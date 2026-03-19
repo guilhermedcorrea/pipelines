@@ -1,0 +1,348 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Cadastro de Cliente{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1 class="page-title">Cadastro de Cliente</h1>
+
+  <style>
+    .flash.info{ border-left: 6px solid #2563eb; background: rgba(37,99,235,.06); }
+    .flash.warning{ border-left: 6px solid #f59e0b; background: rgba(245,158,11,.10); }
+    .flash.danger{ border-left: 6px solid #dc2626; background: rgba(220,38,38,.08); }
+    .flash.success{ border-left: 6px solid #16a34a; background: rgba(22,163,74,.10); }
+
+    .field-err{
+      color:#dc2626;
+      font-weight:800;
+      font-size:12px;
+      margin-top:6px;
+    }
+  </style>
+
+  {# ==========================================================
+     ✅ WTForms: render invisível do CSRF + (opcional) mensagens
+     - Isso NÃO muda seu fluxo JS (fetch JSON).
+     - Só garante que o CSRF do Flask-WTF exista na página,
+       e você pode usar form.hidden_tag() sem mostrar nada.
+     ========================================================== #}
+  {% if form is defined %}
+    <form id="form_csrf_wtf" method="POST" style="display:none !important;">
+      {{ form.hidden_tag() }}
+    </form>
+  {% endif %}
+
+  <div class="grid">
+    <div>
+      <label>CNPJ</label>
+      <input id="cnpj" placeholder="00.000.000/0000-00" autocomplete="off" inputmode="numeric">
+
+      {# (Opcional) mostra erro do WTForms, se você decidir validar via POST normal no futuro #}
+      {% if form is defined and form.cnpj.errors %}
+        <div class="field-err">{{ form.cnpj.errors[0] }}</div>
+      {% endif %}
+    </div>
+
+    <div style="display:flex;align-items:flex-end;gap:10px;">
+      <button type="button" class="btn btn-secondary" id="btnBuscarCnpj" style="width:100%;">Buscar</button>
+    </div>
+  </div>
+
+  <div id="boxStatus" class="flash" style="display:none;margin-top:12px;"></div>
+
+  <div class="card" style="margin-top:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div style="font-weight:900;color:var(--euro-blue);">Dados do Cliente (DimClientes)</div>
+
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button type="button" class="btn btn-primary" id="btnCadastrar" style="display:none;">
+          Cadastrar
+        </button>
+      </div>
+    </div>
+
+    <!-- IDCliente (hidden) -->
+    <input type="hidden" id="id_cliente">
+
+    <div class="grid" style="margin-top:10px;">
+      <div><label>Razão Social</label><input id="razao_social"></div>
+      <div><label>Nome Fantasia</label><input id="nome_fantasia"></div>
+
+      <div><label>Porte</label><input id="porte"></div>
+      <div><label>Email</label><input id="email"></div>
+
+      <div><label>Telefone</label><input id="telefone"></div>
+      <div><label>CNPJ (limpo)</label><input id="cnpj_limpo" disabled></div>
+
+      <div><label>CNAE</label><input id="cnae"></div>
+      <div><label>Descrição CNAE</label><input id="descricao_cnae"></div>
+
+      <div><label>Logradouro</label><input id="logradouro"></div>
+      <div><label>Número</label><input id="numero"></div>
+
+      <div><label>Complemento</label><input id="complemento"></div>
+      <div><label>Cidade</label><input id="cidade"></div>
+
+      <div><label>Estado (texto)</label><input id="estado"></div>
+      <div><label>UF</label><input id="uf" maxlength="2"></div>
+
+      <div><label>Capital Social</label><input id="capital_social" inputmode="decimal" placeholder="Ex: 10000.00"></div>
+
+      <div><label>Descrição Matriz/Filial</label><input id="descricao_matriz_filial"></div>
+      <div><label>Identificador Matriz/Filial</label><input id="identificador_matriz_filial"></div>
+
+      <div><label>ID Empresa Proprietária</label><input id="id_empresa_proprietaria" inputmode="numeric"></div>
+
+      <div style="display:flex;gap:12px;align-items:center;">
+        <label style="display:flex;gap:10px;align-items:center;margin:0;">
+          <input type="checkbox" id="bit_situacao_cadastral">
+          Situação Cadastral (BitSituacaoCadastral)
+        </label>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:center;">
+        <label style="display:flex;gap:10px;align-items:center;margin:0;">
+          <input type="checkbox" id="bit_ativo">
+          Ativo (BitAtivo)
+        </label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const elCnpj = document.getElementById("cnpj");
+  const btnBuscar = document.getElementById("btnBuscarCnpj");
+  const box = document.getElementById("boxStatus");
+  const btnCadastrar = document.getElementById("btnCadastrar");
+
+  function $(id){ return document.getElementById(id); }
+  function somenteDigitos(v){ return (v || "").replace(/\D+/g, ""); }
+
+  // ✅ CSRF: pega SOMENTE do <meta name="csrf-token"> do base
+  function getCsrfOuFalha(){
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    const token = meta && meta.content ? String(meta.content).trim() : "";
+    if (!token){
+      throw new Error("CSRF token não encontrado no <meta name='csrf-token'> do template base.");
+    }
+    return token;
+  }
+
+  function setStatus(texto, tipo){
+    box.textContent = texto || "";
+    box.className = "flash " + (tipo || "info");
+    box.style.display = "block";
+  }
+
+  function limparCampos(){
+    const idsTexto = [
+      "id_cliente",
+      "razao_social","nome_fantasia","porte","email","telefone",
+      "cnpj_limpo","cnae","descricao_cnae",
+      "logradouro","numero","complemento","cidade","estado","uf",
+      "capital_social",
+      "descricao_matriz_filial","identificador_matriz_filial",
+      "id_empresa_proprietaria"
+    ];
+
+    idsTexto.forEach(id => {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+
+    const chk1 = $("bit_situacao_cadastral");
+    const chk2 = $("bit_ativo");
+    if (chk1) chk1.checked = false;
+    if (chk2) chk2.checked = false;
+  }
+
+  function configurarBotaoCadastrar(label){
+    btnCadastrar.textContent = label || "Cadastrar";
+    btnCadastrar.style.display = "inline-flex";
+  }
+
+  function preencherCampos(d){
+    if (!d) return;
+
+    $("id_cliente").value = d.id_cliente ?? "";
+    $("razao_social").value = d.razao_social ?? "";
+    $("nome_fantasia").value = d.nome_fantasia ?? "";
+    $("porte").value = d.porte ?? "";
+    $("email").value = d.email ?? "";
+    $("telefone").value = d.telefone ?? "";
+
+    $("cnae").value = d.cnae ?? "";
+    $("descricao_cnae").value = d.descricao_cnae ?? "";
+
+    $("logradouro").value = d.logradouro ?? "";
+    $("numero").value = d.numero ?? "";
+    $("complemento").value = d.complemento ?? "";
+
+    $("cidade").value = d.cidade ?? "";
+    $("estado").value = d.estado ?? "";
+    $("uf").value = d.uf ?? "";
+
+    $("capital_social").value = (d.capital_social ?? "");
+
+    $("descricao_matriz_filial").value = d.descricao_matriz_filial ?? "";
+    $("identificador_matriz_filial").value = d.identificador_matriz_filial ?? "";
+
+    $("id_empresa_proprietaria").value = (d.id_empresa_proprietaria ?? "");
+
+    $("bit_situacao_cadastral").checked = (d.bit_situacao_cadastral === true);
+    $("bit_ativo").checked = (d.bit_ativo === true);
+
+    $("cnpj_limpo").value = somenteDigitos(d.cnpj ?? "");
+  }
+
+  function coletarPayload(){
+    const cnpjLimpo = somenteDigitos(elCnpj.value);
+    const capital = ($("capital_social").value || "").trim();
+
+    return {
+      cnpj: cnpjLimpo,
+
+      razao_social: ($("razao_social").value || "").trim(),
+      nome_fantasia: ($("nome_fantasia").value || "").trim(),
+      porte: ($("porte").value || "").trim(),
+
+      email: ($("email").value || "").trim(),
+      telefone: somenteDigitos($("telefone").value),
+
+      cnae: somenteDigitos($("cnae").value),
+      descricao_cnae: ($("descricao_cnae").value || "").trim(),
+
+      logradouro: ($("logradouro").value || "").trim(),
+      numero: ($("numero").value || "").trim(),
+      complemento: ($("complemento").value || "").trim(),
+
+      cidade: ($("cidade").value || "").trim(),
+      estado: ($("estado").value || "").trim(),
+      uf: ($("uf").value || "").trim().toUpperCase(),
+
+      capital_social: capital,
+
+      bit_situacao_cadastral: $("bit_situacao_cadastral").checked,
+      descricao_matriz_filial: ($("descricao_matriz_filial").value || "").trim(),
+      identificador_matriz_filial: ($("identificador_matriz_filial").value || "").trim(),
+
+      bit_ativo: $("bit_ativo").checked,
+
+      id_empresa_proprietaria: ($("id_empresa_proprietaria").value || "").trim()
+    };
+  }
+
+  async function buscarCnpj(){
+    const cnpj = somenteDigitos(elCnpj.value);
+
+    box.style.display = "none";
+    btnCadastrar.style.display = "none";
+    limparCampos();
+
+    if (cnpj.length !== 14){
+      setStatus("CNPJ inválido (precisa ter 14 dígitos).", "danger");
+      return;
+    }
+
+    setStatus("Consultando (banco → receita)...", "info");
+
+    try{
+      const resp = await fetch(`/paineis/api/clientes/buscar/${cnpj}`);
+      const json = await resp.json();
+
+      if (!json || json.ok !== true){
+        setStatus((json && (json.message || json.error)) ? (json.message || json.error) : "Erro ao consultar.", "danger");
+        return;
+      }
+
+      const status = json.status;
+      const msg = json.message || "";
+
+      if (status === "exists"){
+        preencherCampos(json.data || {});
+        setStatus(msg || "Cliente já existe. Você pode editar e salvar.", "warning");
+        configurarBotaoCadastrar("Salvar alterações");
+        return;
+      }
+
+      if (status === "from_api"){
+        preencherCampos(json.data || {});
+        setStatus(msg || "Cliente não existe no banco. Você pode editar e cadastrar.", "success");
+        configurarBotaoCadastrar("Cadastrar");
+        return;
+      }
+
+      if (status === "not_found"){
+        setStatus(msg || "Não encontrado. Preencha manualmente e clique em Cadastrar.", "info");
+        configurarBotaoCadastrar("Cadastrar");
+        $("cnpj_limpo").value = cnpj;
+        return;
+      }
+
+      setStatus(msg || "Resposta inesperada.", "danger");
+    }catch(e){
+      setStatus("Falha ao consultar (rede/servidor).", "danger");
+    }
+  }
+
+  async function salvarCadastro(){
+    const payload = coletarPayload();
+
+    if (!payload.cnpj || payload.cnpj.length !== 14){
+      setStatus("CNPJ inválido (precisa ter 14 dígitos).", "danger");
+      return;
+    }
+
+    if (!payload.razao_social){
+      setStatus("Razão Social é obrigatória.", "danger");
+      return;
+    }
+
+    setStatus("Salvando no DimClientes...", "info");
+
+    try{
+      const csrf = getCsrfOuFalha();
+
+      const resp = await fetch("/paineis/api/clientes/salvar", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrf,
+          "X-CSRF-Token": csrf
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await resp.json();
+
+      if (!json || json.ok !== true){
+        setStatus((json && (json.message || json.error)) ? (json.message || json.error) : "Erro ao salvar.", "danger");
+        return;
+      }
+
+      if (json.data && json.data.id_cliente){
+        $("id_cliente").value = json.data.id_cliente;
+      }
+
+      setStatus(json.message || "Salvo com sucesso.", "success");
+      configurarBotaoCadastrar("Salvar alterações");
+
+    }catch(e){
+      setStatus(e && e.message ? e.message : "Falha ao salvar (rede/servidor).", "danger");
+    }
+  }
+
+  btnBuscar.addEventListener("click", buscarCnpj);
+
+  elCnpj.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter"){
+      ev.preventDefault();
+      buscarCnpj();
+    }
+  });
+
+  btnCadastrar.addEventListener("click", salvarCadastro);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,3034 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Ativos | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+
+
+
+  
+<style>
+  /* ====== BASE ====== */
+  .ativos-wrap{ width:100%; }
+
+  .linha-topo{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .texto-ajuda{
+    color:rgba(15,23,42,.70);
+    font-size:14px;
+    line-height:1.25;
+  }
+
+  .hr-soft{
+    margin:14px 0;
+    opacity:.12;
+  }
+
+  /* ====== INPUT + SUGESTÕES ====== */
+  .busca-box{ margin-top:14px; position:relative; width:100%; }
+  .busca-input{
+    width:100%;
+    padding:14px 14px;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius:12px;
+    outline:none;
+    font-size:15px;
+    background:#fff;
+  }
+  .sugestoes{
+    display:none;
+    position:absolute;
+    top:54px;
+    left:0;
+    right:0;
+    background:#fff;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius:12px;
+    box-shadow:0 12px 28px rgba(0,0,0,.10);
+    z-index:50;
+    overflow:hidden;
+  }
+  .sug-item{
+    padding:10px 12px;
+    cursor:pointer;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    background:#fff;
+  }
+  .sug-item.ativo{ background: rgba(59,130,246,.10); }
+  .sug-titulo{ font-weight:800; font-size:14px; color:rgba(15,23,42,.92); }
+  .sug-sub{ font-size:12px; color:rgba(15,23,42,.65); margin-top:2px; }
+
+  .linha-status{
+    margin-top:10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .btn-clean{
+    display:none;
+    padding:8px 12px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:800;
+  }
+
+  /* ====== COMPARAÇÃO (até 4) ====== */
+  .comparacao{
+    display:none;
+    margin:10px 0 16px 0;
+    padding:14px;
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    background:#fff;
+  }
+  .comparacao-topo{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .comparacao-grid{
+    margin-top:12px;
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap:12px;
+  }
+  .comparacao-card{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    padding:12px;
+    background:#fff;
+    position:relative;
+    min-height: 74px;
+  }
+  .comparacao-titulo{ font-weight:900; font-size:14px; line-height:1.2; padding-right:30px; }
+  .comparacao-sub{ margin-top:6px; font-size:12px; color:rgba(15,23,42,.65); padding-right:30px; }
+  .comparacao-rm{
+    position:absolute;
+    top:10px;
+    right:10px;
+    width:26px;
+    height:26px;
+    border-radius:10px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    cursor:pointer;
+    font-weight:900;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .comparacao-rm:hover{ background: rgba(15,23,42,.03); }
+  .comparacao-hint{
+    margin-top:10px;
+    font-size:12px;
+    color:rgba(15,23,42,.65);
+  }
+
+  /* ====== DETALHE ====== */
+  .bloco-detalhe{ display:none; }
+
+  .cabecalho-ativo{
+    margin:10px 0 12px 0;
+    padding:12px 14px;
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:12px;
+    background:rgba(15,23,42,.02);
+  }
+  .cabecalho-ativo .nome{ font-weight:900; font-size:16px; }
+  .cabecalho-ativo .sub{ margin-top:4px; font-size:13px; color:rgba(15,23,42,.70); }
+
+  /* ====== KPIs ====== */
+  .kpis{
+    display:none;
+    margin:12px 0 10px 0;
+    gap:12px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .kpi-card{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    padding:12px;
+    background:#fff;
+  }
+  .kpi-label{ font-size:13px; color:rgba(15,23,42,.70); }
+  .kpi-valor{ margin-top:4px; font-weight:900; font-size:20px; }
+
+  /* ====== GRÁFICO (estilo Mais Retorno) ====== */
+  .graf-wrap{
+    display:none;
+    margin:12px 0 14px 0;
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    background:#fff;
+    overflow:hidden;
+  }
+  .graf-topo{
+    padding:10px 12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    background: rgba(15,23,42,.02);
+  }
+  .graf-topo-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width: 240px;
+  }
+  .graf-titulo{
+    font-weight:900;
+    font-size:16px;
+    white-space:nowrap;
+  }
+  .graf-periodo{
+    font-size:12px;
+    color:rgba(15,23,42,.65);
+    white-space:nowrap;
+  }
+
+  .graf-topo-right{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+
+  .btn-pill{
+    padding:9px 12px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    border-radius:12px;
+    cursor:pointer;
+    font-weight:900;
+    line-height:1;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    height:38px;
+  }
+  .btn-pill.ok{ border-color: rgba(34,197,94,.55); box-shadow: 0 0 0 2px rgba(34,197,94,.10) inset; }
+  .btn-pill.danger{ border-color: rgba(239,68,68,.45); box-shadow: 0 0 0 2px rgba(239,68,68,.08) inset; }
+
+  .range-wrap{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:3px;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius:12px;
+    height:38px;
+    background:#fff;
+  }
+  .range-btn{
+    padding:8px 10px;
+    border:0;
+    background:transparent;
+    cursor:pointer;
+    border-radius:10px;
+    font-weight:900;
+    font-size:13px;
+    line-height:1;
+    height:30px;
+  }
+  .range-btn.ativo{
+    background: rgba(34,197,94,.14);
+    border:1px solid rgba(34,197,94,.40);
+  }
+
+  /* dropdown alinhado */
+  .dd{
+    position:relative;
+    display:inline-flex;
+    align-items:center;
+  }
+  .dd-menu{
+    display:none;
+    position:absolute;
+    right:0;
+    top:44px;
+    width:300px;
+    max-height: 70vh;
+    overflow:auto;
+    background:#fff;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius:12px;
+    box-shadow:0 12px 28px rgba(0,0,0,.10);
+    z-index:60;
+  }
+  .dd-head{
+    padding:10px 12px;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    font-weight:900;
+    background: rgba(15,23,42,.02);
+  }
+  .dd-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:10px 12px;
+    cursor:pointer;
+    user-select:none;
+  }
+  .dd-item:hover{ background: rgba(15,23,42,.03); }
+  .dd-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width: 0;
+  }
+  .dd-left span{
+    font-weight:900;
+    white-space:normal;
+    line-height:1.2;
+  }
+  .dd-item input{ width:16px; height:16px; }
+
+  .dd-sep{
+    height:1px;
+    background: rgba(15,23,42,.10);
+    margin:6px 0;
+  }
+  .dd-subhead{
+    padding:8px 12px;
+    font-size:12px;
+    color:rgba(15,23,42,.65);
+    font-weight:900;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+  }
+
+  /* canvas size controlado */
+  .graf-body{ padding:10px 12px; }
+  .graf-canvas{
+    height:300px;
+    width:100%;
+    position:relative;
+  }
+  .graf-rodape{
+    margin-top:8px;
+    font-size:12px;
+    color:rgba(15,23,42,.65);
+  }
+
+  /* ====== TABELAS ABAIXO DO GRÁFICO (harmonizadas) ====== */
+  .comp-wrap{
+    margin-top:14px;
+    display:none;
+    border-top:1px solid rgba(15,23,42,.08);
+    padding-top:14px;
+  }
+  .comp-box{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+    margin-bottom:12px;
+  }
+  .comp-head{
+    padding:10px 12px;
+    font-weight:900;
+    font-size:16px;
+    background: rgba(15,23,42,.94);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .comp-sub{
+    font-size:12px;
+    color:rgba(255,255,255,.78);
+    font-weight:700;
+  }
+  .comp-table-wrap{ width:100%; overflow:auto; background:#fff; }
+  .comp-table{ width:100%; border-collapse:collapse; min-width: 980px; }
+  .comp-table th{
+    background: rgba(15,23,42,.94);
+    color:#fff;
+    font-weight:900;
+    padding:10px 10px;
+    font-size:13px;
+    text-align:right;
+    border-bottom:1px solid rgba(255,255,255,.10);
+    white-space:nowrap;
+  }
+  .comp-table th:first-child{ text-align:left; }
+  .comp-table td{
+    padding:10px 10px;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    font-size:13px;
+    text-align:right;
+    white-space:nowrap;
+  }
+  .comp-table td:first-child{
+    text-align:left;
+    font-weight:900;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .mini-bar{
+    width:4px;
+    height:18px;
+    border-radius:999px;
+    background: rgba(15,23,42,.20);
+    flex:0 0 auto;
+  }
+  .comp-muted{ color:rgba(15,23,42,.65); font-weight:700; font-size:12px; }
+  .val-neg{ color:#ef4444; font-weight:900; }
+  .val-pos{ color:#0b1220; font-weight:900; }
+  .val-zero{ color:rgba(15,23,42,.72); font-weight:900; }
+
+  /* ====== NOVA TABELA (OCUPAÇÃO - painel) ====== */
+  .ocp-wrap{
+    margin-top:14px;
+    display:none;
+    border-top:1px solid rgba(15,23,42,.08);
+    padding-top:14px;
+  }
+  .ocp-box{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+    margin-bottom:12px;
+  }
+  .ocp-head{
+    padding:10px 12px;
+    font-weight:900;
+    font-size:16px;
+    background: rgba(15,23,42,.94);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .ocp-sub{
+    font-size:12px;
+    color:rgba(255,255,255,.78);
+    font-weight:700;
+  }
+  .ocp-hint{
+    padding:10px 12px;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    background: rgba(15,23,42,.02);
+    font-size:12px;
+    color:rgba(15,23,42,.70);
+  }
+  .ocp-table-wrap{ width:100%; overflow:auto; background:#fff; }
+  .ocp-table{ width:100%; border-collapse:collapse; min-width: 980px; }
+  .ocp-table th{
+    background: rgba(15,23,42,.94);
+    color:#fff;
+    font-weight:900;
+    padding:10px 10px;
+    font-size:13px;
+    text-align:right;
+    border-bottom:1px solid rgba(255,255,255,.10);
+    white-space:nowrap;
+  }
+  .ocp-table th:first-child{ text-align:left; }
+  .ocp-table td{
+    padding:10px 10px;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    font-size:13px;
+    text-align:right;
+    white-space:nowrap;
+  }
+  .ocp-table td:first-child{
+    text-align:left;
+    font-weight:900;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+
+  /* ====== ✅ MATRIZ + ROSCA (NOVO BLOCO ABAIXO DO COMPARATIVO) ====== */
+  .mc-wrap{
+    margin-top:14px;
+    display:none;
+    border-top:1px solid rgba(15,23,42,.08);
+    padding-top:14px;
+  }
+
+  .mc-grid{
+    display:block;
+  }
+
+  .mc-box{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+    margin-bottom:12px;
+  }
+
+  .mc-head{
+    padding:10px 12px;
+    font-weight:900;
+    font-size:16px;
+    background: rgba(15,23,42,.94);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .mc-sub{
+    font-size:12px;
+    color:rgba(255,255,255,.78);
+    font-weight:700;
+  }
+
+  /* MATRIZ */
+  .mc-matriz-wrap{ width:100%; overflow:auto; background:#fff; }
+  .mc-matriz{ width:100%; border-collapse:collapse; min-width: 980px; }
+  .mc-matriz th{
+    background: rgba(15,23,42,.06);
+    color:rgba(15,23,42,.90);
+    font-weight:900;
+    padding:10px 10px;
+    font-size:13px;
+    text-align:center;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    white-space:nowrap;
+  }
+  .mc-matriz td{
+    padding:10px 10px;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    font-size:13px;
+    text-align:center;
+    white-space:nowrap;
+  }
+  .mc-matriz td:first-child, .mc-matriz th:first-child{
+    text-align:left;
+    font-weight:900;
+  }
+
+  /* ✅ COMPOSIÇÃO: donut ESQUERDA + legenda DIREITA */
+  .mc-rosca-row{
+    display:grid;
+    grid-template-columns: minmax(260px, 360px) 1fr;
+    gap:14px;
+    padding:12px;
+    align-items:stretch;
+    background:#fff;
+  }
+
+  .mc-rosca-left{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    padding:10px;
+    background:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    min-height: 280px;
+  }
+
+  .mc-rosca-right{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    padding:10px;
+    background:#fff;
+    min-height: 280px;
+    overflow:auto;
+  }
+
+  .mc-rosca-canvas{
+    height:260px;
+    width:100%;
+    position:relative;
+  }
+
+  #canvasRoscaComposicao{
+    width:100% !important;
+    height:100% !important;
+    display:block;
+  }
+
+  .mc-rosca-area{
+    height:260px;
+    width:100%;
+    position:relative;
+  }
+  .mc-rosca-area > canvas{
+    width:100% !important;
+    height:100% !important;
+    display:block;
+  }
+
+  .mc-rosca-leg{
+    display:grid;
+    grid-template-columns: 1fr;
+    gap:8px;
+    font-size:13px;
+    color:rgba(15,23,42,.86);
+  }
+
+  .mc-leg-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px 10px;
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:12px;
+    background:#fff;
+  }
+
+  .mc-leg-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
+  }
+
+  .mc-dot{
+    width:10px;
+    height:10px;
+    border-radius:999px;
+    background: rgba(15,23,42,.30);
+    flex:0 0 auto;
+  }
+
+  .mc-leg-name{
+    font-weight:900;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width: 520px;
+  }
+
+  .mc-leg-val{
+    font-weight:900;
+    white-space:nowrap;
+  }
+
+  @media (max-width: 860px){
+    .mc-rosca-row{
+      grid-template-columns: 1fr;
+    }
+    .mc-rosca-left,
+    .mc-rosca-right{
+      min-height: auto;
+    }
+
+    .mc-rosca-canvas,
+    .mc-rosca-area{
+      height:300px;
+    }
+
+    .mc-leg-name{
+      max-width: 320px;
+    }
+  }
+
+  /* ====== AÇÕES ====== */
+  .acoes-wrap{
+    margin:10px 0 14px 0;
+    display:flex;
+    gap:10px;
+    justify-content:flex-start;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .btn-primario{
+    display:none;
+    padding:12px 16px;
+    border:1px solid rgba(15,23,42,.10);
+    background:#22c55e;
+    color:#0b1220;
+    border-radius:14px;
+    cursor:pointer;
+    font-weight:900;
+  }
+  .btn-secundario{
+    display:none;
+    padding:12px 16px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    color:#0b1220;
+    border-radius:14px;
+    cursor:pointer;
+    font-weight:900;
+  }
+
+  /* ====== TABELA ====== */
+  .tbl-wrap{ width:100%; overflow:auto; }
+  .tbl-min{ min-width:1100px; }
+</style>
+
+
+
+<div class="ativos-wrap">
+  <div class="linha-topo">
+    <div style="flex:1 1 auto; min-width:280px;">
+      <h2 style="margin:0 0 6px 0;">Ativos</h2>
+      <div class="texto-ajuda">
+        Pesquise por Nome, Referência Externa, Nº Série, Bairro, Logradouro, Cidade, CEP e UF.
+      </div>
+    </div>
+  </div>
+
+  <div id="topoBusca" class="busca-box">
+    <div style="display:block; width:100%; position:relative;">
+      <input
+        id="q"
+        value="{{ q or '' }}"
+        placeholder="Digite para buscar... (ex: 118, Campinas, Centro, SP, 130xx-xxx, NS123...)"
+        class="busca-input"
+        autocomplete="off"
+      />
+
+      <div id="sugestoes" class="sugestoes">
+        <div id="sugestoesLista"></div>
+      </div>
+    </div>
+
+    <div class="linha-status">
+      <div id="statusBusca" style="color:rgba(15,23,42,.70); font-size:13px;">
+        Digite 2 ou mais caracteres para buscar.
+      </div>
+
+      <button id="btnLimpar" type="button" class="btn-clean">Limpar</button>
+    </div>
+  </div>
+
+  <hr class="hr-soft" />
+
+  <!-- COMPARAÇÃO (até 4) -->
+  <div id="blocoComparacao" class="comparacao">
+    <div class="comparacao-topo">
+      <div style="font-weight:900; font-size:18px;">Selecionados</div>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <button id="btnAddAtivo" type="button" class="btn-pill">Adicionar (+)</button>
+        <button id="btnPararAdd" type="button" class="btn-pill" style="display:none;">Parar de adicionar</button>
+        <button id="btnLimparComparacao" type="button" class="btn-pill danger">Remover todos</button>
+      </div>
+    </div>
+
+    <div id="comparacaoGrid" class="comparacao-grid"></div>
+    <div id="comparacaoHint" class="comparacao-hint"></div>
+  </div>
+
+  <!-- DETALHE -->
+  <div id="blocoDetalhe" class="bloco-detalhe">
+
+    <div id="cabecalhoDinamico"></div>
+
+    <div id="kpis12m" class="kpis">
+      <div class="kpi-card">
+        <div class="kpi-label">Receita R$ 12M</div>
+        <div id="kpiReceita12m" class="kpi-valor">-</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Ocupação (%) 12M</div>
+        <div id="kpiOcupacao12m" class="kpi-valor">-</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Rentabilidade 12M</div>
+        <div id="kpiRentabilidade12m" class="kpi-valor">-</div>
+      </div>
+    </div>
+
+    <div class="acoes-wrap">
+      <button id="btnComparar" type="button" class="btn-primario">Comparar (+)</button>
+      <button id="btnPararComparar" type="button" class="btn-secundario">Parar comparação</button>
+    </div>
+
+    <!-- tabela de informações primeiro -->
+    <div class="tbl-wrap">
+      <table class="table tbl-min">
+        <thead id="theadDinamico"></thead>
+        <tbody id="tbodyAtivos"></tbody>
+      </table>
+    </div>
+
+    <!-- gráfico embaixo -->
+    <div id="blocoGrafico" class="graf-wrap">
+      <div class="graf-topo">
+        <div class="graf-topo-left">
+          <div id="graficoTituloTxt" class="graf-titulo">Gráfico</div>
+          <div id="graficoPeriodoTxt" class="graf-periodo"></div>
+        </div>
+
+        <div class="graf-topo-right">
+          <div class="dd">
+            <button id="btnIndicadores" type="button" class="btn-pill">
+              Indicadores <span style="opacity:.7;">▾</span>
+            </button>
+
+            <div id="menuIndicadores" class="dd-menu">
+              <div class="dd-head">Selecione</div>
+
+              <div class="dd-subhead">Métrica do Ativo (1)</div>
+
+              <!-- ✅ EXCLUSIVO: só 1 métrica por vez -->
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkOcupacao" type="checkbox" />
+                  <span>Ocupação</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkRentabilidade" type="checkbox" checked />
+                  <span>Rentabilidade</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkReceita" type="checkbox" />
+                  <span>Receita</span>
+                </div>
+              </label>
+
+              <div class="dd-sep"></div>
+              <div class="dd-subhead">Benchmarks / Índices</div>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkCCO" type="checkbox" />
+                  <span>CCO - Clear Channel Outdoor Holdings Inc</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkLAMR" type="checkbox" />
+                  <span>LAMR - Lamar Advertising Company</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkOUT" type="checkbox" />
+                  <span>OUT - Outfront Media Inc</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkConsumo" type="checkbox" />
+                  <span>ICON - Índice de Consumo</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkImobiliario" type="checkbox" />
+                  <span>IIMOB - Índice Imobiliário</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkIndustrial" type="checkbox" />
+                  <span>IIND - Índice Industrial</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkFinanceiro" type="checkbox" />
+                  <span>IFIN - Índice Financeiro</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkOuro" type="checkbox" />
+                  <span>Ouro</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkPetroleo" type="checkbox" />
+                  <span>Petróleo</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkOOH" type="checkbox" />
+                  <span>OOH - Índice OOH</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkOOHGlobal" type="checkbox" />
+                  <span>OOH Global - Índice OOH Global</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkDolar" type="checkbox" />
+                  <span>Dólar</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkCdi" type="checkbox" checked />
+                  <span>CDI</span>
+                </div>
+              </label>
+
+              <label class="dd-item">
+                <div class="dd-left">
+                  <input id="chkSp500" type="checkbox" />
+                  <span>S&amp;P 500 BRL</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- escala por mês -->
+          <div class="range-wrap" title="Período (meses)">
+            <button type="button" class="range-btn ativo" data-range="otimo">Ótimo</button>
+            <button type="button" class="range-btn" data-range="6m">6M</button>
+            <button type="button" class="range-btn" data-range="1a">1A</button>
+            <button type="button" class="range-btn" data-range="2a">2A</button>
+            <button type="button" class="range-btn" data-range="3a">3A</button>
+            <button type="button" class="range-btn" data-range="5a">5A</button>
+          </div>
+
+          <button id="btnRecarregarGrafico" type="button" class="btn-pill ok">
+            Atualizar
+          </button>
+        </div>
+      </div>
+
+      <div class="graf-body">
+        <div class="graf-canvas">
+          <canvas id="canvasGraficoReceita" style="height:300px; width:100%;"></canvas>
+        </div>
+
+        <div class="graf-rodape"></div>
+
+        <!-- TABELAS ABAIXO DO GRÁFICO -->
+        <div id="comparacaoTabelaWrap" class="comp-wrap">
+          <div class="comp-box">
+            <div class="comp-head">
+              <div id="compTituloHistorico">Comparação (histórico)</div>
+              <div class="comp-sub" id="compSubPeriodo1"></div>
+            </div>
+            <div class="comp-table-wrap">
+              <table class="comp-table">
+                <thead id="compHistHead"></thead>
+                <tbody id="compHistBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="comp-box">
+            <div class="comp-head">
+              <div>Consistência</div>
+              <div class="comp-sub" id="compSubPeriodo2"></div>
+            </div>
+            <div class="comp-table-wrap">
+              <table class="comp-table" style="min-width: 780px;">
+                <thead id="compConsHead"></thead>
+                <tbody id="compConsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABELA DE OCUPAÇÃO (só painel + métrica ocupação) -->
+        <div id="ocupacaoPainelWrap" class="ocp-wrap">
+          <div class="ocp-box">
+            <div class="ocp-head">
+              <div>Ocupação do painel (comparativo)</div>
+              <div class="ocp-sub" id="ocpSubPeriodo"></div>
+            </div>
+
+            <div class="ocp-hint"></div>
+
+            <div class="ocp-table-wrap">
+              <table class="ocp-table">
+                <thead id="ocpHead"></thead>
+                <tbody id="ocpBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ✅ CORRIGIDO: MATRIZ (100%) EM CIMA + COMPOSIÇÃO (100%) EMBAIXO -->
+        <div id="matrizComposicaoWrap" class="mc-wrap">
+
+          <!-- MATRIZ 100% -->
+          <div class="mc-box">
+            <div class="mc-head">
+              <div>Historico</div>
+              <div class="mc-sub" id="mcSubPeriodo"></div>
+            </div>
+
+            <div class="mc-matriz-wrap">
+              <table class="mc-matriz">
+                <thead id="mcMatrizHead"></thead>
+                <tbody id="mcMatrizBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- COMPOSIÇÃO 100% (donut esquerda + legenda direita) -->
+          <div class="mc-box">
+            <div class="mc-head">
+              <div>Composição do ativo</div>
+              <div class="mc-sub" id="mcSubRosca"></div>
+            </div>
+
+            <div class="mc-rosca-row">
+              <div class="mc-rosca-left">
+                <div class="mc-rosca-canvas">
+                  <canvas id="canvasRoscaComposicao" style="height:260px; width:100%;"></canvas>
+                </div>
+              </div>
+
+              <div class="mc-rosca-right">
+                <div class="mc-rosca-leg" id="mcRoscaLegenda"></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+
+
+<script>
+(() => {
+  // padrão: receita em % acumulado (estilo "Mais Retorno")
+  window.__modoReceitaPct = window.__modoReceitaPct || "acumulado"; // "acumulado" | "mensal"
+
+  const input = document.getElementById("q");
+  const box = document.getElementById("sugestoes");
+  const lista = document.getElementById("sugestoesLista");
+  const statusBusca = document.getElementById("statusBusca");
+  const btnLimpar = document.getElementById("btnLimpar");
+  const topoBusca = document.getElementById("topoBusca");
+
+  const blocoDetalhe = document.getElementById("blocoDetalhe");
+  const cabecalhoDinamico = document.getElementById("cabecalhoDinamico");
+  const theadDinamico = document.getElementById("theadDinamico");
+  const tbody = document.getElementById("tbodyAtivos");
+
+  const kpis12m = document.getElementById("kpis12m");
+  const kpiReceita12m = document.getElementById("kpiReceita12m");
+  const kpiOcupacao12m = document.getElementById("kpiOcupacao12m");
+  const kpiRentabilidade12m = document.getElementById("kpiRentabilidade12m");
+
+  const blocoComparacao = document.getElementById("blocoComparacao");
+  const comparacaoGrid = document.getElementById("comparacaoGrid");
+  const comparacaoHint = document.getElementById("comparacaoHint");
+  const btnAddAtivo = document.getElementById("btnAddAtivo");
+  const btnPararAdd = document.getElementById("btnPararAdd");
+  const btnLimparComparacao = document.getElementById("btnLimparComparacao");
+
+  const blocoGrafico = document.getElementById("blocoGrafico");
+  const graficoTituloTxt = document.getElementById("graficoTituloTxt");
+  const graficoPeriodoTxt = document.getElementById("graficoPeriodoTxt");
+  const canvasGraficoReceita = document.getElementById("canvasGraficoReceita");
+  const btnIndicadores = document.getElementById("btnIndicadores");
+  const menuIndicadores = document.getElementById("menuIndicadores");
+
+  // ✅ métricas (exclusivas quando MARCA, mas pode DESMARCAR tudo)
+  const chkOcupacao = document.getElementById("chkOcupacao");
+  const chkRentabilidade = document.getElementById("chkRentabilidade");
+  const chkReceita = document.getElementById("chkReceita");
+
+  // ✅ benchmarks
+  const chkCdi = document.getElementById("chkCdi");
+  const chkDolar = document.getElementById("chkDolar");
+  const chkSp500 = document.getElementById("chkSp500");
+
+  const chkCCO = document.getElementById("chkCCO");
+  const chkLAMR = document.getElementById("chkLAMR");
+  const chkOUT = document.getElementById("chkOUT");
+  const chkConsumo = document.getElementById("chkConsumo");
+  const chkImobiliario = document.getElementById("chkImobiliario");
+  const chkIndustrial = document.getElementById("chkIndustrial");
+  const chkFinanceiro = document.getElementById("chkFinanceiro");
+  const chkOuro = document.getElementById("chkOuro");
+  const chkPetroleo = document.getElementById("chkPetroleo");
+  const chkOOH = document.getElementById("chkOOH");
+  const chkOOHGlobal = document.getElementById("chkOOHGlobal");
+
+  const btnRecarregarGrafico = document.getElementById("btnRecarregarGrafico");
+
+  const btnComparar = document.getElementById("btnComparar");
+  const btnPararComparar = document.getElementById("btnPararComparar");
+
+  const rangeBtns = Array.from(document.querySelectorAll(".range-btn"));
+
+  /* tabela comparativa abaixo do gráfico */
+  const comparacaoTabelaWrap = document.getElementById("comparacaoTabelaWrap");
+  const compSubPeriodo1 = document.getElementById("compSubPeriodo1");
+  const compSubPeriodo2 = document.getElementById("compSubPeriodo2");
+  const compHistHead = document.getElementById("compHistHead");
+  const compHistBody = document.getElementById("compHistBody");
+  const compConsHead = document.getElementById("compConsHead");
+  const compConsBody = document.getElementById("compConsBody");
+
+  const compTituloHistorico = document.getElementById("compTituloHistorico");
+
+  /* tabela de ocupação (painel) */
+  const ocupacaoPainelWrap = document.getElementById("ocupacaoPainelWrap");
+  const ocpSubPeriodo = document.getElementById("ocpSubPeriodo");
+  const ocpHead = document.getElementById("ocpHead");
+  const ocpBody = document.getElementById("ocpBody");
+
+  /* ✅ NOVO: Matriz + Rosca */
+  const matrizComposicaoWrap = document.getElementById("matrizComposicaoWrap");
+  const mcSubPeriodo = document.getElementById("mcSubPeriodo");
+  const mcSubRosca = document.getElementById("mcSubRosca");
+  const mcMatrizHead = document.getElementById("mcMatrizHead");
+  const mcMatrizBody = document.getElementById("mcMatrizBody");
+  const canvasRoscaComposicao = document.getElementById("canvasRoscaComposicao");
+  const mcRoscaLegenda = document.getElementById("mcRoscaLegenda");
+  let chartRosca = null;
+
+  /* ===============================
+     ✅ GARANTIA: elementos essenciais
+  =============================== */
+  const EL_ESSENCIAIS_OK = !!(
+    input && box && lista && statusBusca && btnLimpar &&
+    blocoDetalhe && cabecalhoDinamico && theadDinamico && tbody &&
+    kpis12m && kpiReceita12m && kpiOcupacao12m && kpiRentabilidade12m &&
+    blocoComparacao && comparacaoGrid && comparacaoHint && btnAddAtivo && btnPararAdd && btnLimparComparacao &&
+    blocoGrafico && graficoTituloTxt && graficoPeriodoTxt && canvasGraficoReceita &&
+    btnIndicadores && menuIndicadores &&
+    chkOcupacao && chkRentabilidade && chkReceita &&
+    chkCdi && chkDolar && chkSp500 &&
+    chkCCO && chkLAMR && chkOUT && chkConsumo && chkImobiliario && chkIndustrial &&
+    chkFinanceiro && chkOuro && chkPetroleo && chkOOH && chkOOHGlobal &&
+    btnRecarregarGrafico &&
+    btnComparar && btnPararComparar &&
+    comparacaoTabelaWrap && compSubPeriodo1 && compSubPeriodo2 && compHistHead && compHistBody && compConsHead && compConsBody &&
+    ocupacaoPainelWrap && ocpSubPeriodo && ocpHead && ocpBody
+  );
+
+  if (!EL_ESSENCIAIS_OK) {
+    console.warn("[ativos.js] Elementos essenciais não encontrados no DOM. Script abortado para evitar erro.");
+    return;
+  }
+
+  /* Matriz/rosca são opcionais */
+  const EL_MATRIZ_OK = !!(
+    matrizComposicaoWrap && mcSubPeriodo && mcSubRosca && mcMatrizHead && mcMatrizBody && canvasRoscaComposicao && mcRoscaLegenda
+  );
+
+  let timerSug = null;
+  let selecionado = -1;
+  let itens = [];
+  let abortController = null;
+
+  const LIMITE_ATIVOS = 4;
+  let modoAdicionar = false;
+
+  let ativosSel = [];
+  let ativoBase = null;
+  let chart = null;
+
+  const seriesById = new Map();
+
+  let serieIndicadoresFull = [];
+  let serieIndicadoresView = [];
+
+  let labelsFull = [];
+  let labelsView = [];
+
+  let periodoAtual = {
+    dtIni: null,
+    dtFim: null,
+    rangeKey: "otimo"
+  };
+
+  let carregandoRange = false;
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function setStatus(txt) { statusBusca.textContent = txt; }
+  function setLimparVisivel(v) { btnLimpar.style.display = v ? "inline-flex" : "none"; }
+
+  function esconderSugestoes() {
+    box.style.display = "none";
+    lista.innerHTML = "";
+    itens = [];
+    selecionado = -1;
+  }
+
+  function mostrarSugestoes() { box.style.display = "block"; }
+
+  function renderSugestoes() {
+    if (!itens.length) return esconderSugestoes();
+
+    lista.innerHTML = itens.map((it, idx) => {
+      const cls = idx === selecionado ? "sug-item ativo" : "sug-item";
+      return `
+        <div class="${cls}" data-idx="${idx}">
+          <div class="sug-titulo">${escapeHtml(it.label)}</div>
+          <div class="sug-sub">${escapeHtml(it.sublabel || "")}</div>
+        </div>
+      `;
+    }).join("");
+
+    mostrarSugestoes();
+  }
+
+  async function buscarSugestoes(q) {
+    const url = "{{ url_for('admin.ativos_sugestoes') }}?q=" + encodeURIComponent(q);
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!resp.ok) return [];
+    return await resp.json();
+  }
+
+  async function buscarDetalhe(id) {
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+
+    const url = "{{ url_for('admin.ativos_detalhe') }}?id=" + encodeURIComponent(id);
+    const resp = await fetch(url, {
+      headers: { "Accept": "application/json" },
+      signal: abortController.signal
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  }
+
+  function normalizarMes(mesRaw){
+    if (mesRaw === null || mesRaw === undefined) return null;
+
+    const s = String(mesRaw).trim();
+    if (!s) return null;
+
+    if (/^\d{4}-\d{2}$/.test(s)) return s;
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 7);
+    if (/^\d{4}\/\d{2}/.test(s)) return s.slice(0, 7).replace("/", "-");
+
+    if (/^\d{2}\/\d{4}$/.test(s)) {
+      const [mm, yyyy] = s.split("/");
+      return `${yyyy}-${mm}`;
+    }
+
+    const m1 = s.match(/(\d{4})-(\d{2})/);
+    if (m1) return `${m1[1]}-${m1[2]}`;
+
+    const m2 = s.match(/(\d{4})\/(\d{2})/);
+    if (m2) return `${m2[1]}-${m2[2]}`;
+
+    return null;
+  }
+
+  function normalizarSerieMes(serie){
+    const out = [];
+    for (const r of (serie || [])) {
+      if (!r) continue;
+      const mes = normalizarMes(r.mes);
+      if (!mes) continue;
+      out.push({ ...r, mes });
+    }
+    return out;
+  }
+
+  async function buscarSerie(id, dtIni, dtFim) {
+    let url = "{{ url_for('admin.ativos_serie_receita') }}?id=" + encodeURIComponent(id);
+    if (dtIni) url += "&dt_ini=" + encodeURIComponent(dtIni);
+    if (dtFim) url += "&dt_fim=" + encodeURIComponent(dtFim);
+
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    if (!data || !data.ok) return [];
+    return normalizarSerieMes(data.serie || []);
+  }
+
+  async function buscarSerieIndicadores(dtIni, dtFim) {
+    const url = "{{ url_for('admin.ativos_serie_indicadores') }}"
+      + "?dt_ini=" + encodeURIComponent(dtIni)
+      + "&dt_fim=" + encodeURIComponent(dtFim);
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    if (!data || !data.ok) return [];
+    return normalizarSerieMes(data.serie || []);
+  }
+
+  async function buscarMatrizComposicao(idAtivo, dtIni, dtFim) {
+    const url =
+      "{{ url_for('admin.ativos_matriz_composicao') }}"
+      + "?id=" + encodeURIComponent(idAtivo)
+      + "&dt_ini=" + encodeURIComponent(dtIni)
+      + "&dt_fim=" + encodeURIComponent(dtFim);
+
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+    if (!data || !data.ok) return null;
+    return data;
+  }
+
+  function mostrarMatrizComposicao() {
+    if (!EL_MATRIZ_OK) return;
+    matrizComposicaoWrap.style.display = "block";
+
+    const parent = canvasRoscaComposicao?.parentElement;
+    if (parent) {
+      parent.style.position = parent.style.position || "relative";
+      if (!parent.style.height) parent.style.height = "260px";
+    }
+
+    if (canvasRoscaComposicao) {
+      canvasRoscaComposicao.style.display = "block";
+      canvasRoscaComposicao.style.width = "100%";
+      canvasRoscaComposicao.style.height = "100%";
+    }
+  }
+
+  function esconderMatrizComposicao() {
+    if (!EL_MATRIZ_OK) return;
+
+    matrizComposicaoWrap.style.display = "none";
+    mcSubPeriodo.textContent = "";
+    mcSubRosca.textContent = "";
+    mcMatrizHead.innerHTML = "";
+    mcMatrizBody.innerHTML = "";
+    mcRoscaLegenda.innerHTML = "";
+
+    if (chartRosca) {
+      try { chartRosca.destroy(); } catch(e) {}
+      chartRosca = null;
+    }
+  }
+
+  function formatarMoedaBRL(valor) {
+    if (valor === null || valor === undefined || valor === "") return "-";
+    const n = Number(valor);
+    if (!isFinite(n)) return "-";
+    return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  }
+
+  function formatarPct(valor) {
+    if (valor === null || valor === undefined || valor === "") return "-";
+    const n = Number(valor);
+    if (!isFinite(n)) return "-";
+    return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  }
+
+  function renderMatriz(data){
+    if (!EL_MATRIZ_OK) return;
+
+    const matriz = Array.isArray(data?.matriz) ? data.matriz : [];
+
+    if (!matriz.length) {
+      mcMatrizHead.innerHTML = "";
+      mcMatrizBody.innerHTML = "";
+      return;
+    }
+
+    const mesesNomes = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+    mcMatrizHead.innerHTML = `
+      <tr>
+        <th>Ano</th>
+        ${mesesNomes.map(m => `<th>${escapeHtml(m)}</th>`).join("")}
+        <th>Total</th>
+        <th>Margem média</th>
+        <th>Acumulado</th>
+      </tr>
+    `;
+
+    function cellReceita(mesObj){
+      const rec = mesObj && (mesObj.receita !== undefined ? mesObj.receita : null);
+      const cus = mesObj && (mesObj.custo !== undefined ? mesObj.custo : null);
+      const mar = mesObj && (mesObj.margem_pct !== undefined ? mesObj.margem_pct : null);
+
+      const nRec = Number(rec);
+      const nCus = Number(cus);
+      const nMar = Number(mar);
+
+      const txt = (isFinite(nRec) && nRec !== 0) ? formatarMoedaBRL(nRec) : "-";
+      const tipParts = [];
+      if (isFinite(nRec)) tipParts.push(`Receita: ${formatarMoedaBRL(nRec)}`);
+      if (isFinite(nCus)) tipParts.push(`Custo: ${formatarMoedaBRL(nCus)}`);
+      if (isFinite(nMar)) tipParts.push(`Margem: ${formatarPct(nMar)}`);
+      const tip = tipParts.join(" | ");
+
+      return `<td title="${escapeHtml(tip)}">${escapeHtml(txt)}</td>`;
+    }
+
+    function cellMoeda(v){
+      const n = Number(v);
+      if (!isFinite(n)) return `<td class="comp-muted">-</td>`;
+      return `<td>${escapeHtml(formatarMoedaBRL(n))}</td>`;
+    }
+
+    function cellPct(v){
+      const n = Number(v);
+      if (!isFinite(n)) return `<td class="comp-muted">-</td>`;
+      const cls = classeValorPct(n);
+      return `<td class="${cls}">${escapeHtml(formatarPct(n))}</td>`;
+    }
+
+    mcMatrizBody.innerHTML = matriz.map((row) => {
+      const ano = row?.ano ?? "-";
+      const meses = row?.meses || {};
+
+      const tAno = row?.total_ano;
+      const mMed = row?.margem_media_ano;
+      const acum = row?.acumulado;
+
+      return `
+        <tr>
+          <td><b>${escapeHtml(String(ano))}</b></td>
+          ${Array.from({length:12}, (_,i) => cellReceita(meses[i+1] || null)).join("")}
+          ${cellMoeda(tAno)}
+          ${cellPct(mMed)}
+          ${cellMoeda(acum)}
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function renderRosca(data){
+    if (!EL_MATRIZ_OK) return;
+
+    const itensRaw = Array.isArray(data?.composicao) ? data.composicao : [];
+    mcRoscaLegenda.innerHTML = "";
+
+    const itens = itensRaw
+      .map(x => ({
+        nome: String(x?.nome ?? "Item"),
+        valor: (() => { const v = Number(x?.valor); return isFinite(v) ? v : 0; })(),
+        pct: (x?.pct !== undefined && x?.pct !== null && isFinite(Number(x.pct))) ? Number(x.pct) : null
+      }))
+      .filter(x => x.valor > 0);
+
+    if (!itens.length) {
+      if (chartRosca) { try { chartRosca.destroy(); } catch(e) {} chartRosca = null; }
+      return;
+    }
+
+    const soma = itens.reduce((acc, it) => acc + (isFinite(it.valor) ? it.valor : 0), 0);
+    for (const it of itens) {
+      if (it.pct === null && soma > 0) it.pct = (it.valor / soma) * 100;
+    }
+
+    const labels = itens.map(x => x.nome);
+    const valores = itens.map(x => x.valor);
+
+    if (chartRosca) { try { chartRosca.destroy(); } catch(e) {} chartRosca = null; }
+
+    if (typeof Chart === "undefined") {
+      console.warn("[ativos.js] Chart.js não encontrado (Chart undefined). Rosca não será renderizada.");
+      return;
+    }
+
+    const ctxOk = !!canvasRoscaComposicao?.getContext;
+    if (!ctxOk) {
+      console.warn("[ativos.js] Canvas da rosca inválido. Rosca não será renderizada.");
+      return;
+    }
+
+    chartRosca = new Chart(canvasRoscaComposicao, {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [{
+          data: valores,
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const nome = ctx.label || "";
+                const val = ctx.parsed || 0;
+                return `${nome}: ${formatarMoedaBRL(val)}`;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    mcRoscaLegenda.innerHTML = itens.map((x) => {
+      const nome = x.nome;
+      const v = x.valor;
+      const pct = x.pct;
+      const vTxt = isFinite(v) ? formatarMoedaBRL(v) : "-";
+      const pTxt = (pct !== null && isFinite(pct)) ? ` (${formatarPct(pct)})` : "";
+      return `
+        <div class="mc-leg-item">
+          <div class="mc-leg-left">
+            <span class="mc-dot"></span>
+            <span class="mc-leg-name" title="${escapeHtml(nome)}">${escapeHtml(nome)}</span>
+          </div>
+          <div class="mc-leg-val">${escapeHtml(vTxt + pTxt)}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  async function atualizarMatrizComposicaoSeDer(){
+    if (!EL_MATRIZ_OK) return;
+    if (!ativoBase) { esconderMatrizComposicao(); return; }
+
+    const id = String(ativoBase.IDDimAtivos || "");
+    if (!id) { esconderMatrizComposicao(); return; }
+
+    const dtIni = periodoAtual?.dtIni;
+    const dtFim = periodoAtual?.dtFim;
+    if (!dtIni || !dtFim) { esconderMatrizComposicao(); return; }
+
+    const data = await buscarMatrizComposicao(id, dtIni, dtFim);
+    if (!data) { esconderMatrizComposicao(); return; }
+
+    const sub = `Período: ${dtIni} até ${dtFim}`;
+    mcSubPeriodo.textContent = sub;
+    mcSubRosca.textContent = sub;
+
+    mostrarMatrizComposicao();
+
+    renderMatriz(data);
+
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    renderRosca(data);
+
+    if (chartRosca) {
+      requestAnimationFrame(() => {
+        try { chartRosca.resize(); } catch(e) {}
+      });
+    }
+  }
+
+  function formatarPctSemSinal(valor) {
+    if (valor === null || valor === undefined || valor === "") return "-";
+    const n = Number(valor);
+    if (!isFinite(n)) return "-";
+    return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  }
+
+  function classeValorPct(v){
+    const n = Number(v);
+    if (!isFinite(n)) return "";
+    if (n < 0) return "val-neg";
+    if (n === 0) return "val-zero";
+    return "val-pos";
+  }
+
+  function mostrarDetalhe() { blocoDetalhe.style.display = "block"; }
+
+  function esconderDetalhe() {
+    blocoDetalhe.style.display = "none";
+    cabecalhoDinamico.innerHTML = "";
+    theadDinamico.innerHTML = "";
+    tbody.innerHTML = "";
+    kpis12m.style.display = "none";
+    blocoGrafico.style.display = "none";
+    graficoTituloTxt.textContent = "Gráfico";
+    graficoPeriodoTxt.textContent = "";
+
+    ativosSel = [];
+    ativoBase = null;
+    seriesById.clear();
+
+    serieIndicadoresFull = [];
+    serieIndicadoresView = [];
+    labelsFull = [];
+    labelsView = [];
+    modoAdicionar = false;
+
+    periodoAtual = { dtIni: null, dtFim: null, rangeKey: "otimo" };
+
+    blocoComparacao.style.display = "none";
+    comparacaoGrid.innerHTML = "";
+    comparacaoHint.textContent = "";
+
+    btnComparar.style.display = "none";
+    btnPararComparar.style.display = "none";
+
+    comparacaoTabelaWrap.style.display = "none";
+    compSubPeriodo1.textContent = "";
+    compSubPeriodo2.textContent = "";
+    compHistHead.innerHTML = "";
+    compHistBody.innerHTML = "";
+    compConsHead.innerHTML = "";
+    compConsBody.innerHTML = "";
+
+    ocupacaoPainelWrap.style.display = "none";
+    ocpSubPeriodo.textContent = "";
+    ocpHead.innerHTML = "";
+    ocpBody.innerHTML = "";
+
+    esconderMatrizComposicao();
+
+    if (chart) { chart.destroy(); chart = null; }
+  }
+
+  function renderKpis12m(kpis) {
+    const receita = kpis?.receita_brl ?? null;
+    const ocupacao = kpis?.ocupacao_pct ?? null;
+    const rentab = kpis?.rentabilidade_pct ?? null;
+
+    kpiReceita12m.textContent = formatarMoedaBRL(receita);
+    kpiOcupacao12m.textContent = formatarPct(ocupacao);
+    kpiRentabilidade12m.textContent = formatarPct(rentab);
+
+    kpis12m.style.display = "grid";
+  }
+
+  function scrollTopoBusca() {
+    topoBusca.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => input.focus(), 250);
+  }
+
+  function mostrarMenuIndicadores() { menuIndicadores.style.display = "block"; }
+  function esconderMenuIndicadores() { menuIndicadores.style.display = "none"; }
+
+  function setExclusivaSeMarcou(alvo){
+    const a = String(alvo || "").toLowerCase();
+    if (a === "ocupacao" && chkOcupacao.checked) {
+      chkRentabilidade.checked = false;
+      chkReceita.checked = false;
+    }
+    if (a === "rentabilidade" && chkRentabilidade.checked) {
+      chkOcupacao.checked = false;
+      chkReceita.checked = false;
+    }
+    if (a === "receita" && chkReceita.checked) {
+      chkOcupacao.checked = false;
+      chkRentabilidade.checked = false;
+    }
+  }
+
+  function getMetricaPrincipal(){
+    if (chkOcupacao.checked) return "ocupacao";
+    if (chkReceita.checked) return "receita";
+    if (chkRentabilidade.checked) return "rentabilidade";
+    return null;
+  }
+
+  function getTituloMetrica(){
+    const m = getMetricaPrincipal();
+    if (m === "ocupacao") return "Gráfico de Ocupação (variação %)";
+    if (m === "receita") return "Gráfico de Receita (variação %)";
+    if (m === "rentabilidade") return "Gráfico de Rentabilidade";
+    return "Gráfico";
+  }
+
+  function getBenchSelecionados() {
+    const ind = [];
+    if (chkCdi.checked) ind.push("cdi");
+    if (chkDolar.checked) ind.push("dolar");
+    if (chkSp500.checked) ind.push("sp500_brl");
+
+    if (chkCCO.checked) ind.push("cco");
+    if (chkLAMR.checked) ind.push("lamr");
+    if (chkOUT.checked) ind.push("out");
+    if (chkConsumo.checked) ind.push("icon");
+    if (chkImobiliario.checked) ind.push("iimob");
+    if (chkIndustrial.checked) ind.push("iind");
+    if (chkFinanceiro.checked) ind.push("ifin");
+    if (chkOuro.checked) ind.push("ouro");
+    if (chkPetroleo.checked) ind.push("petroleo");
+    if (chkOOH.checked) ind.push("ooh");
+    if (chkOOHGlobal.checked) ind.push("ooh_global");
+
+    return ind;
+  }
+
+  function lastDayOfMonthYYYYMM(yyyymm){
+    const [y, m] = yyyymm.split("-").map(Number);
+    const d = new Date(y, m, 0);
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyymm}-${dd}`;
+  }
+
+  function sliceLastNLabels(labels, n){
+    if (!labels || !labels.length) return [];
+    if (labels.length <= n) return [...labels];
+    return labels.slice(labels.length - n);
+  }
+
+  function normalizarRangeKey(k){
+    const key = String(k || "").toLowerCase().trim();
+    if (key === "ótimo") return "otimo";
+    if (key === "otimo") return "otimo";
+    if (key === "6m") return "6m";
+    if (key === "1a") return "1a";
+    if (key === "2a") return "2a";
+    if (key === "3a") return "3a";
+    if (key === "5a") return "5a";
+    return "otimo";
+  }
+
+  function dateToYMD(d){
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function primeiroDiaDoMes(d){
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }
+
+  function ultimoDiaDoMes(d){
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  }
+
+  function addMeses(d, delta){
+    return new Date(d.getFullYear(), d.getMonth() + delta, 1);
+  }
+
+  function rangeParaDatas(rangeKey){
+    const rk = normalizarRangeKey(rangeKey);
+    const hoje = new Date();
+
+    const fimMes = primeiroDiaDoMes(hoje);
+    const fim = ultimoDiaDoMes(fimMes);
+
+    let meses = null;
+    if (rk === "6m") meses = 6;
+    else if (rk === "1a") meses = 12;
+    else if (rk === "2a") meses = 24;
+    else if (rk === "3a") meses = 36;
+    else if (rk === "5a") meses = 60;
+    else meses = null;
+
+    if (meses === null){
+      return { dtIni: null, dtFim: dateToYMD(fim) };
+    }
+
+    const iniMes = addMeses(fimMes, -(meses - 1));
+    const ini = primeiroDiaDoMes(iniMes);
+
+    return { dtIni: dateToYMD(ini), dtFim: dateToYMD(fim) };
+  }
+
+  function construirLabelsEntre(dtIni, dtFim){
+    if (!dtIni || !dtFim) return [];
+
+    const di = new Date(dtIni + "T00:00:00");
+    const df = new Date(dtFim + "T00:00:00");
+    if (!isFinite(di.getTime()) || !isFinite(df.getTime())) return [];
+    if (di > df) return [];
+
+    let cursor = new Date(di.getFullYear(), di.getMonth(), 1);
+    const fim = new Date(df.getFullYear(), df.getMonth(), 1);
+
+    const labels = [];
+    while (cursor <= fim){
+      const y = cursor.getFullYear();
+      const m = String(cursor.getMonth() + 1).padStart(2, "0");
+      labels.push(`${y}-${m}`);
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    }
+    return labels;
+  }
+
+  function aplicarRangeSomenteView(rangeKey){
+    const rk = normalizarRangeKey(rangeKey);
+
+    if (!labelsFull.length) {
+      labelsView = [];
+      serieIndicadoresView = [];
+      return;
+    }
+
+    if (rk === "otimo") {
+      labelsView = [...labelsFull];
+    } else if (rk === "6m") {
+      labelsView = sliceLastNLabels(labelsFull, 6);
+    } else if (rk === "1a") {
+      labelsView = sliceLastNLabels(labelsFull, 12);
+    } else if (rk === "2a") {
+      labelsView = sliceLastNLabels(labelsFull, 24);
+    } else if (rk === "3a") {
+      labelsView = sliceLastNLabels(labelsFull, 36);
+    } else if (rk === "5a") {
+      labelsView = sliceLastNLabels(labelsFull, 60);
+    } else {
+      labelsView = [...labelsFull];
+    }
+
+    const setMes = new Set(labelsView);
+
+    serieIndicadoresView = (serieIndicadoresFull || [])
+      .map(x => (x ? ({ ...x, mes: normalizarMes(x.mes) }) : null))
+      .filter(x => x && x.mes && setMes.has(x.mes));
+  }
+
+  async function aplicarRange(rangeKey){
+    if (!ativosSel.length) {
+      labelsFull = [];
+      labelsView = [];
+      serieIndicadoresFull = [];
+      serieIndicadoresView = [];
+      graficoPeriodoTxt.textContent = "";
+      return;
+    }
+
+    const rk = normalizarRangeKey(rangeKey);
+
+    if (carregandoRange) return;
+    carregandoRange = true;
+
+    try {
+      setStatus("Carregando período...");
+
+      const alvo = rangeParaDatas(rk);
+
+      let dtIni = alvo.dtIni;
+      let dtFim = alvo.dtFim;
+
+      if (rk === "otimo") {
+        if (periodoAtual.dtIni && periodoAtual.dtFim) {
+          dtIni = periodoAtual.dtIni;
+          dtFim = periodoAtual.dtFim;
+        } else {
+          const fallback = rangeParaDatas("1a");
+          dtIni = fallback.dtIni;
+          dtFim = fallback.dtFim;
+        }
+      }
+
+      if (!dtIni || !dtFim) {
+        setStatus("Período inválido.");
+        carregandoRange = false;
+        return;
+      }
+
+      periodoAtual = { dtIni, dtFim, rangeKey: rk };
+
+      labelsFull = construirLabelsEntre(dtIni, dtFim);
+
+      await Promise.all(
+        ativosSel.map(async (a) => {
+          const idStr = String(a.IDDimAtivos);
+          const serie = await buscarSerie(idStr, dtIni, dtFim);
+          seriesById.set(idStr, Array.isArray(serie) ? serie : []);
+        })
+      );
+
+      serieIndicadoresFull = await buscarSerieIndicadores(dtIni, dtFim);
+
+      graficoPeriodoTxt.textContent = `Período: ${dtIni} até ${dtFim}`;
+
+      aplicarRangeSomenteView(rk);
+
+      setStatus("Período carregado.");
+    } catch (e) {
+      setStatus("Falha ao carregar período.");
+      console.error(e);
+    } finally {
+      carregandoRange = false;
+    }
+  }
+
+  function setRangeAtivo(key){
+    for (const b of rangeBtns){
+      const k = b.getAttribute("data-range");
+      if (String(k || "").toLowerCase() === String(key || "").toLowerCase()) b.classList.add("ativo");
+      else b.classList.remove("ativo");
+    }
+  }
+
+  function labelReceitaAtivo(ativo){
+    const ref = (ativo?.ReferenciaExterna ?? "").toString().trim();
+    const nome = (ativo?.NomeAtivo ?? "").toString().trim();
+    const base = ref ? `Ponto ${ref}` : (nome || "Ativo");
+    return `${base}`;
+  }
+
+  function montarSubComparacao(ativo) {
+    const tipo = (ativo.Tipo || "").trim();
+    const subtipo = (ativo.SubTipo || "").trim();
+    const ref = (ativo.ReferenciaExterna === null || ativo.ReferenciaExterna === undefined) ? "" : `RefExt: ${ativo.ReferenciaExterna}`;
+    const cod = (ativo.CodPonto === null || ativo.CodPonto === undefined) ? "" : `CodPonto: ${ativo.CodPonto}`;
+    const st = (ativo.BitAtivo === null || ativo.BitAtivo === undefined) ? "" : (ativo.BitAtivo ? "ATIVO" : "INATIVO");
+    const arr = [];
+    if (tipo) arr.push(tipo);
+    if (subtipo) arr.push(subtipo);
+    if (ref) arr.push(ref);
+    if (cod) arr.push(cod);
+    if (st) arr.push(st);
+    return arr.join(" • ");
+  }
+
+  function tipoEhPainel(ativo){
+    const t = String(ativo?.Tipo || "").trim().toUpperCase();
+    if (!t) return false;
+    if (t === "PAINEL") return true;
+    if (t.startsWith("PAINEL")) return true;
+    if (t.includes("PAINEL")) return true;
+    return false;
+  }
+
+  function atualizarComparacaoUI(){
+    if (!ativosSel.length) {
+      blocoComparacao.style.display = "none";
+      comparacaoGrid.innerHTML = "";
+      comparacaoHint.textContent = "";
+      btnAddAtivo.style.display = "none";
+      btnPararAdd.style.display = "none";
+      return;
+    }
+
+    blocoComparacao.style.display = "block";
+
+    btnAddAtivo.style.display = (ativosSel.length < LIMITE_ATIVOS) ? "inline-flex" : "none";
+    btnPararAdd.style.display = modoAdicionar ? "inline-flex" : "none";
+
+    comparacaoGrid.innerHTML = ativosSel.map((a, idx) => {
+      const titulo = (idx === 0) ? `${labelReceitaAtivo(a)} Selecionado` : labelReceitaAtivo(a);
+      const sub = montarSubComparacao(a);
+      return `
+        <div class="comparacao-card" data-id="${escapeHtml(a.IDDimAtivos)}">
+          <button type="button" class="comparacao-rm" title="Remover" data-rm="${escapeHtml(a.IDDimAtivos)}">×</button>
+          <div class="comparacao-titulo">${escapeHtml(titulo)}</div>
+          <div class="comparacao-sub">${escapeHtml(sub)}</div>
+        </div>
+      `;
+    }).join("");
+
+    const faltam = Math.max(0, LIMITE_ATIVOS - ativosSel.length);
+    if (faltam > 0) {
+      comparacaoHint.textContent = modoAdicionar
+        ? `Modo adicionar ligado: selecione mais ${faltam} ativo(s) no campo de busca.`
+        : `Você pode adicionar mais ${faltam} ativo(s) para comparar.`;
+    } else {
+      comparacaoHint.textContent = `Limite atingido: até ${LIMITE_ATIVOS} ativos no gráfico.`;
+    }
+
+    comparacaoGrid.querySelectorAll("[data-rm]").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const id = String(btn.getAttribute("data-rm"));
+        await removerAtivoDoGrafico(id);
+      });
+    });
+
+    btnComparar.style.display = (ativosSel.length > 0 && ativosSel.length < LIMITE_ATIVOS) ? "inline-flex" : "none";
+    btnPararComparar.style.display = modoAdicionar ? "inline-flex" : "none";
+  }
+
+  async function removerAtivoDoGrafico(idStr){
+    const idx = ativosSel.findIndex(x => String(x.IDDimAtivos) === String(idStr));
+    if (idx < 0) return;
+
+    const removendoBase = (idx === 0);
+
+    const removido = ativosSel.splice(idx, 1)[0];
+    if (removido) seriesById.delete(String(removido.IDDimAtivos));
+
+    if (!ativosSel.length){
+      ativoBase = null;
+      serieIndicadoresFull = [];
+      serieIndicadoresView = [];
+      labelsFull = [];
+      labelsView = [];
+      periodoAtual = { dtIni: null, dtFim: null, rangeKey: "otimo" };
+      if (chart) { chart.destroy(); chart = null; }
+      blocoGrafico.style.display = "none";
+      graficoTituloTxt.textContent = "Gráfico";
+      graficoPeriodoTxt.textContent = "";
+      comparacaoTabelaWrap.style.display = "none";
+
+      ocupacaoPainelWrap.style.display = "none";
+      ocpSubPeriodo.textContent = "";
+      ocpHead.innerHTML = "";
+      ocpBody.innerHTML = "";
+
+      esconderMatrizComposicao();
+
+      atualizarComparacaoUI();
+      setStatus("Todos os ativos removidos do gráfico.");
+      return;
+    }
+
+    if (removendoBase) {
+      ativoBase = ativosSel[0];
+      renderCabecalho(ativoBase);
+      renderTabelaPorTipo(ativoBase);
+    }
+
+    const rk = periodoAtual.rangeKey || "otimo";
+    await aplicarRange(rk);
+
+    renderGrafico();
+    atualizarComparacaoUI();
+    setStatus("Ativo removido do gráfico.");
+  }
+
+  function alinharCampoPorMes(serie, campo){
+    const map = {};
+    for (const row of (serie || [])) {
+      if (!row) continue;
+      const mes = normalizarMes(row.mes);
+      if (!mes) continue;
+      const v = Number(row[campo]);
+      map[mes] = isFinite(v) ? v : null;
+    }
+    return map;
+  }
+
+  function calcularPctSerieAcumulado(labels, mapMesValor){
+    let baseMes = null;
+    for (const m of labels){
+      const v = mapMesValor[m];
+      if (v !== undefined && v !== null && isFinite(Number(v)) && Number(v) > 0) { baseMes = m; break; }
+    }
+    if (!baseMes) return labels.map(_ => null);
+
+    const base = Number(mapMesValor[baseMes] || 0);
+    if (!isFinite(base) || base === 0) return labels.map(_ => null);
+
+    const pct = [];
+    for (const m of labels){
+      const v = Number(mapMesValor[m]);
+      if (!isFinite(v)) { pct.push(null); continue; }
+      pct.push(((v / base) - 1) * 100);
+    }
+    return pct.map(x => (isFinite(x) ? x : null));
+  }
+
+  function calcularPctSerieMensal(labels, mapMesValor){
+    const pct = [];
+    let prevVal = null;
+    for (const m of labels){
+      const v = Number(mapMesValor[m]);
+      if (!isFinite(v)) { pct.push(null); continue; }
+      if (prevVal === null) { pct.push(0); prevVal = v; continue; }
+      if (!isFinite(prevVal) || prevVal === 0) { pct.push(0); prevVal = v; continue; }
+      pct.push(((v / prevVal) - 1) * 100);
+      prevVal = v;
+    }
+    return pct.map(x => (isFinite(x) ? x : null));
+  }
+
+  function calcularPctSerieReceita(labels, mapMesReceita){
+    const modoReceita = (window.__modoReceitaPct || "acumulado");
+    if (modoReceita === "mensal") return calcularPctSerieMensal(labels, mapMesReceita);
+    return calcularPctSerieAcumulado(labels, mapMesReceita);
+  }
+
+  function getBenchMeta(){
+    return {
+      "cdi": { label: "CDI", key: "cdi" },
+      "dolar": { label: "Dólar", key: "dolar" },
+      "sp500_brl": { label: "S&P 500 BRL", key: "sp500_brl" },
+
+      "cco": { label: "CCO", key: "cco" },
+      "lamr": { label: "LAMR", key: "lamr" },
+      "out": { label: "OUT", key: "out" },
+      "icon": { label: "ICON", key: "icon" },
+      "iimob": { label: "IIMOB", key: "iimob" },
+      "iind": { label: "IIND", key: "iind" },
+      "ifin": { label: "IFIN", key: "ifin" },
+      "ouro": { label: "Ouro", key: "ouro" },
+      "petroleo": { label: "Petróleo", key: "petroleo" },
+      "ooh": { label: "OOH", key: "ooh" },
+      "ooh_global": { label: "OOH Global", key: "ooh_global" }
+    };
+  }
+
+  function coletarValoresValidos(datasets){
+    const vals = [];
+    for (const ds of (datasets || [])) {
+      for (const v of (ds.data || [])) {
+        const n = Number(v);
+        if (isFinite(n)) vals.push(n);
+      }
+    }
+    return vals;
+  }
+
+  function arredondarParaCima(valor, passo){
+    if (!isFinite(valor)) return valor;
+    return Math.ceil(valor / passo) * passo;
+  }
+
+  function arredondarParaBaixo(valor, passo){
+    if (!isFinite(valor)) return valor;
+    return Math.floor(valor / passo) * passo;
+  }
+
+  function escolherPasso(minV, maxV){
+    const range = Math.abs(maxV - minV);
+    if (range <= 50)  return 5;
+    if (range <= 120) return 10;
+    if (range <= 250) return 20;
+    if (range <= 600) return 50;
+    return 100;
+  }
+
+  function calcularLimitesY(datasets){
+    const vals = coletarValoresValidos(datasets);
+    if (!vals.length) return { min: -10, max: 10, step: 5 };
+
+    let minV = Math.min(...vals);
+    let maxV = Math.max(...vals);
+
+    const range = Math.max(10, (maxV - minV));
+    const pad = range * 0.10;
+
+    minV = minV - pad;
+    maxV = maxV + pad;
+
+    const step = escolherPasso(minV, maxV);
+
+    const minR = arredondarParaBaixo(minV, step);
+    const maxR = arredondarParaCima(maxV, step);
+
+    return { min: minR, max: maxR, step };
+  }
+
+  function montarDatasets() {
+    const labels = labelsView || [];
+    const ds = [];
+    const metrica = getMetricaPrincipal();
+
+    if (metrica) {
+      for (const ativo of ativosSel) {
+        const idStr = String(ativo.IDDimAtivos);
+        const serie = seriesById.get(idStr) || [];
+
+        if (metrica === "receita") {
+          const mapMes = alinharCampoPorMes(serie, "receita");
+          const pct = calcularPctSerieReceita(labels, mapMes);
+
+          ds.push({
+            label: `${labelReceitaAtivo(ativo)}`,
+            data: pct.map(v => (v === null ? null : Number(v))),
+            type: "line",
+            yAxisID: "y",
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 2,
+            spanGaps: false
+          });
+        } else if (metrica === "ocupacao") {
+          const mapMes = {};
+          for (const row of (serie || [])) {
+            if (!row) continue;
+            const mes = normalizarMes(row.mes);
+            if (!mes) continue;
+            const raw = (row.ocupacao_pct !== undefined && row.ocupacao_pct !== null) ? row.ocupacao_pct : row.ocupacao;
+            const v = Number(raw);
+            mapMes[mes] = isFinite(v) ? v : null;
+          }
+          ds.push({
+            label: `${labelReceitaAtivo(ativo)}`,
+            data: labels.map(m => (mapMes[m] === null || mapMes[m] === undefined ? null : Number(mapMes[m]))),
+            type: "line",
+            yAxisID: "y",
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 2,
+            spanGaps: false
+          });
+        } else {
+          const mapMes = {};
+          for (const row of (serie || [])) {
+            if (!row) continue;
+            const mes = normalizarMes(row.mes);
+            if (!mes) continue;
+            const raw = (row.rentabilidade_pct !== undefined && row.rentabilidade_pct !== null) ? row.rentabilidade_pct : row.rentabilidade;
+            const v = Number(raw);
+            mapMes[mes] = isFinite(v) ? v : null;
+          }
+          ds.push({
+            label: `${labelReceitaAtivo(ativo)}`,
+            data: labels.map(m => (mapMes[m] === null || mapMes[m] === undefined ? null : Number(mapMes[m]))),
+            type: "line",
+            yAxisID: "y",
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 2,
+            spanGaps: false
+          });
+        }
+      }
+    }
+
+    const indSel = getBenchSelecionados();
+    const mapInd = getBenchMeta();
+
+    const indByMes = {};
+    for (const it of (serieIndicadoresView || [])) {
+      if (!it) continue;
+      const mes = normalizarMes(it.mes);
+      if (!mes) continue;
+      indByMes[mes] = it;
+    }
+
+    for (const k of indSel) {
+      const meta = mapInd[k];
+      ds.push({
+        label: `${meta.label}`,
+        data: labels.map(m => {
+          const row = indByMes[m] || {};
+          const raw = row[meta.key];
+          const v = Number(raw);
+          return isFinite(v) ? v : null;
+        }),
+        type: "line",
+        yAxisID: "y",
+        tension: 0.25,
+        pointRadius: 0,
+        borderWidth: 2,
+        spanGaps: false
+      });
+    }
+
+    return { labels, datasets: ds };
+  }
+
+  function pctToFactor(pct){
+    const n = Number(pct);
+    if (!isFinite(n)) return null;
+    return 1 + (n / 100);
+  }
+
+  function retornoJanelaPct(acumSeries, nMeses){
+    if (!Array.isArray(acumSeries) || !acumSeries.length) return null;
+
+    const lastIdx = acumSeries.length - 1;
+    const prevIdx = lastIdx - nMeses;
+    if (prevIdx < 0) return null;
+
+    const fLast = pctToFactor(acumSeries[lastIdx]);
+    const fPrev = pctToFactor(acumSeries[prevIdx]);
+    if (fLast === null || fPrev === null || fPrev === 0) return null;
+
+    const r = ((fLast / fPrev) - 1) * 100;
+    return isFinite(r) ? r : null;
+  }
+
+  function retornoYtdPct(acumSeries, labels){
+    if (!Array.isArray(acumSeries) || !acumSeries.length) return null;
+    if (!Array.isArray(labels) || !labels.length) return null;
+
+    const lastLabel = labels[labels.length - 1];
+    const lastYear = String(lastLabel || "").slice(0,4);
+    if (!lastYear) return null;
+
+    const jan = `${lastYear}-01`;
+    const idxJan = labels.findIndex(x => x === jan);
+    const lastIdx = labels.length - 1;
+
+    if (idxJan < 0) return null;
+    if (lastIdx <= idxJan) return null;
+
+    const fLast = pctToFactor(acumSeries[lastIdx]);
+    const fJan  = pctToFactor(acumSeries[idxJan]);
+    if (fLast === null || fJan === null || fJan === 0) return null;
+
+    const r = ((fLast / fJan) - 1) * 100;
+    return isFinite(r) ? r : null;
+  }
+
+  function retornoMensalSerie(acumSeries){
+    const out = [];
+    if (!Array.isArray(acumSeries) || !acumSeries.length) return out;
+
+    out.push(null);
+    for (let i = 1; i < acumSeries.length; i++){
+      const fNow = pctToFactor(acumSeries[i]);
+      const fPrev = pctToFactor(acumSeries[i-1]);
+      if (fNow === null || fPrev === null || fPrev === 0) { out.push(null); continue; }
+      const r = ((fNow / fPrev) - 1) * 100;
+      out.push(isFinite(r) ? r : null);
+    }
+    return out;
+  }
+
+  function contarPosNeg(retMensal){
+    let pos = 0;
+    let neg = 0;
+    for (const v of (retMensal || [])){
+      const n = Number(v);
+      if (!isFinite(n)) continue;
+      if (n > 0) pos++;
+      else if (n < 0) neg++;
+    }
+    const total = pos + neg;
+    return { pos, neg, total };
+  }
+
+  function maxMin(retMensal){
+    let max = null;
+    let min = null;
+    for (const v of (retMensal || [])){
+      const n = Number(v);
+      if (!isFinite(n)) continue;
+      if (max === null || n > max) max = n;
+      if (min === null || n < min) min = n;
+    }
+    return { max, min };
+  }
+
+  function renderTabelaComparacao(labels, datasets){
+    if (!labels || !labels.length || !datasets || !datasets.length){
+      comparacaoTabelaWrap.style.display = "none";
+      return;
+    }
+
+    const ini = labels[0] ? (labels[0] + "-01") : "";
+    const fim = labels[labels.length - 1] ? lastDayOfMonthYYYYMM(labels[labels.length - 1]) : "";
+    const subTxt = (ini && fim) ? `Período exibido: ${ini} até ${fim}` : "";
+    compSubPeriodo1.textContent = subTxt;
+    compSubPeriodo2.textContent = subTxt;
+
+    const titulo = getTituloMetrica().replace("Gráfico de ", "");
+    if (compTituloHistorico) compTituloHistorico.textContent = `Comparação (${titulo})`;
+
+    compHistHead.innerHTML = `
+      <tr>
+        <th>Série</th>
+        <th>No mês</th>
+        <th>No ano (YTD)</th>
+        <th>3M</th>
+        <th>6M</th>
+        <th>12M</th>
+        <th>24M</th>
+        <th>36M</th>
+        <th>48M</th>
+        <th>60M</th>
+      </tr>
+    `;
+
+    compConsHead.innerHTML = `
+      <tr>
+        <th>Série</th>
+        <th>Meses positivos</th>
+        <th>Meses negativos</th>
+        <th>Maior retorno (mês)</th>
+        <th>Menor retorno (mês)</th>
+      </tr>
+    `;
+
+    const linhasHist = [];
+    const linhasCons = [];
+
+    datasets.forEach((ds, idx) => {
+      const nome = ds.label || `Série ${idx+1}`;
+      const serie = (ds.data || []).map(x => (x === null ? null : Number(x)));
+
+      const v1   = retornoJanelaPct(serie, 1);
+      const vytd = retornoYtdPct(serie, labels);
+      const v3   = retornoJanelaPct(serie, 3);
+      const v6   = retornoJanelaPct(serie, 6);
+      const v12  = retornoJanelaPct(serie, 12);
+      const v24  = retornoJanelaPct(serie, 24);
+      const v36  = retornoJanelaPct(serie, 36);
+      const v48  = retornoJanelaPct(serie, 48);
+      const v60  = retornoJanelaPct(serie, 60);
+
+      const td = (v) => {
+        if (v === null || v === undefined || !isFinite(Number(v))) return `<td class="comp-muted">-</td>`;
+        const cls = classeValorPct(v);
+        return `<td class="${cls}">${escapeHtml(formatarPctSemSinal(v))}</td>`;
+      };
+
+      linhasHist.push(`
+        <tr>
+          <td><span class="mini-bar"></span>${escapeHtml(nome)}</td>
+          ${td(v1)}
+          ${td(vytd)}
+          ${td(v3)}
+          ${td(v6)}
+          ${td(v12)}
+          ${td(v24)}
+          ${td(v36)}
+          ${td(v48)}
+          ${td(v60)}
+        </tr>
+      `);
+
+      const retMensal = retornoMensalSerie(serie);
+      const { pos, neg, total } = contarPosNeg(retMensal);
+      const { max, min } = maxMin(retMensal);
+
+      const pctPos = (total > 0) ? ((pos / total) * 100) : null;
+      const pctNeg = (total > 0) ? ((neg / total) * 100) : null;
+
+      const cellPos = (pctPos === null)
+        ? `<td class="comp-muted">-</td>`
+        : `<td><span class="val-pos">${escapeHtml(String(pos))}</span><div class="comp-muted">${escapeHtml(formatarPctSemSinal(pctPos))}</div></td>`;
+
+      const cellNeg = (pctNeg === null)
+        ? `<td class="comp-muted">-</td>`
+        : `<td><span class="val-neg">${escapeHtml(String(neg))}</span><div class="comp-muted">${escapeHtml(formatarPctSemSinal(pctNeg))}</div></td>`;
+
+      const cellMax = (max === null) ? `<td class="comp-muted">-</td>` : `<td class="${classeValorPct(max)}">${escapeHtml(formatarPctSemSinal(max))}</td>`;
+      const cellMin = (min === null) ? `<td class="comp-muted">-</td>` : `<td class="${classeValorPct(min)}">${escapeHtml(formatarPctSemSinal(min))}</td>`;
+
+      linhasCons.push(`
+        <tr>
+          <td><span class="mini-bar"></span>${escapeHtml(nome)}</td>
+          ${cellPos}
+          ${cellNeg}
+          ${cellMax}
+          ${cellMin}
+        </tr>
+      `);
+    });
+
+    compHistBody.innerHTML = linhasHist.join("");
+    compConsBody.innerHTML = linhasCons.join("");
+    comparacaoTabelaWrap.style.display = "block";
+  }
+
+  function renderTabelaOcupacao(labels){
+    if (!ativoBase || !tipoEhPainel(ativoBase)) {
+      ocupacaoPainelWrap.style.display = "none";
+      ocpSubPeriodo.textContent = "";
+      ocpHead.innerHTML = "";
+      ocpBody.innerHTML = "";
+      return;
+    }
+
+    if (!ativosSel.length) {
+      ocupacaoPainelWrap.style.display = "none";
+      return;
+    }
+
+    const ini = labels && labels.length ? (labels[0] + "-01") : (periodoAtual?.dtIni || "");
+    const fim = labels && labels.length ? lastDayOfMonthYYYYMM(labels[labels.length - 1]) : (periodoAtual?.dtFim || "");
+    ocpSubPeriodo.textContent = (ini && fim) ? `Período: ${ini} até ${fim}` : "";
+
+    ocpHead.innerHTML = `
+      <tr>
+        <th>Painel/Ativo</th>
+        <th>Ocupação (mês final)</th>
+        <th>Ocupação (mês inicial)</th>
+        <th>Variação no período</th>
+        <th>Observação</th>
+      </tr>
+    `;
+
+    const labelsUse = labels || [];
+    const firstMes = labelsUse.length ? labelsUse[0] : null;
+    const lastMes  = labelsUse.length ? labelsUse[labelsUse.length - 1] : null;
+
+    ocpBody.innerHTML = ativosSel.map((a, idx) => {
+      const nome = (idx === 0) ? `${labelReceitaAtivo(a)} (base)` : `${labelReceitaAtivo(a)}`;
+      const idStr = String(a.IDDimAtivos);
+      const serie = seriesById.get(idStr) || [];
+
+      const mapMes = {};
+      for (const row of (serie || [])) {
+        if (!row) continue;
+        const mes = normalizarMes(row.mes);
+        if (!mes) continue;
+        const raw = (row.ocupacao_pct !== undefined && row.ocupacao_pct !== null) ? row.ocupacao_pct : row.ocupacao;
+        const v = Number(raw);
+        mapMes[mes] = isFinite(v) ? v : null;
+      }
+
+      const vIni = firstMes ? mapMes[firstMes] : null;
+      const vFim = lastMes ? mapMes[lastMes] : null;
+
+      let variacao = null;
+      if (isFinite(Number(vIni)) && isFinite(Number(vFim))) variacao = Number(vFim) - Number(vIni);
+
+      const tdPct = (v) => {
+        if (v === null || v === undefined || !isFinite(Number(v))) return `<td class="comp-muted">-</td>`;
+        return `<td class="${classeValorPct(v)}">${escapeHtml(formatarPctSemSinal(v))}</td>`;
+      };
+
+      const tdVar = (v) => {
+        if (v === null || v === undefined || !isFinite(Number(v))) return `<td class="comp-muted">-</td>`;
+        const cls = classeValorPct(v);
+        const sinal = (v > 0) ? "+" : "";
+        return `<td class="${cls}">${escapeHtml(sinal + formatarPctSemSinal(v))}</td>`;
+      };
+
+      return `
+        <tr>
+          <td><span class="mini-bar"></span>${escapeHtml(nome)}</td>
+          ${tdPct(vFim)}
+          ${tdPct(vIni)}
+          ${tdVar(variacao)}
+          <td class="comp-muted">-</td>
+        </tr>
+      `;
+    }).join("");
+
+    ocupacaoPainelWrap.style.display = "block";
+  }
+
+  function renderCabecalho(ativo) {
+    const nome = ativo.NomeAtivo || "-";
+    const sub = [ativo.Tipo, ativo.SubTipo, ativo.Descricao].filter(Boolean).join(" • ");
+    const ref = (ativo.ReferenciaExterna === null || ativo.ReferenciaExterna === undefined) ? "-" : ativo.ReferenciaExterna;
+    const status = (ativo.BitAtivo === null || ativo.BitAtivo === undefined) ? "-" : (ativo.BitAtivo ? "ATIVO" : "INATIVO");
+
+    cabecalhoDinamico.innerHTML = `
+      <div class="cabecalho-ativo">
+        <div class="nome">${escapeHtml(nome)}</div>
+        <div class="sub">
+          ${escapeHtml(sub)}${sub ? " • " : ""}Ref: ${escapeHtml(ref)} • ${escapeHtml(status)}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderTabelaPorTipo(ativo) {
+    const tipo = (ativo.Tipo || "").trim().toUpperCase();
+
+    if (tipo.includes("PAINEL")) {
+      theadDinamico.innerHTML = `
+        <tr>
+          <th>ID</th>
+          <th>Nome</th>
+          <th>Tipo</th>
+          <th>Ponto</th>
+          <th>Nº Série</th>
+          <th>Ref</th>
+          <th>Local</th>
+          <th>Endereço</th>
+          <th>CEP</th>
+          <th>Status</th>
+          <th>Atualização</th>
+        </tr>
+      `;
+
+      const id = ativo.IDDimAtivos ?? "-";
+      const nome = ativo.NomeAtivo ?? "-";
+      const subtipo = ativo.SubTipo ?? "";
+      const tipoTxt = ativo.Tipo ?? "-";
+      const codponto = (ativo.CodPonto === null || ativo.CodPonto === undefined) ? "-" : ativo.CodPonto;
+      const ns = ativo.NumeroSerie ?? "-";
+      const refext = (ativo.ReferenciaExterna === null || ativo.ReferenciaExterna === undefined) ? "-" : ativo.ReferenciaExterna;
+      const cidade = ativo.Cidade ?? "-";
+      const uf = ativo.UF ?? "-";
+      const logradouro = ativo.Logradouro ?? "-";
+      const bairro = ativo.Bairro ?? "-";
+      const cep = ativo.CEP ?? "-";
+      const dt = ativo.DataAtualizacao ?? "-";
+
+      let statusHtml = "-";
+      if (ativo.BitAtivo !== null && ativo.BitAtivo !== undefined) {
+        statusHtml = ativo.BitAtivo
+          ? '<span class="badge badge-success">ATIVO</span>'
+          : '<span class="badge badge-danger">INATIVO</span>';
+      }
+
+      tbody.innerHTML = `
+        <tr>
+          <td>${escapeHtml(id)}</td>
+          <td style="white-space:nowrap;">
+            <b>${escapeHtml(nome)}</b>
+            ${subtipo ? `<div style="font-size:12px; color:rgba(15,23,42,.65);">${escapeHtml(subtipo)}</div>` : ""}
+          </td>
+          <td>${escapeHtml(tipoTxt)}</td>
+          <td>${escapeHtml(codponto)}</td>
+          <td>${escapeHtml(ns)}</td>
+          <td>${escapeHtml(refext)}</td>
+          <td>${escapeHtml(cidade)}/${escapeHtml(uf)}</td>
+          <td>
+            <div style="font-size:13px;">${escapeHtml(logradouro)}</div>
+            <div style="font-size:12px; color:rgba(15,23,42,.65);">${escapeHtml(bairro)}</div>
+          </td>
+          <td>${escapeHtml(cep)}</td>
+          <td>${statusHtml}</td>
+          <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
+        </tr>
+      `;
+      return;
+    }
+
+    theadDinamico.innerHTML = `
+      <tr>
+        <th>ID</th>
+        <th>Nome</th>
+        <th>Tipo</th>
+        <th>SubTipo</th>
+        <th>Nº Série</th>
+        <th>RefExt</th>
+        <th>Local</th>
+        <th>Status</th>
+        <th>Atualização</th>
+      </tr>
+    `;
+
+    const id = ativo.IDDimAtivos ?? "-";
+    const nome = ativo.NomeAtivo ?? "-";
+    const tipoTxt = ativo.Tipo ?? "-";
+    const subtipo = ativo.SubTipo ?? "-";
+    const ns = ativo.NumeroSerie ?? "-";
+    const refext = (ativo.ReferenciaExterna === null || ativo.ReferenciaExterna === undefined) ? "-" : ativo.ReferenciaExterna;
+    const cidade = ativo.Cidade ?? "-";
+    const uf = ativo.UF ?? "-";
+    const dt = ativo.DataAtualizacao ?? "-";
+
+    let statusHtml = "-";
+    if (ativo.BitAtivo !== null && ativo.BitAtivo !== undefined) {
+      statusHtml = ativo.BitAtivo
+        ? '<span class="badge badge-success">ATIVO</span>'
+        : '<span class="badge badge-danger">INATIVO</span>';
+    }
+
+    tbody.innerHTML = `
+      <tr>
+        <td>${escapeHtml(id)}</td>
+        <td><b>${escapeHtml(nome)}</b></td>
+        <td>${escapeHtml(tipoTxt)}</td>
+        <td>${escapeHtml(subtipo)}</td>
+        <td>${escapeHtml(ns)}</td>
+        <td>${escapeHtml(refext)}</td>
+        <td>${escapeHtml(cidade)}/${escapeHtml(uf)}</td>
+        <td>${statusHtml}</td>
+        <td style="white-space:nowrap;">${escapeHtml(dt)}</td>
+      </tr>
+    `;
+  }
+
+  function renderGrafico() {
+    if (!ativosSel.length || !labelsView.length) {
+      blocoGrafico.style.display = "none";
+      if (chart) { chart.destroy(); chart = null; }
+      comparacaoTabelaWrap.style.display = "none";
+      ocupacaoPainelWrap.style.display = "none";
+      esconderMatrizComposicao();
+      return;
+    }
+
+    graficoTituloTxt.textContent = getTituloMetrica();
+
+    const { labels, datasets } = montarDatasets();
+
+    if (!datasets || !datasets.length) {
+      blocoGrafico.style.display = "none";
+      if (chart) { chart.destroy(); chart = null; }
+      comparacaoTabelaWrap.style.display = "none";
+      ocupacaoPainelWrap.style.display = "none";
+      esconderMatrizComposicao();
+      setStatus("Nenhum indicador selecionado. Marque uma métrica do ativo ou um benchmark.");
+      return;
+    }
+
+    blocoGrafico.style.display = "block";
+
+    const lim = calcularLimitesY(datasets);
+
+    if (chart) { chart.destroy(); chart = null; }
+
+    if (typeof Chart === "undefined") {
+      setStatus("Chart.js não carregou. Verifique o include do Chart.js.");
+      console.error("[ativos.js] Chart undefined");
+      return;
+    }
+
+    chart = new Chart(canvasGraficoReceita, {
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: "top",
+            align: "start",
+            labels: {
+              boxWidth: 10,
+              boxHeight: 10,
+              usePointStyle: true,
+              pointStyle: "line",
+              padding: 14
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${formatarPct(ctx.parsed.y)}`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { maxRotation: 0, autoSkip: true } },
+          y: {
+            position: "left",
+            min: lim.min,
+            max: lim.max,
+            ticks: {
+              stepSize: lim.step,
+              callback: (v) => {
+                const n = Number(v);
+                if (!isFinite(n)) return v;
+                return n.toLocaleString("pt-BR") + "%";
+              }
+            },
+            grid: { drawBorder: false }
+          }
+        }
+      }
+    });
+
+    renderTabelaComparacao(labels, datasets);
+    renderTabelaOcupacao(labels);
+    atualizarMatrizComposicaoSeDer();
+  }
+
+  btnIndicadores.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (menuIndicadores.style.display === "block") esconderMenuIndicadores();
+    else mostrarMenuIndicadores();
+  });
+
+  menuIndicadores.addEventListener("click", (e) => { e.stopPropagation(); });
+
+  document.addEventListener("click", (e) => {
+    if (!menuIndicadores.contains(e.target) && e.target !== btnIndicadores) esconderMenuIndicadores();
+    if (!box.contains(e.target) && e.target !== input) esconderSugestoes();
+  });
+
+  function onMetricaChange(alvo){
+    setExclusivaSeMarcou(alvo);
+    renderGrafico();
+  }
+
+  chkOcupacao.addEventListener("change", () => onMetricaChange("ocupacao"));
+  chkRentabilidade.addEventListener("change", () => onMetricaChange("rentabilidade"));
+  chkReceita.addEventListener("change", () => onMetricaChange("receita"));
+
+  function onBenchChange() {
+    renderGrafico();
+  }
+
+  chkCdi.addEventListener("change", onBenchChange);
+  chkDolar.addEventListener("change", onBenchChange);
+  chkSp500.addEventListener("change", onBenchChange);
+  chkCCO.addEventListener("change", onBenchChange);
+  chkLAMR.addEventListener("change", onBenchChange);
+  chkOUT.addEventListener("change", onBenchChange);
+  chkConsumo.addEventListener("change", onBenchChange);
+  chkImobiliario.addEventListener("change", onBenchChange);
+  chkIndustrial.addEventListener("change", onBenchChange);
+  chkFinanceiro.addEventListener("change", onBenchChange);
+  chkOuro.addEventListener("change", onBenchChange);
+  chkPetroleo.addEventListener("change", onBenchChange);
+  chkOOH.addEventListener("change", onBenchChange);
+  chkOOHGlobal.addEventListener("change", onBenchChange);
+
+  btnRecarregarGrafico.addEventListener("click", async () => {
+    if (!ativosSel.length) return;
+
+    const rk = periodoAtual?.rangeKey || (rangeBtns.find(b => b.classList.contains("ativo"))?.getAttribute("data-range") || "otimo");
+    await aplicarRange(rk);
+    renderGrafico();
+    setStatus("Gráfico atualizado.");
+  });
+
+  rangeBtns.forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const k = btn.getAttribute("data-range");
+      setRangeAtivo(k);
+      await aplicarRange(k);
+      renderGrafico();
+    });
+  });
+
+  async function selecionarAtivoPorId(id) {
+    setStatus("Carregando ativo...");
+    esconderSugestoes();
+
+    const data = await buscarDetalhe(id);
+    if (!data || !data.ok || !data.ativo) {
+      setStatus("Não consegui carregar o ativo.");
+      return;
+    }
+
+    const ativo = data.ativo;
+    const kpis = data.kpis_12m || null;
+
+    if (!ativoBase) {
+      ativoBase = ativo;
+      ativosSel = [ativo];
+
+      renderCabecalho(ativoBase);
+      renderTabelaPorTipo(ativoBase);
+      renderKpis12m(kpis);
+      mostrarDetalhe();
+
+      blocoComparacao.style.display = "block";
+      atualizarComparacaoUI();
+
+      btnComparar.style.display = "inline-flex";
+      btnPararComparar.style.display = "none";
+
+      input.value = (ativoBase.NomeAtivo || "").trim() || input.value;
+      setStatus("Ativo selecionado.");
+      setLimparVisivel(true);
+
+      const btnAtivo = rangeBtns.find(b => b.classList.contains("ativo"));
+      const rk = btnAtivo ? btnAtivo.getAttribute("data-range") : "1a";
+      setRangeAtivo(rk);
+
+      await aplicarRange(rk);
+
+      renderGrafico();
+      return;
+    }
+
+    const jaExiste = ativosSel.some(a => String(a.IDDimAtivos) === String(ativo.IDDimAtivos));
+    if (jaExiste) {
+      setStatus("Esse ativo já está no gráfico.");
+      return;
+    }
+
+    if (!modoAdicionar) {
+      ativoBase = ativo;
+      ativosSel = [ativo];
+
+      seriesById.clear();
+      serieIndicadoresFull = [];
+      serieIndicadoresView = [];
+      labelsFull = [];
+      labelsView = [];
+
+      renderCabecalho(ativoBase);
+      renderTabelaPorTipo(ativoBase);
+      renderKpis12m(kpis);
+      mostrarDetalhe();
+
+      atualizarComparacaoUI();
+
+      input.value = (ativoBase.NomeAtivo || "").trim() || input.value;
+      setStatus("Ativo base alterado.");
+      setLimparVisivel(true);
+
+      const btnAtivo = rangeBtns.find(b => b.classList.contains("ativo"));
+      const rk = btnAtivo ? btnAtivo.getAttribute("data-range") : (periodoAtual?.rangeKey || "1a");
+      setRangeAtivo(rk);
+
+      await aplicarRange(rk);
+
+      renderGrafico();
+      return;
+    }
+
+    if (ativosSel.length >= LIMITE_ATIVOS) {
+      setStatus(`Limite: até ${LIMITE_ATIVOS} ativos no gráfico.`);
+      return;
+    }
+
+    ativosSel.push(ativo);
+
+    input.value = (ativo.NomeAtivo || "").trim() || input.value;
+    setStatus("Ativo adicionado ao gráfico.");
+    setLimparVisivel(true);
+
+    const btnAtivo = rangeBtns.find(b => b.classList.contains("ativo"));
+    const rk = btnAtivo ? btnAtivo.getAttribute("data-range") : (periodoAtual?.rangeKey || "1a");
+    await aplicarRange(rk);
+
+    atualizarComparacaoUI();
+    renderGrafico();
+  }
+
+  input.addEventListener("input", () => {
+    const q = (input.value || "").trim();
+    setLimparVisivel(q.length > 0);
+
+    clearTimeout(timerSug);
+    if (q.length < 2) {
+      esconderSugestoes();
+      if (!ativoBase) setStatus("Digite 2 ou mais caracteres para buscar.");
+      else setStatus(modoAdicionar ? "Selecione outro ativo para adicionar." : "Ativo selecionado.");
+      return;
+    }
+
+    timerSug = setTimeout(async () => {
+      try {
+        itens = await buscarSugestoes(q);
+        selecionado = -1;
+        renderSugestoes();
+        setStatus(modoAdicionar ? `Adicionando: selecione um ativo para "${q}"` : `Sugestões para: "${q}"`);
+      } catch (e) {
+        esconderSugestoes();
+        setStatus("Falha ao buscar sugestões.");
+      }
+    }, 140);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (box.style.display !== "block") return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      selecionado = Math.min(selecionado + 1, itens.length - 1);
+      renderSugestoes();
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      selecionado = Math.max(selecionado - 1, 0);
+      renderSugestoes();
+    }
+
+    if (e.key === "Enter") {
+      if (selecionado >= 0 && itens[selecionado]) {
+        e.preventDefault();
+        const it = itens[selecionado];
+        selecionarAtivoPorId(it.id);
+      }
+    }
+
+    if (e.key === "Escape") esconderSugestoes();
+  });
+
+  lista.addEventListener("mousedown", (e) => {
+    const alvo = e.target.closest("[data-idx]");
+    if (!alvo) return;
+
+    const idx = parseInt(alvo.getAttribute("data-idx"), 10);
+    const it = itens[idx];
+    if (!it) return;
+
+    selecionarAtivoPorId(it.id);
+  });
+
+  btnLimpar.addEventListener("click", () => {
+    input.value = "";
+    esconderSugestoes();
+    setLimparVisivel(false);
+
+    esconderDetalhe();
+
+    setStatus("Digite 2 ou mais caracteres para buscar.");
+    input.focus();
+    history.replaceState(null, "", "{{ url_for('admin.ativos') }}");
+  });
+
+  btnComparar.addEventListener("click", () => {
+    if (!ativoBase) return;
+    if (ativosSel.length >= LIMITE_ATIVOS) {
+      setStatus(`Limite: até ${LIMITE_ATIVOS} ativos no gráfico.`);
+      return;
+    }
+    modoAdicionar = true;
+    atualizarComparacaoUI();
+    btnPararComparar.style.display = "inline-flex";
+    setStatus("Modo comparação: selecione outro ativo para adicionar.");
+    scrollTopoBusca();
+  });
+
+  btnPararComparar.addEventListener("click", () => {
+    modoAdicionar = false;
+    atualizarComparacaoUI();
+    btnPararComparar.style.display = "none";
+    setStatus("Modo comparação desligado.");
+  });
+
+  btnAddAtivo.addEventListener("click", () => {
+    if (!ativoBase) return;
+    if (ativosSel.length >= LIMITE_ATIVOS) {
+      setStatus(`Limite: até ${LIMITE_ATIVOS} ativos no gráfico.`);
+      return;
+    }
+    modoAdicionar = true;
+    atualizarComparacaoUI();
+    setStatus("Modo adicionar ligado: selecione um ativo para adicionar.");
+    scrollTopoBusca();
+  });
+
+  btnPararAdd.addEventListener("click", () => {
+    modoAdicionar = false;
+    atualizarComparacaoUI();
+    setStatus("Modo adicionar desligado.");
+  });
+
+  btnLimparComparacao.addEventListener("click", async () => {
+    if (!ativoBase) return;
+
+    ativosSel = [ativoBase];
+    seriesById.clear();
+
+    const btnAtivo = rangeBtns.find(b => b.classList.contains("ativo"));
+    const rk = btnAtivo ? btnAtivo.getAttribute("data-range") : (periodoAtual?.rangeKey || "1a");
+    setRangeAtivo(rk);
+
+    await aplicarRange(rk);
+
+    modoAdicionar = false;
+    atualizarComparacaoUI();
+    renderGrafico();
+    setStatus("Comparação removida (mantido apenas o ativo base).");
+  });
+
+  const qInicial = (input.value || "").trim();
+  if (qInicial.length >= 2) {
+    setLimparVisivel(true);
+    setStatus(`Digite para ver sugestões (atual: "${qInicial}")`);
+  } else {
+    setStatus("Digite 2 ou mais caracteres para buscar.");
+  }
+
+  if (!chkOcupacao.checked && !chkReceita.checked && !chkRentabilidade.checked) {
+    chkRentabilidade.checked = true;
+  }
+  graficoTituloTxt.textContent = getTituloMetrica();
+})();
+</script>
+
+
+
+{% endblock %}

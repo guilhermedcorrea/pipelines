@@ -1,0 +1,1547 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Empresa | {{ empresa.RazaoSocial }}{% endblock %}
+
+{% block content %}
+
+{% set segmentacao_safe = (segmentacao if segmentacao is defined and segmentacao else {}) %}
+
+{% set score_setor_val = segmentacao_safe.get('ScoreSetor') %}
+{% if score_setor_val is none and classificacao %}
+  {% set score_setor_val = classificacao.get('ScoreSetor') %}
+{% endif %}
+{% if score_setor_val is none %}
+  {% set score_setor_val = empresa.get('ScoreSetor') %}
+{% endif %}
+
+{% set classificacao_setor_txt = segmentacao_safe.get('ClassificacaoSetor') %}
+{% if not classificacao_setor_txt and classificacao %}
+  {% set classificacao_setor_txt = classificacao.get('ClassificacaoSetor') %}
+{% endif %}
+{% if not classificacao_setor_txt %}
+  {% set classificacao_setor_txt = empresa.get('ClassificacaoSetor') %}
+{% endif %}
+{% if not classificacao_setor_txt %}
+  {% set classificacao_setor_txt = empresa.get('ClassificacaoMacro') %}
+{% endif %}
+
+{% set grupo_empresa_txt = segmentacao_safe.get('GrupoEmpresa') %}
+{% if not grupo_empresa_txt and classificacao %}
+  {% set grupo_empresa_txt = classificacao.get('GrupoEmpresa') %}
+{% endif %}
+{% if not grupo_empresa_txt and classificacao %}
+  {% set grupo_empresa_txt = classificacao.get('ClusterGrupoCliente') %}
+{% endif %}
+
+{% set score_perfil_val = segmentacao_safe.get('ScorePerfil') %}
+{% if score_perfil_val is none and classificacao %}
+  {% set score_perfil_val = classificacao.get('ScorePerfil') %}
+{% endif %}
+{% if score_perfil_val is none and classificacao %}
+  {% set score_perfil_val = classificacao.get('ScorePerfilEmpresa') %}
+{% endif %}
+
+{% set classificacao_perfil_txt = segmentacao_safe.get('ClassificacaoPerfil') %}
+{% if not classificacao_perfil_txt and classificacao %}
+  {% set classificacao_perfil_txt = classificacao.get('ClassificacaoPerfil') %}
+{% endif %}
+{% if not classificacao_perfil_txt and classificacao %}
+  {% set classificacao_perfil_txt = classificacao.get('ClassificacaoPerfilEmpresa') %}
+{% endif %}
+
+{# =========================
+   Helpers
+   ========================= #}
+{% macro fmt_num(v, casas=2) -%}
+  {%- if v is none -%}
+    —
+  {%- else -%}
+    {%- set s = (v|string) -%}
+    {{ s }}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro fmt_bool(v) -%}
+  {%- if v in [1, True, '1', 'True', 'true', 'SIM', 'Sim', 'sim'] -%}
+    <span class="badge green">Sim</span>
+  {%- elif v in [0, False, '0', 'False', 'false', 'NAO', 'Não', 'Nao', 'não', 'nao'] -%}
+    <span class="badge gray">Não</span>
+  {%- else -%}
+    <span class="badge gray">n/d</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro badge_segmentacao(texto) -%}
+  {% set t = ((texto|string) if texto is not none else '')|trim %}
+  {% set tu = t|upper %}
+
+  {% if not t %}
+    <span class="seg-badge gray">Sem classificação</span>
+  {% elif 'MUITO ALTO' in tu %}
+    <span class="seg-badge green">{{ t }}</span>
+  {% elif 'ALTO RETORNO' in tu %}
+    <span class="seg-badge green">{{ t }}</span>
+  {% elif tu == 'ALTO' %}
+    <span class="seg-badge green">{{ t }}</span>
+  {% elif 'MÉDIO' in tu or 'MEDIO' in tu %}
+    <span class="seg-badge yellow">{{ t }}</span>
+  {% elif 'NEUTRO' in tu %}
+    <span class="seg-badge neutral">{{ t }}</span>
+  {% elif 'BAIXO RETORNO' in tu %}
+    <span class="seg-badge blue">{{ t }}</span>
+  {% elif 'BAIXO' in tu %}
+    <span class="seg-badge orange">{{ t }}</span>
+  {% elif 'SEM CLASSIFICA' in tu %}
+    <span class="seg-badge gray">{{ t }}</span>
+  {% else %}
+    <span class="seg-badge gray">{{ t }}</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro score_segmentacao(valor, tipo='perfil', classificacao='') -%}
+  {% set classe_txt = ((classificacao|string) if classificacao is not none else '')|trim|upper %}
+  {% set tem_valor = valor is not none and ((valor|string)|trim|length > 0) %}
+
+  {% if not tem_valor %}
+    <span class="score-chip gray">--</span>
+  {% else %}
+    {% set valor_exibicao = (valor|round(0)|int) if valor is number else valor %}
+
+    {% if 'MUITO ALTO' in classe_txt or 'ALTO RETORNO' in classe_txt or classe_txt == 'ALTO' %}
+      <span class="score-chip green">{{ valor_exibicao }}</span>
+    {% elif 'NEUTRO' in classe_txt or 'MÉDIO' in classe_txt or 'MEDIO' in classe_txt %}
+      <span class="score-chip blue">{{ valor_exibicao }}</span>
+    {% elif 'BAIXO' in classe_txt %}
+      <span class="score-chip orange">{{ valor_exibicao }}</span>
+    {% elif 'SEM CLASSIFICA' in classe_txt %}
+      <span class="score-chip gray">{{ valor_exibicao }}</span>
+    {% else %}
+      {% if tipo == 'setor' %}
+        {% if valor is number and valor >= 70 %}
+          <span class="score-chip green">{{ valor_exibicao }}</span>
+        {% elif valor is number and valor >= 50 %}
+          <span class="score-chip blue">{{ valor_exibicao }}</span>
+        {% else %}
+          <span class="score-chip orange">{{ valor_exibicao }}</span>
+        {% endif %}
+      {% else %}
+        {% if valor is number and valor >= 800 %}
+          <span class="score-chip green">{{ valor_exibicao }}</span>
+        {% elif valor is number and valor >= 500 %}
+          <span class="score-chip blue">{{ valor_exibicao }}</span>
+        {% else %}
+          <span class="score-chip orange">{{ valor_exibicao }}</span>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% endif %}
+{%- endmacro %}
+
+<style>
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(0,40,132,.18);
+    background: rgba(0,40,132,.06);
+    color: var(--euro-blue);
+    font-weight: 900;
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .badge.yellow{
+    border-color: rgba(255,179,0,.35);
+    background: rgba(255,179,0,.18);
+    color: #5b3a00;
+  }
+  .badge.gray{
+    border-color: rgba(100,116,139,.25);
+    background: rgba(100,116,139,.10);
+    color: #334155;
+  }
+  .badge.green{
+    border-color: rgba(34,197,94,.25);
+    background: rgba(34,197,94,.12);
+    color: #14532d;
+  }
+  .badge.red{
+    border-color: rgba(239,68,68,.25);
+    background: rgba(239,68,68,.12);
+    color: #7f1d1d;
+  }
+  .badge.blue{
+    border-color: rgba(59,130,246,.25);
+    background: rgba(59,130,246,.10);
+    color: #1e3a8a;
+  }
+
+  .badge.money{
+    border-color: rgba(16,185,129,.22);
+    background: rgba(16,185,129,.10);
+    color: #064e3b;
+  }
+
+  .sec{
+    margin-top: 14px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .sec-h{
+    padding: 12px 14px;
+    background: #F8FAFC;
+    border-bottom: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .sec-title{
+    font-weight: 1000;
+    color: var(--euro-blue);
+    font-size: 14px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .sec-b{
+    padding: 14px;
+  }
+
+  .grid2{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .grid3{
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .grid4{
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .grid5{
+    display:grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .kv{
+    border: 1px solid rgba(15,23,42,.08);
+    border-radius: 12px;
+    padding: 12px;
+    background: #fff;
+  }
+  .k{
+    font-size: 12px;
+    font-weight: 900;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .v{
+    font-size: 14px;
+    font-weight: 1000;
+    color: var(--text);
+    word-break: break-word;
+  }
+  .v.small{
+    font-size: 12px;
+    font-weight: 900;
+    color: var(--muted);
+    margin-top: 6px;
+    line-height: 1.35;
+  }
+
+  .logo-wrap{
+    width: 120px;
+    height: 72px;
+    border-radius: 14px;
+    border: 1px solid rgba(15,23,42,.10);
+    background: #fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    box-shadow: 0 1px 10px rgba(0,0,0,.08);
+  }
+  .logo-wrap img{
+    max-width: 92%;
+    max-height: 92%;
+    object-fit: contain;
+    display:block;
+  }
+  .logo-fallback{
+    width: 100%;
+    height: 100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size: 12px;
+    font-weight: 1000;
+    color: rgba(0,40,132,.85);
+    background: rgba(0,40,132,.06);
+  }
+
+  /* =========================
+     Segmentação
+     ========================= */
+  .segment-kv{
+    min-height: 118px;
+    display:flex;
+    flex-direction:column;
+    justify-content:flex-start;
+    align-items:flex-start;
+  }
+  .segment-kv .k{
+    margin-bottom: 10px;
+  }
+  .segment-valor{
+    min-height: 46px;
+    display:flex;
+    align-items:center;
+  }
+
+  .score-chip{
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-size: 18px;
+    font-weight: 1000;
+    line-height: 1;
+    background: #fff;
+    border: 2px solid rgba(148,163,184,.45);
+    color: #475569;
+    box-shadow: inset 0 0 0 3px rgba(255,255,255,.8);
+  }
+  .score-chip.green{
+    border-color: #22c55e;
+    color: #166534;
+    background: linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%);
+  }
+  .score-chip.blue{
+    border-color: #94a3b8;
+    color: #334155;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  }
+  .score-chip.orange{
+    border-color: #f59e0b;
+    color: #b45309;
+    background: linear-gradient(180deg, #ffffff 0%, #fffbeb 100%);
+  }
+  .score-chip.gray{
+    border-color: #cbd5e1;
+    color: #64748b;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  }
+
+  .seg-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    min-height: 30px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(148,163,184,.35);
+    background: #f8fafc;
+    color: #334155;
+    font-weight: 1000;
+    font-size: 12px;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .seg-badge.green{
+    border-color: rgba(16,185,129,.32);
+    background: rgba(16,185,129,.14);
+    color: #065f46;
+  }
+  .seg-badge.blue{
+    border-color: rgba(148,163,184,.35);
+    background: rgba(148,163,184,.12);
+    color: #334155;
+  }
+  .seg-badge.neutral{
+    border-color: rgba(148,163,184,.35);
+    background: rgba(148,163,184,.12);
+    color: #334155;
+  }
+  .seg-badge.yellow{
+    border-color: rgba(245,158,11,.28);
+    background: rgba(245,158,11,.12);
+    color: #92400e;
+  }
+  .seg-badge.orange{
+    border-color: rgba(249,115,22,.28);
+    background: rgba(249,115,22,.10);
+    color: #c2410c;
+  }
+  .seg-badge.gray{
+    border-color: rgba(148,163,184,.30);
+    background: rgba(148,163,184,.08);
+    color: #475569;
+  }
+
+  .segment-sub{
+    font-size: 12px;
+    font-weight: 900;
+    color: var(--muted);
+    margin-top: 8px;
+    line-height: 1.35;
+  }
+
+  /* TABELA CONTRATOS */
+  .tbl{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .tbl thead th{
+    text-align: left;
+    font-size: 12px;
+    letter-spacing: .2px;
+    color: var(--muted);
+    font-weight: 1000;
+    padding: 12px 12px;
+    border-bottom: 1px solid var(--border);
+    background: #F8FAFC;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    white-space: nowrap;
+  }
+  .tbl tbody td{
+    padding: 12px 12px;
+    border-bottom: 1px solid rgba(15,23,42,.06);
+    vertical-align: middle;
+    font-size: 13px;
+    font-weight: 900;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .tbl tbody tr:hover{
+    background: rgba(0,40,132,.04);
+  }
+
+  .muted-2{
+    color: var(--muted);
+    font-weight: 900;
+    font-size: 12px;
+  }
+
+  .scroll-x{
+    width: 100%;
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .btn-mini{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+    border: 1px solid rgba(15,23,42,.14);
+    background: #fff;
+    color: var(--euro-blue);
+    font-weight: 1000;
+    cursor: pointer;
+    user-select: none;
+  }
+  .btn-mini:hover{
+    background: rgba(0,40,132,.06);
+  }
+  .btn-mini:focus{
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(11,78,162,.14);
+  }
+
+  .row-details{
+    display:none;
+    background: rgba(2,6,23,.02);
+  }
+  .row-details td{
+    white-space: normal;
+    padding: 12px;
+  }
+
+  .subtbl{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid rgba(15,23,42,.10);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .subtbl thead th{
+    text-align:left;
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 1000;
+    padding: 10px 10px;
+    border-bottom: 1px solid rgba(15,23,42,.10);
+    background: #F8FAFC;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    white-space: nowrap;
+  }
+  .subtbl tbody td{
+    padding: 10px 10px;
+    border-bottom: 1px solid rgba(15,23,42,.06);
+    vertical-align: middle;
+    font-size: 12px;
+    font-weight: 900;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .subtbl tbody tr:hover{
+    background: rgba(0,40,132,.04);
+  }
+
+  .pager{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+  }
+  .pager-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .pager-right{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+  .pager a{
+    text-decoration:none;
+  }
+  .pager .btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(15,23,42,.14);
+    background: #fff;
+    color: var(--euro-blue);
+    font-weight: 1000;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .pager .btn:hover{
+    background: rgba(0,40,132,.06);
+  }
+  .pager .btn.disabled{
+    opacity: .45;
+    pointer-events: none;
+  }
+
+  @media (max-width: 1300px){
+    .grid5{ grid-template-columns: 1fr 1fr 1fr; }
+  }
+  @media (max-width: 1100px){
+    .grid4{ grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 900px){
+    .grid2{ grid-template-columns: 1fr; }
+    .grid3{ grid-template-columns: 1fr; }
+    .grid4{ grid-template-columns: 1fr; }
+    .grid5{ grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 640px){
+    .grid5{ grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="card" style="padding: 16px;">
+
+  <!-- CABEÇALHO -->
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div style="min-width:min(720px,100%);">
+      <h1 class="page-title" style="margin:0;">{{ empresa.RazaoSocial or "Empresa" }}</h1>
+      <div class="muted" style="font-weight:900;margin-top:6px;">
+        {{ empresa.NomeFantasia or "" }}
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+        {% if empresa.Setor %}
+          <span class="badge">{{ empresa.Setor }}</span>
+        {% else %}
+          <span class="badge gray">Sem Setor</span>
+        {% endif %}
+
+        {% if empresa.Porte %}
+          <span class="badge yellow">{{ empresa.Porte }}</span>
+        {% else %}
+          <span class="badge yellow">Porte n/d</span>
+        {% endif %}
+
+        {% if empresa.MatrizFilial %}
+          <span class="badge gray">{{ empresa.MatrizFilial }}</span>
+        {% else %}
+          <span class="badge gray">Matriz/Filial n/d</span>
+        {% endif %}
+
+        {% if cnpj14 %}
+          <span class="badge blue">CNPJ {{ cnpj14 }}</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+      <a class="btn btn-secondary" style="text-decoration:none;"
+         href="{{ url_for('Paineis.clientes_lista', page=1) }}">
+        ← Voltar
+      </a>
+    </div>
+  </div>
+
+  <!-- Segmentação -->
+  <div class="sec">
+    <div class="sec-h">
+      <div class="sec-title">Segmentação</div>
+      <div class="muted" style="font-weight:900;">Classificação comercial e perfil</div>
+    </div>
+    <div class="sec-b">
+      <div class="grid5">
+
+        <div class="kv segment-kv">
+          <div class="k">Score Setor</div>
+          <div class="segment-valor">
+            {{ score_segmentacao(score_setor_val, 'setor', classificacao_setor_txt) }}
+          </div>
+          <div class="segment-sub">
+            Valor calculado para o setor/CNAE da empresa.
+          </div>
+        </div>
+
+        <div class="kv segment-kv">
+          <div class="k">Classificação Setor</div>
+          <div class="segment-valor">
+            {{ badge_segmentacao(classificacao_setor_txt) }}
+          </div>
+          <div class="segment-sub">
+            Faixa qualitativa do score setorial.
+          </div>
+        </div>
+
+        <div class="kv segment-kv">
+          <div class="k">Grupo Empresa</div>
+          <div class="segment-valor">
+            {{ badge_segmentacao(grupo_empresa_txt) }}
+          </div>
+          <div class="segment-sub">
+            Grupo de retorno da empresa dentro do cluster.
+          </div>
+        </div>
+
+        <div class="kv segment-kv">
+          <div class="k">Score Perfil</div>
+          <div class="segment-valor">
+            {{ score_segmentacao(score_perfil_val, 'perfil', classificacao_perfil_txt) }}
+          </div>
+          <div class="segment-sub">
+            Score técnico/comercial do perfil da empresa.
+          </div>
+        </div>
+
+        <div class="kv segment-kv">
+          <div class="k">Classificação Perfil</div>
+          <div class="segment-valor">
+            {{ badge_segmentacao(classificacao_perfil_txt) }}
+          </div>
+          <div class="segment-sub">
+            Leitura qualitativa do score de perfil.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Identificação -->
+  <div class="sec">
+    <div class="sec-h">
+      <div class="sec-title">Identificação</div>
+      <div class="muted" style="font-weight:900;">ID {{ empresa.IDDimClientesEuromidia }}</div>
+    </div>
+    <div class="sec-b">
+      <div class="grid3">
+        <div class="kv">
+          <div class="k">CNPJ</div>
+          <div class="v">{{ empresa.CNPJ or "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Razão Social</div>
+          <div class="v">{{ empresa.RazaoSocial or "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Nome Fantasia</div>
+          <div class="v">{{ empresa.NomeFantasia or "" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Endereço -->
+  <div class="sec">
+    <div class="sec-h">
+      <div class="sec-title">Endereço</div>
+    </div>
+    <div class="sec-b">
+      <div class="grid2">
+        <div class="kv">
+          <div class="k">Logradouro</div>
+          <div class="v">
+            {{ empresa.TipoLogradouro or "" }} {{ empresa.Logradouro or "" }}{% if empresa.Numero %}, {{ empresa.Numero }}{% endif %}
+          </div>
+        </div>
+        <div class="kv">
+          <div class="k">Bairro / Complemento</div>
+          <div class="v">{{ empresa.Bairro or "" }}{% if empresa.Complemento %} — {{ empresa.Complemento }}{% endif %}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Município / UF</div>
+          <div class="v">{{ empresa.Municipio or "" }} / {{ empresa.UF or "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">CEP</div>
+          <div class="v">{{ empresa.CEP or "" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CNAE -->
+  <div class="sec">
+    <div class="sec-h">
+      <div class="sec-title">Atividade (CNAE)</div>
+    </div>
+    <div class="sec-b">
+      <div class="grid2">
+        <div class="kv">
+          <div class="k">CNAE</div>
+          <div class="v">{{ empresa.CNAE or "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Descrição CNAE</div>
+          <div class="v">{{ empresa.DescricaoCnae or "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Setor</div>
+          <div class="v">{{ empresa.Setor or "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Capital Social</div>
+          <div class="v">{{ empresa.CapitalSocial if empresa.CapitalSocial is not none else "" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Datas -->
+  <div class="sec">
+    <div class="sec-h">
+      <div class="sec-title">Datas</div>
+    </div>
+    <div class="sec-b">
+      <div class="grid2">
+        <div class="kv">
+          <div class="k">Início de Atividade</div>
+          <div class="v">{{ empresa.DataInicioAtividade if empresa.DataInicioAtividade is not none else "" }}</div>
+        </div>
+        <div class="kv">
+          <div class="k">Situação Cadastral (Data)</div>
+          <div class="v">{{ empresa.DataSituacaoCadastral if empresa.DataSituacaoCadastral is not none else "" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if classificacao %}
+  <div class="sec">
+    <div class="sec-h">
+      <div class="sec-title">
+        Classificações do Cliente
+        <span class="badge green">Encontrado</span>
+      </div>
+      <div class="muted" style="font-weight:900;">
+        IDEmpresa {{ classificacao.IDEmpresa if classificacao.IDEmpresa is not none else (empresa.IDDimClientesEuromidia if empresa.IDDimClientesEuromidia is not none else "") }}
+      </div>
+    </div>
+
+    <div class="sec-b">
+
+      <div class="grid4">
+        <div class="kv">
+          <div class="k">Receita Total (R$)</div>
+          <div class="v">{{ classificacao.ReceitaTotal if classificacao.ReceitaTotal is not none else "—" }}</div>
+          <div class="v small">Perc. Receita Acumulada: {{ classificacao.PercReceitaAcumulada if classificacao.PercReceitaAcumulada is not none else "—" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Classe Valor</div>
+          <div class="v">
+            {% if classificacao.ClasseValor %}
+              <span class="badge blue">{{ classificacao.ClasseValor }}</span>
+            {% else %}
+              <span class="badge gray">n/d</span>
+            {% endif %}
+          </div>
+          <div class="v small">{{ classificacao.DescricaoClasseValor or "" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Escala Operacional</div>
+          <div class="v">
+            {% if classificacao.TipoEscalaOperacional %}
+              <span class="badge">{{ classificacao.TipoEscalaOperacional }}</span>
+            {% else %}
+              <span class="badge gray">n/d</span>
+            {% endif %}
+          </div>
+          <div class="v small">{{ classificacao.DescricaoTipoEscalaOperacional or "" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Potencial</div>
+          <div class="v">
+            {% if classificacao.ClassePotencial %}
+              <span class="badge yellow">{{ classificacao.ClassePotencial }}</span>
+            {% else %}
+              <span class="badge gray">n/d</span>
+            {% endif %}
+          </div>
+          <div class="v small">Geografia: {{ classificacao.ClasseGeo or "—" }}</div>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="grid2">
+
+        <div class="kv">
+          <div class="k">Recência / Última Compra</div>
+          <div class="v">
+            Data Última Compra:
+            {{ classificacao.DataUltimaCompra if classificacao.DataUltimaCompra is not none else "—" }}
+          </div>
+          <div class="v small">
+            Dias desde última compra:
+            {{ classificacao.DiasDesdeUltimaCompra if classificacao.DiasDesdeUltimaCompra is not none else "—" }}
+            |
+            Valor última compra:
+            {{ classificacao.ValorUltimaCompra if classificacao.ValorUltimaCompra is not none else "—" }}
+          </div>
+          <div class="v small">
+            Receita 12M:
+            {{ classificacao.Receita12M if classificacao.Receita12M is not none else "—" }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Importância / Score</div>
+          <div class="v">
+            Tier Importância:
+            {% if classificacao.TierImportancia %}
+              <span class="badge blue">{{ classificacao.TierImportancia }}</span>
+            {% else %}
+              <span class="badge gray">n/d</span>
+            {% endif %}
+          </div>
+          <div class="v small">
+            Score Importância:
+            {{ classificacao.ScoreImportancia if classificacao.ScoreImportancia is not none else "—" }}
+          </div>
+          <div class="v small">
+            Origem:
+            {{ classificacao.Origem if classificacao.Origem is not none else "—" }}
+            |
+            Compra outras empresas:
+            {{ fmt_bool(classificacao.BitCompraOutrasEmpresas if classificacao.BitCompraOutrasEmpresas is not none else classificacao.BitComprasOutrasEmpresas) }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Perfil Público Alvo</div>
+          <div class="v">
+            {{ (classificacao.TipoUsoTerritorio | default('') | trim) if classificacao else '—' }}
+          </div>
+          <div class="v small">
+            Classe Social Alvo:
+            {{ classificacao.ClasseSocialAlvo if classificacao.ClasseSocialAlvo is not none else "—" }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Nível Premium</div>
+          <div class="v">
+            {% if classificacao.NivelPremium is not none and (classificacao.NivelPremium|string)|length > 0 %}
+              <span class="badge yellow">{{ classificacao.NivelPremium }}</span>
+            {% else %}
+              <span class="badge gray">n/d</span>
+            {% endif %}
+          </div>
+          <div class="v small">
+            ID Lead:
+            {{ classificacao.IDLead if classificacao.IDLead is not none else "—" }}
+            |
+            ID Cluster:
+            {{ classificacao.IDCluster if classificacao.IDCluster is not none else "—" }}
+          </div>
+        </div>
+
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="grid2">
+
+        <div class="kv">
+          <div class="k">Indicadores de Volume</div>
+          <div class="v">
+            Contratos: {{ classificacao.QtdContratos if classificacao.QtdContratos is not none else "—" }} |
+            Pontos: {{ classificacao.QtdPontos if classificacao.QtdPontos is not none else "—" }} |
+            Faces: {{ classificacao.QtdFaces if classificacao.QtdFaces is not none else "—" }}
+          </div>
+          <div class="v small">
+            Total Cotas Compradas: {{ classificacao.TotalCotasCompradas if classificacao.TotalCotasCompradas is not none else "—" }} |
+            Tempo Total Exibição: {{ classificacao.TempoTotalExibicao if classificacao.TempoTotalExibicao is not none else "—" }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Estrutura do Cliente</div>
+          <div class="v">
+            Porte: {{ classificacao.Porte or "—" }} |
+            Capital Social: {{ classificacao.CapitalSocial if classificacao.CapitalSocial is not none else "—" }}
+          </div>
+          <div class="v small">
+            Classe Estrutural: {{ classificacao.ClasseEstrutural or "—" }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">CNAE (da Classificação)</div>
+          <div class="v">
+            CNAE: {{ classificacao.CNAE if classificacao.CNAE is not none else "—" }}
+          </div>
+          <div class="v small">
+            {{ classificacao.DescricaoCNAE or "" }}
+          </div>
+          <div class="v small">
+            Classe CNAE: {{ classificacao.ClasseCNAE or "—" }} |
+            Setor CNAE: {{ classificacao.SetorCNAE or "—" }} |
+            MacroSetor: {{ classificacao.MacroSetorCNAE or "—" }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Atributos do Segmento</div>
+          <div class="v">
+            Depende Crédito: {{ fmt_bool(classificacao.DependeCredito) }} &nbsp;
+            Consumo Discr.: {{ fmt_bool(classificacao.ConsumoDiscricionario) }} &nbsp;
+            Insumo Import.: {{ fmt_bool(classificacao.InsumoImportado) }}
+          </div>
+          <div class="v small">
+            Exportador: {{ fmt_bool(classificacao.Exportador) }} &nbsp;
+            Repasse Preço: {{ fmt_bool(classificacao.PoderRepassePreco) }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Geografia (base classificação)</div>
+          <div class="v">
+            Classe Geo: {{ classificacao.ClasseGeo or "—" }}
+          </div>
+          <div class="v small">
+            Cidades Cliente: {{ classificacao.QtdCidadesCliente if classificacao.QtdCidadesCliente is not none else "—" }} |
+            UF Cliente: {{ classificacao.QtdUFCliente if classificacao.QtdUFCliente is not none else "—" }}
+          </div>
+          <div class="v small">
+            Cidades Painel: {{ classificacao.QtdCidadesPainel if classificacao.QtdCidadesPainel is not none else "—" }} |
+            CEPs Painel: {{ classificacao.QtdCEPPainel if classificacao.QtdCEPPainel is not none else "—" }}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Aderência geográfica (itens)</div>
+          <div class="v">
+            Itens na mesma cidade: {{ classificacao.ItensMesmaCidade if classificacao.ItensMesmaCidade is not none else "—" }} |
+            Total Itens: {{ classificacao.TotalItens if classificacao.TotalItens is not none else "—" }}
+          </div>
+          <div class="v small">
+            Perc. Itens mesma cidade: {{ classificacao.PercItensMesmaCidade if classificacao.PercItensMesmaCidade is not none else "—" }}
+          </div>
+        </div>
+
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="sec" style="margin-top:0;">
+        <div class="sec-h">
+          <div class="sec-title">Todas as informações</div>
+        </div>
+        <div class="sec-b">
+          <div class="grid4">
+
+            <div class="kv">
+              <div class="k">CNPJ</div>
+              <div class="v">{{ classificacao.CNPJ or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">IDEmpresa</div>
+              <div class="v">{{ classificacao.IDEmpresa if classificacao.IDEmpresa is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">RazaoSocial</div>
+              <div class="v">{{ classificacao.RazaoSocial or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClasseValor</div>
+              <div class="v">{{ classificacao.ClasseValor or "—" }}</div>
+              <div class="v small">{{ classificacao.DescricaoClasseValor or "" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">DescricaoClasseValor</div>
+              <div class="v">{{ classificacao.DescricaoClasseValor or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdContratos</div>
+              <div class="v">{{ classificacao.QtdContratos if classificacao.QtdContratos is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdPontos</div>
+              <div class="v">{{ classificacao.QtdPontos if classificacao.QtdPontos is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdFaces</div>
+              <div class="v">{{ classificacao.QtdFaces if classificacao.QtdFaces is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">TotalCotasCompradas</div>
+              <div class="v">{{ classificacao.TotalCotasCompradas if classificacao.TotalCotasCompradas is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">TempoTotalExibicao</div>
+              <div class="v">{{ classificacao.TempoTotalExibicao if classificacao.TempoTotalExibicao is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">TipoEscalaOperacional</div>
+              <div class="v">{{ classificacao.TipoEscalaOperacional or "—" }}</div>
+              <div class="v small">{{ classificacao.DescricaoTipoEscalaOperacional or "" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">DescricaoTipoEscalaOperacional</div>
+              <div class="v">{{ classificacao.DescricaoTipoEscalaOperacional or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">CNAE</div>
+              <div class="v">{{ classificacao.CNAE if classificacao.CNAE is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">Porte</div>
+              <div class="v">{{ classificacao.Porte or "—" }}</div>
+            </div>
+
+            <div class="kv" style="grid-column: 1 / -1;">
+              <div class="k">DescricaoCNAE</div>
+              <div class="v">{{ classificacao.DescricaoCNAE or "" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClasseCNAE</div>
+              <div class="v">{{ classificacao.ClasseCNAE or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">SetorCNAE</div>
+              <div class="v">{{ classificacao.SetorCNAE or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">MacroSetorCNAE</div>
+              <div class="v">{{ classificacao.MacroSetorCNAE or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">DependeCredito</div>
+              <div class="v">{{ fmt_bool(classificacao.DependeCredito) }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ConsumoDiscricionario</div>
+              <div class="v">{{ fmt_bool(classificacao.ConsumoDiscricionario) }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">InsumoImportado</div>
+              <div class="v">{{ fmt_bool(classificacao.InsumoImportado) }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">Exportador</div>
+              <div class="v">{{ fmt_bool(classificacao.Exportador) }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">PoderRepassePreco</div>
+              <div class="v">{{ fmt_bool(classificacao.PoderRepassePreco) }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">CapitalSocial</div>
+              <div class="v">{{ classificacao.CapitalSocial if classificacao.CapitalSocial is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClasseEstrutural</div>
+              <div class="v">{{ classificacao.ClasseEstrutural or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdCidadesCliente</div>
+              <div class="v">{{ classificacao.QtdCidadesCliente if classificacao.QtdCidadesCliente is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdUFCliente</div>
+              <div class="v">{{ classificacao.QtdUFCliente if classificacao.QtdUFCliente is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdCidadesPainel</div>
+              <div class="v">{{ classificacao.QtdCidadesPainel if classificacao.QtdCidadesPainel is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">QtdCEPPainel</div>
+              <div class="v">{{ classificacao.QtdCEPPainel if classificacao.QtdCEPPainel is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ItensMesmaCidade</div>
+              <div class="v">{{ classificacao.ItensMesmaCidade if classificacao.ItensMesmaCidade is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">TotalItens</div>
+              <div class="v">{{ classificacao.TotalItens if classificacao.TotalItens is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">PercItensMesmaCidade</div>
+              <div class="v">{{ classificacao.PercItensMesmaCidade if classificacao.PercItensMesmaCidade is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClasseGeo</div>
+              <div class="v">{{ classificacao.ClasseGeo or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClassePotencial</div>
+              <div class="v">{{ classificacao.ClassePotencial or "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ReceitaTotal</div>
+              <div class="v">{{ classificacao.ReceitaTotal if classificacao.ReceitaTotal is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">PercReceitaAcumulada</div>
+              <div class="v">{{ classificacao.PercReceitaAcumulada if classificacao.PercReceitaAcumulada is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">DataUltimaCompra</div>
+              <div class="v">{{ classificacao.DataUltimaCompra if classificacao.DataUltimaCompra is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">DiasDesdeUltimaCompra</div>
+              <div class="v">{{ classificacao.DiasDesdeUltimaCompra if classificacao.DiasDesdeUltimaCompra is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ValorUltimaCompra</div>
+              <div class="v">{{ classificacao.ValorUltimaCompra if classificacao.ValorUltimaCompra is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">Receita12M</div>
+              <div class="v">{{ classificacao.Receita12M if classificacao.Receita12M is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">TierImportancia</div>
+              <div class="v">{{ classificacao.TierImportancia if classificacao.TierImportancia is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ScoreImportancia</div>
+              <div class="v">{{ classificacao.ScoreImportancia if classificacao.ScoreImportancia is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">PerfilPublicoAlvo</div>
+              <div class="v">{{ classificacao.PerfilPublicoAlvo if classificacao.PerfilPublicoAlvo is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClasseSocialAlvo</div>
+              <div class="v">{{ classificacao.ClasseSocialAlvo if classificacao.ClasseSocialAlvo is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">NivelPremium</div>
+              <div class="v">{{ classificacao.NivelPremium if classificacao.NivelPremium is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">Origem</div>
+              <div class="v">{{ classificacao.Origem if classificacao.Origem is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">BitCompraOutrasEmpresas</div>
+              <div class="v">
+                {{ fmt_bool(classificacao.BitCompraOutrasEmpresas if classificacao.BitCompraOutrasEmpresas is not none else classificacao.BitComprasOutrasEmpresas) }}
+              </div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ScoreSetor</div>
+              <div class="v">{{ classificacao.ScoreSetor if classificacao.ScoreSetor is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClassificacaoSetor</div>
+              <div class="v">{{ classificacao.ClassificacaoSetor if classificacao.ClassificacaoSetor is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClusterGrupoCliente</div>
+              <div class="v">{{ classificacao.ClusterGrupoCliente if classificacao.ClusterGrupoCliente is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ScorePerfilEmpresa</div>
+              <div class="v">{{ classificacao.ScorePerfilEmpresa if classificacao.ScorePerfilEmpresa is not none else "—" }}</div>
+            </div>
+
+            <div class="kv">
+              <div class="k">ClassificacaoPerfilEmpresa</div>
+              <div class="v">{{ classificacao.ClassificacaoPerfilEmpresa if classificacao.ClassificacaoPerfilEmpresa is not none else "—" }}</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="sec" id="sec-contratos">
+    <div class="sec-h">
+      <div class="sec-title">
+        Contratos do Cliente
+
+        {% if valor_total_contratos_cliente is not none %}
+          <span class="badge money">Total Cliente (R$): {{ valor_total_contratos_cliente }}</span>
+        {% endif %}
+
+        {% if contratos_itens and contratos_itens|length > 0 %}
+          <span class="badge green">{{ contratos_itens|length }} itens (página)</span>
+        {% else %}
+          <span class="badge gray">0 itens (página)</span>
+        {% endif %}
+
+        {% if contratos_cab and contratos_cab|length > 0 %}
+          <span class="badge blue">{{ contratos_cab|length }} contratos (página)</span>
+        {% else %}
+          <span class="badge gray">0 contratos</span>
+        {% endif %}
+
+        {% if contratos_paginacao and contratos_paginacao.total is not none %}
+          <span class="badge yellow">{{ contratos_paginacao.total }} total</span>
+        {% endif %}
+      </div>
+
+      {% if contratos_paginacao %}
+        <div class="muted" style="font-weight:900;">
+          Exibindo {{ contratos_paginacao.inicio }}–{{ contratos_paginacao.fim }} de {{ contratos_paginacao.total }}
+          • Página {{ contratos_paginacao.page }} / {{ contratos_paginacao.total_pages }}
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="sec-b">
+
+      {% if contratos_cab and contratos_cab|length > 0 %}
+        <div class="scroll-x">
+          <table class="tbl" id="tbl-contratos-cab">
+            <thead>
+              <tr>
+                <th style="width:44px;">&nbsp;</th>
+                <th>Data</th>
+                <th>Contrato</th>
+                <th>Prévia</th>
+                <th>Marca</th>
+                <th>Vendedor</th>
+                <th>Tipo Doc</th>
+                <th>Origem</th>
+                <th>Qtd Pontos</th>
+                <th>Qtd Faces</th>
+                <th>Permuta (%)</th>
+                <th>Total Líq (Acordo)</th>
+                <th>ID Contrato</th>
+              </tr>
+            </thead>
+            <tbody>
+
+              {% for cab in contratos_cab %}
+                {% set idc = cab.IDFatoControleContratosEuromidia %}
+
+                <tr class="row-cab" data-contrato-id="{{ idc }}">
+                  <td>
+                    <button
+                      type="button"
+                      class="btn-mini js-toggle"
+                      data-target="det-{{ idc }}"
+                      aria-expanded="false"
+                      title="Expandir/Retrair itens"
+                    >+</button>
+                  </td>
+
+                  <td>{{ cab.DataLancamento if cab.DataLancamento is not none else "" }}</td>
+                  <td style="font-weight:1000;">{{ cab.NumeroContrato or "" }}</td>
+                  <td>{{ cab.NumeroPrevia or "" }}</td>
+                  <td>{{ cab.MarcaExibida or "" }}</td>
+                  <td>{{ cab.Vendedor or "" }}</td>
+                  <td>{{ cab.TipoDocumento or "" }}</td>
+                  <td>{{ cab.Origem or "" }}</td>
+                  <td>{{ cab.QuantidadePontos if cab.QuantidadePontos is not none else "" }}</td>
+                  <td>{{ cab.QuantidadeFaces if cab.QuantidadeFaces is not none else "" }}</td>
+                  <td>{{ cab.TotalPercentualPermuta if cab.TotalPercentualPermuta is not none else "" }}</td>
+                  <td>{{ cab.TotalLiquidoContratoAGBRCTACORDO if cab.TotalLiquidoContratoAGBRCTACORDO is not none else "" }}</td>
+                  <td class="muted-2">{{ idc if idc is not none else "" }}</td>
+                </tr>
+
+                <tr id="det-{{ idc }}" class="row-details" data-contrato-id="{{ idc }}">
+                  <td colspan="13">
+
+                    {% set itens = (contratos_itens_por_contrato[idc] if contratos_itens_por_contrato and (idc in contratos_itens_por_contrato) else []) %}
+
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                      <div class="sec-title" style="margin:0;">
+                        Itens do contrato {{ cab.NumeroContrato or "" }}
+                        {% if itens and itens|length > 0 %}
+                          <span class="badge green">{{ itens|length }} itens</span>
+                        {% else %}
+                          <span class="badge gray">0 itens</span>
+                        {% endif %}
+                      </div>
+                      <div class="muted-2">
+                        IDRef: {{ idc }}
+                      </div>
+                    </div>
+
+                    {% if itens and itens|length > 0 %}
+                      <div class="scroll-x" style="max-height: 360px; overflow:auto; border-radius:12px;">
+                        <table class="subtbl">
+                          <thead>
+                            <tr>
+                              <th>Status</th>
+                              <th>CodPonto</th>
+                              <th>CodFace</th>
+                              <th>Cota</th>
+                              <th>Cidade</th>
+                              <th>Tipo</th>
+                              <th>Início</th>
+                              <th>Término</th>
+                              <th>Dias</th>
+                              <th>Permuta (%)</th>
+                              <th>Total Líq (Acordo)</th>
+                              <th>Fatur. Líq Final Mensal</th>
+                              <th>ID Item</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {% for it in itens %}
+                              {% set sc = (it.StatusCalculado or '')|trim|upper %}
+
+                              <tr>
+                                <td>
+                                  {% if sc == 'ATIVO' %}
+                                    <span class="badge green">ATIVO</span>
+                                  {% elif sc == 'CONCLUIDO' %}
+                                    <span class="badge blue">CONCLUIDO</span>
+                                  {% else %}
+                                    <span class="badge red">INATIVO</span>
+                                  {% endif %}
+                                </td>
+                                <td>{{ it.CodPonto if it.CodPonto is not none else "" }}</td>
+                                <td>{{ it.CodFace or "" }}</td>
+                                <td>{{ it.Cota if it.Cota is not none else "" }}</td>
+                                <td>{{ it.CidadeExibicao or "" }}</td>
+                                <td>{{ it.Tipo or "" }}</td>
+                                <td>{{ it.DataInicioPrevisto if it.DataInicioPrevisto is not none else "" }}</td>
+                                <td>{{ it.DataTerminoPrevisto if it.DataTerminoPrevisto is not none else "" }}</td>
+                                <td>{{ it.TexmpoExposicao if it.TexmpoExposicao is not none else "" }}</td>
+                                <td>{{ it.PercentualPermuta if it.PercentualPermuta is not none else "" }}</td>
+                                <td>{{ it.TotalLiquidoContratoAGBRCTACORDO if it.TotalLiquidoContratoAGBRCTACORDO is not none else "" }}</td>
+                                <td>{{ it.FaturamentoLiquidoFinalMensal if it.FaturamentoLiquidoFinalMensal is not none else "" }}</td>
+                                <td class="muted-2">{{ it.IDFatoControleContratosItensEuromidia if it.IDFatoControleContratosItensEuromidia is not none else "" }}</td>
+                              </tr>
+                            {% endfor %}
+                          </tbody>
+                        </table>
+                      </div>
+                    {% else %}
+                      <div class="muted-2">Sem itens para este contrato.</div>
+                    {% endif %}
+
+                  </td>
+                </tr>
+
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        {% set pag = contratos_paginacao %}
+        {% if pag %}
+          {% set page = pag.page %}
+          {% set total_pages = pag.total_pages %}
+
+          <div class="pager">
+            <div class="pager-left">
+              <span class="muted-2">
+                Exibindo {{ pag.inicio }}–{{ pag.fim }} de {{ pag.total }} • Página {{ page }} / {{ total_pages }}
+              </span>
+            </div>
+
+            <div class="pager-right">
+              {% if page > 1 %}
+                <a
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=1, _anchor='sec-contratos') }}"
+                  class="btn js-pager-link"
+                >« Primeiro</a>
+              {% else %}
+                <span class="btn disabled">« Primeiro</span>
+              {% endif %}
+
+              {% if page > 1 %}
+                <a
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=page-1, _anchor='sec-contratos') }}"
+                  class="btn js-pager-link"
+                >‹ Anterior</a>
+              {% else %}
+                <span class="btn disabled">‹ Anterior</span>
+              {% endif %}
+
+              {% if page < total_pages %}
+                <a
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=page+1, _anchor='sec-contratos') }}"
+                  class="btn js-pager-link"
+                >Próximo ›</a>
+              {% else %}
+                <span class="btn disabled">Próximo ›</span>
+              {% endif %}
+
+              {% if page < total_pages %}
+                <a
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=total_pages, _anchor='sec-contratos') }}"
+                  class="btn js-pager-link"
+                >Último »</a>
+              {% else %}
+                <span class="btn disabled">Último »</span>
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+
+      {% else %}
+        <div class="muted-2">Sem contratos para este cliente.</div>
+      {% endif %}
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  (function(){
+    function toggleDetalhe(btn){
+      var targetId = btn.getAttribute("data-target");
+      if(!targetId) return;
+      var row = document.getElementById(targetId);
+      if(!row) return;
+
+      var expanded = btn.getAttribute("aria-expanded") === "true";
+
+      if(expanded){
+        row.style.display = "none";
+        btn.textContent = "+";
+        btn.setAttribute("aria-expanded", "false");
+      } else {
+        row.style.display = "table-row";
+        btn.textContent = "−";
+        btn.setAttribute("aria-expanded", "true");
+      }
+    }
+
+    document.addEventListener("click", function(e){
+      var btn = e.target && e.target.closest ? e.target.closest(".js-toggle") : null;
+      if(!btn) return;
+      e.preventDefault();
+      toggleDetalhe(btn);
+    });
+  })();
+</script>
+
+{% endblock %}

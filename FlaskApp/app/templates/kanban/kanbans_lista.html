@@ -1,0 +1,96 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Kanbans | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0;">Kanbans</h2>
+      <div style="opacity:.75;margin-top:4px;">Crie e gerencie seus quadros.</div>
+    </div>
+    <button class="btn btn-primary" id="btnNovoKanban">+ Novo Kanban</button>
+  </div>
+
+  <hr style="opacity:.12;margin:14px 0;">
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+    {% for k in kanbans %}
+      <a href="{{ url_for('kanban.kanban_view', id_kanban=k.IDDimKanban) }}"
+         class="card"
+         style="text-decoration:none;color:inherit;border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:14px;">
+        <div style="font-weight:700;">{{ k.NomeKanban }}</div>
+        <div style="opacity:.72;font-size:13px;margin-top:6px;min-height:38px;">
+          {{ k.Descricao or "—" }}
+        </div>
+        <div style="opacity:.55;font-size:12px;margin-top:10px;">
+          Criado em: {{ k.CriadoEm }}
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Token CSRF pro fetch -->
+<meta name="csrf-token" content="{{ csrf_token() }}">
+
+<!-- Modal simples -->
+<div id="modalNovoKanban" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;">
+  <div style="max-width:560px;margin:8vh auto;background:#fff;border-radius:16px;padding:16px;box-shadow:0 20px 70px rgba(0,0,0,.25);">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-weight:800;">Criar Kanban</div>
+      <button class="btn" id="btnFecharModal">Fechar</button>
+    </div>
+    <div style="margin-top:12px;display:grid;gap:10px;">
+      <input id="nomeKanban" class="input" placeholder="Nome do Kanban (ex: Comercial)" />
+      <textarea id="descKanban" class="input" rows="4" placeholder="Descrição (opcional)"></textarea>
+      <button class="btn btn-primary" id="btnSalvarKanban">Salvar</button>
+      <div id="msgKanban" style="color:#b91c1c;display:none;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const modal = document.getElementById("modalNovoKanban");
+  const btnNovo = document.getElementById("btnNovoKanban");
+  const btnFechar = document.getElementById("btnFecharModal");
+  const btnSalvar = document.getElementById("btnSalvarKanban");
+  const msg = document.getElementById("msgKanban");
+
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+
+  btnNovo.addEventListener("click", () => { modal.style.display = "block"; msg.style.display="none"; });
+  btnFechar.addEventListener("click", () => modal.style.display = "none");
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.style.display = "none"; });
+
+  btnSalvar.addEventListener("click", async () => {
+    const nome = (document.getElementById("nomeKanban").value || "").trim();
+    const descricao = (document.getElementById("descKanban").value || "").trim();
+
+    msg.style.display = "none";
+
+    const r = await fetch("{{ url_for('kanban.api_kanban_criar') }}", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrf
+      },
+      body: JSON.stringify({ nome, descricao })
+    });
+
+    let j = null;
+    try { j = await r.json(); } catch (e) {}
+
+    if (!r.ok || !j || !j.ok) {
+      const erro = (j && (j.msg || j.erro)) || `Erro ao criar kanban (HTTP ${r.status})`;
+      msg.textContent = erro;
+      msg.style.display = "block";
+      return;
+    }
+
+    window.location.href = "/kanban/" + j.IDDimKanban;
+  });
+})();
+</script>
+{% endblock %}

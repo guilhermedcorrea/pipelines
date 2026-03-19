@@ -1,0 +1,1542 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Checkout | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+
+  <!-- ✅ CSRF para AJAX -->
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+
+  <style>
+    :root{
+      --ck-bg: #f6f8fb;
+      --ck-card: #ffffff;
+      --ck-border: var(--border);
+      --ck-text: var(--text);
+      --ck-muted: var(--muted);
+      --ck-blue: var(--euro-blue);
+      --ck-yellow: var(--euro-yellow);
+      --ck-danger: #dc2626;
+      --ck-success: #16a34a;
+      --ck-shadow: 0 16px 42px rgba(2, 6, 23, .08);
+      --ck-radius: 16px;
+    }
+
+    .ck-page{
+      display:grid;
+      grid-template-columns: 1fr 380px;
+      gap: 16px;
+      align-items:start;
+    }
+
+    .ck-topbar{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap: 12px;
+      flex-wrap:wrap;
+      margin-bottom: 10px;
+    }
+
+    .ck-title{
+      display:flex;
+      flex-direction:column;
+      gap: 6px;
+    }
+
+    .ck-title h1{
+      margin:0;
+      font-size: 22px;
+      font-weight: 1100;
+      color: var(--ck-text);
+      letter-spacing:.2px;
+    }
+
+    .ck-sub{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      flex-wrap:wrap;
+      font-weight: 900;
+      color: var(--ck-muted);
+      font-size: 12px;
+    }
+
+    .ck-pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--ck-border);
+      background: #fff;
+      font-weight: 1000;
+      font-size: 12px;
+      color: #0b1a3a;
+      box-shadow: 0 10px 24px rgba(2,6,23,.06);
+      user-select:none;
+      white-space:nowrap;
+    }
+
+    .ck-pill .dot{
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--ck-blue);
+      opacity:.9;
+      box-shadow: 0 0 0 2px rgba(255,255,255,.95);
+    }
+
+    /* === BOX: seleção de contrato/cliente (VTEX style) === */
+    .ck-box{
+      border: 1px solid var(--ck-border);
+      border-radius: var(--ck-radius);
+      background: #fff;
+      overflow:hidden;
+      box-shadow: 0 10px 26px rgba(2,6,23,.06);
+    }
+
+    .ck-box-h{
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--ck-border);
+      background: rgba(0,40,132,.03);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      font-weight: 1100;
+      color: var(--ck-blue);
+    }
+
+    .ck-box-b{
+      padding: 14px;
+      background:#fff;
+    }
+
+    .ck-grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      align-items:end;
+    }
+
+    .ck-field label{
+      display:block;
+      font-weight: 1000;
+      font-size: 12px;
+      color: #0b1a3a;
+      margin-bottom: 6px;
+    }
+
+    .ck-input{
+      width: 100%;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid var(--ck-border);
+      padding: 0 12px;
+      outline: none;
+      font-weight: 900;
+      color: var(--ck-text);
+      background:#fff;
+    }
+    .ck-input:focus{
+      border-color: rgba(0,40,132,.45);
+      box-shadow: 0 0 0 4px rgba(0,40,132,.08);
+    }
+
+    .ck-help{
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--ck-muted);
+      line-height: 1.25;
+    }
+
+    .ck-inline{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+    }
+
+    .ck-mini-card{
+      flex: 1 1 auto;
+      border: 1px solid var(--ck-border);
+      border-radius: 14px;
+      background: #fff;
+      padding: 10px 12px;
+    }
+    .ck-mini-card .t{
+      font-weight: 1100;
+      color: var(--ck-blue);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .ck-mini-card .v{
+      font-weight: 1000;
+      color: var(--ck-text);
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    .ck-mini-card .m{
+      margin-top: 6px;
+      font-weight: 900;
+      font-size: 12px;
+      color: var(--ck-muted);
+    }
+
+    /* === LISTA ITENS (CodPonto) === */
+    .ck-list{
+      margin-top: 14px;
+      border: 1px solid var(--ck-border);
+      border-radius: var(--ck-radius);
+      background: #fff;
+      overflow:hidden;
+      box-shadow: var(--ck-shadow);
+    }
+
+    .ck-list-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--ck-border);
+      background: rgba(0,40,132,.03);
+    }
+    .ck-list-head .left{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex-wrap:wrap;
+    }
+    .ck-list-head .title{
+      font-weight: 1100;
+      color: var(--ck-blue);
+    }
+    .ck-list-head .muted{
+      font-weight: 1000;
+      font-size: 12px;
+      color: var(--ck-muted);
+    }
+
+    .ck-codponto{
+      border-bottom: 1px solid var(--ck-border);
+      background:#fff;
+    }
+    .ck-codponto:last-child{
+      border-bottom:none;
+    }
+
+    .cp-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .cp-id{
+      display:flex;
+      gap: 12px;
+      align-items:flex-start;
+      min-width:0;
+    }
+
+    .cp-badge{
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,40,132,.18);
+      background: rgba(0,40,132,.06);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight: 1100;
+      color: var(--ck-blue);
+      flex: 0 0 auto;
+      user-select:none;
+    }
+
+    .cp-main{
+      min-width:0;
+    }
+
+    .cp-title{
+      font-size: 14px;
+      font-weight: 1100;
+      color: var(--ck-text);
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      flex-wrap:wrap;
+    }
+
+    .cp-title .uf{
+      font-weight: 1100;
+      color: var(--ck-muted);
+    }
+
+    .cp-meta{
+      margin-top: 6px;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--ck-muted);
+      line-height: 1.35;
+    }
+
+    .cp-actions{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+
+    .btn-mini{
+      border: 1px solid rgba(0,40,132,.18);
+      background: rgba(0,40,132,.06);
+      color: var(--ck-blue);
+      border-radius: 12px;
+      padding: 9px 12px;
+      font-weight: 1100;
+      cursor: pointer;
+      font-size: 12px;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      line-height: 1;
+      user-select:none;
+    }
+    .btn-mini:hover{ background: rgba(0,40,132,.10); }
+
+    .btn-danger{
+      border: 1px solid rgba(220,38,38,.30);
+      background: rgba(220,38,38,.08);
+      color: #b91c1c;
+    }
+    .btn-danger:hover{ background: rgba(220,38,38,.12); }
+
+    /* === TABELA DE FACES (linhas) === */
+    .faces-wrap{
+      padding: 0 14px 14px 14px;
+    }
+
+    .faces-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--ck-border);
+      border-radius: 14px;
+      background: #fff;
+      margin-top: 8px;
+    }
+    .faces-head .t{
+      font-weight: 1100;
+      color: #0b1a3a;
+      font-size: 12px;
+    }
+    .faces-head .m{
+      font-weight: 900;
+      color: var(--ck-muted);
+      font-size: 12px;
+    }
+
+    .face-row{
+      margin-top: 10px;
+      border: 1px solid var(--ck-border);
+      border-radius: 14px;
+      background: #fff;
+      overflow:hidden;
+    }
+
+    .face-grid{
+      display:grid;
+      grid-template-columns: 220px 140px 140px 120px 90px 120px 220px 44px;
+      gap: 10px;
+      padding: 12px;
+      align-items:end;
+    }
+
+    .face-grid .ck-field{ margin:0; }
+
+    .face-grid .ck-input{
+      height: 40px;
+      border-radius: 12px;
+      font-size: 13px;
+    }
+
+    .face-tools{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap: 8px;
+      height: 40px;
+    }
+
+    .ico-btn{
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      border: 1px solid var(--ck-border);
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      user-select:none;
+      font-weight: 1100;
+      color: #0b1a3a;
+      box-shadow: 0 10px 22px rgba(2,6,23,.05);
+      transition: .12s ease;
+    }
+    .ico-btn:hover{ transform: translateY(-1px); }
+    .ico-btn:active{ transform: translateY(0px); }
+
+    .ico-btn.plus{
+      border-color: rgba(22,163,74,.30);
+      background: rgba(22,163,74,.08);
+      color: #166534;
+    }
+    .ico-btn.minus{
+      border-color: rgba(220,38,38,.30);
+      background: rgba(220,38,38,.08);
+      color: #991b1b;
+    }
+
+    .face-foot{
+      padding: 10px 12px;
+      border-top: 1px dashed var(--ck-border);
+      display:flex;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap:wrap;
+      background: #fbfdff;
+      font-weight: 1000;
+      color: var(--ck-muted);
+      font-size: 12px;
+    }
+    .face-foot b{
+      color: var(--ck-text);
+      font-weight: 1100;
+    }
+
+    /* === SIDEBAR (VTEX feel) === */
+    .ck-side{
+      border: 1px solid var(--ck-border);
+      border-radius: var(--ck-radius);
+      background:#fff;
+      overflow:hidden;
+      position: sticky;
+      top: 88px;
+      box-shadow: var(--ck-shadow);
+    }
+
+    .ck-side-head{
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--ck-border);
+      background: rgba(0,40,132,.03);
+      font-weight: 1100;
+      color: var(--ck-blue);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 10px;
+    }
+
+    .ck-side-body{
+      padding: 14px;
+    }
+
+    .sum-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 12px;
+      padding: 10px 0;
+      font-weight: 1000;
+      color: var(--ck-text);
+      border-bottom: 1px solid rgba(148,163,184,.18);
+    }
+    .sum-row:last-child{ border-bottom:none; }
+
+    .sum-row .k{
+      color: var(--ck-muted);
+      font-weight: 1000;
+      font-size: 12px;
+    }
+    .sum-row .v{
+      font-weight: 1200;
+      font-size: 14px;
+      color: #0b1a3a;
+      white-space:nowrap;
+    }
+
+    .sum-big{
+      margin-top: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,179,0,.55);
+      background: rgba(255,179,0,.12);
+      padding: 12px;
+    }
+    .sum-big .t{
+      font-weight: 1100;
+      color: #0b1a3a;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .sum-big .v{
+      font-weight: 1400;
+      font-size: 18px;
+      color: #0b1a3a;
+    }
+
+    .ck-cta{
+      margin-top: 12px;
+      width: 100%;
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .ck-note{
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--ck-muted);
+      line-height: 1.35;
+      font-weight: 900;
+    }
+
+    .ck-empty{
+      padding: 22px 14px;
+      text-align:center;
+      color: var(--ck-muted);
+      font-weight: 1000;
+    }
+    .ck-empty .big{
+      font-size: 14px;
+      color: var(--ck-text);
+      font-weight: 1200;
+      margin-bottom: 6px;
+    }
+
+    @media (max-width: 1180px){
+      .ck-page{
+        grid-template-columns: 1fr;
+      }
+      .ck-side{
+        position: static;
+        top: auto;
+      }
+      .face-grid{
+        grid-template-columns: 1fr 1fr;
+      }
+      .face-tools{
+        justify-content:flex-start;
+      }
+    }
+  </style>
+
+  <div class="ck-topbar">
+    <div class="ck-title">
+      <h1>Checkout</h1>
+      <div class="ck-sub">
+        <span class="ck-pill"><span class="dot"></span> Seleção de painéis</span>
+        <span class="ck-pill"><span class="dot" style="background:var(--ck-yellow);"></span></span>
+      </div>
+    </div>
+
+    <div class="ck-pill" title="Quantidade de CodPontos no checkout">
+      <span class="dot" style="background:#16a34a;"></span>
+      <span><span id="ckQtdTop">{{ itens|length }}</span> CodPonto(s)</span>
+    </div>
+  </div>
+
+  <!-- ✅ BOX: Contrato / Cliente (opcional) -->
+  <div class="ck-box">
+    <div class="ck-box-h">
+      <span>Identificação</span>
+      <span style="font-size:12px;font-weight:1000;color:var(--ck-muted);">Contrato existente ou novo</span>
+    </div>
+
+    <div class="ck-box-b">
+      <div class="ck-grid">
+
+        
+        <div class="ck-field">
+          <label>Adicionar Contrato</label>
+          <input class="ck-input" id="inpContrato" placeholder="Digite Nº contrato, razão social ou CNPJ..." autocomplete="off">
+          <div class="ck-help"></div>
+        </div>
+
+        <div class="ck-field">
+          <label>Adicionar Cliente</label>
+          <input class="ck-input" id="inpCliente" placeholder="Digite razão social ou CNPJ..." autocomplete="off">
+          <div class="ck-help"></div>
+        </div>
+      </div>
+
+      <div class="ck-inline" id="boxContratoCliente" style="display:none;">
+        <div class="ck-mini-card" style="flex:1 1 380px;">
+          <div class="t">Cliente selecionado</div>
+          <div class="v" id="clienteInfo">—</div>
+          <div class="m" id="clienteInfo2"></div>
+        </div>
+
+        <div class="ck-mini-card" style="flex:1 1 380px;display:none;" id="boxContratoResumo">
+          <div class="t">Contrato selecionado</div>
+          <div class="v" id="contratoInfo">—</div>
+          <div class="m" id="contratoAditivo">Valor Aditivo do Contrato: —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ck-page">
+
+    <!-- ===========================
+         LISTA PRINCIPAL
+    ============================ -->
+    <div>
+
+      <div class="ck-list" id="ckList">
+        <div class="ck-list-head">
+          <div class="left">
+            <div class="title">Itens selecionados</div>
+            <div class="muted"><span id="ckQtd">{{ itens|length }}</span> CodPonto(s)</div>
+          </div>
+
+          <div class="muted" style="font-weight:1100;">
+            Configure CodFace + período + valores
+          </div>
+        </div>
+
+        {% if itens and itens|length > 0 %}
+          {% for it in itens %}
+            <div class="ck-codponto" data-codponto="{{ it.CodPonto }}">
+
+              <div class="cp-head">
+                <div class="cp-id">
+                  <div class="cp-badge">{{ it.CodPonto }}</div>
+
+                  <div class="cp-main">
+                    <div class="cp-title">
+                      CodPonto {{ it.CodPonto }}
+                      {% if it.UF %}<span class="uf">• {{ it.UF }}</span>{% endif %}
+                    </div>
+
+                    <div class="cp-meta">
+                      {% if it.Bairro %}<div><b>Bairro:</b> {{ it.Bairro }}</div>{% endif %}
+                      {% if it.Exibidora %}<div><b>Exibidora:</b> {{ it.Exibidora }}</div>{% endif %}
+                      {% if it.Faces is not none %}<div><b>Faces (cadastro):</b> {{ it.Faces }}</div>{% endif %}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="cp-actions">
+                  <a class="btn-mini" href="{{ url_for('Paineis.detalhe_painel', codponto=it.CodPonto) }}" title="Ver painel">
+                    Ver
+                  </a>
+
+                  <button type="button"
+                          class="btn-mini btn-danger btnRemoverCodPonto"
+                          data-codponto="{{ it.CodPonto }}"
+                          title="Remover CodPonto do checkout">
+                    Remover
+                  </button>
+                </div>
+              </div>
+
+              <div class="faces-wrap">
+                <div class="faces-head">
+                  <div class="t">Faces do CodPonto {{ it.CodPonto }}</div>
+                  <div class="m">Use o + para adicionar mais CodFace para o mesmo CodPonto</div>
+                </div>
+
+                <!-- Container onde as linhas de CodFace serão montadas -->
+                <div class="faces-container" id="faces-{{ it.CodPonto }}"
+                     data-codponto="{{ it.CodPonto }}"
+                     data-faces='{{ (faces_map.get(it.CodPonto, [])) | tojson }}'>
+                </div>
+              </div>
+
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="ck-empty">
+            <div class="big">Seu checkout está vazio.</div>
+            Selecione painéis na <b>Lista de Painéis</b> clicando em <b>＋ Adicionar</b>.
+            <div style="margin-top:12px;">
+              <a class="btn btn-secondary" href="{{ url_for('Paineis.lista_paineis') }}">Ir para Lista de Painéis</a>
+            </div>
+          </div>
+        {% endif %}
+
+      </div>
+
+    </div>
+
+    <!-- ===========================
+         SIDEBAR
+    ============================ -->
+    <div class="ck-side">
+      <div class="ck-side-head">
+        <span>Resumo</span>
+        <span style="font-size:12px;font-weight:1100;color:var(--ck-muted);"></span>
+      </div>
+
+      <div class="ck-side-body">
+
+        <div class="sum-row">
+          <div class="k">CodPontos</div>
+          <div class="v" id="sumCodPontos">{{ itens|length }}</div>
+        </div>
+
+        <div class="sum-row">
+          <div class="k">Faces configuradas</div>
+          <div class="v" id="sumFaces">0</div>
+        </div>
+
+        <div class="sum-row">
+          <div class="k">Total mensal (líquido)</div>
+          <div class="v" id="sumMensal">R$ 0,00</div>
+        </div>
+
+        <div class="sum-big">
+          <div class="t">Valor total</div>
+          <div class="v" id="sumTotal">R$ 0,00</div>
+        </div>
+
+       
+
+        <div class="ck-cta">
+          <button type="button" class="btn btn-secondary" id="btnLimparCheckout">Limpar checkout</button>
+          <button type="button" class="btn btn-primary" id="btnContinuar" disabled>Continuar</button>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+
+
+
+  <script>
+  (function(){
+    function getCsrf(){
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      return meta ? (meta.getAttribute("content") || "") : "";
+    }
+
+    const csrf = getCsrf();
+
+    const urlRemover = "{{ url_for('Paineis.checkout_remover') }}";
+    const urlLimpar  = "{{ url_for('Paineis.checkout_limpar') }}";
+
+    const urlSearchContratos = "{{ url_for('Paineis.checkout_search_contratos') }}";
+    const urlGetContratoBase = "{{ url_for('Paineis.checkout_get_contrato', id_contrato=0) }}".replace("/0", "/");
+    const urlSearchClientes = "{{ url_for('Paineis.checkout_search_clientes') }}";
+    const urlGetClienteBase = "{{ url_for('Paineis.checkout_get_cliente', id_cliente=0) }}".replace("/0", "/");
+
+    const urlDisponBase = "{{ url_for('Paineis.checkout_disponibilidade') }}";
+
+    const loopsPermitidos = {{ loops_permitidos|tojson }};
+
+    const qtdSpan = document.getElementById("ckQtd");
+    const qtdTop  = document.getElementById("ckQtdTop");
+    const sumCodPontos = document.getElementById("sumCodPontos");
+    const sumFaces = document.getElementById("sumFaces");
+    const sumMensal = document.getElementById("sumMensal");
+    const sumTotal = document.getElementById("sumTotal");
+
+    const btnLimpar = document.getElementById("btnLimparCheckout");
+    const btnContinuar = document.getElementById("btnContinuar");
+
+    const inpContrato = document.getElementById("inpContrato");
+    const inpCliente = document.getElementById("inpCliente");
+
+    const boxContratoCliente = document.getElementById("boxContratoCliente");
+    const boxContratoResumo = document.getElementById("boxContratoResumo");
+    const clienteInfo = document.getElementById("clienteInfo");
+    const clienteInfo2 = document.getElementById("clienteInfo2");
+    const contratoInfo = document.getElementById("contratoInfo");
+    const contratoAditivo = document.getElementById("contratoAditivo");
+
+    // ======= util =======
+    function moedaBR(v){
+      const n = Number(v || 0);
+      return n.toLocaleString("pt-BR", { style:"currency", currency:"BRL" });
+    }
+
+    function num(v){
+      if (v === null || v === undefined) return 0;
+      if (typeof v === "number") return v;
+      const s = String(v).replace(/\./g, "").replace(",", ".");
+      const n = parseFloat(s);
+      return isNaN(n) ? 0 : n;
+    }
+
+    function inteiro(v){
+      const n = parseInt(String(v || "0").replace(/\D/g, ""), 10);
+      return isNaN(n) ? 0 : n;
+    }
+
+    async function fetchJson(url, opts){
+      const resp = await fetch(url, opts);
+      const txt = await resp.text();
+      try{
+        const data = JSON.parse(txt);
+        return { ok: resp.ok, status: resp.status, data: data };
+      }catch(e){
+        return { ok: false, status: resp.status, data: { ok:false, erro:"Resposta não é JSON. Provável erro/CSRF. Recarregue." }, raw: txt };
+      }
+    }
+
+    function setBtnContinuar(){
+      const cods = inteiro(qtdSpan ? qtdSpan.textContent : "0");
+      if (btnContinuar){
+        btnContinuar.disabled = (cods <= 0);
+      }
+    }
+
+    function atualizarQtdUI(n){
+      const v = inteiro(n);
+      if (qtdSpan) qtdSpan.textContent = String(v);
+      if (qtdTop) qtdTop.textContent = String(v);
+      if (sumCodPontos) sumCodPontos.textContent = String(v);
+      setBtnContinuar();
+    }
+
+    // ======= Remover CodPonto =======
+    async function removerCodPonto(codponto){
+      const r = await fetchJson(urlRemover, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+          "X-CSRFToken": csrf
+        },
+        body: JSON.stringify({ codponto: codponto })
+      });
+
+      if (!r.data || !r.data.ok){
+        alert((r.data && r.data.erro) ? r.data.erro : "Falha ao remover.");
+        return;
+      }
+
+      const el = document.querySelector('.ck-codponto[data-codponto="'+codponto+'"]');
+      if (el) el.remove();
+
+      atualizarQtdUI(r.data.qtd || 0);
+
+      if ((r.data.qtd || 0) <= 0){
+        window.location.reload();
+        return;
+      }
+
+      recalcularResumo();
+    }
+
+    document.querySelectorAll(".btnRemoverCodPonto").forEach(btn => {
+      btn.addEventListener("click", function(){
+        const cod = inteiro(btn.getAttribute("data-codponto") || "0");
+        if (!cod) return;
+        removerCodPonto(cod);
+      });
+    });
+
+    // ======= Limpar checkout =======
+    async function limparCheckout(){
+      const r = await fetchJson(urlLimpar, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-Requested-With": "XMLHttpRequest",
+          "X-CSRFToken": csrf
+        },
+        body: JSON.stringify({})
+      });
+
+      if (!r.data || !r.data.ok){
+        alert((r.data && r.data.erro) ? r.data.erro : "Falha ao limpar checkout.");
+        return;
+      }
+
+      atualizarQtdUI(0);
+      window.location.reload();
+    }
+
+    if (btnLimpar){
+      btnLimpar.addEventListener("click", limparCheckout);
+    }
+
+    // ======= Contrato / Cliente (search leve sem libs) =======
+    let contratoSelecionado = null;
+    let clienteSelecionado = null;
+
+    function showBoxInfo(){
+      const any = !!(contratoSelecionado || clienteSelecionado);
+      if (boxContratoCliente){
+        boxContratoCliente.style.display = any ? "" : "none";
+      }
+      if (boxContratoResumo){
+        boxContratoResumo.style.display = contratoSelecionado ? "" : "none";
+      }
+    }
+
+    async function searchContratos(q){
+      const url = urlSearchContratos + "?q=" + encodeURIComponent(q);
+      const r = await fetchJson(url, { method:"GET", credentials:"same-origin", headers:{ "Accept":"application/json" } });
+      if (!r.data || !r.data.ok) return [];
+      return r.data.items || [];
+    }
+
+    async function getContrato(id){
+      const url = urlGetContratoBase + String(id);
+      const r = await fetchJson(url, { method:"GET", credentials:"same-origin", headers:{ "Accept":"application/json" } });
+      if (!r.data || !r.data.ok) return null;
+      return r.data.contrato || null;
+    }
+
+    async function searchClientes(q){
+      const url = urlSearchClientes + "?q=" + encodeURIComponent(q);
+      const r = await fetchJson(url, { method:"GET", credentials:"same-origin", headers:{ "Accept":"application/json" } });
+      if (!r.data || !r.data.ok) return [];
+      return r.data.items || [];
+    }
+
+    async function getCliente(id){
+      const url = urlGetClienteBase + String(id);
+      const r = await fetchJson(url, { method:"GET", credentials:"same-origin", headers:{ "Accept":"application/json" } });
+      if (!r.data || !r.data.ok) return null;
+      return r.data.cliente || null;
+    }
+
+    function montarSugestoes(inputEl, items, onPick){
+      let box = inputEl._suggestBox;
+      if (!box){
+        box = document.createElement("div");
+        box.style.position = "absolute";
+        box.style.zIndex = "9999";
+        box.style.background = "#fff";
+        box.style.border = "1px solid var(--border)";
+        box.style.borderRadius = "14px";
+        box.style.boxShadow = "0 18px 44px rgba(2,6,23,.12)";
+        box.style.overflow = "hidden";
+        box.style.minWidth = "320px";
+        box.style.maxWidth = "680px";
+        box.style.maxHeight = "260px";
+        box.style.overflowY = "auto";
+        box.style.display = "none";
+        box.style.fontWeight = "900";
+        box.style.fontSize = "13px";
+
+        document.body.appendChild(box);
+        inputEl._suggestBox = box;
+
+        document.addEventListener("click", (ev) => {
+          if (ev.target === inputEl) return;
+          if (box.contains(ev.target)) return;
+          box.style.display = "none";
+        });
+      }
+
+      const rect = inputEl.getBoundingClientRect();
+      box.style.left = (rect.left + window.scrollX) + "px";
+      box.style.top  = (rect.bottom + window.scrollY + 6) + "px";
+      box.style.width = rect.width + "px";
+
+      box.innerHTML = "";
+      if (!items || items.length === 0){
+        const empty = document.createElement("div");
+        empty.style.padding = "10px 12px";
+        empty.style.color = "#64748B";
+        empty.textContent = "Nenhum resultado.";
+        box.appendChild(empty);
+        box.style.display = "";
+        return;
+      }
+
+      items.forEach(it => {
+        const row = document.createElement("div");
+        row.style.padding = "10px 12px";
+        row.style.borderBottom = "1px solid rgba(148,163,184,.18)";
+        row.style.cursor = "pointer";
+
+        row.addEventListener("mouseenter", () => row.style.background = "rgba(0,40,132,.04)");
+        row.addEventListener("mouseleave", () => row.style.background = "#fff");
+
+        row.addEventListener("click", () => {
+          box.style.display = "none";
+          onPick(it);
+        });
+
+        row.innerHTML = `
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+            <div style="min-width:0;">
+              <div style="font-weight:1100;color:#0b1a3a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${it.numero ? ("Contrato " + it.numero) : (it.razao || it.fantasia || "—")}
+              </div>
+              <div style="margin-top:4px;font-size:12px;color:#64748B;font-weight:1000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${(it.razao || it.fantasia || "")} ${(it.cnpj ? ("• " + it.cnpj) : "")}
+              </div>
+            </div>
+            <div style="font-size:12px;color:#0b1a3a;font-weight:1100;white-space:nowrap;">
+              ${it.id ? ("#" + it.id) : ""}
+            </div>
+          </div>
+        `;
+        box.appendChild(row);
+      });
+
+      // remove border do último
+      const last = box.lastElementChild;
+      if (last) last.style.borderBottom = "none";
+
+      box.style.display = "";
+    }
+
+
+
+
+
+    
+    function attachSearch(inputEl, isContrato){
+      let t = null;
+
+      inputEl.addEventListener("input", () => {
+        const q = (inputEl.value || "").trim();
+        if (t) clearTimeout(t);
+
+        if (q.length < 2){
+          if (inputEl._suggestBox) inputEl._suggestBox.style.display = "none";
+          return;
+        }
+
+        t = setTimeout(async () => {
+          if (isContrato){
+            const items = await searchContratos(q);
+            montarSugestoes(inputEl, items, async (pick) => {
+              const c = await getContrato(pick.id);
+              if (!c) return;
+
+              contratoSelecionado = c;
+
+              // ao selecionar contrato, define cliente com base no contrato (RazaoSocial/CNPJ)
+              clienteSelecionado = {
+                id: null,
+                razao: c.razao || "",
+                fantasia: "",
+                cnpj: c.cnpj || ""
+              };
+
+              if (inpContrato) inpContrato.value = (c.numero ? ("Contrato " + c.numero) : ("#" + c.id));
+              if (inpCliente) inpCliente.value = (clienteSelecionado.razao || clienteSelecionado.cnpj || "");
+
+              if (clienteInfo) clienteInfo.textContent = (clienteSelecionado.razao || "—");
+              if (clienteInfo2) clienteInfo2.textContent = (clienteSelecionado.cnpj ? ("CNPJ: " + clienteSelecionado.cnpj) : "");
+
+              if (contratoInfo) contratoInfo.textContent = (c.numero ? ("Contrato " + c.numero) : ("#" + c.id)) + (c.razao ? (" • " + c.razao) : "");
+              if (contratoAditivo){
+                // ✅ aqui você pode trocar quando você decidir o que é "valor aditivo"
+                // por enquanto, mostra o Total Mensal Final como referência.
+                const v = c.total_mensal_final || c.total_mensal || c.total_bruto || "";
+                contratoAditivo.textContent = "Valor Aditivo do Contrato: " + (v ? ("R$ " + v) : "—");
+              }
+
+              showBoxInfo();
+            });
+          }else{
+            const items = await searchClientes(q);
+            montarSugestoes(inputEl, items, async (pick) => {
+              const c = await getCliente(pick.id);
+              if (!c) return;
+
+              // Se usuário escolheu cliente manualmente, isso significa "novo contrato"
+              clienteSelecionado = c;
+
+              // não zera contrato automaticamente se já existe; mas em regra:
+              // se ele está escolhendo cliente sem escolher contrato, contrato fica vazio.
+              if (!contratoSelecionado){
+                if (inpContrato) inpContrato.value = "";
+              }
+
+              if (inpCliente) inpCliente.value = (c.razao || c.fantasia || ("#" + c.id));
+              if (clienteInfo) clienteInfo.textContent = (c.razao || c.fantasia || "—");
+              if (clienteInfo2) clienteInfo2.textContent = (c.cnpj ? ("CNPJ: " + c.cnpj) : "");
+
+              showBoxInfo();
+            });
+          }
+        }, 250);
+      });
+    }
+
+
+
+
+
+
+
+    if (inpContrato) attachSearch(inpContrato, true);
+    if (inpCliente) attachSearch(inpCliente, false);
+
+    // ======= Faces UI =======
+    function faceRowTemplate(codponto, faces, idx){
+      // faces = [{CodFace:"",TipoPainel:""}]
+      const optionsFaces = faces.map(f => {
+        const cf = (f.CodFace || "").replace(/"/g, "&quot;");
+        const tp = (f.TipoPainel || "").replace(/"/g, "&quot;");
+        return `<option value="${cf}">${cf}${tp ? (" • " + tp) : ""}</option>`;
+      }).join("");
+
+      const optionsLoop = (loopsPermitidos || []).map(lp => `<option value="${lp}">${lp}</option>`).join("");
+
+      return `
+        <div class="face-row" data-codponto="${codponto}" data-idx="${idx}">
+          <div class="face-grid">
+
+            <div class="ck-field">
+              <label>CodFace</label>
+              <select class="ck-input selCodFace">
+                <option value="">Selecione...</option>
+                ${optionsFaces}
+              </select>
+            </div>
+
+            <div class="ck-field">
+              <label>Data Início</label>
+              <select class="ck-input selIni" disabled>
+                <option value="">Selecione CodFace</option>
+              </select>
+            </div>
+
+            <div class="ck-field">
+              <label>Data Fim</label>
+              <select class="ck-input selFim" disabled>
+                <option value="">Selecione Início</option>
+              </select>
+            </div>
+
+            <div class="ck-field">
+              <label>Loop</label>
+              <select class="ck-input selLoop">
+                ${optionsLoop}
+              </select>
+            </div>
+
+            <div class="ck-field">
+              <label>Cota</label>
+              <input class="ck-input inpCota" inputmode="numeric" placeholder="Ex.: 1">
+            </div>
+
+            <div class="ck-field">
+              <label>Parcelas</label>
+              <input class="ck-input inpParcelas" inputmode="numeric" placeholder="Ex.: 12">
+            </div>
+
+            <div class="ck-field">
+              <label>Faturamento Líquido Mensal</label>
+              <input class="ck-input inpMensal" inputmode="decimal" placeholder="Ex.: 2500,00">
+            </div>
+
+            <div class="face-tools">
+              <button type="button" class="ico-btn plus" title="Adicionar outra face">+</button>
+              <button type="button" class="ico-btn minus" title="Remover esta face">−</button>
+            </div>
+
+          </div>
+
+          <div class="face-foot">
+            <div>Mensal informado: <b class="lblMensal">R$ 0,00</b></div>
+            <div>Total período: <b class="lblTotal">R$ 0,00</b></div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function carregarDisponibilidade(codponto, codface){
+      const url = urlDisponBase + "?codponto=" + encodeURIComponent(codponto) + "&codface=" + encodeURIComponent(codface);
+      const r = await fetchJson(url, { method:"GET", credentials:"same-origin", headers:{ "Accept":"application/json" } });
+      if (!r.data || !r.data.ok) return null;
+      return r.data.meses || [];
+    }
+
+    function montarOptionsMeses(meses){
+      // meses = ["2026-01","2026-02"...]
+      if (!meses || meses.length === 0){
+        return `<option value="">Sem disponibilidade</option>`;
+      }
+      return meses.map(m => `<option value="${m}">${m}</option>`).join("");
+    }
+
+    function mesesEntre(inicio, fim){
+      // inicio/fim: "YYYY-MM"
+      if (!inicio || !fim) return [];
+      const a = inicio.split("-");
+      const b = fim.split("-");
+      if (a.length !== 2 || b.length !== 2) return [];
+
+      let y1 = inteiro(a[0]);
+      let m1 = inteiro(a[1]);
+      let y2 = inteiro(b[0]);
+      let m2 = inteiro(b[1]);
+
+      if (!y1 || !m1 || !y2 || !m2) return [];
+
+      const out = [];
+      let y = y1, m = m1;
+
+      while (true){
+        out.push(String(y).padStart(4,"0") + "-" + String(m).padStart(2,"0"));
+        if (y === y2 && m === m2) break;
+        m += 1;
+        if (m > 12){ m = 1; y += 1; }
+        if (out.length > 60) break;
+      }
+      return out;
+    }
+
+    function atualizarRowFooter(row){
+      const mensalEl = row.querySelector(".inpMensal");
+      const parcEl = row.querySelector(".inpParcelas");
+      const lblMensal = row.querySelector(".lblMensal");
+      const lblTotal = row.querySelector(".lblTotal");
+
+      const mensal = num(mensalEl ? mensalEl.value : 0);
+      const parcelas = inteiro(parcEl ? parcEl.value : 0);
+
+      const total = mensal * (parcelas > 0 ? parcelas : 0);
+
+      if (lblMensal) lblMensal.textContent = moedaBR(mensal);
+      if (lblTotal) lblTotal.textContent = moedaBR(total);
+    }
+
+    function recalcularResumo(){
+      const rows = document.querySelectorAll(".face-row");
+      let qtdFaces = 0;
+      let totalMensal = 0;
+      let totalPeriodo = 0;
+
+      rows.forEach(row => {
+        const codface = (row.querySelector(".selCodFace") || {}).value || "";
+        if (!codface) return;
+
+        qtdFaces += 1;
+
+        const mensal = num((row.querySelector(".inpMensal") || {}).value || 0);
+        const parcelas = inteiro((row.querySelector(".inpParcelas") || {}).value || 0);
+
+        totalMensal += mensal;
+        totalPeriodo += (mensal * (parcelas > 0 ? parcelas : 0));
+      });
+
+      if (sumFaces) sumFaces.textContent = String(qtdFaces);
+      if (sumMensal) sumMensal.textContent = moedaBR(totalMensal);
+      if (sumTotal) sumTotal.textContent = moedaBR(totalPeriodo);
+    }
+
+    function bindRowEvents(row){
+      const codponto = inteiro(row.getAttribute("data-codponto") || "0");
+
+      const selCodFace = row.querySelector(".selCodFace");
+      const selIni = row.querySelector(".selIni");
+      const selFim = row.querySelector(".selFim");
+
+      const btnPlus = row.querySelector(".ico-btn.plus");
+      const btnMinus = row.querySelector(".ico-btn.minus");
+
+      const inpMensal = row.querySelector(".inpMensal");
+      const inpParcelas = row.querySelector(".inpParcelas");
+      const inpCota = row.querySelector(".inpCota");
+      const selLoop = row.querySelector(".selLoop");
+
+      async function onCodFaceChange(){
+        const cf = (selCodFace ? selCodFace.value : "").trim();
+        if (!cf){
+          if (selIni){
+            selIni.innerHTML = `<option value="">Selecione CodFace</option>`;
+            selIni.disabled = true;
+          }
+          if (selFim){
+            selFim.innerHTML = `<option value="">Selecione Início</option>`;
+            selFim.disabled = true;
+          }
+          atualizarRowFooter(row);
+          recalcularResumo();
+          return;
+        }
+
+        if (selIni){
+          selIni.innerHTML = `<option value="">Carregando...</option>`;
+          selIni.disabled = true;
+        }
+        if (selFim){
+          selFim.innerHTML = `<option value="">Selecione Início</option>`;
+          selFim.disabled = true;
+        }
+
+        const meses = await carregarDisponibilidade(codponto, cf);
+
+        if (!meses || meses.length === 0){
+          if (selIni){
+            selIni.innerHTML = `<option value="">Sem disponibilidade</option>`;
+            selIni.disabled = true;
+          }
+          return;
+        }
+
+        if (selIni){
+          selIni.innerHTML = `<option value="">Selecione...</option>` + montarOptionsMeses(meses);
+          selIni.disabled = false;
+        }
+
+        // zera fim até selecionar início
+        if (selFim){
+          selFim.innerHTML = `<option value="">Selecione Início</option>`;
+          selFim.disabled = true;
+        }
+
+        atualizarRowFooter(row);
+        recalcularResumo();
+      }
+
+      function onIniChange(){
+        const ini = (selIni ? selIni.value : "").trim();
+        const mesesAll = Array.from(selIni ? selIni.querySelectorAll("option") : []).map(o => o.value).filter(v => v && v !== "Selecione...");
+        if (!ini){
+          if (selFim){
+            selFim.innerHTML = `<option value="">Selecione Início</option>`;
+            selFim.disabled = true;
+          }
+          atualizarRowFooter(row);
+          recalcularResumo();
+          return;
+        }
+
+        // fim só pode ser >= início dentro da mesma lista de disponíveis
+        const idxIni = mesesAll.indexOf(ini);
+        const mesesFim = (idxIni >= 0) ? mesesAll.slice(idxIni) : [];
+
+        if (selFim){
+          selFim.innerHTML = `<option value="">Selecione...</option>` + montarOptionsMeses(mesesFim);
+          selFim.disabled = false;
+        }
+
+        atualizarRowFooter(row);
+        recalcularResumo();
+      }
+
+      function onFimChange(){
+        atualizarRowFooter(row);
+        recalcularResumo();
+      }
+
+      function onValoresChange(){
+        atualizarRowFooter(row);
+        recalcularResumo();
+      }
+
+      if (selCodFace) selCodFace.addEventListener("change", onCodFaceChange);
+      if (selIni) selIni.addEventListener("change", onIniChange);
+      if (selFim) selFim.addEventListener("change", onFimChange);
+
+      if (inpMensal) inpMensal.addEventListener("input", onValoresChange);
+      if (inpParcelas) inpParcelas.addEventListener("input", onValoresChange);
+      if (inpCota) inpCota.addEventListener("input", onValoresChange);
+      if (selLoop) selLoop.addEventListener("change", onValoresChange);
+
+      if (btnPlus){
+        btnPlus.addEventListener("click", function(){
+          const container = row.closest(".faces-container");
+          if (!container) return;
+
+          const faces = JSON.parse(container.getAttribute("data-faces") || "[]");
+          const idx = container.querySelectorAll(".face-row").length;
+
+          container.insertAdjacentHTML("beforeend", faceRowTemplate(codponto, faces, idx));
+          const newRow = container.querySelector('.face-row[data-idx="'+idx+'"]');
+          if (newRow){
+            bindRowEvents(newRow);
+            atualizarRowFooter(newRow);
+            recalcularResumo();
+          }
+        });
+      }
+
+      if (btnMinus){
+        btnMinus.addEventListener("click", function(){
+          const container = row.closest(".faces-container");
+          if (!container) return;
+
+          const all = container.querySelectorAll(".face-row");
+          if (all.length <= 1){
+            alert("Este CodPonto precisa ter pelo menos 1 CodFace.");
+            return;
+          }
+
+          row.remove();
+          recalcularResumo();
+        });
+      }
+    }
+
+    function montarPrimeiraLinhaFaces(){
+      document.querySelectorAll(".faces-container").forEach(container => {
+        const codponto = inteiro(container.getAttribute("data-codponto") || "0");
+        const faces = JSON.parse(container.getAttribute("data-faces") || "[]");
+
+        // se não tiver faces, mostra aviso
+        if (!faces || faces.length === 0){
+          container.innerHTML = `
+            <div class="ck-empty" style="border:1px dashed var(--border);border-radius:14px;margin-top:10px;">
+              <div class="big">Nenhuma CodFace encontrada para este CodPonto.</div>
+              Verifique a tabela Silver.DimFacesPaineis.
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = faceRowTemplate(codponto, faces, 0);
+        const row0 = container.querySelector('.face-row[data-idx="0"]');
+        if (row0){
+          bindRowEvents(row0);
+          atualizarRowFooter(row0);
+          recalcularResumo();
+        }
+      });
+    }
+
+    // ======= Continuar (por enquanto só valida e mostra payload no console) =======
+    function coletarPayload(){
+      const rows = document.querySelectorAll(".face-row");
+      const itens = [];
+
+      rows.forEach(row => {
+        const codponto = inteiro(row.getAttribute("data-codponto") || "0");
+        const codface = ((row.querySelector(".selCodFace") || {}).value || "").trim();
+        const ini = ((row.querySelector(".selIni") || {}).value || "").trim();
+        const fim = ((row.querySelector(".selFim") || {}).value || "").trim();
+        const loop = ((row.querySelector(".selLoop") || {}).value || "").trim();
+
+        const cota = inteiro(((row.querySelector(".inpCota") || {}).value || "0"));
+        const parcelas = inteiro(((row.querySelector(".inpParcelas") || {}).value || "0"));
+        const mensal = num(((row.querySelector(".inpMensal") || {}).value || "0"));
+
+        if (!codponto || !codface) return;
+
+        itens.push({
+          CodPonto: codponto,
+          CodFace: codface,
+          MesInicio: ini,
+          MesFim: fim,
+          Loop: loop,
+          Cota: cota,
+          Parcelas: parcelas,
+          MensalLiquido: mensal
+        });
+      });
+
+      return {
+        contrato: contratoSelecionado ? contratoSelecionado : null,
+        cliente: clienteSelecionado ? clienteSelecionado : null,
+        itens: itens
+      };
+    }
+
+    function validarAntesDeContinuar(payload){
+      if (!payload || !payload.itens || payload.itens.length === 0){
+        alert("Você precisa configurar pelo menos 1 CodFace.");
+        return false;
+      }
+
+      // valida campos por linha
+      for (let i = 0; i < payload.itens.length; i++){
+        const it = payload.itens[i];
+
+        if (!it.CodPonto || !it.CodFace){
+          alert("Há item sem CodPonto/CodFace.");
+          return false;
+        }
+
+        if (!it.MesInicio){
+          alert("Selecione o mês de início para CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+          return false;
+        }
+
+        if (!it.MesFim){
+          alert("Selecione o mês de fim para CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+          return false;
+        }
+
+        // garante fim >= inicio (lexicográfico funciona em YYYY-MM)
+        if (String(it.MesFim) < String(it.MesInicio)){
+          alert("Mês fim não pode ser anterior ao início em CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+          return false;
+        }
+
+        if (!it.Loop){
+          alert("Selecione o Loop em CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+          return false;
+        }
+
+        if (!it.Parcelas || it.Parcelas <= 0){
+          alert("Informe Parcelas (>0) em CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+          return false;
+        }
+
+        if (it.MensalLiquido <= 0){
+          alert("Informe o Faturamento Líquido Mensal (>0) em CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+          return false;
+        }
+
+        // cota pode ser 0 se você quiser permitir, mas geralmente não.
+        // Se quiser obrigar:
+        // if (!it.Cota || it.Cota <= 0){
+        //   alert("Informe Cota (>0) em CodPonto " + it.CodPonto + " / CodFace " + it.CodFace + ".");
+        //   return false;
+        // }
+      }
+
+      return true;
+    }
+
+    function onContinuar(){
+      const payload = coletarPayload();
+      if (!validarAntesDeContinuar(payload)) return;
+
+      // Aqui você vai implementar o próximo passo (persistir/gerar proposta).
+      // Por enquanto, só mostra no console.
+      console.log("Checkout payload:", payload);
+      alert("Payload pronto (veja no console). Próximo passo: implementar persistência/geração.");
+    }
+
+    if (btnContinuar){
+      btnContinuar.addEventListener("click", onContinuar);
+    }
+
+    // ======= init =======
+    function init(){
+      setBtnContinuar();
+      montarPrimeiraLinhaFaces();
+      recalcularResumo();
+    }
+
+    if (document.readyState === "loading"){
+      document.addEventListener("DOMContentLoaded", init);
+    }else{
+      init();
+    }
+
+  })();
+</script>
+</div> 
+{% endblock %}

@@ -1,0 +1,475 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Meu Perfil | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+
+  <style>
+    .perfil-wrap{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 14px;
+    }
+
+    .perfil-card{
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      overflow:hidden;
+    }
+
+    .perfil-head{
+      padding:12px 14px;
+      border-bottom:1px solid var(--border);
+      background: rgba(0,40,132,.03);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+    }
+
+    .perfil-head .title{
+      font-weight: 900;
+      color: var(--euro-blue);
+      font-size: 14px;
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:6px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      font-size: 12px;
+      border:1px solid var(--border);
+      background:#fff;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .badge.ok{
+      border-color: rgba(22,163,74,.25);
+      background: rgba(22,163,74,.06);
+      color: #166534;
+    }
+
+    .badge.bad{
+      border-color: rgba(220,38,38,.25);
+      background: rgba(220,38,38,.06);
+      color: #991b1b;
+    }
+
+    .perfil-body{
+      padding: 14px;
+    }
+
+    .kv{
+      display:grid;
+      grid-template-columns: 180px 1fr;
+      gap: 10px 14px;
+      align-items:center;
+    }
+
+    .kv .k{
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 900;
+    }
+
+    .kv .v{
+      font-size: 14px;
+      color: var(--text);
+      font-weight: 900;
+      word-break: break-word;
+    }
+
+    .muted-mini{
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 800;
+      margin-top: 8px;
+      line-height: 1.35;
+    }
+
+    .sec{
+      margin-top: 12px;
+    }
+
+    .table-wrap{
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#fff;
+    }
+
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      font-size: 13px;
+    }
+
+    thead th{
+      position: sticky;
+      top: 0;
+      background: #F8FAFC;
+      border-bottom: 1px solid var(--border);
+      text-align:left;
+      padding: 10px 12px;
+      font-weight: 900;
+      color: #0f172a;
+      z-index: 1;
+    }
+
+    tbody td{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-weight: 800;
+      color: #0f172a;
+      vertical-align: top;
+    }
+
+    tbody tr:last-child td{
+      border-bottom: 0;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-weight: 900;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: #fff;
+      white-space: nowrap;
+    }
+
+    .pill.conceder{
+      border-color: rgba(37,99,235,.25);
+      background: rgba(37,99,235,.06);
+      color: #1d4ed8;
+    }
+
+    .pill.revogar{
+      border-color: rgba(220,38,38,.25);
+      background: rgba(220,38,38,.06);
+      color: #991b1b;
+    }
+
+    .pill.expirado{
+      border-color: rgba(217,119,6,.25);
+      background: rgba(217,119,6,.06);
+      color: #92400e;
+    }
+
+    .form-grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .form-grid .full{
+      grid-column: 1 / -1;
+    }
+
+    .help{
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 800;
+      line-height: 1.35;
+      margin-top: 8px;
+    }
+
+    .btn-danger{
+      background: rgba(220,38,38,.10);
+      color: #991b1b;
+      border: 1px solid rgba(220,38,38,.20);
+    }
+
+    .btn-danger:hover{
+      filter: brightness(0.98);
+    }
+
+    .actions-line{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      justify-content:flex-end;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 980px){
+      .perfil-wrap{
+        grid-template-columns: 1fr;
+      }
+      .kv{
+        grid-template-columns: 1fr;
+      }
+      .kv .k{ margin-top: 6px; }
+      .form-grid{
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <h1 class="page-title">Meu Perfil</h1>
+  <div class="muted" style="margin-bottom:12px;font-weight:800;">
+   
+  </div>
+
+  <div class="perfil-wrap">
+
+    <!-- COLUNA ESQUERDA -->
+    <div class="perfil-card">
+      <div class="perfil-head">
+        <div class="title">Informações do Usuário</div>
+        {% if usuario and usuario.BitAtivo %}
+          <div class="badge ok">Ativo</div>
+        {% else %}
+          <div class="badge bad">Inativo</div>
+        {% endif %}
+      </div>
+
+      <div class="perfil-body">
+        <div class="kv">
+          <div class="k">ID</div>
+          <div class="v">{{ usuario.IDDimUsuarios }}</div>
+
+          <div class="k">Nome</div>
+          <div class="v">{{ usuario.NomeUsuario or "—" }}</div>
+
+          <div class="k">E-mail</div>
+          <div class="v">{{ usuario.Email or "—" }}</div>
+
+          <div class="k">Último login</div>
+          <div class="v">
+            {% if usuario.UltimoLogin %}
+              {{ usuario.UltimoLogin.strftime("%d/%m/%Y %H:%M:%S") }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+
+          <div class="k">Criado em</div>
+          <div class="v">
+            {% if usuario.CreatedAt %}
+              {{ usuario.CreatedAt.strftime("%d/%m/%Y %H:%M:%S") }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+
+          <div class="k">Atualizado em</div>
+          <div class="v">
+            {% if usuario.UpdateAt %}
+              {{ usuario.UpdateAt.strftime("%d/%m/%Y %H:%M:%S") }}
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="sec"></div>
+
+        <div class="table-wrap">
+          <div class="perfil-head" style="border-bottom:1px solid var(--border);">
+            <div class="title">Perfil associado</div>
+            {% if perfil and perfil.BitAtivo %}
+              <div class="badge ok">Perfil ativo</div>
+            {% else %}
+              <div class="badge bad">Perfil inativo</div>
+            {% endif %}
+          </div>
+
+          <div class="perfil-body">
+            <div class="kv">
+              <div class="k">ID Perfil</div>
+              <div class="v">{{ perfil.IDDimPerfilUsuario if perfil else "—" }}</div>
+
+              <div class="k">Nome do Perfil</div>
+              <div class="v">{{ perfil.NomePerfil if perfil and perfil.NomePerfil else "—" }}</div>
+
+              <div class="k">Descrição</div>
+              <div class="v">{{ perfil.Descricao if perfil and perfil.Descricao else "—" }}</div>
+            </div>
+
+            <div class="muted-mini">
+         
+            </div>
+          </div>
+        </div>
+
+        <div class="sec"></div>
+
+        <div class="table-wrap">
+          <div class="perfil-head">
+            <div class="title">Permissões do Perfil</div>
+            <div class="badge">
+              {{ (permissoes_perfil|length) if permissoes_perfil is defined else 0 }} permissões
+            </div>
+          </div>
+
+          <div class="overflow-x">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:220px;">Código</th>
+                  <th>Descrição</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if permissoes_perfil is defined and permissoes_perfil %}
+                  {% for p in permissoes_perfil %}
+                    <tr>
+                      <td><span class="pill">{{ p.codigo }}</span></td>
+                      <td>{{ p.descricao or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="2" class="muted">Nenhuma permissão vinculada ao perfil.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="sec"></div>
+
+        <div class="table-wrap">
+          <div class="perfil-head">
+            <div class="title">Permissões Extras do Usuário</div>
+            <div class="badge">
+              {{ (permissoes_extras|length) if permissoes_extras is defined else 0 }} regras
+            </div>
+          </div>
+
+          <div class="overflow-x">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:220px;">Código</th>
+                  <th style="width:140px;">Tipo</th>
+                  <th style="width:190px;">Expiração</th>
+                  <th>Descrição / Observação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if permissoes_extras is defined and permissoes_extras %}
+                  {% for r in permissoes_extras %}
+                    <tr>
+                      <td><span class="pill">{{ r.codigo }}</span></td>
+                      <td>
+                        {% if r.tipo == "REVOGAR" %}
+                          <span class="pill revogar">REVOGAR</span>
+                        {% else %}
+                          <span class="pill conceder">CONCEDER</span>
+                        {% endif %}
+                        {% if r.expirado %}
+                          <span class="pill expirado" style="margin-left:8px;">EXPIRADO</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if r.data_expiracao %}
+                          {{ r.data_expiracao.strftime("%d/%m/%Y %H:%M:%S") }}
+                        {% else %}
+                          —
+                        {% endif %}
+                      </td>
+                      <td>
+                        <div style="font-weight:900;">{{ r.descricao or "—" }}</div>
+                        {% if r.observacao %}
+                          <div class="muted" style="margin-top:4px;font-weight:800;">{{ r.observacao }}</div>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="4" class="muted">Nenhuma permissão extra configurada para este usuário.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- COLUNA DIREITA -->
+    <div class="perfil-card">
+      <div class="perfil-head">
+        <div class="title">Segurança</div>
+        <div class="badge">Troca de senha</div>
+      </div>
+
+      <div class="perfil-body">
+        <form method="POST" action="{{ url_for('Autenticacao.trocar_senha') }}" autocomplete="off">
+          {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% endif %}
+
+          <div class="form-grid">
+            <div class="full">
+              <label for="senha_atual">Senha atual</label>
+              <input id="senha_atual" name="senha_atual" type="password" placeholder="Digite sua senha atual" required>
+            </div>
+
+            <div>
+              <label for="nova_senha">Nova senha</label>
+              <input id="nova_senha" name="nova_senha" type="password" placeholder="Mínimo 10 caracteres" required>
+            </div>
+
+            <div>
+              <label for="confirmar_senha">Confirmar nova senha</label>
+              <input id="confirmar_senha" name="confirmar_senha" type="password" placeholder="Repita a nova senha" required>
+            </div>
+          </div>
+
+          <div class="help">
+            Regras recomendadas: senha longa, misture letras maiúsculas/minúsculas, números e símbolos.
+            Evite reaproveitar senha de outros sistemas.
+          </div>
+
+          <div class="actions-line">
+            <button type="submit" class="btn btn-primary">Atualizar Senha</button>
+          </div>
+        </form>
+
+        <div class="sec"></div>
+
+        <div class="table-wrap">
+          <div class="perfil-head">
+            <div class="title">Sessão</div>
+            <div class="badge">Conta</div>
+          </div>
+
+          <div class="perfil-body">
+            <div class="muted-mini">
+              Se você estiver em um computador público ou compartilhado, faça logout ao finalizar.
+            </div>
+
+            <div class="actions-line">
+              <form method="POST" action="{{ url_for('Autenticacao.logout') }}">
+                {% if csrf_token is defined %}
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                {% endif %}
+                <button type="submit" class="btn btn-danger">Sair (Logout)</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}

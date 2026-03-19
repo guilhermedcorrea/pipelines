@@ -1,0 +1,1546 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block content %}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+
+<style>
+  .reserva-page{
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 18px 22px;
+  }
+
+  .reserva-card{
+    width: 100%;
+    max-width: none;
+  }
+
+  @media (max-width: 900px){
+    .reserva-page{ padding: 14px 14px; }
+  }
+
+  .reserva-grid-2{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:12px;
+    align-items:end;
+  }
+
+  .reserva-grid-3{
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap:12px;
+    align-items:end;
+  }
+
+  @media (max-width: 900px){
+    .reserva-grid-2{ grid-template-columns: 1fr; }
+    .reserva-grid-3{ grid-template-columns: 1fr; }
+  }
+
+  /* ✅ marca visual nos dias ocupados (continua existindo) */
+  .flatpickr-day.ocupado{
+    position: relative;
+  }
+  .flatpickr-day.ocupado::after{
+    content:"";
+    position:absolute;
+    top:2px;
+    left:50%;
+    transform:translateX(-50%);
+    width:6px;
+    height:6px;
+    border-radius:999px;
+    background:#b00020;
+    z-index: 3; /* ✅ garante que a bolinha não brigue com o badge */
+  }
+  .flatpickr-day.flatpickr-disabled.ocupado{
+    opacity: 1;
+    color: #b00020;
+    text-decoration: line-through;
+  }
+
+  .hint{
+    margin-top:6px;
+    opacity:.75;
+    font-weight:700;
+    font-size:12px;
+  }
+
+  /* =========================================================
+     ✅ NOVO: badge tipo “6/16” dentro do calendário (igual seu print)
+     ✅ FIX: garantir que o NÚMERO DO DIA apareça
+     ========================================================= */
+
+  /* ✅ o flatpickr usa line-height centralizado; isso some com o número quando você coloca badge.
+     Então ajustamos o layout do dia para suportar o badge sem tampar o texto do dia. */
+  .flatpickr-day{
+    position: relative;         /* pra ancorar badge e bolinha */
+    line-height: 1 !important;  /* ✅ evita o texto ficar "no meio" e sumir */
+    padding-top: 8px !important;/* ✅ reserva espaço pro número (e bolinha) */
+  }
+
+  .flatpickr-day.has-badge{
+    padding-bottom: 26px !important; /* ✅ mais espaço pro badge sem tampar o número */
+  }
+
+  .flatpickr-day .day-badge{
+    position: absolute;
+    left: 50%;
+    bottom: 4px;                /* ✅ desce o badge pra não cobrir o número */
+    transform: translateX(-50%);
+    font-size: 12px;
+    font-weight: 900;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 8px;
+    color: #fff;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 4px 10px rgba(0,0,0,.12);
+    z-index: 2;                 /* ✅ abaixo da bolinha (z=3), acima do fundo */
+  }
+
+  /* ✅ cores do badge (sem depender de variáveis externas) */
+  .flatpickr-day.badge-green .day-badge{ background: #178a3a; }
+  .flatpickr-day.badge-yellow .day-badge{ background: #d39a00; }
+  .flatpickr-day.badge-red .day-badge{ background: #b00020; }
+  .flatpickr-day.badge-gray .day-badge{ background: #6b7280; } /* ✅ indisponível */
+
+  /* ✅ tooltip igualzinho: "PARCIAL — 12/16 disponíveis" */
+  .fp-tooltip{
+    position: fixed;              /* ✅ era absolute; fixed evita recorte */
+    z-index: 2147483647;          /* ✅ sempre na frente */
+    background: #fff;
+    border: 1px solid rgba(0,0,0,.10);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.18);
+    padding: 10px 12px;
+    font-weight: 900;
+    font-size: 13px;
+    color: #111;
+    pointer-events: none;
+    display: none;
+    min-width: 240px;
+  }
+  .fp-tooltip .tag{
+    display:inline-block;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 1000;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .fp-tooltip .tag.parcial{ background: rgba(211,154,0,.12); color: #d39a00; }
+  .fp-tooltip .tag.livre  { background: rgba(23,138,58,.12); color: #178a3a; }
+  .fp-tooltip .tag.cheio  { background: rgba(176,0,32,.12); color: #b00020; }
+  .fp-tooltip .tag.indisp { background: rgba(107,114,128,.12); color: #6b7280; }
+  .fp-tooltip .muted{
+    font-weight: 800;
+    opacity: .75;
+  }
+
+  /* =========================================================
+     ✅ NOVO: "select pesquisável" (sem libs externas)
+     ========================================================= */
+  .select-search{
+    position: relative;
+  }
+  .select-search .ss-input{
+    width:100%;
+    height: 38px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background:#fff;
+    font-weight: 800;
+    outline: none;
+  }
+  .select-search .ss-input:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+  .select-search select.ss-select{
+    position:absolute;
+    left:-99999px;
+    top:auto;
+    width:1px;
+    height:1px;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  .select-search .ss-dropdown{
+    position:absolute;
+    left:0;
+    right:0;
+    top: calc(100% + 6px);
+    z-index: 9999;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,.12);
+    max-height: 280px;
+    overflow:auto;
+    display:none;
+  }
+  .select-search.open .ss-dropdown{ display:block; }
+
+  .select-search .ss-item{
+    padding: 10px 12px;
+    border-bottom:1px solid rgba(0,0,0,.06);
+    cursor:pointer;
+    font-weight:800;
+    font-size:13px;
+    line-height: 1.25;
+  }
+  .select-search .ss-item:last-child{ border-bottom:none; }
+  .select-search .ss-item:hover{
+    background: rgba(0,0,0,.04);
+  }
+  .select-search .ss-item .sub{
+    display:block;
+    margin-top:4px;
+    opacity:.72;
+    font-weight:800;
+    font-size:12px;
+  }
+  .select-search .ss-empty{
+    padding: 10px 12px;
+    opacity:.75;
+    font-weight:800;
+    font-size:13px;
+  }
+
+
+  /* =========================================================
+   ✅ FIX DEFINITIVO: número do dia NÃO fica atrás do badge
+   - Troca badge absoluto por badge "embaixo" (fluxo normal)
+   ========================================================= */
+
+/* garante espaço vertical suficiente */
+.flatpickr-day.has-badge{
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+
+  /* remove aquele espaço que você colocou pro absoluto */
+  padding-bottom: 6px !important;
+
+  /* dá altura pra caber número + badge sem sobrepor */
+  min-height: 52px !important;
+  height: auto !important;
+}
+
+/* o texto do dia (número) fica naturalmente acima,
+   só garantimos que não cola no topo */
+.flatpickr-day{
+  line-height: 1 !important;
+  padding-top: 6px !important;
+}
+
+/* ✅ badge vira "bloco" abaixo do número (não sobrepõe) */
+.flatpickr-day .day-badge{
+  position: static !important;     /* era absolute */
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+
+  margin-top: 4px !important;      /* espaço entre número e badge */
+
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 8px;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,.12);
+}
+
+/* bolinha de ocupado continua no topo sem brigar com badge */
+.flatpickr-day.ocupado::after{
+  top: 2px !important;
+}
+
+</style>
+
+
+
+
+<div class="reserva-page">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h1 style="margin:0;">Nova Reserva</h1>
+      <div style="opacity:.75;font-weight:700;margin-top:6px;">
+        CodPonto: <b>{{ codponto or "-" }}</b>
+        {% if tipo %} • Tipo: <b>{{ tipo }}</b>{% endif %}
+        {% if mes_ref %} • Mês ref: <b>{{ mes_ref }}</b>{% endif %}
+      </div>
+    </div>
+
+    <a class="btn btn-secondary"
+       style="text-decoration:none;"
+       href="{{ request.referrer or url_for('Paineis.lista_paineis') }}">
+      Voltar
+    </a>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <div class="reserva-card" style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:14px;">
+
+    <form id="formReserva" autocomplete="off" method="post">
+
+      {% if form is defined %}
+        {{ form.hidden_tag() }}
+      {% endif %}
+
+      <input type="hidden" id="f_cod_ponto" name="cod_ponto" value="{{ codponto or '' }}">
+      <input type="hidden" id="f_cod_face" name="cod_face" value="{{ codface_sel or '' }}">
+      <input type="hidden" id="f_cota" name="cota" value="">
+      <input type="hidden" id="f_data_inicio" name="data_inicio" value="{{ dt_ini or '' }}">
+      <input type="hidden" id="f_data_fim" name="data_fim" value="{{ dt_fim or '' }}">
+
+      <input type="hidden" id="f_dias" name="dias" value="7">
+
+      <input type="hidden" id="f_id_cliente" name="id_cliente" value="">
+      <input type="hidden" id="f_id_vendedor" name="id_vendedor" value="">
+      <input type="hidden" id="f_id_fato_controle_contratos" name="id_fato_controle_contratos" value="">
+
+      <input type="hidden" id="f_numero_contrato" name="numero_contrato" value="">
+      <input type="hidden" id="f_numero_previa" name="numero_previa" value="">
+
+      <input type="hidden" id="f_observacao" name="observacao" value="">
+      <input type="hidden" id="f_marca_exibida" name="marca_exibida" value="">
+
+      <div class="reserva-grid-2">
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Face (CodFace)</label>
+          <select id="codFace" class="form-control" required>
+            <option value="">Selecione...</option>
+            {% for f in faces %}
+              {% set cod = (f.CodFace|string) %}
+              <option value="{{ cod }}" {% if codface_sel and (cod == (codface_sel|string)) %}selected{% endif %}>
+                {{ cod }}{% if f.Face %} — Face {{ f.Face }}{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          {% if not faces %}
+            <div style="margin-top:8px;opacity:.75;font-weight:700;">
+              Não encontrei faces para esse CodPonto. Verifique Integracao.Silver.DimFacesPaineis.
+            </div>
+          {% endif %}
+        </div>
+
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Cota</label>
+          <select id="cota" class="form-control" required>
+            <option value="540">540</option>
+            <option value="1080">1080</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="reserva-grid-3">
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Data início</label>
+          <input id="dataInicio" type="text" class="form-control" required placeholder="AAAA-MM-DD" value="{{ dt_ini or '' }}">
+        </div>
+
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Data fim</label>
+          <input id="dataFim" type="text" class="form-control" required placeholder="AAAA-MM-DD" value="{{ dt_fim or '' }}">
+        </div>
+
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Prazo (dias)</label>
+          <input id="prazoDias" type="number" class="form-control" value="7" min="1">
+         
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="reserva-grid-3">
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Empresa (Cliente)</label>
+
+          <div class="select-search" id="ssCliente">
+            <input id="idCliente_search" type="text" class="ss-input" placeholder="Digite para pesquisar...">
+            <select id="idCliente" class="form-control ss-select">
+              <option value="">Carregando...</option>
+            </select>
+            <div class="ss-dropdown" id="idCliente_dropdown"></div>
+            <div class="hint">Digite nome ou CNPJ</div>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Vendedor</label>
+
+          <div class="select-search" id="ssVendedor">
+            <input id="idVendedor_search" type="text" class="ss-input" placeholder="Digite para pesquisar...">
+            <select id="idVendedor" class="form-control ss-select">
+              <option value="">Carregando...</option>
+            </select>
+            <div class="ss-dropdown" id="idVendedor_dropdown"></div>
+            <div class="hint">Digite nome do vendedor.</div>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Contrato (Número / Prévia)</label>
+
+          <div class="select-search" id="ssContrato">
+            <input id="idContrato_search" type="text" class="ss-input" placeholder="Digite para pesquisar... (contrato, prévia, empresa)">
+            <select id="idContrato" class="form-control ss-select">
+              <option value="">Selecione...</option>
+            </select>
+            <div class="ss-dropdown" id="idContrato_dropdown"></div>
+            <div class="hint">Digite número do contrato, prévia</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <!-- ✅ NOVO: Marca Exibida (obrigatório) -->
+      <div>
+        <label style="font-weight:900;display:block;margin-bottom:6px;">
+          Marca Exibida <span style="color:#b00020;">*</span>
+        </label>
+        <input
+          id="marcaExibida"
+          type="text"
+          class="form-control"
+          required
+          maxlength="200"
+          placeholder="Ex: Coca-Cola / Banco do Brasil / etc."
+          value=""
+        >
+        <div class="hint">Obrigatório • até 200 caracteres</div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div>
+        <label style="font-weight:900;display:block;margin-bottom:6px;">Observação (opcional)</label>
+        <textarea id="observacao" class="form-control" rows="3" placeholder="Anotações..."></textarea>
+      </div>
+
+      <div style="height:14px;"></div>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Reserva</button>
+        <div id="msg" style="font-weight:900;"></div>
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+<!-- ✅ tooltip flutuante único (reaproveitado) -->
+<div id="fpTooltip" class="fp-tooltip"></div>
+
+
+
+<script>
+(function(){
+  "use strict";
+
+  const URL_DADOS_MODAL = "{{ url_for('Paineis.api_ocupacao_reserva_dados_modal') }}";
+  const URL_CRIAR      = "{{ url_for('Paineis.api_ocupacao_reserva_criar') }}";
+  const URL_CALENDARIO = "{{ url_for('Paineis.api_ocupacao_calendario') }}";
+
+  const COD_PONTO = "{{ codponto|e }}";
+  const MES_REF   = "{{ mes_ref|e }}";
+
+  const COD_FACE_INICIAL = "{{ (codface_sel or '')|e }}";
+  const DT_INI_INICIAL   = "{{ (dt_ini or '')|e }}";
+  const DT_FIM_INICIAL   = "{{ (dt_fim or '')|e }}";
+
+  const elCodFace    = document.getElementById("codFace");
+  const elCota       = document.getElementById("cota");
+  const elDataInicio = document.getElementById("dataInicio");
+  const elDataFim    = document.getElementById("dataFim");
+  const elPrazoDias  = document.getElementById("prazoDias");
+  const elIdCliente  = document.getElementById("idCliente");
+  const elIdVendedor = document.getElementById("idVendedor");
+  const elIdContrato = document.getElementById("idContrato");
+  const elObservacao = document.getElementById("observacao");
+  const elMarcaExibida = document.getElementById("marcaExibida");
+  const elMsg        = document.getElementById("msg");
+  const elBtnSalvar  = document.getElementById("btnSalvar");
+  const elForm       = document.getElementById("formReserva");
+
+  const fCodPonto = document.getElementById("f_cod_ponto");
+  const fCodFace  = document.getElementById("f_cod_face");
+  const fCota     = document.getElementById("f_cota");
+  const fDtIni    = document.getElementById("f_data_inicio");
+  const fDtFim    = document.getElementById("f_data_fim");
+  const fDias     = document.getElementById("f_dias");
+
+  const fIdCliente   = document.getElementById("f_id_cliente");
+  const fIdVendedor  = document.getElementById("f_id_vendedor");
+  const fIdFato      = document.getElementById("f_id_fato_controle_contratos");
+  const fNumContrato = document.getElementById("f_numero_contrato");
+  const fNumPrevia   = document.getElementById("f_numero_previa");
+  const fObs         = document.getElementById("f_observacao");
+  const fMarcaExibida  = document.getElementById("f_marca_exibida");
+
+  const elCsrf = elForm ? elForm.querySelector("input[name='csrf_token']") : null;
+
+  const ssClienteWrap  = document.getElementById("ssCliente");
+  const ssVendedorWrap = document.getElementById("ssVendedor");
+  const ssContratoWrap = document.getElementById("ssContrato");
+
+  const elClienteSearch  = document.getElementById("idCliente_search");
+  const elVendedorSearch = document.getElementById("idVendedor_search");
+  const elContratoSearch = document.getElementById("idContrato_search");
+
+  const elClienteDrop  = document.getElementById("idCliente_dropdown");
+  const elVendedorDrop = document.getElementById("idVendedor_dropdown");
+  const elContratoDrop = document.getElementById("idContrato_dropdown");
+
+  const elTooltip = document.getElementById("fpTooltip");
+
+  if(!elForm || !elCodFace || !elCota || !elDataInicio || !elDataFim || !elPrazoDias || !elBtnSalvar){
+    console.error("[reserva] Elementos do DOM não encontrados. Verifique IDs no template.");
+    return;
+  }
+
+  let ocupacoesAtuais = [];
+  let ocupacoesRanges = [];
+
+  let contratosAtuais = [];
+  let contratosMap = new Map();
+
+  let fpInicio = null;
+  let fpFim = null;
+
+  let empresasAtuais = [];
+  let vendedoresAtuais = [];
+
+  // chave "YYYY-MM-DD" -> { disponiveis, total, status }
+  let dayBadgeMap = new Map();
+  let CAP_TOTAL_DEFAULT = 16;
+
+  function setMsg(txt, ok){
+    if(!elMsg) return;
+    elMsg.textContent = txt || "";
+    elMsg.style.color = ok ? "#0a7a2f" : "#b00020";
+  }
+
+  function getEmpresaId(e){
+    return String(e.IDEmpresa ?? e.IDEmpresas ?? e.IDCliente ?? e.ID ?? "").trim();
+  }
+
+  function getVendedorId(v){
+    return String(v.IDVendedor ?? v.ID ?? "").trim();
+  }
+
+  function getContratoId(c){
+    return String(c.IDContrato ?? c.IDFatoControleContratosEuromidia ?? c.ID ?? "").trim();
+  }
+
+  function preencherSelectTolerante(el, itens, getValueFn, labelFn, valorInicial){
+    if(!el) return;
+    el.innerHTML = '<option value="">Selecione...</option>';
+    for(const it of (itens || [])){
+      const val = String(getValueFn(it) ?? "").trim();
+      if(!val) continue;
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = labelFn(it);
+      el.appendChild(opt);
+    }
+    if(valorInicial){
+      el.value = valorInicial;
+    }
+  }
+
+  function yyyy_mm_dd_para_date(v){
+    const s = (v || "").trim();
+    if(!s) return null;
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return null;
+
+    const y  = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    const d  = parseInt(m[3], 10);
+
+    return new Date(Date.UTC(y, mo - 1, d));
+  }
+
+  function normalizarParaMeiaNoiteTs(dt){
+    if(!dt) return null;
+    return Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+  }
+
+  function date_para_yyyy_mm_dd(dt){
+    if(!dt) return "";
+    const y = dt.getUTCFullYear();
+    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(dt.getUTCDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  function montarRangesDeOcupacao(){
+    ocupacoesRanges = [];
+    for(const o of (ocupacoesAtuais || [])){
+      const di = yyyy_mm_dd_para_date(o.DataInicio);
+      const df = yyyy_mm_dd_para_date(o.DataFim);
+      if(!di || !df) continue;
+
+      const iniTs = normalizarParaMeiaNoiteTs(di);
+      const fimTs = normalizarParaMeiaNoiteTs(df);
+      if(iniTs == null || fimTs == null) continue;
+
+      const a = Math.min(iniTs, fimTs);
+      const b = Math.max(iniTs, fimTs);
+      ocupacoesRanges.push({ iniTs: a, fimTs: b });
+    }
+  }
+
+  function diaEstaOcupado(dateObj){
+    const ts = normalizarParaMeiaNoiteTs(dateObj);
+    if(ts == null) return false;
+    for(const r of ocupacoesRanges){
+      if(ts >= r.iniTs && ts <= r.fimTs) return true;
+    }
+    return false;
+  }
+
+  // =========================================================
+  // ✅ STATUS / BADGE
+  // =========================================================
+  function normalizarStatusBadge(status){
+    const s = (status || "").toString().trim().toUpperCase();
+    if(!s) return "PARCIAL";
+
+    if(s === "LOTADO") return "CHEIO";
+    if(s === "OCUPADO") return "CHEIO";
+    if(s === "CHEIO") return "CHEIO";
+    if(s === "LIVRE") return "LIVRE";
+    if(s === "PARCIAL") return "PARCIAL";
+
+    if(s.includes("INDISP")) return "INDISPONIVEL";
+    if(s.includes("BLOQ")) return "INDISPONIVEL";
+
+    return s;
+  }
+
+  function escolherCorBadgePorStatus(statusNorm, disponiveis, total){
+    const s = normalizarStatusBadge(statusNorm);
+
+    if(s === "INDISPONIVEL") return "gray";
+    if(s === "CHEIO") return "red";
+    if(s === "LIVRE") return "green";
+    if(s === "PARCIAL") return "yellow";
+
+    if(total <= 0) return "green";
+    if(disponiveis <= 0) return "red";
+    if(disponiveis >= total) return "green";
+    return "yellow";
+  }
+
+  function montarTooltipText(status, disponiveis, total){
+    const st = normalizarStatusBadge(status || "PARCIAL");
+    return st + " — " + disponiveis + "/" + total + " disponíveis";
+  }
+
+  function limparBadgeClasses(dayElem){
+    dayElem.classList.remove("has-badge","badge-green","badge-yellow","badge-red","badge-gray");
+    const old = dayElem.querySelector(".day-badge");
+    if(old) old.remove();
+    dayElem.removeAttribute("data-badge-tooltip");
+    dayElem.removeAttribute("data-badge-status");
+  }
+
+  function tooltipShow(texto, status, x, y){
+    if(!elTooltip) return;
+    const stNorm = normalizarStatusBadge(status);
+
+    const cls =
+      (stNorm === "CHEIO") ? "cheio" :
+      (stNorm === "LIVRE") ? "livre" :
+      (stNorm === "INDISPONIVEL") ? "indisp" :
+      "parcial";
+
+    elTooltip.innerHTML =
+      "<span class='tag "+cls+"'>" + (stNorm || "PARCIAL") + "</span>" +
+      "<span class='muted'>" + String(texto || "").replace(/^.*—\s*/, "") + "</span>";
+
+    elTooltip.style.display = "block";
+
+    const pad = 12;
+    const w = elTooltip.offsetWidth || 260;
+    const h = elTooltip.offsetHeight || 44;
+
+    let left = x + pad;
+    let top  = y + pad;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    if(left + w + 10 > vw) left = x - w - pad;
+    if(top  + h + 10 > vh) top  = y - h - pad;
+
+    elTooltip.style.left = left + "px";
+    elTooltip.style.top  = top  + "px";
+  }
+
+  function tooltipHide(){
+    if(!elTooltip) return;
+    elTooltip.style.display = "none";
+  }
+
+  // =========================================================
+  // ✅ BLOQUEIO POR CAPACIDADE (PARCIAL com disp>0 é clicável)
+  // =========================================================
+  function getDayInfo(dateObj){
+    const key = date_para_yyyy_mm_dd(dateObj);
+    return dayBadgeMap.get(key) || null;
+  }
+
+  function diaBloqueadoPorCapacidade(dateObj){
+    const info = getDayInfo(dateObj);
+
+    if(info){
+      const disp = Number(info.disponiveis);
+      const total = Number(info.total);
+      const st = normalizarStatusBadge(info.status);
+
+      if(!Number.isFinite(disp) || !Number.isFinite(total)) return false;
+      if(st === "INDISPONIVEL") return true;
+      if(st === "CHEIO") return true;
+      if(disp <= 0) return true;
+
+      return false;
+    }
+
+    // fallback: sem calendário diário -> usa faixa azul
+    return diaEstaOcupado(dateObj);
+  }
+
+  function ranges_tem_conflito(inicioStr, fimStr){
+    const di = yyyy_mm_dd_para_date(inicioStr);
+    const df = yyyy_mm_dd_para_date(fimStr);
+    if(!di || !df) return false;
+
+    const tIni = normalizarParaMeiaNoiteTs(di);
+    const tFim = normalizarParaMeiaNoiteTs(df);
+    if(tIni == null || tFim == null) return false;
+
+    if(tFim < tIni) return true;
+
+    const diaMs = 24 * 60 * 60 * 1000;
+    for(let t = tIni; t <= tFim; t += diaMs){
+      const d = new Date(t);
+      if(diaBloqueadoPorCapacidade(d)) return true;
+    }
+    return false;
+  }
+
+  function garantirFimNaoAntesDoInicio(){
+    if(!fpFim) return;
+
+    const diStr = (elDataInicio.value || "").trim();
+    if(!diStr) return;
+
+    fpFim.set("minDate", diStr);
+
+    const dfStr = (elDataFim.value || "").trim();
+    if(!dfStr){
+      fpFim.setDate(diStr, false);
+      return;
+    }
+
+    const di = yyyy_mm_dd_para_date(diStr);
+    const df = yyyy_mm_dd_para_date(dfStr);
+    if(!di || !df) return;
+
+    const tIni = normalizarParaMeiaNoiteTs(di);
+    const tFim = normalizarParaMeiaNoiteTs(df);
+    if(tIni == null || tFim == null) return;
+
+    if(tFim < tIni){
+      fpFim.setDate(diStr, false);
+    }
+  }
+
+  function atualizarRestricoesCalendarios(){
+    if(!fpInicio || !fpFim) return;
+
+    fpInicio.set("disable", [ (date) => diaBloqueadoPorCapacidade(date) ]);
+    fpFim.set("disable", [ (date) => diaBloqueadoPorCapacidade(date) ]);
+
+    const diStr = (elDataInicio.value || "").trim();
+    if(diStr){
+      fpFim.set("minDate", diStr);
+      garantirFimNaoAntesDoInicio();
+    }else{
+      fpFim.set("minDate", null);
+    }
+
+    fpInicio.redraw();
+    fpFim.redraw();
+  }
+
+  function validarDatasNoClient(){
+    const di = (elDataInicio.value || "").trim();
+    const df = (elDataFim.value || "").trim();
+    if(!di || !df) return;
+
+    if(ranges_tem_conflito(di, df)){
+      setMsg("Período conflita (dia CHEIO/INDISPONÍVEL). Escolha outro intervalo.", false);
+      elBtnSalvar.disabled = true;
+      return;
+    }
+
+    setMsg("", true);
+    elBtnSalvar.disabled = false;
+  }
+
+  // =========================================================
+  // ✅ Flatpickr
+  // =========================================================
+  function initFlatpickr(){
+    fpInicio = flatpickr(elDataInicio, {
+      dateFormat: "Y-m-d",
+      allowInput: true,
+      disableMobile: true,
+      prevArrow: "‹",
+      nextArrow: "›",
+      disable: [ (date) => diaBloqueadoPorCapacidade(date) ],
+      onDayCreate: function(dObj, dStr, fp, dayElem){
+        limparBadgeClasses(dayElem);
+
+        const key = date_para_yyyy_mm_dd(dayElem.dateObj);
+        const info = dayBadgeMap.get(key);
+
+        if(info){
+          const disponiveis = Number(info.disponiveis);
+          const total = Number(info.total);
+
+          if(Number.isFinite(disponiveis) && Number.isFinite(total)){
+            const status = normalizarStatusBadge(
+              info.status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
+            );
+            const cor = escolherCorBadgePorStatus(status, disponiveis, total);
+
+            dayElem.classList.add("has-badge");
+            dayElem.classList.add(
+              cor === "red" ? "badge-red" :
+              (cor === "yellow" ? "badge-yellow" :
+              (cor === "gray" ? "badge-gray" : "badge-green"))
+            );
+
+            const badge = document.createElement("span");
+            badge.className = "day-badge";
+            badge.textContent = disponiveis + "/" + total;
+            dayElem.appendChild(badge);
+
+            const tooltipText = montarTooltipText(status, disponiveis, total);
+            dayElem.addEventListener("mouseenter", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
+            dayElem.addEventListener("mousemove", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
+            dayElem.addEventListener("mouseleave", tooltipHide);
+          }
+        }
+
+        if(diaEstaOcupado(dayElem.dateObj)){
+          dayElem.classList.add("ocupado");
+        }
+      },
+      onReady: function(selectedDates, dateStr, fp){
+        const mesRef = (MES_REF || "").trim();
+        if(mesRef) fp.jumpToDate(mesRef + "-01", false);
+      },
+      onChange: function(){
+        atualizarRestricoesCalendarios();
+        garantirFimNaoAntesDoInicio();
+        if(fpFim) fpFim.redraw();
+        validarDatasNoClient();
+      }
+    });
+
+    fpFim = flatpickr(elDataFim, {
+      dateFormat: "Y-m-d",
+      allowInput: true,
+      disableMobile: true,
+      prevArrow: "‹",
+      nextArrow: "›",
+      disable: [ (date) => diaBloqueadoPorCapacidade(date) ],
+      onDayCreate: function(dObj, dStr, fp, dayElem){
+        limparBadgeClasses(dayElem);
+
+        const key = date_para_yyyy_mm_dd(dayElem.dateObj);
+        const info = dayBadgeMap.get(key);
+
+        if(info){
+          const disponiveis = Number(info.disponiveis);
+          const total = Number(info.total);
+
+          if(Number.isFinite(disponiveis) && Number.isFinite(total)){
+            const status = normalizarStatusBadge(
+              info.status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
+            );
+            const cor = escolherCorBadgePorStatus(status, disponiveis, total);
+
+            dayElem.classList.add("has-badge");
+            dayElem.classList.add(
+              cor === "red" ? "badge-red" :
+              (cor === "yellow" ? "badge-yellow" :
+              (cor === "gray" ? "badge-gray" : "badge-green"))
+            );
+
+            const badge = document.createElement("span");
+            badge.className = "day-badge";
+            badge.textContent = disponiveis + "/" + total;
+            dayElem.appendChild(badge);
+
+            const tooltipText = montarTooltipText(status, disponiveis, total);
+            dayElem.addEventListener("mouseenter", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
+            dayElem.addEventListener("mousemove", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
+            dayElem.addEventListener("mouseleave", tooltipHide);
+          }
+        }
+
+        if(diaEstaOcupado(dayElem.dateObj)){
+          dayElem.classList.add("ocupado");
+        }
+      },
+      onReady: function(selectedDates, dateStr, fp){
+        const mesRef = (MES_REF || "").trim();
+        if(mesRef) fp.jumpToDate(mesRef + "-01", false);
+      },
+      onOpen: function(){
+        garantirFimNaoAntesDoInicio();
+        if(fpFim) fpFim.redraw();
+      },
+      onChange: function(){
+        validarDatasNoClient();
+      }
+    });
+
+    if(DT_INI_INICIAL) fpInicio.setDate(DT_INI_INICIAL, false);
+    if(DT_FIM_INICIAL) fpFim.setDate(DT_FIM_INICIAL, false);
+
+    atualizarRestricoesCalendarios();
+    garantirFimNaoAntesDoInicio();
+  }
+
+  // =========================================================
+  // ✅ Searchable selects
+  // =========================================================
+  function normalizarTexto(s){
+    return (s || "")
+      .toString()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function labelEmpresa(e){
+    const nome = (e.Nome || e.RazaoSocial || "").trim();
+    const cnpj = (e.CNPJ || "").trim();
+    return (nome && cnpj) ? (nome + " — " + cnpj) : (nome || cnpj || "—");
+  }
+
+  function labelVendedor(v){
+    return (v.NomeVendedor || "").trim() || "—";
+  }
+
+  function labelContrato(c){
+    const nc = (c.NumeroContrato || "").trim();
+    const np = (c.NumeroPrevia || "").trim();
+    const rz = (c.RazaoSocial || "").trim();
+    const cj = (c.CNPJ || "").trim();
+    const cab = ("Contrato " + (nc || "-") + " / Prévia " + (np || "-"));
+    const emp = (rz || cj) ? (" — " + (rz || "") + (cj ? (" — " + cj) : "")) : "";
+    return cab + emp;
+  }
+
+  function abrirDropdown(wrap){ if(wrap) wrap.classList.add("open"); }
+  function fecharDropdown(wrap){ if(wrap) wrap.classList.remove("open"); }
+
+  function renderDropdown(dropEl, itens, renderFn, onPick){
+    if(!dropEl) return;
+    dropEl.innerHTML = "";
+    if(!itens || itens.length === 0){
+      const d = document.createElement("div");
+      d.className = "ss-empty";
+      d.textContent = "Nenhum resultado";
+      dropEl.appendChild(d);
+      return;
+    }
+    for(const it of itens){
+      const row = document.createElement("div");
+      row.className = "ss-item";
+      const html = renderFn(it);
+      if(typeof html === "string") row.innerHTML = html;
+      else row.textContent = String(html);
+
+      row.addEventListener("mousedown", function(ev){
+        ev.preventDefault();
+        onPick(it);
+      });
+      dropEl.appendChild(row);
+    }
+  }
+
+  function buildSearchableSelect(cfg){
+    const wrap = cfg.wrap;
+    const input = cfg.input;
+    const select = cfg.select;
+    const dropdown = cfg.dropdown;
+
+    if(!wrap || !input || !select || !dropdown){
+      console.warn("[reserva] buildSearchableSelect: elementos não encontrados:", cfg);
+      return { setItems: function(){} };
+    }
+
+    let itensOriginais = [];
+    const getValue = cfg.getValue;
+    const getLabel = cfg.getLabel;
+    const renderItem = cfg.renderItem;
+
+    function setItems(itens){
+      itensOriginais = Array.isArray(itens) ? itens : [];
+      const valorAtual = (select.value || "").toString().trim();
+      if(valorAtual){
+        const achado = itensOriginais.find(x => String(getValue(x)).trim() === valorAtual);
+        if(achado) input.value = getLabel(achado);
+      }
+      filtrarEExibir();
+    }
+
+    function filtrarEExibir(){
+      const termo = normalizarTexto(input.value || "");
+      const filtrados = itensOriginais
+        .filter(it => !termo || normalizarTexto(getLabel(it)).includes(termo))
+        .slice(0, 200);
+
+      renderDropdown(dropdown, filtrados, renderItem, function(it){
+        const val = String(getValue(it) ?? "").trim();
+        select.value = val;
+        input.value = getLabel(it);
+        fecharDropdown(wrap);
+        select.dispatchEvent(new Event("change", { bubbles:true }));
+      });
+    }
+
+    input.addEventListener("focus", function(){ abrirDropdown(wrap); filtrarEExibir(); });
+    input.addEventListener("input", function(){ abrirDropdown(wrap); filtrarEExibir(); });
+    input.addEventListener("keydown", function(ev){ if(ev.key === "Escape") fecharDropdown(wrap); });
+
+    document.addEventListener("mousedown", function(ev){
+      if(!wrap.contains(ev.target)) fecharDropdown(wrap);
+    });
+
+    select.addEventListener("change", function(){
+      const valorAtual = (select.value || "").toString().trim();
+      const achado = itensOriginais.find(x => String(getValue(x)).trim() === valorAtual);
+      if(achado) input.value = getLabel(achado);
+    });
+
+    return { setItems };
+  }
+
+  const ssCliente = buildSearchableSelect({
+    wrap: ssClienteWrap,
+    input: elClienteSearch,
+    select: elIdCliente,
+    dropdown: elClienteDrop,
+    getValue: (e) => getEmpresaId(e),
+    getLabel: (e) => labelEmpresa(e),
+    renderItem: (e) => {
+      const nome = (e.Nome || e.RazaoSocial || "").trim() || "—";
+      const cnpj = (e.CNPJ || "").trim();
+      const sub = cnpj ? ("<span class='sub'>" + cnpj + "</span>") : "";
+      return nome + sub;
+    }
+  });
+
+  const ssVendedor = buildSearchableSelect({
+    wrap: ssVendedorWrap,
+    input: elVendedorSearch,
+    select: elIdVendedor,
+    dropdown: elVendedorDrop,
+    getValue: (v) => getVendedorId(v),
+    getLabel: (v) => labelVendedor(v),
+    renderItem: (v) => (v.NomeVendedor || "").trim() || "—"
+  });
+
+  const ssContrato = buildSearchableSelect({
+    wrap: ssContratoWrap,
+    input: elContratoSearch,
+    select: elIdContrato,
+    dropdown: elContratoDrop,
+    getValue: (c) => getContratoId(c),
+    getLabel: (c) => labelContrato(c),
+    renderItem: (c) => {
+      const nc = (c.NumeroContrato || "").trim();
+      const np = (c.NumeroPrevia || "").trim();
+      const rz = (c.RazaoSocial || "").trim();
+      const cj = (c.CNPJ || "").trim();
+      const top = ("Contrato " + (nc || "-") + " / Prévia " + (np || "-"));
+      const sub = (rz || cj) ? ("<span class='sub'>" + (rz || "") + (cj ? (" — " + cj) : "") + "</span>") : "";
+      return top + sub;
+    }
+  });
+
+  // =========================================================
+  // ✅ fetch fallback
+  // =========================================================
+  async function fetchComFallback(url, options){
+    const tentar = async (u) => {
+      console.log("[reserva] FETCH:", (options && options.method) ? options.method : "GET", u);
+      return await fetch(u, options);
+    };
+
+    let resp = await tentar(url);
+    if(resp.status !== 404) return resp;
+
+    if(url.includes("/paineis/")){
+      const u2 = url.replace("/paineis/", "/");
+      resp = await tentar(u2);
+      if(resp.status !== 404) return resp;
+    }
+
+    if(!url.includes("/paineis/")){
+      const u3 = "/paineis" + (url.startsWith("/") ? "" : "/") + url;
+      resp = await tentar(u3);
+      if(resp.status !== 404) return resp;
+    }
+
+    return resp;
+  }
+
+  // =========================================================
+  // ✅ calendário -> dayBadgeMap
+  // =========================================================
+  function montarDayBadgeMapDoPayload(data){
+    dayBadgeMap = new Map();
+
+    const cap = Number(data.capacidade_total ?? data.cap_total ?? data.k_fisico ?? data.CapacidadeTotal ?? NaN);
+    const capTotal = Number.isFinite(cap) ? cap : CAP_TOTAL_DEFAULT;
+
+    const cal = data.calendario || data.calendar || data.dias_calendario || data.day_status || null;
+    if(Array.isArray(cal) && cal.length){
+      for(const it of cal){
+        const dt = (it.data || it.Data || it.dia || it.Dia || it.date || it.Date || "").toString().trim();
+        if(!dt) continue;
+
+        const total = Number(it.total ?? it.Total ?? it.capacidade ?? it.Capacidade ?? capTotal);
+
+        let disp = it.disponiveis ?? it.Disponiveis ?? it.available ?? it.Available ?? null;
+        if(disp == null){
+          const ocu = it.ocupados ?? it.Ocupados ?? it.usados ?? it.Usados ?? it.used ?? it.Used ?? null;
+          if(ocu != null) disp = Number(total) - Number(ocu);
+        }
+
+        const disponiveis = Number(disp);
+        if(!Number.isFinite(disponiveis) || !Number.isFinite(total)) continue;
+
+        const status = normalizarStatusBadge(
+          (it.status || it.Status || "").toString().trim().toUpperCase()
+          || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
+        );
+
+        dayBadgeMap.set(dt, { disponiveis, total, status });
+      }
+    }
+  }
+
+  function montarDayBadgeMapDoCalendario(payloadCalendario){
+    dayBadgeMap = new Map();
+
+    if(!payloadCalendario || !payloadCalendario.ok) return;
+
+    const cal = payloadCalendario.cal || {};
+    const chaves = Object.keys(cal);
+
+    for(const dt of chaves){
+      const it = cal[dt];
+      if(!it) continue;
+
+      const total = Number(it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? NaN);
+      const disponiveis = Number(it.disp ?? it.disponiveis ?? it.SlotsDisponiveis ?? it.Disponiveis ?? NaN);
+      if(!Number.isFinite(total) || !Number.isFinite(disponiveis)) continue;
+
+      const status = normalizarStatusBadge(it.status || it.Status || "");
+      dayBadgeMap.set(dt, {
+        disponiveis,
+        total,
+        status: status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
+      });
+    }
+
+    for(const dt of chaves){
+      const it = cal[dt];
+      const t = Number(it && (it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? NaN));
+      if(Number.isFinite(t) && t > 0){
+        CAP_TOTAL_DEFAULT = t;
+        break;
+      }
+    }
+  }
+
+  // =========================================================
+  // ✅ contratos map
+  // =========================================================
+  function montarContratosMap(){
+    contratosMap = new Map();
+    for(const c of (contratosAtuais || [])){
+      const id = getContratoId(c);
+      if(id) contratosMap.set(id, c);
+    }
+  }
+
+  function onContratoChange(){
+    if(!elIdContrato || !elIdCliente || !elClienteSearch) return;
+
+    const id = (elIdContrato.value || "").trim();
+    if(!id) return;
+
+    const c = contratosMap.get(id);
+    if(!c) return;
+
+    const idEmpresa = String(c.IDEmpresa ?? c.IDEmpresaCliente ?? c.IDCliente ?? "").trim();
+    if(idEmpresa){
+      elIdCliente.value = idEmpresa;
+
+      const achada = (empresasAtuais || []).find(x => getEmpresaId(x) === idEmpresa);
+      if(achada){
+        elClienteSearch.value = labelEmpresa(achada);
+      }
+    }
+  }
+
+  // =========================================================
+  // ✅ carregar dados modal + calendário
+  // =========================================================
+  async function carregarDadosModal(){
+    const codFace = (elCodFace.value || "").trim();
+    const cota = (elCota.value || "").trim();
+
+    if(!COD_PONTO){
+      console.warn("[reserva] COD_PONTO vazio.");
+      return;
+    }
+
+    const qs = new URLSearchParams();
+    qs.set("cod_face", codFace);
+    qs.set("cota", cota);
+    qs.set("mes_ref", MES_REF || "");
+
+    const url = URL_DADOS_MODAL + "?" + qs.toString();
+
+    const resp = await fetchComFallback(url, { method: "GET", credentials: "same-origin" });
+    if(!resp.ok){
+      const txt = await resp.text().catch(()=> "");
+      console.error("[reserva] dados-modal falhou:", resp.status, txt);
+      setMsg("Erro ao carregar dados (clientes/vendedores/contratos).", false);
+      return;
+    }
+
+    const data = await resp.json().catch(()=> null);
+    if(!data){
+      setMsg("Erro: resposta inválida do backend.", false);
+      return;
+    }
+
+    empresasAtuais   = data.empresas   || data.Empresas   || [];
+    vendedoresAtuais = data.vendedores || data.Vendedores || [];
+    contratosAtuais  = data.contratos  || data.Contratos  || [];
+
+    ocupacoesAtuais = data.ocupacoes || data.Ocupacoes || [];
+    montarRangesDeOcupacao();
+
+    // opcional: se backend mandar calendário aqui
+    montarDayBadgeMapDoPayload(data);
+
+    // selects reais
+    preencherSelectTolerante(elIdCliente,  empresasAtuais,   getEmpresaId,  labelEmpresa,  (fIdCliente.value || "").trim());
+    preencherSelectTolerante(elIdVendedor, vendedoresAtuais, getVendedorId, labelVendedor, (fIdVendedor.value || "").trim());
+
+    // contrato (label grande)
+    if(elIdContrato){
+      elIdContrato.innerHTML = '<option value="">Selecione...</option>';
+      for(const c of (contratosAtuais || [])){
+        const id = getContratoId(c);
+        if(!id) continue;
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = labelContrato(c);
+        elIdContrato.appendChild(opt);
+      }
+      const v = (fIdFato.value || "").trim();
+      if(v) elIdContrato.value = v;
+    }
+
+    montarContratosMap();
+
+    // searchable UI
+    ssCliente.setItems(empresasAtuais);
+    ssVendedor.setItems(vendedoresAtuais);
+    ssContrato.setItems(contratosAtuais);
+
+    atualizarRestricoesCalendarios();
+    if(fpInicio) fpInicio.redraw();
+    if(fpFim) fpFim.redraw();
+  }
+
+  async function carregarCalendario(){
+    const codFace = (elCodFace.value || "").trim();
+    const cota = (elCota.value || "").trim();
+
+    if(!COD_PONTO || !codFace) return;
+
+    const qs = new URLSearchParams();
+    qs.set("cod_ponto", COD_PONTO);
+    qs.set("cod_face", codFace);
+    qs.set("cota", cota);
+    if(MES_REF) qs.set("mes_ref", MES_REF);
+
+    const url = URL_CALENDARIO + "?" + qs.toString();
+
+    const resp = await fetchComFallback(url, { method:"GET", credentials:"same-origin" });
+    if(!resp.ok){
+      const txt = await resp.text().catch(()=> "");
+      console.warn("[reserva] calendario falhou:", resp.status, txt);
+      dayBadgeMap = new Map();
+      if(fpInicio) fpInicio.redraw();
+      if(fpFim) fpFim.redraw();
+      return;
+    }
+
+    const payload = await resp.json().catch(()=> null);
+    if(!payload){
+      dayBadgeMap = new Map();
+      if(fpInicio) fpInicio.redraw();
+      if(fpFim) fpFim.redraw();
+      return;
+    }
+
+    montarDayBadgeMapDoCalendario(payload);
+
+    if(fpInicio) fpInicio.redraw();
+    if(fpFim) fpFim.redraw();
+  }
+
+  // =========================================================
+  // ✅ sync hidden fields
+  // =========================================================
+  function syncHiddenFields(){
+    const codFace = (elCodFace.value || "").trim();
+    const cota = (elCota.value || "").trim();
+
+    fCodPonto.value = (COD_PONTO || "").trim();
+    fCodFace.value  = codFace;
+    fCota.value     = cota;
+
+    fDtIni.value = (elDataInicio.value || "").trim();
+    fDtFim.value = (elDataFim.value || "").trim();
+
+    const dias = parseInt((elPrazoDias.value || "7"), 10);
+    fDias.value = (Number.isFinite(dias) && dias > 0) ? String(dias) : "7";
+
+    const idCli = (elIdCliente.value || "").trim();
+    const idVen = (elIdVendedor.value || "").trim();
+    const idCtr = (elIdContrato.value || "").trim();
+
+    fIdCliente.value = idCli;
+    fIdVendedor.value = idVen;
+    fIdFato.value = idCtr;
+
+    if(idCtr && contratosMap.has(idCtr)){
+      const c = contratosMap.get(idCtr);
+      fNumContrato.value = String(c.NumeroContrato || "").trim();
+      fNumPrevia.value   = String(c.NumeroPrevia || "").trim();
+    }else{
+      fNumContrato.value = "";
+      fNumPrevia.value   = "";
+    }
+
+    fObs.value = (elObservacao.value || "").trim();
+    fMarcaExibida.value = (elMarcaExibida && elMarcaExibida.value ? elMarcaExibida.value : "").trim();
+  }
+
+  // =========================================================
+  // ✅ submit
+  // =========================================================
+  async function enviarReserva(ev){
+    ev.preventDefault();
+
+    syncHiddenFields();
+
+    const codFace = (fCodFace.value || "").trim();
+    const cota = (fCota.value || "").trim();
+    const di = (fDtIni.value || "").trim();
+    const df = (fDtFim.value || "").trim();
+
+    if(!COD_PONTO || !codFace || !cota || !di || !df){
+      setMsg("Preencha Face, Cota e Datas.", false);
+      return;
+    }
+
+    if(ranges_tem_conflito(di, df)){
+      setMsg("Período conflita (dia CHEIO/INDISPONÍVEL).", false);
+      return;
+    }
+
+    elBtnSalvar.disabled = true;
+    setMsg("Salvando...", true);
+
+    const formData = new FormData(elForm);
+
+    formData.set("cod_ponto", fCodPonto.value);
+    formData.set("cod_face", fCodFace.value);
+    formData.set("cota", fCota.value);
+    formData.set("data_inicio", fDtIni.value);
+    formData.set("data_fim", fDtFim.value);
+    formData.set("dias", fDias.value);
+
+    formData.set("id_cliente", fIdCliente.value);
+    formData.set("id_vendedor", fIdVendedor.value);
+    formData.set("id_fato_controle_contratos", fIdFato.value);
+
+    formData.set("numero_contrato", fNumContrato.value);
+    formData.set("numero_previa", fNumPrevia.value);
+    formData.set("observacao", fObs.value);
+    formData.set("marca_exibida", fMarcaExibida.value);
+
+    if(elCsrf && elCsrf.value){
+      formData.set("csrf_token", elCsrf.value);
+    }
+
+    const resp = await fetchComFallback(URL_CRIAR, {
+      method: "POST",
+      credentials: "same-origin",
+      body: formData
+    });
+
+    let payload = null;
+    try{ payload = await resp.json(); }catch(e){}
+
+    if(!resp.ok || !payload){
+      const txt = payload && (payload.msg || payload.erro) ? (payload.msg || payload.erro) : ("HTTP " + resp.status);
+      setMsg("Erro ao salvar: " + txt, false);
+      elBtnSalvar.disabled = false;
+      return;
+    }
+
+    if(payload.ok){
+      setMsg(payload.msg || "Reserva criada com sucesso!", true);
+
+      await carregarDadosModal();
+      await carregarCalendario();
+
+      if(payload.redirect){
+        window.location.href = payload.redirect;
+        return;
+      }
+    }else{
+      setMsg(payload.msg || payload.erro || "Falha ao criar reserva.", false);
+    }
+
+    elBtnSalvar.disabled = false;
+  }
+
+  // =========================================================
+  // ✅ eventos
+  // =========================================================
+  elPrazoDias.addEventListener("change", function(){
+    const diStr = (elDataInicio.value || "").trim();
+    const prazoStr = (elPrazoDias.value || "").trim();
+    if(!diStr || !prazoStr) return;
+
+    const prazo = parseInt(prazoStr, 10);
+    if(!prazo || prazo < 1) return;
+
+    const di = yyyy_mm_dd_para_date(diStr);
+    if(!di) return;
+
+    const baseTs = normalizarParaMeiaNoiteTs(di);
+    const diasMs = 24 * 60 * 60 * 1000;
+    const dfTs = baseTs + ((prazo - 1) * diasMs);
+    const df = new Date(dfTs);
+
+    const dfStr = date_para_yyyy_mm_dd(df);
+
+    if(ranges_tem_conflito(diStr, dfStr)){
+      setMsg("Prazo cai em dia CHEIO/INDISPONÍVEL. Ajuste Data início ou reduza o prazo.", false);
+      return;
+    }
+
+    fpFim.setDate(dfStr, true);
+    garantirFimNaoAntesDoInicio();
+    validarDatasNoClient();
+  });
+
+  elCodFace.addEventListener("change", async function(){
+    fCodFace.value = (elCodFace.value || "").trim();
+    await carregarDadosModal();
+    await carregarCalendario();
+    validarDatasNoClient();
+  });
+
+  elCota.addEventListener("change", async function(){
+    fCota.value = (elCota.value || "").trim();
+    await carregarDadosModal();
+    await carregarCalendario();
+    validarDatasNoClient();
+  });
+
+  elIdContrato.addEventListener("change", function(){
+    onContratoChange();
+    syncHiddenFields();
+  });
+
+  elIdCliente.addEventListener("change", syncHiddenFields);
+  elIdVendedor.addEventListener("change", syncHiddenFields);
+  elObservacao.addEventListener("input", syncHiddenFields);
+  if(elMarcaExibida){
+    elMarcaExibida.addEventListener("input", syncHiddenFields);
+  }
+
+  elForm.addEventListener("submit", enviarReserva);
+
+  // =========================================================
+  // ✅ boot
+  // =========================================================
+  async function boot(){
+    if(COD_FACE_INICIAL && elCodFace){
+      elCodFace.value = COD_FACE_INICIAL;
+    }
+
+    initFlatpickr();
+
+    await carregarDadosModal();
+    await carregarCalendario();
+
+    syncHiddenFields();
+    validarDatasNoClient();
+  }
+
+  boot();
+
+})();
+</script>
+
+
+{% endblock %}

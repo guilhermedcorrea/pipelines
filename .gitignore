@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Segredos
+.env
+.env.*
+*.env
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Airflow
+airflow/logs/
+airflow/airflow.cfg
+airflow/standalone_admin_password.txt
+
+# Dados e artefatos
+*.csv
+*.xlsx
+*.xlsm
+*.parquet
+*.feather
+*.pkl
+*.joblib
+
+# Pastas comuns de dados/saída
+Dados/
+data/
+outputs/
+saida/
+saidas/
+tmp/
+temp/
+
+# Sistema
+.DS_Store
+Thumbs.db

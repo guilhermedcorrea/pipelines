@@ -1,0 +1,1237 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Movimentação Financeira - Empresas{% endblock %}
+
+{% block content %}
+<div class="card movfin-page">
+
+  <!-- CABEÇALHO -->
+  <div class="movfin-header" style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;">
+    <div class="movfin-header-left" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <h1 class="page-title" style="margin:0;">Movimentação Financeira (Empresas)</h1>
+
+      <span class="movfin-count" style="
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        padding:6px 10px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:#fff;
+        font-weight:800;
+        color: var(--euro-blue);
+      ">
+        ☰ {{ paginacao.total }}
+      </span>
+
+      <div class="muted movfin-range" style="font-size:12px;font-weight:800;">
+        Exibindo <b>{{ paginacao.inicio }}</b>–<b>{{ paginacao.fim }}</b> de <b>{{ paginacao.total }}</b>
+      </div>
+    </div>
+
+    <div class="muted movfin-mesref" style="font-weight:900;">
+      {% if filtros.modo == "MES_ATUAL" %}
+        📅 Mês Atual (Vencimento)
+      {% elif filtros.modo == "TUDO" %}
+        🌐 Tudo (Vencimento)
+      {% else %}
+        {% if filtros.data_ini or filtros.data_fim %}
+          {% if filtros.data_ini %}{{ filtros.data_ini }}{% else %}—{% endif %}
+          <span class="muted">até</span>
+          {% if filtros.data_fim %}{{ filtros.data_fim }}{% else %}—{% endif %}
+        {% else %}
+          —
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  {% set ns = namespace(
+      total_reg=0,
+      total_valor=0,
+
+      pagar_valor=0,
+      receber_valor=0,
+
+      pago_valor=0,
+      recebido_valor=0,
+      pago_qtd=0,
+      recebido_qtd=0,
+
+      aberto_outros_valor=0,
+      aberto_outros_qtd=0,
+
+      vencido_valor=0,
+      a_vencer_valor=0,
+      vencido_qtd=0,
+      a_vencer_qtd=0,
+
+      atraso_pagar_valor=0,
+      atraso_receber_valor=0,
+      atraso_pagar_qtd=0,
+      atraso_receber_qtd=0,
+
+      pagar_qtd=0,
+      receber_qtd=0,
+
+      cat_top_nome="—",
+      cat_top_valor=0
+  ) %}
+
+  {% for it in itens %}
+    {% set v = (it.Valor or 0) %}
+
+    {# ✅ MOVIMENTO (coluna Movimento) — normalização forte #}
+    {% set mov_raw0 = (it.Movimento or "")|string %}
+    {% set mov0 = mov_raw0|upper|trim %}
+    {% set mov0 = mov0|replace("_", " ") %}
+    {% set mov0 = mov0|replace("\u00A0", " ") %} {# NBSP #}
+    {% set mov0 = mov0|replace("\t", " ") %}
+    {% set mov0 = mov0|replace("\n", " ") %}
+    {% set mov0 = mov0|replace("\r", " ") %}
+    {% set mov0 = mov0|replace("  ", " ") %}
+    {% set mov0 = mov0|replace("  ", " ") %}
+    {% set mov = mov0 %}
+
+    {% set cat = (it.Categoria or "")|trim %}
+
+    {% set ns.total_reg = ns.total_reg + 1 %}
+    {% set ns.total_valor = ns.total_valor + v %}
+
+    {# =========================================================
+       ✅ Cards por MOVIMENTO (valores oficiais)
+       ========================================================= #}
+
+    {# Card: A PAGAR = "A PAGAR - FUTURO" #}
+    {% if mov == "A PAGAR - FUTURO" %}
+      {% set ns.pagar_valor = ns.pagar_valor + v %}
+      {% set ns.pagar_qtd = ns.pagar_qtd + 1 %}
+    {% endif %}
+
+    {# Card: A RECEBER = "A RECEBER - FUTURO" #}
+    {% if mov == "A RECEBER - FUTURO" %}
+      {% set ns.receber_valor = ns.receber_valor + v %}
+      {% set ns.receber_qtd = ns.receber_qtd + 1 %}
+    {% endif %}
+
+    {# Card: PAGO = "PAGAMENTOS REALIZADOS" #}
+    {% if mov == "PAGAMENTOS REALIZADOS" %}
+      {% set ns.pago_valor = ns.pago_valor + v %}
+      {% set ns.pago_qtd = ns.pago_qtd + 1 %}
+    {% endif %}
+
+    {# Card: RECEBIDO = "RECEBIDOS" #}
+    {% if mov == "RECEBIDOS" %}
+      {% set ns.recebido_valor = ns.recebido_valor + v %}
+      {% set ns.recebido_qtd = ns.recebido_qtd + 1 %}
+    {% endif %}
+
+    {# Cards de ATRASO por MOVIMENTO #}
+    {% if mov == "A PAGAR - EM ATRASO" %}
+      {% set ns.atraso_pagar_valor = ns.atraso_pagar_valor + v %}
+      {% set ns.atraso_pagar_qtd = ns.atraso_pagar_qtd + 1 %}
+    {% elif mov == "A RECEBER - EM ATRASO" %}
+      {% set ns.atraso_receber_valor = ns.atraso_receber_valor + v %}
+      {% set ns.atraso_receber_qtd = ns.atraso_receber_qtd + 1 %}
+    {% endif %}
+
+    {# "Em aberto / outros" = tudo que NÃO é PAGO/RECEBIDO, baseado em MOVIMENTO #}
+    {% if mov != "PAGAMENTOS REALIZADOS" and mov != "RECEBIDOS" %}
+      {% set ns.aberto_outros_valor = ns.aberto_outros_valor + v %}
+      {% set ns.aberto_outros_qtd = ns.aberto_outros_qtd + 1 %}
+    {% endif %}
+
+    {# Mantido: Vencido / A vencer (se você quiser usar depois)
+       - Aqui, como você pediu que "sempre que falar de data é DataVencimento",
+         o "ATRASADO/A VENCER" não vem do Status mais.
+       - Para não remover nada, mantenho os campos, mas sem depender de Status.
+       - (Se você quiser depois, dá pra calcular isso no backend usando DataVencimento vs hoje.)
+    #}
+
+    {# Categoria TOP (por valor absoluto, só desta página) #}
+    {% if cat and (v|abs) >= (ns.cat_top_valor|abs) %}
+      {% set ns.cat_top_valor = v %}
+      {% set ns.cat_top_nome = cat %}
+    {% endif %}
+  {% endfor %}
+
+  {# =========================================================
+     ✅ NOVO: ns2 = fonte única para os cards
+     - Se resumo veio do backend, usa ele
+     - Senão, usa ns (página)
+     ========================================================= #}
+  {% if resumo is defined and resumo %}
+    {% set ns2 = namespace(
+        total_reg=resumo.total_reg,
+        total_valor=resumo.total_valor,
+
+        pagar_valor=resumo.pagar_valor,
+        receber_valor=resumo.receber_valor,
+        pagar_qtd=resumo.pagar_qtd,
+        receber_qtd=resumo.receber_qtd,
+
+        pago_valor=(resumo.pago_valor if resumo.pago_valor is defined else 0),
+        recebido_valor=(resumo.recebido_valor if resumo.recebido_valor is defined else 0),
+        pago_qtd=(resumo.pago_qtd if resumo.pago_qtd is defined else 0),
+        recebido_qtd=(resumo.recebido_qtd if resumo.recebido_qtd is defined else 0),
+
+        aberto_outros_valor=resumo.aberto_outros_valor,
+        aberto_outros_qtd=resumo.aberto_outros_qtd,
+
+        vencido_valor=resumo.vencido_valor,
+        vencido_qtd=resumo.vencido_qtd,
+        a_vencer_valor=resumo.a_vencer_valor,
+        a_vencer_qtd=resumo.a_vencer_qtd,
+
+        atraso_pagar_valor=(resumo.pag_em_atraso_valor if resumo.pag_em_atraso_valor is defined else (resumo.atraso_pagar_valor if resumo.atraso_pagar_valor is defined else 0)),
+        atraso_receber_valor=(resumo.receb_em_atraso_valor if resumo.receb_em_atraso_valor is defined else (resumo.atraso_receber_valor if resumo.atraso_receber_valor is defined else 0)),
+        atraso_pagar_qtd=(resumo.pag_em_atraso_qtd if resumo.pag_em_atraso_qtd is defined else (resumo.atraso_pagar_qtd if resumo.atraso_pagar_qtd is defined else 0)),
+        atraso_receber_qtd=(resumo.receb_em_atraso_qtd if resumo.receb_em_atraso_qtd is defined else (resumo.atraso_receber_qtd if resumo.atraso_receber_qtd is defined else 0)),
+
+        cat_top_nome=resumo.cat_top_nome,
+        cat_top_valor=resumo.cat_top_valor
+    ) %}
+    {% set cards_scope_label = "Soma do período / filtro (tudo filtrado)" %}
+  {% else %}
+    {% set ns2 = ns %}
+    {% set cards_scope_label = "Soma dos valores exibidos nesta página" %}
+  {% endif %}
+
+  <div class="movfin-cards">
+
+    <div class="movfin-card">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">A Pagar</span>
+        <span class="movfin-card-chip">⬇ {{ ns2.pagar_qtd }}</span>
+      </div>
+      <div class="movfin-card-value mono" style="color:#991b1b;">
+        {% if ns2.pagar_valor is not none %}
+          R$ {{ "{:,.2f}".format(ns2.pagar_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="movfin-card-sub muted">A PAGAR - FUTURO</div>
+    </div>
+
+    <div class="movfin-card">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">A Receber</span>
+        <span class="movfin-card-chip">⬆ {{ ns2.receber_qtd }}</span>
+      </div>
+      <div class="movfin-card-value mono" style="color:#166534;">
+        {% if ns2.receber_valor is not none %}
+          R$ {{ "{:,.2f}".format(ns2.receber_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="movfin-card-sub muted">A RECEBER - FUTURO</div>
+    </div>
+
+    {# ✅ CARD: PAGO (Movimento) #}
+    <div class="movfin-card">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">Pago</span>
+        <span class="movfin-card-chip">✔ {{ ns2.pago_qtd }}</span>
+      </div>
+      <div class="movfin-card-value mono" style="color:#166534;">
+        {% if ns2.pago_valor is not none %}
+          R$ {{ "{:,.2f}".format(ns2.pago_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="movfin-card-sub muted">PAGAMENTOS REALIZADOS</div>
+    </div>
+
+    {# ✅ CARD: RECEBIDO (Movimento) #}
+    <div class="movfin-card">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">Recebido</span>
+        <span class="movfin-card-chip">✔ {{ ns2.recebido_qtd }}</span>
+      </div>
+      <div class="movfin-card-value mono" style="color:#065f46;">
+        {% if ns2.recebido_valor is not none %}
+          R$ {{ "{:,.2f}".format(ns2.recebido_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="movfin-card-sub muted">RECEBIDOS</div>
+    </div>
+
+    {# ✅ CARD: RECEBIMENTOS EM ATRASO (Movimento) #}
+    <div class="movfin-card">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">Recebimentos em atraso</span>
+        <span class="movfin-card-chip">⚠ {{ ns2.atraso_receber_qtd }}</span>
+      </div>
+      <div class="movfin-card-value mono" style="color:#991b1b;">
+        {% if ns2.atraso_receber_valor is not none %}
+          R$ {{ "{:,.2f}".format(ns2.atraso_receber_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="movfin-card-sub muted">A RECEBER - EM ATRASO</div>
+    </div>
+
+    {# ✅ CARD: PAGAMENTOS EM ATRASO (Movimento) #}
+    <div class="movfin-card">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">Pagamentos em atraso</span>
+        <span class="movfin-card-chip">⚠ {{ ns2.atraso_pagar_qtd }}</span>
+      </div>
+      <div class="movfin-card-value mono" style="color:#991b1b;">
+        {% if ns2.atraso_pagar_valor is not none %}
+          R$ {{ "{:,.2f}".format(ns2.atraso_pagar_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="movfin-card-sub muted">A PAGAR - EM ATRASO</div>
+    </div>
+
+    <div class="movfin-card movfin-card-wide">
+      <div class="movfin-card-top">
+        <span class="movfin-card-title">Categoria em destaque</span>
+        <span class="movfin-card-chip">🏷</span>
+      </div>
+      <div class="movfin-card-value" style="font-size:13px;font-weight:1000;line-height:1.15;white-space:normal;">
+        {{ ns2.cat_top_nome }}
+      </div>
+      <div class="movfin-card-sub muted">
+        Valor (linha):
+        <span class="mono" style="font-weight:1000;color:var(--text);">
+          {% if ns2.cat_top_valor is not none %}
+            R$ {{ "{:,.2f}".format(ns2.cat_top_valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+          {% else %}
+            —
+          {% endif %}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* ✅ NOVO: Cards de resumo */
+    .movfin-cards{
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+      width: 100%;
+    }
+
+    .movfin-card{
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fff;
+      padding: 12px 12px;
+      box-shadow: 0 1px 10px rgba(0,0,0,.03);
+      min-height: 92px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+    }
+
+    .movfin-card-top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .movfin-card-title{
+      font-weight: 1000;
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: .1px;
+      white-space: nowrap;
+    }
+
+    .movfin-card-chip{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,.10);
+      background: rgba(0,40,132,.03);
+      color: var(--euro-blue);
+      font-weight: 1000;
+      font-size: 12px;
+      line-height:1;
+      white-space: nowrap;
+    }
+
+    .movfin-card-value{
+      margin-top: 10px;
+      font-weight: 1000;
+      font-size: 18px;
+      color: var(--text);
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+
+    .movfin-card-sub{
+      margin-top: 6px;
+      font-weight: 900;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .movfin-card-wide{
+      grid-column: span 2;
+    }
+
+    @media (max-width: 1320px){
+      .movfin-cards{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .movfin-card-wide{ grid-column: span 3; }
+      .movfin-card-title{ white-space: normal; }
+    }
+
+    @media (max-width: 820px){
+      .movfin-cards{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .movfin-card-wide{ grid-column: span 2; }
+      .movfin-card-title{ white-space: normal; }
+      .movfin-card-value{ white-space: normal; }
+    }
+
+    @media (max-width: 520px){
+      .movfin-cards{ grid-template-columns: 1fr; }
+      .movfin-card-wide{ grid-column: span 1; }
+    }
+  </style>
+
+  <div style="height:14px;"></div>
+
+  <!-- FILTROS -->
+  <form method="GET" action="{{ url_for('admin.lista_movimentacao_empresas') }}">
+
+    <!-- LINHA 1: BUSCA + PERÍODO + AÇÕES -->
+    <div class="movfin-row movfin-row-top">
+      <div class="movfin-field movfin-field-search">
+        <label>Buscar (descrição/contraparte/categoria/empresa)</label>
+        <input name="q" value="{{ filtros.q }}" placeholder="Ex: aluguel, DARF, fornecedor...">
+      </div>
+
+      <div class="movfin-field">
+        <label>Vencimento (início)</label>
+        <input
+          type="date"
+          name="data_ini"
+          value="{% if request.args.get('data_ini') %}{{ request.args.get('data_ini') }}{% elif request.args.get('data_fim') %}{{ (filtros.data_ini_iso if filtros.data_ini_iso is defined else '') }}{% else %}{% endif %}"
+          autocomplete="off">
+      </div>
+
+      <div class="movfin-field">
+        <label>Vencimento (até)</label>
+        <input
+          type="date"
+          name="data_fim"
+          value="{% if request.args.get('data_fim') %}{{ request.args.get('data_fim') }}{% elif request.args.get('data_ini') %}{{ (filtros.data_fim_iso if filtros.data_fim_iso is defined else '') }}{% else %}{% endif %}"
+          autocomplete="off">
+      </div>
+
+      <div class="movfin-actions">
+        <button class="btn btn-primary" type="submit">
+          ⛭ Aplicar
+        </button>
+
+        <a class="btn btn-secondary"
+           style="text-decoration:none;"
+           href="{{ url_for('admin.lista_movimentacao_empresas') }}">
+          ⟲ Limpar
+        </a>
+
+        <a class="btn btn-secondary"
+           style="text-decoration:none;"
+           href="{{ url_for('admin.lista_movimentacao_empresas',
+              modo='MES_ATUAL',
+              per_page=filtros.per_page
+           ) }}">
+          📅 Mês Atual
+        </a>
+
+        <a class="btn btn-secondary"
+           style="text-decoration:none;"
+           href="{{ url_for('admin.lista_movimentacao_empresas',
+              modo='TUDO',
+              per_page=filtros.per_page
+           ) }}">
+          🌐 Tudo
+        </a>
+      </div>
+    </div>
+
+    <div style="height:10px;"></div>
+
+    <!-- LINHA 2: FILTROS SECUNDÁRIOS -->
+    <div class="movfin-row movfin-row-bottom">
+      <div class="movfin-field">
+        <label>Sistema</label>
+        <select name="sistema">
+          <option value="">Todos</option>
+          {% for s in sistemas %}
+            <option value="{{ s }}" {% if filtros.sistema == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="movfin-field">
+        <label>Natureza</label>
+        {# ✅ AGORA É MOVIMENTO (coluna Movimento) #}
+        <select name="movimento">
+          <option value="">Todas</option>
+          {% for m in movimentos %}
+            <option value="{{ m }}" {% if filtros.movimento == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="movfin-field">
+        <label>Status</label>
+        <select name="status">
+          <option value="">Todos</option>
+          {% for st in status_list %}
+            <option value="{{ st }}" {% if filtros.status == st %}selected{% endif %}>{{ st }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="movfin-field">
+        <label>Categoria</label>
+        <select name="categoria">
+          <option value="">Todas</option>
+          {% for c in categorias %}
+            <option value="{{ c }}" {% if filtros.categoria == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="movfin-field">
+        <label>Empresa</label>
+        <select name="empresa">
+          <option value="">Todas</option>
+          {% for e in empresas %}
+            <option value="{{ e.id }}" {% if filtros.empresa == e.id %}selected{% endif %}>{{ e.razao }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="movfin-field movfin-field-perpage">
+        <label>Por página</label>
+        <select name="per_page">
+          {% for n in [10,20,30,50,100] %}
+            <option value="{{ n }}" {% if filtros.per_page == n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+  </form>
+
+  <style>
+    /* ===========================================================
+       FILTROS - ORGANIZAÇÃO BONITA E HARMONIOSA (2 LINHAS)
+       =========================================================== */
+
+    .movfin-page,
+    .movfin-page *{
+      box-sizing: border-box !important;
+    }
+
+    /* labels */
+    .movfin-page .movfin-field label{
+      display:block !important;
+      margin: 0 0 6px 0 !important;
+      font-weight: 900 !important;
+      font-size: 12px !important;
+      color: var(--muted) !important;
+      line-height: 1.15 !important;
+      letter-spacing: .1px;
+      white-space: nowrap;
+    }
+
+    /* altura e “cara” única */
+    .movfin-page .movfin-field input,
+    .movfin-page .movfin-field select,
+    .movfin-page .movfin-actions .btn{
+      height: 44px !important;
+      min-height: 44px !important;
+      border-radius: 12px !important;
+    }
+
+    .movfin-page .movfin-field input,
+    .movfin-page .movfin-field select{
+      width: 100% !important;
+      display:block !important;
+      padding: 0 12px !important;
+      border: 1px solid var(--border) !important;
+      background: #fff !important;
+      color: var(--text) !important;
+      font-weight: 800 !important;
+    }
+
+    /* input centraliza melhor com line-height */
+    .movfin-page .movfin-field input{
+      line-height: 44px !important;
+    }
+
+    /* ✅ Date input: evita ficar “alto/estranho” em alguns browsers */
+    .movfin-page .movfin-field input[type="date"]{
+      padding-right: 10px !important; /* não deixa ícone esmagar texto */
+    }
+
+    /* select sem quebrar altura */
+    .movfin-page .movfin-field select{
+      padding-right: 38px !important;
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%),
+        linear-gradient(to right, transparent, transparent);
+      background-position:
+        calc(100% - 18px) 18px,
+        calc(100% - 12px) 18px,
+        0 0;
+      background-size:
+        6px 6px,
+        6px 6px,
+        100% 100%;
+      background-repeat: no-repeat;
+    }
+
+    .movfin-page .movfin-field input::placeholder{
+      color: rgba(100,116,139,.85);
+      font-weight: 700;
+    }
+
+    /* LINHAS */
+    .movfin-page .movfin-row{
+      display: grid !important;
+      gap: 10px !important;
+      align-items: end !important;
+      width: 100% !important;
+    }
+
+    /* Linha de cima: busca grande + 2 datas + ações */
+    .movfin-page .movfin-row-top{
+      grid-template-columns: 1.6fr 180px 180px auto !important;
+    }
+
+    /* ✅ Linha de baixo: NÃO some mais (auto-fit + minmax) */
+    .movfin-page .movfin-row-bottom{
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+    }
+
+    .movfin-page .movfin-field-search{
+      min-width: 320px;
+    }
+
+    .movfin-page .movfin-field-perpage{
+      justify-self: end;
+      min-width: 130px;
+    }
+
+    /* AÇÕES: bloco alinhado, sem “fugir” pra direita */
+    .movfin-page .movfin-actions{
+      display:flex !important;
+      gap:10px !important;
+      align-items:end !important;
+      justify-content:flex-end !important;
+      flex-wrap: nowrap !important;
+      width: 100% !important;
+    }
+
+    .movfin-page .movfin-actions .btn{
+      display:inline-flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      padding: 0 14px !important;
+      font-weight: 900 !important;
+      white-space: nowrap !important;
+    }
+
+    /* RESPONSIVO: cai para 2 colunas e depois 1 */
+    @media (max-width: 1200px){
+      .movfin-page .movfin-row-top{
+        grid-template-columns: 1fr 1fr !important;
+      }
+      .movfin-page .movfin-actions{
+        justify-content:flex-start !important;
+        flex-wrap: wrap !important;
+      }
+      .movfin-page .movfin-row-bottom{
+        grid-template-columns: 1fr 1fr 1fr !important;
+      }
+      .movfin-page .movfin-field-perpage{
+        justify-self: start !important;
+        min-width: 0 !important;
+      }
+      .movfin-page .movfin-field label{
+        white-space: normal !important;
+      }
+    }
+
+    @media (max-width: 560px){
+      .movfin-page .movfin-row-top,
+      .movfin-page .movfin-row-bottom{
+        grid-template-columns: 1fr !important;
+      }
+      .movfin-page .movfin-actions .btn{
+        width: 100% !important;
+      }
+    }
+
+    /* ===========================================================
+       TABELA: trava contra responsivo do base (td::before etc.)
+       =========================================================== */
+
+    .movfin-page .movfin-wrap .movfin-table{
+      display: table !important;
+      width: 100% !important;
+      table-layout: auto !important;
+      border-collapse: collapse !important;
+    }
+    .movfin-page .movfin-wrap .movfin-table thead{ display: table-header-group !important; }
+    .movfin-page .movfin-wrap .movfin-table tbody{ display: table-row-group !important; }
+    .movfin-page .movfin-wrap .movfin-table tfoot{ display: table-footer-group !important; }
+    .movfin-page .movfin-wrap .movfin-table tr{ display: table-row !important; }
+
+    .movfin-page .movfin-wrap .movfin-table th,
+    .movfin-page .movfin-wrap .movfin-table td{
+      display: table-cell !important;
+      float: none !important;
+      width: auto !important;
+      box-sizing: border-box !important;
+      vertical-align: middle !important;
+    }
+
+    .movfin-page .movfin-wrap .movfin-table td::before,
+    .movfin-page .movfin-wrap .movfin-table td::after{
+      content: none !important;
+      display: none !important;
+    }
+
+    .movfin-page .overflow-x{
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+      -webkit-overflow-scrolling: touch;
+      width: 100% !important;
+      display: block !important;
+    }
+
+    /* ===== Empresa (logo + nome) ===== */
+    .empresa-badge{
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
+      min-width: 260px;
+    }
+
+    .empresa-logo{
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,.10);
+      background: #fff;
+      object-fit: contain;
+      padding: 3px;
+      display:block;
+      box-shadow: 0 1px 8px rgba(0,0,0,.06);
+      flex: 0 0 auto;
+      margin-top: 2px;
+    }
+
+    .empresa-avatar{
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,.10);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background: rgba(0,40,132,.08);
+      color: var(--euro-blue);
+      font-weight: 1000;
+      font-size: 12px;
+      flex: 0 0 auto;
+      margin-top: 2px;
+    }
+
+    .empresa-nome{
+      font-weight: 900;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.15;
+      white-space: normal;
+      word-break: break-word;
+      max-width: 360px;
+    }
+
+    .empresa-sub{
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+      line-height: 1.2;
+      white-space: normal;
+      word-break: break-word;
+      max-width: 360px;
+    }
+
+    /* ===== Sistema (logo + nome) ===== */
+    .sistema-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    .sistema-logo{
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(0,0,0,.10);
+      background: #fff;
+      object-fit: contain;
+      display:block;
+      flex: 0 0 auto;
+      box-shadow: 0 1px 6px rgba(0,0,0,.06);
+    }
+
+    .sistema-nome{
+      font-weight: 900;
+      color: var(--text);
+      font-size: 12px;
+    }
+
+    /* ===== Tabela ===== */
+    .table-wrap{
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#fff;
+      margin-top: 14px;
+    }
+
+    .movfin-table{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .movfin-table th, .movfin-table td{
+      padding: 12px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    .movfin-table th{
+      font-size: 12px;
+      color: var(--euro-blue);
+      font-weight: 900;
+      background: rgba(0,40,132,.03);
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      white-space: nowrap;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 900;
+      font-size: 12px;
+      border: 1px solid rgba(0,0,0,.08);
+      background: #fff;
+      gap: 8px;
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .pill.pagar{ background: rgba(220,38,38,.06); color:#991b1b; border-color: rgba(220,38,38,.18); }
+    .pill.receber{ background: rgba(22,163,74,.06); color:#166534; border-color: rgba(22,163,74,.18); }
+
+    /* ===== Status badges ===== */
+    .status-pill{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 1000;
+      font-size: 12px;
+      border: 1px solid rgba(0,0,0,.10);
+      background: #fff;
+      white-space: nowrap;
+      line-height: 1;
+      letter-spacing: .2px;
+    }
+
+    .status-pill.atrasado{
+      background: rgba(220,38,38,.10);
+      color: #991b1b;
+      border-color: rgba(220,38,38,.28);
+    }
+
+    .status-pill.pago{
+      background: rgba(22,163,74,.10);
+      color: #166534;
+      border-color: rgba(22,163,74,.26);
+    }
+
+    .status-pill.recebido{
+      background: rgba(5,150,105,.12);
+      color: #065f46;
+      border-color: rgba(5,150,105,.28);
+    }
+
+    .status-pill.em-aberto{
+      background: rgba(37,99,235,.10);
+      color: #1e40af;
+      border-color: rgba(37,99,235,.25);
+    }
+
+    .status-pill.a-vencer{
+      background: rgba(245,158,11,.14);
+      color: #92400e;
+      border-color: rgba(245,158,11,.28);
+    }
+
+    .status-pill.cancelado{
+      background: rgba(100,116,139,.12);
+      color: #334155;
+      border-color: rgba(100,116,139,.28);
+    }
+
+    .mono{
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum";
+      white-space: nowrap;
+    }
+
+    .wraptext{
+      max-width: 520px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.2;
+    }
+
+    @media (max-width: 760px){
+      .empresa-badge{ min-width: 0; }
+      .empresa-nome, .empresa-sub{ max-width: 220px; }
+      .wraptext{ max-width: 240px; }
+    }
+
+    /* ===========================================================
+       ✅ NOVO: Linha clicável (sem interferir no resto)
+       =========================================================== */
+    .movfin-row-click{
+      cursor: pointer;
+      transition: background .12s ease;
+    }
+    .movfin-row-click:hover{
+      background: rgba(0,40,132,.04);
+    }
+  </style>
+
+  <!-- TABELA -->
+  <div class="table-wrap movfin-wrap">
+    <div class="overflow-x">
+      <table class="movfin-table">
+        <thead>
+          <tr>
+            <th>Empresa</th>
+            <th>Sistema</th>
+            <th>Tipo</th>
+            <th>Natureza</th>
+            <th>Competência</th>
+            <th>Vencimento</th>
+            <th>Pagamento</th>
+            <th>Categoria</th>
+            <th>Descrição</th>
+            <th class="mono">Valor</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {% for it in itens %}
+          <tr
+            class="movfin-row-click"
+                data-href="{{ url_for('admin.movimentacao_empresas_detalhe',
+                id_mov=it.ID
+                ) }}"
+                onclick="if(this.dataset.href){ window.location = this.dataset.href; }"
+                title="Abrir detalhes da movimentação"
+          >
+            <td>
+              <div class="empresa-badge">
+                {% set nome = (it.RazaoSocial or "Empresa") %}
+                {% set partes = nome.split() %}
+                {% set ini1 = (partes[0][:1] if partes|length > 0 else "E") %}
+                {% set ini2 = (partes[1][:1] if partes|length > 1 else "") %}
+                {% set iniciais = (ini1 ~ ini2)|upper %}
+
+                {% set logo = (it.Logo or "")|trim %}
+
+                {% if logo.startswith("http://") or logo.startswith("https://") %}
+                  <img class="empresa-logo"
+                       src="{{ logo }}"
+                       alt="{{ nome }}"
+                       loading="lazy"
+                       referrerpolicy="no-referrer"
+                       onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                  <div class="empresa-avatar" style="display:none;" title="{{ nome }}">{{ iniciais }}</div>
+
+                {% elif logo %}
+                  {% if "/" in logo %}
+                    {% set logo_rel = logo %}
+                  {% else %}
+                    {% set logo_rel = "imagens/LogoEmpresaProprietaria/" ~ logo %}
+                  {% endif %}
+
+                  <img class="empresa-logo"
+                       src="{{ url_for('static', filename=logo_rel) }}"
+                       alt="{{ nome }}"
+                       loading="lazy"
+                       onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                  <div class="empresa-avatar" style="display:none;" title="{{ nome }}">{{ iniciais }}</div>
+
+                {% else %}
+                  <div class="empresa-avatar" title="{{ nome }}">{{ iniciais }}</div>
+                {% endif %}
+
+                <div>
+                  <div class="empresa-nome" title="{{ nome }}">{{ nome }}</div>
+                  {% if it.CNPJ %}
+                    <div class="empresa-sub">CNPJ: {{ it.CNPJ }}</div>
+                  {% endif %}
+                </div>
+              </div>
+            </td>
+
+            <!-- SISTEMA -->
+            <td class="mono">
+              {% set sis = (it.SistemaOrigem or "")|trim %}
+              {% set sis_u = sis|upper %}
+
+              <span class="sistema-badge">
+                {% if sis_u == "GRANATUM" %}
+                  <img class="sistema-logo"
+                       src="{{ url_for('static', filename='imagens/LogoSistemas/granatum.png') }}"
+                       alt="Granatum"
+                       loading="lazy">
+                  <span class="sistema-nome">GRANATUM</span>
+
+                {% elif sis_u == "OMIE" %}
+                  <img class="sistema-logo"
+                       src="{{ url_for('static', filename='imagens/LogoSistemas/omie.jpg') }}"
+                       alt="Omie"
+                       loading="lazy">
+                  <span class="sistema-nome">OMIE</span>
+
+                {% else %}
+                  <span class="sistema-nome">{{ sis }}</span>
+                {% endif %}
+              </span>
+            </td>
+
+            <!-- TIPO (NOVA COLUNA) -->
+            <td class="mono">
+              {% if it.Tipo %}
+                <span class="pill">{{ it.Tipo }}</span>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+            <!-- DIREÇÃO (NATUREZA) -> agora vem de MOVIMENTO -->
+            <td>
+              {% set mov_raw0 = (it.Movimento or "")|string %}
+              {% set mov0 = mov_raw0|upper|trim %}
+              {% set mov0 = mov0|replace("_", " ") %}
+              {% set mov0 = mov0|replace("\u00A0", " ") %}
+              {% set mov0 = mov0|replace("\t", " ") %}
+              {% set mov0 = mov0|replace("\n", " ") %}
+              {% set mov0 = mov0|replace("\r", " ") %}
+              {% set mov0 = mov0|replace("  ", " ") %}
+              {% set mov0 = mov0|replace("  ", " ") %}
+              {% set mov = mov0 %}
+              {% set mov_raw = mov_raw0|trim %}
+
+              {% if mov == "A PAGAR - FUTURO" or mov == "A PAGAR - EM ATRASO" or mov == "PAGAMENTOS REALIZADOS" %}
+                <span class="pill pagar">PAGAR</span>
+              {% elif mov == "A RECEBER - FUTURO" or mov == "A RECEBER - EM ATRASO" or mov == "RECEBIDOS" %}
+                <span class="pill receber">RECEBER</span>
+              {% else %}
+                <span class="pill">{{ mov_raw }}</span>
+              {% endif %}
+            </td>
+
+            <!-- DATAS -->
+            <td class="mono">{{ it.DataCompetencia or "—" }}</td>
+            <td class="mono">{{ it.DataVencimento or "—" }}</td>
+            <td class="mono">{{ it.DataPagamento or "—" }}</td>
+
+            <!-- TEXTOS -->
+            <td class="wraptext" title="{{ it.Categoria }}">{{ it.Categoria }}</td>
+            <td class="wraptext" title="{{ it.Descricao }}">{{ it.Descricao }}</td>
+
+            <!-- VALOR -->
+            <td class="mono">
+              {% if it.Valor is not none %}
+                R$ {{ "{:,.2f}".format(it.Valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+            <!-- STATUS -->
+            <td>
+              {# ✅ AGORA: "Status" visual da tabela vem da coluna MOVIMENTO (não da coluna Status).
+                 Valores oficiais:
+                   A PAGAR - FUTURO
+                   A PAGAR - EM ATRASO
+                   A RECEBER - FUTURO
+                   PAGAMENTOS REALIZADOS
+                   A RECEBER - EM ATRASO
+                   RECEBIDOS
+              #}
+
+              {% set st_raw0 = (it.Movimento or "")|string %}
+              {% set st0 = st_raw0|upper|trim %}
+              {% set st0 = st0|replace("_", " ") %}
+              {% set st0 = st0|replace("\u00A0", " ") %}
+              {% set st0 = st0|replace("\t", " ") %}
+              {% set st0 = st0|replace("\n", " ") %}
+              {% set st0 = st0|replace("\r", " ") %}
+              {% set st0 = st0|replace("  ", " ") %}
+              {% set st0 = st0|replace("  ", " ") %}
+              {% set st = st0 %}
+              {% set st_raw = st_raw0|trim %}
+
+              {% if st == "A PAGAR - EM ATRASO" or st == "A RECEBER - EM ATRASO" %}
+                <span class="status-pill atrasado">{{ st }}</span>
+              {% elif st == "PAGAMENTOS REALIZADOS" %}
+                <span class="status-pill pago">PAGAMENTOS REALIZADOS</span>
+              {% elif st == "RECEBIDOS" %}
+                <span class="status-pill recebido">RECEBIDOS</span>
+              {% elif st == "A PAGAR - FUTURO" or st == "A RECEBER - FUTURO" %}
+                <span class="status-pill a-vencer">{{ st }}</span>
+              {% else %}
+                <span class="status-pill">{{ st_raw }}</span>
+              {% endif %}
+            </td>
+
+          </tr>
+          {% endfor %}
+
+          {% if itens|length == 0 %}
+          <tr>
+            <td colspan="11" class="muted" style="padding:14px;">
+              Nenhum registro encontrado para os filtros informados.
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PAGINAÇÃO -->
+    <div style="padding: 12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div class="muted" style="font-weight:800;">
+        Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} registros
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;">
+        {% set p = paginacao.page %}
+        {% set tp = paginacao.total_pages %}
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_movimentacao_empresas',
+              page=1,
+              per_page=filtros.per_page,
+              q=filtros.q,
+              sistema=filtros.sistema,
+              movimento=filtros.movimento,
+              status=filtros.status,
+              categoria=filtros.categoria,
+              empresa=filtros.empresa,
+              data_ini=filtros.data_ini,
+              data_fim=filtros.data_fim,
+              modo=filtros.modo
+           ) }}">
+          «
+        </a>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_movimentacao_empresas',
+              page=(p-1 if p>1 else 1),
+              per_page=filtros.per_page,
+              q=filtros.q,
+              sistema=filtros.sistema,
+              movimento=filtros.movimento,
+              status=filtros.status,
+              categoria=filtros.categoria,
+              empresa=filtros.empresa,
+              data_ini=filtros.data_ini,
+              data_fim=filtros.data_fim,
+              modo=filtros.modo
+           ) }}">
+          ‹
+        </a>
+
+        <span style="font-weight:900;color:var(--text);padding:0 10px;">
+          {{ p }} / {{ tp }}
+        </span>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_movimentacao_empresas',
+              page=(p+1 if p<tp else tp),
+              per_page=filtros.per_page,
+              q=filtros.q,
+              sistema=filtros.sistema,
+              movimento=filtros.movimento,
+              status=filtros.status,
+              categoria=filtros.categoria,
+              empresa=filtros.empresa,
+              data_ini=filtros.data_ini,
+              data_fim=filtros.data_fim,
+              modo=filtros.modo
+           ) }}">
+          ›
+        </a>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_movimentacao_empresas',
+              page=tp,
+              per_page=filtros.per_page,
+              q=filtros.q,
+              sistema=filtros.sistema,
+              movimento=filtros.movimento,
+              status=filtros.status,
+              categoria=filtros.categoria,
+              empresa=filtros.empresa,
+              data_ini=filtros.data_ini,
+              data_fim=filtros.data_fim,
+              modo=filtros.modo
+           ) }}">
+          »
+        </a>
+      </div>
+
+      <div class="muted" style="display:flex;align-items:center;gap:10px;font-weight:900;">
+        <span>{{ filtros.per_page }} por página</span>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

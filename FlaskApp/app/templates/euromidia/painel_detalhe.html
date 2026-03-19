@@ -1,0 +1,697 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Painel {{ painel.CodPonto }} | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+
+  <!-- ✅ Estilos locais (somente neste template) -->
+  <style>
+    .mr-wrap{
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#fff;
+    }
+    .mr-title{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:12px 14px;
+      border-bottom:1px solid var(--border);
+      background: rgba(0,40,132,.03);
+      font-weight:900;
+      color: var(--euro-blue);
+      flex-wrap:wrap;
+    }
+    .mr-title .muted{
+      font-weight:900;
+    }
+
+    .mr-table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      font-size:13px;
+    }
+    .mr-table th{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background: #0b1a3a;
+      color:#fff;
+      text-align:right;
+      padding:10px 10px;
+      font-weight:900;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      white-space:nowrap;
+    }
+    .mr-table th:first-child{
+      text-align:left;
+      width:70px;
+    }
+    .mr-table th:nth-child(2){
+      text-align:left;
+      min-width:260px;
+    }
+
+    .mr-table td{
+      padding:10px 10px;
+      border-bottom:1px solid var(--border);
+      text-align:right;
+      vertical-align:middle;
+      background:#fff;
+      white-space:nowrap;
+    }
+    .mr-table td:first-child{
+      text-align:left;
+      font-weight:900;
+      color: var(--text);
+      background:#fff;
+    }
+
+    .mr-label{
+      text-align:left !important;
+      font-weight:900;
+      color: var(--text);
+    }
+
+    .mr-sub{
+      margin-top:2px;
+      font-size:11px;
+      color: var(--muted);
+      font-weight:900;
+    }
+
+    .mr-val{
+      font-weight:900;
+      color: var(--text);
+    }
+    .mr-zero{
+      color:#94A3B8;
+      font-weight:900;
+    }
+    .mr-pos{
+      color:#0f766e;
+      font-weight:900;
+    }
+
+    .mr-foot{
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      background:#fff;
+    }
+    .mr-foot .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 12px;
+      border-radius:999px;
+      border:1px solid var(--border);
+      background:#fff;
+      font-weight:900;
+      color: #0b1a3a;
+    }
+
+    .mr-scroll{
+      overflow:auto;
+      max-width:100%;
+    }
+
+    /* =========================================================
+       ✅ Gráfico (ajustado pro seu layout — não é “cópia do Mais Retorno”)
+       ========================================================= */
+    .chart-card{
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      overflow:hidden;
+    }
+    .chart-head{
+      padding:12px 14px;
+      border-bottom:1px solid var(--border);
+      background:#fff;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .chart-title{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:240px;
+    }
+    .chart-title .h{
+      font-weight:900;
+      color:var(--text);
+      font-size:18px;
+      line-height:1.2;
+    }
+    .chart-title .s{
+      font-weight:900;
+      color:var(--muted);
+      font-size:12px;
+    }
+
+    .chart-tools{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    .chart-form{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .ui-input{
+      height:36px;
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:0 10px;
+      font-weight:900;
+      outline:none;
+      background:#fff;
+      color:var(--text);
+      min-width:140px;
+    }
+
+    .ui-btn{
+      height:36px;
+      border-radius:10px;
+      padding:0 12px;
+      font-weight:900;
+      border:1px solid var(--border);
+      background:#fff;
+      cursor:pointer;
+      color:#0b1a3a;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      text-decoration:none;
+    }
+    .ui-btn:hover{ filter:brightness(.98); }
+
+    .ui-btn-primary{
+      border-color: rgba(0,40,132,.18);
+      background: rgba(0,40,132,.06);
+      color: var(--euro-blue);
+    }
+
+    .chart-body{
+      padding:12px 14px 14px 14px;
+      background:#fff;
+    }
+
+    .canvas-wrap{
+      position:relative;
+      height:320px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background: #fff;
+      overflow:hidden;
+    }
+
+    /* ✅ (NOVO) garante que o canvas não “apague” e fique nítido */
+    .canvas-wrap canvas{
+      display:block;
+      width:100% !important;
+      height:100% !important;
+    }
+
+    .chart-footer{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .legend{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .legend .dot{
+      width:10px;height:10px;border-radius:999px;
+      background: var(--euro-blue);
+      box-shadow:0 0 0 2px rgba(0,40,132,.12);
+      display:inline-block;
+    }
+    .legend .lbl{
+      font-weight:900;
+      color:var(--text);
+    }
+    .legend .mut{
+      font-weight:900;
+      color:var(--muted);
+      font-size:12px;
+    }
+
+    .hint{
+      font-weight:900;
+      color:var(--muted);
+      font-size:12px;
+    }
+  </style>
+
+  <!-- Cabeçalho -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div class="page-title" style="margin:0;font-weight:900;">
+          Painel {{ painel.CodPonto }}
+        </div>
+
+        <span style="
+          display:inline-flex;align-items:center;gap:8px;
+          padding:6px 10px;border-radius:999px;
+          border:1px solid var(--border);
+          background:#fff;
+          font-weight:900;
+          color: {% if bit_ativo %}#059669{% else %}#b91c1c{% endif %};
+        ">
+          <span style="width:8px;height:8px;border-radius:99px;background:{% if bit_ativo %}#059669{% else %}#ef4444{% endif %};display:inline-block;"></span>
+          {% if bit_ativo %}Ativo{% else %}Inativo{% endif %}
+        </span>
+      </div>
+
+      <div class="muted" style="margin-top:6px;font-weight:800;">
+        {{ painel.Exibidora or "—" }} • {{ proprio_txt }}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;">
+      <a class="btn btn-secondary" href="{{ url_for('Paineis.lista_paineis') }}" style="text-decoration:none;">
+        ‹ Voltar
+      </a>
+
+      <a class="btn btn-primary"
+         href="{{ url_for('Paineis.grade_painel', codponto=painel.CodPonto) }}"
+         style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
+        ⊞ Abrir grade
+      </a>
+    </div>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <!-- Endereço -->
+  <div style="
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:14px 16px;
+    background: rgba(0,40,132,.03);
+  ">
+    <div style="font-weight:900;color:var(--euro-blue);margin-bottom:8px;">
+      Endereço
+    </div>
+
+    <div style="font-weight:900;font-size:18px;color:var(--text);">
+      {{ endereco_linha_1 }}
+    </div>
+
+    <div class="muted" style="margin-top:4px;font-weight:800;">
+      {{ endereco_linha_2 }}
+    </div>
+
+    {% if painel.ReferenciaEndereco %}
+      <div style="margin-top:10px;">
+        <span style="font-weight:900;">Referência:</span>
+        <span class="muted" style="font-weight:800;">{{ painel.ReferenciaEndereco }}</span>
+      </div>
+    {% endif %}
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <!-- Blocos -->
+  <div style="display:grid;grid-template-columns: 1fr 1fr 1fr;gap:12px;">
+    <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:#fff;">
+      <div class="muted" style="font-weight:900;">IDPainelEuromidia</div>
+      <div style="font-weight:900;font-size:18px;margin-top:6px;">{{ painel.IDPainelEuromidia or "—" }}</div>
+    </div>
+
+    <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:#fff;">
+      <div class="muted" style="font-weight:900;">Faces</div>
+      <div style="font-weight:900;font-size:18px;margin-top:6px;">{{ painel.Faces or "—" }}</div>
+    </div>
+
+    <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:#fff;">
+      <div class="muted" style="font-weight:900;">Exibidora</div>
+      <div style="font-weight:900;font-size:18px;margin-top:6px;">{{ painel.Exibidora or "—" }}</div>
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  <div style="display:grid;grid-template-columns: 2fr 1fr;gap:12px;">
+    <!-- Coordenadas -->
+    <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:#fff;">
+      <div style="font-weight:900;color:var(--euro-blue);margin-bottom:10px;">Coordenadas</div>
+
+      <div style="display:grid;grid-template-columns: 1fr 1fr;gap:12px;">
+        <div>
+          <div class="muted" style="font-weight:900;">Latitude</div>
+          <div style="font-weight:900;margin-top:6px;">{{ painel.Latitude if painel.Latitude is not none else "—" }}</div>
+        </div>
+        <div>
+          <div class="muted" style="font-weight:900;">Longitude</div>
+          <div style="font-weight:900;margin-top:6px;">{{ painel.Longitude if painel.Longitude is not none else "—" }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Datas -->
+    <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:#fff;">
+      <div style="font-weight:900;color:var(--euro-blue);margin-bottom:10px;">Datas</div>
+
+      <div style="display:grid;grid-template-columns: 1fr;gap:10px;">
+        <div>
+          <div class="muted" style="font-weight:900;">Instalação</div>
+          <div style="font-weight:900;margin-top:6px;">{{ painel.DataInstalacao or "—" }}</div>
+        </div>
+        <div>
+          <div class="muted" style="font-weight:900;">Retirada</div>
+          <div style="font-weight:900;margin-top:6px;">{{ painel.DataRetirada or "—" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  <!-- Custos / Infra -->
+  <div style="border:1px solid var(--border);border-radius:14px;padding:12px 14px;background:#fff;">
+    <div style="font-weight:900;color:var(--euro-blue);margin-bottom:10px;">Custos / Infra</div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:999px;padding:8px 12px;font-weight:900;background:#fff;">
+        Aluguel: {{ aluguel_txt }}
+      </span>
+
+      <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:999px;padding:8px 12px;font-weight:900;background:#fff;">
+        Energia: {{ energia_txt }}
+      </span>
+
+      <span style="display:inline-flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:999px;padding:8px 12px;font-weight:900;background:#fff;">
+        Internet: {{ internet_txt }}
+      </span>
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+ 
+  <div class="chart-card">
+    <div class="chart-head">
+      <div class="chart-title">
+        <div class="h">Faturamento</div>
+        <div class="s">CodPonto {{ painel.CodPonto }} • {{ painel.Exibidora or "—" }} • {{ proprio_txt }}</div>
+      </div>
+
+      <div class="chart-tools">
+        <form class="chart-form"
+              method="GET"
+              action="{{ url_for('Paineis.detalhe_painel', codponto=painel.CodPonto) }}">
+
+          <input class="ui-input" name="dt_de"
+                 value="{{ (filtros_faturamento.dt_de if filtros_faturamento is defined else '') }}"
+                 placeholder="DD-MM-AAAA">
+
+          <input class="ui-input" name="dt_ate"
+                 value="{{ (filtros_faturamento.dt_ate if filtros_faturamento is defined else '') }}"
+                 placeholder="DD-MM-AAAA">
+
+          <button class="ui-btn ui-btn-primary" type="submit">Aplicar</button>
+
+          <a class="ui-btn"
+             href="{{ url_for('Paineis.detalhe_painel', codponto=painel.CodPonto) }}">
+            Limpar
+          </a>
+        </form>
+      </div>
+    </div>
+
+    <div class="chart-body">
+      <div class="canvas-wrap">
+        <canvas id="chartFaturamento"></canvas>
+      </div>
+
+      <div class="chart-footer">
+        <div class="legend">
+          <span class="dot"></span>
+          <span class="lbl">Faturamento mensal (R$)</span>
+        </div>
+        <div class="hint">Passe o mouse para ver mês e valor</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  
+  <div class="mr-wrap">
+    <div class="mr-title">
+      <div>Faturamento (mensal) • por Ano</div>
+      <div class="muted" style="font-weight:900;">
+      </div>
+    </div>
+
+    <div class="mr-scroll">
+      <table class="mr-table">
+        <thead>
+          <tr>
+            <th>ANO</th>
+            <th style="text-align:left;">Ponto</th>
+            <th>Jan</th>
+            <th>Fev</th>
+            <th>Mar</th>
+            <th>Abr</th>
+            <th>Mai</th>
+            <th>Jun</th>
+            <th>Jul</th>
+            <th>Ago</th>
+            <th>Set</th>
+            <th>Out</th>
+            <th>Nov</th>
+            <th>Dez</th>
+            <th>No ano</th>
+            <th>Acumulado</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {% if faturamento_matriz and faturamento_matriz|length > 0 %}
+            {% for linha in faturamento_matriz %}
+              <tr>
+                <td>{{ linha.Ano }}</td>
+
+                <td class="mr-label">
+                  <div>CodPonto {{ painel.CodPonto }}</div>
+                  <div class="mr-sub">{{ painel.Exibidora or "—" }} • {{ proprio_txt }}</div>
+                </td>
+
+                {% for mm in range(1, 13) %}
+                  {% set v = (linha.Meses[mm] if linha.Meses is defined and (mm in linha.Meses) else 0) %}
+                  {% if v and v != 0 %}
+                    <td class="mr-pos">
+                      R$ {{ "%.2f"|format(v) }}
+                    </td>
+                  {% else %}
+                    <td class="mr-zero">—</td>
+                  {% endif %}
+                {% endfor %}
+
+                {% if linha.NoAno and linha.NoAno != 0 %}
+                  <td class="mr-val">R$ {{ "%.2f"|format(linha.NoAno) }}</td>
+                {% else %}
+                  <td class="mr-zero">—</td>
+                {% endif %}
+
+                {% if linha.Acumulado and linha.Acumulado != 0 %}
+                  <td class="mr-val">R$ {{ "%.2f"|format(linha.Acumulado) }}</td>
+                {% else %}
+                  <td class="mr-zero">—</td>
+                {% endif %}
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="16" style="text-align:left;">
+                <div style="padding:14px 10px;font-weight:900;color:var(--text);">
+                  Não há faturamento calculado para este CodPonto.
+                </div>
+                <div class="muted" style="padding:0 10px 14px 10px;font-weight:800;">
+                  Verifique se existem itens em FatoControleContratosItens para este ponto e se o contrato possui valor mensal.
+                </div>
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mr-foot">
+      <span class="chip">CodPonto: {{ painel.CodPonto }}</span>
+      <span class="chip">Exibidora: {{ painel.Exibidora or "—" }}</span>
+      <span class="chip">UF: {{ painel.UF or "—" }}</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ✅ Chart.js (CDN) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+  const serie = {{ (faturamento_serie|tojson if faturamento_serie is defined else "[]") | safe }};
+
+  const labels = (serie || []).map(p => p.x);
+  const values = (serie || []).map(p => (p.y || 0));
+
+  function formatBRL(v){
+    try{
+      return (v || 0).toLocaleString("pt-BR", { style:"currency", currency:"BRL" });
+    }catch(e){
+      const n = Number(v || 0);
+      return "R$ " + (isFinite(n) ? n.toFixed(2) : "0,00");
+    }
+  }
+
+  const el = document.getElementById("chartFaturamento");
+  const ctx = el.getContext("2d");
+
+  // ✅ Se não tiver dados, evita gráfico “vazio confuso”
+  const hasData = Array.isArray(values) && values.some(v => Number(v || 0) !== 0);
+
+  // =========================================================
+  // ✅ AJUSTE DE VISUAL (pra não “escurecer” e sumir com a leitura)
+  // - Linha mais nítida (cor definida)
+  // - Preenchimento com GRADIENTE leve (não “chapado escuro”)
+  // - Grid do Y mais suave
+  // =========================================================
+  function buildAreaGradient(chart){
+    const area = chart.chartArea;
+    if (!area) return "rgba(0,40,132,.06)";
+    const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+    g.addColorStop(0, "rgba(0,40,132,.16)"); // topo: mais visível
+    g.addColorStop(1, "rgba(0,40,132,0)");   // base: some, não “suja” o fundo
+    return g;
+  }
+
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: "Faturamento mensal (R$)",
+        data: values,
+
+        // ✅ Linha nítida
+        borderColor: "rgba(0,40,132,1)",
+        borderWidth: 3,
+
+        // ✅ Pontos (quase invisíveis, mas aparecem no hover)
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBorderWidth: 2,
+        pointHoverBackgroundColor: "rgba(0,40,132,1)",
+        pointHoverBorderColor: "#ffffff",
+
+        // ✅ Curva suave
+        tension: 0.25,
+
+        // ✅ Preenchimento leve (evita escurecer tudo)
+        fill: true,
+        backgroundColor: "rgba(0,40,132,.06)" // será trocado por gradiente no afterLayout
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            title: (items) => items && items.length ? String(items[0].label || "") : "",
+            label: (item) => " " + formatBRL(item.parsed.y || 0)
+          }
+        }
+      },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: {
+          grid: {
+            display: false
+          },
+          ticks: {
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 14,
+            font: { weight: "900" }
+          }
+        },
+        y: {
+          beginAtZero: true,
+          grid: {
+            drawBorder: false,
+            color: "rgba(15,23,42,.08)" // ✅ grid bem suave (não pesa)
+          },
+          ticks: {
+            font: { weight: "900" },
+            callback: (value) => {
+              try { return Number(value).toLocaleString("pt-BR"); }
+              catch(e){ return value; }
+            }
+          }
+        }
+      }
+    },
+    plugins: [
+      {
+        // ✅ Aplica o gradiente depois que o chartArea existe
+        id: "softFillGradient",
+        afterLayout: (c) => {
+          const ds = c.data && c.data.datasets && c.data.datasets[0];
+          if (!ds) return;
+          ds.backgroundColor = buildAreaGradient(c);
+        }
+      },
+      {
+        id: "noData",
+        afterDraw: (c) => {
+          if (hasData) return;
+          const { ctx, chartArea } = c;
+          if (!chartArea) return;
+          const x = (chartArea.left + chartArea.right) / 2;
+          const y = (chartArea.top + chartArea.bottom) / 2;
+
+          ctx.save();
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = "900 13px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillStyle = "#64748B";
+          ctx.fillText("Sem dados no período selecionado.", x, y);
+          ctx.restore();
+        }
+      }
+    ]
+  });
+</script>
+
+{% endblock %}

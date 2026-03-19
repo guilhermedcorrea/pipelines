@@ -1,0 +1,517 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block content %}
+
+<style>
+  .page-wrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding: 18px 22px;
+  }
+  @media (max-width: 900px){
+    .page-wrap{ padding: 14px 14px; }
+  }
+
+  .card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+
+  /* =========================================================
+     ✅ FILTROS RESPONSIVOS (sem larguras fixas)
+     ========================================================= */
+  .filters{
+    display:grid;
+    grid-template-columns: repeat(5, minmax(160px, 1fr));
+    gap:10px;
+    padding: 12px 14px 14px 14px;
+    align-items:end;
+  }
+  .filters .actions{
+    display:flex;
+    gap:10px;
+    align-items:end;
+    justify-content:flex-start;
+    flex-wrap:wrap;
+  }
+  @media (max-width: 1200px){
+    .filters{ grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+  }
+  @media (max-width: 700px){
+    .filters{ grid-template-columns: 1fr; }
+    .filters .actions{ justify-content:stretch; }
+    .filters .actions .btn{ width:100%; justify-content:center; }
+  }
+
+  .field label{
+    display:block;
+    font-weight:900;
+    font-size:12px;
+    opacity:.8;
+    margin-bottom:6px;
+  }
+  .field input, .field select{
+    width:100%;
+    height:38px;
+    padding: 8px 10px;
+    border:1px solid var(--border);
+    border-radius: 10px;
+    background:#fff;
+    font-weight:800;
+    outline:none;
+  }
+  .field input:focus, .field select:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+
+  /* =========================================================
+     ✅ TABELA
+     ========================================================= */
+  .table-wrap{
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table{
+    width:100%;
+    border-collapse: collapse;
+    min-width: 980px; /* ✅ desktop ok, mobile troca pra card */
+  }
+  thead th{
+    text-align:left;
+    font-weight:1000;
+    font-size:12px;
+    letter-spacing:.2px;
+    opacity:.85;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(0,0,0,.06);
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    background: rgba(0,0,0,.02);
+    white-space:nowrap;
+  }
+  tbody td{
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    font-weight:800;
+    vertical-align:top;
+  }
+  tbody tr:hover{
+    background: rgba(0,0,0,.02);
+  }
+
+  .muted{ opacity:.75; font-weight:800; }
+
+  /* =========================================================
+     ✅ LINHA CLICÁVEL (DBLCLICK)
+     ========================================================= */
+  tr.row-click{
+    cursor: default;
+  }
+  tr.row-click:hover{
+    background: rgba(0,0,0,.03);
+  }
+  tr.row-click:active{
+    opacity: .96;
+  }
+  tr.row-click:focus{
+    outline: none;
+  }
+  tr.row-click:focus-visible{
+    outline: 3px solid rgba(37,99,235,.22);
+    outline-offset: -3px;
+    background: rgba(37,99,235,.04);
+  }
+
+  /* =========================================================
+     ✅ BADGES
+     ========================================================= */
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(107,114,128,.10);
+    color:#6b7280;
+    font-weight:1000;
+    font-size:12px;
+    line-height:1;
+    white-space:nowrap;
+  }
+  .badge .dot{
+    width:8px;height:8px;border-radius:999px;
+    background: currentColor;
+    opacity:.95;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.9);
+  }
+
+  .badge-status-blue{ background: rgba(37,99,235,.10); border:1px solid rgba(37,99,235,.22); color: rgba(37,99,235,1); }
+  .badge-status-amber{ background: rgba(245,158,11,.12); border:1px solid rgba(245,158,11,.26); color: #92400e; }
+  .badge-status-green{ background: rgba(16,185,129,.12); border:1px solid rgba(16,185,129,.26); color: #065f46; }
+
+  .badge-prio-red{ background: rgba(220,38,38,.10); border:1px solid rgba(220,38,38,.22); color: #b91c1c; }
+  .badge-prio-amber{ background: rgba(245,158,11,.12); border:1px solid rgba(245,158,11,.26); color: #92400e; }
+
+  .badge-tipo-indigo{ background: rgba(79,70,229,.10); border:1px solid rgba(79,70,229,.22); color: #3730a3; }
+  .badge-tipo-slate{ background: rgba(15,23,42,.08); border:1px solid rgba(15,23,42,.14); color: #0f172a; }
+
+  /* ✅ título/cliente sem forçar largura */
+  .ellipsis{
+    display:block;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    max-width: 100%;
+  }
+  td.col-titulo, td.col-cliente{
+    min-width: 220px;
+    max-width: 520px;
+  }
+
+  /* =========================================================
+     ✅ PAGINAÇÃO RESPONSIVA (sem absolute)
+     ========================================================= */
+  .pager{
+    border-top: 1px solid rgba(0,0,0,.06);
+    padding: 12px 14px;
+    display:grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items:center;
+    gap:12px;
+  }
+  .pager .left{
+    justify-self:start;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width: 100%;
+  }
+  .pager .center{
+    justify-self:center;
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+    justify-content:center;
+    white-space:nowrap;
+  }
+  .pager .right{
+    justify-self:end;
+    white-space:nowrap;
+  }
+  @media (max-width: 900px){
+    .pager{
+      grid-template-columns: 1fr;
+      text-align:center;
+    }
+    .pager .left, .pager .center, .pager .right{
+      justify-self:center;
+    }
+    .pager .right{
+      order:2;
+      opacity:.85;
+    }
+    .pager .center{
+      order:3;
+    }
+  }
+
+  /* =========================================================
+     ✅ MOBILE: tabela vira “cards” (sem scroll horizontal)
+     ========================================================= */
+  @media (max-width: 980px){
+    .table-wrap{ overflow: visible; }
+    table{ min-width: 0; width:100%; }
+    thead{ display:none; }
+
+    tbody tr{
+      display:block;
+      border-bottom: 1px solid rgba(0,0,0,.08);
+      padding: 10px 12px;
+    }
+    tbody td{
+      display:flex;
+      gap:10px;
+      padding: 8px 0;
+      border:0;
+      align-items:flex-start;
+      justify-content:space-between;
+    }
+    tbody td::before{
+      content: attr(data-label);
+      font-weight:1000;
+      opacity:.75;
+      flex: 0 0 38%;
+      max-width: 38%;
+      padding-right:10px;
+    }
+    tbody td > *{
+      flex: 1 1 auto;
+      min-width: 0;
+      text-align:right;
+    }
+
+    /* campos longos alinham melhor */
+    tbody td.col-titulo > *,
+    tbody td.col-cliente > *{
+      text-align:right;
+    }
+
+    /* badge no mobile não estoura */
+    .badge{
+      max-width: 100%;
+    }
+  }
+</style>
+
+<div class="page-wrap">
+  <div class="card">
+
+    <form method="GET" action="{{ url_for('admin.lista_tickets_auvo') }}">
+
+      <div class="filters">
+
+        <div class="field">
+          <label>Busca (IdTicket / Título / Cliente)</label>
+          <input type="text" name="q" value="{{ filtros.q }}" placeholder="Ex: 12345 ou Cliente..." />
+        </div>
+
+        <div class="field">
+          <label>Status</label>
+          <select name="status">
+            <option value="">(Todos)</option>
+            {% for s in status_opcoes %}
+              <option value="{{ s }}" {% if filtros.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Prioridade</label>
+          <select name="prioridade">
+            <option value="">(Todas)</option>
+            {% for p in prioridade_opcoes %}
+              <option value="{{ p }}" {% if filtros.prioridade == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Tipo Solicitação</label>
+          <select name="tipo">
+            <option value="">(Todos)</option>
+            {% for t in tipo_opcoes %}
+              <option value="{{ t }}" {% if filtros.tipo == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Por página</label>
+          <select name="per_page">
+            {% for n in [10,20,30,50,100] %}
+              <option value="{{ n }}" {% if filtros.per_page == n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-primary" type="submit" style="height:38px;">Filtrar</button>
+
+          <a class="btn btn-secondary" style="height:38px;display:inline-flex;align-items:center;text-decoration:none;"
+             href="{{ url_for('admin.lista_tickets_auvo', page=1, per_page=filtros.per_page) }}">
+            Limpar
+          </a>
+        </div>
+
+      </div>
+
+      <div style="height:6px;"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>IdTicket</th>
+              <th>Criado em</th>
+              <th>Atualizado em</th>
+              <th>Título</th>
+              <th>Cliente</th>
+              <th>Tipo</th>
+              <th>Prioridade</th>
+              <th>Status</th>
+              <th>Encerramento</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {% if itens and itens|length > 0 %}
+              {% for it in itens %}
+                <tr class="row-click"
+                    tabindex="0"
+                    role="link"
+                    aria-label="Abrir ticket {{ it.IdTicketAuvo }}"
+                    data-href="{{ it.url_detalhe }}">
+
+                  <td data-label="IdTicket" style="font-weight:1000;">
+                    {{ it.IdTicketAuvo or "-" }}
+                  </td>
+
+                  <td data-label="Criado em" class="muted">
+                    {% if it.DataCriacao %}
+                      {{ it.DataCriacao.strftime("%d/%m/%Y %H:%M") if it.DataCriacao.__class__.__name__ != 'str' else it.DataCriacao }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+
+                  <td data-label="Atualizado em" class="muted">
+                    {% if it.DataUltimaAtualizacao %}
+                      {{ it.DataUltimaAtualizacao.strftime("%d/%m/%Y %H:%M") if it.DataUltimaAtualizacao.__class__.__name__ != 'str' else it.DataUltimaAtualizacao }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+
+                  <td data-label="Título" class="col-titulo">
+                    <span class="ellipsis" title="{{ it.Titulo or '-' }}">{{ it.Titulo or "-" }}</span>
+                  </td>
+
+                  <td data-label="Cliente" class="col-cliente">
+                    <span class="ellipsis" title="{{ it.NomeCliente or '-' }}">{{ it.NomeCliente or "-" }}</span>
+                  </td>
+
+                  <td data-label="Tipo">
+                    {% set tipo_raw = (it.TipoSolicitacao or "") %}
+                    {% set tipo_u = tipo_raw|trim|upper %}
+
+                    {% if tipo_u == "ATENDIMENTO REMOTO" %}
+                      <span class="badge badge-tipo-indigo"><span class="dot"></span>Atendimento Remoto</span>
+                    {% elif tipo_u == "REPARO" %}
+                      <span class="badge badge-tipo-slate"><span class="dot"></span>Reparo</span>
+                    {% else %}
+                      <span class="badge"><span class="dot"></span>{{ it.TipoSolicitacao or "-" }}</span>
+                    {% endif %}
+                  </td>
+
+                  <td data-label="Prioridade">
+                    {% set pr_raw = (it.Prioridade or "") %}
+                    {% set pr_u = pr_raw|trim|upper %}
+
+                    {% if pr_u == "ALTA" %}
+                      <span class="badge badge-prio-red"><span class="dot"></span>Alta</span>
+                    {% elif pr_u == "MEDIA" or pr_u == "MÉDIA" %}
+                      <span class="badge badge-prio-amber"><span class="dot"></span>Média</span>
+                    {% else %}
+                      <span class="badge"><span class="dot"></span>{{ it.Prioridade or "-" }}</span>
+                    {% endif %}
+                  </td>
+
+                  <td data-label="Status">
+                    {% set st_raw = (it.StatusDescricao or "") %}
+                    {% set st_u = st_raw|trim|upper %}
+
+                    {% if st_u == "AGUARDANDO ATENDENTE" or st_u == "AGUARDANDO ATENDIMENTO" %}
+                      <span class="badge badge-status-blue"><span class="dot"></span>{{ it.StatusDescricao }}</span>
+                    {% elif st_u == "AGUARDANDO CLIENTE" %}
+                      <span class="badge badge-status-amber"><span class="dot"></span>Aguardando Cliente</span>
+                    {% elif st_u == "ATENDIMENTO ENCERRADO" %}
+                      <span class="badge badge-status-green"><span class="dot"></span>Atendimento Encerrado</span>
+                    {% else %}
+                      <span class="badge"><span class="dot"></span>{{ it.StatusDescricao or "-" }}</span>
+                    {% endif %}
+                  </td>
+
+                  <td data-label="Encerramento" class="muted">
+                    {% if it.DataEncerramento %}
+                      {{ it.DataEncerramento.strftime("%d/%m/%Y %H:%M") if it.DataEncerramento.__class__.__name__ != 'str' else it.DataEncerramento }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="9" class="muted" style="padding:16px 14px;">
+                  Nenhum ticket encontrado com os filtros atuais.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ✅ PAGINAÇÃO RESPONSIVA -->
+      <div class="pager">
+        <div class="muted left" style="font-weight:800;">
+          Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} tickets
+        </div>
+
+        <div class="center">
+          {% set p = paginacao.page %}
+          {% set tp = paginacao.total_pages %}
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_tickets_auvo', page=1, per_page=filtros.per_page, q=filtros.q, status=filtros.status, prioridade=filtros.prioridade, tipo=filtros.tipo) }}">
+            «
+          </a>
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_tickets_auvo', page=(p-1 if p>1 else 1), per_page=filtros.per_page, q=filtros.q, status=filtros.status, prioridade=filtros.prioridade, tipo=filtros.tipo) }}">
+            ‹
+          </a>
+
+          <span style="font-weight:900;color:var(--text);padding:0 10px;">
+            {{ p }} / {{ tp }}
+          </span>
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_tickets_auvo', page=(p+1 if p<tp else tp), per_page=filtros.per_page, q=filtros.q, status=filtros.status, prioridade=filtros.prioridade, tipo=filtros.tipo) }}">
+            ›
+          </a>
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_tickets_auvo', page=tp, per_page=filtros.per_page, q=filtros.q, status=filtros.status, prioridade=filtros.prioridade, tipo=filtros.tipo) }}">
+            »
+          </a>
+        </div>
+
+        <div class="muted right" style="font-weight:900;">
+          <span>{{ filtros.per_page }} por página</span>
+        </div>
+      </div>
+
+    </form>
+
+  </div>
+</div>
+
+<script>
+  (function(){
+    function irPara(url){
+      if (!url) return;
+      window.location.href = url;
+    }
+
+    const linhas = document.querySelectorAll("tr.row-click[data-href]");
+    for (const tr of linhas) {
+      tr.addEventListener("dblclick", function(){
+        irPara(tr.getAttribute("data-href"));
+      });
+
+      tr.addEventListener("keydown", function(e){
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          irPara(tr.getAttribute("data-href"));
+        }
+      });
+    }
+  })();
+</script>
+
+{% endblock %}

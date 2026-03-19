@@ -1,0 +1,367 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block content %}
+
+<style>
+  .page-wrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding: 18px 22px;
+  }
+  @media (max-width: 900px){
+    .page-wrap{ padding: 14px 14px; }
+  }
+
+  .card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+
+  .filters{
+    display:grid;
+    grid-template-columns: 1.2fr 160px 180px;
+    gap:10px;
+    padding: 12px 14px 14px 14px;
+  }
+  @media (max-width: 900px){
+    .filters{ grid-template-columns: 1fr; }
+  }
+
+  .field label{
+    display:block;
+    font-weight:900;
+    font-size:12px;
+    opacity:.8;
+    margin-bottom:6px;
+  }
+  .field input, .field select{
+    width:100%;
+    height:38px;
+    padding: 8px 10px;
+    border:1px solid var(--border);
+    border-radius: 10px;
+    background:#fff;
+    font-weight:800;
+    outline:none;
+  }
+  .field input:focus, .field select:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+
+  table{ width:100%; border-collapse: collapse; }
+  thead th{
+    text-align:left;
+    font-weight:1000;
+    font-size:12px;
+    letter-spacing:.2px;
+    opacity:.85;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(0,0,0,.06);
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    background: rgba(0,0,0,.02);
+    white-space:nowrap;
+  }
+  tbody td{
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    font-weight:800;
+    vertical-align:top;
+  }
+  tbody tr:hover{ background: rgba(0,0,0,.02); }
+
+  .muted{ opacity:.75; font-weight:800; }
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(107,114,128,.10);
+    color:#6b7280;
+    font-weight:1000;
+    font-size:12px;
+    line-height:1;
+    white-space:nowrap;
+  }
+
+  .row-actions{
+    display:flex;
+    gap:10px;
+    align-items:flex-end;
+    flex-wrap:wrap;
+  }
+
+  .vinculo-atual{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  /* ✅ 1 campo só (input + datalist) */
+  .input-vinculo{
+    width: 420px;
+    max-width: 100%;
+    height: 38px;
+    padding: 8px 10px;
+    border:1px solid var(--border);
+    border-radius: 10px;
+    background:#fff;
+    font-weight:900;
+    outline:none;
+  }
+  .input-vinculo:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+
+  .btn-salvar{
+    height:38px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(37,99,235,.10);
+    color: rgba(37,99,235,1);
+    font-weight:1000;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .btn-salvar:hover{
+    background: rgba(37,99,235,.14);
+  }
+</style>
+
+<div class="page-wrap">
+  <div class="card">
+
+    <form method="GET" action="{{ url_for('admin.lista_produtos_auvo') }}">
+      <div class="filters">
+        <div class="field">
+          <label>Busca Nome ou ID Produto</label>
+          <input type="text" name="q" value="{{ filtros.q }}" placeholder="Ex: Parafuso / 999" />
+        </div>
+
+        <div class="field">
+          <label>Por página</label>
+          <select name="per_page">
+            {% for n in [10,20,30,50,100] %}
+              <option value="{{ n }}" {% if filtros.per_page == n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:end;">
+          <button class="btn btn-primary" type="submit" style="height:38px;">Filtrar</button>
+
+          <a class="btn btn-secondary" style="height:38px;display:inline-flex;align-items:center;text-decoration:none;"
+             href="{{ url_for('admin.lista_produtos_auvo', page=1, per_page=filtros.per_page) }}">
+            Limpar
+          </a>
+        </div>
+      </div>
+    </form>
+
+    <!-- ✅ DATALIST GLOBAL (uma lista única, 1 campo só por linha usa isso) -->
+    <datalist id="lista_dimproduto">
+      {% for p in produtos %}
+        <option value="{{ p.IDDimProduto }} | {{ p.NomeProduto }}"></option>
+      {% endfor %}
+    </datalist>
+
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Referencia</th>
+            <th>Nome (Auvo)</th>
+            <th>Valor Unitario</th>
+            <th>CriadoEm</th>
+            <th>BitAtivo</th>
+            <th>Vincular Produto</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {% if itens and itens|length > 0 %}
+            {% for it in itens %}
+              <tr>
+                <td>
+                  <div class="vinculo-atual">
+                    <span style="font-weight:1000;">{{ it.IDDimProduto if it.IDDimProduto is not none else "-" }}</span>
+                    {% if it.NomeProdutoVinculado %}
+                      <span class="pill">{{ it.NomeProdutoVinculado }}</span>
+                    {% endif %}
+                  </div>
+                </td>
+
+                <td style="font-weight:1000;">{{ it.Nome or "-" }}</td>
+
+                <td>
+                  {% if it.UnitarioValor is not none %}
+                    R$ {{ "%.2f"|format(it.UnitarioValor) }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+
+                <td class="muted">
+                  {% if it.CriadoEm %}
+                    {{ it.CriadoEm.strftime("%d/%m/%Y %H:%M") if it.CriadoEm.__class__.__name__ != 'str' else it.CriadoEm }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+
+                <td>
+                  {% if it.BitAtivo %}
+                    <span class="pill" style="background: rgba(16,185,129,.10);border-color: rgba(16,185,129,.22);color:#065f46;">ATIVO</span>
+                  {% else %}
+                    <span class="pill">INATIVO</span>
+                  {% endif %}
+                </td>
+
+                <td>
+                  <form method="POST"
+                        action="{{ url_for('admin.produto_auvo_vincular_dimproduto',
+                                           id_dim_produto_auvo=it.IDDimProdutoAuvo,
+                                           page=paginacao.page,
+                                           per_page=filtros.per_page,
+                                           q=filtros.q) }}">
+
+                    <!-- ✅ CSRF CERTO -->
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="row-actions">
+                      <div style="display:flex;flex-direction:column;gap:6px;">
+                        <div class="muted" style="font-size:12px;font-weight:900;">
+                         Digite ID ou Nome do Produto
+                        </div>
+
+                        <input class="input-vinculo"
+                               name="id_dim_produto_input"
+                               list="lista_dimproduto"
+                               placeholder="Digite: 123 ou 123 | NomeProduto"
+                               autocomplete="off"
+                               inputmode="numeric" />
+                      </div>
+
+                      <button type="submit" class="btn-salvar">Salvar vínculo</button>
+                    </div>
+
+                    <div class="muted" style="margin-top:6px;font-size:12px;">
+                      Dica: pode digitar só o ID (ex: 123) ou escolher no autocomplete.
+                    </div>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="6" class="muted" style="padding:16px 14px;">
+                Nenhum produto Auvo encontrado com os filtros atuais.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="height:10px;"></div>
+
+    <!-- paginação no mesmo estilo -->
+    <div style="
+        position:relative;
+        padding: 12px 14px;
+        width:100%;
+        min-height:56px;
+        display:grid;
+        grid-template-columns: 1fr 1fr;
+        align-items:center;
+        gap:12px;
+      ">
+
+      <div class="muted" style="
+          font-weight:800;
+          justify-self:start;
+          white-space:nowrap;
+          overflow:hidden;
+          text-overflow:ellipsis;
+          max-width: 45%;
+        ">
+        Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} produtos (Auvo)
+      </div>
+
+      <div class="muted" style="
+          display:flex;
+          align-items:center;
+          gap:10px;
+          font-weight:900;
+          justify-self:end;
+          white-space:nowrap;
+        ">
+        <span>{{ filtros.per_page }} por página</span>
+      </div>
+
+      <div style="
+          position:absolute;
+          left:50%;
+          top:50%;
+          transform: translate(-50%, -50%);
+          display:flex;
+          align-items:center;
+          gap:8px;
+          flex-wrap:wrap;
+          justify-content:center;
+          justify-self:center;
+          white-space:nowrap;
+        ">
+        {% set p = paginacao.page %}
+        {% set tp = paginacao.total_pages %}
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_produtos_auvo', page=1, per_page=filtros.per_page, q=filtros.q) }}">«</a>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_produtos_auvo', page=(p-1 if p>1 else 1), per_page=filtros.per_page, q=filtros.q) }}">‹</a>
+
+        <span style="font-weight:900;color:var(--text);padding:0 10px;">{{ p }} / {{ tp }}</span>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_produtos_auvo', page=(p+1 if p<tp else tp), per_page=filtros.per_page, q=filtros.q) }}">›</a>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+           href="{{ url_for('admin.lista_produtos_auvo', page=tp, per_page=filtros.per_page, q=filtros.q) }}">»</a>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<script>
+  (function(){
+    
+    const inputs = document.querySelectorAll("input[name='id_dim_produto_input']");
+    for (const inp of inputs) {
+      inp.addEventListener("blur", function(){
+        const v = (inp.value || "").trim();
+        if (!v) return;
+
+       
+        const m = v.match(/^(\d+)(\s*\|.*)?$/);
+        if (m && m[1]) {
+          inp.value = m[1] + (m[2] ? m[2].replace(/\s+/g, ' ').trim().startsWith('|') ? ' ' + m[2].replace(/\s+/g, ' ').trim() : '' : '');
+         
+          return;
+        }
+
+     
+      });
+    }
+  })();
+</script>
+
+{% endblock %}

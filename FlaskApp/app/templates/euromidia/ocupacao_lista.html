@@ -1,0 +1,621 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block content %}
+
+<style>
+  .page-wrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding: 18px 22px;
+  }
+  @media (max-width: 900px){
+    .page-wrap{ padding: 14px 14px; }
+  }
+
+  .card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+
+  .filters{
+    display:grid;
+    grid-template-columns: 1.2fr 240px 240px 160px;
+    gap:10px;
+    padding: 12px 14px 14px 14px;
+  }
+  @media (max-width: 1100px){
+    .filters{ grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 700px){
+    .filters{ grid-template-columns: 1fr; }
+  }
+
+  .field label{
+    display:block;
+    font-weight:900;
+    font-size:12px;
+    opacity:.8;
+    margin-bottom:6px;
+  }
+  .field input, .field select{
+    width:100%;
+    height:38px;
+    padding: 8px 10px;
+    border:1px solid var(--border);
+    border-radius: 10px;
+    background:#fff;
+    font-weight:800;
+    outline:none;
+  }
+  .field input:focus, .field select:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+
+  table{
+    width:100%;
+    border-collapse: collapse;
+  }
+  thead th{
+    text-align:left;
+    font-weight:1000;
+    font-size:12px;
+    letter-spacing:.2px;
+    opacity:.85;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(0,0,0,.06);
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    background: rgba(0,0,0,.02);
+    white-space:nowrap;
+  }
+  tbody td{
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    font-weight:800;
+    vertical-align:top;
+  }
+  tbody tr:hover{
+    background: rgba(0,0,0,.02);
+  }
+
+  .muted{ opacity:.75; font-weight:800; }
+
+  /* =========================================================
+     ✅ LINHA CLICÁVEL (DBLCLICK) — ADICIONADO
+     ========================================================= */
+  tr.row-click{
+    cursor: default;
+  }
+  tr.row-click:hover{
+    background: rgba(0,0,0,.02);
+  }
+  tr.row-click:active{
+    opacity: .96;
+  }
+
+  /* =========================================================
+     ✅ COLUNA AÇÕES (DROPDOWN) — ADICIONADO
+     ========================================================= */
+  .acoes-wrap{
+    position:relative;
+    display:inline-flex;
+    justify-content:flex-end;
+    width:100%;
+  }
+
+  .btn-acoes{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    height:34px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(107,114,128,.10);
+    color:#111827;
+    font-weight:1000;
+    font-size:12px;
+    cursor:pointer;
+    user-select:none;
+    white-space:nowrap;
+  }
+  .btn-acoes:hover{
+    background: rgba(107,114,128,.14);
+  }
+
+  .caret{
+    display:inline-block;
+    width:0;height:0;
+    border-left:5px solid transparent;
+    border-right:5px solid transparent;
+    border-top:6px solid rgba(17,24,39,.75);
+    margin-left:4px;
+    transform: translateY(1px);
+  }
+
+  .acoes-menu{
+    position:absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 210px;
+    background:#fff;
+    border:1px solid rgba(0,0,0,.10);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.14);
+    padding: 6px;
+    z-index: 20;
+    display:none;
+  }
+  .acoes-menu.open{
+    display:block;
+  }
+
+  .acoes-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding: 10px 10px;
+    border-radius: 10px;
+    text-decoration:none;
+    color:#111827;
+    font-weight:900;
+    font-size:13px;
+    line-height:1;
+  }
+  .acoes-item:hover{
+    background: rgba(0,0,0,.04);
+  }
+
+  .acoes-item.danger{
+    color:#b91c1c;
+  }
+  .acoes-item.danger:hover{
+    background: rgba(185,28,28,.08);
+  }
+
+  .ico{
+    width:18px;
+    height:18px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    opacity:.9;
+    flex: 0 0 18px;
+  }
+</style>
+
+<div class="page-wrap">
+  <div class="card">
+
+    <form method="GET" action="{{ url_for('Paineis.lista_ocupacao') }}">
+
+      <div class="filters">
+        <div class="field">
+          <label>Busca (CodFace / Cliente / Marca)</label>
+          <input type="text" name="q" value="{{ filtros.q }}" placeholder="Ex: 245AD ou Empresa..." />
+        </div>
+
+        <div class="field">
+          <label>Status</label>
+          <select name="status">
+            <option value="">(Todos)</option>
+            {% for s in status_opcoes %}
+              <option value="{{ s }}" {% if filtros.status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Origem</label>
+          <select name="origem">
+            <option value="">(Todas)</option>
+            {% for o in origem_opcoes %}
+              <option value="{{ o }}" {% if filtros.origem == o %}selected{% endif %}>{{ o }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Por página</label>
+          <select name="per_page">
+            {% for n in [10,20,30,50,100] %}
+              <option value="{{ n }}" {% if filtros.per_page == n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:end;">
+          <button class="btn btn-primary" type="submit" style="height:38px;">Filtrar</button>
+
+          <a class="btn btn-secondary" style="height:38px;display:inline-flex;align-items:center;text-decoration:none;"
+             href="{{ url_for('Paineis.lista_ocupacao', page=1, per_page=filtros.per_page) }}">
+            Limpar
+          </a>
+        </div>
+      </div>
+
+      <div style="height:6px;"></div>
+
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>CodFace</th>
+              <th>Cliente</th>
+              <th>Marca</th>
+              <th>Status</th>
+              <th>Origem</th>
+              <th>Início</th>
+              <th>Fim</th>
+              <th>Cota</th>
+              <th>Criado em</th>
+              <th style="text-align:right;">Ações</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {% if itens and itens|length > 0 %}
+              {% for it in itens %}
+                <tr class="row-click"
+                    data-href="{{ url_for('Paineis.ocupacao_detalhe', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
+                  <td style="font-weight:1000;">{{ it.CodFace }}</td>
+                  <td>{{ it.RazaoSocial or "-" }}</td>
+                  <td>{{ it.MarcaExibida or "-" }}</td>
+
+                  <!-- ✅ STATUS com badges especiais -->
+                  <td>
+                    {% set st_raw = (it.Status or "") %}
+                    {% set st = st_raw|trim|upper %}
+
+                    {% if st == "ATIVO" %}
+                      <span style="
+                          display:inline-flex;
+                          align-items:center;
+                          gap:10px;
+
+                          padding:8px 12px;
+                          border-radius:999px;
+                          border:1px solid var(--border);
+                          background:#fff;
+
+                          font-weight:800;
+                          color:var(--text);
+
+                          box-shadow: 0 2px 8px rgba(15,23,42,.06);
+                        ">
+                        <img src="/static/imagens/contrato.png" alt="Contrato" style="
+                          width:18px;height:18px;object-fit:contain;
+                          filter: drop-shadow(0 1px 0 rgba(0,0,0,.06));
+                        ">
+                        Contrato / Locação
+
+                        <span style="
+                          margin-left:6px;
+                          display:inline-flex;
+                          align-items:center;
+                          gap:6px;
+
+                          padding:4px 10px;
+                          border-radius:999px;
+
+                          background: rgba(37,99,235,.10);
+                          border:1px solid rgba(37,99,235,.20);
+
+                          color: rgba(37,99,235,1);
+                          font-weight:900;
+                          font-size:12px;
+                          line-height:1;
+                          white-space:nowrap;
+                        ">
+                          ATIVO
+                        </span>
+                      </span>
+
+                    {% elif st == "RESERVADO" %}
+                      <span style="
+                          display:inline-flex;
+                          align-items:center;
+                          gap:10px;
+
+                          padding:8px 12px;
+                          border-radius:999px;
+
+                          background: rgba(245,158,11,.10);
+                          border:1px solid rgba(245,158,11,.22);
+
+                          font-weight:800;
+                          color:#92400e;
+
+                          box-shadow: 0 2px 8px rgba(15,23,42,.06);
+                        ">
+                        <img src="/static/imagens/reservado.png" alt="Reservado" style="
+                          width:18px;height:18px;object-fit:contain;
+                          filter: drop-shadow(0 1px 0 rgba(0,0,0,.06));
+                        ">
+                        Reservado
+
+                        <span style="
+                          margin-left:6px;
+                          display:inline-flex;
+                          align-items:center;
+                          gap:6px;
+
+                          padding:4px 10px;
+                          border-radius:999px;
+
+                          background: rgba(245,158,11,.18);
+                          border:1px solid rgba(245,158,11,.28);
+
+                          color:#92400e;
+                          font-weight:900;
+                          font-size:12px;
+                          line-height:1;
+                          white-space:nowrap;
+                        ">
+                          RESERVA
+                        </span>
+                      </span>
+
+                    {% else %}
+                      <span style="
+                          display:inline-flex;
+                          align-items:center;
+                          padding:6px 10px;
+                          border-radius:999px;
+                          border:1px solid rgba(0,0,0,.10);
+                          background: rgba(107,114,128,.10);
+                          color:#6b7280;
+                          font-weight:1000;
+                          font-size:12px;
+                          line-height:1;
+                          white-space:nowrap;
+                        ">
+                        {{ it.Status or "-" }}
+                      </span>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    <span style="
+                      display:inline-flex;
+                      align-items:center;
+                      padding:6px 10px;
+                      border-radius:999px;
+                      border:1px solid rgba(0,0,0,.10);
+                      background: rgba(107,114,128,.10);
+                      color:#6b7280;
+                      font-weight:1000;
+                      font-size:12px;
+                      line-height:1;
+                      white-space:nowrap;
+                    ">
+                      {{ it.Origem or "-" }}
+                    </span>
+                  </td>
+
+                  <td>
+                    {% if it.DataInicio %}
+                      {{ it.DataInicio.strftime("%d/%m/%Y") if it.DataInicio.__class__.__name__ != 'str' else it.DataInicio }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if it.DataFim %}
+                      {{ it.DataFim.strftime("%d/%m/%Y") if it.DataFim.__class__.__name__ != 'str' else it.DataFim }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+
+                  <td>{{ it.Cota if it.Cota is not none else "-" }}</td>
+
+                  <td class="muted">
+                    {% if it.CriadoEm %}
+                      {{ it.CriadoEm.strftime("%d/%m/%Y %H:%M") if it.CriadoEm.__class__.__name__ != 'str' else it.CriadoEm }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+
+                  <!-- ✅ AÇÕES (dropdown) -->
+                  <td style="text-align:right;">
+                    <div class="acoes-wrap">
+                      <button type="button"
+                              class="btn-acoes"
+                              data-menu-btn="1"
+                              data-ocupacao-id="{{ it.IDFatoOcupacaoPaineisEuromidia }}">
+                        Ações <span class="caret"></span>
+                      </button>
+
+                      <div class="acoes-menu" data-menu="1">
+                        <a class="acoes-item"
+                           href="{{ url_for('Paineis.ocupacao_detalhe', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
+                          <span class="ico">✏️</span>
+                          Alterar Dados
+                        </a>
+
+                        <a class="acoes-item danger"
+                           href="{{ url_for('Paineis.ocupacao_cancelar', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
+                          <span class="ico">🗑️</span>
+                          Cancelar Ocupação
+                        </a>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="10" class="muted" style="padding:16px 14px;">
+                  Nenhum registro encontrado com os filtros atuais.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <!-- =========================================================
+           ✅ PAGINAÇÃO (IGUAL SEU EXEMPLO) ✅ DENTRO DO FORM/CARD
+           ========================================================= -->
+      <div style="
+          position:relative;
+          padding: 12px 14px;
+          width:100%;
+          min-height:56px;
+          display:grid;
+          grid-template-columns: 1fr 1fr;
+          align-items:center;
+          gap:12px;
+        ">
+
+        <div class="muted" style="
+            font-weight:800;
+            justify-self:start;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            max-width: 45%;
+          ">
+          Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} ocupações
+        </div>
+
+        <div class="muted" style="
+            display:flex;
+            align-items:center;
+            gap:10px;
+            font-weight:900;
+            justify-self:end;
+            white-space:nowrap;
+          ">
+          <span>{{ filtros.per_page }} por página</span>
+        </div>
+
+        <div style="
+            position:absolute;
+            left:50%;
+            top:50%;
+            transform: translate(-50%, -50%);
+            display:flex;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
+            justify-content:center;
+            justify-self:center;
+            white-space:nowrap;
+          ">
+          {% set p = paginacao.page %}
+          {% set tp = paginacao.total_pages %}
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.lista_ocupacao',
+                              page=1,
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              status=filtros.status,
+                              origem=filtros.origem) }}">
+            «
+          </a>
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.lista_ocupacao',
+                              page=(p-1 if p>1 else 1),
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              status=filtros.status,
+                              origem=filtros.origem) }}">
+            ‹
+          </a>
+
+          <span style="font-weight:900;color:var(--text);padding:0 10px;">
+            {{ p }} / {{ tp }}
+          </span>
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.lista_ocupacao',
+                              page=(p+1 if p<tp else tp),
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              status=filtros.status,
+                              origem=filtros.origem) }}">
+            ›
+          </a>
+
+          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.lista_ocupacao',
+                              page=tp,
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              status=filtros.status,
+                              origem=filtros.origem) }}">
+            »
+          </a>
+        </div>
+
+      </div>
+
+    </form>
+
+  </div>
+</div>
+
+<script>
+  (function(){
+    const linhas = document.querySelectorAll("tr.row-click[data-href]");
+    for (const tr of linhas) {
+      tr.addEventListener("dblclick", function(e){
+        /* ✅ se clicou dentro do menu/btn de ações, NÃO navega pro detalhe */
+        if (e.target && (e.target.closest(".acoes-wrap") || e.target.closest(".acoes-menu") || e.target.closest(".btn-acoes"))) {
+          return;
+        }
+        const url = tr.getAttribute("data-href");
+        if (url) window.location.href = url;
+      });
+    }
+
+    /* ✅ dropdown: abre/fecha por linha + fecha ao clicar fora */
+    function fecharTodos() {
+      document.querySelectorAll(".acoes-menu.open").forEach(m => m.classList.remove("open"));
+    }
+
+    document.addEventListener("click", function(e){
+      const botao = e.target.closest(".btn-acoes");
+      const menu = e.target.closest(".acoes-menu");
+
+      if (botao) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const wrap = botao.closest(".acoes-wrap");
+        const meuMenu = wrap ? wrap.querySelector(".acoes-menu") : null;
+        const jaAberto = meuMenu && meuMenu.classList.contains("open");
+
+        fecharTodos();
+        if (meuMenu && !jaAberto) {
+          meuMenu.classList.add("open");
+        }
+        return;
+      }
+
+      if (menu) {
+        /* clicou dentro do menu, deixa seguir link normal */
+        return;
+      }
+
+      fecharTodos();
+    });
+
+    /* ✅ ESC fecha menus */
+    document.addEventListener("keydown", function(e){
+      if (e.key === "Escape") fecharTodos();
+    });
+  })();
+</script>
+
+{% endblock %}

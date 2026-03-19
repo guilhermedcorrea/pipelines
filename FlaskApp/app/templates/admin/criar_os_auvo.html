@@ -1,0 +1,563 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block content %}
+
+<style>
+  .page-wrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding: 18px 22px;
+  }
+  @media (max-width: 900px){
+    .page-wrap{ padding: 14px 14px; }
+  }
+
+  .card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+
+  .header{
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .title{
+    font-weight:1000;
+    font-size:16px;
+    line-height:1.2;
+  }
+  .subtitle{
+    margin-top:4px;
+    font-weight:900;
+    opacity:.75;
+    font-size:12px;
+  }
+
+  .toolbar{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  .btnx{
+    height:38px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border:1px solid rgba(0,0,0,.10);
+    background:#fff;
+    font-weight:1000;
+    cursor:pointer;
+    white-space:nowrap;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    text-decoration:none;
+    user-select:none;
+  }
+  .btnx:hover{ background: rgba(0,0,0,.02); }
+
+  .btn-primary{
+    background: rgba(37,99,235,.10);
+    border-color: rgba(37,99,235,.20);
+    color: rgba(37,99,235,1);
+  }
+  .btn-primary:hover{
+    background: rgba(37,99,235,.14);
+  }
+
+  .btn-danger{
+    background: rgba(239,68,68,.10);
+    border-color: rgba(239,68,68,.20);
+    color: rgba(239,68,68,1);
+  }
+  .btn-danger:hover{
+    background: rgba(239,68,68,.14);
+  }
+
+  .content{ padding: 14px 16px 18px 16px; }
+
+  .muted{ opacity:.75; font-weight:900; }
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(107,114,128,.10);
+    color:#6b7280;
+    font-weight:1000;
+    font-size:12px;
+    line-height:1;
+    white-space:nowrap;
+  }
+
+  .os-wrap{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+
+  .os-card{
+    border:1px solid rgba(0,0,0,.08);
+    border-radius: 14px;
+    overflow:hidden;
+    background:#fff;
+  }
+
+  .os-head{
+    padding: 12px 12px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    background: rgba(0,0,0,.02);
+  }
+
+  .os-head-left{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  .os-body{ padding: 12px 12px 14px 12px; }
+
+  .grid{
+    display:grid;
+    grid-template-columns: 1.2fr 1fr 1fr;
+    gap:10px;
+  }
+  @media (max-width: 1000px){
+    .grid{ grid-template-columns: 1fr; }
+  }
+
+  .field label{
+    display:block;
+    font-weight:900;
+    font-size:12px;
+    opacity:.8;
+    margin-bottom:6px;
+  }
+
+  .field input, .field textarea{
+    width:100%;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:#fff;
+    font-weight:900;
+    outline:none;
+    padding: 8px 10px;
+  }
+  .field input{ height:38px; }
+  .field textarea{ min-height: 74px; resize: vertical; }
+
+  .field input:focus, .field textarea:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+
+  .input-select{
+    width:100%;
+    height:38px;
+    padding: 8px 10px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:#fff;
+    font-weight:1000;
+    outline:none;
+  }
+
+  .items{
+    margin-top: 10px;
+    border-top: 1px dashed rgba(0,0,0,.10);
+    padding-top: 10px;
+  }
+
+  table{ width:100%; border-collapse: collapse; }
+  thead th{
+    text-align:left;
+    font-weight:1000;
+    font-size:12px;
+    letter-spacing:.2px;
+    opacity:.85;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(0,0,0,.06);
+    border-bottom: 1px solid rgba(0,0,0,.08);
+    background: rgba(0,0,0,.02);
+    white-space:nowrap;
+  }
+  tbody td{
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    font-weight:900;
+    vertical-align:top;
+  }
+  tbody tr:hover{ background: rgba(0,0,0,.02); }
+
+  .qty{ width:120px; max-width:100%; }
+
+  .icon-btn{
+    height:36px;
+    width:36px;
+    border-radius:10px;
+    border:1px solid rgba(0,0,0,.10);
+    background:#fff;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:1000;
+    user-select:none;
+  }
+  .icon-btn:hover{ background: rgba(0,0,0,.02); }
+
+  .status-bar{
+    margin-top:10px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .err{
+    padding:10px 12px;
+    border-radius: 12px;
+    border:1px solid rgba(239,68,68,.25);
+    background: rgba(239,68,68,.08);
+    color: rgba(185,28,28,1);
+    font-weight:1000;
+    display:none;
+  }
+  .ok{
+    padding:10px 12px;
+    border-radius: 12px;
+    border:1px solid rgba(16,185,129,.25);
+    background: rgba(16,185,129,.10);
+    color: #065f46;
+    font-weight:1000;
+    display:none;
+  }
+</style>
+
+<div class="page-wrap">
+  <div class="card">
+
+    <div class="header">
+      <div>
+        <div class="title">Criar OS (Auvo)</div>
+        
+      </div>
+
+      <div class="toolbar">
+        <button class="btnx" type="button" id="btn-add-os">＋ Nova OS</button>
+        <button class="btnx btn-primary" type="button" id="btn-salvar">Salvar tudo</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <input type="hidden" id="csrf_token" value="{{ csrf_token() }}">
+
+      <!-- DATALISTS -->
+      <datalist id="dl_empresas">
+        {% for e in listas.empresas %}
+          <option value="{{ e.IDEmpresa }} | {{ e.RazaoSocial }}"></option>
+        {% endfor %}
+      </datalist>
+
+      <datalist id="dl_projetos">
+        {% for p in listas.projetos %}
+          <option value="{{ p.IDDimProjeto }} | {{ p.NomeProjeto }} (Emp {{ p.IDEmpresa }})"></option>
+        {% endfor %}
+      </datalist>
+
+      <datalist id="dl_contratos">
+        {% for c in listas.contratos %}
+          <option value="{{ c.IDDimContrato }} | {{ c.NomeContrato }} (Emp {{ c.IDEmpresa }})"></option>
+        {% endfor %}
+      </datalist>
+
+      <datalist id="dl_produtos">
+        {% for pr in listas.produtos %}
+          <option value="{{ pr.IDDimProdutoAuvo }} | {{ pr.Nome }}"></option>
+        {% endfor %}
+      </datalist>
+
+      <div class="os-wrap" id="os-wrap"></div>
+
+      <div class="status-bar">
+        <div class="err" id="box-erro"></div>
+        <div class="ok" id="box-ok"></div>
+        <div class="muted">Dica: digite “ID” ou “ID | Nome” nos campos</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const osWrap = document.getElementById("os-wrap");
+  const btnAddOs = document.getElementById("btn-add-os");
+  const btnSalvar = document.getElementById("btn-salvar");
+
+  const boxErro = document.getElementById("box-erro");
+  const boxOk = document.getElementById("box-ok");
+  const csrfToken = document.getElementById("csrf_token").value;
+
+  function showErro(msg){
+    boxOk.style.display = "none";
+    boxOk.textContent = "";
+    boxErro.style.display = "block";
+    boxErro.textContent = msg || "Erro.";
+  }
+  function showOk(msg){
+    boxErro.style.display = "none";
+    boxErro.textContent = "";
+    boxOk.style.display = "block";
+    boxOk.textContent = msg || "OK.";
+  }
+  function clearMsgs(){
+    boxErro.style.display = "none";
+    boxOk.style.display = "none";
+    boxErro.textContent = "";
+    boxOk.textContent = "";
+  }
+
+  async function buscarProximoIdEstimado(){
+    try{
+      const resp = await fetch("{{ url_for('admin.api_os_auvo_proximo_id') }}", { method: "GET" });
+      const js = await resp.json();
+      return js.proximo_id_estimado || null;
+    } catch(e){
+      return null;
+    }
+  }
+
+  function normalizarIdPrefixo(inp){
+    const v = (inp.value || "").trim();
+    if (!v) return;
+    const m = v.match(/^(\d+)(\s*\|.*)?$/);
+    if (m && m[1]) {
+      inp.value = m[1] + (m[2] ? (" " + m[2].trim()) : "");
+    }
+  }
+
+  function criarLinhaItem(){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>
+        <input class="input-select item-produto" list="dl_produtos"
+               placeholder="Produto (digite ID ou escolha) - ex: 12 | Cabo"
+               autocomplete="off" />
+      </td>
+      <td style="width:140px;">
+        <input class="input-select qty item-qtd" type="number" min="1" step="1" placeholder="Qtd" />
+      </td>
+      <td style="width:60px;">
+        <button class="icon-btn btn-del-item" type="button" title="Remover item">−</button>
+      </td>
+    `;
+
+    tr.querySelector(".btn-del-item").addEventListener("click", () => tr.remove());
+    tr.querySelector(".item-produto").addEventListener("blur", (e) => normalizarIdPrefixo(e.target));
+
+    return tr;
+  }
+
+  async function criarCardOS(){
+    const idEstimado = await buscarProximoIdEstimado();
+
+    const osCard = document.createElement("div");
+    osCard.className = "os-card";
+
+    osCard.innerHTML = `
+      <div class="os-head">
+        <div class="os-head-left">
+          <span class="pill">OS ID: <span class="os-id-est">${idEstimado ? idEstimado : "-"}</span></span>
+          <span class="muted">ID OS</span>
+        </div>
+        <div class="toolbar">
+          <button class="btnx btn-danger btn-del-os" type="button">Remover OS</button>
+        </div>
+      </div>
+
+      <div class="os-body">
+        <div class="grid">
+          <div class="field">
+            <label>Empresa</label>
+            <input class="input-select os-empresa" list="dl_empresas"
+                   placeholder="Ex: 10 | Razão Social"
+                   autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label>Projeto</label>
+            <input class="input-select os-projeto" list="dl_projetos"
+                   placeholder="Ex: 3 | NomeProjeto (Emp 10)"
+                   autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label>Contrato</label>
+            <input class="input-select os-contrato" list="dl_contratos"
+                   placeholder="Ex: 7 | NomeContrato (Emp 10)"
+                   autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label>Data do Serviço</label>
+            <input class="input-select os-data" type="date" />
+          </div>
+
+          <div class="field" style="grid-column: span 2;">
+            <label>Endereço</label>
+            <input class="input-select os-endereco" placeholder="Rua, número, bairro..." />
+          </div>
+
+          <div class="field" style="grid-column: span 3;">
+            <label>Observações</label>
+            <textarea class="os-obs" placeholder="Observações gerais da OS..."></textarea>
+          </div>
+        </div>
+
+        <div class="items">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <div style="font-weight:1000;">Itens da OS</div>
+            <button class="btnx btn-add-item" type="button">＋ Adicionar item</button>
+          </div>
+
+          <div style="overflow:auto;margin-top:10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th>Quantidade</th>
+                  <th style="text-align:right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody class="tbody-itens"></tbody>
+            </table>
+          </div>
+
+          <div class="muted" style="margin-top:8px;font-size:12px;">
+        
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remover OS
+    osCard.querySelector(".btn-del-os").addEventListener("click", () => osCard.remove());
+
+    // Normaliza inputs com datalist (empresa/projeto/contrato)
+    for (const inp of osCard.querySelectorAll("input[list]")) {
+      inp.addEventListener("blur", (e) => normalizarIdPrefixo(e.target));
+    }
+
+    // Itens
+    const tbody = osCard.querySelector(".tbody-itens");
+    tbody.appendChild(criarLinhaItem()); // começa com 1 item
+
+    osCard.querySelector(".btn-add-item").addEventListener("click", () => {
+      tbody.appendChild(criarLinhaItem());
+    });
+
+    return osCard;
+  }
+
+  async function init(){
+    osWrap.appendChild(await criarCardOS());
+  }
+
+  btnAddOs.addEventListener("click", async () => {
+    clearMsgs();
+    osWrap.appendChild(await criarCardOS());
+  });
+
+  btnSalvar.addEventListener("click", async () => {
+    clearMsgs();
+
+    const cards = Array.from(osWrap.querySelectorAll(".os-card"));
+    if (cards.length === 0){
+      showErro("Adicione ao menos 1 OS antes de salvar.");
+      return;
+    }
+
+    const ordens = [];
+
+    for (const card of cards) {
+      const empresa_input = card.querySelector(".os-empresa").value;
+      const projeto_input = card.querySelector(".os-projeto").value;
+      const contrato_input = card.querySelector(".os-contrato").value;
+      const data_servico = card.querySelector(".os-data").value;
+      const endereco = card.querySelector(".os-endereco").value;
+      const observacoes = card.querySelector(".os-obs").value;
+
+      const itensRows = Array.from(card.querySelectorAll(".tbody-itens tr"));
+      const itens = [];
+
+      for (const tr of itensRows) {
+        const produto_input = tr.querySelector(".item-produto").value;
+        const quantidade = tr.querySelector(".item-qtd").value;
+
+        // só adiciona se tiver algo digitado
+        if ((produto_input || "").trim() || (quantidade || "").trim()) {
+          itens.push({ produto_input, quantidade });
+        }
+      }
+
+      ordens.push({
+        empresa_input,
+        projeto_input,
+        contrato_input,
+        data_servico,
+        endereco,
+        observacoes,
+        itens
+      });
+    }
+
+    try{
+      btnSalvar.disabled = true;
+      btnSalvar.textContent = "Salvando...";
+
+      const resp = await fetch("{{ url_for('admin.criar_os_auvo') }}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken
+        },
+        body: JSON.stringify({ ordens })
+      });
+
+      const js = await resp.json();
+
+      if (!resp.ok || !js.ok){
+        showErro(js.erro || "Falha ao salvar.");
+        return;
+      }
+
+      showOk("Salvo com sucesso! IDs criados: " + (js.ids_criados || []).join(", "));
+    } catch(e){
+      showErro("Erro inesperado ao salvar: " + (e?.message || e));
+    } finally {
+      btnSalvar.disabled = false;
+      btnSalvar.textContent = "Salvar tudo";
+    }
+  });
+
+  init();
+})();
+</script>
+
+{% endblock %}

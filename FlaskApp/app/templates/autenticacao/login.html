@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Identifique-se</title>
+
+  <style>
+    :root{
+      --blue:#002884;
+      --bg:#F5F7FA;
+      --card:#FFFFFF;
+      --text:#0F172A;
+      --muted:#64748B;
+      --border:#E5E7EB;
+      --danger:#DC2626;
+      --warning:#D97706;
+      --info:#2563EB;
+      --success:#16A34A;
+      --shadow:0 12px 28px rgba(2, 6, 23, .10);
+      --radius:16px;
+    }
+
+    *{ box-sizing:border-box; }
+
+    body{
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      background:var(--bg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color:var(--text);
+    }
+
+    .wrap{ width:100%; max-width:420px; }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+
+    .head{
+      padding:18px 18px 14px 18px;
+      border-bottom:1px solid var(--border);
+      background:rgba(0,40,132,.03);
+    }
+
+    .head h1{
+      margin:0;
+      font-size:20px;
+      font-weight:900;
+      color:var(--blue);
+      letter-spacing:.2px;
+    }
+
+    .head p{
+      margin:6px 0 0 0;
+      font-size:13px;
+      color:var(--muted);
+      font-weight:700;
+      line-height:1.35;
+    }
+
+    .body{ padding:18px; }
+
+    label{
+      display:block;
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      margin-bottom:6px;
+    }
+
+    .input{
+      width:100%;
+      padding:12px 12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      font-size:14px;
+      outline:none;
+      background:#fff;
+    }
+    .input:focus{
+      border-color: rgba(0,40,132,.45);
+      box-shadow:0 0 0 4px rgba(0,40,132,.10);
+    }
+
+    .row{ margin-bottom:12px; }
+
+    .row-2{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:12px 0 14px 0;
+    }
+
+    .check{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      color:var(--muted);
+      font-weight:700;
+      user-select:none;
+    }
+    .check input{ width:16px; height:16px; }
+
+    .btn{
+      width:100%;
+      border:none;
+      border-radius:14px;
+      padding:12px 14px;
+      cursor:pointer;
+      font-weight:900;
+      font-size:14px;
+      color:#fff;
+      background:var(--blue);
+      box-shadow: 0 10px 22px rgba(0,40,132,.18);
+    }
+    .btn:hover{ filter:brightness(1.03); }
+    .btn:active{ transform: translateY(1px); }
+
+    .flashes{ margin:0 0 14px 0; padding:0; list-style:none; }
+    .flash{
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:10px 12px;
+      margin-bottom:10px;
+      font-size:13px;
+      font-weight:800;
+      background:#fff;
+    }
+    .flash.danger{ border-color: rgba(220,38,38,.25); background:rgba(220,38,38,.06); color:var(--danger); }
+    .flash.warning{ border-color: rgba(217,119,6,.25); background:rgba(217,119,6,.06); color:var(--warning); }
+    .flash.info{ border-color: rgba(37,99,235,.25); background:rgba(37,99,235,.06); color:var(--info); }
+    .flash.success{ border-color: rgba(22,163,74,.25); background:rgba(22,163,74,.06); color:var(--success); }
+
+    .foot{
+      margin-top:12px;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:700;
+      text-align:center;
+      line-height:1.4;
+    }
+
+    /* ✅ bloco do captcha */
+    .captcha-wrap{
+      display:flex;
+      justify-content:center;
+      margin:12px 0 10px 0;
+    }
+
+    .captcha-erro{
+      margin-top:8px;
+      font-size:12px;
+      font-weight:900;
+      color:var(--danger);
+      text-align:center;
+    }
+
+    /* ✅ deixa o recaptcha responsivo em telas menores */
+    @media (max-width: 380px){
+      .captcha-wrap{
+        transform: scale(.92);
+        transform-origin: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+
+      <div class="head">
+        <h1>Identifique-se</h1>
+        <p>Informe seu e-mail e sua senha para acessar.</p>
+      </div>
+
+      <div class="body">
+
+        <!-- Flash messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <ul class="flashes">
+              {% for category, message in messages %}
+                <li class="flash {{ category|e }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('Autenticacao.login', next=request.args.get('next')) }}" autocomplete="off">
+          {# ✅ CSRF: mantém seu padrão atual #}
+          {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% endif %}
+
+          <div class="row">
+            <label for="email">E-mail</label>
+            <input class="input" id="email" name="email" type="email" placeholder="seu@email.com" required autofocus value="{{ request.form.get('email','') }}">
+          </div>
+
+          <div class="row">
+            <label for="senha">Senha</label>
+            <input class="input" id="senha" name="senha" type="password" placeholder="••••••••" required>
+          </div>
+
+          <div class="row-2">
+            <label class="check" for="lembrar" style="margin:0;">
+              <input id="lembrar" name="lembrar" type="checkbox" value="1" {% if request.form.get('lembrar') %}checked{% endif %}>
+              Manter conectado
+            </label>
+          </div>
+
+   
+          <div class="captcha-wrap">
+            <div
+              class="g-recaptcha"
+              data-sitekey="{{ config.get('RECAPTCHA_PUBLIC_KEY', '') }}"
+
+            ></div>
+          </div>
+
+          {# (opcional) se você der flash de erro específico #}
+          {% if recaptcha_erro %}
+            <div class="captcha-erro">{{ recaptcha_erro }}</div>
+          {% endif %}
+
+          <button class="btn" type="submit">Entrar</button>
+        </form>
+
+        <div class="foot">
+          Se você não tem acesso, solicite ao administrador.
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ script do Google reCAPTCHA -->
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</body>
+</html>

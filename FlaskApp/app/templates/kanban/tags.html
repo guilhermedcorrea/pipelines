@@ -1,0 +1,91 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Tags | {{ kanban.NomeKanban }}{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0;">Tags — {{ kanban.NomeKanban }}</h2>
+      <div style="opacity:.75;margin-top:4px;">Crie tags e defina cor/ícone. Elas aparecem dentro e fora do card.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a class="btn" href="{{ url_for('Kanban.kanban_view', id_kanban=kanban.IDDimKanban) }}">← Voltar ao Kanban</a>
+    </div>
+  </div>
+
+  <hr style="opacity:.12;margin:14px 0;">
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+    <div class="card" style="border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:14px;">
+      <div style="font-weight:900;margin-bottom:10px;">Nova Tag</div>
+      <div style="display:grid;gap:10px;">
+        <input id="tagNome" class="input" placeholder="Nome (ex: Aguardando Retorno)" />
+        <select id="tagTipo" class="input">
+          <option value="OPERACIONAL">OPERACIONAL</option>
+          <option value="FINANCEIRA">FINANCEIRA</option>
+          <option value="INFORMATIVA">INFORMATIVA</option>
+        </select>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <input id="tagCor" class="input" type="color" value="#94a3b8" style="width:64px;height:42px;padding:0;" />
+          <input id="tagCorHex" class="input" placeholder="#RRGGBB" value="#94a3b8" />
+        </div>
+        <input id="tagIcone" class="input" placeholder="Ícone (ex: clock, percent, shield)" />
+        <button class="btn btn-primary" id="btnCriarTag">Criar</button>
+        <div id="msgTag" style="color:#b91c1c;display:none;"></div>
+      </div>
+    </div>
+
+    <div class="card" style="border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:14px;">
+      <div style="font-weight:900;margin-bottom:10px;">Tags existentes</div>
+      <div style="display:grid;gap:8px;">
+        {% for t in tags %}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid rgba(15,23,42,.10);border-radius:12px;padding:10px;">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <span style="width:14px;height:14px;border-radius:4px;background:{{ t.CorHex or '#CBD5E1' }};display:inline-block;"></span>
+              <div style="font-weight:800;">{{ t.NomeTag }}</div>
+              <div style="opacity:.65;font-size:12px;">{{ t.TipoTag }}</div>
+              {% if t.Icone %}<div style="opacity:.65;font-size:12px;">ícone: {{ t.Icone }}</div>{% endif %}
+              {% if t.Ativo == 0 %}<div style="color:#b91c1c;font-size:12px;">(inativa)</div>{% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const idKanban = {{ kanban.IDDimKanban }};
+  const corPicker = document.getElementById("tagCor");
+  const corHex = document.getElementById("tagCorHex");
+
+  corPicker.addEventListener("input", () => corHex.value = corPicker.value);
+  corHex.addEventListener("input", () => corPicker.value = corHex.value);
+
+  document.getElementById("btnCriarTag").addEventListener("click", async () => {
+    const nome = (document.getElementById("tagNome").value || "").trim();
+    const tipo = document.getElementById("tagTipo").value;
+    const cor_hex = (document.getElementById("tagCorHex").value || "").trim();
+    const icone = (document.getElementById("tagIcone").value || "").trim();
+
+    const msg = document.getElementById("msgTag");
+    msg.style.display = "none";
+
+    const r = await fetch(`/kanban/api/kanbans/${idKanban}/tags`, {
+      method:"POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({nome, tipo, cor_hex, icone})
+    });
+
+    const j = await r.json();
+    if (!j.ok) {
+      msg.textContent = j.msg || "Erro";
+      msg.style.display = "block";
+      return;
+    }
+    window.location.reload();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,489 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block content %}
+
+<style>
+  .page-wrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding: 18px 22px;
+  }
+  @media (max-width: 900px){
+    .page-wrap{ padding: 14px 14px; }
+  }
+
+  .card{
+    width:100%;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+
+  /* ✅ header 2-colunas: título (esq) + ações (dir) */
+  .header{
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    min-width:0;
+  }
+
+  .header-left{
+    min-width:0;
+    flex: 1 1 auto;
+  }
+
+  .header-right{
+    flex: 0 0 auto;
+    min-width:0;
+  }
+
+  .title{
+    font-weight:1000;
+    font-size:16px;
+    line-height:1.2;
+  }
+  .subtitle{
+    margin-top:4px;
+    font-weight:900;
+    opacity:.7;
+    font-size:12px;
+    line-height:1.25;
+    word-break: break-word;
+    overflow-wrap:anywhere;
+  }
+
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height:34px;
+    padding:0 12px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(107,114,128,.10);
+    color:#6b7280;
+    font-weight:1000;
+    font-size:12px;
+    line-height:34px;
+    white-space:nowrap;
+    flex: 0 0 auto;
+    box-sizing:border-box;
+  }
+  .badge.ativo{
+    background: rgba(37,99,235,.10);
+    border:1px solid rgba(37,99,235,.20);
+    color: rgba(37,99,235,1);
+  }
+  .badge.reserva{
+    background: rgba(245,158,11,.18);
+    border:1px solid rgba(245,158,11,.28);
+    color:#92400e;
+  }
+  .badge.cancelado{
+    background: rgba(239,68,68,.12);
+    border:1px solid rgba(239,68,68,.25);
+    color: rgba(185,28,28,1);
+  }
+
+  /* ✅ grade com 3 colunas em telas grandes, 2 em médias, 1 no mobile */
+  .grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap:12px;
+    padding: 14px 16px;
+  }
+  @media (max-width: 1200px){
+    .grid{ grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 900px){
+    .grid{ grid-template-columns: 1fr; }
+  }
+
+  .box{
+    border:1px solid rgba(0,0,0,.08);
+    border-radius: 14px;
+    padding: 12px 12px;
+    background: rgba(0,0,0,.01);
+    min-width: 0;
+  }
+  .box h3{
+    margin:0 0 10px 0;
+    font-size:12px;
+    letter-spacing:.2px;
+    font-weight:1000;
+    opacity:.85;
+    text-transform:uppercase;
+  }
+
+  .kv{
+    display:grid;
+    grid-template-columns: 160px minmax(0, 1fr);
+    gap:8px 10px;
+    align-items:start;
+  }
+  @media (max-width: 600px){
+    .kv{ grid-template-columns: 1fr; }
+  }
+
+  .k{
+    font-weight:1000;
+    font-size:12px;
+    opacity:.70;
+  }
+  .v{
+    font-weight:900;
+    font-size:13px;
+    color: var(--text);
+    word-break: break-word;
+    overflow-wrap:anywhere;
+    min-width:0;
+  }
+
+  .mono{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size:12px;
+    white-space:pre-wrap;
+    word-break: break-word;
+    overflow-wrap:anywhere;
+  }
+
+  /* =========================================================
+     ✅ AÇÕES (header-right) — simples, estável e sem treta
+     (agora só tem: badge + voltar)
+     ========================================================= */
+  .header .actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    gap:0;
+    min-width:0;
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+  .header .actions > *{
+    margin-left:10px;
+    margin-top:0;
+  }
+  .header .actions > *:first-child{
+    margin-left:0;
+  }
+  @media (max-width: 900px){
+    .header .actions > *{ margin-top:8px; }
+  }
+
+  /* ✅ normalize do botão bootstrap apenas no header */
+  .header .actions a.btn,
+  .header .actions button.btn{
+    height:34px !important;
+    line-height:34px !important;
+    padding:0 14px !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    box-sizing:border-box !important;
+    text-decoration:none !important;
+  }
+
+  /* ✅ deixa o TEXTO ORIGINAL ocupando a largura toda */
+  .box.full{
+    grid-column: 1 / -1;
+  }
+  @media (max-width: 900px){
+    .box.full{ grid-column: auto; }
+  }
+
+  /* =========================================================
+     ✅ ALTERAR STATUS — agora vai pra baixo, sem atrapalhar header
+     ========================================================= */
+  .status-area{
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    background: rgba(0,0,0,.01);
+  }
+
+  .status-row{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    gap:0;
+  }
+
+  .status-row > *{
+    margin-left:10px;
+    margin-top:0;
+  }
+  .status-row > *:first-child{
+    margin-left:0;
+  }
+  @media (max-width: 900px){
+    .status-row{
+      justify-content:flex-start;
+    }
+    .status-row > *{
+      margin-top:8px;
+    }
+  }
+
+  .status-form{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height:34px;
+    padding:0 10px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(0,0,0,.02);
+    box-sizing:border-box;
+    flex: 0 0 auto;
+    flex-wrap:nowrap;
+    white-space:nowrap;
+    overflow: visible;
+    gap:0;
+  }
+
+  .status-form label{
+    margin:0 !important;
+    padding:0 !important;
+  }
+
+  .status-label{
+    font-weight:1000;
+    font-size:12px;
+    opacity:.75;
+    white-space:nowrap;
+    flex: 0 0 auto;
+    line-height:34px;
+    margin-right:8px;
+  }
+
+  .status-select{
+    height:28px;
+    line-height:28px;
+    border-radius: 999px;
+    border:1px solid rgba(0,0,0,.12);
+    background:#fff;
+    padding: 0 28px 0 10px;
+    font-weight:1000;
+    font-size:12px;
+    outline:none;
+    cursor:pointer;
+    display:block;
+    box-sizing:border-box;
+
+    min-width: 180px;
+    flex: 0 0 auto;
+
+    -webkit-appearance:none;
+    -moz-appearance:none;
+    appearance:none;
+
+    background-image:
+      linear-gradient(45deg, transparent 50%, rgba(0,0,0,.55) 50%),
+      linear-gradient(135deg, rgba(0,0,0,.55) 50%, transparent 50%),
+      linear-gradient(to right, transparent, transparent);
+    background-position:
+      calc(100% - 16px) calc(50% - 2px),
+      calc(100% - 11px) calc(50% - 2px),
+      0 0;
+    background-size:
+      6px 6px,
+      6px 6px,
+      100% 100%;
+    background-repeat:no-repeat;
+  }
+
+  .status-select:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+
+  @media (max-width: 780px){
+    .status-form{
+      flex: 1 1 100%;
+      justify-content:flex-start;
+    }
+    .status-select{
+      min-width: 220px;
+    }
+  }
+
+  @media (max-width: 420px){
+    .status-label{ display:none; }
+    .status-select{ min-width: 220px; }
+  }
+</style>
+
+<div class="page-wrap">
+
+  <div class="card">
+
+    <div class="header">
+      <div class="header-left">
+        <div class="title">
+          Ocupação #{{ detalhe.IDFatoOcupacaoPaineisEuromidia }}
+        </div>
+        <div class="subtitle">
+          CodFace: <span style="font-weight:1000;">{{ detalhe.CodFace or "-" }}</span>
+          • Cliente: <span style="font-weight:1000;">{{ detalhe.RazaoSocial or "-" }}</span>
+          • Marca: <span style="font-weight:1000;">{{ detalhe.MarcaExibida or "-" }}</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <div class="actions">
+
+          {# ✅ Badge atual #}
+          {% set st = (detalhe.Status or "")|trim|upper %}
+          {% if st == "ATIVO" %}
+            <span class="badge ativo">ATIVO</span>
+          {% elif st == "RESERVADO" %}
+            <span class="badge reserva">RESERVADO</span>
+          {% elif st == "CANCELADO" %}
+            <span class="badge cancelado">CANCELADO</span>
+          {% else %}
+            <span class="badge">{{ detalhe.Status or "-" }}</span>
+          {% endif %}
+
+          <a class="btn btn-secondary"
+             href="{{ url_for('Paineis.lista_ocupacao') }}">
+            Voltar
+          </a>
+        </div>
+      </div>
+    </div>
+
+    {# ✅ agora o alterar status fica fora do header e não atrapalha nada #}
+    <div class="status-area">
+      <div class="status-row">
+
+        <form method="POST"
+            action="{{ url_for('Paineis.ocupacao_alterar_status', id_ocupacao=detalhe.IDFatoOcupacaoPaineisEuromidia) }}">
+
+
+          {# ✅ CSRF (OBRIGATÓRIO quando CSRFProtect/Flask-WTF está ativo) #}
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <label class="status-label" for="status_novo">Alterar Status</label>
+
+          <select class="status-select" id="status_novo" name="status_novo" onchange="this.form.submit()">
+            <option value="ATIVO" {% if st == "ATIVO" %}selected{% endif %}>ATIVO</option>
+            <option value="RESERVADO" {% if st == "RESERVADO" %}selected{% endif %}>RESERVADO</option>
+            <option value="CANCELADO" {% if st == "CANCELADO" %}selected{% endif %}>CANCELADO</option>
+          </select>
+        </form>
+
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <div class="box">
+        <h3>Identificação</h3>
+        <div class="kv">
+          <div class="k">Referência</div><div class="v">{{ detalhe.Referencia or "-" }}</div>
+          <div class="k">CodPonto</div><div class="v">{{ detalhe.CodPonto or "-" }}</div>
+          <div class="k">CodFace</div><div class="v">{{ detalhe.CodFace or "-" }}</div>
+          <div class="k">IDPainelEuromidia</div><div class="v">{{ detalhe.IDPainelEuromidia if detalhe.IDPainelEuromidia is not none else "-" }}</div>
+          <div class="k">Origem</div><div class="v">{{ detalhe.Origem or "-" }}</div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>Datas</h3>
+        <div class="kv">
+          <div class="k">Início</div>
+          <div class="v">
+            {% if detalhe.DataInicio %}
+              {{ detalhe.DataInicio.strftime("%d/%m/%Y") if detalhe.DataInicio.__class__.__name__ != 'str' else detalhe.DataInicio }}
+            {% else %}-{% endif %}
+          </div>
+
+          <div class="k">Fim</div>
+          <div class="v">
+            {% if detalhe.DataFim %}
+              {{ detalhe.DataFim.strftime("%d/%m/%Y") if detalhe.DataFim.__class__.__name__ != 'str' else detalhe.DataFim }}
+            {% else %}-{% endif %}
+          </div>
+
+          <div class="k">Criado em</div>
+          <div class="v">
+            {% if detalhe.CriadoEm %}
+              {{ detalhe.CriadoEm.strftime("%d/%m/%Y %H:%M") if detalhe.CriadoEm.__class__.__name__ != 'str' else detalhe.CriadoEm }}
+            {% else %}-{% endif %}
+          </div>
+
+          <div class="k">Atualizado em</div>
+          <div class="v">
+            {% if detalhe.DataAtualizacao %}
+              {{ detalhe.DataAtualizacao.strftime("%d/%m/%Y %H:%M") if detalhe.DataAtualizacao.__class__.__name__ != 'str' else detalhe.DataAtualizacao }}
+            {% else %}-{% endif %}
+          </div>
+
+          <div class="k">Expira em</div>
+          <div class="v">
+            {% if detalhe.ExpiraEm %}
+              {{ detalhe.ExpiraEm.strftime("%d/%m/%Y %H:%M") if detalhe.ExpiraEm.__class__.__name__ != 'str' else detalhe.ExpiraEm }}
+            {% else %}-{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>Exibição</h3>
+        <div class="kv">
+          <div class="k">Loop início</div><div class="v">{{ detalhe.LoopInicio if detalhe.LoopInicio is not none else "-" }}</div>
+          <div class="k">Loop fim</div><div class="v">{{ detalhe.LoopFim if detalhe.LoopFim is not none else "-" }}</div>
+          <div class="k">SpanQtd</div><div class="v">{{ detalhe.SpanQtd if detalhe.SpanQtd is not none else "-" }}</div>
+          <div class="k">Cota</div><div class="v">{{ detalhe.Cota if detalhe.Cota is not none else "-" }}</div>
+          <div class="k">Dias</div><div class="v">{{ detalhe.Dias if detalhe.Dias is not none else "-" }}</div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>Comercial / Contrato</h3>
+        <div class="kv">
+          <div class="k">Cliente (IDCliente)</div><div class="v">{{ detalhe.IDCliente if detalhe.IDCliente is not none else "-" }}</div>
+          <div class="k">Cliente (Razão Social)</div><div class="v">{{ detalhe.RazaoSocial or "-" }}</div>
+          <div class="k">Vendedor</div><div class="v">{{ detalhe.Vendedor or "-" }}</div>
+          <div class="k">IDVendedor</div><div class="v">{{ detalhe.IDVendedor if detalhe.IDVendedor is not none else "-" }}</div>
+          <div class="k">IDFatoControleContratos</div><div class="v">{{ detalhe.IDFatoControleContratos if detalhe.IDFatoControleContratos is not none else "-" }}</div>
+          <div class="k">Número contrato</div><div class="v">{{ detalhe.NumeroContrato or "-" }}</div>
+          <div class="k">Número prévia</div><div class="v">{{ detalhe.NumeroPrevia or "-" }}</div>
+        </div>
+      </div>
+
+      <div class="box">
+        <h3>Cancelamento</h3>
+        <div class="kv">
+          <div class="k">Cancelado em</div>
+          <div class="v">
+            {% if detalhe.CanceladoEm %}
+              {{ detalhe.CanceladoEm.strftime("%d/%m/%Y %H:%M") if detalhe.CanceladoEm.__class__.__name__ != 'str' else detalhe.CanceladoEm }}
+            {% else %}-{% endif %}
+          </div>
+
+          <div class="k">Cancelado por (ID)</div><div class="v">{{ detalhe.CanceladoPorIDUsuario if detalhe.CanceladoPorIDUsuario is not none else "-" }}</div>
+          <div class="k">Observação</div><div class="v">{{ detalhe.Observacao or "-" }}</div>
+        </div>
+      </div>
+
+      <div class="box full">
+        <h3>Observações</h3>
+        <div class="v mono">
+          {{ detalhe.TextoOriginal or "-" }}
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

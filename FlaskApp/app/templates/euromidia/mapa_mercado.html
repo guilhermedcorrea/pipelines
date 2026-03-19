@@ -1,0 +1,3403 @@
+
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Pagina Painel| Euromídia{% endblock %}
+
+{% block content %}
+
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <!-- HeatLayer -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+
+
+<style>
+  /* =========================================================
+     ✅ Harmonização com base_euromidia.html
+     - usa as variáveis: --euro-blue / --euro-yellow / --bg / --card / --text / --muted / --border
+     ========================================================= */
+
+  .mm-shell{
+    display:grid;
+    grid-template-columns: 340px 1fr 380px;
+    gap: 14px;
+    align-items: stretch;
+    min-height: 720px;
+  }
+
+  @media (max-width: 1200px){
+    .mm-shell{
+      grid-template-columns: 340px 1fr;
+      grid-template-rows: auto auto;
+    }
+    .mm-right{ grid-column: 1 / -1; }
+  }
+  @media (max-width: 860px){
+    .mm-shell{
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+  }
+
+  .mm-card{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 1px 8px rgba(0,0,0,.06);
+    overflow:hidden;
+    min-height:0;
+  }
+
+  .mm-head{
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: #F8FAFC;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .mm-head .t{
+    font-weight: 900;
+    letter-spacing:.3px;
+    color: var(--euro-blue);
+  }
+  .mm-head .sub{
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 12px;
+  }
+
+  /* LEFT - painel */
+  .painel-box{
+    padding: 14px 16px;
+    display:grid;
+    grid-template-columns: 110px 1fr;
+    gap: 12px;
+    align-items:start;
+  }
+
+  .painel-foto{
+    width:110px;
+    height:86px;
+    border-radius: 14px;
+    border:1px solid var(--border);
+    background: linear-gradient(180deg, rgba(0,40,132,.08), rgba(255,179,0,.12));
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.55);
+    overflow:hidden;
+  }
+  .painel-foto img{
+    width: 58px;
+    height: 58px;
+    object-fit: contain;
+    display:block;
+    filter: drop-shadow(0 8px 14px rgba(15,23,42,.14));
+  }
+
+  /* ✅ IMPORTANTÍSSIMO: evita corte/overflow em flex/grid
+     - min-width:0 permite a coluna "1fr" realmente quebrar texto
+  */
+  .painel-info{
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .painel-info .nome{
+    margin:0;
+    font-weight:1000;
+    font-size: 16px;
+    line-height:1.15;
+    color: var(--text);
+
+    /* ✅ quebra e não corta */
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .painel-info .endereco{
+    margin: 4px 0 10px 0;
+    color: var(--muted);
+    font-weight:800;
+    font-size: 12.5px;
+    line-height: 1.35;
+
+    /* ✅ quebra e não corta */
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .kv{
+    display:grid;
+    grid-template-columns: 86px 1fr;
+    gap: 8px;
+    font-size: 12.5px;
+    margin: 6px 0;
+    align-items:start;
+
+    /* ✅ evita que a grid "corte" conteúdo */
+    min-width: 0;
+  }
+  .kv b{ color:#334155; }
+
+  /* ✅ garante que textos longos não “quebrem” o layout */
+  .kv span{
+    color: var(--text);
+    font-weight: 900;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+
+    /* ✅ deixa quebrar em múltiplas linhas */
+    white-space: normal;
+
+    /* ✅ evita corte por container pai */
+    min-width: 0;
+  }
+
+  /* ✅ badge azul Euromídia para Tipo */
+  .tipo-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(0,40,132,.10);
+    border: 1px solid rgba(0,40,132,.20);
+    color: var(--euro-blue);
+    font-weight: 1000;
+    font-size: 12px;
+    line-height: 1;
+
+    /* ✅ não deixar o badge forçar largura */
+    max-width: 100%;
+    min-width: 0;
+  }
+  .tipo-badge .dot{
+    width:10px;height:10px;border-radius:999px;
+    background: var(--euro-blue);
+    box-shadow: 0 0 0 2px rgba(255,255,255,.85);
+    flex: 0 0 auto;
+  }
+
+  /* ✅ CORREÇÃO do corte do "Tipo:"
+     Antes você tinha: nowrap + ellipsis => isso CORTA o texto.
+     Agora: quebra em linha e permite ler tudo.
+  */
+  .tipo-badge .txt{
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+
+    /* ✅ quebra agressiva se precisar */
+    word-break: break-word;
+    overflow-wrap: anywhere;
+
+    max-width: 100%;
+    min-width: 0;
+    line-height: 1.15;
+  }
+
+  .btn-full{
+    width:100%;
+    height: 44px;
+    border-radius: 10px;
+    border: 0;
+    background: var(--euro-yellow);
+    color: #0b1a3a;
+    font-weight: 1000;
+    cursor:pointer;
+  }
+  .btn-full:hover{ filter: brightness(.97); }
+  .btn-full:active{ transform: translateY(1px); }
+
+  .hint{
+    margin: 0 16px 16px 16px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border:1px dashed var(--border);
+    background: #fff;
+    color:#334155;
+    font-weight: 800;
+    font-size: 12.5px;
+    line-height: 1.35;
+  }
+
+  /* CENTER - mapa */
+  .mm-center{
+    position:relative;
+    min-height: 640px;
+  }
+  #mapa{
+    width:100%;
+    height: 100%;
+    min-height: 640px;
+  }
+
+  .filters{
+    position:absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    display:flex;
+    gap: 10px;
+    z-index: 1200;
+    pointer-events:none;
+    flex-wrap: wrap;
+  }
+  .filters .fbox{
+    pointer-events:auto;
+    background: rgba(255,255,255,.96);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 10px;
+    box-shadow: 0 12px 26px rgba(0,0,0,.12);
+    display:flex;
+    align-items:center;
+    gap: 8px;
+  }
+  .filters label{
+    margin:0;
+    font-size: 12px;
+    font-weight: 900;
+    color:#334155;
+    white-space:nowrap;
+  }
+  .filters select{
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background:#fff;
+    font-weight: 900;
+    padding: 0 10px;
+    outline:none;
+    width: auto;
+    min-width: 140px;
+  }
+
+  .bottom-kpis{
+    position:absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 1200;
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr 200px;
+    gap: 10px;
+    pointer-events:none;
+  }
+  @media (max-width: 860px){
+    .bottom-kpis{
+      grid-template-columns: 1fr 1fr;
+    }
+    .bottom-kpis .cta{
+      grid-column: 1 / -1;
+    }
+  }
+  .kpi{
+    pointer-events:auto;
+    background: rgba(255,255,255,.96);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 12px 26px rgba(0,0,0,.12);
+    padding: 10px 12px;
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap: 10px;
+    min-height: 54px;
+  }
+  .kpi .t{
+    font-size: 12px;
+    font-weight: 900;
+    color:#334155;
+  }
+  .kpi .v{
+    font-size: 22px;
+    font-weight: 1000;
+    color: var(--euro-blue);
+    letter-spacing: .2px;
+  }
+  .cta{
+    pointer-events:auto;
+    border: 0;
+    border-radius: 14px;
+    background: var(--euro-blue);
+    color:#fff;
+    font-weight: 1000;
+    cursor:pointer;
+    box-shadow: 0 12px 26px rgba(0,40,132,.22);
+  }
+  .cta:hover{ filter: brightness(.98); }
+  .cta:active{ transform: translateY(1px); }
+
+  /* RIGHT - legenda + drawer */
+  .mm-right{
+    display:flex;
+    flex-direction:column;
+    gap: 14px;
+    min-height:0;
+  }
+
+  .legend{
+    padding: 12px 14px;
+  }
+  .legend .ttl{
+    margin: 0 0 10px 0;
+    font-weight: 1000;
+    color: var(--euro-blue);
+    letter-spacing:.2px;
+  }
+  .legend .row{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+    padding: 10px 0;
+    border-top: 1px dashed rgba(203,213,225,.7);
+  }
+  .legend .row:first-of-type{ border-top:none; }
+
+  .dot{
+    width: 14px;height:14px;border-radius:999px;
+    border:2px solid rgba(255,255,255,.85);
+    box-shadow: 0 6px 10px rgba(15,23,42,.10);
+    background:#999;
+    flex: 0 0 auto;
+  }
+  .dot.ok{ background:#16a34a; }
+  .dot.warn{ background:#f59e0b; }
+  .dot.painel{ background:#ef4444; border-radius:8px; width:14px; height:14px; }
+
+  .chip{
+    margin-left:auto;
+    font-size: 12px;
+    font-weight: 1000;
+    color:#334155;
+    border: 1px solid var(--border);
+    background:#fff;
+    padding: 6px 10px;
+    border-radius: 999px;
+  }
+
+  .drawer{
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+  }
+  .drawer .bar{
+    padding: 12px 14px;
+    background: rgba(0,40,132,.08);
+    border-bottom: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+  }
+  .drawer .bar b{
+    color: var(--euro-blue);
+    font-weight: 1000;
+  }
+  .drawer .bar small{
+    color: var(--muted);
+    font-weight: 900;
+  }
+  .drawer .content{
+    padding: 14px;
+    overflow:auto;
+    min-height:0;
+  }
+
+  .empresa-top{
+    display:grid;
+    grid-template-columns: 54px 1fr;
+    gap: 12px;
+    align-items:center;
+    margin-bottom: 12px;
+
+    /* ✅ evita corte por largura */
+    min-width: 0;
+  }
+  .empresa-avatar{
+    width:54px;height:54px;border-radius: 14px;
+    border:1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,179,0,.22), rgba(0,40,132,.10));
+    display:grid;place-items:center;
+    font-weight:1000;
+    color: #0b1a3a;
+  }
+  .empresa-top .nome{
+    margin:0;
+    font-weight:1000;
+    line-height:1.15;
+    color: var(--text);
+
+    /* ✅ quebra */
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .empresa-top .seg{
+    margin: 2px 0 0 0;
+    color: var(--muted);
+    font-weight: 900;
+    font-size: 12.5px;
+
+    /* ✅ quebra */
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .linha{ border-top: 1px solid var(--border); margin: 12px 0; }
+
+  .info-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    margin: 10px 0;
+    font-size: 13px;
+  }
+
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background:#fff;
+    font-weight: 1000;
+  }
+  .mini-dot{
+    width:10px;height:10px;border-radius:999px;background:#999;
+  }
+  .badge.ok .mini-dot{ background:#16a34a; }
+  .badge.warn .mini-dot{ background:#f59e0b; }
+
+  .score{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #F8FAFC;
+    font-weight: 1000;
+  }
+  .score .pill{
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(255,179,0,.18);
+    border: 1px solid rgba(255,179,0,.30);
+    color: #5b3a00;
+    font-weight: 1000;
+    text-align:right;
+  }
+
+  .acoes{
+    display:grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .acoes .btn-primary{
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 1000;
+    cursor:pointer;
+    border: 0;
+    background: var(--euro-yellow);
+    color: #0b1a3a;
+  }
+  .acoes .btn-primary:hover{ filter: brightness(.98); }
+
+  /* Leaflet tweaks */
+  .leaflet-control-attribution{ display:none; }
+
+  /* Tooltip Leaflet (hover) com cara "Euromídia" */
+  .leaflet-tooltip.mm-tt{
+    border: 1px solid rgba(0,40,132,.18);
+    background: rgba(255,255,255,.96);
+    color: #0f172a;
+    box-shadow: 0 12px 26px rgba(0,0,0,.14);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-weight: 900;
+  }
+  .leaflet-tooltip.mm-tt:before{
+    border-top-color: rgba(255,255,255,.96) !important;
+  }
+
+  /* =========================================================
+     ✅ NOVO: BLOCO DE GRÁFICO + MATRIZ (estilo Mais Retorno)
+     ========================================================= */
+
+  .fin-shell{
+    margin-top: 14px;
+    display:grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .fin-card{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 1px 8px rgba(0,0,0,.06);
+    overflow:hidden;
+
+    /* ✅ FIX: garante “altura mínima útil” quando gráficos estão dentro */
+    min-height: 0;
+  }
+
+  .fin-tabs{
+    padding: 12px 14px 0 14px;
+    display:flex;
+    gap: 18px;
+    border-bottom: 1px solid var(--border);
+    background:#fff;
+  }
+  .fin-tab{
+    appearance:none;
+    border:0;
+    background:transparent;
+    padding: 12px 8px;
+    font-weight: 1000;
+    color:#0f172a;
+    cursor:pointer;
+    border-bottom: 3px solid transparent;
+  }
+  .fin-tab.active{
+    color: var(--euro-blue);
+    border-bottom-color: #22c55e; /* verde "ativo" igual vibe do exemplo */
+  }
+
+  .fin-topbar{
+    padding: 12px 14px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 12px;
+    background:#fff;
+  }
+
+  .fin-title{
+    display:flex;
+    flex-direction:column;
+    gap: 6px;
+  }
+  .fin-title h3{
+    margin:0;
+    font-size: 20px;
+    font-weight: 1100;
+    color:#0f172a;
+    line-height: 1.1;
+  }
+  .fin-title .sub{
+    margin:0;
+    font-weight: 900;
+    color: #64748b;
+    font-size: 12px;
+    letter-spacing: .2px;
+    text-transform: uppercase;
+  }
+
+  .fin-controls{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content:flex-end;
+  }
+
+  .fin-pill{
+    border: 1px solid var(--border);
+    background:#fff;
+    border-radius: 12px;
+    padding: 8px 10px;
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    box-shadow: 0 10px 20px rgba(0,0,0,.08);
+  }
+  .fin-pill label{
+    margin:0;
+    font-weight: 1000;
+    color:#0f172a;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .fin-pill select{
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background:#fff;
+    font-weight: 1000;
+    padding: 0 10px;
+    outline:none;
+    cursor:pointer;
+  }
+
+  .fin-range{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    background:#fff;
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 10px 20px rgba(0,0,0,.08);
+  }
+  .fin-range button{
+    height: 34px;
+    border: 0;
+    background: transparent;
+    border-radius: 10px;
+    padding: 0 10px;
+    font-weight: 1100;
+    cursor:pointer;
+    color:#0f172a;
+  }
+  .fin-range button.active{
+    color:#22c55e;
+    box-shadow: inset 0 -3px 0 #22c55e;
+  }
+  .fin-range .sep{
+    width: 1px;
+    height: 26px;
+    background: var(--border);
+    margin: 0 2px;
+  }
+  .fin-range .cal{
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background:#fff;
+    font-weight: 1000;
+    padding: 0 10px;
+    outline:none;
+    cursor:pointer;
+  }
+
+  .fin-toggle{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+    font-weight: 1000;
+    color:#0f172a;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .fin-switch{
+    width: 42px;
+    height: 22px;
+    border-radius: 999px;
+    background: rgba(100,116,139,.35);
+    position: relative;
+    cursor:pointer;
+    border: 1px solid rgba(100,116,139,.25);
+  }
+  .fin-switch::after{
+    content:"";
+    position:absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background:#fff;
+    box-shadow: 0 6px 14px rgba(15,23,42,.18);
+    transition: transform .18s ease, background .18s ease;
+  }
+  .fin-switch.on{
+    background: rgba(128,0,255,.85); /* roxinho do print */
+    border-color: rgba(128,0,255,.25);
+  }
+  .fin-switch.on::after{
+    transform: translateX(20px);
+  }
+
+  .fin-chart-wrap{
+    padding: 6px 14px 16px 14px;
+    background:#fff;
+
+    /* ✅ FIX: se o gráfico estiver dentro de grid/flex, garante altura útil */
+    min-height: 0;
+  }
+  .fin-chart{
+    border-top: 1px dashed rgba(203,213,225,.75);
+    padding-top: 14px;
+
+    /* ✅ FIX: garante que o bloco “segure” o canvas */
+    min-height: 0;
+  }
+  #grafFaturamento{
+    width: 100% !important;
+    height: 320px !important;
+    display:block;
+
+    /* ✅ FIX: evita canvas virar inline e dar altura “estranha” em alguns browsers */
+    max-width: 100%;
+  }
+
+  .fin-table-wrap{
+    background:#fff;
+    border-top: 1px solid var(--border);
+    padding: 12px 14px 16px 14px;
+    overflow:auto;
+  }
+
+  .fin-matriz{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 980px;
+  }
+  .fin-matriz thead th{
+    position: sticky;
+    top: 0;
+    background: #0b1026;
+    color:#fff;
+    font-weight: 1100;
+    font-size: 12px;
+    padding: 10px 10px;
+    text-align: right;
+    border-bottom: 1px solid rgba(255,255,255,.10);
+    z-index: 2;
+    white-space: nowrap;
+  }
+  .fin-matriz thead th:first-child{
+    text-align:left;
+    width: 70px;
+  }
+  .fin-matriz thead th:nth-child(2){
+    text-align:left;
+    width: 260px;
+  }
+
+  .fin-matriz tbody td{
+    border-bottom: 1px solid rgba(203,213,225,.65);
+    padding: 10px 10px;
+    font-weight: 1000;
+    color:#0f172a;
+    font-size: 12.5px;
+    text-align: right;
+    vertical-align: top;
+    background:#fff;
+  }
+  .fin-matriz tbody td:first-child{
+    text-align:left;
+    font-weight: 1100;
+    color:#0f172a;
+    background:#fff;
+  }
+  .fin-matriz tbody td:nth-child(2){
+    text-align:left;
+    font-weight: 1100;
+    color:#0f172a;
+    background:#fff;
+  }
+
+  .fin-cell{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap: 2px;
+    line-height: 1.05;
+  }
+  .fin-cell small{
+    font-weight: 1100;
+    color:#64748b;
+    font-size: 11px;
+  }
+  .fin-neg{
+    color:#ef4444 !important;
+  }
+  .fin-pos{
+    color:#0f172a !important;
+  }
+
+  .fin-footnote{
+    margin-top: 10px;
+    color:#64748b;
+    font-weight: 900;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  /* =========================================================
+     ✅ NOVO: CUSTOS (ROSCA) - usado pelo HTML que inserimos
+     ========================================================= */
+  .fin-cost-wrap{
+    background:#fff;
+    border-top: 1px solid var(--border);
+    padding: 14px;
+
+    /* ✅ FIX: garante que o bloco tenha altura mínima útil */
+    min-height: 0;
+  }
+
+  .fin-cost-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .fin-cost-title{
+    font-weight: 1100;
+    color:#0f172a;
+    font-size: 16px;
+  }
+
+  .fin-cost-sub{
+    margin-top: 4px;
+    font-weight: 900;
+    color:#64748b;
+    font-size: 12px;
+  }
+
+  .fin-cost-grid{
+    display:grid;
+    grid-template-columns: 320px 1fr;
+    gap: 14px;
+    align-items: stretch;
+
+    /* ✅ FIX: evita colapsar em alguns layouts quando o pai é flex/grid */
+    min-height: 0;
+  }
+
+  @media (max-width: 860px){
+    .fin-cost-grid{
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .fin-cost-chart{
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px;
+    background: #F8FAFC;
+
+    /* ✅ FIX CRÍTICO: garante altura do “quadro” do gráfico (senão pode ficar 0 e parecer branco) */
+    min-height: 280px;
+
+    /* ✅ FIX: se você colocar algum título/legenda acima, mantém o canvas abaixo */
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+  }
+
+  #grafCustoRosca{
+    width: 100% !important;
+    height: 260px !important;
+    display:block;
+
+    /* ✅ FIX: evita canvas inline e garante cálculo correto de layout */
+    max-width: 100%;
+  }
+
+  .fin-cost-list{
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background:#fff;
+    overflow:auto;
+
+    /* ✅ FIX: impede lista de “sumir” em containers com min-height:0 */
+    min-height: 280px;
+  }
+
+  .fin-cost-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px dashed rgba(203,213,225,.7);
+  }
+  .fin-cost-item:first-child{ border-top:none; }
+
+  .fin-cost-left{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+
+    /* ❗️CORREÇÃO: você tinha min-width duplicado e o 0 estava “matando” o 220.
+       Mantive SEM remover nada, mas fiz a intenção ficar correta:
+       - min-width:0 (permite quebrar texto)
+       - flex:1 (permite ocupar espaço sem estourar)
+    */
+    min-width: 220px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .fin-cost-dot{
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+  }
+
+  .fin-cost-name{
+    font-weight: 1000;
+    color:#0f172a;
+    font-size: 13px;
+
+    /* ✅ quebra se ficar longo */
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  .fin-cost-right{
+    text-align:right;
+    display:flex;
+    flex-direction:column;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+
+  .fin-cost-val{
+    font-weight: 1100;
+    color:#0f172a;
+    font-size: 13px;
+  }
+
+  .fin-cost-pct{
+    font-weight: 1000;
+    color:#64748b;
+    font-size: 12px;
+  }
+</style>
+
+
+
+<div class="mm-shell">
+
+  <!-- =========================
+       LEFT
+       ========================= -->
+  <div class="mm-card">
+    <div class="mm-head">
+      <div>
+        <div class="t">INFORMAÇÕES DO PAINEL</div>
+        <div class="sub">Resumo do ponto + dados operacionais</div>
+      </div>
+    </div>
+
+    <div class="painel-box">
+      <div class="painel-foto">
+        <img src="{{ url_for('static', filename='icones/outdoor.png') }}" alt="Painel">
+      </div>
+
+      <!-- ✅ Ajuste HTML: evita corte/overflow dentro de flex -->
+      <div class="painel-info" style="min-width:0;">
+
+        <!-- ✅ Ajuste HTML: força quebra de linha mesmo sem CSS -->
+        <p class="nome" id="painelNome" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;margin:0;">
+          —
+        </p>
+
+        <p class="endereco" id="painelEndereco" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;margin:4px 0 10px 0;">
+          —
+        </p>
+
+        <div class="kv">
+          <b>Tipo:</b>
+          <span>
+            <span class="tipo-badge" id="painelTipoBadge" style="max-width:100%;display:inline-flex;min-width:0;">
+              <span class="dot"></span>
+
+              <!-- ✅ Ajuste HTML: garante que o texto do tipo pode quebrar -->
+              <span class="txt" id="painelTipoTxt" style="min-width:0;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">
+                —
+              </span>
+            </span>
+          </span>
+        </div>
+
+        <div class="kv"><b>Produto:</b> <span id="painelProduto" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</span></div>
+        <div class="kv"><b>Sentido:</b> <span id="painelSentido" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</span></div>
+        <div class="kv"><b>Faces:</b> <span id="painelFaces">—</span></div>
+      </div>
+    </div>
+
+    <div style="padding: 0 16px 16px 16px;">
+      <button class="btn-full" id="btnVerFichaPainel">Ver Ficha do Painel</button>
+    </div>
+
+    <div class="hint">
+      Passe o mouse nos pontos do mapa para ver a <b>legenda</b>. Clique em uma empresa para abrir detalhes no painel direito.
+    </div>
+  </div>
+
+  <!-- =========================
+       CENTER / MAP
+       ========================= -->
+  <div class="mm-card mm-center">
+
+    <!-- filtros -->
+    <div class="filters">
+      <div class="fbox">
+        <label for="selSegmento">Segmento:</label>
+        <select id="selSegmento">
+          <option value="todos">Todos</option>
+        </select>
+      </div>
+
+      <div class="fbox">
+        <label for="selStatus">Status:</label>
+        <select id="selStatus">
+          <option value="todos">Todos</option>
+          <option value="cliente">Clientes</option>
+          <option value="prospect">Não Cliente</option>
+        </select>
+      </div>
+
+      <div class="fbox">
+        <label for="selRaio">Raio:</label>
+        <select id="selRaio">
+          <option value="500">500 m</option>
+          <option value="1000" selected>1 km</option>
+          <option value="2000">2 km</option>
+          <option value="5000">5 km</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="mapa"></div>
+
+    <!-- KPIs -->
+    <div class="bottom-kpis">
+      <div class="kpi">
+        <div class="t">Empresas no Raio</div>
+        <div class="v" id="kpiEmpresas">0</div>
+      </div>
+      <div class="kpi">
+        <div class="t">Clientes no Raio</div>
+        <div class="v" id="kpiClientes">0</div>
+      </div>
+      <div class="kpi">
+        <div class="t">Segmento (Top)</div>
+        <div class="v" id="kpiTopSeg">—</div>
+      </div>
+      <button class="cta" id="btnAnalisarArea">Analisar Área</button>
+    </div>
+  </div>
+
+  <!-- =========================
+       RIGHT
+       ========================= -->
+  <div class="mm-right">
+
+    <div class="mm-card legend">
+      <p class="ttl">LEGENDA</p>
+
+      <div class="row" title="Painel selecionado (ponto principal)">
+        <div class="dot painel"></div>
+        <div><b>Painel</b></div>
+        <div class="chip" id="chipPainel">1</div>
+      </div>
+
+      <div class="row" title="Empresas já clientes (verde)">
+        <div class="dot ok"></div>
+        <div><b>Cliente</b></div>
+        <div class="chip" id="chipClientes">0</div>
+      </div>
+
+      <div class="row" title="Empresas que ainda não são clientes (amarelo)">
+        <div class="dot warn"></div>
+        <div><b>Não Cliente</b></div>
+        <div class="chip" id="chipProspects">0</div>
+      </div>
+
+      <div class="row" title="Mapa de calor: concentração (peso por score)">
+        <div style="width:14px;height:14px;border-radius:6px;background:linear-gradient(180deg,#FFB300,#ef4444);border:2px solid rgba(255,255,255,.85);box-shadow: 0 6px 10px rgba(15,23,42,.10)"></div>
+        <div><b>Concentração (Heat)</b></div>
+        <div class="chip" id="chipHeat">On</div>
+      </div>
+    </div>
+
+    <div class="mm-card drawer">
+      <div class="bar">
+        <b>EMPRESA SELECIONADA</b>
+        <small id="lblSelecionada">—</small>
+      </div>
+
+      <div class="content">
+        <div class="empresa-top">
+          <div class="empresa-avatar" id="empresaAvatar">—</div>
+          <div style="min-width:0;">
+            <p class="nome" id="empresaNome" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">Selecione uma empresa no mapa</p>
+            <p class="seg" id="empresaSegmento" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</p>
+          </div>
+        </div>
+
+        <div class="linha"></div>
+
+        <div class="info-row">
+          <div><b>Distância:</b></div>
+          <div id="empresaDist">—</div>
+        </div>
+
+        <div class="score">
+          <div>Score:</div>
+          <div class="pill" id="empresaScore">—</div>
+        </div>
+
+        <div class="info-row" style="margin-top:12px">
+          <div class="badge" id="empresaBadgeStatus">
+            <span class="mini-dot"></span>
+            <span id="empresaStatus">—</span>
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div><b>Último contato:</b></div>
+          <div id="empresaUltimoContato">—</div>
+        </div>
+
+        <!-- ✅ Só mantém ação de produto: abrir ficha -->
+        <div class="acoes">
+          <button type="button" class="btn-primary" id="btnAbrirFichaEmpresa">Abrir Ficha</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- =========================================================
+     ✅ NOVO BLOCO ABAIXO DO MAPA: GRÁFICO + MATRIZ (Mais Retorno-like)
+     ========================================================= -->
+
+
+
+
+  <div class="fin-shell">
+
+  <div class="fin-card">
+
+    <!-- Tabs (mantido, mas comentado: você queria remover depois) -->
+    <!--
+    <div class="fin-tabs">
+      <button type="button" class="fin-tab active" id="tabRent">Rentabilidade</button>
+      <button type="button" class="fin-tab" id="tabJan">Janelas Móveis</button>
+    </div>
+    -->
+
+    <!-- Top header + controles -->
+    <div class="fin-topbar">
+      <div class="fin-title">
+        <h3>Gráfico de Rentabilidade</h3>
+        <p class="sub">Faturamento {{ (painel_json.nome if painel_json and painel_json.nome else "Painel") }}</p>
+      </div>
+
+      <div class="fin-controls">
+
+        <!-- Indicadores (mantido, mas comentado: você queria remover depois) -->
+        <!--
+        <div class="fin-pill">
+          <label for="selIndicadores">Indicadores</label>
+          <select id="selIndicadores">
+            <option value="faturamento" selected>Faturamento (R$)</option>
+            <option value="margem">Margem (%)</option>
+            <option value="ocupa">Ocupação (%)</option>
+          </select>
+        </div>
+        -->
+
+        <div class="fin-range" aria-label="Atalhos de período">
+          <button type="button" class="fin-rng active" data-rng="otimo">Ótimo</button>
+          <button type="button" class="fin-rng" data-rng="6m">6M</button>
+          <button type="button" class="fin-rng" data-rng="1a">1A</button>
+          <button type="button" class="fin-rng" data-rng="2a">2A</button>
+          <button type="button" class="fin-rng" data-rng="3a">3A</button>
+          <button type="button" class="fin-rng" data-rng="5a">5A</button>
+          <div class="sep"></div>
+
+          {# ✅ já preenche com dt_ini/dt_fim do backend #}
+          <input
+            type="date"
+            class="cal"
+            id="dtIniGraf"
+            title="Data inicial"
+            value="{{ (fin_json.dt_ini if fin_json and fin_json.dt_ini else '2024-01-01') }}"
+          >
+          <input
+            type="date"
+            class="cal"
+            id="dtFimGraf"
+            title="Data final"
+            value="{{ (fin_json.dt_fim if fin_json and fin_json.dt_fim else '2026-12-01') }}"
+          >
+        </div>
+
+        <!-- Switch (mantido, mas comentado: você queria remover depois) -->
+        <!--
+        <div class="fin-toggle" title="Simula incluir histórico (mais antigo) no gráfico">
+          <div class="fin-switch on" id="switchHist" role="switch" aria-checked="true"></div>
+          <span>Incluir histórico do painel</span>
+        </div>
+        -->
+
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="fin-chart-wrap">
+      <div class="fin-chart">
+        <canvas id="grafFaturamento"></canvas>
+      </div>
+    </div>
+
+    <!-- Matriz -->
+    <div class="fin-table-wrap">
+      <table class="fin-matriz" id="tblMatriz">
+        <thead>
+          <tr>
+            <th>ANO</th>
+            <th>PAINEL</th>
+            <th>Jan</th><th>Fev</th><th>Mar</th><th>Abr</th><th>Mai</th><th>Jun</th>
+            <th>Jul</th><th>Ago</th><th>Set</th><th>Out</th><th>Nov</th><th>Dez</th>
+            <th>No ano</th>
+            <th>Acumulado</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {# =========================================================
+             ✅ AGORA VEM DO BACKEND: fin_json["matriz"]
+             linha = { ano, painel, meses{1..12:{receita,margem_pct}}, total_ano, margem_media_ano, acumulado }
+             ========================================================= #}
+
+          {% if fin_json and fin_json.matriz and (fin_json.matriz|length > 0) %}
+
+            {% for linha in fin_json.matriz %}
+              <tr>
+                <td>{{ linha.ano }}</td>
+                <td>{{ linha.painel }}</td>
+
+                {# 12 meses #}
+                {% for mes in range(1, 13) %}
+                  {% set cel = linha.meses[mes] %}
+                  <td>
+                    <div class="fin-cell">
+                      {% if cel and cel.receita is not none %}
+                        <span>
+                          R$ {{ "{:,.0f}".format(cel.receita|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+                        </span>
+                      {% else %}
+                        <span>—</span>
+                      {% endif %}
+
+                      {% if cel and cel.margem_pct is not none %}
+                        <small>{{ "{:.1f}".format(cel.margem_pct|float).replace(".", ",") }}%</small>
+                      {% else %}
+                        <small>—</small>
+                      {% endif %}
+                    </div>
+                  </td>
+                {% endfor %}
+
+                {# Total do ano + margem média ponderada #}
+                <td>
+                  <div class="fin-cell">
+                    <span>
+                      R$ {{ "{:,.0f}".format((linha.total_ano or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+                    </span>
+                    {% if linha.margem_media_ano is not none %}
+                      <small>margem média {{ "{:.1f}".format(linha.margem_media_ano|float).replace(".", ",") }}%</small>
+                    {% else %}
+                      <small>margem média —</small>
+                    {% endif %}
+                  </div>
+                </td>
+
+                {# Acumulado geral #}
+                <td>
+                  <div class="fin-cell">
+                    <span>
+                      R$ {{ "{:,.0f}".format((linha.acumulado or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+
+          {% else %}
+
+            <tr>
+              <td colspan="16" style="text-align:center; padding:14px 10px; opacity:.75;">
+                Sem dados financeiros para o período selecionado.
+              </td>
+            </tr>
+
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+
+
+
+
+    <div class="fin-cost-wrap">
+
+  <div class="fin-cost-head">
+    <div>
+      <div class="fin-cost-title">Composição do Custo do Painel</div>
+      <div class="fin-cost-sub" id="lblCustoPeriodo">—</div>
+    </div>
+  </div>
+
+  <div class="fin-cost-grid">
+    <div class="fin-cost-chart">
+      <canvas id="grafCustoRosca"></canvas>
+    </div>
+
+    <div class="fin-cost-list" id="listaCustoRosca">
+      <div class="fin-cost-empty" style="color:#64748b;font-weight:900">Carregando custos…</div>
+    </div>
+  </div>
+
+
+
+
+</div>
+
+</div>
+
+
+
+
+
+</div>
+
+
+
+
+
+
+
+
+<script>
+
+  const PAINEL = {{ painel_json|tojson }};
+  const EMPRESAS = {{ empresas_json|tojson }};
+  const FILTRO_INICIAL = {{ filtro_inicial|tojson }};
+  const CEP_POINTS = {{ cep_points_json|tojson }};  // ✅ NOVO (backend -> heat por CEP)
+
+  console.log("PAINEL:", PAINEL);
+  console.log("EMPRESAS tipo:", typeof EMPRESAS, "isArray:", Array.isArray(EMPRESAS), "len:", (EMPRESAS && EMPRESAS.length) || 0);
+  console.log("CEP_POINTS len:", (CEP_POINTS && CEP_POINTS.length) || 0);
+</script>
+
+<script>
+;(function(){
+  "use strict";
+
+  // =========================================================
+  // ✅ SEM painelDefault (como você pediu)
+  // =========================================================
+  const painelObj = (PAINEL && typeof PAINEL === "object") ? PAINEL : {};
+  const P = painelObj; // ✅ sem defaults
+
+  // ✅ garante array
+  const empresasArr = Array.isArray(EMPRESAS) ? EMPRESAS : [];
+
+  // ✅ garante objeto
+  const filtroIni = (FILTRO_INICIAL && typeof FILTRO_INICIAL === "object") ? FILTRO_INICIAL : {};
+
+  // ✅ garante array (CEP heat)
+  const cepPointsArr = Array.isArray(CEP_POINTS) ? CEP_POINTS : [];
+
+  // =========================================================
+  // Utils
+  // =========================================================
+  function _fmtData(iso){
+    if(!iso) return "—";
+    const p = String(iso).split("-");
+    if(p.length !== 3) return String(iso);
+    return `${p[2]}/${p[1]}/${p[0]}`;
+  }
+
+  function _haversineMetros(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = (v)=> v * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  function _classificarScore(score){
+    if(score >= 80) return "Alta Potencial";
+    if(score >= 60) return "Médio Potencial";
+    return "Baixo Potencial";
+  }
+
+  function _normalizarStatus(status){
+    if(status === "cliente") return "Cliente (Painel)";
+    if(status === "cliente_painel") return "Cliente (Painel)";
+    if(status === "cliente_euro") return "Cliente (Euromídia)";
+    if(status === "cliente_euromidia") return "Cliente (Euromídia)";
+    if(status === "prospect") return "Não Cliente";
+    return status || "—";
+  }
+
+  function _avatar2(nome){
+    if(!nome) return "—";
+    const partes = String(nome).trim().split(/\s+/).filter(Boolean);
+    const a = (partes[0] || "?")[0] || "?";
+    const b = (partes.length > 1 ? partes[partes.length-1][0] : "") || "";
+    return (a + b).toUpperCase();
+  }
+
+  function _num(n){
+    const v = Number(n);
+    return Number.isFinite(v) ? v : 0;
+  }
+
+  function _brMoeda(n){
+    const v = Number(n);
+    if(!Number.isFinite(v)) return "R$ 0";
+    return v.toLocaleString("pt-BR", { style:"currency", currency:"BRL", maximumFractionDigits: 0 });
+  }
+
+  function _brPct(n){
+    const v = Number(n);
+    if(!Number.isFinite(v)) return "0,0%";
+    return `${v.toFixed(1).replace(".", ",")}%`;
+  }
+
+  function _normStr(s){
+    if(s == null) return "";
+    return String(s)
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .trim().toLowerCase();
+  }
+
+  function _latPainel(){
+    const v = Number(P && P.lat);
+    return Number.isFinite(v) ? v : null;
+  }
+  function _lngPainel(){
+    const v = Number(P && P.lng);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  // =========================================================
+  // ✅ CLASSIFICAÇÃO (MAPA) - CLIENTE DO PAINEL / CLIENTE EUROMÍDIA / PROSPECT
+  // - Mantém compatibilidade com seu dataset atual:
+  //   status: "cliente" (interpreto como Cliente do Painel)
+  //   status: "prospect"
+  // - Se no futuro você mandar flags/campos, ele separa automaticamente:
+  //   cliente_painel / cliente_euro / cliente_euromidia / cliente_euro
+  // =========================================================
+  function _categoriaEmpresaMapa(e){
+    const st = String(e?.status || "").trim().toLowerCase();
+
+    // 1) flags explícitas (se vier do backend)
+    if(e?.cliente_painel === true || e?.eh_cliente_painel === true) return "cliente_painel";
+    if(e?.cliente_euro === true || e?.cliente_euromidia === true || e?.eh_cliente_euro === true) return "cliente_euro";
+
+    // 2) status explícito
+    if(st === "cliente_painel") return "cliente_painel";
+    if(st === "cliente_euro" || st === "cliente_euromidia") return "cliente_euro";
+
+    // 3) compatibilidade com seu dataset atual
+    if(st === "cliente") return "cliente_painel";
+    if(st === "prospect") return "prospect";
+
+    return "prospect";
+  }
+
+  function _ehClienteQualquer(e){
+    const c = _categoriaEmpresaMapa(e);
+    return (c === "cliente_painel" || c === "cliente_euro");
+  }
+
+  // =========================================================
+  // Painel (lado esquerdo)
+  // =========================================================
+  const painelNome = document.getElementById("painelNome");
+  const painelEndereco = document.getElementById("painelEndereco");
+  const painelTipoTxt = document.getElementById("painelTipoTxt");
+  const painelProduto = document.getElementById("painelProduto");
+  const painelSentido = document.getElementById("painelSentido");
+  const painelFaces = document.getElementById("painelFaces");
+  const btnVerFichaPainel = document.getElementById("btnVerFichaPainel");
+
+  if(painelNome) painelNome.textContent = (P && P.nome) ? P.nome : "—";
+  if(painelEndereco) painelEndereco.textContent = (P && P.endereco) ? P.endereco : "—";
+  if(painelTipoTxt) painelTipoTxt.textContent = (P && P.tipo) ? P.tipo : "—";
+  if(painelProduto) painelProduto.textContent = (P && P.produto) ? P.produto : "—";
+  if(painelSentido) painelSentido.textContent = (P && P.sentido) ? P.sentido : "—";
+  if(painelFaces) painelFaces.textContent = (P && P.faces != null) ? String(P.faces) : "—";
+
+  if(btnVerFichaPainel){
+    btnVerFichaPainel.addEventListener("click", ()=> {
+      if(P && P.url_ficha) window.location.href = P.url_ficha;
+    });
+  }
+
+  // =========================================================
+  // DOM refs (Filtros e KPIs do mapa)
+  // =========================================================
+  const selSegmento = document.getElementById("selSegmento");
+  const selStatus = document.getElementById("selStatus");
+  const selRaio = document.getElementById("selRaio");
+
+  const kpiEmpresas = document.getElementById("kpiEmpresas");
+  const kpiClientes = document.getElementById("kpiClientes");
+  const kpiTopSeg = document.getElementById("kpiTopSeg");
+
+  const chipClientes = document.getElementById("chipClientes");
+  const chipProspects = document.getElementById("chipProspects");
+  const chipHeat = document.getElementById("chipHeat");
+
+  const btnAnalisarArea = document.getElementById("btnAnalisarArea");
+
+  // =========================================================
+  // Build segmentos no select
+  // =========================================================
+  if(selSegmento){
+    const segmentos = Array.from(new Set(empresasArr.map(e => e && e.segmento).filter(Boolean)))
+      .sort((a,b)=> String(a).localeCompare(String(b), "pt-BR", { sensitivity:"base" }));
+
+    for(const s of segmentos){
+      const opt = document.createElement("option");
+      opt.value = s;
+      opt.textContent = s;
+      selSegmento.appendChild(opt);
+    }
+  }
+
+  // Filtro inicial (robusto)
+  if(selSegmento && filtroIni && filtroIni.segmento){
+    const alvo = _normStr(filtroIni.segmento);
+    const opts = Array.from(selSegmento.options);
+    const achou = opts.find(o => _normStr(o.value) === alvo);
+    if(achou) selSegmento.value = achou.value;
+  }
+
+  if(selStatus && filtroIni && filtroIni.status){
+    selStatus.value = String(filtroIni.status);
+  }
+
+  if(selRaio && filtroIni && filtroIni.raio_m){
+    selRaio.value = String(filtroIni.raio_m);
+  }
+
+  // =========================================================
+  // Drawer (Empresa)
+  // =========================================================
+  const lblSelecionada = document.getElementById("lblSelecionada");
+  const empresaAvatar = document.getElementById("empresaAvatar");
+  const empresaNome = document.getElementById("empresaNome");
+  const empresaSegmento = document.getElementById("empresaSegmento");
+  const empresaDist = document.getElementById("empresaDist");
+  const empresaScore = document.getElementById("empresaScore");
+  const empresaStatus = document.getElementById("empresaStatus");
+  const empresaBadgeStatus = document.getElementById("empresaBadgeStatus");
+  const empresaUltimoContato = document.getElementById("empresaUltimoContato");
+  const btnAbrirFichaEmpresa = document.getElementById("btnAbrirFichaEmpresa");
+
+  let empresaSelecionada = null;
+
+  function _setEmpresaSelecionada(e){
+    empresaSelecionada = e || null;
+
+    if(!empresaSelecionada){
+      if(lblSelecionada) lblSelecionada.textContent = "—";
+      if(empresaAvatar) empresaAvatar.textContent = "—";
+      if(empresaNome) empresaNome.textContent = "Selecione uma empresa no mapa";
+      if(empresaSegmento) empresaSegmento.textContent = "—";
+      if(empresaDist) empresaDist.textContent = "—";
+      if(empresaScore) empresaScore.textContent = "—";
+      if(empresaStatus) empresaStatus.textContent = "—";
+      if(empresaUltimoContato) empresaUltimoContato.textContent = "—";
+      if(empresaBadgeStatus) empresaBadgeStatus.classList.remove("ok","warn");
+      if(btnAbrirFichaEmpresa) btnAbrirFichaEmpresa.onclick = null;
+      return;
+    }
+
+    const nome = empresaSelecionada.nome || "—";
+    const seg = empresaSelecionada.segmento || "—";
+    const stRaw = String(empresaSelecionada.status || "");
+    const st = _normalizarStatus(stRaw);
+
+    const latP = _latPainel();
+    const lngP = _lngPainel();
+
+    const latE = Number(empresaSelecionada.lat);
+    const lngE = Number(empresaSelecionada.lng);
+    const dist = (Number.isFinite(latE) && Number.isFinite(lngE) && latP != null && lngP != null)
+      ? _haversineMetros(latP, lngP, latE, lngE)
+      : 0;
+
+    const score = _num(empresaSelecionada.score);
+
+    if(lblSelecionada) lblSelecionada.textContent = st;
+    if(empresaAvatar) empresaAvatar.textContent = _avatar2(nome);
+    if(empresaNome) empresaNome.textContent = nome;
+    if(empresaSegmento) empresaSegmento.textContent = seg;
+
+    if(empresaDist){
+      if(dist >= 1000){
+        empresaDist.textContent = `${(dist/1000).toFixed(2).replace(".", ",")} km`;
+      } else {
+        empresaDist.textContent = `${Math.round(dist)} m`;
+      }
+    }
+
+    if(empresaScore) empresaScore.textContent = `${Math.round(score)} • ${_classificarScore(score)}`;
+    if(empresaStatus) empresaStatus.textContent = st;
+    if(empresaUltimoContato) empresaUltimoContato.textContent = _fmtData(empresaSelecionada.ultimo_contato);
+
+    if(empresaBadgeStatus){
+      empresaBadgeStatus.classList.remove("ok","warn");
+      const cat = _categoriaEmpresaMapa(empresaSelecionada);
+      if(cat === "cliente_painel" || cat === "cliente_euro") empresaBadgeStatus.classList.add("ok");
+      if(cat === "prospect") empresaBadgeStatus.classList.add("warn");
+    }
+
+    if(btnAbrirFichaEmpresa){
+      btnAbrirFichaEmpresa.onclick = ()=> {
+        if(empresaSelecionada && empresaSelecionada.url_ficha) window.location.href = empresaSelecionada.url_ficha;
+        else alert("Sem URL de ficha configurada para esta empresa.");
+      };
+    }
+  }
+
+  // =========================================================
+  // Leaflet Map (garante libs)
+  // =========================================================
+  if(!window.L){
+    console.warn("Leaflet (L) não carregou. Verifique os CDNs.");
+    return;
+  }
+  if(!document.getElementById("mapa")){
+    console.warn("Elemento #mapa não encontrado.");
+    return;
+  }
+
+  // ✅ sem painelDefault: se não vier lat/lng do backend, não tem como renderizar mapa corretamente
+  const latP0 = _latPainel();
+  const lngP0 = _lngPainel();
+  if(latP0 == null || lngP0 == null){
+    console.warn("PAINEL sem lat/lng válidos. Não posso inicializar o mapa. PAINEL:", P);
+    return;
+  }
+
+  const mapa = L.map("mapa", { zoomControl: true }).setView([latP0, lngP0], 14);
+
+  // ✅ panes (heat embaixo, bairros no meio, empresas em cima, painel acima de tudo)
+  mapa.createPane("heatPane");
+  mapa.getPane("heatPane").style.zIndex = 300;
+
+  mapa.createPane("bairrosPane");
+  mapa.getPane("bairrosPane").style.zIndex = 430;
+
+  mapa.createPane("empresasPane");
+  mapa.getPane("empresasPane").style.zIndex = 650;
+
+  mapa.createPane("painelPane");
+  mapa.getPane("painelPane").style.zIndex = 700;
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapa);
+
+  const temCluster = typeof L.markerClusterGroup === "function";
+  const temHeat = typeof L.heatLayer === "function";
+
+  // ✅ mantém tudo no código, mas NÃO duplica marker (agora categorias em camadas)
+  const USAR_CLUSTER_GERAL = false;
+
+  // ✅ Grupo cluster (mantido no código)
+  const grupoCluster = temCluster
+    ? L.markerClusterGroup({
+        chunkedLoading:true,
+        maxClusterRadius: 52,
+        pane: "empresasPane"
+      })
+    : L.layerGroup({ pane: "empresasPane" });
+
+  // ✅ Heat (declara antes de usar)
+  const camadaHeat = temHeat
+    ? L.heatLayer([], {
+        pane: "heatPane",
+        radius: 70,
+        blur: 55,
+        maxZoom: 17,
+        minOpacity: 0.55,
+        max: 1.0,
+        gradient: {
+          0.00: "rgba(0,40,132,0.25)",
+          0.20: "rgba(0,40,132,0.75)",
+          0.45: "rgba(245,158,11,0.90)",
+          0.70: "rgba(239,68,68,0.95)",
+          1.00: "rgba(239,68,68,1.00)"
+        }
+      })
+    : null;
+
+  // ✅ camadas extras (mantidas)
+  //    OBS: bolhas (bairros/CEP) usam pane "bairrosPane" em cada circleMarker
+  const camadaBairros = L.layerGroup();
+
+  const camadaClientesPainel = temCluster
+    ? L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius: 52, pane:"empresasPane" })
+    : L.layerGroup({ pane:"empresasPane" });
+
+  const camadaClientesEuro = temCluster
+    ? L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius: 52, pane:"empresasPane" })
+    : L.layerGroup({ pane:"empresasPane" });
+
+  const camadaProspects = temCluster
+    ? L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius: 52, pane:"empresasPane" })
+    : L.layerGroup({ pane:"empresasPane" });
+
+  // ✅ adiciona no mapa (ligadas por padrão)
+  mapa.addLayer(camadaBairros);
+  mapa.addLayer(camadaClientesPainel);
+  mapa.addLayer(camadaClientesEuro);
+  mapa.addLayer(camadaProspects);
+
+  // ✅ Mantém cluster geral (no código) - mas não popula para não duplicar
+  mapa.addLayer(grupoCluster);
+
+  if(camadaHeat) mapa.addLayer(camadaHeat);
+
+  // =========================================================
+  // ✅ Controle liga/desliga (camadas do mapa)
+  // =========================================================
+  (function _criarControleCamadas(){
+    const overlays = {
+      "Bairros (Perfil da Região)": camadaBairros,
+      "Clientes (Painel)": camadaClientesPainel,
+      "Clientes (Euromídia)": camadaClientesEuro,
+      "Prospects": camadaProspects
+    };
+    if(camadaHeat) overlays["Heat (Concentração)"] = camadaHeat;
+
+    try{
+      L.control.layers(null, overlays, { collapsed: true, position: "topright" }).addTo(mapa);
+    } catch(e){
+      console.warn("Falha ao criar controle de camadas:", e);
+    }
+  })();
+
+  let circuloRaio = null;
+
+  function _raioAtualMetros(){
+    const v = parseInt((selRaio && selRaio.value) ? selRaio.value : "1000", 10);
+    return Number.isFinite(v) ? v : 1000;
+  }
+
+
+  function _desenharRaio(){
+  const r = _raioAtualMetros();
+  if(circuloRaio) mapa.removeLayer(circuloRaio);
+
+  circuloRaio = L.circle([latP0, lngP0], {
+    radius: r,
+    color: "#0340A7",
+    weight: 3,
+    opacity: 0.9,
+    fillColor: "#0340A7",
+    fillOpacity: 0.08,
+    pane: "painelPane",
+
+    // ✅ AJUSTE: não deixa o círculo “roubar” clique/hover dos markers
+    interactive: false
+  }).addTo(mapa);
+}
+
+
+
+
+// ✅ (NOVO) URL do ícone no static (Flask/Jinja)
+// - Se você NÃO estiver em Jinja aqui, troque pela string direta:
+//   const URL_ICONE_PAINEL = "/static/imagens/painel-publicitario.png";
+const URL_ICONE_PAINEL = "{{ url_for('static', filename='imagens/painel-publicitario.png') }}";
+
+// ✅ Painel: troca o retângulo por um ícone PNG (Leaflet L.icon)
+const iconePainel = L.icon({
+  iconUrl: URL_ICONE_PAINEL,
+  iconSize: [46, 46],      // tamanho do ícone
+  iconAnchor: [23, 46],    // “pé” do ícone (meio, embaixo)
+  tooltipAnchor: [0, -34]  // onde nasce o tooltip
+});
+
+L.marker([latP0, lngP0], { icon: iconePainel, zIndexOffset: 9999, pane: "painelPane" })
+  .addTo(mapa)
+  .bindTooltip(`
+    <div style="font-weight:1000;color:#0f172a;margin-bottom:6px">${(P && P.nome) ? P.nome : "—"}</div>
+    <div style="color:#64748b;font-weight:900;font-size:12px;line-height:1.35;margin-bottom:10px">
+      <span style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(0,40,132,.10);border:1px solid rgba(0,40,132,.20);color:#002884;font-weight:1000;">
+        <span style="width:10px;height:10px;border-radius:999px;background:#002884;display:inline-block;"></span>
+        ${(P && P.tipo) ? P.tipo : "—"}
+      </span>
+      <br>
+      Produto: ${(P && P.produto) ? P.produto : "—"}<br>
+      Sentido: ${(P && P.sentido) ? P.sentido : "—"}<br>
+      ${(P && P.endereco) ? P.endereco : "—"}<br>
+      Faces: ${(P && P.faces != null) ? P.faces : "—"}
+    </div>
+  `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
+
+// =========================================================
+// ✅ Controle/Legenda do Heat (rodapé do lado)
+// =========================================================
+let heatLegendaCtrl = null;
+
+function _criarOuAtualizarLegendaHeat(){
+  if(!mapa || !window.L) return;
+
+  if(heatLegendaCtrl){
+    try { heatLegendaCtrl.remove(); } catch(e){}
+    heatLegendaCtrl = null;
+  }
+
+  if(!camadaHeat) return;
+  if(!mapa.hasLayer(camadaHeat)) return;
+
+  heatLegendaCtrl = L.control({ position: "bottomright" });
+
+  heatLegendaCtrl.onAdd = function(){
+    const div = L.DomUtil.create("div", "mm-heat-legend");
+    div.style.cssText = `
+      background: rgba(255,255,255,.94);
+      border: 1px solid rgba(15,23,42,.10);
+      box-shadow: 0 12px 24px rgba(15,23,42,.10);
+      border-radius: 14px;
+      padding: 12px 12px;
+      min-width: 230px;
+      margin-bottom: 10px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    `;
+
+    div.innerHTML = `
+      <div style="font-weight:1000;color:#0f172a;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span>Concentração (Heat)</span>
+        <span id="heatHoverTxt" style="font-size:12px;font-weight:1000;color:#002884">Passe o mouse nas cores</span>
+      </div>
+
+      <!-- ✅ AJUSTE: barra alinhada ao gradient real do heatLayer -->
+      <div id="heatBar" style="
+        height: 12px;
+        border-radius: 999px;
+        background: linear-gradient(90deg,
+          rgba(0,40,132,0.25) 0%,
+          rgba(0,40,132,0.75) 20%,
+          rgba(245,158,11,0.90) 45%,
+          rgba(239,68,68,0.95) 70%,
+          rgba(239,68,68,1.00) 100%
+        );
+        border: 1px solid rgba(15,23,42,.10);
+        cursor: crosshair;
+      "></div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:8px;color:#64748b;font-weight:900;font-size:12px">
+        <span>Baixo</span>
+        <span>Alto</span>
+      </div>
+
+      <div style="margin-top:10px;color:#0f172a;font-weight:900;font-size:12px;line-height:1.35">
+        Métrica: <span style="color:#002884">Concentração de empresas</span><br>
+        <span style="color:#64748b;font-weight:900">(DENS_ESTAB_NRESID_100_END)</span>
+      </div>
+    `;
+
+    const bar = div.querySelector("#heatBar");
+    const txt = div.querySelector("#heatHoverTxt");
+
+    function _descPorPos(t){
+      // ✅ thresholds alinhados: 0.20 / 0.45 / 0.70
+      if(t < 0.20) return "Baixa concentração de empresas";
+      if(t < 0.45) return "Concentração baixa-média de empresas";
+      if(t < 0.70) return "Concentração média de empresas";
+      if(t < 0.90) return "Concentração alta de empresas";
+      return "Concentração MUITO alta de empresas";
+    }
+
+    if(bar && txt){
+      bar.addEventListener("mousemove", (ev)=>{
+        const r = bar.getBoundingClientRect();
+        const t = (ev.clientX - r.left) / (r.width || 1);
+        const tt = Math.max(0, Math.min(1, t));
+        txt.textContent = _descPorPos(tt);
+      });
+
+      bar.addEventListener("mouseleave", ()=>{
+        txt.textContent = "Passe o mouse nas cores";
+      });
+    }
+
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    return div;
+  };
+
+  heatLegendaCtrl.addTo(mapa);
+}
+
+
+  // =========================================================
+  // ✅ Legenda Perfil da Região (AGORA DENTRO DO IIFE)
+  //    + hover em cima das cores para explicar o que é
+  // =========================================================
+  let perfilLegendaCtrl = null;
+
+
+
+
+function _criarOuAtualizarLegendaPerfilRegiao(){
+  if(!mapa || !window.L) return;
+
+  // remove legenda anterior
+  if(perfilLegendaCtrl){
+    try { perfilLegendaCtrl.remove(); } catch(e){}
+    perfilLegendaCtrl = null;
+  }
+
+  perfilLegendaCtrl = L.control({ position: "bottomleft" });
+
+  perfilLegendaCtrl.onAdd = function(){
+    const div = L.DomUtil.create("div", "mm-perfil-legend");
+
+    div.style.cssText = `
+      background: rgba(255,255,255,.95);
+      border: 1px solid rgba(15,23,42,.12);
+      box-shadow: 0 14px 28px rgba(15,23,42,.12);
+      border-radius: 14px;
+      padding: 12px 14px;
+      min-width: 380px;
+      margin-bottom: 10px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      user-select: none;
+    `;
+
+    div.innerHTML = `
+      <div style="font-weight:1000;color:#0f172a;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span>Perfil do Bairro</span>
+        <span id="perfilHoverTxt" style="font-size:12px;font-weight:1000;color:#2563eb">
+          Passe o mouse nas cores
+        </span>
+      </div>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;color:#0f172a;font-weight:900;font-size:12px">
+
+        <div
+          data-perfil="res"
+          data-desc="Predominantemente Residencial (mais de 60% dos endereços são residências)"
+          title="Predominantemente Residencial"
+          role="button"
+          tabindex="0"
+          style="display:flex;align-items:center;gap:8px;cursor:help;padding:6px 10px;border-radius:10px;"
+        >
+          <span
+            style="width:14px;height:14px;border-radius:999px;background:#2563eb;border:2px solid rgba(255,255,255,.95);box-shadow:0 8px 16px rgba(37,99,235,.28)"
+            title="Predominantemente Residencial"
+          ></span>
+          Residencial
+        </div>
+
+        <div
+          data-perfil="emp"
+          data-desc="Predominantemente Empresarial (mais de 60% dos endereços são não residenciais)"
+          title="Predominantemente Empresarial"
+          role="button"
+          tabindex="0"
+          style="display:flex;align-items:center;gap:8px;cursor:help;padding:6px 10px;border-radius:10px;"
+        >
+          <span
+            style="width:14px;height:14px;border-radius:999px;background:#f59e0b;border:2px solid rgba(255,255,255,.95);box-shadow:0 8px 16px rgba(245,158,11,.28)"
+            title="Predominantemente Empresarial"
+          ></span>
+          Empresarial
+        </div>
+
+        <div
+          data-perfil="mix"
+          data-desc="Perfil Misto ou Indefinido (não há predominância clara residencial ou empresarial)"
+          title="Misto / Indefinido"
+          role="button"
+          tabindex="0"
+          style="display:flex;align-items:center;gap:8px;cursor:help;padding:6px 10px;border-radius:10px;"
+        >
+          <span
+            style="width:14px;height:14px;border-radius:999px;background:#94a3b8;border:2px solid rgba(255,255,255,.95);box-shadow:0 8px 16px rgba(148,163,184,.28)"
+            title="Misto / Indefinido"
+          ></span>
+          Misto / Indefinido
+        </div>
+
+      </div>
+
+      <div style="margin-top:10px;color:#334155;font-weight:900;font-size:12px;line-height:1.35">
+        <span style="color:#64748b;font-weight:900">
+          (Cada bolha cobre um BAIRRO inteiro e a cor representa o perfil dominante da região)
+        </span>
+      </div>
+    `;
+
+    const hover = div.querySelector("#perfilHoverTxt");
+    const itens = div.querySelectorAll("[data-perfil]");
+
+    function _setHoverTxt(msg){
+      if(!hover) return;
+      hover.textContent = msg || "Passe o mouse nas cores";
+    }
+
+    function _bindItem(el){
+      const desc = el.getAttribute("data-desc") || "—";
+
+      el.addEventListener("mouseenter", ()=> _setHoverTxt(desc));
+      el.addEventListener("mouseleave", ()=> _setHoverTxt("Passe o mouse nas cores"));
+
+      el.addEventListener("focus", ()=> _setHoverTxt(desc));
+      el.addEventListener("blur", ()=> _setHoverTxt("Passe o mouse nas cores"));
+
+      el.addEventListener("keydown", (ev)=>{
+        if(ev.key === "Enter" || ev.key === " "){
+          ev.preventDefault();
+          _setHoverTxt(desc);
+        }
+      });
+
+      el.addEventListener("mouseenter", ()=>{
+        el.style.background = "rgba(37,99,235,.06)";
+        el.style.border = "1px solid rgba(37,99,235,.18)";
+      });
+      el.addEventListener("mouseleave", ()=>{
+        el.style.background = "transparent";
+        el.style.border = "1px solid transparent";
+      });
+    }
+
+    if(itens && itens.length){
+      itens.forEach(_bindItem);
+    }
+
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+
+    return div;
+  };
+
+  perfilLegendaCtrl.addTo(mapa);
+}
+
+
+
+
+
+
+
+
+
+  // =========================================================
+  // Filtros + Render do mapa
+  // =========================================================
+  function _empresaPassaFiltro(e){
+    if(!e) return false;
+
+    const lat = Number(e.lat);
+    const lng = Number(e.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+    const r = _raioAtualMetros();
+    const dist = _haversineMetros(latP0, lngP0, lat, lng);
+
+    // ✅ REGRA DO PRODUTO:
+    // - clientes (painel ou euromidia): entra sempre (não depende do raio)
+    // - prospect: só entra se estiver dentro do raio
+    if(!_ehClienteQualquer(e)){
+      if(dist > r) return false;
+    }
+
+    const segSel = selSegmento ? selSegmento.value : "todos";
+    if(segSel && segSel !== "todos"){
+      if(_normStr(e.segmento) !== _normStr(segSel)) return false;
+    }
+
+    const stSel = selStatus ? selStatus.value : "todos";
+    if(stSel && stSel !== "todos"){
+      // mantém compatibilidade: se select estiver "cliente", aceita cliente_painel/cliente_euro
+      const stRaw = String(e.status || "");
+      if(String(stSel) === "cliente"){
+        if(!_ehClienteQualquer(e)) return false;
+      } else {
+        if(stRaw !== String(stSel)) return false;
+      }
+    }
+
+    return true;
+  }
+
+  function _topSegmento(lista){
+    const mapaSeg = new Map();
+    for(const e of lista){
+      const s = (e && e.segmento) ? String(e.segmento) : "—";
+      mapaSeg.set(s, (mapaSeg.get(s) || 0) + 1);
+    }
+    let top = null;
+    for(const [seg, qt] of mapaSeg.entries()){
+      if(!top || qt > top.qt) top = { seg, qt };
+    }
+    return top ? top.seg : "—";
+  }
+
+  function _corPorCategoria(cat){
+    if(cat === "cliente_painel") return "#16a34a";     // verde
+    if(cat === "cliente_euro")  return "#2563eb";     // azul
+    if(cat === "prospect")      return "#f59e0b";     // laranja
+    return "#94a3b8";                                  // cinza
+  }
+
+
+
+
+let legendaEmpresasCtrl = null;
+
+function _criarOuAtualizarLegendaEmpresas(){
+  if(!mapa || !window.L) return;
+
+  // remove anterior
+  if(legendaEmpresasCtrl){
+    try { legendaEmpresasCtrl.remove(); } catch(e){}
+    legendaEmpresasCtrl = null;
+  }
+
+  // ✅ menor e menos intrusiva
+  legendaEmpresasCtrl = L.control({ position: "topright" });
+
+  legendaEmpresasCtrl.onAdd = function(){
+    const div = L.DomUtil.create("div", "mm-legend-empresas");
+
+    // ✅ tamanho compacto + scroll
+    div.style.cssText = `
+      background: rgba(255,255,255,.92);
+      border: 1px solid rgba(15,23,42,.10);
+      box-shadow: 0 10px 22px rgba(15,23,42,.10);
+      border-radius: 12px;
+      padding: 10px 10px;
+      width: 220px;
+      max-width: 220px;
+      max-height: 240px;
+      overflow: auto;
+      margin-top: 10px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      user-select: none;
+      backdrop-filter: blur(6px);
+    `;
+
+    // ✅ badge pequeno
+    function _badge(txt){
+      if(txt == null) return ``;
+      const t = String(txt).trim();
+      if(!t) return ``;
+      return `
+        <span style="
+          min-width:34px;
+          text-align:center;
+          padding:3px 8px;
+          border-radius:999px;
+          border:1px solid rgba(15,23,42,.10);
+          background:rgba(15,23,42,.03);
+          color:#0f172a;
+          font-weight:1000;
+          font-size:11px
+        ">${t}</span>
+      `;
+    }
+
+    // ✅ linha compacta (sem descrição longa)
+    function _linhaPonto(cor, rotulo, badgeTxt){
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(15,23,42,.08)">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <span style="
+              width:10px;height:10px;border-radius:999px;
+              background:${cor};
+              border:2px solid rgba(255,255,255,.95);
+              box-shadow:0 8px 14px rgba(15,23,42,.08);
+              display:inline-block;
+              flex:0 0 auto;
+            "></span>
+            <div style="font-weight:1000;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${rotulo}
+            </div>
+          </div>
+          ${_badge(badgeTxt)}
+        </div>
+      `;
+    }
+
+    function _linhaHeat(rotulo, badgeTxt){
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(15,23,42,.08)">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <span style="
+              width:10px;height:10px;border-radius:999px;
+              background: linear-gradient(90deg,
+                rgba(0,40,132,.55),
+                rgba(245,158,11,.90),
+                rgba(239,68,68,.95)
+              );
+              border:2px solid rgba(255,255,255,.95);
+              box-shadow:0 8px 14px rgba(15,23,42,.08);
+              display:inline-block;
+              flex:0 0 auto;
+            "></span>
+            <div style="font-weight:1000;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${rotulo}
+            </div>
+          </div>
+          ${_badge(badgeTxt)}
+        </div>
+      `;
+    }
+
+    function _linhaIconePainel(rotulo){
+      const src = "/static/imagens/painel-publicitario.png";
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(15,23,42,.08)">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <img
+              src="${src}"
+              alt="Painel"
+              style="
+                width:16px;height:16px;
+                object-fit:contain;
+                border-radius:6px;
+                box-shadow:0 8px 14px rgba(15,23,42,.08);
+                background:rgba(255,255,255,.9);
+                border:1px solid rgba(15,23,42,.10);
+                flex:0 0 auto;
+              "
+              onerror="this.style.display='none';"
+            />
+            <div style="font-weight:1100;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${rotulo}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ✅ contagens (chips)
+    const qtClientes = (chipClientes && chipClientes.textContent) ? chipClientes.textContent.trim() : "";
+    const qtProspects = (chipProspects && chipProspects.textContent) ? chipProspects.textContent.trim() : "";
+    const heatTxt = (chipHeat && chipHeat.textContent) ? chipHeat.textContent.trim() : "";
+
+    // ✅ cores das bolhas grandes (perfil regional)
+    const corBolhaRes = "#2563eb";
+    const corBolhaEmp = "#f59e0b";
+    const corBolhaMix = "#94a3b8";
+
+    // ✅ header compacto
+    div.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-weight:1100;color:#0f172a;font-size:12px">Legenda</div>
+        <div style="font-size:11px;font-weight:1000;color:#64748b">Mapa</div>
+      </div>
+
+      ${_linhaIconePainel("Painel")}
+
+      ${_linhaPonto(_corPorCategoria("cliente_painel"), "Cliente (Painel)", qtClientes)}
+      ${_linhaPonto(_corPorCategoria("prospect"), "Não Cliente", qtProspects)}
+      ${_linhaHeat("Heat (Concentração)", heatTxt)}
+
+      <div style="margin-top:8px;font-weight:1100;color:#0f172a;font-size:12px">Bolhas (Bairro)</div>
+      ${_linhaPonto(corBolhaRes, "Azul: Residencial", "")}
+      ${_linhaPonto(corBolhaEmp, "Laranja: Empresarial", "")}
+      ${_linhaPonto(corBolhaMix, "Cinza: Misto", "")}
+
+      <div style="margin-top:8px;color:#64748b;font-weight:900;font-size:11px;line-height:1.25">
+        Pequenas = empresas • Grandes = bairros/CEPs
+      </div>
+    `;
+
+    // ✅ impede que clique/scroll na legenda mexa no mapa
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+
+    return div;
+  };
+
+  legendaEmpresasCtrl.addTo(mapa);
+}
+
+
+
+
+
+
+  function _criarMarcadorEmpresa(e, categoria){
+    const cat = categoria || _categoriaEmpresaMapa(e);
+    const cor = _corPorCategoria(cat);
+
+    const icone = L.divIcon({
+      className: "",
+      html: `
+        <div style="
+          width: 16px; height: 16px;
+          border-radius: 999px;
+          background:${cor};
+          border:2px solid rgba(255,255,255,.9);
+          box-shadow: 0 10px 18px rgba(15,23,42,.16);
+        "></div>
+      `
+    });
+
+    const m = L.marker([Number(e.lat), Number(e.lng)], { icon: icone, pane: "empresasPane" });
+
+    const nome = e.nome || "Empresa";
+    const seg = e.segmento || "—";
+    const st = _normalizarStatus(e.status);
+    const score = _num(e.score);
+
+    m.bindTooltip(`
+      <div style="font-weight:1000;color:#0f172a">${nome}</div>
+      <div style="color:#64748b;font-weight:900;font-size:12px;margin-top:2px">${seg} • ${st}</div>
+      <div style="margin-top:8px;font-size:12px;color:#0f172a">
+        <b>Score:</b> ${Math.round(score)} (${_classificarScore(score)})
+      </div>
+    `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
+
+    m.on("click", ()=> _setEmpresaSelecionada(e));
+    return m;
+  }
+
+
+
+function _limparCamadas(){
+  if(grupoCluster && typeof grupoCluster.clearLayers === "function"){
+    grupoCluster.clearLayers();
+  }
+  if(camadaClientesPainel && typeof camadaClientesPainel.clearLayers === "function"){
+    camadaClientesPainel.clearLayers();
+  }
+  if(camadaClientesEuro && typeof camadaClientesEuro.clearLayers === "function"){
+    camadaClientesEuro.clearLayers();
+  }
+  if(camadaProspects && typeof camadaProspects.clearLayers === "function"){
+    camadaProspects.clearLayers();
+  }
+
+  // ✅ BOLHAS DE BAIRRO / REGIÃO
+  if(camadaBairros && typeof camadaBairros.clearLayers === "function"){
+    camadaBairros.clearLayers();
+  }
+
+  // ❌ HEAT DESATIVADO (mantido só para compatibilidade)
+  if(camadaHeat && typeof camadaHeat.setLatLngs === "function"){
+    camadaHeat.setLatLngs([]); // não remove layer, só garante vazio
+  }
+}
+
+// =========================================================
+// ❌ HEAT POR CEP DESATIVADO
+// - Função mantida apenas para não quebrar referências
+// - NÃO é mais usada no mapa
+// =========================================================
+function _heatLatLngsPorCEP(){
+  return [];
+}
+
+
+
+
+
+  // =========================================================
+  // ✅ bolhas por CEP/bairro (perfil residencial x empresarial)
+  // =========================================================
+  function _getProp(props, chaves){
+    if(!props) return null;
+    for(const k of chaves){
+      if(props[k] != null) return props[k];
+    }
+    return null;
+  }
+
+  function _perfilDaRegiao(props){
+    const tipoTxt = _normStr(_getProp(props, ["TIPO_AREA", "tipo_area", "perfil", "PERFIL"]) || "");
+
+    const pctR = Number(_getProp(props, ["PCT_RESIDENCIAL_%", "pct_residencial", "pct_residencial_%", "PCT_RESIDENCIAL", "pct_resid"]) );
+    const pctE = Number(_getProp(props, ["PCT_ESTAB_NRESID_%", "pct_estab_nresid", "pct_estab_nresid_%", "PCT_NAO_RESIDENCIAL_%", "pct_nao_residencial", "PCT_NAO_RESIDENCIAL", "pct_empresarial"]) );
+
+    const pctRok = Number.isFinite(pctR) ? pctR : null;
+    const pctEok = Number.isFinite(pctE) ? pctE : null;
+
+    // 1) se vier texto pronto
+    if(tipoTxt.includes("resid")) return { chave:"res", rotulo:"Predominantemente Residencial", cor:"#2563eb" };
+    if(tipoTxt.includes("empre") || tipoTxt.includes("nao") || tipoTxt.includes("nres")) return { chave:"emp", rotulo:"Predominantemente Empresarial", cor:"#f59e0b" };
+    if(tipoTxt.includes("mist") || tipoTxt.includes("indef")) return { chave:"mix", rotulo:"Misto / Indefinido", cor:"#94a3b8" };
+
+    // 2) se vier percentuais, decide por regra
+    if(pctRok != null || pctEok != null){
+      const r = pctRok != null ? pctRok : 0;
+      const e = pctEok != null ? pctEok : 0;
+
+      if(r >= 60 && e <= 40) return { chave:"res", rotulo:"Predominantemente Residencial", cor:"#2563eb" };
+      if(e >= 60) return { chave:"emp", rotulo:"Predominantemente Empresarial", cor:"#f59e0b" };
+      return { chave:"mix", rotulo:"Misto / Indefinido", cor:"#94a3b8" };
+    }
+
+    // 3) fallback
+    return { chave:"mix", rotulo:"Misto / Indefinido", cor:"#94a3b8" };
+  }
+
+  function _raioBolha(props){
+    const totEnd = Number(_getProp(props, ["TOT_END", "total_end", "total_enderecos", "TOTAL_ENDERECOS"]));
+    const totEmp = Number(_getProp(props, ["TOT_ESTAB_NRESID", "total_estab_nresid", "qtd_nao_residencial", "QTD_NAO_RESIDENCIAL"]));
+
+    const a = Number.isFinite(totEnd) ? totEnd : 0;
+    const b = Number.isFinite(totEmp) ? totEmp : 0;
+
+    // escala suave com sqrt para não explodir
+    const base = 10;
+    const r1 = Math.sqrt(Math.max(0, a)) / 45;
+    const r2 = Math.sqrt(Math.max(0, b)) / 20;
+
+    const r = base + r1 + r2;
+    return Math.max(10, Math.min(28, r));
+  }
+
+
+
+function _criarBolhaCEP(p){
+  /**
+   * IMPORTANTE:
+   * - Mantém o nome da função (_criarBolhaCEP)
+   * - p pode vir em 2 formatos:
+   *   (A) { lat, lng, props: {...} }  ✅ seu CEP_POINTS atual
+   *   (B) { LatitudeBairro, LongitudeBairro, ... } (fallback)
+   * - Bolha GRANDE (bairro/região)
+   * - COR AGORA é definida PRIORITARIAMENTE pelos percentuais (pctRes / pctNRes),
+   *   e só usa PerfilDominante como fallback quando percentuais não existirem.
+   */
+
+  // =========================================================
+  // Utils (robusto p/ número pt-BR e strings)
+  // =========================================================
+  function _num(v){
+    if(v === null || v === undefined) return NaN;
+    if(typeof v === "number") return v;
+    const s = String(v).trim();
+    if(!s) return NaN;
+
+    // "92,16" -> "92.16"
+    // "1.234,56" -> "1234.56"
+    const norm = s.replace(/\./g, "").replace(",", ".");
+    const n = Number(norm);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function _bool(v){
+    if(v === true || v === 1 || v === "1") return true;
+    if(typeof v === "string") return v.trim().toLowerCase() === "true";
+    return false;
+  }
+
+  // =========================================================
+  // 1) Coordenadas (seu CEP_POINTS -> p.lat / p.lng)
+  // =========================================================
+  const lat = _num(p?.lat ?? p?.LatitudeBairro ?? p?.props?.LatitudeBairro);
+  const lng = _num(p?.lng ?? p?.LongitudeBairro ?? p?.props?.LongitudeBairro);
+
+  // sanity check (evita lixo tipo -228, -470 etc)
+  if(!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if(lat < -90 || lat > 90) return null;
+  if(lng < -180 || lng > 180) return null;
+
+  // =========================================================
+  // 2) Propriedades (seu backend manda tudo dentro de props)
+  // =========================================================
+  const props = p?.props || p || {};
+
+  const bairro = (props?.BAIRRO ?? props?.Bairro ?? props?.bairro_final ?? props?.bairro ?? "—").toString();
+
+  const pctRes = _num(props?.["PCT_RESIDENCIAL_%"] ?? props?.PercentualResidencial ?? props?.pct_residencial);
+  const pctNRes = _num(props?.["PCT_ESTAB_NRESID_%"] ?? props?.PercentualNaoResidencial ?? props?.pct_nao_residencial);
+  const pctInd = _num(props?.PercentualIndefinido ?? props?.pct_indefinido ?? props?.["PCT_INDEFINIDO_%"]);
+
+  const totalEnd = _num(props?.TOT_END ?? props?.TotalEnderecos ?? props?.total_enderecos);
+  const qtdResid = _num(props?.TOT_DP ?? props?.QuantidadeResidencial ?? props?.qtd_residencial);
+  const qtdNRes  = _num(props?.TOT_ESTAB_NRESID ?? props?.QuantidadeNaoResidencial ?? props?.qtd_nao_residencial);
+
+  const dens100 = _num(props?.DENS_ESTAB_NRESID_100_END ?? props?.dens_100);
+  const qtdPaineis = _num(props?.QTD_PAINEIS ?? props?.QuantidadePaineis ?? props?.qtd_paineis);
+
+  const temPainel = _bool(props?.TEM_PAINEL_EUROMIDIA ?? props?.BitPainelEuromidia ?? props?.tem_painel_euromidia);
+
+  const perfilRaw = (props?.TIPO_AREA ?? props?.PerfilDominante ?? props?.perfil_dominante ?? "")
+    .toString()
+    .trim()
+    .toLowerCase();
+
+
+  let classe = "misto";
+
+  const temPctRes = Number.isFinite(pctRes);
+  const temPctNRes = Number.isFinite(pctNRes);
+
+  if(temPctRes || temPctNRes){
+    const r = temPctRes ? pctRes : 0;
+    const e = temPctNRes ? pctNRes : 0;
+
+    if(r >= 70) classe = "residencial";
+    else if(e >= 70) classe = "empresarial";
+    else classe = "misto";
+  } else {
+    if(perfilRaw.includes("resid")) classe = "residencial";
+    else if(perfilRaw.includes("empres") || perfilRaw.includes("comerc")) classe = "empresarial";
+    else classe = "misto";
+  }
+
+  let cor = "#94a3b8";          // cinza = misto/indefinido
+  let rotuloPerfil = "Misto / Indefinido";
+  if(classe === "residencial"){
+    cor = "#2563eb";            // azul
+    rotuloPerfil = "Predominantemente Residencial";
+  } else if(classe === "empresarial"){
+    cor = "#f59e0b";            // laranja
+    rotuloPerfil = "Predominantemente Empresarial/Comercial";
+  }
+
+  // =========================================================
+  // 4) Raio (tamanho da bolha) baseado em TotalEnderecos
+  // - mínimo visual (não some)
+  // - máximo para não cobrir o mapa inteiro
+  // =========================================================
+  const baseMin = 180;
+  const baseMax = 650;
+
+  const proxy = (Number.isFinite(totalEnd) && totalEnd > 0)
+    ? totalEnd
+    : ((Number.isFinite(qtdResid) && Number.isFinite(qtdNRes) && (qtdResid + qtdNRes) > 0)
+        ? (qtdResid + qtdNRes)
+        : 250
+      );
+
+  // sqrt питания: cresce “desacelerando” (bom p/ mapa)
+  const raio = Math.min(
+    baseMax,
+    Math.max(baseMin, Math.sqrt(proxy) * 14)
+  );
+
+  // =========================================================
+  // 5) Cria bolha (circle)
+  // =========================================================
+  const bolha = L.circle([lat, lng], {
+    pane: "bairrosPane",
+    radius: raio,
+    color: cor,        // borda
+    weight: 2,
+    fillColor: cor,    // preenchimento
+    fillOpacity: 0.22
+  });
+
+  // =========================================================
+  // 6) Hover (destacar)
+  // =========================================================
+  bolha.on("mouseover", ()=>{
+    try{
+      bolha.setStyle({ fillOpacity: 0.35, weight: 3 });
+    }catch(e){}
+  });
+
+  bolha.on("mouseout", ()=>{
+    try{
+      bolha.setStyle({ fillOpacity: 0.22, weight: 2 });
+    }catch(e){}
+  });
+
+  // =========================================================
+  // 7) Tooltip (explica a cor + dados úteis)
+  // =========================================================
+  function _fmtPct(x){
+    return Number.isFinite(x) ? x.toFixed(1).replace(".", ",") + "%" : "—";
+  }
+  function _fmtInt(x){
+    return Number.isFinite(x) ? String(Math.round(x)) : "—";
+  }
+
+  bolha.bindTooltip(`
+    <div style="font-weight:1000;color:#0f172a;margin-bottom:6px">
+      ${bairro}
+    </div>
+
+    <div style="font-size:12px;font-weight:900;line-height:1.45;color:#0f172a">
+      Perfil: <b>${rotuloPerfil}</b><br>
+      Residencial: <b>${_fmtPct(pctRes)}</b><br>
+      Empresarial: <b>${_fmtPct(pctNRes)}</b><br>
+      Indefinido: <b>${_fmtPct(pctInd)}</b><br>
+      Endereços: <b>${_fmtInt(totalEnd)}</b><br>
+      Estab. não-resid.: <b>${_fmtInt(qtdNRes)}</b><br>
+      Densidade (por 100 end.): <b>${Number.isFinite(dens100) ? dens100.toFixed(2).replace(".", ",") : "—"}</b><br>
+      Painéis Euromídia no bairro: <b>${temPainel ? "Sim" : "Não"}</b>
+      ${Number.isFinite(qtdPaineis) ? `<br>Qtd. painéis: <b>${_fmtInt(qtdPaineis)}</b>` : ``}
+    </div>
+  `, {
+    sticky: true,
+    direction: "top",
+    opacity: 0.98,
+    className: "mm-tt"
+  });
+
+  return bolha;
+}
+
+
+
+
+function _renderMapa(){
+  _limparCamadas();
+
+  // =========================================================
+  // EMPRESAS (fluxo original mantido)
+  // =========================================================
+  const filtradas = empresasArr.filter(_empresaPassaFiltro);
+  const exibidas = filtradas;
+
+  const r = _raioAtualMetros();
+
+  const noRaio = exibidas.filter(e => {
+    const lat = Number(e && e.lat);
+    const lng = Number(e && e.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    const dist = _haversineMetros(latP0, lngP0, lat, lng);
+    return dist <= r;
+  });
+
+  const clientesExibidos   = exibidas.filter(x => _ehClienteQualquer(x)).length;
+  const prospectsExibidos  = exibidas.filter(x => _categoriaEmpresaMapa(x) === "prospect").length;
+  const clientesNoRaio     = noRaio.filter(x => _ehClienteQualquer(x)).length;
+
+  if(kpiEmpresas) kpiEmpresas.textContent = String(noRaio.length);
+  if(kpiClientes) kpiClientes.textContent = String(clientesNoRaio);
+  if(kpiTopSeg)   kpiTopSeg.textContent   = _topSegmento(noRaio.length ? noRaio : exibidas);
+
+  if(chipClientes)  chipClientes.textContent  = String(clientesExibidos);
+  if(chipProspects) chipProspects.textContent = String(prospectsExibidos);
+
+  // =========================================================
+  // ✅ BOLHAS DE BAIRRO / REGIÃO (MAPA INTEIRO)
+  // - NÃO usa raio do painel
+  // - NÃO usa heatmap
+  // - UMA bolha por BAIRRO
+  // =========================================================
+  if(camadaBairros && typeof camadaBairros.addLayer === "function"){
+    const bairros = Array.isArray(cepPointsArr) ? cepPointsArr : [];
+
+    // evita poluição visual extrema
+    const LIMITE_BOLHAS = 900;
+    let bairrosFinal = bairros;
+
+    if(bairros.length > LIMITE_BOLHAS){
+      const passo = Math.ceil(bairros.length / LIMITE_BOLHAS);
+      const amostra = [];
+      for(let i = 0; i < bairros.length; i += passo){
+        amostra.push(bairros[i]);
+      }
+      bairrosFinal = amostra.slice(0, LIMITE_BOLHAS);
+    }
+
+    for(const b of bairrosFinal){
+      const bolha = _criarBolhaCEP(b);   // 👈 continua usando a MESMA função
+      if(bolha){
+        camadaBairros.addLayer(bolha);
+      }
+    }
+  }
+
+  // =========================================================
+  // MARKERS DAS EMPRESAS (inalterado)
+  // =========================================================
+  for(const e of exibidas){
+    const cat = _categoriaEmpresaMapa(e);
+    const m = _criarMarcadorEmpresa(e, cat);
+
+    if(USAR_CLUSTER_GERAL){
+      if(grupoCluster && typeof grupoCluster.addLayer === "function"){
+        grupoCluster.addLayer(m);
+      }
+    }
+
+    if(!USAR_CLUSTER_GERAL){
+      if(cat === "cliente_painel"){
+        if(camadaClientesPainel && typeof camadaClientesPainel.addLayer === "function"){
+          camadaClientesPainel.addLayer(m);
+        }
+      } else if(cat === "cliente_euro"){
+        if(camadaClientesEuro && typeof camadaClientesEuro.addLayer === "function"){
+          camadaClientesEuro.addLayer(m);
+        }
+      } else {
+        if(camadaProspects && typeof camadaProspects.addLayer === "function"){
+          camadaProspects.addLayer(m);
+        }
+      }
+    }
+  }
+
+  // =========================================================
+  // SELEÇÃO ATIVA (mantém consistência)
+  // =========================================================
+  if(empresaSelecionada){
+    const idSel = String(empresaSelecionada.id_empresa ?? "");
+    if(idSel && !exibidas.some(x => String(x && x.id_empresa) === idSel)){
+      _setEmpresaSelecionada(null);
+    }
+  }
+}
+
+
+
+
+
+
+
+  function _atualizarQuerystring(){
+    const params = new URLSearchParams(window.location.search);
+
+    const seg = selSegmento ? selSegmento.value : "todos";
+    const st  = selStatus ? selStatus.value : "todos";
+    const r   = selRaio ? selRaio.value : "";
+
+    if(seg && seg !== "todos") params.set("segmento", seg); else params.delete("segmento");
+    if(st  && st  !== "todos") params.set("status", st);   else params.delete("status");
+    if(r) params.set("raio_m", r); else params.delete("raio_m");
+
+    const qs = params.toString();
+    const novaUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState({}, "", novaUrl);
+  }
+
+  function _recalcularTudoMapa(){
+    _desenharRaio();
+    _renderMapa();
+    _atualizarQuerystring();
+  }
+
+  if(selSegmento) selSegmento.addEventListener("change", _recalcularTudoMapa);
+  if(selStatus) selStatus.addEventListener("change", _recalcularTudoMapa);
+  if(selRaio) selRaio.addEventListener("change", _recalcularTudoMapa);
+
+  if(btnAnalisarArea){
+    btnAnalisarArea.addEventListener("click", ()=> {
+      const r = _raioAtualMetros();
+      alert(`Analisar área no raio de ${r}m: aqui você pode abrir um relatório/lista detalhada.`);
+    });
+  }
+
+  // =========================================================
+  // ✅ Toggle do chipHeat (On/Off) mantendo sua UI
+  // =========================================================
+  if(chipHeat){
+    chipHeat.style.cursor = "pointer";
+    chipHeat.title = "Clique para ligar/desligar a camada de calor (Heat)";
+
+    chipHeat.addEventListener("click", ()=> {
+      if(!camadaHeat){
+        chipHeat.textContent = "Off";
+        return;
+      }
+      if(mapa.hasLayer(camadaHeat)){
+        mapa.removeLayer(camadaHeat);
+      } else {
+        mapa.addLayer(camadaHeat);
+      }
+      chipHeat.textContent = mapa.hasLayer(camadaHeat) ? "On" : "Off";
+      _criarOuAtualizarLegendaHeat();
+    });
+  }
+
+
+
+
+const DADOS_FIN_RAW = {{ (fin_json.get("serie") if fin_json else [])|tojson }};
+
+function _pad2(n){
+  const s = String(n ?? "");
+  return s.length === 1 ? ("0" + s) : s;
+}
+
+function _normalizarDadosFinBackend(lista){
+  const arr = Array.isArray(lista) ? lista : [];
+
+  function _num(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  return arr.map(x => {
+    // ✅ backend atual manda ano/mes (inteiros) e/ou data_ref (YYYY-MM-DD)
+    const ano = x?.ano ?? x?.Ano ?? null;
+    const mes = x?.mes ?? x?.Mes ?? null;
+
+    // fallback 1: monta YYYY-MM a partir de ano/mes
+    const ymFromAnoMes = (ano && mes) ? `${ano}-${_pad2(mes)}` : "";
+
+    // fallback 2: extrai YYYY-MM de data_ref (YYYY-MM-DD)
+    const dataRef = String(x?.data_ref ?? x?.DataRef ?? "");
+    const ymFromDataRef = (/^\d{4}-\d{2}-\d{2}$/.test(dataRef)) ? dataRef.slice(0, 7) : "";
+
+    return ({
+      // tenta vários nomes + fallbacks compatíveis com seu backend
+      ym: String(
+        x?.ym ??
+        x?.ano_mes ??
+        x?.AnoMes ??
+        x?.competencia ??
+        x?.Competencia ??
+        ymFromAnoMes ??
+        ymFromDataRef ??
+        ""
+      ).trim(),
+
+      // ✅ seu backend usa "receita"
+      faturamento: _num(
+        x?.faturamento ??
+        x?.vl_faturamento ??
+        x?.valor_faturamento ??
+        x?.Faturamento ??
+        x?.Valor ??
+        x?.receita ??
+        x?.Receita ??
+        0
+      ),
+
+      // ✅ seu backend usa "margem_pct"
+      margem: _num(
+        x?.margem ??
+        x?.margem_pct ??
+        x?.margem_percentual ??
+        x?.Margem ??
+        0
+      ),
+
+      ocupa: _num(
+        x?.ocupa ??
+        x?.ocupacao ??
+        x?.ocupacao_pct ??
+        x?.Ocupacao ??
+        0
+      )
+    });
+  })
+  // remove linhas sem ym válido (pra não quebrar o gráfico)
+  .filter(x => /^\d{4}-\d{2}$/.test(x.ym));
+}
+
+// 3) este é o array FINAL que o resto do seu código usa
+const DADOS_FIN = _normalizarDadosFinBackend(DADOS_FIN_RAW);
+
+console.log("DADOS_FIN_RAW len:", Array.isArray(DADOS_FIN_RAW) ? DADOS_FIN_RAW.length : 0);
+console.log("DADOS_FIN len:", DADOS_FIN.length);
+console.log("DADOS_FIN sample:", DADOS_FIN.slice(0, 5));
+
+
+
+  // =========================================================
+  // ✅ CUSTOS (ROSCA) - dados mock (troca por backend depois)
+  // =========================================================
+ ;const CUSTOS_PAINEL_RAW = {{ (fin_json.get("custos") if fin_json else [])|tojson }};
+
+;const CUSTOS_PAINEL = (Array.isArray(CUSTOS_PAINEL_RAW) ? CUSTOS_PAINEL_RAW : []).map(x => ({
+  nome: (x && x.nome != null) ? String(x.nome).trim() : "—",
+  valor: (typeof (x && x.valor) === "number")
+    ? (Number.isFinite(x.valor) ? x.valor : 0)
+    : (function(v){
+        let s = String(v ?? "").trim();
+        if(!s) return 0;
+        const temPonto = s.includes(".");
+        const temVirgula = s.includes(",");
+        if(temPonto && temVirgula) s = s.replace(/\./g,"").replace(",",".");
+        else if(!temPonto && temVirgula) s = s.replace(",",".");
+        const n = Number(s);
+        return Number.isFinite(n) ? n : 0;
+      })(x && x.valor)
+}));
+
+
+
+console.log("CUSTOS_PAINEL_RAW len:", Array.isArray(CUSTOS_PAINEL_RAW) ? CUSTOS_PAINEL_RAW.length : 0);
+console.log("CUSTOS_PAINEL len:", CUSTOS_PAINEL.length);
+console.log("CUSTOS_PAINEL sample:", CUSTOS_PAINEL.slice(0, 10));
+
+  function _parseYm(ym){
+    const [y,m] = String(ym).split("-");
+    const yy = parseInt(y,10);
+    const mm = parseInt(m,10);
+    return new Date(yy, mm-1, 1);
+  }
+
+  function _formatYm(ym){
+    const d = _parseYm(ym);
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    return `${mm}/${d.getFullYear()}`;
+  }
+
+  // ---- Controles
+  const tabRent = document.getElementById("tabRent");
+  const tabJan = document.getElementById("tabJan");
+  const selIndicadores = document.getElementById("selIndicadores");
+  const switchHist = document.getElementById("switchHist");
+  const dtIniGraf = document.getElementById("dtIniGraf");
+  const dtFimGraf = document.getElementById("dtFimGraf");
+  const botoesRng = Array.from(document.querySelectorAll(".fin-rng"));
+
+  if(dtIniGraf && !dtIniGraf.value) dtIniGraf.value = "2024-01-01";
+  if(dtFimGraf && !dtFimGraf.value) dtFimGraf.value = "2026-12-01";
+
+  if(switchHist){
+    switchHist.addEventListener("click", ()=> {
+      switchHist.classList.toggle("on");
+      const on = switchHist.classList.contains("on");
+      switchHist.setAttribute("aria-checked", on ? "true" : "false");
+      _atualizarGrafico();
+      _renderCustoRosca();
+    });
+  }
+
+  function _setTab(active){
+    if(active === "rent"){
+      if(tabRent) tabRent.classList.add("active");
+      if(tabJan) tabJan.classList.remove("active");
+    } else {
+      if(tabJan) tabJan.classList.add("active");
+      if(tabRent) tabRent.classList.remove("active");
+    }
+  }
+
+  if(tabRent) tabRent.addEventListener("click", ()=> _setTab("rent"));
+  if(tabJan) tabJan.addEventListener("click", ()=> _setTab("jan"));
+
+  function _setActiveRange(btn){
+    botoesRng.forEach(b=> b.classList.remove("active"));
+    if(btn) btn.classList.add("active");
+  }
+
+  function _aplicarRange(rng){
+    const fim = _parseYm("2026-12");
+    const fimISO = `${fim.getFullYear()}-${String(fim.getMonth()+1).padStart(2,"0")}-01`;
+    if(dtFimGraf) dtFimGraf.value = fimISO;
+
+    let ini = new Date(fim);
+    if(rng === "6m") ini.setMonth(ini.getMonth() - 5);
+    else if(rng === "1a") ini.setMonth(ini.getMonth() - 11);
+    else if(rng === "2a") ini.setMonth(ini.getMonth() - 23);
+    else if(rng === "3a") ini.setMonth(ini.getMonth() - 35);
+    else if(rng === "5a") ini.setMonth(ini.getMonth() - 59);
+    else ini = _parseYm("2024-01");
+
+    const iniISO = `${ini.getFullYear()}-${String(ini.getMonth()+1).padStart(2,"0")}-01`;
+    if(dtIniGraf) dtIniGraf.value = iniISO;
+
+    _atualizarGrafico();
+    _renderCustoRosca();
+  }
+
+  botoesRng.forEach(btn=>{
+    btn.addEventListener("click", ()=> {
+      _setActiveRange(btn);
+      _aplicarRange(btn.dataset.rng);
+    });
+  });
+
+  if(dtIniGraf){
+    dtIniGraf.addEventListener("change", ()=> {
+      botoesRng.forEach(b=> b.classList.remove("active"));
+      _atualizarGrafico();
+      _renderCustoRosca();
+    });
+  }
+  if(dtFimGraf){
+    dtFimGraf.addEventListener("change", ()=> {
+      botoesRng.forEach(b=> b.classList.remove("active"));
+      _atualizarGrafico();
+      _renderCustoRosca();
+    });
+  }
+
+  if(selIndicadores) selIndicadores.addEventListener("change", ()=> {
+    _atualizarGrafico();
+    _renderCustoRosca();
+  });
+
+  // ---- chart
+  let chart = null;
+
+  function _filtrarPorData(){
+    const ini = new Date((dtIniGraf && dtIniGraf.value) ? dtIniGraf.value : "2024-01-01");
+    const fim = new Date((dtFimGraf && dtFimGraf.value) ? dtFimGraf.value : "2026-12-01");
+
+    const inclHist = (switchHist && switchHist.classList.contains("on")) ? true : false;
+
+    let lista = DADOS_FIN.slice();
+
+    if(!inclHist){
+      lista = lista.filter(x => String(x.ym).startsWith("2025") || String(x.ym).startsWith("2026"));
+    }
+
+    let iniOk = ini;
+    let fimOk = fim;
+    if(iniOk > fimOk){
+      const tmp = iniOk;
+      iniOk = fimOk;
+      fimOk = tmp;
+    }
+
+    return lista.filter(x => {
+      const d = _parseYm(x.ym);
+      return d >= iniOk && d <= fimOk;
+    });
+  }
+
+  function _serieIndicador(lista, indicador){
+    if(indicador === "margem") return lista.map(x => _num(x.margem));
+    if(indicador === "ocupa") return lista.map(x => _num(x.ocupa));
+    return lista.map(x => _num(x.faturamento));
+  }
+
+  function _tituloIndicador(indicador){
+    if(indicador === "margem") return "Margem (%)";
+    if(indicador === "ocupa") return "Ocupação (%)";
+    return "Faturamento (R$)";
+  }
+
+  function _formatTooltip(indicador, v){
+    if(indicador === "margem" || indicador === "ocupa") return _brPct(v);
+    return _brMoeda(v);
+  }
+
+  function _atualizarGrafico(){
+    const canvas = document.getElementById("grafFaturamento");
+    if(!canvas) return;
+
+    if(!window.Chart){
+      console.warn("Chart.js não carregou. Verifique o CDN.");
+      return;
+    }
+
+    const indicador = (selIndicadores && selIndicadores.value) ? selIndicadores.value : "faturamento";
+    const lista = _filtrarPorData();
+
+    const labels = lista.map(x => _formatYm(x.ym));
+    const dados = _serieIndicador(lista, indicador);
+
+    const labelsFinal = (labels.length ? labels : ["—"]);
+    const dadosFinal = (dados.length ? dados : [0]);
+
+    if(chart){
+      chart.data.labels = labelsFinal;
+      chart.data.datasets[0].label = _tituloIndicador(indicador);
+      chart.data.datasets[0].data = dadosFinal;
+
+      chart.options.plugins.tooltip.callbacks.label = (c)=> {
+        const y = (c && c.parsed) ? c.parsed.y : 0;
+        return `${_tituloIndicador(indicador)}: ${_formatTooltip(indicador, y)}`;
+      };
+
+      chart.options.scales.y.ticks.callback = (v)=> {
+        if(indicador === "margem" || indicador === "ocupa"){
+          return `${String(v).replace(".", ",")}%`;
+        }
+        return Number(v).toLocaleString("pt-BR");
+      };
+
+      chart.update();
+      return;
+    }
+
+    chart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: labelsFinal,
+        datasets: [{
+          label: _tituloIndicador(indicador),
+          data: dadosFinal,
+          tension: 0.25,
+          pointRadius: 0,
+          borderWidth: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c)=> {
+                const y = (c && c.parsed) ? c.parsed.y : 0;
+                return `${_tituloIndicador(indicador)}: ${_formatTooltip(indicador, y)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { maxRotation: 0, autoSkip: true }
+          },
+          y: {
+            beginAtZero: false,
+            ticks: {
+              callback: (v)=> {
+                if(indicador === "margem" || indicador === "ocupa"){
+                  return `${String(v).replace(".", ",")}%`;
+                }
+                return Number(v).toLocaleString("pt-BR");
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+
+
+
+
+
+
+
+let chartCusto = null;
+
+/* =========================================================
+   ✅ PARSER NUMÉRICO ROBUSTO
+   - aceita número (JSON) e string
+   - aceita pt-BR "1.109,84" e "1109,84"
+   - aceita padrão "1109.84"
+   - NÃO remove "." quando ele é decimal (se só houver ponto)
+   ========================================================= */
+function _num(v){
+  if (v === null || v === undefined) return NaN;
+
+  // ✅ se já é número, não mexe
+  if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
+
+  let s = String(v).trim();
+  if (!s) return NaN;
+
+  const temPonto = s.includes(".");
+  const temVirgula = s.includes(",");
+
+  // Caso 1: "1.109,84" -> 1109.84
+  if (temPonto && temVirgula) {
+    s = s.replace(/\./g, "").replace(/,/g, ".");
+  }
+  // Caso 2: "1109,84" -> 1109.84
+  else if (!temPonto && temVirgula) {
+    s = s.replace(/,/g, ".");
+  }
+  // Caso 3: "1109.84" -> mantém (padrão)
+  // (não mexe)
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function _renderCustoRosca(){
+  const canvas = document.getElementById("grafCustoRosca");
+  const listaEl = document.getElementById("listaCustoRosca");
+  const lblPeriodo = document.getElementById("lblCustoPeriodo");
+
+  if(!canvas){
+    console.warn("Canvas #grafCustoRosca não encontrado.");
+    return;
+  }
+
+  if(!window.Chart){
+    console.warn("Chart.js não carregou. Verifique o CDN.");
+    if(listaEl){
+      listaEl.innerHTML = `<div class="fin-cost-empty" style="color:#b91c1c;font-weight:900">Chart.js não carregou (CDN).</div>`;
+    }
+    return;
+  }
+
+  /* ✅ pega inputs de data (se existirem) sem depender de variáveis globais */
+  const dtIniEl = document.getElementById("dtIniGraf");
+  const dtFimEl = document.getElementById("dtFimGraf");
+
+  const ini = (dtIniEl && dtIniEl.value) ? String(dtIniEl.value) : "";
+  const fim = (dtFimEl && dtFimEl.value) ? String(dtFimEl.value) : "";
+
+  if(lblPeriodo){
+    lblPeriodo.textContent =
+      (ini && fim) ? `Período: ${_fmtData(ini)} até ${_fmtData(fim)}` : "—";
+  }
+
+  /* ✅ NÃO PODE dar ReferenceError se CUSTOS_PAINEL não existir */
+  const itensRaw = (typeof window.CUSTOS_PAINEL !== "undefined" && Array.isArray(window.CUSTOS_PAINEL))
+    ? window.CUSTOS_PAINEL
+    : (typeof CUSTOS_PAINEL !== "undefined" && Array.isArray(CUSTOS_PAINEL))
+      ? CUSTOS_PAINEL
+      : [];
+
+  /* ✅ normaliza (nome/valor) e filtra valores <= 0 */
+  const itens = itensRaw
+    .map(x => ({
+      nome: (x && x.nome ? String(x.nome) : "—").trim() || "—",
+      valor: _num(x && x.valor)
+    }))
+    .filter(x => Number.isFinite(x.valor) && x.valor > 0);
+
+  const total = itens.reduce((acc, x) => acc + x.valor, 0);
+
+  const labels = itens.map(x => x.nome);
+  const valores = itens.map(x => x.valor);
+  const cores = labels.map((_, i) => `hsl(${(i * 47) % 360}, 75%, 55%)`);
+
+  /* ✅ se não tem dados, destrói chart e mostra mensagem */
+  if(!itens.length || total <= 0){
+    if(chartCusto){
+      chartCusto.destroy();
+      chartCusto = null;
+    }
+
+    if(listaEl){
+      listaEl.innerHTML = `
+        <div class="fin-cost-empty" style="color:#64748b;font-weight:900">
+          Sem custos cadastrados no período.
+        </div>
+      `;
+    }
+    return;
+  }
+
+  /* ✅ cria ou atualiza o chart */
+  if(chartCusto){
+    chartCusto.data.labels = labels;
+    chartCusto.data.datasets[0].data = valores;
+    chartCusto.data.datasets[0].backgroundColor = cores;
+    chartCusto.update();
+  } else {
+    chartCusto = new Chart(canvas, {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [{
+          data: valores,
+          backgroundColor: cores,
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const v = (c && Number.isFinite(c.parsed)) ? c.parsed : 0;
+                const pct = total > 0 ? (v / total) * 100 : 0;
+                return `${c.label}: ${_brMoeda(v)} (${_brPct(pct)})`;
+              }
+            }
+          }
+        },
+        cutout: "68%"
+      }
+    });
+  }
+
+  /* ✅ lista */
+  if(listaEl){
+    listaEl.innerHTML = itens.map((x, idx) => {
+      const pct = total > 0 ? (x.valor / total) * 100 : 0;
+
+      return `
+        <div class="fin-cost-item">
+          <div class="fin-cost-left">
+            <span class="fin-cost-dot" style="background:${cores[idx] || "rgba(0,40,132,.85)"}"></span>
+            <div class="fin-cost-name">${x.nome}</div>
+          </div>
+          <div class="fin-cost-right">
+            <div class="fin-cost-val">${_brMoeda(x.valor)}</div>
+            <div class="fin-cost-pct">${_brPct(pct)}</div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+}
+
+/* =========================================================
+   ✅ CHAMADA SEGURA (roda quando DOM estiver pronto)
+   - e re-render quando mudar datas
+   ========================================================= */
+document.addEventListener("DOMContentLoaded", function(){
+  _renderCustoRosca();
+
+  const dtIniEl = document.getElementById("dtIniGraf");
+  const dtFimEl = document.getElementById("dtFimGraf");
+
+  if(dtIniEl) dtIniEl.addEventListener("change", _renderCustoRosca);
+  if(dtFimEl) dtFimEl.addEventListener("change", _renderCustoRosca);
+});
+
+
+
+
+
+
+  _desenharRaio();
+  _renderMapa();
+  _criarOuAtualizarLegendaEmpresas();
+  _atualizarQuerystring();
+  _atualizarGrafico();
+  _renderCustoRosca();
+
+})();
+</script>
+
+
+
+
+
+
+
+{% endblock %}
+

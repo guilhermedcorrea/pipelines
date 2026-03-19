@@ -1,0 +1,269 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Contrato {{ contrato["NumeroContrato"] or contrato["NumeroPrevia"] }} | Euromídia{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h1 class="page-title" style="margin:0;">Detalhes do Contrato</h1>
+      <div class="muted" style="margin-top:6px;font-weight:900;">
+        Nº Contrato: <span style="color:var(--euro-blue);">{{ contrato["NumeroContrato"] or "-" }}</span>
+        • Prévia: <span style="color:var(--text);">{{ contrato["NumeroPrevia"] or "-" }}</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      {% if return_to %}
+        <a class="btn btn-secondary" style="text-decoration:none;" href="{{ return_to }}">← Voltar para a grade</a>
+      {% else %}
+        <a class="btn btn-secondary" style="text-decoration:none;" href="{{ url_for('Paineis.lista_paineis') }}">← Voltar</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <!-- Cabeçalho -->
+  <div style="border:1px solid var(--border);border-radius:14px;padding:14px;background:#fff;">
+    <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+      <div>
+        <label>Cliente / Razão Social</label>
+        <div style="font-weight:900;">{{ contrato["RazaoSocial"] or "-" }}</div>
+      </div>
+      <div>
+        <label>Marca exibida</label>
+        <div style="font-weight:900;">{{ contrato["MarcaExibida"] or "-" }}</div>
+      </div>
+
+      <div>
+        <label>CNPJ</label>
+        <div style="font-weight:900;">{{ contrato["CNPJ"] or "-" }}</div>
+      </div>
+      <div>
+        <label>CPF</label>
+        <div style="font-weight:900;">{{ contrato["CPF"] or "-" }}</div>
+      </div>
+
+      <div>
+        <label>Data Lançamento</label>
+        <div style="font-weight:900;">
+          {% set dl = contrato["DataLancamento"] %}
+          {% if dl and dl.strftime %}
+            {{ dl.strftime('%d/%m/%Y') }}
+          {% elif dl %}
+            {{ dl }}
+          {% else %}
+            -
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <label>Cidade de exibição</label>
+        <div style="font-weight:900;">{{ contrato["CidadeExibicao"] or "-" }}</div>
+      </div>
+
+      <div>
+        <label>Origem</label>
+        <div style="font-weight:900;">{{ contrato["Origem"] or "-" }}</div>
+      </div>
+      <div>
+        <label>Tipo Documento</label>
+        <div style="font-weight:900;">{{ contrato["TipoDocumento"] or "-" }}</div>
+      </div>
+
+      <div>
+        <label>Vendedor (DimVendedor)</label>
+        <div style="font-weight:900;">{{ contrato["DimVendedor"] or "-" }}</div>
+      </div>
+      <div>
+        <label>Qtde Pontos / Faces</label>
+        <div style="font-weight:900;">
+          {{ contrato["QtdeCodPonto"] or 0 }} ponto(s) • {{ contrato["QtdeCodFace"] or 0 }} face(s)
+        </div>
+      </div>
+    </div>
+
+    <div style="height:14px;"></div>
+
+    <!-- Totais -->
+    <div style="border-top:1px dashed var(--border);padding-top:12px;">
+      <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+        <div>
+          <label>Total bruto (contrato)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalBrutoContrato"] or 0)) }}
+          </div>
+        </div>
+        <div>
+          <label>Total líquido mensal (final)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalFaturamentoLiquidoMensalFinal"] or 0)) }}
+          </div>
+        </div>
+
+        <div>
+          <label>Total líquido (AGBR CT Acordo)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalLiquidoContratoAGBRCTACORDO"] or 0)) }}
+          </div>
+        </div>
+        <div>
+          <label>Total líquido (AGBR Vend/Ger/Coor)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalLiquidoContratoAGBRVENDGERCOOR"] or 0)) }}
+          </div>
+        </div>
+
+        <div>
+          <label>Agência (mensal)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalValorMensalAgencia"] or 0)) }}
+          </div>
+        </div>
+        <div>
+          <label>Bureau (mensal)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalValorBureauMensal"] or 0)) }}
+          </div>
+        </div>
+
+        <div>
+          <label>Carta Acordo (mensal)</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalValorAcordoMensal"] or 0)) }}
+          </div>
+        </div>
+        <div>
+          <label>Outras comissões</label>
+          <div style="font-weight:900;">
+            R$ {{ "%.2f"|format((contrato["TotalOutrasComissoes"] or 0)) }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:16px;"></div>
+
+  <!-- Itens -->
+  <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff;">
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-weight:900;color:var(--euro-blue);">
+      Itens do Contrato ({{ itens|length }})
+    </div>
+
+    <div class="overflow-x">
+      <table style="width:100%;border-collapse:collapse;min-width:1650px;">
+        <thead>
+          <tr style="background:#F8FAFC;border-bottom:1px solid var(--border);">
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">CodPonto</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">CodFace</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Cota</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Período</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Vendedor</th>
+
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Bruto Mensal</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Líquido Mensal</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Líquido Final</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Permuta</th>
+
+            <!-- ✅ Novas colunas (margem agregada por face) -->
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Fat. Líq Final (Face)</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Custo Alocado (Face)</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Margem (R$) (Face)</th>
+            <th style="text-align:left;padding:10px 12px;font-weight:900;">Margem (%) (Face)</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {% for it in itens %}
+            {% set di = it["DataInicioPrevisto"] %}
+            {% set df = it["DataTerminoPrevisto"] %}
+            {% set perm = it["Permuta"] %}
+
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:10px 12px;font-weight:900;">{{ it["CodPonto"] or "-" }}</td>
+              <td style="padding:10px 12px;font-weight:900;">{{ it["CodFace"] or "-" }}</td>
+              <td style="padding:10px 12px;font-weight:900;">{{ it["Cota"] or "-" }}</td>
+
+              <td style="padding:10px 12px;font-weight:900;">
+                {% if di and di.strftime %}
+                  {{ di.strftime('%d/%m/%Y') }}
+                {% elif di %}
+                  {{ di }}
+                {% else %}
+                  -
+                {% endif %}
+                →
+                {% if df and df.strftime %}
+                  {{ df.strftime('%d/%m/%Y') }}
+                {% elif df %}
+                  {{ df }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+
+              <td style="padding:10px 12px;font-weight:900;">{{ it["Vendedor"] or "-" }}</td>
+
+              <td style="padding:10px 12px;font-weight:900;">
+                R$ {{ "%.2f"|format((it["FaturamentoBrutoMensal"] or 0)) }}
+              </td>
+              <td style="padding:10px 12px;font-weight:900;">
+                R$ {{ "%.2f"|format((it["FaturamentoLiquidoMensal"] or 0)) }}
+              </td>
+              <td style="padding:10px 12px;font-weight:900;">
+                R$ {{ "%.2f"|format((it["FaturamentoLiquidoMensalFinal"] or 0)) }}
+              </td>
+
+              <td style="padding:10px 12px;font-weight:900;">
+                {% if perm in (1, True, "1", "S", "s", "SIM", "Sim", "sim", "TRUE", "True", "true") %}
+                  SIM
+                {% else %}
+                  NÃO
+                {% endif %}
+              </td>
+
+              <!-- ✅ Novos campos vindos do SQL (agregado por face) -->
+              <td style="padding:10px 12px;font-weight:900;">
+                {% if it["FatLiquidoFinal_Soma"] is not none %}
+                  R$ {{ "%.2f"|format(it["FatLiquidoFinal_Soma"]) }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+
+              <td style="padding:10px 12px;font-weight:900;">
+                {% if it["CustoMensalAlocado_Soma"] is not none %}
+                  R$ {{ "%.2f"|format(it["CustoMensalAlocado_Soma"]) }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+
+              <td style="padding:10px 12px;font-weight:900;">
+                {% if it["MargemR_Face_Soma"] is not none %}
+                  R$ {{ "%.2f"|format(it["MargemR_Face_Soma"]) }}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+
+              <td style="padding:10px 12px;font-weight:900;">
+                {% if it["MargemPct_Face"] is not none %}
+                  {{ "%.2f"|format(it["MargemPct_Face"]) }}%
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

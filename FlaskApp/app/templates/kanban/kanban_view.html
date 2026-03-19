@@ -1,0 +1,2061 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}{{ kanban.NomeKanban }} | Kanban{% endblock %}
+
+{% block content %}
+<style>
+  :root{
+    
+    --kb-bg: #f3f5f8;
+    --kb-card: #ffffff;
+    --kb-line: rgba(15,23,42,.12);
+    --kb-line2: rgba(15,23,42,.08);
+    --kb-text: #0f172a;
+    --kb-muted: rgba(15,23,42,.70);
+
+    --kb-primary: var(--euro-blue, #0b4ea2);
+    --kb-primary-weak: rgba(11,78,162,.10);
+
+    --kb-shadow: 0 10px 30px rgba(15,23,42,.10);
+    --kb-shadow2: 0 6px 18px rgba(15,23,42,.10);
+    --kb-radius: 14px;
+
+    --kb-col-w: 332px; 
+
+   
+    --kb-top-h: auto;
+    --kb-col-head-h: 56px;
+    --kb-col-pad-v: 10px;
+  }
+
+
+  @media (max-width: 520px){
+    :root{ --kb-col-w: 300px; }
+  }
+  @media (min-width: 521px) and (max-width: 920px){
+    :root{ --kb-col-w: 320px; }
+  }
+  @media (min-width: 1400px){
+    :root{ --kb-col-w: 352px; }
+  }
+
+  .kb-wrap{
+    background: var(--kb-bg);
+    border: 1px solid var(--kb-line2);
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  .kb-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    padding: 10px 10px 12px 10px;
+  }
+
+  .kb-title{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    min-width: min(520px, 100%);
+  }
+
+  .kb-title h1{
+    margin:0;
+    font-size: 22px;
+    font-weight: 950;
+    letter-spacing: -0.02em;
+    color: var(--kb-text);
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .kb-desc{
+    margin:0;
+    color: var(--kb-muted);
+    font-size: 13px;
+    line-height: 1.35;
+    max-width: 920px;
+  }
+
+  .kb-actions{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  .kb-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border-radius: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--kb-line);
+    background: #fff;
+    color: var(--kb-text);
+    font-weight: 900;
+    font-size: 13px;
+    cursor:pointer;
+    text-decoration:none;
+    transition: transform .06s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease;
+    user-select:none;
+    line-height: 1;
+  }
+  .kb-btn:hover{ box-shadow: var(--kb-shadow2); transform: translateY(-1px); }
+  .kb-btn:active{ transform: translateY(0); box-shadow: none; }
+
+  .kb-btn.primary{
+    border-color: rgba(11,78,162,.22);
+    background: var(--kb-primary);
+    color: #fff;
+  }
+  .kb-btn.ghost{
+    background: rgba(255,255,255,.75);
+  }
+  .kb-btn.sm{
+    padding: 7px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 950;
+  }
+
+  .kb-btn.icon{
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 12px;
+    font-weight: 950;
+  }
+  .kb-btn.danger{
+    border-color: rgba(239,68,68,.28);
+    background: rgba(239,68,68,.08);
+    color: rgba(127,29,29,.95);
+  }
+  .kb-btn.danger:hover{
+    border-color: rgba(239,68,68,.40);
+    box-shadow: 0 10px 22px rgba(239,68,68,.12);
+  }
+
+  .kb-divider{
+    height: 1px;
+    background: var(--kb-line2);
+    margin: 0 10px 10px 10px;
+  }
+
+
+  .kb-filtros{
+    display:flex;
+    gap:12px;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    padding: 0 10px 12px 10px;
+  }
+
+  .kb-filtros-left{
+    display:flex;
+    gap:10px;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    min-width: min(740px, 100%);
+    flex: 1;
+  }
+
+  .kb-filtros .lbl{
+    font-weight: 950;
+    font-size: 13px;
+    color: var(--kb-text);
+    margin-bottom: 6px;
+  }
+
+  .kb-multi{
+    min-width: min(560px, 100%);
+    max-width: 760px;
+    border: 1px solid var(--kb-line);
+    border-radius: 14px;
+    background: #fff;
+    padding: 10px 12px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    box-shadow: 0 2px 10px rgba(15,23,42,.05);
+  }
+  .kb-multi small{
+    color: var(--kb-muted);
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  #filtroTags{
+    width: 100%;
+    border: 1px solid var(--kb-line2);
+    border-radius: 12px;
+    padding: 10px;
+    min-height: 96px;
+    outline: none;
+    font-size: 13px;
+    background: rgba(15,23,42,.02);
+  }
+  #filtroTags:focus{
+    border-color: rgba(11,78,162,.35);
+    box-shadow: 0 0 0 4px rgba(11,78,162,.12);
+    background:#fff;
+  }
+
+  .kb-filtros-right{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    min-width: 180px;
+  }
+
+
+  .kb-board{
+    display:flex;
+    gap:14px;
+    overflow:auto;
+    padding: 8px 10px 12px 10px;
+    scroll-snap-type: x mandatory;
+    scroll-padding-left: 10px;
+    max-height: calc(100vh - 260px);
+    overscroll-behavior: contain;
+  }
+  .kb-board::-webkit-scrollbar{ height: 12px; }
+  .kb-board::-webkit-scrollbar-thumb{
+    background: rgba(15,23,42,.18);
+    border-radius: 999px;
+  }
+
+ 
+  .kb-col{
+    scroll-snap-align: start;
+    width: var(--kb-col-w);
+    flex: 0 0 auto;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid var(--kb-line2);
+    box-shadow: 0 6px 18px rgba(15,23,42,.08);
+    display:flex;
+    flex-direction:column;
+    min-height: 420px;
+    overflow:hidden;
+
+    --col-accent: rgba(11,78,162,1);
+    border-top: 4px solid var(--col-accent);
+  }
+
+  .kb-col-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--kb-line2);
+    background: #fff;
+    min-height: var(--kb-col-head-h);
+  }
+
+  .kb-col-title{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    min-width: 0;
+  }
+
+  .kb-col-title strong{
+    font-weight: 950;
+    font-size: 14px;
+    letter-spacing: -.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--col-accent);
+  }
+
+  .kb-col-sub{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    color: rgba(15,23,42,.62);
+    font-size: 12px;
+  }
+
+  .kb-count{
+    font-weight: 950;
+    color: rgba(15,23,42,.70);
+  }
+
+  .kb-col-actions{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex:0 0 auto;
+  }
+
+  .kb-add{
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    font-weight: 950;
+    border: 1px solid rgba(15,23,42,.12);
+    background: #fff;
+    color: rgba(15,23,42,.85);
+    box-shadow: 0 2px 10px rgba(15,23,42,.06);
+    cursor:pointer;
+  }
+  .kb-add:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(15,23,42,.12);
+    border-color: rgba(15,23,42,.18);
+  }
+
+  .kb-col-del{
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    font-weight: 950;
+    border: 1px solid rgba(239,68,68,.28);
+    background: rgba(239,68,68,.08);
+    color: rgba(127,29,29,.95);
+    box-shadow: 0 2px 10px rgba(15,23,42,.06);
+    cursor:pointer;
+  }
+  .kb-col-del:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(239,68,68,.12);
+    border-color: rgba(239,68,68,.40);
+  }
+
+  .kb-col-body{
+    padding: 10px 12px 12px 12px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    flex: 1;
+    background: #fff;
+    min-height: 0;
+  }
+
+  .kb-drop{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    padding-bottom: 8px;
+    overflow-y: auto;
+    min-height: 0;
+    flex: 1;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15,23,42,.25) transparent;
+    overscroll-behavior: contain;
+  }
+  .kb-drop::-webkit-scrollbar{ width: 10px; }
+  .kb-drop::-webkit-scrollbar-thumb{
+    background: rgba(15,23,42,.18);
+    border-radius: 999px;
+  }
+
+  .kb-drop.is-over{
+    outline: 2px dashed rgba(15,23,42,.22);
+    border-radius: 10px;
+    padding: 8px;
+    background: rgba(15,23,42,.03);
+  }
+
+
+  .kb-card{
+    background: var(--kb-card);
+    border: 1px solid rgba(15,23,42,.10);
+    border-radius: 10px;
+    padding: 10px 10px 9px 10px;
+    cursor: grab;
+    box-shadow: 0 2px 8px rgba(15,23,42,.08);
+    transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
+    position: relative;
+  }
+  .kb-card:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(15,23,42,.12);
+    border-color: rgba(15,23,42,.16);
+  }
+  .kb-card:active{ cursor: grabbing; transform: translateY(0); }
+
+  .kb-card-phase{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom: 8px;
+  }
+
+  
+  .kb-card-del{
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    border: 1px solid rgba(239,68,68,.28);
+    background: rgba(239,68,68,.08);
+    color: rgba(127,29,29,.95);
+    cursor:pointer;
+    flex: 0 0 auto;
+    box-shadow: 0 2px 8px rgba(15,23,42,.06);
+    transition: transform .06s ease, box-shadow .12s ease, border-color .12s ease;
+    user-select:none;
+  }
+  .kb-card-del:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(239,68,68,.12);
+    border-color: rgba(239,68,68,.40);
+  }
+
+  .kb-phase-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.03);
+    font-size: 11px;
+    font-weight: 950;
+    color: rgba(15,23,42,.85);
+    max-width: 100%;
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow: ellipsis;
+  }
+  .kb-phase-dot{
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--phase-accent, rgba(11,78,162,1));
+    box-shadow: 0 0 0 3px rgba(15,23,42,.06);
+    flex: 0 0 auto;
+  }
+
+  .kb-card-title{
+    font-weight: 950;
+    font-size: 13px;
+    color: var(--kb-text);
+    line-height: 1.25;
+  }
+
+  .kb-card-meta{
+    margin-top: 8px;
+    display:grid;
+    gap:6px;
+  }
+  .kb-meta-row{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    min-width:0;
+    color: rgba(15,23,42,.72);
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  .kb-meta-key{
+    font-weight: 950;
+    color: rgba(15,23,42,.60);
+    white-space: nowrap;
+  }
+  .kb-meta-val{
+    font-weight: 900;
+    color: rgba(15,23,42,.85);
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow: ellipsis;
+  }
+
+  
+  .kb-empresa{
+    margin-top: 8px;
+    border: 0 !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  .kb-empresa::before{ display:none !important; }
+
+  .kb-empresa-nome{
+    padding-left: 0 !important;
+    margin: 0 0 6px 0;
+    font-size: 12px;
+    font-weight: 950;
+    color: rgba(15,23,42,.92);
+    line-height: 1.2;
+  }
+
+  .kb-empresa-grid{ padding-left: 0 !important; }
+
+  .kb-empresa-item{
+    display:flex !important;
+    align-items:baseline;
+    gap:6px !important;
+    min-width:0;
+  }
+
+  .kb-empresa-k{
+    width:auto !important;
+    min-width:0 !important;
+    flex:0 0 auto;
+    font-weight: 950;
+    font-size: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: rgba(15,23,42,.52);
+    line-height: 1.1;
+    padding-top: 2px;
+    white-space: nowrap;
+    margin-right: 2px;
+  }
+
+  .kb-empresa-v{
+    flex:1 1 auto;
+    min-width:0;
+    font-weight: 900;
+    font-size: 12px;
+    color: rgba(15,23,42,.86);
+    line-height: 1.2;
+    white-space: normal;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .kb-tags{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+    margin-top: 8px;
+  }
+
+  .kb-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 950;
+    border: 1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.04);
+    color: #0f172a;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kb-loadmore{
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px dashed rgba(15,23,42,.18);
+    background: rgba(15,23,42,.02);
+    color: rgba(15,23,42,.70);
+    font-weight: 900;
+    font-size: 12px;
+    text-align:center;
+    user-select:none;
+  }
+  .kb-loadmore strong{ color: rgba(15,23,42,.85); }
+
+
+  .kb-modal{
+    display:none;
+    position:fixed;
+    inset:0;
+    background: rgba(2,6,23,.55);
+    z-index:9999;
+    padding: 24px 14px;
+    overflow:auto;
+  }
+  .kb-modal-card{
+    max-width: 880px;
+    margin: 4vh auto;
+    background: #fff;
+    border-radius: 18px;
+    box-shadow: 0 30px 120px rgba(0,0,0,.30);
+    border: 1px solid rgba(255,255,255,.18);
+    overflow:hidden;
+  }
+  .kb-modal-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+    padding: 14px 16px;
+    background: linear-gradient(0deg, rgba(11,78,162,.06), rgba(11,78,162,.10));
+    border-bottom: 1px solid rgba(11,78,162,.18);
+  }
+  .kb-modal-head strong{
+    font-weight: 950;
+    letter-spacing: -.01em;
+  }
+  .kb-modal-body{
+    padding: 14px 16px 16px 16px;
+    display:grid;
+    gap:12px;
+  }
+
+  .kb-input, .kb-textarea, .kb-select{
+    width:100%;
+    border: 1px solid var(--kb-line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    outline:none;
+    font-size: 13px;
+    background:#fff;
+  }
+  .kb-input:focus, .kb-textarea:focus, .kb-select:focus{
+    border-color: rgba(11,78,162,.35);
+    box-shadow: 0 0 0 4px rgba(11,78,162,.12);
+  }
+  .kb-textarea{ resize: vertical; min-height: 120px; }
+
+  .kb-row{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+    min-width:0;
+  }
+  .kb-row .grow{ flex:1; min-width: min(320px, 100%); }
+
+
+  #notaTexto{
+    flex: 1 1 420px;
+    min-width: 0;
+  }
+
+  .kb-section-title{
+    font-weight: 950;
+    color: var(--kb-text);
+    margin-top: 2px;
+  }
+
+  .kb-nota{
+    border: 1px solid var(--kb-line2);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: rgba(15,23,42,.02);
+  }
+  .kb-nota small{
+    display:block;
+    color: var(--kb-muted);
+    font-size: 12px;
+  }
+
+  .kb-msg-erro{
+    display:none;
+    color:#b91c1c;
+    font-weight: 900;
+  }
+
+
+  .kb-empresa-box{
+    border: 1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.02);
+    border-radius: 14px;
+    padding: 10px 12px;
+    display:grid;
+    gap:8px;
+  }
+
+  .kb-empresa-preview{
+    display:none;
+    gap:6px;
+  }
+  .kb-empresa-box.has-empresa .kb-empresa-preview{
+    display:grid;
+  }
+
+  .kb-empresa-preview .linha{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    min-width:0;
+    color: rgba(15,23,42,.75);
+    font-size: 12px;
+  }
+  .kb-empresa-preview .k{
+    font-weight: 950;
+    color: rgba(15,23,42,.60);
+    white-space: nowrap;
+  }
+  .kb-empresa-preview .v{
+    font-weight: 900;
+    color: rgba(15,23,42,.90);
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow: ellipsis;
+  }
+
+  
+  .kb-painel-box{
+    display:none;
+    border: 1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.02);
+    border-radius: 14px;
+    padding: 10px 12px;
+    gap:8px;
+  }
+  .kb-painel-box.is-on{
+    display:grid;
+  }
+
+  .kb-painel-preview{
+    display:none;
+    gap:6px;
+  }
+  .kb-painel-box.has-painel .kb-painel-preview{
+    display:grid;
+  }
+
+  .kb-painel-preview .linha{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    min-width:0;
+    color: rgba(15,23,42,.75);
+    font-size: 12px;
+  }
+  .kb-painel-preview .k{
+    font-weight: 950;
+    color: rgba(15,23,42,.60);
+    white-space: nowrap;
+  }
+  .kb-painel-preview .v{
+    font-weight: 900;
+    color: rgba(15,23,42,.90);
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kb-hint{
+    color: rgba(15,23,42,.62);
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+
+  .kb-warn{
+    border: 1px solid rgba(239,68,68,.22);
+    background: rgba(239,68,68,.06);
+    border-radius: 14px;
+    padding: 10px 12px;
+    color: rgba(127,29,29,.95);
+    font-weight: 900;
+    font-size: 13px;
+    line-height: 1.25;
+  }
+</style>
+
+<div class="kb-wrap">
+  <div class="kb-top">
+    <div class="kb-title">
+      <h1>
+        {{ kanban.NomeKanban }}
+        
+        <button class="kb-btn icon danger" id="btnInativarKanban" title="Inativar Kanban">−</button>
+      </h1>
+      <p class="kb-desc">{{ kanban.Descricao or "—" }}</p>
+    </div>
+
+    <div class="kb-actions">
+      <a class="kb-btn ghost" href="{{ url_for('kanban.kanbans_lista') }}">← Voltar</a>
+      <a class="kb-btn" href="{{ url_for('kanban.kanban_tags_view', id_kanban=kanban.IDDimKanban) }}">Tags</a>
+      <button class="kb-btn primary" id="btnNovaFase">+ Fase</button>
+    </div>
+  </div>
+
+  <div class="kb-divider"></div>
+
+  <div class="kb-filtros">
+    <div class="kb-filtros-left">
+      <div style="display:flex;flex-direction:column;gap:0;">
+        <div class="lbl">Filtrar por tags</div>
+        <div class="kb-multi">
+          <small>Selecionar várias.</small>
+          <select id="filtroTags" multiple></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="kb-filtros-right">
+      <button class="kb-btn" id="btnLimparFiltro">Limpar</button>
+    </div>
+  </div>
+
+  <div class="kb-divider"></div>
+
+  <div id="board" class="kb-board"></div>
+</div>
+
+<meta name="csrf-token" content="{{ csrf_token() }}">
+
+
+<div id="modalCard" class="kb-modal">
+  <div class="kb-modal-card">
+    <div class="kb-modal-head">
+      <strong>Detalhes do Card</strong>
+      <button class="kb-btn" id="btnFecharCard">Fechar</button>
+    </div>
+
+    <div class="kb-modal-body">
+      <input id="cardTitulo" class="kb-input" placeholder="Título" />
+      <textarea id="cardDescricao" class="kb-textarea" rows="6" placeholder="Descrição"></textarea>
+
+      <div class="kb-section-title">Empresa</div>
+      <div class="kb-empresa-box">
+        <div class="kb-row">
+          <select id="selectEmpresaCard" class="kb-select grow"></select>
+          <button class="kb-btn sm" id="btnLimparEmpresa">Sem empresa</button>
+        </div>
+
+        <div id="empresaPreview" class="kb-empresa-preview">
+          <div class="linha"><span class="k">Razão:</span> <span class="v" id="empPrevRazao">—</span></div>
+          <div class="linha"><span class="k">CNPJ:</span>  <span class="v" id="empPrevCnpj">—</span></div>
+          <div class="linha"><span class="k">CNAE:</span>  <span class="v" id="empPrevCnae">—</span></div>
+          <div class="linha"><span class="k">Setor:</span> <span class="v" id="empPrevSetor">—</span></div>
+          <div class="linha"><span class="k">Classe:</span><span class="v" id="empPrevClasse">—</span></div>
+        </div>
+      </div>
+
+  
+      <div id="painelFaceWrap" class="kb-painel-box">
+        <div class="kb-section-title">Painel / Face </div>
+        <div class="kb-hint">
+       
+        </div>
+
+        <div class="kb-row">
+          <select id="selectPainelCard" class="kb-select grow"></select>
+          <select id="selectFaceCard" class="kb-select" style="width:180px;"></select>
+          <button class="kb-btn sm" id="btnLimparPainelFace">Sem painel</button>
+        </div>
+
+        <div id="painelPreview" class="kb-painel-preview">
+          <div class="linha"><span class="k">CodPonto:</span> <span class="v" id="pnPrevCodPonto">—</span></div>
+          <div class="linha"><span class="k">Tipo:</span>    <span class="v" id="pnPrevTipo">—</span></div>
+          <div class="linha"><span class="k">Cidade/UF:</span><span class="v" id="pnPrevCidadeUF">—</span></div>
+          <div class="linha"><span class="k">Endereço:</span> <span class="v" id="pnPrevEndereco">—</span></div>
+          <div class="linha"><span class="k">Faces:</span>    <span class="v" id="pnPrevFaces">—</span></div>
+        </div>
+      </div>
+
+      <div class="kb-divider" style="margin:4px 0;"></div>
+
+      <div class="kb-row">
+        <div class="kb-section-title">Tags</div>
+        <select id="selectTagCard" class="kb-select grow"></select>
+        <button class="kb-btn" id="btnAddTag">Adicionar</button>
+      </div>
+
+      <div id="tagsNoCard" class="kb-tags"></div>
+
+      <div class="kb-divider" style="margin:4px 0;"></div>
+
+      <div class="kb-section-title">Notas</div>
+      <div class="kb-row">
+        <input id="notaTexto" class="kb-input grow" placeholder="Escreva uma nota..." />
+      </div>
+
+      <div id="listaNotas" style="display:grid;gap:10px;"></div>
+
+      <div class="kb-row" style="justify-content:flex-end;">
+        <button class="kb-btn primary" id="btnSalvarCard">Salvar alterações</button>
+      </div>
+
+      <div id="msgCard" class="kb-msg-erro"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Nova Fase -->
+<div id="modalFase" class="kb-modal">
+  <div class="kb-modal-card" style="max-width:560px;">
+    <div class="kb-modal-head">
+      <strong>Nova Fase</strong>
+      <button class="kb-btn" id="btnFecharFase">Fechar</button>
+    </div>
+
+    <div class="kb-modal-body">
+      <input id="faseNome" class="kb-input" placeholder="Nome da fase (ex: Proposta)" />
+      <select id="faseTipo" class="kb-select">
+        <option value="ATIVA">ATIVA</option>
+        <option value="SUCESSO">SUCESSO</option>
+        <option value="PERDA">PERDA</option>
+      </select>
+
+      <button class="kb-btn primary" id="btnSalvarFase">Salvar</button>
+      <div id="msgFase" class="kb-msg-erro"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Remover Card (com motivo + descrição) -->
+<div id="modalRemoverCard" class="kb-modal">
+  <div class="kb-modal-card" style="max-width:620px;">
+    <div class="kb-modal-head">
+      <strong>Remover Card</strong>
+      <button class="kb-btn" id="btnFecharRemoverCard">Fechar</button>
+    </div>
+
+    <div class="kb-modal-body">
+      <div class="kb-warn">
+        Você está removendo este card do Kanban.Estamos buscando entender o comportamento do cliente, para isso nos informe o motivo da desistencia.
+      </div>
+
+      <div class="kb-section-title">Motivo</div>
+      <select id="motivoRemocao" class="kb-select">
+        <option value="">— Selecione —</option>
+        <option value="Desistencia">Desistência</option>
+        <option value="Preco">Preço</option>
+        <option value="Apenas Informacoes">Apenas Informações</option>
+        <option value="Outro Motivo">Outro Motivo</option>
+      </select>
+
+      <div class="kb-section-title">Descrição</div>
+      <textarea id="descricaoRemocao" class="kb-textarea" rows="5" placeholder="Descreva o motivo..."></textarea>
+
+      <div class="kb-row" style="justify-content:flex-end;">
+        <button class="kb-btn danger" id="btnConfirmarRemoverCard">Remover</button>
+      </div>
+
+      <div id="msgRemoverCard" class="kb-msg-erro"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Inativar Fase -->
+<div id="modalInativarFase" class="kb-modal">
+  <div class="kb-modal-card" style="max-width:620px;">
+    <div class="kb-modal-head">
+      <strong>Inativar Fase</strong>
+      <button class="kb-btn" id="btnFecharInativarFase">Fechar</button>
+    </div>
+
+    <div class="kb-modal-body">
+      <div class="kb-warn">
+        Isso deve INATIVAR (não apagar) a fase e ela some do Kanban.
+      </div>
+
+      <div class="kb-section-title">Confirma?</div>
+      <div class="kb-row" style="justify-content:flex-end;">
+        <button class="kb-btn danger" id="btnConfirmarInativarFase">Inativar</button>
+      </div>
+
+      <div id="msgInativarFase" class="kb-msg-erro"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Inativar Kanban (DimKanban.Ativo = 0) -->
+<div id="modalInativarKanban" class="kb-modal">
+  <div class="kb-modal-card" style="max-width:620px;">
+    <div class="kb-modal-head">
+      <strong>Inativar Kanban</strong>
+      <button class="kb-btn" id="btnFecharInativarKanban">Fechar</button>
+    </div>
+
+    <div class="kb-modal-body">
+      <div class="kb-warn">
+        Isso deve setar DimKanban.Ativo = 0 e o Kanban deixa de aparecer.
+      </div>
+
+      <div class="kb-row" style="justify-content:flex-end;">
+        <button class="kb-btn danger" id="btnConfirmarInativarKanban">Inativar</button>
+      </div>
+
+      <div id="msgInativarKanban" class="kb-msg-erro"></div>
+    </div>
+  </div>
+</div>
+
+
+<script>
+(() => {
+  const ID_KANBAN = {{ kanban.IDDimKanban }};
+  const board = document.getElementById("board");
+
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+  const headersJSON = {
+    "Content-Type": "application/json",
+    "X-CSRFToken": csrf
+  };
+
+  let fases = [];
+  let cards = [];
+  let tagsCatalogo = [];
+  let mapaTagsPorCard = new Map();
+  let cardAbertoId = null;
+
+  /* ===== cfg + paineis (vindo do endpoint /dados) ===== */
+  let kanbanCfg = {};
+  let paineisCatalogo = [];
+  let paineisPorId = new Map();
+
+  /* ===== cache empresas ===== */
+  let empresasCatalogo = [];
+  let empresasPorId = new Map();
+
+  /* ===== perf: carregamento incremental por fase (não renderiza tudo) ===== */
+  const TAM_LOTE_POR_FASE = 16;
+  const estadoFase = new Map();  // idFase(NUM) -> { visiveis, rendered, dropEl, sentinelEl, loading, colAccent }
+
+  /* ===== modais ===== */
+  const modalCard = document.getElementById("modalCard");
+  const btnFecharCard = document.getElementById("btnFecharCard");
+  const msgCard = document.getElementById("msgCard");
+
+  const filtroTags = document.getElementById("filtroTags");
+  const btnLimparFiltro = document.getElementById("btnLimparFiltro");
+
+  const selectEmpresaCard = document.getElementById("selectEmpresaCard");
+  const btnLimparEmpresa = document.getElementById("btnLimparEmpresa");
+
+  /* ===== painel/face =====
+     REGRA CERTA:
+     - "Painel" = CodPonto (selecionado via catálogo j.paineis)
+     - "Face"   = CodFace (NÃO é Face 01..16)
+     - As faces devem vir de endpoint (fetch) por CodPonto
+  */
+  const painelFaceWrap = document.getElementById("painelFaceWrap");
+  const selectPainelCard = document.getElementById("selectPainelCard");
+  const selectFaceCard = document.getElementById("selectFaceCard");
+  const btnLimparPainelFace = document.getElementById("btnLimparPainelFace");
+  const painelPreview = document.getElementById("painelPreview");
+
+  /* ===== remover/encerrar ===== */
+  const modalRemoverCard = document.getElementById("modalRemoverCard");
+  const btnFecharRemoverCard = document.getElementById("btnFecharRemoverCard");
+  const btnConfirmarRemoverCard = document.getElementById("btnConfirmarRemoverCard");
+  const motivoRemocao = document.getElementById("motivoRemocao");
+  const descricaoRemocao = document.getElementById("descricaoRemocao");
+  const msgRemoverCard = document.getElementById("msgRemoverCard");
+
+  /* ===== inativar fase ===== */
+  const modalInativarFase = document.getElementById("modalInativarFase");
+  const btnFecharInativarFase = document.getElementById("btnFecharInativarFase");
+  const btnConfirmarInativarFase = document.getElementById("btnConfirmarInativarFase");
+  const msgInativarFase = document.getElementById("msgInativarFase");
+
+  /* ===== inativar kanban ===== */
+  const modalInativarKanban = document.getElementById("modalInativarKanban");
+  const btnFecharInativarKanban = document.getElementById("btnFecharInativarKanban");
+  const btnConfirmarInativarKanban = document.getElementById("btnConfirmarInativarKanban");
+  const msgInativarKanban = document.getElementById("msgInativarKanban");
+  const btnInativarKanban = document.getElementById("btnInativarKanban");
+
+  /* ===== estado de ação ===== */
+  let cardParaRemover = null;
+  let faseParaInativar = null;
+
+  /* ===== cache faces por codPonto ===== */
+  const facesPorCodPonto = new Map(); // codPonto(NUM) -> Array<{CodFace, ...}>
+  let facesCarregando = false;
+
+  function el(tag, attrs={}, children=[]) {
+    const d = document.createElement(tag);
+    Object.entries(attrs).forEach(([k,v]) => {
+      if (k === "class") d.className = v;
+      else if (k === "style") d.setAttribute("style", v);
+      else if (k.startsWith("on") && typeof v === "function") d.addEventListener(k.slice(2), v);
+      else d.setAttribute(k, v);
+    });
+    children.forEach(c => d.appendChild(typeof c === "string" ? document.createTextNode(c) : c));
+    return d;
+  }
+
+  function idNum(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function safeStr(v){
+    if (v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  function tagsDoCard(cardId) {
+    return mapaTagsPorCard.get(cardId) || [];
+  }
+
+  function cardPassaFiltro(cardId) {
+    const selecionadas = Array.from(filtroTags.selectedOptions).map(o => parseInt(o.value));
+    if (!selecionadas.length) return true;
+    const ids = tagsDoCard(cardId).map(t => t.IDDimKanbanTag);
+    return selecionadas.every(x => ids.includes(x));
+  }
+
+  function listaCardsDaFase(idFase){
+    const idF = idNum(idFase);
+    return cards
+      .filter(c => idNum(c.IDDimKanbanFaseAtual) === idF)
+      .filter(c => cardPassaFiltro(c.IDFatoKanbanCard));
+  }
+
+  function contarCardsNaFase(idFase){
+    return listaCardsDaFase(idFase).length;
+  }
+
+  function corColunaPorIndice(i){
+    const paleta = ["#16a34a","#f97316","#64748b","#7c3aed","#10b981","#0ea5e9","#eab308","#ef4444"];
+    return paleta[i % paleta.length];
+  }
+
+  function normalizaCnpj(v){
+    const s = safeStr(v).replace(/\D+/g, "");
+    if (!s) return "";
+    return s;
+  }
+
+  function mascaraCnpj(v){
+    const s = normalizaCnpj(v);
+    if (s.length !== 14) return s;
+    return `${s.slice(0,2)}.${s.slice(2,5)}.${s.slice(5,8)}/${s.slice(8,12)}-${s.slice(12,14)}`;
+  }
+
+  /* =========================
+     APIs
+     ========================= */
+  async function apiPost(url, payload){
+    const r = await fetch(url, {
+      method:"POST",
+      credentials:"same-origin",
+      headers: headersJSON,
+      body: JSON.stringify(payload || {})
+    });
+    const j = await r.json().catch(() => null);
+    return { ok: !!(j && j.ok), http: r.status, body: j };
+  }
+
+  /* ===== carregar empresas ===== */
+  async function carregarEmpresas() {
+    if (empresasCatalogo.length) return;
+
+    const r = await fetch(`/kanban/api/empresas`, { credentials: "same-origin" });
+    const j = await r.json().catch(() => null);
+
+    if (!r.ok || !j || !j.ok) {
+      console.warn("carregarEmpresas: falhou", { http: r.status, body: j });
+      return;
+    }
+
+    empresasCatalogo = Array.isArray(j.empresas) ? j.empresas : [];
+
+    empresasPorId = new Map();
+    for (const e of empresasCatalogo) {
+      const id = Number(e?.IDEmpresa || e?.IDEmpresaProprietaria || e?.ID || 0);
+      if (id > 0) empresasPorId.set(id, e);
+    }
+
+    montarSelectEmpresas();
+  }
+
+  function montarSelectEmpresas() {
+    selectEmpresaCard.innerHTML = "";
+    selectEmpresaCard.appendChild(el("option", {value: ""}, ["— Selecione uma empresa —"]));
+
+    empresasCatalogo.forEach(e => {
+      const id = e.IDEmpresa ?? e.IDEmpresaProprietaria ?? e.ID;
+      const razao = e.RazaoSocial || e.EmpresaRazaoSocial || "—";
+      const cnpj = e.CNPJ || e.EmpresaCNPJ || "";
+      const texto = cnpj ? `${razao} • ${mascaraCnpj(cnpj)}` : razao;
+
+      selectEmpresaCard.appendChild(el("option", {value: String(id)}, [texto]));
+    });
+  }
+
+  function setEmpresaPreviewByObj(emp) {
+    const box = document.getElementById("empresaPreview");
+    const wrap = box?.closest(".kb-empresa-box");
+
+    const tem = !!(emp && (
+      emp.RazaoSocial || emp.EmpresaRazaoSocial ||
+      emp.CNPJ || emp.EmpresaCNPJ ||
+      emp.CNAE || emp.EmpresaCNAE ||
+      emp.Setor || emp.EmpresaSetor ||
+      emp.Classe || emp.EmpresaClasse
+    ));
+
+    if (wrap) wrap.classList.toggle("has-empresa", tem);
+
+    if (!tem) {
+      if (box) box.style.display = "none";
+      return;
+    }
+
+    if (box) box.style.display = "grid";
+
+    document.getElementById("empPrevRazao").textContent  = (emp.RazaoSocial || emp.EmpresaRazaoSocial || "");
+    document.getElementById("empPrevCnpj").textContent   = mascaraCnpj(emp.CNPJ || emp.EmpresaCNPJ || "");
+    document.getElementById("empPrevCnae").textContent   = String(emp.CNAE || emp.EmpresaCNAE || "");
+    document.getElementById("empPrevSetor").textContent  = (emp.Setor || emp.EmpresaSetor || "");
+    document.getElementById("empPrevClasse").textContent = (emp.Classe || emp.EmpresaClasse || "");
+  }
+
+  function setEmpresaPreviewById(idEmp) {
+    const id = Number(idEmp || 0);
+    if (!id) { setEmpresaPreviewByObj(null); return; }
+    setEmpresaPreviewByObj(empresasPorId.get(id) || null);
+  }
+
+  /* =========================
+     PAINÉIS / FACES (CORRIGIDO)
+     ========================= */
+
+  function montarSelectPaineis(){
+    if (!selectPainelCard) return;
+
+    selectPainelCard.innerHTML = "";
+    selectPainelCard.appendChild(el("option", {value: ""}, ["— Selecione um painel (CodPonto) —"]));
+
+    paineisCatalogo.forEach(p => {
+      const id = Number(p.IDDimPaineisEuromidia ?? p.ID ?? 0);
+      if (!id) return;
+
+      const cod = p.CodPonto || "—";
+      const tipo = p.Tipo || "";
+      const cidade = p.Cidade || "";
+      const uf = p.UF || "";
+
+      const label = `${cod} • ${tipo} • ${cidade}/${uf}`.trim();
+      selectPainelCard.appendChild(el("option", {value: String(id)}, [label]));
+    });
+  }
+
+  function limparSelectFaces(){
+    if (!selectFaceCard) return;
+    selectFaceCard.innerHTML = "";
+    selectFaceCard.appendChild(el("option", {value: ""}, ["— Face (CodFace) —"]));
+  }
+
+  function montarSelectFacesPorLista(faces){
+    if (!selectFaceCard) return;
+
+    limparSelectFaces();
+
+    const arr = Array.isArray(faces) ? faces : [];
+    if (!arr.length) return;
+
+    for (const f of arr){
+      const codFace = safeStr(f?.CodFace ?? f?.codFace ?? f?.CODFACE ?? "");
+      if (!codFace) continue;
+
+      const desc =
+        safeStr(f?.Descricao ?? f?.NomeFace ?? f?.Nome ?? f?.Local ?? f?.Endereco ?? "").trim();
+
+      const label = desc ? `${codFace} • ${desc}` : `${codFace}`;
+      selectFaceCard.appendChild(el("option", { value: codFace }, [label]));
+    }
+  }
+
+  function setPainelPreviewByObj(p){
+    if (!painelPreview || !painelFaceWrap) return;
+
+    const wrap = painelFaceWrap;
+    const tem = !!(p && (p.CodPonto || p.Tipo || p.Cidade || p.UF || p.Logradouro));
+
+    wrap.classList.toggle("has-painel", tem);
+
+    if (!tem){
+      painelPreview.style.display = "none";
+      document.getElementById("pnPrevCodPonto").textContent = "—";
+      document.getElementById("pnPrevTipo").textContent = "—";
+      document.getElementById("pnPrevCidadeUF").textContent = "—";
+      document.getElementById("pnPrevEndereco").textContent = "—";
+      document.getElementById("pnPrevFaces").textContent = "—";
+      return;
+    }
+
+    painelPreview.style.display = "grid";
+
+    const cod = p.CodPonto || "—";
+    const tipo = p.Tipo || "—";
+    const cidadeUF = `${p.Cidade || "—"}/${p.UF || "—"}`;
+    const end = `${p.Logradouro || ""}${p.Numero ? (", " + p.Numero) : ""}${p.Bairro ? (" - " + p.Bairro) : ""}`.trim() || "—";
+    const qtdFaces = Number(p.QuantidadeFaces || 0);
+
+    document.getElementById("pnPrevCodPonto").textContent = String(cod);
+    document.getElementById("pnPrevTipo").textContent = String(tipo);
+    document.getElementById("pnPrevCidadeUF").textContent = String(cidadeUF);
+    document.getElementById("pnPrevEndereco").textContent = String(end);
+    document.getElementById("pnPrevFaces").textContent = qtdFaces ? String(qtdFaces) : "—";
+  }
+
+  function setPainelPreviewById(idPainel){
+    const id = Number(idPainel || 0);
+    if (!id){
+      setPainelPreviewByObj(null);
+      limparSelectFaces();
+      return null;
+    }
+    const p = paineisPorId.get(id) || null;
+    setPainelPreviewByObj(p);
+    return p;
+  }
+
+  /* ===== ENDPOINT DE FACES (VOCÊ PRECISA TER NO BACKEND) =====
+     Este JS vai chamar:
+       GET /kanban/api/paineis/<cod_ponto>/faces
+     Esperado:
+       { ok: true, faces: [ { CodFace: 123, Descricao: "..." }, ... ] }
+  */
+  async function carregarFacesDoCodPonto(codPonto){
+    const cod = Number(codPonto || 0);
+    if (!cod) return [];
+
+    if (facesPorCodPonto.has(cod)) return facesPorCodPonto.get(cod) || [];
+
+    facesCarregando = true;
+    try{
+      const r = await fetch(`/kanban/api/paineis/${cod}/faces`, { credentials: "same-origin" });
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok || !j || !j.ok){
+        console.warn("carregarFacesDoCodPonto: falhou", { http: r.status, body: j, codPonto: cod });
+        facesPorCodPonto.set(cod, []);
+        return [];
+      }
+
+      const arr = Array.isArray(j.faces) ? j.faces : [];
+      facesPorCodPonto.set(cod, arr);
+      return arr;
+    } finally {
+      facesCarregando = false;
+    }
+  }
+
+  async function atualizarFacesParaPainelSelecionado(){
+    if (!selectPainelCard || !selectFaceCard) return;
+
+    const idPainel = selectPainelCard.value || "";
+    const painel = setPainelPreviewById(idPainel);
+
+    /* sempre reseta o select de face */
+    limparSelectFaces();
+    selectFaceCard.value = "";
+
+    if (!painel) return;
+
+    const codPonto = Number(painel.CodPonto || 0);
+    if (!codPonto) return;
+
+    /* while loading: placeholder */
+    selectFaceCard.innerHTML = "";
+    selectFaceCard.appendChild(el("option", {value: ""}, ["Carregando faces..."]));
+
+    const faces = await carregarFacesDoCodPonto(codPonto);
+
+    montarSelectFacesPorLista(faces);
+    selectFaceCard.value = "";
+  }
+
+  function ativarPainelFaceSeNecessario(){
+    if (!painelFaceWrap) return;
+
+    const on = !!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard);
+    painelFaceWrap.classList.toggle("is-on", on);
+
+    if (!on) return;
+
+    paineisPorId = new Map();
+    for (const p of (paineisCatalogo || [])){
+      const id = Number(p?.IDDimPaineisEuromidia || p?.ID || 0);
+      if (id > 0) paineisPorId.set(id, p);
+    }
+
+    montarSelectPaineis();
+
+    /* reset */
+    if (selectPainelCard) selectPainelCard.value = "";
+    if (selectFaceCard) selectFaceCard.value = "";
+    setPainelPreviewByObj(null);
+    limparSelectFaces();
+  }
+
+  /* =========================
+     CARREGAR DADOS DO KANBAN
+     ========================= */
+  async function carregar() {
+    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/dados`, { credentials: "same-origin" });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) return;
+
+    fases = j.fases || [];
+    cards = j.cards || [];
+    tagsCatalogo = j.tags || [];
+
+    kanbanCfg = j.kanban_cfg || {};
+    paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
+
+    ativarPainelFaceSeNecessario();
+
+    mapaTagsPorCard = new Map();
+    (j.card_tags || []).forEach(ct => {
+      const arr = mapaTagsPorCard.get(ct.IDFatoKanbanCard) || [];
+      arr.push(ct);
+      mapaTagsPorCard.set(ct.IDFatoKanbanCard, arr);
+    });
+
+    montarFiltroTags();
+    renderBoardCompleto();
+  }
+
+  function montarFiltroTags() {
+    filtroTags.innerHTML = "";
+    tagsCatalogo.forEach(t => {
+      filtroTags.appendChild(el("option", {value: t.IDDimKanbanTag}, [t.NomeTag]));
+    });
+  }
+
+  /* =========================
+     RENDER DO BOARD
+     ========================= */
+  function renderBoardCompleto() {
+    board.innerHTML = "";
+    estadoFase.clear();
+
+    fases.forEach((f, idx) => {
+      const idFase = idNum(f.IDDimKanbanFase);
+      const qtdTotal = contarCardsNaFase(idFase);
+      const colAccent = corColunaPorIndice(idx);
+
+      const col = el("div", {class:"kb-col", "data-fase": idFase});
+      col.style.setProperty("--col-accent", colAccent);
+
+      const head = el("div", {class:"kb-col-head"}, [
+        el("div", {class:"kb-col-title"}, [
+          el("strong", {title: f.NomeFase || ""}, [`${(f.NomeFase || "—")} (${qtdTotal})`]),
+          el("div", {class:"kb-col-sub"}, [
+            el("span", {class:"kb-count"}, [String(f.TipoFase || "").toLowerCase()])
+          ])
+        ]),
+        el("div", {class:"kb-col-actions"}, [
+          el("button", {class:"kb-col-del", title:"Inativar fase", onclick: () => abrirModalInativarFase(idFase)}, ["−"]),
+          el("button", {class:"kb-add", title:"Adicionar card", onclick: () => criarCardPrompt(idFase)}, ["+"])
+        ])
+      ]);
+
+      const body = el("div", {class:"kb-col-body"}, []);
+      const drop = el("div", {class:"kb-drop", "data-drop":"1", "data-fase": idFase}, []);
+
+      drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("is-over"); });
+      drop.addEventListener("dragleave", () => { drop.classList.remove("is-over"); });
+      drop.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        drop.classList.remove("is-over");
+        const cardId = parseInt(e.dataTransfer.getData("text/plain") || "0");
+        if (!cardId) return;
+        await moverCard(cardId, idFase, "LAST");
+      });
+
+      const sentinel = el("div", {class:"kb-loadmore", style:"display:none;"}, ["Carregando..."]);
+
+      drop.appendChild(sentinel);
+      body.appendChild(drop);
+      col.appendChild(head);
+      col.appendChild(body);
+      board.appendChild(col);
+
+      estadoFase.set(idFase, {
+        visiveis: TAM_LOTE_POR_FASE,
+        rendered: 0,
+        dropEl: drop,
+        sentinelEl: sentinel,
+        loading: false,
+        colAccent
+      });
+
+      drop.addEventListener("scroll", () => {
+        const st = estadoFase.get(idFase);
+        if (!st || st.loading) return;
+
+        const temOverflow = (drop.scrollHeight - drop.clientHeight) > 20;
+        if (!temOverflow) return;
+
+        const nearBottom = (drop.scrollTop + drop.clientHeight) >= (drop.scrollHeight - 160);
+        if (!nearBottom) return;
+
+        carregarMaisCardsDaFase(idFase);
+      }, { passive: true });
+    });
+
+    fases.forEach(f => {
+      const idFase = idNum(f.IDDimKanbanFase);
+      preencherCabecalhoFase(idFase);
+      preencherCardsInicial(idFase);
+    });
+  }
+
+  function preencherCabecalhoFase(idFase){
+    const idF = idNum(idFase);
+    const f = fases.find(x => idNum(x.IDDimKanbanFase) === idF);
+    if (!f) return;
+
+    const qtd = contarCardsNaFase(idF);
+    const col = board.querySelector(`.kb-col[data-fase="${idF}"]`);
+    if (!col) return;
+
+    const strong = col.querySelector(".kb-col-title strong");
+    if (strong) strong.textContent = `${(f.NomeFase || "—")} (${qtd})`;
+  }
+
+  function preencherCardsInicial(idFase){
+    const idF = idNum(idFase);
+    const st = estadoFase.get(idF);
+    if (!st) return;
+
+    st.dropEl.innerHTML = "";
+    st.dropEl.appendChild(st.sentinelEl);
+    st.rendered = 0;
+    st.visiveis = TAM_LOTE_POR_FASE;
+
+    carregarMaisCardsDaFase(idF, true);
+  }
+
+  function carregarMaisCardsDaFase(idFase, force=false){
+    const idF = idNum(idFase);
+    const st = estadoFase.get(idF);
+    if (!st || st.loading) return;
+
+    const lista = listaCardsDaFase(idF);
+    const total = lista.length;
+
+    if (!force && st.rendered >= total) return;
+
+    st.loading = true;
+    st.sentinelEl.style.display = "block";
+    st.sentinelEl.textContent = "Carregando...";
+
+    const alvo = Math.min(st.rendered + TAM_LOTE_POR_FASE, total);
+    const fatia = lista.slice(st.rendered, alvo);
+
+    fatia.forEach(c => {
+      st.dropEl.insertBefore(renderCard(c, idF, st.colAccent), st.sentinelEl);
+    });
+
+    st.rendered = alvo;
+
+    if (total === 0){
+      st.sentinelEl.style.display = "block";
+      st.sentinelEl.textContent = "Sem cards nesta fase.";
+    } else if (st.rendered < total){
+      st.sentinelEl.style.display = "block";
+      st.sentinelEl.innerHTML = "";
+      st.sentinelEl.appendChild(document.createTextNode("Mostrando "));
+      st.sentinelEl.appendChild(el("strong", {}, [String(st.rendered)]));
+      st.sentinelEl.appendChild(document.createTextNode(" de "));
+      st.sentinelEl.appendChild(el("strong", {}, [String(total)]));
+      st.sentinelEl.appendChild(document.createTextNode(" — role para ver mais"));
+    } else {
+      st.sentinelEl.style.display = "none";
+      st.sentinelEl.textContent = "";
+    }
+
+    st.loading = false;
+  }
+
+  function renderCard(c, idFase, colAccent){
+    const idF = idNum(idFase);
+    const f = fases.find(x => idNum(x.IDDimKanbanFase) === idF) || {};
+    const tgs = tagsDoCard(c.IDFatoKanbanCard);
+
+    const tagsLinha = el("div", {class:"kb-tags"},
+      tgs.map(t => el("span", {
+        class:"kb-tag",
+        title: t.NomeTag || "",
+        style: t.CorHex ? `background:${t.CorHex}; border-color: rgba(15,23,42,.10);` : ""
+      }, [t.NomeTag || ""]))
+    );
+
+    const meta = el("div", {class:"kb-card-meta"}, []);
+    if (c.Departamento) {
+      meta.appendChild(
+        el("div", {class:"kb-meta-row"}, [
+          el("span", {class:"kb-meta-key"}, ["DEPARTAMENTO:"]),
+          el("span", {class:"kb-meta-val", title: String(c.Departamento)}, [String(c.Departamento)])
+        ])
+      );
+    }
+    if (c.Valor) {
+      meta.appendChild(
+        el("div", {class:"kb-meta-row"}, [
+          el("span", {class:"kb-meta-key"}, ["VALOR:"]),
+          el("span", {class:"kb-meta-val", title: String(c.Valor)}, [String(c.Valor)])
+        ])
+      );
+    }
+
+    const fasePill = el("span", { class:"kb-phase-pill", title: f.NomeFase || "" }, [
+      el("span", {class:"kb-phase-dot", style:`--phase-accent:${colAccent}; background:${colAccent};`}, []),
+      `${f.NomeFase || "—"}`
+    ]);
+
+    const btnDel = el("button", {
+      class:"kb-card-del",
+      title:"Remover card",
+      onclick: (e) => {
+        e.stopPropagation();
+        abrirModalRemoverCard(c.IDFatoKanbanCard);
+      }
+    }, ["−"]);
+
+    const topRow = el("div", {class:"kb-card-phase"}, [fasePill, btnDel]);
+
+    const idEmp = c.IDEmpresaProprietaria;
+    const empNome = c.EmpresaRazaoSocial || "";
+    const empSetor = c.EmpresaSetor || "";
+    const empClasse = c.EmpresaClasse || "";
+    const temEmpresa = !!(idEmp || empNome || empSetor || empClasse);
+
+    const blocoEmpresa = temEmpresa ? el("div", {class:"kb-empresa"}, [
+      el("div", {class:"kb-empresa-nome", title: empNome || ""}, [empNome ? empNome : "Empresa não vinculada"]),
+      el("div", {class:"kb-empresa-grid"}, [
+        el("div", {class:"kb-empresa-item"}, [
+          el("span", {class:"kb-empresa-k"}, ["Setor"]),
+          el("span", {class:"kb-empresa-v", title: empSetor || ""}, [empSetor || "—"])
+        ]),
+        el("div", {class:"kb-empresa-item"}, [
+          el("span", {class:"kb-empresa-k"}, ["Classe"]),
+          el("span", {class:"kb-empresa-v", title: empClasse || ""}, [empClasse || "—"])
+        ])
+      ])
+    ]) : null;
+
+    const cardChildren = [
+      topRow,
+      el("div", {class:"kb-card-title"}, [c.Titulo || "—"]),
+      meta
+    ];
+
+    if (blocoEmpresa) cardChildren.push(blocoEmpresa);
+    cardChildren.push(tagsLinha);
+
+    const card = el("div", { class:"kb-card", draggable:"true", "data-card": c.IDFatoKanbanCard }, cardChildren);
+
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", String(c.IDFatoKanbanCard));
+    });
+
+    card.addEventListener("dblclick", () => abrirCard(c.IDFatoKanbanCard));
+
+    return card;
+  }
+
+  async function criarCardPrompt(idFase) {
+    const titulo = prompt("Nome do card:");
+    if (!titulo || titulo.trim().length < 2) return;
+
+    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/cards`, {
+      method:"POST",
+      credentials: "same-origin",
+      headers: headersJSON,
+      body: JSON.stringify({titulo: titulo.trim(), id_fase: idFase})
+    });
+
+    const j = await r.json().catch(() => null);
+    if (j && j.ok) await carregar();
+  }
+
+  async function moverCard(idCard, idFasePara, posicao) {
+    const payload = { id_fase_para: idFasePara, posicao: posicao || "LAST" };
+
+    const r = await fetch(`/kanban/api/cards/${idCard}/mover`, {
+      method:"POST",
+      credentials: "same-origin",
+      headers: headersJSON,
+      body: JSON.stringify(payload)
+    });
+
+    const j = await r.json().catch(() => null);
+    if (j && j.ok) await carregar();
+  }
+
+  /* =========================
+     REMOVER CARD (modal)
+     ========================= */
+  function abrirModalRemoverCard(idCard){
+    cardParaRemover = idCard;
+    msgRemoverCard.style.display = "none";
+    motivoRemocao.value = "";
+    descricaoRemocao.value = "";
+    modalRemoverCard.style.display = "block";
+  }
+
+  function fecharModalRemoverCard(){
+    modalRemoverCard.style.display = "none";
+    cardParaRemover = null;
+  }
+
+  btnFecharRemoverCard.addEventListener("click", fecharModalRemoverCard);
+  modalRemoverCard.addEventListener("click", (e) => { if (e.target === modalRemoverCard) fecharModalRemoverCard(); });
+
+  btnConfirmarRemoverCard.addEventListener("click", async () => {
+    msgRemoverCard.style.display = "none";
+
+    const motivo = (motivoRemocao.value || "").trim();
+    const desc = (descricaoRemocao.value || "").trim();
+
+    if (!cardParaRemover){
+      msgRemoverCard.textContent = "Card inválido.";
+      msgRemoverCard.style.display = "block";
+      return;
+    }
+    if (!motivo){
+      msgRemoverCard.textContent = "Selecione um motivo.";
+      msgRemoverCard.style.display = "block";
+      return;
+    }
+    if (desc.length < 3){
+      msgRemoverCard.textContent = "Descreva o motivo (mínimo 3 caracteres).";
+      msgRemoverCard.style.display = "block";
+      return;
+    }
+
+    const res = await apiPost(`/kanban/api/cards/${cardParaRemover}/inativar`, { motivo, descricao: desc });
+
+    if (!res.ok){
+      msgRemoverCard.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao remover (HTTP ${res.http}).`;
+      msgRemoverCard.style.display = "block";
+      return;
+    }
+
+    fecharModalRemoverCard();
+    await carregar();
+  });
+
+  /* =========================
+     INATIVAR FASE (modal)
+     ========================= */
+  function abrirModalInativarFase(idFase){
+    faseParaInativar = idFase;
+    msgInativarFase.style.display = "none";
+    modalInativarFase.style.display = "block";
+  }
+
+  function fecharModalInativarFase(){
+    modalInativarFase.style.display = "none";
+    faseParaInativar = null;
+  }
+
+  btnFecharInativarFase.addEventListener("click", fecharModalInativarFase);
+  modalInativarFase.addEventListener("click", (e) => { if (e.target === modalInativarFase) fecharModalInativarFase(); });
+
+  btnConfirmarInativarFase.addEventListener("click", async () => {
+    msgInativarFase.style.display = "none";
+
+    if (!faseParaInativar){
+      msgInativarFase.textContent = "Fase inválida.";
+      msgInativarFase.style.display = "block";
+      return;
+    }
+
+    const res = await apiPost(`/kanban/api/fases/${faseParaInativar}/inativar`, {});
+
+    if (!res.ok){
+      msgInativarFase.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar fase (HTTP ${res.http}).`;
+      msgInativarFase.style.display = "block";
+      return;
+    }
+
+    fecharModalInativarFase();
+    await carregar();
+  });
+
+  /* =========================
+     INATIVAR KANBAN (DimKanban.Ativo = 0)
+     ========================= */
+  function abrirModalInativarKanban(){
+    msgInativarKanban.style.display = "none";
+    modalInativarKanban.style.display = "block";
+  }
+
+  function fecharModalInativarKanban(){
+    modalInativarKanban.style.display = "none";
+  }
+
+  btnInativarKanban.addEventListener("click", abrirModalInativarKanban);
+
+  btnFecharInativarKanban.addEventListener("click", fecharModalInativarKanban);
+  modalInativarKanban.addEventListener("click", (e) => { if (e.target === modalInativarKanban) fecharModalInativarKanban(); });
+
+  btnConfirmarInativarKanban.addEventListener("click", async () => {
+    msgInativarKanban.style.display = "none";
+
+    const res = await apiPost(`/kanban/api/kanbans/${ID_KANBAN}/inativar`, {});
+
+    if (!res.ok){
+      msgInativarKanban.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar kanban (HTTP ${res.http}).`;
+      msgInativarKanban.style.display = "block";
+      return;
+    }
+
+    window.location.href = "{{ url_for('kanban.kanbans_lista') }}";
+  });
+
+  /* ===== modal card ===== */
+  btnFecharCard.addEventListener("click", () => { modalCard.style.display="none"; cardAbertoId=null; });
+  modalCard.addEventListener("click", (e) => { if (e.target === modalCard) { modalCard.style.display="none"; cardAbertoId=null; } });
+
+  selectEmpresaCard.addEventListener("change", () => {
+    const idEmp = selectEmpresaCard.value || "";
+    setEmpresaPreviewById(idEmp);
+  });
+
+  btnLimparEmpresa.addEventListener("click", () => {
+    selectEmpresaCard.value = "";
+    setEmpresaPreviewByObj(null);
+  });
+
+  /* ===== painel/face eventos (CORRIGIDO) ===== */
+  if (selectPainelCard){
+    selectPainelCard.addEventListener("change", async () => {
+      await atualizarFacesParaPainelSelecionado();
+    });
+  }
+
+  if (btnLimparPainelFace){
+    btnLimparPainelFace.addEventListener("click", () => {
+      if (selectPainelCard) selectPainelCard.value = "";
+      if (selectFaceCard) selectFaceCard.value = "";
+      setPainelPreviewByObj(null);
+      limparSelectFaces();
+    });
+  }
+
+  async function abrirCard(idCard) {
+    cardAbertoId = idCard;
+    msgCard.style.display = "none";
+
+    await carregarEmpresas();
+
+    const r = await fetch(`/kanban/api/cards/${idCard}`, { credentials: "same-origin" });
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) return;
+
+    document.getElementById("cardTitulo").value = j.card.Titulo || "";
+    document.getElementById("cardDescricao").value = j.card.Descricao || "";
+
+    const idEmpCard = j.card.IDEmpresaProprietaria || "";
+    selectEmpresaCard.value = idEmpCard ? String(idEmpCard) : "";
+    setEmpresaPreviewById(idEmpCard);
+
+    /* painel/face: reseta ao abrir o modal */
+    if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard && painelFaceWrap){
+      painelFaceWrap.classList.add("is-on");
+
+      if (selectPainelCard) selectPainelCard.value = "";
+      if (selectFaceCard) selectFaceCard.value = "";
+
+      setPainelPreviewByObj(null);
+      limparSelectFaces();
+    }
+
+    const selectTagCard = document.getElementById("selectTagCard");
+    selectTagCard.innerHTML = "";
+    tagsCatalogo.forEach(t => {
+      selectTagCard.appendChild(el("option", {value: t.IDDimKanbanTag}, [t.NomeTag]));
+    });
+
+    renderTagsNoCard(j.tags || []);
+    renderNotas(j.notas || []);
+
+    modalCard.style.display = "block";
+  }
+
+  function renderTagsNoCard(tags) {
+    const box = document.getElementById("tagsNoCard");
+    box.innerHTML = "";
+    tags.forEach(t => {
+      const pill = el("span", {
+        class:"kb-tag",
+        title: t.NomeTag || "",
+        style: t.CorHex ? `background:${t.CorHex};` : ""
+      }, [t.NomeTag || ""]);
+
+      const btnX = el("button", {class:"kb-btn sm", onclick: () => removerTagDoCard(t.IDDimKanbanTag)}, ["x"]);
+      const wrap = el("div", {style:"display:flex;gap:6px;align-items:center;flex-wrap:wrap;"}, [pill, btnX]);
+      box.appendChild(wrap);
+    });
+  }
+
+  async function removerTagDoCard(idTag) {
+    const r = await fetch(`/kanban/api/cards/${cardAbertoId}/tags/${idTag}`, {
+      method:"DELETE",
+      credentials: "same-origin",
+      headers: {"X-CSRFToken": csrf}
+    });
+
+    const j = await r.json().catch(() => null);
+    if (j && j.ok) await abrirCard(cardAbertoId);
+    await carregar();
+  }
+
+  document.getElementById("btnAddTag").addEventListener("click", async () => {
+    const idTag = parseInt(document.getElementById("selectTagCard").value || "0");
+    if (!idTag) return;
+
+    const r = await fetch(`/kanban/api/cards/${cardAbertoId}/tags`, {
+      method:"POST",
+      credentials: "same-origin",
+      headers: headersJSON,
+      body: JSON.stringify({id_tag: idTag})
+    });
+
+    const j = await r.json().catch(() => null);
+    if (j && j.ok) await abrirCard(cardAbertoId);
+    await carregar();
+  });
+
+  async function salvarNotaSeTiverTexto() {
+    const inp = document.getElementById("notaTexto");
+    const texto = (inp.value || "").trim();
+    if (texto.length < 2) return { ok: true, fez: false };
+
+    const r = await fetch(`/kanban/api/cards/${cardAbertoId}/notas`, {
+      method:"POST",
+      credentials: "same-origin",
+      headers: headersJSON,
+      body: JSON.stringify({texto, tipo:"OBS"})
+    });
+
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) {
+      return { ok: false, msg: (j && (j.msg || j.erro)) || `Erro ao salvar nota (HTTP ${r.status})` };
+    }
+
+    inp.value = "";
+    return { ok: true, fez: true };
+  }
+
+  document.getElementById("btnSalvarCard").addEventListener("click", async () => {
+    const titulo = (document.getElementById("cardTitulo").value || "").trim();
+    const descricao = document.getElementById("cardDescricao").value || "";
+    const idEmpresa = selectEmpresaCard.value ? Number(selectEmpresaCard.value) : null;
+
+    msgCard.style.display = "none";
+
+    const resNota = await salvarNotaSeTiverTexto();
+    if (!resNota.ok) {
+      msgCard.textContent = resNota.msg || "Erro ao salvar nota";
+      msgCard.style.display = "block";
+      return;
+    }
+
+    const payload = {
+      titulo,
+      descricao,
+      id_empresa: idEmpresa,
+      id_empresa_proprietaria: idEmpresa
+      /* OBS: Painel/Face é UI — não persiste aqui */
+    };
+
+    const r = await fetch(`/kanban/api/cards/${cardAbertoId}`, {
+      method:"PUT",
+      credentials: "same-origin",
+      headers: headersJSON,
+      body: JSON.stringify(payload)
+    });
+
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) {
+      msgCard.textContent = (j && j.msg) || "Erro ao salvar";
+      msgCard.style.display = "block";
+      return;
+    }
+
+    await carregar();
+    await abrirCard(cardAbertoId);
+  });
+
+  function renderNotas(notas) {
+    const box = document.getElementById("listaNotas");
+    box.innerHTML = "";
+    notas.forEach(n => {
+      box.appendChild(el("div", {class:"kb-nota"}, [
+        el("small", {}, [String(n.CriadoEm || "")]),
+        el("div", {style:"margin-top:6px;"}, [n.Texto || ""])
+      ]));
+    });
+  }
+
+  filtroTags.addEventListener("change", () => {
+    fases.forEach(f => {
+      const idFase = idNum(f.IDDimKanbanFase);
+      preencherCabecalhoFase(idFase);
+      preencherCardsInicial(idFase);
+    });
+  });
+
+  btnLimparFiltro.addEventListener("click", () => {
+    Array.from(filtroTags.options).forEach(o => o.selected = false);
+    fases.forEach(f => {
+      const idFase = idNum(f.IDDimKanbanFase);
+      preencherCabecalhoFase(idFase);
+      preencherCardsInicial(idFase);
+    });
+  });
+
+  /* modal fase */
+  const modalFase = document.getElementById("modalFase");
+  document.getElementById("btnNovaFase").addEventListener("click", () => { modalFase.style.display="block"; });
+  document.getElementById("btnFecharFase").addEventListener("click", () => { modalFase.style.display="none"; });
+  modalFase.addEventListener("click", (e) => { if (e.target === modalFase) modalFase.style.display="none"; });
+
+  document.getElementById("btnSalvarFase").addEventListener("click", async () => {
+    const nome = (document.getElementById("faseNome").value || "").trim();
+    const tipo = document.getElementById("faseTipo").value;
+    const msgFase = document.getElementById("msgFase");
+    msgFase.style.display="none";
+
+    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/fases`, {
+      method:"POST",
+      credentials: "same-origin",
+      headers: headersJSON,
+      body: JSON.stringify({nome, tipo})
+    });
+
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) {
+      msgFase.textContent = (j && (j.msg || j.erro)) || `Erro (HTTP ${r.status})`;
+      msgFase.style.display="block";
+      return;
+    }
+
+    document.getElementById("faseNome").value = "";
+    modalFase.style.display="none";
+    await carregar();
+  });
+
+  carregar();
+})();
+</script>
+
+
+
+{% endblock %}

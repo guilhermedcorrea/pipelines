@@ -1,0 +1,338 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Detalhe da Movimentação{% endblock %}
+
+{% block content %}
+<div class="card" style="padding:16px;">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h1 class="page-title" style="margin:0;">Detalhe da Movimentação</h1>
+      <div class="muted" style="font-weight:900;margin-top:6px;">
+        ID consolidado: <span class="mono">{{ mov.IDFatoMovimentoFinanceiroEmpresas }}</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <a class="btn btn-secondary" style="text-decoration:none;"
+         href="{{ url_for('admin.lista_movimentacao_empresas') }}">
+        ← Voltar
+      </a>
+    </div>
+  </div>
+
+  {% if aviso_match %}
+    <div class="flash warning" style="margin-top:14px;">
+      {{ aviso_match }}
+    </div>
+  {% endif %}
+
+  <div style="height:14px;"></div>
+
+  <!-- EMPRESA -->
+  <div class="card" style="padding:14px;border:1px solid var(--border);border-radius:14px;background:#fff;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      {% set nome = (empresa_info.RazaoSocial or "Empresa") %}
+      {% set logo = (empresa_info.Logo or "")|trim %}
+
+      <div style="display:flex;align-items:center;gap:12px;">
+        {% if logo.startswith("http://") or logo.startswith("https://") %}
+          <img src="{{ logo }}" alt="{{ nome }}" style="width:34px;height:34px;border-radius:12px;border:1px solid rgba(0,0,0,.10);object-fit:contain;background:#fff;padding:4px;">
+        {% elif logo %}
+          {% if "/" in logo %}
+            {% set logo_rel = logo %}
+          {% else %}
+            {% set logo_rel = "imagens/LogoEmpresaProprietaria/" ~ logo %}
+          {% endif %}
+          <img src="{{ url_for('static', filename=logo_rel) }}" alt="{{ nome }}" style="width:34px;height:34px;border-radius:12px;border:1px solid rgba(0,0,0,.10);object-fit:contain;background:#fff;padding:4px;">
+        {% else %}
+          <div style="width:34px;height:34px;border-radius:12px;border:1px solid rgba(0,0,0,.10);display:flex;align-items:center;justify-content:center;background:rgba(0,40,132,.08);color:var(--euro-blue);font-weight:1000;">
+            E
+          </div>
+        {% endif %}
+
+        <div>
+          <div style="font-weight:1000;color:var(--text);">{{ nome }}</div>
+          {% if empresa_info.CNPJ %}
+            <div class="muted" style="font-weight:900;">CNPJ: {{ empresa_info.CNPJ }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        {# =========================================================
+           ✅ SISTEMA: exibe logo + nome (Granatum / Omie) de forma portátil
+           - Usa url_for('static', filename='...') => funciona Windows/Linux
+           - Não usa caminho físico D:\...
+           ========================================================= #}
+        {% set sis = (mov.SistemaOrigem or "")|trim %}
+        {% set sis_u = sis|upper %}
+
+        <span class="sistema-badge" style="display:inline-flex;align-items:center;gap:10px;white-space:nowrap;line-height:1;">
+          {% if sis_u == "GRANATUM" %}
+            <img class="sistema-logo"
+                 src="{{ url_for('static', filename='imagens/LogoSistemas/granatum.png') }}"
+                 alt="Granatum"
+                 loading="lazy"
+                 style="width:28px;height:28px;border-radius:10px;border:1px solid rgba(0,0,0,.10);background:#fff;object-fit:contain;display:block;flex:0 0 auto;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:3px;">
+            <span class="pill" style="font-weight:1000;display:inline-flex;align-items:center;gap:8px;">
+              GRANATUM
+            </span>
+
+          {% elif sis_u == "OMIE" %}
+            <img class="sistema-logo"
+                 src="{{ url_for('static', filename='imagens/LogoSistemas/omie.jpg') }}"
+                 alt="Omie"
+                 loading="lazy"
+                 style="width:28px;height:28px;border-radius:10px;border:1px solid rgba(0,0,0,.10);background:#fff;object-fit:contain;display:block;flex:0 0 auto;box-shadow:0 1px 8px rgba(0,0,0,.08);padding:3px;">
+            <span class="pill" style="font-weight:1000;display:inline-flex;align-items:center;gap:8px;">
+              OMIE
+            </span>
+
+          {% else %}
+            <span class="pill" style="font-weight:1000;display:inline-flex;align-items:center;gap:8px;">
+              {{ sis or "—" }}
+            </span>
+          {% endif %}
+        </span>
+
+        <span class="pill" style="font-weight:1000;">{{ mov.Tipo or "—" }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <!-- RESUMO CONSOLIDADO -->
+  <div class="card" style="padding:14px;border:1px solid var(--border);border-radius:14px;background:#fff;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div style="font-weight:1000;color:var(--euro-blue);">Resumo (Consolidado)</div>
+      <div class="muted" style="font-weight:900;">Atualizado em: {{ mov.DataAtualizacao or "—" }}</div>
+    </div>
+
+    <div style="height:10px;"></div>
+
+    <div class="grid2">
+      <div class="kv">
+        <div class="k">Natureza</div>
+        <div class="v">{{ mov.Direcao or "—" }}</div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Status</div>
+        <div class="v">
+          {# =========================================================
+             ✅ STATUS: copia o badge do template de lista
+             ========================================================= #}
+          {% set st_raw = (mov.Status or "")|trim %}
+          {% set st = st_raw|upper %}
+
+          {% if st == "ATRASADO" %}
+            <span class="status-pill atrasado">ATRASADO</span>
+          {% elif st == "PAGO" %}
+            <span class="status-pill pago">PAGO</span>
+          {% elif st == "RECEBIDO" %}
+            <span class="status-pill recebido">RECEBIDO</span>
+          {% elif st == "EM ABERTO" %}
+            <span class="status-pill em-aberto">EM ABERTO</span>
+          {% elif st == "A VENCER" or st == "À VENCER" %}
+            <span class="status-pill a-vencer">A VENCER</span>
+          {% elif st == "CANCELADO" %}
+            <span class="status-pill cancelado">CANCELADO</span>
+          {% else %}
+            <span class="status-pill">{{ st_raw if st_raw else "—" }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Competência</div>
+        <div class="v mono">{{ mov.DataCompetencia or "—" }}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Vencimento</div>
+        <div class="v mono">{{ mov.DataVencimento or "—" }}</div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Pagamento</div>
+        <div class="v mono">{{ mov.DataPagamento or "—" }}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Valor</div>
+        <div class="v mono">
+          {% if mov.Valor is not none %}
+            R$ {{ "{:,.2f}".format(mov.Valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="kv" style="grid-column:1 / -1;">
+        <div class="k">Categoria</div>
+        <div class="v">{{ mov.Categoria or "—" }}</div>
+      </div>
+
+      <div class="kv" style="grid-column:1 / -1;">
+        <div class="k">Descrição</div>
+        <div class="v">{{ mov.Descricao or "—" }}</div>
+      </div>
+
+      <div class="kv">
+        <div class="k">Contraparte</div>
+        <div class="v">{{ mov.Contraparte or "—" }}</div>
+      </div>
+      <div class="kv">
+        <div class="k">Documento Contraparte</div>
+        <div class="v mono">{{ mov.DocumentoContraparte or "—" }}</div>
+      </div>
+
+      <div class="kv" style="grid-column:1 / -1;">
+        <div class="k">Referência</div>
+        <div class="v mono">{{ mov.Referencia or "—" }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <!-- DETALHE ORIGEM -->
+  <div class="card" style="padding:14px;border:1px solid var(--border);border-radius:14px;background:#fff;">
+    <div style="font-weight:1000;color:var(--euro-blue);">
+      Detalhe ({{ detalhe_fonte or "Origem" }})
+    </div>
+
+    <div style="height:10px;"></div>
+
+    {% if detalhe %}
+      <div class="grid2">
+        {% for k, v in detalhe.items() %}
+          <div class="kv">
+            <div class="k">{{ k }}</div>
+            <div class="v {% if 'Dt' in k or 'Data' in k or 'Hora' in k or 'Cod' in k or 'ID' in k %}mono{% endif %}">
+              {{ v if v is not none and v != "" else "—" }}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="muted" style="font-weight:900;">
+        Não foi possível localizar o registro detalhado na tabela de origem (faltou chave única).
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  .mono{ font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; white-space: nowrap; }
+
+  .grid2{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .kv{
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:10px 12px;
+    background: #fff;
+  }
+
+  .k{
+    font-size: 11px;
+    font-weight: 1000;
+    color: var(--muted);
+    margin-bottom: 4px;
+    white-space: nowrap;
+  }
+
+  .v{
+    font-size: 13px;
+    font-weight: 900;
+    color: var(--text);
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.2;
+  }
+
+  /* ===== Sistema (logo + nome) - mesmo visual do template de lista ===== */
+  .sistema-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    white-space: nowrap;
+    line-height: 1;
+  }
+  .sistema-logo{
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+    border: 1px solid rgba(0,0,0,.10);
+    background: #fff;
+    object-fit: contain;
+    display:block;
+    flex: 0 0 auto;
+    box-shadow: 0 1px 8px rgba(0,0,0,.08);
+    padding: 3px;
+  }
+
+  /* ===== Status badges (copiado do template de lista) ===== */
+  .status-pill{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-weight: 1000;
+    font-size: 12px;
+    border: 1px solid rgba(0,0,0,.10);
+    background: #fff;
+    white-space: nowrap;
+    line-height: 1;
+    letter-spacing: .2px;
+  }
+
+  .status-pill.atrasado{
+    background: rgba(220,38,38,.10);
+    color: #991b1b;
+    border-color: rgba(220,38,38,.28);
+  }
+
+  .status-pill.pago{
+    background: rgba(22,163,74,.10);
+    color: #166534;
+    border-color: rgba(22,163,74,.26);
+  }
+
+  .status-pill.recebido{
+    background: rgba(5,150,105,.12);
+    color: #065f46;
+    border-color: rgba(5,150,105,.28);
+  }
+
+  .status-pill.em-aberto{
+    background: rgba(37,99,235,.10);
+    color: #1e40af;
+    border-color: rgba(37,99,235,.25);
+  }
+
+  .status-pill.a-vencer{
+    background: rgba(245,158,11,.14);
+    color: #92400e;
+    border-color: rgba(245,158,11,.28);
+  }
+
+  .status-pill.cancelado{
+    background: rgba(100,116,139,.12);
+    color: #334155;
+    border-color: rgba(100,116,139,.28);
+  }
+
+  @media (max-width: 900px){
+    .grid2{ grid-template-columns: 1fr; }
+    .mono{ white-space: normal; }
+  }
+</style>
+{% endblock %}

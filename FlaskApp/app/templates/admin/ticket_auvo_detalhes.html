@@ -1,0 +1,597 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block content %}
+
+<style>
+  /* =========================================================
+     ✅ FIXES GERAIS
+     - Forço o card e o header do ticket a ficarem CLAROS (base às vezes pinta tudo de azul)
+     - Subo z-index do dropdown para não ser “cortado” ao rolar
+     - Removo overflow hidden do card (isso corta elementos flutuantes)
+     - Deixo tudo auto-ajustável (grid auto-fit)
+     ========================================================= */
+
+  :root{
+    --bg-page: #f6f8fb;
+    --card-bg: #ffffff;
+    --card-border: rgba(15,23,42,.10);
+    --text-strong: #0f172a;
+    --text: #111827;
+    --text-muted: rgba(15,23,42,.72);
+    --soft: rgba(15,23,42,.04);
+    --soft-2: rgba(15,23,42,.06);
+  }
+
+  /* Página */
+  .page-wrap{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding: 18px 22px;
+    background: transparent;
+    color: var(--text-strong);
+  }
+  @media (max-width: 900px){
+    .page-wrap{ padding: 14px 14px; }
+  }
+
+  /* Força o fundo geral do conteúdo a ficar claro (se o base estiver “pesado”) */
+  body .page-wrap{
+    background: transparent !important;
+    color: var(--text-strong) !important;
+  }
+
+  /* Card */
+  .page-wrap .card{
+    background: var(--card-bg) !important;
+    border:1px solid var(--card-border) !important;
+    border-radius: 16px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.06);
+    overflow: visible !important; /* ✅ não corta dropdown/tooltip/flutuantes */
+  }
+
+  .card-pad{ padding: 14px 14px; }
+
+  /* Cabeçalho do ticket (zona “escura” no print) */
+  .ticket-header{
+    background: linear-gradient(180deg, rgba(248,250,252,1) 0%, rgba(255,255,255,1) 100%) !important;
+    border-bottom: 1px solid var(--soft-2);
+    color: var(--text-strong) !important;
+  }
+
+  .topbar{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .title{
+    font-size: clamp(16px, 1.2vw, 20px);
+    font-weight:1000;
+    letter-spacing:.2px;
+    margin:0;
+    color: var(--text-strong) !important;
+    line-height: 1.15;
+    word-break: break-word;
+  }
+
+  .subtitle{
+    margin-top:6px;
+    font-weight:900;
+    color: var(--text-muted) !important;
+    opacity: 1 !important;
+    word-break: break-word;
+  }
+
+  .subtitle span{
+    color: var(--text-strong) !important;
+  }
+
+  /* Grid auto-ajustável (sem depender de breakpoints fixos) */
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap:10px;
+  }
+
+  /* Cards KV */
+  .kv{
+    border:1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.03);
+    border-radius: 14px;
+    padding: 10px 12px;
+    min-width:0;
+  }
+  .kv .k{
+    font-weight:1000;
+    font-size:12px;
+    color: rgba(15,23,42,.70);
+    margin-bottom:6px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .kv .v{
+    font-weight:900;
+    color: var(--text-strong);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .muted{ color: rgba(15,23,42,.70) !important; font-weight:900; opacity: 1 !important; }
+
+  /* =========================================================
+     ✅ BADGES (alto contraste, legíveis em qualquer fundo)
+     ========================================================= */
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:7px 10px;
+    border-radius:999px;
+    border:1px solid rgba(15,23,42,.14);
+    background: rgba(255,255,255,.92);
+    color: rgba(15,23,42,.90);
+    font-weight:1000;
+    font-size:12px;
+    line-height:1;
+    white-space:nowrap;
+    box-shadow: 0 6px 14px rgba(0,0,0,.05);
+  }
+  .badge .dot{
+    width:8px;height:8px;border-radius:999px;
+    background: currentColor;
+    opacity:.95;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.95);
+  }
+
+  .badge-status-blue{
+    background: rgba(59,130,246,.12);
+    border:1px solid rgba(59,130,246,.26);
+    color: rgba(29,78,216,1);
+  }
+  .badge-status-amber{
+    background: rgba(245,158,11,.14);
+    border:1px solid rgba(245,158,11,.28);
+    color: #92400e;
+  }
+  .badge-status-green{
+    background: rgba(16,185,129,.14);
+    border:1px solid rgba(16,185,129,.28);
+    color: #065f46;
+  }
+
+  .badge-prio-red{
+    background: rgba(239,68,68,.12);
+    border:1px solid rgba(239,68,68,.26);
+    color: #b91c1c;
+  }
+  .badge-prio-amber{
+    background: rgba(245,158,11,.14);
+    border:1px solid rgba(245,158,11,.28);
+    color: #92400e;
+  }
+
+  .badge-tipo-indigo{
+    background: rgba(99,102,241,.12);
+    border:1px solid rgba(99,102,241,.26);
+    color: #3730a3;
+  }
+  .badge-tipo-slate{
+    background: rgba(148,163,184,.20);
+    border:1px solid rgba(148,163,184,.40);
+    color: #0f172a;
+  }
+
+  /* =========================================================
+     ✅ TABELA (TASKS) — responsiva com rolagem horizontal
+     ========================================================= */
+  .table-wrap{
+    width:100%;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 14px;
+    border: 1px solid rgba(15,23,42,.10);
+    background: #fff;
+  }
+
+  table{
+    width:100%;
+    border-collapse: collapse;
+    min-width: 980px; /* ✅ garante layout, rola no mobile */
+  }
+
+  thead th{
+    text-align:left;
+    font-weight:1000;
+    font-size:12px;
+    letter-spacing:.2px;
+    color: rgba(15,23,42,.82);
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.03);
+    white-space:nowrap;
+    position: sticky;
+    top: 0; /* ✅ cabeçalho gruda dentro do scroll do wrapper */
+    z-index: 2;
+  }
+
+  tbody td{
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(15,23,42,.06);
+    font-weight:850;
+    color: rgba(15,23,42,.92);
+    vertical-align:top;
+    background: #fff;
+  }
+
+  tbody tr:hover td{
+    background: rgba(15,23,42,.02);
+  }
+
+  .pre{
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-weight:850;
+    line-height:1.35;
+    color: rgba(15,23,42,.92);
+  }
+
+  /* Botão voltar */
+  .btn-back{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    height:34px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.14);
+    background: rgba(255,255,255,.92);
+    color: rgba(15,23,42,.92);
+    font-weight:1000;
+    font-size:12px;
+    text-decoration:none;
+    white-space:nowrap;
+    box-shadow: 0 6px 14px rgba(0,0,0,.05);
+  }
+  .btn-back:hover{
+    background: rgba(255,255,255,1);
+  }
+
+  /* =========================================================
+     ✅ FIX DROPDOWN “CORTADO” AO ROLAR
+     - Base geralmente tem navbar sticky/fixed e dropdown com z-index baixo
+     - Eu forço overflow visível e z-index alto do menu
+     ========================================================= */
+
+  header, nav,
+  .navbar, .topbar, .top-nav, .navbar-collapse,
+  .page-header, .header, .container, .container-fluid,
+  .euromidia-header, .euromidia-nav{
+    overflow: visible !important;
+  }
+
+  /* Bootstrap padrão / genérico */
+  .dropdown-menu{
+    z-index: 99999 !important;
+  }
+
+  /* Outras variações comuns de menu */
+  .dropdown-content, .menu-dropdown, .nav-dropdown, .tp-dropdown, .euro-dropdown{
+    z-index: 99999 !important;
+  }
+
+  /* Se o header do site estiver por cima, subo o z-index dele também (sem estourar o dropdown) */
+  header, nav, .navbar, .euromidia-header, .euromidia-nav{
+    position: sticky;
+    top: 0;
+    z-index: 60000;
+  }
+
+  /* Mantém dropdown acima do header sticky */
+  .dropdown-menu,
+  .dropdown-content, .menu-dropdown, .nav-dropdown, .tp-dropdown, .euro-dropdown{
+    position: absolute;
+    z-index: 99999 !important;
+  }
+
+  /* =========================================================
+     ✅ Ajustes extras para telas pequenas
+     ========================================================= */
+  @media (max-width: 700px){
+    .card-pad{ padding: 12px 12px; }
+    .btn-back{ width: 100%; justify-content:center; }
+  }
+
+  /* Linha separadora suave */
+  .sep{
+    height:1px;
+    background: rgba(15,23,42,.08);
+  }
+</style>
+
+{% set st_raw = (ticket.StatusDescricao or "") %}
+{% set st_u = st_raw|trim|upper %}
+
+{% set pr_raw = (ticket.Prioridade or "") %}
+{% set pr_u = pr_raw|trim|upper %}
+
+{% set tp_raw = (ticket.TipoSolicitacao or "") %}
+{% set tp_u = tp_raw|trim|upper %}
+
+<div class="page-wrap">
+  <div class="card">
+
+    <!-- CABEÇALHO -->
+    <div class="ticket-header">
+      <div class="card-pad">
+        <div class="topbar">
+          <div style="min-width:260px;flex:1 1 520px;">
+            <h1 class="title">Ticket #{{ ticket.IdTicketAuvo }} — {{ ticket.Titulo or "-" }}</h1>
+
+            <div class="subtitle">
+              Cliente: <span style="font-weight:1000;">{{ ticket.NomeCliente or "-" }}</span>
+              {% if ticket.NomeEquipe %}
+                • Equipe: <span style="font-weight:1000;">{{ ticket.NomeEquipe }}</span>
+              {% endif %}
+            </div>
+
+            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+
+              <!-- STATUS -->
+              {% if st_u == "AGUARDANDO ATENDENTE" or st_u == "AGUARDANDO ATENDIMENTO" %}
+                <span class="badge badge-status-blue"><span class="dot"></span>{{ ticket.StatusDescricao }}</span>
+              {% elif st_u == "AGUARDANDO CLIENTE" %}
+                <span class="badge badge-status-amber"><span class="dot"></span>Aguardando Cliente</span>
+              {% elif st_u == "ATENDIMENTO ENCERRADO" %}
+                <span class="badge badge-status-green"><span class="dot"></span>Atendimento Encerrado</span>
+              {% else %}
+                <span class="badge"><span class="dot"></span>{{ ticket.StatusDescricao or "-" }}</span>
+              {% endif %}
+
+              <!-- PRIORIDADE -->
+              {% if pr_u == "ALTA" %}
+                <span class="badge badge-prio-red"><span class="dot"></span>Prioridade: Alta</span>
+              {% elif pr_u == "MEDIA" or pr_u == "MÉDIA" %}
+                <span class="badge badge-prio-amber"><span class="dot"></span>Prioridade: Média</span>
+              {% else %}
+                <span class="badge"><span class="dot"></span>Prioridade: {{ ticket.Prioridade or "-" }}</span>
+              {% endif %}
+
+              <!-- TIPO -->
+              {% if tp_u == "ATENDIMENTO REMOTO" %}
+                <span class="badge badge-tipo-indigo"><span class="dot"></span>Atendimento Remoto</span>
+              {% elif tp_u == "REPARO" %}
+                <span class="badge badge-tipo-slate"><span class="dot"></span>Reparo</span>
+              {% else %}
+                <span class="badge"><span class="dot"></span>{{ ticket.TipoSolicitacao or "-" }}</span>
+              {% endif %}
+
+              <!-- SLA (mostra mesmo se vier 0) -->
+              <span class="badge"><span class="dot"></span>SLA: {{ ticket.Sla if ticket.Sla is not none else "-" }}</span>
+
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;align-items:flex-start;justify-content:flex-end;flex:0 0 auto;">
+            <a class="btn-back" href="{{ url_for('admin.lista_tickets_auvo') }}">← Voltar</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- RESUMO (GRID) -->
+    <div class="card-pad">
+      <div class="grid">
+        <div class="kv">
+          <div class="k">Criado em</div>
+          <div class="v">
+            {% if ticket.DataCriacao %}
+              {{ ticket.DataCriacao.strftime("%d/%m/%Y %H:%M") if ticket.DataCriacao.__class__.__name__ != 'str' else ticket.DataCriacao }}
+            {% else %}-{% endif %}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Última atualização</div>
+          <div class="v">
+            {% if ticket.DataUltimaAtualizacao %}
+              {{ ticket.DataUltimaAtualizacao.strftime("%d/%m/%Y %H:%M") if ticket.DataUltimaAtualizacao.__class__.__name__ != 'str' else ticket.DataUltimaAtualizacao }}
+            {% else %}-{% endif %}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Responsável</div>
+          <div class="v">{{ ticket.NomeUsuarioResponsavel or "-" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Criador</div>
+          <div class="v">{{ ticket.NomeUsuarioCriador or "-" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Solicitante</div>
+          <div class="v">{{ ticket.NomeSolicitante or "-" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Email solicitante</div>
+          <div class="v">{{ ticket.EmailSolicitante or "-" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Contato cliente</div>
+          <div class="v">{{ ticket.EmailCliente or "-" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Telefone cliente</div>
+          <div class="v">{{ ticket.TelefoneCliente or "-" }}</div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Data status</div>
+          <div class="v">
+            {% if ticket.DataStatus %}
+              {{ ticket.DataStatus.strftime("%d/%m/%Y %H:%M") if ticket.DataStatus.__class__.__name__ != 'str' else ticket.DataStatus }}
+            {% else %}-{% endif %}
+          </div>
+        </div>
+
+        <div class="kv">
+          <div class="k">Encerramento</div>
+          <div class="v">
+            {% if ticket.DataEncerramento %}
+              {{ ticket.DataEncerramento.strftime("%d/%m/%Y %H:%M") if ticket.DataEncerramento.__class__.__name__ != 'str' else ticket.DataEncerramento }}
+            {% else %}-{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <!-- DESCRIÇÃO -->
+      <div class="kv" style="background:#fff;">
+        <div class="k">Descrição</div>
+        <div class="pre">{{ ticket.Descricao or "-" }}</div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- TASKS -->
+    <div class="card-pad">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="font-weight:1000;font-size:14px;color:var(--text-strong);">Histórico de Tarefas</div>
+        <div class="muted">{{ tasks|length }} task(s)</div>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>IdTarefa</th>
+              <th>Tipo</th>
+              <th>De</th>
+              <th>Para</th>
+              <th>Status</th>
+              <th>Finalizada</th>
+              <th>Criação</th>
+              <th>Data Tarefa</th>
+              <th>Check-in</th>
+              <th>Check-out</th>
+              <th>Atualização</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {% if tasks and tasks|length > 0 %}
+              {% for t in tasks %}
+                <tr>
+                  <td style="font-weight:1000;">
+                    {{ t.IdTarefaAuvo or "-" }}
+                    {% if t.UrlTarefa %}
+                      <div class="muted" style="margin-top:6px;">
+                        <a href="{{ t.UrlTarefa }}" target="_blank" style="text-decoration:none;font-weight:1000;">Abrir no Auvo</a>
+                      </div>
+                    {% endif %}
+                  </td>
+
+                  <td>{{ t.DescricaoTipoTarefa or "-" }}</td>
+                  <td>{{ t.NomeUsuarioDe or "-" }}</td>
+                  <td>{{ t.NomeUsuarioPara or "-" }}</td>
+
+                  <td>
+                    {% if t.StatusTarefa is not none %}
+                      <span class="badge"><span class="dot"></span>Status: {{ t.StatusTarefa }}</span>
+                    {% else %}
+                      <span class="badge"><span class="dot"></span>-</span>
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if t.Finalizada %}
+                      <span class="badge badge-status-green"><span class="dot"></span>Sim</span>
+                    {% else %}
+                      <span class="badge badge-status-amber"><span class="dot"></span>Não</span>
+                    {% endif %}
+                  </td>
+
+                  <td class="muted">
+                    {% if t.DataCriacao %}
+                      {{ t.DataCriacao.strftime("%d/%m/%Y %H:%M") if t.DataCriacao.__class__.__name__ != 'str' else t.DataCriacao }}
+                    {% else %}-{% endif %}
+                  </td>
+
+                  <td class="muted">
+                    {% if t.DataTarefa %}
+                      {{ t.DataTarefa.strftime("%d/%m/%Y %H:%M") if t.DataTarefa.__class__.__name__ != 'str' else t.DataTarefa }}
+                    {% else %}-{% endif %}
+                  </td>
+
+                  <td class="muted">
+                    {% if t.DataCheckIn %}
+                      {{ t.DataCheckIn.strftime("%d/%m/%Y %H:%M") if t.DataCheckIn.__class__.__name__ != 'str' else t.DataCheckIn }}
+                    {% else %}-{% endif %}
+                  </td>
+
+                  <td class="muted">
+                    {% if t.DataCheckOut %}
+                      {{ t.DataCheckOut.strftime("%d/%m/%Y %H:%M") if t.DataCheckOut.__class__.__name__ != 'str' else t.DataCheckOut }}
+                    {% else %}-{% endif %}
+                  </td>
+
+                  <td class="muted">
+                    {% if t.DataUltimaAtualizacao %}
+                      {{ t.DataUltimaAtualizacao.strftime("%d/%m/%Y %H:%M") if t.DataUltimaAtualizacao.__class__.__name__ != 'str' else t.DataUltimaAtualizacao }}
+                    {% else %}-{% endif %}
+                  </td>
+                </tr>
+
+                {% if t.Endereco or t.Pendencia or t.Relatorio %}
+                  <tr>
+                    <td colspan="11" style="padding-top:0;border-bottom: 1px solid rgba(15,23,42,.06);">
+                      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(220px,1fr));gap:10px;padding:10px 0;">
+                        <div class="kv">
+                          <div class="k">Endereço</div>
+                          <div class="pre">{{ t.Endereco or "-" }}</div>
+                        </div>
+                        <div class="kv">
+                          <div class="k">Pendência</div>
+                          <div class="pre">{{ t.Pendencia or "-" }}</div>
+                        </div>
+                        <div class="kv">
+                          <div class="k">Relatório</div>
+                          <div class="pre">{{ t.Relatorio or "-" }}</div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                {% endif %}
+
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="11" class="muted" style="padding:16px 14px;">
+                  Nenhuma task vinculada a este ticket.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

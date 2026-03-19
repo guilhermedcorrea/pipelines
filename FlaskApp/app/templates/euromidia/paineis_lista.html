@@ -1,0 +1,3547 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Lista de Painéis | Euromídia{% endblock %}
+{% block content %}
+
+{% set GRID_COLS = "34px clamp(118px, 8.2vw, 146px) 40px minmax(220px, 1.72fr) minmax(110px, 0.90fr) 44px minmax(128px, 0.88fr) minmax(168px, 1.12fr) minmax(96px, 0.76fr) 82px minmax(220px, 1.16fr) clamp(132px, 10.5vw, 168px)" %}
+{% set ponto_ativo_val = (filtros.ponto_ativo if filtros.ponto_ativo is not none else '1')|string %}
+<div class="card card-no-clip">
+
+ <style>
+
+  .card-no-clip{
+    overflow: visible !important;
+    position: relative;
+    z-index: 1;
+  }
+  .card-no-clip, .card-no-clip *,
+  .card-no-clip *::before, .card-no-clip *::after{
+    box-sizing: border-box !important;
+  }
+
+  .page-wrap{
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .page-inner{
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 12px 12px 14px 12px;
+  }
+
+  @media (max-width: 900px){
+    .page-inner{
+      padding: 12px 12px 12px 12px;
+    }
+  }
+
+  /* =========================================================
+     ✅ BADGES (TIPO)
+     ========================================================= */
+  .tp-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    padding:5px 8px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:#fff;
+    font-weight:900;
+    font-size:10.8px;
+    line-height:1.02;
+    letter-spacing:.10px;
+    white-space:nowrap;
+    user-select:none;
+    min-width:0;
+    max-width:100%;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    flex: 0 1 auto;
+  }
+
+  .tp-dot{
+    width:7px;
+    height:7px;
+    border-radius:999px;
+    background: currentColor;
+    opacity:.9;
+    box-shadow: 0 0 0 2px rgba(255,255,255,.9);
+    flex: 0 0 auto;
+  }
+
+  /* Cores por tipo */
+  .tp-EMPENA{ background:#FEE2E2; border-color:#EF4444; color:#991B1B; }
+  .tp-FRONT_LIGHT{ background:#FEF3C7; border-color:#F59E0B; color:#92400E; }
+  .tp-FRONT_LIGHT_HIBRIDO{ background:#FFEDD5; border-color:#FB923C; color:#9A3412; }
+  .tp-MUPI{ background:#DCFCE7; border-color:#22C55E; color:#166534; }
+  .tp-PAINEL_DIGITAL{ background:#DBEAFE; border-color:#3B82F6; color:#1E3A8A; }
+  .tp-RELOGIO_MULTIMENSAGEM_COM_BACKLIGHT{ background:#EDE9FE; border-color:#8B5CF6; color:#5B21B6; }
+  .tp-RELOGIO_TEMPERATURA_COM_BACKLIGHT{ background:#CFFAFE; border-color:#06B6D4; color:#155E75; }
+  .tp-TOPO{ background:#FFEDD5; border-color:#F97316; color:#9A3412; }
+  .tp-TRIEDRO{ background:#CCFBF1; border-color:#14B8A6; color:#115E59; }
+  .tp-TRIEDRO_COM_RELOGIO_TEMPERATURA{ background:#E0F2FE; border-color:#0284C7; color:#0C4A6E; }
+
+  /* =========================================================
+     ✅ FILTROS (TOPO) — 2 LINHAS RESPONSIVAS
+     ========================================================= */
+  .filters-wrap{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    padding: 0 12px;
+    width: 100%;
+    position: relative;
+    z-index: 2000;
+  }
+
+  .filters-top-shell{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    width:100%;
+    min-width:0;
+    position: relative;
+    z-index: 2100;
+  }
+
+  .filters-row-1{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap:10px;
+    align-items:stretch;
+    width:100%;
+    min-width:0;
+    grid-auto-rows: 42px;
+    position: relative;
+    z-index: 2200;
+  }
+
+  @media (min-width: 1280px){
+    .filters-row-1{
+      grid-template-columns: repeat(7, minmax(120px, 1fr)) minmax(132px, 172px) minmax(150px, 200px);
+    }
+  }
+
+  .filters-row-1 > *{
+    height: 42px;
+    min-height: 42px;
+    align-self:stretch;
+    display:flex;
+    align-items:center;
+    min-width:0;
+  }
+
+  .filters-row-1 select,
+  .filters-row-1 input{
+    height: 42px !important;
+    min-height: 42px !important;
+    line-height: 42px !important;
+    padding: 0 12px !important;
+    margin:0 !important;
+    min-width: 0 !important;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-clip: padding-box;
+    font-size: 13.4px !important;
+    font-weight: 800 !important;
+  }
+
+  .filters-row-1 .btn,
+  .filters-row-1 button.btn,
+  .filters-row-1 a.btn{
+    width: 100%;
+    height: 42px !important;
+    min-height: 42px !important;
+    padding: 0 14px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    line-height: 1 !important;
+    margin:0 !important;
+    vertical-align: middle !important;
+    transform: translateZ(0);
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    font-size: 13.6px !important;
+    font-weight: 900 !important;
+  }
+
+  .filters-row-1 .btn *{
+    line-height: 1 !important;
+  }
+
+  .filters-row-2{
+    display:grid;
+    grid-template-columns: 1fr auto;
+    gap:10px;
+    align-items:start;
+    width:100%;
+    min-width:0;
+    position: relative;
+    z-index: 2000;
+  }
+
+  .filters-row-2 > .btn-pill{
+    align-self:flex-start;
+    margin-top:0;
+  }
+
+  .search-periodo-wrap{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    min-width:0;
+    flex:1;
+    flex-wrap:wrap;
+  }
+
+  .search-periodo-wrap > *{
+    min-width:0;
+  }
+
+  .search-big{
+    height:42px;
+    padding:0 14px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    font-weight:900;
+    font-size:13.6px;
+    color: var(--text);
+    outline:none;
+    width: 100%;
+    box-shadow: 0 8px 18px rgba(2,6,23,.06);
+  }
+
+  .btn-pill{
+    height:42px;
+    padding:0 15px;
+    border-radius:12px;
+    border:1px solid var(--border);
+    background:#fff;
+    font-weight:900;
+    font-size:13.4px;
+    color:#0b1a3a;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    text-decoration:none;
+    cursor:pointer;
+    user-select:none;
+    box-shadow: 0 8px 18px rgba(2,6,23,.06);
+    transition: .12s ease;
+    white-space:nowrap;
+  }
+
+  .btn-pill:hover{
+    transform: translateY(-1px);
+  }
+
+  .btn-pill:active{
+    transform: translateY(0px);
+  }
+
+  .btn-pill.danger{
+    border-color: rgba(239,68,68,.35);
+    background: rgba(239,68,68,.08);
+    color:#991b1b;
+  }
+
+  .btn-pill[disabled]{
+    opacity:.55;
+    cursor:not-allowed;
+    pointer-events:none;
+  }
+
+  .legacy-hidden{
+    display:none !important;
+    visibility:hidden !important;
+    width:0 !important;
+    height:0 !important;
+    overflow:hidden !important;
+    position:absolute !important;
+    left:-99999px !important;
+    top:-99999px !important;
+  }
+
+  @media (max-width: 1200px){
+    .filters-wrap{ padding: 0 10px; }
+    .filters-row-2{ grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 820px){
+    .filters-wrap{ padding: 0 8px; }
+  }
+
+  /* =========================================================
+     ✅ BARRA DE SELEÇÃO DE FACES
+     ========================================================= */
+  .selecao-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    padding: 0 12px 12px 12px;
+  }
+
+  .selecao-toolbar-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    min-width:0;
+  }
+
+  .selecao-toolbar-right{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .selecao-info{
+    font-size:11px;
+    font-weight:900;
+    color: var(--muted);
+    line-height:1.2;
+  }
+
+  .check-selecao-pagina{
+    width:18px;
+    height:18px;
+    accent-color: var(--euro-blue);
+    cursor:pointer;
+  }
+
+  .check-selecao-face{
+    width:18px;
+    height:18px;
+    accent-color: var(--euro-blue);
+    cursor:pointer;
+  }
+
+  @media (max-width: 980px){
+    .selecao-toolbar{
+      padding: 0 8px 12px 8px;
+    }
+  }
+
+  /* =========================================================
+     ✅ SELETOR DE PERÍODO
+     ========================================================= */
+  .periodo-shell{
+    position: relative;
+    width: 100%;
+    max-width: 520px;
+    flex: 0 1 auto;
+    min-width: 280px;
+  }
+
+  .periodo-topbar{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(2,6,23,.06);
+  }
+
+  .periodo-chip{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    font-weight: 800;
+    font-size: 12.9px;
+    color: rgba(15,23,42,.86);
+    cursor: pointer;
+    user-select: none;
+    transition: background .12s ease, border-color .12s ease, transform .12s ease;
+    white-space: nowrap;
+  }
+
+  .periodo-chip:hover{
+    background: rgba(37,99,235,.08);
+    border-color: rgba(37,99,235,.22);
+    transform: translateY(-1px);
+  }
+
+  .periodo-chip.ativo{
+    background: rgba(37,99,235,.14);
+    border-color: rgba(37,99,235,.30);
+    color: rgba(29,78,216,.98);
+  }
+
+  .periodo-open{
+    margin-left:auto;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    font-weight: 800;
+    font-size: 12.9px;
+    color: rgba(15,23,42,.90);
+    cursor:pointer;
+    user-select:none;
+    white-space: nowrap;
+  }
+
+  .periodo-open:hover{
+    background: rgba(2,132,199,.08);
+    border-color: rgba(2,132,199,.22);
+  }
+
+  .periodo-panel{
+    position:absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 420px;
+    max-width: 92vw;
+    background: #fff;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius: 14px;
+    box-shadow: 0 24px 44px rgba(2,6,23,.14);
+    padding: 10px;
+    z-index: 9999;
+    display:none;
+  }
+
+  .periodo-panel.aberto{
+    display:block;
+  }
+
+  .periodo-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding: 4px 6px 10px 6px;
+    border-bottom: 1px solid rgba(15,23,42,.10);
+    margin-bottom: 10px;
+  }
+
+  .periodo-ano{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-weight: 950;
+    font-size: 14px;
+    color: rgba(15,23,42,.92);
+  }
+
+  .periodo-nav{
+    width: 34px;
+    height: 30px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    cursor:pointer;
+    font-weight: 950;
+    color: rgba(15,23,42,.90);
+  }
+
+  .periodo-nav:hover{
+    background: rgba(37,99,235,.10);
+    border-color: rgba(37,99,235,.22);
+  }
+
+  .periodo-meses{
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 0 4px 10px 4px;
+  }
+
+  .periodo-mes{
+    height: 34px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: #fff;
+    font-weight: 950;
+    font-size: 12.3px;
+    color: rgba(15,23,42,.86);
+    cursor:pointer;
+  }
+
+  .periodo-mes:hover{
+    background: rgba(2,132,199,.08);
+    border-color: rgba(2,132,199,.22);
+  }
+
+  .periodo-mes.sel{
+    background: rgba(37,99,235,.14);
+    border-color: rgba(37,99,235,.30);
+    color: rgba(29,78,216,.98);
+  }
+
+  .periodo-range{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 10px 4px 8px 4px;
+    border-top: 1px solid rgba(15,23,42,.10);
+  }
+
+  .periodo-range label{
+    display:block;
+    font-weight: 900;
+    color: rgba(15,23,42,.72);
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .periodo-range input{
+    width: 100%;
+    height: 36px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.14);
+    padding: 0 10px;
+    font-weight: 900;
+    font-size: 13px;
+    color: rgba(15,23,42,.92);
+    background: #fff;
+  }
+
+  /* ✅ NOVO: BI-SEMANA */
+  .periodo-bisemana-solo{
+    padding: 2px 4px 8px 4px;
+  }
+
+  .periodo-bisemana-solo label{
+    display:block;
+    font-weight: 900;
+    color: rgba(15,23,42,.72);
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .periodo-bisemana-solo select{
+    width:100%;
+    height: 36px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.14);
+    padding: 0 10px;
+    font-weight: 900;
+    font-size: 13px;
+    color: rgba(15,23,42,.92);
+    background:#fff;
+    outline:none;
+  }
+
+  .periodo-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap: 10px;
+    padding: 8px 4px 2px 4px;
+  }
+
+  .periodo-btn{
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    font-weight: 950;
+    font-size: 13px;
+    cursor:pointer;
+    color: rgba(15,23,42,.90);
+  }
+
+  .periodo-btn:hover{
+    background: rgba(2,132,199,.08);
+    border-color: rgba(2,132,199,.22);
+  }
+
+  .periodo-btn.primary{
+    background: rgba(37,99,235,.92);
+    border-color: rgba(37,99,235,.92);
+    color: #fff;
+  }
+
+  .periodo-inputs-reais{
+    position:absolute;
+    width:1px;
+    height:1px;
+    overflow:hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+    border:0;
+    padding:0;
+    margin:-1px;
+  }
+
+  @media (max-width: 820px){
+    .periodo-shell{
+      max-width: 100%;
+      min-width: 0;
+    }
+    .periodo-panel{
+      right: 0;
+      left: auto;
+      width: min(92vw, 420px);
+    }
+  }
+
+  /* =========================================================
+     ✅ DROPDOWN CHECKLIST (details.dd)
+     ========================================================= */
+  .dd{
+    position: relative;
+    width: 100%;
+    height: 42px;
+    min-height: 42px;
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    z-index: 60;
+  }
+
+  .dd > summary.dd-summary{
+    list-style: none;
+    width: 100%;
+    height: 42px;
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 12px;
+    border: 1px solid rgba(15,23,42,.16);
+    border-radius: 12px;
+    background: #fff;
+    font-weight: 800;
+    font-size: 13.4px;
+    color: #0b1a3a;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 10px 22px rgba(2,6,23,.08);
+  }
+
+  .dd > summary.dd-summary::-webkit-details-marker{
+    display:none;
+  }
+
+  .dd .dd-label{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    letter-spacing:.2px;
+  }
+
+  .dd .dd-caret{
+    opacity: .75;
+    font-weight: 950;
+    transition: transform .12s ease;
+    flex: 0 0 auto;
+  }
+
+  .dd[open] .dd-caret{
+    transform: rotate(180deg);
+  }
+
+  .dd .dd-panel{
+    position: absolute;
+    left: 0;
+    top: calc(100% + 8px);
+    width: max(280px, 100%);
+    max-width: 92vw;
+    background: #fff;
+    border: 1px solid rgba(15,23,42,.16);
+    border-radius: 14px;
+    box-shadow: 0 24px 44px rgba(2,6,23,.14);
+    padding: 10px;
+    z-index: 9999;
+    max-height: 360px;
+    overflow: auto;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(15,23,42,.25) transparent;
+  }
+
+  .dd .dd-item{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 14px;
+    color: rgba(11,26,58,.98);
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid transparent;
+  }
+
+  .dd .dd-item:hover{
+    background: rgba(0,40,132,.07);
+    border-color: rgba(0,40,132,.16);
+  }
+
+  .dd .dd-item input[type="checkbox"]{
+    appearance: auto;
+    -webkit-appearance: auto;
+    -moz-appearance: auto;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    accent-color: var(--euro-blue);
+    background: #fff;
+    border: 1px solid rgba(15,23,42,.28);
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+
+  .dd .dd-item span{
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: .15px;
+  }
+
+  /* =========================================================
+     ✅ LAYOUT: SEM SIDEBAR
+     ========================================================= */
+  .paneis-layout,
+  .paineis-layout{
+    display:block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .facet-aside{
+    display:none !important;
+  }
+
+  .facet-main{
+    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* =========================================================
+     ✅ FACET / SIDEBAR
+     ========================================================= */
+  .facet-card{
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    box-shadow: 0 10px 18px rgba(2,6,23,.06);
+    overflow:hidden;
+  }
+
+  .facet-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding: 9px 9px;
+    border-bottom:1px solid var(--border);
+    background: rgba(0,40,132,.03);
+  }
+
+  .facet-title{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-weight:900;
+    color: var(--euro-blue);
+    font-size:11px;
+    letter-spacing:.2px;
+    white-space:nowrap;
+  }
+
+  .facet-count{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:5px 8px;
+    border:1px solid var(--border);
+    border-radius: 999px;
+    background:#fff;
+    font-weight:900;
+    font-size:11px;
+    color:#0b1a3a;
+    white-space:nowrap;
+  }
+
+  .facet-body{
+    padding: 9px;
+    display:flex;
+    flex-direction:column;
+    gap: 9px;
+  }
+
+  .facet-group{
+    border:1px solid var(--border);
+    border-radius: 12px;
+    background:#fff;
+    overflow:hidden;
+  }
+
+  .facet-group summary{
+    list-style:none;
+    cursor:pointer;
+    user-select:none;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding: 8px 9px;
+    font-weight: 900;
+    font-size:11px;
+    color:#0b1a3a;
+    background: rgba(2,6,23,.02);
+  }
+
+  .facet-group summary::-webkit-details-marker{
+    display:none;
+  }
+
+  .facet-group .facet-content{
+    padding: 9px;
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+  }
+
+  .facet-mini{
+    font-size:10px;
+    font-weight:900;
+    color: var(--muted);
+    line-height:1.25;
+  }
+
+  .facet-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    padding-top: 2px;
+  }
+
+  .facet-actions .btn-pill{
+    flex: 1 1 auto;
+    justify-content:center;
+    height:36px;
+    padding:0 9px;
+    border-radius:10px;
+    font-size:11px;
+  }
+
+  .facet-aside select,
+  .facet-aside input[type="text"],
+  .facet-aside input[type="number"]{
+    height:36px;
+    padding:0 9px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:#fff;
+    font-weight:900;
+    color: var(--text);
+    outline:none;
+    width:100%;
+    font-size:11px;
+  }
+
+  .facet-checklist{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    max-height: 220px;
+    overflow:auto;
+    padding-right: 2px;
+  }
+
+  .facet-checkitem{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-weight:900;
+    font-size:11px;
+    color:#0b1a3a;
+    white-space:nowrap;
+    min-width:0;
+  }
+
+  .facet-checkitem input[type="checkbox"]{
+    width:16px;
+    height:16px;
+    border-radius:4px;
+    accent-color: var(--euro-blue);
+    cursor:pointer;
+    flex: 0 0 auto;
+  }
+
+  .facet-checkitem .label{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  /* =========================================================
+     ✅ GRID DA LISTA
+     ========================================================= */
+  .grid-scroll-x{
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .grid-inner{
+    width: 100%;
+    min-width: 0;
+    --grid-cols: {{ GRID_COLS }};
+  }
+
+  @media (max-width: 1600px){
+    .grid-inner{
+      --grid-cols: 30px clamp(104px, 6.4vw, 126px) 30px minmax(158px, 1.26fr) minmax(76px, 0.62fr) 32px minmax(88px, 0.68fr) minmax(138px, 0.94fr) minmax(68px, 0.50fr) 56px minmax(154px, 0.84fr) 92px;
+    }
+  }
+
+  @media (max-width: 1440px){
+    .grid-inner{
+      --grid-cols: 28px clamp(98px, 6vw, 118px) 28px minmax(146px, 1.18fr) minmax(70px, 0.58fr) 30px minmax(80px, 0.62fr) minmax(128px, 0.88fr) minmax(64px, 0.46fr) 50px minmax(144px, 0.78fr) 88px;
+    }
+  }
+
+  @media (max-width: 1280px){
+    .grid-inner{
+      --grid-cols: 26px clamp(92px, 5.5vw, 110px) 26px minmax(136px, 1.08fr) minmax(64px, 0.54fr) 28px minmax(72px, 0.56fr) minmax(118px, 0.82fr) minmax(58px, 0.40fr) 46px minmax(132px, 0.72fr) 84px;
+    }
+  }
+
+  .paneis-grid.paneis-grid--head,
+  .paneis-grid.paneis-grid--row{
+    display: grid !important;
+    grid-template-columns: var(--grid-cols) !important;
+    gap: 0 !important;
+    align-items: center !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .paneis-grid > *{
+    min-width:0;
+  }
+
+  .paneis-grid--head{
+    padding: 8px 6px;
+    border-bottom:1px solid var(--border);
+    background: rgba(0,40,132,.03);
+    font-weight:900;
+    color: var(--euro-blue);
+    font-size: clamp(9.6px, 0.68vw, 10.8px);
+  }
+
+  .paneis-grid--row{
+    padding: 8px 6px;
+    border-bottom:1px solid var(--border);
+    background:#fff;
+    font-size: clamp(10px, 0.72vw, 11px);
+  }
+
+  .paneis-grid [data-ocupacao-bar]{
+    width:100% !important;
+    max-width:100% !important;
+    height: 20px;
+  }
+
+  /* =========================================================
+     ✅ HELPERS DE CÉLULA
+     ========================================================= */
+  .codface-cell{
+    overflow: hidden !important;
+  }
+
+  .codface-codigo{
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 15px;
+    font-weight: 900;
+    color: var(--euro-blue);
+    line-height: 1;
+  }
+
+  @media (max-width: 1440px){
+    .codface-codigo{
+      font-size: 14px;
+    }
+  }
+
+  .cell-formato{
+    min-width:0;
+    overflow:hidden;
+  }
+
+  .cell-formato > span{
+    display:block;
+    width:100%;
+    min-width:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    font-size:10.4px;
+    font-weight:900;
+  }
+
+  /* =========================================================
+     ✅ FIX: alinhamento consistente das células
+     ========================================================= */
+  .paneis-grid--head > div,
+  .paneis-grid--row > div{
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .paneis-grid--row > div{
+    font-size: 10.4px;
+  }
+
+  .paneis-grid--head > div{
+    font-size: inherit;
+  }
+
+  /* ✅ OCUPAÇÃO */
+  .paneis-grid--row .cell-ocupacao{
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    justify-content:flex-start !important;
+    overflow: visible !important;
+    gap: 5px;
+    min-width:0 !important;
+    width:100%;
+  }
+
+  .paneis-grid--row .cell-ocupacao .ocupacao-legenda{
+    margin-top: 0 !important;
+    display:flex;
+    align-items:flex-start;
+    gap:6px;
+    flex-wrap:wrap;
+    line-height:1.12;
+    font-size:9.6px;
+  }
+
+  .paneis-grid--row .cell-ocupacao .ocupacao-legenda > span{
+    font-size:9.8px !important;
+  }
+
+  .cell-ocupacao [data-ocupacao-bar] > div:last-child{
+    font-size:10.6px !important;
+    padding:0 5px !important;
+  }
+
+  .paneis-grid--head .cell-ocupacao,
+  .paneis-grid--row .cell-ocupacao{
+    justify-content: center !important;
+    overflow: visible;
+  }
+
+  .paneis-grid--head .cell-opcoes,
+  .paneis-grid--row .cell-opcoes{
+    justify-content: center !important;
+    overflow: visible;
+  }
+
+  .paneis-grid--head > div:nth-child(3),
+  .paneis-grid--row > div:nth-child(3){
+    justify-content: center !important;
+  }
+
+  /* =========================================================
+     ✅ TIPO
+     ========================================================= */
+  .tipo-wrap{
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+    min-width:0;
+    max-width:100%;
+    overflow:hidden;
+  }
+
+  .tipo-toprow{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:8px;
+    min-width:0;
+  }
+
+  .tipo-exibidora-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-width:0;
+    flex-wrap:wrap;
+  }
+
+  .tipo-exibidora{
+    font-weight: 950;
+    font-size: 10px;
+    color:#0b1a3a;
+    letter-spacing:.08px;
+    text-transform: uppercase;
+    min-width:0;
+    max-width: 100%;
+    overflow:hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .meta-icos{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .meta-ico{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:16px;
+    height:16px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    background:#fff;
+    box-shadow: 0 2px 10px rgba(0,0,0,.04);
+    user-select:none;
+    overflow:hidden;
+    flex: 0 0 auto;
+    font-size:9px;
+  }
+
+  .meta-ico img{
+    width:11px;
+    height:11px;
+    object-fit:contain;
+    display:block;
+    opacity:.92;
+  }
+
+  /* =========================================================
+     ✅ ENDEREÇO
+     ========================================================= */
+  .tp-subrow{
+    margin-top:1px;
+    display:block;
+    min-width:0;
+    overflow:hidden;
+  }
+
+  .tp-subrow .addr{
+    display:block;
+    min-width:0;
+    line-height:1.1;
+    white-space:normal;
+    word-break:break-word;
+    font-size:9.9px;
+  }
+
+  .tp-subrow .addr .ref-line{
+    display:block;
+    margin-top:1px;
+    opacity:.92;
+  }
+
+  /* =========================================================
+     ✅ TEXTO COM QUEBRA SEGURA
+     ========================================================= */
+  .cell-text-wrap{
+    display:-webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow:hidden;
+    width:100%;
+    min-width:0;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+    line-height:1.12;
+    font-size:10.2px;
+  }
+
+  .cell-text-wrap--strong{
+    font-weight:900;
+    color: var(--text);
+  }
+
+  .cell-text-wrap--muted{
+    color: var(--text);
+    opacity:.96;
+  }
+
+  /* =========================================================
+     ✅ OPÇÕES + OCUPAÇÃO
+     ========================================================= */
+  .cell-ocupacao{
+    align-self:flex-start;
+    min-width:0;
+  }
+
+  .cell-opcoes{
+    align-self: start !important;
+    justify-self: center !important;
+    display:flex !important;
+    justify-content:center !important;
+    align-items:flex-start !important;
+    gap:8px !important;
+    min-width:0 !important;
+    padding-top: 0 !important;
+  }
+
+  .cell-opcoes a.btn{
+    box-sizing: border-box !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:7px !important;
+    height: 32px !important;
+    padding: 0 10px !important;
+    border-radius: 10px !important;
+    width: 100% !important;
+    max-width: 110px !important;
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 11.6px !important;
+    font-weight: 900 !important;
+  }
+
+  .cell-opcoes a.btn .btn-ico{
+    flex: 0 0 auto;
+    font-weight: 950;
+    font-size: 12px;
+  }
+
+  .cell-opcoes a.btn .btn-label{
+    min-width:0 !important;
+    overflow:hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  @media (max-width: 1650px){
+    .cell-opcoes a.btn{
+      width: 40px !important;
+      max-width: 40px !important;
+      padding: 0 !important;
+      border-radius: 10px !important;
+    }
+    .cell-opcoes a.btn .btn-label{
+      display:none !important;
+    }
+  }
+
+  @media (max-width: 1100px){
+    .cell-opcoes a.btn{
+      padding: 0 9px !important;
+      font-size: 11.2px !important;
+    }
+  }
+
+  @media (max-width: 980px){
+    .cell-opcoes a.btn{
+      width: 40px !important;
+      max-width: 40px !important;
+      padding: 0 !important;
+    }
+    .cell-opcoes a.btn .btn-label{
+      display:none !important;
+    }
+  }
+
+  /* =========================================================
+     ✅ MOBILE
+     ========================================================= */
+  @media (max-width: 820px){
+    .paneis-grid--head{
+      display:none !important;
+    }
+
+    .paneis-grid.paneis-grid--row{
+      grid-template-columns: 34px minmax(0, 1fr) !important;
+      align-items:start !important;
+      row-gap:10px !important;
+      min-width: 0 !important;
+      width: 100% !important;
+    }
+
+    .paneis-grid--row > :nth-child(3),
+    .paneis-grid--row > :nth-child(5),
+    .paneis-grid--row > :nth-child(6),
+    .paneis-grid--row > :nth-child(7),
+    .paneis-grid--row > :nth-child(8),
+    .paneis-grid--row > :nth-child(9),
+    .paneis-grid--row > :nth-child(10){
+      display:none !important;
+    }
+
+    .paneis-grid--row > :nth-child(1){ grid-column:1; grid-row:1; }
+    .paneis-grid--row > :nth-child(2){ grid-column:2; grid-row:1; }
+    .paneis-grid--row > :nth-child(12){ grid-column:2; grid-row:2; justify-self:end; }
+    .paneis-grid--row > :nth-child(4){ grid-column:2; grid-row:3; }
+    .paneis-grid--row > :nth-child(11){ grid-column:1 / -1; grid-row:4; }
+
+    .paneis-grid--row [data-ocupacao-bar]{
+      height:24px !important;
+      border-radius:12px !important;
+      max-width:100% !important;
+    }
+
+    .grid-inner{
+      width: 100%;
+      min-width: 0;
+    }
+
+    .paneis-grid{
+      min-width: 0;
+      width: 100%;
+    }
+  }
+
+  /* =========================================================
+     ✅ PAGINAÇÃO
+     ========================================================= */
+  @media (max-width: 980px){
+    .paginacao-shell{
+      display:flex !important;
+      flex-direction:column !important;
+      align-items:stretch !important;
+      gap:10px !important;
+      min-height:auto !important;
+    }
+
+    .paginacao-shell .pagi-left,
+    .paginacao-shell .pagi-right{
+      max-width:none !important;
+      justify-content:center !important;
+    }
+
+    .paginacao-shell .pagi-center{
+      position:static !important;
+      left:auto !important;
+      top:auto !important;
+      transform:none !important;
+      justify-content:center !important;
+      flex-wrap:wrap !important;
+    }
+  }
+</style>
+
+  <div class="page-wrap">
+    <div class="page-inner">
+
+      <div style="padding:0 0 0 0;">
+        <div style="display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0;">
+            <h1 class="page-title" style="margin:0;white-space:nowrap;">Lista de Painéis</h1>
+            <span style="
+              display:inline-flex;
+              align-items:center;
+              gap:8px;
+              padding:6px 10px;
+              border:1px solid var(--border);
+              border-radius:10px;
+              background:#fff;
+              font-weight:800;
+              color: var(--euro-blue);
+              white-space:nowrap;
+            ">
+              ☰ {{ paginacao.total }}
+            </span>
+          </div>
+
+          <div class="muted" style="
+            font-weight:700;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            max-width:min(45vw, 560px);
+          ">
+            {{ filtros.periodo_label }}
+          </div>
+        </div>
+        <div style="height:14px;"></div>
+      </div>
+
+      <form id="formListaPaineis" method="GET" action="{{ url_for('Paineis.lista_paineis') }}">
+        <div class="filters-wrap">
+          <div class="filters-top-shell">
+
+            <div class="filters-row-1">
+
+              <!-- ✅ CIDADE (cidade_exibicao) -->
+              <details class="dd" data-dd="cidade_exibicao">
+                <summary class="dd-summary">
+                  <span class="dd-label">Cidade</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="cidade_exibicao" value="" data-dd-all="1"
+                      {% if (filtros.cidade_exibicao or [])|length == 0 %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=cidade_exibicao]') : [];
+                          if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                        })(this);
+                      ">
+                    <span>(Todas)</span>
+                  </label>
+                  {% for c in (cidades_exibicao or []) %}
+                    <label class="dd-item">
+                      <input type="checkbox" name="cidade_exibicao" value="{{ c }}"
+                        {% if c in (filtros.cidade_exibicao or []) %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const todos = dd ? dd.querySelector('input[type=checkbox][name=cidade_exibicao][value=\"\"]') : null;
+                            if(el.checked && todos) todos.checked = false;
+                          })(this);
+                        ">
+                      <span>{{ c }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
+
+              <select name="cidade" class="legacy-hidden" disabled><option value="">Cidade</option></select>
+
+              <select name="cidade_exibicao__single" class="legacy-hidden" disabled>
+                <option value="">Cidade</option>
+                {% for c in (cidades_exibicao or []) %}
+                  <option value="{{ c }}" {% if c in (filtros.cidade_exibicao or []) %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+              </select>
+
+              <!-- ✅ TIPO (tipo) -->
+              <details class="dd" data-dd="tipo">
+                <summary class="dd-summary">
+                  <span class="dd-label">Tipo Produto</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="tipo" value="" data-dd-all="1"
+                      {% if (filtros.tipo or [])|length == 0 %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=tipo]') : [];
+                          if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                        })(this);
+                      ">
+                    <span>(Todos)</span>
+                  </label>
+                  {% for t in (tipos or []) %}
+                    <label class="dd-item">
+                      <input type="checkbox" name="tipo" value="{{ t }}"
+                        {% if t in (filtros.tipo or []) %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const todos = dd ? dd.querySelector('input[type=checkbox][name=tipo][value=\"\"]') : null;
+                            if(el.checked && todos) todos.checked = false;
+                          })(this);
+                        ">
+                      <span>{{ t }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
+
+              <select name="tipo__single" class="legacy-hidden" disabled>
+                <option value="">Tipo Produto</option>
+                {% for t in (tipos or []) %}
+                  <option value="{{ t }}" {% if t in (filtros.tipo or []) %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+              </select>
+
+              {% if filtros.pode_ver_exibidora %}
+              <details class="dd" data-dd="exibidora">
+                <summary class="dd-summary">
+                  <span class="dd-label">Exibidora</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="exibidora" value="" data-dd-all="1"
+                      {% if (filtros.exibidora or [])|length == 0 %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=exibidora]') : [];
+                          if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                        })(this);
+                      ">
+                    <span>(Todas)</span>
+                  </label>
+                  {% for e in (exibidoras or []) %}
+                    <label class="dd-item">
+                      <input type="checkbox" name="exibidora" value="{{ e }}"
+                        {% if e in (filtros.exibidora or []) %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const todos = dd ? dd.querySelector('input[type=checkbox][name=exibidora][value=\"\"]') : null;
+                            if(el.checked && todos) todos.checked = false;
+                          })(this);
+                        ">
+                      <span>{{ e }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
+              {% endif %}
+
+              <select name="exibidora__single" class="legacy-hidden" disabled>
+                <option value="">Exibidora</option>
+                {% for e in (exibidoras or []) %}
+                  <option value="{{ e }}" {% if e in (filtros.exibidora or []) %}selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+              </select>
+
+              <details class="dd" data-dd="tipo_documento">
+                <summary class="dd-summary">
+                  <span class="dd-label">Tipo Documento</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="tipo_documento" value="" data-dd-all="1"
+                      {% if (filtros.tipo_documento or [])|length == 0 %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=tipo_documento]') : [];
+                          if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                        })(this);
+                      ">
+                    <span>(Todos)</span>
+                  </label>
+                  {% for td in (tipos_documento or []) %}
+                    <label class="dd-item">
+                      <input type="checkbox" name="tipo_documento" value="{{ td }}"
+                        {% if td in (filtros.tipo_documento or []) %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const todos = dd ? dd.querySelector('input[type=checkbox][name=tipo_documento][value=\"\"]') : null;
+                            if(el.checked && todos) todos.checked = false;
+                          })(this);
+                        ">
+                      <span>{{ td }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
+
+              <select name="tipo_documento__single" class="legacy-hidden" disabled>
+                <option value="">Tipo Documento</option>
+                {% for td in (tipos_documento or []) %}
+                  <option value="{{ td }}"
+                    {% if (filtros.tipo_documento or [])|length and (td in (filtros.tipo_documento or [])) %}selected{% endif %}>
+                    {{ td }}
+                  </option>
+                {% endfor %}
+              </select>
+
+              <details class="dd" data-dd="vendedor">
+                <summary class="dd-summary">
+                  <span class="dd-label">Vendedor</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="vendedor" value="" data-dd-all="1"
+                      {% if (filtros.vendedor or [])|length == 0 %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=vendedor]') : [];
+                          if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                        })(this);
+                      ">
+                    <span>(Todos)</span>
+                  </label>
+                  {% for v in (vendedores_contrato or []) %}
+                    <label class="dd-item">
+                      <input type="checkbox" name="vendedor" value="{{ v }}"
+                        {% if v in (filtros.vendedor or []) %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const todos = dd ? dd.querySelector('input[type=checkbox][name=vendedor][value=\"\"]') : null;
+                            if(el.checked && todos) todos.checked = false;
+                          })(this);
+                        ">
+                      <span>{{ v }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
+
+              <select name="vendedor__single" class="legacy-hidden" disabled>
+                <option value="">Vendedor</option>
+                {% for v in (vendedores_contrato or []) %}
+                  <option value="{{ v }}" {% if v in (filtros.vendedor or []) %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+              </select>
+
+              <details class="dd" data-dd="marca_exibida">
+                <summary class="dd-summary">
+                  <span class="dd-label">Marca Exibida</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="marca_exibida" value="" data-dd-all="1"
+                      {% if (filtros.marca_exibida or [])|length == 0 %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=marca_exibida]') : [];
+                          if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                        })(this);
+                      ">
+                    <span>(Todas)</span>
+                  </label>
+                  {% for m in (marcas_exibidas or []) %}
+                    <label class="dd-item">
+                      <input type="checkbox" name="marca_exibida" value="{{ m }}"
+                        {% if m in (filtros.marca_exibida or []) %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const todos = dd ? dd.querySelector('input[type=checkbox][name=marca_exibida][value=\"\"]') : null;
+                            if(el.checked && todos) todos.checked = false;
+                          })(this);
+                        ">
+                      <span>{{ m }}</span>
+                    </label>
+                  {% endfor %}
+                </div>
+              </details>
+
+              <select name="marca_exibida__single" class="legacy-hidden" disabled>
+                <option value="">Marca Exibida</option>
+                {% for m in (marcas_exibidas or []) %}
+                  <option value="{{ m }}" {% if m in (filtros.marca_exibida or []) %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+              </select>
+
+              <details class="dd" data-dd="status">
+                <summary class="dd-summary">
+                  <span class="dd-label">Status</span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+                <div class="dd-panel">
+                  <label class="dd-item">
+                    <input type="checkbox" name="status" value="todos" data-dd-all="1"
+                      {% if 'todos' in (filtros.status or ['todos']) %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=status]') : [];
+                          if(el.checked){
+                            itens.forEach(x => { if(x !== el) x.checked = false; });
+                            el.checked = true;
+                          }
+                        })(this);
+                      ">
+                    <span>Todos</span>
+                  </label>
+
+                  <label class="dd-item">
+                    <input type="checkbox" name="status" value="livre"
+                      {% if 'livre' in (filtros.status or []) %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const todos = dd ? dd.querySelector('input[type=checkbox][name=status][value=todos]') : null;
+                          if(el.checked && todos) todos.checked = false;
+                        })(this);
+                      ">
+                    <span>Livre</span>
+                  </label>
+
+                  <label class="dd-item">
+                    <input type="checkbox" name="status" value="ocupado"
+                      {% if 'ocupado' in (filtros.status or []) %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const todos = dd ? dd.querySelector('input[type=checkbox][name=status][value=todos]') : null;
+                          if(el.checked && todos) todos.checked = false;
+                        })(this);
+                      ">
+                    <span>Ocupado</span>
+                  </label>
+
+                  <label class="dd-item">
+                    <input type="checkbox" name="status" value="com_conflito"
+                      {% if 'com_conflito' in (filtros.status or []) %}checked{% endif %}
+                      onclick="
+                        (function(el){
+                          const dd = el.closest('.dd');
+                          const todos = dd ? dd.querySelector('input[type=checkbox][name=status][value=todos]') : null;
+                          if(el.checked && todos) todos.checked = false;
+                        })(this);
+                      ">
+                    <span>Com conflito</span>
+                  </label>
+                </div>
+              </details>
+
+              <select name="status__single" class="legacy-hidden" disabled>
+                <option value="todos" {% if 'todos' in (filtros.status or ['todos']) %}selected{% endif %}>Status</option>
+                <option value="livre" {% if 'livre' in (filtros.status or []) %}selected{% endif %}>Livre</option>
+                <option value="ocupado" {% if 'ocupado' in (filtros.status or []) %}selected{% endif %}>Ocupado</option>
+                <option value="com_conflito" {% if 'com_conflito' in (filtros.status or []) %}selected{% endif %}>Com conflito</option>
+              </select>
+
+              <button class="btn btn-primary" type="submit" style="display:flex;align-items:center;gap:8px;justify-content:center;">
+                ⛭ Filtrar
+              </button>
+
+              <a class="btn btn-secondary js-preservar-faces-url"
+                 data-preservar-faces="1"
+                 href="{{ url_for('Paineis.lista_paineis', per_page=filtros.per_page) }}"
+                 style="text-decoration:none;display:flex;align-items:center;gap:8px;justify-content:center;"
+                 title="Remove todos os filtros e volta ao padrão">
+                ⌫ Limpar Filtros
+              </a>
+
+            </div>
+
+            <div class="filters-row-2">
+              <div class="search-periodo-wrap">
+                <input class="search-big" name="q" type="text" value="{{ filtros.q }}"
+                       placeholder="Buscar CodFace (ou lista: 118AD, 119AD...) ou CNPJ (14 dígitos)..."
+                       autocomplete="off" style="flex:1;min-width:220px;">
+
+                <details class="dd" data-dd="formato" style="flex:0 1 300px;min-width:240px;max-width:340px;">
+                  <summary class="dd-summary">
+                    <span class="dd-label">Formato</span>
+                    <span class="dd-caret">▾</span>
+                  </summary>
+                  <div class="dd-panel">
+                    <label class="dd-item">
+                      <input type="checkbox" name="formato" value="" data-dd-all="1"
+                        {% if (filtros.formato or [])|length == 0 %}checked{% endif %}
+                        onclick="
+                          (function(el){
+                            const dd = el.closest('.dd');
+                            const itens = dd ? dd.querySelectorAll('input[type=checkbox][name=formato]') : [];
+                            if(el.checked){ itens.forEach(x => { if(x !== el) x.checked = false; }); }
+                          })(this);
+                        ">
+                      <span>(Todos)</span>
+                    </label>
+                    {% for f in (altxlarg_opcoes or []) %}
+                      <label class="dd-item">
+                        <input type="checkbox" name="formato" value="{{ f }}"
+                          {% if f in (filtros.formato or []) %}checked{% endif %}
+                          onclick="
+                            (function(el){
+                              const dd = el.closest('.dd');
+                              const todos = dd ? dd.querySelector('input[type=checkbox][name=formato][value=\"\"]') : null;
+                              if(el.checked && todos) todos.checked = false;
+                            })(this);
+                          ">
+                        <span>{{ f }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </details>
+
+                <select name="formato__single" class="legacy-hidden" disabled>
+                  <option value="">Formato</option>
+                  {% for f in (altxlarg_opcoes or []) %}
+                    <option value="{{ f }}" {% if f in (filtros.formato or []) %}selected{% endif %}>{{ f }}</option>
+                  {% endfor %}
+                </select>
+
+                <details class="dd" data-dd="ponto_ativo" data-dd-mode="single" style="flex:0 1 240px;min-width:210px;max-width:280px;">
+                  <summary class="dd-summary">
+                    <span class="dd-label">Painéis</span>
+                    <span class="dd-caret">▾</span>
+                  </summary>
+                  <div class="dd-panel">
+                    <label class="dd-item">
+                      <input type="checkbox" name="ponto_ativo_ui" value="1"
+                        {% if ponto_ativo_val == '1' %}checked{% endif %}>
+                      <span>Ativos</span>
+                    </label>
+
+                    <label class="dd-item">
+                      <input type="checkbox" name="ponto_ativo_ui" value="0"
+                        {% if ponto_ativo_val == '0' %}checked{% endif %}>
+                      <span>Inativos</span>
+                    </label>
+
+                    <label class="dd-item">
+                      <input type="checkbox" name="ponto_ativo_ui" value="todos"
+                        {% if ponto_ativo_val == '' %}checked{% endif %}>
+                      <span>Todos</span>
+                    </label>
+                  </div>
+                </details>
+
+                <div class="periodo-shell" id="periodoShell"
+                     title="Período usado para calcular ocupação (DataInicioPrevisto/DataTerminoPrevisto)">
+
+                  <div class="periodo-topbar">
+                    <span class="periodo-chip ativo" data-modo="dia">Dia</span>
+                    <span class="periodo-chip" data-modo="semana">Semana</span>
+                    <span class="periodo-chip" data-modo="mes">Mês</span>
+                    <span class="periodo-chip" data-modo="ano">Ano</span>
+                    <span class="periodo-chip" id="btnHoje">Hoje</span>
+
+                    <span class="periodo-open" id="btnAbrirPeriodo" title="Abrir seletor de período">
+                      <span id="lblPeriodoTopo">Período</span>
+                      <span style="font-weight:950;opacity:.85;">▾</span>
+                    </span>
+                  </div>
+
+                  <div class="periodo-panel" id="periodoPanel">
+                    <div class="periodo-header">
+                      <button type="button" class="periodo-nav" id="anoPrev">‹</button>
+                      <div class="periodo-ano"><span id="lblAno">2026</span></div>
+                      <button type="button" class="periodo-nav" id="anoNext">›</button>
+                    </div>
+
+                    <div class="periodo-meses" id="gridMeses">
+                      <button type="button" class="periodo-mes" data-mes="01">JANEIRO</button>
+                      <button type="button" class="periodo-mes" data-mes="02">FEVEREIRO</button>
+                      <button type="button" class="periodo-mes" data-mes="03">MARÇO</button>
+                      <button type="button" class="periodo-mes" data-mes="04">ABRIL</button>
+                      <button type="button" class="periodo-mes" data-mes="05">MAIO</button>
+                      <button type="button" class="periodo-mes" data-mes="06">JUNHO</button>
+                      <button type="button" class="periodo-mes" data-mes="07">JULHO</button>
+                      <button type="button" class="periodo-mes" data-mes="08">AGOSTO</button>
+                      <button type="button" class="periodo-mes" data-mes="09">SETEMBRO</button>
+                      <button type="button" class="periodo-mes" data-mes="10">OUTUBRO</button>
+                      <button type="button" class="periodo-mes" data-mes="11">NOVEMBRO</button>
+                      <button type="button" class="periodo-mes" data-mes="12">DEZEMBRO</button>
+                    </div>
+
+                    <div class="periodo-range">
+                      <div>
+                        <label>De</label>
+                        <input type="date" id="pickerDe" value="">
+                      </div>
+                      <div>
+                        <label>Até</label>
+                        <input type="date" id="pickerAte" value="">
+                      </div>
+                    </div>
+
+                    {# ✅ NOVO: BI-SEMANA #}
+                    <div class="periodo-bisemana-solo">
+                      <div style="grid-column: 1 / -1;">
+                        <label>Bi-Semana</label>
+                        <select id="selBiSemana" name="bi_semana" aria-label="Selecionar bi-semana">
+                          <option value="">Selecione...</option>
+                          {% for bi in (bisemanas_select or []) %}
+                            <option
+                              value="{{ bi.value }}"
+                              data-inicio="{{ bi.inicio }}"
+                              data-fim="{{ bi.fim }}"
+                              {% if (filtros.bi_semana or filtros.bisemana or '')|string == (bi.value|string) %}selected{% endif %}>
+                              {{ bi.label }}
+                            </option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="periodo-actions">
+                      <button type="button" class="periodo-btn" id="btnFecharPeriodo">Fechar</button>
+                      <button type="button" class="periodo-btn primary" id="btnAplicarPeriodo">Filtrar</button>
+                    </div>
+                  </div>
+
+                  <div class="periodo-inputs-reais">
+                    <input type="date" id="dtIniReal" name="dt_ini" value="{{ filtros.dt_ini or '' }}">
+                    <input type="date" id="dtFimReal" name="dt_fim" value="{{ filtros.dt_fim or '' }}">
+                  </div>
+                </div>
+              </div>
+
+              <a class="btn-pill danger js-preservar-faces-url"
+                 data-preservar-faces="1"
+                 href="{{ url_for('Paineis.lista_paineis', tudo=1, per_page=filtros.per_page) }}"
+                 title="Traz tudo e desmarca todos os filtros"
+                 style="flex:0 0 auto;">
+                ⌁ Filtrar tudo
+              </a>
+            </div>
+
+          </div>
+        </div>
+
+        <input type="hidden" name="per_page" value="{{ filtros.per_page }}">
+        <input type="hidden" name="altxlarg" value="{{ filtros.altxlarg or '' }}">
+        <input type="hidden" name="iluminado" value="{{ filtros.iluminado or '' }}">
+        <input type="hidden" name="area_min" value="{{ filtros.area_min if filtros.area_min is not none else '' }}">
+        <input type="hidden" name="area_max" value="{{ filtros.area_max if filtros.area_max is not none else '' }}">
+        <input type="hidden" id="pontoAtivoReal" name="ponto_ativo" value="{{ filtros.ponto_ativo if filtros.ponto_ativo is not none else '1' }}">
+
+        <div id="facesSelecionadasContainer"></div>
+
+        <div style="height:14px;"></div>
+
+        <div class="selecao-toolbar">
+          <div class="selecao-toolbar-left">
+            <span id="facesSelecionadasBadge" class="facet-count">0 face(s) selecionada(s)</span>
+            <span id="facesSelecionadasInfo" class="selecao-info">
+              Selecione faces para reaplicar os filtros somente nelas e abrir a grade filtrada.
+            </span>
+          </div>
+
+          <div class="selecao-toolbar-right">
+            <button type="button" id="btnAbrirGradesSelecionadas" class="btn-pill">
+              ⊞ Abrir grades selecionadas
+            </button>
+            <button type="button" id="btnLimparFacesSelecionadas" class="btn-pill danger">
+              ⌫ Limpar seleção
+            </button>
+          </div>
+        </div>
+
+        <div class="paneis-layout">
+
+          <main class="facet-main">
+
+            <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff; width:100%;">
+
+              <div class="grid-scroll-x">
+                <div class="grid-inner" style="--grid-cols: {{ GRID_COLS }};">
+
+                  <div class="paneis-grid paneis-grid--head">
+                    <div>
+                      <input
+                        type="checkbox"
+                        id="selecionarFacesPagina"
+                        class="check-selecao-pagina"
+                        title="Selecionar ou desmarcar todas as faces desta página"
+                        aria-label="Selecionar todas as faces desta página">
+                    </div>
+                    <div>CodFace <span class="muted" style="font-weight:900;">+</span></div>
+                    <div style="display:flex;align-items:center;justify-content:center;">
+                      <img src="{{ url_for('static', filename='imagens/painel-publicitario.png') }}"
+                           alt="Painel" title="Painel"
+                           style="width:18px;height:18px;opacity:.75;" draggable="false">
+                    </div>
+                    <div style="color:var(--text);font-weight:900;">Tipo</div>
+                    <div style="color:var(--text);font-weight:900;">Cidade</div>
+                    <div style="color:var(--text);font-weight:900;">UF</div>
+                    <div style="color:var(--text);font-weight:900;">Bairro</div>
+                    <div style="color:var(--text);font-weight:900;">Ponto Referência</div>
+                    <div style="color:var(--text);font-weight:900;">Formato</div>
+                    <div style="color:var(--text);font-weight:900;">N° Faces</div>
+                    <div style="color:var(--text);font-weight:900;">Ocupação</div>
+                    <div style="color:var(--text);font-weight:900;">Opções</div>
+                  </div>
+
+                  {% for x in itens %}
+                    {% set mostrar_infra_abaixo = (request.args.get('infra') or '')|string == '1' %}
+
+                    <div class="paneis-grid paneis-grid--row">
+
+                      <div>
+                        <input
+                          type="checkbox"
+                          class="check-selecao-face js-face-select"
+                          data-codface="{{ x.CodFace }}"
+                          data-codponto="{{ x.CodPonto }}"
+                          aria-label="Selecionar face {{ x.CodFace }}"
+                          title="Selecionar face {{ x.CodFace }}">
+                      </div>
+
+                      <div class="codface-cell"
+                           style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:0;"
+                           ondblclick="window.location.href='{{ url_for('Paineis.painel_detalhes', codponto=x.CodPonto) }}'"
+                           title="Duplo clique para ver detalhes do painel (CodPonto {{ x.CodPonto }})">
+                        <div class="codface-codigo">
+                          {{ x.CodFace }}
+                        </div>
+                        <div style="
+                          width:34px;height:26px;
+                          border:1px solid var(--border);
+                          border-radius:8px;
+                          display:flex;align-items:center;justify-content:center;
+                          color: var(--muted);
+                          font-weight:900;
+                          flex:0 0 auto;
+                        " title="CodPonto: {{ x.CodPonto }}">
+                          ≡
+                        </div>
+                      </div>
+
+                      <div style="display:flex;align-items:center;justify-content:center;">
+                        <img src="{{ url_for('static', filename='imagens/painel-publicitario.png') }}"
+                             alt="Painel" title="Abrir detalhes do painel"
+                             style="width:28px;height:28px;opacity:.95;filter: drop-shadow(0 2px 6px rgba(0,0,0,.10));"
+                             draggable="false">
+                      </div>
+
+                      <div style="min-width:0;">
+                        {% set tp = (x.TipoProd or x.Tipo or '')|trim|upper %}
+                        {% set tp_cls = tp
+                          | replace('Á','A') | replace('À','A') | replace('Â','A') | replace('Ã','A')
+                          | replace('É','E') | replace('Ê','E')
+                          | replace('Í','I')
+                          | replace('Ó','O') | replace('Ô','O') | replace('Õ','O')
+                          | replace('Ú','U') | replace('Ü','U')
+                          | replace('Ç','C')
+                          | replace('-', ' ')
+                          | replace('/', ' ')
+                          | replace(' ', ' ')
+                          | replace(' ', '_')
+                        %}
+
+                        <div class="tipo-wrap">
+
+                          <div class="tipo-toprow">
+                            <span class="tp-badge
+                              {% if tp == 'EMPENA' %}tp-EMPENA
+                              {% elif tp == 'FRONT LIGHT' %}tp-FRONT_LIGHT
+                              {% elif tp == 'FRONT LIGHT HIBRIDO' or tp == 'FRONT LIGHT HÍBRIDO' %}tp-FRONT_LIGHT_HIBRIDO
+                              {% elif tp == 'MUPI' %}tp-MUPI
+                              {% elif tp == 'PAINEL DIGITAL' %}tp-PAINEL_DIGITAL
+                              {% elif tp == 'RELOGIO MULTIMENSAGEM COM BACKLIGHT' or tp == 'RELÓGIO MULTIMENSAGEM COM BACKLIGHT' %}tp-RELOGIO_MULTIMENSAGEM_COM_BACKLIGHT
+                              {% elif tp == 'RELOGIO TEMPERATURA COM BACKLIGHT' or tp == 'RELÓGIO TEMPERATURA COM BACKLIGHT' %}tp-RELOGIO_TEMPERATURA_COM_BACKLIGHT
+                              {% elif tp == 'TOPO' %}tp-TOPO
+                              {% elif tp == 'TRIEDRO' %}tp-TRIEDRO
+                              {% elif tp == 'TRIEDRO COM RELOGIO TEMPERATURA' or tp == 'TRIEDRO COM RELÓGIO TEMPERATURA' %}tp-TRIEDRO_COM_RELOGIO_TEMPERATURA
+                              {% else %}tp-{{ tp_cls }}
+                              {% endif %}
+                            ">
+                              <span class="tp-dot"></span>
+                              {{ x.TipoProd or x.Tipo }}
+                            </span>
+                          </div>
+
+                          {# ✅ Exibidora embaixo do Tipo (ex: MOBILIARIO / EUROMIDIA) #}
+                          <div class="tipo-exibidora-row">
+                            <span class="tipo-exibidora" title="Exibidora">
+                              {{ x.EXIBIDORA or x.Exibidora or '—' }}
+                            </span>
+
+                            <span class="meta-icos" title="Infra">
+                              {% if (x.BitEnergia or 0) == 1 %}
+                                <span class="meta-ico" title="Energia (BitEnergia = 1)">
+                                  <img src="{{ url_for('static', filename='imagens/eletricidade.png') }}" alt="Energia" draggable="false">
+                                </span>
+                              {% endif %}
+                              {% if (x.BitInternet or 0) == 1 %}
+                                <span class="meta-ico" title="Internet (BitInternet = 1)">
+                                  <img src="{{ url_for('static', filename='imagens/internet.png') }}" alt="Internet" draggable="false">
+                                </span>
+                              {% endif %}
+                              {% if (x.BitAtivo or 0) == 1 %}
+                                <span class="meta-ico" title="Ativo (BitAtivo = 1)">✅</span>
+                              {% endif %}
+                              {% if (x.BitAluguel or 0) == 1 %}
+                                <span class="meta-ico" title="Aluguel (BitAluguel = 1)">
+                                  <img src="{{ url_for('static', filename='imagens/aluguel.png') }}" alt="Aluguel" draggable="false">
+                                </span>
+                              {% endif %}
+                            </span>
+                          </div>
+
+                          {# ✅ Endereço com quebra de linha no " X " #}
+                          {% set endereco_raw = (x.Endereco or x.Endereço or '') %}
+                          {% set endereco_fmt = endereco_raw|e
+                              | replace(' X ', ' X<br>')
+                              | replace(' x ', ' x<br>')
+                          %}
+                          <div class="muted tp-subrow">
+                            <span class="addr">
+                              <span class="ref-line">
+                                {{ endereco_fmt|safe }}
+                              </span>
+                            </span>
+                          </div>
+
+                        </div>
+                      </div>
+
+                      <div style="font-weight:900;color: var(--text);">{{ x.Cidade or '—' }}</div>
+
+                      <div style="font-weight:900;color: var(--text);">
+                        {{ x.UF or x.Estado or x.Uf or '—' }}
+                      </div>
+
+                      <div title="{{ x.Bairro or '—' }}">
+                        <span class="cell-text-wrap cell-text-wrap--strong">
+                          {{ x.Bairro or '—' }}
+                        </span>
+                      </div>
+
+                      <div title="{{ x.Referencia or '—' }}">
+                        <span class="cell-text-wrap cell-text-wrap--muted">
+                          {{ x.Referencia or '—' }}
+                        </span>
+                      </div>
+
+                      <div class="cell-formato" style="font-weight:900;color: var(--text);">
+                        <span>{{ x.Formato or x.AltxLarg or '—' }}</span>
+                      </div>
+
+                      <div style="font-weight:900;font-size:18px;color: var(--text);">
+                        {{ x.QuantidadeFaces if x.QuantidadeFaces is defined and x.QuantidadeFaces is not none else x.NumFaces }}
+                      </div>
+
+                      <div class="cell-ocupacao">
+                        <div data-ocupacao-bar style="
+                          position:relative;
+                          height: 22px;
+                          border-radius: 9px;
+                          border: 1px solid #94A3B8;
+                          background: #E2E8F0;
+                          box-shadow: inset 0 0 0 1px #CBD5E1, 0 1px 2px rgba(15,23,42,.18);
+                          overflow:hidden;
+                          width:100%;
+                          min-width:0;
+                        ">
+                          <div style="
+                            position:absolute;
+                            left:0;top:0;bottom:0;
+                            width: {{ x.Pct }}%;
+                            background: {% if x.Conflitos > 0 %}#F59E0B{% elif x.Pct >= 80 %}#059669{% else %}#FBBF24{% endif %};
+                          "></div>
+
+                          <div style="
+                            position:absolute;
+                            inset:0;
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+                            font-weight:900;
+                            color:#0b1a3a;
+                            white-space:nowrap;
+                            padding:0 8px;
+                            font-size:12px;
+                          ">
+                            {% if x.Conflitos > 0 %}
+                              Conflito ({{ x.Conflitos }}/{{ x.NumFaces }})
+                            {% else %}
+                              {{ x.Pct }}%
+                            {% endif %}
+                          </div>
+                        </div>
+
+                        <div class="muted ocupacao-legenda" style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                          <span>{{ filtros.periodo_label }}</span>
+
+                          {% if x.Conflitos > 0 %}
+                            <span style="display:inline-flex;align-items:center;gap:6px;color:#b91c1c;font-weight:900;">
+                              ▲ Conflito ({{ x.Conflitos }}/{{ x.NumFaces }})
+                            </span>
+                          {% elif x.Ocupadas > 0 %}
+                            <span style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
+                              ● Ocupado ({{ x.Ocupadas }}/{{ x.NumFaces }})
+                            </span>
+                          {% else %}
+                            <span style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
+                              ● Livre (0/{{ x.NumFaces }})
+                            </span>
+                          {% endif %}
+                        </div>
+                      </div>
+
+                      <div class="cell-opcoes">
+                       <a class="btn btn-primary"
+                        href="{{ url_for(
+                              'Paineis.grade_painel',
+                              codponto=x.CodPonto,
+                              codface=x.CodFace,
+
+                              mes_de=(
+                                (filtros.dt_ini[:7] if filtros.dt_ini is string else (filtros.dt_ini.strftime('%Y-%m') if filtros.dt_ini else None))
+                              ),
+                              mes_ate=(
+                                (filtros.dt_fim[:10] if filtros.dt_fim is string else (filtros.dt_fim.strftime('%Y-%m-%d') if filtros.dt_fim else None))
+                              ),
+
+                              mes_ref=(filtros.mes_atual if filtros.mes_atual else None),
+                              tudo=(filtros.tudo if filtros.tudo else None),
+                              tipo=(x.TipoProd if x.TipoProd else None)
+                        ) }}"
+                        title="Abrir grade"
+                        style="text-decoration:none;">
+                        <span class="btn-ico">⊞</span>
+                        <span class="btn-label">Abrir grade</span>
+                      </a>
+                      </div>
+
+                    </div>
+                  {% endfor %}
+
+                </div>
+              </div>
+
+              <!-- =========================================================
+                   ✅ PAGINAÇÃO (VOLTOU) — bloco completo
+                   ========================================================= -->
+              <div class="paginacao-shell" style="
+                position:relative;
+                padding: 12px 14px;
+                width:100%;
+                min-height:56px;
+                display:grid;
+                grid-template-columns: 1fr 1fr;
+                align-items:center;
+                gap:12px;
+              ">
+
+                <div class="pagi-left muted" style="
+                    font-weight:800;
+                    justify-self:start;
+                    white-space:nowrap;
+                    overflow:hidden;
+                    text-overflow:ellipsis;
+                    max-width: 45%;
+                  ">
+                  Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }}
+                </div>
+
+                <div class="pagi-right muted" style="
+                    display:flex;
+                    align-items:center;
+                    gap:10px;
+                    font-weight:900;
+                    justify-self:end;
+                    white-space:nowrap;
+                  ">
+                  <span>{{ filtros.per_page }} por página</span>
+                </div>
+
+                <div class="pagi-center" style="
+                    position:absolute;
+                    left:50%;
+                    top:50%;
+                    transform: translate(-50%, -50%);
+                    display:flex;
+                    align-items:center;
+                    gap:8px;
+                    flex-wrap:wrap;
+                    justify-content:center;
+                    justify-self:center;
+                    white-space:nowrap;
+                  ">
+                  {% set p = paginacao.page %}
+                  {% set tp = paginacao.total_pages %}
+
+                  <a class="btn btn-secondary js-preservar-faces-url" data-preservar-faces="1" style="text-decoration:none;padding:8px 10px;"
+                     href="{{ url_for('Paineis.lista_paineis',
+                                      page=1,
+                                      per_page=filtros.per_page,
+                                      q=filtros.q,
+                                      tipo=filtros.tipo,
+                                      exibidora=filtros.exibidora,
+                                      cidade_exibicao=filtros.cidade_exibicao,
+                                      tipo_documento=filtros.tipo_documento,
+                                      vendedor=filtros.vendedor,
+                                      marca_exibida=filtros.marca_exibida,
+                                      status=filtros.status,
+                                      formato=filtros.formato,
+                                      dt_ini=filtros.dt_ini,
+                                      dt_fim=filtros.dt_fim,
+                                      bi_semana=filtros.bi_semana,
+                                      mes_atual=filtros.mes_atual,
+                                      tudo=filtros.tudo,
+                                      altxlarg=filtros.altxlarg,
+                                      iluminado=filtros.iluminado,
+                                      area_min=filtros.area_min,
+                                      area_max=filtros.area_max,
+                                      ponto_ativo=filtros.ponto_ativo) }}">
+                    «
+                  </a>
+
+                  <a class="btn btn-secondary js-preservar-faces-url" data-preservar-faces="1" style="text-decoration:none;padding:8px 10px;"
+                     href="{{ url_for('Paineis.lista_paineis',
+                                      page=(p-1 if p>1 else 1),
+                                      per_page=filtros.per_page,
+                                      q=filtros.q,
+                                      tipo=filtros.tipo,
+                                      exibidora=filtros.exibidora,
+                                      cidade_exibicao=filtros.cidade_exibicao,
+                                      tipo_documento=filtros.tipo_documento,
+                                      vendedor=filtros.vendedor,
+                                      marca_exibida=filtros.marca_exibida,
+                                      status=filtros.status,
+                                      formato=filtros.formato,
+                                      dt_ini=filtros.dt_ini,
+                                      dt_fim=filtros.dt_fim,
+                                      bi_semana=filtros.bi_semana,
+                                      mes_atual=filtros.mes_atual,
+                                      tudo=filtros.tudo,
+                                      altxlarg=filtros.altxlarg,
+                                      iluminado=filtros.iluminado,
+                                      area_min=filtros.area_min,
+                                      area_max=filtros.area_max,
+                                      ponto_ativo=filtros.ponto_ativo) }}">
+                    ‹
+                  </a>
+
+                  <span style="font-weight:900;color:var(--text);padding:0 10px;">
+                    {{ p }} / {{ tp }}
+                  </span>
+
+                  <a class="btn btn-secondary js-preservar-faces-url" data-preservar-faces="1" style="text-decoration:none;padding:8px 10px;"
+                     href="{{ url_for('Paineis.lista_paineis',
+                                      page=(p+1 if p<tp else tp),
+                                      per_page=filtros.per_page,
+                                      q=filtros.q,
+                                      tipo=filtros.tipo,
+                                      exibidora=filtros.exibidora,
+                                      cidade_exibicao=filtros.cidade_exibicao,
+                                      tipo_documento=filtros.tipo_documento,
+                                      vendedor=filtros.vendedor,
+                                      marca_exibida=filtros.marca_exibida,
+                                      status=filtros.status,
+                                      formato=filtros.formato,
+                                      dt_ini=filtros.dt_ini,
+                                      dt_fim=filtros.dt_fim,
+                                      bi_semana=filtros.bi_semana,
+                                      mes_atual=filtros.mes_atual,
+                                      tudo=filtros.tudo,
+                                      altxlarg=filtros.altxlarg,
+                                      iluminado=filtros.iluminado,
+                                      area_min=filtros.area_min,
+                                      area_max=filtros.area_max,
+                                      ponto_ativo=filtros.ponto_ativo) }}">
+                    ›
+                  </a>
+
+                  <a class="btn btn-secondary js-preservar-faces-url" data-preservar-faces="1" style="text-decoration:none;padding:8px 10px;"
+                     href="{{ url_for('Paineis.lista_paineis',
+                                      page=tp,
+                                      per_page=filtros.per_page,
+                                      q=filtros.q,
+                                      tipo=filtros.tipo,
+                                      exibidora=filtros.exibidora,
+                                      cidade_exibicao=filtros.cidade_exibicao,
+                                      tipo_documento=filtros.tipo_documento,
+                                      vendedor=filtros.vendedor,
+                                      marca_exibida=filtros.marca_exibida,
+                                      status=filtros.status,
+                                      formato=filtros.formato,
+                                      dt_ini=filtros.dt_ini,
+                                      dt_fim=filtros.dt_fim,
+                                      bi_semana=filtros.bi_semana,
+                                      mes_atual=filtros.mes_atual,
+                                      tudo=filtros.tudo,
+                                      altxlarg=filtros.altxlarg,
+                                      iluminado=filtros.iluminado,
+                                      area_min=filtros.area_min,
+                                      area_max=filtros.area_max,
+                                      ponto_ativo=filtros.ponto_ativo) }}">
+                    »
+                  </a>
+                </div>
+
+              </div>
+
+            </div>
+
+          </main>
+
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  (function(){
+    const shell = document.getElementById("periodoShell");
+    if (!shell) return;
+
+    const panel = document.getElementById("periodoPanel");
+    const btnAbrir = document.getElementById("btnAbrirPeriodo");
+    const btnFechar = document.getElementById("btnFecharPeriodo");
+    const btnAplicar = document.getElementById("btnAplicarPeriodo");
+    const btnHoje = document.getElementById("btnHoje");
+
+    const lblTopo = document.getElementById("lblPeriodoTopo");
+    const lblAno  = document.getElementById("lblAno");
+    const anoPrev = document.getElementById("anoPrev");
+    const anoNext = document.getElementById("anoNext");
+
+    const pickerDe  = document.getElementById("pickerDe");
+    const pickerAte = document.getElementById("pickerAte");
+    const selBiSemana = document.getElementById("selBiSemana");
+
+    /* ✅ PATCH: tenta por ID e, se não existir, tenta por name (evita quebrar se você mudou o HTML) */
+    const dtIniReal =
+      document.getElementById("dtIniReal") ||
+      shell.querySelector('input[name="mes_de"]') ||
+      document.querySelector('input[name="mes_de"]');
+
+    const dtFimReal =
+      document.getElementById("dtFimReal") ||
+      shell.querySelector('input[name="mes_ate"]') ||
+      document.querySelector('input[name="mes_ate"]');
+
+    const chips = Array.from(shell.querySelectorAll(".periodo-chip[data-modo]"));
+    const mesesBtns = Array.from(document.querySelectorAll(".periodo-mes"));
+
+    /* ✅ PATCH: painel e labels são obrigatórios pra funcionar direito */
+    if (!panel || !lblTopo || !lblAno || !dtIniReal || !dtFimReal){
+      try{
+        console.warn("Periodo: faltando elemento no DOM", {
+          shell: !!shell,
+          panel: !!panel,
+          btnAbrir: !!btnAbrir,
+          lblTopo: !!lblTopo,
+          lblAno: !!lblAno,
+          dtIniReal: !!dtIniReal,
+          dtFimReal: !!dtFimReal,
+          selBiSemana: !!selBiSemana
+        });
+      }catch(e){}
+      return;
+    }
+
+    function pad2(n){ return String(n).padStart(2, "0"); }
+    function toISO(d){
+      const y = d.getFullYear();
+      const m = pad2(d.getMonth() + 1);
+      const day = pad2(d.getDate());
+      return y + "-" + m + "-" + day;
+    }
+    function fromISO(s){
+      if (!s || typeof s !== "string") return null;
+      const p = s.split("-");
+      if (p.length !== 3) return null;
+      const y = parseInt(p[0], 10);
+      const m = parseInt(p[1], 10);
+      const d = parseInt(p[2], 10);
+      if (!y || !m || !d) return null;
+      const dt = new Date(y, m - 1, d);
+      if (isNaN(dt.getTime())) return null;
+      return dt;
+    }
+    function ultimoDiaDoMes(ano, mes){
+      return new Date(ano, mes, 0).getDate();
+    }
+
+    function nomeMesPt(mes){
+      const nomes = [
+        "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+        "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+      ];
+      return nomes[(mes - 1)] || "";
+    }
+
+    function limparChipsAtivos(){
+      chips.forEach(c => c.classList.remove("ativo"));
+    }
+
+    function limparBiSemana(){
+      if (selBiSemana){
+        selBiSemana.value = "";
+      }
+    }
+
+    function aplicarBiSemanaSelecionadaNoRange(){
+      if (!selBiSemana || !selBiSemana.value) return false;
+
+      const opt = selBiSemana.options[selBiSemana.selectedIndex];
+      if (!opt) return false;
+
+      const ini = (opt.getAttribute("data-inicio") || "").trim();
+      const fim = (opt.getAttribute("data-fim") || "").trim();
+
+      if (pickerDe)  pickerDe.value  = ini;
+      if (pickerAte) pickerAte.value = fim;
+
+      dtIniReal.value = ini;
+      dtFimReal.value = fim;
+
+      return !!(ini && fim);
+    }
+
+    function setTopoLabelPorDatas(){
+      if (selBiSemana && selBiSemana.value){
+        const opt = selBiSemana.options[selBiSemana.selectedIndex];
+        if (opt){
+          lblTopo.textContent = (opt.textContent || "Bi-Semana").trim();
+          return;
+        }
+      }
+
+      const di = dtIniReal.value || "";
+      const df = dtFimReal.value || "";
+      if (!di && !df){
+        lblTopo.textContent = "Período";
+        return;
+      }
+      const d1 = fromISO(di);
+      const d2 = fromISO(df);
+      if (d1 && d2){
+        const y1 = d1.getFullYear(), m1 = d1.getMonth()+1, day1 = d1.getDate();
+        const y2 = d2.getFullYear(), m2 = d2.getMonth()+1, day2 = d2.getDate();
+        if (y1===y2 && m1===m2 && day1===1 && day2===ultimoDiaDoMes(y2, m2)){
+          lblTopo.textContent = nomeMesPt(m1) + " de " + y1;
+          return;
+        }
+      }
+      lblTopo.textContent = di + " até " + df;
+    }
+
+    function getForm(){
+      return shell.closest("form");
+    }
+
+    function submitForm(){
+      const form = getForm();
+      if (!form) return;
+
+      if (form.dataset._submitting === "1") return;
+      form.dataset._submitting = "1";
+
+      try{
+        form.submit();
+      } finally {
+        setTimeout(() => { try{ delete form.dataset._submitting; }catch(e){} }, 600);
+      }
+    }
+
+    function abrir(){
+      panel.classList.add("aberto");
+      panel.setAttribute("aria-hidden", "false");
+    }
+    function fechar(){
+      panel.classList.remove("aberto");
+      panel.setAttribute("aria-hidden", "true");
+    }
+
+    function marcarChip(modo){
+      chips.forEach(c => c.classList.toggle("ativo", c.getAttribute("data-modo") === modo));
+    }
+
+    function marcarMesSelecionado(ano, mes){
+      const anoStr = String(ano);
+      const mesStr = pad2(mes);
+      mesesBtns.forEach(b => {
+        const mm = (b.getAttribute("data-mes") || "").trim();
+        const isSel = (mm === mesStr) && (String(lblAno.textContent || "") === anoStr);
+        b.classList.toggle("sel", isSel);
+      });
+    }
+
+    function limparSelecaoMes(){
+      mesesBtns.forEach(b => b.classList.remove("sel"));
+    }
+
+    function syncPickersFromReal(){
+      if (pickerDe)  pickerDe.value  = dtIniReal.value || "";
+      if (pickerAte) pickerAte.value = dtFimReal.value || "";
+      setTopoLabelPorDatas();
+
+      const d1 = fromISO(dtIniReal.value);
+      if (d1){
+        lblAno.textContent = String(d1.getFullYear());
+      } else {
+        lblAno.textContent = String(new Date().getFullYear());
+      }
+    }
+
+    function aplicarPickersParaReal(){
+      const di = (pickerDe && pickerDe.value) ? pickerDe.value : "";
+      const df = (pickerAte && pickerAte.value) ? pickerAte.value : "";
+      dtIniReal.value = di;
+      dtFimReal.value = df;
+      setTopoLabelPorDatas();
+    }
+
+    function setRange(iniDateObj, fimDateObj){
+      const di = toISO(iniDateObj);
+      const df = toISO(fimDateObj);
+      if (pickerDe)  pickerDe.value  = di;
+      if (pickerAte) pickerAte.value = df;
+      aplicarPickersParaReal();
+    }
+
+    function aplicarModoRapido(modo, autoSubmit){
+      const hoje = new Date();
+      const y = hoje.getFullYear();
+      const m = hoje.getMonth() + 1;
+
+      limparBiSemana();
+
+      if (modo === "dia"){
+        setRange(hoje, hoje);
+        if (autoSubmit) submitForm();
+        return;
+      }
+      if (modo === "semana"){
+        const ini = new Date(hoje);
+        ini.setDate(ini.getDate() - 6);
+        setRange(ini, hoje);
+        if (autoSubmit) submitForm();
+        return;
+      }
+      if (modo === "mes"){
+        const ini = new Date(y, m - 1, 1);
+        const fim = new Date(y, m - 1, ultimoDiaDoMes(y, m));
+        setRange(ini, fim);
+        lblAno.textContent = String(y);
+        marcarMesSelecionado(y, m);
+        if (autoSubmit) submitForm();
+        return;
+      }
+      if (modo === "ano"){
+        const ini = new Date(y, 0, 1);
+        const fim = new Date(y, 11, 31);
+        setRange(ini, fim);
+        lblAno.textContent = String(y);
+        limparSelecaoMes();
+        if (autoSubmit) submitForm();
+        return;
+      }
+    }
+
+    if (btnAbrir){
+      btnAbrir.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (panel.classList.contains("aberto")){
+          fechar();
+        } else {
+          syncPickersFromReal();
+          abrir();
+        }
+      });
+    }
+
+    if (btnFechar){
+      btnFechar.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        fechar();
+      });
+    }
+
+    document.addEventListener("click", function(ev){
+      if (!panel.classList.contains("aberto")) return;
+
+      if (shell.contains(ev.target)) return;
+      if (panel.contains(ev.target)) return;
+
+      fechar();
+    });
+
+    document.addEventListener("keydown", function(ev){
+      if (ev.key !== "Escape") return;
+      if (!panel.classList.contains("aberto")) return;
+      fechar();
+    });
+
+    chips.forEach(ch => {
+      ch.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        const modo = ch.getAttribute("data-modo");
+        marcarChip(modo);
+        aplicarModoRapido(modo, true);
+      });
+    });
+
+    if (btnHoje){
+      btnHoje.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        marcarChip("dia");
+        aplicarModoRapido("dia", true);
+      });
+    }
+
+    if (anoPrev){
+      anoPrev.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        const a = parseInt(lblAno.textContent || "2026", 10) || 2026;
+        lblAno.textContent = String(a - 1);
+        limparSelecaoMes();
+      });
+    }
+
+    if (anoNext){
+      anoNext.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        const a = parseInt(lblAno.textContent || "2026", 10) || 2026;
+        lblAno.textContent = String(a + 1);
+        limparSelecaoMes();
+      });
+    }
+
+    mesesBtns.forEach(btn => {
+      btn.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const ano = parseInt(lblAno.textContent || "2026", 10) || 2026;
+        const mes = parseInt((btn.getAttribute("data-mes") || "1").trim(), 10) || 1;
+
+        const ini = new Date(ano, mes - 1, 1);
+        const fim = new Date(ano, mes - 1, ultimoDiaDoMes(ano, mes));
+
+        marcarChip("mes");
+        limparBiSemana();
+        setRange(ini, fim);
+
+        limparSelecaoMes();
+        btn.classList.add("sel");
+
+        submitForm();
+      });
+    });
+
+    if (pickerDe){
+      pickerDe.addEventListener("change", function(){
+        limparBiSemana();
+        limparChipsAtivos();
+        aplicarPickersParaReal();
+      });
+    }
+    if (pickerAte){
+      pickerAte.addEventListener("change", function(){
+        limparBiSemana();
+        limparChipsAtivos();
+        aplicarPickersParaReal();
+      });
+    }
+
+    if (selBiSemana){
+      selBiSemana.addEventListener("change", function(ev){
+        ev.stopPropagation();
+        limparChipsAtivos();
+        aplicarBiSemanaSelecionadaNoRange();
+        setTopoLabelPorDatas();
+      });
+    }
+
+    if (btnAplicar){
+      btnAplicar.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        if (!(selBiSemana && selBiSemana.value)){
+          aplicarPickersParaReal();
+        } else {
+          aplicarBiSemanaSelecionadaNoRange();
+        }
+
+        submitForm();
+      });
+    }
+
+    if (selBiSemana && selBiSemana.value){
+      limparChipsAtivos();
+      aplicarBiSemanaSelecionadaNoRange();
+    }
+
+    setTopoLabelPorDatas();
+  })();
+</script>
+
+<script>
+  (function(){
+    function closeAllExcept(exceptDetails){
+      document.querySelectorAll("details.dd[open]").forEach(d => {
+        if (exceptDetails && d === exceptDetails) return;
+        d.open = false;
+      });
+    }
+
+    function getBaseLabel(dd){
+      const base = (dd.getAttribute("data-dd") || "").trim();
+      if (!base) return "Filtro";
+
+      const nice =
+        base === "cidade_exibicao" ? "Cidade" :
+        base === "tipo_documento"  ? "Tipo Documento" :
+        base === "marca_exibida"   ? "Marca Exibida" :
+        base === "tipo"            ? "Tipo Produto" :
+        base === "exibidora"       ? "Exibidora" :
+        base === "vendedor"        ? "Vendedor" :
+        base === "status"          ? "Status" :
+        base === "formato"         ? "Formato" :
+        base === "ponto_ativo"     ? "Painéis" :
+        base.replaceAll("_", " ");
+
+      return nice.charAt(0).toUpperCase() + nice.slice(1);
+    }
+
+    function getCheckedValues(dd){
+      const checks = Array.from(dd.querySelectorAll('.dd-panel input[type="checkbox"]'));
+      const all = dd.querySelector('.dd-panel input[type="checkbox"][data-dd-all="1"]');
+
+      if (all && all.checked) return [];
+
+      return checks
+        .filter(c => c.checked)
+        .filter(c => !c.hasAttribute("data-dd-all"))
+        .map(c => (c.value || "").trim())
+        .filter(v => v.length > 0);
+    }
+
+    function updateLabel(dd){
+      const labelEl = dd.querySelector(".dd-label");
+      if (!labelEl) return;
+
+      const base = getBaseLabel(dd);
+      const vals = getCheckedValues(dd);
+
+      if (!vals.length){
+        labelEl.textContent = base;
+        return;
+      }
+
+      const mapaPontoAtivo = {
+        "1": "Ativos",
+        "0": "Inativos",
+        "todos": "Todos"
+      };
+
+      const valsFmt = vals.map(v => mapaPontoAtivo[v] || v);
+
+      const primeiro = valsFmt[0];
+      const resto = valsFmt.length - 1;
+
+      if (resto <= 0){
+        labelEl.textContent = base + ": " + primeiro;
+      } else {
+        labelEl.textContent = base + ": " + primeiro + " +" + resto;
+      }
+    }
+
+    function ensureSearchUI(dd){
+      const panel = dd.querySelector(".dd-panel");
+      if (!panel) return;
+
+      if (panel.querySelector(".dd-search")) return;
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "dd-search";
+      input.placeholder = "Pesquisar...";
+      input.autocomplete = "off";
+
+      const hint = document.createElement("div");
+      hint.className = "dd-hint";
+      hint.textContent = "Digite para filtrar a lista";
+
+      panel.insertBefore(hint, panel.firstChild);
+      panel.insertBefore(input, panel.firstChild);
+
+      input.addEventListener("click", function(ev){
+        ev.stopPropagation();
+      });
+
+      input.addEventListener("input", function(){
+        const q = (input.value || "").trim().toLowerCase();
+
+        panel.querySelectorAll(".dd-item").forEach(item => {
+          const isAll = !!item.querySelector('input[data-dd-all="1"]');
+          if (isAll){
+            item.style.display = q ? "none" : "";
+            return;
+          }
+          const txt = (item.textContent || "").toLowerCase();
+          item.style.display = (!q || txt.includes(q)) ? "" : "none";
+        });
+      });
+
+      dd.addEventListener("toggle", function(){
+        if (dd.open){
+          setTimeout(() => { try{ input.focus(); }catch(e){} }, 0);
+        } else {
+          input.value = "";
+          panel.querySelectorAll(".dd-item").forEach(item => item.style.display = "");
+        }
+      });
+    }
+
+    function wireRules(dd){
+      const panel = dd.querySelector(".dd-panel");
+      if (!panel) return;
+
+      const mode = (dd.getAttribute("data-dd-mode") || "multi").toLowerCase();
+      const all = panel.querySelector('input[type="checkbox"][data-dd-all="1"]');
+      const checks = Array.from(panel.querySelectorAll('input[type="checkbox"]'));
+
+      function ensureDefaultAllIfEmpty(){
+        const anyMarked = checks.some(c => c.checked && !c.hasAttribute("data-dd-all"));
+        const allMarked = !!(all && all.checked);
+
+        if (!anyMarked && all && !allMarked){
+          all.checked = true;
+        }
+      }
+
+      checks.forEach(chk => {
+        chk.addEventListener("change", function(){
+          const isAll = chk.hasAttribute("data-dd-all");
+
+          if (mode === "single"){
+            checks.forEach(c => { if (c !== chk) c.checked = false; });
+            chk.checked = true;
+          } else {
+            if (isAll && chk.checked){
+              checks.forEach(c => { if (c !== chk) c.checked = false; });
+            } else if (!isAll && chk.checked){
+              if (all) all.checked = false;
+            }
+
+            ensureDefaultAllIfEmpty();
+          }
+
+          updateLabel(dd);
+        });
+      });
+
+      ensureDefaultAllIfEmpty();
+      updateLabel(dd);
+    }
+
+    const dds = Array.from(document.querySelectorAll("details.dd"));
+    dds.forEach(dd => {
+      ensureSearchUI(dd);
+      wireRules(dd);
+
+      dd.addEventListener("click", function(ev){
+        if (ev.target && ev.target.closest && ev.target.closest("summary")){
+          closeAllExcept(dd);
+        }
+      });
+    });
+
+    document.addEventListener("click", function(ev){
+      const alvo = ev.target;
+      const dentroDeAlgum = alvo && alvo.closest && alvo.closest("details.dd");
+      if (dentroDeAlgum) return;
+      closeAllExcept(null);
+    });
+
+    document.addEventListener("keydown", function(ev){
+      if (ev.key === "Escape"){
+        closeAllExcept(null);
+      }
+    });
+  })();
+</script>
+
+<script>
+  (function(){
+    const hidden = document.getElementById("pontoAtivoReal");
+    const dd = document.querySelector('details.dd[data-dd="ponto_ativo"]');
+    if (!hidden || !dd) return;
+
+    const checks = Array.from(dd.querySelectorAll('input[type="checkbox"][name="ponto_ativo_ui"]'));
+    if (!checks.length) return;
+
+    function normalizarValorHidden(v){
+      const valor = String(v == null ? "" : v).trim().toLowerCase();
+      if (valor === "1") return "1";
+      if (valor === "0") return "0";
+      if (valor === "" || valor === "todos" || valor === "all") return "todos";
+      return "1";
+    }
+
+    function valorUiParaHidden(v){
+      const valor = String(v == null ? "" : v).trim().toLowerCase();
+      if (valor === "1") return "1";
+      if (valor === "0") return "0";
+      return "";
+    }
+
+    function syncUiFromHidden(){
+      const alvo = normalizarValorHidden(hidden.value);
+      let encontrou = false;
+
+      checks.forEach(chk => {
+        const marcar = (String(chk.value || "").trim().toLowerCase() === alvo);
+        chk.checked = marcar;
+        if (marcar) encontrou = true;
+      });
+
+      if (!encontrou){
+        checks.forEach(chk => {
+          chk.checked = (String(chk.value || "").trim().toLowerCase() === "1");
+        });
+        hidden.value = "1";
+      }
+
+      const event = new Event("change", { bubbles: true });
+      const marcado = checks.find(chk => chk.checked);
+      if (marcado) marcado.dispatchEvent(event);
+    }
+
+    function syncHiddenFromUi(){
+      const marcado = checks.find(chk => chk.checked);
+      if (!marcado){
+        hidden.value = "1";
+        return;
+      }
+      hidden.value = valorUiParaHidden(marcado.value);
+    }
+
+    checks.forEach(chk => {
+      chk.addEventListener("change", syncHiddenFromUi);
+    });
+
+    syncUiFromHidden();
+  })();
+</script>
+
+<script>
+  (function(){
+    const CHAVE_STORAGE = "euromidia_lista_paineis_faces_selecionadas_v1";
+
+    const form = document.getElementById("formListaPaineis");
+    const container = document.getElementById("facesSelecionadasContainer");
+    const badge = document.getElementById("facesSelecionadasBadge");
+    const info = document.getElementById("facesSelecionadasInfo");
+    const btnAbrir = document.getElementById("btnAbrirGradesSelecionadas");
+    const btnLimpar = document.getElementById("btnLimparFacesSelecionadas");
+    const checkPagina = document.getElementById("selecionarFacesPagina");
+
+    const rotaGradeBase = {{ url_for('Paineis.grade_painel', codponto=0)|tojson }};
+    const rotaGradeMulti = {{ url_for('Paineis.grade_painel_multi')|tojson }};
+    const filtrosServidorFaces = {{ (filtros.selected_codface or [])|tojson }};
+    const filtrosServidorPontos = {{ (filtros.selected_codponto or [])|tojson }};
+
+    if (!form || !container || !badge || !info || !btnAbrir || !btnLimpar) return;
+
+    function normalizarTexto(v){
+      return String(v == null ? "" : v).trim();
+    }
+
+    function chaveItem(item){
+      return normalizarTexto(item.codponto) + "|" + normalizarTexto(item.codface).toUpperCase();
+    }
+
+    function deduplicar(lista){
+      const out = [];
+      const vistos = new Set();
+
+      (lista || []).forEach(item => {
+        const codponto = normalizarTexto(item && item.codponto);
+        const codface = normalizarTexto(item && item.codface);
+        if (!codponto || !codface) return;
+
+        const limpo = { codponto, codface };
+        const chave = chaveItem(limpo);
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+        out.push(limpo);
+      });
+
+      return out;
+    }
+
+    function lerStorage(){
+      try{
+        const bruto = localStorage.getItem(CHAVE_STORAGE);
+        if (!bruto) return [];
+        const arr = JSON.parse(bruto);
+        if (!Array.isArray(arr)) return [];
+        return deduplicar(arr);
+      }catch(e){
+        return [];
+      }
+    }
+
+    function salvarStorage(lista){
+      try{
+        localStorage.setItem(CHAVE_STORAGE, JSON.stringify(deduplicar(lista)));
+      }catch(e){}
+    }
+
+    function lerSelecaoDaUrlAtual(){
+      try{
+        const usp = new URLSearchParams(window.location.search);
+        const codfaces = usp.getAll("selected_codface").map(normalizarTexto).filter(Boolean);
+        const codpontos = usp.getAll("selected_codponto").map(normalizarTexto).filter(Boolean);
+
+        if (!codfaces.length || codfaces.length !== codpontos.length){
+          return [];
+        }
+
+        const lista = [];
+        for (let i = 0; i < codfaces.length; i += 1){
+          lista.push({ codface: codfaces[i], codponto: codpontos[i] });
+        }
+        return deduplicar(lista);
+      }catch(e){
+        return [];
+      }
+    }
+
+    function lerSelecaoDoServidor(){
+      try{
+        if (!Array.isArray(filtrosServidorFaces) || !Array.isArray(filtrosServidorPontos)) return [];
+        if (!filtrosServidorFaces.length || filtrosServidorFaces.length !== filtrosServidorPontos.length) return [];
+        const lista = [];
+        for (let i = 0; i < filtrosServidorFaces.length; i += 1){
+          lista.push({
+            codface: normalizarTexto(filtrosServidorFaces[i]),
+            codponto: normalizarTexto(filtrosServidorPontos[i])
+          });
+        }
+        return deduplicar(lista);
+      }catch(e){
+        return [];
+      }
+    }
+
+    function checksDaPagina(){
+      return Array.from(document.querySelectorAll(".js-face-select"));
+    }
+
+    function escreverHiddenInputs(){
+      container.innerHTML = "";
+      const lista = lerStorage();
+
+      lista.forEach(item => {
+        const inputFace = document.createElement("input");
+        inputFace.type = "hidden";
+        inputFace.name = "selected_codface";
+        inputFace.value = item.codface;
+        container.appendChild(inputFace);
+
+        const inputPonto = document.createElement("input");
+        inputPonto.type = "hidden";
+        inputPonto.name = "selected_codponto";
+        inputPonto.value = item.codponto;
+        container.appendChild(inputPonto);
+      });
+    }
+
+    function atualizarLinksPreservandoSelecao(){
+      const lista = lerStorage();
+      document.querySelectorAll('a[data-preservar-faces="1"]').forEach(link => {
+        try{
+          const url = new URL(link.getAttribute("href"), window.location.origin);
+          url.searchParams.delete("selected_codface");
+          url.searchParams.delete("selected_codponto");
+
+          lista.forEach(item => {
+            url.searchParams.append("selected_codface", item.codface);
+            url.searchParams.append("selected_codponto", item.codponto);
+          });
+
+          link.setAttribute("href", url.pathname + url.search + url.hash);
+        }catch(e){}
+      });
+    }
+
+    function atualizarBadgeEInfo(){
+      const lista = lerStorage();
+      badge.textContent = lista.length + " face(s) selecionada(s)";
+
+      if (!lista.length){
+        info.textContent = "Selecione faces para reaplicar os filtros somente nelas e abrir a grade filtrada.";
+        btnAbrir.disabled = true;
+        return;
+      }
+
+      const grupos = {};
+      lista.forEach(item => {
+        const cp = normalizarTexto(item.codponto);
+        grupos[cp] = grupos[cp] || [];
+        grupos[cp].push(item.codface);
+      });
+
+      const codpontos = Object.keys(grupos);
+
+      if (codpontos.length === 1){
+        info.textContent = lista.length + " face(s) selecionada(s) no CodPonto " + codpontos[0] + ".";
+        btnAbrir.disabled = false;
+        return;
+      }
+
+      info.textContent = lista.length + " face(s) em " + codpontos.length + " painéis.";
+      btnAbrir.disabled = false;
+    }
+
+    function sincronizarChecksDaPagina(){
+      const lista = lerStorage();
+      const set = new Set(lista.map(chaveItem));
+
+      const checks = checksDaPagina();
+      checks.forEach(chk => {
+        const codface = normalizarTexto(chk.getAttribute("data-codface"));
+        const codponto = normalizarTexto(chk.getAttribute("data-codponto"));
+        chk.checked = set.has((codponto + "|" + codface.toUpperCase()));
+      });
+
+      if (checkPagina){
+        const total = checks.length;
+        const marcadas = checks.filter(chk => chk.checked).length;
+        checkPagina.indeterminate = (marcadas > 0 && marcadas < total);
+        checkPagina.checked = (total > 0 && marcadas === total);
+      }
+
+      escreverHiddenInputs();
+      atualizarLinksPreservandoSelecao();
+      atualizarBadgeEInfo();
+    }
+
+    function atualizarStorageComCheckbox(chk){
+      const codface = normalizarTexto(chk.getAttribute("data-codface"));
+      const codponto = normalizarTexto(chk.getAttribute("data-codponto"));
+      if (!codface || !codponto) return;
+
+      const chaveAtual = codponto + "|" + codface.toUpperCase();
+      let lista = lerStorage().filter(item => chaveItem(item) !== chaveAtual);
+
+      if (chk.checked){
+        lista.push({ codface, codponto });
+      }
+
+      salvarStorage(lista);
+      sincronizarChecksDaPagina();
+    }
+
+    function alternarPaginaInteira(marcar){
+      const listaAtual = lerStorage();
+      const mapa = new Map(listaAtual.map(item => [chaveItem(item), item]));
+
+      checksDaPagina().forEach(chk => {
+        const codface = normalizarTexto(chk.getAttribute("data-codface"));
+        const codponto = normalizarTexto(chk.getAttribute("data-codponto"));
+        const chave = codponto + "|" + codface.toUpperCase();
+
+        chk.checked = !!marcar;
+        if (marcar){
+          mapa.set(chave, { codface, codponto });
+        } else {
+          mapa.delete(chave);
+        }
+      });
+
+      salvarStorage(Array.from(mapa.values()));
+      sincronizarChecksDaPagina();
+    }
+
+    function caminhoGradePorCodPonto(codponto){
+      const cp = String(codponto);
+      return rotaGradeBase.replace(/0(?=\/grade(?:\/)?$)/, cp);
+    }
+
+    function montarUrlGradeSimples(codponto, codfaces, dtIni, dtFim){
+      const url = new URL(caminhoGradePorCodPonto(codponto), window.location.origin);
+
+      if (dtIni){
+        url.searchParams.set("mes_de", dtIni.slice(0, 7));
+      }
+      if (dtFim){
+        url.searchParams.set("mes_ate", dtFim.slice(0, 10));
+      }
+
+      (codfaces || []).forEach(codface => {
+        if (normalizarTexto(codface)){
+          url.searchParams.append("codface", codface);
+        }
+      });
+
+      return url;
+    }
+
+    function montarUrlGradeMulti(lista, dtIni, dtFim){
+      const url = new URL(rotaGradeMulti, window.location.origin);
+
+      if (dtIni){
+        url.searchParams.set("mes_de", dtIni.slice(0, 7));
+      }
+      if (dtFim){
+        url.searchParams.set("mes_ate", dtFim.slice(0, 10));
+      }
+
+      lista.forEach(item => {
+        if (normalizarTexto(item.codface)){
+          url.searchParams.append("codface", item.codface);
+        }
+      });
+
+      return url;
+    }
+
+    function abrirGradeDasFacesSelecionadas(){
+      const lista = lerStorage();
+      if (!lista.length){
+        window.alert("Selecione ao menos uma face.");
+        return;
+      }
+
+      const grupos = {};
+      lista.forEach(item => {
+        const cp = normalizarTexto(item.codponto);
+        grupos[cp] = grupos[cp] || [];
+        grupos[cp].push(item.codface);
+      });
+
+      const codpontos = Object.keys(grupos);
+
+      const dtIni = normalizarTexto((document.getElementById("dtIniReal") || {}).value || {{ (filtros.dt_ini or '')|tojson }});
+      const dtFim = normalizarTexto((document.getElementById("dtFimReal") || {}).value || {{ (filtros.dt_fim or '')|tojson }});
+
+      let urlFinal;
+
+      if (codpontos.length === 1){
+        const codponto = codpontos[0];
+        urlFinal = montarUrlGradeSimples(codponto, grupos[codponto], dtIni, dtFim);
+      } else {
+        urlFinal = montarUrlGradeMulti(lista, dtIni, dtFim);
+      }
+
+      window.location.href = urlFinal.pathname + urlFinal.search + urlFinal.hash;
+    }
+
+    function inicializarSelecao(){
+      const daUrl = lerSelecaoDaUrlAtual();
+      if (daUrl.length){
+        salvarStorage(daUrl);
+        return;
+      }
+
+      const doServidor = lerSelecaoDoServidor();
+      if (doServidor.length){
+        salvarStorage(doServidor);
+      }
+    }
+
+    checksDaPagina().forEach(chk => {
+      chk.addEventListener("change", function(){
+        atualizarStorageComCheckbox(chk);
+      });
+    });
+
+    if (checkPagina){
+      checkPagina.addEventListener("change", function(){
+        alternarPaginaInteira(checkPagina.checked);
+      });
+    }
+
+    btnLimpar.addEventListener("click", function(ev){
+      ev.preventDefault();
+      try{
+        localStorage.removeItem(CHAVE_STORAGE);
+      }catch(e){}
+      sincronizarChecksDaPagina();
+    });
+
+    btnAbrir.addEventListener("click", function(ev){
+      ev.preventDefault();
+      abrirGradeDasFacesSelecionadas();
+    });
+
+    form.addEventListener("submit", function(){
+      escreverHiddenInputs();
+    });
+
+    inicializarSelecao();
+    sincronizarChecksDaPagina();
+  })();
+</script>
+
+
+<script>
+  (function(){
+    const urlAdd = "{{ url_for('Paineis.checkout_adicionar') }}";
+    const urlStatus = "{{ url_for('Paineis.checkout_status') }}";
+
+    function getCsrf(){
+      if (window.EURO && typeof window.EURO.getCsrfToken === "function"){
+        return window.EURO.getCsrfToken() || "";
+      }
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      return meta ? (meta.getAttribute("content") || "") : "";
+    }
+
+    function toast(msg, tipo){
+      if (window.EURO && typeof window.EURO.toast === "function"){
+        window.EURO.toast(msg, tipo || "info");
+        return;
+      }
+      try{ console.log(msg); }catch(e){}
+    }
+
+    function setBadge(qtd){
+      if (window.EURO && typeof window.EURO.setCheckoutBadge === "function"){
+        window.EURO.setCheckoutBadge(qtd);
+      }
+    }
+
+    function setBtnEstado(btn, estado){
+      if (!btn) return;
+
+      if (estado === "loading"){
+        btn.classList.remove("is-added");
+        btn.setAttribute("aria-disabled", "true");
+        btn.dataset._oldHtml = btn.innerHTML || '<span class="ico">＋</span> Adicionar';
+        btn.innerHTML = "Adicionando...";
+        btn.style.pointerEvents = "none";
+        btn.style.opacity = ".78";
+        return;
+      }
+
+      btn.style.pointerEvents = "";
+      btn.style.opacity = "";
+      btn.removeAttribute("aria-disabled");
+
+      if (estado === "added"){
+        btn.classList.add("is-added");
+        btn.innerHTML = '<span class="ico">✓</span> Adicionado';
+        return;
+      }
+
+      if (estado === "exists"){
+        btn.classList.add("is-added");
+        btn.innerHTML = '<span class="ico">✓</span> Já no checkout';
+        return;
+      }
+
+      btn.classList.remove("is-added");
+      btn.innerHTML = '<span class="ico">＋</span> Adicionar';
+    }
+
+    async function carregarStatusEMarcarBotoes(){
+      try{
+        const resp = await fetch(urlStatus, { method: "GET", credentials: "same-origin" });
+        const data = await resp.json();
+        if (!data || !data.ok) return;
+
+        setBadge(data.qtd || 0);
+
+        const set = new Set((data.codpontos || []).map(x => parseInt(x, 10)).filter(x => x > 0));
+
+        document.querySelectorAll(".btn-add-checkout").forEach(btn => {
+          const cod = parseInt(btn.getAttribute("data-codponto") || "0", 10) || 0;
+          if (!cod) return;
+
+          if (set.has(cod)){
+            setBtnEstado(btn, "exists");
+          } else {
+            setBtnEstado(btn, "normal");
+          }
+        });
+      }catch(e){}
+    }
+
+    async function adicionarCodPonto(codponto){
+      const csrf = getCsrf();
+
+      const resp = await fetch(urlAdd, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrf
+        },
+        body: JSON.stringify({ codponto: codponto })
+      });
+
+      let data = null;
+      try{ data = await resp.json(); }catch(e){}
+      return { resp_ok: resp.ok, data };
+    }
+
+    document.querySelectorAll(".btn-add-checkout").forEach(btn => {
+      btn.addEventListener("click", async function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const cod = parseInt(btn.getAttribute("data-codponto") || "0", 10) || 0;
+        if (!cod) return;
+
+        if (btn.dataset._busy === "1") return;
+        btn.dataset._busy = "1";
+
+        toast("CodPonto " + cod + " adicionando...", "info");
+        setBtnEstado(btn, "loading");
+
+        try{
+          const { resp_ok, data } = await adicionarCodPonto(cod);
+
+          if (!resp_ok || !data || !data.ok){
+            setBtnEstado(btn, "normal");
+            const msg = (data && data.erro) ? data.erro : "Falha ao adicionar.";
+            toast("CodPonto " + cod + " falhou: " + msg, "danger");
+            return;
+          }
+
+          setBadge(data.qtd || 0);
+
+          if (data.adicionado){
+            setBtnEstado(btn, "added");
+            toast("CodPonto " + cod + " adicionado.", "ok");
+          } else {
+            setBtnEstado(btn, "exists");
+            toast("CodPonto " + cod + " já estava no checkout.", "warn");
+          }
+
+        }catch(e){
+          setBtnEstado(btn, "normal");
+          toast("CodPonto " + cod + " falhou (erro de rede).", "danger");
+        } finally {
+          try{ delete btn.dataset._busy; }catch(e){}
+        }
+      });
+    });
+
+    carregarStatusEMarcarBotoes();
+  })();
+</script>
+
+{% endblock %}
