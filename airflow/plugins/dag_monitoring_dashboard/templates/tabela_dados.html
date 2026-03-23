@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ metadados.nome_qualificado }}</title>
+  <style>
+    :root{
+      --bg:#f4f7fb;
+      --card:#ffffff;
+      --border:#dbe3ef;
+      --text:#1f2937;
+      --muted:#64748b;
+      --primary:#1e3a8a;
+      --primary-soft:#e8eefc;
+      --success:#15803d;
+      --shadow:0 8px 24px rgba(15,23,42,.08);
+      --radius:16px;
+    }
+
+    *{ box-sizing:border-box; }
+
+    body{
+      margin:0;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+
+    .pagina{
+      max-width: 1800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .topo{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      padding:20px;
+      box-shadow:var(--shadow);
+      margin-bottom:16px;
+    }
+
+    .titulo{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+
+    .titulo h1{
+      margin:0;
+      font-size:28px;
+      line-height:1.1;
+      color:var(--primary);
+    }
+
+    .subtitulo{
+      margin-top:8px;
+      color:var(--muted);
+      font-size:14px;
+      font-weight:700;
+    }
+
+    .chips{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:8px 12px;
+      background:var(--primary-soft);
+      color:var(--primary);
+      border:1px solid rgba(30,58,138,.15);
+      border-radius:999px;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      margin-bottom:16px;
+    }
+
+    .card-header{
+      padding:16px 18px;
+      border-bottom:1px solid var(--border);
+      background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    }
+
+    .card-header h2{
+      margin:0;
+      font-size:20px;
+      color:var(--primary);
+    }
+
+    .card-header p{
+      margin:6px 0 0 0;
+      font-size:13px;
+      color:var(--muted);
+      font-weight:700;
+    }
+
+    .card-body{
+      padding:16px 18px 18px 18px;
+    }
+
+    .filtros-form{
+      display:grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap:12px;
+      align-items:end;
+    }
+
+    .campo{
+      grid-column: span 3;
+      min-width:0;
+    }
+
+    .campo-lg{
+      grid-column: span 6;
+    }
+
+    .campo-sm{
+      grid-column: span 2;
+    }
+
+    label{
+      display:block;
+      margin-bottom:6px;
+      font-size:12px;
+      font-weight:1000;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+
+    input[type="text"],
+    input[type="date"],
+    select{
+      width:100%;
+      border:1px solid var(--border);
+      background:#fff;
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:13px;
+      font-weight:800;
+      color:var(--text);
+      outline:none;
+    }
+
+    input[type="text"]:focus,
+    input[type="date"]:focus,
+    select:focus{
+      border-color:rgba(30,58,138,.35);
+      box-shadow:0 0 0 4px rgba(30,58,138,.08);
+    }
+
+    .acoes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:none;
+      border-radius:12px;
+      padding:10px 14px;
+      font-size:13px;
+      font-weight:1000;
+      cursor:pointer;
+      text-decoration:none;
+    }
+
+    .btn-primary{
+      background:var(--primary);
+      color:#fff;
+    }
+
+    .btn-secondary{
+      background:#eef2f7;
+      color:#334155;
+      border:1px solid var(--border);
+    }
+
+    details.dd{
+      position:relative;
+      width:100%;
+    }
+
+    .dd-summary{
+      list-style:none;
+      cursor:pointer;
+      user-select:none;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:10px 12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      font-size:13px;
+      font-weight:900;
+      color:var(--text);
+      min-height:42px;
+    }
+
+    .dd-summary::-webkit-details-marker{
+      display:none;
+    }
+
+    details.dd[open] .dd-summary{
+      border-color:rgba(30,58,138,.35);
+      box-shadow:0 10px 24px rgba(30,58,138,.08);
+    }
+
+    .dd-label{
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .dd-caret{
+      color:var(--muted);
+      font-size:12px;
+      font-weight:1000;
+    }
+
+    .dd-panel{
+      position:absolute;
+      top:calc(100% + 8px);
+      left:0;
+      width:360px;
+      max-width:min(92vw, 420px);
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 16px 36px rgba(15,23,42,.18);
+      padding:10px;
+      z-index:50;
+    }
+
+    .dd-search{
+      width:100%;
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:12px;
+      font-weight:900;
+      margin-bottom:8px;
+    }
+
+    .dd-list{
+      max-height:280px;
+      overflow:auto;
+      padding-right:2px;
+    }
+
+    .dd-item{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 8px;
+      border-radius:10px;
+      font-size:12px;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    .dd-item:hover{
+      background:rgba(30,58,138,.06);
+    }
+
+    .dd-item input[type="checkbox"]{
+      width:16px;
+      height:16px;
+      accent-color:var(--primary);
+      cursor:pointer;
+    }
+
+    .overflow-x{
+      width:100%;
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+
+    .tbl{
+      width:100%;
+      min-width:1280px;
+      border-collapse:separate;
+      border-spacing:0;
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:hidden;
+      table-layout:auto;
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    .tbl thead th{
+      position:sticky;
+      top:0;
+      z-index:3;
+      text-align:left;
+      background:#f7fbff;
+      color:#334155;
+      border-bottom:1px solid var(--border);
+      padding:10px 10px;
+      font-size:12px;
+      font-weight:1000;
+      white-space:nowrap;
+    }
+
+    .tbl tbody td{
+      border-bottom:1px solid rgba(15,23,42,.06);
+      padding:8px 10px;
+      font-size:12px;
+      vertical-align:top;
+      white-space:nowrap;
+    }
+
+    .tbl tbody tr:hover{
+      background:rgba(30,58,138,.035);
+    }
+
+    .cabecalho-coluna{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    .ordenacao{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      color:inherit;
+      text-decoration:none;
+      font-weight:1000;
+    }
+
+    .ordenacao.ativa{
+      color:var(--primary);
+    }
+
+    .vazio{
+      padding:26px;
+      text-align:center;
+      font-size:14px;
+      font-weight:900;
+      color:var(--muted);
+    }
+
+    .pager{
+      margin-top:12px;
+      padding:12px 14px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .pager .left,
+    .pager .right{
+      font-size:12px;
+      font-weight:1000;
+      color:var(--muted);
+    }
+
+    .pager .center{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      flex-wrap:wrap;
+    }
+
+    .pager .btn{
+      min-width:40px;
+      padding:8px 10px;
+    }
+
+    @media (max-width: 1400px){
+      .campo{ grid-column: span 4; }
+      .campo-lg{ grid-column: span 8; }
+      .campo-sm{ grid-column: span 3; }
+    }
+
+    @media (max-width: 980px){
+      .campo,
+      .campo-lg,
+      .campo-sm{
+        grid-column: span 12;
+      }
+
+      .tbl{
+        min-width:960px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="pagina">
+    <div class="topo">
+      <div class="titulo">
+        <div>
+          <h1>{{ metadados.nome_qualificado }}</h1>
+          <div class="subtitulo">
+            Visualização operacional da tabela real com paginação, filtros relevantes e ordenação segura
+          </div>
+          <div class="chips">
+            <span class="chip">Conexão: {{ metadados.conn_id }}</span>
+            {% if metadados.banco %}
+              <span class="chip">Banco: {{ metadados.banco }}</span>
+            {% endif %}
+            <span class="chip">Schema: {{ metadados.schema }}</span>
+            <span class="chip">Tabela: {{ metadados.tabela }}</span>
+            <span class="chip">Total de linhas: {{ dados.total_linhas }}</span>
+          </div>
+        </div>
+
+        <div class="acoes">
+          <a class="btn btn-secondary" href="javascript:window.close();">Fechar</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Filtros</h2>
+        <p>Busca global, filtros categóricos com múltipla escolha e intervalos de data</p>
+      </div>
+
+      <div class="card-body">
+        <form method="GET" action="./tabela" class="filtros-form">
+          <input type="hidden" name="conexao_id" value="{{ metadados.conn_id }}">
+          {% if metadados.banco %}
+            <input type="hidden" name="banco" value="{{ metadados.banco }}">
+          {% endif %}
+          <input type="hidden" name="schema" value="{{ metadados.schema }}">
+          <input type="hidden" name="tabela" value="{{ metadados.tabela }}">
+
+          <div class="campo campo-lg">
+            <label for="q">Busca global</label>
+            <input
+              id="q"
+              name="q"
+              type="text"
+              value="{{ dados.texto_busca }}"
+              placeholder="Pesquisar em todas as colunas..."
+            >
+          </div>
+
+          <div class="campo campo-sm">
+            <label for="tamanho_pagina">Por página</label>
+            <select id="tamanho_pagina" name="tamanho_pagina">
+              {% for valor in [20, 50, 100, 200] %}
+                <option value="{{ valor }}" {% if dados.tamanho_pagina == valor %}selected{% endif %}>{{ valor }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="campo campo-sm">
+            <label for="ordenar_por">Ordenar por</label>
+            <select id="ordenar_por" name="ordenar_por">
+              <option value="">Sem ordenação explícita</option>
+              {% for coluna in dados.colunas %}
+                <option value="{{ coluna }}" {% if dados.ordenar_por == coluna %}selected{% endif %}>{{ coluna }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="campo campo-sm">
+            <label for="direcao">Direção</label>
+            <select id="direcao" name="direcao">
+              <option value="asc" {% if dados.direcao == "asc" %}selected{% endif %}>Ascendente</option>
+              <option value="desc" {% if dados.direcao == "desc" %}selected{% endif %}>Descendente</option>
+            </select>
+          </div>
+
+          {% for filtro in dados.filtros_relevantes.categoricos %}
+            {% set selecionados = dados.filtros_categoricos.get(filtro.chave) or [] %}
+            <div class="campo">
+              <label>{{ filtro.rotulo }}</label>
+              <details class="dd" data-dd="{{ filtro.chave }}">
+                <summary class="dd-summary">
+                  <span class="dd-label">
+                    {% if selecionados|length == 0 %}
+                      {{ filtro.rotulo }}
+                    {% elif selecionados|length == 1 %}
+                      {{ selecionados[0] }}
+                    {% else %}
+                      {{ selecionados|length }} selecionados
+                    {% endif %}
+                  </span>
+                  <span class="dd-caret">▾</span>
+                </summary>
+
+                <div class="dd-panel">
+                  <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+
+                  <div class="dd-list">
+                    <label class="dd-item">
+                      <input
+                        type="checkbox"
+                        name="f_{{ filtro.chave }}"
+                        value=""
+                        data-dd-all="1"
+                        {% if selecionados|length == 0 %}checked{% endif %}
+                      >
+                      <span>(Todos)</span>
+                    </label>
+
+                    {% for opcao in filtro.opcoes %}
+                      <label class="dd-item" data-dd-text="{{ opcao|lower }}">
+                        <input
+                          type="checkbox"
+                          name="f_{{ filtro.chave }}"
+                          value="{{ opcao }}"
+                          {% if opcao in selecionados %}checked{% endif %}
+                        >
+                        <span>{{ opcao }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+              </details>
+            </div>
+          {% endfor %}
+
+          {% for filtro in dados.filtros_relevantes.datas %}
+            <div class="campo">
+              <label for="de_{{ filtro.chave }}">{{ filtro.rotulo }} - De</label>
+              <input
+                id="de_{{ filtro.chave }}"
+                name="de_{{ filtro.chave }}"
+                type="date"
+                value="{{ dados.filtros_datas_de.get(filtro.chave) or '' }}"
+              >
+            </div>
+
+            <div class="campo">
+              <label for="ate_{{ filtro.chave }}">{{ filtro.rotulo }} - Até</label>
+              <input
+                id="ate_{{ filtro.chave }}"
+                name="ate_{{ filtro.chave }}"
+                type="date"
+                value="{{ dados.filtros_datas_ate.get(filtro.chave) or '' }}"
+              >
+            </div>
+          {% endfor %}
+
+          <div class="campo campo-lg">
+            <div class="acoes">
+              <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+              <a
+                class="btn btn-secondary"
+                href="./tabela?conexao_id={{ metadados.conn_id }}{% if metadados.banco %}&banco={{ metadados.banco }}{% endif %}&schema={{ metadados.schema }}&tabela={{ metadados.tabela }}"
+              >
+                Limpar
+              </a>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Dados</h2>
+        <p>Visualização paginada no estilo operacional de inspeção de tabela</p>
+      </div>
+
+      <div class="card-body">
+        <div class="overflow-x">
+          <table class="tbl">
+            <thead>
+              <tr>
+                {% for coluna in dados.colunas %}
+                  {% set direcao_coluna = "asc" %}
+                  {% if dados.ordenar_por == coluna and dados.direcao == "asc" %}
+                    {% set direcao_coluna = "desc" %}
+                  {% endif %}
+
+                  <th>
+                    <div class="cabecalho-coluna">
+                      <a
+                        class="ordenacao {% if dados.ordenar_por == coluna %}ativa{% endif %}"
+                        href="./tabela?{{ query_base }}&ordenar_por={{ coluna }}&direcao={{ direcao_coluna }}"
+                      >
+                        <span>{{ coluna }}</span>
+                        {% if dados.ordenar_por == coluna %}
+                          <span>{% if dados.direcao == "asc" %}▲{% else %}▼{% endif %}</span>
+                        {% endif %}
+                      </a>
+                    </div>
+                  </th>
+                {% endfor %}
+              </tr>
+            </thead>
+
+            <tbody>
+              {% if dados.linhas and dados.linhas|length > 0 %}
+                {% for linha in dados.linhas %}
+                  <tr>
+                    {% for coluna in dados.colunas %}
+                      <td>{{ linha.get(coluna) }}</td>
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td colspan="{{ dados.colunas|length if dados.colunas else 1 }}" class="vazio">
+                    Nenhuma linha encontrada para os filtros atuais.
+                  </td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pager">
+          <div class="left">
+            Mostrando {{ dados.inicio }} até {{ dados.fim }} de {{ dados.total_linhas }} linhas
+          </div>
+
+          <div class="center">
+            <a class="btn btn-secondary" href="./tabela?{{ query_base }}&pagina=1">«</a>
+            <a class="btn btn-secondary" href="./tabela?{{ query_base }}&pagina={{ dados.prev_page }}">‹</a>
+
+            <span class="chip">{{ dados.pagina }} / {{ dados.total_paginas }}</span>
+
+            <a class="btn btn-secondary" href="./tabela?{{ query_base }}&pagina={{ dados.next_page }}">›</a>
+            <a class="btn btn-secondary" href="./tabela?{{ query_base }}&pagina={{ dados.total_paginas }}">»</a>
+          </div>
+
+          <div class="right">
+            {{ dados.tamanho_pagina }} por página
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      document.addEventListener("click", function(ev){
+        document.querySelectorAll("details.dd[open]").forEach(dd => {
+          if (!dd.contains(ev.target)) {
+            dd.removeAttribute("open");
+          }
+        });
+      });
+
+      document.querySelectorAll("details.dd").forEach(dd => {
+        const busca = dd.querySelector("[data-dd-search]");
+        if (busca) {
+          busca.addEventListener("input", function(){
+            const termo = String(busca.value || "").trim().toLowerCase();
+            dd.querySelectorAll(".dd-item[data-dd-text]").forEach(item => {
+              const texto = String(item.getAttribute("data-dd-text") || "").toLowerCase();
+              item.style.display = (!termo || texto.includes(termo)) ? "" : "none";
+            });
+          });
+        }
+
+        dd.addEventListener("change", function(ev){
+          const elemento = ev.target;
+          if (!elemento || elemento.type !== "checkbox") {
+            return;
+          }
+
+          const nome = elemento.getAttribute("name");
+          if (!nome) {
+            return;
+          }
+
+          const todos = dd.querySelector('input[type="checkbox"][name="' + nome + '"][data-dd-all="1"]');
+          const itens = Array.from(
+            dd.querySelectorAll('input[type="checkbox"][name="' + nome + '"]:not([data-dd-all="1"])')
+          );
+
+          if (elemento === todos) {
+            if (todos && todos.checked) {
+              itens.forEach(item => item.checked = false);
+            } else if (todos && !itens.some(item => item.checked)) {
+              todos.checked = true;
+            }
+          } else {
+            if (elemento.checked && todos) {
+              todos.checked = false;
+            }
+
+            if (!elemento.checked && todos && !itens.some(item => item.checked)) {
+              todos.checked = true;
+            }
+          }
+
+          const label = dd.querySelector(".dd-label");
+          if (!label) {
+            return;
+          }
+
+          const selecionados = itens.filter(item => item.checked);
+          const rotuloPadrao = dd.closest(".campo")?.querySelector("label")?.textContent?.trim() || "Selecionar";
+
+          if (todos && todos.checked) {
+            label.textContent = rotuloPadrao;
+          } else if (selecionados.length === 1) {
+            const span = selecionados[0].closest(".dd-item")?.querySelector("span");
+            label.textContent = span ? span.textContent.trim() : rotuloPadrao;
+          } else if (selecionados.length > 1) {
+            label.textContent = selecionados.length + " selecionados";
+          } else {
+            label.textContent = rotuloPadrao;
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

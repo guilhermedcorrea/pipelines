@@ -25,4 +25,5 @@ COPY --chown=airflow:root requirements.txt /requirements.txt
 USER airflow
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir apache-airflow-providers-fab \
     && pip install --no-cache-dir -r /requirements.txt

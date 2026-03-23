@@ -1,0 +1,97 @@
+:root {
+  --phm-font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+
+  --phm-bg: #0b1220;
+  --phm-surface: #111827;
+  --phm-surface-2: #162033;
+  --phm-surface-3: #1b2940;
+
+  --phm-border: rgba(255, 255, 255, 0.08);
+  --phm-border-strong: rgba(255, 255, 255, 0.14);
+
+  --phm-text: #e5e7eb;
+  --phm-text-soft: #94a3b8;
+  --phm-text-muted: #64748b;
+
+  --phm-primary: #38bdf8;
+  --phm-primary-soft: rgba(56, 189, 248, 0.14);
+
+  --phm-success: #22c55e;
+  --phm-success-soft: rgba(34, 197, 94, 0.14);
+
+  --phm-warning: #f59e0b;
+  --phm-warning-soft: rgba(245, 158, 11, 0.14);
+
+  --phm-danger: #ef4444;
+  --phm-danger-soft: rgba(239, 68, 68, 0.14);
+
+  --phm-info: #60a5fa;
+  --phm-info-soft: rgba(96, 165, 250, 0.14);
+
+  --phm-paused: #94a3b8;
+  --phm-paused-soft: rgba(148, 163, 184, 0.14);
+
+  --phm-shadow-sm: 0 6px 16px rgba(0, 0, 0, 0.18);
+  --phm-shadow-md: 0 10px 30px rgba(0, 0, 0, 0.24);
+
+  --phm-radius-sm: 10px;
+  --phm-radius-md: 14px;
+  --phm-radius-lg: 18px;
+
+  --phm-space-1: 4px;
+  --phm-space-2: 8px;
+  --phm-space-3: 12px;
+  --phm-space-4: 16px;
+  --phm-space-5: 20px;
+  --phm-space-6: 24px;
+  --phm-space-7: 28px;
+  --phm-space-8: 32px;
+
+  --phm-container-max: 1440px;
+
+  --phm-transition-fast: 160ms ease;
+  --phm-transition-normal: 220ms ease;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--phm-font-family);
+  color: var(--phm-text);
+  background: var(--phm-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 26%),
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.06), transparent 22%),
+    linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+  color: var(--phm-text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+#root {
+  min-height: 100vh;
+}

@@ -58,3 +58,11 @@
 #docker compose down --remove-orphans
 #docker compose up -d --build --force-recreate
 #docker compose ps
+
+
+#docker compose logs airflow-apiserver --tail=300 | grep -Ei "auditoria|traceback|error|exception|pyodbc|connection|jinja|sqlserver"
+
+
+
+#Reinicia airflow
+#docker compose restart airflow-apiserver airflow-scheduler airflow-dag-processor airflow-worker airflow-triggerer

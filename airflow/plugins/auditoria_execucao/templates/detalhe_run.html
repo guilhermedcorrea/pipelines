@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Detalhe da Execução</title>
+    <link rel="stylesheet" href="/auditoria-execucao/static/auditoria.css" />
+</head>
+<body>
+    <div class="pagina">
+        <header class="topo">
+            <div>
+                <a class="voltar" href="/auditoria-execucao/painel">← Voltar</a>
+                <h1>{{ dag.dag_id if dag else "Execução" }}</h1>
+                <p class="subtitulo texto-monaco">{{ dag.run_id if dag else "" }}</p>
+            </div>
+            {% if dag %}
+            <div class="lado-topo">
+                <span class="badge badge-{{ (dag.status or '').lower() }}">{{ dag.status }}</span>
+            </div>
+            {% endif %}
+        </header>
+
+        {% if dag %}
+        <section class="cards-resumo">
+            <article class="card">
+                <span class="rotulo">Run type</span>
+                <strong>{{ dag.run_type or "-" }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Início</span>
+                <strong>{{ dag.start_date or "-" }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Fim</span>
+                <strong>{{ dag.end_date or "-" }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Duração (s)</span>
+                <strong>{{ dag.duracao_segundos or "-" }}</strong>
+            </article>
+        </section>
+        {% endif %}
+
+        <section class="lista-tasks">
+            {% for task in tasks %}
+            <article class="task-card">
+                <div class="task-cabecalho">
+                    <div>
+                        <h2>{{ task.nome_amigavel or task.task_id }}</h2>
+                        <p class="texto-monaco">{{ task.task_id }}</p>
+                    </div>
+                    <span class="badge badge-{{ (task.status or '').lower() }}">{{ task.status }}</span>
+                </div>
+
+                <div class="task-grid">
+                    <div><strong>Descrição:</strong> {{ task.descricao_etapa or "-" }}</div>
+                    <div><strong>Operator:</strong> {{ task.operator or "-" }}</div>
+
+                    <div>
+                        <strong>Origem:</strong>
+                        {% if task.origem_recursos %}
+                            <span>
+                                {% for recurso in task.origem_recursos %}
+                                    {% if recurso.tipo == "tabela_sql" and recurso.preview_habilitado %}
+                                        <button
+                                            type="button"
+                                            class="botao-preview-tabela"
+                                            data-conexao-id="{{ recurso.conexao_id }}"
+                                            data-banco="{{ recurso.banco or '' }}"
+                                            data-schema="{{ recurso.schema }}"
+                                            data-tabela="{{ recurso.tabela }}"
+                                            data-texto="{{ recurso.texto }}"
+                                        >
+                                            {{ recurso.texto }}
+                                        </button>
+                                    {% elif recurso.tipo == "arquivo" and recurso.download_habilitado %}
+                                        <a
+                                            class="link-download-arquivo"
+                                            href="/auditoria-execucao/arquivo/download?caminho={{ recurso.caminho | urlencode }}"
+                                            download
+                                        >
+                                            {{ recurso.texto }}
+                                        </a>
+                                    {% else %}
+                                        <span>{{ recurso.texto }}</span>
+                                    {% endif %}
+
+                                    {% if not loop.last %}
+                                        <span class="separador-recurso"> + </span>
+                                    {% endif %}
+                                {% endfor %}
+                            </span>
+                        {% else %}
+                            {{ task.origem_dados or "-" }}
+                        {% endif %}
+                    </div>
+
+                    <div>
+                        <strong>Destino:</strong>
+                        {% if task.destino_recursos %}
+                            <span>
+                                {% for recurso in task.destino_recursos %}
+                                    {% if recurso.tipo == "tabela_sql" and recurso.preview_habilitado %}
+                                        <button
+                                            type="button"
+                                            class="botao-preview-tabela"
+                                            data-conexao-id="{{ recurso.conexao_id }}"
+                                            data-banco="{{ recurso.banco or '' }}"
+                                            data-schema="{{ recurso.schema }}"
+                                            data-tabela="{{ recurso.tabela }}"
+                                            data-texto="{{ recurso.texto }}"
+                                        >
+                                            {{ recurso.texto }}
+                                        </button>
+                                    {% elif recurso.tipo == "arquivo" and recurso.download_habilitado %}
+                                        <a
+                                            class="link-download-arquivo"
+                                            href="/auditoria-execucao/arquivo/download?caminho={{ recurso.caminho | urlencode }}"
+                                            download
+                                        >
+                                            {{ recurso.texto }}
+                                        </a>
+                                    {% else %}
+                                        <span>{{ recurso.texto }}</span>
+                                    {% endif %}
+
+                                    {% if not loop.last %}
+                                        <span class="separador-recurso"> + </span>
+                                    {% endif %}
+                                {% endfor %}
+                            </span>
+                        {% else %}
+                            {{ task.destino_dados or "-" }}
+                        {% endif %}
+                    </div>
+
+                    <div><strong>Linhas lidas:</strong> {{ task.linhas_lidas or "-" }}</div>
+                    <div><strong>Linhas inseridas:</strong> {{ task.linhas_inseridas or "-" }}</div>
+                    <div><strong>Linhas atualizadas:</strong> {{ task.linhas_atualizadas or "-" }}</div>
+                    <div><strong>Linhas descartadas:</strong> {{ task.linhas_descartadas or "-" }}</div>
+                    <div><strong>Início:</strong> {{ task.start_date or "-" }}</div>
+                    <div><strong>Fim:</strong> {{ task.end_date or "-" }}</div>
+                    <div><strong>Duração (s):</strong> {{ task.duracao_segundos or "-" }}</div>
+                    <div><strong>Tentativa:</strong> {{ task.try_number or "-" }}</div>
+                </div>
+
+                <div class="bloco-interno">
+                    <h3>Validações</h3>
+                    {% if task.validacoes_json %}
+                        <ul class="lista">
+                            {% for item in task.validacoes_json %}
+                            <li>
+                                <strong>{{ item.nome }}</strong> — {{ item.status }} — {{ item.detalhe }}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="vazio-texto">Nenhuma validação informada.</p>
+                    {% endif %}
+                </div>
+
+                <div class="bloco-interno">
+                    <h3>Amostra</h3>
+                    {% if task.amostra_json %}
+                        <pre class="json-bloco">{{ task.amostra_json | tojson(indent=2) }}</pre>
+                    {% else %}
+                        <p class="vazio-texto">Nenhuma amostra informada.</p>
+                    {% endif %}
+                </div>
+
+                <div class="bloco-interno">
+                    <h3>Diagnóstico</h3>
+                    <p><strong>Erro técnico:</strong> {{ task.erro_tecnico or "-" }}</p>
+                    <p><strong>Erro traduzido:</strong> {{ task.erro_traduzido or "-" }}</p>
+                    <p><strong>Causa provável:</strong> {{ task.causa_provavel or "-" }}</p>
+                    <p><strong>Ação sugerida:</strong> {{ task.acao_sugerida or "-" }}</p>
+                </div>
+            </article>
+            {% else %}
+            <div class="task-card">
+                <p class="vazio-texto">Nenhuma task registrada para esta execução.</p>
+            </div>
+            {% endfor %}
+        </section>
+    </div>
+
+    <div id="modal-preview-tabela" class="modal-preview hidden" aria-hidden="true">
+        <div class="modal-preview__overlay" data-fechar-modal="true"></div>
+
+        <div class="modal-preview__caixa" role="dialog" aria-modal="true" aria-labelledby="modal-preview-tabela-titulo">
+            <div class="modal-preview__cabecalho">
+                <div>
+                    <h2 id="modal-preview-tabela-titulo">Preview da tabela</h2>
+                    <p id="modal-preview-tabela-subtitulo" class="subtitulo texto-monaco">-</p>
+                </div>
+
+                <button type="button" id="modal-preview-fechar" class="modal-preview__fechar" aria-label="Fechar">
+                    ×
+                </button>
+            </div>
+
+            <div class="modal-preview__corpo">
+                <div id="modal-preview-estado" class="vazio-texto">
+                    Carregando preview...
+                </div>
+
+                <div id="modal-preview-resumo" class="modal-preview__resumo hidden"></div>
+
+                <div id="modal-preview-tabela-wrapper" class="modal-preview__tabela-wrapper hidden">
+                    <table class="tabela tabela-preview" id="modal-preview-tabela-dados">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="modal-preview__rodape">
+                <a
+                    id="modal-preview-abrir-completo"
+                    class="botao-link"
+                    href="#"
+                >
+                    Abrir tabela completa
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/auditoria-execucao/static/auditoria_tabela.js"></script>
+</body>
+</html>

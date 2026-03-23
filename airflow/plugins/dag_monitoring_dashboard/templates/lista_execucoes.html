@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <title>Auditoria de Execução - Lista</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f7fb;
+            color: #163a6b;
+            margin: 0;
+            padding: 24px;
+        }
+
+        h1 {
+            margin: 0 0 16px 0;
+            font-size: 42px;
+            font-weight: 700;
+        }
+
+        .filtros,
+        .tabela-container {
+            background: #ffffff;
+            border: 1px solid #d7e0ec;
+            border-radius: 18px;
+            padding: 18px;
+            margin-bottom: 18px;
+        }
+
+        .linha-filtros {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 180px;
+            gap: 12px;
+            align-items: end;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: #4d6588;
+        }
+
+        input,
+        select,
+        button {
+            width: 100%;
+            box-sizing: border-box;
+            border-radius: 12px;
+            border: 1px solid #c9d6e7;
+            padding: 12px;
+            font-size: 14px;
+        }
+
+        button {
+            background: #1976d2;
+            color: #ffffff;
+            border: none;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        button:hover {
+            opacity: 0.95;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead th {
+            text-align: left;
+            padding: 14px 12px;
+            border-bottom: 1px solid #d9e3ef;
+            color: #4d6588;
+            font-size: 13px;
+        }
+
+        tbody td {
+            padding: 14px 12px;
+            border-bottom: 1px solid #ecf1f7;
+            font-size: 14px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .status-success { background: #e6f6ea; color: #14833b; }
+        .status-failed { background: #fdeaea; color: #b42318; }
+        .status-running { background: #e8f1ff; color: #175cd3; }
+        .status-queued { background: #fff4e5; color: #b54708; }
+        .status-default { background: #eef2f7; color: #344054; }
+
+        .botao-detalhe {
+            display: inline-block;
+            padding: 10px 14px;
+            border-radius: 12px;
+            background: #1976d2;
+            color: #ffffff;
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .mensagem {
+            margin: 10px 0 0 0;
+            color: #667085;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Auditoria de Execução</h1>
+
+    <div class="filtros">
+        <div class="linha-filtros">
+            <div>
+                <label for="campo_dag_id">DAG</label>
+                <input id="campo_dag_id" type="text" placeholder="Ex: pipeline_movimento_financeiro_omie">
+            </div>
+
+            <div>
+                <label for="campo_status">Status</label>
+                <select id="campo_status">
+                    <option value="">Todos</option>
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                    <option value="running">Running</option>
+                    <option value="queued">Queued</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="campo_limite">Limite</label>
+                <input id="campo_limite" type="number" value="50" min="1" max="500">
+            </div>
+
+            <div>
+                <button id="botao_filtrar" type="button">Filtrar</button>
+            </div>
+        </div>
+
+        <p id="mensagem_status" class="mensagem">Carregando execuções...</p>
+    </div>
+
+    <div class="tabela-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>DAG</th>
+                    <th>Run ID</th>
+                    <th>Status</th>
+                    <th>Tipo</th>
+                    <th>Início</th>
+                    <th>Fim</th>
+                    <th>Duração (s)</th>
+                    <th>Ação</th>
+                </tr>
+            </thead>
+            <tbody id="corpo_tabela_execucoes"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const PREFIXO_APP = "/dag_monitoring";
+
+        function escaparHtml(valor) {
+            return String(valor ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function classeStatus(status) {
+            const texto = String(status || "").toLowerCase();
+            if (texto.includes("success")) return "status-success";
+            if (texto.includes("failed")) return "status-failed";
+            if (texto.includes("running")) return "status-running";
+            if (texto.includes("queued")) return "status-queued";
+            return "status-default";
+        }
+
+        function montarUrlDetalhe(dagId, runId) {
+            const params = new URLSearchParams();
+            params.set("dag_id", dagId);
+            if (runId) {
+                params.set("run_id", runId);
+            }
+            return `${PREFIXO_APP}/detalhe?${params.toString()}`;
+        }
+
+        async function carregarExecucoes() {
+            const campoDagId = document.getElementById("campo_dag_id");
+            const campoStatus = document.getElementById("campo_status");
+            const campoLimite = document.getElementById("campo_limite");
+            const corpoTabela = document.getElementById("corpo_tabela_execucoes");
+            const mensagemStatus = document.getElementById("mensagem_status");
+
+            mensagemStatus.textContent = "Carregando execuções...";
+            corpoTabela.innerHTML = "";
+
+            const params = new URLSearchParams();
+            const dagId = campoDagId.value.trim();
+            const status = campoStatus.value.trim();
+            const limite = campoLimite.value.trim() || "50";
+
+            if (dagId) {
+                params.set("dag_id", dagId);
+            }
+
+            if (status) {
+                params.set("status", status);
+            }
+
+            params.set("limite", limite);
+
+            try {
+                const url = `${PREFIXO_APP}/api/execucoes?${params.toString()}`;
+                const resposta = await fetch(url, {
+                    credentials: "same-origin",
+                    headers: {
+                        "Accept": "application/json"
+                    }
+                });
+
+                if (!resposta.ok) {
+                    const textoErro = await resposta.text();
+                    console.error("Erro HTTP ao buscar execuções:", resposta.status, textoErro);
+                    mensagemStatus.textContent = `Erro ao carregar execuções. HTTP ${resposta.status}.`;
+                    return;
+                }
+
+                const contentType = resposta.headers.get("content-type") || "";
+                if (!contentType.includes("application/json")) {
+                    const respostaTexto = await resposta.text();
+                    console.error("A API não retornou JSON. Resposta recebida:", respostaTexto);
+                    mensagemStatus.textContent = "Erro: a API retornou HTML em vez de JSON.";
+                    return;
+                }
+
+                const dados = await resposta.json();
+                const itens = Array.isArray(dados.itens) ? dados.itens : [];
+
+                if (itens.length === 0) {
+                    mensagemStatus.textContent = "Nenhuma execução encontrada.";
+                    return;
+                }
+
+                mensagemStatus.textContent = `${itens.length} execução(ões) carregada(s).`;
+
+                corpoTabela.innerHTML = itens.map((item) => {
+                    const dagIdItem = escaparHtml(item.dag_id || "-");
+                    const runIdItem = escaparHtml(item.run_id || "-");
+                    const statusItem = escaparHtml(item.status || "-");
+                    const tipoItem = escaparHtml(item.run_type || "-");
+                    const inicioItem = escaparHtml(item.start_date || "-");
+                    const fimItem = escaparHtml(item.end_date || "-");
+                    const duracaoItem = escaparHtml(item.duration_seconds ?? "-");
+                    const classe = classeStatus(item.status);
+
+                    const urlDetalhe = montarUrlDetalhe(item.dag_id || "", item.run_id || "");
+
+                    return `
+                        <tr>
+                            <td>${dagIdItem}</td>
+                            <td>${runIdItem}</td>
+                            <td><span class="badge ${classe}">${statusItem}</span></td>
+                            <td>${tipoItem}</td>
+                            <td>${inicioItem}</td>
+                            <td>${fimItem}</td>
+                            <td>${duracaoItem}</td>
+                            <td><a class="botao-detalhe" href="${urlDetalhe}">Ver detalhe</a></td>
+                        </tr>
+                    `;
+                }).join("");
+            } catch (erro) {
+                console.error("Erro inesperado ao carregar execuções:", erro);
+                mensagemStatus.textContent = `Erro inesperado ao carregar execuções: ${erro.message}`;
+            }
+        }
+
+        document.getElementById("botao_filtrar").addEventListener("click", carregarExecucoes);
+        window.addEventListener("load", carregarExecucoes);
+    </script>
+</body>
+</html>

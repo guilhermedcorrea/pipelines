@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auditoria de Execução</title>
+    <link rel="stylesheet" href="/auditoria-execucao/static/auditoria.css" />
+</head>
+<body>
+    <div class="pagina">
+        <header class="topo">
+            <div>
+                <h1>Auditoria de Execução</h1>
+                <p class="subtitulo">
+                    Visualização operacional das execuções de DAGs e suas etapas.
+                </p>
+            </div>
+        </header>
+
+        <section class="cards-resumo">
+            <article class="card">
+                <span class="rotulo">Execuções listadas</span>
+                <strong>{{ cards.total }}</strong>
+            </article>
+            <article class="card card-ok">
+                <span class="rotulo">Success</span>
+                <strong>{{ cards.success }}</strong>
+            </article>
+            <article class="card card-erro">
+                <span class="rotulo">Failed</span>
+                <strong>{{ cards.failed }}</strong>
+            </article>
+            <article class="card card-aviso">
+                <span class="rotulo">Running</span>
+                <strong>{{ cards.running }}</strong>
+            </article>
+        </section>
+
+        <section class="painel-filtros">
+            <form method="get" class="form-filtros">
+                <label>
+                    <span>DAG</span>
+                    <input type="text" name="dag_id" value="{{ filtro_dag_id }}" placeholder="Ex: Pipeline_Movimento_Financeiro_Omie" />
+                </label>
+
+                <label>
+                    <span>Status</span>
+                    <select name="status">
+                        <option value="" {% if not filtro_status %}selected{% endif %}>Todos</option>
+                        <option value="SUCCESS" {% if filtro_status == "SUCCESS" %}selected{% endif %}>SUCCESS</option>
+                        <option value="FAILED" {% if filtro_status == "FAILED" %}selected{% endif %}>FAILED</option>
+                        <option value="RUNNING" {% if filtro_status == "RUNNING" %}selected{% endif %}>RUNNING</option>
+                    </select>
+                </label>
+
+                <label>
+                    <span>Limite</span>
+                    <input type="number" name="limite" value="{{ limite }}" min="1" max="200" />
+                </label>
+
+                <button type="submit">Filtrar</button>
+            </form>
+        </section>
+
+        <section class="bloco-tabela">
+            <table class="tabela">
+                <thead>
+                    <tr>
+                        <th>DAG</th>
+                        <th>Run ID</th>
+                        <th>Status</th>
+                        <th>Tipo</th>
+                        <th>Início</th>
+                        <th>Fim</th>
+                        <th>Duração (s)</th>
+                        <th>Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in execucoes %}
+                    <tr>
+                        <td class="texto-forte">{{ item.dag_id }}</td>
+                        <td class="texto-monaco">{{ item.run_id }}</td>
+                        <td>
+                            <span class="badge badge-{{ (item.status or '').lower() }}">
+                                {{ item.status }}
+                            </span>
+                        </td>
+                        <td>{{ item.run_type }}</td>
+                        <td>{{ item.start_date or "-" }}</td>
+                        <td>{{ item.end_date or "-" }}</td>
+                        <td>{{ item.duracao_segundos or "-" }}</td>
+                        <td>
+                            <a class="botao-link" href="/auditoria-execucao/dag/{{ item.dag_id }}/run/{{ item.run_id }}">
+                                Ver detalhe
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="vazio">Nenhuma execução encontrada.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </div>
+</body>
+</html>

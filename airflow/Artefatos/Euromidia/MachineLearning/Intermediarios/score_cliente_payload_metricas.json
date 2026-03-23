@@ -1,0 +1,135 @@
+{
+    "configuracao": {
+        "quantidade_meses_validacao": 6,
+        "quantidade_meses_teste": 6,
+        "quantidade_minima_meses_treino_walk_forward": 24,
+        "quantidade_maxima_folds_walk_forward": null,
+        "iteracoes_catboost": 1200,
+        "iteracoes_finais_modelo": 896,
+        "learning_rate_catboost": 0.03,
+        "profundidade_catboost": 6,
+        "l2_leaf_reg_catboost": 8.0,
+        "random_strength_catboost": 1.5,
+        "bagging_temperature_catboost": 0.5,
+        "early_stopping_rounds_catboost": 150,
+        "semente_aleatoria": 42,
+        "usar_pesos_balanceamento": true
+    },
+    "resumo_dataset": {
+        "linhas_total": 35660,
+        "linhas_desenvolvimento": 30743,
+        "linhas_teste_final_oot": 4917,
+        "quantidade_features": 67,
+        "quantidade_features_numericas": 55,
+        "quantidade_features_categoricas": 12,
+        "quantidade_folds_walk_forward": 9
+    },
+    "periodos": {
+        "inicio_desenvolvimento": "2019-01-01",
+        "fim_desenvolvimento": "2025-08-01",
+        "inicio_teste_final_oot": "2025-09-01",
+        "fim_teste_final_oot": "2026-02-01",
+        "mes_snapshot_mais_recente": "2026-02-01"
+    },
+    "walk_forward": {
+        "melhores_iteracoes_por_fold": [
+            519,
+            535,
+            1186,
+            944,
+            622,
+            1027,
+            485,
+            896,
+            1190
+        ],
+        "media_auc_roc_folds": 0.9158380796828237,
+        "media_auc_pr_folds": 0.679013720209475,
+        "media_logloss_folds": 0.24612030495079035,
+        "media_brier_folds": 0.0735795807332654,
+        "media_ks_folds": 0.6945286823594241
+    },
+    "metricas_desenvolvimento": {
+        "auc_roc": 0.9821805446921654,
+        "auc_pr": 0.8852318273009067,
+        "log_loss": 0.20997235532385428,
+        "brier_score": 0.06127315675375199,
+        "ks": 0.8795929740443407,
+        "precision_threshold_0_5": 0.6325702224387075,
+        "recall_threshold_0_5": 0.962688411168767,
+        "true_negative": 24433,
+        "false_positive": 2263,
+        "false_negative": 151,
+        "true_positive": 3896,
+        "taxa_positivos_real": 0.13163972286374134,
+        "taxa_positivos_predita_media": 0.23973550223118836
+    },
+    "metricas_top_desenvolvimento": {
+        "precision_top_10": 0.8780487804878049,
+        "recall_top_10": 0.6671608598962194,
+        "lift_top_10": 6.670089858793324
+    },
+    "metricas_walk_forward_oof": {
+        "auc_roc": 0.9282033759835869,
+        "auc_pr": 0.6904181324238914,
+        "log_loss": 0.2246658932330527,
+        "brier_score": 0.06679986243445887,
+        "ks": 0.7017772831418045,
+        "precision_threshold_0_5": 0.6095210280373832,
+        "recall_threshold_0_5": 0.674313408723748,
+        "true_negative": 21807,
+        "false_positive": 1337,
+        "false_negative": 1008,
+        "true_positive": 2087,
+        "taxa_positivos_real": 0.11795419032737528,
+        "taxa_positivos_predita_media": 0.1808428927119225
+    },
+    "metricas_top_walk_forward_oof": {
+        "precision_top_10": 0.6920731707317073,
+        "recall_top_10": 0.5867528271405493,
+        "lift_top_10": 5.867304661334174
+    },
+    "metricas_teste_final_oot": {
+        "auc_roc": 0.9696024582470018,
+        "auc_pr": 0.7869820006064276,
+        "log_loss": 0.1507095652534567,
+        "brier_score": 0.04249527717812709,
+        "ks": 0.8249541324555635,
+        "precision_threshold_0_5": 0.5897920604914934,
+        "recall_threshold_0_5": 0.814621409921671,
+        "true_negative": 4317,
+        "false_positive": 217,
+        "false_negative": 71,
+        "true_positive": 312,
+        "taxa_positivos_real": 0.07789302420174904,
+        "taxa_positivos_predita_media": 0.1429450555686552
+    },
+    "metricas_top_teste_final_oot": {
+        "precision_top_10": 0.6260162601626016,
+        "recall_top_10": 0.804177545691906,
+        "lift_top_10": 8.036871935298986
+    },
+    "colunas_tabela_final": [
+        "CNPJ_LIMPO",
+        "IDEmpresa",
+        "RazaoSocial",
+        "ClasseValor",
+        "DescricaoClasseValor",
+        "ClasseEstrutural",
+        "ClasseGeo",
+        "ClassePotencial",
+        "ClusterGrupoCliente",
+        "DiasDesdeUltimaCompra",
+        "ValorVida",
+        "ScoreCliente",
+        "ClassificacaoScore"
+    ],
+    "quantidade_linhas_tabela_final": 827,
+    "atualizacao_dim_classificacao_clientes": {
+        "linhas_resultado_snapshot": 827,
+        "linhas_enviadas_atualizacao": 827,
+        "linhas_encontradas_destino": 827,
+        "linhas_atualizadas": 827,
+        "linhas_nao_encontradas_destino": 0
+    }
+}

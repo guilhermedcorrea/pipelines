@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pipeline Health Monitor</title>
+    <link rel="stylesheet" href="/pipeline-health-monitor/static/pipeline_health.css" />
+</head>
+<body>
+    <div class="pagina">
+        <header class="topo">
+            <div class="topo-esquerda">
+                <div class="icone-titulo">❤</div>
+                <div>
+                    <h1>Pipeline Health Monitor</h1>
+                    <p>Monitor avançado de saúde operacional dos pipelines do Airflow</p>
+                </div>
+            </div>
+
+            <div class="topo-direita">
+                <div class="bloco-status-geral">
+                    <span class="rotulo">Status</span>
+                    <span class="valor">Online</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="grade-resumo">
+            <article class="card-metrica">
+                <span class="rotulo">Total de pipelines</span>
+                <span class="valor" id="metrica-total-pipelines">--</span>
+                <span class="subtexto">Pipelines monitorados</span>
+            </article>
+
+            <article class="card-metrica healthy">
+                <span class="rotulo">Healthy</span>
+                <span class="valor" id="metrica-healthy">--</span>
+                <span class="subtexto">Saudáveis</span>
+            </article>
+
+            <article class="card-metrica degraded">
+                <span class="rotulo">Degraded</span>
+                <span class="valor" id="metrica-degraded">--</span>
+                <span class="subtexto">Com degradação</span>
+            </article>
+
+            <article class="card-metrica critical">
+                <span class="rotulo">Critical</span>
+                <span class="valor" id="metrica-critical">--</span>
+                <span class="subtexto">Críticos</span>
+            </article>
+
+            <article class="card-metrica paused">
+                <span class="rotulo">Paused</span>
+                <span class="valor" id="metrica-paused">--</span>
+                <span class="subtexto">Pausados</span>
+            </article>
+
+            <article class="card-metrica">
+                <span class="rotulo">Incidentes 24h</span>
+                <span class="valor" id="metrica-incidentes">--</span>
+                <span class="subtexto">Alertas recentes</span>
+            </article>
+        </section>
+
+        <section class="secao">
+            <div class="secao-titulo">
+                <h2>Pipeline Health</h2>
+                <p>Visão consolidada dos pipelines monitorados</p>
+            </div>
+
+            <div class="cartao">
+                <div class="tabela-wrapper">
+                    <table class="tabela-health">
+                        <thead>
+                            <tr>
+                                <th class="coluna-dag">Pipeline</th>
+                                <th>Health Score</th>
+                                <th>Status</th>
+                                <th>Última execução</th>
+                                <th>Duração vs média</th>
+                                <th>Última falha</th>
+                                <th>Dependência</th>
+                                <th>Qualidade de dados</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tabela-pipelines-body">
+                            <tr>
+                                <td colspan="8" class="mensagem-vazia">Carregando pipelines...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <section class="grade-inferior">
+            <section class="secao">
+                <div class="secao-titulo">
+                    <h2>Dependency Status</h2>
+                    <p>Saúde operacional das integrações</p>
+                </div>
+
+                <div class="cartao">
+                    <div class="lista-status" id="lista-dependencias">
+                        <div class="mensagem-vazia">Carregando dependências...</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="secao">
+                <div class="secao-titulo">
+                    <h2>Health Alerts</h2>
+                    <p>Incidentes e eventos recentes</p>
+                </div>
+
+                <div class="cartao">
+                    <div class="lista-alertas" id="lista-alertas">
+                        <div class="mensagem-vazia">Carregando alertas...</div>
+                    </div>
+                </div>
+            </section>
+        </section>
+
+        <div class="rodape-debug" id="rodape-debug">
+            Aguardando carregamento da API...
+        </div>
+    </div>
+
+    <script>
+        (() => {
+            "use strict";
+
+            const montarBaseApi = () => {
+                const caminho = window.location.pathname.replace(/\/+$/, "");
+
+                if (caminho.endsWith("/plugin/pipeline-health-monitor")) {
+                    return "/plugin/pipeline-health-monitor/api";
+                }
+
+                if (caminho.endsWith("/pipeline-health-monitor")) {
+                    return "/pipeline-health-monitor/api";
+                }
+
+                if (caminho.includes("/plugin/pipeline-health-monitor")) {
+                    return "/plugin/pipeline-health-monitor/api";
+                }
+
+                if (caminho.includes("/pipeline-health-monitor")) {
+                    return "/pipeline-health-monitor/api";
+                }
+
+                return "/plugin/pipeline-health-monitor/api";
+            };
+
+            const BASE_API = montarBaseApi();
+
+            const elemento = (id) => document.getElementById(id);
+
+            const normalizar = (valor) =>
+                String(valor ?? "")
+                    .trim()
+                    .toLowerCase()
+                    .normalize("NFD")
+                    .replace(/[\u0300-\u036f]/g, "");
+
+            const classeBadge = (valor) => {
+                const texto = normalizar(valor);
+
+                if (texto.includes("healthy")) return "badge badge-healthy";
+                if (texto.includes("degraded")) return "badge badge-degraded";
+                if (texto.includes("critical")) return "badge badge-critical";
+                if (texto.includes("paused")) return "badge badge-paused";
+                if (texto.includes("warning")) return "badge badge-warning";
+                if (texto.includes("ok")) return "badge badge-ok";
+                if (texto.includes("down")) return "badge badge-down";
+                if (texto.includes("unstable")) return "badge badge-unstable";
+
+                return "badge";
+            };
+
+            const classeScore = (valor) => {
+                const numero = Number(valor);
+                if (Number.isNaN(numero)) return "valor-score";
+                if (numero >= 80) return "valor-score score-bom";
+                if (numero >= 60) return "valor-score score-medio";
+                return "valor-score score-ruim";
+            };
+
+            const textoSeguro = (valor, padrao = "—") => {
+                if (valor === null || valor === undefined) return padrao;
+                const texto = String(valor).trim();
+                return texto ? texto : padrao;
+            };
+
+            const atualizarResumo = (resumo) => {
+                elemento("metrica-total-pipelines").textContent = textoSeguro(
+                    resumo.total_pipelines ?? resumo.totalPipelines,
+                    "--"
+                );
+                elemento("metrica-healthy").textContent = textoSeguro(resumo.healthy, "--");
+                elemento("metrica-degraded").textContent = textoSeguro(resumo.degraded, "--");
+                elemento("metrica-critical").textContent = textoSeguro(resumo.critical, "--");
+                elemento("metrica-paused").textContent = textoSeguro(resumo.paused, "--");
+                elemento("metrica-incidentes").textContent = textoSeguro(
+                    resumo.incidents_last_24h ?? resumo.incidentsLast24h ?? resumo.incidentes_ultimas_24h,
+                    "--"
+                );
+            };
+
+            const renderizarPipelines = (pipelines) => {
+                const tbody = elemento("tabela-pipelines-body");
+
+                if (!Array.isArray(pipelines) || pipelines.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="mensagem-vazia">Nenhum pipeline encontrado.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = pipelines.map((item) => {
+                    const nomeExibicao = textoSeguro(
+                        item.nome_exibicao ?? item.nomeExibicao ?? item.nome ?? item.pipeline_nome ?? item.pipelineNome,
+                        "-"
+                    );
+
+                    const dagId = textoSeguro(
+                        item.dag_id ?? item.dagId ?? item.pipeline_id ?? item.pipelineId,
+                        "-"
+                    );
+
+                    const score = textoSeguro(item.health_score ?? item.healthScore, "-");
+                    const status = textoSeguro(item.status, "-");
+                    const ultimaExecucao = textoSeguro(
+                        item.last_run ?? item.lastRun ?? item.ultima_execucao ?? item.ultimaExecucao,
+                        "—"
+                    );
+                    const duracaoVsMedia = textoSeguro(
+                        item.duration_vs_avg ?? item.durationVsAvg ?? item.duracao_vs_media ?? item.duracaoVsMedia,
+                        "—"
+                    );
+                    const ultimaFalha = textoSeguro(
+                        item.last_failure ?? item.lastFailure ?? item.ultima_falha ?? item.ultimaFalha,
+                        "—"
+                    );
+                    const dependencia = textoSeguro(item.dependency ?? item.dependencia, "—");
+                    const qualidade = textoSeguro(
+                        item.data_quality ?? item.dataQuality ?? item.qualidade_dados ?? item.qualidadeDados,
+                        "—"
+                    );
+
+                    return `
+                        <tr>
+                            <td class="coluna-dag">
+                                <div class="nome-dag">${nomeExibicao}</div>
+                                <div class="subtexto-dag">${dagId}</div>
+                            </td>
+                            <td><span class="${classeScore(score)}">${score}</span></td>
+                            <td><span class="${classeBadge(status)}">${status}</span></td>
+                            <td>${ultimaExecucao}</td>
+                            <td>${duracaoVsMedia}</td>
+                            <td>${ultimaFalha}</td>
+                            <td><span class="${classeBadge(dependencia)}">${dependencia}</span></td>
+                            <td><span class="${classeBadge(qualidade)}">${qualidade}</span></td>
+                        </tr>
+                    `;
+                }).join("");
+            };
+
+            const renderizarDependencias = (dependencias) => {
+                const container = elemento("lista-dependencias");
+
+                if (!Array.isArray(dependencias) || dependencias.length === 0) {
+                    container.innerHTML = '<div class="mensagem-vazia">Nenhuma dependência encontrada.</div>';
+                    return;
+                }
+
+                container.innerHTML = dependencias.map((item) => {
+                    const nome = textoSeguro(item.nome ?? item.name, "-");
+                    const status = textoSeguro(item.status, "-");
+                    const latencia = textoSeguro(
+                        item.latencia ?? item.latency ?? item.tempo_resposta,
+                        "Latência: —"
+                    );
+
+                    return `
+                        <div class="item-status">
+                            <div class="linha-status-topo">
+                                <span class="nome-dependencia">${nome}</span>
+                                <span class="${classeBadge(status)}">${status}</span>
+                            </div>
+                            <div class="latencia">${latencia}</div>
+                        </div>
+                    `;
+                }).join("");
+            };
+
+            const renderizarAlertas = (resumo, pipelines) => {
+                const container = elemento("lista-alertas");
+                const alertas = [];
+
+                const incidentes = Number(
+                    resumo?.incidents_last_24h ??
+                    resumo?.incidentsLast24h ??
+                    resumo?.incidentes_ultimas_24h ??
+                    0
+                );
+
+                if (incidentes > 0) {
+                    alertas.push(`Incidentes nas últimas 24 horas: ${incidentes}`);
+                }
+
+                if (Array.isArray(pipelines)) {
+                    pipelines.forEach((item) => {
+                        const nome = textoSeguro(
+                            item.nome_exibicao ?? item.nomeExibicao ?? item.nome ?? item.pipeline_nome ?? item.pipelineNome,
+                            "Pipeline"
+                        );
+
+                        const status = normalizar(item.status);
+                        const score = Number(item.health_score ?? item.healthScore);
+
+                        const ultimaFalha = textoSeguro(
+                            item.last_failure ?? item.lastFailure ?? item.ultima_falha ?? item.ultimaFalha,
+                            ""
+                        );
+
+                        if (status.includes("critical")) {
+                            alertas.push(`${nome}: status crítico`);
+                        }
+
+                        if (!Number.isNaN(score) && score < 60) {
+                            alertas.push(`${nome}: health score crítico (${score})`);
+                        }
+
+                        if (ultimaFalha && ultimaFalha !== "—") {
+                            alertas.push(`${nome}: ${ultimaFalha}`);
+                        }
+                    });
+                }
+
+                const alertasUnicos = [...new Set(alertas)];
+
+                if (alertasUnicos.length === 0) {
+                    container.innerHTML = '<div class="mensagem-vazia">Nenhum alerta recente.</div>';
+                    return;
+                }
+
+                container.innerHTML = alertasUnicos.map((texto) => `
+                    <div class="item-alerta">
+                        <span class="icone-alerta">!</span>
+                        <div class="texto-alerta">${texto}</div>
+                    </div>
+                `).join("");
+            };
+
+            const buscarJson = async (url) => {
+                const resposta = await fetch(url, {
+                    method: "GET",
+                    headers: {
+                        "Accept": "application/json"
+                    }
+                });
+
+                if (!resposta.ok) {
+                    throw new Error(`Falha ao buscar ${url}: HTTP ${resposta.status}`);
+                }
+
+                return resposta.json();
+            };
+
+            const ajustarArrayPipelines = (retorno) => {
+                if (Array.isArray(retorno)) return retorno;
+                if (Array.isArray(retorno?.pipelines)) return retorno.pipelines;
+                if (Array.isArray(retorno?.items)) return retorno.items;
+                if (Array.isArray(retorno?.dados)) return retorno.dados;
+                return [];
+            };
+
+            const ajustarArrayDependencias = (retorno) => {
+                if (Array.isArray(retorno)) return retorno;
+                if (Array.isArray(retorno?.dependencias)) return retorno.dependencias;
+                if (Array.isArray(retorno?.dependencies)) return retorno.dependencies;
+                if (Array.isArray(retorno?.items)) return retorno.items;
+                if (Array.isArray(retorno?.dados)) return retorno.dados;
+                return [];
+            };
+
+            const ajustarResumo = (retorno) => {
+                if (retorno?.resumo && typeof retorno.resumo === "object") return retorno.resumo;
+                return retorno ?? {};
+            };
+
+            const atualizarRodape = (texto) => {
+                elemento("rodape-debug").textContent = texto;
+            };
+
+            const carregar = async () => {
+                try {
+                    atualizarRodape(`Carregando dados do monitor em ${BASE_API} ...`);
+
+                    const [resumoBruto, pipelinesBruto, dependenciasBruto] = await Promise.all([
+                        buscarJson(`${BASE_API}/resumo`),
+                        buscarJson(`${BASE_API}/pipelines`),
+                        buscarJson(`${BASE_API}/dependencias`)
+                    ]);
+
+                    const resumo = ajustarResumo(resumoBruto);
+                    const pipelines = ajustarArrayPipelines(pipelinesBruto);
+                    const dependencias = ajustarArrayDependencias(dependenciasBruto);
+
+                    atualizarResumo(resumo);
+                    renderizarPipelines(pipelines);
+                    renderizarDependencias(dependencias);
+                    renderizarAlertas(resumo, pipelines);
+
+                    atualizarRodape("Monitor carregado com sucesso.");
+                } catch (erro) {
+                    console.error("Erro ao carregar Pipeline Health Monitor:", erro);
+
+                    elemento("tabela-pipelines-body").innerHTML =
+                        '<tr><td colspan="8" class="mensagem-vazia">Erro ao carregar pipelines da API.</td></tr>';
+
+                    elemento("lista-dependencias").innerHTML =
+                        '<div class="mensagem-vazia">Erro ao carregar dependências da API.</div>';
+
+                    elemento("lista-alertas").innerHTML =
+                        '<div class="mensagem-vazia">Erro ao carregar alertas da API.</div>';
+
+                    atualizarRodape(`Falha no carregamento: ${erro.message}`);
+                }
+            };
+
+            if (document.readyState === "loading") {
+                document.addEventListener("DOMContentLoaded", carregar);
+            } else {
+                carregar();
+            }
+        })();
+    </script>
+</body>
+</html>

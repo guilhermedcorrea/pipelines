@@ -30,9 +30,8 @@ x-airflow-common: &airflow-common
     AIRFLOW__CELERY__WORKER_CONCURRENCY: 1
     AIRFLOW__SCHEDULER__TASK_QUEUED_TIMEOUT: 3600
 
-    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_SIMPLE_AUTH_USERS}
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/simple_auth/simple_auth_manager_passwords.json.generated
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+   
 
     AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"

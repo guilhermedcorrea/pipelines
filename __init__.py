@@ -60,12 +60,9 @@
 #docker compose ps
 
 
-
-
 #Logs Flask
 #docker compose logs --tail=100 nginx-flask
 #docker compose logs --tail=100 flask-app
-
 
 
 #rebuild flask
@@ -81,3 +78,38 @@
 
 #netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=5000 connectaddress=172.26.200.69 connectport=5000
 #New-NetFirewallRule -DisplayName "Flask 5000" -Direction Inbound -Protocol TCP -LocalPort 5000 -Action Allow
+
+
+#reinicia
+#docker compose restart airflow-apiserver airflow-scheduler airflow-worker airflow-dag-processor
+
+
+
+
+
+#Acessa o container
+#docker exec -it pipelines-airflow-apiserver-1 bash
+
+
+
+
+"""
+docker compose down
+docker compose build --no-cache airflow-init airflow-apiserver airflow-scheduler airflow-dag-processor airflow-worker airflow-triggerer
+docker compose up airflow-init
+docker compose up -d
+docker compose exec airflow-apiserver airflow users create \
+  --username guilherme \
+  --firstname Guilherme \
+  --lastname Correa \
+  --role Admin \
+  --email guilherme.correa@cscc.com.br \
+  --password Gui@07spk8abcde
+  """
+
+
+#docker compose restart airflow-apiserver airflow-scheduler airflow-dag-processor airflow-worker airflow-
+
+
+#acessa containwer
+#docker compose exec airflow-apiserver bash

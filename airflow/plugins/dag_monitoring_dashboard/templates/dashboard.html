@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auditoria de Execução</title>
+  <link rel="stylesheet" href="/dag_monitoring/static/legacy/dashboard.css" />
+  <style>
+    .objetos-ajuda {
+      margin: 0 0 14px 0;
+      color: #60708b;
+      font-size: 0.95rem;
+    }
+
+    .objeto-card {
+      position: relative;
+    }
+
+    .objeto-card.previewavel {
+      cursor: pointer;
+      transition: 0.18s ease;
+    }
+
+    .objeto-card.previewavel:hover {
+      transform: translateY(-2px);
+      border-color: #aac5ea;
+      box-shadow: 0 8px 20px rgba(40, 63, 95, 0.09);
+    }
+
+    .objeto-card.downloadable {
+      border-style: dashed;
+    }
+
+    .objeto-acoes {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .objeto-botao {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid #d8e5f5;
+      background: #f3f7fd;
+      color: #3f5f8b;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      transition: 0.18s ease;
+    }
+
+    .objeto-botao:hover {
+      background: #e9f1fb;
+      border-color: #b8cde9;
+    }
+
+    .objeto-botao.primario {
+      background: #edf4fd;
+      color: #245792;
+      border-color: #cfe0f6;
+    }
+
+    .objeto-botao.secundario {
+      background: #fff;
+      color: #4f6888;
+    }
+
+    .objeto-botao.desabilitado,
+    .objeto-botao[aria-disabled="true"] {
+      opacity: 0.55;
+      pointer-events: none;
+      cursor: default;
+    }
+
+    .objeto-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 10px;
+      font-size: 0.88rem;
+      color: #61738d;
+    }
+
+    .objeto-meta span strong {
+      color: #314a6e;
+    }
+
+    .estado-vazio {
+      border: 1px dashed #cfdced;
+      background: #f9fbfe;
+      border-radius: 14px;
+      padding: 18px;
+      color: #60708b;
+      font-weight: 600;
+    }
+
+    .tabela-preview-topo {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .tabela-preview-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      color: #60708b;
+      font-size: 0.92rem;
+      margin-bottom: 12px;
+    }
+
+    .tabela-preview-wrapper {
+      width: 100%;
+      overflow: auto;
+      border: 1px solid #dbe6f4;
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .tabela-preview-wrapper table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+
+    .tabela-preview-wrapper thead th {
+      background: #eef4fb;
+      color: #4f6888;
+      font-size: 0.9rem;
+      text-align: left;
+      padding: 14px 12px;
+      border-bottom: 1px solid #d7e3f2;
+      white-space: nowrap;
+    }
+
+    .tabela-preview-wrapper tbody td {
+      padding: 12px;
+      border-bottom: 1px solid #edf2f8;
+      color: #243756;
+      white-space: nowrap;
+      vertical-align: top;
+    }
+
+    .tabela-preview-wrapper tbody tr:hover {
+      background: #fafcff;
+    }
+
+    .preview-paginacao {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+
+    .preview-paginacao-info {
+      color: #60708b;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .preview-paginacao-acoes {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .preview-erro {
+      background: #fdecec;
+      color: #9d2a2a;
+      border: 1px solid #f5cccc;
+      border-radius: 12px;
+      padding: 14px;
+      font-weight: 700;
+    }
+
+    .preview-loading {
+      color: #35527a;
+      font-weight: 700;
+      padding: 12px 0;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 29, 48, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 9999;
+    }
+
+    .modal-overlay.ativo {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(860px, 100%);
+      max-height: 90vh;
+      overflow: auto;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 16px 40px rgba(13, 25, 44, 0.22);
+      border: 1px solid #d8e5f5;
+    }
+
+    .modal-card.modal-card-grande {
+      width: min(1280px, 100%);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid #e2ebf6;
+      position: sticky;
+      top: 0;
+      background: #fff;
+      z-index: 3;
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      color: #24395b;
+      font-size: 1.2rem;
+    }
+
+    .modal-body {
+      padding: 20px;
+    }
+
+    .atalhos-objetos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div
+    class="pagina-dashboard"
+    id="pagina-dashboard"
+    data-dag-id="__DAG_ID__"
+    data-run-id="__RUN_ID__"
+  >
+    <header class="cabecalho-dashboard">
+      <div class="cabecalho-conteudo">
+        <div>
+          <h1>Auditoria de Execução</h1>
+          <p id="dag-descricao-curta">Carregando...</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="faixa-resumo">
+      <div class="item-resumo">
+        <span class="rotulo">DAG ID</span>
+        <span class="valor" id="dag-id">-</span>
+      </div>
+
+      <div class="item-resumo">
+        <span class="rotulo">Status</span>
+        <span class="valor"><span id="dag-status">-</span></span>
+      </div>
+
+      <div class="item-resumo">
+        <span class="rotulo">Próxima execução</span>
+        <span class="valor" id="dag-proxima">-</span>
+      </div>
+
+      <div class="item-resumo">
+        <span class="rotulo">Última execução</span>
+        <span class="valor" id="dag-ultima">-</span>
+      </div>
+    </section>
+
+    <section class="bloco-pipeline">
+      <div class="titulo-bloco">
+        <h2>Fluxo da Pipeline</h2>
+        <p>Tasks reais da DAG e status real da execução</p>
+      </div>
+      <div class="pipeline-horizontal" id="pipeline"></div>
+    </section>
+
+    <section class="layout-principal">
+      <aside class="coluna-esquerda">
+        <div class="card">
+          <div class="card-head azul">Descrição</div>
+          <div class="card-body">
+            <p id="descricao-detalhe">-</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">Execução</div>
+          <div class="card-body lista-infos">
+            <div class="linha-info">
+              <span class="chave">Agendamento</span>
+              <span class="valor" id="agendamento">-</span>
+            </div>
+            <div class="linha-info">
+              <span class="chave">Início</span>
+              <span class="valor" id="inicio">-</span>
+            </div>
+            <div class="linha-info">
+              <span class="chave">Última execução</span>
+              <span class="valor" id="execucao-detalhe">-</span>
+            </div>
+            <div class="linha-info">
+              <span class="chave">Owner</span>
+              <span class="valor" id="owner-dag">-</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">Documentação</div>
+          <div class="card-body">
+            <ul class="lista-links">
+              <li><a href="#" id="link-guia">Guia das Transformações</a></li>
+              <li><a href="#" id="link-upsert">Regras de Upsert</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">Tags</div>
+          <div class="card-body">
+            <div class="tags-box" id="tags-dag"></div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="coluna-centro">
+        <div class="card card-detalhe-task">
+          <div class="topo-task">
+            <div class="icone-task">↗</div>
+            <div>
+              <h2 id="task-titulo">Detalhes da Task</h2>
+              <p id="task-subtitulo">-</p>
+            </div>
+          </div>
+
+          <div class="tabs">
+            <button class="tab ativa" data-tab="resumo" type="button">Resumo</button>
+            <button class="tab" data-tab="objetos" type="button">Objetos</button>
+            <button class="tab" data-tab="dados" type="button">Dados</button>
+            <button class="tab" data-tab="sql" type="button">SQL / Procedure</button>
+          </div>
+
+          <div class="tab-content ativa" id="tab-resumo">
+            <div class="grid-resumo-task">
+              <div class="linha-detalhe">
+                <span class="label">Etapa</span>
+                <span class="conteudo" id="resumo-etapa">-</span>
+              </div>
+              <div class="linha-detalhe">
+                <span class="label">Objetivo</span>
+                <span class="conteudo" id="resumo-objetivo">-</span>
+              </div>
+              <div class="linha-detalhe">
+                <span class="label">Tipo</span>
+                <span class="conteudo" id="resumo-tipo">-</span>
+              </div>
+              <div class="linha-detalhe">
+                <span class="label">Operação</span>
+                <span class="conteudo" id="resumo-operacao">-</span>
+              </div>
+              <div class="linha-detalhe linha-detalhe-full">
+                <span class="label">Descrição</span>
+                <span class="conteudo" id="task-resumo">-</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-content" id="tab-objetos">
+            <div class="secao-interna">
+              <h3>Objetos manipulados</h3>
+              <p class="objetos-ajuda">
+                Objetos com referência estruturada de conexão, schema e tabela poderão ser abertos para preview.
+              </p>
+
+              <div class="atalhos-objetos" id="atalhos-objetos"></div>
+
+              <div class="objetos-grid" id="objetos-task"></div>
+
+              <div class="estado-vazio" id="objetos-vazio" style="display:none;">
+                Nenhum objeto estruturado foi registrado para esta task.
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-content" id="tab-dados">
+            <div class="secao-interna">
+              <div class="barra-dados">
+                <div>
+                  <h3>Amostra dos dados</h3>
+                  <p>Dados reais registrados pela própria task</p>
+                </div>
+              </div>
+
+              <div class="nome-fonte-box">
+                <span class="badge-objeto" id="fonte-dados">Fonte: -</span>
+              </div>
+
+              <div class="tabela-wrapper">
+                <table id="tabela-amostra"></table>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-content" id="tab-sql">
+            <div class="secao-interna">
+              <h3>Consulta / View / Procedure</h3>
+              <pre class="bloco-codigo" id="codigo-sql">-</pre>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="coluna-direita">
+        <div class="card">
+          <div class="card-head verde">Health & Monitoramento</div>
+          <div class="card-body">
+            <div class="health-topo">
+              <div class="health-item">
+                <span class="health-label">DAG</span>
+                <span class="health-value" id="health-dag">-</span>
+              </div>
+              <div class="health-item">
+                <span class="health-label">Tasks saudáveis</span>
+                <span class="health-value" id="health-tasks">-</span>
+              </div>
+            </div>
+
+            <div class="health-bloco">
+              <div class="linha-info">
+                <span class="chave">Broker</span>
+                <span class="valor" id="health-broker">-</span>
+              </div>
+              <div class="linha-info">
+                <span class="chave">Fila</span>
+                <span class="valor" id="health-fila">-</span>
+              </div>
+              <div class="linha-info">
+                <span class="chave">Executando</span>
+                <span class="valor" id="health-executando">-</span>
+              </div>
+              <div class="linha-info">
+                <span class="chave">Workers online</span>
+                <span class="valor" id="health-workers">-</span>
+              </div>
+            </div>
+
+            <div class="health-barra-box">
+              <div class="health-barra-label">
+                <span>Saúde geral</span>
+                <span id="health-percentual">0%</span>
+              </div>
+              <div class="health-barra">
+                <div class="health-barra-preenchimento" id="health-barra-preenchimento"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">Métricas da Task</div>
+          <div class="card-body lista-infos">
+            <div class="linha-info">
+              <span class="chave">Linhas processadas</span>
+              <span class="valor" id="metricas-linhas">-</span>
+            </div>
+            <div class="linha-info">
+              <span class="chave">Tempo execução</span>
+              <span class="valor" id="metricas-tempo">-</span>
+            </div>
+            <div class="linha-info">
+              <span class="chave">Tentativas</span>
+              <span class="valor" id="metricas-tentativas">-</span>
+            </div>
+            <div class="linha-info">
+              <span class="chave">Último status</span>
+              <span class="valor" id="metricas-status">-</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </div>
+
+  <div class="modal-overlay" id="modal-info">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-info-titulo">Informação</h3>
+        <button id="modal-info-fechar" class="botao-secundario" type="button">Fechar</button>
+      </div>
+      <div class="modal-body" id="modal-info-conteudo"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-tabela">
+    <div class="modal-card modal-card-grande">
+      <div class="modal-header">
+        <h3 id="modal-tabela-titulo">Tabela</h3>
+        <button id="modal-tabela-fechar" class="botao-secundario" type="button">Fechar</button>
+      </div>
+      <div class="modal-body" id="modal-tabela-conteudo">
+        <div class="preview-loading">Carregando preview...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.DAG_MONITORING_CONFIG = {
+      dagIdTemplate: "__DAG_ID__",
+      runIdTemplate: "__RUN_ID__",
+      apiBase: "/dag_monitoring/api",
+      detalheBase: "/dag_monitoring/detalhe",
+      listaBase: "/dag_monitoring/lista",
+      tablePreviewBase: "/dag_monitoring/api/task/table-preview",
+      tableLegacyPreviewBase: "/dag_monitoring/api/table-preview",
+      tablePageBase: "/dag_monitoring/tabela"
+    };
+  </script>
+
+  <script src="/dag_monitoring/static/legacy/dashboard.js"></script>
+</body>
+</html>

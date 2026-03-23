@@ -13,6 +13,14 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from dags._libs.auditoria_task import (
+    adicionar_observacao,
+    adicionar_validacao,
+    criar_resumo_auditoria,
+    definir_amostra,
+    publicar_resumo_auditoria,
+    registrar_erro_no_resumo,
+)
 from hooks.BancodeDados.SqlServer import HookSqlServer
 from hooks.api.omie.omie import OmieHook
 
@@ -46,6 +54,75 @@ def obter_engine_sql() -> Engine:
     """Obtém a engine do SQL Server via hook."""
     hook_sql = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
     return hook_sql.obter_engine()
+
+
+def normalizar_valor_para_auditoria(valor: Any) -> Any:
+    """Normaliza valores para exibição amigável na auditoria."""
+    if valor is None:
+        return None
+
+    if isinstance(valor, (datetime, date, dtime)):
+        return str(valor)
+
+    if isinstance(valor, Decimal):
+        return str(valor)
+
+    if isinstance(valor, bytes):
+        try:
+            return valor.decode("utf-8")
+        except Exception:
+            return str(valor)
+
+    try:
+        import numpy as np
+
+        if isinstance(valor, np.integer):
+            return int(valor)
+        if isinstance(valor, np.floating):
+            return float(valor)
+        if isinstance(valor, np.bool_):
+            return bool(valor)
+    except Exception:
+        pass
+
+    try:
+        import pandas as pd
+
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+
+    return valor
+
+
+def limitar_amostra(lista_linhas: List[Dict[str, Any]], limite: int = 10) -> List[Dict[str, Any]]:
+    """Limita e normaliza amostra para exibição no painel."""
+    amostra: List[Dict[str, Any]] = []
+
+    for linha in lista_linhas[:limite]:
+        amostra.append(
+            {
+                chave: normalizar_valor_para_auditoria(valor)
+                for chave, valor in linha.items()
+            }
+        )
+
+    return amostra
+
+
+def consultar_amostra_sql(
+    engine: Engine,
+    sql: str,
+    parametros: Optional[Dict[str, Any]] = None,
+    limite: int = 5,
+) -> List[Dict[str, Any]]:
+    """Consulta amostra simples no SQL para exibição na auditoria."""
+    with engine.begin() as conn:
+        resultado = conn.execute(text(sql), parametros or {})
+        linhas = resultado.mappings().fetchall()
+
+    return limitar_amostra([dict(linha) for linha in linhas], limite=limite)
 
 
 def parse_data_ddmmaaaa(valor: Optional[str]) -> Optional[date]:
@@ -532,6 +609,29 @@ def achatar_movimento(
     linha["DocumentoKey"] = doc_key
 
     return linha
+
+
+def montar_amostra_movimento_raw(linha: Dict[str, Any]) -> Dict[str, Any]:
+    """Monta amostra enxuta e legível de um evento financeiro raw."""
+    return {
+        "IDEmpresaProprietaria": linha.get("IDEmpresaProprietaria"),
+        "TipoLancamento": linha.get("TipoLancamento"),
+        "EventKey": linha.get("EventKey"),
+        "DocumentoKey": linha.get("DocumentoKey"),
+        "nCodTitulo": linha.get("nCodTitulo"),
+        "nCodBaixa": linha.get("nCodBaixa"),
+        "nCodMovCC": linha.get("nCodMovCC"),
+        "cGrupo": linha.get("cGrupo"),
+        "cNatureza": linha.get("cNatureza"),
+        "cStatus": linha.get("cStatus"),
+        "dDtVenc": linha.get("dDtVenc"),
+        "dDtPagamento": linha.get("dDtPagamento"),
+        "nValorTitulo": linha.get("nValorTitulo"),
+        "nValPago": linha.get("nValPago"),
+        "nValAberto": linha.get("nValAberto"),
+        "dDtAlt": linha.get("dDtAlt"),
+        "cHrAlt": linha.get("cHrAlt"),
+    }
 
 
 def extrair_momento_alteracao(linha: Dict[str, Any]) -> Optional[datetime]:
@@ -1101,8 +1201,9 @@ def sincronizar_ambiente_por_tipo(
     engine: Engine,
     hook_omie: OmieHook,
     tipo: str,
-) -> None:
-    """Sincroniza um ambiente Omie para um tipo de lançamento."""
+    limite_amostra: int = 5,
+) -> Dict[str, Any]:
+    """Sincroniza um ambiente Omie para um tipo de lançamento e retorna estatísticas da execução."""
     config_omie = hook_omie.obter_configuracao()
     id_empresa = config_omie.id_empresa_proprietaria
 
@@ -1123,8 +1224,13 @@ def sincronizar_ambiente_por_tipo(
 
     maior_momento_global: Optional[datetime] = None
     total_processados = 0
+    total_paginas = 0
+    total_fatias = 0
+    amostra_linhas: List[Dict[str, Any]] = []
 
     for dt_de, dt_ate in _iterar_fatias(inicio_base, fim_base, JANELA_DIAS):
+        total_fatias += 1
+
         logger.info(
             "[RANGE] Conn=%s Empresa=%s Tipo=%s AltDe=%s AltAte=%s",
             config_omie.conn_id,
@@ -1149,6 +1255,7 @@ def sincronizar_ambiente_por_tipo(
             n_tot_paginas = int(resp.get("nTotPaginas", 0) or 0)
             movimentos = resp.get("movimentos", []) or []
             qtd = len(movimentos)
+            total_paginas += 1
 
             meta = {
                 "nPagina": resp.get("nPagina"),
@@ -1171,6 +1278,9 @@ def sincronizar_ambiente_por_tipo(
             for mov in movimentos:
                 linha = achatar_movimento(id_empresa, meta, mov, tipo)
                 linhas.append(linha)
+
+                if len(amostra_linhas) < limite_amostra and linha.get("EventKey"):
+                    amostra_linhas.append(montar_amostra_movimento_raw(linha))
 
                 momento = extrair_momento_alteracao(linha)
                 if momento is not None:
@@ -1229,9 +1339,23 @@ def sincronizar_ambiente_por_tipo(
             maior_momento_global,
         )
 
+    return {
+        "conn_id_omie": config_omie.conn_id,
+        "id_empresa_proprietaria": id_empresa,
+        "tipo_lancamento": tipo,
+        "watermark_anterior": str(ultimo_dt),
+        "inicio_base": str(inicio_base),
+        "fim_base": str(fim_base),
+        "maior_momento_global": str(maior_momento_global) if maior_momento_global else None,
+        "total_processados": int(total_processados),
+        "total_paginas": int(total_paginas),
+        "total_fatias": int(total_fatias),
+        "amostra": limitar_amostra(amostra_linhas, limite=limite_amostra),
+    }
 
-def executar_merge_silver(engine: Engine) -> None:
-    """Executa MERGE da camada Silver."""
+
+def executar_merge_silver(engine: Engine) -> Dict[str, Any]:
+    """Executa MERGE da camada Silver e retorna estatísticas com amostra."""
     SQL_MERGE_FATO_MOV_FIN_OMIE = r"""
 DECLARE @ultima_carga datetime2(0) =
 (
@@ -1701,14 +1825,47 @@ WHEN NOT MATCHED BY TARGET THEN
     try:
         with engine.begin() as conn:
             conn.exec_driver_sql(SQL_MERGE_FATO_MOV_FIN_OMIE)
+
+        amostra = consultar_amostra_sql(
+            engine=engine,
+            sql="""
+                SELECT TOP 5
+                    IDEmpresaProprietaria,
+                    DocumentoKey,
+                    EventKey,
+                    TipoLancamento,
+                    cNatureza,
+                    cStatus,
+                    Nivel1,
+                    nValorTitulo,
+                    nValPago,
+                    nValAberto,
+                    DataAtualizacao
+                FROM Silver.FatoMovimentacaoFinanceiroOmie
+                ORDER BY DataAtualizacao DESC, IDEmpresaProprietaria DESC
+            """,
+            limite=5,
+        )
+
+        with engine.begin() as conn:
+            total = conn.execute(
+                text("SELECT COUNT(1) FROM Silver.FatoMovimentacaoFinanceiroOmie")
+            ).scalar()
+
         logger.info("[MERGE] Silver.FatoMovimentacaoFinanceiroOmie OK")
+
+        return {
+            "tabela_destino": "Silver.FatoMovimentacaoFinanceiroOmie",
+            "total_registros_tabela": int(total or 0),
+            "amostra": amostra,
+        }
     except SQLAlchemyError:
         logger.exception("[MERGE][ERRO] Falhou na Silver")
         raise
 
 
-def executar_merge_gold(engine: Engine) -> None:
-    """Executa MERGE da camada Gold."""
+def executar_merge_gold(engine: Engine) -> Dict[str, Any]:
+    """Executa MERGE da camada Gold e retorna estatísticas com amostra."""
     SQL_MERGE_GOLD_FATO_MOV_FIN_OMIE = r"""
 ;WITH FonteRaw AS (
 SELECT
@@ -1788,8 +1945,8 @@ SELECT
     ,o.dDtAlt
     ,o.cHrAlt
     ,o.nValorTitulo
-    ,o.nValPago
-    ,-ABS(o.nValAberto) AS nValAberto
+    ,-ABS(o.nValPago) AS nValPago
+    ,o.nValAberto
     ,o.nValLiquido
     ,o.TipoLancamento
     ,o.TipoLancamentoDescricao
@@ -2082,7 +2239,40 @@ WHEN NOT MATCHED BY TARGET THEN
     try:
         with engine.begin() as conn:
             conn.exec_driver_sql(SQL_MERGE_GOLD_FATO_MOV_FIN_OMIE)
+
+        amostra = consultar_amostra_sql(
+            engine=engine,
+            sql="""
+                SELECT TOP 5
+                    IDEmpresaProprietaria,
+                    DocumentoKey,
+                    EventKey,
+                    Movimento,
+                    TipoLancamento,
+                    Tipo,
+                    ReferenciaPedidoOS,
+                    nValorTitulo,
+                    nValPago,
+                    nValAberto,
+                    DataAtualizacao
+                FROM [DataMart].[Gold].[FatoMovimentacaoFinanceiraOmie]
+                ORDER BY DataAtualizacao DESC, IDEmpresaProprietaria DESC
+            """,
+            limite=5,
+        )
+
+        with engine.begin() as conn:
+            total = conn.execute(
+                text("SELECT COUNT(1) FROM [DataMart].[Gold].[FatoMovimentacaoFinanceiraOmie]")
+            ).scalar()
+
         logger.info("[MERGE] Gold.FatoMovimentacaoFinanceiraOmie OK")
+
+        return {
+            "tabela_destino": "[DataMart].[Gold].[FatoMovimentacaoFinanceiraOmie]",
+            "total_registros_tabela": int(total or 0),
+            "amostra": amostra,
+        }
     except SQLAlchemyError:
         logger.exception("[MERGE][ERRO] Falhou na Gold")
         raise
@@ -2090,11 +2280,17 @@ WHEN NOT MATCHED BY TARGET THEN
 
 @dag(
     dag_id="Pipeline_Movimento_Financeiro_Omie",
-    description="Pipeline Movimento Financeiro Omie",
+    description=(
+        "Pipeline incremental de movimentação financeira da Omie, com carga RAW por watermark, "
+        "consolidação Silver e publicação analítica Gold. O fluxo consome múltiplas empresas Omie, "
+        "sincroniza eventos financeiros por tipo de lançamento, aplica deduplicação por chaves "
+        "de negócio e transforma os dados em camadas operacionais e analíticas voltadas para "
+        "controle financeiro, aging, realizado e visão por documento/evento."
+    ),
     schedule="0 10,13,15,18,19 * * 1-6",
     start_date=pendulum.datetime(2026, 3, 1, tz="America/Sao_Paulo"),
     catchup=False,
-    tags=["Shempo", "ETL", "Financeiro", "Movimento Financeiro"],
+    tags=["ETL", "Financeiro", "Shempo", "Omie"],
     max_active_runs=1,
     max_active_tasks=1,
     default_args={
@@ -2102,11 +2298,190 @@ WHEN NOT MATCHED BY TARGET THEN
     },
 )
 def pipeline_movimento_financeiro_omie():
-    @task(task_id="sincronizar_movimentacao_financeiro_raw")
+    """
+    ### Pipeline de Movimentação Financeira Omie
+
+    Este pipeline foi desenhado para sincronizar a movimentação financeira da Omie de forma
+    incremental, consistente e auditável, separando a responsabilidade em três etapas:
+
+    1. **RAW**
+       - Consulta a API da Omie para múltiplas empresas (`omie_shempo`, `omie_sinamovel`).
+       - Processa os tipos de lançamento:
+         - `CPCR` = compensação pagar/receber
+         - `BX` = baixa efetiva
+         - `CC` = movimento de conta corrente
+       - Usa watermark por `IDEmpresaProprietaria + TipoLancamento`.
+       - Reprocessa uma janela de sobreposição (`OVERLAP_DIAS`) para evitar perda de eventos
+         alterados retroativamente.
+       - Divide o período em fatias (`JANELA_DIAS`) e pagina (`REGISTROS_POR_PAGINA`) para
+         reduzir risco operacional e facilitar retry.
+       - Achata o JSON em estrutura tabular.
+       - Faz upsert na tabela RAW `dbo.MovimentacaoFinanceiro`.
+
+    2. **Silver**
+       - Consolida a RAW em `Silver.FatoMovimentacaoFinanceiroOmie`.
+       - Faz enriquecimento com:
+         - tipo de documento
+         - plano de categorias gerencial
+         - clientes Omie
+       - Tradução de códigos em descrições de negócio.
+       - Deduplicação por:
+         - `IDEmpresaProprietaria`
+         - `DocumentoKey`
+         - `EventKey`
+       - Prioriza o registro mais recente por `DataHoraCarga` e `dDtAlt`.
+
+    3. **Gold**
+       - Materializa visão analítica em `[DataMart].[Gold].[FatoMovimentacaoFinanceiraOmie]`.
+       - Separa movimentos de negócio como:
+         - A RECEBER - EM ATRASO
+         - A PAGAR - EM ATRASO
+         - RECEBIDOS
+         - PAGAMENTOS REALIZADOS
+       - Enriquecimento com classificação de origem, tipo e referência operacional.
+       - Pronta para análises financeiras, aging, fluxo realizado, cobrança e acompanhamento.
+
+    ---
+
+    ### Lógica técnica do incremental
+
+    O pipeline não depende apenas de data de vencimento ou pagamento.
+    Ele usa a melhor combinação de campos de alteração da Omie:
+
+    - `dDtAlt + cHrAlt`
+    - fallback em `dDtInc + cHrInc`
+
+    Isso é importante porque o objetivo não é apenas capturar novos títulos, mas também:
+    - baixas posteriores
+    - conciliações
+    - alterações em valores
+    - mudanças de status
+
+    A estratégia de watermark com overlap minimiza risco de perda por atraso de atualização na origem.
+
+    ---
+
+    ### Chaves de negócio adotadas
+
+    O pipeline constrói chaves explícitas para manter rastreabilidade:
+
+    - `EventKey`
+      - identifica o evento financeiro específico
+      - varia conforme baixa, movimento de conta corrente ou título
+
+    - `DocumentoKey`
+      - identifica o documento financeiro de negócio
+      - útil para agrupar eventos de um mesmo título
+
+    Essas chaves são essenciais para:
+    - deduplicação
+    - versionamento operacional
+    - MERGE seguro
+    - visão analítica consistente na Silver e Gold
+
+    ---
+
+    ### Auditoria estruturada
+
+    Cada task publica:
+    - descrição amigável
+    - origem e destino
+    - métricas principais
+    - validações executadas
+    - observações operacionais
+    - amostras reais da etapa
+
+    Isso permite que a tela de auditoria mostre:
+    - como a API respondeu
+    - que tipo de eventos foram persistidos
+    - amostras da Silver consolidada
+    - amostras da Gold analítica
+
+    Em outras palavras:
+    o log bruto continua útil para debug técnico,
+    mas a auditoria estruturada passa a explicar o processo de forma operacional e legível.
+
+    ---
+
+    ### Conexões esperadas
+
+    - SQL Server:
+      - `mssql_integracao`
+
+    - Omie:
+      - `omie_shempo`
+      - `omie_sinamovel`
+
+    Essas connections devem estar corretamente configuradas no Airflow.
+
+    ---
+
+    ### Cuidados operacionais
+
+    - O DAG roda com `max_active_runs=1` e `max_active_tasks=1` para evitar concorrência
+      sobre as mesmas tabelas e watermarks.
+    - O retry do banco é feito manualmente em pontos críticos.
+    - O pipeline foi desenhado para priorizar consistência e rastreabilidade,
+      mesmo que isso implique uma execução mais conservadora.
+    """
+
+    @task(
+        task_id="sincronizar_movimentacao_financeiro_raw",
+        execution_timeout=timedelta(hours=2),
+    )
     def sincronizar_movimentacao_financeiro_raw():
+        """
+        Sincroniza a camada RAW da movimentação financeira Omie.
+
+        Esta etapa:
+        - percorre todas as empresas Omie configuradas
+        - percorre todos os tipos de lançamento
+        - usa watermark + overlap
+        - consulta a API Omie em fatias temporais e páginas
+        - achata o payload em formato relacional
+        - aplica upsert incremental na tabela RAW
+        - atualiza o watermark ao final
+
+        A auditoria desta etapa mostra:
+        - empresas e tipos processados
+        - volume total carregado
+        - watermark anterior e novo watermark
+        - amostra dos eventos financeiros raw
+        """
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Sincronizar movimentação financeira RAW",
+            descricao_etapa=(
+                "Consome a API da Omie por empresa e tipo de lançamento, usando watermark incremental "
+                "com sobreposição temporal. Achata os payloads financeiros em linhas tabulares e faz "
+                "upsert na tabela RAW dbo.MovimentacaoFinanceiro."
+            ),
+            origem_dados=(
+                "API Omie (connections: omie_shempo, omie_sinamovel) | "
+                "Tipos: CPCR, BX, CC"
+            ),
+            destino_dados="dbo.MovimentacaoFinanceiro + dbo.MovFinWatermark",
+        )
+
         engine = obter_engine_sql()
 
         try:
+            resumo.status = "RUNNING"
+            resumo.metricas_extras["conn_id_sql_server"] = CONN_ID_SQL_SERVER
+            resumo.metricas_extras["conn_ids_omie"] = CONN_IDS_OMIE
+            resumo.metricas_extras["tipos_lancamento"] = TIPOS_LANCAMENTO
+            resumo.metricas_extras["overlap_dias"] = OVERLAP_DIAS
+            resumo.metricas_extras["registros_por_pagina"] = REGISTROS_POR_PAGINA
+            resumo.metricas_extras["janela_dias"] = JANELA_DIAS
+            resumo.metricas_extras["primeira_carga_desde"] = str(PRIMEIRA_CARGA_DESDE)
+            publicar_resumo_auditoria(resumo)
+
+            total_processados = 0
+            total_paginas = 0
+            total_fatias = 0
+            ambientes_processados = 0
+            detalhes_execucao: List[Dict[str, Any]] = []
+            amostra_total: List[Dict[str, Any]] = []
+
             for conn_id_omie in CONN_IDS_OMIE:
                 hook_omie = OmieHook(omie_conn_id=conn_id_omie)
                 config_omie = hook_omie.obter_configuracao()
@@ -2119,11 +2494,34 @@ def pipeline_movimento_financeiro_omie():
                         tipo,
                     )
 
-                    sincronizar_ambiente_por_tipo(
+                    resultado_sync = sincronizar_ambiente_por_tipo(
                         engine=engine,
                         hook_omie=hook_omie,
                         tipo=tipo,
+                        limite_amostra=4,
                     )
+
+                    ambientes_processados += 1
+                    total_processados += int(resultado_sync["total_processados"])
+                    total_paginas += int(resultado_sync["total_paginas"])
+                    total_fatias += int(resultado_sync["total_fatias"])
+
+                    detalhes_execucao.append(
+                        {
+                            "conn_id_omie": resultado_sync["conn_id_omie"],
+                            "id_empresa_proprietaria": resultado_sync["id_empresa_proprietaria"],
+                            "tipo_lancamento": resultado_sync["tipo_lancamento"],
+                            "watermark_anterior": resultado_sync["watermark_anterior"],
+                            "maior_momento_global": resultado_sync["maior_momento_global"],
+                            "total_processados": resultado_sync["total_processados"],
+                            "total_paginas": resultado_sync["total_paginas"],
+                            "total_fatias": resultado_sync["total_fatias"],
+                        }
+                    )
+
+                    for linha_amostra in resultado_sync["amostra"]:
+                        if len(amostra_total) < 12:
+                            amostra_total.append(linha_amostra)
 
                     logger.info(
                         "[OK] Conn=%s Empresa=%s Tipo=%s",
@@ -2132,23 +2530,215 @@ def pipeline_movimento_financeiro_omie():
                         tipo,
                     )
 
+            resumo.status = "SUCCESS"
+            resumo.linhas_lidas = int(total_processados)
+            resumo.linhas_inseridas = int(total_processados)
+            resumo.linhas_atualizadas = int(total_processados)
+
+            resumo.metricas_extras["ambientes_processados"] = int(ambientes_processados)
+            resumo.metricas_extras["total_paginas"] = int(total_paginas)
+            resumo.metricas_extras["total_fatias"] = int(total_fatias)
+            resumo.metricas_extras["detalhes_execucao"] = detalhes_execucao
+
+            adicionar_validacao(
+                resumo,
+                nome="empresas_e_tipos_processados",
+                status="ok",
+                detalhe=(
+                    f"Foram processadas {ambientes_processados:,} combinações de empresa e tipo "
+                    f"de lançamento na RAW."
+                ),
+            )
+            adicionar_validacao(
+                resumo,
+                nome="movimentos_raw_processados",
+                status="ok",
+                detalhe=f"Foram processados {total_processados:,} movimentos financeiros na camada RAW.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="watermark_atualizado",
+                status="ok",
+                detalhe="Os watermarks por empresa e tipo foram recalculados ao final da sincronização.",
+            )
+
+            adicionar_observacao(
+                resumo,
+                "A amostra desta etapa representa eventos financeiros reais já achatados, antes da consolidação Silver.",
+            )
+            adicionar_observacao(
+                resumo,
+                "Mesmo quando um título já existia, ele pode ter sido reprocessado por overlap para capturar alterações retroativas.",
+            )
+
+            definir_amostra(resumo, limitar_amostra(amostra_total, limite=10), limite=10)
+            publicar_resumo_auditoria(resumo)
+
             logger.info("Sincronização RAW concluída.")
+
+            return {
+                "ambientes_processados": int(ambientes_processados),
+                "total_processados": int(total_processados),
+                "total_paginas": int(total_paginas),
+                "total_fatias": int(total_fatias),
+            }
+        except Exception as erro:
+            resumo.status = "FAILED"
+            registrar_erro_no_resumo(resumo, erro)
+            publicar_resumo_auditoria(resumo)
+            raise
         finally:
             engine.dispose()
 
-    @task(task_id="sincronizar_silver_fato_movimentacao_financeiro_omie")
+    @task(
+        task_id="sincronizar_silver_fato_movimentacao_financeiro_omie",
+        execution_timeout=timedelta(hours=2),
+    )
     def sincronizar_silver_fato_movimentacao_financeiro_omie():
+        """
+        Consolida a camada Silver da movimentação financeira Omie.
+
+        Esta etapa:
+        - lê a RAW incrementalmente
+        - enriquece com dimensões auxiliares
+        - traduz códigos técnicos em descrições legíveis
+        - deduplica por chaves de negócio
+        - faz MERGE na `Silver.FatoMovimentacaoFinanceiroOmie`
+
+        A auditoria desta etapa mostra:
+        - amostra da Silver resultante
+        - totais da tabela
+        - validações do merge
+        """
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Consolidar Silver da movimentação financeira",
+            descricao_etapa=(
+                "Executa o MERGE da camada Silver, consolidando a tabela financeira a partir da RAW, "
+                "com enriquecimento por cliente, tipo documental e plano gerencial, além de deduplicação "
+                "por chaves de negócio e priorização do registro mais recente."
+            ),
+            origem_dados="dbo.MovimentacaoFinanceiro + dimensões auxiliares Omie",
+            destino_dados="Silver.FatoMovimentacaoFinanceiroOmie",
+        )
+
         engine = obter_engine_sql()
+
         try:
-            executar_merge_silver(engine)
+            resumo.status = "RUNNING"
+            publicar_resumo_auditoria(resumo)
+
+            resultado_merge = executar_merge_silver(engine)
+
+            resumo.status = "SUCCESS"
+            resumo.metricas_extras["tabela_destino"] = resultado_merge["tabela_destino"]
+            resumo.metricas_extras["total_registros_tabela"] = int(resultado_merge["total_registros_tabela"])
+            resumo.linhas_inseridas = int(resultado_merge["total_registros_tabela"])
+
+            adicionar_validacao(
+                resumo,
+                nome="merge_silver_executado",
+                status="ok",
+                detalhe="O MERGE da camada Silver foi executado com sucesso.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="silver_disponivel_para_consulta",
+                status="ok",
+                detalhe=(
+                    f"A tabela {resultado_merge['tabela_destino']} possui "
+                    f"{resultado_merge['total_registros_tabela']:,} registros após o MERGE."
+                ),
+            )
+
+            adicionar_observacao(
+                resumo,
+                "A amostra desta etapa mostra a visão consolidada da Silver, já com descrições operacionais e chaves de negócio.",
+            )
+
+            definir_amostra(resumo, resultado_merge["amostra"], limite=10)
+            publicar_resumo_auditoria(resumo)
+
+            return resultado_merge
+        except Exception as erro:
+            resumo.status = "FAILED"
+            registrar_erro_no_resumo(resumo, erro)
+            publicar_resumo_auditoria(resumo)
+            raise
         finally:
             engine.dispose()
 
-    @task(task_id="sincronizar_gold_fato_movimentacao_financeira_omie")
+    @task(
+        task_id="sincronizar_gold_fato_movimentacao_financeira_omie",
+        execution_timeout=timedelta(hours=2),
+    )
     def sincronizar_gold_fato_movimentacao_financeira_omie():
+        """
+        Publica a visão Gold analítica da movimentação financeira Omie.
+
+        Esta etapa:
+        - deriva visões financeiras de negócio a partir da Silver
+        - classifica movimentos em atrasos, recebidos e pagamentos realizados
+        - consolida a análise no DataMart Gold
+
+        A auditoria desta etapa mostra:
+        - amostra da tabela Gold
+        - total consolidado
+        - exemplos de movimentos de negócio já prontos para consumo analítico
+        """
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Publicar Gold da movimentação financeira",
+            descricao_etapa=(
+                "Executa o MERGE da camada Gold, derivando movimentos analíticos de negócio como "
+                "a receber em atraso, a pagar em atraso, recebidos e pagamentos realizados, a partir "
+                "da Silver consolidada."
+            ),
+            origem_dados="Silver.FatoMovimentacaoFinanceiroOmie",
+            destino_dados="[DataMart].[Gold].[FatoMovimentacaoFinanceiraOmie]",
+        )
+
         engine = obter_engine_sql()
+
         try:
-            executar_merge_gold(engine)
+            resumo.status = "RUNNING"
+            publicar_resumo_auditoria(resumo)
+
+            resultado_merge = executar_merge_gold(engine)
+
+            resumo.status = "SUCCESS"
+            resumo.metricas_extras["tabela_destino"] = resultado_merge["tabela_destino"]
+            resumo.metricas_extras["total_registros_tabela"] = int(resultado_merge["total_registros_tabela"])
+            resumo.linhas_inseridas = int(resultado_merge["total_registros_tabela"])
+
+            adicionar_validacao(
+                resumo,
+                nome="merge_gold_executado",
+                status="ok",
+                detalhe="O MERGE da camada Gold foi executado com sucesso.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="gold_disponivel_para_analise",
+                status="ok",
+                detalhe=(
+                    f"A tabela {resultado_merge['tabela_destino']} possui "
+                    f"{resultado_merge['total_registros_tabela']:,} registros após o MERGE."
+                ),
+            )
+
+            adicionar_observacao(
+                resumo,
+                "A amostra desta etapa representa a visão analítica final, já classificada por movimento de negócio.",
+            )
+
+            definir_amostra(resumo, resultado_merge["amostra"], limite=10)
+            publicar_resumo_auditoria(resumo)
+
+            return resultado_merge
+        except Exception as erro:
+            resumo.status = "FAILED"
+            registrar_erro_no_resumo(resumo, erro)
+            publicar_resumo_auditoria(resumo)
+            raise
         finally:
             engine.dispose()
 

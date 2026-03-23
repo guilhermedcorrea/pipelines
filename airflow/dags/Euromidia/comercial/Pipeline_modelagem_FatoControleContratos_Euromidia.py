@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 import hashlib
 import logging
-import urllib.parse
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,18 @@ import pandas as pd
 import pendulum
 import polars as pl
 from airflow.sdk import dag, task
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+
+from dags._libs.auditoria_task import (
+    adicionar_observacao,
+    adicionar_validacao,
+    criar_resumo_auditoria,
+    definir_amostra,
+    publicar_resumo_auditoria,
+    registrar_erro_no_resumo,
+)
+from hooks.BancodeDados.SqlServer import HookSqlServer
 
 
 logger = logging.getLogger(__name__)
@@ -19,20 +31,14 @@ DAG_ID = "etl_ctr_controle_contratos_euromidia"
 FUSO_HORARIO = "America/Sao_Paulo"
 CRON_AGENDAMENTO = "0 9,18 * * 1-6"
 
-PASTA_SHAREPOINT_CONTAINER = Path("/opt/airflow/sharepoint_teste")
+CONN_ID_SQL_SERVER = "mssql_integracao"
 
-# Ajuste principal:
-# saímos do bind mount problemático do Windows e passamos a gravar
-# em uma pasta estável do projeto/container.
+PASTA_SHAREPOINT_CONTAINER = Path("/opt/airflow/sharepoint_teste")
 PASTA_CARGA_CONTAINER = Path("/opt/airflow/Artefatos/CargasSQL/CTR")
 
 CAMINHO_ARQUIVO_EXCEL = PASTA_SHAREPOINT_CONTAINER / "CTR_Atualizado_copia.xlsm"
 NOME_ABA_EXCEL = "CTR"
 
-SERVIDOR_SQL = "192.168.40.177"
-BANCO_SQL = "Integracao"
-USUARIO_SQL = "sa"
-SENHA_SQL = "Mudar@123ab"
 TABELA_STAGE = "dbo.df_fatocontrolecontratos"
 
 mapeamento_colunas = {
@@ -105,26 +111,72 @@ ORDEM_COLUNAS_SAIDA = list(mapeamento_colunas.values()) + ["OBS"]
 schema_overrides = {col: pl.Utf8 for col in mapeamento_colunas.keys()}
 
 
-def obter_engine_sql_server():
-    params = urllib.parse.quote_plus(
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER={SERVIDOR_SQL};"
-        f"DATABASE={BANCO_SQL};"
-        f"UID={USUARIO_SQL};"
-        f"PWD={SENHA_SQL};"
-        "TrustServerCertificate=yes;"
-        "Connection Timeout=30;"
-    )
+def obter_engine_sql_server() -> Engine:
+    """Obtém a engine SQL Server via hook centralizado do Airflow."""
+    hook_sql = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
+    return hook_sql.obter_engine()
 
-    return create_engine(
-        f"mssql+pyodbc:///?odbc_connect={params}",
-        fast_executemany=True,
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-        pool_recycle=1800,
-        future=True,
-    )
+
+def normalizar_valor_auditoria(valor: Any) -> Any:
+    """Normaliza valores para exibição no painel de auditoria."""
+    if valor is None:
+        return None
+
+    if isinstance(valor, (datetime, date)):
+        return str(valor)
+
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+
+    return valor
+
+
+def df_polars_para_amostra(
+    df: pl.DataFrame,
+    limite: int = 5,
+    colunas: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Converte DataFrame Polars para amostra amigável no painel."""
+    if df.is_empty():
+        return []
+
+    base = df
+    if colunas:
+        colunas_existentes = [col for col in colunas if col in df.columns]
+        if colunas_existentes:
+            base = df.select(colunas_existentes)
+
+    linhas = base.head(limite).to_dicts()
+
+    return [
+        {chave: normalizar_valor_auditoria(valor) for chave, valor in linha.items()}
+        for linha in linhas
+    ]
+
+
+def consultar_amostra_sql(
+    engine: Engine,
+    sql: str,
+    parametros: dict[str, Any] | None = None,
+    limite: int = 5,
+) -> list[dict[str, Any]]:
+    """Consulta amostra diretamente no SQL Server para auditoria."""
+    with engine.begin() as conn:
+        resultado = conn.execute(text(sql), parametros or {})
+        linhas = resultado.mappings().fetchall()
+
+    amostra = []
+    for linha in linhas[:limite]:
+        amostra.append(
+            {
+                chave: normalizar_valor_auditoria(valor)
+                for chave, valor in dict(linha).items()
+            }
+        )
+    return amostra
 
 
 def _somente_existentes(nomes: list[str], existentes: set[str]) -> list[str]:
@@ -436,9 +488,12 @@ def garantir_colunas_saida(df: pl.DataFrame) -> pl.DataFrame:
 
 def executar_sql(nome_etapa: str, sql: str) -> None:
     engine = obter_engine_sql_server()
-    with engine.begin() as conn:
-        conn.exec_driver_sql(sql)
-    logger.info("%s executado com sucesso.", nome_etapa)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(sql)
+        logger.info("%s executado com sucesso.", nome_etapa)
+    finally:
+        engine.dispose()
 
 
 def garantir_pasta_escrita(pasta: Path) -> None:
@@ -463,9 +518,6 @@ def separar_schema_tabela(nome_completo: str) -> tuple[str, str]:
 def carregar_dataframe_stage_sql_server(df: pl.DataFrame, tabela_stage: str) -> None:
     schema_sql, nome_tabela = separar_schema_tabela(tabela_stage)
 
-    # A stage do seu fluxo é usada como staging bruto.
-    # Aqui eu converto tudo para objeto/string/None para reproduzir a ideia do BULK INSERT
-    # sem depender de filesystem do Windows.
     df_stage = df.with_columns(
         [pl.col(col).cast(pl.Utf8, strict=False).alias(col) for col in df.columns]
     )
@@ -475,25 +527,28 @@ def carregar_dataframe_stage_sql_server(df: pl.DataFrame, tabela_stage: str) -> 
 
     engine = obter_engine_sql_server()
 
-    with engine.begin() as conn:
-        conn.execute(text(f"TRUNCATE TABLE {tabela_stage}"))
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f"TRUNCATE TABLE {tabela_stage}"))
 
-    df_pandas.to_sql(
-        name=nome_tabela,
-        con=engine,
-        schema=schema_sql,
-        if_exists="append",
-        index=False,
-        chunksize=2000,
-        method=None,
-    )
+        df_pandas.to_sql(
+            name=nome_tabela,
+            con=engine,
+            schema=schema_sql,
+            if_exists="append",
+            index=False,
+            chunksize=2000,
+            method=None,
+        )
 
-    logger.info(
-        "Stage %s carregada com sucesso via INSERT em lote. Linhas: %s | Colunas: %s",
-        tabela_stage,
-        len(df_pandas),
-        len(df_pandas.columns),
-    )
+        logger.info(
+            "Stage %s carregada com sucesso via INSERT em lote. Linhas: %s | Colunas: %s",
+            tabela_stage,
+            len(df_pandas),
+            len(df_pandas.columns),
+        )
+    finally:
+        engine.dispose()
 
 
 MERGE_CONTRATOS_SQL = r"""
@@ -1540,6 +1595,61 @@ VALUES (
 """
 
 
+def executar_sql_auditado(
+    nome_amigavel: str,
+    descricao_etapa: str,
+    sql_execucao: str,
+    sql_amostra: str | None = None,
+    destino_dados: str | None = None,
+    origem_dados: str | None = None,
+) -> dict[str, Any]:
+    """Executa SQL com auditoria estruturada e amostra opcional."""
+    resumo = criar_resumo_auditoria(
+        nome_amigavel=nome_amigavel,
+        descricao_etapa=descricao_etapa,
+        origem_dados=origem_dados,
+        destino_dados=destino_dados,
+    )
+
+    engine = obter_engine_sql_server()
+
+    try:
+        resumo.status = "RUNNING"
+        resumo.metricas_extras["conn_id_sql_server"] = CONN_ID_SQL_SERVER
+        publicar_resumo_auditoria(resumo)
+
+        with engine.begin() as conn:
+            conn.exec_driver_sql(sql_execucao)
+
+        resumo.status = "SUCCESS"
+        adicionar_validacao(
+            resumo,
+            nome="sql_executado",
+            status="ok",
+            detalhe=f"A etapa SQL '{nome_amigavel}' foi executada com sucesso.",
+        )
+
+        amostra = []
+        if sql_amostra:
+            amostra = consultar_amostra_sql(engine=engine, sql=sql_amostra, limite=5)
+            if amostra:
+                definir_amostra(resumo, amostra, limite=10)
+
+        publicar_resumo_auditoria(resumo)
+
+        return {
+            "etapa": nome_amigavel,
+            "amostra": amostra,
+        }
+    except Exception as erro:
+        resumo.status = "FAILED"
+        registrar_erro_no_resumo(resumo, erro)
+        publicar_resumo_auditoria(resumo)
+        raise
+    finally:
+        engine.dispose()
+
+
 @dag(
     dag_id=DAG_ID,
     schedule=CRON_AGENDAMENTO,
@@ -1547,271 +1657,769 @@ VALUES (
     catchup=False,
     max_active_runs=1,
     tags=["Euromidia", "ETL", "Contratos", "Sharepoint", "SQLServer"],
-    description="Lê a aba CTR do arquivo CTR_Atualizado_copia.xlsm, trata os dados, gera CSV técnico em pasta estável do container, carrega a stage por insert em lote e atualiza tabelas Silver.",
-    doc_md="""
+    description=(
+        "Pipeline ETL do controle de contratos da Euromídia. Lê a aba CTR de um arquivo Excel montado "
+        "no container, padroniza datas, números, percentuais, CNPJ e campos textuais, gera identificadores "
+        "hash para contratos e prévias ausentes, produz um CSV técnico, recarrega a stage SQL Server via "
+        "insert em lote e executa a cadeia de consolidação nas tabelas Silver e ocupação."
+    ),
+    doc_md=r"""
 # ETL CTR - Controle de Contratos Euromídia
 
-## Objetivo
-Este DAG lê o arquivo `CTR_Atualizado_copia.xlsm` da pasta montada no container,
-trata os campos, gera um CSV técnico em pasta estável do projeto/container e carrega os dados no SQL Server.
+## Visão geral
 
-## Motivo técnico do ajuste
-O fluxo anterior dependia de gravação em uma pasta bind mount do Windows.
-Esse tipo de montagem costuma gerar erro de permissão no Docker Desktop + WSL + Airflow.
-Por isso a geração do CSV passou para uma pasta técnica interna estável:
-`/opt/airflow/Artefatos/CargasSQL/CTR`
+Este DAG implementa o fluxo de ingestão e consolidação do arquivo de **controle de contratos CTR** da Euromídia.
 
-A carga da stage agora é feita por `INSERT` em lote via SQLAlchemy,
-eliminando a dependência do `BULK INSERT` em arquivo no filesystem do Windows.
+Ele foi desenhado para resolver um problema operacional muito comum em ambientes Docker + Airflow + Windows/WSL:
+a fragilidade de cargas baseadas em filesystem externo e permissões inconsistentes de bind mount.
 
-## Frequência
-Executa de segunda a sábado às 09:00 e às 18:00.
+Por isso, o fluxo foi estruturado para:
 
-## Etapas
-1. Ler arquivo Excel na aba `CTR`
-2. Tratar datas, CNPJ, valores monetários e percentuais
-3. Gerar hashes para contrato e prévia quando estiverem vazios
-4. Gerar CSV técnico
-5. Truncar e recarregar a tabela stage por insert em lote
-6. Executar MERGEs e UPDATEs nas tabelas Silver
+1. ler o Excel diretamente no container;
+2. tratar e normalizar os dados com Polars;
+3. gerar um CSV técnico em uma pasta estável do container;
+4. recarregar a tabela stage por insert em lote via SQLAlchemy;
+5. consolidar os fatos e relacionamentos nas tabelas Silver;
+6. atualizar ocupação, dimensões auxiliares e chaves de relacionamento.
 
-## Origem
-Arquivo montado em:
+---
+
+## Objetivo de negócio
+
+O pipeline existe para transformar uma planilha operacional de contratos em uma base estruturada para:
+
+- consolidação de contratos;
+- detalhamento por item/face/ponto;
+- relacionamento com vendedor, cliente, painel e face;
+- visão de ocupação dos painéis;
+- apoio a análises comerciais, faturamento, ocupação e performance operacional.
+
+---
+
+## Origem dos dados
+
+Arquivo Excel montado no container:
+
 `/opt/airflow/sharepoint_teste/CTR_Atualizado_copia.xlsm`
 
-## Pasta de carga técnica
-Container:
-`/opt/airflow/Artefatos/CargasSQL/CTR`
+Aba lida:
 
-## Destino
-Banco: `Integracao`
-Tabelas:
+`CTR`
+
+---
+
+## Destino intermediário e final
+
+### Stage
 - `dbo.df_fatocontrolecontratos`
+
+### Silver
 - `Silver.FatoControleContratosEuromidia`
 - `Silver.FatoControleContratosItensEuromidia`
 - `Silver.FatoOcupacaoPaineisEuromidia`
+
+### Procedimentos e atualizações auxiliares
+- `Silver.sp_UpsertDimCalendario`
+- relacionamento com:
+  - `DimEmpresas`
+  - `DimPaineisEuromidia`
+  - `DimFacesPaineis`
+  - `Vendedores`
+
+---
+
+## Frequência de execução
+
+O DAG executa:
+
+- de segunda a sábado
+- às 09:00
+- e às 18:00
+
+Cron:
+
+`0 9,18 * * 1-6`
+
+---
+
+## Motivação técnica da arquitetura
+
+### Problema original
+O modelo tradicional usando `BULK INSERT` em arquivo hospedado em bind mount do Windows é frágil em ambientes:
+
+- Docker Desktop
+- WSL
+- Airflow
+- permissões heterogêneas entre host e container
+
+Isso costuma causar:
+- erro de permissão
+- arquivo visível no host mas inacessível ao SQL Server
+- inconsistência de path
+- falha intermitente entre ambientes
+
+### Solução aplicada
+O DAG foi estruturado para:
+- processar o Excel no container
+- escrever o CSV técnico em uma pasta interna estável:
+  `/opt/airflow/Artefatos/CargasSQL/CTR`
+- carregar a stage via `to_sql`/insert em lote
+- remover a dependência crítica de `BULK INSERT` em caminho externo
+
+Essa abordagem é mais robusta, mais portátil e mais compatível com execução containerizada.
+
+---
+
+## Etapas detalhadas do processo
+
+### 1. Leitura da planilha CTR
+A aba `CTR` é lida com `polars.read_excel`, usando `calamine`, com inferência mínima e schema textual base para garantir maior tolerância a planilhas “sujas”.
+
+### 2. Padronização dos dados
+São tratados:
+- datas em formatos brasileiros, ISO, datetime e serial Excel;
+- inteiros;
+- percentuais;
+- valores monetários;
+- CNPJ;
+- textos com caracteres invisíveis.
+
+### 3. Renomeação das colunas
+As colunas de origem da planilha são renomeadas para nomes técnicos padronizados do pipeline.
+
+### 4. Geração de hashes
+Quando `NumeroContrato` ou `NumeroPrevia` estiverem vazios, são gerados hashes determinísticos baseados em assinatura de negócio.
+
+Isso reduz perda de rastreabilidade e melhora a estabilidade do relacionamento entre registros.
+
+### 5. Geração do CSV técnico
+O CSV é gravado em pasta estável do container, com:
+- `;` como separador
+- vírgula decimal
+- `utf-8-sig`
+- formato de data `YYYY-MM-DD`
+
+### 6. Recarga da stage
+O CSV é relido e enviado para a stage:
+- `dbo.df_fatocontrolecontratos`
+
+A carga usa insert em lote via SQLAlchemy.
+
+### 7. Consolidação do contrato
+A tabela `Silver.FatoControleContratosEuromidia` recebe uma visão agregada por referência contratual.
+
+### 8. Consolidação dos itens
+A tabela `Silver.FatoControleContratosItensEuromidia` recebe a granularidade detalhada por item.
+
+### 9. Atualização de vínculos
+São atualizadas:
+- FK de itens para contratos
+- ID do vendedor
+- ID da empresa
+- ID do painel
+- ID da face
+
+### 10. Calendário e ocupação
+Por fim:
+- atualiza dimensão calendário
+- executa MERGE de ocupação em `FatoOcupacaoPaineisEuromidia`
+
+---
+
+## Observabilidade e auditoria
+
+Cada task publica auditoria estruturada contendo:
+- nome amigável
+- descrição da etapa
+- origem e destino
+- validações executadas
+- observações técnicas
+- amostras reais dos dados
+
+Isso foi feito para que a execução fique legível no painel e não dependa só de log bruto.
+
+---
+
+## Conexões esperadas
+
+### SQL Server
+- `mssql_integracao`
+
+---
+
+## Premissas operacionais
+
+- O arquivo Excel deve existir no caminho esperado antes da execução.
+- A aba `CTR` precisa existir.
+- A stage deve existir previamente no banco.
+- As tabelas Silver e dimensões relacionadas devem existir.
+- O Airflow precisa ter acesso à connection `mssql_integracao`.
+
+---
+
+## Benefícios da abordagem atual
+
+- menor dependência de filesystem externo
+- maior estabilidade em ambiente Docker
+- maior rastreabilidade
+- tratamento explícito de formatos mistos
+- melhor observabilidade por etapa
+- redução de falhas silenciosas em planilhas operacionais
+
+---
 """,
 )
 def etl_ctr_controle_contratos_euromidia():
-    @task
+    @task(task_id="gerar_csv_ctr")
     def gerar_csv_ctr() -> dict[str, Any]:
-        logger.info("PASTA_SHAREPOINT_CONTAINER: %s", PASTA_SHAREPOINT_CONTAINER)
-        logger.info("CAMINHO_ARQUIVO_EXCEL: %s", CAMINHO_ARQUIVO_EXCEL)
-        logger.info("PASTA_SHAREPOINT_CONTAINER.exists(): %s", PASTA_SHAREPOINT_CONTAINER.exists())
-        logger.info("CAMINHO_ARQUIVO_EXCEL.exists(): %s", CAMINHO_ARQUIVO_EXCEL.exists())
-        logger.info("PASTA_CARGA_CONTAINER: %s", PASTA_CARGA_CONTAINER)
-        logger.info("PASTA_CARGA_CONTAINER.exists(): %s", PASTA_CARGA_CONTAINER.exists())
-
-        garantir_pasta_escrita(PASTA_CARGA_CONTAINER)
-
-        lazy = ler_aba_ctr_xlsm_lazy(str(CAMINHO_ARQUIVO_EXCEL))
-        colunas_existentes = set(lazy.collect_schema().names())
-
-        cols_datas = _somente_existentes(
-            [
-                "DATA DO LANÇAMENTO",
-                "DATA DE ASSINATURA/RENOVAÇÃO (EMISSÃO)",
-                "DATA DE INÍCIO PREVISTO",
-                "DATA DE TÉRMINO PREVISTO",
-                "DATA DO 1º VENCIMENTO",
-                "DATA DE CANCELAMENTO",
-            ],
-            colunas_existentes,
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Gerar CSV técnico do CTR",
+            descricao_etapa=(
+                "Lê a aba CTR do arquivo Excel, aplica normalização de datas, números, percentuais, "
+                "CNPJ e textos, renomeia colunas, gera hashes para contrato/prévia ausentes e grava "
+                "um CSV técnico em pasta estável do container."
+            ),
+            origem_dados=str(CAMINHO_ARQUIVO_EXCEL),
+            destino_dados=str(PASTA_CARGA_CONTAINER),
         )
-
-        cols_int = _somente_existentes(
-            [
-                "PONTO",
-                "TEMPO DE EXPOSIÇÃO [DIAS]",
-                "Nº DE PARCELAS",
-            ],
-            colunas_existentes,
-        )
-
-        cols_idtri = _somente_existentes(["ID. TRIMESTRE"], colunas_existentes)
-
-        cols_float = _somente_existentes(
-            [
-                "COTA (Exato)",
-                "% PERMUTA",
-                "COTA DE OPORTUNIDADE?",
-                "% AGÊNCIA",
-                "% BUREAU",
-                "% CARTA ACORDO",
-                "% COMISSÃO VENDEDOR",
-                "%COMISSÃO COORDENAÇÃO",
-                "% COMISSÃO GERÊNCIA",
-            ],
-            colunas_existentes,
-        )
-
-        cols_money = _somente_existentes(
-            [
-                "FATURAMENTO BRUTO MENSAL",
-                "VALOR PERMUTA",
-                "FATURAMENTO LÍQ. (- PERMUTA)",
-                "TOTAL BRUTO DO CONTRATO",
-                "TOTAL LÍQUIDO DO CONTRATO (-AG, -BR, -CT ACORDO)",
-                "TOTAL LÍQUIDO DO CONTRATO (- AG, - BR, -VEND, - GER ,-COOR)",
-                "VALOR DA AGÊNCIA (MENSAL)",
-                "VALOR BUREAU (MENSAL)",
-                "VALOR CARTA ACORDO (MENSAL)",
-                "VALOR OUTRAS COMISSÕES",
-                "FATURAMENTO LÍQUIDO MENSAL",
-                "VALOR VENDEDOR",
-                "VALOR VENDEDOR TOTAL",
-                "VALOR COORDENADOR",
-                "VALOR COORDENADOR TOTAL",
-                "VALOR GERÊNCIA",
-                "VALOR GERÊNCIA TOTAL",
-                "FATURAMENTO LÍQUIDO FINAL MENSAL",
-                "COMISSÃO GERÊNCIA NORDESTE",
-                "FATURAMENTO",
-            ],
-            colunas_existentes,
-        )
-
-        cols_cnpj = _somente_existentes(
-            [
-                "CNPJ",
-                "CNPJ AGÊNCIA",
-                "CNPJ BUREAU",
-                "CNPJ INTERMEDIÁRIO",
-                "CNPJ DA EXIBIDORA (EUROMIDIA)",
-            ],
-            colunas_existentes,
-        )
-
-        exprs = []
-
-        for c in cols_datas:
-            exprs.append(parse_data_br(pl.col(c)).alias(c))
-
-        for c in cols_int:
-            exprs.append(parse_int(pl.col(c)).alias(c))
-
-        for c in cols_idtri:
-            exprs.append(parse_id_trimestre(pl.col(c)).alias(c))
-
-        for c in cols_float:
-            exprs.append(parse_float_br(pl.col(c)).alias(c))
-
-        for c in cols_money:
-            exprs.append(parse_br_money(pl.col(c)).alias(c))
-
-        for c in cols_cnpj:
-            exprs.append(parse_cnpj(pl.col(c)).alias(c))
-
-        if "OBS" in colunas_existentes:
-            exprs.append(_limpar_texto(pl.col("OBS")).alias("OBS"))
-
-        rename_map = {
-            orig: dest
-            for orig, dest in mapeamento_colunas.items()
-            if orig in colunas_existentes
-        }
-
-        lazy_tratado = lazy.with_columns(exprs).rename(rename_map)
 
         try:
-            df = lazy_tratado.collect(engine="streaming")
-        except Exception:
-            df = lazy_tratado.collect()
+            resumo.status = "RUNNING"
+            resumo.metricas_extras["nome_aba_excel"] = NOME_ABA_EXCEL
+            resumo.metricas_extras["conn_id_sql_server"] = CONN_ID_SQL_SERVER
+            publicar_resumo_auditoria(resumo)
 
-        df = aplicar_hash_contrato_e_previa(df)
-        df = garantir_colunas_saida(df)
+            logger.info("PASTA_SHAREPOINT_CONTAINER: %s", PASTA_SHAREPOINT_CONTAINER)
+            logger.info("CAMINHO_ARQUIVO_EXCEL: %s", CAMINHO_ARQUIVO_EXCEL)
+            logger.info("PASTA_SHAREPOINT_CONTAINER.exists(): %s", PASTA_SHAREPOINT_CONTAINER.exists())
+            logger.info("CAMINHO_ARQUIVO_EXCEL.exists(): %s", CAMINHO_ARQUIVO_EXCEL.exists())
+            logger.info("PASTA_CARGA_CONTAINER: %s", PASTA_CARGA_CONTAINER)
+            logger.info("PASTA_CARGA_CONTAINER.exists(): %s", PASTA_CARGA_CONTAINER.exists())
 
-        agora = datetime.now()
-        data_hora = agora.strftime("%Y%m%d_%H%M%S")
-        nome_arquivo_csv = f"df_fatocontrolecontratos_{data_hora}.csv"
+            garantir_pasta_escrita(PASTA_CARGA_CONTAINER)
 
-        caminho_saida_linux = PASTA_CARGA_CONTAINER / nome_arquivo_csv
-        caminho_saida_linux.parent.mkdir(parents=True, exist_ok=True)
+            lazy = ler_aba_ctr_xlsm_lazy(str(CAMINHO_ARQUIVO_EXCEL))
+            colunas_existentes = set(lazy.collect_schema().names())
 
-        csv_texto = df.write_csv(
-            separator=";",
-            decimal_comma=True,
-            date_format="%Y-%m-%d",
+            cols_datas = _somente_existentes(
+                [
+                    "DATA DO LANÇAMENTO",
+                    "DATA DE ASSINATURA/RENOVAÇÃO (EMISSÃO)",
+                    "DATA DE INÍCIO PREVISTO",
+                    "DATA DE TÉRMINO PREVISTO",
+                    "DATA DO 1º VENCIMENTO",
+                    "DATA DE CANCELAMENTO",
+                ],
+                colunas_existentes,
+            )
+
+            cols_int = _somente_existentes(
+                [
+                    "PONTO",
+                    "TEMPO DE EXPOSIÇÃO [DIAS]",
+                    "Nº DE PARCELAS",
+                ],
+                colunas_existentes,
+            )
+
+            cols_idtri = _somente_existentes(["ID. TRIMESTRE"], colunas_existentes)
+
+            cols_float = _somente_existentes(
+                [
+                    "COTA (Exato)",
+                    "% PERMUTA",
+                    "COTA DE OPORTUNIDADE?",
+                    "% AGÊNCIA",
+                    "% BUREAU",
+                    "% CARTA ACORDO",
+                    "% COMISSÃO VENDEDOR",
+                    "%COMISSÃO COORDENAÇÃO",
+                    "% COMISSÃO GERÊNCIA",
+                ],
+                colunas_existentes,
+            )
+
+            cols_money = _somente_existentes(
+                [
+                    "FATURAMENTO BRUTO MENSAL",
+                    "VALOR PERMUTA",
+                    "FATURAMENTO LÍQ. (- PERMUTA)",
+                    "TOTAL BRUTO DO CONTRATO",
+                    "TOTAL LÍQUIDO DO CONTRATO (-AG, -BR, -CT ACORDO)",
+                    "TOTAL LÍQUIDO DO CONTRATO (- AG, - BR, -VEND, - GER ,-COOR)",
+                    "VALOR DA AGÊNCIA (MENSAL)",
+                    "VALOR BUREAU (MENSAL)",
+                    "VALOR CARTA ACORDO (MENSAL)",
+                    "VALOR OUTRAS COMISSÕES",
+                    "FATURAMENTO LÍQUIDO MENSAL",
+                    "VALOR VENDEDOR",
+                    "VALOR VENDEDOR TOTAL",
+                    "VALOR COORDENADOR",
+                    "VALOR COORDENADOR TOTAL",
+                    "VALOR GERÊNCIA",
+                    "VALOR GERÊNCIA TOTAL",
+                    "FATURAMENTO LÍQUIDO FINAL MENSAL",
+                    "COMISSÃO GERÊNCIA NORDESTE",
+                    "FATURAMENTO",
+                ],
+                colunas_existentes,
+            )
+
+            cols_cnpj = _somente_existentes(
+                [
+                    "CNPJ",
+                    "CNPJ AGÊNCIA",
+                    "CNPJ BUREAU",
+                    "CNPJ INTERMEDIÁRIO",
+                    "CNPJ DA EXIBIDORA (EUROMIDIA)",
+                ],
+                colunas_existentes,
+            )
+
+            exprs = []
+
+            for c in cols_datas:
+                exprs.append(parse_data_br(pl.col(c)).alias(c))
+
+            for c in cols_int:
+                exprs.append(parse_int(pl.col(c)).alias(c))
+
+            for c in cols_idtri:
+                exprs.append(parse_id_trimestre(pl.col(c)).alias(c))
+
+            for c in cols_float:
+                exprs.append(parse_float_br(pl.col(c)).alias(c))
+
+            for c in cols_money:
+                exprs.append(parse_br_money(pl.col(c)).alias(c))
+
+            for c in cols_cnpj:
+                exprs.append(parse_cnpj(pl.col(c)).alias(c))
+
+            if "OBS" in colunas_existentes:
+                exprs.append(_limpar_texto(pl.col("OBS")).alias("OBS"))
+
+            rename_map = {
+                orig: dest
+                for orig, dest in mapeamento_colunas.items()
+                if orig in colunas_existentes
+            }
+
+            lazy_tratado = lazy.with_columns(exprs).rename(rename_map)
+
+            try:
+                df = lazy_tratado.collect(engine="streaming")
+            except Exception:
+                df = lazy_tratado.collect()
+
+            df = aplicar_hash_contrato_e_previa(df)
+            df = garantir_colunas_saida(df)
+
+            agora = datetime.now()
+            data_hora = agora.strftime("%Y%m%d_%H%M%S")
+            nome_arquivo_csv = f"df_fatocontrolecontratos_{data_hora}.csv"
+
+            caminho_saida_linux = PASTA_CARGA_CONTAINER / nome_arquivo_csv
+            caminho_saida_linux.parent.mkdir(parents=True, exist_ok=True)
+
+            csv_texto = df.write_csv(
+                separator=";",
+                decimal_comma=True,
+                date_format="%Y-%m-%d",
+            )
+
+            with open(caminho_saida_linux, "w", encoding="utf-8-sig", newline="") as arquivo_saida:
+                arquivo_saida.write(csv_texto)
+
+            resumo.status = "SUCCESS"
+            resumo.linhas_lidas = int(df.height)
+            resumo.linhas_inseridas = int(df.height)
+            resumo.metricas_extras["nome_arquivo_csv"] = nome_arquivo_csv
+            resumo.metricas_extras["caminho_csv_linux"] = str(caminho_saida_linux)
+            resumo.metricas_extras["colunas_exportadas"] = int(df.width)
+
+            adicionar_validacao(
+                resumo,
+                nome="arquivo_excel_disponivel",
+                status="ok",
+                detalhe=f"O arquivo Excel foi encontrado em {CAMINHO_ARQUIVO_EXCEL}.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="csv_tecnico_gerado",
+                status="ok",
+                detalhe=f"O CSV técnico foi gerado com {df.height:,} linhas e {df.width:,} colunas.",
+            )
+            adicionar_observacao(
+                resumo,
+                "A amostra mostra o dataset já padronizado e pronto para carga na stage técnica.",
+            )
+
+            definir_amostra(
+                resumo,
+                df_polars_para_amostra(
+                    df,
+                    limite=5,
+                    colunas=[
+                        "DataLancamento",
+                        "NumeroContrato",
+                        "NumeroPrevia",
+                        "CNPJ",
+                        "MarcaExibida",
+                        "CodPonto",
+                        "CodFace",
+                        "DataInicioPrevisto",
+                        "DataTerminoPrevisto",
+                        "FaturamentoBrutoMensal",
+                        "OBS",
+                    ],
+                ),
+                limite=10,
+            )
+            publicar_resumo_auditoria(resumo)
+
+            logger.info("Arquivo Excel lido com sucesso: %s", CAMINHO_ARQUIVO_EXCEL)
+            logger.info("Linhas tratadas: %s", df.height)
+            logger.info("Colunas exportadas: %s", df.width)
+            logger.info("CSV técnico gerado em: %s", caminho_saida_linux)
+            logger.info("Amostra:\n%s", df.head(5))
+
+            return {
+                "nome_arquivo_csv": nome_arquivo_csv,
+                "caminho_csv_linux": str(caminho_saida_linux),
+                "linhas": int(df.height),
+                "colunas": int(df.width),
+            }
+        except Exception as erro:
+            resumo.status = "FAILED"
+            registrar_erro_no_resumo(resumo, erro)
+            publicar_resumo_auditoria(resumo)
+            raise
+
+    @task(task_id="carregar_stage")
+    def carregar_stage(info_csv: dict[str, Any]) -> dict[str, Any]:
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Carregar stage técnica",
+            descricao_etapa=(
+                "Relê o CSV técnico gerado, converte todos os campos para formato textual controlado "
+                "e recarrega a tabela stage dbo.df_fatocontrolecontratos por insert em lote."
+            ),
+            origem_dados=info_csv["caminho_csv_linux"],
+            destino_dados=TABELA_STAGE,
         )
 
-        with open(caminho_saida_linux, "w", encoding="utf-8-sig", newline="") as arquivo_saida:
-            arquivo_saida.write(csv_texto)
-
-        logger.info("Arquivo Excel lido com sucesso: %s", CAMINHO_ARQUIVO_EXCEL)
-        logger.info("Linhas tratadas: %s", df.height)
-        logger.info("Colunas exportadas: %s", df.width)
-        logger.info("CSV técnico gerado em: %s", caminho_saida_linux)
-        logger.info("Amostra:\n%s", df.head(5))
-
-        return {
-            "nome_arquivo_csv": nome_arquivo_csv,
-            "caminho_csv_linux": str(caminho_saida_linux),
-            "linhas": df.height,
-            "colunas": df.width,
-        }
-
-    @task
-    def carregar_stage(info_csv: dict[str, Any]) -> None:
         caminho_csv_linux = Path(info_csv["caminho_csv_linux"])
 
-        if not caminho_csv_linux.exists():
-            raise FileNotFoundError(f"CSV não encontrado para carga da stage: {caminho_csv_linux}")
+        try:
+            resumo.status = "RUNNING"
+            publicar_resumo_auditoria(resumo)
 
-        schema_csv = {col: pl.Utf8 for col in ORDEM_COLUNAS_SAIDA}
+            if not caminho_csv_linux.exists():
+                raise FileNotFoundError(f"CSV não encontrado para carga da stage: {caminho_csv_linux}")
 
-        df_stage = pl.read_csv(
-            str(caminho_csv_linux),
-            separator=";",
-            encoding="utf8-lossy",
-            infer_schema_length=0,
-            schema_overrides=schema_csv,
-            null_values=["", "null", "None"],
+            schema_csv = {col: pl.Utf8 for col in ORDEM_COLUNAS_SAIDA}
+
+            df_stage = pl.read_csv(
+                str(caminho_csv_linux),
+                separator=";",
+                encoding="utf8-lossy",
+                infer_schema_length=0,
+                schema_overrides=schema_csv,
+                null_values=["", "null", "None"],
+            )
+
+            logger.info(
+                "CSV carregado para stage. Arquivo: %s | Linhas: %s | Colunas: %s",
+                caminho_csv_linux,
+                df_stage.height,
+                df_stage.width,
+            )
+
+            carregar_dataframe_stage_sql_server(df_stage, TABELA_STAGE)
+
+            resumo.status = "SUCCESS"
+            resumo.linhas_lidas = int(df_stage.height)
+            resumo.linhas_inseridas = int(df_stage.height)
+
+            adicionar_validacao(
+                resumo,
+                nome="csv_relido_com_sucesso",
+                status="ok",
+                detalhe=f"O CSV técnico foi relido com {df_stage.height:,} linhas.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="stage_recarregada",
+                status="ok",
+                detalhe=f"A tabela {TABELA_STAGE} foi truncada e recarregada com sucesso.",
+            )
+            adicionar_observacao(
+                resumo,
+                "A amostra representa exatamente o conteúdo enviado para a stage técnica antes dos MERGEs de consolidação.",
+            )
+
+            definir_amostra(
+                resumo,
+                df_polars_para_amostra(
+                    df_stage,
+                    limite=5,
+                    colunas=[
+                        "DataLancamento",
+                        "NumeroContrato",
+                        "NumeroPrevia",
+                        "CNPJ",
+                        "MarcaExibida",
+                        "CodPonto",
+                        "CodFace",
+                        "DataInicioPrevisto",
+                        "DataTerminoPrevisto",
+                    ],
+                ),
+                limite=10,
+            )
+            publicar_resumo_auditoria(resumo)
+
+            return {
+                "tabela_stage": TABELA_STAGE,
+                "linhas_stage": int(df_stage.height),
+            }
+        except Exception as erro:
+            resumo.status = "FAILED"
+            registrar_erro_no_resumo(resumo, erro)
+            publicar_resumo_auditoria(resumo)
+            raise
+
+    @task(task_id="merge_contratos")
+    def merge_contratos() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="MERGE contratos consolidados",
+            descricao_etapa=(
+                "Consolida a visão agregada de contratos na tabela Silver.FatoControleContratosEuromidia, "
+                "agrupando os registros por referência contratual e calculando totais, quantidades e "
+                "atributos principais de negócio."
+            ),
+            sql_execucao=MERGE_CONTRATOS_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    CNPJ,
+                    RazaoSocial,
+                    QuantidadePontos,
+                    QuantidadeFaces,
+                    TotalBrutoContrato,
+                    TotalFaturamentoLiquidoMensal,
+                    DataAtualizacao
+                FROM [Silver].[FatoControleContratosEuromidia]
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados=TABELA_STAGE,
+            destino_dados="[Silver].[FatoControleContratosEuromidia]",
         )
 
-        logger.info(
-            "CSV carregado para stage. Arquivo: %s | Linhas: %s | Colunas: %s",
-            caminho_csv_linux,
-            df_stage.height,
-            df_stage.width,
+    @task(task_id="merge_itens")
+    def merge_itens() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="MERGE itens de contratos",
+            descricao_etapa=(
+                "Consolida a granularidade detalhada dos contratos por item, ponto e face, "
+                "alimentando a tabela Silver.FatoControleContratosItensEuromidia."
+            ),
+            sql_execucao=MERGE_ITENS_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    CNPJ,
+                    CodPonto,
+                    CodFace,
+                    MarcaExibida,
+                    DataInicioPrevisto,
+                    DataTerminoPrevisto,
+                    FaturamentoBrutoMensal,
+                    DataAtualizacao
+                FROM [Silver].[FatoControleContratosItensEuromidia]
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados=TABELA_STAGE,
+            destino_dados="[Silver].[FatoControleContratosItensEuromidia]",
         )
 
-        carregar_dataframe_stage_sql_server(df_stage, TABELA_STAGE)
+    @task(task_id="update_fk_contratos_itens")
+    def update_fk_contratos_itens() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar vínculo itens para contratos",
+            descricao_etapa=(
+                "Preenche a chave estrangeira dos itens para a tabela consolidada de contratos, "
+                "garantindo integridade entre contrato agregado e seus itens detalhados."
+            ),
+            sql_execucao=UPDATE_FK_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    IDFatoControleContratoEuromidia,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    CodPonto,
+                    CodFace,
+                    DataAtualizacao
+                FROM [Silver].[FatoControleContratosItensEuromidia]
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Silver].[FatoControleContratosEuromidia] + [Silver].[FatoControleContratosItensEuromidia]",
+            destino_dados="[Silver].[FatoControleContratosItensEuromidia]",
+        )
 
-    @task
-    def merge_contratos() -> None:
-        executar_sql("MERGE contratos", MERGE_CONTRATOS_SQL)
+    @task(task_id="update_id_vendedor")
+    def update_id_vendedor() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar ID do vendedor",
+            descricao_etapa=(
+                "Relaciona o nome do vendedor presente nos itens de contratos com a dimensão de vendedores, "
+                "preenchendo o identificador técnico do vendedor."
+            ),
+            sql_execucao=UPDATE_VENDEDOR_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    Vendedor,
+                    IDVendedor,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    DataAtualizacao
+                FROM [Silver].[FatoControleContratosItensEuromidia]
+                WHERE IDVendedor IS NOT NULL
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Silver].[FatoControleContratosItensEuromidia] + [Integracao].[dbo].[Vendedores]",
+            destino_dados="[Silver].[FatoControleContratosItensEuromidia]",
+        )
 
-    @task
-    def merge_itens() -> None:
-        executar_sql("MERGE itens", MERGE_ITENS_SQL)
+    @task(task_id="update_id_empresa")
+    def update_id_empresa() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar ID da empresa",
+            descricao_etapa=(
+                "Relaciona o CNPJ do contrato consolidado à dimensão de empresas para preenchimento do IDEmpresa."
+            ),
+            sql_execucao=UPDATE_EMPRESA_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    CNPJ,
+                    IDEmpresa,
+                    DataAtualizacao
+                FROM [Silver].[FatoControleContratosEuromidia]
+                WHERE IDEmpresa IS NOT NULL
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Silver].[FatoControleContratosEuromidia] + [Integracao].[Silver].[DimEmpresas]",
+            destino_dados="[Silver].[FatoControleContratosEuromidia]",
+        )
 
-    @task
-    def update_fk_contratos_itens() -> None:
-        executar_sql("UPDATE vínculo itens -> contratos", UPDATE_FK_SQL)
+    @task(task_id="update_id_painel")
+    def update_id_painel() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar ID do painel",
+            descricao_etapa=(
+                "Relaciona o código do ponto dos itens contratuais à dimensão de painéis, "
+                "preenchendo o IDPainelEuromidia."
+            ),
+            sql_execucao=UPDATE_PONTOS_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    CodPonto,
+                    IDPainelEuromidia,
+                    CodFace,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    DataAtualizacao
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+                WHERE IDPainelEuromidia IS NOT NULL
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia] + [Integracao].[Silver].[DimPaineisEuromidia]",
+            destino_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia]",
+        )
 
-    @task
-    def update_id_vendedor() -> None:
-        executar_sql("UPDATE IDVendedor", UPDATE_VENDEDOR_SQL)
+    @task(task_id="update_id_face")
+    def update_id_face() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar ID da face",
+            descricao_etapa=(
+                "Relaciona o código da face presente nos itens contratuais à dimensão de faces de painéis."
+            ),
+            sql_execucao=UPDATE_FACES_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    CodFace,
+                    IDDimFacesPaineis,
+                    CodPonto,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    DataAtualizacao
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+                WHERE IDDimFacesPaineis IS NOT NULL
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia] + [Integracao].[Silver].[DimFacesPaineis]",
+            destino_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia]",
+        )
 
-    @task
-    def update_id_empresa() -> None:
-        executar_sql("UPDATE IDEmpresa", UPDATE_EMPRESA_SQL)
+    @task(task_id="upsert_dim_calendario")
+    def upsert_dim_calendario() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar dimensão calendário",
+            descricao_etapa=(
+                "Executa o procedimento de upsert da dimensão calendário, garantindo suporte temporal "
+                "para análises baseadas em datas de contratos, vencimentos e ocupação."
+            ),
+            sql_execucao=CALL_PROCEDURE_SQL,
+            sql_amostra="""
+                SELECT TOP 5 *
+                FROM [Silver].[DimCalendario]
+                ORDER BY Data DESC
+            """,
+            origem_dados="Procedimento Silver.sp_UpsertDimCalendario",
+            destino_dados="[Silver].[DimCalendario]",
+        )
 
-    @task
-    def update_id_painel() -> None:
-        executar_sql("UPDATE IDPainelEuromidia", UPDATE_PONTOS_SQL)
-
-    @task
-    def update_id_face() -> None:
-        executar_sql("UPDATE IDDimFacesPaineis", UPDATE_FACES_SQL)
-
-    @task
-    def upsert_dim_calendario() -> None:
-        executar_sql("EXEC sp_UpsertDimCalendario", CALL_PROCEDURE_SQL)
-
-    @task
-    def upsert_ocupacao() -> None:
-        executar_sql("MERGE ocupação", UPDATE_OCUPACAO_SQL)
+    @task(task_id="upsert_ocupacao")
+    def upsert_ocupacao() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="MERGE ocupação dos painéis",
+            descricao_etapa=(
+                "Deriva a ocupação contratual dos painéis Euromídia a partir dos itens de contratos, "
+                "calculando início, fim, status, cliente, vendedor e demais metadados operacionais."
+            ),
+            sql_execucao=UPDATE_OCUPACAO_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    Referencia,
+                    CodPonto,
+                    CodFace,
+                    Origem,
+                    Status,
+                    DataInicio,
+                    DataFim,
+                    Cota,
+                    MarcaExibida,
+                    Vendedor,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    DataAtualizacao
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia]",
+            destino_dados="[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
+        )
 
     info_csv = gerar_csv_ctr()
     stage = carregar_stage(info_csv)

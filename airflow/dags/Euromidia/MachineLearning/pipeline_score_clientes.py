@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import json
 import math
 import statistics
-import urllib.parse
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -15,7 +16,6 @@ import pendulum
 import polars as pl
 from airflow.sdk import dag, task
 from catboost import CatBoostClassifier, Pool
-from sqlalchemy import create_engine
 from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
@@ -25,16 +25,24 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from sqlalchemy import text
+
+from hooks.BancodeDados.SqlServer import HookSqlServer
+from dags._libs.auditoria_task import (
+    adicionar_observacao,
+    adicionar_validacao,
+    criar_resumo_auditoria,
+    definir_amostra,
+    publicar_resumo_auditoria,
+    registrar_erro_no_resumo,
+)
 
 
 @dataclass(frozen=True)
 class Configuracao:
     """Configuração central do pipeline."""
 
-    servidor_sql: str = r"192.168.40.177"
-    banco_sql: str = "DataMining"
-    usuario_sql: str = "sa"
-    senha_sql: str = "Mudar@123ab"
+    conn_id_sql: str = "mssql_integracao"
 
     caminho_query_sql: Path = Path(
         "/opt/airflow/queries/Euromidia/MachineLearning/algoritmo_score_cliente.sql"
@@ -45,6 +53,25 @@ class Configuracao:
     )
     pasta_saida_metricas: Path = Path(
         "/opt/airflow/Artefatos/Euromidia/MachineLearning/Metricas"
+    )
+    pasta_saida_intermediarios: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios"
+    )
+
+    caminho_dataset_bruto_parquet: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios/score_cliente_dataset_bruto.parquet"
+    )
+    caminho_dataset_preparado_parquet: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios/score_cliente_dataset_preparado.parquet"
+    )
+    caminho_metadados_preparacao_json: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios/score_cliente_metadados_preparacao.json"
+    )
+    caminho_resumo_treino_json: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios/score_cliente_resumo_treino.json"
+    )
+    caminho_saida_payload_metricas_json: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios/score_cliente_payload_metricas.json"
     )
 
     caminho_saida_score_historico_csv: Path = Path(
@@ -100,30 +127,20 @@ class Configuracao:
 
     salvar_score_historico_completo: bool = True
     quantidade_linhas_exibir_tabela_final: int = 50
+    quantidade_linhas_amostra_auditoria: int = 5
+
+
+def garantir_pastas_saida(config: Configuracao) -> None:
+    """Garante a existência das pastas necessárias."""
+    config.pasta_saida_dados.mkdir(parents=True, exist_ok=True)
+    config.pasta_saida_metricas.mkdir(parents=True, exist_ok=True)
+    config.pasta_saida_intermediarios.mkdir(parents=True, exist_ok=True)
 
 
 def criar_engine_sql(config: Configuracao):
-    """Cria a conexão com SQL Server via SQLAlchemy."""
-
-    params_datamining = urllib.parse.quote_plus(
-        "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER={config.servidor_sql};"
-        f"DATABASE={config.banco_sql};"
-        f"UID={config.usuario_sql};"
-        f"PWD={config.senha_sql};"
-        "Connection Timeout=30;"
-        "TrustServerCertificate=yes;"
-    )
-
-    engine_sql = create_engine(
-        f"mssql+pyodbc:///?odbc_connect={params_datamining}",
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,
-        pool_recycle=1800,
-        future=True,
-    )
-    return engine_sql
+    """Cria a conexão com SQL Server via HookSqlServer do projeto."""
+    hook_sql_server = HookSqlServer(conn_id=config.conn_id_sql)
+    return hook_sql_server.obter_engine()
 
 
 def ler_query_sql(caminho_query_sql: Path) -> str:
@@ -158,6 +175,120 @@ def normalizar_valor_sql(valor):
             return str(valor)
 
     return valor
+
+
+def normalizar_valor_para_json(valor: Any) -> Any:
+    """Converte valores para tipos serializáveis e legíveis na auditoria."""
+
+    if valor is None:
+        return None
+
+    if isinstance(valor, (datetime, date, pd.Timestamp)):
+        return str(valor)
+
+    if isinstance(valor, Decimal):
+        return str(valor)
+
+    if isinstance(valor, UUID):
+        return str(valor)
+
+    if isinstance(valor, Path):
+        return str(valor)
+
+    if isinstance(valor, np.integer):
+        return int(valor)
+
+    if isinstance(valor, np.floating):
+        return float(valor)
+
+    if isinstance(valor, np.bool_):
+        return bool(valor)
+
+    if pd.isna(valor):
+        return None
+
+    return valor
+
+
+def obter_amostra_polars(
+    df: pl.DataFrame,
+    limite: int = 5,
+    colunas: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Monta uma amostra amigável de um DataFrame Polars."""
+    if df.is_empty():
+        return []
+
+    df_amostra = df
+    if colunas:
+        colunas_existentes = [coluna for coluna in colunas if coluna in df.columns]
+        if colunas_existentes:
+            df_amostra = df.select(colunas_existentes)
+
+    linhas = df_amostra.head(limite).to_dicts()
+
+    amostra: list[dict[str, Any]] = []
+    for linha in linhas:
+        amostra.append(
+            {chave: normalizar_valor_para_json(valor) for chave, valor in linha.items()}
+        )
+
+    return amostra
+
+
+def obter_amostra_pandas(
+    df: pd.DataFrame,
+    limite: int = 5,
+    colunas: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Monta uma amostra amigável de um DataFrame pandas."""
+    if df.empty:
+        return []
+
+    df_amostra = df.copy()
+    if colunas:
+        colunas_existentes = [coluna for coluna in colunas if coluna in df_amostra.columns]
+        if colunas_existentes:
+            df_amostra = df_amostra[colunas_existentes].copy()
+
+    linhas = df_amostra.head(limite).to_dict(orient="records")
+
+    amostra: list[dict[str, Any]] = []
+    for linha in linhas:
+        amostra.append(
+            {chave: normalizar_valor_para_json(valor) for chave, valor in linha.items()}
+        )
+
+    return amostra
+
+
+def salvar_json(caminho: Path, payload: dict[str, Any]) -> None:
+    """Salva JSON em disco."""
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    with open(caminho, "w", encoding="utf-8") as arquivo_json:
+        json.dump(payload, arquivo_json, ensure_ascii=False, indent=4, default=str)
+
+
+def carregar_json(caminho: Path) -> dict[str, Any]:
+    """Carrega JSON de disco."""
+    if not caminho.exists():
+        raise FileNotFoundError(f"Arquivo JSON não encontrado: {caminho}")
+
+    with open(caminho, "r", encoding="utf-8") as arquivo_json:
+        return json.load(arquivo_json)
+
+
+def salvar_polars_parquet(df: pl.DataFrame, caminho: Path) -> None:
+    """Salva DataFrame Polars em parquet."""
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(caminho)
+
+
+def carregar_polars_parquet(caminho: Path) -> pl.DataFrame:
+    """Carrega DataFrame Polars em parquet."""
+    if not caminho.exists():
+        raise FileNotFoundError(f"Arquivo parquet não encontrado: {caminho}")
+    return pl.read_parquet(caminho)
 
 
 def coluna_tem_tipos_mistos_criticos(serie: pd.Series) -> bool:
@@ -270,7 +401,6 @@ def converter_pandas_para_polars_sem_pyarrow(df_pandas: pd.DataFrame) -> pl.Data
 
 def polars_para_pandas_sem_pyarrow(df: pl.DataFrame) -> pd.DataFrame:
     """Converte Polars para pandas sem usar to_pandas()."""
-
     return pd.DataFrame(df.to_dicts())
 
 
@@ -1216,9 +1346,6 @@ def escolher_iteracoes_finais(
     return mediana_iteracoes
 
 
-
-
-
 def imprimir_resumo_dataset_walk_forward(
     df_total: pl.DataFrame,
     df_desenvolvimento: pl.DataFrame,
@@ -1256,7 +1383,6 @@ def imprimir_resumo_dataset_walk_forward(
     print("Teste Final OOT")
     print(f"Período: {meses_teste[0]} até {meses_teste[-1]}")
     print(f"Taxa média do target: {taxa_teste:.4f}" if taxa_teste is not None else "Taxa média do target: n/a")
-
 
 
 def imprimir_metricas(
@@ -1556,306 +1682,729 @@ def atualizar_dim_classificacao_clientes_com_score(
             pass
 
 
-def executar_pipeline() -> None:
-    """Executa o fluxo completo do score de propensão de contratação do cliente."""
-
+def executar_etapa_extracao_sql() -> dict[str, Any]:
+    """Extrai o dataset bruto do SQL Server e grava artefato intermediário."""
     config = Configuracao()
+    garantir_pastas_saida(config)
 
-    print("=" * 100)
-    print("INÍCIO DO PIPELINE - SCORE DE PROPENSÃO DE CONTRATAÇÃO")
-    print("=" * 100)
+    resumo = criar_resumo_auditoria(
+        nome_amigavel="Extrair dataset bruto do SQL Server",
+        descricao_etapa=(
+            "Executa a query SQL de score de empresas, captura o result set final, "
+            "normaliza tipos e grava o dataset bruto em parquet para as próximas etapas."
+        ),
+        origem_dados=f"SQL Server via conn_id {config.conn_id_sql}",
+        destino_dados=str(config.caminho_dataset_bruto_parquet),
+    )
 
     engine_sql = criar_engine_sql(config)
-    query_sql = ler_query_sql(config.caminho_query_sql)
 
-    print("\nLendo dados do SQL Server...")
-    df = carregar_dados_sql_em_polars(engine_sql, query_sql)
-    print(f"Linhas carregadas: {df.height:,}")
-    print(f"Colunas carregadas: {len(df.columns):,}")
+    try:
+        resumo.status = "RUNNING"
+        resumo.metricas_extras["conn_id_sql"] = config.conn_id_sql
+        resumo.metricas_extras["caminho_query_sql"] = str(config.caminho_query_sql)
+        publicar_resumo_auditoria(resumo)
 
-    df = limpar_e_padronizar_dataset(df, config)
-    df = adicionar_features_temporais(df, config)
+        print("=" * 100)
+        print("ETAPA 1 - EXTRAÇÃO DO DATASET BRUTO")
+        print("=" * 100)
 
-    colunas_excluir = obter_colunas_excluir_por_padrao(df, config)
-    colunas_features = [
-        coluna
-        for coluna in df.columns
-        if coluna not in colunas_excluir
-    ]
+        query_sql = ler_query_sql(config.caminho_query_sql)
+        df = carregar_dados_sql_em_polars(engine_sql, query_sql)
 
-    if not colunas_features:
-        raise ValueError("Nenhuma feature sobrou após exclusões. Revise a query e as regras do pipeline.")
+        salvar_polars_parquet(df, config.caminho_dataset_bruto_parquet)
 
-    colunas_numericas, colunas_categoricas = identificar_tipos_de_features(df, colunas_features)
+        resumo.status = "SUCCESS"
+        resumo.linhas_lidas = int(df.height)
+        resumo.linhas_inseridas = int(df.height)
+        resumo.metricas_extras["quantidade_colunas"] = int(len(df.columns))
+        resumo.metricas_extras["colunas"] = list(df.columns)
 
-    print("\nResumo das features:")
-    print(f"Total de features:{len(colunas_features):,}")
-    print(f"Features numéricas:{len(colunas_numericas):,}")
-    print(f"Features categóricas: {len(colunas_categoricas):,}")
+        adicionar_validacao(
+            resumo,
+            nome="dataset_bruto_nao_vazio",
+            status="ok" if df.height > 0 else "erro",
+            detalhe=f"A consulta retornou {df.height:,} linhas e {len(df.columns):,} colunas.",
+        )
 
-    print("\nSeparando desenvolvimento e teste final OOT por tempo...")
-    df_desenvolvimento, df_teste, meses_desenvolvimento, meses_teste = separar_desenvolvimento_teste_temporal(df, config)
+        definir_amostra(
+            resumo,
+            obter_amostra_polars(df, limite=config.quantidade_linhas_amostra_auditoria),
+            limite=config.quantidade_linhas_amostra_auditoria,
+        )
+        publicar_resumo_auditoria(resumo)
 
-    imprimir_resumo_dataset_walk_forward(
-        df_total=df,
-        df_desenvolvimento=df_desenvolvimento,
-        df_teste=df_teste,
-        meses_desenvolvimento=meses_desenvolvimento,
-        meses_teste=meses_teste,
-        config=config,
+        print(f"Linhas carregadas: {df.height:,}")
+        print(f"Colunas carregadas: {len(df.columns):,}")
+        print(f"Arquivo parquet bruto: {config.caminho_dataset_bruto_parquet}")
+
+        return {
+            "linhas": int(df.height),
+            "colunas": int(len(df.columns)),
+            "caminho_dataset_bruto_parquet": str(config.caminho_dataset_bruto_parquet),
+        }
+
+    except Exception as erro:
+        resumo.status = "FAILED"
+        registrar_erro_no_resumo(resumo, erro)
+        publicar_resumo_auditoria(resumo)
+        raise
+
+    finally:
+        engine_sql.dispose()
+
+
+def executar_etapa_preparacao_modelagem() -> dict[str, Any]:
+    """Prepara dataset para modelagem, cria features e salva metadados."""
+    config = Configuracao()
+    garantir_pastas_saida(config)
+
+    resumo = criar_resumo_auditoria(
+        nome_amigavel="Preparar dataset de modelagem",
+        descricao_etapa=(
+            "Carrega o dataset bruto, converte datas, limpa linhas inviáveis, "
+            "cria features temporais, identifica variáveis numéricas e categóricas "
+            "e salva o dataset preparado com os metadados de modelagem."
+        ),
+        origem_dados=str(config.caminho_dataset_bruto_parquet),
+        destino_dados=str(config.caminho_dataset_preparado_parquet),
     )
 
-    (
-        df_resumo_folds_walk_forward,
-        df_predicoes_walk_forward,
-        melhores_iteracoes,
-    ) = executar_walk_forward_validation(
-        df_desenvolvimento=df_desenvolvimento,
-        meses_desenvolvimento=meses_desenvolvimento,
-        colunas_features=colunas_features,
-        colunas_categoricas=colunas_categoricas,
-        config=config,
-    )
+    try:
+        resumo.status = "RUNNING"
+        publicar_resumo_auditoria(resumo)
 
-    imprimir_resumo_walk_forward_folds(df_resumo_folds_walk_forward)
+        print("=" * 100)
+        print("ETAPA 2 - PREPARAÇÃO DO DATASET DE MODELAGEM")
+        print("=" * 100)
 
-    iteracoes_finais = escolher_iteracoes_finais(melhores_iteracoes, config)
+        df = carregar_polars_parquet(config.caminho_dataset_bruto_parquet)
+        linhas_antes = int(df.height)
 
-    print("\n" + "=" * 100)
-    print("DEFINIÇÃO DO MODELO FINAL")
-    print("=" * 100)
-    print(f"Melhores iterações por fold: {melhores_iteracoes}")
-    print(f"Iterações finais escolhidas (mediana dos folds): {iteracoes_finais}")
+        df = limpar_e_padronizar_dataset(df, config)
+        df = adicionar_features_temporais(df, config)
 
-    print("\nTreinando modelo final em todo o desenvolvimento...")
-    modelo_final, _ = treinar_modelo_final_catboost(
-        df_treino_final=df_desenvolvimento,
-        colunas_features=colunas_features,
-        colunas_categoricas=colunas_categoricas,
-        config=config,
-        iteracoes_finais=iteracoes_finais,
-        verbose=100,
-    )
+        colunas_excluir = obter_colunas_excluir_por_padrao(df, config)
+        colunas_features = [
+            coluna
+            for coluna in df.columns
+            if coluna not in colunas_excluir
+        ]
 
-    print("\nGerando previsões do modelo final...")
-    _, prob_desenvolvimento = prever_probabilidade(
-        modelo=modelo_final,
-        df=df_desenvolvimento,
-        colunas_features=colunas_features,
-        colunas_categoricas=colunas_categoricas,
-        config=config,
-    )
+        if not colunas_features:
+            raise ValueError("Nenhuma feature sobrou após exclusões. Revise a query e as regras do pipeline.")
 
-    _, prob_teste = prever_probabilidade(
-        modelo=modelo_final,
-        df=df_teste,
-        colunas_features=colunas_features,
-        colunas_categoricas=colunas_categoricas,
-        config=config,
-    )
+        colunas_numericas, colunas_categoricas = identificar_tipos_de_features(df, colunas_features)
 
-    y_desenvolvimento = obter_y_numpy(df_desenvolvimento, config.nome_coluna_alvo)
-    y_teste = obter_y_numpy(df_teste, config.nome_coluna_alvo)
+        meses_ordenados = obter_meses_ordenados(df, config)
 
-    y_walk_forward = pd.to_numeric(
-        df_predicoes_walk_forward[config.nome_coluna_alvo],
-        errors="coerce",
-    ).fillna(0).astype(int).to_numpy()
+        salvar_polars_parquet(df, config.caminho_dataset_preparado_parquet)
 
-    prob_walk_forward = pd.to_numeric(
-        df_predicoes_walk_forward["ProbabilidadeContratacao"],
-        errors="coerce",
-    ).fillna(0.0).to_numpy()
-
-    metricas_desenvolvimento = calcular_metricas_classificacao(y_desenvolvimento, prob_desenvolvimento)
-    metricas_walk_forward = calcular_metricas_classificacao(y_walk_forward, prob_walk_forward)
-    metricas_teste = calcular_metricas_classificacao(y_teste, prob_teste)
-
-    metricas_top_desenvolvimento = calcular_metricas_top_decile(y_desenvolvimento, prob_desenvolvimento)
-    metricas_top_walk_forward = calcular_metricas_top_decile(y_walk_forward, prob_walk_forward)
-    metricas_top_teste = calcular_metricas_top_decile(y_teste, prob_teste)
-
-    imprimir_metricas(
-        "Desenvolvimento (In-Sample)",
-        metricas_desenvolvimento,
-        metricas_top_desenvolvimento,
-    )
-    imprimir_metricas(
-        "Walk-Forward OOF",
-        metricas_walk_forward,
-        metricas_top_walk_forward,
-    )
-    imprimir_metricas(
-        "Teste Final OOT",
-        metricas_teste,
-        metricas_top_teste,
-    )
-
-    print("\nMontando score histórico completo com modelo final...")
-    _, prob_total = prever_probabilidade(
-        modelo=modelo_final,
-        df=df,
-        colunas_features=colunas_features,
-        colunas_categoricas=colunas_categoricas,
-        config=config,
-    )
-
-    resultado_historico = montar_dataframe_resultado(
-        df_original=df,
-        probabilidades=prob_total,
-        config=config,
-    )
-
-    if config.nome_coluna_mes_ref not in resultado_historico.columns:
-        raise ValueError("A coluna MesRef não está disponível no resultado final.")
-
-    mes_mais_recente = resultado_historico[config.nome_coluna_mes_ref].max()
-    resultado_atual = resultado_historico.loc[
-        resultado_historico[config.nome_coluna_mes_ref] == mes_mais_recente
-    ].copy()
-
-    resultado_atual = resultado_atual.sort_values(
-        ["ScoreCliente", "ProbabilidadeContratacao"],
-        ascending=[False, False],
-    )
-
-    meses_teste_unicos = df_teste.get_column(config.nome_coluna_mes_ref).unique().to_list()
-
-    resumo_faixas_teste = avaliar_por_faixa_score(
-        df_resultado=resultado_historico.loc[
-            resultado_historico[config.nome_coluna_mes_ref].isin(meses_teste_unicos)
-        ].copy(),
-        nome_coluna_alvo=config.nome_coluna_alvo,
-    )
-
-    df_importancias = extrair_importancias(modelo_final, colunas_features)
-    tabela_final = montar_tabela_final_exibicao(resultado_atual)
-
-    print("\n" + "=" * 100)
-    print("TOP 25 FEATURES MAIS IMPORTANTES")
-    print("=" * 100)
-    print(df_importancias.head(25).to_string(index=False))
-
-    print("\n" + "=" * 100)
-    print("RESUMO POR CLASSIFICAÇÃO DE SCORE - TESTE FINAL OOT")
-    print("=" * 100)
-    print(resumo_faixas_teste.to_string(index=False))
-
-    print("\n" + "=" * 100)
-    print("TABELA FINAL DE SAÍDA - SNAPSHOT MAIS RECENTE")
-    print("=" * 100)
-    print(
-        tabela_final.head(config.quantidade_linhas_exibir_tabela_final).to_string(index=False)
-    )
-
-    print("\n" + "=" * 100)
-    print("ATUALIZAÇÃO DA DIMCLASSIFICACACAOCLIENTES")
-    print("=" * 100)
-    resumo_atualizacao_dim = atualizar_dim_classificacao_clientes_com_score(
-        engine_sql=engine_sql,
-        resultado_atual=resultado_atual,
-    )
-    print(f"Linhas no snapshot atual: {resumo_atualizacao_dim['linhas_resultado_snapshot']:,}")
-    print(f"Linhas enviadas para atualização: {resumo_atualizacao_dim['linhas_enviadas_atualizacao']:,}")
-    print(f"IDEmpresa encontrados no destino: {resumo_atualizacao_dim['linhas_encontradas_destino']:,}")
-    print(f"Linhas efetivamente atualizadas: {resumo_atualizacao_dim['linhas_atualizadas']:,}")
-    print(f"IDEmpresa não encontrados no destino:{resumo_atualizacao_dim['linhas_nao_encontradas_destino']:,}")
-
-    payload_metricas = {
-        "configuracao": {
-            "quantidade_meses_validacao": config.quantidade_meses_validacao,
-            "quantidade_meses_teste": config.quantidade_meses_teste,
-            "quantidade_minima_meses_treino_walk_forward": config.quantidade_minima_meses_treino_walk_forward,
-            "quantidade_maxima_folds_walk_forward": config.quantidade_maxima_folds_walk_forward,
-            "iteracoes_catboost": config.iteracoes_catboost,
-            "iteracoes_finais_modelo": iteracoes_finais,
-            "learning_rate_catboost": config.learning_rate_catboost,
-            "profundidade_catboost": config.profundidade_catboost,
-            "l2_leaf_reg_catboost": config.l2_leaf_reg_catboost,
-            "random_strength_catboost": config.random_strength_catboost,
-            "bagging_temperature_catboost": config.bagging_temperature_catboost,
-            "early_stopping_rounds_catboost": config.early_stopping_rounds_catboost,
-            "semente_aleatoria": config.semente_aleatoria,
-            "usar_pesos_balanceamento": config.usar_pesos_balanceamento,
-        },
-        "resumo_dataset": {
-            "linhas_total": int(df.height),
-            "linhas_desenvolvimento": int(df_desenvolvimento.height),
-            "linhas_teste_final_oot": int(df_teste.height),
+        metadados_preparacao = {
+            "colunas_features": colunas_features,
+            "colunas_numericas": colunas_numericas,
+            "colunas_categoricas": colunas_categoricas,
+            "colunas_excluir": colunas_excluir,
+            "meses_ordenados": [str(mes) for mes in meses_ordenados],
+            "linhas_antes_limpeza": linhas_antes,
+            "linhas_apos_limpeza": int(df.height),
             "quantidade_features": int(len(colunas_features)),
             "quantidade_features_numericas": int(len(colunas_numericas)),
             "quantidade_features_categoricas": int(len(colunas_categoricas)),
-            "quantidade_folds_walk_forward": int(len(df_resumo_folds_walk_forward)),
-        },
-        "periodos": {
-            "inicio_desenvolvimento": str(meses_desenvolvimento[0]),
-            "fim_desenvolvimento": str(meses_desenvolvimento[-1]),
-            "inicio_teste_final_oot": str(meses_teste[0]),
-            "fim_teste_final_oot": str(meses_teste[-1]),
-            "mes_snapshot_mais_recente": str(mes_mais_recente),
-        },
-        "walk_forward": {
-            "melhores_iteracoes_por_fold": [int(valor) for valor in melhores_iteracoes],
-            "media_auc_roc_folds": float(df_resumo_folds_walk_forward["AUC_ROC"].mean()),
-            "media_auc_pr_folds": float(df_resumo_folds_walk_forward["AUC_PR"].mean()),
-            "media_logloss_folds": float(df_resumo_folds_walk_forward["LogLoss"].mean()),
-            "media_brier_folds": float(df_resumo_folds_walk_forward["BrierScore"].mean()),
-            "media_ks_folds": float(df_resumo_folds_walk_forward["KS"].mean()),
-        },
-        "metricas_desenvolvimento": metricas_desenvolvimento,
-        "metricas_top_desenvolvimento": metricas_top_desenvolvimento,
-        "metricas_walk_forward_oof": metricas_walk_forward,
-        "metricas_top_walk_forward_oof": metricas_top_walk_forward,
-        "metricas_teste_final_oot": metricas_teste,
-        "metricas_top_teste_final_oot": metricas_top_teste,
-        "colunas_tabela_final": list(tabela_final.columns),
-        "quantidade_linhas_tabela_final": int(len(tabela_final)),
-        "atualizacao_dim_classificacao_clientes": resumo_atualizacao_dim,
-    }
+        }
+        salvar_json(config.caminho_metadados_preparacao_json, metadados_preparacao)
 
-    salvar_resultados(
-        resultado_historico=resultado_historico,
-        resultado_atual=resultado_atual,
-        tabela_final=tabela_final,
-        df_importancias=df_importancias,
-        resumo_faixas=resumo_faixas_teste,
-        payload_metricas=payload_metricas,
-        df_resumo_folds_walk_forward=df_resumo_folds_walk_forward,
-        df_predicoes_walk_forward=df_predicoes_walk_forward,
-        config=config,
+        resumo.status = "SUCCESS"
+        resumo.linhas_lidas = linhas_antes
+        resumo.linhas_inseridas = int(df.height)
+        resumo.linhas_descartadas = int(max(linhas_antes - df.height, 0))
+        resumo.metricas_extras["quantidade_features"] = int(len(colunas_features))
+        resumo.metricas_extras["quantidade_features_numericas"] = int(len(colunas_numericas))
+        resumo.metricas_extras["quantidade_features_categoricas"] = int(len(colunas_categoricas))
+        resumo.metricas_extras["mes_inicial"] = str(meses_ordenados[0]) if meses_ordenados else None
+        resumo.metricas_extras["mes_final"] = str(meses_ordenados[-1]) if meses_ordenados else None
+
+        adicionar_validacao(
+            resumo,
+            nome="features_disponiveis",
+            status="ok",
+            detalhe=(
+                f"Foram mantidas {len(colunas_features):,} features, sendo "
+                f"{len(colunas_numericas):,} numéricas e {len(colunas_categoricas):,} categóricas."
+            ),
+        )
+        adicionar_validacao(
+            resumo,
+            nome="meses_suficientes_para_split_temporal",
+            status="ok",
+            detalhe=f"Foram identificados {len(meses_ordenados):,} meses únicos ordenados para modelagem temporal.",
+        )
+
+        colunas_amostra = [
+            config.nome_coluna_mes_ref,
+            config.nome_coluna_alvo,
+            "IDEmpresa",
+            "RazaoSocial",
+            "ClasseValor",
+            "DiasDesdeUltimaCompra",
+        ]
+        definir_amostra(
+            resumo,
+            obter_amostra_polars(
+                df,
+                limite=config.quantidade_linhas_amostra_auditoria,
+                colunas=colunas_amostra,
+            ),
+            limite=config.quantidade_linhas_amostra_auditoria,
+        )
+        publicar_resumo_auditoria(resumo)
+
+        print(f"Linhas antes da limpeza: {linhas_antes:,}")
+        print(f"Linhas após limpeza: {df.height:,}")
+        print(f"Features totais: {len(colunas_features):,}")
+        print(f"Features numéricas: {len(colunas_numericas):,}")
+        print(f"Features categóricas: {len(colunas_categoricas):,}")
+        print(f"Dataset preparado salvo em: {config.caminho_dataset_preparado_parquet}")
+        print(f"Metadados salvos em: {config.caminho_metadados_preparacao_json}")
+
+        return {
+            "linhas_preparadas": int(df.height),
+            "quantidade_features": int(len(colunas_features)),
+            "quantidade_features_numericas": int(len(colunas_numericas)),
+            "quantidade_features_categoricas": int(len(colunas_categoricas)),
+            "caminho_dataset_preparado_parquet": str(config.caminho_dataset_preparado_parquet),
+            "caminho_metadados_preparacao_json": str(config.caminho_metadados_preparacao_json),
+        }
+
+    except Exception as erro:
+        resumo.status = "FAILED"
+        registrar_erro_no_resumo(resumo, erro)
+        publicar_resumo_auditoria(resumo)
+        raise
+
+
+def executar_etapa_treino_validacao_score() -> dict[str, Any]:
+    """Executa walk-forward, treina modelo final, gera scores e salva artefatos."""
+    config = Configuracao()
+    garantir_pastas_saida(config)
+
+    resumo = criar_resumo_auditoria(
+        nome_amigavel="Treinar modelo, validar e gerar scores",
+        descricao_etapa=(
+            "Carrega o dataset preparado, executa walk-forward temporal, escolhe a iteração final, "
+            "treina o CatBoost final, gera scores históricos e do snapshot atual, produz métricas, "
+            "faixas, importâncias e grava todos os artefatos finais do pipeline."
+        ),
+        origem_dados=str(config.caminho_dataset_preparado_parquet),
+        destino_dados=str(config.caminho_saida_score_atual_csv),
     )
 
-    print("\n" + "=" * 100)
-    print("ARQUIVOS GERADOS")
-    print("=" * 100)
-    print(f"Histórico scored: {config.caminho_saida_score_historico_csv}")
-    print(f"Snapshot atual: {config.caminho_saida_score_atual_csv}")
-    print(f"Tabela final: {config.caminho_saida_tabela_final_csv}")
-    print(f"Métricas JSON: {config.caminho_saida_metricas_json}")
-    print(f"Importâncias: {config.caminho_saida_importancias_csv}")
-    print(f"Faixas de score: {config.caminho_saida_resumo_faixas_csv}")
-    print(f"Resumo folds walk-forward: {config.caminho_saida_walk_forward_folds_csv}")
-    print(f"Predições walk-forward OOF: {config.caminho_saida_walk_forward_predicoes_csv}")
+    engine_sql = criar_engine_sql(config)
 
-    print("\n" + "=" * 100)
-    print("FIM DO PIPELINE")
-    print("=" * 100)
+    try:
+        resumo.status = "RUNNING"
+        publicar_resumo_auditoria(resumo)
+
+        print("=" * 100)
+        print("ETAPA 3 - TREINO, VALIDAÇÃO E GERAÇÃO DE SCORES")
+        print("=" * 100)
+
+        df = carregar_polars_parquet(config.caminho_dataset_preparado_parquet)
+        metadados_preparacao = carregar_json(config.caminho_metadados_preparacao_json)
+
+        colunas_features = metadados_preparacao["colunas_features"]
+        colunas_numericas = metadados_preparacao["colunas_numericas"]
+        colunas_categoricas = metadados_preparacao["colunas_categoricas"]
+
+        print("\nResumo das features:")
+        print(f"Total de features:{len(colunas_features):,}")
+        print(f"Features numéricas:{len(colunas_numericas):,}")
+        print(f"Features categóricas: {len(colunas_categoricas):,}")
+
+        print("\nSeparando desenvolvimento e teste final OOT por tempo...")
+        df_desenvolvimento, df_teste, meses_desenvolvimento, meses_teste = separar_desenvolvimento_teste_temporal(df, config)
+
+        imprimir_resumo_dataset_walk_forward(
+            df_total=df,
+            df_desenvolvimento=df_desenvolvimento,
+            df_teste=df_teste,
+            meses_desenvolvimento=meses_desenvolvimento,
+            meses_teste=meses_teste,
+            config=config,
+        )
+
+        (
+            df_resumo_folds_walk_forward,
+            df_predicoes_walk_forward,
+            melhores_iteracoes,
+        ) = executar_walk_forward_validation(
+            df_desenvolvimento=df_desenvolvimento,
+            meses_desenvolvimento=meses_desenvolvimento,
+            colunas_features=colunas_features,
+            colunas_categoricas=colunas_categoricas,
+            config=config,
+        )
+
+        imprimir_resumo_walk_forward_folds(df_resumo_folds_walk_forward)
+
+        iteracoes_finais = escolher_iteracoes_finais(melhores_iteracoes, config)
+
+        print("\n" + "=" * 100)
+        print("DEFINIÇÃO DO MODELO FINAL")
+        print("=" * 100)
+        print(f"Melhores iterações por fold: {melhores_iteracoes}")
+        print(f"Iterações finais escolhidas (mediana dos folds): {iteracoes_finais}")
+
+        print("\nTreinando modelo final em todo o desenvolvimento...")
+        modelo_final, _ = treinar_modelo_final_catboost(
+            df_treino_final=df_desenvolvimento,
+            colunas_features=colunas_features,
+            colunas_categoricas=colunas_categoricas,
+            config=config,
+            iteracoes_finais=iteracoes_finais,
+            verbose=100,
+        )
+
+        print("\nGerando previsões do modelo final...")
+        _, prob_desenvolvimento = prever_probabilidade(
+            modelo=modelo_final,
+            df=df_desenvolvimento,
+            colunas_features=colunas_features,
+            colunas_categoricas=colunas_categoricas,
+            config=config,
+        )
+
+        _, prob_teste = prever_probabilidade(
+            modelo=modelo_final,
+            df=df_teste,
+            colunas_features=colunas_features,
+            colunas_categoricas=colunas_categoricas,
+            config=config,
+        )
+
+        y_desenvolvimento = obter_y_numpy(df_desenvolvimento, config.nome_coluna_alvo)
+        y_teste = obter_y_numpy(df_teste, config.nome_coluna_alvo)
+
+        y_walk_forward = pd.to_numeric(
+            df_predicoes_walk_forward[config.nome_coluna_alvo],
+            errors="coerce",
+        ).fillna(0).astype(int).to_numpy()
+
+        prob_walk_forward = pd.to_numeric(
+            df_predicoes_walk_forward["ProbabilidadeContratacao"],
+            errors="coerce",
+        ).fillna(0.0).to_numpy()
+
+        metricas_desenvolvimento = calcular_metricas_classificacao(y_desenvolvimento, prob_desenvolvimento)
+        metricas_walk_forward = calcular_metricas_classificacao(y_walk_forward, prob_walk_forward)
+        metricas_teste = calcular_metricas_classificacao(y_teste, prob_teste)
+
+        metricas_top_desenvolvimento = calcular_metricas_top_decile(y_desenvolvimento, prob_desenvolvimento)
+        metricas_top_walk_forward = calcular_metricas_top_decile(y_walk_forward, prob_walk_forward)
+        metricas_top_teste = calcular_metricas_top_decile(y_teste, prob_teste)
+
+        imprimir_metricas(
+            "Desenvolvimento (In-Sample)",
+            metricas_desenvolvimento,
+            metricas_top_desenvolvimento,
+        )
+        imprimir_metricas(
+            "Walk-Forward OOF",
+            metricas_walk_forward,
+            metricas_top_walk_forward,
+        )
+        imprimir_metricas(
+            "Teste Final OOT",
+            metricas_teste,
+            metricas_top_teste,
+        )
+
+        print("\nMontando score histórico completo com modelo final...")
+        _, prob_total = prever_probabilidade(
+            modelo=modelo_final,
+            df=df,
+            colunas_features=colunas_features,
+            colunas_categoricas=colunas_categoricas,
+            config=config,
+        )
+
+        resultado_historico = montar_dataframe_resultado(
+            df_original=df,
+            probabilidades=prob_total,
+            config=config,
+        )
+
+        if config.nome_coluna_mes_ref not in resultado_historico.columns:
+            raise ValueError("A coluna MesRef não está disponível no resultado final.")
+
+        mes_mais_recente = resultado_historico[config.nome_coluna_mes_ref].max()
+        resultado_atual = resultado_historico.loc[
+            resultado_historico[config.nome_coluna_mes_ref] == mes_mais_recente
+        ].copy()
+
+        resultado_atual = resultado_atual.sort_values(
+            ["ScoreCliente", "ProbabilidadeContratacao"],
+            ascending=[False, False],
+        )
+
+        meses_teste_unicos = df_teste.get_column(config.nome_coluna_mes_ref).unique().to_list()
+
+        resumo_faixas_teste = avaliar_por_faixa_score(
+            df_resultado=resultado_historico.loc[
+                resultado_historico[config.nome_coluna_mes_ref].isin(meses_teste_unicos)
+            ].copy(),
+            nome_coluna_alvo=config.nome_coluna_alvo,
+        )
+
+        df_importancias = extrair_importancias(modelo_final, colunas_features)
+        tabela_final = montar_tabela_final_exibicao(resultado_atual)
+
+        print("\n" + "=" * 100)
+        print("TOP 25 FEATURES MAIS IMPORTANTES")
+        print("=" * 100)
+        print(df_importancias.head(25).to_string(index=False))
+
+        print("\n" + "=" * 100)
+        print("RESUMO POR CLASSIFICAÇÃO DE SCORE - TESTE FINAL OOT")
+        print("=" * 100)
+        print(resumo_faixas_teste.to_string(index=False))
+
+        print("\n" + "=" * 100)
+        print("TABELA FINAL DE SAÍDA - SNAPSHOT MAIS RECENTE")
+        print("=" * 100)
+        print(
+            tabela_final.head(config.quantidade_linhas_exibir_tabela_final).to_string(index=False)
+        )
+
+        payload_metricas = {
+            "configuracao": {
+                "quantidade_meses_validacao": config.quantidade_meses_validacao,
+                "quantidade_meses_teste": config.quantidade_meses_teste,
+                "quantidade_minima_meses_treino_walk_forward": config.quantidade_minima_meses_treino_walk_forward,
+                "quantidade_maxima_folds_walk_forward": config.quantidade_maxima_folds_walk_forward,
+                "iteracoes_catboost": config.iteracoes_catboost,
+                "iteracoes_finais_modelo": iteracoes_finais,
+                "learning_rate_catboost": config.learning_rate_catboost,
+                "profundidade_catboost": config.profundidade_catboost,
+                "l2_leaf_reg_catboost": config.l2_leaf_reg_catboost,
+                "random_strength_catboost": config.random_strength_catboost,
+                "bagging_temperature_catboost": config.bagging_temperature_catboost,
+                "early_stopping_rounds_catboost": config.early_stopping_rounds_catboost,
+                "semente_aleatoria": config.semente_aleatoria,
+                "usar_pesos_balanceamento": config.usar_pesos_balanceamento,
+            },
+            "resumo_dataset": {
+                "linhas_total": int(df.height),
+                "linhas_desenvolvimento": int(df_desenvolvimento.height),
+                "linhas_teste_final_oot": int(df_teste.height),
+                "quantidade_features": int(len(colunas_features)),
+                "quantidade_features_numericas": int(len(colunas_numericas)),
+                "quantidade_features_categoricas": int(len(colunas_categoricas)),
+                "quantidade_folds_walk_forward": int(len(df_resumo_folds_walk_forward)),
+            },
+            "periodos": {
+                "inicio_desenvolvimento": str(meses_desenvolvimento[0]),
+                "fim_desenvolvimento": str(meses_desenvolvimento[-1]),
+                "inicio_teste_final_oot": str(meses_teste[0]),
+                "fim_teste_final_oot": str(meses_teste[-1]),
+                "mes_snapshot_mais_recente": str(mes_mais_recente),
+            },
+            "walk_forward": {
+                "melhores_iteracoes_por_fold": [int(valor) for valor in melhores_iteracoes],
+                "media_auc_roc_folds": float(df_resumo_folds_walk_forward["AUC_ROC"].mean()),
+                "media_auc_pr_folds": float(df_resumo_folds_walk_forward["AUC_PR"].mean()),
+                "media_logloss_folds": float(df_resumo_folds_walk_forward["LogLoss"].mean()),
+                "media_brier_folds": float(df_resumo_folds_walk_forward["BrierScore"].mean()),
+                "media_ks_folds": float(df_resumo_folds_walk_forward["KS"].mean()),
+            },
+            "metricas_desenvolvimento": metricas_desenvolvimento,
+            "metricas_top_desenvolvimento": metricas_top_desenvolvimento,
+            "metricas_walk_forward_oof": metricas_walk_forward,
+            "metricas_top_walk_forward_oof": metricas_top_walk_forward,
+            "metricas_teste_final_oot": metricas_teste,
+            "metricas_top_teste_final_oot": metricas_top_teste,
+            "colunas_tabela_final": list(tabela_final.columns),
+            "quantidade_linhas_tabela_final": int(len(tabela_final)),
+            "atualizacao_dim_classificacao_clientes": None,
+        }
+
+        salvar_resultados(
+            resultado_historico=resultado_historico,
+            resultado_atual=resultado_atual,
+            tabela_final=tabela_final,
+            df_importancias=df_importancias,
+            resumo_faixas=resumo_faixas_teste,
+            payload_metricas=payload_metricas,
+            df_resumo_folds_walk_forward=df_resumo_folds_walk_forward,
+            df_predicoes_walk_forward=df_predicoes_walk_forward,
+            config=config,
+        )
+
+        resumo_treino = {
+            "mes_snapshot_mais_recente": str(mes_mais_recente),
+            "iteracoes_finais": int(iteracoes_finais),
+            "melhores_iteracoes": [int(valor) for valor in melhores_iteracoes],
+            "metricas_walk_forward": metricas_walk_forward,
+            "metricas_teste_final_oot": metricas_teste,
+            "caminho_score_historico": str(config.caminho_saida_score_historico_csv),
+            "caminho_score_atual": str(config.caminho_saida_score_atual_csv),
+            "caminho_tabela_final": str(config.caminho_saida_tabela_final_csv),
+        }
+        salvar_json(config.caminho_resumo_treino_json, resumo_treino)
+        salvar_json(config.caminho_saida_payload_metricas_json, payload_metricas)
+
+        resumo.status = "SUCCESS"
+        resumo.linhas_lidas = int(df.height)
+        resumo.linhas_inseridas = int(len(resultado_historico))
+        resumo.linhas_atualizadas = int(len(resultado_atual))
+        resumo.metricas_extras["iteracoes_finais"] = int(iteracoes_finais)
+        resumo.metricas_extras["quantidade_folds_walk_forward"] = int(len(df_resumo_folds_walk_forward))
+        resumo.metricas_extras["auc_walk_forward"] = float(metricas_walk_forward["auc_roc"])
+        resumo.metricas_extras["auc_teste_final_oot"] = float(metricas_teste["auc_roc"])
+        resumo.metricas_extras["mes_snapshot_mais_recente"] = str(mes_mais_recente)
+
+        adicionar_validacao(
+            resumo,
+            nome="walk_forward_executado",
+            status="ok",
+            detalhe=f"Foram executados {len(df_resumo_folds_walk_forward):,} folds walk-forward.",
+        )
+        adicionar_validacao(
+            resumo,
+            nome="snapshot_atual_gerado",
+            status="ok",
+            detalhe=f"O snapshot atual gerou {len(resultado_atual):,} linhas scored no mês {mes_mais_recente}.",
+        )
+        adicionar_validacao(
+            resumo,
+            nome="artefatos_salvos",
+            status="ok",
+            detalhe="Histórico, snapshot atual, tabela final, métricas, importâncias e outputs walk-forward foram gravados em disco.",
+        )
+        adicionar_observacao(
+            resumo,
+            "A amostra exibida nesta etapa corresponde ao snapshot mais recente já scoreado, ordenado pelos maiores scores.",
+        )
+
+        colunas_amostra_score = [
+            "IDEmpresa",
+            "RazaoSocial",
+            "ClasseValor",
+            "ClusterGrupoCliente",
+            "ScoreCliente",
+            "ProbabilidadeContratacao",
+            "ClassificacaoScore",
+        ]
+        definir_amostra(
+            resumo,
+            obter_amostra_pandas(
+                resultado_atual,
+                limite=config.quantidade_linhas_amostra_auditoria,
+                colunas=colunas_amostra_score,
+            ),
+            limite=config.quantidade_linhas_amostra_auditoria,
+        )
+        publicar_resumo_auditoria(resumo)
+
+        print("\n" + "=" * 100)
+        print("ARQUIVOS GERADOS")
+        print("=" * 100)
+        print(f"Histórico scored: {config.caminho_saida_score_historico_csv}")
+        print(f"Snapshot atual: {config.caminho_saida_score_atual_csv}")
+        print(f"Tabela final: {config.caminho_saida_tabela_final_csv}")
+        print(f"Métricas JSON: {config.caminho_saida_metricas_json}")
+        print(f"Importâncias: {config.caminho_saida_importancias_csv}")
+        print(f"Faixas de score: {config.caminho_saida_resumo_faixas_csv}")
+        print(f"Resumo folds walk-forward: {config.caminho_saida_walk_forward_folds_csv}")
+        print(f"Predições walk-forward OOF: {config.caminho_saida_walk_forward_predicoes_csv}")
+
+        return {
+            "linhas_total": int(df.height),
+            "linhas_snapshot_atual": int(len(resultado_atual)),
+            "iteracoes_finais": int(iteracoes_finais),
+            "mes_snapshot_mais_recente": str(mes_mais_recente),
+            "caminho_score_atual": str(config.caminho_saida_score_atual_csv),
+            "caminho_resumo_treino_json": str(config.caminho_resumo_treino_json),
+        }
+
+    except Exception as erro:
+        resumo.status = "FAILED"
+        registrar_erro_no_resumo(resumo, erro)
+        publicar_resumo_auditoria(resumo)
+        raise
+
+    finally:
+        engine_sql.dispose()
+
+
+def executar_etapa_atualizacao_dim() -> dict[str, Any]:
+    """Atualiza a dimensão final no SQL Server usando o snapshot scoreado mais recente."""
+    config = Configuracao()
+    garantir_pastas_saida(config)
+
+    resumo = criar_resumo_auditoria(
+        nome_amigavel="Atualizar DimClassificacacaoClientes",
+        descricao_etapa=(
+            "Carrega o snapshot atual scoreado e atualiza os campos ScorePerfilEmpresa "
+            "e ClassificacaoPerfilEmpresa na tabela Integracao.Silver.DimClassificacacaoClientes."
+        ),
+        origem_dados=str(config.caminho_saida_score_atual_csv),
+        destino_dados="[Integracao].[Silver].[DimClassificacacaoClientes]",
+    )
+
+    engine_sql = criar_engine_sql(config)
+
+    try:
+        resumo.status = "RUNNING"
+        resumo.metricas_extras["conn_id_sql"] = config.conn_id_sql
+        publicar_resumo_auditoria(resumo)
+
+        print("=" * 100)
+        print("ETAPA 4 - ATUALIZAÇÃO DA DIMCLASSIFICACACAOCLIENTES")
+        print("=" * 100)
+
+        if not config.caminho_saida_score_atual_csv.exists():
+            raise FileNotFoundError(
+                f"Snapshot atual não encontrado para atualização da dimensão: {config.caminho_saida_score_atual_csv}"
+            )
+
+        resultado_atual = pd.read_csv(config.caminho_saida_score_atual_csv, encoding="utf-8-sig")
+
+        resumo_atualizacao_dim = atualizar_dim_classificacao_clientes_com_score(
+            engine_sql=engine_sql,
+            resultado_atual=resultado_atual,
+        )
+
+        payload_metricas = carregar_json(config.caminho_saida_payload_metricas_json)
+        payload_metricas["atualizacao_dim_classificacao_clientes"] = resumo_atualizacao_dim
+        salvar_json(config.caminho_saida_payload_metricas_json, payload_metricas)
+        salvar_json(config.caminho_saida_metricas_json, payload_metricas)
+
+        resumo.status = "SUCCESS"
+        resumo.linhas_lidas = int(resumo_atualizacao_dim["linhas_resultado_snapshot"])
+        resumo.linhas_inseridas = int(resumo_atualizacao_dim["linhas_enviadas_atualizacao"])
+        resumo.linhas_atualizadas = int(resumo_atualizacao_dim["linhas_atualizadas"])
+        resumo.linhas_descartadas = int(resumo_atualizacao_dim["linhas_nao_encontradas_destino"])
+
+        adicionar_validacao(
+            resumo,
+            nome="snapshot_para_atualizacao_disponivel",
+            status="ok",
+            detalhe=f"Foram carregadas {resumo_atualizacao_dim['linhas_resultado_snapshot']:,} linhas do snapshot atual.",
+        )
+        adicionar_validacao(
+            resumo,
+            nome="atualizacao_dim_executada",
+            status="ok",
+            detalhe=(
+                f"Foram atualizadas {resumo_atualizacao_dim['linhas_atualizadas']:,} linhas na "
+                "DimClassificacacaoClientes."
+            ),
+        )
+        adicionar_observacao(
+            resumo,
+            "A amostra exibida nesta etapa representa exatamente os registros enviados para atualização da dimensão.",
+        )
+
+        df_update = preparar_dataframe_atualizacao_perfil_empresa(resultado_atual)
+
+        definir_amostra(
+            resumo,
+            obter_amostra_pandas(
+                df_update,
+                limite=config.quantidade_linhas_amostra_auditoria,
+                colunas=["IDEmpresa", "ScorePerfilEmpresa", "ClassificacaoPerfilEmpresa"],
+            ),
+            limite=config.quantidade_linhas_amostra_auditoria,
+        )
+        publicar_resumo_auditoria(resumo)
+
+        print(f"Linhas no snapshot atual: {resumo_atualizacao_dim['linhas_resultado_snapshot']:,}")
+        print(f"Linhas enviadas para atualização: {resumo_atualizacao_dim['linhas_enviadas_atualizacao']:,}")
+        print(f"IDEmpresa encontrados no destino: {resumo_atualizacao_dim['linhas_encontradas_destino']:,}")
+        print(f"Linhas efetivamente atualizadas: {resumo_atualizacao_dim['linhas_atualizadas']:,}")
+        print(f"IDEmpresa não encontrados no destino:{resumo_atualizacao_dim['linhas_nao_encontradas_destino']:,}")
+
+        return resumo_atualizacao_dim
+
+    except Exception as erro:
+        resumo.status = "FAILED"
+        registrar_erro_no_resumo(resumo, erro)
+        publicar_resumo_auditoria(resumo)
+        raise
+
+    finally:
+        engine_sql.dispose()
 
 
 @dag(
     dag_id="pipeline_score_empresas",
-    description="Pipeline Score Empresas",
+    description="Pipeline Score Empresas com auditoria por etapa",
     schedule="0 10 * * 1-6",
     start_date=pendulum.datetime(2026, 3, 18, 10, 0, tz="America/Sao_Paulo"),
     catchup=False,
     tags=["Euromidia", "MachineLearning", "Comercial", "Empresas"],
+    max_active_runs=1,
 )
 def pipeline_score_empresas():
-    @task(task_id="executar_pipeline_score_empresas")
-    def tarefa_executar_pipeline() -> None:
-        executar_pipeline()
+    """
+    ### Pipeline de Score de Empresas com auditoria por etapa
 
-    tarefa_executar_pipeline()
+    Etapas:
+    1. Extrair dataset bruto do SQL Server
+    2. Preparar dataset de modelagem
+    3. Treinar, validar e gerar scores
+    4. Atualizar a DimClassificacacaoClientes
+
+    Observação:
+    - Cada task publica resumo estruturado de auditoria
+    - Cada task publica amostra própria, que fica visível no painel
+    - Os artefatos pesados são trocados por arquivos intermediários, e não por XCom
+    - A conexão com SQL Server usa o HookSqlServer do projeto
+    """
+
+    @task(
+        task_id="extrair_dataset_bruto_sql",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        execution_timeout=timedelta(hours=2),
+    )
+    def tarefa_extrair_dataset_bruto_sql() -> dict[str, Any]:
+        return executar_etapa_extracao_sql()
+
+    @task(
+        task_id="preparar_dataset_modelagem",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        execution_timeout=timedelta(hours=2),
+    )
+    def tarefa_preparar_dataset_modelagem() -> dict[str, Any]:
+        return executar_etapa_preparacao_modelagem()
+
+    @task(
+        task_id="treinar_validar_gerar_scores",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        execution_timeout=timedelta(hours=6),
+    )
+    def tarefa_treinar_validar_gerar_scores() -> dict[str, Any]:
+        return executar_etapa_treino_validacao_score()
+
+    @task(
+        task_id="atualizar_dim_classificacao_clientes",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        execution_timeout=timedelta(hours=2),
+    )
+    def tarefa_atualizar_dim_classificacao_clientes() -> dict[str, Any]:
+        return executar_etapa_atualizacao_dim()
+
+    etapa_1 = tarefa_extrair_dataset_bruto_sql()
+    etapa_2 = tarefa_preparar_dataset_modelagem()
+    etapa_3 = tarefa_treinar_validar_gerar_scores()
+    etapa_4 = tarefa_atualizar_dim_classificacao_clientes()
+
+    etapa_1 >> etapa_2 >> etapa_3 >> etapa_4
 
 
 pipeline_score_empresas_dag = pipeline_score_empresas()

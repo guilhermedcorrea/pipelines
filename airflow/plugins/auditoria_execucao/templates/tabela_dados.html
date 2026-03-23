@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Visualização da Tabela</title>
+    <link rel="stylesheet" href="/auditoria-execucao/static/auditoria.css" />
+</head>
+<body>
+    <div class="pagina">
+        <header class="topo">
+            <div>
+                <a class="voltar" href="javascript:history.back()">← Voltar</a>
+                <h1>Visualização da Tabela</h1>
+                <p class="subtitulo texto-monaco">{{ nome_qualificado }}</p>
+            </div>
+
+            <div class="lado-topo">
+                <span class="badge badge-running">Tabela SQL</span>
+            </div>
+        </header>
+
+        <section class="cards-resumo">
+            <article class="card">
+                <span class="rotulo">Conexão</span>
+                <strong>{{ conexao_id }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Schema</span>
+                <strong>{{ schema }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Tabela</span>
+                <strong>{{ tabela }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Total de linhas</span>
+                <strong>{{ total_linhas }}</strong>
+            </article>
+        </section>
+
+        <section class="painel-filtros">
+            <form method="get" class="form-filtros">
+                <input type="hidden" name="conexao_id" value="{{ conexao_id }}" />
+                <input type="hidden" name="schema" value="{{ schema }}" />
+                <input type="hidden" name="tabela" value="{{ tabela }}" />
+
+                <label>
+                    <span>Página</span>
+                    <input
+                        type="number"
+                        name="pagina"
+                        value="{{ pagina }}"
+                        min="1"
+                        max="{{ total_paginas }}"
+                    />
+                </label>
+
+                <label>
+                    <span>Tamanho da página</span>
+                    <select name="tamanho_pagina">
+                        <option value="20" {% if tamanho_pagina == 20 %}selected{% endif %}>20</option>
+                        <option value="50" {% if tamanho_pagina == 50 %}selected{% endif %}>50</option>
+                        <option value="100" {% if tamanho_pagina == 100 %}selected{% endif %}>100</option>
+                        <option value="200" {% if tamanho_pagina == 200 %}selected{% endif %}>200</option>
+                    </select>
+                </label>
+
+                <button type="submit">Atualizar</button>
+            </form>
+        </section>
+
+        <section class="cards-resumo cards-resumo-secundario">
+            <article class="card">
+                <span class="rotulo">Página atual</span>
+                <strong>{{ pagina }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Total de páginas</span>
+                <strong>{{ total_paginas }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Linhas nesta página</span>
+                <strong>{{ linhas|length }}</strong>
+            </article>
+            <article class="card">
+                <span class="rotulo">Colunas</span>
+                <strong>{{ colunas|length }}</strong>
+            </article>
+        </section>
+
+        <section class="paginacao-bloco">
+            <div class="paginacao-acoes">
+                {% if pagina_anterior %}
+                    <a
+                        class="botao-link"
+                        href="/auditoria-execucao/tabela?conexao_id={{ conexao_id }}&schema={{ schema }}&tabela={{ tabela }}&pagina={{ pagina_anterior }}&tamanho_pagina={{ tamanho_pagina }}"
+                    >
+                        ← Página anterior
+                    </a>
+                {% else %}
+                    <span class="botao-link botao-link-desabilitado">← Página anterior</span>
+                {% endif %}
+
+                {% if proxima_pagina %}
+                    <a
+                        class="botao-link"
+                        href="/auditoria-execucao/tabela?conexao_id={{ conexao_id }}&schema={{ schema }}&tabela={{ tabela }}&pagina={{ proxima_pagina }}&tamanho_pagina={{ tamanho_pagina }}"
+                    >
+                        Próxima página →
+                    </a>
+                {% else %}
+                    <span class="botao-link botao-link-desabilitado">Próxima página →</span>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="bloco-tabela">
+            <table class="tabela">
+                <thead>
+                    <tr>
+                        {% for coluna in colunas %}
+                        <th>{{ coluna }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if linhas %}
+                        {% for linha in linhas %}
+                        <tr>
+                            {% for coluna in colunas %}
+                            <td>
+                                {% set valor = linha.get(coluna) %}
+                                {% if valor is none or valor == "" %}
+                                    <span class="vazio">-</span>
+                                {% else %}
+                                    {{ valor }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="{{ colunas|length if colunas else 1 }}" class="vazio">
+                                Nenhuma linha encontrada para esta página.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </section>
+    </div>
+</body>
+</html>

@@ -1,0 +1,133 @@
+.phm-app {
+  min-height: 100vh;
+  padding: var(--phm-space-6);
+}
+
+.phm-container {
+  width: 100%;
+  max-width: var(--phm-container-max);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--phm-space-6);
+}
+
+.phm-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--phm-space-4);
+}
+
+.phm-topo__titulo-bloco {
+  display: flex;
+  align-items: center;
+  gap: var(--phm-space-4);
+}
+
+.phm-topo__logo {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(96, 165, 250, 0.1));
+  border: 1px solid var(--phm-border-strong);
+  box-shadow: var(--phm-shadow-sm);
+  font-size: 22px;
+}
+
+.phm-topo__titulo {
+  margin: 0;
+  font-size: clamp(1.5rem, 2vw, 2rem);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.phm-topo__subtitulo {
+  margin: var(--phm-space-2) 0 0;
+  color: var(--phm-text-soft);
+  font-size: 0.98rem;
+  line-height: 1.5;
+}
+
+.phm-grid-indicadores {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--phm-space-4);
+}
+
+.phm-grid-inferior {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: var(--phm-space-4);
+  align-items: start;
+}
+
+.phm-dependencias,
+.phm-alertas,
+.phm-resumo-operacional {
+  display: flex;
+  flex-direction: column;
+  gap: var(--phm-space-3);
+}
+
+.phm-tabela-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.phm-loading,
+.phm-vazio {
+  color: var(--phm-text-soft);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 1280px) {
+  .phm-grid-indicadores {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .phm-grid-inferior {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .phm-app {
+    padding: var(--phm-space-4);
+  }
+
+  .phm-grid-indicadores {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .phm-topo {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .phm-grid-indicadores {
+    grid-template-columns: 1fr;
+  }
+
+  .phm-topo__titulo-bloco {
+    align-items: flex-start;
+  }
+
+  .phm-topo__logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    font-size: 18px;
+  }
+
+  .phm-topo__subtitulo {
+    font-size: 0.92rem;
+  }
+}

@@ -1,0 +1,56 @@
+.grupo-esquerdo-com-logos {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    overflow: visible !important;
+}
+
+.grupo-esquerdo-com-logos > [data-testid="dag-id"] {
+    flex: 0 1 auto !important;
+}
+
+.grupo-esquerdo-com-logos > [data-testid="limited-items-list"] {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+}
+
+.bloco-logos-dag {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+    margin-left: 2px !important;
+}
+
+.logo-pill {
+    display: inline-block !important;
+    flex: 0 0 auto !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    background-size: contain !important;
+    background-color: transparent !important;
+}
+
+.logo-empresa {
+    width: 88px !important;
+    height: 24px !important;
+}
+
+.logo-sistema {
+    width: 72px !important;
+    height: 20px !important;
+}
+
+.separador-logos {
+    display: inline-block !important;
+    width: 1px !important;
+    height: 14px !important;
+    background: rgba(15, 23, 42, 0.18) !important;
+    margin: 0 2px !important;
+    flex: 0 0 auto !important;
+}
