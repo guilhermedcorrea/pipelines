@@ -12,6 +12,11 @@ from airflow.models.dagbag import DagBag
 from airflow.models.xcom import XComModel
 from airflow.utils.session import create_session
 
+try:
+    from hooks.BancodeDados.SqlServer import HookSqlServer
+except Exception:  # pragma: no cover
+    HookSqlServer = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,36 @@ PADRAO_IDENTIFICADOR_SQL = re.compile(
 PADRAO_PROCEDURE_SQL = re.compile(
     r"(?i)\bexec(?:ute)?\s+((?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+)){0,2})"
 )
+
+PADRAO_REFERENCIA_QUALIFICADA_TEXTO = re.compile(
+    r"(?<![\w])((?:\[[^\]]+\]|\w+)(?:\.(?:\[[^\]]+\]|\w+)){1,2})(?![\w])"
+)
+
+PADRAO_IDENTIFICADOR_SIMPLES = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+EXTENSOES_ARQUIVO_BAIXAVEL = {
+    "xlsx",
+    "xls",
+    "csv",
+    "parquet",
+    "json",
+    "txt",
+    "zip",
+    "gz",
+    "pdf",
+    "css",
+    "js",
+    "sql",
+    "yaml",
+    "yml",
+    "xml",
+    "html",
+    "htm",
+    "md",
+    "log",
+    "feather",
+    "orc",
+}
 
 
 def _humanizar_texto(texto: str | None) -> str:
@@ -464,7 +499,6 @@ def _obter_tipo_task(task, ti: TaskInstance | None = None) -> str:
     return _obter_operador_ti(ti)
 
 
-
 def _calcular_tempo_execucao_ti(ti: TaskInstance | None) -> str | None:
     """Eu calculo o tempo de execução da task instance de forma segura."""
     if not ti:
@@ -686,6 +720,260 @@ def _limpar_identificador_sql_bruto(valor: str | None) -> list[str]:
     return partes
 
 
+def _obter_conn_id_sqlserver_padrao() -> str | None:
+    """
+    Eu obtenho o conn_id padrão do hook oficial de SQL Server do projeto.
+
+    Se o hook estiver disponível, eu uso o valor padrão real do construtor.
+    Se o import falhar por ambiente de teste/import circular, eu uso o fallback
+    padrão do próprio projeto.
+    """
+    if HookSqlServer is not None:
+        try:
+            conn_id = str(HookSqlServer().conn_id or "").strip()
+            if conn_id:
+                return conn_id
+        except Exception:
+            logger.exception("Falha ao obter conn_id padrão a partir do HookSqlServer.")
+
+    return "mssql_integracao"
+
+
+def _parece_caminho_arquivo(texto: str | None) -> bool:
+    """Eu identifico se a string parece representar um arquivo e não uma tabela."""
+    valor = str(texto or "").strip()
+    if not valor:
+        return False
+
+    if "/" in valor or "\\" in valor:
+        return True
+
+    nome_final = valor.split("?")[0].split("#")[0].split("/")[-1].split("\\")[-1]
+    if "." not in nome_final:
+        return False
+
+    extensao = nome_final.rsplit(".", 1)[-1].strip().lower()
+    return extensao in EXTENSOES_ARQUIVO_BAIXAVEL
+
+
+def _dividir_segmentos_objeto_textual(texto: str | None) -> list[str]:
+    """Eu separo possíveis múltiplos objetos declarados em uma única string."""
+    valor = str(texto or "").strip()
+    if not valor:
+        return []
+
+    segmentos = re.split(r"\s*(?:\+|;|\||\n|\r)\s*", valor)
+    return [segmento.strip() for segmento in segmentos if segmento and segmento.strip()]
+
+
+def _montar_objeto_referencia_struct(
+    *,
+    tipo: str,
+    nome: str,
+    descricao: str,
+    conn_id: str | None,
+    banco: str | None,
+    schema: str | None,
+    tabela: str | None,
+    caminho_arquivo: str | None,
+    formato: str | None,
+    direcao: str,
+) -> dict[str, Any]:
+    """Eu monto um objeto já no contrato final do front."""
+    tipo_limpo = str(tipo or "Objeto")
+    conn_id_limpo = str(conn_id).strip() if _valor_preenchido(conn_id) else None
+    banco_limpo = str(banco).strip() if _valor_preenchido(banco) else None
+    schema_limpo = str(schema).strip() if _valor_preenchido(schema) else None
+    tabela_limpa = str(tabela).strip() if _valor_preenchido(tabela) else None
+    caminho_limpo = str(caminho_arquivo).strip() if _valor_preenchido(caminho_arquivo) else None
+    formato_limpo = str(formato).strip() if _valor_preenchido(formato) else None
+
+    eh_arquivo = bool(caminho_limpo)
+    eh_tabela = tipo_limpo.lower() == "tabela"
+
+    return {
+        "tipo": tipo_limpo,
+        "nome": str(nome or "-"),
+        "descricao": str(descricao or ""),
+        "conn_id": conn_id_limpo,
+        "banco": banco_limpo,
+        "schema": schema_limpo,
+        "tabela": tabela_limpa,
+        "caminho_arquivo": caminho_limpo,
+        "formato": formato_limpo,
+        "direcao": direcao,
+        "downloadable": eh_arquivo,
+        "visualizavel": bool(eh_tabela and conn_id_limpo and schema_limpo and tabela_limpa),
+    }
+
+
+def _aplicar_conn_id_padrao_em_objeto(
+    objeto: dict[str, Any],
+    conn_id_padrao: str | None,
+) -> dict[str, Any]:
+    """Eu completo conn_id/visualizavel quando a referência é de tabela e faltou a conexão."""
+    resultado = dict(objeto)
+
+    tipo = str(resultado.get("tipo", "") or "").strip().lower()
+    schema = resultado.get("schema")
+    tabela = resultado.get("tabela")
+    caminho_arquivo = resultado.get("caminho_arquivo")
+
+    if tipo == "tabela" and not caminho_arquivo:
+        if not resultado.get("conn_id") and conn_id_padrao and schema and tabela:
+            resultado["conn_id"] = conn_id_padrao
+
+        resultado["visualizavel"] = bool(resultado.get("conn_id") and schema and tabela)
+    else:
+        resultado["visualizavel"] = False
+
+    resultado["downloadable"] = bool(caminho_arquivo)
+    return resultado
+
+
+def _extrair_referencias_textuais_multiplas(
+    texto: str | None,
+    *,
+    direcao: str,
+    tipo_padrao: str,
+    conn_id_padrao: str | None,
+) -> list[dict[str, Any]]:
+    """
+    Eu extraio múltiplas referências quando a auditoria mandou tudo em uma única string.
+
+    Exemplos tratados:
+    - dbo.MovimentacaoFinanceiro + dbo.MovFinWatermark
+    - MovimentacaoFinanceiro + dbo.MovFinWatermark
+    - banco.dbo.TabelaA + dbo.TabelaB
+    """
+    valor = str(texto or "").strip()
+    if not valor:
+        return []
+
+    if _parece_caminho_arquivo(valor):
+        return [
+            _montar_objeto_referencia_struct(
+                tipo="Arquivo",
+                nome=valor,
+                descricao="Arquivo inferido a partir do texto da auditoria.",
+                conn_id=None,
+                banco=None,
+                schema=None,
+                tabela=None,
+                caminho_arquivo=valor,
+                formato=None,
+                direcao=direcao,
+            )
+        ]
+
+    referencias_extraidas: list[dict[str, Any]] = []
+
+    referencias_qualificadas = []
+    for match in PADRAO_REFERENCIA_QUALIFICADA_TEXTO.finditer(valor):
+        bruto = match.group(1)
+        partes = _limpar_identificador_sql_bruto(bruto)
+        if len(partes) in {2, 3}:
+            referencias_qualificadas.append(partes)
+
+    banco_padrao = None
+    schema_padrao = None
+
+    for partes in referencias_qualificadas:
+        if len(partes) == 3:
+            banco_padrao, schema_padrao, _ = partes
+            break
+        if len(partes) == 2 and not schema_padrao:
+            schema_padrao, _ = partes
+
+    for partes in referencias_qualificadas:
+        banco = None
+        schema = None
+        tabela = None
+
+        if len(partes) == 3:
+            banco, schema, tabela = partes
+        elif len(partes) == 2:
+            schema, tabela = partes
+
+        nome = (
+            f"{banco}.{schema}.{tabela}"
+            if banco and schema and tabela
+            else f"{schema}.{tabela}"
+        )
+
+        referencias_extraidas.append(
+            _montar_objeto_referencia_struct(
+                tipo="Tabela",
+                nome=nome,
+                descricao="Tabela inferida a partir do texto da auditoria.",
+                conn_id=conn_id_padrao,
+                banco=banco,
+                schema=schema,
+                tabela=tabela,
+                caminho_arquivo=None,
+                formato=None,
+                direcao=direcao,
+            )
+        )
+
+    for segmento in _dividir_segmentos_objeto_textual(valor):
+        if PADRAO_REFERENCIA_QUALIFICADA_TEXTO.search(segmento):
+            continue
+
+        if _parece_caminho_arquivo(segmento):
+            referencias_extraidas.append(
+                _montar_objeto_referencia_struct(
+                    tipo="Arquivo",
+                    nome=segmento,
+                    descricao="Arquivo inferido a partir do texto da auditoria.",
+                    conn_id=None,
+                    banco=None,
+                    schema=None,
+                    tabela=None,
+                    caminho_arquivo=segmento,
+                    formato=None,
+                    direcao=direcao,
+                )
+            )
+            continue
+
+        partes = _limpar_identificador_sql_bruto(segmento)
+        if len(partes) != 1:
+            continue
+
+        identificador = partes[0]
+        if not PADRAO_IDENTIFICADOR_SIMPLES.fullmatch(identificador):
+            continue
+
+        if not schema_padrao:
+            continue
+
+        nome = (
+            f"{banco_padrao}.{schema_padrao}.{identificador}"
+            if banco_padrao
+            else f"{schema_padrao}.{identificador}"
+        )
+
+        referencias_extraidas.append(
+            _montar_objeto_referencia_struct(
+                tipo="Tabela",
+                nome=nome,
+                descricao="Tabela inferida a partir de nome simples e schema herdado do mesmo texto.",
+                conn_id=conn_id_padrao,
+                banco=banco_padrao,
+                schema=schema_padrao,
+                tabela=identificador,
+                caminho_arquivo=None,
+                formato=None,
+                direcao=direcao,
+            )
+        )
+
+    return _deduplicar_objetos(
+        [_aplicar_conn_id_padrao_em_objeto(item, conn_id_padrao) for item in referencias_extraidas]
+    )
+
+
 def _normalizar_referencia_tabela(
     item: Any,
     direcao: str = "neutro",
@@ -744,6 +1032,8 @@ def _normalizar_referencia_tabela(
             item.get("name"),
             item.get("objeto"),
             item.get("texto"),
+            item.get("referencia"),
+            item.get("reference"),
         )
 
         if not nome and _valor_preenchido(caminho_arquivo):
@@ -758,94 +1048,170 @@ def _normalizar_referencia_tabela(
         if not nome:
             nome = "-"
 
-        visualizavel = bool(conn_id and schema and tabela)
-        downloadable = bool(caminho_arquivo)
-
-        return {
-            "tipo": str(tipo),
-            "nome": str(nome),
-            "descricao": str(descricao or ""),
-            "conn_id": conn_id,
-            "banco": banco,
-            "schema": schema,
-            "tabela": tabela,
-            "caminho_arquivo": caminho_arquivo,
-            "formato": formato,
-            "direcao": direcao,
-            "downloadable": downloadable,
-            "visualizavel": visualizavel,
-        }
+        return _montar_objeto_referencia_struct(
+            tipo=str(tipo),
+            nome=str(nome),
+            descricao=str(descricao or ""),
+            conn_id=conn_id,
+            banco=banco,
+            schema=schema,
+            tabela=tabela,
+            caminho_arquivo=caminho_arquivo,
+            formato=formato,
+            direcao=direcao,
+        )
 
     if isinstance(item, str):
         texto = item.strip()
         if not texto:
             return None
 
+        if _parece_caminho_arquivo(texto):
+            return _montar_objeto_referencia_struct(
+                tipo="Arquivo",
+                nome=texto,
+                descricao="Arquivo inferido a partir do texto da auditoria.",
+                conn_id=None,
+                banco=None,
+                schema=None,
+                tabela=None,
+                caminho_arquivo=texto,
+                formato=None,
+                direcao=direcao,
+            )
+
         partes = _limpar_identificador_sql_bruto(texto)
 
         if len(partes) == 3:
             banco, schema, tabela = partes
-            return {
-                "tipo": tipo_padrao,
-                "nome": f"{banco}.{schema}.{tabela}",
-                "descricao": "",
-                "conn_id": None,
-                "banco": banco,
-                "schema": schema,
-                "tabela": tabela,
-                "caminho_arquivo": None,
-                "formato": None,
-                "direcao": direcao,
-                "downloadable": False,
-                "visualizavel": False,
-            }
+            return _montar_objeto_referencia_struct(
+                tipo=tipo_padrao,
+                nome=f"{banco}.{schema}.{tabela}",
+                descricao="",
+                conn_id=None,
+                banco=banco,
+                schema=schema,
+                tabela=tabela,
+                caminho_arquivo=None,
+                formato=None,
+                direcao=direcao,
+            )
 
         if len(partes) == 2:
             schema, tabela = partes
-            return {
-                "tipo": tipo_padrao,
-                "nome": f"{schema}.{tabela}",
-                "descricao": "",
-                "conn_id": None,
-                "banco": None,
-                "schema": schema,
-                "tabela": tabela,
-                "caminho_arquivo": None,
-                "formato": None,
-                "direcao": direcao,
-                "downloadable": False,
-                "visualizavel": False,
-            }
+            return _montar_objeto_referencia_struct(
+                tipo=tipo_padrao,
+                nome=f"{schema}.{tabela}",
+                descricao="",
+                conn_id=None,
+                banco=None,
+                schema=schema,
+                tabela=tabela,
+                caminho_arquivo=None,
+                formato=None,
+                direcao=direcao,
+            )
 
-        return {
-            "tipo": tipo_padrao,
-            "nome": texto,
-            "descricao": "",
-            "conn_id": None,
-            "banco": None,
-            "schema": None,
-            "tabela": None,
-            "caminho_arquivo": None,
-            "formato": None,
-            "direcao": direcao,
-            "downloadable": False,
-            "visualizavel": False,
-        }
+        return _montar_objeto_referencia_struct(
+            tipo=tipo_padrao,
+            nome=texto,
+            descricao="",
+            conn_id=None,
+            banco=None,
+            schema=None,
+            tabela=None,
+            caminho_arquivo=None,
+            formato=None,
+            direcao=direcao,
+        )
 
-    return {
-        "tipo": tipo_padrao,
-        "nome": str(item),
-        "descricao": "",
-        "conn_id": None,
-        "banco": None,
-        "schema": None,
-        "tabela": None,
-        "caminho_arquivo": None,
-        "formato": None,
-        "direcao": direcao,
-        "downloadable": False,
-        "visualizavel": False,
-    }
+    return _montar_objeto_referencia_struct(
+        tipo=tipo_padrao,
+        nome=str(item),
+        descricao="",
+        conn_id=None,
+        banco=None,
+        schema=None,
+        tabela=None,
+        caminho_arquivo=None,
+        formato=None,
+        direcao=direcao,
+    )
+
+
+def _normalizar_referencias_objeto(
+    item: Any,
+    *,
+    direcao: str,
+    tipo_padrao: str,
+    conn_id_padrao: str | None,
+) -> list[dict[str, Any]]:
+    """
+    Eu normalizo um item podendo gerar um ou vários objetos finais.
+
+    Regra:
+    - se vier estruturado, preservo o que já veio correto;
+    - se vier como texto agrupado, separo as referências;
+    - se vier sem conn_id mas for tabela válida, aplico o conn_id padrão do hook;
+    - se nada der certo, devolvo o objeto genérico original.
+    """
+    objetos: list[dict[str, Any]] = []
+
+    normalizado_unico = _normalizar_referencia_tabela(
+        item=item,
+        direcao=direcao,
+        tipo_padrao=tipo_padrao,
+    )
+    if normalizado_unico:
+        objetos.append(_aplicar_conn_id_padrao_em_objeto(normalizado_unico, conn_id_padrao))
+
+    textos_candidatos: list[str] = []
+
+    if isinstance(item, dict):
+        for chave in (
+            "referencia",
+            "reference",
+            "nome",
+            "name",
+            "objeto",
+            "texto",
+        ):
+            valor = item.get(chave)
+            if isinstance(valor, str) and valor.strip():
+                textos_candidatos.append(valor)
+    elif isinstance(item, str):
+        textos_candidatos.append(item)
+
+    for texto in textos_candidatos:
+        objetos.extend(
+            _extrair_referencias_textuais_multiplas(
+                texto=texto,
+                direcao=direcao,
+                tipo_padrao=tipo_padrao,
+                conn_id_padrao=conn_id_padrao,
+            )
+        )
+
+    objetos = _deduplicar_objetos(objetos)
+
+    if len(objetos) <= 1:
+        return objetos
+
+    objetos_validos = [
+        item_objeto
+        for item_objeto in objetos
+        if item_objeto.get("downloadable")
+        or (
+            str(item_objeto.get("tipo", "") or "").lower() == "tabela"
+            and item_objeto.get("schema")
+            and item_objeto.get("tabela")
+        )
+    ]
+
+    if objetos_validos:
+        return _deduplicar_objetos(objetos_validos)
+
+    return objetos
 
 
 def _deduplicar_objetos(objetos: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -911,7 +1277,11 @@ def _inferir_conn_id_task(task, metadata_auditoria: dict[str, Any]) -> str | Non
             ]
         )
 
-    return _primeiro_preenchido(*candidatos)
+    conn_id_encontrado = _primeiro_preenchido(*candidatos)
+    if _valor_preenchido(conn_id_encontrado):
+        return str(conn_id_encontrado)
+
+    return _obter_conn_id_sqlserver_padrao()
 
 
 def _extrair_objetos_sql(sql_real: str | None, conn_id_padrao: str | None = None) -> list[dict[str, Any]]:
@@ -952,20 +1322,18 @@ def _extrair_objetos_sql(sql_real: str | None, conn_id_padrao: str | None = None
             nome = tabela
 
         objetos.append(
-            {
-                "tipo": "Tabela",
-                "nome": nome or bruto,
-                "descricao": "Inferido automaticamente a partir da SQL da task.",
-                "conn_id": conn_id_padrao,
-                "banco": banco,
-                "schema": schema,
-                "tabela": tabela,
-                "caminho_arquivo": None,
-                "formato": None,
-                "direcao": direcao,
-                "downloadable": False,
-                "visualizavel": bool(conn_id_padrao and schema and tabela),
-            }
+            _montar_objeto_referencia_struct(
+                tipo="Tabela",
+                nome=nome or bruto,
+                descricao="Inferido automaticamente a partir da SQL da task.",
+                conn_id=conn_id_padrao,
+                banco=banco,
+                schema=schema,
+                tabela=tabela,
+                caminho_arquivo=None,
+                formato=None,
+                direcao=direcao,
+            )
         )
 
     for correspondencia in PADRAO_PROCEDURE_SQL.finditer(sql_texto):
@@ -975,23 +1343,23 @@ def _extrair_objetos_sql(sql_real: str | None, conn_id_padrao: str | None = None
         nome = ".".join(partes) if partes else bruto
 
         objetos.append(
-            {
-                "tipo": "Procedure",
-                "nome": nome,
-                "descricao": "Inferido automaticamente a partir do EXEC/EXECUTE da task.",
-                "conn_id": conn_id_padrao,
-                "banco": partes[0] if len(partes) == 3 else None,
-                "schema": partes[-2] if len(partes) >= 2 else None,
-                "tabela": partes[-1] if len(partes) >= 1 else None,
-                "caminho_arquivo": None,
-                "formato": None,
-                "direcao": "saida",
-                "downloadable": False,
-                "visualizavel": False,
-            }
+            _montar_objeto_referencia_struct(
+                tipo="Procedure",
+                nome=nome,
+                descricao="Inferido automaticamente a partir do EXEC/EXECUTE da task.",
+                conn_id=conn_id_padrao,
+                banco=partes[0] if len(partes) == 3 else None,
+                schema=partes[-2] if len(partes) >= 2 else None,
+                tabela=partes[-1] if len(partes) >= 1 else None,
+                caminho_arquivo=None,
+                formato=None,
+                direcao="saida",
+            )
         )
 
-    return _deduplicar_objetos(objetos)
+    return _deduplicar_objetos(
+        [_aplicar_conn_id_padrao_em_objeto(item, conn_id_padrao) for item in objetos]
+    )
 
 
 def _extrair_objetos_task(task, metadata_auditoria: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1010,16 +1378,14 @@ def _extrair_objetos_task(task, metadata_auditoria: dict[str, Any]) -> list[dict
     ]
 
     for direcao, referencia in referencias_diretas:
-        ref_normalizada = _normalizar_referencia_tabela(referencia, direcao=direcao, tipo_padrao="Tabela")
-        if ref_normalizada:
-            if not ref_normalizada.get("conn_id") and conn_id_padrao:
-                ref_normalizada["conn_id"] = conn_id_padrao
-                ref_normalizada["visualizavel"] = bool(
-                    ref_normalizada.get("conn_id")
-                    and ref_normalizada.get("schema")
-                    and ref_normalizada.get("tabela")
-                )
-            objetos.append(ref_normalizada)
+        objetos.extend(
+            _normalizar_referencias_objeto(
+                item=referencia,
+                direcao=direcao,
+                tipo_padrao="Tabela",
+                conn_id_padrao=conn_id_padrao,
+            )
+        )
 
     caminho_arquivo = _primeiro_preenchido(
         getattr(task, "filepath", None),
@@ -1031,20 +1397,18 @@ def _extrair_objetos_task(task, metadata_auditoria: dict[str, Any]) -> list[dict
     )
     if caminho_arquivo:
         objetos.append(
-            {
-                "tipo": "Arquivo",
-                "nome": str(caminho_arquivo),
-                "descricao": "Arquivo inferido a partir dos atributos da task.",
-                "conn_id": None,
-                "banco": None,
-                "schema": None,
-                "tabela": None,
-                "caminho_arquivo": str(caminho_arquivo),
-                "formato": None,
-                "direcao": "saida",
-                "downloadable": True,
-                "visualizavel": False,
-            }
+            _montar_objeto_referencia_struct(
+                tipo="Arquivo",
+                nome=str(caminho_arquivo),
+                descricao="Arquivo inferido a partir dos atributos da task.",
+                conn_id=None,
+                banco=None,
+                schema=None,
+                tabela=None,
+                caminho_arquivo=str(caminho_arquivo),
+                formato=None,
+                direcao="saida",
+            )
         )
 
     schema_task = _primeiro_preenchido(
@@ -1067,23 +1431,23 @@ def _extrair_objetos_task(task, metadata_auditoria: dict[str, Any]) -> list[dict
 
     if schema_task and tabela_task:
         objetos.append(
-            {
-                "tipo": "Tabela",
-                "nome": f"{schema_task}.{tabela_task}" if not banco_task else f"{banco_task}.{schema_task}.{tabela_task}",
-                "descricao": "Tabela inferida a partir dos atributos do operador.",
-                "conn_id": conn_id_padrao,
-                "banco": banco_task,
-                "schema": schema_task,
-                "tabela": tabela_task,
-                "caminho_arquivo": None,
-                "formato": None,
-                "direcao": "saida",
-                "downloadable": False,
-                "visualizavel": bool(conn_id_padrao and schema_task and tabela_task),
-            }
+            _montar_objeto_referencia_struct(
+                tipo="Tabela",
+                nome=f"{schema_task}.{tabela_task}" if not banco_task else f"{banco_task}.{schema_task}.{tabela_task}",
+                descricao="Tabela inferida a partir dos atributos do operador.",
+                conn_id=conn_id_padrao,
+                banco=banco_task,
+                schema=schema_task,
+                tabela=tabela_task,
+                caminho_arquivo=None,
+                formato=None,
+                direcao="saida",
+            )
         )
 
-    return _deduplicar_objetos(objetos)
+    return _deduplicar_objetos(
+        [_aplicar_conn_id_padrao_em_objeto(item, conn_id_padrao) for item in objetos]
+    )
 
 
 def _montar_objetos(
@@ -1095,7 +1459,7 @@ def _montar_objetos(
     Eu transformo os objetos reais da auditoria no formato do front.
     """
     objetos: list[dict[str, Any]] = []
-    conn_id_padrao = _inferir_conn_id_task(task, metadata_auditoria) if task else None
+    conn_id_padrao = _inferir_conn_id_task(task, metadata_auditoria) if task else _obter_conn_id_sqlserver_padrao()
 
     for chave in ("objetos_entrada", "objetos_saida", "objetos"):
         if chave == "objetos_entrada":
@@ -1106,16 +1470,14 @@ def _montar_objetos(
             direcao = "neutro"
 
         for item in _garantir_lista(metadata_auditoria.get(chave)):
-            normalizado = _normalizar_referencia_tabela(item, direcao=direcao, tipo_padrao="Objeto")
-            if normalizado:
-                if not normalizado.get("conn_id") and conn_id_padrao:
-                    normalizado["conn_id"] = conn_id_padrao
-                    normalizado["visualizavel"] = bool(
-                        normalizado.get("conn_id")
-                        and normalizado.get("schema")
-                        and normalizado.get("tabela")
-                    )
-                objetos.append(normalizado)
+            objetos.extend(
+                _normalizar_referencias_objeto(
+                    item=item,
+                    direcao=direcao,
+                    tipo_padrao="Objeto",
+                    conn_id_padrao=conn_id_padrao,
+                )
+            )
 
     objetos.extend(_extrair_objetos_task(task, metadata_auditoria) if task else [])
     objetos.extend(_extrair_objetos_sql(sql_real=sql_real, conn_id_padrao=conn_id_padrao))
