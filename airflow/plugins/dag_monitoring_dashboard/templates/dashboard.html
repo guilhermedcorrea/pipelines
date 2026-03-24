@@ -4,31 +4,46 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Auditoria de Execução</title>
-  <link rel="stylesheet" href="/dag_monitoring/static/legacy/dashboard.css" />
+
+  <link rel="stylesheet" href="/dag_monitoring/static/legacy/dashboard.css?v=20260324_0900" />
+
   <style>
     .objetos-ajuda {
       margin: 0 0 14px 0;
       color: #60708b;
       font-size: 0.95rem;
+      line-height: 1.5;
     }
 
     .objeto-card {
       position: relative;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
     }
 
-    .objeto-card.previewavel {
+    .objeto-card.objeto-card-tabela,
+    .objeto-card.objeto-card-download {
       cursor: pointer;
-      transition: 0.18s ease;
     }
 
-    .objeto-card.previewavel:hover {
-      transform: translateY(-2px);
+    .objeto-card.objeto-card-tabela:hover,
+    .objeto-card.objeto-card-download:hover,
+    .objeto-card.objeto-card-tabela:focus-visible,
+    .objeto-card.objeto-card-download:focus-visible {
+      transform: translateY(-3px);
       border-color: #aac5ea;
-      box-shadow: 0 8px 20px rgba(40, 63, 95, 0.09);
+      box-shadow: 0 12px 26px rgba(40, 63, 95, 0.11);
+      outline: none;
     }
 
-    .objeto-card.downloadable {
+    .objeto-card.objeto-card-tabela {
+      background:
+        linear-gradient(180deg, rgba(241, 247, 255, 0.86) 0%, rgba(255, 255, 255, 1) 100%);
+    }
+
+    .objeto-card.objeto-card-download {
       border-style: dashed;
+      background:
+        linear-gradient(180deg, rgba(247, 251, 255, 0.92) 0%, rgba(255, 255, 255, 1) 100%);
     }
 
     .objeto-acoes {
@@ -199,9 +214,11 @@
       justify-content: center;
       padding: 20px;
       z-index: 9999;
+      backdrop-filter: blur(4px);
     }
 
-    .modal-overlay.ativo {
+    .modal-overlay.ativo,
+    .modal-overlay.aberto {
       display: flex;
     }
 
@@ -248,6 +265,159 @@
       gap: 8px;
       margin-top: 12px;
     }
+
+    .pipeline-horizontal {
+      display: flex;
+      align-items: stretch;
+      gap: 18px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 6px 2px 2px;
+      scrollbar-width: thin;
+    }
+
+    .pipeline-horizontal::-webkit-scrollbar {
+      height: 10px;
+    }
+
+    .pipeline-horizontal::-webkit-scrollbar-thumb {
+      background: #c9d8ea;
+      border-radius: 999px;
+    }
+
+    .pipeline-card {
+      flex: 0 0 270px;
+      min-height: 122px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid #dbe6f4;
+      background:
+        radial-gradient(circle at top right, rgba(227, 239, 255, 0.9) 0%, rgba(255, 255, 255, 0) 32%),
+        linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow: 0 10px 24px rgba(31, 54, 88, 0.08);
+      cursor: pointer;
+      text-align: left;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .pipeline-card:hover,
+    .pipeline-card:focus-visible {
+      transform: translateY(-3px);
+      border-color: #b9cfe9;
+      box-shadow: 0 16px 34px rgba(31, 54, 88, 0.14);
+      outline: none;
+    }
+
+    .pipeline-card.ativo {
+      border-color: #5f8fca;
+      box-shadow: 0 18px 38px rgba(36, 87, 146, 0.18);
+    }
+
+    .pipeline-card.sucesso {
+      border-left: 5px solid #2e7d32;
+    }
+
+    .pipeline-card.executando {
+      border-left: 5px solid #1976d2;
+    }
+
+    .pipeline-card.falha {
+      border-left: 5px solid #c62828;
+    }
+
+    .pipeline-card.fila {
+      border-left: 5px solid #f9a825;
+    }
+
+    .pipeline-card.ignorada,
+    .pipeline-card.neutro {
+      border-left: 5px solid #90a4ae;
+    }
+
+    .pipeline-card-titulo {
+      font-size: 1rem;
+      line-height: 1.35;
+      font-weight: 800;
+      color: #223655;
+      word-break: break-word;
+    }
+
+    .pipeline-card-subtitulo {
+      font-size: 0.88rem;
+      line-height: 1.35;
+      color: #60708b;
+      word-break: break-word;
+    }
+
+    .pipeline-card-status {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 800;
+      border: 1px solid #d5e1ef;
+      background: #f5f9ff;
+      color: #314a6e;
+    }
+
+    .pipeline-card-status.sucesso {
+      background: #e9f7ed;
+      color: #2e7d32;
+      border-color: #cfe9d3;
+    }
+
+    .pipeline-card-status.executando {
+      background: #eaf3ff;
+      color: #1976d2;
+      border-color: #cfe0fb;
+    }
+
+    .pipeline-card-status.falha {
+      background: #fdecec;
+      color: #c62828;
+      border-color: #f3cdcd;
+    }
+
+    .pipeline-card-status.fila {
+      background: #fff7e3;
+      color: #b37b00;
+      border-color: #f1e0aa;
+    }
+
+    .pipeline-card-status.ignorada,
+    .pipeline-card-status.neutro {
+      background: #f2f5f8;
+      color: #5b6d83;
+      border-color: #d8e1eb;
+    }
+
+    .pipeline-seta {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #8aa2c1;
+      font-size: 1.8rem;
+      font-weight: 900;
+      min-width: 18px;
+      padding-top: 2px;
+    }
+
+    @media (max-width: 960px) {
+      .pipeline-card {
+        flex-basis: 240px;
+      }
+
+      .modal-card.modal-card-grande {
+        width: min(100%, 100%);
+      }
+    }
   </style>
 </head>
 <body>
@@ -293,7 +463,7 @@
         <h2>Fluxo da Pipeline</h2>
         <p>Tasks reais da DAG e status real da execução</p>
       </div>
-      <div class="pipeline-horizontal" id="pipeline"></div>
+      <div class="pipeline-horizontal" id="pipeline" aria-label="Fluxo da pipeline"></div>
     </section>
 
     <section class="layout-principal">
@@ -391,7 +561,8 @@
             <div class="secao-interna">
               <h3>Objetos manipulados</h3>
               <p class="objetos-ajuda">
-                Objetos com referência estruturada de conexão, schema e tabela poderão ser abertos para preview.
+                Arquivos como xlsx, css, parquet, csv, json e similares ficam clicáveis para download.
+                Objetos que representarem tabela ficam clicáveis para abrir a visualização da tabela.
               </p>
 
               <div class="atalhos-objetos" id="atalhos-objetos"></div>
@@ -503,7 +674,7 @@
     </section>
   </div>
 
-  <div class="modal-overlay" id="modal-info">
+  <div class="modal-overlay" id="modal-info" aria-hidden="true">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-info-titulo">Informação</h3>
@@ -513,7 +684,7 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="modal-tabela">
+  <div class="modal-overlay" id="modal-tabela" aria-hidden="true">
     <div class="modal-card modal-card-grande">
       <div class="modal-header">
         <h3 id="modal-tabela-titulo">Tabela</h3>
@@ -532,12 +703,13 @@
       apiBase: "/dag_monitoring/api",
       detalheBase: "/dag_monitoring/detalhe",
       listaBase: "/dag_monitoring/lista",
-      tablePreviewBase: "/dag_monitoring/api/task/table-preview",
-      tableLegacyPreviewBase: "/dag_monitoring/api/table-preview",
-      tablePageBase: "/dag_monitoring/tabela"
+      tablePreviewBase: "/dag_monitoring/api/table-preview",
+      tableDataBase: "/dag_monitoring/api/table-data",
+      tableViewBase: "/dag_monitoring/tabela",
+      fileDownloadBase: "/dag_monitoring/arquivo/download"
     };
   </script>
 
-  <script src="/dag_monitoring/static/legacy/dashboard.js"></script>
+  <script src="/dag_monitoring/static/legacy/dashboard.js?v=20260324_0900" defer></script>
 </body>
 </html>

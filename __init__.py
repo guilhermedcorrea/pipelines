@@ -113,3 +113,10 @@ docker compose exec airflow-apiserver airflow users create \
 
 #acessa containwer
 #docker compose exec airflow-apiserver bash
+
+
+#rebuild docker compose
+#docker compose up -d --build
+
+#Inicia
+#docker compose up

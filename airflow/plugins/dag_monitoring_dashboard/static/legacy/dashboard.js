@@ -251,6 +251,193 @@ function renderizarResumoTask(task) {
   renderizarObjetos(task);
 }
 
+const EXTENSOES_ARQUIVO_BAIXAVEL = new Set([
+  "xlsx", "xls", "csv", "parquet", "json", "txt", "zip", "gz", "pdf",
+  "css", "js", "sql", "yaml", "yml", "xml", "html", "htm", "md",
+  "log", "feather", "orc"
+]);
+
+function obterPrimeiroValorPreenchido(objeto, chaves) {
+  for (const chave of chaves) {
+    const valor = objeto?.[chave];
+    if (valor !== undefined && valor !== null && String(valor).trim() !== "") {
+      return valor;
+    }
+  }
+  return "";
+}
+
+function obterConnIdObjeto(objeto) {
+  return String(
+    obterPrimeiroValorPreenchido(objeto, ["conn_id", "conexao_id", "connection_id", "connId", "connectionId"])
+  ).trim();
+}
+
+function obterCaminhoArquivoObjeto(objeto) {
+  return String(
+    obterPrimeiroValorPreenchido(objeto, ["caminho_arquivo", "caminhoArquivo", "file_path", "filepath", "path", "arquivo", "caminho"])
+  ).trim();
+}
+
+function obterExtensaoArquivo(valor) {
+  const texto = String(valor || "").trim();
+  if (!texto) return "";
+
+  const semQuery = texto.split("?")[0].split("#")[0];
+  const nomeFinal = semQuery.split(/[\\/]/).pop() || semQuery;
+  const partes = nomeFinal.split(".");
+
+  if (partes.length < 2) return "";
+  return String(partes.pop() || "").trim().toLowerCase();
+}
+
+function inferirArquivoObjeto(objeto) {
+  const caminho = obterCaminhoArquivoObjeto(objeto);
+  if (!caminho) return null;
+
+  const nome = String(objeto?.nome || "").trim();
+  const extensao = obterExtensaoArquivo(caminho) || obterExtensaoArquivo(nome);
+
+  return {
+    caminho,
+    extensao,
+    nomeArquivo: caminho.split(/[\\/]/).pop() || nome || caminho,
+    baixavelPorExtensao: Boolean(extensao && EXTENSOES_ARQUIVO_BAIXAVEL.has(extensao)),
+  };
+}
+
+function extrairReferenciasTabelaDeTexto(texto) {
+  const textoLimpo = String(texto || "").trim();
+  if (!textoLimpo) return [];
+
+  const regex = /\b(?:(?<banco>[A-Za-z_][A-Za-z0-9_]*)\.)?(?<schema>[A-Za-z_][A-Za-z0-9_]*)\.(?<tabela>[A-Za-z_][A-Za-z0-9_]*)\b/g;
+  const referencias = [];
+  const vistos = new Set();
+  let match;
+
+  while ((match = regex.exec(textoLimpo)) !== null) {
+    const valorBruto = match[0] || "";
+    const tabela = String(match.groups?.tabela || "").trim();
+    const schema = String(match.groups?.schema || "").trim();
+    const banco = String(match.groups?.banco || "").trim();
+    const inicio = match.index;
+    const fim = inicio + valorBruto.length;
+    const anterior = inicio > 0 ? textoLimpo[inicio - 1] : "";
+    const proximo = fim < textoLimpo.length ? textoLimpo[fim] : "";
+
+    if (["/", "\\"].includes(anterior) || ["/", "\\"].includes(proximo)) {
+      continue;
+    }
+
+    if (EXTENSOES_ARQUIVO_BAIXAVEL.has(tabela.toLowerCase())) {
+      continue;
+    }
+
+    if (!schema || !tabela) {
+      continue;
+    }
+
+    const chave = `${banco}|${schema}|${tabela}`.toLowerCase();
+    if (vistos.has(chave)) {
+      continue;
+    }
+
+    vistos.add(chave);
+    referencias.push({ banco, schema, tabela, nome_qualificado: valorBruto });
+  }
+
+  return referencias;
+}
+
+function inferirTabelasDoObjeto(objeto) {
+  const referencias = [];
+  const vistos = new Set();
+  const connId = obterConnIdObjeto(objeto);
+
+  function adicionar(referencia) {
+    const schema = String(referencia?.schema || "").trim();
+    const tabela = String(referencia?.tabela || "").trim();
+    const banco = String(referencia?.banco || "").trim();
+
+    if (!schema || !tabela) {
+      return;
+    }
+
+    const chave = `${connId}|${banco}|${schema}|${tabela}`.toLowerCase();
+    if (vistos.has(chave)) {
+      return;
+    }
+
+    vistos.add(chave);
+    referencias.push({
+      conn_id: connId,
+      banco,
+      schema,
+      tabela,
+      nome_qualificado: banco ? `${banco}.${schema}.${tabela}` : `${schema}.${tabela}`,
+    });
+  }
+
+  const schemaExplicito = String(objeto?.schema || "").trim();
+  const tabelaExplicita = String(objeto?.tabela || "").trim();
+  const bancoExplicito = String(objeto?.banco || "").trim();
+
+  if (connId && schemaExplicito && tabelaExplicita) {
+    adicionar({ banco: bancoExplicito, schema: schemaExplicito, tabela: tabelaExplicita });
+  }
+
+  const candidatosTexto = [
+    objeto?.nome_qualificado,
+    objeto?.referencia,
+    objeto?.referência,
+    objeto?.nome,
+    objeto?.descricao,
+    objeto?.descrição,
+    objeto?.objeto,
+  ];
+
+  for (const candidato of candidatosTexto) {
+    for (const referencia of extrairReferenciasTabelaDeTexto(candidato)) {
+      adicionar(referencia);
+    }
+  }
+
+  return referencias;
+}
+
+function inferirAcaoObjeto(objeto) {
+  const arquivo = inferirArquivoObjeto(objeto);
+  const tabelas = inferirTabelasDoObjeto(objeto);
+  const flagTabela = Boolean(objeto?.visualizavel);
+  const flagArquivo = Boolean(objeto?.downloadable);
+
+  if (flagTabela && tabelas.length > 0) {
+    return { tipo: "tabela", tabelas };
+  }
+
+  if (flagArquivo && arquivo) {
+    return { tipo: "arquivo", arquivo };
+  }
+
+  if (tabelas.length > 0 && !arquivo) {
+    return { tipo: "tabela", tabelas };
+  }
+
+  if (arquivo && tabelas.length === 0) {
+    return { tipo: "arquivo", arquivo };
+  }
+
+  if (tabelas.length > 0) {
+    return { tipo: "tabela", tabelas };
+  }
+
+  if (arquivo) {
+    return { tipo: "arquivo", arquivo };
+  }
+
+  return { tipo: "info" };
+}
+
 function montarHtmlPreviewTabela(preview) {
   const colunas = Array.isArray(preview.colunas) ? preview.colunas : [];
   const linhas = Array.isArray(preview.linhas) ? preview.linhas : [];
@@ -295,59 +482,130 @@ function montarHtmlPreviewTabela(preview) {
   return html;
 }
 
-async function abrirPreviewTabela(objeto) {
+async function abrirPreviewTabela(objetoOuReferencia) {
+  const referencia = objetoOuReferencia?.schema && objetoOuReferencia?.tabela
+    ? objetoOuReferencia
+    : inferirTabelasDoObjeto(objetoOuReferencia)[0];
+
+  if (!referencia || !referencia.conn_id || !referencia.schema || !referencia.tabela) {
+    throw new Error("Não encontrei uma referência de tabela válida para abrir o preview.");
+  }
+
   const config = obterConfig();
   const url = montarUrl(config.tablePreviewBase, {
-    conexao_id: objeto.conn_id,
-    banco: objeto.banco,
-    schema: objeto.schema,
-    tabela: objeto.tabela,
+    conexao_id: referencia.conn_id,
+    banco: referencia.banco,
+    schema: referencia.schema,
+    tabela: referencia.tabela,
     limite: 20,
   });
 
-  const resposta = await fetch(url, { headers: { "Accept": "application/json" } });
+  const resposta = await fetch(url, { headers: { Accept: "application/json" } });
   if (!resposta.ok) {
     const texto = await resposta.text();
     throw new Error(texto || "Não consegui carregar preview da tabela.");
   }
 
   const preview = await resposta.json();
-  abrirModalTabela(preview.nome_qualificado || objeto.nome || "Tabela", montarHtmlPreviewTabela(preview));
+  abrirModalTabela(preview.nome_qualificado || referencia.nome_qualificado || "Tabela", montarHtmlPreviewTabela(preview));
 
   const botaoAbrir = document.getElementById("botao-abrir-tabela-completa");
   if (botaoAbrir) {
-    botaoAbrir.addEventListener("click", function(){
-      abrirTabelaCompleta(objeto);
+    botaoAbrir.addEventListener("click", function () {
+      abrirTabelaCompleta(referencia);
     });
   }
 }
 
-function abrirTabelaCompleta(objeto) {
-  const config = obterConfig();
+function abrirTabelaCompleta(objetoOuReferencia) {
+  const referencia = objetoOuReferencia?.schema && objetoOuReferencia?.tabela
+    ? objetoOuReferencia
+    : inferirTabelasDoObjeto(objetoOuReferencia)[0];
 
+  if (!referencia || !referencia.conn_id || !referencia.schema || !referencia.tabela) {
+    mostrarErro("Não encontrei uma referência de tabela válida para abrir a tela da tabela.");
+    return;
+  }
+
+  const config = obterConfig();
   const url = montarUrl(config.tableViewBase, {
-    conexao_id: objeto.conn_id,
-    banco: objeto.banco,
-    schema: objeto.schema,
-    tabela: objeto.tabela,
+    conexao_id: referencia.conn_id,
+    banco: referencia.banco,
+    schema: referencia.schema,
+    tabela: referencia.tabela,
     pagina: 1,
     tamanho_pagina: 50,
   });
 
-  window.open(url, "_blank");
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function montarHtmlEscolhaTabelas(tabelas) {
+  return `
+    <div style="display:grid;gap:12px;">
+      <div style="font-weight:900;color:#334155;">Este objeto referencia mais de uma tabela. Escolha qual deseja abrir:</div>
+      ${tabelas.map((tabela) => {
+        const config = obterConfig();
+        const url = montarUrl(config.tableViewBase, {
+          conexao_id: tabela.conn_id,
+          banco: tabela.banco,
+          schema: tabela.schema,
+          tabela: tabela.tabela,
+          pagina: 1,
+          tamanho_pagina: 50,
+        });
+
+        return `
+          <a
+            href="${escaparHtml(url)}"
+            target="_blank"
+            rel="noopener noreferrer"
+            style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid rgba(15,23,42,.08);border-radius:12px;background:#fff;text-decoration:none;color:#0f172a;font-weight:900;"
+          >
+            <span>${escaparHtml(tabela.nome_qualificado)}</span>
+            <span style="color:#1e3a8a;">Abrir →</span>
+          </a>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function abrirTabelasDoObjeto(objeto) {
+  const tabelas = inferirTabelasDoObjeto(objeto);
+
+  if (tabelas.length === 0) {
+    mostrarErro("Não encontrei tabela válida neste objeto.");
+    return;
+  }
+
+  if (tabelas.length === 1) {
+    abrirTabelaCompleta(tabelas[0]);
+    return;
+  }
+
+  abrirModalInfo("Escolha a tabela", montarHtmlEscolhaTabelas(tabelas));
 }
 
 function baixarArquivo(objeto) {
+  const arquivo = inferirArquivoObjeto(objeto);
+  if (!arquivo?.caminho) {
+    mostrarErro("Não encontrei caminho de arquivo válido para download.");
+    return;
+  }
+
   const config = obterConfig();
   const url = montarUrl(config.fileDownloadBase, {
-    caminho: objeto.caminho_arquivo,
+    caminho: arquivo.caminho,
   });
 
-  window.open(url, "_blank");
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function montarDescricaoObjeto(objeto) {
   const partes = [];
+  const arquivo = inferirArquivoObjeto(objeto);
+  const tabelas = inferirTabelasDoObjeto(objeto);
 
   if (objeto.descricao) {
     partes.push(`<div class="objeto-descricao">${escaparHtml(objeto.descricao)}</div>`);
@@ -359,19 +617,49 @@ function montarDescricaoObjeto(objeto) {
     partes.push(`<div class="objeto-meta"><strong>Direção:</strong> ${escaparHtml(objeto.direcao)}</div>`);
   }
 
-  if (objeto.conn_id) {
-    partes.push(`<div class="objeto-meta"><strong>Conexão:</strong> ${escaparHtml(objeto.conn_id)}</div>`);
+  const connId = obterConnIdObjeto(objeto);
+  if (connId) {
+    partes.push(`<div class="objeto-meta"><strong>Conexão:</strong> ${escaparHtml(connId)}</div>`);
   }
 
-  if (objeto.schema && objeto.tabela) {
-    partes.push(`<div class="objeto-meta"><strong>Referência:</strong> ${escaparHtml(`${objeto.schema}.${objeto.tabela}`)}</div>`);
+  if (tabelas.length === 1) {
+    partes.push(`<div class="objeto-meta"><strong>Tabela:</strong> ${escaparHtml(tabelas[0].nome_qualificado)}</div>`);
+  } else if (tabelas.length > 1) {
+    partes.push(`<div class="objeto-meta"><strong>Tabelas:</strong> ${tabelas.map(item => escaparHtml(item.nome_qualificado)).join(" | ")}</div>`);
   }
 
-  if (objeto.caminho_arquivo) {
-    partes.push(`<div class="objeto-meta"><strong>Arquivo:</strong> ${escaparHtml(objeto.caminho_arquivo)}</div>`);
+  if (arquivo?.caminho) {
+    const etiquetaExtensao = arquivo.extensao ? ` (${arquivo.extensao.toUpperCase()})` : "";
+    partes.push(`<div class="objeto-meta"><strong>Arquivo:</strong> ${escaparHtml(arquivo.caminho)}${escaparHtml(etiquetaExtensao)}</div>`);
   }
 
   return partes.join("");
+}
+
+function executarAcaoPrimariaObjeto(objeto) {
+  const acao = inferirAcaoObjeto(objeto);
+
+  if (acao.tipo === "arquivo") {
+    baixarArquivo(objeto);
+    return;
+  }
+
+  if (acao.tipo === "tabela") {
+    abrirTabelasDoObjeto(objeto);
+    return;
+  }
+
+  const tipo = String(objeto?.tipo || "Objeto").trim();
+  abrirModalInfo(
+    objeto?.nome || "Objeto",
+    `
+      <div style="display:grid;gap:10px;">
+        <div><strong>Tipo:</strong> ${escaparHtml(tipo)}</div>
+        <div><strong>Nome:</strong> ${escaparHtml(objeto?.nome || "-")}</div>
+        <div><strong>Descrição:</strong> ${escaparHtml(objeto?.descricao || "-")}</div>
+      </div>
+    `
+  );
 }
 
 function renderizarObjetos(task) {
@@ -391,64 +679,44 @@ function renderizarObjetos(task) {
   }
 
   objetos.forEach((objeto) => {
-    const tipo = String(objeto.tipo || "Objeto").trim();
-    const isArquivo = Boolean(objeto.downloadable && objeto.caminho_arquivo);
-    const isTabela = Boolean(objeto.visualizavel && objeto.schema && objeto.tabela && objeto.conn_id);
+    const tipo = String(objeto?.tipo || "Objeto").trim();
+    const acao = inferirAcaoObjeto(objeto);
 
     const card = document.createElement("div");
     card.className = "objeto-card";
     card.tabIndex = 0;
 
-    if (isArquivo) {
+    if (acao.tipo === "arquivo") {
       card.classList.add("objeto-card-download");
       card.title = "Clique para baixar o arquivo";
-    } else if (isTabela) {
+    } else if (acao.tipo === "tabela") {
       card.classList.add("objeto-card-tabela");
-      card.title = "Clique para preview e dê duplo clique para abrir a tabela completa";
+      card.title = "Clique para abrir a tela da tabela";
     }
+
+    const rotuloAcao = acao.tipo === "arquivo"
+      ? "Baixar arquivo"
+      : acao.tipo === "tabela"
+        ? "Abrir tabela"
+        : "Ver detalhes";
 
     card.innerHTML = `
       <span class="badge-objeto">${escaparHtml(tipo)}</span>
-      <h4>${escaparHtml(objeto.nome || "-")}</h4>
+      <h4>${escaparHtml(objeto?.nome || "-")}</h4>
       ${montarDescricaoObjeto(objeto)}
+      <div class="objeto-meta" style="margin-top:10px;font-weight:1000;color:#1e3a8a;">${escaparHtml(rotuloAcao)}</div>
     `;
 
-    if (isArquivo) {
-      card.addEventListener("click", function(){
-        baixarArquivo(objeto);
-      });
-    } else if (isTabela) {
-      card.addEventListener("click", async function(){
-        try {
-          await abrirPreviewTabela(objeto);
-        } catch (erro) {
-          mostrarErro(erro.message || "Erro ao abrir preview da tabela.");
-        }
-      });
+    card.addEventListener("click", function () {
+      executarAcaoPrimariaObjeto(objeto);
+    });
 
-      card.addEventListener("dblclick", function(){
-        abrirTabelaCompleta(objeto);
-      });
-
-      card.addEventListener("keydown", function(ev){
-        if (ev.key === "Enter") {
-          abrirTabelaCompleta(objeto);
-        }
-      });
-    } else {
-      card.addEventListener("click", function(){
-        abrirModalInfo(
-          objeto.nome || "Objeto",
-          `
-            <div style="display:grid;gap:10px;">
-              <div><strong>Tipo:</strong> ${escaparHtml(tipo)}</div>
-              <div><strong>Nome:</strong> ${escaparHtml(objeto.nome || "-")}</div>
-              <div><strong>Descrição:</strong> ${escaparHtml(objeto.descricao || "-")}</div>
-            </div>
-          `
-        );
-      });
-    }
+    card.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        executarAcaoPrimariaObjeto(objeto);
+      }
+    });
 
     container.appendChild(card);
   });
