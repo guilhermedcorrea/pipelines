@@ -1,0 +1,1348 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ configuracao_frontend.titulo_plugin }} - {{ dag_id }}</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --bg-soft: #11182d;
+      --bg-elev: #151f38;
+      --bg-elev-2: #1a2748;
+      --border: #26345c;
+      --text: #e8eeff;
+      --muted: #a8b3d1;
+      --primary: #6e56cf;
+      --primary-hover: #7c66d9;
+      --blue: #3b82f6;
+      --cyan: #22d3ee;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --chip: #2a3557;
+      --shadow: 0 20px 60px rgba(110, 86, 207, 0.18);
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 14px;
+      --font: Inter, "Segoe UI", Arial, sans-serif;
+    }
+
+    *{ box-sizing:border-box; }
+
+    html{ scroll-behavior:smooth; }
+
+    body{
+      margin:0;
+      font-family:var(--font);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(110,86,207,.20), transparent 25%),
+        radial-gradient(circle at left bottom, rgba(34,211,238,.10), transparent 22%),
+        var(--bg);
+      min-height:100vh;
+    }
+
+    a{ color:inherit; }
+
+    .pagina{
+      width:min(1600px, calc(100vw - 32px));
+      margin:0 auto;
+      padding:24px 0 42px;
+    }
+
+    .hero{
+      position:relative;
+      overflow:hidden;
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      background:
+        linear-gradient(180deg, rgba(21,31,56,.96) 0%, rgba(17,24,45,.98) 100%);
+      box-shadow:var(--shadow);
+      padding:26px 28px;
+      margin-bottom:18px;
+    }
+
+    .hero::after{
+      content:"";
+      position:absolute;
+      right:-90px;
+      top:-90px;
+      width:240px;
+      height:240px;
+      border-radius:50%;
+      background:radial-gradient(circle, rgba(34,211,238,.12) 0%, rgba(34,211,238,0) 70%);
+      pointer-events:none;
+    }
+
+    .hero-topo{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:18px;
+      flex-wrap:wrap;
+    }
+
+    .hero h1{
+      margin:0 0 10px 0;
+      font-size:clamp(1.9rem, 2.9vw, 2.8rem);
+      line-height:1.08;
+      letter-spacing:-0.02em;
+      word-break:break-word;
+    }
+
+    .hero p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.7;
+      max-width:980px;
+    }
+
+    .hero-badges,
+    .chips{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:7px 11px;
+      border-radius:999px;
+      font-size:0.78rem;
+      font-weight:900;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.04);
+      color:#dbe7ff;
+    }
+
+    .chip-primario{
+      background:rgba(59,130,246,.12);
+      border-color:rgba(59,130,246,.26);
+    }
+
+    .actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      margin-top:16px;
+    }
+
+    .btn{
+      min-height:44px;
+      border:none;
+      border-radius:14px;
+      padding:0 15px;
+      font-size:0.92rem;
+      font-weight:900;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      white-space:nowrap;
+      transition:transform .16s ease, background .16s ease, border-color .16s ease;
+    }
+
+    .btn:hover{ transform:translateY(-1px); }
+
+    .btn-primario{
+      background:linear-gradient(135deg, var(--primary), var(--blue));
+      color:#fff;
+    }
+
+    .btn-secundario{
+      background:rgba(255,255,255,.04);
+      color:var(--text);
+      border:1px solid var(--border);
+    }
+
+    .btn-alerta{
+      background:rgba(245,158,11,.13);
+      color:#fde68a;
+      border:1px solid rgba(245,158,11,.25);
+    }
+
+    .grade-kpis{
+      display:grid;
+      grid-template-columns:repeat(6, minmax(0, 1fr));
+      gap:14px;
+      margin-bottom:18px;
+    }
+
+    .kpi{
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(21,31,56,.95), rgba(17,24,45,.98));
+      border-radius:var(--radius-md);
+      box-shadow:var(--shadow);
+      padding:16px 18px;
+      min-height:110px;
+    }
+
+    .kpi small{
+      display:block;
+      color:var(--muted);
+      font-size:0.78rem;
+      font-weight:900;
+      letter-spacing:.05em;
+      text-transform:uppercase;
+      margin-bottom:10px;
+    }
+
+    .kpi strong{
+      display:block;
+      font-size:1.7rem;
+      line-height:1.05;
+      margin-bottom:8px;
+    }
+
+    .kpi span{
+      color:var(--muted);
+      font-size:0.88rem;
+      line-height:1.55;
+    }
+
+    .layout{
+      display:grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap:16px;
+      align-items:start;
+    }
+
+    .painel,
+    .card{
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(21,31,56,.96), rgba(17,24,45,.98));
+      border-radius:var(--radius-lg);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+
+    .painel-topo,
+    .card-topo{
+      padding:16px 18px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+    }
+
+    .painel-topo h2,
+    .card-topo h2{
+      margin:0 0 6px 0;
+      font-size:1.18rem;
+    }
+
+    .painel-topo p,
+    .card-topo p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.6;
+      font-size:0.9rem;
+    }
+
+    .painel-body,
+    .card-body{
+      padding:16px 18px 18px;
+    }
+
+    .lista-etapas{
+      display:grid;
+      gap:10px;
+    }
+
+    .etapa{
+      position:relative;
+      border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.02);
+      border-radius:16px;
+      padding:14px;
+      cursor:pointer;
+      transition:transform .16s ease, border-color .16s ease, background .16s ease;
+    }
+
+    .etapa:hover{
+      transform:translateY(-1px);
+      border-color:rgba(59,130,246,.34);
+      background:rgba(59,130,246,.05);
+    }
+
+    .etapa.ativa{
+      border-color:rgba(34,211,238,.42);
+      background:rgba(34,211,238,.08);
+      box-shadow:0 0 0 1px rgba(34,211,238,.12) inset;
+    }
+
+    .etapa-numero{
+      width:28px;
+      height:28px;
+      border-radius:50%;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:0.8rem;
+      font-weight:900;
+      background:rgba(110,86,207,.22);
+      color:#f3edff;
+      margin-right:8px;
+      flex:0 0 auto;
+    }
+
+    .etapa-topo{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:8px;
+    }
+
+    .etapa-titulo{
+      display:flex;
+      align-items:center;
+      min-width:0;
+    }
+
+    .etapa h3{
+      margin:0;
+      font-size:0.98rem;
+      line-height:1.35;
+      word-break:break-word;
+    }
+
+    .etapa small{
+      color:var(--muted);
+      display:block;
+      margin-top:6px;
+      line-height:1.45;
+      font-size:0.82rem;
+    }
+
+    .badge-status{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:30px;
+      padding:6px 10px;
+      border-radius:999px;
+      font-size:0.74rem;
+      font-weight:900;
+      border:1px solid transparent;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      white-space:nowrap;
+    }
+
+    .status-success{
+      background:rgba(34,197,94,.12);
+      color:#9ae6b4;
+      border-color:rgba(34,197,94,.26);
+    }
+
+    .status-failed{
+      background:rgba(239,68,68,.12);
+      color:#ffb3b3;
+      border-color:rgba(239,68,68,.28);
+    }
+
+    .status-running{
+      background:rgba(59,130,246,.12);
+      color:#bfdbfe;
+      border-color:rgba(59,130,246,.28);
+    }
+
+    .status-queued{
+      background:rgba(245,158,11,.12);
+      color:#fde68a;
+      border-color:rgba(245,158,11,.28);
+    }
+
+    .status-default{
+      background:rgba(168,179,209,.10);
+      color:#d1d8eb;
+      border-color:rgba(168,179,209,.22);
+    }
+
+    .tabs{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:14px;
+    }
+
+    .tab{
+      min-height:38px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.03);
+      color:var(--text);
+      border-radius:12px;
+      padding:0 12px;
+      font-size:0.85rem;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    .tab.ativa{
+      background:linear-gradient(135deg, rgba(110,86,207,.24), rgba(59,130,246,.18));
+      border-color:rgba(59,130,246,.35);
+    }
+
+    .aba{
+      display:none;
+    }
+
+    .aba.ativa{
+      display:block;
+    }
+
+    .grid-duas{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:14px;
+    }
+
+    .bloco{
+      border:1px solid rgba(255,255,255,.06);
+      background:rgba(255,255,255,.02);
+      border-radius:18px;
+      padding:14px;
+      min-width:0;
+    }
+
+    .bloco h3{
+      margin:0 0 10px 0;
+      font-size:1rem;
+    }
+
+    .bloco p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.65;
+      font-size:0.92rem;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+
+    .grid-metricas{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:12px;
+      margin-top:14px;
+    }
+
+    .metrica{
+      border:1px solid rgba(255,255,255,.06);
+      background:rgba(255,255,255,.02);
+      border-radius:16px;
+      padding:12px;
+      min-width:0;
+    }
+
+    .metrica small{
+      display:block;
+      color:var(--muted);
+      margin-bottom:6px;
+      font-size:0.75rem;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      font-weight:900;
+    }
+
+    .metrica strong{
+      display:block;
+      font-size:1.05rem;
+      line-height:1.35;
+      word-break:break-word;
+    }
+
+    .objeto-lista{
+      display:grid;
+      gap:10px;
+    }
+
+    .objeto{
+      border:1px solid rgba(255,255,255,.06);
+      background:rgba(255,255,255,.02);
+      border-radius:16px;
+      padding:13px 14px;
+    }
+
+    .objeto-topo{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+
+    .objeto h4{
+      margin:0;
+      font-size:0.95rem;
+      line-height:1.35;
+      word-break:break-word;
+    }
+
+    .objeto-meta{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:8px 12px;
+      margin-top:8px;
+    }
+
+    .objeto-meta div{
+      color:var(--muted);
+      font-size:0.84rem;
+      line-height:1.5;
+      word-break:break-word;
+    }
+
+    .objeto-meta strong{
+      color:var(--text);
+    }
+
+    .objeto-acoes{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:12px;
+    }
+
+    .btn-mini{
+      min-height:34px;
+      border-radius:10px;
+      padding:0 10px;
+      font-size:0.78rem;
+      font-weight:900;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      border:1px solid rgba(255,255,255,.09);
+      background:rgba(255,255,255,.04);
+      color:var(--text);
+    }
+
+    .btn-mini:hover{
+      border-color:rgba(59,130,246,.35);
+    }
+
+    .sql-box,
+    .json-box{
+      background:rgba(0,0,0,.26);
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:16px;
+      padding:14px;
+      color:#e2e8f0;
+      font-size:0.84rem;
+      line-height:1.65;
+      overflow:auto;
+      max-height:480px;
+      white-space:pre-wrap;
+      word-break:break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .tabela-wrap{
+      width:100%;
+      overflow:auto;
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:16px;
+      background:rgba(255,255,255,.02);
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      min-width:760px;
+    }
+
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:1;
+      background:#10182d;
+      color:#dce5ff;
+      padding:12px 10px;
+      text-align:left;
+      font-size:0.8rem;
+      font-weight:900;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      white-space:nowrap;
+    }
+
+    tbody td{
+      padding:10px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      vertical-align:top;
+      color:#e6ebfa;
+      font-size:0.84rem;
+      white-space:nowrap;
+    }
+
+    tbody tr:hover{
+      background:rgba(59,130,246,.05);
+    }
+
+    .linha-health{
+      display:grid;
+      grid-template-columns:repeat(5, minmax(0, 1fr));
+      gap:12px;
+      margin-top:14px;
+    }
+
+    .health-card{
+      border:1px solid rgba(255,255,255,.06);
+      background:rgba(255,255,255,.02);
+      border-radius:16px;
+      padding:12px;
+    }
+
+    .health-card small{
+      display:block;
+      color:var(--muted);
+      margin-bottom:8px;
+      font-size:0.75rem;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      font-weight:900;
+    }
+
+    .health-card strong{
+      display:block;
+      font-size:1.3rem;
+      line-height:1.1;
+      margin-bottom:6px;
+    }
+
+    .estado-vazio{
+      border:1px dashed rgba(168,179,209,.25);
+      border-radius:18px;
+      background:rgba(255,255,255,.02);
+      padding:24px;
+      text-align:center;
+      color:var(--muted);
+      line-height:1.7;
+    }
+
+    .erro{
+      border:1px solid rgba(239,68,68,.24);
+      background:rgba(239,68,68,.08);
+      color:#ffd4d4;
+      border-radius:18px;
+      padding:18px;
+      line-height:1.6;
+    }
+
+    @media (max-width: 1360px){
+      .layout{ grid-template-columns: 1fr; }
+      .grade-kpis{ grid-template-columns:repeat(3, minmax(0, 1fr)); }
+      .grid-metricas{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .linha-health{ grid-template-columns:repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 860px){
+      .pagina{ width:min(100vw - 20px, 1600px); padding:14px 0 28px; }
+      .hero{ padding:18px; }
+      .grade-kpis{ grid-template-columns:1fr 1fr; }
+      .grid-duas{ grid-template-columns:1fr; }
+      .grid-metricas{ grid-template-columns:1fr; }
+      .linha-health{ grid-template-columns:1fr 1fr; }
+    }
+
+    @media (max-width: 640px){
+      .grade-kpis{ grid-template-columns:1fr; }
+      .linha-health{ grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="pagina">
+    <section class="hero">
+      <div class="hero-topo">
+        <div>
+          <h1 id="tituloDag">{{ dag_id }}</h1>
+          <p id="subtituloDag">
+            Painel detalhado do pipeline de Machine Learning. Esta tela foi desenhada para mostrar a execução real,
+            as etapas do pipeline, a documentação técnica, os objetos de entrada e saída, as tabelas reais,
+            a saúde operacional e as métricas que ajudam a entender o comportamento do modelo.
+          </p>
+
+          <div class="hero-badges" id="heroBadges" style="margin-top:14px;"></div>
+
+          <div class="actions">
+            <a class="btn btn-secundario" href="{{ configuracao_frontend.url_prefixo }}{{ configuracao_frontend.rota_lista_html }}">Voltar para a lista</a>
+            <button class="btn btn-primario" id="btnRecarregar" type="button">Recarregar painel</button>
+            <button class="btn btn-alerta" id="btnCopiarJson" type="button">Copiar JSON</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="grade-kpis">
+      <article class="kpi">
+        <small>Status da DAG</small>
+        <strong id="kpiStatus">-</strong>
+        <span>Último estado consolidado da execução analisada.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Total de tasks</small>
+        <strong id="kpiTasks">-</strong>
+        <span>Número de etapas encontradas na execução real.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Success</small>
+        <strong id="kpiSuccess">-</strong>
+        <span>Tasks concluídas com sucesso.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Falhas</small>
+        <strong id="kpiFalhas">-</strong>
+        <span>Tasks com erro ou interrupção identificadas na execução.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Modelo inferido</small>
+        <strong id="kpiModelo">-</strong>
+        <span>Família do modelo inferida a partir das tasks e artefatos.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Domínio</small>
+        <strong id="kpiDominio">-</strong>
+        <span>Domínio funcional estimado do pipeline de ML.</span>
+      </article>
+    </section>
+
+    <section class="layout">
+      <aside class="painel">
+        <div class="painel-topo">
+          <h2>Etapas do pipeline</h2>
+          <p>
+            Clique em uma task para inspecionar objetivo, SQL, amostra, objetos gerados e métricas da etapa.
+          </p>
+        </div>
+
+        <div class="painel-body">
+          <div class="lista-etapas" id="listaEtapas">
+            <div class="estado-vazio">Carregando tasks...</div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="card">
+        <div class="card-topo">
+          <h2>Painel detalhado</h2>
+          <p>Resumo operacional, técnico e analítico da execução selecionada.</p>
+        </div>
+
+        <div class="card-body">
+          <div class="tabs">
+            <button class="tab ativa" data-aba="abaResumo" type="button">Resumo</button>
+            <button class="tab" data-aba="abaTask" type="button">Task selecionada</button>
+            <button class="tab" data-aba="abaObjetos" type="button">Objetos</button>
+            <button class="tab" data-aba="abaMetricas" type="button">Métricas</button>
+            <button class="tab" data-aba="abaHealth" type="button">Health</button>
+            <button class="tab" data-aba="abaJson" type="button">JSON</button>
+          </div>
+
+          <section class="aba ativa" id="abaResumo">
+            <div class="grid-duas">
+              <article class="bloco">
+                <h3>Visão de negócio e documentação</h3>
+                <p id="resumoDocumentacao">Carregando...</p>
+              </article>
+
+              <article class="bloco">
+                <h3>Modelo inferido</h3>
+                <p id="resumoModelo">Carregando...</p>
+              </article>
+            </div>
+
+            <div class="grid-metricas" id="metricasResumo"></div>
+
+            <div class="grid-duas" style="margin-top:14px;">
+              <article class="bloco">
+                <h3>Entradas principais</h3>
+                <div class="objeto-lista" id="listaEntradas"></div>
+              </article>
+
+              <article class="bloco">
+                <h3>Saídas principais</h3>
+                <div class="objeto-lista" id="listaSaidas"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="aba" id="abaTask">
+            <div class="grid-duas">
+              <article class="bloco">
+                <h3 id="tituloTaskSelecionada">Nenhuma task selecionada</h3>
+                <p id="descricaoTaskSelecionada">
+                  Selecione uma etapa do pipeline na coluna da esquerda para ver os detalhes.
+                </p>
+              </article>
+
+              <article class="bloco">
+                <h3>Métricas da task</h3>
+                <div class="grid-metricas" id="metricasTask"></div>
+              </article>
+            </div>
+
+            <div class="grid-duas" style="margin-top:14px;">
+              <article class="bloco">
+                <h3>SQL / lógica técnica</h3>
+                <div class="sql-box" id="sqlTask">Sem SQL registrado.</div>
+              </article>
+
+              <article class="bloco">
+                <h3>Amostra real da task</h3>
+                <div id="amostraTask">
+                  <div class="estado-vazio">Nenhuma amostra carregada.</div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="aba" id="abaObjetos">
+            <div class="grid-duas">
+              <article class="bloco">
+                <h3>Objetos de entrada</h3>
+                <div class="objeto-lista" id="listaObjetosEntrada"></div>
+              </article>
+
+              <article class="bloco">
+                <h3>Objetos de saída e apoio</h3>
+                <div class="objeto-lista" id="listaObjetosSaida"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="aba" id="abaMetricas">
+            <div class="grid-duas">
+              <article class="bloco">
+                <h3>Métricas principais do pipeline</h3>
+                <div id="graficoMetricasPipeline" style="width:100%;height:360px;"></div>
+              </article>
+
+              <article class="bloco">
+                <h3>Status das tasks</h3>
+                <div id="graficoStatusTasks" style="width:100%;height:360px;"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="aba" id="abaHealth">
+            <article class="bloco">
+              <h3>Saúde operacional da execução</h3>
+              <p id="textoHealth">Carregando...</p>
+
+              <div class="linha-health" id="cardsHealth"></div>
+            </article>
+          </section>
+
+          <section class="aba" id="abaJson">
+            <div class="json-box" id="jsonCompleto">Carregando payload JSON...</div>
+          </section>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const CONFIG = {{ configuracao_frontend|tojson }};
+    const DAG_ID = {{ dag_id|tojson }};
+    const RUN_ID = {{ run_id|tojson }};
+    const PREFIXO = CONFIG.url_prefixo || "";
+    const URL_DASHBOARD = `${PREFIXO}/api/pipelines/${encodeURIComponent(DAG_ID)}` + (RUN_ID ? `?run_id=${encodeURIComponent(RUN_ID)}` : "");
+
+    const estado = {
+      dashboard: null,
+      tasks: [],
+      taskSelecionada: null
+    };
+
+    const elementos = {
+      tituloDag: document.getElementById("tituloDag"),
+      heroBadges: document.getElementById("heroBadges"),
+      btnRecarregar: document.getElementById("btnRecarregar"),
+      btnCopiarJson: document.getElementById("btnCopiarJson"),
+      kpiStatus: document.getElementById("kpiStatus"),
+      kpiTasks: document.getElementById("kpiTasks"),
+      kpiSuccess: document.getElementById("kpiSuccess"),
+      kpiFalhas: document.getElementById("kpiFalhas"),
+      kpiModelo: document.getElementById("kpiModelo"),
+      kpiDominio: document.getElementById("kpiDominio"),
+      listaEtapas: document.getElementById("listaEtapas"),
+      resumoDocumentacao: document.getElementById("resumoDocumentacao"),
+      resumoModelo: document.getElementById("resumoModelo"),
+      metricasResumo: document.getElementById("metricasResumo"),
+      listaEntradas: document.getElementById("listaEntradas"),
+      listaSaidas: document.getElementById("listaSaidas"),
+      tituloTaskSelecionada: document.getElementById("tituloTaskSelecionada"),
+      descricaoTaskSelecionada: document.getElementById("descricaoTaskSelecionada"),
+      metricasTask: document.getElementById("metricasTask"),
+      sqlTask: document.getElementById("sqlTask"),
+      amostraTask: document.getElementById("amostraTask"),
+      listaObjetosEntrada: document.getElementById("listaObjetosEntrada"),
+      listaObjetosSaida: document.getElementById("listaObjetosSaida"),
+      graficoMetricasPipeline: document.getElementById("graficoMetricasPipeline"),
+      graficoStatusTasks: document.getElementById("graficoStatusTasks"),
+      textoHealth: document.getElementById("textoHealth"),
+      cardsHealth: document.getElementById("cardsHealth"),
+      jsonCompleto: document.getElementById("jsonCompleto"),
+      tabs: Array.from(document.querySelectorAll(".tab")),
+      abas: Array.from(document.querySelectorAll(".aba")),
+    };
+
+    function escaparHtml(valor) {
+      return String(valor ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function normalizarTexto(valor) {
+      return String(valor ?? "").trim();
+    }
+
+    function valorLegivel(valor) {
+      if (valor === null || valor === undefined || valor === "") return "-";
+      if (typeof valor === "number") {
+        if (Number.isInteger(valor)) return String(valor);
+        return valor.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+      }
+      return String(valor);
+    }
+
+    function arraySeguro(valor) {
+      if (!Array.isArray(valor)) return [];
+      return valor;
+    }
+
+    function objetoSeguro(valor) {
+      return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+    }
+
+    function classeStatus(status) {
+      const texto = String(status || "").toLowerCase();
+      if (texto.includes("success")) return "status-success";
+      if (texto.includes("failed")) return "status-failed";
+      if (texto.includes("running")) return "status-running";
+      if (texto.includes("queued")) return "status-queued";
+      return "status-default";
+    }
+
+    function contarStatus(tasks) {
+      const resumo = { success: 0, failed: 0, running: 0, queued: 0, outros: 0 };
+      arraySeguro(tasks).forEach((task) => {
+        const status = String(task.status || "").toLowerCase();
+        if (status === "success") resumo.success += 1;
+        else if (status === "failed") resumo.failed += 1;
+        else if (status === "running") resumo.running += 1;
+        else if (status === "queued") resumo.queued += 1;
+        else resumo.outros += 1;
+      });
+      return resumo;
+    }
+
+    function montarChip(texto, classeExtra = "") {
+      return `<span class="chip ${classeExtra}">${escaparHtml(texto)}</span>`;
+    }
+
+    function ativarAba(idAba) {
+      elementos.tabs.forEach((tab) => {
+        tab.classList.toggle("ativa", tab.dataset.aba === idAba);
+      });
+
+      elementos.abas.forEach((aba) => {
+        aba.classList.toggle("ativa", aba.id === idAba);
+      });
+    }
+
+    function montarMetricasCards(metricas) {
+      const entries = Object.entries(objetoSeguro(metricas));
+      if (!entries.length) {
+        return `<div class="estado-vazio">Nenhuma métrica consolidada foi encontrada.</div>`;
+      }
+
+      return entries.map(([chave, valor]) => `
+        <div class="metrica">
+          <small>${escaparHtml(chave)}</small>
+          <strong>${escaparHtml(valorLegivel(valor))}</strong>
+        </div>
+      `).join("");
+    }
+
+    function montarTabelaHtml(colunas, linhas) {
+      const cols = arraySeguro(colunas);
+      const rows = arraySeguro(linhas);
+
+      if (!cols.length || !rows.length) {
+        return `<div class="estado-vazio">Nenhuma amostra tabular disponível para esta task.</div>`;
+      }
+
+      const cabecalho = cols.map((col) => `<th>${escaparHtml(col)}</th>`).join("");
+
+      const corpo = rows.map((linha) => {
+        const item = objetoSeguro(linha);
+        return `
+          <tr>
+            ${cols.map((col) => `<td>${escaparHtml(valorLegivel(item[col]))}</td>`).join("")}
+          </tr>
+        `;
+      }).join("");
+
+      return `
+        <div class="tabela-wrap">
+          <table>
+            <thead><tr>${cabecalho}</tr></thead>
+            <tbody>${corpo}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function montarUrlTabela(objeto) {
+      const item = objetoSeguro(objeto);
+      if (!item.conn_id || !item.schema || !item.tabela) return "";
+      const params = new URLSearchParams();
+      params.set("conexao_id", item.conn_id);
+      params.set("schema", item.schema);
+      params.set("tabela", item.tabela);
+      if (item.banco) params.set("banco", item.banco);
+      return `${PREFIXO}${CONFIG.rota_tabela_html}?${params.toString()}`;
+    }
+
+    function montarUrlDownload(objeto) {
+      const item = objetoSeguro(objeto);
+      const caminho = normalizarTexto(item.caminho_arquivo || item.path || item.file_path);
+      if (!caminho) return "";
+      const params = new URLSearchParams();
+      params.set("caminho", caminho);
+      return `${PREFIXO}${CONFIG.rota_download}?${params.toString()}`;
+    }
+
+    function montarObjetoHtml(objeto) {
+      const item = objetoSeguro(objeto);
+      const nome = item.nome || item.tabela || item.caminho_arquivo || item.tipo || "Objeto";
+      const tipo = item.tipo || "objeto";
+      const direcao = item.direcao || "neutro";
+      const connId = item.conn_id || "-";
+      const schema = item.schema || "-";
+      const tabela = item.tabela || "-";
+      const caminho = item.caminho_arquivo || item.path || "-";
+
+      const urlTabela = montarUrlTabela(item);
+      const urlDownload = montarUrlDownload(item);
+
+      return `
+        <article class="objeto">
+          <div class="objeto-topo">
+            <div>
+              <h4>${escaparHtml(nome)}</h4>
+              <div class="chips" style="margin-top:8px;">
+                ${montarChip(tipo)}
+                ${montarChip(`direção: ${direcao}`)}
+              </div>
+            </div>
+          </div>
+
+          <div class="objeto-meta">
+            <div><strong>Conn ID:</strong> ${escaparHtml(connId)}</div>
+            <div><strong>Schema:</strong> ${escaparHtml(schema)}</div>
+            <div><strong>Tabela:</strong> ${escaparHtml(tabela)}</div>
+            <div><strong>Caminho:</strong> ${escaparHtml(caminho)}</div>
+          </div>
+
+          <div class="objeto-acoes">
+            ${urlTabela ? `<a class="btn-mini" href="${urlTabela}" target="_blank" rel="noopener">Abrir tabela</a>` : ""}
+            ${urlDownload ? `<a class="btn-mini" href="${urlDownload}">Baixar arquivo</a>` : ""}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderizarHeroBadges(dashboard) {
+      const pipeline = objetoSeguro(dashboard.pipeline);
+      const badges = [
+        montarChip(`dag_id: ${dashboard.dag_id || DAG_ID}`, "chip-primario"),
+        montarChip(`run_id: ${dashboard.run_id || "-"}`),
+        montarChip(`status: ${dashboard.status || "unknown"}`),
+        montarChip(`tipo: ${dashboard.tipo_pipeline || pipeline.tipo_pipeline || "-"}`),
+        montarChip(`subtipo: ${dashboard.subtipo_pipeline || pipeline.subtipo_pipeline || "-"}`),
+      ];
+
+      arraySeguro(dashboard.tags).forEach((tag) => {
+        badges.push(montarChip(`tag: ${tag}`));
+      });
+
+      elementos.heroBadges.innerHTML = badges.join("");
+    }
+
+    function renderizarKpis(dashboard) {
+      const tasks = arraySeguro(dashboard.tasks);
+      const status = contarStatus(tasks);
+      const modelo = objetoSeguro(dashboard.modelo || objetoSeguro(dashboard.pipeline).modelo);
+
+      elementos.kpiStatus.textContent = valorLegivel(dashboard.status || "-");
+      elementos.kpiTasks.textContent = String(tasks.length);
+      elementos.kpiSuccess.textContent = String(status.success);
+      elementos.kpiFalhas.textContent = String(status.failed);
+      elementos.kpiModelo.textContent = valorLegivel(modelo.nome_modelo || "-");
+      elementos.kpiDominio.textContent = valorLegivel(dashboard.dominio || "-");
+    }
+
+    function renderizarListaEtapas(tasks) {
+      if (!arraySeguro(tasks).length) {
+        elementos.listaEtapas.innerHTML = `<div class="estado-vazio">Nenhuma task encontrada nesta execução.</div>`;
+        return;
+      }
+
+      elementos.listaEtapas.innerHTML = tasks.map((task, indice) => `
+        <article class="etapa ${indice === 0 ? "ativa" : ""}" data-task-id="${escaparHtml(task.task_id)}">
+          <div class="etapa-topo">
+            <div class="etapa-titulo">
+              <span class="etapa-numero">${task.ordem_pipeline || (indice + 1)}</span>
+              <div>
+                <h3>${escaparHtml(task.nome_amigavel || task.nome || task.task_id || "-")}</h3>
+                <small>${escaparHtml(task.tipo_etapa_ml || task.tipo || "-")}</small>
+              </div>
+            </div>
+            <span class="badge-status ${classeStatus(task.status)}">${escaparHtml(task.status || "unknown")}</span>
+          </div>
+          <small>${escaparHtml(task.objetivo || task.descricao || "Sem objetivo documentado.")}</small>
+        </article>
+      `).join("");
+
+      Array.from(document.querySelectorAll(".etapa")).forEach((elemento) => {
+        elemento.addEventListener("click", () => {
+          const taskId = elemento.getAttribute("data-task-id");
+          selecionarTask(taskId);
+        });
+      });
+    }
+
+    function renderizarResumo(dashboard) {
+      const pipeline = objetoSeguro(dashboard.pipeline);
+      const documentacao = objetoSeguro(dashboard.documentacao || pipeline.documentacao);
+      const modelo = objetoSeguro(dashboard.modelo || pipeline.modelo);
+      const textoDocumentacao = [
+        documentacao.dag_descricao,
+        documentacao.documentacao_dag,
+        documentacao.explicacao_execucao
+      ].filter(Boolean).join("\n\n");
+
+      const textoModelo = [
+        `Nome do modelo: ${valorLegivel(modelo.nome_modelo || "-")}`,
+        `Família: ${valorLegivel(modelo.familia_modelo || "-")}`,
+        `Métricas principais encontradas: ${Object.keys(objetoSeguro(modelo.metricas_principais)).length}`,
+        `Artefatos relacionados: ${arraySeguro(modelo.artefatos_relacionados).length}`
+      ].join("\n");
+
+      elementos.resumoDocumentacao.textContent = textoDocumentacao || "Sem documentação consolidada.";
+      elementos.resumoModelo.textContent = textoModelo;
+      elementos.metricasResumo.innerHTML = montarMetricasCards(modelo.metricas_principais || {});
+      elementos.listaEntradas.innerHTML = montarListaObjetos(arraySeguro(dashboard.entradas));
+      elementos.listaSaidas.innerHTML = montarListaObjetos(arraySeguro(dashboard.saidas));
+      elementos.listaObjetosEntrada.innerHTML = montarListaObjetos(arraySeguro(dashboard.entradas));
+      elementos.listaObjetosSaida.innerHTML = montarListaObjetos([
+        ...arraySeguro(dashboard.saidas),
+        ...arraySeguro(dashboard.artefatos_apoio)
+      ]);
+    }
+
+    function montarListaObjetos(lista) {
+      const itens = arraySeguro(lista);
+      if (!itens.length) {
+        return `<div class="estado-vazio">Nenhum objeto encontrado.</div>`;
+      }
+      return itens.map(montarObjetoHtml).join("");
+    }
+
+    function selecionarTask(taskId) {
+      const tasks = arraySeguro(estado.tasks);
+      const task = tasks.find((item) => String(item.task_id) === String(taskId));
+      if (!task) return;
+
+      estado.taskSelecionada = task;
+
+      Array.from(document.querySelectorAll(".etapa")).forEach((elemento) => {
+        elemento.classList.toggle("ativa", elemento.getAttribute("data-task-id") === String(taskId));
+      });
+
+      elementos.tituloTaskSelecionada.textContent = task.nome_amigavel || task.nome || task.task_id || "Task";
+      elementos.descricaoTaskSelecionada.textContent = task.descricao || task.objetivo || "Sem descrição registrada.";
+      elementos.metricasTask.innerHTML = montarMetricasCards(task.metricas || {});
+      elementos.sqlTask.textContent = normalizarTexto(task.sql || task.sql_preview || "") || "Sem SQL registrado.";
+      elementos.amostraTask.innerHTML = montarTabelaHtml(
+        arraySeguro(objetoSeguro(task.tabela).colunas),
+        arraySeguro(objetoSeguro(task.tabela).linhas)
+      );
+    }
+
+    function renderizarHealth(dashboard) {
+      const health = objetoSeguro(dashboard.health);
+      const texto = [
+        `Status geral da DAG: ${valorLegivel(dashboard.status || "-")}`,
+        `Sucesso: ${valorLegivel(health.success)}`,
+        `Falha: ${valorLegivel(health.failed)}`,
+        `Executando: ${valorLegivel(health.running)}`,
+        `Em fila: ${valorLegivel(health.queued)}`,
+      ].join("\n");
+
+      elementos.textoHealth.textContent = texto;
+
+      const cards = [
+        ["Success", health.success],
+        ["Failed", health.failed],
+        ["Running", health.running],
+        ["Queued", health.queued],
+        ["Total", health.total_tasks]
+      ];
+
+      elementos.cardsHealth.innerHTML = cards.map(([nome, valor]) => `
+        <div class="health-card">
+          <small>${escaparHtml(nome)}</small>
+          <strong>${escaparHtml(valorLegivel(valor))}</strong>
+          <span style="color:var(--muted); font-size:.85rem;">Contador operacional consolidado.</span>
+        </div>
+      `).join("");
+    }
+
+    function renderizarJson(dashboard) {
+      elementos.jsonCompleto.textContent = JSON.stringify(dashboard, null, 2);
+    }
+
+    function renderizarGraficos(dashboard) {
+      const pipeline = objetoSeguro(dashboard.pipeline);
+      const modelo = objetoSeguro(dashboard.modelo || pipeline.modelo);
+      const metricas = objetoSeguro(modelo.metricas_principais);
+      const entries = Object.entries(metricas).filter(([, valor]) => typeof valor === "number");
+
+      if (window.Plotly && entries.length) {
+        Plotly.newPlot(
+          elementos.graficoMetricasPipeline,
+          [{
+            type: "bar",
+            x: entries.map(([chave]) => chave),
+            y: entries.map(([, valor]) => valor),
+            text: entries.map(([, valor]) => valorLegivel(valor)),
+            textposition: "auto",
+          }],
+          {
+            paper_bgcolor: "rgba(0,0,0,0)",
+            plot_bgcolor: "rgba(0,0,0,0)",
+            font: { color: "#E8EEFF", family: "Inter, Segoe UI, Arial, sans-serif" },
+            margin: { t: 20, r: 10, b: 80, l: 45 },
+            xaxis: { tickangle: -25, gridcolor: "rgba(255,255,255,.07)" },
+            yaxis: { gridcolor: "rgba(255,255,255,.07)" },
+          },
+          { responsive: true, displayModeBar: false }
+        );
+      } else {
+        elementos.graficoMetricasPipeline.innerHTML = `<div class="estado-vazio">Não há métricas numéricas suficientes para montar o gráfico.</div>`;
+      }
+
+      const status = contarStatus(arraySeguro(dashboard.tasks));
+      const labels = ["Success", "Failed", "Running", "Queued", "Outros"];
+      const values = [status.success, status.failed, status.running, status.queued, status.outros];
+
+      if (window.Plotly) {
+        Plotly.newPlot(
+          elementos.graficoStatusTasks,
+          [{
+            type: "pie",
+            labels,
+            values,
+            hole: 0.45,
+            textinfo: "label+value",
+          }],
+          {
+            paper_bgcolor: "rgba(0,0,0,0)",
+            plot_bgcolor: "rgba(0,0,0,0)",
+            font: { color: "#E8EEFF", family: "Inter, Segoe UI, Arial, sans-serif" },
+            margin: { t: 20, r: 10, b: 20, l: 10 },
+            showlegend: true,
+          },
+          { responsive: true, displayModeBar: false }
+        );
+      } else {
+        elementos.graficoStatusTasks.innerHTML = `<div class="estado-vazio">Plotly não está disponível no navegador.</div>`;
+      }
+    }
+
+    async function carregarDashboard() {
+      try {
+        const resposta = await fetch(URL_DASHBOARD, {
+          credentials: "same-origin",
+          headers: { "Accept": "application/json" }
+        });
+
+        if (!resposta.ok) {
+          const textoErro = await resposta.text();
+          throw new Error(`Falha HTTP ${resposta.status}: ${textoErro}`);
+        }
+
+        const dashboard = await resposta.json();
+        estado.dashboard = dashboard;
+        estado.tasks = arraySeguro(dashboard.tasks);
+
+        renderizarHeroBadges(dashboard);
+        renderizarKpis(dashboard);
+        renderizarListaEtapas(estado.tasks);
+        renderizarResumo(dashboard);
+        renderizarHealth(dashboard);
+        renderizarJson(dashboard);
+        renderizarGraficos(dashboard);
+
+        if (estado.tasks.length) {
+          selecionarTask(estado.tasks[0].task_id);
+        } else {
+          elementos.tituloTaskSelecionada.textContent = "Nenhuma task encontrada";
+          elementos.descricaoTaskSelecionada.textContent = "Esta execução não retornou etapas visíveis.";
+          elementos.metricasTask.innerHTML = `<div class="estado-vazio">Sem métricas de task.</div>`;
+          elementos.sqlTask.textContent = "Sem SQL registrado.";
+          elementos.amostraTask.innerHTML = `<div class="estado-vazio">Sem amostra disponível.</div>`;
+        }
+      } catch (erro) {
+        console.error(erro);
+        const mensagem = escaparHtml(erro.message || "Erro desconhecido.");
+        document.querySelector(".layout").innerHTML = `
+          <div class="erro">
+            Não foi possível carregar o dashboard do pipeline.<br /><br />
+            ${mensagem}
+          </div>
+        `;
+      }
+    }
+
+    elementos.tabs.forEach((tab) => {
+      tab.addEventListener("click", () => ativarAba(tab.dataset.aba));
+    });
+
+    elementos.btnRecarregar.addEventListener("click", carregarDashboard);
+
+    elementos.btnCopiarJson.addEventListener("click", async () => {
+      try {
+        const texto = estado.dashboard ? JSON.stringify(estado.dashboard, null, 2) : "";
+        await navigator.clipboard.writeText(texto);
+        elementos.btnCopiarJson.textContent = "JSON copiado";
+        setTimeout(() => {
+          elementos.btnCopiarJson.textContent = "Copiar JSON";
+        }, 1800);
+      } catch (erro) {
+        console.error(erro);
+      }
+    });
+
+    carregarDashboard();
+  </script>
+</body>
+</html>

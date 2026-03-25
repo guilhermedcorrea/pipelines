@@ -54,7 +54,7 @@
 
   .kb-top{
     display:flex;
-    align-items:flex-start;
+    align-items:center;
     justify-content:space-between;
     gap:12px;
     flex-wrap:wrap;
@@ -65,24 +65,31 @@
   .kb-title{
     display:flex;
     flex-direction:column;
+    align-items:center;
+    justify-content:center;
     gap:6px;
     min-width: min(520px, 100%);
   }
 
   .kb-title h1{
     margin:0;
+    width:100%;
     font-size: 22px;
     font-weight: 950;
     letter-spacing: -0.02em;
     color: var(--kb-text);
     display:flex;
     align-items:center;
+    justify-content:center;
     gap:10px;
     flex-wrap:wrap;
+    text-align:center;
   }
 
   .kb-desc{
     margin:0;
+    align-self:center;
+    text-align:center;
     color: var(--kb-muted);
     font-size: 13px;
     line-height: 1.35;
@@ -169,34 +176,32 @@
   }
 
   .kb-toolbar{
-    display:flex;
-    align-items:flex-end;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
     padding: 0 10px 12px 10px;
     flex: 0 0 auto;
-  }
-
-  .kb-toolbar-left{
-    flex: 1 1 520px;
-    min-width: 280px;
-  }
-
-  .kb-toolbar-right{
-    display:flex;
-    align-items:center;
-    justify-content:flex-end;
-    gap:8px;
-    flex-wrap:wrap;
-    flex: 0 1 auto;
   }
 
   .kb-search{
     display:flex;
     flex-direction:column;
-    gap:6px;
+    gap:8px;
     width:100%;
+  }
+
+  .kb-search-main{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    width:100%;
+  }
+
+  .kb-toolbar-right{
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    gap:10px;
+    flex-wrap:wrap;
+    flex: 0 0 auto;
   }
 
   .kb-search-label{
@@ -209,7 +214,9 @@
     display:flex;
     align-items:center;
     gap:10px;
-    width:100%;
+    flex: 1 1 420px;
+    min-width: min(320px, 100%);
+    min-height: 44px;
     background:#fff;
     border:1px solid var(--kb-line);
     border-radius: 14px;
@@ -249,15 +256,22 @@
   .kb-search-count{
     display:inline-flex;
     align-items:center;
-    min-height: 40px;
-    padding: 0 12px;
-    border-radius: 12px;
+    min-height: 44px;
+    padding: 0 14px;
+    border-radius: 14px;
     border: 1px solid var(--kb-line);
-    background: rgba(255,255,255,.9);
+    background: rgba(255,255,255,.96);
     color: var(--kb-muted);
     font-size: 12px;
     font-weight: 900;
     white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(15,23,42,.04);
+  }
+
+  #btnLimparBusca{
+    min-height: 44px;
+    padding-inline: 14px;
+    border-radius: 14px;
   }
 
   .kb-board{
@@ -669,16 +683,26 @@
   }
 
   .kb-tag{
+    --kb-tag-bg: #e2e8f0;
+    --kb-tag-fg: #0f172a;
     display:inline-flex;
     align-items:center;
     gap:6px;
-    padding: 3px 8px;
-    border-radius: 999px;
+    min-height: 22px;
+    padding: 4px 8px;
+    border-radius: 7px;
     font-size: 11px;
     font-weight: 950;
     border: 1px solid rgba(15,23,42,.10);
-    background: rgba(15,23,42,.04);
-    color: #0f172a;
+    background: var(--kb-tag-bg);
+    color: var(--kb-tag-fg);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 1px 2px rgba(15,23,42,.08);
+    line-height: 1;
+    max-width: 100%;
+  }
+
+  .kb-tag-text{
+    display:block;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
@@ -926,9 +950,13 @@
       padding-right: 6px;
     }
 
+    .kb-search-main{
+      align-items:stretch;
+    }
+
     .kb-toolbar-right{
       width:100%;
-      justify-content:space-between;
+      justify-content:flex-start;
     }
 
     .kb-search-count{
@@ -948,6 +976,11 @@
       min-width: 100%;
     }
 
+    .kb-title h1,
+    .kb-desc{
+      text-align:center;
+    }
+
     .kb-actions{
       width:100%;
     }
@@ -956,8 +989,14 @@
       flex: 1 1 auto;
     }
 
-    .kb-toolbar-right{
+    .kb-search-main{
       flex-direction: column;
+      align-items: stretch;
+    }
+
+    .kb-toolbar-right{
+      width:100%;
+      flex-direction: row;
       align-items: stretch;
     }
 
@@ -976,10 +1015,7 @@
 <div class="kb-wrap">
   <div class="kb-top">
     <div class="kb-title">
-      <h1>
-        {{ kanban.NomeKanban }}
-        <button class="kb-btn icon danger" id="btnInativarKanban" title="Inativar Kanban">−</button>
-      </h1>
+      <h1>{{ kanban.NomeKanban }}</h1>
       <p class="kb-desc">{{ kanban.Descricao or "—" }}</p>
     </div>
 
@@ -993,9 +1029,9 @@
   <div class="kb-divider"></div>
 
   <div class="kb-toolbar">
-    <div class="kb-toolbar-left">
-      <label class="kb-search" for="buscaKanban">
-        <span class="kb-search-label">Pesquisar cards</span>
+    <label class="kb-search" for="buscaKanban">
+      <span class="kb-search-label">Pesquisar cards</span>
+      <div class="kb-search-main">
         <div class="kb-search-box">
           <span class="kb-search-icon">🔎</span>
           <input
@@ -1007,13 +1043,13 @@
             spellcheck="false"
           />
         </div>
-      </label>
-    </div>
 
-    <div class="kb-toolbar-right">
-      <div id="contadorPesquisa" class="kb-search-count">Carregando cards...</div>
-      <button class="kb-btn" id="btnLimparBusca">Limpar busca</button>
-    </div>
+        <div class="kb-toolbar-right">
+          <div id="contadorPesquisa" class="kb-search-count">Carregando cards...</div>
+          <button class="kb-btn" id="btnLimparBusca">Limpar busca</button>
+        </div>
+      </div>
+    </label>
   </div>
 
   <div class="kb-divider"></div>
@@ -1173,27 +1209,6 @@
   </div>
 </div>
 
-<div id="modalInativarKanban" class="kb-modal">
-  <div class="kb-modal-card" style="max-width:620px;">
-    <div class="kb-modal-head">
-      <strong>Inativar Kanban</strong>
-      <button class="kb-btn" id="btnFecharInativarKanban">Fechar</button>
-    </div>
-
-    <div class="kb-modal-body">
-      <div class="kb-warn">
-        Isso deve setar DimKanban.Ativo = 0 e o Kanban deixa de aparecer.
-      </div>
-
-      <div class="kb-row" style="justify-content:flex-end;">
-        <button class="kb-btn danger" id="btnConfirmarInativarKanban">Inativar</button>
-      </div>
-
-      <div id="msgInativarKanban" class="kb-msg-erro"></div>
-    </div>
-  </div>
-</div>
-
 <script src="/socket.io/socket.io.js"></script>
 <script>
 (() => {
@@ -1256,11 +1271,6 @@
   const btnConfirmarInativarFase = document.getElementById("btnConfirmarInativarFase");
   const msgInativarFase = document.getElementById("msgInativarFase");
 
-  const modalInativarKanban = document.getElementById("modalInativarKanban");
-  const btnFecharInativarKanban = document.getElementById("btnFecharInativarKanban");
-  const btnConfirmarInativarKanban = document.getElementById("btnConfirmarInativarKanban");
-  const msgInativarKanban = document.getElementById("msgInativarKanban");
-  const btnInativarKanban = document.getElementById("btnInativarKanban");
 
   let cardParaRemover = null;
   let faseParaInativar = null;
@@ -1341,6 +1351,74 @@
     const s = normalizaCnpj(v);
     if (s.length !== 14) return s;
     return `${s.slice(0,2)}.${s.slice(2,5)}.${s.slice(5,8)}/${s.slice(8,12)}-${s.slice(12,14)}`;
+  }
+
+  function normalizarCorHex(cor){
+    let hex = safeStr(cor).trim();
+    if (!hex) return "";
+
+    if (!hex.startsWith("#")) hex = `#${hex}`;
+
+    if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) return "";
+
+    if (hex.length === 4) {
+      hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+    }
+
+    return hex.toUpperCase();
+  }
+
+  function hexParaRgb(hex){
+    const cor = normalizarCorHex(hex);
+    if (!cor) return null;
+
+    return {
+      r: parseInt(cor.slice(1, 3), 16),
+      g: parseInt(cor.slice(3, 5), 16),
+      b: parseInt(cor.slice(5, 7), 16)
+    };
+  }
+
+  function canalSrgbParaLinear(valor){
+    const canal = valor / 255;
+    return canal <= 0.03928 ? canal / 12.92 : ((canal + 0.055) / 1.055) ** 2.4;
+  }
+
+  function luminanciaRelativa(rgb){
+    if (!rgb) return 1;
+
+    const r = canalSrgbParaLinear(rgb.r);
+    const g = canalSrgbParaLinear(rgb.g);
+    const b = canalSrgbParaLinear(rgb.b);
+
+    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+  }
+
+  function corTextoPorFundo(hex){
+    const rgb = hexParaRgb(hex);
+    return luminanciaRelativa(rgb) > 0.56 ? "#0F172A" : "#FFFFFF";
+  }
+
+  function escurecerCor(hex, fator = 0.22){
+    const rgb = hexParaRgb(hex);
+    if (!rgb) return "rgba(15,23,42,.14)";
+
+    const reduzir = (canal) => Math.max(0, Math.min(255, Math.round(canal * (1 - fator))));
+
+    const r = reduzir(rgb.r).toString(16).padStart(2, "0");
+    const g = reduzir(rgb.g).toString(16).padStart(2, "0");
+    const b = reduzir(rgb.b).toString(16).padStart(2, "0");
+
+    return `#${r}${g}${b}`.toUpperCase();
+  }
+
+  function estiloTag(corHex){
+    const corBase = normalizarCorHex(corHex);
+    if (!corBase) return "";
+
+    const corTexto = corTextoPorFundo(corBase);
+    const corBorda = escurecerCor(corBase, 0.22);
+    return `background:${corBase}; color:${corTexto}; border-color:${corBorda};`;
   }
 
   function obterTextoFaceCard(card){
@@ -2191,8 +2269,10 @@
       tgs.map(t => el("span", {
         class:"kb-tag",
         title: t.NomeTag || "",
-        style: t.CorHex ? `background:${t.CorHex}; border-color: rgba(15,23,42,.10);` : ""
-      }, [t.NomeTag || ""]))
+        style: estiloTag(t.CorHex)
+      }, [
+        el("span", {class:"kb-tag-text"}, [t.NomeTag || ""])
+      ]))
     );
 
     const meta = el("div", {class:"kb-card-meta"}, []);
@@ -2484,35 +2564,6 @@
     await carregar();
   });
 
-  function abrirModalInativarKanban(){
-    msgInativarKanban.style.display = "none";
-    modalInativarKanban.style.display = "block";
-  }
-
-  function fecharModalInativarKanban(){
-    modalInativarKanban.style.display = "none";
-  }
-
-  btnInativarKanban.addEventListener("click", abrirModalInativarKanban);
-
-  btnFecharInativarKanban.addEventListener("click", fecharModalInativarKanban);
-  modalInativarKanban.addEventListener("click", (e) => {
-    if (e.target === modalInativarKanban) fecharModalInativarKanban();
-  });
-
-  btnConfirmarInativarKanban.addEventListener("click", async () => {
-    msgInativarKanban.style.display = "none";
-
-    const res = await apiPost(`/kanban/api/kanbans/${ID_KANBAN}/inativar`, {});
-
-    if (!res.ok){
-      msgInativarKanban.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar kanban (HTTP ${res.http}).`;
-      msgInativarKanban.style.display = "block";
-      return;
-    }
-
-    window.location.href = "{{ url_for('kanban.kanbans_lista') }}";
-  });
 
   function limparEstadoCardAberto(){
     cardAbertoId = null;
@@ -2617,8 +2668,10 @@
       const pill = el("span", {
         class:"kb-tag",
         title: t.NomeTag || "",
-        style: t.CorHex ? `background:${t.CorHex};` : ""
-      }, [t.NomeTag || ""]);
+        style: estiloTag(t.CorHex)
+      }, [
+        el("span", {class:"kb-tag-text"}, [t.NomeTag || ""])
+      ]);
 
       const btnX = el("button", {class:"kb-btn sm", onclick: () => removerTagDoCard(t.IDDimKanbanTag)}, ["x"]);
       const wrap = el("div", {style:"display:flex;gap:6px;align-items:center;flex-wrap:wrap;"}, [pill, btnX]);

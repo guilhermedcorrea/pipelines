@@ -1,0 +1,55 @@
+{% set metricas_ctx = metricas if metricas is defined else {} %}
+{% set resumo_principal = metricas_ctx.resumo_principal if metricas_ctx.resumo_principal is defined else [] %}
+{% set por_task = metricas_ctx.por_task if metricas_ctx.por_task is defined else [] %}
+<article class="card">
+  <div class="card-topo">
+    <h2>Métricas</h2>
+    <p>Métricas principais consolidadas do pipeline e métricas complementares por task.</p>
+  </div>
+  <div class="card-body">
+    {% if resumo_principal %}
+      <div class="grid-metricas" style="margin-top:0; margin-bottom:14px;">
+        {% for item in resumo_principal %}
+          <div class="metrica">
+            <small>{{ item.label or item.chave or 'Métrica' }}</small>
+            <strong>{{ item.valor if item.valor is not none else '-' }}</strong>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="estado-vazio" style="margin-bottom:14px;">Nenhuma métrica principal foi consolidada.</div>
+    {% endif %}
+
+    {% if por_task %}
+      <div class="objeto-lista">
+        {% for task in por_task %}
+          <article class="objeto">
+            <div class="objeto-topo">
+              <div>
+                <h4>{{ task.task_nome or task.task_id or 'Task' }}</h4>
+                <div class="chips" style="margin-top:8px;">
+                  <span class="chip">{{ task.task_id or '-' }}</span>
+                  <span class="chip">Principais: {{ task.principais|length if task.principais is defined else 0 }}</span>
+                  <span class="chip">Complementares: {{ task.complementares|length if task.complementares is defined else 0 }}</span>
+                </div>
+              </div>
+            </div>
+
+            {% if task.principais %}
+              <div class="grid-metricas" style="margin-top:0;">
+                {% for item in task.principais %}
+                  <div class="metrica">
+                    <small>{{ item.label or item.chave }}</small>
+                    <strong>{{ item.valor if item.valor is not none else '-' }}</strong>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="estado-vazio">Esta task não trouxe métricas principais numéricas.</div>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</article>

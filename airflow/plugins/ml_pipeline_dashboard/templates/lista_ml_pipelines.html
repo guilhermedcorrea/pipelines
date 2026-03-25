@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ configuracao_frontend.titulo_plugin }} - Catálogo de Pipelines ML</title>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --bg-soft: #11182d;
+      --bg-elev: #151f38;
+      --bg-elev-2: #1a2748;
+      --border: #26345c;
+      --text: #e8eeff;
+      --muted: #a8b3d1;
+      --primary: #6e56cf;
+      --primary-hover: #7c66d9;
+      --blue: #3b82f6;
+      --cyan: #22d3ee;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --chip: #2a3557;
+      --shadow: 0 20px 60px rgba(110, 86, 207, 0.18);
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 14px;
+      --font: Inter, "Segoe UI", Arial, sans-serif;
+    }
+
+    *{ box-sizing:border-box; }
+
+    body{
+      margin:0;
+      font-family:var(--font);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(110,86,207,.20), transparent 25%),
+        radial-gradient(circle at left bottom, rgba(34,211,238,.10), transparent 22%),
+        var(--bg);
+      min-height:100vh;
+    }
+
+    a{ color:inherit; }
+
+    .pagina{
+      width:min(1500px, calc(100vw - 32px));
+      margin:0 auto;
+      padding:24px 0 42px;
+    }
+
+    .hero{
+      position:relative;
+      overflow:hidden;
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      background:
+        linear-gradient(180deg, rgba(21,31,56,.96) 0%, rgba(17,24,45,.98) 100%);
+      box-shadow:var(--shadow);
+      padding:28px;
+      margin-bottom:18px;
+    }
+
+    .hero::before{
+      content:"";
+      position:absolute;
+      inset:auto -120px -120px auto;
+      width:280px;
+      height:280px;
+      border-radius:50%;
+      background:radial-gradient(circle, rgba(34,211,238,.12) 0%, rgba(34,211,238,0) 70%);
+      pointer-events:none;
+    }
+
+    .hero-topo{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:20px;
+      flex-wrap:wrap;
+      position:relative;
+      z-index:1;
+    }
+
+    .hero h1{
+      margin:0 0 10px 0;
+      font-size:clamp(2rem, 3vw, 2.6rem);
+      line-height:1.08;
+      letter-spacing:-0.02em;
+    }
+
+    .hero p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.7;
+      max-width:880px;
+      font-size:0.98rem;
+    }
+
+    .hero-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:40px;
+      padding:10px 14px;
+      border-radius:999px;
+      border:1px solid rgba(59,130,246,.24);
+      background:rgba(59,130,246,.12);
+      color:#dbe7ff;
+      font-weight:800;
+      white-space:nowrap;
+    }
+
+    .grade-kpis{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap:14px;
+      margin-bottom:18px;
+    }
+
+    .kpi{
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(21,31,56,.95), rgba(17,24,45,.98));
+      border-radius:var(--radius-md);
+      padding:16px 18px;
+      box-shadow:var(--shadow);
+      min-height:112px;
+    }
+
+    .kpi small{
+      display:block;
+      color:var(--muted);
+      font-size:0.82rem;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      margin-bottom:12px;
+    }
+
+    .kpi strong{
+      display:block;
+      font-size:2rem;
+      line-height:1;
+      margin-bottom:8px;
+    }
+
+    .kpi span{
+      color:var(--muted);
+      font-size:0.9rem;
+      line-height:1.55;
+    }
+
+    .filtros{
+      border:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(21,31,56,.95), rgba(17,24,45,.98));
+      border-radius:var(--radius-lg);
+      box-shadow:var(--shadow);
+      padding:20px;
+      margin-bottom:18px;
+    }
+
+    .filtros-topo{
+      display:flex;
+      justify-content:space-between;
+      gap:14px;
+      align-items:flex-start;
+      flex-wrap:wrap;
+      margin-bottom:14px;
+    }
+
+    .filtros-topo h2{
+      margin:0 0 6px 0;
+      font-size:1.25rem;
+    }
+
+    .filtros-topo p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.6;
+      max-width:760px;
+    }
+
+    .filtros-grade{
+      display:grid;
+      grid-template-columns: 2.4fr 1fr 1fr auto auto;
+      gap:12px;
+      align-items:end;
+    }
+
+    .campo label{
+      display:block;
+      margin-bottom:7px;
+      color:var(--muted);
+      font-size:0.76rem;
+      font-weight:900;
+      text-transform:uppercase;
+      letter-spacing:.06em;
+    }
+
+    .campo input,
+    .campo select{
+      width:100%;
+      min-height:46px;
+      border-radius:14px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.03);
+      color:var(--text);
+      padding:12px 14px;
+      font-size:0.95rem;
+      font-weight:700;
+      outline:none;
+    }
+
+    .campo input::placeholder{
+      color:#7f8bb0;
+    }
+
+    .campo input:focus,
+    .campo select:focus{
+      border-color:rgba(59,130,246,.45);
+      box-shadow:0 0 0 4px rgba(59,130,246,.10);
+    }
+
+    .acoes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+
+    .btn{
+      min-height:46px;
+      border:none;
+      border-radius:14px;
+      padding:0 16px;
+      font-size:0.92rem;
+      font-weight:900;
+      cursor:pointer;
+      transition:transform .16s ease, opacity .16s ease, background .16s ease, border-color .16s ease;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      white-space:nowrap;
+    }
+
+    .btn:hover{ transform:translateY(-1px); }
+
+    .btn-primario{
+      background:linear-gradient(135deg, var(--primary), var(--blue));
+      color:#fff;
+    }
+
+    .btn-secundario{
+      background:rgba(255,255,255,.04);
+      color:var(--text);
+      border:1px solid var(--border);
+    }
+
+    .mensagem{
+      margin-top:14px;
+      min-height:22px;
+      color:var(--muted);
+      font-size:0.92rem;
+      font-weight:700;
+    }
+
+    .lista{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:16px;
+    }
+
+    .card{
+      border:1px solid var(--border);
+      background:
+        linear-gradient(180deg, rgba(21,31,56,.96) 0%, rgba(17,24,45,.98) 100%);
+      border-radius:22px;
+      box-shadow:var(--shadow);
+      padding:20px;
+      min-height:310px;
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+      transition:transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+
+    .card:hover{
+      transform:translateY(-2px);
+      border-color:rgba(59,130,246,.45);
+      background:
+        linear-gradient(180deg, rgba(26,39,72,.98) 0%, rgba(17,24,45,.98) 100%);
+    }
+
+    .card-topo{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .card-titulo{
+      min-width:0;
+    }
+
+    .card-titulo h3{
+      margin:0 0 8px 0;
+      font-size:1.18rem;
+      line-height:1.25;
+      word-break:break-word;
+    }
+
+    .card-titulo .descricao{
+      color:var(--muted);
+      font-size:0.93rem;
+      line-height:1.6;
+      display:-webkit-box;
+      -webkit-line-clamp:3;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+
+    .badge-status{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:32px;
+      padding:7px 12px;
+      border-radius:999px;
+      font-size:0.78rem;
+      font-weight:900;
+      border:1px solid transparent;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+    }
+
+    .status-success{
+      background:rgba(34,197,94,.12);
+      color:#9ae6b4;
+      border-color:rgba(34,197,94,.26);
+    }
+
+    .status-failed{
+      background:rgba(239,68,68,.12);
+      color:#ffb3b3;
+      border-color:rgba(239,68,68,.28);
+    }
+
+    .status-running{
+      background:rgba(59,130,246,.12);
+      color:#bfdbfe;
+      border-color:rgba(59,130,246,.28);
+    }
+
+    .status-queued{
+      background:rgba(245,158,11,.12);
+      color:#fde68a;
+      border-color:rgba(245,158,11,.28);
+    }
+
+    .status-default{
+      background:rgba(168,179,209,.10);
+      color:#d1d8eb;
+      border-color:rgba(168,179,209,.22);
+    }
+
+    .grid-meta{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:12px;
+    }
+
+    .meta{
+      border:1px solid rgba(255,255,255,.06);
+      background:rgba(255,255,255,.02);
+      border-radius:16px;
+      padding:12px 14px;
+      min-width:0;
+    }
+
+    .meta small{
+      display:block;
+      color:var(--muted);
+      font-size:0.75rem;
+      font-weight:900;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      margin-bottom:7px;
+    }
+
+    .meta strong{
+      display:block;
+      font-size:0.95rem;
+      line-height:1.45;
+      word-break:break-word;
+    }
+
+    .chips{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:30px;
+      padding:6px 10px;
+      border-radius:999px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.08);
+      color:#dce5ff;
+      font-size:0.76rem;
+      font-weight:800;
+    }
+
+    .card-rodape{
+      margin-top:auto;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      padding-top:6px;
+    }
+
+    .rodape-info{
+      color:var(--muted);
+      font-size:0.86rem;
+      line-height:1.5;
+    }
+
+    .estado-vazio{
+      border:1px dashed rgba(168,179,209,.25);
+      border-radius:22px;
+      background:rgba(255,255,255,.02);
+      padding:32px;
+      text-align:center;
+      color:var(--muted);
+      box-shadow:var(--shadow);
+      grid-column:1 / -1;
+    }
+
+    .rodape{
+      margin-top:26px;
+      text-align:center;
+      color:var(--muted);
+      font-size:0.88rem;
+      line-height:1.65;
+    }
+
+    @media (max-width: 1180px){
+      .lista{ grid-template-columns:1fr; }
+      .grade-kpis{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .filtros-grade{ grid-template-columns:1fr 1fr; }
+      .acoes{ grid-column:1 / -1; }
+    }
+
+    @media (max-width: 760px){
+      .pagina{ width:min(100vw - 20px, 1500px); padding:14px 0 28px; }
+      .hero, .filtros{ padding:18px; }
+      .grade-kpis{ grid-template-columns:1fr; }
+      .filtros-grade{ grid-template-columns:1fr; }
+      .grid-meta{ grid-template-columns:1fr; }
+      .card-rodape{ flex-direction:column; align-items:stretch; }
+      .card-rodape .btn{ width:100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="pagina">
+    <section class="hero">
+      <div class="hero-topo">
+        <div>
+          <h1>{{ configuracao_frontend.titulo_plugin }}</h1>
+          <p>
+            Catálogo operacional dos DAGs de Machine Learning. Esta tela foi desenhada para o usuário entender
+            rapidamente quais pipelines existem, qual foi o último status, quais tags estão associadas,
+            quem é o owner e qual execução merece investigação.
+          </p>
+        </div>
+        <div class="hero-badge">Airflow + ML + Observabilidade</div>
+      </div>
+    </section>
+
+    <section class="grade-kpis">
+      <article class="kpi">
+        <small>Total de pipelines</small>
+        <strong id="kpiTotal">-</strong>
+        <span>Quantidade de DAGs classificados como Machine Learning pela API do plugin.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Último status: sucesso</small>
+        <strong id="kpiSuccess">-</strong>
+        <span>DAGs cuja execução mais recente retornou estado <code>success</code>.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Último status: falha</small>
+        <strong id="kpiFailed">-</strong>
+        <span>DAGs cuja execução mais recente retornou estado <code>failed</code>.</span>
+      </article>
+
+      <article class="kpi">
+        <small>Em andamento / fila</small>
+        <strong id="kpiRunning">-</strong>
+        <span>DAGs com execução ainda em progresso, em fila ou processamento em curso.</span>
+      </article>
+    </section>
+
+    <section class="filtros">
+      <div class="filtros-topo">
+        <div>
+          <h2>Filtros do catálogo</h2>
+          <p>
+            O filtro atua diretamente sobre a API de listagem do plugin. Ele serve para localizar um DAG específico,
+            analisar apenas um status ou limitar o volume retornado para manter a tela leve.
+          </p>
+        </div>
+      </div>
+
+      <div class="filtros-grade">
+        <div class="campo">
+          <label for="campoDagId">DAG ID</label>
+          <input id="campoDagId" type="text" placeholder="Ex.: pipeline_score_clientes" />
+        </div>
+
+        <div class="campo">
+          <label for="campoStatus">Status</label>
+          <select id="campoStatus">
+            <option value="">Todos</option>
+            <option value="success">Success</option>
+            <option value="failed">Failed</option>
+            <option value="running">Running</option>
+            <option value="queued">Queued</option>
+          </select>
+        </div>
+
+        <div class="campo">
+          <label for="campoLimite">Limite</label>
+          <select id="campoLimite">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+
+        <div class="acoes">
+          <button id="btnAplicar" class="btn btn-primario" type="button">Aplicar filtros</button>
+          <button id="btnLimpar" class="btn btn-secundario" type="button">Limpar</button>
+        </div>
+      </div>
+
+      <div class="mensagem" id="mensagemStatus">Aguardando primeira consulta.</div>
+    </section>
+
+    <section class="lista" id="listaPipelines">
+      <div class="estado-vazio">Carregando lista de pipelines...</div>
+    </section>
+
+    <div class="rodape">
+      Este template foi desenhado para funcionar sem React, usando apenas HTML, CSS e JavaScript.
+      A navegação abre o painel detalhado de cada DAG de Machine Learning no próprio plugin.
+    </div>
+  </main>
+
+  <script>
+    const CONFIG = {{ configuracao_frontend|tojson }};
+    const PREFIXO = CONFIG.url_prefixo || "";
+    const ROTA_LISTA_API = `${PREFIXO}${CONFIG.rota_lista_api || "/api/pipelines"}`;
+    const ROTA_DETALHE = `${PREFIXO}/pipelines`;
+
+    const elementos = {
+      campoDagId: document.getElementById("campoDagId"),
+      campoStatus: document.getElementById("campoStatus"),
+      campoLimite: document.getElementById("campoLimite"),
+      btnAplicar: document.getElementById("btnAplicar"),
+      btnLimpar: document.getElementById("btnLimpar"),
+      mensagemStatus: document.getElementById("mensagemStatus"),
+      listaPipelines: document.getElementById("listaPipelines"),
+      kpiTotal: document.getElementById("kpiTotal"),
+      kpiSuccess: document.getElementById("kpiSuccess"),
+      kpiFailed: document.getElementById("kpiFailed"),
+      kpiRunning: document.getElementById("kpiRunning"),
+    };
+
+    function escaparHtml(valor) {
+      return String(valor ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function normalizarTexto(valor) {
+      return String(valor ?? "").trim();
+    }
+
+    function classeStatus(status) {
+      const texto = String(status || "").toLowerCase();
+      if (texto.includes("success")) return "status-success";
+      if (texto.includes("failed")) return "status-failed";
+      if (texto.includes("running")) return "status-running";
+      if (texto.includes("queued")) return "status-queued";
+      return "status-default";
+    }
+
+    function textoCurto(texto, limite = 180) {
+      const valor = normalizarTexto(texto);
+      if (!valor) return "Sem descrição cadastrada.";
+      if (valor.length <= limite) return valor;
+      return `${valor.slice(0, limite).trim()}...`;
+    }
+
+    function formatarData(valor) {
+      const texto = normalizarTexto(valor);
+      if (!texto) return "-";
+      return texto;
+    }
+
+    function arraySeguro(valor) {
+      if (!Array.isArray(valor)) return [];
+      return valor;
+    }
+
+    function atualizarKpis(itens) {
+      const total = itens.length;
+      const success = itens.filter(item => String(item.status || "").toLowerCase() === "success").length;
+      const failed = itens.filter(item => String(item.status || "").toLowerCase() === "failed").length;
+      const running = itens.filter(item => ["running", "queued"].includes(String(item.status || "").toLowerCase())).length;
+
+      elementos.kpiTotal.textContent = String(total);
+      elementos.kpiSuccess.textContent = String(success);
+      elementos.kpiFailed.textContent = String(failed);
+      elementos.kpiRunning.textContent = String(running);
+    }
+
+    function montarChipsTags(tags) {
+      const lista = arraySeguro(tags).filter(Boolean);
+      if (!lista.length) {
+        return `<span class="chip">Sem tags</span>`;
+      }
+      return lista.slice(0, 8).map(tag => `<span class="chip">${escaparHtml(tag)}</span>`).join("");
+    }
+
+    function montarUrlDetalhe(item) {
+      const dagId = encodeURIComponent(String(item.dag_id || ""));
+      const params = new URLSearchParams();
+      if (item.run_id) {
+        params.set("run_id", item.run_id);
+      }
+      const sufixo = params.toString() ? `?${params.toString()}` : "";
+      return `${ROTA_DETALHE}/${dagId}${sufixo}`;
+    }
+
+    function montarCard(item) {
+      const dagId = escaparHtml(item.dag_id || "-");
+      const nome = escaparHtml(item.nome || item.dag_id || "-");
+      const descricao = escaparHtml(textoCurto(item.descricao_curta || item.descricao || ""));
+      const owner = escaparHtml(item.owner || "-");
+      const runId = escaparHtml(item.run_id || "-");
+      const status = escaparHtml(item.status || "unknown");
+      const runType = escaparHtml(item.run_type || "-");
+      const executionDate = escaparHtml(formatarData(item.execution_date));
+      const startDate = escaparHtml(formatarData(item.start_date));
+      const endDate = escaparHtml(formatarData(item.end_date));
+      const duration = escaparHtml(item.duration_seconds ?? "-");
+      const linkDetalhe = montarUrlDetalhe(item);
+      const chips = montarChipsTags(item.dag_tags || item.tags || []);
+
+      return `
+        <article class="card">
+          <div class="card-topo">
+            <div class="card-titulo">
+              <h3 title="${dagId}">${nome}</h3>
+              <div class="descricao">${descricao}</div>
+            </div>
+            <span class="badge-status ${classeStatus(item.status)}">${status}</span>
+          </div>
+
+          <div class="grid-meta">
+            <div class="meta">
+              <small>DAG ID</small>
+              <strong>${dagId}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Owner</small>
+              <strong>${owner}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Run ID</small>
+              <strong>${runId}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Tipo da run</small>
+              <strong>${runType}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Execution date</small>
+              <strong>${executionDate}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Duração (s)</small>
+              <strong>${duration}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Início</small>
+              <strong>${startDate}</strong>
+            </div>
+
+            <div class="meta">
+              <small>Fim</small>
+              <strong>${endDate}</strong>
+            </div>
+          </div>
+
+          <div class="chips">${chips}</div>
+
+          <div class="card-rodape">
+            <div class="rodape-info">
+              Última execução registrada no catálogo do plugin. Abra o detalhe para ver tasks,
+              objetos, documentação, healthcheck e métricas do pipeline.
+            </div>
+
+            <a class="btn btn-primario" href="${linkDetalhe}">Abrir painel</a>
+          </div>
+        </article>
+      `;
+    }
+
+    async function carregarLista() {
+      const dagId = normalizarTexto(elementos.campoDagId.value);
+      const status = normalizarTexto(elementos.campoStatus.value);
+      const limite = normalizarTexto(elementos.campoLimite.value) || "50";
+
+      const params = new URLSearchParams();
+      if (dagId) params.set("dag_id", dagId);
+      if (status) params.set("status", status);
+      params.set("limite", limite);
+
+      elementos.mensagemStatus.textContent = "Consultando pipelines de Machine Learning...";
+      elementos.listaPipelines.innerHTML = `<div class="estado-vazio">Carregando lista...</div>`;
+
+      try {
+        const resposta = await fetch(`${ROTA_LISTA_API}?${params.toString()}`, {
+          credentials: "same-origin",
+          headers: {
+            "Accept": "application/json"
+          }
+        });
+
+        if (!resposta.ok) {
+          const textoErro = await resposta.text();
+          throw new Error(`Falha HTTP ${resposta.status}: ${textoErro}`);
+        }
+
+        const payload = await resposta.json();
+        const itens = arraySeguro(payload.itens);
+
+        atualizarKpis(itens);
+
+        if (!itens.length) {
+          elementos.listaPipelines.innerHTML = `
+            <div class="estado-vazio">
+              Nenhum pipeline de Machine Learning foi encontrado para os filtros atuais.
+            </div>
+          `;
+          elementos.mensagemStatus.textContent = "Consulta concluída sem resultados.";
+          return;
+        }
+
+        elementos.listaPipelines.innerHTML = itens.map(montarCard).join("");
+        elementos.mensagemStatus.textContent = `${itens.length} pipeline(s) retornado(s) pela API.`;
+      } catch (erro) {
+        console.error(erro);
+        atualizarKpis([]);
+        elementos.listaPipelines.innerHTML = `
+          <div class="estado-vazio">
+            Erro ao carregar a lista de pipelines.<br />
+            ${escaparHtml(erro.message || "Erro desconhecido.")}
+          </div>
+        `;
+        elementos.mensagemStatus.textContent = "A consulta falhou. Veja o console do navegador para detalhes.";
+      }
+    }
+
+    function limparFiltros() {
+      elementos.campoDagId.value = "";
+      elementos.campoStatus.value = "";
+      elementos.campoLimite.value = "50";
+      carregarLista();
+    }
+
+    elementos.btnAplicar.addEventListener("click", carregarLista);
+    elementos.btnLimpar.addEventListener("click", limparFiltros);
+
+    elementos.campoDagId.addEventListener("keydown", (evento) => {
+      if (evento.key === "Enter") {
+        evento.preventDefault();
+        carregarLista();
+      }
+    });
+
+    carregarLista();
+  </script>
+</body>
+</html>

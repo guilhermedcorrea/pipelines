@@ -1,0 +1,74 @@
+{% set health_ctx = health if health is defined else {} %}
+{% set health_tasks = health_ctx.health_tasks if health_ctx.health_tasks is defined else {} %}
+{% set health_dados = health_ctx.health_dados if health_ctx.health_dados is defined else {} %}
+{% set health_modelo = health_ctx.health_modelo if health_ctx.health_modelo is defined else {} %}
+<article class="card">
+  <div class="card-topo">
+    <h2>Healthcheck</h2>
+    <p>Saúde operacional, qualidade dos dados e sinais de estabilidade do modelo nesta execução.</p>
+  </div>
+  <div class="card-body">
+    <div class="grid-info" style="margin-bottom:14px;">
+      <div class="info-item">
+        <small>Status geral</small>
+        <strong>{{ health_ctx.status_geral or 'indeterminado' }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Tasks</small>
+        <strong>{{ health_tasks.status or 'indeterminado' }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Dados</small>
+        <strong>{{ health_dados.status or 'indeterminado' }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Modelo</small>
+        <strong>{{ health_modelo.status or 'indeterminado' }}</strong>
+      </div>
+    </div>
+
+    <div class="grid-duas">
+      <article class="bloco">
+        <h3>Operação</h3>
+        <p>
+Tasks totais: {{ health_tasks.total_tasks if health_tasks.total_tasks is defined else 0 }}
+Sucesso: {{ health_tasks.contadores.sucesso if health_tasks.contadores is defined else 0 }}
+Alerta: {{ health_tasks.contadores.alerta if health_tasks.contadores is defined else 0 }}
+Falha: {{ health_tasks.contadores.falha if health_tasks.contadores is defined else 0 }}
+Percentual de sucesso: {{ health_tasks.percentual_sucesso if health_tasks.percentual_sucesso is defined else 0 }}%
+        </p>
+      </article>
+
+      <article class="bloco">
+        <h3>Dados</h3>
+        <p>
+Status: {{ health_dados.status or 'indeterminado' }}
+Validações OK: {{ health_dados.contadores.ok if health_dados.contadores is defined else 0 }}
+Alertas: {{ health_dados.contadores.alerta if health_dados.contadores is defined else 0 }}
+Erros: {{ health_dados.contadores.erro if health_dados.contadores is defined else 0 }}
+Tasks sem amostra: {{ health_dados.tasks_sem_amostra if health_dados.tasks_sem_amostra is defined else 0 }}
+        </p>
+      </article>
+
+      <article class="bloco">
+        <h3>Modelo</h3>
+        <p>
+Status: {{ health_modelo.status or 'indeterminado' }}
+Sinais positivos: {{ health_modelo.quantidade_sinais_positivos if health_modelo.quantidade_sinais_positivos is defined else 0 }}
+Sinais de alerta: {{ health_modelo.quantidade_sinais_alerta if health_modelo.quantidade_sinais_alerta is defined else 0 }}
+        </p>
+      </article>
+
+      <article class="bloco">
+        <h3>Runtime</h3>
+        <p>
+Status runtime: {{ health_ctx.health_runtime.status if health_ctx.health_runtime is defined else 'indeterminado' }}
+Success: {{ health_ctx.health_runtime.success if health_ctx.health_runtime is defined else 0 }}
+Failed: {{ health_ctx.health_runtime.failed if health_ctx.health_runtime is defined else 0 }}
+Running: {{ health_ctx.health_runtime.running if health_ctx.health_runtime is defined else 0 }}
+Queued: {{ health_ctx.health_runtime.queued if health_ctx.health_runtime is defined else 0 }}
+        </p>
+      </article>
+    </div>
+  </div>
+</article>

@@ -1,0 +1,74 @@
+{% set artefatos_ctx = artefatos if artefatos is defined else {} %}
+{% set itens = artefatos_ctx.itens if artefatos_ctx.itens is defined else [] %}
+<article class="card">
+  <div class="card-topo">
+    <h2>Artefatos</h2>
+    <p>Arquivos, tabelas, modelos, métricas e objetos técnicos encontrados na execução atual.</p>
+  </div>
+  <div class="card-body">
+    <div class="grid-info" style="margin-bottom:14px;">
+      <div class="info-item">
+        <small>Total</small>
+        <strong>{{ artefatos_ctx.total if artefatos_ctx.total is defined else itens|length }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Visualizáveis</small>
+        <strong>{{ artefatos_ctx.quantidade_visualizavel if artefatos_ctx.quantidade_visualizavel is defined else 0 }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Download</small>
+        <strong>{{ artefatos_ctx.quantidade_downloadable if artefatos_ctx.quantidade_downloadable is defined else 0 }}</strong>
+      </div>
+    </div>
+
+    {% if itens %}
+      <div class="objeto-lista">
+        {% for item in itens %}
+          <article class="objeto">
+            <div class="objeto-topo">
+              <div>
+                <h4>{{ item.nome_amigavel or item.nome or 'Artefato' }}</h4>
+                <div class="chips" style="margin-top:8px;">
+                  <span class="chip">{{ item.tipo or 'desconhecido' }}</span>
+                  <span class="chip">{{ item.grupo or item.direcao or 'apoio' }}</span>
+                  {% if item.extensao %}
+                    <span class="chip">{{ item.extensao }}</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <div class="objeto-meta">
+              <div><strong>Descrição:</strong> {{ item.descricao or '-' }}</div>
+              <div><strong>Conn ID:</strong> {{ item.conn_id or '-' }}</div>
+              <div><strong>Schema:</strong> {{ item.schema or '-' }}</div>
+              <div><strong>Tabela:</strong> {{ item.tabela or '-' }}</div>
+              <div><strong>Procedure:</strong> {{ item.procedure or '-' }}</div>
+              <div><strong>Caminho:</strong> {{ item.caminho_arquivo or '-' }}</div>
+            </div>
+
+            <div class="objeto-acoes">
+              {% if item.visualizavel and item.conn_id and item.schema and item.tabela %}
+                <a
+                  class="btn-mini"
+                  href="{{ configuracao_frontend.url_prefixo }}{{ configuracao_frontend.rota_tabela_html }}?conexao_id={{ item.conn_id }}{% if item.banco %}&banco={{ item.banco }}{% endif %}&schema={{ item.schema }}&tabela={{ item.tabela }}"
+                  target="_blank"
+                  rel="noopener"
+                >Abrir tabela</a>
+              {% endif %}
+
+              {% if item.downloadable and item.caminho_arquivo %}
+                <a
+                  class="btn-mini"
+                  href="{{ configuracao_frontend.url_prefixo }}{{ configuracao_frontend.rota_download }}?caminho={{ item.caminho_arquivo|urlencode }}"
+                >Baixar arquivo</a>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="estado-vazio">Nenhum artefato foi consolidado para esta execução.</div>
+    {% endif %}
+  </div>
+</article>

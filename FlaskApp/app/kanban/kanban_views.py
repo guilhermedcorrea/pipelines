@@ -5,8 +5,12 @@ from typing import Any
 from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import text
-
 from ..extensions import cache, db, limiter, socketio
+
+
+
+"""Kanban Euromidia Comercial"""
+
 
 kanban_bp = Blueprint("kanban", __name__)
 

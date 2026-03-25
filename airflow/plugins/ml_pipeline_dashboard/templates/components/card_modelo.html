@@ -1,0 +1,80 @@
+{% set modelo_ctx = modelo if modelo is defined else {} %}
+{% set artefatos_relacionados = modelo_ctx.artefatos_relacionados if modelo_ctx.artefatos_relacionados is defined else [] %}
+{% set metricas_principais = modelo_ctx.metricas_principais if modelo_ctx.metricas_principais is defined else {} %}
+<article class="card">
+  <div class="card-topo">
+    <h2>Modelo</h2>
+    <p>Resumo do modelo inferido ou registrado a partir das tasks e artefatos da execução.</p>
+  </div>
+  <div class="card-body">
+    <div class="grid-info" style="margin-bottom:14px;">
+      <div class="info-item">
+        <small>Nome do modelo</small>
+        <strong>{{ modelo_ctx.nome_modelo or modelo_ctx.nome or '-' }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Família</small>
+        <strong>{{ modelo_ctx.familia_modelo or '-' }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Versão</small>
+        <strong>{{ modelo_ctx.versao_modelo or '-' }}</strong>
+      </div>
+      <div class="info-item">
+        <small>Variável alvo</small>
+        <strong>{{ modelo_ctx.variavel_alvo or '-' }}</strong>
+      </div>
+    </div>
+
+    <div class="grid-duas">
+      <article class="bloco">
+        <h3>Leitura técnica</h3>
+        <p>
+Nome: {{ modelo_ctx.nome_modelo or modelo_ctx.nome or '-' }}
+Família: {{ modelo_ctx.familia_modelo or '-' }}
+Versão: {{ modelo_ctx.versao_modelo or '-' }}
+Variável alvo: {{ modelo_ctx.variavel_alvo or '-' }}
+Artefatos relacionados: {{ artefatos_relacionados|length }}
+        </p>
+      </article>
+
+      <article class="bloco">
+        <h3>Métricas principais</h3>
+        {% if metricas_principais %}
+          <div class="grid-metricas" style="margin-top:0;">
+            {% for chave, valor in metricas_principais.items() %}
+              <div class="metrica">
+                <small>{{ chave }}</small>
+                <strong>{{ valor if valor is not none else '-' }}</strong>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="estado-vazio">Nenhuma métrica principal foi inferida para o modelo.</div>
+        {% endif %}
+      </article>
+    </div>
+
+    {% if artefatos_relacionados %}
+      <div class="objeto-lista" style="margin-top:14px;">
+        {% for item in artefatos_relacionados %}
+          <article class="objeto">
+            <div class="objeto-topo">
+              <div>
+                <h4>{{ item.nome_amigavel or item.nome or 'Artefato do modelo' }}</h4>
+                <div class="chips" style="margin-top:8px;">
+                  <span class="chip">{{ item.tipo or 'artefato' }}</span>
+                  {% if item.extensao %}<span class="chip">{{ item.extensao }}</span>{% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="objeto-meta">
+              <div><strong>Descrição:</strong> {{ item.descricao or '-' }}</div>
+              <div><strong>Caminho:</strong> {{ item.caminho_arquivo or '-' }}</div>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</article>

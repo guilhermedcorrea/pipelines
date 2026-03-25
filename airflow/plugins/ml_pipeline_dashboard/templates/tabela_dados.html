@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ metadados.nome_qualificado or (metadados.schema ~ '.' ~ metadados.tabela) }}</title>
+  <style>
+    :root{
+      --bg: #0b1020;
+      --bg-soft: #11182d;
+      --bg-elev: #151f38;
+      --border: #26345c;
+      --text: #e8eeff;
+      --muted: #a8b3d1;
+      --primary: #6e56cf;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --shadow: 0 20px 60px rgba(110, 86, 207, 0.18);
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 14px;
+      --font: Inter, "Segoe UI", Arial, sans-serif;
+    }
+
+    *{ box-sizing:border-box; }
+
+    body{
+      margin:0;
+      font-family:var(--font);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(110,86,207,.20), transparent 25%),
+        radial-gradient(circle at left bottom, rgba(34,211,238,.10), transparent 22%),
+        var(--bg);
+      min-height:100vh;
+    }
+
+    .pagina{
+      width:min(1680px, calc(100vw - 32px));
+      margin:0 auto;
+      padding:24px 0 42px;
+    }
+
+    .hero,
+    .card{
+      border:1px solid var(--border);
+      border-radius:var(--radius-lg);
+      background:linear-gradient(180deg, rgba(21,31,56,.96), rgba(17,24,45,.98));
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      margin-bottom:18px;
+    }
+
+    .hero-body,
+    .card-body{
+      padding:22px 24px;
+    }
+
+    .hero h1{
+      margin:0 0 10px 0;
+      font-size:clamp(1.8rem, 2.8vw, 2.5rem);
+      line-height:1.08;
+      letter-spacing:-0.02em;
+      word-break:break-word;
+    }
+
+    .hero p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.7;
+      max-width:980px;
+    }
+
+    .chips{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:7px 11px;
+      border-radius:999px;
+      font-size:0.78rem;
+      font-weight:900;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.04);
+      color:#dbe7ff;
+    }
+
+    .card-topo{
+      padding:16px 18px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+    }
+
+    .card-topo h2{
+      margin:0 0 6px 0;
+      font-size:1.12rem;
+    }
+
+    .card-topo p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.6;
+      font-size:0.9rem;
+    }
+
+    .filtros-form{
+      display:grid;
+      grid-template-columns:repeat(12, minmax(0, 1fr));
+      gap:12px;
+      align-items:end;
+    }
+
+    .campo{
+      grid-column: span 3;
+      min-width:0;
+    }
+
+    .campo-lg{ grid-column: span 6; }
+    .campo-sm{ grid-column: span 2; }
+
+    label{
+      display:block;
+      margin-bottom:7px;
+      color:var(--muted);
+      font-size:0.76rem;
+      font-weight:900;
+      text-transform:uppercase;
+      letter-spacing:.06em;
+    }
+
+    input[type="text"],
+    input[type="date"],
+    select{
+      width:100%;
+      min-height:44px;
+      border-radius:14px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.03);
+      color:var(--text);
+      padding:12px 14px;
+      font-size:0.92rem;
+      font-weight:700;
+      outline:none;
+    }
+
+    input::placeholder{
+      color:#7f8bb0;
+    }
+
+    input:focus,
+    select:focus{
+      border-color:rgba(59,130,246,.45);
+      box-shadow:0 0 0 4px rgba(59,130,246,.10);
+    }
+
+    .acoes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:end;
+      grid-column:1 / -1;
+    }
+
+    .btn{
+      min-height:44px;
+      border:none;
+      border-radius:14px;
+      padding:0 15px;
+      font-size:0.9rem;
+      font-weight:900;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      white-space:nowrap;
+      transition:transform .16s ease, background .16s ease, border-color .16s ease;
+    }
+
+    .btn:hover{ transform:translateY(-1px); }
+
+    .btn-primario{
+      background:linear-gradient(135deg, var(--primary), var(--blue));
+      color:#fff;
+    }
+
+    .btn-secundario{
+      background:rgba(255,255,255,.04);
+      color:var(--text);
+      border:1px solid var(--border);
+    }
+
+    .resumo{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:14px;
+    }
+
+    .kpi{
+      border:1px solid rgba(255,255,255,.06);
+      background:rgba(255,255,255,.02);
+      border-radius:18px;
+      padding:14px;
+      min-width:0;
+    }
+
+    .kpi small{
+      display:block;
+      color:var(--muted);
+      font-size:0.76rem;
+      font-weight:900;
+      letter-spacing:.05em;
+      text-transform:uppercase;
+      margin-bottom:8px;
+    }
+
+    .kpi strong{
+      display:block;
+      font-size:1.2rem;
+      line-height:1.3;
+      word-break:break-word;
+    }
+
+    .tabela-wrap{
+      width:100%;
+      overflow:auto;
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:18px;
+      background:rgba(255,255,255,.02);
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      min-width:900px;
+    }
+
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background:#10182d;
+      color:#dce5ff;
+      padding:12px 10px;
+      text-align:left;
+      font-size:0.8rem;
+      font-weight:900;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      white-space:nowrap;
+    }
+
+    thead th a{
+      color:inherit;
+      text-decoration:none;
+    }
+
+    tbody td{
+      padding:10px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      vertical-align:top;
+      color:#e6ebfa;
+      font-size:0.84rem;
+      white-space:nowrap;
+    }
+
+    tbody tr:hover{
+      background:rgba(59,130,246,.05);
+    }
+
+    .paginacao{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+
+    .paginacao-info{
+      color:var(--muted);
+      font-size:0.9rem;
+      line-height:1.6;
+    }
+
+    .paginacao-acoes{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .estado-vazio{
+      border:1px dashed rgba(168,179,209,.25);
+      border-radius:18px;
+      background:rgba(255,255,255,.02);
+      padding:24px;
+      text-align:center;
+      color:var(--muted);
+      line-height:1.7;
+    }
+
+    @media (max-width: 1200px){
+      .resumo{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .filtros-form{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .campo, .campo-lg, .campo-sm{ grid-column:auto; }
+    }
+
+    @media (max-width: 760px){
+      .pagina{ width:min(100vw - 20px, 1680px); padding:14px 0 28px; }
+      .hero-body, .card-body{ padding:18px; }
+      .resumo{ grid-template-columns:1fr; }
+      .filtros-form{ grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="pagina">
+    <section class="hero">
+      <div class="hero-body">
+        <h1>{{ metadados.nome_qualificado or (metadados.schema ~ '.' ~ metadados.tabela) }}</h1>
+        <p>
+          Visualização tabular real da fonte associada ao pipeline. Esta tela serve para inspeção operacional,
+          conferência de dados, paginação segura e aplicação de filtros diretamente pela API do plugin.
+        </p>
+
+        <div class="chips">
+          <span class="chip">Conn ID: {{ metadados.conn_id or '-' }}</span>
+          {% if metadados.banco %}
+            <span class="chip">Banco: {{ metadados.banco }}</span>
+          {% endif %}
+          <span class="chip">Schema: {{ metadados.schema or '-' }}</span>
+          <span class="chip">Tabela: {{ metadados.tabela or '-' }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-topo">
+        <h2>Filtros da tabela</h2>
+        <p>
+          Os filtros abaixo atuam sobre a rota de dados paginados. O objetivo é permitir consulta segura,
+          evitando carga completa da tabela quando houver muitos registros.
+        </p>
+      </div>
+
+      <div class="card-body">
+        <form method="get" action="{{ request.url.path }}" class="filtros-form">
+          <input type="hidden" name="conexao_id" value="{{ metadados.conn_id or request.query_params.get('conexao_id', '') }}" />
+          {% if metadados.banco or request.query_params.get('banco') %}
+            <input type="hidden" name="banco" value="{{ metadados.banco or request.query_params.get('banco', '') }}" />
+          {% endif %}
+          <input type="hidden" name="schema" value="{{ metadados.schema or request.query_params.get('schema', '') }}" />
+          <input type="hidden" name="tabela" value="{{ metadados.tabela or request.query_params.get('tabela', '') }}" />
+
+          <div class="campo campo-lg">
+            <label for="campoQ">Busca textual</label>
+            <input id="campoQ" type="text" name="q" value="{{ dados.texto_busca or request.query_params.get('q', '') }}" placeholder="Digite um texto para filtrar resultados..." />
+          </div>
+
+          <div class="campo campo-sm">
+            <label for="campoPaginaTamanho">Tamanho da página</label>
+            {% set tamanho_atual = (dados.tamanho_pagina or request.query_params.get('tamanho_pagina', '50')) | string %}
+            <select id="campoPaginaTamanho" name="tamanho_pagina">
+              <option value="20" {% if tamanho_atual == '20' %}selected{% endif %}>20</option>
+              <option value="50" {% if tamanho_atual == '50' %}selected{% endif %}>50</option>
+              <option value="100" {% if tamanho_atual == '100' %}selected{% endif %}>100</option>
+              <option value="200" {% if tamanho_atual == '200' %}selected{% endif %}>200</option>
+            </select>
+          </div>
+
+          <div class="campo campo-sm">
+            <label for="campoDirecao">Direção</label>
+            {% set direcao_atual = (dados.direcao or request.query_params.get('direcao', 'asc')) | string %}
+            <select id="campoDirecao" name="direcao">
+              <option value="asc" {% if direcao_atual == 'asc' %}selected{% endif %}>Ascendente</option>
+              <option value="desc" {% if direcao_atual == 'desc' %}selected{% endif %}>Descendente</option>
+            </select>
+          </div>
+
+          {% for filtro in metadados.filtros_relevantes.categoricos or [] %}
+            {% set chave = filtro.chave %}
+            {% set valores_atuais = request.query_params.getlist('f_' ~ chave) %}
+            <div class="campo">
+              <label for="filtro_{{ chave }}">{{ filtro.label or chave }}</label>
+              <select id="filtro_{{ chave }}" name="f_{{ chave }}" multiple size="4">
+                {% for opcao in filtro.opcoes or [] %}
+                  <option value="{{ opcao.valor }}" {% if opcao.valor in valores_atuais %}selected{% endif %}>{{ opcao.label or opcao.valor }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          {% endfor %}
+
+          {% for filtro in metadados.filtros_relevantes.datas or [] %}
+            {% set chave = filtro.chave %}
+            <div class="campo">
+              <label for="de_{{ chave }}">{{ filtro.label or chave }} - de</label>
+              <input id="de_{{ chave }}" type="date" name="de_{{ chave }}" value="{{ request.query_params.get('de_' ~ chave, '') }}" />
+            </div>
+            <div class="campo">
+              <label for="ate_{{ chave }}">{{ filtro.label or chave }} - até</label>
+              <input id="ate_{{ chave }}" type="date" name="ate_{{ chave }}" value="{{ request.query_params.get('ate_' ~ chave, '') }}" />
+            </div>
+          {% endfor %}
+
+          <div class="acoes">
+            <button class="btn btn-primario" type="submit">Aplicar filtros</button>
+            <a class="btn btn-secundario" href="{{ request.url.path }}?conexao_id={{ metadados.conn_id or request.query_params.get('conexao_id', '') }}{% if metadados.banco or request.query_params.get('banco') %}&banco={{ metadados.banco or request.query_params.get('banco', '') }}{% endif %}&schema={{ metadados.schema or request.query_params.get('schema', '') }}&tabela={{ metadados.tabela or request.query_params.get('tabela', '') }}">Limpar filtros</a>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-topo">
+        <h2>Resumo da consulta</h2>
+        <p>Resumo operacional da paginação retornada pela API do plugin.</p>
+      </div>
+
+      <div class="card-body">
+        <div class="resumo">
+          <article class="kpi">
+            <small>Total de linhas filtradas</small>
+            <strong>{{ dados.total_linhas if dados.total_linhas is not none else '-' }}</strong>
+          </article>
+
+          <article class="kpi">
+            <small>Página atual</small>
+            <strong>{{ dados.pagina if dados.pagina is not none else '-' }}</strong>
+          </article>
+
+          <article class="kpi">
+            <small>Tamanho da página</small>
+            <strong>{{ dados.tamanho_pagina if dados.tamanho_pagina is not none else '-' }}</strong>
+          </article>
+
+          <article class="kpi">
+            <small>Ordenação</small>
+            <strong>{{ dados.ordenar_por or '-' }} / {{ dados.direcao or '-' }}</strong>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-topo">
+        <h2>Dados paginados</h2>
+        <p>
+          Resultado real retornado pela consulta paginada. A ordenação atual vem da API e deve ser preservada
+          sempre que o usuário navegar entre páginas.
+        </p>
+      </div>
+
+      <div class="card-body">
+        {% if dados.colunas and dados.linhas %}
+          <div class="tabela-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {% for coluna in dados.colunas %}
+                    {% set direcao_atual = dados.direcao or request.query_params.get('direcao', 'asc') %}
+                    {% if (dados.ordenar_por or request.query_params.get('ordenar_por', '')) == coluna and direcao_atual == 'asc' %}
+                      {% set proxima_direcao = 'desc' %}
+                    {% else %}
+                      {% set proxima_direcao = 'asc' %}
+                    {% endif %}
+                    <th>
+                      <a href="{{ request.url.path }}?{{ query_base }}&ordenar_por={{ coluna|urlencode }}&direcao={{ proxima_direcao }}">
+                        {{ coluna }}
+                        {% if (dados.ordenar_por or request.query_params.get('ordenar_por', '')) == coluna %}
+                          {% if direcao_atual == 'asc' %} ▲ {% else %} ▼ {% endif %}
+                        {% endif %}
+                      </a>
+                    </th>
+                  {% endfor %}
+                </tr>
+              </thead>
+
+              <tbody>
+                {% for linha in dados.linhas %}
+                  <tr>
+                    {% for coluna in dados.colunas %}
+                      <td>{{ linha.get(coluna, '') }}</td>
+                    {% endfor %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="estado-vazio">
+            Nenhuma linha foi retornada para a combinação atual de filtros.
+          </div>
+        {% endif %}
+
+        <div class="paginacao">
+          <div class="paginacao-info">
+            Exibindo página {{ dados.pagina if dados.pagina is not none else '-' }}
+            de {{ dados.total_paginas if dados.total_paginas is not none else '-' }}.
+          </div>
+
+          <div class="paginacao-acoes">
+            {% set pagina_atual = dados.pagina or 1 %}
+            {% set total_paginas = dados.total_paginas or 1 %}
+
+            {% if pagina_atual > 1 %}
+              <a class="btn btn-secundario" href="{{ request.url.path }}?{{ query_base }}&pagina={{ pagina_atual - 1 }}">Página anterior</a>
+            {% endif %}
+
+            {% if pagina_atual < total_paginas %}
+              <a class="btn btn-primario" href="{{ request.url.path }}?{{ query_base }}&pagina={{ pagina_atual + 1 }}">Próxima página</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
