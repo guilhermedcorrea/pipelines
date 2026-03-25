@@ -4,7 +4,6 @@
 {% block content %}
 <style>
   :root{
-    
     --kb-bg: #f3f5f8;
     --kb-card: #ffffff;
     --kb-line: rgba(15,23,42,.12);
@@ -19,23 +18,27 @@
     --kb-shadow2: 0 6px 18px rgba(15,23,42,.10);
     --kb-radius: 14px;
 
-    --kb-col-w: 332px; 
-
-   
+    --kb-col-w: clamp(280px, 24vw, 360px);
     --kb-top-h: auto;
     --kb-col-head-h: 56px;
     --kb-col-pad-v: 10px;
   }
 
+  @media (max-width: 920px){
+    :root{
+      --kb-col-w: min(88vw, 340px);
+    }
+  }
 
   @media (max-width: 520px){
-    :root{ --kb-col-w: 300px; }
+    :root{
+      --kb-col-w: min(92vw, 320px);
+    }
   }
-  @media (min-width: 521px) and (max-width: 920px){
-    :root{ --kb-col-w: 320px; }
-  }
-  @media (min-width: 1400px){
-    :root{ --kb-col-w: 352px; }
+
+  body.kb-dragging{
+    user-select: none;
+    cursor: grabbing;
   }
 
   .kb-wrap{
@@ -43,6 +46,10 @@
     border: 1px solid var(--kb-line2);
     border-radius: 18px;
     padding: 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 140px);
+    overflow: hidden;
   }
 
   .kb-top{
@@ -52,6 +59,7 @@
     gap:12px;
     flex-wrap:wrap;
     padding: 10px 10px 12px 10px;
+    flex: 0 0 auto;
   }
 
   .kb-title{
@@ -106,17 +114,27 @@
     user-select:none;
     line-height: 1;
   }
-  .kb-btn:hover{ box-shadow: var(--kb-shadow2); transform: translateY(-1px); }
-  .kb-btn:active{ transform: translateY(0); box-shadow: none; }
+
+  .kb-btn:hover{
+    box-shadow: var(--kb-shadow2);
+    transform: translateY(-1px);
+  }
+
+  .kb-btn:active{
+    transform: translateY(0);
+    box-shadow: none;
+  }
 
   .kb-btn.primary{
     border-color: rgba(11,78,162,.22);
     background: var(--kb-primary);
     color: #fff;
   }
+
   .kb-btn.ghost{
     background: rgba(255,255,255,.75);
   }
+
   .kb-btn.sm{
     padding: 7px 10px;
     border-radius: 10px;
@@ -131,11 +149,13 @@
     border-radius: 12px;
     font-weight: 950;
   }
+
   .kb-btn.danger{
     border-color: rgba(239,68,68,.28);
     background: rgba(239,68,68,.08);
     color: rgba(127,29,29,.95);
   }
+
   .kb-btn.danger:hover{
     border-color: rgba(239,68,68,.40);
     box-shadow: 0 10px 22px rgba(239,68,68,.12);
@@ -145,95 +165,135 @@
     height: 1px;
     background: var(--kb-line2);
     margin: 0 10px 10px 10px;
+    flex: 0 0 auto;
   }
 
-
-  .kb-filtros{
+  .kb-toolbar{
     display:flex;
-    gap:12px;
     align-items:flex-end;
     justify-content:space-between;
+    gap:12px;
     flex-wrap:wrap;
     padding: 0 10px 12px 10px;
+    flex: 0 0 auto;
   }
 
-  .kb-filtros-left{
+  .kb-toolbar-left{
+    flex: 1 1 520px;
+    min-width: 280px;
+  }
+
+  .kb-toolbar-right{
     display:flex;
-    gap:10px;
-    align-items:flex-end;
+    align-items:center;
+    justify-content:flex-end;
+    gap:8px;
     flex-wrap:wrap;
-    min-width: min(740px, 100%);
-    flex: 1;
+    flex: 0 1 auto;
   }
 
-  .kb-filtros .lbl{
+  .kb-search{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    width:100%;
+  }
+
+  .kb-search-label{
     font-weight: 950;
     font-size: 13px;
     color: var(--kb-text);
-    margin-bottom: 6px;
   }
 
-  .kb-multi{
-    min-width: min(560px, 100%);
-    max-width: 760px;
-    border: 1px solid var(--kb-line);
-    border-radius: 14px;
-    background: #fff;
-    padding: 10px 12px;
+  .kb-search-box{
     display:flex;
-    flex-direction:column;
-    gap:8px;
+    align-items:center;
+    gap:10px;
+    width:100%;
+    background:#fff;
+    border:1px solid var(--kb-line);
+    border-radius: 14px;
+    padding: 10px 12px;
     box-shadow: 0 2px 10px rgba(15,23,42,.05);
   }
-  .kb-multi small{
-    color: var(--kb-muted);
-    font-size: 12px;
-    line-height: 1.2;
+
+  .kb-search-icon{
+    flex: 0 0 auto;
+    color: rgba(15,23,42,.55);
+    font-size: 15px;
+    line-height: 1;
   }
 
-  #filtroTags{
-    width: 100%;
-    border: 1px solid var(--kb-line2);
-    border-radius: 12px;
-    padding: 10px;
-    min-height: 96px;
-    outline: none;
+  .kb-search-input{
+    width:100%;
+    border:0;
+    outline:none;
+    background:transparent;
+    color: var(--kb-text);
     font-size: 13px;
-    background: rgba(15,23,42,.02);
+    font-weight: 700;
+    min-width: 0;
   }
-  #filtroTags:focus{
+
+  .kb-search-input::placeholder{
+    color: rgba(15,23,42,.45);
+    font-weight: 600;
+  }
+
+  .kb-search-box:focus-within{
     border-color: rgba(11,78,162,.35);
     box-shadow: 0 0 0 4px rgba(11,78,162,.12);
     background:#fff;
   }
 
-  .kb-filtros-right{
-    display:flex;
-    gap:8px;
+  .kb-search-count{
+    display:inline-flex;
     align-items:center;
-    justify-content:flex-end;
-    flex-wrap:wrap;
-    min-width: 180px;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid var(--kb-line);
+    background: rgba(255,255,255,.9);
+    color: var(--kb-muted);
+    font-size: 12px;
+    font-weight: 900;
+    white-space: nowrap;
   }
-
 
   .kb-board{
     display:flex;
+    align-items:stretch;
     gap:14px;
-    overflow:auto;
+    overflow-x:auto;
+    overflow-y:hidden;
     padding: 8px 10px 12px 10px;
     scroll-snap-type: x mandatory;
     scroll-padding-left: 10px;
-    max-height: calc(100vh - 260px);
     overscroll-behavior: contain;
+    flex: 1 1 auto;
+    min-height: 520px;
+    height: calc(100vh - 300px);
   }
-  .kb-board::-webkit-scrollbar{ height: 12px; }
+
+  .kb-board.is-dragging{
+    scroll-snap-type: none;
+    cursor: grabbing;
+  }
+
+  .kb-board.is-dragging *{
+    cursor: grabbing !important;
+  }
+
+  .kb-board::-webkit-scrollbar{
+    height: 12px;
+    width: 12px;
+  }
+
   .kb-board::-webkit-scrollbar-thumb{
     background: rgba(15,23,42,.18);
     border-radius: 999px;
   }
 
- 
   .kb-col{
     scroll-snap-align: start;
     width: var(--kb-col-w);
@@ -244,7 +304,8 @@
     box-shadow: 0 6px 18px rgba(15,23,42,.08);
     display:flex;
     flex-direction:column;
-    min-height: 420px;
+    min-height: 0;
+    height: 100%;
     overflow:hidden;
 
     --col-accent: rgba(11,78,162,1);
@@ -260,6 +321,7 @@
     border-bottom: 1px solid var(--kb-line2);
     background: #fff;
     min-height: var(--kb-col-head-h);
+    flex: 0 0 auto;
   }
 
   .kb-col-title{
@@ -314,6 +376,7 @@
     box-shadow: 0 2px 10px rgba(15,23,42,.06);
     cursor:pointer;
   }
+
   .kb-add:hover{
     transform: translateY(-1px);
     box-shadow: 0 8px 18px rgba(15,23,42,.12);
@@ -335,6 +398,7 @@
     box-shadow: 0 2px 10px rgba(15,23,42,.06);
     cursor:pointer;
   }
+
   .kb-col-del:hover{
     transform: translateY(-1px);
     box-shadow: 0 10px 22px rgba(239,68,68,.12);
@@ -346,7 +410,7 @@
     display:flex;
     flex-direction:column;
     gap:10px;
-    flex: 1;
+    flex: 1 1 auto;
     background: #fff;
     min-height: 0;
   }
@@ -357,25 +421,30 @@
     gap:10px;
     padding-bottom: 8px;
     overflow-y: auto;
+    overflow-x: hidden;
     min-height: 0;
-    flex: 1;
+    flex: 1 1 auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(15,23,42,.25) transparent;
     overscroll-behavior: contain;
+    border-radius: 10px;
+    position: relative;
+    transition: background .12s ease, box-shadow .12s ease;
   }
-  .kb-drop::-webkit-scrollbar{ width: 10px; }
+
+  .kb-drop::-webkit-scrollbar{
+    width: 10px;
+  }
+
   .kb-drop::-webkit-scrollbar-thumb{
     background: rgba(15,23,42,.18);
     border-radius: 999px;
   }
 
   .kb-drop.is-over{
-    outline: 2px dashed rgba(15,23,42,.22);
-    border-radius: 10px;
-    padding: 8px;
     background: rgba(15,23,42,.03);
+    box-shadow: inset 0 0 0 2px rgba(15,23,42,.18);
   }
-
 
   .kb-card{
     background: var(--kb-card);
@@ -384,15 +453,56 @@
     padding: 10px 10px 9px 10px;
     cursor: grab;
     box-shadow: 0 2px 8px rgba(15,23,42,.08);
-    transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
+    transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease, opacity .12s ease;
     position: relative;
+    will-change: transform;
+    backface-visibility: hidden;
   }
+
   .kb-card:hover{
     transform: translateY(-1px);
     box-shadow: 0 10px 22px rgba(15,23,42,.12);
     border-color: rgba(15,23,42,.16);
   }
-  .kb-card:active{ cursor: grabbing; transform: translateY(0); }
+
+  .kb-card:active{
+    cursor: grabbing;
+    transform: translateY(0);
+  }
+
+  .kb-board.is-dragging .kb-card{
+    transition: opacity .12s ease;
+  }
+
+  .kb-board.is-dragging .kb-card:hover{
+    transform: none;
+    box-shadow: 0 2px 8px rgba(15,23,42,.08);
+    border-color: rgba(15,23,42,.10);
+  }
+
+  .kb-card.drag-source{
+    opacity: .42;
+    transform: none !important;
+    box-shadow: 0 2px 8px rgba(15,23,42,.08);
+  }
+
+  .kb-card.drop-commit{
+    animation: kbDropCommit .18s ease;
+  }
+
+  .kb-card.kb-drag-image{
+    transform: rotate(1.4deg);
+    box-shadow: 0 18px 42px rgba(15,23,42,.20);
+  }
+
+  @keyframes kbDropCommit{
+    0%{
+      transform: scale(.985);
+    }
+    100%{
+      transform: scale(1);
+    }
+  }
 
   .kb-card-phase{
     display:flex;
@@ -402,7 +512,6 @@
     margin-bottom: 8px;
   }
 
-  
   .kb-card-del{
     width: 26px;
     height: 26px;
@@ -420,6 +529,7 @@
     transition: transform .06s ease, box-shadow .12s ease, border-color .12s ease;
     user-select:none;
   }
+
   .kb-card-del:hover{
     transform: translateY(-1px);
     box-shadow: 0 10px 22px rgba(239,68,68,.12);
@@ -442,6 +552,7 @@
     overflow:hidden;
     text-overflow: ellipsis;
   }
+
   .kb-phase-dot{
     width: 10px;
     height: 10px;
@@ -463,6 +574,7 @@
     display:grid;
     gap:6px;
   }
+
   .kb-meta-row{
     display:flex;
     gap:8px;
@@ -472,11 +584,13 @@
     font-size: 12px;
     line-height: 1.2;
   }
+
   .kb-meta-key{
     font-weight: 950;
     color: rgba(15,23,42,.60);
     white-space: nowrap;
   }
+
   .kb-meta-val{
     font-weight: 900;
     color: rgba(15,23,42,.85);
@@ -485,7 +599,6 @@
     text-overflow: ellipsis;
   }
 
-  
   .kb-empresa{
     margin-top: 8px;
     border: 0 !important;
@@ -494,7 +607,10 @@
     padding: 0 !important;
     box-shadow: none !important;
   }
-  .kb-empresa::before{ display:none !important; }
+
+  .kb-empresa::before{
+    display:none !important;
+  }
 
   .kb-empresa-nome{
     padding-left: 0 !important;
@@ -505,7 +621,9 @@
     line-height: 1.2;
   }
 
-  .kb-empresa-grid{ padding-left: 0 !important; }
+  .kb-empresa-grid{
+    padding-left: 0 !important;
+  }
 
   .kb-empresa-item{
     display:flex !important;
@@ -579,8 +697,10 @@
     text-align:center;
     user-select:none;
   }
-  .kb-loadmore strong{ color: rgba(15,23,42,.85); }
 
+  .kb-loadmore strong{
+    color: rgba(15,23,42,.85);
+  }
 
   .kb-modal{
     display:none;
@@ -591,6 +711,7 @@
     padding: 24px 14px;
     overflow:auto;
   }
+
   .kb-modal-card{
     max-width: 880px;
     margin: 4vh auto;
@@ -600,6 +721,7 @@
     border: 1px solid rgba(255,255,255,.18);
     overflow:hidden;
   }
+
   .kb-modal-head{
     display:flex;
     justify-content:space-between;
@@ -609,17 +731,21 @@
     background: linear-gradient(0deg, rgba(11,78,162,.06), rgba(11,78,162,.10));
     border-bottom: 1px solid rgba(11,78,162,.18);
   }
+
   .kb-modal-head strong{
     font-weight: 950;
     letter-spacing: -.01em;
   }
+
   .kb-modal-body{
     padding: 14px 16px 16px 16px;
     display:grid;
     gap:12px;
   }
 
-  .kb-input, .kb-textarea, .kb-select{
+  .kb-input,
+  .kb-textarea,
+  .kb-select{
     width:100%;
     border: 1px solid var(--kb-line);
     border-radius: 14px;
@@ -628,11 +754,18 @@
     font-size: 13px;
     background:#fff;
   }
-  .kb-input:focus, .kb-textarea:focus, .kb-select:focus{
+
+  .kb-input:focus,
+  .kb-textarea:focus,
+  .kb-select:focus{
     border-color: rgba(11,78,162,.35);
     box-shadow: 0 0 0 4px rgba(11,78,162,.12);
   }
-  .kb-textarea{ resize: vertical; min-height: 120px; }
+
+  .kb-textarea{
+    resize: vertical;
+    min-height: 120px;
+  }
 
   .kb-row{
     display:flex;
@@ -641,8 +774,11 @@
     flex-wrap:wrap;
     min-width:0;
   }
-  .kb-row .grow{ flex:1; min-width: min(320px, 100%); }
 
+  .kb-row .grow{
+    flex:1;
+    min-width: min(320px, 100%);
+  }
 
   #notaTexto{
     flex: 1 1 420px;
@@ -661,6 +797,7 @@
     padding: 10px 12px;
     background: rgba(15,23,42,.02);
   }
+
   .kb-nota small{
     display:block;
     color: var(--kb-muted);
@@ -672,7 +809,6 @@
     color:#b91c1c;
     font-weight: 900;
   }
-
 
   .kb-empresa-box{
     border: 1px solid rgba(15,23,42,.10);
@@ -687,6 +823,7 @@
     display:none;
     gap:6px;
   }
+
   .kb-empresa-box.has-empresa .kb-empresa-preview{
     display:grid;
   }
@@ -699,11 +836,13 @@
     color: rgba(15,23,42,.75);
     font-size: 12px;
   }
+
   .kb-empresa-preview .k{
     font-weight: 950;
     color: rgba(15,23,42,.60);
     white-space: nowrap;
   }
+
   .kb-empresa-preview .v{
     font-weight: 900;
     color: rgba(15,23,42,.90);
@@ -712,7 +851,6 @@
     text-overflow: ellipsis;
   }
 
-  
   .kb-painel-box{
     display:none;
     border: 1px solid rgba(15,23,42,.10);
@@ -721,6 +859,7 @@
     padding: 10px 12px;
     gap:8px;
   }
+
   .kb-painel-box.is-on{
     display:grid;
   }
@@ -729,6 +868,7 @@
     display:none;
     gap:6px;
   }
+
   .kb-painel-box.has-painel .kb-painel-preview{
     display:grid;
   }
@@ -741,11 +881,13 @@
     color: rgba(15,23,42,.75);
     font-size: 12px;
   }
+
   .kb-painel-preview .k{
     font-weight: 950;
     color: rgba(15,23,42,.60);
     white-space: nowrap;
   }
+
   .kb-painel-preview .v{
     font-weight: 900;
     color: rgba(15,23,42,.90);
@@ -760,7 +902,6 @@
     line-height: 1.2;
   }
 
-
   .kb-warn{
     border: 1px solid rgba(239,68,68,.22);
     background: rgba(239,68,68,.06);
@@ -771,6 +912,65 @@
     font-size: 13px;
     line-height: 1.25;
   }
+
+  @media (max-width: 920px){
+    .kb-wrap{
+      padding: 10px;
+      min-height: calc(100vh - 110px);
+    }
+
+    .kb-top,
+    .kb-toolbar,
+    .kb-board{
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
+    .kb-toolbar-right{
+      width:100%;
+      justify-content:space-between;
+    }
+
+    .kb-search-count{
+      flex:1 1 auto;
+      min-width: 0;
+      white-space: normal;
+    }
+
+    .kb-board{
+      height: calc(100vh - 260px);
+      min-height: 460px;
+    }
+  }
+
+  @media (max-width: 640px){
+    .kb-title{
+      min-width: 100%;
+    }
+
+    .kb-actions{
+      width:100%;
+    }
+
+    .kb-actions .kb-btn{
+      flex: 1 1 auto;
+    }
+
+    .kb-toolbar-right{
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .kb-toolbar-right .kb-btn,
+    .kb-search-count{
+      width:100%;
+    }
+
+    .kb-board{
+      min-height: 420px;
+      height: calc(100vh - 240px);
+    }
+  }
 </style>
 
 <div class="kb-wrap">
@@ -778,7 +978,6 @@
     <div class="kb-title">
       <h1>
         {{ kanban.NomeKanban }}
-        
         <button class="kb-btn icon danger" id="btnInativarKanban" title="Inativar Kanban">−</button>
       </h1>
       <p class="kb-desc">{{ kanban.Descricao or "—" }}</p>
@@ -793,19 +992,27 @@
 
   <div class="kb-divider"></div>
 
-  <div class="kb-filtros">
-    <div class="kb-filtros-left">
-      <div style="display:flex;flex-direction:column;gap:0;">
-        <div class="lbl">Filtrar por tags</div>
-        <div class="kb-multi">
-          <small>Selecionar várias.</small>
-          <select id="filtroTags" multiple></select>
+  <div class="kb-toolbar">
+    <div class="kb-toolbar-left">
+      <label class="kb-search" for="buscaKanban">
+        <span class="kb-search-label">Pesquisar cards</span>
+        <div class="kb-search-box">
+          <span class="kb-search-icon">🔎</span>
+          <input
+            id="buscaKanban"
+            class="kb-search-input"
+            type="search"
+            placeholder="Pesquisar por nome do card, nome da face ou nome da empresa..."
+            autocomplete="off"
+            spellcheck="false"
+          />
         </div>
-      </div>
+      </label>
     </div>
 
-    <div class="kb-filtros-right">
-      <button class="kb-btn" id="btnLimparFiltro">Limpar</button>
+    <div class="kb-toolbar-right">
+      <div id="contadorPesquisa" class="kb-search-count">Carregando cards...</div>
+      <button class="kb-btn" id="btnLimparBusca">Limpar busca</button>
     </div>
   </div>
 
@@ -815,7 +1022,6 @@
 </div>
 
 <meta name="csrf-token" content="{{ csrf_token() }}">
-
 
 <div id="modalCard" class="kb-modal">
   <div class="kb-modal-card">
@@ -844,12 +1050,9 @@
         </div>
       </div>
 
-  
       <div id="painelFaceWrap" class="kb-painel-box">
-        <div class="kb-section-title">Painel / Face </div>
-        <div class="kb-hint">
-       
-        </div>
+        <div class="kb-section-title">Painel / Face</div>
+        <div class="kb-hint"></div>
 
         <div class="kb-row">
           <select id="selectPainelCard" class="kb-select grow"></select>
@@ -894,7 +1097,6 @@
   </div>
 </div>
 
-<!-- Modal Nova Fase -->
 <div id="modalFase" class="kb-modal">
   <div class="kb-modal-card" style="max-width:560px;">
     <div class="kb-modal-head">
@@ -916,7 +1118,6 @@
   </div>
 </div>
 
-<!-- Modal Remover Card (com motivo + descrição) -->
 <div id="modalRemoverCard" class="kb-modal">
   <div class="kb-modal-card" style="max-width:620px;">
     <div class="kb-modal-head">
@@ -926,7 +1127,7 @@
 
     <div class="kb-modal-body">
       <div class="kb-warn">
-        Você está removendo este card do Kanban.Estamos buscando entender o comportamento do cliente, para isso nos informe o motivo da desistencia.
+        Você está removendo este card do Kanban. Estamos buscando entender o comportamento do cliente, para isso nos informe o motivo da desistencia.
       </div>
 
       <div class="kb-section-title">Motivo</div>
@@ -950,7 +1151,6 @@
   </div>
 </div>
 
-<!-- Modal Inativar Fase -->
 <div id="modalInativarFase" class="kb-modal">
   <div class="kb-modal-card" style="max-width:620px;">
     <div class="kb-modal-head">
@@ -973,7 +1173,6 @@
   </div>
 </div>
 
-<!-- Modal Inativar Kanban (DimKanban.Ativo = 0) -->
 <div id="modalInativarKanban" class="kb-modal">
   <div class="kb-modal-card" style="max-width:620px;">
     <div class="kb-modal-head">
@@ -995,7 +1194,7 @@
   </div>
 </div>
 
-
+<script src="/socket.io/socket.io.js"></script>
 <script>
 (() => {
   const ID_KANBAN = {{ kanban.IDDimKanban }};
@@ -1012,44 +1211,39 @@
   let tagsCatalogo = [];
   let mapaTagsPorCard = new Map();
   let cardAbertoId = null;
+  let termoBusca = "";
+  let versaoConcorrenciaCardAberto = "";
+  let cardAbertoConflitoExterno = false;
 
-  /* ===== cfg + paineis (vindo do endpoint /dados) ===== */
   let kanbanCfg = {};
   let paineisCatalogo = [];
   let paineisPorId = new Map();
 
-  /* ===== cache empresas ===== */
   let empresasCatalogo = [];
   let empresasPorId = new Map();
 
-  /* ===== perf: carregamento incremental por fase (não renderiza tudo) ===== */
-  const TAM_LOTE_POR_FASE = 16;
-  const estadoFase = new Map();  // idFase(NUM) -> { visiveis, rendered, dropEl, sentinelEl, loading, colAccent }
+  const TAM_LOTE_POR_FASE = 8;
+  const estadoFase = new Map();
+  let socketKanban = null;
+  let socketConectado = false;
 
-  /* ===== modais ===== */
   const modalCard = document.getElementById("modalCard");
   const btnFecharCard = document.getElementById("btnFecharCard");
   const msgCard = document.getElementById("msgCard");
 
-  const filtroTags = document.getElementById("filtroTags");
-  const btnLimparFiltro = document.getElementById("btnLimparFiltro");
+  const buscaKanban = document.getElementById("buscaKanban");
+  const btnLimparBusca = document.getElementById("btnLimparBusca");
+  const contadorPesquisa = document.getElementById("contadorPesquisa");
 
   const selectEmpresaCard = document.getElementById("selectEmpresaCard");
   const btnLimparEmpresa = document.getElementById("btnLimparEmpresa");
 
-  /* ===== painel/face =====
-     REGRA CERTA:
-     - "Painel" = CodPonto (selecionado via catálogo j.paineis)
-     - "Face"   = CodFace (NÃO é Face 01..16)
-     - As faces devem vir de endpoint (fetch) por CodPonto
-  */
   const painelFaceWrap = document.getElementById("painelFaceWrap");
   const selectPainelCard = document.getElementById("selectPainelCard");
   const selectFaceCard = document.getElementById("selectFaceCard");
   const btnLimparPainelFace = document.getElementById("btnLimparPainelFace");
   const painelPreview = document.getElementById("painelPreview");
 
-  /* ===== remover/encerrar ===== */
   const modalRemoverCard = document.getElementById("modalRemoverCard");
   const btnFecharRemoverCard = document.getElementById("btnFecharRemoverCard");
   const btnConfirmarRemoverCard = document.getElementById("btnConfirmarRemoverCard");
@@ -1057,35 +1251,39 @@
   const descricaoRemocao = document.getElementById("descricaoRemocao");
   const msgRemoverCard = document.getElementById("msgRemoverCard");
 
-  /* ===== inativar fase ===== */
   const modalInativarFase = document.getElementById("modalInativarFase");
   const btnFecharInativarFase = document.getElementById("btnFecharInativarFase");
   const btnConfirmarInativarFase = document.getElementById("btnConfirmarInativarFase");
   const msgInativarFase = document.getElementById("msgInativarFase");
 
-  /* ===== inativar kanban ===== */
   const modalInativarKanban = document.getElementById("modalInativarKanban");
   const btnFecharInativarKanban = document.getElementById("btnFecharInativarKanban");
   const btnConfirmarInativarKanban = document.getElementById("btnConfirmarInativarKanban");
   const msgInativarKanban = document.getElementById("msgInativarKanban");
   const btnInativarKanban = document.getElementById("btnInativarKanban");
 
-  /* ===== estado de ação ===== */
   let cardParaRemover = null;
   let faseParaInativar = null;
 
-  /* ===== cache faces por codPonto ===== */
-  const facesPorCodPonto = new Map(); // codPonto(NUM) -> Array<{CodFace, ...}>
+  const facesPorCodPonto = new Map();
   let facesCarregando = false;
+  let debounceBuscaTimer = null;
 
-  function el(tag, attrs={}, children=[]) {
+  let cardArrastandoId = 0;
+  let faseOrigemArrasteId = 0;
+  let elementoArrastando = null;
+  let dragImageEl = null;
+
+  function el(tag, attrs = {}, children = []) {
     const d = document.createElement(tag);
-    Object.entries(attrs).forEach(([k,v]) => {
+
+    Object.entries(attrs).forEach(([k, v]) => {
       if (k === "class") d.className = v;
       else if (k === "style") d.setAttribute("style", v);
       else if (k.startsWith("on") && typeof v === "function") d.addEventListener(k.slice(2), v);
       else d.setAttribute(k, v);
     });
+
     children.forEach(c => d.appendChild(typeof c === "string" ? document.createTextNode(c) : c));
     return d;
   }
@@ -1100,31 +1298,37 @@
     return String(v);
   }
 
+  function normalizarTexto(v){
+    return safeStr(v)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  function normalizarCardServidor(card){
+    const c = Object.assign({}, card || {});
+    c.IDFatoKanbanCard = idNum(c.IDFatoKanbanCard);
+    c.IDDimKanban = idNum(c.IDDimKanban || ID_KANBAN);
+    c.IDDimKanbanFaseAtual = idNum(c.IDDimKanbanFaseAtual);
+    c.IDEmpresaProprietaria = c.IDEmpresaProprietaria === null || c.IDEmpresaProprietaria === undefined ? null : idNum(c.IDEmpresaProprietaria);
+    c.VersaoConcorrenciaHex = safeStr(c.VersaoConcorrenciaHex || c.versao_concorrencia || "").trim().toUpperCase();
+    return c;
+  }
+
   function tagsDoCard(cardId) {
-    return mapaTagsPorCard.get(cardId) || [];
+    return mapaTagsPorCard.get(idNum(cardId)) || [];
   }
 
-  function cardPassaFiltro(cardId) {
-    const selecionadas = Array.from(filtroTags.selectedOptions).map(o => parseInt(o.value));
-    if (!selecionadas.length) return true;
-    const ids = tagsDoCard(cardId).map(t => t.IDDimKanbanTag);
-    return selecionadas.every(x => ids.includes(x));
+  function setTagsDoCard(cardId, tags){
+    mapaTagsPorCard.set(
+      idNum(cardId),
+      Array.isArray(tags) ? tags.map(t => Object.assign({}, t || {})) : []
+    );
   }
 
-  function listaCardsDaFase(idFase){
-    const idF = idNum(idFase);
-    return cards
-      .filter(c => idNum(c.IDDimKanbanFaseAtual) === idF)
-      .filter(c => cardPassaFiltro(c.IDFatoKanbanCard));
-  }
-
-  function contarCardsNaFase(idFase){
-    return listaCardsDaFase(idFase).length;
-  }
-
-  function corColunaPorIndice(i){
-    const paleta = ["#16a34a","#f97316","#64748b","#7c3aed","#10b981","#0ea5e9","#eab308","#ef4444"];
-    return paleta[i % paleta.length];
+  function removerTagsDoCard(cardId){
+    mapaTagsPorCard.delete(idNum(cardId));
   }
 
   function normalizaCnpj(v){
@@ -1139,9 +1343,108 @@
     return `${s.slice(0,2)}.${s.slice(2,5)}.${s.slice(5,8)}/${s.slice(8,12)}-${s.slice(12,14)}`;
   }
 
-  /* =========================
-     APIs
-     ========================= */
+  function obterTextoFaceCard(card){
+    const nomeFace =
+      safeStr(card?.NomeFace || card?.Face || card?.DescricaoFace || card?.LabelFace || "");
+
+    const codFace =
+      safeStr(card?.CodFace || card?.CodigoFace || "");
+
+    if (nomeFace && codFace) return `${nomeFace} ${codFace}`;
+    if (nomeFace) return nomeFace;
+    if (codFace) return codFace;
+    return "";
+  }
+
+  function textoBuscaDoCard(card){
+    return [
+      safeStr(card?.Titulo),
+      safeStr(card?.EmpresaRazaoSocial),
+      obterTextoFaceCard(card)
+    ].join(" ");
+  }
+
+  function cardPassaBusca(card){
+    const termo = normalizarTexto(termoBusca);
+    if (!termo) return true;
+
+    const base = normalizarTexto(textoBuscaDoCard(card));
+    return base.includes(termo);
+  }
+
+  function fasePorId(idFase){
+    const id = idNum(idFase);
+    return fases.find(f => idNum(f.IDDimKanbanFase) === id) || null;
+  }
+
+  function listaCardsDaFase(idFase, considerarBusca = true){
+    const idF = idNum(idFase);
+    return cards
+      .filter(c => idNum(c.IDDimKanbanFaseAtual) === idF)
+      .filter(c => considerarBusca ? cardPassaBusca(c) : true);
+  }
+
+  function contarCardsNaFaseCarregados(idFase){
+    return listaCardsDaFase(idFase, false).length;
+  }
+
+  function contarCardsNaFaseVisiveis(idFase){
+    return listaCardsDaFase(idFase, true).length;
+  }
+
+  function contarCardsVisiveis(){
+    return cards.filter(c => cardPassaBusca(c)).length;
+  }
+
+  function totalServidorDoQuadro(){
+    return fases.reduce((acc, f) => acc + idNum(f.QuantidadeCardsTotal || 0), 0);
+  }
+
+  function atualizarResumoBusca(){
+    if (!contadorPesquisa) return;
+
+    const totalCarregado = cards.length;
+    const totalVisivel = contarCardsVisiveis();
+    const totalServidor = totalServidorDoQuadro();
+    const termo = safeStr(termoBusca).trim();
+
+    if (!totalCarregado && !totalServidor){
+      contadorPesquisa.textContent = "Nenhum card carregado";
+      return;
+    }
+
+    if (!termo){
+      if (totalServidor > 0 && totalServidor !== totalCarregado){
+        contadorPesquisa.textContent = `${totalCarregado} carregados de ${totalServidor} card${totalServidor === 1 ? "" : "s"} no quadro`;
+      } else {
+        contadorPesquisa.textContent = `${totalCarregado} card${totalCarregado === 1 ? "" : "s"} no quadro`;
+      }
+      return;
+    }
+
+    if (!totalVisivel){
+      contadorPesquisa.textContent = `Nenhum resultado para "${termo}" entre ${totalCarregado} card${totalCarregado === 1 ? "" : "s"} carregado${totalCarregado === 1 ? "" : "s"}`;
+      return;
+    }
+
+    contadorPesquisa.textContent = `${totalVisivel} resultado${totalVisivel === 1 ? "" : "s"} para "${termo}" entre ${totalCarregado} card${totalCarregado === 1 ? "" : "s"} carregado${totalCarregado === 1 ? "" : "s"}`;
+  }
+
+  function aplicarBusca(){
+    fases.forEach(f => {
+      const idFase = idNum(f.IDDimKanbanFase);
+      preencherCabecalhoFase(idFase);
+      void preencherCardsInicial(idFase, TAM_LOTE_POR_FASE, true);
+    });
+
+    atualizarResumoBusca();
+  }
+
+  function corColunaPorIndice(i){
+    const paleta = ["#16a34a", "#f97316", "#64748b", "#7c3aed", "#10b981", "#0ea5e9", "#eab308", "#ef4444"];
+    return paleta[i % paleta.length];
+  }
+
   async function apiPost(url, payload){
     const r = await fetch(url, {
       method:"POST",
@@ -1149,11 +1452,162 @@
       headers: headersJSON,
       body: JSON.stringify(payload || {})
     });
+
     const j = await r.json().catch(() => null);
     return { ok: !!(j && j.ok), http: r.status, body: j };
   }
 
-  /* ===== carregar empresas ===== */
+  function limparEstadosDrop(){
+    estadoFase.forEach(st => {
+      st.dragDepth = 0;
+      if (st.dropEl) st.dropEl.classList.remove("is-over");
+    });
+  }
+
+  function limparDragImage(){
+    if (dragImageEl && dragImageEl.parentNode) {
+      dragImageEl.parentNode.removeChild(dragImageEl);
+    }
+    dragImageEl = null;
+  }
+
+  function criarDragImage(cardEl){
+    if (!cardEl) return null;
+
+    const rect = cardEl.getBoundingClientRect();
+    const clone = cardEl.cloneNode(true);
+    clone.classList.add("kb-drag-image");
+    clone.style.position = "fixed";
+    clone.style.top = "-9999px";
+    clone.style.left = "-9999px";
+    clone.style.pointerEvents = "none";
+    clone.style.width = `${Math.ceil(rect.width)}px`;
+    clone.style.maxWidth = `${Math.ceil(rect.width)}px`;
+    clone.style.zIndex = "999999";
+    document.body.appendChild(clone);
+    return clone;
+  }
+
+  function iniciarModoDrag(cardId, idFaseOrigem, cardEl, event){
+    cardArrastandoId = idNum(cardId);
+    faseOrigemArrasteId = idNum(idFaseOrigem);
+    elementoArrastando = cardEl || null;
+
+    document.body.classList.add("kb-dragging");
+    board.classList.add("is-dragging");
+
+    if (elementoArrastando){
+      requestAnimationFrame(() => {
+        if (elementoArrastando) elementoArrastando.classList.add("drag-source");
+      });
+    }
+
+    if (event && event.dataTransfer){
+      event.dataTransfer.effectAllowed = "move";
+
+      const img = criarDragImage(cardEl);
+      if (img){
+        dragImageEl = img;
+        try{
+          event.dataTransfer.setDragImage(img, 28, 18);
+        } catch (_erro) {
+        }
+      }
+    }
+  }
+
+  function encerrarModoDrag(){
+    document.body.classList.remove("kb-dragging");
+    board.classList.remove("is-dragging");
+
+    if (elementoArrastando){
+      elementoArrastando.classList.remove("drag-source");
+    }
+
+    elementoArrastando = null;
+    cardArrastandoId = 0;
+    faseOrigemArrasteId = 0;
+
+    limparEstadosDrop();
+
+    setTimeout(() => {
+      limparDragImage();
+    }, 0);
+  }
+
+  function obterCardPorId(idCard){
+    const id = idNum(idCard);
+    return cards.find(c => idNum(c.IDFatoKanbanCard) === id) || null;
+  }
+
+  function inserirOuAtualizarCardLocal(card){
+    const cardNorm = normalizarCardServidor(card);
+    if (!cardNorm.IDFatoKanbanCard) return null;
+
+    const idx = cards.findIndex(c => idNum(c.IDFatoKanbanCard) === cardNorm.IDFatoKanbanCard);
+    if (idx >= 0){
+      cards[idx] = Object.assign({}, cards[idx], cardNorm);
+      return cards[idx];
+    }
+
+    cards.unshift(cardNorm);
+    return cardNorm;
+  }
+
+  function removerCardLocal(idCard){
+    const id = idNum(idCard);
+    cards = cards.filter(c => idNum(c.IDFatoKanbanCard) !== id);
+    removerTagsDoCard(id);
+  }
+
+  function moverCardLocalmente(idCard, idFasePara){
+    const idC = idNum(idCard);
+    const idDestino = idNum(idFasePara);
+
+    if (!idC || !idDestino) {
+      return { ok: false, origem: 0, destino: 0 };
+    }
+
+    const indiceAtual = cards.findIndex(c => idNum(c.IDFatoKanbanCard) === idC);
+    if (indiceAtual < 0) {
+      return { ok: false, origem: 0, destino: idDestino };
+    }
+
+    const card = cards[indiceAtual];
+    const idOrigem = idNum(card.IDDimKanbanFaseAtual);
+
+    const [cardMovido] = cards.splice(indiceAtual, 1);
+    cardMovido.IDDimKanbanFaseAtual = idDestino;
+
+    let indiceInsercao = cards.length;
+
+    for (let i = cards.length - 1; i >= 0; i -= 1) {
+      if (idNum(cards[i].IDDimKanbanFaseAtual) === idDestino) {
+        indiceInsercao = i + 1;
+        break;
+      }
+    }
+
+    cards.splice(indiceInsercao, 0, cardMovido);
+
+    return { ok: true, origem: idOrigem, destino: idDestino };
+  }
+
+  function destacarCardNaFase(idCard, idFase){
+    requestAnimationFrame(() => {
+      const st = estadoFase.get(idNum(idFase));
+      if (!st || !st.dropEl) return;
+
+      const cardEl = st.dropEl.querySelector(`.kb-card[data-card="${idNum(idCard)}"]`);
+      if (!cardEl) return;
+
+      cardEl.classList.add("drop-commit");
+      setTimeout(() => {
+        cardEl.classList.remove("drop-commit");
+      }, 220);
+    });
+  }
+
   async function carregarEmpresas() {
     if (empresasCatalogo.length) return;
 
@@ -1220,13 +1674,12 @@
 
   function setEmpresaPreviewById(idEmp) {
     const id = Number(idEmp || 0);
-    if (!id) { setEmpresaPreviewByObj(null); return; }
+    if (!id) {
+      setEmpresaPreviewByObj(null);
+      return;
+    }
     setEmpresaPreviewByObj(empresasPorId.get(id) || null);
   }
-
-  /* =========================
-     PAINÉIS / FACES (CORRIGIDO)
-     ========================= */
 
   function montarSelectPaineis(){
     if (!selectPainelCard) return;
@@ -1266,8 +1719,16 @@
       const codFace = safeStr(f?.CodFace ?? f?.codFace ?? f?.CODFACE ?? "");
       if (!codFace) continue;
 
-      const desc =
-        safeStr(f?.Descricao ?? f?.NomeFace ?? f?.Nome ?? f?.Local ?? f?.Endereco ?? "").trim();
+      const desc = safeStr(
+        f?.Descricao ??
+        f?.NomeFace ??
+        f?.Nome ??
+        f?.Local ??
+        f?.Endereco ??
+        f?.Face ??
+        f?.Label ??
+        ""
+      ).trim();
 
       const label = desc ? `${codFace} • ${desc}` : `${codFace}`;
       selectFaceCard.appendChild(el("option", { value: codFace }, [label]));
@@ -1314,17 +1775,12 @@
       limparSelectFaces();
       return null;
     }
+
     const p = paineisPorId.get(id) || null;
     setPainelPreviewByObj(p);
     return p;
   }
 
-  /* ===== ENDPOINT DE FACES (VOCÊ PRECISA TER NO BACKEND) =====
-     Este JS vai chamar:
-       GET /kanban/api/paineis/<cod_ponto>/faces
-     Esperado:
-       { ok: true, faces: [ { CodFace: 123, Descricao: "..." }, ... ] }
-  */
   async function carregarFacesDoCodPonto(codPonto){
     const cod = Number(codPonto || 0);
     if (!cod) return [];
@@ -1356,7 +1812,6 @@
     const idPainel = selectPainelCard.value || "";
     const painel = setPainelPreviewById(idPainel);
 
-    /* sempre reseta o select de face */
     limparSelectFaces();
     selectFaceCard.value = "";
 
@@ -1365,7 +1820,6 @@
     const codPonto = Number(painel.CodPonto || 0);
     if (!codPonto) return;
 
-    /* while loading: placeholder */
     selectFaceCard.innerHTML = "";
     selectFaceCard.appendChild(el("option", {value: ""}, ["Carregando faces..."]));
 
@@ -1391,24 +1845,83 @@
 
     montarSelectPaineis();
 
-    /* reset */
     if (selectPainelCard) selectPainelCard.value = "";
     if (selectFaceCard) selectFaceCard.value = "";
     setPainelPreviewByObj(null);
     limparSelectFaces();
   }
 
-  /* =========================
-     CARREGAR DADOS DO KANBAN
-     ========================= */
-  async function carregar() {
-    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/dados`, { credentials: "same-origin" });
+  async function buscarDetalheCard(idCard){
+    const r = await fetch(`/kanban/api/cards/${idNum(idCard)}`, { credentials: "same-origin" });
     const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !j.ok) return null;
+    return j;
+  }
+
+  async function enriquecerCardsCarregados(cardsNovos){
+    const lista = Array.isArray(cardsNovos) ? cardsNovos : [];
+    if (!lista.length) return;
+
+    const ids = [...new Set(lista.map(c => idNum(c.IDFatoKanbanCard)).filter(Boolean))];
+    if (!ids.length) return;
+
+    await Promise.all(ids.map(async (idCard) => {
+      const detalhe = await buscarDetalheCard(idCard);
+      if (!detalhe || !detalhe.card) return;
+      inserirOuAtualizarCardLocal(detalhe.card);
+      setTagsDoCard(idCard, detalhe.tags || []);
+    }));
+  }
+
+  async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE){
+    const idF = idNum(idFase);
+    const st = estadoFase.get(idF);
+    if (!st || st.carregandoServidor || st.cargaCompleta) return 0;
+
+    st.carregandoServidor = true;
+
+    try{
+      const offset = idNum(st.offsetServidor || 0);
+      const limit = Math.max(1, Math.min(idNum(limite) || TAM_LOTE_POR_FASE, 100));
+      const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/cards?id_fase=${idF}&offset=${offset}&limit=${limit}`, { credentials: "same-origin" });
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok || !j || !j.ok){
+        console.warn("carregarLoteServidorDaFase falhou", { idFase: idF, http: r.status, body: j });
+        return 0;
+      }
+
+      const cardsNovos = Array.isArray(j.cards) ? j.cards.map(normalizarCardServidor) : [];
+      cardsNovos.forEach(card => inserirOuAtualizarCardLocal(card));
+
+      if (typeof j.total !== "undefined"){
+        const fase = fasePorId(idF);
+        if (fase) fase.QuantidadeCardsTotal = idNum(j.total);
+        st.totalServidor = idNum(j.total);
+      }
+
+      st.offsetServidor = offset + cardsNovos.length;
+      st.cargaCompleta = st.offsetServidor >= idNum(st.totalServidor);
+
+      if (cardsNovos.length){
+        await enriquecerCardsCarregados(cardsNovos);
+      }
+
+      return cardsNovos.length;
+    } finally {
+      st.carregandoServidor = false;
+    }
+  }
+
+  async function carregar() {
+    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/dados?limit_inicial=${TAM_LOTE_POR_FASE}`, { credentials: "same-origin" });
+    const j = await r.json().catch(() => null);
+
     if (!j || !j.ok) return;
 
-    fases = j.fases || [];
-    cards = j.cards || [];
-    tagsCatalogo = j.tags || [];
+    fases = Array.isArray(j.fases) ? j.fases.map(f => Object.assign({}, f || {})) : [];
+    cards = Array.isArray(j.cards) ? j.cards.map(normalizarCardServidor) : [];
+    tagsCatalogo = Array.isArray(j.tags) ? j.tags.map(t => Object.assign({}, t || {})) : [];
 
     kanbanCfg = j.kanban_cfg || {};
     paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
@@ -1417,32 +1930,24 @@
 
     mapaTagsPorCard = new Map();
     (j.card_tags || []).forEach(ct => {
-      const arr = mapaTagsPorCard.get(ct.IDFatoKanbanCard) || [];
+      const idCard = idNum(ct.IDFatoKanbanCard);
+      const arr = mapaTagsPorCard.get(idCard) || [];
       arr.push(ct);
-      mapaTagsPorCard.set(ct.IDFatoKanbanCard, arr);
+      mapaTagsPorCard.set(idCard, arr);
     });
 
-    montarFiltroTags();
     renderBoardCompleto();
+    atualizarResumoBusca();
   }
 
-  function montarFiltroTags() {
-    filtroTags.innerHTML = "";
-    tagsCatalogo.forEach(t => {
-      filtroTags.appendChild(el("option", {value: t.IDDimKanbanTag}, [t.NomeTag]));
-    });
-  }
-
-  /* =========================
-     RENDER DO BOARD
-     ========================= */
   function renderBoardCompleto() {
     board.innerHTML = "";
     estadoFase.clear();
 
     fases.forEach((f, idx) => {
       const idFase = idNum(f.IDDimKanbanFase);
-      const qtdTotal = contarCardsNaFase(idFase);
+      const qtdTotalServidor = idNum(f.QuantidadeCardsTotal || contarCardsNaFaseCarregados(idFase));
+      const qtdCarregadaInicial = idNum(f.QuantidadeCardsCarregadosInicialmente || contarCardsNaFaseCarregados(idFase));
       const colAccent = corColunaPorIndice(idx);
 
       const col = el("div", {class:"kb-col", "data-fase": idFase});
@@ -1450,7 +1955,7 @@
 
       const head = el("div", {class:"kb-col-head"}, [
         el("div", {class:"kb-col-title"}, [
-          el("strong", {title: f.NomeFase || ""}, [`${(f.NomeFase || "—")} (${qtdTotal})`]),
+          el("strong", {title: f.NomeFase || ""}, [`${(f.NomeFase || "—")} (${qtdTotalServidor})`]),
           el("div", {class:"kb-col-sub"}, [
             el("span", {class:"kb-count"}, [String(f.TipoFase || "").toLowerCase()])
           ])
@@ -1463,17 +1968,6 @@
 
       const body = el("div", {class:"kb-col-body"}, []);
       const drop = el("div", {class:"kb-drop", "data-drop":"1", "data-fase": idFase}, []);
-
-      drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("is-over"); });
-      drop.addEventListener("dragleave", () => { drop.classList.remove("is-over"); });
-      drop.addEventListener("drop", async (e) => {
-        e.preventDefault();
-        drop.classList.remove("is-over");
-        const cardId = parseInt(e.dataTransfer.getData("text/plain") || "0");
-        if (!cardId) return;
-        await moverCard(cardId, idFase, "LAST");
-      });
-
       const sentinel = el("div", {class:"kb-loadmore", style:"display:none;"}, ["Carregando..."]);
 
       drop.appendChild(sentinel);
@@ -1483,12 +1977,72 @@
       board.appendChild(col);
 
       estadoFase.set(idFase, {
-        visiveis: TAM_LOTE_POR_FASE,
+        visiveis: Math.max(TAM_LOTE_POR_FASE, qtdCarregadaInicial || TAM_LOTE_POR_FASE),
         rendered: 0,
         dropEl: drop,
         sentinelEl: sentinel,
         loading: false,
-        colAccent
+        carregandoServidor: false,
+        colAccent,
+        dragDepth: 0,
+        offsetServidor: qtdCarregadaInicial,
+        totalServidor: qtdTotalServidor,
+        cargaCompleta: !!f.CargaInicialCompleta || qtdCarregadaInicial >= qtdTotalServidor
+      });
+
+      drop.addEventListener("dragenter", (e) => {
+        if (!cardArrastandoId) return;
+        e.preventDefault();
+
+        const st = estadoFase.get(idFase);
+        if (!st) return;
+
+        st.dragDepth = (st.dragDepth || 0) + 1;
+        drop.classList.add("is-over");
+      });
+
+      drop.addEventListener("dragover", (e) => {
+        if (!cardArrastandoId) return;
+        e.preventDefault();
+
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = "move";
+        }
+
+        if (!drop.classList.contains("is-over")) {
+          drop.classList.add("is-over");
+        }
+      });
+
+      drop.addEventListener("dragleave", () => {
+        if (!cardArrastandoId) return;
+
+        const st = estadoFase.get(idFase);
+        if (!st) return;
+
+        st.dragDepth = Math.max(0, (st.dragDepth || 0) - 1);
+        if (st.dragDepth === 0) {
+          drop.classList.remove("is-over");
+        }
+      });
+
+      drop.addEventListener("drop", async (e) => {
+        if (!cardArrastandoId) return;
+
+        e.preventDefault();
+
+        const st = estadoFase.get(idFase);
+        if (st) st.dragDepth = 0;
+        drop.classList.remove("is-over");
+
+        const cardId = idNum(e.dataTransfer?.getData("text/plain") || cardArrastandoId);
+        if (!cardId) {
+          encerrarModoDrag();
+          return;
+        }
+
+        await moverCard(cardId, idFase, "LAST");
+        encerrarModoDrag();
       });
 
       drop.addEventListener("scroll", () => {
@@ -1501,88 +2055,136 @@
         const nearBottom = (drop.scrollTop + drop.clientHeight) >= (drop.scrollHeight - 160);
         if (!nearBottom) return;
 
-        carregarMaisCardsDaFase(idFase);
+        void carregarMaisCardsDaFase(idFase);
       }, { passive: true });
     });
 
     fases.forEach(f => {
       const idFase = idNum(f.IDDimKanbanFase);
       preencherCabecalhoFase(idFase);
-      preencherCardsInicial(idFase);
+      void preencherCardsInicial(idFase);
     });
   }
 
   function preencherCabecalhoFase(idFase){
     const idF = idNum(idFase);
-    const f = fases.find(x => idNum(x.IDDimKanbanFase) === idF);
-    if (!f) return;
+    const f = fasePorId(idF);
+    const st = estadoFase.get(idF);
+    if (!f || !st) return;
 
-    const qtd = contarCardsNaFase(idF);
+    const qtdVisivel = contarCardsNaFaseVisiveis(idF);
+    const qtdCarregado = contarCardsNaFaseCarregados(idF);
+    const qtdTotalServidor = Math.max(idNum(f.QuantidadeCardsTotal || 0), qtdCarregado);
+    st.totalServidor = qtdTotalServidor;
+
     const col = board.querySelector(`.kb-col[data-fase="${idF}"]`);
     if (!col) return;
 
     const strong = col.querySelector(".kb-col-title strong");
-    if (strong) strong.textContent = `${(f.NomeFase || "—")} (${qtd})`;
+    if (strong){
+      if (safeStr(termoBusca).trim()) {
+        strong.textContent = `${(f.NomeFase || "—")} (${qtdVisivel})`;
+      } else {
+        strong.textContent = `${(f.NomeFase || "—")} (${qtdTotalServidor})`;
+      }
+    }
+
+    const countEl = col.querySelector(".kb-count");
+    if (countEl){
+      if (safeStr(termoBusca).trim()){
+        countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdVisivel} visível${qtdVisivel === 1 ? "" : "eis"} entre ${qtdCarregado} carregado${qtdCarregado === 1 ? "" : "s"}`;
+      } else if (qtdCarregado !== qtdTotalServidor) {
+        countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdCarregado}/${qtdTotalServidor} carregados`;
+      } else {
+        countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdTotalServidor} carregados`;
+      }
+    }
   }
 
-  function preencherCardsInicial(idFase){
+  async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_FASE, manterScroll = false){
     const idF = idNum(idFase);
     const st = estadoFase.get(idF);
     if (!st) return;
 
+    const scrollTopAnterior = manterScroll ? st.dropEl.scrollTop : 0;
+
     st.dropEl.innerHTML = "";
     st.dropEl.appendChild(st.sentinelEl);
     st.rendered = 0;
-    st.visiveis = TAM_LOTE_POR_FASE;
+    st.visiveis = Math.max(TAM_LOTE_POR_FASE, idNum(quantidadeDesejada) || TAM_LOTE_POR_FASE);
 
-    carregarMaisCardsDaFase(idF, true);
+    await carregarMaisCardsDaFase(idF, true, st.visiveis);
+
+    if (manterScroll) {
+      requestAnimationFrame(() => {
+        const maxScroll = Math.max(0, st.dropEl.scrollHeight - st.dropEl.clientHeight);
+        st.dropEl.scrollTop = Math.min(scrollTopAnterior, maxScroll);
+      });
+    }
   }
 
-  function carregarMaisCardsDaFase(idFase, force=false){
+  async function carregarMaisCardsDaFase(idFase, force = false, incremento = TAM_LOTE_POR_FASE){
     const idF = idNum(idFase);
     const st = estadoFase.get(idF);
     if (!st || st.loading) return;
-
-    const lista = listaCardsDaFase(idF);
-    const total = lista.length;
-
-    if (!force && st.rendered >= total) return;
 
     st.loading = true;
     st.sentinelEl.style.display = "block";
     st.sentinelEl.textContent = "Carregando...";
 
-    const alvo = Math.min(st.rendered + TAM_LOTE_POR_FASE, total);
-    const fatia = lista.slice(st.rendered, alvo);
+    try{
+      const qtdIncremento = Math.max(TAM_LOTE_POR_FASE, idNum(incremento) || TAM_LOTE_POR_FASE);
+      let lista = listaCardsDaFase(idF);
 
-    fatia.forEach(c => {
-      st.dropEl.insertBefore(renderCard(c, idF, st.colAccent), st.sentinelEl);
-    });
+      if ((force && lista.length < qtdIncremento && !st.cargaCompleta) || (!force && st.rendered >= lista.length && !st.cargaCompleta)) {
+        await carregarLoteServidorDaFase(idF, qtdIncremento);
+        lista = listaCardsDaFase(idF);
+      }
 
-    st.rendered = alvo;
+      const alvo = Math.min(st.rendered + qtdIncremento, lista.length);
+      const fatia = lista.slice(st.rendered, alvo);
 
-    if (total === 0){
-      st.sentinelEl.style.display = "block";
-      st.sentinelEl.textContent = "Sem cards nesta fase.";
-    } else if (st.rendered < total){
-      st.sentinelEl.style.display = "block";
-      st.sentinelEl.innerHTML = "";
-      st.sentinelEl.appendChild(document.createTextNode("Mostrando "));
-      st.sentinelEl.appendChild(el("strong", {}, [String(st.rendered)]));
-      st.sentinelEl.appendChild(document.createTextNode(" de "));
-      st.sentinelEl.appendChild(el("strong", {}, [String(total)]));
-      st.sentinelEl.appendChild(document.createTextNode(" — role para ver mais"));
-    } else {
-      st.sentinelEl.style.display = "none";
-      st.sentinelEl.textContent = "";
+      fatia.forEach(c => {
+        st.dropEl.insertBefore(renderCard(c, idF, st.colAccent), st.sentinelEl);
+      });
+
+      st.rendered = alvo;
+      st.visiveis = Math.max(st.visiveis, st.rendered);
+
+      const totalCarregadoNaFase = contarCardsNaFaseCarregados(idF);
+      const totalServidorNaFase = Math.max(st.totalServidor, idNum(fasePorId(idF)?.QuantidadeCardsTotal || 0), totalCarregadoNaFase);
+      st.totalServidor = totalServidorNaFase;
+      st.cargaCompleta = st.cargaCompleta || totalCarregadoNaFase >= totalServidorNaFase;
+
+      if (lista.length === 0){
+        st.sentinelEl.style.display = "block";
+        st.sentinelEl.textContent = termoBusca
+          ? "Sem cards carregados para esta busca nesta fase."
+          : "Sem cards nesta fase.";
+      } else if (st.rendered < lista.length){
+        st.sentinelEl.style.display = "block";
+        st.sentinelEl.innerHTML = "";
+        st.sentinelEl.appendChild(document.createTextNode("Mostrando "));
+        st.sentinelEl.appendChild(el("strong", {}, [String(st.rendered)]));
+        st.sentinelEl.appendChild(document.createTextNode(" de "));
+        st.sentinelEl.appendChild(el("strong", {}, [String(lista.length)]));
+        st.sentinelEl.appendChild(document.createTextNode(" carregados — role para ver mais"));
+      } else if (!st.cargaCompleta) {
+        st.sentinelEl.style.display = "block";
+        st.sentinelEl.textContent = `Mostrando ${lista.length} carregados de ${totalServidorNaFase}. Role para buscar mais do servidor.`;
+      } else {
+        st.sentinelEl.style.display = "none";
+        st.sentinelEl.textContent = "";
+      }
+    } finally {
+      st.loading = false;
+      preencherCabecalhoFase(idF);
     }
-
-    st.loading = false;
   }
 
   function renderCard(c, idFase, colAccent){
     const idF = idNum(idFase);
-    const f = fases.find(x => idNum(x.IDDimKanbanFase) === idF) || {};
+    const f = fasePorId(idF) || {};
     const tgs = tagsDoCard(c.IDFatoKanbanCard);
 
     const tagsLinha = el("div", {class:"kb-tags"},
@@ -1594,6 +2196,7 @@
     );
 
     const meta = el("div", {class:"kb-card-meta"}, []);
+
     if (c.Departamento) {
       meta.appendChild(
         el("div", {class:"kb-meta-row"}, [
@@ -1602,11 +2205,22 @@
         ])
       );
     }
+
     if (c.Valor) {
       meta.appendChild(
         el("div", {class:"kb-meta-row"}, [
           el("span", {class:"kb-meta-key"}, ["VALOR:"]),
           el("span", {class:"kb-meta-val", title: String(c.Valor)}, [String(c.Valor)])
+        ])
+      );
+    }
+
+    const textoFace = obterTextoFaceCard(c);
+    if (textoFace) {
+      meta.appendChild(
+        el("div", {class:"kb-meta-row"}, [
+          el("span", {class:"kb-meta-key"}, ["FACE:"]),
+          el("span", {class:"kb-meta-val", title: textoFace}, [textoFace])
         ])
       );
     }
@@ -1631,6 +2245,7 @@
     const empNome = c.EmpresaRazaoSocial || "";
     const empSetor = c.EmpresaSetor || "";
     const empClasse = c.EmpresaClasse || "";
+
     const temEmpresa = !!(idEmp || empNome || empSetor || empClasse);
 
     const blocoEmpresa = temEmpresa ? el("div", {class:"kb-empresa"}, [
@@ -1660,11 +2275,27 @@
 
     card.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", String(c.IDFatoKanbanCard));
+      iniciarModoDrag(c.IDFatoKanbanCard, idF, card, e);
+    });
+
+    card.addEventListener("dragend", () => {
+      encerrarModoDrag();
     });
 
     card.addEventListener("dblclick", () => abrirCard(c.IDFatoKanbanCard));
 
     return card;
+  }
+
+  function redesenharFases(idsFase, manterScroll = true){
+    const ids = [...new Set((Array.isArray(idsFase) ? idsFase : [idsFase]).map(idNum).filter(Boolean))];
+    ids.forEach(idFase => {
+      preencherCabecalhoFase(idFase);
+      const st = estadoFase.get(idFase);
+      const qtd = st ? Math.max(TAM_LOTE_POR_FASE, st.visiveis) : TAM_LOTE_POR_FASE;
+      void preencherCardsInicial(idFase, qtd, manterScroll);
+    });
+    atualizarResumoBusca();
   }
 
   async function criarCardPrompt(idFase) {
@@ -1679,13 +2310,59 @@
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) await carregar();
+    if (j && j.ok) {
+      await carregar();
+    }
+  }
+
+  async function obterVersaoAtualDoCard(idCard){
+    const cardLocal = obterCardPorId(idCard);
+    if (cardLocal && safeStr(cardLocal.VersaoConcorrenciaHex)) return cardLocal;
+
+    const detalhe = await buscarDetalheCard(idCard);
+    if (!detalhe || !detalhe.card) return null;
+
+    inserirOuAtualizarCardLocal(detalhe.card);
+    setTagsDoCard(idCard, detalhe.tags || []);
+    return normalizarCardServidor(detalhe.card);
   }
 
   async function moverCard(idCard, idFasePara, posicao) {
-    const payload = { id_fase_para: idFasePara, posicao: posicao || "LAST" };
+    const idC = idNum(idCard);
+    const idDestino = idNum(idFasePara);
 
-    const r = await fetch(`/kanban/api/cards/${idCard}/mover`, {
+    if (!idC || !idDestino) return;
+
+    const cardAtual = await obterVersaoAtualDoCard(idC);
+    if (!cardAtual || !safeStr(cardAtual.VersaoConcorrenciaHex)) {
+      await carregar();
+      return;
+    }
+
+    const stOrigemAntes = estadoFase.get(faseOrigemArrasteId || idNum(cardAtual?.IDDimKanbanFaseAtual));
+    const stDestinoAntes = estadoFase.get(idDestino);
+
+    const qtdOrigemManter = stOrigemAntes ? Math.max(TAM_LOTE_POR_FASE, stOrigemAntes.rendered) : TAM_LOTE_POR_FASE;
+    const qtdDestinoManter = stDestinoAntes ? Math.max(TAM_LOTE_POR_FASE, stDestinoAntes.rendered + 1) : TAM_LOTE_POR_FASE;
+
+    const movLocal = moverCardLocalmente(idC, idDestino);
+
+    if (movLocal.ok){
+      if (movLocal.origem === movLocal.destino){
+        redesenharFases([movLocal.origem], true);
+      } else {
+        redesenharFases([movLocal.origem, movLocal.destino], true);
+      }
+      destacarCardNaFase(idC, movLocal.destino);
+    }
+
+    const payload = {
+      id_fase_para: idDestino,
+      posicao: posicao || "LAST",
+      versao_concorrencia: safeStr(cardAtual.VersaoConcorrenciaHex)
+    };
+
+    const r = await fetch(`/kanban/api/cards/${idC}/mover`, {
       method:"POST",
       credentials: "same-origin",
       headers: headersJSON,
@@ -1693,12 +2370,28 @@
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) await carregar();
+    if (!(j && j.ok)) {
+      if (r.status === 409 && j && j.card_atual) {
+        inserirOuAtualizarCardLocal(j.card_atual);
+      }
+      await carregar();
+      return;
+    }
+
+    if (j.card) {
+      inserirOuAtualizarCardLocal(j.card);
+    }
+
+    if (movLocal.ok){
+      if (movLocal.origem === movLocal.destino){
+        redesenharFases([movLocal.origem], true);
+      } else {
+        redesenharFases([movLocal.origem, movLocal.destino], true);
+      }
+      destacarCardNaFase(idC, movLocal.destino);
+    }
   }
 
-  /* =========================
-     REMOVER CARD (modal)
-     ========================= */
   function abrirModalRemoverCard(idCard){
     cardParaRemover = idCard;
     msgRemoverCard.style.display = "none";
@@ -1713,7 +2406,9 @@
   }
 
   btnFecharRemoverCard.addEventListener("click", fecharModalRemoverCard);
-  modalRemoverCard.addEventListener("click", (e) => { if (e.target === modalRemoverCard) fecharModalRemoverCard(); });
+  modalRemoverCard.addEventListener("click", (e) => {
+    if (e.target === modalRemoverCard) fecharModalRemoverCard();
+  });
 
   btnConfirmarRemoverCard.addEventListener("click", async () => {
     msgRemoverCard.style.display = "none";
@@ -1726,11 +2421,13 @@
       msgRemoverCard.style.display = "block";
       return;
     }
+
     if (!motivo){
       msgRemoverCard.textContent = "Selecione um motivo.";
       msgRemoverCard.style.display = "block";
       return;
     }
+
     if (desc.length < 3){
       msgRemoverCard.textContent = "Descreva o motivo (mínimo 3 caracteres).";
       msgRemoverCard.style.display = "block";
@@ -1745,13 +2442,11 @@
       return;
     }
 
+    removerCardLocal(cardParaRemover);
     fecharModalRemoverCard();
     await carregar();
   });
 
-  /* =========================
-     INATIVAR FASE (modal)
-     ========================= */
   function abrirModalInativarFase(idFase){
     faseParaInativar = idFase;
     msgInativarFase.style.display = "none";
@@ -1764,7 +2459,9 @@
   }
 
   btnFecharInativarFase.addEventListener("click", fecharModalInativarFase);
-  modalInativarFase.addEventListener("click", (e) => { if (e.target === modalInativarFase) fecharModalInativarFase(); });
+  modalInativarFase.addEventListener("click", (e) => {
+    if (e.target === modalInativarFase) fecharModalInativarFase();
+  });
 
   btnConfirmarInativarFase.addEventListener("click", async () => {
     msgInativarFase.style.display = "none";
@@ -1787,9 +2484,6 @@
     await carregar();
   });
 
-  /* =========================
-     INATIVAR KANBAN (DimKanban.Ativo = 0)
-     ========================= */
   function abrirModalInativarKanban(){
     msgInativarKanban.style.display = "none";
     modalInativarKanban.style.display = "block";
@@ -1802,7 +2496,9 @@
   btnInativarKanban.addEventListener("click", abrirModalInativarKanban);
 
   btnFecharInativarKanban.addEventListener("click", fecharModalInativarKanban);
-  modalInativarKanban.addEventListener("click", (e) => { if (e.target === modalInativarKanban) fecharModalInativarKanban(); });
+  modalInativarKanban.addEventListener("click", (e) => {
+    if (e.target === modalInativarKanban) fecharModalInativarKanban();
+  });
 
   btnConfirmarInativarKanban.addEventListener("click", async () => {
     msgInativarKanban.style.display = "none";
@@ -1818,9 +2514,25 @@
     window.location.href = "{{ url_for('kanban.kanbans_lista') }}";
   });
 
-  /* ===== modal card ===== */
-  btnFecharCard.addEventListener("click", () => { modalCard.style.display="none"; cardAbertoId=null; });
-  modalCard.addEventListener("click", (e) => { if (e.target === modalCard) { modalCard.style.display="none"; cardAbertoId=null; } });
+  function limparEstadoCardAberto(){
+    cardAbertoId = null;
+    versaoConcorrenciaCardAberto = "";
+    cardAbertoConflitoExterno = false;
+    msgCard.style.display = "none";
+    msgCard.textContent = "";
+  }
+
+  btnFecharCard.addEventListener("click", () => {
+    modalCard.style.display = "none";
+    limparEstadoCardAberto();
+  });
+
+  modalCard.addEventListener("click", (e) => {
+    if (e.target === modalCard) {
+      modalCard.style.display = "none";
+      limparEstadoCardAberto();
+    }
+  });
 
   selectEmpresaCard.addEventListener("change", () => {
     const idEmp = selectEmpresaCard.value || "";
@@ -1832,7 +2544,6 @@
     setEmpresaPreviewByObj(null);
   });
 
-  /* ===== painel/face eventos (CORRIGIDO) ===== */
   if (selectPainelCard){
     selectPainelCard.addEventListener("change", async () => {
       await atualizarFacesParaPainelSelecionado();
@@ -1848,15 +2559,26 @@
     });
   }
 
+  function mostrarMensagemCard(texto){
+    msgCard.textContent = safeStr(texto);
+    msgCard.style.display = "block";
+  }
+
   async function abrirCard(idCard) {
-    cardAbertoId = idCard;
+    cardAbertoId = idNum(idCard);
+    versaoConcorrenciaCardAberto = "";
+    cardAbertoConflitoExterno = false;
     msgCard.style.display = "none";
 
     await carregarEmpresas();
 
-    const r = await fetch(`/kanban/api/cards/${idCard}`, { credentials: "same-origin" });
-    const j = await r.json().catch(() => null);
-    if (!j || !j.ok) return;
+    const j = await buscarDetalheCard(idCard);
+    if (!j || !j.card) return;
+
+    inserirOuAtualizarCardLocal(j.card);
+    setTagsDoCard(idCard, j.tags || []);
+
+    versaoConcorrenciaCardAberto = safeStr(j.card.VersaoConcorrenciaHex);
 
     document.getElementById("cardTitulo").value = j.card.Titulo || "";
     document.getElementById("cardDescricao").value = j.card.Descricao || "";
@@ -1865,7 +2587,6 @@
     selectEmpresaCard.value = idEmpCard ? String(idEmpCard) : "";
     setEmpresaPreviewById(idEmpCard);
 
-    /* painel/face: reseta ao abrir o modal */
     if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard && painelFaceWrap){
       painelFaceWrap.classList.add("is-on");
 
@@ -1891,6 +2612,7 @@
   function renderTagsNoCard(tags) {
     const box = document.getElementById("tagsNoCard");
     box.innerHTML = "";
+
     tags.forEach(t => {
       const pill = el("span", {
         class:"kb-tag",
@@ -1912,8 +2634,10 @@
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) await abrirCard(cardAbertoId);
-    await carregar();
+    if (j && j.ok) {
+      await abrirCard(cardAbertoId);
+      redesenharFases([idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual)], true);
+    }
   }
 
   document.getElementById("btnAddTag").addEventListener("click", async () => {
@@ -1928,8 +2652,10 @@
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) await abrirCard(cardAbertoId);
-    await carregar();
+    if (j && j.ok) {
+      await abrirCard(cardAbertoId);
+      redesenharFases([idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual)], true);
+    }
   });
 
   async function salvarNotaSeTiverTexto() {
@@ -1960,10 +2686,13 @@
 
     msgCard.style.display = "none";
 
-    const resNota = await salvarNotaSeTiverTexto();
-    if (!resNota.ok) {
-      msgCard.textContent = resNota.msg || "Erro ao salvar nota";
-      msgCard.style.display = "block";
+    if (!cardAbertoId || !safeStr(versaoConcorrenciaCardAberto)) {
+      mostrarMensagemCard("A versão atual do card não está carregada. Feche e abra o card novamente.");
+      return;
+    }
+
+    if (cardAbertoConflitoExterno) {
+      mostrarMensagemCard("Este card recebeu atualização externa enquanto estava aberto. Reabra o card antes de salvar para evitar sobrescrita.");
       return;
     }
 
@@ -1971,8 +2700,8 @@
       titulo,
       descricao,
       id_empresa: idEmpresa,
-      id_empresa_proprietaria: idEmpresa
-      /* OBS: Painel/Face é UI — não persiste aqui */
+      id_empresa_proprietaria: idEmpresa,
+      versao_concorrencia: versaoConcorrenciaCardAberto
     };
 
     const r = await fetch(`/kanban/api/cards/${cardAbertoId}`, {
@@ -1984,18 +2713,39 @@
 
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) {
-      msgCard.textContent = (j && j.msg) || "Erro ao salvar";
-      msgCard.style.display = "block";
+      if (r.status === 409) {
+        if (j && j.card_atual) {
+          inserirOuAtualizarCardLocal(j.card_atual);
+        }
+        mostrarMensagemCard((j && j.msg) || "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.");
+        cardAbertoConflitoExterno = true;
+        return;
+      }
+
+      mostrarMensagemCard((j && j.msg) || "Erro ao salvar");
       return;
     }
 
-    await carregar();
+    if (j.card) {
+      inserirOuAtualizarCardLocal(j.card);
+      versaoConcorrenciaCardAberto = safeStr(j.card.VersaoConcorrenciaHex || versaoConcorrenciaCardAberto);
+      redesenharFases([idNum(j.card.IDDimKanbanFaseAtual)], true);
+    }
+
+    const resNota = await salvarNotaSeTiverTexto();
+    if (!resNota.ok) {
+      mostrarMensagemCard(resNota.msg || "Erro ao salvar nota");
+      return;
+    }
+
     await abrirCard(cardAbertoId);
+    redesenharFases([idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual)], true);
   });
 
   function renderNotas(notas) {
     const box = document.getElementById("listaNotas");
     box.innerHTML = "";
+
     notas.forEach(n => {
       box.appendChild(el("div", {class:"kb-nota"}, [
         el("small", {}, [String(n.CriadoEm || "")]),
@@ -2004,34 +2754,46 @@
     });
   }
 
-  filtroTags.addEventListener("change", () => {
-    fases.forEach(f => {
-      const idFase = idNum(f.IDDimKanbanFase);
-      preencherCabecalhoFase(idFase);
-      preencherCardsInicial(idFase);
-    });
-  });
+  if (buscaKanban){
+    buscaKanban.addEventListener("input", () => {
+      clearTimeout(debounceBuscaTimer);
 
-  btnLimparFiltro.addEventListener("click", () => {
-    Array.from(filtroTags.options).forEach(o => o.selected = false);
-    fases.forEach(f => {
-      const idFase = idNum(f.IDDimKanbanFase);
-      preencherCabecalhoFase(idFase);
-      preencherCardsInicial(idFase);
+      debounceBuscaTimer = setTimeout(() => {
+        termoBusca = buscaKanban.value || "";
+        aplicarBusca();
+      }, 120);
     });
-  });
+  }
 
-  /* modal fase */
+  if (btnLimparBusca){
+    btnLimparBusca.addEventListener("click", () => {
+      termoBusca = "";
+      if (buscaKanban) {
+        buscaKanban.value = "";
+        buscaKanban.focus();
+      }
+      aplicarBusca();
+    });
+  }
+
   const modalFase = document.getElementById("modalFase");
-  document.getElementById("btnNovaFase").addEventListener("click", () => { modalFase.style.display="block"; });
-  document.getElementById("btnFecharFase").addEventListener("click", () => { modalFase.style.display="none"; });
-  modalFase.addEventListener("click", (e) => { if (e.target === modalFase) modalFase.style.display="none"; });
+  document.getElementById("btnNovaFase").addEventListener("click", () => {
+    modalFase.style.display = "block";
+  });
+
+  document.getElementById("btnFecharFase").addEventListener("click", () => {
+    modalFase.style.display = "none";
+  });
+
+  modalFase.addEventListener("click", (e) => {
+    if (e.target === modalFase) modalFase.style.display = "none";
+  });
 
   document.getElementById("btnSalvarFase").addEventListener("click", async () => {
     const nome = (document.getElementById("faseNome").value || "").trim();
     const tipo = document.getElementById("faseTipo").value;
     const msgFase = document.getElementById("msgFase");
-    msgFase.style.display="none";
+    msgFase.style.display = "none";
 
     const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/fases`, {
       method:"POST",
@@ -2043,19 +2805,171 @@
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) {
       msgFase.textContent = (j && (j.msg || j.erro)) || `Erro (HTTP ${r.status})`;
-      msgFase.style.display="block";
+      msgFase.style.display = "block";
       return;
     }
 
     document.getElementById("faseNome").value = "";
-    modalFase.style.display="none";
+    modalFase.style.display = "none";
     await carregar();
   });
 
-  carregar();
+  function atualizarTagsCatalogoSeNecessario(tag){
+    const idTag = idNum(tag?.IDDimKanbanTag);
+    if (!idTag) return;
+
+    const idx = tagsCatalogo.findIndex(t => idNum(t.IDDimKanbanTag) === idTag);
+    if (idx >= 0) {
+      tagsCatalogo[idx] = Object.assign({}, tagsCatalogo[idx], tag);
+    } else {
+      tagsCatalogo.push(Object.assign({}, tag));
+    }
+
+    if (cardAbertoId) {
+      const selectTagCard = document.getElementById("selectTagCard");
+      const valorAtual = safeStr(selectTagCard.value);
+      selectTagCard.innerHTML = "";
+      tagsCatalogo.forEach(t => {
+        selectTagCard.appendChild(el("option", {value: t.IDDimKanbanTag}, [t.NomeTag]));
+      });
+      if (valorAtual) selectTagCard.value = valorAtual;
+    }
+  }
+
+  function tratarAtualizacaoExternaNoCardAberto(idCard, mensagem){
+    if (!cardAbertoId || idNum(cardAbertoId) !== idNum(idCard) || modalCard.style.display !== "block") return;
+    cardAbertoConflitoExterno = true;
+    mostrarMensagemCard(mensagem || "Este card foi atualizado por outro usuário enquanto estava aberto. Reabra o card antes de salvar.");
+  }
+
+  async function sincronizarCardPorDetalhe(idCard, redesenhar = true){
+    const detalhe = await buscarDetalheCard(idCard);
+    if (!detalhe || !detalhe.card) return;
+    inserirOuAtualizarCardLocal(detalhe.card);
+    setTagsDoCard(idCard, detalhe.tags || []);
+    if (redesenhar) {
+      redesenharFases([idNum(detalhe.card.IDDimKanbanFaseAtual)], true);
+    }
+  }
+
+  function conectarSocketKanban(){
+    if (typeof window.io !== "function") {
+      console.warn("Socket.IO client não carregado no template do kanban.");
+      return;
+    }
+
+    socketKanban = window.io("/kanban", {
+      path: "/socket.io",
+      transports: ["websocket", "polling"],
+      withCredentials: true
+    });
+
+    socketKanban.on("connect", () => {
+      socketConectado = true;
+      socketKanban.emit("entrar_kanban", { id_kanban: ID_KANBAN });
+    });
+
+    socketKanban.on("disconnect", () => {
+      socketConectado = false;
+    });
+
+    socketKanban.on("socket_ack", (payload) => {
+      console.debug("kanban socket ack", payload || {});
+    });
+
+    socketKanban.on("socket_erro", (payload) => {
+      console.warn("kanban socket erro", payload || {});
+    });
+
+    socketKanban.on("card_atualizado", (payload = {}) => {
+      if (payload.card) {
+        inserirOuAtualizarCardLocal(payload.card);
+      }
+      if (payload.id_card && Array.isArray(payload.tags)) {
+        setTagsDoCard(payload.id_card, payload.tags);
+      }
+      tratarAtualizacaoExternaNoCardAberto(payload.id_card, "Este card foi atualizado por outro usuário enquanto estava aberto. Reabra o card antes de salvar.");
+      const faseId = idNum(payload.card?.IDDimKanbanFaseAtual || obterCardPorId(payload.id_card)?.IDDimKanbanFaseAtual);
+      if (faseId) redesenharFases([faseId], true);
+    });
+
+    socketKanban.on("card_movido", (payload = {}) => {
+      const idCard = idNum(payload.id_card);
+      const idFaseDe = idNum(payload.id_fase_de);
+      const idFasePara = idNum(payload.id_fase_para);
+
+      if (payload.card) {
+        inserirOuAtualizarCardLocal(payload.card);
+      } else if (idCard && idFasePara) {
+        const cardLocal = obterCardPorId(idCard);
+        if (cardLocal) cardLocal.IDDimKanbanFaseAtual = idFasePara;
+      }
+
+      if (idCard && Array.isArray(payload.tags)) {
+        setTagsDoCard(idCard, payload.tags);
+      }
+
+      tratarAtualizacaoExternaNoCardAberto(idCard, "Este card foi movido por outro usuário enquanto estava aberto. Reabra o card antes de salvar.");
+      redesenharFases([idFaseDe, idFasePara], true);
+    });
+
+    socketKanban.on("card_inativado", async (payload = {}) => {
+      const idCard = idNum(payload.id_card);
+      if (!idCard) return;
+      removerCardLocal(idCard);
+      tratarAtualizacaoExternaNoCardAberto(idCard, "Este card foi inativado por outro usuário.");
+      await carregar();
+    });
+
+    socketKanban.on("tag_criada", (payload = {}) => {
+      atualizarTagsCatalogoSeNecessario(payload);
+    });
+
+    socketKanban.on("card_tag_adicionada", async (payload = {}) => {
+      const idCard = idNum(payload.id_card);
+      if (!idCard) return;
+      await sincronizarCardPorDetalhe(idCard, true);
+      tratarAtualizacaoExternaNoCardAberto(idCard, "As tags deste card foram alteradas por outro usuário. Reabra o card antes de salvar.");
+    });
+
+    socketKanban.on("card_tag_removida", async (payload = {}) => {
+      const idCard = idNum(payload.id_card);
+      if (!idCard) return;
+      await sincronizarCardPorDetalhe(idCard, true);
+      tratarAtualizacaoExternaNoCardAberto(idCard, "As tags deste card foram alteradas por outro usuário. Reabra o card antes de salvar.");
+    });
+
+    socketKanban.on("card_nota_criada", async (payload = {}) => {
+      const idCard = idNum(payload.id_card);
+      if (!idCard) return;
+      if (idNum(cardAbertoId) === idCard && modalCard.style.display === "block") {
+        cardAbertoConflitoExterno = true;
+        mostrarMensagemCard("Uma nota foi adicionada a este card em outra sessão. Reabra o card antes de salvar.");
+      }
+      await sincronizarCardPorDetalhe(idCard, true);
+    });
+
+    socketKanban.on("fase_criada", async () => {
+      await carregar();
+    });
+
+    socketKanban.on("fase_inativada", async () => {
+      await carregar();
+    });
+  }
+
+  window.addEventListener("beforeunload", () => {
+    if (socketKanban && socketConectado) {
+      try {
+        socketKanban.emit("sair_kanban", { id_kanban: ID_KANBAN });
+      } catch (_erro) {
+      }
+    }
+  });
+
+  void carregar().then(() => {
+    conectarSocketKanban();
+  });
 })();
 </script>
-
-
-
 {% endblock %}

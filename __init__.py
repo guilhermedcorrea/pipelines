@@ -92,6 +92,12 @@
 
 
 
+#ver log flask
+#docker compose restart flask-app
+#reiniciar flask com nginx
+#docker compose restart flask-app nginx-flask
+
+
 
 """
 docker compose down
@@ -120,3 +126,11 @@ docker compose exec airflow-apiserver airflow users create \
 
 #Inicia
 #docker compose up
+
+
+#Reinicia flask
+#docker compose up -d --build flask-app
+
+
+#docker compose build flask-app
+#docker compose up -d flask-app

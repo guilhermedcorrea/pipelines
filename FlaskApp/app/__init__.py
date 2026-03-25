@@ -1,8 +1,12 @@
-from flask import Flask, redirect, url_for
+from __future__ import annotations
+
+import os
 from datetime import timedelta
+
+from flask import Flask, redirect, url_for
 from sqlalchemy import event
 
-from .extensions import db, login_manager, csrf, limiter, cache
+from .extensions import db, login_manager, csrf, limiter, cache, socketio
 
 from config import (
     SQLALCHEMY_DATABASE_URI,
@@ -54,11 +58,37 @@ def create_app() -> Flask:
     app.config["RECAPTCHA_PUBLIC_KEY"] = RECAPTCHA_PUBLIC_KEY
     app.config["RECAPTCHA_PRIVATE_KEY"] = RECAPTCHA_PRIVATE_KEY
 
+    """
+    Configuração do Socket.IO:
+    - usa Redis como message queue para permitir rooms/broadcast entre instâncias
+    - por padrão estou reaproveitando o Redis já configurado
+    - channel separado evita mistura com outros serviços no mesmo Redis
+    """
+    app.config["SOCKETIO_MESSAGE_QUEUE"] = os.getenv(
+        "SOCKETIO_MESSAGE_QUEUE",
+        CACHE_REDIS_URL,
+    )
+    app.config["SOCKETIO_CHANNEL"] = os.getenv(
+        "SOCKETIO_CHANNEL",
+        "flaskapp_socketio",
+    )
+
     db.init_app(app)
     login_manager.init_app(app)
     limiter.init_app(app)
     cache.init_app(app)
     csrf.init_app(app)
+
+    socketio.init_app(
+        app,
+        async_mode="threading",
+        cors_allowed_origins="*",
+        message_queue=app.config["SOCKETIO_MESSAGE_QUEUE"],
+        channel=app.config["SOCKETIO_CHANNEL"],
+        manage_session=False,
+        logger=True,
+        engineio_logger=True,
+    )
 
     login_manager.login_view = "Autenticacao.login"
     login_manager.session_protection = "strong"
@@ -69,13 +99,15 @@ def create_app() -> Flask:
         @event.listens_for(engine, "connect")
         def _set_sqlserver_session_settings(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SET ARITHABORT ON;
                 SET ANSI_NULLS ON;
                 SET QUOTED_IDENTIFIER ON;
                 SET ANSI_WARNINGS ON;
                 SET CONCAT_NULL_YIELDS_NULL ON;
-            """)
+                """
+            )
             cursor.close()
 
     from .euromidia.controle_paineis_views import paineis_bp
@@ -87,6 +119,12 @@ def create_app() -> Flask:
     app.register_blueprint(autenticacao_bp, url_prefix="/autenticacao")
     app.register_blueprint(admin, url_prefix="/admin")
     app.register_blueprint(kanban_bp, url_prefix="/kanban")
+
+    """
+    Importa os eventos do Socket.IO só depois do init_app,
+    para garantir que o objeto socketio já esteja inicializado.
+    """
+    from . import socket_events 
 
     @app.route("/")
     def index():
