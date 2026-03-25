@@ -138,3 +138,8 @@ docker compose exec airflow-apiserver airflow users create \
 
 #reinicia o airflow
 #docker compose restart
+
+
+#docker compose up -d --build flask-app
+
+#docker compose up -d --build --force-recreate flask-app nginx-flask

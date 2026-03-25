@@ -926,6 +926,119 @@
     line-height: 1.2;
   }
 
+  .kb-painel-lista{
+    display:grid;
+    gap:10px;
+  }
+
+  .kb-painel-item{
+    border:1px solid rgba(15,23,42,.10);
+    background:#fff;
+    border-radius:14px;
+    padding:12px;
+    display:grid;
+    gap:10px;
+    box-shadow: 0 2px 10px rgba(15,23,42,.04);
+  }
+
+  .kb-painel-item-topo{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .kb-painel-item-titulo{
+    font-weight:950;
+    font-size:13px;
+    color: var(--kb-text);
+  }
+
+  .kb-painel-item-acoes{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+
+  .kb-painel-item-grid{
+    display:grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(180px, .9fr) auto;
+    gap:10px;
+    align-items:center;
+  }
+
+  .kb-painel-item-grid-2{
+    display:grid;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 170px) minmax(130px, 150px);
+    gap:10px;
+    align-items:center;
+  }
+
+  .kb-painel-item-grid-3{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap:10px;
+    align-items:end;
+  }
+
+  .kb-campo{
+    display:grid;
+    gap:6px;
+    min-width:0;
+  }
+
+  .kb-campo-label{
+    font-size:11px;
+    font-weight:950;
+    letter-spacing:.02em;
+    color: rgba(15,23,42,.60);
+    text-transform: uppercase;
+  }
+
+  .kb-kpi{
+    min-height:44px;
+    border:1px solid rgba(15,23,42,.10);
+    background: rgba(15,23,42,.03);
+    border-radius:12px;
+    padding:10px 12px;
+    display:flex;
+    align-items:center;
+    font-weight:900;
+    color: rgba(15,23,42,.90);
+  }
+
+  .kb-kpi.negativo{
+    border-color: rgba(239,68,68,.22);
+    background: rgba(239,68,68,.06);
+    color: rgba(127,29,29,.95);
+  }
+
+  .kb-kpi.positivo{
+    border-color: rgba(34,197,94,.22);
+    background: rgba(34,197,94,.06);
+    color: rgba(20,83,45,.95);
+  }
+
+  .kb-comercial-vazio{
+    border:1px dashed rgba(15,23,42,.14);
+    border-radius:12px;
+    padding:10px 12px;
+    color: rgba(15,23,42,.60);
+    font-size:12px;
+    font-weight:800;
+    background: rgba(15,23,42,.02);
+  }
+
+  @media (max-width: 900px){
+    .kb-painel-item-grid,
+    .kb-painel-item-grid-2,
+    .kb-painel-item-grid-3{
+      grid-template-columns: 1fr;
+    }
+  }
+
   .kb-warn{
     border: 1px solid rgba(239,68,68,.22);
     background: rgba(239,68,68,.06);
@@ -1090,18 +1203,10 @@
         <div class="kb-section-title">Painel / Face</div>
         <div class="kb-hint"></div>
 
-        <div class="kb-row">
-          <select id="selectPainelCard" class="kb-select grow"></select>
-          <select id="selectFaceCard" class="kb-select" style="width:180px;"></select>
-          <button class="kb-btn sm" id="btnLimparPainelFace">Sem painel</button>
-        </div>
+        <div id="painelFaceLista" class="kb-painel-lista"></div>
 
-        <div id="painelPreview" class="kb-painel-preview">
-          <div class="linha"><span class="k">CodPonto:</span> <span class="v" id="pnPrevCodPonto">—</span></div>
-          <div class="linha"><span class="k">Tipo:</span>    <span class="v" id="pnPrevTipo">—</span></div>
-          <div class="linha"><span class="k">Cidade/UF:</span><span class="v" id="pnPrevCidadeUF">—</span></div>
-          <div class="linha"><span class="k">Endereço:</span> <span class="v" id="pnPrevEndereco">—</span></div>
-          <div class="linha"><span class="k">Faces:</span>    <span class="v" id="pnPrevFaces">—</span></div>
+        <div class="kb-row" style="justify-content:flex-end;">
+          <button class="kb-btn sm primary" id="btnAdicionarPainelFace" type="button">+ Adicionar painel / face</button>
         </div>
       </div>
 
@@ -1254,10 +1359,8 @@
   const btnLimparEmpresa = document.getElementById("btnLimparEmpresa");
 
   const painelFaceWrap = document.getElementById("painelFaceWrap");
-  const selectPainelCard = document.getElementById("selectPainelCard");
-  const selectFaceCard = document.getElementById("selectFaceCard");
-  const btnLimparPainelFace = document.getElementById("btnLimparPainelFace");
-  const painelPreview = document.getElementById("painelPreview");
+  const painelFaceLista = document.getElementById("painelFaceLista");
+  const btnAdicionarPainelFace = document.getElementById("btnAdicionarPainelFace");
 
   const modalRemoverCard = document.getElementById("modalRemoverCard");
   const btnFecharRemoverCard = document.getElementById("btnFecharRemoverCard");
@@ -1275,7 +1378,8 @@
   let cardParaRemover = null;
   let faseParaInativar = null;
 
-  const facesPorCodPonto = new Map();
+  const facesPorPainelId = new Map();
+  const comercialPorPainelFace = new Map();
   let facesCarregando = false;
   let debounceBuscaTimer = null;
 
@@ -1759,160 +1863,446 @@
     setEmpresaPreviewByObj(empresasPorId.get(id) || null);
   }
 
-  function montarSelectPaineis(){
-    if (!selectPainelCard) return;
+  function formatarMoedaBR(valor){
+    const num = Number(valor);
+    if (!Number.isFinite(num)) return "—";
+    return num.toLocaleString("pt-BR", { style:"currency", currency:"BRL" });
+  }
 
-    selectPainelCard.innerHTML = "";
-    selectPainelCard.appendChild(el("option", {value: ""}, ["— Selecione um painel (CodPonto) —"]));
+  function formatarPercentualBR(valor){
+    const num = Number(valor);
+    if (!Number.isFinite(num)) return "—";
+    return `${num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  }
+
+  function parseNumeroInput(valor){
+    const txt = safeStr(valor).trim();
+    if (!txt) return null;
+    const normalizado = txt.replace(/\./g, "").replace(",", ".");
+    const num = Number(normalizado);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function atualizarTitulosPainelFace(){
+    const itens = [...(painelFaceLista?.querySelectorAll('.kb-painel-item') || [])];
+    itens.forEach((item, idx) => {
+      const titulo = item.querySelector('[data-role="titulo-item"]');
+      if (titulo) titulo.textContent = `Painel / Face ${idx + 1}`;
+    });
+  }
+
+  function montarSelectPaineisNoElemento(selectEl){
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+    selectEl.appendChild(el("option", { value:"" }, ["— Selecione um painel (CodPonto) —"]));
 
     paineisCatalogo.forEach(p => {
       const id = Number(p.IDDimPaineisEuromidia ?? p.ID ?? 0);
       if (!id) return;
-
       const cod = p.CodPonto || "—";
       const tipo = p.Tipo || "";
       const cidade = p.Cidade || "";
       const uf = p.UF || "";
-
       const label = `${cod} • ${tipo} • ${cidade}/${uf}`.trim();
-      selectPainelCard.appendChild(el("option", {value: String(id)}, [label]));
+      selectEl.appendChild(el("option", { value:String(id) }, [label]));
     });
   }
 
-  function limparSelectFaces(){
-    if (!selectFaceCard) return;
-    selectFaceCard.innerHTML = "";
-    selectFaceCard.appendChild(el("option", {value: ""}, ["— Face (CodFace) —"]));
+  function limparSelectFacesNoElemento(selectEl){
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+    selectEl.appendChild(el("option", { value:"" }, ["— Face (CodFace) —"]));
   }
 
-  function montarSelectFacesPorLista(faces){
-    if (!selectFaceCard) return;
-
-    limparSelectFaces();
-
-    const arr = Array.isArray(faces) ? faces : [];
-    if (!arr.length) return;
-
-    for (const f of arr){
-      const codFace = safeStr(f?.CodFace ?? f?.codFace ?? f?.CODFACE ?? "");
-      if (!codFace) continue;
-
-      const desc = safeStr(
-        f?.Descricao ??
-        f?.NomeFace ??
-        f?.Nome ??
-        f?.Local ??
-        f?.Endereco ??
-        f?.Face ??
-        f?.Label ??
-        ""
-      ).trim();
-
-      const label = desc ? `${codFace} • ${desc}` : `${codFace}`;
-      selectFaceCard.appendChild(el("option", { value: codFace }, [label]));
-    }
+  function limparSelectPrecosNoElemento(selectEl){
+    if (!selectEl) return;
+    selectEl.innerHTML = "";
+    selectEl.appendChild(el("option", { value:"" }, ["— Selecione a tabela de preço —"]));
   }
 
-  function setPainelPreviewByObj(p){
-    if (!painelPreview || !painelFaceWrap) return;
+  function montarSelectFacesNoElemento(selectEl, faces){
+    limparSelectFacesNoElemento(selectEl);
+    (Array.isArray(faces) ? faces : []).forEach(f => {
+      const codFace = safeStr(f?.CodFace ?? f?.codFace ?? "");
+      if (!codFace) return;
+      const desc = safeStr(f?.Face ?? f?.Label ?? "").trim();
+      const label = desc ? `${codFace} • ${desc}` : codFace;
+      selectEl.appendChild(el("option", { value: codFace }, [label]));
+    });
+  }
 
-    const wrap = painelFaceWrap;
-    const tem = !!(p && (p.CodPonto || p.Tipo || p.Cidade || p.UF || p.Logradouro));
+  function montarSelectPrecosNoElemento(selectEl, precos){
+    limparSelectPrecosNoElemento(selectEl);
+    (Array.isArray(precos) ? precos : []).forEach(p => {
+      const idPreco = idNum(p?.IDDimTabelaPrecosEuromidia);
+      if (!idPreco) return;
+      const label = [
+        safeStr(p?.PeriodoExibicao || "—"),
+        (p?.ExibicoesDia ?? "—"),
+        formatarMoedaBR(p?.Valor),
+        safeStr(p?.Tabela || "—"),
+        safeStr(p?.PoliticaTrocas || "—"),
+        formatarMoedaBR(p?.ValorTroca)
+      ].join(" | ");
+      selectEl.appendChild(el("option", { value:String(idPreco) }, [label]));
+    });
+  }
 
-    wrap.classList.toggle("has-painel", tem);
+  function preencherPreviewPainel(bloco, painel){
+    const preview = bloco.querySelector('[data-role="painel-preview"]');
+    if (!preview) return;
+
+    const tem = !!(painel && (painel.CodPonto || painel.Tipo || painel.Cidade || painel.UF || painel.Logradouro));
+    bloco.classList.toggle('has-painel', tem);
+    preview.style.display = tem ? 'grid' : 'none';
+
+    const setTxt = (role, valor) => {
+      const alvo = bloco.querySelector(`[data-role="${role}"]`);
+      if (alvo) alvo.textContent = valor;
+    };
 
     if (!tem){
-      painelPreview.style.display = "none";
-      document.getElementById("pnPrevCodPonto").textContent = "—";
-      document.getElementById("pnPrevTipo").textContent = "—";
-      document.getElementById("pnPrevCidadeUF").textContent = "—";
-      document.getElementById("pnPrevEndereco").textContent = "—";
-      document.getElementById("pnPrevFaces").textContent = "—";
+      setTxt('pn-codponto', '—');
+      setTxt('pn-tipo', '—');
+      setTxt('pn-cidadeuf', '—');
+      setTxt('pn-endereco', '—');
+      setTxt('pn-faces', '—');
       return;
     }
 
-    painelPreview.style.display = "grid";
-
-    const cod = p.CodPonto || "—";
-    const tipo = p.Tipo || "—";
-    const cidadeUF = `${p.Cidade || "—"}/${p.UF || "—"}`;
-    const end = `${p.Logradouro || ""}${p.Numero ? (", " + p.Numero) : ""}${p.Bairro ? (" - " + p.Bairro) : ""}`.trim() || "—";
-    const qtdFaces = Number(p.QuantidadeFaces || 0);
-
-    document.getElementById("pnPrevCodPonto").textContent = String(cod);
-    document.getElementById("pnPrevTipo").textContent = String(tipo);
-    document.getElementById("pnPrevCidadeUF").textContent = String(cidadeUF);
-    document.getElementById("pnPrevEndereco").textContent = String(end);
-    document.getElementById("pnPrevFaces").textContent = qtdFaces ? String(qtdFaces) : "—";
+    setTxt('pn-codponto', String(painel.CodPonto || '—'));
+    setTxt('pn-tipo', String(painel.Tipo || '—'));
+    setTxt('pn-cidadeuf', `${painel.Cidade || '—'}/${painel.UF || '—'}`);
+    setTxt('pn-endereco', `${painel.Logradouro || ''}${painel.Numero ? (', ' + painel.Numero) : ''}${painel.Bairro ? (' - ' + painel.Bairro) : ''}`.trim() || '—');
+    setTxt('pn-faces', Number(painel.QuantidadeFaces || 0) ? String(painel.QuantidadeFaces) : '—');
   }
 
-  function setPainelPreviewById(idPainel){
-    const id = Number(idPainel || 0);
-    if (!id){
-      setPainelPreviewByObj(null);
-      limparSelectFaces();
-      return null;
-    }
-
-    const p = paineisPorId.get(id) || null;
-    setPainelPreviewByObj(p);
-    return p;
+  function limparComercialBloco(bloco, mensagem = 'Selecione painel e face para consultar custo e preços.'){
+    const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
+    const selectPreco = bloco.querySelector('[data-role="select-preco"]');
+    if (wrap) wrap.innerHTML = `<div class="kb-comercial-vazio">${mensagem}</div>`;
+    if (selectPreco) limparSelectPrecosNoElemento(selectPreco);
+    bloco.__dadosComerciais = null;
   }
 
-  async function carregarFacesDoCodPonto(codPonto){
-    const cod = Number(codPonto || 0);
-    if (!cod) return [];
-
-    if (facesPorCodPonto.has(cod)) return facesPorCodPonto.get(cod) || [];
+  async function carregarFacesDoPainel(idPainel){
+    const id = idNum(idPainel);
+    if (!id) return [];
+    if (facesPorPainelId.has(id)) return facesPorPainelId.get(id) || [];
 
     facesCarregando = true;
     try{
-      const r = await fetch(`/kanban/api/paineis/${cod}/faces`, { credentials: "same-origin" });
+      const r = await fetch(`/kanban/api/paineis/id/${id}/faces`, { credentials: 'same-origin' });
       const j = await r.json().catch(() => null);
-
       if (!r.ok || !j || !j.ok){
-        console.warn("carregarFacesDoCodPonto: falhou", { http: r.status, body: j, codPonto: cod });
-        facesPorCodPonto.set(cod, []);
+        console.warn('carregarFacesDoPainel: falhou', { idPainel: id, http: r.status, body: j });
+        facesPorPainelId.set(id, []);
         return [];
       }
-
       const arr = Array.isArray(j.faces) ? j.faces : [];
-      facesPorCodPonto.set(cod, arr);
+      facesPorPainelId.set(id, arr);
       return arr;
     } finally {
       facesCarregando = false;
     }
   }
 
-  async function atualizarFacesParaPainelSelecionado(){
-    if (!selectPainelCard || !selectFaceCard) return;
+  async function carregarComercialPainelFace(idPainel, codFace){
+    const id = idNum(idPainel);
+    const cod = encodeURIComponent(safeStr(codFace).trim());
+    if (!id || !cod) return null;
 
-    const idPainel = selectPainelCard.value || "";
-    const painel = setPainelPreviewById(idPainel);
+    const chave = `${id}|${decodeURIComponent(cod)}`;
+    if (comercialPorPainelFace.has(chave)) return comercialPorPainelFace.get(chave) || null;
 
-    limparSelectFaces();
-    selectFaceCard.value = "";
+    const r = await fetch(`/kanban/api/paineis/id/${id}/faces/${cod}/comercial`, { credentials: 'same-origin' });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !j.ok){
+      console.warn('carregarComercialPainelFace: falhou', { idPainel: id, codFace, http: r.status, body: j });
+      return null;
+    }
 
-    if (!painel) return;
+    comercialPorPainelFace.set(chave, j);
+    return j;
+  }
 
-    const codPonto = Number(painel.CodPonto || 0);
-    if (!codPonto) return;
+  function obterPrecoSelecionadoDoBloco(bloco){
+    const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0);
+    const precos = Array.isArray(bloco.__dadosComerciais?.precos) ? bloco.__dadosComerciais.precos : [];
+    return precos.find(p => idNum(p.IDDimTabelaPrecosEuromidia) === idPreco) || null;
+  }
 
-    selectFaceCard.innerHTML = "";
-    selectFaceCard.appendChild(el("option", {value: ""}, ["Carregando faces..."]));
+  function atualizarResumoComercial(bloco){
+    const kpiCusto = bloco.querySelector('[data-role="kpi-custo"]');
+    const kpiMargemBase = bloco.querySelector('[data-role="kpi-margem-base"]');
+    const kpiValorFinal = bloco.querySelector('[data-role="kpi-valor-final"]');
+    const kpiMargemFinal = bloco.querySelector('[data-role="kpi-margem-final"]');
+    const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
+    const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
+    const precoSel = obterPrecoSelecionadoDoBloco(bloco);
+    const custo = Number(bloco.__dadosComerciais?.custo?.Valor);
+    const valorTabela = Number(precoSel?.Valor);
 
-    const faces = await carregarFacesDoCodPonto(codPonto);
+    const novoValor = parseNumeroInput(inputNovoValor?.value);
+    const percentual = parseNumeroInput(inputPercentual?.value);
 
-    montarSelectFacesPorLista(faces);
-    selectFaceCard.value = "";
+    if (kpiCusto){
+      kpiCusto.textContent = Number.isFinite(custo) ? formatarMoedaBR(custo) : '—';
+    }
+
+    const margemBase = Number.isFinite(valorTabela) && Number.isFinite(custo) ? (valorTabela - custo) : null;
+    if (kpiMargemBase){
+      kpiMargemBase.textContent = margemBase === null ? '—' : `${formatarMoedaBR(margemBase)}${Number.isFinite(valorTabela) && valorTabela !== 0 ? ` • ${formatarPercentualBR((margemBase / valorTabela) * 100)}` : ''}`;
+      kpiMargemBase.classList.remove('positivo', 'negativo');
+      if (margemBase !== null) kpiMargemBase.classList.add(margemBase >= 0 ? 'positivo' : 'negativo');
+    }
+
+    let valorFinal = null;
+    if (novoValor !== null) {
+      valorFinal = novoValor;
+    } else if (percentual !== null && Number.isFinite(valorTabela)) {
+      valorFinal = valorTabela * (1 - (percentual / 100));
+    } else if (Number.isFinite(valorTabela)) {
+      valorFinal = valorTabela;
+    }
+
+    const margemFinal = (valorFinal !== null && Number.isFinite(custo)) ? (valorFinal - custo) : null;
+    const margemFinalPerc = (margemFinal !== null && valorFinal) ? (margemFinal / valorFinal) * 100 : null;
+
+    if (kpiValorFinal){
+      kpiValorFinal.textContent = valorFinal === null ? '—' : formatarMoedaBR(valorFinal);
+    }
+
+    if (kpiMargemFinal){
+      kpiMargemFinal.textContent = margemFinal === null ? '—' : `${formatarMoedaBR(margemFinal)}${margemFinalPerc === null ? '' : ` • ${formatarPercentualBR(margemFinalPerc)}`}`;
+      kpiMargemFinal.classList.remove('positivo', 'negativo');
+      if (margemFinal !== null) kpiMargemFinal.classList.add(margemFinal >= 0 ? 'positivo' : 'negativo');
+    }
+  }
+
+  function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
+    const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
+    if (!wrap) return;
+
+    let selectPreco = bloco.querySelector('[data-role="select-preco"]');
+    if (!selectPreco){
+      selectPreco = el('select', { class:'kb-select grow', 'data-role':'select-preco' });
+    }
+
+    bloco.__dadosComerciais = comercial || null;
+    montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
+
+    wrap.innerHTML = '';
+    wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, [
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Preço / tabela']),
+        selectPreco
+      ]),
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Custo do ponto']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-custo' }, ['—'])
+      ]),
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Margem atual']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-margem-base' }, ['—'])
+      ])
+    ]));
+
+    wrap.appendChild(el('div', { class:'kb-painel-item-grid-3' }, [
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['NovoValor']),
+        el('input', { class:'kb-input', 'data-role':'input-novo-valor', type:'number', step:'0.01', min:'0', placeholder:'Ex: 15000,00' })
+      ]),
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Percentual']),
+        el('input', { class:'kb-input', 'data-role':'input-percentual', type:'number', step:'0.01', placeholder:'Ex: 10,00' })
+      ]),
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Valor final']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-valor-final' }, ['—'])
+      ]),
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Margem final']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-margem-final' }, ['—'])
+      ])
+    ]));
+
+    const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
+    const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
+
+    selectPreco.addEventListener('change', () => atualizarResumoComercial(bloco));
+    inputNovoValor?.addEventListener('input', () => {
+      if (safeStr(inputNovoValor.value).trim()) inputPercentual.value = '';
+      atualizarResumoComercial(bloco);
+    });
+    inputPercentual?.addEventListener('input', () => {
+      if (safeStr(inputPercentual.value).trim()) inputNovoValor.value = '';
+      atualizarResumoComercial(bloco);
+    });
+
+    if (valoresSalvos){
+      const idPrecoSalvo = idNum(valoresSalvos.IDDimTabelaPrecosEuromidia || valoresSalvos.id_preco || 0);
+      if (idPrecoSalvo) selectPreco.value = String(idPrecoSalvo);
+      if (inputNovoValor && valoresSalvos.NovoValor != null) inputNovoValor.value = String(valoresSalvos.NovoValor).replace('.', ',');
+      if (inputPercentual && valoresSalvos.PercentualDesconto != null) inputPercentual.value = String(valoresSalvos.PercentualDesconto).replace('.', ',');
+    }
+
+    atualizarResumoComercial(bloco);
+  }
+
+  async function atualizarFacesDoBloco(bloco, dadosSalvos = null){
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+    const idPainel = idNum(selectPainel?.value || 0);
+    const painel = paineisPorId.get(idPainel) || null;
+
+    preencherPreviewPainel(bloco, painel);
+    limparComercialBloco(bloco);
+    limparSelectFacesNoElemento(selectFace);
+
+    if (!idPainel || !painel) return;
+
+    selectFace.innerHTML = '';
+    selectFace.appendChild(el('option', { value:'' }, ['Carregando faces...']));
+
+    const faces = await carregarFacesDoPainel(idPainel);
+    montarSelectFacesNoElemento(selectFace, faces);
+
+    const codFaceSalvo = safeStr(dadosSalvos?.CodFace || dadosSalvos?.cod_face || '').trim();
+    if (codFaceSalvo){
+      selectFace.value = codFaceSalvo;
+
+      if (safeStr(selectFace.value).trim()){
+        await atualizarComercialDoBloco(bloco, dadosSalvos);
+      }
+    }
+  }
+
+  async function atualizarComercialDoBloco(bloco, dadosSalvos = null){
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+
+    const idPainel = idNum(selectPainel?.value || 0);
+    const painel = paineisPorId.get(idPainel) || null;
+    const codFace = safeStr(selectFace?.value || '').trim();
+
+    preencherPreviewPainel(bloco, painel);
+    limparComercialBloco(bloco);
+
+    if (!idPainel || !painel || !codFace) return;
+
+    const comercial = await carregarComercialPainelFace(idPainel, codFace);
+    if (!comercial){
+      limparComercialBloco(bloco, 'Não foi possível consultar custos e preços para este painel/face.');
+      return;
+    }
+
+    renderizarComercialBloco(bloco, comercial, dadosSalvos);
+  }
+
+  function criarPainelFaceItem(dados = null){
+    const bloco = el('div', { class:'kb-painel-item' }, [
+      el('div', { class:'kb-painel-item-topo' }, [
+        el('div', { class:'kb-painel-item-titulo', 'data-role':'titulo-item' }, ['Painel / Face']),
+        el('div', { class:'kb-painel-item-acoes' }, [
+          el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-duplicar' }, ['+']),
+          el('button', { class:'kb-btn sm danger', type:'button', 'data-role':'btn-remover' }, ['−'])
+        ])
+      ]),
+      el('div', { class:'kb-painel-item-grid' }, [
+        el('select', { class:'kb-select grow', 'data-role':'select-painel' }),
+        el('select', { class:'kb-select', 'data-role':'select-face' }),
+        el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-limpar' }, ['Sem painel'])
+      ]),
+      el('div', { class:'kb-painel-preview', 'data-role':'painel-preview', style:'display:none;' }, [
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['CodPonto:']), el('span', { class:'v', 'data-role':'pn-codponto' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Tipo:']), el('span', { class:'v', 'data-role':'pn-tipo' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Cidade/UF:']), el('span', { class:'v', 'data-role':'pn-cidadeuf' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Endereço:']), el('span', { class:'v', 'data-role':'pn-endereco' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Faces:']), el('span', { class:'v', 'data-role':'pn-faces' }, ['—'])])
+      ]),
+      el('div', { 'data-role':'comercial-wrap' }, [
+        el('div', { class:'kb-comercial-vazio' }, ['Selecione painel e face para consultar custo e preços.'])
+      ])
+    ]);
+
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+    montarSelectPaineisNoElemento(selectPainel);
+    limparSelectFacesNoElemento(selectFace);
+
+    bloco.querySelector('[data-role="btn-duplicar"]')?.addEventListener('click', () => {
+      painelFaceLista?.appendChild(criarPainelFaceItem());
+      atualizarTitulosPainelFace();
+    });
+
+    bloco.querySelector('[data-role="btn-remover"]')?.addEventListener('click', () => {
+      bloco.remove();
+      if (!(painelFaceLista?.querySelector('.kb-painel-item'))) {
+        painelFaceLista?.appendChild(criarPainelFaceItem());
+      }
+      atualizarTitulosPainelFace();
+    });
+
+    bloco.querySelector('[data-role="btn-limpar"]')?.addEventListener('click', () => {
+      if (selectPainel) selectPainel.value = '';
+      if (selectFace) selectFace.value = '';
+      preencherPreviewPainel(bloco, null);
+      limparSelectFacesNoElemento(selectFace);
+      limparComercialBloco(bloco);
+    });
+
+    selectPainel?.addEventListener('change', async () => {
+      await atualizarFacesDoBloco(bloco);
+    });
+
+    selectFace?.addEventListener('change', async () => {
+      await atualizarComercialDoBloco(bloco);
+    });
+
+    if (dados){
+      const idPainelSalvo = idNum(dados.IDDimPaineisEuromidia || dados.id_painel || 0);
+      if (idPainelSalvo) selectPainel.value = String(idPainelSalvo);
+      void atualizarFacesDoBloco(bloco, dados);
+    }
+
+    return bloco;
+  }
+
+  function coletarPainelFacesDoFormulario(){
+    const itens = [];
+    for (const bloco of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])){
+      const idPainel = idNum(bloco.querySelector('[data-role="select-painel"]')?.value || 0);
+      const codFace = safeStr(bloco.querySelector('[data-role="select-face"]')?.value || '').trim();
+      const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0) || null;
+      const novoValor = parseNumeroInput(bloco.querySelector('[data-role="input-novo-valor"]')?.value);
+      const percentual = parseNumeroInput(bloco.querySelector('[data-role="input-percentual"]')?.value);
+
+      if (!idPainel && !codFace && !idPreco && novoValor === null && percentual === null) continue;
+
+      itens.push({
+        id_painel: idPainel || null,
+        cod_face: codFace || null,
+        id_preco: idPreco,
+        novo_valor: novoValor,
+        percentual_desconto: novoValor !== null ? null : percentual,
+      });
+    }
+    return itens;
+  }
+
+  function preencherPainelFacesDoCard(lista){
+    if (!painelFaceLista) return;
+    painelFaceLista.innerHTML = '';
+    const arr = Array.isArray(lista) && lista.length ? lista : [null];
+    arr.forEach(item => painelFaceLista.appendChild(criarPainelFaceItem(item)));
+    atualizarTitulosPainelFace();
   }
 
   function ativarPainelFaceSeNecessario(){
     if (!painelFaceWrap) return;
-
     const on = !!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard);
-    painelFaceWrap.classList.toggle("is-on", on);
-
+    painelFaceWrap.classList.toggle('is-on', on);
     if (!on) return;
 
     paineisPorId = new Map();
@@ -1921,12 +2311,9 @@
       if (id > 0) paineisPorId.set(id, p);
     }
 
-    montarSelectPaineis();
-
-    if (selectPainelCard) selectPainelCard.value = "";
-    if (selectFaceCard) selectFaceCard.value = "";
-    setPainelPreviewByObj(null);
-    limparSelectFaces();
+    if (!(painelFaceLista?.querySelector('.kb-painel-item'))) {
+      preencherPainelFacesDoCard([]);
+    }
   }
 
   async function buscarDetalheCard(idCard){
@@ -2595,20 +2982,10 @@
     setEmpresaPreviewByObj(null);
   });
 
-  if (selectPainelCard){
-    selectPainelCard.addEventListener("change", async () => {
-      await atualizarFacesParaPainelSelecionado();
-    });
-  }
-
-  if (btnLimparPainelFace){
-    btnLimparPainelFace.addEventListener("click", () => {
-      if (selectPainelCard) selectPainelCard.value = "";
-      if (selectFaceCard) selectFaceCard.value = "";
-      setPainelPreviewByObj(null);
-      limparSelectFaces();
-    });
-  }
+  btnAdicionarPainelFace?.addEventListener("click", () => {
+    painelFaceLista?.appendChild(criarPainelFaceItem());
+    atualizarTitulosPainelFace();
+  });
 
   function mostrarMensagemCard(texto){
     msgCard.textContent = safeStr(texto);
@@ -2640,12 +3017,7 @@
 
     if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard && painelFaceWrap){
       painelFaceWrap.classList.add("is-on");
-
-      if (selectPainelCard) selectPainelCard.value = "";
-      if (selectFaceCard) selectFaceCard.value = "";
-
-      setPainelPreviewByObj(null);
-      limparSelectFaces();
+      preencherPainelFacesDoCard(j.paineis_vinculados || []);
     }
 
     const selectTagCard = document.getElementById("selectTagCard");
@@ -2754,7 +3126,8 @@
       descricao,
       id_empresa: idEmpresa,
       id_empresa_proprietaria: idEmpresa,
-      versao_concorrencia: versaoConcorrenciaCardAberto
+      versao_concorrencia: versaoConcorrenciaCardAberto,
+      painel_faces: coletarPainelFacesDoFormulario()
     };
 
     const r = await fetch(`/kanban/api/cards/${cardAbertoId}`, {

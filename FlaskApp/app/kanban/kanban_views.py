@@ -1,6 +1,7 @@
 import json
 from collections.abc import Mapping
 from typing import Any
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -509,6 +510,282 @@ def _obter_paineis_catalogo() -> list[dict[str, Any]]:
 
 
 
+
+
+def _valor_decimal(valor: Any) -> Decimal | None:
+    if valor is None:
+        return None
+    if isinstance(valor, Decimal):
+        return valor
+    texto = str(valor).strip().replace("R$", "").replace(" ", "")
+    if not texto:
+        return None
+    if "," in texto and "." in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    else:
+        texto = texto.replace(",", ".")
+    try:
+        return Decimal(texto)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _decimal_para_float(valor: Any) -> float | None:
+    dec = _valor_decimal(valor)
+    return float(dec) if dec is not None else None
+
+
+def _normalizar_texto(valor: Any) -> str:
+    return str(valor or "").strip()
+
+
+def _obter_painel_por_id(id_painel: int) -> dict[str, Any] | None:
+    sql = text("""
+        SELECT TOP 1
+            p.IDDimPaineisEuromidia,
+            p.CodPonto,
+            p.Tipo,
+            p.Logradouro,
+            p.Cidade,
+            p.UF,
+            p.Bairro,
+            p.Numero,
+            p.CEP,
+            p.QuantidadeFaces,
+            p.BitAtivo
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+        WHERE TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+        ORDER BY p.DataAtualizacao DESC, p.IDDimPaineisEuromidia DESC;
+    """)
+    row = db.session.execute(sql, {"id_painel": int(id_painel)}).mappings().first()
+    return dict(row) if row else None
+
+
+def _resolver_face_do_painel(id_painel: int, cod_face: str) -> dict[str, Any] | None:
+    painel = _obter_painel_por_id(id_painel)
+    if not painel:
+        return None
+
+    cod_face = _normalizar_texto(cod_face)
+    if not cod_face:
+        return None
+
+    sql = text("""
+        SELECT TOP 1
+            f.IDDimFacesPaineis,
+            f.CodPonto,
+            f.Face,
+            f.CodFace,
+            f.Tipo
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        WHERE TRY_CONVERT(int, f.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+          AND LTRIM(RTRIM(ISNULL(f.CodFace, ''))) = :cod_face
+        ORDER BY f.IDDimFacesPaineis DESC;
+    """)
+    row = db.session.execute(sql, {"id_painel": int(id_painel), "cod_face": cod_face}).mappings().first()
+    if row:
+        return dict(row)
+
+    sql_fallback = text("""
+        SELECT TOP 1
+            f.IDDimFacesPaineis,
+            f.CodPonto,
+            f.Face,
+            f.CodFace,
+            f.Tipo
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        WHERE TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+          AND UPPER(LTRIM(RTRIM(ISNULL(f.Tipo, '')))) = UPPER(LTRIM(RTRIM(:tipo_painel)))
+          AND LTRIM(RTRIM(ISNULL(f.CodFace, ''))) = :cod_face
+        ORDER BY f.IDDimFacesPaineis DESC;
+    """)
+    row = db.session.execute(
+        sql_fallback,
+        {
+            "cod_ponto": painel.get("CodPonto"),
+            "tipo_painel": _normalizar_texto(painel.get("Tipo")),
+            "cod_face": cod_face,
+        },
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+def _obter_custo_por_codponto(cod_ponto: int) -> dict[str, Any] | None:
+    sql = text("""
+        SELECT TOP 1
+            c.IDDimCustoPainel,
+            c.Ano,
+            c.CodPonto,
+            c.Origem,
+            c.Valor,
+            c.DataCarga
+        FROM [Integracao].[Silver].[DimCustoPainel] c
+        WHERE TRY_CONVERT(int, c.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+        ORDER BY c.Ano DESC, c.DataCarga DESC, c.IDDimCustoPainel DESC;
+    """)
+    row = db.session.execute(sql, {"cod_ponto": int(cod_ponto)}).mappings().first()
+    return dict(row) if row else None
+
+
+def _obter_precos_painel_face(id_painel: int, id_dim_face: int | None, tipo_painel: str) -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT
+            tp.IDDimTabelaPrecosEuromidia,
+            tp.IDDimPaineisEuromidia,
+            tp.IDDimFacesPaineis,
+            tp.Tipo,
+            tp.PeriodoExibicao,
+            tp.ExibicoesDia,
+            tp.Valor,
+            tp.PoliticaTrocas,
+            tp.Tabela,
+            tp.DataPublicacao,
+            tp.DataValidade,
+            tp.DataAtualizacao,
+            tp.BitAtivo,
+            tp.AlteradoPor,
+            tp.ValorTroca
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] tp
+        WHERE TRY_CONVERT(int, tp.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+          AND UPPER(LTRIM(RTRIM(ISNULL(tp.Tipo, '')))) = UPPER(LTRIM(RTRIM(:tipo_painel)))
+          AND (
+                :id_dim_face IS NULL
+                OR tp.IDDimFacesPaineis IS NULL
+                OR TRY_CONVERT(int, tp.IDDimFacesPaineis) = TRY_CONVERT(int, :id_dim_face)
+              )
+        ORDER BY
+            CASE WHEN ISNULL(tp.BitAtivo, 0) = 1 THEN 0 ELSE 1 END,
+            ISNULL(tp.DataValidade, '9999-12-31') DESC,
+            ISNULL(tp.DataPublicacao, '9999-12-31') DESC,
+            tp.IDDimTabelaPrecosEuromidia DESC;
+    """)
+    rows = db.session.execute(
+        sql,
+        {
+            "id_painel": int(id_painel),
+            "id_dim_face": int(id_dim_face) if id_dim_face else None,
+            "tipo_painel": _normalizar_texto(tipo_painel),
+        },
+    ).mappings().all()
+    return _rows_para_dicts(rows)
+
+
+def _obter_preco_por_id(id_preco: int, id_painel: int, id_dim_face: int | None, tipo_painel: str) -> dict[str, Any] | None:
+    sql = text("""
+        SELECT TOP 1
+            tp.IDDimTabelaPrecosEuromidia,
+            tp.IDDimPaineisEuromidia,
+            tp.IDDimFacesPaineis,
+            tp.Tipo,
+            tp.PeriodoExibicao,
+            tp.ExibicoesDia,
+            tp.Valor,
+            tp.PoliticaTrocas,
+            tp.Tabela,
+            tp.DataPublicacao,
+            tp.DataValidade,
+            tp.DataAtualizacao,
+            tp.BitAtivo,
+            tp.AlteradoPor,
+            tp.ValorTroca
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] tp
+        WHERE tp.IDDimTabelaPrecosEuromidia = :id_preco
+          AND TRY_CONVERT(int, tp.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+          AND UPPER(LTRIM(RTRIM(ISNULL(tp.Tipo, '')))) = UPPER(LTRIM(RTRIM(:tipo_painel)))
+          AND (
+                :id_dim_face IS NULL
+                OR tp.IDDimFacesPaineis IS NULL
+                OR TRY_CONVERT(int, tp.IDDimFacesPaineis) = TRY_CONVERT(int, :id_dim_face)
+              )
+        ORDER BY tp.IDDimTabelaPrecosEuromidia DESC;
+    """)
+    row = db.session.execute(
+        sql,
+        {
+            "id_preco": int(id_preco),
+            "id_painel": int(id_painel),
+            "id_dim_face": int(id_dim_face) if id_dim_face else None,
+            "tipo_painel": _normalizar_texto(tipo_painel),
+        },
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+def _calcular_margens_comerciais(custo: Any, valor_tabela: Any, novo_valor: Any, percentual_desconto: Any) -> dict[str, Any]:
+    custo_dec = _valor_decimal(custo) or Decimal('0')
+    valor_tabela_dec = _valor_decimal(valor_tabela)
+    novo_valor_dec = _valor_decimal(novo_valor)
+    percentual_dec = _valor_decimal(percentual_desconto)
+
+    valor_final: Decimal | None = None
+    percentual_aplicado: Decimal | None = None
+
+    if novo_valor_dec is not None:
+        valor_final = novo_valor_dec
+    elif percentual_dec is not None and valor_tabela_dec is not None:
+        percentual_aplicado = percentual_dec
+        valor_final = valor_tabela_dec * (Decimal('1') - (percentual_dec / Decimal('100')))
+    else:
+        valor_final = valor_tabela_dec
+
+    margem_valor: Decimal | None = None
+    margem_percentual: Decimal | None = None
+    if valor_final is not None:
+        margem_valor = valor_final - custo_dec
+        if valor_final != 0:
+            margem_percentual = (margem_valor / valor_final) * Decimal('100')
+
+    return {
+        "Custo": float(custo_dec) if custo is not None else None,
+        "ValorTabela": float(valor_tabela_dec) if valor_tabela_dec is not None else None,
+        "NovoValor": float(novo_valor_dec) if novo_valor_dec is not None else None,
+        "PercentualDesconto": float(percentual_aplicado if percentual_aplicado is not None else percentual_dec) if (percentual_aplicado is not None or percentual_dec is not None) else None,
+        "ValorVendaFinal": float(valor_final) if valor_final is not None else None,
+        "MargemValor": float(margem_valor) if margem_valor is not None else None,
+        "MargemPercentual": float(margem_percentual) if margem_percentual is not None else None,
+    }
+
+
+def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT
+            r.IDFatoKanbanCardPainelFace,
+            r.Ordem,
+            r.IDDimPaineisEuromidia,
+            r.IDDimFacesPaineis,
+            r.CodPonto,
+            r.CodFace,
+            r.TipoPainel,
+            r.AnoCusto,
+            r.CustoTabela,
+            r.IDDimTabelaPrecosEuromidia,
+            r.PeriodoExibicao,
+            r.ExibicoesDia,
+            r.ValorTabela,
+            r.Tabela,
+            r.PoliticaTrocas,
+            r.ValorTroca,
+            r.NovoValor,
+            r.PercentualDesconto,
+            r.ValorVendaFinal,
+            r.MargemValor,
+            r.MargemPercentual,
+            p.Logradouro,
+            p.Cidade,
+            p.UF,
+            p.Bairro,
+            p.Numero,
+            p.QuantidadeFaces
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] r
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+          ON TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, r.IDDimPaineisEuromidia)
+        WHERE r.IDFatoKanbanCard = :id_card
+          AND r.Ativo = 1
+        ORDER BY r.Ordem ASC, r.IDFatoKanbanCardPainelFace ASC;
+    """)
+    rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
+    return _rows_para_dicts(rows)
+
 def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     card_escopo = _obter_card_autorizado(id_card)
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
@@ -592,6 +869,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         "kanban_cfg": _obter_cfg_kanban(id_kanban),
         "tags": _rows_para_dicts(tags),
         "notas": _rows_para_dicts(notas),
+        "paineis_vinculados": _listar_paineis_vinculados_card(id_card),
     }
 
 
@@ -1198,6 +1476,132 @@ def api_faces_por_painel(cod_ponto: int):
     return jsonify(payload)
 
 
+@kanban_bp.route("/api/paineis/id/<int:id_painel>/faces", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_faces_por_id_painel(id_painel: int):
+    _assert_login()
+    painel = _obter_painel_por_id(id_painel)
+    if not painel:
+        return jsonify({"ok": False, "msg": "Painel não encontrado"}), 404
+
+    chave = _chave_cache_json("kanban:api:faces:id_painel", id_painel)
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return jsonify(em_cache)
+
+    sql = text("""
+        SELECT
+            f.IDDimFacesPaineis,
+            f.CodFace,
+            f.Face,
+            f.Tipo
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        WHERE f.CodFace IS NOT NULL
+          AND LTRIM(RTRIM(f.CodFace)) <> ''
+          AND (
+                TRY_CONVERT(int, f.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+                OR (
+                    TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+                    AND UPPER(LTRIM(RTRIM(ISNULL(f.Tipo, '')))) = UPPER(LTRIM(RTRIM(:tipo_painel)))
+                )
+              )
+        GROUP BY f.IDDimFacesPaineis, f.CodFace, f.Face, f.Tipo
+        ORDER BY
+            CASE WHEN f.Face IS NULL OR LTRIM(RTRIM(f.Face)) = '' THEN 1 ELSE 0 END,
+            f.Face ASC,
+            f.CodFace ASC;
+    """)
+    rows = db.session.execute(
+        sql,
+        {
+            "id_painel": int(id_painel),
+            "cod_ponto": painel.get("CodPonto"),
+            "tipo_painel": _normalizar_texto(painel.get("Tipo")),
+        },
+    ).mappings().all()
+
+    faces = []
+    for row in rows:
+        codface = _normalizar_texto(row.get("CodFace"))
+        face = _normalizar_texto(row.get("Face"))
+        if not codface:
+            continue
+        label = f"Face {face} • CodFace {codface}" if face else f"CodFace {codface}"
+        faces.append(
+            {
+                "IDDimFacesPaineis": int(row.get("IDDimFacesPaineis") or 0) if row.get("IDDimFacesPaineis") is not None else None,
+                "CodFace": codface,
+                "Face": face or None,
+                "Tipo": _normalizar_texto(row.get("Tipo")) or None,
+                "Label": label,
+            }
+        )
+
+    payload = {
+        "ok": True,
+        "id_painel": int(id_painel),
+        "cod_ponto": painel.get("CodPonto"),
+        "tipo_painel": painel.get("Tipo"),
+        "total": len(faces),
+        "faces": faces,
+    }
+    _cache_json_set(chave, payload, TIMEOUT_CACHE_LONGO)
+    return jsonify(payload)
+
+
+@kanban_bp.route("/api/paineis/id/<int:id_painel>/faces/<string:cod_face>/comercial", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_comercial_painel_face(id_painel: int, cod_face: str):
+    _assert_login()
+    painel = _obter_painel_por_id(id_painel)
+    if not painel:
+        return jsonify({"ok": False, "msg": "Painel não encontrado"}), 404
+
+    face = _resolver_face_do_painel(id_painel, cod_face)
+    if not face:
+        return jsonify({"ok": False, "msg": "Face não encontrada para o painel selecionado"}), 404
+
+    custo = _obter_custo_por_codponto(int(painel.get("CodPonto") or 0))
+    precos = _obter_precos_painel_face(
+        id_painel=int(id_painel),
+        id_dim_face=int(face.get("IDDimFacesPaineis") or 0) if face.get("IDDimFacesPaineis") is not None else None,
+        tipo_painel=_normalizar_texto(painel.get("Tipo")),
+    )
+
+    precos_payload = []
+    for row in precos:
+        linha = {
+            "IDDimTabelaPrecosEuromidia": int(row.get("IDDimTabelaPrecosEuromidia") or 0),
+            "PeriodoExibicao": row.get("PeriodoExibicao"),
+            "ExibicoesDia": row.get("ExibicoesDia"),
+            "Valor": _decimal_para_float(row.get("Valor")),
+            "Tabela": row.get("Tabela"),
+            "PoliticaTrocas": row.get("PoliticaTrocas"),
+            "ValorTroca": _decimal_para_float(row.get("ValorTroca")),
+            "BitAtivo": int(row.get("BitAtivo") or 0),
+            "DataPublicacao": row.get("DataPublicacao"),
+            "DataValidade": row.get("DataValidade"),
+        }
+        precos_payload.append(linha)
+
+    payload = {
+        "ok": True,
+        "painel": painel,
+        "face": face,
+        "custo": {
+            "IDDimCustoPainel": int(custo.get("IDDimCustoPainel") or 0) if custo else None,
+            "Ano": int(custo.get("Ano") or 0) if custo and custo.get("Ano") is not None else None,
+            "CodPonto": int(custo.get("CodPonto") or 0) if custo and custo.get("CodPonto") is not None else None,
+            "Origem": custo.get("Origem") if custo else None,
+            "Valor": _decimal_para_float(custo.get("Valor")) if custo else None,
+            "DataCarga": custo.get("DataCarga") if custo else None,
+            "observacao": "O custo disponível hoje está na DimCustoPainel por CodPonto. Logo, ele é custo do painel/ponto, não custo específico da face.",
+        },
+        "precos": precos_payload,
+    }
+    return jsonify(payload)
 
 
 @kanban_bp.route("/api/kanbans", methods=["POST"])
@@ -1449,9 +1853,16 @@ def api_card_atualizar(id_card: int):
     descricao = payload.get("descricao")
     status = (payload.get("status") or "").strip().upper()
     id_empresa = payload.get("id_empresa")
+    painel_faces_payload = payload.get("painel_faces") if "painel_faces" in payload else None
+    painel_faces_informado = "painel_faces" in payload
 
     if titulo and len(titulo) < 2:
         return jsonify({"ok": False, "msg": "Título inválido"}), 400
+
+    if painel_faces_informado and painel_faces_payload is None:
+        painel_faces_payload = []
+    if painel_faces_informado and not isinstance(painel_faces_payload, list):
+        return jsonify({"ok": False, "msg": "painel_faces deve ser uma lista"}), 400
 
     campos: list[str] = []
     params: dict[str, Any] = {
@@ -1498,9 +1909,9 @@ def api_card_atualizar(id_card: int):
         campos.append("IDEmpresaProprietaria = :id_empresa")
         params["id_empresa"] = id_empresa_int
 
-    if not campos:
+    if not campos and not painel_faces_informado:
         detalhe = _obter_card_detalhe_payload(id_card)
-        return jsonify({"ok": True, "card": detalhe["card"]})
+        return jsonify({"ok": True, "card": detalhe["card"], "paineis_vinculados": detalhe.get("paineis_vinculados", [])})
 
     try:
         sql_lock_card = text("""
@@ -1536,19 +1947,33 @@ def api_card_atualizar(id_card: int):
                 }
             ), 409
 
-        sql = text(f"""
-            UPDATE [Kanban].[Silver].[FatoKanbanCard]
-            SET {', '.join(campos)},
-                AtualizadoEm = GETDATE()
-            OUTPUT
-                INSERTED.IDFatoKanbanCard,
-                INSERTED.AtualizadoEm,
-                INSERTED.VersaoConcorrencia
-            WHERE IDFatoKanbanCard = :id_card
-              AND IDDimKanban = :id_kanban
-              AND Ativo = 1
-              AND VersaoConcorrencia = :versao_concorrencia;
-        """)
+        if campos:
+            sql = text(f"""
+                UPDATE [Kanban].[Silver].[FatoKanbanCard]
+                SET {', '.join(campos)},
+                    AtualizadoEm = GETDATE()
+                OUTPUT
+                    INSERTED.IDFatoKanbanCard,
+                    INSERTED.AtualizadoEm,
+                    INSERTED.VersaoConcorrencia
+                WHERE IDFatoKanbanCard = :id_card
+                  AND IDDimKanban = :id_kanban
+                  AND Ativo = 1
+                  AND VersaoConcorrencia = :versao_concorrencia;
+            """)
+        else:
+            sql = text("""
+                UPDATE [Kanban].[Silver].[FatoKanbanCard]
+                SET AtualizadoEm = GETDATE()
+                OUTPUT
+                    INSERTED.IDFatoKanbanCard,
+                    INSERTED.AtualizadoEm,
+                    INSERTED.VersaoConcorrencia
+                WHERE IDFatoKanbanCard = :id_card
+                  AND IDDimKanban = :id_kanban
+                  AND Ativo = 1
+                  AND VersaoConcorrencia = :versao_concorrencia;
+            """)
 
         row_atualizada = db.session.execute(sql, params).mappings().first()
 
@@ -1563,6 +1988,165 @@ def api_card_atualizar(id_card: int):
                     "card_atual": detalhe_atual["card"],
                 }
             ), 409
+
+        if painel_faces_informado:
+            sql_inativar_rel = text("""
+                UPDATE [Kanban].[Silver].[FatoKanbanCardPainelFace]
+                SET Ativo = 0,
+                    RemovidoEm = GETDATE(),
+                    RemovidoPor = :id_usuario,
+                    DataAtualizacao = GETDATE()
+                WHERE IDFatoKanbanCard = :id_card
+                  AND Ativo = 1;
+            """)
+            db.session.execute(sql_inativar_rel, {"id_card": id_card, "id_usuario": _id_usuario()})
+
+            ordem_rel = 1
+            for item in (painel_faces_payload or []):
+                if not isinstance(item, dict):
+                    continue
+
+                id_painel_item = int(item.get("id_painel") or 0)
+                cod_face_item = _normalizar_texto(item.get("cod_face"))
+
+                if not id_painel_item and not cod_face_item:
+                    continue
+                if not id_painel_item:
+                    return jsonify({"ok": False, "msg": "Painel é obrigatório em cada vinculação"}), 400
+                if not cod_face_item:
+                    return jsonify({"ok": False, "msg": "Face é obrigatória em cada vinculação"}), 400
+
+                painel_item = _obter_painel_por_id(id_painel_item)
+                if not painel_item:
+                    return jsonify({"ok": False, "msg": f"Painel {id_painel_item} não encontrado"}), 400
+
+                face_item = _resolver_face_do_painel(id_painel_item, cod_face_item)
+                if not face_item:
+                    return jsonify({"ok": False, "msg": f"A face {cod_face_item} não pertence ao painel selecionado"}), 400
+
+                custo_item = _obter_custo_por_codponto(int(painel_item.get("CodPonto") or 0))
+
+                id_preco_item = item.get("id_preco")
+                if id_preco_item in ("", None):
+                    id_preco_item = None
+                else:
+                    try:
+                        id_preco_item = int(id_preco_item)
+                    except Exception:
+                        return jsonify({"ok": False, "msg": "Preço selecionado inválido"}), 400
+
+                preco_item = None
+                if id_preco_item:
+                    preco_item = _obter_preco_por_id(
+                        id_preco=id_preco_item,
+                        id_painel=id_painel_item,
+                        id_dim_face=int(face_item.get("IDDimFacesPaineis") or 0) if face_item.get("IDDimFacesPaineis") is not None else None,
+                        tipo_painel=_normalizar_texto(painel_item.get("Tipo")),
+                    )
+                    if not preco_item:
+                        return jsonify({"ok": False, "msg": f"O preço selecionado não é válido para o painel/face informado ({cod_face_item})"}), 400
+
+                novo_valor_item = _valor_decimal(item.get("novo_valor"))
+                percentual_item = _valor_decimal(item.get("percentual_desconto"))
+                if novo_valor_item is not None and percentual_item is not None:
+                    percentual_item = None
+
+                metricas = _calcular_margens_comerciais(
+                    custo_item.get("Valor") if custo_item else None,
+                    preco_item.get("Valor") if preco_item else None,
+                    novo_valor_item,
+                    percentual_item,
+                )
+
+                sql_ins_rel = text("""
+                    INSERT INTO [Kanban].[Silver].[FatoKanbanCardPainelFace]
+                        (
+                            IDFatoKanbanCard,
+                            Ordem,
+                            IDDimPaineisEuromidia,
+                            IDDimFacesPaineis,
+                            CodPonto,
+                            CodFace,
+                            TipoPainel,
+                            AnoCusto,
+                            CustoTabela,
+                            IDDimTabelaPrecosEuromidia,
+                            PeriodoExibicao,
+                            ExibicoesDia,
+                            ValorTabela,
+                            Tabela,
+                            PoliticaTrocas,
+                            ValorTroca,
+                            NovoValor,
+                            PercentualDesconto,
+                            ValorVendaFinal,
+                            MargemValor,
+                            MargemPercentual,
+                            Ativo,
+                            CriadoEm,
+                            DataAtualizacao,
+                            IDUsuario,
+                            IDEmpresaProprietaria
+                        )
+                    VALUES
+                        (
+                            :id_card,
+                            :ordem,
+                            :id_painel,
+                            :id_dim_face,
+                            :cod_ponto,
+                            :cod_face,
+                            :tipo_painel,
+                            :ano_custo,
+                            :custo_tabela,
+                            :id_preco,
+                            :periodo_exibicao,
+                            :exibicoes_dia,
+                            :valor_tabela,
+                            :tabela,
+                            :politica_trocas,
+                            :valor_troca,
+                            :novo_valor,
+                            :percentual_desconto,
+                            :valor_venda_final,
+                            :margem_valor,
+                            :margem_percentual,
+                            1,
+                            GETDATE(),
+                            GETDATE(),
+                            :id_usuario,
+                            :id_empresa
+                        );
+                """)
+                db.session.execute(
+                    sql_ins_rel,
+                    {
+                        "id_card": id_card,
+                        "ordem": ordem_rel,
+                        "id_painel": int(id_painel_item),
+                        "id_dim_face": int(face_item.get("IDDimFacesPaineis") or 0) if face_item.get("IDDimFacesPaineis") is not None else None,
+                        "cod_ponto": int(painel_item.get("CodPonto") or 0) if painel_item.get("CodPonto") is not None else None,
+                        "cod_face": cod_face_item,
+                        "tipo_painel": _normalizar_texto(painel_item.get("Tipo")) or None,
+                        "ano_custo": int(custo_item.get("Ano") or 0) if custo_item and custo_item.get("Ano") is not None else None,
+                        "custo_tabela": metricas.get("Custo"),
+                        "id_preco": int(preco_item.get("IDDimTabelaPrecosEuromidia") or 0) if preco_item else None,
+                        "periodo_exibicao": preco_item.get("PeriodoExibicao") if preco_item else None,
+                        "exibicoes_dia": int(preco_item.get("ExibicoesDia") or 0) if preco_item and preco_item.get("ExibicoesDia") is not None else None,
+                        "valor_tabela": metricas.get("ValorTabela"),
+                        "tabela": preco_item.get("Tabela") if preco_item else None,
+                        "politica_trocas": preco_item.get("PoliticaTrocas") if preco_item else None,
+                        "valor_troca": _decimal_para_float(preco_item.get("ValorTroca")) if preco_item else None,
+                        "novo_valor": metricas.get("NovoValor"),
+                        "percentual_desconto": metricas.get("PercentualDesconto"),
+                        "valor_venda_final": metricas.get("ValorVendaFinal"),
+                        "margem_valor": metricas.get("MargemValor"),
+                        "margem_percentual": metricas.get("MargemPercentual"),
+                        "id_usuario": _id_usuario(),
+                        "id_empresa": id_emp,
+                    },
+                )
+                ordem_rel += 1
 
         db.session.commit()
 
@@ -1585,7 +2169,7 @@ def api_card_atualizar(id_card: int):
         },
     )
 
-    return jsonify({"ok": True, "card": detalhe["card"]})
+    return jsonify({"ok": True, "card": detalhe["card"], "paineis_vinculados": detalhe.get("paineis_vinculados", [])})
 
 
 

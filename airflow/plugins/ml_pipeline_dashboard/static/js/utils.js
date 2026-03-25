@@ -1,230 +1,236 @@
-.ml-tabela-pagina{
-  width:min(1680px, calc(100vw - 32px));
-  margin:0 auto;
-  padding:24px 0 42px;
-}
+(function (window) {
+  "use strict";
 
-.ml-tabela-hero{
-  border:1px solid var(--ml-cor-borda);
-  border-radius:var(--ml-raio-lg);
-  background:linear-gradient(180deg, rgba(21,31,56,.96), rgba(17,24,45,.98));
-  box-shadow:var(--ml-sombra);
-  margin-bottom:18px;
-  overflow:hidden;
-}
+  function texto(valor) {
+    return String(valor ?? "").trim();
+  }
 
-.ml-tabela-hero-body{ padding:24px 26px; }
+  function escaparHtml(valor) {
+    return String(valor ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
 
-.ml-tabela-hero h1{
-  margin:0 0 10px 0;
-  font-size:clamp(1.85rem, 2.7vw, 2.55rem);
-  line-height:1.12;
-  word-break:break-word;
-}
+  function truncarTexto(valor, limite = 180) {
+    const textoNormalizado = texto(valor);
+    if (!textoNormalizado) return "";
+    if (textoNormalizado.length <= limite) return textoNormalizado;
+    return `${textoNormalizado.slice(0, limite).trim()}...`;
+  }
 
-.ml-tabela-hero p{
-  margin:0;
-  color:var(--ml-cor-texto-fraco);
-  line-height:1.7;
-  max-width:1040px;
-}
+  function arraySeguro(valor) {
+    return Array.isArray(valor) ? valor : [];
+  }
 
-.ml-tabela-chips{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  margin-top:14px;
-}
+  function objetoSeguro(valor) {
+    return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+  }
 
-.ml-tabela-card{
-  border:1px solid var(--ml-cor-borda);
-  border-radius:var(--ml-raio-lg);
-  background:linear-gradient(180deg, rgba(21,31,56,.96), rgba(17,24,45,.98));
-  box-shadow:var(--ml-sombra);
-  overflow:hidden;
-  margin-bottom:18px;
-}
+  function normalizarStatus(status) {
+    const valor = texto(status).toLowerCase();
+    if (!valor) return "unknown";
+    if (valor.includes("success")) return "success";
+    if (valor.includes("fail")) return "failed";
+    if (valor.includes("error")) return "failed";
+    if (valor.includes("up_for_retry")) return "running";
+    if (valor.includes("run")) return "running";
+    if (valor.includes("queue")) return "queued";
+    return valor;
+  }
 
-.ml-tabela-card-topo{
-  padding:18px 20px;
-  border-bottom:1px solid rgba(255,255,255,.06);
-  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
-}
+  function classeStatus(status) {
+    const valor = normalizarStatus(status);
+    if (valor === "success") return "ml-status-success";
+    if (valor === "failed") return "ml-status-failed";
+    if (valor === "running") return "ml-status-running";
+    if (valor === "queued") return "ml-status-queued";
+    return "ml-status-default";
+  }
 
-.ml-tabela-card-topo h2{
-  margin:0 0 6px 0;
-  font-size:1.18rem;
-}
+  function atribuirTexto(elemento, valor, fallback = "") {
+    if (!elemento) return;
+    const textoFinal =
+      valor === undefined || valor === null || String(valor) === ""
+        ? fallback
+        : String(valor);
+    elemento.textContent = textoFinal;
+  }
 
-.ml-tabela-card-topo p{
-  margin:0;
-  color:var(--ml-cor-texto-fraco);
-  line-height:1.62;
-}
+  function atribuirHtml(elemento, html, fallback = "") {
+    if (!elemento) return;
+    const htmlFinal = texto(html) ? html : fallback;
+    elemento.innerHTML = htmlFinal;
+  }
 
-.ml-tabela-card-body{ padding:18px 20px 20px; }
+  function formatarNumero(valor, casas = 2) {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return "-";
+    return numero.toLocaleString("pt-BR", {
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas,
+    });
+  }
 
-.ml-filtros-form{
-  display:grid;
-  grid-template-columns:repeat(4, minmax(0, 1fr));
-  gap:12px;
-  align-items:end;
-}
+  function formatarInteiro(valor) {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return "-";
+    return numero.toLocaleString("pt-BR", {
+      maximumFractionDigits: 0,
+    });
+  }
 
-.ml-campo{ min-width:0; }
-.ml-campo-lg{ grid-column:span 2; }
-.ml-campo-sm{ grid-column:span 1; }
+  function formatarPercentual(valor, casas = 2) {
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return "-";
+    return numero.toLocaleString("pt-BR", {
+      style: "percent",
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas,
+    });
+  }
 
-.ml-campo label{
-  display:block;
-  margin-bottom:7px;
-  color:var(--ml-cor-texto-fraco);
-  font-size:.76rem;
-  font-weight:900;
-  text-transform:uppercase;
-  letter-spacing:.05em;
-}
+  function formatarValorPorFormato(valor, formato = "auto") {
+    const numero = Number(valor);
 
-.ml-campo input,
-.ml-campo select{
-  width:100%;
-  min-height:46px;
-  border-radius:14px;
-  border:1px solid var(--ml-cor-borda);
-  background:rgba(255,255,255,.03);
-  color:var(--ml-cor-texto);
-  padding:12px 14px;
-  font-size:.94rem;
-  outline:none;
-}
+    if (formato === "texto") {
+      return String(valor ?? "-");
+    }
 
-.ml-campo input:focus,
-.ml-campo select:focus{
-  border-color:rgba(59,130,246,.45);
-  box-shadow:0 0 0 4px rgba(59,130,246,.10);
-}
+    if (!Number.isFinite(numero)) {
+      return valor === null || valor === undefined || valor === "" ? "-" : String(valor);
+    }
 
-.ml-campo select[multiple]{
-  min-height:120px;
-  padding:8px;
-}
+    if (formato === "percentual") {
+      return formatarPercentual(numero, 2);
+    }
 
-.ml-tabela-acoes{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  grid-column:1 / -1;
-}
+    if (formato === "decimal_4") {
+      return formatarNumero(numero, 4);
+    }
 
-.ml-tabela-resumo{
-  display:grid;
-  grid-template-columns:repeat(4, minmax(0, 1fr));
-  gap:14px;
-}
+    if (formato === "decimal_2") {
+      return formatarNumero(numero, 2);
+    }
 
-.ml-kpi-tabela{
-  border:1px solid rgba(255,255,255,.06);
-  background:rgba(255,255,255,.02);
-  border-radius:18px;
-  padding:14px;
-  min-width:0;
-}
+    if (formato === "inteiro") {
+      return formatarInteiro(numero);
+    }
 
-.ml-kpi-tabela small{
-  display:block;
-  color:var(--ml-cor-texto-fraco);
-  font-size:.76rem;
-  font-weight:900;
-  letter-spacing:.05em;
-  text-transform:uppercase;
-  margin-bottom:8px;
-}
+    if (formato === "auto") {
+      if (Number.isInteger(numero)) return formatarInteiro(numero);
+      if (Math.abs(numero) <= 1) return formatarNumero(numero, 4);
+      return formatarNumero(numero, 2);
+    }
 
-.ml-kpi-tabela strong{
-  display:block;
-  font-size:1.2rem;
-  line-height:1.3;
-  word-break:break-word;
-}
+    return formatarNumero(numero, 4);
+  }
 
-.ml-tabela-wrap{
-  width:100%;
-  overflow:auto;
-  border:1px solid rgba(255,255,255,.06);
-  border-radius:18px;
-  background:rgba(255,255,255,.02);
-}
+  function slugify(valor) {
+    return texto(valor)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
 
-.ml-tabela{
-  width:100%;
-  border-collapse:collapse;
-  min-width:900px;
-}
+  function gerarIdUnico(prefixo = "id") {
+    return `${prefixo}-${Math.random().toString(36).slice(2, 10)}`;
+  }
 
-.ml-tabela thead th{
-  position:sticky;
-  top:0;
-  z-index:2;
-  background:#10182d;
-  color:#dce5ff;
-  padding:12px 10px;
-  text-align:left;
-  font-size:.8rem;
-  font-weight:900;
-  border-bottom:1px solid rgba(255,255,255,.08);
-  white-space:nowrap;
-}
+  function formatarDataHora(valor) {
+    const textoValor = texto(valor);
+    if (!textoValor) return "-";
 
-.ml-tabela thead th a{
-  color:inherit;
-  text-decoration:none;
-}
+    const data = new Date(textoValor);
+    if (Number.isNaN(data.getTime())) return textoValor;
 
-.ml-tabela tbody td{
-  padding:10px;
-  border-bottom:1px solid rgba(255,255,255,.06);
-  vertical-align:top;
-  color:#e6ebfa;
-  font-size:.84rem;
-  white-space:nowrap;
-}
+    return data.toLocaleString("pt-BR");
+  }
 
-.ml-tabela tbody tr:hover{ background:rgba(59,130,246,.05); }
+  function abrirUrlComParametros(urlBase, parametros = {}) {
+    const url = new URL(urlBase, window.location.origin);
 
-.ml-paginacao{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:12px;
-  flex-wrap:wrap;
-  margin-top:14px;
-}
+    Object.entries(objetoSeguro(parametros)).forEach(([chave, valor]) => {
+      const textoValor = texto(valor);
+      if (textoValor) {
+        url.searchParams.set(chave, textoValor);
+      }
+    });
 
-.ml-paginacao-info{
-  color:var(--ml-cor-texto-fraco);
-  font-size:.9rem;
-  line-height:1.6;
-}
+    return url.toString();
+  }
 
-.ml-paginacao-acoes{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-}
+  async function obterJson(url) {
+    const resposta = await window.fetch(url, {
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+      },
+    });
 
-@media (max-width: 1200px){
-  .ml-tabela-resumo{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
-  .ml-filtros-form{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
-  .ml-campo,
-  .ml-campo-lg,
-  .ml-campo-sm{ grid-column:auto; }
-}
+    if (!resposta.ok) {
+      const textoErro = await resposta.text();
+      throw new Error(`Falha HTTP ${resposta.status}: ${textoErro || "sem detalhes."}`);
+    }
 
-@media (max-width: 760px){
-  .ml-tabela-pagina{ width:min(100vw, calc(100vw - 20px)); padding:14px 0 28px; }
-  .ml-tabela-card-body,
-  .ml-tabela-card-topo,
-  .ml-tabela-hero-body{ padding:18px; }
-  .ml-tabela-resumo{ grid-template-columns:1fr; }
-  .ml-filtros-form{ grid-template-columns:1fr; }
-}
+    return resposta.json();
+  }
+
+  async function copiarTexto(valor) {
+    const conteudo = String(valor ?? "");
+
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(conteudo);
+      return;
+    }
+
+    const area = document.createElement("textarea");
+    area.value = conteudo;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    document.body.removeChild(area);
+  }
+
+  function debounce(funcao, espera = 250) {
+    let temporizador = null;
+
+    return function (...args) {
+      const contexto = this;
+      window.clearTimeout(temporizador);
+      temporizador = window.setTimeout(() => {
+        funcao.apply(contexto, args);
+      }, espera);
+    };
+  }
+
+  window.MLPipelineDashboardUtils = {
+    texto,
+    escaparHtml,
+    truncarTexto,
+    arraySeguro,
+    objetoSeguro,
+    normalizarStatus,
+    classeStatus,
+    atribuirTexto,
+    atribuirHtml,
+    formatarNumero,
+    formatarInteiro,
+    formatarPercentual,
+    formatarValorPorFormato,
+    slugify,
+    gerarIdUnico,
+    formatarDataHora,
+    abrirUrlComParametros,
+    obterJson,
+    copiarTexto,
+    debounce,
+  };
+})(window);

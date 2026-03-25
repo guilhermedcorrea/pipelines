@@ -21,9 +21,11 @@ from sklearn.metrics import (
     brier_score_loss,
     confusion_matrix,
     log_loss,
+    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
+    roc_curve,
 )
 from sqlalchemy import text
 
@@ -82,6 +84,9 @@ class Configuracao:
     )
     caminho_saida_metricas_json: Path = Path(
         "/opt/airflow/Artefatos/Euromidia/MachineLearning/Metricas/score_cliente_metricas.json"
+    )
+    caminho_saida_dashboard_spec_json: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/Metricas/score_cliente_dashboard_spec.json"
     )
     caminho_saida_importancias_csv: Path = Path(
         "/opt/airflow/Dados/Euromidia/MachineLearning/score_cliente_importancias.csv"
@@ -1073,6 +1078,985 @@ def calcular_metricas_top_decile(y_true: np.ndarray, y_prob: np.ndarray) -> dict
         "recall_top_10": float(recall_top),
         "lift_top_10": float(lift),
     }
+
+
+def limitar_float_json(valor: Any) -> Any:
+    """Normaliza floats para JSON seguro."""
+    try:
+        numero = float(valor)
+    except Exception:
+        return valor
+
+    if math.isnan(numero) or math.isinf(numero):
+        return None
+
+    return float(numero)
+
+
+def serie_numerica_limpa(valores: Any) -> list[float]:
+    """Converte uma série em lista de floats válidos para JSON."""
+    serie = pd.to_numeric(pd.Series(valores), errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    return [float(valor) for valor in serie.tolist()]
+
+
+def texto_periodo_mes(valor: Any) -> str:
+    """Padroniza representação textual de mês/período."""
+    if valor is None:
+        return "-"
+
+    if isinstance(valor, pd.Timestamp):
+        return valor.strftime("%Y-%m")
+
+    if isinstance(valor, datetime):
+        return valor.strftime("%Y-%m")
+
+    if isinstance(valor, date):
+        return valor.strftime("%Y-%m")
+
+    return str(valor)
+
+
+def construir_curva_roc(y_true: np.ndarray, y_prob: np.ndarray) -> dict[str, Any]:
+    """Gera estrutura da curva ROC para o dashboard."""
+    try:
+        fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+    except Exception:
+        return {"x": [], "y": [], "thresholds": [], "linha_base_x": [0.0, 1.0], "linha_base_y": [0.0, 1.0]}
+
+    return {
+        "x": [float(valor) for valor in fpr.tolist()],
+        "y": [float(valor) for valor in tpr.tolist()],
+        "thresholds": [None if math.isinf(valor) else float(valor) for valor in thresholds.tolist()],
+        "linha_base_x": [0.0, 1.0],
+        "linha_base_y": [0.0, 1.0],
+    }
+
+
+def construir_curva_precision_recall(y_true: np.ndarray, y_prob: np.ndarray) -> dict[str, Any]:
+    """Gera estrutura da curva Precision-Recall para o dashboard."""
+    try:
+        precisao, recall, thresholds = precision_recall_curve(y_true, y_prob)
+    except Exception:
+        return {"x": [], "y": [], "thresholds": [], "linha_base_x": [0.0, 1.0], "linha_base_y": [0.0, 0.0]}
+
+    taxa_base = float(np.mean(y_true)) if len(y_true) else 0.0
+
+    return {
+        "x": [float(valor) for valor in recall.tolist()],
+        "y": [float(valor) for valor in precisao.tolist()],
+        "thresholds": [float(valor) for valor in thresholds.tolist()],
+        "linha_base_x": [0.0, 1.0],
+        "linha_base_y": [taxa_base, taxa_base],
+    }
+
+
+def construir_curva_ks(y_true: np.ndarray, y_prob: np.ndarray) -> dict[str, Any]:
+    """Gera dados completos da curva KS."""
+    df_aux = pd.DataFrame({"y": y_true, "score": y_prob}).sort_values("score", ascending=False).reset_index(drop=True)
+
+    if df_aux.empty:
+        return {
+            "x": [],
+            "positivos": [],
+            "negativos": [],
+            "distancia": [],
+            "indice_maximo": None,
+            "ks_maximo": None,
+            "x_ponto_maximo": None,
+            "y_positivo_ponto_maximo": None,
+            "y_negativo_ponto_maximo": None,
+        }
+
+    positivos = int((df_aux["y"] == 1).sum())
+    negativos = int((df_aux["y"] == 0).sum())
+
+    if positivos == 0 or negativos == 0:
+        return {
+            "x": [],
+            "positivos": [],
+            "negativos": [],
+            "distancia": [],
+            "indice_maximo": None,
+            "ks_maximo": None,
+            "x_ponto_maximo": None,
+            "y_positivo_ponto_maximo": None,
+            "y_negativo_ponto_maximo": None,
+        }
+
+    df_aux["cum_positivos"] = (df_aux["y"] == 1).cumsum() / positivos
+    df_aux["cum_negativos"] = (df_aux["y"] == 0).cumsum() / negativos
+    df_aux["distancia"] = (df_aux["cum_positivos"] - df_aux["cum_negativos"]).abs()
+    df_aux["percentil_populacao"] = (np.arange(len(df_aux)) + 1) / len(df_aux)
+
+    indice_maximo = int(df_aux["distancia"].idxmax())
+    linha_max = df_aux.iloc[indice_maximo]
+
+    return {
+        "x": [float(valor) for valor in df_aux["percentil_populacao"].tolist()],
+        "positivos": [float(valor) for valor in df_aux["cum_positivos"].tolist()],
+        "negativos": [float(valor) for valor in df_aux["cum_negativos"].tolist()],
+        "distancia": [float(valor) for valor in df_aux["distancia"].tolist()],
+        "indice_maximo": indice_maximo,
+        "ks_maximo": float(linha_max["distancia"]),
+        "x_ponto_maximo": float(linha_max["percentil_populacao"]),
+        "y_positivo_ponto_maximo": float(linha_max["cum_positivos"]),
+        "y_negativo_ponto_maximo": float(linha_max["cum_negativos"]),
+    }
+
+
+def construir_tabela_calibracao(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    quantidade_bins: int = 10,
+) -> pd.DataFrame:
+    """Constrói tabela de calibração por quantis."""
+    df_aux = pd.DataFrame({"y": y_true, "prob": y_prob}).dropna()
+
+    if df_aux.empty:
+        return pd.DataFrame(columns=[
+            "Bin", "FaixaProbabilidade", "Quantidade", "ProbabilidadeMediaPrevista",
+            "TaxaRealObservada", "DiferencaObservadoMenosPrevisto"
+        ])
+
+    quantidade_bins_real = max(2, min(quantidade_bins, len(df_aux)))
+    ranking = df_aux["prob"].rank(method="first")
+    df_aux["Bin"] = pd.qcut(ranking, q=quantidade_bins_real, labels=False, duplicates="drop") + 1
+
+    resumo = (
+        df_aux.groupby("Bin", dropna=False)
+        .agg(
+            Quantidade=("y", "size"),
+            ProbabilidadeMediaPrevista=("prob", "mean"),
+            TaxaRealObservada=("y", "mean"),
+            ProbMin=("prob", "min"),
+            ProbMax=("prob", "max"),
+        )
+        .reset_index()
+        .sort_values("Bin")
+    )
+
+    resumo["FaixaProbabilidade"] = resumo.apply(
+        lambda linha: f"{linha['ProbMin']:.3f} até {linha['ProbMax']:.3f}",
+        axis=1,
+    )
+    resumo["DiferencaObservadoMenosPrevisto"] = (
+        resumo["TaxaRealObservada"] - resumo["ProbabilidadeMediaPrevista"]
+    )
+
+    return resumo[
+        [
+            "Bin",
+            "FaixaProbabilidade",
+            "Quantidade",
+            "ProbabilidadeMediaPrevista",
+            "TaxaRealObservada",
+            "DiferencaObservadoMenosPrevisto",
+        ]
+    ]
+
+
+def construir_histograma_probabilidade_por_classe(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    quantidade_bins: int = 20,
+) -> dict[str, Any]:
+    """Gera histograma por classe usando bins fixos de 0 a 1."""
+    bins = np.linspace(0.0, 1.0, quantidade_bins + 1)
+    centros = (bins[:-1] + bins[1:]) / 2
+
+    probs_0 = pd.Series(y_prob)[pd.Series(y_true) == 0].astype(float).to_numpy()
+    probs_1 = pd.Series(y_prob)[pd.Series(y_true) == 1].astype(float).to_numpy()
+
+    contagem_0, _ = np.histogram(probs_0, bins=bins)
+    contagem_1, _ = np.histogram(probs_1, bins=bins)
+
+    return {
+        "x": [float(valor) for valor in centros.tolist()],
+        "classe_0": [int(valor) for valor in contagem_0.tolist()],
+        "classe_1": [int(valor) for valor in contagem_1.tolist()],
+        "bin_inicio": [float(valor) for valor in bins[:-1].tolist()],
+        "bin_fim": [float(valor) for valor in bins[1:].tolist()],
+    }
+
+
+def construir_tabela_lift_por_decil(y_true: np.ndarray, y_prob: np.ndarray) -> pd.DataFrame:
+    """Resume precisão, participação e lift por decil do ranking."""
+    df_aux = pd.DataFrame({"y": y_true, "prob": y_prob}).sort_values("prob", ascending=False).reset_index(drop=True)
+
+    if df_aux.empty:
+        return pd.DataFrame(columns=[
+            "Decil", "Faixa", "Quantidade", "Positivos", "TaxaReal", "Lift", "RecallAcumulado"
+        ])
+
+    ranking = np.arange(1, len(df_aux) + 1)
+    df_aux["Decil"] = pd.qcut(ranking, q=min(10, len(df_aux)), labels=False, duplicates="drop") + 1
+
+    resumo = (
+        df_aux.groupby("Decil", dropna=False)
+        .agg(
+            Quantidade=("y", "size"),
+            Positivos=("y", "sum"),
+            TaxaReal=("y", "mean"),
+            ProbMedia=("prob", "mean"),
+            ProbMin=("prob", "min"),
+            ProbMax=("prob", "max"),
+        )
+        .reset_index()
+        .sort_values("Decil")
+    )
+
+    taxa_base = float(df_aux["y"].mean()) if len(df_aux) else float("nan")
+    resumo["Lift"] = np.where(taxa_base > 0, resumo["TaxaReal"] / taxa_base, np.nan)
+    total_positivos = float(df_aux["y"].sum())
+    resumo["RecallAcumulado"] = np.where(
+        total_positivos > 0,
+        resumo["Positivos"].cumsum() / total_positivos,
+        np.nan,
+    )
+    resumo["Faixa"] = resumo.apply(
+        lambda linha: f"{linha['ProbMax']:.3f} até {linha['ProbMin']:.3f}",
+        axis=1,
+    )
+
+    return resumo[
+        ["Decil", "Faixa", "Quantidade", "Positivos", "TaxaReal", "Lift", "RecallAcumulado"]
+    ]
+
+
+def construir_resumo_temporal_resultado(
+    resultado_historico: pd.DataFrame,
+    nome_coluna_mes_ref: str,
+    nome_coluna_alvo: str,
+) -> pd.DataFrame:
+    """Consolida volume, taxa real e probabilidade média por mês."""
+    if resultado_historico.empty:
+        return pd.DataFrame(columns=["MesRef", "Volume", "TaxaReal", "ProbabilidadeMedia", "ScoreMedio"])
+
+    resumo = (
+        resultado_historico.groupby(nome_coluna_mes_ref, dropna=False)
+        .agg(
+            Volume=(nome_coluna_alvo, "size"),
+            TaxaReal=(nome_coluna_alvo, "mean"),
+            ProbabilidadeMedia=("ProbabilidadeContratacao", "mean"),
+            ScoreMedio=("ScoreCliente", "mean"),
+        )
+        .reset_index()
+        .sort_values(nome_coluna_mes_ref)
+    )
+
+    resumo["MesRefTexto"] = resumo[nome_coluna_mes_ref].apply(texto_periodo_mes)
+    return resumo
+
+
+def construir_distribuicao_target(y_true: np.ndarray) -> pd.DataFrame:
+    """Resume distribuição do target."""
+    serie = pd.Series(y_true)
+    resumo = (
+        serie.value_counts(dropna=False)
+        .rename_axis("Classe")
+        .reset_index(name="Quantidade")
+        .sort_values("Classe")
+    )
+    resumo["ClasseLabel"] = resumo["Classe"].map({0: "Não contratou (0)", 1: "Contratou (1)"}).fillna("Indefinido")
+    resumo["Participacao"] = resumo["Quantidade"] / resumo["Quantidade"].sum()
+    return resumo[["Classe", "ClasseLabel", "Quantidade", "Participacao"]]
+
+
+def construir_tabela_missing(
+    df: pl.DataFrame,
+    colunas_analisar: list[str],
+) -> pd.DataFrame:
+    """Calcula percentual de missing das features."""
+    if not colunas_analisar:
+        return pd.DataFrame(columns=["Feature", "QuantidadeNulos", "PercentualNulos"])
+
+    total = max(int(df.height), 1)
+    registros = []
+    for coluna in colunas_analisar:
+        quantidade_nulos = int(df.select(pl.col(coluna).is_null().sum()).item())
+        percentual_nulos = quantidade_nulos / total
+        registros.append(
+            {
+                "Feature": coluna,
+                "QuantidadeNulos": quantidade_nulos,
+                "PercentualNulos": percentual_nulos,
+            }
+        )
+
+    return pd.DataFrame(registros).sort_values(
+        ["PercentualNulos", "QuantidadeNulos", "Feature"],
+        ascending=[False, False, True],
+    )
+
+
+def obter_explicacoes_metricas_score() -> list[dict[str, str]]:
+    """Retorna explicações detalhadas das métricas principais."""
+    return [
+        {
+            "titulo": "AUC ROC",
+            "conteudo": (
+                "A área sob a Curva ROC mede a capacidade global do modelo separar positivos e negativos ao longo "
+                "de todos os thresholds possíveis. Em termos práticos, ela responde à pergunta: se eu pegar um caso "
+                "que contratou e um caso que não contratou, qual a chance de o modelo dar score maior para o caso "
+                "positivo? Quanto mais perto de 1, melhor a separação; 0,5 significa comportamento próximo ao aleatório. "
+                "É útil para visão geral de discriminação, mas pode parecer boa demais em bases desbalanceadas, porque "
+                "ela não pune com tanta dureza uma explosão de falsos positivos."
+            ),
+        },
+        {
+            "titulo": "AUC PR",
+            "conteudo": (
+                "A área sob a Curva Precision-Recall resume o equilíbrio entre precisão e recall quando o threshold varia. "
+                "Ela é especialmente importante quando o evento positivo é raro, porque foca na capacidade do modelo "
+                "encontrar positivos de verdade sem poluir demais a seleção com falsos positivos. No contexto comercial, "
+                "isso é crítico quando a empresa quer priorizar equipes, orçamento e esforço em uma parcela pequena da base."
+            ),
+        },
+        {
+            "titulo": "Log Loss",
+            "conteudo": (
+                "O Log Loss mede o quão boas ou ruins são as probabilidades previstas, penalizando fortemente erros "
+                "muito confiantes. Se o modelo diz 0,99 para um cliente que não vai contratar, ele sofre uma penalização "
+                "bem maior do que sofreria por um palpite moderado. É uma métrica importante porque não olha só a ordem "
+                "do ranking; ela avalia a qualidade probabilística. Menor é melhor."
+            ),
+        },
+        {
+            "titulo": "Brier Score",
+            "conteudo": (
+                "O Brier Score mede o erro quadrático médio entre a probabilidade prevista e o resultado real. "
+                "Se o modelo prevê 0,70 e o cliente contrata, o erro é pequeno; se prevê 0,70 e o cliente não contrata, "
+                "o erro é bem maior. Ele é uma métrica de calibração e confiabilidade: ajuda a entender se as probabilidades "
+                "estão perto do comportamento observado. Menor é melhor."
+            ),
+        },
+        {
+            "titulo": "KS",
+            "conteudo": (
+                "A estatística KS mede a maior distância entre as distribuições acumuladas de positivos e negativos ao "
+                "longo do score. Em linguagem prática, ela mostra o ponto em que o modelo mais consegue separar bons e maus "
+                "casos. Quanto maior o KS, maior a discriminação entre os dois grupos. É muito usada em score porque traduz "
+                "bem a força de separação do ranking."
+            ),
+        },
+        {
+            "titulo": "Precision @ 0,5 e Recall @ 0,5",
+            "conteudo": (
+                "Essas métricas transformam a probabilidade em decisão binária usando threshold fixo de 0,5. "
+                "Precision diz: entre os casos que o modelo marcou como positivos, quantos realmente contrataram. "
+                "Recall diz: entre todos os positivos reais, quantos o modelo conseguiu capturar. Elas são úteis para "
+                "entender o comportamento operacional de uma regra objetiva de corte, mas podem ser enganosas se o threshold "
+                "não fizer sentido para o negócio."
+            ),
+        },
+        {
+            "titulo": "Precision Top 10%, Recall Top 10% e Lift Top 10%",
+            "conteudo": (
+                "Essas métricas olham o topo do ranking, que costuma ser a parte mais valiosa comercialmente. "
+                "Precision Top 10% mostra a taxa real de contratação dentro do grupo mais bem ranqueado. Recall Top 10% "
+                "mostra quanto dos positivos totais ficou concentrado nesse topo. Lift Top 10% compara a taxa do topo com a "
+                "taxa média da base. Se o lift for 3, por exemplo, significa que o topo converte 3 vezes mais do que a base "
+                "inteira. Para priorização comercial, essas três métricas costumam ser mais acionáveis do que métricas globais."
+            ),
+        },
+    ]
+
+
+def construir_dashboard_spec_score_clientes(
+    config: Configuracao,
+    metricas_desenvolvimento: dict[str, Any],
+    metricas_top_desenvolvimento: dict[str, Any],
+    metricas_walk_forward: dict[str, Any],
+    metricas_top_walk_forward: dict[str, Any],
+    metricas_teste: dict[str, Any],
+    metricas_top_teste: dict[str, Any],
+    resumo_faixas_teste: pd.DataFrame,
+    df_resumo_folds_walk_forward: pd.DataFrame,
+    df_predicoes_walk_forward: pd.DataFrame,
+    df_importancias: pd.DataFrame,
+    resultado_historico: pd.DataFrame,
+    y_teste: np.ndarray,
+    prob_teste: np.ndarray,
+    df_preparado: pl.DataFrame,
+    colunas_features: list[str],
+) -> dict[str, Any]:
+    """Cria a especificação declarativa do dashboard analítico do plugin."""
+    y_walk_forward = pd.to_numeric(
+        df_predicoes_walk_forward[config.nome_coluna_alvo],
+        errors="coerce",
+    ).fillna(0).astype(int).to_numpy()
+    prob_walk_forward = pd.to_numeric(
+        df_predicoes_walk_forward["ProbabilidadeContratacao"],
+        errors="coerce",
+    ).fillna(0.0).to_numpy()
+
+    curva_roc_oot = construir_curva_roc(y_teste, prob_teste)
+    curva_pr_oot = construir_curva_precision_recall(y_teste, prob_teste)
+    curva_ks_oot = construir_curva_ks(y_teste, prob_teste)
+    calibracao_oot = construir_tabela_calibracao(y_teste, prob_teste, quantidade_bins=10)
+    hist_oot = construir_histograma_probabilidade_por_classe(y_teste, prob_teste, quantidade_bins=20)
+    lift_decil_oot = construir_tabela_lift_por_decil(y_teste, prob_teste)
+
+    curva_roc_oof = construir_curva_roc(y_walk_forward, prob_walk_forward)
+    curva_pr_oof = construir_curva_precision_recall(y_walk_forward, prob_walk_forward)
+    curva_ks_oof = construir_curva_ks(y_walk_forward, prob_walk_forward)
+    calibracao_oof = construir_tabela_calibracao(y_walk_forward, prob_walk_forward, quantidade_bins=10)
+    hist_oof = construir_histograma_probabilidade_por_classe(y_walk_forward, prob_walk_forward, quantidade_bins=20)
+
+    resumo_temporal = construir_resumo_temporal_resultado(
+        resultado_historico=resultado_historico,
+        nome_coluna_mes_ref=config.nome_coluna_mes_ref,
+        nome_coluna_alvo=config.nome_coluna_alvo,
+    )
+
+    distribuicao_target = construir_distribuicao_target(obter_y_numpy(df_preparado, config.nome_coluna_alvo))
+    tabela_missing = construir_tabela_missing(df_preparado, colunas_features)
+    explicacoes_metricas = obter_explicacoes_metricas_score()
+
+    kpis_principais = [
+        {
+            "titulo": "AUC ROC OOT",
+            "valor": limitar_float_json(metricas_teste["auc_roc"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Separação global entre positivos e negativos no teste final intocado.",
+        },
+        {
+            "titulo": "AUC PR OOT",
+            "valor": limitar_float_json(metricas_teste["auc_pr"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Qualidade do ranking em cenário de evento relativamente raro.",
+        },
+        {
+            "titulo": "Log Loss OOT",
+            "valor": limitar_float_json(metricas_teste["log_loss"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Penaliza probabilidades ruins, principalmente as excessivamente confiantes.",
+        },
+        {
+            "titulo": "Brier Score OOT",
+            "valor": limitar_float_json(metricas_teste["brier_score"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Erro quadrático médio entre probabilidade prevista e resultado real.",
+        },
+        {
+            "titulo": "KS OOT",
+            "valor": limitar_float_json(metricas_teste["ks"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Maior distância entre as distribuições acumuladas de positivos e negativos.",
+        },
+        {
+            "titulo": "Precision @ 0,5 OOT",
+            "valor": limitar_float_json(metricas_teste["precision_threshold_0_5"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Precisão da decisão binária usando corte fixo em 0,5.",
+        },
+        {
+            "titulo": "Recall @ 0,5 OOT",
+            "valor": limitar_float_json(metricas_teste["recall_threshold_0_5"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Cobertura dos positivos reais usando corte fixo em 0,5.",
+        },
+        {
+            "titulo": "Precision Top 10% OOT",
+            "valor": limitar_float_json(metricas_top_teste["precision_top_10"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Taxa real de contratação dentro do decil mais alto do score.",
+        },
+        {
+            "titulo": "Recall Top 10% OOT",
+            "valor": limitar_float_json(metricas_top_teste["recall_top_10"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Quanto dos positivos totais foi capturado no topo do ranking.",
+        },
+        {
+            "titulo": "Lift Top 10% OOT",
+            "valor": limitar_float_json(metricas_top_teste["lift_top_10"]),
+            "formato": "decimal_4",
+            "descricao_curta": "Quanto o topo converte acima da taxa média da base.",
+        },
+    ]
+
+    tabela_metricas = [
+        {
+            "Conjunto": "Desenvolvimento",
+            "AUC ROC": limitar_float_json(metricas_desenvolvimento["auc_roc"]),
+            "AUC PR": limitar_float_json(metricas_desenvolvimento["auc_pr"]),
+            "Log Loss": limitar_float_json(metricas_desenvolvimento["log_loss"]),
+            "Brier Score": limitar_float_json(metricas_desenvolvimento["brier_score"]),
+            "KS": limitar_float_json(metricas_desenvolvimento["ks"]),
+            "Precision @ 0,5": limitar_float_json(metricas_desenvolvimento["precision_threshold_0_5"]),
+            "Recall @ 0,5": limitar_float_json(metricas_desenvolvimento["recall_threshold_0_5"]),
+            "Precision Top 10%": limitar_float_json(metricas_top_desenvolvimento["precision_top_10"]),
+            "Recall Top 10%": limitar_float_json(metricas_top_desenvolvimento["recall_top_10"]),
+            "Lift Top 10%": limitar_float_json(metricas_top_desenvolvimento["lift_top_10"]),
+        },
+        {
+            "Conjunto": "Walk-forward OOF",
+            "AUC ROC": limitar_float_json(metricas_walk_forward["auc_roc"]),
+            "AUC PR": limitar_float_json(metricas_walk_forward["auc_pr"]),
+            "Log Loss": limitar_float_json(metricas_walk_forward["log_loss"]),
+            "Brier Score": limitar_float_json(metricas_walk_forward["brier_score"]),
+            "KS": limitar_float_json(metricas_walk_forward["ks"]),
+            "Precision @ 0,5": limitar_float_json(metricas_walk_forward["precision_threshold_0_5"]),
+            "Recall @ 0,5": limitar_float_json(metricas_walk_forward["recall_threshold_0_5"]),
+            "Precision Top 10%": limitar_float_json(metricas_top_walk_forward["precision_top_10"]),
+            "Recall Top 10%": limitar_float_json(metricas_top_walk_forward["recall_top_10"]),
+            "Lift Top 10%": limitar_float_json(metricas_top_walk_forward["lift_top_10"]),
+        },
+        {
+            "Conjunto": "Teste final OOT",
+            "AUC ROC": limitar_float_json(metricas_teste["auc_roc"]),
+            "AUC PR": limitar_float_json(metricas_teste["auc_pr"]),
+            "Log Loss": limitar_float_json(metricas_teste["log_loss"]),
+            "Brier Score": limitar_float_json(metricas_teste["brier_score"]),
+            "KS": limitar_float_json(metricas_teste["ks"]),
+            "Precision @ 0,5": limitar_float_json(metricas_teste["precision_threshold_0_5"]),
+            "Recall @ 0,5": limitar_float_json(metricas_teste["recall_threshold_0_5"]),
+            "Precision Top 10%": limitar_float_json(metricas_top_teste["precision_top_10"]),
+            "Recall Top 10%": limitar_float_json(metricas_top_teste["recall_top_10"]),
+            "Lift Top 10%": limitar_float_json(metricas_top_teste["lift_top_10"]),
+        },
+    ]
+
+    top_importancias = df_importancias.head(20).copy()
+    top_missing = tabela_missing.head(20).copy()
+
+    return {
+        "tipo_dashboard": "ml_dinamico",
+        "versao_dashboard": "1.0",
+        "titulo": "Dashboard Analítico do Modelo de Score de Empresas",
+        "subtitulo": (
+            "Painel específico do algoritmo de score, com performance clássica, valor de negócio, "
+            "calibração, estabilidade temporal e interpretação do modelo."
+        ),
+        "secoes": [
+            {
+                "id": "visao_geral",
+                "titulo": "1. Performance principal",
+                "descricao": (
+                    "Comece aqui. Este bloco resume a qualidade do modelo no teste final OOT, que é a visão mais importante "
+                    "para avaliar o que aconteceu em um período realmente intocado."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grupo_kpis",
+                        "colunas": 5,
+                        "itens": kpis_principais,
+                    },
+                    {
+                        "tipo": "tabela",
+                        "titulo": "Comparação entre Desenvolvimento, Walk-forward OOF e Teste final OOT",
+                        "descricao": (
+                            "Esta tabela mostra a leitura completa por conjunto. A comparação entre desenvolvimento, "
+                            "walk-forward e teste final ajuda a enxergar sobreajuste, degradação temporal e estabilidade real."
+                        ),
+                        "colunas": list(tabela_metricas[0].keys()),
+                        "linhas": tabela_metricas,
+                    },
+                ],
+            },
+            {
+                "id": "explicacoes_metricas",
+                "titulo": "2. Explicação detalhada das métricas",
+                "descricao": (
+                    "Cada métrica abaixo foi explicada com foco no que ela mede, por que existe, qual pergunta responde e "
+                    "como deve ser interpretada no contexto comercial."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "texto_detalhado",
+                        "itens": explicacoes_metricas,
+                    }
+                ],
+            },
+            {
+                "id": "valor_negocio",
+                "titulo": "3. Valor de negócio do score",
+                "descricao": (
+                    "Esta camada responde à pergunta mais importante para operação comercial: o score realmente concentra "
+                    "os melhores casos nas faixas e decis mais altos?"
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "bar_vertical",
+                        "titulo": "Taxa real de contratação por faixa de score",
+                        "descricao": (
+                            "Este é o gráfico mais importante para negócio. Ele mostra se faixas mais altas do score "
+                            "realmente entregam taxas reais maiores de contratação."
+                        ),
+                        "dados": {
+                            "x": [str(valor) for valor in resumo_faixas_teste["ClassificacaoScore"].tolist()],
+                            "y": serie_numerica_limpa(resumo_faixas_teste["TaxaRealContratacao"]),
+                            "texto": [f"{valor:.2%}" for valor in pd.to_numeric(resumo_faixas_teste["TaxaRealContratacao"], errors="coerce").fillna(0).tolist()],
+                        },
+                        "layout": {
+                            "xaxis_title": "Faixa de score",
+                            "yaxis_title": "Taxa real de contratação",
+                            "yaxis_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "bar_vertical",
+                        "titulo": "Lift por decil do score",
+                        "descricao": (
+                            "Mostra quanto cada decil converte acima ou abaixo da média da base. "
+                            "Os decis do topo deveriam concentrar lifts maiores."
+                        ),
+                        "dados": {
+                            "x": [f"Decil {int(valor)}" for valor in lift_decil_oot["Decil"].tolist()],
+                            "y": serie_numerica_limpa(lift_decil_oot["Lift"]),
+                            "texto": [f"{valor:.2f}x" for valor in pd.to_numeric(lift_decil_oot["Lift"], errors="coerce").fillna(0).tolist()],
+                        },
+                        "layout": {
+                            "xaxis_title": "Decil",
+                            "yaxis_title": "Lift",
+                        },
+                    },
+                    {
+                        "tipo": "tabela",
+                        "titulo": "Tabela de lift por decil",
+                        "descricao": "Detalhamento numérico do valor de negócio por bloco do ranking.",
+                        "colunas": list(lift_decil_oot.columns),
+                        "linhas": lift_decil_oot.to_dict(orient="records"),
+                    },
+                ],
+            },
+            {
+                "id": "performance_classica",
+                "titulo": "4. Performance clássica de separação",
+                "descricao": (
+                    "Aqui entram as curvas tradicionais de discriminação. Elas mostram se o score separa bem quem contrata "
+                    "e quem não contrata."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "roc_curve",
+                        "titulo": "Curva ROC - Teste final OOT",
+                        "descricao": "Capacidade de separação em vários thresholds no período intocado.",
+                        "dados": curva_roc_oot,
+                        "layout": {
+                            "xaxis_title": "False Positive Rate",
+                            "yaxis_title": "True Positive Rate",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "pr_curve",
+                        "titulo": "Curva Precision-Recall - Teste final OOT",
+                        "descricao": "Mais sensível ao desempenho sobre positivos quando o evento é menos frequente.",
+                        "dados": curva_pr_oot,
+                        "layout": {
+                            "xaxis_title": "Recall",
+                            "yaxis_title": "Precision",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "ks_curve",
+                        "titulo": "Curva KS - Teste final OOT",
+                        "descricao": "Mostra as distribuições acumuladas de positivos e negativos e a distância máxima entre elas.",
+                        "dados": curva_ks_oot,
+                        "layout": {
+                            "xaxis_title": "População acumulada",
+                            "yaxis_title": "Distribuição acumulada",
+                            "yaxis_tickformat": ".0%",
+                            "xaxis_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "histograma_duas_series",
+                        "titulo": "Histograma de probabilidades por classe - Teste final OOT",
+                        "descricao": "Quanto menor a sobreposição entre as distribuições, melhor a separação prática.",
+                        "dados": hist_oot,
+                        "layout": {
+                            "xaxis_title": "Probabilidade prevista",
+                            "yaxis_title": "Quantidade de registros",
+                        },
+                    },
+                ],
+            },
+            {
+                "id": "calibracao",
+                "titulo": "5. Confiabilidade da probabilidade",
+                "descricao": (
+                    "Não basta ordenar bem. Este bloco verifica se a probabilidade prevista conversa com a taxa real observada."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "calibration_curve",
+                        "titulo": "Gráfico de calibração - Teste final OOT",
+                        "descricao": (
+                            "Se os pontos ficarem perto da diagonal, a probabilidade prevista está coerente com o realizado. "
+                            "Acima da diagonal o modelo subestima; abaixo da diagonal ele superestima."
+                        ),
+                        "dados": {
+                            "x": serie_numerica_limpa(calibracao_oot["ProbabilidadeMediaPrevista"]),
+                            "y": serie_numerica_limpa(calibracao_oot["TaxaRealObservada"]),
+                            "linha_base_x": [0.0, 1.0],
+                            "linha_base_y": [0.0, 1.0],
+                        },
+                        "layout": {
+                            "xaxis_title": "Probabilidade média prevista",
+                            "yaxis_title": "Taxa real observada",
+                            "xaxis_tickformat": ".0%",
+                            "yaxis_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "tabela",
+                        "titulo": "Tabela de calibração - Teste final OOT",
+                        "descricao": "Detalha cada bin com previsão média, taxa observada e diferença entre as duas.",
+                        "colunas": list(calibracao_oot.columns),
+                        "linhas": calibracao_oot.to_dict(orient="records"),
+                    },
+                ],
+            },
+            {
+                "id": "estabilidade",
+                "titulo": "6. Estabilidade temporal",
+                "descricao": (
+                    "Como o pipeline é temporal, é obrigatório enxergar se o desempenho varia demais entre folds e ao longo do tempo."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "linha_multiplas_series",
+                        "titulo": "Métricas por fold do walk-forward",
+                        "descricao": "Permite ver robustez ou instabilidade da performance ao longo dos blocos temporais de validação.",
+                        "series": [
+                            {
+                                "nome": "AUC ROC",
+                                "x": [int(valor) for valor in df_resumo_folds_walk_forward["Fold"].tolist()],
+                                "y": serie_numerica_limpa(df_resumo_folds_walk_forward["AUC_ROC"]),
+                            },
+                            {
+                                "nome": "AUC PR",
+                                "x": [int(valor) for valor in df_resumo_folds_walk_forward["Fold"].tolist()],
+                                "y": serie_numerica_limpa(df_resumo_folds_walk_forward["AUC_PR"]),
+                            },
+                            {
+                                "nome": "KS",
+                                "x": [int(valor) for valor in df_resumo_folds_walk_forward["Fold"].tolist()],
+                                "y": serie_numerica_limpa(df_resumo_folds_walk_forward["KS"]),
+                            },
+                            {
+                                "nome": "Lift Top 10%",
+                                "x": [int(valor) for valor in df_resumo_folds_walk_forward["Fold"].tolist()],
+                                "y": serie_numerica_limpa(df_resumo_folds_walk_forward["LiftTop10"]),
+                            },
+                        ],
+                        "layout": {
+                            "xaxis_title": "Fold",
+                            "yaxis_title": "Valor",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "linha_duas_series",
+                        "titulo": "Volume e taxa real por mês",
+                        "descricao": "Ajuda a diagnosticar sazonalidade, meses fracos e mudança de regime.",
+                        "dados": {
+                            "x": resumo_temporal["MesRefTexto"].tolist(),
+                            "serie_1_nome": "Volume",
+                            "serie_1_y": [int(valor) for valor in resumo_temporal["Volume"].tolist()],
+                            "serie_2_nome": "Taxa real",
+                            "serie_2_y": serie_numerica_limpa(resumo_temporal["TaxaReal"]),
+                        },
+                        "layout": {
+                            "xaxis_title": "Mês de referência",
+                            "yaxis_title": "Valor",
+                            "serie_2_eixo_secundario": True,
+                            "yaxis2_title": "Taxa real",
+                            "yaxis2_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "linha_duas_series",
+                        "titulo": "Taxa real e probabilidade média por mês",
+                        "descricao": "Compara o comportamento observado com o comportamento médio previsto pelo modelo.",
+                        "dados": {
+                            "x": resumo_temporal["MesRefTexto"].tolist(),
+                            "serie_1_nome": "Taxa real",
+                            "serie_1_y": serie_numerica_limpa(resumo_temporal["TaxaReal"]),
+                            "serie_2_nome": "Probabilidade média",
+                            "serie_2_y": serie_numerica_limpa(resumo_temporal["ProbabilidadeMedia"]),
+                        },
+                        "layout": {
+                            "xaxis_title": "Mês de referência",
+                            "yaxis_title": "Taxa / probabilidade",
+                            "yaxis_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "tabela",
+                        "titulo": "Resumo dos folds walk-forward",
+                        "descricao": "Tabela completa para auditoria das janelas temporais de treino e validação.",
+                        "colunas": list(df_resumo_folds_walk_forward.columns),
+                        "linhas": df_resumo_folds_walk_forward.to_dict(orient="records"),
+                    },
+                ],
+            },
+            {
+                "id": "saude_base",
+                "titulo": "7. Saúde da base",
+                "descricao": (
+                    "Antes de culpar o modelo, é preciso entender a base. Esta seção ajuda a detectar desequilíbrio, "
+                    "lacunas de informação e meses anormais."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "bar_vertical",
+                        "titulo": "Distribuição do target",
+                        "descricao": "Mostra a quantidade de 0 e 1 na base preparada.",
+                        "dados": {
+                            "x": distribuicao_target["ClasseLabel"].tolist(),
+                            "y": [int(valor) for valor in distribuicao_target["Quantidade"].tolist()],
+                            "texto": [f"{valor:.2%}" for valor in pd.to_numeric(distribuicao_target["Participacao"], errors="coerce").fillna(0).tolist()],
+                        },
+                        "layout": {
+                            "xaxis_title": "Classe",
+                            "yaxis_title": "Quantidade",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "bar_horizontal",
+                        "titulo": "Top 20 variáveis com maior percentual de nulos",
+                        "descricao": "Ajuda a ver se o modelo pode estar aprendendo padrões de ausência em vez de padrão de negócio.",
+                        "dados": {
+                            "x": serie_numerica_limpa(top_missing["PercentualNulos"]),
+                            "y": top_missing["Feature"].tolist(),
+                            "texto": [f"{valor:.2%}" for valor in pd.to_numeric(top_missing["PercentualNulos"], errors="coerce").fillna(0).tolist()],
+                        },
+                        "layout": {
+                            "xaxis_title": "% de nulos",
+                            "yaxis_title": "Feature",
+                            "xaxis_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "tabela",
+                        "titulo": "Tabela de missing values",
+                        "descricao": "Percentual de nulos por variável do conjunto preparado.",
+                        "colunas": list(tabela_missing.columns),
+                        "linhas": tabela_missing.head(50).to_dict(orient="records"),
+                    },
+                ],
+            },
+            {
+                "id": "interpretacao_modelo",
+                "titulo": "8. Interpretação do modelo",
+                "descricao": (
+                    "Importância de feature ajuda a enxergar influência no modelo, não causalidade econômica. "
+                    "Use este bloco para levantar hipóteses, não para decretar verdade de negócio."
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "bar_horizontal",
+                        "titulo": "Top 20 features mais importantes",
+                        "descricao": "Ranking de influência estatística no CatBoost final.",
+                        "dados": {
+                            "x": serie_numerica_limpa(top_importancias["Importancia"]),
+                            "y": top_importancias["Feature"].tolist(),
+                            "texto": [f"{valor:.2f}" for valor in pd.to_numeric(top_importancias["Importancia"], errors="coerce").fillna(0).tolist()],
+                        },
+                        "layout": {
+                            "xaxis_title": "Importância",
+                            "yaxis_title": "Feature",
+                        },
+                    },
+                    {
+                        "tipo": "tabela",
+                        "titulo": "Tabela de importâncias",
+                        "descricao": "Detalhamento numérico das principais variáveis.",
+                        "colunas": list(df_importancias.columns),
+                        "linhas": df_importancias.head(50).to_dict(orient="records"),
+                    },
+                ],
+            },
+            {
+                "id": "comparacao_oof_oot",
+                "titulo": "9. Comparação OOF versus OOT",
+                "descricao": (
+                    "Este bloco ajuda a separar duas perguntas: o modelo parecia bom em validação temporal e "
+                    "continuou bom no teste final realmente intocado?"
+                ),
+                "widgets": [
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "roc_dupla",
+                        "titulo": "Curvas ROC - Walk-forward OOF vs Teste final OOT",
+                        "descricao": "Comparação direta de discriminação entre validação temporal e teste final.",
+                        "dados": {
+                            "oof": curva_roc_oof,
+                            "oot": curva_roc_oot,
+                        },
+                        "layout": {
+                            "xaxis_title": "False Positive Rate",
+                            "yaxis_title": "True Positive Rate",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "pr_dupla",
+                        "titulo": "Curvas Precision-Recall - Walk-forward OOF vs Teste final OOT",
+                        "descricao": "Comparação direta entre a validação temporal consolidada e o período final intocado.",
+                        "dados": {
+                            "oof": curva_pr_oof,
+                            "oot": curva_pr_oot,
+                        },
+                        "layout": {
+                            "xaxis_title": "Recall",
+                            "yaxis_title": "Precision",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "calibration_dupla",
+                        "titulo": "Calibração - Walk-forward OOF vs Teste final OOT",
+                        "descricao": "Permite ver se a confiabilidade probabilística degrada do OOF para o OOT.",
+                        "dados": {
+                            "oof_x": serie_numerica_limpa(calibracao_oof["ProbabilidadeMediaPrevista"]),
+                            "oof_y": serie_numerica_limpa(calibracao_oof["TaxaRealObservada"]),
+                            "oot_x": serie_numerica_limpa(calibracao_oot["ProbabilidadeMediaPrevista"]),
+                            "oot_y": serie_numerica_limpa(calibracao_oot["TaxaRealObservada"]),
+                            "linha_base_x": [0.0, 1.0],
+                            "linha_base_y": [0.0, 1.0],
+                        },
+                        "layout": {
+                            "xaxis_title": "Probabilidade média prevista",
+                            "yaxis_title": "Taxa real observada",
+                            "xaxis_tickformat": ".0%",
+                            "yaxis_tickformat": ".0%",
+                        },
+                    },
+                    {
+                        "tipo": "grafico_plotly",
+                        "subtipo": "histograma_dupla_comparacao",
+                        "titulo": "Histograma por classe - OOF vs OOT",
+                        "descricao": "Comparação visual da separação de score entre validação temporal e teste final.",
+                        "dados": {
+                            "oof": hist_oof,
+                            "oot": hist_oot,
+                        },
+                        "layout": {
+                            "xaxis_title": "Probabilidade prevista",
+                            "yaxis_title": "Quantidade",
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+
 
 
 def probabilidade_para_score_serasa(probabilidade: np.ndarray) -> np.ndarray:
@@ -2076,7 +3060,55 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
             tabela_final.head(config.quantidade_linhas_exibir_tabela_final).to_string(index=False)
         )
 
+        dashboard_spec = construir_dashboard_spec_score_clientes(
+            config=config,
+            metricas_desenvolvimento=metricas_desenvolvimento,
+            metricas_top_desenvolvimento=metricas_top_desenvolvimento,
+            metricas_walk_forward=metricas_walk_forward,
+            metricas_top_walk_forward=metricas_top_walk_forward,
+            metricas_teste=metricas_teste,
+            metricas_top_teste=metricas_top_teste,
+            resumo_faixas_teste=resumo_faixas_teste,
+            df_resumo_folds_walk_forward=df_resumo_folds_walk_forward,
+            df_predicoes_walk_forward=df_predicoes_walk_forward,
+            df_importancias=df_importancias,
+            resultado_historico=resultado_historico,
+            y_teste=y_teste,
+            prob_teste=prob_teste,
+            df_preparado=df,
+            colunas_features=colunas_features,
+        )
+
+        metricas_principais = {
+            "AUC ROC OOT": limitar_float_json(metricas_teste["auc_roc"]),
+            "AUC PR OOT": limitar_float_json(metricas_teste["auc_pr"]),
+            "Log Loss OOT": limitar_float_json(metricas_teste["log_loss"]),
+            "Brier Score OOT": limitar_float_json(metricas_teste["brier_score"]),
+            "KS OOT": limitar_float_json(metricas_teste["ks"]),
+            "Precision @ 0,5 OOT": limitar_float_json(metricas_teste["precision_threshold_0_5"]),
+            "Recall @ 0,5 OOT": limitar_float_json(metricas_teste["recall_threshold_0_5"]),
+            "Precision Top 10% OOT": limitar_float_json(metricas_top_teste["precision_top_10"]),
+            "Recall Top 10% OOT": limitar_float_json(metricas_top_teste["recall_top_10"]),
+            "Lift Top 10% OOT": limitar_float_json(metricas_top_teste["lift_top_10"]),
+        }
+
         payload_metricas = {
+            "nome_modelo": "CatBoostClassifier",
+            "familia_modelo": "Classificação binária de score",
+            "versao_modelo": "1.0",
+            "variavel_alvo": config.nome_coluna_alvo,
+            "metricas_principais": metricas_principais,
+            "dashboard_spec": dashboard_spec,
+            "artefatos_relacionados": [
+                {"nome": "Métricas JSON", "tipo": "json", "caminho_arquivo": str(config.caminho_saida_metricas_json)},
+                {"nome": "Dashboard Spec JSON", "tipo": "json", "caminho_arquivo": str(config.caminho_saida_dashboard_spec_json)},
+                {"nome": "Importâncias", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_importancias_csv)},
+                {"nome": "Faixas de score", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_resumo_faixas_csv)},
+                {"nome": "Folds walk-forward", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_walk_forward_folds_csv)},
+                {"nome": "Predições walk-forward", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_walk_forward_predicoes_csv)},
+                {"nome": "Score histórico", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_score_historico_csv)},
+                {"nome": "Score atual", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_score_atual_csv)},
+            ],
             "configuracao": {
                 "quantidade_meses_validacao": config.quantidade_meses_validacao,
                 "quantidade_meses_teste": config.quantidade_meses_teste,
@@ -2152,6 +3184,7 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
         }
         salvar_json(config.caminho_resumo_treino_json, resumo_treino)
         salvar_json(config.caminho_saida_payload_metricas_json, payload_metricas)
+        salvar_json(config.caminho_saida_dashboard_spec_json, dashboard_spec)
 
         resumo.status = "SUCCESS"
         resumo.linhas_lidas = int(df.height)
