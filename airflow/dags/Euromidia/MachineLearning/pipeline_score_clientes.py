@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import re
 import statistics
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -58,6 +60,9 @@ class Configuracao:
     )
     pasta_saida_intermediarios: Path = Path(
         "/opt/airflow/Artefatos/Euromidia/MachineLearning/Intermediarios"
+    )
+    pasta_saida_historico_execucoes: Path = Path(
+        "/opt/airflow/Artefatos/Euromidia/MachineLearning/HistoricoExecucoes"
     )
 
     caminho_dataset_bruto_parquet: Path = Path(
@@ -140,6 +145,83 @@ def garantir_pastas_saida(config: Configuracao) -> None:
     config.pasta_saida_dados.mkdir(parents=True, exist_ok=True)
     config.pasta_saida_metricas.mkdir(parents=True, exist_ok=True)
     config.pasta_saida_intermediarios.mkdir(parents=True, exist_ok=True)
+    config.pasta_saida_historico_execucoes.mkdir(parents=True, exist_ok=True)
+
+
+def obter_identificador_execucao_airflow() -> str:
+    """Monta um identificador estável da execução para versionar artefatos por run."""
+
+    run_id = str(os.getenv("AIRFLOW_CTX_DAG_RUN_ID", "")).strip()
+
+    if not run_id:
+        run_id = pendulum.now("America/Sao_Paulo").format("YYYYMMDD_HHmmss")
+
+    identificador_execucao = re.sub(r"[^0-9A-Za-z_.-]+", "_", run_id).strip("._-")
+
+    if not identificador_execucao:
+        identificador_execucao = pendulum.now("America/Sao_Paulo").format("YYYYMMDD_HHmmss")
+
+    return identificador_execucao[:180]
+
+
+def construir_caminhos_artefatos_execucao(
+    config: Configuracao,
+    identificador_execucao: str,
+) -> dict[str, Path]:
+    """Cria caminhos versionados por execução para preservar histórico real do plugin."""
+
+    pasta_execucao = config.pasta_saida_historico_execucoes / identificador_execucao
+
+    return {
+        "pasta_execucao": pasta_execucao,
+        "score_historico_csv": pasta_execucao / "score_cliente_historico.csv",
+        "score_atual_csv": pasta_execucao / "score_cliente_atual.csv",
+        "tabela_final_csv": pasta_execucao / "score_cliente_tabela_final.csv",
+        "importancias_csv": pasta_execucao / "score_cliente_importancias.csv",
+        "resumo_faixas_csv": pasta_execucao / "score_cliente_faixas.csv",
+        "walk_forward_folds_csv": pasta_execucao / "score_cliente_walk_forward_folds.csv",
+        "walk_forward_predicoes_csv": pasta_execucao / "score_cliente_walk_forward_predicoes.csv",
+        "metricas_json": pasta_execucao / "score_cliente_metricas.json",
+        "dashboard_spec_json": pasta_execucao / "score_cliente_dashboard_spec.json",
+        "payload_metricas_json": pasta_execucao / "score_cliente_payload_metricas.json",
+        "resumo_treino_json": pasta_execucao / "score_cliente_resumo_treino.json",
+    }
+
+
+def publicar_dashboard_analitico_no_resumo(
+    resumo: Any,
+    payload_metricas: dict[str, Any],
+    dashboard_spec: dict[str, Any],
+    caminhos_execucao: dict[str, Path] | None = None,
+) -> None:
+    """Publica o dashboard inline e também os caminhos dos artefatos para facilitar descoberta pelo plugin."""
+
+    resumo.metricas_extras["dashboard_analitico_publicado"] = True
+    resumo.metricas_extras["tipo_dashboard"] = str(dashboard_spec.get("tipo_dashboard") or "ml_dinamico")
+    resumo.metricas_extras["versao_dashboard"] = str(dashboard_spec.get("versao_dashboard") or "1.0")
+    resumo.metricas_extras["titulo_dashboard"] = str(dashboard_spec.get("titulo") or "Dashboard analítico")
+    resumo.metricas_extras["subtitulo_dashboard"] = str(dashboard_spec.get("subtitulo") or "")
+    resumo.metricas_extras["dashboard_spec"] = dashboard_spec
+    resumo.metricas_extras["payload_metricas"] = payload_metricas
+    resumo.metricas_extras["metricas_principais"] = payload_metricas.get("metricas_principais", {})
+    resumo.metricas_extras["artefatos_relacionados"] = payload_metricas.get("artefatos_relacionados", [])
+
+    if caminhos_execucao is not None:
+        resumo.metricas_extras["caminho_payload_metricas_json"] = str(caminhos_execucao["payload_metricas_json"])
+        resumo.metricas_extras["caminho_dashboard_spec_json"] = str(caminhos_execucao["dashboard_spec_json"])
+        resumo.metricas_extras["caminho_metricas_json"] = str(caminhos_execucao["metricas_json"])
+        resumo.metricas_extras["pasta_execucao_historica"] = str(caminhos_execucao["pasta_execucao"])
+
+    for nome_atributo, valor in {
+        "dashboard_analitico_publicado": True,
+        "tipo_dashboard": dashboard_spec.get("tipo_dashboard", "ml_dinamico"),
+        "dashboard_spec": dashboard_spec,
+        "payload_metricas": payload_metricas,
+    }.items():
+        try:
+            setattr(resumo, nome_atributo, valor)
+        except Exception:
+            pass
 
 
 def criar_engine_sql(config: Configuracao):
@@ -2439,18 +2521,26 @@ def salvar_resultados(
     df_importancias: pd.DataFrame,
     resumo_faixas: pd.DataFrame,
     payload_metricas: dict[str, Any],
+    dashboard_spec: dict[str, Any],
     df_resumo_folds_walk_forward: pd.DataFrame,
     df_predicoes_walk_forward: pd.DataFrame,
     config: Configuracao,
+    caminhos_execucao: dict[str, Path],
 ) -> None:
-    """Salva os artefatos finais do pipeline."""
+    """Salva os artefatos finais do pipeline sem alterar a lógica do algoritmo."""
 
     config.pasta_saida_dados.mkdir(parents=True, exist_ok=True)
     config.pasta_saida_metricas.mkdir(parents=True, exist_ok=True)
+    caminhos_execucao["pasta_execucao"].mkdir(parents=True, exist_ok=True)
 
     if config.salvar_score_historico_completo:
         resultado_historico.to_csv(
             config.caminho_saida_score_historico_csv,
+            index=False,
+            encoding="utf-8-sig",
+        )
+        resultado_historico.to_csv(
+            caminhos_execucao["score_historico_csv"],
             index=False,
             encoding="utf-8-sig",
         )
@@ -2460,34 +2550,74 @@ def salvar_resultados(
         index=False,
         encoding="utf-8-sig",
     )
+    resultado_atual.to_csv(
+        caminhos_execucao["score_atual_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     tabela_final.to_csv(
         config.caminho_saida_tabela_final_csv,
         index=False,
         encoding="utf-8-sig",
     )
+    tabela_final.to_csv(
+        caminhos_execucao["tabela_final_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     df_importancias.to_csv(
         config.caminho_saida_importancias_csv,
         index=False,
         encoding="utf-8-sig",
     )
+    df_importancias.to_csv(
+        caminhos_execucao["importancias_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     resumo_faixas.to_csv(
         config.caminho_saida_resumo_faixas_csv,
         index=False,
         encoding="utf-8-sig",
     )
+    resumo_faixas.to_csv(
+        caminhos_execucao["resumo_faixas_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     df_resumo_folds_walk_forward.to_csv(
         config.caminho_saida_walk_forward_folds_csv,
         index=False,
         encoding="utf-8-sig",
     )
+    df_resumo_folds_walk_forward.to_csv(
+        caminhos_execucao["walk_forward_folds_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     df_predicoes_walk_forward.to_csv(
         config.caminho_saida_walk_forward_predicoes_csv,
         index=False,
         encoding="utf-8-sig",
     )
+    df_predicoes_walk_forward.to_csv(
+        caminhos_execucao["walk_forward_predicoes_csv"],
+        index=False,
+        encoding="utf-8-sig",
+    )
 
-    with open(config.caminho_saida_metricas_json, "w", encoding="utf-8") as arquivo_json:
-        json.dump(payload_metricas, arquivo_json, ensure_ascii=False, indent=4, default=str)
+    salvar_json(config.caminho_saida_metricas_json, payload_metricas)
+    salvar_json(config.caminho_saida_payload_metricas_json, payload_metricas)
+    salvar_json(config.caminho_saida_dashboard_spec_json, dashboard_spec)
+
+    salvar_json(caminhos_execucao["metricas_json"], payload_metricas)
+    salvar_json(caminhos_execucao["payload_metricas_json"], payload_metricas)
+    salvar_json(caminhos_execucao["dashboard_spec_json"], dashboard_spec)
 
 
 def preparar_dataframe_atualizacao_perfil_empresa(resultado_atual: pd.DataFrame) -> pd.DataFrame:
@@ -2871,6 +3001,8 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
     """Executa walk-forward, treina modelo final, gera scores e salva artefatos."""
     config = Configuracao()
     garantir_pastas_saida(config)
+    identificador_execucao = obter_identificador_execucao_airflow()
+    caminhos_execucao = construir_caminhos_artefatos_execucao(config, identificador_execucao)
 
     resumo = criar_resumo_auditoria(
         nome_amigavel="Treinar modelo, validar e gerar scores",
@@ -2887,6 +3019,8 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
 
     try:
         resumo.status = "RUNNING"
+        resumo.metricas_extras["identificador_execucao"] = identificador_execucao
+        resumo.metricas_extras["pasta_execucao_historica"] = str(caminhos_execucao["pasta_execucao"])
         publicar_resumo_auditoria(resumo)
 
         print("=" * 100)
@@ -3096,18 +3230,28 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
             "nome_modelo": "CatBoostClassifier",
             "familia_modelo": "Classificação binária de score",
             "versao_modelo": "1.0",
+            "identificador_execucao": identificador_execucao,
             "variavel_alvo": config.nome_coluna_alvo,
             "metricas_principais": metricas_principais,
             "dashboard_spec": dashboard_spec,
             "artefatos_relacionados": [
-                {"nome": "Métricas JSON", "tipo": "json", "caminho_arquivo": str(config.caminho_saida_metricas_json)},
-                {"nome": "Dashboard Spec JSON", "tipo": "json", "caminho_arquivo": str(config.caminho_saida_dashboard_spec_json)},
-                {"nome": "Importâncias", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_importancias_csv)},
-                {"nome": "Faixas de score", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_resumo_faixas_csv)},
-                {"nome": "Folds walk-forward", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_walk_forward_folds_csv)},
-                {"nome": "Predições walk-forward", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_walk_forward_predicoes_csv)},
-                {"nome": "Score histórico", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_score_historico_csv)},
-                {"nome": "Score atual", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_score_atual_csv)},
+                {"nome": "Métricas JSON (execução)", "tipo": "json", "caminho_arquivo": str(caminhos_execucao["metricas_json"])},
+                {"nome": "Payload de métricas (execução)", "tipo": "json", "caminho_arquivo": str(caminhos_execucao["payload_metricas_json"])},
+                {"nome": "Dashboard Spec JSON (execução)", "tipo": "json", "caminho_arquivo": str(caminhos_execucao["dashboard_spec_json"])},
+                {"nome": "Resumo de treino (execução)", "tipo": "json", "caminho_arquivo": str(caminhos_execucao["resumo_treino_json"])},
+                {"nome": "Importâncias (execução)", "tipo": "csv", "caminho_arquivo": str(caminhos_execucao["importancias_csv"])},
+                {"nome": "Faixas de score (execução)", "tipo": "csv", "caminho_arquivo": str(caminhos_execucao["resumo_faixas_csv"])},
+                {"nome": "Folds walk-forward (execução)", "tipo": "csv", "caminho_arquivo": str(caminhos_execucao["walk_forward_folds_csv"])},
+                {"nome": "Predições walk-forward (execução)", "tipo": "csv", "caminho_arquivo": str(caminhos_execucao["walk_forward_predicoes_csv"])},
+                {"nome": "Score atual (execução)", "tipo": "csv", "caminho_arquivo": str(caminhos_execucao["score_atual_csv"])},
+                {"nome": "Métricas JSON (latest)", "tipo": "json", "caminho_arquivo": str(config.caminho_saida_metricas_json)},
+                {"nome": "Dashboard Spec JSON (latest)", "tipo": "json", "caminho_arquivo": str(config.caminho_saida_dashboard_spec_json)},
+                {"nome": "Importâncias (latest)", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_importancias_csv)},
+                {"nome": "Faixas de score (latest)", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_resumo_faixas_csv)},
+                {"nome": "Folds walk-forward (latest)", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_walk_forward_folds_csv)},
+                {"nome": "Predições walk-forward (latest)", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_walk_forward_predicoes_csv)},
+                {"nome": "Score histórico (latest)", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_score_historico_csv)},
+                {"nome": "Score atual (latest)", "tipo": "csv", "caminho_arquivo": str(config.caminho_saida_score_atual_csv)},
             ],
             "configuracao": {
                 "quantidade_meses_validacao": config.quantidade_meses_validacao,
@@ -3167,9 +3311,11 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
             df_importancias=df_importancias,
             resumo_faixas=resumo_faixas_teste,
             payload_metricas=payload_metricas,
+            dashboard_spec=dashboard_spec,
             df_resumo_folds_walk_forward=df_resumo_folds_walk_forward,
             df_predicoes_walk_forward=df_predicoes_walk_forward,
             config=config,
+            caminhos_execucao=caminhos_execucao,
         )
 
         resumo_treino = {
@@ -3183,8 +3329,7 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
             "caminho_tabela_final": str(config.caminho_saida_tabela_final_csv),
         }
         salvar_json(config.caminho_resumo_treino_json, resumo_treino)
-        salvar_json(config.caminho_saida_payload_metricas_json, payload_metricas)
-        salvar_json(config.caminho_saida_dashboard_spec_json, dashboard_spec)
+        salvar_json(caminhos_execucao["resumo_treino_json"], resumo_treino)
 
         resumo.status = "SUCCESS"
         resumo.linhas_lidas = int(df.height)
@@ -3195,6 +3340,12 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
         resumo.metricas_extras["auc_walk_forward"] = float(metricas_walk_forward["auc_roc"])
         resumo.metricas_extras["auc_teste_final_oot"] = float(metricas_teste["auc_roc"])
         resumo.metricas_extras["mes_snapshot_mais_recente"] = str(mes_mais_recente)
+        publicar_dashboard_analitico_no_resumo(
+            resumo=resumo,
+            payload_metricas=payload_metricas,
+            dashboard_spec=dashboard_spec,
+            caminhos_execucao=caminhos_execucao,
+        )
 
         adicionar_validacao(
             resumo,
@@ -3217,6 +3368,10 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
         adicionar_observacao(
             resumo,
             "A amostra exibida nesta etapa corresponde ao snapshot mais recente já scoreado, ordenado pelos maiores scores.",
+        )
+        adicionar_observacao(
+            resumo,
+            "Os artefatos analíticos desta execução foram versionados em pasta própria, preservando histórico por run sem sobrescrever o dashboard anterior do plugin.",
         )
 
         colunas_amostra_score = [
@@ -3256,8 +3411,19 @@ def executar_etapa_treino_validacao_score() -> dict[str, Any]:
             "linhas_snapshot_atual": int(len(resultado_atual)),
             "iteracoes_finais": int(iteracoes_finais),
             "mes_snapshot_mais_recente": str(mes_mais_recente),
+            "identificador_execucao": identificador_execucao,
+            "dashboard_analitico_publicado": True,
+            "tipo_dashboard": dashboard_spec.get("tipo_dashboard", "ml_dinamico"),
+            "metricas_principais": metricas_principais,
+            "dashboard_spec": dashboard_spec,
             "caminho_score_atual": str(config.caminho_saida_score_atual_csv),
+            "caminho_score_atual_execucao": str(caminhos_execucao["score_atual_csv"]),
             "caminho_resumo_treino_json": str(config.caminho_resumo_treino_json),
+            "caminho_resumo_treino_json_execucao": str(caminhos_execucao["resumo_treino_json"]),
+            "caminho_payload_metricas_json": str(config.caminho_saida_payload_metricas_json),
+            "caminho_payload_metricas_json_execucao": str(caminhos_execucao["payload_metricas_json"]),
+            "caminho_dashboard_spec_json": str(config.caminho_saida_dashboard_spec_json),
+            "caminho_dashboard_spec_json_execucao": str(caminhos_execucao["dashboard_spec_json"]),
         }
 
     except Exception as erro:
@@ -3274,6 +3440,8 @@ def executar_etapa_atualizacao_dim() -> dict[str, Any]:
     """Atualiza a dimensão final no SQL Server usando o snapshot scoreado mais recente."""
     config = Configuracao()
     garantir_pastas_saida(config)
+    identificador_execucao = obter_identificador_execucao_airflow()
+    caminhos_execucao = construir_caminhos_artefatos_execucao(config, identificador_execucao)
 
     resumo = criar_resumo_auditoria(
         nome_amigavel="Atualizar DimClassificacacaoClientes",
@@ -3290,6 +3458,8 @@ def executar_etapa_atualizacao_dim() -> dict[str, Any]:
     try:
         resumo.status = "RUNNING"
         resumo.metricas_extras["conn_id_sql"] = config.conn_id_sql
+        resumo.metricas_extras["identificador_execucao"] = identificador_execucao
+        resumo.metricas_extras["pasta_execucao_historica"] = str(caminhos_execucao["pasta_execucao"])
         publicar_resumo_auditoria(resumo)
 
         print("=" * 100)
@@ -3310,14 +3480,31 @@ def executar_etapa_atualizacao_dim() -> dict[str, Any]:
 
         payload_metricas = carregar_json(config.caminho_saida_payload_metricas_json)
         payload_metricas["atualizacao_dim_classificacao_clientes"] = resumo_atualizacao_dim
+        payload_metricas["identificador_execucao"] = identificador_execucao
         salvar_json(config.caminho_saida_payload_metricas_json, payload_metricas)
         salvar_json(config.caminho_saida_metricas_json, payload_metricas)
+        salvar_json(caminhos_execucao["payload_metricas_json"], payload_metricas)
+        salvar_json(caminhos_execucao["metricas_json"], payload_metricas)
 
         resumo.status = "SUCCESS"
         resumo.linhas_lidas = int(resumo_atualizacao_dim["linhas_resultado_snapshot"])
         resumo.linhas_inseridas = int(resumo_atualizacao_dim["linhas_enviadas_atualizacao"])
         resumo.linhas_atualizadas = int(resumo_atualizacao_dim["linhas_atualizadas"])
         resumo.linhas_descartadas = int(resumo_atualizacao_dim["linhas_nao_encontradas_destino"])
+
+        dashboard_spec_execucao: dict[str, Any] = {}
+        if caminhos_execucao["dashboard_spec_json"].exists():
+            dashboard_spec_execucao = carregar_json(caminhos_execucao["dashboard_spec_json"])
+        elif config.caminho_saida_dashboard_spec_json.exists():
+            dashboard_spec_execucao = carregar_json(config.caminho_saida_dashboard_spec_json)
+
+        if dashboard_spec_execucao:
+            publicar_dashboard_analitico_no_resumo(
+                resumo=resumo,
+                payload_metricas=payload_metricas,
+                dashboard_spec=dashboard_spec_execucao,
+                caminhos_execucao=caminhos_execucao,
+            )
 
         adicionar_validacao(
             resumo,
@@ -3358,7 +3545,13 @@ def executar_etapa_atualizacao_dim() -> dict[str, Any]:
         print(f"Linhas efetivamente atualizadas: {resumo_atualizacao_dim['linhas_atualizadas']:,}")
         print(f"IDEmpresa não encontrados no destino:{resumo_atualizacao_dim['linhas_nao_encontradas_destino']:,}")
 
-        return resumo_atualizacao_dim
+        return {
+            **resumo_atualizacao_dim,
+            "identificador_execucao": identificador_execucao,
+            "caminho_payload_metricas_json_execucao": str(caminhos_execucao["payload_metricas_json"]),
+            "caminho_metricas_json_execucao": str(caminhos_execucao["metricas_json"]),
+            "caminho_dashboard_spec_json_execucao": str(caminhos_execucao["dashboard_spec_json"]),
+        }
 
     except Exception as erro:
         resumo.status = "FAILED"

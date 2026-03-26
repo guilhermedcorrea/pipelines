@@ -114,7 +114,6 @@ docker compose exec airflow-apiserver airflow users create \
   """
 
 
-#docker compose restart airflow-apiserver airflow-scheduler airflow-dag-processor airflow-worker airflow-
 
 
 #acessa containwer
@@ -143,3 +142,13 @@ docker compose exec airflow-apiserver airflow users create \
 #docker compose up -d --build flask-app
 
 #docker compose up -d --build --force-recreate flask-app nginx-flask
+
+
+
+#rebuild compose
+#cd /home/guilherme_correa/PythonJobs/pipelines
+#docker compose down
+#docker compose up -d --build
+
+
+#docker compose logs -f flask-app

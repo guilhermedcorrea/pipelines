@@ -419,6 +419,28 @@
     border-color: rgba(239,68,68,.40);
   }
 
+  .kb-col-edit{
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    font-weight: 950;
+    border: 1px solid rgba(15,23,42,.12);
+    background: rgba(15,23,42,.04);
+    color: rgba(15,23,42,.88);
+    box-shadow: 0 2px 10px rgba(15,23,42,.06);
+    cursor:pointer;
+  }
+
+  .kb-col-edit:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgba(15,23,42,.12);
+    border-color: rgba(15,23,42,.18);
+  }
+
   .kb-col-body{
     padding: 10px 12px 12px 12px;
     display:flex;
@@ -1167,6 +1189,8 @@
 
   <div class="kb-divider"></div>
 
+  <div id="msgBoard" class="kb-msg-erro" style="display:none;margin:0 6px 12px 6px;"></div>
+
   <div id="board" class="kb-board"></div>
 </div>
 
@@ -1241,7 +1265,7 @@
 <div id="modalFase" class="kb-modal">
   <div class="kb-modal-card" style="max-width:560px;">
     <div class="kb-modal-head">
-      <strong>Nova Fase</strong>
+      <strong id="modalFaseTitulo">Nova Fase</strong>
       <button class="kb-btn" id="btnFecharFase">Fechar</button>
     </div>
 
@@ -1252,6 +1276,20 @@
         <option value="SUCESSO">SUCESSO</option>
         <option value="PERDA">PERDA</option>
       </select>
+
+      <div class="kb-empresa-box">
+        <div class="kb-row" style="justify-content:space-between;">
+          <label class="kb-meta-row" style="font-weight:900;cursor:pointer;">
+            <input id="faseUsarCor" type="checkbox" style="margin-right:8px;" />
+            Usar cor personalizada para a fase
+          </label>
+          <button class="kb-btn sm" id="btnLimparCorFase" type="button">Usar padrão</button>
+        </div>
+        <div class="kb-row">
+          <input id="faseCorHex" class="kb-input" type="color" value="#0B4EA2" style="max-width:84px;padding:6px 8px;height:44px;" disabled />
+          <div class="kb-hint grow">Quando a cor personalizada estiver desativada, o quadro usa a cor padrão visual do sistema.</div>
+        </div>
+      </div>
 
       <button class="kb-btn primary" id="btnSalvarFase">Salvar</button>
       <div id="msgFase" class="kb-msg-erro"></div>
@@ -1274,10 +1312,10 @@
       <div class="kb-section-title">Motivo</div>
       <select id="motivoRemocao" class="kb-select">
         <option value="">— Selecione —</option>
-        <option value="Desistencia">Desistência</option>
-        <option value="Preco">Preço</option>
-        <option value="Apenas Informacoes">Apenas Informações</option>
-        <option value="Outro Motivo">Outro Motivo</option>
+        <option value="DESISTENCIA">Desistência</option>
+        <option value="PRECO">Preço</option>
+        <option value="APENAS_INFORMACOES">Apenas Informações</option>
+        <option value="OUTRO_MOTIVO">Outro Motivo</option>
       </select>
 
       <div class="kb-section-title">Descrição</div>
@@ -1314,11 +1352,14 @@
   </div>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
 <script>
 (() => {
   const ID_KANBAN = {{ kanban.IDDimKanban }};
   const board = document.getElementById("board");
+  const msgBoard = document.getElementById("msgBoard");
+  const SCRIPT_ROOT = {{ (request.script_root or "") | tojson }};
+  const SOCKET_IO_NAMESPACE = "/kanban";
+  const SOCKET_IO_PATH = `${SCRIPT_ROOT}/socket.io`;
 
   const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
   const headersJSON = {
@@ -1334,6 +1375,7 @@
   let termoBusca = "";
   let versaoConcorrenciaCardAberto = "";
   let cardAbertoConflitoExterno = false;
+  let faseEditandoId = null;
 
   let kanbanCfg = {};
   let paineisCatalogo = [];
@@ -1346,10 +1388,33 @@
   const estadoFase = new Map();
   let socketKanban = null;
   let socketConectado = false;
+  let socketConectando = false;
+  let kanbanInicializado = false;
 
   const modalCard = document.getElementById("modalCard");
   const btnFecharCard = document.getElementById("btnFecharCard");
   const msgCard = document.getElementById("msgCard");
+  const btnSalvarCard = document.getElementById("btnSalvarCard");
+  const inputIdCard = document.getElementById("inputIdCard") || document.getElementById("cardId") || null;
+  const inputTituloCard = document.getElementById("cardTitulo");
+  const inputDescricaoCard = document.getElementById("cardDescricao");
+  const selectResponsavelCard = document.getElementById("selectResponsavelCard");
+  const selectOrigemCard = document.getElementById("selectOrigemCard");
+  const selectMotivoEncerramentoCard = document.getElementById("selectMotivoEncerramentoCard");
+  const inputMotivoEncerramentoObsCard = document.getElementById("inputMotivoEncerramentoObsCard");
+  const selectStatusCard = document.getElementById("selectStatusCard");
+  const selectTagCard = document.getElementById("selectTagCard");
+  const inputNotaTexto = document.getElementById("notaTexto");
+  const listaNotas = document.getElementById("listaNotas");
+
+  const modalFase = document.getElementById("modalFase");
+  const modalFaseTitulo = document.getElementById("modalFaseTitulo");
+  const faseNomeInput = document.getElementById("faseNome");
+  const faseTipoSelect = document.getElementById("faseTipo");
+  const faseUsarCor = document.getElementById("faseUsarCor");
+  const faseCorHex = document.getElementById("faseCorHex");
+  const btnLimparCorFase = document.getElementById("btnLimparCorFase");
+  const msgFase = document.getElementById("msgFase");
 
   const buscaKanban = document.getElementById("buscaKanban");
   const btnLimparBusca = document.getElementById("btnLimparBusca");
@@ -1412,6 +1477,84 @@
     return String(v);
   }
 
+  function mostrarMensagemBoard(texto, esconderAposMs = 0){
+    if (!msgBoard) return;
+    const mensagem = safeStr(texto).trim();
+    if (!mensagem) {
+      msgBoard.textContent = "";
+      msgBoard.style.display = "none";
+      return;
+    }
+    msgBoard.textContent = mensagem;
+    msgBoard.style.display = "block";
+    if (esconderAposMs > 0) {
+      window.setTimeout(() => {
+        if (msgBoard.textContent === mensagem) {
+          msgBoard.textContent = "";
+          msgBoard.style.display = "none";
+        }
+      }, esconderAposMs);
+    }
+  }
+
+  function limparMensagemBoard(){
+    mostrarMensagemBoard("");
+  }
+
+  function mensagemErroHttp(resposta, corpo, fallback){
+    if (corpo && typeof corpo === "object") {
+      const msg = corpo.msg || corpo.erro || corpo.message || corpo.detail;
+      if (msg) return String(msg);
+    }
+    return fallback || `Erro (HTTP ${resposta?.status || 0})`;
+  }
+
+  function carregarScriptExterno(src){
+    return new Promise((resolve, reject) => {
+      const existente = [...document.scripts].find(s => s.src === src);
+      if (existente) {
+        if (typeof window.io === "function") {
+          resolve(true);
+        } else {
+          existente.addEventListener("load", () => resolve(true), {once: true});
+          existente.addEventListener("error", () => reject(new Error(`Falha ao carregar ${src}`)), {once: true});
+        }
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = src;
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => reject(new Error(`Falha ao carregar ${src}`));
+      document.head.appendChild(script);
+    });
+  }
+
+
+
+  async function garantirClienteSocketIo(){
+  if (typeof window.io === "function") return true;
+
+  const fontes = [
+    "https://cdn.socket.io/4.7.5/socket.io.min.js",
+    "https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"
+  ];
+
+  for (const src of fontes) {
+    try {
+      await carregarScriptExterno(src);
+      if (typeof window.io === "function") return true;
+    } catch (erro) {
+      console.warn("Falha ao carregar cliente Socket.IO", { src, erro: String(erro) });
+    }
+  }
+
+  return typeof window.io === "function";
+}
+
+
+
   function normalizarTexto(v){
     return safeStr(v)
       .normalize("NFD")
@@ -1420,19 +1563,65 @@
       .trim();
   }
 
-  function normalizarCardServidor(card){
-    const c = Object.assign({}, card || {});
-    c.IDFatoKanbanCard = idNum(c.IDFatoKanbanCard);
-    c.IDDimKanban = idNum(c.IDDimKanban || ID_KANBAN);
-    c.IDDimKanbanFaseAtual = idNum(c.IDDimKanbanFaseAtual);
-    c.IDEmpresaProprietaria = c.IDEmpresaProprietaria === null || c.IDEmpresaProprietaria === undefined ? null : idNum(c.IDEmpresaProprietaria);
-    c.VersaoConcorrenciaHex = safeStr(c.VersaoConcorrenciaHex || c.versao_concorrencia || "").trim().toUpperCase();
-    return c;
-  }
+
+
+
+function normalizarCardServidor(card){
+  const c = Object.assign({}, card || {});
+  c.IDFatoKanbanCard = idNum(c.IDFatoKanbanCard);
+  c.IDDimKanban = idNum(c.IDDimKanban || ID_KANBAN);
+  c.IDDimKanbanFaseAtual = idNum(c.IDDimKanbanFaseAtual);
+  c.IDEmpresaProprietaria =
+    c.IDEmpresaProprietaria === null || c.IDEmpresaProprietaria === undefined
+      ? null
+      : idNum(c.IDEmpresaProprietaria);
+
+  const idEmpRelacionadaBruto =
+    c.IDEmpresaRelacionadaCard ??
+    c.IDCliente ??
+    c.IDEmpresaRelacionada ??
+    c.IDEmpresa ??
+    null;
+
+  c.IDEmpresaRelacionadaCard =
+    idEmpRelacionadaBruto === null ||
+    idEmpRelacionadaBruto === undefined ||
+    idEmpRelacionadaBruto === ""
+      ? null
+      : idNum(idEmpRelacionadaBruto);
+
+  const versaoHexBruta = safeStr(
+    c.VersaoConcorrenciaHex ??
+    c.versao_concorrencia ??
+    c.versaoConcorrencia ??
+    c.VersaoConcorrencia ??
+    ""
+  ).trim();
+
+  c.VersaoConcorrenciaHex = versaoHexBruta
+    .replace(/^0x/i, "")
+    .replace(/[^0-9a-fA-F]/g, "")
+    .toUpperCase();
+
+  c.VersaoConcorrencia = c.VersaoConcorrenciaHex;
+  c.versaoConcorrencia = c.VersaoConcorrenciaHex;
+  c.versao_concorrencia = c.VersaoConcorrenciaHex;
+
+  return c;
+}
+
+
+
+
+
 
   function tagsDoCard(cardId) {
     return mapaTagsPorCard.get(idNum(cardId)) || [];
   }
+
+
+
+
 
   function setTagsDoCard(cardId, tags){
     mapaTagsPorCard.set(
@@ -1625,6 +1814,53 @@
   function corColunaPorIndice(i){
     const paleta = ["#16a34a", "#f97316", "#64748b", "#7c3aed", "#10b981", "#0ea5e9", "#eab308", "#ef4444"];
     return paleta[i % paleta.length];
+  }
+
+  function obterCorFase(fase, indice){
+    const corPersistida = normalizarCorHex(fase?.CorHex || "");
+    if (corPersistida) return corPersistida;
+    return corColunaPorIndice(indice);
+  }
+
+  function resetModalFase(){
+    faseEditandoId = null;
+    if (modalFaseTitulo) modalFaseTitulo.textContent = "Nova Fase";
+    if (faseNomeInput) faseNomeInput.value = "";
+    if (faseTipoSelect) faseTipoSelect.value = "ATIVA";
+    if (faseUsarCor) faseUsarCor.checked = false;
+    if (faseCorHex) {
+      faseCorHex.value = "#0B4EA2";
+      faseCorHex.disabled = true;
+    }
+    if (msgFase) {
+      msgFase.style.display = "none";
+      msgFase.textContent = "";
+    }
+  }
+
+  function abrirModalNovaFase(){
+    resetModalFase();
+    modalFase.style.display = "block";
+  }
+
+  function abrirModalEditarFase(idFase){
+    const fase = fasePorId(idFase);
+    if (!fase) return;
+
+    resetModalFase();
+    faseEditandoId = idNum(idFase);
+    if (modalFaseTitulo) modalFaseTitulo.textContent = "Editar Fase";
+    if (faseNomeInput) faseNomeInput.value = safeStr(fase.NomeFase);
+    if (faseTipoSelect) faseTipoSelect.value = safeStr(fase.TipoFase || "ATIVA").toUpperCase() || "ATIVA";
+
+    const corPersistida = normalizarCorHex(fase.CorHex || "");
+    if (faseUsarCor) faseUsarCor.checked = !!corPersistida;
+    if (faseCorHex) {
+      faseCorHex.value = corPersistida || obterCorFase(fase, fases.findIndex(f => idNum(f.IDDimKanbanFase) === idNum(idFase)));
+      faseCorHex.disabled = !corPersistida;
+    }
+
+    modalFase.style.display = "block";
   }
 
   async function apiPost(url, payload){
@@ -2413,7 +2649,7 @@
       const idFase = idNum(f.IDDimKanbanFase);
       const qtdTotalServidor = idNum(f.QuantidadeCardsTotal || contarCardsNaFaseCarregados(idFase));
       const qtdCarregadaInicial = idNum(f.QuantidadeCardsCarregadosInicialmente || contarCardsNaFaseCarregados(idFase));
-      const colAccent = corColunaPorIndice(idx);
+      const colAccent = obterCorFase(f, idx);
 
       const col = el("div", {class:"kb-col", "data-fase": idFase});
       col.style.setProperty("--col-accent", colAccent);
@@ -2426,6 +2662,7 @@
           ])
         ]),
         el("div", {class:"kb-col-actions"}, [
+          el("button", {class:"kb-col-edit", title:"Editar fase", onclick: () => abrirModalEditarFase(idFase)}, ["✎"]),
           el("button", {class:"kb-col-del", title:"Inativar fase", onclick: () => abrirModalInativarFase(idFase)}, ["−"]),
           el("button", {class:"kb-add", title:"Adicionar card", onclick: () => criarCardPrompt(idFase)}, ["+"])
         ])
@@ -2708,7 +2945,7 @@
 
     const topRow = el("div", {class:"kb-card-phase"}, [fasePill, btnDel]);
 
-    const idEmp = c.IDEmpresaProprietaria;
+    const idEmp = c.IDEmpresaRelacionadaCard || c.IDCliente || c.IDEmpresaRelacionada || null;
     const empNome = c.EmpresaRazaoSocial || "";
     const empSetor = c.EmpresaSetor || "";
     const empClasse = c.EmpresaClasse || "";
@@ -2777,9 +3014,14 @@
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) {
-      await carregar();
+    if (!r.ok || !j || !j.ok) {
+      mostrarMensagemBoard(mensagemErroHttp(r, j, "Não foi possível criar o card."));
+      console.warn("criarCardPrompt falhou", { http: r.status, body: j, idFase });
+      return;
     }
+
+    limparMensagemBoard();
+    await carregar();
   }
 
   async function obterVersaoAtualDoCard(idCard){
@@ -2802,6 +3044,7 @@
 
     const cardAtual = await obterVersaoAtualDoCard(idC);
     if (!cardAtual || !safeStr(cardAtual.VersaoConcorrenciaHex)) {
+      mostrarMensagemBoard("A versão mais recente do card não está carregada. Recarregando o quadro...");
       await carregar();
       return;
     }
@@ -2841,9 +3084,13 @@
       if (r.status === 409 && j && j.card_atual) {
         inserirOuAtualizarCardLocal(j.card_atual);
       }
+      mostrarMensagemBoard(mensagemErroHttp(r, j, "Não foi possível mover o card."));
+      console.warn("moverCard falhou", { http: r.status, body: j, idCard: idC, idFasePara: idDestino });
       await carregar();
       return;
     }
+
+    limparMensagemBoard();
 
     if (j.card) {
       inserirOuAtualizarCardLocal(j.card);
@@ -2942,7 +3189,10 @@
     const res = await apiPost(`/kanban/api/fases/${faseParaInativar}/inativar`, {});
 
     if (!res.ok){
-      msgInativarFase.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar fase (HTTP ${res.http}).`;
+      const qtdAtivos = idNum(res.body?.QuantidadeCardsAtivos || 0);
+      msgInativarFase.textContent = qtdAtivos > 0
+        ? `${(res.body && (res.body.msg || res.body.erro)) || "Não foi possível inativar a fase."} Cards ativos encontrados: ${qtdAtivos}.`
+        : ((res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar fase (HTTP ${res.http}).`);
       msgInativarFase.style.display = "block";
       return;
     }
@@ -2958,6 +3208,7 @@
     cardAbertoConflitoExterno = false;
     msgCard.style.display = "none";
     msgCard.textContent = "";
+    atualizarEstadoSalvarCard();
   }
 
   btnFecharCard.addEventListener("click", () => {
@@ -2992,64 +3243,224 @@
     msgCard.style.display = "block";
   }
 
+  function atualizarEstadoSalvarCard(){
+    if (!btnSalvarCard) return;
+
+    const temVersao = !!safeStr(versaoConcorrenciaCardAberto);
+    const podeSalvar = temVersao && !cardAbertoConflitoExterno;
+
+    btnSalvarCard.disabled = !podeSalvar;
+    btnSalvarCard.title = podeSalvar
+      ? ""
+      : (!temVersao
+          ? "Este card foi carregado sem versão de concorrência. O backend precisa devolver essa versão para permitir salvar."
+          : "Este card recebeu atualização externa. Reabra o card antes de salvar.");
+  }
+
+
   async function abrirCard(idCard) {
     cardAbertoId = idNum(idCard);
     versaoConcorrenciaCardAberto = "";
     cardAbertoConflitoExterno = false;
     msgCard.style.display = "none";
+    msgCard.textContent = "";
+    atualizarEstadoSalvarCard();
 
     await carregarEmpresas();
 
     const j = await buscarDetalheCard(idCard);
-    if (!j || !j.card) return;
-
-    inserirOuAtualizarCardLocal(j.card);
-    setTagsDoCard(idCard, j.tags || []);
-
-    versaoConcorrenciaCardAberto = safeStr(j.card.VersaoConcorrenciaHex);
-
-    document.getElementById("cardTitulo").value = j.card.Titulo || "";
-    document.getElementById("cardDescricao").value = j.card.Descricao || "";
-
-    const idEmpCard = j.card.IDEmpresaProprietaria || "";
-    selectEmpresaCard.value = idEmpCard ? String(idEmpCard) : "";
-    setEmpresaPreviewById(idEmpCard);
-
-    if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard && painelFaceWrap){
-      painelFaceWrap.classList.add("is-on");
-      preencherPainelFacesDoCard(j.paineis_vinculados || []);
+    if (!j || !j.card) {
+      mostrarMensagemCard("Não foi possível carregar os detalhes do card.");
+      return;
     }
 
-    const selectTagCard = document.getElementById("selectTagCard");
-    selectTagCard.innerHTML = "";
-    tagsCatalogo.forEach(t => {
-      selectTagCard.appendChild(el("option", {value: t.IDDimKanbanTag}, [t.NomeTag]));
-    });
+    const cardNormalizado = normalizarCardServidor(j.card);
 
-    renderTagsNoCard(j.tags || []);
-    renderNotas(j.notas || []);
+    /*
+     * Aqui eu uso a versão canônica já normalizada pelo próprio template.
+     * No kanban, a concorrência é tratada por VersaoConcorrenciaHex
+     * (rowversion/hex do backend), não por um número simples inventado no front.
+     */
+    versaoConcorrenciaCardAberto = safeStr(
+      cardNormalizado.VersaoConcorrenciaHex ||
+      cardNormalizado.VersaoConcorrencia ||
+      cardNormalizado.versao_concorrencia ||
+      ""
+    ).trim();
+
+    /*
+     * Eu só preencho os campos que realmente existem neste template.
+     * O erro anterior aconteceu porque foram referenciados elementos de outro modal
+     * (inputIdCard, selectResponsavelCard, selectStatusCard etc.) sem garantir
+     * que eles existiam aqui.
+     */
+    if (inputIdCard) {
+      inputIdCard.value = String(cardNormalizado.IDFatoKanbanCard || "");
+    }
+
+    if (inputTituloCard) {
+      inputTituloCard.value = cardNormalizado.Titulo ?? "";
+    }
+
+    if (inputDescricaoCard) {
+      inputDescricaoCard.value = cardNormalizado.Descricao ?? "";
+    }
+
+    if (selectEmpresaCard) {
+      const idEmpresa = cardNormalizado.IDEmpresaRelacionadaCard ?? "";
+      selectEmpresaCard.value = idEmpresa !== null && idEmpresa !== undefined ? String(idEmpresa) : "";
+      setEmpresaPreviewById(selectEmpresaCard.value || "");
+    } else {
+      setEmpresaPreviewByObj(null);
+    }
+
+    if (selectResponsavelCard) {
+      const idResponsavel = cardNormalizado.IDVendedorUsuario ?? cardNormalizado.IDDimUsuarios ?? "";
+      selectResponsavelCard.value = idResponsavel !== null && idResponsavel !== undefined ? String(idResponsavel) : "";
+    }
+
+    if (selectOrigemCard) {
+      const idOrigem = cardNormalizado.IDDimKanbanOrigem ?? "";
+      selectOrigemCard.value = idOrigem !== null && idOrigem !== undefined ? String(idOrigem) : "";
+    }
+
+    if (selectMotivoEncerramentoCard) {
+      const idMotivo = cardNormalizado.IDDimKanbanMotivoEncerramento ?? "";
+      selectMotivoEncerramentoCard.value = idMotivo !== null && idMotivo !== undefined ? String(idMotivo) : "";
+    }
+
+    if (inputMotivoEncerramentoObsCard) {
+      inputMotivoEncerramentoObsCard.value = cardNormalizado.MotivoEncerramentoObs ?? "";
+    }
+
+    if (selectStatusCard) {
+      const statusAtual = cardNormalizado.StatusCard ?? "";
+      selectStatusCard.value = statusAtual !== null && statusAtual !== undefined ? String(statusAtual) : "";
+    }
+
+    if (selectTagCard) {
+      selectTagCard.innerHTML = "";
+      tagsCatalogo.forEach(t => {
+        selectTagCard.appendChild(
+          el("option", { value: t.IDDimKanbanTag }, [t.NomeTag])
+        );
+      });
+    }
+
+    renderTagsNoCard(Array.isArray(j.tags) ? j.tags : []);
+    renderNotas(Array.isArray(j.notas) ? j.notas : []);
+
+    if (inputNotaTexto) {
+      inputNotaTexto.value = "";
+    }
+
+    if (painelFaceWrap?.classList.contains("is-on")) {
+      const painelFaces =
+        (Array.isArray(j.painel_faces) && j.painel_faces) ||
+        (Array.isArray(j.painelFaces) && j.painelFaces) ||
+        [];
+      preencherPainelFacesDoCard(painelFaces);
+    }
+
+    atualizarEstadoSalvarCard();
+
+    if (!versaoConcorrenciaCardAberto) {
+      console.warn("abrirCard sem versão de concorrência", {
+        idCard,
+        cardNormalizado,
+        respostaCompleta: j
+      });
+
+      mostrarMensagemCard(
+        "O card foi carregado para visualização, mas o backend não enviou a versão de concorrência. Você pode visualizar, porém não consegue salvar até o backend devolver essa versão."
+      );
+    }
 
     modalCard.style.display = "block";
   }
 
   function renderTagsNoCard(tags) {
-    const box = document.getElementById("tagsNoCard");
-    box.innerHTML = "";
+  const box = document.getElementById("tagsNoCard");
 
-    tags.forEach(t => {
-      const pill = el("span", {
-        class:"kb-tag",
-        title: t.NomeTag || "",
-        style: estiloTag(t.CorHex)
-      }, [
-        el("span", {class:"kb-tag-text"}, [t.NomeTag || ""])
-      ]);
-
-      const btnX = el("button", {class:"kb-btn sm", onclick: () => removerTagDoCard(t.IDDimKanbanTag)}, ["x"]);
-      const wrap = el("div", {style:"display:flex;gap:6px;align-items:center;flex-wrap:wrap;"}, [pill, btnX]);
-      box.appendChild(wrap);
-    });
+  if (!box) {
+    console.warn("renderTagsNoCard: elemento #tagsNoCard não encontrado no DOM.");
+    return;
   }
+
+  box.innerHTML = "";
+
+  if (!Array.isArray(tags) || tags.length === 0) {
+    return;
+  }
+
+  tags.forEach(tagAtual => {
+    if (!tagAtual || typeof tagAtual !== "object") {
+      return;
+    }
+
+    const idTag = idNum(
+      tagAtual.IDDimKanbanTag ??
+      tagAtual.idDimKanbanTag ??
+      tagAtual.id ??
+      0
+    );
+
+    const nomeTag = String(
+      tagAtual.NomeTag ??
+      tagAtual.nomeTag ??
+      ""
+    ).trim();
+
+    const corHex = String(
+      tagAtual.CorHex ??
+      tagAtual.corHex ??
+      ""
+    ).trim();
+
+    const pill = el(
+      "span",
+      {
+        class: "kb-tag",
+        title: nomeTag,
+        style: estiloTag(corHex)
+      },
+      [
+        el("span", { class: "kb-tag-text" }, [nomeTag])
+      ]
+    );
+
+    const btnRemover = el(
+      "button",
+      {
+        class: "kb-btn sm",
+        type: "button",
+        title: nomeTag ? `Remover tag ${nomeTag}` : "Remover tag"
+      },
+      ["x"]
+    );
+
+    btnRemover.addEventListener("click", () => {
+      if (!idTag) {
+        console.warn("renderTagsNoCard: tag sem ID válido para remoção.", tagAtual);
+        return;
+      }
+
+      removerTagDoCard(idTag);
+    });
+
+    const wrap = el(
+      "div",
+      {
+        style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap;"
+      },
+      [pill, btnRemover]
+    );
+
+    box.appendChild(wrap);
+  });
+}
+
+
 
   async function removerTagDoCard(idTag) {
     const r = await fetch(`/kanban/api/cards/${cardAbertoId}/tags/${idTag}`, {
@@ -3104,20 +3515,23 @@
     return { ok: true, fez: true };
   }
 
-  document.getElementById("btnSalvarCard").addEventListener("click", async () => {
+  btnSalvarCard.addEventListener("click", async () => {
     const titulo = (document.getElementById("cardTitulo").value || "").trim();
     const descricao = document.getElementById("cardDescricao").value || "";
     const idEmpresa = selectEmpresaCard.value ? Number(selectEmpresaCard.value) : null;
 
     msgCard.style.display = "none";
+    msgCard.textContent = "";
 
     if (!cardAbertoId || !safeStr(versaoConcorrenciaCardAberto)) {
-      mostrarMensagemCard("A versão atual do card não está carregada. Feche e abra o card novamente.");
+      mostrarMensagemCard("A versão atual do card não está carregada. O detalhe abriu para visualização, mas o backend não devolveu a versão de concorrência necessária para salvar.");
+      atualizarEstadoSalvarCard();
       return;
     }
 
     if (cardAbertoConflitoExterno) {
       mostrarMensagemCard("Este card recebeu atualização externa enquanto estava aberto. Reabra o card antes de salvar para evitar sobrescrita.");
+      atualizarEstadoSalvarCard();
       return;
     }
 
@@ -3125,7 +3539,6 @@
       titulo,
       descricao,
       id_empresa: idEmpresa,
-      id_empresa_proprietaria: idEmpresa,
       versao_concorrencia: versaoConcorrenciaCardAberto,
       painel_faces: coletarPainelFacesDoFormulario()
     };
@@ -3141,10 +3554,12 @@
     if (!j || !j.ok) {
       if (r.status === 409) {
         if (j && j.card_atual) {
-          inserirOuAtualizarCardLocal(j.card_atual);
+          const cardAtualConflito = normalizarCardServidor(j.card_atual);
+          inserirOuAtualizarCardLocal(cardAtualConflito);
         }
         mostrarMensagemCard((j && j.msg) || "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.");
         cardAbertoConflitoExterno = true;
+        atualizarEstadoSalvarCard();
         return;
       }
 
@@ -3153,9 +3568,11 @@
     }
 
     if (j.card) {
-      inserirOuAtualizarCardLocal(j.card);
-      versaoConcorrenciaCardAberto = safeStr(j.card.VersaoConcorrenciaHex || versaoConcorrenciaCardAberto);
-      redesenharFases([idNum(j.card.IDDimKanbanFaseAtual)], true);
+      const cardAtualizado = normalizarCardServidor(j.card);
+      inserirOuAtualizarCardLocal(cardAtualizado);
+      versaoConcorrenciaCardAberto = safeStr(cardAtualizado.VersaoConcorrenciaHex);
+      atualizarEstadoSalvarCard();
+      redesenharFases([idNum(cardAtualizado.IDDimKanbanFaseAtual)], true);
     }
 
     const resNota = await salvarNotaSeTiverTexto();
@@ -3169,11 +3586,12 @@
   });
 
   function renderNotas(notas) {
-    const box = document.getElementById("listaNotas");
-    box.innerHTML = "";
+    if (!listaNotas) return;
 
-    notas.forEach(n => {
-      box.appendChild(el("div", {class:"kb-nota"}, [
+    listaNotas.innerHTML = "";
+
+    (Array.isArray(notas) ? notas : []).forEach(n => {
+      listaNotas.appendChild(el("div", {class:"kb-nota"}, [
         el("small", {}, [String(n.CriadoEm || "")]),
         el("div", {style:"margin-top:6px;"}, [n.Texto || ""])
       ]));
@@ -3202,30 +3620,53 @@
     });
   }
 
-  const modalFase = document.getElementById("modalFase");
   document.getElementById("btnNovaFase").addEventListener("click", () => {
-    modalFase.style.display = "block";
+    abrirModalNovaFase();
   });
 
   document.getElementById("btnFecharFase").addEventListener("click", () => {
     modalFase.style.display = "none";
+    resetModalFase();
   });
 
   modalFase.addEventListener("click", (e) => {
-    if (e.target === modalFase) modalFase.style.display = "none";
+    if (e.target === modalFase) {
+      modalFase.style.display = "none";
+      resetModalFase();
+    }
+  });
+
+  faseUsarCor?.addEventListener("change", () => {
+    if (faseCorHex) faseCorHex.disabled = !faseUsarCor.checked;
+  });
+
+  btnLimparCorFase?.addEventListener("click", () => {
+    if (faseUsarCor) faseUsarCor.checked = false;
+    if (faseCorHex) {
+      faseCorHex.value = "#0B4EA2";
+      faseCorHex.disabled = true;
+    }
   });
 
   document.getElementById("btnSalvarFase").addEventListener("click", async () => {
-    const nome = (document.getElementById("faseNome").value || "").trim();
-    const tipo = document.getElementById("faseTipo").value;
-    const msgFase = document.getElementById("msgFase");
-    msgFase.style.display = "none";
+    const nome = (faseNomeInput?.value || "").trim();
+    const tipo = faseTipoSelect?.value || "ATIVA";
+    const corHex = faseUsarCor?.checked ? normalizarCorHex(faseCorHex?.value || "") : null;
 
-    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/fases`, {
-      method:"POST",
+    msgFase.style.display = "none";
+    msgFase.textContent = "";
+
+    const payload = { nome, tipo, cor_hex: corHex };
+    const url = faseEditandoId
+      ? `/kanban/api/fases/${faseEditandoId}`
+      : `/kanban/api/kanbans/${ID_KANBAN}/fases`;
+    const method = faseEditandoId ? "PUT" : "POST";
+
+    const r = await fetch(url, {
+      method,
       credentials: "same-origin",
       headers: headersJSON,
-      body: JSON.stringify({nome, tipo})
+      body: JSON.stringify(payload)
     });
 
     const j = await r.json().catch(() => null);
@@ -3235,8 +3676,8 @@
       return;
     }
 
-    document.getElementById("faseNome").value = "";
     modalFase.style.display = "none";
+    resetModalFase();
     await carregar();
   });
 
@@ -3281,22 +3722,70 @@
   function conectarSocketKanban(){
     if (typeof window.io !== "function") {
       console.warn("Socket.IO client não carregado no template do kanban.");
+      mostrarMensagemBoard("Tempo real indisponível agora. O kanban continua funcionando via HTTP, mas sem atualização automática entre sessões.");
       return;
     }
 
-    socketKanban = window.io("/kanban", {
-      path: "/socket.io",
-      transports: ["websocket", "polling"],
-      withCredentials: true
+    if (socketConectando) {
+      console.debug("conectarSocketKanban ignorado: já existe uma conexão em andamento.");
+      return;
+    }
+
+    if (socketKanban && (socketKanban.connected || socketKanban.active)) {
+      console.debug("conectarSocketKanban ignorado: socket já está ativo.");
+      return;
+    }
+
+    if (socketKanban) {
+      try {
+        socketKanban.removeAllListeners();
+        socketKanban.disconnect();
+      } catch (_erro) {
+      }
+      socketKanban = null;
+    }
+
+    socketConectando = true;
+    socketConectado = false;
+
+    socketKanban = window.io(SOCKET_IO_NAMESPACE, {
+      path: SOCKET_IO_PATH,
+      transports: ["polling"],
+      upgrade: false,
+      rememberUpgrade: false,
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 8000,
+      timeout: 20000,
+      autoConnect: true,
+      forceNew: true
     });
 
     socketKanban.on("connect", () => {
+      socketConectando = false;
       socketConectado = true;
+      limparMensagemBoard();
       socketKanban.emit("entrar_kanban", { id_kanban: ID_KANBAN });
     });
 
-    socketKanban.on("disconnect", () => {
+    socketKanban.on("disconnect", (reason) => {
+      socketConectando = false;
       socketConectado = false;
+      console.warn("Socket do kanban desconectado", { reason });
+    });
+
+    socketKanban.on("connect_error", (erro) => {
+      socketConectando = false;
+      socketConectado = false;
+      console.warn("connect_error socket kanban", {
+        message: erro?.message || null,
+        description: erro?.description || null,
+        type: erro?.type || null,
+        context: erro?.context || null
+      });
+      mostrarMensagemBoard("Não foi possível conectar o tempo real do kanban agora. As ações continuam funcionando e a tela pode ser atualizada manualmente.");
     });
 
     socketKanban.on("socket_ack", (payload) => {
@@ -3305,6 +3794,8 @@
 
     socketKanban.on("socket_erro", (payload) => {
       console.warn("kanban socket erro", payload || {});
+      const msg = payload?.msg || payload?.erro;
+      if (msg) mostrarMensagemBoard(msg);
     });
 
     socketKanban.on("card_atualizado", (payload = {}) => {
@@ -3337,6 +3828,10 @@
 
       tratarAtualizacaoExternaNoCardAberto(idCard, "Este card foi movido por outro usuário enquanto estava aberto. Reabra o card antes de salvar.");
       redesenharFases([idFaseDe, idFasePara], true);
+    });
+
+    socketKanban.on("card_criado", async () => {
+      await carregar();
     });
 
     socketKanban.on("card_inativado", async (payload = {}) => {
@@ -3379,23 +3874,56 @@
       await carregar();
     });
 
+    socketKanban.on("fase_atualizada", async () => {
+      await carregar();
+    });
+
     socketKanban.on("fase_inativada", async () => {
       await carregar();
+    });
+
+    socketKanban.on("fases_reordenadas", async () => {
+      await carregar();
+    });
+
+    socketKanban.on("kanban_inativado", () => {
+      mostrarMensagemBoard("Este kanban foi inativado em outra sessão.");
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 1200);
     });
   }
 
   window.addEventListener("beforeunload", () => {
-    if (socketKanban && socketConectado) {
+    if (socketKanban) {
       try {
-        socketKanban.emit("sair_kanban", { id_kanban: ID_KANBAN });
+        if (socketConectado) {
+          socketKanban.emit("sair_kanban", { id_kanban: ID_KANBAN });
+        }
+        socketKanban.removeAllListeners();
+        socketKanban.disconnect();
       } catch (_erro) {
       }
     }
+    socketKanban = null;
+    socketConectado = false;
+    socketConectando = false;
   });
 
-  void carregar().then(() => {
+  async function inicializarKanban(){
+    if (kanbanInicializado) return;
+    kanbanInicializado = true;
+
+    await carregar();
+    const clienteSocketOk = await garantirClienteSocketIo();
+    if (!clienteSocketOk) {
+      mostrarMensagemBoard("Não foi possível carregar a biblioteca do tempo real. O kanban continua operando normalmente, mas sem atualização automática entre sessões.");
+      return;
+    }
     conectarSocketKanban();
-  });
+  }
+
+  void inicializarKanban();
 })();
 </script>
 {% endblock %}
