@@ -1477,28 +1477,51 @@
     return String(v);
   }
 
-  function mostrarMensagemBoard(texto, esconderAposMs = 0){
+  function mostrarMensagemBoard(texto, tipo = "erro", esconderAposMs = 0){
     if (!msgBoard) return;
+
     const mensagem = safeStr(texto).trim();
+    window.clearTimeout(mostrarMensagemBoard._timer);
+
     if (!mensagem) {
       msgBoard.textContent = "";
       msgBoard.style.display = "none";
+      msgBoard.style.color = "";
+      msgBoard.style.border = "";
+      msgBoard.style.background = "";
+      msgBoard.style.padding = "";
+      msgBoard.style.borderRadius = "";
+      msgBoard.style.fontWeight = "";
       return;
     }
+
     msgBoard.textContent = mensagem;
     msgBoard.style.display = "block";
+    msgBoard.style.padding = "10px 12px";
+    msgBoard.style.borderRadius = "12px";
+    msgBoard.style.fontWeight = "900";
+
+    if (tipo === "sucesso") {
+      msgBoard.style.color = "#166534";
+      msgBoard.style.border = "1px solid rgba(34,197,94,.28)";
+      msgBoard.style.background = "rgba(34,197,94,.08)";
+    } else {
+      msgBoard.style.color = "#991b1b";
+      msgBoard.style.border = "1px solid rgba(239,68,68,.28)";
+      msgBoard.style.background = "rgba(239,68,68,.08)";
+    }
+
     if (esconderAposMs > 0) {
-      window.setTimeout(() => {
+      mostrarMensagemBoard._timer = window.setTimeout(() => {
         if (msgBoard.textContent === mensagem) {
-          msgBoard.textContent = "";
-          msgBoard.style.display = "none";
+          limparMensagemBoard();
         }
       }, esconderAposMs);
     }
   }
 
   function limparMensagemBoard(){
-    mostrarMensagemBoard("");
+    mostrarMensagemBoard("", "erro", 0);
   }
 
   function mensagemErroHttp(resposta, corpo, fallback){
@@ -2946,21 +2969,29 @@ function normalizarCardServidor(card){
     const topRow = el("div", {class:"kb-card-phase"}, [fasePill, btnDel]);
 
     const idEmp = c.IDEmpresaRelacionadaCard || c.IDCliente || c.IDEmpresaRelacionada || null;
-    const empNome = c.EmpresaRazaoSocial || "";
-    const empSetor = c.EmpresaSetor || "";
-    const empClasse = c.EmpresaClasse || "";
+    const empRazao = safeStr(c.EmpresaRazaoSocial || c.RazaoSocial || "").trim();
+    const empCnpj = mascaraCnpj(c.EmpresaCNPJ || c.CNPJ || "");
+    const empSetor = safeStr(c.EmpresaSetor || c.Setor || "").trim();
+    const empClasse = safeStr(c.EmpresaClasse || c.Classe || "").trim();
 
-    const temEmpresa = !!(idEmp || empNome || empSetor || empClasse);
+    const temEmpresa = !!(idEmp || empRazao || empCnpj || empSetor || empClasse);
 
     const blocoEmpresa = temEmpresa ? el("div", {class:"kb-empresa"}, [
-      el("div", {class:"kb-empresa-nome", title: empNome || ""}, [empNome ? empNome : "Empresa não vinculada"]),
       el("div", {class:"kb-empresa-grid"}, [
         el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["Setor"]),
+          el("span", {class:"kb-empresa-k"}, ["Razão:"]),
+          el("span", {class:"kb-empresa-v", title: empRazao || ""}, [empRazao || "—"])
+        ]),
+        el("div", {class:"kb-empresa-item"}, [
+          el("span", {class:"kb-empresa-k"}, ["CNPJ:"]),
+          el("span", {class:"kb-empresa-v", title: empCnpj || ""}, [empCnpj || "—"])
+        ]),
+        el("div", {class:"kb-empresa-item"}, [
+          el("span", {class:"kb-empresa-k"}, ["Setor:"]),
           el("span", {class:"kb-empresa-v", title: empSetor || ""}, [empSetor || "—"])
         ]),
         el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["Classe"]),
+          el("span", {class:"kb-empresa-k"}, ["Classe:"]),
           el("span", {class:"kb-empresa-v", title: empClasse || ""}, [empClasse || "—"])
         ])
       ])
@@ -3211,15 +3242,18 @@ function normalizarCardServidor(card){
     atualizarEstadoSalvarCard();
   }
 
-  btnFecharCard.addEventListener("click", () => {
+  function fecharModalCard(){
     modalCard.style.display = "none";
     limparEstadoCardAberto();
+  }
+
+  btnFecharCard.addEventListener("click", () => {
+    fecharModalCard();
   });
 
   modalCard.addEventListener("click", (e) => {
     if (e.target === modalCard) {
-      modalCard.style.display = "none";
-      limparEstadoCardAberto();
+      fecharModalCard();
     }
   });
 
@@ -3535,15 +3569,24 @@ function normalizarCardServidor(card){
       return;
     }
 
-    const payload = {
-      titulo,
-      descricao,
-      id_empresa: idEmpresa,
-      versao_concorrencia: versaoConcorrenciaCardAberto,
-      painel_faces: coletarPainelFacesDoFormulario()
-    };
+    const idCardSalvo = idNum(cardAbertoId);
 
-    const r = await fetch(`/kanban/api/cards/${cardAbertoId}`, {
+    const payload = {
+  titulo,
+  descricao,
+  id_empresa: idEmpresa,
+  versao_concorrencia: versaoConcorrenciaCardAberto
+};
+
+const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
+if (painelFaceLigado) {
+  const itensPainelFace = coletarPainelFacesDoFormulario();
+  if (Array.isArray(itensPainelFace)) {
+    payload.painel_faces = itensPainelFace;
+  }
+}
+
+    const r = await fetch(`/kanban/api/cards/${idCardSalvo}`, {
       method:"PUT",
       credentials: "same-origin",
       headers: headersJSON,
@@ -3556,6 +3599,7 @@ function normalizarCardServidor(card){
         if (j && j.card_atual) {
           const cardAtualConflito = normalizarCardServidor(j.card_atual);
           inserirOuAtualizarCardLocal(cardAtualConflito);
+          redesenharFases([idNum(cardAtualConflito.IDDimKanbanFaseAtual)], true);
         }
         mostrarMensagemCard((j && j.msg) || "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.");
         cardAbertoConflitoExterno = true;
@@ -3570,9 +3614,13 @@ function normalizarCardServidor(card){
     if (j.card) {
       const cardAtualizado = normalizarCardServidor(j.card);
       inserirOuAtualizarCardLocal(cardAtualizado);
-      versaoConcorrenciaCardAberto = safeStr(cardAtualizado.VersaoConcorrenciaHex);
+      versaoConcorrenciaCardAberto = safeStr(
+        cardAtualizado.VersaoConcorrenciaHex ||
+        cardAtualizado.VersaoConcorrencia ||
+        cardAtualizado.versao_concorrencia ||
+        versaoConcorrenciaCardAberto
+      ).trim();
       atualizarEstadoSalvarCard();
-      redesenharFases([idNum(cardAtualizado.IDDimKanbanFaseAtual)], true);
     }
 
     const resNota = await salvarNotaSeTiverTexto();
@@ -3581,8 +3629,19 @@ function normalizarCardServidor(card){
       return;
     }
 
-    await abrirCard(cardAbertoId);
-    redesenharFases([idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual)], true);
+    await sincronizarCardPorDetalhe(idCardSalvo, false);
+
+    const cardAtual = obterCardPorId(idCardSalvo);
+    const idFaseAtual = idNum(cardAtual?.IDDimKanbanFaseAtual || j?.card?.IDDimKanbanFaseAtual || 0);
+
+    if (idFaseAtual) {
+      redesenharFases([idFaseAtual], true);
+    } else {
+      await carregar();
+    }
+
+    fecharModalCard();
+    mostrarMensagemBoard("Alterações salvas", "sucesso", 2500);
   });
 
   function renderNotas(notas) {
