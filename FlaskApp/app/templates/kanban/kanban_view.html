@@ -992,11 +992,43 @@
   }
 
   .kb-painel-item-grid-2{
-    display:grid;
-    grid-template-columns: minmax(0, 1fr) minmax(150px, 170px) minmax(130px, 150px);
-    gap:10px;
-    align-items:center;
-  }
+  display:grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(170px, 0.95fr) minmax(320px, 1.65fr);
+  gap:10px;
+  align-items:end;
+}
+
+.kb-campo-curto{
+  max-width: 240px;
+}
+
+.kb-campo-medio{
+  max-width: 280px;
+}
+
+.kb-campo-largo{
+  min-width: 0;
+}
+
+.kb-kpi{
+  min-height:44px;
+  border:1px solid rgba(15,23,42,.10);
+  background: rgba(15,23,42,.03);
+  border-radius:12px;
+  padding:10px 12px;
+  display:flex;
+  align-items:center;
+  font-weight:900;
+  color: rgba(15,23,42,.90);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.kb-select.grow{
+  width:100%;
+  min-width:0;
+}
 
   .kb-painel-item-grid-3{
     display:grid;
@@ -2374,76 +2406,171 @@ function atualizarResumoComercial(bloco){
 
 
 
-  function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
-    const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
-    if (!wrap) return;
 
-    let selectPreco = bloco.querySelector('[data-role="select-preco"]');
-    if (!selectPreco){
-      selectPreco = el('select', { class:'kb-select grow', 'data-role':'select-preco' });
-    }
 
-    bloco.__dadosComerciais = comercial || null;
-    montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
 
-    wrap.innerHTML = '';
-    wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, [
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['Preço / tabela']),
-        selectPreco
-      ]),
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['Custo do ponto']),
-        el('div', { class:'kb-kpi', 'data-role':'kpi-custo' }, ['—'])
-      ]),
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['Margem atual']),
-        el('div', { class:'kb-kpi', 'data-role':'kpi-margem-base' }, ['—'])
-      ])
-    ]));
 
-    wrap.appendChild(el('div', { class:'kb-painel-item-grid-3' }, [
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['NovoValor']),
-        el('input', { class:'kb-input', 'data-role':'input-novo-valor', type:'number', step:'0.01', min:'0', placeholder:'Ex: 15000,00' })
-      ]),
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['Percentual']),
-        el('input', { class:'kb-input', 'data-role':'input-percentual', type:'number', step:'0.01', placeholder:'Ex: 10,00' })
-      ]),
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['Valor final']),
-        el('div', { class:'kb-kpi', 'data-role':'kpi-valor-final' }, ['—'])
-      ]),
-      el('div', { class:'kb-campo' }, [
-        el('div', { class:'kb-campo-label' }, ['Margem final']),
-        el('div', { class:'kb-kpi', 'data-role':'kpi-margem-final' }, ['—'])
-      ])
-    ]));
 
-    const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
-    const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
+function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
+  const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
+  if (!wrap) return;
 
-    selectPreco.addEventListener('change', () => atualizarResumoComercial(bloco));
-    inputNovoValor?.addEventListener('input', () => {
-      if (safeStr(inputNovoValor.value).trim()) inputPercentual.value = '';
-      atualizarResumoComercial(bloco);
-    });
-    inputPercentual?.addEventListener('input', () => {
-      if (safeStr(inputPercentual.value).trim()) inputNovoValor.value = '';
-      atualizarResumoComercial(bloco);
-    });
-
-    if (valoresSalvos){
-      const idPrecoSalvo = idNum(valoresSalvos.IDDimTabelaPrecosEuromidia || valoresSalvos.id_preco || 0);
-      if (idPrecoSalvo) selectPreco.value = String(idPrecoSalvo);
-      if (inputNovoValor && valoresSalvos.NovoValor != null) inputNovoValor.value = String(valoresSalvos.NovoValor).replace('.', ',');
-      if (inputPercentual && valoresSalvos.PercentualDesconto != null) inputPercentual.value = String(valoresSalvos.PercentualDesconto).replace('.', ',');
-    }
-
-    atualizarResumoComercial(bloco);
+  let selectPreco = bloco.querySelector('[data-role="select-preco"]');
+  if (!selectPreco){
+    selectPreco = el('select', { class:'kb-select grow', 'data-role':'select-preco' });
   }
 
+  bloco.__dadosComerciais = comercial || null;
+  montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
+
+  wrap.innerHTML = '';
+
+  /*
+    Mantive o layout em blocos/kpis.
+    A única correção aqui é funcional:
+    - mostrar custo atual
+    - mostrar preço de venda atual
+    - mostrar margem atual
+    - permitir manter o preço atual ou trocar por novo valor/desconto
+  */
+  wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, [
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Custo atual']),
+      el('div', { class:'kb-kpi', 'data-role':'kpi-custo' }, ['—'])
+    ]),
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Preço de venda atual']),
+      el('div', { class:'kb-kpi', 'data-role':'kpi-preco-atual' }, ['—'])
+    ]),
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Tabela / preço']),
+      selectPreco
+    ]),
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Margem atual']),
+      el('div', { class:'kb-kpi', 'data-role':'kpi-margem-base' }, ['—'])
+    ])
+  ]));
+
+  wrap.appendChild(el('div', { class:'kb-painel-item-grid-3' }, [
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Novo valor']),
+      el('input', {
+        class:'kb-input',
+        'data-role':'input-novo-valor',
+        type:'number',
+        step:'0.01',
+        min:'0',
+        placeholder:'Ex: 1500,00'
+      })
+    ]),
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Desconto %']),
+      el('input', {
+        class:'kb-input',
+        'data-role':'input-percentual',
+        type:'number',
+        step:'0.01',
+        placeholder:'Ex: 10,00'
+      })
+    ]),
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Valor final']),
+      el('div', { class:'kb-kpi', 'data-role':'kpi-valor-final' }, ['—'])
+    ]),
+    el('div', { class:'kb-campo' }, [
+      el('div', { class:'kb-campo-label' }, ['Margem final']),
+      el('div', { class:'kb-kpi', 'data-role':'kpi-margem-final' }, ['—'])
+    ])
+  ]));
+
+  const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
+  const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
+
+  selectPreco.addEventListener('change', () => {
+    atualizarResumoComercial(bloco);
+  });
+
+  inputNovoValor?.addEventListener('input', () => {
+    if (safeStr(inputNovoValor.value).trim()){
+      inputPercentual.value = '';
+    }
+    atualizarResumoComercial(bloco);
+  });
+
+  inputPercentual?.addEventListener('input', () => {
+    if (safeStr(inputPercentual.value).trim()){
+      inputNovoValor.value = '';
+    }
+    atualizarResumoComercial(bloco);
+  });
+
+  /*
+    Reidratação correta:
+    - preço salvo continua selecionado
+    - novo valor salvo volta
+    - desconto salvo volta
+    - se não houver novo valor nem desconto, o sistema assume o preço atual
+  */
+  if (valoresSalvos){
+    const idPrecoSalvo = idNum(
+      valoresSalvos.IDDimTabelaPrecosEuromidia ||
+      valoresSalvos.id_preco ||
+      valoresSalvos.IDTabelaPreco ||
+      0
+    );
+
+    const novoValorSalvo =
+      valoresSalvos.NovoValor ??
+      valoresSalvos.novo_valor ??
+      null;
+
+    const percentualSalvo =
+      valoresSalvos.PercentualDesconto ??
+      valoresSalvos.percentual_desconto ??
+      null;
+
+    if (idPrecoSalvo) {
+      selectPreco.value = String(idPrecoSalvo);
+    }
+
+    if (inputNovoValor) {
+      inputNovoValor.value =
+        novoValorSalvo !== null && novoValorSalvo !== undefined
+          ? String(novoValorSalvo).replace('.', ',')
+          : '';
+    }
+
+    if (inputPercentual) {
+      inputPercentual.value =
+        percentualSalvo !== null && percentualSalvo !== undefined
+          ? String(percentualSalvo).replace('.', ',')
+          : '';
+    }
+
+    /*
+      Se existir novo valor salvo, ele prevalece sobre desconto.
+      Se existir desconto salvo e não houver novo valor, desconto prevalece.
+    */
+    if (
+      novoValorSalvo !== null &&
+      novoValorSalvo !== undefined &&
+      safeStr(String(novoValorSalvo)).trim() !== ''
+    ){
+      inputPercentual.value = '';
+    }
+  }
+
+  atualizarResumoComercial(bloco);
+}
+
+
+
+
+
+
+
+  
   async function atualizarFacesDoBloco(bloco, dadosSalvos = null){
     const selectPainel = bloco.querySelector('[data-role="select-painel"]');
     const selectFace = bloco.querySelector('[data-role="select-face"]');

@@ -349,10 +349,6 @@ def _rowversion_hex_para_bytes(valor: Any) -> bytes | None:
 
 
 
-
-
-
-
 def _salvar_vinculos_painel_face_card(
     id_card: int,
     vinculos_preparados: list[dict] | None = None,
@@ -361,20 +357,14 @@ def _salvar_vinculos_painel_face_card(
     itens_painel_face: list[dict] | None = None,
 ) -> None:
     """
-    Salva o histórico de vínculos de painel/face do card sem apagar registros antigos.
+    Salva o estado operacional de painel/face do card sem duplicar linhas ativas idênticas.
 
-    Regra:
-    - não faz DELETE físico
-    - mantém histórico
-    - encerra logicamente vínculos ativos que não existem mais no estado atual
-    - insere novos vínculos quando o estado atual ainda não existir como linha ativa
-    - evita duplicar linha ativa idêntica
-    - não insere linha vazia
-    - gera Ordem automaticamente quando não vier preenchida
-
-    Compatibilidade:
-    - aceita tanto 'vinculos_preparados' quanto 'itens_painel_face'
-    - se os dois vierem preenchidos, prioriza 'vinculos_preparados'
+    Lógica desta versão:
+    1) a identidade operacional do vínculo é a combinação painel + face
+    2) a linha ativa só é encerrada quando o estado comercial/operacional realmente mudou
+    3) reenviar o mesmo payload não cria nova linha
+    4) remover um painel/face do payload encerra logicamente a linha ativa correspondente
+    5) diferenças cosméticas de formato (None, "", vírgula, casas decimais) são normalizadas antes da comparação
     """
 
     if isinstance(vinculos_preparados, list):
@@ -385,91 +375,58 @@ def _salvar_vinculos_painel_face_card(
         itens_entrada = []
 
     def obter_primeiro(item: dict, chaves: tuple[str, ...]) -> object:
-        """
-        Retorna o primeiro valor encontrado entre várias chaves possíveis.
-        """
         for chave in chaves:
             if chave in item:
                 valor = item.get(chave)
-                if valor is not None and valor != "":
+                if valor is not None and str(valor).strip() != "":
                     return valor
         return None
 
     def normalizar_texto(valor: object) -> str | None:
         if valor is None:
             return None
-
-        texto = str(valor).strip()
+        texto = " ".join(str(valor).strip().split())
         return texto if texto else None
 
     def normalizar_inteiro(valor: object) -> int | None:
         if valor is None or valor == "":
             return None
-
         if isinstance(valor, bool):
             return int(valor)
-
         try:
             return int(str(valor).strip())
         except (TypeError, ValueError):
             return None
 
-    def normalizar_decimal(valor: object) -> Decimal | None:
+    def normalizar_decimal(valor: object, casas: str = "0.0001") -> Decimal | None:
         if valor is None or valor == "":
             return None
 
         if isinstance(valor, Decimal):
-            return valor
-
-        if isinstance(valor, (int, float)):
+            dec = valor
+        else:
+            if isinstance(valor, (int, float)):
+                texto = str(valor)
+            else:
+                texto = str(valor).strip()
+                if not texto:
+                    return None
+                if "," in texto:
+                    texto = texto.replace(".", "").replace(",", ".")
             try:
-                return Decimal(str(valor))
+                dec = Decimal(str(texto))
             except (InvalidOperation, TypeError, ValueError):
                 return None
 
-        texto = str(valor).strip()
-        if not texto:
-            return None
-
-        if "," in texto:
-            texto = texto.replace(".", "").replace(",", ".")
-        else:
-            texto = texto
-
         try:
-            return Decimal(texto)
-        except (InvalidOperation, TypeError, ValueError):
-            return None
+            return dec.quantize(Decimal(casas))
+        except Exception:
+            return dec
 
     def linha_tem_conteudo_minimo(linha: dict) -> bool:
-        """
-        Evita inserir linha completamente vazia.
-        Considero conteúdo mínimo qualquer identificação operacional/comercial do vínculo.
-        """
-        campos_relevantes = (
-            "IDDimPaineisEuromidia",
-            "IDDimFacesPaineis",
-            "CodPonto",
-            "CodFace",
-            "TipoPainel",
-            "IDDimTabelaPrecosEuromidia",
-            "PeriodoExibicao",
-            "Tabela",
-            "ValorVendaFinal",
-            "NovoValor",
-            "ValorTabela",
-            "CustoTabela",
-        )
-
-        return any(linha.get(campo) is not None for campo in campos_relevantes)
+        return bool(linha.get("IDDimPaineisEuromidia") and linha.get("IDDimFacesPaineis"))
 
     def normalizar_linha(item: dict, ordem_padrao: int) -> dict:
-        """
-        Converte o payload para o formato canônico.
-
-        Também aceita chaves alternativas porque o front/preparação
-        pode estar mandando nomes diferentes.
-        """
         linha = {
             "Ordem": normalizar_inteiro(
                 obter_primeiro(item, ("Ordem", "ordem", "Indice", "indice", "Sequencia", "sequencia"))
@@ -497,6 +454,7 @@ def _salvar_vinculos_painel_face_card(
                         "id_face",
                         "IDPainelFace",
                         "IDDimFace",
+                        "id_dim_face",
                     ),
                 )
             ),
@@ -509,9 +467,7 @@ def _salvar_vinculos_painel_face_card(
             "TipoPainel": normalizar_texto(
                 obter_primeiro(item, ("TipoPainel", "tipo_painel", "TipoMidia", "tipo_midia"))
             ),
-            "AnoCusto": normalizar_inteiro(
-                obter_primeiro(item, ("AnoCusto", "ano_custo"))
-            ),
+            "AnoCusto": normalizar_inteiro(obter_primeiro(item, ("AnoCusto", "ano_custo"))),
             "CustoTabela": normalizar_decimal(
                 obter_primeiro(item, ("CustoTabela", "custo_tabela", "Custo", "custo"))
             ),
@@ -523,27 +479,18 @@ def _salvar_vinculos_painel_face_card(
                         "id_dim_tabela_precos_euromidia",
                         "IDTabelaPreco",
                         "id_tabela_preco",
+                        "id_preco",
                     ),
                 )
             ),
             "PeriodoExibicao": normalizar_texto(
                 obter_primeiro(item, ("PeriodoExibicao", "periodo_exibicao", "Periodo", "periodo"))
             ),
-            "ExibicoesDia": normalizar_inteiro(
-                obter_primeiro(item, ("ExibicoesDia", "exibicoes_dia"))
-            ),
-            "ValorTabela": normalizar_decimal(
-                obter_primeiro(item, ("ValorTabela", "valor_tabela"))
-            ),
-            "Tabela": normalizar_texto(
-                obter_primeiro(item, ("Tabela", "tabela", "NomeTabela", "nome_tabela"))
-            ),
-            "PoliticaTrocas": normalizar_texto(
-                obter_primeiro(item, ("PoliticaTrocas", "politica_trocas"))
-            ),
-            "ValorTroca": normalizar_decimal(
-                obter_primeiro(item, ("ValorTroca", "valor_troca"))
-            ),
+            "ExibicoesDia": normalizar_inteiro(obter_primeiro(item, ("ExibicoesDia", "exibicoes_dia"))),
+            "ValorTabela": normalizar_decimal(obter_primeiro(item, ("ValorTabela", "valor_tabela"))),
+            "Tabela": normalizar_texto(obter_primeiro(item, ("Tabela", "tabela", "NomeTabela", "nome_tabela"))),
+            "PoliticaTrocas": normalizar_texto(obter_primeiro(item, ("PoliticaTrocas", "politica_trocas"))),
+            "ValorTroca": normalizar_decimal(obter_primeiro(item, ("ValorTroca", "valor_troca"))),
             "NovoValor": normalizar_decimal(
                 obter_primeiro(item, ("NovoValor", "novo_valor", "ValorNegociado", "valor_negociado"))
             ),
@@ -553,45 +500,42 @@ def _salvar_vinculos_painel_face_card(
             "ValorVendaFinal": normalizar_decimal(
                 obter_primeiro(item, ("ValorVendaFinal", "valor_venda_final", "ValorVenda", "valor_venda"))
             ),
-            "MargemValor": normalizar_decimal(
-                obter_primeiro(item, ("MargemValor", "margem_valor"))
-            ),
+            "MargemValor": normalizar_decimal(obter_primeiro(item, ("MargemValor", "margem_valor"))),
             "MargemPercentual": normalizar_decimal(
                 obter_primeiro(item, ("MargemPercentual", "margem_percentual"))
             ),
         }
 
-        """
-        Ordem é obrigatória no banco.
-        Se não vier do front, eu gero pela posição do item.
-        """
         if linha["Ordem"] is None:
             linha["Ordem"] = ordem_padrao
 
         return linha
 
-    def assinatura_comparacao(linha: dict) -> tuple:
+    def chave_principal(linha: dict) -> tuple[int | None, int | None]:
         return (
-            linha.get("Ordem"),
-            linha.get("IDDimPaineisEuromidia"),
-            linha.get("IDDimFacesPaineis"),
-            linha.get("CodPonto"),
-            linha.get("CodFace"),
-            linha.get("TipoPainel"),
-            linha.get("AnoCusto"),
-            linha.get("CustoTabela"),
-            linha.get("IDDimTabelaPrecosEuromidia"),
-            linha.get("PeriodoExibicao"),
-            linha.get("ExibicoesDia"),
-            linha.get("ValorTabela"),
-            linha.get("Tabela"),
-            linha.get("PoliticaTrocas"),
-            linha.get("ValorTroca"),
-            linha.get("NovoValor"),
-            linha.get("PercentualDesconto"),
-            linha.get("ValorVendaFinal"),
-            linha.get("MargemValor"),
-            linha.get("MargemPercentual"),
+            normalizar_inteiro(linha.get("IDDimPaineisEuromidia")),
+            normalizar_inteiro(linha.get("IDDimFacesPaineis")),
+        )
+
+    def assinatura_estado(linha: dict) -> tuple:
+        return (
+            normalizar_texto(linha.get("CodPonto")),
+            normalizar_texto(linha.get("CodFace")),
+            normalizar_texto(linha.get("TipoPainel")),
+            normalizar_inteiro(linha.get("AnoCusto")),
+            normalizar_decimal(linha.get("CustoTabela")),
+            normalizar_inteiro(linha.get("IDDimTabelaPrecosEuromidia")),
+            normalizar_texto(linha.get("PeriodoExibicao")),
+            normalizar_inteiro(linha.get("ExibicoesDia")),
+            normalizar_decimal(linha.get("ValorTabela")),
+            normalizar_texto(linha.get("Tabela")),
+            normalizar_texto(linha.get("PoliticaTrocas")),
+            normalizar_decimal(linha.get("ValorTroca")),
+            normalizar_decimal(linha.get("NovoValor")),
+            normalizar_decimal(linha.get("PercentualDesconto")),
+            normalizar_decimal(linha.get("ValorVendaFinal")),
+            normalizar_decimal(linha.get("MargemValor")),
+            normalizar_decimal(linha.get("MargemPercentual")),
         )
 
     sql_buscar_ativos = text(
@@ -622,214 +566,206 @@ def _salvar_vinculos_painel_face_card(
             Ativo
         FROM [Kanban].[Silver].[FatoKanbanCardPainelFace]
         WHERE IDFatoKanbanCard = :id_card
-          AND Ativo = 1
+          AND ISNULL(Ativo, 1) = 1
         """
     )
 
-    resultado_ativos = db.session.execute(sql_buscar_ativos, {"id_card": id_card})
-    linhas_ativas = [dict(linha._mapping) for linha in resultado_ativos]
+    linhas_ativas = [
+        dict(linha._mapping)
+        for linha in db.session.execute(sql_buscar_ativos, {"id_card": int(id_card)})
+    ]
 
-    linhas_ativas_normalizadas: list[dict] = []
+    ativos_por_chave: dict[tuple[int | None, int | None], dict] = {}
     for linha in linhas_ativas:
-        linhas_ativas_normalizadas.append(
-            {
-                "IDFatoKanbanCardPainelFace": normalizar_inteiro(linha.get("IDFatoKanbanCardPainelFace")),
-                "Ordem": normalizar_inteiro(linha.get("Ordem")),
-                "IDDimPaineisEuromidia": normalizar_inteiro(linha.get("IDDimPaineisEuromidia")),
-                "IDDimFacesPaineis": normalizar_inteiro(linha.get("IDDimFacesPaineis")),
-                "CodPonto": normalizar_texto(linha.get("CodPonto")),
-                "CodFace": normalizar_texto(linha.get("CodFace")),
-                "TipoPainel": normalizar_texto(linha.get("TipoPainel")),
-                "AnoCusto": normalizar_inteiro(linha.get("AnoCusto")),
-                "CustoTabela": normalizar_decimal(linha.get("CustoTabela")),
-                "IDDimTabelaPrecosEuromidia": normalizar_inteiro(linha.get("IDDimTabelaPrecosEuromidia")),
-                "PeriodoExibicao": normalizar_texto(linha.get("PeriodoExibicao")),
-                "ExibicoesDia": normalizar_inteiro(linha.get("ExibicoesDia")),
-                "ValorTabela": normalizar_decimal(linha.get("ValorTabela")),
-                "Tabela": normalizar_texto(linha.get("Tabela")),
-                "PoliticaTrocas": normalizar_texto(linha.get("PoliticaTrocas")),
-                "ValorTroca": normalizar_decimal(linha.get("ValorTroca")),
-                "NovoValor": normalizar_decimal(linha.get("NovoValor")),
-                "PercentualDesconto": normalizar_decimal(linha.get("PercentualDesconto")),
-                "ValorVendaFinal": normalizar_decimal(linha.get("ValorVendaFinal")),
-                "MargemValor": normalizar_decimal(linha.get("MargemValor")),
-                "MargemPercentual": normalizar_decimal(linha.get("MargemPercentual")),
-            }
-        )
+        linha_normalizada = {
+            "IDFatoKanbanCardPainelFace": normalizar_inteiro(linha.get("IDFatoKanbanCardPainelFace")),
+            "Ordem": normalizar_inteiro(linha.get("Ordem")),
+            "IDDimPaineisEuromidia": normalizar_inteiro(linha.get("IDDimPaineisEuromidia")),
+            "IDDimFacesPaineis": normalizar_inteiro(linha.get("IDDimFacesPaineis")),
+            "CodPonto": normalizar_texto(linha.get("CodPonto")),
+            "CodFace": normalizar_texto(linha.get("CodFace")),
+            "TipoPainel": normalizar_texto(linha.get("TipoPainel")),
+            "AnoCusto": normalizar_inteiro(linha.get("AnoCusto")),
+            "CustoTabela": normalizar_decimal(linha.get("CustoTabela")),
+            "IDDimTabelaPrecosEuromidia": normalizar_inteiro(linha.get("IDDimTabelaPrecosEuromidia")),
+            "PeriodoExibicao": normalizar_texto(linha.get("PeriodoExibicao")),
+            "ExibicoesDia": normalizar_inteiro(linha.get("ExibicoesDia")),
+            "ValorTabela": normalizar_decimal(linha.get("ValorTabela")),
+            "Tabela": normalizar_texto(linha.get("Tabela")),
+            "PoliticaTrocas": normalizar_texto(linha.get("PoliticaTrocas")),
+            "ValorTroca": normalizar_decimal(linha.get("ValorTroca")),
+            "NovoValor": normalizar_decimal(linha.get("NovoValor")),
+            "PercentualDesconto": normalizar_decimal(linha.get("PercentualDesconto")),
+            "ValorVendaFinal": normalizar_decimal(linha.get("ValorVendaFinal")),
+            "MargemValor": normalizar_decimal(linha.get("MargemValor")),
+            "MargemPercentual": normalizar_decimal(linha.get("MargemPercentual")),
+        }
 
-    itens_normalizados: list[dict] = []
+        chave = chave_principal(linha_normalizada)
+        if chave[0] and chave[1] and chave not in ativos_por_chave:
+            ativos_por_chave[chave] = linha_normalizada
+
+    novos_por_chave: dict[tuple[int | None, int | None], dict] = {}
     for indice, item in enumerate(itens_entrada, start=1):
         if not isinstance(item, dict):
             continue
-
         linha = normalizar_linha(item, ordem_padrao=indice)
-
-        """
-        Se a linha veio completamente vazia, não tento inserir.
-        Isso evita exatamente o cenário do erro atual:
-        vários campos None sendo empurrados para o banco.
-        """
         if not linha_tem_conteudo_minimo(linha):
             continue
+        chave = chave_principal(linha)
+        if chave[0] and chave[1]:
+            novos_por_chave[chave] = linha
 
-        itens_normalizados.append(linha)
+    sql_encerrar = text(
+        """
+        UPDATE [Kanban].[Silver].[FatoKanbanCardPainelFace]
+           SET Ativo = 0,
+               DataAtualizacao = GETDATE(),
+               RemovidoEm = GETDATE(),
+               RemovidoPor = :id_usuario
+         WHERE IDFatoKanbanCardPainelFace = :id_fato_kanban_card_painel_face
+           AND ISNULL(Ativo, 1) = 1
+        """
+    )
 
-    mapa_ativos_por_assinatura: dict[tuple, list[dict]] = {}
-    for linha in linhas_ativas_normalizadas:
-        chave = assinatura_comparacao(linha)
-        mapa_ativos_por_assinatura.setdefault(chave, []).append(linha)
-
-    ids_ativos_que_permanecem: set[int] = set()
-    itens_para_inserir: list[dict] = []
-
-    for item_novo in itens_normalizados:
-        chave_item_novo = assinatura_comparacao(item_novo)
-        ativos_iguais = mapa_ativos_por_assinatura.get(chave_item_novo, [])
-
-        if ativos_iguais:
-            linha_existente = ativos_iguais.pop(0)
-            id_linha_existente = linha_existente.get("IDFatoKanbanCardPainelFace")
-
-            if id_linha_existente is not None:
-                ids_ativos_que_permanecem.add(int(id_linha_existente))
-        else:
-            itens_para_inserir.append(item_novo)
-
-    ids_ativos_para_encerrar: list[int] = []
-    for linha_ativa in linhas_ativas_normalizadas:
-        id_linha = linha_ativa.get("IDFatoKanbanCardPainelFace")
-        if id_linha is None:
-            continue
-
-        if int(id_linha) not in ids_ativos_que_permanecem:
-            ids_ativos_para_encerrar.append(int(id_linha))
-
-    if ids_ativos_para_encerrar:
-        sql_encerrar = text(
-            """
-            UPDATE [Kanban].[Silver].[FatoKanbanCardPainelFace]
-               SET Ativo = 0,
-                   DataAtualizacao = GETDATE(),
-                   RemovidoEm = GETDATE(),
-                   RemovidoPor = :id_usuario
-             WHERE IDFatoKanbanCardPainelFace = :id_fato_kanban_card_painel_face
-               AND Ativo = 1
-            """
+    sql_inserir = text(
+        """
+        INSERT INTO [Kanban].[Silver].[FatoKanbanCardPainelFace]
+        (
+            IDFatoKanbanCard,
+            Ordem,
+            IDDimPaineisEuromidia,
+            IDDimFacesPaineis,
+            CodPonto,
+            CodFace,
+            TipoPainel,
+            AnoCusto,
+            CustoTabela,
+            IDDimTabelaPrecosEuromidia,
+            PeriodoExibicao,
+            ExibicoesDia,
+            ValorTabela,
+            Tabela,
+            PoliticaTrocas,
+            ValorTroca,
+            NovoValor,
+            PercentualDesconto,
+            ValorVendaFinal,
+            MargemValor,
+            MargemPercentual,
+            Ativo,
+            CriadoEm,
+            DataAtualizacao,
+            RemovidoEm,
+            RemovidoPor,
+            IDUsuario,
+            IDEmpresaProprietaria
         )
+        VALUES
+        (
+            :id_card,
+            :ordem,
+            :id_painel,
+            :id_face,
+            :cod_ponto,
+            :cod_face,
+            :tipo_painel,
+            :ano_custo,
+            :custo_tabela,
+            :id_tabela_preco,
+            :periodo_exibicao,
+            :exibicoes_dia,
+            :valor_tabela,
+            :tabela,
+            :politica_trocas,
+            :valor_troca,
+            :novo_valor,
+            :percentual_desconto,
+            :valor_venda_final,
+            :margem_valor,
+            :margem_percentual,
+            1,
+            GETDATE(),
+            GETDATE(),
+            NULL,
+            NULL,
+            :id_usuario,
+            :id_empresa_proprietaria
+        )
+        """
+    )
 
-        for id_linha in ids_ativos_para_encerrar:
+    chaves_ativas = set(ativos_por_chave.keys())
+    chaves_novas = set(novos_por_chave.keys())
+
+    for chave_removida in sorted(
+        chaves_ativas - chaves_novas,
+        key=lambda item: (
+            item[0] is None,
+            item[0] or 0,
+            item[1] is None,
+            item[1] or 0,
+        ),
+    ):
+        linha_ativa = ativos_por_chave[chave_removida]
+        id_linha = linha_ativa.get("IDFatoKanbanCardPainelFace")
+        if id_linha:
             db.session.execute(
                 sql_encerrar,
                 {
                     "id_usuario": id_usuario,
-                    "id_fato_kanban_card_painel_face": id_linha,
+                    "id_fato_kanban_card_painel_face": int(id_linha),
                 },
             )
 
-    if itens_para_inserir:
-        sql_inserir = text(
-            """
-            INSERT INTO [Kanban].[Silver].[FatoKanbanCardPainelFace]
-            (
-                IDFatoKanbanCard,
-                Ordem,
-                IDDimPaineisEuromidia,
-                IDDimFacesPaineis,
-                CodPonto,
-                CodFace,
-                TipoPainel,
-                AnoCusto,
-                CustoTabela,
-                IDDimTabelaPrecosEuromidia,
-                PeriodoExibicao,
-                ExibicoesDia,
-                ValorTabela,
-                Tabela,
-                PoliticaTrocas,
-                ValorTroca,
-                NovoValor,
-                PercentualDesconto,
-                ValorVendaFinal,
-                MargemValor,
-                MargemPercentual,
-                Ativo,
-                CriadoEm,
-                DataAtualizacao,
-                RemovidoEm,
-                RemovidoPor,
-                IDUsuario,
-                IDEmpresaProprietaria
-            )
-            VALUES
-            (
-                :id_card,
-                :ordem,
-                :id_dim_paineis_euromidia,
-                :id_dim_faces_paineis,
-                :cod_ponto,
-                :cod_face,
-                :tipo_painel,
-                :ano_custo,
-                :custo_tabela,
-                :id_dim_tabela_precos_euromidia,
-                :periodo_exibicao,
-                :exibicoes_dia,
-                :valor_tabela,
-                :tabela,
-                :politica_trocas,
-                :valor_troca,
-                :novo_valor,
-                :percentual_desconto,
-                :valor_venda_final,
-                :margem_valor,
-                :margem_percentual,
-                1,
-                GETDATE(),
-                GETDATE(),
-                NULL,
-                NULL,
-                :id_usuario,
-                :id_empresa_proprietaria
-            )
-            """
+    for chave, linha_nova in novos_por_chave.items():
+        linha_ativa = ativos_por_chave.get(chave)
+
+        if linha_ativa:
+            assinatura_ativa = assinatura_estado(linha_ativa)
+            assinatura_nova = assinatura_estado(linha_nova)
+
+            if assinatura_ativa == assinatura_nova:
+                continue
+
+            id_linha = linha_ativa.get("IDFatoKanbanCardPainelFace")
+            if id_linha:
+                db.session.execute(
+                    sql_encerrar,
+                    {
+                        "id_usuario": id_usuario,
+                        "id_fato_kanban_card_painel_face": int(id_linha),
+                    },
+                )
+
+        db.session.execute(
+            sql_inserir,
+            {
+                "id_card": int(id_card),
+                "ordem": linha_nova.get("Ordem"),
+                "id_painel": linha_nova.get("IDDimPaineisEuromidia"),
+                "id_face": linha_nova.get("IDDimFacesPaineis"),
+                "cod_ponto": linha_nova.get("CodPonto"),
+                "cod_face": linha_nova.get("CodFace"),
+                "tipo_painel": linha_nova.get("TipoPainel"),
+                "ano_custo": linha_nova.get("AnoCusto"),
+                "custo_tabela": linha_nova.get("CustoTabela"),
+                "id_tabela_preco": linha_nova.get("IDDimTabelaPrecosEuromidia"),
+                "periodo_exibicao": linha_nova.get("PeriodoExibicao"),
+                "exibicoes_dia": linha_nova.get("ExibicoesDia"),
+                "valor_tabela": linha_nova.get("ValorTabela"),
+                "tabela": linha_nova.get("Tabela"),
+                "politica_trocas": linha_nova.get("PoliticaTrocas"),
+                "valor_troca": linha_nova.get("ValorTroca"),
+                "novo_valor": linha_nova.get("NovoValor"),
+                "percentual_desconto": linha_nova.get("PercentualDesconto"),
+                "valor_venda_final": linha_nova.get("ValorVendaFinal"),
+                "margem_valor": linha_nova.get("MargemValor"),
+                "margem_percentual": linha_nova.get("MargemPercentual"),
+                "id_usuario": id_usuario,
+                "id_empresa_proprietaria": id_empresa_proprietaria,
+            },
         )
-
-        for item in itens_para_inserir:
-            db.session.execute(
-                sql_inserir,
-                {
-                    "id_card": id_card,
-                    "ordem": item.get("Ordem"),
-                    "id_dim_paineis_euromidia": item.get("IDDimPaineisEuromidia"),
-                    "id_dim_faces_paineis": item.get("IDDimFacesPaineis"),
-                    "cod_ponto": item.get("CodPonto"),
-                    "cod_face": item.get("CodFace"),
-                    "tipo_painel": item.get("TipoPainel"),
-                    "ano_custo": item.get("AnoCusto"),
-                    "custo_tabela": item.get("CustoTabela"),
-                    "id_dim_tabela_precos_euromidia": item.get("IDDimTabelaPrecosEuromidia"),
-                    "periodo_exibicao": item.get("PeriodoExibicao"),
-                    "exibicoes_dia": item.get("ExibicoesDia"),
-                    "valor_tabela": item.get("ValorTabela"),
-                    "tabela": item.get("Tabela"),
-                    "politica_trocas": item.get("PoliticaTrocas"),
-                    "valor_troca": item.get("ValorTroca"),
-                    "novo_valor": item.get("NovoValor"),
-                    "percentual_desconto": item.get("PercentualDesconto"),
-                    "valor_venda_final": item.get("ValorVendaFinal"),
-                    "margem_valor": item.get("MargemValor"),
-                    "margem_percentual": item.get("MargemPercentual"),
-                    "id_usuario": id_usuario,
-                    "id_empresa_proprietaria": id_empresa_proprietaria,
-                },
-            )
-
-
-
-
-
-
-
 
 
 def _quebrar_nome_tabela_schema_objeto(nome_tabela: str) -> tuple[str | None, str]:
@@ -2803,6 +2739,147 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
 
 
 
+def _buscar_ultima_negociacao_preco_card(
+    *,
+    id_card: int,
+    id_painel: int,
+    id_face: int,
+) -> dict[str, Any] | None:
+    """
+    Busca a última linha histórica da negociação para o mesmo card/painel/face.
+    """
+    sql = text("""
+        SELECT TOP 1
+            IDFatoKanbanNegociacaoPreco,
+            IDDimTabelaPrecosEuromidia,
+            CustoAtual,
+            PrecoAtual,
+            MargemAtual,
+            CustoAtualRateado,
+            PrecoAtualRateado,
+            MargemAtualRateado,
+            CustoProposto,
+            PrecoProposto,
+            MargemProposta,
+            CustoPropostoRateado,
+            PrecoPropostoRateado,
+            DescontoProposto,
+            ObservacoesProposta
+        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
+        WHERE IDFatoKanbanCard = :id_card
+          AND IDDimPaineisEuromidia = :id_painel
+          AND IDDimFacesPaineis = :id_face
+        ORDER BY IDFatoKanbanNegociacaoPreco DESC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_painel": int(id_painel),
+            "id_face": int(id_face),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _normalizar_int_negociacao(valor: Any) -> int | None:
+    if valor in (None, ""):
+        return None
+    try:
+        return int(valor)
+    except Exception:
+        return None
+
+
+def _normalizar_decimal_negociacao(valor: Any, casas: str = "0.0001") -> Decimal | None:
+    dec = _valor_decimal(valor)
+    if dec is None:
+        return None
+
+    try:
+        return dec.quantize(Decimal(casas))
+    except Exception:
+        return dec
+
+
+def _calcular_margem_percentual_negociacao(
+    custo: Any,
+    preco: Any,
+) -> Decimal | None:
+    custo_dec = _valor_decimal(custo)
+    preco_dec = _valor_decimal(preco)
+
+    if custo_dec is None:
+        return None
+
+    if preco_dec in (None, Decimal("0")):
+        return None
+
+    return ((preco_dec - custo_dec) / preco_dec) * Decimal("100")
+
+
+def _montar_assinatura_negociacao_preco(
+    *,
+    id_tabela_preco: Any,
+    custo_atual: Any,
+    preco_atual: Any,
+    margem_atual: Any,
+    custo_proposto: Any,
+    preco_proposto: Any,
+    margem_proposta: Any,
+    desconto_proposto: Any,
+) -> tuple:
+    """
+    Cria uma assinatura estável da negociação.
+    Se a assinatura atual for igual à última assinatura histórica,
+    não existe motivo para criar nova linha no histórico.
+    """
+    return (
+        _normalizar_int_negociacao(id_tabela_preco),
+        _normalizar_decimal_negociacao(custo_atual),
+        _normalizar_decimal_negociacao(preco_atual),
+        _normalizar_decimal_negociacao(margem_atual),
+        _normalizar_decimal_negociacao(custo_proposto),
+        _normalizar_decimal_negociacao(preco_proposto),
+        _normalizar_decimal_negociacao(margem_proposta),
+        _normalizar_decimal_negociacao(desconto_proposto),
+    )
+
+
+def _listar_estado_atual_negociacao_card(id_card: int) -> list[dict[str, Any]]:
+    """
+    Lê a foto atual canônica do card a partir da tabela operacional.
+    É essa tabela que deve ser a fonte da verdade para decidir se houve mudança.
+    """
+    sql = text("""
+        SELECT
+            pf.IDFatoKanbanCardPainelFace,
+            pf.Ordem,
+            pf.IDDimPaineisEuromidia,
+            pf.IDDimFacesPaineis,
+            pf.IDDimTabelaPrecosEuromidia,
+            pf.CustoTabela,
+            pf.ValorTabela,
+            pf.NovoValor,
+            pf.PercentualDesconto,
+            pf.ValorVendaFinal,
+            pf.MargemValor,
+            pf.MargemPercentual
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
+        WHERE pf.IDFatoKanbanCard = :id_card
+          AND ISNULL(pf.Ativo, 1) = 1
+        ORDER BY
+            ISNULL(pf.Ordem, 0),
+            pf.IDFatoKanbanCardPainelFace;
+    """)
+
+    rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
+    return [dict(row) for row in rows]
+
+
+
 
 def _registrar_negociacao_preco_card(
     *,
@@ -2814,21 +2891,7 @@ def _registrar_negociacao_preco_card(
     vinculos_preparados: list[dict[str, Any]],
     observacoes_proposta: str | None = None,
 ) -> None:
-    """
-    Grava histórico de negociação de preço.
-
-    Regras desta versão:
-    - não apaga histórico
-    - CustoProposto = custo atual do vínculo
-    - PrecoProposto = preço digitado ou preço final calculado
-    - MargemAtual = percentual sobre o preço atual
-    - MargemProposta = percentual sobre o preço proposto/final
-    - DescontoProposto = desconto informado pelo usuário
-    - se a tabela tiver nomes antigos/alternativos de colunas, tento mapear dinamicamente
-    """
-
-    if not vinculos_preparados:
-        return
+   
 
     def _tem_valor_informado(valor: Any) -> bool:
         if valor is None:
@@ -2838,17 +2901,17 @@ def _registrar_negociacao_preco_card(
         return True
 
     def _para_int_ou_none(valor: Any) -> int | None:
-        if valor is None or valor == "":
+        if valor in (None, ""):
             return None
         try:
             return int(valor)
         except (TypeError, ValueError):
             return None
 
-    def _para_decimal_ou_none(valor: Any):
-        if valor is None or valor == "":
+    def _para_decimal_ou_none(valor: Any) -> Decimal | None:
+        if valor in (None, ""):
             return None
-        return valor
+        return _valor_decimal(valor)
 
     def _montar_insert_dinamico(valores: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         colunas: list[str] = []
@@ -2881,23 +2944,22 @@ def _registrar_negociacao_preco_card(
         adicionar("IDDimFacesPaineis", "id_face", valores.get("id_face"))
         adicionar("DataPrecoProposto", "data_preco_proposto", None, usar_getdate=True)
 
-        """
-        Financeiro / negociação
-        """
         adicionar("CustoAtual", "custo_atual", valores.get("custo_atual"))
         adicionar("PrecoAtual", "preco_atual", valores.get("preco_atual"))
-        adicionar("MargemAtual", "margem_atual", valores.get("margem_atual_percentual"))
+        adicionar("MargemAtual", "margem_atual", valores.get("margem_atual"))
+
+        adicionar("CustoAtualRateado", "custo_atual_rateado", valores.get("custo_atual_rateado"))
+        adicionar("PrecoAtualRateado", "preco_atual_rateado", valores.get("preco_atual_rateado"))
+        adicionar("MargemAtualRateado", "margem_atual_rateado", valores.get("margem_atual_rateado"))
 
         adicionar("CustoProposto", "custo_proposto", valores.get("custo_proposto"))
         adicionar("PrecoProposto", "preco_proposto", valores.get("preco_proposto"))
-        adicionar("MargemProposta", "margem_proposta", valores.get("margem_proposta_percentual"))
+        adicionar("MargemProposta", "margem_proposta", valores.get("margem_proposta"))
+
+        adicionar("CustoPropostoRateado", "custo_proposto_rateado", valores.get("custo_proposto_rateado"))
+        adicionar("PrecoPropostoRateado", "preco_proposto_rateado", valores.get("preco_proposto_rateado"))
 
         adicionar("DescontoProposto", "desconto_proposto", valores.get("desconto_proposto"))
-
-        """
-        Compatibilidade com estruturas antigas
-        """
-        adicionar("CustoRateado", "custo_rateado", valores.get("custo_proposto"))
 
         adicionar("PeriodoInicio", "periodo_inicio", None)
         adicionar("PeriodoTermino", "periodo_termino", None)
@@ -2907,6 +2969,7 @@ def _registrar_negociacao_preco_card(
         adicionar("PrecoAprovado", "preco_aprovado", None)
         adicionar("DescontoAprovado", "desconto_aprovado", None)
         adicionar("ObservacoesAprovacao", "observacoes_aprovacao", None)
+        adicionar("BitAutorizacaoDiretoria", "bit_autorizacao_diretoria", 0)
 
         if not colunas:
             raise ValueError("Nenhuma coluna válida encontrada em FatoKanbanNegociacaoPreco para gravar a negociação.")
@@ -2932,42 +2995,100 @@ def _registrar_negociacao_preco_card(
         id_empresa_padrao=_id_empresa_usuario_or_403(),
     )
 
-    for vinculo in vinculos_preparados:
-        id_painel = _para_int_ou_none(vinculo.get("id_painel"))
-        id_face = _para_int_ou_none(vinculo.get("id_dim_face"))
-        id_tabela_preco = _para_int_ou_none(vinculo.get("id_preco"))
+   
+    estados_atuais = _listar_estado_atual_negociacao_card(int(id_card))
+    if not estados_atuais:
+        return
 
-        custo_atual = _para_decimal_ou_none(vinculo.get("custo_tabela"))
-        preco_atual = _para_decimal_ou_none(vinculo.get("valor_tabela"))
-        preco_proposto = _para_decimal_ou_none(vinculo.get("valor_venda_final"))
-        desconto_proposto = _para_decimal_ou_none(vinculo.get("percentual_desconto"))
+    chaves_processadas: set[tuple[int, int]] = set()
 
-        """
-        IMPORTANTE:
-        Aqui eu pego a margem percentual que já foi calculada corretamente
-        em _calcular_margens_comerciais.
-        """
-        margem_proposta_percentual = _para_decimal_ou_none(vinculo.get("margem_percentual"))
+    for estado in estados_atuais:
+        id_painel = _para_int_ou_none(estado.get("IDDimPaineisEuromidia"))
+        id_face = _para_int_ou_none(estado.get("IDDimFacesPaineis"))
 
-        margem_atual_percentual = None
-        try:
-            if preco_atual is not None and custo_atual is not None and float(preco_atual) != 0:
-                margem_atual_valor = float(preco_atual) - float(custo_atual)
-                margem_atual_percentual = (margem_atual_valor / float(preco_atual)) * 100
-        except Exception:
-            margem_atual_percentual = None
+        if not id_painel or not id_face:
+            continue
+
+        chave_painel_face = (int(id_painel), int(id_face))
+
+       
+        if chave_painel_face in chaves_processadas:
+            continue
+
+        chaves_processadas.add(chave_painel_face)
+
+        id_tabela_preco = _para_int_ou_none(estado.get("IDDimTabelaPrecosEuromidia"))
+
+        custo_atual = _para_decimal_ou_none(estado.get("CustoTabela"))
+        preco_atual = _para_decimal_ou_none(estado.get("ValorTabela"))
+        margem_atual = _calcular_margem_percentual_negociacao(
+            custo=custo_atual,
+            preco=preco_atual,
+        )
+
+        novo_valor = _para_decimal_ou_none(estado.get("NovoValor"))
+        percentual_desconto = _para_decimal_ou_none(estado.get("PercentualDesconto"))
+        valor_venda_final = _para_decimal_ou_none(estado.get("ValorVendaFinal"))
+
+       
+        preco_proposto = novo_valor
+        if preco_proposto is None:
+            preco_proposto = valor_venda_final
+        if preco_proposto is None:
+            preco_proposto = preco_atual
+
+        custo_proposto = custo_atual
+        margem_proposta = _calcular_margem_percentual_negociacao(
+            custo=custo_proposto,
+            preco=preco_proposto,
+        )
 
         tem_operacao_comercial = any(
             _tem_valor_informado(valor)
             for valor in (
                 id_tabela_preco,
+                novo_valor,
+                percentual_desconto,
+                valor_venda_final,
                 preco_atual,
-                preco_proposto,
-                desconto_proposto,
             )
         )
 
-        if not id_painel or not id_face or not tem_operacao_comercial:
+        if not tem_operacao_comercial:
+            continue
+
+        ultima_negociacao = _buscar_ultima_negociacao_preco_card(
+            id_card=int(id_card),
+            id_painel=int(id_painel),
+            id_face=int(id_face),
+        )
+
+        assinatura_atual = _montar_assinatura_negociacao_preco(
+            id_tabela_preco=id_tabela_preco,
+            custo_atual=custo_atual,
+            preco_atual=preco_atual,
+            margem_atual=margem_atual,
+            custo_proposto=custo_proposto,
+            preco_proposto=preco_proposto,
+            margem_proposta=margem_proposta,
+            desconto_proposto=percentual_desconto,
+        )
+
+        assinatura_ultima = None
+        if ultima_negociacao:
+            assinatura_ultima = _montar_assinatura_negociacao_preco(
+                id_tabela_preco=ultima_negociacao.get("IDDimTabelaPrecosEuromidia"),
+                custo_atual=ultima_negociacao.get("CustoAtual"),
+                preco_atual=ultima_negociacao.get("PrecoAtual"),
+                margem_atual=ultima_negociacao.get("MargemAtual"),
+                custo_proposto=ultima_negociacao.get("CustoProposto"),
+                preco_proposto=ultima_negociacao.get("PrecoProposto"),
+                margem_proposta=ultima_negociacao.get("MargemProposta"),
+                desconto_proposto=ultima_negociacao.get("DescontoProposto"),
+            )
+
+       
+        if assinatura_ultima is not None and assinatura_atual == assinatura_ultima:
             continue
 
         valores_insert = {
@@ -2979,25 +3100,33 @@ def _registrar_negociacao_preco_card(
             "id_fase_atual": _para_int_ou_none(id_fase_atual),
             "id_status_card": _para_int_ou_none(id_status_card),
             "observacoes_proposta": observacoes_proposta,
-
-            "id_painel": id_painel,
-            "id_face": id_face,
+            "id_painel": int(id_painel),
+            "id_face": int(id_face),
 
             "custo_atual": custo_atual,
             "preco_atual": preco_atual,
-            "margem_atual_percentual": margem_atual_percentual,
+            "margem_atual": margem_atual,
 
-            "custo_proposto": custo_atual,
+            "custo_atual_rateado": custo_atual,
+            "preco_atual_rateado": preco_atual,
+            "margem_atual_rateado": margem_atual,
+
+            "custo_proposto": custo_proposto,
             "preco_proposto": preco_proposto,
-            "margem_proposta_percentual": margem_proposta_percentual,
+            "margem_proposta": margem_proposta,
 
-            "desconto_proposto": desconto_proposto,
+            "custo_proposto_rateado": custo_proposto,
+            "preco_proposto_rateado": preco_proposto,
+
+            "desconto_proposto": percentual_desconto,
         }
 
-        sql_insert, params_insert = _montar_insert_dinamico(valores_insert)
-        db.session.execute(text(sql_insert), params_insert)
+        sql_insert, parametros_insert = _montar_insert_dinamico(valores_insert)
+        db.session.execute(text(sql_insert), parametros_insert)
 
-    
+
+
+
 
 
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
@@ -4556,6 +4685,327 @@ def api_card_criar(id_kanban: int):
 
 
 
+def _negociacao_preco_foi_alterada(
+    ultima: dict[str, Any] | None,
+    *,
+    id_tabela_preco: int | None,
+    custo_atual: Any,
+    preco_atual: Any,
+    margem_atual_percentual: Any,
+    custo_proposto: Any,
+    preco_proposto: Any,
+    margem_proposta_percentual: Any,
+    desconto_proposto: Any,
+) -> bool:
+    """
+    Decide se houve mudança real na negociação de preço.
+
+    Fundamento:
+    - histórico não deve crescer por reenvio do mesmo payload
+    - comparação decimal precisa ser normalizada para evitar falso positivo por formato
+    - a decisão deve ser feita por assinatura comercial estável, não por texto bruto do front
+    """
+
+    def normalizar_int(valor: Any) -> int | None:
+        if valor in (None, ""):
+            return None
+        try:
+            return int(valor)
+        except Exception:
+            return None
+
+    def normalizar_dec(valor: Any, casas: str = "0.0001") -> Decimal | None:
+        dec = _valor_decimal(valor)
+        if dec is None:
+            return None
+        try:
+            return dec.quantize(Decimal(casas))
+        except Exception:
+            return dec
+
+    def assinatura_fonte(
+        *,
+        id_tabela: Any,
+        custo_atual_fonte: Any,
+        preco_atual_fonte: Any,
+        margem_atual_fonte: Any,
+        custo_proposto_fonte: Any,
+        preco_proposto_fonte: Any,
+        margem_proposta_fonte: Any,
+        desconto_proposto_fonte: Any,
+    ) -> tuple:
+        return (
+            normalizar_int(id_tabela),
+            normalizar_dec(custo_atual_fonte),
+            normalizar_dec(preco_atual_fonte),
+            normalizar_dec(margem_atual_fonte),
+            normalizar_dec(custo_proposto_fonte),
+            normalizar_dec(preco_proposto_fonte),
+            normalizar_dec(margem_proposta_fonte),
+            normalizar_dec(desconto_proposto_fonte),
+        )
+
+    assinatura_atual = assinatura_fonte(
+        id_tabela=id_tabela_preco,
+        custo_atual_fonte=custo_atual,
+        preco_atual_fonte=preco_atual,
+        margem_atual_fonte=margem_atual_percentual,
+        custo_proposto_fonte=custo_proposto,
+        preco_proposto_fonte=preco_proposto,
+        margem_proposta_fonte=margem_proposta_percentual,
+        desconto_proposto_fonte=desconto_proposto,
+    )
+
+    if not ultima:
+        return True
+
+    assinatura_ultima = assinatura_fonte(
+        id_tabela=ultima.get("IDDimTabelaPrecosEuromidia"),
+        custo_atual_fonte=ultima.get("CustoAtual"),
+        preco_atual_fonte=ultima.get("PrecoAtual"),
+        margem_atual_fonte=ultima.get("MargemAtual"),
+        custo_proposto_fonte=ultima.get("CustoProposto"),
+        preco_proposto_fonte=ultima.get("PrecoProposto"),
+        margem_proposta_fonte=ultima.get("MargemProposta"),
+        desconto_proposto_fonte=ultima.get("DescontoProposto"),
+    )
+
+    return assinatura_atual != assinatura_ultima
+
+
+
+
+
+def _registrar_negociacao_preco_card(
+    *,
+    id_card: int,
+    id_kanban: int,
+    id_fase_atual: int | None,
+    status_card: str | None,
+    id_empresa_relacionada: int | None,
+    vinculos_preparados: list[dict[str, Any]],
+    observacoes_proposta: str | None = None,
+) -> None:
+    """
+    Grava histórico de negociação de preço sem duplicar linha quando nada mudou.
+
+    Fundamento desta versão:
+    - a fonte da verdade é a tabela operacional FatoKanbanCardPainelFace já salva nesta transação
+    - o histórico FatoKanbanNegociacaoPreco só recebe novo registro quando a assinatura comercial mudou
+    - salvar o card novamente, sem alterar tabela/preço/desconto/margem, não gera nova linha
+    """
+
+    if not vinculos_preparados:
+        return
+
+    def _tem_valor_informado(valor: Any) -> bool:
+        if valor is None:
+            return False
+        if isinstance(valor, str) and not valor.strip():
+            return False
+        return True
+
+    def _para_int_ou_none(valor: Any) -> int | None:
+        if valor in (None, ""):
+            return None
+        try:
+            return int(valor)
+        except (TypeError, ValueError):
+            return None
+
+    def _para_decimal_ou_none(valor: Any) -> Decimal | None:
+        if valor in (None, ""):
+            return None
+        return _valor_decimal(valor)
+
+    def _calcular_margem_percentual(custo: Any, preco: Any) -> Decimal | None:
+        custo_dec = _valor_decimal(custo)
+        preco_dec = _valor_decimal(preco)
+
+        if custo_dec is None:
+            return None
+        if preco_dec in (None, Decimal("0")):
+            return None
+
+        return ((preco_dec - custo_dec) / preco_dec) * Decimal("100")
+
+    def _montar_insert_dinamico(valores: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        colunas: list[str] = []
+        marcadores: list[str] = []
+        parametros: dict[str, Any] = {}
+
+        def adicionar(nome_coluna: str, nome_parametro: str, valor: Any, usar_getdate: bool = False) -> None:
+            if not _coluna_existe(TABELA_CARD_NEGOCIACAO_PRECO, nome_coluna):
+                return
+
+            colunas.append(nome_coluna)
+
+            if usar_getdate:
+                marcadores.append("GETDATE()")
+            else:
+                marcadores.append(f":{nome_parametro}")
+                parametros[nome_parametro] = valor
+
+        adicionar("IDDimUsuarios", "id_usuario", valores.get("id_usuario"))
+        adicionar("IDEmpresaProprietaria", "id_empresa_proprietaria", valores.get("id_empresa_proprietaria"))
+        adicionar("IDDimTabelaPrecosEuromidia", "id_tabela_preco", valores.get("id_tabela_preco"))
+        adicionar("IDEmpresa", "id_empresa_relacionada", valores.get("id_empresa_relacionada"))
+        adicionar("IDFatoKanbanCard", "id_card", valores.get("id_card"))
+        adicionar("IDDimKanbanFase", "id_fase_atual", valores.get("id_fase_atual"))
+        adicionar("IDDimKanbanStatusCard", "id_status_card", valores.get("id_status_card"))
+        adicionar("IDFatoControleContratosEuromidia", "id_controle_contrato", None)
+        adicionar("BitAditivoContrato", "bit_aditivo", 0)
+        adicionar("ObservacoesProposta", "observacoes_proposta", valores.get("observacoes_proposta"))
+        adicionar("IDDimPaineisEuromidia", "id_painel", valores.get("id_painel"))
+        adicionar("IDDimFacesPaineis", "id_face", valores.get("id_face"))
+        adicionar("DataPrecoProposto", "data_preco_proposto", None, usar_getdate=True)
+
+        adicionar("CustoAtual", "custo_atual", valores.get("custo_atual"))
+        adicionar("PrecoAtual", "preco_atual", valores.get("preco_atual"))
+        adicionar("MargemAtual", "margem_atual", valores.get("margem_atual"))
+
+        adicionar("CustoAtualRateado", "custo_atual_rateado", valores.get("custo_atual_rateado"))
+        adicionar("PrecoAtualRateado", "preco_atual_rateado", valores.get("preco_atual_rateado"))
+        adicionar("MargemAtualRateado", "margem_atual_rateado", valores.get("margem_atual_rateado"))
+
+        adicionar("CustoProposto", "custo_proposto", valores.get("custo_proposto"))
+        adicionar("PrecoProposto", "preco_proposto", valores.get("preco_proposto"))
+        adicionar("MargemProposta", "margem_proposta", valores.get("margem_proposta"))
+
+        adicionar("CustoPropostoRateado", "custo_proposto_rateado", valores.get("custo_proposto_rateado"))
+        adicionar("PrecoPropostoRateado", "preco_proposto_rateado", valores.get("preco_proposto_rateado"))
+
+        adicionar("DescontoProposto", "desconto_proposto", valores.get("desconto_proposto"))
+
+        adicionar("PeriodoInicio", "periodo_inicio", None)
+        adicionar("PeriodoTermino", "periodo_termino", None)
+
+        adicionar("IDDimUsuariosAprovacaoPreco", "id_usuario_aprovacao", None)
+        adicionar("DataAprovacaoPreco", "data_aprovacao", None)
+        adicionar("PrecoAprovado", "preco_aprovado", None)
+        adicionar("DescontoAprovado", "desconto_aprovado", None)
+        adicionar("ObservacoesAprovacao", "observacoes_aprovacao", None)
+        adicionar("BitAutorizacaoDiretoria", "bit_autorizacao_diretoria", 0)
+
+        if not colunas:
+            raise ValueError("Nenhuma coluna válida encontrada em FatoKanbanNegociacaoPreco para gravar a negociação.")
+
+        sql = f"""
+            INSERT INTO {TABELA_CARD_NEGOCIACAO_PRECO}
+            (
+                {", ".join(colunas)}
+            )
+            VALUES
+            (
+                {", ".join(marcadores)}
+            );
+        """
+        return sql, parametros
+
+    id_status_card = _obter_id_status_card_por_codigo(status_card)
+    id_usuario_atual = _id_usuario()
+    id_empresa_proprietaria_negociacao = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban,
+        id_empresa_padrao=_id_empresa_usuario_or_403(),
+    )
+
+    estados_atuais = _listar_estado_atual_negociacao_card(int(id_card))
+    if not estados_atuais:
+        return
+
+    chaves_processadas: set[tuple[int, int]] = set()
+
+    for estado in estados_atuais:
+        id_painel = _para_int_ou_none(estado.get("IDDimPaineisEuromidia"))
+        id_face = _para_int_ou_none(estado.get("IDDimFacesPaineis"))
+        if not id_painel or not id_face:
+            continue
+
+        chave_painel_face = (int(id_painel), int(id_face))
+        if chave_painel_face in chaves_processadas:
+            continue
+        chaves_processadas.add(chave_painel_face)
+
+        id_tabela_preco = _para_int_ou_none(estado.get("IDDimTabelaPrecosEuromidia"))
+        custo_atual = _para_decimal_ou_none(estado.get("CustoTabela"))
+        preco_atual = _para_decimal_ou_none(estado.get("ValorTabela"))
+        margem_atual = _calcular_margem_percentual(custo_atual, preco_atual)
+
+        novo_valor = _para_decimal_ou_none(estado.get("NovoValor"))
+        percentual_desconto = _para_decimal_ou_none(estado.get("PercentualDesconto"))
+        valor_venda_final = _para_decimal_ou_none(estado.get("ValorVendaFinal"))
+
+        preco_proposto = novo_valor
+        if preco_proposto is None:
+            preco_proposto = valor_venda_final
+        if preco_proposto is None:
+            preco_proposto = preco_atual
+
+        custo_proposto = custo_atual
+        margem_proposta = _calcular_margem_percentual(custo_proposto, preco_proposto)
+
+        tem_operacao_comercial = any(
+            _tem_valor_informado(valor)
+            for valor in (
+                id_tabela_preco,
+                novo_valor,
+                percentual_desconto,
+                valor_venda_final,
+                preco_atual,
+            )
+        )
+        if not tem_operacao_comercial:
+            continue
+
+        ultima_negociacao = _buscar_ultima_negociacao_preco_card(
+            id_card=int(id_card),
+            id_painel=int(id_painel),
+            id_face=int(id_face),
+        )
+
+        if not _negociacao_preco_foi_alterada(
+            ultima_negociacao,
+            id_tabela_preco=id_tabela_preco,
+            custo_atual=custo_atual,
+            preco_atual=preco_atual,
+            margem_atual_percentual=margem_atual,
+            custo_proposto=custo_proposto,
+            preco_proposto=preco_proposto,
+            margem_proposta_percentual=margem_proposta,
+            desconto_proposto=percentual_desconto,
+        ):
+            continue
+
+        valores_insert = {
+            "id_usuario": id_usuario_atual,
+            "id_empresa_proprietaria": id_empresa_proprietaria_negociacao,
+            "id_tabela_preco": id_tabela_preco,
+            "id_empresa_relacionada": _para_int_ou_none(id_empresa_relacionada),
+            "id_card": int(id_card),
+            "id_fase_atual": _para_int_ou_none(id_fase_atual),
+            "id_status_card": _para_int_ou_none(id_status_card),
+            "observacoes_proposta": observacoes_proposta,
+            "id_painel": int(id_painel),
+            "id_face": int(id_face),
+            "custo_atual": custo_atual,
+            "preco_atual": preco_atual,
+            "margem_atual": margem_atual,
+            "custo_atual_rateado": custo_atual,
+            "preco_atual_rateado": preco_atual,
+            "margem_atual_rateado": margem_atual,
+            "custo_proposto": custo_proposto,
+            "preco_proposto": preco_proposto,
+            "margem_proposta": margem_proposta,
+            "custo_proposto_rateado": custo_proposto,
+            "preco_proposto_rateado": preco_proposto,
+            "desconto_proposto": percentual_desconto,
+        }
+
+        sql_insert, parametros_insert = _montar_insert_dinamico(valores_insert)
+        db.session.execute(text(sql_insert), parametros_insert)
+
+
+
 
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
 @login_required
@@ -4668,38 +5118,85 @@ def api_card_atualizar(id_card: int):
         vinculos_preparados: list[dict[str, Any]] = []
 
         if isinstance(painel_faces_payload, list):
+
+            def _assinatura_estado_operacional(estados: list[dict[str, Any]]) -> tuple:
+                def _n_int(valor: Any) -> int | None:
+                    if valor in (None, ""):
+                        return None
+                    try:
+                        return int(valor)
+                    except Exception:
+                        return None
+
+                def _n_dec(valor: Any, casas: str = "0.0001") -> Decimal | None:
+                    dec = _valor_decimal(valor)
+                    if dec is None:
+                        return None
+                    try:
+                        return dec.quantize(Decimal(casas))
+                    except Exception:
+                        return dec
+
+                assinatura: list[tuple] = []
+
+                for estado in estados:
+                    assinatura.append(
+                        (
+                            _n_int(estado.get("IDDimPaineisEuromidia")),
+                            _n_int(estado.get("IDDimFacesPaineis")),
+                            _n_int(estado.get("IDDimTabelaPrecosEuromidia")),
+                            _n_dec(estado.get("CustoTabela")),
+                            _n_dec(estado.get("ValorTabela")),
+                            _n_dec(estado.get("NovoValor")),
+                            _n_dec(estado.get("PercentualDesconto")),
+                            _n_dec(estado.get("ValorVendaFinal")),
+                            _n_dec(estado.get("MargemValor")),
+                            _n_dec(estado.get("MargemPercentual")),
+                        )
+                    )
+
+                return tuple(
+                    sorted(
+                        assinatura,
+                        key=lambda item: tuple((parte is None, str(parte)) for parte in item),
+                    )
+                )
+
+            estado_operacional_antes = _listar_estado_atual_negociacao_card(int(id_card))
+
             vinculos_preparados = _preparar_vinculos_painel_faces(
                 painel_faces_payload=painel_faces_payload,
                 id_empresa_proprietaria=id_emp,
             )
 
-            """
-            Esta função já deve existir no seu fluxo comercial atual.
-            Se o nome estiver um pouco diferente no seu arquivo, ajuste só o nome.
-            A ideia é manter a tabela operacional do card.
-            """
             _salvar_vinculos_painel_face_card(
                 id_card=id_card,
                 vinculos_preparados=vinculos_preparados,
+                id_usuario=id_usuario,
                 id_empresa_proprietaria=id_emp,
             )
 
-            """
-            Além da tabela operacional, eu agora também gravo o histórico
-            comercial na FatoKanbanNegociacaoPreco.
-            """
-            _registrar_negociacao_preco_card(
-                id_card=id_card,
-                id_kanban=id_kanban,
-                id_fase_atual=id_fase_atual,
-                status_card=row_upd.get("StatusCard") or card_atual.get("StatusCard"),
-                id_empresa_relacionada=(
-                    int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
-                ),
-                vinculos_preparados=vinculos_preparados,
+            estado_operacional_depois = _listar_estado_atual_negociacao_card(int(id_card))
+
+            houve_alteracao_operacional = (
+                _assinatura_estado_operacional(estado_operacional_antes)
+                != _assinatura_estado_operacional(estado_operacional_depois)
             )
 
+            if houve_alteracao_operacional:
+                _registrar_negociacao_preco_card(
+                    id_card=id_card,
+                    id_kanban=id_kanban,
+                    id_fase_atual=id_fase_atual,
+                    status_card=row_upd.get("StatusCard") or card_atual.get("StatusCard"),
+                    id_empresa_relacionada=(
+                        int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+                    ),
+                    vinculos_preparados=vinculos_preparados,
+                )
+
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+
         _registrar_log_card(
             id_card=id_card,
             id_kanban=id_kanban,
@@ -4716,6 +5213,7 @@ def api_card_atualizar(id_card: int):
         db.session.commit()
 
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+
         detalhe = _obter_card_detalhe_payload(id_card)
 
         _emitir_evento_kanban(
@@ -4749,9 +5247,6 @@ def api_card_atualizar(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao atualizar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao atualizar card: {str(exc)}"}), 500
-
-
-
 
 
 
