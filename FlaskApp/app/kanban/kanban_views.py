@@ -20,9 +20,9 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
-
-
-
+TABELA_CARD_TAG_HISTORICO= "[Kanban].[Silver].[FatoKanbanCardTagHistorico]"
+TABELA_CARD_STATUS_HISTORICO = "[Kanban].[Silver].[FatoKanbanCardStatusHistorico]"
+TABELA_CARD_OBSERVACOES = "[Kanban].[Silver].[FatoKanbanCardObservacoes]"
 TABELA_CARD_NEGOCIACAO_PRECO = "[Kanban].[Silver].[FatoKanbanNegociacaoPreco]"
 TABELA_STATUS_CARD = "[Kanban].[Silver].[DimKanbanStatusCard]"
 TABELA_MOTIVO_INATIVACAO_CARD = "[Kanban].[Silver].[DimKanbanMotivoInativacaoCard]"
@@ -91,31 +91,29 @@ def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padra
 
 
 
-
 def _resolver_id_status_card_movimento(
     nome_fase_para: str | None = None,
     *,
     card_inativado: bool = False,
 ) -> int | None:
     """
-    Regra fixa para gravar IDDimKanbanStatusCard no histórico de movimento.
+    Regra fixa para gravar IDDimKanbanStatusCard no histórico.
 
-    Regras definidas:
-    - fases:
+    Regras:
+    - fases em andamento:
         A Fazer (Back Office)
         Proposta Enviada
         Refazer
         Aprovado Cliente
         Aguardando Liberação (Gerencia)
         Documentos Enviados
-      => IDDimKanbanStatusCard = 1
+      => 1
 
-    - fase:
-        Concluido
-      => IDDimKanbanStatusCard = 3
+    - fase Concluido
+      => 3
 
-    - card excluído / inativado
-      => IDDimKanbanStatusCard = 2
+    - card inativado/excluído
+      => 2
     """
     if card_inativado:
         return 2
@@ -138,8 +136,6 @@ def _resolver_id_status_card_movimento(
         return 3
 
     return None
-
-
 
 
 
@@ -2816,16 +2812,19 @@ def _registrar_negociacao_preco_card(
     status_card: str | None,
     id_empresa_relacionada: int | None,
     vinculos_preparados: list[dict[str, Any]],
+    observacoes_proposta: str | None = None,
 ) -> None:
     """
-    Registra histórico de negociação de preço do card.
+    Grava histórico de negociação de preço.
 
-    Regras:
-    - a tabela [Kanban].[Silver].[FatoKanbanNegociacaoPreco] é histórica
-    - não apaga registros anteriores
-    - cada negociação relevante gera uma nova linha
-    - só grava quando existir operação comercial real
-    - ObservacoesProposta recebe apenas o texto digitado pelo usuário no campo Notas
+    Regras desta versão:
+    - não apaga histórico
+    - CustoProposto = custo atual do vínculo
+    - PrecoProposto = preço digitado ou preço final calculado
+    - MargemAtual = percentual sobre o preço atual
+    - MargemProposta = percentual sobre o preço proposto/final
+    - DescontoProposto = desconto informado pelo usuário
+    - se a tabela tiver nomes antigos/alternativos de colunas, tento mapear dinamicamente
     """
 
     if not vinculos_preparados:
@@ -2834,10 +2833,8 @@ def _registrar_negociacao_preco_card(
     def _tem_valor_informado(valor: Any) -> bool:
         if valor is None:
             return False
-
         if isinstance(valor, str) and not valor.strip():
             return False
-
         return True
 
     def _para_int_ou_none(valor: Any) -> int | None:
@@ -2853,6 +2850,80 @@ def _registrar_negociacao_preco_card(
             return None
         return valor
 
+    def _montar_insert_dinamico(valores: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        colunas: list[str] = []
+        marcadores: list[str] = []
+        parametros: dict[str, Any] = {}
+
+        def adicionar(nome_coluna: str, nome_parametro: str, valor: Any, usar_getdate: bool = False) -> None:
+            if not _coluna_existe(TABELA_CARD_NEGOCIACAO_PRECO, nome_coluna):
+                return
+
+            colunas.append(nome_coluna)
+
+            if usar_getdate:
+                marcadores.append("GETDATE()")
+            else:
+                marcadores.append(f":{nome_parametro}")
+                parametros[nome_parametro] = valor
+
+        adicionar("IDDimUsuarios", "id_usuario", valores.get("id_usuario"))
+        adicionar("IDEmpresaProprietaria", "id_empresa_proprietaria", valores.get("id_empresa_proprietaria"))
+        adicionar("IDDimTabelaPrecosEuromidia", "id_tabela_preco", valores.get("id_tabela_preco"))
+        adicionar("IDEmpresa", "id_empresa_relacionada", valores.get("id_empresa_relacionada"))
+        adicionar("IDFatoKanbanCard", "id_card", valores.get("id_card"))
+        adicionar("IDDimKanbanFase", "id_fase_atual", valores.get("id_fase_atual"))
+        adicionar("IDDimKanbanStatusCard", "id_status_card", valores.get("id_status_card"))
+        adicionar("IDFatoControleContratosEuromidia", "id_controle_contrato", None)
+        adicionar("BitAditivoContrato", "bit_aditivo", 0)
+        adicionar("ObservacoesProposta", "observacoes_proposta", valores.get("observacoes_proposta"))
+        adicionar("IDDimPaineisEuromidia", "id_painel", valores.get("id_painel"))
+        adicionar("IDDimFacesPaineis", "id_face", valores.get("id_face"))
+        adicionar("DataPrecoProposto", "data_preco_proposto", None, usar_getdate=True)
+
+        """
+        Financeiro / negociação
+        """
+        adicionar("CustoAtual", "custo_atual", valores.get("custo_atual"))
+        adicionar("PrecoAtual", "preco_atual", valores.get("preco_atual"))
+        adicionar("MargemAtual", "margem_atual", valores.get("margem_atual_percentual"))
+
+        adicionar("CustoProposto", "custo_proposto", valores.get("custo_proposto"))
+        adicionar("PrecoProposto", "preco_proposto", valores.get("preco_proposto"))
+        adicionar("MargemProposta", "margem_proposta", valores.get("margem_proposta_percentual"))
+
+        adicionar("DescontoProposto", "desconto_proposto", valores.get("desconto_proposto"))
+
+        """
+        Compatibilidade com estruturas antigas
+        """
+        adicionar("CustoRateado", "custo_rateado", valores.get("custo_proposto"))
+
+        adicionar("PeriodoInicio", "periodo_inicio", None)
+        adicionar("PeriodoTermino", "periodo_termino", None)
+
+        adicionar("IDDimUsuariosAprovacaoPreco", "id_usuario_aprovacao", None)
+        adicionar("DataAprovacaoPreco", "data_aprovacao", None)
+        adicionar("PrecoAprovado", "preco_aprovado", None)
+        adicionar("DescontoAprovado", "desconto_aprovado", None)
+        adicionar("ObservacoesAprovacao", "observacoes_aprovacao", None)
+
+        if not colunas:
+            raise ValueError("Nenhuma coluna válida encontrada em FatoKanbanNegociacaoPreco para gravar a negociação.")
+
+        sql = f"""
+            INSERT INTO {TABELA_CARD_NEGOCIACAO_PRECO}
+            (
+                {", ".join(colunas)}
+            )
+            VALUES
+            (
+                {", ".join(marcadores)}
+            );
+        """
+
+        return sql, parametros
+
     id_status_card = _obter_id_status_card_por_codigo(status_card)
     id_usuario_atual = _id_usuario()
 
@@ -2861,111 +2932,72 @@ def _registrar_negociacao_preco_card(
         id_empresa_padrao=_id_empresa_usuario_or_403(),
     )
 
-    sql_insert = text("""
-        INSERT INTO [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
-        (
-            IDDimUsuarios,
-            IDEmpresaProprietaria,
-            IDDimTabelaPrecosEuromidia,
-            IDEmpresa,
-            IDFatoKanbanCard,
-            IDDimKanbanFase,
-            IDDimKanbanStatusCard,
-            IDFatoControleContratosEuromidia,
-            BitAditivoContrato,
-            ObservacoesProposta,
-            IDDimPaineisEuromidia,
-            IDDimFacesPaineis,
-            DataPrecoProposto,
-            CustoRateado,
-            PrecoProposto,
-            DescontoProposto,
-            PeriodoInicio,
-            PeriodoTermino,
-            IDDimUsuariosAprovacaoPreco,
-            DataAprovacaoPreco,
-            PrecoAprovado,
-            DescontoAprovado,
-            ObservacoesAprovacao
-        )
-        VALUES
-        (
-            :id_usuario,
-            :id_empresa_proprietaria,
-            :id_tabela_preco,
-            :id_empresa_relacionada,
-            :id_card,
-            :id_fase_atual,
-            :id_status_card,
-            NULL,
-            0,
-            :observacoes_proposta,
-            :id_painel,
-            :id_face,
-            GETDATE(),
-            :custo_rateado,
-            :preco_proposto,
-            :desconto_proposto,
-            :periodo_inicio,
-            :periodo_termino,
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            NULL
-        );
-    """)
-
     for vinculo in vinculos_preparados:
         id_painel = _para_int_ou_none(vinculo.get("id_painel"))
         id_face = _para_int_ou_none(vinculo.get("id_dim_face"))
         id_tabela_preco = _para_int_ou_none(vinculo.get("id_preco"))
 
-        novo_valor = vinculo.get("novo_valor")
-        percentual_desconto = vinculo.get("percentual_desconto")
-        valor_venda_final = vinculo.get("valor_venda_final")
-        custo_rateado = vinculo.get("custo_tabela")
+        custo_atual = _para_decimal_ou_none(vinculo.get("custo_tabela"))
+        preco_atual = _para_decimal_ou_none(vinculo.get("valor_tabela"))
+        preco_proposto = _para_decimal_ou_none(vinculo.get("valor_venda_final"))
+        desconto_proposto = _para_decimal_ou_none(vinculo.get("percentual_desconto"))
+
+        """
+        IMPORTANTE:
+        Aqui eu pego a margem percentual que já foi calculada corretamente
+        em _calcular_margens_comerciais.
+        """
+        margem_proposta_percentual = _para_decimal_ou_none(vinculo.get("margem_percentual"))
+
+        margem_atual_percentual = None
+        try:
+            if preco_atual is not None and custo_atual is not None and float(preco_atual) != 0:
+                margem_atual_valor = float(preco_atual) - float(custo_atual)
+                margem_atual_percentual = (margem_atual_valor / float(preco_atual)) * 100
+        except Exception:
+            margem_atual_percentual = None
 
         tem_operacao_comercial = any(
             _tem_valor_informado(valor)
             for valor in (
                 id_tabela_preco,
-                novo_valor,
-                percentual_desconto,
-                valor_venda_final,
+                preco_atual,
+                preco_proposto,
+                desconto_proposto,
             )
         )
 
         if not id_painel or not id_face or not tem_operacao_comercial:
             continue
 
-        preco_proposto = (
-            novo_valor
-            if _tem_valor_informado(novo_valor)
-            else valor_venda_final
-        )
+        valores_insert = {
+            "id_usuario": id_usuario_atual,
+            "id_empresa_proprietaria": id_empresa_proprietaria_negociacao,
+            "id_tabela_preco": id_tabela_preco,
+            "id_empresa_relacionada": _para_int_ou_none(id_empresa_relacionada),
+            "id_card": int(id_card),
+            "id_fase_atual": _para_int_ou_none(id_fase_atual),
+            "id_status_card": _para_int_ou_none(id_status_card),
+            "observacoes_proposta": observacoes_proposta,
 
-        db.session.execute(
-            sql_insert,
-            {
-                "id_usuario": id_usuario_atual,
-                "id_empresa_proprietaria": id_empresa_proprietaria_negociacao,
-                "id_tabela_preco": id_tabela_preco,
-                "id_empresa_relacionada": _para_int_ou_none(id_empresa_relacionada),
-                "id_card": int(id_card),
-                "id_fase_atual": _para_int_ou_none(id_fase_atual),
-                "id_status_card": _para_int_ou_none(id_status_card),
-                "observacoes_proposta": None,
-                "id_painel": id_painel,
-                "id_face": id_face,
-                "custo_rateado": _para_decimal_ou_none(custo_rateado),
-                "preco_proposto": _para_decimal_ou_none(preco_proposto),
-                "desconto_proposto": _para_decimal_ou_none(percentual_desconto),
-                "periodo_inicio": None,
-                "periodo_termino": None,
-            },
-        )
+            "id_painel": id_painel,
+            "id_face": id_face,
 
+            "custo_atual": custo_atual,
+            "preco_atual": preco_atual,
+            "margem_atual_percentual": margem_atual_percentual,
+
+            "custo_proposto": custo_atual,
+            "preco_proposto": preco_proposto,
+            "margem_proposta_percentual": margem_proposta_percentual,
+
+            "desconto_proposto": desconto_proposto,
+        }
+
+        sql_insert, params_insert = _montar_insert_dinamico(valores_insert)
+        db.session.execute(text(sql_insert), params_insert)
+
+    
 
 
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
@@ -5232,6 +5264,156 @@ def api_card_tag_remover(id_card: int, id_tag: int):
     return jsonify({"ok": True})
 
 
+
+
+
+
+
+
+
+def _obter_contexto_observacao_card(id_card: int) -> dict[str, Any]:
+    """
+    Busca o contexto atual do card para gravar histórico de observações.
+
+    Retorna:
+    - IDFatoKanbanCard
+    - IDDimKanban
+    - IDDimKanbanFaseAtual
+    - NomeFaseAtual
+    - IDEmpresaProprietaria do card
+    - IDEmpresaDoKanban
+    - IDDimKanbanStatusCard, se a coluna existir na FatoKanbanCard
+    """
+    id_emp = _id_empresa_usuario_or_403()
+
+    select_status = (
+        "c.IDDimKanbanStatusCard AS IDDimKanbanStatusCard,"
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard")
+        else "CAST(NULL AS INT) AS IDDimKanbanStatusCard,"
+    )
+
+    sql = text(f"""
+        SELECT TOP (1)
+            c.IDFatoKanbanCard,
+            c.IDDimKanban,
+            c.IDDimKanbanFaseAtual,
+            f.NomeFase AS NomeFaseAtual,
+            c.IDEmpresaProprietaria,
+            k.IDEmpresaProprietaria AS IDEmpresaDoKanban,
+            {select_status}
+            c.StatusCard
+        FROM {TABELA_CARD} c
+        JOIN {TABELA_KANBAN} k
+          ON k.IDDimKanban = c.IDDimKanban
+        LEFT JOIN {TABELA_KANBAN_FASE} f
+          ON f.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+        WHERE c.IDFatoKanbanCard = :id_card
+          AND k.IDEmpresaProprietaria = :id_emp
+          AND k.Ativo = 1;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_emp": int(id_emp),
+        },
+    ).mappings().first()
+
+    if not row:
+        abort(403, "Você não tem permissão para acessar este card")
+
+    return dict(row)
+
+
+
+
+
+def _registrar_observacao_historica_card(
+    *,
+    id_card: int,
+    texto_observacao: str,
+    id_usuario: int,
+) -> dict[str, Any] | None:
+    """
+    Grava o histórico de observações digitadas no campo de notas do card.
+
+    Regras:
+    - Observacao = texto digitado
+    - IDEmpresaProprietaria = regra do kanban (kanban 1 => empresa 3)
+    - IDFatoKanbanCard = card atual
+    - IDDimKanbanStatusCard = status atual do card; se não existir na FatoKanbanCard, deriva pela fase
+    - IDDimKanbanFase = fase atual do card
+    - IDDimUsuarios = usuário logado
+    """
+    if not _objeto_existe(TABELA_CARD_OBSERVACOES):
+        return None
+
+    texto = str(texto_observacao or "").strip()
+    if len(texto) < 2:
+        return None
+
+    contexto = _obter_contexto_observacao_card(id_card)
+    if not contexto:
+        return None
+
+    id_kanban = int(contexto.get("IDDimKanban") or 0)
+    id_fase_atual = int(contexto.get("IDDimKanbanFaseAtual") or 0)
+    nome_fase_atual = str(contexto.get("NomeFaseAtual") or "").strip()
+
+    id_status_atual = contexto.get("IDDimKanbanStatusCard")
+    if id_status_atual is None:
+        id_status_atual = _resolver_id_status_card_movimento(
+            nome_fase_para=nome_fase_atual,
+            card_inativado=False,
+        )
+
+    id_empresa_observacao = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban,
+        id_empresa_padrao=contexto.get("IDEmpresaProprietaria"),
+    )
+
+    sql = text(f"""
+        INSERT INTO {TABELA_CARD_OBSERVACOES}
+        (
+            Observacao,
+            IDEmpresaProprietaria,
+            IDFatoKanbanCard,
+            IDDimKanbanStatusCard,
+            IDDimKanbanFase,
+            IDDimUsuarios
+        )
+        OUTPUT INSERTED.IDFatoKanbanCardObservacoes
+        VALUES
+        (
+            :observacao,
+            :id_empresa,
+            :id_card,
+            :id_status_card,
+            :id_fase,
+            :id_usuario
+        );
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "observacao": texto[:1000],
+            "id_empresa": int(id_empresa_observacao or 0) or None,
+            "id_card": int(id_card),
+            "id_status_card": int(id_status_atual) if id_status_atual is not None else None,
+            "id_fase": int(id_fase_atual) if id_fase_atual else None,
+            "id_usuario": int(id_usuario),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+
+
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/notas", methods=["POST"])
 @login_required
 @limiter.limit("180/minute")
@@ -5275,6 +5457,12 @@ def api_card_nota_criar(id_card: int):
     )
     row_nota = db.session.execute(sql, params).mappings().first()
 
+    row_observacao = _registrar_observacao_historica_card(
+        id_card=id_card,
+        texto_observacao=texto,
+        id_usuario=id_usuario,
+    )
+
     snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
     _registrar_log_card(
         id_card=id_card,
@@ -5291,6 +5479,7 @@ def api_card_nota_criar(id_card: int):
     db.session.commit()
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+
     nota_payload = {
         "IDFatoKanbanCardNota": int(row_nota.get("IDFatoKanbanCardNota") or 0) if row_nota else None,
         "TipoNota": tipo[:50],
@@ -5298,7 +5487,9 @@ def api_card_nota_criar(id_card: int):
         "CriadoPor": id_usuario,
         "CriadoEm": row_nota.get("CriadoEm") if row_nota else None,
         "IDEmpresa": id_empresa_relacionada,
+        "IDFatoKanbanCardObservacoes": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
     }
+
     _emitir_evento_kanban(
         id_kanban,
         "card_nota_criada",
@@ -5306,8 +5497,6 @@ def api_card_nota_criar(id_card: int):
     )
 
     return jsonify({"ok": True, "nota": nota_payload})
-
-
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/inativar", methods=["POST"])

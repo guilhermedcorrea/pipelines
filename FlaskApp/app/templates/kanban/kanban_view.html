@@ -2291,53 +2291,88 @@ function normalizarCardServidor(card){
     return precos.find(p => idNum(p.IDDimTabelaPrecosEuromidia) === idPreco) || null;
   }
 
-  function atualizarResumoComercial(bloco){
-    const kpiCusto = bloco.querySelector('[data-role="kpi-custo"]');
-    const kpiMargemBase = bloco.querySelector('[data-role="kpi-margem-base"]');
-    const kpiValorFinal = bloco.querySelector('[data-role="kpi-valor-final"]');
-    const kpiMargemFinal = bloco.querySelector('[data-role="kpi-margem-final"]');
-    const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
-    const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
-    const precoSel = obterPrecoSelecionadoDoBloco(bloco);
-    const custo = Number(bloco.__dadosComerciais?.custo?.Valor);
-    const valorTabela = Number(precoSel?.Valor);
 
-    const novoValor = parseNumeroInput(inputNovoValor?.value);
-    const percentual = parseNumeroInput(inputPercentual?.value);
+function atualizarResumoComercial(bloco){
+  const kpiCusto = bloco.querySelector('[data-role="kpi-custo"]');
+  const kpiPrecoAtual = bloco.querySelector('[data-role="kpi-preco-atual"]');
+  const kpiMargemBase = bloco.querySelector('[data-role="kpi-margem-base"]');
+  const kpiValorFinal = bloco.querySelector('[data-role="kpi-valor-final"]');
+  const kpiMargemFinal = bloco.querySelector('[data-role="kpi-margem-final"]');
 
-    if (kpiCusto){
-      kpiCusto.textContent = Number.isFinite(custo) ? formatarMoedaBR(custo) : '—';
-    }
+  const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
+  const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
 
-    const margemBase = Number.isFinite(valorTabela) && Number.isFinite(custo) ? (valorTabela - custo) : null;
-    if (kpiMargemBase){
-      kpiMargemBase.textContent = margemBase === null ? '—' : `${formatarMoedaBR(margemBase)}${Number.isFinite(valorTabela) && valorTabela !== 0 ? ` • ${formatarPercentualBR((margemBase / valorTabela) * 100)}` : ''}`;
-      kpiMargemBase.classList.remove('positivo', 'negativo');
-      if (margemBase !== null) kpiMargemBase.classList.add(margemBase >= 0 ? 'positivo' : 'negativo');
-    }
+  const precoSel = obterPrecoSelecionadoDoBloco(bloco);
+  const custo = Number(bloco.__dadosComerciais?.custo?.Valor);
+  const valorTabela = Number(precoSel?.Valor);
 
-    let valorFinal = null;
-    if (novoValor !== null) {
-      valorFinal = novoValor;
-    } else if (percentual !== null && Number.isFinite(valorTabela)) {
-      valorFinal = valorTabela * (1 - (percentual / 100));
-    } else if (Number.isFinite(valorTabela)) {
-      valorFinal = valorTabela;
-    }
+  const novoValor = parseNumeroInput(inputNovoValor?.value);
+  const percentual = parseNumeroInput(inputPercentual?.value);
 
-    const margemFinal = (valorFinal !== null && Number.isFinite(custo)) ? (valorFinal - custo) : null;
-    const margemFinalPerc = (margemFinal !== null && valorFinal) ? (margemFinal / valorFinal) * 100 : null;
+  if (kpiCusto){
+    kpiCusto.textContent = Number.isFinite(custo) ? formatarMoedaBR(custo) : '—';
+  }
 
-    if (kpiValorFinal){
-      kpiValorFinal.textContent = valorFinal === null ? '—' : formatarMoedaBR(valorFinal);
-    }
+  if (kpiPrecoAtual){
+    kpiPrecoAtual.textContent = Number.isFinite(valorTabela) ? formatarMoedaBR(valorTabela) : '—';
+  }
 
-    if (kpiMargemFinal){
-      kpiMargemFinal.textContent = margemFinal === null ? '—' : `${formatarMoedaBR(margemFinal)}${margemFinalPerc === null ? '' : ` • ${formatarPercentualBR(margemFinalPerc)}`}`;
-      kpiMargemFinal.classList.remove('positivo', 'negativo');
-      if (margemFinal !== null) kpiMargemFinal.classList.add(margemFinal >= 0 ? 'positivo' : 'negativo');
+  const margemBase = Number.isFinite(valorTabela) && Number.isFinite(custo)
+    ? (valorTabela - custo)
+    : null;
+
+  if (kpiMargemBase){
+    kpiMargemBase.textContent =
+      margemBase === null
+        ? '—'
+        : `${formatarMoedaBR(margemBase)}${
+            Number.isFinite(valorTabela) && valorTabela !== 0
+              ? ` • ${formatarPercentualBR((margemBase / valorTabela) * 100)}`
+              : ''
+          }`;
+
+    kpiMargemBase.classList.remove('positivo', 'negativo');
+    if (margemBase !== null){
+      kpiMargemBase.classList.add(margemBase >= 0 ? 'positivo' : 'negativo');
     }
   }
+
+  let valorFinal = null;
+
+  if (novoValor !== null) {
+    valorFinal = novoValor;
+  } else if (percentual !== null && Number.isFinite(valorTabela)) {
+    valorFinal = valorTabela * (1 - (percentual / 100));
+  } else if (Number.isFinite(valorTabela)) {
+    valorFinal = valorTabela;
+  }
+
+  const margemFinal = (valorFinal !== null && Number.isFinite(custo))
+    ? (valorFinal - custo)
+    : null;
+
+  const margemFinalPerc = (margemFinal !== null && valorFinal)
+    ? (margemFinal / valorFinal) * 100
+    : null;
+
+  if (kpiValorFinal){
+    kpiValorFinal.textContent = valorFinal === null ? '—' : formatarMoedaBR(valorFinal);
+  }
+
+  if (kpiMargemFinal){
+    kpiMargemFinal.textContent =
+      margemFinal === null
+        ? '—'
+        : `${formatarMoedaBR(margemFinal)}${margemFinalPerc === null ? '' : ` • ${formatarPercentualBR(margemFinalPerc)}`}`;
+
+    kpiMargemFinal.classList.remove('positivo', 'negativo');
+    if (margemFinal !== null){
+      kpiMargemFinal.classList.add(margemFinal >= 0 ? 'positivo' : 'negativo');
+    }
+  }
+}
+
+
 
   function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
@@ -3071,82 +3106,101 @@ function normalizarCardServidor(card){
 
 
 
-  
 
-  async function moverCard(idCard, idFasePara, posicao) {
-    const idC = idNum(idCard);
-    const idDestino = idNum(idFasePara);
+async function moverCard(idCard, idFasePara, posicao) {
+  const idC = idNum(idCard);
+  const idDestino = idNum(idFasePara);
 
-    if (!idC || !idDestino) return;
+  if (!idC || !idDestino) return;
 
-    const cardAtual = await obterVersaoAtualDoCard(idC);
-    if (!cardAtual || !safeStr(cardAtual.VersaoConcorrenciaHex)) {
-      mostrarMensagemBoard("A versão mais recente do card não está carregada. Recarregando o quadro...");
-      await carregar();
-      return;
-    }
-
-    const stOrigemAntes = estadoFase.get(faseOrigemArrasteId || idNum(cardAtual?.IDDimKanbanFaseAtual));
-    const stDestinoAntes = estadoFase.get(idDestino);
-
-    const qtdOrigemManter = stOrigemAntes ? Math.max(TAM_LOTE_POR_FASE, stOrigemAntes.rendered) : TAM_LOTE_POR_FASE;
-    const qtdDestinoManter = stDestinoAntes ? Math.max(TAM_LOTE_POR_FASE, stDestinoAntes.rendered + 1) : TAM_LOTE_POR_FASE;
-
-    const movLocal = moverCardLocalmente(idC, idDestino);
-
-    if (movLocal.ok){
-      if (movLocal.origem === movLocal.destino){
-        redesenharFases([movLocal.origem], true);
-      } else {
-        redesenharFases([movLocal.origem, movLocal.destino], true);
-      }
-      destacarCardNaFase(idC, movLocal.destino);
-    }
-
-    const payload = {
-      id_fase_para: idDestino,
-      posicao: posicao || "LAST",
-      versao_concorrencia: safeStr(cardAtual.VersaoConcorrenciaHex)
-    };
-
-    const r = await fetch(`/kanban/api/cards/${idC}/mover`, {
-      method:"POST",
-      credentials: "same-origin",
-      headers: headersJSON,
-      body: JSON.stringify(payload)
-    });
-
-    const j = await r.json().catch(() => null);
-    if (!(j && j.ok)) {
-      if (r.status === 409 && j && j.card_atual) {
-        inserirOuAtualizarCardLocal(j.card_atual);
-      }
-      mostrarMensagemBoard(mensagemErroHttp(r, j, "Não foi possível mover o card."));
-      console.warn("moverCard falhou", { http: r.status, body: j, idCard: idC, idFasePara: idDestino });
-      await carregar();
-      return;
-    }
-
-    limparMensagemBoard();
-
-
-
-
-
-
-    if (j.card) {
-      inserirOuAtualizarCardLocal(j.card);
-    }
-
-    if (movLocal.ok){
-      if (movLocal.origem === movLocal.destino){
-        redesenharFases([movLocal.origem], true);
-      } else {
-        redesenharFases([movLocal.origem, movLocal.destino], true);
-      }
-      destacarCardNaFase(idC, movLocal.destino);
-    }
+  const cardAtual = await obterVersaoAtualDoCard(idC);
+  if (!cardAtual || !safeStr(cardAtual.VersaoConcorrenciaHex)) {
+    mostrarMensagemBoard("A versão mais recente do card não está carregada. Recarregando o quadro...");
+    await carregar();
+    return;
   }
+
+  const stOrigemAntes = estadoFase.get(faseOrigemArrasteId || idNum(cardAtual?.IDDimKanbanFaseAtual));
+  const stDestinoAntes = estadoFase.get(idDestino);
+
+  const qtdOrigemManter = stOrigemAntes ? Math.max(TAM_LOTE_POR_FASE, stOrigemAntes.rendered) : TAM_LOTE_POR_FASE;
+  const qtdDestinoManter = stDestinoAntes ? Math.max(TAM_LOTE_POR_FASE, stDestinoAntes.rendered + 1) : TAM_LOTE_POR_FASE;
+
+  const movLocal = moverCardLocalmente(idC, idDestino);
+
+  if (movLocal.ok) {
+    if (movLocal.origem === movLocal.destino) {
+      redesenharFases([movLocal.origem], true);
+    } else {
+      redesenharFases([movLocal.origem, movLocal.destino], true);
+    }
+    destacarCardNaFase(idC, movLocal.destino);
+  }
+
+  const textoNotaMovimento = ((inputNotaTexto && inputNotaTexto.value) || "").trim();
+
+  const payload = {
+    id_fase_para: idDestino,
+    posicao: posicao || "LAST",
+    versao_concorrencia: safeStr(cardAtual.VersaoConcorrenciaHex),
+    observacao: textoNotaMovimento
+  };
+
+  const r = await fetch(`/kanban/api/cards/${idC}/mover`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: headersJSON,
+    body: JSON.stringify(payload)
+  });
+
+  const j = await r.json().catch(() => null);
+  if (!(j && j.ok)) {
+    if (r.status === 409 && j && j.card_atual) {
+      inserirOuAtualizarCardLocal(j.card_atual);
+    }
+    mostrarMensagemBoard(mensagemErroHttp(r, j, "Não foi possível mover o card."));
+    console.warn("moverCard falhou", { http: r.status, body: j, idCard: idC, idFasePara: idDestino });
+    await carregar();
+    return;
+  }
+
+  const cardServidor = j.card ? normalizarCardServidor(j.card) : null;
+  if (cardServidor) {
+    inserirOuAtualizarCardLocal(cardServidor);
+    setTagsDoCard(idC, Array.isArray(j.tags) ? j.tags : []);
+  }
+
+  const faseOrigemFinal = movLocal?.origem || faseOrigemArrasteId || idNum(cardAtual?.IDDimKanbanFaseAtual);
+  const faseDestinoFinal = movLocal?.destino || idDestino;
+
+  const stOrigemDepois = estadoFase.get(faseOrigemFinal);
+  const stDestinoDepois = estadoFase.get(faseDestinoFinal);
+
+  if (stOrigemDepois) {
+    stOrigemDepois.rendered = Math.max(qtdOrigemManter, stOrigemDepois.rendered || 0);
+    stOrigemDepois.visiveis = Math.max(qtdOrigemManter, stOrigemDepois.visiveis || 0);
+  }
+
+  if (stDestinoDepois) {
+    stDestinoDepois.rendered = Math.max(qtdDestinoManter, stDestinoDepois.rendered || 0);
+    stDestinoDepois.visiveis = Math.max(qtdDestinoManter, stDestinoDepois.visiveis || 0);
+  }
+
+  if (faseOrigemFinal === faseDestinoFinal) {
+    await preencherCardsInicial(faseDestinoFinal, qtdDestinoManter, true);
+    destacarCardNaFase(idC, faseDestinoFinal);
+  } else {
+    await preencherCardsInicial(faseOrigemFinal, qtdOrigemManter, true);
+    await preencherCardsInicial(faseDestinoFinal, qtdDestinoManter, true);
+    destacarCardNaFase(idC, faseDestinoFinal);
+  }
+
+  if (inputNotaTexto && textoNotaMovimento) {
+    inputNotaTexto.value = "";
+  }
+
+  limparMensagemBoard();
+}
 
   function abrirModalRemoverCard(idCard){
     cardParaRemover = idCard;
