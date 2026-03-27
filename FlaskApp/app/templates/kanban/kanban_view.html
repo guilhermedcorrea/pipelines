@@ -28,11 +28,19 @@
     :root{
       --kb-col-w: min(88vw, 340px);
     }
+
+    .kb-resumo-grid{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   @media (max-width: 520px){
     :root{
       --kb-col-w: min(92vw, 320px);
+    }
+
+    .kb-resumo-grid{
+      grid-template-columns: 1fr;
     }
   }
 
@@ -178,6 +186,97 @@
   .kb-toolbar{
     padding: 0 10px 12px 10px;
     flex: 0 0 auto;
+  }
+
+  .kb-resumo{
+    padding: 0 10px 14px 10px;
+    flex: 0 0 auto;
+  }
+
+  .kb-resumo-grid{
+    display:grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap:12px;
+    width:100%;
+  }
+
+  .kb-resumo-card{
+    position:relative;
+    overflow:hidden;
+    min-height: 92px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px solid var(--kb-line);
+    background: linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.98) 100%);
+    box-shadow: 0 6px 18px rgba(15,23,42,.08);
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    gap:10px;
+  }
+
+  .kb-resumo-card::before{
+    content:"";
+    position:absolute;
+    inset:0 auto 0 0;
+    width: 5px;
+    background: var(--resumo-accent, var(--kb-primary));
+  }
+
+  .kb-resumo-topo{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+  }
+
+  .kb-resumo-titulo{
+    margin:0;
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 950;
+    color: rgba(15,23,42,.62);
+    letter-spacing: .02em;
+    text-transform: uppercase;
+  }
+
+  .kb-resumo-icone{
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    background: color-mix(in srgb, var(--resumo-accent, var(--kb-primary)) 12%, white);
+    color: var(--resumo-accent, var(--kb-primary));
+    font-size: 16px;
+    line-height: 1;
+    flex: 0 0 auto;
+  }
+
+  .kb-resumo-valor{
+    margin:0;
+    font-size: clamp(22px, 2.1vw, 30px);
+    line-height: 1;
+    font-weight: 950;
+    color: var(--kb-text);
+    letter-spacing: -0.03em;
+  }
+
+  .kb-resumo-valor.negativo{
+    color:#B91C1C;
+  }
+
+  .kb-resumo-valor.positivo{
+    color:#166534;
+  }
+
+  .kb-resumo-rodape{
+    margin:0;
+    font-size: 12px;
+    line-height: 1.25;
+    font-weight: 800;
+    color: rgba(15,23,42,.60);
   }
 
   .kb-search{
@@ -699,9 +798,12 @@
 
   .kb-tags{
     display:flex;
+    flex-direction:column;
+    align-items:flex-start;
     gap:6px;
-    flex-wrap:wrap;
+    flex-wrap:nowrap;
     margin-top: 8px;
+    width:100%;
   }
 
   .kb-tag{
@@ -709,6 +811,7 @@
     --kb-tag-fg: #0f172a;
     display:inline-flex;
     align-items:center;
+    max-width:100%;
     gap:6px;
     min-height: 22px;
     padding: 4px 8px;
@@ -1195,6 +1298,55 @@
 
   <div class="kb-divider"></div>
 
+  <div class="kb-resumo" id="kbResumoComercial">
+    <div class="kb-resumo-grid">
+      <article class="kb-resumo-card" style="--resumo-accent:#2563EB;">
+        <div class="kb-resumo-topo">
+          <p class="kb-resumo-titulo">Atendimentos Ativos</p>
+          <span class="kb-resumo-icone">🎯</span>
+        </div>
+        <p class="kb-resumo-valor" id="kpiAtendimentosAtivos">—</p>
+       
+      </article>
+
+      <article class="kb-resumo-card" style="--resumo-accent:#F97316;">
+        <div class="kb-resumo-topo">
+          <p class="kb-resumo-titulo">Aprovação Preço</p>
+          <span class="kb-resumo-icone">🏷️</span>
+        </div>
+        <p class="kb-resumo-valor" id="kpiAprovacaoPreco">—</p>
+      
+      </article>
+
+      <article class="kb-resumo-card" style="--resumo-accent:#7C3AED;">
+        <div class="kb-resumo-topo">
+          <p class="kb-resumo-titulo">Custo</p>
+          <span class="kb-resumo-icone">💸</span>
+        </div>
+        <p class="kb-resumo-valor" id="kpiCustoTotal">—</p>
+      
+      </article>
+
+      <article class="kb-resumo-card" style="--resumo-accent:#0F766E;">
+        <div class="kb-resumo-topo">
+          <p class="kb-resumo-titulo">Preço</p>
+          <span class="kb-resumo-icone">💰</span>
+        </div>
+        <p class="kb-resumo-valor" id="kpiVendaTotal">—</p>
+       
+      </article>
+
+      <article class="kb-resumo-card" style="--resumo-accent:#16A34A;">
+        <div class="kb-resumo-topo">
+          <p class="kb-resumo-titulo">Margem</p>
+          <span class="kb-resumo-icone">📈</span>
+        </div>
+        <p class="kb-resumo-valor" id="kpiMargemPercentual">—</p>
+     
+      </article>
+    </div>
+  </div>
+
   <div class="kb-toolbar">
     <label class="kb-search" for="buscaKanban">
       <span class="kb-search-label">Pesquisar cards</span>
@@ -1403,6 +1555,7 @@
   let cards = [];
   let tagsCatalogo = [];
   let mapaTagsPorCard = new Map();
+  let resumoComercial = null;
   let cardAbertoId = null;
   let termoBusca = "";
   let versaoConcorrenciaCardAberto = "";
@@ -1451,6 +1604,12 @@
   const buscaKanban = document.getElementById("buscaKanban");
   const btnLimparBusca = document.getElementById("btnLimparBusca");
   const contadorPesquisa = document.getElementById("contadorPesquisa");
+
+  const kpiAtendimentosAtivos = document.getElementById("kpiAtendimentosAtivos");
+  const kpiAprovacaoPreco = document.getElementById("kpiAprovacaoPreco");
+  const kpiCustoTotal = document.getElementById("kpiCustoTotal");
+  const kpiVendaTotal = document.getElementById("kpiVendaTotal");
+  const kpiMargemPercentual = document.getElementById("kpiMargemPercentual");
 
   const selectEmpresaCard = document.getElementById("selectEmpresaCard");
   const btnLimparEmpresa = document.getElementById("btnLimparEmpresa");
@@ -2166,12 +2325,66 @@ function normalizarCardServidor(card){
     return `${num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
   }
 
+  function renderizarResumoComercial(resumo){
+    resumoComercial = resumo && typeof resumo === "object" ? Object.assign({}, resumo) : null;
+
+    if (kpiAtendimentosAtivos) {
+      kpiAtendimentosAtivos.textContent = resumoComercial
+        ? String(idNum(resumoComercial.QuantidadeAtendimentosAtivos))
+        : "—";
+    }
+
+    if (kpiAprovacaoPreco) {
+      kpiAprovacaoPreco.textContent = resumoComercial
+        ? String(idNum(resumoComercial.QuantidadeAprovacaoPreco))
+        : "—";
+    }
+
+    if (kpiCustoTotal) {
+      kpiCustoTotal.textContent = resumoComercial
+        ? formatarMoedaBR(resumoComercial.ValorCustoTotal)
+        : "—";
+    }
+
+    if (kpiVendaTotal) {
+      kpiVendaTotal.textContent = resumoComercial
+        ? formatarMoedaBR(resumoComercial.ValorVendaTotal)
+        : "—";
+    }
+
+    if (kpiMargemPercentual) {
+      const margem = resumoComercial ? Number(resumoComercial.MargemPercentualTotal) : NaN;
+      kpiMargemPercentual.textContent = Number.isFinite(margem) ? formatarPercentualBR(margem) : "—";
+      kpiMargemPercentual.classList.remove("positivo", "negativo");
+      if (Number.isFinite(margem)) {
+        kpiMargemPercentual.classList.add(margem >= 0 ? "positivo" : "negativo");
+      }
+    }
+  }
+
+  async function recarregarResumoComercial(){
+    try {
+      const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/resumo-comercial`, { credentials: "same-origin" });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) return false;
+      renderizarResumoComercial(j.resumo_comercial || null);
+      return true;
+    } catch (_erro) {
+      return false;
+    }
+  }
+
   function parseNumeroInput(valor){
     const txt = safeStr(valor).trim();
     if (!txt) return null;
     const normalizado = txt.replace(/\./g, "").replace(",", ".");
     const num = Number(normalizado);
     return Number.isFinite(num) ? num : null;
+  }
+
+  function formatarNumeroParaInput(valor){
+    const num = parseNumeroInput(valor);
+    return num === null ? '' : String(num);
   }
 
   function atualizarTitulosPainelFace(){
@@ -2324,6 +2537,8 @@ function normalizarCardServidor(card){
   }
 
 
+
+
 function atualizarResumoComercial(bloco){
   const kpiCusto = bloco.querySelector('[data-role="kpi-custo"]');
   const kpiPrecoAtual = bloco.querySelector('[data-role="kpi-preco-atual"]');
@@ -2353,15 +2568,18 @@ function atualizarResumoComercial(bloco){
     ? (valorTabela - custo)
     : null;
 
+  const margemBasePerc =
+    margemBase !== null &&
+    Number.isFinite(valorTabela) &&
+    valorTabela !== 0
+      ? (margemBase / valorTabela) * 100
+      : null;
+
   if (kpiMargemBase){
     kpiMargemBase.textContent =
-      margemBase === null
+      margemBasePerc === null
         ? '—'
-        : `${formatarMoedaBR(margemBase)}${
-            Number.isFinite(valorTabela) && valorTabela !== 0
-              ? ` • ${formatarPercentualBR((margemBase / valorTabela) * 100)}`
-              : ''
-          }`;
+        : formatarPercentualBR(margemBasePerc);
 
     kpiMargemBase.classList.remove('positivo', 'negativo');
     if (margemBase !== null){
@@ -2383,9 +2601,12 @@ function atualizarResumoComercial(bloco){
     ? (valorFinal - custo)
     : null;
 
-  const margemFinalPerc = (margemFinal !== null && valorFinal)
-    ? (margemFinal / valorFinal) * 100
-    : null;
+  const margemFinalPerc =
+    margemFinal !== null &&
+    Number.isFinite(valorFinal) &&
+    valorFinal !== 0
+      ? (margemFinal / valorFinal) * 100
+      : null;
 
   if (kpiValorFinal){
     kpiValorFinal.textContent = valorFinal === null ? '—' : formatarMoedaBR(valorFinal);
@@ -2393,9 +2614,9 @@ function atualizarResumoComercial(bloco){
 
   if (kpiMargemFinal){
     kpiMargemFinal.textContent =
-      margemFinal === null
+      margemFinalPerc === null
         ? '—'
-        : `${formatarMoedaBR(margemFinal)}${margemFinalPerc === null ? '' : ` • ${formatarPercentualBR(margemFinalPerc)}`}`;
+        : formatarPercentualBR(margemFinalPerc);
 
     kpiMargemFinal.classList.remove('positivo', 'negativo');
     if (margemFinal !== null){
@@ -2403,8 +2624,6 @@ function atualizarResumoComercial(bloco){
     }
   }
 }
-
-
 
 
 
@@ -2537,14 +2756,14 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     if (inputNovoValor) {
       inputNovoValor.value =
         novoValorSalvo !== null && novoValorSalvo !== undefined
-          ? String(novoValorSalvo).replace('.', ',')
+          ? formatarNumeroParaInput(novoValorSalvo)
           : '';
     }
 
     if (inputPercentual) {
       inputPercentual.value =
         percentualSalvo !== null && percentualSalvo !== undefined
-          ? String(percentualSalvo).replace('.', ',')
+          ? formatarNumeroParaInput(percentualSalvo)
           : '';
     }
 
@@ -2811,6 +3030,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
     kanbanCfg = j.kanban_cfg || {};
     paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
+    renderizarResumoComercial(j.resumo_comercial || null);
 
     ativarPainelFaceSeNecessario();
 
@@ -3688,25 +3908,74 @@ async function moverCard(idCard, idFasePara, posicao) {
 
 
 
+  async function sincronizarTagsDoCardAberto(idCard, opcoes = {}) {
+    const idC = idNum(idCard);
+    if (!idC) return false;
+
+    const detalhe = await buscarDetalheCard(idC);
+    if (!detalhe || !detalhe.card) return false;
+
+    const cardServidor = normalizarCardServidor(detalhe.card);
+    inserirOuAtualizarCardLocal(cardServidor);
+
+    const tagsAtualizadas = Array.isArray(detalhe.tags) ? detalhe.tags : [];
+    setTagsDoCard(idC, tagsAtualizadas);
+
+    if (idNum(cardAbertoId) === idC && modalCard.style.display === "block") {
+      renderTagsNoCard(tagsAtualizadas);
+
+      if (selectTagCard && idNum(opcoes.idTagSelecionada)) {
+        selectTagCard.value = String(idNum(opcoes.idTagSelecionada));
+      }
+
+      cardAbertoConflitoExterno = false;
+      msgCard.style.display = "none";
+      msgCard.textContent = "";
+      atualizarEstadoSalvarCard();
+    }
+
+    if (opcoes.redesenhar !== false) {
+      const idFaseAtual = idNum(
+        cardServidor.IDDimKanbanFaseAtual ||
+        obterCardPorId(idC)?.IDDimKanbanFaseAtual ||
+        0
+      );
+
+      if (idFaseAtual) {
+        redesenharFases([idFaseAtual], true);
+      }
+    }
+
+    void recarregarResumoComercial();
+    return true;
+  }
+
   async function removerTagDoCard(idTag) {
-    const r = await fetch(`/kanban/api/cards/${cardAbertoId}/tags/${idTag}`, {
+    const idCard = idNum(cardAbertoId);
+    const idTagNum = idNum(idTag);
+    if (!idCard || !idTagNum) return;
+
+    const r = await fetch(`/kanban/api/cards/${idCard}/tags/${idTagNum}`, {
       method:"DELETE",
       credentials: "same-origin",
       headers: {"X-CSRFToken": csrf}
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) {
-      await abrirCard(cardAbertoId);
-      redesenharFases([idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual)], true);
+    if (!j || !j.ok) {
+      mostrarMensagemCard((j && (j.msg || j.erro)) || "Erro ao remover tag.");
+      return;
     }
+
+    await sincronizarTagsDoCardAberto(idCard, { redesenhar: true });
   }
 
   document.getElementById("btnAddTag").addEventListener("click", async () => {
-    const idTag = parseInt(document.getElementById("selectTagCard").value || "0");
-    if (!idTag) return;
+    const idCard = idNum(cardAbertoId);
+    const idTag = parseInt(document.getElementById("selectTagCard").value || "0", 10);
+    if (!idCard || !idTag) return;
 
-    const r = await fetch(`/kanban/api/cards/${cardAbertoId}/tags`, {
+    const r = await fetch(`/kanban/api/cards/${idCard}/tags`, {
       method:"POST",
       credentials: "same-origin",
       headers: headersJSON,
@@ -3714,10 +3983,15 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     const j = await r.json().catch(() => null);
-    if (j && j.ok) {
-      await abrirCard(cardAbertoId);
-      redesenharFases([idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual)], true);
+    if (!j || !j.ok) {
+      mostrarMensagemCard((j && (j.msg || j.erro)) || "Erro ao adicionar tag.");
+      return;
     }
+
+    await sincronizarTagsDoCardAberto(idCard, {
+      idTagSelecionada: idTag,
+      redesenhar: true
+    });
   });
 
   async function salvarNotaSeTiverTexto() {
@@ -3968,6 +4242,7 @@ if (painelFaceLigado) {
     if (redesenhar) {
       redesenharFases([idNum(detalhe.card.IDDimKanbanFaseAtual)], true);
     }
+    void recarregarResumoComercial();
   }
 
   function conectarSocketKanban(){
@@ -4100,15 +4375,13 @@ if (painelFaceLigado) {
     socketKanban.on("card_tag_adicionada", async (payload = {}) => {
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
-      await sincronizarCardPorDetalhe(idCard, true);
-      tratarAtualizacaoExternaNoCardAberto(idCard, "As tags deste card foram alteradas por outro usuário. Reabra o card antes de salvar.");
+      await sincronizarTagsDoCardAberto(idCard, { redesenhar: true });
     });
 
     socketKanban.on("card_tag_removida", async (payload = {}) => {
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
-      await sincronizarCardPorDetalhe(idCard, true);
-      tratarAtualizacaoExternaNoCardAberto(idCard, "As tags deste card foram alteradas por outro usuário. Reabra o card antes de salvar.");
+      await sincronizarTagsDoCardAberto(idCard, { redesenhar: true });
     });
 
     socketKanban.on("card_nota_criada", async (payload = {}) => {
@@ -4166,6 +4439,10 @@ if (painelFaceLigado) {
     kanbanInicializado = true;
 
     await carregar();
+    window.setInterval(() => {
+      void recarregarResumoComercial();
+    }, 30000);
+
     const clienteSocketOk = await garantirClienteSocketIo();
     if (!clienteSocketOk) {
       mostrarMensagemBoard("Não foi possível carregar a biblioteca do tempo real. O kanban continua operando normalmente, mas sem atualização automática entre sessões.");

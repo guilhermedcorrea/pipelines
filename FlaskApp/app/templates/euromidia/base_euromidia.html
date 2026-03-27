@@ -955,6 +955,13 @@ input:disabled, select:disabled, textarea:disabled{
         </div>
         {% endif %}
 
+        <div class="menu-item" data-menu="admin">
+          <button type="button"
+                  class="menu-btn {% if request.path.startswith('/admin') %}active{% endif %}">
+            Admin
+          </button>
+        </div>
+
         {% if current_user.is_authenticated and current_user.has_permission('ADMIN_TUDO') %}
           <div class="menu-item" data-menu="seguranca">
 

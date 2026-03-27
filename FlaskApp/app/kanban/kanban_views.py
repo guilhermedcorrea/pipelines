@@ -19,7 +19,8 @@ from ..extensions import cache, db, limiter, socketio
 kanban_bp = Blueprint("kanban", __name__)
 
 
-
+TABELA_MOTIVO_ENCERRAMENTO_CARD = "[Kanban].[Silver].[DimKanbanMotivoEncerramento]"
+TABELA_HISTORICO_ENCERRAMENTO_CARD = "[Kanban].[Silver].[FatoDimHistoricoEncerramentoCard]"
 TABELA_CARD_TAG_HISTORICO= "[Kanban].[Silver].[FatoKanbanCardTagHistorico]"
 TABELA_CARD_STATUS_HISTORICO = "[Kanban].[Silver].[FatoKanbanCardStatusHistorico]"
 TABELA_CARD_OBSERVACOES = "[Kanban].[Silver].[FatoKanbanCardObservacoes]"
@@ -168,7 +169,22 @@ def _log_debug_usuario() -> None:
 
 
 
+def _request_pede_dado_fresco() -> bool:
+    """
+    Permite ao front pedir leitura sem usar cache do backend.
 
+    Exemplos aceitos:
+    - ?fresh=1
+    - ?fresh=true
+    - ?no_cache=1
+    """
+    valor = (
+        request.args.get("fresh")
+        or request.args.get("no_cache")
+        or ""
+    ).strip().lower()
+
+    return valor in {"1", "true", "t", "yes", "y", "sim"}
 
 
 
@@ -345,6 +361,147 @@ def _rowversion_hex_para_bytes(valor: Any) -> bytes | None:
         return bytes.fromhex(texto)
     except ValueError:
         return None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _obter_tag_em_atendimento(id_kanban: int) -> dict[str, Any] | None:
+    return _obter_tag_por_nome(id_kanban, "Em Atendimento", somente_ativa=True)
+
+
+def _card_possui_tag_ativa(id_card: int, id_tag: int) -> bool:
+    sql = text("""
+        SELECT TOP (1) 1
+        FROM [Kanban].[Silver].[FatoKanbanCardTag]
+        WHERE IDFatoKanbanCard = :id_card
+          AND IDDimKanbanTag = :id_tag
+          AND RemovidoEm IS NULL;
+    """)
+
+    existe = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_tag": int(id_tag),
+        },
+    ).scalar()
+
+    return bool(existe)
+
+
+def _aplicar_tag_no_card(
+    *,
+    id_card: int,
+    id_tag: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int | None,
+) -> bool:
+    if not id_card or not id_tag:
+        return False
+
+    if _card_possui_tag_ativa(id_card, id_tag):
+        return False
+
+    sql_insert = text("""
+        INSERT INTO [Kanban].[Silver].[FatoKanbanCardTag]
+            (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
+        VALUES
+            (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa);
+    """)
+
+    db.session.execute(
+        sql_insert,
+        {
+            "id_card": int(id_card),
+            "id_tag": int(id_tag),
+            "id_usuario": int(id_usuario),
+            "id_empresa": int(id_empresa_proprietaria or 0) or None,
+        },
+    )
+    return True
+
+
+def _remover_tag_do_card(*, id_card: int, id_tag: int, id_usuario: int) -> bool:
+    if not id_card or not id_tag:
+        return False
+
+    sql = text("""
+        UPDATE [Kanban].[Silver].[FatoKanbanCardTag]
+        SET RemovidoEm = GETDATE(),
+            RemovidoPor = :id_usuario
+        WHERE IDFatoKanbanCard = :id_card
+          AND IDDimKanbanTag = :id_tag
+          AND RemovidoEm IS NULL;
+    """)
+
+    resultado = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_tag": int(id_tag),
+            "id_usuario": int(id_usuario),
+        },
+    )
+
+    return bool(getattr(resultado, "rowcount", 0) or 0)
+
+
+def _garantir_tag_em_atendimento_no_card(
+    *,
+    id_card: int,
+    id_kanban: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int | None,
+    falhar_se_nao_existir: bool = False,
+) -> bool:
+    tag = _obter_tag_em_atendimento(id_kanban)
+
+    if not tag:
+        if falhar_se_nao_existir:
+            raise RuntimeError(
+                "A tag obrigatória 'Em Atendimento' não está cadastrada/ativa para este kanban."
+            )
+        return False
+
+    return _aplicar_tag_no_card(
+        id_card=int(id_card),
+        id_tag=int(tag.get("IDDimKanbanTag") or 0),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=id_empresa_proprietaria,
+    )
+
+
+def _remover_tag_em_atendimento_do_card(*, id_card: int, id_kanban: int, id_usuario: int) -> bool:
+    tag = _obter_tag_em_atendimento(id_kanban)
+    if not tag:
+        return False
+
+    return _remover_tag_do_card(
+        id_card=int(id_card),
+        id_tag=int(tag.get("IDDimKanbanTag") or 0),
+        id_usuario=int(id_usuario),
+    )
+
+
+
+
+
+
+
+
 
 
 
@@ -2147,6 +2304,248 @@ def _validar_fase_do_kanban(id_kanban: int, id_fase: int) -> bool:
 
 
 
+
+
+
+
+def _obter_motivos_encerramento_card(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
+    """
+    Lê os motivos de encerramento válidos do kanban.
+
+    Regras:
+    - usa DimKanbanMotivoEncerramento
+    - prioriza a empresa do usuário
+    - aceita também registros globais / empresa 3, para não quebrar ambiente compartilhado
+    - devolve um Codigo derivado do NomeMotivo para manter compatibilidade com o front antigo
+      (ex.: "Preço" -> "PRECO", "Apenas Informações" -> "APENAS_INFORMACOES")
+    """
+    if not _objeto_existe(TABELA_MOTIVO_ENCERRAMENTO_CARD):
+        return []
+
+    id_emp = _id_empresa_usuario_or_403()
+
+    chave = _chave_cache_json(
+        "kanban:motivos:encerramento",
+        id_emp,
+        1 if incluir_inativos else 0,
+    )
+    em_cache = _cache_json_get(chave)
+    if isinstance(em_cache, list):
+        return em_cache
+
+    filtro_ativo = "" if incluir_inativos else "AND m.Ativo = 1"
+
+    sql = text(f"""
+        SELECT
+            m.IDDimKanbanMotivoEncerramento,
+            m.NomeMotivo,
+            m.TipoMotivo,
+            m.Ativo,
+            m.IDEmpresaProprietaria,
+            m.IDDimUsuarios
+        FROM {TABELA_MOTIVO_ENCERRAMENTO_CARD} m
+        WHERE
+            (m.IDEmpresaProprietaria = :id_emp OR m.IDEmpresaProprietaria = 3 OR m.IDEmpresaProprietaria IS NULL)
+            AND UPPER(LTRIM(RTRIM(ISNULL(m.TipoMotivo, 'ENCERRAMENTO')))) = 'ENCERRAMENTO'
+            {filtro_ativo}
+            AND NULLIF(LTRIM(RTRIM(ISNULL(m.NomeMotivo, ''))), '') IS NOT NULL
+        ORDER BY
+            CASE
+                WHEN m.IDEmpresaProprietaria = :id_emp THEN 0
+                WHEN m.IDEmpresaProprietaria = 3 THEN 1
+                ELSE 2
+            END,
+            m.NomeMotivo ASC,
+            m.IDDimKanbanMotivoEncerramento ASC;
+    """)
+
+    rows = db.session.execute(sql, {"id_emp": int(id_emp)}).mappings().all()
+
+    mapa_unico: dict[str, dict[str, Any]] = {}
+
+    for row in rows:
+        item = dict(row)
+        nome_motivo = str(item.get("NomeMotivo") or "").strip()
+        codigo_motivo = _normalizar_codigo_dominio(nome_motivo)
+
+        if not codigo_motivo:
+            continue
+
+        item["Codigo"] = codigo_motivo
+        item["Descricao"] = nome_motivo
+
+        """
+        Se vier motivo repetido entre empresa local e base compartilhada,
+        fico com o primeiro porque a ordenação já priorizou a empresa do usuário.
+        """
+        if codigo_motivo not in mapa_unico:
+            mapa_unico[codigo_motivo] = item
+
+    resultado = list(mapa_unico.values())
+    _cache_json_set(chave, resultado, TIMEOUT_CACHE_MEDIO)
+    return resultado
+
+
+
+
+
+
+
+
+
+def _normalizar_motivo_encerramento_card(motivo_informado: Any) -> dict[str, Any] | None:
+    """
+    Normaliza o motivo enviado pelo front.
+
+    Aceita:
+    - ID numérico da DimKanbanMotivoEncerramento
+    - Nome do motivo
+    - Código derivado do nome
+    - aliases antigos do HTML atual (PRECO, DESISTENCIA, APENAS_INFORMACOES, OUTRO_MOTIVO)
+    """
+    motivos = _obter_motivos_encerramento_card(incluir_inativos=True)
+    if not motivos:
+        return None
+
+    texto = str(motivo_informado or "").strip()
+    if not texto:
+        return None
+
+    id_informado: int | None = None
+    try:
+        id_informado = int(texto)
+    except Exception:
+        id_informado = None
+
+    codigo_informado = _normalizar_codigo_dominio(texto)
+
+    aliases = {
+        "OUTRO_MOTIVO": "OUTROS",
+        "OUTROS": "OUTROS",
+        "PRECO": "PRECO",
+        "DESISTENCIA": "DESISTENCIA",
+        "APENAS_INFORMACOES": "APENAS_INFORMACOES",
+        "CONCORRENTE": "CONCORRENTE",
+    }
+
+    codigos_aceitos = set()
+    if codigo_informado:
+        codigos_aceitos.add(codigo_informado)
+        if codigo_informado in aliases:
+            codigos_aceitos.add(aliases[codigo_informado])
+
+    nome_comparacao = _normalizar_texto_comparacao(texto)
+
+    for item in motivos:
+        item_dict = dict(item)
+
+        try:
+            id_item = int(item_dict.get("IDDimKanbanMotivoEncerramento") or 0)
+        except Exception:
+            id_item = 0
+
+        nome_item = str(item_dict.get("NomeMotivo") or "").strip()
+        codigo_item = _normalizar_codigo_dominio(nome_item)
+
+        if id_informado and id_item == id_informado:
+            item_dict["Codigo"] = codigo_item
+            item_dict["Descricao"] = nome_item
+            return item_dict
+
+        if codigo_item and codigo_item in codigos_aceitos:
+            item_dict["Codigo"] = codigo_item
+            item_dict["Descricao"] = nome_item
+            return item_dict
+
+        if nome_comparacao and _normalizar_texto_comparacao(nome_item) == nome_comparacao:
+            item_dict["Codigo"] = codigo_item
+            item_dict["Descricao"] = nome_item
+            return item_dict
+
+    return None
+
+
+
+
+
+
+
+
+
+def _registrar_historico_encerramento_card(
+    *,
+    id_card: int,
+    id_motivo_encerramento: int,
+    nome_motivo: str,
+    id_fase: int | None,
+    id_usuario: int,
+    observacoes: str | None,
+) -> dict[str, Any]:
+    """
+    Sempre registra o encerramento nesta tabela:
+    Silver.FatoDimHistoricoEncerramentoCard
+    """
+    if not _objeto_existe(TABELA_HISTORICO_ENCERRAMENTO_CARD):
+        raise RuntimeError(
+            "A tabela Silver.FatoDimHistoricoEncerramentoCard não existe ou não está acessível."
+        )
+
+    sql = text(f"""
+        INSERT INTO {TABELA_HISTORICO_ENCERRAMENTO_CARD}
+        (
+            NomeMotivo,
+            IDDimKanbanMotivoEncerramento,
+            IDDimKanbanFase,
+            IDFatoKanbanCard,
+            IDDimUsuarios,
+            Observacoes,
+            DataAtualizacao
+        )
+        OUTPUT
+            INSERTED.IDFatoDimHistoricoEncerramentoCard,
+            INSERTED.NomeMotivo,
+            INSERTED.IDDimKanbanMotivoEncerramento,
+            INSERTED.IDDimKanbanFase,
+            INSERTED.IDFatoKanbanCard,
+            INSERTED.IDDimUsuarios,
+            INSERTED.Observacoes,
+            INSERTED.DataAtualizacao
+        VALUES
+        (
+            :nome_motivo,
+            :id_motivo_encerramento,
+            :id_fase,
+            :id_card,
+            :id_usuario,
+            :observacoes,
+            GETDATE()
+        );
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "nome_motivo": str(nome_motivo or "").strip()[:100],
+            "id_motivo_encerramento": int(id_motivo_encerramento),
+            "id_fase": int(id_fase) if id_fase else None,
+            "id_card": int(id_card),
+            "id_usuario": int(id_usuario),
+            "observacoes": (str(observacoes or "").strip()[:1000] or None),
+        },
+    ).mappings().first()
+
+    if not row:
+        raise RuntimeError("Não foi possível gravar o histórico de encerramento do card.")
+
+    return dict(row)
+
+
+
+
+
+
+
+
 def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> dict[str, Any]:
     id_emp = _id_empresa_usuario_or_403()
     filtro_ativo = "" if incluir_inativo else "AND c.Ativo = 1"
@@ -2183,6 +2582,13 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
 
 
 
+def _fase_deve_aparecer_no_template(id_fase: int | None) -> bool:
+  
+    return int(id_fase or 0) != 9
+
+
+
+
 def _obter_fases_kanban(id_kanban: int) -> list[dict[str, Any]]:
     cor_select = "CorHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorHex") else "CAST(NULL AS varchar(7)) AS CorHex,"
     sql_fases = text(f"""
@@ -2196,11 +2602,11 @@ def _obter_fases_kanban(id_kanban: int) -> list[dict[str, Any]]:
         FROM {TABELA_KANBAN_FASE}
         WHERE IDDimKanban = :id_kanban
           AND Ativo = 1
+          AND IDDimKanbanFase <> 9
         ORDER BY OrdemFase ASC;
     """)
     fases = db.session.execute(sql_fases, {"id_kanban": id_kanban}).mappings().all()
     return _rows_para_dicts(fases)
-
 
 
 def _obter_tags_kanban(id_kanban: int) -> list[dict[str, Any]]:
@@ -3170,6 +3576,8 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     return _rows_para_dicts(rows)
 
 
+
+
 def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     print(f"[KANBAN][_obter_card_detalhe_payload] INICIO id_card={id_card}")
     current_app.logger.info("KANBAN: _obter_card_detalhe_payload iniciado. id_card=%s", id_card)
@@ -3310,26 +3718,29 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     """)
     tags = db.session.execute(sql_tags, {"id_card": int(id_card)}).mappings().all()
 
-    select_empresa_nota = (
-        "IDEmpresa,"
-        if _coluna_existe(TABELA_CARD_NOTA, "IDEmpresa")
-        else "CAST(NULL AS int) AS IDEmpresa,"
-    )
-
-    sql_notas = text(f"""
-        SELECT
-            IDFatoKanbanCardNota,
-            TipoNota,
-            Texto,
-            CriadoEm,
-            CriadoPor,
-            {select_empresa_nota}
-            IDEmpresaProprietaria
-        FROM {TABELA_CARD_NOTA}
-        WHERE IDFatoKanbanCard = :id_card
-        ORDER BY CriadoEm DESC;
-    """)
-    notas = db.session.execute(sql_notas, {"id_card": int(id_card)}).mappings().all()
+    if _objeto_existe(TABELA_CARD_OBSERVACOES):
+        sql_notas = text(f"""
+            SELECT
+                o.IDFatoKanbanCardObservacoes AS IDFatoKanbanCardNota,
+                o.IDFatoKanbanCardObservacoes AS IDFatoKanbanCardObservacoes,
+                CASE
+                    WHEN TRY_CONVERT(int, o.IDDimKanbanStatusCard) = 2 THEN 'INATIVACAO'
+                    ELSE 'OBS'
+                END AS TipoNota,
+                o.Observacao AS Texto,
+                o.CriadoEm,
+                o.IDDimUsuarios AS CriadoPor,
+                CAST(NULL AS int) AS IDEmpresa,
+                o.IDEmpresaProprietaria,
+                o.IDDimKanbanStatusCard,
+                o.IDDimKanbanFase
+            FROM {TABELA_CARD_OBSERVACOES} o
+            WHERE o.IDFatoKanbanCard = :id_card
+            ORDER BY o.CriadoEm DESC, o.IDFatoKanbanCardObservacoes DESC;
+        """)
+        notas = db.session.execute(sql_notas, {"id_card": int(id_card)}).mappings().all()
+    else:
+        notas = []
 
     paineis_vinculados = _listar_paineis_vinculados_card(id_card)
 
@@ -3350,6 +3761,8 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     )
 
     return retorno
+
+
 
 
 
@@ -3478,6 +3891,143 @@ def api_kanbans_listar():
 
 
 
+
+
+
+def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
+    """
+    Retorna o resumo comercial do quadro inteiro.
+
+    Regras:
+    - considera apenas cards ativos e com status visível no kanban
+    - considera apenas vínculos painel/face ativos (foto atual do card)
+    - contagem de tags usa DISTINCT por card para não duplicar quando houver mais de uma linha
+    - margem percentual total é calculada de forma ponderada:
+      (venda_total - custo_total) / venda_total * 100
+      e não pela média simples das margens linha a linha
+    """
+    sql = text(f"""
+        ;WITH CardsBase AS (
+            SELECT c.IDFatoKanbanCard
+            FROM {TABELA_CARD} c
+            WHERE c.IDDimKanban = :id_kanban
+              AND c.Ativo = 1
+              {_sql_filtro_status_card_visiveis('c')}
+        ),
+        TagsAtivas AS (
+            SELECT DISTINCT
+                ct.IDFatoKanbanCard,
+                UPPER(LTRIM(RTRIM(ISNULL(t.NomeTag, '')))) AS NomeTagNormalizado
+            FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
+            INNER JOIN [Kanban].[Silver].[DimKanbanTag] t
+                ON t.IDDimKanbanTag = ct.IDDimKanbanTag
+            INNER JOIN CardsBase cb
+                ON cb.IDFatoKanbanCard = ct.IDFatoKanbanCard
+            WHERE ct.RemovidoEm IS NULL
+              AND ISNULL(t.Ativo, 1) = 1
+        ),
+        PainelFaceAtivo AS (
+            SELECT
+                pf.IDFatoKanbanCard,
+                CAST(ISNULL(pf.CustoTabela, 0) AS DECIMAL(18, 4)) AS ValorCustoLinha,
+                CAST(
+                    ISNULL(
+                        pf.ValorVendaFinal,
+                        ISNULL(pf.NovoValor, ISNULL(pf.ValorTabela, 0))
+                    )
+                    AS DECIMAL(18, 4)
+                ) AS ValorVendaLinha
+            FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
+            INNER JOIN CardsBase cb
+                ON cb.IDFatoKanbanCard = pf.IDFatoKanbanCard
+            WHERE ISNULL(pf.Ativo, 1) = 1
+        ),
+        TotaisFinanceiros AS (
+            SELECT
+                CAST(ISNULL(SUM(ValorCustoLinha), 0) AS DECIMAL(18, 4)) AS ValorCustoTotal,
+                CAST(ISNULL(SUM(ValorVendaLinha), 0) AS DECIMAL(18, 4)) AS ValorVendaTotal
+            FROM PainelFaceAtivo
+        )
+        SELECT
+            ISNULL((
+                SELECT COUNT(DISTINCT ta.IDFatoKanbanCard)
+                FROM TagsAtivas ta
+                WHERE ta.NomeTagNormalizado IN ('EM ATENDIMENTO', 'ATENDIMENTO')
+            ), 0) AS QuantidadeAtendimentosAtivos,
+            ISNULL((
+                SELECT COUNT(DISTINCT ta.IDFatoKanbanCard)
+                FROM TagsAtivas ta
+                WHERE ta.NomeTagNormalizado IN (
+                    'APROVACAO DESCONTO',
+                    'APROVAÇÃO DESCONTO',
+                    'APROVACAO PRECO',
+                    'APROVAÇÃO PREÇO'
+                )
+            ), 0) AS QuantidadeAprovacaoPreco,
+            tf.ValorCustoTotal,
+            tf.ValorVendaTotal,
+            CAST(
+                CASE
+                    WHEN ISNULL(tf.ValorVendaTotal, 0) = 0 THEN 0
+                    ELSE ((tf.ValorVendaTotal - tf.ValorCustoTotal) / NULLIF(tf.ValorVendaTotal, 0)) * 100
+                END
+                AS DECIMAL(18, 4)
+            ) AS MargemPercentualTotal
+        FROM TotaisFinanceiros tf;
+    """)
+
+    row = db.session.execute(sql, {"id_kanban": int(id_kanban)}).mappings().first() or {}
+
+    return {
+        "QuantidadeAtendimentosAtivos": int(row.get("QuantidadeAtendimentosAtivos") or 0),
+        "QuantidadeAprovacaoPreco": int(row.get("QuantidadeAprovacaoPreco") or 0),
+        "ValorCustoTotal": float(row.get("ValorCustoTotal") or 0),
+        "ValorVendaTotal": float(row.get("ValorVendaTotal") or 0),
+        "MargemPercentualTotal": float(row.get("MargemPercentualTotal") or 0),
+    }
+
+
+
+
+
+
+
+@kanban_bp.route("/api/kanbans/<int:id_kanban>/resumo-comercial", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_kanban_resumo_comercial(id_kanban: int):
+    _assert_login()
+    _obter_kanban_autorizado(id_kanban)
+    id_emp = _id_empresa_usuario_or_403()
+
+    usar_cache = not _request_pede_dado_fresco()
+
+    chave = _chave_cache_json(
+        "kanban:api:resumo-comercial",
+        id_emp,
+        id_kanban,
+        _versao_empresa(id_emp),
+        _versao_kanban(id_kanban),
+    )
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
+
+    payload = {
+        "ok": True,
+        "resumo_comercial": _obter_resumo_comercial_kanban(id_kanban),
+    }
+
+    if usar_cache:
+        _cache_json_set(chave, payload, 5)
+
+    return jsonify(payload)
+
+
+
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/dados", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -3492,6 +4042,7 @@ def api_kanban_dados(id_kanban: int):
         return jsonify({"ok": False, "msg": "limit_inicial inválido"}), 400
 
     limite_inicial_por_fase = max(1, min(limite_inicial_por_fase, LIMITE_CARDS_POR_FASE))
+    usar_cache = not _request_pede_dado_fresco()
 
     chave = _chave_cache_json(
         "kanban:api:dados",
@@ -3501,9 +4052,11 @@ def api_kanban_dados(id_kanban: int):
         _versao_empresa(id_emp),
         _versao_kanban(id_kanban),
     )
-    em_cache = _cache_json_get(chave)
-    if em_cache is not None:
-        return jsonify(em_cache)
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
 
     fases_base = _obter_fases_kanban(id_kanban)
     tags_catalogo = _obter_tags_kanban(id_kanban)
@@ -3655,12 +4208,17 @@ def api_kanban_dados(id_kanban: int):
         "tags": tags_catalogo,
         "card_tags": card_tags_iniciais,
         "paineis": paineis_catalogo,
+        "resumo_comercial": _obter_resumo_comercial_kanban(id_kanban),
         "limit_inicial_por_fase": limite_inicial_por_fase,
         "carga_parcial": True,
     }
 
-    _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
+
     return jsonify(payload)
+
+
 
 
 
@@ -4400,6 +4958,7 @@ def api_fases_reordenar():
 
 
 
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -4572,6 +5131,15 @@ def api_card_criar(id_kanban: int):
         if not novo_id:
             raise RuntimeError("O INSERT não retornou IDFatoKanbanCard.")
 
+        etapa = "aplicar_tag_em_atendimento"
+        _garantir_tag_em_atendimento_no_card(
+            id_card=int(novo_id),
+            id_kanban=int(id_kanban),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=id_emp,
+            falhar_se_nao_existir=True,
+        )
+
         etapa = "snapshot_depois"
         snapshot_depois = _obter_snapshot_card_log(int(novo_id), incluir_inativo=True)
         print(f"[KANBAN][CRIAR_CARD] snapshot_depois={snapshot_depois}")
@@ -4680,6 +5248,7 @@ def api_card_criar(id_kanban: int):
                 "etapa_pos_commit": etapa,
             }
         ), 200
+
 
 
 
@@ -5283,6 +5852,7 @@ def api_card_mover(id_card: int):
                 SELECT TOP (1)
                     f.IDDimKanbanFase,
                     f.NomeFase,
+                    f.TipoFase,
                     f.IDEmpresaProprietaria
                 FROM {TABELA_KANBAN_FASE} f
                 WHERE f.IDDimKanbanFase = :id_fase_para
@@ -5452,6 +6022,7 @@ def api_card_mover(id_card: int):
             )
 
         nome_fase_destino = str(fase_destino.get("NomeFase") or "").strip()
+        tipo_fase_destino = str(fase_destino.get("TipoFase") or "").strip()
 
         id_status_movimento = _resolver_id_status_card_movimento(
             nome_fase_para=nome_fase_destino,
@@ -5491,6 +6062,13 @@ def api_card_mover(id_card: int):
                 WHERE IDFatoKanbanCard = :id_card;
             """)
             db.session.execute(sql_status_pos_mov, params_status_pos_mov)
+
+        if _fase_define_status_concluido(nome_fase_destino, tipo_fase_destino):
+            _remover_tag_em_atendimento_do_card(
+                id_card=int(id_card),
+                id_kanban=int(id_kanban),
+                id_usuario=int(id_usuario),
+            )
 
         id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
             id_kanban=id_kanban,
@@ -5597,9 +6175,6 @@ def api_card_mover(id_card: int):
 
 
 
-
-
-
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/tags", methods=["POST"])
 @login_required
 @limiter.limit("60/minute")
@@ -5663,6 +6238,8 @@ def api_tag_criar(id_kanban: int):
     return jsonify({"ok": True, "IDDimKanbanTag": int(novo_id)})
 
 
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/tags", methods=["POST"])
 @login_required
 @limiter.limit("180/minute")
@@ -5686,8 +6263,12 @@ def api_card_tag_adicionar(id_card: int):
     """)
     tag_ok = db.session.execute(
         sql_tag,
-        {"id_tag": id_tag, "id_kanban": id_kanban},
+        {
+            "id_tag": id_tag,
+            "id_kanban": id_kanban,
+        },
     ).scalar()
+
     if not tag_ok:
         return jsonify({"ok": False, "msg": "Tag inválida para este card"}), 400
 
@@ -5698,35 +6279,62 @@ def api_card_tag_adicionar(id_card: int):
           AND IDDimKanbanTag = :id_tag
           AND RemovidoEm IS NULL;
     """)
-    existe = db.session.execute(sql_dup, {"id_card": id_card, "id_tag": id_tag}).scalar()
-    if existe:
-        return jsonify({"ok": True})
-
-    sql = text("""
-        INSERT INTO [Kanban].[Silver].[FatoKanbanCardTag]
-            (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
-        VALUES
-            (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa);
-    """)
-    db.session.execute(
-        sql,
+    existe = db.session.execute(
+        sql_dup,
         {
             "id_card": id_card,
             "id_tag": id_tag,
-            "id_usuario": id_usuario,
-            "id_empresa": card.get("IDEmpresaProprietaria"),
         },
-    )
-    db.session.commit()
+    ).scalar()
+
+    alterou = False
+
+    if not existe:
+        sql_insert = text("""
+            INSERT INTO [Kanban].[Silver].[FatoKanbanCardTag]
+                (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
+            VALUES
+                (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa);
+        """)
+        db.session.execute(
+            sql_insert,
+            {
+                "id_card": id_card,
+                "id_tag": id_tag,
+                "id_usuario": id_usuario,
+                "id_empresa": card.get("IDEmpresaProprietaria"),
+            },
+        )
+        db.session.commit()
+        alterou = True
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
-    _emitir_evento_kanban(
-        id_kanban,
-        "card_tag_adicionada",
-        {"id_card": id_card, "id_tag": id_tag},
+    detalhe = _obter_card_detalhe_payload(id_card)
+
+    if alterou:
+        _emitir_evento_kanban(
+            id_kanban,
+            "card_tag_adicionada",
+            {
+                "id_card": id_card,
+                "id_tag": id_tag,
+                "id_usuario_acao": id_usuario,
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+            },
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "id_card": id_card,
+            "id_tag": id_tag,
+            "card": detalhe.get("card"),
+            "tags": detalhe.get("tags", []),
+        }
     )
 
-    return jsonify({"ok": True})
+
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/tags/<int:id_tag>", methods=["DELETE"])
@@ -5738,27 +6346,30 @@ def api_card_tag_remover(id_card: int, id_tag: int):
     id_emp = _id_empresa_usuario_or_403()
     id_kanban = int(card.get("IDDimKanban") or 0)
 
-    sql = text("""
-        UPDATE [Kanban].[Silver].[FatoKanbanCardTag]
-        SET RemovidoEm = GETDATE(),
-            RemovidoPor = :id_usuario
-        WHERE IDFatoKanbanCard = :id_card
-          AND IDDimKanbanTag = :id_tag
-          AND RemovidoEm IS NULL;
-    """)
-    db.session.execute(sql, {"id_card": id_card, "id_tag": id_tag, "id_usuario": id_usuario})
+    tag_em_atendimento = _obter_tag_em_atendimento(id_kanban)
+    if tag_em_atendimento and int(tag_em_atendimento.get("IDDimKanbanTag") or 0) == int(id_tag):
+        return jsonify({
+            "ok": False,
+            "msg": "A tag 'Em Atendimento' é automática e só pode ser removida quando o card for concluído ou removido do kanban.",
+        }), 400
+
+    alterou = _remover_tag_do_card(
+        id_card=int(id_card),
+        id_tag=int(id_tag),
+        id_usuario=int(id_usuario),
+    )
     db.session.commit()
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
-    _emitir_evento_kanban(
-        id_kanban,
-        "card_tag_removida",
-        {"id_card": id_card, "id_tag": id_tag},
-    )
+
+    if alterou:
+        _emitir_evento_kanban(
+            id_kanban,
+            "card_tag_removida",
+            {"id_card": id_card, "id_tag": id_tag},
+        )
 
     return jsonify({"ok": True})
-
-
 
 
 
@@ -5823,12 +6434,13 @@ def _obter_contexto_observacao_card(id_card: int) -> dict[str, Any]:
 
 
 
-
 def _registrar_observacao_historica_card(
     *,
     id_card: int,
     texto_observacao: str,
     id_usuario: int,
+    id_status_card: int | None = None,
+    id_fase: int | None = None,
 ) -> dict[str, Any] | None:
     """
     Grava o histórico de observações digitadas no campo de notas do card.
@@ -5837,9 +6449,11 @@ def _registrar_observacao_historica_card(
     - Observacao = texto digitado
     - IDEmpresaProprietaria = regra do kanban (kanban 1 => empresa 3)
     - IDFatoKanbanCard = card atual
-    - IDDimKanbanStatusCard = status atual do card; se não existir na FatoKanbanCard, deriva pela fase
-    - IDDimKanbanFase = fase atual do card
+    - IDDimKanbanStatusCard = status atual do card; se não vier por parâmetro,
+      tento pegar da FatoKanbanCard e, se não existir, derivo pela fase
+    - IDDimKanbanFase = fase atual do card; se vier por parâmetro, uso o informado
     - IDDimUsuarios = usuário logado
+    - CriadoEm = GETDATE()
     """
     if not _objeto_existe(TABELA_CARD_OBSERVACOES):
         return None
@@ -5853,10 +6467,13 @@ def _registrar_observacao_historica_card(
         return None
 
     id_kanban = int(contexto.get("IDDimKanban") or 0)
-    id_fase_atual = int(contexto.get("IDDimKanbanFaseAtual") or 0)
+    id_fase_atual = int(id_fase or contexto.get("IDDimKanbanFaseAtual") or 0)
     nome_fase_atual = str(contexto.get("NomeFaseAtual") or "").strip()
 
-    id_status_atual = contexto.get("IDDimKanbanStatusCard")
+    id_status_atual = id_status_card
+    if id_status_atual is None:
+        id_status_atual = contexto.get("IDDimKanbanStatusCard")
+
     if id_status_atual is None:
         id_status_atual = _resolver_id_status_card_movimento(
             nome_fase_para=nome_fase_atual,
@@ -5876,9 +6493,18 @@ def _registrar_observacao_historica_card(
             IDFatoKanbanCard,
             IDDimKanbanStatusCard,
             IDDimKanbanFase,
-            IDDimUsuarios
+            IDDimUsuarios,
+            CriadoEm
         )
-        OUTPUT INSERTED.IDFatoKanbanCardObservacoes
+        OUTPUT
+            INSERTED.IDFatoKanbanCardObservacoes,
+            INSERTED.Observacao,
+            INSERTED.IDEmpresaProprietaria,
+            INSERTED.IDFatoKanbanCard,
+            INSERTED.IDDimKanbanStatusCard,
+            INSERTED.IDDimKanbanFase,
+            INSERTED.IDDimUsuarios,
+            INSERTED.CriadoEm
         VALUES
         (
             :observacao,
@@ -5886,7 +6512,8 @@ def _registrar_observacao_historica_card(
             :id_card,
             :id_status_card,
             :id_fase,
-            :id_usuario
+            :id_usuario,
+            GETDATE()
         );
     """)
 
@@ -5902,10 +6529,27 @@ def _registrar_observacao_historica_card(
         },
     ).mappings().first()
 
-    return dict(row) if row else None
+    if not row:
+        return None
 
+    registro = dict(row)
 
+    try:
+        id_status_registro = (
+            int(registro.get("IDDimKanbanStatusCard"))
+            if registro.get("IDDimKanbanStatusCard") is not None
+            else None
+        )
+    except Exception:
+        id_status_registro = None
 
+    registro["IDFatoKanbanCardNota"] = registro.get("IDFatoKanbanCardObservacoes")
+    registro["TipoNota"] = "INATIVACAO" if id_status_registro == 2 else "OBS"
+    registro["Texto"] = registro.get("Observacao")
+    registro["CriadoPor"] = registro.get("IDDimUsuarios")
+    registro["IDEmpresa"] = None
+
+    return registro
 
 
 
@@ -5917,46 +6561,22 @@ def api_card_nota_criar(id_card: int):
     card = _obter_card_autorizado(id_card)
     id_emp = _id_empresa_usuario_or_403()
     id_kanban = int(card.get("IDDimKanban") or 0)
-    id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
 
     payload = request.get_json(silent=True) or {}
     texto = (payload.get("texto") or "").strip()
-    tipo = (payload.get("tipo") or "OBS").strip().upper()
 
     if len(texto) < 2:
         return jsonify({"ok": False, "msg": "Texto da nota inválido"}), 400
-
-    colunas = ["IDFatoKanbanCard", "TipoNota", "Texto", "CriadoEm", "CriadoPor", "IDEmpresaProprietaria"]
-    valores = [":id_card", ":tipo", ":texto", "GETDATE()", ":criado_por", ":id_empresa"]
-    params = {
-        "id_card": id_card,
-        "tipo": tipo[:50],
-        "texto": texto,
-        "criado_por": id_usuario,
-        "id_empresa": card.get("IDEmpresaProprietaria"),
-    }
-
-    if _coluna_existe(TABELA_CARD_NOTA, "IDEmpresa"):
-        colunas.append("IDEmpresa")
-        valores.append(":id_empresa_relacionada")
-        params["id_empresa_relacionada"] = id_empresa_relacionada
-
-    sql = text(
-        f"""
-        INSERT INTO {TABELA_CARD_NOTA}
-            ({', '.join(colunas)})
-        OUTPUT INSERTED.IDFatoKanbanCardNota, INSERTED.CriadoEm
-        VALUES
-            ({', '.join(valores)});
-        """
-    )
-    row_nota = db.session.execute(sql, params).mappings().first()
 
     row_observacao = _registrar_observacao_historica_card(
         id_card=id_card,
         texto_observacao=texto,
         id_usuario=id_usuario,
     )
+
+    if not row_observacao:
+        db.session.rollback()
+        return jsonify({"ok": False, "msg": "Não foi possível gravar a observação do card"}), 500
 
     snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
     _registrar_log_card(
@@ -5965,10 +6585,10 @@ def api_card_nota_criar(id_card: int):
         id_empresa_proprietaria=id_emp,
         id_usuario_acao=id_usuario,
         tipo_evento="CARD_NOTA_CRIADA",
-        subtipo_evento=tipo[:50],
+        subtipo_evento="OBS",
         observacao=texto,
-        tabela_origem=TABELA_CARD_NOTA,
-        id_registro_origem=int(row_nota.get("IDFatoKanbanCardNota") or 0) if row_nota else None,
+        tabela_origem=TABELA_CARD_OBSERVACOES,
+        id_registro_origem=int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0),
         payload_depois=snapshot_depois,
     )
     db.session.commit()
@@ -5976,13 +6596,16 @@ def api_card_nota_criar(id_card: int):
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
 
     nota_payload = {
-        "IDFatoKanbanCardNota": int(row_nota.get("IDFatoKanbanCardNota") or 0) if row_nota else None,
-        "TipoNota": tipo[:50],
-        "Texto": texto,
-        "CriadoPor": id_usuario,
-        "CriadoEm": row_nota.get("CriadoEm") if row_nota else None,
-        "IDEmpresa": id_empresa_relacionada,
-        "IDFatoKanbanCardObservacoes": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
+        "IDFatoKanbanCardNota": int(row_observacao.get("IDFatoKanbanCardNota") or 0),
+        "IDFatoKanbanCardObservacoes": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0),
+        "TipoNota": row_observacao.get("TipoNota") or "OBS",
+        "Texto": row_observacao.get("Texto") or texto,
+        "CriadoPor": int(row_observacao.get("CriadoPor") or id_usuario),
+        "CriadoEm": row_observacao.get("CriadoEm"),
+        "IDEmpresa": None,
+        "IDEmpresaProprietaria": row_observacao.get("IDEmpresaProprietaria"),
+        "IDDimKanbanStatusCard": row_observacao.get("IDDimKanbanStatusCard"),
+        "IDDimKanbanFase": row_observacao.get("IDDimKanbanFase"),
     }
 
     _emitir_evento_kanban(
@@ -5992,6 +6615,7 @@ def api_card_nota_criar(id_card: int):
     )
 
     return jsonify({"ok": True, "nota": nota_payload})
+
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/inativar", methods=["POST"])
@@ -6022,15 +6646,16 @@ def api_card_inativar(id_card: int):
         f"[KANBAN][api_card_inativar] motivo_informado={motivo_informado!r} descricao={descricao!r}"
     )
 
-    motivo_normalizado = _normalizar_motivo_inativacao_card(motivo_informado)
+    motivo_normalizado = _normalizar_motivo_encerramento_card(motivo_informado)
     print(f"[KANBAN][api_card_inativar] motivo_normalizado={motivo_normalizado!r}")
 
     if not motivo_normalizado:
         print("[KANBAN][api_card_inativar] motivo inválido -> retorno 400")
         return jsonify({"ok": False, "msg": "Motivo inválido"}), 400
 
-    if _normalizar_codigo_dominio(motivo_normalizado.get("Codigo")) == "OUTRO_MOTIVO" and len(descricao) < 2:
-        print("[KANBAN][api_card_inativar] motivo OUTRO_MOTIVO sem descrição suficiente -> retorno 400")
+    codigo_motivo = _normalizar_codigo_dominio(motivo_normalizado.get("Codigo"))
+    if codigo_motivo in {"OUTROS", "OUTRO_MOTIVO"} and len(descricao) < 2:
+        print("[KANBAN][api_card_inativar] motivo OUTROS sem descrição suficiente -> retorno 400")
         return jsonify({"ok": False, "msg": "Descreva o motivo"}), 400
 
     print("[KANBAN][api_card_inativar] capturando snapshot_antes")
@@ -6038,13 +6663,14 @@ def api_card_inativar(id_card: int):
 
     sql_card = text(f"""
         SELECT
-            IDDimKanban,
-            IDDimKanbanFaseAtual,
-            IDEmpresaProprietaria,
+            c.IDDimKanban,
+            c.IDDimKanbanFaseAtual,
+            c.IDEmpresaProprietaria,
+            c.IDDimKanbanMotivoEncerramento,
             {_sql_select_empresa_relacionada_card('c')}
         FROM {TABELA_CARD} c
-        WHERE IDFatoKanbanCard = :id_card
-          AND Ativo = 1;
+        WHERE c.IDFatoKanbanCard = :id_card
+          AND c.Ativo = 1;
     """)
 
     print(f"[KANBAN][api_card_inativar] executando SQL card ativo id_card={id_card}")
@@ -6061,51 +6687,69 @@ def api_card_inativar(id_card: int):
         )
         return jsonify({"ok": False, "msg": "Card fora do escopo do usuário"}), 403
 
-    id_fase_atual = int(row["IDDimKanbanFaseAtual"])
+    id_fase_atual = int(row["IDDimKanbanFaseAtual"] or 0)
+    id_fase_para_movimento = 9
     id_empresa_card = row.get("IDEmpresaProprietaria")
+    id_motivo_encerramento = int(motivo_normalizado.get("IDDimKanbanMotivoEncerramento") or 0)
     motivo_texto = str(motivo_normalizado.get("Descricao") or "").strip()
 
     observacao_inativacao = f"[INATIVADO] Motivo: {motivo_texto}" + (f" | {descricao}" if descricao else "")
     print(
         "[KANBAN][api_card_inativar] dados básicos -> "
-        f"id_fase_atual={id_fase_atual} id_empresa_card={id_empresa_card} "
+        f"id_fase_atual={id_fase_atual} id_fase_para_movimento={id_fase_para_movimento} "
+        f"id_empresa_card={id_empresa_card} "
+        f"id_motivo_encerramento={id_motivo_encerramento} "
         f"motivo_texto={motivo_texto!r} observacao_inativacao={observacao_inativacao!r}"
     )
 
     id_status_inativacao = _resolver_id_status_card_movimento(card_inativado=True)
+    status_inativacao_texto = "CANCELADO"
 
     print(
-        f"[KANBAN][api_card_inativar] id_status_inativacao={id_status_inativacao!r}"
+        f"[KANBAN][api_card_inativar] id_status_inativacao={id_status_inativacao!r} "
+        f"status_inativacao_texto={status_inativacao_texto!r}"
     )
 
     try:
-        campos_update = [
-            "Ativo = 0",
-            "InativadoEm = GETDATE()",
-            "InativadoPor = :id_usuario",
-        ]
+        campos_update = ["Ativo = 0"]
         params_update = {
             "id_usuario": id_usuario,
             "id_card": id_card,
         }
 
+        if _coluna_existe(TABELA_CARD, "InativadoEm"):
+            campos_update.append("InativadoEm = GETDATE()")
+
+        if _coluna_existe(TABELA_CARD, "InativadoPor"):
+            campos_update.append("InativadoPor = :id_usuario")
+
         if _coluna_existe(TABELA_CARD, "StatusCard"):
             campos_update.append("StatusCard = :status_inativacao")
-            params_update["status_inativacao"] = "CANCELADO"
+            params_update["status_inativacao"] = status_inativacao_texto[:100]
 
         if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_inativacao is not None:
             campos_update.append("IDDimKanbanStatusCard = :id_status_inativacao")
             params_update["id_status_inativacao"] = int(id_status_inativacao)
 
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanMotivoEncerramento"):
+            campos_update.append("IDDimKanbanMotivoEncerramento = :id_motivo_encerramento")
+            params_update["id_motivo_encerramento"] = int(id_motivo_encerramento)
+
         if _coluna_existe(TABELA_CARD, "MotivoEncerramentoObs"):
             campos_update.append("MotivoEncerramentoObs = :motivo_obs")
-            params_update["motivo_obs"] = observacao_inativacao[:2000]
+            params_update["motivo_obs"] = (descricao[:2000] if descricao else observacao_inativacao[:2000])
 
         if _coluna_existe(TABELA_CARD, "EncerradoEm"):
             campos_update.append("EncerradoEm = ISNULL(EncerradoEm, GETDATE())")
 
+        if _coluna_existe(TABELA_CARD, "EncerradoPor"):
+            campos_update.append("EncerradoPor = ISNULL(EncerradoPor, :id_usuario)")
+
         if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
             campos_update.append("AtualizadoEm = GETDATE()")
+
+        if _coluna_existe(TABELA_CARD, "AtualizadoPor"):
+            campos_update.append("AtualizadoPor = :id_usuario")
 
         print(f"[KANBAN][api_card_inativar] campos_update={campos_update!r}")
         print(f"[KANBAN][api_card_inativar] params_update={params_update!r}")
@@ -6147,7 +6791,7 @@ def api_card_inativar(id_card: int):
             (
                 :id_card,
                 :id_fase_de,
-                NULL,
+                :id_fase_para,
                 GETDATE(),
                 :movido_por,
                 :obs,
@@ -6161,6 +6805,7 @@ def api_card_inativar(id_card: int):
         params_mov = {
             "id_card": id_card,
             "id_fase_de": id_fase_atual,
+            "id_fase_para": id_fase_para_movimento,
             "movido_por": id_usuario,
             "obs": observacao_inativacao[:2000],
             "id_empresa": id_empresa_movimento,
@@ -6173,58 +6818,31 @@ def api_card_inativar(id_card: int):
         row_mov = db.session.execute(sql_ins_mov, params_mov).mappings().first()
         print(f"[KANBAN][api_card_inativar] row_mov={row_mov!r}")
 
-        if _objeto_existe(TABELA_CARD_NOTA):
-            print("[KANBAN][api_card_inativar] tabela de nota existe -> preparando insert")
+        print("[KANBAN][api_card_inativar] inserindo histórico de encerramento")
+        row_hist_enc = _registrar_historico_encerramento_card(
+            id_card=id_card,
+            id_motivo_encerramento=id_motivo_encerramento,
+            nome_motivo=motivo_texto,
+            id_fase=id_fase_atual,
+            id_usuario=id_usuario,
+            observacoes=descricao,
+        )
+        print(f"[KANBAN][api_card_inativar] row_hist_enc={row_hist_enc!r}")
 
-            colunas_nota = [
-                "IDFatoKanbanCard",
-                "TipoNota",
-                "Texto",
-                "CriadoEm",
-                "CriadoPor",
-                "IDEmpresaProprietaria",
-            ]
-            valores_nota = [
-                ":id_card",
-                ":tipo_nota",
-                ":texto_nota",
-                "GETDATE()",
-                ":criado_por",
-                ":id_empresa",
-            ]
-            params_nota = {
-                "id_card": id_card,
-                "tipo_nota": "INATIVACAO",
-                "texto_nota": observacao_inativacao[:4000],
-                "criado_por": id_usuario,
-                "id_empresa": id_empresa_movimento,
-            }
+        row_observacao = _registrar_observacao_historica_card(
+            id_card=id_card,
+            texto_observacao=observacao_inativacao,
+            id_usuario=id_usuario,
+            id_status_card=id_status_inativacao,
+            id_fase=id_fase_atual,
+        )
+        print(f"[KANBAN][api_card_inativar] row_observacao={row_observacao!r}")
 
-            if _coluna_existe(TABELA_CARD_NOTA, "IDEmpresa"):
-                id_empresa_relacionada = _obter_id_empresa_relacionada_card(row)
-                print(
-                    f"[KANBAN][api_card_inativar] coluna IDEmpresa existe em nota -> id_empresa_relacionada={id_empresa_relacionada!r}"
-                )
-                colunas_nota.append("IDEmpresa")
-                valores_nota.append(":id_empresa_relacionada")
-                params_nota["id_empresa_relacionada"] = id_empresa_relacionada
-
-            print(f"[KANBAN][api_card_inativar] colunas_nota={colunas_nota!r}")
-            print(f"[KANBAN][api_card_inativar] valores_nota={valores_nota!r}")
-            print(f"[KANBAN][api_card_inativar] params_nota={params_nota!r}")
-
-            sql_nota = text(f"""
-                INSERT INTO {TABELA_CARD_NOTA}
-                    ({', '.join(colunas_nota)})
-                VALUES
-                    ({', '.join(valores_nota)});
-            """)
-
-            print("[KANBAN][api_card_inativar] inserindo nota de inativação")
-            db.session.execute(sql_nota, params_nota)
-            print("[KANBAN][api_card_inativar] nota inserida com sucesso")
-        else:
-            print("[KANBAN][api_card_inativar] tabela de nota NÃO existe -> pulando insert de nota")
+        _remover_tag_em_atendimento_do_card(
+            id_card=int(id_card),
+            id_kanban=int(id_kanban),
+            id_usuario=int(id_usuario),
+        )
 
         print("[KANBAN][api_card_inativar] capturando snapshot_depois")
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
@@ -6237,10 +6855,11 @@ def api_card_inativar(id_card: int):
             id_usuario_acao=id_usuario,
             tipo_evento="CARD_INATIVADO",
             id_fase_de=id_fase_atual,
+            id_fase_para=id_fase_para_movimento,
             motivo=motivo_texto,
-            observacao=observacao_inativacao,
-            tabela_origem=TABELA_CARD_MOVIMENTO,
-            id_registro_origem=int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
+            observacao=descricao or observacao_inativacao,
+            tabela_origem=TABELA_HISTORICO_ENCERRAMENTO_CARD,
+            id_registro_origem=int(row_hist_enc.get("IDFatoDimHistoricoEncerramentoCard") or 0),
             payload_antes=snapshot_antes,
             payload_depois=snapshot_depois,
         )
@@ -6259,28 +6878,32 @@ def api_card_inativar(id_card: int):
             {
                 "id_card": id_card,
                 "id_fase_de": id_fase_atual,
+                "id_fase_para": id_fase_para_movimento,
                 "motivo": motivo_texto,
-                "motivo_codigo": motivo_normalizado["Codigo"],
+                "motivo_codigo": motivo_normalizado.get("Codigo"),
+                "id_motivo_encerramento": id_motivo_encerramento,
                 "descricao": descricao or None,
             },
         )
 
         print(
-            f"[KANBAN][api_card_inativar] SUCESSO id_card={id_card} motivo={motivo_texto!r} codigo={motivo_normalizado['Codigo']!r}"
+            f"[KANBAN][api_card_inativar] SUCESSO id_card={id_card} motivo={motivo_texto!r} codigo={motivo_normalizado.get('Codigo')!r}"
         )
         current_app.logger.info(
-            "KANBAN: card inativado com sucesso. id_card=%s id_usuario=%s motivo=%s codigo=%s",
+            "KANBAN: card inativado com sucesso. id_card=%s id_usuario=%s motivo=%s codigo=%s id_motivo=%s",
             id_card,
             id_usuario,
             motivo_texto,
-            motivo_normalizado["Codigo"],
+            motivo_normalizado.get("Codigo"),
+            id_motivo_encerramento,
         )
 
         return jsonify(
             {
                 "ok": True,
                 "motivo": motivo_texto,
-                "motivo_codigo": motivo_normalizado["Codigo"],
+                "motivo_codigo": motivo_normalizado.get("Codigo"),
+                "id_motivo_encerramento": id_motivo_encerramento,
             }
         )
     except Exception as exc:
@@ -6288,6 +6911,45 @@ def api_card_inativar(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao inativar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao inativar card: {str(exc)}"}), 500
+
+
+
+
+
+
+
+def _obter_tag_por_nome(id_kanban: int, nome_tag: str, *, somente_ativa: bool = True) -> dict[str, Any] | None:
+    nome_limpo = str(nome_tag or "").strip()
+    if not id_kanban or not nome_limpo:
+        return None
+
+    filtro_ativo = "AND ISNULL(t.Ativo, 1) = 1" if somente_ativa else ""
+
+    sql = text(f"""
+        SELECT TOP (1)
+            t.IDDimKanbanTag,
+            t.IDDimKanban,
+            t.NomeTag,
+            t.TipoTag,
+            t.CorHex,
+            ISNULL(t.Ativo, 1) AS Ativo,
+            t.IDEmpresaProprietaria
+        FROM [Kanban].[Silver].[DimKanbanTag] t
+        WHERE t.IDDimKanban = :id_kanban
+          AND UPPER(LTRIM(RTRIM(ISNULL(t.NomeTag, '')))) = UPPER(LTRIM(RTRIM(:nome_tag)))
+          {filtro_ativo}
+        ORDER BY t.IDDimKanbanTag ASC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_kanban": int(id_kanban),
+            "nome_tag": nome_limpo,
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
 
 
 
