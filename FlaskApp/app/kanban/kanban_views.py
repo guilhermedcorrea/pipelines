@@ -19,6 +19,11 @@ from ..extensions import cache, db, limiter, socketio
 kanban_bp = Blueprint("kanban", __name__)
 
 
+
+
+
+
+TABELA_CARD_NEGOCIACAO_PRECO = "[Kanban].[Silver].[FatoKanbanNegociacaoPreco]"
 TABELA_STATUS_CARD = "[Kanban].[Silver].[DimKanbanStatusCard]"
 TABELA_MOTIVO_INATIVACAO_CARD = "[Kanban].[Silver].[DimKanbanMotivoInativacaoCard]"
 STATUS_CARD_FALLBACK_PADRAO = "ATIVO"
@@ -70,6 +75,24 @@ def _id_empresa_usuario_or_403() -> int:
 
 
 
+
+
+def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padrao: int) -> int:
+    """
+    Regra de negócio:
+    - se o kanban for o principal IDDimKanban = 1, o movimento deve ser gravado com IDEmpresaProprietaria = 3
+    - caso contrário, uso a empresa proprietária padrão do card/usuário
+    """
+    if int(id_kanban or 0) == 1:
+        return 3
+
+    return int(id_empresa_padrao or 0)
+
+
+
+
+
+
 def _rows_para_dicts(rows: Any) -> list[dict[str, Any]]:
     return [dict(r) if isinstance(r, Mapping) else r for r in (rows or [])]
 
@@ -96,6 +119,45 @@ def _log_debug_usuario() -> None:
         (current_user.get_id() if hasattr(current_user, "get_id") else None),
         getattr(current_user, "Email", None),
     )
+
+
+
+
+
+
+
+
+from datetime import datetime, date
+
+def _para_data_sql_ou_none(valor: Any):
+    if valor is None:
+        return None
+
+    if isinstance(valor, (datetime, date)):
+        return valor
+
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if not texto:
+            return None
+
+        formatos = (
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%Y-%m-%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+        )
+
+        for formato in formatos:
+            try:
+                return datetime.strptime(texto, formato)
+            except ValueError:
+                pass
+
+    return None
+
+
+
 
 
 
@@ -238,6 +300,483 @@ def _rowversion_hex_para_bytes(valor: Any) -> bytes | None:
     except ValueError:
         return None
 
+
+
+
+
+
+
+
+def _salvar_vinculos_painel_face_card(
+    id_card: int,
+    vinculos_preparados: list[dict] | None = None,
+    id_usuario: int | None = None,
+    id_empresa_proprietaria: int | None = None,
+    itens_painel_face: list[dict] | None = None,
+) -> None:
+    """
+    Salva o histórico de vínculos de painel/face do card sem apagar registros antigos.
+
+    Regra:
+    - não faz DELETE físico
+    - mantém histórico
+    - encerra logicamente vínculos ativos que não existem mais no estado atual
+    - insere novos vínculos quando o estado atual ainda não existir como linha ativa
+    - evita duplicar linha ativa idêntica
+    - não insere linha vazia
+    - gera Ordem automaticamente quando não vier preenchida
+
+    Compatibilidade:
+    - aceita tanto 'vinculos_preparados' quanto 'itens_painel_face'
+    - se os dois vierem preenchidos, prioriza 'vinculos_preparados'
+    """
+
+    if isinstance(vinculos_preparados, list):
+        itens_entrada = vinculos_preparados
+    elif isinstance(itens_painel_face, list):
+        itens_entrada = itens_painel_face
+    else:
+        itens_entrada = []
+
+    def obter_primeiro(item: dict, chaves: tuple[str, ...]) -> object:
+        """
+        Retorna o primeiro valor encontrado entre várias chaves possíveis.
+        """
+        for chave in chaves:
+            if chave in item:
+                valor = item.get(chave)
+                if valor is not None and valor != "":
+                    return valor
+        return None
+
+    def normalizar_texto(valor: object) -> str | None:
+        if valor is None:
+            return None
+
+        texto = str(valor).strip()
+        return texto if texto else None
+
+    def normalizar_inteiro(valor: object) -> int | None:
+        if valor is None or valor == "":
+            return None
+
+        if isinstance(valor, bool):
+            return int(valor)
+
+        try:
+            return int(str(valor).strip())
+        except (TypeError, ValueError):
+            return None
+
+    def normalizar_decimal(valor: object) -> Decimal | None:
+        if valor is None or valor == "":
+            return None
+
+        if isinstance(valor, Decimal):
+            return valor
+
+        if isinstance(valor, (int, float)):
+            try:
+                return Decimal(str(valor))
+            except (InvalidOperation, TypeError, ValueError):
+                return None
+
+        texto = str(valor).strip()
+        if not texto:
+            return None
+
+        if "," in texto:
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            texto = texto
+
+        try:
+            return Decimal(texto)
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    def linha_tem_conteudo_minimo(linha: dict) -> bool:
+        """
+        Evita inserir linha completamente vazia.
+        Considero conteúdo mínimo qualquer identificação operacional/comercial do vínculo.
+        """
+        campos_relevantes = (
+            "IDDimPaineisEuromidia",
+            "IDDimFacesPaineis",
+            "CodPonto",
+            "CodFace",
+            "TipoPainel",
+            "IDDimTabelaPrecosEuromidia",
+            "PeriodoExibicao",
+            "Tabela",
+            "ValorVendaFinal",
+            "NovoValor",
+            "ValorTabela",
+            "CustoTabela",
+        )
+
+        return any(linha.get(campo) is not None for campo in campos_relevantes)
+
+    def normalizar_linha(item: dict, ordem_padrao: int) -> dict:
+        """
+        Converte o payload para o formato canônico.
+
+        Também aceita chaves alternativas porque o front/preparação
+        pode estar mandando nomes diferentes.
+        """
+        linha = {
+            "Ordem": normalizar_inteiro(
+                obter_primeiro(item, ("Ordem", "ordem", "Indice", "indice", "Sequencia", "sequencia"))
+            ),
+            "IDDimPaineisEuromidia": normalizar_inteiro(
+                obter_primeiro(
+                    item,
+                    (
+                        "IDDimPaineisEuromidia",
+                        "id_dim_paineis_euromidia",
+                        "IDPainel",
+                        "id_painel",
+                        "IDPainelMidia",
+                        "IDDimPainel",
+                    ),
+                )
+            ),
+            "IDDimFacesPaineis": normalizar_inteiro(
+                obter_primeiro(
+                    item,
+                    (
+                        "IDDimFacesPaineis",
+                        "id_dim_faces_paineis",
+                        "IDFace",
+                        "id_face",
+                        "IDPainelFace",
+                        "IDDimFace",
+                    ),
+                )
+            ),
+            "CodPonto": normalizar_texto(
+                obter_primeiro(item, ("CodPonto", "cod_ponto", "CodigoPonto", "codigo_ponto"))
+            ),
+            "CodFace": normalizar_texto(
+                obter_primeiro(item, ("CodFace", "cod_face", "CodigoFace", "codigo_face"))
+            ),
+            "TipoPainel": normalizar_texto(
+                obter_primeiro(item, ("TipoPainel", "tipo_painel", "TipoMidia", "tipo_midia"))
+            ),
+            "AnoCusto": normalizar_inteiro(
+                obter_primeiro(item, ("AnoCusto", "ano_custo"))
+            ),
+            "CustoTabela": normalizar_decimal(
+                obter_primeiro(item, ("CustoTabela", "custo_tabela", "Custo", "custo"))
+            ),
+            "IDDimTabelaPrecosEuromidia": normalizar_inteiro(
+                obter_primeiro(
+                    item,
+                    (
+                        "IDDimTabelaPrecosEuromidia",
+                        "id_dim_tabela_precos_euromidia",
+                        "IDTabelaPreco",
+                        "id_tabela_preco",
+                    ),
+                )
+            ),
+            "PeriodoExibicao": normalizar_texto(
+                obter_primeiro(item, ("PeriodoExibicao", "periodo_exibicao", "Periodo", "periodo"))
+            ),
+            "ExibicoesDia": normalizar_inteiro(
+                obter_primeiro(item, ("ExibicoesDia", "exibicoes_dia"))
+            ),
+            "ValorTabela": normalizar_decimal(
+                obter_primeiro(item, ("ValorTabela", "valor_tabela"))
+            ),
+            "Tabela": normalizar_texto(
+                obter_primeiro(item, ("Tabela", "tabela", "NomeTabela", "nome_tabela"))
+            ),
+            "PoliticaTrocas": normalizar_texto(
+                obter_primeiro(item, ("PoliticaTrocas", "politica_trocas"))
+            ),
+            "ValorTroca": normalizar_decimal(
+                obter_primeiro(item, ("ValorTroca", "valor_troca"))
+            ),
+            "NovoValor": normalizar_decimal(
+                obter_primeiro(item, ("NovoValor", "novo_valor", "ValorNegociado", "valor_negociado"))
+            ),
+            "PercentualDesconto": normalizar_decimal(
+                obter_primeiro(item, ("PercentualDesconto", "percentual_desconto", "DescontoPercentual"))
+            ),
+            "ValorVendaFinal": normalizar_decimal(
+                obter_primeiro(item, ("ValorVendaFinal", "valor_venda_final", "ValorVenda", "valor_venda"))
+            ),
+            "MargemValor": normalizar_decimal(
+                obter_primeiro(item, ("MargemValor", "margem_valor"))
+            ),
+            "MargemPercentual": normalizar_decimal(
+                obter_primeiro(item, ("MargemPercentual", "margem_percentual"))
+            ),
+        }
+
+        """
+        Ordem é obrigatória no banco.
+        Se não vier do front, eu gero pela posição do item.
+        """
+        if linha["Ordem"] is None:
+            linha["Ordem"] = ordem_padrao
+
+        return linha
+
+    def assinatura_comparacao(linha: dict) -> tuple:
+        return (
+            linha.get("Ordem"),
+            linha.get("IDDimPaineisEuromidia"),
+            linha.get("IDDimFacesPaineis"),
+            linha.get("CodPonto"),
+            linha.get("CodFace"),
+            linha.get("TipoPainel"),
+            linha.get("AnoCusto"),
+            linha.get("CustoTabela"),
+            linha.get("IDDimTabelaPrecosEuromidia"),
+            linha.get("PeriodoExibicao"),
+            linha.get("ExibicoesDia"),
+            linha.get("ValorTabela"),
+            linha.get("Tabela"),
+            linha.get("PoliticaTrocas"),
+            linha.get("ValorTroca"),
+            linha.get("NovoValor"),
+            linha.get("PercentualDesconto"),
+            linha.get("ValorVendaFinal"),
+            linha.get("MargemValor"),
+            linha.get("MargemPercentual"),
+        )
+
+    sql_buscar_ativos = text(
+        """
+        SELECT
+            IDFatoKanbanCardPainelFace,
+            IDFatoKanbanCard,
+            Ordem,
+            IDDimPaineisEuromidia,
+            IDDimFacesPaineis,
+            CodPonto,
+            CodFace,
+            TipoPainel,
+            AnoCusto,
+            CustoTabela,
+            IDDimTabelaPrecosEuromidia,
+            PeriodoExibicao,
+            ExibicoesDia,
+            ValorTabela,
+            Tabela,
+            PoliticaTrocas,
+            ValorTroca,
+            NovoValor,
+            PercentualDesconto,
+            ValorVendaFinal,
+            MargemValor,
+            MargemPercentual,
+            Ativo
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace]
+        WHERE IDFatoKanbanCard = :id_card
+          AND Ativo = 1
+        """
+    )
+
+    resultado_ativos = db.session.execute(sql_buscar_ativos, {"id_card": id_card})
+    linhas_ativas = [dict(linha._mapping) for linha in resultado_ativos]
+
+    linhas_ativas_normalizadas: list[dict] = []
+    for linha in linhas_ativas:
+        linhas_ativas_normalizadas.append(
+            {
+                "IDFatoKanbanCardPainelFace": normalizar_inteiro(linha.get("IDFatoKanbanCardPainelFace")),
+                "Ordem": normalizar_inteiro(linha.get("Ordem")),
+                "IDDimPaineisEuromidia": normalizar_inteiro(linha.get("IDDimPaineisEuromidia")),
+                "IDDimFacesPaineis": normalizar_inteiro(linha.get("IDDimFacesPaineis")),
+                "CodPonto": normalizar_texto(linha.get("CodPonto")),
+                "CodFace": normalizar_texto(linha.get("CodFace")),
+                "TipoPainel": normalizar_texto(linha.get("TipoPainel")),
+                "AnoCusto": normalizar_inteiro(linha.get("AnoCusto")),
+                "CustoTabela": normalizar_decimal(linha.get("CustoTabela")),
+                "IDDimTabelaPrecosEuromidia": normalizar_inteiro(linha.get("IDDimTabelaPrecosEuromidia")),
+                "PeriodoExibicao": normalizar_texto(linha.get("PeriodoExibicao")),
+                "ExibicoesDia": normalizar_inteiro(linha.get("ExibicoesDia")),
+                "ValorTabela": normalizar_decimal(linha.get("ValorTabela")),
+                "Tabela": normalizar_texto(linha.get("Tabela")),
+                "PoliticaTrocas": normalizar_texto(linha.get("PoliticaTrocas")),
+                "ValorTroca": normalizar_decimal(linha.get("ValorTroca")),
+                "NovoValor": normalizar_decimal(linha.get("NovoValor")),
+                "PercentualDesconto": normalizar_decimal(linha.get("PercentualDesconto")),
+                "ValorVendaFinal": normalizar_decimal(linha.get("ValorVendaFinal")),
+                "MargemValor": normalizar_decimal(linha.get("MargemValor")),
+                "MargemPercentual": normalizar_decimal(linha.get("MargemPercentual")),
+            }
+        )
+
+    itens_normalizados: list[dict] = []
+    for indice, item in enumerate(itens_entrada, start=1):
+        if not isinstance(item, dict):
+            continue
+
+        linha = normalizar_linha(item, ordem_padrao=indice)
+
+        """
+        Se a linha veio completamente vazia, não tento inserir.
+        Isso evita exatamente o cenário do erro atual:
+        vários campos None sendo empurrados para o banco.
+        """
+        if not linha_tem_conteudo_minimo(linha):
+            continue
+
+        itens_normalizados.append(linha)
+
+    mapa_ativos_por_assinatura: dict[tuple, list[dict]] = {}
+    for linha in linhas_ativas_normalizadas:
+        chave = assinatura_comparacao(linha)
+        mapa_ativos_por_assinatura.setdefault(chave, []).append(linha)
+
+    ids_ativos_que_permanecem: set[int] = set()
+    itens_para_inserir: list[dict] = []
+
+    for item_novo in itens_normalizados:
+        chave_item_novo = assinatura_comparacao(item_novo)
+        ativos_iguais = mapa_ativos_por_assinatura.get(chave_item_novo, [])
+
+        if ativos_iguais:
+            linha_existente = ativos_iguais.pop(0)
+            id_linha_existente = linha_existente.get("IDFatoKanbanCardPainelFace")
+
+            if id_linha_existente is not None:
+                ids_ativos_que_permanecem.add(int(id_linha_existente))
+        else:
+            itens_para_inserir.append(item_novo)
+
+    ids_ativos_para_encerrar: list[int] = []
+    for linha_ativa in linhas_ativas_normalizadas:
+        id_linha = linha_ativa.get("IDFatoKanbanCardPainelFace")
+        if id_linha is None:
+            continue
+
+        if int(id_linha) not in ids_ativos_que_permanecem:
+            ids_ativos_para_encerrar.append(int(id_linha))
+
+    if ids_ativos_para_encerrar:
+        sql_encerrar = text(
+            """
+            UPDATE [Kanban].[Silver].[FatoKanbanCardPainelFace]
+               SET Ativo = 0,
+                   DataAtualizacao = GETDATE(),
+                   RemovidoEm = GETDATE(),
+                   RemovidoPor = :id_usuario
+             WHERE IDFatoKanbanCardPainelFace = :id_fato_kanban_card_painel_face
+               AND Ativo = 1
+            """
+        )
+
+        for id_linha in ids_ativos_para_encerrar:
+            db.session.execute(
+                sql_encerrar,
+                {
+                    "id_usuario": id_usuario,
+                    "id_fato_kanban_card_painel_face": id_linha,
+                },
+            )
+
+    if itens_para_inserir:
+        sql_inserir = text(
+            """
+            INSERT INTO [Kanban].[Silver].[FatoKanbanCardPainelFace]
+            (
+                IDFatoKanbanCard,
+                Ordem,
+                IDDimPaineisEuromidia,
+                IDDimFacesPaineis,
+                CodPonto,
+                CodFace,
+                TipoPainel,
+                AnoCusto,
+                CustoTabela,
+                IDDimTabelaPrecosEuromidia,
+                PeriodoExibicao,
+                ExibicoesDia,
+                ValorTabela,
+                Tabela,
+                PoliticaTrocas,
+                ValorTroca,
+                NovoValor,
+                PercentualDesconto,
+                ValorVendaFinal,
+                MargemValor,
+                MargemPercentual,
+                Ativo,
+                CriadoEm,
+                DataAtualizacao,
+                RemovidoEm,
+                RemovidoPor,
+                IDUsuario,
+                IDEmpresaProprietaria
+            )
+            VALUES
+            (
+                :id_card,
+                :ordem,
+                :id_dim_paineis_euromidia,
+                :id_dim_faces_paineis,
+                :cod_ponto,
+                :cod_face,
+                :tipo_painel,
+                :ano_custo,
+                :custo_tabela,
+                :id_dim_tabela_precos_euromidia,
+                :periodo_exibicao,
+                :exibicoes_dia,
+                :valor_tabela,
+                :tabela,
+                :politica_trocas,
+                :valor_troca,
+                :novo_valor,
+                :percentual_desconto,
+                :valor_venda_final,
+                :margem_valor,
+                :margem_percentual,
+                1,
+                GETDATE(),
+                GETDATE(),
+                NULL,
+                NULL,
+                :id_usuario,
+                :id_empresa_proprietaria
+            )
+            """
+        )
+
+        for item in itens_para_inserir:
+            db.session.execute(
+                sql_inserir,
+                {
+                    "id_card": id_card,
+                    "ordem": item.get("Ordem"),
+                    "id_dim_paineis_euromidia": item.get("IDDimPaineisEuromidia"),
+                    "id_dim_faces_paineis": item.get("IDDimFacesPaineis"),
+                    "cod_ponto": item.get("CodPonto"),
+                    "cod_face": item.get("CodFace"),
+                    "tipo_painel": item.get("TipoPainel"),
+                    "ano_custo": item.get("AnoCusto"),
+                    "custo_tabela": item.get("CustoTabela"),
+                    "id_dim_tabela_precos_euromidia": item.get("IDDimTabelaPrecosEuromidia"),
+                    "periodo_exibicao": item.get("PeriodoExibicao"),
+                    "exibicoes_dia": item.get("ExibicoesDia"),
+                    "valor_tabela": item.get("ValorTabela"),
+                    "tabela": item.get("Tabela"),
+                    "politica_trocas": item.get("PoliticaTrocas"),
+                    "valor_troca": item.get("ValorTroca"),
+                    "novo_valor": item.get("NovoValor"),
+                    "percentual_desconto": item.get("PercentualDesconto"),
+                    "valor_venda_final": item.get("ValorVendaFinal"),
+                    "margem_valor": item.get("MargemValor"),
+                    "margem_percentual": item.get("MargemPercentual"),
+                    "id_usuario": id_usuario,
+                    "id_empresa_proprietaria": id_empresa_proprietaria,
+                },
+            )
 
 
 
@@ -597,9 +1136,160 @@ def _objeto_existe(nome_objeto: str) -> bool:
 
 
 
-def _coluna_existe(nome_tabela: str, nome_coluna: str) -> bool:
-    def _limpar_identificador(parte: str) -> str:
-        return str(parte or "").strip().strip("[]").strip()
+def _quebrar_nome_banco_schema_tabela(nome_tabela: str) -> tuple[str | None, str | None, str]:
+    partes = [
+        str(parte or "").strip().strip("[]").strip()
+        for parte in str(nome_tabela or "").strip().split(".")
+    ]
+    partes = [parte for parte in partes if parte]
+
+    if not partes:
+        return None, None, ""
+
+    if len(partes) == 1:
+        return None, "dbo", partes[0]
+
+    if len(partes) == 2:
+        return None, partes[0], partes[1]
+
+    return partes[-3], partes[-2], partes[-1]
+
+
+
+
+
+def _coluna_existe(nome_tabela: str, nome_coluna: str, ignorar_cache: bool = False) -> bool:
+    ignorar_cache = bool(
+        ignorar_cache or str(nome_coluna).strip().lower() == "versaoconcorrencia"
+    )
+
+    banco_nome, schema_nome, tabela_nome = _quebrar_nome_banco_schema_tabela(nome_tabela)
+    coluna_nome = str(nome_coluna or "").strip().strip("[]").strip()
+
+    print(
+        f"[KANBAN][_coluna_existe] INICIO nome_tabela={nome_tabela!r} "
+        f"nome_coluna={nome_coluna!r} banco={banco_nome!r} schema={schema_nome!r} tabela={tabela_nome!r}"
+    )
+
+    current_app.logger.info(
+        "KANBAN: _coluna_existe iniciado. nome_tabela=%r nome_coluna=%r banco=%r schema=%r tabela=%r",
+        nome_tabela,
+        nome_coluna,
+        banco_nome,
+        schema_nome,
+        tabela_nome,
+    )
+
+    if not tabela_nome or not coluna_nome:
+        print(
+            f"[KANBAN][_coluna_existe] nome inválido. "
+            f"tabela={tabela_nome!r} coluna={coluna_nome!r}"
+        )
+        current_app.logger.warning(
+            "KANBAN: _coluna_existe recebeu nome inválido. tabela=%r coluna=%r",
+            tabela_nome,
+            coluna_nome,
+        )
+        return False
+
+    chave = _chave_cache_json(
+        "kanban:schema:coluna",
+        banco_nome or "",
+        schema_nome or "dbo",
+        tabela_nome,
+        coluna_nome,
+    )
+
+    if not ignorar_cache:
+        em_cache = cache.get(chave)
+        if em_cache is not None:
+            print(
+                f"[KANBAN][_coluna_existe] CACHE HIT banco={banco_nome!r} "
+                f"schema={schema_nome!r} tabela={tabela_nome!r} coluna={coluna_nome!r} valor={bool(em_cache)}"
+            )
+            current_app.logger.info(
+                "KANBAN: _coluna_existe cache hit. banco=%r schema=%r tabela=%r coluna=%r valor=%s",
+                banco_nome,
+                schema_nome,
+                tabela_nome,
+                coluna_nome,
+                bool(em_cache),
+            )
+            return bool(em_cache)
+
+    if banco_nome:
+        sql = text(f"""
+            SELECT TOP (1)
+                1
+            FROM [{banco_nome}].sys.tables t
+            INNER JOIN [{banco_nome}].sys.schemas s
+                ON s.schema_id = t.schema_id
+            INNER JOIN [{banco_nome}].sys.columns c
+                ON c.object_id = t.object_id
+            WHERE s.name = :schema_nome
+              AND t.name = :tabela_nome
+              AND c.name = :coluna_nome;
+        """)
+    else:
+        sql = text("""
+            SELECT TOP (1)
+                1
+            FROM sys.tables t
+            INNER JOIN sys.schemas s
+                ON s.schema_id = t.schema_id
+            INNER JOIN sys.columns c
+                ON c.object_id = t.object_id
+            WHERE s.name = :schema_nome
+              AND t.name = :tabela_nome
+              AND c.name = :coluna_nome;
+        """)
+
+    resultado = db.session.execute(
+        sql,
+        {
+            "schema_nome": schema_nome or "dbo",
+            "tabela_nome": tabela_nome,
+            "coluna_nome": coluna_nome,
+        },
+    ).scalar()
+
+    existe = bool(resultado)
+
+    print(
+        f"[KANBAN][_coluna_existe] RESULTADO banco={banco_nome!r} schema={schema_nome!r} "
+        f"tabela={tabela_nome!r} coluna={coluna_nome!r} existe={existe}"
+    )
+
+    current_app.logger.info(
+        "KANBAN: _coluna_existe resultado. banco=%r schema=%r tabela=%r coluna=%r existe=%s",
+        banco_nome,
+        schema_nome,
+        tabela_nome,
+        coluna_nome,
+        existe,
+    )
+
+    if not ignorar_cache:
+        cache.set(chave, existe, timeout=TIMEOUT_CACHE_LONGO)
+        print(
+            f"[KANBAN][_coluna_existe] CACHE SET banco={banco_nome!r} schema={schema_nome!r} "
+            f"tabela={tabela_nome!r} coluna={coluna_nome!r} valor={existe}"
+        )
+        current_app.logger.info(
+            "KANBAN: _coluna_existe cache set. banco=%r schema=%r tabela=%r coluna=%r valor=%s timeout=%s",
+            banco_nome,
+            schema_nome,
+            tabela_nome,
+            coluna_nome,
+            existe,
+            TIMEOUT_CACHE_LONGO,
+        )
+
+    return existe
+
+
+
+
 
     def _quebrar_nome_tabela(nome: str) -> tuple[str | None, str]:
         bruto = str(nome or "").strip()
@@ -619,7 +1309,14 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str) -> bool:
 
         return partes[-2], partes[-1]
 
-    ignorar_cache = str(nome_coluna).strip().lower() == "versaoconcorrencia"
+    """
+    Eu continuo ignorando cache automaticamente para VersaoConcorrencia,
+    porque ela já era um caso especial no seu código.
+    Além disso, agora também posso forçar ignorar cache externamente.
+    """
+    ignorar_cache = bool(
+        ignorar_cache or str(nome_coluna).strip().lower() == "versaoconcorrencia"
+    )
 
     schema_nome, tabela_nome = _quebrar_nome_tabela(nome_tabela)
     coluna_nome = _limpar_identificador(nome_coluna)
@@ -729,14 +1426,19 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str) -> bool:
     return existe
 
 
-
-
 def _nome_coluna_empresa_relacionada_card() -> str | None:
-    for nome_coluna in ("IDCliente", "IDEmpresaRelacionada"):
-        if _coluna_existe(TABELA_CARD, nome_coluna):
-            return nome_coluna
-    return None
+    """
+    Retorna a coluna da FatoKanbanCard usada para vincular a empresa ao card.
 
+    Regra atual do kanban:
+    - a coluna correta é IDEmpresa
+    - mantenho fallback apenas por compatibilidade com estruturas antigas
+    """
+    for nome_coluna in ("IDEmpresa", "IDCliente", "IDEmpresaRelacionada"):
+        if _coluna_existe(TABELA_CARD, nome_coluna, ignorar_cache=True):
+            return nome_coluna
+
+    return None
 
 
 def _nome_coluna_usuario_relacionado_card() -> str | None:
@@ -877,11 +1579,14 @@ def _sql_join_empresa_relacionada_card(alias_card: str = "c", alias_empresa: str
 
 
 
+
+
+
 def _obter_id_empresa_relacionada_card(card: Mapping[str, Any] | dict[str, Any] | None) -> int | None:
     if not card:
         return None
 
-    for chave in ("IDEmpresaRelacionadaCard", "IDCliente", "IDEmpresaRelacionada"):
+    for chave in ("IDEmpresaRelacionadaCard", "IDEmpresa", "IDCliente", "IDEmpresaRelacionada"):
         valor = card.get(chave)
         if valor not in (None, ""):
             try:
@@ -889,7 +1594,6 @@ def _obter_id_empresa_relacionada_card(card: Mapping[str, Any] | dict[str, Any] 
             except Exception:
                 return None
     return None
-
 
 
 def _obter_id_usuario_relacionado_card(card: Mapping[str, Any] | dict[str, Any] | None) -> int | None:
@@ -1960,6 +2664,8 @@ def _calcular_margens_comerciais(custo: Any, valor_tabela: Any, novo_valor: Any,
     }
 
 
+
+
 def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_proprietaria: int) -> list[dict[str, Any]]:
     vinculos_preparados: list[dict[str, Any]] = []
 
@@ -2047,6 +2753,169 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
         )
 
     return vinculos_preparados
+
+
+
+
+
+def _registrar_negociacao_preco_card(
+    *,
+    id_card: int,
+    id_kanban: int,
+    id_fase_atual: int | None,
+    status_card: str | None,
+    id_empresa_relacionada: int | None,
+    vinculos_preparados: list[dict[str, Any]],
+) -> None:
+    """
+    Registra histórico de negociação de preço do card.
+
+    Regras:
+    - a tabela [Kanban].[Silver].[FatoKanbanNegociacaoPreco] é histórica
+    - não apaga registros anteriores
+    - cada negociação relevante gera uma nova linha
+    - só grava quando existir operação comercial real
+    - ObservacoesProposta recebe apenas o texto digitado pelo usuário no campo Notas
+    """
+
+    if not vinculos_preparados:
+        return
+
+    def _tem_valor_informado(valor: Any) -> bool:
+        if valor is None:
+            return False
+
+        if isinstance(valor, str) and not valor.strip():
+            return False
+
+        return True
+
+    def _para_int_ou_none(valor: Any) -> int | None:
+        if valor is None or valor == "":
+            return None
+        try:
+            return int(valor)
+        except (TypeError, ValueError):
+            return None
+
+    def _para_decimal_ou_none(valor: Any):
+        if valor is None or valor == "":
+            return None
+        return valor
+
+    id_status_card = _obter_id_status_card_por_codigo(status_card)
+    id_usuario_atual = _id_usuario()
+
+    id_empresa_proprietaria_negociacao = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban,
+        id_empresa_padrao=_id_empresa_usuario_or_403(),
+    )
+
+    sql_insert = text("""
+        INSERT INTO [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
+        (
+            IDDimUsuarios,
+            IDEmpresaProprietaria,
+            IDDimTabelaPrecosEuromidia,
+            IDEmpresa,
+            IDFatoKanbanCard,
+            IDDimKanbanFase,
+            IDDimKanbanStatusCard,
+            IDFatoControleContratosEuromidia,
+            BitAditivoContrato,
+            ObservacoesProposta,
+            IDDimPaineisEuromidia,
+            IDDimFacesPaineis,
+            DataPrecoProposto,
+            CustoRateado,
+            PrecoProposto,
+            DescontoProposto,
+            PeriodoInicio,
+            PeriodoTermino,
+            IDDimUsuariosAprovacaoPreco,
+            DataAprovacaoPreco,
+            PrecoAprovado,
+            DescontoAprovado,
+            ObservacoesAprovacao
+        )
+        VALUES
+        (
+            :id_usuario,
+            :id_empresa_proprietaria,
+            :id_tabela_preco,
+            :id_empresa_relacionada,
+            :id_card,
+            :id_fase_atual,
+            :id_status_card,
+            NULL,
+            0,
+            :observacoes_proposta,
+            :id_painel,
+            :id_face,
+            GETDATE(),
+            :custo_rateado,
+            :preco_proposto,
+            :desconto_proposto,
+            :periodo_inicio,
+            :periodo_termino,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL
+        );
+    """)
+
+    for vinculo in vinculos_preparados:
+        id_painel = _para_int_ou_none(vinculo.get("id_painel"))
+        id_face = _para_int_ou_none(vinculo.get("id_dim_face"))
+        id_tabela_preco = _para_int_ou_none(vinculo.get("id_preco"))
+
+        novo_valor = vinculo.get("novo_valor")
+        percentual_desconto = vinculo.get("percentual_desconto")
+        valor_venda_final = vinculo.get("valor_venda_final")
+        custo_rateado = vinculo.get("custo_tabela")
+
+        tem_operacao_comercial = any(
+            _tem_valor_informado(valor)
+            for valor in (
+                id_tabela_preco,
+                novo_valor,
+                percentual_desconto,
+                valor_venda_final,
+            )
+        )
+
+        if not id_painel or not id_face or not tem_operacao_comercial:
+            continue
+
+        preco_proposto = (
+            novo_valor
+            if _tem_valor_informado(novo_valor)
+            else valor_venda_final
+        )
+
+        db.session.execute(
+            sql_insert,
+            {
+                "id_usuario": id_usuario_atual,
+                "id_empresa_proprietaria": id_empresa_proprietaria_negociacao,
+                "id_tabela_preco": id_tabela_preco,
+                "id_empresa_relacionada": _para_int_ou_none(id_empresa_relacionada),
+                "id_card": int(id_card),
+                "id_fase_atual": _para_int_ou_none(id_fase_atual),
+                "id_status_card": _para_int_ou_none(id_status_card),
+                "observacoes_proposta": None,
+                "id_painel": id_painel,
+                "id_face": id_face,
+                "custo_rateado": _para_decimal_ou_none(custo_rateado),
+                "preco_proposto": _para_decimal_ou_none(preco_proposto),
+                "desconto_proposto": _para_decimal_ou_none(percentual_desconto),
+                "periodo_inicio": None,
+                "periodo_termino": None,
+            },
+        )
+
 
 
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
@@ -3604,262 +4473,149 @@ def api_card_criar(id_kanban: int):
 
 
 
+
+
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
 @login_required
 @limiter.limit("180/minute")
 def api_card_atualizar(id_card: int):
     id_usuario = _assert_login()
-    card_escopo = _obter_card_autorizado(id_card)
-    id_kanban = int(card_escopo.get("IDDimKanban") or 0)
     id_emp = _id_empresa_usuario_or_403()
 
-    payload = request.get_json(silent=True) or {}
-
-    has_versao_concorrencia = _card_tem_versao_concorrencia()
-    versao_concorrencia_hex = (payload.get("versao_concorrencia") or "").strip()
-    versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia_hex)
-    if has_versao_concorrencia and not versao_concorrencia_bytes:
-        return jsonify(
-            {
-                "ok": False,
-                "codigo": "VERSAO_OBRIGATORIA",
-                "msg": "Versão de concorrência do card é obrigatória e deve estar em hexadecimal.",
-            }
-        ), 400
-
-    titulo = (payload.get("titulo") or "").strip()
-    descricao = payload.get("descricao")
-    status = (payload.get("status") or "").strip().upper()
-    id_empresa = payload.get("id_empresa")
-    painel_faces_informado = "painel_faces" in payload
-    painel_faces_payload = payload.get("painel_faces") if painel_faces_informado else None
-
-    if titulo and len(titulo) < 2:
-        return jsonify({"ok": False, "msg": "Título inválido"}), 400
-
-    if painel_faces_informado and painel_faces_payload is None:
-        painel_faces_payload = []
-    if painel_faces_informado and not isinstance(painel_faces_payload, list):
-        return jsonify({"ok": False, "msg": "painel_faces deve ser uma lista"}), 400
-
-    nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
-    id_empresa_int: int | None = None
-    if id_empresa is not None:
-        if not nome_coluna_empresa:
-            return jsonify({"ok": False, "msg": "O card não possui coluna de empresa relacionada configurada no banco."}), 500
-
-        id_empresa_str = str(id_empresa).strip()
-        if id_empresa_str == "":
-            id_empresa_int = None
-        else:
-            try:
-                id_empresa_int = int(id_empresa)
-            except Exception:
-                return jsonify({"ok": False, "msg": "Empresa inválida"}), 400
-
-            sql_emp = text(f"""
-                SELECT 1
-                FROM {TABELA_EMPRESAS}
-                WHERE IDEmpresa = :id_empresa;
-            """)
-            ok_emp = db.session.execute(sql_emp, {"id_empresa": id_empresa_int}).scalar()
-            if not ok_emp:
-                return jsonify({"ok": False, "msg": "Empresa não encontrada"}), 400
-
-    vinculos_painel_preparados: list[dict[str, Any]] = []
-    if painel_faces_informado:
-        try:
-            vinculos_painel_preparados = _preparar_vinculos_painel_faces(painel_faces_payload or [], id_emp)
-        except ValueError as exc:
-            return jsonify({"ok": False, "msg": str(exc)}), 400
-
-    campos: list[str] = []
-    params: dict[str, Any] = {
-        "id_card": id_card,
-        "id_kanban": id_kanban,
-    }
-    if has_versao_concorrencia:
-        params["versao_concorrencia"] = versao_concorrencia_bytes
-
-    if titulo:
-        campos.append("Titulo = :titulo")
-        params["titulo"] = titulo[:200]
-
-    if descricao is not None:
-        campos.append("Descricao = :descricao")
-        params["descricao"] = descricao
-
-    if status:
-        if status not in _obter_status_card_validos():
-            return jsonify({"ok": False, "msg": "StatusCard inválido"}), 400
-        campos.append("StatusCard = :status")
-        params["status"] = status
-        id_status_card = _obter_id_status_card_por_codigo(status)
-        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_card is not None:
-            campos.append("IDDimKanbanStatusCard = :id_status_card")
-            params["id_status_card"] = int(id_status_card)
-        if _status_card_eh_final(status) and _coluna_existe(TABELA_CARD, "EncerradoEm"):
-            campos.append("EncerradoEm = ISNULL(EncerradoEm, GETDATE())")
-        elif status == _obter_status_card_padrao() and _coluna_existe(TABELA_CARD, "EncerradoEm"):
-            campos.append("EncerradoEm = NULL")
-
-    if id_empresa is not None and nome_coluna_empresa:
-        campos.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
-        params["id_empresa_relacionada"] = id_empresa_int
-
-    if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
-        campos.append("AtualizadoEm = GETDATE()")
-
-    if not campos and not painel_faces_informado:
-        detalhe = _obter_card_detalhe_payload(id_card)
-        return jsonify({"ok": True, "card": detalhe["card"], "paineis_vinculados": detalhe.get("paineis_vinculados", [])})
-
-    snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-
     try:
-        sql_lock_card = text("""
-            DECLARE @resultado INT;
-            EXEC @resultado = sp_getapplock
-                @Resource = :recurso,
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = :timeout_ms;
-            SELECT @resultado;
-        """)
+        card_atual = _obter_card_autorizado(id_card)
+        if not card_atual:
+            return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
 
-        codigo_lock = db.session.execute(
-            sql_lock_card,
-            {
-                "recurso": f"kanban:card:{int(id_card)}",
-                "timeout_ms": 10000,
-            },
-        ).scalar()
+        id_kanban = int(card_atual.get("IDDimKanban") or 0)
+        id_fase_atual = int(card_atual.get("IDDimKanbanFaseAtual") or 0)
 
-        try:
-            codigo_lock = int(codigo_lock)
-        except Exception:
-            codigo_lock = -999
+        payload = request.get_json(silent=True) or {}
 
-        if codigo_lock < 0:
-            db.session.rollback()
-            return jsonify(
-                {
-                    "ok": False,
-                    "codigo": "LOCK_TIMEOUT",
-                    "msg": "O card está sendo alterado por outra operação neste momento. Tente novamente.",
-                }
-            ), 409
+        titulo = (payload.get("titulo") or "").strip()
+        descricao = payload.get("descricao")
+        id_empresa_relacionada = payload.get("id_empresa")
+        versao_concorrencia = payload.get("versao_concorrencia")
+        painel_faces_payload = payload.get("painel_faces")
 
-        output_cols = ["INSERTED.IDFatoKanbanCard"]
+        if not titulo:
+            return jsonify({"ok": False, "msg": "Título do card é obrigatório."}), 400
+
+        has_versao = _card_tem_versao_concorrencia()
+        versao_concorrencia_bytes = None
+
+        if has_versao:
+            versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
+            if not versao_concorrencia_bytes:
+                detalhe_atual = _obter_card_detalhe_payload(id_card)
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "msg": "Versão de concorrência inválida ou ausente.",
+                            "card_atual": detalhe_atual.get("card"),
+                        }
+                    ),
+                    409,
+                )
+
+        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+
+        campos_update: list[str] = []
+        params_update: dict[str, Any] = {
+            "id_card": int(id_card),
+            "titulo": titulo[:300],
+            "descricao": descricao,
+        }
+
+        if _coluna_existe(TABELA_CARD, "Titulo"):
+            campos_update.append("Titulo = :titulo")
+
+        if _coluna_existe(TABELA_CARD, "Descricao"):
+            campos_update.append("Descricao = :descricao")
+
+        nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
+        if nome_coluna_empresa:
+            campos_update.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
+            params_update["id_empresa_relacionada"] = (
+                int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+            )
+
         if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
-            output_cols.append("INSERTED.AtualizadoEm")
-        if has_versao_concorrencia:
-            output_cols.append("INSERTED.VersaoConcorrencia")
+            campos_update.append("AtualizadoEm = GETDATE()")
 
-        filtros_where = [
-            "IDFatoKanbanCard = :id_card",
-            "IDDimKanban = :id_kanban",
-            "Ativo = 1",
-        ]
-        if has_versao_concorrencia:
-            filtros_where.append("VersaoConcorrencia = :versao_concorrencia")
+        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
 
-        sql = text(f"""
+        if has_versao:
+            params_update["versao_concorrencia"] = versao_concorrencia_bytes
+
+        if not campos_update:
+            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização no card."}), 400
+
+        sql_upd = text(f"""
             UPDATE {TABELA_CARD}
-            SET {', '.join(campos)}
+            SET {', '.join(campos_update)}
             OUTPUT
-                {', '.join(output_cols)}
-            WHERE {' AND '.join(filtros_where)};
+                INSERTED.IDFatoKanbanCard,
+                INSERTED.IDDimKanban,
+                INSERTED.IDDimKanbanFaseAtual,
+                INSERTED.Titulo,
+                INSERTED.Descricao,
+                INSERTED.StatusCard,
+                INSERTED.IDEmpresaProprietaria{output_versao}
+            WHERE IDFatoKanbanCard = :id_card
+              AND Ativo = 1{where_versao};
         """)
 
-        row_atualizada = db.session.execute(sql, params).mappings().first()
+        row_upd = db.session.execute(sql_upd, params_update).mappings().first()
 
-        if not row_atualizada:
-            db.session.rollback()
+        if not row_upd:
             detalhe_atual = _obter_card_detalhe_payload(id_card)
-            return jsonify(
-                {
-                    "ok": False,
-                    "codigo": "CONFLITO_CONCORRENCIA",
-                    "msg": "Este card foi alterado por outro usuário. Recarregue antes de salvar novamente.",
-                    "card_atual": detalhe_atual["card"],
-                }
-            ), 409
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "msg": "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.",
+                        "card_atual": detalhe_atual.get("card"),
+                    }
+                ),
+                409,
+            )
 
-        if painel_faces_informado:
-            sql_inativar_rel = text("""
-                UPDATE [Kanban].[Silver].[FatoKanbanCardPainelFace]
-                SET Ativo = 0,
-                    RemovidoEm = GETDATE(),
-                    RemovidoPor = :id_usuario,
-                    DataAtualizacao = GETDATE()
-                WHERE IDFatoKanbanCard = :id_card
-                  AND Ativo = 1;
-            """)
-            db.session.execute(sql_inativar_rel, {"id_card": id_card, "id_usuario": id_usuario})
+        vinculos_preparados: list[dict[str, Any]] = []
 
-            sql_ins_rel = text("""
-                INSERT INTO [Kanban].[Silver].[FatoKanbanCardPainelFace]
-                    (
-                        IDFatoKanbanCard,
-                        Ordem,
-                        IDDimPaineisEuromidia,
-                        IDDimFacesPaineis,
-                        CodPonto,
-                        CodFace,
-                        TipoPainel,
-                        AnoCusto,
-                        CustoTabela,
-                        IDDimTabelaPrecosEuromidia,
-                        PeriodoExibicao,
-                        ExibicoesDia,
-                        ValorTabela,
-                        Tabela,
-                        PoliticaTrocas,
-                        ValorTroca,
-                        NovoValor,
-                        PercentualDesconto,
-                        ValorVendaFinal,
-                        MargemValor,
-                        MargemPercentual,
-                        Ativo,
-                        CriadoEm,
-                        DataAtualizacao,
-                        IDUsuario,
-                        IDEmpresaProprietaria
-                    )
-                VALUES
-                    (
-                        :id_card,
-                        :ordem,
-                        :id_painel,
-                        :id_dim_face,
-                        :cod_ponto,
-                        :cod_face,
-                        :tipo_painel,
-                        :ano_custo,
-                        :custo_tabela,
-                        :id_preco,
-                        :periodo_exibicao,
-                        :exibicoes_dia,
-                        :valor_tabela,
-                        :tabela,
-                        :politica_trocas,
-                        :valor_troca,
-                        :novo_valor,
-                        :percentual_desconto,
-                        :valor_venda_final,
-                        :margem_valor,
-                        :margem_percentual,
-                        1,
-                        GETDATE(),
-                        GETDATE(),
-                        :id_usuario,
-                        :id_empresa
-                    );
-            """)
-            for vinculo in vinculos_painel_preparados:
-                db.session.execute(sql_ins_rel, {"id_card": id_card, **vinculo})
+        if isinstance(painel_faces_payload, list):
+            vinculos_preparados = _preparar_vinculos_painel_faces(
+                painel_faces_payload=painel_faces_payload,
+                id_empresa_proprietaria=id_emp,
+            )
+
+            """
+            Esta função já deve existir no seu fluxo comercial atual.
+            Se o nome estiver um pouco diferente no seu arquivo, ajuste só o nome.
+            A ideia é manter a tabela operacional do card.
+            """
+            _salvar_vinculos_painel_face_card(
+                id_card=id_card,
+                vinculos_preparados=vinculos_preparados,
+                id_empresa_proprietaria=id_emp,
+            )
+
+            """
+            Além da tabela operacional, eu agora também gravo o histórico
+            comercial na FatoKanbanNegociacaoPreco.
+            """
+            _registrar_negociacao_preco_card(
+                id_card=id_card,
+                id_kanban=id_kanban,
+                id_fase_atual=id_fase_atual,
+                status_card=row_upd.get("StatusCard") or card_atual.get("StatusCard"),
+                id_empresa_relacionada=(
+                    int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+                ),
+                vinculos_preparados=vinculos_preparados,
+            )
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
         _registrar_log_card(
@@ -3868,213 +4624,135 @@ def api_card_atualizar(id_card: int):
             id_empresa_proprietaria=id_emp,
             id_usuario_acao=id_usuario,
             tipo_evento="CARD_ATUALIZADO",
-            observacao="Dados do card atualizados.",
+            observacao="Card atualizado pelo modal.",
+            tabela_origem=TABELA_CARD,
+            id_registro_origem=int(id_card),
             payload_antes=snapshot_antes,
             payload_depois=snapshot_depois,
-            tabela_origem=TABELA_CARD,
-            id_registro_origem=id_card,
         )
 
         db.session.commit()
+
+        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+        detalhe = _obter_card_detalhe_payload(id_card)
+
+        _emitir_evento_kanban(
+            id_kanban,
+            "card_atualizado",
+            {
+                "id_card": id_card,
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            },
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "msg": "Card atualizado com sucesso.",
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            }
+        )
+
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "msg": str(exc)}), 400
 
     except Exception as exc:
         db.session.rollback()
         current_app.logger.exception("Erro ao atualizar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao atualizar card: {str(exc)}"}), 500
 
-    _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
-    detalhe = _obter_card_detalhe_payload(id_card)
 
-    _emitir_evento_kanban(
-        id_kanban,
-        "card_atualizado",
-        {
-            "id_card": id_card,
-            "card": detalhe["card"],
-            "tags": detalhe["tags"],
-            "notas": detalhe["notas"],
-            "paineis_vinculados": detalhe.get("paineis_vinculados", []),
-        },
-    )
-
-    return jsonify({"ok": True, "card": detalhe["card"], "paineis_vinculados": detalhe.get("paineis_vinculados", [])})
 
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
-@limiter.limit("300/minute")
+@limiter.limit("180/minute")
 def api_card_mover(id_card: int):
     id_usuario = _assert_login()
-    card_escopo = _obter_card_autorizado(id_card)
     id_emp = _id_empresa_usuario_or_403()
 
-    payload = request.get_json(silent=True) or {}
-
-    versao_concorrencia_hex = (payload.get("versao_concorrencia") or "").strip()
-    versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia_hex)
-
     try:
-        id_fase_para = int(payload.get("id_fase_para") or 0)
-    except Exception:
-        return jsonify({"ok": False, "msg": "Fase destino inválida"}), 400
-
-    observacao = (payload.get("observacao") or "").strip()
-    posicao = (payload.get("posicao") or "LAST").strip().upper()
-
-    if not id_fase_para:
-        return jsonify({"ok": False, "msg": "Fase destino obrigatória"}), 400
-
-    if posicao not in {"LAST"}:
-        return jsonify({"ok": False, "msg": "Posição inválida"}), 400
-
-    snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-
-    try:
-        sql_cols = text(f"""
-            SELECT
-                MAX(CASE WHEN c.name = 'OrdemNaFase' THEN 1 ELSE 0 END) AS HasOrdemNaFase,
-                MAX(CASE WHEN c.name = 'AtualizadoEm' THEN 1 ELSE 0 END) AS HasAtualizadoEm,
-                MAX(CASE WHEN c.name = 'VersaoConcorrencia' THEN 1 ELSE 0 END) AS HasVersaoConcorrencia
-            FROM sys.columns c
-            WHERE c.object_id = OBJECT_ID(:nome_tabela);
-        """)
-        cols = db.session.execute(sql_cols, {"nome_tabela": TABELA_CARD}).mappings().first() or {}
-
-        has_ordem = bool(cols.get("HasOrdemNaFase"))
-        has_atualizado = bool(cols.get("HasAtualizadoEm"))
-        has_versao = bool(cols.get("HasVersaoConcorrencia"))
-
-        if has_versao and not versao_concorrencia_bytes:
-            return jsonify(
-                {
-                    "ok": False,
-                    "codigo": "VERSAO_OBRIGATORIA",
-                    "msg": "Versão de concorrência do card é obrigatória e deve estar em hexadecimal.",
-                }
-            ), 400
-
-        sql_lock_card = text("""
-            DECLARE @resultado INT;
-            EXEC @resultado = sp_getapplock
-                @Resource = :recurso,
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = :timeout_ms;
-            SELECT @resultado;
-        """)
-
-        codigo_lock_card = db.session.execute(
-            sql_lock_card,
-            {
-                "recurso": f"kanban:card:{int(id_card)}",
-                "timeout_ms": 10000,
-            },
-        ).scalar()
-
-        try:
-            codigo_lock_card = int(codigo_lock_card)
-        except Exception:
-            codigo_lock_card = -999
-
-        if codigo_lock_card < 0:
-            db.session.rollback()
-            return jsonify(
-                {
-                    "ok": False,
-                    "codigo": "LOCK_TIMEOUT_CARD",
-                    "msg": "O card está sendo movimentado por outra operação neste momento. Tente novamente.",
-                }
-            ), 409
-
-        sql_atual = text(f"""
-            SELECT
-                IDDimKanban,
-                IDDimKanbanFaseAtual,
-                IDEmpresaProprietaria
-            FROM {TABELA_CARD} WITH (UPDLOCK, ROWLOCK)
-            WHERE IDFatoKanbanCard = :id_card
-              AND Ativo = 1;
-        """)
-        row = db.session.execute(sql_atual, {"id_card": id_card}).mappings().first()
+        row = _obter_card_autorizado(id_card)
         if not row:
-            db.session.rollback()
-            return jsonify({"ok": False, "msg": "Card não encontrado"}), 404
+            return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
 
-        if int(row["IDDimKanban"]) != int(card_escopo.get("IDDimKanban") or 0):
-            db.session.rollback()
-            return jsonify({"ok": False, "msg": "Card fora do escopo do usuário"}), 403
+        id_kanban = int(row.get("IDDimKanban") or 0)
+        id_fase_de = int(row.get("IDDimKanbanFaseAtual") or 0)
 
-        id_kanban = int(row["IDDimKanban"])
-        id_fase_de = int(row["IDDimKanbanFaseAtual"])
+        payload = request.get_json(silent=True) or {}
+        id_fase_para = int(payload.get("id_fase_para") or 0)
+        posicao = str(payload.get("posicao") or "LAST").strip().upper()
+        observacao = (payload.get("observacao") or "").strip()
+        versao_concorrencia = payload.get("versao_concorrencia")
 
-        if not _validar_fase_do_kanban(id_kanban, id_fase_para):
-            db.session.rollback()
-            return jsonify({"ok": False, "msg": "Fase destino inválida"}), 400
+        if not id_fase_para:
+            return jsonify({"ok": False, "msg": "Fase de destino inválida."}), 400
 
-        status_destino = _obter_status_card_para_fase(id_fase_para)
-        id_status_destino = _obter_id_status_card_por_codigo(status_destino)
+        _obter_kanban_autorizado(id_kanban)
 
-        if id_fase_de == id_fase_para:
-            db.session.rollback()
-            detalhe = _obter_card_detalhe_payload(id_card)
-            return jsonify(
-                {
-                    "ok": True,
-                    "id_card": id_card,
-                    "id_fase_de": id_fase_de,
-                    "id_fase_para": id_fase_para,
-                    "ordem_na_fase": detalhe["card"].get("OrdemNaFase"),
-                    "card": detalhe["card"],
-                }
-            )
-
-        sql_lock_fase = text("""
-            DECLARE @resultado INT;
-            EXEC @resultado = sp_getapplock
-                @Resource = :recurso,
-                @LockMode = 'Exclusive',
-                @LockOwner = 'Transaction',
-                @LockTimeout = :timeout_ms;
-            SELECT @resultado;
-        """)
-
-        codigo_lock_fase = db.session.execute(
-            sql_lock_fase,
+        fase_destino = db.session.execute(
+            text(f"""
+                SELECT TOP (1)
+                    f.IDDimKanbanFase
+                FROM {TABELA_KANBAN_FASE} f
+                WHERE f.IDDimKanbanFase = :id_fase_para
+                  AND f.IDDimKanban = :id_kanban
+                  AND f.Ativo = 1;
+            """),
             {
-                "recurso": f"kanban:kanban:{int(id_kanban)}:fase:{int(id_fase_para)}",
-                "timeout_ms": 10000,
+                "id_fase_para": id_fase_para,
+                "id_kanban": id_kanban,
             },
-        ).scalar()
+        ).mappings().first()
 
-        try:
-            codigo_lock_fase = int(codigo_lock_fase)
-        except Exception:
-            codigo_lock_fase = -999
+        if not fase_destino:
+            return jsonify({"ok": False, "msg": "Fase de destino não encontrada."}), 404
 
-        if codigo_lock_fase < 0:
-            db.session.rollback()
-            return jsonify(
-                {
-                    "ok": False,
-                    "codigo": "LOCK_TIMEOUT_FASE",
-                    "msg": "A fase de destino está sendo reorganizada por outra operação neste momento. Tente novamente.",
-                }
-            ), 409
+        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
-        proxima_ordem: int | None = None
+        has_ordem = _coluna_existe(TABELA_CARD, "OrdemNaFase")
+        has_atualizado = _coluna_existe(TABELA_CARD, "AtualizadoEm")
+        has_versao = _card_tem_versao_concorrencia()
 
+        versao_concorrencia_bytes = None
+        if has_versao:
+            versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
+            if not versao_concorrencia_bytes:
+                detalhe_atual = _obter_card_detalhe_payload(id_card)
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "msg": "Versão de concorrência inválida ou ausente.",
+                            "card_atual": detalhe_atual.get("card"),
+                        }
+                    ),
+                    409,
+                )
+
+        proxima_ordem = None
         if has_ordem:
             sql_next_ordem = text(f"""
-                SELECT ISNULL(MAX(fc.OrdemNaFase), 0) + 1 AS ProximaOrdem
-                FROM {TABELA_CARD} fc WITH (UPDLOCK, HOLDLOCK)
+                SELECT ISNULL(MAX(fc.OrdemNaFase), 0) + 1
+                FROM {TABELA_CARD} fc
                 WHERE fc.IDDimKanban = :id_kanban
                   AND fc.IDDimKanbanFaseAtual = :id_fase_para
                   AND fc.Ativo = 1;
             """)
             proxima_ordem = db.session.execute(
                 sql_next_ordem,
-                {"id_kanban": id_kanban, "id_fase_para": id_fase_para},
+                {
+                    "id_kanban": id_kanban,
+                    "id_fase_para": id_fase_para,
+                },
             ).scalar()
 
             try:
@@ -4082,9 +4760,11 @@ def api_card_mover(id_card: int):
             except Exception:
                 proxima_ordem = 1
 
+        row_upd = None
+
         if has_ordem and has_atualizado:
-            output_versao = ",\n                    INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = "\n                  AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
             params_upd = {
                 "id_fase_para": id_fase_para,
                 "ordem_na_fase": proxima_ordem,
@@ -4092,6 +4772,7 @@ def api_card_mover(id_card: int):
             }
             if has_versao:
                 params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
             sql_upd = text(f"""
                 UPDATE {TABELA_CARD}
                 SET IDDimKanbanFaseAtual = :id_fase_para,
@@ -4106,9 +4787,10 @@ def api_card_mover(id_card: int):
                   AND Ativo = 1{where_versao};
             """)
             row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
         elif has_ordem and not has_atualizado:
-            output_versao = ",\n                    INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = "\n                  AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
             params_upd = {
                 "id_fase_para": id_fase_para,
                 "ordem_na_fase": proxima_ordem,
@@ -4116,6 +4798,7 @@ def api_card_mover(id_card: int):
             }
             if has_versao:
                 params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
             sql_upd = text(f"""
                 UPDATE {TABELA_CARD}
                 SET IDDimKanbanFaseAtual = :id_fase_para,
@@ -4128,15 +4811,17 @@ def api_card_mover(id_card: int):
                   AND Ativo = 1{where_versao};
             """)
             row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
         elif (not has_ordem) and has_atualizado:
-            output_versao = ",\n                    INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = "\n                  AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
             params_upd = {
                 "id_fase_para": id_fase_para,
                 "id_card": id_card,
             }
             if has_versao:
                 params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
             sql_upd = text(f"""
                 UPDATE {TABELA_CARD}
                 SET IDDimKanbanFaseAtual = :id_fase_para,
@@ -4149,15 +4834,17 @@ def api_card_mover(id_card: int):
                   AND Ativo = 1{where_versao};
             """)
             row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
         else:
-            output_versao = ",\n                    INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = "\n                  AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
             params_upd = {
                 "id_fase_para": id_fase_para,
                 "id_card": id_card,
             }
             if has_versao:
                 params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
             sql_upd = text(f"""
                 UPDATE {TABELA_CARD}
                 SET IDDimKanbanFaseAtual = :id_fase_para
@@ -4170,29 +4857,40 @@ def api_card_mover(id_card: int):
             row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
 
         if not row_upd:
-            db.session.rollback()
             detalhe_atual = _obter_card_detalhe_payload(id_card)
-            return jsonify(
-                {
-                    "ok": False,
-                    "codigo": "CONFLITO_CONCORRENCIA",
-                    "msg": "Este card foi alterado ou movido por outro usuário. Recarregue antes de tentar novamente.",
-                    "card_atual": detalhe_atual["card"],
-                }
-            ), 409
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "msg": "Este card foi alterado ou movido por outro usuário. Recarregue antes de tentar novamente.",
+                        "card_atual": detalhe_atual.get("card"),
+                    }
+                ),
+                409,
+            )
+
+        status_destino = str(row.get("StatusCard") or _obter_status_card_padrao()).strip().upper()
+        id_status_destino = _obter_id_status_card_por_codigo(status_destino)
 
         campos_status_pos_mov: list[str] = []
-        params_status_pos_mov: dict[str, Any] = {"id_card": id_card, "status_destino": status_destino}
+        params_status_pos_mov: dict[str, Any] = {
+            "id_card": id_card,
+            "status_destino": status_destino,
+        }
+
         if _coluna_existe(TABELA_CARD, "StatusCard"):
             campos_status_pos_mov.append("StatusCard = :status_destino")
+
         if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_destino is not None:
             campos_status_pos_mov.append("IDDimKanbanStatusCard = :id_status_destino")
             params_status_pos_mov["id_status_destino"] = int(id_status_destino)
+
         if _coluna_existe(TABELA_CARD, "EncerradoEm"):
             if _status_card_eh_final(status_destino):
                 campos_status_pos_mov.append("EncerradoEm = ISNULL(EncerradoEm, GETDATE())")
             else:
                 campos_status_pos_mov.append("EncerradoEm = NULL")
+
         if campos_status_pos_mov:
             sql_status_pos_mov = text(f"""
                 UPDATE {TABELA_CARD}
@@ -4201,13 +4899,42 @@ def api_card_mover(id_card: int):
             """)
             db.session.execute(sql_status_pos_mov, params_status_pos_mov)
 
+        id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
+            id_kanban=id_kanban,
+            id_empresa_padrao=row.get("IDEmpresaProprietaria"),
+        )
+
+        """
+        É AQUI que entra o sql_ins que você perguntou.
+        """
         sql_ins = text(f"""
             INSERT INTO {TABELA_CARD_MOVIMENTO}
-                (IDFatoKanbanCard, IDFaseDe, IDFasePara, MovidoEm, MovidoPor, Observacao, IDEmpresaProprietaria)
+            (
+                IDFatoKanbanCard,
+                IDFaseDe,
+                IDFasePara,
+                MovidoEm,
+                MovidoPor,
+                Observacao,
+                IDEmpresaProprietaria,
+                IDDimKanbanTag,
+                IDDimKanbanStatusCard
+            )
             OUTPUT INSERTED.IDFatoKanbanCardMovimento
             VALUES
-                (:id_card, :id_fase_de, :id_fase_para, GETDATE(), :movido_por, :obs, :id_empresa);
+            (
+                :id_card,
+                :id_fase_de,
+                :id_fase_para,
+                GETDATE(),
+                :movido_por,
+                :obs,
+                :id_empresa,
+                :id_tag,
+                :id_status_card
+            );
         """)
+
         row_movimento = db.session.execute(
             sql_ins,
             {
@@ -4216,7 +4943,9 @@ def api_card_mover(id_card: int):
                 "id_fase_para": id_fase_para,
                 "movido_por": id_usuario,
                 "obs": observacao[:2000] if observacao else None,
-                "id_empresa": row.get("IDEmpresaProprietaria"),
+                "id_empresa": id_empresa_movimento,
+                "id_tag": None,
+                "id_status_card": int(id_status_destino) if id_status_destino is not None else None,
             },
         ).mappings().first()
 
@@ -4270,6 +4999,10 @@ def api_card_mover(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
+
+
+
+
 
 
 
