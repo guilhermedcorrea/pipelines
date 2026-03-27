@@ -2644,14 +2644,6 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
   wrap.innerHTML = '';
 
-  /*
-    Mantive o layout em blocos/kpis.
-    A única correção aqui é funcional:
-    - mostrar custo atual
-    - mostrar preço de venda atual
-    - mostrar margem atual
-    - permitir manter o preço atual ou trocar por novo valor/desconto
-  */
   wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, [
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Custo atual']),
@@ -2668,6 +2660,27 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Margem atual']),
       el('div', { class:'kb-kpi', 'data-role':'kpi-margem-base' }, ['—'])
+    ])
+  ]));
+
+  wrap.appendChild(el('div', { class:'kb-row' }, [
+    el('div', { class:'kb-campo grow' }, [
+      el('div', { class:'kb-campo-label' }, ['Data de']),
+      el('input', {
+        class:'kb-input',
+        'data-role':'input-data-inicio',
+        type:'date',
+        autocomplete:'off'
+      })
+    ]),
+    el('div', { class:'kb-campo grow' }, [
+      el('div', { class:'kb-campo-label' }, ['Data até']),
+      el('input', {
+        class:'kb-input',
+        'data-role':'input-data-fim',
+        type:'date',
+        autocomplete:'off'
+      })
     ])
   ]));
 
@@ -2705,6 +2718,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
   const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
   const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
+  const inputDataInicio = bloco.querySelector('[data-role="input-data-inicio"]');
+  const inputDataFim = bloco.querySelector('[data-role="input-data-fim"]');
 
   selectPreco.addEventListener('change', () => {
     atualizarResumoComercial(bloco);
@@ -2724,13 +2739,24 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     atualizarResumoComercial(bloco);
   });
 
-  /*
-    Reidratação correta:
-    - preço salvo continua selecionado
-    - novo valor salvo volta
-    - desconto salvo volta
-    - se não houver novo valor nem desconto, o sistema assume o preço atual
-  */
+  inputDataInicio?.addEventListener('change', () => {
+    const dataInicio = safeStr(inputDataInicio.value).trim();
+    if (inputDataFim){
+      inputDataFim.min = dataInicio || '';
+      if (dataInicio && safeStr(inputDataFim.value).trim() && inputDataFim.value < dataInicio){
+        inputDataFim.value = dataInicio;
+      }
+    }
+  });
+
+  inputDataFim?.addEventListener('change', () => {
+    const dataInicio = safeStr(inputDataInicio?.value).trim();
+    const dataFim = safeStr(inputDataFim.value).trim();
+    if (dataInicio && dataFim && dataFim < dataInicio){
+      inputDataFim.value = dataInicio;
+    }
+  });
+
   if (valoresSalvos){
     const idPrecoSalvo = idNum(
       valoresSalvos.IDDimTabelaPrecosEuromidia ||
@@ -2748,6 +2774,22 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       valoresSalvos.PercentualDesconto ??
       valoresSalvos.percentual_desconto ??
       null;
+
+    const dataInicioSalva = safeStr(
+      valoresSalvos.DataInicioReserva ||
+      valoresSalvos.data_inicio_reserva ||
+      valoresSalvos.DataInicio ||
+      valoresSalvos.data_inicio ||
+      ''
+    ).trim();
+
+    const dataFimSalva = safeStr(
+      valoresSalvos.DataFimReserva ||
+      valoresSalvos.data_fim_reserva ||
+      valoresSalvos.DataFim ||
+      valoresSalvos.data_fim ||
+      ''
+    ).trim();
 
     if (idPrecoSalvo) {
       selectPreco.value = String(idPrecoSalvo);
@@ -2767,10 +2809,15 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
           : '';
     }
 
-    /*
-      Se existir novo valor salvo, ele prevalece sobre desconto.
-      Se existir desconto salvo e não houver novo valor, desconto prevalece.
-    */
+    if (inputDataInicio) {
+      inputDataInicio.value = dataInicioSalva || '';
+    }
+
+    if (inputDataFim) {
+      inputDataFim.value = dataFimSalva || '';
+      inputDataFim.min = dataInicioSalva || '';
+    }
+
     if (
       novoValorSalvo !== null &&
       novoValorSalvo !== undefined &&
@@ -2917,8 +2964,10 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0) || null;
       const novoValor = parseNumeroInput(bloco.querySelector('[data-role="input-novo-valor"]')?.value);
       const percentual = parseNumeroInput(bloco.querySelector('[data-role="input-percentual"]')?.value);
+      const dataInicio = safeStr(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '').trim();
+      const dataFim = safeStr(bloco.querySelector('[data-role="input-data-fim"]')?.value || '').trim();
 
-      if (!idPainel && !codFace && !idPreco && novoValor === null && percentual === null) continue;
+      if (!idPainel && !codFace && !idPreco && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
 
       itens.push({
         id_painel: idPainel || null,
@@ -2926,6 +2975,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
         id_preco: idPreco,
         novo_valor: novoValor,
         percentual_desconto: novoValor !== null ? null : percentual,
+        data_inicio: dataInicio || null,
+        data_fim: dataFim || null,
       });
     }
     return itens;
@@ -4015,6 +4066,32 @@ async function moverCard(idCard, idFasePara, posicao) {
     return { ok: true, fez: true };
   }
 
+  function validarReservasPainelFacesFormulario(){
+    for (const bloco of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])){
+      const titulo = safeStr(bloco.querySelector('[data-role="titulo-item"]')?.textContent || '').trim() || 'Painel / Face';
+      const idPainel = idNum(bloco.querySelector('[data-role="select-painel"]')?.value || 0);
+      const codFace = safeStr(bloco.querySelector('[data-role="select-face"]')?.value || '').trim();
+      const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0) || null;
+      const dataInicio = safeStr(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '').trim();
+      const dataFim = safeStr(bloco.querySelector('[data-role="input-data-fim"]')?.value || '').trim();
+
+      const temContextoPainel = !!(idPainel || codFace || idPreco);
+      if (!temContextoPainel && !dataInicio && !dataFim){
+        continue;
+      }
+
+      if ((dataInicio && !dataFim) || (!dataInicio && dataFim)){
+        return { ok: false, msg: `${titulo}: preencha Data de e Data até.` };
+      }
+
+      if (dataInicio && dataFim && dataFim < dataInicio){
+        return { ok: false, msg: `${titulo}: a Data até não pode ser menor que a Data de.` };
+      }
+    }
+
+    return { ok: true };
+  }
+
   btnSalvarCard.addEventListener("click", async () => {
     const titulo = (document.getElementById("cardTitulo").value || "").trim();
     const descricao = document.getElementById("cardDescricao").value || "";
@@ -4035,22 +4112,28 @@ async function moverCard(idCard, idFasePara, posicao) {
       return;
     }
 
+    const validacaoReservas = validarReservasPainelFacesFormulario();
+    if (!validacaoReservas.ok){
+      mostrarMensagemCard(validacaoReservas.msg || "Existem datas inválidas no painel / face.");
+      return;
+    }
+
     const idCardSalvo = idNum(cardAbertoId);
 
     const payload = {
-  titulo,
-  descricao,
-  id_empresa: idEmpresa,
-  versao_concorrencia: versaoConcorrenciaCardAberto
-};
+      titulo,
+      descricao,
+      id_empresa: idEmpresa,
+      versao_concorrencia: versaoConcorrenciaCardAberto
+    };
 
-const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
-if (painelFaceLigado) {
-  const itensPainelFace = coletarPainelFacesDoFormulario();
-  if (Array.isArray(itensPainelFace)) {
-    payload.painel_faces = itensPainelFace;
-  }
-}
+    const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
+    if (painelFaceLigado) {
+      const itensPainelFace = coletarPainelFacesDoFormulario();
+      if (Array.isArray(itensPainelFace)) {
+        payload.painel_faces = itensPainelFace;
+      }
+    }
 
     const r = await fetch(`/kanban/api/cards/${idCardSalvo}`, {
       method:"PUT",
@@ -4107,7 +4190,7 @@ if (painelFaceLigado) {
     }
 
     fecharModalCard();
-    mostrarMensagemBoard("Alterações salvas", "sucesso", 2500);
+    mostrarMensagemBoard(j?.msg || "Alterações salvas", "sucesso", 2500);
   });
 
   function renderNotas(notas) {

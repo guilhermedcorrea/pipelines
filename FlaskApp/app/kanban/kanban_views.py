@@ -92,6 +92,68 @@ def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padra
 
 
 
+
+
+
+
+
+
+
+
+def _obter_id_dim_usuario_logado() -> int | None:
+    candidatos = [
+        getattr(current_user, "IDDimUsuarios", None),
+        getattr(current_user, "id", None),
+    ]
+
+    for valor in candidatos:
+        try:
+            valor_int = int(valor)
+            if valor_int > 0:
+                return valor_int
+        except Exception:
+            pass
+
+    if hasattr(current_user, "get_id"):
+        try:
+            valor_int = int(current_user.get_id())
+            if valor_int > 0:
+                return valor_int
+        except Exception:
+            pass
+
+    return None
+
+
+
+
+def _obter_id_empresa_proprietaria_usuario_logado() -> int | None:
+    candidatos = [
+        getattr(current_user, "IDEmpresaProprietaria", None),
+        getattr(current_user, "id_empresa_proprietaria", None),
+    ]
+
+    for valor in candidatos:
+        try:
+            valor_int = int(valor)
+            if valor_int > 0:
+                return valor_int
+        except Exception:
+            pass
+
+    return None
+
+
+
+
+
+
+
+
+
+
+
+
 def _resolver_id_status_card_movimento(
     nome_fase_para: str | None = None,
     *,
@@ -217,6 +279,12 @@ def _para_data_sql_ou_none(valor: Any):
                 pass
 
     return None
+
+
+
+
+
+
 
 
 
@@ -3054,6 +3122,470 @@ def _calcular_margens_comerciais(custo: Any, valor_tabela: Any, novo_valor: Any,
 
 
 
+
+
+
+
+def _normalizar_data_reserva_kanban(valor: Any) -> date | None:
+    if valor is None:
+        return None
+
+    if isinstance(valor, date) and not isinstance(valor, datetime):
+        return valor
+
+    if isinstance(valor, datetime):
+        return valor.date()
+
+    texto = str(valor).strip()
+    if not texto:
+        return None
+
+    for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except Exception:
+            pass
+
+    return None
+
+
+def _obter_vendedor_logado_reserva_kanban(id_empresa_proprietaria: int) -> dict[str, Any] | None:
+    sql = text("""
+        SELECT TOP 1
+            v.IDVendedor,
+            v.NomeVendedor
+        FROM [Integracao].[dbo].[Vendedores] v
+        INNER JOIN [Integracao].[Silver].[DimUsuarios] u
+            ON u.IDDimUsuarios = v.IDDimUsuarios
+           AND COALESCE(u.IDEmpresaProprietaria, 0) = COALESCE(v.IDEmpresaProprietaria, 0)
+        WHERE u.IDDimUsuarios = :id_usuario
+          AND COALESCE(u.BitAtivo, 1) = 1
+          AND COALESCE(v.BitAtivo, 1) = 1
+          AND COALESCE(v.IDEmpresaProprietaria, 0) = :id_empresa
+        ORDER BY v.IDVendedor
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_usuario": int(_id_usuario()),
+            "id_empresa": int(id_empresa_proprietaria),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada: Any) -> str:
+    try:
+        id_empresa_int = int(id_empresa_relacionada or 0)
+    except Exception:
+        id_empresa_int = 0
+
+    if not id_empresa_int:
+        return ""
+
+    sql = text("""
+        SELECT TOP 1
+            RazaoSocial
+        FROM [Integracao].[Silver].[DimEmpresas]
+        WHERE IDEmpresa = :id_empresa
+    """)
+    valor = db.session.execute(sql, {"id_empresa": int(id_empresa_int)}).scalar()
+    return str(valor or "").strip()
+
+
+def _obter_capacidade_face_reserva_kanban(cod_face: str) -> dict[str, Any]:
+    sql = text("""
+        SELECT TOP 1
+            IDPainelEuromidia = TRY_CONVERT(int, p.IDDimPaineisEuromidia),
+            CodPonto = TRY_CONVERT(int, p.CodPonto),
+            TipoPainel = UPPER(LTRIM(RTRIM(COALESCE(p.Tipo, '')))),
+            QuantidadeFaces = TRY_CONVERT(int, NULLIF(p.QuantidadeFaces, 0)),
+            BitAtivo = COALESCE(p.BitAtivo, 1)
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, f.CodPonto)
+        WHERE UPPER(LTRIM(RTRIM(COALESCE(f.CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
+        ORDER BY
+            COALESCE(p.BitAtivo, 1) DESC,
+            TRY_CONVERT(int, p.IDDimPaineisEuromidia) DESC
+    """)
+
+    row = db.session.execute(sql, {"cod_face": str(cod_face or "").strip()}).mappings().first()
+    if not row:
+        raise ValueError(f"Não foi possível localizar o painel da face {cod_face}.")
+
+    item = dict(row)
+    tipo_painel = str(item.get("TipoPainel") or "").strip().upper()
+    eh_digital = 1 if "DIGITAL" in tipo_painel else 0
+    capacidade_slots = int(item.get("QuantidadeFaces") or 0) if eh_digital else 1
+    if eh_digital and capacidade_slots <= 0:
+        capacidade_slots = 16
+
+    item["EhDigital"] = eh_digital
+    item["CapacidadeSlots"] = capacidade_slots
+    item["BitAtivo"] = int(item.get("BitAtivo") or 0)
+
+    return item
+
+
+def _reserva_kanban_ja_existe(
+    *,
+    cod_face: str,
+    data_inicio: date,
+    data_fim: date,
+    marcador_observacao: str,
+) -> bool:
+    sql = text("""
+        SELECT TOP 1 1
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+        WHERE UPPER(LTRIM(RTRIM(COALESCE(CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
+          AND CanceladoEm IS NULL
+          AND Status IN ('ATIVO', 'RESERVADO')
+          AND TRY_CONVERT(date, DataInicio) = :data_inicio
+          AND TRY_CONVERT(date, DataFim) = :data_fim
+          AND COALESCE(Observacao, '') LIKE :marcador_prefixo
+    """)
+
+    existe = db.session.execute(
+        sql,
+        {
+            "cod_face": str(cod_face or "").strip(),
+            "data_inicio": data_inicio,
+            "data_fim": data_fim,
+            "marcador_prefixo": f"{marcador_observacao}%",
+        },
+    ).scalar()
+
+    return bool(existe)
+
+
+def _validar_conflito_reserva_kanban(
+    *,
+    cod_face: str,
+    data_inicio: date,
+    data_fim: date,
+    eh_digital: int,
+    capacidade_slots: int,
+) -> bool:
+    if int(eh_digital or 0) != 1:
+        sql = text("""
+            SELECT TOP 1 1
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+            WHERE UPPER(LTRIM(RTRIM(COALESCE(CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
+              AND CanceladoEm IS NULL
+              AND Status IN ('ATIVO', 'RESERVADO')
+              AND NOT (
+                    TRY_CONVERT(date, :data_fim) < TRY_CONVERT(date, DataInicio)
+                 OR TRY_CONVERT(date, :data_inicio) > TRY_CONVERT(date, DataFim)
+              )
+        """)
+        existe = db.session.execute(
+            sql,
+            {
+                "cod_face": cod_face,
+                "data_inicio": data_inicio,
+                "data_fim": data_fim,
+            },
+        ).scalar()
+        return bool(existe)
+
+    sql = text("""
+        ;WITH Dias AS (
+            SELECT c.[Data]
+            FROM [Integracao].[Silver].[DimCalendario] c
+            WHERE c.[Data] >= :data_inicio
+              AND c.[Data] <= :data_fim
+        ),
+        Uso AS (
+            SELECT
+                d.[Data] AS Dia,
+                SlotsOcupados = COALESCE(SUM(COALESCE(NULLIF(fo.SpanQtd, 0), 1)), 0)
+            FROM Dias d
+            LEFT JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+                ON d.[Data] >= CAST(fo.DataInicio AS date)
+               AND d.[Data] <= CAST(fo.DataFim AS date)
+               AND UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
+               AND fo.CanceladoEm IS NULL
+               AND fo.Status IN ('ATIVO', 'RESERVADO')
+            GROUP BY d.[Data]
+        )
+        SELECT TOP 1 1
+        FROM Uso
+        WHERE SlotsOcupados >= :capacidade_slots
+        ORDER BY Dia
+    """)
+
+    existe = db.session.execute(
+        sql,
+        {
+            "cod_face": cod_face,
+            "data_inicio": data_inicio,
+            "data_fim": data_fim,
+            "capacidade_slots": int(capacidade_slots or 0),
+        },
+    ).scalar()
+
+    return bool(existe)
+
+
+def _obter_proxima_prioridade_reserva_kanban(
+    *,
+    cod_face: str,
+    data_inicio: date,
+    data_fim: date,
+    cota: int | None,
+    spanqtd: int | None,
+) -> int:
+    sql = text("""
+        SELECT
+            COALESCE(MAX(COALESCE(ReservaOrdemPrioridade, 0)), 0) + 1
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] WITH (UPDLOCK, HOLDLOCK)
+        WHERE UPPER(LTRIM(RTRIM(COALESCE(CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
+          AND CanceladoEm IS NULL
+          AND Status IN ('ATIVO', 'RESERVADO')
+          AND TRY_CONVERT(date, DataInicio) = :data_inicio
+          AND TRY_CONVERT(date, DataFim) = :data_fim
+          AND ((:cota IS NULL AND Cota IS NULL) OR (Cota = :cota))
+          AND ((:spanqtd IS NULL AND SpanQtd IS NULL) OR (COALESCE(SpanQtd, 0) = COALESCE(:spanqtd, 0)))
+    """)
+
+    valor = db.session.execute(
+        sql,
+        {
+            "cod_face": cod_face,
+            "data_inicio": data_inicio,
+            "data_fim": data_fim,
+            "cota": cota,
+            "spanqtd": spanqtd,
+        },
+    ).scalar()
+
+    try:
+        return int(valor or 1)
+    except Exception:
+        return 1
+
+
+def _criar_reservas_painel_faces_kanban(
+    *,
+    id_card: int,
+    titulo_card: str,
+    id_empresa_relacionada: int | None,
+    painel_faces_payload: list[Any] | None,
+    vinculos_preparados: list[dict[str, Any]] | None,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+) -> int:
+    if not isinstance(painel_faces_payload, list) or not painel_faces_payload:
+        return 0
+
+    mapa_vinculos: dict[tuple[int | None, str], dict[str, Any]] = {}
+    for vinculo in (vinculos_preparados or []):
+        chave = (
+            int(vinculo.get("id_painel") or 0) or None,
+            str(vinculo.get("cod_face") or "").strip().upper(),
+        )
+        if chave[1]:
+            mapa_vinculos[chave] = vinculo
+
+    vendedor_logado = _obter_vendedor_logado_reserva_kanban(int(id_empresa_proprietaria))
+    id_vendedor = int(vendedor_logado.get("IDVendedor") or 0) if vendedor_logado else None
+    nome_vendedor = str(vendedor_logado.get("NomeVendedor") or "").strip() if vendedor_logado else ""
+
+    razao_social = _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada)
+    marca_exibida_padrao = razao_social or str(titulo_card or "").strip() or f"Card {int(id_card)}"
+
+    reservas_criadas = 0
+
+    for item in painel_faces_payload:
+        if not isinstance(item, dict):
+            continue
+
+        data_inicio = _normalizar_data_reserva_kanban(item.get("data_inicio"))
+        data_fim = _normalizar_data_reserva_kanban(item.get("data_fim"))
+
+        if data_inicio is None and data_fim is None:
+            continue
+
+        if data_inicio is None or data_fim is None:
+            raise ValueError("Preencha Data de e Data até para reservar o painel/face.")
+
+        if data_fim < data_inicio:
+            raise ValueError("A Data até não pode ser menor que a Data de.")
+
+        id_painel = int(item.get("id_painel") or 0) or None
+        cod_face = str(item.get("cod_face") or "").strip().upper()
+
+        if not cod_face:
+            raise ValueError("CodFace obrigatório para criar a reserva.")
+
+        vinculo = mapa_vinculos.get((id_painel, cod_face))
+        if not vinculo:
+            raise ValueError(f"Não foi possível preparar o vínculo comercial da face {cod_face} para reservar.")
+
+        capacidade = _obter_capacidade_face_reserva_kanban(cod_face)
+        if int(capacidade.get("BitAtivo") or 0) != 1:
+            raise ValueError(f"O painel da face {cod_face} está inativo.")
+
+        cod_ponto = int(vinculo.get("cod_ponto") or capacidade.get("CodPonto") or 0)
+        id_painel_final = int(vinculo.get("id_painel") or capacidade.get("IDPainelEuromidia") or 0) or None
+        eh_digital = int(capacidade.get("EhDigital") or 0)
+        capacidade_slots = int(capacidade.get("CapacidadeSlots") or 0)
+
+        if not cod_ponto:
+            raise ValueError(f"Não foi possível resolver o CodPonto da face {cod_face}.")
+
+        marcador_observacao = f"[KANBAN_CARD={int(id_card)}][COD_FACE={cod_face}]"
+
+        if _reserva_kanban_ja_existe(
+            cod_face=cod_face,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            marcador_observacao=marcador_observacao,
+        ):
+            continue
+
+        sem_capacidade = _validar_conflito_reserva_kanban(
+            cod_face=cod_face,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            eh_digital=eh_digital,
+            capacidade_slots=capacidade_slots,
+        )
+
+        spanqtd_novo = 1 if eh_digital == 1 else None
+
+        cota_valor = vinculo.get("exibicoes_dia")
+        try:
+            cota_int = int(cota_valor) if cota_valor not in (None, "", 0) else None
+        except Exception:
+            cota_int = None
+
+        reserva_ordem_prioridade = (
+            _obter_proxima_prioridade_reserva_kanban(
+                cod_face=cod_face,
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                cota=cota_int,
+                spanqtd=spanqtd_novo,
+            )
+            if sem_capacidade
+            else 1
+        )
+
+        dias_int = ((data_fim - data_inicio).days + 1)
+
+        observacao_insert = f"{marcador_observacao} Reserva criada pelo salvamento do card no Kanban."
+
+        sql_insert = text("""
+            INSERT INTO [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] (
+                DataAtualizacao,
+                Referencia,
+                CodPonto,
+                CodFace,
+                IDPainelEuromidia,
+                Origem,
+                Status,
+                DataInicio,
+                DataFim,
+                SpanQtd,
+                Cota,
+                MarcaExibida,
+                Vendedor,
+                IDVendedor,
+                IDCliente,
+                IDFatoControleContratos,
+                NumeroContrato,
+                NumeroPrevia,
+                Observacao,
+                Dias,
+                ExpiraEm,
+                CriadoEm,
+                CriadoPorIDUsuario,
+                ReservaOrdemPrioridade
+            )
+            VALUES (
+                SYSDATETIME(),
+                CONVERT(varchar(64),
+                    HASHBYTES(
+                        'SHA2_256',
+                        CONCAT(
+                            'KANBAN|',
+                            COALESCE(CONVERT(varchar(30), :cod_ponto), ''), '|',
+                            UPPER(LTRIM(RTRIM(COALESCE(:cod_face, '')))), '|',
+                            COALESCE(CONVERT(varchar(10), :data_inicio, 23), ''), '|',
+                            COALESCE(CONVERT(varchar(10), :data_fim, 23), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :spanqtd), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :cota), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :id_cliente), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :id_vendedor), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :id_card), '')
+                        )
+                    ),
+                    2
+                ),
+                :cod_ponto,
+                :cod_face,
+                :id_painel,
+                'KANBAN',
+                'RESERVADO',
+                :data_inicio,
+                :data_fim,
+                :spanqtd,
+                :cota,
+                :marca_exibida,
+                :vendedor_nome,
+                :id_vendedor,
+                :id_cliente,
+                NULL,
+                NULL,
+                NULL,
+                :observacao,
+                :dias,
+                DATEADD(day, :dias, SYSDATETIME()),
+                SYSDATETIME(),
+                :criado_por,
+                :reserva_ordem_prioridade
+            )
+        """)
+
+        db.session.execute(
+            sql_insert,
+            {
+                "id_card": int(id_card),
+                "cod_ponto": int(cod_ponto),
+                "cod_face": cod_face,
+                "id_painel": id_painel_final,
+                "data_inicio": data_inicio,
+                "data_fim": data_fim,
+                "spanqtd": spanqtd_novo,
+                "cota": cota_int,
+                "marca_exibida": marca_exibida_padrao[:200],
+                "vendedor_nome": nome_vendedor[:200] if nome_vendedor else None,
+                "id_vendedor": id_vendedor,
+                "id_cliente": int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+                "observacao": observacao_insert[:1000],
+                "dias": int(dias_int),
+                "criado_por": int(id_usuario),
+                "reserva_ordem_prioridade": int(reserva_ordem_prioridade),
+            },
+        )
+
+        reservas_criadas += 1
+
+    return reservas_criadas
+
+
+
+
+
+
+
+
+
+
 def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_proprietaria: int) -> list[dict[str, Any]]:
     vinculos_preparados: list[dict[str, Any]] = []
 
@@ -3532,9 +4064,6 @@ def _registrar_negociacao_preco_card(
 
 
 
-
-
-
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     sql = text("""
         SELECT
@@ -3564,16 +4093,34 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             p.UF,
             p.Bairro,
             p.Numero,
-            p.QuantidadeFaces
+            p.QuantidadeFaces,
+            rv.DataInicioReserva,
+            rv.DataFimReserva
         FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] r
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
           ON TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, r.IDDimPaineisEuromidia)
+        OUTER APPLY (
+            SELECT TOP 1
+                CONVERT(varchar(10), fo.DataInicio, 23) AS DataInicioReserva,
+                CONVERT(varchar(10), fo.DataFim, 23) AS DataFimReserva
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+            WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = UPPER(LTRIM(RTRIM(COALESCE(r.CodFace, ''))))
+              AND fo.CanceladoEm IS NULL
+              AND fo.Status IN ('ATIVO', 'RESERVADO')
+              AND COALESCE(fo.Observacao, '') LIKE (
+                    '[KANBAN_CARD=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' + UPPER(LTRIM(RTRIM(COALESCE(r.CodFace, '')))) + ']%'
+                  )
+            ORDER BY fo.CriadoEm DESC, fo.DataAtualizacao DESC
+        ) rv
         WHERE r.IDFatoKanbanCard = :id_card
           AND r.Ativo = 1
         ORDER BY r.Ordem ASC, r.IDFatoKanbanCardPainelFace ASC;
     """)
     rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
     return _rows_para_dicts(rows)
+
+
+
 
 
 
@@ -5576,9 +6123,10 @@ def _registrar_negociacao_preco_card(
 
 
 
+
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
 @login_required
-@limiter.limit("180/minute")
+@limiter.limit("120/minute")
 def api_card_atualizar(id_card: int):
     id_usuario = _assert_login()
     id_emp = _id_empresa_usuario_or_403()
@@ -5685,6 +6233,7 @@ def api_card_atualizar(id_card: int):
             )
 
         vinculos_preparados: list[dict[str, Any]] = []
+        reservas_criadas = 0
 
         if isinstance(painel_faces_payload, list):
 
@@ -5764,6 +6313,18 @@ def api_card_atualizar(id_card: int):
                     vinculos_preparados=vinculos_preparados,
                 )
 
+            reservas_criadas = _criar_reservas_painel_faces_kanban(
+                id_card=int(id_card),
+                titulo_card=titulo,
+                id_empresa_relacionada=(
+                    int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+                ),
+                painel_faces_payload=painel_faces_payload,
+                vinculos_preparados=vinculos_preparados,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+            )
+
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
         _registrar_log_card(
@@ -5800,7 +6361,12 @@ def api_card_atualizar(id_card: int):
         return jsonify(
             {
                 "ok": True,
-                "msg": "Card atualizado com sucesso.",
+                "msg": (
+                    f"Card atualizado com sucesso. {int(reservas_criadas)} reserva(s) criada(s)."
+                    if int(reservas_criadas or 0) > 0
+                    else "Card atualizado com sucesso."
+                ),
+                "reservas_criadas": int(reservas_criadas or 0),
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
@@ -5816,6 +6382,7 @@ def api_card_atualizar(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao atualizar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao atualizar card: {str(exc)}"}), 500
+
 
 
 
