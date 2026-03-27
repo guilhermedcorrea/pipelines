@@ -92,6 +92,56 @@ def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padra
 
 
 
+def _resolver_id_status_card_movimento(
+    nome_fase_para: str | None = None,
+    *,
+    card_inativado: bool = False,
+) -> int | None:
+    """
+    Regra fixa para gravar IDDimKanbanStatusCard no histórico de movimento.
+
+    Regras definidas:
+    - fases:
+        A Fazer (Back Office)
+        Proposta Enviada
+        Refazer
+        Aprovado Cliente
+        Aguardando Liberação (Gerencia)
+        Documentos Enviados
+      => IDDimKanbanStatusCard = 1
+
+    - fase:
+        Concluido
+      => IDDimKanbanStatusCard = 3
+
+    - card excluído / inativado
+      => IDDimKanbanStatusCard = 2
+    """
+    if card_inativado:
+        return 2
+
+    nome_normalizado = _normalizar_texto_comparacao(nome_fase_para)
+
+    fases_status_1 = {
+        "a fazer (back office)",
+        "proposta enviada",
+        "refazer",
+        "aprovado cliente",
+        "aguardando liberacao (gerencia)",
+        "documentos enviados",
+    }
+
+    if nome_normalizado in fases_status_1:
+        return 1
+
+    if nome_normalizado == "concluido":
+        return 3
+
+    return None
+
+
+
+
 
 def _rows_para_dicts(rows: Any) -> list[dict[str, Any]]:
     return [dict(r) if isinstance(r, Mapping) else r for r in (rows or [])]
@@ -4672,9 +4722,11 @@ def api_card_atualizar(id_card: int):
 
 
 
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
-@limiter.limit("180/minute")
+@limiter.limit("120/minute")
 def api_card_mover(id_card: int):
     id_usuario = _assert_login()
     id_emp = _id_empresa_usuario_or_403()
@@ -4691,6 +4743,7 @@ def api_card_mover(id_card: int):
         id_fase_para = int(payload.get("id_fase_para") or 0)
         posicao = str(payload.get("posicao") or "LAST").strip().upper()
         observacao = (payload.get("observacao") or "").strip()
+        nota_movimento = (payload.get("nota_movimento") or "").strip()
         versao_concorrencia = payload.get("versao_concorrencia")
 
         if not id_fase_para:
@@ -4701,7 +4754,9 @@ def api_card_mover(id_card: int):
         fase_destino = db.session.execute(
             text(f"""
                 SELECT TOP (1)
-                    f.IDDimKanbanFase
+                    f.IDDimKanbanFase,
+                    f.NomeFase,
+                    f.IDEmpresaProprietaria
                 FROM {TABELA_KANBAN_FASE} f
                 WHERE f.IDDimKanbanFase = :id_fase_para
                   AND f.IDDimKanban = :id_kanban
@@ -4869,24 +4924,35 @@ def api_card_mover(id_card: int):
                 409,
             )
 
-        status_destino = str(row.get("StatusCard") or _obter_status_card_padrao()).strip().upper()
-        id_status_destino = _obter_id_status_card_por_codigo(status_destino)
+        nome_fase_destino = str(fase_destino.get("NomeFase") or "").strip()
+
+        id_status_movimento = _resolver_id_status_card_movimento(
+            nome_fase_para=nome_fase_destino,
+            card_inativado=False,
+        )
 
         campos_status_pos_mov: list[str] = []
         params_status_pos_mov: dict[str, Any] = {
             "id_card": id_card,
-            "status_destino": status_destino,
         }
 
-        if _coluna_existe(TABELA_CARD, "StatusCard"):
-            campos_status_pos_mov.append("StatusCard = :status_destino")
-
-        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_destino is not None:
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_movimento is not None:
             campos_status_pos_mov.append("IDDimKanbanStatusCard = :id_status_destino")
-            params_status_pos_mov["id_status_destino"] = int(id_status_destino)
+            params_status_pos_mov["id_status_destino"] = int(id_status_movimento)
+
+        if _coluna_existe(TABELA_CARD, "StatusCard"):
+            if id_status_movimento == 3:
+                campos_status_pos_mov.append("StatusCard = :status_destino")
+                params_status_pos_mov["status_destino"] = "CONCLUIDO"
+            elif id_status_movimento == 2:
+                campos_status_pos_mov.append("StatusCard = :status_destino")
+                params_status_pos_mov["status_destino"] = "CANCELADO"
+            elif id_status_movimento == 1:
+                campos_status_pos_mov.append("StatusCard = :status_destino")
+                params_status_pos_mov["status_destino"] = "ATIVO"
 
         if _coluna_existe(TABELA_CARD, "EncerradoEm"):
-            if _status_card_eh_final(status_destino):
+            if id_status_movimento == 3:
                 campos_status_pos_mov.append("EncerradoEm = ISNULL(EncerradoEm, GETDATE())")
             else:
                 campos_status_pos_mov.append("EncerradoEm = NULL")
@@ -4904,9 +4970,8 @@ def api_card_mover(id_card: int):
             id_empresa_padrao=row.get("IDEmpresaProprietaria"),
         )
 
-        """
-        É AQUI que entra o sql_ins que você perguntou.
-        """
+        observacao_movimento = nota_movimento or observacao
+
         sql_ins = text(f"""
             INSERT INTO {TABELA_CARD_MOVIMENTO}
             (
@@ -4918,7 +4983,8 @@ def api_card_mover(id_card: int):
                 Observacao,
                 IDEmpresaProprietaria,
                 IDDimKanbanTag,
-                IDDimKanbanStatusCard
+                IDDimKanbanStatusCard,
+                IDDimKanban
             )
             OUTPUT INSERTED.IDFatoKanbanCardMovimento
             VALUES
@@ -4931,7 +4997,8 @@ def api_card_mover(id_card: int):
                 :obs,
                 :id_empresa,
                 :id_tag,
-                :id_status_card
+                :id_status_card,
+                :id_kanban
             );
         """)
 
@@ -4942,10 +5009,11 @@ def api_card_mover(id_card: int):
                 "id_fase_de": id_fase_de,
                 "id_fase_para": id_fase_para,
                 "movido_por": id_usuario,
-                "obs": observacao[:2000] if observacao else None,
+                "obs": observacao_movimento[:2000] if observacao_movimento else None,
                 "id_empresa": id_empresa_movimento,
                 "id_tag": None,
-                "id_status_card": int(id_status_destino) if id_status_destino is not None else None,
+                "id_status_card": int(id_status_movimento) if id_status_movimento is not None else None,
+                "id_kanban": int(id_kanban),
             },
         ).mappings().first()
 
@@ -4958,7 +5026,7 @@ def api_card_mover(id_card: int):
             tipo_evento="CARD_MOVIDO",
             id_fase_de=id_fase_de,
             id_fase_para=id_fase_para,
-            observacao=observacao or "Card movido entre fases.",
+            observacao=observacao_movimento or "Card movido entre fases.",
             tabela_origem=TABELA_CARD_MOVIMENTO,
             id_registro_origem=int(row_movimento.get("IDFatoKanbanCardMovimento") or 0) if row_movimento else None,
             payload_antes=snapshot_antes,
@@ -4999,7 +5067,6 @@ def api_card_mover(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
-
 
 
 
@@ -5243,7 +5310,6 @@ def api_card_nota_criar(id_card: int):
 
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>/inativar", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -5322,12 +5388,10 @@ def api_card_inativar(id_card: int):
         f"motivo_texto={motivo_texto!r} observacao_inativacao={observacao_inativacao!r}"
     )
 
-    status_inativacao = _obter_status_card_inativacao()
-    id_status_inativacao = _obter_id_status_card_por_codigo(status_inativacao)
+    id_status_inativacao = _resolver_id_status_card_movimento(card_inativado=True)
 
     print(
-        f"[KANBAN][api_card_inativar] status_inativacao={status_inativacao!r} "
-        f"id_status_inativacao={id_status_inativacao!r}"
+        f"[KANBAN][api_card_inativar] id_status_inativacao={id_status_inativacao!r}"
     )
 
     try:
@@ -5343,7 +5407,7 @@ def api_card_inativar(id_card: int):
 
         if _coluna_existe(TABELA_CARD, "StatusCard"):
             campos_update.append("StatusCard = :status_inativacao")
-            params_update["status_inativacao"] = status_inativacao
+            params_update["status_inativacao"] = "CANCELADO"
 
         if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_inativacao is not None:
             campos_update.append("IDDimKanbanStatusCard = :id_status_inativacao")
@@ -5375,12 +5439,39 @@ def api_card_inativar(id_card: int):
             f"[KANBAN][api_card_inativar] UPDATE executado rowcount={getattr(resultado_upd, 'rowcount', None)}"
         )
 
+        id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
+            id_kanban=id_kanban,
+            id_empresa_padrao=id_empresa_card,
+        )
+
         sql_ins_mov = text(f"""
             INSERT INTO {TABELA_CARD_MOVIMENTO}
-                (IDFatoKanbanCard, IDFaseDe, IDFasePara, MovidoEm, MovidoPor, Observacao, IDEmpresaProprietaria)
+            (
+                IDFatoKanbanCard,
+                IDFaseDe,
+                IDFasePara,
+                MovidoEm,
+                MovidoPor,
+                Observacao,
+                IDEmpresaProprietaria,
+                IDDimKanbanTag,
+                IDDimKanbanStatusCard,
+                IDDimKanban
+            )
             OUTPUT INSERTED.IDFatoKanbanCardMovimento
             VALUES
-                (:id_card, :id_fase_de, NULL, GETDATE(), :movido_por, :obs, :id_empresa);
+            (
+                :id_card,
+                :id_fase_de,
+                NULL,
+                GETDATE(),
+                :movido_por,
+                :obs,
+                :id_empresa,
+                NULL,
+                :id_status_card,
+                :id_kanban
+            );
         """)
 
         params_mov = {
@@ -5388,7 +5479,9 @@ def api_card_inativar(id_card: int):
             "id_fase_de": id_fase_atual,
             "movido_por": id_usuario,
             "obs": observacao_inativacao[:2000],
-            "id_empresa": id_empresa_card,
+            "id_empresa": id_empresa_movimento,
+            "id_status_card": int(id_status_inativacao) if id_status_inativacao is not None else None,
+            "id_kanban": int(id_kanban),
         }
         print(f"[KANBAN][api_card_inativar] params_mov={params_mov!r}")
 
@@ -5420,7 +5513,7 @@ def api_card_inativar(id_card: int):
                 "tipo_nota": "INATIVACAO",
                 "texto_nota": observacao_inativacao[:4000],
                 "criado_por": id_usuario,
-                "id_empresa": id_empresa_card,
+                "id_empresa": id_empresa_movimento,
             }
 
             if _coluna_existe(TABELA_CARD_NOTA, "IDEmpresa"):
@@ -5511,6 +5604,7 @@ def api_card_inativar(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao inativar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao inativar card: {str(exc)}"}), 500
+
 
 
 
