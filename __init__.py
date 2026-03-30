@@ -115,7 +115,6 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 
-
 #acessa containwer
 #docker compose exec airflow-apiserver bash
 
@@ -152,3 +151,8 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 #docker compose logs -f flask-app
+
+
+#Reduild e restart compose
+#docker compose down
+#docker compose up -d --build

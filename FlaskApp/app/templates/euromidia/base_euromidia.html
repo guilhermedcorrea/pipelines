@@ -392,6 +392,79 @@ input:disabled, select:disabled, textarea:disabled{
   display: block;
 }
 
+
+.submenu-item{
+  position: relative;
+}
+
+.menu-dropdown .submenu-link{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.menu-dropdown .submenu-link:hover,
+.submenu-item.open > .submenu-link{
+  background: rgba(0,40,132,.08);
+}
+
+.submenu-caret{
+  opacity: .9;
+  flex: 0 0 auto;
+}
+
+.submenu-dropdown{
+  position: absolute;
+  left: calc(100% - 8px);
+  top: -8px;
+  min-width: 240px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.18);
+  padding: 8px;
+  display: none;
+  z-index: 10001;
+}
+
+.submenu-item.open > .submenu-dropdown{
+  display: block;
+}
+
+.submenu-dropdown a{
+  display: block;
+  padding: 10px 10px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 900;
+  font-size: 14px;
+}
+
+.submenu-dropdown a:hover{
+  background: rgba(0,40,132,.08);
+}
+
+@media (max-width: 760px){
+  .submenu-dropdown{
+    position: static;
+    left: auto;
+    top: auto;
+    min-width: 100%;
+    width: 100%;
+    margin-top: 6px;
+    box-shadow: none;
+  }
+}
+
+
 @media (max-width: 760px){
   .menu{
     width: 100%;
@@ -838,6 +911,22 @@ input:disabled, select:disabled, textarea:disabled{
   }
 }
 
+
+.menu-dropdown a.menu-link-current,
+.submenu-dropdown a.menu-link-current{
+  background: rgba(0,40,132,.08);
+  color: var(--text);
+}
+
+.menu-dropdown a.menu-link-current::after,
+.submenu-dropdown a.menu-link-current::after{
+  content: none !important;
+}
+
+
+
+
+
   </style>
 
 </head>
@@ -913,7 +1002,21 @@ input:disabled, select:disabled, textarea:disabled{
             {% endif %}
 
             {% if menu_paineis_atendimento %}
-              <a href="{{ url_for('kanban.atendimento_redirect') }}">Atendimento</a>
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Atendimento</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
+
+                <div class="submenu-dropdown">
+                  <a href="{{ url_for('kanban.atendimento_redirect') }}">Kanban Atendimento</a>
+                  
+
+                  <a href="{{ url_for('kanban.health_check_comercial') }}">Health Check Comercial</a>
+                  <a href="{{ url_for('kanban.historico_cards_lista') }}">Historico Atendimento</a>
+                  <a href="#">Historico Preços</a>
+                </div>
+              </div>
             {% endif %}
 
             {% if menu_paineis_performance %}
@@ -955,12 +1058,35 @@ input:disabled, select:disabled, textarea:disabled{
         </div>
         {% endif %}
 
-        <div class="menu-item" data-menu="admin">
-          <button type="button"
-                  class="menu-btn {% if request.path.startswith('/admin') %}active{% endif %}">
-            Admin
-          </button>
-        </div>
+
+
+ <div class="menu-item" data-menu="admin">
+  <button type="button"
+          class="menu-btn {% if request.path.startswith('/admin') %}active{% endif %}">
+    Admin <span style="opacity:.9;">▾</span>
+  </button>
+
+  <div class="menu-dropdown">
+    <div class="desc">Ações administrativas</div>
+
+    <div class="submenu-item">
+      <a href="#" class="submenu-link">
+        <span>Permissões</span>
+        <span class="submenu-caret">▸</span>
+      </a>
+
+      <div class="submenu-dropdown">
+        <a href="{{ url_for('admin.permissao_desconto') }}"
+           class="{% if request.path == url_for('admin.permissao_desconto') %}menu-link-current{% endif %}">
+          Permissão Desconto
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
 
         {% if current_user.is_authenticated and current_user.has_permission('ADMIN_TUDO') %}
           <div class="menu-item" data-menu="seguranca">
@@ -1130,54 +1256,78 @@ input:disabled, select:disabled, textarea:disabled{
       </div>
     </div>
   </div>
+<script>
+  (function(){
+    function getCsrfToken(){
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      return meta ? meta.getAttribute("content") : "";
+    }
 
-  <script>
-    (function(){
-      function getCsrfToken(){
-        const meta = document.querySelector('meta[name="csrf-token"]');
-        return meta ? meta.getAttribute("content") : "";
+    function setCheckoutBadge(qtd){
+      const badge = document.getElementById("checkoutBadge");
+      if (!badge) return;
+
+      const n = parseInt(qtd || 0, 10) || 0;
+      badge.textContent = String(n);
+
+      if (n <= 0){
+        badge.classList.add("hidden");
+      } else {
+        badge.classList.remove("hidden");
       }
+    }
 
-      function setCheckoutBadge(qtd){
-        const badge = document.getElementById("checkoutBadge");
-        if (!badge) return;
+    async function refreshCheckoutBadge(){
+      try{
+        const url = "{{ url_for('Paineis.checkout_status') }}";
+        const resp = await fetch(url, {
+          method: "GET",
+          credentials: "same-origin"
+        });
 
-        const n = parseInt(qtd || 0, 10) || 0;
-        badge.textContent = String(n);
-
-        if (n <= 0){
-          badge.classList.add("hidden");
-        } else {
-          badge.classList.remove("hidden");
+        const data = await resp.json();
+        if (data && data.ok){
+          setCheckoutBadge(data.qtd);
         }
+      }catch(e){
+        /* silencioso */
       }
+    }
 
-      async function refreshCheckoutBadge(){
-        try{
-          const url = "{{ url_for('Paineis.checkout_status') }}";
-          const resp = await fetch(url, { method: "GET", credentials: "same-origin" });
-          const data = await resp.json();
-          if (data && data.ok){
-            setCheckoutBadge(data.qtd);
-          }
-        }catch(e){
-          /* silencioso */
-        }
-      }
+    function fecharTodosSubmenus(){
+      document
+        .querySelectorAll(".submenu-item.open")
+        .forEach(function(el){
+          el.classList.remove("open");
+        });
+    }
 
-      function fecharTodos(){
-        document.querySelectorAll(".menu-item.open").forEach(el => el.classList.remove("open"));
-      }
+    function fecharTodosMenus(){
+      document
+        .querySelectorAll(".menu-item.open")
+        .forEach(function(el){
+          el.classList.remove("open");
+        });
 
-      document.querySelectorAll(".menu-item .menu-btn").forEach(btn => {
+      fecharTodosSubmenus();
+    }
+
+    document
+      .querySelectorAll(".menu-item .menu-btn")
+      .forEach(function(btn){
         btn.addEventListener("click", function(ev){
           ev.preventDefault();
           ev.stopPropagation();
 
           const item = btn.closest(".menu-item");
+          if (!item) return;
+
+          const dropdown = item.querySelector(":scope > .menu-dropdown");
+          if (!dropdown) return;
+
           const jaAberto = item.classList.contains("open");
 
-          fecharTodos();
+          fecharTodosMenus();
 
           if (!jaAberto){
             item.classList.add("open");
@@ -1185,145 +1335,193 @@ input:disabled, select:disabled, textarea:disabled{
         });
       });
 
-      document.addEventListener("click", function(){
-        fecharTodos();
-      });
-
-      document.addEventListener("keydown", function(e){
-        if (e.key === "Escape"){
-          fecharTodos();
-        }
-      });
-
-      const btnAbrir = document.getElementById("btnExportarExcel");
-      const modal = document.getElementById("modalExportarExcel");
-      const btnFechar = document.getElementById("btnFecharModalExcel");
-      const btnCancelar = document.getElementById("btnCancelarExcel");
-      const btnConfirmar = document.getElementById("btnConfirmarExcel");
-      const selAno = document.getElementById("anoExportar");
-
-      function abrirModalExcel(){
-        if (!modal) return;
-        modal.classList.add("open");
-        modal.setAttribute("aria-hidden", "false");
-        setTimeout(() => { if (selAno) selAno.focus(); }, 0);
-      }
-
-      function fecharModalExcel(){
-        if (!modal) return;
-        modal.classList.remove("open");
-        modal.setAttribute("aria-hidden", "true");
-      }
-
-      function exportarExcel(){
-        const ano = (selAno && selAno.value) ? selAno.value : "";
-        const anoSafe = String(ano).replace(/[^\d]/g, "").slice(0,4);
-
-        const baseUrl = "{{ url_for('Paineis.exportar_excel_ano') }}";
-        const url = baseUrl + "?ano=" + encodeURIComponent(anoSafe);
-
-        window.location.href = url;
-        fecharModalExcel();
-      }
-
-      if (btnAbrir){
-        btnAbrir.addEventListener("click", function(ev){
-          ev.preventDefault();
-          ev.stopPropagation();
-          abrirModalExcel();
-        });
-      }
-
-      if (btnFechar){
-        btnFechar.addEventListener("click", function(){
-          fecharModalExcel();
-        });
-      }
-
-      if (btnCancelar){
-        btnCancelar.addEventListener("click", function(){
-          fecharModalExcel();
-        });
-      }
-
-      if (modal){
-        modal.addEventListener("click", function(e){
-          if (e.target === modal){
-            fecharModalExcel();
-          }
-        });
-      }
-
-      if (btnConfirmar){
-        btnConfirmar.addEventListener("click", function(){
-          exportarExcel();
-        });
-      }
-
-      document.addEventListener("keydown", function(e){
-        if (!modal || !modal.classList.contains("open")) return;
-
-        if (e.key === "Escape"){
-          fecharModalExcel();
-          return;
-        }
-
-        if (e.key === "Enter"){
-          const el = document.activeElement;
-          const dentroModal = el && modal.contains(el);
-          if (dentroModal){
-            e.preventDefault();
-            exportarExcel();
-          }
-        }
-      });
-
-      const userMenu = document.getElementById("userMenu");
-      const btnUserMenu = document.getElementById("btnUserMenu");
-
-      function fecharUserMenu(){
-        if (!userMenu) return;
-        userMenu.classList.remove("open");
-      }
-
-      if (btnUserMenu){
-        btnUserMenu.addEventListener("click", function(ev){
+    document
+      .querySelectorAll(".submenu-item > .submenu-link")
+      .forEach(function(link){
+        link.addEventListener("click", function(ev){
           ev.preventDefault();
           ev.stopPropagation();
 
-          const jaAberto = userMenu.classList.contains("open");
-          fecharTodos();
+          const submenuItem = link.closest(".submenu-item");
+          if (!submenuItem) return;
+
+          const menuItem = link.closest(".menu-item");
+          const jaAberto = submenuItem.classList.contains("open");
+
+          if (menuItem && !menuItem.classList.contains("open")){
+            menuItem.classList.add("open");
+          }
+
+          if (menuItem){
+            menuItem
+              .querySelectorAll(".submenu-item.open")
+              .forEach(function(el){
+                if (el !== submenuItem){
+                  el.classList.remove("open");
+                }
+              });
+          }
 
           if (jaAberto){
-            fecharUserMenu();
+            submenuItem.classList.remove("open");
           } else {
-            userMenu.classList.add("open");
+            submenuItem.classList.add("open");
           }
         });
-      }
-
-      document.addEventListener("click", function(){
-        fecharUserMenu();
       });
 
-      document.addEventListener("keydown", function(e){
-        if (e.key === "Escape"){
-          fecharUserMenu();
+    document
+      .querySelectorAll(".menu-dropdown, .submenu-dropdown")
+      .forEach(function(el){
+        el.addEventListener("click", function(ev){
+          ev.stopPropagation();
+        });
+      });
+
+    document.addEventListener("click", function(){
+      fecharTodosMenus();
+    });
+
+    document.addEventListener("keydown", function(e){
+      if (e.key === "Escape"){
+        fecharTodosMenus();
+      }
+    });
+
+    const btnAbrir = document.getElementById("btnExportarExcel");
+    const modal = document.getElementById("modalExportarExcel");
+    const btnFechar = document.getElementById("btnFecharModalExcel");
+    const btnCancelar = document.getElementById("btnCancelarExcel");
+    const btnConfirmar = document.getElementById("btnConfirmarExcel");
+    const selAno = document.getElementById("anoExportar");
+
+    function abrirModalExcel(){
+      if (!modal) return;
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden", "false");
+      setTimeout(function(){
+        if (selAno) selAno.focus();
+      }, 0);
+    }
+
+    function fecharModalExcel(){
+      if (!modal) return;
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
+    }
+
+    function exportarExcel(){
+      const ano = (selAno && selAno.value) ? selAno.value : "";
+      const anoSafe = String(ano).replace(/[^\d]/g, "").slice(0, 4);
+
+      const baseUrl = "{{ url_for('Paineis.exportar_excel_ano') }}";
+      const url = baseUrl + "?ano=" + encodeURIComponent(anoSafe);
+
+      window.location.href = url;
+      fecharModalExcel();
+    }
+
+    if (btnAbrir){
+      btnAbrir.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        abrirModalExcel();
+      });
+    }
+
+    if (btnFechar){
+      btnFechar.addEventListener("click", function(){
+        fecharModalExcel();
+      });
+    }
+
+    if (btnCancelar){
+      btnCancelar.addEventListener("click", function(){
+        fecharModalExcel();
+      });
+    }
+
+    if (modal){
+      modal.addEventListener("click", function(e){
+        if (e.target === modal){
+          fecharModalExcel();
         }
       });
+    }
 
-      // Atualiza badge ao carregar
-      refreshCheckoutBadge();
+    if (btnConfirmar){
+      btnConfirmar.addEventListener("click", function(){
+        exportarExcel();
+      });
+    }
 
-      // Expõe helpers globais pra outros templates (lista/checkout)
-      window.EURO_CHECKOUT = {
-        getCsrfToken,
-        setCheckoutBadge,
-        refreshCheckoutBadge
-      };
+    document.addEventListener("keydown", function(e){
+      if (!modal || !modal.classList.contains("open")) return;
 
-    })();
-  </script>
+      if (e.key === "Escape"){
+        fecharModalExcel();
+        return;
+      }
 
-</body>
-</html>
+      if (e.key === "Enter"){
+        const el = document.activeElement;
+        const dentroModal = el && modal.contains(el);
+
+        if (dentroModal){
+          e.preventDefault();
+          exportarExcel();
+        }
+      }
+    });
+
+    const userMenu = document.getElementById("userMenu");
+    const btnUserMenu = document.getElementById("btnUserMenu");
+
+    function fecharUserMenu(){
+      if (!userMenu) return;
+      userMenu.classList.remove("open");
+    }
+
+    if (btnUserMenu){
+      btnUserMenu.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const jaAberto = userMenu.classList.contains("open");
+
+        fecharTodosMenus();
+
+        if (jaAberto){
+          fecharUserMenu();
+        } else {
+          userMenu.classList.add("open");
+        }
+      });
+    }
+
+    const userDropdown = document.getElementById("userDropdown");
+    if (userDropdown){
+      userDropdown.addEventListener("click", function(ev){
+        ev.stopPropagation();
+      });
+    }
+
+    document.addEventListener("click", function(){
+      fecharUserMenu();
+    });
+
+    document.addEventListener("keydown", function(e){
+      if (e.key === "Escape"){
+        fecharUserMenu();
+      }
+    });
+
+    refreshCheckoutBadge();
+
+    window.EURO_CHECKOUT = {
+      getCsrfToken,
+      setCheckoutBadge,
+      refreshCheckoutBadge
+    };
+  })();
+</script>

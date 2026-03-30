@@ -1,0 +1,530 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Histórico de Cards{% endblock %}
+
+{% block content %}
+<style>
+  .pagina-historico-cards {
+    width: 100%;
+    padding: 18px 18px 28px 18px;
+    background: #f4f7fb;
+    min-height: calc(100vh - 80px);
+  }
+
+  .bloco-historico-cards {
+    background: #ffffff;
+    border: 1px solid #d7dfeb;
+    border-radius: 22px;
+    box-shadow: 0 10px 26px rgba(19, 44, 89, 0.06);
+    overflow: hidden;
+  }
+
+  .topo-historico-cards {
+    padding: 20px 20px 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .topo-historico-cards__titulo {
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.1;
+    font-weight: 900;
+    color: #002f87;
+  }
+
+  .topo-historico-cards__contador {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: 14px;
+    border: 1px solid #d9e2ef;
+    background: #ffffff;
+    color: #002f87;
+    font-size: 17px;
+    font-weight: 900;
+  }
+
+  .topo-historico-cards__contador strong {
+    font-size: 17px;
+    font-weight: 900;
+  }
+
+  .painel-filtros-historico {
+    padding: 0 20px 18px 20px;
+    border-bottom: 1px solid #e3eaf3;
+  }
+
+  .painel-filtros-historico__titulo {
+    display: block;
+    margin-bottom: 8px;
+    color: #4d6385;
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .painel-filtros-historico__linha {
+    display: grid;
+    grid-template-columns: minmax(320px, 1.8fr) minmax(180px, 0.7fr) minmax(180px, 0.7fr) minmax(180px, 0.8fr) auto auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .campo-filtro-historico input,
+  .campo-filtro-historico select {
+    width: 100%;
+    height: 48px;
+    border: 1px solid #d3dce9;
+    border-radius: 15px;
+    background: #ffffff;
+    color: #495e7a;
+    font-size: 15px;
+    padding: 0 16px;
+    outline: none;
+  }
+
+  .campo-filtro-historico input:focus,
+  .campo-filtro-historico select:focus {
+    border-color: #3d63f2;
+    box-shadow: 0 0 0 3px rgba(61, 99, 242, 0.12);
+  }
+
+  .btn-filtrar-historico,
+  .btn-limpar-historico {
+    height: 48px;
+    padding: 0 22px;
+    border-radius: 15px;
+    font-size: 15px;
+    font-weight: 900;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    transition: 0.18s ease;
+    cursor: pointer;
+  }
+
+  .btn-filtrar-historico {
+    border: 0;
+    background: #f7b500;
+    color: #101828;
+    box-shadow: 0 8px 18px rgba(247, 181, 0, 0.20);
+  }
+
+  .btn-filtrar-historico:hover {
+    filter: brightness(0.96);
+    transform: translateY(-1px);
+  }
+
+  .btn-limpar-historico {
+    border: 1px solid #f0a1a1;
+    background: #ffffff;
+    color: #a12626;
+  }
+
+  .btn-limpar-historico:hover {
+    background: #fff6f6;
+  }
+
+  .tabela-historico-cards-wrapper {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .tabela-historico-cards {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 1500px;
+  }
+
+  .tabela-historico-cards thead th {
+    text-align: left;
+    padding: 18px 16px;
+    background: #f7f9fc;
+    color: #002f87;
+    font-size: 14px;
+    font-weight: 900;
+    text-transform: none;
+    border-bottom: 1px solid #dfe7f1;
+    white-space: nowrap;
+  }
+
+  .tabela-historico-cards tbody td {
+    padding: 18px 16px;
+    border-bottom: 1px solid #e7edf5;
+    vertical-align: middle;
+    color: #21324a;
+    font-size: 15px;
+  }
+
+  .tabela-historico-cards tbody tr:hover {
+    background: #fbfcff;
+  }
+
+  .col-id-card {
+    white-space: nowrap;
+    font-weight: 900;
+    color: #203a63;
+  }
+
+  .pill-id-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid #d9e1ec;
+    background: #ffffff;
+    font-weight: 900;
+    color: #0d2d69;
+  }
+
+  .pill-id-card::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #aebee2;
+    flex: 0 0 auto;
+  }
+
+  .col-titulo-card strong {
+    display: block;
+    font-size: 16px;
+    font-weight: 900;
+    color: #182f56;
+    line-height: 1.25;
+    margin-bottom: 5px;
+  }
+
+  .col-titulo-card small {
+    display: block;
+    color: #657892;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .pill-fase,
+  .pill-status,
+  .pill-situacao {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+
+  .pill-fase {
+    background: #edf3ff;
+    color: #2f5bea;
+  }
+
+  .pill-status {
+    background: #eef4ff;
+    color: #2f5bea;
+  }
+
+  .pill-status--encerrado {
+    background: #fff1f2;
+    color: #d92d20;
+  }
+
+  .pill-situacao {
+    background: #f3f6fb;
+    color: #41526b;
+  }
+
+  .texto-data-forte {
+    font-weight: 900;
+    color: #162c4f;
+    white-space: nowrap;
+  }
+
+  .texto-secundario {
+    color: #607089;
+    font-size: 13px;
+  }
+
+  .grupo-contadores {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 290px;
+  }
+
+  .contador-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid #dbe4ef;
+    background: #f5f8fc;
+    color: #39506e;
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .acoes-historico {
+    white-space: nowrap;
+    text-align: right;
+  }
+
+  .btn-abrir-historico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 16px;
+    border-radius: 14px;
+    background: #1f365b;
+    color: #ffffff;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 900;
+    transition: 0.18s ease;
+  }
+
+  .btn-abrir-historico:hover {
+    background: #172846;
+    transform: translateY(-1px);
+  }
+
+  .estado-vazio-historico {
+    padding: 34px 20px 40px 20px;
+    text-align: center;
+    color: #607089;
+  }
+
+  .estado-vazio-historico h3 {
+    margin: 0 0 8px 0;
+    color: #20324d;
+    font-size: 22px;
+    font-weight: 900;
+  }
+
+  @media (max-width: 1300px) {
+    .painel-filtros-historico__linha {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .painel-filtros-historico__linha .campo-filtro-historico--busca {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .pagina-historico-cards {
+      padding: 12px;
+    }
+
+    .topo-historico-cards {
+      padding: 16px 16px 10px 16px;
+    }
+
+    .painel-filtros-historico {
+      padding: 0 16px 16px 16px;
+    }
+
+    .painel-filtros-historico__linha {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<div class="pagina-historico-cards">
+  <div class="bloco-historico-cards">
+    <div class="topo-historico-cards">
+      <h1 class="topo-historico-cards__titulo">Lista de Cards</h1>
+
+      <div class="topo-historico-cards__contador">
+        <span>☰</span>
+        <strong>{{ total_cards }}</strong>
+      </div>
+    </div>
+
+    <form method="get" class="painel-filtros-historico">
+      <label class="painel-filtros-historico__titulo" for="q">Buscar</label>
+
+      <div class="painel-filtros-historico__linha">
+        <div class="campo-filtro-historico campo-filtro-historico--busca">
+          <input
+            type="text"
+            id="q"
+            name="q"
+            placeholder="ID, título, descrição, ID da empresa, responsável..."
+            value="{{ filtros.q or '' }}"
+          >
+        </div>
+
+        <div class="campo-filtro-historico">
+          <select id="id_fase" name="id_fase">
+            <option value="">Todas as fases</option>
+            {% for fase in fases %}
+              <option value="{{ fase.id_fase }}" {% if filtros.id_fase == fase.id_fase %}selected{% endif %}>
+                {{ fase.nome_fase }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="campo-filtro-historico">
+          <select id="status" name="status">
+            <option value="">Todos os status</option>
+            {% for item_status in opcoes_status %}
+              <option value="{{ item_status.status_card }}" {% if filtros.status == item_status.status_card %}selected{% endif %}>
+                {{ item_status.status_card }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="campo-filtro-historico">
+          <select id="somente_ativos" name="somente_ativos">
+            <option value="1" {% if filtros.somente_ativos %}selected{% endif %}>Somente ativos</option>
+            <option value="0" {% if not filtros.somente_ativos %}selected{% endif %}>Ativos e encerrados</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn-filtrar-historico">⚙ Filtrar</button>
+
+        <a href="{{ url_for('kanban.historico_cards_lista') }}" class="btn-limpar-historico">↘ Limpar</a>
+      </div>
+    </form>
+
+    {% if cards %}
+      <div class="tabela-historico-cards-wrapper">
+        <table class="tabela-historico-cards">
+          <thead>
+            <tr>
+              <th>ID Card</th>
+              <th>Título</th>
+              <th>Empresa Relacionada</th>
+              <th>Fase</th>
+              <th>Status</th>
+              <th>Responsável</th>
+              <th>Criado em</th>
+              <th>Última Atividade</th>
+              <th>Indicadores</th>
+              <th>Situação</th>
+              <th style="text-align:right;">Ação</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {% for card in cards %}
+              <tr>
+                <td class="col-id-card">
+                  <span class="pill-id-card">#{{ card.id_card }}</span>
+                </td>
+
+                <td class="col-titulo-card">
+                  <strong>{{ card.titulo or 'Card sem título' }}</strong>
+
+                  {% if card.descricao %}
+                    <small>
+                      {{ card.descricao[:95] }}{% if card.descricao|length > 95 %}...{% endif %}
+                    </small>
+                  {% else %}
+                    <small>Sem descrição informada</small>
+                  {% endif %}
+                </td>
+
+                <td>
+                  {% if card.id_empresa_relacionada %}
+                    <strong>{{ card.id_empresa_relacionada }}</strong>
+                  {% else %}
+                    <span class="texto-secundario">Não informada</span>
+                  {% endif %}
+                </td>
+
+                <td>
+                  <span class="pill-fase">
+                    {{ card.nome_fase_atual or 'Sem fase' }}
+                  </span>
+                </td>
+
+                <td>
+                  <span class="pill-status {% if not card.ativo %}pill-status--encerrado{% endif %}">
+                    {% if card.ativo %}
+                      {{ card.status_card or 'Ativo' }}
+                    {% else %}
+                      {{ card.status_card or 'Encerrado' }}
+                    {% endif %}
+                  </span>
+                </td>
+
+                <td>
+                  {{ card.nome_usuario_responsavel or 'Não identificado' }}
+                </td>
+
+                <td>
+                  {% if card.criado_em %}
+                    <div class="texto-data-forte">{{ card.criado_em.strftime('%d/%m/%Y') }}</div>
+                    <div class="texto-secundario">{{ card.criado_em.strftime('%H:%M') }}</div>
+                  {% else %}
+                    <span class="texto-secundario">Não informado</span>
+                  {% endif %}
+                </td>
+
+                <td>
+                  {% if card.ultima_atividade_em %}
+                    <div class="texto-data-forte">{{ card.ultima_atividade_em.strftime('%d/%m/%Y') }}</div>
+                    <div class="texto-secundario">{{ card.ultima_atividade_em.strftime('%H:%M') }}</div>
+                  {% else %}
+                    <span class="texto-secundario">Sem atividade</span>
+                  {% endif %}
+                </td>
+
+                <td>
+                  <div class="grupo-contadores">
+                    <span class="contador-chip">📝 {{ card.total_observacoes or 0 }} Obs</span>
+                    <span class="contador-chip">🔁 {{ card.total_movimentacoes or 0 }} Mov</span>
+                    <span class="contador-chip">🏷 {{ card.total_tags_ativas or 0 }} Tags</span>
+                    <span class="contador-chip">🧩 {{ card.total_itens_ativos or 0 }} Itens</span>
+                    <span class="contador-chip">💰 {{ card.total_alteracoes_preco or 0 }} Preço</span>
+                  </div>
+                </td>
+
+                <td>
+                  <span class="pill-situacao">
+                    {% if card.ativo %}
+                      Ativo
+                    {% else %}
+                      Encerrado
+                    {% endif %}
+                  </span>
+                </td>
+
+                <td class="acoes-historico">
+                  <a href="/kanban/historico-card/{{ card.id_card }}" class="btn-abrir-historico">
+                    Abrir histórico
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="estado-vazio-historico">
+        <h3>Nenhum card encontrado</h3>
+        <p>Revise os filtros aplicados ou limpe a busca para carregar os registros.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

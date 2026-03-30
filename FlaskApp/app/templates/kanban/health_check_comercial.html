@@ -1,0 +1,900 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Health Check Comercial{% endblock %}
+
+{% block content %}
+<style>
+  :root{
+    --hc-bg: #ffffff;
+    --hc-card: #ffffff;
+    --hc-border: #E5E7EB;
+    --hc-text: #0F172A;
+    --hc-muted: #64748B;
+    --hc-blue: #002884;
+    --hc-blue-2: #0340A7;
+    --hc-yellow: #FFB300;
+    --hc-green: #16A34A;
+    --hc-red: #DC2626;
+    --hc-orange: #F59E0B;
+    --hc-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  }
+
+  .health-check-page{
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-bottom: 18px;
+  }
+
+  .health-check-header{
+    background: linear-gradient(135deg, #002884 0%, #0340A7 100%);
+    color: #fff;
+    border-radius: 18px;
+    padding: 22px 24px;
+    box-shadow: var(--hc-shadow);
+    border: 1px solid rgba(255,255,255,.10);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+
+  .health-check-header__titulo{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .health-check-header__titulo h1{
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.1;
+    font-weight: 900;
+    letter-spacing: .3px;
+  }
+
+  .health-check-header__titulo p{
+    margin: 0;
+    font-size: 14px;
+    color: rgba(255,255,255,.86);
+    max-width: 900px;
+  }
+
+  .health-check-header__meta{
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  .health-check-meta-box{
+    background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 14px;
+    padding: 12px 14px;
+    min-width: 220px;
+  }
+
+  .health-check-meta-box__label{
+    font-size: 12px;
+    font-weight: 800;
+    color: rgba(255,255,255,.75);
+    margin-bottom: 4px;
+  }
+
+  .health-check-meta-box__value{
+    font-size: 15px;
+    font-weight: 900;
+    color: #fff;
+    word-break: break-word;
+  }
+
+  .health-check-kpis{
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .health-kpi{
+    background: var(--hc-card);
+    border: 1px solid var(--hc-border);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: var(--hc-shadow);
+    min-height: 124px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .health-kpi__topo{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .health-kpi__titulo{
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--hc-muted);
+    line-height: 1.35;
+  }
+
+  .health-kpi__icone{
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    background: rgba(0, 40, 132, 0.08);
+    color: var(--hc-blue);
+    flex: 0 0 auto;
+  }
+
+  .health-kpi__valor{
+    font-size: 32px;
+    font-weight: 900;
+    color: var(--hc-text);
+    line-height: 1;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+  }
+
+  .health-kpi__delta{
+    font-size: 13px;
+    font-weight: 800;
+    min-height: 18px;
+    color: var(--hc-muted);
+  }
+
+  .health-kpi__placeholder{
+    color: #94A3B8;
+  }
+
+  .health-check-grid{
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+  }
+
+  .health-check-coluna{
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .health-card{
+    background: #fff;
+    border: 1px solid var(--hc-border);
+    border-radius: 18px;
+    box-shadow: var(--hc-shadow);
+    overflow: hidden;
+  }
+
+  .health-card__header{
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px 18px 0 18px;
+    flex-wrap: wrap;
+  }
+
+  .health-card__titulo{
+    margin: 0;
+    font-size: 18px;
+    font-weight: 900;
+    color: var(--hc-text);
+  }
+
+  .health-card__subtitulo{
+    margin: 4px 0 0 0;
+    font-size: 13px;
+    color: var(--hc-muted);
+  }
+
+  .health-card__body{
+    padding: 16px 18px 18px 18px;
+  }
+
+  .health-resumo-grid{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .health-mini{
+    border: 1px solid var(--hc-border);
+    border-radius: 14px;
+    padding: 14px;
+    background: #F8FAFC;
+  }
+
+  .health-mini__label{
+    font-size: 12px;
+    color: var(--hc-muted);
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+
+  .health-mini__valor{
+    font-size: 26px;
+    font-weight: 900;
+    color: var(--hc-text);
+    line-height: 1.1;
+    min-height: 28px;
+  }
+
+  .health-mini__delta{
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--hc-muted);
+    font-weight: 800;
+    min-height: 16px;
+  }
+
+  .health-lista{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .health-lista-vazia{
+    border: 1px dashed #CBD5E1;
+    border-radius: 14px;
+    padding: 18px;
+    background: #F8FAFC;
+    color: #64748B;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .health-item{
+    border: 1px solid var(--hc-border);
+    border-radius: 14px;
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: #fff;
+  }
+
+  .health-item__esquerda{
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .health-item__titulo{
+    font-size: 14px;
+    font-weight: 900;
+    color: var(--hc-text);
+    margin: 0 0 4px 0;
+    word-break: break-word;
+  }
+
+  .health-item__subtitulo{
+    font-size: 12px;
+    color: var(--hc-muted);
+    margin: 0;
+    word-break: break-word;
+  }
+
+  .health-item__direita{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .health-badge{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 900;
+    border: 1px solid var(--hc-border);
+    background: #F8FAFC;
+    color: var(--hc-text);
+  }
+
+  .health-badge--novo{
+    background: rgba(22,163,74,.08);
+    color: var(--hc-green);
+    border-color: rgba(22,163,74,.22);
+  }
+
+  .health-badge--aditivo{
+    background: rgba(3,64,167,.08);
+    color: var(--hc-blue-2);
+    border-color: rgba(3,64,167,.22);
+  }
+
+  .health-badge--cancelamento{
+    background: rgba(220,38,38,.08);
+    color: var(--hc-red);
+    border-color: rgba(220,38,38,.22);
+  }
+
+  .health-badge--desconto{
+    background: rgba(245,158,11,.10);
+    color: #B45309;
+    border-color: rgba(245,158,11,.22);
+  }
+
+  .health-matriz{
+    overflow-x: auto;
+  }
+
+  .health-tabela{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 680px;
+  }
+
+  .health-tabela thead th{
+    text-align: left;
+    font-size: 12px;
+    color: var(--hc-muted);
+    font-weight: 900;
+    padding: 12px 12px;
+    background: #F8FAFC;
+    border-top: 1px solid var(--hc-border);
+    border-bottom: 1px solid var(--hc-border);
+  }
+
+  .health-tabela thead th:first-child{
+    border-left: 1px solid var(--hc-border);
+    border-top-left-radius: 12px;
+  }
+
+  .health-tabela thead th:last-child{
+    border-right: 1px solid var(--hc-border);
+    border-top-right-radius: 12px;
+  }
+
+  .health-tabela tbody td{
+    padding: 12px 12px;
+    border-bottom: 1px solid var(--hc-border);
+    font-size: 14px;
+    color: var(--hc-text);
+    background: #fff;
+    vertical-align: middle;
+  }
+
+  .health-tabela tbody tr td:first-child{
+    border-left: 1px solid var(--hc-border);
+  }
+
+  .health-tabela tbody tr td:last-child{
+    border-right: 1px solid var(--hc-border);
+  }
+
+  .health-tabela tbody tr:last-child td:first-child{
+    border-bottom-left-radius: 12px;
+  }
+
+  .health-tabela tbody tr:last-child td:last-child{
+    border-bottom-right-radius: 12px;
+  }
+
+  .health-rodape-updates{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .health-update{
+    border-left: 4px solid var(--hc-blue);
+    background: #F8FAFC;
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .health-update__texto{
+    margin: 0;
+    font-size: 14px;
+    color: var(--hc-text);
+    font-weight: 700;
+  }
+
+  .health-update__meta{
+    margin: 6px 0 0 0;
+    font-size: 12px;
+    color: var(--hc-muted);
+    font-weight: 700;
+  }
+
+  @media (max-width: 1400px){
+    .health-check-kpis{
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 1100px){
+    .health-check-kpis{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .health-check-grid{
+      grid-template-columns: 1fr;
+    }
+
+    .health-resumo-grid{
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 680px){
+    .health-check-kpis{
+      grid-template-columns: 1fr;
+    }
+
+    .health-check-header{
+      padding: 18px;
+    }
+
+    .health-check-header__titulo h1{
+      font-size: 22px;
+    }
+
+    .health-card__header,
+    .health-card__body{
+      padding-left: 14px;
+      padding-right: 14px;
+    }
+
+    .health-kpi__valor{
+      font-size: 28px;
+    }
+
+    .health-mini__valor{
+      font-size: 22px;
+    }
+  }
+</style>
+
+<div class="health-check-page">
+
+  <section class="health-check-header">
+    <div class="health-check-header__titulo">
+      <h1>{{ dados.titulo_painel or "Health Check Comercial" }}</h1>
+      <p>
+        Painel de acompanhamento comercial para contratos, aditivos, cancelamentos,
+        perdas, descontos, segmentos e desempenho por vendedor.
+      </p>
+    </div>
+
+    <div class="health-check-header__meta">
+      <div class="health-check-meta-box">
+        <div class="health-check-meta-box__label">Última atualização</div>
+        <div class="health-check-meta-box__value">
+          {{ dados.atualizado_em or "—" }}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="health-check-kpis">
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Novos contratos</div>
+        <div class="health-kpi__icone">📄</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.novos_contratos if dados.kpis.novos_contratos is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.novos_contratos_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Aditivos</div>
+        <div class="health-kpi__icone">➕</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.aditivos if dados.kpis.aditivos is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.aditivos_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Cancelamentos</div>
+        <div class="health-kpi__icone">❌</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.cancelamentos if dados.kpis.cancelamentos is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.cancelamentos_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Clientes atendidos</div>
+        <div class="health-kpi__icone">🏢</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.clientes_atendidos if dados.kpis.clientes_atendidos is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.clientes_atendidos_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Segmentos atendidos</div>
+        <div class="health-kpi__icone">🧩</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.segmentos_atendidos if dados.kpis.segmentos_atendidos is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.segmentos_atendidos_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Perdas por preço</div>
+        <div class="health-kpi__icone">💸</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.perdas_preco if dados.kpis.perdas_preco is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.perdas_preco_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Perdas por concorrente</div>
+        <div class="health-kpi__icone">⚔️</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.perdas_concorrente if dados.kpis.perdas_concorrente is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.perdas_concorrente_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Perdas por falta de painel</div>
+        <div class="health-kpi__icone">📍</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.perdas_falta_painel if dados.kpis.perdas_falta_painel is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.perdas_falta_painel_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Descontos no mês</div>
+        <div class="health-kpi__icone">🏷️</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.descontos_mes if dados.kpis.descontos_mes is not none else "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.descontos_mes_delta or "" }}</div>
+    </article>
+
+    <article class="health-kpi">
+      <div class="health-kpi__topo">
+        <div class="health-kpi__titulo">Média de desconto</div>
+        <div class="health-kpi__icone">📉</div>
+      </div>
+      <div class="health-kpi__valor">
+        {{ dados.kpis.media_desconto or "—" }}
+      </div>
+      <div class="health-kpi__delta">{{ dados.kpis.media_desconto_delta or "" }}</div>
+    </article>
+  </section>
+
+  <section class="health-check-grid">
+    <div class="health-check-coluna">
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Resumo financeiro comercial</h2>
+            <p class="health-card__subtitulo">
+              Espaço para receita total, receita perdida e ticket médio.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          <div class="health-resumo-grid">
+            <div class="health-mini">
+              <div class="health-mini__label">Receita total</div>
+              <div class="health-mini__valor">{{ dados.resumo_financeiro.receita_total or "—" }}</div>
+              <div class="health-mini__delta">{{ dados.resumo_financeiro.receita_total_delta or "" }}</div>
+            </div>
+
+            <div class="health-mini">
+              <div class="health-mini__label">Receita perdida</div>
+              <div class="health-mini__valor">{{ dados.resumo_financeiro.receita_perdida or "—" }}</div>
+              <div class="health-mini__delta">{{ dados.resumo_financeiro.receita_perdida_delta or "" }}</div>
+            </div>
+
+            <div class="health-mini">
+              <div class="health-mini__label">Ticket médio</div>
+              <div class="health-mini__valor">{{ dados.resumo_financeiro.ticket_medio or "—" }}</div>
+              <div class="health-mini__delta">{{ dados.resumo_financeiro.ticket_medio_delta or "" }}</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Segmentos que mais fecham novos contratos</h2>
+            <p class="health-card__subtitulo">
+              Mostra quais segmentos mais convertem contratos novos.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          {% if dados.segmentos_novos %}
+            <div class="health-lista">
+              {% for item in dados.segmentos_novos %}
+                <div class="health-item">
+                  <div class="health-item__esquerda">
+                    <p class="health-item__titulo">{{ item.nome or "—" }}</p>
+                    <p class="health-item__subtitulo">{{ item.descricao or "" }}</p>
+                  </div>
+                  <div class="health-item__direita">
+                    <span class="health-badge health-badge--novo">{{ item.valor or "—" }}</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="health-lista-vazia">Nenhum segmento carregado.</div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Segmentos que mais fecham aditivos</h2>
+            <p class="health-card__subtitulo">
+              Mostra quais segmentos mais ampliam contrato ou renovam.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          {% if dados.segmentos_aditivos %}
+            <div class="health-lista">
+              {% for item in dados.segmentos_aditivos %}
+                <div class="health-item">
+                  <div class="health-item__esquerda">
+                    <p class="health-item__titulo">{{ item.nome or "—" }}</p>
+                    <p class="health-item__subtitulo">{{ item.descricao or "" }}</p>
+                  </div>
+                  <div class="health-item__direita">
+                    <span class="health-badge health-badge--aditivo">{{ item.valor or "—" }}</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="health-lista-vazia">Nenhum segmento carregado.</div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Segmentos com mais cancelamentos</h2>
+            <p class="health-card__subtitulo">
+              Mostra os segmentos com maior volume de cancelamento.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          {% if dados.segmentos_cancelamentos %}
+            <div class="health-lista">
+              {% for item in dados.segmentos_cancelamentos %}
+                <div class="health-item">
+                  <div class="health-item__esquerda">
+                    <p class="health-item__titulo">{{ item.nome or "—" }}</p>
+                    <p class="health-item__subtitulo">{{ item.descricao or "" }}</p>
+                  </div>
+                  <div class="health-item__direita">
+                    <span class="health-badge health-badge--cancelamento">{{ item.valor or "—" }}</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="health-lista-vazia">Nenhum segmento carregado.</div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Desconto por segmento</h2>
+            <p class="health-card__subtitulo">
+              Quantidade de descontos e média de desconto por segmento.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          {% if dados.desconto_por_segmento %}
+            <div class="health-matriz">
+              <table class="health-tabela">
+                <thead>
+                  <tr>
+                    <th>Segmento</th>
+                    <th>Qtd. descontos</th>
+                    <th>Média desconto</th>
+                    <th>Observação</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in dados.desconto_por_segmento %}
+                    <tr>
+                      <td>{{ item.segmento or "—" }}</td>
+                      <td>{{ item.quantidade if item.quantidade is not none else "—" }}</td>
+                      <td>{{ item.media or "—" }}</td>
+                      <td>{{ item.observacao or "" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="health-lista-vazia">Nenhum dado de desconto por segmento carregado.</div>
+          {% endif %}
+        </div>
+      </article>
+
+    </div>
+
+    <div class="health-check-coluna">
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Vendedores que mais fecham por segmento</h2>
+            <p class="health-card__subtitulo">
+              Relação entre vendedor, segmento e volume de fechamento.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          {% if dados.vendedores_por_segmento %}
+            <div class="health-lista">
+              {% for item in dados.vendedores_por_segmento %}
+                <div class="health-item">
+                  <div class="health-item__esquerda">
+                    <p class="health-item__titulo">{{ item.vendedor or "—" }}</p>
+                    <p class="health-item__subtitulo">
+                      Segmento: {{ item.segmento or "—" }}
+                    </p>
+                  </div>
+                  <div class="health-item__direita">
+                    <span class="health-badge">{{ item.quantidade if item.quantidade is not none else "—" }}</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="health-lista-vazia">Nenhum vendedor carregado.</div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Vendedores que mais dão desconto</h2>
+            <p class="health-card__subtitulo">
+              Ranking de vendedores com maior incidência de desconto.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          {% if dados.vendedores_mais_desconto %}
+            <div class="health-lista">
+              {% for item in dados.vendedores_mais_desconto %}
+                <div class="health-item">
+                  <div class="health-item__esquerda">
+                    <p class="health-item__titulo">{{ item.vendedor or "—" }}</p>
+                    <p class="health-item__subtitulo">
+                      Segmento: {{ item.segmento or "—" }}
+                    </p>
+                  </div>
+                  <div class="health-item__direita">
+                    <span class="health-badge health-badge--desconto">
+                      {{ item.media_desconto or "—" }}
+                    </span>
+                    <span class="health-badge">
+                      {{ item.quantidade if item.quantidade is not none else "—" }}
+                    </span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="health-lista-vazia">Nenhum vendedor carregado.</div>
+          {% endif %}
+        </div>
+      </article>
+
+      <article class="health-card">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">Ideias extras para esse painel</h2>
+            <p class="health-card__subtitulo">
+              Métricas que fazem sentido de verdade para operação comercial.
+            </p>
+          </div>
+        </div>
+        <div class="health-card__body">
+          <div class="health-lista">
+            <div class="health-item">
+              <div class="health-item__esquerda">
+                <p class="health-item__titulo">Taxa de conversão por etapa</p>
+                <p class="health-item__subtitulo">Quantos atendimentos viram proposta, quantas propostas viram contrato.</p>
+              </div>
+            </div>
+
+            <div class="health-item">
+              <div class="health-item__esquerda">
+                <p class="health-item__titulo">Tempo médio de fechamento</p>
+                <p class="health-item__subtitulo">Dias entre primeiro atendimento e fechamento do contrato.</p>
+              </div>
+            </div>
+
+            <div class="health-item">
+              <div class="health-item__esquerda">
+                <p class="health-item__titulo">Taxa de perda por região</p>
+                <p class="health-item__subtitulo">Ajuda a ver onde falta inventário, preço ou competitividade.</p>
+              </div>
+            </div>
+
+            <div class="health-item">
+              <div class="health-item__esquerda">
+                <p class="health-item__titulo">Receita potencial perdida</p>
+                <p class="health-item__subtitulo">Não só quantidade perdida, mas quanto de dinheiro deixou de entrar.</p>
+              </div>
+            </div>
+
+            <div class="health-item">
+              <div class="health-item__esquerda">
+                <p class="health-item__titulo">Desconto médio por vendedor e por segmento</p>
+                <p class="health-item__subtitulo">Importante para saber quem fecha bem e quem fecha barato demais.</p>
+              </div>
+            </div>
+
+            <div class="health-item">
+              <div class="health-item__esquerda">
+                <p class="health-item__titulo">Mix entre novo, aditivo e cancelamento</p>
+                <p class="health-item__subtitulo">Mostra se crescimento é orgânico, expansão de base ou só reposição.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{
+    "mes_snapshot_mais_recente": "2026-02-01",
+    "iteracoes_finais": 896,
+    "melhores_iteracoes": [
+        519,
+        535,
+        1186,
+        944,
+        622,
+        1027,
+        485,
+        896,
+        1190
+    ],
+    "metricas_walk_forward": {
+        "auc_roc": 0.9282033759835869,
+        "auc_pr": 0.6904181324238914,
+        "log_loss": 0.2246658932330527,
+        "brier_score": 0.06679986243445887,
+        "ks": 0.7017772831418045,
+        "precision_threshold_0_5": 0.6095210280373832,
+        "recall_threshold_0_5": 0.674313408723748,
+        "true_negative": 21807,
+        "false_positive": 1337,
+        "false_negative": 1008,
+        "true_positive": 2087,
+        "taxa_positivos_real": 0.11795419032737528,
+        "taxa_positivos_predita_media": 0.1808428927119225
+    },
+    "metricas_teste_final_oot": {
+        "auc_roc": 0.9696024582470018,
+        "auc_pr": 0.7869820006064276,
+        "log_loss": 0.1507095652534567,
+        "brier_score": 0.04249527717812709,
+        "ks": 0.8249541324555635,
+        "precision_threshold_0_5": 0.5897920604914934,
+        "recall_threshold_0_5": 0.814621409921671,
+        "true_negative": 4317,
+        "false_positive": 217,
+        "false_negative": 71,
+        "true_positive": 312,
+        "taxa_positivos_real": 0.07789302420174904,
+        "taxa_positivos_predita_media": 0.1429450555686552
+    },
+    "caminho_score_historico": "/opt/airflow/Dados/Euromidia/MachineLearning/score_cliente_historico.csv",
+    "caminho_score_atual": "/opt/airflow/Dados/Euromidia/MachineLearning/score_cliente_atual.csv",
+    "caminho_tabela_final": "/opt/airflow/Dados/Euromidia/MachineLearning/score_cliente_tabela_final.csv"
+}

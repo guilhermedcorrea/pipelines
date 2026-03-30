@@ -1,0 +1,513 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Permissão de Desconto | Euromídia{% endblock %}
+
+{% block content %}
+  <div class="card">
+
+    <style>
+      .hdr{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        justify-content:space-between;
+        flex-wrap:wrap;
+      }
+
+      .hdr-left{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      .count-pill{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        padding:6px 10px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:#fff;
+        font-weight:800;
+        color: var(--euro-blue);
+        user-select:none;
+        white-space:nowrap;
+      }
+
+      .form-card{
+        margin-top:14px;
+        border:1px solid var(--border);
+        border-radius:14px;
+        overflow:hidden;
+        background:#fff;
+      }
+
+      .form-card-header{
+        padding:12px 14px;
+        border-bottom:1px solid var(--border);
+        background: rgba(0,40,132,.03);
+        font-weight:900;
+        color: var(--euro-blue);
+      }
+
+      .form-card-body{
+        padding:14px;
+      }
+
+      .form-grid{
+        display:grid;
+        grid-template-columns: 1.4fr .8fr auto;
+        gap:12px;
+        align-items:end;
+      }
+
+      .field{
+        min-width:0;
+      }
+
+      .field label{
+        display:block;
+        margin-bottom:6px;
+        font-weight:900;
+        color:var(--text);
+      }
+
+      .field select,
+      .field input{
+        width:100%;
+      }
+
+      .hint{
+        margin-top:10px;
+        color:var(--muted);
+        font-size:12px;
+        font-weight:800;
+      }
+
+      .filters{
+        margin-top:14px;
+        display:flex;
+        gap:10px;
+        align-items:flex-end;
+        flex-wrap:wrap;
+      }
+
+      .filters .field{
+        min-width:280px;
+        flex:1;
+      }
+
+      .btn-pill{
+        height:40px;
+        padding:0 14px;
+        border-radius:12px;
+        border:1px solid var(--border);
+        background:#fff;
+        font-weight:900;
+        color:#0b1a3a;
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        text-decoration:none;
+        cursor:pointer;
+        user-select:none;
+        box-shadow: 0 8px 18px rgba(2,6,23,.06);
+        transition: .12s ease;
+      }
+
+      .btn-pill:hover{
+        transform: translateY(-1px);
+      }
+
+      .btn-pill:active{
+        transform: translateY(0px);
+      }
+
+      .btn-pill.danger{
+        border-color: rgba(239,68,68,.35);
+        background: rgba(239,68,68,.08);
+        color:#991b1b;
+      }
+
+      .flash-wrap{
+        margin-top:14px;
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+      }
+
+      .flash-item{
+        padding:12px 14px;
+        border-radius:12px;
+        border:1px solid var(--border);
+        font-weight:800;
+        background:#fff;
+      }
+
+      .flash-item.success{
+        border-color: rgba(34,197,94,.28);
+        background: rgba(34,197,94,.08);
+        color:#166534;
+      }
+
+      .flash-item.warning{
+        border-color: rgba(245,158,11,.28);
+        background: rgba(245,158,11,.10);
+        color:#92400e;
+      }
+
+      .flash-item.danger,
+      .flash-item.error{
+        border-color: rgba(239,68,68,.28);
+        background: rgba(239,68,68,.08);
+        color:#991b1b;
+      }
+
+      .flash-item.info,
+      .flash-item.message{
+        border-color: rgba(59,130,246,.22);
+        background: rgba(59,130,246,.07);
+        color:#1d4ed8;
+      }
+
+      .list-wrap{
+        margin-top:14px;
+        border:1px solid var(--border);
+        border-radius:14px;
+        overflow:hidden;
+        background:#fff;
+      }
+
+      .list-head{
+        display:grid;
+        grid-template-columns: 120px 1.2fr 1fr 190px 1fr;
+        gap:0;
+        padding:12px 14px;
+        border-bottom:1px solid var(--border);
+        background: rgba(0,40,132,.03);
+        font-weight:900;
+        color: var(--euro-blue);
+        align-items:center;
+      }
+
+      .row{
+        display:grid;
+        grid-template-columns: 120px 1.2fr 1fr 190px 1fr;
+        gap:0;
+        padding:14px 14px;
+        border-bottom:1px solid var(--border);
+        align-items:center;
+        background:#fff;
+      }
+
+      .row:hover{
+        background: rgba(0,40,132,.04);
+      }
+
+      .row:last-child{
+        border-bottom:0;
+      }
+
+      .id-pill{
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 12px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:#fff;
+        font-weight:900;
+        font-size:13px;
+        line-height:1;
+        white-space:nowrap;
+        user-select:none;
+      }
+
+      .id-pill .dot{
+        width:9px;
+        height:9px;
+        border-radius:999px;
+        background: rgba(0,40,132,.45);
+        box-shadow: 0 0 0 2px rgba(255,255,255,.9);
+      }
+
+      .ellipsis{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .muted{
+        color:var(--muted);
+      }
+
+      .data-col{
+        font-weight:900;
+        color:var(--text);
+      }
+
+      .valor-desconto{
+        font-weight:900;
+        color:var(--text);
+      }
+
+      .pager{
+        padding:12px 14px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      @media (max-width: 1180px){
+        .list-head,
+        .row{
+          grid-template-columns: 120px 1fr 1fr 190px;
+        }
+
+        .hide-lg{
+          display:none;
+        }
+      }
+
+      @media (max-width: 980px){
+        .form-grid{
+          grid-template-columns: 1fr;
+        }
+
+        .list-head,
+        .row{
+          grid-template-columns: 110px 1fr 180px;
+        }
+
+        .hide-md{
+          display:none;
+        }
+      }
+
+      @media (max-width: 640px){
+        .filters .field{
+          min-width:100%;
+        }
+
+        .list-head,
+        .row{
+          grid-template-columns: 1fr;
+          gap:8px;
+        }
+
+        .hide-sm{
+          display:none;
+        }
+      }
+    </style>
+
+    <div class="hdr">
+      <div class="hdr-left">
+        <h1 class="page-title" style="margin:0;">Permissão de Desconto</h1>
+        <span class="count-pill">☰ {{ paginacao.total if paginacao.total is not none else 0 }}</span>
+      </div>
+    </div>
+
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+      {% if mensagens %}
+        <div class="flash-wrap">
+          {% for categoria, mensagem in mensagens %}
+            <div class="flash-item {{ categoria or 'info' }}">
+              {{ mensagem }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="form-card">
+      <div class="form-card-header">
+        Nova permissão
+      </div>
+
+      <div class="form-card-body">
+        <form method="POST" action="{{ url_for('admin.permissao_desconto', page=paginacao.page, q=filtros.q) }}">
+          {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% endif %}
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="id_dim_usuarios">Usuário</label>
+              <select id="id_dim_usuarios" name="id_dim_usuarios" required>
+                <option value="">Selecione um usuário desta página</option>
+                {% for u in usuarios %}
+                  <option value="{{ u.IDDimUsuarios }}">
+                    {{ u.NomeUsuario or ("Usuário #" ~ u.IDDimUsuarios) }}
+                    {% if u.Email %}
+                      — {{ u.Email }}
+                    {% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="desconto_maximo">Desconto máximo (%)</label>
+              <input
+                id="desconto_maximo"
+                name="desconto_maximo"
+                type="text"
+                inputmode="decimal"
+                placeholder="Ex.: 12 ou 12,50"
+                required
+              >
+            </div>
+
+            <div class="field">
+              <button
+                class="btn btn-primary"
+                type="submit"
+                style="height:40px;display:inline-flex;align-items:center;gap:8px;"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+
+          <div class="hint">
+            O valor será gravado como float. Exemplo: 12 vira 12,00.
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <form method="GET" action="{{ url_for('admin.permissao_desconto') }}">
+      <div class="filters">
+        <div class="field">
+          <label>Buscar usuário</label>
+          <input
+            name="q"
+            type="text"
+            value="{{ filtros.q }}"
+            placeholder="ID, nome ou e-mail..."
+            autocomplete="off"
+          >
+        </div>
+
+        <button class="btn btn-primary" type="submit" style="height:40px;display:inline-flex;align-items:center;gap:8px;">
+          ⛭ Filtrar
+        </button>
+
+        <a
+          class="btn-pill danger"
+          href="{{ url_for('admin.permissao_desconto') }}"
+          title="Limpa busca e volta para a lista completa"
+        >
+          ⌁ Limpar
+        </a>
+      </div>
+    </form>
+
+    <div class="list-wrap">
+      <div class="list-head">
+        <div>IDUsuário</div>
+        <div>Nome</div>
+        <div class="hide-md">Email</div>
+        <div>Desconto Permitido</div>
+        <div class="hide-lg">Usuário que liberou desconto</div>
+      </div>
+
+      {% if usuarios and usuarios|length > 0 %}
+        {% for u in usuarios %}
+          <div class="row">
+            <div>
+              <span class="id-pill">
+                <span class="dot"></span>
+                #{{ u.IDDimUsuarios }}
+              </span>
+            </div>
+
+            <div class="ellipsis data-col">
+              {{ u.NomeUsuario or "—" }}
+            </div>
+
+            <div class="hide-md ellipsis">
+              {{ u.Email or "—" }}
+            </div>
+
+            <div class="valor-desconto">
+              {% if u.DescontoPermitido is defined and u.DescontoPermitido is not none %}
+                {{ "{:,.2f}".format(u.DescontoPermitido).replace(",", "X").replace(".", ",").replace("X", ".") }}%
+              {% else %}
+                —
+              {% endif %}
+            </div>
+
+            <div class="hide-lg ellipsis">
+              {% if u.UsuarioAprovadoNome is defined and u.UsuarioAprovadoNome %}
+                {{ u.UsuarioAprovadoNome }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div style="padding:14px;" class="muted">
+          Nenhum usuário encontrado.
+        </div>
+      {% endif %}
+
+      <div class="pager">
+        <div class="muted" style="font-weight:800;">
+          Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }}
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;">
+          {% set p = paginacao.page %}
+          {% set tp = paginacao.total_pages %}
+
+          <a
+            class="btn btn-secondary"
+            style="text-decoration:none;padding:8px 10px;"
+            href="{{ url_for('admin.permissao_desconto', page=1, q=filtros.q) }}"
+          >
+            «
+          </a>
+
+          <a
+            class="btn btn-secondary"
+            style="text-decoration:none;padding:8px 10px;"
+            href="{{ url_for('admin.permissao_desconto', page=(p-1 if p > 1 else 1), q=filtros.q) }}"
+          >
+            ‹
+          </a>
+
+          <span style="font-weight:900;color:var(--text);padding:0 10px;">
+            {{ p }} / {{ tp }}
+          </span>
+
+          <a
+            class="btn btn-secondary"
+            style="text-decoration:none;padding:8px 10px;"
+            href="{{ url_for('admin.permissao_desconto', page=(p+1 if p < tp else tp), q=filtros.q) }}"
+          >
+            ›
+          </a>
+
+          <a
+            class="btn btn-secondary"
+            style="text-decoration:none;padding:8px 10px;"
+            href="{{ url_for('admin.permissao_desconto', page=tp, q=filtros.q) }}"
+          >
+            »
+          </a>
+        </div>
+
+        <div class="muted" style="display:flex;align-items:center;gap:10px;font-weight:900;">
+          <span>{{ paginacao.per_page }} por página</span>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from ..models.admin_models import FatoMovimentoFinanceiroEmpresas, DimEmpresaProprietaria,DimProdutoAuvo
 from datetime import datetime, date, timedelta
 from sqlalchemy import func, case
-from flask_login import login_required
+from flask_login import login_required, current_user
 from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
 
@@ -2571,3 +2571,278 @@ def ativos_matriz_composicao():
         "matriz": matriz,
         "composicao": composicao,
     })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _obter_id_usuario_logado_admin() -> int | None:
+    """Eu tento descobrir o ID do usuário logado de forma defensiva."""
+    candidatos = [
+        getattr(current_user, "IDDimUsuarios", None),
+        getattr(current_user, "id", None),
+    ]
+
+    for valor in candidatos:
+        if valor is None or valor == "":
+            continue
+        try:
+            return int(valor)
+        except Exception:
+            continue
+
+    return None
+
+
+def _normalizar_float_brasil(valor_texto: str) -> float:
+    """Eu converto texto como 12, 12,5 ou 12.5 para float."""
+    texto = (valor_texto or "").strip().replace("%", "").strip()
+
+    if not texto:
+        raise ValueError("Informe o desconto máximo.")
+
+    if "," in texto and "." in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    else:
+        texto = texto.replace(",", ".")
+
+    valor = float(texto)
+
+    if valor < 0:
+        raise ValueError("O desconto máximo não pode ser negativo.")
+
+    return valor
+
+
+
+
+
+@admin.route("/permissao-desconto", methods=["GET", "POST"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("80 per minute", methods=["GET", "POST"])
+def permissao_desconto():
+    q = (request.args.get("q") or "").strip()
+
+    try:
+        page = int(request.args.get("page") or "1")
+    except Exception:
+        page = 1
+
+    per_page = 10
+    page = max(1, page)
+    offset = (page - 1) * per_page
+
+    filtros_sql = [
+        "u.BitAtivo = 1"
+    ]
+    params = {}
+
+    if q:
+        filtros_sql.append("""
+            (
+                CAST(u.IDDimUsuarios AS varchar(50)) LIKE :q_like
+                OR ISNULL(u.NomeUsuario, '') LIKE :q_like
+                OR ISNULL(u.Email, '') LIKE :q_like
+            )
+        """)
+        params["q_like"] = f"%{q}%"
+
+    where_sql = " AND ".join([f"({x})" for x in filtros_sql]) if filtros_sql else "1=1"
+
+    if request.method == "POST":
+        id_usuario_logado = _obter_id_usuario_logado_admin()
+
+        try:
+            id_dim_usuarios = int(request.form.get("id_dim_usuarios") or 0)
+        except Exception:
+            id_dim_usuarios = 0
+
+        desconto_maximo_raw = request.form.get("desconto_maximo") or ""
+
+        try:
+            if not id_usuario_logado:
+                raise ValueError("Não foi possível identificar o usuário logado.")
+
+            if id_dim_usuarios <= 0:
+                raise ValueError("Selecione um usuário.")
+
+            desconto_maximo = _normalizar_float_brasil(desconto_maximo_raw)
+
+            usuario_existe = db.session.execute(
+                text("""
+                    SELECT TOP 1
+                        u.IDDimUsuarios,
+                        u.NomeUsuario
+                    FROM [Integracao].[Silver].[DimUsuarios] u
+                    WHERE u.IDDimUsuarios = :id_dim_usuarios
+                      AND ISNULL(u.BitAtivo, 0) = 1
+                """),
+                {
+                    "id_dim_usuarios": id_dim_usuarios,
+                },
+            ).mappings().first()
+
+            if not usuario_existe:
+                raise ValueError("Usuário não encontrado ou inativo.")
+
+            db.session.execute(
+                text("""
+                    UPDATE [Kanban].[Silver].[DimKanbanPermissaoDesconto]
+                    SET
+                        BitAtivo = 0,
+                        DataAtualizado = GETDATE(),
+                        IDUsuarioAprovado = :id_usuario_aprovado
+                    WHERE IDDimUsuarios = :id_dim_usuarios
+                      AND ISNULL(BitAtivo, 0) = 1
+                """),
+                {
+                    "id_dim_usuarios": id_dim_usuarios,
+                    "id_usuario_aprovado": id_usuario_logado,
+                },
+            )
+
+            db.session.execute(
+                text("""
+                    INSERT INTO [Kanban].[Silver].[DimKanbanPermissaoDesconto]
+                    (
+                        IDDimUsuarios,
+                        DescontoMaximo,
+                        DataAtualizado,
+                        IDUsuarioAprovado,
+                        BitAtivo
+                    )
+                    VALUES
+                    (
+                        :id_dim_usuarios,
+                        :desconto_maximo,
+                        GETDATE(),
+                        :id_usuario_aprovado,
+                        1
+                    )
+                """),
+                {
+                    "id_dim_usuarios": id_dim_usuarios,
+                    "desconto_maximo": desconto_maximo,
+                    "id_usuario_aprovado": id_usuario_logado,
+                },
+            )
+
+            db.session.commit()
+            flash("Permissão de desconto salva com sucesso.", "success")
+
+            return redirect(
+                url_for(
+                    "admin.permissao_desconto",
+                    page=page,
+                    q=q,
+                )
+            )
+
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception("Erro ao salvar permissão de desconto: %s", e)
+            flash(f"Erro ao salvar permissão de desconto: {e}", "danger")
+
+    sql_total = text(f"""
+        SELECT COUNT(1) AS total
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE {where_sql}
+    """)
+
+    row_total = db.session.execute(sql_total, params).fetchone()
+    total = int(row_total[0] or 0) if row_total else 0
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    if page > total_pages:
+        page = total_pages
+        offset = (page - 1) * per_page
+
+    params_lista = dict(params)
+    params_lista["offset"] = offset
+    params_lista["limit"] = per_page
+
+    sql_lista = text(f"""
+        SELECT
+            u.IDDimUsuarios,
+            u.NomeUsuario,
+            u.Email,
+            pd.DescontoMaximo AS DescontoPermitido,
+            ua.NomeUsuario AS UsuarioAprovadoNome
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        OUTER APPLY (
+            SELECT TOP 1
+                p.DescontoMaximo,
+                p.IDUsuarioAprovado,
+                p.DataAtualizado
+            FROM [Kanban].[Silver].[DimKanbanPermissaoDesconto] p
+            WHERE p.IDDimUsuarios = u.IDDimUsuarios
+              AND ISNULL(p.BitAtivo, 0) = 1
+            ORDER BY
+                ISNULL(p.DataAtualizado, '1900-01-01') DESC,
+                p.IDDimKanbanPermissaoDesconto DESC
+        ) pd
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] ua
+            ON ua.IDDimUsuarios = pd.IDUsuarioAprovado
+        WHERE {where_sql}
+        ORDER BY
+            u.NomeUsuario ASC,
+            u.IDDimUsuarios ASC
+        OFFSET :offset ROWS
+        FETCH NEXT :limit ROWS ONLY
+    """)
+
+    rows = db.session.execute(sql_lista, params_lista).mappings().all()
+
+    usuarios = []
+    for r in rows:
+        usuarios.append(
+            {
+                "IDDimUsuarios": r.get("IDDimUsuarios"),
+                "NomeUsuario": (r.get("NomeUsuario") or "").strip(),
+                "Email": (r.get("Email") or "").strip(),
+                "DescontoPermitido": r.get("DescontoPermitido"),
+                "UsuarioAprovadoNome": (r.get("UsuarioAprovadoNome") or "").strip(),
+            }
+        )
+
+    inicio = 0 if total == 0 else offset + 1
+    fim = min(offset + per_page, total)
+
+    return render_template(
+        "admin/permissao_desconto.html",
+        usuarios=usuarios,
+        filtros={
+            "q": q,
+            "per_page": per_page,
+        },
+        paginacao={
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "inicio": inicio,
+            "fim": fim,
+        },
+    )

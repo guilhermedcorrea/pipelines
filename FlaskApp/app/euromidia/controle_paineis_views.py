@@ -12038,16 +12038,7 @@ def api_ocupacao_reserva_dados_modal():
         "cota": cota
     }
 
-    # =========================================================
-    # ✅ AJUSTE AQUI
-    # - Seu SELECT original tentava filtrar por CodPonto em tabelas
-    #   que NÃO têm CodPonto no header (FatoControleContratosEuromidia).
-    # - Então:
-    #   1) Buscamos contratos pelos ITENS (que têm CodPonto) e trazemos o header
-    #      para pegar RazaoSocial corretamente.
-    #   2) Mantemos fallback para tabelas antigas.
-    #   3) Normalizamos strings (LTRIM/RTRIM) para evitar lixo e duplicidade.
-    # =========================================================
+ 
 
     sqls_contratos = [
         # ✅ 1) PRIORIDADE: pelo ITENS (tem CodPonto) e JOIN no HEADER pra pegar RazaoSocial correta

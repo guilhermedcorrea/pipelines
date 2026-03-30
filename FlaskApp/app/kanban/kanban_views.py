@@ -4124,7 +4124,6 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
 
 
 
-
 def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     print(f"[KANBAN][_obter_card_detalhe_payload] INICIO id_card={id_card}")
     current_app.logger.info("KANBAN: _obter_card_detalhe_payload iniciado. id_card=%s", id_card)
@@ -4164,9 +4163,13 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             e.CNPJ AS EmpresaCNPJ,
             e.CNAE AS EmpresaCNAE,
             cn.Classe AS EmpresaClasse,
-            cn.Setor AS EmpresaSetor
+            cn.Setor AS EmpresaSetor,
+            rp.QuantidadePaineisVinculados,
+            rp.QuantidadePaineisUnicos,
+            rp.ValorTotalPaineis
         FROM {TABELA_CARD} c
         {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+        {_sql_join_resumo_paineis_card('c', 'rp')}
         WHERE c.IDFatoKanbanCard = :id_card
           AND c.Ativo = 1;
     """)
@@ -4177,6 +4180,9 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         abort(404, "Card não encontrado")
 
     card_dict = dict(card)
+    card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
+    card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
+    card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
 
     valor_versao_bruta = card_dict.pop("VersaoConcorrencia", None)
     valor_versao_hex_sql = card_dict.pop("VersaoConcorrenciaHexSql", None)
@@ -4308,6 +4314,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     )
 
     return retorno
+
 
 
 
@@ -4575,6 +4582,7 @@ def api_kanban_resumo_comercial(id_kanban: int):
 
 
 
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/dados", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -4645,6 +4653,9 @@ def api_kanban_dados(id_kanban: int):
                 e.CNAE AS EmpresaCNAE,
                 cn.Classe AS EmpresaClasse,
                 cn.Setor AS EmpresaSetor,
+                rp.QuantidadePaineisVinculados,
+                rp.QuantidadePaineisUnicos,
+                rp.ValorTotalPaineis,
                 ROW_NUMBER() OVER (
                     PARTITION BY c.IDDimKanbanFaseAtual
                     ORDER BY
@@ -4653,6 +4664,7 @@ def api_kanban_dados(id_kanban: int):
                 ) AS RowNumFase
             FROM {TABELA_CARD} c
             {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+            {_sql_join_resumo_paineis_card('c', 'rp')}
             WHERE c.IDDimKanban = :id_kanban
               AND c.Ativo = 1
               {_sql_filtro_status_card_visiveis('c')}
@@ -4674,6 +4686,9 @@ def api_kanban_dados(id_kanban: int):
             EmpresaCNAE,
             EmpresaClasse,
             EmpresaSetor,
+            QuantidadePaineisVinculados,
+            QuantidadePaineisUnicos,
+            ValorTotalPaineis,
             RowNumFase
         FROM CardsOrdenados
         WHERE RowNumFase <= :limite_inicial_por_fase
@@ -4689,28 +4704,37 @@ def api_kanban_dados(id_kanban: int):
     ).mappings().all()
 
     cards_iniciais: list[dict[str, Any]] = []
-    ids_cards_iniciais: list[int] = []
     mapa_carregados_por_fase: dict[int, int] = {}
+    ids_cards_iniciais: list[int] = []
 
     for row in rows_cards_iniciais:
         card_dict = dict(row)
-        card_dict["VersaoConcorrenciaHex"] = _rowversion_para_hex(card_dict.pop("VersaoConcorrencia", None))
-        card_dict.pop("RowNumFase", None)
+
+        card_dict["VersaoConcorrenciaHex"] = _rowversion_para_hex(
+            card_dict.pop("VersaoConcorrencia", None)
+        )
+        card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
+        card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
+        card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
+
+        cards_iniciais.append(card_dict)
 
         id_card = int(card_dict.get("IDFatoKanbanCard") or 0)
-        id_fase = int(card_dict.get("IDDimKanbanFaseAtual") or 0)
-
         if id_card:
             ids_cards_iniciais.append(id_card)
 
-        mapa_carregados_por_fase[id_fase] = mapa_carregados_por_fase.get(id_fase, 0) + 1
-        cards_iniciais.append(card_dict)
+        id_fase_card = int(card_dict.get("IDDimKanbanFaseAtual") or 0)
+        if id_fase_card:
+            mapa_carregados_por_fase[id_fase_card] = int(mapa_carregados_por_fase.get(id_fase_card, 0)) + 1
 
     card_tags_iniciais: list[dict[str, Any]] = []
 
     if ids_cards_iniciais:
-        params_card_tags = {f"id_card_{i}": int(v) for i, v in enumerate(ids_cards_iniciais)}
-        placeholders = ", ".join(f":id_card_{i}" for i in range(len(ids_cards_iniciais)))
+        placeholders = ", ".join(f":id_card_{idx}" for idx, _ in enumerate(ids_cards_iniciais))
+        params_card_tags = {
+            f"id_card_{idx}": int(id_card)
+            for idx, id_card in enumerate(ids_cards_iniciais)
+        }
 
         sql_card_tags = text(f"""
             SELECT
@@ -4821,6 +4845,18 @@ def api_cards_listar_por_fase(id_kanban: int):
     if not id_fase or not _validar_fase_do_kanban(id_kanban, id_fase):
         return jsonify({"ok": False, "msg": "Fase inválida para este kanban"}), 400
 
+    usar_cache = not _request_pede_dado_fresco()
+
+    def _json_resposta(payload: dict, no_cache_http: bool = False):
+        resposta = jsonify(payload)
+
+        if no_cache_http:
+            resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resposta.headers["Pragma"] = "no-cache"
+            resposta.headers["Expires"] = "0"
+
+        return resposta
+
     chave = _chave_cache_json(
         "kanban:api:cards:fase",
         id_emp,
@@ -4830,9 +4866,11 @@ def api_cards_listar_por_fase(id_kanban: int):
         limit,
         _versao_kanban(id_kanban),
     )
-    em_cache = _cache_json_get(chave)
-    if em_cache is not None:
-        return jsonify(em_cache)
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return _json_resposta(em_cache)
 
     sql_total = text(f"""
         SELECT COUNT(1)
@@ -4842,7 +4880,16 @@ def api_cards_listar_por_fase(id_kanban: int):
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')};
     """)
-    total = int(db.session.execute(sql_total, {"id_kanban": id_kanban, "id_fase": id_fase}).scalar() or 0)
+
+    total = int(
+        db.session.execute(
+            sql_total,
+            {
+                "id_kanban": id_kanban,
+                "id_fase": id_fase,
+            },
+        ).scalar() or 0
+    )
 
     sql_cards = text(f"""
         SELECT
@@ -4861,18 +4908,26 @@ def api_cards_listar_por_fase(id_kanban: int):
             e.CNPJ AS EmpresaCNPJ,
             e.CNAE AS EmpresaCNAE,
             cn.Classe AS EmpresaClasse,
-            cn.Setor AS EmpresaSetor
+            cn.Setor AS EmpresaSetor,
+            rp.QuantidadePaineisVinculados,
+            rp.QuantidadePaineisUnicos,
+            rp.ValorTotalPaineis
         FROM {TABELA_CARD} c
         {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+        {_sql_join_resumo_paineis_card('c', 'rp')}
         WHERE c.IDDimKanban = :id_kanban
           AND c.IDDimKanbanFaseAtual = :id_fase
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')}
         ORDER BY
-            CASE WHEN c.AtualizadoEm IS NULL THEN c.CriadoEm ELSE c.AtualizadoEm END DESC,
+            CASE
+                WHEN c.AtualizadoEm IS NULL THEN c.CriadoEm
+                ELSE c.AtualizadoEm
+            END DESC,
             c.IDFatoKanbanCard DESC
         OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY;
     """)
+
     rows_cards = db.session.execute(
         sql_cards,
         {
@@ -4886,7 +4941,12 @@ def api_cards_listar_por_fase(id_kanban: int):
     cards = []
     for row in rows_cards:
         card = dict(row)
-        card["VersaoConcorrenciaHex"] = _rowversion_para_hex(card.pop("VersaoConcorrencia", None))
+        card["VersaoConcorrenciaHex"] = _rowversion_para_hex(
+            card.pop("VersaoConcorrencia", None)
+        )
+        card["QuantidadePaineisVinculados"] = int(card.get("QuantidadePaineisVinculados") or 0)
+        card["QuantidadePaineisUnicos"] = int(card.get("QuantidadePaineisUnicos") or 0)
+        card["ValorTotalPaineis"] = _decimal_para_float(card.get("ValorTotalPaineis"))
         cards.append(card)
 
     payload = {
@@ -4898,8 +4958,12 @@ def api_cards_listar_por_fase(id_kanban: int):
         "total": total,
         "cards": cards,
     }
-    _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
-    return jsonify(payload)
+
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
+
+    return _json_resposta(payload, no_cache_http=not usar_cache)
+
 
 
 
@@ -4915,6 +4979,8 @@ def api_card_detalhe(id_card: int):
     card_escopo = _obter_card_autorizado(id_card)
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
 
+    usar_cache = not _request_pede_dado_fresco()
+
     chave = _chave_cache_json(
         "kanban:api:card:detalhe",
         id_emp,
@@ -4924,9 +4990,10 @@ def api_card_detalhe(id_card: int):
         _versao_card(id_card),
     )
 
-    em_cache = _cache_json_get(chave)
-    if em_cache is not None:
-        return jsonify(em_cache)
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
 
     payload = _obter_card_detalhe_payload(id_card)
 
@@ -4962,9 +5029,10 @@ def api_card_detalhe(id_card: int):
     if "painelFaces" not in payload:
         payload["painelFaces"] = payload.get("painel_faces", []) or []
 
-    _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
-    return jsonify(payload)
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
+    return jsonify(payload)
 
 
 
@@ -6386,7 +6454,6 @@ def api_card_atualizar(id_card: int):
 
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -6718,9 +6785,9 @@ def api_card_mover(id_card: int):
                 "id_fase_de": id_fase_de,
                 "id_fase_para": id_fase_para,
                 "ordem_na_fase": proxima_ordem if has_ordem else None,
-                "card": detalhe["card"],
-                "tags": detalhe["tags"],
-                "notas": detalhe["notas"],
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
             },
         )
 
@@ -6731,7 +6798,9 @@ def api_card_mover(id_card: int):
                 "id_fase_de": id_fase_de,
                 "id_fase_para": id_fase_para,
                 "ordem_na_fase": proxima_ordem if has_ordem else None,
-                "card": detalhe["card"],
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
             }
         )
 
@@ -6739,7 +6808,6 @@ def api_card_mover(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
-
 
 
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/tags", methods=["POST"])
@@ -7639,4 +7707,1070 @@ def api_kanban_inativar(id_kanban: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao inativar kanban id_kanban=%s", id_kanban)
         return jsonify({"ok": False, "msg": f"Erro ao inativar kanban: {str(exc)}"}), 500
+
+
+
+
+
+
+
+
+@kanban_bp.route("/health-check-comercial", methods=["GET"])
+@login_required
+def health_check_comercial():
+    dados = {
+        "titulo_painel": "Health Check Comercial",
+        "atualizado_em": "",
+
+        "kpis": {
+            "novos_contratos": None,
+            "novos_contratos_delta": "",
+
+            "aditivos": None,
+            "aditivos_delta": "",
+
+            "cancelamentos": None,
+            "cancelamentos_delta": "",
+
+            "clientes_atendidos": None,
+            "clientes_atendidos_delta": "",
+
+            "segmentos_atendidos": None,
+            "segmentos_atendidos_delta": "",
+
+            "perdas_preco": None,
+            "perdas_preco_delta": "",
+
+            "perdas_concorrente": None,
+            "perdas_concorrente_delta": "",
+
+            "perdas_falta_painel": None,
+            "perdas_falta_painel_delta": "",
+
+            "descontos_mes": None,
+            "descontos_mes_delta": "",
+
+            "media_desconto": "",
+            "media_desconto_delta": ""
+        },
+
+        "resumo_financeiro": {
+            "receita_total": "",
+            "receita_total_delta": "",
+            "receita_perdida": "",
+            "receita_perdida_delta": "",
+            "ticket_medio": "",
+            "ticket_medio_delta": ""
+        },
+
+        "segmentos_novos": [],
+        "segmentos_aditivos": [],
+        "segmentos_cancelamentos": [],
+        "desconto_por_segmento": [],
+        "vendedores_por_segmento": [],
+        "vendedores_mais_desconto": [],
+        "ultimas_atualizacoes": []
+    }
+
+    return render_template(
+        "kanban/health_check_comercial.html",
+        dados=dados
+    )
+
+
+
+
+
+
+
+
+
+def _sql_join_resumo_paineis_card(alias_card: str, alias_resumo: str = "rp") -> str:
+    return f"""
+        OUTER APPLY (
+            SELECT
+                COUNT(1) AS QuantidadePaineisVinculados,
+                COUNT(DISTINCT TRY_CONVERT(int, pf.IDDimPaineisEuromidia)) AS QuantidadePaineisUnicos,
+                CAST(
+                    SUM(
+                        COALESCE(
+                            TRY_CONVERT(decimal(18, 2), pf.ValorVendaFinal),
+                            TRY_CONVERT(decimal(18, 2), pf.NovoValor),
+                            TRY_CONVERT(decimal(18, 2), pf.ValorTabela),
+                            0
+                        )
+                    )
+                    AS decimal(18, 2)
+                ) AS ValorTotalPaineis
+            FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
+            WHERE pf.IDFatoKanbanCard = {alias_card}.IDFatoKanbanCard
+              AND ISNULL(pf.Ativo, 1) = 1
+        ) {alias_resumo}
+    """
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _executar_sql_mapeado(sql: str, parametros: dict | None = None) -> list[dict]:
+    resultado = db.session.execute(text(sql), parametros or {})
+    return [dict(linha) for linha in resultado.mappings().all()]
+
+
+"""Eu limpo texto de filtro para evitar espaços sobrando."""
+def _normalizar_texto_filtro(texto: str | None) -> str:
+    return " ".join((texto or "").strip().split())
+
+
+"""Eu busco as fases disponíveis para montar o filtro da tela."""
+def _listar_fases_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        f.IDDimKanbanFase AS id_fase,
+        f.NomeFase AS nome_fase
+    FROM [Kanban].[Silver].[DimKanbanFase] f
+    WHERE f.IDEmpresaProprietaria = :id_empresa_proprietaria
+      AND ISNULL(f.Ativo, 1) = 1
+    ORDER BY
+        ISNULL(f.OrdemFase, 999999),
+        f.NomeFase
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {"id_empresa_proprietaria": id_empresa_proprietaria},
+    )
+
+
+"""Eu busco os status existentes para montar o filtro da tela."""
+def _listar_status_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT DISTINCT
+        LTRIM(RTRIM(c.StatusCard)) AS status_card
+    FROM [Kanban].[Silver].[FatoKanbanCard] c
+    WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      AND NULLIF(LTRIM(RTRIM(c.StatusCard)), '') IS NOT NULL
+    ORDER BY
+        LTRIM(RTRIM(c.StatusCard))
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {"id_empresa_proprietaria": id_empresa_proprietaria},
+    )
+
+
+"""Eu busco a lista-resumo dos cards para a tela de entrada do histórico."""
+def _listar_cards_resumo_historico(
+    id_empresa_proprietaria: int,
+    termo_busca: str = "",
+    id_fase: int | None = None,
+    status_card: str | None = None,
+    somente_ativos: bool = True,
+    limite: int = 200,
+) -> list[dict]:
+    limite = max(1, min(int(limite or 200), 500))
+    termo_busca = _normalizar_texto_filtro(termo_busca)
+    termo_like = f"%{termo_busca}%"
+
+    sql = f"""
+    SELECT TOP {limite}
+        c.IDFatoKanbanCard AS id_card,
+        c.Titulo AS titulo,
+        c.Descricao AS descricao,
+        c.CriadoEm AS criado_em,
+        c.AtualizadoEm AS atualizado_em,
+        c.EncerradoEm AS encerrado_em,
+        c.Ativo AS ativo,
+        c.StatusCard AS status_card,
+        c.IDDimKanbanStatusCard AS id_status_card,
+        c.IDEmpresa AS id_empresa_relacionada,
+        c.IDVendedor AS id_vendedor,
+        c.IDVendedorUsuario AS id_vendedor_usuario,
+        c.IDDimUsuarios AS id_usuario_criador,
+        c.IDDimKanban AS id_kanban,
+        c.IDDimKanbanFaseAtual AS id_fase_atual,
+
+        fase.NomeFase AS nome_fase_atual,
+        fase.CorHex AS cor_fase,
+        fase.CorTextoHex AS cor_texto_fase,
+
+        usuario.NomeUsuario AS nome_usuario_responsavel,
+
+        ISNULL(obs.total_observacoes, 0) AS total_observacoes,
+        ISNULL(mov.total_movimentacoes, 0) AS total_movimentacoes,
+        ISNULL(tag.total_tags_ativas, 0) AS total_tags_ativas,
+        ISNULL(item.total_itens_ativos, 0) AS total_itens_ativos,
+        ISNULL(preco.total_alteracoes_preco, 0) AS total_alteracoes_preco,
+        atividade.ultima_atividade_em AS ultima_atividade_em
+
+    FROM [Kanban].[Silver].[FatoKanbanCard] c
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+        ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+       AND fase.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
+       AND usuario.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+
+    OUTER APPLY (
+        SELECT
+            COUNT(1) AS total_observacoes,
+            MAX(o.CriadoEm) AS ultima_observacao_em
+        FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o
+        WHERE o.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND o.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    ) obs
+
+    OUTER APPLY (
+        SELECT
+            COUNT(1) AS total_movimentacoes,
+            MAX(m.MovidoEm) AS ultimo_movimento_em
+        FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m
+        WHERE m.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND m.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    ) mov
+
+    OUTER APPLY (
+        SELECT
+            SUM(CASE WHEN t.RemovidoEm IS NULL THEN 1 ELSE 0 END) AS total_tags_ativas,
+            MAX(COALESCE(t.RemovidoEm, t.AplicadoEm)) AS ultimo_evento_tag_em
+        FROM [Kanban].[Silver].[FatoKanbanCardTag] t
+        WHERE t.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND t.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    ) tag
+
+    OUTER APPLY (
+        SELECT
+            SUM(
+                CASE
+                    WHEN ISNULL(i.Ativo, 1) = 1 AND i.RemovidoEm IS NULL THEN 1
+                    ELSE 0
+                END
+            ) AS total_itens_ativos,
+            MAX(COALESCE(i.RemovidoEm, i.DataAtualizacao, i.CriadoEm)) AS ultimo_item_em
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] i
+        WHERE i.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND i.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    ) item
+
+    OUTER APPLY (
+        SELECT
+            SUM(
+                CASE
+                    WHEN i.NovoValor IS NOT NULL
+                      OR i.PercentualDesconto IS NOT NULL
+                      OR i.ValorVendaFinal IS NOT NULL
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS total_alteracoes_preco,
+            MAX(
+                CASE
+                    WHEN i.NovoValor IS NOT NULL
+                      OR i.PercentualDesconto IS NOT NULL
+                      OR i.ValorVendaFinal IS NOT NULL
+                    THEN COALESCE(i.DataAtualizacao, i.CriadoEm)
+                    ELSE NULL
+                END
+            ) AS ultima_alteracao_preco_em
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] i
+        WHERE i.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND i.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    ) preco
+
+    OUTER APPLY (
+        SELECT
+            MAX(v.data_evento) AS ultima_atividade_em
+        FROM (
+            VALUES
+                (c.CriadoEm),
+                (c.AtualizadoEm),
+                (c.EncerradoEm),
+                (obs.ultima_observacao_em),
+                (mov.ultimo_movimento_em),
+                (tag.ultimo_evento_tag_em),
+                (item.ultimo_item_em),
+                (preco.ultima_alteracao_preco_em)
+        ) v(data_evento)
+    ) atividade
+
+    WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
+      AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
+      AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
+      AND (
+            :termo_busca = ''
+            OR c.Titulo LIKE :termo_like
+            OR ISNULL(c.Descricao, '') LIKE :termo_like
+            OR CAST(c.IDFatoKanbanCard AS VARCHAR(30)) LIKE :termo_like
+            OR CAST(ISNULL(c.IDEmpresa, '') AS VARCHAR(30)) LIKE :termo_like
+          )
+
+    ORDER BY
+        COALESCE(atividade.ultima_atividade_em, c.AtualizadoEm, c.CriadoEm) DESC,
+        c.IDFatoKanbanCard DESC
+    """
+
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+            "id_fase": id_fase,
+            "status_card": status_card,
+            "somente_ativos": 1 if somente_ativos else 0,
+            "termo_busca": termo_busca,
+            "termo_like": termo_like,
+        },
+    )
+
+
+
+
+@kanban_bp.route("/historico-cards", methods=["GET"])
+@login_required
+@limiter.limit("60/minute")
+def historico_cards_lista():
+    _assert_login()
+    id_empresa_proprietaria = _id_empresa_usuario_or_403()
+
+    termo_busca = _normalizar_texto_filtro(request.args.get("q"))
+    status_card = _normalizar_texto_filtro(request.args.get("status"))
+    status_card = status_card or None
+
+    id_fase = request.args.get("id_fase")
+    try:
+        id_fase = int(id_fase) if id_fase not in (None, "", "0") else None
+    except Exception:
+        id_fase = None
+
+    somente_ativos = str(request.args.get("somente_ativos", "1")).strip() != "0"
+
+    cards = _listar_cards_resumo_historico(
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        termo_busca=termo_busca,
+        id_fase=id_fase,
+        status_card=status_card,
+        somente_ativos=somente_ativos,
+        limite=200,
+    )
+
+    fases = _listar_fases_historico_cards(id_empresa_proprietaria)
+    opcoes_status = _listar_status_historico_cards(id_empresa_proprietaria)
+
+    filtros = {
+        "q": termo_busca,
+        "id_fase": id_fase,
+        "status": status_card or "",
+        "somente_ativos": somente_ativos,
+    }
+
+    return render_template(
+        "kanban/historico_cards_lista.html",
+        cards=cards,
+        fases=fases,
+        opcoes_status=opcoes_status,
+        filtros=filtros,
+        total_cards=len(cards),
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""Eu transformo payload em texto legível para exibição no histórico."""
+def _normalizar_payload_historico(payload) -> str:
+    if payload is None:
+        return ""
+
+    if isinstance(payload, str):
+        texto = payload.strip()
+        return texto
+
+    try:
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(payload).strip()
+
+
+"""Eu tento padronizar a data para ordenar a timeline corretamente."""
+def _normalizar_data_evento_historico(valor):
+    if valor is None:
+        return None
+
+    if isinstance(valor, datetime):
+        return valor
+
+    try:
+        return datetime.fromisoformat(str(valor))
+    except Exception:
+        return None
+
+
+"""Eu busco o cabeçalho principal do card para a tela de histórico."""
+def _buscar_cabecalho_historico_card(id_card: int, id_empresa_proprietaria: int) -> dict | None:
+    sql = """
+    SELECT TOP 1
+        c.IDFatoKanbanCard AS id_card,
+        c.IDDimKanban AS id_kanban,
+        c.IDDimKanbanFaseAtual AS id_fase_atual,
+        c.Titulo AS titulo,
+        c.Descricao AS descricao,
+        c.StatusCard AS status_card,
+        c.IDDimKanbanStatusCard AS id_status_card,
+        c.Ativo AS ativo,
+        c.CriadoEm AS criado_em,
+        c.AtualizadoEm AS atualizado_em,
+        c.EncerradoEm AS encerrado_em,
+        c.IDEmpresa AS id_empresa_relacionada,
+        c.IDVendedor AS id_vendedor,
+        c.IDVendedorUsuario AS id_vendedor_usuario,
+        c.IDDimUsuarios AS id_usuario_criador,
+        c.IDDimKanbanMotivoEncerramento AS id_motivo_encerramento,
+        c.MotivoEncerramentoObs AS motivo_encerramento_obs,
+
+        fase.NomeFase AS nome_fase_atual,
+        fase.CorHex AS cor_fase,
+        fase.CorTextoHex AS cor_texto_fase,
+
+        usuario.NomeUsuario AS nome_usuario_responsavel,
+
+        motivo.NomeMotivo AS nome_motivo_encerramento
+
+    FROM [Kanban].[Silver].[FatoKanbanCard] c
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+        ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+       AND fase.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
+       AND usuario.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanMotivoEncerramento] motivo
+        ON motivo.IDDimKanbanMotivoEncerramento = c.IDDimKanbanMotivoEncerramento
+       AND motivo.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+
+    WHERE c.IDFatoKanbanCard = :id_card
+      AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+    """
+    linhas = _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+    return linhas[0] if linhas else None
+
+
+"""Eu busco as movimentações de fase do card."""
+def _buscar_movimentacoes_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        m.IDFatoKanbanCardMovimento AS id_movimento,
+        m.IDFatoKanbanCard AS id_card,
+        m.IDFaseDe AS id_fase_de,
+        m.IDFasePara AS id_fase_para,
+        m.MovidoEm AS movido_em,
+        m.MovidoPor AS id_usuario,
+        m.Observacao AS observacao,
+        m.IDDimKanbanTag AS id_tag,
+        m.IDDimKanbanStatusCard AS id_status_card,
+        m.IDDimKanban AS id_kanban,
+
+        fase_de.NomeFase AS nome_fase_de,
+        fase_para.NomeFase AS nome_fase_para,
+
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_de
+        ON fase_de.IDDimKanbanFase = m.IDFaseDe
+       AND fase_de.IDEmpresaProprietaria = m.IDEmpresaProprietaria
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_para
+        ON fase_para.IDDimKanbanFase = m.IDFasePara
+       AND fase_para.IDEmpresaProprietaria = m.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = m.MovidoPor
+       AND usuario.IDEmpresaProprietaria = m.IDEmpresaProprietaria
+
+    WHERE m.IDFatoKanbanCard = :id_card
+      AND m.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    ORDER BY
+        m.MovidoEm DESC,
+        m.IDFatoKanbanCardMovimento DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco as observações do card em ordem da mais recente para a mais antiga."""
+def _buscar_observacoes_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        o.IDFatoKanbanCardObservacoes AS id_observacao,
+        o.Observacao AS observacao,
+        o.IDFatoKanbanCard AS id_card,
+        o.IDDimKanbanStatusCard AS id_status_card,
+        o.IDDimKanbanFase AS id_fase,
+        o.IDDimUsuarios AS id_usuario,
+        o.CriadoEm AS criado_em,
+
+        fase.NomeFase AS nome_fase,
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+        ON fase.IDDimKanbanFase = o.IDDimKanbanFase
+       AND fase.IDEmpresaProprietaria = o.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = o.IDDimUsuarios
+       AND usuario.IDEmpresaProprietaria = o.IDEmpresaProprietaria
+
+    WHERE o.IDFatoKanbanCard = :id_card
+      AND o.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    ORDER BY
+        o.CriadoEm DESC,
+        o.IDFatoKanbanCardObservacoes DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco os painéis e faces vinculados ao card."""
+def _buscar_itens_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        i.IDFatoKanbanCardPainelFace AS id_item,
+        i.IDFatoKanbanCard AS id_card,
+        i.Ordem AS ordem,
+        i.IDDimPaineisEuromidia AS id_painel,
+        i.IDDimFacesPaineis AS id_face_painel,
+        i.CodPonto AS cod_ponto,
+        i.CodFace AS cod_face,
+        i.TipoPainel AS tipo_painel,
+        i.AnoCusto AS ano_custo,
+        i.CustoTabela AS custo_tabela,
+        i.IDDimTabelaPrecosEuromidia AS id_tabela_preco,
+        i.PeriodoExibicao AS periodo_exibicao,
+        i.ExibicoesDia AS exibicoes_dia,
+        i.ValorTabela AS valor_tabela,
+        i.Tabela AS tabela,
+        i.PoliticaTrocas AS politica_trocas,
+        i.ValorTroca AS valor_troca,
+        i.NovoValor AS novo_valor,
+        i.PercentualDesconto AS percentual_desconto,
+        i.ValorVendaFinal AS valor_venda_final,
+        i.MargemValor AS margem_valor,
+        i.MargemPercentual AS margem_percentual,
+        i.Ativo AS ativo,
+        i.CriadoEm AS criado_em,
+        i.DataAtualizacao AS atualizado_em,
+        i.RemovidoEm AS removido_em,
+        i.RemovidoPor AS removido_por,
+        i.IDUsuario AS id_usuario
+    FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] i
+    WHERE i.IDFatoKanbanCard = :id_card
+      AND i.IDEmpresaProprietaria = :id_empresa_proprietaria
+    ORDER BY
+        ISNULL(i.Ordem, 999999),
+        i.CriadoEm DESC,
+        i.IDFatoKanbanCardPainelFace DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco o histórico de tags do card."""
+def _buscar_tags_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        t.IDFatoKanbanCardTag AS id_card_tag,
+        t.IDFatoKanbanCard AS id_card,
+        t.IDDimKanbanTag AS id_tag,
+        t.AplicadoEm AS aplicado_em,
+        t.AplicadoPor AS aplicado_por,
+        t.RemovidoEm AS removido_em,
+        t.RemovidoPor AS removido_por,
+        t.IDDimKanbanTagCard AS id_tag_card,
+
+        tag.NomeTag AS nome_tag,
+        tag.TipoTag AS tipo_tag,
+        tag.CorHex AS cor_tag,
+        tag.Icone AS icone_tag,
+
+        usuario_aplicou.NomeUsuario AS nome_usuario_aplicou,
+        usuario_removeu.NomeUsuario AS nome_usuario_removeu
+
+    FROM [Kanban].[Silver].[FatoKanbanCardTag] t
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanTag] tag
+        ON tag.IDDimKanbanTag = t.IDDimKanbanTag
+       AND tag.IDEmpresaProprietaria = t.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_aplicou
+        ON usuario_aplicou.IDDimUsuarios = t.AplicadoPor
+       AND usuario_aplicou.IDEmpresaProprietaria = t.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_removeu
+        ON usuario_removeu.IDDimUsuarios = t.RemovidoPor
+       AND usuario_removeu.IDEmpresaProprietaria = t.IDEmpresaProprietaria
+
+    WHERE t.IDFatoKanbanCard = :id_card
+      AND t.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    ORDER BY
+        ISNULL(t.AplicadoEm, t.RemovidoEm) DESC,
+        t.IDFatoKanbanCardTag DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco o histórico de status do card."""
+def _buscar_status_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        s.IDDimKanbanCardTagHistorico AS id_status_historico,
+        s.IDFatoKanbanCard AS id_card,
+        s.IDDimKanbanStatusCard AS id_status_card,
+        s.IDDimKanbanFase AS id_fase,
+        s.IDDimUsuarios AS id_usuario,
+
+        fase.NomeFase AS nome_fase,
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoKanbanCardStatusHistorico] s
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+        ON fase.IDDimKanbanFase = s.IDDimKanbanFase
+       AND fase.IDEmpresaProprietaria = s.IDEmpresaProprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = s.IDDimUsuarios
+       AND usuario.IDEmpresaProprietaria = s.IDEmpresaProprietaria
+
+    WHERE s.IDFatoKanbanCard = :id_card
+      AND s.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    ORDER BY
+        s.IDDimKanbanCardTagHistorico DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco o histórico de encerramento do card."""
+def _buscar_encerramento_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        e.IDFatoDimHistoricoEncerramentoCard AS id_historico_encerramento,
+        e.NomeMotivo AS nome_motivo,
+        e.IDDimKanbanMotivoEncerramento AS id_motivo_encerramento,
+        e.IDDimKanbanFase AS id_fase,
+        e.IDFatoKanbanCard AS id_card,
+        e.IDDimUsuarios AS id_usuario,
+        e.DataAtualizacao AS data_atualizacao,
+        e.Observacoes AS observacoes,
+
+        fase.NomeFase AS nome_fase,
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoDimHistoricoEncerramentoCard] e
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+        ON fase.IDDimKanbanFase = e.IDDimKanbanFase
+       AND fase.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = e.IDDimUsuarios
+       AND usuario.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    WHERE e.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        e.DataAtualizacao DESC,
+        e.IDFatoDimHistoricoEncerramentoCard DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco os logs técnicos do card."""
+def _buscar_logs_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        l.IDFatoKanbanCardLog AS id_log,
+        l.IDFatoKanbanCard AS id_card,
+        l.IDDimKanban AS id_kanban,
+        l.IDEmpresaRelacionada AS id_empresa_relacionada,
+        l.IDUsuarioAcao AS id_usuario_acao,
+        l.TipoEvento AS tipo_evento,
+        l.SubtipoEvento AS subtipo_evento,
+        l.OcorridoEm AS ocorrido_em,
+        l.IDFaseDe AS id_fase_de,
+        l.IDFasePara AS id_fase_para,
+        l.IDDimKanbanMotivoAcao AS id_motivo_acao,
+        l.TabelaOrigem AS tabela_origem,
+        l.IDRegistroOrigem AS id_registro_origem,
+        l.TextoLivre AS texto_livre,
+        l.PayloadAntes AS payload_antes,
+        l.PayloadDepois AS payload_depois,
+
+        usuario.NomeUsuario AS nome_usuario_acao,
+        fase_de.NomeFase AS nome_fase_de,
+        fase_para.NomeFase AS nome_fase_para
+
+    FROM [Kanban].[Silver].[FatoKanbanCardLog] l
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
+        ON usuario.IDDimUsuarios = l.IDUsuarioAcao
+       AND usuario.IDEmpresaProprietaria = l.IDEmpresaProprietaria
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_de
+        ON fase_de.IDDimKanbanFase = l.IDFaseDe
+       AND fase_de.IDEmpresaProprietaria = l.IDEmpresaProprietaria
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_para
+        ON fase_para.IDDimKanbanFase = l.IDFasePara
+       AND fase_para.IDEmpresaProprietaria = l.IDEmpresaProprietaria
+
+    WHERE l.IDFatoKanbanCard = :id_card
+      AND l.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    ORDER BY
+        l.OcorridoEm DESC,
+        l.IDFatoKanbanCardLog DESC
+    """
+    linhas = _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+    for linha in linhas:
+        linha["payload_antes_texto"] = _normalizar_payload_historico(linha.get("payload_antes"))
+        linha["payload_depois_texto"] = _normalizar_payload_historico(linha.get("payload_depois"))
+
+    return linhas
+
+
+"""Eu monto os contadores-resumo do histórico do card."""
+def _montar_resumo_historico_card(
+    movimentacoes: list[dict],
+    observacoes: list[dict],
+    itens: list[dict],
+    tags: list[dict],
+    status_historico: list[dict],
+    encerramentos: list[dict],
+    logs: list[dict],
+) -> dict:
+    total_tags_ativas = sum(1 for item in tags if not item.get("removido_em"))
+    total_itens_ativos = sum(
+        1
+        for item in itens
+        if bool(item.get("ativo")) and not item.get("removido_em")
+    )
+    total_precos_alterados = sum(
+        1
+        for item in itens
+        if item.get("novo_valor") is not None
+        or item.get("percentual_desconto") is not None
+        or item.get("valor_venda_final") is not None
+    )
+
+    return {
+        "total_movimentacoes": len(movimentacoes),
+        "total_observacoes": len(observacoes),
+        "total_itens": len(itens),
+        "total_itens_ativos": total_itens_ativos,
+        "total_tags": len(tags),
+        "total_tags_ativas": total_tags_ativas,
+        "total_status": len(status_historico),
+        "total_encerramentos": len(encerramentos),
+        "total_logs": len(logs),
+        "total_precos_alterados": total_precos_alterados,
+    }
+
+
+"""Eu monto uma timeline consolidada juntando todas as categorias do histórico."""
+def _montar_timeline_historico_card(
+    cabecalho: dict,
+    movimentacoes: list[dict],
+    observacoes: list[dict],
+    itens: list[dict],
+    tags: list[dict],
+    status_historico: list[dict],
+    encerramentos: list[dict],
+    logs: list[dict],
+) -> list[dict]:
+    timeline = []
+
+    if cabecalho and cabecalho.get("criado_em"):
+        timeline.append(
+            {
+                "tipo_evento": "CRIACAO",
+                "data_evento": cabecalho.get("criado_em"),
+                "data_evento_ordenacao": _normalizar_data_evento_historico(cabecalho.get("criado_em")),
+                "titulo": "Card criado",
+                "descricao": f"Card criado com o título '{cabecalho.get('titulo') or 'Sem título'}'.",
+                "usuario": cabecalho.get("nome_usuario_responsavel") or "",
+                "icone": "🆕",
+            }
+        )
+
+    for item in movimentacoes:
+        timeline.append(
+            {
+                "tipo_evento": "MOVIMENTACAO",
+                "data_evento": item.get("movido_em"),
+                "data_evento_ordenacao": _normalizar_data_evento_historico(item.get("movido_em")),
+                "titulo": "Mudança de fase",
+                "descricao": f"{item.get('nome_fase_de') or 'Sem fase'} → {item.get('nome_fase_para') or 'Sem fase'}",
+                "usuario": item.get("nome_usuario") or "",
+                "icone": "🔁",
+                "dados": item,
+            }
+        )
+
+    for item in observacoes:
+        timeline.append(
+            {
+                "tipo_evento": "OBSERVACAO",
+                "data_evento": item.get("criado_em"),
+                "data_evento_ordenacao": _normalizar_data_evento_historico(item.get("criado_em")),
+                "titulo": "Observação adicionada",
+                "descricao": item.get("observacao") or "",
+                "usuario": item.get("nome_usuario") or "",
+                "icone": "📝",
+                "dados": item,
+            }
+        )
+
+    for item in itens:
+        data_referencia = item.get("atualizado_em") or item.get("criado_em") or item.get("removido_em")
+        descricao_item = f"{item.get('cod_ponto') or '-'} / {item.get('cod_face') or '-'}"
+
+        if item.get("removido_em"):
+            titulo = "Item removido"
+            icone = "🗑️"
+            data_evento = item.get("removido_em")
+        elif item.get("novo_valor") is not None or item.get("percentual_desconto") is not None or item.get("valor_venda_final") is not None:
+            titulo = "Preço do item alterado"
+            icone = "💰"
+            data_evento = data_referencia
+        else:
+            titulo = "Item vinculado ao card"
+            icone = "🧩"
+            data_evento = data_referencia
+
+        timeline.append(
+            {
+                "tipo_evento": "ITEM",
+                "data_evento": data_evento,
+                "data_evento_ordenacao": _normalizar_data_evento_historico(data_evento),
+                "titulo": titulo,
+                "descricao": descricao_item,
+                "usuario": "",
+                "icone": icone,
+                "dados": item,
+            }
+        )
+
+    for item in tags:
+        if item.get("removido_em"):
+            timeline.append(
+                {
+                    "tipo_evento": "TAG_REMOVIDA",
+                    "data_evento": item.get("removido_em"),
+                    "data_evento_ordenacao": _normalizar_data_evento_historico(item.get("removido_em")),
+                    "titulo": "Tag removida",
+                    "descricao": item.get("nome_tag") or "Tag sem nome",
+                    "usuario": item.get("nome_usuario_removeu") or "",
+                    "icone": "🏷️",
+                    "dados": item,
+                }
+            )
+
+        if item.get("aplicado_em"):
+            timeline.append(
+                {
+                    "tipo_evento": "TAG_APLICADA",
+                    "data_evento": item.get("aplicado_em"),
+                    "data_evento_ordenacao": _normalizar_data_evento_historico(item.get("aplicado_em")),
+                    "titulo": "Tag aplicada",
+                    "descricao": item.get("nome_tag") or "Tag sem nome",
+                    "usuario": item.get("nome_usuario_aplicou") or "",
+                    "icone": "🏷️",
+                    "dados": item,
+                }
+            )
+
+    for item in status_historico:
+        timeline.append(
+            {
+                "tipo_evento": "STATUS",
+                "data_evento": None,
+                "data_evento_ordenacao": None,
+                "titulo": "Registro de status",
+                "descricao": f"Status ID {item.get('id_status_card') or '-'} na fase {item.get('nome_fase') or 'Sem fase'}",
+                "usuario": item.get("nome_usuario") or "",
+                "icone": "📌",
+                "dados": item,
+            }
+        )
+
+    for item in encerramentos:
+        timeline.append(
+            {
+                "tipo_evento": "ENCERRAMENTO",
+                "data_evento": item.get("data_atualizacao"),
+                "data_evento_ordenacao": _normalizar_data_evento_historico(item.get("data_atualizacao")),
+                "titulo": "Card encerrado",
+                "descricao": item.get("nome_motivo") or "Encerramento sem motivo informado",
+                "usuario": item.get("nome_usuario") or "",
+                "icone": "⛔",
+                "dados": item,
+            }
+        )
+
+    for item in logs:
+        timeline.append(
+            {
+                "tipo_evento": "LOG",
+                "data_evento": item.get("ocorrido_em"),
+                "data_evento_ordenacao": _normalizar_data_evento_historico(item.get("ocorrido_em")),
+                "titulo": item.get("tipo_evento") or "Log",
+                "descricao": item.get("texto_livre") or item.get("subtipo_evento") or "",
+                "usuario": item.get("nome_usuario_acao") or "",
+                "icone": "📜",
+                "dados": item,
+            }
+        )
+
+    timeline.sort(
+        key=lambda item: (
+            item.get("data_evento_ordenacao") is None,
+            item.get("data_evento_ordenacao") or datetime.min,
+        ),
+        reverse=True,
+    )
+
+    return timeline
+
+
+@kanban_bp.route("/historico-card/<int:id_card>", methods=["GET"])
+@login_required
+@limiter.limit("60/minute")
+def historico_card_visualizacao(id_card: int):
+    _assert_login()
+    id_empresa_proprietaria = _id_empresa_usuario_or_403()
+
+    cabecalho = _buscar_cabecalho_historico_card(id_card, id_empresa_proprietaria)
+    if not cabecalho:
+        abort(404)
+
+    movimentacoes = _buscar_movimentacoes_historico_card(id_card, id_empresa_proprietaria)
+    observacoes = _buscar_observacoes_historico_card(id_card, id_empresa_proprietaria)
+    itens = _buscar_itens_historico_card(id_card, id_empresa_proprietaria)
+    tags = _buscar_tags_historico_card(id_card, id_empresa_proprietaria)
+    status_historico = _buscar_status_historico_card(id_card, id_empresa_proprietaria)
+    encerramentos = _buscar_encerramento_historico_card(id_card, id_empresa_proprietaria)
+    logs = _buscar_logs_historico_card(id_card, id_empresa_proprietaria)
+
+    resumo = _montar_resumo_historico_card(
+        movimentacoes=movimentacoes,
+        observacoes=observacoes,
+        itens=itens,
+        tags=tags,
+        status_historico=status_historico,
+        encerramentos=encerramentos,
+        logs=logs,
+    )
+
+    timeline = _montar_timeline_historico_card(
+        cabecalho=cabecalho,
+        movimentacoes=movimentacoes,
+        observacoes=observacoes,
+        itens=itens,
+        tags=tags,
+        status_historico=status_historico,
+        encerramentos=encerramentos,
+        logs=logs,
+    )
+
+    return render_template(
+        "kanban/historico_card_visualizacao.html",
+        card=cabecalho,
+        resumo=resumo,
+        timeline=timeline,
+        movimentacoes=movimentacoes,
+        observacoes=observacoes,
+        itens=itens,
+        tags=tags,
+        status_historico=status_historico,
+        encerramentos=encerramentos,
+        logs=logs,
+    )
+
 
