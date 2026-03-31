@@ -2187,6 +2187,7 @@ def lista_paineis():
         db.session.query(
             DimFacesPaineis.CodFace.label("CodFace"),
             DimFacesPaineis.CodPonto.label("CodPonto"),
+            DimFacesPaineis.IDDimFacesPaineis.label("IDDimFacesPaineis"),
             func.upper(func.trim(DimFacesPaineis.Tipo)).label("TipoProd"),
 
             func.trim(ultimo_painel.c.Exibidora).label("EXIBIDORA"),
@@ -2349,6 +2350,115 @@ def lista_paineis():
 
     codpontos_pagina = sorted(list({int(r.CodPonto) for r in rows if r and r.CodPonto is not None}))
     codfaces_pagina = sorted(list({(str(r.CodFace) or "").strip() for r in rows if r and (r.CodFace is not None)}))
+    ids_faces_pagina = sorted(list({int(r.IDDimFacesPaineis) for r in rows if r and getattr(r, "IDDimFacesPaineis", None) is not None}))
+
+    def _montar_placeholders_sql(prefixo: str, valores: list, parametros: dict):
+        placeholders = []
+        for idx, valor in enumerate(valores or []):
+            nome_param = f"{prefixo}_{idx}"
+            placeholders.append(f":{nome_param}")
+            parametros[nome_param] = valor
+        return ", ".join(placeholders)
+
+    mapa_url_imagem_por_id_face = {}
+    mapa_url_imagem_por_codface = {}
+
+    try:
+        if ids_faces_pagina:
+            parametros_ids = {}
+            placeholders_ids = _montar_placeholders_sql("id_face", ids_faces_pagina, parametros_ids)
+
+            sql_imagem_por_id_face = text(f"""
+                WITH imagens_ordenadas AS (
+                    SELECT
+                        img.IDDimFacesPaineis,
+                        img.UrlImagem,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY img.IDDimFacesPaineis
+                            ORDER BY img.DataAtualizacao DESC, img.IDDimImagemPainel DESC
+                        ) AS rn
+                    FROM [Integracao].[Silver].[DimImagemPainel] AS img
+                    WHERE
+                        img.BitAtivo = 1
+                        AND img.NumeroImagem = 1
+                        AND img.IDDimFacesPaineis IN ({placeholders_ids})
+                )
+                SELECT
+                    IDDimFacesPaineis,
+                    UrlImagem
+                FROM imagens_ordenadas
+                WHERE rn = 1
+            """)
+
+            rows_imagem_por_id = db.session.execute(sql_imagem_por_id_face, parametros_ids).mappings().all()
+            for row_img in rows_imagem_por_id:
+                try:
+                    id_face_img = int(row_img.get("IDDimFacesPaineis") or 0)
+                except:
+                    id_face_img = 0
+
+                url_img = (row_img.get("UrlImagem") or "").strip()
+                if id_face_img > 0 and url_img:
+                    mapa_url_imagem_por_id_face[id_face_img] = url_img
+
+        codfaces_sem_imagem_por_id = []
+        vistos_codfaces_sem_imagem = set()
+
+        for r_img in rows:
+            codface_tmp = (str(getattr(r_img, "CodFace", "") or "")).strip()
+            if not codface_tmp:
+                continue
+
+            try:
+                id_face_tmp = int(getattr(r_img, "IDDimFacesPaineis", None) or 0)
+            except:
+                id_face_tmp = 0
+
+            if id_face_tmp > 0 and id_face_tmp in mapa_url_imagem_por_id_face:
+                continue
+
+            chave_cf_tmp = codface_tmp.upper()
+            if chave_cf_tmp in vistos_codfaces_sem_imagem:
+                continue
+
+            vistos_codfaces_sem_imagem.add(chave_cf_tmp)
+            codfaces_sem_imagem_por_id.append(chave_cf_tmp)
+
+        if codfaces_sem_imagem_por_id:
+            parametros_codfaces = {}
+            placeholders_codfaces = _montar_placeholders_sql("codface_img", codfaces_sem_imagem_por_id, parametros_codfaces)
+
+            sql_imagem_por_codface = text(f"""
+                WITH imagens_ordenadas AS (
+                    SELECT
+                        UPPER(LTRIM(RTRIM(ISNULL(img.CodFace, '')))) AS CodFaceNormalizada,
+                        img.UrlImagem,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY UPPER(LTRIM(RTRIM(ISNULL(img.CodFace, ''))))
+                            ORDER BY img.DataAtualizacao DESC, img.IDDimImagemPainel DESC
+                        ) AS rn
+                    FROM [Integracao].[Silver].[DimImagemPainel] AS img
+                    WHERE
+                        img.BitAtivo = 1
+                        AND img.NumeroImagem = 1
+                        AND UPPER(LTRIM(RTRIM(ISNULL(img.CodFace, '')))) IN ({placeholders_codfaces})
+                )
+                SELECT
+                    CodFaceNormalizada,
+                    UrlImagem
+                FROM imagens_ordenadas
+                WHERE rn = 1
+            """)
+
+            rows_imagem_por_codface = db.session.execute(sql_imagem_por_codface, parametros_codfaces).mappings().all()
+            for row_img in rows_imagem_por_codface:
+                codface_img = (row_img.get("CodFaceNormalizada") or "").strip().upper()
+                url_img = (row_img.get("UrlImagem") or "").strip()
+                if codface_img and url_img:
+                    mapa_url_imagem_por_codface[codface_img] = url_img
+    except:
+        mapa_url_imagem_por_id_face = {}
+        mapa_url_imagem_por_codface = {}
 
     tipo_por_face = {}
     tipo_por_idcadastro = {}
@@ -2598,10 +2708,24 @@ def lista_paineis():
             if num_faces_exibicao <= 0:
                 num_faces_exibicao = 1
 
+        try:
+            id_dim_faces_paineis = int(getattr(r, "IDDimFacesPaineis", None) or 0)
+        except:
+            id_dim_faces_paineis = 0
+
+        url_imagem_painel = ""
+        if id_dim_faces_paineis > 0:
+            url_imagem_painel = (mapa_url_imagem_por_id_face.get(id_dim_faces_paineis) or "").strip()
+
+        if (not url_imagem_painel) and cf:
+            url_imagem_painel = (mapa_url_imagem_por_codface.get(cf.upper()) or "").strip()
+
         itens.append(
             {
                 "CodFace": cf,
                 "CodPonto": cp,
+                "IDDimFacesPaineis": id_dim_faces_paineis,
+                "UrlImagemPainel": url_imagem_painel,
                 "TipoProd": tp,
                 "Cidade": municipio,
                 "Endereco": endereco_linha,
@@ -2748,6 +2872,7 @@ def lista_paineis():
             "fim": min(page * per_page, total),
         },
     )
+
 
 
 
@@ -10998,10 +11123,164 @@ def _excel_montar_aba_grade_ano(
 
 
 
-
 @paineis_bp.route("/painel-detalhes/<int:codponto>", methods=["GET"])
 def painel_detalhes(codponto: int):
+    def _texto_limpo(valor):
+        try:
+            return str(valor or "").strip()
+        except Exception:
+            return ""
 
+    def _to_bool_sql(valor, padrao=None):
+        """Eu converto valores do SQL Server para bool de forma robusta."""
+        if valor is None:
+            return padrao
+
+        if isinstance(valor, bool):
+            return valor
+
+        if isinstance(valor, (int, float)):
+            return bool(int(valor))
+
+        txt = _texto_limpo(valor).lower()
+        if txt in {"1", "true", "t", "sim", "s", "yes", "y"}:
+            return True
+        if txt in {"0", "false", "f", "nao", "não", "n", "no"}:
+            return False
+
+        return padrao
+
+    def _to_int_seguro(valor, padrao):
+        try:
+            return int(str(valor).strip())
+        except Exception:
+            return padrao
+
+    def _normalizar_url_imagem(url):
+        """Eu normalizo a URL da imagem para o navegador."""
+        txt = _texto_limpo(url)
+        if not txt:
+            return None
+
+        txt_lower = txt.lower()
+
+        if txt_lower.startswith("http://") or txt_lower.startswith("https://") or txt.startswith("//"):
+            return txt
+
+        if txt.startswith("/"):
+            return txt
+
+        if txt_lower.startswith("static/"):
+            return f"/{txt}"
+
+        return f"/{txt.lstrip('/')}"
+
+    def _primeiro_dia_mes(iso: str, fallback: str) -> str:
+        try:
+            d = datetime.strptime(iso, "%Y-%m-%d")
+            return f"{d.year:04d}-{d.month:02d}-01"
+        except Exception:
+            return fallback
+
+    def _to_float_br(v):
+        if v is None:
+            return None
+
+        if isinstance(v, (int, float)):
+            return float(v)
+
+        s = str(v).strip()
+        if not s:
+            return None
+
+        if "," in s and "." in s:
+            s = s.replace(".", "").replace(",", ".")
+        elif "," in s and "." not in s:
+            s = s.replace(",", ".")
+
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    def _carregar_imagens_painel(cod_ponto: int) -> list[dict]:
+        """
+        Eu busco as imagens do painel e devolvo já ordenadas para a galeria.
+        Regras:
+        - uso somente imagens ativas
+        - ordeno por NumeroImagem
+        - se não houver imagem válida, devolvo fallback
+        """
+        sql_imagens = text("""
+            SELECT
+                TRY_CONVERT(int, IDDimImagemPainel) AS IDDimImagemPainel,
+                TRY_CONVERT(int, IDDimFacesPaineis) AS IDDimFacesPaineis,
+                CAST(ISNULL(UrlImagem, '') AS varchar(600)) AS UrlImagem,
+                TRY_CONVERT(int, NumeroImagem) AS NumeroImagem,
+                CAST(ISNULL(CodFace, '') AS varchar(60)) AS CodFace,
+                CAST(ISNULL(CodPonto, '') AS varchar(60)) AS CodPonto,
+                CAST(ISNULL(BitAtivo, 1) AS bit) AS BitAtivo
+            FROM [Integracao].[Silver].[DimImagemPainel]
+            WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
+              AND ISNULL(BitAtivo, 1) = 1
+              AND NULLIF(LTRIM(RTRIM(ISNULL(UrlImagem, ''))), '') IS NOT NULL
+            ORDER BY
+                CASE WHEN TRY_CONVERT(int, NumeroImagem) IS NULL THEN 1 ELSE 0 END,
+                TRY_CONVERT(int, NumeroImagem) ASC,
+                TRY_CONVERT(int, IDDimImagemPainel) ASC
+        """)
+
+        linhas_imagens = db.session.execute(
+            sql_imagens,
+            {"cod_ponto": cod_ponto}
+        ).mappings().all()
+
+        imagens = []
+        urls_vistas = set()
+
+        for linha in linhas_imagens:
+            url_normalizada = _normalizar_url_imagem(linha.get("UrlImagem"))
+            if not url_normalizada:
+                continue
+
+            url_chave = url_normalizada.lower()
+            if url_chave in urls_vistas:
+                continue
+            urls_vistas.add(url_chave)
+
+            numero_imagem = linha.get("NumeroImagem")
+            try:
+                numero_imagem = int(numero_imagem) if numero_imagem is not None else None
+            except Exception:
+                numero_imagem = None
+
+            imagens.append(
+                {
+                    "id_imagem": linha.get("IDDimImagemPainel"),
+                    "id_face_painel": linha.get("IDDimFacesPaineis"),
+                    "url": url_normalizada,
+                    "numero": numero_imagem,
+                    "cod_face": _texto_limpo(linha.get("CodFace")),
+                    "cod_ponto": _texto_limpo(linha.get("CodPonto")),
+                    "eh_fallback": False,
+                }
+            )
+
+        if imagens:
+            return imagens
+
+        url_fallback = url_for("static", filename="imagens/painel-publicitario.png")
+        return [
+            {
+                "id_imagem": None,
+                "id_face_painel": None,
+                "url": url_fallback,
+                "numero": 1,
+                "cod_face": "",
+                "cod_ponto": str(cod_ponto),
+                "eh_fallback": True,
+            }
+        ]
 
     sql_painel_dim = text("""
         SELECT TOP 1
@@ -11047,6 +11326,7 @@ def painel_detalhes(codponto: int):
             WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
         """)
         row_fb = db.session.execute(sql_painel_fallback, {"cod_ponto": codponto}).mappings().first()
+
         if not row_fb or row_fb.get("lat") is None or row_fb.get("lng") is None:
             abort(404, description=f"Painel {codponto} não encontrado ou sem Latitude/Longitude válidos.")
 
@@ -11062,15 +11342,15 @@ def painel_detalhes(codponto: int):
             "lat": float(row_fb["lat"]),
             "lng": float(row_fb["lng"]),
             "url_ficha": f"/admin/paineis/{int(row_fb['CodPonto'])}",
-            "uf": (row_fb.get("UF") or "").strip(),
-            "municipio": (row_fb.get("Municipio") or "").strip(),
-            "bairro": (row_fb.get("Bairro") or "").strip(),
-            "cep": (row_fb.get("CEP") or "").strip(),
-            "sentido": (row_fb.get("Sentido") or "").strip(),
-            "tipo": (row_fb.get("Tipo") or "").strip(),
+            "uf": _texto_limpo(row_fb.get("UF")),
+            "municipio": _texto_limpo(row_fb.get("Municipio")),
+            "bairro": _texto_limpo(row_fb.get("Bairro")),
+            "cep": _texto_limpo(row_fb.get("CEP")),
+            "sentido": _texto_limpo(row_fb.get("Sentido")),
+            "tipo": _texto_limpo(row_fb.get("Tipo")),
             "quantidade_faces": None,
             "exibidora": None,
-            "bit_iluminado": None,
+            "bit_iluminado": _to_bool_sql(row_fb.get("Iluminado"), None),
             "bit_ativo": None,
             "bit_aluguel": None,
             "formato_lxa": None,
@@ -11078,36 +11358,52 @@ def painel_detalhes(codponto: int):
     else:
         endereco_painel = (
             f"{row_painel.get('Logradouro','')}"
-            + (f", {row_painel.get('Numero','')}" if (row_painel.get("Numero") or "").strip() else "")
-            + (f" • {row_painel.get('Bairro','')}" if (row_painel.get("Bairro") or "").strip() else "")
-            + (f" • {row_painel.get('Municipio','')}-{row_painel.get('UF','')}" if (row_painel.get("Municipio") or "").strip() else "")
-            + (f" • CEP {row_painel.get('CEP','')}" if (row_painel.get("CEP") or "").strip() else "")
+            + (f", {row_painel.get('Numero','')}" if _texto_limpo(row_painel.get("Numero")) else "")
+            + (f" • {row_painel.get('Bairro','')}" if _texto_limpo(row_painel.get("Bairro")) else "")
+            + (f" • {row_painel.get('Municipio','')}-{row_painel.get('UF','')}" if _texto_limpo(row_painel.get("Municipio")) else "")
+            + (f" • CEP {row_painel.get('CEP','')}" if _texto_limpo(row_painel.get("CEP")) else "")
         ).strip()
+
+        bit_ativo = _to_bool_sql(row_painel.get("BitAtivo"), True)
+        bit_iluminado = _to_bool_sql(row_painel.get("BitIluminado"), False)
+        bit_aluguel = _to_bool_sql(row_painel.get("BitAluguel"), False)
 
         painel = {
             "id_painel": int(row_painel["CodPonto"]),
             "nome": f"Painel {int(row_painel['CodPonto'])}",
             "endereco": endereco_painel,
             "formato": row_painel.get("Tipo") or "",
-            "status": "Disponível" if bool(row_painel.get("BitAtivo") is True) else "Inativo",
+            "status": "Disponível" if bit_ativo else "Inativo",
             "lat": float(row_painel["lat"]),
             "lng": float(row_painel["lng"]),
             "url_ficha": f"/admin/paineis/{int(row_painel['CodPonto'])}",
-            "uf": (row_painel.get("UF") or "").strip(),
-            "municipio": (row_painel.get("Municipio") or "").strip(),
-            "bairro": (row_painel.get("Bairro") or "").strip(),
-            "cep": (row_painel.get("CEP") or "").strip(),
-            "sentido": (row_painel.get("Sentido") or "").strip(),
-            "tipo": (row_painel.get("Tipo") or "").strip(),
+            "uf": _texto_limpo(row_painel.get("UF")),
+            "municipio": _texto_limpo(row_painel.get("Municipio")),
+            "bairro": _texto_limpo(row_painel.get("Bairro")),
+            "cep": _texto_limpo(row_painel.get("CEP")),
+            "sentido": _texto_limpo(row_painel.get("Sentido")),
+            "tipo": _texto_limpo(row_painel.get("Tipo")),
             "quantidade_faces": int(row_painel["QuantidadeFaces"]) if row_painel.get("QuantidadeFaces") is not None else None,
-            "exibidora": (row_painel.get("Exibidora") or "").strip(),
-            "bit_iluminado": bool(row_painel.get("BitIluminado") is True),
-            "bit_ativo": bool(row_painel.get("BitAtivo") is True),
-            "bit_aluguel": bool(row_painel.get("BitAluguel") is True),
-            "formato_lxa": (row_painel.get("FormatoLxA") or "").strip(),
+            "exibidora": _texto_limpo(row_painel.get("Exibidora")),
+            "bit_iluminado": bit_iluminado,
+            "bit_ativo": bit_ativo,
+            "bit_aluguel": bit_aluguel,
+            "formato_lxa": _texto_limpo(row_painel.get("FormatoLxA")),
         }
 
-  
+    imagens_painel = _carregar_imagens_painel(int(painel["id_painel"]))
+
+    painel["imagens"] = imagens_painel
+    painel["imagem_principal"] = imagens_painel[0]["url"] if imagens_painel else url_for(
+        "static",
+        filename="imagens/painel-publicitario.png"
+    )
+    painel["quantidade_imagens"] = len(imagens_painel)
+    painel["tem_imagem_real"] = any(not img.get("eh_fallback") for img in imagens_painel)
+
+    painel["produto"] = painel.get("tipo") or ""
+    painel["faces"] = painel.get("quantidade_faces")
+
     try:
         dt_ini_str = request.args.get("dt_ini") or request.args.get("dtIni") or request.args.get("data_ini") or ""
         dt_fim_str = request.args.get("dt_fim") or request.args.get("dtFim") or request.args.get("data_fim") or ""
@@ -11117,34 +11413,9 @@ def painel_detalhes(codponto: int):
         if not dt_fim_str:
             dt_fim_str = "2026-12-01"
 
-        def _primeiro_dia_mes(iso: str, fallback: str) -> str:
-            try:
-                d = datetime.strptime(iso, "%Y-%m-%d")
-                return f"{d.year:04d}-{d.month:02d}-01"
-            except Exception:
-                return fallback
-
-        def _to_float_br(v):
-            if v is None:
-                return None
-            if isinstance(v, (int, float)):
-                return float(v)
-            s = str(v).strip()
-            if not s:
-                return None
-            if "," in s and "." in s:
-                s = s.replace(".", "").replace(",", ".")
-            elif "," in s and "." not in s:
-                s = s.replace(",", ".")
-            try:
-                return float(s)
-            except Exception:
-                return None
-
         dt_ini_mes = _primeiro_dia_mes(dt_ini_str, "2024-01-01")
         dt_fim_mes = _primeiro_dia_mes(dt_fim_str, "2026-12-01")
 
-     
         sql_financeiro = text("""
             ;WITH BaseItens AS (
                 SELECT
@@ -11182,11 +11453,8 @@ def painel_detalhes(codponto: int):
                 r.DataRef,
                 YEAR(r.DataRef) AS Ano,
                 MONTH(r.DataRef) AS Mes,
-
-               
                 r.ReceitaMes AS ReceitaMes_Full,
                 rp.ReceitaMes AS ReceitaMes_Periodo,
-
                 ca.ValorMensal AS CustoMensal,
                 ca.Ano AS AnoCusto,
                 ca.Mes AS MesCusto
@@ -11194,7 +11462,6 @@ def painel_detalhes(codponto: int):
             LEFT JOIN ReceitaMes_Periodo rp
                 ON rp.CodPonto = r.CodPonto
                AND rp.DataRef  = r.DataRef
-
             OUTER APPLY (
                 SELECT TOP 1
                     TRY_CONVERT(int, c.Ano) AS Ano,
@@ -11221,9 +11488,7 @@ def painel_detalhes(codponto: int):
             }
         ).mappings().all()
 
-       
         serie_fin = []
-       
         serie_hist = []
 
         for r in linhas_fin:
@@ -11231,7 +11496,6 @@ def painel_detalhes(codponto: int):
             ano_i = int(r.get("Ano") or 0)
             mes_i = int(r.get("Mes") or 0)
 
-            # FULL -> matriz
             receita_full = float(r.get("ReceitaMes_Full") or 0.0)
 
             custo_raw = r.get("CustoMensal")
@@ -11250,7 +11514,6 @@ def painel_detalhes(codponto: int):
                 "margem_pct": float(margem_full) if margem_full is not None else None,
             })
 
-            # PERÍODO -> gráfico (só entra se tiver receita no período)
             receita_periodo = r.get("ReceitaMes_Periodo")
             if receita_periodo is not None:
                 receita_p = float(receita_periodo or 0.0)
@@ -11268,7 +11531,6 @@ def painel_detalhes(codponto: int):
                     "margem_pct": float(margem_p) if margem_p is not None else None,
                 })
 
-   
         sql_custo_categoria = text("""
             ;WITH BaseCat AS (
                 SELECT
@@ -11316,11 +11578,10 @@ def painel_detalhes(codponto: int):
 
         custos_painel = []
         for r in linhas_cat:
-            nome = (r.get("Categoria") or "").strip() or "Sem Categoria"
+            nome = _texto_limpo(r.get("Categoria")) or "Sem Categoria"
             valor = _to_float_br(r.get("Valor")) or 0.0
             custos_painel.append({"nome": nome, "valor": float(valor)})
 
-    
         anos_presentes = sorted({x["ano"] for x in serie_hist if x.get("ano")}, reverse=True)
 
         matriz = []
@@ -11370,9 +11631,9 @@ def painel_detalhes(codponto: int):
         fin_json = {
             "dt_ini": dt_ini_str,
             "dt_fim": dt_fim_str,
-            "serie": serie_fin,      # ✅ FILTRADA (gráfico)
-            "matriz": matriz,        # ✅ HISTÓRICO TOTAL (matriz)
-            "custos": custos_painel  # ✅ FILTRADO (rosca)
+            "serie": serie_fin,
+            "matriz": matriz,
+            "custos": custos_painel
         }
 
     except Exception:
@@ -11383,7 +11644,6 @@ def painel_detalhes(codponto: int):
             "matriz": [],
             "custos": [],
         }
-
 
     prospects_mock = [
         {
@@ -11464,9 +11724,9 @@ def painel_detalhes(codponto: int):
 
     empresas = clientes_reais + prospects_mock
 
-    raio_m = int(request.args.get("raio_m", "1000"))
-    status = request.args.get("status", "todos")
-    segmento = request.args.get("segmento", "todos")
+    raio_m = max(0, _to_int_seguro(request.args.get("raio_m", "1000"), 1000))
+    status = (request.args.get("status", "todos") or "todos").strip()
+    segmento = (request.args.get("segmento", "todos") or "todos").strip()
 
     def _distancia_haversine_m(lat1, lng1, lat2, lng2):
         if lat1 is None or lng1 is None or lat2 is None or lng2 is None:
@@ -11489,10 +11749,10 @@ def painel_detalhes(codponto: int):
             return "cliente_euromidia"
         return "prospect"
 
-    def _classificar_proximidade(distancia_m: int, raio_m: int) -> str:
+    def _classificar_proximidade(distancia_m: int, raio_metros: int) -> str:
         if distancia_m is None:
             return "sem_localizacao"
-        return "dentro_do_raio" if distancia_m <= raio_m else "fora_do_raio"
+        return "dentro_do_raio" if distancia_m <= raio_metros else "fora_do_raio"
 
     def _definir_camada(status_relacao: str, proximidade: str) -> str:
         if status_relacao == "cliente_no_painel":
@@ -11631,7 +11891,7 @@ def painel_detalhes(codponto: int):
                 "PESO_HEAT": float(r.get("peso_heat") or 0.0),
                 "TIPO_AREA": r.get("perfil_dominante") or "",
                 "QTD_PAINEIS": int(round(float(r.get("qtd_paineis") or 0.0))),
-                "TEM_PAINEL_EUROMIDIA": bool(r.get("tem_painel_euromidia") is True),
+                "TEM_PAINEL_EUROMIDIA": _to_bool_sql(r.get("tem_painel_euromidia"), False),
                 "LISTA_COD_PONTO": r.get("lista_cod_ponto") or "",
                 "LISTA_CEP_PAINEL": r.get("lista_cep_painel") or "",
             }
@@ -11647,6 +11907,7 @@ def painel_detalhes(codponto: int):
         kpis=kpis,
         fin_json=fin_json,
     )
+
 
 
 

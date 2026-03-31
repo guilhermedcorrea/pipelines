@@ -3,6 +3,8 @@
 {% block title %}Health Check Comercial{% endblock %}
 
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
 <style>
   :root{
     --hc-bg: #ffffff;
@@ -156,6 +158,57 @@
 
   .health-kpi__placeholder{
     color: #94A3B8;
+  }
+
+  .health-series-grid{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .health-card--grafico .health-card__body{
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .health-chart-badges{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .health-chart-wrap{
+    position: relative;
+    width: 100%;
+    height: 290px;
+  }
+
+  .health-chart-rodape{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .health-chart-mini{
+    border: 1px solid var(--hc-border);
+    border-radius: 12px;
+    background: #F8FAFC;
+    padding: 10px 12px;
+  }
+
+  .health-chart-mini__label{
+    margin: 0 0 6px 0;
+    font-size: 12px;
+    color: var(--hc-muted);
+    font-weight: 800;
+  }
+
+  .health-chart-mini__valor{
+    margin: 0;
+    font-size: 16px;
+    color: var(--hc-text);
+    font-weight: 900;
   }
 
   .health-check-grid{
@@ -424,6 +477,12 @@
     }
   }
 
+  @media (max-width: 1200px){
+    .health-series-grid{
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (max-width: 1100px){
     .health-check-kpis{
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -463,6 +522,14 @@
 
     .health-mini__valor{
       font-size: 22px;
+    }
+
+    .health-chart-rodape{
+      grid-template-columns: 1fr;
+    }
+
+    .health-chart-wrap{
+      height: 240px;
     }
   }
 </style>
@@ -599,6 +666,51 @@
       <div class="health-kpi__delta">{{ dados.kpis.media_desconto_delta or "" }}</div>
     </article>
   </section>
+
+  {% set series_temporais_mercado = dados.series_temporais_mercado | default([], true) %}
+
+  {% if series_temporais_mercado %}
+  <section class="health-series-grid">
+    {% for serie in series_temporais_mercado %}
+      <article class="health-card health-card--grafico">
+        <div class="health-card__header">
+          <div>
+            <h2 class="health-card__titulo">{{ serie.titulo or "Indicador" }}</h2>
+            <p class="health-card__subtitulo">{{ serie.subtitulo or "" }}</p>
+          </div>
+
+          <div class="health-chart-badges">
+            <span class="health-badge">{{ serie.ultimo_valor_texto or "—" }}</span>
+            <span class="health-badge">{{ serie.total_pontos or 0 }} pontos</span>
+          </div>
+        </div>
+
+        <div class="health-card__body">
+          <div class="health-chart-wrap">
+            <canvas id="graf-serie-{{ loop.index }}"></canvas>
+          </div>
+
+          <div class="health-chart-rodape">
+            <div class="health-chart-mini">
+              <p class="health-chart-mini__label">Última data</p>
+              <p class="health-chart-mini__valor">{{ serie.ultima_data or "—" }}</p>
+            </div>
+
+            <div class="health-chart-mini">
+              <p class="health-chart-mini__label">Mínimo</p>
+              <p class="health-chart-mini__valor">{{ serie.minimo_valor_texto or "—" }}</p>
+            </div>
+
+            <div class="health-chart-mini">
+              <p class="health-chart-mini__label">Máximo</p>
+              <p class="health-chart-mini__valor">{{ serie.maximo_valor_texto or "—" }}</p>
+            </div>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   <section class="health-check-grid">
     <div class="health-check-coluna">
@@ -897,4 +1009,125 @@
   </section>
 
 </div>
+
+<script>
+  const SERIES_TEMPORAIS_MERCADO = {{ dados.series_temporais_mercado | default([], true) | tojson }};
+
+  function formatarNumeroHealth(valor, casas = 2){
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return "—";
+
+    return numero.toLocaleString("pt-BR", {
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas
+    });
+  }
+
+  function formatarValorSerieHealth(valor, tipoValor){
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return "—";
+
+    const sinal = numero > 0 ? "+" : "";
+    const texto = formatarNumeroHealth(numero, 2);
+
+    if (tipoValor === "percentual"){
+      return `${sinal}${texto}%`;
+    }
+
+    return `${sinal}${texto}`;
+  }
+
+  function formatarEixoSerieHealth(valor, tipoValor){
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) return "—";
+
+    const texto = numero.toLocaleString("pt-BR", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    });
+
+    if (tipoValor === "percentual"){
+      return `${texto}%`;
+    }
+
+    return texto;
+  }
+
+  function criarGraficosSeriesHealth(){
+    if (!window.Chart) {
+      console.warn("Chart.js não carregou no health-check-comercial.");
+      return;
+    }
+
+    if (!Array.isArray(SERIES_TEMPORAIS_MERCADO) || !SERIES_TEMPORAIS_MERCADO.length){
+      return;
+    }
+
+    SERIES_TEMPORAIS_MERCADO.forEach((serie, indice) => {
+      const canvas = document.getElementById(`graf-serie-${indice + 1}`);
+      if (!canvas) return;
+
+      const labels = Array.isArray(serie.labels) && serie.labels.length ? serie.labels : ["—"];
+      const valores = Array.isArray(serie.valores) && serie.valores.length ? serie.valores : [0];
+
+      new Chart(canvas, {
+        type: "line",
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: serie.titulo || "Indicador",
+              data: valores,
+              tension: 0.25,
+              pointRadius: 0,
+              borderWidth: 2,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: "index",
+            intersect: false
+          },
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              callbacks: {
+                label: (contexto) => {
+                  const valor = contexto?.parsed?.y;
+                  return `${serie.titulo || "Valor"}: ${formatarValorSerieHealth(valor, serie.tipo_valor)}`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: {
+                display: false
+              },
+              ticks: {
+                maxRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: 8
+              }
+            },
+            y: {
+              beginAtZero: false,
+              ticks: {
+                callback: (valor) => formatarEixoSerieHealth(valor, serie.tipo_valor)
+              }
+            }
+          }
+        }
+      });
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", criarGraficosSeriesHealth);
+</script>
 {% endblock %}

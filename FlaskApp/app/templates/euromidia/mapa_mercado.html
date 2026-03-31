@@ -112,6 +112,124 @@
     filter: drop-shadow(0 8px 14px rgba(15,23,42,.14));
   }
 
+  .painel-foto.painel-foto-galeria{
+    position: relative;
+    display:block;
+    width:110px;
+    height:86px;
+    border-radius: 14px;
+    overflow:hidden;
+    background: linear-gradient(180deg, rgba(0,40,132,.08), rgba(255,179,0,.12));
+  }
+
+  .painel-foto.painel-foto-galeria img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+    filter:none;
+    transition: transform .18s ease;
+  }
+
+  .painel-foto.painel-foto-galeria:hover img{
+    transform: scale(1.02);
+  }
+
+  .painel-foto-nav{
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
+    z-index:3;
+    width:24px;
+    height:24px;
+    border:none;
+    border-radius:999px;
+    background:rgba(15,23,42,.58);
+    color:#fff;
+    font-size:18px;
+    font-weight:1000;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    box-shadow:0 4px 12px rgba(0,0,0,.18);
+    transition:all .18s ease;
+    padding:0;
+  }
+
+  .painel-foto-nav:hover{
+    background:rgba(15,23,42,.78);
+  }
+
+  .painel-foto-nav.prev{ left:6px; }
+  .painel-foto-nav.next{ right:6px; }
+
+  .painel-foto-nav[hidden]{
+    display:none !important;
+  }
+
+  .painel-foto-overlay{
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:2;
+    padding:6px;
+    display:flex;
+    justify-content:flex-end;
+    pointer-events:none;
+    background:linear-gradient(to top, rgba(2,6,23,.42), rgba(2,6,23,0));
+  }
+
+  .painel-foto-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:42px;
+    padding:3px 8px;
+    border-radius:999px;
+    background:rgba(255,255,255,.94);
+    color:#0f172a;
+    font-size:10px;
+    font-weight:1000;
+    box-shadow:0 2px 8px rgba(15,23,42,.14);
+  }
+
+  .painel-foto-dots{
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:8px;
+    z-index:3;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    padding:0 28px;
+  }
+
+  .painel-foto-dot{
+    width:7px;
+    height:7px;
+    border-radius:999px;
+    background:rgba(255,255,255,.55);
+    border:1px solid rgba(255,255,255,.85);
+    cursor:pointer;
+    transition:all .18s ease;
+    padding:0;
+  }
+
+  .painel-foto-dot.ativo{
+    background:#fff;
+    transform:scale(1.18);
+  }
+
+  .painel-foto-sem-multiplas .painel-foto-dots,
+  .painel-foto-sem-multiplas .painel-foto-nav{
+    display:none !important;
+  }
+
   /* ✅ IMPORTANTÍSSIMO: evita corte/overflow em flex/grid
      - min-width:0 permite a coluna "1fr" realmente quebrar texto
   */
@@ -1011,8 +1129,24 @@
     </div>
 
     <div class="painel-box">
-      <div class="painel-foto">
-        <img src="{{ url_for('static', filename='icones/outdoor.png') }}" alt="Painel">
+      <div class="painel-foto painel-foto-galeria" id="painelFotoGaleria">
+        <button type="button" class="painel-foto-nav prev" id="btnPainelFotoPrev" aria-label="Imagem anterior">‹</button>
+
+        <img
+          id="imgPainelPrincipal"
+          src="{{ url_for('static', filename='imagens/painel-publicitario.png') }}"
+          alt="Painel"
+          loading="lazy"
+          decoding="async"
+        >
+
+        <button type="button" class="painel-foto-nav next" id="btnPainelFotoNext" aria-label="Próxima imagem">›</button>
+
+        <div class="painel-foto-overlay">
+          <span class="painel-foto-badge" id="lblPainelFotoContador">1 / 1</span>
+        </div>
+
+        <div class="painel-foto-dots" id="painelFotoDots"></div>
       </div>
 
       <!-- ✅ Ajuste HTML: evita corte/overflow dentro de flex -->
@@ -1561,12 +1695,148 @@
   const painelFaces = document.getElementById("painelFaces");
   const btnVerFichaPainel = document.getElementById("btnVerFichaPainel");
 
+  const painelFotoGaleria = document.getElementById("painelFotoGaleria");
+  const imgPainelPrincipal = document.getElementById("imgPainelPrincipal");
+  const btnPainelFotoPrev = document.getElementById("btnPainelFotoPrev");
+  const btnPainelFotoNext = document.getElementById("btnPainelFotoNext");
+  const lblPainelFotoContador = document.getElementById("lblPainelFotoContador");
+  const painelFotoDots = document.getElementById("painelFotoDots");
+
+  const IMAGEM_PAINEL_FALLBACK = "{{ url_for('static', filename='imagens/painel-publicitario.png') }}";
+
+  function _normalizarImagemPainel(item){
+    if(!item) return null;
+
+    if(typeof item === "string"){
+      const urlDireta = String(item || "").trim();
+      if(!urlDireta) return null;
+      return {
+        url: urlDireta,
+        numero: null,
+        eh_fallback: false
+      };
+    }
+
+    const urlItem = String(item.url || item.UrlImagem || item.imagem || "").trim();
+    if(!urlItem) return null;
+
+    return {
+      url: urlItem,
+      numero: item.numero ?? item.NumeroImagem ?? null,
+      eh_fallback: Boolean(item.eh_fallback === true || item.fallback === true)
+    };
+  }
+
+  const imagensPainel = Array.isArray(P && P.imagens)
+    ? P.imagens.map(_normalizarImagemPainel).filter(Boolean)
+    : [];
+
+  if(!imagensPainel.length){
+    const imagemPrincipal = String((P && P.imagem_principal) || "").trim();
+    if(imagemPrincipal){
+      imagensPainel.push({
+        url: imagemPrincipal,
+        numero: 1,
+        eh_fallback: false
+      });
+    }
+  }
+
+  if(!imagensPainel.length){
+    imagensPainel.push({
+      url: IMAGEM_PAINEL_FALLBACK,
+      numero: 1,
+      eh_fallback: true
+    });
+  }
+
+  let indiceImagemPainelAtual = 0;
+
+  function _obterImagemPainelAtual(){
+    return imagensPainel[indiceImagemPainelAtual] || imagensPainel[0] || { url: IMAGEM_PAINEL_FALLBACK, numero: 1, eh_fallback: true };
+  }
+
+  function _renderizarGaleriaPainel(){
+    if(!painelFotoGaleria || !imgPainelPrincipal || !lblPainelFotoContador || !painelFotoDots){
+      return;
+    }
+
+    const imagemAtual = _obterImagemPainelAtual();
+    imgPainelPrincipal.src = imagemAtual && imagemAtual.url ? imagemAtual.url : IMAGEM_PAINEL_FALLBACK;
+    imgPainelPrincipal.alt = (P && P.nome) ? `Imagem do ${P.nome}` : "Imagem do painel";
+
+    lblPainelFotoContador.textContent = `${indiceImagemPainelAtual + 1} / ${imagensPainel.length}`;
+
+    painelFotoDots.innerHTML = "";
+    imagensPainel.forEach((item, idx) => {
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = `painel-foto-dot${idx === indiceImagemPainelAtual ? " ativo" : ""}`;
+      dot.setAttribute("aria-label", `Ir para imagem ${idx + 1}`);
+      dot.addEventListener("click", () => {
+        indiceImagemPainelAtual = idx;
+        _renderizarGaleriaPainel();
+      });
+      painelFotoDots.appendChild(dot);
+    });
+
+    const temMultiplas = imagensPainel.length > 1;
+
+    if(temMultiplas){
+      painelFotoGaleria.classList.remove("painel-foto-sem-multiplas");
+      if(btnPainelFotoPrev) btnPainelFotoPrev.hidden = false;
+      if(btnPainelFotoNext) btnPainelFotoNext.hidden = false;
+    }else{
+      painelFotoGaleria.classList.add("painel-foto-sem-multiplas");
+      if(btnPainelFotoPrev) btnPainelFotoPrev.hidden = true;
+      if(btnPainelFotoNext) btnPainelFotoNext.hidden = true;
+    }
+  }
+
+  function _mudarImagemPainel(direcao){
+    if(imagensPainel.length <= 1){
+      return;
+    }
+
+    indiceImagemPainelAtual = (indiceImagemPainelAtual + direcao + imagensPainel.length) % imagensPainel.length;
+    _renderizarGaleriaPainel();
+  }
+
+  if(btnPainelFotoPrev){
+    btnPainelFotoPrev.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      _mudarImagemPainel(-1);
+    });
+  }
+
+  if(btnPainelFotoNext){
+    btnPainelFotoNext.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      _mudarImagemPainel(1);
+    });
+  }
+
+  if(painelFotoGaleria){
+    painelFotoGaleria.addEventListener("keydown", (ev) => {
+      if(ev.key === "ArrowLeft"){
+        ev.preventDefault();
+        _mudarImagemPainel(-1);
+      }
+      if(ev.key === "ArrowRight"){
+        ev.preventDefault();
+        _mudarImagemPainel(1);
+      }
+    });
+  }
+
   if(painelNome) painelNome.textContent = (P && P.nome) ? P.nome : "—";
   if(painelEndereco) painelEndereco.textContent = (P && P.endereco) ? P.endereco : "—";
   if(painelTipoTxt) painelTipoTxt.textContent = (P && P.tipo) ? P.tipo : "—";
-  if(painelProduto) painelProduto.textContent = (P && P.produto) ? P.produto : "—";
+  if(painelProduto) painelProduto.textContent = (P && (P.produto || P.tipo)) ? (P.produto || P.tipo) : "—";
   if(painelSentido) painelSentido.textContent = (P && P.sentido) ? P.sentido : "—";
-  if(painelFaces) painelFaces.textContent = (P && P.faces != null) ? String(P.faces) : "—";
+  if(painelFaces) painelFaces.textContent = (P && (P.faces != null || P.quantidade_faces != null)) ? String(P.faces ?? P.quantidade_faces) : "—";
+
+  _renderizarGaleriaPainel();
 
   if(btnVerFichaPainel){
     btnVerFichaPainel.addEventListener("click", ()=> {

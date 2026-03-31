@@ -2019,10 +2019,13 @@
                       </div>
 
                       <div style="display:flex;align-items:center;justify-content:center;">
-                        <img src="{{ url_for('static', filename='imagens/painel-publicitario.png') }}"
-                             alt="Painel" title="Abrir detalhes do painel"
-                             style="width:28px;height:28px;opacity:.95;filter: drop-shadow(0 2px 6px rgba(0,0,0,.10));"
-                             draggable="false">
+                        <img src="{{ x.UrlImagemPainel or url_for('static', filename='imagens/painel-publicitario.png') }}"
+                             alt="Painel"
+                             title="Abrir detalhes do painel"
+                             style="width:28px;height:28px;opacity:.95;filter: drop-shadow(0 2px 6px rgba(0,0,0,.10));object-fit:cover;border-radius:6px;background:#fff;"
+                             loading="lazy"
+                             draggable="false"
+                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='imagens/painel-publicitario.png') }}';">
                       </div>
 
                       <div style="min-width:0;">

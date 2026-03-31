@@ -4060,7 +4060,6 @@ def _registrar_negociacao_preco_card(
 
     
 
-
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     sql = text("""
         SELECT
@@ -4095,7 +4094,7 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             rv.DataFimReserva
         FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] r
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
-          ON TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, r.IDDimPaineisEuromidia)
+          ON  p.IDDimPaineisEuromidia = r.IDDimPaineisEuromidia
         OUTER APPLY (
             SELECT TOP 1
                 CONVERT(varchar(10), fo.DataInicio, 23) AS DataInicioReserva,
@@ -4115,6 +4114,330 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     """)
     rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
     return _rows_para_dicts(rows)
+
+
+
+
+
+
+
+
+def _url_fallback_imagem_painel_orcamento() -> str:
+    return url_for("static", filename="imagens/painel-publicitario.png")
+
+
+
+
+
+
+def _normalizar_url_imagem_painel_orcamento(url_imagem: Any) -> str | None:
+    texto = _normalizar_texto(url_imagem)
+    if not texto:
+        return None
+
+    texto = str(texto).strip().replace("\\", "/")
+    texto = re.sub(r"/+", "/", texto)
+
+    if texto.startswith(("http://", "https://")):
+        return texto
+
+    caminho_static_url = getattr(current_app, "static_url_path", "/static") or "/static"
+    caminho_static_url = "/" + caminho_static_url.strip("/")
+
+    if texto.startswith(caminho_static_url + "/") or texto == caminho_static_url:
+        return texto
+
+    marcadores_static = (
+        "/FlaskApp/app/static/",
+        "/app/static/",
+        "/app/app/static/",
+        "/static/",
+        "static/",
+    )
+
+    texto_lower = texto.lower()
+    for marcador in marcadores_static:
+        marcador_lower = marcador.lower()
+        pos = texto_lower.find(marcador_lower)
+        if pos >= 0:
+            relativo = texto[pos + len(marcador):].lstrip("/")
+            if relativo:
+                return url_for("static", filename=relativo)
+
+    padroes_relativos = (
+        "orcamentopaineiseuromidia/",
+        "imagens/",
+        "painéis/",
+        "paineis/",
+    )
+
+    texto_relativo = texto.lstrip("/")
+    texto_relativo_lower = texto_relativo.lower()
+    if any(texto_relativo_lower.startswith(prefixo) for prefixo in padroes_relativos):
+        return url_for("static", filename=texto_relativo)
+
+    if texto.startswith("/"):
+        return texto
+
+    return "/" + texto_relativo
+
+
+
+
+
+
+
+def _montar_nome_painel_orcamento(item: dict[str, Any]) -> str:
+    tipo_painel = _normalizar_texto(item.get("TipoPainel"))
+    cod_ponto = _normalizar_texto(item.get("CodPonto"))
+    cod_face = _normalizar_texto(item.get("CodFace"))
+
+    partes: list[str] = []
+
+    if tipo_painel:
+        partes.append(tipo_painel)
+
+    if cod_ponto:
+        partes.append(f"Ponto {cod_ponto}")
+
+    if cod_face:
+        partes.append(f"Face {cod_face}")
+
+    return " • ".join(partes) if partes else "Painel publicitário"
+
+
+def _montar_endereco_painel_orcamento(item: dict[str, Any]) -> str:
+    logradouro = _normalizar_texto(item.get("Logradouro"))
+    numero = _normalizar_texto(item.get("Numero"))
+    bairro = _normalizar_texto(item.get("Bairro"))
+    cidade = _normalizar_texto(item.get("Cidade"))
+    uf = _normalizar_texto(item.get("UF"))
+
+    cidade_uf = "/".join([parte for parte in [cidade, uf] if parte])
+    linha_1 = ", ".join([parte for parte in [logradouro, numero] if parte])
+    linha_2 = " - ".join([parte for parte in [bairro, cidade_uf] if parte])
+
+    endereco = " • ".join([parte for parte in [linha_1, linha_2] if parte])
+    return endereco or "Endereço não informado"
+
+
+
+
+
+def _url_cabecalho_orcamento() -> str:
+    return url_for(
+        "static",
+        filename="OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG",
+    )
+
+
+def _obter_imagens_painel_orcamento(
+    *,
+    id_face_painel: Any = None,
+    cod_face: Any = None,
+    cod_ponto: Any = None,
+) -> list[dict[str, Any]]:
+    id_face = int(id_face_painel or 0) if str(id_face_painel or "").strip() else None
+    cod_face_norm = _normalizar_texto(cod_face).upper()
+    cod_ponto_norm = _normalizar_texto(cod_ponto)
+
+    sql = text("""
+        WITH imagens_base AS (
+            SELECT
+                i.IDDimImagemPainel,
+                i.IDDimFacesPaineis,
+                i.UrlImagem,
+                i.NumeroImagem,
+                i.DataAtualizacao,
+                i.BitAtivo,
+                i.CodFace,
+                i.CodPonto,
+                i.BitImagemOrcamento,
+                CASE
+                    WHEN :id_face_painel IS NOT NULL
+                         AND TRY_CONVERT(int, i.IDDimFacesPaineis) = TRY_CONVERT(int, :id_face_painel)
+                    THEN 0
+                    WHEN :cod_face <> ''
+                         AND UPPER(LTRIM(RTRIM(COALESCE(i.CodFace, '')))) = :cod_face
+                    THEN 1
+                    WHEN :cod_ponto <> ''
+                         AND LTRIM(RTRIM(COALESCE(i.CodPonto, ''))) = :cod_ponto
+                    THEN 2
+                    ELSE 9
+                END AS OrdemCorrespondencia
+            FROM [Integracao].[Silver].[DimImagemPainel] i
+            WHERE ISNULL(i.BitAtivo, 1) = 1
+              AND TRY_CONVERT(int, ISNULL(i.BitImagemOrcamento, 0)) = 1
+              AND (
+                    (:id_face_painel IS NOT NULL AND TRY_CONVERT(int, i.IDDimFacesPaineis) = TRY_CONVERT(int, :id_face_painel))
+                 OR (:cod_face <> '' AND UPPER(LTRIM(RTRIM(COALESCE(i.CodFace, '')))) = :cod_face)
+                 OR (:cod_ponto <> '' AND LTRIM(RTRIM(COALESCE(i.CodPonto, ''))) = :cod_ponto)
+              )
+        )
+        SELECT
+            IDDimImagemPainel,
+            IDDimFacesPaineis,
+            UrlImagem,
+            NumeroImagem,
+            DataAtualizacao,
+            BitAtivo,
+            CodFace,
+            CodPonto,
+            BitImagemOrcamento,
+            OrdemCorrespondencia
+        FROM imagens_base
+        ORDER BY
+            OrdemCorrespondencia ASC,
+            CASE
+                WHEN TRY_CONVERT(int, NumeroImagem) IS NULL THEN 999999
+                ELSE TRY_CONVERT(int, NumeroImagem)
+            END ASC,
+            DataAtualizacao DESC,
+            IDDimImagemPainel DESC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_face_painel": id_face,
+            "cod_face": cod_face_norm,
+            "cod_ponto": cod_ponto_norm,
+        },
+    ).mappings().all()
+
+    imagens: list[dict[str, Any]] = []
+    urls_vistas: set[str] = set()
+
+    for row in rows:
+        registro = dict(row)
+        url_imagem = _normalizar_url_imagem_painel_orcamento(registro.get("UrlImagem"))
+
+        if not url_imagem:
+            continue
+
+        if url_imagem in urls_vistas:
+            continue
+
+        urls_vistas.add(url_imagem)
+
+        imagens.append(
+            {
+                "id_imagem_painel": int(registro.get("IDDimImagemPainel") or 0) or None,
+                "url": url_imagem,
+                "numero_imagem": int(registro.get("NumeroImagem") or 0) or len(imagens) + 1,
+                "cod_face": _normalizar_texto(registro.get("CodFace")),
+                "cod_ponto": _normalizar_texto(registro.get("CodPonto")),
+                "bit_imagem_orcamento": int(registro.get("BitImagemOrcamento") or 0),
+                "ordem_correspondencia": int(registro.get("OrdemCorrespondencia") or 9),
+                "fallback": False,
+            }
+        )
+
+    if imagens:
+        return imagens
+
+    return [
+        {
+            "id_imagem_painel": None,
+            "url": _url_fallback_imagem_painel_orcamento(),
+            "numero_imagem": 1,
+            "cod_face": cod_face_norm,
+            "cod_ponto": cod_ponto_norm,
+            "bit_imagem_orcamento": None,
+            "ordem_correspondencia": 99,
+            "fallback": True,
+        }
+    ]
+
+
+
+def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
+    painel_faces = detalhe.get("painel_faces") if isinstance(detalhe.get("painel_faces"), list) else []
+
+    empresa = {
+        "id_empresa": int(card.get("IDEmpresaRelacionadaCard") or 0) or None,
+        "razao_social": _normalizar_texto(card.get("EmpresaRazaoSocial")),
+        "cnpj": _normalizar_texto(card.get("EmpresaCNPJ")),
+        "cnae": _normalizar_texto(card.get("EmpresaCNAE")),
+        "setor": _normalizar_texto(card.get("EmpresaSetor")),
+        "classe": _normalizar_texto(card.get("EmpresaClasse")),
+    }
+
+    itens_orcamento: list[dict[str, Any]] = []
+    valor_total = Decimal("0")
+
+    for indice, item in enumerate(painel_faces, start=1):
+        if not isinstance(item, dict):
+            continue
+
+        valor_final = _valor_decimal(item.get("ValorVendaFinal"))
+        preco_venda_atual = _valor_decimal(item.get("ValorTabela"))
+        valor_exibido = valor_final if valor_final is not None else preco_venda_atual
+        origem_preco = "Valor final" if valor_final is not None else "Preço de venda atual"
+
+        if valor_exibido is not None:
+            valor_total += valor_exibido
+
+        imagens = _obter_imagens_painel_orcamento(
+            id_face_painel=item.get("IDDimFacesPaineis"),
+            cod_face=item.get("CodFace"),
+            cod_ponto=item.get("CodPonto"),
+        )
+
+        itens_orcamento.append(
+            {
+                "indice": indice,
+                "id_item": int(item.get("IDFatoKanbanCardPainelFace") or 0) or None,
+                "id_painel": int(item.get("IDDimPaineisEuromidia") or 0) or None,
+                "id_face_painel": int(item.get("IDDimFacesPaineis") or 0) or None,
+                "nome_painel": _montar_nome_painel_orcamento(item),
+                "tipo_painel": _normalizar_texto(item.get("TipoPainel")),
+                "cod_ponto": _normalizar_texto(item.get("CodPonto")),
+                "cod_face": _normalizar_texto(item.get("CodFace")),
+                "endereco": _montar_endereco_painel_orcamento(item),
+                "logradouro": _normalizar_texto(item.get("Logradouro")),
+                "numero": _normalizar_texto(item.get("Numero")),
+                "bairro": _normalizar_texto(item.get("Bairro")),
+                "cidade": _normalizar_texto(item.get("Cidade")),
+                "uf": _normalizar_texto(item.get("UF")),
+                "periodo_exibicao": _normalizar_texto(item.get("PeriodoExibicao")),
+                "exibicoes_dia": int(item.get("ExibicoesDia") or 0) or None,
+                "tabela": _normalizar_texto(item.get("Tabela")),
+                "politica_trocas": _normalizar_texto(item.get("PoliticaTrocas")),
+                "valor_troca": _decimal_para_float(item.get("ValorTroca")),
+                "preco_venda_atual": _decimal_para_float(preco_venda_atual),
+                "valor_final": _decimal_para_float(valor_final),
+                "valor_exibido": _decimal_para_float(valor_exibido),
+                "origem_preco": origem_preco,
+                "margem_percentual": _decimal_para_float(item.get("MargemPercentual")),
+                "imagens": imagens,
+                "quantidade_imagens": len(imagens),
+                "tem_imagem_real": any(not bool(img.get("fallback")) for img in imagens),
+            }
+        )
+
+    return {
+        "ok": True,
+        "id_card": int(id_card),
+        "titulo_card": _normalizar_texto(card.get("Titulo")) or f"Card {int(id_card)}",
+        "descricao_card": _normalizar_texto(card.get("Descricao")),
+        "empresa": empresa,
+        "cabecalho": {
+            "url": _url_cabecalho_orcamento(),
+            "alt": "Cabeçalho do orçamento Euromídia",
+        },
+        "itens": itens_orcamento,
+        "resumo": {
+            "quantidade_paineis": len(itens_orcamento),
+            "valor_total": float(valor_total),
+            "data_geracao": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        },
+    }
+
+
+
 
 
 
@@ -4979,7 +5302,6 @@ def api_cards_listar_por_fase(id_kanban: int):
 
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["GET"])
 @login_required
 @limiter.limit("180/minute")
@@ -5044,6 +5366,47 @@ def api_card_detalhe(id_card: int):
         _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
     return jsonify(payload)
+
+
+
+
+@kanban_bp.route("/api/cards/<int:id_card>/orcamento", methods=["GET"])
+@login_required
+@limiter.limit("60/minute")
+def api_card_orcamento(id_card: int):
+    _assert_login()
+
+    id_emp = _id_empresa_usuario_or_403()
+    card_escopo = _obter_card_autorizado(id_card)
+    id_kanban = int(card_escopo.get("IDDimKanban") or 0)
+
+    usar_cache = not _request_pede_dado_fresco()
+
+    chave = _chave_cache_json(
+        "kanban:api:card:orcamento",
+        id_emp,
+        id_kanban,
+        id_card,
+        _versao_kanban(id_kanban),
+        _versao_card(id_card),
+    )
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
+
+    payload = _montar_orcamento_card_payload(id_card)
+
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
+
+    return jsonify(payload)
+
+
+
+
+
 
 
 
@@ -9662,6 +10025,11 @@ def _normalizar_texto_health_check(valor: Any) -> str:
     return texto
 
 
+
+
+
+
+
 def _montar_dados_vazios_health_check() -> dict[str, Any]:
     """Eu devolvo a estrutura exata esperada pelo template do health check."""
     return {
@@ -9698,6 +10066,7 @@ def _montar_dados_vazios_health_check() -> dict[str, Any]:
             "ticket_medio": "—",
             "ticket_medio_delta": "",
         },
+        "series_temporais_mercado": [],
         "segmentos_novos": [],
         "segmentos_aditivos": [],
         "segmentos_cancelamentos": [],
@@ -9706,6 +10075,7 @@ def _montar_dados_vazios_health_check() -> dict[str, Any]:
         "vendedores_mais_desconto": [],
         "ultimas_atualizacoes": [],
     }
+
 
 
 def _formatar_moeda_health_check(valor: Any) -> str:
@@ -9981,6 +10351,268 @@ def _contar_perdas_no_mes_health_check(
 
     row = db.session.execute(sql, parametros).mappings().first() or {}
     return int(row.get("Quantidade") or 0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _deslocar_primeiro_dia_mes_health_check(data_base: datetime, quantidade_meses: int) -> datetime:
+    """Eu ando meses para frente ou para trás e devolvo sempre o primeiro dia do mês."""
+    total_meses = (data_base.year * 12 + (data_base.month - 1)) + int(quantidade_meses)
+    ano = total_meses // 12
+    mes = (total_meses % 12) + 1
+    return datetime(ano, mes, 1)
+
+
+def _formatar_valor_card_serie_health_check(valor: Any, tipo_valor: str) -> str:
+    """Eu formato o valor-resumo que aparece no card da série temporal."""
+    decimal_valor = _valor_decimal(valor)
+    if decimal_valor is None:
+        decimal_valor = Decimal("0")
+
+    if tipo_valor == "percentual":
+        return _formatar_percentual_health_check(decimal_valor)
+
+    if decimal_valor == decimal_valor.to_integral_value():
+        return str(int(decimal_valor))
+
+    texto = f"{decimal_valor:,.2f}"
+    return texto.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _obter_media_desconto_no_mes_health_check(
+    *,
+    id_kanban: int,
+    id_empresa_proprietaria: int,
+    inicio_periodo: datetime,
+    fim_periodo: datetime,
+) -> Decimal:
+    """Eu calculo a média de desconto aprovada/proposta do mês."""
+    sql = text(f"""
+        SELECT
+            AVG(
+                TRY_CONVERT(
+                    decimal(18, 4),
+                    COALESCE(
+                        NULLIF(np.DescontoAprovado, 0),
+                        NULLIF(np.DescontoProposto, 0)
+                    )
+                )
+            ) AS MediaDesconto
+        FROM {TABELA_CARD_NEGOCIACAO_PRECO} np
+        INNER JOIN {TABELA_CARD} c
+            ON c.IDFatoKanbanCard = np.IDFatoKanbanCard
+           AND c.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+        WHERE c.IDDimKanban = :id_kanban
+          AND np.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto) >= :inicio_periodo
+          AND COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto) < :fim_periodo
+          AND COALESCE(np.DescontoAprovado, np.DescontoProposto, 0) > 0;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_kanban": int(id_kanban),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            "inicio_periodo": inicio_periodo,
+            "fim_periodo": fim_periodo,
+        },
+    ).mappings().first() or {}
+
+    return _valor_decimal(row.get("MediaDesconto")) or Decimal("0")
+
+
+def _montar_card_serie_temporal_health_check(
+    *,
+    titulo: str,
+    subtitulo: str,
+    tipo_valor: str,
+    pontos: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Eu transformo pontos mensais em um card pronto para o template e para o Chart.js."""
+    labels: list[str] = []
+    valores: list[float] = []
+    datas: list[str] = []
+
+    for ponto in pontos:
+        decimal_valor = _valor_decimal(ponto.get("valor")) or Decimal("0")
+        labels.append(str(ponto.get("label") or "—"))
+        datas.append(str(ponto.get("data") or "—"))
+        valores.append(float(decimal_valor))
+
+    if not valores:
+        labels = ["—"]
+        datas = ["—"]
+        valores = [0.0]
+
+    ultimo_valor = valores[-1]
+    minimo_valor = min(valores)
+    maximo_valor = max(valores)
+
+    return {
+        "titulo": titulo,
+        "subtitulo": subtitulo,
+        "tipo_valor": tipo_valor,
+        "labels": labels,
+        "valores": valores,
+        "total_pontos": len(valores),
+        "ultima_data": datas[-1],
+        "ultimo_valor_texto": _formatar_valor_card_serie_health_check(ultimo_valor, tipo_valor),
+        "minimo_valor_texto": _formatar_valor_card_serie_health_check(minimo_valor, tipo_valor),
+        "maximo_valor_texto": _formatar_valor_card_serie_health_check(maximo_valor, tipo_valor),
+    }
+
+
+def _obter_series_temporais_health_check(
+    *,
+    id_kanban: int,
+    id_empresa_proprietaria: int,
+    inicio_periodo_referencia: datetime,
+    ids_tag_novo_contrato: list[int],
+    ids_tag_aditivo: list[int],
+    ids_tags_perdas: list[int],
+    ids_motivos_perdas: list[int],
+    quantidade_meses: int = 12,
+) -> list[dict[str, Any]]:
+    """Eu monto as séries temporais mensais dos últimos N meses para o health check."""
+    quantidade_meses = max(1, int(quantidade_meses))
+    inicio_primeiro_mes = _deslocar_primeiro_dia_mes_health_check(
+        inicio_periodo_referencia,
+        -(quantidade_meses - 1),
+    )
+
+    pontos_novos: list[dict[str, Any]] = []
+    pontos_aditivos: list[dict[str, Any]] = []
+    pontos_cancelamentos: list[dict[str, Any]] = []
+    pontos_perdas: list[dict[str, Any]] = []
+    pontos_media_desconto: list[dict[str, Any]] = []
+
+    for deslocamento in range(quantidade_meses):
+        inicio_mes = _deslocar_primeiro_dia_mes_health_check(inicio_primeiro_mes, deslocamento)
+        fim_mes = _deslocar_primeiro_dia_mes_health_check(inicio_mes, 1)
+
+        label_mes = inicio_mes.strftime("%m/%y")
+        data_mes = inicio_mes.strftime("%m/%Y")
+
+        valor_novos = _contar_cards_tag_no_mes_health_check(
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            inicio_periodo=inicio_mes,
+            fim_periodo=fim_mes,
+            ids_tags=ids_tag_novo_contrato,
+        )
+
+        valor_aditivos = _contar_cards_tag_no_mes_health_check(
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            inicio_periodo=inicio_mes,
+            fim_periodo=fim_mes,
+            ids_tags=ids_tag_aditivo,
+        )
+
+        valor_cancelamentos = _contar_cancelamentos_no_mes_health_check(
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            inicio_periodo=inicio_mes,
+            fim_periodo=fim_mes,
+        )
+
+        valor_perdas = _contar_perdas_no_mes_health_check(
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            inicio_periodo=inicio_mes,
+            fim_periodo=fim_mes,
+            ids_tags=ids_tags_perdas,
+            ids_motivos=ids_motivos_perdas,
+        )
+
+        valor_media_desconto = _obter_media_desconto_no_mes_health_check(
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            inicio_periodo=inicio_mes,
+            fim_periodo=fim_mes,
+        )
+
+        pontos_novos.append({
+            "label": label_mes,
+            "data": data_mes,
+            "valor": valor_novos,
+        })
+        pontos_aditivos.append({
+            "label": label_mes,
+            "data": data_mes,
+            "valor": valor_aditivos,
+        })
+        pontos_cancelamentos.append({
+            "label": label_mes,
+            "data": data_mes,
+            "valor": valor_cancelamentos,
+        })
+        pontos_perdas.append({
+            "label": label_mes,
+            "data": data_mes,
+            "valor": valor_perdas,
+        })
+        pontos_media_desconto.append({
+            "label": label_mes,
+            "data": data_mes,
+            "valor": valor_media_desconto,
+        })
+
+    return [
+        _montar_card_serie_temporal_health_check(
+            titulo="Novos contratos",
+            subtitulo="Quantidade mensal dos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_novos,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Aditivos",
+            subtitulo="Quantidade mensal dos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_aditivos,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Cancelamentos",
+            subtitulo="Quantidade mensal dos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_cancelamentos,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Perdas comerciais",
+            subtitulo="Perdas por tag ou motivo nos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_perdas,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Média de desconto",
+            subtitulo="Desconto médio mensal aprovado/proposto nos últimos 12 meses.",
+            tipo_valor="percentual",
+            pontos=pontos_media_desconto,
+        ),
+    ]
+
+
+
+
+
+
+
+
 
 
 def _obter_clientes_e_segmentos_atendidos_health_check(
@@ -10443,6 +11075,216 @@ def _obter_vendedores_mais_desconto_health_check(
     ]
 
 
+
+
+
+
+
+def _deslocar_mes_health_check(data_base: datetime, quantidade_meses: int) -> datetime:
+    """Eu ando meses para frente ou para trás e devolvo sempre o primeiro dia do mês."""
+    total_meses = (data_base.year * 12 + (data_base.month - 1)) + int(quantidade_meses)
+    ano = total_meses // 12
+    mes = (total_meses % 12) + 1
+    return datetime(ano, mes, 1)
+
+
+def _formatar_numero_br_health_check(valor: Any, casas: int = 2) -> str:
+    """Eu formato número no padrão brasileiro."""
+    decimal_valor = _valor_decimal(valor)
+    if decimal_valor is None:
+        decimal_valor = Decimal("0")
+
+    texto = f"{decimal_valor:,.{casas}f}"
+    return texto.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _formatar_valor_card_serie_health_check(valor: Any, tipo_valor: str) -> str:
+    """Eu formato o valor-resumo exibido nos cards dos gráficos."""
+    decimal_valor = _valor_decimal(valor)
+    if decimal_valor is None:
+        decimal_valor = Decimal("0")
+
+    if tipo_valor == "percentual":
+        return _formatar_percentual_health_check(decimal_valor)
+
+    if decimal_valor == decimal_valor.to_integral_value():
+        return str(int(decimal_valor))
+
+    return _formatar_numero_br_health_check(decimal_valor, 2)
+
+
+def _montar_card_serie_temporal_health_check(
+    *,
+    titulo: str,
+    subtitulo: str,
+    tipo_valor: str,
+    pontos: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Eu transformo os pontos da série em payload pronto para o template."""
+    labels: list[str] = []
+    valores: list[float] = []
+    datas: list[str] = []
+
+    for ponto in pontos:
+        data_texto = str(ponto.get("data_label") or "—")
+        valor_decimal = _valor_decimal(ponto.get("valor"))
+        if valor_decimal is None:
+            valor_decimal = Decimal("0")
+
+        labels.append(data_texto)
+        datas.append(data_texto)
+        valores.append(float(valor_decimal))
+
+    if not valores:
+        labels = ["—"]
+        datas = ["—"]
+        valores = [0.0]
+
+    ultimo_valor = valores[-1]
+    minimo_valor = min(valores)
+    maximo_valor = max(valores)
+
+    return {
+        "titulo": titulo,
+        "subtitulo": subtitulo,
+        "tipo_valor": tipo_valor,
+        "labels": labels,
+        "valores": valores,
+        "total_pontos": len(valores),
+        "ultima_data": datas[-1],
+        "ultimo_valor_texto": _formatar_valor_card_serie_health_check(ultimo_valor, tipo_valor),
+        "minimo_valor_texto": _formatar_valor_card_serie_health_check(minimo_valor, tipo_valor),
+        "maximo_valor_texto": _formatar_valor_card_serie_health_check(maximo_valor, tipo_valor),
+    }
+
+
+def _obter_pontos_serie_variacao_health_check(
+    *,
+    nome_tabela: str,
+    coluna_data: str,
+    coluna_valor: str,
+    inicio_periodo: datetime,
+) -> list[dict[str, Any]]:
+    """Eu busco os pontos diários da série temporal dos últimos 12 meses."""
+    sql = text(f"""
+        SELECT
+            CAST([{coluna_data}] AS date) AS DataReferencia,
+            TRY_CONVERT(decimal(18, 6), [{coluna_valor}]) AS ValorVariacao
+        FROM {nome_tabela}
+        WHERE [{coluna_data}] >= :inicio_periodo
+          AND [{coluna_data}] IS NOT NULL
+          AND [{coluna_valor}] IS NOT NULL
+        ORDER BY [{coluna_data}] ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "inicio_periodo": inicio_periodo,
+        },
+    ).mappings().all()
+
+    pontos: list[dict[str, Any]] = []
+    for row in rows:
+        data_ref = row.get("DataReferencia")
+        valor = row.get("ValorVariacao")
+
+        if data_ref is None:
+            continue
+
+        if hasattr(data_ref, "strftime"):
+            data_label = data_ref.strftime("%d/%m/%y")
+        else:
+            data_label = str(data_ref)
+
+        pontos.append(
+            {
+                "data_label": data_label,
+                "valor": _valor_decimal(valor) or Decimal("0"),
+            }
+        )
+
+    return pontos
+
+
+def _obter_series_temporais_mercado_health_check() -> list[dict[str, Any]]:
+    """Eu monto as séries temporais reais dos indicadores de mercado e OOH."""
+    hoje = datetime.now()
+    inicio_periodo = _deslocar_mes_health_check(datetime(hoje.year, hoje.month, 1), -11)
+
+    pontos_industrial = _obter_pontos_serie_variacao_health_check(
+        nome_tabela="[DataMining].[Silver].[FatoCotacaoDiariaIndiceIndustrial]",
+        coluna_data="DataCotacao",
+        coluna_valor="VarBRL",
+        inicio_periodo=inicio_periodo,
+    )
+
+    pontos_imobiliario = _obter_pontos_serie_variacao_health_check(
+        nome_tabela="[DataMining].[Silver].[FatoCotacaoDiariaIndiceImobiliario]",
+        coluna_data="DataCotacao",
+        coluna_valor="VarBRL",
+        inicio_periodo=inicio_periodo,
+    )
+
+    pontos_consumo = _obter_pontos_serie_variacao_health_check(
+        nome_tabela="[DataMining].[Silver].[FatoCotacaoDiariaIndiceConsumo]",
+        coluna_data="DataCotacao",
+        coluna_valor="VarBRL",
+        inicio_periodo=inicio_periodo,
+    )
+
+    pontos_ooh = _obter_pontos_serie_variacao_health_check(
+        nome_tabela="[Integracao].[Silver].[FatoIndiceOOHDiario]",
+        coluna_data="Data",
+        coluna_valor="VariacaoPercent",
+        inicio_periodo=inicio_periodo,
+    )
+
+    pontos_ooh_global = _obter_pontos_serie_variacao_health_check(
+        nome_tabela="[Integracao].[Silver].[FatoIndiceOOHGlobal]",
+        coluna_data="Data",
+        coluna_valor="VariacaoPercent",
+        inicio_periodo=inicio_periodo,
+    )
+
+    return [
+        _montar_card_serie_temporal_health_check(
+            titulo="Índice Industrial",
+            subtitulo="Variação diária do índice industrial nos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_industrial,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Índice Imobiliário",
+            subtitulo="Variação diária do índice imobiliário nos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_imobiliario,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Índice Consumo",
+            subtitulo="Variação diária do índice de consumo nos últimos 12 meses.",
+            tipo_valor="numero",
+            pontos=pontos_consumo,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Índice OOH",
+            subtitulo="Variação percentual diária do índice OOH nos últimos 12 meses.",
+            tipo_valor="percentual",
+            pontos=pontos_ooh,
+        ),
+        _montar_card_serie_temporal_health_check(
+            titulo="Índice OOH Global",
+            subtitulo="Variação percentual diária do índice OOH global nos últimos 12 meses.",
+            tipo_valor="percentual",
+            pontos=pontos_ooh_global,
+        ),
+    ]
+
+
+
+
+
+
 @kanban_bp.route("/health-check-comercial", methods=["GET"])
 @login_required
 def health_check_comercial():
@@ -10619,6 +11461,8 @@ def health_check_comercial():
         dados["kpis"]["descontos_mes"] = descontos_mes
         dados["kpis"]["media_desconto"] = _formatar_percentual_health_check(media_desconto)
 
+        dados["series_temporais_mercado"] = _obter_series_temporais_mercado_health_check()
+
         dados["resumo_financeiro"] = _obter_resumo_financeiro_health_check(
             id_kanban=id_kanban,
             id_empresa_proprietaria=id_empresa_proprietaria,
@@ -10699,6 +11543,8 @@ def health_check_comercial():
         "kanban/health_check_comercial.html",
         dados=dados,
     )
+
+
 
 
 
@@ -11512,3 +12358,7 @@ def api_aprovacao_preco_aprovar(id_card: int):
             "historico_card_url": url_for("kanban.historico_card_visualizacao", id_card=int(id_card)),
         }
     )
+
+
+
+
