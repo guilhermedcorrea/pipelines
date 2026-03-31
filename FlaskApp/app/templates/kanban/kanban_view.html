@@ -1172,6 +1172,89 @@
     text-overflow: ellipsis;
   }
 
+  .kb-cadastro-empresa-modal-card{
+    max-width: 1180px;
+  }
+
+  .kb-cadastro-empresa-grid{
+    display:grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap:12px;
+  }
+
+  .kb-cadastro-empresa-grid .span-2{
+    grid-column: span 2;
+  }
+
+  .kb-cadastro-empresa-grid .span-3{
+    grid-column: 1 / -1;
+  }
+
+  .kb-cadastro-empresa-toolbar{
+    display:flex;
+    gap:10px;
+    align-items:end;
+    flex-wrap:wrap;
+  }
+
+  .kb-cadastro-empresa-status{
+    display:none;
+    padding:10px 12px;
+    border-radius:12px;
+    font-weight:900;
+    font-size:12px;
+  }
+
+  .kb-cadastro-empresa-status.is-info{
+    display:block;
+    color:#0f3f84;
+    border:1px solid rgba(11,78,162,.18);
+    background:rgba(11,78,162,.08);
+  }
+
+  .kb-cadastro-empresa-status.is-erro{
+    display:block;
+    color:#991b1b;
+    border:1px solid rgba(239,68,68,.22);
+    background:rgba(239,68,68,.08);
+  }
+
+  .kb-cadastro-empresa-status.is-sucesso{
+    display:block;
+    color:#166534;
+    border:1px solid rgba(34,197,94,.22);
+    background:rgba(34,197,94,.08);
+  }
+
+  .kb-input[readonly],
+  .kb-input:disabled,
+  .kb-select:disabled,
+  .kb-textarea:disabled{
+    background: rgba(15,23,42,.04);
+    color: rgba(15,23,42,.72);
+  }
+
+  @media (max-width: 980px){
+    .kb-cadastro-empresa-grid{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .kb-cadastro-empresa-grid .span-3{
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 640px){
+    .kb-cadastro-empresa-grid{
+      grid-template-columns: 1fr;
+    }
+
+    .kb-cadastro-empresa-grid .span-2,
+    .kb-cadastro-empresa-grid .span-3{
+      grid-column: auto;
+    }
+  }
+
   .kb-painel-box{
     display:none;
     border: 1px solid rgba(15,23,42,.10);
@@ -2201,11 +2284,14 @@
       <input id="cardTitulo" class="kb-input" placeholder="Título" />
       <textarea id="cardDescricao" class="kb-textarea" rows="6" placeholder="Descrição"></textarea>
 
-      <div class="kb-section-title">Empresa</div>
+      <div class="kb-row" style="justify-content:space-between;align-items:center;">
+        <div class="kb-section-title">Empresa</div>
+        <button class="kb-btn sm kb-btn-orcamento" id="btnAbrirCadastroEmpresa" type="button" title="Cadastrar ou editar empresa deste card">Cadastrar Empresa</button>
+      </div>
       <div class="kb-empresa-box">
         <div class="kb-row">
           <select id="selectEmpresaCard" class="kb-select grow"></select>
-          <button class="kb-btn sm" id="btnLimparEmpresa">Sem empresa</button>
+          <button class="kb-btn sm" id="btnLimparEmpresa" type="button">Sem empresa</button>
         </div>
 
         <div id="empresaPreview" class="kb-empresa-preview">
@@ -2252,6 +2338,190 @@
       </div>
 
       <div id="msgCard" class="kb-msg-erro"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalCadastroEmpresa" class="kb-modal">
+  <div class="kb-modal-card kb-cadastro-empresa-modal-card">
+    <div class="kb-modal-head">
+      <strong>Cadastrar Empresa</strong>
+      <button class="kb-btn" id="btnFecharCadastroEmpresa" type="button">Fechar</button>
+    </div>
+
+    <div class="kb-modal-body">
+      <div class="kb-cadastro-empresa-toolbar">
+        <div class="kb-campo" style="flex:1 1 260px;min-width:min(260px,100%);">
+          <div class="kb-campo-label">CNPJ</div>
+          <input id="cadEmpresaCnpj" class="kb-input" placeholder="00.000.000/0000-00" maxlength="18" />
+        </div>
+      </div>
+
+      <div id="msgCadastroEmpresa" class="kb-cadastro-empresa-status"></div>
+
+      <div class="kb-cadastro-empresa-grid">
+        <div class="kb-campo">
+          <div class="kb-campo-label">ID Empresa</div>
+          <input id="cadEmpresaId" class="kb-input" readonly />
+        </div>
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Empresa Proprietária</div>
+          <select id="cadEmpresaProprietaria" class="kb-select"></select>
+        </div>
+
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Razão Social</div>
+          <input id="cadEmpresaRazaoSocial" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Nome Fantasia</div>
+          <input id="cadEmpresaNomeFantasia" class="kb-input" />
+        </div>
+
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Email</div>
+          <input id="cadEmpresaEmail" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">BitCliente</div>
+          <select id="cadEmpresaBitCliente" class="kb-select">
+            <option value="">— Não definido —</option>
+            <option value="1">Sim</option>
+            <option value="0">Não</option>
+          </select>
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Telefone 1</div>
+          <input id="cadEmpresaTelefone1" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Telefone 2</div>
+          <input id="cadEmpresaTelefone2" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">País</div>
+          <input id="cadEmpresaPais" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">CEP</div>
+          <input id="cadEmpresaCep" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">UF</div>
+          <input id="cadEmpresaUf" class="kb-input" maxlength="3" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Município</div>
+          <input id="cadEmpresaMunicipio" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Bairro</div>
+          <input id="cadEmpresaBairro" class="kb-input" />
+        </div>
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Logradouro</div>
+          <input id="cadEmpresaLogradouro" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Número</div>
+          <input id="cadEmpresaNumero" class="kb-input" />
+        </div>
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Complemento</div>
+          <input id="cadEmpresaComplemento" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">CNAE</div>
+          <input id="cadEmpresaCnae" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Código Porte</div>
+          <input id="cadEmpresaCodigoPorte" class="kb-input" type="number" step="1" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Porte</div>
+          <input id="cadEmpresaPorte" class="kb-input" />
+        </div>
+
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Descrição CNAE</div>
+          <input id="cadEmpresaDescricaoCnae" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Natureza Jurídica</div>
+          <input id="cadEmpresaNaturezaJuridica" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Capital Social</div>
+          <input id="cadEmpresaCapitalSocial" class="kb-input" type="number" step="1" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Identificador Matriz/Filial</div>
+          <input id="cadEmpresaIdentificadorMatrizFilial" class="kb-input" type="number" step="1" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Descrição Matriz/Filial</div>
+          <input id="cadEmpresaDescricaoIdentificadorMatrizFilial" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Situação Cadastral</div>
+          <input id="cadEmpresaDescricaoSituacaoCadastral" class="kb-input" />
+        </div>
+        <div class="kb-campo span-2">
+          <div class="kb-campo-label">Motivo Situação Cadastral</div>
+          <input id="cadEmpresaDescricaoMotivoSituacaoCadastral" class="kb-input" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Tipo de Logradouro</div>
+          <input id="cadEmpresaDescricaoTipoLogradouro" class="kb-input" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Latitude</div>
+          <input id="cadEmpresaLatitude" class="kb-input" type="number" step="any" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Longitude</div>
+          <input id="cadEmpresaLongitude" class="kb-input" type="number" step="any" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Início Atividades</div>
+          <input id="cadEmpresaDataInicioAtividades" class="kb-input" type="date" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Situação Especial</div>
+          <input id="cadEmpresaDataSituacaoEspecial" class="kb-input" type="date" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Opção pelo Simples</div>
+          <input id="cadEmpresaDataOpcaoPeloSimples" class="kb-input" type="date" />
+        </div>
+
+        <div class="kb-campo">
+          <div class="kb-campo-label">Situação Cadastral em</div>
+          <input id="cadEmpresaDataSituacaoCadastral" class="kb-input" type="date" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Exclusão do Simples</div>
+          <input id="cadEmpresaDataExclusaoSimples" class="kb-input" type="date" />
+        </div>
+        <div class="kb-campo">
+          <div class="kb-campo-label">Data Atualização</div>
+          <input id="cadEmpresaDataAtualizacao" class="kb-input" readonly />
+        </div>
+      </div>
+
+      <div class="kb-row" style="justify-content:flex-end;">
+        <button class="kb-btn primary" id="btnSalvarCadastroEmpresa" type="button">Salvar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2399,6 +2669,9 @@
 
   let empresasCatalogo = [];
   let empresasPorId = new Map();
+  let empresasProprietariasCatalogo = [];
+  let empresaCadastroConsultaTimer = null;
+  let empresaCadastroUltimoCnpjConsultado = "";
 
   const TAM_LOTE_POR_FASE = 8;
   const estadoFase = new Map();
@@ -2458,6 +2731,48 @@
 
   const selectEmpresaCard = document.getElementById("selectEmpresaCard");
   const btnLimparEmpresa = document.getElementById("btnLimparEmpresa");
+  const btnAbrirCadastroEmpresa = document.getElementById("btnAbrirCadastroEmpresa");
+  const modalCadastroEmpresa = document.getElementById("modalCadastroEmpresa");
+  const btnFecharCadastroEmpresa = document.getElementById("btnFecharCadastroEmpresa");
+  const btnSalvarCadastroEmpresa = document.getElementById("btnSalvarCadastroEmpresa");
+  const msgCadastroEmpresa = document.getElementById("msgCadastroEmpresa");
+
+  const cadEmpresaId = document.getElementById("cadEmpresaId");
+  const cadEmpresaCnpj = document.getElementById("cadEmpresaCnpj");
+  const cadEmpresaProprietaria = document.getElementById("cadEmpresaProprietaria");
+  const cadEmpresaRazaoSocial = document.getElementById("cadEmpresaRazaoSocial");
+  const cadEmpresaNomeFantasia = document.getElementById("cadEmpresaNomeFantasia");
+  const cadEmpresaEmail = document.getElementById("cadEmpresaEmail");
+  const cadEmpresaBitCliente = document.getElementById("cadEmpresaBitCliente");
+  const cadEmpresaTelefone1 = document.getElementById("cadEmpresaTelefone1");
+  const cadEmpresaTelefone2 = document.getElementById("cadEmpresaTelefone2");
+  const cadEmpresaPais = document.getElementById("cadEmpresaPais");
+  const cadEmpresaCep = document.getElementById("cadEmpresaCep");
+  const cadEmpresaUf = document.getElementById("cadEmpresaUf");
+  const cadEmpresaMunicipio = document.getElementById("cadEmpresaMunicipio");
+  const cadEmpresaBairro = document.getElementById("cadEmpresaBairro");
+  const cadEmpresaLogradouro = document.getElementById("cadEmpresaLogradouro");
+  const cadEmpresaNumero = document.getElementById("cadEmpresaNumero");
+  const cadEmpresaComplemento = document.getElementById("cadEmpresaComplemento");
+  const cadEmpresaCnae = document.getElementById("cadEmpresaCnae");
+  const cadEmpresaCodigoPorte = document.getElementById("cadEmpresaCodigoPorte");
+  const cadEmpresaPorte = document.getElementById("cadEmpresaPorte");
+  const cadEmpresaDescricaoCnae = document.getElementById("cadEmpresaDescricaoCnae");
+  const cadEmpresaNaturezaJuridica = document.getElementById("cadEmpresaNaturezaJuridica");
+  const cadEmpresaCapitalSocial = document.getElementById("cadEmpresaCapitalSocial");
+  const cadEmpresaIdentificadorMatrizFilial = document.getElementById("cadEmpresaIdentificadorMatrizFilial");
+  const cadEmpresaDescricaoIdentificadorMatrizFilial = document.getElementById("cadEmpresaDescricaoIdentificadorMatrizFilial");
+  const cadEmpresaDescricaoSituacaoCadastral = document.getElementById("cadEmpresaDescricaoSituacaoCadastral");
+  const cadEmpresaDescricaoMotivoSituacaoCadastral = document.getElementById("cadEmpresaDescricaoMotivoSituacaoCadastral");
+  const cadEmpresaDescricaoTipoLogradouro = document.getElementById("cadEmpresaDescricaoTipoLogradouro");
+  const cadEmpresaLatitude = document.getElementById("cadEmpresaLatitude");
+  const cadEmpresaLongitude = document.getElementById("cadEmpresaLongitude");
+  const cadEmpresaDataInicioAtividades = document.getElementById("cadEmpresaDataInicioAtividades");
+  const cadEmpresaDataSituacaoEspecial = document.getElementById("cadEmpresaDataSituacaoEspecial");
+  const cadEmpresaDataOpcaoPeloSimples = document.getElementById("cadEmpresaDataOpcaoPeloSimples");
+  const cadEmpresaDataSituacaoCadastral = document.getElementById("cadEmpresaDataSituacaoCadastral");
+  const cadEmpresaDataExclusaoSimples = document.getElementById("cadEmpresaDataExclusaoSimples");
+  const cadEmpresaDataAtualizacao = document.getElementById("cadEmpresaDataAtualizacao");
 
   const painelFaceWrap = document.getElementById("painelFaceWrap");
   const painelFaceLista = document.getElementById("painelFaceLista");
@@ -3558,6 +3873,355 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       return;
     }
     setEmpresaPreviewByObj(empresasPorId.get(id) || null);
+  }
+
+  function setMensagemCadastroEmpresa(texto, tipo = "info") {
+    if (!msgCadastroEmpresa) return;
+
+    const mensagem = safeStr(texto).trim();
+    msgCadastroEmpresa.className = "kb-cadastro-empresa-status";
+    msgCadastroEmpresa.textContent = mensagem;
+
+    if (!mensagem) {
+      return;
+    }
+
+    if (tipo === "erro") msgCadastroEmpresa.classList.add("is-erro");
+    else if (tipo === "sucesso") msgCadastroEmpresa.classList.add("is-sucesso");
+    else msgCadastroEmpresa.classList.add("is-info");
+  }
+
+  async function carregarEmpresasProprietarias() {
+    if (empresasProprietariasCatalogo.length) return;
+
+    const r = await fetch(`/kanban/api/empresas-proprietarias`, { credentials: "same-origin" });
+    const j = await r.json().catch(() => null);
+
+    if (!r.ok || !j || !j.ok) {
+      throw new Error((j && (j.msg || j.erro)) || `Erro ao carregar empresas proprietárias (HTTP ${r.status})`);
+    }
+
+    empresasProprietariasCatalogo = Array.isArray(j.empresas_proprietarias) ? j.empresas_proprietarias : [];
+
+    cadEmpresaProprietaria.innerHTML = "";
+    cadEmpresaProprietaria.appendChild(el("option", { value: "" }, ["— Selecione —"]));
+
+    empresasProprietariasCatalogo.forEach(item => {
+      const id = Number(item?.IDEmpresaProprietaria || 0);
+      const razao = safeStr(item?.RazaoSocial || "").trim() || `Empresa #${id}`;
+      const cnpj = mascaraCnpj(item?.CNPJ || "");
+      const texto = cnpj ? `${razao} | ${cnpj}` : razao;
+      cadEmpresaProprietaria.appendChild(el("option", { value: String(id) }, [texto]));
+    });
+  }
+
+  function obterEmpresaAtualDoCard() {
+    const idEmp = idNum(selectEmpresaCard?.value || 0);
+    if (idEmp && empresasPorId.has(idEmp)) {
+      return empresasPorId.get(idEmp);
+    }
+
+    return obterCardPorId(cardAbertoId) || null;
+  }
+
+  function limparFormularioCadastroEmpresa() {
+    cadEmpresaId.value = "";
+    cadEmpresaCnpj.value = "";
+    cadEmpresaProprietaria.value = "";
+    cadEmpresaRazaoSocial.value = "";
+    cadEmpresaNomeFantasia.value = "";
+    cadEmpresaEmail.value = "";
+    cadEmpresaBitCliente.value = "";
+    cadEmpresaTelefone1.value = "";
+    cadEmpresaTelefone2.value = "";
+    cadEmpresaPais.value = "";
+    cadEmpresaCep.value = "";
+    cadEmpresaUf.value = "";
+    cadEmpresaMunicipio.value = "";
+    cadEmpresaBairro.value = "";
+    cadEmpresaLogradouro.value = "";
+    cadEmpresaNumero.value = "";
+    cadEmpresaComplemento.value = "";
+    cadEmpresaCnae.value = "";
+    cadEmpresaCodigoPorte.value = "";
+    cadEmpresaPorte.value = "";
+    cadEmpresaDescricaoCnae.value = "";
+    cadEmpresaNaturezaJuridica.value = "";
+    cadEmpresaCapitalSocial.value = "";
+    cadEmpresaIdentificadorMatrizFilial.value = "";
+    cadEmpresaDescricaoIdentificadorMatrizFilial.value = "";
+    cadEmpresaDescricaoSituacaoCadastral.value = "";
+    cadEmpresaDescricaoMotivoSituacaoCadastral.value = "";
+    cadEmpresaDescricaoTipoLogradouro.value = "";
+    cadEmpresaLatitude.value = "";
+    cadEmpresaLongitude.value = "";
+    cadEmpresaDataInicioAtividades.value = "";
+    cadEmpresaDataSituacaoEspecial.value = "";
+    cadEmpresaDataOpcaoPeloSimples.value = "";
+    cadEmpresaDataSituacaoCadastral.value = "";
+    cadEmpresaDataExclusaoSimples.value = "";
+    cadEmpresaDataAtualizacao.value = "";
+    empresaCadastroUltimoCnpjConsultado = "";
+  }
+
+  function preencherFormularioCadastroEmpresa(empresa) {
+    const emp = empresa || {};
+
+    cadEmpresaId.value = safeStr(emp.IDEmpresa || "");
+    cadEmpresaCnpj.value = mascaraCnpj(emp.CNPJ || "");
+    cadEmpresaProprietaria.value = emp.IDEmpresaProprietaria !== null && emp.IDEmpresaProprietaria !== undefined ? String(emp.IDEmpresaProprietaria) : "";
+    cadEmpresaRazaoSocial.value = safeStr(emp.RazaoSocial || "");
+    cadEmpresaNomeFantasia.value = safeStr(emp.NomeFantasia || "");
+    cadEmpresaEmail.value = safeStr(emp.Email || "");
+    cadEmpresaBitCliente.value = emp.BitCliente === null || emp.BitCliente === undefined || emp.BitCliente === "" ? "" : String(Number(emp.BitCliente));
+    cadEmpresaTelefone1.value = safeStr(emp.TelefoneContato1 || "");
+    cadEmpresaTelefone2.value = safeStr(emp.TelefoneContato2 || "");
+    cadEmpresaPais.value = safeStr(emp.Pais || "");
+    cadEmpresaCep.value = safeStr(emp.CEP || "");
+    cadEmpresaUf.value = safeStr(emp.UF || "");
+    cadEmpresaMunicipio.value = safeStr(emp.Municipio || "");
+    cadEmpresaBairro.value = safeStr(emp.Bairro || "");
+    cadEmpresaLogradouro.value = safeStr(emp.Logradouro || "");
+    cadEmpresaNumero.value = safeStr(emp.Numero || "");
+    cadEmpresaComplemento.value = safeStr(emp.Complemento || "");
+    cadEmpresaCnae.value = safeStr(emp.CNAE || "");
+    cadEmpresaCodigoPorte.value = emp.CodigoPorte === null || emp.CodigoPorte === undefined ? "" : String(emp.CodigoPorte);
+    cadEmpresaPorte.value = safeStr(emp.Porte || "");
+    cadEmpresaDescricaoCnae.value = safeStr(emp.DescricaoCnae || "");
+    cadEmpresaNaturezaJuridica.value = safeStr(emp.NaturezaJuridica || "");
+    cadEmpresaCapitalSocial.value = emp.CapitalSocial === null || emp.CapitalSocial === undefined ? "" : String(emp.CapitalSocial);
+    cadEmpresaIdentificadorMatrizFilial.value = emp.IdentificadorMatrizFilial === null || emp.IdentificadorMatrizFilial === undefined ? "" : String(emp.IdentificadorMatrizFilial);
+    cadEmpresaDescricaoIdentificadorMatrizFilial.value = safeStr(emp.DescricaoIdentificadorMatrizFilial || "");
+    cadEmpresaDescricaoSituacaoCadastral.value = safeStr(emp.DescricaoSituacaoCadastral || "");
+    cadEmpresaDescricaoMotivoSituacaoCadastral.value = safeStr(emp.DescricaoMotivoSituacaoCadastral || "");
+    cadEmpresaDescricaoTipoLogradouro.value = safeStr(emp.DescricaoTipoLogradouro || "");
+    cadEmpresaLatitude.value = emp.Latitude === null || emp.Latitude === undefined ? "" : String(emp.Latitude);
+    cadEmpresaLongitude.value = emp.Longitude === null || emp.Longitude === undefined ? "" : String(emp.Longitude);
+    cadEmpresaDataInicioAtividades.value = safeStr(emp.DataInicioAtividades || "").slice(0, 10);
+    cadEmpresaDataSituacaoEspecial.value = safeStr(emp.DataSituacaoEspecial || "").slice(0, 10);
+    cadEmpresaDataOpcaoPeloSimples.value = safeStr(emp.DataOpcaoPeloSimples || "").slice(0, 10);
+    cadEmpresaDataSituacaoCadastral.value = safeStr(emp.DataSituacaoCadastral || "").slice(0, 10);
+    cadEmpresaDataExclusaoSimples.value = safeStr(emp.DataExclusaoSimples || "").slice(0, 10);
+    cadEmpresaDataAtualizacao.value = safeStr(emp.DataAtualizacao || "");
+
+    empresaCadastroUltimoCnpjConsultado = normalizaCnpj(cadEmpresaCnpj.value || "");
+  }
+
+  function coletarFormularioCadastroEmpresa() {
+    return {
+      IDEmpresa: cadEmpresaId.value ? Number(cadEmpresaId.value) : null,
+      IDEmpresaProprietaria: cadEmpresaProprietaria.value ? Number(cadEmpresaProprietaria.value) : null,
+      CNPJ: cadEmpresaCnpj.value || "",
+      UF: cadEmpresaUf.value || null,
+      CEP: cadEmpresaCep.value || null,
+      CodigoPorte: cadEmpresaCodigoPorte.value || null,
+      Pais: cadEmpresaPais.value || null,
+      Email: cadEmpresaEmail.value || null,
+      Porte: cadEmpresaPorte.value || null,
+      Bairro: cadEmpresaBairro.value || null,
+      Numero: cadEmpresaNumero.value || null,
+      TelefoneContato1: cadEmpresaTelefone1.value || null,
+      Municipio: cadEmpresaMunicipio.value || null,
+      Logradouro: cadEmpresaLogradouro.value || null,
+      CNAE: cadEmpresaCnae.value || null,
+      Complemento: cadEmpresaComplemento.value || null,
+      RazaoSocial: cadEmpresaRazaoSocial.value || null,
+      NomeFantasia: cadEmpresaNomeFantasia.value || null,
+      CapitalSocial: cadEmpresaCapitalSocial.value || null,
+      TelefoneContato2: cadEmpresaTelefone2.value || null,
+      NaturezaJuridica: cadEmpresaNaturezaJuridica.value || null,
+      DescricaoCnae: cadEmpresaDescricaoCnae.value || null,
+      DataInicioAtividades: cadEmpresaDataInicioAtividades.value || null,
+      DataSituacaoEspecial: cadEmpresaDataSituacaoEspecial.value || null,
+      DataOpcaoPeloSimples: cadEmpresaDataOpcaoPeloSimples.value || null,
+      DataSituacaoCadastral: cadEmpresaDataSituacaoCadastral.value || null,
+      DataExclusaoSimples: cadEmpresaDataExclusaoSimples.value || null,
+      IdentificadorMatrizFilial: cadEmpresaIdentificadorMatrizFilial.value || null,
+      DescricaoSituacaoCadastral: cadEmpresaDescricaoSituacaoCadastral.value || null,
+      DescricaoMotivoSituacaoCadastral: cadEmpresaDescricaoMotivoSituacaoCadastral.value || null,
+      DescricaoIdentificadorMatrizFilial: cadEmpresaDescricaoIdentificadorMatrizFilial.value || null,
+      DescricaoTipoLogradouro: cadEmpresaDescricaoTipoLogradouro.value || null,
+      Latitude: cadEmpresaLatitude.value || null,
+      Longitude: cadEmpresaLongitude.value || null,
+      BitCliente: cadEmpresaBitCliente.value === "" ? null : Number(cadEmpresaBitCliente.value),
+    };
+  }
+
+  function atualizarCatalogoEmpresa(empresa) {
+    if (!empresa) return;
+
+    const idEmpresa = idNum(empresa.IDEmpresa || 0);
+    if (!idEmpresa) return;
+
+    const registro = Object.assign({}, empresasPorId.get(idEmpresa) || {}, empresa || {});
+    empresasPorId.set(idEmpresa, registro);
+
+    const idx = empresasCatalogo.findIndex(item => idNum(item?.IDEmpresa || 0) === idEmpresa);
+    if (idx >= 0) empresasCatalogo[idx] = registro;
+    else empresasCatalogo.push(registro);
+
+    empresasCatalogo.sort((a, b) => safeStr(a?.RazaoSocial || "").localeCompare(safeStr(b?.RazaoSocial || ""), "pt-BR"));
+    montarSelectEmpresas();
+  }
+
+  async function consultarCadastroEmpresa(parametros = {}) {
+    const idEmpresa = idNum(parametros.idEmpresa || 0);
+    const cnpjDigits = normalizaCnpj(parametros.cnpj || "");
+
+    let url = "";
+
+    if (idEmpresa > 0) {
+      url = `/kanban/api/empresas/cadastro/${idEmpresa}`;
+    } else if (cnpjDigits.length === 14) {
+      const query = new URLSearchParams();
+      query.set("cnpj", cnpjDigits);
+      url = `/kanban/api/empresas/cadastro/buscar-por-cnpj?${query.toString()}`;
+    } else {
+      throw new Error("Informe um ID de empresa válido ou um CNPJ com 14 dígitos para consultar.");
+    }
+
+    const r = await fetch(url, { credentials: "same-origin" });
+    const j = await r.json().catch(() => null);
+
+    if (!r.ok || !j || !j.ok) {
+      throw new Error((j && (j.msg || j.erro)) || `Erro ao consultar empresa (HTTP ${r.status})`);
+    }
+
+    return j;
+  }
+
+  async function buscarCadastroEmpresaPorCnpj(cnpjInformado, opcoes = {}) {
+    const cnpjDigits = normalizaCnpj(cnpjInformado);
+    if (cnpjDigits.length !== 14) {
+      if (!opcoes.silencioso) {
+        setMensagemCadastroEmpresa("Digite um CNPJ completo com 14 dígitos para buscar.", "info");
+      }
+      return null;
+    }
+
+    setMensagemCadastroEmpresa("Consultando cadastro da empresa...", "info");
+
+    const resposta = await consultarCadastroEmpresa({ cnpj: cnpjDigits });
+
+    if (resposta.encontrado && resposta.empresa) {
+      preencherFormularioCadastroEmpresa(resposta.empresa);
+      setMensagemCadastroEmpresa(
+        resposta.origem === "banco"
+          ? "Cadastro encontrado no banco de dados."
+          : "Cadastro encontrado na API Minha Receita e preenchido no formulário.",
+        "sucesso"
+      );
+      return resposta.empresa;
+    }
+
+    if (!opcoes.silencioso) {
+      setMensagemCadastroEmpresa("CNPJ não encontrado no banco e nem na API. Você pode preencher manualmente.", "info");
+    }
+    return null;
+  }
+
+  async function abrirModalCadastroEmpresa() {
+    try {
+      await carregarEmpresasProprietarias();
+      limparFormularioCadastroEmpresa();
+      setMensagemCadastroEmpresa("", "info");
+
+      const idEmpresaSelecionada = idNum(selectEmpresaCard?.value || 0);
+      const empresaAtual = obterEmpresaAtualDoCard();
+      const idEmpresaAtual = idEmpresaSelecionada || idNum(empresaAtual?.IDEmpresa || empresaAtual?.IDEmpresaRelacionadaCard || 0);
+      const idEmpresaProprietariaAtual = idNum(empresaAtual?.IDEmpresaProprietaria || 0);
+
+      if (idEmpresaProprietariaAtual) {
+        cadEmpresaProprietaria.value = String(idEmpresaProprietariaAtual);
+      }
+
+      if (idEmpresaAtual) {
+        const resposta = await consultarCadastroEmpresa({ idEmpresa: idEmpresaAtual });
+        if (resposta?.empresa) {
+          preencherFormularioCadastroEmpresa(resposta.empresa);
+          setMensagemCadastroEmpresa("Cadastro carregado para edição.", "info");
+        }
+      }
+
+      modalCadastroEmpresa.style.display = "block";
+    } catch (erro) {
+      setMensagemCadastroEmpresa(String(erro), "erro");
+      modalCadastroEmpresa.style.display = "block";
+    }
+  }
+
+  function fecharModalCadastroEmpresa() {
+    if (!modalCadastroEmpresa) return;
+    modalCadastroEmpresa.style.display = "none";
+    setMensagemCadastroEmpresa("", "info");
+    window.clearTimeout(empresaCadastroConsultaTimer);
+  }
+
+  function agendarBuscaAutomaticaCadastroEmpresa() {
+    window.clearTimeout(empresaCadastroConsultaTimer);
+    const cnpjDigits = normalizaCnpj(cadEmpresaCnpj.value || "");
+
+    if (cnpjDigits.length !== 14) {
+      empresaCadastroUltimoCnpjConsultado = "";
+      return;
+    }
+
+    if (empresaCadastroUltimoCnpjConsultado === cnpjDigits) {
+      return;
+    }
+
+    empresaCadastroConsultaTimer = window.setTimeout(async () => {
+      try {
+        await buscarCadastroEmpresaPorCnpj(cnpjDigits, { silencioso: true, idEmpresa: idNum(cadEmpresaId.value || 0) });
+        empresaCadastroUltimoCnpjConsultado = cnpjDigits;
+      } catch (erro) {
+        setMensagemCadastroEmpresa(String(erro), "erro");
+      }
+    }, 650);
+  }
+
+  async function salvarCadastroEmpresa() {
+    const cnpjDigits = normalizaCnpj(cadEmpresaCnpj.value || "");
+    if (cnpjDigits.length !== 14) {
+      setMensagemCadastroEmpresa("CNPJ é obrigatório e deve ter 14 dígitos.", "erro");
+      cadEmpresaCnpj.focus();
+      return;
+    }
+
+    const payload = coletarFormularioCadastroEmpresa();
+    payload.CNPJ = cnpjDigits;
+
+    btnSalvarCadastroEmpresa.disabled = true;
+    setMensagemCadastroEmpresa("Salvando cadastro da empresa...", "info");
+
+    try {
+      const r = await fetch(`/kanban/api/empresas/cadastro/salvar`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: headersJSON,
+        body: JSON.stringify(payload),
+      });
+
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) {
+        throw new Error((j && (j.msg || j.erro)) || `Erro ao salvar empresa (HTTP ${r.status})`);
+      }
+
+      if (j.empresa) {
+        preencherFormularioCadastroEmpresa(j.empresa);
+        atualizarCatalogoEmpresa(j.empresa);
+        if (selectEmpresaCard) {
+          selectEmpresaCard.value = String(j.empresa.IDEmpresa || "");
+        }
+        setEmpresaPreviewByObj(j.empresa);
+      }
+
+      setMensagemCadastroEmpresa(j.msg || "Empresa salva com sucesso.", "sucesso");
+    } catch (erro) {
+      setMensagemCadastroEmpresa(String(erro), "erro");
+    } finally {
+      btnSalvarCadastroEmpresa.disabled = false;
+    }
   }
 
   function formatarMoedaBR(valor){
@@ -5257,6 +5921,36 @@ async function moverCard(idCard, idFasePara, posicao) {
   btnLimparEmpresa.addEventListener("click", () => {
     selectEmpresaCard.value = "";
     setEmpresaPreviewByObj(null);
+  });
+
+  btnAbrirCadastroEmpresa?.addEventListener("click", async () => {
+    await abrirModalCadastroEmpresa();
+  });
+
+  btnFecharCadastroEmpresa?.addEventListener("click", () => {
+    fecharModalCadastroEmpresa();
+  });
+
+  modalCadastroEmpresa?.addEventListener("click", (e) => {
+    if (e.target === modalCadastroEmpresa) {
+      fecharModalCadastroEmpresa();
+    }
+  });
+
+  cadEmpresaCnpj?.addEventListener("input", () => {
+    const digits = normalizaCnpj(cadEmpresaCnpj.value || "");
+    cadEmpresaCnpj.value = mascaraCnpj(digits);
+
+    const cnpjAtualDoRegistro = normalizaCnpj(empresaCadastroUltimoCnpjConsultado || "");
+    if (digits !== cnpjAtualDoRegistro) {
+      cadEmpresaId.value = "";
+    }
+
+    agendarBuscaAutomaticaCadastroEmpresa();
+  });
+
+  btnSalvarCadastroEmpresa?.addEventListener("click", async () => {
+    await salvarCadastroEmpresa();
   });
 
   btnAdicionarPainelFace?.addEventListener("click", () => {

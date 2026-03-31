@@ -4,7 +4,7 @@ import unicodedata
 from collections.abc import Mapping
 from typing import Any
 from decimal import Decimal, InvalidOperation
-
+import requests
 from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import text
@@ -12362,3 +12362,733 @@ def api_aprovacao_preco_aprovar(id_card: int):
 
 
 
+
+
+
+
+
+
+TABELA_EMPRESAS_PROPRIETARIAS = "[Integracao].[dbo].[EmpresaProprietaria]"
+URL_API_MINHA_RECEITA = "https://minhareceita.org"
+
+
+def _normalizar_cnpj(valor: Any) -> str:
+    """Eu removo qualquer caractere não numérico do CNPJ."""
+    return re.sub(r"\D+", "", str(valor or ""))[:14]
+
+
+def _formatar_cnpj(valor: Any) -> str:
+    """Eu devolvo o CNPJ mascarado quando ele tiver 14 dígitos."""
+    cnpj = _normalizar_cnpj(valor)
+    if len(cnpj) != 14:
+        return str(valor or "")
+    return f"{cnpj[0:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:14]}"
+
+
+def _texto_ou_none(valor: Any, tamanho_maximo: int | None = None) -> str | None:
+    """Eu normalizo textos opcionais e corto no tamanho da coluna quando necessário."""
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    if tamanho_maximo is not None:
+        texto = texto[: int(tamanho_maximo)]
+    return texto
+
+
+def _int_ou_none(valor: Any) -> int | None:
+    """Eu converto números inteiros opcionais."""
+    if valor in (None, ""):
+        return None
+    try:
+        return int(str(valor).strip())
+    except Exception:
+        return None
+
+
+def _bigint_ou_none(valor: Any) -> int | None:
+    """Eu converto bigint opcional."""
+    if valor in (None, ""):
+        return None
+    texto = str(valor).strip().replace(".", "").replace(",", "")
+    if not texto:
+        return None
+    try:
+        return int(texto)
+    except Exception:
+        return None
+
+
+def _decimal_ou_none(valor: Any) -> Decimal | None:
+    """Eu converto decimal opcional aceitando vírgula ou ponto."""
+    if valor in (None, ""):
+        return None
+    texto = str(valor).strip().replace(",", ".")
+    if not texto:
+        return None
+    try:
+        return Decimal(texto)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _bit_ou_none(valor: Any) -> int | None:
+    """Eu converto valores lógicos para bit do SQL Server."""
+    if valor in (None, ""):
+        return None
+
+    if isinstance(valor, bool):
+        return 1 if valor else 0
+
+    texto = str(valor).strip().lower()
+    if texto in {"1", "true", "t", "sim", "s", "yes", "y"}:
+        return 1
+    if texto in {"0", "false", "f", "nao", "não", "n", "no"}:
+        return 0
+
+    return None
+
+
+def _serializar_valor_json_empresa(valor: Any) -> Any:
+    """Eu converto tipos do SQL Server para JSON seguro."""
+    if isinstance(valor, datetime):
+        return valor.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(valor, date):
+        return valor.strftime("%Y-%m-%d")
+    if isinstance(valor, Decimal):
+        return float(valor)
+    return valor
+
+
+def _serializar_empresa(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """Eu transformo a linha da empresa em dicionário JSON."""
+    if not row:
+        return None
+
+    dados = {}
+    for chave, valor in dict(row).items():
+        if chave == "BitCliente" and valor is not None:
+            dados[chave] = bool(valor)
+            continue
+        dados[chave] = _serializar_valor_json_empresa(valor)
+
+    if dados.get("CNPJ"):
+        dados["CNPJ"] = _formatar_cnpj(dados["CNPJ"])
+
+    return dados
+
+
+def _listar_empresas_proprietarias_para_cadastro() -> list[dict[str, Any]]:
+    """Eu listo empresas proprietárias ativas para preencher o select do modal."""
+    chave = _chave_cache_json("kanban:api:empresas_proprietarias:lista")
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return em_cache
+
+    sql = text(f"""
+        SELECT
+            IDEmpresaProprietaria,
+            RazaoSocial,
+            CNPJ
+        FROM {TABELA_EMPRESAS_PROPRIETARIAS}
+        WHERE ISNULL(BitAtivo, 1) = 1
+        ORDER BY RazaoSocial ASC;
+    """)
+
+    rows = db.session.execute(sql).mappings().all()
+    lista = []
+    for row in rows:
+        item = dict(row)
+        item["CNPJ"] = _formatar_cnpj(item.get("CNPJ"))
+        lista.append(item)
+
+    _cache_json_set(chave, lista, TIMEOUT_CACHE_LONGO)
+    return lista
+
+
+def _buscar_empresa_completa_por_id(id_empresa: int) -> dict[str, Any] | None:
+    """Eu busco a empresa completa pelo IDEmpresa."""
+    sql = text(f"""
+        SELECT TOP 1
+            e.IDEmpresa,
+            e.IDEmpresaProprietaria,
+            e.CNPJ,
+            e.UF,
+            e.CEP,
+            e.CodigoPorte,
+            e.Pais,
+            e.Email,
+            e.Porte,
+            e.Bairro,
+            e.Numero,
+            e.TelefoneContato1,
+            e.Municipio,
+            e.Logradouro,
+            e.CNAE,
+            e.Complemento,
+            e.RazaoSocial,
+            e.NomeFantasia,
+            e.CapitalSocial,
+            e.TelefoneContato2,
+            e.NaturezaJuridica,
+            e.DescricaoCnae,
+            e.DataInicioAtividades,
+            e.DataSituacaoEspecial,
+            e.DataOpcaoPeloSimples,
+            e.DataSituacaoCadastral,
+            e.DataExclusaoSimples,
+            e.IdentificadorMatrizFilial,
+            e.DescricaoSituacaoCadastral,
+            e.DescricaoMotivoSituacaoCadastral,
+            e.DescricaoIdentificadorMatrizFilial,
+            e.DescricaoTipoLogradouro,
+            e.DataAtualizacao,
+            e.Latitude,
+            e.Longitude,
+            e.BitCliente,
+            c.Setor,
+            c.Classe
+        FROM {TABELA_EMPRESAS} e
+        LEFT JOIN {TABELA_CNAES} c
+          ON c.cnaepadrao = e.CNAE
+        WHERE e.IDEmpresa = :id_empresa;
+    """)
+
+    row = db.session.execute(sql, {"id_empresa": int(id_empresa)}).mappings().first()
+    return _serializar_empresa(row)
+
+
+def _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado: str) -> dict[str, Any] | None:
+    """Eu busco a empresa pelo CNPJ ignorando máscara."""
+    sql = text(f"""
+        SELECT TOP 1
+            e.IDEmpresa,
+            e.IDEmpresaProprietaria,
+            e.CNPJ,
+            e.UF,
+            e.CEP,
+            e.CodigoPorte,
+            e.Pais,
+            e.Email,
+            e.Porte,
+            e.Bairro,
+            e.Numero,
+            e.TelefoneContato1,
+            e.Municipio,
+            e.Logradouro,
+            e.CNAE,
+            e.Complemento,
+            e.RazaoSocial,
+            e.NomeFantasia,
+            e.CapitalSocial,
+            e.TelefoneContato2,
+            e.NaturezaJuridica,
+            e.DescricaoCnae,
+            e.DataInicioAtividades,
+            e.DataSituacaoEspecial,
+            e.DataOpcaoPeloSimples,
+            e.DataSituacaoCadastral,
+            e.DataExclusaoSimples,
+            e.IdentificadorMatrizFilial,
+            e.DescricaoSituacaoCadastral,
+            e.DescricaoMotivoSituacaoCadastral,
+            e.DescricaoIdentificadorMatrizFilial,
+            e.DescricaoTipoLogradouro,
+            e.DataAtualizacao,
+            e.Latitude,
+            e.Longitude,
+            e.BitCliente,
+            c.Setor,
+            c.Classe
+        FROM {TABELA_EMPRESAS} e
+        LEFT JOIN {TABELA_CNAES} c
+          ON c.cnaepadrao = e.CNAE
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(e.CNPJ, ''), '.', ''), '-', ''), '/', ''), ' ', '') = :cnpj
+        ORDER BY e.DataAtualizacao DESC, e.IDEmpresa DESC;
+    """)
+
+    row = db.session.execute(sql, {"cnpj": cnpj_normalizado}).mappings().first()
+    return _serializar_empresa(row)
+
+
+def _mapear_empresa_minha_receita(dados_api: dict[str, Any], cnpj_consultado: str) -> dict[str, Any] | None:
+    """Eu converto o payload da API Minha Receita para o formato da DimEmpresas."""
+    if not isinstance(dados_api, dict):
+        return None
+
+    cnpj_api = _normalizar_cnpj(dados_api.get("cnpj") or cnpj_consultado)
+    if len(cnpj_api) != 14:
+        return None
+
+    porte_valor = dados_api.get("porte")
+    if isinstance(porte_valor, dict):
+        porte_texto = porte_valor.get("descricao") or porte_valor.get("porte")
+    else:
+        porte_texto = porte_valor
+
+    natureza_valor = dados_api.get("natureza_juridica")
+    if isinstance(natureza_valor, dict):
+        natureza_texto = natureza_valor.get("descricao") or natureza_valor.get("nome")
+    else:
+        natureza_texto = natureza_valor
+
+    retorno = {
+        "IDEmpresa": None,
+        "IDEmpresaProprietaria": None,
+        "CNPJ": _formatar_cnpj(cnpj_api),
+        "UF": _texto_ou_none(dados_api.get("uf"), 3),
+        "CEP": _texto_ou_none(dados_api.get("cep"), 10),
+        "CodigoPorte": _int_ou_none(
+            dados_api.get("codigo_porte")
+            or (porte_valor.get("codigo") if isinstance(porte_valor, dict) else None)
+        ),
+        "Pais": _texto_ou_none(dados_api.get("pais") or "Brasil", 50),
+        "Email": _texto_ou_none(dados_api.get("email"), 100),
+        "Porte": _texto_ou_none(porte_texto, 200),
+        "Bairro": _texto_ou_none(dados_api.get("bairro"), 100),
+        "Numero": _texto_ou_none(dados_api.get("numero"), 20),
+        "TelefoneContato1": _texto_ou_none(
+            dados_api.get("ddd_telefone_1")
+            or dados_api.get("telefone")
+            or dados_api.get("telefone_1"),
+            20,
+        ),
+        "Municipio": _texto_ou_none(dados_api.get("municipio"), 100),
+        "Logradouro": _texto_ou_none(dados_api.get("logradouro"), 150),
+        "CNAE": _texto_ou_none(
+            dados_api.get("cnae_fiscal")
+            or dados_api.get("cnae")
+            or dados_api.get("atividade_principal"),
+            20,
+        ),
+        "Complemento": _texto_ou_none(dados_api.get("complemento"), 100),
+        "RazaoSocial": _texto_ou_none(
+            dados_api.get("razao_social")
+            or dados_api.get("nome_empresarial")
+            or dados_api.get("razao"),
+            150,
+        ),
+        "NomeFantasia": _texto_ou_none(dados_api.get("nome_fantasia"), 150),
+        "CapitalSocial": _bigint_ou_none(dados_api.get("capital_social")),
+        "TelefoneContato2": _texto_ou_none(
+            dados_api.get("ddd_telefone_2")
+            or dados_api.get("telefone_2"),
+            20,
+        ),
+        "NaturezaJuridica": _texto_ou_none(natureza_texto, 100),
+        "DescricaoCnae": _texto_ou_none(
+            dados_api.get("cnae_fiscal_descricao")
+            or dados_api.get("descricao_cnae")
+            or dados_api.get("atividade_principal_descricao"),
+            150,
+        ),
+        "DataInicioAtividades": _serializar_valor_json_empresa(
+            _para_data_sql_ou_none(dados_api.get("data_inicio_atividade"))
+        ),
+        "DataSituacaoEspecial": _serializar_valor_json_empresa(
+            _para_data_sql_ou_none(dados_api.get("data_situacao_especial"))
+        ),
+        "DataOpcaoPeloSimples": _serializar_valor_json_empresa(
+            _para_data_sql_ou_none(dados_api.get("data_opcao_pelo_simples"))
+        ),
+        "DataSituacaoCadastral": _serializar_valor_json_empresa(
+            _para_data_sql_ou_none(dados_api.get("data_situacao_cadastral"))
+        ),
+        "DataExclusaoSimples": _serializar_valor_json_empresa(
+            _para_data_sql_ou_none(dados_api.get("data_exclusao_simples"))
+        ),
+        "IdentificadorMatrizFilial": _int_ou_none(
+            dados_api.get("identificador_matriz_filial")
+            or dados_api.get("matriz_filial")
+        ),
+        "DescricaoSituacaoCadastral": _texto_ou_none(
+            dados_api.get("descricao_situacao_cadastral")
+            or dados_api.get("situacao_cadastral"),
+            20,
+        ),
+        "DescricaoMotivoSituacaoCadastral": _texto_ou_none(
+            dados_api.get("descricao_motivo_situacao_cadastral")
+            or dados_api.get("motivo_situacao_cadastral"),
+            20,
+        ),
+        "DescricaoIdentificadorMatrizFilial": _texto_ou_none(
+            dados_api.get("descricao_identificador_matriz_filial"),
+            20,
+        ),
+        "DescricaoTipoLogradouro": _texto_ou_none(
+            dados_api.get("descricao_tipo_logradouro")
+            or dados_api.get("tipo_logradouro"),
+            20,
+        ),
+        "DataAtualizacao": None,
+        "Latitude": _serializar_valor_json_empresa(_decimal_ou_none(dados_api.get("latitude"))),
+        "Longitude": _serializar_valor_json_empresa(_decimal_ou_none(dados_api.get("longitude"))),
+        "BitCliente": False,
+        "Setor": None,
+        "Classe": None,
+    }
+
+    return retorno
+
+
+def _buscar_empresa_na_api_minha_receita(cnpj_normalizado: str) -> dict[str, Any] | None:
+    """Eu consulto a API externa somente quando não encontro o CNPJ no banco."""
+    if len(cnpj_normalizado) != 14:
+        return None
+
+    try:
+        resposta = requests.get(
+            f"{URL_API_MINHA_RECEITA.rstrip('/')}/{cnpj_normalizado}",
+            timeout=12,
+            headers={"Accept": "application/json"},
+        )
+    except Exception as erro:
+        current_app.logger.warning(
+            "KANBAN EMPRESA: falha ao consultar Minha Receita para CNPJ=%s erro=%s",
+            cnpj_normalizado,
+            erro,
+        )
+        return None
+
+    if not resposta.ok:
+        return None
+
+    try:
+        dados_api = resposta.json()
+    except Exception:
+        return None
+
+    return _mapear_empresa_minha_receita(dados_api, cnpj_normalizado)
+
+
+def _invalidar_cache_empresas() -> None:
+    """Eu invalido os caches principais de empresa usados no modal do card."""
+    try:
+        cache.delete(_chave_cache_json("kanban:api:empresas:lista"))
+    except Exception:
+        pass
+
+    try:
+        cache.delete(_chave_cache_json("kanban:api:empresas_proprietarias:lista"))
+    except Exception:
+        pass
+
+
+@kanban_bp.route("/api/empresas-proprietarias", methods=["GET"])
+@login_required
+@limiter.limit("60/minute")
+def api_empresas_proprietarias_lista():
+    _assert_login()
+    return jsonify(
+        {
+            "ok": True,
+            "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+        }
+    )
+
+
+@kanban_bp.route("/api/empresas/cadastro/<int:id_empresa>", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_empresa_cadastro_por_id(id_empresa: int):
+    _assert_login()
+
+    empresa = _buscar_empresa_completa_por_id(id_empresa)
+    if not empresa:
+        return jsonify({"ok": False, "erro": "Empresa não encontrada."}), 404
+
+    return jsonify(
+        {
+            "ok": True,
+            "origem": "banco",
+            "empresa": empresa,
+            "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+        }
+    )
+
+
+@kanban_bp.route("/api/empresas/cadastro/buscar-por-cnpj", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_empresa_cadastro_buscar_por_cnpj():
+    _assert_login()
+
+    cnpj_normalizado = _normalizar_cnpj(request.args.get("cnpj"))
+    if len(cnpj_normalizado) != 14:
+        return jsonify(
+            {
+                "ok": True,
+                "encontrado": False,
+                "origem": None,
+                "empresa": None,
+                "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+            }
+        )
+
+    empresa_banco = _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado)
+    if empresa_banco:
+        return jsonify(
+            {
+                "ok": True,
+                "encontrado": True,
+                "origem": "banco",
+                "empresa": empresa_banco,
+                "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+            }
+        )
+
+    empresa_api = _buscar_empresa_na_api_minha_receita(cnpj_normalizado)
+    if empresa_api:
+        return jsonify(
+            {
+                "ok": True,
+                "encontrado": True,
+                "origem": "minha_receita",
+                "empresa": empresa_api,
+                "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "encontrado": False,
+            "origem": None,
+            "empresa": None,
+            "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+        }
+    )
+
+
+
+
+
+@kanban_bp.route("/api/empresas/cadastro/salvar", methods=["POST"])
+@login_required
+@limiter.limit("60/minute")
+def api_empresa_cadastro_salvar():
+    _assert_login()
+    id_empresa_usuario = _id_empresa_usuario_or_403()
+
+    payload = request.get_json(silent=True) or {}
+
+    cnpj_normalizado = _normalizar_cnpj(payload.get("CNPJ"))
+    if len(cnpj_normalizado) != 14:
+        return jsonify({"ok": False, "erro": "CNPJ é obrigatório e deve ter 14 dígitos."}), 400
+
+    id_empresa_informado = _int_ou_none(payload.get("IDEmpresa")) or 0
+
+    dados_sql = {
+        "IDEmpresa": id_empresa_informado or None,
+        "IDEmpresaProprietaria": _int_ou_none(payload.get("IDEmpresaProprietaria")) or id_empresa_usuario,
+        "CNPJ": _formatar_cnpj(cnpj_normalizado),
+        "UF": _texto_ou_none(payload.get("UF"), 3),
+        "CEP": _texto_ou_none(payload.get("CEP"), 10),
+        "CodigoPorte": _int_ou_none(payload.get("CodigoPorte")),
+        "Pais": _texto_ou_none(payload.get("Pais"), 50),
+        "Email": _texto_ou_none(payload.get("Email"), 100),
+        "Porte": _texto_ou_none(payload.get("Porte"), 200),
+        "Bairro": _texto_ou_none(payload.get("Bairro"), 100),
+        "Numero": _texto_ou_none(payload.get("Numero"), 20),
+        "TelefoneContato1": _texto_ou_none(payload.get("TelefoneContato1"), 20),
+        "Municipio": _texto_ou_none(payload.get("Municipio"), 100),
+        "Logradouro": _texto_ou_none(payload.get("Logradouro"), 150),
+        "CNAE": _texto_ou_none(payload.get("CNAE"), 20),
+        "Complemento": _texto_ou_none(payload.get("Complemento"), 100),
+        "RazaoSocial": _texto_ou_none(payload.get("RazaoSocial"), 150),
+        "NomeFantasia": _texto_ou_none(payload.get("NomeFantasia"), 150),
+        "CapitalSocial": _bigint_ou_none(payload.get("CapitalSocial")),
+        "TelefoneContato2": _texto_ou_none(payload.get("TelefoneContato2"), 20),
+        "NaturezaJuridica": _texto_ou_none(payload.get("NaturezaJuridica"), 100),
+        "DescricaoCnae": _texto_ou_none(payload.get("DescricaoCnae"), 150),
+        "DataInicioAtividades": _para_data_sql_ou_none(payload.get("DataInicioAtividades")),
+        "DataSituacaoEspecial": _para_data_sql_ou_none(payload.get("DataSituacaoEspecial")),
+        "DataOpcaoPeloSimples": _para_data_sql_ou_none(payload.get("DataOpcaoPeloSimples")),
+        "DataSituacaoCadastral": _para_data_sql_ou_none(payload.get("DataSituacaoCadastral")),
+        "DataExclusaoSimples": _para_data_sql_ou_none(payload.get("DataExclusaoSimples")),
+        "IdentificadorMatrizFilial": _int_ou_none(payload.get("IdentificadorMatrizFilial")),
+        "DescricaoSituacaoCadastral": _texto_ou_none(payload.get("DescricaoSituacaoCadastral"), 20),
+        "DescricaoMotivoSituacaoCadastral": _texto_ou_none(payload.get("DescricaoMotivoSituacaoCadastral"), 20),
+        "DescricaoIdentificadorMatrizFilial": _texto_ou_none(payload.get("DescricaoIdentificadorMatrizFilial"), 20),
+        "DescricaoTipoLogradouro": _texto_ou_none(payload.get("DescricaoTipoLogradouro"), 20),
+        "Latitude": _decimal_ou_none(payload.get("Latitude")),
+        "Longitude": _decimal_ou_none(payload.get("Longitude")),
+        "BitCliente": _bit_ou_none(payload.get("BitCliente")),
+    }
+
+    sql_lock_cnpj = text(f"""
+        SELECT TOP 1 IDEmpresa
+        FROM {TABELA_EMPRESAS} WITH (UPDLOCK, HOLDLOCK)
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(CNPJ, ''), '.', ''), '-', ''), '/', ''), ' ', '') = :cnpj;
+    """)
+
+    sql_lock_id = text(f"""
+        SELECT TOP 1 IDEmpresa
+        FROM {TABELA_EMPRESAS} WITH (UPDLOCK, HOLDLOCK)
+        WHERE IDEmpresa = :id_empresa;
+    """)
+
+    try:
+        row_existente_cnpj = db.session.execute(sql_lock_cnpj, {"cnpj": cnpj_normalizado}).mappings().first()
+        row_existente_id = None
+        if id_empresa_informado:
+            row_existente_id = db.session.execute(
+                sql_lock_id,
+                {"id_empresa": id_empresa_informado},
+            ).mappings().first()
+
+        id_empresa_alvo = 0
+        if row_existente_cnpj:
+            id_empresa_alvo = int(row_existente_cnpj.get("IDEmpresa") or 0)
+        elif row_existente_id:
+            id_empresa_alvo = int(row_existente_id.get("IDEmpresa") or 0)
+
+        if id_empresa_alvo > 0:
+            dados_sql["IDEmpresa"] = id_empresa_alvo
+
+            sql_update = text(f"""
+                UPDATE {TABELA_EMPRESAS}
+                   SET IDEmpresaProprietaria = :IDEmpresaProprietaria,
+                       CNPJ = :CNPJ,
+                       UF = :UF,
+                       CEP = :CEP,
+                       CodigoPorte = :CodigoPorte,
+                       Pais = :Pais,
+                       Email = :Email,
+                       Porte = :Porte,
+                       Bairro = :Bairro,
+                       Numero = :Numero,
+                       TelefoneContato1 = :TelefoneContato1,
+                       Municipio = :Municipio,
+                       Logradouro = :Logradouro,
+                       CNAE = :CNAE,
+                       Complemento = :Complemento,
+                       RazaoSocial = :RazaoSocial,
+                       NomeFantasia = :NomeFantasia,
+                       CapitalSocial = :CapitalSocial,
+                       TelefoneContato2 = :TelefoneContato2,
+                       NaturezaJuridica = :NaturezaJuridica,
+                       DescricaoCnae = :DescricaoCnae,
+                       DataInicioAtividades = :DataInicioAtividades,
+                       DataSituacaoEspecial = :DataSituacaoEspecial,
+                       DataOpcaoPeloSimples = :DataOpcaoPeloSimples,
+                       DataSituacaoCadastral = :DataSituacaoCadastral,
+                       DataExclusaoSimples = :DataExclusaoSimples,
+                       IdentificadorMatrizFilial = :IdentificadorMatrizFilial,
+                       DescricaoSituacaoCadastral = :DescricaoSituacaoCadastral,
+                       DescricaoMotivoSituacaoCadastral = :DescricaoMotivoSituacaoCadastral,
+                       DescricaoIdentificadorMatrizFilial = :DescricaoIdentificadorMatrizFilial,
+                       DescricaoTipoLogradouro = :DescricaoTipoLogradouro,
+                       Latitude = :Latitude,
+                       Longitude = :Longitude,
+                       BitCliente = :BitCliente,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDEmpresa = :IDEmpresa;
+            """)
+
+            db.session.execute(sql_update, dados_sql)
+
+        else:
+            sql_insert = text(f"""
+                INSERT INTO {TABELA_EMPRESAS} (
+                    IDEmpresaProprietaria,
+                    CNPJ,
+                    UF,
+                    CEP,
+                    CodigoPorte,
+                    Pais,
+                    Email,
+                    Porte,
+                    Bairro,
+                    Numero,
+                    TelefoneContato1,
+                    Municipio,
+                    Logradouro,
+                    CNAE,
+                    Complemento,
+                    RazaoSocial,
+                    NomeFantasia,
+                    CapitalSocial,
+                    TelefoneContato2,
+                    NaturezaJuridica,
+                    DescricaoCnae,
+                    DataInicioAtividades,
+                    DataSituacaoEspecial,
+                    DataOpcaoPeloSimples,
+                    DataSituacaoCadastral,
+                    DataExclusaoSimples,
+                    IdentificadorMatrizFilial,
+                    DescricaoSituacaoCadastral,
+                    DescricaoMotivoSituacaoCadastral,
+                    DescricaoIdentificadorMatrizFilial,
+                    DescricaoTipoLogradouro,
+                    DataAtualizacao,
+                    Latitude,
+                    Longitude,
+                    BitCliente
+                )
+                VALUES (
+                    :IDEmpresaProprietaria,
+                    :CNPJ,
+                    :UF,
+                    :CEP,
+                    :CodigoPorte,
+                    :Pais,
+                    :Email,
+                    :Porte,
+                    :Bairro,
+                    :Numero,
+                    :TelefoneContato1,
+                    :Municipio,
+                    :Logradouro,
+                    :CNAE,
+                    :Complemento,
+                    :RazaoSocial,
+                    :NomeFantasia,
+                    :CapitalSocial,
+                    :TelefoneContato2,
+                    :NaturezaJuridica,
+                    :DescricaoCnae,
+                    :DataInicioAtividades,
+                    :DataSituacaoEspecial,
+                    :DataOpcaoPeloSimples,
+                    :DataSituacaoCadastral,
+                    :DataExclusaoSimples,
+                    :IdentificadorMatrizFilial,
+                    :DescricaoSituacaoCadastral,
+                    :DescricaoMotivoSituacaoCadastral,
+                    :DescricaoIdentificadorMatrizFilial,
+                    :DescricaoTipoLogradouro,
+                    GETDATE(),
+                    :Latitude,
+                    :Longitude,
+                    :BitCliente
+                );
+
+                SELECT CAST(SCOPE_IDENTITY() AS int) AS IDEmpresa;
+            """)
+
+            novo_id = db.session.execute(sql_insert, dados_sql).scalar()
+            id_empresa_alvo = int(novo_id or 0)
+
+        db.session.commit()
+
+    except Exception as erro:
+        db.session.rollback()
+        current_app.logger.exception("KANBAN EMPRESA: erro ao salvar cadastro de empresa.")
+        return jsonify({"ok": False, "erro": f"Erro ao salvar empresa: {erro}"}), 500
+
+    _invalidar_cache_empresas()
+
+    empresa_salva = _buscar_empresa_completa_por_id(id_empresa_alvo)
+    if not empresa_salva:
+        return jsonify({"ok": False, "erro": "Empresa salva, mas não foi possível reler o cadastro."}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "empresa": empresa_salva,
+            "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+        }
+    )
