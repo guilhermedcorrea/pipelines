@@ -1,0 +1,914 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% macro moeda(valor) -%}
+  {% if valor is not none and valor != "" %}
+    R$ {{ "{:,.2f}".format(valor|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+  {% else %}
+    —
+  {% endif %}
+{%- endmacro %}
+
+{% macro percentual(valor) -%}
+  {% if valor is not none and valor != "" %}
+    {{ "{:,.2f}".format(valor|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%
+  {% else %}
+    —
+  {% endif %}
+{%- endmacro %}
+
+{% macro data_hora_br(valor) -%}
+  {% if valor %}
+    {% if valor.strftime is defined %}
+      {{ valor.strftime("%d/%m/%Y %H:%M") }}
+    {% else %}
+      {{ valor }}
+    {% endif %}
+  {% else %}
+    —
+  {% endif %}
+{%- endmacro %}
+
+{% macro data_br(valor) -%}
+  {% if valor %}
+    {% if valor.strftime is defined %}
+      {{ valor.strftime("%d/%m/%Y") }}
+    {% else %}
+      {{ valor }}
+    {% endif %}
+  {% else %}
+    —
+  {% endif %}
+{%- endmacro %}
+
+{% block title %}Histórico de Preços{% endblock %}
+
+{% block content %}
+<style>
+  .hp-pagina{
+    --hp-bg:#f6f8fc;
+    --hp-card:#ffffff;
+    --hp-borda:#e5e7eb;
+    --hp-texto:#0f172a;
+    --hp-texto-suave:#64748b;
+    --hp-azul:#2563eb;
+    --hp-verde:#16a34a;
+    --hp-vermelho:#dc2626;
+    --hp-amarelo:#d97706;
+    --hp-roxo:#7c3aed;
+    --hp-sombra:0 10px 28px rgba(15, 23, 42, 0.08);
+
+    padding: 24px;
+    background: var(--hp-bg);
+    border-radius: 22px;
+    color: var(--hp-texto);
+  }
+
+  .hp-topo{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:18px;
+  }
+
+  .hp-titulos h1{
+    margin:0 0 8px 0;
+    font-size:30px;
+    line-height:1.05;
+    font-weight:800;
+    letter-spacing:-0.02em;
+  }
+
+  .hp-titulos p{
+    margin:0;
+    color:var(--hp-texto-suave);
+    font-size:14px;
+    line-height:1.6;
+  }
+
+  .hp-acoes-topo{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .hp-botao{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    height:42px;
+    padding:0 14px;
+    border-radius:12px;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:700;
+    transition:.18s ease;
+    cursor:pointer;
+  }
+
+  .hp-botao-primario{
+    background:var(--hp-azul);
+    color:#fff;
+    border:1px solid var(--hp-azul);
+  }
+
+  .hp-botao-primario:hover{
+    filter:brightness(.97);
+  }
+
+  .hp-botao-secundario{
+    background:#fff;
+    color:#334155;
+    border:1px solid #cbd5e1;
+  }
+
+  .hp-botao-secundario:hover{
+    background:#f8fafc;
+  }
+
+  .hp-cabecalho-card{
+    background:var(--hp-card);
+    border:1px solid var(--hp-borda);
+    border-radius:22px;
+    padding:18px;
+    box-shadow:var(--hp-sombra);
+    margin-bottom:18px;
+  }
+
+  .hp-cabecalho-grid{
+    display:grid;
+    grid-template-columns: 1.6fr .8fr;
+    gap:18px;
+    align-items:start;
+  }
+
+  .hp-cabecalho-titulo{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .hp-cabecalho-titulo h2{
+    margin:0;
+    font-size:24px;
+    font-weight:800;
+    line-height:1.2;
+  }
+
+  .hp-cabecalho-sub{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px 14px;
+    font-size:13px;
+    color:var(--hp-texto-suave);
+  }
+
+  .hp-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    border-radius:999px;
+    padding:6px 10px;
+    font-size:12px;
+    font-weight:800;
+    line-height:1;
+    white-space:nowrap;
+  }
+
+  .hp-badge-fase{
+    box-shadow:inset 0 0 0 1px rgba(15,23,42,.06);
+  }
+
+  .hp-badge-status-aprovado{
+    background:#dcfce7;
+    color:#166534;
+    border:1px solid #bbf7d0;
+  }
+
+  .hp-badge-status-pendente{
+    background:#fff7ed;
+    color:#9a3412;
+    border:1px solid #fed7aa;
+  }
+
+  .hp-info-direita{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+  }
+
+  .hp-info-box{
+    border:1px solid #e2e8f0;
+    border-radius:16px;
+    padding:12px 14px;
+    background:#fbfdff;
+  }
+
+  .hp-info-box .rotulo{
+    font-size:12px;
+    font-weight:700;
+    color:var(--hp-texto-suave);
+    margin-bottom:6px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+
+  .hp-info-box .valor{
+    font-size:15px;
+    font-weight:800;
+    color:var(--hp-texto);
+    line-height:1.35;
+  }
+
+  .hp-kpis{
+    display:grid;
+    grid-template-columns:repeat(6, minmax(0, 1fr));
+    gap:14px;
+    margin-bottom:18px;
+  }
+
+  .hp-kpi{
+    background:var(--hp-card);
+    border:1px solid var(--hp-borda);
+    border-radius:20px;
+    padding:16px;
+    box-shadow:var(--hp-sombra);
+  }
+
+  .hp-kpi .icone{
+    width:40px;
+    height:40px;
+    border-radius:14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    margin-bottom:10px;
+    background:#eff6ff;
+  }
+
+  .hp-kpi .rotulo{
+    font-size:12px;
+    font-weight:700;
+    color:var(--hp-texto-suave);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:6px;
+  }
+
+  .hp-kpi .valor{
+    font-size:26px;
+    font-weight:800;
+    line-height:1;
+    margin-bottom:6px;
+  }
+
+  .hp-kpi .legenda{
+    font-size:12px;
+    color:var(--hp-texto-suave);
+  }
+
+  .hp-lista{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+  }
+
+  .hp-item{
+    background:var(--hp-card);
+    border:1px solid var(--hp-borda);
+    border-radius:24px;
+    box-shadow:var(--hp-sombra);
+    overflow:hidden;
+  }
+
+  .hp-item-topo{
+    padding:18px 18px 14px 18px;
+    border-bottom:1px solid #eef2f7;
+    background:linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  }
+
+  .hp-item-topo-grid{
+    display:grid;
+    grid-template-columns:1.35fr .9fr;
+    gap:18px;
+    align-items:start;
+  }
+
+  .hp-item-titulo{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    min-width:0;
+  }
+
+  .hp-item-titulo h3{
+    margin:0;
+    font-size:21px;
+    font-weight:800;
+    line-height:1.25;
+  }
+
+  .hp-item-meta{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px 14px;
+    font-size:13px;
+    color:var(--hp-texto-suave);
+  }
+
+  .hp-linha-badges{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+
+  .hp-responsaveis{
+    display:grid;
+    gap:12px;
+  }
+
+  .hp-pessoa{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:12px 14px;
+    border:1px solid #e2e8f0;
+    border-radius:16px;
+    background:#fbfdff;
+  }
+
+  .hp-avatar{
+    width:40px;
+    height:40px;
+    border-radius:12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:18px;
+    flex:0 0 auto;
+    background:#eef2ff;
+  }
+
+  .hp-pessoa .rotulo{
+    font-size:12px;
+    font-weight:700;
+    color:var(--hp-texto-suave);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:4px;
+  }
+
+  .hp-pessoa .nome{
+    font-size:15px;
+    font-weight:800;
+    color:var(--hp-texto);
+    line-height:1.3;
+  }
+
+  .hp-pessoa .extra{
+    font-size:12px;
+    color:var(--hp-texto-suave);
+    margin-top:3px;
+  }
+
+  .hp-corpo{
+    padding:18px;
+  }
+
+  .hp-etapas{
+    display:grid;
+    grid-template-columns:repeat(5, minmax(0, 1fr));
+    gap:12px;
+    margin-bottom:16px;
+  }
+
+  .hp-etapa{
+    border:1px solid #e2e8f0;
+    background:#fff;
+    border-radius:18px;
+    padding:14px;
+    min-height:116px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+  }
+
+  .hp-etapa .topo{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:10px;
+  }
+
+  .hp-etapa .icone{
+    width:34px;
+    height:34px;
+    border-radius:12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:16px;
+    background:#f1f5f9;
+    flex:0 0 auto;
+  }
+
+  .hp-etapa .titulo{
+    font-size:13px;
+    font-weight:800;
+    color:#334155;
+    line-height:1.2;
+  }
+
+  .hp-etapa .valor{
+    font-size:28px;
+    font-weight:900;
+    line-height:1;
+    color:#0f172a;
+    margin-bottom:6px;
+  }
+
+  .hp-etapa .subvalor{
+    font-size:12px;
+    color:#64748b;
+    line-height:1.45;
+  }
+
+  .hp-detalhes{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap:12px;
+    margin-bottom:16px;
+  }
+
+  .hp-bloco-info{
+    border:1px solid #e2e8f0;
+    border-radius:16px;
+    background:#fbfdff;
+    padding:14px;
+  }
+
+  .hp-bloco-info .rotulo{
+    font-size:12px;
+    font-weight:800;
+    color:var(--hp-texto-suave);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:8px;
+  }
+
+  .hp-bloco-info .valor{
+    font-size:16px;
+    font-weight:800;
+    color:var(--hp-texto);
+    line-height:1.35;
+  }
+
+  .hp-autorizacoes{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:16px;
+  }
+
+  .hp-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:10px 12px;
+    border-radius:999px;
+    border:1px solid #e2e8f0;
+    background:#fff;
+    font-size:13px;
+    font-weight:800;
+    color:#334155;
+  }
+
+  .hp-chip.ok{
+    background:#ecfdf5;
+    border-color:#bbf7d0;
+    color:#166534;
+  }
+
+  .hp-chip.nao{
+    background:#fff7ed;
+    border-color:#fed7aa;
+    color:#9a3412;
+  }
+
+  .hp-observacoes{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+  }
+
+  .hp-caixa-texto{
+    border:1px solid #e2e8f0;
+    border-radius:18px;
+    background:#fff;
+    padding:14px 16px;
+    min-height:112px;
+  }
+
+  .hp-caixa-texto .titulo{
+    font-size:12px;
+    font-weight:800;
+    color:var(--hp-texto-suave);
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    margin-bottom:10px;
+  }
+
+  .hp-caixa-texto .texto{
+    font-size:14px;
+    color:#1e293b;
+    line-height:1.65;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+
+  .hp-vazio{
+    background:var(--hp-card);
+    border:1px dashed #cbd5e1;
+    border-radius:22px;
+    padding:34px 20px;
+    text-align:center;
+    box-shadow:var(--hp-sombra);
+  }
+
+  .hp-vazio .icone{
+    font-size:36px;
+    margin-bottom:10px;
+  }
+
+  .hp-vazio h3{
+    margin:0 0 8px 0;
+    font-size:22px;
+    font-weight:800;
+  }
+
+  .hp-vazio p{
+    margin:0;
+    font-size:14px;
+    color:var(--hp-texto-suave);
+    line-height:1.6;
+  }
+
+  @media (max-width: 1400px){
+    .hp-kpis{
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+    }
+
+    .hp-etapas{
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+    }
+
+    .hp-detalhes{
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 1024px){
+    .hp-cabecalho-grid,
+    .hp-item-topo-grid,
+    .hp-observacoes{
+      grid-template-columns:1fr;
+    }
+
+    .hp-info-direita{
+      grid-template-columns:1fr 1fr;
+    }
+
+    .hp-etapas{
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 720px){
+    .hp-pagina{
+      padding:16px;
+      border-radius:16px;
+    }
+
+    .hp-kpis,
+    .hp-etapas,
+    .hp-detalhes,
+    .hp-info-direita{
+      grid-template-columns:1fr;
+    }
+
+    .hp-titulos h1{
+      font-size:24px;
+    }
+
+    .hp-item-titulo h3{
+      font-size:18px;
+    }
+  }
+</style>
+
+<div class="hp-pagina">
+  <div class="hp-topo">
+    <div class="hp-titulos">
+      <h1>Histórico de Preços</h1>
+      <p>
+        Visualização didática da trilha de negociação do card, mostrando custo original,
+        preço original, preço proposto, preço aplicado, margem final, solicitante e aprovador.
+      </p>
+    </div>
+
+    <div class="hp-acoes-topo">
+      <a href="{{ url_for('kanban.historico_card_visualizacao', id_card=card.id_card) }}" class="hp-botao hp-botao-secundario">
+        📜 Ver histórico do card
+      </a>
+
+      {% if card.id_kanban %}
+      <a href="{{ url_for('kanban.kanban_view', id_kanban=card.id_kanban) }}" class="hp-botao hp-botao-primario">
+        ↩ Voltar ao kanban
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="hp-cabecalho-card">
+    <div class="hp-cabecalho-grid">
+      <div class="hp-cabecalho-titulo">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+          <h2 style="margin:0;">{{ card.titulo or ('Card #' ~ card.id_card) }}</h2>
+
+          {% if card.nome_fase_atual %}
+          <span class="hp-badge hp-badge-fase"
+                style="background:{{ card.cor_fase or '#E5E7EB' }}; color:{{ card.cor_texto_fase or '#111827' }};">
+            🏷 {{ card.nome_fase_atual }}
+          </span>
+          {% endif %}
+        </div>
+
+        <div class="hp-cabecalho-sub">
+          <span><strong>Card:</strong> #{{ card.id_card }}</span>
+
+          {% if cliente_referencia and cliente_referencia.nome_cliente_exibicao %}
+          <span><strong>Cliente:</strong> {{ cliente_referencia.nome_cliente_exibicao }}</span>
+          {% endif %}
+
+          {% if card.nome_usuario_responsavel %}
+          <span><strong>Responsável:</strong> {{ card.nome_usuario_responsavel }}</span>
+          {% endif %}
+
+          <span><strong>Criado em:</strong> {{ data_hora_br(card.criado_em) }}</span>
+          <span><strong>Atualizado em:</strong> {{ data_hora_br(card.atualizado_em) }}</span>
+        </div>
+      </div>
+
+      <div class="hp-info-direita">
+        <div class="hp-info-box">
+          <div class="rotulo">Total de negociações</div>
+          <div class="valor">{{ resumo.total }}</div>
+        </div>
+
+        <div class="hp-info-box">
+          <div class="rotulo">Com desconto aprovado</div>
+          <div class="valor">{{ resumo.com_desconto_aprovado }}</div>
+        </div>
+
+        <div class="hp-info-box">
+          <div class="rotulo">Média desconto proposto</div>
+          <div class="valor">{{ percentual(resumo.media_desconto_proposto) }}</div>
+        </div>
+
+        <div class="hp-info-box">
+          <div class="rotulo">Média desconto aprovado</div>
+          <div class="valor">{{ percentual(resumo.media_desconto_aprovado) }}</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="hp-kpis">
+    <article class="hp-kpi">
+      <div class="icone">🧾</div>
+      <div class="rotulo">Total</div>
+      <div class="valor">{{ resumo.total }}</div>
+      <div class="legenda">Registros de negociação encontrados</div>
+    </article>
+
+    <article class="hp-kpi">
+      <div class="icone">✅</div>
+      <div class="rotulo">Aprovadas</div>
+      <div class="valor">{{ resumo.aprovadas }}</div>
+      <div class="legenda">Negociações com aprovação registrada</div>
+    </article>
+
+    <article class="hp-kpi">
+      <div class="icone">⏳</div>
+      <div class="rotulo">Pendentes</div>
+      <div class="valor">{{ resumo.pendentes }}</div>
+      <div class="legenda">Ainda sem preço aplicado</div>
+    </article>
+
+    <article class="hp-kpi">
+      <div class="icone">🏷️</div>
+      <div class="rotulo">Com desconto proposto</div>
+      <div class="valor">{{ resumo.com_desconto_proposto }}</div>
+      <div class="legenda">Pedidos onde houve desconto sugerido</div>
+    </article>
+
+    <article class="hp-kpi">
+      <div class="icone">🟢</div>
+      <div class="rotulo">Média proposta</div>
+      <div class="valor">{{ percentual(resumo.media_desconto_proposto) }}</div>
+      <div class="legenda">Média dos descontos sugeridos</div>
+    </article>
+
+    <article class="hp-kpi">
+      <div class="icone">🛡️</div>
+      <div class="rotulo">Média aprovada</div>
+      <div class="valor">{{ percentual(resumo.media_desconto_aprovado) }}</div>
+      <div class="legenda">Média dos descontos autorizados</div>
+    </article>
+  </section>
+
+  {% if registros %}
+    <section class="hp-lista">
+      {% for item in registros %}
+      <article class="hp-item">
+        <div class="hp-item-topo">
+          <div class="hp-item-topo-grid">
+            <div class="hp-item-titulo">
+              <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+                <h3>
+                  {{ item.nome_cliente_exibicao or ("Negociação #" ~ item.id_negociacao_preco) }}
+                </h3>
+              </div>
+
+              <div class="hp-linha-badges">
+                <span class="hp-badge hp-badge-fase"
+                      style="background:{{ item.cor_fase or '#E5E7EB' }}; color:{{ item.cor_texto_fase or '#111827' }};">
+                  📍 {{ item.nome_fase or 'Sem fase' }}
+                </span>
+
+                {% if item.status_negociacao == 'APROVADO' %}
+                  <span class="hp-badge hp-badge-status-aprovado">✅ Aprovado</span>
+                {% else %}
+                  <span class="hp-badge hp-badge-status-pendente">⏳ Pendente</span>
+                {% endif %}
+
+                {% if item.bit_aditivo_contrato %}
+                  <span class="hp-badge" style="background:#ede9fe; color:#5b21b6; border:1px solid #ddd6fe;">
+                    ➕ Aditivo
+                  </span>
+                {% endif %}
+              </div>
+
+              <div class="hp-item-meta">
+                <span><strong>Negociação:</strong> #{{ item.id_negociacao_preco }}</span>
+                <span><strong>Data proposta:</strong> {{ data_hora_br(item.data_preco_proposto) }}</span>
+                <span><strong>Data aprovação:</strong> {{ data_hora_br(item.data_aprovacao_preco) }}</span>
+                <span><strong>Período:</strong> {{ data_br(item.periodo_inicio) }} até {{ data_br(item.periodo_termino) }}</span>
+              </div>
+            </div>
+
+            <div class="hp-responsaveis">
+              <div class="hp-pessoa">
+                <div class="hp-avatar">🙋</div>
+                <div>
+                  <div class="rotulo">Quem pediu o desconto</div>
+                  <div class="nome">{{ item.nome_usuario_solicitante or 'Não informado' }}</div>
+                  <div class="extra">{{ item.email_usuario_solicitante or '' }}</div>
+                </div>
+              </div>
+
+              <div class="hp-pessoa">
+                <div class="hp-avatar">🛡️</div>
+                <div>
+                  <div class="rotulo">Quem autorizou o desconto</div>
+                  <div class="nome">{{ item.nome_usuario_aprovador or 'Sem aprovação registrada' }}</div>
+                  <div class="extra">{{ item.email_usuario_aprovador or '' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hp-corpo">
+          <section class="hp-etapas">
+            <div class="hp-etapa">
+              <div class="topo">
+                <div class="icone">💸</div>
+                <div class="titulo">Custo original</div>
+              </div>
+              <div class="valor">{{ moeda(item.custo_original) }}</div>
+              <div class="subvalor">
+                Margem original: {{ percentual(item.margem_original) }}
+              </div>
+            </div>
+
+            <div class="hp-etapa">
+              <div class="topo">
+                <div class="icone">📌</div>
+                <div class="titulo">Preço original</div>
+              </div>
+              <div class="valor">{{ moeda(item.preco_original) }}</div>
+              <div class="subvalor">
+                Valor base antes da negociação
+              </div>
+            </div>
+
+            <div class="hp-etapa">
+              <div class="topo">
+                <div class="icone">💡</div>
+                <div class="titulo">Preço proposto</div>
+              </div>
+              <div class="valor">{{ moeda(item.preco_proposto) }}</div>
+              <div class="subvalor">
+                Desconto proposto: {{ percentual(item.desconto_proposto) }}
+              </div>
+            </div>
+
+            <div class="hp-etapa">
+              <div class="topo">
+                <div class="icone">✅</div>
+                <div class="titulo">Preço aplicado</div>
+              </div>
+              <div class="valor">{{ moeda(item.preco_aplicado) }}</div>
+              <div class="subvalor">
+                Desconto aprovado: {{ percentual(item.desconto_aprovado) }}
+              </div>
+            </div>
+
+            <div class="hp-etapa">
+              <div class="topo">
+                <div class="icone">📈</div>
+                <div class="titulo">Margem que ficou</div>
+              </div>
+              <div class="valor">{{ percentual(item.margem_aplicada) }}</div>
+              <div class="subvalor">
+                Margem proposta: {{ percentual(item.margem_proposta) }}
+              </div>
+            </div>
+          </section>
+
+          <section class="hp-detalhes">
+            <div class="hp-bloco-info">
+              <div class="rotulo">Cliente</div>
+              <div class="valor">{{ item.nome_cliente_exibicao or '—' }}</div>
+            </div>
+
+            <div class="hp-bloco-info">
+              <div class="rotulo">Fase do card</div>
+              <div class="valor">{{ item.nome_fase or '—' }}</div>
+            </div>
+
+            <div class="hp-bloco-info">
+              <div class="rotulo">Custo proposto</div>
+              <div class="valor">{{ moeda(item.custo_proposto) }}</div>
+            </div>
+
+            <div class="hp-bloco-info">
+              <div class="rotulo">Margem original</div>
+              <div class="valor">{{ percentual(item.margem_original) }}</div>
+            </div>
+          </section>
+
+          <section class="hp-autorizacoes">
+            {% if item.bit_autorizacao_coordenador %}
+              <span class="hp-chip ok">✔ Coordenador autorizado</span>
+            {% else %}
+              <span class="hp-chip nao">✖ Coordenador não autorizado</span>
+            {% endif %}
+
+            {% if item.bit_autorizacao_diretoria %}
+              <span class="hp-chip ok">✔ Diretoria autorizada</span>
+            {% else %}
+              <span class="hp-chip nao">✖ Diretoria não autorizada</span>
+            {% endif %}
+          </section>
+
+          <section class="hp-observacoes">
+            <div class="hp-caixa-texto">
+              <div class="titulo">Observações da proposta</div>
+              <div class="texto">{{ item.observacoes_proposta or 'Nenhuma observação informada.' }}</div>
+            </div>
+
+            <div class="hp-caixa-texto">
+              <div class="titulo">Observações da aprovação</div>
+              <div class="texto">{{ item.observacoes_aprovacao or 'Nenhuma observação informada.' }}</div>
+            </div>
+          </section>
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="hp-vazio">
+      <div class="icone">🧾</div>
+      <h3>Nenhum histórico de preço encontrado</h3>
+      <p>
+        Este card ainda não possui registros na tabela de negociação de preços.
+      </p>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

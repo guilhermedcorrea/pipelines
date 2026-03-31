@@ -61,22 +61,24 @@
   }
 
   .kb-top{
-    display:flex;
+    display:grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items:center;
-    justify-content:space-between;
     gap:12px;
-    flex-wrap:wrap;
     padding: 10px 10px 12px 10px;
     flex: 0 0 auto;
   }
 
   .kb-title{
+    grid-column: 2;
     display:flex;
     flex-direction:column;
     align-items:center;
     justify-content:center;
     gap:6px;
+    width:100%;
     min-width: min(520px, 100%);
+    max-width: min(760px, 100%);
   }
 
   .kb-title h1{
@@ -105,9 +107,12 @@
   }
 
   .kb-actions{
+    grid-column: 3;
+    justify-self: end;
     display:flex;
     gap:8px;
     align-items:center;
+    justify-content:flex-end;
     flex-wrap:wrap;
   }
 
@@ -373,6 +378,159 @@
     border-radius: 14px;
   }
 
+  .kb-filtros{
+    display:flex;
+    align-items:stretch;
+    gap:10px;
+    flex-wrap:wrap;
+    flex: 1 1 520px;
+  }
+
+  .kb-filtro-multi{
+    position:relative;
+    flex: 1 1 240px;
+    min-width: 220px;
+  }
+
+  .kb-filtro-multi-btn{
+    width:100%;
+    min-height: 44px;
+    border:1px solid var(--kb-line);
+    background:#fff;
+    border-radius:14px;
+    padding:10px 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    cursor:pointer;
+    box-shadow: 0 2px 10px rgba(15,23,42,.05);
+  }
+
+  .kb-filtro-multi-btn:hover{
+    box-shadow: var(--kb-shadow2);
+  }
+
+  .kb-filtro-multi.is-open .kb-filtro-multi-btn{
+    border-color: rgba(11,78,162,.35);
+    box-shadow: 0 0 0 4px rgba(11,78,162,.12);
+  }
+
+  .kb-filtro-multi-label{
+    font-size: 12px;
+    font-weight: 950;
+    color: rgba(15,23,42,.68);
+    text-transform: uppercase;
+    letter-spacing: .02em;
+    white-space: nowrap;
+  }
+
+  .kb-filtro-multi-resumo{
+    min-width:0;
+    flex:1 1 auto;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--kb-text);
+    text-align:left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kb-filtro-multi-caret{
+    flex: 0 0 auto;
+    color: rgba(15,23,42,.55);
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .kb-filtro-multi-menu{
+    position:absolute;
+    top: calc(100% + 8px);
+    left:0;
+    right:0;
+    z-index: 40;
+    background:#fff;
+    border:1px solid var(--kb-line);
+    border-radius:16px;
+    box-shadow: 0 18px 40px rgba(15,23,42,.16);
+    padding:12px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .kb-filtro-multi-menu[hidden]{
+    display:none;
+  }
+
+  .kb-filtro-multi-input{
+    width:100%;
+    min-height: 40px;
+    border:1px solid var(--kb-line);
+    border-radius:12px;
+    padding: 10px 12px;
+    outline:none;
+    font-size:13px;
+    font-weight:700;
+  }
+
+  .kb-filtro-multi-input:focus{
+    border-color: rgba(11,78,162,.35);
+    box-shadow: 0 0 0 4px rgba(11,78,162,.12);
+  }
+
+  .kb-filtro-multi-lista{
+    max-height: 260px;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding-right:4px;
+  }
+
+  .kb-filtro-multi-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:8px 10px;
+    border-radius:12px;
+    cursor:pointer;
+    user-select:none;
+    transition: background .12s ease;
+  }
+
+  .kb-filtro-multi-item:hover{
+    background: rgba(15,23,42,.05);
+  }
+
+  .kb-filtro-multi-item input{
+    margin:0;
+    width:16px;
+    height:16px;
+    accent-color: var(--kb-primary);
+    flex: 0 0 auto;
+  }
+
+  .kb-filtro-multi-item span{
+    min-width:0;
+    flex:1 1 auto;
+    color: var(--kb-text);
+    font-size:13px;
+    font-weight:800;
+    word-break: break-word;
+  }
+
+  .kb-filtro-multi-vazio{
+    border:1px dashed rgba(15,23,42,.14);
+    border-radius:12px;
+    padding:12px;
+    color: rgba(15,23,42,.55);
+    font-size:12px;
+    font-weight:800;
+    text-align:center;
+    background: rgba(15,23,42,.02);
+  }
+
   .kb-board{
     display:flex;
     align-items:stretch;
@@ -588,7 +746,7 @@
     padding: 10px 10px 9px 10px;
     cursor: grab;
     box-shadow: 0 2px 8px rgba(15,23,42,.08);
-    transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease, opacity .12s ease;
+    transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease, opacity .12s ease, background .12s ease;
     position: relative;
     will-change: transform;
     backface-visibility: hidden;
@@ -598,6 +756,20 @@
     transform: translateY(-1px);
     box-shadow: 0 10px 22px rgba(15,23,42,.12);
     border-color: rgba(15,23,42,.16);
+  }
+
+  .kb-card.is-tag-alerta{
+    border: 2px solid var(--kb-card-alert-color, #DC2626);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--kb-card-alert-color, #DC2626) 16%, transparent),
+      0 10px 24px color-mix(in srgb, var(--kb-card-alert-color, #DC2626) 18%, transparent);
+  }
+
+  .kb-card.is-tag-alerta:hover{
+    border-color: var(--kb-card-alert-color, #DC2626);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--kb-card-alert-color, #DC2626) 22%, transparent),
+      0 12px 28px color-mix(in srgb, var(--kb-card-alert-color, #DC2626) 24%, transparent);
   }
 
   .kb-card:active{
@@ -1224,6 +1396,10 @@
       align-items:stretch;
     }
 
+    .kb-filtros{
+      flex: 1 1 100%;
+    }
+
     .kb-toolbar-right{
       width:100%;
       justify-content:flex-start;
@@ -1242,8 +1418,16 @@
   }
 
   @media (max-width: 640px){
+    .kb-top{
+      display:flex;
+      flex-direction:column;
+      align-items:stretch;
+    }
+
     .kb-title{
+      width:100%;
       min-width: 100%;
+      max-width: 100%;
     }
 
     .kb-title h1,
@@ -1253,6 +1437,8 @@
 
     .kb-actions{
       width:100%;
+      justify-self:auto;
+      justify-content:stretch;
     }
 
     .kb-actions .kb-btn{
@@ -1262,6 +1448,16 @@
     .kb-search-main{
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .kb-filtros{
+      width:100%;
+      flex-direction: column;
+    }
+
+    .kb-filtro-multi{
+      min-width: 0;
+      width:100%;
     }
 
     .kb-toolbar-right{
@@ -1352,6 +1548,31 @@
 }
 
 
+
+
+
+
+
+  .kb-card.tag-aprovacao-desconto{
+    border: 2px solid #DC2626 !important;
+    box-shadow:
+      0 0 0 1px rgba(220,38,38,.12),
+      0 10px 22px rgba(220,38,38,.18);
+  }
+
+  .kb-card.tag-aprovacao-desconto:hover{
+    border-color: #B91C1C !important;
+    box-shadow:
+      0 0 0 1px rgba(185,28,28,.18),
+      0 12px 26px rgba(220,38,38,.22);
+  }
+
+
+
+
+
+
+
 </style>
 
 <div class="kb-wrap">
@@ -1420,8 +1641,8 @@
   </div>
 
   <div class="kb-toolbar">
-    <label class="kb-search" for="buscaKanban">
-      <span class="kb-search-label">Pesquisar cards</span>
+    <div class="kb-search">
+      <label class="kb-search-label" for="buscaKanban">Pesquisar cards</label>
       <div class="kb-search-main">
         <div class="kb-search-box">
           <span class="kb-search-icon">🔎</span>
@@ -1429,18 +1650,58 @@
             id="buscaKanban"
             class="kb-search-input"
             type="search"
-            placeholder="Pesquisar por nome do card, nome da face ou nome da empresa..."
+            placeholder="Pesquisar por nome do card, nome da face, empresa ou vendedor..."
             autocomplete="off"
             spellcheck="false"
           />
         </div>
 
+        <div class="kb-filtros">
+          <div class="kb-filtro-multi" id="filtroVendedor">
+            <button type="button" class="kb-filtro-multi-btn" id="btnFiltroVendedor">
+              <span class="kb-filtro-multi-label">Vendedor</span>
+              <span class="kb-filtro-multi-resumo" id="resumoFiltroVendedor">Todos</span>
+              <span class="kb-filtro-multi-caret">▾</span>
+            </button>
+            <div class="kb-filtro-multi-menu" id="menuFiltroVendedor" hidden>
+              <input
+                id="inputFiltroVendedor"
+                class="kb-filtro-multi-input"
+                type="search"
+                placeholder="Digite para filtrar vendedor..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div class="kb-filtro-multi-lista" id="listaFiltroVendedor"></div>
+            </div>
+          </div>
+
+          <div class="kb-filtro-multi" id="filtroTag">
+            <button type="button" class="kb-filtro-multi-btn" id="btnFiltroTag">
+              <span class="kb-filtro-multi-label">Tag</span>
+              <span class="kb-filtro-multi-resumo" id="resumoFiltroTag">Todas</span>
+              <span class="kb-filtro-multi-caret">▾</span>
+            </button>
+            <div class="kb-filtro-multi-menu" id="menuFiltroTag" hidden>
+              <input
+                id="inputFiltroTag"
+                class="kb-filtro-multi-input"
+                type="search"
+                placeholder="Digite para filtrar tag..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div class="kb-filtro-multi-lista" id="listaFiltroTag"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="kb-toolbar-right">
           <div id="contadorPesquisa" class="kb-search-count">Carregando cards...</div>
-          <button class="kb-btn" id="btnLimparBusca">Limpar busca</button>
+          <button class="kb-btn" id="btnLimparBusca">Limpar filtros</button>
         </div>
       </div>
-    </label>
+    </div>
   </div>
 
   <div class="kb-divider"></div>
@@ -1626,6 +1887,9 @@
   let fases = [];
   let cards = [];
   let tagsCatalogo = [];
+  let vendedoresCatalogo = [];
+  let vendedoresSelecionados = new Set();
+  let tagsSelecionadasFiltro = new Set();
   let mapaTagsPorCard = new Map();
   let mapaNotasPorCard = new Map();
   let resumoComercial = null;
@@ -1677,6 +1941,20 @@
   const buscaKanban = document.getElementById("buscaKanban");
   const btnLimparBusca = document.getElementById("btnLimparBusca");
   const contadorPesquisa = document.getElementById("contadorPesquisa");
+
+  const filtroVendedorWrap = document.getElementById("filtroVendedor");
+  const btnFiltroVendedor = document.getElementById("btnFiltroVendedor");
+  const menuFiltroVendedor = document.getElementById("menuFiltroVendedor");
+  const inputFiltroVendedor = document.getElementById("inputFiltroVendedor");
+  const listaFiltroVendedor = document.getElementById("listaFiltroVendedor");
+  const resumoFiltroVendedor = document.getElementById("resumoFiltroVendedor");
+
+  const filtroTagWrap = document.getElementById("filtroTag");
+  const btnFiltroTag = document.getElementById("btnFiltroTag");
+  const menuFiltroTag = document.getElementById("menuFiltroTag");
+  const inputFiltroTag = document.getElementById("inputFiltroTag");
+  const listaFiltroTag = document.getElementById("listaFiltroTag");
+  const resumoFiltroTag = document.getElementById("resumoFiltroTag");
 
   const kpiAtendimentosAtivos = document.getElementById("kpiAtendimentosAtivos");
   const kpiAprovacaoPreco = document.getElementById("kpiAprovacaoPreco");
@@ -1895,6 +2173,13 @@ function normalizarCardServidor(card){
   c.versaoConcorrencia = c.VersaoConcorrenciaHex;
   c.versao_concorrencia = c.VersaoConcorrenciaHex;
 
+  c.NomeUsuarioResponsavel = safeStr(
+    c.NomeUsuarioResponsavel ??
+    c.nome_usuario_responsavel ??
+    c.NomeUsuario ??
+    ""
+  ).trim();
+
   c.QuantidadePaineisVinculados = idNum(c.QuantidadePaineisVinculados || 0);
   c.QuantidadePaineisUnicos = idNum(c.QuantidadePaineisUnicos || 0);
 
@@ -2028,11 +2313,39 @@ function normalizarCardServidor(card){
     return "";
   }
 
+  function nomeVendedorDoCard(card){
+    return safeStr(
+      card?.NomeUsuarioResponsavel ||
+      card?.nome_usuario_responsavel ||
+      card?.NomeUsuario ||
+      ""
+    ).trim();
+  }
+
+  function nomesTagsDoCard(card){
+    return tagsDoCard(card?.IDFatoKanbanCard)
+      .map(tag => safeStr(tag?.NomeTag).trim())
+      .filter(Boolean);
+  }
+
+  function tagAfetaCorDoCard(tag){
+    const nomeTag = normalizarTexto(tag?.NomeTag || tag?.nomeTag || "");
+    return idNum(tag?.AfetaCorCard || 0) === 1 || nomeTag === "aprovacao desconto";
+  }
+
+  function obterCorEspecialDoCard(card){
+    const tagEspecial = tagsDoCard(card?.IDFatoKanbanCard).find(tagAfetaCorDoCard);
+    if (!tagEspecial) return "";
+    return normalizarCorHex(tagEspecial?.CorHex || "") || "#DC2626";
+  }
+
   function textoBuscaDoCard(card){
     return [
       safeStr(card?.Titulo),
       safeStr(card?.EmpresaRazaoSocial),
-      obterTextoFaceCard(card)
+      obterTextoFaceCard(card),
+      nomeVendedorDoCard(card),
+      nomesTagsDoCard(card).join(" ")
     ].join(" ");
   }
 
@@ -2044,16 +2357,36 @@ function normalizarCardServidor(card){
     return base.includes(termo);
   }
 
+  function cardPassaFiltroVendedor(card){
+    if (!vendedoresSelecionados.size) return true;
+    const nome = normalizarTexto(nomeVendedorDoCard(card));
+    return !!nome && vendedoresSelecionados.has(nome);
+  }
+
+  function cardPassaFiltroTag(card){
+    if (!tagsSelecionadasFiltro.size) return true;
+    const tagsCard = nomesTagsDoCard(card).map(normalizarTexto).filter(Boolean);
+    return tagsCard.some(tag => tagsSelecionadasFiltro.has(tag));
+  }
+
+  function cardPassaFiltros(card){
+    return cardPassaBusca(card) && cardPassaFiltroVendedor(card) && cardPassaFiltroTag(card);
+  }
+
+  function haFiltroAtivo(){
+    return !!safeStr(termoBusca).trim() || vendedoresSelecionados.size > 0 || tagsSelecionadasFiltro.size > 0;
+  }
+
   function fasePorId(idFase){
     const id = idNum(idFase);
     return fases.find(f => idNum(f.IDDimKanbanFase) === id) || null;
   }
 
-  function listaCardsDaFase(idFase, considerarBusca = true){
+  function listaCardsDaFase(idFase, considerarFiltros = true){
     const idF = idNum(idFase);
     return cards
       .filter(c => idNum(c.IDDimKanbanFaseAtual) === idF)
-      .filter(c => considerarBusca ? cardPassaBusca(c) : true);
+      .filter(c => considerarFiltros ? cardPassaFiltros(c) : true);
   }
 
   function contarCardsNaFaseCarregados(idFase){
@@ -2065,11 +2398,189 @@ function normalizarCardServidor(card){
   }
 
   function contarCardsVisiveis(){
-    return cards.filter(c => cardPassaBusca(c)).length;
+    return cards.filter(c => cardPassaFiltros(c)).length;
   }
 
   function totalServidorDoQuadro(){
     return fases.reduce((acc, f) => acc + idNum(f.QuantidadeCardsTotal || 0), 0);
+  }
+
+  function resumoTextoSelecao(quantidade, singular, plural, padrao){
+    if (!quantidade) return padrao;
+    if (quantidade === 1) return `1 ${singular}`;
+    return `${quantidade} ${plural}`;
+  }
+
+  function obterCatalogoVendedoresFiltro(){
+    const mapa = new Map();
+
+    vendedoresCatalogo.forEach(item => {
+      const nome = safeStr(item?.NomeUsuario || item?.nome_usuario || "").trim();
+      const chave = normalizarTexto(nome);
+      if (nome && chave && !mapa.has(chave)) {
+        mapa.set(chave, nome);
+      }
+    });
+
+    cards.forEach(card => {
+      const nome = nomeVendedorDoCard(card);
+      const chave = normalizarTexto(nome);
+      if (nome && chave && !mapa.has(chave)) {
+        mapa.set(chave, nome);
+      }
+    });
+
+    return [...mapa.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1], "pt-BR", { sensitivity: "base" }))
+      .map(([valor, label]) => ({ valor, label }));
+  }
+
+  function obterCatalogoTagsFiltro(){
+    const mapa = new Map();
+
+    tagsCatalogo.forEach(item => {
+      const nome = safeStr(item?.NomeTag || item?.nome_tag || "").trim();
+      const chave = normalizarTexto(nome);
+      if (nome && chave && !mapa.has(chave)) {
+        mapa.set(chave, nome);
+      }
+    });
+
+    mapaTagsPorCard.forEach(tagsLista => {
+      (Array.isArray(tagsLista) ? tagsLista : []).forEach(item => {
+        const nome = safeStr(item?.NomeTag || item?.nome_tag || "").trim();
+        const chave = normalizarTexto(nome);
+        if (nome && chave && !mapa.has(chave)) {
+          mapa.set(chave, nome);
+        }
+      });
+    });
+
+    return [...mapa.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1], "pt-BR", { sensitivity: "base" }))
+      .map(([valor, label]) => ({ valor, label }));
+  }
+
+  function fecharMenusFiltros(excecao = null){
+    [
+      { wrap: filtroVendedorWrap, menu: menuFiltroVendedor },
+      { wrap: filtroTagWrap, menu: menuFiltroTag }
+    ].forEach(item => {
+      if (!item.wrap || !item.menu || item.wrap === excecao) return;
+      item.wrap.classList.remove("is-open");
+      item.menu.hidden = true;
+    });
+  }
+
+  function alternarMenuFiltro(wrap, menu, input){
+    if (!wrap || !menu) return;
+    const vaiAbrir = menu.hidden;
+    fecharMenusFiltros(vaiAbrir ? wrap : null);
+    wrap.classList.toggle("is-open", vaiAbrir);
+    menu.hidden = !vaiAbrir;
+    if (vaiAbrir && input) {
+      requestAnimationFrame(() => input.focus());
+    }
+  }
+
+  function renderizarListaFiltro({
+    listaEl,
+    inputEl,
+    selecionados,
+    itens,
+    textoVazio,
+    onChange
+  }){
+    if (!listaEl) return;
+
+    const termo = normalizarTexto(inputEl?.value || "");
+    const itensFiltrados = itens.filter(item => {
+      if (!termo) return true;
+      return normalizarTexto(item.label).includes(termo);
+    });
+
+    listaEl.innerHTML = "";
+
+    if (!itensFiltrados.length) {
+      listaEl.appendChild(el("div", { class:"kb-filtro-multi-vazio" }, [textoVazio]));
+      return;
+    }
+
+    itensFiltrados.forEach(item => {
+      const inputId = `flt_${Math.random().toString(36).slice(2)}`;
+      const checked = selecionados.has(item.valor);
+
+      const checkbox = el("input", {
+        id: inputId,
+        type:"checkbox"
+      }, []);
+      checkbox.checked = checked;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selecionados.add(item.valor);
+        } else {
+          selecionados.delete(item.valor);
+        }
+        onChange();
+      });
+
+      const label = el("label", { class:"kb-filtro-multi-item", for: inputId }, [
+        checkbox,
+        el("span", {}, [item.label])
+      ]);
+
+      listaEl.appendChild(label);
+    });
+  }
+
+  function atualizarResumoFiltros(){
+    if (resumoFiltroVendedor) {
+      resumoFiltroVendedor.textContent = resumoTextoSelecao(
+        vendedoresSelecionados.size,
+        "selecionado",
+        "selecionados",
+        "Todos"
+      );
+    }
+
+    if (resumoFiltroTag) {
+      resumoFiltroTag.textContent = resumoTextoSelecao(
+        tagsSelecionadasFiltro.size,
+        "selecionada",
+        "selecionadas",
+        "Todas"
+      );
+    }
+  }
+
+  function renderizarFiltrosMultiselect(){
+    renderizarListaFiltro({
+      listaEl: listaFiltroVendedor,
+      inputEl: inputFiltroVendedor,
+      selecionados: vendedoresSelecionados,
+      itens: obterCatalogoVendedoresFiltro(),
+      textoVazio: "Nenhum vendedor encontrado.",
+      onChange: () => {
+        atualizarResumoFiltros();
+        aplicarBusca();
+        renderizarFiltrosMultiselect();
+      }
+    });
+
+    renderizarListaFiltro({
+      listaEl: listaFiltroTag,
+      inputEl: inputFiltroTag,
+      selecionados: tagsSelecionadasFiltro,
+      itens: obterCatalogoTagsFiltro(),
+      textoVazio: "Nenhuma tag encontrada.",
+      onChange: () => {
+        atualizarResumoFiltros();
+        aplicarBusca();
+        renderizarFiltrosMultiselect();
+      }
+    });
+
+    atualizarResumoFiltros();
   }
 
   function atualizarResumoBusca(){
@@ -2085,7 +2596,7 @@ function normalizarCardServidor(card){
       return;
     }
 
-    if (!termo){
+    if (!haFiltroAtivo()){
       if (totalServidor > 0 && totalServidor !== totalCarregado){
         contadorPesquisa.textContent = `${totalCarregado} carregados de ${totalServidor} card${totalServidor === 1 ? "" : "s"} no quadro`;
       } else {
@@ -2095,11 +2606,15 @@ function normalizarCardServidor(card){
     }
 
     if (!totalVisivel){
-      contadorPesquisa.textContent = `Nenhum resultado para "${termo}" entre ${totalCarregado} card${totalCarregado === 1 ? "" : "s"} carregado${totalCarregado === 1 ? "" : "s"}`;
+      contadorPesquisa.textContent = termo
+        ? `Nenhum resultado para "${termo}" com os filtros atuais`
+        : `Nenhum card encontrado com os filtros atuais`;
       return;
     }
 
-    contadorPesquisa.textContent = `${totalVisivel} resultado${totalVisivel === 1 ? "" : "s"} para "${termo}" entre ${totalCarregado} card${totalCarregado === 1 ? "" : "s"} carregado${totalCarregado === 1 ? "" : "s"}`;
+    contadorPesquisa.textContent = termo
+      ? `${totalVisivel} resultado${totalVisivel === 1 ? "" : "s"} para "${termo}" com os filtros atuais`
+      : `${totalVisivel} card${totalVisivel === 1 ? "" : "s"} visível${totalVisivel === 1 ? "" : "eis"} com os filtros atuais`;
   }
 
   function aplicarBusca(){
@@ -2263,6 +2778,15 @@ function normalizarCardServidor(card){
     const cardNorm = normalizarCardServidor(card);
     if (!cardNorm.IDFatoKanbanCard) return null;
 
+    const nomeVendedor = nomeVendedorDoCard(cardNorm);
+    const chaveVendedor = normalizarTexto(nomeVendedor);
+    if (nomeVendedor && chaveVendedor) {
+      const jaExiste = vendedoresCatalogo.some(item => normalizarTexto(item?.NomeUsuario || "") === chaveVendedor);
+      if (!jaExiste) {
+        vendedoresCatalogo.push({ IDDimUsuarios: cardNorm.IDUsuarioRelacionadoCard || null, NomeUsuario: nomeVendedor });
+      }
+    }
+
     const idx = cards.findIndex(c => idNum(c.IDFatoKanbanCard) === cardNorm.IDFatoKanbanCard);
     if (idx >= 0){
       cards[idx] = Object.assign({}, cards[idx], cardNorm);
@@ -2411,8 +2935,8 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     if (lista.length === 0) {
       st.sentinelEl.style.display = "block";
-      st.sentinelEl.textContent = termoBusca
-        ? "Sem cards carregados para esta busca nesta fase."
+      st.sentinelEl.textContent = haFiltroAtivo()
+        ? "Sem cards carregados para os filtros atuais nesta fase."
         : "Sem cards nesta fase.";
     } else if (st.rendered < lista.length) {
       st.sentinelEl.style.display = "block";
@@ -3383,6 +3907,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     fases = Array.isArray(j.fases) ? j.fases.map(f => Object.assign({}, f || {})) : [];
     cards = Array.isArray(j.cards) ? j.cards.map(normalizarCardServidor) : [];
     tagsCatalogo = Array.isArray(j.tags) ? j.tags.map(t => Object.assign({}, t || {})) : [];
+    vendedoresCatalogo = Array.isArray(j.vendedores) ? j.vendedores.map(v => Object.assign({}, v || {})) : [];
 
     kanbanCfg = j.kanban_cfg || {};
     paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
@@ -3399,6 +3924,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       mapaTagsPorCard.set(idCard, arr);
     });
 
+    renderizarFiltrosMultiselect();
     renderBoardCompleto();
     atualizarResumoBusca();
   }
@@ -3549,7 +4075,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     const strong = col.querySelector(".kb-col-title strong");
     if (strong){
-      if (safeStr(termoBusca).trim()) {
+      if (haFiltroAtivo()) {
         strong.textContent = `${(f.NomeFase || "—")} (${qtdVisivel})`;
       } else {
         strong.textContent = `${(f.NomeFase || "—")} (${qtdTotalServidor})`;
@@ -3558,7 +4084,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     const countEl = col.querySelector(".kb-count");
     if (countEl){
-      if (safeStr(termoBusca).trim()){
+      if (haFiltroAtivo()){
         countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdVisivel} visível${qtdVisivel === 1 ? "" : "eis"} entre ${qtdCarregado} carregado${qtdCarregado === 1 ? "" : "s"}`;
       } else if (qtdCarregado !== qtdTotalServidor) {
         countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdCarregado}/${qtdTotalServidor} carregados`;
@@ -3636,8 +4162,8 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     if (lista.length === 0) {
       st.sentinelEl.style.display = "block";
-      st.sentinelEl.textContent = termoBusca
-        ? "Sem cards carregados para esta busca nesta fase."
+      st.sentinelEl.textContent = haFiltroAtivo()
+        ? "Sem cards carregados para os filtros atuais nesta fase."
         : "Sem cards nesta fase.";
     } else if (st.rendered < lista.length) {
       st.sentinelEl.style.display = "block";
@@ -3787,7 +4313,18 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
     cardChildren.push(tagsLinha);
     if (blocoResumoPaineis) cardChildren.push(blocoResumoPaineis);
 
-    const card = el("div", { class:"kb-card", draggable:"true", "data-card": c.IDFatoKanbanCard }, cardChildren);
+    const corEspecialCard = obterCorEspecialDoCard(c);
+    const atributosCard = {
+      class:`kb-card${corEspecialCard ? " is-tag-alerta" : ""}`,
+      draggable:"true",
+      "data-card": c.IDFatoKanbanCard
+    };
+
+    if (corEspecialCard) {
+      atributosCard.style = `--kb-card-alert-color:${corEspecialCard};`;
+    }
+
+    const card = el("div", atributosCard, cardChildren);
 
     card.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", String(c.IDFatoKanbanCard));
@@ -4667,13 +5204,61 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
   }
 
+  btnFiltroVendedor?.addEventListener("click", (evento) => {
+    evento.preventDefault();
+    evento.stopPropagation();
+    alternarMenuFiltro(filtroVendedorWrap, menuFiltroVendedor, inputFiltroVendedor);
+  });
+
+  btnFiltroTag?.addEventListener("click", (evento) => {
+    evento.preventDefault();
+    evento.stopPropagation();
+    alternarMenuFiltro(filtroTagWrap, menuFiltroTag, inputFiltroTag);
+  });
+
+  inputFiltroVendedor?.addEventListener("input", () => {
+    renderizarFiltrosMultiselect();
+  });
+
+  inputFiltroTag?.addEventListener("input", () => {
+    renderizarFiltrosMultiselect();
+  });
+
+  menuFiltroVendedor?.addEventListener("click", (evento) => {
+    evento.stopPropagation();
+  });
+
+  menuFiltroTag?.addEventListener("click", (evento) => {
+    evento.stopPropagation();
+  });
+
+  document.addEventListener("click", (evento) => {
+    const alvo = evento.target;
+    if (filtroVendedorWrap && filtroVendedorWrap.contains(alvo)) return;
+    if (filtroTagWrap && filtroTagWrap.contains(alvo)) return;
+    fecharMenusFiltros();
+  });
+
   if (btnLimparBusca){
     btnLimparBusca.addEventListener("click", () => {
       termoBusca = "";
+      vendedoresSelecionados.clear();
+      tagsSelecionadasFiltro.clear();
+
       if (buscaKanban) {
         buscaKanban.value = "";
         buscaKanban.focus();
       }
+
+      if (inputFiltroVendedor) {
+        inputFiltroVendedor.value = "";
+      }
+
+      if (inputFiltroTag) {
+        inputFiltroTag.value = "";
+      }
+
+      renderizarFiltrosMultiselect();
       aplicarBusca();
     });
   }

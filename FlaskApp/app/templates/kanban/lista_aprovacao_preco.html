@@ -1,0 +1,358 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Aprovação de Desconto{% endblock %}
+
+{% macro moeda(valor) -%}
+R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+{%- endmacro %}
+
+{% macro percentual(valor) -%}
+{{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%
+{%- endmacro %}
+
+{% block content %}
+<style>
+  .apv-wrap{
+    background:#ffffff;
+    border:1px solid rgba(15,23,42,.08);
+    border-radius:20px;
+    padding:18px;
+    box-shadow:0 10px 30px rgba(15,23,42,.06);
+  }
+
+  .apv-topo{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:18px;
+  }
+
+  .apv-titulo h1{
+    margin:0;
+    font-size:28px;
+    line-height:1.05;
+    color:#0f172a;
+    font-weight:950;
+  }
+
+  .apv-titulo p{
+    margin:8px 0 0 0;
+    color:#475569;
+    font-size:14px;
+    line-height:1.45;
+    max-width:860px;
+  }
+
+  .apv-acoes{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .apv-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border-radius:12px;
+    padding:10px 14px;
+    text-decoration:none;
+    border:1px solid rgba(15,23,42,.12);
+    background:#fff;
+    color:#0f172a;
+    font-size:13px;
+    font-weight:900;
+    cursor:pointer;
+  }
+
+  .apv-btn:hover{
+    box-shadow:0 10px 18px rgba(15,23,42,.08);
+    transform:translateY(-1px);
+  }
+
+  .apv-badges{
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+    gap:12px;
+    margin-bottom:16px;
+  }
+
+  .apv-badge{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:16px;
+    background:linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    padding:14px 16px;
+  }
+
+  .apv-badge-label{
+    margin:0 0 8px 0;
+    font-size:12px;
+    color:#64748b;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    font-weight:900;
+  }
+
+  .apv-badge-valor{
+    margin:0;
+    font-size:26px;
+    color:#0f172a;
+    font-weight:950;
+  }
+
+  .apv-filtros{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+
+  .apv-input{
+    min-height:44px;
+    border-radius:12px;
+    border:1px solid rgba(15,23,42,.12);
+    background:#fff;
+    padding:10px 14px;
+    font-size:14px;
+    color:#0f172a;
+    min-width:280px;
+    outline:none;
+  }
+
+  .apv-input:focus{
+    border-color:#0b4ea2;
+    box-shadow:0 0 0 4px rgba(11,78,162,.10);
+  }
+
+  .apv-tabela-wrap{
+    overflow:auto;
+    border:1px solid rgba(15,23,42,.08);
+    border-radius:18px;
+  }
+
+  .apv-tabela{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    min-width:1200px;
+    background:#fff;
+  }
+
+  .apv-tabela thead th{
+    position:sticky;
+    top:0;
+    z-index:1;
+    background:#f8fafc;
+    color:#334155;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    padding:14px 12px;
+    text-align:left;
+    border-bottom:1px solid rgba(15,23,42,.10);
+    white-space:nowrap;
+  }
+
+  .apv-tabela tbody td{
+    padding:14px 12px;
+    font-size:14px;
+    color:#0f172a;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    vertical-align:middle;
+  }
+
+  .apv-tabela tbody tr{
+    cursor:pointer;
+    transition:background .12s ease;
+  }
+
+  .apv-tabela tbody tr:hover{
+    background:#f8fafc;
+  }
+
+  .apv-card-nome{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+
+  .apv-card-nome strong{
+    font-size:14px;
+    color:#0f172a;
+  }
+
+  .apv-card-nome span,
+  .apv-muted{
+    color:#64748b;
+    font-size:12px;
+  }
+
+  .apv-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    border-radius:999px;
+    padding:6px 10px;
+    background:rgba(239,68,68,.10);
+    border:1px solid rgba(239,68,68,.18);
+    color:#991b1b;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .apv-vazio{
+    border:1px dashed rgba(15,23,42,.15);
+    border-radius:18px;
+    padding:32px 20px;
+    text-align:center;
+    color:#475569;
+    background:#fff;
+  }
+
+  @media (max-width: 1100px){
+    .apv-badges{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 720px){
+    .apv-badges{ grid-template-columns:1fr; }
+    .apv-input{ min-width:100%; width:100%; }
+  }
+</style>
+
+<div class="apv-wrap">
+  <div class="apv-topo">
+    <div class="apv-titulo">
+      <h1>Aprovação de Desconto</h1>
+      <p>
+        Esta tela lista apenas os cards que ainda estão com a tag <strong>{{ nome_tag }}</strong>.
+        O objetivo aqui é separar o fluxo de exceção comercial do kanban normal, para você analisar preço,
+        margem e proposta com clareza antes de aprovar.
+      </p>
+    </div>
+
+    <div class="apv-acoes">
+      <a class="apv-btn" href="{{ url_for('kanban.kanbans_lista') }}">← Voltar</a>
+    </div>
+  </div>
+
+  <div class="apv-badges">
+    <article class="apv-badge">
+      <p class="apv-badge-label">Cards aguardando</p>
+      <p class="apv-badge-valor">{{ cards|length }}</p>
+    </article>
+
+    <article class="apv-badge">
+      <p class="apv-badge-label">Tag monitorada</p>
+      <p class="apv-badge-valor" style="font-size:18px;">{{ nome_tag }}</p>
+    </article>
+
+    <article class="apv-badge">
+      <p class="apv-badge-label">Cards com proposta</p>
+      <p class="apv-badge-valor">{{ cards|selectattr('preco_proposto')|list|length }}</p>
+    </article>
+
+    <article class="apv-badge">
+      <p class="apv-badge-label">Cards com desconto</p>
+      <p class="apv-badge-valor">{{ cards|selectattr('desconto_proposto')|list|length }}</p>
+    </article>
+  </div>
+
+  <div class="apv-filtros">
+    <input id="filtroAprovacao" class="apv-input" type="text" placeholder="Buscar por card, empresa, fase ou responsável">
+  </div>
+
+  {% if cards %}
+  <div class="apv-tabela-wrap">
+    <table class="apv-tabela">
+      <thead>
+        <tr>
+          <th>Card</th>
+          <th>Empresa</th>
+          <th>Fase</th>
+          <th>Custo atual</th>
+          <th>Preço atual</th>
+          <th>Preço proposto</th>
+          <th>Desconto %</th>
+          <th>Margem %</th>
+          <th>Responsável</th>
+          <th>Data proposta</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="tbodyAprovacao">
+        {% for item in cards %}
+        <tr data-url="{{ url_for('kanban.aprovacao_preco_detalhe', id_card=item.id_card) }}">
+          <td>
+            <div class="apv-card-nome">
+              <strong>#{{ item.id_card }} • {{ item.titulo or '—' }}</strong>
+              <span>Negociação #{{ item.id_negociacao_preco or '—' }}</span>
+            </div>
+          </td>
+          <td>
+            <div class="apv-card-nome">
+              <strong>{{ item.nome_empresa or '—' }}</strong>
+              <span>{{ item.cnpj or 'CNPJ não informado' }}</span>
+            </div>
+          </td>
+          <td>{{ item.nome_fase or '—' }}</td>
+          <td>{{ moeda(item.custo_atual) }}</td>
+          <td>{{ moeda(item.preco_atual) }}</td>
+          <td>{{ moeda(item.preco_proposto) }}</td>
+          <td>{{ percentual(item.desconto_proposto) }}</td>
+          <td>{{ percentual(item.margem_proposta) }}</td>
+          <td>{{ item.nome_usuario_responsavel or '—' }}</td>
+          <td>{{ item.data_preco_proposto.strftime('%d/%m/%Y %H:%M') if item.data_preco_proposto else '—' }}</td>
+          <td><span class="apv-tag">Aguardando aprovação</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="apv-vazio">
+    Nenhum card está com a tag <strong>{{ nome_tag }}</strong> neste momento.
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(() => {
+  const inputFiltro = document.getElementById("filtroAprovacao");
+  const linhas = [...document.querySelectorAll("#tbodyAprovacao tr")];
+
+  function normalizarTexto(valor){
+    return String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  linhas.forEach((linha) => {
+    const url = linha.dataset.url;
+    if (!url) return;
+
+    linha.addEventListener("dblclick", () => {
+      window.location.href = url;
+    });
+
+    linha.addEventListener("click", (evento) => {
+      if (evento.target.closest("a, button, input, textarea, select")) return;
+      window.location.href = url;
+    });
+  });
+
+  inputFiltro?.addEventListener("input", () => {
+    const termo = normalizarTexto(inputFiltro.value);
+
+    linhas.forEach((linha) => {
+      const base = normalizarTexto(linha.innerText);
+      linha.style.display = !termo || base.includes(termo) ? "" : "none";
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,673 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Aprovação de Preço do Card #{{ card.id_card }}{% endblock %}
+
+{% macro moeda(valor) -%}
+R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+{%- endmacro %}
+
+{% macro percentual(valor) -%}
+{{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%
+{%- endmacro %}
+
+{% block content %}
+<style>
+  .apd-wrap{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+  }
+
+  .apd-card{
+    background:#fff;
+    border:1px solid rgba(15,23,42,.08);
+    border-radius:20px;
+    padding:18px;
+    box-shadow:0 10px 30px rgba(15,23,42,.06);
+  }
+
+  .apd-topo{
+    display:flex;
+    justify-content:space-between;
+    gap:16px;
+    align-items:flex-start;
+    flex-wrap:wrap;
+  }
+
+  .apd-titulo h1{
+    margin:0;
+    font-size:28px;
+    line-height:1.05;
+    font-weight:950;
+    color:#0f172a;
+  }
+
+  .apd-subtitulo{
+    margin:8px 0 0 0;
+    color:#475569;
+    font-size:14px;
+    line-height:1.45;
+  }
+
+  .apd-acoes{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .apd-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border-radius:12px;
+    padding:10px 14px;
+    text-decoration:none;
+    border:1px solid rgba(15,23,42,.12);
+    background:#fff;
+    color:#0f172a;
+    font-size:13px;
+    font-weight:900;
+    cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+  }
+
+  .apd-btn.primario{
+    background:#0b4ea2;
+    border-color:#0b4ea2;
+    color:#fff;
+  }
+
+  .apd-btn:hover{
+    box-shadow:0 10px 18px rgba(15,23,42,.08);
+    transform:translateY(-1px);
+  }
+
+  .apd-btn:disabled{
+    opacity:.65;
+    cursor:not-allowed;
+    transform:none;
+    box-shadow:none;
+  }
+
+  .apd-grid-resumo{
+    display:grid;
+    grid-template-columns:repeat(4, minmax(0, 1fr));
+    gap:12px;
+  }
+
+  .apd-bloco{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:16px;
+    background:linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    padding:14px 16px;
+  }
+
+  .apd-bloco h3,
+  .apd-card h2{
+    margin:0 0 12px 0;
+    font-size:16px;
+    color:#0f172a;
+    font-weight:950;
+  }
+
+  .apd-kpi-label{
+    margin:0 0 6px 0;
+    color:#64748b;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    font-weight:900;
+  }
+
+  .apd-kpi-valor{
+    margin:0;
+    font-size:24px;
+    color:#0f172a;
+    font-weight:950;
+  }
+
+  .apd-dados-grid{
+    display:grid;
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+    gap:12px;
+  }
+
+  .apd-dado{
+    border:1px solid rgba(15,23,42,.08);
+    border-radius:14px;
+    background:#fff;
+    padding:12px 14px;
+  }
+
+  .apd-dado-label{
+    display:block;
+    margin-bottom:6px;
+    color:#64748b;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    font-weight:900;
+  }
+
+  .apd-dado-valor{
+    color:#0f172a;
+    font-size:14px;
+    line-height:1.45;
+    font-weight:800;
+    word-break:break-word;
+  }
+
+  .apd-tags{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:12px;
+  }
+
+  .apd-tag{
+    display:inline-flex;
+    align-items:center;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid rgba(15,23,42,.12);
+    background:#f8fafc;
+    color:#0f172a;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .apd-alerta{
+    border-left:5px solid #dc2626;
+    background:rgba(239,68,68,.06);
+    border-radius:14px;
+    padding:12px 14px;
+    color:#991b1b;
+    font-size:14px;
+    font-weight:800;
+    margin-top:14px;
+  }
+
+  .apd-tabela-wrap{
+    overflow:auto;
+    border:1px solid rgba(15,23,42,.08);
+    border-radius:18px;
+  }
+
+  .apd-tabela{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    min-width:1320px;
+    background:#fff;
+  }
+
+  .apd-tabela thead th{
+    position:sticky;
+    top:0;
+    z-index:1;
+    background:#f8fafc;
+    color:#334155;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    padding:14px 12px;
+    text-align:left;
+    border-bottom:1px solid rgba(15,23,42,.10);
+    white-space:nowrap;
+  }
+
+  .apd-tabela tbody td{
+    padding:14px 12px;
+    font-size:14px;
+    color:#0f172a;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    vertical-align:top;
+  }
+
+  .apd-input,
+  .apd-textarea{
+    width:100%;
+    border:1px solid rgba(15,23,42,.12);
+    border-radius:12px;
+    background:#fff;
+    padding:10px 12px;
+    font-size:14px;
+    outline:none;
+    color:#0f172a;
+  }
+
+  .apd-input:focus,
+  .apd-textarea:focus{
+    border-color:#0b4ea2;
+    box-shadow:0 0 0 4px rgba(11,78,162,.10);
+  }
+
+  .apd-textarea{
+    min-height:82px;
+    resize:vertical;
+  }
+
+  .apd-margem-preview{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:88px;
+    border-radius:999px;
+    padding:8px 10px;
+    font-size:12px;
+    font-weight:950;
+    border:1px solid rgba(15,23,42,.10);
+    background:#f8fafc;
+    color:#0f172a;
+  }
+
+  .apd-margem-preview.negativa{
+    background:rgba(239,68,68,.10);
+    color:#991b1b;
+    border-color:rgba(239,68,68,.20);
+  }
+
+  .apd-margem-preview.positiva{
+    background:rgba(34,197,94,.10);
+    color:#166534;
+    border-color:rgba(34,197,94,.20);
+  }
+
+  .apd-msg{
+    display:none;
+    border-radius:14px;
+    padding:12px 14px;
+    font-size:14px;
+    font-weight:900;
+  }
+
+  .apd-msg.ok{
+    display:block;
+    background:rgba(34,197,94,.12);
+    color:#166534;
+    border:1px solid rgba(34,197,94,.20);
+  }
+
+  .apd-msg.erro{
+    display:block;
+    background:rgba(239,68,68,.10);
+    color:#991b1b;
+    border:1px solid rgba(239,68,68,.20);
+  }
+
+  .apd-vazio{
+    border:1px dashed rgba(15,23,42,.16);
+    border-radius:18px;
+    padding:28px 20px;
+    text-align:center;
+    color:#475569;
+    background:#fff;
+  }
+
+  .apd-muted{
+    color:#64748b;
+    font-size:12px;
+    line-height:1.45;
+    font-weight:700;
+  }
+
+  @media (max-width: 1180px){
+    .apd-grid-resumo,
+    .apd-dados-grid{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 760px){
+    .apd-grid-resumo,
+    .apd-dados-grid{ grid-template-columns:1fr; }
+  }
+</style>
+
+<div class="apd-wrap">
+  <section class="apd-card">
+    <div class="apd-topo">
+      <div class="apd-titulo">
+        <h1>Card #{{ card.id_card }} • {{ card.titulo or '—' }}</h1>
+      </div>
+
+      <div class="apd-acoes">
+        <a class="apd-btn" href="{{ url_for('kanban.lista_aprovacao_preco') }}">← Voltar para lista</a>
+        <a class="apd-btn" href="{{ url_for('kanban.historico_card_visualizacao', id_card=card.id_card) }}">Histórico do card</a>
+        <a class="apd-btn" href="{{ url_for('kanban.historico_precos_visualizacao', id_card=card.id_card) }}">Histórico de preços</a>
+      </div>
+    </div>
+
+    <div class="apd-grid-resumo" style="margin-top:18px;">
+      <article class="apd-bloco">
+        <p class="apd-kpi-label">Empresa</p>
+        <p class="apd-kpi-valor" style="font-size:18px;">{{ card.nome_fantasia or card.razao_social or '—' }}</p>
+      </article>
+
+      <article class="apd-bloco">
+        <p class="apd-kpi-label">Fase atual</p>
+        <p class="apd-kpi-valor" style="font-size:18px;">{{ card.nome_fase or '—' }}</p>
+      </article>
+
+      <article class="apd-bloco">
+        <p class="apd-kpi-label">Pendências</p>
+        <p class="apd-kpi-valor">{{ pendencias|length }}</p>
+      </article>
+
+      <article class="apd-bloco">
+        <p class="apd-kpi-label">Responsável</p>
+        <p class="apd-kpi-valor" style="font-size:18px;">{{ card.nome_usuario_responsavel or '—' }}</p>
+      </article>
+    </div>
+
+    <div class="apd-dados-grid" style="margin-top:16px;">
+      <div class="apd-dado">
+        <span class="apd-dado-label">Razão social</span>
+        <div class="apd-dado-valor">{{ card.razao_social or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Nome fantasia</span>
+        <div class="apd-dado-valor">{{ card.nome_fantasia or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">CNPJ</span>
+        <div class="apd-dado-valor">{{ card.cnpj or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">CNAE</span>
+        <div class="apd-dado-valor">{{ card.cnae_empresa or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Classe / Setor</span>
+        <div class="apd-dado-valor">{{ card.classe_cnae or '—' }} • {{ card.setor_cnae or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Macro setor</span>
+        <div class="apd-dado-valor">{{ card.macro_setor or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Email empresa</span>
+        <div class="apd-dado-valor">{{ card.email_empresa or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Telefone</span>
+        <div class="apd-dado-valor">{{ card.telefone_empresa or '—' }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Localização</span>
+        <div class="apd-dado-valor">{{ card.municipio or '—' }}/{{ card.uf or '—' }} • {{ card.bairro or '—' }}</div>
+      </div>
+    </div>
+
+    {% if tags_ativas %}
+    <div class="apd-tags">
+      {% for tag in tags_ativas %}
+      <span class="apd-tag">{{ tag.NomeTag }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="apd-alerta">
+      Enquanto existir pendência de preço nesta tela, o card deve permanecer fora do fluxo normal de fechamento.
+      Ao aprovar, a tag <strong>Aprovação Desconto</strong> sai e a tag <strong>Desconto Aprovado</strong> entra.
+    </div>
+  </section>
+
+  <section class="apd-card">
+    <h2>Itens pendentes de aprovação</h2>
+    <div id="mensagemAprovacao" class="apd-msg"></div>
+
+    {% if pendencias %}
+    <div class="apd-tabela-wrap">
+      <table class="apd-tabela">
+        <thead>
+          <tr>
+            <th>Negociação</th>
+            <th>Painel / Face</th>
+            <th>Solicitante</th>
+            <th>Custo atual</th>
+            <th>Preço atual</th>
+            <th>Preço proposto</th>
+            <th>Desconto proposto</th>
+            <th>Margem proposta</th>
+            <th>Informe preço</th>
+            <th>Margem ao digitar</th>
+            <th>Observações</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in pendencias %}
+          {% set custo_base = item.custo_atual if item.custo_atual is not none else item.custo_tabela_operacional %}
+          {% set preco_padrao = item.preco_proposto if item.preco_proposto is not none else item.preco_atual %}
+          <tr class="js-linha-pendencia"
+              data-id-negociacao="{{ item.id_negociacao_preco }}"
+              data-custo="{{ (custo_base or 0)|float }}">
+            <td>
+              <strong>#{{ item.id_negociacao_preco }}</strong><br>
+              <span class="apd-muted">{{ item.data_preco_proposto.strftime('%d/%m/%Y %H:%M') if item.data_preco_proposto else '—' }}</span>
+            </td>
+            <td>
+              <strong>{{ item.cod_ponto or 'Painel não informado' }}</strong><br>
+              <span class="apd-muted">{{ item.cod_face or 'Face não informada' }} • {{ item.tipo_painel or '—' }}</span>
+            </td>
+            <td>
+              <strong>{{ item.nome_usuario_solicitante or '—' }}</strong><br>
+              <span class="apd-muted">{{ item.observacoes_proposta or 'Sem observação da proposta' }}</span>
+            </td>
+            <td>{{ moeda(item.custo_atual or item.custo_tabela_operacional) }}</td>
+            <td>{{ moeda(item.preco_atual) }}</td>
+            <td>{{ moeda(item.preco_proposto or item.valor_venda_final_operacional or item.novo_valor_operacional) }}</td>
+            <td>{{ percentual(item.desconto_proposto or item.percentual_desconto_operacional) }}</td>
+            <td>{{ percentual(item.margem_proposta) }}</td>
+            <td>
+              <input type="text"
+                     class="apd-input js-preco-aprovado"
+                     value="{{ '{:,.2f}'.format((preco_padrao or 0)|float).replace(',', 'X').replace('.', ',').replace('X', '.') }}"
+                     placeholder="Ex.: 1.250,00">
+            </td>
+            <td>
+              <span class="apd-margem-preview js-margem-preview">—</span>
+            </td>
+            <td>
+              <textarea class="apd-textarea js-observacoes" placeholder="Observação da aprovação (opcional)"></textarea>
+            </td>
+            <td>
+              <button type="button" class="apd-btn primario js-btn-aprovar">Aprovar Preço</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="apd-vazio">
+      Não existem linhas pendentes de aprovação para este card neste momento.
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="apd-card">
+    <h2>Histórico de preço</h2>
+
+    {% if historico_precos %}
+    <div class="apd-tabela-wrap">
+      <table class="apd-tabela">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Status</th>
+            <th>Solicitante</th>
+            <th>Aprovador</th>
+            <th>Custo</th>
+            <th>Preço atual</th>
+            <th>Preço proposto</th>
+            <th>Preço aprovado</th>
+            <th>Desconto prop.</th>
+            <th>Desconto aprov.</th>
+            <th>Margem proposta</th>
+            <th>Margem aplicada</th>
+            <th>Observações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in historico_precos %}
+          <tr>
+            <td>{{ (item.data_aprovacao_preco or item.data_preco_proposto).strftime('%d/%m/%Y %H:%M') if (item.data_aprovacao_preco or item.data_preco_proposto) else '—' }}</td>
+            <td><strong>{{ item.status_negociacao or '—' }}</strong></td>
+            <td>{{ item.nome_usuario_solicitante or '—' }}</td>
+            <td>{{ item.nome_usuario_aprovador or '—' }}</td>
+            <td>{{ moeda(item.custo_original) }}</td>
+            <td>{{ moeda(item.preco_original) }}</td>
+            <td>{{ moeda(item.preco_proposto) }}</td>
+            <td>{{ moeda(item.preco_aplicado) }}</td>
+            <td>{{ percentual(item.desconto_proposto) }}</td>
+            <td>{{ percentual(item.desconto_aprovado) }}</td>
+            <td>{{ percentual(item.margem_proposta) }}</td>
+            <td>{{ percentual(item.margem_aplicada) }}</td>
+            <td>{{ item.observacoes_aprovacao or item.observacoes_proposta or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="apd-vazio">
+      Este card ainda não possui histórico de preço gravado.
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+<script>
+(() => {
+  const caixaMensagem = document.getElementById("mensagemAprovacao");
+  const linhas = [...document.querySelectorAll(".js-linha-pendencia")];
+
+  const csrf =
+    document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ||
+    document.querySelector('input[name="csrf_token"]')?.value ||
+    "";
+
+  const headersJSON = {
+    "Content-Type": "application/json",
+    "X-Requested-With": "XMLHttpRequest",
+    "X-CSRFToken": csrf
+  };
+
+  function mostrarMensagem(tipo, texto){
+    if (!caixaMensagem) return;
+
+    caixaMensagem.className = "apd-msg";
+
+    if (!texto) {
+      caixaMensagem.style.display = "none";
+      caixaMensagem.textContent = "";
+      return;
+    }
+
+    caixaMensagem.style.display = "block";
+    caixaMensagem.textContent = texto;
+    caixaMensagem.classList.add(tipo === "ok" ? "ok" : "erro");
+  }
+
+  function parseNumeroBr(valor){
+    const texto = String(valor || "").trim();
+    if (!texto) return null;
+
+    const normalizado = texto.replace(/\./g, "").replace(",", ".");
+    const numero = Number(normalizado);
+
+    return Number.isFinite(numero) ? numero : null;
+  }
+
+  function formatarPercentual(numero){
+    if (numero === null || numero === undefined || Number.isNaN(numero)) return "—";
+
+    return new Intl.NumberFormat("pt-BR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(numero) + "%";
+  }
+
+  function atualizarPreviewMargem(linha){
+    const inputPreco = linha.querySelector(".js-preco-aprovado");
+    const badge = linha.querySelector(".js-margem-preview");
+    const custo = Number(linha.dataset.custo || 0);
+    const preco = parseNumeroBr(inputPreco?.value);
+
+    badge.classList.remove("positiva", "negativa");
+
+    if (!preco || preco <= 0){
+      badge.textContent = "—";
+      return;
+    }
+
+    const margem = ((preco - custo) / preco) * 100;
+    badge.textContent = formatarPercentual(margem);
+    badge.classList.add(margem < 0 ? "negativa" : "positiva");
+  }
+
+  async function aprovarLinha(linha){
+    const idNegociacao = Number(linha.dataset.idNegociacao || 0);
+    const inputPreco = linha.querySelector(".js-preco-aprovado");
+    const inputObs = linha.querySelector(".js-observacoes");
+    const botao = linha.querySelector(".js-btn-aprovar");
+
+    const preco = parseNumeroBr(inputPreco?.value);
+    if (!idNegociacao || !preco || preco <= 0){
+      mostrarMensagem("erro", "Informe um preço aprovado válido antes de continuar.");
+      return;
+    }
+
+    if (!csrf){
+      mostrarMensagem("erro", "CSRF não encontrado na página. Recarregue a tela e tente novamente.");
+      return;
+    }
+
+    botao.disabled = true;
+    mostrarMensagem(null, "");
+
+    try {
+      const resposta = await fetch("{{ url_for('kanban.api_aprovacao_preco_aprovar', id_card=card.id_card) }}", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: headersJSON,
+        body: JSON.stringify({
+          id_negociacao_preco: idNegociacao,
+          preco_aprovado: preco,
+          observacoes_aprovacao: inputObs?.value || ""
+        })
+      });
+
+      const payload = await resposta.json().catch(() => null);
+
+      if (!resposta.ok || !payload || !payload.ok){
+        mostrarMensagem("erro", payload?.msg || payload?.erro || "Não foi possível aprovar o preço.");
+        botao.disabled = false;
+        return;
+      }
+
+      mostrarMensagem("ok", payload.msg || "Preço aprovado com sucesso.");
+
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 900);
+    } catch (_erro) {
+      mostrarMensagem("erro", "Falha de comunicação ao tentar aprovar o preço.");
+      botao.disabled = false;
+    }
+  }
+
+  linhas.forEach((linha) => {
+    atualizarPreviewMargem(linha);
+
+    linha.querySelector(".js-preco-aprovado")?.addEventListener("input", () => {
+      atualizarPreviewMargem(linha);
+    });
+
+    linha.querySelector(".js-btn-aprovar")?.addEventListener("click", () => {
+      aprovarLinha(linha);
+    });
+  });
+})();
+</script>
+{% endblock %}

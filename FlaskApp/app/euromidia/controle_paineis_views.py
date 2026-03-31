@@ -947,6 +947,7 @@ def _marcar_conflitos_por_face(ocupacoes_por_face):
 
 
 
+
 @paineis_bp.route("/", methods=["GET"])
 @login_required
 @limiter.limit("80 per minute", methods=["GET"])
@@ -11383,9 +11384,7 @@ def painel_detalhes(codponto: int):
             "custos": [],
         }
 
-    # =========================================================
-    # (resto do seu endpoint segue igual)
-    # =========================================================
+
     prospects_mock = [
         {
             "id_empresa": 102,

@@ -1014,7 +1014,8 @@ input:disabled, select:disabled, textarea:disabled{
 
                   <a href="{{ url_for('kanban.health_check_comercial') }}">Health Check Comercial</a>
                   <a href="{{ url_for('kanban.historico_cards_lista') }}">Historico Atendimento</a>
-                  <a href="#">Historico Preços</a>
+               
+
                 </div>
               </div>
             {% endif %}
@@ -1079,6 +1080,12 @@ input:disabled, select:disabled, textarea:disabled{
         <a href="{{ url_for('admin.permissao_desconto') }}"
            class="{% if request.path == url_for('admin.permissao_desconto') %}menu-link-current{% endif %}">
           Permissão Desconto
+        </a>
+
+
+          <a href="{{ url_for('kanban.lista_aprovacao_preco') }}"
+           class="{% if request.path == url_for('kanban.lista_aprovacao_preco') %}menu-link-current{% endif %}">
+          Aprovação Desconto
         </a>
       </div>
     </div>

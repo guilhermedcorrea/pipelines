@@ -1,0 +1,1228 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Histórico do Card{% endblock %}
+
+{% block content %}
+
+<style>
+  .pagina-historico-card {
+    width: 100%;
+    padding: 18px 18px 28px 18px;
+    background: #f4f7fb;
+    min-height: calc(100vh - 80px);
+  }
+
+  .historico-card-container {
+    display: grid;
+    gap: 16px;
+  }
+
+  .painel-historico-card {
+    background: #ffffff;
+    border: 1px solid #d8e1ee;
+    border-radius: 22px;
+    box-shadow: 0 10px 26px rgba(19, 44, 89, 0.06);
+    overflow: hidden;
+  }
+
+  .cabecalho-card {
+    padding: 22px 22px 18px 22px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    border-bottom: 1px solid #e6edf5;
+  }
+
+  .cabecalho-card__acoes {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .btn-voltar-historico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 16px;
+    border-radius: 14px;
+    text-decoration: none;
+    border: 1px solid #d7dfeb;
+    background: #ffffff;
+    color: #20324d;
+    font-size: 14px;
+    font-weight: 900;
+    transition: 0.18s ease;
+  }
+
+  .btn-voltar-historico:hover {
+    background: #f7faff;
+  }
+
+  .titulo-card {
+    margin: 0 0 8px 0;
+    color: #082f7a;
+    font-size: 32px;
+    line-height: 1.1;
+    font-weight: 900;
+  }
+
+  .subtitulo-card {
+    margin: 0;
+    color: #607089;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  .linha-badges-topo {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+
+  .pill-fase {
+    background: var(--cor-fase, #edf3ff);
+    color: var(--cor-texto-fase, #2f5bea);
+  }
+
+  .pill-status {
+    background: #eef4ff;
+    color: #2f5bea;
+  }
+
+  .pill-status--encerrado {
+    background: #fff1f2;
+    color: #d92d20;
+  }
+
+  .pill-situacao {
+    background: #f3f6fb;
+    color: #41526b;
+  }
+
+  .grade-metricas {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(120px, 1fr));
+    gap: 12px;
+    padding: 18px 22px 20px 22px;
+    border-bottom: 1px solid #e6edf5;
+  }
+
+  .card-metrica {
+    background: #f8fbff;
+    border: 1px solid #dde6f2;
+    border-radius: 18px;
+    padding: 14px 14px 12px 14px;
+  }
+
+  .card-metrica__numero {
+    color: #0e3a8a;
+    font-size: 28px;
+    line-height: 1;
+    font-weight: 900;
+    margin-bottom: 8px;
+  }
+
+  .card-metrica__rotulo {
+    color: #5b6f8e;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.35;
+  }
+
+  .grade-dados-card {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap: 14px;
+    padding: 18px 22px 22px 22px;
+  }
+
+  .bloco-dado {
+    background: #ffffff;
+    border: 1px solid #e2eaf3;
+    border-radius: 16px;
+    padding: 14px;
+  }
+
+  .bloco-dado__rotulo {
+    display: block;
+    margin-bottom: 6px;
+    color: #607089;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .bloco-dado__valor {
+    color: #20324d;
+    font-size: 15px;
+    line-height: 1.45;
+    font-weight: 700;
+    word-break: break-word;
+  }
+
+  .descricao-card-longa {
+    grid-column: 1 / -1;
+  }
+
+  .abas-historico-card {
+    display: flex;
+    gap: 8px;
+    padding: 16px 22px 0 22px;
+    flex-wrap: wrap;
+  }
+
+  .aba-historico-btn {
+    border: 1px solid #d9e2ef;
+    background: #ffffff;
+    color: #44566f;
+    min-height: 40px;
+    padding: 0 14px;
+    border-radius: 12px 12px 0 0;
+    font-size: 14px;
+    font-weight: 900;
+    cursor: pointer;
+    transition: 0.18s ease;
+  }
+
+  .aba-historico-btn:hover {
+    background: #f7faff;
+  }
+
+  .aba-historico-btn.ativo {
+    background: #0f3d91;
+    border-color: #0f3d91;
+    color: #ffffff;
+  }
+
+  .conteudo-abas-historico {
+    padding: 18px 22px 22px 22px;
+  }
+
+  .aba-historico-conteudo {
+    display: none;
+  }
+
+  .aba-historico-conteudo.ativo {
+    display: block;
+  }
+
+  .titulo-secao {
+    margin: 0 0 14px 0;
+    color: #14366e;
+    font-size: 22px;
+    line-height: 1.2;
+    font-weight: 900;
+  }
+
+  .subtitulo-secao {
+    margin: -4px 0 16px 0;
+    color: #607089;
+    font-size: 14px;
+  }
+
+  .lista-timeline {
+    display: grid;
+    gap: 14px;
+  }
+
+  .item-timeline {
+    display: grid;
+    grid-template-columns: 54px 1fr;
+    gap: 14px;
+    background: #ffffff;
+    border: 1px solid #e2eaf3;
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  .item-timeline__icone {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+    background: #edf3ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+  }
+
+  .item-timeline__titulo {
+    margin: 0 0 6px 0;
+    color: #20324d;
+    font-size: 17px;
+    font-weight: 900;
+  }
+
+  .item-timeline__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    margin-bottom: 8px;
+    color: #607089;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .item-timeline__descricao {
+    color: #324861;
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .tabela-historico-wrapper {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .tabela-historico {
+    width: 100%;
+    min-width: 960px;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .tabela-historico thead th {
+    text-align: left;
+    padding: 14px 14px;
+    background: #f7f9fc;
+    color: #082f7a;
+    font-size: 13px;
+    font-weight: 900;
+    border-bottom: 1px solid #dfe7f1;
+    white-space: nowrap;
+  }
+
+  .tabela-historico tbody td {
+    padding: 14px 14px;
+    border-bottom: 1px solid #e7edf5;
+    color: #21324a;
+    font-size: 14px;
+    vertical-align: top;
+  }
+
+  .tabela-historico tbody tr:hover {
+    background: #fbfcff;
+  }
+
+  .texto-forte {
+    font-weight: 900;
+    color: #182f56;
+  }
+
+  .texto-suave {
+    color: #607089;
+  }
+
+  .blocos-observacoes {
+    display: grid;
+    gap: 14px;
+  }
+
+  .bloco-observacao {
+    border: 1px solid #e1e9f3;
+    background: #ffffff;
+    border-radius: 18px;
+    padding: 16px;
+  }
+
+  .bloco-observacao__topo {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .bloco-observacao__usuario {
+    color: #163b78;
+    font-size: 15px;
+    font-weight: 900;
+  }
+
+  .bloco-observacao__meta {
+    color: #607089;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .bloco-observacao__texto {
+    color: #324861;
+    font-size: 14px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .tags-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .tag-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid #d9e2ef;
+    background: #ffffff;
+    font-size: 14px;
+    font-weight: 900;
+    color: #20324d;
+  }
+
+  .tag-card__ponto {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--cor-tag, #2f5bea);
+    flex: 0 0 auto;
+  }
+
+  .bloco-encerramento {
+    display: grid;
+    gap: 14px;
+  }
+
+  .card-encerramento {
+    border: 1px solid #f0d0d0;
+    background: #fff7f7;
+    border-radius: 18px;
+    padding: 16px;
+  }
+
+  .card-encerramento__titulo {
+    margin: 0 0 8px 0;
+    color: #9b1c1c;
+    font-size: 17px;
+    font-weight: 900;
+  }
+
+  .card-encerramento__meta {
+    color: #7b4e4e;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .card-encerramento__texto {
+    color: #5e3f3f;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+  }
+
+  .payload-box {
+    margin-top: 8px;
+    border: 1px solid #e1e9f3;
+    background: #f8fbff;
+    border-radius: 14px;
+    padding: 12px;
+    overflow-x: auto;
+  }
+
+  .payload-box pre {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #26374c;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: Consolas, "Courier New", monospace;
+  }
+
+  .estado-vazio-historico {
+    border: 1px dashed #d4dde9;
+    background: #fafcff;
+    border-radius: 18px;
+    padding: 26px;
+    text-align: center;
+    color: #607089;
+  }
+
+  .estado-vazio-historico h3 {
+    margin: 0 0 8px 0;
+    color: #20324d;
+    font-size: 20px;
+    font-weight: 900;
+  }
+
+  @media (max-width: 1280px) {
+    .grade-metricas {
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+    }
+
+    .grade-dados-card {
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+  }
+
+  @media (max-width: 860px) {
+    .pagina-historico-card {
+      padding: 12px;
+    }
+
+    .cabecalho-card {
+      grid-template-columns: 1fr;
+    }
+
+    .cabecalho-card__acoes {
+      justify-content: flex-start;
+    }
+
+    .grade-metricas {
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      padding: 16px;
+    }
+
+    .grade-dados-card {
+      grid-template-columns: 1fr;
+      padding: 16px;
+    }
+
+    .abas-historico-card {
+      padding: 16px 16px 0 16px;
+    }
+
+    .conteudo-abas-historico {
+      padding: 16px;
+    }
+
+    .item-timeline {
+      grid-template-columns: 1fr;
+    }
+
+    .item-timeline__icone {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+    }
+  }
+</style>
+
+<div class="pagina-historico-card">
+  <div class="historico-card-container">
+    <div class="painel-historico-card">
+      <div
+        class="cabecalho-card"
+        style="
+          --cor-fase: {{ card.cor_fase or '#edf3ff' }};
+          --cor-texto-fase: {{ card.cor_texto_fase or '#2f5bea' }};
+        "
+      >
+        <div>
+          <h1 class="titulo-card">{{ card.titulo or 'Card sem título' }}</h1>
+
+```
+      <p class="subtitulo-card">
+        Histórico completo do card #{{ card.id_card }}
+      </p>
+
+      <div class="linha-badges-topo">
+        <span class="pill pill-fase">
+          {{ card.nome_fase_atual or 'Sem fase' }}
+        </span>
+
+        <span class="pill {% if card.ativo %}pill-status{% else %}pill-status pill-status--encerrado{% endif %}">
+          {% if card.ativo %}
+            {{ card.status_card or 'Ativo' }}
+          {% else %}
+            {{ card.status_card or 'Encerrado' }}
+          {% endif %}
+        </span>
+
+        <span class="pill pill-situacao">
+          {% if card.ativo %}
+            Card ativo
+          {% else %}
+            Card encerrado
+          {% endif %}
+        </span>
+      </div>
+    </div>
+
+    <div class="cabecalho-card__acoes">
+      <a href="{{ url_for('kanban.historico_cards_lista') }}" class="btn-voltar-historico">
+        ← Voltar para lista
+      </a>
+    </div>
+  </div>
+
+  <div class="grade-metricas">
+    <div class="card-metrica">
+      <div class="card-metrica__numero">{{ resumo.total_movimentacoes or 0 }}</div>
+      <div class="card-metrica__rotulo">Movimentações</div>
+    </div>
+
+    <div class="card-metrica">
+      <div class="card-metrica__numero">{{ resumo.total_observacoes or 0 }}</div>
+      <div class="card-metrica__rotulo">Observações</div>
+    </div>
+
+    <div class="card-metrica">
+      <div class="card-metrica__numero">{{ resumo.total_itens or 0 }}</div>
+      <div class="card-metrica__rotulo">Itens vinculados</div>
+    </div>
+
+    <div class="card-metrica">
+      <div class="card-metrica__numero">{{ resumo.total_tags or 0 }}</div>
+      <div class="card-metrica__rotulo">Tags no histórico</div>
+    </div>
+
+    <div class="card-metrica">
+      <div class="card-metrica__numero">{{ resumo.total_precos_alterados or 0 }}</div>
+      <div class="card-metrica__rotulo">Registros com preço</div>
+    </div>
+
+    <div class="card-metrica">
+      <div class="card-metrica__numero">{{ resumo.total_logs or 0 }}</div>
+      <div class="card-metrica__rotulo">Logs técnicos</div>
+    </div>
+  </div>
+
+  <div class="grade-dados-card">
+    <div class="bloco-dado">
+      <span class="bloco-dado__rotulo">Responsável</span>
+      <div class="bloco-dado__valor">{{ card.nome_usuario_responsavel or 'Não identificado' }}</div>
+    </div>
+
+    <div class="bloco-dado">
+      <span class="bloco-dado__rotulo">Empresa relacionada</span>
+      <div class="bloco-dado__valor">
+        {% if card.id_empresa_relacionada %}
+          {{ card.id_empresa_relacionada }}
+        {% else %}
+          Não informada
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="bloco-dado">
+      <span class="bloco-dado__rotulo">Criado em</span>
+      <div class="bloco-dado__valor">
+        {% if card.criado_em %}
+          {{ card.criado_em.strftime('%d/%m/%Y %H:%M') }}
+        {% else %}
+          Não informado
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="bloco-dado">
+      <span class="bloco-dado__rotulo">Atualizado em</span>
+      <div class="bloco-dado__valor">
+        {% if card.atualizado_em %}
+          {{ card.atualizado_em.strftime('%d/%m/%Y %H:%M') }}
+        {% else %}
+          Não informado
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="bloco-dado">
+      <span class="bloco-dado__rotulo">Encerrado em</span>
+      <div class="bloco-dado__valor">
+        {% if card.encerrado_em %}
+          {{ card.encerrado_em.strftime('%d/%m/%Y %H:%M') }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="bloco-dado">
+      <span class="bloco-dado__rotulo">Motivo de encerramento</span>
+      <div class="bloco-dado__valor">
+        {{ card.nome_motivo_encerramento or 'Não informado' }}
+      </div>
+    </div>
+
+    <div class="bloco-dado descricao-card-longa">
+      <span class="bloco-dado__rotulo">Descrição do card</span>
+      <div class="bloco-dado__valor">
+        {{ card.descricao or 'Sem descrição informada.' }}
+      </div>
+    </div>
+
+    {% if card.motivo_encerramento_obs %}
+      <div class="bloco-dado descricao-card-longa">
+        <span class="bloco-dado__rotulo">Observação do encerramento atual</span>
+        <div class="bloco-dado__valor">
+          {{ card.motivo_encerramento_obs }}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="painel-historico-card">
+  <div class="abas-historico-card">
+    <button type="button" class="aba-historico-btn ativo" data-aba="timeline">Timeline</button>
+    <button type="button" class="aba-historico-btn" data-aba="movimentacoes">Movimentações</button>
+    <button type="button" class="aba-historico-btn" data-aba="observacoes">Observações</button>
+    <button type="button" class="aba-historico-btn" data-aba="itens">Itens</button>
+    <button type="button" class="aba-historico-btn" data-aba="precos">Histórico de Preços</button>
+    <button type="button" class="aba-historico-btn" data-aba="tags">Tags</button>
+    <button type="button" class="aba-historico-btn" data-aba="status">Status</button>
+    <button type="button" class="aba-historico-btn" data-aba="encerramentos">Encerramentos</button>
+    <button type="button" class="aba-historico-btn" data-aba="logs">Logs</button>
+  </div>
+
+  <div class="conteudo-abas-historico">
+    <section class="aba-historico-conteudo ativo" data-aba="timeline">
+      <h2 class="titulo-secao">Linha do tempo consolidada</h2>
+      <p class="subtitulo-secao">Visão cronológica juntando movimentos, observações, itens, tags, encerramentos e logs.</p>
+
+      {% if timeline %}
+        <div class="lista-timeline">
+          {% for evento in timeline %}
+            <article class="item-timeline">
+              <div class="item-timeline__icone">{{ evento.icone or '•' }}</div>
+
+              <div>
+                <h3 class="item-timeline__titulo">{{ evento.titulo or 'Evento' }}</h3>
+
+                <div class="item-timeline__meta">
+                  <span>
+                    <strong>Data:</strong>
+                    {% if evento.data_evento %}
+                      {{ evento.data_evento.strftime('%d/%m/%Y %H:%M') if evento.data_evento.strftime else evento.data_evento }}
+                    {% else %}
+                      Não informada
+                    {% endif %}
+                  </span>
+
+                  {% if evento.usuario %}
+                    <span><strong>Usuário:</strong> {{ evento.usuario }}</span>
+                  {% endif %}
+
+                  <span><strong>Tipo:</strong> {{ evento.tipo_evento or '-' }}</span>
+                </div>
+
+                <div class="item-timeline__descricao">
+                  {{ evento.descricao or 'Sem descrição.' }}
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Nenhum evento encontrado</h3>
+          <p>Não há registros para exibir na timeline deste card.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="movimentacoes">
+      <h2 class="titulo-secao">Movimentações de fase</h2>
+
+      {% if movimentacoes %}
+        <div class="tabela-historico-wrapper">
+          <table class="tabela-historico">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Usuário</th>
+                <th>Fase de</th>
+                <th>Fase para</th>
+                <th>Observação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in movimentacoes %}
+                <tr>
+                  <td class="texto-forte">
+                    {% if item.movido_em %}
+                      {{ item.movido_em.strftime('%d/%m/%Y %H:%M') }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td>{{ item.nome_usuario or 'Não identificado' }}</td>
+                  <td>{{ item.nome_fase_de or 'Sem fase' }}</td>
+                  <td>{{ item.nome_fase_para or 'Sem fase' }}</td>
+                  <td>{{ item.observacao or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem movimentações</h3>
+          <p>Este card ainda não possui movimentações registradas.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="observacoes">
+      <h2 class="titulo-secao">Observações do card</h2>
+
+      {% if observacoes %}
+        <div class="blocos-observacoes">
+          {% for item in observacoes %}
+            <article class="bloco-observacao">
+              <div class="bloco-observacao__topo">
+                <div class="bloco-observacao__usuario">
+                  {{ item.nome_usuario or 'Usuário não identificado' }}
+                </div>
+
+                <div class="bloco-observacao__meta">
+                  {% if item.criado_em %}
+                    {{ item.criado_em.strftime('%d/%m/%Y %H:%M') }}
+                  {% else %}
+                    Data não informada
+                  {% endif %}
+                  {% if item.nome_fase %}
+                    • Fase: {{ item.nome_fase }}
+                  {% endif %}
+                </div>
+              </div>
+
+              <div class="bloco-observacao__texto">
+                {{ item.observacao or 'Sem texto.' }}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem observações</h3>
+          <p>Este card ainda não possui observações registradas.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="itens">
+      <h2 class="titulo-secao">Painéis e faces vinculados</h2>
+
+      {% if itens %}
+        <div class="tabela-historico-wrapper">
+          <table class="tabela-historico">
+            <thead>
+              <tr>
+                <th>Ordem</th>
+                <th>CodPonto</th>
+                <th>CodFace</th>
+                <th>Tipo</th>
+                <th>Valor Tabela</th>
+                <th>Novo Valor</th>
+                <th>% Desc.</th>
+                <th>Valor Final</th>
+                <th>Margem %</th>
+                <th>Situação</th>
+                <th>Criado em</th>
+                <th>Atualizado em</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in itens %}
+                <tr>
+                  <td>{{ item.ordem or '—' }}</td>
+                  <td class="texto-forte">{{ item.cod_ponto or '—' }}</td>
+                  <td class="texto-forte">{{ item.cod_face or '—' }}</td>
+                  <td>{{ item.tipo_painel or '—' }}</td>
+                  <td>{{ item.valor_tabela if item.valor_tabela is not none else '—' }}</td>
+                  <td>{{ item.novo_valor if item.novo_valor is not none else '—' }}</td>
+                  <td>{{ item.percentual_desconto if item.percentual_desconto is not none else '—' }}</td>
+                  <td>{{ item.valor_venda_final if item.valor_venda_final is not none else '—' }}</td>
+                  <td>{{ item.margem_percentual if item.margem_percentual is not none else '—' }}</td>
+                  <td>
+                    {% if item.removido_em %}
+                      <span class="pill pill-status pill-status--encerrado">Removido</span>
+                    {% elif item.ativo %}
+                      <span class="pill pill-status">Ativo</span>
+                    {% else %}
+                      <span class="pill pill-situacao">Inativo</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if item.criado_em %}
+                      {{ item.criado_em.strftime('%d/%m/%Y %H:%M') }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if item.atualizado_em %}
+                      {{ item.atualizado_em.strftime('%d/%m/%Y %H:%M') }}
+                    {% elif item.removido_em %}
+                      {{ item.removido_em.strftime('%d/%m/%Y %H:%M') }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem itens vinculados</h3>
+          <p>Este card ainda não possui painéis ou faces vinculados.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="precos">
+      <h2 class="titulo-secao">Histórico de preços da negociação</h2>
+      <p class="subtitulo-secao">
+        Aqui ficam separados somente os registros de preço, desconto, valor final e margem do card.
+      </p>
+
+      {% if historico_precos %}
+        <div class="tabela-historico-wrapper">
+          <table class="tabela-historico">
+            <thead>
+              <tr>
+                <th>Data referência</th>
+                <th>CodPonto</th>
+                <th>CodFace</th>
+                <th>Tipo</th>
+                <th>Valor Tabela</th>
+                <th>Novo Valor</th>
+                <th>% Desc.</th>
+                <th>Valor Final</th>
+                <th>Margem Valor</th>
+                <th>Margem %</th>
+                <th>Situação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in historico_precos %}
+                <tr>
+                  <td class="texto-forte">
+                    {% if item.data_referencia_preco %}
+                      {{ item.data_referencia_preco.strftime('%d/%m/%Y %H:%M') if item.data_referencia_preco.strftime else item.data_referencia_preco }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td class="texto-forte">{{ item.cod_ponto or '—' }}</td>
+                  <td class="texto-forte">{{ item.cod_face or '—' }}</td>
+                  <td>{{ item.tipo_painel or '—' }}</td>
+
+                  <td>
+                    {% if item.valor_tabela is not none %}
+                      {{ item.valor_tabela }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if item.novo_valor is not none %}
+                      {{ item.novo_valor }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if item.percentual_desconto is not none %}
+                      {{ item.percentual_desconto }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if item.valor_venda_final is not none %}
+                      {{ item.valor_venda_final }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if item.margem_valor is not none %}
+                      {{ item.margem_valor }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if item.margem_percentual is not none %}
+                      {{ item.margem_percentual }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+
+                  <td>
+                    {% if item.removido_em %}
+                      <span class="pill pill-status pill-status--encerrado">Removido</span>
+                    {% elif item.ativo %}
+                      <span class="pill pill-status">Ativo</span>
+                    {% else %}
+                      <span class="pill pill-situacao">Inativo</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem histórico de preços</h3>
+          <p>Este card ainda não possui registros de preço, desconto, valor final ou margem.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="tags">
+      <h2 class="titulo-secao">Histórico de tags</h2>
+
+      {% if tags %}
+        <div class="tabela-historico-wrapper">
+          <table class="tabela-historico">
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Tipo</th>
+                <th>Aplicada em</th>
+                <th>Aplicada por</th>
+                <th>Removida em</th>
+                <th>Removida por</th>
+                <th>Situação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in tags %}
+                <tr>
+                  <td>
+                    <div class="tags-grid">
+                      <span
+                        class="tag-card"
+                        style="--cor-tag: {{ item.cor_tag or '#2f5bea' }};"
+                      >
+                        <span class="tag-card__ponto"></span>
+                        {{ item.nome_tag or 'Tag sem nome' }}
+                      </span>
+                    </div>
+                  </td>
+                  <td>{{ item.tipo_tag or '—' }}</td>
+                  <td>
+                    {% if item.aplicado_em %}
+                      {{ item.aplicado_em.strftime('%d/%m/%Y %H:%M') }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td>{{ item.nome_usuario_aplicou or '—' }}</td>
+                  <td>
+                    {% if item.removido_em %}
+                      {{ item.removido_em.strftime('%d/%m/%Y %H:%M') }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td>{{ item.nome_usuario_removeu or '—' }}</td>
+                  <td>
+                    {% if item.removido_em %}
+                      <span class="pill pill-status pill-status--encerrado">Removida</span>
+                    {% else %}
+                      <span class="pill pill-status">Ativa</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem histórico de tags</h3>
+          <p>Este card ainda não possui registros de tags.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="status">
+      <h2 class="titulo-secao">Histórico de status</h2>
+
+      {% if status_historico %}
+        <div class="tabela-historico-wrapper">
+          <table class="tabela-historico">
+            <thead>
+              <tr>
+                <th>Registro</th>
+                <th>ID Status</th>
+                <th>Fase</th>
+                <th>Usuário</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in status_historico %}
+                <tr>
+                  <td class="texto-forte">#{{ item.id_status_historico or loop.index }}</td>
+                  <td>{{ item.id_status_card or '—' }}</td>
+                  <td>{{ item.nome_fase or 'Sem fase' }}</td>
+                  <td>{{ item.nome_usuario or 'Não identificado' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem histórico de status</h3>
+          <p>Este card ainda não possui registros de status.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="encerramentos">
+      <h2 class="titulo-secao">Histórico de encerramentos</h2>
+
+      {% if encerramentos %}
+        <div class="bloco-encerramento">
+          {% for item in encerramentos %}
+            <article class="card-encerramento">
+              <h3 class="card-encerramento__titulo">
+                {{ item.nome_motivo or 'Encerramento sem motivo informado' }}
+              </h3>
+
+              <div class="card-encerramento__meta">
+                {% if item.data_atualizacao %}
+                  {{ item.data_atualizacao.strftime('%d/%m/%Y %H:%M') }}
+                {% else %}
+                  Data não informada
+                {% endif %}
+                {% if item.nome_usuario %}
+                  • {{ item.nome_usuario }}
+                {% endif %}
+                {% if item.nome_fase %}
+                  • Fase: {{ item.nome_fase }}
+                {% endif %}
+              </div>
+
+              <div class="card-encerramento__texto">
+                {{ item.observacoes or 'Sem observações adicionais.' }}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem encerramentos registrados</h3>
+          <p>Este card não possui histórico de encerramento.</p>
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="aba-historico-conteudo" data-aba="logs">
+      <h2 class="titulo-secao">Logs técnicos</h2>
+
+      {% if logs %}
+        <div class="blocos-observacoes">
+          {% for item in logs %}
+            <article class="bloco-observacao">
+              <div class="bloco-observacao__topo">
+                <div class="bloco-observacao__usuario">
+                  {{ item.tipo_evento or 'Log' }}
+                  {% if item.subtipo_evento %}
+                    • {{ item.subtipo_evento }}
+                  {% endif %}
+                </div>
+
+                <div class="bloco-observacao__meta">
+                  {% if item.ocorrido_em %}
+                    {{ item.ocorrido_em.strftime('%d/%m/%Y %H:%M') }}
+                  {% else %}
+                    Data não informada
+                  {% endif %}
+                  {% if item.nome_usuario_acao %}
+                    • {{ item.nome_usuario_acao }}
+                  {% endif %}
+                </div>
+              </div>
+
+              <div class="bloco-observacao__texto">
+                <div><strong>Tabela origem:</strong> {{ item.tabela_origem or '—' }}</div>
+                <div><strong>ID registro origem:</strong> {{ item.id_registro_origem or '—' }}</div>
+                <div><strong>Fase de:</strong> {{ item.nome_fase_de or '—' }}</div>
+                <div><strong>Fase para:</strong> {{ item.nome_fase_para or '—' }}</div>
+                <div><strong>Texto livre:</strong> {{ item.texto_livre or '—' }}</div>
+              </div>
+
+              {% if item.payload_antes_texto %}
+                <div class="payload-box">
+                  <div class="texto-forte" style="margin-bottom:8px;">Payload antes</div>
+                  <pre>{{ item.payload_antes_texto }}</pre>
+                </div>
+              {% endif %}
+
+              {% if item.payload_depois_texto %}
+                <div class="payload-box">
+                  <div class="texto-forte" style="margin-bottom:8px;">Payload depois</div>
+                  <pre>{{ item.payload_depois_texto }}</pre>
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="estado-vazio-historico">
+          <h3>Sem logs técnicos</h3>
+          <p>Não há logs técnicos registrados para este card.</p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+```
+
+  </div>
+</div>
+
+<script>
+  (() => {
+    const botoes = document.querySelectorAll('.aba-historico-btn');
+    const conteudos = document.querySelectorAll('.aba-historico-conteudo');
+
+    function ativarAba(nomeAba) {
+      botoes.forEach((botao) => {
+        botao.classList.toggle('ativo', botao.dataset.aba === nomeAba);
+      });
+
+      conteudos.forEach((conteudo) => {
+        conteudo.classList.toggle('ativo', conteudo.dataset.aba === nomeAba);
+      });
+    }
+
+    botoes.forEach((botao) => {
+      botao.addEventListener('click', () => {
+        ativarAba(botao.dataset.aba);
+      });
+    });
+  })();
+</script>
+
+{% endblock %}
