@@ -22,16 +22,13 @@
 
 
 
-  <!-- Paleta Euromídia (estimada do site) -->
 
 
 
 
 
   <style>
-    /* =========================================================
-   Paleta Euromídia (estimada do site)
-   ========================================================= */
+
 :root{
   --euro-blue: #002884;
   --euro-blue-2: #0340A7;
@@ -43,12 +40,7 @@
   --border: #E5E7EB;
 }
 
-/* =========================================================
-   ✅ FIX GLOBAL (BASE) — NÃO REMOVE NADA, SÓ CORRIGE “ESTOURO”
-   - evita overflow horizontal “fantasma”
-   - permite encolhimento correto em grid/flex (min-width:0)
-   - box-sizing consistente (evita somas de width + padding estourarem)
-   ========================================================= */
+
 *,
 *::before,
 *::after{
@@ -68,9 +60,7 @@ body{
   color: var(--text);
 }
 
-/* =========================================================
-   TOPBAR
-   ========================================================= */
+
 .topbar{
   background: var(--euro-blue);
   color: #fff;
@@ -1002,23 +992,31 @@ input:disabled, select:disabled, textarea:disabled{
             {% endif %}
 
             {% if menu_paineis_atendimento %}
-              <div class="submenu-item">
-                <a href="#" class="submenu-link">
-                  <span>Atendimento</span>
-                  <span class="submenu-caret">▸</span>
-                </a>
+  <div class="submenu-item">
+    <a href="#" class="submenu-link">
+      <span>Atendimento</span>
+      <span class="submenu-caret">▸</span>
+    </a>
 
-                <div class="submenu-dropdown">
-                  <a href="{{ url_for('kanban.atendimento_redirect') }}">Kanban Atendimento</a>
-                  
+    <div class="submenu-dropdown">
+      <a href="{{ url_for('kanban.atendimento_redirect') }}">Kanban Atendimento</a>
+      <a href="{{ url_for('kanban.health_check_comercial') }}">Health Check Comercial</a>
+      <a href="{{ url_for('kanban.historico_cards_lista') }}">Historico Atendimento</a>
+    </div>
+  </div>
+{% endif %}
 
-                  <a href="{{ url_for('kanban.health_check_comercial') }}">Health Check Comercial</a>
-                  <a href="{{ url_for('kanban.historico_cards_lista') }}">Historico Atendimento</a>
-               
+<div class="submenu-item">
+  <a href="#" class="submenu-link">
+    <span>Kanban</span>
+    <span class="submenu-caret">▸</span>
+  </a>
 
-                </div>
-              </div>
-            {% endif %}
+  <div class="submenu-dropdown">
+    <a href="">Lista Kanbans</a>
+    
+  </div>
+</div>
 
             {% if menu_paineis_performance %}
               <a href="{{ url_for('admin.ativos') }}">Performance Paineis</a>

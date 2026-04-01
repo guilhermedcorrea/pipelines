@@ -2,6 +2,7 @@
 {% block title %}{{ kanban.NomeKanban }} | Kanban{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
   :root{
     --kb-bg: #f3f5f8;
@@ -2133,6 +2134,93 @@
     }
   }
 
+
+  .kb-disponibilidade{
+    margin-top:10px;
+    border-radius:12px;
+    padding:10px 12px;
+    font-size:12px;
+    line-height:1.35;
+    font-weight:800;
+    border:1px solid rgba(15,23,42,.10);
+    background:rgba(15,23,42,.04);
+    color:rgba(15,23,42,.78);
+  }
+
+  .kb-disponibilidade[hidden]{
+    display:none !important;
+  }
+
+  .kb-disponibilidade[data-tipo="info"]{
+    border-color:rgba(11,78,162,.16);
+    background:rgba(11,78,162,.06);
+    color:#1e3a8a;
+  }
+
+  .kb-disponibilidade[data-tipo="sucesso"]{
+    border-color:rgba(34,197,94,.18);
+    background:rgba(34,197,94,.08);
+    color:#166534;
+  }
+
+  .kb-disponibilidade[data-tipo="aviso"]{
+    border-color:rgba(245,158,11,.22);
+    background:rgba(245,158,11,.10);
+    color:#92400e;
+  }
+
+  .kb-disponibilidade[data-tipo="erro"]{
+    border-color:rgba(239,68,68,.20);
+    background:rgba(239,68,68,.08);
+    color:#991b1b;
+  }
+
+  .flatpickr-calendar{
+    z-index:999999 !important;
+    border-radius:16px !important;
+    border:1px solid rgba(15,23,42,.12) !important;
+    box-shadow:0 18px 44px rgba(15,23,42,.18) !important;
+  }
+
+  .flatpickr-day.kb-dia-livre{
+    box-shadow: inset 0 0 0 1px rgba(34,197,94,.28);
+    background: rgba(34,197,94,.10) !important;
+    color:#166534 !important;
+    opacity:1 !important;
+  }
+
+  .flatpickr-day.kb-dia-parcial{
+    box-shadow: inset 0 0 0 1px rgba(245,158,11,.42);
+    background: rgba(245,158,11,.16) !important;
+    color:#92400e !important;
+    opacity:1 !important;
+  }
+
+  .flatpickr-day.kb-dia-indisponivel,
+  .flatpickr-day.kb-dia-inativo{
+    background: rgba(239,68,68,.16) !important;
+    color:#991b1b !important;
+    opacity:1 !important;
+    cursor:not-allowed !important;
+    text-decoration: line-through;
+    text-decoration-thickness: 1.5px;
+    box-shadow: inset 0 0 0 1px rgba(239,68,68,.30);
+  }
+
+  .flatpickr-day.flatpickr-disabled.kb-dia-indisponivel,
+  .flatpickr-day.flatpickr-disabled.kb-dia-inativo{
+    background: rgba(239,68,68,.16) !important;
+    color:#991b1b !important;
+    opacity:1 !important;
+    cursor:not-allowed !important;
+  }
+
+  .flatpickr-day.kb-dia-indisponivel:hover,
+  .flatpickr-day.kb-dia-inativo:hover{
+    background: rgba(239,68,68,.18) !important;
+    color:#991b1b !important;
+  }
+
 </style>
 
 <div class="kb-wrap">
@@ -2671,6 +2759,7 @@
   let empresasPorId = new Map();
   let empresasProprietariasCatalogo = [];
   let empresaCadastroConsultaTimer = null;
+  let empresaCadastroConsultaController = null;
   let empresaCadastroUltimoCnpjConsultado = "";
 
   const TAM_LOTE_POR_FASE = 8;
@@ -2832,6 +2921,676 @@
   function safeStr(v){
     if (v === null || v === undefined) return "";
     return String(v);
+  }
+
+  const URL_FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js";
+  const URL_FLATPICKR_CSS = "https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css";
+  const cacheCalendarioOcupacaoPorFace = new Map();
+  const promessasCalendarioOcupacaoPorFace = new Map();
+  let promessaFlatpickrBiblioteca = null;
+
+  const localeFlatpickrPtBr = {
+    weekdays: {
+      shorthand: ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
+      longhand: ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado']
+    },
+    months: {
+      shorthand: ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'],
+      longhand: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+    },
+    firstDayOfWeek: 0,
+    ordinal: () => 'º',
+    rangeSeparator: ' até ',
+    weekAbbreviation: 'Sem',
+    scrollTitle: 'Role para aumentar',
+    toggleTitle: 'Clique para alternar',
+    time_24hr: true
+  };
+
+  function garantirCssExterno(url, idElemento){
+    if (!url) return;
+    if (idElemento && document.getElementById(idElemento)) return;
+
+    const existente = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find((item) => {
+      const href = safeStr(item.getAttribute('href') || '').trim();
+      return href === url;
+    });
+
+    if (existente) return;
+
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = url;
+    if (idElemento) link.id = idElemento;
+    document.head.appendChild(link);
+  }
+
+  function carregarFlatpickrBiblioteca(){
+    if (window.flatpickr) {
+      return Promise.resolve(window.flatpickr);
+    }
+
+    if (promessaFlatpickrBiblioteca) {
+      return promessaFlatpickrBiblioteca;
+    }
+
+    garantirCssExterno(URL_FLATPICKR_CSS, 'kb-flatpickr-css');
+
+    promessaFlatpickrBiblioteca = new Promise((resolve, reject) => {
+      const existente = document.getElementById('kb-flatpickr-js');
+      if (existente) {
+        existente.addEventListener('load', () => resolve(window.flatpickr), { once: true });
+        existente.addEventListener('error', () => reject(new Error('Falha ao carregar flatpickr.')), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.id = 'kb-flatpickr-js';
+      script.src = URL_FLATPICKR_JS;
+      script.async = true;
+      script.onload = () => {
+        if (window.flatpickr) {
+          resolve(window.flatpickr);
+          return;
+        }
+        reject(new Error('Flatpickr carregou sem expor a função global.'));
+      };
+      script.onerror = () => reject(new Error('Falha ao carregar a biblioteca de calendário.'));
+      document.head.appendChild(script);
+    }).catch((erro) => {
+      promessaFlatpickrBiblioteca = null;
+      throw erro;
+    });
+
+    return promessaFlatpickrBiblioteca;
+  }
+
+  function formatarDataIso(data){
+    if (!(data instanceof Date) || Number.isNaN(data.getTime())) return '';
+
+    const ano = data.getFullYear();
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const dia = String(data.getDate()).padStart(2, '0');
+    return `${ano}-${mes}-${dia}`;
+  }
+
+  function parseDataIso(texto){
+    const valor = safeStr(texto).trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(valor);
+    if (!match) return null;
+
+    const ano = Number(match[1]);
+    const mes = Number(match[2]);
+    const dia = Number(match[3]);
+
+    const data = new Date(ano, mes - 1, dia);
+    if (formatarDataIso(data) !== valor) return null;
+    return data;
+  }
+
+  function formatarDataIsoParaBr(texto){
+    const data = parseDataIso(texto);
+    if (!data) return safeStr(texto).trim();
+    const dia = String(data.getDate()).padStart(2, '0');
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const ano = data.getFullYear();
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  function somarDiasDataIso(texto, quantidadeDias){
+    const data = parseDataIso(texto);
+    if (!data) return '';
+    data.setDate(data.getDate() + Number(quantidadeDias || 0));
+    return formatarDataIso(data);
+  }
+
+  function construirSetDatasIntervalo(dataInicio, dataFim){
+    const datas = new Set();
+    if (!dataInicio || !dataFim || dataFim < dataInicio) return datas;
+
+    let cursor = dataInicio;
+    let guard = 0;
+
+    while (cursor && cursor <= dataFim && guard < 3700){
+      datas.add(cursor);
+      cursor = somarDiasDataIso(cursor, 1);
+      guard += 1;
+    }
+
+    return datas;
+  }
+
+  function obterCalendarioOcupacaoDoBloco(bloco){
+    if (!bloco || !bloco.__calendarioOcupacao || typeof bloco.__calendarioOcupacao !== 'object') {
+      return null;
+    }
+    return bloco.__calendarioOcupacao;
+  }
+
+  function sincronizarRestricoesDataFimDoBloco(bloco){
+    const inputDataInicio = bloco?.querySelector('[data-role="input-data-inicio"]');
+    const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
+    if (!inputDataInicio || !inputDataFim) return;
+
+    const dataInicio = safeStr(inputDataInicio.value || '').trim();
+    const dataFim = safeStr(inputDataFim.value || '').trim();
+
+    inputDataFim.min = dataInicio || '';
+
+    if (inputDataFim._flatpickr) {
+      inputDataFim._flatpickr.set('minDate', dataInicio || null);
+
+      if (dataInicio) {
+        inputDataFim._flatpickr.jumpToDate(dataInicio, false);
+      }
+    }
+
+    if (dataInicio && dataFim && dataFim < dataInicio) {
+      if (inputDataFim._flatpickr) {
+        inputDataFim._flatpickr.clear();
+      } else {
+        inputDataFim.value = '';
+      }
+    }
+  }
+
+  function obterInfoDiaOcupacaoDoBloco(bloco, dataIso){
+    const calendario = obterCalendarioOcupacaoDoBloco(bloco);
+    if (!calendario || !dataIso) return null;
+    return calendario[dataIso] || null;
+  }
+
+  function diaEstaManualMenteLiberadoNoBloco(bloco, dataIso){
+    return !!(bloco && bloco.__datasReservaLiberadasManual instanceof Set && bloco.__datasReservaLiberadasManual.has(dataIso));
+  }
+
+  function diaEstaDisponivelNoBloco(bloco, dataIso){
+    if (!dataIso) return false;
+
+    if (diaEstaManualMenteLiberadoNoBloco(bloco, dataIso)) {
+      return true;
+    }
+
+    const info = obterInfoDiaOcupacaoDoBloco(bloco, dataIso);
+    if (!info) return false;
+
+    return Number(info.dia_disponivel || 0) === 1;
+  }
+
+  function intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim){
+    if (!dataInicio || !dataFim || dataFim < dataInicio) return false;
+
+    let cursor = dataInicio;
+    let guard = 0;
+
+    while (cursor && cursor <= dataFim && guard < 3700){
+      if (!diaEstaDisponivelNoBloco(bloco, cursor)) {
+        return false;
+      }
+      cursor = somarDiasDataIso(cursor, 1);
+      guard += 1;
+    }
+
+    return guard > 0;
+  }
+
+  function atualizarMensagemReservaDoBloco(bloco, mensagem = '', tipo = 'info'){
+    const alvo = bloco?.querySelector('[data-role="reserva-disponibilidade"]');
+    if (!alvo) return;
+
+    const texto = safeStr(mensagem).trim();
+    if (!texto){
+      alvo.hidden = true;
+      alvo.textContent = '';
+      alvo.dataset.tipo = 'info';
+      return;
+    }
+
+    alvo.hidden = false;
+    alvo.dataset.tipo = safeStr(tipo).trim() || 'info';
+    alvo.textContent = texto;
+  }
+
+  function atualizarResumoDisponibilidadeDoBloco(bloco){
+    const inputDataInicio = bloco?.querySelector('[data-role="input-data-inicio"]');
+    const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
+    const calendario = obterCalendarioOcupacaoDoBloco(bloco);
+
+    const dataInicio = safeStr(inputDataInicio?.value || '').trim();
+    const dataFim = safeStr(inputDataFim?.value || '').trim();
+
+    if (!calendario) {
+      if (safeStr(bloco?.__calendarioOcupacaoErro || '').trim()) {
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          bloco.__calendarioOcupacaoErro,
+          'aviso'
+        );
+      } else {
+        atualizarMensagemReservaDoBloco(bloco, '', 'info');
+      }
+      return;
+    }
+
+    if (!dataInicio && !dataFim){
+      atualizarMensagemReservaDoBloco(bloco, '', 'info');
+      return;
+    }
+
+    if (dataInicio && !dataFim){
+      if (!diaEstaDisponivelNoBloco(bloco, dataInicio)) {
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade para esta face.`,
+          'erro'
+        );
+        return;
+      }
+
+      atualizarMensagemReservaDoBloco(bloco, '', 'info');
+      return;
+    }
+
+    if (!dataInicio && dataFim){
+      atualizarMensagemReservaDoBloco(bloco, 'Preencha primeiro a Data de.', 'erro');
+      return;
+    }
+
+    if (dataFim < dataInicio){
+      atualizarMensagemReservaDoBloco(bloco, 'A Data até não pode ser menor que a Data de.', 'erro');
+      return;
+    }
+
+    if (!intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)) {
+      atualizarMensagemReservaDoBloco(
+        bloco,
+        `Existe pelo menos um dia sem disponibilidade entre ${formatarDataIsoParaBr(dataInicio)} e ${formatarDataIsoParaBr(dataFim)}.`,
+        'erro'
+      );
+      return;
+    }
+
+    atualizarMensagemReservaDoBloco(bloco, '', 'info');
+  }
+
+  function destruirCalendariosReservaDoBloco(bloco){
+    for (const role of ['input-data-inicio', 'input-data-fim']) {
+      const input = bloco?.querySelector(`[data-role="${role}"]`);
+      if (!input) continue;
+
+      if (input._flatpickr) {
+        try {
+          input._flatpickr.destroy();
+        } catch (erro) {
+          console.warn('Falha ao destruir flatpickr do bloco.', erro);
+        }
+      }
+
+      if (input.__kbReservaOnChange) {
+        input.removeEventListener('change', input.__kbReservaOnChange);
+        delete input.__kbReservaOnChange;
+      }
+    }
+  }
+
+  async function carregarCalendarioOcupacaoDaFace(codFace, opcoes = {}){
+    const chave = safeStr(codFace).trim().toUpperCase();
+    if (!chave) return {};
+
+    const fresh = !!opcoes.fresh;
+    const meses = Number(opcoes.meses || 18) || 18;
+
+    if (!fresh && cacheCalendarioOcupacaoPorFace.has(chave)) {
+      return cacheCalendarioOcupacaoPorFace.get(chave) || {};
+    }
+
+    if (!fresh && promessasCalendarioOcupacaoPorFace.has(chave)) {
+      return promessasCalendarioOcupacaoPorFace.get(chave);
+    }
+
+    const promessa = fetch(
+      `/kanban/api/ocupacao/calendario?cod_face=${encodeURIComponent(chave)}&meses=${encodeURIComponent(meses)}`,
+      { credentials: 'same-origin' }
+    )
+      .then(async (resposta) => {
+        const json = await resposta.json().catch(() => null);
+        if (!resposta.ok || !json || !json.ok) {
+          throw new Error((json && (json.erro || json.msg)) || 'Não foi possível consultar a ocupação desta face.');
+        }
+
+        const calendario = json && typeof json.cal === 'object' && json.cal ? json.cal : {};
+        cacheCalendarioOcupacaoPorFace.set(chave, calendario);
+        return calendario;
+      })
+      .finally(() => {
+        promessasCalendarioOcupacaoPorFace.delete(chave);
+      });
+
+    promessasCalendarioOcupacaoPorFace.set(chave, promessa);
+    return promessa;
+  }
+
+  function prepararInputReservaParaFallback(input){
+    if (!input) return;
+    input.type = 'date';
+    input.inputMode = 'numeric';
+    input.placeholder = '';
+  }
+
+  function decorarDiaFlatpickr(instance, dayElem, date){
+    const input = instance?.input;
+    const bloco = input?.closest('.kb-painel-item');
+    if (!bloco) return;
+
+    const dataIso = formatarDataIso(date);
+    const info = obterInfoDiaOcupacaoDoBloco(bloco, dataIso);
+    const liberadoManual = diaEstaManualMenteLiberadoNoBloco(bloco, dataIso);
+
+    dayElem.classList.remove('kb-dia-livre', 'kb-dia-parcial', 'kb-dia-indisponivel', 'kb-dia-inativo');
+    dayElem.title = '';
+
+    if (!info && !liberadoManual) {
+      dayElem.classList.add('kb-dia-indisponivel');
+      dayElem.title = 'Dia sem informação de disponibilidade.';
+      return;
+    }
+
+    const status = safeStr(info?.status || '').trim().toUpperCase();
+    const disponivel = liberadoManual || Number(info?.dia_disponivel || 0) === 1;
+
+    if (!disponivel) {
+      dayElem.classList.add(status === 'INDISPONIVEL' ? 'kb-dia-inativo' : 'kb-dia-indisponivel');
+    } else if (status === 'PARCIAL') {
+      dayElem.classList.add('kb-dia-parcial');
+    } else {
+      dayElem.classList.add('kb-dia-livre');
+    }
+
+    const pedacosTitulo = [];
+    if (status) pedacosTitulo.push(status);
+    if (info && info.cap !== undefined && info.ocup !== undefined) {
+      pedacosTitulo.push(`ocupação ${info.ocup}/${info.cap}`);
+    }
+    if (info && info.disp !== undefined) {
+      pedacosTitulo.push(`vagas ${info.disp}`);
+    }
+    if (pedacosTitulo.length) {
+      dayElem.title = pedacosTitulo.join(' • ');
+    }
+  }
+
+  function configurarFallbackNativoReservaDoBloco(bloco, datasPadrao = {}){
+    const inputDataInicio = bloco?.querySelector('[data-role="input-data-inicio"]');
+    const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
+    if (!inputDataInicio || !inputDataFim) return;
+
+    prepararInputReservaParaFallback(inputDataInicio);
+    prepararInputReservaParaFallback(inputDataFim);
+
+    inputDataInicio.value = safeStr(datasPadrao.dataInicio || '').trim();
+    inputDataFim.value = safeStr(datasPadrao.dataFim || '').trim();
+    inputDataInicio.disabled = false;
+    inputDataFim.disabled = false;
+    sincronizarRestricoesDataFimDoBloco(bloco);
+
+    const aoAlterarDataInicio = () => {
+      const dataInicio = safeStr(inputDataInicio.value || '').trim();
+      const dataFim = safeStr(inputDataFim.value || '').trim();
+
+      sincronizarRestricoesDataFimDoBloco(bloco);
+
+      if (obterCalendarioOcupacaoDoBloco(bloco) && dataInicio && !diaEstaDisponivelNoBloco(bloco, dataInicio)) {
+        inputDataInicio.value = '';
+        sincronizarRestricoesDataFimDoBloco(bloco);
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade para esta face.`,
+          'erro'
+        );
+        atualizarResumoDisponibilidadeDoBloco(bloco);
+        return;
+      }
+
+      if (dataInicio && dataFim && dataFim < dataInicio){
+        inputDataFim.value = '';
+      }
+
+      if (
+        obterCalendarioOcupacaoDoBloco(bloco) &&
+        dataInicio &&
+        safeStr(inputDataFim.value || '').trim() &&
+        !intervaloEstaDisponivelNoBloco(bloco, dataInicio, safeStr(inputDataFim.value || '').trim())
+      ) {
+        inputDataFim.value = '';
+      }
+
+      atualizarResumoDisponibilidadeDoBloco(bloco);
+    };
+
+    const aoAlterarDataFim = () => {
+      const dataInicio = safeStr(inputDataInicio.value || '').trim();
+      const dataFim = safeStr(inputDataFim.value || '').trim();
+
+      if (dataInicio && dataFim && dataFim < dataInicio){
+        inputDataFim.value = '';
+      }
+
+      if (
+        obterCalendarioOcupacaoDoBloco(bloco) &&
+        dataInicio &&
+        safeStr(inputDataFim.value || '').trim() &&
+        !intervaloEstaDisponivelNoBloco(bloco, dataInicio, safeStr(inputDataFim.value || '').trim())
+      ) {
+        inputDataFim.value = '';
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          `Existe pelo menos um dia sem disponibilidade entre ${formatarDataIsoParaBr(dataInicio)} e ${formatarDataIsoParaBr(dataFim)}.`,
+          'erro'
+        );
+      }
+
+      atualizarResumoDisponibilidadeDoBloco(bloco);
+    };
+
+    inputDataInicio.__kbReservaOnChange = aoAlterarDataInicio;
+    inputDataFim.__kbReservaOnChange = aoAlterarDataFim;
+    inputDataInicio.addEventListener('change', aoAlterarDataInicio);
+    inputDataFim.addEventListener('change', aoAlterarDataFim);
+
+    atualizarResumoDisponibilidadeDoBloco(bloco);
+  }
+
+  async function configurarCalendarioReservaNoBloco(bloco, datasPadrao = {}){
+    const inputDataInicio = bloco?.querySelector('[data-role="input-data-inicio"]');
+    const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
+    if (!inputDataInicio || !inputDataFim) return;
+
+    try {
+      const flatpickr = await carregarFlatpickrBiblioteca();
+      const dataInicioPadrao = safeStr(datasPadrao.dataInicio || '').trim();
+      const dataFimPadrao = safeStr(datasPadrao.dataFim || '').trim();
+
+      inputDataInicio.type = 'text';
+      inputDataInicio.inputMode = 'none';
+      inputDataInicio.placeholder = 'dd/mm/aaaa';
+      inputDataFim.type = 'text';
+      inputDataFim.inputMode = 'none';
+      inputDataFim.placeholder = 'dd/mm/aaaa';
+      inputDataInicio.disabled = false;
+      inputDataFim.disabled = false;
+
+      const opcoesBase = {
+        locale: localeFlatpickrPtBr,
+        altInput: true,
+        altFormat: 'd/m/Y',
+        dateFormat: 'Y-m-d',
+        allowInput: false,
+        disableMobile: true,
+        monthSelectorType: 'static',
+        onDayCreate: function(_dObj, _dStr, instance, dayElem){
+          decorarDiaFlatpickr(instance, dayElem, dayElem.dateObj);
+        }
+      };
+
+      flatpickr(inputDataInicio, {
+        ...opcoesBase,
+        defaultDate: dataInicioPadrao || null,
+        disable: [
+          function(data){
+            const dataIso = formatarDataIso(data);
+            return !diaEstaDisponivelNoBloco(bloco, dataIso);
+          }
+        ],
+        onReady: function(_selectedDates, _dataStr, instance){
+          if (dataInicioPadrao) {
+            instance.jumpToDate(dataInicioPadrao, false);
+          }
+        },
+        onChange: function(_selectedDates, dataStr){
+          const dataInicio = safeStr(dataStr || '').trim();
+
+          sincronizarRestricoesDataFimDoBloco(bloco);
+
+          const dataFimAtual = safeStr(inputDataFim.value || '').trim();
+          if (dataInicio && dataFimAtual && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFimAtual)) {
+            if (inputDataFim._flatpickr) {
+              inputDataFim._flatpickr.clear();
+            } else {
+              inputDataFim.value = '';
+            }
+          }
+
+          atualizarResumoDisponibilidadeDoBloco(bloco);
+        }
+      });
+
+      flatpickr(inputDataFim, {
+        ...opcoesBase,
+        defaultDate: dataFimPadrao || null,
+        minDate: dataInicioPadrao || null,
+        disable: [
+          function(data){
+            const dataIso = formatarDataIso(data);
+            const dataInicio = safeStr(inputDataInicio.value || '').trim();
+
+            if (!dataInicio) {
+              return true;
+            }
+
+            if (dataIso < dataInicio) {
+              return true;
+            }
+
+            return !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataIso);
+          }
+        ],
+        onReady: function(_selectedDates, _dataStr, instance){
+          const dataInicioAtual = safeStr(inputDataInicio.value || '').trim() || dataInicioPadrao;
+          instance.set('minDate', dataInicioAtual || null);
+          if (dataFimPadrao) {
+            instance.jumpToDate(dataFimPadrao, false);
+          } else if (dataInicioAtual) {
+            instance.jumpToDate(dataInicioAtual, false);
+          }
+        },
+        onChange: function(){
+          atualizarResumoDisponibilidadeDoBloco(bloco);
+        },
+        onOpen: function(_selectedDates, _dataStr, instance){
+          const dataInicio = safeStr(inputDataInicio.value || '').trim();
+          instance.set('minDate', dataInicio || null);
+          if (dataInicio) {
+            instance.jumpToDate(dataInicio, false);
+          }
+          instance.redraw();
+        }
+      });
+
+      if (dataInicioPadrao) {
+        inputDataInicio._flatpickr?.setDate(dataInicioPadrao, false, 'Y-m-d');
+      }
+
+      if (dataFimPadrao) {
+        inputDataFim._flatpickr?.setDate(dataFimPadrao, false, 'Y-m-d');
+      }
+
+      sincronizarRestricoesDataFimDoBloco(bloco);
+      atualizarResumoDisponibilidadeDoBloco(bloco);
+    } catch (erro) {
+      console.warn('Falha ao carregar calendário avançado. Voltando para o input nativo.', erro);
+      bloco.__calendarioOcupacaoErro = 'O calendário avançado não carregou; o campo voltou ao modo simples.';
+      configurarFallbackNativoReservaDoBloco(bloco, datasPadrao);
+    }
+  }
+
+  async function inicializarCalendarioReservaDoBloco(bloco, valoresSalvos = null){
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const inputDataInicio = bloco?.querySelector('[data-role="input-data-inicio"]');
+    const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
+    if (!selectFace || !inputDataInicio || !inputDataFim) return;
+
+    const codFace = safeStr(selectFace.value || '').trim().toUpperCase();
+    const dataInicioSalva = safeStr(
+      valoresSalvos?.DataInicioReserva ||
+      valoresSalvos?.data_inicio_reserva ||
+      valoresSalvos?.DataInicio ||
+      valoresSalvos?.data_inicio ||
+      ''
+    ).trim();
+    const dataFimSalva = safeStr(
+      valoresSalvos?.DataFimReserva ||
+      valoresSalvos?.data_fim_reserva ||
+      valoresSalvos?.DataFim ||
+      valoresSalvos?.data_fim ||
+      ''
+    ).trim();
+
+    bloco.__datasReservaLiberadasManual = construirSetDatasIntervalo(dataInicioSalva, dataFimSalva);
+    bloco.__calendarioOcupacao = null;
+    bloco.__calendarioOcupacaoErro = '';
+    bloco.__codFaceCalendario = codFace;
+
+    destruirCalendariosReservaDoBloco(bloco);
+
+    inputDataInicio.disabled = true;
+    inputDataFim.disabled = true;
+
+    if (!codFace) {
+      configurarFallbackNativoReservaDoBloco(bloco, {
+        dataInicio: dataInicioSalva,
+        dataFim: dataFimSalva,
+      });
+      atualizarMensagemReservaDoBloco(bloco, 'Selecione uma face para consultar a disponibilidade do calendário.', 'info');
+      return;
+    }
+
+    atualizarMensagemReservaDoBloco(bloco, 'Carregando disponibilidade da face selecionada...', 'info');
+
+    try {
+      const calendario = await carregarCalendarioOcupacaoDaFace(codFace, { meses: 18 });
+
+      if (safeStr(selectFace.value || '').trim().toUpperCase() != codFace) {
+        return;
+      }
+
+      bloco.__calendarioOcupacao = calendario && typeof calendario === 'object' ? calendario : {};
+      bloco.__calendarioOcupacaoErro = '';
+      await configurarCalendarioReservaNoBloco(bloco, {
+        dataInicio: dataInicioSalva,
+        dataFim: dataFimSalva,
+      });
+    } catch (erro) {
+      console.warn('Falha ao carregar ocupação da face.', erro);
+      bloco.__calendarioOcupacao = null;
+      bloco.__calendarioOcupacaoErro = (erro && erro.message)
+        ? `${erro.message} O campo voltou ao modo simples até a disponibilidade poder ser consultada.`
+        : 'Não foi possível consultar a ocupação desta face. O campo voltou ao modo simples.';
+
+      configurarFallbackNativoReservaDoBloco(bloco, {
+        dataInicio: dataInicioSalva,
+        dataFim: dataFimSalva,
+      });
+    }
   }
 
   function mostrarMensagemBoard(texto, tipo = "erro", esconderAposMs = 0){
@@ -4067,20 +4826,21 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
   async function consultarCadastroEmpresa(parametros = {}) {
     const idEmpresa = idNum(parametros.idEmpresa || 0);
     const cnpjDigits = normalizaCnpj(parametros.cnpj || "");
-
-    let url = "";
+    const query = new URLSearchParams();
 
     if (idEmpresa > 0) {
-      url = `/kanban/api/empresas/cadastro/${idEmpresa}`;
+      query.set("id_empresa", String(idEmpresa));
     } else if (cnpjDigits.length === 14) {
-      const query = new URLSearchParams();
       query.set("cnpj", cnpjDigits);
-      url = `/kanban/api/empresas/cadastro/buscar-por-cnpj?${query.toString()}`;
     } else {
       throw new Error("Informe um ID de empresa válido ou um CNPJ com 14 dígitos para consultar.");
     }
 
-    const r = await fetch(url, { credentials: "same-origin" });
+    const url = `/kanban/api/empresas/cadastro?${query.toString()}`;
+    const r = await fetch(url, {
+      credentials: "same-origin",
+      signal: parametros.signal || null,
+    });
     const j = await r.json().catch(() => null);
 
     if (!r.ok || !j || !j.ok) {
@@ -4093,31 +4853,57 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
   async function buscarCadastroEmpresaPorCnpj(cnpjInformado, opcoes = {}) {
     const cnpjDigits = normalizaCnpj(cnpjInformado);
     if (cnpjDigits.length !== 14) {
+      if (empresaCadastroConsultaController) {
+        empresaCadastroConsultaController.abort();
+        empresaCadastroConsultaController = null;
+      }
       if (!opcoes.silencioso) {
         setMensagemCadastroEmpresa("Digite um CNPJ completo com 14 dígitos para buscar.", "info");
       }
       return null;
     }
 
+    if (empresaCadastroConsultaController) {
+      empresaCadastroConsultaController.abort();
+    }
+
+    const controller = new AbortController();
+    empresaCadastroConsultaController = controller;
+
     setMensagemCadastroEmpresa("Consultando cadastro da empresa...", "info");
 
-    const resposta = await consultarCadastroEmpresa({ cnpj: cnpjDigits });
+    try {
+      const resposta = await consultarCadastroEmpresa({ cnpj: cnpjDigits, signal: controller.signal });
 
-    if (resposta.encontrado && resposta.empresa) {
-      preencherFormularioCadastroEmpresa(resposta.empresa);
-      setMensagemCadastroEmpresa(
-        resposta.origem === "banco"
-          ? "Cadastro encontrado no banco de dados."
-          : "Cadastro encontrado na API Minha Receita e preenchido no formulário.",
-        "sucesso"
-      );
-      return resposta.empresa;
-    }
+      if (empresaCadastroConsultaController !== controller) {
+        return null;
+      }
 
-    if (!opcoes.silencioso) {
-      setMensagemCadastroEmpresa("CNPJ não encontrado no banco e nem na API. Você pode preencher manualmente.", "info");
+      if (resposta.encontrado && resposta.empresa) {
+        preencherFormularioCadastroEmpresa(resposta.empresa);
+        setMensagemCadastroEmpresa(
+          resposta.origem === "banco"
+            ? "Cadastro encontrado no banco de dados."
+            : "Cadastro encontrado na API Minha Receita e preenchido no formulário.",
+          "sucesso"
+        );
+        return resposta.empresa;
+      }
+
+      if (!opcoes.silencioso) {
+        setMensagemCadastroEmpresa("CNPJ não encontrado no banco e nem na API. Você pode preencher manualmente.", "info");
+      }
+      return null;
+    } catch (erro) {
+      if (erro?.name === "AbortError") {
+        return null;
+      }
+      throw erro;
+    } finally {
+      if (empresaCadastroConsultaController === controller) {
+        empresaCadastroConsultaController = null;
+      }
     }
-    return null;
   }
 
   async function abrirModalCadastroEmpresa() {
@@ -4155,6 +4941,10 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     modalCadastroEmpresa.style.display = "none";
     setMensagemCadastroEmpresa("", "info");
     window.clearTimeout(empresaCadastroConsultaTimer);
+    if (empresaCadastroConsultaController) {
+      empresaCadastroConsultaController.abort();
+      empresaCadastroConsultaController = null;
+    }
   }
 
   function agendarBuscaAutomaticaCadastroEmpresa() {
@@ -4163,6 +4953,10 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     if (cnpjDigits.length !== 14) {
       empresaCadastroUltimoCnpjConsultado = "";
+      if (empresaCadastroConsultaController) {
+        empresaCadastroConsultaController.abort();
+        empresaCadastroConsultaController = null;
+      }
       return;
     }
 
@@ -4177,7 +4971,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       } catch (erro) {
         setMensagemCadastroEmpresa(String(erro), "erro");
       }
-    }, 650);
+    }, 300);
   }
 
   async function salvarCadastroEmpresa() {
@@ -4447,9 +5241,16 @@ function formatarNumeroParaInput(valor){
   function limparComercialBloco(bloco, mensagem = 'Selecione painel e face para consultar custo e preços.'){
     const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
     const selectPreco = bloco.querySelector('[data-role="select-preco"]');
+
+    destruirCalendariosReservaDoBloco(bloco);
+
     if (wrap) wrap.innerHTML = `<div class="kb-comercial-vazio">${mensagem}</div>`;
     if (selectPreco) limparSelectPrecosNoElemento(selectPreco);
+
     bloco.__dadosComerciais = null;
+    bloco.__calendarioOcupacao = null;
+    bloco.__calendarioOcupacaoErro = '';
+    bloco.__datasReservaLiberadasManual = new Set();
   }
 
   async function carregarFacesDoPainel(idPainel){
@@ -4602,6 +5403,23 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     selectPreco = el('select', { class:'kb-select grow', 'data-role':'select-preco' });
   }
 
+  const dataInicioSalva = safeStr(
+    valoresSalvos?.DataInicioReserva ||
+    valoresSalvos?.data_inicio_reserva ||
+    valoresSalvos?.DataInicio ||
+    valoresSalvos?.data_inicio ||
+    ''
+  ).trim();
+
+  const dataFimSalva = safeStr(
+    valoresSalvos?.DataFimReserva ||
+    valoresSalvos?.data_fim_reserva ||
+    valoresSalvos?.DataFim ||
+    valoresSalvos?.data_fim ||
+    ''
+  ).trim();
+
+  destruirCalendariosReservaDoBloco(bloco);
   bloco.__dadosComerciais = comercial || null;
   montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
 
@@ -4632,8 +5450,10 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       el('input', {
         class:'kb-input',
         'data-role':'input-data-inicio',
-        type:'date',
-        autocomplete:'off'
+        type:'text',
+        inputmode:'none',
+        autocomplete:'off',
+        placeholder:'dd/mm/aaaa'
       })
     ]),
     el('div', { class:'kb-campo grow' }, [
@@ -4641,11 +5461,26 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       el('input', {
         class:'kb-input',
         'data-role':'input-data-fim',
-        type:'date',
-        autocomplete:'off'
+        type:'text',
+        inputmode:'none',
+        autocomplete:'off',
+        placeholder:'dd/mm/aaaa'
       })
     ])
   ]));
+
+  wrap.appendChild(
+    el(
+      'div',
+      {
+        class:'kb-disponibilidade',
+        'data-role':'reserva-disponibilidade',
+        'data-tipo':'info',
+        hidden:'hidden'
+      },
+      ['Selecione uma face para consultar a disponibilidade do calendário.']
+    )
+  );
 
   wrap.appendChild(el('div', { class:'kb-painel-item-grid-3' }, [
     el('div', { class:'kb-campo' }, [
@@ -4702,24 +5537,6 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     atualizarResumoComercial(bloco);
   });
 
-  inputDataInicio?.addEventListener('change', () => {
-    const dataInicio = safeStr(inputDataInicio.value).trim();
-    if (inputDataFim){
-      inputDataFim.min = dataInicio || '';
-      if (dataInicio && safeStr(inputDataFim.value).trim() && inputDataFim.value < dataInicio){
-        inputDataFim.value = dataInicio;
-      }
-    }
-  });
-
-  inputDataFim?.addEventListener('change', () => {
-    const dataInicio = safeStr(inputDataInicio?.value).trim();
-    const dataFim = safeStr(inputDataFim.value).trim();
-    if (dataInicio && dataFim && dataFim < dataInicio){
-      inputDataFim.value = dataInicio;
-    }
-  });
-
   if (valoresSalvos){
     const idPrecoSalvo = idNum(
       valoresSalvos.IDDimTabelaPrecosEuromidia ||
@@ -4737,22 +5554,6 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       valoresSalvos.PercentualDesconto ??
       valoresSalvos.percentual_desconto ??
       null;
-
-    const dataInicioSalva = safeStr(
-      valoresSalvos.DataInicioReserva ||
-      valoresSalvos.data_inicio_reserva ||
-      valoresSalvos.DataInicio ||
-      valoresSalvos.data_inicio ||
-      ''
-    ).trim();
-
-    const dataFimSalva = safeStr(
-      valoresSalvos.DataFimReserva ||
-      valoresSalvos.data_fim_reserva ||
-      valoresSalvos.DataFim ||
-      valoresSalvos.data_fim ||
-      ''
-    ).trim();
 
     if (idPrecoSalvo) {
       selectPreco.value = String(idPrecoSalvo);
@@ -4790,16 +5591,11 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     }
   }
 
+  sincronizarRestricoesDataFimDoBloco(bloco);
   atualizarResumoComercial(bloco);
+  void inicializarCalendarioReservaDoBloco(bloco, valoresSalvos);
 }
 
-
-
-
-
-
-
-  
   async function atualizarFacesDoBloco(bloco, dadosSalvos = null){
     const selectPainel = bloco.querySelector('[data-role="select-painel"]');
     const selectFace = bloco.querySelector('[data-role="select-face"]');
@@ -6997,6 +7793,13 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       if (dataInicio && dataFim && dataFim < dataInicio){
         return { ok: false, msg: `${titulo}: a Data até não pode ser menor que a Data de.` };
+      }
+
+      if (dataInicio && dataFim && bloco.__calendarioOcupacao && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)){
+        return {
+          ok: false,
+          msg: `${titulo}: existe pelo menos um dia sem disponibilidade entre ${formatarDataIsoParaBr(dataInicio)} e ${formatarDataIsoParaBr(dataFim)}.`
+        };
       }
     }
 

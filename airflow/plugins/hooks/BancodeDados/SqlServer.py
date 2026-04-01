@@ -7,11 +7,7 @@ from sqlalchemy.engine import Engine, Result
 
 
 class HookSqlServer:
-    """Hook customizado para SQL Server usando SQLAlchemy + pyodbc.
-
-    Este hook lê uma Connection do Airflow e monta uma engine SQLAlchemy
-    para conectar no SQL Server via ODBC Driver 18.
-    """
+   
 
     def __init__(
         self,

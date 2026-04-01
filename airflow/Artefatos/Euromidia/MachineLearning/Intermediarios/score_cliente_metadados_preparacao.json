@@ -243,10 +243,11 @@
         "2025-11-01",
         "2025-12-01",
         "2026-01-01",
-        "2026-02-01"
+        "2026-02-01",
+        "2026-03-01"
     ],
-    "linhas_antes_limpeza": 35660,
-    "linhas_apos_limpeza": 35660,
+    "linhas_antes_limpeza": 36487,
+    "linhas_apos_limpeza": 36487,
     "quantidade_features": 67,
     "quantidade_features_numericas": 55,
     "quantidade_features_categoricas": 12

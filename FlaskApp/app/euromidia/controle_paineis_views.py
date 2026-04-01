@@ -12796,14 +12796,7 @@ def api_ocupacao_reserva_criar():
     criado_por = int(getattr(current_user, "id", 0) or 0)
 
 
-    # =========================================================
-    # ✅ AJUSTE: ReservaOrdemPrioridade
-    # Regra final (igual você pediu):
-    # - Se TEM capacidade (sem_capacidade = False) => ReservaOrdemPrioridade = 1
-    # - Se NÃO tem capacidade (sem_capacidade = True) => ReservaOrdemPrioridade = MAX(...) + 1
-    # - "Mesmo espaço" aqui = MESMO CodFace + MESMO DataInicio + MESMO DataFim
-    #   (incluí também Cota e SpanQtd no filtro pra ficar "exatamente o mesmo espaço")
-    # =========================================================
+
     reserva_ordem_prioridade_int = 1
 
     if sem_capacidade:

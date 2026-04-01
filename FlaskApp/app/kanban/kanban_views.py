@@ -21,6 +21,9 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
+TABELA_EMPRESAS_PROPRIETARIAS = "[Integracao].[dbo].[EmpresaProprietaria]"
+URL_API_MINHA_RECEITA = "https://minhareceita.org"
+
 
 NOME_TAG_DESCONTO_APROVADO = "Desconto Aprovado"
 TIPO_NOTA_APROVACAO_DESCONTO = "APROVACAO_DESCONTO"
@@ -40,6 +43,7 @@ STATUS_CARD_FALLBACK_INATIVACAO = "CANCELADO"
 TIPO_FASE_FALLBACK_PADRAO = "ATIVA"
 TIPO_TAG_FALLBACK_PADRAO = "OPERACIONAL"
 NAMESPACE_SOCKET_KANBAN = "/kanban"
+
 TIMEOUT_CACHE_CURTO = 20
 TIMEOUT_CACHE_MEDIO = 60
 TIMEOUT_CACHE_LONGO = 300
@@ -581,7 +585,6 @@ def _remover_tag_em_atendimento_do_card(*, id_card: int, id_kanban: int, id_usua
 
 
 
-
 def _salvar_vinculos_painel_face_card(
     id_card: int,
     vinculos_preparados: list[dict] | None = None,
@@ -655,6 +658,9 @@ def _salvar_vinculos_painel_face_card(
             return dec.quantize(Decimal(casas))
         except Exception:
             return dec
+
+    def normalizar_data(valor: object) -> date | None:
+        return _normalizar_data_reserva_kanban(valor)
 
     def linha_tem_conteudo_minimo(linha: dict) -> bool:
         return bool(linha.get("IDDimPaineisEuromidia") and linha.get("IDDimFacesPaineis"))
@@ -737,10 +743,46 @@ def _salvar_vinculos_painel_face_card(
             "MargemPercentual": normalizar_decimal(
                 obter_primeiro(item, ("MargemPercentual", "margem_percentual"))
             ),
+            "DataInicio": normalizar_data(
+                obter_primeiro(
+                    item,
+                    (
+                        "DataInicio",
+                        "data_inicio",
+                        "PeriodoInicio",
+                        "periodo_inicio",
+                        "DataInicioReserva",
+                        "data_inicio_reserva",
+                    ),
+                )
+            ),
+            "DataFim": normalizar_data(
+                obter_primeiro(
+                    item,
+                    (
+                        "DataFim",
+                        "data_fim",
+                        "PeriodoTermino",
+                        "periodo_termino",
+                        "DataFimReserva",
+                        "data_fim_reserva",
+                    ),
+                )
+            ),
         }
 
         if linha["Ordem"] is None:
             linha["Ordem"] = ordem_padrao
+
+        if (linha["DataInicio"] is None) ^ (linha["DataFim"] is None):
+            raise ValueError("Preencha Data de e Data até para o mesmo painel/face.")
+
+        if (
+            linha["DataInicio"] is not None
+            and linha["DataFim"] is not None
+            and linha["DataFim"] < linha["DataInicio"]
+        ):
+            raise ValueError("A Data até não pode ser menor que a Data de.")
 
         return linha
 
@@ -769,6 +811,8 @@ def _salvar_vinculos_painel_face_card(
             normalizar_decimal(linha.get("ValorVendaFinal")),
             normalizar_decimal(linha.get("MargemValor")),
             normalizar_decimal(linha.get("MargemPercentual")),
+            normalizar_data(linha.get("DataInicio")),
+            normalizar_data(linha.get("DataFim")),
         )
 
     sql_buscar_ativos = text(
@@ -796,6 +840,8 @@ def _salvar_vinculos_painel_face_card(
             ValorVendaFinal,
             MargemValor,
             MargemPercentual,
+            DataInicio,
+            DataFim,
             Ativo
         FROM [Kanban].[Silver].[FatoKanbanCardPainelFace]
         WHERE IDFatoKanbanCard = :id_card
@@ -832,6 +878,8 @@ def _salvar_vinculos_painel_face_card(
             "ValorVendaFinal": normalizar_decimal(linha.get("ValorVendaFinal")),
             "MargemValor": normalizar_decimal(linha.get("MargemValor")),
             "MargemPercentual": normalizar_decimal(linha.get("MargemPercentual")),
+            "DataInicio": normalizar_data(linha.get("DataInicio")),
+            "DataFim": normalizar_data(linha.get("DataFim")),
         }
 
         chave = chave_principal(linha_normalizada)
@@ -892,7 +940,9 @@ def _salvar_vinculos_painel_face_card(
             RemovidoEm,
             RemovidoPor,
             IDUsuario,
-            IDEmpresaProprietaria
+            IDEmpresaProprietaria,
+            DataInicio,
+            DataFim
         )
         VALUES
         (
@@ -923,7 +973,9 @@ def _salvar_vinculos_painel_face_card(
             NULL,
             NULL,
             :id_usuario,
-            :id_empresa_proprietaria
+            :id_empresa_proprietaria,
+            :data_inicio,
+            :data_fim
         )
         """
     )
@@ -997,8 +1049,18 @@ def _salvar_vinculos_painel_face_card(
                 "margem_percentual": linha_nova.get("MargemPercentual"),
                 "id_usuario": id_usuario,
                 "id_empresa_proprietaria": id_empresa_proprietaria,
+                "data_inicio": linha_nova.get("DataInicio"),
+                "data_fim": linha_nova.get("DataFim"),
             },
         )
+
+
+
+
+
+
+
+
 
 
 def _quebrar_nome_tabela_schema_objeto(nome_tabela: str) -> tuple[str | None, str]:
@@ -3592,8 +3654,6 @@ def _criar_reservas_painel_faces_kanban(
 
 
 
-
-
 def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_proprietaria: int) -> list[dict[str, Any]]:
     vinculos_preparados: list[dict[str, Any]] = []
 
@@ -3608,6 +3668,25 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             raise ValueError("Painel é obrigatório em cada vinculação")
         if not cod_face_item:
             raise ValueError("Face é obrigatória em cada vinculação")
+
+        data_inicio_item = _normalizar_data_reserva_kanban(
+            item.get("data_inicio")
+            or item.get("DataInicio")
+            or item.get("data_inicio_reserva")
+            or item.get("DataInicioReserva")
+        )
+        data_fim_item = _normalizar_data_reserva_kanban(
+            item.get("data_fim")
+            or item.get("DataFim")
+            or item.get("data_fim_reserva")
+            or item.get("DataFimReserva")
+        )
+
+        if (data_inicio_item is None) ^ (data_fim_item is None):
+            raise ValueError("Preencha Data de e Data até para o mesmo painel/face.")
+
+        if data_inicio_item is not None and data_fim_item is not None and data_fim_item < data_inicio_item:
+            raise ValueError("A Data até não pode ser menor que a Data de.")
 
         painel_item = _obter_painel_por_id(id_painel_item)
         if not painel_item:
@@ -3633,7 +3712,9 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             preco_item = _obter_preco_por_id(
                 id_preco=id_preco_item,
                 id_painel=id_painel_item,
-                id_dim_face=int(face_item.get("IDDimFacesPaineis") or 0) if face_item.get("IDDimFacesPaineis") is not None else None,
+                id_dim_face=int(face_item.get("IDDimFacesPaineis") or 0)
+                if face_item.get("IDDimFacesPaineis") is not None
+                else None,
                 tipo_painel=_normalizar_texto(painel_item.get("Tipo")),
             )
             if not preco_item:
@@ -3657,15 +3738,23 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             {
                 "ordem": ordem_rel,
                 "id_painel": int(id_painel_item),
-                "id_dim_face": int(face_item.get("IDDimFacesPaineis") or 0) if face_item.get("IDDimFacesPaineis") is not None else None,
-                "cod_ponto": int(painel_item.get("CodPonto") or 0) if painel_item.get("CodPonto") is not None else None,
+                "id_dim_face": int(face_item.get("IDDimFacesPaineis") or 0)
+                if face_item.get("IDDimFacesPaineis") is not None
+                else None,
+                "cod_ponto": int(painel_item.get("CodPonto") or 0)
+                if painel_item.get("CodPonto") is not None
+                else None,
                 "cod_face": cod_face_item,
                 "tipo_painel": _normalizar_texto(painel_item.get("Tipo")) or None,
-                "ano_custo": int(custo_item.get("Ano") or 0) if custo_item and custo_item.get("Ano") is not None else None,
+                "ano_custo": int(custo_item.get("Ano") or 0)
+                if custo_item and custo_item.get("Ano") is not None
+                else None,
                 "custo_tabela": metricas.get("Custo"),
                 "id_preco": int(preco_item.get("IDDimTabelaPrecosEuromidia") or 0) if preco_item else None,
                 "periodo_exibicao": preco_item.get("PeriodoExibicao") if preco_item else None,
-                "exibicoes_dia": int(preco_item.get("ExibicoesDia") or 0) if preco_item and preco_item.get("ExibicoesDia") is not None else None,
+                "exibicoes_dia": int(preco_item.get("ExibicoesDia") or 0)
+                if preco_item and preco_item.get("ExibicoesDia") is not None
+                else None,
                 "valor_tabela": metricas.get("ValorTabela"),
                 "tabela": preco_item.get("Tabela") if preco_item else None,
                 "politica_trocas": preco_item.get("PoliticaTrocas") if preco_item else None,
@@ -3675,12 +3764,17 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
                 "valor_venda_final": metricas.get("ValorVendaFinal"),
                 "margem_valor": metricas.get("MargemValor"),
                 "margem_percentual": metricas.get("MargemPercentual"),
+                "data_inicio": data_inicio_item,
+                "data_fim": data_fim_item,
                 "id_usuario": _id_usuario(),
                 "id_empresa": int(id_empresa_proprietaria),
             }
         )
 
     return vinculos_preparados
+
+
+
 
 
 
@@ -3710,6 +3804,8 @@ def _buscar_ultima_negociacao_preco_card(
             CustoPropostoRateado,
             PrecoPropostoRateado,
             DescontoProposto,
+            PeriodoInicio,
+            PeriodoTermino,
             ObservacoesProposta
         FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
         WHERE IDFatoKanbanCard = :id_card
@@ -3728,6 +3824,10 @@ def _buscar_ultima_negociacao_preco_card(
     ).mappings().first()
 
     return dict(row) if row else None
+
+
+
+
 
 
 def _normalizar_int_negociacao(valor: Any) -> int | None:
@@ -3794,6 +3894,9 @@ def _montar_assinatura_negociacao_preco(
     )
 
 
+
+
+
 def _listar_estado_atual_negociacao_card(id_card: int) -> list[dict[str, Any]]:
     """
     Lê a foto atual canônica do card a partir da tabela operacional.
@@ -3812,7 +3915,9 @@ def _listar_estado_atual_negociacao_card(id_card: int) -> list[dict[str, Any]]:
             pf.PercentualDesconto,
             pf.ValorVendaFinal,
             pf.MargemValor,
-            pf.MargemPercentual
+            pf.MargemPercentual,
+            pf.DataInicio,
+            pf.DataFim
         FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
         WHERE pf.IDFatoKanbanCard = :id_card
           AND ISNULL(pf.Ativo, 1) = 1
@@ -3823,6 +3928,8 @@ def _listar_estado_atual_negociacao_card(id_card: int) -> list[dict[str, Any]]:
 
     rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
     return [dict(row) for row in rows]
+
+
 
 
 
@@ -3842,7 +3949,7 @@ def _registrar_negociacao_preco_card(
     Fundamento desta versão:
     - a fonte da verdade é a tabela operacional FatoKanbanCardPainelFace já salva nesta transação
     - o histórico FatoKanbanNegociacaoPreco só recebe novo registro quando a assinatura comercial mudou
-    - salvar o card novamente, sem alterar tabela/preço/desconto/margem, não gera nova linha
+    - o período também é persistido e participa da assinatura
     """
 
     if not vinculos_preparados:
@@ -3867,6 +3974,9 @@ def _registrar_negociacao_preco_card(
         if valor in (None, ""):
             return None
         return _valor_decimal(valor)
+
+    def _para_data_ou_none(valor: Any) -> date | None:
+        return _normalizar_data_reserva_kanban(valor)
 
     def _calcular_margem_percentual(custo: Any, preco: Any) -> Decimal | None:
         custo_dec = _valor_decimal(custo)
@@ -3927,8 +4037,8 @@ def _registrar_negociacao_preco_card(
 
         adicionar("DescontoProposto", "desconto_proposto", valores.get("desconto_proposto"))
 
-        adicionar("PeriodoInicio", "periodo_inicio", None)
-        adicionar("PeriodoTermino", "periodo_termino", None)
+        adicionar("PeriodoInicio", "periodo_inicio", valores.get("periodo_inicio"))
+        adicionar("PeriodoTermino", "periodo_termino", valores.get("periodo_termino"))
 
         adicionar("IDDimUsuariosAprovacaoPreco", "id_usuario_aprovacao", None)
         adicionar("DataAprovacaoPreco", "data_aprovacao", None)
@@ -3984,6 +4094,8 @@ def _registrar_negociacao_preco_card(
         novo_valor = _para_decimal_ou_none(estado.get("NovoValor"))
         percentual_desconto = _para_decimal_ou_none(estado.get("PercentualDesconto"))
         valor_venda_final = _para_decimal_ou_none(estado.get("ValorVendaFinal"))
+        periodo_inicio_atual = _para_data_ou_none(estado.get("DataInicio"))
+        periodo_termino_atual = _para_data_ou_none(estado.get("DataFim"))
 
         preco_proposto = novo_valor
         if preco_proposto is None:
@@ -3995,7 +4107,7 @@ def _registrar_negociacao_preco_card(
         margem_proposta = _calcular_margem_percentual(custo_proposto, preco_proposto)
         precisa_aprovacao_diretoria = _estado_precisa_aprovacao_diretoria(estado)
 
-        tem_operacao_comercial = any(
+        tem_operacao_comercial_ou_periodo = any(
             _tem_valor_informado(valor)
             for valor in (
                 id_tabela_preco,
@@ -4003,9 +4115,11 @@ def _registrar_negociacao_preco_card(
                 percentual_desconto,
                 valor_venda_final,
                 preco_atual,
+                periodo_inicio_atual,
+                periodo_termino_atual,
             )
         )
-        if not tem_operacao_comercial:
+        if not tem_operacao_comercial_ou_periodo:
             continue
 
         ultima_negociacao = _buscar_ultima_negociacao_preco_card(
@@ -4024,6 +4138,8 @@ def _registrar_negociacao_preco_card(
             preco_proposto=preco_proposto,
             margem_proposta_percentual=margem_proposta,
             desconto_proposto=percentual_desconto,
+            periodo_inicio=periodo_inicio_atual,
+            periodo_termino=periodo_termino_atual,
         ):
             continue
 
@@ -4050,15 +4166,17 @@ def _registrar_negociacao_preco_card(
             "custo_proposto_rateado": custo_proposto,
             "preco_proposto_rateado": preco_proposto,
             "desconto_proposto": percentual_desconto,
+            "periodo_inicio": periodo_inicio_atual,
+            "periodo_termino": periodo_termino_atual,
             "bit_autorizacao_diretoria": 1 if precisa_aprovacao_diretoria else 0,
         }
 
         sql_insert, parametros_insert = _montar_insert_dinamico(valores_insert)
         db.session.execute(text(sql_insert), parametros_insert)
 
-
-
     
+
+
 
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     sql = text("""
@@ -4084,6 +4202,8 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             r.ValorVendaFinal,
             r.MargemValor,
             r.MargemPercentual,
+            CONVERT(varchar(10), r.DataInicio, 23) AS DataInicio,
+            CONVERT(varchar(10), r.DataFim, 23) AS DataFim,
             p.Logradouro,
             p.Cidade,
             p.UF,
@@ -4094,7 +4214,7 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             rv.DataFimReserva
         FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] r
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
-          ON  p.IDDimPaineisEuromidia = r.IDDimPaineisEuromidia
+          ON p.IDDimPaineisEuromidia = r.IDDimPaineisEuromidia
         OUTER APPLY (
             SELECT TOP 1
                 CONVERT(varchar(10), fo.DataInicio, 23) AS DataInicioReserva,
@@ -4114,9 +4234,6 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     """)
     rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
     return _rows_para_dicts(rows)
-
-
-
 
 
 
@@ -6241,8 +6358,6 @@ def api_card_criar(id_kanban: int):
 
 
 
-
-
 def _negociacao_preco_foi_alterada(
     ultima: dict[str, Any] | None,
     *,
@@ -6254,6 +6369,8 @@ def _negociacao_preco_foi_alterada(
     preco_proposto: Any,
     margem_proposta_percentual: Any,
     desconto_proposto: Any,
+    periodo_inicio: Any = None,
+    periodo_termino: Any = None,
 ) -> bool:
     """
     Decide se houve mudança real na negociação de preço.
@@ -6261,7 +6378,9 @@ def _negociacao_preco_foi_alterada(
     Fundamento:
     - histórico não deve crescer por reenvio do mesmo payload
     - comparação decimal precisa ser normalizada para evitar falso positivo por formato
-    - a decisão deve ser feita por assinatura comercial estável, não por texto bruto do front
+    - o período também faz parte da assinatura, porque agora ele é requisito de negócio
+    - porém os campos de período ficam opcionais aqui para manter compatibilidade
+      com chamadas antigas que ainda não foram atualizadas
     """
 
     def normalizar_int(valor: Any) -> int | None:
@@ -6281,6 +6400,9 @@ def _negociacao_preco_foi_alterada(
         except Exception:
             return dec
 
+    def normalizar_data(valor: Any) -> date | None:
+        return _normalizar_data_reserva_kanban(valor)
+
     def assinatura_fonte(
         *,
         id_tabela: Any,
@@ -6291,6 +6413,8 @@ def _negociacao_preco_foi_alterada(
         preco_proposto_fonte: Any,
         margem_proposta_fonte: Any,
         desconto_proposto_fonte: Any,
+        periodo_inicio_fonte: Any,
+        periodo_termino_fonte: Any,
     ) -> tuple:
         return (
             normalizar_int(id_tabela),
@@ -6301,6 +6425,8 @@ def _negociacao_preco_foi_alterada(
             normalizar_dec(preco_proposto_fonte),
             normalizar_dec(margem_proposta_fonte),
             normalizar_dec(desconto_proposto_fonte),
+            normalizar_data(periodo_inicio_fonte),
+            normalizar_data(periodo_termino_fonte),
         )
 
     assinatura_atual = assinatura_fonte(
@@ -6312,6 +6438,8 @@ def _negociacao_preco_foi_alterada(
         preco_proposto_fonte=preco_proposto,
         margem_proposta_fonte=margem_proposta_percentual,
         desconto_proposto_fonte=desconto_proposto,
+        periodo_inicio_fonte=periodo_inicio,
+        periodo_termino_fonte=periodo_termino,
     )
 
     if not ultima:
@@ -6326,12 +6454,11 @@ def _negociacao_preco_foi_alterada(
         preco_proposto_fonte=ultima.get("PrecoProposto"),
         margem_proposta_fonte=ultima.get("MargemProposta"),
         desconto_proposto_fonte=ultima.get("DescontoProposto"),
+        periodo_inicio_fonte=ultima.get("PeriodoInicio"),
+        periodo_termino_fonte=ultima.get("PeriodoTermino"),
     )
 
     return assinatura_atual != assinatura_ultima
-
-
-
 
 
 def _registrar_negociacao_preco_card(
@@ -6348,9 +6475,11 @@ def _registrar_negociacao_preco_card(
     Grava histórico de negociação de preço sem duplicar linha quando nada mudou.
 
     Fundamento desta versão:
-    - a fonte da verdade é a tabela operacional FatoKanbanCardPainelFace já salva nesta transação
-    - o histórico FatoKanbanNegociacaoPreco só recebe novo registro quando a assinatura comercial mudou
-    - salvar o card novamente, sem alterar tabela/preço/desconto/margem, não gera nova linha
+    - a fonte principal é o estado operacional já persistido
+    - quando algum campo ainda não vier preenchido no estado salvo, eu faço fallback
+      para o payload vinculos_preparados da própria requisição
+    - o período participa da assinatura e também do INSERT
+    - não gravo histórico duplicado quando nada mudou
     """
 
     if not vinculos_preparados:
@@ -6376,6 +6505,15 @@ def _registrar_negociacao_preco_card(
             return None
         return _valor_decimal(valor)
 
+    def _para_data_ou_none(valor: Any) -> date | None:
+        return _normalizar_data_reserva_kanban(valor)
+
+    def _primeiro_valor_preenchido(*valores: Any) -> Any:
+        for valor in valores:
+            if _tem_valor_informado(valor):
+                return valor
+        return None
+
     def _calcular_margem_percentual(custo: Any, preco: Any) -> Decimal | None:
         custo_dec = _valor_decimal(custo)
         preco_dec = _valor_decimal(preco)
@@ -6392,7 +6530,12 @@ def _registrar_negociacao_preco_card(
         marcadores: list[str] = []
         parametros: dict[str, Any] = {}
 
-        def adicionar(nome_coluna: str, nome_parametro: str, valor: Any, usar_getdate: bool = False) -> None:
+        def adicionar(
+            nome_coluna: str,
+            nome_parametro: str,
+            valor: Any,
+            usar_getdate: bool = False,
+        ) -> None:
             if not _coluna_existe(TABELA_CARD_NEGOCIACAO_PRECO, nome_coluna):
                 return
 
@@ -6434,19 +6577,20 @@ def _registrar_negociacao_preco_card(
         adicionar("PrecoPropostoRateado", "preco_proposto_rateado", valores.get("preco_proposto_rateado"))
 
         adicionar("DescontoProposto", "desconto_proposto", valores.get("desconto_proposto"))
-
-        adicionar("PeriodoInicio", "periodo_inicio", None)
-        adicionar("PeriodoTermino", "periodo_termino", None)
+        adicionar("PeriodoInicio", "periodo_inicio", valores.get("periodo_inicio"))
+        adicionar("PeriodoTermino", "periodo_termino", valores.get("periodo_termino"))
 
         adicionar("IDDimUsuariosAprovacaoPreco", "id_usuario_aprovacao", None)
         adicionar("DataAprovacaoPreco", "data_aprovacao", None)
         adicionar("PrecoAprovado", "preco_aprovado", None)
         adicionar("DescontoAprovado", "desconto_aprovado", None)
         adicionar("ObservacoesAprovacao", "observacoes_aprovacao", None)
-        adicionar("BitAutorizacaoDiretoria", "bit_autorizacao_diretoria", 0)
+        adicionar("BitAutorizacaoDiretoria", "bit_autorizacao_diretoria", valores.get("bit_autorizacao_diretoria", 0))
 
         if not colunas:
-            raise ValueError("Nenhuma coluna válida encontrada em FatoKanbanNegociacaoPreco para gravar a negociação.")
+            raise ValueError(
+                "Nenhuma coluna válida encontrada em FatoKanbanNegociacaoPreco para gravar a negociação."
+            )
 
         sql = f"""
             INSERT INTO {TABELA_CARD_NEGOCIACAO_PRECO}
@@ -6467,9 +6611,33 @@ def _registrar_negociacao_preco_card(
         id_empresa_padrao=_id_empresa_usuario_or_403(),
     )
 
+    mapa_vinculos_preparados: dict[tuple[int, int], dict[str, Any]] = {}
+    for vinculo in vinculos_preparados:
+        id_painel_vinculo = _para_int_ou_none(
+            _primeiro_valor_preenchido(
+                vinculo.get("IDDimPaineisEuromidia"),
+                vinculo.get("id_painel"),
+                vinculo.get("IDPainel"),
+                vinculo.get("idPainel"),
+            )
+        )
+        id_face_vinculo = _para_int_ou_none(
+            _primeiro_valor_preenchido(
+                vinculo.get("IDDimFacesPaineis"),
+                vinculo.get("id_face"),
+                vinculo.get("IDFace"),
+                vinculo.get("idFace"),
+            )
+        )
+
+        if not id_painel_vinculo or not id_face_vinculo:
+            continue
+
+        mapa_vinculos_preparados[(int(id_painel_vinculo), int(id_face_vinculo))] = vinculo
+
     estados_atuais = _listar_estado_atual_negociacao_card(int(id_card))
     if not estados_atuais:
-        return
+        estados_atuais = []
 
     chaves_processadas: set[tuple[int, int]] = set()
 
@@ -6484,14 +6652,92 @@ def _registrar_negociacao_preco_card(
             continue
         chaves_processadas.add(chave_painel_face)
 
-        id_tabela_preco = _para_int_ou_none(estado.get("IDDimTabelaPrecosEuromidia"))
-        custo_atual = _para_decimal_ou_none(estado.get("CustoTabela"))
-        preco_atual = _para_decimal_ou_none(estado.get("ValorTabela"))
+        vinculo_payload = mapa_vinculos_preparados.get(chave_painel_face, {})
+
+        id_tabela_preco = _para_int_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("IDDimTabelaPrecosEuromidia"),
+                vinculo_payload.get("IDDimTabelaPrecosEuromidia"),
+                vinculo_payload.get("id_tabela_preco"),
+                vinculo_payload.get("IDTabelaPreco"),
+                vinculo_payload.get("idTabelaPreco"),
+            )
+        )
+
+        custo_atual = _para_decimal_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("CustoTabela"),
+                vinculo_payload.get("CustoTabela"),
+                vinculo_payload.get("custo_tabela"),
+                vinculo_payload.get("custoAtual"),
+            )
+        )
+
+        preco_atual = _para_decimal_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("ValorTabela"),
+                vinculo_payload.get("ValorTabela"),
+                vinculo_payload.get("valor_tabela"),
+                vinculo_payload.get("precoAtual"),
+            )
+        )
+
         margem_atual = _calcular_margem_percentual(custo_atual, preco_atual)
 
-        novo_valor = _para_decimal_ou_none(estado.get("NovoValor"))
-        percentual_desconto = _para_decimal_ou_none(estado.get("PercentualDesconto"))
-        valor_venda_final = _para_decimal_ou_none(estado.get("ValorVendaFinal"))
+        novo_valor = _para_decimal_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("NovoValor"),
+                vinculo_payload.get("NovoValor"),
+                vinculo_payload.get("novo_valor"),
+                vinculo_payload.get("novoValor"),
+            )
+        )
+
+        percentual_desconto = _para_decimal_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("PercentualDesconto"),
+                vinculo_payload.get("PercentualDesconto"),
+                vinculo_payload.get("percentual_desconto"),
+                vinculo_payload.get("percentualDesconto"),
+                vinculo_payload.get("DescontoProposto"),
+                vinculo_payload.get("desconto_proposto"),
+            )
+        )
+
+        valor_venda_final = _para_decimal_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("ValorVendaFinal"),
+                vinculo_payload.get("ValorVendaFinal"),
+                vinculo_payload.get("valor_venda_final"),
+                vinculo_payload.get("valorVendaFinal"),
+                vinculo_payload.get("PrecoProposto"),
+                vinculo_payload.get("preco_proposto"),
+            )
+        )
+
+        periodo_inicio_atual = _para_data_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("DataInicio"),
+                estado.get("PeriodoInicio"),
+                vinculo_payload.get("DataInicio"),
+                vinculo_payload.get("PeriodoInicio"),
+                vinculo_payload.get("periodo_inicio"),
+                vinculo_payload.get("data_inicio"),
+                vinculo_payload.get("dataInicio"),
+            )
+        )
+
+        periodo_termino_atual = _para_data_ou_none(
+            _primeiro_valor_preenchido(
+                estado.get("DataFim"),
+                estado.get("PeriodoTermino"),
+                vinculo_payload.get("DataFim"),
+                vinculo_payload.get("PeriodoTermino"),
+                vinculo_payload.get("periodo_termino"),
+                vinculo_payload.get("data_fim"),
+                vinculo_payload.get("dataFim"),
+            )
+        )
 
         preco_proposto = novo_valor
         if preco_proposto is None:
@@ -6502,7 +6748,23 @@ def _registrar_negociacao_preco_card(
         custo_proposto = custo_atual
         margem_proposta = _calcular_margem_percentual(custo_proposto, preco_proposto)
 
-        tem_operacao_comercial = any(
+        estado_completo_para_regra = dict(estado)
+        if vinculo_payload:
+            for chave, valor in vinculo_payload.items():
+                if chave not in estado_completo_para_regra or not _tem_valor_informado(estado_completo_para_regra.get(chave)):
+                    estado_completo_para_regra[chave] = valor
+
+        if periodo_inicio_atual is not None:
+            estado_completo_para_regra["DataInicio"] = periodo_inicio_atual
+            estado_completo_para_regra["PeriodoInicio"] = periodo_inicio_atual
+
+        if periodo_termino_atual is not None:
+            estado_completo_para_regra["DataFim"] = periodo_termino_atual
+            estado_completo_para_regra["PeriodoTermino"] = periodo_termino_atual
+
+        precisa_aprovacao_diretoria = _estado_precisa_aprovacao_diretoria(estado_completo_para_regra)
+
+        tem_operacao_comercial_ou_periodo = any(
             _tem_valor_informado(valor)
             for valor in (
                 id_tabela_preco,
@@ -6510,9 +6772,11 @@ def _registrar_negociacao_preco_card(
                 percentual_desconto,
                 valor_venda_final,
                 preco_atual,
+                periodo_inicio_atual,
+                periodo_termino_atual,
             )
         )
-        if not tem_operacao_comercial:
+        if not tem_operacao_comercial_ou_periodo:
             continue
 
         ultima_negociacao = _buscar_ultima_negociacao_preco_card(
@@ -6531,6 +6795,8 @@ def _registrar_negociacao_preco_card(
             preco_proposto=preco_proposto,
             margem_proposta_percentual=margem_proposta,
             desconto_proposto=percentual_desconto,
+            periodo_inicio=periodo_inicio_atual,
+            periodo_termino=periodo_termino_atual,
         ):
             continue
 
@@ -6557,10 +6823,15 @@ def _registrar_negociacao_preco_card(
             "custo_proposto_rateado": custo_proposto,
             "preco_proposto_rateado": preco_proposto,
             "desconto_proposto": percentual_desconto,
+            "periodo_inicio": periodo_inicio_atual,
+            "periodo_termino": periodo_termino_atual,
+            "bit_autorizacao_diretoria": 1 if precisa_aprovacao_diretoria else 0,
         }
 
         sql_insert, parametros_insert = _montar_insert_dinamico(valores_insert)
         db.session.execute(text(sql_insert), parametros_insert)
+
+
 
 
 
@@ -6696,6 +6967,9 @@ def api_card_atualizar(id_card: int):
                     except Exception:
                         return dec
 
+                def _n_data(valor: Any) -> date | None:
+                    return _normalizar_data_reserva_kanban(valor)
+
                 assinatura: list[tuple] = []
 
                 for estado in estados:
@@ -6711,6 +6985,8 @@ def api_card_atualizar(id_card: int):
                             _n_dec(estado.get("ValorVendaFinal")),
                             _n_dec(estado.get("MargemValor")),
                             _n_dec(estado.get("MargemPercentual")),
+                            _n_data(estado.get("DataInicio")),
+                            _n_data(estado.get("DataFim")),
                         )
                     )
 
@@ -6831,7 +7107,6 @@ def api_card_atualizar(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao atualizar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao atualizar card: {str(exc)}"}), 500
-
 
 
     
@@ -12368,8 +12643,9 @@ def api_aprovacao_preco_aprovar(id_card: int):
 
 
 
-TABELA_EMPRESAS_PROPRIETARIAS = "[Integracao].[dbo].[EmpresaProprietaria]"
-URL_API_MINHA_RECEITA = "https://minhareceita.org"
+
+
+
 
 
 def _normalizar_cnpj(valor: Any) -> str:
@@ -12479,6 +12755,34 @@ def _serializar_empresa(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return dados
 
 
+def _cache_delete_safe(chave: str) -> None:
+    """Eu removo uma chave de cache sem estourar erro no fluxo principal."""
+    try:
+        cache.delete(chave)
+    except Exception:
+        pass
+
+
+def _chave_cache_empresa_cadastro_por_id(id_empresa: int) -> str:
+    """Eu monto a chave de cache da consulta completa da empresa por IDEmpresa."""
+    return _chave_cache_json("kanban:api:empresa_cadastro:id", int(id_empresa or 0))
+
+
+def _chave_cache_empresa_cadastro_por_cnpj(cnpj_normalizado: str) -> str:
+    """Eu monto a chave de cache da consulta completa da empresa por CNPJ limpo."""
+    return _chave_cache_json("kanban:api:empresa_cadastro:cnpj", _normalizar_cnpj(cnpj_normalizado))
+
+
+def _invalidar_cache_empresa_cadastro(id_empresa: int | None = None, cnpj_normalizado: str | None = None) -> None:
+    """Eu invalido os caches do cadastro completo da empresa por ID e por CNPJ."""
+    if id_empresa:
+        _cache_delete_safe(_chave_cache_empresa_cadastro_por_id(int(id_empresa)))
+
+    cnpj_limpo = _normalizar_cnpj(cnpj_normalizado)
+    if cnpj_limpo:
+        _cache_delete_safe(_chave_cache_empresa_cadastro_por_cnpj(cnpj_limpo))
+
+
 def _listar_empresas_proprietarias_para_cadastro() -> list[dict[str, Any]]:
     """Eu listo empresas proprietárias ativas para preencher o select do modal."""
     chave = _chave_cache_json("kanban:api:empresas_proprietarias:lista")
@@ -12508,7 +12812,16 @@ def _listar_empresas_proprietarias_para_cadastro() -> list[dict[str, Any]]:
 
 
 def _buscar_empresa_completa_por_id(id_empresa: int) -> dict[str, Any] | None:
-    """Eu busco a empresa completa pelo IDEmpresa."""
+    """Eu busco a empresa completa pelo IDEmpresa usando cache curto."""
+    id_empresa = int(id_empresa or 0)
+    if id_empresa <= 0:
+        return None
+
+    chave = _chave_cache_empresa_cadastro_por_id(id_empresa)
+    em_cache = _cache_json_get(chave)
+    if isinstance(em_cache, dict):
+        return em_cache
+
     sql = text(f"""
         SELECT TOP 1
             e.IDEmpresa,
@@ -12555,12 +12868,30 @@ def _buscar_empresa_completa_por_id(id_empresa: int) -> dict[str, Any] | None:
         WHERE e.IDEmpresa = :id_empresa;
     """)
 
-    row = db.session.execute(sql, {"id_empresa": int(id_empresa)}).mappings().first()
-    return _serializar_empresa(row)
+    row = db.session.execute(sql, {"id_empresa": id_empresa}).mappings().first()
+    empresa = _serializar_empresa(row)
+    if empresa:
+        _cache_json_set(chave, empresa, TIMEOUT_CACHE_CURTO)
+        cnpj_limpo = _normalizar_cnpj(empresa.get("CNPJ"))
+        if cnpj_limpo:
+            _cache_json_set(_chave_cache_empresa_cadastro_por_cnpj(cnpj_limpo), empresa, TIMEOUT_CACHE_CURTO)
+    return empresa
+
+
+
 
 
 def _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado: str) -> dict[str, Any] | None:
-    """Eu busco a empresa pelo CNPJ ignorando máscara."""
+    """Eu busco a empresa pelo CNPJ já limpo, comparando diretamente com a coluna."""
+    cnpj_normalizado = _normalizar_cnpj(cnpj_normalizado)
+    if len(cnpj_normalizado) != 14:
+        return None
+
+    chave = _chave_cache_json("kanban:api:empresa_cadastro:cnpj", cnpj_normalizado)
+    em_cache = _cache_json_get(chave)
+    if isinstance(em_cache, dict):
+        return em_cache
+
     sql = text(f"""
         SELECT TOP 1
             e.IDEmpresa,
@@ -12604,12 +12935,17 @@ def _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado: str) -> dict
         FROM {TABELA_EMPRESAS} e
         LEFT JOIN {TABELA_CNAES} c
           ON c.cnaepadrao = e.CNAE
-        WHERE REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(e.CNPJ, ''), '.', ''), '-', ''), '/', ''), ' ', '') = :cnpj
+        WHERE e.CNPJ = :cnpj
         ORDER BY e.DataAtualizacao DESC, e.IDEmpresa DESC;
     """)
 
     row = db.session.execute(sql, {"cnpj": cnpj_normalizado}).mappings().first()
-    return _serializar_empresa(row)
+    empresa = _serializar_empresa(row)
+
+    if empresa:
+        _cache_json_set(chave, empresa, TIMEOUT_CACHE_CURTO)
+
+    return empresa
 
 
 def _mapear_empresa_minha_receita(dados_api: dict[str, Any], cnpj_consultado: str) -> dict[str, Any] | None:
@@ -12732,15 +13068,23 @@ def _mapear_empresa_minha_receita(dados_api: dict[str, Any], cnpj_consultado: st
     return retorno
 
 
+
+
 def _buscar_empresa_na_api_minha_receita(cnpj_normalizado: str) -> dict[str, Any] | None:
     """Eu consulto a API externa somente quando não encontro o CNPJ no banco."""
+    cnpj_normalizado = _normalizar_cnpj(cnpj_normalizado)
     if len(cnpj_normalizado) != 14:
         return None
+
+    chave = _chave_cache_json("kanban:api:minha_receita:cnpj", cnpj_normalizado)
+    em_cache = _cache_json_get(chave)
+    if isinstance(em_cache, dict):
+        return em_cache
 
     try:
         resposta = requests.get(
             f"{URL_API_MINHA_RECEITA.rstrip('/')}/{cnpj_normalizado}",
-            timeout=12,
+            timeout=(2, 4),
             headers={"Accept": "application/json"},
         )
     except Exception as erro:
@@ -12752,27 +13096,35 @@ def _buscar_empresa_na_api_minha_receita(cnpj_normalizado: str) -> dict[str, Any
         return None
 
     if not resposta.ok:
+        current_app.logger.warning(
+            "KANBAN EMPRESA: Minha Receita retornou HTTP=%s para CNPJ=%s",
+            resposta.status_code,
+            cnpj_normalizado,
+        )
         return None
 
     try:
         dados_api = resposta.json()
-    except Exception:
+    except Exception as erro:
+        current_app.logger.warning(
+            "KANBAN EMPRESA: falha ao converter JSON da Minha Receita para CNPJ=%s erro=%s",
+            cnpj_normalizado,
+            erro,
+        )
         return None
 
-    return _mapear_empresa_minha_receita(dados_api, cnpj_normalizado)
+    empresa = _mapear_empresa_minha_receita(dados_api, cnpj_normalizado)
+    if empresa:
+        _cache_json_set(chave, empresa, TIMEOUT_CACHE_MEDIO)
+
+    return empresa
 
 
-def _invalidar_cache_empresas() -> None:
+def _invalidar_cache_empresas(id_empresa: int | None = None, cnpj_normalizado: str | None = None) -> None:
     """Eu invalido os caches principais de empresa usados no modal do card."""
-    try:
-        cache.delete(_chave_cache_json("kanban:api:empresas:lista"))
-    except Exception:
-        pass
-
-    try:
-        cache.delete(_chave_cache_json("kanban:api:empresas_proprietarias:lista"))
-    except Exception:
-        pass
+    _cache_delete_safe(_chave_cache_json("kanban:api:empresas:lista"))
+    _cache_delete_safe(_chave_cache_json("kanban:api:empresas_proprietarias:lista"))
+    _invalidar_cache_empresa_cadastro(id_empresa=id_empresa, cnpj_normalizado=cnpj_normalizado)
 
 
 @kanban_bp.route("/api/empresas-proprietarias", methods=["GET"])
@@ -12786,6 +13138,33 @@ def api_empresas_proprietarias_lista():
             "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
         }
     )
+
+
+@kanban_bp.route("/api/empresas/cadastro", methods=["GET", "POST"])
+@login_required
+@limiter.limit("120/minute")
+def api_empresa_cadastro_compat():
+    """Rota única para consulta por IDEmpresa ou por CNPJ, e compatibilidade com POST antigo."""
+    _assert_login()
+
+    if request.method == "POST":
+        return api_empresa_cadastro_salvar()
+
+    id_empresa = _int_ou_none(request.args.get("id_empresa")) or 0
+    cnpj_normalizado = _normalizar_cnpj(request.args.get("cnpj"))
+
+    if id_empresa > 0:
+        return api_empresa_cadastro_por_id(id_empresa)
+
+    if len(cnpj_normalizado) == 14:
+        return api_empresa_cadastro_buscar_por_cnpj()
+
+    return jsonify(
+        {
+            "ok": False,
+            "erro": "Informe id_empresa ou cnpj para consultar o cadastro da empresa.",
+        }
+    ), 400
 
 
 @kanban_bp.route("/api/empresas/cadastro/<int:id_empresa>", methods=["GET"])
@@ -12808,14 +13187,50 @@ def api_empresa_cadastro_por_id(id_empresa: int):
     )
 
 
+
 @kanban_bp.route("/api/empresas/cadastro/buscar-por-cnpj", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
 def api_empresa_cadastro_buscar_por_cnpj():
     _assert_login()
 
-    cnpj_normalizado = _normalizar_cnpj(request.args.get("cnpj"))
-    if len(cnpj_normalizado) != 14:
+    try:
+        cnpj_normalizado = _normalizar_cnpj(request.args.get("cnpj"))
+        if len(cnpj_normalizado) != 14:
+            return jsonify(
+                {
+                    "ok": True,
+                    "encontrado": False,
+                    "origem": None,
+                    "empresa": None,
+                    "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+                }
+            )
+
+        empresa_banco = _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado)
+        if empresa_banco:
+            return jsonify(
+                {
+                    "ok": True,
+                    "encontrado": True,
+                    "origem": "banco",
+                    "empresa": empresa_banco,
+                    "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+                }
+            )
+
+        empresa_api = _buscar_empresa_na_api_minha_receita(cnpj_normalizado)
+        if empresa_api:
+            return jsonify(
+                {
+                    "ok": True,
+                    "encontrado": True,
+                    "origem": "minha_receita",
+                    "empresa": empresa_api,
+                    "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+                }
+            )
+
         return jsonify(
             {
                 "ok": True,
@@ -12826,42 +13241,22 @@ def api_empresa_cadastro_buscar_por_cnpj():
             }
         )
 
-    empresa_banco = _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado)
-    if empresa_banco:
+    except Exception as erro:
+        current_app.logger.exception(
+            "KANBAN EMPRESA: erro ao consultar cadastro por CNPJ. cnpj=%s",
+            request.args.get("cnpj"),
+        )
         return jsonify(
             {
-                "ok": True,
-                "encontrado": True,
-                "origem": "banco",
-                "empresa": empresa_banco,
-                "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
+                "ok": False,
+                "erro": f"Erro interno ao consultar empresa: {erro}",
             }
-        )
-
-    empresa_api = _buscar_empresa_na_api_minha_receita(cnpj_normalizado)
-    if empresa_api:
-        return jsonify(
-            {
-                "ok": True,
-                "encontrado": True,
-                "origem": "minha_receita",
-                "empresa": empresa_api,
-                "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
-            }
-        )
-
-    return jsonify(
-        {
-            "ok": True,
-            "encontrado": False,
-            "origem": None,
-            "empresa": None,
-            "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
-        }
-    )
+        ), 500
 
 
 
+
+    
 
 
 @kanban_bp.route("/api/empresas/cadastro/salvar", methods=["POST"])
@@ -12882,7 +13277,7 @@ def api_empresa_cadastro_salvar():
     dados_sql = {
         "IDEmpresa": id_empresa_informado or None,
         "IDEmpresaProprietaria": _int_ou_none(payload.get("IDEmpresaProprietaria")) or id_empresa_usuario,
-        "CNPJ": _formatar_cnpj(cnpj_normalizado),
+        "CNPJ": cnpj_normalizado,
         "UF": _texto_ou_none(payload.get("UF"), 3),
         "CEP": _texto_ou_none(payload.get("CEP"), 10),
         "CodigoPorte": _int_ou_none(payload.get("CodigoPorte")),
@@ -12920,7 +13315,7 @@ def api_empresa_cadastro_salvar():
     sql_lock_cnpj = text(f"""
         SELECT TOP 1 IDEmpresa
         FROM {TABELA_EMPRESAS} WITH (UPDLOCK, HOLDLOCK)
-        WHERE REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(CNPJ, ''), '.', ''), '-', ''), '/', ''), ' ', '') = :cnpj;
+        WHERE CNPJ = :cnpj;
     """)
 
     sql_lock_id = text(f"""
@@ -12931,8 +13326,9 @@ def api_empresa_cadastro_salvar():
 
     try:
         row_existente_cnpj = db.session.execute(sql_lock_cnpj, {"cnpj": cnpj_normalizado}).mappings().first()
+
         row_existente_id = None
-        if id_empresa_informado:
+        if not row_existente_cnpj and id_empresa_informado:
             row_existente_id = db.session.execute(
                 sql_lock_id,
                 {"id_empresa": id_empresa_informado},
@@ -13079,7 +13475,7 @@ def api_empresa_cadastro_salvar():
         current_app.logger.exception("KANBAN EMPRESA: erro ao salvar cadastro de empresa.")
         return jsonify({"ok": False, "erro": f"Erro ao salvar empresa: {erro}"}), 500
 
-    _invalidar_cache_empresas()
+    _invalidar_cache_empresas(id_empresa=id_empresa_alvo, cnpj_normalizado=cnpj_normalizado)
 
     empresa_salva = _buscar_empresa_completa_por_id(id_empresa_alvo)
     if not empresa_salva:
@@ -13092,3 +13488,236 @@ def api_empresa_cadastro_salvar():
             "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
         }
     )
+
+
+
+
+
+
+
+
+
+
+
+@kanban_bp.route("/api/ocupacao/calendario", methods=["GET"])
+@login_required
+def api_kanban_ocupacao_calendario():
+    cod_face = (request.args.get("cod_face") or request.args.get("codface") or "").strip().upper()
+    mes_ref = (request.args.get("mes_ref") or "").strip()
+    meses = request.args.get("meses", 24)
+
+    try:
+        meses = int(meses)
+    except Exception:
+        meses = 24
+
+    if meses <= 0:
+        meses = 24
+
+    if not cod_face:
+        return jsonify({"ok": False, "erro": "cod_face obrigatório"}), 400
+
+    sql = text("""
+        DECLARE @CodFace varchar(20) = UPPER(LTRIM(RTRIM(:cod_face)));
+
+        DECLARE @Inicio date =
+        CASE
+            WHEN :mes_ref IS NOT NULL AND LEN(:mes_ref) = 7
+            THEN TRY_CONVERT(date, CONCAT(:mes_ref, '-01'))
+            ELSE DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
+        END;
+
+        IF @Inicio IS NULL
+            SET @Inicio = DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1);
+
+        DECLARE @Fim date = DATEADD(MONTH, :meses, @Inicio);
+
+        DECLARE @CodPonto int =
+        (
+            SELECT TOP (1) fo.CodPonto
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+            WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = @CodFace
+              AND fo.CodPonto IS NOT NULL
+            ORDER BY fo.DataAtualizacao DESC
+        );
+
+        ;WITH
+        Painel AS (
+            SELECT TOP (1)
+                p.CodPonto,
+                TipoPainel = UPPER(LTRIM(RTRIM(p.Tipo))),
+                QuantidadeFaces = NULLIF(p.QuantidadeFaces, 0),
+                BitAtivo = COALESCE(p.BitAtivo, 1)
+            FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+            WHERE p.CodPonto = @CodPonto
+        ),
+        Capacidade AS (
+            SELECT
+                CodPonto = (SELECT CodPonto FROM Painel),
+                TipoPainel = COALESCE((SELECT TipoPainel FROM Painel), 'DESCONHECIDO'),
+                BitAtivo = COALESCE((SELECT BitAtivo FROM Painel), 0),
+
+                EhDigital =
+                    CASE
+                        WHEN COALESCE((SELECT TipoPainel FROM Painel), '') LIKE '%DIGITAL%' THEN 1
+                        ELSE 0
+                    END,
+
+                CapacidadeSlots =
+                    CASE
+                        WHEN COALESCE((SELECT TipoPainel FROM Painel), '') LIKE '%DIGITAL%'
+                        THEN COALESCE((SELECT QuantidadeFaces FROM Painel), 16)
+                        ELSE 1
+                    END
+        ),
+        OcupacoesBase AS (
+            SELECT
+                fo.CodFace,
+                DataInicio = CAST(fo.DataInicio AS date),
+                DataFim = CAST(fo.DataFim AS date),
+                SpanQtd = fo.SpanQtd,
+                Cota = fo.Cota,
+                NumeroContrato = fo.NumeroContrato,
+                NumeroPrevia = fo.NumeroPrevia,
+                DataAtualizacao = fo.DataAtualizacao
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+            WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = @CodFace
+              AND fo.DataInicio IS NOT NULL
+              AND fo.DataFim IS NOT NULL
+              AND fo.CanceladoEm IS NULL
+              AND fo.Status IN ('ATIVO', 'RESERVADO')
+        ),
+        OcupacoesDedup AS (
+            SELECT *
+            FROM (
+                SELECT
+                    b.*,
+                    rn = ROW_NUMBER() OVER (
+                        PARTITION BY
+                            b.CodFace,
+                            b.DataInicio,
+                            b.DataFim,
+                            ISNULL(b.NumeroContrato, ''),
+                            ISNULL(b.NumeroPrevia, '')
+                        ORDER BY b.DataAtualizacao DESC
+                    )
+                FROM OcupacoesBase b
+            ) x
+            WHERE x.rn = 1
+        ),
+        OcupacoesValidas AS (
+            SELECT
+                d.DataInicio,
+                d.DataFim,
+                SlotsConsumidos =
+                    CASE
+                        WHEN (SELECT EhDigital FROM Capacidade) = 1
+                        THEN COALESCE(NULLIF(d.SpanQtd, 0), 1)
+                        ELSE 1
+                    END
+            FROM OcupacoesDedup d
+        ),
+        UsoPorDia AS (
+            SELECT
+                c.[Data],
+                SlotsOcupados =
+                    CASE
+                        WHEN cap.EhDigital = 1
+                        THEN COALESCE(SUM(o.SlotsConsumidos), 0)
+                        ELSE CASE WHEN COUNT(o.SlotsConsumidos) > 0 THEN 1 ELSE 0 END
+                    END
+            FROM [Integracao].[Silver].[DimCalendario] c
+            CROSS JOIN Capacidade cap
+            LEFT JOIN OcupacoesValidas o
+                   ON c.[Data] >= o.DataInicio
+                  AND c.[Data] <= o.DataFim
+            WHERE c.[Data] >= @Inicio
+              AND c.[Data] < @Fim
+            GROUP BY c.[Data], cap.EhDigital
+        )
+        SELECT
+            Data = CONVERT(varchar(10), c.[Data], 23),
+            CodPonto = cap.CodPonto,
+            TipoPainel = cap.TipoPainel,
+            EhDigital = cap.EhDigital,
+            CapacidadeSlots = cap.CapacidadeSlots,
+            SlotsOcupados = u.SlotsOcupados,
+
+            SlotsDisponiveis =
+                CASE
+                    WHEN cap.CapacidadeSlots - u.SlotsOcupados < 0 THEN 0
+                    ELSE cap.CapacidadeSlots - u.SlotsOcupados
+                END,
+
+            OcupacaoPct =
+                CASE
+                    WHEN cap.CapacidadeSlots > 0
+                    THEN CAST(u.SlotsOcupados * 100.0 / cap.CapacidadeSlots AS decimal(9,2))
+                    ELSE NULL
+                END,
+
+            DiaDisponivel =
+                CASE
+                    WHEN cap.BitAtivo = 0 THEN 0
+                    WHEN (cap.CapacidadeSlots - u.SlotsOcupados) > 0 THEN 1
+                    ELSE 0
+                END,
+
+            StatusDia =
+                CASE
+                    WHEN cap.BitAtivo = 0 THEN 'INDISPONIVEL'
+                    WHEN cap.EhDigital = 0 AND u.SlotsOcupados = 0 THEN 'DISPONIVEL'
+                    WHEN cap.EhDigital = 0 AND u.SlotsOcupados = 1 THEN 'OCUPADO'
+                    WHEN cap.EhDigital = 1 AND u.SlotsOcupados = 0 THEN 'LIVRE'
+                    WHEN cap.EhDigital = 1 AND u.SlotsOcupados < cap.CapacidadeSlots THEN 'PARCIAL'
+                    ELSE 'LOTADO'
+                END
+        FROM [Integracao].[Silver].[DimCalendario] c
+        JOIN UsoPorDia u
+          ON u.[Data] = c.[Data]
+        CROSS JOIN Capacidade cap
+        WHERE c.[Data] >= @Inicio
+          AND c.[Data] < @Fim
+        ORDER BY c.[Data];
+    """)
+
+    try:
+        rows = db.session.execute(
+            sql,
+            {
+                "cod_face": cod_face,
+                "mes_ref": mes_ref,
+                "meses": meses,
+            },
+        ).all()
+    except Exception as erro:
+        current_app.logger.exception(
+            "KANBAN OCUPACAO: erro ao consultar calendário da face %s.",
+            cod_face,
+        )
+        return jsonify(
+            {
+                "ok": False,
+                "erro": f"Não foi possível consultar a ocupação da face {cod_face}: {erro}",
+            }
+        ), 500
+
+    calendario = {}
+    for r in rows:
+        chave = (r.Data or "").strip()
+        if not chave:
+            continue
+
+        calendario[chave] = {
+            "status": (r.StatusDia or "").strip(),
+            "disp": int(r.SlotsDisponiveis or 0),
+            "cap": int(r.CapacidadeSlots or 0),
+            "ocup": int(r.SlotsOcupados or 0),
+            "pct": float(r.OcupacaoPct) if r.OcupacaoPct is not None else None,
+            "dia_disponivel": int(r.DiaDisponivel or 0),
+            "eh_digital": int(r.EhDigital or 0),
+            "codponto": int(r.CodPonto) if r.CodPonto is not None else None,
+            "tipo": (r.TipoPainel or "").strip(),
+        }
+
+    return jsonify({"ok": True, "cal": calendario})
