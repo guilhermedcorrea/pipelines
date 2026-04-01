@@ -106,7 +106,27 @@ def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padra
 
 
 
+def _sql_filtro_cards_nao_concluidos_no_quadro(alias_card: str = "c") -> str:
+    """
+    Remove do quadro cards cuja fase atual seja final/concluída.
 
+    Regra:
+    - NomeFase = 'Concluido'
+    - ou TipoFase = 'SUCESSO'
+    """
+    return f"""
+      AND NOT EXISTS (
+            SELECT 1
+            FROM {TABELA_KANBAN_FASE} f_final
+            WHERE f_final.IDDimKanbanFase = {alias_card}.IDDimKanbanFaseAtual
+              AND f_final.IDDimKanban = {alias_card}.IDDimKanban
+              AND f_final.Ativo = 1
+              AND (
+                    LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
+                 OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+              )
+        )
+    """.rstrip()
 
 
 
@@ -2787,6 +2807,8 @@ def _obter_card_tags_kanban(id_kanban: int) -> list[dict[str, Any]]:
 
 
 
+
+
 def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
     sql_cards = text(f"""
         SELECT
@@ -2810,44 +2832,13 @@ def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
         WHERE c.IDDimKanban = :id_kanban
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')}
+          {_sql_filtro_cards_nao_concluidos_no_quadro('c')}
         ORDER BY
             CASE WHEN c.AtualizadoEm IS NULL THEN c.CriadoEm ELSE c.AtualizadoEm END DESC,
             c.IDFatoKanbanCard DESC;
     """)
-    cards = db.session.execute(sql_cards, {"id_kanban": id_kanban}).mappings().all()
-    return _rows_para_dicts(cards)
-
-
-def _obter_paineis_catalogo() -> list[dict[str, Any]]:
-    chave = _chave_cache_json("kanban:catalogo:paineis")
-    em_cache = _cache_json_get(chave)
-    if em_cache is not None:
-        return em_cache
-
-    sql_paineis = text("""
-        SELECT
-            p.IDDimPaineisEuromidia,
-            p.CodPonto,
-            p.Tipo,
-            p.Logradouro,
-            p.Cidade,
-            p.UF,
-            p.Bairro,
-            p.Numero,
-            p.CEP,
-            p.QuantidadeFaces,
-            p.BitAtivo
-        FROM [Integracao].[Silver].[DimPaineisEuromidia] p
-        WHERE p.BitAtivo = 1
-          AND p.CodPonto IS NOT NULL
-          AND LTRIM(RTRIM(p.CodPonto)) <> ''
-        ORDER BY p.UF ASC, p.Cidade ASC, p.Tipo ASC, p.CodPonto ASC;
-    """)
-    paineis = _rows_para_dicts(db.session.execute(sql_paineis).mappings().all())
-    _cache_json_set(chave, paineis, TIMEOUT_CACHE_LONGO)
-    return paineis
-
-
+    rows = db.session.execute(sql_cards, {"id_kanban": id_kanban}).mappings().all()
+    return _rows_para_dicts(rows)
 
 
 
@@ -5023,6 +5014,40 @@ def api_kanban_resumo_comercial(id_kanban: int):
 
 
 
+
+def _obter_paineis_catalogo() -> list[dict[str, Any]]:
+    chave = _chave_cache_json("kanban:catalogo:paineis")
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return em_cache
+
+    sql_paineis = text("""
+        SELECT
+            p.IDDimPaineisEuromidia,
+            p.CodPonto,
+            p.Tipo,
+            p.Logradouro,
+            p.Cidade,
+            p.UF,
+            p.Bairro,
+            p.Numero,
+            p.CEP,
+            p.QuantidadeFaces,
+            p.BitAtivo
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+        WHERE p.BitAtivo = 1
+          AND p.CodPonto IS NOT NULL
+          AND LTRIM(RTRIM(p.CodPonto)) <> ''
+        ORDER BY p.UF ASC, p.Cidade ASC, p.Tipo ASC, p.CodPonto ASC;
+    """)
+    paineis = _rows_para_dicts(db.session.execute(sql_paineis).mappings().all())
+    _cache_json_set(chave, paineis, TIMEOUT_CACHE_LONGO)
+    return paineis
+
+
+
+
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/dados", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -5066,6 +5091,17 @@ def api_kanban_dados(id_kanban: int):
         WHERE c.IDDimKanban = :id_kanban
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')}
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {TABELA_KANBAN_FASE} f_final
+                WHERE f_final.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+                  AND f_final.IDDimKanban = c.IDDimKanban
+                  AND ISNULL(f_final.Ativo, 1) = 1
+                  AND (
+                        LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                  )
+            )
         GROUP BY c.IDDimKanbanFaseAtual;
     """)
     rows_totais = db.session.execute(sql_totais, {"id_kanban": id_kanban}).mappings().all()
@@ -5111,6 +5147,17 @@ def api_kanban_dados(id_kanban: int):
             WHERE c.IDDimKanban = :id_kanban
               AND c.Ativo = 1
               {_sql_filtro_status_card_visiveis('c')}
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM {TABELA_KANBAN_FASE} f_final
+                    WHERE f_final.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+                      AND f_final.IDDimKanban = c.IDDimKanban
+                      AND ISNULL(f_final.Ativo, 1) = 1
+                      AND (
+                            LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
+                         OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                      )
+                )
         )
         SELECT
             IDFatoKanbanCard,
@@ -5236,7 +5283,6 @@ def api_kanban_dados(id_kanban: int):
 
 
 
-
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/fases", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -5258,7 +5304,6 @@ def api_fases_listar(id_kanban: int):
     payload = {"ok": True, "fases": _obter_fases_kanban(id_kanban)}
     _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
     return jsonify(payload)
-
 
 
 
@@ -5325,7 +5370,18 @@ def api_cards_listar_por_fase(id_kanban: int):
         WHERE c.IDDimKanban = :id_kanban
           AND c.IDDimKanbanFaseAtual = :id_fase
           AND c.Ativo = 1
-          {_sql_filtro_status_card_visiveis('c')};
+          {_sql_filtro_status_card_visiveis('c')}
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {TABELA_KANBAN_FASE} f_final
+                WHERE f_final.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+                  AND f_final.IDDimKanban = c.IDDimKanban
+                  AND ISNULL(f_final.Ativo, 1) = 1
+                  AND (
+                        LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                  )
+            );
     """)
 
     total = int(
@@ -5368,6 +5424,17 @@ def api_cards_listar_por_fase(id_kanban: int):
           AND c.IDDimKanbanFaseAtual = :id_fase
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')}
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {TABELA_KANBAN_FASE} f_final
+                WHERE f_final.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+                  AND f_final.IDDimKanban = c.IDDimKanban
+                  AND ISNULL(f_final.Ativo, 1) = 1
+                  AND (
+                        LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                  )
+            )
         ORDER BY
             CASE
                 WHEN c.AtualizadoEm IS NULL THEN c.CriadoEm
@@ -5412,8 +5479,6 @@ def api_cards_listar_por_fase(id_kanban: int):
         _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
     return _json_resposta(payload, no_cache_http=not usar_cache)
-
-
 
 
 
