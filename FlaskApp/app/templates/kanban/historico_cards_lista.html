@@ -138,7 +138,7 @@
 
   .cabecalho-historico-cards {
     display: grid;
-    grid-template-columns: minmax(110px, 0.9fr) minmax(220px, 2fr) minmax(120px, 1fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr) minmax(150px, 1.2fr) minmax(125px, 1fr) minmax(135px, 1fr) minmax(170px, 1.15fr);
+    grid-template-columns: minmax(110px, 0.9fr) minmax(220px, 2fr) minmax(180px, 1.35fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr) minmax(150px, 1.2fr) minmax(125px, 1fr) minmax(135px, 1fr) minmax(170px, 1.15fr);
     gap: 16px;
     padding: 18px 20px;
     background: #f7f9fc;
@@ -162,7 +162,7 @@
 
   .item-historico-card__principal {
     display: grid;
-    grid-template-columns: minmax(110px, 0.9fr) minmax(220px, 2fr) minmax(120px, 1fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr) minmax(150px, 1.2fr) minmax(125px, 1fr) minmax(135px, 1fr) minmax(170px, 1.15fr);
+    grid-template-columns: minmax(110px, 0.9fr) minmax(220px, 2fr) minmax(180px, 1.35fr) minmax(150px, 1.2fr) minmax(100px, 0.9fr) minmax(150px, 1.2fr) minmax(125px, 1fr) minmax(135px, 1fr) minmax(170px, 1.15fr);
     gap: 16px;
     align-items: center;
     width: 100%;
@@ -289,9 +289,24 @@
   }
 
   .texto-forte {
+    display: block;
     font-weight: 900;
     color: #162c4f;
     word-break: break-word;
+    line-height: 1.35;
+  }
+
+  .coluna-empresa-relacionada {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .coluna-empresa-relacionada .texto-forte,
+  .coluna-empresa-relacionada .texto-secundario {
+    width: 100%;
   }
 
   .grupo-contadores {
@@ -402,7 +417,7 @@
   @media (max-width: 1500px) {
     .cabecalho-historico-cards,
     .item-historico-card__principal {
-      grid-template-columns: minmax(105px, 0.85fr) minmax(200px, 1.8fr) minmax(100px, 0.8fr) minmax(140px, 1fr) minmax(95px, 0.8fr) minmax(130px, 1fr) minmax(115px, 0.9fr) minmax(120px, 0.95fr) minmax(155px, 1fr);
+      grid-template-columns: minmax(105px, 0.85fr) minmax(200px, 1.8fr) minmax(170px, 1.25fr) minmax(140px, 1fr) minmax(95px, 0.8fr) minmax(130px, 1fr) minmax(115px, 0.9fr) minmax(120px, 0.95fr) minmax(155px, 1fr);
       gap: 12px;
     }
   }
@@ -418,7 +433,7 @@
 
     .cabecalho-historico-cards,
     .item-historico-card__principal {
-      grid-template-columns: minmax(95px, 0.8fr) minmax(180px, 1.7fr) minmax(95px, 0.75fr) minmax(125px, 0.95fr) minmax(90px, 0.75fr) minmax(120px, 0.9fr) minmax(105px, 0.85fr) minmax(110px, 0.85fr) minmax(145px, 0.95fr);
+      grid-template-columns: minmax(95px, 0.8fr) minmax(180px, 1.7fr) minmax(160px, 1.15fr) minmax(125px, 0.95fr) minmax(90px, 0.75fr) minmax(120px, 0.9fr) minmax(105px, 0.85fr) minmax(110px, 0.85fr) minmax(145px, 0.95fr);
       gap: 10px;
     }
 
@@ -572,7 +587,7 @@
       <label class="painel-filtros-historico__titulo" for="q">Buscar</label>
       <div class="painel-filtros-historico__linha">
         <div class="campo-filtro-historico campo-filtro-historico--busca">
-          <input type="text" id="q" name="q" placeholder="ID, título, descrição, ID da empresa, responsável..." value="{{ filtros.q or '' }}">
+          <input type="text" id="q" name="q" placeholder="ID, título, descrição, razão social, nome fantasia, CNPJ, responsável..." value="{{ filtros.q or '' }}">
         </div>
 
         <div class="campo-filtro-historico">
@@ -638,17 +653,33 @@
               </div>
 
               <div>
-                <span class="rotulo-mobile">Empresa Relacionada</span>
-                {% if card.id_empresa_relacionada %}
-                  <span class="texto-forte">{{ card.id_empresa_relacionada }}</span>
-                {% else %}
-                  <span class="texto-secundario">Não informada</span>
-                {% endif %}
-              </div>
+  <span class="rotulo-mobile">Empresa Relacionada</span>
+  <div class="coluna-empresa-relacionada">
+    {% if card.razao_social_empresa_relacionada %}
+      <span class="texto-forte" title="{{ card.razao_social_empresa_relacionada }}">{{ card.razao_social_empresa_relacionada }}</span>
+      {% if card.cnpj_empresa_relacionada %}
+        <span class="texto-secundario">{{ card.cnpj_empresa_relacionada }}</span>
+      {% endif %}
+    {% elif card.nome_fantasia_empresa_relacionada %}
+      <span class="texto-forte" title="{{ card.nome_fantasia_empresa_relacionada }}">{{ card.nome_fantasia_empresa_relacionada }}</span>
+      {% if card.cnpj_empresa_relacionada %}
+        <span class="texto-secundario">{{ card.cnpj_empresa_relacionada }}</span>
+      {% endif %}
+    {% else %}
+      <span class="texto-secundario">Não informada</span>
+    {% endif %}
+  </div>
+</div>
 
               <div>
                 <span class="rotulo-mobile">Fase</span>
-                <span class="pill-fase" {% if card.cor_fase %}style="background: {{ card.cor_fase }}; border-color: {{ card.cor_fase }}; color: {{ card.cor_texto_fase or '#FFFFFF' }};"{% endif %}>
+                <span
+                  class="pill-fase"
+                  title="{{ card.nome_fase_atual or 'Sem fase' }}"
+                  {% if card.cor_fase %}
+                    style="background: {{ card.cor_fase }}; border-color: {{ card.cor_fase }}; color: {{ card.cor_texto_fase or '#FFFFFF' }};"
+                  {% endif %}
+                >
                   {{ card.nome_fase_atual or 'Sem fase' }}
                 </span>
               </div>

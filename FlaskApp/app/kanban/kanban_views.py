@@ -185,7 +185,6 @@ def _obter_id_empresa_proprietaria_usuario_logado() -> int | None:
 
 
 
-
 def _resolver_id_status_card_movimento(
     nome_fase_para: str | None = None,
     *,
@@ -231,6 +230,72 @@ def _resolver_id_status_card_movimento(
         return 3
 
     return None
+
+
+def _registrar_status_historico_card(
+    *,
+    id_card: int,
+    id_fase: int | None,
+    id_status_card: int | None,
+    id_usuario: int | None,
+    id_empresa_proprietaria: int | None,
+) -> None:
+    """
+    Registra o snapshot lógico de status do card na fase informada.
+
+    Observação importante:
+    esta tabela não possui data/hora no esquema atual, então ela funciona
+    como trilha estrutural complementar. A linha do tempo cronológica continua
+    vindo principalmente de FatoKanbanCardMovimento, FatoKanbanCardObservacoes
+    e FatoKanbanCardLog.
+    """
+    if id_status_card in (None, "", 0):
+        return
+
+    _inserir_registro_dinamico(
+        TABELA_CARD_STATUS_HISTORICO,
+        {
+            "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+            "IDDimKanbanStatusCard": int(id_status_card),
+            "IDFatoKanbanCard": int(id_card),
+            "IDDimKanbanFase": int(id_fase) if id_fase not in (None, "", 0) else None,
+            "IDDimUsuarios": int(id_usuario) if id_usuario not in (None, "", 0) else None,
+        },
+    )
+
+
+def _registrar_tag_historico_card(
+    *,
+    id_fato_kanban_card_tag: int | None,
+    id_card: int,
+    id_fase: int | None,
+    id_usuario: int | None,
+    id_empresa_proprietaria: int | None,
+) -> None:
+    """
+    Registra em qual fase a alteração de tag ocorreu.
+
+    A tabela histórica de tag também não carrega timestamp no esquema atual.
+    Por isso eu gravo aqui a referência estrutural da fase/usuário e deixo a
+    cronologia completa por conta da própria FatoKanbanCardTag (AplicadoEm /
+    RemovidoEm) e da FatoKanbanCardLog.
+    """
+    if id_fato_kanban_card_tag in (None, "", 0):
+        return
+
+    _inserir_registro_dinamico(
+        TABELA_CARD_TAG_HISTORICO,
+        {
+            "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+            "IDFatoKanbanCardTag": int(id_fato_kanban_card_tag),
+            "IDFatoKanbanCard": int(id_card),
+            "IDDimKanbanFase": int(id_fase) if id_fase not in (None, "", 0) else None,
+            "IDDimUsuarios": int(id_usuario) if id_usuario not in (None, "", 0) else None,
+        },
+    )
+
+
+
 
 
 
@@ -2065,6 +2130,75 @@ def _obter_status_card_inativacao() -> str:
             if codigo:
                 return codigo
     return STATUS_CARD_FALLBACK_INATIVACAO
+
+
+
+
+
+
+"""Eu busco os itens painel/face vinculados ao card para compor o histórico."""
+def _buscar_itens_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        i.IDFatoKanbanCardPainelFace AS id_item,
+        i.IDFatoKanbanCard AS id_card,
+        i.Ordem AS ordem,
+        i.IDDimPaineisEuromidia AS id_painel,
+        i.IDDimFacesPaineis AS id_face_painel,
+        i.CodPonto AS cod_ponto,
+        i.CodFace AS cod_face,
+        i.TipoPainel AS tipo_painel,
+        i.AnoCusto AS ano_custo,
+        i.CustoTabela AS custo_tabela,
+        i.IDDimTabelaPrecosEuromidia AS id_tabela_preco,
+        i.PeriodoExibicao AS periodo_exibicao,
+        i.ExibicoesDia AS exibicoes_dia,
+        i.ValorTabela AS valor_tabela,
+        i.Tabela AS tabela,
+        i.PoliticaTrocas AS politica_trocas,
+        i.ValorTroca AS valor_troca,
+        i.NovoValor AS novo_valor,
+        i.PercentualDesconto AS percentual_desconto,
+        i.ValorVendaFinal AS valor_venda_final,
+        i.MargemValor AS margem_valor,
+        i.MargemPercentual AS margem_percentual,
+        i.Ativo AS ativo,
+        i.CriadoEm AS criado_em,
+        i.DataAtualizacao AS atualizado_em,
+        i.RemovidoEm AS removido_em,
+        i.RemovidoPor AS removido_por,
+        i.IDUsuario AS id_usuario,
+        i.IDEmpresaProprietaria AS id_empresa_proprietaria_evento
+    FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] i
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = i.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+    WHERE i.IDFatoKanbanCard = :id_card
+    ORDER BY
+        ISNULL(i.Ordem, 999999),
+        i.CriadoEm DESC,
+        i.IDFatoKanbanCardPainelFace DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _status_card_eh_final(status_card: Any) -> bool:
@@ -7176,7 +7310,6 @@ def api_card_atualizar(id_card: int):
 
     
 
-
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -7479,6 +7612,23 @@ def api_card_mover(id_card: int):
             },
         ).mappings().first()
 
+        _registrar_status_historico_card(
+            id_card=int(id_card),
+            id_fase=int(id_fase_para),
+            id_status_card=int(id_status_movimento) if id_status_movimento is not None else None,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
+        )
+
+        if observacao_movimento:
+            _registrar_observacao_historica_card(
+                id_card=int(id_card),
+                texto_observacao=observacao_movimento,
+                id_usuario=int(id_usuario),
+                id_status_card=int(id_status_movimento) if id_status_movimento is not None else None,
+                id_fase=int(id_fase_para),
+            )
+
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
         _registrar_log_card(
             id_card=id_card,
@@ -7531,6 +7681,11 @@ def api_card_mover(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
+
+
+
+
+    
 
 
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/tags", methods=["POST"])
@@ -7598,6 +7753,9 @@ def api_tag_criar(id_kanban: int):
 
 
 
+
+
+#add
 @kanban_bp.route("/api/cards/<int:id_card>/tags", methods=["POST"])
 @login_required
 @limiter.limit("180/minute")
@@ -7606,6 +7764,7 @@ def api_card_tag_adicionar(id_card: int):
     card = _obter_card_autorizado(id_card)
     id_emp = _id_empresa_usuario_or_403()
     id_kanban = int(card.get("IDDimKanban") or 0)
+    id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
     payload = request.get_json(silent=True) or {}
 
     id_tag = int(payload.get("id_tag") or 0)
@@ -7613,25 +7772,28 @@ def api_card_tag_adicionar(id_card: int):
         return jsonify({"ok": False, "msg": "Tag obrigatória"}), 400
 
     sql_tag = text("""
-        SELECT t.IDDimKanbanTag
+        SELECT
+            t.IDDimKanbanTag,
+            t.NomeTag
         FROM [Kanban].[Silver].[DimKanbanTag] t
         WHERE t.IDDimKanbanTag = :id_tag
           AND t.IDDimKanban = :id_kanban
           AND t.Ativo = 1;
     """)
-    tag_ok = db.session.execute(
+    tag_row = db.session.execute(
         sql_tag,
         {
             "id_tag": id_tag,
             "id_kanban": id_kanban,
         },
-    ).scalar()
+    ).mappings().first()
 
-    if not tag_ok:
+    if not tag_row:
         return jsonify({"ok": False, "msg": "Tag inválida para este card"}), 400
 
     sql_dup = text("""
-        SELECT 1
+        SELECT TOP (1)
+            IDFatoKanbanCardTag
         FROM [Kanban].[Silver].[FatoKanbanCardTag]
         WHERE IDFatoKanbanCard = :id_card
           AND IDDimKanbanTag = :id_tag
@@ -7648,13 +7810,16 @@ def api_card_tag_adicionar(id_card: int):
     alterou = False
 
     if not existe:
+        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+
         sql_insert = text("""
             INSERT INTO [Kanban].[Silver].[FatoKanbanCardTag]
                 (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
+            OUTPUT INSERTED.IDFatoKanbanCardTag
             VALUES
                 (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa);
         """)
-        db.session.execute(
+        id_card_tag_inserido = db.session.execute(
             sql_insert,
             {
                 "id_card": id_card,
@@ -7662,7 +7827,38 @@ def api_card_tag_adicionar(id_card: int):
                 "id_usuario": id_usuario,
                 "id_empresa": card.get("IDEmpresaProprietaria"),
             },
+        ).scalar()
+
+        id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
+            id_kanban=id_kanban,
+            id_empresa_padrao=card.get("IDEmpresaProprietaria"),
         )
+
+        _registrar_tag_historico_card(
+            id_fato_kanban_card_tag=int(id_card_tag_inserido or 0) or None,
+            id_card=int(id_card),
+            id_fase=int(id_fase_atual) if id_fase_atual else None,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
+        )
+
+        snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+        _registrar_log_card(
+            id_card=id_card,
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_emp,
+            id_usuario_acao=id_usuario,
+            tipo_evento="TAG_ADICIONADA",
+            subtipo_evento=str(tag_row.get("NomeTag") or "").strip()[:120] or None,
+            id_fase_de=id_fase_atual if id_fase_atual else None,
+            id_fase_para=id_fase_atual if id_fase_atual else None,
+            observacao=f"Tag adicionada: {str(tag_row.get('NomeTag') or '').strip()}",
+            tabela_origem="[Kanban].[Silver].[FatoKanbanCardTag]",
+            id_registro_origem=int(id_card_tag_inserido or 0) or None,
+            payload_antes=snapshot_antes,
+            payload_depois=snapshot_depois,
+        )
+
         db.session.commit()
         alterou = True
 
@@ -7693,7 +7889,6 @@ def api_card_tag_adicionar(id_card: int):
     )
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>/tags/<int:id_tag>", methods=["DELETE"])
 @login_required
 @limiter.limit("180/minute")
@@ -7702,6 +7897,7 @@ def api_card_tag_remover(id_card: int, id_tag: int):
     card = _obter_card_autorizado(id_card)
     id_emp = _id_empresa_usuario_or_403()
     id_kanban = int(card.get("IDDimKanban") or 0)
+    id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
 
     tag_em_atendimento = _obter_tag_em_atendimento(id_kanban)
     if tag_em_atendimento and int(tag_em_atendimento.get("IDDimKanbanTag") or 0) == int(id_tag):
@@ -7722,11 +7918,73 @@ def api_card_tag_remover(id_card: int, id_tag: int):
                 "msg": "A tag 'Aprovação Desconto' é automática enquanto o preço final estiver em até 12% acima do custo.",
             }), 400
 
+    tag_row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                IDDimKanbanTag,
+                NomeTag
+            FROM [Kanban].[Silver].[DimKanbanTag]
+            WHERE IDDimKanbanTag = :id_tag;
+        """),
+        {"id_tag": int(id_tag)},
+    ).mappings().first()
+
+    snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
     alterou = _remover_tag_do_card(
         id_card=int(id_card),
         id_tag=int(id_tag),
         id_usuario=int(id_usuario),
     )
+
+    if alterou:
+        id_card_tag_removido = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    IDFatoKanbanCardTag
+                FROM [Kanban].[Silver].[FatoKanbanCardTag]
+                WHERE IDFatoKanbanCard = :id_card
+                  AND IDDimKanbanTag = :id_tag
+                  AND RemovidoPor = :id_usuario
+                  AND RemovidoEm IS NOT NULL
+                ORDER BY RemovidoEm DESC, IDFatoKanbanCardTag DESC;
+            """),
+            {
+                "id_card": int(id_card),
+                "id_tag": int(id_tag),
+                "id_usuario": int(id_usuario),
+            },
+        ).scalar()
+
+        id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
+            id_kanban=id_kanban,
+            id_empresa_padrao=card.get("IDEmpresaProprietaria"),
+        )
+
+        _registrar_tag_historico_card(
+            id_fato_kanban_card_tag=int(id_card_tag_removido or 0) or None,
+            id_card=int(id_card),
+            id_fase=int(id_fase_atual) if id_fase_atual else None,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
+        )
+
+        snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+        _registrar_log_card(
+            id_card=id_card,
+            id_kanban=id_kanban,
+            id_empresa_proprietaria=id_emp,
+            id_usuario_acao=id_usuario,
+            tipo_evento="TAG_REMOVIDA",
+            subtipo_evento=str((tag_row or {}).get("NomeTag") or "").strip()[:120] or None,
+            id_fase_de=id_fase_atual if id_fase_atual else None,
+            id_fase_para=id_fase_atual if id_fase_atual else None,
+            observacao=f"Tag removida: {str((tag_row or {}).get('NomeTag') or '').strip()}",
+            tabela_origem="[Kanban].[Silver].[FatoKanbanCardTag]",
+            id_registro_origem=int(id_card_tag_removido or 0) or None,
+            payload_antes=snapshot_antes,
+            payload_depois=snapshot_depois,
+        )
+
     db.session.commit()
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
@@ -7739,6 +7997,9 @@ def api_card_tag_remover(id_card: int, id_tag: int):
         )
 
     return jsonify({"ok": True})
+
+
+
 
 
 
@@ -7796,6 +8057,128 @@ def _obter_contexto_observacao_card(id_card: int) -> dict[str, Any]:
         abort(403, "Você não tem permissão para acessar este card")
 
     return dict(row)
+
+
+def _registrar_observacao_historica_card(
+    *,
+    id_card: int,
+    texto_observacao: str,
+    id_usuario: int,
+    id_status_card: int | None = None,
+    id_fase: int | None = None,
+) -> dict[str, Any] | None:
+    """
+    Grava o histórico de observações digitadas no campo de notas do card.
+
+    Regras:
+    - Observacao = texto digitado
+    - IDEmpresaProprietaria = regra do kanban (kanban 1 => empresa 3)
+    - IDFatoKanbanCard = card atual
+    - IDDimKanbanStatusCard = status atual do card; se não vier por parâmetro,
+      tento pegar da FatoKanbanCard e, se não existir, derivo pela fase
+    - IDDimKanbanFase = fase atual do card; se vier por parâmetro, uso o informado
+    - IDDimUsuarios = usuário logado
+    - CriadoEm = GETDATE()
+    """
+    if not _objeto_existe(TABELA_CARD_OBSERVACOES):
+        return None
+
+    texto = str(texto_observacao or "").strip()
+    if len(texto) < 2:
+        return None
+
+    contexto = _obter_contexto_observacao_card(id_card)
+    if not contexto:
+        return None
+
+    id_kanban = int(contexto.get("IDDimKanban") or 0)
+    id_fase_atual = int(id_fase or contexto.get("IDDimKanbanFaseAtual") or 0)
+    nome_fase_atual = str(contexto.get("NomeFaseAtual") or "").strip()
+
+    id_status_atual = id_status_card
+    if id_status_atual is None:
+        id_status_atual = contexto.get("IDDimKanbanStatusCard")
+
+    if id_status_atual is None:
+        id_status_atual = _resolver_id_status_card_movimento(
+            nome_fase_para=nome_fase_atual,
+            card_inativado=False,
+        )
+
+    id_empresa_observacao = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban,
+        id_empresa_padrao=contexto.get("IDEmpresaProprietaria"),
+    )
+
+    sql = text(f"""
+        INSERT INTO {TABELA_CARD_OBSERVACOES}
+        (
+            Observacao,
+            IDEmpresaProprietaria,
+            IDFatoKanbanCard,
+            IDDimKanbanStatusCard,
+            IDDimKanbanFase,
+            IDDimUsuarios,
+            CriadoEm
+        )
+        OUTPUT
+            INSERTED.IDFatoKanbanCardObservacoes,
+            INSERTED.Observacao,
+            INSERTED.IDEmpresaProprietaria,
+            INSERTED.IDFatoKanbanCard,
+            INSERTED.IDDimKanbanStatusCard,
+            INSERTED.IDDimKanbanFase,
+            INSERTED.IDDimUsuarios,
+            INSERTED.CriadoEm
+        VALUES
+        (
+            :observacao,
+            :id_empresa,
+            :id_card,
+            :id_status_card,
+            :id_fase,
+            :id_usuario,
+            GETDATE()
+        );
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "observacao": texto[:1000],
+            "id_empresa": int(id_empresa_observacao or 0) or None,
+            "id_card": int(id_card),
+            "id_status_card": int(id_status_atual) if id_status_atual is not None else None,
+            "id_fase": int(id_fase_atual) if id_fase_atual else None,
+            "id_usuario": int(id_usuario),
+        },
+    ).mappings().first()
+
+    if not row:
+        return None
+
+    registro = dict(row)
+
+    try:
+        id_status_registro = (
+            int(registro.get("IDDimKanbanStatusCard"))
+            if registro.get("IDDimKanbanStatusCard") is not None
+            else None
+        )
+    except Exception:
+        id_status_registro = None
+
+    registro["IDFatoKanbanCardNota"] = registro.get("IDFatoKanbanCardObservacoes")
+    registro["TipoNota"] = "INATIVACAO" if id_status_registro == 2 else "OBS"
+    registro["Texto"] = registro.get("Observacao")
+    registro["CriadoPor"] = registro.get("IDDimUsuarios")
+    registro["IDEmpresa"] = None
+
+    return registro
+
+
+
+
 
 
 
@@ -7981,7 +8364,6 @@ def api_card_nota_criar(id_card: int):
     )
 
     return jsonify({"ok": True, "nota": nota_payload})
-
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/inativar", methods=["POST"])
@@ -8189,18 +8571,26 @@ def api_card_inativar(id_card: int):
             id_card=id_card,
             id_motivo_encerramento=id_motivo_encerramento,
             nome_motivo=motivo_texto,
-            id_fase=id_fase_atual,
+            id_fase=id_fase_para_movimento,
             id_usuario=id_usuario,
             observacoes=descricao,
         )
         print(f"[KANBAN][api_card_inativar] row_hist_enc={row_hist_enc!r}")
+
+        _registrar_status_historico_card(
+            id_card=int(id_card),
+            id_fase=int(id_fase_para_movimento),
+            id_status_card=int(id_status_inativacao) if id_status_inativacao is not None else None,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
+        )
 
         row_observacao = _registrar_observacao_historica_card(
             id_card=id_card,
             texto_observacao=observacao_inativacao,
             id_usuario=id_usuario,
             id_status_card=id_status_inativacao,
-            id_fase=id_fase_atual,
+            id_fase=id_fase_para_movimento,
         )
         print(f"[KANBAN][api_card_inativar] row_observacao={row_observacao!r}")
 
@@ -8277,9 +8667,6 @@ def api_card_inativar(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao inativar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao inativar card: {str(exc)}"}), 500
-
-
-
 
 
 
@@ -8528,9 +8915,6 @@ def _listar_fases_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
 
 
 
-
-
-"""Eu busco a lista resumida de cards para a tela de histórico com paginação."""
 def _listar_cards_resumo_historico(
     id_empresa_proprietaria: int,
     termo_busca: str = "",
@@ -8573,6 +8957,10 @@ def _listar_cards_resumo_historico(
         c.IDDimKanban AS id_kanban,
         c.IDDimKanbanFaseAtual AS id_fase_atual,
 
+        NULLIF(LTRIM(RTRIM(ISNULL(emp.RazaoSocial, ''))), '') AS razao_social_empresa_relacionada,
+        NULLIF(LTRIM(RTRIM(ISNULL(emp.NomeFantasia, ''))), '') AS nome_fantasia_empresa_relacionada,
+        NULLIF(LTRIM(RTRIM(ISNULL(emp.CNPJ, ''))), '') AS cnpj_empresa_relacionada,
+
         fase.NomeFase AS nome_fase_atual,
         NULLIF(LTRIM(RTRIM(ISNULL(fase.CorHex, ''))), '') AS cor_fase,
         NULLIF(LTRIM(RTRIM(ISNULL(fase.CorTextoHex, ''))), '') AS cor_texto_fase,
@@ -8588,8 +8976,12 @@ def _listar_cards_resumo_historico(
 
     FROM [Kanban].[Silver].[FatoKanbanCard] c
 
+    LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+        ON emp.IDEmpresa = c.IDEmpresa
+
     LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
         ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+       AND fase.IDDimKanban = c.IDDimKanban
 
     LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
         ON usuario.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
@@ -8683,10 +9075,13 @@ def _listar_cards_resumo_historico(
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
       AND (
             :termo_busca = ''
-            OR c.Titulo LIKE :termo_like
+            OR ISNULL(c.Titulo, '') LIKE :termo_like
             OR ISNULL(c.Descricao, '') LIKE :termo_like
             OR CAST(c.IDFatoKanbanCard AS VARCHAR(30)) LIKE :termo_like
             OR CAST(ISNULL(c.IDEmpresa, '') AS VARCHAR(30)) LIKE :termo_like
+            OR ISNULL(emp.RazaoSocial, '') LIKE :termo_like
+            OR ISNULL(emp.NomeFantasia, '') LIKE :termo_like
+            OR ISNULL(emp.CNPJ, '') LIKE :termo_like
           )
 
     ORDER BY
@@ -8700,16 +9095,18 @@ def _listar_cards_resumo_historico(
     return _executar_sql_mapeado(
         sql,
         {
-            "id_empresa_proprietaria": id_empresa_proprietaria,
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
             "termo_busca": termo_busca,
             "termo_like": termo_like,
-            "offset": offset,
-            "limit": limit,
+            "offset": int(offset),
+            "limit": int(limit),
         },
     )
+
+
 
 
 
@@ -8920,9 +9317,6 @@ def _listar_cards_resumo_historico(
 
 
 
-
-
-"""Eu conto quantos cards existem para a paginação da lista de histórico."""
 def _contar_cards_resumo_historico(
     id_empresa_proprietaria: int,
     termo_busca: str = "",
@@ -8937,6 +9331,10 @@ def _contar_cards_resumo_historico(
     SELECT
         COUNT(1) AS total
     FROM [Kanban].[Silver].[FatoKanbanCard] c
+
+    LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+        ON emp.IDEmpresa = c.IDEmpresa
+
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
@@ -8947,6 +9345,9 @@ def _contar_cards_resumo_historico(
             OR ISNULL(c.Descricao, '') LIKE :termo_like
             OR CAST(c.IDFatoKanbanCard AS VARCHAR(30)) LIKE :termo_like
             OR CAST(ISNULL(c.IDEmpresa, '') AS VARCHAR(30)) LIKE :termo_like
+            OR ISNULL(emp.RazaoSocial, '') LIKE :termo_like
+            OR ISNULL(emp.NomeFantasia, '') LIKE :termo_like
+            OR ISNULL(emp.CNPJ, '') LIKE :termo_like
           )
     """
 
@@ -9070,9 +9471,6 @@ def historico_cards_lista():
 
 
 
-
-
-"""Eu transformo payload em texto legível para exibição no histórico."""
 def _normalizar_payload_historico(payload) -> str:
     if payload is None:
         return ""
@@ -9101,7 +9499,7 @@ def _normalizar_data_evento_historico(valor):
         return None
 
 
-"""Eu busco o cabeçalho principal do card para a tela de histórico."""
+
 def _buscar_cabecalho_historico_card(id_card: int, id_empresa_proprietaria: int) -> dict | None:
     sql = """
     SELECT TOP 1
@@ -9128,22 +9526,44 @@ def _buscar_cabecalho_historico_card(id_card: int, id_empresa_proprietaria: int)
         fase.CorTextoHex AS cor_texto_fase,
 
         usuario.NomeUsuario AS nome_usuario_responsavel,
-
         motivo.NomeMotivo AS nome_motivo_encerramento
 
     FROM [Kanban].[Silver].[FatoKanbanCard] c
 
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
-        ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
-       AND fase.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase,
+            f.CorHex,
+            f.CorTextoHex
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = c.IDDimKanban
+                 AND ISNULL(f.IDEmpresaProprietaria, c.IDEmpresaProprietaria) = c.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = c.IDDimKanban THEN 1
+                WHEN ISNULL(f.IDEmpresaProprietaria, c.IDEmpresaProprietaria) = c.IDEmpresaProprietaria THEN 2
+                ELSE 3
+            END,
+            f.IDDimKanbanFase
+    ) fase
 
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
-        ON usuario.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
-       AND usuario.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+    OUTER APPLY (
+        SELECT TOP (1)
+            u.NomeUsuario
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE u.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
+        ORDER BY
+            CASE
+                WHEN u.IDEmpresaProprietaria = c.IDEmpresaProprietaria THEN 0
+                WHEN u.IDEmpresaProprietaria IS NULL THEN 1
+                ELSE 2
+            END,
+            u.IDDimUsuarios
+    ) usuario
 
     LEFT JOIN [Kanban].[Silver].[DimKanbanMotivoEncerramento] motivo
         ON motivo.IDDimKanbanMotivoEncerramento = c.IDDimKanbanMotivoEncerramento
-       AND motivo.IDEmpresaProprietaria = c.IDEmpresaProprietaria
 
     WHERE c.IDFatoKanbanCard = :id_card
       AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
@@ -9161,9 +9581,468 @@ def _buscar_cabecalho_historico_card(id_card: int, id_empresa_proprietaria: int)
 
 
 
+"""Eu busco as movimentações de fase do card."""
+def _buscar_movimentacoes_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        m.IDFatoKanbanCardMovimento AS id_movimento,
+        m.IDFatoKanbanCard AS id_card,
+        m.IDFaseDe AS id_fase_de,
+        m.IDFasePara AS id_fase_para,
+        m.MovidoEm AS movido_em,
+        m.MovidoPor AS id_usuario,
+        m.Observacao AS observacao,
+        m.IDDimKanbanTag AS id_tag,
+        m.IDDimKanbanStatusCard AS id_status_card,
+        m.IDDimKanban AS id_kanban,
+        m.IDEmpresaProprietaria AS id_empresa_proprietaria_evento,
+
+        COALESCE(
+            fase_de.NomeFase,
+            CASE
+                WHEN m.IDFaseDe IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), m.IDFaseDe))
+                ELSE NULL
+            END
+        ) AS nome_fase_de,
+
+        COALESCE(
+            fase_para.NomeFase,
+            CASE
+                WHEN m.IDFasePara IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), m.IDFasePara))
+                ELSE NULL
+            END
+        ) AS nome_fase_para,
+
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = m.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = m.IDFaseDe
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = COALESCE(m.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = COALESCE(m.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, m.IDEmpresaProprietaria) = m.IDEmpresaProprietaria THEN 1
+                WHEN f.IDDimKanban = COALESCE(m.IDDimKanban, card_aut.IDDimKanban) THEN 2
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 3
+                ELSE 4
+            END,
+            f.IDDimKanbanFase
+    ) fase_de
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = m.IDFasePara
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = COALESCE(m.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = COALESCE(m.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, m.IDEmpresaProprietaria) = m.IDEmpresaProprietaria THEN 1
+                WHEN f.IDDimKanban = COALESCE(m.IDDimKanban, card_aut.IDDimKanban) THEN 2
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 3
+                ELSE 4
+            END,
+            f.IDDimKanbanFase
+    ) fase_para
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            u.NomeUsuario
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE u.IDDimUsuarios = m.MovidoPor
+        ORDER BY
+            CASE
+                WHEN u.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN u.IDEmpresaProprietaria = m.IDEmpresaProprietaria THEN 1
+                WHEN u.IDEmpresaProprietaria IS NULL THEN 2
+                ELSE 3
+            END,
+            u.IDDimUsuarios
+    ) usuario
+
+    WHERE m.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        m.MovidoEm DESC,
+        m.IDFatoKanbanCardMovimento DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco as observações do card em ordem da mais recente para a mais antiga."""
+def _buscar_observacoes_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        o.IDFatoKanbanCardObservacoes AS id_observacao,
+        o.Observacao AS observacao,
+        o.IDFatoKanbanCard AS id_card,
+        o.IDDimKanbanStatusCard AS id_status_card,
+        o.IDDimKanbanFase AS id_fase,
+        o.IDDimUsuarios AS id_usuario,
+        o.CriadoEm AS criado_em,
+        o.IDEmpresaProprietaria AS id_empresa_proprietaria_evento,
+
+        COALESCE(
+            fase.NomeFase,
+            CASE
+                WHEN o.IDDimKanbanFase IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), o.IDDimKanbanFase))
+                ELSE NULL
+            END
+        ) AS nome_fase,
+
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = o.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = o.IDDimKanbanFase
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = card_aut.IDDimKanban
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = card_aut.IDDimKanban
+                 AND ISNULL(f.IDEmpresaProprietaria, o.IDEmpresaProprietaria) = o.IDEmpresaProprietaria THEN 1
+                WHEN f.IDDimKanban = card_aut.IDDimKanban THEN 2
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 3
+                ELSE 4
+            END,
+            f.IDDimKanbanFase
+    ) fase
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            u.NomeUsuario
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE u.IDDimUsuarios = o.IDDimUsuarios
+        ORDER BY
+            CASE
+                WHEN u.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN u.IDEmpresaProprietaria = o.IDEmpresaProprietaria THEN 1
+                WHEN u.IDEmpresaProprietaria IS NULL THEN 2
+                ELSE 3
+            END,
+            u.IDDimUsuarios
+    ) usuario
+
+    WHERE o.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        o.CriadoEm DESC,
+        o.IDFatoKanbanCardObservacoes DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+"""Eu busco o histórico de status do card."""
+def _buscar_status_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        s.IDDimKanbanCardTagHistorico AS id_status_historico,
+        s.IDFatoKanbanCard AS id_card,
+        s.IDDimKanbanStatusCard AS id_status_card,
+        s.IDDimKanbanFase AS id_fase,
+        s.IDDimUsuarios AS id_usuario,
+        s.IDEmpresaProprietaria AS id_empresa_proprietaria_evento,
+
+        COALESCE(
+            fase.NomeFase,
+            CASE
+                WHEN s.IDDimKanbanFase IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), s.IDDimKanbanFase))
+                ELSE NULL
+            END
+        ) AS nome_fase,
+
+        usuario.NomeUsuario AS nome_usuario,
+        status_card.CodigoStatus AS codigo_status,
+        status_card.NomeExibicao AS nome_status
+
+    FROM [Kanban].[Silver].[FatoKanbanCardStatusHistorico] s
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = s.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = s.IDDimKanbanFase
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = card_aut.IDDimKanban
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = card_aut.IDDimKanban
+                 AND ISNULL(f.IDEmpresaProprietaria, s.IDEmpresaProprietaria) = s.IDEmpresaProprietaria THEN 1
+                WHEN f.IDDimKanban = card_aut.IDDimKanban THEN 2
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 3
+                ELSE 4
+            END,
+            f.IDDimKanbanFase
+    ) fase
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            u.NomeUsuario
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE u.IDDimUsuarios = s.IDDimUsuarios
+        ORDER BY
+            CASE
+                WHEN u.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN u.IDEmpresaProprietaria = s.IDEmpresaProprietaria THEN 1
+                WHEN u.IDEmpresaProprietaria IS NULL THEN 2
+                ELSE 3
+            END,
+            u.IDDimUsuarios
+    ) usuario
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanStatusCard] status_card
+        ON status_card.IDDimKanbanStatusCard = s.IDDimKanbanStatusCard
+
+    WHERE s.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        s.IDDimKanbanCardTagHistorico DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+
+
+"""Eu busco o histórico de encerramento do card."""
+def _buscar_encerramento_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        e.IDFatoDimHistoricoEncerramentoCard AS id_historico_encerramento,
+        e.NomeMotivo AS nome_motivo,
+        e.IDDimKanbanMotivoEncerramento AS id_motivo_encerramento,
+        e.IDDimKanbanFase AS id_fase,
+        e.IDFatoKanbanCard AS id_card,
+        e.IDDimUsuarios AS id_usuario,
+        e.DataAtualizacao AS data_atualizacao,
+        e.Observacoes AS observacoes,
+
+        COALESCE(
+            fase.NomeFase,
+            CASE
+                WHEN e.IDDimKanbanFase IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), e.IDDimKanbanFase))
+                ELSE NULL
+            END
+        ) AS nome_fase,
+
+        usuario.NomeUsuario AS nome_usuario
+
+    FROM [Kanban].[Silver].[FatoDimHistoricoEncerramentoCard] e
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = e.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = e.IDDimKanbanFase
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = card_aut.IDDimKanban
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = card_aut.IDDimKanban THEN 1
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 2
+                ELSE 3
+            END,
+            f.IDDimKanbanFase
+    ) fase
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            u.NomeUsuario
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE u.IDDimUsuarios = e.IDDimUsuarios
+        ORDER BY
+            CASE
+                WHEN u.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN u.IDEmpresaProprietaria IS NULL THEN 1
+                ELSE 2
+            END,
+            u.IDDimUsuarios
+    ) usuario
+
+    WHERE e.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        e.DataAtualizacao DESC,
+        e.IDFatoDimHistoricoEncerramentoCard DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+        },
+    )
+
+
+
+
+
+"""Eu busco os logs técnicos do card."""
+def _buscar_logs_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        l.IDFatoKanbanCardLog AS id_log,
+        l.IDFatoKanbanCard AS id_card,
+        l.IDDimKanban AS id_kanban,
+        l.IDEmpresaRelacionada AS id_empresa_relacionada,
+        l.IDUsuarioAcao AS id_usuario_acao,
+        l.TipoEvento AS tipo_evento,
+        l.SubtipoEvento AS subtipo_evento,
+        l.OcorridoEm AS ocorrido_em,
+        l.IDFaseDe AS id_fase_de,
+        l.IDFasePara AS id_fase_para,
+        l.IDDimKanbanMotivoAcao AS id_motivo_acao,
+        l.TabelaOrigem AS tabela_origem,
+        l.IDRegistroOrigem AS id_registro_origem,
+        l.TextoLivre AS texto_livre,
+        l.PayloadAntes AS payload_antes,
+        l.PayloadDepois AS payload_depois,
+        l.IDEmpresaProprietaria AS id_empresa_proprietaria_evento,
+
+        usuario.NomeUsuario AS nome_usuario_acao,
+
+        COALESCE(
+            fase_de.NomeFase,
+            CASE
+                WHEN l.IDFaseDe IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), l.IDFaseDe))
+                ELSE NULL
+            END
+        ) AS nome_fase_de,
+
+        COALESCE(
+            fase_para.NomeFase,
+            CASE
+                WHEN l.IDFasePara IS NOT NULL THEN CONCAT('Fase ID ', CONVERT(varchar(20), l.IDFasePara))
+                ELSE NULL
+            END
+        ) AS nome_fase_para
+
+    FROM [Kanban].[Silver].[FatoKanbanCardLog] l
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = l.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            u.NomeUsuario
+        FROM [Integracao].[Silver].[DimUsuarios] u
+        WHERE u.IDDimUsuarios = l.IDUsuarioAcao
+        ORDER BY
+            CASE
+                WHEN u.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN u.IDEmpresaProprietaria = l.IDEmpresaProprietaria THEN 1
+                WHEN u.IDEmpresaProprietaria IS NULL THEN 2
+                ELSE 3
+            END,
+            u.IDDimUsuarios
+    ) usuario
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = l.IDFaseDe
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = COALESCE(l.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = COALESCE(l.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, l.IDEmpresaProprietaria) = l.IDEmpresaProprietaria THEN 1
+                WHEN f.IDDimKanban = COALESCE(l.IDDimKanban, card_aut.IDDimKanban) THEN 2
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 3
+                ELSE 4
+            END,
+            f.IDDimKanbanFase
+    ) fase_de
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            f.NomeFase
+        FROM [Kanban].[Silver].[DimKanbanFase] f
+        WHERE f.IDDimKanbanFase = l.IDFasePara
+        ORDER BY
+            CASE
+                WHEN f.IDDimKanban = COALESCE(l.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 0
+                WHEN f.IDDimKanban = COALESCE(l.IDDimKanban, card_aut.IDDimKanban)
+                 AND ISNULL(f.IDEmpresaProprietaria, l.IDEmpresaProprietaria) = l.IDEmpresaProprietaria THEN 1
+                WHEN f.IDDimKanban = COALESCE(l.IDDimKanban, card_aut.IDDimKanban) THEN 2
+                WHEN ISNULL(f.IDEmpresaProprietaria, card_aut.IDEmpresaProprietaria) = card_aut.IDEmpresaProprietaria THEN 3
+                ELSE 4
+            END,
+            f.IDDimKanbanFase
+    ) fase_para
+
+    WHERE l.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        l.OcorridoEm DESC,
+        l.IDFatoKanbanCardLog DESC
+    """
+    linhas = _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": id_card,
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+        },
+    )
+
+    for linha in linhas:
+        linha["payload_antes_texto"] = _normalizar_payload_historico(linha.get("payload_antes"))
+        linha["payload_depois_texto"] = _normalizar_payload_historico(linha.get("payload_depois"))
+
+    return linhas
+
+
 
 
 def _decimal_para_float_seguro(valor: Any) -> float | None:
+
     """Eu tento converter qualquer número do banco para float sem estourar a tela."""
     if valor in (None, ""):
         return None
@@ -9179,21 +10058,37 @@ def _decimal_para_float_seguro(valor: Any) -> float | None:
 
 
 
-
 def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    """Eu busco o histórico de negociação de preços do card já enriquecido com fase, cliente e usuários."""
+    """Eu busco o histórico de negociação de preços do card já enriquecido e compatível com a tela de histórico."""
     sql = """
+    ;WITH NegociacoesBase AS (
+        SELECT
+            np.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY
+                    ISNULL(np.IDDimPaineisEuromidia, -1),
+                    ISNULL(np.IDDimFacesPaineis, -1)
+                ORDER BY
+                    COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino) DESC,
+                    np.IDFatoKanbanNegociacaoPreco DESC
+            ) AS rn_painel_face
+        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] np
+        WHERE np.IDFatoKanbanCard = :id_card
+          AND np.IDEmpresaProprietaria = :id_empresa_proprietaria
+    )
     SELECT
         np.IDFatoKanbanNegociacaoPreco AS id_negociacao_preco,
         np.IDFatoKanbanCard AS id_card,
         np.IDEmpresa AS id_empresa_relacionada,
+        np.IDDimPaineisEuromidia AS id_painel,
+        np.IDDimFacesPaineis AS id_face,
 
         cli.RazaoSocial AS razao_social_cliente,
         cli.NomeFantasia AS nome_fantasia_cliente,
         COALESCE(
             NULLIF(LTRIM(RTRIM(cli.NomeFantasia)), ''),
             NULLIF(LTRIM(RTRIM(cli.RazaoSocial)), ''),
-            CONCAT('Empresa #', CAST(np.IDEmpresa AS VARCHAR(30)))
+            CONCAT('Empresa #', CAST(COALESCE(np.IDEmpresa, card_aut.IDEmpresa) AS VARCHAR(30)))
         ) AS nome_cliente_exibicao,
 
         np.IDDimKanbanFase AS id_fase,
@@ -9213,6 +10108,7 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
         np.DataAprovacaoPreco AS data_aprovacao_preco,
         np.PeriodoInicio AS periodo_inicio,
         np.PeriodoTermino AS periodo_termino,
+        COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino) AS data_referencia_preco,
 
         np.CustoAtual AS custo_original,
         np.PrecoAtual AS preco_original,
@@ -9233,16 +10129,38 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
         np.BitAutorizacaoDiretoria AS bit_autorizacao_diretoria,
         np.BitAutorizacaoCoordenador AS bit_autorizacao_coordenador,
 
+        pf.CodPonto AS cod_ponto,
+        pf.CodFace AS cod_face,
+        pf.TipoPainel AS tipo_painel,
+
+        COALESCE(pf.ValorTabela, np.PrecoAtual) AS valor_tabela,
+        COALESCE(np.PrecoProposto, pf.NovoValor, np.PrecoAprovado) AS novo_valor,
+        np.DescontoProposto AS percentual_desconto,
+        COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual) AS valor_venda_final,
+
         CASE
-            WHEN COALESCE(np.PrecoAprovado, 0) > 0
-             AND COALESCE(np.CustoProposto, np.CustoAtual) IS NOT NULL
-            THEN (
-                (
-                    np.PrecoAprovado - COALESCE(np.CustoProposto, np.CustoAtual)
-                ) / np.PrecoAprovado
-            ) * 100.0
-            ELSE NULL
-        END AS margem_aplicada,
+            WHEN COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual) IS NOT NULL
+             AND COALESCE(np.CustoProposto, np.CustoAtual, pf.CustoTabela) IS NOT NULL
+            THEN COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual)
+                 - COALESCE(np.CustoProposto, np.CustoAtual, pf.CustoTabela)
+            ELSE pf.MargemValor
+        END AS margem_valor,
+
+        COALESCE(
+            np.MargemProposta,
+            CASE
+                WHEN COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual, 0) > 0
+                 AND COALESCE(np.CustoProposto, np.CustoAtual, pf.CustoTabela) IS NOT NULL
+                THEN (
+                    (
+                        COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual)
+                        - COALESCE(np.CustoProposto, np.CustoAtual, pf.CustoTabela)
+                    )
+                    / COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual)
+                ) * 100.0
+                ELSE pf.MargemPercentual
+            END
+        ) AS margem_percentual,
 
         CASE
             WHEN np.PrecoAprovado IS NOT NULL
@@ -9250,28 +10168,70 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
               OR np.DataAprovacaoPreco IS NOT NULL
             THEN 'APROVADO'
             ELSE 'PENDENTE'
-        END AS status_negociacao
+        END AS status_negociacao,
 
-    FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] np
+        CASE WHEN np.rn_painel_face = 1 THEN 1 ELSE 0 END AS ativo,
+        CAST(NULL AS DATETIME) AS removido_em
+
+    FROM NegociacoesBase np
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = np.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
 
     LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
         ON fase.IDDimKanbanFase = np.IDDimKanbanFase
-       AND fase.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+       AND (
+            fase.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+            OR fase.IDEmpresaProprietaria IS NULL
+       )
 
     LEFT JOIN [Integracao].[Silver].[DimUsuarios] usu_sol
         ON usu_sol.IDDimUsuarios = np.IDDimUsuarios
-       AND usu_sol.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+       AND (
+            usu_sol.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+            OR usu_sol.IDEmpresaProprietaria IS NULL
+       )
 
     LEFT JOIN [Integracao].[Silver].[DimUsuarios] usu_apr
         ON usu_apr.IDDimUsuarios = np.IDDimUsuariosAprovacaoPreco
-       AND usu_apr.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+       AND (
+            usu_apr.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+            OR usu_apr.IDEmpresaProprietaria IS NULL
+       )
 
     LEFT JOIN [Integracao].[Silver].[DimEmpresas] cli
-        ON cli.IDEmpresa = np.IDEmpresa
-       AND cli.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+        ON cli.IDEmpresa = COALESCE(np.IDEmpresa, card_aut.IDEmpresa)
+       AND (
+            cli.IDEmpresaProprietaria = np.IDEmpresaProprietaria
+            OR cli.IDEmpresaProprietaria IS NULL
+       )
 
-    WHERE np.IDFatoKanbanCard = :id_card
-      AND np.IDEmpresaProprietaria = :id_empresa_proprietaria
+    OUTER APPLY (
+        SELECT TOP (1)
+            pf_hist.CodPonto,
+            pf_hist.CodFace,
+            pf_hist.TipoPainel,
+            pf_hist.CustoTabela,
+            pf_hist.ValorTabela,
+            pf_hist.NovoValor,
+            pf_hist.PercentualDesconto,
+            pf_hist.ValorVendaFinal,
+            pf_hist.MargemValor,
+            pf_hist.MargemPercentual,
+            pf_hist.Ativo,
+            pf_hist.RemovidoEm,
+            pf_hist.CriadoEm,
+            pf_hist.DataAtualizacao
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf_hist
+        WHERE pf_hist.IDFatoKanbanCard = np.IDFatoKanbanCard
+          AND ISNULL(pf_hist.IDDimPaineisEuromidia, 0) = ISNULL(np.IDDimPaineisEuromidia, 0)
+          AND ISNULL(pf_hist.IDDimFacesPaineis, 0) = ISNULL(np.IDDimFacesPaineis, 0)
+        ORDER BY
+            CASE WHEN ISNULL(pf_hist.Ativo, 1) = 1 AND pf_hist.RemovidoEm IS NULL THEN 0 ELSE 1 END,
+            COALESCE(pf_hist.DataAtualizacao, pf_hist.CriadoEm, pf_hist.RemovidoEm) DESC,
+            pf_hist.IDFatoKanbanCardPainelFace DESC
+    ) pf
 
     ORDER BY
         COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino) DESC,
@@ -9285,6 +10245,9 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
         },
     )
 
+
+
+    
 
 def _montar_resumo_historico_precos(registros: list[dict]) -> dict:
     """Eu monto os KPIs da tela para ficar mais didática e rápida de ler."""
@@ -9390,405 +10353,6 @@ def historico_precos_visualizacao(id_card: int):
 
 
 
-"""Eu busco as movimentações de fase do card."""
-def _buscar_movimentacoes_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        m.IDFatoKanbanCardMovimento AS id_movimento,
-        m.IDFatoKanbanCard AS id_card,
-        m.IDFaseDe AS id_fase_de,
-        m.IDFasePara AS id_fase_para,
-        m.MovidoEm AS movido_em,
-        m.MovidoPor AS id_usuario,
-        m.Observacao AS observacao,
-        m.IDDimKanbanTag AS id_tag,
-        m.IDDimKanbanStatusCard AS id_status_card,
-        m.IDDimKanban AS id_kanban,
-
-        fase_de.NomeFase AS nome_fase_de,
-        fase_para.NomeFase AS nome_fase_para,
-
-        usuario.NomeUsuario AS nome_usuario
-
-    FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_de
-        ON fase_de.IDDimKanbanFase = m.IDFaseDe
-       AND fase_de.IDEmpresaProprietaria = m.IDEmpresaProprietaria
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_para
-        ON fase_para.IDDimKanbanFase = m.IDFasePara
-       AND fase_para.IDEmpresaProprietaria = m.IDEmpresaProprietaria
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
-        ON usuario.IDDimUsuarios = m.MovidoPor
-       AND usuario.IDEmpresaProprietaria = m.IDEmpresaProprietaria
-
-    WHERE m.IDFatoKanbanCard = :id_card
-      AND m.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    ORDER BY
-        m.MovidoEm DESC,
-        m.IDFatoKanbanCardMovimento DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-"""Eu busco as observações do card em ordem da mais recente para a mais antiga."""
-def _buscar_observacoes_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        o.IDFatoKanbanCardObservacoes AS id_observacao,
-        o.Observacao AS observacao,
-        o.IDFatoKanbanCard AS id_card,
-        o.IDDimKanbanStatusCard AS id_status_card,
-        o.IDDimKanbanFase AS id_fase,
-        o.IDDimUsuarios AS id_usuario,
-        o.CriadoEm AS criado_em,
-
-        fase.NomeFase AS nome_fase,
-        usuario.NomeUsuario AS nome_usuario
-
-    FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
-        ON fase.IDDimKanbanFase = o.IDDimKanbanFase
-       AND fase.IDEmpresaProprietaria = o.IDEmpresaProprietaria
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
-        ON usuario.IDDimUsuarios = o.IDDimUsuarios
-       AND usuario.IDEmpresaProprietaria = o.IDEmpresaProprietaria
-
-    WHERE o.IDFatoKanbanCard = :id_card
-      AND o.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    ORDER BY
-        o.CriadoEm DESC,
-        o.IDFatoKanbanCardObservacoes DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-"""Eu busco os painéis e faces vinculados ao card."""
-def _buscar_itens_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        i.IDFatoKanbanCardPainelFace AS id_item,
-        i.IDFatoKanbanCard AS id_card,
-        i.Ordem AS ordem,
-        i.IDDimPaineisEuromidia AS id_painel,
-        i.IDDimFacesPaineis AS id_face_painel,
-        i.CodPonto AS cod_ponto,
-        i.CodFace AS cod_face,
-        i.TipoPainel AS tipo_painel,
-        i.AnoCusto AS ano_custo,
-        i.CustoTabela AS custo_tabela,
-        i.IDDimTabelaPrecosEuromidia AS id_tabela_preco,
-        i.PeriodoExibicao AS periodo_exibicao,
-        i.ExibicoesDia AS exibicoes_dia,
-        i.ValorTabela AS valor_tabela,
-        i.Tabela AS tabela,
-        i.PoliticaTrocas AS politica_trocas,
-        i.ValorTroca AS valor_troca,
-        i.NovoValor AS novo_valor,
-        i.PercentualDesconto AS percentual_desconto,
-        i.ValorVendaFinal AS valor_venda_final,
-        i.MargemValor AS margem_valor,
-        i.MargemPercentual AS margem_percentual,
-        i.Ativo AS ativo,
-        i.CriadoEm AS criado_em,
-        i.DataAtualizacao AS atualizado_em,
-        i.RemovidoEm AS removido_em,
-        i.RemovidoPor AS removido_por,
-        i.IDUsuario AS id_usuario
-    FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] i
-    WHERE i.IDFatoKanbanCard = :id_card
-      AND i.IDEmpresaProprietaria = :id_empresa_proprietaria
-    ORDER BY
-        ISNULL(i.Ordem, 999999),
-        i.CriadoEm DESC,
-        i.IDFatoKanbanCardPainelFace DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-
-
-
-
-
-
-
-"""Eu busco somente o histórico de preços do card para exibir em uma aba separada."""
-def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        i.IDFatoKanbanCardPainelFace AS id_preco,
-        i.IDFatoKanbanCard AS id_card,
-        i.Ordem AS ordem,
-        i.IDDimPaineisEuromidia AS id_painel,
-        i.IDDimFacesPaineis AS id_face_painel,
-        i.CodPonto AS cod_ponto,
-        i.CodFace AS cod_face,
-        i.TipoPainel AS tipo_painel,
-        i.AnoCusto AS ano_custo,
-        i.CustoTabela AS custo_tabela,
-        i.IDDimTabelaPrecosEuromidia AS id_tabela_preco,
-        i.PeriodoExibicao AS periodo_exibicao,
-        i.ExibicoesDia AS exibicoes_dia,
-        i.ValorTabela AS valor_tabela,
-        i.Tabela AS tabela,
-        i.PoliticaTrocas AS politica_trocas,
-        i.ValorTroca AS valor_troca,
-        i.NovoValor AS novo_valor,
-        i.PercentualDesconto AS percentual_desconto,
-        i.ValorVendaFinal AS valor_venda_final,
-        i.MargemValor AS margem_valor,
-        i.MargemPercentual AS margem_percentual,
-        i.Ativo AS ativo,
-        i.CriadoEm AS criado_em,
-        i.DataAtualizacao AS atualizado_em,
-        i.RemovidoEm AS removido_em,
-        i.RemovidoPor AS removido_por,
-        i.IDUsuario AS id_usuario,
-        COALESCE(i.DataAtualizacao, i.CriadoEm, i.RemovidoEm) AS data_referencia_preco
-    FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] i
-    WHERE i.IDFatoKanbanCard = :id_card
-      AND i.IDEmpresaProprietaria = :id_empresa_proprietaria
-      AND (
-            i.NovoValor IS NOT NULL
-            OR i.PercentualDesconto IS NOT NULL
-            OR i.ValorVendaFinal IS NOT NULL
-            OR i.MargemValor IS NOT NULL
-            OR i.MargemPercentual IS NOT NULL
-          )
-    ORDER BY
-        COALESCE(i.DataAtualizacao, i.CriadoEm, i.RemovidoEm) DESC,
-        ISNULL(i.Ordem, 999999),
-        i.IDFatoKanbanCardPainelFace DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-
-
-
-
-
-
-"""Eu busco o histórico de tags do card."""
-def _buscar_tags_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        t.IDFatoKanbanCardTag AS id_card_tag,
-        t.IDFatoKanbanCard AS id_card,
-        t.IDDimKanbanTag AS id_tag,
-        t.AplicadoEm AS aplicado_em,
-        t.AplicadoPor AS aplicado_por,
-        t.RemovidoEm AS removido_em,
-        t.RemovidoPor AS removido_por,
-        t.IDDimKanbanTagCard AS id_tag_card,
-
-        tag.NomeTag AS nome_tag,
-        tag.TipoTag AS tipo_tag,
-        tag.CorHex AS cor_tag,
-        tag.Icone AS icone_tag,
-
-        usuario_aplicou.NomeUsuario AS nome_usuario_aplicou,
-        usuario_removeu.NomeUsuario AS nome_usuario_removeu
-
-    FROM [Kanban].[Silver].[FatoKanbanCardTag] t
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanTag] tag
-        ON tag.IDDimKanbanTag = t.IDDimKanbanTag
-       AND tag.IDEmpresaProprietaria = t.IDEmpresaProprietaria
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_aplicou
-        ON usuario_aplicou.IDDimUsuarios = t.AplicadoPor
-       AND usuario_aplicou.IDEmpresaProprietaria = t.IDEmpresaProprietaria
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_removeu
-        ON usuario_removeu.IDDimUsuarios = t.RemovidoPor
-       AND usuario_removeu.IDEmpresaProprietaria = t.IDEmpresaProprietaria
-
-    WHERE t.IDFatoKanbanCard = :id_card
-      AND t.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    ORDER BY
-        ISNULL(t.AplicadoEm, t.RemovidoEm) DESC,
-        t.IDFatoKanbanCardTag DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-"""Eu busco o histórico de status do card."""
-def _buscar_status_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        s.IDDimKanbanCardTagHistorico AS id_status_historico,
-        s.IDFatoKanbanCard AS id_card,
-        s.IDDimKanbanStatusCard AS id_status_card,
-        s.IDDimKanbanFase AS id_fase,
-        s.IDDimUsuarios AS id_usuario,
-
-        fase.NomeFase AS nome_fase,
-        usuario.NomeUsuario AS nome_usuario
-
-    FROM [Kanban].[Silver].[FatoKanbanCardStatusHistorico] s
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
-        ON fase.IDDimKanbanFase = s.IDDimKanbanFase
-       AND fase.IDEmpresaProprietaria = s.IDEmpresaProprietaria
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
-        ON usuario.IDDimUsuarios = s.IDDimUsuarios
-       AND usuario.IDEmpresaProprietaria = s.IDEmpresaProprietaria
-
-    WHERE s.IDFatoKanbanCard = :id_card
-      AND s.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    ORDER BY
-        s.IDDimKanbanCardTagHistorico DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-"""Eu busco o histórico de encerramento do card."""
-def _buscar_encerramento_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        e.IDFatoDimHistoricoEncerramentoCard AS id_historico_encerramento,
-        e.NomeMotivo AS nome_motivo,
-        e.IDDimKanbanMotivoEncerramento AS id_motivo_encerramento,
-        e.IDDimKanbanFase AS id_fase,
-        e.IDFatoKanbanCard AS id_card,
-        e.IDDimUsuarios AS id_usuario,
-        e.DataAtualizacao AS data_atualizacao,
-        e.Observacoes AS observacoes,
-
-        fase.NomeFase AS nome_fase,
-        usuario.NomeUsuario AS nome_usuario
-
-    FROM [Kanban].[Silver].[FatoDimHistoricoEncerramentoCard] e
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
-        ON fase.IDDimKanbanFase = e.IDDimKanbanFase
-       AND fase.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
-        ON usuario.IDDimUsuarios = e.IDDimUsuarios
-       AND usuario.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    WHERE e.IDFatoKanbanCard = :id_card
-
-    ORDER BY
-        e.DataAtualizacao DESC,
-        e.IDFatoDimHistoricoEncerramentoCard DESC
-    """
-    return _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-
-"""Eu busco os logs técnicos do card."""
-def _buscar_logs_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
-    SELECT
-        l.IDFatoKanbanCardLog AS id_log,
-        l.IDFatoKanbanCard AS id_card,
-        l.IDDimKanban AS id_kanban,
-        l.IDEmpresaRelacionada AS id_empresa_relacionada,
-        l.IDUsuarioAcao AS id_usuario_acao,
-        l.TipoEvento AS tipo_evento,
-        l.SubtipoEvento AS subtipo_evento,
-        l.OcorridoEm AS ocorrido_em,
-        l.IDFaseDe AS id_fase_de,
-        l.IDFasePara AS id_fase_para,
-        l.IDDimKanbanMotivoAcao AS id_motivo_acao,
-        l.TabelaOrigem AS tabela_origem,
-        l.IDRegistroOrigem AS id_registro_origem,
-        l.TextoLivre AS texto_livre,
-        l.PayloadAntes AS payload_antes,
-        l.PayloadDepois AS payload_depois,
-
-        usuario.NomeUsuario AS nome_usuario_acao,
-        fase_de.NomeFase AS nome_fase_de,
-        fase_para.NomeFase AS nome_fase_para
-
-    FROM [Kanban].[Silver].[FatoKanbanCardLog] l
-
-    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario
-        ON usuario.IDDimUsuarios = l.IDUsuarioAcao
-       AND usuario.IDEmpresaProprietaria = l.IDEmpresaProprietaria
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_de
-        ON fase_de.IDDimKanbanFase = l.IDFaseDe
-       AND fase_de.IDEmpresaProprietaria = l.IDEmpresaProprietaria
-
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase_para
-        ON fase_para.IDDimKanbanFase = l.IDFasePara
-       AND fase_para.IDEmpresaProprietaria = l.IDEmpresaProprietaria
-
-    WHERE l.IDFatoKanbanCard = :id_card
-      AND l.IDEmpresaProprietaria = :id_empresa_proprietaria
-
-    ORDER BY
-        l.OcorridoEm DESC,
-        l.IDFatoKanbanCardLog DESC
-    """
-    linhas = _executar_sql_mapeado(
-        sql,
-        {
-            "id_card": id_card,
-            "id_empresa_proprietaria": id_empresa_proprietaria,
-        },
-    )
-
-    for linha in linhas:
-        linha["payload_antes_texto"] = _normalizar_payload_historico(linha.get("payload_antes"))
-        linha["payload_depois_texto"] = _normalizar_payload_historico(linha.get("payload_depois"))
-
-    return linhas
 
 
 
@@ -9884,9 +10448,6 @@ def _listar_cards_com_historico_precos(id_empresa_proprietaria: int) -> list[dic
 
 
 
-
-
-"""Eu monto uma timeline consolidada juntando todas as categorias do histórico."""
 def _montar_timeline_historico_card(
     cabecalho: dict,
     movimentacoes: list[dict],
@@ -10006,7 +10567,7 @@ def _montar_timeline_historico_card(
                 "data_evento": None,
                 "data_evento_ordenacao": None,
                 "titulo": "Registro de status",
-                "descricao": f"Status ID {item.get('id_status_card') or '-'} na fase {item.get('nome_fase') or 'Sem fase'}",
+                "descricao": f"{item.get('nome_status') or item.get('codigo_status') or ('Status ID ' + str(item.get('id_status_card') or '-'))} na fase {item.get('nome_fase') or 'Sem fase'}",
                 "usuario": item.get("nome_usuario") or "",
                 "icone": "📌",
                 "dados": item,
@@ -10050,6 +10611,84 @@ def _montar_timeline_historico_card(
     )
 
     return timeline
+
+
+
+
+
+
+
+
+
+
+
+
+"""Eu busco o histórico de tags do card."""
+def _buscar_tags_historico_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
+    sql = """
+    SELECT
+        ct.IDFatoKanbanCardTag AS id_card_tag,
+        ct.IDFatoKanbanCard AS id_card,
+        ct.IDDimKanbanTag AS id_tag,
+        ct.AplicadoEm AS aplicado_em,
+        ct.AplicadoPor AS aplicado_por,
+        ct.RemovidoEm AS removido_em,
+        ct.RemovidoPor AS removido_por,
+        ct.IDEmpresaProprietaria AS id_empresa_proprietaria_evento,
+
+        tag.NomeTag AS nome_tag,
+        tag.TipoTag AS tipo_tag,
+        tag.CorHex AS cor_tag,
+        tag.Icone AS icone_tag,
+
+        usuario_aplicou.NomeUsuario AS nome_usuario_aplicou,
+        usuario_removeu.NomeUsuario AS nome_usuario_removeu
+
+    FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
+
+    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
+        ON card_aut.IDFatoKanbanCard = ct.IDFatoKanbanCard
+       AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanTag] tag
+        ON tag.IDDimKanbanTag = ct.IDDimKanbanTag
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_aplicou
+        ON usuario_aplicou.IDDimUsuarios = ct.AplicadoPor
+       AND (
+            usuario_aplicou.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria
+            OR usuario_aplicou.IDEmpresaProprietaria IS NULL
+       )
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_removeu
+        ON usuario_removeu.IDDimUsuarios = ct.RemovidoPor
+       AND (
+            usuario_removeu.IDEmpresaProprietaria = card_aut.IDEmpresaProprietaria
+            OR usuario_removeu.IDEmpresaProprietaria IS NULL
+       )
+
+    WHERE ct.IDFatoKanbanCard = :id_card
+
+    ORDER BY
+        COALESCE(ct.RemovidoEm, ct.AplicadoEm) DESC,
+        ct.IDFatoKanbanCardTag DESC
+    """
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+        },
+    )
+
+
+
+
+
+
+
+
+
 
 
 

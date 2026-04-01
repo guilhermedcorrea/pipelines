@@ -915,72 +915,54 @@
               {% for item in historico_precos %}
                 <tr>
                   <td class="texto-forte">
-                    {% if item.data_referencia_preco %}
-                      {{ item.data_referencia_preco.strftime('%d/%m/%Y %H:%M') if item.data_referencia_preco.strftime else item.data_referencia_preco }}
+                    {% set data_ref = item.data_referencia_preco or item.data_aprovacao_preco or item.data_preco_proposto %}
+                    {% if data_ref %}
+                      {{ data_ref.strftime('%d/%m/%Y %H:%M') if data_ref.strftime else data_ref }}
                     {% else %}
                       —
                     {% endif %}
                   </td>
 
-                  <td class="texto-forte">{{ item.cod_ponto or '—' }}</td>
-                  <td class="texto-forte">{{ item.cod_face or '—' }}</td>
-                  <td>{{ item.tipo_painel or '—' }}</td>
+                  <td class="texto-forte">{{ item.cod_ponto or item.id_painel or '—' }}</td>
+                  <td class="texto-forte">{{ item.cod_face or item.id_face or '—' }}</td>
+                  <td>{{ item.tipo_painel or item.nome_fase or '—' }}</td>
 
                   <td>
-                    {% if item.valor_tabela is not none %}
-                      {{ item.valor_tabela }}
-                    {% else %}
-                      —
-                    {% endif %}
+                    {% set valor_tabela_exibicao = item.valor_tabela if item.valor_tabela is not none else item.preco_original %}
+                    {{ valor_tabela_exibicao if valor_tabela_exibicao is not none else '—' }}
                   </td>
 
                   <td>
-                    {% if item.novo_valor is not none %}
-                      {{ item.novo_valor }}
-                    {% else %}
-                      —
-                    {% endif %}
+                    {% set novo_valor_exibicao = item.novo_valor if item.novo_valor is not none else item.preco_proposto %}
+                    {{ novo_valor_exibicao if novo_valor_exibicao is not none else '—' }}
                   </td>
 
                   <td>
-                    {% if item.percentual_desconto is not none %}
-                      {{ item.percentual_desconto }}
-                    {% else %}
-                      —
-                    {% endif %}
+                    {% set desconto_exibicao = item.percentual_desconto if item.percentual_desconto is not none else item.desconto_proposto %}
+                    {{ desconto_exibicao if desconto_exibicao is not none else '—' }}
                   </td>
 
                   <td>
-                    {% if item.valor_venda_final is not none %}
-                      {{ item.valor_venda_final }}
-                    {% else %}
-                      —
-                    {% endif %}
+                    {% set valor_final_exibicao = item.valor_venda_final if item.valor_venda_final is not none else (item.preco_aplicado if item.preco_aplicado is not none else item.preco_proposto) %}
+                    {{ valor_final_exibicao if valor_final_exibicao is not none else '—' }}
                   </td>
 
                   <td>
-                    {% if item.margem_valor is not none %}
-                      {{ item.margem_valor }}
-                    {% else %}
-                      —
-                    {% endif %}
+                    {{ item.margem_valor if item.margem_valor is not none else '—' }}
                   </td>
 
                   <td>
-                    {% if item.margem_percentual is not none %}
-                      {{ item.margem_percentual }}
-                    {% else %}
-                      —
-                    {% endif %}
+                    {% set margem_percentual_exibicao = item.margem_percentual if item.margem_percentual is not none else (item.margem_proposta if item.margem_proposta is not none else item.margem_aplicada) %}
+                    {{ margem_percentual_exibicao if margem_percentual_exibicao is not none else '—' }}
                   </td>
 
                   <td>
-                    {% if item.removido_em %}
-                      <span class="pill pill-status pill-status--encerrado">Removido</span>
+                    {% if item.status_negociacao == 'APROVADO' %}
+                      <span class="pill pill-status">Aprovado</span>
                     {% elif item.ativo %}
-                      <span class="pill pill-status">Ativo</span>
+                      <span class="pill pill-situacao">Pendente</span>
                     {% else %}
-                      <span class="pill pill-situacao">Inativo</span>
+                      <span class="pill pill-situacao">Histórico</span>
                     {% endif %}
                   </td>
                 </tr>

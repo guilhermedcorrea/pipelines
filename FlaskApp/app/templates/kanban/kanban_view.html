@@ -3955,6 +3955,33 @@ function normalizarCardServidor(card){
     return fases.find(f => idNum(f.IDDimKanbanFase) === id) || null;
   }
 
+  function faseEhFinalDoQuadro(idFase){
+    const fase = fasePorId(idFase);
+    if (!fase) return false;
+
+    const nomeFase = normalizarTexto(fase?.NomeFase || "");
+    const tipoFase = safeStr(fase?.TipoFase || "").trim().toUpperCase();
+
+    return nomeFase === "concluido" || tipoFase === "SUCESSO";
+  }
+
+  function statusCardEhFinal(statusCard){
+    const codigo = safeStr(statusCard || "").trim().toUpperCase();
+    return codigo === "CONCLUIDO" || codigo === "CANCELADO";
+  }
+
+  function cardDeveSairDoQuadro(card, idFaseSobrescrita = null){
+    if (!card) return false;
+
+    const idFaseAtual = idNum(
+      idFaseSobrescrita != null
+        ? idFaseSobrescrita
+        : (card.IDDimKanbanFaseAtual || card.id_fase_atual || 0)
+    );
+
+    return faseEhFinalDoQuadro(idFaseAtual) || statusCardEhFinal(card.StatusCard || card.status_card);
+  }
+
   function listaCardsDaFase(idFase, considerarFiltros = true){
     const idF = idNum(idFase);
     return cards
@@ -4350,6 +4377,11 @@ function normalizarCardServidor(card){
   function inserirOuAtualizarCardLocal(card){
     const cardNorm = normalizarCardServidor(card);
     if (!cardNorm.IDFatoKanbanCard) return null;
+
+    if (cardDeveSairDoQuadro(cardNorm)) {
+      removerCardLocal(cardNorm.IDFatoKanbanCard);
+      return null;
+    }
 
     const nomeVendedor = nomeVendedorDoCard(cardNorm);
     const chaveVendedor = normalizarTexto(nomeVendedor);
@@ -6474,8 +6506,13 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       if (r.status === 409 && j && j.card_atual) {
         const cardAtualServidor = normalizarCardServidor(j.card_atual);
-        inserirOuAtualizarCardLocal(cardAtualServidor);
-        idsParaSincronizar.push(idNum(cardAtualServidor.IDDimKanbanFaseAtual));
+
+        if (cardDeveSairDoQuadro(cardAtualServidor)) {
+          removerCardLocal(idC);
+        } else {
+          inserirOuAtualizarCardLocal(cardAtualServidor);
+          idsParaSincronizar.push(idNum(cardAtualServidor.IDDimKanbanFaseAtual));
+        }
       } else if (movimentoLocal?.ok) {
         restaurarMovimentoCardLocal(movimentoLocal);
         redesenharFasesLocalmente([idFaseOrigem, idDestino], mapaQuantidades, true);
@@ -6533,7 +6570,14 @@ async function moverCard(idCard, idFasePara, posicao) {
       detalheFinal?.card || j.card || obterCardPorId(idC) || cardAtual
     );
 
-    inserirOuAtualizarCardLocal(cardFinal);
+    const cardSaiDoQuadro = cardDeveSairDoQuadro(cardFinal);
+
+    if (cardSaiDoQuadro) {
+      removerCardLocal(idC);
+      removerTagsDoCard(idC);
+    } else {
+      inserirOuAtualizarCardLocal(cardFinal);
+    }
 
     const idFaseDestinoFinal = idNum(cardFinal.IDDimKanbanFaseAtual || idDestino);
 
@@ -6548,7 +6592,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       { fresh: true }
     );
 
-    destacarCardNaFase(idC, idFaseDestinoFinal);
+    if (!cardSaiDoQuadro) {
+      destacarCardNaFase(idC, idFaseDestinoFinal);
+    }
 
     if (inputNotaTexto && textoNotaMovimento) {
       inputNotaTexto.value = "";
@@ -8171,13 +8217,21 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     socketKanban.on("card_atualizado", async (payload = {}) => {
       const idCard = idNum(payload.id_card);
+      const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
+      const cardSaiDoQuadro = !!(cardPayload && cardDeveSairDoQuadro(cardPayload));
 
-      if (payload.card) {
-        inserirOuAtualizarCardLocal(payload.card);
+      if (cardSaiDoQuadro) {
+        removerCardLocal(idCard);
+      } else if (cardPayload) {
+        inserirOuAtualizarCardLocal(cardPayload);
       }
 
       if (idCard && Array.isArray(payload.tags)) {
-        setTagsDoCard(idCard, payload.tags);
+        if (cardSaiDoQuadro) {
+          removerTagsDoCard(idCard);
+        } else {
+          setTagsDoCard(idCard, payload.tags);
+        }
       }
 
       if (idCard && Array.isArray(payload.notas)) {
@@ -8202,8 +8256,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       );
 
       if (faseId) {
-        await redesenharFasesSincronizado([faseId], null, true);
+        await redesenharFasesSincronizado([faseId], null, true, { fresh: true });
+      } else {
+        await carregar();
       }
+
+      void recarregarResumoComercial();
     });
 
     socketKanban.on("card_movido", async (payload = {}) => {
@@ -8211,8 +8269,16 @@ async function moverCard(idCard, idFasePara, posicao) {
       const idFaseDe = idNum(payload.id_fase_de);
       const idFasePara = idNum(payload.id_fase_para);
 
-      if (payload.card) {
-        inserirOuAtualizarCardLocal(payload.card);
+      const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
+      const cardSaiDoQuadro = !!(
+        (cardPayload && cardDeveSairDoQuadro(cardPayload, idFasePara)) ||
+        (!cardPayload && faseEhFinalDoQuadro(idFasePara))
+      );
+
+      if (cardSaiDoQuadro) {
+        removerCardLocal(idCard);
+      } else if (cardPayload) {
+        inserirOuAtualizarCardLocal(cardPayload);
       } else if (idCard && idFasePara) {
         const cardLocal = obterCardPorId(idCard);
         if (cardLocal) {
@@ -8221,7 +8287,11 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
 
       if (idCard && Array.isArray(payload.tags)) {
-        setTagsDoCard(idCard, payload.tags);
+        if (cardSaiDoQuadro) {
+          removerTagsDoCard(idCard);
+        } else {
+          setTagsDoCard(idCard, payload.tags);
+        }
       }
 
       if (idCard && Array.isArray(payload.notas)) {
@@ -8240,7 +8310,8 @@ async function moverCard(idCard, idFasePara, posicao) {
         "Este card foi movido por outro usuário enquanto estava aberto. Reabra o card antes de salvar."
       );
 
-      await redesenharFasesSincronizado([idFaseDe, idFasePara], null, true);
+      await redesenharFasesSincronizado([idFaseDe, idFasePara], null, true, { fresh: true });
+      void recarregarResumoComercial();
     });
 
     socketKanban.on("card_criado", async () => {
