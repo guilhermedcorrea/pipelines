@@ -8,6 +8,15 @@ CAMINHO_DOTENV = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(CAMINHO_DOTENV)
 
 
+
+EXTENSOES_PERMITIDAS_CHECKING = {"jpg", "jpeg", "png"}
+TAMANHO_MAXIMO_UPLOAD_MB = 5
+LARGURA_MAXIMA_IMAGEM = 5000
+ALTURA_MAXIMA_IMAGEM = 5000
+
+
+
+
 def obter_variavel_obrigatoria(nome_variavel: str) -> str:
     valor = os.getenv(nome_variavel)
     if not valor:

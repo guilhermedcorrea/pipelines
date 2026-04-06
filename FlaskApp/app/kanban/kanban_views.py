@@ -6263,300 +6263,6 @@ def api_fases_reordenar():
 
 
 
-
-@kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
-@login_required
-@limiter.limit("120/minute")
-def api_card_criar(id_kanban: int):
-    etapa = "inicio"
-    novo_id = None
-
-    try:
-        print("\n" + "=" * 120)
-        print(f"[KANBAN][CRIAR_CARD] INICIO id_kanban={id_kanban}")
-        print(f"[KANBAN][CRIAR_CARD] method={request.method} path={request.path}")
-        print(f"[KANBAN][CRIAR_CARD] content_type={request.content_type}")
-        print(f"[KANBAN][CRIAR_CARD] is_json={request.is_json}")
-
-        etapa = "autenticacao"
-        id_usuario = _assert_login()
-        id_emp = _id_empresa_usuario_or_403()
-        _obter_kanban_autorizado(id_kanban)
-        print(f"[KANBAN][CRIAR_CARD] autenticacao_ok id_usuario={id_usuario} id_emp={id_emp}")
-
-        etapa = "payload"
-        payload = request.get_json(silent=True) or {}
-        print(f"[KANBAN][CRIAR_CARD] payload_bruto={payload}")
-
-        titulo = (payload.get("titulo") or "").strip()
-        descricao = payload.get("descricao")
-        id_fase = int(payload.get("id_fase") or 0)
-        id_empresa_relacionada = payload.get("id_empresa")
-
-        print(
-            "[KANBAN][CRIAR_CARD] payload_tratado "
-            f"titulo={titulo!r} "
-            f"descricao={descricao!r} "
-            f"id_fase={id_fase!r} "
-            f"id_empresa_relacionada={id_empresa_relacionada!r}"
-        )
-
-        etapa = "validacao_titulo"
-        if len(titulo) < 2:
-            print("[KANBAN][CRIAR_CARD] ERRO validacao_titulo: titulo invalido")
-            return jsonify({"ok": False, "msg": "Título inválido"}), 400
-
-        etapa = "validacao_fase_obrigatoria"
-        if not id_fase:
-            print("[KANBAN][CRIAR_CARD] ERRO validacao_fase_obrigatoria: fase ausente")
-            return jsonify({"ok": False, "msg": "Fase obrigatória"}), 400
-
-        etapa = "validacao_fase_kanban"
-        fase_valida = _validar_fase_do_kanban(id_kanban, id_fase)
-        print(f"[KANBAN][CRIAR_CARD] fase_valida={fase_valida}")
-        if not fase_valida:
-            print("[KANBAN][CRIAR_CARD] ERRO validacao_fase_kanban: fase invalida para o kanban")
-            return jsonify({"ok": False, "msg": "Fase inválida para este kanban"}), 400
-
-        etapa = "validacao_empresa_relacionada"
-        id_empresa_relacionada_int = None
-        if id_empresa_relacionada not in (None, ""):
-            try:
-                id_empresa_relacionada_int = int(id_empresa_relacionada)
-                print(f"[KANBAN][CRIAR_CARD] id_empresa_relacionada_int={id_empresa_relacionada_int}")
-            except Exception as exc:
-                print(f"[KANBAN][CRIAR_CARD] ERRO empresa invalida ao converter: {exc}")
-                return jsonify({"ok": False, "msg": "Empresa inválida"}), 400
-
-            sql_emp = text(f"""
-                SELECT 1
-                FROM {TABELA_EMPRESAS}
-                WHERE IDEmpresa = :id_empresa;
-            """)
-            empresa_existe = db.session.execute(
-                sql_emp,
-                {"id_empresa": id_empresa_relacionada_int},
-            ).scalar()
-
-            print(f"[KANBAN][CRIAR_CARD] empresa_existe={empresa_existe}")
-
-            if not empresa_existe:
-                print("[KANBAN][CRIAR_CARD] ERRO empresa nao encontrada")
-                return jsonify({"ok": False, "msg": "Empresa não encontrada"}), 400
-
-        etapa = "descobrir_colunas_dinamicas"
-        nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
-
-        coluna_id_dim_usuarios_existe = _coluna_existe(TABELA_CARD, "IDDimUsuarios")
-        coluna_iddimkanbanorigem_existe = _coluna_existe(TABELA_CARD, "IDDimKanbanOrigem")
-
-        print(
-            "[KANBAN][CRIAR_CARD] colunas_dinamicas "
-            f"nome_coluna_empresa={nome_coluna_empresa!r} "
-            f"coluna_id_dim_usuarios_existe={coluna_id_dim_usuarios_existe} "
-            f"coluna_iddimkanbanorigem_existe={coluna_iddimkanbanorigem_existe}"
-        )
-
-        etapa = "montagem_insert"
-        print(f"[KANBAN][CRIAR_CARD] id_usuario_logado={id_usuario}")
-        print("[KANBAN][CRIAR_CARD] vou gravar id_usuario em IDVendedorUsuario e, se existir, também em IDDimUsuarios")
-
-        status_card_inicial = _obter_status_card_para_fase(id_fase)
-        id_status_card_inicial = _obter_id_status_card_por_codigo(status_card_inicial)
-
-        colunas = [
-            "IDDimKanban",
-            "IDDimKanbanFaseAtual",
-            "Titulo",
-            "Descricao",
-            "IDVendedorUsuario",
-            "StatusCard",
-            "CriadoEm",
-            "Ativo",
-            "IDEmpresaProprietaria",
-        ]
-        valores = [
-            ":id_kanban",
-            ":id_fase",
-            ":titulo",
-            ":descricao",
-            ":id_usuario",
-            ":status_card_inicial",
-            "GETDATE()",
-            "1",
-            ":id_emp",
-        ]
-        params = {
-            "id_kanban": id_kanban,
-            "id_fase": id_fase,
-            "titulo": titulo[:200],
-            "descricao": descricao,
-            "id_usuario": int(id_usuario),
-            "id_emp": id_emp,
-            "status_card_inicial": status_card_inicial,
-        }
-
-        if nome_coluna_empresa:
-            colunas.append(nome_coluna_empresa)
-            valores.append(":id_empresa_relacionada")
-            params["id_empresa_relacionada"] = id_empresa_relacionada_int
-
-        if coluna_id_dim_usuarios_existe:
-            colunas.append("IDDimUsuarios")
-            valores.append(":id_dim_usuarios")
-            params["id_dim_usuarios"] = int(id_usuario)
-
-        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_card_inicial is not None:
-            colunas.append("IDDimKanbanStatusCard")
-            valores.append(":id_status_card_inicial")
-            params["id_status_card_inicial"] = int(id_status_card_inicial)
-
-        if coluna_iddimkanbanorigem_existe:
-            colunas.append("IDDimKanbanOrigem")
-            valores.append("NULL")
-
-        sql_insert = f"""
-            INSERT INTO {TABELA_CARD}
-                ({', '.join(colunas)})
-            OUTPUT INSERTED.IDFatoKanbanCard
-            VALUES
-                ({', '.join(valores)});
-        """
-
-        print(f"[KANBAN][CRIAR_CARD] tabela_card={TABELA_CARD}")
-        print(f"[KANBAN][CRIAR_CARD] colunas_insert={colunas}")
-        print(f"[KANBAN][CRIAR_CARD] valores_insert={valores}")
-        print(f"[KANBAN][CRIAR_CARD] params_insert={params}")
-        print(f"[KANBAN][CRIAR_CARD] sql_insert=\n{sql_insert}")
-
-        etapa = "executar_insert"
-        novo_id = db.session.execute(text(sql_insert), params).scalar()
-        print(f"[KANBAN][CRIAR_CARD] novo_id={novo_id}")
-
-        if not novo_id:
-            raise RuntimeError("O INSERT não retornou IDFatoKanbanCard.")
-
-        etapa = "aplicar_tag_em_atendimento"
-        _garantir_tag_em_atendimento_no_card(
-            id_card=int(novo_id),
-            id_kanban=int(id_kanban),
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=id_emp,
-            falhar_se_nao_existir=True,
-        )
-
-        etapa = "snapshot_depois"
-        snapshot_depois = _obter_snapshot_card_log(int(novo_id), incluir_inativo=True)
-        print(f"[KANBAN][CRIAR_CARD] snapshot_depois={snapshot_depois}")
-
-        etapa = "registrar_log_card"
-        _registrar_log_card(
-            id_card=int(novo_id),
-            id_kanban=id_kanban,
-            id_empresa_proprietaria=id_emp,
-            id_usuario_acao=id_usuario,
-            tipo_evento="CARD_CRIADO",
-            id_fase_para=id_fase,
-            payload_depois=snapshot_depois,
-            observacao="Card criado no kanban.",
-            tabela_origem=TABELA_CARD,
-            id_registro_origem=int(novo_id),
-        )
-        print("[KANBAN][CRIAR_CARD] log_card_ok")
-
-        etapa = "commit"
-        db.session.commit()
-        print("[KANBAN][CRIAR_CARD] commit_ok")
-
-    except Exception as exc:
-        db.session.rollback()
-        print(
-            f"[KANBAN][CRIAR_CARD] ERRO antes_pos_processamento "
-            f"etapa={etapa} novo_id={novo_id} erro={repr(exc)}"
-        )
-        current_app.logger.exception(
-            "Erro ao criar card no kanban. etapa=%s id_kanban=%s novo_id=%s",
-            etapa,
-            id_kanban,
-            novo_id,
-        )
-        return jsonify(
-            {
-                "ok": False,
-                "msg": f"Erro ao criar card na etapa '{etapa}': {str(exc)}",
-                "etapa": etapa,
-                "novo_id": int(novo_id) if novo_id else None,
-            }
-        ), 500
-
-    try:
-        etapa = "invalidar_cache"
-        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=int(novo_id))
-        print("[KANBAN][CRIAR_CARD] invalidar_cache_ok")
-
-        etapa = "obter_detalhe"
-        detalhe = _obter_card_detalhe_payload(int(novo_id))
-        print(
-            f"[KANBAN][CRIAR_CARD] detalhe_keys="
-            f"{list(detalhe.keys()) if isinstance(detalhe, dict) else type(detalhe)}"
-        )
-        print(
-            f"[KANBAN][CRIAR_CARD] detalhe_card="
-            f"{detalhe.get('card') if isinstance(detalhe, dict) else None}"
-        )
-
-        etapa = "emitir_socket"
-        payload_socket = {
-            "card": detalhe["card"],
-            "id_fase": id_fase,
-            "tags": detalhe["tags"],
-            "notas": detalhe["notas"],
-            "paineis_vinculados": detalhe.get("paineis_vinculados", []),
-        }
-        print(f"[KANBAN][CRIAR_CARD] payload_socket={payload_socket}")
-
-        _emitir_evento_kanban(
-            id_kanban,
-            "card_criado",
-            payload_socket,
-        )
-        print("[KANBAN][CRIAR_CARD] emitir_socket_ok")
-
-        print(f"[KANBAN][CRIAR_CARD] SUCESSO id_card={novo_id}")
-        print("=" * 120 + "\n")
-
-        return jsonify(
-            {
-                "ok": True,
-                "IDFatoKanbanCard": int(novo_id),
-                "card": detalhe["card"],
-            }
-        )
-
-    except Exception as exc:
-        print(
-            f"[KANBAN][CRIAR_CARD] ERRO pos_commit "
-            f"etapa={etapa} novo_id={novo_id} erro={repr(exc)}"
-        )
-        current_app.logger.exception(
-            "Card criado, mas houve falha no pos-processamento. etapa=%s id_kanban=%s novo_id=%s",
-            etapa,
-            id_kanban,
-            novo_id,
-        )
-
-        return jsonify(
-            {
-                "ok": True,
-                "IDFatoKanbanCard": int(novo_id),
-                "msg": f"Card criado com sucesso, mas houve falha após gravar na etapa '{etapa}': {str(exc)}",
-                "etapa_pos_commit": etapa,
-            }
-        ), 200
-
-
-
-
 def _negociacao_preco_foi_alterada(
     ultima: dict[str, Any] | None,
     *,
@@ -7032,280 +6738,6 @@ def _registrar_negociacao_preco_card(
 
 
 
-
-
-
-@kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
-@login_required
-@limiter.limit("120/minute")
-def api_card_atualizar(id_card: int):
-    id_usuario = _assert_login()
-    id_emp = _id_empresa_usuario_or_403()
-
-    try:
-        card_atual = _obter_card_autorizado(id_card)
-        if not card_atual:
-            return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
-
-        id_kanban = int(card_atual.get("IDDimKanban") or 0)
-        id_fase_atual = int(card_atual.get("IDDimKanbanFaseAtual") or 0)
-
-        payload = request.get_json(silent=True) or {}
-
-        titulo = (payload.get("titulo") or "").strip()
-        descricao = payload.get("descricao")
-        id_empresa_relacionada = payload.get("id_empresa")
-        versao_concorrencia = payload.get("versao_concorrencia")
-        painel_faces_payload = payload.get("painel_faces")
-
-        if not titulo:
-            return jsonify({"ok": False, "msg": "Título do card é obrigatório."}), 400
-
-        has_versao = _card_tem_versao_concorrencia()
-        versao_concorrencia_bytes = None
-
-        if has_versao:
-            versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
-            if not versao_concorrencia_bytes:
-                detalhe_atual = _obter_card_detalhe_payload(id_card)
-                return (
-                    jsonify(
-                        {
-                            "ok": False,
-                            "msg": "Versão de concorrência inválida ou ausente.",
-                            "card_atual": detalhe_atual.get("card"),
-                        }
-                    ),
-                    409,
-                )
-
-        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-
-        campos_update: list[str] = []
-        params_update: dict[str, Any] = {
-            "id_card": int(id_card),
-            "titulo": titulo[:300],
-            "descricao": descricao,
-        }
-
-        if _coluna_existe(TABELA_CARD, "Titulo"):
-            campos_update.append("Titulo = :titulo")
-
-        if _coluna_existe(TABELA_CARD, "Descricao"):
-            campos_update.append("Descricao = :descricao")
-
-        nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
-        if nome_coluna_empresa:
-            campos_update.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
-            params_update["id_empresa_relacionada"] = (
-                int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
-            )
-
-        if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
-            campos_update.append("AtualizadoEm = GETDATE()")
-
-        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
-        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
-
-        if has_versao:
-            params_update["versao_concorrencia"] = versao_concorrencia_bytes
-
-        if not campos_update:
-            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização no card."}), 400
-
-        sql_upd = text(f"""
-            UPDATE {TABELA_CARD}
-            SET {', '.join(campos_update)}
-            OUTPUT
-                INSERTED.IDFatoKanbanCard,
-                INSERTED.IDDimKanban,
-                INSERTED.IDDimKanbanFaseAtual,
-                INSERTED.Titulo,
-                INSERTED.Descricao,
-                INSERTED.StatusCard,
-                INSERTED.IDEmpresaProprietaria{output_versao}
-            WHERE IDFatoKanbanCard = :id_card
-              AND Ativo = 1{where_versao};
-        """)
-
-        row_upd = db.session.execute(sql_upd, params_update).mappings().first()
-
-        if not row_upd:
-            detalhe_atual = _obter_card_detalhe_payload(id_card)
-            return (
-                jsonify(
-                    {
-                        "ok": False,
-                        "msg": "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.",
-                        "card_atual": detalhe_atual.get("card"),
-                    }
-                ),
-                409,
-            )
-
-        vinculos_preparados: list[dict[str, Any]] = []
-        reservas_criadas = 0
-
-        if isinstance(painel_faces_payload, list):
-
-            def _assinatura_estado_operacional(estados: list[dict[str, Any]]) -> tuple:
-                def _n_int(valor: Any) -> int | None:
-                    if valor in (None, ""):
-                        return None
-                    try:
-                        return int(valor)
-                    except Exception:
-                        return None
-
-                def _n_dec(valor: Any, casas: str = "0.0001") -> Decimal | None:
-                    dec = _valor_decimal(valor)
-                    if dec is None:
-                        return None
-                    try:
-                        return dec.quantize(Decimal(casas))
-                    except Exception:
-                        return dec
-
-                def _n_data(valor: Any) -> date | None:
-                    return _normalizar_data_reserva_kanban(valor)
-
-                assinatura: list[tuple] = []
-
-                for estado in estados:
-                    assinatura.append(
-                        (
-                            _n_int(estado.get("IDDimPaineisEuromidia")),
-                            _n_int(estado.get("IDDimFacesPaineis")),
-                            _n_int(estado.get("IDDimTabelaPrecosEuromidia")),
-                            _n_dec(estado.get("CustoTabela")),
-                            _n_dec(estado.get("ValorTabela")),
-                            _n_dec(estado.get("NovoValor")),
-                            _n_dec(estado.get("PercentualDesconto")),
-                            _n_dec(estado.get("ValorVendaFinal")),
-                            _n_dec(estado.get("MargemValor")),
-                            _n_dec(estado.get("MargemPercentual")),
-                            _n_data(estado.get("DataInicio")),
-                            _n_data(estado.get("DataFim")),
-                        )
-                    )
-
-                return tuple(
-                    sorted(
-                        assinatura,
-                        key=lambda item: tuple((parte is None, str(parte)) for parte in item),
-                    )
-                )
-
-            estado_operacional_antes = _listar_estado_atual_negociacao_card(int(id_card))
-
-            vinculos_preparados = _preparar_vinculos_painel_faces(
-                painel_faces_payload=painel_faces_payload,
-                id_empresa_proprietaria=id_emp,
-            )
-
-            _salvar_vinculos_painel_face_card(
-                id_card=id_card,
-                vinculos_preparados=vinculos_preparados,
-                id_usuario=id_usuario,
-                id_empresa_proprietaria=id_emp,
-            )
-
-            estado_operacional_depois = _listar_estado_atual_negociacao_card(int(id_card))
-
-            _sincronizar_tag_aprovacao_diretoria_card(
-                id_card=int(id_card),
-                id_kanban=int(id_kanban),
-                estados_atuais=estado_operacional_depois,
-                id_usuario=int(id_usuario),
-                id_empresa_proprietaria=int(id_emp),
-            )
-
-            houve_alteracao_operacional = (
-                _assinatura_estado_operacional(estado_operacional_antes)
-                != _assinatura_estado_operacional(estado_operacional_depois)
-            )
-
-            if houve_alteracao_operacional:
-                _registrar_negociacao_preco_card(
-                    id_card=id_card,
-                    id_kanban=id_kanban,
-                    id_fase_atual=id_fase_atual,
-                    status_card=row_upd.get("StatusCard") or card_atual.get("StatusCard"),
-                    id_empresa_relacionada=(
-                        int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
-                    ),
-                    vinculos_preparados=vinculos_preparados,
-                )
-
-            reservas_criadas = _criar_reservas_painel_faces_kanban(
-                id_card=int(id_card),
-                titulo_card=titulo,
-                id_empresa_relacionada=(
-                    int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
-                ),
-                painel_faces_payload=painel_faces_payload,
-                vinculos_preparados=vinculos_preparados,
-                id_usuario=int(id_usuario),
-                id_empresa_proprietaria=int(id_emp),
-            )
-
-        snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-
-        _registrar_log_card(
-            id_card=id_card,
-            id_kanban=id_kanban,
-            id_empresa_proprietaria=id_emp,
-            id_usuario_acao=id_usuario,
-            tipo_evento="CARD_ATUALIZADO",
-            observacao="Card atualizado pelo modal.",
-            tabela_origem=TABELA_CARD,
-            id_registro_origem=int(id_card),
-            payload_antes=snapshot_antes,
-            payload_depois=snapshot_depois,
-        )
-
-        db.session.commit()
-
-        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
-
-        detalhe = _obter_card_detalhe_payload(id_card)
-
-        _emitir_evento_kanban(
-            id_kanban,
-            "card_atualizado",
-            {
-                "id_card": id_card,
-                "card": detalhe.get("card"),
-                "tags": detalhe.get("tags", []),
-                "notas": detalhe.get("notas", []),
-                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
-            },
-        )
-
-        return jsonify(
-            {
-                "ok": True,
-                "msg": (
-                    f"Card atualizado com sucesso. {int(reservas_criadas)} reserva(s) criada(s)."
-                    if int(reservas_criadas or 0) > 0
-                    else "Card atualizado com sucesso."
-                ),
-                "reservas_criadas": int(reservas_criadas or 0),
-                "card": detalhe.get("card"),
-                "tags": detalhe.get("tags", []),
-                "notas": detalhe.get("notas", []),
-                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
-            }
-        )
-
-    except ValueError as exc:
-        db.session.rollback()
-        return jsonify({"ok": False, "msg": str(exc)}), 400
-
-    except Exception as exc:
-        db.session.rollback()
-        current_app.logger.exception("Erro ao atualizar card id_card=%s", id_card)
-        return jsonify({"ok": False, "msg": f"Erro ao atualizar card: {str(exc)}"}), 500
 
 
     
@@ -10058,6 +9490,8 @@ def _decimal_para_float_seguro(valor: Any) -> float | None:
 
 
 
+
+
 def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
     """Eu busco o histórico de negociação de preços do card já enriquecido e compatível com a tela de histórico."""
     sql = """
@@ -10247,7 +9681,7 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
 
 
 
-    
+
 
 def _montar_resumo_historico_precos(registros: list[dict]) -> dict:
     """Eu monto os KPIs da tela para ficar mais didática e rápida de ler."""
@@ -14425,3 +13859,756 @@ def api_kanban_ocupacao_calendario():
         }
 
     return jsonify({"ok": True, "cal": calendario})
+
+
+
+
+
+
+
+
+
+
+
+
+
+    TABELA_KANBAN = "[Kanban].[Silver].[DimKanban]"
+TABELA_KANBAN_FASE = "[Kanban].[Silver].[DimKanbanFase]"
+TABELA_CARD = "[Kanban].[Silver].[FatoKanbanCard]"
+TABELA_CARD_MOVIMENTO = "[Kanban].[Silver].[FatoKanbanCardMovimento]"
+TABELA_CARD_NOTA = "[Kanban].[Silver].[FatoKanbanCardNota]"
+TABELA_CARD_LOG = "[Kanban].[Silver].[FatoKanbanCardLog]"
+TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
+TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
+TABELA_TIPO_CLIENTE_DESCONTO = "[Kanban].[Silver].[DimKanbanTipoClienteDesconto]"
+MAPA_TIPO_CLIENTE_DESCONTO_PADRAO = {
+    1: "Cliente Direto",
+    2: "Agência",
+    3: "Planejador",
+}
+
+
+def _sql_select_tipo_cliente_desconto_card(alias_card: str = "c") -> str:
+    colunas: list[str] = []
+
+    for nome_coluna in ("BitClienteDireto", "BitAgencia", "BitPlanejador"):
+        if _coluna_existe(TABELA_CARD, nome_coluna):
+            colunas.append(f"{alias_card}.{nome_coluna} AS {nome_coluna}")
+        else:
+            colunas.append(f"CAST(0 AS bit) AS {nome_coluna}")
+
+    return ",\n            ".join(colunas)
+
+
+def _obter_tipos_cliente_desconto(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
+    chave = _chave_cache_json("kanban:dominio:tipo_cliente_desconto", incluir_inativos)
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return em_cache
+
+    resultado: list[dict[str, Any]] = []
+
+    if _objeto_existe(TABELA_TIPO_CLIENTE_DESCONTO):
+        where_ativo = "" if incluir_inativos else "WHERE ISNULL(BitAtivo, 1) = 1"
+        sql = text(f"""
+            SELECT
+                IDDimKanbanTipoClienteDesconto,
+                TipoCliente,
+                ISNULL(BitAtivo, 1) AS BitAtivo
+            FROM {TABELA_TIPO_CLIENTE_DESCONTO}
+            {where_ativo}
+            ORDER BY IDDimKanbanTipoClienteDesconto ASC;
+        """)
+        rows = db.session.execute(sql).mappings().all()
+
+        for row in rows:
+            try:
+                id_tipo = int(row.get("IDDimKanbanTipoClienteDesconto") or 0)
+            except Exception:
+                id_tipo = 0
+
+            if not id_tipo:
+                continue
+
+            nome_tipo = str(row.get("TipoCliente") or "").strip()
+            if not nome_tipo:
+                nome_tipo = MAPA_TIPO_CLIENTE_DESCONTO_PADRAO.get(id_tipo, f"Tipo {id_tipo}")
+
+            resultado.append(
+                {
+                    "IDDimKanbanTipoClienteDesconto": id_tipo,
+                    "TipoCliente": nome_tipo,
+                    "BitAtivo": int(row.get("BitAtivo") or 0),
+                }
+            )
+    else:
+        for id_tipo, nome_tipo in MAPA_TIPO_CLIENTE_DESCONTO_PADRAO.items():
+            resultado.append(
+                {
+                    "IDDimKanbanTipoClienteDesconto": int(id_tipo),
+                    "TipoCliente": nome_tipo,
+                    "BitAtivo": 1,
+                }
+            )
+
+    _cache_json_set(chave, resultado, TIMEOUT_CACHE_LONGO)
+    return resultado
+
+
+def _resolver_id_tipo_cliente_desconto_por_bits(card: Mapping[str, Any] | dict[str, Any] | None) -> int | None:
+    if not card:
+        return None
+
+    def _bit(nome_campo: str) -> int:
+        try:
+            return int(card.get(nome_campo) or 0)
+        except Exception:
+            return 0
+
+    if _bit("BitClienteDireto") == 1:
+        return 1
+    if _bit("BitAgencia") == 1:
+        return 2
+    if _bit("BitPlanejador") == 1:
+        return 3
+
+    return None
+
+
+def _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto: Any) -> dict[str, int]:
+    try:
+        id_tipo = int(id_tipo_cliente_desconto) if id_tipo_cliente_desconto not in (None, "", 0) else None
+    except Exception:
+        id_tipo = None
+
+    return {
+        "BitClienteDireto": 1 if id_tipo == 1 else 0,
+        "BitAgencia": 1 if id_tipo == 2 else 0,
+        "BitPlanejador": 1 if id_tipo == 3 else 0,
+    }
+
+
+def _aplicar_tipo_cliente_desconto_no_card_dict(card_dict: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(card_dict, dict):
+        return card_dict
+
+    id_tipo = _resolver_id_tipo_cliente_desconto_por_bits(card_dict)
+    mapa_tipos = {
+        int(item.get("IDDimKanbanTipoClienteDesconto") or 0): str(item.get("TipoCliente") or "").strip()
+        for item in _obter_tipos_cliente_desconto(incluir_inativos=True)
+        if int(item.get("IDDimKanbanTipoClienteDesconto") or 0) > 0
+    }
+
+    card_dict["IDDimKanbanTipoClienteDesconto"] = id_tipo
+    card_dict["TipoClienteDesconto"] = mapa_tipos.get(id_tipo, "")
+    return card_dict
+
+
+def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
+    sql_cards = text(f"""
+        SELECT
+            c.IDFatoKanbanCard,
+            c.IDDimKanban,
+            c.IDDimKanbanFaseAtual,
+            c.Titulo,
+            c.StatusCard,
+            c.CriadoEm,
+            c.AtualizadoEm,
+            c.IDEmpresaProprietaria,
+            {_sql_select_tipo_cliente_desconto_card('c')},
+            {_sql_select_empresa_relacionada_card('c')},
+            {_sql_select_usuario_relacionado_card('c')},
+            e.RazaoSocial AS EmpresaRazaoSocial,
+            e.CNPJ AS EmpresaCNPJ,
+            e.CNAE AS EmpresaCNAE,
+            cn.Classe AS EmpresaClasse,
+            cn.Setor AS EmpresaSetor
+        FROM {TABELA_CARD} c
+        {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+        WHERE c.IDDimKanban = :id_kanban
+          AND c.Ativo = 1
+          {_sql_filtro_status_card_visiveis('c')}
+          {_sql_filtro_cards_nao_concluidos_no_quadro('c')}
+        ORDER BY
+            CASE WHEN c.AtualizadoEm IS NULL THEN c.CriadoEm ELSE c.AtualizadoEm END DESC,
+            c.IDFatoKanbanCard DESC;
+    """)
+    rows = db.session.execute(sql_cards, {"id_kanban": id_kanban}).mappings().all()
+    cards = _rows_para_dicts(rows)
+    for card in cards:
+        _aplicar_tipo_cliente_desconto_no_card_dict(card)
+    return cards
+
+
+@kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
+@login_required
+@limiter.limit("120/minute")
+def api_card_criar(id_kanban: int):
+    etapa = "inicio"
+    novo_id = None
+
+    try:
+        print("\n" + "=" * 120)
+        print(f"[KANBAN][CRIAR_CARD] INICIO id_kanban={id_kanban}")
+        print(f"[KANBAN][CRIAR_CARD] method={request.method} path={request.path}")
+        print(f"[KANBAN][CRIAR_CARD] content_type={request.content_type}")
+        print(f"[KANBAN][CRIAR_CARD] is_json={request.is_json}")
+
+        etapa = "autenticacao"
+        id_usuario = _assert_login()
+        id_emp = _id_empresa_usuario_or_403()
+        _obter_kanban_autorizado(id_kanban)
+        print(f"[KANBAN][CRIAR_CARD] autenticacao_ok id_usuario={id_usuario} id_emp={id_emp}")
+
+        etapa = "payload"
+        payload = request.get_json(silent=True) or {}
+        print(f"[KANBAN][CRIAR_CARD] payload_bruto={payload}")
+
+        titulo = (payload.get("titulo") or "").strip()
+        descricao = payload.get("descricao")
+        id_fase = int(payload.get("id_fase") or 0)
+        id_empresa_relacionada = payload.get("id_empresa")
+        id_tipo_cliente_desconto = payload.get("id_tipo_cliente_desconto")
+
+        print(
+            "[KANBAN][CRIAR_CARD] payload_tratado "
+            f"titulo={titulo!r} "
+            f"descricao={descricao!r} "
+            f"id_fase={id_fase!r} "
+            f"id_empresa_relacionada={id_empresa_relacionada!r} "
+            f"id_tipo_cliente_desconto={id_tipo_cliente_desconto!r}"
+        )
+
+        etapa = "validacao_titulo"
+        if len(titulo) < 2:
+            print("[KANBAN][CRIAR_CARD] ERRO validacao_titulo: titulo invalido")
+            return jsonify({"ok": False, "msg": "Título inválido"}), 400
+
+        etapa = "validacao_fase_obrigatoria"
+        if not id_fase:
+            print("[KANBAN][CRIAR_CARD] ERRO validacao_fase_obrigatoria: fase ausente")
+            return jsonify({"ok": False, "msg": "Fase obrigatória"}), 400
+
+        etapa = "validacao_fase_kanban"
+        fase_valida = _validar_fase_do_kanban(id_kanban, id_fase)
+        print(f"[KANBAN][CRIAR_CARD] fase_valida={fase_valida}")
+        if not fase_valida:
+            print("[KANBAN][CRIAR_CARD] ERRO validacao_fase_kanban: fase invalida para o kanban")
+            return jsonify({"ok": False, "msg": "Fase inválida para este kanban"}), 400
+
+        etapa = "validacao_empresa_relacionada"
+        id_empresa_relacionada_int = None
+        if id_empresa_relacionada not in (None, ""):
+            try:
+                id_empresa_relacionada_int = int(id_empresa_relacionada)
+                print(f"[KANBAN][CRIAR_CARD] id_empresa_relacionada_int={id_empresa_relacionada_int}")
+            except Exception as exc:
+                print(f"[KANBAN][CRIAR_CARD] ERRO empresa invalida ao converter: {exc}")
+                return jsonify({"ok": False, "msg": "Empresa inválida"}), 400
+
+            sql_emp = text(f"""
+                SELECT 1
+                FROM {TABELA_EMPRESAS}
+                WHERE IDEmpresa = :id_empresa;
+            """)
+            empresa_existe = db.session.execute(
+                sql_emp,
+                {"id_empresa": id_empresa_relacionada_int},
+            ).scalar()
+
+            print(f"[KANBAN][CRIAR_CARD] empresa_existe={empresa_existe}")
+
+            if not empresa_existe:
+                print("[KANBAN][CRIAR_CARD] ERRO empresa nao encontrada")
+                return jsonify({"ok": False, "msg": "Empresa não encontrada"}), 400
+
+
+        etapa = "validacao_tipo_cliente_desconto"
+        id_tipo_cliente_desconto_int = None
+        if id_tipo_cliente_desconto not in (None, "", 0):
+            try:
+                id_tipo_cliente_desconto_int = int(id_tipo_cliente_desconto)
+            except Exception:
+                return jsonify({"ok": False, "msg": "Tipo de cliente inválido"}), 400
+
+            tipos_validos = {
+                int(item.get("IDDimKanbanTipoClienteDesconto") or 0)
+                for item in _obter_tipos_cliente_desconto()
+            }
+            if id_tipo_cliente_desconto_int not in tipos_validos:
+                return jsonify({"ok": False, "msg": "Tipo de cliente inválido"}), 400
+
+        mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto_int)
+
+        etapa = "descobrir_colunas_dinamicas"
+        nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
+
+        coluna_id_dim_usuarios_existe = _coluna_existe(TABELA_CARD, "IDDimUsuarios")
+        coluna_iddimkanbanorigem_existe = _coluna_existe(TABELA_CARD, "IDDimKanbanOrigem")
+
+        print(
+            "[KANBAN][CRIAR_CARD] colunas_dinamicas "
+            f"nome_coluna_empresa={nome_coluna_empresa!r} "
+            f"coluna_id_dim_usuarios_existe={coluna_id_dim_usuarios_existe} "
+            f"coluna_iddimkanbanorigem_existe={coluna_iddimkanbanorigem_existe}"
+        )
+
+        etapa = "montagem_insert"
+        print(f"[KANBAN][CRIAR_CARD] id_usuario_logado={id_usuario}")
+        print("[KANBAN][CRIAR_CARD] vou gravar id_usuario em IDVendedorUsuario e, se existir, também em IDDimUsuarios")
+
+        status_card_inicial = _obter_status_card_para_fase(id_fase)
+        id_status_card_inicial = _obter_id_status_card_por_codigo(status_card_inicial)
+
+        colunas = [
+            "IDDimKanban",
+            "IDDimKanbanFaseAtual",
+            "Titulo",
+            "Descricao",
+            "IDVendedorUsuario",
+            "StatusCard",
+            "CriadoEm",
+            "Ativo",
+            "IDEmpresaProprietaria",
+        ]
+        valores = [
+            ":id_kanban",
+            ":id_fase",
+            ":titulo",
+            ":descricao",
+            ":id_usuario",
+            ":status_card_inicial",
+            "GETDATE()",
+            "1",
+            ":id_emp",
+        ]
+        params = {
+            "id_kanban": id_kanban,
+            "id_fase": id_fase,
+            "titulo": titulo[:200],
+            "descricao": descricao,
+            "id_usuario": int(id_usuario),
+            "id_emp": id_emp,
+            "status_card_inicial": status_card_inicial,
+        }
+
+        if nome_coluna_empresa:
+            colunas.append(nome_coluna_empresa)
+            valores.append(":id_empresa_relacionada")
+            params["id_empresa_relacionada"] = id_empresa_relacionada_int
+
+        if _coluna_existe(TABELA_CARD, "BitClienteDireto"):
+            colunas.append("BitClienteDireto")
+            valores.append(":bit_cliente_direto")
+            params["bit_cliente_direto"] = int(mapa_bits_tipo_cliente["BitClienteDireto"])
+
+        if _coluna_existe(TABELA_CARD, "BitAgencia"):
+            colunas.append("BitAgencia")
+            valores.append(":bit_agencia")
+            params["bit_agencia"] = int(mapa_bits_tipo_cliente["BitAgencia"])
+
+        if _coluna_existe(TABELA_CARD, "BitPlanejador"):
+            colunas.append("BitPlanejador")
+            valores.append(":bit_planejador")
+            params["bit_planejador"] = int(mapa_bits_tipo_cliente["BitPlanejador"])
+
+        if coluna_id_dim_usuarios_existe:
+            colunas.append("IDDimUsuarios")
+            valores.append(":id_dim_usuarios")
+            params["id_dim_usuarios"] = int(id_usuario)
+
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_card_inicial is not None:
+            colunas.append("IDDimKanbanStatusCard")
+            valores.append(":id_status_card_inicial")
+            params["id_status_card_inicial"] = int(id_status_card_inicial)
+
+        if coluna_iddimkanbanorigem_existe:
+            colunas.append("IDDimKanbanOrigem")
+            valores.append("NULL")
+
+        sql_insert = f"""
+            INSERT INTO {TABELA_CARD}
+                ({', '.join(colunas)})
+            OUTPUT INSERTED.IDFatoKanbanCard
+            VALUES
+                ({', '.join(valores)});
+        """
+
+        print(f"[KANBAN][CRIAR_CARD] tabela_card={TABELA_CARD}")
+        print(f"[KANBAN][CRIAR_CARD] colunas_insert={colunas}")
+        print(f"[KANBAN][CRIAR_CARD] valores_insert={valores}")
+        print(f"[KANBAN][CRIAR_CARD] params_insert={params}")
+        print(f"[KANBAN][CRIAR_CARD] sql_insert=\n{sql_insert}")
+
+        etapa = "executar_insert"
+        novo_id = db.session.execute(text(sql_insert), params).scalar()
+        print(f"[KANBAN][CRIAR_CARD] novo_id={novo_id}")
+
+        if not novo_id:
+            raise RuntimeError("O INSERT não retornou IDFatoKanbanCard.")
+
+        etapa = "aplicar_tag_em_atendimento"
+        _garantir_tag_em_atendimento_no_card(
+            id_card=int(novo_id),
+            id_kanban=int(id_kanban),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=id_emp,
+            falhar_se_nao_existir=True,
+        )
+
+        etapa = "snapshot_depois"
+        snapshot_depois = _obter_snapshot_card_log(int(novo_id), incluir_inativo=True)
+        print(f"[KANBAN][CRIAR_CARD] snapshot_depois={snapshot_depois}")
+
+        etapa = "registrar_log_criacao"
+        _registrar_log_card(
+            id_card=int(novo_id),
+            acao="CARD_CRIADO",
+            detalhes="Card criado via quadro Kanban",
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=id_emp,
+            antes=None,
+            depois=snapshot_depois,
+        )
+
+        etapa = "registrar_historico_status"
+        _registrar_status_historico_card(
+            id_card=int(novo_id),
+            id_fase=int(id_fase),
+            id_status_card=id_status_card_inicial,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=id_emp,
+        )
+
+        etapa = "db_commit"
+        db.session.commit()
+        print(f"[KANBAN][CRIAR_CARD] COMMIT OK novo_id={novo_id}")
+
+        etapa = "invalidar_cache"
+        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=int(novo_id))
+        print(f"[KANBAN][CRIAR_CARD] cache invalidado id_emp={id_emp} id_kanban={id_kanban} id_card={novo_id}")
+
+        etapa = "detalhe"
+        detalhe = _obter_card_detalhe_payload(int(novo_id))
+        print(f"[KANBAN][CRIAR_CARD] detalhe_card carregado ok id_card={novo_id}")
+
+        etapa = "emitir_evento_socket"
+        _emitir_evento_kanban(
+            id_kanban,
+            "card_criado",
+            {
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            },
+        )
+        print(f"[KANBAN][CRIAR_CARD] evento socket emitido id_kanban={id_kanban}")
+
+        print(f"[KANBAN][CRIAR_CARD] FIM OK novo_id={novo_id}")
+        print("=" * 120 + "\n")
+
+        return jsonify(
+            {
+                "ok": True,
+                "msg": "Card criado com sucesso.",
+                "id": int(novo_id),
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            }
+        ), 201
+
+    except ValueError as exc:
+        db.session.rollback()
+        print(f"[KANBAN][CRIAR_CARD] ROLLBACK por ValueError etapa={etapa} erro={exc}")
+        current_app.logger.exception("Erro de validação ao criar card. etapa=%s", etapa)
+        return jsonify({"ok": False, "msg": str(exc)}), 400
+
+    except Exception as exc:
+        db.session.rollback()
+        print(f"[KANBAN][CRIAR_CARD] ROLLBACK por Exception etapa={etapa} erro={exc}")
+        current_app.logger.exception("Erro ao criar card no kanban %s. etapa=%s", id_kanban, etapa)
+        return jsonify({"ok": False, "msg": f"Erro ao criar card: {str(exc)}"}), 500
+
+
+
+
+
+
+@kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
+@login_required
+@limiter.limit("120/minute")
+def api_card_atualizar(id_card: int):
+    id_usuario = _assert_login()
+    id_emp = _id_empresa_usuario_or_403()
+
+    try:
+        card_atual = _obter_card_autorizado(id_card)
+        if not card_atual:
+            return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
+
+        id_kanban = int(card_atual.get("IDDimKanban") or 0)
+        id_fase_atual = int(card_atual.get("IDDimKanbanFaseAtual") or 0)
+
+        payload = request.get_json(silent=True) or {}
+
+        titulo = (payload.get("titulo") or "").strip()
+        descricao = payload.get("descricao")
+        id_empresa_relacionada = payload.get("id_empresa")
+        id_tipo_cliente_desconto = payload.get("id_tipo_cliente_desconto") if "id_tipo_cliente_desconto" in payload else None
+        tipo_cliente_desconto_informado = "id_tipo_cliente_desconto" in payload
+        versao_concorrencia = payload.get("versao_concorrencia")
+        painel_faces_payload = payload.get("painel_faces")
+
+        if not titulo:
+            return jsonify({"ok": False, "msg": "Título do card é obrigatório."}), 400
+
+        has_versao = _card_tem_versao_concorrencia()
+        versao_concorrencia_bytes = None
+
+        if has_versao:
+            versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
+            if not versao_concorrencia_bytes:
+                detalhe_atual = _obter_card_detalhe_payload(id_card)
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "msg": "Versão de concorrência inválida ou ausente.",
+                            "card_atual": detalhe_atual.get("card"),
+                        }
+                    ),
+                    409,
+                )
+
+
+        id_tipo_cliente_desconto_int = None
+        mapa_bits_tipo_cliente = None
+        if tipo_cliente_desconto_informado:
+            if id_tipo_cliente_desconto not in (None, "", 0):
+                try:
+                    id_tipo_cliente_desconto_int = int(id_tipo_cliente_desconto)
+                except Exception:
+                    return jsonify({"ok": False, "msg": "Tipo de cliente inválido."}), 400
+
+                tipos_validos = {
+                    int(item.get("IDDimKanbanTipoClienteDesconto") or 0)
+                    for item in _obter_tipos_cliente_desconto()
+                }
+                if id_tipo_cliente_desconto_int not in tipos_validos:
+                    return jsonify({"ok": False, "msg": "Tipo de cliente inválido."}), 400
+
+            mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto_int)
+
+        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+
+        campos_update: list[str] = []
+        params_update: dict[str, Any] = {
+            "id_card": int(id_card),
+            "titulo": titulo[:300],
+            "descricao": descricao,
+        }
+
+        if _coluna_existe(TABELA_CARD, "Titulo"):
+            campos_update.append("Titulo = :titulo")
+
+        if _coluna_existe(TABELA_CARD, "Descricao"):
+            campos_update.append("Descricao = :descricao")
+
+        nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
+        if nome_coluna_empresa:
+            campos_update.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
+            params_update["id_empresa_relacionada"] = (
+                int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+            )
+
+        if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
+            campos_update.append("AtualizadoEm = GETDATE()")
+
+        if tipo_cliente_desconto_informado and mapa_bits_tipo_cliente is not None:
+            if _coluna_existe(TABELA_CARD, "BitClienteDireto"):
+                campos_update.append("BitClienteDireto = :bit_cliente_direto")
+                params_update["bit_cliente_direto"] = int(mapa_bits_tipo_cliente["BitClienteDireto"])
+
+            if _coluna_existe(TABELA_CARD, "BitAgencia"):
+                campos_update.append("BitAgencia = :bit_agencia")
+                params_update["bit_agencia"] = int(mapa_bits_tipo_cliente["BitAgencia"])
+
+            if _coluna_existe(TABELA_CARD, "BitPlanejador"):
+                campos_update.append("BitPlanejador = :bit_planejador")
+                params_update["bit_planejador"] = int(mapa_bits_tipo_cliente["BitPlanejador"])
+
+
+        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+
+        if has_versao:
+            params_update["versao_concorrencia"] = versao_concorrencia_bytes
+
+        if not campos_update:
+            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização no card."}), 400
+
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+            SET {', '.join(campos_update)}
+            OUTPUT
+                INSERTED.IDFatoKanbanCard,
+                INSERTED.IDDimKanban,
+                INSERTED.IDDimKanbanFaseAtual,
+                INSERTED.Titulo,
+                INSERTED.Descricao,
+                INSERTED.StatusCard,
+                INSERTED.IDEmpresaProprietaria
+            WHERE IDFatoKanbanCard = :id_card
+              AND Ativo = 1{where_versao};
+        """)
+
+        row_upd = db.session.execute(sql_upd, params_update).mappings().first()
+
+        if not row_upd:
+            detalhe_atual = _obter_card_detalhe_payload(id_card)
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "msg": "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.",
+                        "card_atual": detalhe_atual.get("card"),
+                    }
+                ),
+                409,
+            )
+
+        vinculos_preparados: list[dict[str, Any]] = []
+        reservas_criadas = 0
+
+        if isinstance(painel_faces_payload, list):
+
+            def _assinatura_estado_operacional(estados: list[dict[str, Any]]) -> tuple:
+                def _n_int(valor: Any) -> int | None:
+                    if valor in (None, ""):
+                        return None
+                    try:
+                        return int(valor)
+                    except Exception:
+                        return None
+
+                def _n_dec(valor: Any) -> str | None:
+                    dec = _valor_decimal(valor)
+                    return None if dec is None else format(dec.quantize(Decimal("0.0001")), "f")
+
+                def _n_data(valor: Any) -> str | None:
+                    data = _normalizar_data_reserva_kanban(valor)
+                    return None if data is None else data.isoformat()
+
+                itens_norm = []
+                for item in estados or []:
+                    itens_norm.append(
+                        (
+                            _n_int(item.get("IDDimPaineisEuromidia")),
+                            _n_int(item.get("IDDimFacesPaineis")),
+                            _n_int(item.get("IDDimTabelaPrecosEuromidia")),
+                            _n_dec(item.get("CustoTabela")),
+                            _n_int(item.get("AnoCusto")),
+                            _n_dec(item.get("ValorTabela")),
+                            str(item.get("PeriodoExibicao") or "").strip(),
+                            _n_int(item.get("ExibicoesDia")),
+                            _n_dec(item.get("ValorVendaFinal")),
+                            _n_dec(item.get("MargemValor")),
+                            _n_dec(item.get("MargemPercentual")),
+                            _n_data(item.get("PeriodoInicio")),
+                            _n_data(item.get("PeriodoTermino")),
+                        )
+                    )
+                return tuple(sorted(itens_norm))
+
+            estado_antes_operacional = _listar_estado_atual_negociacao_card(id_card)
+            assinatura_antes_operacional = _assinatura_estado_operacional(estado_antes_operacional)
+
+            vinculos_preparados = _preparar_vinculos_painel_faces(painel_faces_payload, id_emp)
+            _salvar_vinculos_painel_face_card(
+                id_card=id_card,
+                vinculos_preparados=vinculos_preparados,
+                id_empresa_proprietaria=id_emp,
+            )
+
+            try:
+                reservas_criadas = _criar_reservas_painel_faces_kanban(
+                    id_card=id_card,
+                    vinculos_preparados=vinculos_preparados,
+                    id_empresa_proprietaria=id_emp,
+                )
+            except ValueError:
+                raise
+            except Exception as exc:
+                current_app.logger.exception(
+                    "Erro ao criar reservas do card %s após salvar vínculos", id_card
+                )
+                raise RuntimeError(f"Falha ao criar reservas dos painéis/faces: {str(exc)}") from exc
+
+            estado_depois_operacional = _listar_estado_atual_negociacao_card(id_card)
+            assinatura_depois_operacional = _assinatura_estado_operacional(estado_depois_operacional)
+
+            if assinatura_depois_operacional != assinatura_antes_operacional:
+                _registrar_negociacao_preco_card(
+                    id_card=id_card,
+                    id_kanban=id_kanban,
+                    id_fase_atual=id_fase_atual,
+                    status_card=row_upd.get("StatusCard"),
+                    id_empresa_relacionada=params_update.get("id_empresa_relacionada"),
+                    vinculos_preparados=vinculos_preparados,
+                    observacoes_proposta=descricao,
+                )
+
+        snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+        _registrar_log_card(
+            id_card=id_card,
+            acao="CARD_ATUALIZADO",
+            detalhes="Card atualizado via quadro Kanban",
+            id_usuario=id_usuario,
+            id_empresa_proprietaria=id_emp,
+            antes=snapshot_antes,
+            depois=snapshot_depois,
+        )
+
+        db.session.commit()
+
+        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+
+        detalhe = _obter_card_detalhe_payload(id_card)
+        _emitir_evento_kanban(
+            id_kanban,
+            "card_atualizado",
+            {
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            },
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "msg": (
+                    f"Card atualizado com sucesso. {int(reservas_criadas)} reserva(s) criada(s)."
+                    if int(reservas_criadas or 0) > 0
+                    else "Card atualizado com sucesso."
+                ),
+                "reservas_criadas": int(reservas_criadas or 0),
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            }
+        )
+
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "msg": str(exc)}), 400
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao atualizar card id_card=%s", id_card)
+        return jsonify({"ok": False, "msg": f"Erro ao atualizar card: {str(exc)}"}), 500

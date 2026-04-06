@@ -1,10 +1,12 @@
 from flask_sqlalchemy import SQLAlchemy
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,abort,send_file,session
+#from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,abort,send_file,session
+from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify, abort, send_file, session
 from ..extensions import db,limiter
 from ..models.euromidia_models import (DimPaineisEuromidia,DimFacesPaineis,Vendedores
                                        ,FatoControleContratosEuromidia
                                        ,FatoControleContratosItensEuromidia,DimEmpresas,DimCustoMensalPainel,
-                                       DimMargemPaineisEuromidia,FatoOcupacaoPaineisEuromidia,DimCnaes,DimClassificacacaoClientes,DimCustoPainel)
+                                       DimMargemPaineisEuromidia,FatoOcupacaoPaineisEuromidia,DimCnaes,
+                                       DimClassificacacaoClientes,DimCustoPainel,DimCheckingHistorico)
 
 from ..autenticacao.autenticacao_views import requer_permissao
 from ..models.autenticacao import (DimUsuarios,DimPerfilUsuario, DimPermissoes, PermissoesUsuario,)
@@ -27,6 +29,15 @@ import math
 from flask_login import current_user
 import threading
 import os
+
+    
+    
+
+from PIL import Image, ImageOps
+from pathlib import Path
+from werkzeug.utils import secure_filename
+import uuid
+
 
 
 
@@ -13831,3 +13842,965 @@ def ocupacao_alterar_status(id_ocupacao: int):
 
     db.session.commit()
     return redirect(url_for("Paineis.ocupacao_detalhe", id_ocupacao=id_ocupacao))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _localizar_arquivo_imagem(pasta: Path) -> Path:
+    extensoes = ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG")
+
+    arquivos = []
+    for ext in extensoes:
+        arquivos.extend(pasta.glob(ext))
+
+    if not arquivos:
+        raise FileNotFoundError(f"Nenhuma imagem encontrada em: {pasta}")
+
+    arquivos = [arq for arq in arquivos if arq.is_file()]
+    if not arquivos:
+        raise FileNotFoundError(f"Nenhum arquivo de imagem válido encontrado em: {pasta}")
+
+    return sorted(arquivos)[0]
+
+
+
+
+
+
+
+def _normalizar_texto_checking(valor) -> str:
+    try:
+        return str(valor or "").strip()
+    except Exception:
+        return ""
+
+
+def _somente_digitos(valor) -> str:
+    return "".join(ch for ch in _normalizar_texto_checking(valor) if ch.isdigit())
+
+
+def _garantir_pasta(caminho: Path) -> None:
+    caminho.mkdir(parents=True, exist_ok=True)
+
+
+
+
+
+def _obter_pasta_base_checking() -> Path:
+    """Eu resolvo a pasta raiz do checking usando config quando existir e um padrão seguro quando não existir."""
+    candidatos = [
+        current_app.config.get("PASTA_BASE_CHECKING"),
+        current_app.config.get("CHECKING_PASTA_BASE"),
+        current_app.config.get("DIRETORIO_BASE_CHECKING"),
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/pontos",
+    ]
+
+    for candidato in candidatos:
+        texto = str(candidato or "").strip()
+        if texto:
+            return Path(texto)
+
+    raise RuntimeError("Não foi possível resolver a pasta base do checking.")
+
+
+def _normalizar_extensao_arquivo(nome_arquivo: str) -> str:
+    """Eu extraio a extensão do arquivo e devolvo sempre em minúsculo."""
+    nome_arquivo = str(nome_arquivo or "").strip()
+    if "." not in nome_arquivo:
+        return ".jpg"
+    return "." + nome_arquivo.rsplit(".", 1)[1].lower()
+
+
+def _localizar_fundo_checking(cod_ponto: str, cod_face: str) -> Path:
+    """Eu localizo o fundo oficial da face procurando primeiro na pasta fundo e depois na pasta da face."""
+    pasta_base = _obter_pasta_base_checking()
+    pasta_face = pasta_base / str(cod_ponto) / str(cod_face)
+
+    if not pasta_face.exists():
+        raise FileNotFoundError(f"Pasta da face não encontrada: {pasta_face}")
+
+    pasta_fundo = pasta_face / "fundo"
+    if pasta_fundo.exists() and pasta_fundo.is_dir():
+        return _localizar_arquivo_imagem(pasta_fundo)
+
+    return _localizar_arquivo_imagem(pasta_face)
+
+
+
+def _salvar_upload_original_checking(
+    *,
+    arquivo,
+    pasta_destino: Path,
+    id_empresa: int,
+    cod_face: str,
+    data_checking: date,
+) -> tuple[str, Path]:
+    """
+    Eu salvo a imagem importada dentro da pasta da empresa.
+
+    Regra:
+    - não crio pasta uploads
+    - salvo em /pontos/<codponto>/<codface>/<IDEmpresa>/
+    - o nome salvo fica no padrão:
+      cod_face_data_idempresa_upload.ext
+    """
+
+    nome_original = _normalizar_texto_checking(getattr(arquivo, "filename", ""))
+    nome_seguro = secure_filename(nome_original) if nome_original else ""
+    extensao = Path(nome_seguro).suffix.lower()
+
+    if not extensao:
+        extensao = ".jpg"
+
+    nome_base = f"{cod_face}_{data_checking.strftime('%Y%m%d')}_{int(id_empresa)}_upload"
+    caminho_saida = pasta_destino / f"{nome_base}{extensao}"
+
+    contador = 1
+    while caminho_saida.exists():
+        caminho_saida = pasta_destino / f"{nome_base}_{contador:02d}{extensao}"
+        contador += 1
+
+    arquivo.stream.seek(0)
+    arquivo.save(caminho_saida)
+
+    return nome_original, caminho_saida
+
+
+
+def _montar_mockup_checking(
+    *,
+    caminho_fundo: Path,
+    caminho_arte: Path,
+    caminho_saida: Path,
+) -> None:
+    """Eu monto o mockup centralizando a arte sobre o fundo com redimensionamento proporcional."""
+    fundo = Image.open(caminho_fundo).convert("RGBA")
+    arte = Image.open(caminho_arte).convert("RGBA")
+
+    largura_fundo, altura_fundo = fundo.size
+
+    margem_lateral = int(largura_fundo * 0.08)
+    margem_superior = int(altura_fundo * 0.08)
+
+    largura_util = max(1, largura_fundo - (margem_lateral * 2))
+    altura_util = max(1, altura_fundo - (margem_superior * 2))
+
+    arte_ajustada = ImageOps.contain(arte, (largura_util, altura_util))
+
+    posicao_x = int((largura_fundo - arte_ajustada.width) / 2)
+    posicao_y = int((altura_fundo - arte_ajustada.height) / 2)
+
+    composicao = fundo.copy()
+    composicao.paste(arte_ajustada, (posicao_x, posicao_y), arte_ajustada)
+
+    _garantir_pasta(caminho_saida.parent)
+    composicao.convert("RGB").save(caminho_saida, quality=95)
+
+
+def _buscar_razao_social_empresa(id_empresa: int | None) -> str:
+    """Eu busco a razão social da empresa para gravar junto com o checking."""
+    if not id_empresa:
+        return ""
+
+    sql = text("""
+        SELECT TOP (1)
+            RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(RazaoSocial, NomeFantasia, ''))), '')
+        FROM [Integracao].[Silver].[DimEmpresas]
+        WHERE IDEmpresa = :id_empresa
+    """)
+
+    row = db.session.execute(sql, {"id_empresa": id_empresa}).mappings().first()
+    if not row:
+        return ""
+
+    return _normalizar_texto_checking(row["RazaoSocial"])
+
+
+def _processar_upload_checking(
+    *,
+    id_empresa: int | None,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+    data_checking: date,
+    arquivo,
+    cnpj_digitado: str | None = None,
+    observacao: str | None = None,
+):
+    cod_ponto_txt = _somente_digitos(cod_ponto)
+    cod_face_txt = _normalizar_texto_checking(cod_face).upper()
+    observacao_txt = _normalizar_texto_checking(observacao) or None
+    cnpj_txt = _somente_digitos(cnpj_digitado) or None
+
+    if not cod_ponto_txt:
+        raise ValueError("CodPonto não informado.")
+
+    if not cod_face_txt:
+        raise ValueError("CodFace não informado.")
+
+    if not id_empresa:
+        raise ValueError("Empresa não informada.")
+
+    if not id_fato_controle_contratos:
+        raise ValueError("Contrato não informado.")
+
+    cod_ponto_int = int(cod_ponto_txt)
+    id_empresa_int = int(id_empresa)
+
+    pasta_face, caminho_imagem_painel, caminho_fundo = _buscar_paths_mockup(
+        cod_ponto_int,
+        cod_face_txt,
+    )
+
+    pasta_empresa = pasta_face / str(id_empresa_int)
+    _garantir_pasta(pasta_empresa)
+
+    nome_original_cliente, caminho_imagem_upload = _salvar_upload_original_checking(
+        arquivo=arquivo,
+        pasta_destino=pasta_empresa,
+        id_empresa=id_empresa_int,
+        cod_face=cod_face_txt,
+        data_checking=data_checking,
+    )
+
+    nome_base_gerado = f"{cod_face_txt}_{data_checking.strftime('%Y%m%d')}_gerado_{id_empresa_int}"
+    caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}.jpg"
+
+    contador = 1
+    while caminho_imagem_gerada.exists():
+        caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}_{contador:02d}.jpg"
+        contador += 1
+
+    _gerar_mockup_checking(
+        caminho_fundo=caminho_fundo,
+        caminho_imagem_upload=caminho_imagem_upload,
+        caminho_saida=caminho_imagem_gerada,
+    )
+
+    razao_social = None
+    if id_empresa:
+        sql_empresa = text("""
+            SELECT TOP (1)
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), ''),
+                RazaoSocial = NULLIF(LTRIM(RTRIM(CAST(COALESCE(RazaoSocial, NomeFantasia, '') AS nvarchar(200)))), '')
+            FROM [Integracao].[Silver].[DimEmpresas]
+            WHERE IDEmpresa = :id_empresa
+        """)
+        row_empresa = db.session.execute(
+            sql_empresa,
+            {"id_empresa": id_empresa_int}
+        ).mappings().first()
+
+        if row_empresa:
+            if not cnpj_txt:
+                cnpj_txt = _somente_digitos(row_empresa["CNPJ"]) or None
+            razao_social = _normalizar_texto_checking(row_empresa["RazaoSocial"]) or None
+
+    tipo_painel = None
+    tipo_face = None
+
+    try:
+        row_face = (
+            db.session.query(DimFacesPaineis.TipoPainel)
+            .filter(
+                DimFacesPaineis.CodPonto == cod_ponto_int,
+                DimFacesPaineis.CodFace == cod_face_txt,
+            )
+            .first()
+        )
+
+        if row_face:
+            tipo_painel = _normalizar_texto_checking(row_face[0]) or None
+    except Exception:
+        tipo_painel = None
+
+    id_usuario_criacao = None
+    if current_user.is_authenticated:
+        try:
+            id_usuario_criacao = int(current_user.get_id())
+        except Exception:
+            id_usuario_criacao = None
+
+    checking = DimCheckingHistorico()
+    checking.DataAtualizacao = datetime.now()
+    checking.DataChecking = data_checking
+    checking.IDEmpresa = id_empresa_int
+    checking.CNPJ = cnpj_txt
+    checking.RazaoSocial = razao_social
+    checking.IDFatoControleContratosEuromidia = int(id_fato_controle_contratos)
+    checking.CodPonto = cod_ponto_int
+    checking.CodFace = cod_face_txt
+    checking.TipoPainel = tipo_painel
+    checking.TipoFace = tipo_face
+    checking.NomeArquivoOriginal = nome_original_cliente or None
+    checking.NomeArquivoSalvo = caminho_imagem_upload.name
+    checking.CaminhoImagemPainel = str(caminho_imagem_painel)
+    checking.CaminhoImagemFundo = str(caminho_fundo)
+    checking.CaminhoImagemUpload = str(caminho_imagem_upload)
+    checking.CaminhoImagemGerada = str(caminho_imagem_gerada)
+    checking.UrlImagemUpload = None
+    checking.UrlImagemGerada = None
+    checking.BitChekin = False
+    checking.DataConfirmacao = None
+    checking.IDUsuarioCriacao = id_usuario_criacao
+    checking.IDUsuarioConfirmacao = None
+    checking.Observacao = observacao_txt
+
+    db.session.add(checking)
+    db.session.flush()
+
+    checking.UrlImagemGerada = url_for(
+        "Paineis.checking_arquivo",
+        id_checking=int(checking.IDDimCheckingHistorico),
+    )
+
+    db.session.commit()
+    db.session.refresh(checking)
+
+    return checking
+
+
+
+def _buscar_dados_select_checking(id_empresa: int | None = None):
+    sql_empresas = text("""
+        SELECT
+            TOP (500)
+            e.IDEmpresa,
+            CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(30)))), ''),
+            RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, e.NomeFantasia, ''))), ''),
+            NomeFantasia = NULLIF(LTRIM(RTRIM(COALESCE(e.NomeFantasia, ''))), '')
+        FROM [Integracao].[Silver].[DimEmpresas] e
+        WHERE NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(30)))), '') IS NOT NULL
+        ORDER BY
+            NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, e.NomeFantasia, ''))), ''),
+            NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(30)))), '')
+    """)
+
+    sql_pontos = text("""
+        SELECT
+            TOP (1000)
+            p.CodPonto,
+            TipoPainel = NULLIF(LTRIM(RTRIM(COALESCE(p.Tipo, ''))), '')
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+        WHERE p.CodPonto IS NOT NULL
+        ORDER BY p.CodPonto ASC
+    """)
+
+    sql_faces = text("""
+        SELECT
+            TOP (2000)
+            f.IDDimFacesPaineis,
+            f.CodPonto,
+            f.CodFace,
+            TipoFace = NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, ''))), ''),
+            TipoPainel = NULLIF(LTRIM(RTRIM(COALESCE(p.Tipo, ''))), '')
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+        WHERE f.CodPonto IS NOT NULL
+          AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+        ORDER BY f.CodPonto ASC, f.CodFace ASC
+    """)
+
+    empresas_rows = db.session.execute(sql_empresas).mappings().all()
+    pontos_rows = db.session.execute(sql_pontos).mappings().all()
+    faces_rows = db.session.execute(sql_faces).mappings().all()
+
+    empresas = []
+    for row in empresas_rows:
+        id_empresa_linha = row["IDEmpresa"]
+        cnpj = _somente_digitos(row["CNPJ"])
+        razao = _normalizar_texto_checking(row["RazaoSocial"])
+        nome_fantasia = _normalizar_texto_checking(row["NomeFantasia"])
+
+        nome_exibicao = razao or nome_fantasia or "Sem nome cadastrado"
+
+        empresas.append({
+            "IDEmpresa": id_empresa_linha,
+            "CNPJ": cnpj,
+            "RazaoSocial": razao,
+            "NomeFantasia": nome_fantasia,
+            "texto": f"{cnpj} | {nome_exibicao}",
+        })
+
+    pontos = []
+    for row in pontos_rows:
+        cod_ponto = row["CodPonto"]
+        tipo_painel = _normalizar_texto_checking(row["TipoPainel"]) or "Sem tipo"
+
+        pontos.append({
+            "CodPonto": cod_ponto,
+            "TipoPainel": tipo_painel,
+            "texto": f"{cod_ponto} | {tipo_painel}",
+        })
+
+    faces = []
+    for row in faces_rows:
+        cod_ponto = row["CodPonto"]
+        cod_face = _normalizar_texto_checking(row["CodFace"])
+        tipo_face = _normalizar_texto_checking(row["TipoFace"]) or _normalizar_texto_checking(row["TipoPainel"]) or "Sem tipo"
+
+        faces.append({
+            "IDDimFacesPaineis": row["IDDimFacesPaineis"],
+            "CodPonto": cod_ponto,
+            "CodFace": cod_face,
+            "TipoFace": tipo_face,
+            "TipoPainel": _normalizar_texto_checking(row["TipoPainel"]),
+            "texto_face": f"{cod_face} | {tipo_face}",
+        })
+
+    return empresas, [], pontos, faces
+
+
+
+
+
+
+@paineis_bp.route("/checking/empresas/buscar", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checking_empresas_buscar():
+    q = _normalizar_texto_checking(request.args.get("q"))
+    q_digitos = _somente_digitos(q)
+
+    if not q:
+        return jsonify([])
+
+    parametros = {
+        "q": q,
+        "q_like": f"%{q}%",
+        "q_digitos": q_digitos,
+        "q_digitos_prefixo": f"{q_digitos}%",
+    }
+
+    if q_digitos:
+        sql = text("""
+            SELECT TOP (20)
+                e.IDEmpresa,
+                e.CNPJ,
+                e.RazaoSocial,
+                e.NomeFantasia
+            FROM [Integracao].[Silver].[DimEmpresas] e
+            WHERE
+                (
+                    e.CNPJ = :q_digitos
+                    OR e.CNPJ LIKE :q_digitos_prefixo
+                )
+                OR
+                (
+                    e.RazaoSocial LIKE :q_like
+                    OR e.NomeFantasia LIKE :q_like
+                )
+            ORDER BY
+                CASE
+                    WHEN e.CNPJ = :q_digitos THEN 0
+                    WHEN e.CNPJ LIKE :q_digitos_prefixo THEN 1
+                    WHEN e.RazaoSocial = :q THEN 2
+                    WHEN e.NomeFantasia = :q THEN 3
+                    ELSE 4
+                END,
+                e.RazaoSocial,
+                e.NomeFantasia,
+                e.CNPJ
+        """)
+    else:
+        sql = text("""
+            SELECT TOP (20)
+                e.IDEmpresa,
+                e.CNPJ,
+                e.RazaoSocial,
+                e.NomeFantasia
+            FROM [Integracao].[Silver].[DimEmpresas] e
+            WHERE
+                e.RazaoSocial LIKE :q_like
+                OR e.NomeFantasia LIKE :q_like
+            ORDER BY
+                CASE
+                    WHEN e.RazaoSocial = :q THEN 0
+                    WHEN e.NomeFantasia = :q THEN 1
+                    ELSE 2
+                END,
+                e.RazaoSocial,
+                e.NomeFantasia,
+                e.CNPJ
+        """)
+
+    rows = db.session.execute(sql, parametros).mappings().all()
+
+    retorno = []
+
+    for row in rows:
+        id_empresa = row["IDEmpresa"]
+        cnpj = _normalizar_texto_checking(row["CNPJ"])
+        razao = _normalizar_texto_checking(row["RazaoSocial"])
+        nome_fantasia = _normalizar_texto_checking(row["NomeFantasia"])
+
+        nome_exibicao = razao or nome_fantasia or "Sem nome cadastrado"
+
+        retorno.append({
+            "id": int(id_empresa),
+            "texto": f"{cnpj} | {nome_exibicao}",
+        })
+
+    return jsonify(retorno)
+
+
+def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path, Path]:
+    pasta_raiz = Path("/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/pontos")
+    pasta_ponto = pasta_raiz / str(cod_ponto)
+    pasta_face = pasta_ponto / str(cod_face)
+    pasta_fundo = pasta_ponto / "fundo"
+
+    if not pasta_ponto.exists():
+        raise FileNotFoundError(f"Pasta do ponto não encontrada: {pasta_ponto}")
+
+    if not pasta_face.exists():
+        raise FileNotFoundError(f"Pasta da face não encontrada: {pasta_face}")
+
+    if not pasta_fundo.exists():
+        raise FileNotFoundError(f"Pasta do fundo não encontrada: {pasta_fundo}")
+
+    caminho_imagem_face = _localizar_arquivo_imagem(pasta_face)
+    caminho_fundo = _localizar_arquivo_imagem(pasta_fundo)
+
+    return pasta_face, caminho_imagem_face, caminho_fundo
+
+
+
+def _gerar_mockup_checking(
+    caminho_fundo: Path,
+    caminho_imagem_upload: Path,
+    caminho_saida: Path,
+) -> None:
+    """
+    Eu gero o mockup final colocando a arte enviada em cima do fundo padrão.
+
+    Lógica:
+    - abro a imagem de fundo
+    - abro a imagem enviada pelo usuário
+    - ajusto a imagem exatamente na área útil definida
+    - colo a imagem ajustada sobre o fundo
+    - salvo o resultado final
+    """
+
+    fundo = Image.open(caminho_fundo).convert("RGB")
+    imagem = Image.open(caminho_imagem_upload).convert("RGB")
+
+    x1 = 430
+    y1 = 35
+    x2 = 1230
+    y2 = 605
+
+    largura_area = x2 - x1
+    altura_area = y2 - y1
+
+    imagem_ajustada = ImageOps.fit(
+        imagem,
+        (largura_area, altura_area),
+        method=Image.Resampling.LANCZOS,
+        centering=(0.5, 0.5),
+    )
+
+    fundo.paste(imagem_ajustada, (x1, y1))
+
+    _garantir_pasta(caminho_saida.parent)
+    fundo.save(caminho_saida, quality=95)
+
+
+
+
+@paineis_bp.route("/checking/novo", methods=["GET", "POST"])
+@login_required
+@limiter.limit("25 per minute", methods=["POST"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checking_novo():
+    extensoes_permitidas = current_app.config["EXTENSOES_PERMITIDAS_CHECKING"]
+    largura_maxima = current_app.config["LARGURA_MAXIMA_IMAGEM"]
+    altura_maxima = current_app.config["ALTURA_MAXIMA_IMAGEM"]
+
+    empresas = []
+    contratos = []
+    pontos = []
+    faces = []
+
+    if request.method == "GET":
+        empresas, contratos, pontos, faces = _buscar_dados_select_checking(id_empresa=None)
+
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    id_empresa_txt = _normalizar_texto_checking(request.form.get("id_empresa"))
+
+    try:
+        id_empresa = int(id_empresa_txt)
+    except Exception:
+        flash("Selecione uma empresa válida.", "warning")
+        empresas, contratos, pontos, faces = _buscar_dados_select_checking(id_empresa=None)
+
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    empresas, contratos, pontos, faces = _buscar_dados_select_checking(id_empresa=id_empresa)
+
+    arquivo = request.files.get("imagem")
+    if not arquivo or not arquivo.filename:
+        flash("Selecione uma imagem para upload.", "warning")
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    nome_arquivo = str(arquivo.filename or "").lower().strip()
+    if "." not in nome_arquivo or nome_arquivo.rsplit(".", 1)[1] not in extensoes_permitidas:
+        flash("Extensão de arquivo inválida.", "danger")
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    try:
+        id_fato_controle_contratos = int(request.form.get("id_fato_controle_contratos"))
+    except Exception:
+        flash("Selecione um contrato válido.", "warning")
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    cod_ponto = _normalizar_texto_checking(request.form.get("cod_ponto"))
+    cod_face = _normalizar_texto_checking(request.form.get("cod_face"))
+    observacao = _normalizar_texto_checking(request.form.get("observacao"))
+    data_checking_txt = _normalizar_texto_checking(request.form.get("data_checking"))
+
+    cnpj_digitado = None
+
+    if not cod_ponto:
+        flash("Selecione um ponto válido.", "warning")
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    if not cod_face:
+        flash("Selecione uma face válida.", "warning")
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    try:
+        data_checking = datetime.strptime(data_checking_txt, "%Y-%m-%d").date()
+    except Exception:
+        flash("Data de checking inválida.", "warning")
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+    try:
+        imagem_bytes = arquivo.read()
+        imagem = Image.open(BytesIO(imagem_bytes))
+        largura, altura = imagem.size
+
+        if largura > largura_maxima or altura > altura_maxima:
+            flash(
+                f"Imagem maior que o permitido. Máximo: {largura_maxima}x{altura_maxima}px.",
+                "danger"
+            )
+            return render_template(
+                "euromidia/checking_upload.html",
+                empresas=empresas,
+                contratos=contratos,
+                pontos=pontos,
+                faces=faces,
+                hoje=datetime.now().date(),
+                checking=None,
+            )
+
+        arquivo.stream.seek(0)
+
+        checking = _processar_upload_checking(
+            id_empresa=id_empresa,
+            id_fato_controle_contratos=id_fato_controle_contratos,
+            cod_ponto=cod_ponto,
+            cod_face=cod_face,
+            data_checking=data_checking,
+            arquivo=arquivo,
+            cnpj_digitado=cnpj_digitado,
+            observacao=observacao,
+        )
+
+        flash("Upload realizado e mockup gerado com sucesso.", "success")
+
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=checking,
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("[CHECKING] erro ao processar upload")
+        flash(f"Falha ao processar checking: {str(e)}", "danger")
+
+        return render_template(
+            "euromidia/checking_upload.html",
+            empresas=empresas,
+            contratos=contratos,
+            pontos=pontos,
+            faces=faces,
+            hoje=datetime.now().date(),
+            checking=None,
+        )
+
+
+
+
+
+@paineis_bp.route("/checking/contratos/buscar", methods=["GET"])
+@login_required
+def checking_contratos():
+    id_empresa_txt = _normalizar_texto_checking(request.args.get("id_empresa"))
+    cnpj_txt = _somente_digitos(request.args.get("cnpj"))
+    q = _normalizar_texto_checking(request.args.get("q"))
+    q_digitos = _somente_digitos(q)
+
+    id_empresa = None
+    try:
+        if id_empresa_txt:
+            id_empresa = int(id_empresa_txt)
+    except Exception:
+        id_empresa = None
+
+    cnpj_empresa = cnpj_txt
+
+    if not cnpj_empresa and id_empresa is not None:
+        sql_empresa = text("""
+            SELECT TOP (1)
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), '')
+            FROM [Integracao].[Silver].[DimEmpresas]
+            WHERE IDEmpresa = :id_empresa
+        """)
+        row_empresa = db.session.execute(
+            sql_empresa,
+            {"id_empresa": id_empresa}
+        ).mappings().first()
+
+        if row_empresa:
+            cnpj_empresa = _somente_digitos(row_empresa["CNPJ"])
+
+    contratos = []
+
+    sql_cabecalho = text("""
+        SELECT DISTINCT TOP (200)
+            c.IDFatoControleContratosEuromidia,
+            NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(c.NumeroContrato AS varchar(50)))), ''),
+            NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(c.NumeroPrevia AS varchar(50)))), ''),
+            RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(c.RazaoSocial, c.MarcaExibida, ''))), ''),
+            CNPJ = NULLIF(LTRIM(RTRIM(CAST(c.CNPJ AS varchar(30)))), ''),
+            c.IDEmpresa
+        FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
+        WHERE
+            (
+                (:id_empresa IS NOT NULL AND c.IDEmpresa = :id_empresa)
+                OR
+                (:cnpj IS NOT NULL AND REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') = :cnpj)
+            )
+            AND
+            (
+                :q = ''
+                OR CAST(c.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
+                OR CAST(c.NumeroContrato AS varchar(50)) LIKE :q_like
+                OR CAST(c.NumeroPrevia AS varchar(50)) LIKE :q_like
+                OR COALESCE(c.RazaoSocial, c.MarcaExibida, '') LIKE :q_like
+                OR REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') LIKE :q_digitos_like
+            )
+        ORDER BY c.IDFatoControleContratosEuromidia DESC
+    """)
+
+    contratos = db.session.execute(
+        sql_cabecalho,
+        {
+            "id_empresa": id_empresa,
+            "cnpj": cnpj_empresa or None,
+            "q": q,
+            "q_like": f"%{q}%",
+            "q_digitos_like": f"%{q_digitos}%",
+        }
+    ).mappings().all()
+
+    if not contratos and cnpj_empresa:
+        sql_itens = text("""
+            SELECT DISTINCT TOP (200)
+                i.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia,
+                NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(i.NumeroContrato AS varchar(50)))), ''),
+                NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(i.NumeroPrevia AS varchar(50)))), ''),
+                RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(i.RazaoSocial, i.MarcaExibida, ''))), ''),
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(i.CNPJ AS varchar(30)))), '')
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+            WHERE
+                REPLACE(REPLACE(REPLACE(CAST(i.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') = :cnpj
+                AND
+                (
+                    :q = ''
+                    OR CAST(i.IDFatoControleContratoEuromidia AS varchar(50)) LIKE :q_like
+                    OR CAST(i.NumeroContrato AS varchar(50)) LIKE :q_like
+                    OR CAST(i.NumeroPrevia AS varchar(50)) LIKE :q_like
+                    OR COALESCE(i.RazaoSocial, i.MarcaExibida, '') LIKE :q_like
+                    OR REPLACE(REPLACE(REPLACE(CAST(i.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') LIKE :q_digitos_like
+                )
+            ORDER BY i.IDFatoControleContratoEuromidia DESC
+        """)
+
+        contratos = db.session.execute(
+            sql_itens,
+            {
+                "cnpj": cnpj_empresa,
+                "q": q,
+                "q_like": f"%{q}%",
+                "q_digitos_like": f"%{q_digitos}%",
+            }
+        ).mappings().all()
+
+    retorno = []
+    ids_vistos = set()
+
+    for row in contratos:
+        id_contrato = row["IDFatoControleContratosEuromidia"]
+
+        if not id_contrato or id_contrato in ids_vistos:
+            continue
+
+        ids_vistos.add(id_contrato)
+
+        numero_contrato = _normalizar_texto_checking(row["NumeroContrato"])
+        numero_previa = _normalizar_texto_checking(row["NumeroPrevia"])
+        razao = _normalizar_texto_checking(row["RazaoSocial"]) or "Sem razão social"
+        cnpj = _somente_digitos(row["CNPJ"])
+
+        complemento = numero_contrato or numero_previa or cnpj or "Sem número"
+
+        retorno.append({
+            "id": int(id_contrato),
+            "texto": f"{int(id_contrato)} | {razao} | {complemento}",
+        })
+
+    return jsonify(retorno)
+
+
+@paineis_bp.route("/checking/arquivo/<int:id_checking>", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def checking_arquivo(id_checking: int):
+    row = (
+        db.session.query(DimCheckingHistorico)
+        .filter(DimCheckingHistorico.IDDimCheckingHistorico == id_checking)
+        .first()
+    )
+
+    if not row:
+        abort(404)
+
+    caminho = Path(str(row.CaminhoImagemGerada or "").strip())
+
+    if not caminho.exists() or not caminho.is_file():
+        abort(404)
+
+    return send_file(caminho)
+
+
+
+@paineis_bp.route("/checking/<int:id_checking>/confirmar", methods=["POST"])
+@login_required
+def checking_confirmar(id_checking: int):
+    csrf_token = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-CSRF-Token")
+    )
+
+    try:
+        validate_csrf(csrf_token)
+    except Exception:
+        flash("CSRF inválido ou ausente.", "danger")
+        return redirect(url_for("Paineis.checking_novo"))
+
+    row = (
+        db.session.query(DimCheckingHistorico)
+        .filter(DimCheckingHistorico.IDDimCheckingHistorico == id_checking)
+        .first()
+    )
+
+    if not row:
+        flash("Checking não encontrado.", "danger")
+        return redirect(url_for("Paineis.checking_novo"))
+
+    try:
+        row.BitChekin = True
+        row.DataConfirmacao = datetime.now()
+        row.IDUsuarioConfirmacao = int(current_user.get_id()) if current_user.is_authenticated else None
+        db.session.commit()
+        flash("Checking confirmado com sucesso.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        flash(f"Falha ao confirmar checking: {exc}", "danger")
+
+    return redirect(url_for("Paineis.checking_novo"))

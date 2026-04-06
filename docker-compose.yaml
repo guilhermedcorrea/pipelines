@@ -58,6 +58,7 @@ x-airflow-common: &airflow-common
     - ./airflow/sharepoint_teste:/opt/airflow/sharepoint_teste
     - ./FlaskApp/app/static:/opt/airflow/FlaskApp/app/static:ro
     - "/run/desktop/mnt/host/c/CargaSQL/Euromidia/Contratos:/opt/airflow/Dados/Euromidia/Comercial/CargasSQL"
+    - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
 
   user: "${AIRFLOW_UID}:0"
 
@@ -201,6 +202,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
     restart: unless-stopped
 
   nginx-flask:

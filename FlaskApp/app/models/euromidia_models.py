@@ -840,3 +840,53 @@ class DimCustoPainel(db.Model):
             f"<DimCustoPainel ID={self.IDDimCustoPainel} "
             f"Ano={self.Ano} CodPonto={self.CodPonto} Origem={self.Origem} Valor={self.Valor}>"
         )
+
+
+
+
+class DimCheckingHistorico(db.Model):
+    __tablename__ = "DimCheckingHistorico"
+    __table_args__ = ({"schema": "Silver"},)
+
+    IDDimCheckingHistorico = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    DataAtualizacao = db.Column(DATETIME2(0), nullable=False, server_default=db.text("SYSDATETIME()"))
+    DataChecking = db.Column(db.Date, nullable=False)
+
+    IDEmpresa = db.Column(db.Integer, nullable=True)
+    CNPJ = db.Column(db.String(20), nullable=True)
+    RazaoSocial = db.Column(db.Unicode(200), nullable=True)
+
+    IDFatoControleContratosEuromidia = db.Column(db.Integer, nullable=True)
+
+    CodPonto = db.Column(db.Integer, nullable=False)
+    CodFace = db.Column(db.Unicode(100), nullable=False)
+    TipoPainel = db.Column(db.Unicode(100), nullable=True)
+    TipoFace = db.Column(db.Unicode(100), nullable=True)
+
+    NomeArquivoOriginal = db.Column(db.Unicode(760), nullable=True)
+    NomeArquivoSalvo = db.Column(db.Unicode(760), nullable=False)
+
+    CaminhoImagemPainel = db.Column(db.Unicode(1500), nullable=True)
+    CaminhoImagemFundo = db.Column(db.Unicode(1500), nullable=True)
+    CaminhoImagemUpload = db.Column(db.Unicode(1500), nullable=False)
+    CaminhoImagemGerada = db.Column(db.Unicode(1500), nullable=False)
+
+    UrlImagemUpload = db.Column(db.Unicode(500), nullable=True)
+    UrlImagemGerada = db.Column(db.Unicode(500), nullable=True)
+
+    BitChekin = db.Column(db.Boolean, nullable=False, server_default=db.text("0"))
+    DataConfirmacao = db.Column(DATETIME2(0), nullable=True)
+
+    IDUsuarioCriacao = db.Column(db.Integer, nullable=True)
+    IDUsuarioConfirmacao = db.Column(db.Integer, nullable=True)
+
+    Observacao = db.Column(db.Unicode(500), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<DimCheckingHistorico "
+            f"ID={self.IDDimCheckingHistorico} "
+            f"CodPonto={self.CodPonto} "
+            f"CodFace={self.CodFace!r} "
+            f"BitChekin={self.BitChekin}>"
+        )

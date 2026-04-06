@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import os
 from datetime import timedelta
-
 from flask import Flask, redirect, url_for
 from sqlalchemy import event
 
@@ -15,6 +12,10 @@ from config import (
     RECAPTCHA_PRIVATE_KEY,
     RATELIMIT_STORAGE_URI,
     CACHE_REDIS_URL,
+    EXTENSOES_PERMITIDAS_CHECKING,
+    TAMANHO_MAXIMO_UPLOAD_MB,
+    LARGURA_MAXIMA_IMAGEM,
+    ALTURA_MAXIMA_IMAGEM
 )
 
 from .handlers import registrar_handlers
@@ -31,6 +32,7 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True,
         "pool_recycle": 1800,
@@ -42,6 +44,11 @@ def create_app() -> Flask:
         },
     }
 
+    app.config["EXTENSOES_PERMITIDAS_CHECKING"] = EXTENSOES_PERMITIDAS_CHECKING
+    app.config["TAMANHO_MAXIMO_UPLOAD_MB"] = TAMANHO_MAXIMO_UPLOAD_MB
+    app.config["LARGURA_MAXIMA_IMAGEM"] = LARGURA_MAXIMA_IMAGEM
+    app.config["ALTURA_MAXIMA_IMAGEM"] = ALTURA_MAXIMA_IMAGEM
+    app.config["MAX_CONTENT_LENGTH"] = TAMANHO_MAXIMO_UPLOAD_MB * 1024 * 1024
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = False

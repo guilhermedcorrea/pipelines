@@ -1,0 +1,471 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Checking de Painel | Euromídia{% endblock %}
+
+{% block content %}
+<div class="container container-limit">
+  <div class="card">
+    <h1 class="page-title">Upload de Checking</h1>
+   
+
+    <form method="POST" enctype="multipart/form-data" class="grid" style="margin-top:16px;" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div style="position:relative;">
+        <label for="empresa_busca">CNPJ | Razão Social</label>
+        <input
+          type="text"
+          id="empresa_busca"
+          placeholder="Digite CNPJ ou razão social"
+          value="{{ request.form.get('empresa_texto', '') }}"
+          required
+        >
+        <input type="hidden" name="id_empresa" id="id_empresa" value="{{ request.form.get('id_empresa', '') }}">
+        <input type="hidden" name="empresa_texto" id="empresa_texto" value="{{ request.form.get('empresa_texto', '') }}">
+        <div id="empresa_resultados" class="busca-dropdown" hidden></div>
+      </div>
+
+      <div>
+        <label for="id_fato_controle_contratos">Contrato | Razão Social</label>
+
+        <select
+          name="id_fato_controle_contratos"
+          id="id_fato_controle_contratos"
+          disabled
+          required
+        >
+          {% if request.form.get('id_fato_controle_contratos') and request.form.get('contrato_texto') %}
+            <option value="">Selecione um contrato</option>
+            <option
+              value="{{ request.form.get('id_fato_controle_contratos') }}"
+              selected
+              data-texto="{{ request.form.get('contrato_texto', '') }}"
+            >
+              {{ request.form.get('contrato_texto', '') }}
+            </option>
+          {% else %}
+            <option value="">Primeiro selecione a empresa</option>
+          {% endif %}
+        </select>
+
+        <input
+          type="hidden"
+          name="contrato_texto"
+          id="contrato_texto"
+          value="{{ request.form.get('contrato_texto', '') }}"
+        >
+
+        <small class="muted" id="contratos_status">
+          Selecione uma empresa para carregar os contratos.
+        </small>
+      </div>
+
+      <div>
+        <label for="data_checking">Data atual</label>
+        <input
+          type="date"
+          name="data_checking"
+          id="data_checking"
+          value="{{ request.form.get('data_checking', hoje) }}"
+          required
+        >
+      </div>
+
+      <div>
+        <label for="cod_ponto">CodPonto | Tipo</label>
+        <select name="cod_ponto" id="cod_ponto" required>
+          <option value="">Selecione</option>
+          {% for ponto in pontos %}
+            <option
+              value="{{ ponto.CodPonto }}"
+              {% if request.form.get('cod_ponto') == (ponto.CodPonto|string) %}selected{% endif %}
+            >
+              {{ ponto.texto }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="cod_face">CodFace | Tipo</label>
+        <select name="cod_face" id="cod_face" required>
+          <option value="">Selecione</option>
+          {% for face in faces %}
+            <option
+              value="{{ face.CodFace }}"
+              data-codponto="{{ face.CodPonto }}"
+              {% if request.form.get('cod_face') == (face.CodFace|string) %}selected{% endif %}
+            >
+              {{ face.texto_face }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label for="imagem">Imagem da arte</label>
+        <input type="file" name="imagem" id="imagem" accept=".jpg,.jpeg,.png,.webp" required>
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label for="observacao">Observação</label>
+        <textarea
+          name="observacao"
+          id="observacao"
+          rows="3"
+          placeholder="Observações opcionais"
+        >{{ request.form.get('observacao', '') }}</textarea>
+      </div>
+
+      <div class="actions" style="grid-column: 1 / -1;">
+        <button type="submit">Fazer upload e gerar mockup</button>
+      </div>
+    </form>
+  </div>
+
+  {% if checking %}
+  <div class="card" style="margin-top:18px;">
+    <h2 class="page-title" style="font-size:18px;">Resultado gerado</h2>
+
+    <div class="grid" style="align-items:start;">
+      <div>
+        <div style="font-weight:800; margin-bottom:8px;">Mockup gerado</div>
+        <img
+          src="{{ checking.UrlImagemGerada }}"
+          alt="Mockup gerado"
+          style="width:100%; border-radius:12px; border:1px solid #E5E7EB;"
+        >
+      </div>
+
+      <div>
+        <div style="font-weight:800; margin-bottom:8px;">Dados do checking</div>
+        <div class="muted">ID: <b>{{ checking.IDDimCheckingHistorico }}</b></div>
+        <div class="muted">Empresa: <b>{{ checking.RazaoSocial }}</b></div>
+        <div class="muted">Contrato: <b>{{ checking.IDFatoControleContratosEuromidia }}</b></div>
+        <div class="muted">Ponto: <b>{{ checking.CodPonto }}</b></div>
+        <div class="muted">Face: <b>{{ checking.CodFace }}</b></div>
+        <div class="muted">
+          Status:
+          {% if checking.BitChekin %}
+            <b style="color:green;">Checkin concluído</b>
+          {% else %}
+            <b style="color:#b45309;">Pendente de confirmação</b>
+          {% endif %}
+        </div>
+
+        {% if not checking.BitChekin %}
+        <form
+          method="POST"
+          action="{{ url_for('Paineis.checking_confirmar', id_checking=checking.IDDimCheckingHistorico) }}"
+          style="margin-top:16px;"
+        >
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Confirmar Checking</button>
+        </form>
+        {% else %}
+        <div
+          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800;"
+        >
+          Checkin concluído
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.busca-dropdown{
+  position:absolute;
+  top:100%;
+  left:0;
+  right:0;
+  z-index:50;
+  background:#fff;
+  border:1px solid #d1d5db;
+  border-radius:12px;
+  box-shadow:0 10px 25px rgba(0,0,0,.08);
+  max-height:260px;
+  overflow:auto;
+  margin-top:6px;
+}
+.busca-item{
+  padding:10px 12px;
+  cursor:pointer;
+  border-bottom:1px solid #f3f4f6;
+}
+.busca-item:last-child{
+  border-bottom:none;
+}
+.busca-item:hover{
+  background:#f9fafb;
+}
+.busca-vazio{
+  padding:10px 12px;
+  color:#6b7280;
+}
+</style>
+
+<script>
+(function () {
+  const inputEmpresa = document.getElementById("empresa_busca");
+  const hiddenEmpresa = document.getElementById("id_empresa");
+  const hiddenEmpresaTexto = document.getElementById("empresa_texto");
+  const boxEmpresa = document.getElementById("empresa_resultados");
+
+  const selectContrato = document.getElementById("id_fato_controle_contratos");
+  const hiddenContratoTexto = document.getElementById("contrato_texto");
+  const contratosStatus = document.getElementById("contratos_status");
+
+  const selectPonto = document.getElementById("cod_ponto");
+  const selectFace = document.getElementById("cod_face");
+
+  const valorInicialContrato = {{ request.form.get('id_fato_controle_contratos', '')|tojson }};
+  let timerEmpresa = null;
+
+  function esconderBox(box) {
+    box.hidden = true;
+    box.innerHTML = "";
+  }
+
+  function mostrarMensagem(box, texto) {
+    box.innerHTML = `<div class="busca-vazio">${texto}</div>`;
+    box.hidden = false;
+  }
+
+  function renderizarResultados(box, itens, onClickItem) {
+    if (!itens || !itens.length) {
+      mostrarMensagem(box, "Nenhum resultado encontrado.");
+      return;
+    }
+
+    box.innerHTML = "";
+    itens.forEach(function (item) {
+      const div = document.createElement("div");
+      div.className = "busca-item";
+      div.textContent = item.texto;
+      div.addEventListener("click", function () {
+        onClickItem(item);
+        esconderBox(box);
+      });
+      box.appendChild(div);
+    });
+    box.hidden = false;
+  }
+
+  function definirStatusContratos(texto) {
+    if (contratosStatus) {
+      contratosStatus.textContent = texto;
+    }
+  }
+
+  function limparSelectContratos(textoOpcao) {
+    selectContrato.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = textoOpcao || "Selecione";
+    selectContrato.appendChild(option);
+    selectContrato.value = "";
+    hiddenContratoTexto.value = "";
+  }
+
+  function bloquearContrato(textoOpcao, textoStatus) {
+    selectContrato.disabled = true;
+    limparSelectContratos(textoOpcao || "Primeiro selecione a empresa");
+    definirStatusContratos(textoStatus || "Selecione uma empresa para carregar os contratos.");
+  }
+
+  function liberarContrato() {
+    selectContrato.disabled = false;
+  }
+
+  function atualizarTextoContratoSelecionado() {
+    const optionSelecionada = selectContrato.options[selectContrato.selectedIndex];
+    if (!optionSelecionada || !optionSelecionada.value) {
+      hiddenContratoTexto.value = "";
+      return;
+    }
+    hiddenContratoTexto.value = optionSelecionada.dataset.texto || optionSelecionada.textContent || "";
+  }
+
+  function preencherSelectContratos(itens, idContratoSelecionado) {
+    limparSelectContratos("Selecione um contrato");
+
+    if (!itens || !itens.length) {
+      bloquearContrato("Nenhum contrato encontrado", "Nenhum contrato encontrado para a empresa selecionada.");
+      return;
+    }
+
+    itens.forEach(function (item) {
+      const option = document.createElement("option");
+      option.value = String(item.id);
+      option.textContent = item.texto;
+      option.dataset.texto = item.texto;
+      if (idContratoSelecionado && String(item.id) === String(idContratoSelecionado)) {
+        option.selected = true;
+      }
+      selectContrato.appendChild(option);
+    });
+
+    liberarContrato();
+    atualizarTextoContratoSelecionado();
+    definirStatusContratos(`${itens.length} contrato(s) encontrado(s).`);
+  }
+
+  async function buscarEmpresas(q) {
+    const resposta = await fetch(`/paineis/checking/empresas/buscar?q=${encodeURIComponent(q)}`, {
+      method: "GET",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+
+    return await resposta.json();
+  }
+
+  async function carregarContratosDaEmpresa(idEmpresa, idContratoSelecionado) {
+    bloquearContrato("Carregando contratos...", "Carregando contratos da empresa selecionada...");
+
+    const resposta = await fetch(
+      `/paineis/checking/contratos/buscar?id_empresa=${encodeURIComponent(idEmpresa)}&q=`,
+      {
+        method: "GET",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      }
+    );
+
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+
+    const contratos = await resposta.json();
+    preencherSelectContratos(contratos, idContratoSelecionado || "");
+  }
+
+  inputEmpresa.addEventListener("input", function () {
+    const termo = String(inputEmpresa.value || "").trim();
+
+    hiddenEmpresa.value = "";
+    hiddenEmpresaTexto.value = "";
+    bloquearContrato();
+
+    clearTimeout(timerEmpresa);
+
+    if (termo.length < 2) {
+      esconderBox(boxEmpresa);
+      return;
+    }
+
+    timerEmpresa = setTimeout(async function () {
+      try {
+        const empresas = await buscarEmpresas(termo);
+        renderizarResultados(boxEmpresa, empresas, async function (item) {
+          inputEmpresa.value = item.texto;
+          hiddenEmpresa.value = item.id;
+          hiddenEmpresaTexto.value = item.texto;
+
+          try {
+            await carregarContratosDaEmpresa(item.id, "");
+            selectContrato.focus();
+          } catch (erroContrato) {
+            console.error("[CHECKING] erro ao carregar contratos:", erroContrato);
+            bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
+          }
+        });
+      } catch (erro) {
+        console.error("[CHECKING] erro ao buscar empresas:", erro);
+        mostrarMensagem(boxEmpresa, "Não foi possível buscar empresas agora.");
+      }
+    }, 300);
+  });
+
+  selectContrato.addEventListener("change", function () {
+    atualizarTextoContratoSelecionado();
+    if (selectContrato.value) {
+      definirStatusContratos("Contrato selecionado.");
+    } else {
+      definirStatusContratos("Selecione um contrato.");
+    }
+  });
+
+  document.addEventListener("click", function (event) {
+    if (!boxEmpresa.contains(event.target) && event.target !== inputEmpresa) {
+      esconderBox(boxEmpresa);
+    }
+  });
+
+  function filtrarFacesPorPonto() {
+    if (!selectPonto || !selectFace) {
+      return;
+    }
+
+    const codPonto = (selectPonto.value || "").trim();
+    const opcoes = Array.from(selectFace.options);
+    let possuiOpcaoVisivelSelecionavel = false;
+
+    opcoes.forEach(function (opcao, indice) {
+      if (indice === 0) {
+        opcao.hidden = false;
+        return;
+      }
+
+      const pontoDaOpcao = (opcao.getAttribute("data-codponto") || "").trim();
+      const deveOcultar = !!codPonto && pontoDaOpcao !== codPonto;
+
+      opcao.hidden = deveOcultar;
+
+      if (!deveOcultar) {
+        possuiOpcaoVisivelSelecionavel = true;
+      }
+    });
+
+    const opcaoSelecionada = selectFace.options[selectFace.selectedIndex];
+    if (opcaoSelecionada && opcaoSelecionada.hidden) {
+      selectFace.value = "";
+    }
+
+    if (!codPonto) {
+      selectFace.value = "";
+      return;
+    }
+
+    if (!possuiOpcaoVisivelSelecionavel) {
+      selectFace.value = "";
+    }
+  }
+
+  async function inicializarContratosSeJaExistirEmpresa() {
+    const idEmpresaAtual = String(hiddenEmpresa.value || "").trim();
+
+    if (!idEmpresaAtual) {
+      bloquearContrato();
+      return;
+    }
+
+    try {
+      await carregarContratosDaEmpresa(idEmpresaAtual, valorInicialContrato);
+      if (selectContrato.value) {
+        definirStatusContratos("Contrato selecionado.");
+      }
+    } catch (erro) {
+      console.error("[CHECKING] erro ao inicializar contratos:", erro);
+      bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
+    }
+  }
+
+  if (selectPonto) {
+    selectPonto.addEventListener("change", filtrarFacesPorPonto);
+    filtrarFacesPorPonto();
+  }
+
+  inicializarContratosSeJaExistirEmpresa();
+})();
+</script>
+{% endblock %}
