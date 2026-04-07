@@ -21,9 +21,23 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
+TABELA_SOLICITACAO_CONTRATO = "[Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]"
+TABELA_SOLICITACAO_CONTRATO_ITEM = "[Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]"
+TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
+
+ID_TAG_CONTRATO_EM_AVALIACAO = 14
+NOME_TAG_CONTRATO_EM_AVALIACAO = "Contrato em Avaliação"
+NOME_TAG_TIPO_CONTRATO_NOVO = "Novo Contrato"
+NOME_TAG_TIPO_CONTRATO_ADITIVO = "Aditivo"
+
+
+
+
+
+
+
 TABELA_EMPRESAS_PROPRIETARIAS = "[Integracao].[dbo].[EmpresaProprietaria]"
 URL_API_MINHA_RECEITA = "https://minhareceita.org"
-
 
 NOME_TAG_DESCONTO_APROVADO = "Desconto Aprovado"
 TIPO_NOTA_APROVACAO_DESCONTO = "APROVACAO_DESCONTO"
@@ -2419,6 +2433,389 @@ def _inserir_registro_dinamico(nome_tabela: str, valores: dict[str, Any], coluna
         f"INSERT INTO {nome_tabela} ({', '.join(colunas_insert)}) VALUES ({', '.join(valores_insert)});"
     )
     db.session.execute(sql, params)
+
+
+
+
+
+
+
+
+def _inserir_registro_dinamico_output_id(
+    nome_tabela: str,
+    coluna_id_output: str,
+    valores: dict[str, Any],
+    colunas_getdate: tuple[str, ...] = (),
+) -> int | None:
+    """
+    Insere dinamicamente e devolve o ID gerado pelo OUTPUT INSERTED.
+    """
+    if not _objeto_existe(nome_tabela):
+        raise RuntimeError(f"A tabela {nome_tabela} não existe.")
+
+    if not _coluna_existe(nome_tabela, coluna_id_output):
+        raise RuntimeError(
+            f"A coluna de retorno {coluna_id_output} não existe em {nome_tabela}."
+        )
+
+    colunas_parametros: list[str] = []
+    parametros: dict[str, Any] = {}
+    colunas_literais: list[tuple[str, str]] = []
+
+    for coluna, valor in valores.items():
+        if valor is None:
+            continue
+        if not _coluna_existe(nome_tabela, coluna):
+            continue
+
+        colunas_parametros.append(coluna)
+        parametros[coluna] = valor
+
+    for coluna in colunas_getdate:
+        if _coluna_existe(nome_tabela, coluna) and coluna not in colunas_parametros:
+            colunas_literais.append((coluna, "GETDATE()"))
+
+    if not colunas_parametros and not colunas_literais:
+        raise RuntimeError(
+            f"Nenhuma coluna válida foi encontrada para inserir em {nome_tabela}."
+        )
+
+    colunas_insert = [f"[{coluna}]" for coluna in colunas_parametros]
+    colunas_insert += [f"[{coluna}]" for coluna, _ in colunas_literais]
+
+    valores_insert = [f":{coluna}" for coluna in colunas_parametros]
+    valores_insert += [literal for _, literal in colunas_literais]
+
+    sql = text(
+        f"""
+        INSERT INTO {nome_tabela}
+        (
+            {", ".join(colunas_insert)}
+        )
+        OUTPUT INSERTED.[{coluna_id_output}]
+        VALUES
+        (
+            {", ".join(valores_insert)}
+        );
+        """
+    )
+
+    valor_id = db.session.execute(sql, parametros).scalar()
+    return int(valor_id) if valor_id not in (None, "") else None
+
+
+def _obter_solicitacao_contrato_ativa_por_card(id_card: int) -> dict[str, Any] | None:
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO):
+        return None
+
+    filtro_ativo = ""
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "BitAtivo"):
+        filtro_ativo = "AND BitAtivo = 1"
+
+    sql = text(
+        f"""
+        SELECT TOP (1)
+            IDFatoSolicitacaoContratoEuromidia,
+            IDFatoKanbanCard,
+            TipoSolicitacao,
+            IDDimStatusContratos
+        FROM {TABELA_SOLICITACAO_CONTRATO}
+        WHERE IDFatoKanbanCard = :id_card
+          {filtro_ativo}
+        ORDER BY
+            DataCriacao DESC,
+            IDFatoSolicitacaoContratoEuromidia DESC;
+        """
+    )
+
+    row = db.session.execute(sql, {"id_card": int(id_card)}).mappings().first()
+    return dict(row) if row else None
+
+
+def _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas: list[dict[str, Any]]) -> str:
+    nomes_tags = {
+        _normalizar_texto_comparacao(item.get("NomeTag"))
+        for item in (tags_ativas or [])
+        if isinstance(item, dict)
+    }
+
+    tem_novo_contrato = _normalizar_texto_comparacao(NOME_TAG_TIPO_CONTRATO_NOVO) in nomes_tags
+    tem_aditivo = _normalizar_texto_comparacao(NOME_TAG_TIPO_CONTRATO_ADITIVO) in nomes_tags
+
+    if tem_novo_contrato and tem_aditivo:
+        raise ValueError(
+            "O card está com as tags 'Novo Contrato' e 'Aditivo' ao mesmo tempo. Corrija isso antes de enviar para avaliação."
+        )
+
+    if tem_novo_contrato:
+        return "NOVO_CONTRATO"
+
+    if tem_aditivo:
+        return "ADITIVO"
+
+    raise ValueError(
+        "Para enviar o contrato para avaliação, o card precisa ter a tag 'Novo Contrato' ou 'Aditivo'."
+    )
+
+
+def _obter_id_status_contrato_em_avaliacao() -> int:
+    """
+    Resolve dinamicamente o ID do status 'Em Avaliação' na dimensão de status.
+    Ajuste o nome da tabela se no seu banco ela estiver em outro schema.
+    """
+    if not _objeto_existe(TABELA_STATUS_CONTRATOS):
+        raise RuntimeError(
+            f"A tabela de status {TABELA_STATUS_CONTRATOS} não existe. Ajuste a constante TABELA_STATUS_CONTRATOS."
+        )
+
+    coluna_id = "IDDimStatusContratos"
+    if not _coluna_existe(TABELA_STATUS_CONTRATOS, coluna_id):
+        raise RuntimeError(
+            f"A coluna {coluna_id} não existe em {TABELA_STATUS_CONTRATOS}."
+        )
+
+    colunas_codigo = [
+        coluna
+        for coluna in ("CodigoStatus", "Codigo", "Sigla", "CodigoSituacao")
+        if _coluna_existe(TABELA_STATUS_CONTRATOS, coluna)
+    ]
+
+    colunas_nome = [
+        coluna
+        for coluna in ("NomeStatus", "Nome", "Descricao", "DescricaoStatus")
+        if _coluna_existe(TABELA_STATUS_CONTRATOS, coluna)
+    ]
+
+    if not colunas_codigo and not colunas_nome:
+        raise RuntimeError(
+            f"Não encontrei colunas de código/nome em {TABELA_STATUS_CONTRATOS} para localizar o status 'Em Avaliação'."
+        )
+
+    filtros_status: list[str] = []
+
+    for coluna in colunas_codigo:
+        filtros_status.append(
+            f"UPPER(LTRIM(RTRIM(ISNULL({coluna}, '')))) IN ('EM_AVALIACAO', 'EM AVALIACAO', 'AVALIACAO')"
+        )
+
+    for coluna in colunas_nome:
+        filtros_status.append(
+            f"UPPER(LTRIM(RTRIM(ISNULL({coluna}, '')))) IN ('EM AVALIAÇÃO', 'EM AVALIACAO', 'CONTRATO EM AVALIAÇÃO', 'CONTRATO EM AVALIACAO')"
+        )
+
+    filtro_ativo = ""
+    if _coluna_existe(TABELA_STATUS_CONTRATOS, "Ativo"):
+        filtro_ativo = "AND Ativo = 1"
+    elif _coluna_existe(TABELA_STATUS_CONTRATOS, "BitAtivo"):
+        filtro_ativo = "AND BitAtivo = 1"
+
+    sql = text(
+        f"""
+        SELECT TOP (1)
+            {coluna_id} AS IDDimStatusContratos
+        FROM {TABELA_STATUS_CONTRATOS}
+        WHERE (
+            {" OR ".join(filtros_status)}
+        )
+        {filtro_ativo}
+        ORDER BY {coluna_id} ASC;
+        """
+    )
+
+    valor = db.session.execute(sql).scalar()
+
+    if valor in (None, ""):
+        raise RuntimeError(
+            "Não encontrei o status 'Em Avaliação' na DimStatusContratos. Cadastre esse status antes de usar a tag."
+        )
+
+    return int(valor)
+
+
+def _obter_valor_mensal_item_solicitacao(item: dict[str, Any]) -> Decimal | None:
+    for campo in ("ValorVendaFinal", "NovoValor", "ValorTabela"):
+        valor = _valor_decimal(item.get(campo))
+        if valor is not None:
+            return valor
+    return None
+
+
+def _montar_resumo_paineis_solicitacao(
+    painel_faces: list[dict[str, Any]],
+) -> dict[str, Any]:
+    codigos_ponto: set[str] = set()
+    codigos_face: set[str] = set()
+    valor_total_mensal = Decimal("0")
+
+    for item in painel_faces or []:
+        cod_ponto = str(item.get("CodPonto") or "").strip()
+        cod_face = str(item.get("CodFace") or "").strip().upper()
+
+        if cod_ponto:
+            codigos_ponto.add(cod_ponto)
+
+        if cod_face:
+            codigos_face.add(cod_face)
+
+        valor_item = _obter_valor_mensal_item_solicitacao(item)
+        if valor_item is not None:
+            valor_total_mensal += valor_item
+
+    return {
+        "quantidade_pontos": len(codigos_ponto),
+        "quantidade_faces": len(codigos_face),
+        "valor_total_mensal": valor_total_mensal,
+    }
+
+
+def _criar_solicitacao_contrato_em_avaliacao_para_card(
+    *,
+    id_card: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any]:
+    """
+    Cria cabeçalho e itens da solicitação quando a tag 'Contrato em Avaliação'
+    entra no card.
+
+    Regra:
+    - não duplica solicitação ativa do mesmo card
+    - exige tipo de contrato definido por tag
+    - exige ao menos um painel/face vinculado
+    """
+    solicitacao_existente = _obter_solicitacao_contrato_ativa_por_card(int(id_card))
+    if solicitacao_existente:
+        return {
+            "criada": False,
+            "id_solicitacao": int(solicitacao_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0) or None,
+            "motivo": "Solicitação ativa já existente para este card.",
+        }
+
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
+    tags_ativas = detalhe.get("tags") if isinstance(detalhe.get("tags"), list) else []
+    painel_faces = (
+        detalhe.get("painel_faces")
+        if isinstance(detalhe.get("painel_faces"), list)
+        else _listar_paineis_vinculados_card(int(id_card))
+    )
+
+    if not painel_faces:
+        raise ValueError(
+            "Para enviar contrato para avaliação, o card precisa ter pelo menos um painel/face vinculado."
+        )
+
+    tipo_solicitacao = _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas)
+    id_status_contrato = _obter_id_status_contrato_em_avaliacao()
+    resumo = _montar_resumo_paineis_solicitacao(painel_faces)
+
+    id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
+
+    razao_social = (
+        card.get("EmpresaRazaoSocial")
+        or card.get("RazaoSocial")
+        or None
+    )
+    cnpj = (
+        card.get("EmpresaCNPJ")
+        or card.get("CNPJ")
+        or None
+    )
+
+    nome_vendedor = (
+        card.get("NomeUsuarioResponsavel")
+        or card.get("NomeUsuario")
+        or card.get("Vendedor")
+        or None
+    )
+
+    observacao_base = "Solicitação criada automaticamente ao aplicar a tag 'Contrato em Avaliação' no card do Kanban."
+    descricao_card = str(card.get("Descricao") or "").strip()
+    observacao = (
+        f"{observacao_base} Descrição do card: {descricao_card}"
+        if descricao_card
+        else observacao_base
+    )
+
+    id_solicitacao = _inserir_registro_dinamico_output_id(
+        TABELA_SOLICITACAO_CONTRATO,
+        "IDFatoSolicitacaoContratoEuromidia",
+        {
+            "IDFatoKanbanCard": int(id_card),
+            "IDDimStatusContratos": int(id_status_contrato),
+            "IDDimUsuariosCriacao": int(id_usuario),
+            "IDDimUsuariosEnvioAvaliacao": int(id_usuario),
+            "IDEmpresa": int(id_empresa_relacionada) if id_empresa_relacionada else None,
+            "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria else None,
+            "TipoSolicitacao": tipo_solicitacao,
+            "CNPJ": str(cnpj).strip() if cnpj else None,
+            "RazaoSocial": str(razao_social).strip() if razao_social else None,
+            "Vendedor": str(nome_vendedor).strip() if nome_vendedor else None,
+            "QuantidadePontos": int(resumo["quantidade_pontos"] or 0),
+            "QuantidadeFaces": int(resumo["quantidade_faces"] or 0),
+            "TotalFaturamentoBrutoMensal": resumo["valor_total_mensal"],
+            "Observacao": observacao[:1000],
+        },
+        colunas_getdate=("DataEnvioAvaliacao",),
+    )
+
+    if not id_solicitacao:
+        raise RuntimeError("Não foi possível gerar o cabeçalho da solicitação de contrato.")
+
+    total_itens_criados = 0
+
+    for item in painel_faces:
+        if not isinstance(item, dict):
+            continue
+
+        valor_mensal = _obter_valor_mensal_item_solicitacao(item)
+
+        _inserir_registro_dinamico(
+            TABELA_SOLICITACAO_CONTRATO_ITEM,
+            {
+                "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
+                "IDFatoKanbanCard": int(id_card),
+                "IDDimUsuariosCriacao": int(id_usuario),
+                "IDPainelEuromidia": int(item.get("IDDimPaineisEuromidia") or 0) or None,
+                "IDDimFacesPaineis": int(item.get("IDDimFacesPaineis") or 0) or None,
+                "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria else None,
+                "CNPJ": str(cnpj).strip() if cnpj else None,
+                "RazaoSocial": str(razao_social).strip() if razao_social else None,
+                "Vendedor": str(nome_vendedor).strip() if nome_vendedor else None,
+                "CodPonto": str(item.get("CodPonto") or "").strip() or None,
+                "CodFace": str(item.get("CodFace") or "").strip() or None,
+                "Tipo": str(item.get("TipoPainel") or "").strip() or None,
+                "DataInicioPrevisto": _para_data_sql_ou_none(item.get("DataInicio") or item.get("DataInicioReserva")),
+                "DataTerminoPrevisto": _para_data_sql_ou_none(item.get("DataFim") or item.get("DataFimReserva")),
+                "FaturamentoBrutoMensal": valor_mensal,
+                "Faturamento": valor_mensal,
+                "OBS": "Item gerado automaticamente a partir do vínculo painel/face do card.",
+                "Status": "EM_AVALIACAO",
+            }
+        )
+
+        total_itens_criados += 1
+
+    return {
+        "criada": True,
+        "id_solicitacao": int(id_solicitacao),
+        "total_itens": int(total_itens_criados),
+        "tipo_solicitacao": tipo_solicitacao,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -7187,7 +7584,6 @@ def api_tag_criar(id_kanban: int):
 
 
 
-#add
 @kanban_bp.route("/api/cards/<int:id_card>/tags", methods=["POST"])
 @login_required
 @limiter.limit("180/minute")
@@ -7240,85 +7636,160 @@ def api_card_tag_adicionar(id_card: int):
     ).scalar()
 
     alterou = False
+    retorno_solicitacao: dict[str, Any] | None = None
 
-    if not existe:
-        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+    try:
+        if not existe:
+            snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
-        sql_insert = text("""
-            INSERT INTO [Kanban].[Silver].[FatoKanbanCardTag]
-                (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
-            OUTPUT INSERTED.IDFatoKanbanCardTag
-            VALUES
-                (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa);
-        """)
-        id_card_tag_inserido = db.session.execute(
-            sql_insert,
-            {
-                "id_card": id_card,
-                "id_tag": id_tag,
-                "id_usuario": id_usuario,
-                "id_empresa": card.get("IDEmpresaProprietaria"),
-            },
-        ).scalar()
+            sql_insert = text("""
+                INSERT INTO [Kanban].[Silver].[FatoKanbanCardTag]
+                    (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
+                OUTPUT INSERTED.IDFatoKanbanCardTag
+                VALUES
+                    (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa);
+            """)
+            id_card_tag_inserido = db.session.execute(
+                sql_insert,
+                {
+                    "id_card": id_card,
+                    "id_tag": id_tag,
+                    "id_usuario": id_usuario,
+                    "id_empresa": card.get("IDEmpresaProprietaria"),
+                },
+            ).scalar()
 
-        id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
-            id_kanban=id_kanban,
-            id_empresa_padrao=card.get("IDEmpresaProprietaria"),
-        )
+            nome_tag_aplicada = str(tag_row.get("NomeTag") or "").strip()
+            nome_tag_aplicada_normalizada = _normalizar_texto_comparacao(nome_tag_aplicada)
 
-        _registrar_tag_historico_card(
-            id_fato_kanban_card_tag=int(id_card_tag_inserido or 0) or None,
-            id_card=int(id_card),
-            id_fase=int(id_fase_atual) if id_fase_atual else None,
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
-        )
+            if (
+                int(id_tag) == int(ID_TAG_CONTRATO_EM_AVALIACAO)
+                or nome_tag_aplicada_normalizada == _normalizar_texto_comparacao(NOME_TAG_CONTRATO_EM_AVALIACAO)
+            ):
+                retorno_solicitacao = _criar_solicitacao_contrato_em_avaliacao_para_card(
+                    id_card=int(id_card),
+                    id_usuario=int(id_usuario),
+                    id_empresa_proprietaria=int(id_emp),
+                )
 
-        snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-        _registrar_log_card(
-            id_card=id_card,
-            id_kanban=id_kanban,
-            id_empresa_proprietaria=id_emp,
-            id_usuario_acao=id_usuario,
-            tipo_evento="TAG_ADICIONADA",
-            subtipo_evento=str(tag_row.get("NomeTag") or "").strip()[:120] or None,
-            id_fase_de=id_fase_atual if id_fase_atual else None,
-            id_fase_para=id_fase_atual if id_fase_atual else None,
-            observacao=f"Tag adicionada: {str(tag_row.get('NomeTag') or '').strip()}",
-            tabela_origem="[Kanban].[Silver].[FatoKanbanCardTag]",
-            id_registro_origem=int(id_card_tag_inserido or 0) or None,
-            payload_antes=snapshot_antes,
-            payload_depois=snapshot_depois,
-        )
+            id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
+                id_kanban=id_kanban,
+                id_empresa_padrao=card.get("IDEmpresaProprietaria"),
+            )
 
-        db.session.commit()
-        alterou = True
+            _registrar_tag_historico_card(
+                id_fato_kanban_card_tag=int(id_card_tag_inserido or 0) or None,
+                id_card=int(id_card),
+                id_fase=int(id_fase_atual) if id_fase_atual else None,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
+            )
 
-    _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
-    detalhe = _obter_card_detalhe_payload(id_card)
+            snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
-    if alterou:
-        _emitir_evento_kanban(
-            id_kanban,
-            "card_tag_adicionada",
-            {
+            observacao_log = f"Tag adicionada: {nome_tag_aplicada}"
+            if retorno_solicitacao and retorno_solicitacao.get("criada"):
+                observacao_log += (
+                    f" | Solicitação de contrato criada: "
+                    f"{retorno_solicitacao.get('id_solicitacao')} "
+                    f"({retorno_solicitacao.get('tipo_solicitacao')})"
+                )
+
+            _registrar_log_card(
+                id_card=id_card,
+                id_kanban=id_kanban,
+                id_empresa_proprietaria=id_emp,
+                id_usuario_acao=id_usuario,
+                tipo_evento="TAG_ADICIONADA",
+                subtipo_evento=nome_tag_aplicada[:120] or None,
+                id_fase_de=id_fase_atual if id_fase_atual else None,
+                id_fase_para=id_fase_atual if id_fase_atual else None,
+                observacao=observacao_log[:2000],
+                tabela_origem="[Kanban].[Silver].[FatoKanbanCardTag]",
+                id_registro_origem=int(id_card_tag_inserido or 0) or None,
+                payload_antes=snapshot_antes,
+                payload_depois=snapshot_depois,
+            )
+
+            db.session.commit()
+            alterou = True
+
+        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+        detalhe = _obter_card_detalhe_payload(id_card)
+
+        if alterou:
+            payload_socket = {
                 "id_card": id_card,
                 "id_tag": id_tag,
                 "id_usuario_acao": id_usuario,
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
-            },
+            }
+
+            if retorno_solicitacao:
+                payload_socket["solicitacao_contrato"] = retorno_solicitacao
+
+            _emitir_evento_kanban(
+                id_kanban,
+                "card_tag_adicionada",
+                payload_socket,
+            )
+
+        msg = "Tag adicionada com sucesso."
+        if retorno_solicitacao:
+            if retorno_solicitacao.get("criada"):
+                msg = (
+                    f"Tag adicionada com sucesso. "
+                    f"Solicitação {retorno_solicitacao.get('id_solicitacao')} criada com "
+                    f"{retorno_solicitacao.get('total_itens')} item(ns)."
+                )
+            elif retorno_solicitacao.get("motivo"):
+                msg = (
+                    "Tag adicionada com sucesso. "
+                    f"{retorno_solicitacao.get('motivo')}"
+                )
+
+        return jsonify(
+            {
+                "ok": True,
+                "msg": msg,
+                "id_card": id_card,
+                "id_tag": id_tag,
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "solicitacao_contrato": retorno_solicitacao,
+            }
         )
 
-    return jsonify(
-        {
-            "ok": True,
-            "id_card": id_card,
-            "id_tag": id_tag,
-            "card": detalhe.get("card"),
-            "tags": detalhe.get("tags", []),
-        }
-    )
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "msg": str(exc)}), 400
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Erro ao adicionar tag no card id_card=%s id_tag=%s",
+            id_card,
+            id_tag,
+        )
+        return jsonify({"ok": False, "msg": f"Erro ao adicionar tag: {str(exc)}"}), 500
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/tags/<int:id_tag>", methods=["DELETE"])
@@ -14040,6 +14511,8 @@ def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
     return cards
 
 
+
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -14062,7 +14535,6 @@ def api_card_criar(id_kanban: int):
 
         etapa = "payload"
         payload = request.get_json(silent=True) or {}
-        print(f"[KANBAN][CRIAR_CARD] payload_bruto={payload}")
 
         titulo = (payload.get("titulo") or "").strip()
         descricao = payload.get("descricao")
@@ -14121,7 +14593,6 @@ def api_card_criar(id_kanban: int):
             if not empresa_existe:
                 print("[KANBAN][CRIAR_CARD] ERRO empresa nao encontrada")
                 return jsonify({"ok": False, "msg": "Empresa não encontrada"}), 400
-
 
         etapa = "validacao_tipo_cliente_desconto"
         id_tipo_cliente_desconto_int = None
@@ -14214,8 +14685,12 @@ def api_card_criar(id_kanban: int):
 
         if coluna_id_dim_usuarios_existe:
             colunas.append("IDDimUsuarios")
-            valores.append(":id_dim_usuarios")
-            params["id_dim_usuarios"] = int(id_usuario)
+            valores.append(":id_usuario")
+
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto"):
+            colunas.append("IDDimKanbanTipoClienteDesconto")
+            valores.append(":id_tipo_cliente_desconto")
+            params["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
 
         if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_card_inicial is not None:
             colunas.append("IDDimKanbanStatusCard")
@@ -14263,12 +14738,16 @@ def api_card_criar(id_kanban: int):
         etapa = "registrar_log_criacao"
         _registrar_log_card(
             id_card=int(novo_id),
-            acao="CARD_CRIADO",
-            detalhes="Card criado via quadro Kanban",
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=id_emp,
-            antes=None,
-            depois=snapshot_depois,
+            id_kanban=int(id_kanban),
+            id_empresa_proprietaria=int(id_emp),
+            id_usuario_acao=int(id_usuario),
+            tipo_evento="CARD_CRIADO",
+            subtipo_evento="CRIACAO",
+            id_fase_de=None,
+            id_fase_para=int(id_fase) if id_fase else None,
+            observacao="Card criado via quadro Kanban",
+            payload_antes=None,
+            payload_depois=snapshot_depois,
         )
 
         etapa = "registrar_historico_status"
@@ -14331,6 +14810,8 @@ def api_card_criar(id_kanban: int):
         print(f"[KANBAN][CRIAR_CARD] ROLLBACK por Exception etapa={etapa} erro={exc}")
         current_app.logger.exception("Erro ao criar card no kanban %s. etapa=%s", id_kanban, etapa)
         return jsonify({"ok": False, "msg": f"Erro ao criar card: {str(exc)}"}), 500
+
+
 
 
 
