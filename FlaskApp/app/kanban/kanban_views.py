@@ -307,8 +307,6 @@ def _resolver_contexto_tipo_contrato_payload(
 
 
 
-
-
 def _validar_contrato_empresa(
     *,
     id_empresa: int | None,
@@ -319,6 +317,24 @@ def _validar_contrato_empresa(
 
     if not id_empresa:
         raise ValueError("Selecione a empresa antes de escolher um contrato existente.")
+
+    sql_empresa = text(f"""
+        SELECT TOP (1)
+            e.IDEmpresa,
+            e.CNPJ
+        FROM {TABELA_EMPRESAS} e
+        WHERE e.IDEmpresa = :id_empresa;
+    """)
+
+    empresa = db.session.execute(
+        sql_empresa,
+        {"id_empresa": int(id_empresa)},
+    ).mappings().first()
+
+    if not empresa:
+        raise ValueError("Empresa selecionada não foi encontrada.")
+
+    cnpj_empresa = str(empresa.get("CNPJ") or "").strip()
 
     sql = text(f"""
         SELECT TOP (1)
@@ -333,12 +349,12 @@ def _validar_contrato_empresa(
             c.BitAtivo,
             c.IDDimStatusContratos
         FROM {TABELA_CONTROLE_CONTRATOS} c
-        INNER JOIN {TABELA_EMPRESAS} e
-            ON e.IDEmpresa = c.IDEmpresa
         WHERE c.IDFatoControleContratosEuromidia = :id_contrato
-          AND c.IDEmpresa = :id_empresa
-          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
-          AND ISNULL(c.BitAtivo, 1) = 1;
+          AND ISNULL(c.BitAtivo, 1) = 1
+          AND (
+                c.IDEmpresa = :id_empresa
+                OR (:cnpj_empresa <> '' AND LTRIM(RTRIM(ISNULL(c.CNPJ, ''))) = :cnpj_empresa)
+          );
     """)
 
     row = db.session.execute(
@@ -346,7 +362,7 @@ def _validar_contrato_empresa(
         {
             "id_contrato": int(id_contrato_existente),
             "id_empresa": int(id_empresa),
-            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+            "cnpj_empresa": cnpj_empresa,
         },
     ).mappings().first()
 
@@ -354,9 +370,6 @@ def _validar_contrato_empresa(
         raise ValueError("O contrato selecionado não pertence à empresa informada ou não está ativo.")
 
     return dict(row)
-
-
-
 
 
 
@@ -571,9 +584,11 @@ def _montar_label_contrato_existente(contrato: Mapping[str, Any] | dict[str, Any
 
 
 
-
-
 def _listar_contratos_existentes_empresa(id_empresa: int) -> list[dict[str, object]]:
+    id_empresa_int = int(id_empresa or 0)
+    if id_empresa_int <= 0:
+        return []
+
     colunas_select: list[str] = [
         "c.IDFatoControleContratosEuromidia",
         "c.IDEmpresa",
@@ -618,36 +633,68 @@ def _listar_contratos_existentes_empresa(id_empresa: int) -> list[dict[str, obje
     elif _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataAtualizacao"):
         expressao_ordenacao = "c.DataAtualizacao DESC, c.IDFatoControleContratosEuromidia DESC"
 
-    sql = text(f"""
+    sql_empresa = text(f"""
+        SELECT TOP (1)
+            e.IDEmpresa,
+            e.CNPJ
+        FROM {TABELA_EMPRESAS} e
+        WHERE e.IDEmpresa = :id_empresa;
+    """)
+
+    empresa = db.session.execute(
+        sql_empresa,
+        {"id_empresa": id_empresa_int},
+    ).mappings().first()
+
+    if not empresa:
+        return []
+
+    cnpj_empresa = str(empresa.get("CNPJ") or "").strip()
+
+    def _executar_consulta(sql_consulta, parametros: dict[str, object]) -> list[dict[str, object]]:
+        rows = db.session.execute(sql_consulta, parametros).mappings().all()
+
+        contratos: list[dict[str, object]] = []
+        for row in rows:
+            item = dict(row)
+            item["label"] = _montar_label_contrato_existente(item)
+            contratos.append(item)
+
+        return contratos
+
+    sql_por_id_empresa = text(f"""
         SELECT
             {', '.join(colunas_select)}
         FROM {TABELA_CONTROLE_CONTRATOS} c
-        INNER JOIN {TABELA_EMPRESAS} e
-            ON e.IDEmpresa = c.IDEmpresa
         WHERE c.IDEmpresa = :id_empresa
-          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
           AND ISNULL(c.BitAtivo, 1) = 1
         ORDER BY {expressao_ordenacao};
     """)
 
-    rows = db.session.execute(
-        sql,
-        {
-            "id_empresa": int(id_empresa),
-            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
-        },
-    ).mappings().all()
+    contratos = _executar_consulta(
+        sql_por_id_empresa,
+        {"id_empresa": id_empresa_int},
+    )
 
-    contratos: list[dict[str, object]] = []
+    if contratos:
+        return contratos
 
-    for row in rows:
-        item = dict(row)
-        item["label"] = _montar_label_contrato_existente(item)
-        contratos.append(item)
+    if not cnpj_empresa:
+        return []
 
-    return contratos
+    sql_por_cnpj = text(f"""
+        SELECT
+            {', '.join(colunas_select)}
+        FROM {TABELA_CONTROLE_CONTRATOS} c
+        WHERE c.CNPJ = :cnpj
+          AND ISNULL(c.BitAtivo, 1) = 1
+        ORDER BY {expressao_ordenacao};
+    """)
 
-
+    return _executar_consulta(
+        sql_por_cnpj,
+        {"cnpj": cnpj_empresa},
+    )
 
 
 
@@ -801,7 +848,6 @@ def api_listar_contratos_empresa(id_empresa: int):
 
 
 
-
 @kanban_bp.route("/api/contratos/<int:id_contrato>/pontos", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -818,10 +864,7 @@ def api_listar_pontos_contrato(id_contrato: int):
             c.CNPJ,
             c.MarcaExibida
         FROM {TABELA_CONTROLE_CONTRATOS} c
-        INNER JOIN {TABELA_EMPRESAS} e
-            ON e.IDEmpresa = c.IDEmpresa
         WHERE c.IDFatoControleContratosEuromidia = :id_contrato
-          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
           AND ISNULL(c.BitAtivo, 1) = 1;
     """)
 
@@ -829,7 +872,6 @@ def api_listar_pontos_contrato(id_contrato: int):
         sql_contrato,
         {
             "id_contrato": int(id_contrato),
-            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
         },
     ).mappings().first()
 
@@ -860,9 +902,6 @@ def api_listar_pontos_contrato(id_contrato: int):
 
 
 
-
-
-
 @kanban_bp.route("/api/contratos/<int:id_contrato>/pontos/<string:cod_ponto>/faces", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -875,12 +914,10 @@ def api_listar_faces_contrato_ponto(id_contrato: int, cod_ponto: str):
         return jsonify({"ok": False, "msg": "CodPonto obrigatório."}), 400
 
     sql_contrato = text(f"""
-        SELECT TOP (1) 1
+        SELECT TOP (1)
+            c.IDFatoControleContratosEuromidia
         FROM {TABELA_CONTROLE_CONTRATOS} c
-        INNER JOIN {TABELA_EMPRESAS} e
-            ON e.IDEmpresa = c.IDEmpresa
         WHERE c.IDFatoControleContratosEuromidia = :id_contrato
-          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
           AND ISNULL(c.BitAtivo, 1) = 1;
     """)
 
@@ -888,7 +925,6 @@ def api_listar_faces_contrato_ponto(id_contrato: int, cod_ponto: str):
         sql_contrato,
         {
             "id_contrato": int(id_contrato),
-            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
         },
     ).scalar()
 
@@ -905,6 +941,7 @@ def api_listar_faces_contrato_ponto(id_contrato: int, cod_ponto: str):
             "faces": faces,
         }
     )
+
 
 
 

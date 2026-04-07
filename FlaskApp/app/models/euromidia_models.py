@@ -351,6 +351,8 @@ class FatoControleContratosEuromidia(db.Model):
 
     TotalPercentualComissaoCoordenacao = db.Column(db.Numeric(5, 2), nullable=True)
     IDCategoriaMarca = db.Column(db.Integer, nullable=True)
+    IDDimStatusContratos = db.Column(db.Integer, nullable=True)
+
 
     itens = db.relationship(
         "FatoControleContratosItensEuromidia",
@@ -890,3 +892,17 @@ class DimCheckingHistorico(db.Model):
             f"CodFace={self.CodFace!r} "
             f"BitChekin={self.BitChekin}>"
         )
+
+
+
+
+class DimStatusContratos(db.Model):
+    __tablename__ = "DimStatusContratos"
+    __table_args__ = {"schema": "Silver"}
+
+    IDDimStatusContratos = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    Status = db.Column(db.String(100), nullable=True)
+    IDEmpresaProprietaria = db.Column(db.Integer, nullable=True)
+
+    def __repr__(self):
+        return f"<DimStatusContratos IDDimStatusContratos={self.IDDimStatusContratos} Status={self.Status!r}>"

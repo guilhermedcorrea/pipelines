@@ -35,9 +35,6 @@
         white-space:nowrap;
       }
 
-      /* =========================
-         Filtros
-         ========================= */
       .filters{
         margin-top:14px;
         display:flex;
@@ -83,9 +80,6 @@
         color:#991b1b;
       }
 
-      /* =========================
-         Lista estilo grid
-         ========================= */
       .list-wrap{
         margin-top:14px;
         border:1px solid var(--border);
@@ -96,7 +90,7 @@
 
       .list-head{
         display:grid;
-        grid-template-columns: 86px 170px 130px 170px 1fr 1fr;
+        grid-template-columns: 86px 170px 130px 180px 170px 1fr 1fr;
         gap:0;
         padding: 12px 14px;
         border-bottom:1px solid var(--border);
@@ -108,7 +102,7 @@
 
       .row{
         display:grid;
-        grid-template-columns: 86px 170px 130px 170px 1fr 1fr;
+        grid-template-columns: 86px 170px 130px 180px 170px 1fr 1fr;
         gap:0;
         padding: 14px 14px;
         border-bottom:1px solid var(--border);
@@ -198,9 +192,29 @@
         color:var(--text);
       }
 
-      /* =========================
-         Paginação
-         ========================= */
+      .status-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:34px;
+        padding:6px 12px;
+        border-radius:999px;
+        border:1px solid rgba(0,40,132,.15);
+        background: rgba(0,40,132,.06);
+        color: var(--euro-blue);
+        font-weight:900;
+        white-space:nowrap;
+        max-width: 100%;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .status-badge.status-vazio{
+        border-color: rgba(100,116,139,.18);
+        background: rgba(100,116,139,.08);
+        color: #475569;
+      }
+
       .pager{
         padding: 12px 14px;
         display:flex;
@@ -210,10 +224,21 @@
         flex-wrap:wrap;
       }
 
-      @media (max-width: 1200px){
+      @media (max-width: 1360px){
         .list-head,
         .row{
-          grid-template-columns: 86px 170px 130px 1fr 1fr;
+          grid-template-columns: 86px 170px 130px 180px 1fr 1fr;
+        }
+
+        .hide-xl{
+          display:none;
+        }
+      }
+
+      @media (max-width: 1120px){
+        .list-head,
+        .row{
+          grid-template-columns: 86px 170px 130px 180px 1fr;
         }
 
         .hide-lg{
@@ -228,7 +253,7 @@
 
         .list-head,
         .row{
-          grid-template-columns: 72px 1fr 120px;
+          grid-template-columns: 72px 1fr 140px;
         }
 
         .hide-md{
@@ -248,8 +273,6 @@
         <h1 class="page-title" style="margin:0;">Lista de Contratos</h1>
         <span class="count-pill">☰ {{ paginacao.total if paginacao.total is not none else paginacao.fim }}</span>
       </div>
-
-     
     </div>
 
     <form method="GET" action="{{ url_for('Paineis.contratos_lista') }}">
@@ -283,8 +306,9 @@
       <div class="list-head">
         <div>Logo</div>
         <div>IDContrato</div>
-        <div>Data</div>
-        <div>Cidade</div>
+        <div class="hide-md">Data</div>
+        <div>Status</div>
+        <div class="hide-xl">Cidade</div>
         <div class="hide-md">Razão Social</div>
         <div class="hide-lg">Marca</div>
       </div>
@@ -315,7 +339,7 @@
               </span>
             </div>
 
-            <div class="data-col">
+            <div class="data-col hide-md">
               {% if c.DataLancamento %}
                 {{ c.DataLancamento.strftime("%d/%m/%Y") }}
               {% else %}
@@ -323,7 +347,13 @@
               {% endif %}
             </div>
 
-            <div class="ellipsis" style="font-weight:900;color:var(--text);">
+            <div class="ellipsis">
+              <span class="status-badge {{ 'status-vazio' if not c.StatusContrato else '' }}">
+                {{ c.StatusContrato or "—" }}
+              </span>
+            </div>
+
+            <div class="ellipsis hide-xl" style="font-weight:900;color:var(--text);">
               {{ c.CidadeExibicao or "—" }}
             </div>
 

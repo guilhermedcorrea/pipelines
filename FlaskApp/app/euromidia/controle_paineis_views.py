@@ -6,7 +6,7 @@ from ..models.euromidia_models import (DimPaineisEuromidia,DimFacesPaineis,Vende
                                        ,FatoControleContratosEuromidia
                                        ,FatoControleContratosItensEuromidia,DimEmpresas,DimCustoMensalPainel,
                                        DimMargemPaineisEuromidia,FatoOcupacaoPaineisEuromidia,DimCnaes,
-                                       DimClassificacacaoClientes,DimCustoPainel,DimCheckingHistorico)
+                                       DimClassificacacaoClientes,DimCustoPainel,DimCheckingHistorico,DimStatusContratos)
 
 from ..autenticacao.autenticacao_views import requer_permissao
 from ..models.autenticacao import (DimUsuarios,DimPerfilUsuario, DimPermissoes, PermissoesUsuario,)
@@ -29,18 +29,11 @@ import math
 from flask_login import current_user
 import threading
 import os
-
-    
-    
-
+from types import SimpleNamespace
 from PIL import Image, ImageOps
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import uuid
-
-
-
-
 from ..autenticacao.acl_menu_paineis import pode_acessar_menu_paineis, requer_item_menu_paineis
 
 
@@ -9139,14 +9132,9 @@ def checkout_disponibilidade():
 
 
 
-import os
-import time
-from types import SimpleNamespace
 
-from flask import request, render_template, current_app, url_for
-from flask_login import login_required
+
 from sqlalchemy import or_, desc, func, text
-
 
 @paineis_bp.get("/contratos")
 @login_required
@@ -9318,11 +9306,17 @@ def contratos_lista():
                 FatoControleContratosEuromidia.DataLancamento.label("DataLancamento"),
                 FatoControleContratosEuromidia.RazaoSocial.label("RazaoSocial"),
                 FatoControleContratosEuromidia.MarcaExibida.label("MarcaExibida"),
+                FatoControleContratosEuromidia.IDDimStatusContratos.label("IDDimStatusContratos"),
+                DimStatusContratos.Status.label("StatusContrato"),
                 subquery_cidades.c.CidadeExibicao.label("CidadeExibicao"),
             )
             .outerjoin(
                 subquery_cidades,
                 subquery_cidades.c.id_contrato == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
+            )
+            .outerjoin(
+                DimStatusContratos,
+                DimStatusContratos.IDDimStatusContratos == FatoControleContratosEuromidia.IDDimStatusContratos
             )
             .filter(
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.in_(ids_pagina)
