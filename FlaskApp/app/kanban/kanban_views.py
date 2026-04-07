@@ -10,13 +10,39 @@ from flask_login import current_user, login_required
 from sqlalchemy import text
 from flask_socketio import disconnect, emit, join_room, leave_room
 from ..extensions import cache, db, limiter, socketio
-
+from decimal import Decimal
 
 
 """Kanban Euromidia Comercial"""
 
 
 kanban_bp = Blueprint("kanban", __name__)
+
+
+
+
+
+
+
+
+
+
+TABELA_CONTROLE_CONTRATOS = "[Integracao].[Silver].[FatoControleContratosEuromidia]"
+TABELA_CONTROLE_CONTRATOS_ITENS = "[Integracao].[Silver].[FatoControleContratosItensEuromidia]"
+
+ID_TAG_TIPO_CONTRATO_ADITIVO = 8
+ID_TAG_TIPO_CONTRATO_NOVO = 9
+
+TIPO_SOLICITACAO_ADITIVO = "ADITIVO"
+TIPO_SOLICITACAO_NOVO = "NOVO_CONTRATO"
+
+VALOR_OPCAO_NOVO_CONTRATO = "NOVO_CONTRATO"
+VALOR_OPCAO_NOVO_PAINEL = "NOVO_PAINEL"
+ID_EMPRESA_PROPRIETARIA_CONTRATOS = 3
+
+
+
+
 
 
 
@@ -189,6 +215,774 @@ def _obter_id_empresa_proprietaria_usuario_logado() -> int | None:
 
     return None
 
+
+
+
+
+
+
+
+def _normalizar_tipo_contrato_card(valor: object) -> str | None:
+    texto = _normalizar_texto_comparacao(valor)
+
+    mapa = {
+        "aditivo": TIPO_SOLICITACAO_ADITIVO,
+        "novo contrato": TIPO_SOLICITACAO_NOVO,
+        "novo_contrato": TIPO_SOLICITACAO_NOVO,
+        "novocontrato": TIPO_SOLICITACAO_NOVO,
+    }
+    return mapa.get(texto)
+
+
+
+
+
+
+def _obter_tag_tipo_contrato(id_kanban: int, tipo_contrato: str) -> dict[str, object] | None:
+    tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
+
+    if tipo_norm == TIPO_SOLICITACAO_ADITIVO:
+        return (
+            _obter_tag_por_nome(id_kanban, NOME_TAG_TIPO_CONTRATO_ADITIVO, somente_ativa=True)
+            or {
+                "IDDimKanbanTag": ID_TAG_TIPO_CONTRATO_ADITIVO,
+                "NomeTag": NOME_TAG_TIPO_CONTRATO_ADITIVO,
+            }
+        )
+
+    if tipo_norm == TIPO_SOLICITACAO_NOVO:
+        return (
+            _obter_tag_por_nome(id_kanban, NOME_TAG_TIPO_CONTRATO_NOVO, somente_ativa=True)
+            or {
+                "IDDimKanbanTag": ID_TAG_TIPO_CONTRATO_NOVO,
+                "NomeTag": NOME_TAG_TIPO_CONTRATO_NOVO,
+            }
+        )
+
+    return None
+
+
+
+
+
+
+
+def _resolver_contexto_tipo_contrato_payload(
+    *,
+    id_empresa: object,
+    id_contrato_existente: object,
+    tipo_contrato_card: object,
+) -> dict[str, object]:
+    """
+    Regras:
+    1) sem contrato selecionado => sempre NOVO_CONTRATO
+    2) com contrato selecionado e tipo vazio => default ADITIVO
+    3) com contrato selecionado o usuário pode trocar para NOVO_CONTRATO
+    """
+    id_empresa_int = int(id_empresa) if id_empresa not in (None, "", 0) else None
+    id_contrato_int = int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None
+    tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato_card)
+
+    if id_contrato_int is None:
+        tipo_norm = TIPO_SOLICITACAO_NOVO
+    elif tipo_norm is None:
+        tipo_norm = TIPO_SOLICITACAO_ADITIVO
+
+    return {
+        "id_empresa": id_empresa_int,
+        "id_contrato_existente": id_contrato_int,
+        "tipo_contrato": tipo_norm,
+        "bit_aditivo": 1 if tipo_norm == TIPO_SOLICITACAO_ADITIVO else 0,
+        "bit_contrato_novo": 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _validar_contrato_empresa(
+    *,
+    id_empresa: int | None,
+    id_contrato_existente: int | None,
+) -> dict[str, object] | None:
+    if not id_contrato_existente:
+        return None
+
+    if not id_empresa:
+        raise ValueError("Selecione a empresa antes de escolher um contrato existente.")
+
+    sql = text(f"""
+        SELECT TOP (1)
+            c.IDFatoControleContratosEuromidia,
+            c.IDEmpresa,
+            c.NumeroContrato,
+            c.NumeroPrevia,
+            c.Referencia,
+            c.RazaoSocial,
+            c.CNPJ,
+            c.MarcaExibida,
+            c.BitAtivo,
+            c.IDDimStatusContratos
+        FROM {TABELA_CONTROLE_CONTRATOS} c
+        INNER JOIN {TABELA_EMPRESAS} e
+            ON e.IDEmpresa = c.IDEmpresa
+        WHERE c.IDFatoControleContratosEuromidia = :id_contrato
+          AND c.IDEmpresa = :id_empresa
+          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
+          AND ISNULL(c.BitAtivo, 1) = 1;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_contrato": int(id_contrato_existente),
+            "id_empresa": int(id_empresa),
+            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+        },
+    ).mappings().first()
+
+    if not row:
+        raise ValueError("O contrato selecionado não pertence à empresa informada ou não está ativo.")
+
+    return dict(row)
+
+
+
+
+
+
+
+
+
+
+
+
+def _validar_ponto_face_contrato(
+    *,
+    id_contrato_existente: int | None,
+    cod_ponto: object,
+    cod_face: object,
+) -> dict[str, object]:
+    cod_ponto_limpo = str(cod_ponto or "").strip()
+    cod_face_limpo = str(cod_face or "").strip().upper()
+
+    if not id_contrato_existente:
+        return {
+            "cod_ponto": None,
+            "cod_face": None,
+        }
+
+    if cod_ponto_limpo and _normalizar_texto_comparacao(cod_ponto_limpo) != _normalizar_texto_comparacao(VALOR_OPCAO_NOVO_PAINEL):
+        sql_ponto = text(f"""
+            SELECT TOP (1) 1
+            FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+            WHERE i.IDFatoControleContratoEuromidia = :id_contrato
+              AND LTRIM(RTRIM(ISNULL(i.CodPonto, ''))) = :cod_ponto
+              AND ISNULL(i.BitAtivo, 1) = 1;
+        """)
+        existe_ponto = db.session.execute(
+            sql_ponto,
+            {
+                "id_contrato": int(id_contrato_existente),
+                "cod_ponto": cod_ponto_limpo,
+            },
+        ).scalar()
+
+        if not existe_ponto:
+            raise ValueError("O CodPonto selecionado não pertence ao contrato informado.")
+
+    if cod_face_limpo and _normalizar_texto_comparacao(cod_face_limpo) != _normalizar_texto_comparacao(VALOR_OPCAO_NOVO_PAINEL):
+        if not cod_ponto_limpo:
+            raise ValueError("Selecione o CodPonto antes de escolher a face do contrato.")
+
+        sql_face = text(f"""
+            SELECT TOP (1) 1
+            FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+            WHERE i.IDFatoControleContratoEuromidia = :id_contrato
+              AND LTRIM(RTRIM(ISNULL(i.CodPonto, ''))) = :cod_ponto
+              AND UPPER(LTRIM(RTRIM(ISNULL(i.CodFace, '')))) = :cod_face
+              AND ISNULL(i.BitAtivo, 1) = 1;
+        """)
+        existe_face = db.session.execute(
+            sql_face,
+            {
+                "id_contrato": int(id_contrato_existente),
+                "cod_ponto": cod_ponto_limpo,
+                "cod_face": cod_face_limpo,
+            },
+        ).scalar()
+
+        if not existe_face:
+            raise ValueError("A CodFace selecionada não pertence ao CodPonto/contrato informado.")
+
+    return {
+        "cod_ponto": cod_ponto_limpo or None,
+        "cod_face": cod_face_limpo or None,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _sincronizar_tipo_contrato_card(
+    *,
+    id_card: int,
+    id_kanban: int,
+    id_fase_atual: int | None,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+    tipo_contrato: str,
+) -> dict[str, object]:
+    """
+    Regras:
+    - ADITIVO => BitAditivo=1, BitContratoNovo=0, tag Aditivo ativa, tag Novo Contrato removida
+    - NOVO_CONTRATO => BitAditivo=0, BitContratoNovo=1, tag Novo Contrato ativa, tag Aditivo removida
+    """
+    tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
+    if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
+        raise ValueError("Tipo de contrato inválido.")
+
+    tag_desejada = _obter_tag_tipo_contrato(id_kanban, tipo_norm)
+    tag_oposta = _obter_tag_tipo_contrato(
+        id_kanban,
+        TIPO_SOLICITACAO_NOVO if tipo_norm == TIPO_SOLICITACAO_ADITIVO else TIPO_SOLICITACAO_ADITIVO,
+    )
+
+    campos_update: list[str] = []
+    parametros_update: dict[str, object] = {"id_card": int(id_card)}
+
+    if _coluna_existe(TABELA_CARD, "BitAditivo"):
+        campos_update.append("BitAditivo = :bit_aditivo")
+        parametros_update["bit_aditivo"] = 1 if tipo_norm == TIPO_SOLICITACAO_ADITIVO else 0
+
+    if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
+        campos_update.append("BitContratoNovo = :bit_contrato_novo")
+        parametros_update["bit_contrato_novo"] = 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0
+
+    if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
+        campos_update.append("AtualizadoEm = GETDATE()")
+
+    if campos_update:
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+               SET {', '.join(campos_update)}
+             WHERE IDFatoKanbanCard = :id_card;
+        """)
+        db.session.execute(sql_upd, parametros_update)
+
+    tags_adicionadas: list[int] = []
+    tags_removidas: list[int] = []
+
+    if tag_oposta and int(tag_oposta.get("IDDimKanbanTag") or 0) > 0:
+        if _remover_tag_do_card(
+            id_card=int(id_card),
+            id_tag=int(tag_oposta.get("IDDimKanbanTag") or 0),
+            id_usuario=int(id_usuario),
+        ):
+            tags_removidas.append(int(tag_oposta.get("IDDimKanbanTag") or 0))
+
+    if tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
+        if _aplicar_tag_no_card(
+            id_card=int(id_card),
+            id_tag=int(tag_desejada.get("IDDimKanbanTag") or 0),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+        ):
+            tags_adicionadas.append(int(tag_desejada.get("IDDimKanbanTag") or 0))
+
+    return {
+        "tipo_contrato": tipo_norm,
+        "bit_aditivo": 1 if tipo_norm == TIPO_SOLICITACAO_ADITIVO else 0,
+        "bit_contrato_novo": 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0,
+        "tags_adicionadas": tags_adicionadas,
+        "tags_removidas": tags_removidas,
+        "id_tag_ativa": int(tag_desejada.get("IDDimKanbanTag") or 0) if tag_desejada else None,
+        "id_fase_atual": int(id_fase_atual or 0) or None,
+    }
+
+
+
+
+
+
+def _montar_label_contrato_existente(contrato: Mapping[str, Any] | dict[str, Any]) -> str:
+    item = dict(contrato or {})
+
+    id_contrato = int(
+        item.get("IDFatoControleContratosEuromidia")
+        or item.get("IDFatoControleContratoEuromidia")
+        or 0
+    )
+
+    numero_contrato = str(item.get("NumeroContrato") or "").strip()
+    numero_previa = str(item.get("NumeroPrevia") or "").strip()
+    referencia = str(item.get("Referencia") or "").strip()
+    razao_social = str(item.get("RazaoSocial") or "").strip()
+    cnpj = _formatar_cnpj(item.get("CNPJ"))
+
+    partes: list[str] = []
+
+    if numero_contrato:
+        partes.append(f"Contrato {numero_contrato}")
+    elif id_contrato > 0:
+        partes.append(f"Contrato #{id_contrato}")
+    else:
+        partes.append("Contrato")
+
+    if numero_previa:
+        partes.append(f"Prévia {numero_previa}")
+
+    if razao_social:
+        partes.append(razao_social)
+
+    if cnpj:
+        partes.append(cnpj)
+
+    if referencia:
+        partes.append(f"Ref. {referencia}")
+
+    return " | ".join([parte for parte in partes if str(parte).strip()])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _listar_contratos_existentes_empresa(id_empresa: int) -> list[dict[str, object]]:
+    colunas_select: list[str] = [
+        "c.IDFatoControleContratosEuromidia",
+        "c.IDEmpresa",
+        "c.NumeroContrato",
+        "c.NumeroPrevia",
+        "c.Referencia",
+        "c.RazaoSocial",
+        "c.CNPJ",
+    ]
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "MarcaExibida"):
+        colunas_select.append("c.MarcaExibida")
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataLancamento"):
+        colunas_select.append("c.DataLancamento")
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataAtualizacao"):
+        colunas_select.append("c.DataAtualizacao")
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "QuantidadePontos"):
+        colunas_select.append("c.QuantidadePontos")
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "QuantidadeFaces"):
+        colunas_select.append("c.QuantidadeFaces")
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "TotalFaturamentoLiquidoMensal"):
+        colunas_select.append("c.TotalFaturamentoLiquidoMensal")
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "IDDimStatusContratos"):
+        colunas_select.append("c.IDDimStatusContratos")
+
+    expressao_ordenacao = "c.IDFatoControleContratosEuromidia DESC"
+
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataAssinaturaRenovacao") and _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataAtualizacao"):
+        expressao_ordenacao = """
+            CASE
+                WHEN c.DataAssinaturaRenovacao IS NULL THEN c.DataAtualizacao
+                ELSE c.DataAssinaturaRenovacao
+            END DESC,
+            c.IDFatoControleContratosEuromidia DESC
+        """
+    elif _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataAtualizacao"):
+        expressao_ordenacao = "c.DataAtualizacao DESC, c.IDFatoControleContratosEuromidia DESC"
+
+    sql = text(f"""
+        SELECT
+            {', '.join(colunas_select)}
+        FROM {TABELA_CONTROLE_CONTRATOS} c
+        INNER JOIN {TABELA_EMPRESAS} e
+            ON e.IDEmpresa = c.IDEmpresa
+        WHERE c.IDEmpresa = :id_empresa
+          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
+          AND ISNULL(c.BitAtivo, 1) = 1
+        ORDER BY {expressao_ordenacao};
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_empresa": int(id_empresa),
+            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+        },
+    ).mappings().all()
+
+    contratos: list[dict[str, object]] = []
+
+    for row in rows:
+        item = dict(row)
+        item["label"] = _montar_label_contrato_existente(item)
+        contratos.append(item)
+
+    return contratos
+
+
+
+
+
+
+
+def _listar_cod_ponto_por_contrato(id_contrato: int) -> list[dict[str, object]]:
+    sql = text(f"""
+        SELECT
+            i.CodPonto,
+            MAX(i.CidadeExibicao) AS CidadeExibicao,
+            MAX(i.Tipo) AS TipoPainel,
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(i.CodFace, ''))), '')) AS QuantidadeFaces
+        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+        WHERE i.IDFatoControleContratoEuromidia = :id_contrato
+          AND ISNULL(i.BitAtivo, 1) = 1
+          AND NULLIF(LTRIM(RTRIM(ISNULL(i.CodPonto, ''))), '') IS NOT NULL
+        GROUP BY i.CodPonto
+        ORDER BY i.CodPonto ASC;
+    """)
+
+    rows = db.session.execute(sql, {"id_contrato": int(id_contrato)}).mappings().all()
+
+    resultado: list[dict[str, object]] = []
+    for row in rows:
+        item = dict(row)
+        item["label"] = (
+            f"{item.get('CodPonto')}"
+            f" | {str(item.get('TipoPainel') or '').strip()}"
+            f" | {str(item.get('CidadeExibicao') or '').strip()}"
+        ).strip(" |")
+        resultado.append(item)
+
+    return resultado
+
+
+
+
+
+
+
+
+
+def _listar_cod_face_por_contrato_ponto(id_contrato: int, cod_ponto: str) -> list[dict[str, object]]:
+    sql = text(f"""
+        SELECT
+            i.CodFace,
+            MAX(i.Tipo) AS TipoPainel,
+            MAX(i.CidadeExibicao) AS CidadeExibicao,
+            MAX(i.Cota) AS Cota,
+            MAX(i.FaturamentoLiquidoMensal) AS FaturamentoLiquidoMensal,
+            MAX(i.DataInicioPrevisto) AS DataInicioPrevisto,
+            MAX(i.DataTerminoPrevisto) AS DataTerminoPrevisto,
+            MAX(i.IDPainelEuromidia) AS IDPainelEuromidia,
+            MAX(i.IDDimFacesPaineis) AS IDDimFacesPaineis
+        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+        WHERE i.IDFatoControleContratoEuromidia = :id_contrato
+          AND LTRIM(RTRIM(ISNULL(i.CodPonto, ''))) = :cod_ponto
+          AND ISNULL(i.BitAtivo, 1) = 1
+          AND NULLIF(LTRIM(RTRIM(ISNULL(i.CodFace, ''))), '') IS NOT NULL
+        GROUP BY i.CodFace
+        ORDER BY i.CodFace ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_contrato": int(id_contrato),
+            "cod_ponto": str(cod_ponto).strip(),
+        },
+    ).mappings().all()
+
+    resultado: list[dict[str, object]] = []
+    for row in rows:
+        item = dict(row)
+        item["label"] = (
+            f"{item.get('CodFace')}"
+            f" | {str(item.get('TipoPainel') or '').strip()}"
+            f" | Cota {str(item.get('Cota') or '').strip()}"
+        ).strip(" |")
+        resultado.append(item)
+
+    return resultado
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@kanban_bp.route("/api/empresas/<int:id_empresa>/contratos", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_listar_contratos_empresa(id_empresa: int):
+    _assert_login()
+    _id_empresa_usuario_or_403()
+
+    try:
+        sql_empresa = text(f"""
+            SELECT TOP (1)
+                IDEmpresa,
+                IDEmpresaProprietaria,
+                RazaoSocial,
+                CNPJ
+            FROM {TABELA_EMPRESAS}
+            WHERE IDEmpresa = :id_empresa;
+        """)
+
+        empresa = db.session.execute(
+            sql_empresa,
+            {"id_empresa": int(id_empresa)},
+        ).mappings().first()
+
+        if not empresa:
+            return jsonify({"ok": False, "msg": "Empresa não encontrada."}), 404
+
+        contratos = _listar_contratos_existentes_empresa(int(id_empresa))
+
+        return jsonify(
+            {
+                "ok": True,
+                "empresa": dict(empresa),
+                "contratos": contratos,
+                "tem_contratos": bool(contratos),
+                "opcoes": [
+                    {"valor": VALOR_OPCAO_NOVO_CONTRATO, "label": "Novo Contrato"}
+                ],
+            }
+        )
+
+    except Exception as erro:
+        current_app.logger.exception(
+            "KANBAN CONTRATOS EMPRESA: erro ao listar contratos. id_empresa=%s",
+            id_empresa,
+        )
+        return jsonify(
+            {
+                "ok": False,
+                "msg": "Erro ao listar contratos da empresa.",
+                "erro": str(erro),
+            }
+        ), 500
+
+
+
+
+
+
+@kanban_bp.route("/api/contratos/<int:id_contrato>/pontos", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_listar_pontos_contrato(id_contrato: int):
+    _assert_login()
+    _id_empresa_usuario_or_403()
+
+    sql_contrato = text(f"""
+        SELECT TOP (1)
+            c.IDFatoControleContratosEuromidia,
+            c.IDEmpresa,
+            c.NumeroContrato,
+            c.RazaoSocial,
+            c.CNPJ,
+            c.MarcaExibida
+        FROM {TABELA_CONTROLE_CONTRATOS} c
+        INNER JOIN {TABELA_EMPRESAS} e
+            ON e.IDEmpresa = c.IDEmpresa
+        WHERE c.IDFatoControleContratosEuromidia = :id_contrato
+          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
+          AND ISNULL(c.BitAtivo, 1) = 1;
+    """)
+
+    contrato = db.session.execute(
+        sql_contrato,
+        {
+            "id_contrato": int(id_contrato),
+            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+        },
+    ).mappings().first()
+
+    if not contrato:
+        return jsonify({"ok": False, "msg": "Contrato não encontrado."}), 404
+
+    pontos = _listar_cod_ponto_por_contrato(int(id_contrato))
+
+    return jsonify(
+        {
+            "ok": True,
+            "contrato": dict(contrato),
+            "pontos": pontos,
+            "opcoes": [
+                {"valor": VALOR_OPCAO_NOVO_PAINEL, "label": "Novo Painel"}
+            ],
+        }
+    )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@kanban_bp.route("/api/contratos/<int:id_contrato>/pontos/<string:cod_ponto>/faces", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_listar_faces_contrato_ponto(id_contrato: int, cod_ponto: str):
+    _assert_login()
+    _id_empresa_usuario_or_403()
+
+    cod_ponto_limpo = str(cod_ponto or "").strip()
+    if not cod_ponto_limpo:
+        return jsonify({"ok": False, "msg": "CodPonto obrigatório."}), 400
+
+    sql_contrato = text(f"""
+        SELECT TOP (1) 1
+        FROM {TABELA_CONTROLE_CONTRATOS} c
+        INNER JOIN {TABELA_EMPRESAS} e
+            ON e.IDEmpresa = c.IDEmpresa
+        WHERE c.IDFatoControleContratosEuromidia = :id_contrato
+          AND e.IDEmpresaProprietaria = :id_empresa_proprietaria_contratos
+          AND ISNULL(c.BitAtivo, 1) = 1;
+    """)
+
+    contrato_existe = db.session.execute(
+        sql_contrato,
+        {
+            "id_contrato": int(id_contrato),
+            "id_empresa_proprietaria_contratos": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+        },
+    ).scalar()
+
+    if not contrato_existe:
+        return jsonify({"ok": False, "msg": "Contrato não encontrado."}), 404
+
+    faces = _listar_cod_face_por_contrato_ponto(int(id_contrato), cod_ponto_limpo)
+
+    return jsonify(
+        {
+            "ok": True,
+            "id_contrato": int(id_contrato),
+            "cod_ponto": cod_ponto_limpo,
+            "faces": faces,
+        }
+    )
+
+
+
+def _sincronizar_tipo_contrato_card(
+    *,
+    id_card: int,
+    id_kanban: int,
+    id_fase_atual: int | None,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+    tipo_contrato: str,
+) -> dict[str, object]:
+    """
+    Regras:
+    - ADITIVO => BitAditivo=1, BitContratoNovo=0, tag Aditivo ativa, tag Novo Contrato removida
+    - NOVO_CONTRATO => BitAditivo=0, BitContratoNovo=1, tag Novo Contrato ativa, tag Aditivo removida
+    """
+    tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
+    if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
+        raise ValueError("Tipo de contrato inválido.")
+
+    tag_desejada = _obter_tag_tipo_contrato(id_kanban, tipo_norm)
+    tag_oposta = _obter_tag_tipo_contrato(
+        id_kanban,
+        TIPO_SOLICITACAO_NOVO if tipo_norm == TIPO_SOLICITACAO_ADITIVO else TIPO_SOLICITACAO_ADITIVO,
+    )
+
+    campos_update: list[str] = []
+    parametros_update: dict[str, object] = {"id_card": int(id_card)}
+
+    if _coluna_existe(TABELA_CARD, "BitAditivo"):
+        campos_update.append("BitAditivo = :bit_aditivo")
+        parametros_update["bit_aditivo"] = 1 if tipo_norm == TIPO_SOLICITACAO_ADITIVO else 0
+
+    if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
+        campos_update.append("BitContratoNovo = :bit_contrato_novo")
+        parametros_update["bit_contrato_novo"] = 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0
+
+    if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
+        campos_update.append("AtualizadoEm = GETDATE()")
+
+    if campos_update:
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+               SET {', '.join(campos_update)}
+             WHERE IDFatoKanbanCard = :id_card;
+        """)
+        db.session.execute(sql_upd, parametros_update)
+
+    tags_adicionadas: list[int] = []
+    tags_removidas: list[int] = []
+
+    if tag_oposta and int(tag_oposta.get("IDDimKanbanTag") or 0) > 0:
+        if _remover_tag_do_card(
+            id_card=int(id_card),
+            id_tag=int(tag_oposta.get("IDDimKanbanTag") or 0),
+            id_usuario=int(id_usuario),
+        ):
+            tags_removidas.append(int(tag_oposta.get("IDDimKanbanTag") or 0))
+
+    if tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
+        if _aplicar_tag_no_card(
+            id_card=int(id_card),
+            id_tag=int(tag_desejada.get("IDDimKanbanTag") or 0),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+        ):
+            tags_adicionadas.append(int(tag_desejada.get("IDDimKanbanTag") or 0))
+
+    return {
+        "tipo_contrato": tipo_norm,
+        "bit_aditivo": 1 if tipo_norm == TIPO_SOLICITACAO_ADITIVO else 0,
+        "bit_contrato_novo": 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0,
+        "tags_adicionadas": tags_adicionadas,
+        "tags_removidas": tags_removidas,
+        "id_tag_ativa": int(tag_desejada.get("IDDimKanbanTag") or 0) if tag_desejada else None,
+        "id_fase_atual": int(id_fase_atual or 0) or None,
+    }
 
 
 
@@ -2558,78 +3352,51 @@ def _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas: list[dict[str, Any]]
     )
 
 
+
 def _obter_id_status_contrato_em_avaliacao() -> int:
     """
-    Resolve dinamicamente o ID do status 'Em Avaliação' na dimensão de status.
-    Ajuste o nome da tabela se no seu banco ela estiver em outro schema.
+    Quando a tag 'Contrato em Avaliação' entra no card,
+    a solicitação de contrato deve nascer com IDDimStatusContratos = 1.
+
+    Importante:
+    - aqui eu NÃO procuro status pelo texto da DimStatusContratos;
+    - eu retorno diretamente o ID definido pela sua regra de negócio;
+    - ainda assim eu valido se esse ID existe na tabela para evitar gravar lixo.
     """
     if not _objeto_existe(TABELA_STATUS_CONTRATOS):
         raise RuntimeError(
-            f"A tabela de status {TABELA_STATUS_CONTRATOS} não existe. Ajuste a constante TABELA_STATUS_CONTRATOS."
+            f"A tabela {TABELA_STATUS_CONTRATOS} não existe."
         )
 
-    coluna_id = "IDDimStatusContratos"
-    if not _coluna_existe(TABELA_STATUS_CONTRATOS, coluna_id):
+    if not _coluna_existe(TABELA_STATUS_CONTRATOS, "IDDimStatusContratos"):
         raise RuntimeError(
-            f"A coluna {coluna_id} não existe em {TABELA_STATUS_CONTRATOS}."
+            f"A coluna IDDimStatusContratos não existe em {TABELA_STATUS_CONTRATOS}."
         )
 
-    colunas_codigo = [
-        coluna
-        for coluna in ("CodigoStatus", "Codigo", "Sigla", "CodigoSituacao")
-        if _coluna_existe(TABELA_STATUS_CONTRATOS, coluna)
-    ]
-
-    colunas_nome = [
-        coluna
-        for coluna in ("NomeStatus", "Nome", "Descricao", "DescricaoStatus")
-        if _coluna_existe(TABELA_STATUS_CONTRATOS, coluna)
-    ]
-
-    if not colunas_codigo and not colunas_nome:
-        raise RuntimeError(
-            f"Não encontrei colunas de código/nome em {TABELA_STATUS_CONTRATOS} para localizar o status 'Em Avaliação'."
-        )
-
-    filtros_status: list[str] = []
-
-    for coluna in colunas_codigo:
-        filtros_status.append(
-            f"UPPER(LTRIM(RTRIM(ISNULL({coluna}, '')))) IN ('EM_AVALIACAO', 'EM AVALIACAO', 'AVALIACAO')"
-        )
-
-    for coluna in colunas_nome:
-        filtros_status.append(
-            f"UPPER(LTRIM(RTRIM(ISNULL({coluna}, '')))) IN ('EM AVALIAÇÃO', 'EM AVALIACAO', 'CONTRATO EM AVALIAÇÃO', 'CONTRATO EM AVALIACAO')"
-        )
-
-    filtro_ativo = ""
-    if _coluna_existe(TABELA_STATUS_CONTRATOS, "Ativo"):
-        filtro_ativo = "AND Ativo = 1"
-    elif _coluna_existe(TABELA_STATUS_CONTRATOS, "BitAtivo"):
-        filtro_ativo = "AND BitAtivo = 1"
+    id_status_contrato = 1
 
     sql = text(
         f"""
         SELECT TOP (1)
-            {coluna_id} AS IDDimStatusContratos
+            IDDimStatusContratos
         FROM {TABELA_STATUS_CONTRATOS}
-        WHERE (
-            {" OR ".join(filtros_status)}
-        )
-        {filtro_ativo}
-        ORDER BY {coluna_id} ASC;
+        WHERE IDDimStatusContratos = :id_status;
         """
     )
 
-    valor = db.session.execute(sql).scalar()
+    valor = db.session.execute(
+        sql,
+        {"id_status": int(id_status_contrato)},
+    ).scalar()
 
     if valor in (None, ""):
         raise RuntimeError(
-            "Não encontrei o status 'Em Avaliação' na DimStatusContratos. Cadastre esse status antes de usar a tag."
+            f"O IDDimStatusContratos={id_status_contrato} não existe em {TABELA_STATUS_CONTRATOS}."
         )
 
     return int(valor)
+
+
 
 
 def _obter_valor_mensal_item_solicitacao(item: dict[str, Any]) -> Decimal | None:
@@ -2638,6 +3405,7 @@ def _obter_valor_mensal_item_solicitacao(item: dict[str, Any]) -> Decimal | None
         if valor is not None:
             return valor
     return None
+
 
 
 def _montar_resumo_paineis_solicitacao(
@@ -6162,17 +6930,37 @@ def api_empresas_buscar():
     _assert_login()
 
     q = (request.args.get("q") or "").strip()
-    if len(q) < 2:
+    q_digits = "".join([c for c in q if c.isdigit()])
+
+    if not q and not q_digits:
+        sql = text("""
+            SELECT TOP 80
+                e.IDEmpresa,
+                e.RazaoSocial,
+                e.CNPJ,
+                e.CNAE,
+                c.Classe,
+                c.Setor
+            FROM [Integracao].[Silver].[DimEmpresas] e
+            LEFT JOIN [Integracao].[Silver].[DimCnaes] c
+              ON c.cnaepadrao = e.CNAE
+            WHERE e.RazaoSocial IS NOT NULL
+              AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
+            ORDER BY e.RazaoSocial ASC;
+        """)
+        empresas = db.session.execute(sql).mappings().all()
+        return jsonify({"ok": True, "empresas": _rows_para_dicts(empresas)})
+
+    if len(q) < 2 and len(q_digits) < 4:
         return jsonify({"ok": True, "empresas": []})
 
-    q_digits = "".join([c for c in q if c.isdigit()])
     chave = _chave_cache_json("kanban:api:empresas:buscar", q.lower(), q_digits)
     em_cache = _cache_json_get(chave)
     if em_cache is not None:
         return jsonify(em_cache)
 
     sql = text("""
-        SELECT TOP 25
+        SELECT TOP 80
             e.IDEmpresa,
             e.RazaoSocial,
             e.CNPJ,
@@ -6182,11 +6970,19 @@ def api_empresas_buscar():
         FROM [Integracao].[Silver].[DimEmpresas] e
         LEFT JOIN [Integracao].[Silver].[DimCnaes] c
           ON c.cnaepadrao = e.CNAE
-        WHERE (e.RazaoSocial LIKE :q_like)
-           OR (e.CNPJ LIKE :q_like)
-           OR (:q_digits <> '' AND REPLACE(REPLACE(REPLACE(e.CNPJ,'.',''),'/',''),'-','') LIKE :q_digits_like)
+        WHERE e.RazaoSocial IS NOT NULL
+          AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
+          AND (
+                e.RazaoSocial LIKE :q_like
+             OR e.CNPJ LIKE :q_like
+             OR (:q_digits <> '' AND REPLACE(REPLACE(REPLACE(e.CNPJ,'.',''),'/',''),'-','') LIKE :q_digits_like)
+          )
         ORDER BY
-            CASE WHEN e.RazaoSocial LIKE :q_like_inicio THEN 0 ELSE 1 END,
+            CASE
+                WHEN e.RazaoSocial LIKE :q_like_inicio THEN 0
+                WHEN :q_digits <> '' AND REPLACE(REPLACE(REPLACE(e.CNPJ,'.',''),'/',''),'-','') LIKE :q_digits_inicio THEN 1
+                ELSE 2
+            END,
             e.RazaoSocial ASC;
     """)
     empresas = db.session.execute(
@@ -6196,6 +6992,7 @@ def api_empresas_buscar():
             "q_like_inicio": f"{q}%",
             "q_digits": q_digits,
             "q_digits_like": f"%{q_digits}%",
+            "q_digits_inicio": f"{q_digits}%",
         },
     ).mappings().all()
 
@@ -6205,6 +7002,7 @@ def api_empresas_buscar():
 
 
 @kanban_bp.route("/api/paineis", methods=["GET"])
+
 @login_required
 @limiter.limit("60/minute")
 def api_paineis_lista():
@@ -14512,28 +15310,18 @@ def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
 
 
 
-
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
 @login_required
-@limiter.limit("120/minute")
+@limiter.limit("60/minute")
 def api_card_criar(id_kanban: int):
     etapa = "inicio"
     novo_id = None
 
     try:
-        print("\n" + "=" * 120)
-        print(f"[KANBAN][CRIAR_CARD] INICIO id_kanban={id_kanban}")
-        print(f"[KANBAN][CRIAR_CARD] method={request.method} path={request.path}")
-        print(f"[KANBAN][CRIAR_CARD] content_type={request.content_type}")
-        print(f"[KANBAN][CRIAR_CARD] is_json={request.is_json}")
-
-        etapa = "autenticacao"
         id_usuario = _assert_login()
         id_emp = _id_empresa_usuario_or_403()
         _obter_kanban_autorizado(id_kanban)
-        print(f"[KANBAN][CRIAR_CARD] autenticacao_ok id_usuario={id_usuario} id_emp={id_emp}")
 
-        etapa = "payload"
         payload = request.get_json(silent=True) or {}
 
         titulo = (payload.get("titulo") or "").strip()
@@ -14542,40 +15330,25 @@ def api_card_criar(id_kanban: int):
         id_empresa_relacionada = payload.get("id_empresa")
         id_tipo_cliente_desconto = payload.get("id_tipo_cliente_desconto")
 
-        print(
-            "[KANBAN][CRIAR_CARD] payload_tratado "
-            f"titulo={titulo!r} "
-            f"descricao={descricao!r} "
-            f"id_fase={id_fase!r} "
-            f"id_empresa_relacionada={id_empresa_relacionada!r} "
-            f"id_tipo_cliente_desconto={id_tipo_cliente_desconto!r}"
-        )
+        id_contrato_existente = payload.get("id_contrato_existente")
+        tipo_contrato_card = payload.get("tipo_contrato_card")
+        cod_ponto_contrato = payload.get("cod_ponto_contrato")
+        cod_face_contrato = payload.get("cod_face_contrato")
 
-        etapa = "validacao_titulo"
         if len(titulo) < 2:
-            print("[KANBAN][CRIAR_CARD] ERRO validacao_titulo: titulo invalido")
             return jsonify({"ok": False, "msg": "Título inválido"}), 400
 
-        etapa = "validacao_fase_obrigatoria"
         if not id_fase:
-            print("[KANBAN][CRIAR_CARD] ERRO validacao_fase_obrigatoria: fase ausente")
             return jsonify({"ok": False, "msg": "Fase obrigatória"}), 400
 
-        etapa = "validacao_fase_kanban"
-        fase_valida = _validar_fase_do_kanban(id_kanban, id_fase)
-        print(f"[KANBAN][CRIAR_CARD] fase_valida={fase_valida}")
-        if not fase_valida:
-            print("[KANBAN][CRIAR_CARD] ERRO validacao_fase_kanban: fase invalida para o kanban")
+        if not _validar_fase_do_kanban(id_kanban, id_fase):
             return jsonify({"ok": False, "msg": "Fase inválida para este kanban"}), 400
 
-        etapa = "validacao_empresa_relacionada"
         id_empresa_relacionada_int = None
         if id_empresa_relacionada not in (None, ""):
             try:
                 id_empresa_relacionada_int = int(id_empresa_relacionada)
-                print(f"[KANBAN][CRIAR_CARD] id_empresa_relacionada_int={id_empresa_relacionada_int}")
-            except Exception as exc:
-                print(f"[KANBAN][CRIAR_CARD] ERRO empresa invalida ao converter: {exc}")
+            except Exception:
                 return jsonify({"ok": False, "msg": "Empresa inválida"}), 400
 
             sql_emp = text(f"""
@@ -14588,13 +15361,26 @@ def api_card_criar(id_kanban: int):
                 {"id_empresa": id_empresa_relacionada_int},
             ).scalar()
 
-            print(f"[KANBAN][CRIAR_CARD] empresa_existe={empresa_existe}")
-
             if not empresa_existe:
-                print("[KANBAN][CRIAR_CARD] ERRO empresa nao encontrada")
                 return jsonify({"ok": False, "msg": "Empresa não encontrada"}), 400
 
-        etapa = "validacao_tipo_cliente_desconto"
+        contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
+            id_empresa=id_empresa_relacionada_int,
+            id_contrato_existente=id_contrato_existente,
+            tipo_contrato_card=tipo_contrato_card,
+        )
+
+        contrato_existente = _validar_contrato_empresa(
+            id_empresa=contexto_tipo_contrato["id_empresa"],
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+        )
+
+        validacao_ponto_face = _validar_ponto_face_contrato(
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto=cod_ponto_contrato,
+            cod_face=cod_face_contrato,
+        )
+
         id_tipo_cliente_desconto_int = None
         if id_tipo_cliente_desconto not in (None, "", 0):
             try:
@@ -14606,27 +15392,14 @@ def api_card_criar(id_kanban: int):
                 int(item.get("IDDimKanbanTipoClienteDesconto") or 0)
                 for item in _obter_tipos_cliente_desconto()
             }
+
             if id_tipo_cliente_desconto_int not in tipos_validos:
                 return jsonify({"ok": False, "msg": "Tipo de cliente inválido"}), 400
 
         mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto_int)
-
-        etapa = "descobrir_colunas_dinamicas"
         nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
-
         coluna_id_dim_usuarios_existe = _coluna_existe(TABELA_CARD, "IDDimUsuarios")
         coluna_iddimkanbanorigem_existe = _coluna_existe(TABELA_CARD, "IDDimKanbanOrigem")
-
-        print(
-            "[KANBAN][CRIAR_CARD] colunas_dinamicas "
-            f"nome_coluna_empresa={nome_coluna_empresa!r} "
-            f"coluna_id_dim_usuarios_existe={coluna_id_dim_usuarios_existe} "
-            f"coluna_iddimkanbanorigem_existe={coluna_iddimkanbanorigem_existe}"
-        )
-
-        etapa = "montagem_insert"
-        print(f"[KANBAN][CRIAR_CARD] id_usuario_logado={id_usuario}")
-        print("[KANBAN][CRIAR_CARD] vou gravar id_usuario em IDVendedorUsuario e, se existir, também em IDDimUsuarios")
 
         status_card_inicial = _obter_status_card_para_fase(id_fase)
         id_status_card_inicial = _obter_id_status_card_por_codigo(status_card_inicial)
@@ -14683,6 +15456,16 @@ def api_card_criar(id_kanban: int):
             valores.append(":bit_planejador")
             params["bit_planejador"] = int(mapa_bits_tipo_cliente["BitPlanejador"])
 
+        if _coluna_existe(TABELA_CARD, "BitAditivo"):
+            colunas.append("BitAditivo")
+            valores.append(":bit_aditivo")
+            params["bit_aditivo"] = int(contexto_tipo_contrato["bit_aditivo"])
+
+        if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
+            colunas.append("BitContratoNovo")
+            valores.append(":bit_contrato_novo")
+            params["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
+
         if coluna_id_dim_usuarios_existe:
             colunas.append("IDDimUsuarios")
             valores.append(":id_usuario")
@@ -14709,20 +15492,19 @@ def api_card_criar(id_kanban: int):
                 ({', '.join(valores)});
         """
 
-        print(f"[KANBAN][CRIAR_CARD] tabela_card={TABELA_CARD}")
-        print(f"[KANBAN][CRIAR_CARD] colunas_insert={colunas}")
-        print(f"[KANBAN][CRIAR_CARD] valores_insert={valores}")
-        print(f"[KANBAN][CRIAR_CARD] params_insert={params}")
-        print(f"[KANBAN][CRIAR_CARD] sql_insert=\n{sql_insert}")
-
-        etapa = "executar_insert"
         novo_id = db.session.execute(text(sql_insert), params).scalar()
-        print(f"[KANBAN][CRIAR_CARD] novo_id={novo_id}")
-
         if not novo_id:
             raise RuntimeError("O INSERT não retornou IDFatoKanbanCard.")
 
-        etapa = "aplicar_tag_em_atendimento"
+        sincronizacao_tipo = _sincronizar_tipo_contrato_card(
+            id_card=int(novo_id),
+            id_kanban=int(id_kanban),
+            id_fase_atual=int(id_fase),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+            tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
+        )
+
         _garantir_tag_em_atendimento_no_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -14731,11 +15513,16 @@ def api_card_criar(id_kanban: int):
             falhar_se_nao_existir=True,
         )
 
-        etapa = "snapshot_depois"
         snapshot_depois = _obter_snapshot_card_log(int(novo_id), incluir_inativo=True)
-        print(f"[KANBAN][CRIAR_CARD] snapshot_depois={snapshot_depois}")
 
-        etapa = "registrar_log_criacao"
+        observacao_log = (
+            "Card criado via quadro Kanban"
+            f" | tipo_contrato={sincronizacao_tipo.get('tipo_contrato')}"
+            f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente') or 'NULL'}"
+            f" | cod_ponto_contrato={validacao_ponto_face.get('cod_ponto') or 'NULL'}"
+            f" | cod_face_contrato={validacao_ponto_face.get('cod_face') or 'NULL'}"
+        )
+
         _registrar_log_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -14745,12 +15532,11 @@ def api_card_criar(id_kanban: int):
             subtipo_evento="CRIACAO",
             id_fase_de=None,
             id_fase_para=int(id_fase) if id_fase else None,
-            observacao="Card criado via quadro Kanban",
+            observacao=observacao_log[:2000],
             payload_antes=None,
             payload_depois=snapshot_depois,
         )
 
-        etapa = "registrar_historico_status"
         _registrar_status_historico_card(
             id_card=int(novo_id),
             id_fase=int(id_fase),
@@ -14759,19 +15545,11 @@ def api_card_criar(id_kanban: int):
             id_empresa_proprietaria=id_emp,
         )
 
-        etapa = "db_commit"
         db.session.commit()
-        print(f"[KANBAN][CRIAR_CARD] COMMIT OK novo_id={novo_id}")
 
-        etapa = "invalidar_cache"
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=int(novo_id))
-        print(f"[KANBAN][CRIAR_CARD] cache invalidado id_emp={id_emp} id_kanban={id_kanban} id_card={novo_id}")
-
-        etapa = "detalhe"
         detalhe = _obter_card_detalhe_payload(int(novo_id))
-        print(f"[KANBAN][CRIAR_CARD] detalhe_card carregado ok id_card={novo_id}")
 
-        etapa = "emitir_evento_socket"
         _emitir_evento_kanban(
             id_kanban,
             "card_criado",
@@ -14780,12 +15558,10 @@ def api_card_criar(id_kanban: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "tipo_contrato": sincronizacao_tipo,
+                "contrato_existente": contrato_existente,
             },
         )
-        print(f"[KANBAN][CRIAR_CARD] evento socket emitido id_kanban={id_kanban}")
-
-        print(f"[KANBAN][CRIAR_CARD] FIM OK novo_id={novo_id}")
-        print("=" * 120 + "\n")
 
         return jsonify(
             {
@@ -14796,20 +15572,24 @@ def api_card_criar(id_kanban: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "tipo_contrato": sincronizacao_tipo,
+                "contrato_existente": contrato_existente,
             }
         ), 201
 
     except ValueError as exc:
         db.session.rollback()
-        print(f"[KANBAN][CRIAR_CARD] ROLLBACK por ValueError etapa={etapa} erro={exc}")
         current_app.logger.exception("Erro de validação ao criar card. etapa=%s", etapa)
         return jsonify({"ok": False, "msg": str(exc)}), 400
 
     except Exception as exc:
         db.session.rollback()
-        print(f"[KANBAN][CRIAR_CARD] ROLLBACK por Exception etapa={etapa} erro={exc}")
         current_app.logger.exception("Erro ao criar card no kanban %s. etapa=%s", id_kanban, etapa)
         return jsonify({"ok": False, "msg": f"Erro ao criar card: {str(exc)}"}), 500
+
+
+
+
 
 
 
@@ -14841,6 +15621,11 @@ def api_card_atualizar(id_card: int):
         versao_concorrencia = payload.get("versao_concorrencia")
         painel_faces_payload = payload.get("painel_faces")
 
+        id_contrato_existente = payload.get("id_contrato_existente")
+        tipo_contrato_card = payload.get("tipo_contrato_card")
+        cod_ponto_contrato = payload.get("cod_ponto_contrato")
+        cod_face_contrato = payload.get("cod_face_contrato")
+
         if not titulo:
             return jsonify({"ok": False, "msg": "Título do card é obrigatório."}), 400
 
@@ -14851,19 +15636,17 @@ def api_card_atualizar(id_card: int):
             versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
             if not versao_concorrencia_bytes:
                 detalhe_atual = _obter_card_detalhe_payload(id_card)
-                return (
-                    jsonify(
-                        {
-                            "ok": False,
-                            "msg": "Versão de concorrência inválida ou ausente.",
-                            "card_atual": detalhe_atual.get("card"),
-                        }
-                    ),
-                    409,
-                )
+                return jsonify(
+                    {
+                        "ok": False,
+                        "msg": "Versão de concorrência inválida ou ausente.",
+                        "card_atual": detalhe_atual.get("card"),
+                    }
+                ), 409
 
         id_tipo_cliente_desconto_int = None
         mapa_bits_tipo_cliente = None
+
         if tipo_cliente_desconto_informado:
             if id_tipo_cliente_desconto not in (None, "", 0):
                 try:
@@ -14875,15 +15658,35 @@ def api_card_atualizar(id_card: int):
                     int(item.get("IDDimKanbanTipoClienteDesconto") or 0)
                     for item in _obter_tipos_cliente_desconto()
                 }
+
                 if id_tipo_cliente_desconto_int not in tipos_validos:
                     return jsonify({"ok": False, "msg": "Tipo de cliente inválido."}), 400
 
             mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto_int)
 
+        id_empresa_relacionada_int = int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+
+        contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
+            id_empresa=id_empresa_relacionada_int,
+            id_contrato_existente=id_contrato_existente,
+            tipo_contrato_card=tipo_contrato_card,
+        )
+
+        contrato_existente = _validar_contrato_empresa(
+            id_empresa=contexto_tipo_contrato["id_empresa"],
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+        )
+
+        validacao_ponto_face = _validar_ponto_face_contrato(
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto=cod_ponto_contrato,
+            cod_face=cod_face_contrato,
+        )
+
         snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
         campos_update: list[str] = []
-        params_update: dict[str, Any] = {
+        params_update: dict[str, object] = {
             "id_card": int(id_card),
             "titulo": titulo[:300],
             "descricao": descricao,
@@ -14898,9 +15701,7 @@ def api_card_atualizar(id_card: int):
         nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
         if nome_coluna_empresa:
             campos_update.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
-            params_update["id_empresa_relacionada"] = (
-                int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
-            )
+            params_update["id_empresa_relacionada"] = id_empresa_relacionada_int
 
         if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
             campos_update.append("AtualizadoEm = GETDATE()")
@@ -14917,6 +15718,14 @@ def api_card_atualizar(id_card: int):
             if _coluna_existe(TABELA_CARD, "BitPlanejador"):
                 campos_update.append("BitPlanejador = :bit_planejador")
                 params_update["bit_planejador"] = int(mapa_bits_tipo_cliente["BitPlanejador"])
+
+        if _coluna_existe(TABELA_CARD, "BitAditivo"):
+            campos_update.append("BitAditivo = :bit_aditivo_contrato")
+            params_update["bit_aditivo_contrato"] = int(contexto_tipo_contrato["bit_aditivo"])
+
+        if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
+            campos_update.append("BitContratoNovo = :bit_contrato_novo")
+            params_update["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
 
         output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
         where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
@@ -14938,32 +15747,38 @@ def api_card_atualizar(id_card: int):
                 INSERTED.Descricao,
                 INSERTED.StatusCard,
                 INSERTED.IDEmpresaProprietaria
+                {output_versao}
             WHERE IDFatoKanbanCard = :id_card
               AND Ativo = 1{where_versao};
         """)
 
         row_upd = db.session.execute(sql_upd, params_update).mappings().first()
-
         if not row_upd:
             detalhe_atual = _obter_card_detalhe_payload(id_card)
-            return (
-                jsonify(
-                    {
-                        "ok": False,
-                        "msg": "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.",
-                        "card_atual": detalhe_atual.get("card"),
-                    }
-                ),
-                409,
-            )
+            return jsonify(
+                {
+                    "ok": False,
+                    "msg": "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.",
+                    "card_atual": detalhe_atual.get("card"),
+                }
+            ), 409
 
-        vinculos_preparados: list[dict[str, Any]] = []
+        sincronizacao_tipo = _sincronizar_tipo_contrato_card(
+            id_card=int(id_card),
+            id_kanban=int(id_kanban),
+            id_fase_atual=int(id_fase_atual),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+            tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
+        )
+
+        vinculos_preparados: list[dict[str, object]] = []
         reservas_criadas = 0
 
         if isinstance(painel_faces_payload, list):
 
-            def _assinatura_estado_operacional(estados: list[dict[str, Any]]) -> tuple:
-                def _n_int(valor: Any) -> int | None:
+            def _assinatura_estado_operacional(estados: list[dict[str, object]]) -> tuple:
+                def _n_int(valor: object) -> int | None:
                     if valor in (None, ""):
                         return None
                     try:
@@ -14971,11 +15786,11 @@ def api_card_atualizar(id_card: int):
                     except Exception:
                         return None
 
-                def _n_dec(valor: Any) -> str | None:
+                def _n_dec(valor: object) -> str | None:
                     dec = _valor_decimal(valor)
                     return None if dec is None else format(dec.quantize(Decimal("0.0001")), "f")
 
-                def _n_data(valor: Any) -> str | None:
+                def _n_data(valor: object) -> str | None:
                     data = _normalizar_data_reserva_kanban(valor)
                     return None if data is None else data.isoformat()
 
@@ -15004,6 +15819,7 @@ def api_card_atualizar(id_card: int):
             assinatura_antes_operacional = _assinatura_estado_operacional(estado_antes_operacional)
 
             vinculos_preparados = _preparar_vinculos_painel_faces(painel_faces_payload, id_emp)
+
             _salvar_vinculos_painel_face_card(
                 id_card=id_card,
                 vinculos_preparados=vinculos_preparados,
@@ -15027,9 +15843,7 @@ def api_card_atualizar(id_card: int):
             except ValueError:
                 raise
             except Exception as exc:
-                current_app.logger.exception(
-                    "Erro ao criar reservas do card %s após salvar vínculos", id_card
-                )
+                current_app.logger.exception("Erro ao criar reservas do card %s após salvar vínculos", id_card)
                 raise RuntimeError(f"Falha ao criar reservas dos painéis/faces: {str(exc)}") from exc
 
             estado_depois_operacional = _listar_estado_atual_negociacao_card(id_card)
@@ -15051,6 +15865,15 @@ def api_card_atualizar(id_card: int):
                 )
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+
+        observacao_log = (
+            "Card atualizado via quadro Kanban"
+            f" | tipo_contrato={sincronizacao_tipo.get('tipo_contrato')}"
+            f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente') or 'NULL'}"
+            f" | cod_ponto_contrato={validacao_ponto_face.get('cod_ponto') or 'NULL'}"
+            f" | cod_face_contrato={validacao_ponto_face.get('cod_face') or 'NULL'}"
+        )
+
         _registrar_log_card(
             id_card=int(id_card),
             id_kanban=int(id_kanban),
@@ -15060,7 +15883,7 @@ def api_card_atualizar(id_card: int):
             subtipo_evento="EDICAO",
             id_fase_de=int(id_fase_atual) if id_fase_atual else None,
             id_fase_para=int(row_upd.get("IDDimKanbanFaseAtual") or id_fase_atual or 0) or None,
-            observacao="Card atualizado via quadro Kanban",
+            observacao=observacao_log[:2000],
             payload_antes=snapshot_antes,
             payload_depois=snapshot_depois,
         )
@@ -15070,6 +15893,7 @@ def api_card_atualizar(id_card: int):
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
 
         detalhe = _obter_card_detalhe_payload(id_card)
+
         _emitir_evento_kanban(
             id_kanban,
             "card_atualizado",
@@ -15078,6 +15902,8 @@ def api_card_atualizar(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "tipo_contrato": sincronizacao_tipo,
+                "contrato_existente": contrato_existente,
             },
         )
 
@@ -15094,6 +15920,8 @@ def api_card_atualizar(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "tipo_contrato": sincronizacao_tipo,
+                "contrato_existente": contrato_existente,
             }
         )
 
