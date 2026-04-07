@@ -4009,6 +4009,65 @@ function normalizarCardServidor(card){
     ""
   ).trim();
 
+  const idContratoBruto =
+    c.IDFatoControleContratosEuromidia ??
+    c.IDFatoControleContratoEuromidia ??
+    c.id_contrato_existente ??
+    c.id_controle_contrato ??
+    null;
+
+  c.IDFatoControleContratosEuromidia =
+    idContratoBruto === null || idContratoBruto === undefined || idContratoBruto === ""
+      ? null
+      : idNum(idContratoBruto);
+
+  c.IDFatoControleContratoEuromidia = c.IDFatoControleContratosEuromidia;
+
+  c.CodPontoContrato = safeStr(
+    c.CodPontoContrato ??
+    c.cod_ponto_contrato ??
+    ""
+  ).trim() || null;
+
+  c.cod_ponto_contrato = c.CodPontoContrato;
+
+  c.CodFaceContrato = safeStr(
+    c.CodFaceContrato ??
+    c.cod_face_contrato ??
+    ""
+  ).trim().toUpperCase() || null;
+
+  c.cod_face_contrato = c.CodFaceContrato;
+
+  c.BitAditivo = idNum(c.BitAditivo || 0) ? 1 : 0;
+  c.BitContratoNovo = idNum(c.BitContratoNovo || 0) ? 1 : 0;
+
+  const tipoContratoBruto = safeStr(
+    c.tipo_contrato ??
+    c.tipoContrato ??
+    c.tipo_contrato_card ??
+    c.TipoSolicitacao ??
+    ""
+  ).trim().toUpperCase();
+
+  if (tipoContratoBruto === VALOR_MODO_CONTRATO_ADITIVO || tipoContratoBruto === "ADITIVO") {
+    c.tipo_contrato = VALOR_MODO_CONTRATO_ADITIVO;
+  } else if (
+    tipoContratoBruto === VALOR_MODO_CONTRATO_NOVO ||
+    tipoContratoBruto === "NOVO CONTRATO" ||
+    tipoContratoBruto === "NOVO_CONTRATO"
+  ) {
+    c.tipo_contrato = VALOR_MODO_CONTRATO_NOVO;
+  } else if (c.BitAditivo) {
+    c.tipo_contrato = VALOR_MODO_CONTRATO_ADITIVO;
+  } else if (c.BitContratoNovo) {
+    c.tipo_contrato = VALOR_MODO_CONTRATO_NOVO;
+  } else {
+    c.tipo_contrato = c.IDFatoControleContratosEuromidia
+      ? VALOR_MODO_CONTRATO_ADITIVO
+      : VALOR_MODO_CONTRATO_NOVO;
+  }
+
   c.BitClienteDireto = idNum(c.BitClienteDireto || 0) ? 1 : 0;
   c.BitAgencia = idNum(c.BitAgencia || 0) ? 1 : 0;
   c.BitPlanejador = idNum(c.BitPlanejador || 0) ? 1 : 0;
@@ -5519,6 +5578,74 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     };
   }
 
+  function normalizarModoContratoPersistido(valor, modoFallback = VALOR_MODO_CONTRATO_NOVO) {
+    const texto = safeStr(valor).trim().toUpperCase();
+
+    if (texto === VALOR_MODO_CONTRATO_ADITIVO || texto === "ADITIVO") {
+      return VALOR_MODO_CONTRATO_ADITIVO;
+    }
+
+    if (
+      texto === VALOR_MODO_CONTRATO_NOVO ||
+      texto === "NOVO CONTRATO" ||
+      texto === "NOVO_CONTRATO"
+    ) {
+      return VALOR_MODO_CONTRATO_NOVO;
+    }
+
+    return modoFallback;
+  }
+
+  function possuiOpcaoNoSelect(selectEl, valor) {
+    if (!selectEl) return false;
+    const valorComparacao = safeStr(valor).trim();
+    if (!valorComparacao) return false;
+
+    return Array.from(selectEl.options || []).some((opcao) => safeStr(opcao?.value || "").trim() === valorComparacao);
+  }
+
+  function selecionarValorOuAcrescentarOpcao(selectEl, valor, textoFallback) {
+    if (!selectEl) return false;
+
+    const valorComparacao = safeStr(valor).trim();
+    if (!valorComparacao) {
+      selectEl.value = "";
+      return false;
+    }
+
+    if (!possuiOpcaoNoSelect(selectEl, valorComparacao)) {
+      selectEl.appendChild(el("option", { value: valorComparacao }, [safeStr(textoFallback).trim() || valorComparacao]));
+    }
+
+    selectEl.value = valorComparacao;
+    return safeStr(selectEl.value || "").trim() === valorComparacao;
+  }
+
+  function extrairFluxoContratoPersistidoDoCard(card) {
+    const cardNormalizado = normalizarCardServidor(card || {});
+    const idContrato = idNum(
+      cardNormalizado.IDFatoControleContratosEuromidia ??
+      cardNormalizado.IDFatoControleContratoEuromidia ??
+      0
+    ) || null;
+
+    let modoPersistido = normalizarModoContratoPersistido(
+      cardNormalizado.tipo_contrato,
+      idContrato ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO
+    );
+
+    if (!idContrato) {
+      modoPersistido = VALOR_MODO_CONTRATO_NOVO;
+    }
+
+    return {
+      id_contrato_existente: idContrato,
+      tipo_contrato_card: modoPersistido,
+      cod_ponto_contrato: safeStr(cardNormalizado.CodPontoContrato ?? cardNormalizado.cod_ponto_contrato ?? "").trim() || null,
+      cod_face_contrato: safeStr(cardNormalizado.CodFaceContrato ?? cardNormalizado.cod_face_contrato ?? "").trim().toUpperCase() || null
+    };
+  }
+
   function obterIdTagTipoContratoDesejada() {
     const fluxo = obterFluxoContratoAtual();
     return fluxo.id_contrato && fluxo.modo_contrato === VALOR_MODO_CONTRATO_ADITIVO
@@ -5616,6 +5743,20 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
   async function carregarFluxoContratoParaEmpresa(idEmpresa, opcoes = {}) {
     const idEmp = idNum(idEmpresa);
+    const idContratoSalvo = idNum(
+      opcoes.id_contrato_existente ??
+      opcoes.idContratoSelecionado ??
+      opcoes.id_contrato ??
+      0
+    ) || null;
+    const modoSalvo = normalizarModoContratoPersistido(
+      opcoes.tipo_contrato_card ?? opcoes.modo_contrato ?? opcoes.tipo_contrato ?? "",
+      idContratoSalvo ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO
+    );
+    const codPontoSalvo = safeStr(opcoes.cod_ponto_contrato ?? opcoes.codPontoContrato ?? "").trim();
+    const codFaceSalva = safeStr(opcoes.cod_face_contrato ?? opcoes.codFaceContrato ?? "").trim().toUpperCase();
+    const preservarSelecao = !!opcoes.preservarSelecao;
+
     resetarFluxoContrato();
 
     if (!idEmp) {
@@ -5628,6 +5769,69 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     try {
       const contratos = await carregarContratosDaEmpresa(idEmp);
       montarSelectContratoCard(contratos);
+
+      const contratoSalvoDisponivel = !!idContratoSalvo;
+
+      if (preservarSelecao && contratoSalvoDisponivel) {
+        selecionarValorOuAcrescentarOpcao(
+          selectContratoCard,
+          String(idContratoSalvo),
+          `Contrato salvo #${idContratoSalvo}`
+        );
+
+        montarSelectModoContratoCard(modoSalvo, true);
+        if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
+        selectModoContratoCard.value = modoSalvo;
+
+        if (modoSalvo === VALOR_MODO_CONTRATO_ADITIVO) {
+          if (wrapSelectCodPontoContratoCard) wrapSelectCodPontoContratoCard.hidden = false;
+          setMensagemFluxoContrato("Reaplicando o contrato salvo do card...", "info");
+
+          const pontos = await carregarPontosDoContrato(idContratoSalvo);
+          montarSelectPontosContratoCard(pontos);
+
+          if (codPontoSalvo) {
+            selecionarValorOuAcrescentarOpcao(
+              selectCodPontoContratoCard,
+              codPontoSalvo,
+              codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel" : `${codPontoSalvo} • valor salvo`
+            );
+          }
+
+          if (!codPontoSalvo) {
+            setMensagemFluxoContrato("Contrato salvo reaplicado. Agora selecione um CodPonto do contrato ou escolha Novo Painel.", "info");
+            return;
+          }
+
+          if (codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL) {
+            if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = true;
+            setMensagemFluxoContrato("Contrato salvo reaplicado em modo Aditivo com Novo Painel selecionado.", "alerta");
+            return;
+          }
+
+          if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = false;
+          const faces = await carregarFacesDoContrato(idContratoSalvo, codPontoSalvo);
+          montarSelectFacesContratoCard(faces);
+
+          if (codFaceSalva) {
+            selecionarValorOuAcrescentarOpcao(
+              selectCodFaceContratoCard,
+              codFaceSalva,
+              `${codFaceSalva} • valor salvo`
+            );
+            setMensagemFluxoContrato("Contrato, tipo da solicitação, CodPonto e CodFace salvos foram reaplicados no card.", "sucesso");
+          } else {
+            setMensagemFluxoContrato("Contrato salvo reaplicado. Agora selecione a face do CodPonto salvo.", "info");
+          }
+
+          return;
+        }
+
+        if (wrapSelectCodPontoContratoCard) wrapSelectCodPontoContratoCard.hidden = true;
+        if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = true;
+        setMensagemFluxoContrato("Contrato da empresa e tipo da solicitação salvos foram reaplicados no card.", "sucesso");
+        return;
+      }
 
       if (contratos.length) {
         selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
@@ -5643,6 +5847,38 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     } catch (erro) {
       console.warn("carregarFluxoContratoParaEmpresa: falhou", erro);
       montarSelectContratoCard([]);
+
+      if (preservarSelecao && idContratoSalvo) {
+        selecionarValorOuAcrescentarOpcao(
+          selectContratoCard,
+          String(idContratoSalvo),
+          `Contrato salvo #${idContratoSalvo}`
+        );
+        montarSelectModoContratoCard(modoSalvo, true);
+        if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
+        selectModoContratoCard.value = modoSalvo;
+
+        if (modoSalvo === VALOR_MODO_CONTRATO_ADITIVO) {
+          if (wrapSelectCodPontoContratoCard) wrapSelectCodPontoContratoCard.hidden = false;
+          if (codPontoSalvo) {
+            selecionarValorOuAcrescentarOpcao(
+              selectCodPontoContratoCard,
+              codPontoSalvo,
+              codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel" : `${codPontoSalvo} • valor salvo`
+            );
+          }
+          if (codPontoSalvo && codPontoSalvo !== VALOR_OPCAO_NOVO_PAINEL) {
+            if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = false;
+            if (codFaceSalva) {
+              selecionarValorOuAcrescentarOpcao(selectCodFaceContratoCard, codFaceSalva, `${codFaceSalva} • valor salvo`);
+            }
+          }
+        }
+
+        setMensagemFluxoContrato("Não foi possível consultar novamente os contratos da empresa, mas o template reaplicou os valores salvos do card para você não perder o contexto.", "alerta");
+        return;
+      }
+
       selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
       montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
       if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
@@ -8763,6 +8999,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const cardNormalizado = normalizarCardServidor(j.card);
+    const fluxoPersistido = extrairFluxoContratoPersistidoDoCard(cardNormalizado);
 
     /*
      * Aqui eu uso a versão canônica já normalizada pelo próprio template.
@@ -8798,7 +9035,13 @@ async function moverCard(idCard, idFasePara, posicao) {
       const idEmpresa = cardNormalizado.IDEmpresaRelacionadaCard ?? "";
       await selecionarEmpresaPorIdComGarantia(idEmpresa !== null && idEmpresa !== undefined ? String(idEmpresa) : "", false);
       setEmpresaPreviewById(selectEmpresaCard.value || "");
-      await carregarFluxoContratoParaEmpresa(selectEmpresaCard.value || "");
+      await carregarFluxoContratoParaEmpresa(selectEmpresaCard.value || "", {
+        preservarSelecao: true,
+        id_contrato_existente: fluxoPersistido.id_contrato_existente,
+        tipo_contrato_card: fluxoPersistido.tipo_contrato_card,
+        cod_ponto_contrato: fluxoPersistido.cod_ponto_contrato,
+        cod_face_contrato: fluxoPersistido.cod_face_contrato
+      });
     } else {
       setEmpresaPreviewByObj(null);
       resetarFluxoContrato();

@@ -301,6 +301,60 @@ def _resolver_contexto_tipo_contrato_payload(
 
 
 
+
+
+
+
+
+def _anexar_campos_vinculo_contrato_card(
+    *,
+    campos_sql: list[str],
+    parametros: dict[str, object],
+    id_contrato_existente: object,
+    cod_ponto_contrato: object,
+    cod_face_contrato: object,
+    prefixo_parametros: str = "",
+) -> None:
+    """
+    Eu anexo ao INSERT/UPDATE do card os campos persistentes do vínculo
+    com contrato existente, ponto e face, quando essas colunas existirem
+    fisicamente na tabela do card.
+    """
+    id_contrato_int = int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None
+    cod_ponto_limpo = str(cod_ponto_contrato or "").strip() or None
+    cod_face_limpo = str(cod_face_contrato or "").strip().upper() or None
+
+    nome_param_id_contrato = f"{prefixo_parametros}id_contrato_vinculado"
+    nome_param_cod_ponto = f"{prefixo_parametros}cod_ponto_contrato"
+    nome_param_cod_face = f"{prefixo_parametros}cod_face_contrato"
+
+    if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia"):
+        campos_sql.append(f"IDFatoControleContratosEuromidia = :{nome_param_id_contrato}")
+        parametros[nome_param_id_contrato] = id_contrato_int
+
+    elif _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia"):
+        campos_sql.append(f"IDFatoControleContratoEuromidia = :{nome_param_id_contrato}")
+        parametros[nome_param_id_contrato] = id_contrato_int
+
+    if _coluna_existe(TABELA_CARD, "CodPontoContrato"):
+        campos_sql.append(f"CodPontoContrato = :{nome_param_cod_ponto}")
+        parametros[nome_param_cod_ponto] = cod_ponto_limpo
+
+    if _coluna_existe(TABELA_CARD, "CodFaceContrato"):
+        campos_sql.append(f"CodFaceContrato = :{nome_param_cod_face}")
+        parametros[nome_param_cod_face] = cod_face_limpo
+
+
+
+
+
+
+
+
+
+
+
+
 def _obter_item_contrato_euromidia(
     *,
     id_contrato: int | None,
@@ -1102,7 +1156,6 @@ def api_listar_faces_contrato_ponto(id_contrato: int, cod_ponto: str):
 
 
 
-
 def _sincronizar_tipo_contrato_card(
     *,
     id_card: int,
@@ -1111,11 +1164,16 @@ def _sincronizar_tipo_contrato_card(
     id_usuario: int,
     id_empresa_proprietaria: int,
     tipo_contrato: str,
+    id_contrato_existente: int | None = None,
+    cod_ponto_contrato: object = None,
+    cod_face_contrato: object = None,
 ) -> dict[str, object]:
     """
     Regras:
     - ADITIVO => BitAditivo=1, BitContratoNovo=0, tag Aditivo ativa, tag Novo Contrato removida
     - NOVO_CONTRATO => BitAditivo=0, BitContratoNovo=1, tag Novo Contrato ativa, tag Aditivo removida
+    - quando o fluxo estiver em NOVO_CONTRATO, eu limpo o vínculo persistido de contrato/ponto/face
+    - quando o fluxo estiver em ADITIVO, eu persisto o contrato/ponto/face no card
     """
     tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
@@ -1137,6 +1195,19 @@ def _sincronizar_tipo_contrato_card(
     if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
         campos_update.append("BitContratoNovo = :bit_contrato_novo")
         parametros_update["bit_contrato_novo"] = 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0
+
+    id_contrato_para_persistir = id_contrato_existente if tipo_norm == TIPO_SOLICITACAO_ADITIVO else None
+    cod_ponto_para_persistir = cod_ponto_contrato if tipo_norm == TIPO_SOLICITACAO_ADITIVO else None
+    cod_face_para_persistir = cod_face_contrato if tipo_norm == TIPO_SOLICITACAO_ADITIVO else None
+
+    _anexar_campos_vinculo_contrato_card(
+        campos_sql=campos_update,
+        parametros=parametros_update,
+        id_contrato_existente=id_contrato_para_persistir,
+        cod_ponto_contrato=cod_ponto_para_persistir,
+        cod_face_contrato=cod_face_para_persistir,
+        prefixo_parametros="sync_",
+    )
 
     if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
         campos_update.append("AtualizadoEm = GETDATE()")
@@ -1177,10 +1248,10 @@ def _sincronizar_tipo_contrato_card(
         "tags_removidas": tags_removidas,
         "id_tag_ativa": int(tag_desejada.get("IDDimKanbanTag") or 0) if tag_desejada else None,
         "id_fase_atual": int(id_fase_atual or 0) or None,
+        "id_contrato_existente": int(id_contrato_para_persistir) if id_contrato_para_persistir not in (None, "", 0) else None,
+        "cod_ponto_contrato": str(cod_ponto_para_persistir).strip() if cod_ponto_para_persistir not in (None, "") else None,
+        "cod_face_contrato": str(cod_face_para_persistir).strip().upper() if cod_face_para_persistir not in (None, "") else None,
     }
-
-
-
 
 
 
@@ -4308,10 +4379,44 @@ def _registrar_historico_encerramento_card(
 
 
 
-
 def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> dict[str, Any]:
     id_emp = _id_empresa_usuario_or_403()
     filtro_ativo = "" if incluir_inativo else "AND c.Ativo = 1"
+
+    select_id_contrato = (
+        "c.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidia,"
+        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia")
+        else (
+            "c.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia,"
+            if _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia")
+            else "CAST(NULL AS int) AS IDFatoControleContratosEuromidia,"
+        )
+    )
+
+    select_cod_ponto_contrato = (
+        "c.CodPontoContrato AS CodPontoContrato,"
+        if _coluna_existe(TABELA_CARD, "CodPontoContrato")
+        else "CAST(NULL AS varchar(50)) AS CodPontoContrato,"
+    )
+
+    select_cod_face_contrato = (
+        "c.CodFaceContrato AS CodFaceContrato,"
+        if _coluna_existe(TABELA_CARD, "CodFaceContrato")
+        else "CAST(NULL AS varchar(50)) AS CodFaceContrato,"
+    )
+
+    select_bit_aditivo = (
+        "c.BitAditivo AS BitAditivo,"
+        if _coluna_existe(TABELA_CARD, "BitAditivo")
+        else "CAST(0 AS bit) AS BitAditivo,"
+    )
+
+    select_bit_contrato_novo = (
+        "c.BitContratoNovo AS BitContratoNovo,"
+        if _coluna_existe(TABELA_CARD, "BitContratoNovo")
+        else "CAST(0 AS bit) AS BitContratoNovo,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -4326,6 +4431,11 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             c.IDDimKanbanMotivoEncerramento,
             c.MotivoEncerramentoObs,
             c.IDEmpresaProprietaria,
+            {select_id_contrato}
+            {select_cod_ponto_contrato}
+            {select_cod_face_contrato}
+            {select_bit_aditivo}
+            {select_bit_contrato_novo}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             k.BitPrincipal,
@@ -4338,10 +4448,18 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
           AND k.Ativo = 1
           {filtro_ativo};
     """)
-    row = db.session.execute(sql, {"id_card": id_card, "id_emp": id_emp}).mappings().first()
+
+    row = db.session.execute(
+        sql,
+        {"id_card": int(id_card), "id_emp": int(id_emp)},
+    ).mappings().first()
+
     if not row:
         abort(403, "Você não tem permissão para acessar este card")
+
     return dict(row)
+
+
 
 
 
@@ -7089,6 +7207,7 @@ def api_cards_listar_por_fase(id_kanban: int):
 
 
 
+
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["GET"])
 @login_required
 @limiter.limit("180/minute")
@@ -7123,6 +7242,33 @@ def api_card_detalhe(id_card: int):
     card_payload = payload.get("card")
     if not isinstance(card_payload, dict):
         card_payload = {}
+
+    campos_escopo_para_reidratar = (
+        "IDFatoKanbanCard",
+        "IDDimKanban",
+        "IDDimKanbanFaseAtual",
+        "IDFatoControleContratosEuromidia",
+        "CodPontoContrato",
+        "CodFaceContrato",
+        "BitAditivo",
+        "BitContratoNovo",
+        "IDEmpresaRelacionadaCard",
+        "EmpresaRazaoSocial",
+        "EmpresaCNPJ",
+        "Titulo",
+        "Descricao",
+        "StatusCard",
+    )
+
+    for chave_campo in campos_escopo_para_reidratar:
+        if chave_campo in card_escopo and card_escopo.get(chave_campo) is not None:
+            card_payload[chave_campo] = card_escopo.get(chave_campo)
+
+    if card_payload.get("tipo_contrato") in (None, ""):
+        if int(card_payload.get("BitAditivo") or 0) == 1:
+            card_payload["tipo_contrato"] = TIPO_SOLICITACAO_ADITIVO
+        elif int(card_payload.get("BitContratoNovo") or 0) == 1:
+            card_payload["tipo_contrato"] = TIPO_SOLICITACAO_NOVO
 
     versao_hex = (
         card_payload.get("VersaoConcorrenciaHex")
@@ -15616,9 +15762,10 @@ def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
 
 
 
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
 @login_required
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")
 def api_card_criar(id_kanban: int):
     etapa = "inicio"
     novo_id = None
@@ -15772,6 +15919,26 @@ def api_card_criar(id_kanban: int):
             valores.append(":bit_contrato_novo")
             params["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
 
+        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia"):
+            colunas.append("IDFatoControleContratosEuromidia")
+            valores.append(":id_contrato_vinculado")
+            params["id_contrato_vinculado"] = contexto_tipo_contrato["id_contrato_existente"]
+
+        elif _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia"):
+            colunas.append("IDFatoControleContratoEuromidia")
+            valores.append(":id_contrato_vinculado")
+            params["id_contrato_vinculado"] = contexto_tipo_contrato["id_contrato_existente"]
+
+        if _coluna_existe(TABELA_CARD, "CodPontoContrato"):
+            colunas.append("CodPontoContrato")
+            valores.append(":cod_ponto_contrato")
+            params["cod_ponto_contrato"] = validacao_ponto_face.get("cod_ponto")
+
+        if _coluna_existe(TABELA_CARD, "CodFaceContrato"):
+            colunas.append("CodFaceContrato")
+            valores.append(":cod_face_contrato")
+            params["cod_face_contrato"] = validacao_ponto_face.get("cod_face")
+
         if coluna_id_dim_usuarios_existe:
             colunas.append("IDDimUsuarios")
             valores.append(":id_usuario")
@@ -15892,9 +16059,6 @@ def api_card_criar(id_kanban: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao criar card no kanban %s. etapa=%s", id_kanban, etapa)
         return jsonify({"ok": False, "msg": f"Erro ao criar card: {str(exc)}"}), 500
-
-
-
 
 
 
