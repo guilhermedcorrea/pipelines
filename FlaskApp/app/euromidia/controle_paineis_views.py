@@ -696,46 +696,105 @@ def cadastrar_ocupacao():
 
 
 
-
 @paineis_bp.route("/api/pontos", methods=["GET"])
 @limiter.limit("120 per minute", methods=["GET"])
-@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def api_pontos():
     q = (request.args.get("q") or "").strip()
 
-    query = (
-        db.session.query(DimFacesPaineis.CodPonto)
-        .filter(DimFacesPaineis.CodPonto != None)
-        .distinct()
-    )
+    sql = text("""
+        SELECT TOP (100)
+            p.CodPonto,
+            TipoPainel = MAX(NULLIF(LTRIM(RTRIM(COALESCE(p.Tipo, ''))), ''))
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+        WHERE
+            p.CodPonto IS NOT NULL
+            AND (
+                :q = ''
+                OR CAST(p.CodPonto AS varchar(30)) LIKE :q_like
+            )
+        GROUP BY p.CodPonto
+        ORDER BY p.CodPonto ASC
+    """)
 
-    if q:
-        query = query.filter(cast(DimFacesPaineis.CodPonto, String).like(f"{q}%"))
+    rows = db.session.execute(
+        sql,
+        {
+            "q": q,
+            "q_like": f"{q}%"
+        }
+    ).mappings().all()
 
-    pontos = query.order_by(DimFacesPaineis.CodPonto.asc()).limit(50).all()
-    pontos = [int(r[0]) for r in pontos if r and r[0] is not None]
+    itens = []
 
-    return jsonify({"items": pontos})
+    for row in rows:
+        cod_ponto = row["CodPonto"]
+        if cod_ponto is None:
+            continue
+
+        tipo_painel = _normalizar_texto_checking(row["TipoPainel"]) or "Sem tipo"
+
+        try:
+            cod_ponto_int = int(cod_ponto)
+        except Exception:
+            continue
+
+        itens.append({
+            "cod_ponto": cod_ponto_int,
+            "tipo_painel": tipo_painel,
+            "texto": f"{cod_ponto_int} | {tipo_painel}",
+        })
+
+    return jsonify({"items": itens})
 
 
 @paineis_bp.route("/api/pontos/<int:codponto>/faces", methods=["GET"])
 @limiter.limit("120 per minute", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def api_faces_do_ponto(codponto: int):
-    faces = (
-        db.session.query(DimFacesPaineis.CodFace)
-        .filter(
-            DimFacesPaineis.CodPonto == codponto,
-            DimFacesPaineis.CodFace != None,
-            DimFacesPaineis.CodFace != "",
-        )
-        .distinct()
-        .order_by(DimFacesPaineis.CodFace.asc())
-        .all()
-    )
+    sql = text("""
+        SELECT TOP (200)
+            f.CodFace,
+            TipoFace = MAX(
+                NULLIF(
+                    LTRIM(RTRIM(COALESCE(f.Tipo, p.Tipo, ''))),
+                    ''
+                )
+            )
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+        WHERE
+            f.CodPonto = :codponto
+            AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+        GROUP BY f.CodFace
+        ORDER BY f.CodFace ASC
+    """)
 
-    faces = [r[0] for r in faces if r and r[0]]
+    rows = db.session.execute(
+        sql,
+        {"codponto": codponto}
+    ).mappings().all()
 
-    return jsonify({"codponto": codponto, "items": faces})
+    itens = []
+
+    for row in rows:
+        cod_face = _normalizar_texto_checking(row["CodFace"])
+        if not cod_face:
+            continue
+
+        tipo_face = _normalizar_texto_checking(row["TipoFace"]) or "Sem tipo"
+
+        itens.append({
+            "cod_face": cod_face,
+            "tipo_face": tipo_face,
+            "texto": f"{cod_face} | {tipo_face}",
+        })
+
+    return jsonify({
+        "codponto": codponto,
+        "items": itens
+    })
 
 
 
@@ -3246,16 +3305,7 @@ def grade_painel(codponto: int):
     dt_ini = None
     dt_fim = None
 
-    # =========================================================
-    # AJUSTE TÉCNICO 1:
-    # Se a query vier com uma ou mais CodFace que apontem de forma
-    # inequívoca para outro painel, redireciona para o CodPonto correto
-    # antes de montar a grade.
-    #
-    # Regra:
-    # - 1 face: mantém o comportamento antigo;
-    # - N faces: só redireciona se todas resolverem para o mesmo CodPonto.
-    # =========================================================
+
     if tem_filtro_codface:
         codponto_resolvido_pelas_faces = _resolver_codponto_unico_por_codfaces_globais(filtros_codface)
 
@@ -3479,11 +3529,7 @@ def grade_painel(codponto: int):
     total_dias = (dt_fim - dt_ini).days + 1
     ultimo_dia = total_dias
 
-    # =========================================================
-    # AJUSTE TÉCNICO 2:
-    # O select field passa a listar TODAS as CodFace da dimensão,
-    # sem limitar ao CodPonto atual.
-    # =========================================================
+
     rows_codfaces_select = (
         db.session.query(DimFacesPaineis.CodFace)
         .filter(
@@ -3510,10 +3556,7 @@ def grade_painel(codponto: int):
         vistos_codfaces_select.add(chave_tmp)
         codfaces_select.append(cf_norm_tmp)
 
-    # =========================================================
-    # Faces do painel local continuam sendo buscadas pelo CodPonto
-    # atual, pois a grade exibida continua sendo a do painel da URL.
-    # =========================================================
+
     faces_info_raw = (
         db.session.query(
             DimFacesPaineis.IDDimPaineisEuromidia,
@@ -3627,19 +3670,7 @@ def grade_painel(codponto: int):
                 tipo_prod = tp_txt
                 break
 
-    # =========================================================
-    # AJUSTE TÉCNICO 3:
-    # Buscar os dados do endereço do painel na DimPaineisEuromidia
-    # incluindo Logradouro.
-    #
-    # Em vez de depender de apenas um único registro "latest",
-    # lemos os registros do CodPonto em ordem decrescente de
-    # atualização e pegamos o primeiro valor não vazio de cada campo.
-    #
-    # Isso é mais robusto em dimensão histórica/SCD, onde um registro
-    # mais recente pode vir com algum campo nulo e outro registro
-    # logo abaixo ainda conter a informação correta.
-    # =========================================================
+
     def _valor_texto_painel(v):
         try:
             txt = str(v or "").strip()
@@ -14419,6 +14450,168 @@ def _gerar_mockup_checking(
 
 
 
+
+
+
+
+
+
+def _checking_item_pertence_ao_contrato(
+    *,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+) -> bool:
+    sql = text("""
+        SELECT TOP (1) 1 AS Existe
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        WHERE
+            i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
+            AND TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+            AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "cod_ponto": str(cod_ponto or "").strip(),
+            "cod_face": str(cod_face or "").strip(),
+        },
+    ).mappings().first()
+
+    return bool(row)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@paineis_bp.route("/checking/contratos/<int:id_fato_controle_contratos>/pontos", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checking_pontos_do_contrato(id_fato_controle_contratos: int):
+    sql = text("""
+        SELECT TOP (300)
+            CodPonto = TRY_CONVERT(int, i.CodPonto),
+            TipoPainel = MAX(
+                NULLIF(
+                    LTRIM(RTRIM(COALESCE(p.Tipo, ''))),
+                    ''
+                )
+            )
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+        WHERE
+            i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
+            AND TRY_CONVERT(int, i.CodPonto) IS NOT NULL
+        GROUP BY TRY_CONVERT(int, i.CodPonto)
+        ORDER BY TRY_CONVERT(int, i.CodPonto) ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_fato_controle_contratos": int(id_fato_controle_contratos)},
+    ).mappings().all()
+
+    itens = []
+    for row in rows:
+        cod_ponto = row["CodPonto"]
+        if cod_ponto is None:
+            continue
+
+        tipo_painel = _normalizar_texto_checking(row["TipoPainel"]) or "Sem tipo"
+
+        itens.append(
+            {
+                "cod_ponto": int(cod_ponto),
+                "tipo_painel": tipo_painel,
+                "texto": f"{int(cod_ponto)} | {tipo_painel}",
+            }
+        )
+
+    return jsonify({
+        "id_fato_controle_contratos": int(id_fato_controle_contratos),
+        "items": itens,
+    })
+
+
+
+
+
+
+@paineis_bp.route("/checking/contratos/<int:id_fato_controle_contratos>/pontos/<int:codponto>/faces", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checking_faces_do_contrato(id_fato_controle_contratos: int, codponto: int):
+    sql = text("""
+        SELECT TOP (300)
+            CodFace = UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))),
+            TipoFace = MAX(
+                NULLIF(
+                    LTRIM(RTRIM(COALESCE(f.Tipo, p.Tipo, ''))),
+                    ''
+                )
+            )
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] f
+            ON TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+            AND UPPER(LTRIM(RTRIM(CAST(f.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50)))))
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+            OR TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+        WHERE
+            i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
+            AND TRY_CONVERT(int, i.CodPonto) = :codponto
+            AND NULLIF(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50)))), '') IS NOT NULL
+        GROUP BY UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50)))))
+        ORDER BY UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "codponto": int(codponto),
+        },
+    ).mappings().all()
+
+    itens = []
+    for row in rows:
+        cod_face = _normalizar_texto_checking(row["CodFace"])
+        if not cod_face:
+            continue
+
+        tipo_face = _normalizar_texto_checking(row["TipoFace"]) or "Sem tipo"
+
+        itens.append(
+            {
+                "cod_face": cod_face,
+                "tipo_face": tipo_face,
+                "texto": f"{cod_face} | {tipo_face}",
+            }
+        )
+
+    return jsonify({
+        "id_fato_controle_contratos": int(id_fato_controle_contratos),
+        "codponto": int(codponto),
+        "items": itens,
+    })
+
+
+
+
+
+
 @paineis_bp.route("/checking/novo", methods=["GET", "POST"])
 @login_required
 @limiter.limit("25 per minute", methods=["POST"])
@@ -14428,21 +14621,12 @@ def checking_novo():
     largura_maxima = current_app.config["LARGURA_MAXIMA_IMAGEM"]
     altura_maxima = current_app.config["ALTURA_MAXIMA_IMAGEM"]
 
-    empresas = []
-    contratos = []
-    pontos = []
-    faces = []
+    hoje = datetime.now().date()
 
     if request.method == "GET":
-        empresas, contratos, pontos, faces = _buscar_dados_select_checking(id_empresa=None)
-
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
 
@@ -14452,30 +14636,18 @@ def checking_novo():
         id_empresa = int(id_empresa_txt)
     except Exception:
         flash("Selecione uma empresa válida.", "warning")
-        empresas, contratos, pontos, faces = _buscar_dados_select_checking(id_empresa=None)
-
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
-
-    empresas, contratos, pontos, faces = _buscar_dados_select_checking(id_empresa=id_empresa)
 
     arquivo = request.files.get("imagem")
     if not arquivo or not arquivo.filename:
         flash("Selecione uma imagem para upload.", "warning")
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
 
@@ -14484,11 +14656,7 @@ def checking_novo():
         flash("Extensão de arquivo inválida.", "danger")
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
 
@@ -14498,11 +14666,7 @@ def checking_novo():
         flash("Selecione um contrato válido.", "warning")
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
 
@@ -14517,11 +14681,7 @@ def checking_novo():
         flash("Selecione um ponto válido.", "warning")
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
 
@@ -14529,11 +14689,19 @@ def checking_novo():
         flash("Selecione uma face válida.", "warning")
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
+            checking=None,
+        )
+
+    if not _checking_item_pertence_ao_contrato(
+        id_fato_controle_contratos=id_fato_controle_contratos,
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
+    ):
+        flash("O CodPonto e o CodFace selecionados não pertencem ao contrato informado.", "danger")
+        return render_template(
+            "euromidia/checking_upload.html",
+            hoje=hoje,
             checking=None,
         )
 
@@ -14543,11 +14711,7 @@ def checking_novo():
         flash("Data de checking inválida.", "warning")
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
 
@@ -14563,11 +14727,7 @@ def checking_novo():
             )
             return render_template(
                 "euromidia/checking_upload.html",
-                empresas=empresas,
-                contratos=contratos,
-                pontos=pontos,
-                faces=faces,
-                hoje=datetime.now().date(),
+                hoje=hoje,
                 checking=None,
             )
 
@@ -14588,11 +14748,7 @@ def checking_novo():
 
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=checking,
         )
 
@@ -14603,14 +14759,9 @@ def checking_novo():
 
         return render_template(
             "euromidia/checking_upload.html",
-            empresas=empresas,
-            contratos=contratos,
-            pontos=pontos,
-            faces=faces,
-            hoje=datetime.now().date(),
+            hoje=hoje,
             checking=None,
         )
-
 
 
 
@@ -14746,6 +14897,7 @@ def checking_contratos():
     return jsonify(retorno)
 
 
+
 @paineis_bp.route("/checking/arquivo/<int:id_checking>", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
@@ -14804,3 +14956,181 @@ def checking_confirmar(id_checking: int):
         flash(f"Falha ao confirmar checking: {exc}", "danger")
 
     return redirect(url_for("Paineis.checking_novo"))
+
+
+
+
+
+"""Lista Checkin"""
+
+
+
+
+def _paginacao_basica(page: int, per_page: int, total: int):
+    """Eu monto um objeto simples de paginação para o template."""
+    if per_page <= 0:
+        per_page = 10
+
+    total_pages = max((total + per_page - 1) // per_page, 1)
+    page = max(min(page, total_pages), 1)
+
+    inicio = (page - 1) * per_page + 1 if total > 0 else 0
+    fim = min(page * per_page, total) if total > 0 else 0
+
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "inicio": inicio,
+        "fim": fim,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_page": page - 1 if page > 1 else 1,
+        "next_page": page + 1 if page < total_pages else total_pages,
+    }
+
+
+
+
+@paineis_bp.route("/checking/lista", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def lista_checkins():
+    page = request.args.get("page", default=1, type=int) or 1
+    per_page = 10
+
+    sql_total = text("""
+        SELECT COUNT(1) AS Total
+        FROM [Integracao].[Silver].[DimCheckingHistorico] ch
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = ch.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] fp
+            ON fp.CodFace = ch.CodFace
+           AND fp.CodPonto = ch.CodPonto
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON p.IDDimPaineisEuromidia = fp.IDDimPaineisEuromidia
+    """)
+
+    total = db.session.execute(sql_total).scalar() or 0
+    paginacao = _paginacao_basica(page, per_page, total)
+    offset = (paginacao["page"] - 1) * paginacao["per_page"]
+
+    sql_lista = text("""
+        SELECT
+            ch.IDDimCheckingHistorico,
+            ch.DataAtualizacao,
+            CNPJ = COALESCE(emp.CNPJ, ch.CNPJ),
+            RazaoSocial = COALESCE(emp.RazaoSocial, ch.RazaoSocial),
+            ch.CodFace,
+            Tipo = COALESCE(
+                NULLIF(LTRIM(RTRIM(fp.Tipo)), ''),
+                NULLIF(LTRIM(RTRIM(p.Tipo)), '')
+            )
+        FROM [Integracao].[Silver].[DimCheckingHistorico] ch
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = ch.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] fp
+            ON fp.CodFace = ch.CodFace
+           AND fp.CodPonto = ch.CodPonto
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON p.IDDimPaineisEuromidia = fp.IDDimPaineisEuromidia
+        ORDER BY ch.DataAtualizacao DESC
+        OFFSET :offset ROWS
+        FETCH NEXT :per_page ROWS ONLY
+    """)
+
+    resultado = db.session.execute(
+        sql_lista,
+        {
+            "offset": offset,
+            "per_page": paginacao["per_page"],
+        },
+    )
+
+    itens = [dict(linha._mapping) for linha in resultado]
+
+    return render_template(
+        "euromidia/lista_checkins.html",
+        itens=itens,
+        paginacao=paginacao,
+    )
+
+
+@paineis_bp.route("/checking/<int:id_checking_historico>", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def visualizar_checking(id_checking_historico: int):
+    sql = text("""
+        SELECT
+            ch.IDDimCheckingHistorico,
+            ch.DataAtualizacao,
+            ch.DataChecking,
+            ch.IDEmpresa,
+            CNPJ = COALESCE(emp.CNPJ, ch.CNPJ),
+            RazaoSocial = COALESCE(emp.RazaoSocial, ch.RazaoSocial),
+            ch.IDFatoControleContratosEuromidia,
+            ch.CodPonto,
+            ch.CodFace,
+            ch.TipoPainel,
+            ch.TipoFace,
+            fp.IDDimFacesPaineis,
+            p.IDDimPaineisEuromidia,
+
+            EnderecoPainel =
+                LTRIM(RTRIM(
+                    COALESCE(p.Logradouro, '') +
+                    CASE WHEN p.Numero IS NOT NULL AND LTRIM(RTRIM(p.Numero)) <> '' THEN ', ' + p.Numero ELSE '' END +
+                    CASE WHEN p.Bairro IS NOT NULL AND LTRIM(RTRIM(p.Bairro)) <> '' THEN ' - ' + p.Bairro ELSE '' END +
+                    CASE WHEN p.Cidade IS NOT NULL AND LTRIM(RTRIM(p.Cidade)) <> '' THEN ' - ' + p.Cidade ELSE '' END +
+                    CASE WHEN p.UF IS NOT NULL AND LTRIM(RTRIM(p.UF)) <> '' THEN '/' + p.UF ELSE '' END +
+                    CASE WHEN p.CEP IS NOT NULL AND LTRIM(RTRIM(p.CEP)) <> '' THEN ' - CEP: ' + p.CEP ELSE '' END +
+                    CASE WHEN p.Referencia IS NOT NULL AND LTRIM(RTRIM(p.Referencia)) <> '' THEN ' - Ref.: ' + p.Referencia ELSE '' END
+                )),
+
+            p.Logradouro,
+            p.Numero,
+            p.Bairro,
+            p.Cidade,
+            p.UF,
+            p.CEP,
+            p.Referencia,
+
+            ch.NomeArquivoOriginal,
+            ch.NomeArquivoSalvo,
+            ch.CaminhoImagemPainel,
+            ch.CaminhoImagemFundo,
+            ch.CaminhoImagemUpload,
+            ch.CaminhoImagemGerada,
+            ch.UrlImagemUpload,
+            ch.UrlImagemGerada,
+            ch.BitChekin,
+            ch.DataConfirmacao,
+            ch.IDUsuarioCriacao,
+            ch.IDUsuarioConfirmacao,
+            ch.Observacao
+        FROM [Integracao].[Silver].[DimCheckingHistorico] ch
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = ch.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] fp
+            ON fp.CodFace = ch.CodFace
+           AND fp.CodPonto = ch.CodPonto
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
+            ON p.IDDimPaineisEuromidia = fp.IDDimPaineisEuromidia
+        WHERE ch.IDDimCheckingHistorico = :id_checking_historico
+    """)
+
+    linha = db.session.execute(
+        sql,
+        {"id_checking_historico": id_checking_historico},
+    ).mappings().first()
+
+    if not linha:
+        abort(404)
+
+    item = dict(linha)
+
+    return render_template(
+        "euromidia/visualizar_checking.html",
+        item=item,
+    )

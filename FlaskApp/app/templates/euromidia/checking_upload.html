@@ -6,7 +6,6 @@
 <div class="container container-limit">
   <div class="card">
     <h1 class="page-title">Upload de Checking</h1>
-   
 
     <form method="POST" enctype="multipart/form-data" class="grid" style="margin-top:16px;" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -73,32 +72,39 @@
 
       <div>
         <label for="cod_ponto">CodPonto | Tipo</label>
-        <select name="cod_ponto" id="cod_ponto" required>
-          <option value="">Selecione</option>
-          {% for ponto in pontos %}
-            <option
-              value="{{ ponto.CodPonto }}"
-              {% if request.form.get('cod_ponto') == (ponto.CodPonto|string) %}selected{% endif %}
-            >
-              {{ ponto.texto }}
-            </option>
-          {% endfor %}
+        <select
+          name="cod_ponto"
+          id="cod_ponto"
+          required
+          disabled
+          data-valor-inicial="{{ request.form.get('cod_ponto', '') }}"
+        >
+          <option value="">
+            {% if request.form.get('cod_ponto') %}
+              Carregando pontos do contrato...
+            {% else %}
+              Primeiro selecione um contrato
+            {% endif %}
+          </option>
         </select>
       </div>
 
       <div>
         <label for="cod_face">CodFace | Tipo</label>
-        <select name="cod_face" id="cod_face" required>
-          <option value="">Selecione</option>
-          {% for face in faces %}
-            <option
-              value="{{ face.CodFace }}"
-              data-codponto="{{ face.CodPonto }}"
-              {% if request.form.get('cod_face') == (face.CodFace|string) %}selected{% endif %}
-            >
-              {{ face.texto_face }}
-            </option>
-          {% endfor %}
+        <select
+          name="cod_face"
+          id="cod_face"
+          required
+          disabled
+          data-valor-inicial="{{ request.form.get('cod_face', '') }}"
+        >
+          <option value="">
+            {% if request.form.get('cod_face') %}
+              Carregando faces do contrato...
+            {% else %}
+              Primeiro selecione o contrato e o ponto
+            {% endif %}
+          </option>
         </select>
       </div>
 
@@ -222,6 +228,9 @@
   const selectFace = document.getElementById("cod_face");
 
   const valorInicialContrato = {{ request.form.get('id_fato_controle_contratos', '')|tojson }};
+  const valorInicialPonto = {{ request.form.get('cod_ponto', '')|tojson }};
+  const valorInicialFace = {{ request.form.get('cod_face', '')|tojson }};
+
   let timerEmpresa = null;
 
   function esconderBox(box) {
@@ -241,6 +250,7 @@
     }
 
     box.innerHTML = "";
+
     itens.forEach(function (item) {
       const div = document.createElement("div");
       div.className = "busca-item";
@@ -251,7 +261,17 @@
       });
       box.appendChild(div);
     });
+
     box.hidden = false;
+  }
+
+  function limparSelect(select, textoOpcao) {
+    select.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = textoOpcao || "Selecione";
+    select.appendChild(option);
+    select.value = "";
   }
 
   function definirStatusContratos(texto) {
@@ -261,12 +281,7 @@
   }
 
   function limparSelectContratos(textoOpcao) {
-    selectContrato.innerHTML = "";
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = textoOpcao || "Selecione";
-    selectContrato.appendChild(option);
-    selectContrato.value = "";
+    limparSelect(selectContrato, textoOpcao || "Selecione um contrato");
     hiddenContratoTexto.value = "";
   }
 
@@ -289,11 +304,35 @@
     hiddenContratoTexto.value = optionSelecionada.dataset.texto || optionSelecionada.textContent || "";
   }
 
+  function bloquearPonto(textoOpcao) {
+    selectPonto.disabled = true;
+    limparSelect(selectPonto, textoOpcao || "Primeiro selecione um contrato");
+  }
+
+  function liberarPonto() {
+    selectPonto.disabled = false;
+  }
+
+  function bloquearFace(textoOpcao) {
+    selectFace.disabled = true;
+    limparSelect(selectFace, textoOpcao || "Primeiro selecione o ponto");
+  }
+
+  function liberarFace() {
+    selectFace.disabled = false;
+  }
+
+  function limparDependenciasDoContrato() {
+    bloquearPonto("Primeiro selecione um contrato");
+    bloquearFace("Primeiro selecione o contrato e o ponto");
+  }
+
   function preencherSelectContratos(itens, idContratoSelecionado) {
     limparSelectContratos("Selecione um contrato");
 
     if (!itens || !itens.length) {
       bloquearContrato("Nenhum contrato encontrado", "Nenhum contrato encontrado para a empresa selecionada.");
+      limparDependenciasDoContrato();
       return;
     }
 
@@ -302,15 +341,63 @@
       option.value = String(item.id);
       option.textContent = item.texto;
       option.dataset.texto = item.texto;
+
       if (idContratoSelecionado && String(item.id) === String(idContratoSelecionado)) {
         option.selected = true;
       }
+
       selectContrato.appendChild(option);
     });
 
     liberarContrato();
     atualizarTextoContratoSelecionado();
     definirStatusContratos(`${itens.length} contrato(s) encontrado(s).`);
+  }
+
+  function preencherSelectPontos(itens, valorSelecionado) {
+    limparSelect(selectPonto, "Selecione");
+
+    if (!itens || !itens.length) {
+      bloquearPonto("Nenhum ponto encontrado no contrato");
+      return;
+    }
+
+    itens.forEach(function (item) {
+      const option = document.createElement("option");
+      option.value = String(item.cod_ponto);
+      option.textContent = item.texto;
+
+      if (valorSelecionado && String(item.cod_ponto) === String(valorSelecionado)) {
+        option.selected = true;
+      }
+
+      selectPonto.appendChild(option);
+    });
+
+    liberarPonto();
+  }
+
+  function preencherSelectFaces(itens, valorSelecionado) {
+    limparSelect(selectFace, "Selecione");
+
+    if (!itens || !itens.length) {
+      bloquearFace("Nenhuma face encontrada no contrato");
+      return;
+    }
+
+    itens.forEach(function (item) {
+      const option = document.createElement("option");
+      option.value = String(item.cod_face);
+      option.textContent = item.texto;
+
+      if (valorSelecionado && String(item.cod_face) === String(valorSelecionado)) {
+        option.selected = true;
+      }
+
+      selectFace.appendChild(option);
+    });
+
+    liberarFace();
   }
 
   async function buscarEmpresas(q) {
@@ -330,6 +417,7 @@
 
   async function carregarContratosDaEmpresa(idEmpresa, idContratoSelecionado) {
     bloquearContrato("Carregando contratos...", "Carregando contratos da empresa selecionada...");
+    limparDependenciasDoContrato();
 
     const resposta = await fetch(
       `/paineis/checking/contratos/buscar?id_empresa=${encodeURIComponent(idEmpresa)}&q=`,
@@ -349,12 +437,71 @@
     preencherSelectContratos(contratos, idContratoSelecionado || "");
   }
 
+  async function carregarPontosDoContrato(idContrato, valorSelecionado) {
+    if (!idContrato) {
+      limparDependenciasDoContrato();
+      return;
+    }
+
+    bloquearPonto("Carregando pontos do contrato...");
+    bloquearFace("Primeiro selecione o ponto");
+
+    const resposta = await fetch(
+      `/paineis/checking/contratos/${encodeURIComponent(idContrato)}/pontos`,
+      {
+        method: "GET",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      }
+    );
+
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+
+    const payload = await resposta.json();
+    preencherSelectPontos(payload.items || [], valorSelecionado || "");
+  }
+
+  async function carregarFacesDoContrato(idContrato, codPonto, valorSelecionado) {
+    if (!idContrato) {
+      limparDependenciasDoContrato();
+      return;
+    }
+
+    if (!codPonto) {
+      bloquearFace("Primeiro selecione o ponto");
+      return;
+    }
+
+    bloquearFace("Carregando faces do contrato...");
+
+    const resposta = await fetch(
+      `/paineis/checking/contratos/${encodeURIComponent(idContrato)}/pontos/${encodeURIComponent(codPonto)}/faces`,
+      {
+        method: "GET",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      }
+    );
+
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+
+    const payload = await resposta.json();
+    preencherSelectFaces(payload.items || [], valorSelecionado || "");
+  }
+
   inputEmpresa.addEventListener("input", function () {
     const termo = String(inputEmpresa.value || "").trim();
 
     hiddenEmpresa.value = "";
     hiddenEmpresaTexto.value = "";
     bloquearContrato();
+    limparDependenciasDoContrato();
 
     clearTimeout(timerEmpresa);
 
@@ -366,6 +513,7 @@
     timerEmpresa = setTimeout(async function () {
       try {
         const empresas = await buscarEmpresas(termo);
+
         renderizarResultados(boxEmpresa, empresas, async function (item) {
           inputEmpresa.value = item.texto;
           hiddenEmpresa.value = item.id;
@@ -377,6 +525,7 @@
           } catch (erroContrato) {
             console.error("[CHECKING] erro ao carregar contratos:", erroContrato);
             bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
+            limparDependenciasDoContrato();
           }
         });
       } catch (erro) {
@@ -386,12 +535,43 @@
     }, 300);
   });
 
-  selectContrato.addEventListener("change", function () {
+  selectContrato.addEventListener("change", async function () {
     atualizarTextoContratoSelecionado();
-    if (selectContrato.value) {
-      definirStatusContratos("Contrato selecionado.");
-    } else {
+
+    const idContrato = String(selectContrato.value || "").trim();
+
+    if (!idContrato) {
       definirStatusContratos("Selecione um contrato.");
+      limparDependenciasDoContrato();
+      return;
+    }
+
+    definirStatusContratos("Contrato selecionado.");
+
+    try {
+      await carregarPontosDoContrato(idContrato, "");
+      bloquearFace("Primeiro selecione o ponto");
+    } catch (erro) {
+      console.error("[CHECKING] erro ao carregar pontos do contrato:", erro);
+      bloquearPonto("Falha ao carregar pontos");
+      bloquearFace("Falha ao carregar faces");
+    }
+  });
+
+  selectPonto.addEventListener("change", async function () {
+    const idContrato = String(selectContrato.value || "").trim();
+    const codPonto = String(selectPonto.value || "").trim();
+
+    if (!idContrato || !codPonto) {
+      bloquearFace("Primeiro selecione o ponto");
+      return;
+    }
+
+    try {
+      await carregarFacesDoContrato(idContrato, codPonto, "");
+    } catch (erro) {
+      console.error("[CHECKING] erro ao carregar faces do contrato:", erro);
+      bloquearFace("Falha ao carregar faces");
     }
   });
 
@@ -401,71 +581,57 @@
     }
   });
 
-  function filtrarFacesPorPonto() {
-    if (!selectPonto || !selectFace) {
-      return;
-    }
-
-    const codPonto = (selectPonto.value || "").trim();
-    const opcoes = Array.from(selectFace.options);
-    let possuiOpcaoVisivelSelecionavel = false;
-
-    opcoes.forEach(function (opcao, indice) {
-      if (indice === 0) {
-        opcao.hidden = false;
-        return;
-      }
-
-      const pontoDaOpcao = (opcao.getAttribute("data-codponto") || "").trim();
-      const deveOcultar = !!codPonto && pontoDaOpcao !== codPonto;
-
-      opcao.hidden = deveOcultar;
-
-      if (!deveOcultar) {
-        possuiOpcaoVisivelSelecionavel = true;
-      }
-    });
-
-    const opcaoSelecionada = selectFace.options[selectFace.selectedIndex];
-    if (opcaoSelecionada && opcaoSelecionada.hidden) {
-      selectFace.value = "";
-    }
-
-    if (!codPonto) {
-      selectFace.value = "";
-      return;
-    }
-
-    if (!possuiOpcaoVisivelSelecionavel) {
-      selectFace.value = "";
-    }
-  }
-
   async function inicializarContratosSeJaExistirEmpresa() {
     const idEmpresaAtual = String(hiddenEmpresa.value || "").trim();
 
     if (!idEmpresaAtual) {
       bloquearContrato();
+      limparDependenciasDoContrato();
       return;
     }
 
     try {
       await carregarContratosDaEmpresa(idEmpresaAtual, valorInicialContrato);
+
       if (selectContrato.value) {
         definirStatusContratos("Contrato selecionado.");
       }
     } catch (erro) {
       console.error("[CHECKING] erro ao inicializar contratos:", erro);
       bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
+      limparDependenciasDoContrato();
     }
   }
 
-  if (selectPonto) {
-    selectPonto.addEventListener("change", filtrarFacesPorPonto);
-    filtrarFacesPorPonto();
+  async function inicializarPontoEFaceSeExistiremValores() {
+    const idContratoAtual = String(selectContrato.value || valorInicialContrato || "").trim();
+
+    if (!idContratoAtual) {
+      limparDependenciasDoContrato();
+      return;
+    }
+
+    try {
+      await carregarPontosDoContrato(idContratoAtual, valorInicialPonto || "");
+
+      const codPontoAtual = String(selectPonto.value || valorInicialPonto || "").trim();
+      if (!codPontoAtual) {
+        bloquearFace("Primeiro selecione o ponto");
+        return;
+      }
+
+      await carregarFacesDoContrato(idContratoAtual, codPontoAtual, valorInicialFace || "");
+    } catch (erro) {
+      console.error("[CHECKING] erro ao inicializar ponto/face:", erro);
+      bloquearPonto("Falha ao carregar pontos");
+      bloquearFace("Falha ao carregar faces");
+    }
   }
 
-  inicializarContratosSeJaExistirEmpresa();
+  (async function iniciarTela() {
+    await inicializarContratosSeJaExistirEmpresa();
+    await inicializarPontoEFaceSeExistiremValores();
+  })();
 })();
 </script>
 {% endblock %}

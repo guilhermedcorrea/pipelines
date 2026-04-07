@@ -989,6 +989,11 @@ input:disabled, select:disabled, textarea:disabled{
 
             {% if menu_paineis_disponibilidades %}
               <a href="{{ url_for('Paineis.lista_paineis') }}">Disponibilidades</a>
+              <a href="{{ url_for('Paineis.checking_novo') }}">Realizar Checkin</a>
+              <a href="{{ url_for('Paineis.lista_checkins') }}">Lista Checkins</a>
+
+
+
             {% endif %}
 
             {% if menu_paineis_atendimento %}

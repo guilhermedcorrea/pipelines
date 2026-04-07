@@ -1,0 +1,340 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Visualizar Check-in | Euromídia{% endblock %}
+
+{% block content %}
+
+<style>
+  .pagina-visualizar-checking{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+
+  .topo-checking{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .topo-checking .titulo-wrap{
+    flex:1 1 320px;
+    min-width:min(320px, 100%);
+  }
+
+  .topo-checking .acoes{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+  }
+
+  .grid-detalhes{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap:12px;
+  }
+
+  .card-detalhe{
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:#fff;
+    overflow:hidden;
+  }
+
+  .card-detalhe .cabecalho{
+    padding:12px 14px;
+    border-bottom:1px solid var(--border);
+    background:#F8FAFC;
+    font-size:13px;
+    font-weight:1000;
+    color:var(--text);
+  }
+
+  .lista-campos{
+    display:flex;
+    flex-direction:column;
+  }
+
+  .linha-campo{
+    display:grid;
+    grid-template-columns: 220px 1fr;
+    gap:12px;
+    padding:10px 14px;
+    border-bottom:1px solid rgba(15,23,42,.06);
+  }
+
+  .linha-campo:last-child{
+    border-bottom:none;
+  }
+
+  .campo-nome{
+    font-size:12px;
+    font-weight:1000;
+    color:var(--muted);
+    word-break:break-word;
+  }
+
+  .campo-valor{
+    font-size:12px;
+    font-weight:900;
+    color:var(--text);
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    line-height:1.35;
+  }
+
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 8px;
+    border-radius:999px;
+    border:1px solid rgba(0,40,132,.18);
+    background:rgba(0,40,132,.06);
+    color:var(--euro-blue);
+    font-weight:1000;
+    font-size:11px;
+    line-height:1.1;
+    white-space:normal;
+    text-align:center;
+    max-width:100%;
+  }
+
+  .badge.green{
+    border-color: rgba(16,185,129,.30);
+    background: rgba(16,185,129,.14);
+    color: #065f46;
+  }
+
+  .badge.yellow{
+    border-color: rgba(255,179,0,.35);
+    background: rgba(255,179,0,.18);
+    color: #5b3a00;
+  }
+
+  .bloco-unico{
+    margin-top:12px;
+  }
+
+  .pre-wrap{
+    white-space:pre-wrap;
+  }
+
+  @media (max-width: 980px){
+    .grid-detalhes{
+      grid-template-columns: 1fr;
+    }
+
+    .linha-campo{
+      grid-template-columns: 1fr;
+      gap:6px;
+    }
+  }
+</style>
+
+<div class="pagina-visualizar-checking">
+  <div class="card" style="padding:14px;">
+    <div class="topo-checking">
+      <div class="titulo-wrap">
+        <h1 class="page-title" style="margin:0;">Visualizar Check-in</h1>
+        <div class="muted" style="font-weight:900;margin-top:6px;">
+          ID: {{ item.IDDimCheckingHistorico }}
+        </div>
+      </div>
+
+      <div class="acoes">
+        <a class="btn btn-secondary" href="{{ url_for('Paineis.lista_checkins') }}">
+          Voltar
+        </a>
+      </div>
+    </div>
+
+    <div class="grid-detalhes" style="margin-top:12px;">
+
+      <div class="card-detalhe">
+        <div class="cabecalho">Dados principais</div>
+        <div class="lista-campos">
+          <div class="linha-campo">
+            <div class="campo-nome">IDDimCheckingHistorico</div>
+            <div class="campo-valor">{{ item.IDDimCheckingHistorico or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">DataAtualizacao</div>
+            <div class="campo-valor">{{ item.DataAtualizacao.strftime("%d/%m/%Y %H:%M:%S") if item.DataAtualizacao else "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">DataChecking</div>
+            <div class="campo-valor">{{ item.DataChecking.strftime("%d/%m/%Y %H:%M:%S") if item.DataChecking else "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">IDEmpresa</div>
+            <div class="campo-valor">{{ item.IDEmpresa or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CNPJ</div>
+            <div class="campo-valor">{{ item.CNPJ or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">RazaoSocial</div>
+            <div class="campo-valor">{{ item.RazaoSocial or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">IDFatoControleContratosEuromidia</div>
+            <div class="campo-valor">{{ item.IDFatoControleContratosEuromidia or "-" }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-detalhe">
+        <div class="cabecalho">Dados do painel / face</div>
+        <div class="lista-campos">
+          <div class="linha-campo">
+            <div class="campo-nome">CodPonto</div>
+            <div class="campo-valor">{{ item.CodPonto or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CodFace</div>
+            <div class="campo-valor">{{ item.CodFace or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">TipoPainel</div>
+            <div class="campo-valor">{{ item.TipoPainel or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">TipoFace</div>
+            <div class="campo-valor">{{ item.TipoFace or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">IDDimFacesPaineis</div>
+            <div class="campo-valor">{{ item.IDDimFacesPaineis or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">IDDimPaineisEuromidia</div>
+            <div class="campo-valor">{{ item.IDDimPaineisEuromidia or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">EnderecoPainel</div>
+            <div class="campo-valor">{{ item.EnderecoPainel or "-" }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-detalhe">
+        <div class="cabecalho">Endereço detalhado</div>
+        <div class="lista-campos">
+          <div class="linha-campo">
+            <div class="campo-nome">Logradouro</div>
+            <div class="campo-valor">{{ item.Logradouro or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">Numero</div>
+            <div class="campo-valor">{{ item.Numero or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">Bairro</div>
+            <div class="campo-valor">{{ item.Bairro or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">Cidade</div>
+            <div class="campo-valor">{{ item.Cidade or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">UF</div>
+            <div class="campo-valor">{{ item.UF or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CEP</div>
+            <div class="campo-valor">{{ item.CEP or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">Referencia</div>
+            <div class="campo-valor">{{ item.Referencia or "-" }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-detalhe">
+        <div class="cabecalho">Arquivos / caminhos</div>
+        <div class="lista-campos">
+          <div class="linha-campo">
+            <div class="campo-nome">NomeArquivoOriginal</div>
+            <div class="campo-valor">{{ item.NomeArquivoOriginal or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">NomeArquivoSalvo</div>
+            <div class="campo-valor">{{ item.NomeArquivoSalvo or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CaminhoImagemPainel</div>
+            <div class="campo-valor">{{ item.CaminhoImagemPainel or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CaminhoImagemFundo</div>
+            <div class="campo-valor">{{ item.CaminhoImagemFundo or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CaminhoImagemUpload</div>
+            <div class="campo-valor">{{ item.CaminhoImagemUpload or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">CaminhoImagemGerada</div>
+            <div class="campo-valor">{{ item.CaminhoImagemGerada or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">UrlImagemUpload</div>
+            <div class="campo-valor">{{ item.UrlImagemUpload or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">UrlImagemGerada</div>
+            <div class="campo-valor">{{ item.UrlImagemGerada or "-" }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-detalhe">
+        <div class="cabecalho">Controle / status</div>
+        <div class="lista-campos">
+          <div class="linha-campo">
+            <div class="campo-nome">BitChekin</div>
+            <div class="campo-valor">
+              {% if item.BitChekin in [1, true, True] %}
+                <span class="badge green">1 / Confirmado</span>
+              {% else %}
+                <span class="badge yellow">0 / Pendente</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">DataConfirmacao</div>
+            <div class="campo-valor">{{ item.DataConfirmacao.strftime("%d/%m/%Y %H:%M:%S") if item.DataConfirmacao else "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">IDUsuarioCriacao</div>
+            <div class="campo-valor">{{ item.IDUsuarioCriacao or "-" }}</div>
+          </div>
+          <div class="linha-campo">
+            <div class="campo-nome">IDUsuarioConfirmacao</div>
+            <div class="campo-valor">{{ item.IDUsuarioConfirmacao or "-" }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-detalhe">
+        <div class="cabecalho">Observação</div>
+        <div class="lista-campos">
+          <div class="linha-campo">
+            <div class="campo-nome">Observacao</div>
+            <div class="campo-valor pre-wrap">{{ item.Observacao or "-" }}</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}
