@@ -5473,66 +5473,10 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       : VALOR_MODO_CONTRATO_NOVO;
   }
 
-  function normalizarPontoContrato(item) {
-    if (!item || typeof item !== "object") return null;
-
-    const codPonto = safeStr(
-      item.cod_ponto ??
-      item.CodPonto ??
-      item.codPonto ??
-      ""
-    ).trim();
-
-    if (!codPonto) return null;
-
-    const label = safeStr(
-      item.label ??
-      item.Label ??
-      codPonto
-    ).trim();
-
-    return {
-      ...item,
-      cod_ponto: codPonto,
-      label: label || codPonto
-    };
-  }
-
-  function normalizarFaceContrato(item) {
-    if (!item || typeof item !== "object") return null;
-
-    const codFace = safeStr(
-      item.cod_face ??
-      item.CodFace ??
-      item.codFace ??
-      ""
-    ).trim().toUpperCase();
-
-    if (!codFace) return null;
-
-    const label = safeStr(
-      item.label ??
-      item.Label ??
-      codFace
-    ).trim();
-
-    return {
-      ...item,
-      cod_face: codFace,
-      label: label || codFace
-    };
-  }
-
-  function montarSelectPontosContratoCard(pontos, valorSelecionado = "") {
+  function montarSelectPontosContratoCard(pontos) {
     limparSelectComPlaceholder(selectCodPontoContratoCard, "— Selecione o CodPonto —");
 
-    const valorDesejado = safeStr(valorSelecionado).trim();
-
-    const pontosNormalizados = (Array.isArray(pontos) ? pontos : [])
-      .map(normalizarPontoContrato)
-      .filter(Boolean);
-
-    pontosNormalizados.forEach((ponto) => {
+    (Array.isArray(pontos) ? pontos : []).forEach((ponto) => {
       selectCodPontoContratoCard.appendChild(
         el("option", { value: ponto.cod_ponto }, [ponto.label])
       );
@@ -5541,40 +5485,16 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     selectCodPontoContratoCard.appendChild(
       el("option", { value: VALOR_OPCAO_NOVO_PAINEL }, ["Novo Painel"])
     );
-
-    if (valorDesejado) {
-      const existe = Array.from(selectCodPontoContratoCard.options)
-        .some((opt) => safeStr(opt.value).trim() === valorDesejado);
-
-      if (existe) {
-        selectCodPontoContratoCard.value = valorDesejado;
-      }
-    }
   }
 
-  function montarSelectFacesContratoCard(faces, valorSelecionado = "") {
+  function montarSelectFacesContratoCard(faces) {
     limparSelectComPlaceholder(selectCodFaceContratoCard, "— Selecione o CodFace —");
 
-    const valorDesejado = safeStr(valorSelecionado).trim().toUpperCase();
-
-    const facesNormalizadas = (Array.isArray(faces) ? faces : [])
-      .map(normalizarFaceContrato)
-      .filter(Boolean);
-
-    facesNormalizadas.forEach((face) => {
+    (Array.isArray(faces) ? faces : []).forEach((face) => {
       selectCodFaceContratoCard.appendChild(
         el("option", { value: face.cod_face }, [face.label])
       );
     });
-
-    if (valorDesejado) {
-      const existe = Array.from(selectCodFaceContratoCard.options)
-        .some((opt) => safeStr(opt.value).trim().toUpperCase() === valorDesejado);
-
-      if (existe) {
-        selectCodFaceContratoCard.value = valorDesejado;
-      }
-    }
   }
 
   function obterFluxoContratoAtual() {
@@ -5587,7 +5507,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     }
 
     const codPonto = safeStr(selectCodPontoContratoCard?.value || "").trim();
-    const codFace = safeStr(selectCodFaceContratoCard?.value || "").trim().toUpperCase();
+    const codFace = safeStr(selectCodFaceContratoCard?.value || "").trim();
 
     return {
       id_contrato: idContrato,
@@ -5606,16 +5526,62 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       : ID_TAG_TIPO_CONTRATO_NOVO;
   }
 
-  function encontrarPainelPorCodPonto(codPonto) {
+  function normalizarTextoComparacaoPainelContrato(valor) {
+    return safeStr(valor)
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .trim()
+      .toUpperCase();
+  }
+
+  function obterPontoContratoSelecionado(idContrato, codPonto) {
+    const idCtr = idNum(idContrato);
+    const codPontoNormalizado = safeStr(codPonto).trim();
+    if (!idCtr || !codPontoNormalizado) return null;
+
+    const pontos = pontosPorContratoCache.get(idCtr) || [];
+    return (Array.isArray(pontos) ? pontos : []).find((ponto) => {
+      return safeStr(ponto?.cod_ponto ?? ponto?.CodPonto ?? "").trim() === codPontoNormalizado;
+    }) || null;
+  }
+
+  function encontrarPainelPorCodPonto(codPonto, tipoPainel = "") {
     const cod = safeStr(codPonto).trim();
     if (!cod) return null;
 
-    return (paineisCatalogo || []).find((painel) => safeStr(painel?.CodPonto ?? "").trim() === cod) || null;
+    const candidatos = (Array.isArray(paineisCatalogo) ? paineisCatalogo : []).filter((painel) => {
+      return safeStr(painel?.CodPonto ?? "").trim() === cod;
+    });
+
+    if (!candidatos.length) {
+      return null;
+    }
+
+    if (candidatos.length === 1) {
+      return candidatos[0];
+    }
+
+    const tipoContratoNormalizado = normalizarTextoComparacaoPainelContrato(tipoPainel);
+    if (tipoContratoNormalizado) {
+      const painelMesmoTipo = candidatos.find((painel) => {
+        const tipoCatalogo = normalizarTextoComparacaoPainelContrato(painel?.Tipo ?? painel?.TipoPainel ?? "");
+        return tipoCatalogo === tipoContratoNormalizado;
+      });
+
+      if (painelMesmoTipo) {
+        return painelMesmoTipo;
+      }
+    }
+
+    return candidatos[0];
   }
 
   async function aplicarPainelFaceContratoNoPrimeiroBloco(codPonto, codFace) {
+    const fluxo = obterFluxoContratoAtual();
     const codPontoNormalizado = safeStr(codPonto).trim();
     const codFaceNormalizado = safeStr(codFace).trim();
+    const pontoSelecionado = obterPontoContratoSelecionado(fluxo.id_contrato, codPontoNormalizado);
+    const tipoPainelContrato = safeStr(pontoSelecionado?.tipo ?? pontoSelecionado?.TipoPainel ?? "").trim();
 
     if (!codPontoNormalizado || !codFaceNormalizado || !painelFaceLista) {
       return;
@@ -5628,9 +5594,9 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       atualizarTitulosPainelFace();
     }
 
-    const painel = encontrarPainelPorCodPonto(codPontoNormalizado);
+    const painel = encontrarPainelPorCodPonto(codPontoNormalizado, tipoPainelContrato);
     if (!painel) {
-      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado} existe no contrato, mas não foi encontrado na lista de painéis carregados do kanban.`, "alerta");
+      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} existe no contrato, mas não foi encontrado na lista de painéis carregados do kanban.`, "alerta");
       return;
     }
 
@@ -5645,7 +5611,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     selectPainel.value = String(idPainel);
     await atualizarFacesDoBloco(bloco, { CodFace: codFaceNormalizado });
-    setMensagemFluxoContrato(`Contrato existente selecionado. O painel ${codPontoNormalizado} e a face ${codFaceNormalizado} foram carregados no primeiro bloco.`, "sucesso");
+    setMensagemFluxoContrato(`Contrato existente selecionado. O painel ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} e a face ${codFaceNormalizado} foram carregados no primeiro bloco.`, "sucesso");
   }
 
   async function carregarFluxoContratoParaEmpresa(idEmpresa, opcoes = {}) {
@@ -5714,20 +5680,8 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     await onModoContratoCardChange();
   }
 
-  async function onModoContratoCardChange(opcoes = {}) {
+  async function onModoContratoCardChange() {
     const fluxo = obterFluxoContratoAtual();
-
-    const codPontoDesejado = safeStr(
-      opcoes.cod_ponto ??
-      selectCodPontoContratoCard?.value ??
-      ""
-    ).trim();
-
-    const codFaceDesejada = safeStr(
-      opcoes.cod_face ??
-      selectCodFaceContratoCard?.value ??
-      ""
-    ).trim().toUpperCase();
 
     limparSelectComPlaceholder(selectCodPontoContratoCard, "— Selecione o CodPonto —");
     limparSelectComPlaceholder(selectCodFaceContratoCard, "— Selecione o CodFace —");
@@ -5744,16 +5698,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     try {
       const pontos = await carregarPontosDoContrato(fluxo.id_contrato);
-      montarSelectPontosContratoCard(pontos, codPontoDesejado);
-
-      if (
-        codPontoDesejado &&
-        safeStr(selectCodPontoContratoCard?.value || "").trim() === codPontoDesejado
-      ) {
-        await onCodPontoContratoCardChange({ cod_face: codFaceDesejada });
-        return;
-      }
-
+      montarSelectPontosContratoCard(pontos);
       setMensagemFluxoContrato("Selecione um CodPonto já existente do contrato ou escolha Novo Painel para incluir um painel novo no aditivo.", "info");
     } catch (erro) {
       console.warn("onModoContratoCardChange: falhou ao carregar pontos", erro);
@@ -5761,14 +5706,8 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     }
   }
 
-  async function onCodPontoContratoCardChange(opcoes = {}) {
+  async function onCodPontoContratoCardChange() {
     const fluxo = obterFluxoContratoAtual();
-
-    const codFaceDesejada = safeStr(
-      opcoes.cod_face ??
-      selectCodFaceContratoCard?.value ??
-      ""
-    ).trim().toUpperCase();
 
     limparSelectComPlaceholder(selectCodFaceContratoCard, "— Selecione o CodFace —");
     if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = true;
@@ -5792,16 +5731,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     try {
       const faces = await carregarFacesDoContrato(fluxo.id_contrato, fluxo.cod_ponto_contrato);
-      montarSelectFacesContratoCard(faces, codFaceDesejada);
-
-      if (
-        codFaceDesejada &&
-        safeStr(selectCodFaceContratoCard?.value || "").trim().toUpperCase() === codFaceDesejada
-      ) {
-        await onCodFaceContratoCardChange();
-        return;
-      }
-
+      montarSelectFacesContratoCard(faces);
       setMensagemFluxoContrato("Agora selecione a face já existente do contrato.", "info");
     } catch (erro) {
       console.warn("onCodPontoContratoCardChange: falhou ao carregar faces", erro);
@@ -5815,10 +5745,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     if (fluxo.usar_novo_painel) return;
     if (!fluxo.cod_ponto_contrato || !fluxo.cod_face_contrato) return;
 
-    await aplicarPainelFaceContratoNoPrimeiroBloco(
-      fluxo.cod_ponto_contrato,
-      fluxo.cod_face_contrato
-    );
+    await aplicarPainelFaceContratoNoPrimeiroBloco(fluxo.cod_ponto_contrato, fluxo.cod_face_contrato);
   }
 
   async function sincronizarTagTipoContratoDoCard(idCard, idTagDesejada) {
