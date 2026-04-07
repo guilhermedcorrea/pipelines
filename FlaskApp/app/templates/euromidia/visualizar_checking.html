@@ -116,12 +116,32 @@
     color: #5b3a00;
   }
 
-  .bloco-unico{
-    margin-top:12px;
-  }
-
   .pre-wrap{
     white-space:pre-wrap;
+  }
+
+  .preview-imagem-wrap{
+    padding:14px;
+    border-top:1px solid rgba(15,23,42,.06);
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+
+  .preview-imagem-titulo{
+    font-size:12px;
+    font-weight:1000;
+    color:var(--muted);
+  }
+
+  .preview-imagem{
+    display:block;
+    width:100%;
+    max-height:520px;
+    object-fit:contain;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#F8FAFC;
   }
 
   @media (max-width: 980px){
@@ -171,16 +191,16 @@
             <div class="campo-valor">{{ item.DataChecking.strftime("%d/%m/%Y %H:%M:%S") if item.DataChecking else "-" }}</div>
           </div>
           <div class="linha-campo">
-            <div class="campo-nome">IDEmpresa</div>
-            <div class="campo-valor">{{ item.IDEmpresa or "-" }}</div>
+            <div class="campo-nome">RazaoSocial</div>
+            <div class="campo-valor">{{ item.RazaoSocial or "-" }}</div>
           </div>
           <div class="linha-campo">
             <div class="campo-nome">CNPJ</div>
             <div class="campo-valor">{{ item.CNPJ or "-" }}</div>
           </div>
           <div class="linha-campo">
-            <div class="campo-nome">RazaoSocial</div>
-            <div class="campo-valor">{{ item.RazaoSocial or "-" }}</div>
+            <div class="campo-nome">MarcaExibida</div>
+            <div class="campo-valor">{{ item.MarcaExibida or "-" }}</div>
           </div>
           <div class="linha-campo">
             <div class="campo-nome">IDFatoControleContratosEuromidia</div>
@@ -293,6 +313,20 @@
             <div class="campo-valor">{{ item.UrlImagemGerada or "-" }}</div>
           </div>
         </div>
+
+        <div class="preview-imagem-wrap">
+          <div class="preview-imagem-titulo">Imagem gerada</div>
+          {% if item.UrlImagemGerada %}
+            <img
+              src="{{ item.UrlImagemGerada }}"
+              alt="Imagem gerada do checking"
+              class="preview-imagem"
+              loading="lazy"
+            >
+          {% else %}
+            <div class="campo-valor">-</div>
+          {% endif %}
+        </div>
       </div>
 
       <div class="card-detalhe">
@@ -313,12 +347,12 @@
             <div class="campo-valor">{{ item.DataConfirmacao.strftime("%d/%m/%Y %H:%M:%S") if item.DataConfirmacao else "-" }}</div>
           </div>
           <div class="linha-campo">
-            <div class="campo-nome">IDUsuarioCriacao</div>
-            <div class="campo-valor">{{ item.IDUsuarioCriacao or "-" }}</div>
+            <div class="campo-nome">UsuarioCriacao</div>
+            <div class="campo-valor">{{ item.UsuarioCriacao or "-" }}</div>
           </div>
           <div class="linha-campo">
-            <div class="campo-nome">IDUsuarioConfirmacao</div>
-            <div class="campo-valor">{{ item.IDUsuarioConfirmacao or "-" }}</div>
+            <div class="campo-nome">UsuarioConfirmacao</div>
+            <div class="campo-valor">{{ item.UsuarioConfirmacao or "-" }}</div>
           </div>
         </div>
       </div>

@@ -14335,8 +14335,6 @@ def api_card_criar(id_kanban: int):
 
 
 
-
-
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
 @login_required
 @limiter.limit("120/minute")
@@ -14382,7 +14380,6 @@ def api_card_atualizar(id_card: int):
                     ),
                     409,
                 )
-
 
         id_tipo_cliente_desconto_int = None
         mapa_bits_tipo_cliente = None
@@ -14439,7 +14436,6 @@ def api_card_atualizar(id_card: int):
             if _coluna_existe(TABELA_CARD, "BitPlanejador"):
                 campos_update.append("BitPlanejador = :bit_planejador")
                 params_update["bit_planejador"] = int(mapa_bits_tipo_cliente["BitPlanejador"])
-
 
         output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
         where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
@@ -14535,9 +14531,17 @@ def api_card_atualizar(id_card: int):
 
             try:
                 reservas_criadas = _criar_reservas_painel_faces_kanban(
-                    id_card=id_card,
+                    id_card=int(id_card),
+                    titulo_card=str(row_upd.get("Titulo") or titulo or card_atual.get("Titulo") or "").strip(),
+                    id_empresa_relacionada=(
+                        params_update.get("id_empresa_relacionada")
+                        if "id_empresa_relacionada" in params_update
+                        else _obter_id_empresa_relacionada_card(card_atual)
+                    ),
+                    painel_faces_payload=painel_faces_payload,
                     vinculos_preparados=vinculos_preparados,
-                    id_empresa_proprietaria=id_emp,
+                    id_usuario=int(id_usuario),
+                    id_empresa_proprietaria=int(id_emp),
                 )
             except ValueError:
                 raise
@@ -14556,20 +14560,28 @@ def api_card_atualizar(id_card: int):
                     id_kanban=id_kanban,
                     id_fase_atual=id_fase_atual,
                     status_card=row_upd.get("StatusCard"),
-                    id_empresa_relacionada=params_update.get("id_empresa_relacionada"),
+                    id_empresa_relacionada=(
+                        params_update.get("id_empresa_relacionada")
+                        if "id_empresa_relacionada" in params_update
+                        else _obter_id_empresa_relacionada_card(card_atual)
+                    ),
                     vinculos_preparados=vinculos_preparados,
                     observacoes_proposta=descricao,
                 )
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
         _registrar_log_card(
-            id_card=id_card,
-            acao="CARD_ATUALIZADO",
-            detalhes="Card atualizado via quadro Kanban",
-            id_usuario=id_usuario,
-            id_empresa_proprietaria=id_emp,
-            antes=snapshot_antes,
-            depois=snapshot_depois,
+            id_card=int(id_card),
+            id_kanban=int(id_kanban),
+            id_empresa_proprietaria=int(id_emp),
+            id_usuario_acao=int(id_usuario),
+            tipo_evento="CARD_ATUALIZADO",
+            subtipo_evento="EDICAO",
+            id_fase_de=int(id_fase_atual) if id_fase_atual else None,
+            id_fase_para=int(row_upd.get("IDDimKanbanFaseAtual") or id_fase_atual or 0) or None,
+            observacao="Card atualizado via quadro Kanban",
+            payload_antes=snapshot_antes,
+            payload_depois=snapshot_depois,
         )
 
         db.session.commit()

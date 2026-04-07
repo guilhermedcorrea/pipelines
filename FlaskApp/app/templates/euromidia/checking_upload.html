@@ -211,6 +211,17 @@
   padding:10px 12px;
   color:#6b7280;
 }
+.busca-status{
+  padding:10px 12px;
+  color:#1f2937;
+  font-weight:700;
+}
+.busca-status-buscando{
+  color:#1d4ed8;
+}
+.busca-status-nao-encontrado{
+  color:#6b7280;
+}
 </style>
 
 <script>
@@ -232,20 +243,43 @@
   const valorInicialFace = {{ request.form.get('cod_face', '')|tojson }};
 
   let timerEmpresa = null;
+  let sequenciaBuscaEmpresa = 0;
+  let ultimoResultadoEmpresas = [];
+  let ultimoTermoBuscadoEmpresa = "";
+  let promessaBuscaEmpresaEmAndamento = null;
+  let termoBuscaEmpresaEmAndamento = "";
+
+  const cacheBuscaEmpresas = new Map();
+
+  function normalizarTexto(valor) {
+    return String(valor || "").trim();
+  }
+
+  function somenteDigitos(valor) {
+    return String(valor || "").replace(/\D+/g, "");
+  }
 
   function esconderBox(box) {
     box.hidden = true;
     box.innerHTML = "";
   }
 
-  function mostrarMensagem(box, texto) {
-    box.innerHTML = `<div class="busca-vazio">${texto}</div>`;
+  function mostrarMensagem(box, texto, classeExtra) {
+    box.innerHTML = `<div class="busca-status ${classeExtra || ""}">${texto}</div>`;
     box.hidden = false;
+  }
+
+  function mostrarBuscandoEmpresa() {
+    mostrarMensagem(boxEmpresa, "Buscando...", "busca-status-buscando");
+  }
+
+  function mostrarNaoEncontradoEmpresa() {
+    mostrarMensagem(boxEmpresa, "Não encontrado.", "busca-status-nao-encontrado");
   }
 
   function renderizarResultados(box, itens, onClickItem) {
     if (!itens || !itens.length) {
-      mostrarMensagem(box, "Nenhum resultado encontrado.");
+      mostrarNaoEncontradoEmpresa();
       return;
     }
 
@@ -255,10 +289,17 @@
       const div = document.createElement("div");
       div.className = "busca-item";
       div.textContent = item.texto;
+      div.tabIndex = 0;
+
+      div.addEventListener("mousedown", function (event) {
+        event.preventDefault();
+      });
+
       div.addEventListener("click", function () {
         onClickItem(item);
         esconderBox(box);
       });
+
       box.appendChild(div);
     });
 
@@ -325,6 +366,13 @@
   function limparDependenciasDoContrato() {
     bloquearPonto("Primeiro selecione um contrato");
     bloquearFace("Primeiro selecione o contrato e o ponto");
+  }
+
+  function limparSelecaoEmpresa() {
+    hiddenEmpresa.value = "";
+    hiddenEmpresaTexto.value = "";
+    bloquearContrato();
+    limparDependenciasDoContrato();
   }
 
   function preencherSelectContratos(itens, idContratoSelecionado) {
@@ -400,19 +448,83 @@
     liberarFace();
   }
 
+  function buscaEhPorCnpjExato(termo) {
+    return somenteDigitos(termo).length === 14;
+  }
+
+  function validarSePodeBuscarEmpresa(termo) {
+    const termoLimpo = normalizarTexto(termo);
+    const termoDigitos = somenteDigitos(termoLimpo);
+
+    if (!termoLimpo) {
+      return false;
+    }
+
+    if (termoDigitos.length > 0 && termoDigitos.length < 14) {
+      return false;
+    }
+
+    if (termoDigitos.length === 0 && termoLimpo.length < 2) {
+      return false;
+    }
+
+    return true;
+  }
+
   async function buscarEmpresas(q) {
-    const resposta = await fetch(`/paineis/checking/empresas/buscar?q=${encodeURIComponent(q)}`, {
+    const termo = normalizarTexto(q);
+    const meuToken = ++sequenciaBuscaEmpresa;
+
+    if (!termo) {
+      ultimoResultadoEmpresas = [];
+      return [];
+    }
+
+    if (cacheBuscaEmpresas.has(termo)) {
+      const itensDoCache = cacheBuscaEmpresas.get(termo) || [];
+      ultimoResultadoEmpresas = itensDoCache;
+      return itensDoCache;
+    }
+
+    if (promessaBuscaEmpresaEmAndamento && termoBuscaEmpresaEmAndamento === termo) {
+      return promessaBuscaEmpresaEmAndamento;
+    }
+
+    ultimoTermoBuscadoEmpresa = termo;
+    termoBuscaEmpresaEmAndamento = termo;
+    mostrarBuscandoEmpresa();
+
+    promessaBuscaEmpresaEmAndamento = fetch(`/paineis/checking/empresas/buscar?q=${encodeURIComponent(termo)}`, {
       method: "GET",
+      cache: "no-store",
       headers: {
         "X-Requested-With": "XMLHttpRequest"
       }
+    })
+    .then(function (resposta) {
+      if (!resposta.ok) {
+        throw new Error(`HTTP ${resposta.status}`);
+      }
+      return resposta.json();
+    })
+    .then(function (payload) {
+      if (meuToken !== sequenciaBuscaEmpresa) {
+        return [];
+      }
+
+      const itens = Array.isArray(payload) ? payload : [];
+      cacheBuscaEmpresas.set(termo, itens);
+      ultimoResultadoEmpresas = itens;
+      return itens;
+    })
+    .finally(function () {
+      if (termoBuscaEmpresaEmAndamento === termo) {
+        promessaBuscaEmpresaEmAndamento = null;
+        termoBuscaEmpresaEmAndamento = "";
+      }
     });
 
-    if (!resposta.ok) {
-      throw new Error(`HTTP ${resposta.status}`);
-    }
-
-    return await resposta.json();
+    return promessaBuscaEmpresaEmAndamento;
   }
 
   async function carregarContratosDaEmpresa(idEmpresa, idContratoSelecionado) {
@@ -423,6 +535,7 @@
       `/paineis/checking/contratos/buscar?id_empresa=${encodeURIComponent(idEmpresa)}&q=`,
       {
         method: "GET",
+        cache: "no-store",
         headers: {
           "X-Requested-With": "XMLHttpRequest"
         }
@@ -450,6 +563,7 @@
       `/paineis/checking/contratos/${encodeURIComponent(idContrato)}/pontos`,
       {
         method: "GET",
+        cache: "no-store",
         headers: {
           "X-Requested-With": "XMLHttpRequest"
         }
@@ -481,6 +595,7 @@
       `/paineis/checking/contratos/${encodeURIComponent(idContrato)}/pontos/${encodeURIComponent(codPonto)}/faces`,
       {
         method: "GET",
+        cache: "no-store",
         headers: {
           "X-Requested-With": "XMLHttpRequest"
         }
@@ -495,44 +610,232 @@
     preencherSelectFaces(payload.items || [], valorSelecionado || "");
   }
 
-  inputEmpresa.addEventListener("input", function () {
-    const termo = String(inputEmpresa.value || "").trim();
+  function encontrarEmpresaExata(termo, empresas) {
+    const termoNormalizado = normalizarTexto(termo).toLowerCase();
+    const termoDigitos = somenteDigitos(termo);
 
-    hiddenEmpresa.value = "";
-    hiddenEmpresaTexto.value = "";
-    bloquearContrato();
-    limparDependenciasDoContrato();
+    if (!empresas || !empresas.length) {
+      return null;
+    }
+
+    if (termoDigitos.length >= 14) {
+      const exatasPorCnpj = empresas.filter(function (item) {
+        return somenteDigitos(item.cnpj_digitos || item.cnpj) === termoDigitos;
+      });
+
+      if (exatasPorCnpj.length === 1) {
+        return exatasPorCnpj[0];
+      }
+    }
+
+    const exatasPorTexto = empresas.filter(function (item) {
+      return normalizarTexto(item.texto).toLowerCase() === termoNormalizado;
+    });
+
+    if (exatasPorTexto.length === 1) {
+      return exatasPorTexto[0];
+    }
+
+    return null;
+  }
+
+  async function selecionarEmpresa(item) {
+    inputEmpresa.value = item.texto;
+    hiddenEmpresa.value = item.id;
+    hiddenEmpresaTexto.value = item.texto;
+    esconderBox(boxEmpresa);
+
+    try {
+      await carregarContratosDaEmpresa(item.id, "");
+      selectContrato.focus();
+    } catch (erroContrato) {
+      console.error("[CHECKING] erro ao carregar contratos:", erroContrato);
+      bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
+      limparDependenciasDoContrato();
+    }
+  }
+
+  async function pesquisarEmpresas(termo, opcoes) {
+    const configuracao = Object.assign(
+      {
+        exibirDropdown: true,
+        autoSelecionarExata: false,
+        mostrarMensagemErro: true
+      },
+      opcoes || {}
+    );
+
+    const termoLimpo = normalizarTexto(termo);
+
+    if (!validarSePodeBuscarEmpresa(termoLimpo)) {
+      ultimoResultadoEmpresas = [];
+      esconderBox(boxEmpresa);
+      return [];
+    }
+
+    try {
+      const empresas = await buscarEmpresas(termoLimpo);
+      const empresaExata = configuracao.autoSelecionarExata ? encontrarEmpresaExata(termoLimpo, empresas) : null;
+
+      if (empresaExata) {
+        await selecionarEmpresa(empresaExata);
+        return empresas;
+      }
+
+      if (configuracao.exibirDropdown) {
+        renderizarResultados(boxEmpresa, empresas, async function (item) {
+          await selecionarEmpresa(item);
+        });
+      } else if (!empresas || !empresas.length) {
+        mostrarNaoEncontradoEmpresa();
+      } else {
+        esconderBox(boxEmpresa);
+      }
+
+      return empresas;
+    } catch (erro) {
+      console.error("[CHECKING] erro ao buscar empresas:", erro);
+
+      if (configuracao.mostrarMensagemErro) {
+        mostrarMensagem(boxEmpresa, "Não foi possível buscar agora.", "busca-status-nao-encontrado");
+      }
+
+      throw erro;
+    }
+  }
+
+  function agendarBuscaEmpresa(opcoes) {
+    const termo = normalizarTexto(inputEmpresa.value);
 
     clearTimeout(timerEmpresa);
 
-    if (termo.length < 2) {
+    if (hiddenEmpresa.value && hiddenEmpresaTexto.value === termo) {
+      return;
+    }
+
+    limparSelecaoEmpresa();
+
+    if (!validarSePodeBuscarEmpresa(termo)) {
       esconderBox(boxEmpresa);
       return;
     }
 
+    if (promessaBuscaEmpresaEmAndamento && termoBuscaEmpresaEmAndamento === termo) {
+      mostrarBuscandoEmpresa();
+      return;
+    }
+
+    if (ultimoTermoBuscadoEmpresa === termo && cacheBuscaEmpresas.has(termo)) {
+      const itensDoCache = cacheBuscaEmpresas.get(termo) || [];
+      const exibirDropdown = opcoes.exibirDropdown !== false;
+
+      if (!itensDoCache.length) {
+        mostrarNaoEncontradoEmpresa();
+        return;
+      }
+
+      if (exibirDropdown) {
+        renderizarResultados(boxEmpresa, itensDoCache, async function (item) {
+          await selecionarEmpresa(item);
+        });
+      } else {
+        esconderBox(boxEmpresa);
+      }
+
+      return;
+    }
+
+    mostrarBuscandoEmpresa();
+
     timerEmpresa = setTimeout(async function () {
       try {
-        const empresas = await buscarEmpresas(termo);
-
-        renderizarResultados(boxEmpresa, empresas, async function (item) {
-          inputEmpresa.value = item.texto;
-          hiddenEmpresa.value = item.id;
-          hiddenEmpresaTexto.value = item.texto;
-
-          try {
-            await carregarContratosDaEmpresa(item.id, "");
-            selectContrato.focus();
-          } catch (erroContrato) {
-            console.error("[CHECKING] erro ao carregar contratos:", erroContrato);
-            bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
-            limparDependenciasDoContrato();
-          }
+        await pesquisarEmpresas(termo, {
+          exibirDropdown: !buscaEhPorCnpjExato(termo) && opcoes.exibirDropdown !== false,
+          autoSelecionarExata: buscaEhPorCnpjExato(termo) || !!opcoes.autoSelecionarExata,
+          mostrarMensagemErro: opcoes.mostrarMensagemErro !== false
         });
       } catch (erro) {
-        console.error("[CHECKING] erro ao buscar empresas:", erro);
-        mostrarMensagem(boxEmpresa, "Não foi possível buscar empresas agora.");
       }
-    }, 300);
+    }, buscaEhPorCnpjExato(termo) ? 120 : 300);
+  }
+
+  inputEmpresa.addEventListener("input", function () {
+    agendarBuscaEmpresa({
+      exibirDropdown: true,
+      autoSelecionarExata: false,
+      mostrarMensagemErro: true
+    });
+  });
+
+  inputEmpresa.addEventListener("blur", function () {
+    window.setTimeout(async function () {
+      const termo = normalizarTexto(inputEmpresa.value);
+
+      if (hiddenEmpresa.value || !validarSePodeBuscarEmpresa(termo)) {
+        esconderBox(boxEmpresa);
+        return;
+      }
+
+      if (promessaBuscaEmpresaEmAndamento && termoBuscaEmpresaEmAndamento === termo) {
+        mostrarBuscandoEmpresa();
+        return;
+      }
+
+      if (ultimoTermoBuscadoEmpresa === termo && cacheBuscaEmpresas.has(termo)) {
+        const empresasDoCache = cacheBuscaEmpresas.get(termo) || [];
+        const empresaExata = encontrarEmpresaExata(termo, empresasDoCache);
+
+        if (empresaExata) {
+          await selecionarEmpresa(empresaExata);
+        } else if (!empresasDoCache.length) {
+          mostrarNaoEncontradoEmpresa();
+        } else {
+          esconderBox(boxEmpresa);
+        }
+        return;
+      }
+
+      try {
+        mostrarBuscandoEmpresa();
+
+        await pesquisarEmpresas(termo, {
+          exibirDropdown: true,
+          autoSelecionarExata: true,
+          mostrarMensagemErro: false
+        });
+      } catch (erro) {
+        mostrarNaoEncontradoEmpresa();
+      }
+    }, 150);
+  });
+
+  inputEmpresa.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter") {
+      return;
+    }
+
+    event.preventDefault();
+    clearTimeout(timerEmpresa);
+
+    const termo = normalizarTexto(inputEmpresa.value);
+    if (!validarSePodeBuscarEmpresa(termo)) {
+      return;
+    }
+
+    if (promessaBuscaEmpresaEmAndamento && termoBuscaEmpresaEmAndamento === termo) {
+      mostrarBuscandoEmpresa();
+      return;
+    }
+
+    mostrarBuscandoEmpresa();
+
+    pesquisarEmpresas(termo, {
+      exibirDropdown: true,
+      autoSelecionarExata: true,
+      mostrarMensagemErro: true
+    }).catch(function () {
+      mostrarNaoEncontradoEmpresa();
+    });
   });
 
   selectContrato.addEventListener("change", async function () {

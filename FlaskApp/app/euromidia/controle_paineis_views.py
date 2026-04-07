@@ -14295,8 +14295,6 @@ def _buscar_dados_select_checking(id_empresa: int | None = None):
 
 
 
-
-
 @paineis_bp.route("/checking/empresas/buscar", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
@@ -14307,72 +14305,90 @@ def checking_empresas_buscar():
     if not q:
         return jsonify([])
 
-    parametros = {
-        "q": q,
-        "q_like": f"%{q}%",
-        "q_digitos": q_digitos,
-        "q_digitos_prefixo": f"{q_digitos}%",
-    }
+    def formatar_cnpj(cnpj: str) -> str:
+        cnpj = _somente_digitos(cnpj)
+        if len(cnpj) != 14:
+            return cnpj
+        return f"{cnpj[0:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:14]}"
+
+    retorno = []
 
     if q_digitos:
+        q_cnpj_puro = q_digitos
+        q_cnpj_mascarado = formatar_cnpj(q_digitos)
+
+        parametros = {
+            "q": q,
+            "q_like": f"%{q}%",
+            "q_cnpj_puro": q_cnpj_puro,
+            "q_cnpj_mascarado": q_cnpj_mascarado,
+            "q_cnpj_puro_prefixo": f"{q_cnpj_puro}%",
+            "q_cnpj_mascarado_prefixo": f"{q_cnpj_mascarado}%",
+        }
+
         sql = text("""
             SELECT TOP (20)
                 e.IDEmpresa,
-                e.CNPJ,
-                e.RazaoSocial,
-                e.NomeFantasia
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(30)))), ''),
+                RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))), ''),
+                NomeFantasia = NULLIF(LTRIM(RTRIM(COALESCE(e.NomeFantasia, ''))), '')
             FROM [Integracao].[Silver].[DimEmpresas] e
             WHERE
+                NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(30)))), '') IS NOT NULL
+                AND
                 (
-                    e.CNPJ = :q_digitos
-                    OR e.CNPJ LIKE :q_digitos_prefixo
-                )
-                OR
-                (
-                    e.RazaoSocial LIKE :q_like
-                    OR e.NomeFantasia LIKE :q_like
+                    CAST(e.CNPJ AS varchar(30)) = :q_cnpj_puro
+                    OR CAST(e.CNPJ AS varchar(30)) = :q_cnpj_mascarado
+                    OR CAST(e.CNPJ AS varchar(30)) LIKE :q_cnpj_puro_prefixo
+                    OR CAST(e.CNPJ AS varchar(30)) LIKE :q_cnpj_mascarado_prefixo
                 )
             ORDER BY
                 CASE
-                    WHEN e.CNPJ = :q_digitos THEN 0
-                    WHEN e.CNPJ LIKE :q_digitos_prefixo THEN 1
-                    WHEN e.RazaoSocial = :q THEN 2
-                    WHEN e.NomeFantasia = :q THEN 3
+                    WHEN CAST(e.CNPJ AS varchar(30)) = :q_cnpj_puro THEN 0
+                    WHEN CAST(e.CNPJ AS varchar(30)) = :q_cnpj_mascarado THEN 1
+                    WHEN CAST(e.CNPJ AS varchar(30)) LIKE :q_cnpj_puro_prefixo THEN 2
+                    WHEN CAST(e.CNPJ AS varchar(30)) LIKE :q_cnpj_mascarado_prefixo THEN 3
                     ELSE 4
                 END,
-                e.RazaoSocial,
-                e.NomeFantasia,
-                e.CNPJ
+                RazaoSocial,
+                NomeFantasia,
+                CNPJ
         """)
     else:
+        parametros = {
+            "q": q,
+            "q_like": f"%{q}%",
+        }
+
         sql = text("""
             SELECT TOP (20)
                 e.IDEmpresa,
-                e.CNPJ,
-                e.RazaoSocial,
-                e.NomeFantasia
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(30)))), ''),
+                RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))), ''),
+                NomeFantasia = NULLIF(LTRIM(RTRIM(COALESCE(e.NomeFantasia, ''))), '')
             FROM [Integracao].[Silver].[DimEmpresas] e
             WHERE
-                e.RazaoSocial LIKE :q_like
-                OR e.NomeFantasia LIKE :q_like
+                (
+                    COALESCE(e.RazaoSocial, '') LIKE :q_like
+                    OR COALESCE(e.NomeFantasia, '') LIKE :q_like
+                )
             ORDER BY
                 CASE
-                    WHEN e.RazaoSocial = :q THEN 0
-                    WHEN e.NomeFantasia = :q THEN 1
+                    WHEN COALESCE(e.RazaoSocial, '') = :q THEN 0
+                    WHEN COALESCE(e.NomeFantasia, '') = :q THEN 1
                     ELSE 2
                 END,
-                e.RazaoSocial,
-                e.NomeFantasia,
-                e.CNPJ
+                RazaoSocial,
+                NomeFantasia,
+                CNPJ
         """)
 
     rows = db.session.execute(sql, parametros).mappings().all()
 
-    retorno = []
-
     for row in rows:
         id_empresa = row["IDEmpresa"]
         cnpj = _normalizar_texto_checking(row["CNPJ"])
+        cnpj_digitos = _somente_digitos(cnpj)
         razao = _normalizar_texto_checking(row["RazaoSocial"])
         nome_fantasia = _normalizar_texto_checking(row["NomeFantasia"])
 
@@ -14380,10 +14396,17 @@ def checking_empresas_buscar():
 
         retorno.append({
             "id": int(id_empresa),
+            "cnpj": cnpj,
+            "cnpj_digitos": cnpj_digitos,
+            "razao_social": razao,
+            "nome_fantasia": nome_fantasia,
             "texto": f"{cnpj} | {nome_exibicao}",
         })
 
     return jsonify(retorno)
+
+
+
 
 
 def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path, Path]:
@@ -15057,45 +15080,44 @@ def lista_checkins():
     )
 
 
-@paineis_bp.route("/checking/<int:id_checking_historico>", methods=["GET"])
+
+
+
+@paineis_bp.route("/checking/<int:id_checking>", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
-def visualizar_checking(id_checking_historico: int):
+def visualizar_checking(id_checking: int):
     sql = text("""
-        SELECT
+        SELECT TOP (1)
             ch.IDDimCheckingHistorico,
             ch.DataAtualizacao,
             ch.DataChecking,
             ch.IDEmpresa,
-            CNPJ = COALESCE(emp.CNPJ, ch.CNPJ),
-            RazaoSocial = COALESCE(emp.RazaoSocial, ch.RazaoSocial),
+            CNPJ = COALESCE(NULLIF(LTRIM(RTRIM(emp.CNPJ)), ''), NULLIF(LTRIM(RTRIM(cc.CNPJ)), ''), NULLIF(LTRIM(RTRIM(ch.CNPJ)), '')),
+            RazaoSocial = COALESCE(NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(cc.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(ch.RazaoSocial)), '')),
+            MarcaExibida = NULLIF(LTRIM(RTRIM(cc.MarcaExibida)), ''),
             ch.IDFatoControleContratosEuromidia,
             ch.CodPonto,
             ch.CodFace,
-            ch.TipoPainel,
-            ch.TipoFace,
+            TipoPainel = COALESCE(NULLIF(LTRIM(RTRIM(p.Tipo)), ''), NULLIF(LTRIM(RTRIM(ch.TipoPainel)), '')),
+            TipoFace = COALESCE(NULLIF(LTRIM(RTRIM(fp.Tipo)), ''), NULLIF(LTRIM(RTRIM(ch.TipoFace)), '')),
             fp.IDDimFacesPaineis,
             p.IDDimPaineisEuromidia,
-
             EnderecoPainel =
                 LTRIM(RTRIM(
                     COALESCE(p.Logradouro, '') +
                     CASE WHEN p.Numero IS NOT NULL AND LTRIM(RTRIM(p.Numero)) <> '' THEN ', ' + p.Numero ELSE '' END +
                     CASE WHEN p.Bairro IS NOT NULL AND LTRIM(RTRIM(p.Bairro)) <> '' THEN ' - ' + p.Bairro ELSE '' END +
                     CASE WHEN p.Cidade IS NOT NULL AND LTRIM(RTRIM(p.Cidade)) <> '' THEN ' - ' + p.Cidade ELSE '' END +
-                    CASE WHEN p.UF IS NOT NULL AND LTRIM(RTRIM(p.UF)) <> '' THEN '/' + p.UF ELSE '' END +
-                    CASE WHEN p.CEP IS NOT NULL AND LTRIM(RTRIM(p.CEP)) <> '' THEN ' - CEP: ' + p.CEP ELSE '' END +
-                    CASE WHEN p.Referencia IS NOT NULL AND LTRIM(RTRIM(p.Referencia)) <> '' THEN ' - Ref.: ' + p.Referencia ELSE '' END
+                    CASE WHEN p.UF IS NOT NULL AND LTRIM(RTRIM(p.UF)) <> '' THEN '/' + p.UF ELSE '' END
                 )),
-
-            p.Logradouro,
-            p.Numero,
-            p.Bairro,
-            p.Cidade,
-            p.UF,
-            p.CEP,
-            p.Referencia,
-
+            Logradouro = p.Logradouro,
+            Numero = p.Numero,
+            Bairro = p.Bairro,
+            Cidade = p.Cidade,
+            UF = p.UF,
+            CEP = p.CEP,
+            Referencia = p.Referencia,
             ch.NomeArquivoOriginal,
             ch.NomeArquivoSalvo,
             ch.CaminhoImagemPainel,
@@ -15107,30 +15129,40 @@ def visualizar_checking(id_checking_historico: int):
             ch.BitChekin,
             ch.DataConfirmacao,
             ch.IDUsuarioCriacao,
+            UsuarioCriacao = COALESCE(NULLIF(LTRIM(RTRIM(uc.NomeUsuario)), ''), CAST(ch.IDUsuarioCriacao AS VARCHAR(50))),
             ch.IDUsuarioConfirmacao,
+            UsuarioConfirmacao = COALESCE(NULLIF(LTRIM(RTRIM(uf.NomeUsuario)), ''), CAST(ch.IDUsuarioConfirmacao AS VARCHAR(50))),
             ch.Observacao
         FROM [Integracao].[Silver].[DimCheckingHistorico] ch
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] cc
+               ON cc.IDFatoControleContratosEuromidia = ch.IDFatoControleContratosEuromidia
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
-            ON emp.IDEmpresa = ch.IDEmpresa
-        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] fp
-            ON fp.CodFace = ch.CodFace
-           AND fp.CodPonto = ch.CodPonto
+               ON emp.IDEmpresa = COALESCE(ch.IDEmpresa, cc.IDEmpresa)
+        OUTER APPLY (
+            SELECT TOP (1)
+                fp2.IDDimFacesPaineis,
+                fp2.CodPonto,
+                fp2.CodFace,
+                fp2.Tipo,
+                fp2.IDDimPaineisEuromidia
+            FROM [Integracao].[Silver].[DimFacesPaineis] fp2
+            WHERE fp2.CodFace = ch.CodFace
+               OR (fp2.CodPonto = ch.CodPonto AND fp2.Face = ch.CodFace)
+            ORDER BY CASE WHEN fp2.CodFace = ch.CodFace THEN 0 ELSE 1 END,
+                     fp2.IDDimFacesPaineis DESC
+        ) fp
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
-            ON p.IDDimPaineisEuromidia = fp.IDDimPaineisEuromidia
-        WHERE ch.IDDimCheckingHistorico = :id_checking_historico
+               ON p.IDDimPaineisEuromidia = fp.IDDimPaineisEuromidia
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] uc
+               ON uc.IDDimUsuarios = ch.IDUsuarioCriacao
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] uf
+               ON uf.IDDimUsuarios = ch.IDUsuarioConfirmacao
+        WHERE ch.IDDimCheckingHistorico = :id_checking
     """)
 
-    linha = db.session.execute(
-        sql,
-        {"id_checking_historico": id_checking_historico},
-    ).mappings().first()
+    item = db.session.execute(sql, {"id_checking": id_checking}).mappings().first()
 
-    if not linha:
+    if not item:
         abort(404)
 
-    item = dict(linha)
-
-    return render_template(
-        "euromidia/visualizar_checking.html",
-        item=item,
-    )
+    return render_template("euromidia/visualizar_checking.html", item=item)
