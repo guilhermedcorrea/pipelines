@@ -4692,6 +4692,150 @@ def _criar_solicitacao_contrato_em_avaliacao_para_card(
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+def _sincronizar_ativacao_solicitacao_por_fase_do_card(
+    *,
+    id_card: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any]:
+    """
+    Eu sincronizo a solicitação de contrato após movimento de fase do card.
+
+    Regra correta:
+    - primeiro sincronizo o snapshot principal do card;
+    - depois propago o BitSolicitacaoAtiva para TODOS os itens do card
+      em FatoSolicitacaoContratoItemEuromidia;
+    - assim, quando o card vai para a fase 4, todos os itens do card
+      ficam com BitSolicitacaoAtiva = 1, e não apenas um único item.
+    """
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
+
+    id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
+    id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
+
+    tipo_solicitacao = (
+        card.get("tipo_contrato")
+        or card.get("TipoSolicitacao")
+        or (TIPO_SOLICITACAO_ADITIVO if card.get("BitAditivo") else None)
+        or (TIPO_SOLICITACAO_NOVO if card.get("BitContratoNovo") else None)
+    )
+
+    id_contrato_existente = (
+        card.get("IDFatoControleContratosEuromidia")
+        or card.get("IDFatoControleContratoEuromidia")
+        or None
+    )
+
+    cod_ponto_contrato = (
+        card.get("CodPontoContrato")
+        or card.get("cod_ponto_contrato")
+        or None
+    )
+
+    cod_face_contrato = (
+        card.get("CodFaceContrato")
+        or card.get("cod_face_contrato")
+        or None
+    )
+
+    if tipo_solicitacao not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
+        return {"sincronizado": False, "motivo": "card_sem_tipo_solicitacao"}
+
+    resultado = _sincronizar_snapshot_solicitacao_contrato_do_card(
+        id_card=int(id_card),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        tipo_contrato=tipo_solicitacao,
+        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        cod_ponto_contrato=cod_ponto_contrato,
+        cod_face_contrato=cod_face_contrato,
+        descricao_card=str(card.get("Descricao") or "").strip() or None,
+        forcar_solicitacao_ativa=True if int(id_fase_atual) == 4 else None,
+    )
+
+    if not resultado.get("sincronizado"):
+        return resultado
+
+    coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
+    if not coluna_atividade_item:
+        resultado["quantidade_itens_atualizados"] = 0
+        resultado["motivo_itens"] = "coluna_atividade_item_ausente"
+        return resultado
+
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+        resultado["quantidade_itens_atualizados"] = 0
+        resultado["motivo_itens"] = "tabela_solicitacao_item_ausente"
+        return resultado
+
+    bit_solicitacao_ativa = 1 if bool(resultado.get("bit_solicitacao_ativa")) else 0
+
+    sets_item = [f"[{coluna_atividade_item}] = :bit_solicitacao_ativa"]
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+        sets_item.append("DataAtualizacao = GETDATE()")
+
+    sql_update_itens = text(
+        f"""
+        UPDATE {TABELA_SOLICITACAO_CONTRATO_ITEM}
+           SET {', '.join(sets_item)}
+         WHERE IDFatoKanbanCard = :id_card;
+        """
+    )
+
+    db.session.execute(
+        sql_update_itens,
+        {
+            "id_card": int(id_card),
+            "bit_solicitacao_ativa": int(bit_solicitacao_ativa),
+        },
+    )
+
+    sql_count_itens = text(
+        f"""
+        SELECT COUNT(1)
+        FROM {TABELA_SOLICITACAO_CONTRATO_ITEM}
+        WHERE IDFatoKanbanCard = :id_card
+          AND ISNULL([{coluna_atividade_item}], 0) = :bit_solicitacao_ativa;
+        """
+    )
+
+    quantidade_itens_atualizados = db.session.execute(
+        sql_count_itens,
+        {
+            "id_card": int(id_card),
+            "bit_solicitacao_ativa": int(bit_solicitacao_ativa),
+        },
+    ).scalar()
+
+    resultado["quantidade_itens_atualizados"] = int(quantidade_itens_atualizados or 0)
+    resultado["bit_solicitacao_ativa"] = int(bit_solicitacao_ativa)
+
+    return resultado
+
+
+
+
+
+
+
+
+
+
+
+
+
 def _obter_snapshot_card_log(id_card: int, *, incluir_inativo: bool = True) -> dict[str, Any] | None:
     filtro_ativo = "" if incluir_inativo else "AND c.Ativo = 1"
     sql = text(f"""
@@ -9198,7 +9342,6 @@ def _registrar_negociacao_preco_card(
 
 
     
-
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -9518,6 +9661,19 @@ def api_card_mover(id_card: int):
                 id_fase=int(id_fase_para),
             )
 
+        sincronizacao_solicitacao_fase = None
+
+        try:
+            sincronizacao_solicitacao_fase = _sincronizar_ativacao_solicitacao_por_fase_do_card(
+                id_card=int(id_card),
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Falha ao sincronizar a solicitação de contrato após mover o card: {str(exc)}"
+            ) from exc
+
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
         _registrar_log_card(
             id_card=id_card,
@@ -9550,6 +9706,7 @@ def api_card_mover(id_card: int):
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
+                "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             },
         )
 
@@ -9563,6 +9720,7 @@ def api_card_mover(id_card: int):
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
+                "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             }
         )
 
@@ -9570,9 +9728,6 @@ def api_card_mover(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
-
-
-
 
     
 
