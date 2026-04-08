@@ -304,8 +304,6 @@ def _resolver_contexto_tipo_contrato_payload(
 
 
 
-
-
 def _anexar_campos_vinculo_contrato_card(
     *,
     campos_sql: list[str],
@@ -343,10 +341,6 @@ def _anexar_campos_vinculo_contrato_card(
     if _coluna_existe(TABELA_CARD, "CodFaceContrato"):
         campos_sql.append(f"CodFaceContrato = :{nome_param_cod_face}")
         parametros[nome_param_cod_face] = cod_face_limpo
-
-
-
-
 
 
 
@@ -948,15 +942,16 @@ def _listar_cod_ponto_por_contrato(id_contrato: int) -> list[dict[str, object]]:
 
 
 
-
 def _listar_cod_face_por_contrato_ponto(id_contrato: int, cod_ponto: str) -> list[dict[str, object]]:
     sql = text(f"""
         SELECT
+            MAX(i.CodPonto) AS CodPonto,
             i.CodFace,
             MAX(i.Tipo) AS TipoPainel,
             MAX(i.CidadeExibicao) AS CidadeExibicao,
             MAX(i.Cota) AS Cota,
             MAX(i.FaturamentoLiquidoMensal) AS FaturamentoLiquidoMensal,
+            MAX(i.TotalLiquidoContratoAGBRCTACORDO) AS TotalLiquidoContratoAGBRCTACORDO,
             MAX(i.DataInicioPrevisto) AS DataInicioPrevisto,
             MAX(i.DataTerminoPrevisto) AS DataTerminoPrevisto,
             MAX(i.IDPainelEuromidia) AS IDPainelEuromidia,
@@ -981,17 +976,55 @@ def _listar_cod_face_por_contrato_ponto(id_contrato: int, cod_ponto: str) -> lis
     resultado: list[dict[str, object]] = []
     for row in rows:
         item = dict(row)
-        item["label"] = (
-            f"{item.get('CodFace')}"
-            f" | {str(item.get('TipoPainel') or '').strip()}"
-            f" | Cota {str(item.get('Cota') or '').strip()}"
-        ).strip(" |")
+
+        preco_venda_atual = item.get("TotalLiquidoContratoAGBRCTACORDO")
+        if preco_venda_atual in (None, ""):
+            preco_venda_atual = item.get("FaturamentoLiquidoMensal")
+
+        item["TotalLiquidoContratoAGBRCTACORDO"] = _decimal_para_float(preco_venda_atual)
+        item["FaturamentoLiquidoMensal"] = _decimal_para_float(item.get("FaturamentoLiquidoMensal"))
+        item["preco_venda_atual"] = item.get("TotalLiquidoContratoAGBRCTACORDO")
+
+        data_inicio_previsto = item.get("DataInicioPrevisto")
+        data_termino_previsto = item.get("DataTerminoPrevisto")
+
+        if hasattr(data_inicio_previsto, "date"):
+            try:
+                data_inicio_previsto = data_inicio_previsto.date()
+            except Exception:
+                pass
+        if hasattr(data_termino_previsto, "date"):
+            try:
+                data_termino_previsto = data_termino_previsto.date()
+            except Exception:
+                pass
+
+        item["DataInicioPrevisto"] = data_inicio_previsto.isoformat() if hasattr(data_inicio_previsto, "isoformat") else (str(data_inicio_previsto) if data_inicio_previsto not in (None, "") else None)
+        item["DataTerminoPrevisto"] = data_termino_previsto.isoformat() if hasattr(data_termino_previsto, "isoformat") else (str(data_termino_previsto) if data_termino_previsto not in (None, "") else None)
+
+        partes_label: list[str] = [str(item.get("CodFace") or "").strip()]
+
+        tipo_painel = str(item.get("TipoPainel") or "").strip()
+        if tipo_painel:
+            partes_label.append(tipo_painel)
+
+        cota = item.get("Cota")
+        if cota not in (None, ""):
+            partes_label.append(f"Cota {cota}")
+
+        valor_label = item.get("preco_venda_atual")
+        if valor_label not in (None, ""):
+            try:
+                valor_decimal = Decimal(str(valor_label))
+                valor_formatado = f"R$ {valor_decimal:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                partes_label.append(valor_formatado)
+            except Exception:
+                pass
+
+        item["label"] = " | ".join([parte for parte in partes_label if str(parte).strip()])
         resultado.append(item)
 
     return resultado
-
-
-
 
 
 
@@ -1156,6 +1189,7 @@ def api_listar_faces_contrato_ponto(id_contrato: int, cod_ponto: str):
 
 
 
+
 def _sincronizar_tipo_contrato_card(
     *,
     id_card: int,
@@ -1252,9 +1286,6 @@ def _sincronizar_tipo_contrato_card(
         "cod_ponto_contrato": str(cod_ponto_para_persistir).strip() if cod_ponto_para_persistir not in (None, "") else None,
         "cod_face_contrato": str(cod_face_para_persistir).strip().upper() if cod_face_para_persistir not in (None, "") else None,
     }
-
-
-
 
 
 
@@ -3564,13 +3595,53 @@ def _inserir_registro_dinamico_output_id(
     return int(valor_id) if valor_id not in (None, "") else None
 
 
+def _atualizar_registro_dinamico_por_id(
+    nome_tabela: str,
+    coluna_id: str,
+    valor_id: Any,
+    valores: dict[str, Any],
+    colunas_getdate: tuple[str, ...] = (),
+) -> bool:
+    if valor_id in (None, ""):
+        return False
+
+    if not _objeto_existe(nome_tabela) or not _coluna_existe(nome_tabela, coluna_id):
+        return False
+
+    sets: list[str] = []
+    params: dict[str, Any] = {"valor_id_registro": valor_id}
+
+    for coluna, valor in valores.items():
+        if not _coluna_existe(nome_tabela, coluna):
+            continue
+        sets.append(f"[{coluna}] = :{coluna}")
+        params[coluna] = valor
+
+    for coluna in colunas_getdate:
+        if _coluna_existe(nome_tabela, coluna) and coluna not in valores:
+            sets.append(f"[{coluna}] = GETDATE()")
+
+    if not sets:
+        return False
+
+    sql = text(
+        f"""
+        UPDATE {nome_tabela}
+           SET {', '.join(sets)}
+         WHERE [{coluna_id}] = :valor_id_registro;
+        """
+    )
+    db.session.execute(sql, params)
+    return True
+
+
 def _obter_solicitacao_contrato_ativa_por_card(id_card: int) -> dict[str, Any] | None:
     if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO):
         return None
 
     filtro_ativo = ""
     if _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "BitAtivo"):
-        filtro_ativo = "AND BitAtivo = 1"
+        filtro_ativo = "AND ISNULL(BitAtivo, 0) = 1"
 
     sql = text(
         f"""
@@ -3583,6 +3654,7 @@ def _obter_solicitacao_contrato_ativa_por_card(id_card: int) -> dict[str, Any] |
         WHERE IDFatoKanbanCard = :id_card
           {filtro_ativo}
         ORDER BY
+            DataAtualizacao DESC,
             DataCriacao DESC,
             IDFatoSolicitacaoContratoEuromidia DESC;
         """
@@ -3590,6 +3662,853 @@ def _obter_solicitacao_contrato_ativa_por_card(id_card: int) -> dict[str, Any] |
 
     row = db.session.execute(sql, {"id_card": int(id_card)}).mappings().first()
     return dict(row) if row else None
+
+
+def _card_tem_tag_contrato_em_avaliacao(id_card: int) -> bool:
+    sql = text(
+        """
+        SELECT TOP (1) 1
+        FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
+        WHERE ct.IDFatoKanbanCard = :id_card
+          AND ct.IDDimKanbanTag = :id_tag;
+        """
+    )
+    valor = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_tag": int(ID_TAG_CONTRATO_EM_AVALIACAO),
+        },
+    ).scalar()
+    return bool(valor)
+
+
+def _obter_nome_coluna_atividade_solicitacao_item() -> str | None:
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitSolicitacaoAtiva"):
+        return "BitSolicitacaoAtiva"
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitAtivo"):
+        return "BitAtivo"
+    return None
+
+
+def _normalizar_valor_snapshot_solicitacao(valor: Any) -> Any:
+    if valor is None:
+        return None
+
+    if isinstance(valor, Decimal):
+        return format(valor.quantize(Decimal("0.0001")), "f")
+
+    if isinstance(valor, float):
+        try:
+            return format(Decimal(str(valor)).quantize(Decimal("0.0001")), "f")
+        except Exception:
+            return str(valor)
+
+    if isinstance(valor, str):
+        return valor.strip()
+
+    if hasattr(valor, "isoformat"):
+        try:
+            return valor.isoformat()
+        except Exception:
+            return str(valor)
+
+    return valor
+
+
+
+
+
+
+
+
+
+
+def _registro_dinamico_equivalente(
+    registro_atual: dict[str, Any] | None,
+    valores_novos: dict[str, Any] | None,
+    campos_comparacao: list[str] | tuple[str, ...],
+    *,
+    nome_tabela: str | None = None,
+) -> bool:
+    """
+    Compara um registro atual com um dicionário de novos valores,
+    normalizando tipos para evitar falso positivo de diferença.
+
+    Regras:
+    - se vier campo inexistente na tabela informada, eu ignoro esse campo
+    - Decimal, float, datas e strings passam pela mesma normalização
+    - retorna True somente se todos os campos comparados forem equivalentes
+    """
+    if not isinstance(registro_atual, dict) or not isinstance(valores_novos, dict):
+        return False
+
+    for campo in campos_comparacao or []:
+        if nome_tabela and not _coluna_existe(nome_tabela, campo):
+            continue
+
+        valor_atual = _normalizar_valor_snapshot_solicitacao(registro_atual.get(campo))
+        valor_novo = _normalizar_valor_snapshot_solicitacao(valores_novos.get(campo))
+
+        if valor_atual != valor_novo:
+            return False
+
+    return True
+
+
+
+
+
+
+
+
+
+def _obter_snapshot_solicitacao_editavel_por_card(id_card: int) -> dict[str, Any] | None:
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO):
+        return None
+
+    ordem_header: list[str] = []
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "DataAtualizacao"):
+        ordem_header.append("s.DataAtualizacao DESC")
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "DataCriacao"):
+        ordem_header.append("s.DataCriacao DESC")
+    ordem_header.append("s.IDFatoSolicitacaoContratoEuromidia DESC")
+
+    sql_header = text(
+        f"""
+        SELECT TOP (1)
+            s.*
+        FROM {TABELA_SOLICITACAO_CONTRATO} s
+        WHERE s.IDFatoKanbanCard = :id_card
+        ORDER BY {', '.join(ordem_header)};
+        """
+    )
+    header = db.session.execute(sql_header, {"id_card": int(id_card)}).mappings().first()
+    if not header:
+        return None
+
+    resultado = {"header": dict(header), "item": None}
+
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+        return resultado
+
+    ordem_item: list[str] = []
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+        ordem_item.append("i.DataAtualizacao DESC")
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataCriacao"):
+        ordem_item.append("i.DataCriacao DESC")
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoSolicitacaoContratoItemEuromidia"):
+        ordem_item.append("i.IDFatoSolicitacaoContratoItemEuromidia DESC")
+
+    filtros = ["i.IDFatoKanbanCard = :id_card"]
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoSolicitacaoContratoEuromidia"):
+        filtros.append("i.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao")
+
+    sql_item = text(
+        f"""
+        SELECT TOP (1)
+            i.*
+        FROM {TABELA_SOLICITACAO_CONTRATO_ITEM} i
+        WHERE {' AND '.join(filtros)}
+        ORDER BY {', '.join(ordem_item) if ordem_item else 'i.IDFatoSolicitacaoContratoEuromidia DESC'};
+        """
+    )
+    item = db.session.execute(
+        sql_item,
+        {
+            "id_card": int(id_card),
+            "id_solicitacao": int(header.get("IDFatoSolicitacaoContratoEuromidia") or 0),
+        },
+    ).mappings().first()
+
+    if item:
+        resultado["item"] = dict(item)
+
+    return resultado
+
+
+
+
+
+
+def _obter_item_solicitacao_editavel_por_chave(
+    *,
+    id_card: int,
+    id_solicitacao: int | None,
+    id_contrato: int | None,
+    id_item_contrato: int | None,
+    cod_ponto: object = None,
+    cod_face: object = None,
+) -> dict[str, Any] | None:
+    """
+    Eu localizo o item já persistido da solicitação usando a chave lógica correta.
+
+    Regra:
+    - primeiro tento pela chave mais forte: IDFatoSolicitacaoContratoEuromidia + IDFatoControleContratosItensEuromidia
+    - se não houver ID do item oficial do contrato, tento por:
+      IDFatoSolicitacaoContratoEuromidia + IDFatoControleContratosEuromidia + CodPonto + CodFace
+    - isso evita atualizar o último item do card por engano quando o card possui vários itens
+    """
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+        return None
+
+    filtros: list[str] = ["i.IDFatoKanbanCard = :id_card"]
+    parametros: dict[str, object] = {"id_card": int(id_card)}
+
+    if id_solicitacao not in (None, "", 0) and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoSolicitacaoContratoEuromidia"):
+        filtros.append("i.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao")
+        parametros["id_solicitacao"] = int(id_solicitacao)
+
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitAtivo"):
+        filtros.append("ISNULL(i.BitAtivo, 1) = 1")
+
+    coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
+    if coluna_atividade_item:
+        filtros.append(f"ISNULL(i.[{coluna_atividade_item}], 1) = 1")
+
+    ordem_item: list[str] = []
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+        ordem_item.append("i.DataAtualizacao DESC")
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataCriacao"):
+        ordem_item.append("i.DataCriacao DESC")
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoSolicitacaoContratoItemEuromidia"):
+        ordem_item.append("i.IDFatoSolicitacaoContratoItemEuromidia DESC")
+
+    if (
+        id_item_contrato not in (None, "", 0)
+        and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoControleContratosItensEuromidia")
+    ):
+        filtros_item_oficial = list(filtros)
+        parametros_item_oficial = dict(parametros)
+        filtros_item_oficial.append("i.IDFatoControleContratosItensEuromidia = :id_item_contrato")
+        parametros_item_oficial["id_item_contrato"] = int(id_item_contrato)
+
+        sql_item_oficial = text(
+            f"""
+            SELECT TOP (1)
+                i.*
+            FROM {TABELA_SOLICITACAO_CONTRATO_ITEM} i
+            WHERE {' AND '.join(filtros_item_oficial)}
+            ORDER BY {', '.join(ordem_item) if ordem_item else 'i.IDFatoSolicitacaoContratoItemEuromidia DESC'};
+            """
+        )
+
+        row_item_oficial = db.session.execute(
+            sql_item_oficial,
+            parametros_item_oficial,
+        ).mappings().first()
+
+        if row_item_oficial:
+            return dict(row_item_oficial)
+
+    cod_ponto_limpo = str(cod_ponto or "").strip() or None
+    cod_face_limpo = str(cod_face or "").strip().upper() or None
+
+    if not cod_ponto_limpo and not cod_face_limpo:
+        return None
+
+    filtros_chave_logica = list(filtros)
+    parametros_chave_logica = dict(parametros)
+
+    if id_contrato not in (None, "", 0) and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoControleContratosEuromidia"):
+        filtros_chave_logica.append("ISNULL(i.IDFatoControleContratosEuromidia, 0) = :id_contrato")
+        parametros_chave_logica["id_contrato"] = int(id_contrato)
+
+    if cod_ponto_limpo and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "CodPonto"):
+        filtros_chave_logica.append("LTRIM(RTRIM(ISNULL(i.CodPonto, ''))) = :cod_ponto")
+        parametros_chave_logica["cod_ponto"] = cod_ponto_limpo
+
+    if cod_face_limpo and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "CodFace"):
+        filtros_chave_logica.append("UPPER(LTRIM(RTRIM(ISNULL(i.CodFace, '')))) = :cod_face")
+        parametros_chave_logica["cod_face"] = cod_face_limpo
+
+    sql_chave_logica = text(
+        f"""
+        SELECT TOP (1)
+            i.*
+        FROM {TABELA_SOLICITACAO_CONTRATO_ITEM} i
+        WHERE {' AND '.join(filtros_chave_logica)}
+        ORDER BY {', '.join(ordem_item) if ordem_item else 'i.IDFatoSolicitacaoContratoItemEuromidia DESC'};
+        """
+    )
+
+    row_chave_logica = db.session.execute(
+        sql_chave_logica,
+        parametros_chave_logica,
+    ).mappings().first()
+
+    return dict(row_chave_logica) if row_chave_logica else None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _obter_ultima_solicitacao_contrato_por_card(id_card: int) -> dict[str, Any] | None:
+    snapshot = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
+    if not snapshot:
+        return None
+
+    header = snapshot.get("header") if isinstance(snapshot.get("header"), dict) else {}
+    item = snapshot.get("item") if isinstance(snapshot.get("item"), dict) else {}
+
+    resultado = {
+        "IDFatoSolicitacaoContratoEuromidia": header.get("IDFatoSolicitacaoContratoEuromidia"),
+        "IDFatoKanbanCard": header.get("IDFatoKanbanCard"),
+        "IDFatoControleContratosEuromidia": header.get("IDFatoControleContratosEuromidia"),
+        "IDDimStatusContratos": header.get("IDDimStatusContratos"),
+        "TipoSolicitacao": header.get("TipoSolicitacao"),
+        "IDEmpresa": header.get("IDEmpresa"),
+        "CNPJ": header.get("CNPJ"),
+        "RazaoSocial": header.get("RazaoSocial"),
+        "NumeroContrato": header.get("NumeroContrato"),
+        "NumeroPrevia": header.get("NumeroPrevia"),
+        "Referencia": header.get("Referencia"),
+        "IDFatoControleContratosItensEuromidia": item.get("IDFatoControleContratosItensEuromidia"),
+        "SolicitacaoCodPonto": str(item.get("CodPonto") or "").strip() or None,
+        "SolicitacaoCodFace": str(item.get("CodFace") or "").strip().upper() or None,
+        "SolicitacaoPrecoVendaAtual": _decimal_para_float(item.get("TotalLiquidoContratoAGBRCTACORDO") or header.get("TotalLiquidoContratoAGBRCTACORDO")),
+        "SolicitacaoDataInicioPrevisto": None,
+        "SolicitacaoDataTerminoPrevisto": None,
+        "SolicitacaoIDPainelEuromidia": item.get("IDPainelEuromidia"),
+        "SolicitacaoIDDimFacesPaineis": item.get("IDDimFacesPaineis"),
+        "SolicitacaoTotalLiquidoContratoAGBRCTACORDO": _decimal_para_float(header.get("TotalLiquidoContratoAGBRCTACORDO")),
+    }
+
+    for chave_origem, chave_destino in (("DataInicioPrevisto", "SolicitacaoDataInicioPrevisto"), ("DataTerminoPrevisto", "SolicitacaoDataTerminoPrevisto")):
+        valor_data = item.get(chave_origem)
+        if hasattr(valor_data, "date"):
+            try:
+                valor_data = valor_data.date()
+            except Exception:
+                pass
+        if hasattr(valor_data, "isoformat"):
+            resultado[chave_destino] = valor_data.isoformat()
+        elif valor_data in (None, ""):
+            resultado[chave_destino] = None
+        else:
+            resultado[chave_destino] = str(valor_data)
+
+    return resultado
+
+
+def _atualizar_card_no_item_contrato_euromidia(
+    *,
+    id_item_contrato: int | None,
+    id_card: int,
+) -> None:
+    if id_item_contrato in (None, "", 0):
+        return
+
+    if not _objeto_existe(TABELA_CONTROLE_CONTRATOS_ITENS):
+        return
+
+    if not _coluna_existe(TABELA_CONTROLE_CONTRATOS_ITENS, "IDFatoKanbanCard"):
+        return
+
+    sets = ["IDFatoKanbanCard = :id_card"]
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS_ITENS, "DataAtualizacao"):
+        sets.append("DataAtualizacao = GETDATE()")
+
+    sql = text(
+        f"""
+        UPDATE {TABELA_CONTROLE_CONTRATOS_ITENS}
+           SET {', '.join(sets)}
+         WHERE IDFatoControleContratosItensEuromidia = :id_item_contrato;
+        """
+    )
+
+    db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_item_contrato": int(id_item_contrato),
+        },
+    )
+
+
+def _inativar_snapshots_solicitacao_contrato_do_card(id_card: int) -> None:
+    if _objeto_existe(TABELA_SOLICITACAO_CONTRATO) and _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "BitAtivo"):
+        sets = ["BitAtivo = 0"]
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "DataAtualizacao"):
+            sets.append("DataAtualizacao = GETDATE()")
+
+        db.session.execute(
+            text(
+                f"""
+                UPDATE {TABELA_SOLICITACAO_CONTRATO}
+                   SET {', '.join(sets)}
+                 WHERE IDFatoKanbanCard = :id_card;
+                """
+            ),
+            {"id_card": int(id_card)},
+        )
+
+    if _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+        sets_item: list[str] = []
+        coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
+        if coluna_atividade_item:
+            sets_item.append(f"[{coluna_atividade_item}] = 0")
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitAtivo"):
+            sets_item.append("BitAtivo = 0")
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+            sets_item.append("DataAtualizacao = GETDATE()")
+
+        if sets_item:
+            db.session.execute(
+                text(
+                    f"""
+                    UPDATE {TABELA_SOLICITACAO_CONTRATO_ITEM}
+                       SET {', '.join(sets_item)}
+                     WHERE IDFatoKanbanCard = :id_card;
+                    """
+                ),
+                {"id_card": int(id_card)},
+            )
+
+
+
+
+
+def _sincronizar_snapshot_solicitacao_contrato_do_card(
+    *,
+    id_card: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+    id_empresa_relacionada: int | None,
+    tipo_contrato: str | None,
+    id_contrato_existente: int | None,
+    cod_ponto_contrato: object = None,
+    cod_face_contrato: object = None,
+    descricao_card: str | None = None,
+    contrato_existente: dict[str, Any] | None = None,
+    forcar_solicitacao_ativa: bool | None = None,
+) -> dict[str, Any]:
+    tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
+    if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
+        return {"sincronizado": False, "motivo": "tipo_contrato_ausente"}
+
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO):
+        return {"sincronizado": False, "motivo": "tabela_solicitacao_ausente"}
+
+    def _int_positivo_ou_none(valor: object) -> int | None:
+        if valor in (None, "", 0):
+            return None
+        try:
+            valor_int = int(valor)
+        except Exception:
+            return None
+        return valor_int if valor_int > 0 else None
+
+    def _resolver_solicitacao_ativa() -> int:
+        """
+        Regra correta:
+        - se vier forçado explicitamente, respeita o parâmetro;
+        - senão, só ativa quando:
+          a) o card estiver na fase 4
+          OU
+          b) o card tiver a tag 14 ativa.
+        - salvar card com dados preenchidos NÃO ativa por si só.
+        """
+        if forcar_solicitacao_ativa is not None:
+            return 1 if bool(forcar_solicitacao_ativa) else 0
+
+        detalhe_card = _obter_card_detalhe_payload(int(id_card))
+        card_atual = detalhe_card.get("card") if isinstance(detalhe_card.get("card"), dict) else {}
+        tags_ativas = detalhe_card.get("tags") if isinstance(detalhe_card.get("tags"), list) else []
+
+        id_fase_atual = int(card_atual.get("IDDimKanbanFaseAtual") or 0)
+        tem_tag_contrato_em_avaliacao = any(
+            int(item.get("IDDimKanbanTag") or 0) == int(ID_TAG_CONTRATO_EM_AVALIACAO)
+            for item in tags_ativas
+            if isinstance(item, dict)
+        )
+
+        return 1 if (id_fase_atual == 4 or tem_tag_contrato_em_avaliacao) else 0
+
+    empresa = None
+    if id_empresa_relacionada not in (None, "", 0):
+        sql_empresa = text(f"""
+            SELECT TOP (1)
+                e.IDEmpresa,
+                e.CNPJ,
+                e.RazaoSocial
+            FROM {TABELA_EMPRESAS} e
+            WHERE e.IDEmpresa = :id_empresa;
+        """)
+        empresa = db.session.execute(
+            sql_empresa,
+            {"id_empresa": int(id_empresa_relacionada)},
+        ).mappings().first()
+
+    contrato_row = dict(contrato_existente) if isinstance(contrato_existente, dict) else None
+
+    """
+    Se a função foi chamada só com o ID do contrato, eu busco o cabeçalho
+    direto na tabela para não perder os dados do snapshot e não deixar
+    IDDimStatusContratos cair para NULL.
+    """
+    if contrato_row is None and id_contrato_existente not in (None, "", 0) and _objeto_existe(TABELA_CONTROLE_CONTRATOS):
+        sql_contrato = text(f"""
+            SELECT TOP (1)
+                c.*
+            FROM {TABELA_CONTROLE_CONTRATOS} c
+            WHERE c.IDFatoControleContratosEuromidia = :id_contrato;
+        """)
+        row_contrato = db.session.execute(
+            sql_contrato,
+            {"id_contrato": int(id_contrato_existente)},
+        ).mappings().first()
+        contrato_row = dict(row_contrato) if row_contrato else None
+
+    item_contrato = _obter_item_contrato_euromidia(
+        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        cod_ponto=cod_ponto_contrato,
+        cod_face=cod_face_contrato,
+    )
+
+    id_item_contrato = (
+        item_contrato.get("IDFatoControleContratosItensEuromidia")
+        if isinstance(item_contrato, dict)
+        else None
+    )
+
+    _registrar_log_contrato_card_euromidia(
+        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        id_usuario=int(id_usuario),
+    )
+
+    _atualizar_card_no_item_contrato_euromidia(
+        id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        id_card=int(id_card),
+    )
+
+    descricao_limpa = str(descricao_card or "").strip() or None
+
+    solicitacao_ativa = _resolver_solicitacao_ativa()
+    bit_solicitacao_ativa = 1 if solicitacao_ativa else 0
+
+    """
+    BitAtivo = existência/validade do snapshot persistido.
+    BitSolicitacaoAtiva = fila de avaliação.
+    Esses dois conceitos NÃO podem ser o mesmo campo lógico.
+    """
+    bit_registro_ativo = 1
+
+    coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
+
+    snapshot_existente = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
+    header_existente = (
+        snapshot_existente.get("header")
+        if isinstance((snapshot_existente or {}).get("header"), dict)
+        else None
+    )
+
+    id_solicitacao_existente = (
+        int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0)
+        if header_existente
+        else None
+    ) or None
+
+    """
+    Regra do status:
+    1) preservo o status já salvo na solicitação, se existir;
+    2) senão uso o status do contrato de origem;
+    3) se ainda não existir, uso o status padrão "em avaliação" para não gravar NULL.
+    """
+    id_status_contrato = _int_positivo_ou_none((header_existente or {}).get("IDDimStatusContratos"))
+    if id_status_contrato is None:
+        id_status_contrato = _int_positivo_ou_none((contrato_row or {}).get("IDDimStatusContratos"))
+    if id_status_contrato is None:
+        id_status_contrato = _obter_id_status_contrato_em_avaliacao()
+
+    referencia_header = (contrato_row or {}).get("Referencia")
+    numero_contrato_header = (contrato_row or {}).get("NumeroContrato")
+    numero_previa_header = (contrato_row or {}).get("NumeroPrevia")
+    cnpj_header = (
+        (contrato_row or {}).get("CNPJ")
+        or (empresa or {}).get("CNPJ")
+    )
+    razao_social_header = (
+        (contrato_row or {}).get("RazaoSocial")
+        or (empresa or {}).get("RazaoSocial")
+    )
+
+    valores_header = {
+        "IDFatoKanbanCard": int(id_card),
+        "IDFatoControleContratosEuromidia": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        "IDDimStatusContratos": int(id_status_contrato),
+        "IDDimUsuariosCriacao": int(id_usuario),
+        "IDEmpresa": int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+        "TipoSolicitacao": tipo_norm,
+        "Referencia": referencia_header,
+        "NumeroContrato": numero_contrato_header,
+        "NumeroPrevia": numero_previa_header,
+        "CNPJ": cnpj_header,
+        "RazaoSocial": razao_social_header,
+        "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
+        "Vendedor": (contrato_row or {}).get("Vendedor"),
+        "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
+        "Origem": (contrato_row or {}).get("Origem"),
+        "SDR": (contrato_row or {}).get("SDR"),
+        "Agencia": (contrato_row or {}).get("Agencia"),
+        "CnpjAgencia": (contrato_row or {}).get("CnpjAgencia"),
+        "Bureau": (contrato_row or {}).get("Bureau"),
+        "CnpjBureau": (contrato_row or {}).get("CnpjBureau"),
+        "Intermediario": (contrato_row or {}).get("Intermediario"),
+        "CnpjIntermediario": (contrato_row or {}).get("CnpjIntermediario"),
+        "QuantidadePontos": (contrato_row or {}).get("QuantidadePontos"),
+        "QuantidadeFaces": (contrato_row or {}).get("QuantidadeFaces"),
+        "TotalFaturamentoBrutoMensal": (contrato_row or {}).get("TotalFaturamentoBrutoMensal"),
+        "TotalPercentualPermuta": (contrato_row or {}).get("TotalPercentualPermuta"),
+        "TotalCotaOportunidade": (contrato_row or {}).get("TotalCotaOportunidade"),
+        "TotalValorPermuta": (contrato_row or {}).get("TotalValorPermuta"),
+        "TotalFaturamentoLiquidoPermuta": (contrato_row or {}).get("TotalFaturamentoLiquidoPermuta"),
+        "TotalBrutoContrato": (contrato_row or {}).get("TotalBrutoContrato"),
+        "TotalLiquidoContratoAGBRCTACORDO": (contrato_row or {}).get("TotalLiquidoContratoAGBRCTACORDO"),
+        "TotalLiquidoContratoAGBRVENDGERCOOR": (contrato_row or {}).get("TotalLiquidoContratoAGBRVENDGERCOOR"),
+        "TotalPercentualAgencia": (contrato_row or {}).get("TotalPercentualAgencia"),
+        "TotalValorMensalAgencia": (contrato_row or {}).get("TotalValorMensalAgencia"),
+        "TotalPercentualBureau": (contrato_row or {}).get("TotalPercentualBureau"),
+        "TotalValorBureauMensal": (contrato_row or {}).get("TotalValorBureauMensal"),
+        "TotalPercentualCartaAcordo": (contrato_row or {}).get("TotalPercentualCartaAcordo"),
+        "TotalValorCartaAcordoMensal": (contrato_row or {}).get("TotalValorCartaAcordoMensal"),
+        "TotalValorOutrasComissoes": (contrato_row or {}).get("TotalValorOutrasComissoes"),
+        "TotalFaturamentoLiquidoMensal": (contrato_row or {}).get("TotalFaturamentoLiquidoMensal"),
+        "TotalPercentualComissaoVendedor": (contrato_row or {}).get("TotalPercentualComissaoVendedor"),
+        "TotalValorVendedor": (contrato_row or {}).get("TotalValorVendedor"),
+        "ValorVendedorTotal": (contrato_row or {}).get("ValorVendedorTotal"),
+        "TotalPercentualComissaoCoordenacao": (contrato_row or {}).get("TotalPercentualComissaoCoordenacao"),
+        "Observacao": descricao_limpa,
+        "BitAtivo": bit_registro_ativo,
+    }
+
+    valores_item = {
+        "IDFatoControleContratosEuromidia": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        "IDFatoControleContratosItensEuromidia": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        "IDFatoKanbanCard": int(id_card),
+        "IDDimUsuariosCriacao": int(id_usuario),
+        "IDDimUsuariosAtualizacao": int(id_usuario),
+        "IDVendedor": (item_contrato or {}).get("IDVendedor"),
+        "IDPainelEuromidia": (item_contrato or {}).get("IDPainelEuromidia"),
+        "IDDimFacesPaineis": (item_contrato or {}).get("IDDimFacesPaineis"),
+        "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+        "Referencia": (item_contrato or {}).get("Referencia") or (contrato_row or {}).get("Referencia"),
+        "NumeroContrato": (item_contrato or {}).get("NumeroContrato") or (contrato_row or {}).get("NumeroContrato"),
+        "NumeroPrevia": (item_contrato or {}).get("NumeroPrevia") or (contrato_row or {}).get("NumeroPrevia"),
+        "CNPJ": (item_contrato or {}).get("CNPJ") or (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
+        "CodPonto": str(cod_ponto_contrato or "").strip() or None,
+        "CodFace": str(cod_face_contrato or "").strip().upper() or None,
+        "DataLancamento": (item_contrato or {}).get("DataLancamento"),
+        "Cota": (item_contrato or {}).get("Cota"),
+        "CidadeExibicao": (item_contrato or {}).get("CidadeExibicao"),
+        "Tipo": (item_contrato or {}).get("Tipo"),
+        "Origem": (item_contrato or {}).get("Origem") or (contrato_row or {}).get("Origem"),
+        "EmpresaEuro": (item_contrato or {}).get("EmpresaEuro"),
+        "CnpjExibibora": (item_contrato or {}).get("CnpjExibibora"),
+        "TipoDocumento": (item_contrato or {}).get("TipoDocumento") or (contrato_row or {}).get("TipoDocumento"),
+        "RazaoSocial": (item_contrato or {}).get("RazaoSocial") or (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
+        "CPF": (item_contrato or {}).get("CPF") or (contrato_row or {}).get("CPF"),
+        "MarcaExibida": (item_contrato or {}).get("MarcaExibida") or (contrato_row or {}).get("MarcaExibida"),
+        "Vendedor": (item_contrato or {}).get("Vendedor") or (contrato_row or {}).get("Vendedor"),
+        "SDR": (item_contrato or {}).get("SDR") or (contrato_row or {}).get("SDR"),
+        "Agencia": (item_contrato or {}).get("Agencia") or (contrato_row or {}).get("Agencia"),
+        "CnpjAgencia": (item_contrato or {}).get("CnpjAgencia") or (contrato_row or {}).get("CnpjAgencia"),
+        "Bureau": (item_contrato or {}).get("Bureau") or (contrato_row or {}).get("Bureau"),
+        "CnpjBureau": (item_contrato or {}).get("CnpjBureau") or (contrato_row or {}).get("CnpjBureau"),
+        "Intermediario": (item_contrato or {}).get("Intermediario") or (contrato_row or {}).get("Intermediario"),
+        "CnpjIntermediario": (item_contrato or {}).get("CnpjIntermediario") or (contrato_row or {}).get("CnpjIntermediario"),
+        "DataAssinaturaRenovacao": (item_contrato or {}).get("DataAssinaturaRenovacao"),
+        "IDTrimestre": (item_contrato or {}).get("IDTrimestre"),
+        "TexmpoExposicao": (item_contrato or {}).get("TexmpoExposicao"),
+        "DataInicioPrevisto": (item_contrato or {}).get("DataInicioPrevisto"),
+        "DataTerminoPrevisto": (item_contrato or {}).get("DataTerminoPrevisto"),
+        "InicioRenovacao": (item_contrato or {}).get("InicioRenovacao"),
+        "FaturamentoBrutoMensal": (item_contrato or {}).get("FaturamentoBrutoMensal"),
+        "PercentualPermuta": (item_contrato or {}).get("PercentualPermuta"),
+        "CotaOportunidade": (item_contrato or {}).get("CotaOportunidade"),
+        "ValorPermuta": (item_contrato or {}).get("ValorPermuta"),
+        "FaturamentoLiquidoPermuta": (item_contrato or {}).get("FaturamentoLiquidoPermuta"),
+        "NumeroParcelas": (item_contrato or {}).get("NumeroParcelas"),
+        "DataInicioVencimento": (item_contrato or {}).get("DataInicioVencimento"),
+        "TotalBrutoContrato": (item_contrato or {}).get("TotalBrutoContrato"),
+        "TotalLiquidoContratoAGBRCTACORDO": (item_contrato or {}).get("TotalLiquidoContratoAGBRCTACORDO"),
+        "TotalLiquidoContratoAGBRVENDGERCOOR": (item_contrato or {}).get("TotalLiquidoContratoAGBRVENDGERCOOR"),
+        "PercentualAgencia": (item_contrato or {}).get("PercentualAgencia"),
+        "ValorMensalAgencia": (item_contrato or {}).get("ValorMensalAgencia"),
+        "PercentualBureau": (item_contrato or {}).get("PercentualBureau"),
+        "ValorBureauMensal": (item_contrato or {}).get("ValorBureauMensal"),
+        "PercentualCartaAcordo": (item_contrato or {}).get("PercentualCartaAcordo"),
+        "ValorCartaAcordoMensal": (item_contrato or {}).get("ValorCartaAcordoMensal"),
+        "ValorOutrasComissoes": (item_contrato or {}).get("ValorOutrasComissoes"),
+        "FaturamentoLiquidoMensal": (item_contrato or {}).get("FaturamentoLiquidoMensal"),
+        "PercentualComissaoVendedor": (item_contrato or {}).get("PercentualComissaoVendedor"),
+        "ValorVendedor": (item_contrato or {}).get("ValorVendedor"),
+        "ValorVendedorTotal": (item_contrato or {}).get("ValorVendedorTotal"),
+        "PercentualComissaoCoordenacao": (item_contrato or {}).get("PercentualComissaoCoordenacao"),
+        "ValorCoordenador": (item_contrato or {}).get("ValorCoordenador"),
+        "ValorCoordenadorTotal": (item_contrato or {}).get("ValorCoordenadorTotal"),
+        "PercentualComissaoGerencia": (item_contrato or {}).get("PercentualComissaoGerencia"),
+        "ValorGerencia": (item_contrato or {}).get("ValorGerencia"),
+        "ValorGerenciaTotal": (item_contrato or {}).get("ValorGerenciaTotal"),
+        "AtivoCancelamento": (item_contrato or {}).get("AtivoCancelamento"),
+        "FaturamentoLiquidoFinalMensal": (item_contrato or {}).get("FaturamentoLiquidoFinalMensal"),
+        "ComissaoGerenciaNordeste": (item_contrato or {}).get("ComissaoGerenciaNordeste"),
+        "Faturamento": (item_contrato or {}).get("Faturamento"),
+        "DataCancelamento": (item_contrato or {}).get("DataCancelamento"),
+        "OBS": descricao_limpa,
+        "DataFimEfetiva": (item_contrato or {}).get("DataFimEfetiva"),
+        "Status": str((item_contrato or {}).get("Status") or "").strip() or None,
+        "BitAtivo": bit_registro_ativo,
+    }
+
+    if coluna_atividade_item == "BitSolicitacaoAtiva":
+        valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
+
+    item_existente = _obter_item_solicitacao_editavel_por_chave(
+        id_card=int(id_card),
+        id_solicitacao=id_solicitacao_existente,
+        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        cod_ponto=cod_ponto_contrato,
+        cod_face=cod_face_contrato,
+    )
+
+    if header_existente and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoSolicitacaoContratoEuromidia"):
+        valores_item["IDFatoSolicitacaoContratoEuromidia"] = id_solicitacao_existente
+
+    campos_header_comparacao = [
+        "IDFatoKanbanCard", "IDFatoControleContratosEuromidia", "IDDimStatusContratos", "IDEmpresa", "IDEmpresaProprietaria",
+        "TipoSolicitacao", "Referencia", "NumeroContrato", "NumeroPrevia", "CNPJ", "RazaoSocial", "MarcaExibida", "Vendedor",
+        "TipoDocumento", "Origem", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario", "CnpjIntermediario",
+        "QuantidadePontos", "QuantidadeFaces", "TotalFaturamentoBrutoMensal", "TotalFaturamentoLiquidoMensal",
+        "TotalLiquidoContratoAGBRCTACORDO", "Observacao", "BitAtivo",
+    ]
+
+    campos_item_comparacao = [
+        "IDFatoControleContratosEuromidia", "IDFatoControleContratosItensEuromidia", "IDFatoKanbanCard", "IDVendedor",
+        "IDPainelEuromidia", "IDDimFacesPaineis", "IDEmpresaProprietaria", "Referencia", "NumeroContrato", "NumeroPrevia",
+        "CNPJ", "CodPonto", "CodFace", "DataLancamento", "Cota", "CidadeExibicao", "Tipo", "Origem", "TipoDocumento",
+        "RazaoSocial", "MarcaExibida", "Vendedor", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario",
+        "CnpjIntermediario", "DataAssinaturaRenovacao", "IDTrimestre", "DataInicioPrevisto", "DataTerminoPrevisto",
+        "InicioRenovacao", "FaturamentoBrutoMensal", "PercentualPermuta", "CotaOportunidade", "ValorPermuta",
+        "FaturamentoLiquidoPermuta", "TotalBrutoContrato", "TotalLiquidoContratoAGBRCTACORDO", "TotalLiquidoContratoAGBRVENDGERCOOR",
+        "PercentualAgencia", "ValorMensalAgencia", "PercentualBureau", "ValorBureauMensal", "PercentualCartaAcordo",
+        "ValorCartaAcordoMensal", "ValorOutrasComissoes", "FaturamentoLiquidoMensal", "Status", "OBS", "BitAtivo",
+    ]
+    if coluna_atividade_item == "BitSolicitacaoAtiva":
+        campos_item_comparacao.append("BitSolicitacaoAtiva")
+
+    header_igual = (
+        bool(header_existente)
+        and _registro_dinamico_equivalente(
+            header_existente,
+            valores_header,
+            campos_header_comparacao,
+            nome_tabela=TABELA_SOLICITACAO_CONTRATO,
+        )
+    )
+
+    item_igual = (
+        bool(item_existente)
+        and _registro_dinamico_equivalente(
+            item_existente,
+            valores_item,
+            campos_item_comparacao,
+            nome_tabela=TABELA_SOLICITACAO_CONTRATO_ITEM,
+        )
+    )
+
+    if header_igual and (item_igual or not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM)):
+        return {
+            "sincronizado": True,
+            "sem_alteracao": True,
+            "id_solicitacao": int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0) or None,
+            "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+            "tipo_solicitacao": tipo_norm,
+            "bit_solicitacao_ativa": bit_solicitacao_ativa,
+        }
+
+    if header_existente:
+        id_solicitacao = int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0) or None
+        colunas_getdate_update_header = ["DataAtualizacao"]
+        if solicitacao_ativa:
+            colunas_getdate_update_header.append("DataEnvioAvaliacao")
+
+        _atualizar_registro_dinamico_por_id(
+            TABELA_SOLICITACAO_CONTRATO,
+            "IDFatoSolicitacaoContratoEuromidia",
+            id_solicitacao,
+            valores_header,
+            colunas_getdate=tuple(colunas_getdate_update_header),
+        )
+    else:
+        colunas_getdate_insert_header = ["DataCriacao", "DataAtualizacao"]
+        if solicitacao_ativa:
+            colunas_getdate_insert_header.append("DataEnvioAvaliacao")
+
+        id_solicitacao = _inserir_registro_dinamico_output_id(
+            TABELA_SOLICITACAO_CONTRATO,
+            "IDFatoSolicitacaoContratoEuromidia",
+            valores_header,
+            colunas_getdate=tuple(colunas_getdate_insert_header),
+        )
+
+    if not id_solicitacao:
+        raise RuntimeError("Não foi possível persistir o snapshot da solicitação de contrato do card.")
+
+    if _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+        valores_item["IDFatoSolicitacaoContratoEuromidia"] = int(id_solicitacao)
+
+        if item_existente and item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") not in (None, "", 0):
+            _atualizar_registro_dinamico_por_id(
+                TABELA_SOLICITACAO_CONTRATO_ITEM,
+                "IDFatoSolicitacaoContratoItemEuromidia",
+                int(item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") or 0),
+                valores_item,
+                colunas_getdate=("DataAtualizacao",),
+            )
+        else:
+            _inserir_registro_dinamico(
+                TABELA_SOLICITACAO_CONTRATO_ITEM,
+                valores_item,
+                colunas_getdate=("DataCriacao", "DataAtualizacao"),
+            )
+
+    return {
+        "sincronizado": True,
+        "sem_alteracao": False,
+        "id_solicitacao": int(id_solicitacao) if id_solicitacao not in (None, "", 0) else None,
+        "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        "tipo_solicitacao": tipo_norm,
+        "bit_solicitacao_ativa": bit_solicitacao_ativa,
+    }
+
+
 
 
 def _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas: list[dict[str, Any]]) -> str:
@@ -3712,254 +4631,63 @@ def _criar_solicitacao_contrato_em_avaliacao_para_card(
     id_empresa_proprietaria: int,
 ) -> dict[str, Any]:
     """
-    Cria cabeçalho e itens da solicitação quando a tag 'Contrato em Avaliação'
-    entra no card.
+    Quando a tag 'Contrato em Avaliação' entra no card, eu ativo o snapshot
+    já persistido do vínculo contratual do próprio card.
 
     Regras:
-    - não duplica solicitação ativa do mesmo card
-    - exige tipo de contrato definido por tag
-    - exige ao menos um painel/face vinculado
-    - quando houver contrato selecionado no fluxo do card, eu preencho:
-        * FatoSolicitacaoContratoEuromidia.IDFatoControleContratosEuromidia
-        * FatoSolicitacaoContratoItemEuromidia.IDFatoControleContratosEuromidia
-        * FatoSolicitacaoContratoItemEuromidia.IDFatoControleContratosItensEuromidia
-        * FatoContratoCardEuromidia como log
+    - não duplico nova solicitação para o mesmo card sem mudança real;
+    - se o snapshot ainda não existir, eu crio;
+    - se já existir, eu faço upsert pelo ID do card;
+    - a atividade para fila de aprovação passa a 1 quando a tag 14 entra.
     """
-    solicitacao_existente = _obter_solicitacao_contrato_ativa_por_card(int(id_card))
-    if solicitacao_existente:
-        return {
-            "criada": False,
-            "id_solicitacao": int(solicitacao_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0) or None,
-            "motivo": "Solicitação ativa já existente para este card.",
-        }
-
     detalhe = _obter_card_detalhe_payload(int(id_card))
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
-    tags_ativas = detalhe.get("tags") if isinstance(detalhe.get("tags"), list) else []
-    painel_faces = (
-        detalhe.get("painel_faces")
-        if isinstance(detalhe.get("painel_faces"), list)
-        else _listar_paineis_vinculados_card(int(id_card))
-    )
-
-    if not painel_faces:
-        raise ValueError(
-            "Para enviar contrato para avaliação, o card precisa ter pelo menos um painel/face vinculado."
-        )
-
-    tipo_solicitacao = _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas)
-    id_status_contrato = _obter_id_status_contrato_em_avaliacao()
-    resumo = _montar_resumo_paineis_solicitacao(painel_faces)
 
     id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
-
-    razao_social = (
-        card.get("EmpresaRazaoSocial")
-        or card.get("RazaoSocial")
-        or None
+    tipo_solicitacao = (
+        card.get("tipo_contrato")
+        or card.get("TipoSolicitacao")
+        or (TIPO_SOLICITACAO_ADITIVO if card.get("BitAditivo") else None)
+        or (TIPO_SOLICITACAO_NOVO if card.get("BitContratoNovo") else None)
     )
-    cnpj = (
-        card.get("EmpresaCNPJ")
-        or card.get("CNPJ")
-        or None
-    )
-
-    nome_vendedor = (
-        card.get("NomeUsuarioResponsavel")
-        or card.get("NomeUsuario")
-        or card.get("Vendedor")
-        or None
-    )
-
-    descricao_card = str(card.get("Descricao") or "").strip()
-
     id_contrato_existente = (
         card.get("IDFatoControleContratosEuromidia")
         or card.get("IDFatoControleContratoEuromidia")
         or None
     )
-
     cod_ponto_contrato = (
         card.get("CodPontoContrato")
         or card.get("cod_ponto_contrato")
         or None
     )
-
     cod_face_contrato = (
         card.get("CodFaceContrato")
         or card.get("cod_face_contrato")
         or None
     )
 
-    item_contrato = _obter_item_contrato_euromidia(
-        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-        cod_ponto=cod_ponto_contrato,
-        cod_face=cod_face_contrato,
-    )
-
-    id_item_contrato = (
-        item_contrato.get("IDFatoControleContratosItensEuromidia")
-        if isinstance(item_contrato, dict)
-        else None
-    )
-
-    observacao_base = "Solicitação criada automaticamente ao aplicar a tag 'Contrato em Avaliação' no card do Kanban."
-    if id_contrato_existente not in (None, "", 0):
-        observacao_base += f" Contrato vinculado: {int(id_contrato_existente)}."
-    if id_item_contrato not in (None, "", 0):
-        observacao_base += f" Item do contrato vinculado: {int(id_item_contrato)}."
-    observacao = (
-        f"{observacao_base} Descrição do card: {descricao_card}"
-        if descricao_card
-        else observacao_base
-    )
-
-    id_solicitacao = _inserir_registro_dinamico_output_id(
-        TABELA_SOLICITACAO_CONTRATO,
-        "IDFatoSolicitacaoContratoEuromidia",
-        {
-            "IDFatoKanbanCard": int(id_card),
-            "IDFatoControleContratosEuromidia": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-            "IDDimStatusContratos": int(id_status_contrato),
-            "IDDimUsuariosCriacao": int(id_usuario),
-            "IDDimUsuariosEnvioAvaliacao": int(id_usuario),
-            "IDEmpresa": int(id_empresa_relacionada) if id_empresa_relacionada else None,
-            "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria else None,
-            "TipoSolicitacao": tipo_solicitacao,
-            "CNPJ": str(cnpj).strip() if cnpj else None,
-            "RazaoSocial": str(razao_social).strip() if razao_social else None,
-            "Vendedor": str(nome_vendedor).strip() if nome_vendedor else None,
-            "NumeroContrato": str(item_contrato.get("NumeroContrato") or "").strip() if item_contrato else None,
-            "NumeroPrevia": str(item_contrato.get("NumeroPrevia") or "").strip() if item_contrato else None,
-            "Referencia": str(item_contrato.get("Referencia") or "").strip() if item_contrato else None,
-            "DataLancamento": item_contrato.get("DataLancamento") if item_contrato else None,
-            "MarcaExibida": str(item_contrato.get("MarcaExibida") or "").strip() if item_contrato else None,
-            "Origem": str(item_contrato.get("Origem") or "").strip() if item_contrato else None,
-            "TipoDocumento": str(item_contrato.get("TipoDocumento") or "").strip() if item_contrato else None,
-            "Agencia": str(item_contrato.get("Agencia") or "").strip() if item_contrato else None,
-            "CnpjAgencia": str(item_contrato.get("CnpjAgencia") or "").strip() if item_contrato else None,
-            "Bureau": str(item_contrato.get("Bureau") or "").strip() if item_contrato else None,
-            "CnpjBureau": str(item_contrato.get("CnpjBureau") or "").strip() if item_contrato else None,
-            "Intermediario": str(item_contrato.get("Intermediario") or "").strip() if item_contrato else None,
-            "CnpjIntermediario": str(item_contrato.get("CnpjIntermediario") or "").strip() if item_contrato else None,
-            "QuantidadePontos": int(resumo["quantidade_pontos"] or 0),
-            "QuantidadeFaces": int(resumo["quantidade_faces"] or 0),
-            "TotalFaturamentoBrutoMensal": resumo["valor_total_mensal"],
-            "Observacao": observacao[:1000],
-        },
-        colunas_getdate=("DataEnvioAvaliacao",),
-    )
-
-    if not id_solicitacao:
-        raise RuntimeError("Não foi possível gerar o cabeçalho da solicitação de contrato.")
-
-    total_itens_criados = 0
-
-    for item in painel_faces:
-        if not isinstance(item, dict):
-            continue
-
-        valor_mensal = _obter_valor_mensal_item_solicitacao(item)
-
-        item_contrato_relacionado = None
-        id_item_contrato_relacionado = None
-
-        cod_ponto_item = str(item.get("CodPonto") or "").strip()
-        cod_face_item = str(item.get("CodFace") or "").strip().upper()
-
-        if id_contrato_existente not in (None, "", 0) and cod_ponto_item and cod_face_item:
-            item_contrato_relacionado = _obter_item_contrato_euromidia(
-                id_contrato=int(id_contrato_existente),
-                cod_ponto=cod_ponto_item,
-                cod_face=cod_face_item,
-            )
-            if item_contrato_relacionado:
-                id_item_contrato_relacionado = item_contrato_relacionado.get("IDFatoControleContratosItensEuromidia")
-
-        _inserir_registro_dinamico(
-            TABELA_SOLICITACAO_CONTRATO_ITEM,
-            {
-                "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
-                "IDFatoControleContratosEuromidia": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-                "IDFatoControleContratosItensEuromidia": int(id_item_contrato_relacionado) if id_item_contrato_relacionado not in (None, "", 0) else None,
-                "IDFatoKanbanCard": int(id_card),
-                "IDDimUsuariosCriacao": int(id_usuario),
-                "IDPainelEuromidia": int(item.get("IDDimPaineisEuromidia") or 0) or None,
-                "IDDimFacesPaineis": int(item.get("IDDimFacesPaineis") or 0) or None,
-                "IDEmpresaProprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria else None,
-                "Referencia": str((item_contrato_relacionado or {}).get("Referencia") or "").strip() or None,
-                "NumeroContrato": str((item_contrato_relacionado or {}).get("NumeroContrato") or "").strip() or None,
-                "NumeroPrevia": str((item_contrato_relacionado or {}).get("NumeroPrevia") or "").strip() or None,
-                "CNPJ": str(cnpj).strip() if cnpj else None,
-                "CodPonto": cod_ponto_item or None,
-                "CodFace": cod_face_item or None,
-                "DataLancamento": (item_contrato_relacionado or {}).get("DataLancamento"),
-                "Cota": (item_contrato_relacionado or {}).get("Cota"),
-                "CidadeExibicao": str((item_contrato_relacionado or {}).get("CidadeExibicao") or "").strip() or None,
-                "Tipo": str((item_contrato_relacionado or {}).get("Tipo") or "").strip() or None,
-                "Origem": str((item_contrato_relacionado or {}).get("Origem") or "").strip() or None,
-                "TipoDocumento": str((item_contrato_relacionado or {}).get("TipoDocumento") or "").strip() or None,
-                "RazaoSocial": str(razao_social).strip() if razao_social else None,
-                "MarcaExibida": str((item_contrato_relacionado or {}).get("MarcaExibida") or "").strip() or None,
-                "Vendedor": str(nome_vendedor).strip() if nome_vendedor else None,
-                "Agencia": str((item_contrato_relacionado or {}).get("Agencia") or "").strip() or None,
-                "CnpjAgencia": str((item_contrato_relacionado or {}).get("CnpjAgencia") or "").strip() or None,
-                "Bureau": str((item_contrato_relacionado or {}).get("Bureau") or "").strip() or None,
-                "CnpjBureau": str((item_contrato_relacionado or {}).get("CnpjBureau") or "").strip() or None,
-                "Intermediario": str((item_contrato_relacionado or {}).get("Intermediario") or "").strip() or None,
-                "CnpjIntermediario": str((item_contrato_relacionado or {}).get("CnpjIntermediario") or "").strip() or None,
-                "DataAssinaturaRenovacao": (item_contrato_relacionado or {}).get("DataAssinaturaRenovacao"),
-                "IDTrimestre": (item_contrato_relacionado or {}).get("IDTrimestre"),
-                "DataInicioPrevisto": (item_contrato_relacionado or {}).get("DataInicioPrevisto"),
-                "DataTerminoPrevisto": (item_contrato_relacionado or {}).get("DataTerminoPrevisto"),
-                "InicioRenovacao": (item_contrato_relacionado or {}).get("InicioRenovacao"),
-                "FaturamentoBrutoMensal": (item_contrato_relacionado or {}).get("FaturamentoBrutoMensal"),
-                "PercentualPermuta": (item_contrato_relacionado or {}).get("PercentualPermuta"),
-                "CotaOportunidade": (item_contrato_relacionado or {}).get("CotaOportunidade"),
-                "ValorPermuta": (item_contrato_relacionado or {}).get("ValorPermuta"),
-                "FaturamentoLiquidoPermuta": (item_contrato_relacionado or {}).get("FaturamentoLiquidoPermuta"),
-                "TotalBrutoContrato": (item_contrato_relacionado or {}).get("TotalBrutoContrato"),
-                "TotalLiquidoContratoAGBRCTACORDO": (item_contrato_relacionado or {}).get("TotalLiquidoContratoAGBRCTACORDO"),
-                "TotalLiquidoContratoAGBRVENDGERCOOR": (item_contrato_relacionado or {}).get("TotalLiquidoContratoAGBRVENDGERCOOR"),
-                "PercentualAgencia": (item_contrato_relacionado or {}).get("PercentualAgencia"),
-                "ValorMensalAgencia": (item_contrato_relacionado or {}).get("ValorMensalAgencia"),
-                "PercentualBureau": (item_contrato_relacionado or {}).get("PercentualBureau"),
-                "ValorBureauMensal": (item_contrato_relacionado or {}).get("ValorBureauMensal"),
-                "PercentualCartaAcordo": (item_contrato_relacionado or {}).get("PercentualCartaAcordo"),
-                "ValorCartaAcordoMensal": (item_contrato_relacionado or {}).get("ValorCartaAcordoMensal"),
-                "ValorOutrasComissoes": (item_contrato_relacionado or {}).get("ValorOutrasComissoes"),
-                "FaturamentoLiquidoMensal": valor_mensal if valor_mensal is not None else (item_contrato_relacionado or {}).get("FaturamentoLiquidoMensal"),
-                "Status": str((item_contrato_relacionado or {}).get("Status") or "").strip() or None,
-            },
-        )
-
-        total_itens_criados += 1
-
-    _registrar_log_contrato_card_euromidia(
-        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-        id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+    resultado = _sincronizar_snapshot_solicitacao_contrato_do_card(
+        id_card=int(id_card),
         id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        tipo_contrato=tipo_solicitacao,
+        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        cod_ponto_contrato=cod_ponto_contrato,
+        cod_face_contrato=cod_face_contrato,
+        descricao_card=str(card.get("Descricao") or "").strip() or None,
+        forcar_solicitacao_ativa=True,
     )
 
     return {
-        "criada": True,
-        "id_solicitacao": int(id_solicitacao),
-        "tipo_solicitacao": tipo_solicitacao,
-        "quantidade_itens": int(total_itens_criados),
+        "criada": not bool(resultado.get("sem_alteracao")),
+        "id_solicitacao": resultado.get("id_solicitacao"),
+        "tipo_solicitacao": resultado.get("tipo_solicitacao"),
+        "quantidade_itens": 1 if resultado.get("id_item_contrato") else 0,
         "id_controle_contrato": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-        "id_item_controle_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        "id_item_controle_contrato": resultado.get("id_item_contrato"),
+        "modo": "upsert_snapshot_card",
     }
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -4869,9 +5597,19 @@ def _obter_preco_por_id(id_preco: int, id_painel: int, id_dim_face: int | None, 
     return dict(row) if row else None
 
 
-def _calcular_margens_comerciais(custo: Any, valor_tabela: Any, novo_valor: Any, percentual_desconto: Any) -> dict[str, Any]:
+def _calcular_margens_comerciais(
+    custo: Any,
+    valor_tabela: Any,
+    novo_valor: Any,
+    percentual_desconto: Any,
+    valor_base_referencia: Any = None,
+) -> dict[str, Any]:
     custo_dec = _valor_decimal(custo) or Decimal('0')
     valor_tabela_dec = _valor_decimal(valor_tabela)
+    valor_base_dec = _valor_decimal(valor_base_referencia)
+    if valor_base_dec is None:
+        valor_base_dec = valor_tabela_dec
+
     novo_valor_dec = _valor_decimal(novo_valor)
     percentual_dec = _valor_decimal(percentual_desconto)
 
@@ -4880,11 +5618,11 @@ def _calcular_margens_comerciais(custo: Any, valor_tabela: Any, novo_valor: Any,
 
     if novo_valor_dec is not None:
         valor_final = novo_valor_dec
-    elif percentual_dec is not None and valor_tabela_dec is not None:
+    elif percentual_dec is not None and valor_base_dec is not None:
         percentual_aplicado = percentual_dec
-        valor_final = valor_tabela_dec * (Decimal('1') - (percentual_dec / Decimal('100')))
+        valor_final = valor_base_dec * (Decimal('1') - (percentual_dec / Decimal('100')))
     else:
-        valor_final = valor_tabela_dec
+        valor_final = valor_base_dec
 
     margem_valor: Decimal | None = None
     margem_percentual: Decimal | None = None
@@ -4896,6 +5634,7 @@ def _calcular_margens_comerciais(custo: Any, valor_tabela: Any, novo_valor: Any,
     return {
         "Custo": float(custo_dec) if custo is not None else None,
         "ValorTabela": float(valor_tabela_dec) if valor_tabela_dec is not None else None,
+        "ValorBaseReferencia": float(valor_base_dec) if valor_base_dec is not None else None,
         "NovoValor": float(novo_valor_dec) if novo_valor_dec is not None else None,
         "PercentualDesconto": float(percentual_aplicado if percentual_aplicado is not None else percentual_dec) if (percentual_aplicado is not None or percentual_dec is not None) else None,
         "ValorVendaFinal": float(valor_final) if valor_final is not None else None,
@@ -5446,6 +6185,7 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             preco_item.get("Valor") if preco_item else None,
             novo_valor_item,
             percentual_item,
+            item.get("preco_venda_atual_contrato"),
         )
 
         vinculos_preparados.append(
@@ -6339,6 +7079,40 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
     print(f"[KANBAN][_obter_card_detalhe_payload] id_kanban={id_kanban}")
 
+    select_id_contrato = (
+        "c.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidia,"
+        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia")
+        else (
+            "c.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia,"
+            if _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia")
+            else "CAST(NULL AS int) AS IDFatoControleContratosEuromidia,"
+        )
+    )
+
+    select_cod_ponto_contrato = (
+        "c.CodPontoContrato AS CodPontoContrato,"
+        if _coluna_existe(TABELA_CARD, "CodPontoContrato")
+        else "CAST(NULL AS varchar(50)) AS CodPontoContrato,"
+    )
+
+    select_cod_face_contrato = (
+        "c.CodFaceContrato AS CodFaceContrato,"
+        if _coluna_existe(TABELA_CARD, "CodFaceContrato")
+        else "CAST(NULL AS varchar(50)) AS CodFaceContrato,"
+    )
+
+    select_bit_aditivo = (
+        "c.BitAditivo AS BitAditivo,"
+        if _coluna_existe(TABELA_CARD, "BitAditivo")
+        else "CAST(0 AS bit) AS BitAditivo,"
+    )
+
+    select_bit_contrato_novo = (
+        "c.BitContratoNovo AS BitContratoNovo,"
+        if _coluna_existe(TABELA_CARD, "BitContratoNovo")
+        else "CAST(0 AS bit) AS BitContratoNovo,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -6355,6 +7129,11 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             c.IDDimKanbanMotivoEncerramento,
             c.MotivoEncerramentoObs,
             c.IDEmpresaProprietaria,
+            {select_id_contrato}
+            {select_cod_ponto_contrato}
+            {select_cod_face_contrato}
+            {select_bit_aditivo}
+            {select_bit_contrato_novo}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             {_sql_select_nome_usuario_relacionado_card('usuario')},
@@ -6383,6 +7162,37 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
     card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
     card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
+
+    snapshot_solicitacao = _obter_ultima_solicitacao_contrato_por_card(int(id_card))
+    if snapshot_solicitacao:
+        if card_dict.get("IDFatoControleContratosEuromidia") in (None, "", 0):
+            card_dict["IDFatoControleContratosEuromidia"] = (
+                int(snapshot_solicitacao.get("IDFatoControleContratosEuromidia") or 0) or None
+            )
+
+        if not str(card_dict.get("CodPontoContrato") or "").strip():
+            card_dict["CodPontoContrato"] = snapshot_solicitacao.get("SolicitacaoCodPonto")
+
+        if not str(card_dict.get("CodFaceContrato") or "").strip():
+            card_dict["CodFaceContrato"] = snapshot_solicitacao.get("SolicitacaoCodFace")
+
+        if not str(card_dict.get("TipoSolicitacao") or "").strip():
+            card_dict["TipoSolicitacao"] = str(snapshot_solicitacao.get("TipoSolicitacao") or "").strip() or None
+
+        if snapshot_solicitacao.get("SolicitacaoPrecoVendaAtual") not in (None, ""):
+            card_dict["preco_venda_atual_contrato"] = snapshot_solicitacao.get("SolicitacaoPrecoVendaAtual")
+
+        if snapshot_solicitacao.get("SolicitacaoDataInicioPrevisto") not in (None, ""):
+            card_dict["DataInicioPrevisto"] = snapshot_solicitacao.get("SolicitacaoDataInicioPrevisto")
+
+        if snapshot_solicitacao.get("SolicitacaoDataTerminoPrevisto") not in (None, ""):
+            card_dict["DataTerminoPrevisto"] = snapshot_solicitacao.get("SolicitacaoDataTerminoPrevisto")
+
+        if snapshot_solicitacao.get("SolicitacaoIDPainelEuromidia") not in (None, "", 0):
+            card_dict["IDPainelEuromidia"] = int(snapshot_solicitacao.get("SolicitacaoIDPainelEuromidia") or 0) or None
+
+        if snapshot_solicitacao.get("SolicitacaoIDDimFacesPaineis") not in (None, "", 0):
+            card_dict["IDDimFacesPaineis"] = int(snapshot_solicitacao.get("SolicitacaoIDDimFacesPaineis") or 0) or None
 
     valor_versao_bruta = card_dict.pop("VersaoConcorrencia", None)
     valor_versao_hex_sql = card_dict.pop("VersaoConcorrenciaHexSql", None)
@@ -15976,6 +16786,22 @@ def api_card_criar(id_kanban: int):
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_emp),
             tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
+            cod_face_contrato=validacao_ponto_face.get("cod_face"),
+        )
+
+        snapshot_solicitacao = _sincronizar_snapshot_solicitacao_contrato_do_card(
+            id_card=int(novo_id),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+            id_empresa_relacionada=id_empresa_relacionada_int,
+            tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
+            cod_face_contrato=validacao_ponto_face.get("cod_face"),
+            descricao_card=descricao,
+            contrato_existente=contrato_existente,
         )
 
         _garantir_tag_em_atendimento_no_card(
@@ -16033,6 +16859,7 @@ def api_card_criar(id_kanban: int):
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
+                "snapshot_solicitacao": snapshot_solicitacao,
             },
         )
 
@@ -16047,6 +16874,7 @@ def api_card_criar(id_kanban: int):
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
+                "snapshot_solicitacao": snapshot_solicitacao,
             }
         ), 201
 
@@ -16240,6 +17068,22 @@ def api_card_atualizar(id_card: int):
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_emp),
             tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
+            cod_face_contrato=validacao_ponto_face.get("cod_face"),
+        )
+
+        snapshot_solicitacao = _sincronizar_snapshot_solicitacao_contrato_do_card(
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+            id_empresa_relacionada=id_empresa_relacionada_int,
+            tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
+            cod_face_contrato=validacao_ponto_face.get("cod_face"),
+            descricao_card=descricao,
+            contrato_existente=contrato_existente,
         )
 
         vinculos_preparados: list[dict[str, object]] = []
@@ -16374,6 +17218,7 @@ def api_card_atualizar(id_card: int):
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
+                "snapshot_solicitacao": snapshot_solicitacao,
             },
         )
 
@@ -16392,6 +17237,7 @@ def api_card_atualizar(id_card: int):
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
+                "snapshot_solicitacao": snapshot_solicitacao,
             }
         )
 

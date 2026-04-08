@@ -5393,6 +5393,28 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     };
   }
 
+  function converterValorContratoParaNumero(valor) {
+    if (valor === null || valor === undefined || valor === "") return null;
+
+    if (typeof valor === "number") {
+      return Number.isFinite(valor) ? valor : null;
+    }
+
+    let texto = safeStr(valor).trim();
+    if (!texto) return null;
+
+    texto = texto.replace(/^R\$\s*/i, "").replace(/\s+/g, "");
+
+    if (texto.includes(",") && texto.includes(".")) {
+      texto = texto.replace(/\./g, "").replace(",", ".");
+    } else if (texto.includes(",") && !texto.includes(".")) {
+      texto = texto.replace(",", ".");
+    }
+
+    const numero = Number(texto);
+    return Number.isFinite(numero) ? numero : null;
+  }
+
   function normalizarPontoContratoKanban(item) {
     if (!item || typeof item !== "object") return null;
 
@@ -5403,15 +5425,26 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const cidade = safeStr(item.CidadeExibicao ?? item.Cidade ?? item.cidade ?? "").trim();
     const uf = safeStr(item.UF ?? item.uf ?? "").trim();
 
+    const valorBruto =
+      item.FaturamentoLiquidoMensalTotal ??
+      item.faturamento_liquido_mensal_total ??
+      item.valor_mensal ??
+      item.ValorMensal ??
+      null;
+
+    const valorMensal = converterValorContratoParaNumero(valorBruto);
+
     const partes = [codPonto];
     if (tipo) partes.push(tipo);
     if (cidade || uf) partes.push(`${cidade}${cidade && uf ? "/" : ""}${uf}`);
+    if (Number.isFinite(valorMensal)) partes.push(formatarMoedaBR(valorMensal));
 
     return {
       cod_ponto: codPonto,
       tipo,
       cidade,
       uf,
+      valor_mensal: Number.isFinite(valorMensal) ? valorMensal : null,
       label: partes.join(" • ")
     };
   }
@@ -5423,16 +5456,49 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     if (!codFace) return null;
 
     const codPonto = safeStr(item.CodPonto ?? item.cod_ponto ?? "").trim();
-    const tipoFace = safeStr(item.TipoFace ?? item.Face ?? item.tipo_face ?? "").trim();
+    const tipoFace = safeStr(item.TipoFace ?? item.Face ?? item.TipoPainel ?? item.tipo_face ?? item.tipo ?? "").trim();
+    const cota = safeStr(item.Cota ?? item.cota ?? "").trim();
+
+    const valorMensalBruto =
+      item.FaturamentoLiquidoMensal ??
+      item.valor_mensal ??
+      item.ValorMensal ??
+      null;
+
+    const precoVendaAtualBruto =
+      item.TotalLiquidoContratoAGBRCTACORDO ??
+      item.preco_venda_atual ??
+      item.PrecoVendaAtualContrato ??
+      valorMensalBruto ??
+      null;
+
+    const valorMensal = converterValorContratoParaNumero(valorMensalBruto);
+    const precoVendaAtual = converterValorContratoParaNumero(precoVendaAtualBruto);
+    const dataInicioPrevisto = safeStr(item.DataInicioPrevisto ?? item.data_inicio_previsto ?? "").trim() || null;
+    const dataTerminoPrevisto = safeStr(item.DataTerminoPrevisto ?? item.data_termino_previsto ?? "").trim() || null;
+    const idPainelEuromidia = idNum(item.IDPainelEuromidia ?? item.id_painel ?? 0) || null;
+    const idDimFacesPaineis = idNum(item.IDDimFacesPaineis ?? item.id_dim_faces_paineis ?? 0) || null;
+    const labelServidor = safeStr(item.label ?? item.Label ?? "").trim();
 
     const partes = [codFace];
     if (tipoFace) partes.push(tipoFace);
+    if (cota) partes.push(`Cota ${cota}`);
+    if (Number.isFinite(precoVendaAtual)) partes.push(formatarMoedaBR(precoVendaAtual));
+
+    const labelMontado = partes.filter((parte) => safeStr(parte).trim()).join(" • ");
 
     return {
       cod_face: codFace,
       cod_ponto: codPonto,
       tipo_face: tipoFace,
-      label: partes.join(" • ")
+      cota,
+      valor_mensal: Number.isFinite(valorMensal) ? valorMensal : null,
+      preco_venda_atual: Number.isFinite(precoVendaAtual) ? precoVendaAtual : null,
+      data_inicio_previsto: dataInicioPrevisto,
+      data_termino_previsto: dataTerminoPrevisto,
+      id_painel: idPainelEuromidia,
+      id_dim_faces_paineis: idDimFacesPaineis,
+      label: labelServidor || labelMontado || codFace
     };
   }
 
@@ -5703,7 +5769,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     return candidatos[0];
   }
 
-  async function aplicarPainelFaceContratoNoPrimeiroBloco(codPonto, codFace) {
+  async function aplicarPainelFaceContratoNoPrimeiroBloco(codPonto, codFace, dadosContrato = null) {
     const fluxo = obterFluxoContratoAtual();
     const codPontoNormalizado = safeStr(codPonto).trim();
     const codFaceNormalizado = safeStr(codFace).trim();
@@ -5736,8 +5802,25 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const selectPainel = bloco.querySelector('[data-role="select-painel"]');
     if (!selectPainel) return;
 
+    const dadosContratoNormalizados = dadosContrato && typeof dadosContrato === "object"
+      ? {
+          CodFace: codFaceNormalizado,
+          cod_face: codFaceNormalizado,
+          DataInicio: safeStr(dadosContrato.data_inicio_previsto ?? dadosContrato.DataInicioPrevisto ?? "").trim() || null,
+          data_inicio: safeStr(dadosContrato.data_inicio_previsto ?? dadosContrato.DataInicioPrevisto ?? "").trim() || null,
+          DataFim: safeStr(dadosContrato.data_termino_previsto ?? dadosContrato.DataTerminoPrevisto ?? "").trim() || null,
+          data_fim: safeStr(dadosContrato.data_termino_previsto ?? dadosContrato.DataTerminoPrevisto ?? "").trim() || null,
+          PrecoVendaAtualContrato: converterValorContratoParaNumero(
+            dadosContrato.preco_venda_atual ??
+            dadosContrato.TotalLiquidoContratoAGBRCTACORDO ??
+            dadosContrato.valor_mensal ??
+            null
+          )
+        }
+      : { CodFace: codFaceNormalizado };
+
     selectPainel.value = String(idPainel);
-    await atualizarFacesDoBloco(bloco, { CodFace: codFaceNormalizado });
+    await atualizarFacesDoBloco(bloco, dadosContratoNormalizados);
     setMensagemFluxoContrato(`Contrato existente selecionado. O painel ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} e a face ${codFaceNormalizado} foram carregados no primeiro bloco.`, "sucesso");
   }
 
@@ -5756,6 +5839,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const codPontoSalvo = safeStr(opcoes.cod_ponto_contrato ?? opcoes.codPontoContrato ?? "").trim();
     const codFaceSalva = safeStr(opcoes.cod_face_contrato ?? opcoes.codFaceContrato ?? "").trim().toUpperCase();
     const preservarSelecao = !!opcoes.preservarSelecao;
+    const fluxoNovoPersistido = preservarSelecao && !idContratoSalvo && modoSalvo === VALOR_MODO_CONTRATO_NOVO;
 
     resetarFluxoContrato();
 
@@ -5772,14 +5856,19 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
       const contratoSalvoDisponivel = !!idContratoSalvo;
 
-      if (preservarSelecao && contratoSalvoDisponivel) {
-        selecionarValorOuAcrescentarOpcao(
-          selectContratoCard,
-          String(idContratoSalvo),
-          `Contrato salvo #${idContratoSalvo}`
-        );
+      if (preservarSelecao && (contratoSalvoDisponivel || fluxoNovoPersistido)) {
+        if (contratoSalvoDisponivel) {
+          const contratoSelecionado = (Array.isArray(contratos) ? contratos : []).find((contrato) => idNum(contrato?.id_contrato || 0) === idContratoSalvo) || null;
+          selecionarValorOuAcrescentarOpcao(
+            selectContratoCard,
+            String(idContratoSalvo),
+            contratoSelecionado?.label || `Contrato #${idContratoSalvo}`
+          );
+        } else {
+          selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+        }
 
-        montarSelectModoContratoCard(modoSalvo, true);
+        montarSelectModoContratoCard(modoSalvo, contratoSalvoDisponivel);
         if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
         selectModoContratoCard.value = modoSalvo;
 
@@ -5791,10 +5880,11 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
           montarSelectPontosContratoCard(pontos);
 
           if (codPontoSalvo) {
+            const pontoSelecionado = (Array.isArray(pontos) ? pontos : []).find((ponto) => safeStr(ponto?.cod_ponto || "").trim() === codPontoSalvo) || null;
             selecionarValorOuAcrescentarOpcao(
               selectCodPontoContratoCard,
               codPontoSalvo,
-              codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel" : `${codPontoSalvo} • valor salvo`
+              codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel" : (pontoSelecionado?.label || codPontoSalvo)
             );
           }
 
@@ -5814,11 +5904,13 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
           montarSelectFacesContratoCard(faces);
 
           if (codFaceSalva) {
+            const faceSelecionada = (Array.isArray(faces) ? faces : []).find((face) => safeStr(face?.cod_face || "").trim().toUpperCase() === codFaceSalva) || null;
             selecionarValorOuAcrescentarOpcao(
               selectCodFaceContratoCard,
               codFaceSalva,
-              `${codFaceSalva} • valor salvo`
+              faceSelecionada?.label || codFaceSalva
             );
+            await onCodFaceContratoCardChange();
             setMensagemFluxoContrato("Contrato, tipo da solicitação, CodPonto e CodFace salvos foram reaplicados no card.", "sucesso");
           } else {
             setMensagemFluxoContrato("Contrato salvo reaplicado. Agora selecione a face do CodPonto salvo.", "info");
@@ -5848,13 +5940,17 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       console.warn("carregarFluxoContratoParaEmpresa: falhou", erro);
       montarSelectContratoCard([]);
 
-      if (preservarSelecao && idContratoSalvo) {
-        selecionarValorOuAcrescentarOpcao(
-          selectContratoCard,
-          String(idContratoSalvo),
-          `Contrato salvo #${idContratoSalvo}`
-        );
-        montarSelectModoContratoCard(modoSalvo, true);
+      if (preservarSelecao && (idContratoSalvo || fluxoNovoPersistido)) {
+        if (idContratoSalvo) {
+          selecionarValorOuAcrescentarOpcao(
+            selectContratoCard,
+            String(idContratoSalvo),
+            `Contrato #${idContratoSalvo}`
+          );
+        } else {
+          selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+        }
+        montarSelectModoContratoCard(modoSalvo, !!idContratoSalvo);
         if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
         selectModoContratoCard.value = modoSalvo;
 
@@ -5864,13 +5960,13 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
             selecionarValorOuAcrescentarOpcao(
               selectCodPontoContratoCard,
               codPontoSalvo,
-              codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel" : `${codPontoSalvo} • valor salvo`
+              codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel" : codPontoSalvo
             );
           }
           if (codPontoSalvo && codPontoSalvo !== VALOR_OPCAO_NOVO_PAINEL) {
             if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = false;
             if (codFaceSalva) {
-              selecionarValorOuAcrescentarOpcao(selectCodFaceContratoCard, codFaceSalva, `${codFaceSalva} • valor salvo`);
+              selecionarValorOuAcrescentarOpcao(selectCodFaceContratoCard, codFaceSalva, codFaceSalva);
             }
           }
         }
@@ -5981,7 +6077,21 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     if (fluxo.usar_novo_painel) return;
     if (!fluxo.cod_ponto_contrato || !fluxo.cod_face_contrato) return;
 
-    await aplicarPainelFaceContratoNoPrimeiroBloco(fluxo.cod_ponto_contrato, fluxo.cod_face_contrato);
+    const chaveFaces = `${idNum(fluxo.id_contrato)}|${safeStr(fluxo.cod_ponto_contrato).trim()}`;
+    const facesDisponiveis = facesPorContratoPontoCache.get(chaveFaces) || [];
+    const faceSelecionada = (Array.isArray(facesDisponiveis) ? facesDisponiveis : []).find((face) => {
+      return safeStr(face?.cod_face || "").trim().toUpperCase() === safeStr(fluxo.cod_face_contrato).trim().toUpperCase();
+    }) || null;
+
+    const precoAtualContrato = Number(faceSelecionada?.preco_venda_atual);
+    if (faceSelecionada && Number.isFinite(precoAtualContrato)) {
+      setMensagemFluxoContrato(
+        `Face ${fluxo.cod_face_contrato} selecionada no contrato. Preço de venda atual no contrato: ${formatarMoedaBR(precoAtualContrato)}.`,
+        "sucesso"
+      );
+    }
+
+    await aplicarPainelFaceContratoNoPrimeiroBloco(fluxo.cod_ponto_contrato, fluxo.cod_face_contrato, faceSelecionada);
   }
 
   async function sincronizarTagTipoContratoDoCard(idCard, idTagDesejada) {
@@ -6708,6 +6818,8 @@ function atualizarResumoComercial(bloco){
   const precoSel = obterPrecoSelecionadoDoBloco(bloco);
   const custo = Number(bloco.__dadosComerciais?.custo?.Valor);
   const valorTabela = Number(precoSel?.Valor);
+  const precoAtualContrato = Number(bloco.__dadosContratoAtual?.preco_venda_atual);
+  const valorBaseReferencia = Number.isFinite(precoAtualContrato) ? precoAtualContrato : valorTabela;
 
   const novoValor = parseNumeroInput(inputNovoValor?.value);
   const percentual = parseNumeroInput(inputPercentual?.value);
@@ -6717,18 +6829,18 @@ function atualizarResumoComercial(bloco){
   }
 
   if (kpiPrecoAtual){
-    kpiPrecoAtual.textContent = Number.isFinite(valorTabela) ? formatarMoedaBR(valorTabela) : '—';
+    kpiPrecoAtual.textContent = Number.isFinite(valorBaseReferencia) ? formatarMoedaBR(valorBaseReferencia) : '—';
   }
 
-  const margemBase = Number.isFinite(valorTabela) && Number.isFinite(custo)
-    ? (valorTabela - custo)
+  const margemBase = Number.isFinite(valorBaseReferencia) && Number.isFinite(custo)
+    ? (valorBaseReferencia - custo)
     : null;
 
   const margemBasePerc =
     margemBase !== null &&
-    Number.isFinite(valorTabela) &&
-    valorTabela !== 0
-      ? (margemBase / valorTabela) * 100
+    Number.isFinite(valorBaseReferencia) &&
+    valorBaseReferencia !== 0
+      ? (margemBase / valorBaseReferencia) * 100
       : null;
 
   if (kpiMargemBase){
@@ -6747,10 +6859,10 @@ function atualizarResumoComercial(bloco){
 
   if (novoValor !== null) {
     valorFinal = novoValor;
-  } else if (percentual !== null && Number.isFinite(valorTabela)) {
-    valorFinal = valorTabela * (1 - (percentual / 100));
-  } else if (Number.isFinite(valorTabela)) {
-    valorFinal = valorTabela;
+  } else if (percentual !== null && Number.isFinite(valorBaseReferencia)) {
+    valorFinal = valorBaseReferencia * (1 - (percentual / 100));
+  } else if (Number.isFinite(valorBaseReferencia)) {
+    valorFinal = valorBaseReferencia;
   }
 
   const margemFinal = (valorFinal !== null && Number.isFinite(custo))
@@ -6800,6 +6912,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     valoresSalvos?.data_inicio_reserva ||
     valoresSalvos?.DataInicio ||
     valoresSalvos?.data_inicio ||
+    valoresSalvos?.DataInicioPrevisto ||
+    valoresSalvos?.data_inicio_previsto ||
     ''
   ).trim();
 
@@ -6808,11 +6922,26 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     valoresSalvos?.data_fim_reserva ||
     valoresSalvos?.DataFim ||
     valoresSalvos?.data_fim ||
+    valoresSalvos?.DataTerminoPrevisto ||
+    valoresSalvos?.data_termino_previsto ||
     ''
   ).trim();
 
+  const precoVendaAtualContrato = converterValorContratoParaNumero(
+    valoresSalvos?.PrecoVendaAtualContrato ??
+    valoresSalvos?.preco_venda_atual_contrato ??
+    valoresSalvos?.preco_venda_atual ??
+    valoresSalvos?.TotalLiquidoContratoAGBRCTACORDO ??
+    null
+  );
+
   destruirCalendariosReservaDoBloco(bloco);
   bloco.__dadosComerciais = comercial || null;
+  bloco.__dadosContratoAtual = {
+    preco_venda_atual: Number.isFinite(precoVendaAtualContrato) ? precoVendaAtualContrato : null,
+    data_inicio: dataInicioSalva || null,
+    data_fim: dataFimSalva || null
+  };
   montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
 
   wrap.innerHTML = '';
@@ -7139,12 +7268,15 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
       if (!idPainel && !codFace && !idPreco && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
 
+      const precoVendaAtualContrato = Number(bloco.__dadosContratoAtual?.preco_venda_atual);
+
       itens.push({
         id_painel: idPainel || null,
         cod_face: codFace || null,
         id_preco: idPreco,
         novo_valor: novoValor,
         percentual_desconto: novoValor !== null ? null : percentual,
+        preco_venda_atual_contrato: Number.isFinite(precoVendaAtualContrato) ? precoVendaAtualContrato : null,
         data_inicio: dataInicio || null,
         data_fim: dataFim || null,
       });
@@ -8992,7 +9124,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     await carregarEmpresas();
 
-    const j = await buscarDetalheCard(idCard);
+    const j = await buscarDetalheCard(idCard, { fresh: true });
     if (!j || !j.card) {
       mostrarMensagemCard("Não foi possível carregar os detalhes do card.");
       return;
