@@ -1,12 +1,14 @@
 from flask_sqlalchemy import SQLAlchemy
 from ..extensions import db,limiter
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app,abort
 from ..models.admin_models import FatoMovimentoFinanceiroEmpresas, DimEmpresaProprietaria,DimProdutoAuvo
 from datetime import datetime, date, timedelta
-from sqlalchemy import func, case
+from sqlalchemy import func, case,text
 from flask_login import login_required, current_user
 from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
+
+
 
 
 admin = Blueprint("admin", __name__)
@@ -2845,4 +2847,806 @@ def permissao_desconto():
             "inicio": inicio,
             "fim": fim,
         },
+    )
+
+
+
+
+
+
+
+
+
+
+def _resolver_url_logo_empresa_proprietaria(valor_logo) -> str:
+    valor = str(valor_logo or "").strip()
+    if not valor:
+        return ""
+
+    valor = valor.replace("\\", "/").strip()
+
+    if valor.startswith("http://") or valor.startswith("https://") or valor.startswith("data:image/"):
+        return valor
+
+    if valor.startswith("/static/"):
+        return valor
+
+    if valor.startswith("static/"):
+        return f"/{valor}"
+
+    if "LogoEmpresaProprietaria/" in valor:
+        sufixo = valor.split("LogoEmpresaProprietaria/", 1)[1].lstrip("/")
+        if sufixo:
+            return url_for("static", filename=f"LogoEmpresaProprietaria/{sufixo}")
+
+    nome_arquivo = Path(valor).name.strip()
+    if not nome_arquivo:
+        return ""
+
+    return url_for("static", filename=f"LogoEmpresaProprietaria/{nome_arquivo}")
+
+
+def _texto_ou_none(valor):
+    if valor is None:
+        return None
+    valor = str(valor).strip()
+    return valor if valor != "" else None
+
+
+def _texto_ou_vazio(valor):
+    return str(valor or "").strip()
+
+
+def _int_ou_none(valor):
+    valor = _texto_ou_none(valor)
+    if valor is None:
+        return None
+    try:
+        return int(valor)
+    except Exception:
+        return None
+
+
+def _decimal_ou_none(valor):
+    valor = _texto_ou_none(valor)
+    if valor is None:
+        return None
+
+    valor = valor.replace("R$", "").replace(" ", "")
+
+    if "," in valor and "." in valor:
+        valor = valor.replace(".", "").replace(",", ".")
+    elif "," in valor:
+        valor = valor.replace(",", ".")
+
+    try:
+        return float(valor)
+    except Exception:
+        return None
+
+
+def _data_ou_none(valor):
+    valor = _texto_ou_none(valor)
+    if valor is None:
+        return None
+
+    formatos = (
+        "%Y-%m-%d",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%d/%m/%Y",
+        "%d/%m/%Y %H:%M",
+    )
+
+    for fmt in formatos:
+        try:
+            return datetime.strptime(valor, fmt)
+        except Exception:
+            pass
+
+    return None
+
+
+def _data_para_input_date(valor):
+    if not valor:
+        return ""
+    try:
+        return valor.strftime("%Y-%m-%d")
+    except Exception:
+        return str(valor)[:10]
+
+
+def _tipo_solicitacao_normalizado(valor):
+    valor = _texto_ou_vazio(valor).upper().replace("_", " ")
+    if valor == "NOVO CONTRATO":
+        return "NOVO CONTRATO"
+    if valor == "ADITIVO":
+        return "ADITIVO"
+    return "ADITIVO"
+
+
+def _id_usuario_logado():
+    candidatos = [
+        getattr(current_user, "IDDimUsuarios", None),
+        getattr(current_user, "id", None),
+        getattr(current_user, "Id", None),
+        getattr(current_user, "ID", None),
+    ]
+    for c in candidatos:
+        try:
+            if c is not None:
+                return int(c)
+        except Exception:
+            pass
+    return None
+
+
+def _resolver_face_e_painel_por_codigos(cod_ponto: str | None, cod_face: str | None):
+    cod_ponto = _texto_ou_none(cod_ponto)
+    cod_face = _texto_ou_none(cod_face)
+
+    if not cod_ponto or not cod_face:
+        return None
+
+    sql = text("""
+        SELECT TOP 1
+               df.[IDDimFacesPaineis],
+               COALESCE(df.[IDDimPaineisEuromidia], dp.[IDDimPaineisEuromidia]) AS [IDDimPaineisEuromidia],
+               df.[Face],
+               df.[CodFace],
+               df.[CodPonto],
+               COALESCE(df.[Tipo], dp.[Tipo]) AS [TipoPainel],
+               dp.[Cidade],
+               dp.[UF]
+        FROM [Integracao].[Silver].[DimFacesPaineis] df
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
+               ON dp.[IDDimPaineisEuromidia] = df.[IDDimPaineisEuromidia]
+        WHERE LTRIM(RTRIM(ISNULL(df.[CodPonto], ''))) = :cod_ponto
+          AND LTRIM(RTRIM(ISNULL(df.[CodFace], ''))) = :cod_face
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "cod_ponto": cod_ponto,
+            "cod_face": cod_face,
+        }
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
+    sql_cabecalho = text("""
+        SELECT TOP 1
+               fsce.[IDFatoSolicitacaoContratoEuromidia]
+              ,fsce.[IDFatoKanbanCard]
+              ,fsce.[IDFatoControleContratosEuromidia]
+              ,fsce.[IDDimStatusContratos]
+              ,fsce.[IDDimUsuariosCriacao]
+              ,fsce.[IDDimUsuariosEnvioAvaliacao]
+              ,fsce.[IDDimUsuariosAprovacao]
+              ,fsce.[IDDimUsuariosRejeicao]
+              ,fsce.[IDDimUsuariosCancelamento]
+              ,fsce.[IDEmpresa]
+              ,fsce.[IDCategoriaMarca]
+              ,fsce.[IDEmpresaProprietaria]
+              ,fsce.[TipoSolicitacao]
+              ,fsce.[Referencia]
+              ,fsce.[NumeroContrato]
+              ,fsce.[NumeroPrevia]
+              ,fsce.[CNPJ]
+              ,fsce.[DataAssinaturaRenovacao]
+              ,fsce.[IDTrimestre]
+              ,fsce.[DataLancamento]
+              ,fsce.[RazaoSocial]
+              ,fsce.[CPF]
+              ,fsce.[MarcaExibida]
+              ,fsce.[Vendedor]
+              ,fsce.[TipoDocumento]
+              ,fsce.[Origem]
+              ,fsce.[SDR]
+              ,fsce.[Agencia]
+              ,fsce.[CnpjAgencia]
+              ,fsce.[Bureau]
+              ,fsce.[CnpjBureau]
+              ,fsce.[Intermediario]
+              ,fsce.[CnpjIntermediario]
+              ,fsce.[QuantidadePontos]
+              ,fsce.[QuantidadeFaces]
+              ,fsce.[TotalFaturamentoBrutoMensal]
+              ,fsce.[TotalPercentualPermuta]
+              ,fsce.[TotalCotaOportunidade]
+              ,fsce.[TotalValorPermuta]
+              ,fsce.[TotalFaturamentoLiquidoPermuta]
+              ,fsce.[TotalBrutoContrato]
+              ,fsce.[TotalLiquidoContratoAGBRCTACORDO]
+              ,fsce.[TotalLiquidoContratoAGBRVENDGERCOOR]
+              ,fsce.[TotalPercentualAgencia]
+              ,fsce.[TotalValorMensalAgencia]
+              ,fsce.[TotalPercentualBureau]
+              ,fsce.[TotalValorBureauMensal]
+              ,fsce.[TotalPercentualCartaAcordo]
+              ,fsce.[TotalValorCartaAcordoMensal]
+              ,fsce.[TotalValorOutrasComissoes]
+              ,fsce.[TotalFaturamentoLiquidoMensal]
+              ,fsce.[TotalPercentualComissaoVendedor]
+              ,fsce.[TotalValorVendedor]
+              ,fsce.[ValorVendedorTotal]
+              ,fsce.[TotalPercentualComissaoCoordenacao]
+              ,fsce.[Observacao]
+              ,fsce.[MotivoRejeicao]
+              ,fsce.[MotivoCancelamento]
+              ,fsce.[BitAtivo]
+              ,fsce.[DataCriacao]
+              ,fsce.[DataAtualizacao]
+              ,fsce.[DataEnvioAvaliacao]
+              ,fsce.[DataAprovacao]
+              ,fsce.[DataRejeicao]
+              ,fsce.[DataCancelamento]
+              ,du.[NomeUsuario] AS [NomeUsuarioCriacao]
+              ,de.[RazaoSocial] AS [RazaoSocialEmpresa]
+              ,ep.[Logo] AS [LogoEmpresaProprietaria]
+              ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
+        FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
+        INNER JOIN [Integracao].[Silver].[DimUsuarios] du
+                ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
+        INNER JOIN [Integracao].[Silver].[DimEmpresas] de
+                ON de.[IDEmpresa] = fsce.[IDEmpresa]
+        INNER JOIN [Integracao].[dbo].[EmpresaProprietaria] ep
+                ON ep.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        WHERE fsce.[IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
+    """)
+
+    sql_itens = text("""
+        SELECT
+               fsci.[IDFatoSolicitacaoContratoItemEuromidia]
+              ,fsci.[IDFatoSolicitacaoContratoEuromidia]
+              ,fsci.[IDFatoControleContratosEuromidia]
+              ,fsci.[IDFatoControleContratosItensEuromidia]
+              ,fsci.[IDFatoKanbanCard]
+              ,fsci.[IDDimUsuariosCriacao]
+              ,fsci.[IDDimUsuariosAtualizacao]
+              ,fsci.[IDVendedor]
+              ,fsci.[IDPainelEuromidia]
+              ,fsci.[IDDimFacesPaineis]
+              ,fsci.[IDDimCheckingHistorico]
+              ,fsci.[IDEmpresaProprietaria]
+              ,fsci.[Referencia]
+              ,fsci.[NumeroContrato]
+              ,fsci.[NumeroPrevia]
+              ,fsci.[CNPJ]
+              ,fsci.[CodPonto]
+              ,fsci.[CodFace]
+              ,fsci.[DataLancamento]
+              ,fsci.[Cota]
+              ,fsci.[CidadeExibicao]
+              ,fsci.[Tipo]
+              ,fsci.[Origem]
+              ,fsci.[EmpresaEuro]
+              ,fsci.[CnpjExibibora]
+              ,fsci.[TipoDocumento]
+              ,fsci.[RazaoSocial]
+              ,fsci.[CPF]
+              ,fsci.[MarcaExibida]
+              ,fsci.[Vendedor]
+              ,fsci.[SDR]
+              ,fsci.[Agencia]
+              ,fsci.[CnpjAgencia]
+              ,fsci.[Bureau]
+              ,fsci.[CnpjBureau]
+              ,fsci.[Intermediario]
+              ,fsci.[CnpjIntermediario]
+              ,fsci.[DataAssinaturaRenovacao]
+              ,fsci.[IDTrimestre]
+              ,fsci.[TexmpoExposicao]
+              ,fsci.[DataInicioPrevisto]
+              ,fsci.[DataTerminoPrevisto]
+              ,fsci.[InicioRenovacao]
+              ,fsci.[FaturamentoBrutoMensal]
+              ,fsci.[PercentualPermuta]
+              ,fsci.[CotaOportunidade]
+              ,fsci.[ValorPermuta]
+              ,fsci.[FaturamentoLiquidoPermuta]
+              ,fsci.[NumeroParcelas]
+              ,fsci.[DataInicioVencimento]
+              ,fsci.[TotalBrutoContrato]
+              ,fsci.[TotalLiquidoContratoAGBRCTACORDO]
+              ,fsci.[TotalLiquidoContratoAGBRVENDGERCOOR]
+              ,fsci.[PercentualAgencia]
+              ,fsci.[ValorMensalAgencia]
+              ,fsci.[PercentualBureau]
+              ,fsci.[ValorBureauMensal]
+              ,fsci.[PercentualCartaAcordo]
+              ,fsci.[ValorCartaAcordoMensal]
+              ,fsci.[ValorOutrasComissoes]
+              ,fsci.[FaturamentoLiquidoMensal]
+              ,fsci.[PercentualComissaoVendedor]
+              ,fsci.[ValorVendedor]
+              ,fsci.[ValorVendedorTotal]
+              ,fsci.[PercentualComissaoCoordenacao]
+              ,fsci.[ValorCoordenador]
+              ,fsci.[ValorCoordenadorTotal]
+              ,fsci.[PercentualComissaoGerencia]
+              ,fsci.[ValorGerencia]
+              ,fsci.[ValorGerenciaTotal]
+              ,fsci.[AtivoCancelamento]
+              ,fsci.[FaturamentoLiquidoFinalMensal]
+              ,fsci.[ComissaoGerenciaNordeste]
+              ,fsci.[Faturamento]
+              ,fsci.[DataCancelamento]
+              ,fsci.[OBS]
+              ,fsci.[DataFimEfetiva]
+              ,fsci.[Status]
+              ,fsci.[BitAtivo]
+              ,fsci.[DataCriacao]
+              ,fsci.[DataAtualizacao]
+              ,fsci.[BitSolicitacaoAtiva]
+              ,df.[Face] AS [FaceDescricaoCadastro]
+              ,df.[Tipo] AS [TipoFaceCadastro]
+              ,dp.[Cidade] AS [CidadePainelCadastro]
+              ,dp.[UF] AS [UFPainelCadastro]
+              ,dp.[Tipo] AS [TipoPainelCadastro]
+              ,dp.[Logradouro] AS [LogradouroPainelCadastro]
+              ,dp.[Bairro] AS [BairroPainelCadastro]
+              ,dp.[Referencia] AS [ReferenciaPainelCadastro]
+        FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] fsci
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] df
+               ON df.[IDDimFacesPaineis] = fsci.[IDDimFacesPaineis]
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
+               ON dp.[IDDimPaineisEuromidia] = COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia])
+        WHERE fsci.[IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
+        ORDER BY fsci.[IDFatoSolicitacaoContratoItemEuromidia] ASC
+    """)
+
+    cab = db.session.execute(
+        sql_cabecalho,
+        {"id_solicitacao": int(id_solicitacao)}
+    ).mappings().first()
+
+    if not cab:
+        return None
+
+    cab = dict(cab)
+    cab["LogoEmpresaProprietariaUrl"] = _resolver_url_logo_empresa_proprietaria(cab.get("LogoEmpresaProprietaria"))
+    cab["TipoSolicitacaoExibicao"] = _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao"))
+    cab["DataAssinaturaRenovacaoInput"] = _data_para_input_date(cab.get("DataAssinaturaRenovacao"))
+    cab["DataLancamentoInput"] = _data_para_input_date(cab.get("DataLancamento"))
+    cab["DataCriacaoInput"] = _data_para_input_date(cab.get("DataCriacao"))
+    cab["DataEnvioAvaliacaoInput"] = _data_para_input_date(cab.get("DataEnvioAvaliacao"))
+
+    itens_rows = db.session.execute(
+        sql_itens,
+        {"id_solicitacao": int(id_solicitacao)}
+    ).mappings().all()
+
+    itens = []
+    for row in itens_rows:
+        item = dict(row)
+        item["DataLancamentoInput"] = _data_para_input_date(item.get("DataLancamento"))
+        item["DataAssinaturaRenovacaoInput"] = _data_para_input_date(item.get("DataAssinaturaRenovacao"))
+        item["DataInicioPrevistoInput"] = _data_para_input_date(item.get("DataInicioPrevisto"))
+        item["DataTerminoPrevistoInput"] = _data_para_input_date(item.get("DataTerminoPrevisto"))
+        item["DataInicioVencimentoInput"] = _data_para_input_date(item.get("DataInicioVencimento"))
+        item["DataCancelamentoInput"] = _data_para_input_date(item.get("DataCancelamento"))
+        item["DataFimEfetivaInput"] = _data_para_input_date(item.get("DataFimEfetiva"))
+        itens.append(item)
+
+    return {
+        "solicitacao": cab,
+        "itens": itens,
+    }
+
+
+
+
+
+
+@admin.route("/aprovacao/contratos", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("80 per minute", methods=["GET"])
+def lista_aprovacao_contratos():
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 10, type=int)
+    q = (request.args.get("q") or "").strip()
+
+    if per_page not in (10, 20, 30, 50, 100):
+        per_page = 10
+
+    if page < 1:
+        page = 1
+
+    sql_total = text("""
+        SELECT COUNT(1)
+        FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
+        INNER JOIN [Integracao].[Silver].[DimUsuarios] du
+            ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
+        INNER JOIN [Integracao].[Silver].[DimEmpresas] de
+            ON de.[IDEmpresa] = fsce.[IDEmpresa]
+        INNER JOIN [Integracao].[dbo].[EmpresaProprietaria] ep
+            ON ep.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        WHERE
+            (
+                :q = ''
+                OR CAST(fsce.[IDFatoSolicitacaoContratoEuromidia] AS varchar(50)) LIKE '%' + :q + '%'
+                OR CAST(fsce.[IDFatoKanbanCard] AS varchar(50)) LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[CNPJ], '') LIKE '%' + :q + '%'
+                OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
+                OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
+            )
+    """)
+
+    total = int(db.session.execute(sql_total, {"q": q}).scalar() or 0)
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+
+    sql_itens = text("""
+        SELECT
+             fsce.[IDFatoSolicitacaoContratoEuromidia]
+            ,fsce.[IDFatoKanbanCard]
+            ,fsce.[IDFatoControleContratosEuromidia]
+            ,fsce.[IDDimStatusContratos]
+            ,fsce.[IDDimUsuariosCriacao]
+            ,fsce.[IDDimUsuariosEnvioAvaliacao]
+            ,fsce.[IDDimUsuariosAprovacao]
+            ,fsce.[IDDimUsuariosRejeicao]
+            ,fsce.[IDDimUsuariosCancelamento]
+            ,fsce.[IDEmpresa]
+            ,fsce.[IDCategoriaMarca]
+            ,fsce.[IDEmpresaProprietaria]
+            ,fsce.[TipoSolicitacao]
+            ,fsce.[Referencia]
+            ,fsce.[NumeroContrato]
+            ,fsce.[NumeroPrevia]
+            ,fsce.[CNPJ]
+            ,fsce.[DataAssinaturaRenovacao]
+            ,fsce.[IDTrimestre]
+            ,fsce.[DataLancamento]
+            ,fsce.[RazaoSocial] AS [RazaoSocialSolicitacao]
+            ,fsce.[CPF]
+            ,fsce.[MarcaExibida]
+            ,fsce.[Vendedor]
+            ,fsce.[TipoDocumento]
+            ,fsce.[Origem]
+            ,fsce.[SDR]
+            ,fsce.[Agencia]
+            ,fsce.[CnpjAgencia]
+            ,fsce.[Bureau]
+            ,fsce.[CnpjBureau]
+            ,fsce.[Intermediario]
+            ,fsce.[CnpjIntermediario]
+            ,fsce.[QuantidadePontos]
+            ,fsce.[QuantidadeFaces]
+            ,fsce.[TotalFaturamentoBrutoMensal]
+            ,fsce.[TotalPercentualPermuta]
+            ,fsce.[TotalCotaOportunidade]
+            ,fsce.[TotalValorPermuta]
+            ,fsce.[TotalFaturamentoLiquidoPermuta]
+            ,fsce.[TotalBrutoContrato]
+            ,fsce.[TotalLiquidoContratoAGBRCTACORDO]
+            ,fsce.[TotalLiquidoContratoAGBRVENDGERCOOR]
+            ,fsce.[TotalPercentualAgencia]
+            ,fsce.[TotalValorMensalAgencia]
+            ,fsce.[TotalPercentualBureau]
+            ,fsce.[TotalValorBureauMensal]
+            ,fsce.[TotalPercentualCartaAcordo]
+            ,fsce.[TotalValorCartaAcordoMensal]
+            ,fsce.[TotalValorOutrasComissoes]
+            ,fsce.[TotalFaturamentoLiquidoMensal]
+            ,fsce.[TotalPercentualComissaoVendedor]
+            ,fsce.[TotalValorVendedor]
+            ,fsce.[ValorVendedorTotal]
+            ,fsce.[TotalPercentualComissaoCoordenacao]
+            ,fsce.[Observacao]
+            ,fsce.[MotivoRejeicao]
+            ,fsce.[MotivoCancelamento]
+            ,fsce.[BitAtivo]
+            ,fsce.[DataCriacao]
+            ,fsce.[DataAtualizacao]
+            ,fsce.[DataEnvioAvaliacao]
+            ,fsce.[DataAprovacao]
+            ,fsce.[DataRejeicao]
+            ,fsce.[DataCancelamento]
+            ,du.[NomeUsuario] AS [NomeUsuarioCriacao]
+            ,de.[RazaoSocial] AS [RazaoSocialEmpresa]
+            ,ep.[Logo] AS [LogoEmpresaProprietaria]
+            ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
+        FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
+        INNER JOIN [Integracao].[Silver].[DimUsuarios] du
+            ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
+        INNER JOIN [Integracao].[Silver].[DimEmpresas] de
+            ON de.[IDEmpresa] = fsce.[IDEmpresa]
+        INNER JOIN [Integracao].[dbo].[EmpresaProprietaria] ep
+            ON ep.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        WHERE
+            (
+                :q = ''
+                OR CAST(fsce.[IDFatoSolicitacaoContratoEuromidia] AS varchar(50)) LIKE '%' + :q + '%'
+                OR CAST(fsce.[IDFatoKanbanCard] AS varchar(50)) LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[CNPJ], '') LIKE '%' + :q + '%'
+                OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
+                OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
+            )
+        ORDER BY
+            CASE WHEN fsce.[DataEnvioAvaliacao] IS NULL THEN 1 ELSE 0 END ASC,
+            fsce.[DataEnvioAvaliacao] DESC,
+            fsce.[IDFatoSolicitacaoContratoEuromidia] DESC
+        OFFSET :offset ROWS
+        FETCH NEXT :per_page ROWS ONLY
+    """)
+
+    rows = db.session.execute(
+        sql_itens,
+        {
+            "q": q,
+            "offset": offset,
+            "per_page": per_page,
+        }
+    ).mappings().all()
+
+    itens = []
+    for r in rows:
+        logo_url = _resolver_url_logo_empresa_proprietaria(r.get("LogoEmpresaProprietaria"))
+        id_solic = int(r.get("IDFatoSolicitacaoContratoEuromidia"))
+
+        itens.append(
+            {
+                "IDFatoSolicitacaoContratoEuromidia": id_solic,
+                "IDFatoKanbanCard": r.get("IDFatoKanbanCard"),
+                "IDFatoControleContratosEuromidia": r.get("IDFatoControleContratosEuromidia"),
+                "DataEnvioAvaliacao": r.get("DataEnvioAvaliacao"),
+                "NomeUsuarioCriacao": r.get("NomeUsuarioCriacao") or "—",
+                "CNPJ": r.get("CNPJ") or "—",
+                "RazaoSocialEmpresa": r.get("RazaoSocialEmpresa") or "—",
+                "LogoEmpresaProprietaria": logo_url,
+                "TipoSolicitacao": _tipo_solicitacao_normalizado(r.get("TipoSolicitacao") or "—"),
+                "url_detalhe": url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solic),
+            }
+        )
+
+    inicio = 0 if total == 0 else (offset + 1)
+    fim = min(offset + per_page, total)
+
+    paginacao = {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "inicio": inicio,
+        "fim": fim,
+    }
+
+    filtros = {
+        "q": q,
+        "per_page": per_page,
+    }
+
+    return render_template(
+        "admin/lista_aprovacao_contratos.html",
+        itens=itens,
+        filtros=filtros,
+        paginacao=paginacao,
+    )
+
+
+@admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("80 per minute")
+def detalhe_aprovacao_contrato(id_solicitacao: int):
+    if request.method == "POST":
+        try:
+            id_usuario_logado = _id_usuario_logado()
+
+            tipo_solicitacao = _tipo_solicitacao_normalizado(request.form.get("TipoSolicitacao"))
+
+            params_cab = {
+                "id_solicitacao": int(id_solicitacao),
+                "TipoSolicitacao": tipo_solicitacao,
+                "Referencia": _texto_ou_none(request.form.get("Referencia")),
+                "NumeroContrato": _texto_ou_none(request.form.get("NumeroContrato")),
+                "NumeroPrevia": _texto_ou_none(request.form.get("NumeroPrevia")),
+                "CNPJ": _texto_ou_none(request.form.get("CNPJ")),
+                "DataAssinaturaRenovacao": _data_ou_none(request.form.get("DataAssinaturaRenovacao")),
+                "IDTrimestre": _texto_ou_none(request.form.get("IDTrimestre")),
+                "DataLancamento": _data_ou_none(request.form.get("DataLancamento")),
+                "RazaoSocial": _texto_ou_none(request.form.get("RazaoSocial")),
+                "CPF": _texto_ou_none(request.form.get("CPF")),
+                "MarcaExibida": _texto_ou_none(request.form.get("MarcaExibida")),
+                "Vendedor": _texto_ou_none(request.form.get("Vendedor")),
+                "TipoDocumento": _texto_ou_none(request.form.get("TipoDocumento")),
+                "Origem": _texto_ou_none(request.form.get("Origem")),
+                "SDR": _texto_ou_none(request.form.get("SDR")),
+                "Agencia": _texto_ou_none(request.form.get("Agencia")),
+                "CnpjAgencia": _texto_ou_none(request.form.get("CnpjAgencia")),
+                "Bureau": _texto_ou_none(request.form.get("Bureau")),
+                "CnpjBureau": _texto_ou_none(request.form.get("CnpjBureau")),
+                "Intermediario": _texto_ou_none(request.form.get("Intermediario")),
+                "CnpjIntermediario": _texto_ou_none(request.form.get("CnpjIntermediario")),
+                "QuantidadePontos": _int_ou_none(request.form.get("QuantidadePontos")),
+                "QuantidadeFaces": _int_ou_none(request.form.get("QuantidadeFaces")),
+                "TotalFaturamentoBrutoMensal": _decimal_ou_none(request.form.get("TotalFaturamentoBrutoMensal")),
+                "TotalPercentualPermuta": _decimal_ou_none(request.form.get("TotalPercentualPermuta")),
+                "TotalCotaOportunidade": _decimal_ou_none(request.form.get("TotalCotaOportunidade")),
+                "TotalValorPermuta": _decimal_ou_none(request.form.get("TotalValorPermuta")),
+                "TotalFaturamentoLiquidoPermuta": _decimal_ou_none(request.form.get("TotalFaturamentoLiquidoPermuta")),
+                "TotalBrutoContrato": _decimal_ou_none(request.form.get("TotalBrutoContrato")),
+                "TotalLiquidoContratoAGBRCTACORDO": _decimal_ou_none(request.form.get("TotalLiquidoContratoAGBRCTACORDO")),
+                "TotalLiquidoContratoAGBRVENDGERCOOR": _decimal_ou_none(request.form.get("TotalLiquidoContratoAGBRVENDGERCOOR")),
+                "TotalPercentualAgencia": _decimal_ou_none(request.form.get("TotalPercentualAgencia")),
+                "TotalValorMensalAgencia": _decimal_ou_none(request.form.get("TotalValorMensalAgencia")),
+                "TotalPercentualBureau": _decimal_ou_none(request.form.get("TotalPercentualBureau")),
+                "TotalValorBureauMensal": _decimal_ou_none(request.form.get("TotalValorBureauMensal")),
+                "TotalPercentualCartaAcordo": _decimal_ou_none(request.form.get("TotalPercentualCartaAcordo")),
+                "TotalValorCartaAcordoMensal": _decimal_ou_none(request.form.get("TotalValorCartaAcordoMensal")),
+                "TotalValorOutrasComissoes": _decimal_ou_none(request.form.get("TotalValorOutrasComissoes")),
+                "TotalFaturamentoLiquidoMensal": _decimal_ou_none(request.form.get("TotalFaturamentoLiquidoMensal")),
+                "TotalPercentualComissaoVendedor": _decimal_ou_none(request.form.get("TotalPercentualComissaoVendedor")),
+                "TotalValorVendedor": _decimal_ou_none(request.form.get("TotalValorVendedor")),
+                "ValorVendedorTotal": _decimal_ou_none(request.form.get("ValorVendedorTotal")),
+                "TotalPercentualComissaoCoordenacao": _decimal_ou_none(request.form.get("TotalPercentualComissaoCoordenacao")),
+                "Observacao": _texto_ou_none(request.form.get("Observacao")),
+                "MotivoRejeicao": _texto_ou_none(request.form.get("MotivoRejeicao")),
+                "MotivoCancelamento": _texto_ou_none(request.form.get("MotivoCancelamento")),
+            }
+
+            sql_update_cab = text("""
+                UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+                   SET [TipoSolicitacao] = :TipoSolicitacao
+                      ,[Referencia] = :Referencia
+                      ,[NumeroContrato] = :NumeroContrato
+                      ,[NumeroPrevia] = :NumeroPrevia
+                      ,[CNPJ] = :CNPJ
+                      ,[DataAssinaturaRenovacao] = :DataAssinaturaRenovacao
+                      ,[IDTrimestre] = :IDTrimestre
+                      ,[DataLancamento] = :DataLancamento
+                      ,[RazaoSocial] = :RazaoSocial
+                      ,[CPF] = :CPF
+                      ,[MarcaExibida] = :MarcaExibida
+                      ,[Vendedor] = :Vendedor
+                      ,[TipoDocumento] = :TipoDocumento
+                      ,[Origem] = :Origem
+                      ,[SDR] = :SDR
+                      ,[Agencia] = :Agencia
+                      ,[CnpjAgencia] = :CnpjAgencia
+                      ,[Bureau] = :Bureau
+                      ,[CnpjBureau] = :CnpjBureau
+                      ,[Intermediario] = :Intermediario
+                      ,[CnpjIntermediario] = :CnpjIntermediario
+                      ,[QuantidadePontos] = :QuantidadePontos
+                      ,[QuantidadeFaces] = :QuantidadeFaces
+                      ,[TotalFaturamentoBrutoMensal] = :TotalFaturamentoBrutoMensal
+                      ,[TotalPercentualPermuta] = :TotalPercentualPermuta
+                      ,[TotalCotaOportunidade] = :TotalCotaOportunidade
+                      ,[TotalValorPermuta] = :TotalValorPermuta
+                      ,[TotalFaturamentoLiquidoPermuta] = :TotalFaturamentoLiquidoPermuta
+                      ,[TotalBrutoContrato] = :TotalBrutoContrato
+                      ,[TotalLiquidoContratoAGBRCTACORDO] = :TotalLiquidoContratoAGBRCTACORDO
+                      ,[TotalLiquidoContratoAGBRVENDGERCOOR] = :TotalLiquidoContratoAGBRVENDGERCOOR
+                      ,[TotalPercentualAgencia] = :TotalPercentualAgencia
+                      ,[TotalValorMensalAgencia] = :TotalValorMensalAgencia
+                      ,[TotalPercentualBureau] = :TotalPercentualBureau
+                      ,[TotalValorBureauMensal] = :TotalValorBureauMensal
+                      ,[TotalPercentualCartaAcordo] = :TotalPercentualCartaAcordo
+                      ,[TotalValorCartaAcordoMensal] = :TotalValorCartaAcordoMensal
+                      ,[TotalValorOutrasComissoes] = :TotalValorOutrasComissoes
+                      ,[TotalFaturamentoLiquidoMensal] = :TotalFaturamentoLiquidoMensal
+                      ,[TotalPercentualComissaoVendedor] = :TotalPercentualComissaoVendedor
+                      ,[TotalValorVendedor] = :TotalValorVendedor
+                      ,[ValorVendedorTotal] = :ValorVendedorTotal
+                      ,[TotalPercentualComissaoCoordenacao] = :TotalPercentualComissaoCoordenacao
+                      ,[Observacao] = :Observacao
+                      ,[MotivoRejeicao] = :MotivoRejeicao
+                      ,[MotivoCancelamento] = :MotivoCancelamento
+                      ,[DataAtualizacao] = GETDATE()
+                 WHERE [IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
+            """)
+
+            db.session.execute(sql_update_cab, params_cab)
+
+            item_ids = request.form.getlist("item_id")
+
+            sql_update_item = text("""
+                UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
+                   SET [IDPainelEuromidia] = :IDPainelEuromidia
+                      ,[IDDimFacesPaineis] = :IDDimFacesPaineis
+                      ,[CodPonto] = :CodPonto
+                      ,[CodFace] = :CodFace
+                      ,[CidadeExibicao] = :CidadeExibicao
+                      ,[Tipo] = :Tipo
+                      ,[Cota] = :Cota
+                      ,[DataInicioPrevisto] = :DataInicioPrevisto
+                      ,[DataTerminoPrevisto] = :DataTerminoPrevisto
+                      ,[NumeroParcelas] = :NumeroParcelas
+                      ,[DataInicioVencimento] = :DataInicioVencimento
+                      ,[FaturamentoBrutoMensal] = :FaturamentoBrutoMensal
+                      ,[PercentualPermuta] = :PercentualPermuta
+                      ,[ValorPermuta] = :ValorPermuta
+                      ,[FaturamentoLiquidoPermuta] = :FaturamentoLiquidoPermuta
+                      ,[FaturamentoLiquidoMensal] = :FaturamentoLiquidoMensal
+                      ,[FaturamentoLiquidoFinalMensal] = :FaturamentoLiquidoFinalMensal
+                      ,[PercentualComissaoVendedor] = :PercentualComissaoVendedor
+                      ,[ValorVendedor] = :ValorVendedor
+                      ,[ValorVendedorTotal] = :ValorVendedorTotal
+                      ,[Status] = :Status
+                      ,[OBS] = :OBS
+                      ,[BitAtivo] = :BitAtivo
+                      ,[DataAtualizacao] = GETDATE()
+                      ,[IDDimUsuariosAtualizacao] = :IDDimUsuariosAtualizacao
+                 WHERE [IDFatoSolicitacaoContratoItemEuromidia] = :IDFatoSolicitacaoContratoItemEuromidia
+                   AND [IDFatoSolicitacaoContratoEuromidia] = :IDFatoSolicitacaoContratoEuromidia
+            """)
+
+            for item_id_raw in item_ids:
+                item_id = _int_ou_none(item_id_raw)
+                if item_id is None:
+                    continue
+
+                prefixo = f"item_{item_id}__"
+
+                cod_ponto = _texto_ou_none(request.form.get(f"{prefixo}CodPonto"))
+                cod_face = _texto_ou_none(request.form.get(f"{prefixo}CodFace"))
+
+                info_face = None
+                if cod_ponto and cod_face:
+                    info_face = _resolver_face_e_painel_por_codigos(cod_ponto, cod_face)
+                    if not info_face:
+                        raise ValueError(
+                            f"Não encontrei CodPonto/CodFace válidos para o item {item_id}: {cod_ponto} / {cod_face}."
+                        )
+
+                params_item = {
+                    "IDFatoSolicitacaoContratoItemEuromidia": item_id,
+                    "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
+                    "IDPainelEuromidia": info_face.get("IDDimPaineisEuromidia") if info_face else None,
+                    "IDDimFacesPaineis": info_face.get("IDDimFacesPaineis") if info_face else None,
+                    "CodPonto": cod_ponto,
+                    "CodFace": cod_face,
+                    "CidadeExibicao": _texto_ou_none(request.form.get(f"{prefixo}CidadeExibicao")),
+                    "Tipo": _texto_ou_none(request.form.get(f"{prefixo}Tipo")),
+                    "Cota": _decimal_ou_none(request.form.get(f"{prefixo}Cota")),
+                    "DataInicioPrevisto": _data_ou_none(request.form.get(f"{prefixo}DataInicioPrevisto")),
+                    "DataTerminoPrevisto": _data_ou_none(request.form.get(f"{prefixo}DataTerminoPrevisto")),
+                    "NumeroParcelas": _int_ou_none(request.form.get(f"{prefixo}NumeroParcelas")),
+                    "DataInicioVencimento": _data_ou_none(request.form.get(f"{prefixo}DataInicioVencimento")),
+                    "FaturamentoBrutoMensal": _decimal_ou_none(request.form.get(f"{prefixo}FaturamentoBrutoMensal")),
+                    "PercentualPermuta": _decimal_ou_none(request.form.get(f"{prefixo}PercentualPermuta")),
+                    "ValorPermuta": _decimal_ou_none(request.form.get(f"{prefixo}ValorPermuta")),
+                    "FaturamentoLiquidoPermuta": _decimal_ou_none(request.form.get(f"{prefixo}FaturamentoLiquidoPermuta")),
+                    "FaturamentoLiquidoMensal": _decimal_ou_none(request.form.get(f"{prefixo}FaturamentoLiquidoMensal")),
+                    "FaturamentoLiquidoFinalMensal": _decimal_ou_none(request.form.get(f"{prefixo}FaturamentoLiquidoFinalMensal")),
+                    "PercentualComissaoVendedor": _decimal_ou_none(request.form.get(f"{prefixo}PercentualComissaoVendedor")),
+                    "ValorVendedor": _decimal_ou_none(request.form.get(f"{prefixo}ValorVendedor")),
+                    "ValorVendedorTotal": _decimal_ou_none(request.form.get(f"{prefixo}ValorVendedorTotal")),
+                    "Status": _texto_ou_none(request.form.get(f"{prefixo}Status")),
+                    "OBS": _texto_ou_none(request.form.get(f"{prefixo}OBS")),
+                    "BitAtivo": 1 if request.form.get(f"{prefixo}BitAtivo") == "1" else 0,
+                    "IDDimUsuariosAtualizacao": id_usuario_logado,
+                }
+
+                db.session.execute(sql_update_item, params_item)
+
+            db.session.commit()
+            flash("Solicitação salva com sucesso.", "success")
+            return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Erro ao salvar a solicitação: {str(exc)}", "danger")
+
+    payload = _obter_solicitacao_contrato_detalhe(id_solicitacao)
+    if not payload:
+        abort(404)
+
+    return render_template(
+        "admin/aprovacao_contrato_detalhe.html",
+        solicitacao=payload["solicitacao"],
+        itens=payload["itens"],
     )

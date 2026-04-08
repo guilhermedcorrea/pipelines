@@ -34,10 +34,10 @@ ID_TAG_TIPO_CONTRATO_ADITIVO = 8
 ID_TAG_TIPO_CONTRATO_NOVO = 9
 
 TIPO_SOLICITACAO_ADITIVO = "ADITIVO"
-TIPO_SOLICITACAO_NOVO = "NOVO_CONTRATO"
+TIPO_SOLICITACAO_NOVO = "NOVO CONTRATO"
 
-VALOR_OPCAO_NOVO_CONTRATO = "NOVO_CONTRATO"
-VALOR_OPCAO_NOVO_PAINEL = "NOVO_PAINEL"
+VALOR_OPCAO_NOVO_CONTRATO = "NOVO CONTRATO"
+VALOR_OPCAO_NOVO_PAINEL = "NOVO PAINEL"
 ID_EMPRESA_PROPRIETARIA_CONTRATOS = 3
 
 
@@ -147,13 +147,7 @@ def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padra
 
 
 def _sql_filtro_cards_nao_concluidos_no_quadro(alias_card: str = "c") -> str:
-    """
-    Remove do quadro cards cuja fase atual seja final/concluída.
-
-    Regra:
-    - NomeFase = 'Concluido'
-    - ou TipoFase = 'SUCESSO'
-    """
+   
     return f"""
       AND NOT EXISTS (
             SELECT 1
@@ -668,6 +662,7 @@ def _sincronizar_tipo_contrato_card(
     id_usuario: int,
     id_empresa_proprietaria: int,
     tipo_contrato: str,
+    aplicar_tags: bool = True,
 ) -> dict[str, object]:
     """
     Regras:
@@ -717,7 +712,7 @@ def _sincronizar_tipo_contrato_card(
         ):
             tags_removidas.append(int(tag_oposta.get("IDDimKanbanTag") or 0))
 
-    if tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
+    if aplicar_tags and tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
         if _aplicar_tag_no_card(
             id_card=int(id_card),
             id_tag=int(tag_desejada.get("IDDimKanbanTag") or 0),
@@ -1201,6 +1196,7 @@ def _sincronizar_tipo_contrato_card(
     id_contrato_existente: int | None = None,
     cod_ponto_contrato: object = None,
     cod_face_contrato: object = None,
+    aplicar_tags: bool = True,
 ) -> dict[str, object]:
     """
     Regras:
@@ -1265,7 +1261,7 @@ def _sincronizar_tipo_contrato_card(
         ):
             tags_removidas.append(int(tag_oposta.get("IDDimKanbanTag") or 0))
 
-    if tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
+    if aplicar_tags and tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
         if _aplicar_tag_no_card(
             id_card=int(id_card),
             id_tag=int(tag_desejada.get("IDDimKanbanTag") or 0),
@@ -9661,6 +9657,15 @@ def api_card_mover(id_card: int):
                 id_fase=int(id_fase_para),
             )
 
+        tag_contrato_em_avaliacao_aplicada = False
+        if int(id_fase_para) == 4:
+            tag_contrato_em_avaliacao_aplicada = _aplicar_tag_no_card(
+                id_card=int(id_card),
+                id_tag=int(ID_TAG_CONTRATO_EM_AVALIACAO),
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+            )
+
         sincronizacao_solicitacao_fase = None
 
         try:
@@ -9669,6 +9674,8 @@ def api_card_mover(id_card: int):
                 id_usuario=int(id_usuario),
                 id_empresa_proprietaria=int(id_emp),
             )
+            if isinstance(sincronizacao_solicitacao_fase, dict):
+                sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
         except Exception as exc:
             raise RuntimeError(
                 f"Falha ao sincronizar a solicitação de contrato após mover o card: {str(exc)}"
@@ -16934,6 +16941,11 @@ def api_card_criar(id_kanban: int):
         if not novo_id:
             raise RuntimeError("O INSERT não retornou IDFatoKanbanCard.")
 
+        aplicar_tags_automaticas_tipo_contrato = not (
+            int(id_fase) == 1
+            and _normalizar_tipo_contrato_card(contexto_tipo_contrato["tipo_contrato"]) == TIPO_SOLICITACAO_NOVO
+        )
+
         sincronizacao_tipo = _sincronizar_tipo_contrato_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -16944,6 +16956,7 @@ def api_card_criar(id_kanban: int):
             id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
             cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
             cod_face_contrato=validacao_ponto_face.get("cod_face"),
+            aplicar_tags=aplicar_tags_automaticas_tipo_contrato,
         )
 
         snapshot_solicitacao = _sincronizar_snapshot_solicitacao_contrato_do_card(

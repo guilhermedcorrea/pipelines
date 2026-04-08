@@ -204,6 +204,7 @@ services:
         condition: service_healthy
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+      - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 
   nginx-flask:

@@ -1,0 +1,449 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Lista de Aprovação de Contratos | Euromídia{% endblock %}
+
+{% block content %}
+  <div class="card">
+
+    <style>
+      .hdr{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        justify-content:space-between;
+        flex-wrap:wrap;
+      }
+
+      .hdr-left{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      .count-pill{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        padding:6px 10px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:#fff;
+        font-weight:800;
+        color: var(--euro-blue);
+        user-select:none;
+        white-space:nowrap;
+      }
+
+      .filters{
+        margin-top:14px;
+        display:flex;
+        gap:10px;
+        align-items:flex-end;
+        flex-wrap:wrap;
+      }
+
+      .filters .field{
+        min-width:280px;
+        flex:1;
+      }
+
+      .btn-pill{
+        height:40px;
+        padding:0 14px;
+        border-radius:12px;
+        border:1px solid var(--border);
+        background:#fff;
+        font-weight:900;
+        color:#0b1a3a;
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        text-decoration:none;
+        cursor:pointer;
+        user-select:none;
+        box-shadow:0 8px 18px rgba(2,6,23,.06);
+        transition:.12s ease;
+      }
+
+      .btn-pill:hover{
+        transform:translateY(-1px);
+      }
+
+      .btn-pill.danger{
+        border-color:rgba(239,68,68,.35);
+        background:rgba(239,68,68,.08);
+        color:#991b1b;
+      }
+
+      .list-wrap{
+        margin-top:14px;
+        border:1px solid var(--border);
+        border-radius:14px;
+        overflow:hidden;
+        background:#fff;
+      }
+
+      .list-head{
+        display:grid;
+        grid-template-columns:86px 170px 170px 180px 1fr 170px;
+        gap:0;
+        padding:12px 14px;
+        border-bottom:1px solid var(--border);
+        background:rgba(0,40,132,.03);
+        font-weight:900;
+        color:var(--euro-blue);
+        align-items:center;
+      }
+
+      .row{
+        display:grid;
+        grid-template-columns:86px 170px 170px 180px 1fr 170px;
+        gap:0;
+        padding:14px 14px;
+        border-bottom:1px solid var(--border);
+        align-items:center;
+        background:#fff;
+        cursor:pointer;
+      }
+
+      .row:hover{
+        background:rgba(0,40,132,.04);
+      }
+
+      .row:last-child{
+        border-bottom:0;
+      }
+
+      .logo-box{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .logo-empresa{
+        width:44px;
+        height:44px;
+        object-fit:contain;
+        border-radius:10px;
+        border:1px solid var(--border);
+        background:#fff;
+        padding:4px;
+        box-shadow:0 6px 14px rgba(2,6,23,.05);
+      }
+
+      .logo-fallback{
+        width:44px;
+        height:44px;
+        border-radius:10px;
+        border:1px solid var(--border);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:rgba(0,40,132,.04);
+        color:var(--euro-blue);
+        font-weight:900;
+        font-size:12px;
+        user-select:none;
+      }
+
+      .logo-fallback.hidden{
+        display:none;
+      }
+
+      .id-pill{
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 12px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:#fff;
+        font-weight:900;
+        font-size:13px;
+        line-height:1;
+        white-space:nowrap;
+        user-select:none;
+      }
+
+      .id-pill .dot{
+        width:9px;
+        height:9px;
+        border-radius:999px;
+        background:rgba(0,40,132,.45);
+        box-shadow:0 0 0 2px rgba(255,255,255,.9);
+      }
+
+      .ellipsis{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .razao-social-wrap{
+        min-width:0;
+      }
+
+      .razao-social-nome{
+        font-weight:900;
+        color:var(--text);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .razao-social-cnpj{
+        font-size:12px;
+        color:var(--muted);
+        font-weight:800;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .data-col{
+        font-weight:900;
+        color:var(--text);
+      }
+
+      .tipo-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:34px;
+        padding:6px 12px;
+        border-radius:999px;
+        border:1px solid rgba(0,40,132,.15);
+        background:rgba(0,40,132,.06);
+        color:var(--euro-blue);
+        font-weight:900;
+        white-space:nowrap;
+        max-width:100%;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .tipo-badge.tipo-vazio{
+        border-color:rgba(100,116,139,.18);
+        background:rgba(100,116,139,.08);
+        color:#475569;
+      }
+
+      .pager{
+        padding:12px 14px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      @media (max-width: 1240px){
+        .list-head,
+        .row{
+          grid-template-columns:86px 170px 170px 1fr 170px;
+        }
+
+        .hide-xl{
+          display:none;
+        }
+      }
+
+      @media (max-width: 980px){
+        .list-head,
+        .row{
+          grid-template-columns:86px 170px 1fr 170px;
+        }
+
+        .hide-lg{
+          display:none;
+        }
+      }
+
+      @media (max-width: 760px){
+        .filters .field{
+          min-width:100%;
+        }
+
+        .list-head,
+        .row{
+          grid-template-columns:72px 1fr 140px;
+        }
+
+        .hide-md{
+          display:none;
+        }
+
+        .logo-empresa,
+        .logo-fallback{
+          width:38px;
+          height:38px;
+        }
+      }
+    </style>
+
+    <div class="hdr">
+      <div class="hdr-left">
+        <h1 class="page-title" style="margin:0;">Lista de Aprovação de Contratos</h1>
+        <span class="count-pill">☰ {{ paginacao.total if paginacao.total is not none else paginacao.fim }}</span>
+      </div>
+    </div>
+
+    <form method="GET" action="{{ url_for('admin.lista_aprovacao_contratos') }}">
+      <div class="filters">
+        <div class="field">
+          <label>Buscar</label>
+          <input
+            name="q"
+            type="text"
+            value="{{ filtros.q }}"
+            placeholder="ID, CNPJ, razão social, usuário criador, tipo de solicitação..."
+            autocomplete="off"
+          >
+        </div>
+
+        <input type="hidden" name="per_page" value="{{ filtros.per_page }}">
+
+        <button class="btn btn-primary" type="submit" style="height:40px;display:inline-flex;align-items:center;gap:8px;">
+          ⛭ Filtrar
+        </button>
+
+        <a
+          class="btn-pill danger"
+          href="{{ url_for('admin.lista_aprovacao_contratos', per_page=filtros.per_page) }}"
+          title="Limpa busca e volta para a lista completa">
+          ⌁ Limpar
+        </a>
+      </div>
+    </form>
+
+    <div class="list-wrap">
+      <div class="list-head">
+        <div>Logo</div>
+        <div>IDSolicitação</div>
+        <div class="hide-md">Envio Avaliação</div>
+        <div class="hide-lg">Criado por</div>
+        <div>Razão Social</div>
+        <div class="hide-xl">Tipo Solicitação</div>
+      </div>
+
+      {% if itens and itens|length > 0 %}
+        {% for item in itens %}
+          {% set logo_url = item.LogoEmpresaProprietaria %}
+          <div class="row"
+               onclick="window.location.href='{{ item.url_detalhe }}'"
+               title="Clique para abrir a solicitação">
+            <div class="logo-box">
+              {% if logo_url %}
+                <img
+                  src="{{ logo_url }}"
+                  alt="Logo da empresa proprietária"
+                  class="logo-empresa"
+                  loading="lazy"
+                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                >
+                <div class="logo-fallback hidden">LOGO</div>
+              {% else %}
+                <div class="logo-fallback">LOGO</div>
+              {% endif %}
+            </div>
+
+            <div>
+              <span class="id-pill">
+                <span class="dot"></span>
+                #{{ item.IDFatoSolicitacaoContratoEuromidia }}
+              </span>
+            </div>
+
+            <div class="data-col hide-md">
+              {% if item.DataEnvioAvaliacao %}
+                {{ item.DataEnvioAvaliacao.strftime("%d/%m/%Y %H:%M") if item.DataEnvioAvaliacao.strftime else item.DataEnvioAvaliacao }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+
+            <div class="ellipsis hide-lg">
+              {{ item.NomeUsuarioCriacao or "—" }}
+            </div>
+
+            <div class="razao-social-wrap">
+              <div class="razao-social-nome">
+                {{ item.RazaoSocialEmpresa or "—" }}
+              </div>
+              <div class="razao-social-cnpj">
+                {{ item.CNPJ or "—" }}
+              </div>
+            </div>
+
+            <div class="ellipsis hide-xl">
+              <span class="tipo-badge {{ 'tipo-vazio' if not item.TipoSolicitacao or item.TipoSolicitacao == '—' else '' }}">
+                {{ item.TipoSolicitacao or "—" }}
+              </span>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div style="padding:14px;" class="muted">
+          Nenhuma solicitação encontrada.
+        </div>
+      {% endif %}
+
+      <div class="pager">
+        <div class="muted" style="font-weight:800;">
+          Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total if paginacao.total is not none else "muitos" }}
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;">
+          {% set p = paginacao.page %}
+          {% set tp = paginacao.total_pages %}
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_aprovacao_contratos',
+                              page=1,
+                              per_page=filtros.per_page,
+                              q=filtros.q) }}">
+            «
+          </a>
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_aprovacao_contratos',
+                              page=(p-1 if p>1 else 1),
+                              per_page=filtros.per_page,
+                              q=filtros.q) }}">
+            ‹
+          </a>
+
+          <span style="font-weight:900;color:var(--text);padding:0 10px;">
+            {{ p }} / {{ tp }}
+          </span>
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_aprovacao_contratos',
+                              page=(p+1 if p<tp else tp),
+                              per_page=filtros.per_page,
+                              q=filtros.q) }}">
+            ›
+          </a>
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('admin.lista_aprovacao_contratos',
+                              page=tp,
+                              per_page=filtros.per_page,
+                              q=filtros.q) }}">
+            »
+          </a>
+        </div>
+
+        <div class="muted" style="display:flex;align-items:center;gap:10px;font-weight:900;">
+          <span>{{ filtros.per_page }} por página</span>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

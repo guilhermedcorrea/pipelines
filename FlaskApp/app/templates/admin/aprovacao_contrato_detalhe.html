@@ -1,0 +1,806 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Solicitação de Contrato #{{ solicitacao.IDFatoSolicitacaoContratoEuromidia }} | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+  <style>
+    .page-wrap{
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:16px;
+      flex-wrap:wrap;
+    }
+
+    .topbar-left{
+      display:flex;
+      align-items:center;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .logo-box{
+      width:64px;
+      height:64px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      box-shadow:0 6px 14px rgba(2,6,23,.05);
+    }
+
+    .logo-box img{
+      width:100%;
+      height:100%;
+      object-fit:contain;
+      padding:6px;
+    }
+
+    .logo-fallback{
+      color:var(--euro-blue);
+      font-weight:900;
+      font-size:12px;
+    }
+
+    .titulo-wrap{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+
+    .titulo-principal{
+      margin:0;
+      color:var(--euro-blue);
+      font-weight:900;
+      font-size:28px;
+      line-height:1.1;
+    }
+
+    .subtitulo{
+      color:var(--muted);
+      font-weight:800;
+      font-size:13px;
+    }
+
+    .badges{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:36px;
+      padding:6px 12px;
+      border-radius:999px;
+      border:1px solid rgba(0,40,132,.15);
+      background:rgba(0,40,132,.06);
+      color:var(--euro-blue);
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .badge.warn{
+      border-color:rgba(234,179,8,.28);
+      background:rgba(234,179,8,.10);
+      color:#8a5a00;
+    }
+
+    .badge.neutral{
+      border-color:rgba(100,116,139,.20);
+      background:rgba(100,116,139,.08);
+      color:#475569;
+    }
+
+    .actions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .btn-x{
+      height:42px;
+      padding:0 16px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:#fff;
+      font-weight:900;
+      color:#0b1a3a;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      text-decoration:none;
+      cursor:pointer;
+      box-shadow:0 8px 18px rgba(2,6,23,.06);
+    }
+
+    .btn-x.primary{
+      background:#ffbf00;
+      border-color:#ffbf00;
+      color:#111827;
+    }
+
+    .btn-x.success{
+      background:#e9f9ef;
+      border-color:#b7e4c7;
+      color:#166534;
+    }
+
+    .btn-x.danger{
+      background:#fff1f2;
+      border-color:#fecdd3;
+      color:#be123c;
+    }
+
+    .section{
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+      overflow:hidden;
+    }
+
+    .section-head{
+      padding:14px 16px;
+      border-bottom:1px solid var(--border);
+      background:rgba(0,40,132,.03);
+      color:var(--euro-blue);
+      font-weight:900;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .section-body{
+      padding:16px;
+    }
+
+    .hint{
+      padding:12px 14px;
+      border-radius:14px;
+      background:#f8fafc;
+      border:1px solid #e2e8f0;
+      color:#334155;
+      font-weight:700;
+      line-height:1.5;
+    }
+
+    .grid-2{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:14px;
+    }
+
+    .grid-3{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:14px;
+    }
+
+    .grid-4{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:14px;
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+    }
+
+    .field label{
+      font-size:12px;
+      font-weight:900;
+      color:#475569;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+
+    .field input,
+    .field select,
+    .field textarea{
+      width:100%;
+      min-height:42px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      padding:10px 12px;
+      color:#0f172a;
+      font-weight:700;
+      outline:none;
+    }
+
+    .field textarea{
+      min-height:110px;
+      resize:vertical;
+    }
+
+    .field input[readonly]{
+      background:#f8fafc;
+      color:#475569;
+    }
+
+    .item-card{
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+      overflow:hidden;
+    }
+
+    .item-head{
+      padding:14px 16px;
+      border-bottom:1px solid var(--border);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      background:#fcfdff;
+    }
+
+    .item-title{
+      font-weight:900;
+      color:var(--euro-blue);
+      font-size:18px;
+      margin:0;
+    }
+
+    .item-meta{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .item-body{
+      padding:16px;
+      display:flex;
+      flex-direction:column;
+      gap:16px;
+    }
+
+    .painel-resumo{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0, 1fr));
+      gap:12px;
+      padding:12px;
+      border:1px dashed #cbd5e1;
+      border-radius:14px;
+      background:#f8fafc;
+    }
+
+    .painel-box{
+      min-width:0;
+    }
+
+    .painel-box .k{
+      font-size:11px;
+      text-transform:uppercase;
+      color:#64748b;
+      font-weight:900;
+      letter-spacing:.04em;
+      margin-bottom:4px;
+    }
+
+    .painel-box .v{
+      font-size:14px;
+      color:#0f172a;
+      font-weight:900;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .sticky-actions{
+      position:sticky;
+      bottom:12px;
+      z-index:5;
+      padding-top:8px;
+    }
+
+    .sticky-actions .bar{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:12px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:rgba(255,255,255,.96);
+      backdrop-filter:blur(8px);
+      box-shadow:0 14px 28px rgba(2,6,23,.10);
+    }
+
+    @media (max-width: 1200px){
+      .grid-4{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .painel-resumo{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 900px){
+      .grid-3{ grid-template-columns:1fr; }
+      .grid-2{ grid-template-columns:1fr; }
+    }
+
+    @media (max-width: 700px){
+      .painel-resumo{ grid-template-columns:1fr; }
+      .topbar{ flex-direction:column; }
+      .actions{ width:100%; }
+      .actions .btn-x{ flex:1; }
+    }
+  </style>
+
+  <form method="POST" class="page-wrap">
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="logo-box">
+          {% if solicitacao.LogoEmpresaProprietariaUrl %}
+            <img src="{{ solicitacao.LogoEmpresaProprietariaUrl }}" alt="Logo empresa">
+          {% else %}
+            <div class="logo-fallback">LOGO</div>
+          {% endif %}
+        </div>
+
+        <div class="titulo-wrap">
+          <h1 class="titulo-principal">
+            Solicitação #{{ solicitacao.IDFatoSolicitacaoContratoEuromidia }}
+          </h1>
+          <div class="subtitulo">
+            Empresa: {{ solicitacao.RazaoSocialEmpresa or solicitacao.RazaoSocial or "—" }}
+            {% if solicitacao.CNPJ %} • CNPJ {{ solicitacao.CNPJ }}{% endif %}
+          </div>
+
+          <div class="badges">
+            <span class="badge">{{ solicitacao.TipoSolicitacaoExibicao }}</span>
+            <span class="badge neutral">Card #{{ solicitacao.IDFatoKanbanCard }}</span>
+            <span class="badge neutral">Contrato #{{ solicitacao.IDFatoControleContratosEuromidia or "—" }}</span>
+            <span class="badge warn">Criado por {{ solicitacao.NomeUsuarioCriacao or "—" }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a class="btn-x" href="{{ url_for('admin.lista_aprovacao_contratos') }}">← Voltar</a>
+        <button type="submit" class="btn-x primary">💾 Salvar</button>
+        <button type="button" class="btn-x success">✔ Aprovar</button>
+        <button type="button" class="btn-x danger">✖ Reprovar</button>
+      </div>
+    </div>
+
+    <div class="hint">
+      Esta tela é para revisar claramente o que está sendo solicitado e, se necessário, corrigir antes de aprovar.
+      Apos Clicar em Salvar As alterações são salvas e somente após clicar em Aprovar as alterações são atualizadas diretamente na tabela
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span>Dados gerais da solicitação</span>
+      </div>
+      <div class="section-body">
+        <div class="grid-4">
+          <div class="field">
+            <label>ID Solicitação</label>
+            <input type="text" value="{{ solicitacao.IDFatoSolicitacaoContratoEuromidia }}" readonly>
+          </div>
+          <div class="field">
+            <label>ID Kanban Card</label>
+            <input type="text" value="{{ solicitacao.IDFatoKanbanCard }}" readonly>
+          </div>
+          <div class="field">
+            <label>ID Contrato</label>
+            <input type="text" value="{{ solicitacao.IDFatoControleContratosEuromidia or '' }}" readonly>
+          </div>
+          <div class="field">
+            <label>Data Envio Avaliação</label>
+            <input type="text" value="{{ solicitacao.DataEnvioAvaliacao.strftime('%d/%m/%Y %H:%M') if solicitacao.DataEnvioAvaliacao and solicitacao.DataEnvioAvaliacao.strftime else solicitacao.DataEnvioAvaliacao or '' }}" readonly>
+          </div>
+        </div>
+
+        <div class="grid-4" style="margin-top:14px;">
+          <div class="field">
+            <label>Tipo Solicitação</label>
+            <select name="TipoSolicitacao">
+              <option value="ADITIVO" {{ 'selected' if solicitacao.TipoSolicitacaoExibicao == 'ADITIVO' else '' }}>ADITIVO</option>
+              <option value="NOVO CONTRATO" {{ 'selected' if solicitacao.TipoSolicitacaoExibicao == 'NOVO CONTRATO' else '' }}>NOVO CONTRATO</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Referência</label>
+            <input type="text" name="Referencia" value="{{ solicitacao.Referencia or '' }}">
+          </div>
+          <div class="field">
+            <label>Número Contrato</label>
+            <input type="text" name="NumeroContrato" value="{{ solicitacao.NumeroContrato or '' }}">
+          </div>
+          <div class="field">
+            <label>Número Prévia</label>
+            <input type="text" name="NumeroPrevia" value="{{ solicitacao.NumeroPrevia or '' }}">
+          </div>
+
+          <div class="field">
+            <label>CNPJ</label>
+            <input type="text" name="CNPJ" value="{{ solicitacao.CNPJ or '' }}">
+          </div>
+          <div class="field">
+            <label>Data Assinatura/Renovação</label>
+            <input type="date" name="DataAssinaturaRenovacao" value="{{ solicitacao.DataAssinaturaRenovacaoInput or '' }}">
+          </div>
+          <div class="field">
+            <label>Trimestre</label>
+            <input type="text" name="IDTrimestre" value="{{ solicitacao.IDTrimestre or '' }}">
+          </div>
+          <div class="field">
+            <label>Data Lançamento</label>
+            <input type="date" name="DataLancamento" value="{{ solicitacao.DataLancamentoInput or '' }}">
+          </div>
+
+          <div class="field">
+            <label>Razão Social</label>
+            <input type="text" name="RazaoSocial" value="{{ solicitacao.RazaoSocial or '' }}">
+          </div>
+          <div class="field">
+            <label>CPF</label>
+            <input type="text" name="CPF" value="{{ solicitacao.CPF or '' }}">
+          </div>
+          <div class="field">
+            <label>Marca Exibida</label>
+            <input type="text" name="MarcaExibida" value="{{ solicitacao.MarcaExibida or '' }}">
+          </div>
+          <div class="field">
+            <label>Vendedor</label>
+            <input type="text" name="Vendedor" value="{{ solicitacao.Vendedor or '' }}">
+          </div>
+
+          <div class="field">
+            <label>Tipo Documento</label>
+            <input type="text" name="TipoDocumento" value="{{ solicitacao.TipoDocumento or '' }}">
+          </div>
+          <div class="field">
+            <label>Origem</label>
+            <input type="text" name="Origem" value="{{ solicitacao.Origem or '' }}">
+          </div>
+          <div class="field">
+            <label>SDR</label>
+            <input type="text" name="SDR" value="{{ solicitacao.SDR or '' }}">
+          </div>
+          <div class="field">
+            <label>Agência</label>
+            <input type="text" name="Agencia" value="{{ solicitacao.Agencia or '' }}">
+          </div>
+
+          <div class="field">
+            <label>CNPJ Agência</label>
+            <input type="text" name="CnpjAgencia" value="{{ solicitacao.CnpjAgencia or '' }}">
+          </div>
+          <div class="field">
+            <label>Bureau</label>
+            <input type="text" name="Bureau" value="{{ solicitacao.Bureau or '' }}">
+          </div>
+          <div class="field">
+            <label>CNPJ Bureau</label>
+            <input type="text" name="CnpjBureau" value="{{ solicitacao.CnpjBureau or '' }}">
+          </div>
+          <div class="field">
+            <label>Intermediário</label>
+            <input type="text" name="Intermediario" value="{{ solicitacao.Intermediario or '' }}">
+          </div>
+
+          <div class="field">
+            <label>CNPJ Intermediário</label>
+            <input type="text" name="CnpjIntermediario" value="{{ solicitacao.CnpjIntermediario or '' }}">
+          </div>
+          <div class="field">
+            <label>Quantidade Pontos</label>
+            <input type="number" name="QuantidadePontos" value="{{ solicitacao.QuantidadePontos or '' }}">
+          </div>
+          <div class="field">
+            <label>Quantidade Faces</label>
+            <input type="number" name="QuantidadeFaces" value="{{ solicitacao.QuantidadeFaces or '' }}">
+          </div>
+          <div class="field">
+            <label>Empresa Proprietária</label>
+            <input type="text" value="{{ solicitacao.RazaoSocialEmpresaProprietaria or '' }}" readonly>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-top:14px;">
+          <div class="field">
+            <label>Observação</label>
+            <textarea name="Observacao">{{ solicitacao.Observacao or '' }}</textarea>
+          </div>
+          <div class="field">
+            <label>Motivo Rejeição / Cancelamento</label>
+            <textarea name="MotivoRejeicao">{{ solicitacao.MotivoRejeicao or '' }}</textarea>
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:14px;">
+          <label>Motivo Cancelamento</label>
+          <textarea name="MotivoCancelamento">{{ solicitacao.MotivoCancelamento or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span>Resumo financeiro da solicitação</span>
+      </div>
+      <div class="section-body">
+        <div class="grid-4">
+          <div class="field">
+            <label>Total Faturamento Bruto Mensal</label>
+            <input type="text" name="TotalFaturamentoBrutoMensal" value="{{ solicitacao.TotalFaturamentoBrutoMensal or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Percentual Permuta</label>
+            <input type="text" name="TotalPercentualPermuta" value="{{ solicitacao.TotalPercentualPermuta or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Cota Oportunidade</label>
+            <input type="text" name="TotalCotaOportunidade" value="{{ solicitacao.TotalCotaOportunidade or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Valor Permuta</label>
+            <input type="text" name="TotalValorPermuta" value="{{ solicitacao.TotalValorPermuta or '' }}">
+          </div>
+
+          <div class="field">
+            <label>Total Faturamento Líquido Permuta</label>
+            <input type="text" name="TotalFaturamentoLiquidoPermuta" value="{{ solicitacao.TotalFaturamentoLiquidoPermuta or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Bruto Contrato</label>
+            <input type="text" name="TotalBrutoContrato" value="{{ solicitacao.TotalBrutoContrato or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Líquido AGBR CTA Acordo</label>
+            <input type="text" name="TotalLiquidoContratoAGBRCTACORDO" value="{{ solicitacao.TotalLiquidoContratoAGBRCTACORDO or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Líquido AGBR Vend/Ger/Coor</label>
+            <input type="text" name="TotalLiquidoContratoAGBRVENDGERCOOR" value="{{ solicitacao.TotalLiquidoContratoAGBRVENDGERCOOR or '' }}">
+          </div>
+
+          <div class="field">
+            <label>Total Percentual Agência</label>
+            <input type="text" name="TotalPercentualAgencia" value="{{ solicitacao.TotalPercentualAgencia or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Valor Mensal Agência</label>
+            <input type="text" name="TotalValorMensalAgencia" value="{{ solicitacao.TotalValorMensalAgencia or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Percentual Bureau</label>
+            <input type="text" name="TotalPercentualBureau" value="{{ solicitacao.TotalPercentualBureau or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Valor Bureau Mensal</label>
+            <input type="text" name="TotalValorBureauMensal" value="{{ solicitacao.TotalValorBureauMensal or '' }}">
+          </div>
+
+          <div class="field">
+            <label>Total Percentual Carta Acordo</label>
+            <input type="text" name="TotalPercentualCartaAcordo" value="{{ solicitacao.TotalPercentualCartaAcordo or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Valor Carta Acordo Mensal</label>
+            <input type="text" name="TotalValorCartaAcordoMensal" value="{{ solicitacao.TotalValorCartaAcordoMensal or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Valor Outras Comissões</label>
+            <input type="text" name="TotalValorOutrasComissoes" value="{{ solicitacao.TotalValorOutrasComissoes or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Faturamento Líquido Mensal</label>
+            <input type="text" name="TotalFaturamentoLiquidoMensal" value="{{ solicitacao.TotalFaturamentoLiquidoMensal or '' }}">
+          </div>
+
+          <div class="field">
+            <label>Total Percentual Comissão Vendedor</label>
+            <input type="text" name="TotalPercentualComissaoVendedor" value="{{ solicitacao.TotalPercentualComissaoVendedor or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Valor Vendedor</label>
+            <input type="text" name="TotalValorVendedor" value="{{ solicitacao.TotalValorVendedor or '' }}">
+          </div>
+          <div class="field">
+            <label>Valor Vendedor Total</label>
+            <input type="text" name="ValorVendedorTotal" value="{{ solicitacao.ValorVendedorTotal or '' }}">
+          </div>
+          <div class="field">
+            <label>Total Percentual Comissão Coordenação</label>
+            <input type="text" name="TotalPercentualComissaoCoordenacao" value="{{ solicitacao.TotalPercentualComissaoCoordenacao or '' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <span>Itens da solicitação</span>
+        <span>{{ itens|length }} item(ns)</span>
+      </div>
+
+      <div class="section-body" style="display:flex;flex-direction:column;gap:16px;">
+        {% if itens and itens|length > 0 %}
+          {% for item in itens %}
+            <input type="hidden" name="item_id" value="{{ item.IDFatoSolicitacaoContratoItemEuromidia }}">
+
+            <div class="item-card">
+              <div class="item-head">
+                <div>
+                  <h3 class="item-title">
+                    Item #{{ item.IDFatoSolicitacaoContratoItemEuromidia }}
+                  </h3>
+                  <div class="subtitulo">
+                    Solicitação #{{ item.IDFatoSolicitacaoContratoEuromidia }} • ContratoItem #{{ item.IDFatoControleContratosItensEuromidia or "—" }}
+                  </div>
+                </div>
+
+                <div class="item-meta">
+                  <span class="badge neutral">CodPonto {{ item.CodPonto or "—" }}</span>
+                  <span class="badge neutral">CodFace {{ item.CodFace or "—" }}</span>
+                  <span class="badge">{{ item.Status or "SEM STATUS" }}</span>
+                </div>
+              </div>
+
+              <div class="item-body">
+                <div class="hint">
+                  Este bloco representa a alteração/adição do item no contrato.
+                  A área abaixo mostra o que está amarrado hoje no cadastro de painel/face para facilitar a conferência
+                  antes de salvar.
+                </div>
+
+                <div class="painel-resumo">
+                  <div class="painel-box">
+                    <div class="k">Face cadastrada</div>
+                    <div class="v">{{ item.FaceDescricaoCadastro or "—" }}</div>
+                  </div>
+                  <div class="painel-box">
+                    <div class="k">Tipo painel cadastro</div>
+                    <div class="v">{{ item.TipoPainelCadastro or item.TipoFaceCadastro or "—" }}</div>
+                  </div>
+                  <div class="painel-box">
+                    <div class="k">Cidade/UF cadastro</div>
+                    <div class="v">{{ item.CidadePainelCadastro or "—" }}{% if item.UFPainelCadastro %}/{{ item.UFPainelCadastro }}{% endif %}</div>
+                  </div>
+                  <div class="painel-box">
+                    <div class="k">Local referência</div>
+                    <div class="v">{{ item.LogradouroPainelCadastro or item.BairroPainelCadastro or item.ReferenciaPainelCadastro or "—" }}</div>
+                  </div>
+                </div>
+
+                <div class="grid-4">
+                  <div class="field">
+                    <label>CodPonto</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__CodPonto" value="{{ item.CodPonto or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>CodFace</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__CodFace" value="{{ item.CodFace or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Cidade Exibição</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__CidadeExibicao" value="{{ item.CidadeExibicao or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Tipo</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Tipo" value="{{ item.Tipo or '' }}">
+                  </div>
+
+                  <div class="field">
+                    <label>Cota</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Cota" value="{{ item.Cota or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Data Início Previsto</label>
+                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DataInicioPrevisto" value="{{ item.DataInicioPrevistoInput or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Data Término Previsto</label>
+                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DataTerminoPrevisto" value="{{ item.DataTerminoPrevistoInput or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Número Parcelas</label>
+                    <input type="number" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__NumeroParcelas" value="{{ item.NumeroParcelas or '' }}">
+                  </div>
+
+                  <div class="field">
+                    <label>Data Início Vencimento</label>
+                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DataInicioVencimento" value="{{ item.DataInicioVencimentoInput or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Faturamento Bruto Mensal</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoBrutoMensal" value="{{ item.FaturamentoBrutoMensal or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Percentual Permuta</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__PercentualPermuta" value="{{ item.PercentualPermuta or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Valor Permuta</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__ValorPermuta" value="{{ item.ValorPermuta or '' }}">
+                  </div>
+
+                  <div class="field">
+                    <label>Fat. Líquido Permuta</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoLiquidoPermuta" value="{{ item.FaturamentoLiquidoPermuta or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Fat. Líquido Mensal</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoLiquidoMensal" value="{{ item.FaturamentoLiquidoMensal or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Fat. Líquido Final Mensal</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoLiquidoFinalMensal" value="{{ item.FaturamentoLiquidoFinalMensal or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>% Comissão Vendedor</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__PercentualComissaoVendedor" value="{{ item.PercentualComissaoVendedor or '' }}">
+                  </div>
+
+                  <div class="field">
+                    <label>Valor Vendedor</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__ValorVendedor" value="{{ item.ValorVendedor or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Valor Vendedor Total</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__ValorVendedorTotal" value="{{ item.ValorVendedorTotal or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Status</label>
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Status" value="{{ item.Status or '' }}">
+                  </div>
+                  <div class="field">
+                    <label>Ativo</label>
+                    <select name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__BitAtivo">
+                      <option value="1" {{ 'selected' if item.BitAtivo else '' }}>1 - Ativo</option>
+                      <option value="0" {{ 'selected' if not item.BitAtivo else '' }}>0 - Inativo</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label>Observação do Item</label>
+                  <textarea name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__OBS">{{ item.OBS or '' }}</textarea>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="hint">
+            Esta solicitação não possui itens vinculados.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="sticky-actions">
+      <div class="bar">
+        <a class="btn-x" href="{{ url_for('admin.lista_aprovacao_contratos') }}">← Voltar</a>
+        <button type="submit" class="btn-x primary">💾 Salvar</button>
+        <button type="button" class="btn-x success">✔ Aprovar</button>
+        <button type="button" class="btn-x danger">✖ Reprovar</button>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}
