@@ -15,9 +15,6 @@ admin = Blueprint("admin", __name__)
 
 
 
-
-
-
 def _parse_date_br(s: str) -> date | None:
     if not s:
         return None

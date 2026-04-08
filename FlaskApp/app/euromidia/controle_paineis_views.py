@@ -40,7 +40,7 @@ from ..autenticacao.acl_menu_paineis import pode_acessar_menu_paineis, requer_it
 
 paineis_bp = Blueprint("Paineis", __name__)
 
-
+ID_TAG_CHECKING_CONFIRMADO_KANBAN = 12
 
 @paineis_bp.app_context_processor
 def injetar_acl_menu_paineis():
@@ -14403,6 +14403,276 @@ def checking_empresas_buscar():
 
 
 
+
+
+
+def _obter_id_usuario_logado_para_checking() -> int | None:
+    candidatos = [
+        getattr(current_user, "IDDimUsuarios", None),
+        getattr(current_user, "id", None),
+    ]
+
+    for valor in candidatos:
+        try:
+            valor_int = int(valor)
+            if valor_int > 0:
+                return valor_int
+        except Exception:
+            pass
+
+    if hasattr(current_user, "get_id"):
+        try:
+            valor_int = int(current_user.get_id())
+            if valor_int > 0:
+                return valor_int
+        except Exception:
+            pass
+
+    return None
+
+
+def _obter_id_empresa_proprietaria_logada_para_checking() -> int | None:
+    candidatos = [
+        getattr(current_user, "IDEmpresaProprietaria", None),
+        getattr(current_user, "id_empresa_proprietaria", None),
+    ]
+
+    for valor in candidatos:
+        try:
+            valor_int = int(valor)
+            if valor_int > 0:
+                return valor_int
+        except Exception:
+            pass
+
+    return None
+
+
+
+
+
+
+def _aplicar_tag_checking_confirmado_no_card_se_precisar(
+    *,
+    id_card: int,
+    id_tag: int,
+    id_usuario: int | None,
+    id_empresa_proprietaria: int | None = None,
+) -> bool:
+    if not id_card:
+        raise RuntimeError("ID do card não informado para aplicar a tag do checking.")
+
+    if not id_tag:
+        raise RuntimeError("ID da tag não informado para aplicar no card.")
+
+    tabela = "[Kanban].[Silver].[FatoKanbanCardTag]"
+    condicao_tag_ativa = _obter_condicao_sql_tag_ativa_checking_confirmado()
+
+    sql_tag_existente = text(f"""
+        SELECT TOP (1)
+            1 AS Existe
+        FROM {tabela} ct
+        WHERE
+            ct.IDFatoKanbanCard = :id_card
+            AND ct.IDDimKanbanTag = :id_tag
+            AND {condicao_tag_ativa}
+    """)
+
+    tag_ja_existe = db.session.execute(
+        sql_tag_existente,
+        {
+            "id_card": int(id_card),
+            "id_tag": int(id_tag),
+        },
+    ).mappings().first()
+
+    if tag_ja_existe:
+        return False
+
+    colunas = [
+        "IDFatoKanbanCard",
+        "IDDimKanbanTag",
+        "AplicadoEm",
+    ]
+    valores = [
+        ":id_card",
+        ":id_tag",
+        "GETDATE()",
+    ]
+    params = {
+        "id_card": int(id_card),
+        "id_tag": int(id_tag),
+    }
+
+    if _coluna_existe(tabela, "IDUsuario"):
+        colunas.append("IDUsuario")
+        valores.append(":id_usuario")
+        params["id_usuario"] = int(id_usuario) if id_usuario not in (None, "", 0) else None
+    elif _coluna_existe(tabela, "AplicadoPor"):
+        colunas.append("AplicadoPor")
+        valores.append(":id_usuario")
+        params["id_usuario"] = int(id_usuario) if id_usuario not in (None, "", 0) else None
+
+    if _coluna_existe(tabela, "IDEmpresaProprietaria"):
+        colunas.append("IDEmpresaProprietaria")
+        valores.append(":id_empresa_proprietaria")
+        params["id_empresa_proprietaria"] = (
+            int(id_empresa_proprietaria)
+            if id_empresa_proprietaria not in (None, "", 0)
+            else None
+        )
+
+    sql_insert = text(f"""
+        INSERT INTO {tabela}
+        ({", ".join(colunas)})
+        VALUES
+        ({", ".join(valores)})
+    """)
+
+    db.session.execute(sql_insert, params)
+    return True
+
+
+
+
+
+
+
+def _obter_card_vinculado_item_contrato_checking(
+    *,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+) -> dict[str, int | None] | None:
+    cod_ponto_txt = _somente_digitos(cod_ponto)
+    cod_face_txt = _normalizar_texto_checking(cod_face).upper()
+
+    if not id_fato_controle_contratos:
+        return None
+
+    if not cod_ponto_txt:
+        return None
+
+    if not cod_face_txt:
+        return None
+
+    sql = text("""
+        SELECT TOP (1)
+            id_card = TRY_CONVERT(int, i.IDFatoKanbanCard),
+            id_empresa_proprietaria = TRY_CONVERT(int, c.IDEmpresaProprietaria)
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] c
+            ON c.IDFatoKanbanCard = i.IDFatoKanbanCard
+        WHERE
+            i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
+            AND i.IDFatoKanbanCard IS NOT NULL
+            AND TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+            AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
+        ORDER BY i.IDFatoControleContratosItensEuromidia DESC
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "cod_ponto": str(cod_ponto_txt).strip(),
+            "cod_face": str(cod_face_txt).strip(),
+        },
+    ).mappings().first()
+
+    if not row:
+        return None
+
+    id_card = row.get("id_card")
+    if not id_card:
+        return None
+
+    id_empresa_proprietaria = row.get("id_empresa_proprietaria")
+
+    return {
+        "id_card": int(id_card),
+        "id_empresa_proprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+def _sincronizar_tag_checking_confirmado_com_card(checking: DimCheckingHistorico) -> dict[str, int | bool | None]:
+    if not checking:
+        raise RuntimeError("Checking não informado para sincronizar a tag do card.")
+
+    id_contrato = int(getattr(checking, "IDFatoControleContratosEuromidia", 0) or 0)
+    cod_ponto = _somente_digitos(getattr(checking, "CodPonto", None))
+    cod_face = _normalizar_texto_checking(getattr(checking, "CodFace", None)).upper()
+
+    if not id_contrato:
+        raise RuntimeError("O checking não possui contrato vinculado.")
+
+    if not cod_ponto:
+        raise RuntimeError("O checking não possui CodPonto válido.")
+
+    if not cod_face:
+        raise RuntimeError("O checking não possui CodFace válido.")
+
+    card = _obter_card_vinculado_item_contrato_checking(
+        id_fato_controle_contratos=id_contrato,
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
+    )
+
+    if not card:
+        return {
+            "id_card": None,
+            "id_tag": ID_TAG_CHECKING_CONFIRMADO_KANBAN,
+            "tag_aplicada": False,
+            "card_encontrado": False,
+        }
+
+    id_card = int(card.get("IDFatoKanbanCard") or 0)
+    if not id_card:
+        return {
+            "id_card": None,
+            "id_tag": ID_TAG_CHECKING_CONFIRMADO_KANBAN,
+            "tag_aplicada": False,
+            "card_encontrado": False,
+        }
+
+    id_usuario = _obter_id_usuario_logado_para_checking()
+    id_empresa_proprietaria = int(
+        getattr(checking, "IDEmpresaProprietaria", 0)
+        or getattr(current_user, "IDEmpresaProprietaria", 0)
+        or 0
+    ) or None
+
+    tag_aplicada = _aplicar_tag_checking_confirmado_no_card_se_precisar(
+        id_card=id_card,
+        id_tag=ID_TAG_CHECKING_CONFIRMADO_KANBAN,
+        id_usuario=id_usuario,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+    )
+
+    return {
+        "id_card": id_card,
+        "id_tag": ID_TAG_CHECKING_CONFIRMADO_KANBAN,
+        "tag_aplicada": bool(tag_aplicada),
+        "card_encontrado": True,
+    }
+
+
+
+
+
+
+
+
 def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path, Path]:
     pasta_raiz = Path("/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/pontos")
     pasta_ponto = pasta_raiz / str(cod_ponto)
@@ -14500,6 +14770,18 @@ def _checking_item_pertence_ao_contrato(
     return bool(row)
 
 
+
+
+def _obter_condicao_sql_tag_ativa_checking_confirmado() -> str:
+    tabela = "[Kanban].[Silver].[FatoKanbanCardTag]"
+
+    if _coluna_existe(tabela, "RemovidoEm"):
+        return "ct.RemovidoEm IS NULL"
+
+    if _coluna_existe(tabela, "DataRemocao"):
+        return "ct.DataRemocao IS NULL"
+
+    return "1 = 1"
 
 
 
@@ -14937,6 +15219,9 @@ def checking_arquivo(id_checking: int):
 
 
 
+
+
+
 @paineis_bp.route("/checking/<int:id_checking>/confirmar", methods=["POST"])
 @login_required
 def checking_confirmar(id_checking: int):
@@ -14966,6 +15251,9 @@ def checking_confirmar(id_checking: int):
         row.BitChekin = True
         row.DataConfirmacao = datetime.now()
         row.IDUsuarioConfirmacao = int(current_user.get_id()) if current_user.is_authenticated else None
+
+        _sincronizar_tag_checking_confirmado_com_card(row)
+
         db.session.commit()
         flash("Checking confirmado com sucesso.", "success")
     except Exception as exc:
@@ -14973,7 +15261,6 @@ def checking_confirmar(id_checking: int):
         flash(f"Falha ao confirmar checking: {exc}", "danger")
 
     return redirect(url_for("Paineis.checking_novo"))
-
 
 
 

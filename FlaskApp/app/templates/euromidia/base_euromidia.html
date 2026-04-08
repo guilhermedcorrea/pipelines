@@ -20,13 +20,6 @@
     }
   </style>
 
-
-
-
-
-
-
-
   <style>
 
 :root{
@@ -913,10 +906,6 @@ input:disabled, select:disabled, textarea:disabled{
   content: none !important;
 }
 
-
-
-
-
   </style>
 
 </head>
@@ -987,76 +976,170 @@ input:disabled, select:disabled, textarea:disabled{
           <div class="menu-dropdown">
             <div class="desc">Consulta e gestão do inventário</div>
 
+            {% if menu_paineis_disponibilidades or menu_paineis_lista_ocupacao %}
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Estoques</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
+
+                <div class="submenu-dropdown">
+                  {% if menu_paineis_disponibilidades %}
+                    <a href="{{ url_for('Paineis.lista_paineis') }}"
+                       class="{% if request.path == url_for('Paineis.lista_paineis') %}menu-link-current{% endif %}">
+                      Disponibilidades
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_lista_ocupacao %}
+                    <a href="{{ url_for('Paineis.lista_ocupacao') }}"
+                       class="{% if request.path == url_for('Paineis.lista_ocupacao') %}menu-link-current{% endif %}">
+                      Lista Ocupação
+                    </a>
+                  {% endif %}
+                </div>
+              </div>
+            {% endif %}
+
             {% if menu_paineis_disponibilidades %}
-              <a href="{{ url_for('Paineis.lista_paineis') }}">Disponibilidades</a>
-              <a href="{{ url_for('Paineis.checking_novo') }}">Realizar Checkin</a>
-              <a href="{{ url_for('Paineis.lista_checkins') }}">Lista Checkins</a>
+              <a href="{{ url_for('Paineis.checking_novo') }}"
+                 class="{% if request.path == url_for('Paineis.checking_novo') %}menu-link-current{% endif %}">
+                Realizar Checkin
+              </a>
+            {% endif %}
 
-
-
+            {% if menu_paineis_disponibilidades %}
+              <a href="{{ url_for('Paineis.lista_checkins') }}"
+                 class="{% if request.path == url_for('Paineis.lista_checkins') %}menu-link-current{% endif %}">
+                Lista Checkins
+              </a>
             {% endif %}
 
             {% if menu_paineis_atendimento %}
-  <div class="submenu-item">
-    <a href="#" class="submenu-link">
-      <span>Atendimento</span>
-      <span class="submenu-caret">▸</span>
-    </a>
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Atendimento</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
 
-    <div class="submenu-dropdown">
-      <a href="{{ url_for('kanban.atendimento_redirect') }}">Kanban Atendimento</a>
-      <a href="{{ url_for('kanban.health_check_comercial') }}">Health Check Comercial</a>
-      <a href="{{ url_for('kanban.historico_cards_lista') }}">Historico Atendimento</a>
-    </div>
-  </div>
-{% endif %}
+                <div class="submenu-dropdown">
+                  <a href="{{ url_for('kanban.atendimento_redirect') }}"
+                     class="{% if request.path == url_for('kanban.atendimento_redirect') %}menu-link-current{% endif %}">
+                    Kanban Atendimento
+                  </a>
+                  <a href="{{ url_for('kanban.health_check_comercial') }}"
+                     class="{% if request.path == url_for('kanban.health_check_comercial') %}menu-link-current{% endif %}">
+                    Health Check Comercial
+                  </a>
+                  <a href="{{ url_for('kanban.historico_cards_lista') }}"
+                     class="{% if request.path == url_for('kanban.historico_cards_lista') %}menu-link-current{% endif %}">
+                    Historico Atendimento
+                  </a>
+                </div>
+              </div>
+            {% endif %}
 
-<div class="submenu-item">
-  <a href="#" class="submenu-link">
-    <span>Kanban</span>
-    <span class="submenu-caret">▸</span>
-  </a>
+            <div class="submenu-item">
+              <a href="#" class="submenu-link">
+                <span>Kanban</span>
+                <span class="submenu-caret">▸</span>
+              </a>
 
-  <div class="submenu-dropdown">
-    <a href="">Lista Kanbans</a>
-    
-  </div>
-</div>
+              <div class="submenu-dropdown">
+                <a href="">Lista Kanbans</a>
+              </div>
+            </div>
 
             {% if menu_paineis_performance %}
-              <a href="{{ url_for('admin.ativos') }}">Performance Paineis</a>
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Ativos</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
+
+                <div class="submenu-dropdown">
+                  <a href="{{ url_for('admin.ativos') }}"
+                     class="{% if request.path == url_for('admin.ativos') %}menu-link-current{% endif %}">
+                    Performance Ativos
+                  </a>
+                </div>
+              </div>
+            {% endif %}
+
+            {% if menu_paineis_contratos or menu_paineis_mov_fin or menu_paineis_inadimplentes %}
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Financeiro</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
+
+                <div class="submenu-dropdown">
+                  {% if menu_paineis_inadimplentes %}
+                    <a href="{{ url_for('admin.listadevedores') }}"
+                       class="{% if request.path == url_for('admin.listadevedores') %}menu-link-current{% endif %}">
+                      Inadimplentes
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_mov_fin %}
+                    <a href="{{ url_for('admin.lista_movimentacao_empresas') }}"
+                       class="{% if request.path == url_for('admin.lista_movimentacao_empresas') %}menu-link-current{% endif %}">
+                      Movimentações Financeiras
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_contratos %}
+                    <a href="{{ url_for('Paineis.contratos_lista') }}"
+                       class="{% if request.path == url_for('Paineis.contratos_lista') %}menu-link-current{% endif %}">
+                      Contratos
+                    </a>
+                  {% endif %}
+
+                  <a href="{{ url_for('admin.lista_aprovacao_contratos') }}"
+                     class="{% if request.path == url_for('admin.lista_aprovacao_contratos') %}menu-link-current{% endif %}">
+                    Lista Aprovação Contratos
+                  </a>
+                </div>
+              </div>
+            {% endif %}
+
+            {% if menu_paineis_produtos_auvo or menu_paineis_tickets_auvo or menu_paineis_criar_os_auvo %}
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Solicitações</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
+
+                <div class="submenu-dropdown">
+                  {% if menu_paineis_produtos_auvo %}
+                    <a href="{{ url_for('admin.lista_produtos_auvo') }}"
+                       class="{% if request.path == url_for('admin.lista_produtos_auvo') %}menu-link-current{% endif %}">
+                      Vincular Produtos Auvo
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_tickets_auvo %}
+                    <a href="{{ url_for('admin.lista_tickets_auvo') }}"
+                       class="{% if request.path == url_for('admin.lista_tickets_auvo') %}menu-link-current{% endif %}">
+                      Tickets Auvo
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_criar_os_auvo %}
+                    <a href="{{ url_for('admin.criar_os_auvo') }}"
+                       class="{% if request.path == url_for('admin.criar_os_auvo') %}menu-link-current{% endif %}">
+                      Criar OS Auvo
+                    </a>
+                  {% endif %}
+                </div>
+              </div>
             {% endif %}
 
             {% if menu_paineis_empresas %}
-              <a href="{{ url_for('Paineis.clientes_lista') }}">Empresas</a>
-            {% endif %}
-
-            {% if menu_paineis_lista_ocupacao %}
-              <a href="{{ url_for('Paineis.lista_ocupacao') }}">Lista Ocupação</a>
-            {% endif %}
-
-            {% if menu_paineis_contratos %}
-              <a href="{{ url_for('Paineis.contratos_lista') }}">Contratos</a>
-            {% endif %}
-
-            {% if menu_paineis_mov_fin %}
-              <a href="{{ url_for('admin.lista_movimentacao_empresas') }}">Movimentação Financeira</a>
-            {% endif %}
-
-            {% if menu_paineis_inadimplentes %}
-              <a href="{{ url_for('admin.listadevedores') }}">Inadimplentes</a>
-            {% endif %}
-
-            {% if menu_paineis_produtos_auvo %}
-              <a href="{{ url_for('admin.lista_produtos_auvo') }}">Vincular Produtos Auvo</a>
-            {% endif %}
-
-            {% if menu_paineis_tickets_auvo %}
-              <a href="{{ url_for('admin.lista_tickets_auvo') }}">Tickets Auvo</a>
-            {% endif %}
-
-            {% if menu_paineis_criar_os_auvo %}
-              <a href="{{ url_for('admin.criar_os_auvo') }}">Criar OS Auvo</a>
+              <a href="{{ url_for('Paineis.clientes_lista') }}"
+                 class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
+                Empresas
+              </a>
             {% endif %}
           </div>
         </div>
@@ -1535,3 +1618,6 @@ input:disabled, select:disabled, textarea:disabled{
     };
   })();
 </script>
+
+</body>
+</html>
