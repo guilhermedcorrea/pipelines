@@ -14452,6 +14452,65 @@ def _obter_id_empresa_proprietaria_logada_para_checking() -> int | None:
 
 
 
+def _coluna_existe(nome_tabela: str, nome_coluna: str) -> bool:
+    banco_nome, schema_nome, tabela_nome = _quebrar_nome_banco_schema_tabela_checking(nome_tabela)
+    coluna_nome = str(nome_coluna or "").strip().strip("[]").strip()
+
+    if not tabela_nome or not coluna_nome:
+        return False
+
+    if banco_nome:
+        sql = text(f"""
+            SELECT TOP (1)
+                1
+            FROM [{banco_nome}].sys.tables t
+            INNER JOIN [{banco_nome}].sys.schemas s
+                ON s.schema_id = t.schema_id
+            INNER JOIN [{banco_nome}].sys.columns c
+                ON c.object_id = t.object_id
+            WHERE s.name = :schema_nome
+              AND t.name = :tabela_nome
+              AND c.name = :coluna_nome;
+        """)
+    else:
+        sql = text("""
+            SELECT TOP (1)
+                1
+            FROM sys.tables t
+            INNER JOIN sys.schemas s
+                ON s.schema_id = t.schema_id
+            INNER JOIN sys.columns c
+                ON c.object_id = t.object_id
+            WHERE s.name = :schema_nome
+              AND t.name = :tabela_nome
+              AND c.name = :coluna_nome;
+        """)
+
+    resultado = db.session.execute(
+        sql,
+        {
+            "schema_nome": schema_nome or "dbo",
+            "tabela_nome": tabela_nome,
+            "coluna_nome": coluna_nome,
+        },
+    ).scalar()
+
+    return bool(resultado)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def _aplicar_tag_checking_confirmado_no_card_se_precisar(
     *,
     id_card: int,
@@ -15187,6 +15246,44 @@ def checking_contratos():
         })
 
     return jsonify(retorno)
+
+
+
+
+
+
+
+
+
+
+def _quebrar_nome_banco_schema_tabela_checking(nome_tabela: str) -> tuple[str | None, str | None, str]:
+    partes = [
+        str(parte or "").strip().strip("[]").strip()
+        for parte in str(nome_tabela or "").strip().split(".")
+    ]
+    partes = [parte for parte in partes if parte]
+
+    if not partes:
+        return None, None, ""
+
+    if len(partes) == 1:
+        return None, "dbo", partes[0]
+
+    if len(partes) == 2:
+        return None, partes[0], partes[1]
+
+    return partes[-3], partes[-2], partes[-1]
+
+
+
+
+
+
+
+
+
+
+
 
 
 
