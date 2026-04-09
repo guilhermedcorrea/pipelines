@@ -274,7 +274,7 @@
       position:relative;
       flex:0 0 180px;
       min-height:132px;
-      padding:14px 12px 12px 12px;
+      padding:14px 64px 12px 12px;
       border-radius:18px;
       border:1px solid #dbe7f6;
       background:#ffffff;
@@ -365,24 +365,34 @@
 
     .status-node-logo{
       position:absolute;
-      top:12px;
-      right:12px;
-      width:26px;
-      height:26px;
-      border-radius:9px;
-      border:1px solid rgba(2,6,23,.08);
-      background:#fff;
+      top:10px;
+      right:10px;
+      width:52px;
+      height:52px;
+      border-radius:12px;
+      border:1px solid rgba(2,6,23,.10);
+      background:#ffffff;
       display:flex;
       align-items:center;
       justify-content:center;
       overflow:hidden;
-      box-shadow:0 8px 18px rgba(2,6,23,.08);
+      box-shadow:0 8px 18px rgba(2,6,23,.10);
+      z-index:3;
     }
 
     .status-node-logo img{
       width:100%;
       height:100%;
-      object-fit:cover;
+      object-fit:contain;
+      background:#fff;
+      padding:1px;
+    }
+
+    .status-node-logo.fallback-texto{
+      color:#0f172a;
+      font-size:11px;
+      font-weight:900;
+      letter-spacing:.04em;
     }
 
     .status-node-title{
@@ -674,8 +684,7 @@
       </div>
     </div>
 
-    {% set logo_d4sign = url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') %}
-    <div class="status-flow-card">
+        <div class="status-flow-card">
       <div class="status-flow-head">
         <div>
           <div class="status-flow-title">Fluxo do contrato</div>
@@ -703,9 +712,14 @@
                 {% endif %}
               </div>
 
-              {% if etapa.mostra_d4sign %}
+              {% if etapa.id in [2, 3, 4, 5, 6] %}
                 <div class="status-node-logo" title="Fluxo integrado ao D4Sign">
-                  <img src="{{ logo_d4sign }}" alt="Logo D4Sign">
+                  <img
+                    src="{{ etapa.logo_d4sign_url or url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}"
+                    alt="Logo D4Sign"
+                    loading="lazy"
+                    onerror="this.style.display='none'; this.parentElement.classList.add('fallback-texto'); this.parentElement.innerHTML = '<span>D4</span>';"
+                  >
                 </div>
               {% endif %}
 

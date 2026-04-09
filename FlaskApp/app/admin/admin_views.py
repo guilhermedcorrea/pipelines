@@ -3630,6 +3630,7 @@ def lista_aprovacao_contratos():
 
 
 
+
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
 @login_required
 @requer_permissao("ADMIN_TUDO")
@@ -3672,6 +3673,7 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
 
         ids_fluxo_principal = {1, 2, 3, 4, 5, 6, 7}
         ids_com_logo_d4sign = {2, 3, 4, 5, 6}
+        url_logo_d4sign = "/static/imagens/LogoSistemas/d4sign.jpg?v=1"
 
         terminal_atual = None
         etapas = []
@@ -3690,18 +3692,10 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     atual = True
                 else:
                     pendente = True
-
             elif status_atual_id == 8:
                 concluida = True
-
             elif status_atual_id in (9, 10):
-                if id_etapa < 7:
-                    concluida = False
-                elif id_etapa == 7:
-                    pendente = True
-                else:
-                    pendente = True
-
+                pendente = True
             else:
                 if id_etapa == 1:
                     atual = True
@@ -3732,7 +3726,7 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     "atual": atual,
                     "pendente": pendente,
                     "mostrar_logo_d4sign": id_etapa in ids_com_logo_d4sign,
-                    "logo_d4sign_url": "/static/imagens/LogoSistemas/d4sign.jpg" if id_etapa in ids_com_logo_d4sign else None,
+                    "logo_d4sign_url": url_logo_d4sign if id_etapa in ids_com_logo_d4sign else None,
                 }
             )
 
