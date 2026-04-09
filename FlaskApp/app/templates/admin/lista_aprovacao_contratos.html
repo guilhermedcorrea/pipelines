@@ -86,7 +86,7 @@
 
       .list-head{
         display:grid;
-        grid-template-columns:86px 170px 170px 180px 1fr 170px;
+        grid-template-columns:86px 150px 170px 180px 1fr 170px 170px;
         gap:0;
         padding:12px 14px;
         border-bottom:1px solid var(--border);
@@ -98,7 +98,7 @@
 
       .row{
         display:grid;
-        grid-template-columns:86px 170px 170px 180px 1fr 170px;
+        grid-template-columns:86px 150px 170px 180px 1fr 170px 170px;
         gap:0;
         padding:14px 14px;
         border-bottom:1px solid var(--border);
@@ -230,6 +230,29 @@
         color:#475569;
       }
 
+      .status-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:34px;
+        padding:6px 12px;
+        border-radius:999px;
+        border:1px solid rgba(15,23,42,.10);
+        background:rgba(15,23,42,.04);
+        color:var(--text);
+        font-weight:900;
+        white-space:nowrap;
+        max-width:100%;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .status-badge.status-vazio{
+        border-color:rgba(100,116,139,.18);
+        background:rgba(100,116,139,.08);
+        color:#475569;
+      }
+
       .pager{
         padding:12px 14px;
         display:flex;
@@ -242,7 +265,7 @@
       @media (max-width: 1240px){
         .list-head,
         .row{
-          grid-template-columns:86px 170px 170px 1fr 170px;
+          grid-template-columns:86px 150px 170px 1fr 170px 170px;
         }
 
         .hide-xl{
@@ -253,7 +276,7 @@
       @media (max-width: 980px){
         .list-head,
         .row{
-          grid-template-columns:86px 170px 1fr 170px;
+          grid-template-columns:86px 150px 1fr 170px 170px;
         }
 
         .hide-lg{
@@ -325,6 +348,7 @@
         <div class="hide-md">Envio Avaliação</div>
         <div class="hide-lg">Criado por</div>
         <div>Razão Social</div>
+        <div class="hide-xl">Status</div>
         <div class="hide-xl">Tipo Solicitação</div>
       </div>
 
@@ -375,6 +399,12 @@
               <div class="razao-social-cnpj">
                 {{ item.CNPJ or "—" }}
               </div>
+            </div>
+
+            <div class="ellipsis hide-xl">
+              <span class="status-badge {{ 'status-vazio' if not item.StatusContrato or item.StatusContrato == '—' else '' }}">
+                {{ item.StatusContrato or "—" }}
+              </span>
             </div>
 
             <div class="ellipsis hide-xl">

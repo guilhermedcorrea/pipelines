@@ -181,6 +181,286 @@
       line-height:1.5;
     }
 
+    .status-flow-card{
+      border:1px solid var(--border);
+      border-radius:18px;
+      background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow:0 16px 30px rgba(2,6,23,.06);
+      overflow:hidden;
+    }
+
+    .status-flow-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      padding:16px 18px 0 18px;
+      flex-wrap:wrap;
+    }
+
+    .status-flow-title{
+      color:var(--euro-blue);
+      font-size:18px;
+      font-weight:900;
+      margin:0;
+    }
+
+    .status-flow-subtitle{
+      color:#64748b;
+      font-size:13px;
+      font-weight:700;
+      margin-top:4px;
+      line-height:1.45;
+    }
+
+    .status-flow-current{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:38px;
+      padding:8px 12px;
+      border-radius:999px;
+      font-weight:900;
+      font-size:13px;
+      border:1px solid rgba(0,40,132,.15);
+      background:rgba(0,40,132,.06);
+      color:var(--euro-blue);
+    }
+
+    .status-flow-current::before{
+      content:"";
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      background:currentColor;
+      box-shadow:0 0 0 4px rgba(255,255,255,.95);
+      opacity:.9;
+    }
+
+    .status-flow-current.sucesso{
+      background:#ecfdf3;
+      border-color:#bbf7d0;
+      color:#15803d;
+    }
+
+    .status-flow-current.erro{
+      background:#fff1f2;
+      border-color:#fecdd3;
+      color:#be123c;
+    }
+
+    .status-flow-track-wrap{
+      padding:16px 18px 18px 18px;
+    }
+
+    .status-flow-track{
+      display:flex;
+      align-items:stretch;
+      gap:10px;
+      overflow-x:auto;
+      padding-bottom:4px;
+    }
+
+    .status-flow-track::-webkit-scrollbar{
+      height:8px;
+    }
+
+    .status-flow-track::-webkit-scrollbar-thumb{
+      background:#cbd5e1;
+      border-radius:999px;
+    }
+
+    .status-node{
+      position:relative;
+      flex:0 0 180px;
+      min-height:132px;
+      padding:14px 12px 12px 12px;
+      border-radius:18px;
+      border:1px solid #dbe7f6;
+      background:#ffffff;
+      display:flex;
+      flex-direction:column;
+      align-items:flex-start;
+      justify-content:flex-start;
+      gap:10px;
+      box-shadow:0 10px 24px rgba(2,6,23,.05);
+    }
+
+    .status-node.pendente{
+      background:linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border-color:#e2e8f0;
+    }
+
+    .status-node.concluido{
+      background:linear-gradient(180deg, #f4f9ff 0%, #eef6ff 100%);
+      border-color:#bfdbfe;
+    }
+
+    .status-node.atual{
+      background:linear-gradient(180deg, #effdf5 0%, #e8fff1 100%);
+      border-color:#86efac;
+      box-shadow:0 0 0 1px rgba(34,197,94,.08), 0 16px 30px rgba(34,197,94,.12);
+    }
+
+    .status-node.terminal-sucesso{
+      background:linear-gradient(180deg, #effdf5 0%, #e8fff1 100%);
+      border-color:#86efac;
+      box-shadow:0 16px 30px rgba(34,197,94,.12);
+    }
+
+    .status-node.terminal-erro{
+      background:linear-gradient(180deg, #fff5f5 0%, #fff1f2 100%);
+      border-color:#fda4af;
+      box-shadow:0 16px 30px rgba(244,63,94,.10);
+    }
+
+    .status-node-icon{
+      width:36px;
+      height:36px;
+      border-radius:999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:18px;
+      font-weight:900;
+      border:1px solid #cbd5e1;
+      background:#fff;
+      color:#64748b;
+      position:relative;
+      z-index:1;
+    }
+
+    .status-node.concluido .status-node-icon{
+      border-color:#60a5fa;
+      background:#eff6ff;
+      color:#2563eb;
+    }
+
+    .status-node.atual .status-node-icon,
+    .status-node.terminal-sucesso .status-node-icon{
+      border-color:#22c55e;
+      background:#ecfdf3;
+      color:#16a34a;
+    }
+
+    .status-node.terminal-erro .status-node-icon{
+      border-color:#f43f5e;
+      background:#fff1f2;
+      color:#e11d48;
+    }
+
+    .status-node-icon.pulsando::after{
+      content:"";
+      position:absolute;
+      inset:-6px;
+      border-radius:999px;
+      border:2px solid rgba(34,197,94,.18);
+      animation:statusPulse 1.8s ease-out infinite;
+    }
+
+    @keyframes statusPulse{
+      0%{ transform:scale(.85); opacity:.85; }
+      100%{ transform:scale(1.25); opacity:0; }
+    }
+
+    .status-node-logo{
+      position:absolute;
+      top:12px;
+      right:12px;
+      width:26px;
+      height:26px;
+      border-radius:9px;
+      border:1px solid rgba(2,6,23,.08);
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      box-shadow:0 8px 18px rgba(2,6,23,.08);
+    }
+
+    .status-node-logo img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+
+    .status-node-title{
+      font-size:15px;
+      font-weight:900;
+      color:#0f172a;
+      line-height:1.3;
+      min-height:40px;
+      display:flex;
+      align-items:center;
+    }
+
+    .status-node-id{
+      font-size:11px;
+      letter-spacing:.05em;
+      text-transform:uppercase;
+      font-weight:900;
+      color:#64748b;
+    }
+
+    .status-node-desc{
+      font-size:12px;
+      font-weight:700;
+      color:#64748b;
+      line-height:1.45;
+    }
+
+    .status-arrow{
+      flex:0 0 28px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#94a3b8;
+      font-size:24px;
+      font-weight:900;
+      user-select:none;
+    }
+
+    .status-arrow.done{
+      color:#2563eb;
+    }
+
+    .status-arrow.final-sucesso{
+      color:#16a34a;
+    }
+
+    .status-arrow.final-erro{
+      color:#e11d48;
+    }
+
+    .status-flow-legend{
+      margin-top:12px;
+      display:flex;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      color:#64748b;
+      font-size:12px;
+      font-weight:800;
+    }
+
+    .status-flow-legend-item{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    .status-flow-legend-dot{
+      width:12px;
+      height:12px;
+      border-radius:999px;
+      display:inline-block;
+    }
+
+    .status-flow-legend-dot.verde{ background:#22c55e; }
+    .status-flow-legend-dot.azul{ background:#2563eb; }
+    .status-flow-legend-dot.cinza{ background:#94a3b8; }
+
     .grid-2{
       display:grid;
       grid-template-columns:repeat(2, minmax(0, 1fr));
@@ -340,11 +620,19 @@
       .grid-2{ grid-template-columns:1fr; }
     }
 
+    @media (max-width: 900px){
+      .status-node{ flex-basis:164px; min-height:128px; }
+    }
+
     @media (max-width: 700px){
       .painel-resumo{ grid-template-columns:1fr; }
       .topbar{ flex-direction:column; }
       .actions{ width:100%; }
       .actions .btn-x{ flex:1; }
+      .status-flow-head{ padding:14px 14px 0 14px; }
+      .status-flow-track-wrap{ padding:14px; }
+      .status-node{ flex-basis:150px; }
+      .status-flow-current{ width:100%; justify-content:center; }
     }
   </style>
 
@@ -373,6 +661,7 @@
             <span class="badge neutral">Card #{{ solicitacao.IDFatoKanbanCard }}</span>
             <span class="badge neutral">Contrato #{{ solicitacao.IDFatoControleContratosEuromidia or "—" }}</span>
             <span class="badge warn">Criado por {{ solicitacao.NomeUsuarioCriacao or "—" }}</span>
+            <span class="badge neutral">Status Atual: {{ solicitacao.StatusContrato or "—" }}</span>
           </div>
         </div>
       </div>
@@ -382,6 +671,88 @@
         <button type="submit" class="btn-x primary">💾 Salvar</button>
         <button type="button" class="btn-x success">✔ Aprovar</button>
         <button type="button" class="btn-x danger">✖ Reprovar</button>
+      </div>
+    </div>
+
+    {% set logo_d4sign = url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') %}
+    <div class="status-flow-card">
+      <div class="status-flow-head">
+        <div>
+          <div class="status-flow-title">Fluxo do contrato</div>
+          <div class="status-flow-subtitle">
+            Visualização do andamento do contrato conforme o status cadastrado na solicitação.
+          </div>
+        </div>
+
+        <div class="status-flow-current {% if diagrama_status.terminal_atual %}{{ 'sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'erro' }}{% elif diagrama_status.status_atual_id in [1,2,3,4,5,6,7] %}sucesso{% endif %}">
+          {{ diagrama_status.status_atual_nome or 'Sem status definido' }}
+        </div>
+      </div>
+
+      <div class="status-flow-track-wrap">
+        <div class="status-flow-track">
+          {% for etapa in diagrama_status.etapas %}
+            <div class="status-node {{ 'atual' if etapa.atual else 'concluido' if etapa.concluido else 'pendente' }}">
+              <div class="status-node-icon {{ 'pulsando' if etapa.atual else '' }}">
+                {% if etapa.concluido %}
+                  ✓
+                {% elif etapa.atual %}
+                  ●
+                {% else %}
+                  {{ etapa.id }}
+                {% endif %}
+              </div>
+
+              {% if etapa.mostra_d4sign %}
+                <div class="status-node-logo" title="Fluxo integrado ao D4Sign">
+                  <img src="{{ logo_d4sign }}" alt="Logo D4Sign">
+                </div>
+              {% endif %}
+
+              <div class="status-node-id">Status {{ etapa.id }}</div>
+              <div class="status-node-title">{{ etapa.nome }}</div>
+              <div class="status-node-desc">
+                {% if etapa.atual %}
+                  Etapa atual do contrato.
+                {% elif etapa.concluido %}
+                  Etapa concluída com sucesso.
+                {% else %}
+                  Etapa ainda não alcançada.
+                {% endif %}
+              </div>
+            </div>
+
+            {% if not loop.last %}
+              <div class="status-arrow {{ 'done' if etapa.concluido else '' }}">→</div>
+            {% endif %}
+          {% endfor %}
+
+          {% if diagrama_status.terminal_atual %}
+            <div class="status-arrow {{ 'final-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'final-erro' }}">→</div>
+            <div class="status-node {{ 'terminal-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'terminal-erro' }}">
+              <div class="status-node-icon {{ 'pulsando' if diagrama_status.terminal_atual.classe == 'sucesso' else '' }}">
+                {{ diagrama_status.terminal_atual.icone }}
+              </div>
+              <div class="status-node-id">Status {{ diagrama_status.terminal_atual.id }}</div>
+              <div class="status-node-title">{{ diagrama_status.terminal_atual.nome }}</div>
+              <div class="status-node-desc">
+                {% if diagrama_status.terminal_atual.id == 8 %}
+                  Fluxo concluído e contrato já está ativo/concluído.
+                {% elif diagrama_status.terminal_atual.id == 9 %}
+                  Fluxo interrompido por cancelamento.
+                {% else %}
+                  Fluxo interrompido por erro e exige revisão.
+                {% endif %}
+              </div>
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="status-flow-legend">
+          <span class="status-flow-legend-item"><span class="status-flow-legend-dot verde"></span> Etapa atual</span>
+          <span class="status-flow-legend-item"><span class="status-flow-legend-dot azul"></span> Etapa já concluída</span>
+          <span class="status-flow-legend-item"><span class="status-flow-legend-dot cinza"></span> Etapa pendente</span>
+        </div>
       </div>
     </div>
 

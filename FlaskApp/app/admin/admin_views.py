@@ -3017,6 +3017,149 @@ def _resolver_face_e_painel_por_codigos(cod_ponto: str | None, cod_face: str | N
 
 
 
+def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
+    mapa_padrao = {
+        1: "Em Digitação",
+        2: "Pendente Geração",
+        3: "Documento Gerado",
+        4: "Pendente Envio",
+        5: "Enviado Assinatura",
+        6: "Em Assinatura",
+        7: "Ativo",
+        8: "Concluido",
+        9: "Cancelado",
+        10: "ERRO",
+    }
+
+    try:
+        id_empresa = int(id_empresa_proprietaria or 0)
+    except Exception:
+        id_empresa = 0
+
+    if id_empresa <= 0:
+        return [
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": nome,
+            }
+            for id_status, nome in mapa_padrao.items()
+        ]
+
+    sql = text("""
+        SELECT
+             [IDDimStatusContratos]
+            ,[Status]
+        FROM [Integracao].[Silver].[DimStatusContratos]
+        WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
+          AND [IDDimStatusContratos] BETWEEN 1 AND 10
+        ORDER BY [IDDimStatusContratos] ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_empresa_proprietaria": id_empresa},
+    ).mappings().all()
+
+    if not rows:
+        return [
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": nome,
+            }
+            for id_status, nome in mapa_padrao.items()
+        ]
+
+    retorno = []
+    ids_existentes = set()
+    for row in rows:
+        id_status = int(row.get("IDDimStatusContratos") or 0)
+        if id_status <= 0:
+            continue
+        ids_existentes.add(id_status)
+        retorno.append(
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+            }
+        )
+
+    for id_status, nome in mapa_padrao.items():
+        if id_status not in ids_existentes:
+            retorno.append(
+                {
+                    "IDDimStatusContratos": id_status,
+                    "Status": nome,
+                }
+            )
+
+    retorno.sort(key=lambda x: int(x.get("IDDimStatusContratos") or 0))
+    return retorno
+
+
+
+def _montar_diagrama_status_contrato(
+    id_empresa_proprietaria: int | None,
+    id_status_atual: int | None,
+    nome_status_atual: str | None = None,
+):
+    status_rows = _obter_status_contratos_empresa(id_empresa_proprietaria)
+    mapa_status = {
+        int(row.get("IDDimStatusContratos") or 0): (row.get("Status") or "").strip()
+        for row in status_rows
+        if int(row.get("IDDimStatusContratos") or 0) > 0
+    }
+
+    try:
+        id_status_corrente = int(id_status_atual or 0)
+    except Exception:
+        id_status_corrente = 0
+
+    nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+
+    etapas_principais = []
+    for id_status in range(1, 8):
+        nome = mapa_status.get(id_status) or f"Status {id_status}"
+        concluido = False
+        atual = False
+
+        if id_status_corrente in range(1, 8):
+            concluido = id_status < id_status_corrente
+            atual = id_status == id_status_corrente
+        elif id_status_corrente == 8:
+            concluido = True
+        else:
+            concluido = False
+            atual = False
+
+        etapas_principais.append(
+            {
+                "id": id_status,
+                "nome": nome,
+                "concluido": concluido,
+                "atual": atual,
+                "pendente": (not concluido) and (not atual),
+                "mostra_d4sign": 2 <= id_status <= 6,
+            }
+        )
+
+    terminal_atual = None
+    if id_status_corrente in (8, 9, 10):
+        terminal_atual = {
+            "id": id_status_corrente,
+            "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+            "classe": "sucesso" if id_status_corrente == 8 else "erro",
+            "icone": "✓" if id_status_corrente == 8 else "!",
+        }
+
+    return {
+        "status_atual_id": id_status_corrente,
+        "status_atual_nome": nome_status_corrente or "Sem status definido",
+        "etapas": etapas_principais,
+        "terminal_atual": terminal_atual,
+    }
+
+
+
 def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     sql_cabecalho = text("""
         SELECT TOP 1
@@ -3089,6 +3232,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
               ,de.[RazaoSocial] AS [RazaoSocialEmpresa]
               ,ep.[Logo] AS [LogoEmpresaProprietaria]
               ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
+              ,dsc.[Status] AS [StatusContrato]
         FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
         INNER JOIN [Integracao].[Silver].[DimUsuarios] du
                 ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
@@ -3096,6 +3240,9 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                 ON de.[IDEmpresa] = fsce.[IDEmpresa]
         INNER JOIN [Integracao].[dbo].[EmpresaProprietaria] ep
                 ON ep.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
+                ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
+               AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
         WHERE fsce.[IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
     """)
 
@@ -3240,6 +3387,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     cab = dict(cab)
     cab["LogoEmpresaProprietariaUrl"] = _resolver_url_logo_empresa_proprietaria(cab.get("LogoEmpresaProprietaria"))
     cab["TipoSolicitacaoExibicao"] = _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao"))
+    cab["StatusContrato"] = (cab.get("StatusContrato") or "").strip()
     cab["DataAssinaturaRenovacaoInput"] = _data_para_input_date(cab.get("DataAssinaturaRenovacao"))
     cab["DataLancamentoInput"] = _data_para_input_date(cab.get("DataLancamento"))
     cab["DataCriacaoInput"] = _data_para_input_date(cab.get("DataCriacao"))
@@ -3265,6 +3413,11 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     return {
         "solicitacao": cab,
         "itens": itens,
+        "diagrama_status": _montar_diagrama_status_contrato(
+            id_empresa_proprietaria=cab.get("IDEmpresaProprietaria"),
+            id_status_atual=cab.get("IDDimStatusContratos"),
+            nome_status_atual=cab.get("StatusContrato"),
+        ),
     }
 
 
@@ -3295,6 +3448,9 @@ def lista_aprovacao_contratos():
             ON de.[IDEmpresa] = fsce.[IDEmpresa]
         INNER JOIN [Integracao].[dbo].[EmpresaProprietaria] ep
             ON ep.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
+            ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
+           AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
         WHERE
             (
                 :q = ''
@@ -3304,6 +3460,7 @@ def lista_aprovacao_contratos():
                 OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
                 OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
                 OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
+                OR ISNULL(dsc.[Status], '') LIKE '%' + :q + '%'
             )
     """)
 
@@ -3386,6 +3543,7 @@ def lista_aprovacao_contratos():
             ,de.[RazaoSocial] AS [RazaoSocialEmpresa]
             ,ep.[Logo] AS [LogoEmpresaProprietaria]
             ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
+            ,dsc.[Status] AS [StatusContrato]
         FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
         INNER JOIN [Integracao].[Silver].[DimUsuarios] du
             ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
@@ -3393,6 +3551,9 @@ def lista_aprovacao_contratos():
             ON de.[IDEmpresa] = fsce.[IDEmpresa]
         INNER JOIN [Integracao].[dbo].[EmpresaProprietaria] ep
             ON ep.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
+            ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
+           AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
         WHERE
             (
                 :q = ''
@@ -3402,6 +3563,7 @@ def lista_aprovacao_contratos():
                 OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
                 OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
                 OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
+                OR ISNULL(dsc.[Status], '') LIKE '%' + :q + '%'
             )
         ORDER BY
             CASE WHEN fsce.[DataEnvioAvaliacao] IS NULL THEN 1 ELSE 0 END ASC,
@@ -3435,6 +3597,7 @@ def lista_aprovacao_contratos():
                 "CNPJ": r.get("CNPJ") or "—",
                 "RazaoSocialEmpresa": r.get("RazaoSocialEmpresa") or "—",
                 "LogoEmpresaProprietaria": logo_url,
+                "StatusContrato": r.get("StatusContrato") or "—",
                 "TipoSolicitacao": _tipo_solicitacao_normalizado(r.get("TipoSolicitacao") or "—"),
                 "url_detalhe": url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solic),
             }
@@ -3465,11 +3628,144 @@ def lista_aprovacao_contratos():
     )
 
 
+
+
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
 @login_required
 @requer_permissao("ADMIN_TUDO")
 @limiter.limit("80 per minute")
 def detalhe_aprovacao_contrato(id_solicitacao: int):
+    def _montar_diagrama_status_contrato(solicitacao: dict) -> dict:
+        mapa_status_por_id = {
+            1: "Em Digitação",
+            2: "Pendente Geração",
+            3: "Documento Gerado",
+            4: "Pendente Envio",
+            5: "Enviado Assinatura",
+            6: "Em Assinatura",
+            7: "Ativo",
+            8: "Concluido",
+            9: "Cancelado",
+            10: "ERRO",
+        }
+
+        try:
+            status_atual_id = int(solicitacao.get("IDDimStatusContratos") or 0)
+        except Exception:
+            status_atual_id = 0
+
+        status_atual_nome = (
+            (solicitacao.get("StatusContrato") or "").strip()
+            or mapa_status_por_id.get(status_atual_id)
+            or "Sem status"
+        )
+
+        etapas_base = [
+            {"id": 1, "nome": "Em Digitação"},
+            {"id": 2, "nome": "Pendente Geração"},
+            {"id": 3, "nome": "Documento Gerado"},
+            {"id": 4, "nome": "Pendente Envio"},
+            {"id": 5, "nome": "Enviado Assinatura"},
+            {"id": 6, "nome": "Em Assinatura"},
+            {"id": 7, "nome": "Ativo"},
+        ]
+
+        ids_fluxo_principal = {1, 2, 3, 4, 5, 6, 7}
+        ids_com_logo_d4sign = {2, 3, 4, 5, 6}
+
+        terminal_atual = None
+        etapas = []
+
+        for etapa in etapas_base:
+            id_etapa = etapa["id"]
+
+            concluida = False
+            atual = False
+            pendente = False
+
+            if status_atual_id in ids_fluxo_principal:
+                if id_etapa < status_atual_id:
+                    concluida = True
+                elif id_etapa == status_atual_id:
+                    atual = True
+                else:
+                    pendente = True
+
+            elif status_atual_id == 8:
+                concluida = True
+
+            elif status_atual_id in (9, 10):
+                if id_etapa < 7:
+                    concluida = False
+                elif id_etapa == 7:
+                    pendente = True
+                else:
+                    pendente = True
+
+            else:
+                if id_etapa == 1:
+                    atual = True
+                else:
+                    pendente = True
+
+            if concluida:
+                estado = "concluida"
+                icone = "✓"
+                classe = "concluida"
+            elif atual:
+                estado = "atual"
+                icone = "●"
+                classe = "atual"
+            else:
+                estado = "pendente"
+                icone = str(id_etapa)
+                classe = "pendente"
+
+            etapas.append(
+                {
+                    "id": id_etapa,
+                    "nome": etapa["nome"],
+                    "estado": estado,
+                    "icone": icone,
+                    "classe": classe,
+                    "concluida": concluida,
+                    "atual": atual,
+                    "pendente": pendente,
+                    "mostrar_logo_d4sign": id_etapa in ids_com_logo_d4sign,
+                    "logo_d4sign_url": "/static/imagens/LogoSistemas/d4sign.jpg" if id_etapa in ids_com_logo_d4sign else None,
+                }
+            )
+
+        if status_atual_id == 8:
+            terminal_atual = {
+                "id": 8,
+                "nome": "Concluido",
+                "classe": "sucesso",
+                "icone": "✓",
+            }
+        elif status_atual_id == 9:
+            terminal_atual = {
+                "id": 9,
+                "nome": "Cancelado",
+                "classe": "erro",
+                "icone": "✕",
+            }
+        elif status_atual_id == 10:
+            terminal_atual = {
+                "id": 10,
+                "nome": "ERRO",
+                "classe": "erro",
+                "icone": "!",
+            }
+
+        return {
+            "status_atual_id": status_atual_id,
+            "status_atual_nome": status_atual_nome,
+            "etapas": etapas,
+            "terminal_atual": terminal_atual,
+            "tem_terminal": terminal_atual is not None,
+        }
+
     if request.method == "POST":
         try:
             id_usuario_logado = _id_usuario_logado()
@@ -3674,8 +3970,13 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
     if not payload:
         abort(404)
 
+    solicitacao = payload["solicitacao"]
+    itens = payload["itens"]
+    diagrama_status = _montar_diagrama_status_contrato(solicitacao)
+
     return render_template(
         "admin/aprovacao_contrato_detalhe.html",
-        solicitacao=payload["solicitacao"],
-        itens=payload["itens"],
+        solicitacao=solicitacao,
+        itens=itens,
+        diagrama_status=diagrama_status,
     )
