@@ -3014,6 +3014,9 @@ def _resolver_face_e_painel_por_codigos(cod_ponto: str | None, cod_face: str | N
     return dict(row) if row else None
 
 
+
+
+
 def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     sql_cabecalho = text("""
         SELECT TOP 1
@@ -3097,104 +3100,133 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     """)
 
     sql_itens = text("""
-        SELECT
-               fsci.[IDFatoSolicitacaoContratoItemEuromidia]
-              ,fsci.[IDFatoSolicitacaoContratoEuromidia]
-              ,fsci.[IDFatoControleContratosEuromidia]
-              ,fsci.[IDFatoControleContratosItensEuromidia]
-              ,fsci.[IDFatoKanbanCard]
-              ,fsci.[IDDimUsuariosCriacao]
-              ,fsci.[IDDimUsuariosAtualizacao]
-              ,fsci.[IDVendedor]
-              ,fsci.[IDPainelEuromidia]
-              ,fsci.[IDDimFacesPaineis]
-              ,fsci.[IDDimCheckingHistorico]
-              ,fsci.[IDEmpresaProprietaria]
-              ,fsci.[Referencia]
-              ,fsci.[NumeroContrato]
-              ,fsci.[NumeroPrevia]
-              ,fsci.[CNPJ]
-              ,fsci.[CodPonto]
-              ,fsci.[CodFace]
-              ,fsci.[DataLancamento]
-              ,fsci.[Cota]
-              ,fsci.[CidadeExibicao]
-              ,fsci.[Tipo]
-              ,fsci.[Origem]
-              ,fsci.[EmpresaEuro]
-              ,fsci.[CnpjExibibora]
-              ,fsci.[TipoDocumento]
-              ,fsci.[RazaoSocial]
-              ,fsci.[CPF]
-              ,fsci.[MarcaExibida]
-              ,fsci.[Vendedor]
-              ,fsci.[SDR]
-              ,fsci.[Agencia]
-              ,fsci.[CnpjAgencia]
-              ,fsci.[Bureau]
-              ,fsci.[CnpjBureau]
-              ,fsci.[Intermediario]
-              ,fsci.[CnpjIntermediario]
-              ,fsci.[DataAssinaturaRenovacao]
-              ,fsci.[IDTrimestre]
-              ,fsci.[TexmpoExposicao]
-              ,fsci.[DataInicioPrevisto]
-              ,fsci.[DataTerminoPrevisto]
-              ,fsci.[InicioRenovacao]
-              ,fsci.[FaturamentoBrutoMensal]
-              ,fsci.[PercentualPermuta]
-              ,fsci.[CotaOportunidade]
-              ,fsci.[ValorPermuta]
-              ,fsci.[FaturamentoLiquidoPermuta]
-              ,fsci.[NumeroParcelas]
-              ,fsci.[DataInicioVencimento]
-              ,fsci.[TotalBrutoContrato]
-              ,fsci.[TotalLiquidoContratoAGBRCTACORDO]
-              ,fsci.[TotalLiquidoContratoAGBRVENDGERCOOR]
-              ,fsci.[PercentualAgencia]
-              ,fsci.[ValorMensalAgencia]
-              ,fsci.[PercentualBureau]
-              ,fsci.[ValorBureauMensal]
-              ,fsci.[PercentualCartaAcordo]
-              ,fsci.[ValorCartaAcordoMensal]
-              ,fsci.[ValorOutrasComissoes]
-              ,fsci.[FaturamentoLiquidoMensal]
-              ,fsci.[PercentualComissaoVendedor]
-              ,fsci.[ValorVendedor]
-              ,fsci.[ValorVendedorTotal]
-              ,fsci.[PercentualComissaoCoordenacao]
-              ,fsci.[ValorCoordenador]
-              ,fsci.[ValorCoordenadorTotal]
-              ,fsci.[PercentualComissaoGerencia]
-              ,fsci.[ValorGerencia]
-              ,fsci.[ValorGerenciaTotal]
-              ,fsci.[AtivoCancelamento]
-              ,fsci.[FaturamentoLiquidoFinalMensal]
-              ,fsci.[ComissaoGerenciaNordeste]
-              ,fsci.[Faturamento]
-              ,fsci.[DataCancelamento]
-              ,fsci.[OBS]
-              ,fsci.[DataFimEfetiva]
-              ,fsci.[Status]
-              ,fsci.[BitAtivo]
-              ,fsci.[DataCriacao]
-              ,fsci.[DataAtualizacao]
-              ,fsci.[BitSolicitacaoAtiva]
-              ,df.[Face] AS [FaceDescricaoCadastro]
-              ,df.[Tipo] AS [TipoFaceCadastro]
-              ,dp.[Cidade] AS [CidadePainelCadastro]
-              ,dp.[UF] AS [UFPainelCadastro]
-              ,dp.[Tipo] AS [TipoPainelCadastro]
-              ,dp.[Logradouro] AS [LogradouroPainelCadastro]
-              ,dp.[Bairro] AS [BairroPainelCadastro]
-              ,dp.[Referencia] AS [ReferenciaPainelCadastro]
-        FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] fsci
-        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] df
-               ON df.[IDDimFacesPaineis] = fsci.[IDDimFacesPaineis]
-        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
-               ON dp.[IDDimPaineisEuromidia] = COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia])
-        WHERE fsci.[IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
-        ORDER BY fsci.[IDFatoSolicitacaoContratoItemEuromidia] ASC
+        WITH itens_rankeados AS (
+            SELECT
+                   fsci.[IDFatoSolicitacaoContratoItemEuromidia]
+                  ,fsci.[IDFatoSolicitacaoContratoEuromidia]
+                  ,fsci.[IDFatoControleContratosEuromidia]
+                  ,fsci.[IDFatoControleContratosItensEuromidia]
+                  ,fsci.[IDFatoKanbanCard]
+                  ,fsci.[IDDimUsuariosCriacao]
+                  ,fsci.[IDDimUsuariosAtualizacao]
+                  ,fsci.[IDVendedor]
+                  ,fsci.[IDPainelEuromidia]
+                  ,fsci.[IDDimFacesPaineis]
+                  ,fsci.[IDDimCheckingHistorico]
+                  ,fsci.[IDEmpresaProprietaria]
+                  ,fsci.[Referencia]
+                  ,fsci.[NumeroContrato]
+                  ,fsci.[NumeroPrevia]
+                  ,fsci.[CNPJ]
+                  ,fsci.[CodPonto]
+                  ,fsci.[CodFace]
+                  ,fsci.[DataLancamento]
+                  ,fsci.[Cota]
+                  ,fsci.[CidadeExibicao]
+                  ,fsci.[Tipo]
+                  ,fsci.[Origem]
+                  ,fsci.[EmpresaEuro]
+                  ,fsci.[CnpjExibibora]
+                  ,fsci.[TipoDocumento]
+                  ,fsci.[RazaoSocial]
+                  ,fsci.[CPF]
+                  ,fsci.[MarcaExibida]
+                  ,fsci.[Vendedor]
+                  ,fsci.[SDR]
+                  ,fsci.[Agencia]
+                  ,fsci.[CnpjAgencia]
+                  ,fsci.[Bureau]
+                  ,fsci.[CnpjBureau]
+                  ,fsci.[Intermediario]
+                  ,fsci.[CnpjIntermediario]
+                  ,fsci.[DataAssinaturaRenovacao]
+                  ,fsci.[IDTrimestre]
+                  ,fsci.[TexmpoExposicao]
+                  ,fsci.[DataInicioPrevisto]
+                  ,fsci.[DataTerminoPrevisto]
+                  ,fsci.[InicioRenovacao]
+                  ,fsci.[FaturamentoBrutoMensal]
+                  ,fsci.[PercentualPermuta]
+                  ,fsci.[CotaOportunidade]
+                  ,fsci.[ValorPermuta]
+                  ,fsci.[FaturamentoLiquidoPermuta]
+                  ,fsci.[NumeroParcelas]
+                  ,fsci.[DataInicioVencimento]
+                  ,fsci.[TotalBrutoContrato]
+                  ,fsci.[TotalLiquidoContratoAGBRCTACORDO]
+                  ,fsci.[TotalLiquidoContratoAGBRVENDGERCOOR]
+                  ,fsci.[PercentualAgencia]
+                  ,fsci.[ValorMensalAgencia]
+                  ,fsci.[PercentualBureau]
+                  ,fsci.[ValorBureauMensal]
+                  ,fsci.[PercentualCartaAcordo]
+                  ,fsci.[ValorCartaAcordoMensal]
+                  ,fsci.[ValorOutrasComissoes]
+                  ,fsci.[FaturamentoLiquidoMensal]
+                  ,fsci.[PercentualComissaoVendedor]
+                  ,fsci.[ValorVendedor]
+                  ,fsci.[ValorVendedorTotal]
+                  ,fsci.[PercentualComissaoCoordenacao]
+                  ,fsci.[ValorCoordenador]
+                  ,fsci.[ValorCoordenadorTotal]
+                  ,fsci.[PercentualComissaoGerencia]
+                  ,fsci.[ValorGerencia]
+                  ,fsci.[ValorGerenciaTotal]
+                  ,fsci.[AtivoCancelamento]
+                  ,fsci.[FaturamentoLiquidoFinalMensal]
+                  ,fsci.[ComissaoGerenciaNordeste]
+                  ,fsci.[Faturamento]
+                  ,fsci.[DataCancelamento]
+                  ,fsci.[OBS]
+                  ,fsci.[DataFimEfetiva]
+                  ,fsci.[Status]
+                  ,fsci.[BitAtivo]
+                  ,fsci.[DataCriacao]
+                  ,fsci.[DataAtualizacao]
+                  ,fsci.[BitSolicitacaoAtiva]
+                  ,df.[Face] AS [FaceDescricaoCadastro]
+                  ,df.[Tipo] AS [TipoFaceCadastro]
+                  ,dp.[Cidade] AS [CidadePainelCadastro]
+                  ,dp.[UF] AS [UFPainelCadastro]
+                  ,dp.[Tipo] AS [TipoPainelCadastro]
+                  ,dp.[Logradouro] AS [LogradouroPainelCadastro]
+                  ,dp.[Bairro] AS [BairroPainelCadastro]
+                  ,dp.[Referencia] AS [ReferenciaPainelCadastro]
+                  ,ROW_NUMBER() OVER (
+                        PARTITION BY
+                            fsci.[IDFatoSolicitacaoContratoEuromidia],
+                            CASE
+                                WHEN ISNULL(fsci.[IDFatoControleContratosItensEuromidia], 0) > 0 THEN
+                                    CONCAT('ITEM|', CAST(fsci.[IDFatoControleContratosItensEuromidia] AS varchar(50)))
+                                ELSE
+                                    CONCAT(
+                                        'LOGICO|',
+                                        CAST(ISNULL(fsci.[IDFatoControleContratosEuromidia], 0) AS varchar(50)),
+                                        '|', LTRIM(RTRIM(ISNULL(CAST(fsci.[CodPonto] AS varchar(50)), ''))),
+                                        '|', UPPER(LTRIM(RTRIM(ISNULL(CAST(fsci.[CodFace] AS varchar(50)), ''))))
+                                    )
+                            END
+                        ORDER BY
+                            CASE WHEN fsci.[DataAtualizacao] IS NULL THEN 1 ELSE 0 END,
+                            fsci.[DataAtualizacao] DESC,
+                            CASE WHEN fsci.[DataCriacao] IS NULL THEN 1 ELSE 0 END,
+                            fsci.[DataCriacao] DESC,
+                            fsci.[IDFatoSolicitacaoContratoItemEuromidia] DESC
+                    ) AS rn
+            FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] fsci
+            LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] df
+                   ON df.[IDDimFacesPaineis] = fsci.[IDDimFacesPaineis]
+            LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
+                   ON dp.[IDDimPaineisEuromidia] = COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia])
+            WHERE fsci.[IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
+        )
+        SELECT *
+        FROM itens_rankeados
+        WHERE rn = 1
+        ORDER BY
+            LTRIM(RTRIM(ISNULL(CAST([CodPonto] AS varchar(50)), ''))) ASC,
+            UPPER(LTRIM(RTRIM(ISNULL(CAST([CodFace] AS varchar(50)), '')))) ASC,
+            [IDFatoSolicitacaoContratoItemEuromidia] ASC
     """)
 
     cab = db.session.execute(
@@ -3234,7 +3266,6 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
         "solicitacao": cab,
         "itens": itens,
     }
-
 
 
 

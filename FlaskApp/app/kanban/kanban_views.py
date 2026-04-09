@@ -232,6 +232,81 @@ def _normalizar_tipo_contrato_card(valor: object) -> str | None:
 
 
 
+
+
+
+def _sincronizar_item_oficial_contrato_com_card_salvo(
+    *,
+    id_card: int,
+    id_empresa_relacionada: int | None,
+    id_contrato_existente: int | None,
+    cod_ponto_contrato: object = None,
+    cod_face_contrato: object = None,
+    contexto_erro: str = "salvar card",
+) -> dict[str, object]:
+    """
+    Eu sincronizo imediatamente o item oficial do contrato com o card salvo.
+
+    Regra:
+    - se houver contrato + CodPonto + CodFace no card, eu atualizo
+      FatoControleContratosItensEuromidia.IDFatoKanbanCard na hora;
+    - se não houver vínculo completo, eu não erro: apenas informo o motivo;
+    - se houver vínculo completo e nenhuma linha for atualizada, eu erro,
+      porque isso indica divergência de contrato/ponto/face.
+    """
+    resultado = {
+        "sincronizado": False,
+        "quantidade_itens_controle_contrato_atualizados": 0,
+        "motivo_itens_controle_contrato": None,
+    }
+
+    if id_contrato_existente in (None, "", 0):
+        resultado["motivo_itens_controle_contrato"] = "card_sem_contrato"
+        return resultado
+
+    cod_ponto_txt = str(cod_ponto_contrato or "").strip()
+    if not cod_ponto_txt:
+        resultado["motivo_itens_controle_contrato"] = "card_sem_cod_ponto_contrato"
+        return resultado
+
+    cod_face_txt = str(cod_face_contrato or "").strip().upper()
+    if not cod_face_txt:
+        resultado["motivo_itens_controle_contrato"] = "card_sem_cod_face_contrato"
+        return resultado
+
+    quantidade_itens_controle_contrato_atualizados = _atualizar_card_nos_itens_contrato_euromidia(
+        id_empresa=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        id_contrato=int(id_contrato_existente),
+        cod_ponto=cod_ponto_txt,
+        cod_face=cod_face_txt,
+        id_card=int(id_card),
+    )
+
+    resultado["sincronizado"] = True
+    resultado["quantidade_itens_controle_contrato_atualizados"] = int(
+        quantidade_itens_controle_contrato_atualizados or 0
+    )
+
+    if int(quantidade_itens_controle_contrato_atualizados or 0) <= 0:
+        raise RuntimeError(
+            "Nenhum item de FatoControleContratosItensEuromidia foi atualizado com o "
+            f"IDFatoKanbanCard ao {contexto_erro}. "
+            "Verifique contrato + CodPonto + CodFace gravados no card."
+        )
+
+    return resultado
+
+
+
+
+
+
+
+
+
+
+
+
 def _obter_tag_tipo_contrato(id_kanban: int, tipo_contrato: str) -> dict[str, object] | None:
     tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
 
@@ -470,20 +545,22 @@ def _obter_item_contrato_euromidia(
 
 
 
-
-
-
-
-
 def _registrar_log_contrato_card_euromidia(
     *,
     id_contrato: int | None,
     id_item_contrato: int | None,
-    id_usuario: int | None,
+    id_card: int | None = None,
+    id_usuario: int | None = None,
+    evento: str | None = None,
+    payload: dict[str, object] | None = None,
 ) -> None:
     """
     Eu gravo o vínculo/log solicitado em FatoContratoCardEuromidia
     somente quando houver contrato selecionado no fluxo de avaliação.
+
+    Observação:
+    - mantenho 'evento' e 'payload' por compatibilidade com chamadas antigas;
+    - se o id_usuario vier vazio, eu tento resolver pelo usuário logado.
     """
     if not _objeto_existe(TABELA_CONTRATO_CARD_EUROMIDIA):
         return
@@ -491,19 +568,36 @@ def _registrar_log_contrato_card_euromidia(
     if id_contrato in (None, "", 0):
         return
 
+    id_usuario_resolvido = None
+
+    try:
+        if id_usuario not in (None, "", 0):
+            id_usuario_resolvido = int(id_usuario)
+    except Exception:
+        id_usuario_resolvido = None
+
+    if id_usuario_resolvido in (None, 0):
+        try:
+            id_usuario_resolvido = _obter_id_dim_usuario_logado()
+        except Exception:
+            id_usuario_resolvido = None
+
     _inserir_registro_dinamico(
         TABELA_CONTRATO_CARD_EUROMIDIA,
         {
             "IDFatoControleContratosEuromidia": int(id_contrato),
-            "IDFatoControleContratosItensEuromidia": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
-            "IDDimUsuarios": int(id_usuario) if id_usuario not in (None, "", 0) else None,
+            "IDFatoControleContratosItensEuromidia": (
+                int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None
+            ),
+            "IDFatoKanbanCard": (
+                int(id_card) if id_card not in (None, "", 0) else None
+            ),
+            "IDDimUsuarios": (
+                int(id_usuario_resolvido) if id_usuario_resolvido not in (None, "", 0) else None
+            ),
         },
         colunas_getdate=("DataAtualizacao",),
     )
-
-
-
-
 
 
 
@@ -4122,6 +4216,7 @@ def _inativar_snapshots_solicitacao_contrato_do_card(id_card: int) -> None:
 
 
 
+
 def _sincronizar_snapshot_solicitacao_contrato_do_card(
     *,
     id_card: int,
@@ -4167,6 +4262,158 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             if isinstance(item, dict)
         )
         return 1 if (id_fase_atual == 4 or tem_tag_contrato_em_avaliacao) else 0
+
+    def _montar_ordem_item_snapshot(alias: str = "i") -> str:
+        ordem: list[str] = []
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+            ordem.append(f"{alias}.DataAtualizacao DESC")
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataCriacao"):
+            ordem.append(f"{alias}.DataCriacao DESC")
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoSolicitacaoContratoItemEuromidia"):
+            ordem.append(f"{alias}.IDFatoSolicitacaoContratoItemEuromidia DESC")
+        return ", ".join(ordem) if ordem else f"{alias}.IDFatoSolicitacaoContratoItemEuromidia DESC"
+
+    def _buscar_item_snapshot_existente_para_upsert(
+        *,
+        id_solicitacao: int,
+        id_contrato: int | None,
+        id_item_contrato: int | None,
+        cod_ponto: object = None,
+        cod_face: object = None,
+    ) -> dict[str, Any] | None:
+        if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+            return None
+
+        ordem_sql = _montar_ordem_item_snapshot("i")
+        filtros_base = ["i.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao"]
+        parametros_base: dict[str, object] = {"id_solicitacao": int(id_solicitacao)}
+
+        if (
+            id_item_contrato not in (None, "", 0)
+            and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoControleContratosItensEuromidia")
+        ):
+            filtros_item = list(filtros_base)
+            parametros_item = dict(parametros_base)
+            filtros_item.append("ISNULL(i.IDFatoControleContratosItensEuromidia, 0) = :id_item_contrato")
+            parametros_item["id_item_contrato"] = int(id_item_contrato)
+
+            row_item = db.session.execute(
+                text(
+                    f"""
+                    SELECT TOP (1)
+                        i.*
+                    FROM {TABELA_SOLICITACAO_CONTRATO_ITEM} i
+                    WHERE {' AND '.join(filtros_item)}
+                    ORDER BY {ordem_sql};
+                    """
+                ),
+                parametros_item,
+            ).mappings().first()
+
+            if row_item:
+                return dict(row_item)
+
+        cod_ponto_limpo = str(cod_ponto or "").strip() or None
+        cod_face_limpo = str(cod_face or "").strip().upper() or None
+
+        if not cod_ponto_limpo and not cod_face_limpo:
+            return None
+
+        filtros_logicos = list(filtros_base)
+        parametros_logicos = dict(parametros_base)
+
+        if id_contrato not in (None, "", 0) and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoControleContratosEuromidia"):
+            filtros_logicos.append("ISNULL(i.IDFatoControleContratosEuromidia, 0) = :id_contrato")
+            parametros_logicos["id_contrato"] = int(id_contrato)
+
+        if cod_ponto_limpo and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "CodPonto"):
+            filtros_logicos.append("LTRIM(RTRIM(ISNULL(CAST(i.CodPonto AS varchar(50)), ''))) = :cod_ponto")
+            parametros_logicos["cod_ponto"] = cod_ponto_limpo
+
+        if cod_face_limpo and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "CodFace"):
+            filtros_logicos.append("UPPER(LTRIM(RTRIM(ISNULL(CAST(i.CodFace AS varchar(50)), '')))) = :cod_face")
+            parametros_logicos["cod_face"] = cod_face_limpo
+
+        row_logico = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (1)
+                    i.*
+                FROM {TABELA_SOLICITACAO_CONTRATO_ITEM} i
+                WHERE {' AND '.join(filtros_logicos)}
+                ORDER BY {ordem_sql};
+                """
+            ),
+            parametros_logicos,
+        ).mappings().first()
+
+        return dict(row_logico) if row_logico else None
+
+    def _inativar_duplicados_do_item_snapshot(
+        *,
+        id_solicitacao: int,
+        id_item_manter: int,
+        id_contrato: int | None,
+        id_item_contrato: int | None,
+        cod_ponto: object = None,
+        cod_face: object = None,
+        coluna_atividade_item: str | None = None,
+    ) -> None:
+        if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+            return
+
+        filtros = [
+            "IDFatoSolicitacaoContratoEuromidia = :id_solicitacao",
+            "IDFatoSolicitacaoContratoItemEuromidia <> :id_item_manter",
+        ]
+        parametros: dict[str, object] = {
+            "id_solicitacao": int(id_solicitacao),
+            "id_item_manter": int(id_item_manter),
+        }
+
+        if (
+            id_item_contrato not in (None, "", 0)
+            and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoControleContratosItensEuromidia")
+        ):
+            filtros.append("ISNULL(IDFatoControleContratosItensEuromidia, 0) = :id_item_contrato")
+            parametros["id_item_contrato"] = int(id_item_contrato)
+        else:
+            cod_ponto_limpo = str(cod_ponto or "").strip() or None
+            cod_face_limpo = str(cod_face or "").strip().upper() or None
+
+            if id_contrato not in (None, "", 0) and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDFatoControleContratosEuromidia"):
+                filtros.append("ISNULL(IDFatoControleContratosEuromidia, 0) = :id_contrato")
+                parametros["id_contrato"] = int(id_contrato)
+
+            if cod_ponto_limpo and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "CodPonto"):
+                filtros.append("LTRIM(RTRIM(ISNULL(CAST(CodPonto AS varchar(50)), ''))) = :cod_ponto")
+                parametros["cod_ponto"] = cod_ponto_limpo
+
+            if cod_face_limpo and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "CodFace"):
+                filtros.append("UPPER(LTRIM(RTRIM(ISNULL(CAST(CodFace AS varchar(50)), '')))) = :cod_face")
+                parametros["cod_face"] = cod_face_limpo
+
+        sets: list[str] = []
+        if coluna_atividade_item:
+            sets.append(f"[{coluna_atividade_item}] = 0")
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitAtivo"):
+            sets.append("BitAtivo = 0")
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+            sets.append("DataAtualizacao = GETDATE()")
+
+        if not sets:
+            return
+
+        db.session.execute(
+            text(
+                f"""
+                UPDATE {TABELA_SOLICITACAO_CONTRATO_ITEM}
+                   SET {', '.join(sets)}
+                 WHERE {' AND '.join(filtros)};
+                """
+            ),
+            parametros,
+        )
 
     empresa = None
     if id_empresa_relacionada not in (None, "", 0):
@@ -4216,67 +4463,33 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     _registrar_log_contrato_card_euromidia(
         id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
         id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
-        id_usuario=int(id_usuario),
+        id_card=int(id_card),
+        evento="SNAPSHOT_SOLICITACAO_SYNC",
+        payload={
+            "tipo_contrato": tipo_norm,
+            "id_empresa_relacionada": id_empresa_relacionada,
+            "id_contrato_existente": id_contrato_existente,
+            "cod_ponto_contrato": cod_ponto_contrato,
+            "cod_face_contrato": cod_face_contrato,
+        },
     )
 
-    quantidade_itens_atualizados = 0
-    if (
-        id_contrato_existente not in (None, "", 0)
-        and str(cod_ponto_contrato or "").strip()
-        and str(cod_face_contrato or "").strip()
-    ):
-        quantidade_itens_atualizados = _atualizar_card_nos_itens_contrato_euromidia(
-            id_empresa=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
-            id_contrato=int(id_contrato_existente),
-            cod_ponto=cod_ponto_contrato,
-            cod_face=cod_face_contrato,
-            id_card=int(id_card),
-        )
-
-    if (
-        tipo_norm == TIPO_SOLICITACAO_ADITIVO
-        and id_contrato_existente not in (None, "", 0)
-        and str(cod_ponto_contrato or "").strip()
-        and str(cod_face_contrato or "").strip()
-        and quantidade_itens_atualizados <= 0
-    ):
-        raise RuntimeError(
-            "Nenhum item do contrato foi atualizado com o ID do card para a combinação "
-            "empresa + contrato + CodPonto + CodFace."
-        )
-
-    descricao_limpa = str(descricao_card or "").strip() or None
-    solicitacao_ativa = _resolver_solicitacao_ativa()
-    bit_solicitacao_ativa = 1 if solicitacao_ativa else 0
+    bit_solicitacao_ativa = _resolver_solicitacao_ativa()
     bit_registro_ativo = 1
-    coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
 
-    snapshot_existente = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
-    header_existente = (
-        snapshot_existente.get("header")
-        if isinstance((snapshot_existente or {}).get("header"), dict)
-        else None
-    )
+    solicitacao_existente = _obter_solicitacao_contrato_ativa_por_card(int(id_card))
+    if solicitacao_existente:
+        id_solicitacao_existente = int(solicitacao_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0)
+    else:
+        ultima_solicitacao = _obter_ultima_solicitacao_contrato_por_card(int(id_card))
+        id_solicitacao_existente = int(ultima_solicitacao.get("IDFatoSolicitacaoContratoEuromidia") or 0) if ultima_solicitacao else 0
 
-    id_solicitacao_existente = (
-        int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0)
-        if header_existente
-        else None
-    ) or None
-
-    id_status_contrato = _int_positivo_ou_none((header_existente or {}).get("IDDimStatusContratos"))
-    if id_status_contrato is None:
-        id_status_contrato = _int_positivo_ou_none((contrato_row or {}).get("IDDimStatusContratos"))
-    if id_status_contrato is None:
-        id_status_contrato = _obter_id_status_contrato_em_avaliacao()
-
-    valores_header = {
+    valores_solicitacao = {
         "IDFatoKanbanCard": int(id_card),
         "IDFatoControleContratosEuromidia": _int_positivo_ou_none(id_contrato_existente),
-        "IDDimStatusContratos": id_status_contrato,
-        "IDDimUsuariosCriacao": int(id_usuario),
-        "IDEmpresa": _int_positivo_ou_none(id_empresa_relacionada) or _int_positivo_ou_none((contrato_row or {}).get("IDEmpresa")),
-        "IDCategoriaMarca": _int_positivo_ou_none((contrato_row or {}).get("IDCategoriaMarca")),
+        "IDDimStatusContratos": _int_positivo_ou_none(_obter_id_status_contrato_em_avaliacao()),
+        "IDDimUsuariosCriacao": _int_positivo_ou_none(id_usuario),
+        "IDEmpresa": _int_positivo_ou_none(id_empresa_relacionada),
         "IDEmpresaProprietaria": _int_positivo_ou_none(id_empresa_proprietaria),
         "TipoSolicitacao": tipo_norm,
         "Referencia": (contrato_row or {}).get("Referencia"),
@@ -4321,17 +4534,20 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "TotalValorVendedor": (contrato_row or {}).get("TotalValorVendedor"),
         "ValorVendedorTotal": (contrato_row or {}).get("ValorVendedorTotal"),
         "TotalPercentualComissaoCoordenacao": (contrato_row or {}).get("TotalPercentualComissaoCoordenacao"),
-        "Observacao": descricao_limpa,
+        "Observacao": "Solicitação enviada para avaliação a partir do card.",
         "BitAtivo": bit_registro_ativo,
     }
 
+    header_existente = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
+
     campos_header_comparacao = [
-        "IDFatoKanbanCard", "IDFatoControleContratosEuromidia", "IDDimStatusContratos", "IDEmpresa",
-        "IDCategoriaMarca", "IDEmpresaProprietaria", "TipoSolicitacao", "Referencia", "NumeroContrato",
-        "NumeroPrevia", "CNPJ", "DataAssinaturaRenovacao", "IDTrimestre", "DataLancamento", "RazaoSocial",
-        "CPF", "MarcaExibida", "Vendedor", "TipoDocumento", "Origem", "SDR", "Agencia", "CnpjAgencia",
-        "Bureau", "CnpjBureau", "Intermediario", "CnpjIntermediario", "QuantidadePontos", "QuantidadeFaces",
-        "TotalFaturamentoBrutoMensal", "TotalPercentualPermuta", "TotalCotaOportunidade", "TotalValorPermuta",
+        "IDFatoKanbanCard", "IDFatoControleContratosEuromidia", "IDDimStatusContratos",
+        "IDEmpresa", "IDEmpresaProprietaria", "TipoSolicitacao", "Referencia",
+        "NumeroContrato", "NumeroPrevia", "CNPJ", "DataAssinaturaRenovacao", "IDTrimestre",
+        "DataLancamento", "RazaoSocial", "CPF", "MarcaExibida", "Vendedor", "TipoDocumento",
+        "Origem", "SDR", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario",
+        "CnpjIntermediario", "QuantidadePontos", "QuantidadeFaces", "TotalFaturamentoBrutoMensal",
+        "TotalPercentualPermuta", "TotalCotaOportunidade", "TotalValorPermuta",
         "TotalFaturamentoLiquidoPermuta", "TotalBrutoContrato", "TotalLiquidoContratoAGBRCTACORDO",
         "TotalLiquidoContratoAGBRVENDGERCOOR", "TotalPercentualAgencia", "TotalValorMensalAgencia",
         "TotalPercentualBureau", "TotalValorBureauMensal", "TotalPercentualCartaAcordo",
@@ -4344,71 +4560,42 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         bool(header_existente)
         and _registro_dinamico_equivalente(
             header_existente,
-            valores_header,
+            valores_solicitacao,
             campos_header_comparacao,
             nome_tabela=TABELA_SOLICITACAO_CONTRATO,
         )
     )
 
-    if header_existente:
-        id_solicitacao = int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0) or None
-        if not header_igual:
-            colunas_getdate_update_header = ["DataAtualizacao"]
-            if solicitacao_ativa:
-                colunas_getdate_update_header.append("DataEnvioAvaliacao")
+    if header_existente and header_existente.get("IDFatoSolicitacaoContratoEuromidia") not in (None, "", 0):
+        id_solicitacao = int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0)
 
+        if not header_igual:
             _atualizar_registro_dinamico_por_id(
                 TABELA_SOLICITACAO_CONTRATO,
                 "IDFatoSolicitacaoContratoEuromidia",
                 id_solicitacao,
-                valores_header,
-                colunas_getdate=tuple(colunas_getdate_update_header),
+                valores_solicitacao,
+                colunas_getdate=("DataAtualizacao",),
             )
     else:
-        colunas_getdate_insert_header = ["DataCriacao", "DataAtualizacao"]
-        if solicitacao_ativa:
-            colunas_getdate_insert_header.append("DataEnvioAvaliacao")
-
         id_solicitacao = _inserir_registro_dinamico_output_id(
             TABELA_SOLICITACAO_CONTRATO,
             "IDFatoSolicitacaoContratoEuromidia",
-            valores_header,
-            colunas_getdate=tuple(colunas_getdate_insert_header),
+            valores_solicitacao,
+            colunas_getdate=("DataCriacao", "DataAtualizacao", "DataEnvioAvaliacao"),
         )
+        header_igual = False
 
-    if not id_solicitacao:
-        raise RuntimeError("Não foi possível persistir o snapshot da solicitação de contrato do card.")
-
-    """
-    Regra nova:
-    - não insiro item snapshot vazio;
-    - se for ADITIVO, só persisto item quando o item do contrato foi resolvido;
-    - se for NOVO CONTRATO, só persisto item quando houver pelo menos CodPonto/CodFace reais.
-    """
-    deve_persistir_item = False
-
-    if tipo_norm == TIPO_SOLICITACAO_ADITIVO:
-        deve_persistir_item = bool(id_item_contrato)
-    else:
-        deve_persistir_item = bool(str(cod_ponto_contrato or "").strip() and str(cod_face_contrato or "").strip())
-
-    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM) or not deve_persistir_item:
-        return {
-            "sincronizado": True,
-            "sem_alteracao": bool(header_igual),
-            "id_solicitacao": int(id_solicitacao),
-            "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
-            "tipo_solicitacao": tipo_norm,
-            "bit_solicitacao_ativa": bit_solicitacao_ativa,
-        }
+    coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
+    descricao_limpa = (descricao_card or "").strip() or None
 
     valores_item = {
         "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
         "IDFatoControleContratosEuromidia": _int_positivo_ou_none(id_contrato_existente),
         "IDFatoControleContratosItensEuromidia": _int_positivo_ou_none(id_item_contrato),
-        "IDFatoKanbanCard": int(id_card),
-        "IDDimUsuariosCriacao": int(id_usuario),
-        "IDDimUsuariosAtualizacao": int(id_usuario),
+        "IDFatoKanbanCard": _int_positivo_ou_none(id_card),
+        "IDDimUsuariosCriacao": _int_positivo_ou_none(id_usuario),
+        "IDDimUsuariosAtualizacao": _int_positivo_ou_none(id_usuario),
         "IDVendedor": _int_positivo_ou_none((item_contrato or {}).get("IDVendedor")),
         "IDPainelEuromidia": _int_positivo_ou_none((item_contrato or {}).get("IDPainelEuromidia")),
         "IDDimFacesPaineis": _int_positivo_ou_none((item_contrato or {}).get("IDDimFacesPaineis")),
@@ -4486,8 +4673,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     if coluna_atividade_item == "BitSolicitacaoAtiva":
         valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
 
-    item_existente = _obter_item_solicitacao_editavel_por_chave(
-        id_card=int(id_card),
+    item_existente = _buscar_item_snapshot_existente_para_upsert(
         id_solicitacao=int(id_solicitacao),
         id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
         id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
@@ -4523,19 +4709,34 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     )
 
     if item_existente and item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") not in (None, "", 0):
+        id_item_snapshot = int(item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") or 0)
+
         if not item_igual:
             _atualizar_registro_dinamico_por_id(
                 TABELA_SOLICITACAO_CONTRATO_ITEM,
                 "IDFatoSolicitacaoContratoItemEuromidia",
-                int(item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") or 0),
+                id_item_snapshot,
                 valores_item,
                 colunas_getdate=("DataAtualizacao",),
             )
     else:
-        _inserir_registro_dinamico(
+        id_item_snapshot = _inserir_registro_dinamico_output_id(
             TABELA_SOLICITACAO_CONTRATO_ITEM,
+            "IDFatoSolicitacaoContratoItemEuromidia",
             valores_item,
             colunas_getdate=("DataCriacao", "DataAtualizacao"),
+        )
+        item_igual = False
+
+    if id_item_snapshot not in (None, "", 0):
+        _inativar_duplicados_do_item_snapshot(
+            id_solicitacao=int(id_solicitacao),
+            id_item_manter=int(id_item_snapshot),
+            id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+            id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+            cod_ponto=valores_item.get("CodPonto"),
+            cod_face=valores_item.get("CodFace"),
+            coluna_atividade_item=coluna_atividade_item,
         )
 
     return {
@@ -4545,9 +4746,8 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
         "tipo_solicitacao": tipo_norm,
         "bit_solicitacao_ativa": bit_solicitacao_ativa,
+        "id_solicitacao_existente": id_solicitacao_existente,
     }
-
-
 
 
 
@@ -4839,8 +5039,6 @@ def _criar_solicitacao_contrato_em_avaliacao_para_card(
 
 
 
-
-
 def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     *,
     id_card: int,
@@ -4852,10 +5050,10 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
 
     Regra:
     - sempre sincronizo o snapshot principal do card;
-    - quando o card entra na fase 4, também atualizo o IDFatoKanbanCard
-      no item oficial do contrato em FatoControleContratosItensEuromidia;
-    - depois propago BitSolicitacaoAtiva para TODOS os itens da solicitação
-      do card em FatoSolicitacaoContratoItemEuromidia.
+    - sempre que o card tiver contrato + CodPonto + CodFace, eu mantenho
+      FatoControleContratosItensEuromidia.IDFatoKanbanCard apontando para o card atual;
+    - a fase 4 continua sendo especial apenas para atividade/status da solicitação;
+    - depois propago BitSolicitacaoAtiva para TODOS os itens da solicitação do card.
     """
     detalhe = _obter_card_detalhe_payload(int(id_card))
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
@@ -4913,40 +5111,21 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
     )
 
-    resultado["quantidade_itens_controle_contrato_atualizados"] = 0
-    resultado["motivo_itens_controle_contrato"] = None
+    sincronizacao_item_oficial_contrato = _sincronizar_item_oficial_contrato_com_card_salvo(
+        id_card=int(id_card),
+        id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        cod_ponto_contrato=cod_ponto_contrato,
+        cod_face_contrato=cod_face_contrato,
+        contexto_erro="mover o card de fase",
+    )
 
-    """
-    Aqui está a regra nova:
-    se o card entrou na fase 4, eu amarro o item oficial do contrato
-    com o ID do card atual.
-    """
-    if int(id_fase_atual) == 4:
-        if id_contrato_existente in (None, "", 0):
-            resultado["motivo_itens_controle_contrato"] = "card_sem_contrato"
-        elif not str(cod_ponto_contrato or "").strip():
-            resultado["motivo_itens_controle_contrato"] = "card_sem_cod_ponto_contrato"
-        elif not str(cod_face_contrato or "").strip():
-            resultado["motivo_itens_controle_contrato"] = "card_sem_cod_face_contrato"
-        else:
-            quantidade_itens_controle_contrato_atualizados = _atualizar_card_nos_itens_contrato_euromidia(
-                id_empresa=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
-                id_contrato=int(id_contrato_existente),
-                cod_ponto=cod_ponto_contrato,
-                cod_face=cod_face_contrato,
-                id_card=int(id_card),
-            )
-
-            resultado["quantidade_itens_controle_contrato_atualizados"] = int(
-                quantidade_itens_controle_contrato_atualizados or 0
-            )
-
-            if int(quantidade_itens_controle_contrato_atualizados or 0) <= 0:
-                raise RuntimeError(
-                    "Nenhum item de FatoControleContratosItensEuromidia foi atualizado com o "
-                    "IDFatoKanbanCard ao mover o card para a fase 4. "
-                    "Verifique contrato + CodPonto + CodFace gravados no card."
-                )
+    resultado["quantidade_itens_controle_contrato_atualizados"] = int(
+        sincronizacao_item_oficial_contrato.get("quantidade_itens_controle_contrato_atualizados") or 0
+    )
+    resultado["motivo_itens_controle_contrato"] = sincronizacao_item_oficial_contrato.get(
+        "motivo_itens_controle_contrato"
+    )
 
     coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
     if not coluna_atividade_item:
@@ -5001,8 +5180,6 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     resultado["quantidade_itens_atualizados"] = int(quantidade_itens or 0)
     resultado["motivo_itens"] = "itens_solicitacao_sincronizados"
     return resultado
-
-
 
 
 
@@ -16920,7 +17097,6 @@ def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
 
 
 
-
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/cards", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -17158,6 +17334,41 @@ def api_card_criar(id_kanban: int):
             contrato_existente=contrato_existente,
         )
 
+        sincronizacao_item_contrato = {
+            "sincronizado": False,
+            "quantidade_itens_controle_contrato_atualizados": 0,
+            "motivo_itens_controle_contrato": None,
+        }
+
+        if contexto_tipo_contrato["id_contrato_existente"] not in (None, "", 0):
+            cod_ponto_salvo = str(validacao_ponto_face.get("cod_ponto") or "").strip()
+            cod_face_salva = str(validacao_ponto_face.get("cod_face") or "").strip().upper()
+
+            if not cod_ponto_salvo:
+                sincronizacao_item_contrato["motivo_itens_controle_contrato"] = "card_sem_cod_ponto_contrato"
+            elif not cod_face_salva:
+                sincronizacao_item_contrato["motivo_itens_controle_contrato"] = "card_sem_cod_face_contrato"
+            else:
+                quantidade_itens_controle_contrato_atualizados = _atualizar_card_nos_itens_contrato_euromidia(
+                    id_empresa=int(id_empresa_relacionada_int) if id_empresa_relacionada_int not in (None, "", 0) else None,
+                    id_contrato=int(contexto_tipo_contrato["id_contrato_existente"]),
+                    cod_ponto=cod_ponto_salvo,
+                    cod_face=cod_face_salva,
+                    id_card=int(novo_id),
+                )
+
+                sincronizacao_item_contrato["sincronizado"] = True
+                sincronizacao_item_contrato["quantidade_itens_controle_contrato_atualizados"] = int(
+                    quantidade_itens_controle_contrato_atualizados or 0
+                )
+
+                if int(quantidade_itens_controle_contrato_atualizados or 0) <= 0:
+                    raise RuntimeError(
+                        "Nenhum item de FatoControleContratosItensEuromidia foi atualizado com o "
+                        "IDFatoKanbanCard ao salvar o card recém-criado. "
+                        "Verifique contrato + CodPonto + CodFace gravados no card."
+                    )
+
         _garantir_tag_em_atendimento_no_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -17214,6 +17425,7 @@ def api_card_criar(id_kanban: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_item_contrato": sincronizacao_item_contrato,
             },
         )
 
@@ -17229,6 +17441,7 @@ def api_card_criar(id_kanban: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_item_contrato": sincronizacao_item_contrato,
             }
         ), 201
 
@@ -17241,7 +17454,6 @@ def api_card_criar(id_kanban: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao criar card no kanban %s. etapa=%s", id_kanban, etapa)
         return jsonify({"ok": False, "msg": f"Erro ao criar card: {str(exc)}"}), 500
-
 
 
 
@@ -17379,6 +17591,26 @@ def api_card_atualizar(id_card: int):
             campos_update.append("BitContratoNovo = :bit_contrato_novo")
             params_update["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
 
+        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia"):
+            campos_update.append("IDFatoControleContratosEuromidia = :id_contrato_vinculado")
+            params_update["id_contrato_vinculado"] = contexto_tipo_contrato["id_contrato_existente"]
+
+        elif _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia"):
+            campos_update.append("IDFatoControleContratoEuromidia = :id_contrato_vinculado")
+            params_update["id_contrato_vinculado"] = contexto_tipo_contrato["id_contrato_existente"]
+
+        if _coluna_existe(TABELA_CARD, "CodPontoContrato"):
+            campos_update.append("CodPontoContrato = :cod_ponto_contrato")
+            params_update["cod_ponto_contrato"] = validacao_ponto_face.get("cod_ponto")
+
+        if _coluna_existe(TABELA_CARD, "CodFaceContrato"):
+            campos_update.append("CodFaceContrato = :cod_face_contrato")
+            params_update["cod_face_contrato"] = validacao_ponto_face.get("cod_face")
+
+        if tipo_cliente_desconto_informado and _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto"):
+            campos_update.append("IDDimKanbanTipoClienteDesconto = :id_tipo_cliente_desconto")
+            params_update["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
+
         output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
         where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
 
@@ -17439,6 +17671,41 @@ def api_card_atualizar(id_card: int):
             descricao_card=descricao,
             contrato_existente=contrato_existente,
         )
+
+        sincronizacao_item_contrato = {
+            "sincronizado": False,
+            "quantidade_itens_controle_contrato_atualizados": 0,
+            "motivo_itens_controle_contrato": None,
+        }
+
+        if contexto_tipo_contrato["id_contrato_existente"] not in (None, "", 0):
+            cod_ponto_salvo = str(validacao_ponto_face.get("cod_ponto") or "").strip()
+            cod_face_salva = str(validacao_ponto_face.get("cod_face") or "").strip().upper()
+
+            if not cod_ponto_salvo:
+                sincronizacao_item_contrato["motivo_itens_controle_contrato"] = "card_sem_cod_ponto_contrato"
+            elif not cod_face_salva:
+                sincronizacao_item_contrato["motivo_itens_controle_contrato"] = "card_sem_cod_face_contrato"
+            else:
+                quantidade_itens_controle_contrato_atualizados = _atualizar_card_nos_itens_contrato_euromidia(
+                    id_empresa=int(id_empresa_relacionada_int) if id_empresa_relacionada_int not in (None, "", 0) else None,
+                    id_contrato=int(contexto_tipo_contrato["id_contrato_existente"]),
+                    cod_ponto=cod_ponto_salvo,
+                    cod_face=cod_face_salva,
+                    id_card=int(id_card),
+                )
+
+                sincronizacao_item_contrato["sincronizado"] = True
+                sincronizacao_item_contrato["quantidade_itens_controle_contrato_atualizados"] = int(
+                    quantidade_itens_controle_contrato_atualizados or 0
+                )
+
+                if int(quantidade_itens_controle_contrato_atualizados or 0) <= 0:
+                    raise RuntimeError(
+                        "Nenhum item de FatoControleContratosItensEuromidia foi atualizado com o "
+                        "IDFatoKanbanCard ao salvar o card. "
+                        "Verifique contrato + CodPonto + CodFace gravados no card."
+                    )
 
         vinculos_preparados: list[dict[str, object]] = []
         reservas_criadas = 0
@@ -17573,6 +17840,7 @@ def api_card_atualizar(id_card: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_item_contrato": sincronizacao_item_contrato,
             },
         )
 
@@ -17592,6 +17860,7 @@ def api_card_atualizar(id_card: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_item_contrato": sincronizacao_item_contrato,
             }
         )
 
