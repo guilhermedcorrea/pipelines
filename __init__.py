@@ -156,3 +156,17 @@ docker compose exec airflow-apiserver airflow users create \
 #Reduild e restart compose
 #docker compose down
 #docker compose up -d --build
+
+
+
+#rebuild com celery
+
+
+#docker compose down
+#docker compose build --no-cache flask-app celery-checking-worker
+#docker compose up -d
+
+##verificar log
+
+
+#docker compose logs -f celery-checking-worker

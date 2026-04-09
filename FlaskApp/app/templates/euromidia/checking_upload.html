@@ -129,56 +129,82 @@
     </form>
   </div>
 
-  {% if checking %}
-  <div class="card" style="margin-top:18px;">
+  <div
+    id="checking-processamento-card"
+    class="card"
+    style="margin-top:18px; display:{% if processamento_pendente %}block{% else %}none{% endif %};"
+  >
+    <h2 class="page-title" style="font-size:18px;">Processando mockup</h2>
+    <div id="checking-processamento-status" class="muted">
+      Seu upload foi recebido. O mockup está sendo processado em segundo plano...
+    </div>
+  </div>
+
+  <div
+    id="checking-resultado-card"
+    class="card"
+    style="margin-top:18px; display:{% if checking %}block{% else %}none{% endif %};"
+  >
     <h2 class="page-title" style="font-size:18px;">Resultado gerado</h2>
 
     <div class="grid" style="align-items:start;">
       <div>
         <div style="font-weight:800; margin-bottom:8px;">Mockup gerado</div>
         <img
-          src="{{ checking.UrlImagemGerada }}"
+          id="checking-resultado-imagem"
+          src="{% if checking %}{{ checking.UrlImagemGerada }}{% else %}{% endif %}"
           alt="Mockup gerado"
-          style="width:100%; border-radius:12px; border:1px solid #E5E7EB;"
+          style="width:100%; border-radius:12px; border:1px solid #E5E7EB; {% if not checking %}display:none;{% endif %}"
         >
       </div>
 
       <div>
         <div style="font-weight:800; margin-bottom:8px;">Dados do checking</div>
-        <div class="muted">ID: <b>{{ checking.IDDimCheckingHistorico }}</b></div>
-        <div class="muted">Empresa: <b>{{ checking.RazaoSocial }}</b></div>
-        <div class="muted">Contrato: <b>{{ checking.IDFatoControleContratosEuromidia }}</b></div>
-        <div class="muted">Ponto: <b>{{ checking.CodPonto }}</b></div>
-        <div class="muted">Face: <b>{{ checking.CodFace }}</b></div>
-        <div class="muted">
+        <div class="muted" id="checking-resultado-id">
+          ID: <b>{% if checking %}{{ checking.IDDimCheckingHistorico }}{% endif %}</b>
+        </div>
+        <div class="muted" id="checking-resultado-empresa">
+          Empresa: <b>{% if checking %}{{ checking.RazaoSocial }}{% endif %}</b>
+        </div>
+        <div class="muted" id="checking-resultado-contrato">
+          Contrato: <b>{% if checking %}{{ checking.IDFatoControleContratosEuromidia }}{% endif %}</b>
+        </div>
+        <div class="muted" id="checking-resultado-ponto">
+          Ponto: <b>{% if checking %}{{ checking.CodPonto }}{% endif %}</b>
+        </div>
+        <div class="muted" id="checking-resultado-face">
+          Face: <b>{% if checking %}{{ checking.CodFace }}{% endif %}</b>
+        </div>
+        <div class="muted" id="checking-resultado-status-texto">
           Status:
-          {% if checking.BitChekin %}
-            <b style="color:green;">Checkin concluído</b>
-          {% else %}
-            <b style="color:#b45309;">Pendente de confirmação</b>
+          {% if checking %}
+            {% if checking.BitChekin %}
+              <b style="color:green;">Checkin concluído</b>
+            {% else %}
+              <b style="color:#b45309;">Pendente de confirmação</b>
+            {% endif %}
           {% endif %}
         </div>
 
-        {% if not checking.BitChekin %}
         <form
+          id="checking-form-confirmar"
           method="POST"
-          action="{{ url_for('Paineis.checking_confirmar', id_checking=checking.IDDimCheckingHistorico) }}"
-          style="margin-top:16px;"
+          action="{% if checking %}{{ url_for('Paineis.checking_confirmar', id_checking=checking.IDDimCheckingHistorico) }}{% else %}#{% endif %}"
+          style="margin-top:16px; {% if not checking or checking.BitChekin %}display:none;{% endif %}"
         >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit">Confirmar Checking</button>
         </form>
-        {% else %}
+
         <div
-          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800;"
+          id="checking-status-concluido"
+          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800; {% if not checking or not checking.BitChekin %}display:none;{% endif %}"
         >
           Checkin concluído
         </div>
-        {% endif %}
       </div>
     </div>
   </div>
-  {% endif %}
 </div>
 
 <style>
@@ -931,9 +957,155 @@
     }
   }
 
+
+  const taskIdInicial = {{ (task_id or "")|tojson }};
+  const processamentoPendenteInicial = {{ (processamento_pendente or False)|tojson }};
+
+  const cardProcessamento = document.getElementById("checking-processamento-card");
+  const statusProcessamento = document.getElementById("checking-processamento-status");
+
+  const cardResultado = document.getElementById("checking-resultado-card");
+  const imagemResultado = document.getElementById("checking-resultado-imagem");
+  const resultadoId = document.getElementById("checking-resultado-id");
+  const resultadoEmpresa = document.getElementById("checking-resultado-empresa");
+  const resultadoContrato = document.getElementById("checking-resultado-contrato");
+  const resultadoPonto = document.getElementById("checking-resultado-ponto");
+  const resultadoFace = document.getElementById("checking-resultado-face");
+  const resultadoStatusTexto = document.getElementById("checking-resultado-status-texto");
+  const formConfirmar = document.getElementById("checking-form-confirmar");
+  const statusConcluido = document.getElementById("checking-status-concluido");
+
+  function mostrarCardProcessamento(texto) {
+    if (cardProcessamento) {
+      cardProcessamento.style.display = "block";
+    }
+    if (statusProcessamento) {
+      statusProcessamento.textContent = texto || "Processando mockup...";
+    }
+  }
+
+  function esconderCardProcessamento() {
+    if (cardProcessamento) {
+      cardProcessamento.style.display = "none";
+    }
+  }
+
+  function preencherLinhaResultado(elemento, rotulo, valor) {
+    if (!elemento) {
+      return;
+    }
+
+    const valorSeguro = String(valor || "").trim();
+    elemento.innerHTML = `${rotulo}: <b>${valorSeguro}</b>`;
+  }
+
+  function mostrarResultadoChecking(resultado) {
+    if (!resultado) {
+      return;
+    }
+
+    esconderCardProcessamento();
+
+    if (cardResultado) {
+      cardResultado.style.display = "block";
+    }
+
+    if (imagemResultado && resultado.url_imagem_gerada) {
+      imagemResultado.src = resultado.url_imagem_gerada;
+      imagemResultado.style.display = "block";
+    }
+
+    preencherLinhaResultado(resultadoId, "ID", resultado.id_checking || "");
+    preencherLinhaResultado(resultadoEmpresa, "Empresa", resultado.razao_social || "");
+    preencherLinhaResultado(resultadoContrato, "Contrato", resultado.id_fato_controle_contratos || "");
+    preencherLinhaResultado(resultadoPonto, "Ponto", resultado.cod_ponto || "");
+    preencherLinhaResultado(resultadoFace, "Face", resultado.cod_face || "");
+
+    if (resultadoStatusTexto) {
+      resultadoStatusTexto.innerHTML = 'Status: <b style="color:#b45309;">Pendente de confirmação</b>';
+    }
+
+    if (formConfirmar && resultado.url_confirmacao) {
+      formConfirmar.action = resultado.url_confirmacao;
+      formConfirmar.style.display = "block";
+    }
+
+    if (statusConcluido) {
+      statusConcluido.style.display = "none";
+    }
+  }
+
+  async function consultarStatusChecking(taskId) {
+    const taskIdLimpo = String(taskId || "").trim();
+    if (!taskIdLimpo) {
+      return;
+    }
+
+    mostrarCardProcessamento("Seu upload foi recebido. O mockup está sendo processado em segundo plano...");
+
+    let tentativas = 0;
+    const maxTentativas = 180;
+
+    while (tentativas < maxTentativas) {
+      tentativas += 1;
+
+      try {
+        const resposta = await fetch(`/paineis/checking/status/${encodeURIComponent(taskIdLimpo)}`, {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "X-Requested-With": "XMLHttpRequest"
+          }
+        });
+
+        const payload = await resposta.json();
+
+        if (!resposta.ok) {
+          const erroTexto = (payload && (payload.erro || payload.msg)) || "Falha ao consultar o status do checking.";
+          mostrarCardProcessamento(erroTexto);
+          return;
+        }
+
+        const status = String(payload.status || "").toUpperCase();
+
+        if (status === "SUCCESS" && payload.resultado) {
+          mostrarResultadoChecking(payload.resultado);
+          return;
+        }
+
+        if (status === "FAILURE" || status === "REVOKED") {
+          const erroTexto = (payload && (payload.erro || payload.msg)) || "Falha ao processar o checking.";
+          mostrarCardProcessamento(erroTexto);
+          return;
+        }
+
+        if (status === "STARTED") {
+          mostrarCardProcessamento("Mockup em processamento...");
+        } else if (status === "PENDING") {
+          mostrarCardProcessamento("Upload recebido. Aguardando início do processamento...");
+        } else {
+          mostrarCardProcessamento(`Processando... (${status})`);
+        }
+      } catch (erro) {
+        console.error("[CHECKING] erro ao consultar status:", erro);
+        mostrarCardProcessamento("Erro ao consultar o status do processamento. Tentando novamente...");
+      }
+
+      await new Promise(function (resolve) {
+        window.setTimeout(resolve, 2000);
+      });
+    }
+
+    mostrarCardProcessamento("O processamento está demorando mais do que o esperado. Atualize a página em alguns segundos.");
+  }
+
   (async function iniciarTela() {
     await inicializarContratosSeJaExistirEmpresa();
     await inicializarPontoEFaceSeExistiremValores();
+
+    if (processamentoPendenteInicial && taskIdInicial) {
+      await consultarStatusChecking(taskIdInicial);
+    }
   })();
 })();
 </script>

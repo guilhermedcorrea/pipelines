@@ -37,6 +37,7 @@ def _fim_exclusivo_do_dia(dt: date):
     return dt + timedelta(days=1)
 
 
+
 def _tem_filtro_ativo(
     q: str,
     sistema: str,

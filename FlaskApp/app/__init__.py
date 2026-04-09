@@ -29,6 +29,7 @@ def create_app() -> Flask:
     if not app.config["SECRET_KEY"]:
         raise RuntimeError("SECRET_KEY não definida no .env ou ambiente!")
 
+
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -49,6 +50,11 @@ def create_app() -> Flask:
     app.config["LARGURA_MAXIMA_IMAGEM"] = LARGURA_MAXIMA_IMAGEM
     app.config["ALTURA_MAXIMA_IMAGEM"] = ALTURA_MAXIMA_IMAGEM
     app.config["MAX_CONTENT_LENGTH"] = TAMANHO_MAXIMO_UPLOAD_MB * 1024 * 1024
+    app.config["CHECKING_PASTA_TEMP"] = os.getenv(
+                "CHECKING_PASTA_TEMP",
+                "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp",
+            )
+
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = False

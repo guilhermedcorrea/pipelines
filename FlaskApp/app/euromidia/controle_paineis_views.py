@@ -36,6 +36,40 @@ from werkzeug.utils import secure_filename
 import uuid
 from ..autenticacao.acl_menu_paineis import pode_acessar_menu_paineis, requer_item_menu_paineis
 
+import shutil
+from celery.result import AsyncResult
+
+from ..celery_app import celery_app
+from ..tasks.checking_tasks import processar_checking_upload
+
+
+
+
+
+
+def _obter_pasta_temp_checking() -> Path:
+    """Eu resolvo a pasta temporária do checking com fallback seguro."""
+    candidatos = [
+        current_app.config.get("CHECKING_PASTA_TEMP"),
+        current_app.config.get("PASTA_TEMP_CHECKING"),
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp",
+    ]
+
+    for candidato in candidatos:
+        texto = str(candidato or "").strip()
+        if texto:
+            return Path(texto)
+
+    raise RuntimeError("Não foi possível resolver a pasta temporária do checking.")
+
+
+
+
+
+
+
+
+
 
 
 paineis_bp = Blueprint("Paineis", __name__)
@@ -13962,30 +13996,48 @@ def _localizar_fundo_checking(cod_ponto: str, cod_face: str) -> Path:
 
 
 
+
+
 def _salvar_upload_original_checking(
     *,
-    arquivo,
     pasta_destino: Path,
     id_empresa: int,
     cod_face: str,
     data_checking: date,
+    arquivo=None,
+    caminho_arquivo_origem: str | Path | None = None,
+    nome_original_cliente: str | None = None,
 ) -> tuple[str, Path]:
     """
     Eu salvo a imagem importada dentro da pasta da empresa.
 
-    Regra:
-    - não crio pasta uploads
-    - salvo em /pontos/<codponto>/<codface>/<IDEmpresa>/
-    - o nome salvo fica no padrão:
-      cod_face_data_idempresa_upload.ext
+    Posso receber:
+    - arquivo da request Flask
+    - caminho temporário já salvo em disco
     """
 
-    nome_original = _normalizar_texto_checking(getattr(arquivo, "filename", ""))
+    if arquivo is None and caminho_arquivo_origem is None:
+        raise ValueError("Informe 'arquivo' ou 'caminho_arquivo_origem' para salvar o upload original.")
+
+    caminho_origem = Path(str(caminho_arquivo_origem).strip()) if caminho_arquivo_origem else None
+
+    nome_original = (
+        _normalizar_texto_checking(nome_original_cliente)
+        or _normalizar_texto_checking(getattr(arquivo, "filename", ""))
+        or (caminho_origem.name if caminho_origem else "")
+        or "arquivo"
+    )
+
     nome_seguro = secure_filename(nome_original) if nome_original else ""
     extensao = Path(nome_seguro).suffix.lower()
 
+    if not extensao and caminho_origem is not None:
+        extensao = caminho_origem.suffix.lower()
+
     if not extensao:
         extensao = ".jpg"
+
+    _garantir_pasta(pasta_destino)
 
     nome_base = f"{cod_face}_{data_checking.strftime('%Y%m%d')}_{int(id_empresa)}_upload"
     caminho_saida = pasta_destino / f"{nome_base}{extensao}"
@@ -13995,10 +14047,194 @@ def _salvar_upload_original_checking(
         caminho_saida = pasta_destino / f"{nome_base}_{contador:02d}{extensao}"
         contador += 1
 
-    arquivo.stream.seek(0)
-    arquivo.save(caminho_saida)
+    if arquivo is not None:
+        arquivo.stream.seek(0)
+        arquivo.save(caminho_saida)
+    else:
+        if not caminho_origem or not caminho_origem.exists() or not caminho_origem.is_file():
+            raise FileNotFoundError(f"Arquivo temporário não encontrado: {caminho_origem}")
+        shutil.move(str(caminho_origem), str(caminho_saida))
 
     return nome_original, caminho_saida
+
+
+
+
+
+
+
+def _processar_upload_checking_por_caminho(
+    *,
+    id_empresa: int,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+    data_checking_iso: str,
+    caminho_arquivo_temporario: str,
+    nome_original_cliente: str | None = None,
+    cnpj_digitado: str | None = None,
+    observacao: str | None = None,
+    id_usuario_criacao: int | None = None,
+) -> dict[str, object]:
+    """Eu processo o checking usando arquivo temporário já salvo e devolvo um payload serializável."""
+
+    cod_ponto_txt = _somente_digitos(cod_ponto)
+    cod_face_txt = _normalizar_texto_checking(cod_face).upper()
+    observacao_txt = _normalizar_texto_checking(observacao) or None
+    cnpj_txt = _somente_digitos(cnpj_digitado) or None
+
+    if not cod_ponto_txt:
+        raise ValueError("CodPonto não informado.")
+
+    if not cod_face_txt:
+        raise ValueError("CodFace não informado.")
+
+    if not id_empresa:
+        raise ValueError("Empresa não informada.")
+
+    if not id_fato_controle_contratos:
+        raise ValueError("Contrato não informado.")
+
+    try:
+        data_checking = datetime.strptime(str(data_checking_iso), "%Y-%m-%d").date()
+    except Exception as exc:
+        raise ValueError("Data de checking inválida para processamento assíncrono.") from exc
+
+    cod_ponto_int = int(cod_ponto_txt)
+    id_empresa_int = int(id_empresa)
+
+    try:
+        pasta_face, caminho_imagem_painel, caminho_fundo = _buscar_paths_mockup(
+            cod_ponto_int,
+            cod_face_txt,
+        )
+
+        pasta_empresa = pasta_face / str(id_empresa_int)
+        _garantir_pasta(pasta_empresa)
+
+        nome_original_cliente, caminho_imagem_upload = _salvar_upload_original_checking(
+            pasta_destino=pasta_empresa,
+            id_empresa=id_empresa_int,
+            cod_face=cod_face_txt,
+            data_checking=data_checking,
+            caminho_arquivo_origem=caminho_arquivo_temporario,
+            nome_original_cliente=nome_original_cliente,
+        )
+
+        nome_base_gerado = f"{cod_face_txt}_{data_checking.strftime('%Y%m%d')}_gerado_{id_empresa_int}"
+        caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}.jpg"
+
+        contador = 1
+        while caminho_imagem_gerada.exists():
+            caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}_{contador:02d}.jpg"
+            contador += 1
+
+        _gerar_mockup_checking(
+            caminho_fundo=caminho_fundo,
+            caminho_imagem_upload=caminho_imagem_upload,
+            caminho_saida=caminho_imagem_gerada,
+        )
+
+        razao_social = None
+        sql_empresa = text("""
+            SELECT TOP (1)
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), ''),
+                RazaoSocial = NULLIF(LTRIM(RTRIM(CAST(COALESCE(RazaoSocial, NomeFantasia, '') AS nvarchar(200)))), '')
+            FROM [Integracao].[Silver].[DimEmpresas]
+            WHERE IDEmpresa = :id_empresa
+        """)
+        row_empresa = db.session.execute(
+            sql_empresa,
+            {"id_empresa": id_empresa_int}
+        ).mappings().first()
+
+        if row_empresa:
+            if not cnpj_txt:
+                cnpj_txt = _somente_digitos(row_empresa["CNPJ"]) or None
+            razao_social = _normalizar_texto_checking(row_empresa["RazaoSocial"]) or None
+
+        tipo_painel = None
+        tipo_face = None
+
+        try:
+            row_face = (
+                db.session.query(DimFacesPaineis.TipoPainel)
+                .filter(
+                    DimFacesPaineis.CodPonto == cod_ponto_int,
+                    DimFacesPaineis.CodFace == cod_face_txt,
+                )
+                .first()
+            )
+            if row_face:
+                tipo_painel = _normalizar_texto_checking(row_face[0]) or None
+        except Exception:
+            tipo_painel = None
+
+        checking = DimCheckingHistorico()
+        checking.DataAtualizacao = datetime.now()
+        checking.DataChecking = data_checking
+        checking.IDEmpresa = id_empresa_int
+        checking.CNPJ = cnpj_txt
+        checking.RazaoSocial = razao_social
+        checking.IDFatoControleContratosEuromidia = int(id_fato_controle_contratos)
+        checking.CodPonto = cod_ponto_int
+        checking.CodFace = cod_face_txt
+        checking.TipoPainel = tipo_painel
+        checking.TipoFace = tipo_face
+        checking.NomeArquivoOriginal = nome_original_cliente or None
+        checking.NomeArquivoSalvo = caminho_imagem_upload.name
+        checking.CaminhoImagemPainel = str(caminho_imagem_painel)
+        checking.CaminhoImagemFundo = str(caminho_fundo)
+        checking.CaminhoImagemUpload = str(caminho_imagem_upload)
+        checking.CaminhoImagemGerada = str(caminho_imagem_gerada)
+        checking.UrlImagemUpload = None
+        checking.UrlImagemGerada = None
+        checking.BitChekin = False
+        checking.DataConfirmacao = None
+        checking.IDUsuarioCriacao = int(id_usuario_criacao) if id_usuario_criacao not in (None, "", 0) else None
+        checking.IDUsuarioConfirmacao = None
+        checking.Observacao = observacao_txt
+
+        db.session.add(checking)
+        db.session.flush()
+
+        id_checking = int(checking.IDDimCheckingHistorico)
+        url_imagem_gerada = f"/paineis/checking/arquivo/{id_checking}"
+
+        checking.UrlImagemGerada = url_imagem_gerada
+
+        db.session.commit()
+        db.session.refresh(checking)
+
+        return {
+            "ok": True,
+            "status": "SUCCESS",
+            "id_checking": id_checking,
+            "url_imagem_gerada": url_imagem_gerada,
+            "url_confirmacao": f"/paineis/checking/{id_checking}/confirmar",
+            "nome_arquivo_original": checking.NomeArquivoOriginal,
+            "nome_arquivo_salvo": checking.NomeArquivoSalvo,
+            "cod_ponto": int(cod_ponto_int),
+            "cod_face": str(cod_face_txt),
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "id_empresa": int(id_empresa_int),
+        }
+
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -14193,6 +14429,55 @@ def _processar_upload_checking(
     db.session.refresh(checking)
 
     return checking
+
+
+
+
+
+@paineis_bp.route("/checking/status/<string:task_id>", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checking_status(task_id: str):
+    """Eu devolvo o estado atual do processamento assíncrono do checking."""
+
+    resultado_async = AsyncResult(task_id, app=celery_app)
+    estado = str(resultado_async.state or "PENDING").upper()
+
+    if estado == "SUCCESS":
+        resultado = resultado_async.result or {}
+        return jsonify(
+            {
+                "ok": True,
+                "status": estado,
+                "resultado": resultado,
+            }
+        )
+
+    if estado in {"FAILURE", "REVOKED"}:
+        erro = str(resultado_async.result) if resultado_async.result else "Falha ao processar o checking."
+        return jsonify(
+            {
+                "ok": False,
+                "status": estado,
+                "erro": erro,
+            }
+        ), 500
+
+    meta = resultado_async.info if isinstance(resultado_async.info, dict) else {}
+    return jsonify(
+        {
+            "ok": True,
+            "status": estado,
+            "meta": meta,
+        }
+    ), 202
+
+
+
+
+
+
+
 
 
 
@@ -14406,6 +14691,55 @@ def checking_empresas_buscar():
 
 
 
+
+def _salvar_upload_temporario_checking(
+    *,
+    arquivo,
+    id_empresa: int,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+    data_checking: date,
+) -> dict[str, str | int]:
+    """Eu salvo o upload bruto em pasta temporária e devolvo os metadados necessários para a fila."""
+
+    nome_original = _normalizar_texto_checking(getattr(arquivo, "filename", "")) or "arquivo"
+    extensao = _normalizar_extensao_arquivo(nome_original)
+
+    token_upload = uuid.uuid4().hex
+    pasta_temp = (
+        _obter_pasta_temp_checking()
+        / data_checking.strftime("%Y%m%d")
+        / str(int(id_empresa))
+        / str(int(id_fato_controle_contratos))
+    )
+    _garantir_pasta(pasta_temp)
+
+    nome_temporario = (
+        f"checking_{int(id_empresa)}_"
+        f"{int(id_fato_controle_contratos)}_"
+        f"{_somente_digitos(cod_ponto)}_"
+        f"{_normalizar_texto_checking(cod_face).upper()}_"
+        f"{token_upload}{extensao}"
+    )
+
+    caminho_temporario = pasta_temp / nome_temporario
+
+    arquivo.stream.seek(0)
+    arquivo.save(caminho_temporario)
+
+    return {
+        "token_upload": token_upload,
+        "nome_original_cliente": nome_original,
+        "caminho_arquivo_temporario": str(caminho_temporario),
+    }
+
+
+
+
+
+
+
 def _obter_id_usuario_logado_para_checking() -> int | None:
     candidatos = [
         getattr(current_user, "IDDimUsuarios", None),
@@ -14496,11 +14830,6 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str) -> bool:
     ).scalar()
 
     return bool(resultado)
-
-
-
-
-
 
 
 
@@ -14962,7 +15291,6 @@ def checking_faces_do_contrato(id_fato_controle_contratos: int, codponto: int):
 
 
 
-
 @paineis_bp.route("/checking/novo", methods=["GET", "POST"])
 @login_required
 @limiter.limit("25 per minute", methods=["POST"])
@@ -14979,6 +15307,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     id_empresa_txt = _normalizar_texto_checking(request.form.get("id_empresa"))
@@ -14991,6 +15321,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     arquivo = request.files.get("imagem")
@@ -15000,6 +15332,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     nome_arquivo = str(arquivo.filename or "").lower().strip()
@@ -15009,6 +15343,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     try:
@@ -15019,13 +15355,14 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     cod_ponto = _normalizar_texto_checking(request.form.get("cod_ponto"))
     cod_face = _normalizar_texto_checking(request.form.get("cod_face"))
     observacao = _normalizar_texto_checking(request.form.get("observacao"))
     data_checking_txt = _normalizar_texto_checking(request.form.get("data_checking"))
-
     cnpj_digitado = None
 
     if not cod_ponto:
@@ -15034,6 +15371,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     if not cod_face:
@@ -15042,6 +15381,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     if not _checking_item_pertence_ao_contrato(
@@ -15054,6 +15395,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     try:
@@ -15064,6 +15407,8 @@ def checking_novo():
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=None,
+            processamento_pendente=False,
         )
 
     try:
@@ -15080,40 +15425,76 @@ def checking_novo():
                 "euromidia/checking_upload.html",
                 hoje=hoje,
                 checking=None,
+                task_id=None,
+                processamento_pendente=False,
             )
 
         arquivo.stream.seek(0)
 
-        checking = _processar_upload_checking(
-            id_empresa=id_empresa,
-            id_fato_controle_contratos=id_fato_controle_contratos,
+        upload_temp = _salvar_upload_temporario_checking(
+            arquivo=arquivo,
+            id_empresa=int(id_empresa),
+            id_fato_controle_contratos=int(id_fato_controle_contratos),
             cod_ponto=cod_ponto,
             cod_face=cod_face,
             data_checking=data_checking,
-            arquivo=arquivo,
-            cnpj_digitado=cnpj_digitado,
-            observacao=observacao,
         )
 
-        flash("Upload realizado e mockup gerado com sucesso.", "success")
+        id_usuario_criacao = None
+        if current_user.is_authenticated:
+            try:
+                id_usuario_criacao = int(current_user.get_id())
+            except Exception:
+                id_usuario_criacao = None
 
-        return render_template(
-            "euromidia/checking_upload.html",
-            hoje=hoje,
-            checking=checking,
+        tarefa = processar_checking_upload.apply_async(
+            kwargs={
+                "id_empresa": int(id_empresa),
+                "id_fato_controle_contratos": int(id_fato_controle_contratos),
+                "cod_ponto": str(cod_ponto),
+                "cod_face": str(cod_face),
+                "data_checking_iso": data_checking.strftime("%Y-%m-%d"),
+                "caminho_arquivo_temporario": str(upload_temp["caminho_arquivo_temporario"]),
+                "nome_original_cliente": str(upload_temp["nome_original_cliente"]),
+                "cnpj_digitado": cnpj_digitado,
+                "observacao": observacao,
+                "id_usuario_criacao": id_usuario_criacao,
+            },
+            queue="checking_upload",
         )
 
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.exception("[CHECKING] erro ao processar upload")
-        flash(f"Falha ao processar checking: {str(e)}", "danger")
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify(
+                {
+                    "ok": True,
+                    "status": "QUEUED",
+                    "task_id": tarefa.id,
+                    "msg": "Upload recebido e enviado para processamento.",
+                }
+            ), 202
+
+        flash("Upload recebido com sucesso. O mockup está sendo processado em segundo plano.", "success")
 
         return render_template(
             "euromidia/checking_upload.html",
             hoje=hoje,
             checking=None,
+            task_id=tarefa.id,
+            processamento_pendente=True,
         )
 
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("[CHECKING] erro ao enfileirar upload")
+        flash(f"Falha ao iniciar processamento do checking: {str(e)}", "danger")
+
+        return render_template(
+            "euromidia/checking_upload.html",
+            hoje=hoje,
+            checking=None,
+            task_id=None,
+            processamento_pendente=False,
+        )
 
 
 

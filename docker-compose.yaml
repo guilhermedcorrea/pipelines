@@ -31,11 +31,10 @@ x-airflow-common: &airflow-common
     AIRFLOW__SCHEDULER__TASK_QUEUED_TIMEOUT: 3600
 
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-   
 
     AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-    
+
     AIRFLOW__FAB__NAVBAR_COLOR: "#554189"
     AIRFLOW__FAB__NAVBAR_TEXT_COLOR: "#ffffff"
     AIRFLOW__FAB__NAVBAR_HOVER_COLOR: "#6a52a8"
@@ -195,6 +194,15 @@ services:
     environment:
       TZ: America/Sao_Paulo
       PYTHONUNBUFFERED: "1"
+
+      CACHE_REDIS_URL: redis://redis:6379/2
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
+      SOCKETIO_CHANNEL: flaskapp_socketio
+      RATELIMIT_STORAGE_URI: redis://redis:6379/4
+
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
     expose:
       - "8000"
     extra_hosts:
@@ -202,6 +210,38 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+      - ./FlaskApp/app/static:/app/app/static
+    restart: unless-stopped
+
+  celery-checking-worker:
+    build:
+      context: ./FlaskApp
+      dockerfile: Dockerfile
+    image: flaskapp-guilherme:latest
+    env_file:
+      - ./.env
+    environment:
+      TZ: America/Sao_Paulo
+      PYTHONUNBUFFERED: "1"
+
+      CACHE_REDIS_URL: redis://redis:6379/2
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
+      SOCKETIO_CHANNEL: flaskapp_socketio
+      RATELIMIT_STORAGE_URI: redis://redis:6379/4
+
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+    command: python -m celery -A app.celery_app.celery_app worker -Q checking_upload -l info --concurrency=2
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      flask-app:
+        condition: service_started
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
       - ./FlaskApp/app/static:/app/app/static
