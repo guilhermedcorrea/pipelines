@@ -14603,8 +14603,6 @@ def _obter_card_vinculado_item_contrato_checking(
 
 
 
-
-
 def _sincronizar_tag_checking_confirmado_com_card(checking: DimCheckingHistorico) -> dict[str, int | bool | None]:
     if not checking:
         raise RuntimeError("Checking não informado para sincronizar a tag do card.")
@@ -14636,7 +14634,7 @@ def _sincronizar_tag_checking_confirmado_com_card(checking: DimCheckingHistorico
             "card_encontrado": False,
         }
 
-    id_card = int(card.get("IDFatoKanbanCard") or 0)
+    id_card = int(card.get("id_card") or 0)
     if not id_card:
         return {
             "id_card": None,
@@ -14665,11 +14663,6 @@ def _sincronizar_tag_checking_confirmado_com_card(checking: DimCheckingHistorico
         "tag_aplicada": bool(tag_aplicada),
         "card_encontrado": True,
     }
-
-
-
-
-
 
 
 
