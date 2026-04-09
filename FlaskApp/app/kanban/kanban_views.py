@@ -4578,7 +4578,6 @@ def _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas: list[dict[str, Any]]
     )
 
 
-
 def _obter_id_status_contrato_em_avaliacao() -> int:
     """
     Quando a tag 'Contrato em Avaliação' entra no card,
@@ -4621,6 +4620,108 @@ def _obter_id_status_contrato_em_avaliacao() -> int:
         )
 
     return int(valor)
+
+
+
+
+
+
+
+
+
+
+
+
+def _sincronizar_status_contrato_e_solicitacao_por_fase_do_card(
+    *,
+    id_card: int,
+    id_fase_atual: int,
+    id_contrato_existente: int | None,
+) -> dict[str, Any]:
+    """
+    Regra de negócio da fase 4:
+    - se houver contrato existente selecionado no card, eu gravo IDDimStatusContratos = 1
+      tanto em FatoControleContratosEuromidia quanto em FatoSolicitacaoContratoEuromidia;
+    - se for fluxo de novo contrato, eu gravo IDDimStatusContratos = 1 apenas na solicitação,
+      porque ainda não existe cabeçalho oficial em FatoControleContratosEuromidia.
+    """
+    if int(id_fase_atual or 0) != 4:
+        return {
+            "sincronizado": False,
+            "motivo": "fase_diferente_de_4",
+            "id_status_contrato": None,
+            "linhas_solicitacao_atualizadas": 0,
+            "linhas_controle_contrato_atualizadas": 0,
+        }
+
+    id_status_contrato = _obter_id_status_contrato_em_avaliacao()
+
+    linhas_solicitacao_atualizadas = 0
+    linhas_controle_contrato_atualizadas = 0
+
+    if _objeto_existe(TABELA_SOLICITACAO_CONTRATO) and _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "IDDimStatusContratos"):
+        sets_solicitacao = ["IDDimStatusContratos = :id_status_contrato"]
+        if _coluna_existe(TABELA_SOLICITACAO_CONTRATO, "DataAtualizacao"):
+            sets_solicitacao.append("DataAtualizacao = GETDATE()")
+
+        sql_update_solicitacao = text(
+            f"""
+            UPDATE {TABELA_SOLICITACAO_CONTRATO}
+               SET {', '.join(sets_solicitacao)}
+             WHERE IDFatoKanbanCard = :id_card;
+            """
+        )
+
+        resultado_update_solicitacao = db.session.execute(
+            sql_update_solicitacao,
+            {
+                "id_card": int(id_card),
+                "id_status_contrato": int(id_status_contrato),
+            },
+        )
+        linhas_solicitacao_atualizadas = int(resultado_update_solicitacao.rowcount or 0)
+
+    if (
+        id_contrato_existente not in (None, "", 0)
+        and _objeto_existe(TABELA_CONTROLE_CONTRATOS)
+        and _coluna_existe(TABELA_CONTROLE_CONTRATOS, "IDDimStatusContratos")
+    ):
+        sets_controle = ["IDDimStatusContratos = :id_status_contrato"]
+        if _coluna_existe(TABELA_CONTROLE_CONTRATOS, "DataAtualizacao"):
+            sets_controle.append("DataAtualizacao = GETDATE()")
+
+        sql_update_controle = text(
+            f"""
+            UPDATE {TABELA_CONTROLE_CONTRATOS}
+               SET {', '.join(sets_controle)}
+             WHERE IDFatoControleContratosEuromidia = :id_contrato;
+            """
+        )
+
+        resultado_update_controle = db.session.execute(
+            sql_update_controle,
+            {
+                "id_contrato": int(id_contrato_existente),
+                "id_status_contrato": int(id_status_contrato),
+            },
+        )
+        linhas_controle_contrato_atualizadas = int(resultado_update_controle.rowcount or 0)
+
+    return {
+        "sincronizado": True,
+        "motivo": "status_fase_4_sincronizado",
+        "id_status_contrato": int(id_status_contrato),
+        "linhas_solicitacao_atualizadas": int(linhas_solicitacao_atualizadas),
+        "linhas_controle_contrato_atualizadas": int(linhas_controle_contrato_atualizadas),
+        "id_contrato_existente": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+    }
+
+
+
+
+
+
+
 
 
 
@@ -4740,8 +4841,6 @@ def _criar_solicitacao_contrato_em_avaliacao_para_card(
 
 
 
-
-
 def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     *,
     id_card: int,
@@ -4807,6 +4906,12 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
 
     if not resultado.get("sincronizado"):
         return resultado
+
+    resultado["status_fase_4"] = _sincronizar_status_contrato_e_solicitacao_por_fase_do_card(
+        id_card=int(id_card),
+        id_fase_atual=int(id_fase_atual),
+        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+    )
 
     resultado["quantidade_itens_controle_contrato_atualizados"] = 0
     resultado["motivo_itens_controle_contrato"] = None
@@ -4885,7 +4990,7 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         """
     )
 
-    quantidade_itens_atualizados = db.session.execute(
+    quantidade_itens = db.session.execute(
         sql_count_itens,
         {
             "id_card": int(id_card),
@@ -4893,13 +4998,9 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         },
     ).scalar()
 
-    resultado["quantidade_itens_atualizados"] = int(quantidade_itens_atualizados or 0)
+    resultado["quantidade_itens_atualizados"] = int(quantidade_itens or 0)
     resultado["motivo_itens"] = "itens_solicitacao_sincronizados"
     return resultado
-
-
-
-
 
 
 
@@ -9411,7 +9512,9 @@ def _registrar_negociacao_preco_card(
 
 
 
-    
+
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -9810,7 +9913,16 @@ def api_card_mover(id_card: int):
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
 
-    
+
+
+
+
+
+
+
+
+
+
 
 
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/tags", methods=["POST"])

@@ -1,8 +1,6 @@
-
-
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
-from werkzeug.exceptions import Forbidden, HTTPException
+from werkzeug.exceptions import BadGateway, Forbidden, HTTPException
 from werkzeug.routing import BuildError
 
 try:
@@ -187,6 +185,21 @@ def registrar_handlers(app):
 
         detalhe = getattr(erro, "description", "") or ""
         return _responder_erro(403, detalhe)
+
+    @app.errorhandler(BadGateway)
+    def _handle_502(erro):
+        """Eu trato especificamente falhas de comunicação entre serviços internos."""
+        detalhe = getattr(erro, "description", "") or ""
+
+        app.logger.error(
+            "Erro HTTP 502 | rota=%s | metodo=%s | usuario=%s | detalhe=%s",
+            request.path,
+            request.method,
+            _descricao_usuario_logado(),
+            detalhe,
+        )
+
+        return _responder_erro(502, detalhe)
 
     if CSRFError is not None:
         @app.errorhandler(CSRFError)
