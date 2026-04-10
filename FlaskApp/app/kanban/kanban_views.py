@@ -24,6 +24,31 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
+TABELA_RELACIONAMENTO_EMPRESA = "[Integracao].[Silver].[DimRelacionamentoEmpresa]"
+TABELA_KANBAN = "[Kanban].[Silver].[DimKanban]"
+TABELA_KANBAN_FASE = "[Kanban].[Silver].[DimKanbanFase]"
+TABELA_CARD = "[Kanban].[Silver].[FatoKanbanCard]"
+TABELA_CARD_MOVIMENTO = "[Kanban].[Silver].[FatoKanbanCardMovimento]"
+TABELA_CARD_NOTA = "[Kanban].[Silver].[FatoKanbanCardNota]"
+TABELA_CARD_LOG = "[Kanban].[Silver].[FatoKanbanCardLog]"
+TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
+TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
+TABELA_TIPO_CLIENTE_DESCONTO = "[Integracao].[Silver].[DimTipoCliente]"
+TABELA_ORIGEM_ATENDIMENTO = "[Integracao].[Silver].[DimOrigemAtendimento]"
+MAPA_TIPO_CLIENTE_DESCONTO_PADRAO = {
+    1: "Planejador de Mídia",
+    2: "Cliente Direto",
+    3: "Agência de Publicidade",
+}
+
+
+
+
+
+
+
+
+
 TABELA_CONTRATO_CARD_EUROMIDIA = "[Integracao].[Silver].[FatoContratoCardEuromidia]"
 
 
@@ -166,6 +191,156 @@ def _sql_filtro_cards_nao_concluidos_no_quadro(alias_card: str = "c") -> str:
 
 
 
+
+def _obter_relacionamento_empresa_proprietaria(
+    *,
+    id_empresa: int | None,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any] | None:
+    if id_empresa in (None, "", 0):
+        return None
+
+    sql = text(f"""
+        SELECT TOP (1)
+            DimRelacionamentoEmpresa,
+            IDEmpresa,
+            IDEmpresaProprietaria,
+            IDDimOrigemAtendimento,
+            IDDimTipoCliente
+        FROM {TABELA_RELACIONAMENTO_EMPRESA}
+        WHERE IDEmpresa = :id_empresa
+          AND IDEmpresaProprietaria = :id_empresa_proprietaria
+        ORDER BY DimRelacionamentoEmpresa DESC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_empresa": int(id_empresa),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+
+
+
+
+
+
+
+
+def _garantir_relacionamento_empresa_tipo_cliente(
+    *,
+    id_empresa: int | None,
+    id_empresa_proprietaria: int,
+    id_dim_tipo_cliente: int | None,
+    id_dim_origem_atendimento: int | None = None,
+) -> dict[str, Any]:
+    """
+    Regra:
+    - procura relacionamento por IDEmpresa + IDEmpresaProprietaria;
+    - se existir, atualiza IDDimTipoCliente;
+    - se não existir, cria;
+    - nunca duplica;
+    - só altera a linha da empresa proprietária informada.
+    """
+    if id_empresa in (None, "", 0):
+        return {
+            "ok": False,
+            "criado": False,
+            "atualizado": False,
+            "ja_existia": False,
+            "motivo": "id_empresa_invalido",
+        }
+
+    id_empresa_int = int(id_empresa)
+    id_empresa_prop_int = int(id_empresa_proprietaria)
+    id_tipo_int = int(id_dim_tipo_cliente) if id_dim_tipo_cliente not in (None, "", 0) else None
+    id_origem_int = int(id_dim_origem_atendimento) if id_dim_origem_atendimento not in (None, "", 0) else None
+
+    relacionamento_atual = _obter_relacionamento_empresa_proprietaria(
+        id_empresa=id_empresa_int,
+        id_empresa_proprietaria=id_empresa_prop_int,
+    )
+
+    if relacionamento_atual:
+        sql_update = text(f"""
+            UPDATE {TABELA_RELACIONAMENTO_EMPRESA}
+            SET
+                IDDimTipoCliente = :id_dim_tipo_cliente,
+                IDDimOrigemAtendimento = COALESCE(:id_dim_origem_atendimento, IDDimOrigemAtendimento)
+            WHERE DimRelacionamentoEmpresa = :id_relacionamento;
+        """)
+
+        db.session.execute(
+            sql_update,
+            {
+                "id_dim_tipo_cliente": id_tipo_int,
+                "id_dim_origem_atendimento": id_origem_int,
+                "id_relacionamento": int(relacionamento_atual["DimRelacionamentoEmpresa"]),
+            },
+        )
+
+        return {
+            "ok": True,
+            "criado": False,
+            "atualizado": True,
+            "ja_existia": True,
+            "motivo": "relacionamento_atualizado",
+            "DimRelacionamentoEmpresa": int(relacionamento_atual["DimRelacionamentoEmpresa"]),
+            "IDDimTipoCliente": id_tipo_int,
+        }
+
+    sql_insert = text(f"""
+        INSERT INTO {TABELA_RELACIONAMENTO_EMPRESA} (
+            IDEmpresa,
+            IDEmpresaProprietaria,
+            IDDimOrigemAtendimento,
+            IDDimTipoCliente
+        )
+        VALUES (
+            :id_empresa,
+            :id_empresa_proprietaria,
+            :id_dim_origem_atendimento,
+            :id_dim_tipo_cliente
+        );
+    """)
+
+    db.session.execute(
+        sql_insert,
+        {
+            "id_empresa": id_empresa_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+            "id_dim_origem_atendimento": id_origem_int,
+            "id_dim_tipo_cliente": id_tipo_int,
+        },
+    )
+
+    return {
+        "ok": True,
+        "criado": True,
+        "atualizado": False,
+        "ja_existia": False,
+        "motivo": "relacionamento_criado",
+        "IDDimTipoCliente": id_tipo_int,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def _obter_id_dim_usuario_logado() -> int | None:
     candidatos = [
         getattr(current_user, "IDDimUsuarios", None),
@@ -295,6 +470,91 @@ def _sincronizar_item_oficial_contrato_com_card_salvo(
         )
 
     return resultado
+
+
+
+
+
+
+
+
+
+
+
+
+def _garantir_relacionamento_empresa_proprietaria(
+    *,
+    id_empresa: int | None,
+    id_empresa_proprietaria: int,
+) -> dict[str, object]:
+    """
+    Garante que exista o relacionamento IDEmpresa -> IDEmpresaProprietaria
+    na tabela Silver.DimRelacionamentoEmpresa.
+
+    Regra:
+    - se já existir, não duplica;
+    - se não existir, cria;
+    - retorna um resumo do que aconteceu.
+    """
+    if id_empresa in (None, "", 0):
+        return {
+            "ok": False,
+            "criado": False,
+            "ja_existia": False,
+            "motivo": "id_empresa_invalido",
+        }
+
+    id_empresa_int = int(id_empresa)
+    id_empresa_prop_int = int(id_empresa_proprietaria)
+
+    sql_existe = text(f"""
+        SELECT TOP (1) 1 AS Existe
+        FROM {TABELA_RELACIONAMENTO_EMPRESA}
+        WHERE IDEmpresa = :id_empresa
+          AND IDEmpresaProprietaria = :id_empresa_proprietaria;
+    """)
+
+    existe = db.session.execute(
+        sql_existe,
+        {
+            "id_empresa": id_empresa_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+        },
+    ).scalar()
+
+    if existe:
+        return {
+            "ok": True,
+            "criado": False,
+            "ja_existia": True,
+            "motivo": "relacionamento_ja_existia",
+        }
+
+    sql_insert = text(f"""
+        INSERT INTO {TABELA_RELACIONAMENTO_EMPRESA} (
+            IDEmpresa,
+            IDEmpresaProprietaria
+        )
+        VALUES (
+            :id_empresa,
+            :id_empresa_proprietaria
+        );
+    """)
+
+    db.session.execute(
+        sql_insert,
+        {
+            "id_empresa": id_empresa_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+        },
+    )
+
+    return {
+        "ok": True,
+        "criado": True,
+        "ja_existia": False,
+        "motivo": "relacionamento_criado",
+    }
 
 
 
@@ -5198,6 +5458,7 @@ def _obter_snapshot_card_log(id_card: int, *, incluir_inativo: bool = True) -> d
             c.CriadoEm,
             c.AtualizadoEm,
             c.IDEmpresaProprietaria,
+            {_sql_select_id_origem_atendimento_card('c')}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')}
         FROM {TABELA_CARD} c
@@ -5651,6 +5912,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             c.IDDimKanbanMotivoEncerramento,
             c.MotivoEncerramentoObs,
             c.IDEmpresaProprietaria,
+            {_sql_select_id_origem_atendimento_card('c')}
             {select_id_contrato}
             {select_cod_ponto_contrato}
             {select_cod_face_contrato}
@@ -7621,6 +7883,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             c.IDDimKanbanMotivoEncerramento,
             c.MotivoEncerramentoObs,
             c.IDEmpresaProprietaria,
+            {_sql_select_id_origem_atendimento_card('c')}
             {select_id_contrato}
             {select_cod_ponto_contrato}
             {select_cod_face_contrato}
@@ -7654,6 +7917,8 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
     card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
     card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
+    card_dict = _aplicar_tipo_cliente_desconto_no_card_dict(card_dict)
+    card_dict = _aplicar_origem_atendimento_no_card_dict(card_dict)
 
     snapshot_solicitacao = _obter_ultima_solicitacao_contrato_por_card(int(id_card))
     if snapshot_solicitacao:
@@ -7905,13 +8170,14 @@ def api_kanbans_listar():
 
 
 
-
 def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
     """
     Retorna o resumo comercial do quadro inteiro.
 
     Regras:
     - considera apenas cards ativos e com status visível no kanban
+    - considera somente cards que estejam nas fases operacionais 1, 2, 3, 4, 5 e 6
+    - não inclui cards concluídos, removidos ou posicionados fora dessas fases
     - considera apenas vínculos painel/face ativos (foto atual do card)
     - contagem de tags usa DISTINCT por card para não duplicar quando houver mais de uma linha
     - margem percentual total é calculada de forma ponderada:
@@ -7924,6 +8190,7 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
             FROM {TABELA_CARD} c
             WHERE c.IDDimKanban = :id_kanban
               AND c.Ativo = 1
+              AND c.IDDimKanbanFaseAtual IN (1, 2, 3, 4, 5, 6)
               {_sql_filtro_status_card_visiveis('c')}
         ),
         TagsAtivas AS (
@@ -8002,8 +8269,6 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
 
 
 
-
-
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/resumo-comercial", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -8073,6 +8338,8 @@ def _obter_paineis_catalogo() -> list[dict[str, Any]]:
 
 
 
+
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/dados", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -8106,6 +8373,8 @@ def api_kanban_dados(id_kanban: int):
     fases_base = _obter_fases_kanban(id_kanban)
     tags_catalogo = _obter_tags_kanban(id_kanban)
     vendedores_catalogo = _obter_vendedores_kanban(id_kanban)
+    tipos_cliente_desconto_catalogo = _obter_tipos_cliente_desconto()
+    origens_atendimento_catalogo = _obter_origens_atendimento()
     paineis_catalogo = _obter_paineis_catalogo() if kanban_cfg["MostrarPainelFaceNoCard"] else []
 
     sql_totais = text(f"""
@@ -8148,6 +8417,7 @@ def api_kanban_dados(id_kanban: int):
                 c.AtualizadoEm,
                 {_sql_select_versao_concorrencia_card('c')},
                 c.IDEmpresaProprietaria,
+                {_sql_select_id_origem_atendimento_card('c')}
                 {_sql_select_empresa_relacionada_card('c')},
                 {_sql_select_usuario_relacionado_card('c')},
                 {_sql_select_nome_usuario_relacionado_card('usuario')},
@@ -8194,6 +8464,7 @@ def api_kanban_dados(id_kanban: int):
             AtualizadoEm,
             VersaoConcorrencia,
             IDEmpresaProprietaria,
+            IDDimOrigemAtendimento,
             IDEmpresaRelacionadaCard,
             IDUsuarioRelacionadoCard,
             NomeUsuarioResponsavel,
@@ -8232,6 +8503,9 @@ def api_kanban_dados(id_kanban: int):
         card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
         card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
         card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
+
+        card_dict = _aplicar_tipo_cliente_desconto_no_card_dict(card_dict)
+        card_dict = _aplicar_origem_atendimento_no_card_dict(card_dict)
 
         cards_iniciais.append(card_dict)
 
@@ -8294,6 +8568,8 @@ def api_kanban_dados(id_kanban: int):
         "cards": cards_iniciais,
         "tags": tags_catalogo,
         "vendedores": vendedores_catalogo,
+        "tipos_cliente_desconto": tipos_cliente_desconto_catalogo,
+        "origens_atendimento": origens_atendimento_catalogo,
         "card_tags": card_tags_iniciais,
         "paineis": paineis_catalogo,
         "resumo_comercial": _obter_resumo_comercial_kanban(id_kanban),
@@ -8305,6 +8581,8 @@ def api_kanban_dados(id_kanban: int):
         _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
     return jsonify(payload)
+
+
 
 
 
@@ -8488,6 +8766,8 @@ def api_cards_listar_por_fase(id_kanban: int):
         card["QuantidadePaineisVinculados"] = int(card.get("QuantidadePaineisVinculados") or 0)
         card["QuantidadePaineisUnicos"] = int(card.get("QuantidadePaineisUnicos") or 0)
         card["ValorTotalPaineis"] = _decimal_para_float(card.get("ValorTotalPaineis"))
+        card = _aplicar_tipo_cliente_desconto_no_card_dict(card)
+        card = _aplicar_origem_atendimento_no_card_dict(card)
         cards.append(card)
 
     payload = {
@@ -8643,38 +8923,45 @@ def api_card_orcamento(id_card: int):
 
 
 
-
-
 @kanban_bp.route("/api/empresas", methods=["GET"])
 @login_required
 @limiter.limit("60/minute")
 def api_empresas_lista():
     _assert_login()
 
-    chave = _chave_cache_json("kanban:api:empresas:lista")
+    chave = _chave_cache_json("kanban:api:empresas:lista:global")
     em_cache = _cache_json_get(chave)
     if em_cache is not None:
         return jsonify(em_cache)
 
-    sql = text("""
+    sql = text(f"""
         SELECT TOP 500
             e.IDEmpresa,
+            e.IDEmpresaProprietaria,
             e.RazaoSocial,
+            e.NomeFantasia,
             e.CNPJ,
             e.CNAE,
+            e.BitCliente,
+            e.BitClienteDireto,
+            e.IDDimOrigemAtendimento,
             cn.Classe,
             cn.Setor
-        FROM [Integracao].[Silver].[DimEmpresas] e
-        LEFT JOIN [Integracao].[Silver].[DimCnaes] cn
+        FROM {TABELA_EMPRESAS} e
+        LEFT JOIN {TABELA_CNAES} cn
           ON cn.cnaepadrao = e.CNAE
         WHERE e.RazaoSocial IS NOT NULL
           AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
         ORDER BY e.RazaoSocial ASC;
     """)
+
     rows = db.session.execute(sql).mappings().all()
     payload = {"ok": True, "empresas": _rows_para_dicts(rows)}
     _cache_json_set(chave, payload, TIMEOUT_CACHE_LONGO)
     return jsonify(payload)
+
+
+
 
 
 @kanban_bp.route("/api/empresas/buscar", methods=["GET"])
@@ -8687,58 +8974,76 @@ def api_empresas_buscar():
     q_digits = "".join([c for c in q if c.isdigit()])
 
     if not q and not q_digits:
-        sql = text("""
+        sql = text(f"""
             SELECT TOP 80
                 e.IDEmpresa,
+                e.IDEmpresaProprietaria,
                 e.RazaoSocial,
+                e.NomeFantasia,
                 e.CNPJ,
                 e.CNAE,
+                e.BitCliente,
+                e.BitClienteDireto,
+                e.IDDimOrigemAtendimento,
                 c.Classe,
                 c.Setor
-            FROM [Integracao].[Silver].[DimEmpresas] e
-            LEFT JOIN [Integracao].[Silver].[DimCnaes] c
+            FROM {TABELA_EMPRESAS} e
+            LEFT JOIN {TABELA_CNAES} c
               ON c.cnaepadrao = e.CNAE
             WHERE e.RazaoSocial IS NOT NULL
               AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
             ORDER BY e.RazaoSocial ASC;
         """)
+
         empresas = db.session.execute(sql).mappings().all()
         return jsonify({"ok": True, "empresas": _rows_para_dicts(empresas)})
 
     if len(q) < 2 and len(q_digits) < 4:
         return jsonify({"ok": True, "empresas": []})
 
-    chave = _chave_cache_json("kanban:api:empresas:buscar", q.lower(), q_digits)
+    chave = _chave_cache_json("kanban:api:empresas:buscar:global", q.lower(), q_digits)
     em_cache = _cache_json_get(chave)
     if em_cache is not None:
         return jsonify(em_cache)
 
-    sql = text("""
+    sql = text(f"""
         SELECT TOP 80
             e.IDEmpresa,
+            e.IDEmpresaProprietaria,
             e.RazaoSocial,
+            e.NomeFantasia,
             e.CNPJ,
             e.CNAE,
+            e.BitCliente,
+            e.BitClienteDireto,
+            e.IDDimOrigemAtendimento,
             c.Classe,
             c.Setor
-        FROM [Integracao].[Silver].[DimEmpresas] e
-        LEFT JOIN [Integracao].[Silver].[DimCnaes] c
+        FROM {TABELA_EMPRESAS} e
+        LEFT JOIN {TABELA_CNAES} c
           ON c.cnaepadrao = e.CNAE
         WHERE e.RazaoSocial IS NOT NULL
           AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
           AND (
                 e.RazaoSocial LIKE :q_like
+             OR ISNULL(e.NomeFantasia, '') LIKE :q_like
              OR e.CNPJ LIKE :q_like
-             OR (:q_digits <> '' AND REPLACE(REPLACE(REPLACE(e.CNPJ,'.',''),'/',''),'-','') LIKE :q_digits_like)
+             OR (
+                    :q_digits <> ''
+                    AND REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(e.CNPJ, ''), '.', ''), '/', ''), '-', ''), ' ', '')
+                        LIKE :q_digits_like
+                )
           )
         ORDER BY
             CASE
                 WHEN e.RazaoSocial LIKE :q_like_inicio THEN 0
-                WHEN :q_digits <> '' AND REPLACE(REPLACE(REPLACE(e.CNPJ,'.',''),'/',''),'-','') LIKE :q_digits_inicio THEN 1
-                ELSE 2
+                WHEN ISNULL(e.NomeFantasia, '') LIKE :q_like_inicio THEN 1
+                WHEN :q_digits <> '' AND REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(e.CNPJ, ''), '.', ''), '/', ''), '-', ''), ' ', '') LIKE :q_digits_inicio THEN 2
+                ELSE 3
             END,
             e.RazaoSocial ASC;
     """)
+
     empresas = db.session.execute(
         sql,
         {
@@ -8755,13 +9060,19 @@ def api_empresas_buscar():
     return jsonify(payload)
 
 
-@kanban_bp.route("/api/paineis", methods=["GET"])
 
+
+
+@kanban_bp.route("/api/paineis", methods=["GET"])
 @login_required
 @limiter.limit("60/minute")
 def api_paineis_lista():
     _assert_login()
     return jsonify({"ok": True, "paineis": _obter_paineis_catalogo()})
+
+
+
+
 
 
 @kanban_bp.route("/api/paineis/<int:cod_ponto>/faces", methods=["GET"])
@@ -16928,20 +17239,6 @@ def api_kanban_ocupacao_calendario():
 
 
 
-    TABELA_KANBAN = "[Kanban].[Silver].[DimKanban]"
-TABELA_KANBAN_FASE = "[Kanban].[Silver].[DimKanbanFase]"
-TABELA_CARD = "[Kanban].[Silver].[FatoKanbanCard]"
-TABELA_CARD_MOVIMENTO = "[Kanban].[Silver].[FatoKanbanCardMovimento]"
-TABELA_CARD_NOTA = "[Kanban].[Silver].[FatoKanbanCardNota]"
-TABELA_CARD_LOG = "[Kanban].[Silver].[FatoKanbanCardLog]"
-TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
-TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
-TABELA_TIPO_CLIENTE_DESCONTO = "[Kanban].[Silver].[DimKanbanTipoClienteDesconto]"
-MAPA_TIPO_CLIENTE_DESCONTO_PADRAO = {
-    1: "Cliente Direto",
-    2: "Agência",
-    3: "Planejador",
-}
 
 
 def _sql_select_tipo_cliente_desconto_card(alias_card: str = "c") -> str:
@@ -16956,64 +17253,228 @@ def _sql_select_tipo_cliente_desconto_card(alias_card: str = "c") -> str:
     return ",\n            ".join(colunas)
 
 
+
 def _obter_tipos_cliente_desconto(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
-    chave = _chave_cache_json("kanban:dominio:tipo_cliente_desconto", incluir_inativos)
+    chave = _chave_cache_json(
+        "kanban:dominio:tipo_cliente_desconto",
+        ID_EMPRESA_PROPRIETARIA_CONTRATOS,
+        incluir_inativos,
+    )
     em_cache = _cache_json_get(chave)
     if em_cache is not None:
         return em_cache
 
+    sql_where = """
+        WHERE IDEmpresaProprietaria = :id_empresa
+    """
+    if not incluir_inativos:
+        sql_where += """
+          AND ISNULL(BitAtivo, 1) = 1
+        """
+
+    sql = text(f"""
+        SELECT
+            IDDimTipoCliente AS IDDimKanbanTipoClienteDesconto,
+            NomeTipoCliente AS TipoCliente,
+            IDEmpresaProprietaria,
+            ISNULL(BitAtivo, 1) AS BitAtivo
+        FROM {TABELA_TIPO_CLIENTE_DESCONTO}
+        {sql_where}
+        ORDER BY NomeTipoCliente ASC, IDDimTipoCliente ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_empresa": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS)},
+    ).mappings().all()
+
     resultado: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            id_tipo = int(row.get("IDDimKanbanTipoClienteDesconto") or 0)
+        except Exception:
+            id_tipo = 0
 
-    if _objeto_existe(TABELA_TIPO_CLIENTE_DESCONTO):
-        where_ativo = "" if incluir_inativos else "WHERE ISNULL(BitAtivo, 1) = 1"
-        sql = text(f"""
-            SELECT
-                IDDimKanbanTipoClienteDesconto,
-                TipoCliente,
-                ISNULL(BitAtivo, 1) AS BitAtivo
-            FROM {TABELA_TIPO_CLIENTE_DESCONTO}
-            {where_ativo}
-            ORDER BY IDDimKanbanTipoClienteDesconto ASC;
-        """)
-        rows = db.session.execute(sql).mappings().all()
+        if not id_tipo:
+            continue
 
-        for row in rows:
-            try:
-                id_tipo = int(row.get("IDDimKanbanTipoClienteDesconto") or 0)
-            except Exception:
-                id_tipo = 0
+        nome_tipo = str(row.get("TipoCliente") or "").strip()
+        if not nome_tipo:
+            continue
 
-            if not id_tipo:
-                continue
-
-            nome_tipo = str(row.get("TipoCliente") or "").strip()
-            if not nome_tipo:
-                nome_tipo = MAPA_TIPO_CLIENTE_DESCONTO_PADRAO.get(id_tipo, f"Tipo {id_tipo}")
-
-            resultado.append(
-                {
-                    "IDDimKanbanTipoClienteDesconto": id_tipo,
-                    "TipoCliente": nome_tipo,
-                    "BitAtivo": int(row.get("BitAtivo") or 0),
-                }
-            )
-    else:
-        for id_tipo, nome_tipo in MAPA_TIPO_CLIENTE_DESCONTO_PADRAO.items():
-            resultado.append(
-                {
-                    "IDDimKanbanTipoClienteDesconto": int(id_tipo),
-                    "TipoCliente": nome_tipo,
-                    "BitAtivo": 1,
-                }
-            )
+        resultado.append(
+            {
+                "IDDimKanbanTipoClienteDesconto": id_tipo,
+                "TipoCliente": nome_tipo,
+                "IDEmpresaProprietaria": int(row.get("IDEmpresaProprietaria") or 0),
+                "BitAtivo": int(row.get("BitAtivo") or 0),
+            }
+        )
 
     _cache_json_set(chave, resultado, TIMEOUT_CACHE_LONGO)
     return resultado
 
 
+
+def _sql_select_id_origem_atendimento_card(alias_card: str = "c") -> str:
+    if _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
+        return f"{alias_card}.IDDimOrigemAtendimento AS IDDimOrigemAtendimento,"
+    return "CAST(NULL AS int) AS IDDimOrigemAtendimento,"
+
+
+def _obter_origens_atendimento(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
+    chave = _chave_cache_json(
+        "kanban:dominio:origem_atendimento",
+        ID_EMPRESA_PROPRIETARIA_CONTRATOS,
+        incluir_inativos,
+    )
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return em_cache
+
+    sql_where = """
+        WHERE IDEmpresaProprietaria = :id_empresa
+    """
+    if not incluir_inativos:
+        sql_where += """
+          AND ISNULL(BitAtivo, 1) = 1
+        """
+
+    sql = text(f"""
+        SELECT
+            IDDimOrigemAtendimento,
+            NomeOrigemAtendimento,
+            IDEmpresaProprietaria,
+            ISNULL(BitAtivo, 1) AS BitAtivo
+        FROM {TABELA_ORIGEM_ATENDIMENTO}
+        {sql_where}
+        ORDER BY NomeOrigemAtendimento ASC, IDDimOrigemAtendimento ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_empresa": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS)},
+    ).mappings().all()
+
+    resultado: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            id_origem = int(row.get("IDDimOrigemAtendimento") or 0)
+        except Exception:
+            id_origem = 0
+
+        if not id_origem:
+            continue
+
+        nome_origem = str(row.get("NomeOrigemAtendimento") or "").strip()
+        if not nome_origem:
+            continue
+
+        resultado.append(
+            {
+                "IDDimOrigemAtendimento": id_origem,
+                "NomeOrigemAtendimento": nome_origem,
+                "IDEmpresaProprietaria": int(row.get("IDEmpresaProprietaria") or 0),
+                "BitAtivo": int(row.get("BitAtivo") or 0),
+            }
+        )
+
+    _cache_json_set(chave, resultado, TIMEOUT_CACHE_LONGO)
+    return resultado
+
+
+def _resolver_id_origem_atendimento_do_card(card: Mapping[str, Any] | dict[str, Any] | None) -> int | None:
+    if not card:
+        return None
+
+    for nome_campo in (
+        "IDDimOrigemAtendimento",
+        "IDOrigemAtendimento",
+    ):
+        try:
+            valor = int(card.get(nome_campo) or 0)
+            if valor > 0:
+                return valor
+        except Exception:
+            pass
+
+    return None
+
+
+def _obter_id_origem_atendimento_atual_do_card(id_card: int) -> int | None:
+    if not _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
+        return None
+
+    sql = text(f"""
+        SELECT TOP (1)
+            IDDimOrigemAtendimento
+        FROM {TABELA_CARD}
+        WHERE IDFatoKanbanCard = :id_card;
+    """)
+
+    valor = db.session.execute(sql, {"id_card": int(id_card)}).scalar()
+    try:
+        valor_int = int(valor or 0)
+    except Exception:
+        valor_int = 0
+
+    return valor_int or None
+
+
+def _aplicar_origem_atendimento_no_card_dict(card_dict: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(card_dict, dict):
+        return card_dict
+
+    id_empresa_relacionada = (
+        card_dict.get("IDEmpresaRelacionadaCard")
+        or card_dict.get("IDEmpresa")
+        or card_dict.get("IDEmpresaRelacionada")
+    )
+
+    relacionamento = _obter_relacionamento_empresa_proprietaria(
+        id_empresa=_int_ou_none(id_empresa_relacionada),
+        id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_CONTRATOS,
+    )
+
+    id_origem = None
+    if relacionamento:
+        id_origem = _int_ou_none(relacionamento.get("IDDimOrigemAtendimento"))
+
+    if id_origem is None:
+        id_origem = _resolver_id_origem_atendimento_do_card(card_dict)
+
+    mapa_origens = {
+        int(item.get("IDDimOrigemAtendimento") or 0): str(item.get("NomeOrigemAtendimento") or "").strip()
+        for item in _obter_origens_atendimento(incluir_inativos=True)
+        if int(item.get("IDDimOrigemAtendimento") or 0) > 0
+    }
+
+    nome_origem = mapa_origens.get(id_origem, "") if id_origem else ""
+    card_dict["IDDimOrigemAtendimento"] = id_origem
+    card_dict["OrigemAtendimento"] = nome_origem
+    card_dict["NomeOrigemAtendimento"] = nome_origem
+
+    return card_dict
+
+
+
+
+
 def _resolver_id_tipo_cliente_desconto_por_bits(card: Mapping[str, Any] | dict[str, Any] | None) -> int | None:
     if not card:
         return None
+
+    for nome_campo in (
+        "IDDimTipoCliente",
+        "IDDimKanbanTipoClienteDesconto",
+        "IDTipoClienteDesconto",
+    ):
+        try:
+            valor = int(card.get(nome_campo) or 0)
+            if valor > 0:
+                return valor
+        except Exception:
+            pass
 
     def _bit(nome_campo: str) -> int:
         try:
@@ -17021,14 +17482,16 @@ def _resolver_id_tipo_cliente_desconto_por_bits(card: Mapping[str, Any] | dict[s
         except Exception:
             return 0
 
-    if _bit("BitClienteDireto") == 1:
-        return 1
-    if _bit("BitAgencia") == 1:
-        return 2
     if _bit("BitPlanejador") == 1:
+        return 1
+    if _bit("BitClienteDireto") == 1:
+        return 2
+    if _bit("BitAgencia") == 1:
         return 3
 
     return None
+
+
 
 
 def _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto: Any) -> dict[str, int]:
@@ -17038,62 +17501,62 @@ def _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto: Any) -> dict[st
         id_tipo = None
 
     return {
-        "BitClienteDireto": 1 if id_tipo == 1 else 0,
-        "BitAgencia": 1 if id_tipo == 2 else 0,
-        "BitPlanejador": 1 if id_tipo == 3 else 0,
+        "BitPlanejador": 1 if id_tipo == 1 else 0,
+        "BitClienteDireto": 1 if id_tipo == 2 else 0,
+        "BitAgencia": 1 if id_tipo == 3 else 0,
     }
+
+
+
+
 
 
 def _aplicar_tipo_cliente_desconto_no_card_dict(card_dict: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(card_dict, dict):
         return card_dict
 
-    id_tipo = _resolver_id_tipo_cliente_desconto_por_bits(card_dict)
+    id_empresa_relacionada = (
+        card_dict.get("IDEmpresaRelacionadaCard")
+        or card_dict.get("IDEmpresa")
+        or card_dict.get("IDEmpresaRelacionada")
+    )
+
+    relacionamento = _obter_relacionamento_empresa_proprietaria(
+        id_empresa=_int_ou_none(id_empresa_relacionada),
+        id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_CONTRATOS,
+    )
+
+    id_tipo = None
+    if relacionamento:
+        id_tipo = _int_ou_none(relacionamento.get("IDDimTipoCliente"))
+
+    if id_tipo is None:
+        id_tipo = _resolver_id_tipo_cliente_desconto_por_bits(card_dict)
+
     mapa_tipos = {
         int(item.get("IDDimKanbanTipoClienteDesconto") or 0): str(item.get("TipoCliente") or "").strip()
         for item in _obter_tipos_cliente_desconto(incluir_inativos=True)
         if int(item.get("IDDimKanbanTipoClienteDesconto") or 0) > 0
     }
 
+    bits_tipo = _montar_bits_tipo_cliente_desconto(id_tipo)
+    card_dict.update(bits_tipo)
     card_dict["IDDimKanbanTipoClienteDesconto"] = id_tipo
-    card_dict["TipoClienteDesconto"] = mapa_tipos.get(id_tipo, "")
+    card_dict["IDDimTipoCliente"] = id_tipo
+    card_dict["TipoClienteDesconto"] = mapa_tipos.get(id_tipo, "") if id_tipo else ""
+    card_dict["PossuiRelacionamentoEmpresaProprietaria"] = bool(relacionamento)
+    card_dict["DimRelacionamentoEmpresa"] = (
+        int(relacionamento.get("DimRelacionamentoEmpresa"))
+        if relacionamento and relacionamento.get("DimRelacionamentoEmpresa") not in (None, "", 0)
+        else None
+    )
+
     return card_dict
 
 
-def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
-    sql_cards = text(f"""
-        SELECT
-            c.IDFatoKanbanCard,
-            c.IDDimKanban,
-            c.IDDimKanbanFaseAtual,
-            c.Titulo,
-            c.StatusCard,
-            c.CriadoEm,
-            c.AtualizadoEm,
-            c.IDEmpresaProprietaria,
-            {_sql_select_tipo_cliente_desconto_card('c')},
-            {_sql_select_empresa_relacionada_card('c')},
-            {_sql_select_usuario_relacionado_card('c')},
-            e.RazaoSocial AS EmpresaRazaoSocial,
-            e.CNPJ AS EmpresaCNPJ,
-            e.CNAE AS EmpresaCNAE,
-            cn.Classe AS EmpresaClasse,
-            cn.Setor AS EmpresaSetor
-        FROM {TABELA_CARD} c
-        {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
-        WHERE c.IDDimKanban = :id_kanban
-          AND c.Ativo = 1
-          {_sql_filtro_status_card_visiveis('c')}
-          {_sql_filtro_cards_nao_concluidos_no_quadro('c')}
-        ORDER BY
-            CASE WHEN c.AtualizadoEm IS NULL THEN c.CriadoEm ELSE c.AtualizadoEm END DESC,
-            c.IDFatoKanbanCard DESC;
-    """)
-    rows = db.session.execute(sql_cards, {"id_kanban": id_kanban}).mappings().all()
-    cards = _rows_para_dicts(rows)
-    for card in cards:
-        _aplicar_tipo_cliente_desconto_no_card_dict(card)
-    return cards
+
+
+
 
 
 
@@ -17115,7 +17578,10 @@ def api_card_criar(id_kanban: int):
         descricao = payload.get("descricao")
         id_fase = int(payload.get("id_fase") or 0)
         id_empresa_relacionada = payload.get("id_empresa")
-        id_tipo_cliente_desconto = payload.get("id_tipo_cliente_desconto")
+        id_tipo_cliente_desconto = payload.get("id_tipo_cliente_desconto") if "id_tipo_cliente_desconto" in payload else None
+        tipo_cliente_desconto_informado = "id_tipo_cliente_desconto" in payload
+        id_origem_atendimento = payload.get("id_origem_atendimento") if "id_origem_atendimento" in payload else None
+        origem_atendimento_informada = "id_origem_atendimento" in payload
 
         id_contrato_existente = payload.get("id_contrato_existente")
         tipo_contrato_card = payload.get("tipo_contrato_card")
@@ -17169,7 +17635,7 @@ def api_card_criar(id_kanban: int):
         )
 
         id_tipo_cliente_desconto_int = None
-        if id_tipo_cliente_desconto not in (None, "", 0):
+        if tipo_cliente_desconto_informado and id_tipo_cliente_desconto not in (None, "", 0):
             try:
                 id_tipo_cliente_desconto_int = int(id_tipo_cliente_desconto)
             except Exception:
@@ -17182,6 +17648,51 @@ def api_card_criar(id_kanban: int):
 
             if id_tipo_cliente_desconto_int not in tipos_validos:
                 return jsonify({"ok": False, "msg": "Tipo de cliente inválido"}), 400
+
+        id_origem_atendimento_int = None
+        if origem_atendimento_informada and id_origem_atendimento not in (None, "", 0):
+            try:
+                id_origem_atendimento_int = int(id_origem_atendimento)
+            except Exception:
+                return jsonify({"ok": False, "msg": "Origem de atendimento inválida"}), 400
+
+            origens_validas = {
+                int(item.get("IDDimOrigemAtendimento") or 0)
+                for item in _obter_origens_atendimento()
+            }
+
+            if id_origem_atendimento_int not in origens_validas:
+                return jsonify({"ok": False, "msg": "Origem de atendimento inválida"}), 400
+
+        relacionamento_empresa_atual = None
+        id_tipo_cliente_relacionamento_final = None
+        id_origem_atendimento_relacionamento_final = None
+
+        if id_empresa_relacionada_int not in (None, "", 0):
+            relacionamento_empresa_atual = _obter_relacionamento_empresa_proprietaria(
+                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+            )
+
+            if tipo_cliente_desconto_informado:
+                id_tipo_cliente_relacionamento_final = id_tipo_cliente_desconto_int
+            else:
+                id_tipo_cliente_relacionamento_final = (
+                    int(relacionamento_empresa_atual.get("IDDimTipoCliente"))
+                    if relacionamento_empresa_atual
+                    and relacionamento_empresa_atual.get("IDDimTipoCliente") not in (None, "", 0)
+                    else None
+                )
+
+            if origem_atendimento_informada:
+                id_origem_atendimento_relacionamento_final = id_origem_atendimento_int
+            else:
+                id_origem_atendimento_relacionamento_final = (
+                    int(relacionamento_empresa_atual.get("IDDimOrigemAtendimento"))
+                    if relacionamento_empresa_atual
+                    and relacionamento_empresa_atual.get("IDDimOrigemAtendimento") not in (None, "", 0)
+                    else None
+                )
 
         mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto_int)
         nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
@@ -17282,6 +17793,11 @@ def api_card_criar(id_kanban: int):
             valores.append(":id_tipo_cliente_desconto")
             params["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
 
+        if _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
+            colunas.append("IDDimOrigemAtendimento")
+            valores.append(":id_origem_atendimento")
+            params["id_origem_atendimento"] = id_origem_atendimento_int
+
         if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_card_inicial is not None:
             colunas.append("IDDimKanbanStatusCard")
             valores.append(":id_status_card_inicial")
@@ -17369,6 +17885,15 @@ def api_card_criar(id_kanban: int):
                         "Verifique contrato + CodPonto + CodFace gravados no card."
                     )
 
+        relacionamento_empresa_tipo_cliente = None
+        if id_empresa_relacionada_int not in (None, "", 0):
+            relacionamento_empresa_tipo_cliente = _garantir_relacionamento_empresa_tipo_cliente(
+                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+                id_dim_tipo_cliente=id_tipo_cliente_relacionamento_final,
+                id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
+            )
+
         _garantir_tag_em_atendimento_no_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -17385,6 +17910,8 @@ def api_card_criar(id_kanban: int):
             f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente') or 'NULL'}"
             f" | cod_ponto_contrato={validacao_ponto_face.get('cod_ponto') or 'NULL'}"
             f" | cod_face_contrato={validacao_ponto_face.get('cod_face') or 'NULL'}"
+            f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
+            f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else (id_origem_atendimento_int if id_origem_atendimento_int not in (None, '', 0) else 'NULL')}"
         )
 
         _registrar_log_card(
@@ -17460,6 +17987,8 @@ def api_card_criar(id_kanban: int):
 
 
 
+
+
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
 @login_required
 @limiter.limit("120/minute")
@@ -17482,6 +18011,8 @@ def api_card_atualizar(id_card: int):
         id_empresa_relacionada = payload.get("id_empresa")
         id_tipo_cliente_desconto = payload.get("id_tipo_cliente_desconto") if "id_tipo_cliente_desconto" in payload else None
         tipo_cliente_desconto_informado = "id_tipo_cliente_desconto" in payload
+        id_origem_atendimento = payload.get("id_origem_atendimento") if "id_origem_atendimento" in payload else None
+        origem_atendimento_informada = "id_origem_atendimento" in payload
         versao_concorrencia = payload.get("versao_concorrencia")
         painel_faces_payload = payload.get("painel_faces")
 
@@ -17508,9 +18039,9 @@ def api_card_atualizar(id_card: int):
                     }
                 ), 409
 
-        id_tipo_cliente_desconto_int = None
-        mapa_bits_tipo_cliente = None
+        id_empresa_relacionada_int = int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
 
+        id_tipo_cliente_desconto_int = None
         if tipo_cliente_desconto_informado:
             if id_tipo_cliente_desconto not in (None, "", 0):
                 try:
@@ -17519,16 +18050,63 @@ def api_card_atualizar(id_card: int):
                     return jsonify({"ok": False, "msg": "Tipo de cliente inválido."}), 400
 
                 tipos_validos = {
-                    int(item.get("IDDimKanbanTipoClienteDesconto") or 0)
+                    int(item.get("IDDimKanbanTipoClienteDesconto") or item.get("IDDimTipoCliente") or 0)
                     for item in _obter_tipos_cliente_desconto()
                 }
 
                 if id_tipo_cliente_desconto_int not in tipos_validos:
                     return jsonify({"ok": False, "msg": "Tipo de cliente inválido."}), 400
+            else:
+                id_tipo_cliente_desconto_int = None
 
-            mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto_int)
+        id_origem_atendimento_int = None
+        if origem_atendimento_informada:
+            if id_origem_atendimento not in (None, "", 0):
+                try:
+                    id_origem_atendimento_int = int(id_origem_atendimento)
+                except Exception:
+                    return jsonify({"ok": False, "msg": "Origem de atendimento inválida."}), 400
 
-        id_empresa_relacionada_int = int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
+                origens_validas = {
+                    int(item.get("IDDimOrigemAtendimento") or 0)
+                    for item in _obter_origens_atendimento()
+                }
+
+                if id_origem_atendimento_int not in origens_validas:
+                    return jsonify({"ok": False, "msg": "Origem de atendimento inválida."}), 400
+            else:
+                id_origem_atendimento_int = None
+
+        relacionamento_empresa_atual = None
+        id_tipo_cliente_relacionamento_final = None
+        id_origem_atendimento_relacionamento_final = None
+        id_origem_atendimento_atual_card = _obter_id_origem_atendimento_atual_do_card(int(id_card))
+
+        if id_empresa_relacionada_int not in (None, "", 0):
+            relacionamento_empresa_atual = _obter_relacionamento_empresa_proprietaria(
+                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+            )
+
+            if tipo_cliente_desconto_informado:
+                id_tipo_cliente_relacionamento_final = id_tipo_cliente_desconto_int
+            else:
+                id_tipo_cliente_relacionamento_final = (
+                    int(relacionamento_empresa_atual.get("IDDimTipoCliente"))
+                    if relacionamento_empresa_atual
+                    and relacionamento_empresa_atual.get("IDDimTipoCliente") not in (None, "", 0)
+                    else None
+                )
+
+            if origem_atendimento_informada:
+                id_origem_atendimento_relacionamento_final = id_origem_atendimento_int
+            else:
+                id_origem_atendimento_relacionamento_final = (
+                    int(relacionamento_empresa_atual.get("IDDimOrigemAtendimento"))
+                    if relacionamento_empresa_atual
+                    and relacionamento_empresa_atual.get("IDDimOrigemAtendimento") not in (None, "", 0)
+                    else id_origem_atendimento_atual_card
+                )
 
         contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
             id_empresa=id_empresa_relacionada_int,
@@ -17570,19 +18148,6 @@ def api_card_atualizar(id_card: int):
         if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
             campos_update.append("AtualizadoEm = GETDATE()")
 
-        if tipo_cliente_desconto_informado and mapa_bits_tipo_cliente is not None:
-            if _coluna_existe(TABELA_CARD, "BitClienteDireto"):
-                campos_update.append("BitClienteDireto = :bit_cliente_direto")
-                params_update["bit_cliente_direto"] = int(mapa_bits_tipo_cliente["BitClienteDireto"])
-
-            if _coluna_existe(TABELA_CARD, "BitAgencia"):
-                campos_update.append("BitAgencia = :bit_agencia")
-                params_update["bit_agencia"] = int(mapa_bits_tipo_cliente["BitAgencia"])
-
-            if _coluna_existe(TABELA_CARD, "BitPlanejador"):
-                campos_update.append("BitPlanejador = :bit_planejador")
-                params_update["bit_planejador"] = int(mapa_bits_tipo_cliente["BitPlanejador"])
-
         if _coluna_existe(TABELA_CARD, "BitAditivo"):
             campos_update.append("BitAditivo = :bit_aditivo_contrato")
             params_update["bit_aditivo_contrato"] = int(contexto_tipo_contrato["bit_aditivo"])
@@ -17607,9 +18172,9 @@ def api_card_atualizar(id_card: int):
             campos_update.append("CodFaceContrato = :cod_face_contrato")
             params_update["cod_face_contrato"] = validacao_ponto_face.get("cod_face")
 
-        if tipo_cliente_desconto_informado and _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto"):
-            campos_update.append("IDDimKanbanTipoClienteDesconto = :id_tipo_cliente_desconto")
-            params_update["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
+        if origem_atendimento_informada and _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
+            campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
+            params_update["id_origem_atendimento"] = id_origem_atendimento_int
 
         output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
         where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
@@ -17646,6 +18211,15 @@ def api_card_atualizar(id_card: int):
                     "card_atual": detalhe_atual.get("card"),
                 }
             ), 409
+
+        relacionamento_empresa_tipo_cliente = None
+        if id_empresa_relacionada_int not in (None, "", 0):
+            relacionamento_empresa_tipo_cliente = _garantir_relacionamento_empresa_tipo_cliente(
+                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+                id_dim_tipo_cliente=id_tipo_cliente_relacionamento_final,
+                id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
+            )
 
         sincronizacao_tipo = _sincronizar_tipo_contrato_card(
             id_card=int(id_card),
@@ -17807,6 +18381,8 @@ def api_card_atualizar(id_card: int):
             f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente') or 'NULL'}"
             f" | cod_ponto_contrato={validacao_ponto_face.get('cod_ponto') or 'NULL'}"
             f" | cod_face_contrato={validacao_ponto_face.get('cod_face') or 'NULL'}"
+            f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
+            f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else (id_origem_atendimento_int if id_origem_atendimento_int not in (None, '', 0) else 'NULL')}"
         )
 
         _registrar_log_card(
@@ -17841,6 +18417,7 @@ def api_card_atualizar(id_card: int):
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
+                "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
             },
         )
 
@@ -17861,6 +18438,7 @@ def api_card_atualizar(id_card: int):
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
+                "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
             }
         )
 

@@ -820,6 +820,60 @@
     margin-bottom: 8px;
   }
 
+  .kb-card-top-left{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:8px;
+    min-width:0;
+    flex:1 1 auto;
+  }
+
+  .kb-card-head-meta{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+    min-width:0;
+  }
+
+  .kb-card-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    min-height:22px;
+    padding:4px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:950;
+    line-height:1;
+    border:1px solid rgba(15,23,42,.10);
+    background:rgba(15,23,42,.05);
+    color:rgba(15,23,42,.86);
+    white-space:nowrap;
+    max-width:100%;
+  }
+
+  .kb-card-badge-id{
+    background:rgba(15,23,42,.06);
+    color:rgba(15,23,42,.86);
+  }
+
+  .kb-card-badge-tipo{
+    border-color:var(--tipo-cliente-bd, rgba(15,23,42,.10));
+    background:var(--tipo-cliente-bg, rgba(15,23,42,.05));
+    color:var(--tipo-cliente-fg, rgba(15,23,42,.86));
+  }
+
+  .kb-empresa-item-tipo{
+    display:flex;
+    align-items:center;
+  }
+
+  .kb-card-badge-tipo-empresa{
+    max-width:100%;
+  }
+
   .kb-card-del{
     width: 26px;
     height: 26px;
@@ -1057,6 +1111,21 @@
   .kb-modal-head strong{
     font-weight: 950;
     letter-spacing: -.01em;
+  }
+
+  .kb-modal-head-info{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:6px;
+    min-width:0;
+  }
+
+  .kb-modal-head-badges{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
   }
 
   .kb-modal-body{
@@ -2528,7 +2597,14 @@
 <div id="modalCard" class="kb-modal">
   <div class="kb-modal-card">
     <div class="kb-modal-head">
-      <strong>Detalhes do Card</strong>
+      <div class="kb-modal-head-info">
+        <strong>Detalhes do Card</strong>
+        <div class="kb-modal-head-badges">
+          <span id="cardIdVisual" class="kb-card-badge kb-card-badge-id">#—</span>
+          <span id="cardTipoClienteBadgeVisual" class="kb-card-badge kb-card-badge-tipo" hidden>—</span>
+          <span id="cardOrigemAtendimentoBadgeVisual" class="kb-card-badge kb-card-badge-tipo" hidden>—</span>
+        </div>
+      </div>
       <button class="kb-btn" id="btnFecharCard">Fechar</button>
     </div>
 
@@ -2593,6 +2669,11 @@
 
         <div class="kb-section-title" style="margin-top:10px;">Tipo de cliente</div>
         <select id="selectTipoClienteDescontoCard" class="kb-select">
+          <option value="">— Selecione —</option>
+        </select>
+
+        <div class="kb-section-title" style="margin-top:10px;">Origem de atendimento</div>
+        <select id="selectOrigemAtendimentoCard" class="kb-select">
           <option value="">— Selecione —</option>
         </select>
       </div>
@@ -2947,6 +3028,8 @@
   let vendedoresCatalogo = [];
   let tiposClienteDescontoCatalogo = [];
   let tiposClienteDescontoPorId = new Map();
+  let origensAtendimentoCatalogo = [];
+  let origensAtendimentoPorId = new Map();
   let vendedoresSelecionados = new Set();
   let tagsSelecionadasFiltro = new Set();
   let mapaTagsPorCard = new Map();
@@ -2996,6 +3079,10 @@
   const inputTituloCard = document.getElementById("cardTitulo");
   const inputDescricaoCard = document.getElementById("cardDescricao");
   const selectTipoClienteDescontoCard = document.getElementById("selectTipoClienteDescontoCard");
+  const selectOrigemAtendimentoCard = document.getElementById("selectOrigemAtendimentoCard");
+  const cardIdVisual = document.getElementById("cardIdVisual");
+  const cardTipoClienteBadgeVisual = document.getElementById("cardTipoClienteBadgeVisual");
+  const cardOrigemAtendimentoBadgeVisual = document.getElementById("cardOrigemAtendimentoBadgeVisual");
   const selectResponsavelCard = document.getElementById("selectResponsavelCard");
   const selectOrigemCard = document.getElementById("selectOrigemCard");
   const selectMotivoEncerramentoCard = document.getElementById("selectMotivoEncerramentoCard");
@@ -3939,9 +4026,10 @@
   function derivarIdTipoClienteDescontoDoCard(card){
     const c = card || {};
     if (idNum(c.IDDimKanbanTipoClienteDesconto || 0)) return idNum(c.IDDimKanbanTipoClienteDesconto || 0);
-    if (idNum(c.BitClienteDireto || 0)) return 1;
-    if (idNum(c.BitAgencia || 0)) return 2;
-    if (idNum(c.BitPlanejador || 0)) return 3;
+    if (idNum(c.IDDimTipoCliente || 0)) return idNum(c.IDDimTipoCliente || 0);
+    if (idNum(c.BitPlanejador || 0)) return 1;
+    if (idNum(c.BitClienteDireto || 0)) return 2;
+    if (idNum(c.BitAgencia || 0)) return 3;
     return null;
   }
 
@@ -3951,13 +4039,183 @@
     if (tiposClienteDescontoPorId.has(id)) {
       return safeStr(tiposClienteDescontoPorId.get(id)?.TipoCliente || "").trim();
     }
-    return ({ 1: "Cliente Direto", 2: "Agência", 3: "Planejador" })[id] || "";
+    return ({ 1: "Planejador de Mídia", 2: "Cliente Direto", 3: "Agência de Publicidade" })[id] || "";
+  }
+
+  function montarBitsTipoClienteDesconto(idTipo){
+    const id = idNum(idTipo || 0);
+    return {
+      BitPlanejador: id === 1 ? 1 : 0,
+      BitClienteDireto: id === 2 ? 1 : 0,
+      BitAgencia: id === 3 ? 1 : 0,
+    };
+  }
+
+  function obterTemaTipoClienteDesconto(cardOuId){
+    const idTipo = typeof cardOuId === "object"
+      ? derivarIdTipoClienteDescontoDoCard(cardOuId)
+      : idNum(cardOuId || 0);
+
+    if (idTipo === 1) {
+      return {
+        bg: "rgba(37,99,235,.14)",
+        fg: "#1D4ED8",
+        bd: "rgba(37,99,235,.28)"
+      };
+    }
+
+    if (idTipo === 2) {
+      return {
+        bg: "rgba(249,115,22,.14)",
+        fg: "#C2410C",
+        bd: "rgba(249,115,22,.30)"
+      };
+    }
+
+    if (idTipo === 3) {
+      return {
+        bg: "rgba(168,85,247,.14)",
+        fg: "#7E22CE",
+        bd: "rgba(168,85,247,.30)"
+      };
+    }
+
+    return {
+      bg: "rgba(15,23,42,.05)",
+      fg: "rgba(15,23,42,.86)",
+      bd: "rgba(15,23,42,.10)"
+    };
   }
 
   function nomeTipoClienteDescontoDoCard(card){
     const nomeDireto = safeStr(card?.TipoClienteDesconto || card?.tipoClienteDesconto || "").trim();
     if (nomeDireto) return nomeDireto;
     return nomeTipoClienteDescontoPorId(derivarIdTipoClienteDescontoDoCard(card));
+  }
+
+
+function derivarIdOrigemAtendimentoDoCard(card){
+  const c = card || {};
+  if (idNum(c.IDDimOrigemAtendimento || 0)) return idNum(c.IDDimOrigemAtendimento || 0);
+  if (idNum(c.IDOrigemAtendimento || 0)) return idNum(c.IDOrigemAtendimento || 0);
+  return null;
+}
+
+function nomeOrigemAtendimentoPorId(idOrigem){
+  const id = idNum(idOrigem || 0);
+  if (!id) return "";
+  if (origensAtendimentoPorId.has(id)) {
+    return safeStr(origensAtendimentoPorId.get(id)?.NomeOrigemAtendimento || "").trim();
+  }
+  return "";
+}
+
+function nomeOrigemAtendimentoDoCard(card){
+  const nomeDireto = safeStr(
+    card?.OrigemAtendimento ||
+    card?.NomeOrigemAtendimento ||
+    card?.origemAtendimento ||
+    ""
+  ).trim();
+  if (nomeDireto) return nomeDireto;
+  return nomeOrigemAtendimentoPorId(derivarIdOrigemAtendimentoDoCard(card));
+}
+
+function obterTemaOrigemAtendimento(cardOuIdOuNome){
+  let nomeBase = "";
+  if (typeof cardOuIdOuNome === "object" && cardOuIdOuNome !== null) {
+    nomeBase = nomeOrigemAtendimentoDoCard(cardOuIdOuNome);
+  } else if (typeof cardOuIdOuNome === "string") {
+    nomeBase = safeStr(cardOuIdOuNome).trim();
+  } else {
+    nomeBase = nomeOrigemAtendimentoPorId(idNum(cardOuIdOuNome || 0));
+  }
+
+  const chave = normalizarTexto(nomeBase);
+
+  if (chave === "receptivo") {
+    return {
+      bg: "rgba(37,99,235,.14)",
+      fg: "#1D4ED8",
+      bd: "rgba(37,99,235,.28)"
+    };
+  }
+
+  if (chave === "carteira") {
+    return {
+      bg: "rgba(168,85,247,.14)",
+      fg: "#7E22CE",
+      bd: "rgba(168,85,247,.30)"
+    };
+  }
+
+  if (chave === "prospeccao") {
+    return {
+      bg: "rgba(250,204,21,.18)",
+      fg: "#A16207",
+      bd: "rgba(250,204,21,.34)"
+    };
+  }
+
+  if (chave === "indicacao") {
+    return {
+      bg: "rgba(34,197,94,.14)",
+      fg: "#15803D",
+      bd: "rgba(34,197,94,.30)"
+    };
+  }
+
+  return {
+    bg: "rgba(15,23,42,.05)",
+    fg: "rgba(15,23,42,.86)",
+    bd: "rgba(15,23,42,.10)"
+  };
+}
+
+
+
+  function atualizarCabecalhoModalCard(card){
+    const cardNorm = normalizarCardServidor(card || {});
+    const idCard = idNum(cardNorm.IDFatoKanbanCard || 0);
+    const idTipoCliente = derivarIdTipoClienteDescontoDoCard(cardNorm);
+    const nomeTipoCliente = nomeTipoClienteDescontoDoCard(cardNorm);
+    const temaTipoCliente = obterTemaTipoClienteDesconto(idTipoCliente);
+    const idOrigemAtendimento = derivarIdOrigemAtendimentoDoCard(cardNorm);
+    const nomeOrigemAtendimento = nomeOrigemAtendimentoDoCard(cardNorm);
+    const temaOrigemAtendimento = obterTemaOrigemAtendimento(idOrigemAtendimento || nomeOrigemAtendimento);
+
+    if (cardIdVisual) {
+      cardIdVisual.textContent = idCard ? `#${idCard}` : "#—";
+      cardIdVisual.title = idCard ? `IDFatoKanbanCard ${idCard}` : "IDFatoKanbanCard";
+    }
+
+    if (cardTipoClienteBadgeVisual) {
+      if (nomeTipoCliente) {
+        cardTipoClienteBadgeVisual.hidden = false;
+        cardTipoClienteBadgeVisual.textContent = nomeTipoCliente;
+        cardTipoClienteBadgeVisual.title = nomeTipoCliente;
+        cardTipoClienteBadgeVisual.style.setProperty("--tipo-cliente-bg", temaTipoCliente.bg);
+        cardTipoClienteBadgeVisual.style.setProperty("--tipo-cliente-fg", temaTipoCliente.fg);
+        cardTipoClienteBadgeVisual.style.setProperty("--tipo-cliente-bd", temaTipoCliente.bd);
+      } else {
+        cardTipoClienteBadgeVisual.hidden = true;
+        cardTipoClienteBadgeVisual.textContent = "";
+      }
+    }
+
+    if (cardOrigemAtendimentoBadgeVisual) {
+      if (nomeOrigemAtendimento) {
+        cardOrigemAtendimentoBadgeVisual.hidden = false;
+        cardOrigemAtendimentoBadgeVisual.textContent = nomeOrigemAtendimento;
+        cardOrigemAtendimentoBadgeVisual.title = nomeOrigemAtendimento;
+        cardOrigemAtendimentoBadgeVisual.style.setProperty("--tipo-cliente-bg", temaOrigemAtendimento.bg);
+        cardOrigemAtendimentoBadgeVisual.style.setProperty("--tipo-cliente-fg", temaOrigemAtendimento.fg);
+        cardOrigemAtendimentoBadgeVisual.style.setProperty("--tipo-cliente-bd", temaOrigemAtendimento.bd);
+      } else {
+        cardOrigemAtendimentoBadgeVisual.hidden = true;
+        cardOrigemAtendimentoBadgeVisual.textContent = "";
+      }
+    }
   }
 
 
@@ -4001,6 +4259,18 @@ function normalizarCardServidor(card){
   c.VersaoConcorrencia = c.VersaoConcorrenciaHex;
   c.versaoConcorrencia = c.VersaoConcorrenciaHex;
   c.versao_concorrencia = c.VersaoConcorrenciaHex;
+
+  c.IDDimOrigemAtendimento =
+    c.IDDimOrigemAtendimento === null || c.IDDimOrigemAtendimento === undefined || c.IDDimOrigemAtendimento === ""
+      ? null
+      : idNum(c.IDDimOrigemAtendimento);
+
+  c.OrigemAtendimento = safeStr(
+    c.OrigemAtendimento ??
+    c.NomeOrigemAtendimento ??
+    c.origemAtendimento ??
+    ""
+  ).trim();
 
   c.NomeUsuarioResponsavel = safeStr(
     c.NomeUsuarioResponsavel ??
@@ -4072,6 +4342,8 @@ function normalizarCardServidor(card){
   c.BitAgencia = idNum(c.BitAgencia || 0) ? 1 : 0;
   c.BitPlanejador = idNum(c.BitPlanejador || 0) ? 1 : 0;
   c.IDDimKanbanTipoClienteDesconto = derivarIdTipoClienteDescontoDoCard(c);
+  c.IDDimTipoCliente = c.IDDimKanbanTipoClienteDesconto;
+  Object.assign(c, montarBitsTipoClienteDesconto(c.IDDimKanbanTipoClienteDesconto));
   c.TipoClienteDesconto = nomeTipoClienteDescontoDoCard(c);
 
   c.QuantidadePaineisVinculados = idNum(c.QuantidadePaineisVinculados || 0);
@@ -5257,24 +5529,78 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     fecharListaEmpresasCombobox();
   }
 
-  function montarSelectTipoClienteDesconto(){
-    if (!selectTipoClienteDescontoCard) return;
+function montarSelectTipoClienteDesconto(valorSelecionado = null){
+  if (!selectTipoClienteDescontoCard) return;
 
-    const valorAtual = safeStr(selectTipoClienteDescontoCard.value || "").trim();
-    selectTipoClienteDescontoCard.innerHTML = "";
-    selectTipoClienteDescontoCard.appendChild(el("option", { value: "" }, ["— Selecione —"]));
+  const idEmpresaSelecionada = safeStr(selectEmpresaCard?.value || "").trim();
+  const valorAtual = (
+    valorSelecionado !== null && valorSelecionado !== undefined
+      ? safeStr(valorSelecionado).trim()
+      : safeStr(selectTipoClienteDescontoCard.value || "").trim()
+  );
 
-    tiposClienteDescontoCatalogo.forEach(item => {
-      const id = idNum(item?.IDDimKanbanTipoClienteDesconto || 0);
-      const nome = safeStr(item?.TipoCliente || "").trim();
-      if (!id || !nome) return;
-      selectTipoClienteDescontoCard.appendChild(el("option", { value: String(id) }, [nome]));
-    });
+  selectTipoClienteDescontoCard.innerHTML = "";
+  selectTipoClienteDescontoCard.appendChild(
+    el("option", { value: "" }, ["— Selecione —"])
+  );
 
-    if (valorAtual) {
-      selectTipoClienteDescontoCard.value = valorAtual;
-    }
+  if (!idEmpresaSelecionada) {
+    selectTipoClienteDescontoCard.value = "";
+    selectTipoClienteDescontoCard.disabled = true;
+    return;
   }
+
+  selectTipoClienteDescontoCard.disabled = false;
+
+  tiposClienteDescontoCatalogo.forEach((item) => {
+    const id = idNum(item?.IDDimKanbanTipoClienteDesconto || item?.IDDimTipoCliente || 0);
+    const nome = safeStr(item?.TipoCliente || item?.NomeTipoCliente || "").trim();
+    if (!id || !nome) return;
+
+    selectTipoClienteDescontoCard.appendChild(
+      el("option", { value: String(id) }, [nome])
+    );
+  });
+
+  if (valorAtual) {
+    selectTipoClienteDescontoCard.value = String(valorAtual);
+  }
+}
+
+
+function montarSelectOrigemAtendimento(valorSelecionado = null){
+  if (!selectOrigemAtendimentoCard) return;
+
+  const valorAtual = (
+    valorSelecionado !== null && valorSelecionado !== undefined
+      ? safeStr(valorSelecionado).trim()
+      : safeStr(selectOrigemAtendimentoCard.value || "").trim()
+  );
+
+  selectOrigemAtendimentoCard.innerHTML = "";
+  selectOrigemAtendimentoCard.appendChild(
+    el("option", { value: "" }, ["— Selecione —"])
+  );
+
+  selectOrigemAtendimentoCard.disabled = false;
+
+  origensAtendimentoCatalogo.forEach((item) => {
+    const id = idNum(item?.IDDimOrigemAtendimento || 0);
+    const nome = safeStr(item?.NomeOrigemAtendimento || "").trim();
+    if (!id || !nome) return;
+
+    selectOrigemAtendimentoCard.appendChild(
+      el("option", { value: String(id) }, [nome])
+    );
+  });
+
+  if (valorAtual) {
+    selectOrigemAtendimentoCard.value = String(valorAtual);
+  }
+}
+
+
+
 
   function setEmpresaPreviewByObj(emp) {
     const box = document.getElementById("empresaPreview");
@@ -7415,8 +7741,15 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     tiposClienteDescontoCatalogo = Array.isArray(j.tipos_cliente_desconto) ? j.tipos_cliente_desconto.map(t => Object.assign({}, t || {})) : [];
     tiposClienteDescontoPorId = new Map();
     tiposClienteDescontoCatalogo.forEach(item => {
-      const idTipo = idNum(item?.IDDimKanbanTipoClienteDesconto || 0);
+      const idTipo = idNum(item?.IDDimKanbanTipoClienteDesconto || item?.IDDimTipoCliente || 0);
       if (idTipo) tiposClienteDescontoPorId.set(idTipo, item);
+    });
+
+    origensAtendimentoCatalogo = Array.isArray(j.origens_atendimento) ? j.origens_atendimento.map(t => Object.assign({}, t || {})) : [];
+    origensAtendimentoPorId = new Map();
+    origensAtendimentoCatalogo.forEach(item => {
+      const idOrigem = idNum(item?.IDDimOrigemAtendimento || 0);
+      if (idOrigem) origensAtendimentoPorId.set(idOrigem, item);
     });
 
     kanbanCfg = j.kanban_cfg || {};
@@ -7425,6 +7758,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     ativarPainelFaceSeNecessario();
     montarSelectTipoClienteDesconto();
+    montarSelectOrigemAtendimento();
 
     mapaTagsPorCard = new Map();
     mapaNotasPorCard = new Map();
@@ -7750,6 +8084,32 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
       `${f.NomeFase || "—"}`
     ]);
 
+    const idBadge = el("span", { class:"kb-card-badge kb-card-badge-id", title:`ID do card ${c.IDFatoKanbanCard || ""}` }, [
+      `#${c.IDFatoKanbanCard || "—"}`
+    ]);
+
+    const tipoClienteId = derivarIdTipoClienteDescontoDoCard(c);
+    const tipoClienteTema = obterTemaTipoClienteDesconto(tipoClienteId);
+    const tipoClienteDesconto = nomeTipoClienteDescontoDoCard(c);
+    const origemAtendimentoId = derivarIdOrigemAtendimentoDoCard(c);
+    const origemAtendimentoNome = nomeOrigemAtendimentoDoCard(c);
+    const origemAtendimentoTema = obterTemaOrigemAtendimento(origemAtendimentoId || origemAtendimentoNome);
+    const tipoClienteBadge = tipoClienteDesconto
+      ? el("span", {
+          class:"kb-card-badge kb-card-badge-tipo",
+          title: tipoClienteDesconto,
+          style:`--tipo-cliente-bg:${tipoClienteTema.bg}; --tipo-cliente-fg:${tipoClienteTema.fg}; --tipo-cliente-bd:${tipoClienteTema.bd};`
+        }, [tipoClienteDesconto])
+      : null;
+
+    const origemAtendimentoBadge = origemAtendimentoNome
+      ? el("span", {
+          class:"kb-card-badge kb-card-badge-tipo",
+          title: origemAtendimentoNome,
+          style:`--tipo-cliente-bg:${origemAtendimentoTema.bg}; --tipo-cliente-fg:${origemAtendimentoTema.fg}; --tipo-cliente-bd:${origemAtendimentoTema.bd};`
+        }, [origemAtendimentoNome])
+      : null;
+
     const btnDel = el("button", {
       class:"kb-card-del",
       title:"Remover card",
@@ -7759,16 +8119,20 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
       }
     }, ["−"]);
 
-    const topRow = el("div", {class:"kb-card-phase"}, [fasePill, btnDel]);
+    const topInfo = el("div", {class:"kb-card-top-left"}, [
+      fasePill,
+      el("div", {class:"kb-card-head-meta"}, [idBadge])
+    ]);
+
+    const topRow = el("div", {class:"kb-card-phase"}, [topInfo, btnDel]);
 
     const idEmp = c.IDEmpresaRelacionadaCard || c.IDCliente || c.IDEmpresaRelacionada || null;
     const empRazao = safeStr(c.EmpresaRazaoSocial || c.RazaoSocial || "").trim();
     const empCnpj = mascaraCnpj(c.EmpresaCNPJ || c.CNPJ || "");
     const empSetor = safeStr(c.EmpresaSetor || c.Setor || "").trim();
     const empClasse = safeStr(c.EmpresaClasse || c.Classe || "").trim();
-    const tipoClienteDesconto = nomeTipoClienteDescontoDoCard(c);
 
-    const temEmpresa = !!(idEmp || empRazao || empCnpj || empSetor || empClasse || tipoClienteDesconto);
+    const temEmpresa = !!(idEmp || empRazao || empCnpj || empSetor || empClasse || tipoClienteDesconto || origemAtendimentoNome);
 
     const blocoEmpresa = temEmpresa ? el("div", {class:"kb-empresa"}, [
       el("div", {class:"kb-empresa-grid"}, [
@@ -7788,9 +8152,23 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
           el("span", {class:"kb-empresa-k"}, ["Classe:"]),
           el("span", {class:"kb-empresa-v", title: empClasse || ""}, [empClasse || "—"])
         ]),
-        el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["Tipo cliente:"]),
-          el("span", {class:"kb-empresa-v", title: tipoClienteDesconto || ""}, [tipoClienteDesconto || "—"])
+        el("div", {class:"kb-empresa-item kb-empresa-item-tipo"}, [
+          tipoClienteBadge
+            ? el("span", {
+                class:"kb-card-badge kb-card-badge-tipo kb-card-badge-tipo-empresa",
+                title: tipoClienteDesconto,
+                style:`--tipo-cliente-bg:${tipoClienteTema.bg}; --tipo-cliente-fg:${tipoClienteTema.fg}; --tipo-cliente-bd:${tipoClienteTema.bd};`
+              }, [tipoClienteDesconto])
+            : el("span", {class:"kb-empresa-v", title:""}, ["—"])
+        ]),
+        el("div", {class:"kb-empresa-item kb-empresa-item-tipo"}, [
+          origemAtendimentoBadge
+            ? el("span", {
+                class:"kb-card-badge kb-card-badge-tipo kb-card-badge-tipo-empresa",
+                title: origemAtendimentoNome,
+                style:`--tipo-cliente-bg:${origemAtendimentoTema.bg}; --tipo-cliente-fg:${origemAtendimentoTema.fg}; --tipo-cliente-bd:${origemAtendimentoTema.bd};`
+              }, [origemAtendimentoNome])
+            : el("span", {class:"kb-empresa-v", title:""}, ["—"])
         ])
       ])
     ]) : null;
@@ -8265,6 +8643,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     sincronizarBuscaEmpresaComSelect();
     const idEmp = selectEmpresaCard.value || "";
     setEmpresaPreviewById(idEmp);
+
+    if (selectTipoClienteDescontoCard) {
+      selectTipoClienteDescontoCard.value = "";
+    }
+    montarSelectTipoClienteDesconto("");
+
     await carregarFluxoContratoParaEmpresa(idEmp);
   });
 
@@ -8352,6 +8736,12 @@ async function moverCard(idCard, idFasePara, posicao) {
   btnLimparEmpresa.addEventListener("click", async () => {
     await selecionarEmpresaPorIdComGarantia("", true);
     setEmpresaPreviewByObj(null);
+
+    if (selectTipoClienteDescontoCard) {
+      selectTipoClienteDescontoCard.value = "";
+    }
+    montarSelectTipoClienteDesconto("");
+
     resetarFluxoContrato();
   });
 
@@ -9131,6 +9521,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const cardNormalizado = normalizarCardServidor(j.card);
+    atualizarCabecalhoModalCard(cardNormalizado);
     const fluxoPersistido = extrairFluxoContratoPersistidoDoCard(cardNormalizado);
 
     /*
@@ -9180,8 +9571,15 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     if (selectTipoClienteDescontoCard) {
-      const idTipoCliente = cardNormalizado.IDDimKanbanTipoClienteDesconto ?? "";
+      const idTipoCliente = cardNormalizado.IDDimKanbanTipoClienteDesconto ?? cardNormalizado.IDDimTipoCliente ?? "";
+      montarSelectTipoClienteDesconto(idTipoCliente);
       selectTipoClienteDescontoCard.value = idTipoCliente !== null && idTipoCliente !== undefined ? String(idTipoCliente) : "";
+    }
+
+    if (selectOrigemAtendimentoCard) {
+      const idOrigemAtendimento = cardNormalizado.IDDimOrigemAtendimento ?? "";
+      montarSelectOrigemAtendimento(idOrigemAtendimento);
+      selectOrigemAtendimentoCard.value = idOrigemAtendimento !== null && idOrigemAtendimento !== undefined ? String(idOrigemAtendimento) : "";
     }
 
     if (selectResponsavelCard) {
@@ -9477,6 +9875,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     const descricao = document.getElementById("cardDescricao").value || "";
     const idEmpresa = selectEmpresaCard.value ? Number(selectEmpresaCard.value) : null;
     const idTipoClienteDesconto = selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null;
+    const idOrigemAtendimento = selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null;
 
     msgCard.style.display = "none";
     msgCard.textContent = "";
@@ -9508,6 +9907,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       descricao,
       id_empresa: idEmpresa,
       id_tipo_cliente_desconto: idTipoClienteDesconto,
+      id_origem_atendimento: idOrigemAtendimento,
       versao_concorrencia: versaoConcorrenciaCardAberto,
       id_contrato_existente: fluxoContratoAtual.id_contrato,
       id_controle_contrato: fluxoContratoAtual.id_contrato,
@@ -9551,6 +9951,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (j.card) {
       const cardAtualizado = normalizarCardServidor(j.card);
+      atualizarCabecalhoModalCard(cardAtualizado);
       inserirOuAtualizarCardLocal(cardAtualizado);
       versaoConcorrenciaCardAberto = safeStr(
         cardAtualizado.VersaoConcorrenciaHex ||
