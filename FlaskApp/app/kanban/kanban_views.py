@@ -22,6 +22,13 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
+TABELA_CARD_PAINEL_FACE = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
+TABELA_DIM_PAINEIS_EUROMIDIA = "[Integracao].[Silver].[DimPaineisEuromidia]"
+TABELA_DIM_FACES_PAINEIS = "[Integracao].[Silver].[DimFacesPaineis]"
+
+
+
+
 
 
 TABELA_RELACIONAMENTO_EMPRESA = "[Integracao].[Silver].[DimRelacionamentoEmpresa]"
@@ -226,6 +233,116 @@ def _obter_relacionamento_empresa_proprietaria(
     ).mappings().first()
 
     return dict(row) if row else None
+
+
+
+
+
+
+def _obter_painel_por_codponto(cod_ponto: int | str | None) -> dict[str, Any] | None:
+    if cod_ponto in (None, ""):
+        return None
+
+    try:
+        cod_ponto_int = int(str(cod_ponto).strip())
+    except (TypeError, ValueError):
+        return None
+
+    sql = text("""
+        SELECT TOP 1
+            p.IDDimPaineisEuromidia,
+            p.CodPonto,
+            p.Tipo,
+            p.Logradouro,
+            p.Cidade,
+            p.UF,
+            p.Bairro,
+            p.Numero,
+            p.CEP,
+            p.QuantidadeFaces,
+            p.BitAtivo
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+        WHERE TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+        ORDER BY p.DataAtualizacao DESC, p.IDDimPaineisEuromidia DESC;
+    """)
+    row = db.session.execute(sql, {"cod_ponto": cod_ponto_int}).mappings().first()
+    return dict(row) if row else None
+
+
+
+
+
+
+
+
+
+def _obter_face_por_id(id_face: int | None) -> dict[str, Any] | None:
+    if id_face in (None, "", 0):
+        return None
+
+    sql = text("""
+        SELECT TOP 1
+            f.IDDimFacesPaineis,
+            f.CodPonto,
+            f.Face,
+            f.CodFace,
+            f.Tipo,
+            f.IDDimPaineisEuromidia
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        WHERE TRY_CONVERT(int, f.IDDimFacesPaineis) = TRY_CONVERT(int, :id_face)
+        ORDER BY f.IDDimFacesPaineis DESC;
+    """)
+    row = db.session.execute(sql, {"id_face": int(id_face)}).mappings().first()
+    return dict(row) if row else None
+
+
+
+
+
+
+
+
+
+
+
+def _obter_face_por_codponto_codface(
+    cod_ponto: int | str | None,
+    cod_face: str | None,
+) -> dict[str, Any] | None:
+    if cod_ponto in (None, "") or cod_face in (None, ""):
+        return None
+
+    try:
+        cod_ponto_int = int(str(cod_ponto).strip())
+    except (TypeError, ValueError):
+        return None
+
+    cod_face_txt = _normalizar_texto(cod_face).upper()
+    if not cod_face_txt:
+        return None
+
+    sql = text("""
+        SELECT TOP 1
+            f.IDDimFacesPaineis,
+            f.CodPonto,
+            f.Face,
+            f.CodFace,
+            f.Tipo,
+            f.IDDimPaineisEuromidia
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        WHERE TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+          AND UPPER(LTRIM(RTRIM(ISNULL(f.CodFace, '')))) = :cod_face
+        ORDER BY f.IDDimFacesPaineis DESC;
+    """)
+    row = db.session.execute(
+        sql,
+        {
+            "cod_ponto": cod_ponto_int,
+            "cod_face": cod_face_txt,
+        },
+    ).mappings().first()
+    return dict(row) if row else None
+
 
 
 
@@ -6609,7 +6726,6 @@ def _coalescer_primeiro_valor(*valores: Any) -> Any:
 
 
 
-
 def _montar_payload_snapshot_preco_praticado(
     *,
     id_card: int,
@@ -6628,127 +6744,188 @@ def _montar_payload_snapshot_preco_praticado(
 
     detalhe = _obter_card_detalhe_payload(int(id_card))
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
-
     id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
+
+    sql_vinculo = text("""
+        SELECT TOP 1
+            pf.IDFatoKanbanCardPainelFace,
+            pf.IDFatoKanbanCard,
+            pf.Ordem,
+            pf.IDDimPaineisEuromidia,
+            pf.IDDimFacesPaineis,
+            pf.CodPonto,
+            pf.CodFace,
+            pf.TipoPainel,
+            pf.AnoCusto,
+            pf.CustoTabela,
+            pf.IDDimTabelaPrecosEuromidia,
+            pf.PeriodoExibicao,
+            pf.ExibicoesDia,
+            pf.ValorTabela,
+            pf.Tabela,
+            pf.PoliticaTrocas,
+            pf.ValorTroca,
+            pf.NovoValor,
+            pf.PercentualDesconto,
+            pf.ValorVendaFinal,
+            pf.MargemValor,
+            pf.MargemPercentual,
+            pf.DataInicio,
+            pf.DataFim
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
+        WHERE pf.IDFatoKanbanCard = :id_card
+          AND ISNULL(pf.Ativo, 1) = 1
+        ORDER BY
+            ISNULL(pf.Ordem, 0),
+            pf.IDFatoKanbanCardPainelFace;
+    """)
+
+    vinculo = db.session.execute(sql_vinculo, {"id_card": int(id_card)}).mappings().first()
+    if not vinculo:
+        return {
+            "ok": False,
+            "motivo": "card_sem_vinculos_ativos_em_fato_kanban_card_painel_face",
+            "id_fase_atual": int(id_fase_atual),
+            "id_card": int(id_card),
+        }
+
+    vinculo = dict(vinculo)
+
+    id_painel = int(vinculo.get("IDDimPaineisEuromidia") or 0) or None
+    id_face = int(vinculo.get("IDDimFacesPaineis") or 0) or None
+    cod_ponto_item = _normalizar_texto(vinculo.get("CodPonto"))
+    cod_face_item = _normalizar_texto(vinculo.get("CodFace")).upper()
+
+    painel = _obter_painel_por_id(int(id_painel)) if id_painel else None
+    if not painel and cod_ponto_item:
+        painel = _obter_painel_por_codponto(cod_ponto_item)
+
+    face = _obter_face_por_id(int(id_face)) if id_face else None
+    if not face and painel and cod_face_item:
+        face = _resolver_face_do_painel(int(painel.get("IDDimPaineisEuromidia") or 0), cod_face_item)
+    if not face and cod_ponto_item and cod_face_item:
+        face = _obter_face_por_codponto_codface(cod_ponto_item, cod_face_item)
+
+    if not painel and face and face.get("IDDimPaineisEuromidia") not in (None, "", 0):
+        painel = _obter_painel_por_id(int(face.get("IDDimPaineisEuromidia")))
+
+    id_painel = int(
+        (painel or {}).get("IDDimPaineisEuromidia")
+        or vinculo.get("IDDimPaineisEuromidia")
+        or 0
+    ) or None
+    id_face = int(
+        (face or {}).get("IDDimFacesPaineis")
+        or vinculo.get("IDDimFacesPaineis")
+        or 0
+    ) or None
+
+    if not id_painel or not id_face:
+        return {
+            "ok": False,
+            "motivo": "vinculo_card_sem_ids_resolvidos",
+            "id_fase_atual": int(id_fase_atual),
+            "id_card": int(id_card),
+            "id_fato_kanban_card_painel_face": int(vinculo.get("IDFatoKanbanCardPainelFace") or 0) or None,
+            "id_painel": id_painel,
+            "id_face": id_face,
+            "cod_ponto": cod_ponto_item or None,
+            "cod_face": cod_face_item or None,
+        }
+
     id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
     id_contrato_existente = _coalescer_primeiro_valor(
         card.get("IDFatoControleContratosEuromidia"),
         card.get("IDFatoControleContratoEuromidia"),
     )
-    cod_ponto_contrato = _coalescer_primeiro_valor(card.get("CodPontoContrato"), card.get("cod_ponto_contrato"))
-    cod_face_contrato = _coalescer_primeiro_valor(card.get("CodFaceContrato"), card.get("cod_face_contrato"))
-
-    resolucao_item = _resolver_item_base_snapshot_preco_praticado(
-        id_card=int(id_card),
-        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-        cod_ponto_contrato=cod_ponto_contrato,
-        cod_face_contrato=cod_face_contrato,
-    )
-
-    if not resolucao_item.get("ok"):
-        return {
-            **resolucao_item,
-            "id_fase_atual": int(id_fase_atual),
-        }
-
-    item_contrato = dict(resolucao_item.get("item") or {})
-    possui_item_oficial = bool(resolucao_item.get("possui_item_oficial"))
-
-    id_item_contrato = int(item_contrato.get("IDFatoControleContratosItensEuromidia") or 0) or None
-    id_painel = int(
-        item_contrato.get("IDPainelEuromidia")
-        or item_contrato.get("IDDimPaineisEuromidia")
-        or 0
-    ) or None
-    id_face = int(item_contrato.get("IDDimFacesPaineis") or 0) or None
-
-    estado_atual = _obter_estado_atual_negociacao_por_painel_face(
-        id_card=int(id_card),
-        id_painel=id_painel,
-        id_face=id_face,
-    )
-
-    negociacao = negociacao_base or _obter_ultima_negociacao_preco_card_painel_face(
-        id_card=int(id_card),
-        id_painel=id_painel,
-        id_face=id_face,
-        id_empresa_proprietaria=int(id_empresa_proprietaria),
-    )
-
-    id_tabela_preco = _coalescer_primeiro_valor(
-        estado_atual.get("IDDimTabelaPrecosEuromidia") if estado_atual else None,
-        negociacao.get("IDDimTabelaPrecosEuromidia") if negociacao else None,
-    )
-
-    tipo_painel = (
-        str(item_contrato.get("Tipo") or "").strip()
-        or str(item_contrato.get("TipoFace") or "").strip()
-        or None
-    )
-
-    if not tipo_painel and id_painel:
-        painel = _obter_painel_por_id(int(id_painel))
-        tipo_painel = str((painel or {}).get("Tipo") or "").strip() or None
-
-    preco_tabela = None
-    if id_tabela_preco not in (None, "", 0) and id_painel and tipo_painel:
-        try:
-            preco_tabela = _obter_preco_por_id(
-                int(id_tabela_preco),
-                int(id_painel),
-                int(id_face) if id_face not in (None, "", 0) else None,
-                str(tipo_painel),
-            )
-        except Exception:
-            preco_tabela = None
 
     relacionamento = _obter_relacionamento_empresa_proprietaria(
         id_empresa=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
         id_empresa_proprietaria=int(id_empresa_proprietaria),
     )
 
-    custo_ponto = None
-    cod_ponto_item = item_contrato.get("CodPonto")
-    try:
-        if cod_ponto_item not in (None, ""):
-            custo_ponto = _obter_custo_por_codponto(int(cod_ponto_item))
-    except Exception:
-        custo_ponto = None
-
-    custo_painel = _valor_decimal(custo_ponto.get("Valor") if isinstance(custo_ponto, dict) else custo_ponto)
-    preco_cheio_tabela = _valor_decimal(
-        (preco_tabela or {}).get("Valor")
-        if isinstance(preco_tabela, dict)
-        else None
+    estado_atual = _obter_estado_atual_negociacao_por_painel_face(
+        id_card=int(id_card),
+        id_painel=int(id_painel),
+        id_face=int(id_face),
     )
+
+    negociacao = negociacao_base or _obter_ultima_negociacao_preco_card_painel_face(
+        id_card=int(id_card),
+        id_painel=int(id_painel),
+        id_face=int(id_face),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+    )
+
+    id_tabela_preco = _coalescer_primeiro_valor(
+        vinculo.get("IDDimTabelaPrecosEuromidia"),
+        estado_atual.get("IDDimTabelaPrecosEuromidia") if estado_atual else None,
+        negociacao.get("IDDimTabelaPrecosEuromidia") if negociacao else None,
+    )
+
+    tipo_painel = _normalizar_texto(
+        vinculo.get("TipoPainel")
+        or (painel or {}).get("Tipo")
+        or (face or {}).get("Tipo")
+    )
+
+    preco_tabela = None
+    if id_tabela_preco not in (None, "", 0) and tipo_painel:
+        try:
+            preco_tabela = _obter_preco_por_id(
+                int(id_tabela_preco),
+                int(id_painel),
+                int(id_face),
+                str(tipo_painel),
+            )
+        except Exception:
+            preco_tabela = None
+
+    custo_painel = _valor_decimal(vinculo.get("CustoTabela"))
+    if custo_painel is None and cod_ponto_item not in (None, ""):
+        try:
+            custo_ref = _obter_custo_por_codponto(int(cod_ponto_item))
+        except Exception:
+            custo_ref = None
+        custo_painel = _valor_decimal((custo_ref or {}).get("Valor") if isinstance(custo_ref, dict) else custo_ref)
+
+    preco_cheio_tabela = _valor_decimal(vinculo.get("ValorTabela"))
+    if preco_cheio_tabela is None:
+        preco_cheio_tabela = _valor_decimal((preco_tabela or {}).get("Valor") if isinstance(preco_tabela, dict) else None)
+
+    preco_proposto = _valor_decimal(vinculo.get("NovoValor"))
+    if preco_proposto is None:
+        preco_proposto = _valor_decimal(negociacao.get("PrecoProposto") if negociacao else None)
+    if preco_proposto is None:
+        preco_proposto = _valor_decimal(vinculo.get("ValorVendaFinal"))
+    if preco_proposto is None:
+        preco_proposto = preco_cheio_tabela
 
     preco_praticado = _valor_decimal(preco_praticado_override)
     if preco_praticado is None:
-        preco_praticado = _valor_decimal(
-            estado_atual.get("PrecoVendaAtualContrato") if estado_atual else None
-        )
+        preco_praticado = _valor_decimal(vinculo.get("ValorVendaFinal"))
     if preco_praticado is None:
-        preco_praticado = _valor_decimal(
-            negociacao.get("PrecoAprovado") if negociacao else None
-        )
+        preco_praticado = _valor_decimal(estado_atual.get("PrecoVendaAtualContrato") if estado_atual else None)
     if preco_praticado is None:
-        preco_praticado = _valor_decimal(
-            negociacao.get("PrecoProposto") if negociacao else None
-        )
+        preco_praticado = _valor_decimal(negociacao.get("PrecoAprovado") if negociacao else None)
+    if preco_praticado is None:
+        preco_praticado = _valor_decimal(negociacao.get("PrecoProposto") if negociacao else None)
+    if preco_praticado is None:
+        preco_praticado = _valor_decimal(vinculo.get("NovoValor"))
     if preco_praticado is None:
         preco_praticado = preco_cheio_tabela
 
     desconto_percentual = _valor_decimal(desconto_percentual_override)
     if desconto_percentual is None:
-        desconto_percentual = _valor_decimal(
-            negociacao.get("DescontoAprovado") if negociacao else None
-        )
+        desconto_percentual = _valor_decimal(vinculo.get("PercentualDesconto"))
     if desconto_percentual is None:
-        desconto_percentual = _valor_decimal(
-            negociacao.get("DescontoProposto") if negociacao else None
-        )
+        desconto_percentual = _valor_decimal(negociacao.get("DescontoAprovado") if negociacao else None)
+    if desconto_percentual is None:
+        desconto_percentual = _valor_decimal(negociacao.get("DescontoProposto") if negociacao else None)
 
     margem_percentual = _valor_decimal(margem_percentual_override)
+    if margem_percentual is None:
+        margem_percentual = _valor_decimal(vinculo.get("MargemPercentual"))
     if margem_percentual is None and preco_praticado not in (None, Decimal("0")) and custo_painel is not None:
         try:
             margem_percentual = ((preco_praticado - custo_painel) / preco_praticado) * Decimal("100")
@@ -6756,15 +6933,12 @@ def _montar_payload_snapshot_preco_praticado(
             margem_percentual = None
 
     data_inicio = _coalescer_primeiro_valor(
+        vinculo.get("DataInicio"),
         negociacao.get("PeriodoInicio") if negociacao else None,
-        item_contrato.get("DataInicioPrevisto"),
-        item_contrato.get("DataInicio"),
     )
     data_termino = _coalescer_primeiro_valor(
+        vinculo.get("DataFim"),
         negociacao.get("PeriodoTermino") if negociacao else None,
-        item_contrato.get("DataTerminoPrevisto"),
-        item_contrato.get("DataTermino"),
-        item_contrato.get("DataFimEfetiva"),
     )
 
     payload = {
@@ -6772,18 +6946,27 @@ def _montar_payload_snapshot_preco_praticado(
         "DimRelacionamentoEmpresa": int(relacionamento.get("DimRelacionamentoEmpresa") or 0) if relacionamento else None,
         "IDFatoKanbanCard": int(id_card),
         "IDDimUsuarios": int(id_usuario_evento) if id_usuario_evento not in (None, "", 0) else None,
-        "IDDimUsuariosAutorizacaoPreco": int(id_usuario_autorizacao_preco) if id_usuario_autorizacao_preco not in (None, "", 0) else (int(negociacao.get("IDDimUsuariosAprovacaoPreco") or 0) or None if negociacao else None),
+        "IDDimUsuariosAutorizacaoPreco": (
+            int(id_usuario_autorizacao_preco)
+            if id_usuario_autorizacao_preco not in (None, "", 0)
+            else (int(negociacao.get("IDDimUsuariosAprovacaoPreco") or 0) or None if negociacao else None)
+        ),
         "IDDimUsuariosAprovacaoContrato": int(id_usuario_aprovacao_contrato) if id_usuario_aprovacao_contrato not in (None, "", 0) else None,
-        "IDFatoControleContratosEuromidia": int(item_contrato.get("IDFatoControleContratoEuromidia") or id_contrato_existente or 0) or None,
-        "IDFatoControleContratosItensEuromidia": int(id_item_contrato or 0) or None,
-        "IDDimPaineisEuromidia": int(id_painel or 0) or None,
-        "IDDimFacesPaineis": int(id_face or 0) or None,
+        "IDFatoControleContratosEuromidia": int(id_contrato_existente or 0) or None,
+        "IDFatoControleContratosItensEuromidia": None,
+        "IDDimPaineisEuromidia": int(id_painel),
+        "IDDimFacesPaineis": int(id_face),
         "IDDimTabelaPrecosEuromidia": int(id_tabela_preco) if id_tabela_preco not in (None, "", 0) else None,
         "IDFatoKanbanNegociacaoPreco": int(negociacao.get("IDFatoKanbanNegociacaoPreco") or 0) if negociacao else None,
-        "Exibicoes": int(preco_tabela.get("ExibicoesDia") or 0) if preco_tabela and preco_tabela.get("ExibicoesDia") not in (None, "") else None,
+        "Exibicoes": int(
+            _coalescer_primeiro_valor(
+                vinculo.get("ExibicoesDia"),
+                (preco_tabela or {}).get("ExibicoesDia") if isinstance(preco_tabela, dict) else None,
+            ) or 0
+        ) or None,
         "CustoPainel": custo_painel,
-        "PrecoProposto": preco_cheio_tabela,
-        "CustoMedioPainel": None,
+        "PrecoProposto": preco_proposto,
+        "CustoMedioPainel": custo_painel,
         "PrecoPraticado": preco_praticado,
         "DescontoPercentual": desconto_percentual,
         "MargemPercentual": margem_percentual,
@@ -6793,16 +6976,17 @@ def _montar_payload_snapshot_preco_praticado(
 
     return {
         "ok": True,
-        "motivo": "payload_snapshot_preco_praticado_montado",
+        "motivo": "payload_snapshot_preco_praticado_montado_a_partir_do_card_painel_face",
         "id_fase_atual": int(id_fase_atual),
         "payload": payload,
         "marcar_data_aprovacao_contrato": bool(marcar_data_aprovacao_contrato),
-        "item_contrato": item_contrato,
+        "vinculo_card": vinculo,
         "estado_atual": estado_atual,
         "negociacao": negociacao,
-        "origem_item_snapshot": resolucao_item.get("origem"),
-        "possui_item_oficial": possui_item_oficial,
     }
+
+
+
 
 
 
@@ -6941,42 +7125,201 @@ def _upsert_snapshot_preco_praticado(
 
 
 
-
-
 def _sincronizar_snapshot_preco_praticado_fase_4(
     *,
     id_card: int,
     id_usuario: int,
     id_empresa_proprietaria: int,
 ) -> dict[str, Any]:
-    contexto = _montar_payload_snapshot_preco_praticado(
-        id_card=int(id_card),
-        id_empresa_proprietaria=int(id_empresa_proprietaria),
-        id_usuario_evento=int(id_usuario),
-    )
+    if not _objeto_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO):
+        return {"ok": False, "motivo": "tabela_preco_praticado_ausente"}
 
-    if not contexto.get("ok"):
-        return contexto
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
+    id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
 
-    if int(contexto.get("id_fase_atual") or 0) != 4:
+    if id_fase_atual != 4:
         return {
             "ok": False,
             "motivo": "fase_diferente_de_4",
-            "id_fase_atual": int(contexto.get("id_fase_atual") or 0),
+            "id_fase_atual": int(id_fase_atual),
         }
 
-    resultado_upsert = _upsert_snapshot_preco_praticado(
-        payload_snapshot=contexto.get("payload") or {},
-        marcar_data_aprovacao_contrato=False,
-    )
+    sql_vinculos = text("""
+        SELECT
+            pf.IDFatoKanbanCardPainelFace,
+            pf.IDFatoKanbanCard,
+            pf.Ordem,
+            pf.IDDimPaineisEuromidia,
+            pf.IDDimFacesPaineis,
+            pf.CodPonto,
+            pf.CodFace,
+            pf.TipoPainel,
+            pf.AnoCusto,
+            pf.CustoTabela,
+            pf.IDDimTabelaPrecosEuromidia,
+            pf.PeriodoExibicao,
+            pf.ExibicoesDia,
+            pf.ValorTabela,
+            pf.Tabela,
+            pf.PoliticaTrocas,
+            pf.ValorTroca,
+            pf.NovoValor,
+            pf.PercentualDesconto,
+            pf.ValorVendaFinal,
+            pf.MargemValor,
+            pf.MargemPercentual,
+            pf.DataInicio,
+            pf.DataFim
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
+        WHERE pf.IDFatoKanbanCard = :id_card
+          AND ISNULL(pf.Ativo, 1) = 1
+        ORDER BY
+            ISNULL(pf.Ordem, 0),
+            pf.IDFatoKanbanCardPainelFace;
+    """)
+
+    vinculos = db.session.execute(sql_vinculos, {"id_card": int(id_card)}).mappings().all()
+    if not vinculos:
+        return {
+            "ok": False,
+            "motivo": "card_sem_vinculos_ativos_em_fato_kanban_card_painel_face",
+            "id_fase_atual": int(id_fase_atual),
+            "id_card": int(id_card),
+            "total_vinculos": 0,
+        }
+
+    detalhe_resultados: list[dict[str, Any]] = []
+    total_processados = 0
+    total_erros = 0
+
+    for vinculo in vinculos:
+        vinculo = dict(vinculo)
+
+        id_painel = int(vinculo.get("IDDimPaineisEuromidia") or 0) or None
+        id_face = int(vinculo.get("IDDimFacesPaineis") or 0) or None
+        cod_ponto = _normalizar_texto(vinculo.get("CodPonto"))
+        cod_face = _normalizar_texto(vinculo.get("CodFace")).upper()
+
+        painel = _obter_painel_por_id(int(id_painel)) if id_painel else None
+        if not painel and cod_ponto:
+            painel = _obter_painel_por_codponto(cod_ponto)
+
+        face = _obter_face_por_id(int(id_face)) if id_face else None
+        if not face and painel and cod_face:
+            face = _resolver_face_do_painel(int(painel.get("IDDimPaineisEuromidia") or 0), cod_face)
+        if not face and cod_ponto and cod_face:
+            face = _obter_face_por_codponto_codface(cod_ponto, cod_face)
+
+        vinculo["IDDimPaineisEuromidia"] = int(
+            (painel or {}).get("IDDimPaineisEuromidia")
+            or vinculo.get("IDDimPaineisEuromidia")
+            or 0
+        ) or None
+        vinculo["IDDimFacesPaineis"] = int(
+            (face or {}).get("IDDimFacesPaineis")
+            or vinculo.get("IDDimFacesPaineis")
+            or 0
+        ) or None
+        vinculo["CodPonto"] = _normalizar_texto(
+            (painel or {}).get("CodPonto")
+            or (face or {}).get("CodPonto")
+            or vinculo.get("CodPonto")
+        )
+        vinculo["CodFace"] = _normalizar_texto(
+            (face or {}).get("CodFace")
+            or vinculo.get("CodFace")
+        ).upper()
+
+        contexto = _montar_payload_snapshot_preco_praticado(
+            id_card=int(id_card),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_usuario_evento=int(id_usuario),
+        )
+
+        if not contexto.get("ok"):
+            total_erros += 1
+            detalhe_resultados.append(
+                {
+                    "ok": False,
+                    "motivo": contexto.get("motivo"),
+                    "id_fato_kanban_card_painel_face": int(vinculo.get("IDFatoKanbanCardPainelFace") or 0) or None,
+                    "id_painel": int(vinculo.get("IDDimPaineisEuromidia") or 0) or None,
+                    "id_face": int(vinculo.get("IDDimFacesPaineis") or 0) or None,
+                    "cod_ponto": vinculo.get("CodPonto"),
+                    "cod_face": vinculo.get("CodFace"),
+                }
+            )
+            continue
+
+        payload = dict(contexto.get("payload") or {})
+        payload["IDDimPaineisEuromidia"] = int(vinculo.get("IDDimPaineisEuromidia") or 0) or None
+        payload["IDDimFacesPaineis"] = int(vinculo.get("IDDimFacesPaineis") or 0) or None
+        payload["IDDimTabelaPrecosEuromidia"] = int(vinculo.get("IDDimTabelaPrecosEuromidia") or 0) or None
+        payload["Exibicoes"] = int(vinculo.get("ExibicoesDia") or 0) or None
+        payload["CustoPainel"] = _valor_decimal(vinculo.get("CustoTabela"))
+        payload["PrecoProposto"] = (
+            _valor_decimal(vinculo.get("NovoValor"))
+            or _valor_decimal(vinculo.get("ValorVendaFinal"))
+            or payload.get("PrecoProposto")
+        )
+        payload["CustoMedioPainel"] = _valor_decimal(vinculo.get("CustoTabela"))
+        payload["PrecoPraticado"] = (
+            _valor_decimal(vinculo.get("ValorVendaFinal"))
+            or _valor_decimal(vinculo.get("NovoValor"))
+            or payload.get("PrecoPraticado")
+        )
+        payload["DescontoPercentual"] = (
+            _valor_decimal(vinculo.get("PercentualDesconto"))
+            if vinculo.get("PercentualDesconto") not in (None, "")
+            else payload.get("DescontoPercentual")
+        )
+        payload["MargemPercentual"] = (
+            _valor_decimal(vinculo.get("MargemPercentual"))
+            if vinculo.get("MargemPercentual") not in (None, "")
+            else payload.get("MargemPercentual")
+        )
+        payload["DataInicio"] = vinculo.get("DataInicio") or payload.get("DataInicio")
+        payload["DataTermino"] = vinculo.get("DataFim") or payload.get("DataTermino")
+        payload["IDFatoControleContratosItensEuromidia"] = None
+
+        resultado_upsert = _upsert_snapshot_preco_praticado(
+            payload_snapshot=payload,
+            marcar_data_aprovacao_contrato=False,
+        )
+
+        if resultado_upsert.get("ok"):
+            total_processados += 1
+        else:
+            total_erros += 1
+
+        detalhe_resultados.append(
+            {
+                **resultado_upsert,
+                "id_fato_kanban_card_painel_face": int(vinculo.get("IDFatoKanbanCardPainelFace") or 0) or None,
+                "id_painel": int(vinculo.get("IDDimPaineisEuromidia") or 0) or None,
+                "id_face": int(vinculo.get("IDDimFacesPaineis") or 0) or None,
+                "cod_ponto": vinculo.get("CodPonto"),
+                "cod_face": vinculo.get("CodFace"),
+            }
+        )
 
     return {
-        **resultado_upsert,
-        "id_fase_atual": int(contexto.get("id_fase_atual") or 0),
-        "id_item_contrato": int((contexto.get("payload") or {}).get("IDFatoControleContratosItensEuromidia") or 0) or None,
+        "ok": total_processados > 0 and total_erros == 0,
+        "motivo": (
+            "snapshot_preco_praticado_sincronizado_fase_4"
+            if total_processados > 0 and total_erros == 0
+            else "snapshot_preco_praticado_sincronizado_parcial_fase_4"
+            if total_processados > 0
+            else "snapshot_preco_praticado_nao_sincronizado_fase_4"
+        ),
+        "id_fase_atual": int(id_fase_atual),
+        "id_card": int(id_card),
+        "total_vinculos": len(vinculos),
+        "total_processados": int(total_processados),
+        "total_erros": int(total_erros),
+        "detalhes": detalhe_resultados,
     }
-
-
 
 
 
@@ -7008,6 +7351,8 @@ def _sincronizar_aprovacao_preco_no_snapshot_preco_praticado(
         payload_snapshot=contexto.get("payload") or {},
         marcar_data_aprovacao_contrato=False,
     )
+
+
 
 
 

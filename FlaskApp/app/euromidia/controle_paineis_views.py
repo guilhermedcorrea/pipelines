@@ -13914,19 +13914,43 @@ def ocupacao_alterar_status(id_ocupacao: int):
 
 
 
-
 def _obter_base_url_publica_checking() -> str:
     """
     Regra:
     1) se existir configuração explícita, uso ela;
-    2) senão, caio para request.host_url.
+    2) senão, monto automaticamente com o host da request;
+    3) se o host vier sem porta, acrescento a porta pública do checking.
     """
     base_url_cfg = str(current_app.config.get("CHECKING_BASE_URL_PUBLICA") or "").strip()
     if base_url_cfg:
         return base_url_cfg.rstrip("/")
 
-    return request.host_url.rstrip("/")
+    porta_publica = str(
+        current_app.config.get("CHECKING_PORTA_PUBLICA")
+        or current_app.config.get("SERVER_PORT_PUBLICA")
+        or 5000
+    ).strip()
 
+    host_forwarded = str(request.headers.get("X-Forwarded-Host") or "").strip()
+    host_padrao = str(request.headers.get("Host") or request.host or "").strip()
+    host = host_forwarded or host_padrao
+
+    protocolo = str(
+        request.headers.get("X-Forwarded-Proto")
+        or request.scheme
+        or "http"
+    ).strip().lower()
+
+    if not host:
+        return f"{protocolo}://127.0.0.1:{porta_publica}"
+
+    host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE).strip().rstrip("/")
+
+    # Se o host não vier com porta, força a porta pública do checking.
+    if ":" not in host:
+        host = f"{host}:{porta_publica}"
+
+    return f"{protocolo}://{host}".rstrip("/")
 
 
 
@@ -15857,7 +15881,6 @@ def checking_arquivo(id_checking: int):
 
 
 
-
 @paineis_bp.route("/checking/<int:id_checking>/confirmar", methods=["POST"])
 @login_required
 def checking_confirmar(id_checking: int):
@@ -15894,10 +15917,13 @@ def checking_confirmar(id_checking: int):
         compartilhamento_existente = _obter_compartilhamento_publico_ativo_por_checking(int(id_checking))
 
         compartilhamento_publico = None
+
         if compartilhamento_existente:
+            token_publico = str(compartilhamento_existente.get("TokenPublico") or "").strip()
+
             compartilhamento_publico = {
-                "token_publico": str(compartilhamento_existente.get("TokenPublico") or "").strip(),
-                "url_publica_relativa": f"/paineis/checking/publico/{str(compartilhamento_existente.get('TokenPublico') or '').strip()}",
+                "token_publico": token_publico,
+                "url_publica_relativa": f"/paineis/checking/publico/{token_publico}",
                 "senha_publica": None,
                 "ja_existia": True,
             }
@@ -15913,8 +15939,9 @@ def checking_confirmar(id_checking: int):
         db.session.commit()
 
         if compartilhamento_publico and compartilhamento_publico.get("url_publica_relativa"):
+            base_url_publica = _obter_base_url_publica_checking()
             compartilhamento_publico["url_publica"] = (
-                f"{request.host_url.rstrip('/')}{compartilhamento_publico['url_publica_relativa']}"
+                f"{base_url_publica}{compartilhamento_publico['url_publica_relativa']}"
             )
 
         flash("Checking confirmado com sucesso.", "success")
@@ -15933,7 +15960,6 @@ def checking_confirmar(id_checking: int):
         current_app.logger.exception("[CHECKING] erro ao confirmar checking e gerar compartilhamento público")
         flash(f"Falha ao confirmar checking: {str(exc)}", "danger")
         return redirect(url_for("Paineis.checking_novo"))
-
 
 
 

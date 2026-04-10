@@ -10205,9 +10205,9 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     socketKanban = window.io(SOCKET_IO_NAMESPACE, {
       path: SOCKET_IO_PATH,
-      transports: ["polling"],
-      upgrade: false,
-      rememberUpgrade: false,
+      transports: ["websocket"],
+      upgrade: true,
+      rememberUpgrade: true,
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -10215,7 +10215,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       reconnectionDelayMax: 8000,
       timeout: 20000,
       autoConnect: true,
-      forceNew: true
+      forceNew: false
     });
 
     socketKanban.on("connect", () => {

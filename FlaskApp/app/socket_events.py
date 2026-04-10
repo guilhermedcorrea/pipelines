@@ -19,7 +19,7 @@ def ao_conectar() -> None:
 @socketio.on("disconnect", namespace="/kanban")
 def ao_desconectar() -> None:
     """Evento disparado quando o cliente desconecta."""
-    # Aqui você pode registrar log se quiser.
+   
     pass
 
 
