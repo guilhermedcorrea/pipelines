@@ -54,6 +54,10 @@ TABELA_CONTRATO_CARD_EUROMIDIA = "[Integracao].[Silver].[FatoContratoCardEuromid
 
 TABELA_CONTROLE_CONTRATOS = "[Integracao].[Silver].[FatoControleContratosEuromidia]"
 TABELA_CONTROLE_CONTRATOS_ITENS = "[Integracao].[Silver].[FatoControleContratosItensEuromidia]"
+TABELA_CONTRATO_ITEM_PRECO_PRATICADO = "[Integracao].[Silver].[FatoContratoItemPrecoPraticadoEuromidia]"
+COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO = "IDFatoContratoItemPrecoPraticadoEuromidia"
+ID_TAG_CONTRATO_APROVADO = 13
+
 
 ID_TAG_TIPO_CONTRATO_ADITIVO = 8
 ID_TAG_TIPO_CONTRATO_NOVO = 9
@@ -222,6 +226,145 @@ def _obter_relacionamento_empresa_proprietaria(
     ).mappings().first()
 
     return dict(row) if row else None
+
+
+
+
+
+
+
+
+
+def _resolver_item_base_snapshot_preco_praticado(
+    *,
+    id_card: int,
+    id_contrato_existente: int | None,
+    cod_ponto_contrato: object = None,
+    cod_face_contrato: object = None,
+) -> dict[str, Any]:
+    """
+    Regra:
+    1) tento resolver o item oficial do contrato;
+    2) se não existir ainda, tento o item do snapshot de solicitação do próprio card;
+    3) se ainda assim não achar, retorno motivo detalhado.
+    """
+    item_oficial = _obter_item_contrato_euromidia(
+        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        cod_ponto=cod_ponto_contrato,
+        cod_face=cod_face_contrato,
+    )
+
+    if item_oficial:
+        return {
+            "ok": True,
+            "origem": "item_oficial_contrato",
+            "item": dict(item_oficial),
+            "possui_item_oficial": True,
+        }
+
+    snapshot_solicitacao = _obter_ultima_solicitacao_contrato_por_card(int(id_card))
+    if snapshot_solicitacao and isinstance(snapshot_solicitacao, dict):
+        cod_ponto_snapshot = str(snapshot_solicitacao.get("CodPonto") or "").strip()
+        cod_face_snapshot = str(snapshot_solicitacao.get("CodFace") or "").strip().upper()
+        cod_ponto_card = str(cod_ponto_contrato or "").strip()
+        cod_face_card = str(cod_face_contrato or "").strip().upper()
+
+        bate_ponto = (not cod_ponto_card) or (cod_ponto_snapshot == cod_ponto_card)
+        bate_face = (not cod_face_card) or (cod_face_snapshot == cod_face_card)
+
+        tem_minimo_item = any(
+            snapshot_solicitacao.get(chave) not in (None, "", 0)
+            for chave in (
+                "IDPainelEuromidia",
+                "IDDimFacesPaineis",
+                "CodPonto",
+                "CodFace",
+            )
+        )
+
+        if tem_minimo_item and bate_ponto and bate_face:
+            return {
+                "ok": True,
+                "origem": "item_snapshot_solicitacao",
+                "item": dict(snapshot_solicitacao),
+                "possui_item_oficial": False,
+            }
+
+    return {
+        "ok": False,
+        "motivo": "item_base_snapshot_nao_resolvido",
+        "id_card": int(id_card),
+        "id_contrato_existente": int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        "cod_ponto_contrato": str(cod_ponto_contrato or "").strip() or None,
+        "cod_face_contrato": str(cod_face_contrato or "").strip().upper() or None,
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+def _buscar_snapshot_preco_praticado_para_upsert(
+    *,
+    id_item_contrato: int | None,
+    id_card: int | None,
+    id_painel: int | None,
+    id_face: int | None,
+    id_contrato: int | None = None,
+) -> dict[str, Any] | None:
+    if not _objeto_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO):
+        return None
+
+    if id_item_contrato not in (None, "", 0):
+        row_item = _buscar_snapshot_preco_praticado_por_item_contrato(int(id_item_contrato))
+        if row_item:
+            return dict(row_item)
+
+    if id_card in (None, "", 0) or id_painel in (None, "", 0) or id_face in (None, "", 0):
+        return None
+
+    filtros = [
+        "TRY_CONVERT(int, IDFatoKanbanCard) = TRY_CONVERT(int, :id_card)",
+        "TRY_CONVERT(int, IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)",
+        "TRY_CONVERT(int, IDDimFacesPaineis) = TRY_CONVERT(int, :id_face)",
+    ]
+    params: dict[str, object] = {
+        "id_card": int(id_card),
+        "id_painel": int(id_painel),
+        "id_face": int(id_face),
+    }
+
+    if id_contrato not in (None, "", 0) and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "IDFatoControleContratosEuromidia"):
+        filtros.append("TRY_CONVERT(int, ISNULL(IDFatoControleContratosEuromidia, 0)) = TRY_CONVERT(int, :id_contrato)")
+        params["id_contrato"] = int(id_contrato)
+
+    sql = text(
+        f"""
+        SELECT TOP (1)
+            *
+        FROM {TABELA_CONTRATO_ITEM_PRECO_PRATICADO}
+        WHERE {' AND '.join(filtros)}
+        ORDER BY
+            CASE WHEN IDFatoControleContratosItensEuromidia IS NULL THEN 1 ELSE 0 END,
+            [{COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO}] DESC;
+        """
+    )
+
+    row = db.session.execute(sql, params).mappings().first()
+    return dict(row) if row else None
+
+
+
+
+
+
+
 
 
 
@@ -5387,6 +5530,12 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         "motivo_itens_controle_contrato"
     )
 
+    resultado["snapshot_preco_praticado"] = _sincronizar_snapshot_preco_praticado_fase_4(
+        id_card=int(id_card),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+    )
+
     coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
     if not coluna_atividade_item:
         resultado["quantidade_itens_atualizados"] = 0
@@ -6349,6 +6498,541 @@ def _obter_preco_por_id(id_preco: int, id_painel: int, id_dim_face: int | None, 
         },
     ).mappings().first()
     return dict(row) if row else None
+
+
+def _buscar_snapshot_preco_praticado_por_item_contrato(
+    id_item_contrato: int | None,
+) -> dict[str, Any] | None:
+    if id_item_contrato in (None, "", 0):
+        return None
+
+    if not _objeto_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO):
+        return None
+
+    if not _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "IDFatoControleContratosItensEuromidia"):
+        return None
+
+    if not _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO):
+        return None
+
+    ordem_data = "DataCadastro DESC," if _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "DataCadastro") else ""
+
+    sql = text(
+        f"""
+        SELECT TOP (1)
+            *
+        FROM {TABELA_CONTRATO_ITEM_PRECO_PRATICADO}
+        WHERE IDFatoControleContratosItensEuromidia = :id_item_contrato
+        ORDER BY
+            {ordem_data}
+            {COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO} DESC;
+        """
+    )
+
+    row = db.session.execute(sql, {"id_item_contrato": int(id_item_contrato)}).mappings().first()
+    return dict(row) if row else None
+
+
+
+def _obter_estado_atual_negociacao_por_painel_face(
+    *,
+    id_card: int,
+    id_painel: int | None,
+    id_face: int | None,
+) -> dict[str, Any] | None:
+    if id_card in (None, "", 0) or id_painel in (None, "", 0) or id_face in (None, "", 0):
+        return None
+
+    for estado in _listar_estado_atual_negociacao_card(int(id_card)):
+        try:
+            id_painel_estado = int(estado.get("IDDimPaineisEuromidia") or 0)
+            id_face_estado = int(estado.get("IDDimFacesPaineis") or 0)
+        except Exception:
+            continue
+
+        if id_painel_estado == int(id_painel) and id_face_estado == int(id_face):
+            return dict(estado)
+
+    return None
+
+
+
+def _obter_ultima_negociacao_preco_card_painel_face(
+    *,
+    id_card: int,
+    id_painel: int | None,
+    id_face: int | None,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any] | None:
+    if id_card in (None, "", 0) or id_painel in (None, "", 0) or id_face in (None, "", 0):
+        return None
+
+    if not _objeto_existe(TABELA_CARD_NEGOCIACAO_PRECO):
+        return None
+
+    sql = text(
+        f"""
+        SELECT TOP (1)
+            *
+        FROM {TABELA_CARD_NEGOCIACAO_PRECO}
+        WHERE IDFatoKanbanCard = :id_card
+          AND IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND TRY_CONVERT(int, IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+          AND TRY_CONVERT(int, IDDimFacesPaineis) = TRY_CONVERT(int, :id_face)
+        ORDER BY
+            COALESCE(DataAprovacaoPreco, DataPrecoProposto, PeriodoInicio, PeriodoTermino) DESC,
+            IDFatoKanbanNegociacaoPreco DESC;
+        """
+    )
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            "id_painel": int(id_painel),
+            "id_face": int(id_face),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+
+def _coalescer_primeiro_valor(*valores: Any) -> Any:
+    for valor in valores:
+        if valor not in (None, ""):
+            return valor
+    return None
+
+
+
+
+
+
+def _montar_payload_snapshot_preco_praticado(
+    *,
+    id_card: int,
+    id_empresa_proprietaria: int,
+    id_usuario_evento: int | None = None,
+    id_usuario_autorizacao_preco: int | None = None,
+    id_usuario_aprovacao_contrato: int | None = None,
+    marcar_data_aprovacao_contrato: bool = False,
+    negociacao_base: dict[str, Any] | None = None,
+    preco_praticado_override: Any = None,
+    desconto_percentual_override: Any = None,
+    margem_percentual_override: Any = None,
+) -> dict[str, Any]:
+    if not _objeto_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO):
+        return {"ok": False, "motivo": "tabela_preco_praticado_ausente"}
+
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
+
+    id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
+    id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
+    id_contrato_existente = _coalescer_primeiro_valor(
+        card.get("IDFatoControleContratosEuromidia"),
+        card.get("IDFatoControleContratoEuromidia"),
+    )
+    cod_ponto_contrato = _coalescer_primeiro_valor(card.get("CodPontoContrato"), card.get("cod_ponto_contrato"))
+    cod_face_contrato = _coalescer_primeiro_valor(card.get("CodFaceContrato"), card.get("cod_face_contrato"))
+
+    resolucao_item = _resolver_item_base_snapshot_preco_praticado(
+        id_card=int(id_card),
+        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        cod_ponto_contrato=cod_ponto_contrato,
+        cod_face_contrato=cod_face_contrato,
+    )
+
+    if not resolucao_item.get("ok"):
+        return {
+            **resolucao_item,
+            "id_fase_atual": int(id_fase_atual),
+        }
+
+    item_contrato = dict(resolucao_item.get("item") or {})
+    possui_item_oficial = bool(resolucao_item.get("possui_item_oficial"))
+
+    id_item_contrato = int(item_contrato.get("IDFatoControleContratosItensEuromidia") or 0) or None
+    id_painel = int(
+        item_contrato.get("IDPainelEuromidia")
+        or item_contrato.get("IDDimPaineisEuromidia")
+        or 0
+    ) or None
+    id_face = int(item_contrato.get("IDDimFacesPaineis") or 0) or None
+
+    estado_atual = _obter_estado_atual_negociacao_por_painel_face(
+        id_card=int(id_card),
+        id_painel=id_painel,
+        id_face=id_face,
+    )
+
+    negociacao = negociacao_base or _obter_ultima_negociacao_preco_card_painel_face(
+        id_card=int(id_card),
+        id_painel=id_painel,
+        id_face=id_face,
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+    )
+
+    id_tabela_preco = _coalescer_primeiro_valor(
+        estado_atual.get("IDDimTabelaPrecosEuromidia") if estado_atual else None,
+        negociacao.get("IDDimTabelaPrecosEuromidia") if negociacao else None,
+    )
+
+    tipo_painel = (
+        str(item_contrato.get("Tipo") or "").strip()
+        or str(item_contrato.get("TipoFace") or "").strip()
+        or None
+    )
+
+    if not tipo_painel and id_painel:
+        painel = _obter_painel_por_id(int(id_painel))
+        tipo_painel = str((painel or {}).get("Tipo") or "").strip() or None
+
+    preco_tabela = None
+    if id_tabela_preco not in (None, "", 0) and id_painel and tipo_painel:
+        try:
+            preco_tabela = _obter_preco_por_id(
+                int(id_tabela_preco),
+                int(id_painel),
+                int(id_face) if id_face not in (None, "", 0) else None,
+                str(tipo_painel),
+            )
+        except Exception:
+            preco_tabela = None
+
+    relacionamento = _obter_relacionamento_empresa_proprietaria(
+        id_empresa=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+    )
+
+    custo_ponto = None
+    cod_ponto_item = item_contrato.get("CodPonto")
+    try:
+        if cod_ponto_item not in (None, ""):
+            custo_ponto = _obter_custo_por_codponto(int(cod_ponto_item))
+    except Exception:
+        custo_ponto = None
+
+    custo_painel = _valor_decimal(custo_ponto.get("Valor") if isinstance(custo_ponto, dict) else custo_ponto)
+    preco_cheio_tabela = _valor_decimal(
+        (preco_tabela or {}).get("Valor")
+        if isinstance(preco_tabela, dict)
+        else None
+    )
+
+    preco_praticado = _valor_decimal(preco_praticado_override)
+    if preco_praticado is None:
+        preco_praticado = _valor_decimal(
+            estado_atual.get("PrecoVendaAtualContrato") if estado_atual else None
+        )
+    if preco_praticado is None:
+        preco_praticado = _valor_decimal(
+            negociacao.get("PrecoAprovado") if negociacao else None
+        )
+    if preco_praticado is None:
+        preco_praticado = _valor_decimal(
+            negociacao.get("PrecoProposto") if negociacao else None
+        )
+    if preco_praticado is None:
+        preco_praticado = preco_cheio_tabela
+
+    desconto_percentual = _valor_decimal(desconto_percentual_override)
+    if desconto_percentual is None:
+        desconto_percentual = _valor_decimal(
+            negociacao.get("DescontoAprovado") if negociacao else None
+        )
+    if desconto_percentual is None:
+        desconto_percentual = _valor_decimal(
+            negociacao.get("DescontoProposto") if negociacao else None
+        )
+
+    margem_percentual = _valor_decimal(margem_percentual_override)
+    if margem_percentual is None and preco_praticado not in (None, Decimal("0")) and custo_painel is not None:
+        try:
+            margem_percentual = ((preco_praticado - custo_painel) / preco_praticado) * Decimal("100")
+        except Exception:
+            margem_percentual = None
+
+    data_inicio = _coalescer_primeiro_valor(
+        negociacao.get("PeriodoInicio") if negociacao else None,
+        item_contrato.get("DataInicioPrevisto"),
+        item_contrato.get("DataInicio"),
+    )
+    data_termino = _coalescer_primeiro_valor(
+        negociacao.get("PeriodoTermino") if negociacao else None,
+        item_contrato.get("DataTerminoPrevisto"),
+        item_contrato.get("DataTermino"),
+        item_contrato.get("DataFimEfetiva"),
+    )
+
+    payload = {
+        "IDEmpresa": int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        "DimRelacionamentoEmpresa": int(relacionamento.get("DimRelacionamentoEmpresa") or 0) if relacionamento else None,
+        "IDFatoKanbanCard": int(id_card),
+        "IDDimUsuarios": int(id_usuario_evento) if id_usuario_evento not in (None, "", 0) else None,
+        "IDDimUsuariosAutorizacaoPreco": int(id_usuario_autorizacao_preco) if id_usuario_autorizacao_preco not in (None, "", 0) else (int(negociacao.get("IDDimUsuariosAprovacaoPreco") or 0) or None if negociacao else None),
+        "IDDimUsuariosAprovacaoContrato": int(id_usuario_aprovacao_contrato) if id_usuario_aprovacao_contrato not in (None, "", 0) else None,
+        "IDFatoControleContratosEuromidia": int(item_contrato.get("IDFatoControleContratoEuromidia") or id_contrato_existente or 0) or None,
+        "IDFatoControleContratosItensEuromidia": int(id_item_contrato or 0) or None,
+        "IDDimPaineisEuromidia": int(id_painel or 0) or None,
+        "IDDimFacesPaineis": int(id_face or 0) or None,
+        "IDDimTabelaPrecosEuromidia": int(id_tabela_preco) if id_tabela_preco not in (None, "", 0) else None,
+        "IDFatoKanbanNegociacaoPreco": int(negociacao.get("IDFatoKanbanNegociacaoPreco") or 0) if negociacao else None,
+        "Exibicoes": int(preco_tabela.get("ExibicoesDia") or 0) if preco_tabela and preco_tabela.get("ExibicoesDia") not in (None, "") else None,
+        "CustoPainel": custo_painel,
+        "PrecoProposto": preco_cheio_tabela,
+        "CustoMedioPainel": None,
+        "PrecoPraticado": preco_praticado,
+        "DescontoPercentual": desconto_percentual,
+        "MargemPercentual": margem_percentual,
+        "DataInicio": data_inicio,
+        "DataTermino": data_termino,
+    }
+
+    return {
+        "ok": True,
+        "motivo": "payload_snapshot_preco_praticado_montado",
+        "id_fase_atual": int(id_fase_atual),
+        "payload": payload,
+        "marcar_data_aprovacao_contrato": bool(marcar_data_aprovacao_contrato),
+        "item_contrato": item_contrato,
+        "estado_atual": estado_atual,
+        "negociacao": negociacao,
+        "origem_item_snapshot": resolucao_item.get("origem"),
+        "possui_item_oficial": possui_item_oficial,
+    }
+
+
+
+
+
+
+
+
+def _upsert_snapshot_preco_praticado(
+    *,
+    payload_snapshot: dict[str, Any],
+    marcar_data_aprovacao_contrato: bool = False,
+) -> dict[str, Any]:
+    if not _objeto_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO):
+        return {"ok": False, "motivo": "tabela_preco_praticado_ausente"}
+
+    id_item_contrato = payload_snapshot.get("IDFatoControleContratosItensEuromidia")
+    id_card = payload_snapshot.get("IDFatoKanbanCard")
+    id_painel = payload_snapshot.get("IDDimPaineisEuromidia")
+    id_face = payload_snapshot.get("IDDimFacesPaineis")
+    id_contrato = payload_snapshot.get("IDFatoControleContratosEuromidia")
+
+    registro_atual = _buscar_snapshot_preco_praticado_para_upsert(
+        id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        id_card=int(id_card) if id_card not in (None, "", 0) else None,
+        id_painel=int(id_painel) if id_painel not in (None, "", 0) else None,
+        id_face=int(id_face) if id_face not in (None, "", 0) else None,
+        id_contrato=int(id_contrato) if id_contrato not in (None, "", 0) else None,
+    )
+
+    colunas_validas: dict[str, Any] = {}
+    for coluna, valor_novo in payload_snapshot.items():
+        if not _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, coluna):
+            continue
+
+        valor_final = valor_novo
+        if valor_final is None and registro_atual is not None:
+            valor_final = registro_atual.get(coluna)
+
+        colunas_validas[coluna] = valor_final
+
+    if registro_atual and registro_atual.get(COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO) not in (None, "", 0):
+        id_registro = int(registro_atual.get(COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO) or 0)
+
+        sets: list[str] = []
+        params_update: dict[str, Any] = {
+            "id_registro": id_registro,
+        }
+
+        for coluna, valor in colunas_validas.items():
+            if coluna == COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO:
+                continue
+            sets.append(f"[{coluna}] = :{coluna}")
+            params_update[coluna] = valor
+
+        if _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "DataCadastro"):
+            sets.append("[DataCadastro] = GETDATE()")
+
+        if marcar_data_aprovacao_contrato and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "DataAprovacaoContrato"):
+            sets.append("[DataAprovacaoContrato] = GETDATE()")
+
+        if not sets:
+            return {"ok": False, "motivo": "nenhuma_coluna_para_update_preco_praticado"}
+
+        sql_update = text(
+            f"""
+            UPDATE {TABELA_CONTRATO_ITEM_PRECO_PRATICADO}
+               SET {', '.join(sets)}
+             WHERE [{COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO}] = :id_registro;
+            """
+        )
+        result = db.session.execute(sql_update, params_update)
+
+        return {
+            "ok": True,
+            "motivo": "snapshot_preco_praticado_atualizado",
+            "acao": "update",
+            "id_registro": id_registro,
+            "linhas_afetadas": int(result.rowcount or 0),
+            "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+        }
+
+    colunas_insert: list[str] = []
+    valores_insert: list[str] = []
+    params_insert: dict[str, Any] = {}
+
+    for coluna, valor in colunas_validas.items():
+        if valor is None:
+            continue
+        colunas_insert.append(f"[{coluna}]")
+        valores_insert.append(f":{coluna}")
+        params_insert[coluna] = valor
+
+    if _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "DataCadastro") and "[DataCadastro]" not in colunas_insert:
+        colunas_insert.append("[DataCadastro]")
+        valores_insert.append("GETDATE()")
+
+    if (
+        marcar_data_aprovacao_contrato
+        and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "DataAprovacaoContrato")
+        and "[DataAprovacaoContrato]" not in colunas_insert
+    ):
+        colunas_insert.append("[DataAprovacaoContrato]")
+        valores_insert.append("GETDATE()")
+
+    if not colunas_insert:
+        return {"ok": False, "motivo": "nenhuma_coluna_para_insert_preco_praticado"}
+
+    sql_insert = text(
+        f"""
+        INSERT INTO {TABELA_CONTRATO_ITEM_PRECO_PRATICADO}
+        (
+            {', '.join(colunas_insert)}
+        )
+        OUTPUT INSERTED.[{COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO}]
+        VALUES
+        (
+            {', '.join(valores_insert)}
+        );
+        """
+    )
+
+    novo_id = db.session.execute(sql_insert, params_insert).scalar()
+    return {
+        "ok": True,
+        "motivo": "snapshot_preco_praticado_inserido",
+        "acao": "insert",
+        "id_registro": int(novo_id) if novo_id not in (None, "") else None,
+        "linhas_afetadas": 1,
+        "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+    }
+
+
+
+
+
+
+
+
+
+def _sincronizar_snapshot_preco_praticado_fase_4(
+    *,
+    id_card: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any]:
+    contexto = _montar_payload_snapshot_preco_praticado(
+        id_card=int(id_card),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_usuario_evento=int(id_usuario),
+    )
+
+    if not contexto.get("ok"):
+        return contexto
+
+    if int(contexto.get("id_fase_atual") or 0) != 4:
+        return {
+            "ok": False,
+            "motivo": "fase_diferente_de_4",
+            "id_fase_atual": int(contexto.get("id_fase_atual") or 0),
+        }
+
+    resultado_upsert = _upsert_snapshot_preco_praticado(
+        payload_snapshot=contexto.get("payload") or {},
+        marcar_data_aprovacao_contrato=False,
+    )
+
+    return {
+        **resultado_upsert,
+        "id_fase_atual": int(contexto.get("id_fase_atual") or 0),
+        "id_item_contrato": int((contexto.get("payload") or {}).get("IDFatoControleContratosItensEuromidia") or 0) or None,
+    }
+
+
+
+
+
+def _sincronizar_aprovacao_preco_no_snapshot_preco_praticado(
+    *,
+    id_card: int,
+    id_usuario_aprovacao: int,
+    id_empresa_proprietaria: int,
+    negociacao: dict[str, Any],
+    preco_aprovado: Decimal,
+    desconto_aprovado_percentual: Decimal | None,
+    margem_percentual: Decimal | None,
+) -> dict[str, Any]:
+    contexto = _montar_payload_snapshot_preco_praticado(
+        id_card=int(id_card),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_usuario_evento=int(id_usuario_aprovacao),
+        id_usuario_autorizacao_preco=int(id_usuario_aprovacao),
+        negociacao_base=negociacao,
+        preco_praticado_override=preco_aprovado,
+        desconto_percentual_override=desconto_aprovado_percentual,
+        margem_percentual_override=margem_percentual,
+    )
+
+    if not contexto.get("ok"):
+        return contexto
+
+    return _upsert_snapshot_preco_praticado(
+        payload_snapshot=contexto.get("payload") or {},
+        marcar_data_aprovacao_contrato=False,
+    )
+
+
+
+def _sincronizar_aprovacao_contrato_no_snapshot_preco_praticado(
+    *,
+    id_card: int,
+    id_usuario_aprovacao: int,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any]:
+    contexto = _montar_payload_snapshot_preco_praticado(
+        id_card=int(id_card),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_usuario_evento=int(id_usuario_aprovacao),
+        id_usuario_aprovacao_contrato=int(id_usuario_aprovacao),
+        marcar_data_aprovacao_contrato=True,
+    )
+
+    if not contexto.get("ok"):
+        return contexto
+
+    return _upsert_snapshot_preco_praticado(
+        payload_snapshot=contexto.get("payload") or {},
+        marcar_data_aprovacao_contrato=True,
+    )
+
 
 
 def _calcular_margens_comerciais(
@@ -10001,8 +10685,6 @@ def _registrar_negociacao_preco_card(
 
 
 
-
-
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -10332,6 +11014,7 @@ def api_card_mover(id_card: int):
             )
 
         sincronizacao_solicitacao_fase = None
+        snapshot_preco_praticado = None
 
         try:
             sincronizacao_solicitacao_fase = _sincronizar_ativacao_solicitacao_por_fase_do_card(
@@ -10339,11 +11022,49 @@ def api_card_mover(id_card: int):
                 id_usuario=int(id_usuario),
                 id_empresa_proprietaria=int(id_emp),
             )
+
             if isinstance(sincronizacao_solicitacao_fase, dict):
                 sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
+
+            if int(id_fase_para) == 4:
+                try:
+                    snapshot_preco_praticado = _sincronizar_snapshot_preco_praticado_fase_4(
+                        id_card=int(id_card),
+                        id_usuario=int(id_usuario),
+                        id_empresa_proprietaria=int(id_emp),
+                    )
+
+                    current_app.logger.warning(
+                        "KANBAN SNAPSHOT PRECO PRATICADO FASE 4: id_card=%s resultado=%s",
+                        id_card,
+                        snapshot_preco_praticado,
+                    )
+
+                    if not snapshot_preco_praticado or not snapshot_preco_praticado.get("ok"):
+                        motivo_snapshot = (
+                            snapshot_preco_praticado.get("motivo")
+                            if isinstance(snapshot_preco_praticado, dict)
+                            else "snapshot_preco_praticado_nao_retorno_ok"
+                        )
+                        current_app.logger.warning(
+                            "KANBAN SNAPSHOT PRECO PRATICADO FASE 4 NAO BLOQUEOU O MOVER: id_card=%s motivo=%s",
+                            id_card,
+                            motivo_snapshot,
+                        )
+                except Exception as exc_snapshot:
+                    snapshot_preco_praticado = {
+                        "ok": False,
+                        "motivo": "erro_ao_sincronizar_snapshot_preco_praticado_fase_4",
+                        "erro": str(exc_snapshot),
+                    }
+                    current_app.logger.exception(
+                        "Falha ao sincronizar snapshot de preço praticado na fase 4 id_card=%s",
+                        id_card,
+                    )
+
         except Exception as exc:
             raise RuntimeError(
-                f"Falha ao sincronizar a solicitação de contrato após mover o card: {str(exc)}"
+                f"Falha ao sincronizar a solicitação após mover o card: {str(exc)}"
             ) from exc
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
@@ -10379,6 +11100,7 @@ def api_card_mover(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "snapshot_solicitacao": sincronizacao_solicitacao_fase,
+                "snapshot_preco_praticado": snapshot_preco_praticado,
             },
         )
 
@@ -10393,6 +11115,7 @@ def api_card_mover(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "snapshot_solicitacao": sincronizacao_solicitacao_fase,
+                "snapshot_preco_praticado": snapshot_preco_praticado,
             }
         )
 
@@ -10400,12 +11123,6 @@ def api_card_mover(id_card: int):
         db.session.rollback()
         current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao mover card: {str(exc)}"}), 500
-
-
-
-
-
-
 
 
 
@@ -10479,7 +11196,6 @@ def api_tag_criar(id_kanban: int):
 
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>/tags", methods=["POST"])
 @login_required
 @limiter.limit("180/minute")
@@ -10533,6 +11249,7 @@ def api_card_tag_adicionar(id_card: int):
 
     alterou = False
     retorno_solicitacao: dict[str, Any] | None = None
+    snapshot_preco_praticado: dict[str, Any] | None = None
 
     try:
         if not existe:
@@ -10567,6 +11284,31 @@ def api_card_tag_adicionar(id_card: int):
                     id_usuario=int(id_usuario),
                     id_empresa_proprietaria=int(id_emp),
                 )
+
+            snapshot_preco_praticado = None
+            if int(id_tag) == int(ID_TAG_CONTRATO_APROVADO):
+                snapshot_preco_praticado = _sincronizar_aprovacao_contrato_no_snapshot_preco_praticado(
+                    id_card=int(id_card),
+                    id_usuario_aprovacao=int(id_usuario),
+                    id_empresa_proprietaria=int(id_emp),
+                )
+
+                current_app.logger.warning(
+                    "KANBAN SNAPSHOT PRECO PRATICADO TAG 13: id_card=%s resultado=%s",
+                    id_card,
+                    snapshot_preco_praticado,
+                )
+
+                if not snapshot_preco_praticado or not snapshot_preco_praticado.get("ok"):
+                    motivo_snapshot = (
+                        snapshot_preco_praticado.get("motivo")
+                        if isinstance(snapshot_preco_praticado, dict)
+                        else "snapshot_preco_praticado_tag13_nao_retorno_ok"
+                    )
+                    raise RuntimeError(
+                        "Falha ao sincronizar a foto do preço praticado na aprovação do contrato. "
+                        f"Motivo: {motivo_snapshot}"
+                    )
 
             id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
                 id_kanban=id_kanban,
@@ -10624,6 +11366,8 @@ def api_card_tag_adicionar(id_card: int):
 
             if retorno_solicitacao:
                 payload_socket["solicitacao_contrato"] = retorno_solicitacao
+            if snapshot_preco_praticado is not None:
+                payload_socket["snapshot_preco_praticado"] = snapshot_preco_praticado
 
             _emitir_evento_kanban(
                 id_kanban,
@@ -10654,6 +11398,7 @@ def api_card_tag_adicionar(id_card: int):
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "solicitacao_contrato": retorno_solicitacao,
+                "snapshot_preco_praticado": snapshot_preco_praticado,
             }
         )
 
@@ -10669,11 +11414,6 @@ def api_card_tag_adicionar(id_card: int):
             id_tag,
         )
         return jsonify({"ok": False, "msg": f"Erro ao adicionar tag: {str(exc)}"}), 500
-
-
-
-
-
 
 
 
@@ -15961,8 +16701,6 @@ def aprovacao_preco_detalhe(id_card: int):
 
 
 
-
-
 @kanban_bp.route("/api/aprovacao-preco/<int:id_card>/aprovar", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -16059,6 +16797,35 @@ def api_aprovacao_preco_aprovar(id_card: int):
             id_usuario=int(id_usuario),
         )
 
+        etapa = "sincronizar_snapshot_preco_praticado"
+        snapshot_preco_praticado = _sincronizar_aprovacao_preco_no_snapshot_preco_praticado(
+            id_card=int(id_card),
+            id_usuario_aprovacao=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            negociacao=negociacao,
+            preco_aprovado=preco_aprovado,
+            desconto_aprovado_percentual=desconto_aprovado_percentual,
+            margem_percentual=margem_percentual,
+        )
+
+        current_app.logger.warning(
+            "KANBAN SNAPSHOT PRECO PRATICADO APROVACAO PRECO: id_card=%s id_negociacao=%s resultado=%s",
+            id_card,
+            id_negociacao_preco,
+            snapshot_preco_praticado,
+        )
+
+        if not snapshot_preco_praticado or not snapshot_preco_praticado.get("ok"):
+            motivo_snapshot = (
+                snapshot_preco_praticado.get("motivo")
+                if isinstance(snapshot_preco_praticado, dict)
+                else "snapshot_preco_praticado_aprovacao_preco_nao_retorno_ok"
+            )
+            raise RuntimeError(
+                "Falha ao sincronizar a foto do preço praticado na aprovação do preço. "
+                f"Motivo: {motivo_snapshot}"
+            )
+
         etapa = "sincronizar_tags"
         estados_atuais = _listar_estado_atual_negociacao_card(int(id_card))
         _sincronizar_tag_aprovacao_diretoria_card(
@@ -16134,13 +16901,11 @@ def api_aprovacao_preco_aprovar(id_card: int):
             "id_negociacao_preco": int(id_negociacao_preco),
             "tags": _obter_tags_do_card(int(id_card)),
             "nota": texto_nota,
+            "snapshot_preco_praticado": snapshot_preco_praticado,
             "historico_precos_url": url_for("kanban.historico_precos_visualizacao", id_card=int(id_card)),
             "historico_card_url": url_for("kanban.historico_card_visualizacao", id_card=int(id_card)),
         }
     )
-
-
-
 
 
 

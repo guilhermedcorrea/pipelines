@@ -202,6 +202,54 @@
         >
           Checkin concluído
         </div>
+
+        <div
+          id="checking-compartilhamento-publico-box"
+          style="margin-top:16px; padding:14px; border-radius:12px; background:#eff6ff; border:1px solid #bfdbfe; {% if compartilhamento_publico %}display:block;{% else %}display:none;{% endif %}"
+        >
+          <div style="font-weight:800; color:#1d4ed8; margin-bottom:8px;">Compartilhamento público</div>
+          <div id="checking-compartilhamento-publico-texto" class="muted" style="margin-bottom:8px;">
+            {% if compartilhamento_publico %}
+              {% if compartilhamento_publico.get('senha_publica') %}
+                Guarde a senha abaixo. Ela é exibida apenas quando o link é gerado.
+              {% else %}
+                Este checking já possui um link público ativo. A senha anterior não pode ser exibida novamente. Gere um novo compartilhamento se precisar de uma nova senha.
+              {% endif %}
+            {% else %}
+              O link público só é exibido depois da confirmação do checking.
+            {% endif %}
+          </div>
+
+          <label for="checking-link-publico" style="display:block; font-weight:700; margin-bottom:6px;">Link público</label>
+          <input
+            id="checking-link-publico"
+            type="text"
+            readonly
+            style="width:100%; margin-bottom:10px;"
+            value="{% if compartilhamento_publico %}{{ compartilhamento_publico.get('url_publica') or compartilhamento_publico.get('url_publica_relativa') or '' }}{% endif %}"
+          >
+
+          <div id="checking-senha-publica-wrap" style="{% if compartilhamento_publico and compartilhamento_publico.get('senha_publica') %}display:block;{% else %}display:none;{% endif %}">
+            <label for="checking-senha-publica" style="display:block; font-weight:700; margin-bottom:6px;">Senha pública</label>
+            <input
+              id="checking-senha-publica"
+              type="text"
+              readonly
+              style="width:100%; margin-bottom:8px; font-weight:800; letter-spacing:0.03em;"
+              value="{% if compartilhamento_publico %}{{ compartilhamento_publico.get('senha_publica') or '' }}{% endif %}"
+            >
+          </div>
+
+          <div id="checking-compartilhamento-publico-aviso" class="muted">
+            {% if compartilhamento_publico %}
+              {% if compartilhamento_publico.get('senha_publica') %}
+                Envie o link e a senha separadamente para o cliente. Se perder a senha, gere um novo compartilhamento.
+              {% else %}
+                O link acima continua válido enquanto o compartilhamento estiver ativo.
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -960,6 +1008,7 @@
 
   const taskIdInicial = {{ (task_id or "")|tojson }};
   const processamentoPendenteInicial = {{ (processamento_pendente or False)|tojson }};
+  const compartilhamentoPublicoInicial = {{ (compartilhamento_publico or {})|tojson }};
 
   const cardProcessamento = document.getElementById("checking-processamento-card");
   const statusProcessamento = document.getElementById("checking-processamento-status");
@@ -974,6 +1023,12 @@
   const resultadoStatusTexto = document.getElementById("checking-resultado-status-texto");
   const formConfirmar = document.getElementById("checking-form-confirmar");
   const statusConcluido = document.getElementById("checking-status-concluido");
+  const boxCompartilhamentoPublico = document.getElementById("checking-compartilhamento-publico-box");
+  const inputLinkPublico = document.getElementById("checking-link-publico");
+  const inputSenhaPublica = document.getElementById("checking-senha-publica");
+  const avisoCompartilhamentoPublico = document.getElementById("checking-compartilhamento-publico-aviso");
+  const textoCompartilhamentoPublico = document.getElementById("checking-compartilhamento-publico-texto");
+  const wrapSenhaPublica = document.getElementById("checking-senha-publica-wrap");
 
   function mostrarCardProcessamento(texto) {
     if (cardProcessamento) {
@@ -997,6 +1052,66 @@
 
     const valorSeguro = String(valor || "").trim();
     elemento.innerHTML = `${rotulo}: <b>${valorSeguro}</b>`;
+  }
+
+  function esconderCompartilhamentoPublico() {
+    if (boxCompartilhamentoPublico) {
+      boxCompartilhamentoPublico.style.display = "none";
+    }
+    if (inputLinkPublico) {
+      inputLinkPublico.value = "";
+    }
+    if (inputSenhaPublica) {
+      inputSenhaPublica.value = "";
+    }
+    if (wrapSenhaPublica) {
+      wrapSenhaPublica.style.display = "none";
+    }
+    if (textoCompartilhamentoPublico) {
+      textoCompartilhamentoPublico.textContent = "O link público só é exibido depois da confirmação do checking.";
+    }
+    if (avisoCompartilhamentoPublico) {
+      avisoCompartilhamentoPublico.textContent = "";
+    }
+  }
+
+  function mostrarCompartilhamentoPublico(resultado) {
+    const urlPublica = String((resultado && (resultado.url_publica || resultado.url_publica_relativa)) || "").trim();
+    const senhaPublica = String((resultado && resultado.senha_publica) || "").trim();
+    const jaExistia = !!(resultado && resultado.ja_existia);
+
+    if (!urlPublica || !boxCompartilhamentoPublico) {
+      esconderCompartilhamentoPublico();
+      return;
+    }
+
+    boxCompartilhamentoPublico.style.display = "block";
+
+    if (inputLinkPublico) {
+      inputLinkPublico.value = urlPublica;
+    }
+
+    if (inputSenhaPublica) {
+      inputSenhaPublica.value = senhaPublica;
+    }
+
+    if (wrapSenhaPublica) {
+      wrapSenhaPublica.style.display = senhaPublica ? "block" : "none";
+    }
+
+    if (textoCompartilhamentoPublico) {
+      textoCompartilhamentoPublico.textContent = senhaPublica
+        ? "Guarde a senha abaixo. Ela é exibida apenas quando o link é gerado."
+        : "Este checking já possui um link público ativo. A senha anterior não pode ser exibida novamente. Gere um novo compartilhamento se precisar de uma nova senha.";
+    }
+
+    if (avisoCompartilhamentoPublico) {
+      avisoCompartilhamentoPublico.textContent = senhaPublica
+        ? "Envie o link e a senha separadamente para o cliente. Se perder a senha, gere um novo compartilhamento."
+        : (jaExistia
+            ? "O link acima continua válido enquanto o compartilhamento estiver ativo."
+            : "O link acima foi gerado, mas nenhuma senha nova foi retornada.");
+    }
   }
 
   function mostrarResultadoChecking(resultado) {
@@ -1033,6 +1148,8 @@
     if (statusConcluido) {
       statusConcluido.style.display = "none";
     }
+
+    esconderCompartilhamentoPublico();
   }
 
   async function consultarStatusChecking(taskId) {
@@ -1105,6 +1222,13 @@
 
     if (processamentoPendenteInicial && taskIdInicial) {
       await consultarStatusChecking(taskIdInicial);
+      return;
+    }
+
+    if (compartilhamentoPublicoInicial && Object.keys(compartilhamentoPublicoInicial).length > 0) {
+      mostrarCompartilhamentoPublico(compartilhamentoPublicoInicial);
+    } else {
+      esconderCompartilhamentoPublico();
     }
   })();
 })();

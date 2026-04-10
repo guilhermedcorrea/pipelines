@@ -21,7 +21,7 @@ import time,random,calendar,re,requests
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from openpyxl import Workbook
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import login_required
 from flask_wtf.csrf import CSRFError,validate_csrf
 import json
@@ -41,6 +41,15 @@ from celery.result import AsyncResult
 
 from ..celery_app import celery_app
 from ..tasks.checking_tasks import processar_checking_upload
+import secrets
+
+
+
+
+TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO = "[Silver].[FatoCheckingCompartilhamentoPublico]"
+PREFIXO_SESSAO_CHECKING_PUBLICO = "checking_publico_autorizado:"
+TTL_SESSAO_CHECKING_PUBLICO_HORAS = 12
+
 
 
 
@@ -13906,7 +13915,17 @@ def ocupacao_alterar_status(id_ocupacao: int):
 
 
 
+def _obter_base_url_publica_checking() -> str:
+    """
+    Regra:
+    1) se existir configuração explícita, uso ela;
+    2) senão, caio para request.host_url.
+    """
+    base_url_cfg = str(current_app.config.get("CHECKING_BASE_URL_PUBLICA") or "").strip()
+    if base_url_cfg:
+        return base_url_cfg.rstrip("/")
 
+    return request.host_url.rstrip("/")
 
 
 
@@ -14056,8 +14075,6 @@ def _salvar_upload_original_checking(
         shutil.move(str(caminho_origem), str(caminho_saida))
 
     return nome_original, caminho_saida
-
-
 
 
 
@@ -14218,16 +14235,12 @@ def _processar_upload_checking_por_caminho(
             "cod_face": str(cod_face_txt),
             "id_fato_controle_contratos": int(id_fato_controle_contratos),
             "id_empresa": int(id_empresa_int),
+            "razao_social": razao_social,
         }
 
     except Exception:
         db.session.rollback()
         raise
-
-
-
-
-
 
 
 
@@ -14434,6 +14447,9 @@ def _processar_upload_checking(
 
 
 
+
+
+
 @paineis_bp.route("/checking/status/<string:task_id>", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
@@ -14444,7 +14460,12 @@ def checking_status(task_id: str):
     estado = str(resultado_async.state or "PENDING").upper()
 
     if estado == "SUCCESS":
-        resultado = resultado_async.result or {}
+        resultado = dict(resultado_async.result or {})
+
+        url_publica_relativa = str(resultado.get("url_publica_relativa") or "").strip()
+        if url_publica_relativa and not str(resultado.get("url_publica") or "").strip():
+            resultado["url_publica"] = f"{_obter_base_url_publica_checking()}{url_publica_relativa}"
+
         return jsonify(
             {
                 "ok": True,
@@ -14471,7 +14492,6 @@ def checking_status(task_id: str):
             "meta": meta,
         }
     ), 202
-
 
 
 
@@ -15636,7 +15656,6 @@ def checking_contratos():
 
 
 
-
 def _quebrar_nome_banco_schema_tabela_checking(nome_tabela: str) -> tuple[str | None, str | None, str]:
     partes = [
         str(parte or "").strip().strip("[]").strip()
@@ -15657,6 +15676,153 @@ def _quebrar_nome_banco_schema_tabela_checking(nome_tabela: str) -> tuple[str | 
 
 
 
+
+
+@paineis_bp.route("/checking/<int:id_checking>/compartilhamento-publico/gerar", methods=["POST"])
+@login_required
+@limiter.limit("20 per hour")
+def checking_gerar_compartilhamento_publico(id_checking: int):
+    csrf_token = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-CSRF-Token")
+    )
+
+    try:
+        validate_csrf(csrf_token)
+    except Exception:
+        return jsonify({"ok": False, "msg": "CSRF inválido ou ausente."}), 400
+
+    row = (
+        db.session.query(DimCheckingHistorico)
+        .filter(DimCheckingHistorico.IDDimCheckingHistorico == id_checking)
+        .first()
+    )
+
+    if not row:
+        return jsonify({"ok": False, "msg": "Checking não encontrado."}), 404
+
+    try:
+        id_usuario = int(current_user.get_id()) if current_user.is_authenticated else None
+        compartilhamento = _criar_ou_regerar_compartilhamento_publico_checking(
+            id_checking=int(id_checking),
+            id_empresa=int(row.IDEmpresa) if row.IDEmpresa not in (None, "", 0) else None,
+            id_usuario_criacao=id_usuario,
+            observacao="Compartilhamento público regenerado manualmente.",
+        )
+        db.session.commit()
+
+        return jsonify(
+            {
+                "ok": True,
+                "id_checking": int(id_checking),
+                "token_publico": compartilhamento["token_publico"],
+                "url_publica_relativa": compartilhamento["url_publica_relativa"],
+                "url_publica": f"{request.host_url.rstrip('/')}" + compartilhamento["url_publica_relativa"],
+                "senha_publica": compartilhamento["senha_publica"],
+            }
+        )
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("[CHECKING] erro ao gerar compartilhamento público")
+        return jsonify({"ok": False, "msg": f"Falha ao gerar compartilhamento público: {exc}"}), 500
+
+
+
+
+
+
+@paineis_bp.route("/checking/publico/<string:token_publico>", methods=["GET"])
+@limiter.limit("60 per minute")
+def checking_publico_visualizar(token_publico: str):
+    token_limpo = _normalizar_token_publico_checking(token_publico)
+    item = _obter_compartilhamento_publico_por_token(token_limpo)
+
+    if not item:
+        abort(404)
+
+    autorizado = _sessao_checking_publico_autorizada(token_limpo)
+
+    return render_template(
+        "euromidia/checking_upload_checking_publico.html",
+        item=item,
+        autorizado=autorizado,
+        token_publico=token_limpo,
+        url_imagem_publica=url_for("Paineis.checking_publico_arquivo", token_publico=token_limpo),
+        url_autenticar_publico=url_for("Paineis.checking_publico_autenticar", token_publico=token_limpo),
+    )
+
+
+
+
+
+
+
+@paineis_bp.route("/checking/publico/<string:token_publico>/autenticar", methods=["POST"])
+@limiter.limit("10 per minute")
+def checking_publico_autenticar(token_publico: str):
+    token_limpo = _normalizar_token_publico_checking(token_publico)
+
+    csrf_token = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-CSRF-Token")
+    )
+
+    try:
+        validate_csrf(csrf_token)
+    except Exception:
+        flash("CSRF inválido ou ausente.", "danger")
+        return redirect(url_for("Paineis.checking_publico_visualizar", token_publico=token_limpo))
+
+    item = _obter_compartilhamento_publico_por_token(token_limpo)
+    if not item:
+        abort(404)
+
+    senha_digitada = str(request.form.get("senha") or "").strip()
+    if not senha_digitada:
+        flash("Informe a senha para acessar a imagem do checking.", "warning")
+        return redirect(url_for("Paineis.checking_publico_visualizar", token_publico=token_limpo))
+
+    if not check_password_hash(str(item.get("SenhaHash") or ""), senha_digitada):
+        try:
+            _registrar_tentativa_invalida_checking_publico(int(item["IDFatoCheckingCompartilhamentoPublico"]))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        flash("Senha inválida.", "danger")
+        return redirect(url_for("Paineis.checking_publico_visualizar", token_publico=token_limpo))
+
+    try:
+        _definir_sessao_checking_publico(token_limpo)
+        _registrar_acesso_valido_checking_publico(int(item["IDFatoCheckingCompartilhamentoPublico"]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash("Falha ao liberar o acesso público ao checking.", "danger")
+        return redirect(url_for("Paineis.checking_publico_visualizar", token_publico=token_limpo))
+
+    return redirect(url_for("Paineis.checking_publico_visualizar", token_publico=token_limpo))
+
+
+@paineis_bp.route("/checking/publico/<string:token_publico>/arquivo", methods=["GET"])
+@limiter.limit("60 per minute")
+def checking_publico_arquivo(token_publico: str):
+    token_limpo = _normalizar_token_publico_checking(token_publico)
+    item = _obter_compartilhamento_publico_por_token(token_limpo)
+
+    if not item:
+        abort(404)
+
+    if not _sessao_checking_publico_autorizada(token_limpo):
+        abort(403)
+
+    caminho = Path(str(item.get("CaminhoImagemGerada") or "").strip())
+    if not caminho.exists() or not caminho.is_file():
+        abort(404)
+
+    return send_file(caminho)
 
 
 
@@ -15692,7 +15858,6 @@ def checking_arquivo(id_checking: int):
 
 
 
-
 @paineis_bp.route("/checking/<int:id_checking>/confirmar", methods=["POST"])
 @login_required
 def checking_confirmar(id_checking: int):
@@ -15722,16 +15887,52 @@ def checking_confirmar(id_checking: int):
         row.BitChekin = True
         row.DataConfirmacao = datetime.now()
         row.IDUsuarioConfirmacao = int(current_user.get_id()) if current_user.is_authenticated else None
+        row.DataAtualizacao = datetime.now()
 
         _sincronizar_tag_checking_confirmado_com_card(row)
 
+        compartilhamento_existente = _obter_compartilhamento_publico_ativo_por_checking(int(id_checking))
+
+        compartilhamento_publico = None
+        if compartilhamento_existente:
+            compartilhamento_publico = {
+                "token_publico": str(compartilhamento_existente.get("TokenPublico") or "").strip(),
+                "url_publica_relativa": f"/paineis/checking/publico/{str(compartilhamento_existente.get('TokenPublico') or '').strip()}",
+                "senha_publica": None,
+                "ja_existia": True,
+            }
+        else:
+            compartilhamento_publico = _criar_ou_regerar_compartilhamento_publico_checking(
+                id_checking=int(id_checking),
+                id_empresa=int(row.IDEmpresa) if row.IDEmpresa not in (None, "", 0) else None,
+                id_usuario_criacao=int(current_user.get_id()) if current_user.is_authenticated else None,
+                observacao="Compartilhamento público gerado automaticamente após a confirmação do checking.",
+            )
+            compartilhamento_publico["ja_existia"] = False
+
         db.session.commit()
+
+        if compartilhamento_publico and compartilhamento_publico.get("url_publica_relativa"):
+            compartilhamento_publico["url_publica"] = (
+                f"{request.host_url.rstrip('/')}{compartilhamento_publico['url_publica_relativa']}"
+            )
+
         flash("Checking confirmado com sucesso.", "success")
+
+        return render_template(
+            "euromidia/checking_upload.html",
+            hoje=datetime.now().date(),
+            checking=row,
+            task_id=None,
+            processamento_pendente=False,
+            compartilhamento_publico=compartilhamento_publico,
+        )
+
     except Exception as exc:
         db.session.rollback()
-        flash(f"Falha ao confirmar checking: {exc}", "danger")
-
-    return redirect(url_for("Paineis.checking_novo"))
+        current_app.logger.exception("[CHECKING] erro ao confirmar checking e gerar compartilhamento público")
+        flash(f"Falha ao confirmar checking: {str(exc)}", "danger")
+        return redirect(url_for("Paineis.checking_novo"))
 
 
 
@@ -15918,3 +16119,294 @@ def visualizar_checking(id_checking: int):
         abort(404)
 
     return render_template("euromidia/visualizar_checking.html", item=item)
+
+
+
+
+
+
+
+
+
+
+
+
+def _agora_checking_publico() -> datetime:
+    return datetime.now()
+
+
+def _normalizar_token_publico_checking(token_publico: str | None) -> str:
+    return str(token_publico or "").strip()
+
+
+def _gerar_token_publico_checking() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _gerar_senha_publica_checking(tamanho: int = 12) -> str:
+    alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    return "".join(secrets.choice(alfabeto) for _ in range(max(8, int(tamanho or 12))))
+
+
+def _chave_sessao_checking_publico(token_publico: str) -> str:
+    return f"{PREFIXO_SESSAO_CHECKING_PUBLICO}{_normalizar_token_publico_checking(token_publico)}"
+
+
+def _definir_sessao_checking_publico(token_publico: str) -> None:
+    agora = _agora_checking_publico()
+    expira_em = agora + timedelta(hours=TTL_SESSAO_CHECKING_PUBLICO_HORAS)
+    session[_chave_sessao_checking_publico(token_publico)] = {
+        "autorizado": True,
+        "autorizado_em": agora.isoformat(),
+        "expira_em": expira_em.isoformat(),
+    }
+    session.modified = True
+
+
+def _sessao_checking_publico_autorizada(token_publico: str) -> bool:
+    chave = _chave_sessao_checking_publico(token_publico)
+    payload = session.get(chave)
+
+    if payload is True:
+        return True
+
+    if not isinstance(payload, dict):
+        return False
+
+    if not bool(payload.get("autorizado")):
+        return False
+
+    expira_em_txt = str(payload.get("expira_em") or "").strip()
+    if not expira_em_txt:
+        return True
+
+    try:
+        expira_em = datetime.fromisoformat(expira_em_txt)
+    except Exception:
+        session.pop(chave, None)
+        session.modified = True
+        return False
+
+    if expira_em < _agora_checking_publico():
+        session.pop(chave, None)
+        session.modified = True
+        return False
+
+    return True
+
+
+
+
+
+
+
+
+def _obter_compartilhamento_publico_ativo_por_checking(id_checking: int) -> dict | None:
+    sql = text(f"""
+        SELECT TOP (1)
+            cp.IDFatoCheckingCompartilhamentoPublico,
+            cp.IDDimCheckingHistorico,
+            cp.IDEmpresa,
+            cp.IDDimUsuariosCriacao,
+            cp.TokenPublico,
+            cp.SenhaHash,
+            cp.BitAtivo,
+            cp.QuantidadeAcessos,
+            cp.QuantidadeTentativasInvalidas,
+            cp.DataCriacao,
+            cp.DataAtualizacao,
+            cp.DataUltimoAcesso,
+            cp.DataUltimaTentativaInvalida,
+            cp.DataExpiracao,
+            cp.DataRevogacao,
+            cp.IDDimUsuariosRevogacao,
+            cp.Observacao
+        FROM {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO} cp
+        WHERE cp.IDDimCheckingHistorico = :id_checking
+          AND cp.BitAtivo = 1
+          AND (cp.DataExpiracao IS NULL OR cp.DataExpiracao >= GETDATE())
+        ORDER BY cp.IDFatoCheckingCompartilhamentoPublico DESC
+    """)
+
+    row = db.session.execute(sql, {"id_checking": int(id_checking)}).mappings().first()
+    return dict(row) if row else None
+
+
+def _obter_compartilhamento_publico_por_token(token_publico: str) -> dict | None:
+    token_limpo = _normalizar_token_publico_checking(token_publico)
+    if not token_limpo:
+        return None
+
+    sql = text(f"""
+        SELECT TOP (1)
+            cp.IDFatoCheckingCompartilhamentoPublico,
+            cp.IDDimCheckingHistorico,
+            cp.IDEmpresa,
+            cp.IDDimUsuariosCriacao,
+            cp.TokenPublico,
+            cp.SenhaHash,
+            cp.BitAtivo,
+            cp.QuantidadeAcessos,
+            cp.QuantidadeTentativasInvalidas,
+            cp.DataCriacao,
+            cp.DataAtualizacao,
+            cp.DataUltimoAcesso,
+            cp.DataUltimaTentativaInvalida,
+            cp.DataExpiracao,
+            cp.DataRevogacao,
+            cp.IDDimUsuariosRevogacao,
+            cp.Observacao,
+            ch.CaminhoImagemGerada,
+            ch.BitChekin,
+            ch.DataConfirmacao,
+            ch.CodPonto,
+            ch.CodFace,
+            ch.IDFatoControleContratosEuromidia,
+            RazaoSocial = COALESCE(NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(ch.RazaoSocial)), '')),
+            CNPJ = COALESCE(NULLIF(LTRIM(RTRIM(emp.CNPJ)), ''), NULLIF(LTRIM(RTRIM(ch.CNPJ)), ''))
+        FROM {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO} cp
+        INNER JOIN [Integracao].[Silver].[DimCheckingHistorico] ch
+            ON ch.IDDimCheckingHistorico = cp.IDDimCheckingHistorico
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = COALESCE(cp.IDEmpresa, ch.IDEmpresa)
+        WHERE cp.TokenPublico = :token_publico
+          AND cp.BitAtivo = 1
+          AND (cp.DataExpiracao IS NULL OR cp.DataExpiracao >= GETDATE())
+        ORDER BY cp.IDFatoCheckingCompartilhamentoPublico DESC
+    """)
+
+    row = db.session.execute(sql, {"token_publico": token_limpo}).mappings().first()
+    return dict(row) if row else None
+
+
+def _marcar_compartilhamentos_publicos_anteriores_inativos(
+    *,
+    id_checking: int,
+    id_usuario_revogacao: int | None = None,
+) -> None:
+    sql = text(f"""
+        UPDATE {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO}
+        SET
+            BitAtivo = 0,
+            DataAtualizacao = GETDATE(),
+            DataRevogacao = COALESCE(DataRevogacao, GETDATE()),
+            IDDimUsuariosRevogacao = COALESCE(:id_usuario_revogacao, IDDimUsuariosRevogacao)
+        WHERE IDDimCheckingHistorico = :id_checking
+          AND BitAtivo = 1
+    """)
+
+    db.session.execute(
+        sql,
+        {
+            "id_checking": int(id_checking),
+            "id_usuario_revogacao": int(id_usuario_revogacao) if id_usuario_revogacao not in (None, "", 0) else None,
+        },
+    )
+
+
+def _criar_ou_regerar_compartilhamento_publico_checking(
+    *,
+    id_checking: int,
+    id_empresa: int | None,
+    id_usuario_criacao: int | None,
+    observacao: str | None = None,
+    data_expiracao: datetime | None = None,
+) -> dict:
+    id_checking_int = int(id_checking)
+    id_empresa_int = int(id_empresa) if id_empresa not in (None, "", 0) else None
+    id_usuario_int = int(id_usuario_criacao) if id_usuario_criacao not in (None, "", 0) else None
+    observacao_txt = str(observacao or "").strip() or None
+
+    _marcar_compartilhamentos_publicos_anteriores_inativos(
+        id_checking=id_checking_int,
+        id_usuario_revogacao=id_usuario_int,
+    )
+
+    token_publico = None
+    for _ in range(10):
+        token_teste = _gerar_token_publico_checking()
+        ja_existe = db.session.execute(
+            text(f"SELECT TOP (1) 1 AS Existe FROM {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO} WHERE TokenPublico = :token_publico"),
+            {"token_publico": token_teste},
+        ).first()
+        if not ja_existe:
+            token_publico = token_teste
+            break
+
+    if not token_publico:
+        raise RuntimeError("Não foi possível gerar um token público único para o checking.")
+
+    senha_publica = _gerar_senha_publica_checking()
+    senha_hash = generate_password_hash(senha_publica)
+
+    db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO}(
+                IDDimCheckingHistorico,
+                IDEmpresa,
+                IDDimUsuariosCriacao,
+                TokenPublico,
+                SenhaHash,
+                BitAtivo,
+                DataCriacao,
+                DataAtualizacao,
+                DataExpiracao,
+                Observacao
+            )
+            VALUES (
+                :id_checking,
+                :id_empresa,
+                :id_usuario_criacao,
+                :token_publico,
+                :senha_hash,
+                1,
+                GETDATE(),
+                GETDATE(),
+                :data_expiracao,
+                :observacao
+            )
+        """),
+        {
+            "id_checking": id_checking_int,
+            "id_empresa": id_empresa_int,
+            "id_usuario_criacao": id_usuario_int,
+            "token_publico": token_publico,
+            "senha_hash": senha_hash,
+            "data_expiracao": data_expiracao,
+            "observacao": observacao_txt,
+        },
+    )
+
+    return {
+        "token_publico": token_publico,
+        "url_publica_relativa": f"/paineis/checking/publico/{token_publico}",
+        "senha_publica": senha_publica,
+    }
+
+
+def _registrar_tentativa_invalida_checking_publico(id_compartilhamento: int) -> None:
+    db.session.execute(
+        text(f"""
+            UPDATE {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO}
+            SET
+                QuantidadeTentativasInvalidas = ISNULL(QuantidadeTentativasInvalidas, 0) + 1,
+                DataUltimaTentativaInvalida = GETDATE(),
+                DataAtualizacao = GETDATE()
+            WHERE IDFatoCheckingCompartilhamentoPublico = :id_compartilhamento
+        """),
+        {"id_compartilhamento": int(id_compartilhamento)},
+    )
+
+
+def _registrar_acesso_valido_checking_publico(id_compartilhamento: int) -> None:
+    db.session.execute(
+        text(f"""
+            UPDATE {TABELA_CHECKING_COMPARTILHAMENTO_PUBLICO}
+            SET
+                QuantidadeAcessos = ISNULL(QuantidadeAcessos, 0) + 1,
+                DataUltimoAcesso = GETDATE(),
+                DataAtualizacao = GETDATE()
+            WHERE IDFatoCheckingCompartilhamentoPublico = :id_compartilhamento
+        """),
+        {"id_compartilhamento": int(id_compartilhamento)},
+    )
