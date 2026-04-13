@@ -16213,7 +16213,6 @@ def lista_checkins():
 
 
 
-
 @paineis_bp.route("/checkin/<int:id_checkin>", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
@@ -16222,25 +16221,55 @@ def visualizar_checkin(id_checkin: int):
         SELECT TOP (1)
             ch.IDDimCheckinHistorico,
             ch.DataAtualizacao,
-            ch.DataCheckin,
+            ch.DataChekin AS DataCheckin,
             ch.IDEmpresa,
-            CNPJ = COALESCE(NULLIF(LTRIM(RTRIM(emp.CNPJ)), ''), NULLIF(LTRIM(RTRIM(cc.CNPJ)), ''), NULLIF(LTRIM(RTRIM(ch.CNPJ)), '')),
-            RazaoSocial = COALESCE(NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(cc.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(ch.RazaoSocial)), '')),
+            CNPJ = COALESCE(
+                NULLIF(LTRIM(RTRIM(emp.CNPJ)), ''),
+                NULLIF(LTRIM(RTRIM(cc.CNPJ)), ''),
+                NULLIF(LTRIM(RTRIM(ch.CNPJ)), '')
+            ),
+            RazaoSocial = COALESCE(
+                NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), ''),
+                NULLIF(LTRIM(RTRIM(cc.RazaoSocial)), ''),
+                NULLIF(LTRIM(RTRIM(ch.RazaoSocial)), '')
+            ),
             MarcaExibida = NULLIF(LTRIM(RTRIM(cc.MarcaExibida)), ''),
             ch.IDFatoControleContratosEuromidia,
             ch.CodPonto,
             ch.CodFace,
-            TipoPainel = COALESCE(NULLIF(LTRIM(RTRIM(p.Tipo)), ''), NULLIF(LTRIM(RTRIM(ch.TipoPainel)), '')),
-            TipoFace = COALESCE(NULLIF(LTRIM(RTRIM(fp.Tipo)), ''), NULLIF(LTRIM(RTRIM(ch.TipoFace)), '')),
+            TipoPainel = COALESCE(
+                NULLIF(LTRIM(RTRIM(p.Tipo)), ''),
+                NULLIF(LTRIM(RTRIM(ch.TipoPainel)), '')
+            ),
+            TipoFace = COALESCE(
+                NULLIF(LTRIM(RTRIM(fp.Tipo)), ''),
+                NULLIF(LTRIM(RTRIM(ch.TipoFace)), '')
+            ),
             fp.IDDimFacesPaineis,
             p.IDDimPaineisEuromidia,
             EnderecoPainel =
                 LTRIM(RTRIM(
                     COALESCE(p.Logradouro, '') +
-                    CASE WHEN p.Numero IS NOT NULL AND LTRIM(RTRIM(p.Numero)) <> '' THEN ', ' + p.Numero ELSE '' END +
-                    CASE WHEN p.Bairro IS NOT NULL AND LTRIM(RTRIM(p.Bairro)) <> '' THEN ' - ' + p.Bairro ELSE '' END +
-                    CASE WHEN p.Cidade IS NOT NULL AND LTRIM(RTRIM(p.Cidade)) <> '' THEN ' - ' + p.Cidade ELSE '' END +
-                    CASE WHEN p.UF IS NOT NULL AND LTRIM(RTRIM(p.UF)) <> '' THEN '/' + p.UF ELSE '' END
+                    CASE
+                        WHEN p.Numero IS NOT NULL AND LTRIM(RTRIM(p.Numero)) <> ''
+                            THEN ', ' + p.Numero
+                        ELSE ''
+                    END +
+                    CASE
+                        WHEN p.Bairro IS NOT NULL AND LTRIM(RTRIM(p.Bairro)) <> ''
+                            THEN ' - ' + p.Bairro
+                        ELSE ''
+                    END +
+                    CASE
+                        WHEN p.Cidade IS NOT NULL AND LTRIM(RTRIM(p.Cidade)) <> ''
+                            THEN ' - ' + p.Cidade
+                        ELSE ''
+                    END +
+                    CASE
+                        WHEN p.UF IS NOT NULL AND LTRIM(RTRIM(p.UF)) <> ''
+                            THEN '/' + p.UF
+                        ELSE ''
+                    END
                 )),
             Logradouro = p.Logradouro,
             Numero = p.Numero,
@@ -16260,10 +16289,17 @@ def visualizar_checkin(id_checkin: int):
             ch.BitChekin,
             ch.DataConfirmacao,
             ch.IDUsuarioCriacao,
-            UsuarioCriacao = COALESCE(NULLIF(LTRIM(RTRIM(uc.NomeUsuario)), ''), CAST(ch.IDUsuarioCriacao AS VARCHAR(50))),
+            UsuarioCriacao = COALESCE(
+                NULLIF(LTRIM(RTRIM(uc.NomeUsuario)), ''),
+                CAST(ch.IDUsuarioCriacao AS VARCHAR(50))
+            ),
             ch.IDUsuarioConfirmacao,
-            UsuarioConfirmacao = COALESCE(NULLIF(LTRIM(RTRIM(uf.NomeUsuario)), ''), CAST(ch.IDUsuarioConfirmacao AS VARCHAR(50))),
-            ch.Observacao
+            UsuarioConfirmacao = COALESCE(
+                NULLIF(LTRIM(RTRIM(uf.NomeUsuario)), ''),
+                CAST(ch.IDUsuarioConfirmacao AS VARCHAR(50))
+            ),
+            ch.Observacao,
+            ch.IDDimTipoMidia
         FROM [Integracao].[Silver].[DimCheckinHistorico] ch
         LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] cc
                ON cc.IDFatoControleContratosEuromidia = ch.IDFatoControleContratosEuromidia
@@ -16279,8 +16315,9 @@ def visualizar_checkin(id_checkin: int):
             FROM [Integracao].[Silver].[DimFacesPaineis] fp2
             WHERE fp2.CodFace = ch.CodFace
                OR (fp2.CodPonto = ch.CodPonto AND fp2.Face = ch.CodFace)
-            ORDER BY CASE WHEN fp2.CodFace = ch.CodFace THEN 0 ELSE 1 END,
-                     fp2.IDDimFacesPaineis DESC
+            ORDER BY
+                CASE WHEN fp2.CodFace = ch.CodFace THEN 0 ELSE 1 END,
+                fp2.IDDimFacesPaineis DESC
         ) fp
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
                ON p.IDDimPaineisEuromidia = fp.IDDimPaineisEuromidia
@@ -16291,7 +16328,10 @@ def visualizar_checkin(id_checkin: int):
         WHERE ch.IDDimCheckinHistorico = :id_checkin
     """)
 
-    item = db.session.execute(sql, {"id_checkin": id_checkin}).mappings().first()
+    item = db.session.execute(
+        sql,
+        {"id_checkin": id_checkin}
+    ).mappings().first()
 
     if not item:
         abort(404)
