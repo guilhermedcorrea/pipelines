@@ -27,10 +27,6 @@ TABELA_DIM_PAINEIS_EUROMIDIA = "[Integracao].[Silver].[DimPaineisEuromidia]"
 TABELA_DIM_FACES_PAINEIS = "[Integracao].[Silver].[DimFacesPaineis]"
 
 
-
-
-
-
 TABELA_RELACIONAMENTO_EMPRESA = "[Integracao].[Silver].[DimRelacionamentoEmpresa]"
 TABELA_KANBAN = "[Kanban].[Silver].[DimKanban]"
 TABELA_KANBAN_FASE = "[Kanban].[Silver].[DimKanbanFase]"
@@ -47,9 +43,6 @@ MAPA_TIPO_CLIENTE_DESCONTO_PADRAO = {
     2: "Cliente Direto",
     3: "Agência de Publicidade",
 }
-
-
-
 
 
 
@@ -4744,7 +4737,6 @@ def _inativar_snapshots_solicitacao_contrato_do_card(id_card: int) -> None:
 
 
 
-
 def _montar_itens_snapshot_solicitacao_do_card(
     *,
     id_card: int,
@@ -5001,8 +4993,8 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "DataAssinaturaRenovacao": _para_data_sql_ou_none((item_contrato or {}).get("DataAssinaturaRenovacao")),
         "IDTrimestre": (item_contrato or {}).get("IDTrimestre"),
         "TexmpoExposicao": (item_contrato or {}).get("TexmpoExposicao"),
-        "DataInicioPrevisto": _para_data_sql_ou_none((item_contrato or {}).get("DataInicioPrevisto")),
-        "DataTerminoPrevisto": _para_data_sql_ou_none((item_contrato or {}).get("DataTerminoPrevisto")),
+        "DataInicioPrevisto": None,
+        "DataTerminoPrevisto": None,
         "InicioRenovacao": _para_data_sql_ou_none((item_contrato or {}).get("InicioRenovacao")),
         "FaturamentoBrutoMensal": (item_contrato or {}).get("FaturamentoBrutoMensal"),
         "PercentualPermuta": (item_contrato or {}).get("PercentualPermuta"),
@@ -5037,7 +5029,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "Faturamento": (item_contrato or {}).get("Faturamento"),
         "DataCancelamento": _para_data_sql_ou_none((item_contrato or {}).get("DataCancelamento")),
         "OBS": descricao_limpa,
-        "DataFimEfetiva": _para_data_sql_ou_none((item_contrato or {}).get("DataFimEfetiva")),
+        "DataFimEfetiva": None,
         "Status": str((item_contrato or {}).get("Status") or "").strip() or None,
         "BitAtivo": bit_registro_ativo,
     }
