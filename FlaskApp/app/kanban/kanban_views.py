@@ -5053,7 +5053,6 @@ def _montar_itens_snapshot_solicitacao_do_card(
 
 
 
-
 def _sincronizar_snapshot_solicitacao_contrato_do_card(
     *,
     id_card: int,
@@ -5333,9 +5332,9 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "NumeroContrato": (contrato_row or {}).get("NumeroContrato"),
         "NumeroPrevia": (contrato_row or {}).get("NumeroPrevia"),
         "CNPJ": (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
-        "DataAssinaturaRenovacao": (contrato_row or {}).get("DataAssinaturaRenovacao"),
+        "DataAssinaturaRenovacao": _para_data_sql_ou_none((contrato_row or {}).get("DataAssinaturaRenovacao")),
         "IDTrimestre": (contrato_row or {}).get("IDTrimestre"),
-        "DataLancamento": (contrato_row or {}).get("DataLancamento"),
+        "DataLancamento": _para_data_sql_ou_none((contrato_row or {}).get("DataLancamento")),
         "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
         "CPF": (contrato_row or {}).get("CPF"),
         "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
@@ -5375,7 +5374,12 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "BitAtivo": bit_registro_ativo,
     }
 
-    header_existente = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
+    snapshot_existente_payload = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
+    header_existente = (
+        snapshot_existente_payload.get("header")
+        if isinstance(snapshot_existente_payload, dict)
+        else None
+    )
 
     campos_header_comparacao = [
         "IDFatoKanbanCard", "IDFatoControleContratosEuromidia", "IDDimStatusContratos",
@@ -5394,7 +5398,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     ]
 
     header_igual = (
-        bool(header_existente)
+        isinstance(header_existente, dict)
         and _registro_dinamico_equivalente(
             header_existente,
             valores_solicitacao,
@@ -5403,7 +5407,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         )
     )
 
-    if header_existente and header_existente.get("IDFatoSolicitacaoContratoEuromidia") not in (None, "", 0):
+    if isinstance(header_existente, dict) and header_existente.get("IDFatoSolicitacaoContratoEuromidia") not in (None, "", 0):
         id_solicitacao = int(header_existente.get("IDFatoSolicitacaoContratoEuromidia") or 0)
 
         if not header_igual:
@@ -5533,7 +5537,6 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "id_solicitacao_existente": id_solicitacao_existente,
         "quantidade_itens_snapshot": len(itens_snapshot),
     }
-
 
 
 
@@ -19363,7 +19366,6 @@ def api_card_criar(id_kanban: int):
 
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["PUT"])
 @login_required
 @limiter.limit("120/minute")
@@ -19441,14 +19443,6 @@ def api_card_atualizar(id_card: int):
                     id_origem_atendimento_int = int(id_origem_atendimento)
                 except Exception:
                     return jsonify({"ok": False, "msg": "Origem de atendimento inválida."}), 400
-
-                origens_validas = {
-                    int(item.get("IDDimOrigemAtendimento") or 0)
-                    for item in _obter_origens_atendimento()
-                }
-
-                if id_origem_atendimento_int not in origens_validas:
-                    return jsonify({"ok": False, "msg": "Origem de atendimento inválida."}), 400
             else:
                 id_origem_atendimento_int = None
 
@@ -19467,9 +19461,8 @@ def api_card_atualizar(id_card: int):
                 id_tipo_cliente_relacionamento_final = id_tipo_cliente_desconto_int
             else:
                 id_tipo_cliente_relacionamento_final = (
-                    int(relacionamento_empresa_atual.get("IDDimTipoCliente"))
+                    int(relacionamento_empresa_atual.get("IDDimTipoCliente") or 0) or None
                     if relacionamento_empresa_atual
-                    and relacionamento_empresa_atual.get("IDDimTipoCliente") not in (None, "", 0)
                     else None
                 )
 
@@ -19477,10 +19470,9 @@ def api_card_atualizar(id_card: int):
                 id_origem_atendimento_relacionamento_final = id_origem_atendimento_int
             else:
                 id_origem_atendimento_relacionamento_final = (
-                    int(relacionamento_empresa_atual.get("IDDimOrigemAtendimento"))
+                    int(relacionamento_empresa_atual.get("IDDimOrigemAtendimento") or 0) or None
                     if relacionamento_empresa_atual
-                    and relacionamento_empresa_atual.get("IDDimOrigemAtendimento") not in (None, "", 0)
-                    else id_origem_atendimento_atual_card
+                    else (int(id_origem_atendimento_atual_card or 0) or None)
                 )
 
         contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
@@ -19503,7 +19495,7 @@ def api_card_atualizar(id_card: int):
         snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
         campos_update: list[str] = []
-        params_update: dict[str, object] = {
+        parametros_update: dict[str, object] = {
             "id_card": int(id_card),
             "titulo": titulo[:300],
             "descricao": descricao,
@@ -19518,51 +19510,45 @@ def api_card_atualizar(id_card: int):
         nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
         if nome_coluna_empresa:
             campos_update.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
-            params_update["id_empresa_relacionada"] = id_empresa_relacionada_int
+            parametros_update["id_empresa_relacionada"] = id_empresa_relacionada_int
+
+        if _coluna_existe(TABELA_CARD, "BitAditivo"):
+            campos_update.append("BitAditivo = :bit_aditivo_contrato")
+            parametros_update["bit_aditivo_contrato"] = int(contexto_tipo_contrato["bit_aditivo"])
+
+        if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
+            campos_update.append("BitContratoNovo = :bit_contrato_novo")
+            parametros_update["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
+
+        _anexar_campos_vinculo_contrato_card(
+            campos_sql=campos_update,
+            parametros=parametros_update,
+            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
+            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
+            cod_face_contrato=validacao_ponto_face.get("cod_face"),
+            prefixo_parametros="sync_",
+        )
+
+        if origem_atendimento_informada and _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
+            campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
+            parametros_update["id_origem_atendimento"] = id_origem_atendimento_int
 
         if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
             campos_update.append("AtualizadoEm = GETDATE()")
 
-        if _coluna_existe(TABELA_CARD, "BitAditivo"):
-            campos_update.append("BitAditivo = :bit_aditivo_contrato")
-            params_update["bit_aditivo_contrato"] = int(contexto_tipo_contrato["bit_aditivo"])
-
-        if _coluna_existe(TABELA_CARD, "BitContratoNovo"):
-            campos_update.append("BitContratoNovo = :bit_contrato_novo")
-            params_update["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
-
-        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia"):
-            campos_update.append("IDFatoControleContratosEuromidia = :id_contrato_vinculado")
-            params_update["id_contrato_vinculado"] = contexto_tipo_contrato["id_contrato_existente"]
-
-        elif _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia"):
-            campos_update.append("IDFatoControleContratoEuromidia = :id_contrato_vinculado")
-            params_update["id_contrato_vinculado"] = contexto_tipo_contrato["id_contrato_existente"]
-
-        if _coluna_existe(TABELA_CARD, "CodPontoContrato"):
-            campos_update.append("CodPontoContrato = :cod_ponto_contrato")
-            params_update["cod_ponto_contrato"] = validacao_ponto_face.get("cod_ponto")
-
-        if _coluna_existe(TABELA_CARD, "CodFaceContrato"):
-            campos_update.append("CodFaceContrato = :cod_face_contrato")
-            params_update["cod_face_contrato"] = validacao_ponto_face.get("cod_face")
-
-        if origem_atendimento_informada and _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
-            campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
-            params_update["id_origem_atendimento"] = id_origem_atendimento_int
+        if not campos_update:
+            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização no card."}), 400
 
         output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
         where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
 
         if has_versao:
-            params_update["versao_concorrencia"] = versao_concorrencia_bytes
+            parametros_update["versao_concorrencia"] = versao_concorrencia_bytes
 
-        if not campos_update:
-            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização no card."}), 400
-
-        sql_upd = text(f"""
+        sql_upd = text(
+            f"""
             UPDATE {TABELA_CARD}
-            SET {', '.join(campos_update)}
+               SET {', '.join(campos_update)}
             OUTPUT
                 INSERTED.IDFatoKanbanCard,
                 INSERTED.IDDimKanban,
@@ -19572,29 +19558,22 @@ def api_card_atualizar(id_card: int):
                 INSERTED.StatusCard,
                 INSERTED.IDEmpresaProprietaria
                 {output_versao}
-            WHERE IDFatoKanbanCard = :id_card
-              AND Ativo = 1{where_versao};
-        """)
+             WHERE IDFatoKanbanCard = :id_card
+               AND Ativo = 1
+               {where_versao};
+            """
+        )
 
-        row_upd = db.session.execute(sql_upd, params_update).mappings().first()
+        row_upd = db.session.execute(sql_upd, parametros_update).mappings().first()
         if not row_upd:
             detalhe_atual = _obter_card_detalhe_payload(id_card)
             return jsonify(
                 {
                     "ok": False,
-                    "msg": "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.",
+                    "msg": "O card foi alterado por outra operação. Recarregue a tela e tente novamente.",
                     "card_atual": detalhe_atual.get("card"),
                 }
             ), 409
-
-        relacionamento_empresa_tipo_cliente = None
-        if id_empresa_relacionada_int not in (None, "", 0):
-            relacionamento_empresa_tipo_cliente = _garantir_relacionamento_empresa_tipo_cliente(
-                id_empresa=int(id_empresa_relacionada_int),
-                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
-                id_dim_tipo_cliente=id_tipo_cliente_relacionamento_final,
-                id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
-            )
 
         sincronizacao_tipo = _sincronizar_tipo_contrato_card(
             id_card=int(id_card),
@@ -19606,19 +19585,7 @@ def api_card_atualizar(id_card: int):
             id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
             cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
             cod_face_contrato=validacao_ponto_face.get("cod_face"),
-        )
-
-        snapshot_solicitacao = _sincronizar_snapshot_solicitacao_contrato_do_card(
-            id_card=int(id_card),
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=int(id_emp),
-            id_empresa_relacionada=id_empresa_relacionada_int,
-            tipo_contrato=str(contexto_tipo_contrato["tipo_contrato"]),
-            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
-            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
-            cod_face_contrato=validacao_ponto_face.get("cod_face"),
-            descricao_card=descricao,
-            contrato_existente=contrato_existente,
+            aplicar_tags=True,
         )
 
         sincronizacao_item_contrato = {
@@ -19660,104 +19627,142 @@ def api_card_atualizar(id_card: int):
         reservas_criadas = 0
 
         if isinstance(painel_faces_payload, list):
-
-            def _assinatura_estado_operacional(estados: list[dict[str, object]]) -> tuple:
-                def _n_int(valor: object) -> int | None:
-                    if valor in (None, ""):
-                        return None
-                    try:
-                        return int(valor)
-                    except Exception:
-                        return None
-
-                def _n_dec(valor: object) -> str | None:
-                    dec = _valor_decimal(valor)
-                    return None if dec is None else format(dec.quantize(Decimal("0.0001")), "f")
-
-                def _n_data(valor: object) -> str | None:
-                    data = _normalizar_data_reserva_kanban(valor)
-                    return None if data is None else data.isoformat()
-
-                itens_norm = []
-                for item in estados or []:
-                    itens_norm.append(
-                        (
-                            _n_int(item.get("IDDimPaineisEuromidia")),
-                            _n_int(item.get("IDDimFacesPaineis")),
-                            _n_int(item.get("IDDimTabelaPrecosEuromidia")),
-                            _n_dec(item.get("CustoTabela")),
-                            _n_int(item.get("AnoCusto")),
-                            _n_dec(item.get("ValorTabela")),
-                            str(item.get("PeriodoExibicao") or "").strip(),
-                            _n_int(item.get("ExibicoesDia")),
-                            _n_dec(item.get("ValorVendaFinal")),
-                            _n_dec(item.get("MargemValor")),
-                            _n_dec(item.get("MargemPercentual")),
-                            _n_data(item.get("PeriodoInicio")),
-                            _n_data(item.get("PeriodoTermino")),
-                        )
-                    )
-                return tuple(sorted(itens_norm))
-
-            estado_antes_operacional = _listar_estado_atual_negociacao_card(id_card)
-            assinatura_antes_operacional = _assinatura_estado_operacional(estado_antes_operacional)
-
-            vinculos_preparados = _preparar_vinculos_painel_faces(painel_faces_payload, id_emp)
-
-            _salvar_vinculos_painel_face_card(
-                id_card=id_card,
-                vinculos_preparados=vinculos_preparados,
-                id_empresa_proprietaria=id_emp,
+            vinculos_preparados = _preparar_vinculos_painel_faces(
+                painel_faces_payload,
+                int(id_emp),
             )
 
-            try:
-                reservas_criadas = _criar_reservas_painel_faces_kanban(
-                    id_card=int(id_card),
-                    titulo_card=str(row_upd.get("Titulo") or titulo or card_atual.get("Titulo") or "").strip(),
-                    id_empresa_relacionada=(
-                        params_update.get("id_empresa_relacionada")
-                        if "id_empresa_relacionada" in params_update
-                        else _obter_id_empresa_relacionada_card(card_atual)
-                    ),
-                    painel_faces_payload=painel_faces_payload,
-                    vinculos_preparados=vinculos_preparados,
-                    id_usuario=int(id_usuario),
-                    id_empresa_proprietaria=int(id_emp),
-                )
-            except ValueError:
-                raise
-            except Exception as exc:
-                current_app.logger.exception("Erro ao criar reservas do card %s após salvar vínculos", id_card)
-                raise RuntimeError(f"Falha ao criar reservas dos painéis/faces: {str(exc)}") from exc
+            db.session.execute(
+                text(
+                    f"""
+                    UPDATE {TABELA_CARD_PAINEL_FACE}
+                       SET Ativo = 0
+                     WHERE IDFatoKanbanCard = :id_card
+                       AND ISNULL(Ativo, 1) = 1;
+                    """
+                ),
+                {"id_card": int(id_card)},
+            )
 
-            estado_depois_operacional = _listar_estado_atual_negociacao_card(id_card)
-            assinatura_depois_operacional = _assinatura_estado_operacional(estado_depois_operacional)
-
-            if assinatura_depois_operacional != assinatura_antes_operacional:
-                _registrar_negociacao_preco_card(
-                    id_card=id_card,
-                    id_kanban=id_kanban,
-                    id_fase_atual=id_fase_atual,
-                    status_card=row_upd.get("StatusCard"),
-                    id_empresa_relacionada=(
-                        params_update.get("id_empresa_relacionada")
-                        if "id_empresa_relacionada" in params_update
-                        else _obter_id_empresa_relacionada_card(card_atual)
+            for ordem_rel, vinculo in enumerate(vinculos_preparados, start=1):
+                db.session.execute(
+                    text(
+                        f"""
+                        INSERT INTO {TABELA_CARD_PAINEL_FACE} (
+                            IDFatoKanbanCard,
+                            Ordem,
+                            IDDimPaineisEuromidia,
+                            IDDimFacesPaineis,
+                            CodPonto,
+                            CodFace,
+                            TipoPainel,
+                            AnoCusto,
+                            CustoTabela,
+                            IDDimTabelaPrecosEuromidia,
+                            PeriodoExibicao,
+                            ExibicoesDia,
+                            ValorTabela,
+                            Tabela,
+                            PoliticaTrocas,
+                            ValorTroca,
+                            NovoValor,
+                            PercentualDesconto,
+                            ValorVendaFinal,
+                            MargemValor,
+                            MargemPercentual,
+                            DataInicio,
+                            DataFim,
+                            Ativo
+                        )
+                        VALUES (
+                            :id_card,
+                            :ordem,
+                            :id_painel,
+                            :id_face,
+                            :cod_ponto,
+                            :cod_face,
+                            :tipo_painel,
+                            :ano_custo,
+                            :custo_tabela,
+                            :id_tabela_preco,
+                            :periodo_exibicao,
+                            :exibicoes_dia,
+                            :valor_tabela,
+                            :tabela,
+                            :politica_trocas,
+                            :valor_troca,
+                            :novo_valor,
+                            :percentual_desconto,
+                            :valor_venda_final,
+                            :margem_valor,
+                            :margem_percentual,
+                            :data_inicio,
+                            :data_fim,
+                            1
+                        );
+                        """
                     ),
-                    vinculos_preparados=vinculos_preparados,
-                    observacoes_proposta=descricao,
+                    {
+                        "id_card": int(id_card),
+                        "ordem": int(ordem_rel),
+                        "id_painel": int(vinculo.get("IDDimPaineisEuromidia") or vinculo.get("id_painel") or 0) or None,
+                        "id_face": int(vinculo.get("IDDimFacesPaineis") or vinculo.get("id_face") or 0) or None,
+                        "cod_ponto": vinculo.get("CodPonto") or vinculo.get("cod_ponto"),
+                        "cod_face": vinculo.get("CodFace") or vinculo.get("cod_face"),
+                        "tipo_painel": vinculo.get("TipoPainel") or vinculo.get("tipo_painel"),
+                        "ano_custo": vinculo.get("AnoCusto") or vinculo.get("ano_custo"),
+                        "custo_tabela": vinculo.get("CustoTabela") or vinculo.get("custo_tabela"),
+                        "id_tabela_preco": vinculo.get("IDDimTabelaPrecosEuromidia") or vinculo.get("id_tabela_preco") or vinculo.get("id_preco"),
+                        "periodo_exibicao": vinculo.get("PeriodoExibicao") or vinculo.get("periodo_exibicao"),
+                        "exibicoes_dia": vinculo.get("ExibicoesDia") or vinculo.get("exibicoes_dia"),
+                        "valor_tabela": vinculo.get("ValorTabela") or vinculo.get("valor_tabela"),
+                        "tabela": vinculo.get("Tabela") or vinculo.get("tabela"),
+                        "politica_trocas": vinculo.get("PoliticaTrocas") or vinculo.get("politica_trocas"),
+                        "valor_troca": vinculo.get("ValorTroca") or vinculo.get("valor_troca"),
+                        "novo_valor": vinculo.get("NovoValor") or vinculo.get("novo_valor"),
+                        "percentual_desconto": vinculo.get("PercentualDesconto") or vinculo.get("percentual_desconto"),
+                        "valor_venda_final": vinculo.get("ValorVendaFinal") or vinculo.get("valor_venda_final"),
+                        "margem_valor": vinculo.get("MargemValor") or vinculo.get("margem_valor"),
+                        "margem_percentual": vinculo.get("MargemPercentual") or vinculo.get("margem_percentual"),
+                        "data_inicio": _para_data_sql_ou_none(vinculo.get("DataInicio") or vinculo.get("data_inicio")),
+                        "data_fim": _para_data_sql_ou_none(vinculo.get("DataFim") or vinculo.get("data_fim")),
+                    },
                 )
+
+        snapshot_solicitacao = _sincronizar_ativacao_solicitacao_por_fase_do_card(
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
+        if contexto_tipo_contrato["tipo_contrato"] in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
+            if not snapshot_solicitacao.get("sincronizado"):
+                motivo_snapshot = snapshot_solicitacao.get("motivo") or "sincronizacao_solicitacao_nao_realizada"
+                raise RuntimeError(
+                    "Falha ao sincronizar a solicitação de contrato após salvar o card. "
+                    f"Motivo: {motivo_snapshot}"
+                )
+
+        relacionamento_empresa_tipo_cliente = None
+        if id_empresa_relacionada_int not in (None, "", 0):
+            relacionamento_empresa_tipo_cliente = _garantir_relacionamento_empresa_tipo_cliente(
+                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
+                id_dim_tipo_cliente=id_tipo_cliente_relacionamento_final,
+                id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
+            )
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
         observacao_log = (
-            "Card atualizado via quadro Kanban"
+            "Card atualizado via Kanban"
             f" | tipo_contrato={sincronizacao_tipo.get('tipo_contrato')}"
-            f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente') or 'NULL'}"
-            f" | cod_ponto_contrato={validacao_ponto_face.get('cod_ponto') or 'NULL'}"
-            f" | cod_face_contrato={validacao_ponto_face.get('cod_face') or 'NULL'}"
+            f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente')}"
+            f" | cod_ponto={validacao_ponto_face.get('cod_ponto')}"
+            f" | cod_face={validacao_ponto_face.get('cod_face')}"
+            f" | id_empresa={id_empresa_relacionada_int if id_empresa_relacionada_int not in (None, '', 0) else 'NULL'}"
             f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
-            f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else (id_origem_atendimento_int if id_origem_atendimento_int not in (None, '', 0) else 'NULL')}"
+            f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else 'NULL'}"
         )
 
         _registrar_log_card(
