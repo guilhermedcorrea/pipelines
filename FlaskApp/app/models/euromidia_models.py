@@ -846,11 +846,11 @@ class DimCustoPainel(db.Model):
 
 
 
-class DimCheckingHistorico(db.Model):
-    __tablename__ = "DimCheckingHistorico"
+class DimCheckinHistorico(db.Model):
+    __tablename__ = "DimCheckinHistorico"
     __table_args__ = ({"schema": "Silver"},)
 
-    IDDimCheckingHistorico = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    IDDimCheckinHistorico = db.Column(db.Integer, primary_key=True, autoincrement=True)
     DataAtualizacao = db.Column(DATETIME2(0), nullable=False, server_default=db.text("SYSDATETIME()"))
     DataChecking = db.Column(db.Date, nullable=False)
 
@@ -886,8 +886,8 @@ class DimCheckingHistorico(db.Model):
 
     def __repr__(self) -> str:
         return (
-            f"<DimCheckingHistorico "
-            f"ID={self.IDDimCheckingHistorico} "
+            f"<DimCheckinHistorico "
+            f"ID={self.IDDimCheckinHistorico} "
             f"CodPonto={self.CodPonto} "
             f"CodFace={self.CodFace!r} "
             f"BitChekin={self.BitChekin}>"

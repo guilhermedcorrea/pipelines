@@ -1,11 +1,11 @@
 bind = "0.0.0.0:8000"
-workers = 1
+workers = 8
 worker_class = "gthread"
-threads = 32
-timeout = 120
+threads = 4
+timeout = 60
 graceful_timeout = 30
 keepalive = 5
 accesslog = "-"
 errorlog = "-"
-loglevel = "warning"
+loglevel = "info"
 capture_output = False

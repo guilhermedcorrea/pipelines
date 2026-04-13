@@ -1,11 +1,11 @@
 {% extends "euromidia/base_euromidia.html" %}
 
-{% block title %}Checking de Painel | Euromídia{% endblock %}
+{% block title %}Checkin de Painel | Euromídia{% endblock %}
 
 {% block content %}
 <div class="container container-limit">
   <div class="card">
-    <h1 class="page-title">Upload de Checking</h1>
+    <h1 class="page-title">Upload de Checkin</h1>
 
     <form method="POST" enctype="multipart/form-data" class="grid" style="margin-top:16px;" autocomplete="off">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -60,12 +60,12 @@
       </div>
 
       <div>
-        <label for="data_checking">Data atual</label>
+        <label for="data_checkin">Data atual</label>
         <input
           type="date"
-          name="data_checking"
-          id="data_checking"
-          value="{{ request.form.get('data_checking', hoje) }}"
+          name="data_checkin"
+          id="data_checkin"
+          value="{{ request.form.get('data_checkin', hoje) }}"
           required
         >
       </div>
@@ -130,20 +130,20 @@
   </div>
 
   <div
-    id="checking-processamento-card"
+    id="checkin-processamento-card"
     class="card"
     style="margin-top:18px; display:{% if processamento_pendente %}block{% else %}none{% endif %};"
   >
     <h2 class="page-title" style="font-size:18px;">Processando mockup</h2>
-    <div id="checking-processamento-status" class="muted">
+    <div id="checkin-processamento-status" class="muted">
       Seu upload foi recebido. O mockup está sendo processado em segundo plano...
     </div>
   </div>
 
   <div
-    id="checking-resultado-card"
+    id="checkin-resultado-card"
     class="card"
-    style="margin-top:18px; display:{% if checking %}block{% else %}none{% endif %};"
+    style="margin-top:18px; display:{% if checkin %}block{% else %}none{% endif %};"
   >
     <h2 class="page-title" style="font-size:18px;">Resultado gerado</h2>
 
@@ -151,34 +151,34 @@
       <div>
         <div style="font-weight:800; margin-bottom:8px;">Mockup gerado</div>
         <img
-          id="checking-resultado-imagem"
-          src="{% if checking %}{{ checking.UrlImagemGerada }}{% else %}{% endif %}"
+          id="checkin-resultado-imagem"
+          src="{% if checkin %}{{ checkin.UrlImagemGerada }}{% else %}{% endif %}"
           alt="Mockup gerado"
-          style="width:100%; border-radius:12px; border:1px solid #E5E7EB; {% if not checking %}display:none;{% endif %}"
+          style="width:100%; border-radius:12px; border:1px solid #E5E7EB; {% if not checkin %}display:none;{% endif %}"
         >
       </div>
 
       <div>
-        <div style="font-weight:800; margin-bottom:8px;">Dados do checking</div>
-        <div class="muted" id="checking-resultado-id">
-          ID: <b>{% if checking %}{{ checking.IDDimCheckingHistorico }}{% endif %}</b>
+        <div style="font-weight:800; margin-bottom:8px;">Dados do checkin</div>
+        <div class="muted" id="checkin-resultado-id">
+          ID: <b>{% if checkin %}{{ checkin.IDDimCheckinHistorico }}{% endif %}</b>
         </div>
-        <div class="muted" id="checking-resultado-empresa">
-          Empresa: <b>{% if checking %}{{ checking.RazaoSocial }}{% endif %}</b>
+        <div class="muted" id="checkin-resultado-empresa">
+          Empresa: <b>{% if checkin %}{{ checkin.RazaoSocial }}{% endif %}</b>
         </div>
-        <div class="muted" id="checking-resultado-contrato">
-          Contrato: <b>{% if checking %}{{ checking.IDFatoControleContratosEuromidia }}{% endif %}</b>
+        <div class="muted" id="checkin-resultado-contrato">
+          Contrato: <b>{% if checkin %}{{ checkin.IDFatoControleContratosEuromidia }}{% endif %}</b>
         </div>
-        <div class="muted" id="checking-resultado-ponto">
-          Ponto: <b>{% if checking %}{{ checking.CodPonto }}{% endif %}</b>
+        <div class="muted" id="checkin-resultado-ponto">
+          Ponto: <b>{% if checkin %}{{ checkin.CodPonto }}{% endif %}</b>
         </div>
-        <div class="muted" id="checking-resultado-face">
-          Face: <b>{% if checking %}{{ checking.CodFace }}{% endif %}</b>
+        <div class="muted" id="checkin-resultado-face">
+          Face: <b>{% if checkin %}{{ checkin.CodFace }}{% endif %}</b>
         </div>
-        <div class="muted" id="checking-resultado-status-texto">
+        <div class="muted" id="checkin-resultado-status-texto">
           Status:
-          {% if checking %}
-            {% if checking.BitChekin %}
+          {% if checkin %}
+            {% if checkin.BitCheckin %}
               <b style="color:green;">Checkin concluído</b>
             {% else %}
               <b style="color:#b45309;">Pendente de confirmação</b>
@@ -187,52 +187,52 @@
         </div>
 
         <form
-          id="checking-form-confirmar"
+          id="checkin-form-confirmar"
           method="POST"
-          action="{% if checking %}{{ url_for('Paineis.checking_confirmar', id_checking=checking.IDDimCheckingHistorico) }}{% else %}#{% endif %}"
-          style="margin-top:16px; {% if not checking or checking.BitChekin %}display:none;{% endif %}"
+          action="{% if checkin %}{{ url_for('Paineis.checkin_confirmar', id_checkin=checkin.IDDimCheckinHistorico) }}{% else %}#{% endif %}"
+          style="margin-top:16px; {% if not checkin or checkin.BitCheckin %}display:none;{% endif %}"
         >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit">Confirmar Checking</button>
+          <button type="submit">Confirmar Checkin</button>
         </form>
 
         <div
-          id="checking-status-concluido"
-          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800; {% if not checking or not checking.BitChekin %}display:none;{% endif %}"
+          id="checkin-status-concluido"
+          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800; {% if not checkin or not checkin.BitCheckin %}display:none;{% endif %}"
         >
           Checkin concluído
         </div>
 
         <div
-          id="checking-compartilhamento-publico-box"
+          id="checkin-compartilhamento-publico-box"
           style="margin-top:16px; padding:14px; border-radius:12px; background:#eff6ff; border:1px solid #bfdbfe; {% if compartilhamento_publico %}display:block;{% else %}display:none;{% endif %}"
         >
           <div style="font-weight:800; color:#1d4ed8; margin-bottom:8px;">Compartilhamento público</div>
-          <div id="checking-compartilhamento-publico-texto" class="muted" style="margin-bottom:8px;">
+          <div id="checkin-compartilhamento-publico-texto" class="muted" style="margin-bottom:8px;">
             {% if compartilhamento_publico %}
               {% if compartilhamento_publico.get('senha_publica') %}
                 Guarde a senha abaixo. Ela é exibida apenas quando o link é gerado.
               {% else %}
-                Este checking já possui um link público ativo. A senha anterior não pode ser exibida novamente. Gere um novo compartilhamento se precisar de uma nova senha.
+                Este checkin já possui um link público ativo. A senha anterior não pode ser exibida novamente. Gere um novo compartilhamento se precisar de uma nova senha.
               {% endif %}
             {% else %}
-              O link público só é exibido depois da confirmação do checking.
+              O link público só é exibido depois da confirmação do checkin.
             {% endif %}
           </div>
 
-          <label for="checking-link-publico" style="display:block; font-weight:700; margin-bottom:6px;">Link público</label>
+          <label for="checkin-link-publico" style="display:block; font-weight:700; margin-bottom:6px;">Link público</label>
           <input
-            id="checking-link-publico"
+            id="checkin-link-publico"
             type="text"
             readonly
             style="width:100%; margin-bottom:10px;"
             value="{% if compartilhamento_publico %}{{ compartilhamento_publico.get('url_publica') or compartilhamento_publico.get('url_publica_relativa') or '' }}{% endif %}"
           >
 
-          <div id="checking-senha-publica-wrap" style="{% if compartilhamento_publico and compartilhamento_publico.get('senha_publica') %}display:block;{% else %}display:none;{% endif %}">
-            <label for="checking-senha-publica" style="display:block; font-weight:700; margin-bottom:6px;">Senha pública</label>
+          <div id="checkin-senha-publica-wrap" style="{% if compartilhamento_publico and compartilhamento_publico.get('senha_publica') %}display:block;{% else %}display:none;{% endif %}">
+            <label for="checkin-senha-publica" style="display:block; font-weight:700; margin-bottom:6px;">Senha pública</label>
             <input
-              id="checking-senha-publica"
+              id="checkin-senha-publica"
               type="text"
               readonly
               style="width:100%; margin-bottom:8px; font-weight:800; letter-spacing:0.03em;"
@@ -240,7 +240,7 @@
             >
           </div>
 
-          <div id="checking-compartilhamento-publico-aviso" class="muted">
+          <div id="checkin-compartilhamento-publico-aviso" class="muted">
             {% if compartilhamento_publico %}
               {% if compartilhamento_publico.get('senha_publica') %}
                 Envie o link e a senha separadamente para o cliente. Se perder a senha, gere um novo compartilhamento.
@@ -568,7 +568,7 @@
     termoBuscaEmpresaEmAndamento = termo;
     mostrarBuscandoEmpresa();
 
-    promessaBuscaEmpresaEmAndamento = fetch(`/paineis/checking/empresas/buscar?q=${encodeURIComponent(termo)}`, {
+    promessaBuscaEmpresaEmAndamento = fetch(`/paineis/checkin/empresas/buscar?q=${encodeURIComponent(termo)}`, {
       method: "GET",
       cache: "no-store",
       headers: {
@@ -606,7 +606,7 @@
     limparDependenciasDoContrato();
 
     const resposta = await fetch(
-      `/paineis/checking/contratos/buscar?id_empresa=${encodeURIComponent(idEmpresa)}&q=`,
+      `/paineis/checkin/contratos/buscar?id_empresa=${encodeURIComponent(idEmpresa)}&q=`,
       {
         method: "GET",
         cache: "no-store",
@@ -634,7 +634,7 @@
     bloquearFace("Primeiro selecione o ponto");
 
     const resposta = await fetch(
-      `/paineis/checking/contratos/${encodeURIComponent(idContrato)}/pontos`,
+      `/paineis/checkin/contratos/${encodeURIComponent(idContrato)}/pontos`,
       {
         method: "GET",
         cache: "no-store",
@@ -666,7 +666,7 @@
     bloquearFace("Carregando faces do contrato...");
 
     const resposta = await fetch(
-      `/paineis/checking/contratos/${encodeURIComponent(idContrato)}/pontos/${encodeURIComponent(codPonto)}/faces`,
+      `/paineis/checkin/contratos/${encodeURIComponent(idContrato)}/pontos/${encodeURIComponent(codPonto)}/faces`,
       {
         method: "GET",
         cache: "no-store",
@@ -723,7 +723,7 @@
       await carregarContratosDaEmpresa(item.id, "");
       selectContrato.focus();
     } catch (erroContrato) {
-      console.error("[CHECKING] erro ao carregar contratos:", erroContrato);
+      console.error("[CHECKIN] erro ao carregar contratos:", erroContrato);
       bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
       limparDependenciasDoContrato();
     }
@@ -768,7 +768,7 @@
 
       return empresas;
     } catch (erro) {
-      console.error("[CHECKING] erro ao buscar empresas:", erro);
+      console.error("[CHECKIN] erro ao buscar empresas:", erro);
 
       if (configuracao.mostrarMensagemErro) {
         mostrarMensagem(boxEmpresa, "Não foi possível buscar agora.", "busca-status-nao-encontrado");
@@ -929,7 +929,7 @@
       await carregarPontosDoContrato(idContrato, "");
       bloquearFace("Primeiro selecione o ponto");
     } catch (erro) {
-      console.error("[CHECKING] erro ao carregar pontos do contrato:", erro);
+      console.error("[CHECKIN] erro ao carregar pontos do contrato:", erro);
       bloquearPonto("Falha ao carregar pontos");
       bloquearFace("Falha ao carregar faces");
     }
@@ -947,7 +947,7 @@
     try {
       await carregarFacesDoContrato(idContrato, codPonto, "");
     } catch (erro) {
-      console.error("[CHECKING] erro ao carregar faces do contrato:", erro);
+      console.error("[CHECKIN] erro ao carregar faces do contrato:", erro);
       bloquearFace("Falha ao carregar faces");
     }
   });
@@ -974,7 +974,7 @@
         definirStatusContratos("Contrato selecionado.");
       }
     } catch (erro) {
-      console.error("[CHECKING] erro ao inicializar contratos:", erro);
+      console.error("[CHECKIN] erro ao inicializar contratos:", erro);
       bloquearContrato("Falha ao carregar", "Erro ao carregar os contratos da empresa.");
       limparDependenciasDoContrato();
     }
@@ -999,7 +999,7 @@
 
       await carregarFacesDoContrato(idContratoAtual, codPontoAtual, valorInicialFace || "");
     } catch (erro) {
-      console.error("[CHECKING] erro ao inicializar ponto/face:", erro);
+      console.error("[CHECKIN] erro ao inicializar ponto/face:", erro);
       bloquearPonto("Falha ao carregar pontos");
       bloquearFace("Falha ao carregar faces");
     }
@@ -1010,25 +1010,25 @@
   const processamentoPendenteInicial = {{ (processamento_pendente or False)|tojson }};
   const compartilhamentoPublicoInicial = {{ (compartilhamento_publico or {})|tojson }};
 
-  const cardProcessamento = document.getElementById("checking-processamento-card");
-  const statusProcessamento = document.getElementById("checking-processamento-status");
+  const cardProcessamento = document.getElementById("checkin-processamento-card");
+  const statusProcessamento = document.getElementById("checkin-processamento-status");
 
-  const cardResultado = document.getElementById("checking-resultado-card");
-  const imagemResultado = document.getElementById("checking-resultado-imagem");
-  const resultadoId = document.getElementById("checking-resultado-id");
-  const resultadoEmpresa = document.getElementById("checking-resultado-empresa");
-  const resultadoContrato = document.getElementById("checking-resultado-contrato");
-  const resultadoPonto = document.getElementById("checking-resultado-ponto");
-  const resultadoFace = document.getElementById("checking-resultado-face");
-  const resultadoStatusTexto = document.getElementById("checking-resultado-status-texto");
-  const formConfirmar = document.getElementById("checking-form-confirmar");
-  const statusConcluido = document.getElementById("checking-status-concluido");
-  const boxCompartilhamentoPublico = document.getElementById("checking-compartilhamento-publico-box");
-  const inputLinkPublico = document.getElementById("checking-link-publico");
-  const inputSenhaPublica = document.getElementById("checking-senha-publica");
-  const avisoCompartilhamentoPublico = document.getElementById("checking-compartilhamento-publico-aviso");
-  const textoCompartilhamentoPublico = document.getElementById("checking-compartilhamento-publico-texto");
-  const wrapSenhaPublica = document.getElementById("checking-senha-publica-wrap");
+  const cardResultado = document.getElementById("checkin-resultado-card");
+  const imagemResultado = document.getElementById("checkin-resultado-imagem");
+  const resultadoId = document.getElementById("checkin-resultado-id");
+  const resultadoEmpresa = document.getElementById("checkin-resultado-empresa");
+  const resultadoContrato = document.getElementById("checkin-resultado-contrato");
+  const resultadoPonto = document.getElementById("checkin-resultado-ponto");
+  const resultadoFace = document.getElementById("checkin-resultado-face");
+  const resultadoStatusTexto = document.getElementById("checkin-resultado-status-texto");
+  const formConfirmar = document.getElementById("checkin-form-confirmar");
+  const statusConcluido = document.getElementById("checkin-status-concluido");
+  const boxCompartilhamentoPublico = document.getElementById("checkin-compartilhamento-publico-box");
+  const inputLinkPublico = document.getElementById("checkin-link-publico");
+  const inputSenhaPublica = document.getElementById("checkin-senha-publica");
+  const avisoCompartilhamentoPublico = document.getElementById("checkin-compartilhamento-publico-aviso");
+  const textoCompartilhamentoPublico = document.getElementById("checkin-compartilhamento-publico-texto");
+  const wrapSenhaPublica = document.getElementById("checkin-senha-publica-wrap");
 
   function mostrarCardProcessamento(texto) {
     if (cardProcessamento) {
@@ -1068,7 +1068,7 @@
       wrapSenhaPublica.style.display = "none";
     }
     if (textoCompartilhamentoPublico) {
-      textoCompartilhamentoPublico.textContent = "O link público só é exibido depois da confirmação do checking.";
+      textoCompartilhamentoPublico.textContent = "O link público só é exibido depois da confirmação do checkin.";
     }
     if (avisoCompartilhamentoPublico) {
       avisoCompartilhamentoPublico.textContent = "";
@@ -1102,7 +1102,7 @@
     if (textoCompartilhamentoPublico) {
       textoCompartilhamentoPublico.textContent = senhaPublica
         ? "Guarde a senha abaixo. Ela é exibida apenas quando o link é gerado."
-        : "Este checking já possui um link público ativo. A senha anterior não pode ser exibida novamente. Gere um novo compartilhamento se precisar de uma nova senha.";
+        : "Este checkin já possui um link público ativo. A senha anterior não pode ser exibida novamente. Gere um novo compartilhamento se precisar de uma nova senha.";
     }
 
     if (avisoCompartilhamentoPublico) {
@@ -1114,7 +1114,7 @@
     }
   }
 
-  function mostrarResultadoChecking(resultado) {
+  function mostrarResultadoCheckin(resultado) {
     if (!resultado) {
       return;
     }
@@ -1130,7 +1130,7 @@
       imagemResultado.style.display = "block";
     }
 
-    preencherLinhaResultado(resultadoId, "ID", resultado.id_checking || "");
+    preencherLinhaResultado(resultadoId, "ID", resultado.id_checkin || "");
     preencherLinhaResultado(resultadoEmpresa, "Empresa", resultado.razao_social || "");
     preencherLinhaResultado(resultadoContrato, "Contrato", resultado.id_fato_controle_contratos || "");
     preencherLinhaResultado(resultadoPonto, "Ponto", resultado.cod_ponto || "");
@@ -1152,7 +1152,7 @@
     esconderCompartilhamentoPublico();
   }
 
-  async function consultarStatusChecking(taskId) {
+  async function consultarStatusCheckin(taskId) {
     const taskIdLimpo = String(taskId || "").trim();
     if (!taskIdLimpo) {
       return;
@@ -1167,7 +1167,7 @@
       tentativas += 1;
 
       try {
-        const resposta = await fetch(`/paineis/checking/status/${encodeURIComponent(taskIdLimpo)}`, {
+        const resposta = await fetch(`/paineis/checkin/status/${encodeURIComponent(taskIdLimpo)}`, {
           method: "GET",
           cache: "no-store",
           headers: {
@@ -1178,7 +1178,7 @@
         const payload = await resposta.json();
 
         if (!resposta.ok) {
-          const erroTexto = (payload && (payload.erro || payload.msg)) || "Falha ao consultar o status do checking.";
+          const erroTexto = (payload && (payload.erro || payload.msg)) || "Falha ao consultar o status do checkin.";
           mostrarCardProcessamento(erroTexto);
           return;
         }
@@ -1186,12 +1186,12 @@
         const status = String(payload.status || "").toUpperCase();
 
         if (status === "SUCCESS" && payload.resultado) {
-          mostrarResultadoChecking(payload.resultado);
+          mostrarResultadoCheckin(payload.resultado);
           return;
         }
 
         if (status === "FAILURE" || status === "REVOKED") {
-          const erroTexto = (payload && (payload.erro || payload.msg)) || "Falha ao processar o checking.";
+          const erroTexto = (payload && (payload.erro || payload.msg)) || "Falha ao processar o checkin.";
           mostrarCardProcessamento(erroTexto);
           return;
         }
@@ -1204,7 +1204,7 @@
           mostrarCardProcessamento(`Processando... (${status})`);
         }
       } catch (erro) {
-        console.error("[CHECKING] erro ao consultar status:", erro);
+        console.error("[CHECKIN] erro ao consultar status:", erro);
         mostrarCardProcessamento("Erro ao consultar o status do processamento. Tentando novamente...");
       }
 
@@ -1221,7 +1221,7 @@
     await inicializarPontoEFaceSeExistiremValores();
 
     if (processamentoPendenteInicial && taskIdInicial) {
-      await consultarStatusChecking(taskIdInicial);
+      await consultarStatusCheckin(taskIdInicial);
       return;
     }
 

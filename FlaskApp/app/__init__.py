@@ -37,9 +37,9 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True,
         "pool_recycle": 1800,
-        "pool_size": 10,
-        "max_overflow": 2,
-        "pool_timeout": 60,
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_timeout": 30,
         "connect_args": {
             "timeout": 60,
         },

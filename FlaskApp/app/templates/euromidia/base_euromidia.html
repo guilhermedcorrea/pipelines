@@ -1002,8 +1002,8 @@ input:disabled, select:disabled, textarea:disabled{
             {% endif %}
 
             {% if menu_paineis_disponibilidades %}
-              <a href="{{ url_for('Paineis.checking_novo') }}"
-                 class="{% if request.path == url_for('Paineis.checking_novo') %}menu-link-current{% endif %}">
+              <a href="{{ url_for('Paineis.checkin_novo') }}"
+                 class="{% if request.path == url_for('Paineis.checkin_novo') %}menu-link-current{% endif %}">
                 Realizar Checkin
               </a>
             {% endif %}

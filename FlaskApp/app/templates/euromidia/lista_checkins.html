@@ -5,13 +5,13 @@
 {% block content %}
 
 <style>
-  .pagina-checking{
+  .pagina-checkin{
     display:flex;
     flex-direction:column;
     gap:12px;
   }
 
-  .topo-checking{
+  .topo-checkin{
     display:flex;
     align-items:flex-start;
     justify-content:space-between;
@@ -19,12 +19,12 @@
     flex-wrap:wrap;
   }
 
-  .topo-checking .titulo-wrap{
+  .topo-checkin .titulo-wrap{
     flex:1 1 320px;
     min-width:min(320px, 100%);
   }
 
-  .topo-checking .acoes{
+  .topo-checkin .acoes{
     display:flex;
     gap:8px;
     align-items:center;
@@ -152,9 +152,9 @@
   }
 </style>
 
-<div class="pagina-checking">
+<div class="pagina-checkin">
   <div class="card" style="padding:14px;">
-    <div class="topo-checking">
+    <div class="topo-checkin">
       <div class="titulo-wrap">
         <h1 class="page-title" style="margin:0;">Lista de Check-ins</h1>
         <div class="muted" style="font-weight:900;margin-top:6px;">
@@ -165,7 +165,7 @@
       </div>
 
       <div class="acoes">
-        <a class="btn btn-secondary" href="{{ url_for('Paineis.checking_novo') }}">
+        <a class="btn btn-secondary" href="{{ url_for('Paineis.checkin_novo') }}">
           Novo Check-in
         </a>
       </div>
@@ -216,7 +216,7 @@
                 <td>
                   <a
                     class="btn btn-secondary"
-                    href="{{ url_for('Paineis.visualizar_checking', id_checking=item.IDDimCheckingHistorico) }}"
+                    href="{{ url_for('Paineis.visualizar_checkin', id_checkin=item.IDDimCheckinHistorico) }}"
                   >
                     Abrir
                   </a>

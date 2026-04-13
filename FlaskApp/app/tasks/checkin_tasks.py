@@ -7,25 +7,25 @@ from ..extensions import db
 
 @celery_app.task(
     bind=True,
-    name="checking.processar_upload",
+    name="checkin.processar_upload",
     acks_late=True,
     reject_on_worker_lost=True,
 )
-def processar_checking_upload(
+def processar_checkin_upload(
     self,
     *,
     id_empresa: int,
     id_fato_controle_contratos: int,
     cod_ponto: str,
     cod_face: str,
-    data_checking_iso: str,
+    data_checkin_iso: str,
     caminho_arquivo_temporario: str,
     nome_original_cliente: str | None = None,
     cnpj_digitado: str | None = None,
     observacao: str | None = None,
     id_usuario_criacao: int | None = None,
 ) -> dict[str, Any]:
-    """Eu processo o upload do checking fora da request web."""
+    """Eu processo o upload do checkin fora da request web."""
 
     caminho_temp = Path(str(caminho_arquivo_temporario or "").strip())
 
@@ -40,14 +40,14 @@ def processar_checking_upload(
     )
 
     try:
-        from ..euromidia.controle_paineis_views import _processar_upload_checking_por_caminho
+        from ..euromidia.controle_paineis_views import _processar_upload_checkin_por_caminho
 
-        resultado = _processar_upload_checking_por_caminho(
+        resultado = _processar_upload_checkin_por_caminho(
             id_empresa=int(id_empresa),
             id_fato_controle_contratos=int(id_fato_controle_contratos),
             cod_ponto=str(cod_ponto),
             cod_face=str(cod_face),
-            data_checking_iso=str(data_checking_iso),
+            data_checkin_iso=str(data_checkin_iso),
             caminho_arquivo_temporario=str(caminho_temp),
             nome_original_cliente=nome_original_cliente,
             cnpj_digitado=cnpj_digitado,
