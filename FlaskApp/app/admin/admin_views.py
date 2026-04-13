@@ -3160,6 +3160,7 @@ def _montar_diagrama_status_contrato(
 
 
 
+
 def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     sql_cabecalho = text("""
         SELECT TOP 1
@@ -3230,6 +3231,11 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
               ,fsce.[DataCancelamento]
               ,du.[NomeUsuario] AS [NomeUsuarioCriacao]
               ,de.[RazaoSocial] AS [RazaoSocialEmpresa]
+              ,de.[NomeFantasia] AS [NomeFantasiaEmpresa]
+              ,de.[CNPJ] AS [CNPJEmpresa]
+              ,de.[Municipio] AS [MunicipioEmpresa]
+              ,de.[UF] AS [UFEmpresa]
+              ,de.[Email] AS [EmailEmpresa]
               ,ep.[Logo] AS [LogoEmpresaProprietaria]
               ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
               ,dsc.[Status] AS [StatusContrato]
@@ -3247,7 +3253,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     """)
 
     sql_itens = text("""
-        WITH itens_rankeados AS (
+        WITH itens_base AS (
             SELECT
                    fsci.[IDFatoSolicitacaoContratoItemEuromidia]
                   ,fsci.[IDFatoSolicitacaoContratoEuromidia]
@@ -3265,12 +3271,34 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                   ,fsci.[NumeroContrato]
                   ,fsci.[NumeroPrevia]
                   ,fsci.[CNPJ]
-                  ,fsci.[CodPonto]
-                  ,fsci.[CodFace]
+                  ,fsci.[CodPonto] AS [CodPontoOriginal]
+                  ,fsci.[CodFace] AS [CodFaceOriginal]
+                  ,CAST(
+                        COALESCE(
+                            NULLIF(LTRIM(RTRIM(CAST(fsci.[CodPonto] AS varchar(50)))), ''),
+                            NULLIF(LTRIM(RTRIM(CAST(df.[CodPonto] AS varchar(50)))), ''),
+                            NULLIF(LTRIM(RTRIM(CAST(dp.[CodPonto] AS varchar(50)))), '')
+                        ) AS varchar(50)
+                   ) AS [CodPonto]
+                  ,CAST(
+                        COALESCE(
+                            NULLIF(UPPER(LTRIM(RTRIM(CAST(fsci.[CodFace] AS varchar(50))))), ''),
+                            NULLIF(UPPER(LTRIM(RTRIM(CAST(df.[CodFace] AS varchar(50))))), '')
+                        ) AS varchar(50)
+                   ) AS [CodFace]
                   ,fsci.[DataLancamento]
                   ,fsci.[Cota]
-                  ,fsci.[CidadeExibicao]
-                  ,fsci.[Tipo]
+                  ,fsci.[CidadeExibicao] AS [CidadeExibicaoOriginal]
+                  ,COALESCE(
+                        NULLIF(LTRIM(RTRIM(fsci.[CidadeExibicao])), ''),
+                        NULLIF(LTRIM(RTRIM(dp.[Cidade])), '')
+                   ) AS [CidadeExibicao]
+                  ,fsci.[Tipo] AS [TipoOriginal]
+                  ,COALESCE(
+                        NULLIF(LTRIM(RTRIM(fsci.[Tipo])), ''),
+                        NULLIF(LTRIM(RTRIM(df.[Tipo])), ''),
+                        NULLIF(LTRIM(RTRIM(dp.[Tipo])), '')
+                   ) AS [Tipo]
                   ,fsci.[Origem]
                   ,fsci.[EmpresaEuro]
                   ,fsci.[CnpjExibibora]
@@ -3332,6 +3360,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                   ,fsci.[DataAtualizacao]
                   ,fsci.[BitSolicitacaoAtiva]
                   ,df.[Face] AS [FaceDescricaoCadastro]
+                  ,df.[CodFace] AS [CodFaceCadastro]
                   ,df.[Tipo] AS [TipoFaceCadastro]
                   ,dp.[Cidade] AS [CidadePainelCadastro]
                   ,dp.[UF] AS [UFPainelCadastro]
@@ -3339,6 +3368,21 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                   ,dp.[Logradouro] AS [LogradouroPainelCadastro]
                   ,dp.[Bairro] AS [BairroPainelCadastro]
                   ,dp.[Referencia] AS [ReferenciaPainelCadastro]
+                  ,COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia]) AS [IDDimPaineisEuromidia]
+                  ,fknp.[IDFatoKanbanNegociacaoPreco] AS [IDNegociacaoPreco]
+                  ,fknp.[CustoAtual] AS [CustoAtualNegociacao]
+                  ,fknp.[PrecoAtual] AS [PrecoAtualNegociacao]
+                  ,fknp.[PrecoProposto] AS [PrecoPropostoNegociacao]
+                  ,fknp.[DescontoProposto] AS [DescontoPropostoNegociacao]
+                  ,fknp.[MargemProposta] AS [MargemPropostaNegociacao]
+                  ,fknp.[PeriodoInicio] AS [PeriodoInicioNegociacao]
+                  ,fknp.[PeriodoTermino] AS [PeriodoTerminoNegociacao]
+                  ,fcp.[IDFatoContratoItemPrecoPraticadoEuromidia] AS [IDPrecoPraticado]
+                  ,fcp.[PrecoPraticado] AS [PrecoPraticadoOficial]
+                  ,fcp.[PrecoProposto] AS [PrecoPropostoOficial]
+                  ,fcp.[CustoPainel] AS [CustoPainelOficial]
+                  ,fcp.[DescontoPercentual] AS [DescontoPercentualOficial]
+                  ,fcp.[MargemPercentual] AS [MargemPercentualOficial]
                   ,ROW_NUMBER() OVER (
                         PARTITION BY
                             fsci.[IDFatoSolicitacaoContratoEuromidia],
@@ -3349,8 +3393,8 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                                     CONCAT(
                                         'LOGICO|',
                                         CAST(ISNULL(fsci.[IDFatoControleContratosEuromidia], 0) AS varchar(50)),
-                                        '|', LTRIM(RTRIM(ISNULL(CAST(fsci.[CodPonto] AS varchar(50)), ''))),
-                                        '|', UPPER(LTRIM(RTRIM(ISNULL(CAST(fsci.[CodFace] AS varchar(50)), ''))))
+                                        '|', LTRIM(RTRIM(ISNULL(CAST(COALESCE(NULLIF(fsci.[CodPonto], ''), CAST(df.[CodPonto] AS varchar(50)), CAST(dp.[CodPonto] AS varchar(50))) AS varchar(50)), ''))),
+                                        '|', UPPER(LTRIM(RTRIM(ISNULL(CAST(COALESCE(NULLIF(fsci.[CodFace], ''), df.[CodFace]) AS varchar(50)), ''))))
                                     )
                             END
                         ORDER BY
@@ -3365,10 +3409,18 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                    ON df.[IDDimFacesPaineis] = fsci.[IDDimFacesPaineis]
             LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
                    ON dp.[IDDimPaineisEuromidia] = COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia])
+            LEFT JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] fknp
+                   ON fknp.[IDFatoKanbanCard] = fsci.[IDFatoKanbanCard]
+                  AND ISNULL(fknp.[IDDimPaineisEuromidia], 0) = ISNULL(COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia]), 0)
+                  AND ISNULL(fknp.[IDDimFacesPaineis], 0) = ISNULL(fsci.[IDDimFacesPaineis], 0)
+            LEFT JOIN [Integracao].[Silver].[FatoContratoItemPrecoPraticadoEuromidia] fcp
+                   ON fcp.[IDFatoKanbanCard] = fsci.[IDFatoKanbanCard]
+                  AND ISNULL(fcp.[IDDimPaineisEuromidia], 0) = ISNULL(COALESCE(fsci.[IDPainelEuromidia], df.[IDDimPaineisEuromidia]), 0)
+                  AND ISNULL(fcp.[IDDimFacesPaineis], 0) = ISNULL(fsci.[IDDimFacesPaineis], 0)
             WHERE fsci.[IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
         )
         SELECT *
-        FROM itens_rankeados
+        FROM itens_base
         WHERE rn = 1
         ORDER BY
             LTRIM(RTRIM(ISNULL(CAST([CodPonto] AS varchar(50)), ''))) ASC,
@@ -3419,8 +3471,6 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
             nome_status_atual=cab.get("StatusContrato"),
         ),
     }
-
-
 
 
 

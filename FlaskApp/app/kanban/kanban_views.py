@@ -4737,6 +4737,323 @@ def _inativar_snapshots_solicitacao_contrato_do_card(id_card: int) -> None:
 
 
 
+
+
+
+
+
+
+
+
+def _montar_itens_snapshot_solicitacao_do_card(
+    *,
+    id_card: int,
+    id_solicitacao: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+    id_contrato_existente: int | None,
+    item_contrato: dict[str, Any] | None,
+    contrato_row: dict[str, Any] | None,
+    empresa: Mapping[str, Any] | dict[str, Any] | None,
+    descricao_card: str | None,
+    bit_registro_ativo: int,
+    bit_solicitacao_ativa: int,
+    coluna_atividade_item: str | None,
+    tipo_norm: str,
+    cod_ponto_contrato: object = None,
+    cod_face_contrato: object = None,
+) -> list[dict[str, Any]]:
+    def _int_positivo_ou_none_local(valor: object) -> int | None:
+        if valor in (None, "", 0):
+            return None
+        try:
+            valor_int = int(valor)
+        except Exception:
+            return None
+        return valor_int if valor_int > 0 else None
+
+    descricao_limpa = (descricao_card or "").strip() or None
+    itens_resultado: list[dict[str, Any]] = []
+
+    if tipo_norm == TIPO_SOLICITACAO_NOVO:
+        paineis_card = _listar_paineis_vinculados_card(int(id_card))
+
+        for painel_card in paineis_card:
+            cod_ponto = str(painel_card.get("CodPonto") or "").strip() or None
+            cod_face = str(painel_card.get("CodFace") or "").strip().upper() or None
+
+            id_painel = _int_positivo_ou_none_local(painel_card.get("IDDimPaineisEuromidia"))
+            id_face = _int_positivo_ou_none_local(painel_card.get("IDDimFacesPaineis"))
+
+            info_face = None
+            if id_face is not None:
+                info_face = _obter_face_por_id(id_face)
+            elif cod_ponto and cod_face:
+                info_face = _obter_face_por_codponto_codface(
+                    cod_ponto=cod_ponto,
+                    cod_face=cod_face,
+                )
+
+            info_painel = None
+            id_painel_resolvido = (
+                id_painel
+                or _int_positivo_ou_none_local((info_face or {}).get("IDDimPaineisEuromidia"))
+            )
+
+            if id_painel_resolvido is not None:
+                sql_painel = text(
+                    f"""
+                    SELECT TOP (1)
+                        p.IDDimPaineisEuromidia,
+                        p.CodPonto,
+                        p.Tipo,
+                        p.Cidade,
+                        p.UF,
+                        p.Logradouro,
+                        p.Bairro,
+                        p.Numero,
+                        p.CEP,
+                        p.QuantidadeFaces,
+                        p.BitAtivo
+                    FROM {TABELA_DIM_PAINEIS_EUROMIDIA} p
+                    WHERE p.IDDimPaineisEuromidia = :id_painel;
+                    """
+                )
+                row_painel = db.session.execute(
+                    sql_painel,
+                    {"id_painel": int(id_painel_resolvido)},
+                ).mappings().first()
+                info_painel = dict(row_painel) if row_painel else None
+            elif cod_ponto:
+                info_painel = _obter_painel_por_codponto(cod_ponto)
+
+            cod_ponto_resolvido = (
+                cod_ponto
+                or (info_face or {}).get("CodPonto")
+                or (info_painel or {}).get("CodPonto")
+            )
+            cod_ponto_resolvido = str(cod_ponto_resolvido).strip() if cod_ponto_resolvido not in (None, "") else None
+
+            cod_face_resolvido = (
+                cod_face
+                or (info_face or {}).get("CodFace")
+            )
+            cod_face_resolvido = str(cod_face_resolvido).strip().upper() if cod_face_resolvido not in (None, "") else None
+
+            id_painel_final = (
+                id_painel
+                or _int_positivo_ou_none_local((info_painel or {}).get("IDDimPaineisEuromidia"))
+                or _int_positivo_ou_none_local((info_face or {}).get("IDDimPaineisEuromidia"))
+            )
+
+            id_face_final = (
+                id_face
+                or _int_positivo_ou_none_local((info_face or {}).get("IDDimFacesPaineis"))
+            )
+
+            tipo_resolvido = (
+                painel_card.get("TipoPainel")
+                or (info_face or {}).get("Tipo")
+                or (info_painel or {}).get("Tipo")
+            )
+
+            cidade_exibicao_resolvida = (
+                (info_painel or {}).get("Cidade")
+            )
+
+            data_inicio = _para_data_sql_ou_none(painel_card.get("DataInicio"))
+            data_fim = _para_data_sql_ou_none(painel_card.get("DataFim"))
+
+            valores_item = {
+                "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
+                "IDFatoControleContratosEuromidia": _int_positivo_ou_none_local(id_contrato_existente),
+                "IDFatoControleContratosItensEuromidia": None,
+                "IDFatoKanbanCard": _int_positivo_ou_none_local(id_card),
+                "IDDimUsuariosCriacao": _int_positivo_ou_none_local(id_usuario),
+                "IDDimUsuariosAtualizacao": _int_positivo_ou_none_local(id_usuario),
+                "IDVendedor": None,
+                "IDPainelEuromidia": id_painel_final,
+                "IDDimFacesPaineis": id_face_final,
+                "IDDimCheckingHistorico": None,
+                "IDEmpresaProprietaria": _int_positivo_ou_none_local(id_empresa_proprietaria),
+                "Referencia": (contrato_row or {}).get("Referencia"),
+                "NumeroContrato": (contrato_row or {}).get("NumeroContrato"),
+                "NumeroPrevia": (contrato_row or {}).get("NumeroPrevia"),
+                "CNPJ": (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
+                "CodPonto": cod_ponto_resolvido,
+                "CodFace": cod_face_resolvido,
+                "DataLancamento": _para_data_sql_ou_none((contrato_row or {}).get("DataLancamento")),
+                "Cota": None,
+                "CidadeExibicao": cidade_exibicao_resolvida,
+                "Tipo": tipo_resolvido,
+                "Origem": (contrato_row or {}).get("Origem"),
+                "EmpresaEuro": None,
+                "CnpjExibibora": None,
+                "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
+                "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
+                "CPF": (contrato_row or {}).get("CPF"),
+                "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
+                "Vendedor": (contrato_row or {}).get("Vendedor"),
+                "SDR": (contrato_row or {}).get("SDR"),
+                "Agencia": (contrato_row or {}).get("Agencia"),
+                "CnpjAgencia": (contrato_row or {}).get("CnpjAgencia"),
+                "Bureau": (contrato_row or {}).get("Bureau"),
+                "CnpjBureau": (contrato_row or {}).get("CnpjBureau"),
+                "Intermediario": (contrato_row or {}).get("Intermediario"),
+                "CnpjIntermediario": (contrato_row or {}).get("CnpjIntermediario"),
+                "DataAssinaturaRenovacao": _para_data_sql_ou_none((contrato_row or {}).get("DataAssinaturaRenovacao")),
+                "IDTrimestre": (contrato_row or {}).get("IDTrimestre"),
+                "TexmpoExposicao": None,
+                "DataInicioPrevisto": data_inicio,
+                "DataTerminoPrevisto": data_fim,
+                "InicioRenovacao": None,
+                "FaturamentoBrutoMensal": None,
+                "PercentualPermuta": None,
+                "CotaOportunidade": None,
+                "ValorPermuta": None,
+                "FaturamentoLiquidoPermuta": None,
+                "NumeroParcelas": None,
+                "DataInicioVencimento": None,
+                "TotalBrutoContrato": None,
+                "TotalLiquidoContratoAGBRCTACORDO": None,
+                "TotalLiquidoContratoAGBRVENDGERCOOR": None,
+                "PercentualAgencia": None,
+                "ValorMensalAgencia": None,
+                "PercentualBureau": None,
+                "ValorBureauMensal": None,
+                "PercentualCartaAcordo": None,
+                "ValorCartaAcordoMensal": None,
+                "ValorOutrasComissoes": None,
+                "FaturamentoLiquidoMensal": None,
+                "PercentualComissaoVendedor": None,
+                "ValorVendedor": None,
+                "ValorVendedorTotal": None,
+                "PercentualComissaoCoordenacao": None,
+                "ValorCoordenador": None,
+                "ValorCoordenadorTotal": None,
+                "PercentualComissaoGerencia": None,
+                "ValorGerencia": None,
+                "ValorGerenciaTotal": None,
+                "AtivoCancelamento": None,
+                "FaturamentoLiquidoFinalMensal": None,
+                "ComissaoGerenciaNordeste": None,
+                "Faturamento": None,
+                "DataCancelamento": None,
+                "OBS": descricao_limpa,
+                "DataFimEfetiva": data_fim,
+                "Status": None,
+                "BitAtivo": bit_registro_ativo,
+            }
+
+            if coluna_atividade_item == "BitSolicitacaoAtiva":
+                valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
+
+            itens_resultado.append(valores_item)
+
+        return itens_resultado
+
+    cod_ponto_resolvido = (item_contrato or {}).get("CodPonto") or (
+        str(cod_ponto_contrato).strip() if cod_ponto_contrato not in (None, "") else None
+    )
+    cod_face_resolvido = (item_contrato or {}).get("CodFace") or (
+        str(cod_face_contrato).strip().upper() if cod_face_contrato not in (None, "") else None
+    )
+
+    valores_item = {
+        "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
+        "IDFatoControleContratosEuromidia": _int_positivo_ou_none_local(id_contrato_existente),
+        "IDFatoControleContratosItensEuromidia": _int_positivo_ou_none_local(
+            (item_contrato or {}).get("IDFatoControleContratosItensEuromidia")
+        ),
+        "IDFatoKanbanCard": _int_positivo_ou_none_local(id_card),
+        "IDDimUsuariosCriacao": _int_positivo_ou_none_local(id_usuario),
+        "IDDimUsuariosAtualizacao": _int_positivo_ou_none_local(id_usuario),
+        "IDVendedor": _int_positivo_ou_none_local((item_contrato or {}).get("IDVendedor")),
+        "IDPainelEuromidia": _int_positivo_ou_none_local((item_contrato or {}).get("IDPainelEuromidia")),
+        "IDDimFacesPaineis": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimFacesPaineis")),
+        "IDDimCheckingHistorico": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimCheckingHistorico")),
+        "IDEmpresaProprietaria": _int_positivo_ou_none_local(id_empresa_proprietaria),
+        "Referencia": (item_contrato or {}).get("Referencia") or (contrato_row or {}).get("Referencia"),
+        "NumeroContrato": (item_contrato or {}).get("NumeroContrato") or (contrato_row or {}).get("NumeroContrato"),
+        "NumeroPrevia": (item_contrato or {}).get("NumeroPrevia") or (contrato_row or {}).get("NumeroPrevia"),
+        "CNPJ": (item_contrato or {}).get("CNPJ") or (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
+        "CodPonto": cod_ponto_resolvido,
+        "CodFace": cod_face_resolvido,
+        "DataLancamento": _para_data_sql_ou_none((item_contrato or {}).get("DataLancamento") or (contrato_row or {}).get("DataLancamento")),
+        "Cota": (item_contrato or {}).get("Cota"),
+        "CidadeExibicao": (item_contrato or {}).get("CidadeExibicao"),
+        "Tipo": (item_contrato or {}).get("Tipo"),
+        "Origem": (item_contrato or {}).get("Origem") or (contrato_row or {}).get("Origem"),
+        "EmpresaEuro": (item_contrato or {}).get("EmpresaEuro"),
+        "CnpjExibibora": (item_contrato or {}).get("CnpjExibibora"),
+        "TipoDocumento": (item_contrato or {}).get("TipoDocumento") or (contrato_row or {}).get("TipoDocumento"),
+        "RazaoSocial": (item_contrato or {}).get("RazaoSocial") or (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
+        "CPF": (item_contrato or {}).get("CPF") or (contrato_row or {}).get("CPF"),
+        "MarcaExibida": (item_contrato or {}).get("MarcaExibida") or (contrato_row or {}).get("MarcaExibida"),
+        "Vendedor": (item_contrato or {}).get("Vendedor") or (contrato_row or {}).get("Vendedor"),
+        "SDR": (item_contrato or {}).get("SDR") or (contrato_row or {}).get("SDR"),
+        "Agencia": (item_contrato or {}).get("Agencia") or (contrato_row or {}).get("Agencia"),
+        "CnpjAgencia": (item_contrato or {}).get("CnpjAgencia") or (contrato_row or {}).get("CnpjAgencia"),
+        "Bureau": (item_contrato or {}).get("Bureau") or (contrato_row or {}).get("Bureau"),
+        "CnpjBureau": (item_contrato or {}).get("CnpjBureau") or (contrato_row or {}).get("CnpjBureau"),
+        "Intermediario": (item_contrato or {}).get("Intermediario") or (contrato_row or {}).get("Intermediario"),
+        "CnpjIntermediario": (item_contrato or {}).get("CnpjIntermediario") or (contrato_row or {}).get("CnpjIntermediario"),
+        "DataAssinaturaRenovacao": _para_data_sql_ou_none((item_contrato or {}).get("DataAssinaturaRenovacao")),
+        "IDTrimestre": (item_contrato or {}).get("IDTrimestre"),
+        "TexmpoExposicao": (item_contrato or {}).get("TexmpoExposicao"),
+        "DataInicioPrevisto": _para_data_sql_ou_none((item_contrato or {}).get("DataInicioPrevisto")),
+        "DataTerminoPrevisto": _para_data_sql_ou_none((item_contrato or {}).get("DataTerminoPrevisto")),
+        "InicioRenovacao": _para_data_sql_ou_none((item_contrato or {}).get("InicioRenovacao")),
+        "FaturamentoBrutoMensal": (item_contrato or {}).get("FaturamentoBrutoMensal"),
+        "PercentualPermuta": (item_contrato or {}).get("PercentualPermuta"),
+        "CotaOportunidade": (item_contrato or {}).get("CotaOportunidade"),
+        "ValorPermuta": (item_contrato or {}).get("ValorPermuta"),
+        "FaturamentoLiquidoPermuta": (item_contrato or {}).get("FaturamentoLiquidoPermuta"),
+        "NumeroParcelas": (item_contrato or {}).get("NumeroParcelas"),
+        "DataInicioVencimento": _para_data_sql_ou_none((item_contrato or {}).get("DataInicioVencimento")),
+        "TotalBrutoContrato": (item_contrato or {}).get("TotalBrutoContrato"),
+        "TotalLiquidoContratoAGBRCTACORDO": (item_contrato or {}).get("TotalLiquidoContratoAGBRCTACORDO"),
+        "TotalLiquidoContratoAGBRVENDGERCOOR": (item_contrato or {}).get("TotalLiquidoContratoAGBRVENDGERCOOR"),
+        "PercentualAgencia": (item_contrato or {}).get("PercentualAgencia"),
+        "ValorMensalAgencia": (item_contrato or {}).get("ValorMensalAgencia"),
+        "PercentualBureau": (item_contrato or {}).get("PercentualBureau"),
+        "ValorBureauMensal": (item_contrato or {}).get("ValorBureauMensal"),
+        "PercentualCartaAcordo": (item_contrato or {}).get("PercentualCartaAcordo"),
+        "ValorCartaAcordoMensal": (item_contrato or {}).get("ValorCartaAcordoMensal"),
+        "ValorOutrasComissoes": (item_contrato or {}).get("ValorOutrasComissoes"),
+        "FaturamentoLiquidoMensal": (item_contrato or {}).get("FaturamentoLiquidoMensal"),
+        "PercentualComissaoVendedor": (item_contrato or {}).get("PercentualComissaoVendedor"),
+        "ValorVendedor": (item_contrato or {}).get("ValorVendedor"),
+        "ValorVendedorTotal": (item_contrato or {}).get("ValorVendedorTotal"),
+        "PercentualComissaoCoordenacao": (item_contrato or {}).get("PercentualComissaoCoordenacao"),
+        "ValorCoordenador": (item_contrato or {}).get("ValorCoordenador"),
+        "ValorCoordenadorTotal": (item_contrato or {}).get("ValorCoordenadorTotal"),
+        "PercentualComissaoGerencia": (item_contrato or {}).get("PercentualComissaoGerencia"),
+        "ValorGerencia": (item_contrato or {}).get("ValorGerencia"),
+        "ValorGerenciaTotal": (item_contrato or {}).get("ValorGerenciaTotal"),
+        "AtivoCancelamento": (item_contrato or {}).get("AtivoCancelamento"),
+        "FaturamentoLiquidoFinalMensal": (item_contrato or {}).get("FaturamentoLiquidoFinalMensal"),
+        "ComissaoGerenciaNordeste": (item_contrato or {}).get("ComissaoGerenciaNordeste"),
+        "Faturamento": (item_contrato or {}).get("Faturamento"),
+        "DataCancelamento": _para_data_sql_ou_none((item_contrato or {}).get("DataCancelamento")),
+        "OBS": descricao_limpa,
+        "DataFimEfetiva": _para_data_sql_ou_none((item_contrato or {}).get("DataFimEfetiva")),
+        "Status": str((item_contrato or {}).get("Status") or "").strip() or None,
+        "BitAtivo": bit_registro_ativo,
+    }
+
+    if coluna_atividade_item == "BitSolicitacaoAtiva":
+        valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
+
+    itens_resultado.append(valores_item)
+    return itens_resultado
+
+
+
+
+
+
+
 def _sincronizar_snapshot_solicitacao_contrato_do_card(
     *,
     id_card: int,
@@ -5107,166 +5424,114 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         header_igual = False
 
     coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
-    descricao_limpa = (descricao_card or "").strip() or None
 
-    valores_item = {
-        "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
-        "IDFatoControleContratosEuromidia": _int_positivo_ou_none(id_contrato_existente),
-        "IDFatoControleContratosItensEuromidia": _int_positivo_ou_none(id_item_contrato),
-        "IDFatoKanbanCard": _int_positivo_ou_none(id_card),
-        "IDDimUsuariosCriacao": _int_positivo_ou_none(id_usuario),
-        "IDDimUsuariosAtualizacao": _int_positivo_ou_none(id_usuario),
-        "IDVendedor": _int_positivo_ou_none((item_contrato or {}).get("IDVendedor")),
-        "IDPainelEuromidia": _int_positivo_ou_none((item_contrato or {}).get("IDPainelEuromidia")),
-        "IDDimFacesPaineis": _int_positivo_ou_none((item_contrato or {}).get("IDDimFacesPaineis")),
-        "IDDimCheckingHistorico": _int_positivo_ou_none((item_contrato or {}).get("IDDimCheckingHistorico")),
-        "IDEmpresaProprietaria": _int_positivo_ou_none(id_empresa_proprietaria),
-        "Referencia": (item_contrato or {}).get("Referencia") or (contrato_row or {}).get("Referencia"),
-        "NumeroContrato": (item_contrato or {}).get("NumeroContrato") or (contrato_row or {}).get("NumeroContrato"),
-        "NumeroPrevia": (item_contrato or {}).get("NumeroPrevia") or (contrato_row or {}).get("NumeroPrevia"),
-        "CNPJ": (item_contrato or {}).get("CNPJ") or (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
-        "CodPonto": (item_contrato or {}).get("CodPonto") or (str(cod_ponto_contrato).strip() if cod_ponto_contrato not in (None, "") else None),
-        "CodFace": (item_contrato or {}).get("CodFace") or (str(cod_face_contrato).strip().upper() if cod_face_contrato not in (None, "") else None),
-        "DataLancamento": (item_contrato or {}).get("DataLancamento") or (contrato_row or {}).get("DataLancamento"),
-        "Cota": (item_contrato or {}).get("Cota"),
-        "CidadeExibicao": (item_contrato or {}).get("CidadeExibicao"),
-        "Tipo": (item_contrato or {}).get("Tipo"),
-        "Origem": (item_contrato or {}).get("Origem") or (contrato_row or {}).get("Origem"),
-        "EmpresaEuro": (item_contrato or {}).get("EmpresaEuro"),
-        "CnpjExibibora": (item_contrato or {}).get("CnpjExibibora"),
-        "TipoDocumento": (item_contrato or {}).get("TipoDocumento") or (contrato_row or {}).get("TipoDocumento"),
-        "RazaoSocial": (item_contrato or {}).get("RazaoSocial") or (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
-        "CPF": (item_contrato or {}).get("CPF") or (contrato_row or {}).get("CPF"),
-        "MarcaExibida": (item_contrato or {}).get("MarcaExibida") or (contrato_row or {}).get("MarcaExibida"),
-        "Vendedor": (item_contrato or {}).get("Vendedor") or (contrato_row or {}).get("Vendedor"),
-        "SDR": (item_contrato or {}).get("SDR") or (contrato_row or {}).get("SDR"),
-        "Agencia": (item_contrato or {}).get("Agencia") or (contrato_row or {}).get("Agencia"),
-        "CnpjAgencia": (item_contrato or {}).get("CnpjAgencia") or (contrato_row or {}).get("CnpjAgencia"),
-        "Bureau": (item_contrato or {}).get("Bureau") or (contrato_row or {}).get("Bureau"),
-        "CnpjBureau": (item_contrato or {}).get("CnpjBureau") or (contrato_row or {}).get("CnpjBureau"),
-        "Intermediario": (item_contrato or {}).get("Intermediario") or (contrato_row or {}).get("Intermediario"),
-        "CnpjIntermediario": (item_contrato or {}).get("CnpjIntermediario") or (contrato_row or {}).get("CnpjIntermediario"),
-        "DataAssinaturaRenovacao": (item_contrato or {}).get("DataAssinaturaRenovacao"),
-        "IDTrimestre": (item_contrato or {}).get("IDTrimestre"),
-        "TexmpoExposicao": (item_contrato or {}).get("TexmpoExposicao"),
-        "DataInicioPrevisto": (item_contrato or {}).get("DataInicioPrevisto"),
-        "DataTerminoPrevisto": (item_contrato or {}).get("DataTerminoPrevisto"),
-        "InicioRenovacao": (item_contrato or {}).get("InicioRenovacao"),
-        "FaturamentoBrutoMensal": (item_contrato or {}).get("FaturamentoBrutoMensal"),
-        "PercentualPermuta": (item_contrato or {}).get("PercentualPermuta"),
-        "CotaOportunidade": (item_contrato or {}).get("CotaOportunidade"),
-        "ValorPermuta": (item_contrato or {}).get("ValorPermuta"),
-        "FaturamentoLiquidoPermuta": (item_contrato or {}).get("FaturamentoLiquidoPermuta"),
-        "NumeroParcelas": (item_contrato or {}).get("NumeroParcelas"),
-        "DataInicioVencimento": (item_contrato or {}).get("DataInicioVencimento"),
-        "TotalBrutoContrato": (item_contrato or {}).get("TotalBrutoContrato"),
-        "TotalLiquidoContratoAGBRCTACORDO": (item_contrato or {}).get("TotalLiquidoContratoAGBRCTACORDO"),
-        "TotalLiquidoContratoAGBRVENDGERCOOR": (item_contrato or {}).get("TotalLiquidoContratoAGBRVENDGERCOOR"),
-        "PercentualAgencia": (item_contrato or {}).get("PercentualAgencia"),
-        "ValorMensalAgencia": (item_contrato or {}).get("ValorMensalAgencia"),
-        "PercentualBureau": (item_contrato or {}).get("PercentualBureau"),
-        "ValorBureauMensal": (item_contrato or {}).get("ValorBureauMensal"),
-        "PercentualCartaAcordo": (item_contrato or {}).get("PercentualCartaAcordo"),
-        "ValorCartaAcordoMensal": (item_contrato or {}).get("ValorCartaAcordoMensal"),
-        "ValorOutrasComissoes": (item_contrato or {}).get("ValorOutrasComissoes"),
-        "FaturamentoLiquidoMensal": (item_contrato or {}).get("FaturamentoLiquidoMensal"),
-        "PercentualComissaoVendedor": (item_contrato or {}).get("PercentualComissaoVendedor"),
-        "ValorVendedor": (item_contrato or {}).get("ValorVendedor"),
-        "ValorVendedorTotal": (item_contrato or {}).get("ValorVendedorTotal"),
-        "PercentualComissaoCoordenacao": (item_contrato or {}).get("PercentualComissaoCoordenacao"),
-        "ValorCoordenador": (item_contrato or {}).get("ValorCoordenador"),
-        "ValorCoordenadorTotal": (item_contrato or {}).get("ValorCoordenadorTotal"),
-        "PercentualComissaoGerencia": (item_contrato or {}).get("PercentualComissaoGerencia"),
-        "ValorGerencia": (item_contrato or {}).get("ValorGerencia"),
-        "ValorGerenciaTotal": (item_contrato or {}).get("ValorGerenciaTotal"),
-        "AtivoCancelamento": (item_contrato or {}).get("AtivoCancelamento"),
-        "FaturamentoLiquidoFinalMensal": (item_contrato or {}).get("FaturamentoLiquidoFinalMensal"),
-        "ComissaoGerenciaNordeste": (item_contrato or {}).get("ComissaoGerenciaNordeste"),
-        "Faturamento": (item_contrato or {}).get("Faturamento"),
-        "DataCancelamento": (item_contrato or {}).get("DataCancelamento"),
-        "OBS": descricao_limpa,
-        "DataFimEfetiva": (item_contrato or {}).get("DataFimEfetiva"),
-        "Status": str((item_contrato or {}).get("Status") or "").strip() or None,
-        "BitAtivo": bit_registro_ativo,
-    }
-
-    if coluna_atividade_item == "BitSolicitacaoAtiva":
-        valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
-
-    item_existente = _buscar_item_snapshot_existente_para_upsert(
+    itens_snapshot = _montar_itens_snapshot_solicitacao_do_card(
+        id_card=int(id_card),
         id_solicitacao=int(id_solicitacao),
-        id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-        id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
-        cod_ponto=valores_item.get("CodPonto"),
-        cod_face=valores_item.get("CodFace"),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        item_contrato=item_contrato if isinstance(item_contrato, dict) else None,
+        contrato_row=contrato_row if isinstance(contrato_row, dict) else None,
+        empresa=empresa if empresa else None,
+        descricao_card=descricao_card,
+        bit_registro_ativo=bit_registro_ativo,
+        bit_solicitacao_ativa=bit_solicitacao_ativa,
+        coluna_atividade_item=coluna_atividade_item,
+        tipo_norm=tipo_norm,
+        cod_ponto_contrato=cod_ponto_contrato,
+        cod_face_contrato=cod_face_contrato,
     )
 
-    campos_item_comparacao = [
-        "IDFatoSolicitacaoContratoEuromidia", "IDFatoControleContratosEuromidia",
-        "IDFatoControleContratosItensEuromidia", "IDFatoKanbanCard", "IDVendedor", "IDPainelEuromidia",
-        "IDDimFacesPaineis", "IDDimCheckingHistorico", "IDEmpresaProprietaria", "Referencia",
-        "NumeroContrato", "NumeroPrevia", "CNPJ", "CodPonto", "CodFace", "DataLancamento", "Cota",
-        "CidadeExibicao", "Tipo", "Origem", "TipoDocumento", "RazaoSocial", "MarcaExibida", "Vendedor",
-        "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario", "CnpjIntermediario",
-        "DataAssinaturaRenovacao", "IDTrimestre", "DataInicioPrevisto", "DataTerminoPrevisto",
-        "InicioRenovacao", "FaturamentoBrutoMensal", "PercentualPermuta", "CotaOportunidade",
-        "ValorPermuta", "FaturamentoLiquidoPermuta", "TotalBrutoContrato",
-        "TotalLiquidoContratoAGBRCTACORDO", "TotalLiquidoContratoAGBRVENDGERCOOR", "PercentualAgencia",
-        "ValorMensalAgencia", "PercentualBureau", "ValorBureauMensal", "PercentualCartaAcordo",
-        "ValorCartaAcordoMensal", "ValorOutrasComissoes", "FaturamentoLiquidoMensal", "Status", "OBS", "BitAtivo",
-    ]
-    if coluna_atividade_item == "BitSolicitacaoAtiva":
-        campos_item_comparacao.append("BitSolicitacaoAtiva")
+    if not itens_snapshot:
+        return {
+            "sincronizado": False,
+            "motivo": "nenhum_item_snapshot_montado",
+            "id_solicitacao": int(id_solicitacao),
+        }
 
-    item_igual = (
-        bool(item_existente)
-        and _registro_dinamico_equivalente(
-            item_existente,
-            valores_item,
-            campos_item_comparacao,
-            nome_tabela=TABELA_SOLICITACAO_CONTRATO_ITEM,
-        )
-    )
+    sem_alteracao_itens = True
 
-    if item_existente and item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") not in (None, "", 0):
-        id_item_snapshot = int(item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") or 0)
+    for valores_item in itens_snapshot:
+        id_item_contrato_atual = _int_positivo_ou_none(valores_item.get("IDFatoControleContratosItensEuromidia"))
 
-        if not item_igual:
-            _atualizar_registro_dinamico_por_id(
-                TABELA_SOLICITACAO_CONTRATO_ITEM,
-                "IDFatoSolicitacaoContratoItemEuromidia",
-                id_item_snapshot,
-                valores_item,
-                colunas_getdate=("DataAtualizacao",),
-            )
-    else:
-        id_item_snapshot = _inserir_registro_dinamico_output_id(
-            TABELA_SOLICITACAO_CONTRATO_ITEM,
-            "IDFatoSolicitacaoContratoItemEuromidia",
-            valores_item,
-            colunas_getdate=("DataCriacao", "DataAtualizacao"),
-        )
-        item_igual = False
-
-    if id_item_snapshot not in (None, "", 0):
-        _inativar_duplicados_do_item_snapshot(
+        item_existente = _buscar_item_snapshot_existente_para_upsert(
             id_solicitacao=int(id_solicitacao),
-            id_item_manter=int(id_item_snapshot),
             id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
-            id_item_contrato=int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
+            id_item_contrato=id_item_contrato_atual,
             cod_ponto=valores_item.get("CodPonto"),
             cod_face=valores_item.get("CodFace"),
-            coluna_atividade_item=coluna_atividade_item,
         )
+
+        campos_item_comparacao = [
+            "IDFatoSolicitacaoContratoEuromidia", "IDFatoControleContratosEuromidia",
+            "IDFatoControleContratosItensEuromidia", "IDFatoKanbanCard", "IDVendedor", "IDPainelEuromidia",
+            "IDDimFacesPaineis", "IDDimCheckingHistorico", "IDEmpresaProprietaria", "Referencia",
+            "NumeroContrato", "NumeroPrevia", "CNPJ", "CodPonto", "CodFace", "DataLancamento", "Cota",
+            "CidadeExibicao", "Tipo", "Origem", "TipoDocumento", "RazaoSocial", "MarcaExibida", "Vendedor",
+            "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario", "CnpjIntermediario",
+            "DataAssinaturaRenovacao", "IDTrimestre", "DataInicioPrevisto", "DataTerminoPrevisto",
+            "InicioRenovacao", "FaturamentoBrutoMensal", "PercentualPermuta", "CotaOportunidade",
+            "ValorPermuta", "FaturamentoLiquidoPermuta", "TotalBrutoContrato",
+            "TotalLiquidoContratoAGBRCTACORDO", "TotalLiquidoContratoAGBRVENDGERCOOR", "PercentualAgencia",
+            "ValorMensalAgencia", "PercentualBureau", "ValorBureauMensal", "PercentualCartaAcordo",
+            "ValorCartaAcordoMensal", "ValorOutrasComissoes", "FaturamentoLiquidoMensal", "Status", "OBS", "BitAtivo",
+            "IDPainelEuromidia", "IDDimFacesPaineis", "CodPonto", "CodFace", "CidadeExibicao", "Tipo",
+        ]
+        if coluna_atividade_item == "BitSolicitacaoAtiva":
+            campos_item_comparacao.append("BitSolicitacaoAtiva")
+
+        item_igual = (
+            bool(item_existente)
+            and _registro_dinamico_equivalente(
+                item_existente,
+                valores_item,
+                campos_item_comparacao,
+                nome_tabela=TABELA_SOLICITACAO_CONTRATO_ITEM,
+            )
+        )
+
+        if item_existente and item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") not in (None, "", 0):
+            id_item_snapshot = int(item_existente.get("IDFatoSolicitacaoContratoItemEuromidia") or 0)
+
+            if not item_igual:
+                _atualizar_registro_dinamico_por_id(
+                    TABELA_SOLICITACAO_CONTRATO_ITEM,
+                    "IDFatoSolicitacaoContratoItemEuromidia",
+                    id_item_snapshot,
+                    valores_item,
+                    colunas_getdate=("DataAtualizacao",),
+                )
+                sem_alteracao_itens = False
+        else:
+            id_item_snapshot = _inserir_registro_dinamico_output_id(
+                TABELA_SOLICITACAO_CONTRATO_ITEM,
+                "IDFatoSolicitacaoContratoItemEuromidia",
+                valores_item,
+                colunas_getdate=("DataCriacao", "DataAtualizacao"),
+            )
+            sem_alteracao_itens = False
+
+        if id_item_snapshot not in (None, "", 0):
+            _inativar_duplicados_do_item_snapshot(
+                id_solicitacao=int(id_solicitacao),
+                id_item_manter=int(id_item_snapshot),
+                id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+                id_item_contrato=id_item_contrato_atual,
+                cod_ponto=valores_item.get("CodPonto"),
+                cod_face=valores_item.get("CodFace"),
+                coluna_atividade_item=coluna_atividade_item,
+            )
 
     return {
         "sincronizado": True,
-        "sem_alteracao": bool(header_igual and item_igual),
+        "sem_alteracao": bool(header_igual and sem_alteracao_itens),
         "id_solicitacao": int(id_solicitacao),
         "id_item_contrato": int(id_item_contrato) if id_item_contrato not in (None, "", 0) else None,
         "tipo_solicitacao": tipo_norm,
         "bit_solicitacao_ativa": bit_solicitacao_ativa,
         "id_solicitacao_existente": id_solicitacao_existente,
+        "quantidade_itens_snapshot": len(itens_snapshot),
     }
 
 
