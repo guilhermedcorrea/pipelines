@@ -108,9 +108,24 @@
         </select>
       </div>
 
+      <div>
+        <label for="id_empresa_destinatario">Destinatário externo</label>
+        <select
+          name="id_empresa_destinatario"
+          id="id_empresa_destinatario"
+          disabled
+          data-valor-inicial="{{ request.form.get('id_empresa_destinatario', '') }}"
+        >
+          <option value="">Sem destinatário externo</option>
+        </select>
+        <input type="hidden" name="id_fato_contrato_destinatario_externo" id="id_fato_contrato_destinatario_externo" value="{{ request.form.get('id_fato_contrato_destinatario_externo', '') }}">
+        <small class="muted" id="destinatario_status">Selecione contrato, ponto e face para verificar destinatário externo.</small>
+      </div>
+
       <div style="grid-column: 1 / -1;">
-        <label for="imagem">Imagem da arte</label>
-        <input type="file" name="imagem" id="imagem" accept=".jpg,.jpeg,.png,.webp" required>
+        <label for="arquivo_midia">Arquivo da mídia</label>
+        <input type="file" name="arquivo_midia" id="arquivo_midia" accept=".jpg,.jpeg,.png,.webp,.mp4,image/jpeg,image/png,image/webp,video/mp4" required>
+        <small class="muted">Aceita imagem (.jpg, .jpeg, .png, .webp) e vídeo (.mp4).</small>
       </div>
 
       <div style="grid-column: 1 / -1;">
@@ -124,7 +139,7 @@
       </div>
 
       <div class="actions" style="grid-column: 1 / -1;">
-        <button type="submit">Fazer upload e gerar mockup</button>
+        <button type="submit">Fazer upload e processar mídia</button>
       </div>
     </form>
   </div>
@@ -134,9 +149,9 @@
     class="card"
     style="margin-top:18px; display:{% if processamento_pendente %}block{% else %}none{% endif %};"
   >
-    <h2 class="page-title" style="font-size:18px;">Processando mockup</h2>
+    <h2 class="page-title" style="font-size:18px;">Processando mídia</h2>
     <div id="checkin-processamento-status" class="muted">
-      Seu upload foi recebido. O mockup está sendo processado em segundo plano...
+      Seu upload foi recebido. A mídia está sendo processada em segundo plano...
     </div>
   </div>
 
@@ -149,13 +164,23 @@
 
     <div class="grid" style="align-items:start;">
       <div>
-        <div style="font-weight:800; margin-bottom:8px;">Mockup gerado</div>
+        <div style="font-weight:800; margin-bottom:8px;">Arquivo gerado</div>
         <img
           id="checkin-resultado-imagem"
-          src="{% if checkin %}{{ checkin.UrlImagemGerada }}{% else %}{% endif %}"
-          alt="Mockup gerado"
-          style="width:100%; border-radius:12px; border:1px solid #E5E7EB; {% if not checkin %}display:none;{% endif %}"
+          src="{% if checkin and (checkin.IDDimTipoMidia or 1) != 2 %}{{ checkin.UrlImagemGerada }}{% else %}{% endif %}"
+          alt="Resultado do checkin"
+          style="width:100%; border-radius:12px; border:1px solid #E5E7EB; {% if not checkin or (checkin.IDDimTipoMidia or 1) == 2 %}display:none;{% endif %}"
         >
+        <video
+          id="checkin-resultado-video"
+          controls
+          preload="metadata"
+          style="width:100%; border-radius:12px; border:1px solid #E5E7EB; {% if not checkin or (checkin.IDDimTipoMidia or 1) != 2 %}display:none;{% endif %}"
+        >
+          {% if checkin and (checkin.IDDimTipoMidia or 1) == 2 %}
+            <source src="{{ checkin.UrlImagemGerada }}" type="video/mp4">
+          {% endif %}
+        </video>
       </div>
 
       <div>
@@ -164,7 +189,7 @@
           ID: <b>{% if checkin %}{{ checkin.IDDimCheckinHistorico }}{% endif %}</b>
         </div>
         <div class="muted" id="checkin-resultado-empresa">
-          Empresa: <b>{% if checkin %}{{ checkin.RazaoSocial }}{% endif %}</b>
+          Empresa destinatária: <b>{% if checkin %}{{ checkin.RazaoSocial }}{% endif %}</b>
         </div>
         <div class="muted" id="checkin-resultado-contrato">
           Contrato: <b>{% if checkin %}{{ checkin.IDFatoControleContratosEuromidia }}{% endif %}</b>
@@ -175,10 +200,14 @@
         <div class="muted" id="checkin-resultado-face">
           Face: <b>{% if checkin %}{{ checkin.CodFace }}{% endif %}</b>
         </div>
+        <div class="muted" id="checkin-resultado-tipo-midia">
+          Tipo de mídia: <b>{% if checkin %}{% if (checkin.IDDimTipoMidia or 1) == 2 %}Video{% else %}Imagem{% endif %}{% endif %}</b>
+        </div>
+        <div class="muted" id="checkin-resultado-destinatario" style="display:none;"></div>
         <div class="muted" id="checkin-resultado-status-texto">
           Status:
           {% if checkin %}
-            {% if checkin.BitCheckin %}
+            {% if checkin.BitChekin %}
               <b style="color:green;">Checkin concluído</b>
             {% else %}
               <b style="color:#b45309;">Pendente de confirmação</b>
@@ -190,7 +219,7 @@
           id="checkin-form-confirmar"
           method="POST"
           action="{% if checkin %}{{ url_for('Paineis.checkin_confirmar', id_checkin=checkin.IDDimCheckinHistorico) }}{% else %}#{% endif %}"
-          style="margin-top:16px; {% if not checkin or checkin.BitCheckin %}display:none;{% endif %}"
+          style="margin-top:16px; {% if not checkin or checkin.BitChekin %}display:none;{% endif %}"
         >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit">Confirmar Checkin</button>
@@ -198,7 +227,7 @@
 
         <div
           id="checkin-status-concluido"
-          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800; {% if not checkin or not checkin.BitCheckin %}display:none;{% endif %}"
+          style="margin-top:16px; padding:12px; border-radius:10px; background:#ecfdf5; border:1px solid #a7f3d0; color:#065f46; font-weight:800; {% if not checkin or not checkin.BitChekin %}display:none;{% endif %}"
         >
           Checkin concluído
         </div>
@@ -311,10 +340,15 @@
 
   const selectPonto = document.getElementById("cod_ponto");
   const selectFace = document.getElementById("cod_face");
+  const selectDestinatario = document.getElementById("id_empresa_destinatario");
+  const hiddenIdFatoContratoDestinatarioExterno = document.getElementById("id_fato_contrato_destinatario_externo");
+  const destinatarioStatus = document.getElementById("destinatario_status");
 
   const valorInicialContrato = {{ request.form.get('id_fato_controle_contratos', '')|tojson }};
   const valorInicialPonto = {{ request.form.get('cod_ponto', '')|tojson }};
   const valorInicialFace = {{ request.form.get('cod_face', '')|tojson }};
+  const valorInicialDestinatario = {{ request.form.get('id_empresa_destinatario', '')|tojson }};
+  const valorInicialIdFatoContratoDestinatarioExterno = {{ request.form.get('id_fato_contrato_destinatario_externo', '')|tojson }};
 
   let timerEmpresa = null;
   let sequenciaBuscaEmpresa = 0;
@@ -437,9 +471,84 @@
     selectFace.disabled = false;
   }
 
+
+  function definirStatusDestinatario(texto) {
+    if (destinatarioStatus) {
+      destinatarioStatus.textContent = texto;
+    }
+  }
+
+  function limparSelectDestinatario(textoOpcao) {
+    if (!selectDestinatario) {
+      return;
+    }
+    selectDestinatario.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = textoOpcao || "Sem destinatário externo";
+    option.dataset.idFatoContratoDestinatarioExterno = "";
+    selectDestinatario.appendChild(option);
+    selectDestinatario.value = "";
+    if (hiddenIdFatoContratoDestinatarioExterno) {
+      hiddenIdFatoContratoDestinatarioExterno.value = "";
+    }
+  }
+
+  function bloquearDestinatario(textoOpcao, textoStatus) {
+    if (!selectDestinatario) {
+      return;
+    }
+    selectDestinatario.disabled = true;
+    limparSelectDestinatario(textoOpcao || "Sem destinatário externo");
+    definirStatusDestinatario(textoStatus || "Selecione contrato, ponto e face para verificar destinatário externo.");
+  }
+
+  function liberarDestinatario() {
+    if (selectDestinatario) {
+      selectDestinatario.disabled = false;
+    }
+  }
+
+  function atualizarIdFatoContratoDestinatarioExternoSelecionado() {
+    if (!selectDestinatario || !hiddenIdFatoContratoDestinatarioExterno) {
+      return;
+    }
+    const optionSelecionada = selectDestinatario.options[selectDestinatario.selectedIndex];
+    hiddenIdFatoContratoDestinatarioExterno.value = optionSelecionada ? (optionSelecionada.dataset.idFatoContratoDestinatarioExterno || "") : "";
+  }
+
+  function preencherSelectDestinatarios(itens, idEmpresaSelecionado, idFatoSelecionado) {
+    limparSelectDestinatario("Sem destinatário externo");
+
+    if (!itens || !itens.length) {
+      bloquearDestinatario("Sem destinatário externo", "Nenhum destinatário externo ativo para este item.");
+      return;
+    }
+
+    itens.forEach(function (item) {
+      const option = document.createElement("option");
+      option.value = String(item.id_empresa_destinatario);
+      option.textContent = item.texto;
+      option.dataset.idFatoContratoDestinatarioExterno = String(item.id_fato_contrato_destinatario_externo || "");
+
+      const bateEmpresa = idEmpresaSelecionado && String(item.id_empresa_destinatario) === String(idEmpresaSelecionado);
+      const bateFato = idFatoSelecionado && String(item.id_fato_contrato_destinatario_externo) === String(idFatoSelecionado);
+      if (bateEmpresa || bateFato) {
+        option.selected = true;
+      }
+
+      selectDestinatario.appendChild(option);
+    });
+
+    liberarDestinatario();
+    atualizarIdFatoContratoDestinatarioExternoSelecionado();
+    definirStatusDestinatario(`${itens.length} destinatário(s) externo(s) ativo(s) encontrado(s).`);
+  }
+
   function limparDependenciasDoContrato() {
     bloquearPonto("Primeiro selecione um contrato");
     bloquearFace("Primeiro selecione o contrato e o ponto");
+    bloquearDestinatario("Sem destinatário externo", "Selecione contrato, ponto e face para verificar destinatário externo.");
   }
 
   function limparSelecaoEmpresa() {
@@ -682,6 +791,34 @@
 
     const payload = await resposta.json();
     preencherSelectFaces(payload.items || [], valorSelecionado || "");
+  }
+
+
+  async function carregarDestinatariosDoItem(idContrato, codPonto, codFace, idEmpresaSelecionado, idFatoSelecionado) {
+    if (!idContrato || !codPonto || !codFace) {
+      bloquearDestinatario("Sem destinatário externo", "Selecione contrato, ponto e face para verificar destinatário externo.");
+      return;
+    }
+
+    bloquearDestinatario("Carregando destinatários...", "Carregando destinatários externos do item...");
+
+    const resposta = await fetch(
+      `/paineis/checkin/contratos/${encodeURIComponent(idContrato)}/pontos/${encodeURIComponent(codPonto)}/faces/${encodeURIComponent(codFace)}/destinatarios`,
+      {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      }
+    );
+
+    if (!resposta.ok) {
+      throw new Error(`HTTP ${resposta.status}`);
+    }
+
+    const payload = await resposta.json();
+    preencherSelectDestinatarios(payload.items || [], idEmpresaSelecionado || "", idFatoSelecionado || "");
   }
 
   function encontrarEmpresaExata(termo, empresas) {
@@ -928,10 +1065,12 @@
     try {
       await carregarPontosDoContrato(idContrato, "");
       bloquearFace("Primeiro selecione o ponto");
+      bloquearDestinatario("Sem destinatário externo", "Selecione o ponto e a face para verificar destinatário externo.");
     } catch (erro) {
       console.error("[CHECKIN] erro ao carregar pontos do contrato:", erro);
       bloquearPonto("Falha ao carregar pontos");
       bloquearFace("Falha ao carregar faces");
+      bloquearDestinatario("Falha ao carregar", "Falha ao carregar destinatários externos.");
     }
   });
 
@@ -941,16 +1080,49 @@
 
     if (!idContrato || !codPonto) {
       bloquearFace("Primeiro selecione o ponto");
+      bloquearDestinatario("Sem destinatário externo", "Selecione contrato, ponto e face para verificar destinatário externo.");
       return;
     }
 
     try {
       await carregarFacesDoContrato(idContrato, codPonto, "");
+      bloquearDestinatario("Sem destinatário externo", "Selecione a face para verificar destinatário externo.");
     } catch (erro) {
       console.error("[CHECKIN] erro ao carregar faces do contrato:", erro);
       bloquearFace("Falha ao carregar faces");
+      bloquearDestinatario("Falha ao carregar", "Falha ao carregar destinatários externos.");
     }
   });
+
+  selectFace.addEventListener("change", async function () {
+    const idContrato = String(selectContrato.value || "").trim();
+    const codPonto = String(selectPonto.value || "").trim();
+    const codFace = String(selectFace.value || "").trim();
+
+    if (!idContrato || !codPonto || !codFace) {
+      bloquearDestinatario("Sem destinatário externo", "Selecione contrato, ponto e face para verificar destinatário externo.");
+      return;
+    }
+
+    try {
+      await carregarDestinatariosDoItem(
+        idContrato,
+        codPonto,
+        codFace,
+        valorInicialDestinatario || "",
+        valorInicialIdFatoContratoDestinatarioExterno || ""
+      );
+    } catch (erro) {
+      console.error("[CHECKIN] erro ao carregar destinatários do item:", erro);
+      bloquearDestinatario("Falha ao carregar", "Falha ao carregar destinatários externos.");
+    }
+  });
+
+  if (selectDestinatario) {
+    selectDestinatario.addEventListener("change", function () {
+      atualizarIdFatoContratoDestinatarioExternoSelecionado();
+    });
+  }
 
   document.addEventListener("click", function (event) {
     if (!boxEmpresa.contains(event.target) && event.target !== inputEmpresa) {
@@ -994,14 +1166,30 @@
       const codPontoAtual = String(selectPonto.value || valorInicialPonto || "").trim();
       if (!codPontoAtual) {
         bloquearFace("Primeiro selecione o ponto");
+        bloquearDestinatario("Sem destinatário externo", "Selecione contrato, ponto e face para verificar destinatário externo.");
         return;
       }
 
       await carregarFacesDoContrato(idContratoAtual, codPontoAtual, valorInicialFace || "");
+
+      const codFaceAtual = String(selectFace.value || valorInicialFace || "").trim();
+      if (!codFaceAtual) {
+        bloquearDestinatario("Sem destinatário externo", "Selecione a face para verificar destinatário externo.");
+        return;
+      }
+
+      await carregarDestinatariosDoItem(
+        idContratoAtual,
+        codPontoAtual,
+        codFaceAtual,
+        valorInicialDestinatario || "",
+        valorInicialIdFatoContratoDestinatarioExterno || ""
+      );
     } catch (erro) {
       console.error("[CHECKIN] erro ao inicializar ponto/face:", erro);
       bloquearPonto("Falha ao carregar pontos");
       bloquearFace("Falha ao carregar faces");
+      bloquearDestinatario("Falha ao carregar", "Falha ao carregar destinatários externos.");
     }
   }
 
@@ -1015,11 +1203,14 @@
 
   const cardResultado = document.getElementById("checkin-resultado-card");
   const imagemResultado = document.getElementById("checkin-resultado-imagem");
+  const videoResultado = document.getElementById("checkin-resultado-video");
   const resultadoId = document.getElementById("checkin-resultado-id");
   const resultadoEmpresa = document.getElementById("checkin-resultado-empresa");
   const resultadoContrato = document.getElementById("checkin-resultado-contrato");
   const resultadoPonto = document.getElementById("checkin-resultado-ponto");
   const resultadoFace = document.getElementById("checkin-resultado-face");
+  const resultadoTipoMidia = document.getElementById("checkin-resultado-tipo-midia");
+  const resultadoDestinatario = document.getElementById("checkin-resultado-destinatario");
   const resultadoStatusTexto = document.getElementById("checkin-resultado-status-texto");
   const formConfirmar = document.getElementById("checkin-form-confirmar");
   const statusConcluido = document.getElementById("checkin-status-concluido");
@@ -1035,7 +1226,7 @@
       cardProcessamento.style.display = "block";
     }
     if (statusProcessamento) {
-      statusProcessamento.textContent = texto || "Processando mockup...";
+      statusProcessamento.textContent = texto || "Processando mídia...";
     }
   }
 
@@ -1125,16 +1316,48 @@
       cardResultado.style.display = "block";
     }
 
-    if (imagemResultado && resultado.url_imagem_gerada) {
-      imagemResultado.src = resultado.url_imagem_gerada;
-      imagemResultado.style.display = "block";
+    const tipoMidia = String(resultado.tipo_midia || "Imagem").trim();
+    const urlArquivoResultado = String(resultado.url_arquivo_resultado || resultado.url_imagem_gerada || "").trim();
+
+    if (tipoMidia.toLowerCase() === "video") {
+      if (imagemResultado) {
+        imagemResultado.removeAttribute("src");
+        imagemResultado.style.display = "none";
+      }
+      if (videoResultado) {
+        videoResultado.style.display = urlArquivoResultado ? "block" : "none";
+        videoResultado.innerHTML = urlArquivoResultado ? `<source src="${urlArquivoResultado}" type="video/mp4">` : "";
+        videoResultado.load();
+      }
+    } else {
+      if (videoResultado) {
+        videoResultado.pause();
+        videoResultado.removeAttribute("src");
+        videoResultado.innerHTML = "";
+        videoResultado.style.display = "none";
+      }
+      if (imagemResultado) {
+        if (urlArquivoResultado) {
+          imagemResultado.src = urlArquivoResultado;
+          imagemResultado.style.display = "block";
+        } else {
+          imagemResultado.removeAttribute("src");
+          imagemResultado.style.display = "none";
+        }
+      }
     }
 
     preencherLinhaResultado(resultadoId, "ID", resultado.id_checkin || "");
-    preencherLinhaResultado(resultadoEmpresa, "Empresa", resultado.razao_social || "");
+    preencherLinhaResultado(resultadoEmpresa, "Empresa destinatária", resultado.razao_social || "");
     preencherLinhaResultado(resultadoContrato, "Contrato", resultado.id_fato_controle_contratos || "");
     preencherLinhaResultado(resultadoPonto, "Ponto", resultado.cod_ponto || "");
     preencherLinhaResultado(resultadoFace, "Face", resultado.cod_face || "");
+    preencherLinhaResultado(resultadoTipoMidia, "Tipo de mídia", tipoMidia || "");
+
+    if (resultadoDestinatario) {
+      resultadoDestinatario.style.display = "none";
+      resultadoDestinatario.innerHTML = "";
+    }
 
     if (resultadoStatusTexto) {
       resultadoStatusTexto.innerHTML = 'Status: <b style="color:#b45309;">Pendente de confirmação</b>';
@@ -1158,7 +1381,7 @@
       return;
     }
 
-    mostrarCardProcessamento("Seu upload foi recebido. O mockup está sendo processado em segundo plano...");
+    mostrarCardProcessamento("Seu upload foi recebido. A mídia está sendo processada em segundo plano...");
 
     let tentativas = 0;
     const maxTentativas = 180;
@@ -1197,7 +1420,7 @@
         }
 
         if (status === "STARTED") {
-          mostrarCardProcessamento("Mockup em processamento...");
+          mostrarCardProcessamento("Mídia em processamento...");
         } else if (status === "PENDING") {
           mostrarCardProcessamento("Upload recebido. Aguardando início do processamento...");
         } else {

@@ -852,7 +852,7 @@ class DimCheckinHistorico(db.Model):
 
     IDDimCheckinHistorico = db.Column(db.Integer, primary_key=True, autoincrement=True)
     DataAtualizacao = db.Column(DATETIME2(0), nullable=False, server_default=db.text("SYSDATETIME()"))
-    DataChecking = db.Column(db.Date, nullable=False)
+    DataChekin = db.Column(db.Date, nullable=False)
 
     IDEmpresa = db.Column(db.Integer, nullable=True)
     CNPJ = db.Column(db.String(20), nullable=True)
@@ -892,7 +892,6 @@ class DimCheckinHistorico(db.Model):
             f"CodFace={self.CodFace!r} "
             f"BitChekin={self.BitChekin}>"
         )
-
 
 
 

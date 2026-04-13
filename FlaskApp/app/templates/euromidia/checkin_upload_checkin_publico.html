@@ -64,20 +64,18 @@
     .linha {
       margin-bottom: 8px;
     }
-    img {
+    img,
+    video {
       width: 100%;
       border-radius: 12px;
       border: 1px solid #e5e7eb;
       display: block;
+      background: #000;
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="card">
-    
-    
-    </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -99,21 +97,29 @@
             <label for="senha" style="display:block; font-weight:700; margin-bottom:6px;">Senha</label>
             <input id="senha" name="senha" type="password" required>
           </div>
-          <button type="submit">Acessar imagem</button>
+          <button type="submit">Acessar mídia</button>
         </form>
       </div>
     {% else %}
       <div class="card">
-        <h2>Imagem do checkin</h2>
+        <h2>Mídia do checkin</h2>
         <div class="grid">
           <div>
-            <img src="{{ url_imagem_publica }}" alt="Imagem do checkin">
+            {% if (item.IDDimTipoMidia or 1) == 2 %}
+              <video controls preload="metadata">
+                <source src="{{ url_imagem_publica }}" type="video/mp4">
+                Seu navegador não suporta vídeo HTML5.
+              </video>
+            {% else %}
+              <img src="{{ url_imagem_publica }}" alt="Mídia do checkin">
+            {% endif %}
           </div>
           <div>
-            <div class="linha">Empresa: <b>{{ item.RazaoSocial or '' }}</b></div>
+            <div class="linha">Empresa destinatária: <b>{{ item.RazaoSocial or '' }}</b></div>
             <div class="linha">Contrato: <b>{{ item.IDFatoControleContratosEuromidia or '' }}</b></div>
             <div class="linha">Ponto: <b>{{ item.CodPonto or '' }}</b></div>
             <div class="linha">Face: <b>{{ item.CodFace or '' }}</b></div>
+            <div class="linha">Tipo de mídia: <b>{% if (item.IDDimTipoMidia or 1) == 2 %}Vídeo{% else %}Imagem{% endif %}</b></div>
             <div class="linha">Status: <b>{% if item.BitChekin %}Checkin concluído{% else %}Pendente de confirmação{% endif %}</b></div>
             {% if item.DataConfirmacao %}
               <div class="linha">Data de confirmação: <b>{{ item.DataConfirmacao }}</b></div>

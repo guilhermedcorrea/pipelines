@@ -24,6 +24,13 @@ def processar_checkin_upload(
     cnpj_digitado: str | None = None,
     observacao: str | None = None,
     id_usuario_criacao: int | None = None,
+    id_empresa_destinatario: int | None = None,
+    id_fato_controle_contratos_item: int | None = None,
+    id_fato_contrato_destinatario_externo: int | None = None,
+    id_dim_tipo_midia: int | None = None,
+    nome_tipo_midia: str | None = None,
+    mimetype_arquivo: str | None = None,
+    extensao_arquivo: str | None = None,
 ) -> dict[str, Any]:
     """Eu processo o upload do checkin fora da request web."""
 
@@ -36,6 +43,39 @@ def processar_checkin_upload(
             "arquivo_temporario": str(caminho_temp),
             "cod_ponto": str(cod_ponto),
             "cod_face": str(cod_face),
+            "id_empresa": (
+                int(id_empresa)
+                if id_empresa not in (None, "", 0)
+                else None
+            ),
+            "id_empresa_destinatario": (
+                int(id_empresa_destinatario)
+                if id_empresa_destinatario not in (None, "", 0)
+                else None
+            ),
+            "id_fato_controle_contratos": (
+                int(id_fato_controle_contratos)
+                if id_fato_controle_contratos not in (None, "", 0)
+                else None
+            ),
+            "id_fato_controle_contratos_item": (
+                int(id_fato_controle_contratos_item)
+                if id_fato_controle_contratos_item not in (None, "", 0)
+                else None
+            ),
+            "id_fato_contrato_destinatario_externo": (
+                int(id_fato_contrato_destinatario_externo)
+                if id_fato_contrato_destinatario_externo not in (None, "", 0)
+                else None
+            ),
+            "id_dim_tipo_midia": (
+                int(id_dim_tipo_midia)
+                if id_dim_tipo_midia not in (None, "", 0)
+                else None
+            ),
+            "nome_tipo_midia": (nome_tipo_midia or "").strip() or None,
+            "mimetype_arquivo": (mimetype_arquivo or "").strip() or None,
+            "extensao_arquivo": (extensao_arquivo or "").strip() or None,
         },
     )
 
@@ -49,12 +89,59 @@ def processar_checkin_upload(
             cod_face=str(cod_face),
             data_checkin_iso=str(data_checkin_iso),
             caminho_arquivo_temporario=str(caminho_temp),
-            nome_original_cliente=nome_original_cliente,
-            cnpj_digitado=cnpj_digitado,
-            observacao=observacao,
+            nome_original_cliente=(
+                str(nome_original_cliente).strip()
+                if nome_original_cliente not in (None, "")
+                else None
+            ),
+            cnpj_digitado=(
+                str(cnpj_digitado).strip()
+                if cnpj_digitado not in (None, "")
+                else None
+            ),
+            observacao=(
+                str(observacao).strip()
+                if observacao not in (None, "")
+                else None
+            ),
             id_usuario_criacao=(
                 int(id_usuario_criacao)
                 if id_usuario_criacao not in (None, "", 0)
+                else None
+            ),
+            id_empresa_destinatario=(
+                int(id_empresa_destinatario)
+                if id_empresa_destinatario not in (None, "", 0)
+                else None
+            ),
+            id_fato_controle_contratos_item=(
+                int(id_fato_controle_contratos_item)
+                if id_fato_controle_contratos_item not in (None, "", 0)
+                else None
+            ),
+            id_fato_contrato_destinatario_externo=(
+                int(id_fato_contrato_destinatario_externo)
+                if id_fato_contrato_destinatario_externo not in (None, "", 0)
+                else None
+            ),
+            id_dim_tipo_midia=(
+                int(id_dim_tipo_midia)
+                if id_dim_tipo_midia not in (None, "", 0)
+                else None
+            ),
+            nome_tipo_midia=(
+                str(nome_tipo_midia).strip()
+                if nome_tipo_midia not in (None, "")
+                else None
+            ),
+            mimetype_arquivo=(
+                str(mimetype_arquivo).strip().lower()
+                if mimetype_arquivo not in (None, "")
+                else None
+            ),
+            extensao_arquivo=(
+                str(extensao_arquivo).strip().lower()
+                if extensao_arquivo not in (None, "")
                 else None
             ),
         )

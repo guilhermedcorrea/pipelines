@@ -234,7 +234,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
-    command: python -m celery -A app.celery_app.celery_app worker -Q checking_upload -l info --concurrency=2
+    command: python -m celery -A app.celery_app.celery_app worker -Q checkin_upload -l info --concurrency=2
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

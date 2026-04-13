@@ -170,3 +170,10 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 #docker compose logs -f celery-checking-worker
+
+
+
+
+#docker builder prune -af
+#docker compose build --no-cache flask-app celery-checking-worker
+#docker compose up -d flask-app celery-checking-worker

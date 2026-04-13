@@ -20,7 +20,7 @@ def _obter_result_backend() -> str:
     )
 
 
-celery_app = Celery("flaskapp_checking")
+celery_app = Celery("flaskapp_checkin")
 
 celery_app.conf.update(
     broker_url=_obter_broker_url(),
@@ -31,22 +31,18 @@ celery_app.conf.update(
     timezone="America/Sao_Paulo",
     enable_utc=False,
     task_track_started=True,
-    task_default_queue="checking_upload",
+    task_default_queue="checkin_upload",
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
     result_expires=86400,
-    imports=("app.tasks.checking_tasks",),
+    imports=("app.tasks.checkin_tasks",),
 )
 
 _app_flask_cache = None
 
 
 def _obter_app_flask():
-    """
-    Eu crio o Flask app só quando a task realmente executa.
-    Isso evita import circular durante o boot do Flask.
-    """
     global _app_flask_cache
 
     if _app_flask_cache is None:

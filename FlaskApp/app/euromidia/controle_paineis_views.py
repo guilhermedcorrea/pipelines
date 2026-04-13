@@ -14032,8 +14032,137 @@ def _normalizar_extensao_arquivo(nome_arquivo: str) -> str:
     return "." + nome_arquivo.rsplit(".", 1)[1].lower()
 
 
+def _obter_regras_upload_checkin() -> dict[str, object]:
+    """Eu centralizo as regras de upload de imagem e vídeo com fallback seguro."""
+    extensoes_imagem = {".jpg", ".jpeg", ".png", ".webp"}
+    mimes_imagem = {"image/jpeg", "image/png", "image/webp"}
+    extensoes_video = {".mp4"}
+    mimes_video = {"video/mp4"}
+
+    return {
+        "extensoes_imagem": extensoes_imagem,
+        "mimes_imagem": mimes_imagem,
+        "extensoes_video": extensoes_video,
+        "mimes_video": mimes_video,
+        "tamanho_maximo_imagem_bytes": int(current_app.config.get("CHECKIN_TAMANHO_MAXIMO_IMAGEM_BYTES", 20 * 1024 * 1024)),
+        "tamanho_maximo_video_bytes": int(current_app.config.get("CHECKIN_TAMANHO_MAXIMO_VIDEO_BYTES", 250 * 1024 * 1024)),
+    }
+
+
+def _obter_tamanho_arquivo_upload_checkin(arquivo) -> int:
+    """Eu leio o tamanho do arquivo em bytes sem perder a posição original do stream."""
+    try:
+        posicao_atual = arquivo.stream.tell()
+    except Exception:
+        posicao_atual = 0
+
+    try:
+        arquivo.stream.seek(0, os.SEEK_END)
+        tamanho_bytes = int(arquivo.stream.tell() or 0)
+    finally:
+        try:
+            arquivo.stream.seek(posicao_atual)
+        except Exception:
+            arquivo.stream.seek(0)
+
+    return tamanho_bytes
+
+
+def _validar_e_classificar_arquivo_upload_checkin(
+    *,
+    arquivo,
+    largura_maxima: int,
+    altura_maxima: int,
+) -> dict[str, object]:
+    """Eu valido extensão, MIME, coerência e regras específicas de imagem ou vídeo."""
+    regras = _obter_regras_upload_checkin()
+
+    if arquivo is None:
+        raise ValueError("Nenhum arquivo foi enviado.")
+
+    nome_original = _normalizar_texto_checkin(getattr(arquivo, "filename", ""))
+    if not nome_original:
+        raise ValueError("O nome do arquivo está vazio.")
+
+    extensao = _normalizar_extensao_arquivo(nome_original)
+    mimetype = str(getattr(arquivo, "mimetype", "") or "").strip().lower()
+
+    if not mimetype:
+        raise ValueError("Não foi possível identificar o MIME type do arquivo.")
+
+    eh_ext_imagem = extensao in regras["extensoes_imagem"]
+    eh_mime_imagem = mimetype in regras["mimes_imagem"]
+    eh_ext_video = extensao in regras["extensoes_video"]
+    eh_mime_video = mimetype in regras["mimes_video"]
+
+    if eh_ext_imagem and eh_mime_video:
+        raise ValueError("Arquivo incoerente: a extensão é de imagem, mas o MIME type é de vídeo.")
+
+    if eh_ext_video and eh_mime_imagem:
+        raise ValueError("Arquivo incoerente: a extensão é de vídeo, mas o MIME type é de imagem.")
+
+    if eh_ext_imagem and eh_mime_imagem:
+        tipo_midia = "Imagem"
+        id_dim_tipo_midia = 1
+    elif eh_ext_video and eh_mime_video:
+        tipo_midia = "Video"
+        id_dim_tipo_midia = 2
+    else:
+        raise ValueError("Extensão e MIME type não são compatíveis com uma mídia permitida.")
+
+    tamanho_bytes = _obter_tamanho_arquivo_upload_checkin(arquivo)
+
+    if tipo_midia == "Imagem":
+        if tamanho_bytes > int(regras["tamanho_maximo_imagem_bytes"]):
+            raise ValueError("A imagem excede o tamanho máximo permitido.")
+
+        arquivo.stream.seek(0)
+        conteudo = arquivo.read()
+        arquivo.stream.seek(0)
+
+        try:
+            imagem_validacao = Image.open(BytesIO(conteudo))
+            imagem_validacao.verify()
+            imagem_medicao = Image.open(BytesIO(conteudo))
+            largura, altura = imagem_medicao.size
+        except Exception as exc:
+            raise ValueError("O arquivo enviado não é uma imagem válida.") from exc
+
+        if largura > int(largura_maxima) or altura > int(altura_maxima):
+            raise ValueError(
+                f"Imagem maior que o permitido. Máximo: {int(largura_maxima)}x{int(altura_maxima)}px."
+            )
+
+        return {
+            "id_dim_tipo_midia": id_dim_tipo_midia,
+            "nome_midia": tipo_midia,
+            "extensao": extensao,
+            "mimetype": mimetype,
+            "tamanho_bytes": tamanho_bytes,
+            "largura": int(largura),
+            "altura": int(altura),
+            "eh_imagem": True,
+            "eh_video": False,
+        }
+
+    if tamanho_bytes > int(regras["tamanho_maximo_video_bytes"]):
+        raise ValueError("O vídeo excede o tamanho máximo permitido.")
+
+    return {
+        "id_dim_tipo_midia": id_dim_tipo_midia,
+        "nome_midia": tipo_midia,
+        "extensao": extensao,
+        "mimetype": mimetype,
+        "tamanho_bytes": tamanho_bytes,
+        "largura": None,
+        "altura": None,
+        "eh_imagem": False,
+        "eh_video": True,
+    }
+
+
 def _localizar_fundo_checkin(cod_ponto: str, cod_face: str) -> Path:
-    """Eu localizo o fundo oficial da face procurando primeiro na pasta fundo e depois na pasta da face."""
+    """Eu localizo o fundo oficial da face sempre dentro da pasta /fundo da própria face."""
     pasta_base = _obter_pasta_base_checkin()
     pasta_face = pasta_base / str(cod_ponto) / str(cod_face)
 
@@ -14041,19 +14170,32 @@ def _localizar_fundo_checkin(cod_ponto: str, cod_face: str) -> Path:
         raise FileNotFoundError(f"Pasta da face não encontrada: {pasta_face}")
 
     pasta_fundo = pasta_face / "fundo"
-    if pasta_fundo.exists() and pasta_fundo.is_dir():
-        return _localizar_arquivo_imagem(pasta_fundo)
+    if not pasta_fundo.exists() or not pasta_fundo.is_dir():
+        raise FileNotFoundError(f"Pasta do fundo não encontrada: {pasta_fundo}")
 
-    return _localizar_arquivo_imagem(pasta_face)
-
-
+    return _localizar_arquivo_imagem(pasta_fundo)
 
 
+def _montar_pasta_destino_final_checkin(
+    *,
+    cod_ponto: str | int,
+    cod_face: str,
+    id_fato_controle_contratos: int,
+    id_fato_contrato_destinatario_externo: int,
+) -> Path:
+    """Eu monto a pasta final no padrão pontos/CodPonto/CodFace/Contrato/Destinatario."""
+    pasta_base = _obter_pasta_base_checkin()
+    pasta_face = pasta_base / str(cod_ponto) / str(cod_face)
+    pasta_contrato = pasta_face / str(int(id_fato_controle_contratos))
+    pasta_destinatario = pasta_contrato / str(int(id_fato_contrato_destinatario_externo))
+    _garantir_pasta(pasta_destinatario)
+    return pasta_destinatario
 
 def _salvar_upload_original_checkin(
     *,
     pasta_destino: Path,
-    id_empresa: int,
+    id_fato_controle_contratos: int,
+    id_fato_contrato_destinatario_externo: int,
     cod_face: str,
     data_checkin: date,
     arquivo=None,
@@ -14061,7 +14203,7 @@ def _salvar_upload_original_checkin(
     nome_original_cliente: str | None = None,
 ) -> tuple[str, Path]:
     """
-    Eu salvo a imagem importada dentro da pasta da empresa.
+    Eu salvo a mídia importada dentro da pasta final do contrato e destinatário externo.
 
     Posso receber:
     - arquivo da request Flask
@@ -14091,7 +14233,10 @@ def _salvar_upload_original_checkin(
 
     _garantir_pasta(pasta_destino)
 
-    nome_base = f"{cod_face}_{data_checkin.strftime('%Y%m%d')}_{int(id_empresa)}_upload"
+    nome_base = (
+        f"{cod_face}_{data_checkin.strftime('%Y%m%d')}_"
+        f"{int(id_fato_controle_contratos)}_{int(id_fato_contrato_destinatario_externo)}_upload"
+    )
     caminho_saida = pasta_destino / f"{nome_base}{extensao}"
 
     contador = 1
@@ -14111,12 +14256,213 @@ def _salvar_upload_original_checkin(
 
 
 
+def _obter_item_contrato_checkin(
+    *,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+) -> dict | None:
+    """Eu localizo o item ativo exato do contrato selecionado para o checkin."""
+    sql = text("""
+        SELECT TOP (1)
+            IDFatoControleContratosItensEuromidia = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia),
+            IDFatoControleContratoEuromidia = TRY_CONVERT(int, i.IDFatoControleContratoEuromidia),
+            IDEmpresaAgencia = TRY_CONVERT(int, i.IDEmpresaAgencia),
+            BitAtivo = CAST(ISNULL(i.BitAtivo, 1) AS bit)
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        WHERE
+            i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
+            AND TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+            AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
+            AND ISNULL(i.BitAtivo, 1) = 1
+        ORDER BY TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "cod_ponto": str(cod_ponto or "").strip(),
+            "cod_face": str(cod_face or "").strip(),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+
+
+
+
+def _buscar_destinatarios_externos_do_item_checkin(
+    *,
+    id_fato_controle_contratos: int,
+    id_fato_controle_contratos_item: int,
+) -> list[dict]:
+    """Eu devolvo apenas os destinatários externos ativos e coerentes com o cabeçalho e com o item do contrato."""
+
+    sql = text("""
+        SELECT
+            de.IDFatoContratoDestinatarioExterno,
+            de.IDEmpresaDestinatario,
+            RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(emp.RazaoSocial, emp.NomeFantasia, ''))), ''),
+            NomeFantasia = NULLIF(LTRIM(RTRIM(COALESCE(emp.NomeFantasia, ''))), ''),
+            CNPJ = NULLIF(LTRIM(RTRIM(CAST(emp.CNPJ AS varchar(30)))), '')
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] c
+            ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+        INNER JOIN [Integracao].[Silver].[FatoContratoDestinatarioExternoItens] dei
+            ON dei.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+        INNER JOIN [Integracao].[Silver].[FatoContratoDestinatarioExterno] de
+            ON de.IDFatoContratoDestinatarioExterno = dei.IDFatoContratoDestinatarioExterno
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = de.IDEmpresaDestinatario
+        WHERE
+            i.IDFatoControleContratosItensEuromidia = :id_fato_controle_contratos_item
+            AND i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
+            AND de.IDFatoControleContratosEuromidia = c.IDFatoControleContratosEuromidia
+            AND TRY_CONVERT(int, de.IDEmpresa) = TRY_CONVERT(int, c.IDEmpresa)
+            AND ISNULL(i.BitAtivo, 1) = 1
+            AND ISNULL(c.BitAtivo, 1) = 1
+            AND ISNULL(de.BitAtivo, 1) = 1
+            AND ISNULL(dei.BitAtivo, 1) = 1
+            AND (
+                (
+                    TRY_CONVERT(int, i.IDEmpresaAgencia) IS NOT NULL
+                    AND TRY_CONVERT(int, de.IDEmpresaDestinatario) = TRY_CONVERT(int, i.IDEmpresaAgencia)
+                )
+                OR
+                (
+                    TRY_CONVERT(int, i.IDEmpresaAgencia) IS NULL
+                    AND TRY_CONVERT(int, de.IDEmpresaDestinatario) = TRY_CONVERT(int, c.IDEmpresa)
+                )
+            )
+        ORDER BY
+            NULLIF(LTRIM(RTRIM(COALESCE(emp.RazaoSocial, emp.NomeFantasia, ''))), ''),
+            de.IDFatoContratoDestinatarioExterno
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "id_fato_controle_contratos_item": int(id_fato_controle_contratos_item),
+        },
+    ).mappings().all()
+
+    retorno = []
+
+    for row in rows:
+        nome = (
+            _normalizar_texto_checkin(row.get("RazaoSocial"))
+            or _normalizar_texto_checkin(row.get("NomeFantasia"))
+            or "Sem nome"
+        )
+        cnpj = _normalizar_texto_checkin(row.get("CNPJ"))
+
+        retorno.append(
+            {
+                "id_fato_contrato_destinatario_externo": int(row["IDFatoContratoDestinatarioExterno"]),
+                "id_empresa_destinatario": int(row["IDEmpresaDestinatario"]),
+                "razao_social": nome,
+                "cnpj": cnpj,
+                "texto": f"{nome}{(' | ' + cnpj) if cnpj else ''}",
+            }
+        )
+
+    return retorno
+
+
+
+def _resolver_destinatario_externo_upload_checkin(
+    *,
+    id_empresa_principal: int,
+    id_fato_controle_contratos: int,
+    cod_ponto: str,
+    cod_face: str,
+    id_empresa_destinatario_informado: int | None,
+    id_fato_contrato_destinatario_externo_informado: int | None,
+) -> dict[str, object]:
+    """Eu resolvo e valido o destinatário externo ativo do item selecionado."""
+
+    item = _obter_item_contrato_checkin(
+        id_fato_controle_contratos=id_fato_controle_contratos,
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
+    )
+
+    if not item:
+        raise ValueError("O item do contrato não foi encontrado para o ponto e a face informados.")
+
+    id_item = int(item["IDFatoControleContratosItensEuromidia"])
+
+    """A fonte de verdade agora é a tabela de vínculo, não o IDEmpresaAgencia do item."""
+    destinatarios = _buscar_destinatarios_externos_do_item_checkin(
+        id_fato_controle_contratos=id_fato_controle_contratos,
+        id_fato_controle_contratos_item=id_item,
+    )
+
+    """Se não houver vínculo ativo nas tabelas novas, uso a empresa principal."""
+    if not destinatarios:
+        return {
+            "tem_destinatario_externo": False,
+            "id_fato_controle_contratos_item": id_item,
+            "id_fato_contrato_destinatario_externo": 0,
+            "id_empresa_destinatario": int(id_empresa_principal),
+            "destinatario_texto": None,
+            "destinatarios_disponiveis": [],
+        }
+
+    selecionado = None
+
+    if id_fato_contrato_destinatario_externo_informado not in (None, 0):
+        for item_dest in destinatarios:
+            if int(item_dest["id_fato_contrato_destinatario_externo"]) == int(id_fato_contrato_destinatario_externo_informado):
+                selecionado = item_dest
+                break
+
+        if not selecionado:
+            raise ValueError("O destinatário externo informado não está ativo para o item selecionado.")
+
+    elif id_empresa_destinatario_informado not in (None, 0):
+        for item_dest in destinatarios:
+            if int(item_dest["id_empresa_destinatario"]) == int(id_empresa_destinatario_informado):
+                selecionado = item_dest
+                break
+
+        if not selecionado:
+            raise ValueError("A empresa destinatária informada não está ativa para o item selecionado.")
+
+    elif len(destinatarios) == 1:
+        selecionado = destinatarios[0]
+
+    else:
+        raise ValueError("Selecione um destinatário externo válido para o item do contrato.")
+
+    return {
+        "tem_destinatario_externo": True,
+        "id_fato_controle_contratos_item": id_item,
+        "id_fato_contrato_destinatario_externo": int(selecionado["id_fato_contrato_destinatario_externo"]),
+        "id_empresa_destinatario": int(selecionado["id_empresa_destinatario"]),
+        "destinatario_texto": str(selecionado["texto"]),
+        "destinatarios_disponiveis": destinatarios,
+    }
+
+
+
 
 
 def _processar_upload_checkin_por_caminho(
     *,
     id_empresa: int,
+    id_empresa_destinatario: int | None = None,
     id_fato_controle_contratos: int,
+    id_fato_controle_contratos_item: int | None = None,
+    id_fato_contrato_destinatario_externo: int | None = None,
+    id_dim_tipo_midia: int | None = None,
+    nome_tipo_midia: str | None = None,
+    mimetype_arquivo: str | None = None,
+    extensao_arquivo: str | None = None,
     cod_ponto: str,
     cod_face: str,
     data_checkin_iso: str,
@@ -14151,7 +14497,14 @@ def _processar_upload_checkin_por_caminho(
         raise ValueError("Data de checkin inválida para processamento assíncrono.") from exc
 
     cod_ponto_int = int(cod_ponto_txt)
-    id_empresa_int = int(id_empresa)
+    id_empresa_principal_int = int(id_empresa)
+    id_empresa_destinatario_int = int(id_empresa_destinatario or id_empresa_principal_int)
+    id_fato_contrato_destinatario_externo_int = int(id_fato_contrato_destinatario_externo or 0)
+    id_dim_tipo_midia_int = int(id_dim_tipo_midia or 1)
+    nome_tipo_midia_txt = str(
+        nome_tipo_midia or ("Video" if id_dim_tipo_midia_int == 2 else "Imagem")
+    ).strip() or "Imagem"
+    extensao_arquivo_txt = str(extensao_arquivo or "").strip().lower()
 
     try:
         pasta_face, caminho_imagem_painel, caminho_fundo = _buscar_paths_mockup(
@@ -14159,31 +14512,46 @@ def _processar_upload_checkin_por_caminho(
             cod_face_txt,
         )
 
-        pasta_empresa = pasta_face / str(id_empresa_int)
-        _garantir_pasta(pasta_empresa)
+        pasta_destino_final = _montar_pasta_destino_final_checkin(
+            cod_ponto=cod_ponto_int,
+            cod_face=cod_face_txt,
+            id_fato_controle_contratos=int(id_fato_controle_contratos),
+            id_fato_contrato_destinatario_externo=id_fato_contrato_destinatario_externo_int,
+        )
 
-        nome_original_cliente, caminho_imagem_upload = _salvar_upload_original_checkin(
-            pasta_destino=pasta_empresa,
-            id_empresa=id_empresa_int,
+        nome_original_cliente, caminho_midia_upload = _salvar_upload_original_checkin(
+            pasta_destino=pasta_destino_final,
+            id_fato_controle_contratos=int(id_fato_controle_contratos),
+            id_fato_contrato_destinatario_externo=id_fato_contrato_destinatario_externo_int,
             cod_face=cod_face_txt,
             data_checkin=data_checkin,
             caminho_arquivo_origem=caminho_arquivo_temporario,
             nome_original_cliente=nome_original_cliente,
         )
 
-        nome_base_gerado = f"{cod_face_txt}_{data_checkin.strftime('%Y%m%d')}_gerado_{id_empresa_int}"
-        caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}.jpg"
+        caminho_arquivo_resultado = caminho_midia_upload
+        caminho_imagem_gerada = None
 
-        contador = 1
-        while caminho_imagem_gerada.exists():
-            caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}_{contador:02d}.jpg"
-            contador += 1
+        if id_dim_tipo_midia_int == 1:
+            nome_base_gerado = (
+                f"{cod_face_txt}_{data_checkin.strftime('%Y%m%d')}_"
+                f"{int(id_fato_controle_contratos)}_{id_fato_contrato_destinatario_externo_int}_gerado"
+            )
+            caminho_imagem_gerada = pasta_destino_final / f"{nome_base_gerado}.jpg"
 
-        _gerar_mockup_checkin(
-            caminho_fundo=caminho_fundo,
-            caminho_imagem_upload=caminho_imagem_upload,
-            caminho_saida=caminho_imagem_gerada,
-        )
+            contador = 1
+            while caminho_imagem_gerada.exists():
+                caminho_imagem_gerada = (
+                    pasta_destino_final / f"{nome_base_gerado}_{contador:02d}.jpg"
+                )
+                contador += 1
+
+            _gerar_mockup_checkin(
+                caminho_fundo=caminho_fundo,
+                caminho_imagem_upload=caminho_midia_upload,
+                caminho_saida=caminho_imagem_gerada,
+            )
+            caminho_arquivo_resultado = caminho_imagem_gerada
 
         razao_social = None
         sql_empresa = text("""
@@ -14195,7 +14563,7 @@ def _processar_upload_checkin_por_caminho(
         """)
         row_empresa = db.session.execute(
             sql_empresa,
-            {"id_empresa": id_empresa_int}
+            {"id_empresa": id_empresa_destinatario_int}
         ).mappings().first()
 
         if row_empresa:
@@ -14222,8 +14590,8 @@ def _processar_upload_checkin_por_caminho(
 
         checkin = DimCheckinHistorico()
         checkin.DataAtualizacao = datetime.now()
-        checkin.DataCheckin = data_checkin
-        checkin.IDEmpresa = id_empresa_int
+        checkin.DataChekin = data_checkin
+        checkin.IDEmpresa = id_empresa_destinatario_int
         checkin.CNPJ = cnpj_txt
         checkin.RazaoSocial = razao_social
         checkin.IDFatoControleContratosEuromidia = int(id_fato_controle_contratos)
@@ -14232,16 +14600,20 @@ def _processar_upload_checkin_por_caminho(
         checkin.TipoPainel = tipo_painel
         checkin.TipoFace = tipo_face
         checkin.NomeArquivoOriginal = nome_original_cliente or None
-        checkin.NomeArquivoSalvo = caminho_imagem_upload.name
+        checkin.NomeArquivoSalvo = caminho_midia_upload.name
         checkin.CaminhoImagemPainel = str(caminho_imagem_painel)
-        checkin.CaminhoImagemFundo = str(caminho_fundo)
-        checkin.CaminhoImagemUpload = str(caminho_imagem_upload)
-        checkin.CaminhoImagemGerada = str(caminho_imagem_gerada)
+        checkin.CaminhoImagemFundo = str(caminho_fundo) if id_dim_tipo_midia_int == 1 else None
+        checkin.CaminhoImagemUpload = str(caminho_midia_upload)
+        checkin.CaminhoImagemGerada = str(caminho_arquivo_resultado)
         checkin.UrlImagemUpload = None
         checkin.UrlImagemGerada = None
         checkin.BitChekin = False
         checkin.DataConfirmacao = None
-        checkin.IDUsuarioCriacao = int(id_usuario_criacao) if id_usuario_criacao not in (None, "", 0) else None
+        checkin.IDUsuarioCriacao = (
+            int(id_usuario_criacao)
+            if id_usuario_criacao not in (None, "", 0)
+            else None
+        )
         checkin.IDUsuarioConfirmacao = None
         checkin.Observacao = observacao_txt
 
@@ -14249,9 +14621,27 @@ def _processar_upload_checkin_por_caminho(
         db.session.flush()
 
         id_checkin = int(checkin.IDDimCheckinHistorico)
-        url_imagem_gerada = f"/paineis/checkin/arquivo/{id_checkin}"
+        url_arquivo_resultado = f"/paineis/checkin/arquivo/{id_checkin}"
 
-        checkin.UrlImagemGerada = url_imagem_gerada
+        checkin.UrlImagemGerada = url_arquivo_resultado
+        db.session.flush()
+
+        try:
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[DimCheckinHistorico]
+                    SET IDDimTipoMidia = :id_dim_tipo_midia
+                    WHERE IDDimCheckinHistorico = :id_checkin
+                """),
+                {
+                    "id_dim_tipo_midia": int(id_dim_tipo_midia_int),
+                    "id_checkin": int(id_checkin),
+                },
+            )
+        except Exception:
+            current_app.logger.exception(
+                "[CHECKIN] não foi possível atualizar IDDimTipoMidia via SQL."
+            )
 
         db.session.commit()
         db.session.refresh(checkin)
@@ -14260,25 +14650,32 @@ def _processar_upload_checkin_por_caminho(
             "ok": True,
             "status": "SUCCESS",
             "id_checkin": id_checkin,
-            "url_imagem_gerada": url_imagem_gerada,
+            "url_arquivo_resultado": url_arquivo_resultado,
+            "url_imagem_gerada": url_arquivo_resultado if id_dim_tipo_midia_int == 1 else None,
             "url_confirmacao": f"/paineis/checkin/{id_checkin}/confirmar",
             "nome_arquivo_original": checkin.NomeArquivoOriginal,
             "nome_arquivo_salvo": checkin.NomeArquivoSalvo,
             "cod_ponto": int(cod_ponto_int),
             "cod_face": str(cod_face_txt),
             "id_fato_controle_contratos": int(id_fato_controle_contratos),
-            "id_empresa": int(id_empresa_int),
+            "id_fato_controle_contratos_item": (
+                int(id_fato_controle_contratos_item)
+                if id_fato_controle_contratos_item not in (None, "", 0)
+                else None
+            ),
+            "id_fato_contrato_destinatario_externo": int(id_fato_contrato_destinatario_externo_int),
+            "id_empresa": int(id_empresa_principal_int),
+            "id_empresa_destinatario": int(id_empresa_destinatario_int),
             "razao_social": razao_social,
+            "id_dim_tipo_midia": int(id_dim_tipo_midia_int),
+            "tipo_midia": nome_tipo_midia_txt,
+            "mimetype_arquivo": str(mimetype_arquivo or "").strip().lower(),
+            "extensao_arquivo": extensao_arquivo_txt,
         }
 
     except Exception:
         db.session.rollback()
         raise
-
-
-
-
-
 
 
 
@@ -14336,7 +14733,14 @@ def _buscar_razao_social_empresa(id_empresa: int | None) -> str:
 def _processar_upload_checkin(
     *,
     id_empresa: int | None,
+    id_empresa_destinatario: int | None = None,
     id_fato_controle_contratos: int,
+    id_fato_controle_contratos_item: int | None = None,
+    id_fato_contrato_destinatario_externo: int | None = None,
+    id_dim_tipo_midia: int | None = None,
+    nome_tipo_midia: str | None = None,
+    mimetype_arquivo: str | None = None,
+    extensao_arquivo: str | None = None,
     cod_ponto: str,
     cod_face: str,
     data_checkin: date,
@@ -14344,141 +14748,38 @@ def _processar_upload_checkin(
     cnpj_digitado: str | None = None,
     observacao: str | None = None,
 ):
-    cod_ponto_txt = _somente_digitos(cod_ponto)
-    cod_face_txt = _normalizar_texto_checkin(cod_face).upper()
-    observacao_txt = _normalizar_texto_checkin(observacao) or None
-    cnpj_txt = _somente_digitos(cnpj_digitado) or None
+    """Eu mantenho a versão síncrona delegando para o mesmo pipeline por caminho temporário."""
+    if arquivo is None:
+        raise ValueError("Arquivo não informado.")
 
-    if not cod_ponto_txt:
-        raise ValueError("CodPonto não informado.")
-
-    if not cod_face_txt:
-        raise ValueError("CodFace não informado.")
-
-    if not id_empresa:
-        raise ValueError("Empresa não informada.")
-
-    if not id_fato_controle_contratos:
-        raise ValueError("Contrato não informado.")
-
-    cod_ponto_int = int(cod_ponto_txt)
-    id_empresa_int = int(id_empresa)
-
-    pasta_face, caminho_imagem_painel, caminho_fundo = _buscar_paths_mockup(
-        cod_ponto_int,
-        cod_face_txt,
-    )
-
-    pasta_empresa = pasta_face / str(id_empresa_int)
-    _garantir_pasta(pasta_empresa)
-
-    nome_original_cliente, caminho_imagem_upload = _salvar_upload_original_checkin(
+    upload_temp = _salvar_upload_temporario_checkin(
         arquivo=arquivo,
-        pasta_destino=pasta_empresa,
-        id_empresa=id_empresa_int,
-        cod_face=cod_face_txt,
+        id_empresa=int(id_empresa or 0),
+        id_fato_controle_contratos=int(id_fato_controle_contratos),
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
         data_checkin=data_checkin,
     )
 
-    nome_base_gerado = f"{cod_face_txt}_{data_checkin.strftime('%Y%m%d')}_gerado_{id_empresa_int}"
-    caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}.jpg"
-
-    contador = 1
-    while caminho_imagem_gerada.exists():
-        caminho_imagem_gerada = pasta_empresa / f"{nome_base_gerado}_{contador:02d}.jpg"
-        contador += 1
-
-    _gerar_mockup_checkin(
-        caminho_fundo=caminho_fundo,
-        caminho_imagem_upload=caminho_imagem_upload,
-        caminho_saida=caminho_imagem_gerada,
+    return _processar_upload_checkin_por_caminho(
+        id_empresa=int(id_empresa or 0),
+        id_empresa_destinatario=id_empresa_destinatario,
+        id_fato_controle_contratos=int(id_fato_controle_contratos),
+        id_fato_controle_contratos_item=id_fato_controle_contratos_item,
+        id_fato_contrato_destinatario_externo=id_fato_contrato_destinatario_externo,
+        id_dim_tipo_midia=id_dim_tipo_midia,
+        nome_tipo_midia=nome_tipo_midia,
+        mimetype_arquivo=mimetype_arquivo,
+        extensao_arquivo=extensao_arquivo,
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
+        data_checkin_iso=data_checkin.strftime("%Y-%m-%d"),
+        caminho_arquivo_temporario=str(upload_temp["caminho_arquivo_temporario"]),
+        nome_original_cliente=str(upload_temp["nome_original_cliente"]),
+        cnpj_digitado=cnpj_digitado,
+        observacao=observacao,
+        id_usuario_criacao=_obter_id_usuario_logado_para_checkin(),
     )
-
-    razao_social = None
-    if id_empresa:
-        sql_empresa = text("""
-            SELECT TOP (1)
-                CNPJ = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), ''),
-                RazaoSocial = NULLIF(LTRIM(RTRIM(CAST(COALESCE(RazaoSocial, NomeFantasia, '') AS nvarchar(200)))), '')
-            FROM [Integracao].[Silver].[DimEmpresas]
-            WHERE IDEmpresa = :id_empresa
-        """)
-        row_empresa = db.session.execute(
-            sql_empresa,
-            {"id_empresa": id_empresa_int}
-        ).mappings().first()
-
-        if row_empresa:
-            if not cnpj_txt:
-                cnpj_txt = _somente_digitos(row_empresa["CNPJ"]) or None
-            razao_social = _normalizar_texto_checkin(row_empresa["RazaoSocial"]) or None
-
-    tipo_painel = None
-    tipo_face = None
-
-    try:
-        row_face = (
-            db.session.query(DimFacesPaineis.TipoPainel)
-            .filter(
-                DimFacesPaineis.CodPonto == cod_ponto_int,
-                DimFacesPaineis.CodFace == cod_face_txt,
-            )
-            .first()
-        )
-
-        if row_face:
-            tipo_painel = _normalizar_texto_checkin(row_face[0]) or None
-    except Exception:
-        tipo_painel = None
-
-    id_usuario_criacao = None
-    if current_user.is_authenticated:
-        try:
-            id_usuario_criacao = int(current_user.get_id())
-        except Exception:
-            id_usuario_criacao = None
-
-    checkin = DimCheckinHistorico()
-    checkin.DataAtualizacao = datetime.now()
-    checkin.DataCheckin = data_checkin
-    checkin.IDEmpresa = id_empresa_int
-    checkin.CNPJ = cnpj_txt
-    checkin.RazaoSocial = razao_social
-    checkin.IDFatoControleContratosEuromidia = int(id_fato_controle_contratos)
-    checkin.CodPonto = cod_ponto_int
-    checkin.CodFace = cod_face_txt
-    checkin.TipoPainel = tipo_painel
-    checkin.TipoFace = tipo_face
-    checkin.NomeArquivoOriginal = nome_original_cliente or None
-    checkin.NomeArquivoSalvo = caminho_imagem_upload.name
-    checkin.CaminhoImagemPainel = str(caminho_imagem_painel)
-    checkin.CaminhoImagemFundo = str(caminho_fundo)
-    checkin.CaminhoImagemUpload = str(caminho_imagem_upload)
-    checkin.CaminhoImagemGerada = str(caminho_imagem_gerada)
-    checkin.UrlImagemUpload = None
-    checkin.UrlImagemGerada = None
-    checkin.BitChekin = False
-    checkin.DataConfirmacao = None
-    checkin.IDUsuarioCriacao = id_usuario_criacao
-    checkin.IDUsuarioConfirmacao = None
-    checkin.Observacao = observacao_txt
-
-    db.session.add(checkin)
-    db.session.flush()
-
-    checkin.UrlImagemGerada = url_for(
-        "Paineis.checkin_arquivo",
-        id_checkin=int(checkin.IDDimCheckinHistorico),
-    )
-
-    db.session.commit()
-    db.session.refresh(checkin)
-
-    return checkin
-
-
-
-
 
 
 
@@ -14837,6 +15138,52 @@ def _obter_id_empresa_proprietaria_logada_para_checkin() -> int | None:
 
 
 
+def _quebrar_nome_banco_schema_tabela_checkin(nome_tabela: str) -> tuple[str | None, str | None, str | None]:
+    """Separo um nome de tabela no padrão banco.schema.tabela, schema.tabela ou tabela."""
+    texto = str(nome_tabela or "").strip()
+    if not texto:
+        return None, None, None
+
+    partes = [parte.strip().strip("[]").strip() for parte in texto.split(".") if str(parte).strip()]
+    if not partes:
+        return None, None, None
+
+    if len(partes) == 3:
+        banco_nome, schema_nome, tabela_nome = partes
+        return (
+            banco_nome or None,
+            schema_nome or None,
+            tabela_nome or None,
+        )
+
+    if len(partes) == 2:
+        schema_nome, tabela_nome = partes
+        return (
+            None,
+            schema_nome or None,
+            tabela_nome or None,
+        )
+
+    if len(partes) == 1:
+        return (
+            None,
+            None,
+            partes[0] or None,
+        )
+
+    tabela_nome = partes[-1] if len(partes) >= 1 else None
+    schema_nome = partes[-2] if len(partes) >= 2 else None
+    banco_nome = ".".join(partes[:-2]) if len(partes) > 2 else None
+
+    return (
+        banco_nome or None,
+        schema_nome or None,
+        tabela_nome or None,
+    )
+
+
+
+
 
 
 def _coluna_existe(nome_tabela: str, nome_coluna: str) -> bool:
@@ -15107,11 +15454,15 @@ def _sincronizar_tag_checkin_confirmado_com_card(checkin: DimCheckinHistorico) -
 
 
 
+
+
+
 def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path, Path]:
-    pasta_raiz = Path("/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/pontos")
+    """Eu resolvo os caminhos do painel e do fundo aceitando os dois padrões de pasta."""
+
+    pasta_raiz = _obter_pasta_base_checkin()
     pasta_ponto = pasta_raiz / str(cod_ponto)
     pasta_face = pasta_ponto / str(cod_face)
-    pasta_fundo = pasta_ponto / "fundo"
 
     if not pasta_ponto.exists():
         raise FileNotFoundError(f"Pasta do ponto não encontrada: {pasta_ponto}")
@@ -15119,13 +15470,25 @@ def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path, Pat
     if not pasta_face.exists():
         raise FileNotFoundError(f"Pasta da face não encontrada: {pasta_face}")
 
-    if not pasta_fundo.exists():
-        raise FileNotFoundError(f"Pasta do fundo não encontrada: {pasta_fundo}")
+    candidatos_pasta_fundo = [
+        pasta_face / "fundo",
+        pasta_ponto / "fundo",
+    ]
+
+    pasta_fundo = next((p for p in candidatos_pasta_fundo if p.exists()), None)
+
+    if pasta_fundo is None:
+        caminhos_testados = " | ".join(str(p) for p in candidatos_pasta_fundo)
+        raise FileNotFoundError(f"Pasta do fundo não encontrada. Caminhos testados: {caminhos_testados}")
 
     caminho_imagem_face = _localizar_arquivo_imagem(pasta_face)
     caminho_fundo = _localizar_arquivo_imagem(pasta_fundo)
 
     return pasta_face, caminho_imagem_face, caminho_fundo
+
+
+
+
 
 
 
@@ -15183,27 +15546,11 @@ def _checkin_item_pertence_ao_contrato(
     cod_ponto: str,
     cod_face: str,
 ) -> bool:
-    sql = text("""
-        SELECT TOP (1) 1 AS Existe
-        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
-        WHERE
-            i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
-            AND TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto)
-            AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
-    """)
-
-    row = db.session.execute(
-        sql,
-        {
-            "id_fato_controle_contratos": int(id_fato_controle_contratos),
-            "cod_ponto": str(cod_ponto or "").strip(),
-            "cod_face": str(cod_face or "").strip(),
-        },
-    ).mappings().first()
-
-    return bool(row)
-
-
+    return _obter_item_contrato_checkin(
+        id_fato_controle_contratos=id_fato_controle_contratos,
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
+    ) is not None
 
 
 def _obter_condicao_sql_tag_ativa_checkin_confirmado() -> str:
@@ -15344,14 +15691,84 @@ def checkin_faces_do_contrato(id_fato_controle_contratos: int, codponto: int):
 
 
 
+
+
+@paineis_bp.route("/checkin/contratos/<int:id_fato_controle_contratos>/pontos/<int:codponto>/faces/<string:codface>/destinatarios", methods=["GET"])
+@login_required
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checkin_destinatarios_externos_do_item(id_fato_controle_contratos: int, codponto: int, codface: str):
+    item = _obter_item_contrato_checkin(
+        id_fato_controle_contratos=int(id_fato_controle_contratos),
+        cod_ponto=str(codponto),
+        cod_face=str(codface),
+    )
+
+    if not item:
+        return jsonify(
+            {
+                "ok": False,
+                "id_fato_controle_contratos": int(id_fato_controle_contratos),
+                "cod_ponto": int(codponto),
+                "cod_face": str(codface).strip().upper(),
+                "tem_destinatario_externo": False,
+                "items": [],
+                "msg": "Item do contrato não encontrado.",
+            }
+        ), 404
+
+    id_item = int(item["IDFatoControleContratosItensEuromidia"])
+
+    """Busca sempre pela tabela de vínculo, independentemente do IDEmpresaAgencia."""
+    destinatarios = _buscar_destinatarios_externos_do_item_checkin(
+        id_fato_controle_contratos=int(id_fato_controle_contratos),
+        id_fato_controle_contratos_item=id_item,
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "id_fato_controle_contratos": int(id_fato_controle_contratos),
+            "cod_ponto": int(codponto),
+            "cod_face": str(codface).strip().upper(),
+            "tem_destinatario_externo": bool(destinatarios),
+            "items": destinatarios,
+            "msg": (
+                f"{len(destinatarios)} destinatário(s) externo(s) ativo(s) encontrado(s)."
+                if destinatarios else
+                "Nenhum destinatário externo ativo para este item."
+            ),
+        }
+    ), 200
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
 @paineis_bp.route("/checkin/novo", methods=["GET", "POST"])
 @login_required
 @limiter.limit("25 per minute", methods=["POST"])
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_novo():
-    extensoes_permitidas = current_app.config["EXTENSOES_PERMITIDAS_CHECKIN"]
-    largura_maxima = current_app.config["LARGURA_MAXIMA_IMAGEM"]
-    altura_maxima = current_app.config["ALTURA_MAXIMA_IMAGEM"]
+    largura_maxima = int(current_app.config["LARGURA_MAXIMA_IMAGEM"])
+    altura_maxima = int(current_app.config["ALTURA_MAXIMA_IMAGEM"])
 
     hoje = datetime.now().date()
 
@@ -15378,9 +15795,9 @@ def checkin_novo():
             processamento_pendente=False,
         )
 
-    arquivo = request.files.get("imagem")
-    if not arquivo or not arquivo.filename:
-        flash("Selecione uma imagem para upload.", "warning")
+    arquivo = request.files.get("arquivo_midia") or request.files.get("imagem")
+    if not arquivo:
+        flash("Selecione um arquivo para upload.", "warning")
         return render_template(
             "euromidia/checkin_upload.html",
             hoje=hoje,
@@ -15389,9 +15806,24 @@ def checkin_novo():
             processamento_pendente=False,
         )
 
-    nome_arquivo = str(arquivo.filename or "").lower().strip()
-    if "." not in nome_arquivo or nome_arquivo.rsplit(".", 1)[1] not in extensoes_permitidas:
-        flash("Extensão de arquivo inválida.", "danger")
+    if not _normalizar_texto_checkin(getattr(arquivo, "filename", "")):
+        flash("O nome do arquivo está vazio.", "warning")
+        return render_template(
+            "euromidia/checkin_upload.html",
+            hoje=hoje,
+            checkin=None,
+            task_id=None,
+            processamento_pendente=False,
+        )
+
+    try:
+        metadados_arquivo = _validar_e_classificar_arquivo_upload_checkin(
+            arquivo=arquivo,
+            largura_maxima=largura_maxima,
+            altura_maxima=altura_maxima,
+        )
+    except Exception as exc:
+        flash(str(exc), "danger")
         return render_template(
             "euromidia/checkin_upload.html",
             hoje=hoje,
@@ -15438,11 +15870,12 @@ def checkin_novo():
             processamento_pendente=False,
         )
 
-    if not _checkin_item_pertence_ao_contrato(
+    item_contrato = _obter_item_contrato_checkin(
         id_fato_controle_contratos=id_fato_controle_contratos,
         cod_ponto=cod_ponto,
         cod_face=cod_face,
-    ):
+    )
+    if not item_contrato:
         flash("O CodPonto e o CodFace selecionados não pertencem ao contrato informado.", "danger")
         return render_template(
             "euromidia/checkin_upload.html",
@@ -15465,24 +15898,24 @@ def checkin_novo():
         )
 
     try:
-        imagem_bytes = arquivo.read()
-        imagem = Image.open(BytesIO(imagem_bytes))
-        largura, altura = imagem.size
+        id_empresa_destinatario_informado = int(request.form.get("id_empresa_destinatario") or 0) or None
+    except Exception:
+        id_empresa_destinatario_informado = None
 
-        if largura > largura_maxima or altura > altura_maxima:
-            flash(
-                f"Imagem maior que o permitido. Máximo: {largura_maxima}x{altura_maxima}px.",
-                "danger"
-            )
-            return render_template(
-                "euromidia/checkin_upload.html",
-                hoje=hoje,
-                checkin=None,
-                task_id=None,
-                processamento_pendente=False,
-            )
+    try:
+        id_fato_contrato_destinatario_externo_informado = int(request.form.get("id_fato_contrato_destinatario_externo") or 0) or None
+    except Exception:
+        id_fato_contrato_destinatario_externo_informado = None
 
-        arquivo.stream.seek(0)
+    try:
+        destinatario_resolvido = _resolver_destinatario_externo_upload_checkin(
+            id_empresa_principal=int(id_empresa),
+            id_fato_controle_contratos=int(id_fato_controle_contratos),
+            cod_ponto=cod_ponto,
+            cod_face=cod_face,
+            id_empresa_destinatario_informado=id_empresa_destinatario_informado,
+            id_fato_contrato_destinatario_externo_informado=id_fato_contrato_destinatario_externo_informado,
+        )
 
         upload_temp = _salvar_upload_temporario_checkin(
             arquivo=arquivo,
@@ -15503,7 +15936,14 @@ def checkin_novo():
         tarefa = processar_checkin_upload.apply_async(
             kwargs={
                 "id_empresa": int(id_empresa),
+                "id_empresa_destinatario": int(destinatario_resolvido["id_empresa_destinatario"]),
                 "id_fato_controle_contratos": int(id_fato_controle_contratos),
+                "id_fato_controle_contratos_item": int(destinatario_resolvido["id_fato_controle_contratos_item"]),
+                "id_fato_contrato_destinatario_externo": int(destinatario_resolvido["id_fato_contrato_destinatario_externo"]),
+                "id_dim_tipo_midia": int(metadados_arquivo["id_dim_tipo_midia"]),
+                "nome_tipo_midia": str(metadados_arquivo["nome_midia"]),
+                "mimetype_arquivo": str(metadados_arquivo["mimetype"]),
+                "extensao_arquivo": str(metadados_arquivo["extensao"]),
                 "cod_ponto": str(cod_ponto),
                 "cod_face": str(cod_face),
                 "data_checkin_iso": data_checkin.strftime("%Y-%m-%d"),
@@ -15516,17 +15956,23 @@ def checkin_novo():
             queue="checkin_upload",
         )
 
+        mensagem_upload = (
+            "Upload recebido com sucesso. O mockup está sendo processado em segundo plano."
+            if int(metadados_arquivo["id_dim_tipo_midia"]) == 1
+            else "Upload recebido com sucesso. O vídeo está sendo processado em segundo plano."
+        )
+
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
             return jsonify(
                 {
                     "ok": True,
                     "status": "QUEUED",
                     "task_id": tarefa.id,
-                    "msg": "Upload recebido e enviado para processamento.",
+                    "msg": mensagem_upload,
                 }
             ), 202
 
-        flash("Upload recebido com sucesso. O mockup está sendo processado em segundo plano.", "success")
+        flash(mensagem_upload, "success")
 
         return render_template(
             "euromidia/checkin_upload.html",
@@ -15551,321 +15997,6 @@ def checkin_novo():
 
 
 
-@paineis_bp.route("/checkin/contratos/buscar", methods=["GET"])
-@login_required
-def checkin_contratos():
-    id_empresa_txt = _normalizar_texto_checkin(request.args.get("id_empresa"))
-    cnpj_txt = _somente_digitos(request.args.get("cnpj"))
-    q = _normalizar_texto_checkin(request.args.get("q"))
-    q_digitos = _somente_digitos(q)
-
-    id_empresa = None
-    try:
-        if id_empresa_txt:
-            id_empresa = int(id_empresa_txt)
-    except Exception:
-        id_empresa = None
-
-    cnpj_empresa = cnpj_txt
-
-    if not cnpj_empresa and id_empresa is not None:
-        sql_empresa = text("""
-            SELECT TOP (1)
-                CNPJ = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), '')
-            FROM [Integracao].[Silver].[DimEmpresas]
-            WHERE IDEmpresa = :id_empresa
-        """)
-        row_empresa = db.session.execute(
-            sql_empresa,
-            {"id_empresa": id_empresa}
-        ).mappings().first()
-
-        if row_empresa:
-            cnpj_empresa = _somente_digitos(row_empresa["CNPJ"])
-
-    contratos = []
-
-    sql_cabecalho = text("""
-        SELECT DISTINCT TOP (200)
-            c.IDFatoControleContratosEuromidia,
-            NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(c.NumeroContrato AS varchar(50)))), ''),
-            NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(c.NumeroPrevia AS varchar(50)))), ''),
-            RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(c.RazaoSocial, c.MarcaExibida, ''))), ''),
-            CNPJ = NULLIF(LTRIM(RTRIM(CAST(c.CNPJ AS varchar(30)))), ''),
-            c.IDEmpresa
-        FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
-        WHERE
-            (
-                (:id_empresa IS NOT NULL AND c.IDEmpresa = :id_empresa)
-                OR
-                (:cnpj IS NOT NULL AND REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') = :cnpj)
-            )
-            AND
-            (
-                :q = ''
-                OR CAST(c.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
-                OR CAST(c.NumeroContrato AS varchar(50)) LIKE :q_like
-                OR CAST(c.NumeroPrevia AS varchar(50)) LIKE :q_like
-                OR COALESCE(c.RazaoSocial, c.MarcaExibida, '') LIKE :q_like
-                OR REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') LIKE :q_digitos_like
-            )
-        ORDER BY c.IDFatoControleContratosEuromidia DESC
-    """)
-
-    contratos = db.session.execute(
-        sql_cabecalho,
-        {
-            "id_empresa": id_empresa,
-            "cnpj": cnpj_empresa or None,
-            "q": q,
-            "q_like": f"%{q}%",
-            "q_digitos_like": f"%{q_digitos}%",
-        }
-    ).mappings().all()
-
-    if not contratos and cnpj_empresa:
-        sql_itens = text("""
-            SELECT DISTINCT TOP (200)
-                i.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia,
-                NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(i.NumeroContrato AS varchar(50)))), ''),
-                NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(i.NumeroPrevia AS varchar(50)))), ''),
-                RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(i.RazaoSocial, i.MarcaExibida, ''))), ''),
-                CNPJ = NULLIF(LTRIM(RTRIM(CAST(i.CNPJ AS varchar(30)))), '')
-            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
-            WHERE
-                REPLACE(REPLACE(REPLACE(CAST(i.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') = :cnpj
-                AND
-                (
-                    :q = ''
-                    OR CAST(i.IDFatoControleContratoEuromidia AS varchar(50)) LIKE :q_like
-                    OR CAST(i.NumeroContrato AS varchar(50)) LIKE :q_like
-                    OR CAST(i.NumeroPrevia AS varchar(50)) LIKE :q_like
-                    OR COALESCE(i.RazaoSocial, i.MarcaExibida, '') LIKE :q_like
-                    OR REPLACE(REPLACE(REPLACE(CAST(i.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', '') LIKE :q_digitos_like
-                )
-            ORDER BY i.IDFatoControleContratoEuromidia DESC
-        """)
-
-        contratos = db.session.execute(
-            sql_itens,
-            {
-                "cnpj": cnpj_empresa,
-                "q": q,
-                "q_like": f"%{q}%",
-                "q_digitos_like": f"%{q_digitos}%",
-            }
-        ).mappings().all()
-
-    retorno = []
-    ids_vistos = set()
-
-    for row in contratos:
-        id_contrato = row["IDFatoControleContratosEuromidia"]
-
-        if not id_contrato or id_contrato in ids_vistos:
-            continue
-
-        ids_vistos.add(id_contrato)
-
-        numero_contrato = _normalizar_texto_checkin(row["NumeroContrato"])
-        numero_previa = _normalizar_texto_checkin(row["NumeroPrevia"])
-        razao = _normalizar_texto_checkin(row["RazaoSocial"]) or "Sem razão social"
-        cnpj = _somente_digitos(row["CNPJ"])
-
-        complemento = numero_contrato or numero_previa or cnpj or "Sem número"
-
-        retorno.append({
-            "id": int(id_contrato),
-            "texto": f"{int(id_contrato)} | {razao} | {complemento}",
-        })
-
-    return jsonify(retorno)
-
-
-
-
-
-
-
-
-
-def _quebrar_nome_banco_schema_tabela_checkin(nome_tabela: str) -> tuple[str | None, str | None, str]:
-    partes = [
-        str(parte or "").strip().strip("[]").strip()
-        for parte in str(nome_tabela or "").strip().split(".")
-    ]
-    partes = [parte for parte in partes if parte]
-
-    if not partes:
-        return None, None, ""
-
-    if len(partes) == 1:
-        return None, "dbo", partes[0]
-
-    if len(partes) == 2:
-        return None, partes[0], partes[1]
-
-    return partes[-3], partes[-2], partes[-1]
-
-
-
-
-
-@paineis_bp.route("/checkin/<int:id_checkin>/compartilhamento-publico/gerar", methods=["POST"])
-@login_required
-@limiter.limit("20 per hour")
-def checkin_gerar_compartilhamento_publico(id_checkin: int):
-    csrf_token = (
-        request.form.get("csrf_token")
-        or request.headers.get("X-CSRFToken")
-        or request.headers.get("X-CSRF-Token")
-    )
-
-    try:
-        validate_csrf(csrf_token)
-    except Exception:
-        return jsonify({"ok": False, "msg": "CSRF inválido ou ausente."}), 400
-
-    row = (
-        db.session.query(DimCheckinHistorico)
-        .filter(DimCheckinHistorico.IDDimCheckinHistorico == id_checkin)
-        .first()
-    )
-
-    if not row:
-        return jsonify({"ok": False, "msg": "Checkin não encontrado."}), 404
-
-    try:
-        id_usuario = int(current_user.get_id()) if current_user.is_authenticated else None
-        compartilhamento = _criar_ou_regerar_compartilhamento_publico_checkin(
-            id_checkin=int(id_checkin),
-            id_empresa=int(row.IDEmpresa) if row.IDEmpresa not in (None, "", 0) else None,
-            id_usuario_criacao=id_usuario,
-            observacao="Compartilhamento público regenerado manualmente.",
-        )
-        db.session.commit()
-
-        return jsonify(
-            {
-                "ok": True,
-                "id_checkin": int(id_checkin),
-                "token_publico": compartilhamento["token_publico"],
-                "url_publica_relativa": compartilhamento["url_publica_relativa"],
-                "url_publica": f"{request.host_url.rstrip('/')}" + compartilhamento["url_publica_relativa"],
-                "senha_publica": compartilhamento["senha_publica"],
-            }
-        )
-    except Exception as exc:
-        db.session.rollback()
-        current_app.logger.exception("[CHECKIN] erro ao gerar compartilhamento público")
-        return jsonify({"ok": False, "msg": f"Falha ao gerar compartilhamento público: {exc}"}), 500
-
-
-
-
-
-
-@paineis_bp.route("/checkin/publico/<string:token_publico>", methods=["GET"])
-@limiter.limit("60 per minute")
-def checkin_publico_visualizar(token_publico: str):
-    token_limpo = _normalizar_token_publico_checkin(token_publico)
-    item = _obter_compartilhamento_publico_por_token(token_limpo)
-
-    if not item:
-        abort(404)
-
-    autorizado = _sessao_checkin_publico_autorizada(token_limpo)
-
-    return render_template(
-        "euromidia/checkin_upload_checkin_publico.html",
-        item=item,
-        autorizado=autorizado,
-        token_publico=token_limpo,
-        url_imagem_publica=url_for("Paineis.checkin_publico_arquivo", token_publico=token_limpo),
-        url_autenticar_publico=url_for("Paineis.checkin_publico_autenticar", token_publico=token_limpo),
-    )
-
-
-
-
-
-
-
-@paineis_bp.route("/checkin/publico/<string:token_publico>/autenticar", methods=["POST"])
-@limiter.limit("10 per minute")
-def checkin_publico_autenticar(token_publico: str):
-    token_limpo = _normalizar_token_publico_checkin(token_publico)
-
-    csrf_token = (
-        request.form.get("csrf_token")
-        or request.headers.get("X-CSRFToken")
-        or request.headers.get("X-CSRF-Token")
-    )
-
-    try:
-        validate_csrf(csrf_token)
-    except Exception:
-        flash("CSRF inválido ou ausente.", "danger")
-        return redirect(url_for("Paineis.checkin_publico_visualizar", token_publico=token_limpo))
-
-    item = _obter_compartilhamento_publico_por_token(token_limpo)
-    if not item:
-        abort(404)
-
-    senha_digitada = str(request.form.get("senha") or "").strip()
-    if not senha_digitada:
-        flash("Informe a senha para acessar a imagem do checkin.", "warning")
-        return redirect(url_for("Paineis.checkin_publico_visualizar", token_publico=token_limpo))
-
-    if not check_password_hash(str(item.get("SenhaHash") or ""), senha_digitada):
-        try:
-            _registrar_tentativa_invalida_checkin_publico(int(item["IDFatoCheckinCompartilhamentoPublico"]))
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        flash("Senha inválida.", "danger")
-        return redirect(url_for("Paineis.checkin_publico_visualizar", token_publico=token_limpo))
-
-    try:
-        _definir_sessao_checkin_publico(token_limpo)
-        _registrar_acesso_valido_checkin_publico(int(item["IDFatoCheckinCompartilhamentoPublico"]))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        flash("Falha ao liberar o acesso público ao checkin.", "danger")
-        return redirect(url_for("Paineis.checkin_publico_visualizar", token_publico=token_limpo))
-
-    return redirect(url_for("Paineis.checkin_publico_visualizar", token_publico=token_limpo))
-
-
-@paineis_bp.route("/checkin/publico/<string:token_publico>/arquivo", methods=["GET"])
-@limiter.limit("60 per minute")
-def checkin_publico_arquivo(token_publico: str):
-    token_limpo = _normalizar_token_publico_checkin(token_publico)
-    item = _obter_compartilhamento_publico_por_token(token_limpo)
-
-    if not item:
-        abort(404)
-
-    if not _sessao_checkin_publico_autorizada(token_limpo):
-        abort(403)
-
-    caminho = Path(str(item.get("CaminhoImagemGerada") or "").strip())
-    if not caminho.exists() or not caminho.is_file():
-        abort(404)
-
-    return send_file(caminho)
-
-
-
-
-
-
-
-
-
-
 
 @paineis_bp.route("/checkin/arquivo/<int:id_checkin>", methods=["GET"])
 @login_required
@@ -15880,7 +16011,19 @@ def checkin_arquivo(id_checkin: int):
     if not row:
         abort(404)
 
-    caminho = Path(str(row.CaminhoImagemGerada or "").strip())
+    id_dim_tipo_midia = getattr(row, "IDDimTipoMidia", None)
+    try:
+        id_dim_tipo_midia = int(id_dim_tipo_midia) if id_dim_tipo_midia not in (None, "") else None
+    except Exception:
+        id_dim_tipo_midia = None
+
+    caminho_preferencial = str(getattr(row, "CaminhoImagemGerada", "") or "").strip()
+    caminho_upload = str(getattr(row, "CaminhoImagemUpload", "") or "").strip()
+
+    if id_dim_tipo_midia == 2:
+        caminho = Path(caminho_upload or caminho_preferencial)
+    else:
+        caminho = Path(caminho_preferencial or caminho_upload)
 
     if not caminho.exists() or not caminho.is_file():
         abort(404)
@@ -16233,6 +16376,170 @@ def _sessao_checkin_publico_autorizada(token_publico: str) -> bool:
 
 
 
+@paineis_bp.route("/checkin/contratos/buscar", methods=["GET"])
+@login_required
+def checkin_contratos():
+    """Eu carrego os contratos do combo de checkin de forma resiliente."""
+
+    try:
+        id_empresa_txt = _normalizar_texto_checkin(request.args.get("id_empresa"))
+        cnpj_txt = _somente_digitos(request.args.get("cnpj"))
+        q = _normalizar_texto_checkin(request.args.get("q"))
+        q_digitos = _somente_digitos(q)
+
+        id_empresa = None
+        if id_empresa_txt:
+            try:
+                id_empresa = int(id_empresa_txt)
+            except Exception:
+                return jsonify([]), 200
+
+        cnpj_empresa = cnpj_txt or None
+
+        if not id_empresa and not cnpj_empresa:
+            return jsonify([]), 200
+
+        if not cnpj_empresa and id_empresa is not None:
+            sql_empresa = text("""
+                SELECT TOP (1)
+                    CNPJ = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), '')
+                FROM [Integracao].[Silver].[DimEmpresas]
+                WHERE IDEmpresa = :id_empresa
+            """)
+
+            linha_empresa = db.session.execute(
+                sql_empresa,
+                {"id_empresa": id_empresa}
+            ).mappings().first()
+
+            if linha_empresa:
+                cnpj_empresa = _somente_digitos(linha_empresa["CNPJ"]) or None
+
+        parametros = {
+            "id_empresa": id_empresa,
+            "cnpj": cnpj_empresa,
+            "q": q or "",
+            "q_like": f"%{q or ''}%",
+            "q_digitos_like": f"%{q_digitos or ''}%",
+        }
+
+        sql_contratos_por_empresa = text("""
+            SELECT DISTINCT TOP (200)
+                IDFatoControleContratosEuromidia = TRY_CONVERT(int, c.IDFatoControleContratosEuromidia),
+                NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(c.NumeroContrato AS varchar(50)))), ''),
+                NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(c.NumeroPrevia AS varchar(50)))), ''),
+                RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(c.RazaoSocial, c.MarcaExibida, ''))), ''),
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(c.CNPJ AS varchar(30)))), ''),
+                IDEmpresa = TRY_CONVERT(int, c.IDEmpresa)
+            FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
+            WHERE
+                c.IDEmpresa = :id_empresa
+                AND (
+                    :q = ''
+                    OR CAST(c.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
+                    OR CAST(c.NumeroContrato AS varchar(50)) LIKE :q_like
+                    OR CAST(c.NumeroPrevia AS varchar(50)) LIKE :q_like
+                    OR COALESCE(c.RazaoSocial, c.MarcaExibida, '') LIKE :q_like
+                    OR REPLACE(REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', ''), ' ', '') LIKE :q_digitos_like
+                )
+            ORDER BY TRY_CONVERT(int, c.IDFatoControleContratosEuromidia) DESC
+        """)
+
+        contratos = []
+        if id_empresa is not None:
+            contratos = db.session.execute(
+                sql_contratos_por_empresa,
+                parametros
+            ).mappings().all()
+
+        if not contratos and cnpj_empresa:
+            sql_contratos_por_cnpj = text("""
+                SELECT DISTINCT TOP (200)
+                    IDFatoControleContratosEuromidia = TRY_CONVERT(int, c.IDFatoControleContratosEuromidia),
+                    NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(c.NumeroContrato AS varchar(50)))), ''),
+                    NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(c.NumeroPrevia AS varchar(50)))), ''),
+                    RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(c.RazaoSocial, c.MarcaExibida, ''))), ''),
+                    CNPJ = NULLIF(LTRIM(RTRIM(CAST(c.CNPJ AS varchar(30)))), ''),
+                    IDEmpresa = TRY_CONVERT(int, c.IDEmpresa)
+                FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
+                WHERE
+                    REPLACE(REPLACEPLACE(REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', ''), ' ', '') = :cnpj
+                    AND (
+                        :q = ''
+                        OR CAST(c.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
+                        OR CAST(c.NumeroContrato AS varchar(50)) LIKE :q_like
+                        OR CAST(c.NumeroPrevia AS varchar(50)) LIKE :q_like
+                        OR COALESCE(c.RazaoSocial, c.MarcaExibida, '') LIKE :q_like
+                        OR REPLACE(REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', ''), ' ', '') LIKE :q_digitos_like
+                    )
+                ORDER BY TRY_CONVERT(int, c.IDFatoControleContratosEuromidia) DESC
+            """)
+
+            contratos = db.session.execute(
+                sql_contratos_por_cnpj,
+                parametros
+            ).mappings().all()
+
+        itens = []
+        ids_vistos = set()
+
+        for linha in contratos:
+            id_contrato = linha["IDFatoControleContratosEuromidia"]
+            if not id_contrato:
+                continue
+
+            if id_contrato in ids_vistos:
+                continue
+
+            ids_vistos.add(id_contrato)
+
+            numero_contrato = _normalizar_texto_checkin(linha["NumeroContrato"])
+            numero_previa = _normalizar_texto_checkin(linha["NumeroPrevia"])
+            razao_social = _normalizar_texto_checkin(linha["RazaoSocial"])
+            cnpj_linha = _somente_digitos(linha["CNPJ"])
+
+            partes = [str(id_contrato)]
+
+            if numero_contrato:
+                partes.append(f"Contrato {numero_contrato}")
+
+            if numero_previa:
+                partes.append(f"Prévia {numero_previa}")
+
+            if razao_social:
+                partes.append(razao_social)
+
+            if cnpj_linha:
+                partes.append(cnpj_linha)
+
+            itens.append({
+                "id": int(id_contrato),
+                "numero_contrato": numero_contrato or "",
+                "numero_previa": numero_previa or "",
+                "razao_social": razao_social or "",
+                "cnpj": cnpj_linha or "",
+                "texto": " | ".join(partes),
+            })
+
+        return jsonify(itens), 200
+
+    except Exception as e:
+        current_app.logger.exception(
+            "[CHECKIN] erro ao buscar contratos para id_empresa=%s cnpj=%s",
+            request.args.get("id_empresa"),
+            request.args.get("cnpj"),
+        )
+        return jsonify([]), 200
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -16445,3 +16752,196 @@ def _registrar_acesso_valido_checkin_publico(id_compartilhamento: int) -> None:
         """),
         {"id_compartilhamento": int(id_compartilhamento)},
     )
+
+
+
+
+def _chave_sessao_checkin_publico(token_publico: str) -> str:
+    return f"{PREFIXO_SESSAO_CHECKIN_PUBLICO}{str(token_publico or '').strip()}"
+
+
+def _checkin_publico_esta_autorizado_na_sessao(token_publico: str) -> bool:
+    chave = _chave_sessao_checkin_publico(token_publico)
+    expira_em = session.get(chave)
+
+    if not expira_em:
+        return False
+
+    try:
+        instante_expiracao = datetime.fromisoformat(str(expira_em))
+    except Exception:
+        session.pop(chave, None)
+        return False
+
+    if instante_expiracao < datetime.now():
+        session.pop(chave, None)
+        return False
+
+    return True
+
+
+def _autorizar_sessao_checkin_publico(token_publico: str) -> None:
+    chave = _chave_sessao_checkin_publico(token_publico)
+    instante_expiracao = datetime.now() + timedelta(hours=int(TTL_SESSAO_CHECKIN_PUBLICO_HORAS or 12))
+    session[chave] = instante_expiracao.isoformat()
+    session.modified = True
+
+
+def _remover_autorizacao_sessao_checkin_publico(token_publico: str) -> None:
+    chave = _chave_sessao_checkin_publico(token_publico)
+    session.pop(chave, None)
+    session.modified = True
+
+
+
+def _obter_compartilhamento_publico_ativo_por_token(token_publico: str) -> dict | None:
+    token_limpo = _normalizar_token_publico_checkin(token_publico)
+    if not token_limpo:
+        return None
+
+    sql = text(f"""
+        SELECT TOP (1)
+            cp.IDFatoCheckinCompartilhamentoPublico,
+            cp.IDDimCheckinHistorico,
+            cp.IDEmpresa,
+            cp.IDDimUsuariosCriacao,
+            cp.TokenPublico,
+            cp.SenhaHash,
+            cp.BitAtivo,
+            cp.QuantidadeAcessos,
+            cp.QuantidadeTentativasInvalidas,
+            cp.DataCriacao,
+            cp.DataAtualizacao,
+            cp.DataUltimoAcesso,
+            cp.DataUltimaTentativaInvalida,
+            cp.DataExpiracao,
+            cp.DataRevogacao,
+            cp.IDDimUsuariosRevogacao,
+            cp.Observacao,
+            ch.CaminhoImagemGerada,
+            ch.BitChekin,
+            ch.DataConfirmacao,
+            ch.CodPonto,
+            ch.CodFace,
+            ch.IDFatoControleContratosEuromidia,
+            RazaoSocial = COALESCE(
+                NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), ''),
+                NULLIF(LTRIM(RTRIM(ch.RazaoSocial)), '')
+            ),
+            CNPJ = COALESCE(
+                NULLIF(LTRIM(RTRIM(emp.CNPJ)), ''),
+                NULLIF(LTRIM(RTRIM(ch.CNPJ)), '')
+            )
+        FROM {TABELA_CHECKIN_COMPARTILHAMENTO_PUBLICO} cp
+        INNER JOIN [Integracao].[Silver].[DimCheckinHistorico] ch
+            ON ch.IDDimCheckinHistorico = cp.IDDimCheckinHistorico
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = COALESCE(cp.IDEmpresa, ch.IDEmpresa)
+        WHERE cp.TokenPublico = :token_publico
+          AND cp.BitAtivo = 1
+          AND (cp.DataExpiracao IS NULL OR cp.DataExpiracao >= GETDATE())
+        ORDER BY cp.IDFatoCheckinCompartilhamentoPublico DESC
+    """)
+
+    row = db.session.execute(sql, {"token_publico": token_limpo}).mappings().first()
+    return dict(row) if row else None
+
+
+def _obter_compartilhamento_publico_por_token(token_publico: str) -> dict | None:
+    return _obter_compartilhamento_publico_ativo_por_token(token_publico)
+
+
+
+
+
+
+@paineis_bp.route("/checkin/publico/<string:token_publico>", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def checkin_publico(token_publico: str):
+    token_limpo = str(token_publico or "").strip()
+    if not token_limpo:
+        abort(404)
+
+    compartilhamento = _obter_compartilhamento_publico_ativo_por_token(token_limpo)
+    if not compartilhamento:
+        abort(404)
+
+    autorizado = _checkin_publico_esta_autorizado_na_sessao(token_limpo)
+
+    if autorizado:
+        try:
+            _registrar_acesso_valido_checkin_publico(
+                int(compartilhamento["IDFatoCheckinCompartilhamentoPublico"])
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    item = compartilhamento
+    url_arquivo_publico = url_for(
+        "Paineis.checkin_arquivo",
+        id_checkin=int(compartilhamento["IDDimCheckinHistorico"]),
+    )
+
+    return render_template(
+        "euromidia/checkin_upload_checkin_publico.html",
+        autorizado=autorizado,
+        item=item,
+        url_imagem_publica=url_arquivo_publico,
+        url_autenticar_publico=url_for(
+            "Paineis.checkin_publico_autenticar",
+            token_publico=token_limpo,
+        ),
+    )
+
+
+@paineis_bp.route("/checkin/publico/<string:token_publico>/autenticar", methods=["POST"])
+def checkin_publico_autenticar(token_publico: str):
+    token_limpo = str(token_publico or "").strip()
+    if not token_limpo:
+        abort(404)
+
+    csrf_token = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-CSRF-Token")
+    )
+
+    try:
+        validate_csrf(csrf_token)
+    except Exception:
+        flash("CSRF inválido ou ausente.", "danger")
+        return redirect(url_for("Paineis.checkin_publico", token_publico=token_limpo))
+
+    compartilhamento = _obter_compartilhamento_publico_ativo_por_token(token_limpo)
+    if not compartilhamento:
+        abort(404)
+
+    senha_informada = str(request.form.get("senha") or "").strip()
+    senha_hash = str(compartilhamento.get("SenhaHash") or "").strip()
+
+    if not senha_informada or not senha_hash or not check_password_hash(senha_hash, senha_informada):
+        try:
+            _registrar_tentativa_invalida_checkin_publico(
+                int(compartilhamento["IDFatoCheckinCompartilhamentoPublico"])
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        _remover_autorizacao_sessao_checkin_publico(token_limpo)
+        flash("Senha inválida.", "danger")
+        return redirect(url_for("Paineis.checkin_publico", token_publico=token_limpo))
+
+    try:
+        _autorizar_sessao_checkin_publico(token_limpo)
+        _registrar_acesso_valido_checkin_publico(
+            int(compartilhamento["IDFatoCheckinCompartilhamentoPublico"])
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        flash("Falha ao liberar o acesso ao checkin público.", "danger")
+        return redirect(url_for("Paineis.checkin_publico", token_publico=token_limpo))
+
+    return redirect(url_for("Paineis.checkin_publico", token_publico=token_limpo))
