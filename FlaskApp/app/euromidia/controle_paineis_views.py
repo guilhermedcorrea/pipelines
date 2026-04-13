@@ -16787,6 +16787,7 @@ def _autorizar_sessao_checkin_publico(token_publico: str) -> None:
     session.modified = True
 
 
+
 def _remover_autorizacao_sessao_checkin_publico(token_publico: str) -> None:
     chave = _chave_sessao_checkin_publico(token_publico)
     session.pop(chave, None)
@@ -16853,6 +16854,213 @@ def _obter_compartilhamento_publico_por_token(token_publico: str) -> dict | None
 
 
 
+def _montar_item_lista_checkin_publico(row: dict) -> dict:
+    id_checkin = int(row["IDDimCheckinHistorico"])
+    id_tipo_midia = int(row.get("IDDimTipoMidia") or 1)
+
+    data_confirmacao = row.get("DataConfirmacao")
+    data_checkin = row.get("DataChekin")
+    data_referencia = data_confirmacao or data_checkin or row.get("DataAtualizacao")
+
+    if data_confirmacao:
+        data_confirmacao_txt = data_confirmacao.strftime("%d/%m/%Y %H:%M")
+    else:
+        data_confirmacao_txt = ""
+
+    if data_checkin:
+        data_checkin_txt = data_checkin.strftime("%d/%m/%Y")
+    else:
+        data_checkin_txt = ""
+
+    data_ref_filtro = ""
+    if data_referencia:
+        data_ref_filtro = data_referencia.strftime("%Y-%m-%d")
+
+    tipo_midia = "Video" if id_tipo_midia == 2 else "Imagem"
+    status_confirmacao = bool(row.get("BitChekin"))
+    status_texto = "Confirmado" if status_confirmacao else "Pendente"
+    status_classe = "confirmado" if status_confirmacao else "pendente"
+
+    numero_contrato = str(row.get("NumeroContrato") or "").strip()
+    if not numero_contrato:
+        numero_contrato = str(row.get("IDFatoControleContratosEuromidia") or "").strip()
+
+    empresa_destinataria = (
+        _normalizar_texto_checkin(row.get("RazaoSocialDestinatario"))
+        or _normalizar_texto_checkin(row.get("RazaoSocial"))
+        or "Sem empresa"
+    )
+
+    observacao = _normalizar_texto_checkin(row.get("Observacao"))
+
+    return {
+        "id_checkin": id_checkin,
+        "id_fato_controle_contratos": int(row["IDFatoControleContratosEuromidia"]),
+        "numero_contrato": numero_contrato,
+        "empresa_destinataria": empresa_destinataria,
+        "cod_ponto": str(row.get("CodPonto") or "").strip(),
+        "cod_face": str(row.get("CodFace") or "").strip(),
+        "tipo_painel": _normalizar_texto_checkin(row.get("TipoPainel")),
+        "tipo_face": _normalizar_texto_checkin(row.get("TipoFace")),
+        "tipo_midia": tipo_midia,
+        "id_tipo_midia": id_tipo_midia,
+        "url_arquivo": url_for("Paineis.checkin_arquivo", id_checkin=id_checkin),
+        "status_confirmacao": status_confirmacao,
+        "status_texto": status_texto,
+        "status_classe": status_classe,
+        "data_confirmacao_txt": data_confirmacao_txt,
+        "data_checkin_txt": data_checkin_txt,
+        "data_ref_filtro": data_ref_filtro,
+        "observacao": observacao,
+    }
+
+
+
+def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> list[dict]:
+    sql = text(f"""
+        WITH CompartilhamentoBase AS (
+            SELECT TOP (1)
+                cp.IDFatoCheckinCompartilhamentoPublico,
+                cp.IDDimCheckinHistorico,
+                cp.IDEmpresa AS IDEmpresaCompartilhamento,
+                ch.IDEmpresa AS IDEmpresaCheckinOrigem,
+                ch.IDFatoControleContratosEuromidia,
+                TRY_CONVERT(int, ch.CodPonto) AS CodPontoOrigem,
+                UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) AS CodFaceOrigem
+            FROM {TABELA_CHECKIN_COMPARTILHAMENTO_PUBLICO} cp
+            INNER JOIN [Integracao].[Silver].[DimCheckinHistorico] ch
+                ON ch.IDDimCheckinHistorico = cp.IDDimCheckinHistorico
+            WHERE
+                cp.IDFatoCheckinCompartilhamentoPublico = :id_compartilhamento
+                AND cp.BitAtivo = 1
+                AND (cp.DataExpiracao IS NULL OR cp.DataExpiracao >= GETDATE())
+            ORDER BY cp.IDFatoCheckinCompartilhamentoPublico DESC
+        ),
+        DestinatarioBase AS (
+            SELECT TOP (1)
+                de.IDFatoContratoDestinatarioExterno,
+                de.IDEmpresaDestinatario,
+                de.IDEmpresa,
+                de.IDFatoControleContratosEuromidia
+            FROM CompartilhamentoBase cb
+            INNER JOIN [Integracao].[Silver].[FatoContratoDestinatarioExterno] de
+                ON de.IDFatoControleContratosEuromidia = cb.IDFatoControleContratosEuromidia
+            WHERE
+                ISNULL(de.BitAtivo, 1) = 1
+                AND TRY_CONVERT(int, de.IDEmpresaDestinatario) = TRY_CONVERT(
+                    int,
+                    COALESCE(cb.IDEmpresaCompartilhamento, cb.IDEmpresaCheckinOrigem)
+                )
+            ORDER BY de.IDFatoContratoDestinatarioExterno DESC
+        ),
+        ItensPermitidos AS (
+            SELECT DISTINCT
+                i.IDFatoControleContratosItensEuromidia,
+                i.IDFatoControleContratoEuromidia,
+                TRY_CONVERT(int, i.CodPonto) AS CodPonto,
+                UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) AS CodFace,
+                TRY_CONVERT(int, i.IDEmpresaAgencia) AS IDEmpresaAgencia
+            FROM DestinatarioBase d
+            INNER JOIN [Integracao].[Silver].[FatoContratoDestinatarioExternoItens] dei
+                ON dei.IDFatoContratoDestinatarioExterno = d.IDFatoContratoDestinatarioExterno
+            INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+                ON i.IDFatoControleContratosItensEuromidia = dei.IDFatoControleContratosItensEuromidia
+               AND i.IDFatoControleContratoEuromidia = d.IDFatoControleContratosEuromidia
+            WHERE
+                ISNULL(dei.BitAtivo, 1) = 1
+                AND ISNULL(i.BitAtivo, 1) = 1
+                AND (
+                    (
+                        TRY_CONVERT(int, i.IDEmpresaAgencia) IS NOT NULL
+                        AND TRY_CONVERT(int, d.IDEmpresaDestinatario) = TRY_CONVERT(int, i.IDEmpresaAgencia)
+                    )
+                    OR
+                    (
+                        TRY_CONVERT(int, i.IDEmpresaAgencia) IS NULL
+                        AND TRY_CONVERT(int, d.IDEmpresaDestinatario) = TRY_CONVERT(int, d.IDEmpresa)
+                    )
+                )
+        )
+        SELECT
+            ch.IDDimCheckinHistorico,
+            ch.DataAtualizacao,
+            ch.DataChekin,
+            ch.DataConfirmacao,
+            ch.BitChekin,
+            ch.IDDimTipoMidia,
+            ch.UrlImagemGerada,
+            ch.Observacao,
+            TRY_CONVERT(int, ch.CodPonto) AS CodPonto,
+            UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) AS CodFace,
+            ch.TipoPainel,
+            ch.TipoFace,
+            c.IDFatoControleContratosEuromidia,
+            c.NumeroContrato,
+            RazaoSocialDestinatario = NULLIF(
+                LTRIM(RTRIM(COALESCE(emp_dest.RazaoSocial, emp_dest.NomeFantasia, ch.RazaoSocial, ''))),
+                ''
+            ),
+            CNPJDestinatario = NULLIF(
+                LTRIM(RTRIM(CAST(COALESCE(emp_dest.CNPJ, ch.CNPJ) AS varchar(30)))),
+                ''
+            ),
+            ch.RazaoSocial,
+            ch.CNPJ
+        FROM ItensPermitidos ip
+        INNER JOIN DestinatarioBase d
+            ON 1 = 1
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] c
+            ON c.IDFatoControleContratosEuromidia = ip.IDFatoControleContratoEuromidia
+        INNER JOIN [Integracao].[Silver].[DimCheckinHistorico] ch
+            ON ch.IDFatoControleContratosEuromidia = ip.IDFatoControleContratoEuromidia
+           AND TRY_CONVERT(int, ch.CodPonto) = ip.CodPonto
+           AND UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) = ip.CodFace
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp_dest
+            ON emp_dest.IDEmpresa = d.IDEmpresaDestinatario
+        WHERE
+            ISNULL(c.BitAtivo, 1) = 1
+            AND (
+                (
+                    ip.IDEmpresaAgencia IS NOT NULL
+                    AND TRY_CONVERT(int, ch.IDEmpresa) = TRY_CONVERT(int, d.IDEmpresaDestinatario)
+                )
+                OR
+                (
+                    ip.IDEmpresaAgencia IS NULL
+                    AND (
+                        TRY_CONVERT(int, ch.IDEmpresa) = TRY_CONVERT(int, d.IDEmpresaDestinatario)
+                        OR TRY_CONVERT(int, ch.IDEmpresa) = TRY_CONVERT(int, d.IDEmpresa)
+                        OR ch.IDEmpresa IS NULL
+                    )
+                )
+            )
+        ORDER BY
+            COALESCE(ch.DataConfirmacao, ch.DataChekin, ch.DataAtualizacao) DESC,
+            TRY_CONVERT(int, ch.CodPonto) ASC,
+            UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) ASC,
+            ch.IDDimCheckinHistorico DESC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_compartilhamento": int(id_compartilhamento)},
+    ).mappings().all()
+
+    retorno = []
+    ids_vistos = set()
+
+    for row in rows:
+        id_checkin = int(row["IDDimCheckinHistorico"])
+        if id_checkin in ids_vistos:
+            continue
+        ids_vistos.add(id_checkin)
+        retorno.append(_montar_item_lista_checkin_publico(dict(row)))
+
+    return retorno
+
+
+
+
 
 
 @paineis_bp.route("/checkin/publico/<string:token_publico>", methods=["GET"])
@@ -16877,22 +17085,57 @@ def checkin_publico(token_publico: str):
         except Exception:
             db.session.rollback()
 
-    item = compartilhamento
-    url_arquivo_publico = url_for(
-        "Paineis.checkin_arquivo",
-        id_checkin=int(compartilhamento["IDDimCheckinHistorico"]),
+    checkins_publicos = []
+    pontos_disponiveis = []
+    faces_disponiveis = []
+    tipos_midia_disponiveis = ["Imagem", "Video"]
+
+    if autorizado:
+        checkins_publicos = _listar_checkins_publicos_por_compartilhamento(
+            int(compartilhamento["IDFatoCheckinCompartilhamentoPublico"])
+        )
+
+        if not checkins_publicos:
+            checkins_publicos = [_montar_item_lista_checkin_publico(compartilhamento)]
+
+        pontos_disponiveis = sorted(
+            {str(item["cod_ponto"]).strip() for item in checkins_publicos if str(item["cod_ponto"]).strip()},
+            key=lambda valor: int(valor) if str(valor).isdigit() else str(valor)
+        )
+
+        faces_disponiveis = sorted(
+            {str(item["cod_face"]).strip() for item in checkins_publicos if str(item["cod_face"]).strip()}
+        )
+
+    titulo_contrato = (
+        str(compartilhamento.get("NumeroContrato") or "").strip()
+        or str(compartilhamento.get("IDFatoControleContratosEuromidia") or "").strip()
+    )
+
+    empresa_destinataria = (
+        _normalizar_texto_checkin(compartilhamento.get("RazaoSocial"))
+        or "Cliente"
     )
 
     return render_template(
         "euromidia/checkin_upload_checkin_publico.html",
         autorizado=autorizado,
-        item=item,
-        url_imagem_publica=url_arquivo_publico,
+        compartilhamento=compartilhamento,
+        checkins_publicos=checkins_publicos,
+        pontos_disponiveis=pontos_disponiveis,
+        faces_disponiveis=faces_disponiveis,
+        tipos_midia_disponiveis=tipos_midia_disponiveis,
+        titulo_contrato=titulo_contrato,
+        empresa_destinataria=empresa_destinataria,
         url_autenticar_publico=url_for(
             "Paineis.checkin_publico_autenticar",
             token_publico=token_limpo,
         ),
     )
+
+
+
+
 
 
 @paineis_bp.route("/checkin/publico/<string:token_publico>/autenticar", methods=["POST"])
