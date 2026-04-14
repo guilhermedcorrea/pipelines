@@ -174,13 +174,6 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 
-#docker builder prune -af
-#docker compose build --no-cache flask-app celery-checking-worker
-#docker compose up -d flask-app celery-checking-worker
-
-
-
-
 
 
 #Novo Ajuste com Redis, celery e socket

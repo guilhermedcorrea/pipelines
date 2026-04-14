@@ -4811,12 +4811,9 @@ function normalizarCardServidor(card){
   }
 
   function aplicarBusca(){
-    fases.forEach(f => {
-      const idFase = idNum(f.IDDimKanbanFase);
-      preencherCabecalhoFase(idFase);
-      void preencherCardsInicial(idFase, TAM_LOTE_POR_FASE, true);
-    });
-
+    const idsFases = fases.map(f => idNum(f.IDDimKanbanFase)).filter(Boolean);
+    idsFases.forEach(idFase => preencherCabecalhoFase(idFase));
+    redesenharFasesLocalmente(idsFases, null, true);
     atualizarResumoBusca();
   }
 
@@ -6858,6 +6855,45 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     return `${num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
   }
 
+  function formatarNumeroBrSemSimbolo(valor, casas = 2){
+    const num = Number(valor);
+    if (!Number.isFinite(num)) return "";
+    return num.toLocaleString("pt-BR", {
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas
+    });
+  }
+
+  function formatarValorContabilParaInput(valor){
+    return formatarNumeroBrSemSimbolo(valor, 2);
+  }
+
+  function formatarPercentualParaInput(valor){
+    return formatarNumeroBrSemSimbolo(valor, 2);
+  }
+
+  function calcularPercentualDescontoPorNovoValor(valorBase, novoValor){
+    const base = Number(valorBase);
+    const novo = Number(novoValor);
+
+    if (!Number.isFinite(base) || base === 0 || !Number.isFinite(novo)) {
+      return null;
+    }
+
+    return ((base - novo) / base) * 100;
+  }
+
+  function calcularNovoValorPorPercentual(valorBase, percentual){
+    const base = Number(valorBase);
+    const perc = Number(percentual);
+
+    if (!Number.isFinite(base) || !Number.isFinite(perc)) {
+      return null;
+    }
+
+    return base * (1 - (perc / 100));
+  }
+
   function renderizarResumoComercial(resumo){
     resumoComercial = resumo && typeof resumo === "object" ? Object.assign({}, resumo) : null;
 
@@ -6895,7 +6931,13 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     }
   }
 
+  let temporizadorResumoComercial = null
+  let resumoComercialEmAndamento = false;
+
   async function recarregarResumoComercial(){
+    if (resumoComercialEmAndamento) return false;
+    resumoComercialEmAndamento = true;
+
     try {
       const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/resumo-comercial`, { credentials: "same-origin" });
       const j = await r.json().catch(() => null);
@@ -6904,7 +6946,20 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       return true;
     } catch (_erro) {
       return false;
+    } finally {
+      resumoComercialEmAndamento = false;
     }
+  }
+
+  function agendarRecarregarResumoComercial(atrasoMs = 450){
+    if (temporizadorResumoComercial) {
+      window.clearTimeout(temporizadorResumoComercial);
+    }
+
+    temporizadorResumoComercial = window.setTimeout(() => {
+      temporizadorResumoComercial = null;
+      agendarRecarregarResumoComercial();
+    }, Math.max(0, Number(atrasoMs) || 0));
   }
 function parseNumeroInput(valor){
   if (valor === null || valor === undefined) return null;
@@ -7131,7 +7186,7 @@ function formatarNumeroParaInput(valor){
 
 
 
-function atualizarResumoComercial(bloco){
+function atualizarResumoComercial(bloco, opcoes = {}){
   const kpiCusto = bloco.querySelector('[data-role="kpi-custo"]');
   const kpiPrecoAtual = bloco.querySelector('[data-role="kpi-preco-atual"]');
   const kpiMargemBase = bloco.querySelector('[data-role="kpi-margem-base"]');
@@ -7143,30 +7198,34 @@ function atualizarResumoComercial(bloco){
 
   const precoSel = obterPrecoSelecionadoDoBloco(bloco);
   const custo = Number(bloco.__dadosComerciais?.custo?.Valor);
-  const valorTabela = Number(precoSel?.Valor);
-  const precoAtualContrato = Number(bloco.__dadosContratoAtual?.preco_venda_atual);
-  const valorBaseReferencia = Number.isFinite(precoAtualContrato) ? precoAtualContrato : valorTabela;
+  const valorTabelaSelecionada = Number(precoSel?.Valor);
+  const valorBaseTabela = Number.isFinite(valorTabelaSelecionada) ? valorTabelaSelecionada : null;
 
-  const novoValor = parseNumeroInput(inputNovoValor?.value);
-  const percentual = parseNumeroInput(inputPercentual?.value);
+  const novoValorInformado = parseNumeroInput(inputNovoValor?.value);
+  const percentualInformado = parseNumeroInput(inputPercentual?.value);
+
+  const origemEdicao = opcoes.origemEdicao || bloco.__origemEdicaoComercial || null;
+  const formatarCampos = opcoes.formatarCampos === true;
+  const preservarNovoValorEmDigitacao = opcoes.preservarNovoValorEmDigitacao === true;
+  const preservarPercentualEmDigitacao = opcoes.preservarPercentualEmDigitacao === true;
 
   if (kpiCusto){
     kpiCusto.textContent = Number.isFinite(custo) ? formatarMoedaBR(custo) : '—';
   }
 
   if (kpiPrecoAtual){
-    kpiPrecoAtual.textContent = Number.isFinite(valorBaseReferencia) ? formatarMoedaBR(valorBaseReferencia) : '—';
+    kpiPrecoAtual.textContent = valorBaseTabela === null ? '—' : formatarMoedaBR(valorBaseTabela);
   }
 
-  const margemBase = Number.isFinite(valorBaseReferencia) && Number.isFinite(custo)
-    ? (valorBaseReferencia - custo)
+  const margemBase = valorBaseTabela !== null && Number.isFinite(custo)
+    ? (valorBaseTabela - custo)
     : null;
 
   const margemBasePerc =
     margemBase !== null &&
-    Number.isFinite(valorBaseReferencia) &&
-    valorBaseReferencia !== 0
-      ? (margemBase / valorBaseReferencia) * 100
+    valorBaseTabela !== null &&
+    valorBaseTabela !== 0
+      ? (margemBase / valorBaseTabela) * 100
       : null;
 
   if (kpiMargemBase){
@@ -7182,13 +7241,78 @@ function atualizarResumoComercial(bloco){
   }
 
   let valorFinal = null;
+  let percentualCalculado = null;
+  let novoValorCalculado = null;
 
-  if (novoValor !== null) {
-    valorFinal = novoValor;
-  } else if (percentual !== null && Number.isFinite(valorBaseReferencia)) {
-    valorFinal = valorBaseReferencia * (1 - (percentual / 100));
-  } else if (Number.isFinite(valorBaseReferencia)) {
-    valorFinal = valorBaseReferencia;
+  if (origemEdicao === 'novo_valor'){
+    if (novoValorInformado !== null) {
+      novoValorCalculado = novoValorInformado;
+      valorFinal = novoValorInformado;
+      percentualCalculado = calcularPercentualDescontoPorNovoValor(valorBaseTabela, novoValorInformado);
+    } else if (valorBaseTabela !== null) {
+      valorFinal = valorBaseTabela;
+    }
+  } else if (origemEdicao === 'percentual'){
+    if (percentualInformado !== null) {
+      percentualCalculado = percentualInformado;
+      novoValorCalculado = calcularNovoValorPorPercentual(valorBaseTabela, percentualInformado);
+      valorFinal = novoValorCalculado;
+    } else if (valorBaseTabela !== null) {
+      valorFinal = valorBaseTabela;
+    }
+  } else {
+    if (novoValorInformado !== null) {
+      novoValorCalculado = novoValorInformado;
+      valorFinal = novoValorInformado;
+      percentualCalculado = calcularPercentualDescontoPorNovoValor(valorBaseTabela, novoValorInformado);
+      bloco.__origemEdicaoComercial = 'novo_valor';
+    } else if (percentualInformado !== null) {
+      percentualCalculado = percentualInformado;
+      novoValorCalculado = calcularNovoValorPorPercentual(valorBaseTabela, percentualInformado);
+      valorFinal = novoValorCalculado;
+      bloco.__origemEdicaoComercial = 'percentual';
+    } else if (valorBaseTabela !== null) {
+      valorFinal = valorBaseTabela;
+      bloco.__origemEdicaoComercial = null;
+    }
+  }
+
+  if (inputNovoValor && !preservarNovoValorEmDigitacao){
+    const deveAtualizarNovoValor =
+      origemEdicao === 'percentual' ||
+      (origemEdicao === null && novoValorCalculado !== null) ||
+      formatarCampos;
+
+    if (deveAtualizarNovoValor){
+      if (novoValorCalculado === null){
+        if (origemEdicao === 'percentual' || formatarCampos) {
+          inputNovoValor.value = '';
+        }
+      } else {
+        inputNovoValor.value = formatarValorContabilParaInput(novoValorCalculado);
+      }
+    } else if (formatarCampos && novoValorInformado !== null){
+      inputNovoValor.value = formatarValorContabilParaInput(novoValorInformado);
+    }
+  }
+
+  if (inputPercentual && !preservarPercentualEmDigitacao){
+    const deveAtualizarPercentual =
+      origemEdicao === 'novo_valor' ||
+      (origemEdicao === null && percentualCalculado !== null) ||
+      formatarCampos;
+
+    if (deveAtualizarPercentual){
+      if (percentualCalculado === null){
+        if (origemEdicao === 'novo_valor' || formatarCampos) {
+          inputPercentual.value = '';
+        }
+      } else {
+        inputPercentual.value = formatarPercentualParaInput(percentualCalculado);
+      }
+    } else if (formatarCampos && percentualInformado !== null){
+      inputPercentual.value = formatarPercentualParaInput(percentualInformado);
+    }
   }
 
   const margemFinal = (valorFinal !== null && Number.isFinite(custo))
@@ -7335,10 +7459,10 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       el('input', {
         class:'kb-input',
         'data-role':'input-novo-valor',
-        type:'number',
-        step:'0.01',
-        min:'0',
-        placeholder:'Ex: 1500,00'
+        type:'text',
+        inputmode:'decimal',
+        autocomplete:'off',
+        placeholder:'Ex: 1.500,00'
       })
     ]),
     el('div', { class:'kb-campo' }, [
@@ -7346,8 +7470,9 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       el('input', {
         class:'kb-input',
         'data-role':'input-percentual',
-        type:'number',
-        step:'0.01',
+        type:'text',
+        inputmode:'decimal',
+        autocomplete:'off',
         placeholder:'Ex: 10,00'
       })
     ]),
@@ -7367,21 +7492,31 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
   const inputDataFim = bloco.querySelector('[data-role="input-data-fim"]');
 
   selectPreco.addEventListener('change', () => {
-    atualizarResumoComercial(bloco);
+    atualizarResumoComercial(bloco, { formatarCampos: true });
   });
 
   inputNovoValor?.addEventListener('input', () => {
-    if (safeStr(inputNovoValor.value).trim()){
-      inputPercentual.value = '';
-    }
-    atualizarResumoComercial(bloco);
+    bloco.__origemEdicaoComercial = 'novo_valor';
+    atualizarResumoComercial(bloco, {
+      origemEdicao: 'novo_valor',
+      preservarNovoValorEmDigitacao: true
+    });
+  });
+
+  inputNovoValor?.addEventListener('blur', () => {
+    atualizarResumoComercial(bloco, { origemEdicao: 'novo_valor', formatarCampos: true });
   });
 
   inputPercentual?.addEventListener('input', () => {
-    if (safeStr(inputPercentual.value).trim()){
-      inputNovoValor.value = '';
-    }
-    atualizarResumoComercial(bloco);
+    bloco.__origemEdicaoComercial = 'percentual';
+    atualizarResumoComercial(bloco, {
+      origemEdicao: 'percentual',
+      preservarPercentualEmDigitacao: true
+    });
+  });
+
+  inputPercentual?.addEventListener('blur', () => {
+    atualizarResumoComercial(bloco, { origemEdicao: 'percentual', formatarCampos: true });
   });
 
   if (valoresSalvos){
@@ -7406,17 +7541,33 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       selectPreco.value = String(idPrecoSalvo);
     }
 
+    if (
+      novoValorSalvo !== null &&
+      novoValorSalvo !== undefined &&
+      safeStr(String(novoValorSalvo)).trim() !== ''
+    ){
+      bloco.__origemEdicaoComercial = 'novo_valor';
+    } else if (
+      percentualSalvo !== null &&
+      percentualSalvo !== undefined &&
+      safeStr(String(percentualSalvo)).trim() !== ''
+    ){
+      bloco.__origemEdicaoComercial = 'percentual';
+    } else {
+      bloco.__origemEdicaoComercial = null;
+    }
+
     if (inputNovoValor) {
       inputNovoValor.value =
         novoValorSalvo !== null && novoValorSalvo !== undefined
-          ? formatarNumeroParaInput(novoValorSalvo)
+          ? formatarValorContabilParaInput(novoValorSalvo)
           : '';
     }
 
     if (inputPercentual) {
       inputPercentual.value =
         percentualSalvo !== null && percentualSalvo !== undefined
-          ? formatarNumeroParaInput(percentualSalvo)
+          ? formatarPercentualParaInput(percentualSalvo)
           : '';
     }
 
@@ -7654,19 +7805,29 @@ async function buscarDetalheCard(idCard, opcoes = {}) {
   return j;
 }
 
-  async function enriquecerCardsCarregados(cardsNovos){
+  async function enriquecerCardsCarregados(cardsNovos, mapaTagsLote = null){
     const lista = Array.isArray(cardsNovos) ? cardsNovos : [];
     if (!lista.length) return;
 
-    const ids = [...new Set(lista.map(c => idNum(c.IDFatoKanbanCard)).filter(Boolean))];
-    if (!ids.length) return;
+    const mapaTags = mapaTagsLote instanceof Map ? mapaTagsLote : new Map();
 
-    await Promise.all(ids.map(async (idCard) => {
-      const detalhe = await buscarDetalheCard(idCard);
-      if (!detalhe || !detalhe.card) return;
-      inserirOuAtualizarCardLocal(detalhe.card);
-      setTagsDoCard(idCard, detalhe.tags || []);
-    }));
+    lista.forEach(card => {
+      const idCard = idNum(card?.IDFatoKanbanCard);
+      if (!idCard) return;
+
+      const tagsInline = Array.isArray(card?.tags)
+        ? card.tags
+        : (Array.isArray(card?.Tags) ? card.Tags : null);
+
+      if (Array.isArray(tagsInline)) {
+        setTagsDoCard(idCard, tagsInline);
+        return;
+      }
+
+      if (mapaTags.has(idCard)) {
+        setTagsDoCard(idCard, mapaTags.get(idCard) || []);
+      }
+    });
   }
 
 
@@ -7701,6 +7862,16 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       return 0;
     }
 
+    const mapaTagsLote = new Map();
+    const cardTagsLote = Array.isArray(j.card_tags) ? j.card_tags : [];
+    cardTagsLote.forEach(item => {
+      const idCard = idNum(item?.IDFatoKanbanCard);
+      if (!idCard) return;
+      const arr = mapaTagsLote.get(idCard) || [];
+      arr.push(Object.assign({}, item || {}));
+      mapaTagsLote.set(idCard, arr);
+    });
+
     const cardsNovos = Array.isArray(j.cards) ? j.cards.map(normalizarCardServidor) : [];
     cardsNovos.forEach(card => inserirOuAtualizarCardLocal(card));
 
@@ -7714,7 +7885,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     st.cargaCompleta = st.offsetServidor >= idNum(st.totalServidor);
 
     if (cardsNovos.length) {
-      await enriquecerCardsCarregados(cardsNovos);
+      await enriquecerCardsCarregados(cardsNovos, mapaTagsLote);
     }
 
     return cardsNovos.length;
@@ -8469,12 +8640,20 @@ async function moverCard(idCard, idFasePara, posicao) {
     mapaQuantidadesFinais.set(idFaseOrigem, qtdOrigemManter);
     mapaQuantidadesFinais.set(idFaseDestinoFinal, qtdDestinoManter);
 
-    await redesenharFasesSincronizado(
-      [idFaseOrigem, idFaseDestinoFinal],
-      mapaQuantidadesFinais,
-      true,
-      { fresh: true }
-    );
+    if (j.card && Array.isArray(j.tags)) {
+      redesenharFasesLocalmente(
+        [idFaseOrigem, idFaseDestinoFinal],
+        mapaQuantidadesFinais,
+        true
+      );
+    } else {
+      await redesenharFasesSincronizado(
+        [idFaseOrigem, idFaseDestinoFinal],
+        mapaQuantidadesFinais,
+        true,
+        { fresh: true }
+      );
+    }
 
     if (!cardSaiDoQuadro) {
       destacarCardNaFase(idC, idFaseDestinoFinal);
@@ -9768,7 +9947,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
     }
 
-    void recarregarResumoComercial();
+    agendarRecarregarResumoComercial();
     return true;
   }
 
@@ -10164,14 +10343,28 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   async function sincronizarCardPorDetalhe(idCard, redesenhar = true){
+    const cardAntes = obterCardPorId(idCard);
+    const idFaseAntes = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
+
     const detalhe = await buscarDetalheCard(idCard);
     if (!detalhe || !detalhe.card) return;
-    inserirOuAtualizarCardLocal(detalhe.card);
+
+    const cardDepois = inserirOuAtualizarCardLocal(detalhe.card);
     setTagsDoCard(idCard, detalhe.tags || []);
-    if (redesenhar) {
-      redesenharFases([idNum(detalhe.card.IDDimKanbanFaseAtual)], true);
+
+    if (Array.isArray(detalhe.notas)) {
+      mapaNotasPorCard.set(
+        idNum(idCard),
+        detalhe.notas.map(n => Object.assign({}, n || {}))
+      );
     }
-    void recarregarResumoComercial();
+
+    if (redesenhar) {
+      const idsFases = [idFaseAntes, idNum(cardDepois?.IDDimKanbanFaseAtual || detalhe.card.IDDimKanbanFaseAtual || 0)].filter(Boolean);
+      redesenharFasesLocalmente(idsFases, null, true);
+    }
+
+    agendarRecarregarResumoComercial();
   }
 
   function conectarSocketKanban(){
@@ -10255,6 +10448,8 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     socketKanban.on("card_atualizado", async (payload = {}) => {
       const idCard = idNum(payload.id_card);
+      const cardAntes = obterCardPorId(idCard);
+      const idFaseAntes = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
       const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
       const cardSaiDoQuadro = !!(cardPayload && cardDeveSairDoQuadro(cardPayload));
 
@@ -10288,18 +10483,22 @@ async function moverCard(idCard, idFasePara, posicao) {
         "Este card foi atualizado por outro usuário enquanto estava aberto. Reabra o card antes de salvar."
       );
 
-      const faseId = idNum(
+      const faseIdDepois = idNum(
         payload.card?.IDDimKanbanFaseAtual ||
         obterCardPorId(idCard)?.IDDimKanbanFaseAtual
       );
+      const idsFases = [idFaseAntes, faseIdDepois].filter(Boolean);
 
-      if (faseId) {
-        await redesenharFasesSincronizado([faseId], null, true, { fresh: true });
+      if (idsFases.length) {
+        redesenharFasesLocalmente(idsFases, null, true);
+        if (!cardSaiDoQuadro && faseIdDepois) {
+          destacarCardNaFase(idCard, faseIdDepois);
+        }
       } else {
         await carregar();
       }
 
-      void recarregarResumoComercial();
+      agendarRecarregarResumoComercial();
     });
 
     socketKanban.on("card_movido", async (payload = {}) => {
@@ -10348,8 +10547,17 @@ async function moverCard(idCard, idFasePara, posicao) {
         "Este card foi movido por outro usuário enquanto estava aberto. Reabra o card antes de salvar."
       );
 
-      await redesenharFasesSincronizado([idFaseDe, idFasePara], null, true, { fresh: true });
-      void recarregarResumoComercial();
+      const idsFases = [idFaseDe, idFasePara].filter(Boolean);
+      if (idsFases.length) {
+        redesenharFasesLocalmente(idsFases, null, true);
+        if (!cardSaiDoQuadro && idFasePara) {
+          destacarCardNaFase(idCard, idFasePara);
+        }
+      } else {
+        await carregar();
+      }
+
+      agendarRecarregarResumoComercial();
     });
 
     socketKanban.on("card_criado", async () => {
@@ -10359,9 +10567,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     socketKanban.on("card_inativado", async (payload = {}) => {
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
+      const idFaseAntes = idNum(obterCardPorId(idCard)?.IDDimKanbanFaseAtual || 0);
       removerCardLocal(idCard);
       tratarAtualizacaoExternaNoCardAberto(idCard, "Este card foi inativado por outro usuário.");
-      await carregar();
+      if (idFaseAntes) {
+        redesenharFasesLocalmente([idFaseAntes], null, true);
+      }
+      agendarRecarregarResumoComercial();
     });
 
     socketKanban.on("tag_criada", (payload = {}) => {
@@ -10436,7 +10648,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     await carregar();
     window.setInterval(() => {
-      void recarregarResumoComercial();
+      agendarRecarregarResumoComercial();
     }, 30000);
 
     const clienteSocketOk = await garantirClienteSocketIo();

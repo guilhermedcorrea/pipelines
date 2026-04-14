@@ -8736,7 +8736,6 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             preco_item.get("Valor") if preco_item else None,
             novo_valor_item,
             percentual_item,
-            item.get("preco_venda_atual_contrato"),
         )
 
         vinculos_preparados.append(
@@ -10555,6 +10554,7 @@ def api_cards_listar_por_fase(id_kanban: int):
     ).mappings().all()
 
     cards = []
+    ids_cards_lote: list[int] = []
     for row in rows_cards:
         card = dict(row)
         card["VersaoConcorrenciaHex"] = _rowversion_para_hex(
@@ -10567,6 +10567,38 @@ def api_cards_listar_por_fase(id_kanban: int):
         card = _aplicar_origem_atendimento_no_card_dict(card)
         cards.append(card)
 
+        id_card_lote = int(card.get("IDFatoKanbanCard") or 0)
+        if id_card_lote > 0:
+            ids_cards_lote.append(id_card_lote)
+
+    card_tags_lote: list[dict[str, Any]] = []
+    if ids_cards_lote:
+        placeholders_ids_cards, parametros_ids_cards = _montar_placeholders_sql("id_card_lote", ids_cards_lote)
+        sql_card_tags_lote = text(f"""
+            SELECT
+                ct.IDFatoKanbanCard,
+                t.IDDimKanbanTag,
+                t.NomeTag,
+                t.CorHex,
+                t.AfetaCorCard,
+                t.OrdemExibicao
+            FROM {TABELA_CARD_TAG_HISTORICO} ct
+            INNER JOIN [Kanban].[Silver].[DimKanbanTag] t
+                ON t.IDDimKanbanTag = ct.IDDimKanbanTag
+            WHERE ct.IDFatoKanbanCard IN ({placeholders_ids_cards})
+              AND ct.RemovidoEm IS NULL
+              AND ISNULL(t.Ativo, 1) = 1
+            ORDER BY
+                ct.IDFatoKanbanCard ASC,
+                ISNULL(t.OrdemExibicao, 999999) ASC,
+                t.NomeTag ASC,
+                t.IDDimKanbanTag ASC;
+        """)
+
+        card_tags_lote = _rows_para_dicts(
+            db.session.execute(sql_card_tags_lote, parametros_ids_cards).mappings().all()
+        )
+
     payload = {
         "ok": True,
         "id_kanban": id_kanban,
@@ -10575,6 +10607,7 @@ def api_cards_listar_por_fase(id_kanban: int):
         "limit": limit,
         "total": total,
         "cards": cards,
+        "card_tags": card_tags_lote,
     }
 
     if usar_cache:
