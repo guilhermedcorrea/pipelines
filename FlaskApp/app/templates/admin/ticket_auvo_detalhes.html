@@ -58,7 +58,7 @@
     color: var(--text-strong) !important;
   }
 
-  .topbar{
+  .ticket-topbar{
     display:flex;
     align-items:flex-start;
     justify-content:space-between;
@@ -261,40 +261,55 @@
   }
 
   /* =========================================================
-     ✅ FIX DROPDOWN “CORTADO” AO ROLAR
-     - Base geralmente tem navbar sticky/fixed e dropdown com z-index baixo
-     - Eu forço overflow visível e z-index alto do menu
+     ✅ FIX DE CAMADA DO MENU
+     - Não mexo no layout/base do header
+     - Só garanto que o dropdown abra acima desta página
+     - Evito colocar o menu no fluxo normal, para não empurrar conteúdo
      ========================================================= */
 
+  .page-wrap,
+  .page-wrap .card,
+  .ticket-header,
+  .ticket-topbar,
+  .table-wrap,
+  .grid,
+  .kv{
+    position: relative;
+    z-index: auto !important;
+    isolation: auto !important;
+    overflow: visible !important;
+  }
+
   header, nav,
-  .navbar, .topbar, .top-nav, .navbar-collapse,
+  .navbar, .top-nav, .navbar-collapse,
   .page-header, .header, .container, .container-fluid,
   .euromidia-header, .euromidia-nav{
     overflow: visible !important;
   }
 
-  /* Bootstrap padrão / genérico */
-  .dropdown-menu{
-    z-index: 99999 !important;
+  .menu-dropdown{
+    z-index: 2147483646 !important;
+    overflow: visible !important;
   }
 
-  /* Outras variações comuns de menu */
-  .dropdown-content, .menu-dropdown, .nav-dropdown, .tp-dropdown, .euro-dropdown{
-    z-index: 99999 !important;
+  .submenu-item{
+    position: relative !important;
+    z-index: 2147483646 !important;
   }
 
-  /* Se o header do site estiver por cima, subo o z-index dele também (sem estourar o dropdown) */
-  header, nav, .navbar, .euromidia-header, .euromidia-nav{
-    position: sticky;
-    top: 0;
-    z-index: 60000;
+  .submenu-dropdown{
+    position: absolute !important;
+    z-index: 2147483647 !important;
+    overflow: visible !important;
   }
 
-  /* Mantém dropdown acima do header sticky */
   .dropdown-menu,
-  .dropdown-content, .menu-dropdown, .nav-dropdown, .tp-dropdown, .euro-dropdown{
-    position: absolute;
-    z-index: 99999 !important;
+  .dropdown-content,
+  .menu-dropdown,
+  .nav-dropdown,
+  .tp-dropdown,
+  .euro-dropdown{
+    z-index: 2147483647 !important;
   }
 
   /* =========================================================
@@ -327,7 +342,7 @@
     <!-- CABEÇALHO -->
     <div class="ticket-header">
       <div class="card-pad">
-        <div class="topbar">
+        <div class="ticket-topbar">
           <div style="min-width:260px;flex:1 1 520px;">
             <h1 class="title">Ticket #{{ ticket.IdTicketAuvo }} — {{ ticket.Titulo or "-" }}</h1>
 

@@ -6932,6 +6932,30 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         else "CAST(0 AS bit) AS BitContratoNovo,"
     )
 
+    select_id_empresa_agencia = (
+        "c.IDEmpresaAgencia AS IDEmpresaAgencia,"
+        if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia")
+        else "CAST(NULL AS int) AS IDEmpresaAgencia,"
+    )
+
+    select_marca = (
+        "c.Marca AS Marca,"
+        if _coluna_existe(TABELA_CARD, "Marca")
+        else "CAST(NULL AS nvarchar(100)) AS Marca,"
+    )
+
+    select_telefone = (
+        "c.Telefone AS Telefone,"
+        if _coluna_existe(TABELA_CARD, "Telefone")
+        else "CAST(NULL AS varchar(30)) AS Telefone,"
+    )
+
+    select_email = (
+        "c.Email AS Email,"
+        if _coluna_existe(TABELA_CARD, "Email")
+        else "CAST(NULL AS nvarchar(200)) AS Email,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -6952,6 +6976,10 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             {select_cod_face_contrato}
             {select_bit_aditivo}
             {select_bit_contrato_novo}
+            {select_id_empresa_agencia}
+            {select_marca}
+            {select_telefone}
+            {select_email}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             k.BitPrincipal,
@@ -9663,6 +9691,30 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         else "CAST(0 AS bit) AS BitContratoNovo,"
     )
 
+    select_id_empresa_agencia = (
+        "c.IDEmpresaAgencia AS IDEmpresaAgencia,"
+        if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia")
+        else "CAST(NULL AS int) AS IDEmpresaAgencia,"
+    )
+
+    select_marca = (
+        "c.Marca AS Marca,"
+        if _coluna_existe(TABELA_CARD, "Marca")
+        else "CAST(NULL AS nvarchar(100)) AS Marca,"
+    )
+
+    select_telefone = (
+        "c.Telefone AS Telefone,"
+        if _coluna_existe(TABELA_CARD, "Telefone")
+        else "CAST(NULL AS varchar(30)) AS Telefone,"
+    )
+
+    select_email = (
+        "c.Email AS Email,"
+        if _coluna_existe(TABELA_CARD, "Email")
+        else "CAST(NULL AS nvarchar(200)) AS Email,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -9685,6 +9737,10 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             {select_cod_face_contrato}
             {select_bit_aditivo}
             {select_bit_contrato_novo}
+            {select_id_empresa_agencia}
+            {select_marca}
+            {select_telefone}
+            {select_email}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             {_sql_select_nome_usuario_relacionado_card('usuario')},
@@ -10664,6 +10720,10 @@ def api_card_detalhe(id_card: int):
         "CodFaceContrato",
         "BitAditivo",
         "BitContratoNovo",
+        "IDEmpresaAgencia",
+        "Marca",
+        "Telefone",
+        "Email",
         "IDEmpresaRelacionadaCard",
         "EmpresaRazaoSocial",
         "EmpresaCNPJ",
@@ -17745,6 +17805,64 @@ def _texto_ou_none(valor: Any, tamanho_maximo: int | None = None) -> str | None:
     return texto
 
 
+def _somente_digitos(valor: Any) -> str:
+    """Eu removo qualquer caractere que não seja número."""
+    return re.sub(r"\D+", "", str(valor or ""))
+
+
+def _normalizar_telefone_card(valor: Any, tamanho_maximo: int = 30) -> str | None:
+    """Eu salvo o telefone do card somente com DDD + número."""
+    telefone = _somente_digitos(valor)
+    if not telefone:
+        return None
+    return telefone[: int(tamanho_maximo)]
+
+
+def _empresa_existe_por_id(id_empresa: int | None) -> bool:
+    """Eu valido se a empresa existe na DimEmpresas."""
+    if id_empresa in (None, 0):
+        return False
+
+    sql = text(f"""
+        SELECT 1
+        FROM {TABELA_EMPRESAS}
+        WHERE IDEmpresa = :id_empresa;
+    """)
+    return bool(db.session.execute(sql, {"id_empresa": int(id_empresa)}).scalar())
+
+
+def _resolver_campos_complementares_novo_contrato(
+    *,
+    usar_novo_contrato: bool,
+    id_empresa_agencia: Any,
+    marca: Any,
+    telefone: Any,
+    email: Any,
+) -> dict[str, Any]:
+    """Eu resolvo os campos complementares usados somente em Novo Contrato."""
+    if not usar_novo_contrato:
+        return {
+            "id_empresa_agencia": None,
+            "marca": None,
+            "telefone": None,
+            "email": None,
+        }
+
+    id_empresa_agencia_int = _int_ou_none(id_empresa_agencia)
+    if id_empresa_agencia not in (None, "", 0) and id_empresa_agencia_int is None:
+        raise ValueError("Agência inválida.")
+
+    if id_empresa_agencia_int is not None and not _empresa_existe_por_id(id_empresa_agencia_int):
+        raise ValueError("Agência não encontrada.")
+
+    return {
+        "id_empresa_agencia": id_empresa_agencia_int,
+        "marca": _texto_ou_none(marca, 100),
+        "telefone": _normalizar_telefone_card(telefone, 30),
+        "email": _texto_ou_none(email, 200),
+    }
+
+
 def _int_ou_none(valor: Any) -> int | None:
     """Eu converto números inteiros opcionais."""
     if valor in (None, ""):
@@ -19154,6 +19272,10 @@ def api_card_criar(id_kanban: int):
         tipo_contrato_card = payload.get("tipo_contrato_card")
         cod_ponto_contrato = payload.get("cod_ponto_contrato")
         cod_face_contrato = payload.get("cod_face_contrato")
+        id_empresa_agencia = payload.get("id_empresa_agencia")
+        marca_card = payload.get("marca")
+        telefone_card = payload.get("telefone")
+        email_card = payload.get("email")
 
         if len(titulo) < 2:
             return jsonify({"ok": False, "msg": "Título inválido"}), 400
@@ -19199,6 +19321,14 @@ def api_card_criar(id_kanban: int):
             id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
             cod_ponto=cod_ponto_contrato,
             cod_face=cod_face_contrato,
+        )
+
+        campos_complementares_novo_contrato = _resolver_campos_complementares_novo_contrato(
+            usar_novo_contrato=str(contexto_tipo_contrato.get("tipo_contrato") or "").upper() == TIPO_SOLICITACAO_NOVO,
+            id_empresa_agencia=id_empresa_agencia,
+            marca=marca_card,
+            telefone=telefone_card,
+            email=email_card,
         )
 
         id_tipo_cliente_desconto_int = None
@@ -19350,6 +19480,26 @@ def api_card_criar(id_kanban: int):
             colunas.append("CodFaceContrato")
             valores.append(":cod_face_contrato")
             params["cod_face_contrato"] = validacao_ponto_face.get("cod_face")
+
+        if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia"):
+            colunas.append("IDEmpresaAgencia")
+            valores.append(":id_empresa_agencia")
+            params["id_empresa_agencia"] = campos_complementares_novo_contrato.get("id_empresa_agencia")
+
+        if _coluna_existe(TABELA_CARD, "Marca"):
+            colunas.append("Marca")
+            valores.append(":marca")
+            params["marca"] = campos_complementares_novo_contrato.get("marca")
+
+        if _coluna_existe(TABELA_CARD, "Telefone"):
+            colunas.append("Telefone")
+            valores.append(":telefone")
+            params["telefone"] = campos_complementares_novo_contrato.get("telefone")
+
+        if _coluna_existe(TABELA_CARD, "Email"):
+            colunas.append("Email")
+            valores.append(":email")
+            params["email"] = campos_complementares_novo_contrato.get("email")
 
         if coluna_id_dim_usuarios_existe:
             colunas.append("IDDimUsuarios")
@@ -19586,6 +19736,10 @@ def api_card_atualizar(id_card: int):
         tipo_contrato_card = payload.get("tipo_contrato_card")
         cod_ponto_contrato = payload.get("cod_ponto_contrato")
         cod_face_contrato = payload.get("cod_face_contrato")
+        id_empresa_agencia = payload.get("id_empresa_agencia")
+        marca_card = payload.get("marca")
+        telefone_card = payload.get("telefone")
+        email_card = payload.get("email")
 
         if not titulo:
             return jsonify({"ok": False, "msg": "Título do card é obrigatório."}), 400
@@ -19681,6 +19835,14 @@ def api_card_atualizar(id_card: int):
             cod_face=cod_face_contrato,
         )
 
+        campos_complementares_novo_contrato = _resolver_campos_complementares_novo_contrato(
+            usar_novo_contrato=str(contexto_tipo_contrato.get("tipo_contrato") or "").upper() == TIPO_SOLICITACAO_NOVO,
+            id_empresa_agencia=id_empresa_agencia,
+            marca=marca_card,
+            telefone=telefone_card,
+            email=email_card,
+        )
+
         snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
         campos_update: list[str] = []
@@ -19717,6 +19879,22 @@ def api_card_atualizar(id_card: int):
             cod_face_contrato=validacao_ponto_face.get("cod_face"),
             prefixo_parametros="sync_",
         )
+
+        if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia"):
+            campos_update.append("IDEmpresaAgencia = :id_empresa_agencia")
+            parametros_update["id_empresa_agencia"] = campos_complementares_novo_contrato.get("id_empresa_agencia")
+
+        if _coluna_existe(TABELA_CARD, "Marca"):
+            campos_update.append("Marca = :marca")
+            parametros_update["marca"] = campos_complementares_novo_contrato.get("marca")
+
+        if _coluna_existe(TABELA_CARD, "Telefone"):
+            campos_update.append("Telefone = :telefone")
+            parametros_update["telefone"] = campos_complementares_novo_contrato.get("telefone")
+
+        if _coluna_existe(TABELA_CARD, "Email"):
+            campos_update.append("Email = :email")
+            parametros_update["email"] = campos_complementares_novo_contrato.get("email")
 
         if origem_atendimento_informada and _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
             campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
@@ -19950,6 +20128,10 @@ def api_card_atualizar(id_card: int):
             f" | cod_ponto={validacao_ponto_face.get('cod_ponto')}"
             f" | cod_face={validacao_ponto_face.get('cod_face')}"
             f" | id_empresa={id_empresa_relacionada_int if id_empresa_relacionada_int not in (None, '', 0) else 'NULL'}"
+            f" | id_empresa_agencia={campos_complementares_novo_contrato.get('id_empresa_agencia') if campos_complementares_novo_contrato.get('id_empresa_agencia') not in (None, '', 0) else 'NULL'}"
+            f" | marca={campos_complementares_novo_contrato.get('marca') or 'NULL'}"
+            f" | telefone={campos_complementares_novo_contrato.get('telefone') or 'NULL'}"
+            f" | email={campos_complementares_novo_contrato.get('email') or 'NULL'}"
             f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else 'NULL'}"
         )
