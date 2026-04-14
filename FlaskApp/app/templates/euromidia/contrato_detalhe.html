@@ -1,269 +1,560 @@
 {% extends "euromidia/base_euromidia.html" %}
-
-{% block title %}Contrato {{ contrato["NumeroContrato"] or contrato["NumeroPrevia"] }} | Euromídia{% endblock %}
+{% block title %}Contrato #{{ contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia }} | Euromídia{% endblock %}
 
 {% block content %}
-
 <div class="card">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;">
     <div>
-      <h1 class="page-title" style="margin:0;">Detalhes do Contrato</h1>
-      <div class="muted" style="margin-top:6px;font-weight:900;">
-        Nº Contrato: <span style="color:var(--euro-blue);">{{ contrato["NumeroContrato"] or "-" }}</span>
-        • Prévia: <span style="color:var(--text);">{{ contrato["NumeroPrevia"] or "-" }}</span>
+      <h1 class="page-title">Contrato #{{ contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia }}</h1>
+      <div class="muted" style="font-size:12px;">
+        Nº Contrato: <b>{{ contrato.NumeroContrato or "—" }}</b> |
+        Prévia: <b>{{ contrato.NumeroPrevia or "—" }}</b>
       </div>
     </div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      {% if return_to %}
-        <a class="btn btn-secondary" style="text-decoration:none;" href="{{ return_to }}">← Voltar para a grade</a>
-      {% else %}
-        <a class="btn btn-secondary" style="text-decoration:none;" href="{{ url_for('Paineis.lista_paineis') }}">← Voltar</a>
-      {% endif %}
+      <a class="btn btn-secondary"
+         href="{{ url_for('Paineis.contratos_lista') }}"
+         style="text-decoration:none;display:inline-flex;align-items:center;">
+        Voltar
+      </a>
     </div>
   </div>
 
-  <div style="height:14px;"></div>
+  <style>
+    .kv{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .kv .item,
+    .summary-card,
+    .timeline-box,
+    .empty-box{
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+    }
+    .kv .k,
+    .summary-card .k{
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .kv .v{
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .summary-grid{
+      display:grid;
+      grid-template-columns: repeat(6, minmax(150px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .summary-card .v{
+      font-size: 24px;
+      font-weight: 900;
+      line-height: 1.1;
+      color: var(--euro-blue);
+    }
+    .summary-card .v.small{
+      font-size: 15px;
+      line-height: 1.35;
+      color: var(--text);
+    }
+    .section-title{
+      margin:0;
+      color:var(--euro-blue);
+      font-size:16px;
+    }
+    table.tbl{
+      width:100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 13px;
+      overflow:hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background:#fff;
+      margin-top: 14px;
+    }
+    .tbl th, .tbl td{
+      padding: 10px 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    .tbl th{
+      background: #F8FAFC;
+      color: var(--muted);
+      font-weight: 900;
+      font-size: 12px;
+      text-align: left;
+    }
+    .tbl tr:last-child td{ border-bottom: 0; }
+    .td-ellipsis{
+      max-width: 360px;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .td-wrap{
+      max-width: 360px;
+      white-space: normal !important;
+      word-break: break-word;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height: 26px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .02em;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .badge.tipo{ background:#EEF2FF; color:#3730A3; border-color:#C7D2FE; }
+    .badge.aberto{ background:#ECFDF3; color:#166534; border-color:#BBF7D0; }
+    .badge.concluido{ background:#FFF7ED; color:#C2410C; border-color:#FED7AA; }
+    .badge.encerrado{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+    .badge.timeline-MOVIMENTO{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
+    .badge.timeline-OBSERVACAO{ background:#F5F3FF; color:#6D28D9; border-color:#DDD6FE; }
+    .badge.timeline-LOG{ background:#F8FAFC; color:#334155; border-color:#CBD5E1; }
+    .badge.timeline-NEGOCIACAO{ background:#ECFDF5; color:#047857; border-color:#A7F3D0; }
+    .badge.timeline-ENCERRAMENTO{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+    .badge.timeline-CHECKIN{ background:#FFFBEB; color:#B45309; border-color:#FDE68A; }
+    .mini-meta{ display:flex; flex-wrap:wrap; gap:6px; }
+    .timeline-box{ margin-top: 14px; padding: 0; overflow: hidden; }
+    .timeline-list{ list-style:none; margin:0; padding:0; }
+    .timeline-item{
+      display:grid;
+      grid-template-columns: 120px minmax(110px, 160px) 1fr;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      align-items:flex-start;
+    }
+    .timeline-item:last-child{ border-bottom: 0; }
+    .timeline-date{ font-size:12px; font-weight:900; color:var(--text); }
+    .timeline-content{ min-width:0; }
+    .timeline-text{ white-space:normal; word-break:break-word; }
+    .timeline-sub{ margin-top:6px; font-size:12px; color:var(--muted); display:flex; flex-wrap:wrap; gap:10px; }
+    .btn-link-historico{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: var(--euro-blue);
+      color: #fff;
+      text-decoration:none;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .btn-link-historico:hover{ filter: brightness(.96); }
 
-  <!-- Cabeçalho -->
-  <div style="border:1px solid var(--border);border-radius:14px;padding:14px;background:#fff;">
-    <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
-      <div>
-        <label>Cliente / Razão Social</label>
-        <div style="font-weight:900;">{{ contrato["RazaoSocial"] or "-" }}</div>
-      </div>
-      <div>
-        <label>Marca exibida</label>
-        <div style="font-weight:900;">{{ contrato["MarcaExibida"] or "-" }}</div>
-      </div>
+    @media (max-width: 1280px){
+      .summary-grid{ grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+    }
+    @media (max-width: 1100px){
+      .kv{ grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+      .timeline-item{ grid-template-columns: 1fr; gap: 8px; }
+    }
+    @media (max-width: 760px){
+      .kv, .summary-grid{ grid-template-columns: 1fr; }
+      .tbl th, .tbl td{ white-space: normal; }
+    }
+  </style>
 
-      <div>
-        <label>CNPJ</label>
-        <div style="font-weight:900;">{{ contrato["CNPJ"] or "-" }}</div>
-      </div>
-      <div>
-        <label>CPF</label>
-        <div style="font-weight:900;">{{ contrato["CPF"] or "-" }}</div>
-      </div>
-
-      <div>
-        <label>Data Lançamento</label>
-        <div style="font-weight:900;">
-          {% set dl = contrato["DataLancamento"] %}
-          {% if dl and dl.strftime %}
-            {{ dl.strftime('%d/%m/%Y') }}
-          {% elif dl %}
-            {{ dl }}
-          {% else %}
-            -
-          {% endif %}
-        </div>
-      </div>
-      <div>
-        <label>Cidade de exibição</label>
-        <div style="font-weight:900;">{{ contrato["CidadeExibicao"] or "-" }}</div>
-      </div>
-
-      <div>
-        <label>Origem</label>
-        <div style="font-weight:900;">{{ contrato["Origem"] or "-" }}</div>
-      </div>
-      <div>
-        <label>Tipo Documento</label>
-        <div style="font-weight:900;">{{ contrato["TipoDocumento"] or "-" }}</div>
-      </div>
-
-      <div>
-        <label>Vendedor (DimVendedor)</label>
-        <div style="font-weight:900;">{{ contrato["DimVendedor"] or "-" }}</div>
-      </div>
-      <div>
-        <label>Qtde Pontos / Faces</label>
-        <div style="font-weight:900;">
-          {{ contrato["QtdeCodPonto"] or 0 }} ponto(s) • {{ contrato["QtdeCodFace"] or 0 }} face(s)
-        </div>
+  <div class="kv">
+    <div class="item">
+      <div class="k">Data de Lançamento</div>
+      <div class="v">
+        {% if contrato.DataLancamento %}
+          {{ contrato.DataLancamento.strftime("%d/%m/%Y") }}
+        {% else %}
+          —
+        {% endif %}
       </div>
     </div>
 
-    <div style="height:14px;"></div>
+    <div class="item">
+      <div class="k">Cidade de Exibição</div>
+      <div class="v">{{ contrato.CidadeExibicao or "—" }}</div>
+    </div>
 
-    <!-- Totais -->
-    <div style="border-top:1px dashed var(--border);padding-top:12px;">
-      <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
-        <div>
-          <label>Total bruto (contrato)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalBrutoContrato"] or 0)) }}
-          </div>
-        </div>
-        <div>
-          <label>Total líquido mensal (final)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalFaturamentoLiquidoMensalFinal"] or 0)) }}
-          </div>
-        </div>
+    <div class="item">
+      <div class="k">Razão Social</div>
+      <div class="v">{{ contrato.RazaoSocial or "—" }}</div>
+    </div>
 
-        <div>
-          <label>Total líquido (AGBR CT Acordo)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalLiquidoContratoAGBRCTACORDO"] or 0)) }}
-          </div>
-        </div>
-        <div>
-          <label>Total líquido (AGBR Vend/Ger/Coor)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalLiquidoContratoAGBRVENDGERCOOR"] or 0)) }}
-          </div>
-        </div>
+    <div class="item">
+      <div class="k">Marca Exibida</div>
+      <div class="v">{{ contrato.MarcaExibida or "—" }}</div>
+    </div>
 
-        <div>
-          <label>Agência (mensal)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalValorMensalAgencia"] or 0)) }}
-          </div>
-        </div>
-        <div>
-          <label>Bureau (mensal)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalValorBureauMensal"] or 0)) }}
-          </div>
-        </div>
+    <div class="item">
+      <div class="k">CNPJ</div>
+      <div class="v">{{ contrato.CNPJ or "—" }}</div>
+    </div>
 
-        <div>
-          <label>Carta Acordo (mensal)</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalValorAcordoMensal"] or 0)) }}
-          </div>
-        </div>
-        <div>
-          <label>Outras comissões</label>
-          <div style="font-weight:900;">
-            R$ {{ "%.2f"|format((contrato["TotalOutrasComissoes"] or 0)) }}
-          </div>
-        </div>
+    <div class="item">
+      <div class="k">Origem</div>
+      <div class="v">{{ contrato.Origem or "—" }}</div>
+    </div>
+
+    <div class="item">
+      <div class="k">Tipo Documento</div>
+      <div class="v">{{ contrato.TipoDocumento or "—" }}</div>
+    </div>
+
+    <div class="item">
+      <div class="k">Qtde CodPonto / CodFace</div>
+      <div class="v">{{ contrato.QtdeCodPonto if contrato.QtdeCodPonto is defined and contrato.QtdeCodPonto is not none else 0 }} / {{ contrato.QtdeCodFace if contrato.QtdeCodFace is defined and contrato.QtdeCodFace is not none else 0 }}</div>
+    </div>
+
+    <div class="item">
+      <div class="k">Total Bruto Contrato</div>
+      <div class="v">
+        {{ ("R$ " ~ "{:,.2f}".format(contrato.TotalBrutoContrato).replace(",", "X").replace(".", ",").replace("X", "."))
+           if contrato.TotalBrutoContrato is defined and contrato.TotalBrutoContrato is not none else "—" }}
       </div>
+    </div>
+
+    <div class="item">
+      <div class="k">Total Líquido Mensal Final</div>
+      <div class="v">
+        {{ ("R$ " ~ "{:,.2f}".format(contrato.TotalFaturamentoLiquidoMensalFinal).replace(",", "X").replace(".", ",").replace("X", "."))
+           if contrato.TotalFaturamentoLiquidoMensalFinal is defined and contrato.TotalFaturamentoLiquidoMensalFinal is not none else "—" }}
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="k">Atualização</div>
+      <div class="v">
+        {% if contrato.DataAtualizacao %}
+          {{ contrato.DataAtualizacao.strftime("%d/%m/%Y %H:%M") }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="k">ID Cliente Euromídia</div>
+      <div class="v">{{ contrato.IDDimClientesEuromidia or contrato.IDEmpresa or "—" }}</div>
     </div>
   </div>
 
-  <div style="height:16px;"></div>
-
-  <!-- Itens -->
-  <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff;">
-    <div style="padding:12px 14px;border-bottom:1px solid var(--border);font-weight:900;color:var(--euro-blue);">
-      Itens do Contrato ({{ itens|length }})
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Painéis / Faces do Contrato</h2>
+    <div class="muted" style="font-size:12px;margin-top:4px;">
+      Estes são os pontos e faces atualmente vinculados ao contrato.
     </div>
 
     <div class="overflow-x">
-      <table style="width:100%;border-collapse:collapse;min-width:1650px;">
+      <table class="tbl">
         <thead>
-          <tr style="background:#F8FAFC;border-bottom:1px solid var(--border);">
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">CodPonto</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">CodFace</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Cota</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Período</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Vendedor</th>
-
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Bruto Mensal</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Líquido Mensal</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Líquido Final</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Permuta</th>
-
-            <!-- ✅ Novas colunas (margem agregada por face) -->
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Fat. Líq Final (Face)</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Custo Alocado (Face)</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Margem (R$) (Face)</th>
-            <th style="text-align:left;padding:10px 12px;font-weight:900;">Margem (%) (Face)</th>
+          <tr>
+            <th>CodPonto</th>
+            <th>CodFace</th>
+            <th>Cidade</th>
+            <th>Marca</th>
+            <th>Início</th>
+            <th>Término</th>
+            <th>Status</th>
           </tr>
         </thead>
-
         <tbody>
-          {% for it in itens %}
-            {% set di = it["DataInicioPrevisto"] %}
-            {% set df = it["DataTerminoPrevisto"] %}
-            {% set perm = it["Permuta"] %}
-
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:10px 12px;font-weight:900;">{{ it["CodPonto"] or "-" }}</td>
-              <td style="padding:10px 12px;font-weight:900;">{{ it["CodFace"] or "-" }}</td>
-              <td style="padding:10px 12px;font-weight:900;">{{ it["Cota"] or "-" }}</td>
-
-              <td style="padding:10px 12px;font-weight:900;">
-                {% if di and di.strftime %}
-                  {{ di.strftime('%d/%m/%Y') }}
-                {% elif di %}
-                  {{ di }}
-                {% else %}
-                  -
-                {% endif %}
-                →
-                {% if df and df.strftime %}
-                  {{ df.strftime('%d/%m/%Y') }}
-                {% elif df %}
-                  {{ df }}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-
-              <td style="padding:10px 12px;font-weight:900;">{{ it["Vendedor"] or "-" }}</td>
-
-              <td style="padding:10px 12px;font-weight:900;">
-                R$ {{ "%.2f"|format((it["FaturamentoBrutoMensal"] or 0)) }}
-              </td>
-              <td style="padding:10px 12px;font-weight:900;">
-                R$ {{ "%.2f"|format((it["FaturamentoLiquidoMensal"] or 0)) }}
-              </td>
-              <td style="padding:10px 12px;font-weight:900;">
-                R$ {{ "%.2f"|format((it["FaturamentoLiquidoMensalFinal"] or 0)) }}
-              </td>
-
-              <td style="padding:10px 12px;font-weight:900;">
-                {% if perm in (1, True, "1", "S", "s", "SIM", "Sim", "sim", "TRUE", "True", "true") %}
-                  SIM
-                {% else %}
-                  NÃO
-                {% endif %}
-              </td>
-
-              <!-- ✅ Novos campos vindos do SQL (agregado por face) -->
-              <td style="padding:10px 12px;font-weight:900;">
-                {% if it["FatLiquidoFinal_Soma"] is not none %}
-                  R$ {{ "%.2f"|format(it["FatLiquidoFinal_Soma"]) }}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-
-              <td style="padding:10px 12px;font-weight:900;">
-                {% if it["CustoMensalAlocado_Soma"] is not none %}
-                  R$ {{ "%.2f"|format(it["CustoMensalAlocado_Soma"]) }}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-
-              <td style="padding:10px 12px;font-weight:900;">
-                {% if it["MargemR_Face_Soma"] is not none %}
-                  R$ {{ "%.2f"|format(it["MargemR_Face_Soma"]) }}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-
-              <td style="padding:10px 12px;font-weight:900;">
-                {% if it["MargemPct_Face"] is not none %}
-                  {{ "%.2f"|format(it["MargemPct_Face"]) }}%
-                {% else %}
-                  -
-                {% endif %}
-              </td>
+          {% if itens and itens|length > 0 %}
+            {% for it in itens %}
+              <tr>
+                <td>{{ it.CodPonto or "—" }}</td>
+                <td>{{ it.CodFace or "—" }}</td>
+                <td>{{ it.CidadeExibicao or "—" }}</td>
+                <td class="td-wrap">{{ it.MarcaExibida or "—" }}</td>
+                <td>
+                  {% if it.DataInicioPrevisto %}
+                    {{ it.DataInicioPrevisto.strftime("%d/%m/%Y") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {% if it.DataTerminoPrevisto %}
+                    {{ it.DataTerminoPrevisto.strftime("%d/%m/%Y") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ it.Status or "—" }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="7" class="muted" style="padding:14px;">Sem painéis/faces vinculados.</td>
             </tr>
-          {% endfor %}
+          {% endif %}
         </tbody>
       </table>
     </div>
   </div>
 
-</div>
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Resumo dos Atendimentos</h2>
+    <div class="muted" style="font-size:12px;margin-top:4px;">
+      Visão consolidada dos cards, movimentações e check-ins vinculados a este contrato.
+    </div>
 
+    <div class="summary-grid">
+      <div class="summary-card">
+        <div class="k">Total de Atendimentos</div>
+        <div class="v">{{ resumo_atendimentos.Total or 0 }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="k">Abertos</div>
+        <div class="v">{{ resumo_atendimentos.Abertos or 0 }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="k">Concluídos</div>
+        <div class="v">{{ resumo_atendimentos.Concluidos or 0 }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="k">Encerrados</div>
+        <div class="v">{{ resumo_atendimentos.Encerrados or 0 }}</div>
+      </div>
+      <div class="summary-card">
+        <div class="k">Último Atendimento</div>
+        <div class="v small">
+          {% if resumo_atendimentos.UltimoAtendimento %}
+            {{ resumo_atendimentos.UltimoAtendimento.strftime("%d/%m/%Y %H:%M") }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+      <div class="summary-card">
+        <div class="k">Check-ins do Contrato</div>
+        <div class="v small">
+          <div>{{ resumo_atendimentos.TotalCheckins or 0 }} registro(s)</div>
+          <div style="margin-top:6px;">
+            {% if resumo_atendimentos.UltimoCheckin %}
+              Último em {{ resumo_atendimentos.UltimoCheckin.strftime("%d/%m/%Y %H:%M") }}
+            {% else %}
+              Sem check-in
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Atendimentos do Contrato</h2>
+    <div class="muted" style="font-size:12px;margin-top:4px;">
+      Cards do Kanban relacionados ao contrato por vínculo histórico contrato × item × card.
+    </div>
+
+    {% if cards_relacionados and cards_relacionados|length > 0 %}
+      <div class="overflow-x">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>ID Card</th>
+              <th>Título</th>
+              <th>Tipo</th>
+              <th>Fase Atual</th>
+              <th>Status</th>
+              <th>Criado em</th>
+              <th>Atualizado em</th>
+              <th>Usuário</th>
+              <th>Itens Afetados</th>
+              <th>Histórico</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for card in cards_relacionados %}
+              <tr>
+                <td>#{{ card.IDFatoKanbanCard }}</td>
+                <td class="td-wrap">
+                  <div style="font-weight:800;">{{ card.Titulo or "—" }}</div>
+                  {% if card.Descricao %}
+                    <div class="muted" style="font-size:12px;margin-top:4px;">{{ card.Descricao }}</div>
+                  {% endif %}
+                </td>
+                <td><span class="badge tipo">{{ card.TipoCard }}</span></td>
+                <td class="td-wrap">{{ card.NomeFase or "—" }}</td>
+                <td>
+                  <span class="badge {{ card.Situacao }}">{{ card.NomeStatus or card.Situacao|capitalize }}</span>
+                </td>
+                <td>
+                  {% if card.CriadoEm %}
+                    {{ card.CriadoEm.strftime("%d/%m/%Y %H:%M") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {% if card.DataReferencia %}
+                    {{ card.DataReferencia.strftime("%d/%m/%Y %H:%M") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td class="td-wrap">{{ card.Usuario or "—" }}</td>
+                <td class="td-wrap">
+                  {% if card.ItensAfetados and card.ItensAfetados|length > 0 %}
+                    <div class="mini-meta">
+                      {% for item in card.ItensAfetados %}
+                        <span class="badge tipo">{{ item }}</span>
+                      {% endfor %}
+                    </div>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  <a class="btn-link-historico" href="{{ card.HrefHistorico }}" target="_blank" rel="noopener noreferrer">Ver histórico</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-box" style="margin-top:14px;">
+        Nenhum atendimento encontrado para este contrato.
+      </div>
+    {% endif %}
+  </div>
+
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Linha do Tempo dos Atendimentos</h2>
+    <div class="muted" style="font-size:12px;margin-top:4px;">
+      Eventos recentes consolidados: movimentações, observações, logs, negociações, encerramentos e check-ins.
+    </div>
+
+    {% if timeline_atendimentos and timeline_atendimentos|length > 0 %}
+      <div class="timeline-box">
+        <ul class="timeline-list">
+          {% for evento in timeline_atendimentos %}
+            <li class="timeline-item">
+              <div class="timeline-date">
+                {{ evento.DataEvento.strftime("%d/%m/%Y %H:%M") if evento.DataEvento else "—" }}
+              </div>
+              <div>
+                <span class="badge timeline-{{ evento.TipoEvento }}">{{ evento.TipoEvento }}</span>
+              </div>
+              <div class="timeline-content">
+                <div class="timeline-text">{{ evento.Texto or "—" }}</div>
+                <div class="timeline-sub">
+                  {% if evento.IDFatoKanbanCard %}
+                    <span>Card #{{ evento.IDFatoKanbanCard }}</span>
+                  {% else %}
+                    <span>Contrato</span>
+                  {% endif %}
+                  {% if evento.NomeUsuario %}
+                    <span>Usuário: {{ evento.NomeUsuario }}</span>
+                  {% endif %}
+                  {% if evento.Extra and evento.Extra.CodPonto %}
+                    <span>Ponto/Face: {{ evento.Extra.CodPonto or "—" }}/{{ evento.Extra.CodFace or "—" }}</span>
+                  {% endif %}
+                </div>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% else %}
+      <div class="empty-box" style="margin-top:14px;">
+        Ainda não há eventos para montar a timeline deste contrato.
+      </div>
+    {% endif %}
+  </div>
+
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Itens do Contrato</h2>
+    <div class="muted" style="font-size:12px;margin-top:4px;">
+      Total de itens: <b>{{ itens|length }}</b>
+    </div>
+
+    <div class="overflow-x">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>ID Item</th>
+            <th>CodPonto</th>
+            <th>CodFace</th>
+            <th>Cota</th>
+            <th>Início</th>
+            <th>Término</th>
+            <th>Cidade</th>
+            <th>Marca</th>
+            <th>Faturamento Líquido Mensal Final</th>
+            <th>Atendimentos</th>
+            <th>Último Atendimento</th>
+            <th>Check-ins</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if itens and itens|length > 0 %}
+            {% for it in itens %}
+              <tr>
+                <td>#{{ it.IDFatoControleContratosItens or "—" }}</td>
+                <td>{{ it.CodPonto or "—" }}</td>
+                <td class="td-ellipsis">{{ it.CodFace or "—" }}</td>
+                <td>{{ it.Cota or 0 }}</td>
+                <td>
+                  {% if it.DataInicioPrevisto %}
+                    {{ it.DataInicioPrevisto.strftime("%d/%m/%Y") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {% if it.DataTerminoPrevisto %}
+                    {{ it.DataTerminoPrevisto.strftime("%d/%m/%Y") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ it.CidadeExibicao or "—" }}</td>
+                <td class="td-wrap">{{ it.MarcaExibida or "—" }}</td>
+                <td>
+                  {{ ("R$ " ~ "{:,.2f}".format(it.FaturamentoLiquidoMensalFinal).replace(",", "X").replace(".", ",").replace("X", "."))
+                     if it.FaturamentoLiquidoMensalFinal is not none else "—" }}
+                </td>
+                <td>{{ it.QtdeAtendimentos or 0 }}</td>
+                <td>
+                  {% if it.UltimoAtendimentoEm %}
+                    {{ it.UltimoAtendimentoEm.strftime("%d/%m/%Y %H:%M") }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {{ it.QtdeCheckins or 0 }}
+                  {% if it.UltimoCheckinEm %}
+                    <div class="muted" style="font-size:11px;margin-top:4px;">{{ it.UltimoCheckinEm.strftime("%d/%m/%Y %H:%M") }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="12" class="muted" style="padding:14px;">Sem itens vinculados.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

@@ -9499,7 +9499,6 @@ def _obter_imagens_painel_orcamento(
     ]
 
 
-
 def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
     detalhe = _obter_card_detalhe_payload(int(id_card))
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
@@ -9515,7 +9514,7 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
     }
 
     itens_orcamento: list[dict[str, Any]] = []
-    valor_total = Decimal("0")
+    valor_total_geral = Decimal("0")
 
     for indice, item in enumerate(painel_faces, start=1):
         if not isinstance(item, dict):
@@ -9523,11 +9522,18 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
 
         valor_final = _valor_decimal(item.get("ValorVendaFinal"))
         preco_venda_atual = _valor_decimal(item.get("ValorTabela"))
+        valor_negociado = _valor_decimal(item.get("NovoValor"))
+        percentual_desconto = _valor_decimal(item.get("PercentualDesconto"))
+        exibicoes_dia = _decimal_para_float(item.get("ExibicoesDia"))
+
         valor_exibido = valor_final if valor_final is not None else preco_venda_atual
         origem_preco = "Valor final" if valor_final is not None else "Preço de venda atual"
 
         if valor_exibido is not None:
-            valor_total += valor_exibido
+            valor_total_geral += valor_exibido
+
+        valor_total_item = preco_venda_atual if preco_venda_atual is not None else valor_exibido
+        valor_negociado_exibicao = valor_negociado if valor_negociado is not None else valor_final
 
         imagens = _obter_imagens_painel_orcamento(
             id_face_painel=item.get("IDDimFacesPaineis"),
@@ -9543,20 +9549,27 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
                 "id_face_painel": int(item.get("IDDimFacesPaineis") or 0) or None,
                 "nome_painel": _montar_nome_painel_orcamento(item),
                 "tipo_painel": _normalizar_texto(item.get("TipoPainel")),
+                "tipo_produto": _normalizar_texto(item.get("TipoPainel")),
                 "cod_ponto": _normalizar_texto(item.get("CodPonto")),
                 "cod_face": _normalizar_texto(item.get("CodFace")),
                 "endereco": _montar_endereco_painel_orcamento(item),
+                "localizacao": _montar_endereco_painel_orcamento(item),
                 "logradouro": _normalizar_texto(item.get("Logradouro")),
                 "numero": _normalizar_texto(item.get("Numero")),
                 "bairro": _normalizar_texto(item.get("Bairro")),
                 "cidade": _normalizar_texto(item.get("Cidade")),
+                "municipio": _normalizar_texto(item.get("Cidade")),
                 "uf": _normalizar_texto(item.get("UF")),
                 "periodo_exibicao": _normalizar_texto(item.get("PeriodoExibicao")),
-                "exibicoes_dia": int(item.get("ExibicoesDia") or 0) or None,
+                "exibicoes_dia": exibicoes_dia,
                 "tabela": _normalizar_texto(item.get("Tabela")),
                 "politica_trocas": _normalizar_texto(item.get("PoliticaTrocas")),
                 "valor_troca": _decimal_para_float(item.get("ValorTroca")),
                 "preco_venda_atual": _decimal_para_float(preco_venda_atual),
+                "valor_total": _decimal_para_float(valor_total_item),
+                "novo_valor": _decimal_para_float(valor_negociado),
+                "valor_negociado": _decimal_para_float(valor_negociado_exibicao),
+                "percentual_desconto": _decimal_para_float(percentual_desconto),
                 "valor_final": _decimal_para_float(valor_final),
                 "valor_exibido": _decimal_para_float(valor_exibido),
                 "origem_preco": origem_preco,
@@ -9580,12 +9593,10 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
         "itens": itens_orcamento,
         "resumo": {
             "quantidade_paineis": len(itens_orcamento),
-            "valor_total": float(valor_total),
+            "valor_total": float(valor_total_geral),
             "data_geracao": datetime.now().strftime("%d/%m/%Y %H:%M"),
         },
     }
-
-
 
 
 
@@ -10775,38 +10786,54 @@ def api_card_detalhe(id_card: int):
 
 
 
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/orcamento", methods=["GET"])
 @login_required
 @limiter.limit("60/minute")
 def api_card_orcamento(id_card: int):
     _assert_login()
 
-    id_emp = _id_empresa_usuario_or_403()
-    card_escopo = _obter_card_autorizado(id_card)
-    id_kanban = int(card_escopo.get("IDDimKanban") or 0)
+    try:
+        id_emp = _id_empresa_usuario_or_403()
+        card_escopo = _obter_card_autorizado(id_card)
+        id_kanban = int(card_escopo.get("IDDimKanban") or 0)
 
-    usar_cache = not _request_pede_dado_fresco()
+        usar_cache = not _request_pede_dado_fresco()
 
-    chave = _chave_cache_json(
-        "kanban:api:card:orcamento",
-        id_emp,
-        id_kanban,
-        id_card,
-        _versao_kanban(id_kanban),
-        _versao_card(id_card),
-    )
+        chave = _chave_cache_json(
+            "kanban:api:card:orcamento",
+            id_emp,
+            id_kanban,
+            id_card,
+            _versao_kanban(id_kanban),
+            _versao_card(id_card),
+        )
 
-    if usar_cache:
-        em_cache = _cache_json_get(chave)
-        if em_cache is not None:
-            return jsonify(em_cache)
+        if usar_cache:
+            em_cache = _cache_json_get(chave)
+            if em_cache is not None:
+                return jsonify(em_cache)
 
-    payload = _montar_orcamento_card_payload(id_card)
+        payload = _montar_orcamento_card_payload(id_card)
 
-    if usar_cache:
-        _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
+        if usar_cache:
+            _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
-    return jsonify(payload)
+        return jsonify(payload)
+
+    except Exception as exc:
+        current_app.logger.exception(
+            "Erro ao gerar orçamento do card id_card=%s: %s",
+            id_card,
+            exc,
+        )
+        return jsonify(
+            {
+                "ok": False,
+                "msg": "Não foi possível gerar o orçamento deste card."
+            }
+        ), 500
 
 
 
