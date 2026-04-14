@@ -20103,8 +20103,11 @@ def api_card_atualizar(id_card: int):
         )
 
         if contexto_tipo_contrato["tipo_contrato"] in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
-            if not snapshot_solicitacao.get("sincronizado"):
-                motivo_snapshot = snapshot_solicitacao.get("motivo") or "sincronizacao_solicitacao_nao_realizada"
+            motivo_snapshot = snapshot_solicitacao.get("motivo") or "sincronizacao_solicitacao_nao_realizada"
+            if (
+                not snapshot_solicitacao.get("sincronizado")
+                and motivo_snapshot != "nenhum_item_snapshot_montado"
+            ):
                 raise RuntimeError(
                     "Falha ao sincronizar a solicitação de contrato após salvar o card. "
                     f"Motivo: {motivo_snapshot}"

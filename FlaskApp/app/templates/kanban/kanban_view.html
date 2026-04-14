@@ -3090,6 +3090,7 @@
   let termoBusca = "";
   let versaoConcorrenciaCardAberto = "";
   let cardAbertoConflitoExterno = false;
+  let estadoInicialCardAberto = null;
   let faseEditandoId = null;
 
   let kanbanCfg = {};
@@ -9033,6 +9034,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     cardAbertoId = null;
     versaoConcorrenciaCardAberto = "";
     cardAbertoConflitoExterno = false;
+    estadoInicialCardAberto = null;
     msgCard.style.display = "none";
     msgCard.textContent = "";
     limparDadosNovoContratoFormulario();
@@ -10195,6 +10197,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       preencherPainelFacesDoCard(painelFaces);
     }
 
+    estadoInicialCardAberto = montarEstadoEdicaoCardAtual();
     atualizarEstadoSalvarCard();
 
     if (!versaoConcorrenciaCardAberto) {
@@ -10435,6 +10438,73 @@ async function moverCard(idCard, idFasePara, posicao) {
     return { ok: true };
   }
 
+  function normalizarPainelFacesParaComparacao(lista){
+    return (Array.isArray(lista) ? lista : [])
+      .map((item, indice) => ({
+        ordem: idNum(item?.Ordem ?? item?.ordem ?? (indice + 1)),
+        id_painel: idNum(item?.IDDimPaineisEuromidia ?? item?.id_painel ?? 0) || null,
+        id_face: idNum(item?.IDDimFacesPaineis ?? item?.id_face ?? 0) || null,
+        cod_ponto: safeStr(item?.CodPonto ?? item?.cod_ponto ?? "").trim(),
+        cod_face: safeStr(item?.CodFace ?? item?.cod_face ?? "").trim().toUpperCase(),
+        tipo_painel: safeStr(item?.TipoPainel ?? item?.tipo_painel ?? "").trim(),
+        ano_custo: idNum(item?.AnoCusto ?? item?.ano_custo ?? 0) || null,
+        custo_tabela: safeStr(item?.CustoTabela ?? item?.custo_tabela ?? "").trim(),
+        id_tabela_preco: idNum(item?.IDDimTabelaPrecosEuromidia ?? item?.id_tabela_preco ?? item?.id_preco ?? 0) || null,
+        periodo_exibicao: safeStr(item?.PeriodoExibicao ?? item?.periodo_exibicao ?? "").trim(),
+        exibicoes_dia: safeStr(item?.ExibicoesDia ?? item?.exibicoes_dia ?? "").trim(),
+        valor_tabela: safeStr(item?.ValorTabela ?? item?.valor_tabela ?? "").trim(),
+        tabela: safeStr(item?.Tabela ?? item?.tabela ?? "").trim(),
+        politica_trocas: safeStr(item?.PoliticaTrocas ?? item?.politica_trocas ?? "").trim(),
+        valor_troca: safeStr(item?.ValorTroca ?? item?.valor_troca ?? "").trim(),
+        novo_valor: safeStr(item?.NovoValor ?? item?.novo_valor ?? "").trim(),
+        percentual_desconto: safeStr(item?.PercentualDesconto ?? item?.percentual_desconto ?? "").trim(),
+        valor_venda_final: safeStr(item?.ValorVendaFinal ?? item?.valor_venda_final ?? "").trim(),
+        margem_valor: safeStr(item?.MargemValor ?? item?.margem_valor ?? "").trim(),
+        margem_percentual: safeStr(item?.MargemPercentual ?? item?.margem_percentual ?? "").trim(),
+        data_inicio: safeStr(item?.DataInicio ?? item?.data_inicio ?? "").trim(),
+        data_fim: safeStr(item?.DataFim ?? item?.data_fim ?? "").trim()
+      }))
+      .filter((item) => {
+        return !!(
+          item.id_painel || item.id_face || item.cod_ponto || item.cod_face || item.tipo_painel ||
+          item.ano_custo || item.custo_tabela || item.id_tabela_preco || item.periodo_exibicao ||
+          item.exibicoes_dia || item.valor_tabela || item.tabela || item.politica_trocas ||
+          item.valor_troca || item.novo_valor || item.percentual_desconto || item.valor_venda_final ||
+          item.margem_valor || item.margem_percentual || item.data_inicio || item.data_fim
+        );
+      })
+      .sort((a, b) => a.ordem - b.ordem);
+  }
+
+  function montarEstadoEdicaoCardAtual(){
+    const fluxoContratoAtual = obterFluxoContratoAtual();
+    const usarDadosNovoContrato = !!fluxoContratoAtual.usar_novo_contrato;
+    const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
+    const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
+
+    return {
+      titulo: safeStr(document.getElementById("cardTitulo")?.value || "").trim(),
+      descricao: safeStr(document.getElementById("cardDescricao")?.value || ""),
+      id_empresa: selectEmpresaCard?.value ? Number(selectEmpresaCard.value) : null,
+      id_tipo_cliente_desconto: selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null,
+      id_origem_atendimento: selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null,
+      id_contrato_existente: fluxoContratoAtual.id_contrato,
+      id_controle_contrato: fluxoContratoAtual.id_contrato,
+      tipo_contrato_card: fluxoContratoAtual.modo_contrato,
+      cod_ponto_contrato: safeStr(fluxoContratoAtual.cod_ponto_contrato || "").trim(),
+      cod_face_contrato: safeStr(fluxoContratoAtual.cod_face_contrato || "").trim().toUpperCase(),
+      id_empresa_agencia: usarDadosNovoContrato && selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
+      marca: usarDadosNovoContrato ? (safeStr(inputMarcaCard?.value || "").trim() || null) : null,
+      telefone: usarDadosNovoContrato ? (normalizarTelefoneContato(inputTelefoneCard?.value || "") || null) : null,
+      email: usarDadosNovoContrato ? (safeStr(inputEmailCard?.value || "").trim() || null) : null,
+      painel_faces: painelFaces
+    };
+  }
+
+  function estadosEdicaoCardSaoIguais(estadoA, estadoB){
+    return JSON.stringify(estadoA || {}) === JSON.stringify(estadoB || {});
+  }
+
   btnSalvarCard.addEventListener("click", async () => {
     const titulo = (document.getElementById("cardTitulo").value || "").trim();
     const descricao = document.getElementById("cardDescricao").value || "";
@@ -10465,39 +10535,20 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     const idCardSalvo = idNum(cardAbertoId);
 
-    const fluxoContratoAtual = obterFluxoContratoAtual();
-    const usarDadosNovoContrato = !!fluxoContratoAtual.usar_novo_contrato;
-    const idEmpresaAgencia = usarDadosNovoContrato && selectAgenciaCard?.value
-      ? Number(selectAgenciaCard.value)
-      : null;
-    const marcaCard = usarDadosNovoContrato ? safeStr(inputMarcaCard?.value || "").trim() : "";
-    const telefoneCard = usarDadosNovoContrato ? normalizarTelefoneContato(inputTelefoneCard?.value || "") : "";
-    const emailCard = usarDadosNovoContrato ? safeStr(inputEmailCard?.value || "").trim() : "";
-
+    const estadoAtualEdicao = montarEstadoEdicaoCardAtual();
     const payload = {
-      titulo,
-      descricao,
-      id_empresa: idEmpresa,
-      id_tipo_cliente_desconto: idTipoClienteDesconto,
-      id_origem_atendimento: idOrigemAtendimento,
-      versao_concorrencia: versaoConcorrenciaCardAberto,
-      id_contrato_existente: fluxoContratoAtual.id_contrato,
-      id_controle_contrato: fluxoContratoAtual.id_contrato,
-      tipo_contrato_card: fluxoContratoAtual.modo_contrato,
-      cod_ponto_contrato: fluxoContratoAtual.cod_ponto_contrato,
-      cod_face_contrato: fluxoContratoAtual.cod_face_contrato,
-      id_empresa_agencia: idEmpresaAgencia,
-      marca: marcaCard || null,
-      telefone: telefoneCard || null,
-      email: emailCard || null
+      ...estadoAtualEdicao,
+      versao_concorrencia: versaoConcorrenciaCardAberto
     };
 
-    const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
-    if (painelFaceLigado) {
-      const itensPainelFace = coletarPainelFacesDoFormulario();
-      if (Array.isArray(itensPainelFace)) {
-        payload.painel_faces = itensPainelFace;
-      }
+    const notaPendente = safeStr(inputNotaTexto?.value || "").trim();
+    if (estadoInicialCardAberto && estadosEdicaoCardSaoIguais(estadoInicialCardAberto, estadoAtualEdicao) && !notaPendente) {
+      fecharModalCard();
+      return;
+    }
+
+    if (!Array.isArray(payload.painel_faces)) {
+      payload.painel_faces = [];
     }
 
     const r = await fetch(`/kanban/api/cards/${idCardSalvo}`, {
