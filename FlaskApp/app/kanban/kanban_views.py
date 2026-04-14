@@ -12,6 +12,12 @@ from flask_socketio import disconnect, emit, join_room, leave_room
 from ..extensions import cache, db, limiter, socketio
 from decimal import Decimal
 
+from ..retry_deadlock import (
+    eh_deadlock_sql_server,
+    executar_transacao_com_retry_deadlock_ou_enfileirar,
+)
+
+
 
 """Kanban Euromidia Comercial"""
 
@@ -3029,6 +3035,508 @@ def _sala_kanban(id_kanban: int) -> str:
 
 def _obter_celery_app() -> Any | None:
     return current_app.extensions.get("celery")
+
+
+
+
+
+
+
+
+
+def _enfileirar_retry_movimento_card(payload: dict[str, Any]) -> str | None:
+    """
+    Envio uma operacao de movimento do card para retry rapido no Redis/Celery.
+    Uso isso somente quando o retry sincronico por deadlock se esgota.
+    """
+    celery_app = _obter_celery_app()
+    nome_task = current_app.config.get("KANBAN_DEADLOCK_TASK_NAME")
+    nome_fila = current_app.config.get("KANBAN_DEADLOCK_QUEUE_NAME", "kanban_retry_rapido")
+    countdown = int(current_app.config.get("KANBAN_DEADLOCK_COUNTDOWN", 2) or 2)
+    expires = int(current_app.config.get("KANBAN_DEADLOCK_EXPIRES", 30) or 30)
+
+    if not celery_app or not nome_task:
+        current_app.logger.warning(
+            "Celery/task de deadlock nao configurados. task=%s fila=%s",
+            nome_task,
+            nome_fila,
+        )
+        return None
+
+    try:
+        task = celery_app.send_task(
+            nome_task,
+            kwargs={"payload": payload},
+            queue=nome_fila,
+            countdown=countdown,
+            expires=expires,
+        )
+        return getattr(task, "id", None)
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao enfileirar retry de movimento do card no Redis/Celery. payload=%s",
+            payload,
+        )
+        return None
+
+
+
+
+
+
+
+def _executar_movimento_card_core(
+    *,
+    id_card: int,
+    id_usuario: int,
+    id_emp: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Eu executo a transacao principal de mover card.
+    Nao dou commit aqui.
+    Nao emito socket aqui.
+    Nao invalido cache aqui.
+    """
+    row = _obter_card_autorizado(id_card)
+    if not row:
+        raise ValueError("Card não encontrado.")
+
+    id_kanban = int(row.get("IDDimKanban") or 0)
+    id_fase_de = int(row.get("IDDimKanbanFaseAtual") or 0)
+
+    id_fase_para = int(payload.get("id_fase_para") or 0)
+    posicao = str(payload.get("posicao") or "LAST").strip().upper()
+    observacao = (payload.get("observacao") or "").strip()
+    nota_movimento = (payload.get("nota_movimento") or "").strip()
+    versao_concorrencia = payload.get("versao_concorrencia")
+
+    if not id_fase_para:
+        raise ValueError("Fase de destino inválida.")
+
+    _obter_kanban_autorizado(id_kanban)
+
+    fase_destino = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                f.IDDimKanbanFase,
+                f.NomeFase,
+                f.TipoFase,
+                f.IDEmpresaProprietaria
+            FROM {TABELA_KANBAN_FASE} f
+            WHERE f.IDDimKanbanFase = :id_fase_para
+              AND f.IDDimKanban = :id_kanban
+              AND f.Ativo = 1;
+        """),
+        {
+            "id_fase_para": id_fase_para,
+            "id_kanban": id_kanban,
+        },
+    ).mappings().first()
+
+    if not fase_destino:
+        raise ValueError("Fase de destino não encontrada.")
+
+    snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+
+    has_ordem = _coluna_existe(TABELA_CARD, "OrdemNaFase")
+    has_atualizado = _coluna_existe(TABELA_CARD, "AtualizadoEm")
+    has_versao = _card_tem_versao_concorrencia()
+
+    versao_concorrencia_bytes = None
+    if has_versao:
+        versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
+        if not versao_concorrencia_bytes:
+            raise RuntimeError("Versão de concorrência inválida ou ausente.")
+
+    proxima_ordem = None
+    if has_ordem:
+        sql_next_ordem = text(f"""
+            SELECT ISNULL(MAX(fc.OrdemNaFase), 0) + 1
+            FROM {TABELA_CARD} fc
+            WHERE fc.IDDimKanban = :id_kanban
+              AND fc.IDDimKanbanFaseAtual = :id_fase_para
+              AND fc.Ativo = 1;
+        """)
+        proxima_ordem = db.session.execute(
+            sql_next_ordem,
+            {
+                "id_kanban": id_kanban,
+                "id_fase_para": id_fase_para,
+            },
+        ).scalar()
+
+        try:
+            proxima_ordem = int(proxima_ordem or 1)
+        except Exception:
+            proxima_ordem = 1
+
+    row_upd = None
+
+    if has_ordem and has_atualizado:
+        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+        params_upd = {
+            "id_fase_para": id_fase_para,
+            "ordem_na_fase": proxima_ordem,
+            "id_card": id_card,
+        }
+        if has_versao:
+            params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+            SET IDDimKanbanFaseAtual = :id_fase_para,
+                OrdemNaFase = :ordem_na_fase,
+                AtualizadoEm = GETDATE()
+            OUTPUT
+                INSERTED.IDFatoKanbanCard,
+                INSERTED.IDDimKanbanFaseAtual,
+                INSERTED.OrdemNaFase,
+                INSERTED.AtualizadoEm{output_versao}
+            WHERE IDFatoKanbanCard = :id_card
+              AND Ativo = 1{where_versao};
+        """)
+        row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
+    elif has_ordem and not has_atualizado:
+        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+        params_upd = {
+            "id_fase_para": id_fase_para,
+            "ordem_na_fase": proxima_ordem,
+            "id_card": id_card,
+        }
+        if has_versao:
+            params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+            SET IDDimKanbanFaseAtual = :id_fase_para,
+                OrdemNaFase = :ordem_na_fase
+            OUTPUT
+                INSERTED.IDFatoKanbanCard,
+                INSERTED.IDDimKanbanFaseAtual,
+                INSERTED.OrdemNaFase{output_versao}
+            WHERE IDFatoKanbanCard = :id_card
+              AND Ativo = 1{where_versao};
+        """)
+        row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
+    elif (not has_ordem) and has_atualizado:
+        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+        params_upd = {
+            "id_fase_para": id_fase_para,
+            "id_card": id_card,
+        }
+        if has_versao:
+            params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+            SET IDDimKanbanFaseAtual = :id_fase_para,
+                AtualizadoEm = GETDATE()
+            OUTPUT
+                INSERTED.IDFatoKanbanCard,
+                INSERTED.IDDimKanbanFaseAtual,
+                INSERTED.AtualizadoEm{output_versao}
+            WHERE IDFatoKanbanCard = :id_card
+              AND Ativo = 1{where_versao};
+        """)
+        row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
+    else:
+        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
+        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+        params_upd = {
+            "id_fase_para": id_fase_para,
+            "id_card": id_card,
+        }
+        if has_versao:
+            params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+
+        sql_upd = text(f"""
+            UPDATE {TABELA_CARD}
+            SET IDDimKanbanFaseAtual = :id_fase_para
+            OUTPUT
+                INSERTED.IDFatoKanbanCard,
+                INSERTED.IDDimKanbanFaseAtual{output_versao}
+            WHERE IDFatoKanbanCard = :id_card
+              AND Ativo = 1{where_versao};
+        """)
+        row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
+
+    if not row_upd:
+        raise RuntimeError("Este card foi alterado ou movido por outro usuário. Recarregue antes de tentar novamente.")
+
+    nome_fase_destino = str(fase_destino.get("NomeFase") or "").strip()
+    tipo_fase_destino = str(fase_destino.get("TipoFase") or "").strip()
+
+    id_status_movimento = _resolver_id_status_card_movimento(
+        nome_fase_para=nome_fase_destino,
+        card_inativado=False,
+    )
+
+    campos_status_pos_mov: list[str] = []
+    params_status_pos_mov: dict[str, Any] = {
+        "id_card": id_card,
+    }
+
+    if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_movimento is not None:
+        campos_status_pos_mov.append("IDDimKanbanStatusCard = :id_status_destino")
+        params_status_pos_mov["id_status_destino"] = int(id_status_movimento)
+
+    if _coluna_existe(TABELA_CARD, "StatusCard"):
+        if id_status_movimento == 3:
+            campos_status_pos_mov.append("StatusCard = :status_destino")
+            params_status_pos_mov["status_destino"] = "CONCLUIDO"
+        elif id_status_movimento == 2:
+            campos_status_pos_mov.append("StatusCard = :status_destino")
+            params_status_pos_mov["status_destino"] = "CANCELADO"
+        elif id_status_movimento == 1:
+            campos_status_pos_mov.append("StatusCard = :status_destino")
+            params_status_pos_mov["status_destino"] = "ATIVO"
+
+    if _coluna_existe(TABELA_CARD, "EncerradoEm"):
+        if id_status_movimento == 3:
+            campos_status_pos_mov.append("EncerradoEm = ISNULL(EncerradoEm, GETDATE())")
+        else:
+            campos_status_pos_mov.append("EncerradoEm = NULL")
+
+    if campos_status_pos_mov:
+        sql_status_pos_mov = text(f"""
+            UPDATE {TABELA_CARD}
+            SET {', '.join(campos_status_pos_mov)}
+            WHERE IDFatoKanbanCard = :id_card;
+        """)
+        db.session.execute(sql_status_pos_mov, params_status_pos_mov)
+
+    if _fase_define_status_concluido(nome_fase_destino, tipo_fase_destino):
+        _remover_tag_em_atendimento_do_card(
+            id_card=int(id_card),
+            id_kanban=int(id_kanban),
+            id_usuario=int(id_usuario),
+        )
+
+    id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban,
+        id_empresa_padrao=row.get("IDEmpresaProprietaria"),
+    )
+
+    observacao_movimento = nota_movimento or observacao
+
+    sql_ins = text(f"""
+        INSERT INTO {TABELA_CARD_MOVIMENTO}
+        (
+            IDFatoKanbanCard,
+            IDFaseDe,
+            IDFasePara,
+            MovidoEm,
+            MovidoPor,
+            Observacao,
+            IDEmpresaProprietaria,
+            IDDimKanbanTag,
+            IDDimKanbanStatusCard,
+            IDDimKanban
+        )
+        OUTPUT INSERTED.IDFatoKanbanCardMovimento
+        VALUES
+        (
+            :id_card,
+            :id_fase_de,
+            :id_fase_para,
+            GETDATE(),
+            :movido_por,
+            :obs,
+            :id_empresa,
+            :id_tag,
+            :id_status_card,
+            :id_kanban
+        );
+    """)
+
+    row_movimento = db.session.execute(
+        sql_ins,
+        {
+            "id_card": id_card,
+            "id_fase_de": id_fase_de,
+            "id_fase_para": id_fase_para,
+            "movido_por": id_usuario,
+            "obs": observacao_movimento[:2000] if observacao_movimento else None,
+            "id_empresa": id_empresa_movimento,
+            "id_tag": None,
+            "id_status_card": int(id_status_movimento) if id_status_movimento is not None else None,
+            "id_kanban": int(id_kanban),
+        },
+    ).mappings().first()
+
+    _registrar_status_historico_card(
+        id_card=int(id_card),
+        id_fase=int(id_fase_para),
+        id_status_card=int(id_status_movimento) if id_status_movimento is not None else None,
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
+    )
+
+    if observacao_movimento:
+        _registrar_observacao_historica_card(
+            id_card=int(id_card),
+            texto_observacao=observacao_movimento,
+            id_usuario=int(id_usuario),
+            id_status_card=int(id_status_movimento) if id_status_movimento is not None else None,
+            id_fase=int(id_fase_para),
+        )
+
+    tag_contrato_em_avaliacao_aplicada = False
+    if int(id_fase_para) == 4:
+        tag_contrato_em_avaliacao_aplicada = _aplicar_tag_no_card(
+            id_card=int(id_card),
+            id_tag=int(ID_TAG_CONTRATO_EM_AVALIACAO),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
+    sincronizacao_solicitacao_fase = None
+    snapshot_preco_praticado = None
+
+    try:
+        sincronizacao_solicitacao_fase = _sincronizar_ativacao_solicitacao_por_fase_do_card(
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
+        if isinstance(sincronizacao_solicitacao_fase, dict):
+            sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
+
+        if int(id_fase_para) == 4:
+            try:
+                snapshot_preco_praticado = _sincronizar_snapshot_preco_praticado_fase_4(
+                    id_card=int(id_card),
+                    id_usuario=int(id_usuario),
+                    id_empresa_proprietaria=int(id_emp),
+                )
+
+                current_app.logger.warning(
+                    "KANBAN SNAPSHOT PRECO PRATICADO FASE 4: id_card=%s resultado=%s",
+                    id_card,
+                    snapshot_preco_praticado,
+                )
+
+                if not snapshot_preco_praticado or not snapshot_preco_praticado.get("ok"):
+                    motivo_snapshot = (
+                        snapshot_preco_praticado.get("motivo")
+                        if isinstance(snapshot_preco_praticado, dict)
+                        else "snapshot_preco_praticado_nao_retorno_ok"
+                    )
+                    current_app.logger.warning(
+                        "KANBAN SNAPSHOT PRECO PRATICADO FASE 4 NAO BLOQUEOU O MOVER: id_card=%s motivo=%s",
+                        id_card,
+                        motivo_snapshot,
+                    )
+            except Exception as exc_snapshot:
+                snapshot_preco_praticado = {
+                    "ok": False,
+                    "motivo": "erro_ao_sincronizar_snapshot_preco_praticado_fase_4",
+                    "erro": str(exc_snapshot),
+                }
+                current_app.logger.exception(
+                    "Falha ao sincronizar snapshot de preço praticado na fase 4 id_card=%s",
+                    id_card,
+                )
+
+    except Exception as exc:
+        raise RuntimeError(
+            f"Falha ao sincronizar a solicitação após mover o card: {str(exc)}"
+        ) from exc
+
+    snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
+    _registrar_log_card(
+        id_card=id_card,
+        id_kanban=id_kanban,
+        id_empresa_proprietaria=id_emp,
+        id_usuario_acao=id_usuario,
+        tipo_evento="CARD_MOVIDO",
+        id_fase_de=id_fase_de,
+        id_fase_para=id_fase_para,
+        observacao=observacao_movimento or "Card movido entre fases.",
+        tabela_origem=TABELA_CARD_MOVIMENTO,
+        id_registro_origem=int(row_movimento.get("IDFatoKanbanCardMovimento") or 0) if row_movimento else None,
+        payload_antes=snapshot_antes,
+        payload_depois=snapshot_depois,
+    )
+
+    return {
+        "id_card": int(id_card),
+        "id_kanban": int(id_kanban),
+        "id_fase_de": int(id_fase_de),
+        "id_fase_para": int(id_fase_para),
+        "ordem_na_fase": proxima_ordem if has_ordem else None,
+        "sincronizacao_solicitacao_fase": sincronizacao_solicitacao_fase,
+        "snapshot_preco_praticado": snapshot_preco_praticado,
+    }
+
+
+
+
+
+
+
+def _finalizar_pos_movimento_card(
+    *,
+    id_card: int,
+    id_emp: int,
+    resultado_core: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Eu executo o pos-commit comum do movimento.
+    Invalido cache, carrego detalhe e emito socket.
+    """
+    id_kanban = int(resultado_core["id_kanban"])
+    id_fase_de = int(resultado_core["id_fase_de"])
+    id_fase_para = int(resultado_core["id_fase_para"])
+    ordem_na_fase = resultado_core.get("ordem_na_fase")
+    sincronizacao_solicitacao_fase = resultado_core.get("sincronizacao_solicitacao_fase")
+    snapshot_preco_praticado = resultado_core.get("snapshot_preco_praticado")
+
+    _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+    detalhe = _obter_card_detalhe_payload(id_card)
+
+    _emitir_evento_kanban(
+        id_kanban,
+        "card_movido",
+        {
+            "id_card": id_card,
+            "id_fase_de": id_fase_de,
+            "id_fase_para": id_fase_para,
+            "ordem_na_fase": ordem_na_fase,
+            "card": detalhe.get("card"),
+            "tags": detalhe.get("tags", []),
+            "notas": detalhe.get("notas", []),
+            "snapshot_solicitacao": sincronizacao_solicitacao_fase,
+            "snapshot_preco_praticado": snapshot_preco_praticado,
+        },
+    )
+
+    return {
+        "ok": True,
+        "id_card": id_card,
+        "id_fase_de": id_fase_de,
+        "id_fase_para": id_fase_para,
+        "ordem_na_fase": ordem_na_fase,
+        "card": detalhe.get("card"),
+        "tags": detalhe.get("tags", []),
+        "notas": detalhe.get("notas", []),
+        "snapshot_solicitacao": sincronizacao_solicitacao_fase,
+        "snapshot_preco_praticado": snapshot_preco_praticado,
+    }
+
+
+
+
+
+
 
 
 
@@ -11289,440 +11797,96 @@ def _registrar_negociacao_preco_card(
 
 
 
-
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
 @login_required
-@limiter.limit("120/minute")
+@limiter.limit("180/minute")
 def api_card_mover(id_card: int):
     id_usuario = _assert_login()
     id_emp = _id_empresa_usuario_or_403()
+    payload = request.get_json(silent=True) or {}
+
+    def _funcao_transacional() -> dict[str, Any]:
+        return _executar_movimento_card_core(
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            id_emp=int(id_emp),
+            payload=dict(payload),
+        )
+
+    def _funcao_enfileirar(_erro: BaseException) -> str | None:
+        payload_retry = {
+            "id_card": int(id_card),
+            "id_usuario": int(id_usuario),
+            "id_emp": int(id_emp),
+            "payload": dict(payload),
+        }
+        return _enfileirar_retry_movimento_card(payload_retry)
 
     try:
-        row = _obter_card_autorizado(id_card)
-        if not row:
-            return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
+        execucao = executar_transacao_com_retry_deadlock_ou_enfileirar(
+            _funcao_transacional,
+            funcao_enfileirar=_funcao_enfileirar,
+            max_tentativas=4,
+            atraso_inicial_segundos=0.25,
+            multiplicador_backoff=2.0,
+            jitter_max_segundos=0.35,
+        )
 
-        id_kanban = int(row.get("IDDimKanban") or 0)
-        id_fase_de = int(row.get("IDDimKanbanFaseAtual") or 0)
-
-        payload = request.get_json(silent=True) or {}
-        id_fase_para = int(payload.get("id_fase_para") or 0)
-        posicao = str(payload.get("posicao") or "LAST").strip().upper()
-        observacao = (payload.get("observacao") or "").strip()
-        nota_movimento = (payload.get("nota_movimento") or "").strip()
-        versao_concorrencia = payload.get("versao_concorrencia")
-
-        if not id_fase_para:
-            return jsonify({"ok": False, "msg": "Fase de destino inválida."}), 400
-
-        _obter_kanban_autorizado(id_kanban)
-
-        fase_destino = db.session.execute(
-            text(f"""
-                SELECT TOP (1)
-                    f.IDDimKanbanFase,
-                    f.NomeFase,
-                    f.TipoFase,
-                    f.IDEmpresaProprietaria
-                FROM {TABELA_KANBAN_FASE} f
-                WHERE f.IDDimKanbanFase = :id_fase_para
-                  AND f.IDDimKanban = :id_kanban
-                  AND f.Ativo = 1;
-            """),
-            {
-                "id_fase_para": id_fase_para,
-                "id_kanban": id_kanban,
-            },
-        ).mappings().first()
-
-        if not fase_destino:
-            return jsonify({"ok": False, "msg": "Fase de destino não encontrada."}), 404
-
-        snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-
-        has_ordem = _coluna_existe(TABELA_CARD, "OrdemNaFase")
-        has_atualizado = _coluna_existe(TABELA_CARD, "AtualizadoEm")
-        has_versao = _card_tem_versao_concorrencia()
-
-        versao_concorrencia_bytes = None
-        if has_versao:
-            versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
-            if not versao_concorrencia_bytes:
-                detalhe_atual = _obter_card_detalhe_payload(id_card)
-                return (
-                    jsonify(
-                        {
-                            "ok": False,
-                            "msg": "Versão de concorrência inválida ou ausente.",
-                            "card_atual": detalhe_atual.get("card"),
-                        }
-                    ),
-                    409,
-                )
-
-        proxima_ordem = None
-        if has_ordem:
-            sql_next_ordem = text(f"""
-                SELECT ISNULL(MAX(fc.OrdemNaFase), 0) + 1
-                FROM {TABELA_CARD} fc
-                WHERE fc.IDDimKanban = :id_kanban
-                  AND fc.IDDimKanbanFaseAtual = :id_fase_para
-                  AND fc.Ativo = 1;
-            """)
-            proxima_ordem = db.session.execute(
-                sql_next_ordem,
+        if execucao["modo_execucao"] == "fila":
+            return jsonify(
                 {
-                    "id_kanban": id_kanban,
-                    "id_fase_para": id_fase_para,
-                },
-            ).scalar()
+                    "ok": True,
+                    "processamento_assincrono": True,
+                    "msg": "Deadlock persistente. O movimento entrou na fila rápida de retry.",
+                    "task_id": execucao["task_id"],
+                    "id_card": int(id_card),
+                }
+            ), 202
 
-            try:
-                proxima_ordem = int(proxima_ordem or 1)
-            except Exception:
-                proxima_ordem = 1
+        resultado_core = execucao["resultado"]
+        resposta = _finalizar_pos_movimento_card(
+            id_card=int(id_card),
+            id_emp=int(id_emp),
+            resultado_core=resultado_core,
+        )
+        return jsonify(resposta)
 
-        row_upd = None
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "msg": str(exc)}), 400
 
-        if has_ordem and has_atualizado:
-            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
-            params_upd = {
-                "id_fase_para": id_fase_para,
-                "ordem_na_fase": proxima_ordem,
-                "id_card": id_card,
-            }
-            if has_versao:
-                params_upd["versao_concorrencia"] = versao_concorrencia_bytes
+    except RuntimeError as exc:
+        db.session.rollback()
 
-            sql_upd = text(f"""
-                UPDATE {TABELA_CARD}
-                SET IDDimKanbanFaseAtual = :id_fase_para,
-                    OrdemNaFase = :ordem_na_fase,
-                    AtualizadoEm = GETDATE()
-                OUTPUT
-                    INSERTED.IDFatoKanbanCard,
-                    INSERTED.IDDimKanbanFaseAtual,
-                    INSERTED.OrdemNaFase,
-                    INSERTED.AtualizadoEm{output_versao}
-                WHERE IDFatoKanbanCard = :id_card
-                  AND Ativo = 1{where_versao};
-            """)
-            row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
-
-        elif has_ordem and not has_atualizado:
-            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
-            params_upd = {
-                "id_fase_para": id_fase_para,
-                "ordem_na_fase": proxima_ordem,
-                "id_card": id_card,
-            }
-            if has_versao:
-                params_upd["versao_concorrencia"] = versao_concorrencia_bytes
-
-            sql_upd = text(f"""
-                UPDATE {TABELA_CARD}
-                SET IDDimKanbanFaseAtual = :id_fase_para,
-                    OrdemNaFase = :ordem_na_fase
-                OUTPUT
-                    INSERTED.IDFatoKanbanCard,
-                    INSERTED.IDDimKanbanFaseAtual,
-                    INSERTED.OrdemNaFase{output_versao}
-                WHERE IDFatoKanbanCard = :id_card
-                  AND Ativo = 1{where_versao};
-            """)
-            row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
-
-        elif (not has_ordem) and has_atualizado:
-            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
-            params_upd = {
-                "id_fase_para": id_fase_para,
-                "id_card": id_card,
-            }
-            if has_versao:
-                params_upd["versao_concorrencia"] = versao_concorrencia_bytes
-
-            sql_upd = text(f"""
-                UPDATE {TABELA_CARD}
-                SET IDDimKanbanFaseAtual = :id_fase_para,
-                    AtualizadoEm = GETDATE()
-                OUTPUT
-                    INSERTED.IDFatoKanbanCard,
-                    INSERTED.IDDimKanbanFaseAtual,
-                    INSERTED.AtualizadoEm{output_versao}
-                WHERE IDFatoKanbanCard = :id_card
-                  AND Ativo = 1{where_versao};
-            """)
-            row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
-
-        else:
-            output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
-            where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
-            params_upd = {
-                "id_fase_para": id_fase_para,
-                "id_card": id_card,
-            }
-            if has_versao:
-                params_upd["versao_concorrencia"] = versao_concorrencia_bytes
-
-            sql_upd = text(f"""
-                UPDATE {TABELA_CARD}
-                SET IDDimKanbanFaseAtual = :id_fase_para
-                OUTPUT
-                    INSERTED.IDFatoKanbanCard,
-                    INSERTED.IDDimKanbanFaseAtual{output_versao}
-                WHERE IDFatoKanbanCard = :id_card
-                  AND Ativo = 1{where_versao};
-            """)
-            row_upd = db.session.execute(sql_upd, params_upd).mappings().first()
-
-        if not row_upd:
+        msg = str(exc)
+        if "Versão de concorrência inválida ou ausente" in msg:
             detalhe_atual = _obter_card_detalhe_payload(id_card)
             return (
                 jsonify(
                     {
                         "ok": False,
-                        "msg": "Este card foi alterado ou movido por outro usuário. Recarregue antes de tentar novamente.",
+                        "msg": msg,
                         "card_atual": detalhe_atual.get("card"),
                     }
                 ),
                 409,
             )
 
-        nome_fase_destino = str(fase_destino.get("NomeFase") or "").strip()
-        tipo_fase_destino = str(fase_destino.get("TipoFase") or "").strip()
-
-        id_status_movimento = _resolver_id_status_card_movimento(
-            nome_fase_para=nome_fase_destino,
-            card_inativado=False,
-        )
-
-        campos_status_pos_mov: list[str] = []
-        params_status_pos_mov: dict[str, Any] = {
-            "id_card": id_card,
-        }
-
-        if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_movimento is not None:
-            campos_status_pos_mov.append("IDDimKanbanStatusCard = :id_status_destino")
-            params_status_pos_mov["id_status_destino"] = int(id_status_movimento)
-
-        if _coluna_existe(TABELA_CARD, "StatusCard"):
-            if id_status_movimento == 3:
-                campos_status_pos_mov.append("StatusCard = :status_destino")
-                params_status_pos_mov["status_destino"] = "CONCLUIDO"
-            elif id_status_movimento == 2:
-                campos_status_pos_mov.append("StatusCard = :status_destino")
-                params_status_pos_mov["status_destino"] = "CANCELADO"
-            elif id_status_movimento == 1:
-                campos_status_pos_mov.append("StatusCard = :status_destino")
-                params_status_pos_mov["status_destino"] = "ATIVO"
-
-        if _coluna_existe(TABELA_CARD, "EncerradoEm"):
-            if id_status_movimento == 3:
-                campos_status_pos_mov.append("EncerradoEm = ISNULL(EncerradoEm, GETDATE())")
-            else:
-                campos_status_pos_mov.append("EncerradoEm = NULL")
-
-        if campos_status_pos_mov:
-            sql_status_pos_mov = text(f"""
-                UPDATE {TABELA_CARD}
-                SET {', '.join(campos_status_pos_mov)}
-                WHERE IDFatoKanbanCard = :id_card;
-            """)
-            db.session.execute(sql_status_pos_mov, params_status_pos_mov)
-
-        if _fase_define_status_concluido(nome_fase_destino, tipo_fase_destino):
-            _remover_tag_em_atendimento_do_card(
-                id_card=int(id_card),
-                id_kanban=int(id_kanban),
-                id_usuario=int(id_usuario),
-            )
-
-        id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
-            id_kanban=id_kanban,
-            id_empresa_padrao=row.get("IDEmpresaProprietaria"),
-        )
-
-        observacao_movimento = nota_movimento or observacao
-
-        sql_ins = text(f"""
-            INSERT INTO {TABELA_CARD_MOVIMENTO}
-            (
-                IDFatoKanbanCard,
-                IDFaseDe,
-                IDFasePara,
-                MovidoEm,
-                MovidoPor,
-                Observacao,
-                IDEmpresaProprietaria,
-                IDDimKanbanTag,
-                IDDimKanbanStatusCard,
-                IDDimKanban
-            )
-            OUTPUT INSERTED.IDFatoKanbanCardMovimento
-            VALUES
-            (
-                :id_card,
-                :id_fase_de,
-                :id_fase_para,
-                GETDATE(),
-                :movido_por,
-                :obs,
-                :id_empresa,
-                :id_tag,
-                :id_status_card,
-                :id_kanban
-            );
-        """)
-
-        row_movimento = db.session.execute(
-            sql_ins,
-            {
-                "id_card": id_card,
-                "id_fase_de": id_fase_de,
-                "id_fase_para": id_fase_para,
-                "movido_por": id_usuario,
-                "obs": observacao_movimento[:2000] if observacao_movimento else None,
-                "id_empresa": id_empresa_movimento,
-                "id_tag": None,
-                "id_status_card": int(id_status_movimento) if id_status_movimento is not None else None,
-                "id_kanban": int(id_kanban),
-            },
-        ).mappings().first()
-
-        _registrar_status_historico_card(
-            id_card=int(id_card),
-            id_fase=int(id_fase_para),
-            id_status_card=int(id_status_movimento) if id_status_movimento is not None else None,
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=int(id_empresa_movimento or 0) or None,
-        )
-
-        if observacao_movimento:
-            _registrar_observacao_historica_card(
-                id_card=int(id_card),
-                texto_observacao=observacao_movimento,
-                id_usuario=int(id_usuario),
-                id_status_card=int(id_status_movimento) if id_status_movimento is not None else None,
-                id_fase=int(id_fase_para),
-            )
-
-        tag_contrato_em_avaliacao_aplicada = False
-        if int(id_fase_para) == 4:
-            tag_contrato_em_avaliacao_aplicada = _aplicar_tag_no_card(
-                id_card=int(id_card),
-                id_tag=int(ID_TAG_CONTRATO_EM_AVALIACAO),
-                id_usuario=int(id_usuario),
-                id_empresa_proprietaria=int(id_emp),
-            )
-
-        sincronizacao_solicitacao_fase = None
-        snapshot_preco_praticado = None
-
-        try:
-            sincronizacao_solicitacao_fase = _sincronizar_ativacao_solicitacao_por_fase_do_card(
-                id_card=int(id_card),
-                id_usuario=int(id_usuario),
-                id_empresa_proprietaria=int(id_emp),
-            )
-
-            if isinstance(sincronizacao_solicitacao_fase, dict):
-                sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
-
-            if int(id_fase_para) == 4:
-                try:
-                    snapshot_preco_praticado = _sincronizar_snapshot_preco_praticado_fase_4(
-                        id_card=int(id_card),
-                        id_usuario=int(id_usuario),
-                        id_empresa_proprietaria=int(id_emp),
-                    )
-
-                    current_app.logger.warning(
-                        "KANBAN SNAPSHOT PRECO PRATICADO FASE 4: id_card=%s resultado=%s",
-                        id_card,
-                        snapshot_preco_praticado,
-                    )
-
-                    if not snapshot_preco_praticado or not snapshot_preco_praticado.get("ok"):
-                        motivo_snapshot = (
-                            snapshot_preco_praticado.get("motivo")
-                            if isinstance(snapshot_preco_praticado, dict)
-                            else "snapshot_preco_praticado_nao_retorno_ok"
-                        )
-                        current_app.logger.warning(
-                            "KANBAN SNAPSHOT PRECO PRATICADO FASE 4 NAO BLOQUEOU O MOVER: id_card=%s motivo=%s",
-                            id_card,
-                            motivo_snapshot,
-                        )
-                except Exception as exc_snapshot:
-                    snapshot_preco_praticado = {
+        if "Este card foi alterado ou movido por outro usuário" in msg:
+            detalhe_atual = _obter_card_detalhe_payload(id_card)
+            return (
+                jsonify(
+                    {
                         "ok": False,
-                        "motivo": "erro_ao_sincronizar_snapshot_preco_praticado_fase_4",
-                        "erro": str(exc_snapshot),
+                        "msg": msg,
+                        "card_atual": detalhe_atual.get("card"),
                     }
-                    current_app.logger.exception(
-                        "Falha ao sincronizar snapshot de preço praticado na fase 4 id_card=%s",
-                        id_card,
-                    )
+                ),
+                409,
+            )
 
-        except Exception as exc:
-            raise RuntimeError(
-                f"Falha ao sincronizar a solicitação após mover o card: {str(exc)}"
-            ) from exc
-
-        snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
-        _registrar_log_card(
-            id_card=id_card,
-            id_kanban=id_kanban,
-            id_empresa_proprietaria=id_emp,
-            id_usuario_acao=id_usuario,
-            tipo_evento="CARD_MOVIDO",
-            id_fase_de=id_fase_de,
-            id_fase_para=id_fase_para,
-            observacao=observacao_movimento or "Card movido entre fases.",
-            tabela_origem=TABELA_CARD_MOVIMENTO,
-            id_registro_origem=int(row_movimento.get("IDFatoKanbanCardMovimento") or 0) if row_movimento else None,
-            payload_antes=snapshot_antes,
-            payload_depois=snapshot_depois,
-        )
-
-        db.session.commit()
-
-        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
-        detalhe = _obter_card_detalhe_payload(id_card)
-
-        _emitir_evento_kanban(
-            id_kanban,
-            "card_movido",
-            {
-                "id_card": id_card,
-                "id_fase_de": id_fase_de,
-                "id_fase_para": id_fase_para,
-                "ordem_na_fase": proxima_ordem if has_ordem else None,
-                "card": detalhe.get("card"),
-                "tags": detalhe.get("tags", []),
-                "notas": detalhe.get("notas", []),
-                "snapshot_solicitacao": sincronizacao_solicitacao_fase,
-                "snapshot_preco_praticado": snapshot_preco_praticado,
-            },
-        )
-
-        return jsonify(
-            {
-                "ok": True,
-                "id_card": id_card,
-                "id_fase_de": id_fase_de,
-                "id_fase_para": id_fase_para,
-                "ordem_na_fase": proxima_ordem if has_ordem else None,
-                "card": detalhe.get("card"),
-                "tags": detalhe.get("tags", []),
-                "notas": detalhe.get("notas", []),
-                "snapshot_solicitacao": sincronizacao_solicitacao_fase,
-                "snapshot_preco_praticado": snapshot_preco_praticado,
-            }
-        )
+        current_app.logger.exception("Erro ao mover card id_card=%s", id_card)
+        return jsonify({"ok": False, "msg": f"Erro ao mover card: {msg}"}), 500
 
     except Exception as exc:
         db.session.rollback()

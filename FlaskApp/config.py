@@ -16,6 +16,14 @@ ALTURA_MAXIMA_IMAGEM = 5000
 
 
 
+KANBAN_DEADLOCK_TASK_NAME = "app.kanban.tarefa_retry_movimento_card"
+KANBAN_DEADLOCK_QUEUE_NAME = "kanban_retry_rapido"
+KANBAN_DEADLOCK_COUNTDOWN = 2
+KANBAN_DEADLOCK_EXPIRES = 30
+
+
+
+
 
 def obter_variavel_obrigatoria(nome_variavel: str) -> str:
     valor = os.getenv(nome_variavel)
