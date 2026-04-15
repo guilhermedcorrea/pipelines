@@ -1581,9 +1581,15 @@
 
   .kb-painel-item-grid{
     display:grid;
-    grid-template-columns: minmax(170px, .95fr) minmax(190px, 1fr) minmax(0, 1.9fr) auto;
+    grid-template-columns: minmax(150px, .9fr) minmax(180px, 1fr) minmax(0, 2fr) minmax(170px, 1.05fr);
     gap:10px;
-    align-items:center;
+    align-items:end;
+  }
+
+  .kb-painel-item-grid [data-role="wrap-periodo-exibicao"]{
+    grid-column: 4 / 5;
+    grid-row: 2;
+    min-width: 0;
   }
 
   .kb-painel-item-grid-2{
@@ -8395,6 +8401,7 @@ function formatarNumeroParaInput(valor){
 
     definirValorSelectOculto(selectPainel, '', null);
     definirValorSelectOculto(selectFace, '', null);
+    atualizarSelectFaceVisualDoBloco(bloco);
 
     if (resetarFiltros) {
       if (selectCidade) selectCidade.value = '';
@@ -8444,6 +8451,7 @@ function formatarNumeroParaInput(valor){
 
     definirValorSelectOculto(selectPainel, String(idPainel), textoOpcaoPainel(item));
     definirValorSelectOculto(selectFace, codFace, codFace);
+    atualizarSelectFaceVisualDoBloco(bloco);
 
     if (input) {
       input.value = textoOpcaoPainelFace(item);
@@ -8499,7 +8507,7 @@ function formatarNumeroParaInput(valor){
   function limparSelectPrecosNoElemento(selectEl){
     if (!selectEl) return;
     selectEl.innerHTML = "";
-    selectEl.appendChild(el("option", { value:"" }, ["— Selecione a tabela de preço —"]));
+    selectEl.appendChild(el("option", { value:"" }, ["— Preço automático —"]));
   }
 
   function montarSelectFacesNoElemento(selectEl, faces){
@@ -8513,6 +8521,14 @@ function formatarNumeroParaInput(valor){
     });
   }
 
+  function atualizarSelectFaceVisualDoBloco(bloco, opcoes = {}){
+    const wrapSelectFace = bloco?.querySelector('[data-role="wrap-select-face"]');
+    if (wrapSelectFace) {
+      wrapSelectFace.hidden = true;
+      wrapSelectFace.style.display = 'none';
+    }
+  }
+
   function montarSelectPrecosNoElemento(selectEl, precos){
     limparSelectPrecosNoElemento(selectEl);
     (Array.isArray(precos) ? precos : []).forEach(p => {
@@ -8521,13 +8537,219 @@ function formatarNumeroParaInput(valor){
       const label = [
         safeStr(p?.PeriodoExibicao || "—"),
         (p?.ExibicoesDia ?? "—"),
-        formatarMoedaBR(p?.Valor),
-        safeStr(p?.Tabela || "—"),
-        safeStr(p?.PoliticaTrocas || "—"),
-        formatarMoedaBR(p?.ValorTroca)
-      ].join(" | ");
+        formatarMoedaBR(p?.Valor)
+      ].join(" | " );
       selectEl.appendChild(el("option", { value:String(idPreco) }, [label]));
     });
+  }
+
+  function obterPrecosComerciaisDoBloco(bloco){
+    return Array.isArray(bloco?.__dadosComerciais?.precos) ? bloco.__dadosComerciais.precos.slice() : [];
+  }
+
+  function obterTipoPainelComercialDoBloco(bloco){
+    return safeStr(
+      bloco?.__dadosComerciais?.painel?.Tipo ??
+      bloco?.__dadosComerciais?.face?.Tipo ??
+      obterPainelFaceSelecionadoDoBloco(bloco)?.Tipo ??
+      ''
+    ).trim();
+  }
+
+  function painelFaceUsaInsercoesDigitais(bloco){
+    const precos = obterPrecosComerciaisDoBloco(bloco);
+    if (precos.some((preco) => preco?.ExibicoesDia !== null && preco?.ExibicoesDia !== undefined && safeStr(String(preco?.ExibicoesDia)).trim() !== '')) {
+      return true;
+    }
+
+    const tipoNormalizado = normalizarTextoComparacaoPainelContrato(obterTipoPainelComercialDoBloco(bloco));
+    return tipoNormalizado === 'painel digital';
+  }
+
+  function chaveExibicoesDiaDoPreco(preco, usarInsercoesDigitais = false){
+    if (!usarInsercoesDigitais){
+      return 'FULL';
+    }
+
+    const exibicoes = safeStr(preco?.ExibicoesDia ?? '').trim();
+    return exibicoes || 'FULL';
+  }
+
+  function labelExibicoesDiaDoPreco(chave){
+    return safeStr(chave || '').trim().toUpperCase() === 'FULL' ? 'Full' : safeStr(chave || '').trim();
+  }
+
+  function preencherSelectOpcoesSimples(selectEl, opcoes, placeholder){
+    if (!selectEl) return;
+
+    const valorAtual = safeStr(selectEl.value || '').trim();
+    selectEl.innerHTML = '';
+    if (placeholder) {
+      selectEl.appendChild(el('option', { value:'' }, [placeholder]));
+    }
+
+    (Array.isArray(opcoes) ? opcoes : []).forEach((opcao) => {
+      const valor = safeStr(opcao?.valor ?? '').trim();
+      if (!valor) return;
+      const label = safeStr(opcao?.label ?? valor).trim() || valor;
+      selectEl.appendChild(el('option', { value: valor }, [label]));
+    });
+
+    if (valorAtual && (Array.isArray(opcoes) ? opcoes : []).some((opcao) => safeStr(opcao?.valor ?? '').trim() === valorAtual)) {
+      selectEl.value = valorAtual;
+    }
+  }
+
+  function listarOpcoesExibicoesDiaDoBloco(bloco, periodoFiltrado = ''){
+    const usarInsercoesDigitais = painelFaceUsaInsercoesDigitais(bloco);
+    const periodoNormalizado = safeStr(periodoFiltrado || '').trim();
+    const mapa = new Map();
+
+    for (const preco of obterPrecosComerciaisDoBloco(bloco)) {
+      const periodoPreco = safeStr(preco?.PeriodoExibicao || '').trim();
+      if (periodoNormalizado && periodoPreco !== periodoNormalizado) continue;
+
+      const chave = chaveExibicoesDiaDoPreco(preco, usarInsercoesDigitais);
+      if (!chave || mapa.has(chave)) continue;
+      mapa.set(chave, { valor: chave, label: labelExibicoesDiaDoPreco(chave) });
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR', { numeric: true }));
+  }
+
+  function listarOpcoesPeriodoDoBloco(bloco, exibicoesFiltradas = ''){
+    const usarInsercoesDigitais = painelFaceUsaInsercoesDigitais(bloco);
+    const exibicoesNormalizadas = safeStr(exibicoesFiltradas || '').trim();
+    const mapa = new Map();
+
+    for (const preco of obterPrecosComerciaisDoBloco(bloco)) {
+      const chaveExibicoes = chaveExibicoesDiaDoPreco(preco, usarInsercoesDigitais);
+      if (exibicoesNormalizadas && chaveExibicoes !== exibicoesNormalizadas) continue;
+
+      const periodo = safeStr(preco?.PeriodoExibicao || '').trim();
+      if (!periodo || mapa.has(periodo)) continue;
+      mapa.set(periodo, { valor: periodo, label: periodo });
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }
+
+  function localizarPrecoPorFiltrosDoBloco(bloco, filtros = {}){
+    const precos = obterPrecosComerciaisDoBloco(bloco);
+    const usarInsercoesDigitais = painelFaceUsaInsercoesDigitais(bloco);
+    const idPreferido = idNum(filtros?.id_preco || 0) || null;
+    const exibicoesDesejadas = safeStr(filtros?.exibicoes_dia || '').trim();
+    const periodoDesejado = safeStr(filtros?.periodo_exibicao || '').trim();
+
+    const candidatos = precos.filter((preco) => {
+      const chaveExibicoes = chaveExibicoesDiaDoPreco(preco, usarInsercoesDigitais);
+      const periodo = safeStr(preco?.PeriodoExibicao || '').trim();
+      if (exibicoesDesejadas && chaveExibicoes !== exibicoesDesejadas) return false;
+      if (periodoDesejado && periodo !== periodoDesejado) return false;
+      return true;
+    });
+
+    if (idPreferido) {
+      const encontrado = candidatos.find((preco) => idNum(preco?.IDDimTabelaPrecosEuromidia) === idPreferido);
+      if (encontrado) return encontrado;
+    }
+
+    return candidatos[0] || null;
+  }
+
+  function ocultarCamposTabelaPrecoDoBloco(bloco){
+    const wrapExibicoes = bloco?.querySelector('[data-role="wrap-exibicoes-dia"]');
+    const wrapPeriodo = bloco?.querySelector('[data-role="wrap-periodo-exibicao"]');
+    const selectExibicoes = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodo = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
+
+    if (wrapExibicoes) wrapExibicoes.hidden = true;
+    if (wrapPeriodo) wrapPeriodo.hidden = true;
+    if (selectExibicoes) preencherSelectOpcoesSimples(selectExibicoes, [], '— Inserções / dia —');
+    if (selectPeriodo) preencherSelectOpcoesSimples(selectPeriodo, [], '— Período —');
+  }
+
+  function sincronizarSeletoresTabelaPrecoDoBloco(bloco, opcoes = {}){
+    const selectPreco = bloco?.querySelector('[data-role="select-preco"]');
+    const selectExibicoes = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodo = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
+    const wrapExibicoes = bloco?.querySelector('[data-role="wrap-exibicoes-dia"]');
+    const wrapPeriodo = bloco?.querySelector('[data-role="wrap-periodo-exibicao"]');
+
+    if (!selectPreco || !selectExibicoes || !selectPeriodo) return;
+
+    const precos = obterPrecosComerciaisDoBloco(bloco);
+    if (!precos.length) {
+      limparSelectPrecosNoElemento(selectPreco);
+      ocultarCamposTabelaPrecoDoBloco(bloco);
+      return;
+    }
+
+    const usarInsercoesDigitais = painelFaceUsaInsercoesDigitais(bloco);
+    const idPrecoAtual = idNum(selectPreco.value || 0) || null;
+    const idPrecoPreferido = idNum(opcoes?.id_preco || 0) || idPrecoAtual || null;
+    const precoPreferido = idPrecoPreferido
+      ? precos.find((preco) => idNum(preco?.IDDimTabelaPrecosEuromidia) === idPrecoPreferido) || null
+      : null;
+
+    let exibicoesDesejadas = safeStr(selectExibicoes.value || '').trim();
+    let periodoDesejado = safeStr(selectPeriodo.value || '').trim();
+
+    if (!exibicoesDesejadas && precoPreferido) {
+      exibicoesDesejadas = chaveExibicoesDiaDoPreco(precoPreferido, usarInsercoesDigitais);
+    }
+    if (!periodoDesejado && precoPreferido) {
+      periodoDesejado = safeStr(precoPreferido?.PeriodoExibicao || '').trim();
+    }
+
+    let opcoesExibicoes = listarOpcoesExibicoesDiaDoBloco(bloco, periodoDesejado);
+    if (!opcoesExibicoes.length) {
+      opcoesExibicoes = listarOpcoesExibicoesDiaDoBloco(bloco, '');
+    }
+
+    if (!opcoesExibicoes.some((opcao) => opcao.valor === exibicoesDesejadas)) {
+      exibicoesDesejadas = opcoesExibicoes[0]?.valor || '';
+    }
+
+    let opcoesPeriodo = listarOpcoesPeriodoDoBloco(bloco, exibicoesDesejadas);
+    if (!opcoesPeriodo.length) {
+      opcoesPeriodo = listarOpcoesPeriodoDoBloco(bloco, '');
+    }
+
+    if (!opcoesPeriodo.some((opcao) => opcao.valor === periodoDesejado)) {
+      periodoDesejado = opcoesPeriodo[0]?.valor || '';
+    }
+
+    opcoesExibicoes = listarOpcoesExibicoesDiaDoBloco(bloco, periodoDesejado);
+    if (!opcoesExibicoes.some((opcao) => opcao.valor === exibicoesDesejadas)) {
+      exibicoesDesejadas = opcoesExibicoes[0]?.valor || '';
+    }
+
+    const precoSelecionado = localizarPrecoPorFiltrosDoBloco(bloco, {
+      id_preco: idPrecoPreferido,
+      exibicoes_dia: exibicoesDesejadas,
+      periodo_exibicao: periodoDesejado,
+    }) || precoPreferido || precos[0] || null;
+
+    preencherSelectOpcoesSimples(selectExibicoes, opcoesExibicoes, '— Inserções / dia —');
+    preencherSelectOpcoesSimples(selectPeriodo, opcoesPeriodo, '— Período —');
+
+    if (precoSelecionado) {
+      const exibicoesFinais = chaveExibicoesDiaDoPreco(precoSelecionado, usarInsercoesDigitais);
+      const periodoFinal = safeStr(precoSelecionado?.PeriodoExibicao || '').trim();
+      selectExibicoes.value = exibicoesFinais;
+      selectPeriodo.value = periodoFinal;
+      definirValorSelectOculto(
+        selectPreco,
+        String(idNum(precoSelecionado?.IDDimTabelaPrecosEuromidia || 0) || ''),
+        `${safeStr(precoSelecionado?.PeriodoExibicao || '—')} | ${labelExibicoesDiaDoPreco(exibicoesFinais)} | ${formatarMoedaBR(precoSelecionado?.Valor)}`
+      );
+    } else {
+      limparSelectPrecosNoElemento(selectPreco);
+    }
+
+    if (wrapExibicoes) wrapExibicoes.hidden = false;
+    if (wrapPeriodo) wrapPeriodo.hidden = false;
   }
 
   function preencherPreviewPainel(bloco, painel){
@@ -8567,6 +8789,7 @@ function formatarNumeroParaInput(valor){
 
     if (wrap) wrap.innerHTML = `<div class="kb-comercial-vazio">${mensagem}</div>`;
     if (selectPreco) limparSelectPrecosNoElemento(selectPreco);
+    ocultarCamposTabelaPrecoDoBloco(bloco);
 
     bloco.__dadosComerciais = null;
     bloco.__calendarioOcupacao = null;
@@ -8627,6 +8850,7 @@ function formatarNumeroParaInput(valor){
     });
 
     if (!painelFace) {
+      atualizarSelectFaceVisualDoBloco(bloco, { permitirSemPainel: true });
       const atual = obterPainelFaceSelecionadoDoBloco(bloco);
       preencherPreviewPainel(bloco, atual);
       if (!atual) {
@@ -8685,14 +8909,14 @@ function formatarNumeroParaInput(valor){
             type:'text',
             autocomplete:'off',
             spellcheck:'false',
-            placeholder:'Digite CodFace, logradouro, cidade, bairro ou tipo...',
+            placeholder:'Digite CodPonto, logradouro, cidade, bairro, tipo ou CodFace...',
             'data-role':'input-painel-busca'
           }),
           el('button', {
             class:'kb-combobox-toggle',
             type:'button',
             'data-role':'btn-toggle-painel',
-            'aria-label':'Abrir lista de faces'
+            'aria-label':'Abrir lista de painéis e faces'
           }, ['▾']),
           el('div', { class:'kb-combobox-lista', hidden:'hidden', 'data-role':'lista-painel-busca' }),
           el('select', {
@@ -8710,7 +8934,18 @@ function formatarNumeroParaInput(valor){
             'data-placeholder':'— Face (CodFace) —'
           })
         ]),
-        el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-limpar' }, ['Sem painel'])
+        el('div', { class:'kb-campo', 'data-role':'wrap-exibicoes-dia', hidden:'hidden' }, [
+          el('div', { class:'kb-campo-label' }, ['Inserções / dia']),
+          el('select', { class:'kb-select', 'data-role':'select-exibicoes-dia' }, [
+            el('option', { value:'' }, ['— Inserções / dia —'])
+          ])
+        ]),
+        el('div', { class:'kb-campo', 'data-role':'wrap-periodo-exibicao', hidden:'hidden' }, [
+          el('div', { class:'kb-campo-label' }, ['Período']),
+          el('select', { class:'kb-select', 'data-role':'select-periodo-exibicao' }, [
+            el('option', { value:'' }, ['— Período —'])
+          ])
+        ])
       ]),
       el('div', { class:'kb-painel-preview', 'data-role':'painel-preview', style:'display:none;' }, [
         el('div', { class:'linha' }, [el('span', { class:'k' }, ['CodPonto:']), el('span', { class:'v', 'data-role':'pn-codponto' }, ['—'])]),
@@ -8731,9 +8966,12 @@ function formatarNumeroParaInput(valor){
     const selectFace = bloco.querySelector('[data-role="select-face"]');
     const selectFiltroCidade = bloco.querySelector('[data-role="select-filtro-cidade"]');
     const selectFiltroTipo = bloco.querySelector('[data-role="select-filtro-tipo"]');
+    const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodoExibicao = bloco.querySelector('[data-role="select-periodo-exibicao"]');
 
     montarSelectPaineisNoElemento(selectPainel);
     limparSelectFacesNoElemento(selectFace);
+    atualizarSelectFaceVisualDoBloco(bloco);
     sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
     preencherSelectFiltroPainelFace(selectFiltroCidade, listarCidadesPainelFaceDoBloco(bloco), '— Cidade —');
     preencherSelectFiltroPainelFace(selectFiltroTipo, listarTiposPainelFaceDoBloco(bloco), '— Tipo Produto —');
@@ -8764,9 +9002,6 @@ function formatarNumeroParaInput(valor){
       atualizarTitulosPainelFace();
     });
 
-    bloco.querySelector('[data-role="btn-limpar"]')?.addEventListener('click', () => {
-      limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: true, manterBusca: false, dispararChange: false });
-    });
 
     btnTogglePainel?.addEventListener('click', () => {
       const listaPainel = bloco.querySelector('[data-role="lista-painel-busca"]');
@@ -8779,6 +9014,7 @@ function formatarNumeroParaInput(valor){
 
     selectFiltroCidade?.addEventListener('change', () => {
       sincronizarFiltrosPainelFaceDoBloco(bloco);
+      atualizarSelectFaceVisualDoBloco(bloco, { permitirSemPainel: true });
       if (comboPainel?.classList.contains('is-open')) {
         renderizarListaPaineisCombobox(bloco, inputPainelBusca?.value || '');
       }
@@ -8786,6 +9022,7 @@ function formatarNumeroParaInput(valor){
 
     selectFiltroTipo?.addEventListener('change', () => {
       sincronizarFiltrosPainelFaceDoBloco(bloco);
+      atualizarSelectFaceVisualDoBloco(bloco, { permitirSemPainel: true });
       if (comboPainel?.classList.contains('is-open')) {
         renderizarListaPaineisCombobox(bloco, inputPainelBusca?.value || '');
       }
@@ -8831,11 +9068,24 @@ function formatarNumeroParaInput(valor){
     });
 
     selectFace?.addEventListener('change', async () => {
+      atualizarSelectFaceVisualDoBloco(bloco);
       await atualizarComercialDoBloco(bloco);
+    });
+
+    selectExibicoesDia?.addEventListener('change', () => {
+      sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'exibicoes' });
+      atualizarResumoComercial(bloco, { formatarCampos: true });
+    });
+
+    selectPeriodoExibicao?.addEventListener('change', () => {
+      sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'periodo' });
+      atualizarResumoComercial(bloco, { formatarCampos: true });
     });
 
     if (dados){
       void atualizarFacesDoBloco(bloco, dados);
+    } else {
+      atualizarSelectFaceVisualDoBloco(bloco);
     }
 
     return bloco;
@@ -9018,7 +9268,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
   let selectPreco = bloco.querySelector('[data-role="select-preco"]');
   if (!selectPreco){
-    selectPreco = el('select', { class:'kb-select grow', 'data-role':'select-preco' });
+    selectPreco = el('select', { class:'kb-select kb-select-hidden', tabindex:'-1', 'aria-hidden':'true', 'data-role':'select-preco' });
+    bloco.appendChild(selectPreco);
   }
 
   const dataInicioSalva = safeStr(
@@ -9056,8 +9307,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     data_inicio: dataInicioSalva || null,
     data_fim: dataFimSalva || null
   };
-  montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
 
+  montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
   wrap.innerHTML = '';
 
   wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, [
@@ -9068,10 +9319,6 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Preço de venda atual']),
       el('div', { class:'kb-kpi', 'data-role':'kpi-preco-atual' }, ['—'])
-    ]),
-    el('div', { class:'kb-campo' }, [
-      el('div', { class:'kb-campo-label' }, ['Tabela / preço']),
-      selectPreco
     ]),
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Margem atual']),
@@ -9183,8 +9430,9 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     atualizarResumoComercial(bloco, { origemEdicao: 'percentual', formatarCampos: true });
   });
 
+  let idPrecoSalvo = 0;
   if (valoresSalvos){
-    const idPrecoSalvo = idNum(
+    idPrecoSalvo = idNum(
       valoresSalvos.IDDimTabelaPrecosEuromidia ||
       valoresSalvos.id_preco ||
       valoresSalvos.IDTabelaPreco ||
@@ -9200,10 +9448,6 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       valoresSalvos.PercentualDesconto ??
       valoresSalvos.percentual_desconto ??
       null;
-
-    if (idPrecoSalvo) {
-      selectPreco.value = String(idPrecoSalvo);
-    }
 
     if (
       novoValorSalvo !== null &&
@@ -9253,6 +9497,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     }
   }
 
+  sincronizarSeletoresTabelaPrecoDoBloco(bloco, { id_preco: idPrecoSalvo || null });
   sincronizarRestricoesDataFimDoBloco(bloco);
   atualizarResumoComercial(bloco);
   void inicializarCalendarioReservaDoBloco(bloco, valoresSalvos);

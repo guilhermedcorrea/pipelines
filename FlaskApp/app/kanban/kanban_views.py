@@ -11472,6 +11472,7 @@ def api_comercial_painel_face(id_painel: int, cod_face: str):
         "ok": True,
         "painel": painel,
         "face": face,
+        "EhPainelDigital": any(row.get("ExibicoesDia") is not None for row in precos) or _normalizar_texto_comparacao(painel.get("Tipo")) == "painel digital",
         "custo": {
             "IDDimCustoPainel": int(custo.get("IDDimCustoPainel") or 0) if custo else None,
             "Ano": int(custo.get("Ano") or 0) if custo and custo.get("Ano") is not None else None,
