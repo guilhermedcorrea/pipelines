@@ -3145,8 +3145,15 @@ def _executar_movimento_card_core(
     if not fase_destino:
         raise ValueError("Fase de destino não encontrada.")
 
-    if int(id_fase_para) == 4 and not _obter_id_empresa_relacionada_card(row):
-        raise ValueError("Para mover o card para a fase 4, informe a empresa primeiro.")
+    if int(id_fase_para) == 4:
+        _validar_preenchimento_empresas_fase_4(
+            id_tipo_cliente=_resolver_id_tipo_cliente_desconto_por_bits(row),
+            id_empresa_principal=_resolver_id_empresa_principal_por_tipo_cliente(row),
+            id_empresa_agencia=_int_ou_none(row.get("IDEmpresaAgencia")),
+            id_empresa_bureau=_int_ou_none(row.get("IDEmpresaBureau")),
+            id_empresa_cliente_direto=_int_ou_none(row.get("IDEmpresa")),
+            contexto="mover o card para a fase 4",
+        )
 
     snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
@@ -4185,7 +4192,11 @@ def _obter_id_empresa_relacionada_card(card: Mapping[str, Any] | dict[str, Any] 
     if not card:
         return None
 
-    for chave in ("IDEmpresaRelacionadaCard", "IDEmpresa", "IDCliente", "IDEmpresaRelacionada"):
+    id_principal = _resolver_id_empresa_principal_por_tipo_cliente(card)
+    if id_principal is not None:
+        return id_principal
+
+    for chave in ("IDEmpresaRelacionadaCard", "IDEmpresa", "IDEmpresaAgencia", "IDEmpresaBureau", "IDCliente", "IDEmpresaRelacionada"):
         valor = card.get(chave)
         if valor not in (None, ""):
             try:
@@ -6978,6 +6989,12 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         else "CAST(NULL AS int) AS IDEmpresaAgencia,"
     )
 
+    select_id_empresa_bureau = (
+        "c.IDEmpresaBureau AS IDEmpresaBureau,"
+        if _coluna_existe(TABELA_CARD, "IDEmpresaBureau")
+        else "CAST(NULL AS int) AS IDEmpresaBureau,"
+    )
+
     select_marca = (
         "c.Marca AS Marca,"
         if _coluna_existe(TABELA_CARD, "Marca")
@@ -7039,6 +7056,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             {select_bit_aditivo}
             {select_bit_contrato_novo}
             {select_id_empresa_agencia}
+            {select_id_empresa_bureau}
             {select_marca}
             {select_telefone}
             {select_email}
@@ -9773,6 +9791,12 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         else "CAST(NULL AS int) AS IDEmpresaAgencia,"
     )
 
+    select_id_empresa_bureau = (
+        "c.IDEmpresaBureau AS IDEmpresaBureau,"
+        if _coluna_existe(TABELA_CARD, "IDEmpresaBureau")
+        else "CAST(NULL AS int) AS IDEmpresaBureau,"
+    )
+
     select_marca = (
         "c.Marca AS Marca,"
         if _coluna_existe(TABELA_CARD, "Marca")
@@ -9836,6 +9860,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             {select_bit_aditivo}
             {select_bit_contrato_novo}
             {select_id_empresa_agencia}
+            {select_id_empresa_bureau}
             {select_marca}
             {select_telefone}
             {select_email}
@@ -18072,6 +18097,136 @@ def _resolver_campos_complementares_novo_contrato(
     }
 
 
+
+def _resolver_ids_empresas_card_por_tipo_cliente(
+    *,
+    id_tipo_cliente: Any,
+    id_empresa_principal: Any,
+    id_empresa_agencia: Any = None,
+    id_empresa_bureau: Any = None,
+    id_empresa_cliente_direto: Any = None,
+) -> dict[str, Any]:
+    """
+    Regras de persistência do card:
+    - Tipo 2 (Cliente Direto):
+        IDEmpresa = principal
+        IDEmpresaAgencia = agência informada
+        IDEmpresaBureau = bureau informado
+    - Tipo 3 (Agência de Publicidade):
+        IDEmpresa = cliente direto informado
+        IDEmpresaAgencia = principal
+        IDEmpresaBureau = bureau informado
+    - Tipo 4 (Bureau):
+        IDEmpresa = cliente direto informado
+        IDEmpresaAgencia = agência informada
+        IDEmpresaBureau = principal
+    - Demais tipos:
+        IDEmpresa = principal
+    """
+    id_tipo = _int_ou_none(id_tipo_cliente)
+    id_principal = _int_ou_none(id_empresa_principal)
+    id_agencia = _int_ou_none(id_empresa_agencia)
+    id_bureau = _int_ou_none(id_empresa_bureau)
+    id_cliente_direto = _int_ou_none(id_empresa_cliente_direto)
+
+    validacoes = (
+        ("empresa principal", id_empresa_principal, id_principal),
+        ("agência", id_empresa_agencia, id_agencia),
+        ("bureau", id_empresa_bureau, id_bureau),
+        ("cliente direto", id_empresa_cliente_direto, id_cliente_direto),
+    )
+
+    for nome_campo, valor_bruto, valor_int in validacoes:
+        if valor_bruto not in (None, "", 0) and valor_int is None:
+            raise ValueError(f"{nome_campo.capitalize()} inválido(a).")
+        if valor_int is not None and not _empresa_existe_por_id(valor_int):
+            raise ValueError(f"{nome_campo.capitalize()} não encontrado(a).")
+
+    if id_tipo == 3:
+        return {
+            "id_empresa_card": id_cliente_direto,
+            "id_empresa_agencia_card": id_principal,
+            "id_empresa_bureau_card": id_bureau,
+            "id_empresa_principal": id_principal,
+            "id_empresa_cliente_direto": id_cliente_direto,
+        }
+
+    if id_tipo == 4:
+        return {
+            "id_empresa_card": id_cliente_direto,
+            "id_empresa_agencia_card": id_agencia,
+            "id_empresa_bureau_card": id_principal,
+            "id_empresa_principal": id_principal,
+            "id_empresa_cliente_direto": id_cliente_direto,
+        }
+
+    return {
+        "id_empresa_card": id_principal,
+        "id_empresa_agencia_card": id_agencia,
+        "id_empresa_bureau_card": id_bureau,
+        "id_empresa_principal": id_principal,
+        "id_empresa_cliente_direto": id_principal if id_tipo == 2 else id_cliente_direto,
+    }
+
+
+
+def _resolver_id_empresa_principal_por_tipo_cliente(
+    card: Mapping[str, Any] | dict[str, Any] | None,
+) -> int | None:
+    if not card:
+        return None
+
+    id_tipo = _resolver_id_tipo_cliente_desconto_por_bits(card)
+
+    if id_tipo == 3:
+        return _int_ou_none(card.get("IDEmpresaAgencia")) or _int_ou_none(card.get("IDEmpresa"))
+
+    if id_tipo == 4:
+        return _int_ou_none(card.get("IDEmpresaBureau")) or _int_ou_none(card.get("IDEmpresa"))
+
+    return (
+        _int_ou_none(card.get("IDEmpresa"))
+        or _int_ou_none(card.get("IDEmpresaAgencia"))
+        or _int_ou_none(card.get("IDEmpresaBureau"))
+        or _int_ou_none(card.get("IDEmpresaRelacionadaCard"))
+    )
+
+
+
+def _validar_preenchimento_empresas_fase_4(
+    *,
+    id_tipo_cliente: Any,
+    id_empresa_principal: Any,
+    id_empresa_agencia: Any = None,
+    id_empresa_bureau: Any = None,
+    id_empresa_cliente_direto: Any = None,
+    contexto: str = "salvar o card na fase 4",
+) -> None:
+    id_tipo = _int_ou_none(id_tipo_cliente)
+    id_principal = _int_ou_none(id_empresa_principal)
+
+    if id_tipo is None:
+        raise ValueError(f"Para {contexto}, informe o Tipo de cliente.")
+
+    mapa_nomes = {
+        1: "Planejador de Mídia",
+        2: "Cliente Direto",
+        3: "Agência de Publicidade",
+        4: "Bureau",
+    }
+    nome_tipo = mapa_nomes.get(id_tipo, "Empresa")
+
+    if id_principal is None:
+        raise ValueError(f"Para {contexto}, informe a empresa principal do tipo {nome_tipo}.")
+
+    # Regra de negócio:
+    # Agência de Publicidade, Bureau e Cliente Direto complementar são opcionais.
+    # Na fase 4 eu obrigo apenas:
+    # 1) Tipo de cliente
+    # 2) empresa principal correspondente ao tipo selecionado
+    return None
+
+
 def _int_ou_none(valor: Any) -> int | None:
     """Eu converto números inteiros opcionais."""
     if valor in (None, ""):
@@ -19386,6 +19541,12 @@ def _resolver_id_tipo_cliente_desconto_por_bits(card: Mapping[str, Any] | dict[s
     if _bit("BitAgencia") == 1:
         return 3
 
+    try:
+        if int(card.get("IDEmpresaBureau") or 0) > 0 and int(card.get("IDDimTipoCliente") or card.get("IDDimKanbanTipoClienteDesconto") or 0) == 4:
+            return 4
+    except Exception:
+        pass
+
     return None
 
 
@@ -19547,6 +19708,8 @@ def api_card_criar(id_kanban: int):
         cod_ponto_contrato = payload.get("cod_ponto_contrato")
         cod_face_contrato = payload.get("cod_face_contrato")
         id_empresa_agencia = payload.get("id_empresa_agencia")
+        id_empresa_bureau = payload.get("id_empresa_bureau")
+        id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
@@ -19622,6 +19785,24 @@ def api_card_criar(id_kanban: int):
             if id_tipo_cliente_desconto_int not in tipos_validos:
                 return jsonify({"ok": False, "msg": "Tipo de cliente inválido"}), 400
 
+        empresas_relacionadas_card = _resolver_ids_empresas_card_por_tipo_cliente(
+            id_tipo_cliente=id_tipo_cliente_desconto_int,
+            id_empresa_principal=id_empresa_relacionada_int,
+            id_empresa_agencia=id_empresa_agencia,
+            id_empresa_bureau=id_empresa_bureau,
+            id_empresa_cliente_direto=id_empresa_cliente_direto,
+        )
+
+        if int(id_fase or 0) == 4:
+            _validar_preenchimento_empresas_fase_4(
+                id_tipo_cliente=id_tipo_cliente_desconto_int,
+                id_empresa_principal=empresas_relacionadas_card.get("id_empresa_principal"),
+                id_empresa_agencia=empresas_relacionadas_card.get("id_empresa_agencia_card"),
+                id_empresa_bureau=empresas_relacionadas_card.get("id_empresa_bureau_card"),
+                id_empresa_cliente_direto=empresas_relacionadas_card.get("id_empresa_cliente_direto"),
+                contexto="criar o card já na fase 4",
+            )
+
         """
         Na criação rápida do card eu não obrigo Tipo de Cliente.
         Regra de UX:
@@ -19655,21 +19836,23 @@ def api_card_criar(id_kanban: int):
                 return jsonify({"ok": False, "msg": "Segmento inválido"}), 400
 
         nome_empresa_card_txt = str(nome_empresa_card or "").strip() or None
-        if id_empresa_relacionada_int not in (None, "", 0) and not nome_empresa_card_txt:
+        id_empresa_nome_base = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int
+        if id_empresa_nome_base not in (None, "", 0) and not nome_empresa_card_txt:
             sql_nome_empresa = text(f"""
                 SELECT TOP (1) RazaoSocial
                 FROM {TABELA_EMPRESAS}
                 WHERE IDEmpresa = :id_empresa;
             """)
-            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_relacionada_int)}).scalar()
+            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_nome_base)}).scalar()
 
         relacionamento_empresa_atual = None
         id_tipo_cliente_relacionamento_final = None
         id_origem_atendimento_relacionamento_final = None
 
-        if id_empresa_relacionada_int not in (None, "", 0):
+        id_empresa_relacionamento = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int
+        if id_empresa_relacionamento not in (None, "", 0):
             relacionamento_empresa_atual = _obter_relacionamento_empresa_proprietaria(
-                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa=int(id_empresa_relacionamento),
                 id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
             )
 
@@ -19736,7 +19919,7 @@ def api_card_criar(id_kanban: int):
         if nome_coluna_empresa:
             colunas.append(nome_coluna_empresa)
             valores.append(":id_empresa_relacionada")
-            params["id_empresa_relacionada"] = id_empresa_relacionada_int
+            params["id_empresa_relacionada"] = empresas_relacionadas_card.get("id_empresa_card")
 
         if _coluna_existe(TABELA_CARD, "BitClienteDireto"):
             colunas.append("BitClienteDireto")
@@ -19786,7 +19969,12 @@ def api_card_criar(id_kanban: int):
         if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia"):
             colunas.append("IDEmpresaAgencia")
             valores.append(":id_empresa_agencia")
-            params["id_empresa_agencia"] = campos_complementares_novo_contrato.get("id_empresa_agencia")
+            params["id_empresa_agencia"] = empresas_relacionadas_card.get("id_empresa_agencia_card")
+
+        if _coluna_existe(TABELA_CARD, "IDEmpresaBureau"):
+            colunas.append("IDEmpresaBureau")
+            valores.append(":id_empresa_bureau")
+            params["id_empresa_bureau"] = empresas_relacionadas_card.get("id_empresa_bureau_card")
 
         if _coluna_existe(TABELA_CARD, "Marca"):
             colunas.append("Marca")
@@ -20062,6 +20250,8 @@ def api_card_atualizar(id_card: int):
         cod_ponto_contrato = payload.get("cod_ponto_contrato")
         cod_face_contrato = payload.get("cod_face_contrato")
         id_empresa_agencia = payload.get("id_empresa_agencia")
+        id_empresa_bureau = payload.get("id_empresa_bureau")
+        id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
@@ -20109,6 +20299,24 @@ def api_card_atualizar(id_card: int):
         if id_tipo_cliente_desconto_int in (None, 0):
             return jsonify({"ok": False, "msg": "Tipo de cliente é obrigatório."}), 400
 
+        empresas_relacionadas_card = _resolver_ids_empresas_card_por_tipo_cliente(
+            id_tipo_cliente=id_tipo_cliente_desconto_int,
+            id_empresa_principal=id_empresa_relacionada_int,
+            id_empresa_agencia=id_empresa_agencia,
+            id_empresa_bureau=id_empresa_bureau,
+            id_empresa_cliente_direto=id_empresa_cliente_direto,
+        )
+
+        if int(id_fase_atual or 0) == 4:
+            _validar_preenchimento_empresas_fase_4(
+                id_tipo_cliente=id_tipo_cliente_desconto_int,
+                id_empresa_principal=empresas_relacionadas_card.get("id_empresa_principal"),
+                id_empresa_agencia=empresas_relacionadas_card.get("id_empresa_agencia_card"),
+                id_empresa_bureau=empresas_relacionadas_card.get("id_empresa_bureau_card"),
+                id_empresa_cliente_direto=empresas_relacionadas_card.get("id_empresa_cliente_direto"),
+                contexto="salvar o card na fase 4",
+            )
+
         id_origem_atendimento_int = None
         if origem_atendimento_informada:
             if id_origem_atendimento not in (None, "", 0):
@@ -20130,22 +20338,24 @@ def api_card_atualizar(id_card: int):
                 return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
 
         nome_empresa_card_txt = str(nome_empresa_card or "").strip() or None
-        if id_empresa_relacionada_int not in (None, "", 0) and not nome_empresa_card_txt:
+        id_empresa_nome_base = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int
+        if id_empresa_nome_base not in (None, "", 0) and not nome_empresa_card_txt:
             sql_nome_empresa = text(f"""
                 SELECT TOP (1) RazaoSocial
                 FROM {TABELA_EMPRESAS}
                 WHERE IDEmpresa = :id_empresa;
             """)
-            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_relacionada_int)}).scalar()
+            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_nome_base)}).scalar()
 
         relacionamento_empresa_atual = None
         id_tipo_cliente_relacionamento_final = None
         id_origem_atendimento_relacionamento_final = None
         id_origem_atendimento_atual_card = _obter_id_origem_atendimento_atual_do_card(int(id_card))
 
-        if id_empresa_relacionada_int not in (None, "", 0):
+        id_empresa_relacionamento = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int
+        if id_empresa_relacionamento not in (None, "", 0):
             relacionamento_empresa_atual = _obter_relacionamento_empresa_proprietaria(
-                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa=int(id_empresa_relacionamento),
                 id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
             )
 
@@ -20168,7 +20378,7 @@ def api_card_atualizar(id_card: int):
                 )
 
         contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
-            id_empresa=id_empresa_relacionada_int,
+            id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int,
             id_contrato_existente=id_contrato_existente,
             tipo_contrato_card=tipo_contrato_card,
         )
@@ -20210,7 +20420,7 @@ def api_card_atualizar(id_card: int):
         nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
         if nome_coluna_empresa:
             campos_update.append(f"{nome_coluna_empresa} = :id_empresa_relacionada")
-            parametros_update["id_empresa_relacionada"] = id_empresa_relacionada_int
+            parametros_update["id_empresa_relacionada"] = empresas_relacionadas_card.get("id_empresa_card")
 
         if _coluna_existe(TABELA_CARD, "BitAditivo"):
             campos_update.append("BitAditivo = :bit_aditivo_contrato")
@@ -20231,7 +20441,11 @@ def api_card_atualizar(id_card: int):
 
         if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia"):
             campos_update.append("IDEmpresaAgencia = :id_empresa_agencia")
-            parametros_update["id_empresa_agencia"] = campos_complementares_novo_contrato.get("id_empresa_agencia")
+            parametros_update["id_empresa_agencia"] = empresas_relacionadas_card.get("id_empresa_agencia_card")
+
+        if _coluna_existe(TABELA_CARD, "IDEmpresaBureau"):
+            campos_update.append("IDEmpresaBureau = :id_empresa_bureau")
+            parametros_update["id_empresa_bureau"] = empresas_relacionadas_card.get("id_empresa_bureau_card")
 
         if _coluna_existe(TABELA_CARD, "Marca"):
             campos_update.append("Marca = :marca")

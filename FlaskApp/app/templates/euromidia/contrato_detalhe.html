@@ -381,8 +381,8 @@
   </div>
 
   <div style="margin-top:18px;">
-    <h2 class="section-title">Contrato de Controle — todos os campos</h2>
-    <div class="section-sub">Campos vindos de FatoControleContratosEuromidia, com razão social e nome fantasia da DimEmpresas quando houver vínculo.</div>
+    <h2 class="section-title">Detalhess</h2>
+
     <div class="field-grid">
       {% for campo in contrato_campos %}
         <div class="field-item">
@@ -395,7 +395,7 @@
 
   <div style="margin-top:18px;">
     <h2 class="section-title">Empresa principal</h2>
-    <div class="section-sub">Dados completos da DimEmpresas para a empresa vinculada ao contrato.</div>
+   
     {% if empresa_principal_campos and empresa_principal_campos|length > 0 %}
       <div class="field-grid">
         {% for campo in empresa_principal_campos %}
@@ -412,7 +412,7 @@
 
   <div style="margin-top:18px;">
     <h2 class="section-title">Empresas relacionadas</h2>
-    <div class="section-sub">Resumo compacto na tela principal. O detalhamento abre em pop-up para não esticar o contrato.</div>
+    
     <div class="surface-grid">
       <div class="surface-card">
         <div class="surface-head">
@@ -447,7 +447,7 @@
 
   <div style="margin-top:18px;">
     <h2 class="section-title">Painéis / Faces do Contrato</h2>
-    <div class="section-sub">Cada face mostra um resumo executivo na tela e abre pop-up somente quando o usuário quiser aprofundar check-in, negociação de preço ou preço praticado.</div>
+   
 
     {% if itens and itens|length > 0 %}
       <div class="detail-stack">

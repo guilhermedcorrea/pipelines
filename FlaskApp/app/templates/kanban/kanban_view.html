@@ -2680,7 +2680,7 @@
         </select>
 
         <div class="kb-row" style="justify-content:space-between;align-items:center;margin-top:10px;">
-          <div class="kb-section-title">Nome Empresa</div>
+          <div id="labelEmpresaPrincipalCard" class="kb-section-title">Nome Empresa</div>
           <button class="kb-btn sm kb-btn-orcamento" id="btnAbrirCadastroEmpresa" type="button" title="Cadastrar ou editar empresa deste card">Cadastrar Empresa</button>
         </div>
         <div class="kb-row">
@@ -2730,11 +2730,10 @@
           </div>
         </div>
 
-        <div id="wrapDadosNovoContrato" class="kb-contrato-box" hidden>
-          <div class="kb-section-title">Novo contrato</div>
-
-          <div class="kb-contrato-campo">
-            <label class="kb-contrato-label" for="inputAgenciaCardBusca">Agência</label>
+        <div id="wrapEmpresasRelacionadasCard" class="kb-contrato-box" hidden>
+          <div class="kb-section-title">Empresas relacionadas</div>
+          <div id="wrapAgenciaRelacionadaCard" class="kb-contrato-campo" hidden>
+            <label class="kb-contrato-label" for="inputAgenciaCardBusca">Agência de Publicidade</label>
             <div class="kb-row">
               <div id="comboAgenciaCard" class="kb-combobox grow">
                 <input
@@ -2752,6 +2751,50 @@
               <button class="kb-btn sm" id="btnLimparAgencia" type="button">Sem agência</button>
             </div>
           </div>
+
+          <div id="wrapClienteDiretoCard" class="kb-contrato-campo" hidden>
+            <label class="kb-contrato-label" for="inputClienteDiretoCardBusca">Cliente Direto</label>
+            <div class="kb-row">
+              <div id="comboClienteDiretoCard" class="kb-combobox grow">
+                <input
+                  id="inputClienteDiretoCardBusca"
+                  class="kb-input kb-combobox-input"
+                  type="text"
+                  placeholder="Digite razão social ou CNPJ do cliente direto..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button id="btnToggleClienteDiretoCard" class="kb-combobox-toggle" type="button" aria-label="Abrir lista de clientes diretos">▾</button>
+                <div id="listaClienteDiretoCardBusca" class="kb-combobox-lista" hidden></div>
+                <select id="selectClienteDiretoCard" class="kb-select grow kb-select-hidden" tabindex="-1" aria-hidden="true"></select>
+              </div>
+              <button class="kb-btn sm" id="btnLimparClienteDireto" type="button">Sem cliente direto</button>
+            </div>
+          </div>
+
+          <div id="wrapBureauCard" class="kb-contrato-campo" hidden>
+            <label class="kb-contrato-label" for="inputBureauCardBusca">Bureau</label>
+            <div class="kb-row">
+              <div id="comboBureauCard" class="kb-combobox grow">
+                <input
+                  id="inputBureauCardBusca"
+                  class="kb-input kb-combobox-input"
+                  type="text"
+                  placeholder="Digite razão social ou CNPJ do bureau..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button id="btnToggleBureauCard" class="kb-combobox-toggle" type="button" aria-label="Abrir lista de bureaus">▾</button>
+                <div id="listaBureauCardBusca" class="kb-combobox-lista" hidden></div>
+                <select id="selectBureauCard" class="kb-select grow kb-select-hidden" tabindex="-1" aria-hidden="true"></select>
+              </div>
+              <button class="kb-btn sm" id="btnLimparBureau" type="button">Sem bureau</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="wrapDadosNovoContrato" class="kb-contrato-box" hidden>
+          <div class="kb-section-title">Novo contrato</div>
 
           <div class="kb-cadastro-empresa-grid">
             <div class="kb-contrato-campo">
@@ -3267,6 +3310,11 @@
   const listaEmpresaCardBusca = document.getElementById("listaEmpresaCardBusca");
   const selectEmpresaCard = document.getElementById("selectEmpresaCard");
   const btnLimparEmpresa = document.getElementById("btnLimparEmpresa");
+  const labelEmpresaPrincipalCard = document.getElementById("labelEmpresaPrincipalCard");
+  const wrapEmpresasRelacionadasCard = document.getElementById("wrapEmpresasRelacionadasCard");
+  const wrapAgenciaRelacionadaCard = document.getElementById("wrapAgenciaRelacionadaCard");
+  const wrapClienteDiretoCard = document.getElementById("wrapClienteDiretoCard");
+  const wrapBureauCard = document.getElementById("wrapBureauCard");
   const wrapDadosNovoContrato = document.getElementById("wrapDadosNovoContrato");
   const comboAgenciaCard = document.getElementById("comboAgenciaCard");
   const inputAgenciaCardBusca = document.getElementById("inputAgenciaCardBusca");
@@ -3274,6 +3322,18 @@
   const listaAgenciaCardBusca = document.getElementById("listaAgenciaCardBusca");
   const selectAgenciaCard = document.getElementById("selectAgenciaCard");
   const btnLimparAgencia = document.getElementById("btnLimparAgencia");
+  const comboClienteDiretoCard = document.getElementById("comboClienteDiretoCard");
+  const inputClienteDiretoCardBusca = document.getElementById("inputClienteDiretoCardBusca");
+  const btnToggleClienteDiretoCard = document.getElementById("btnToggleClienteDiretoCard");
+  const listaClienteDiretoCardBusca = document.getElementById("listaClienteDiretoCardBusca");
+  const selectClienteDiretoCard = document.getElementById("selectClienteDiretoCard");
+  const btnLimparClienteDireto = document.getElementById("btnLimparClienteDireto");
+  const comboBureauCard = document.getElementById("comboBureauCard");
+  const inputBureauCardBusca = document.getElementById("inputBureauCardBusca");
+  const btnToggleBureauCard = document.getElementById("btnToggleBureauCard");
+  const listaBureauCardBusca = document.getElementById("listaBureauCardBusca");
+  const selectBureauCard = document.getElementById("selectBureauCard");
+  const btnLimparBureau = document.getElementById("btnLimparBureau");
   const inputMarcaCard = document.getElementById("inputMarcaCard");
   const inputTelefoneCard = document.getElementById("inputTelefoneCard");
   const inputEmailCard = document.getElementById("inputEmailCard");
@@ -3291,6 +3351,9 @@
   const btnFecharCadastroEmpresa = document.getElementById("btnFecharCadastroEmpresa");
   const btnSalvarCadastroEmpresa = document.getElementById("btnSalvarCadastroEmpresa");
   const msgCadastroEmpresa = document.getElementById("msgCadastroEmpresa");
+
+  let clientesDiretoResultadoComboboxAtual = [];
+  let bureauResultadoComboboxAtual = [];
 
   const cadEmpresaId = document.getElementById("cadEmpresaId");
   const cadEmpresaCnpj = document.getElementById("cadEmpresaCnpj");
@@ -4186,7 +4249,7 @@
     if (tiposClienteDescontoPorId.has(id)) {
       return safeStr(tiposClienteDescontoPorId.get(id)?.TipoCliente || "").trim();
     }
-    return ({ 1: "Planejador de Mídia", 2: "Cliente Direto", 3: "Agência de Publicidade" })[id] || "";
+    return ({ 1: "Planejador de Mídia", 2: "Cliente Direto", 3: "Agência de Publicidade", 4: "Bureau" })[id] || "";
   }
 
   function montarBitsTipoClienteDesconto(idTipo){
@@ -4196,6 +4259,110 @@
       BitClienteDireto: id === 2 ? 1 : 0,
       BitAgencia: id === 3 ? 1 : 0,
     };
+  }
+
+  function obterConfigEmpresasRelacionadasPorTipo(idTipo){
+    const id = idNum(idTipo || 0);
+
+    if (id === 2) {
+      return {
+        labelEmpresaPrincipal: "Cliente Direto",
+        mostrarWrap: true,
+        mostrarAgencia: true,
+        mostrarClienteDireto: false,
+        mostrarBureau: true,
+      };
+    }
+
+    if (id === 3) {
+      return {
+        labelEmpresaPrincipal: "Agência de Publicidade",
+        mostrarWrap: true,
+        mostrarAgencia: false,
+        mostrarClienteDireto: true,
+        mostrarBureau: true,
+      };
+    }
+
+    if (id === 4) {
+      return {
+        labelEmpresaPrincipal: "Bureau",
+        mostrarWrap: true,
+        mostrarAgencia: true,
+        mostrarClienteDireto: true,
+        mostrarBureau: false,
+      };
+    }
+
+    if (id === 1) {
+      return {
+        labelEmpresaPrincipal: "Planejador de Mídia",
+        mostrarWrap: false,
+        mostrarAgencia: false,
+        mostrarClienteDireto: false,
+        mostrarBureau: false,
+      };
+    }
+
+    return {
+      labelEmpresaPrincipal: "Nome Empresa",
+      mostrarWrap: false,
+      mostrarAgencia: false,
+      mostrarClienteDireto: false,
+      mostrarBureau: false,
+    };
+  }
+
+  function obterEmpresasRelacionadasDoCard(card){
+    const c = card || {};
+    const idTipo = derivarIdTipoClienteDescontoDoCard(c);
+    const idEmpresa = idNum(c.IDEmpresa ?? c.IDEmpresaRelacionadaCard ?? 0) || null;
+    const idAgencia = idNum(c.IDEmpresaAgencia ?? 0) || null;
+    const idBureau = idNum(c.IDEmpresaBureau ?? 0) || null;
+
+    if (idTipo === 3) {
+      return {
+        principal: idAgencia || idEmpresa,
+        agencia: null,
+        clienteDireto: idEmpresa,
+        bureau: idBureau,
+      };
+    }
+
+    if (idTipo === 4) {
+      return {
+        principal: idBureau || idEmpresa,
+        agencia: idAgencia,
+        clienteDireto: idEmpresa,
+        bureau: null,
+      };
+    }
+
+    return {
+      principal: idEmpresa,
+      agencia: idAgencia,
+      clienteDireto: null,
+      bureau: idBureau,
+    };
+  }
+
+  function validarEmpresasRelacionadasFase4Formulario(idTipo, idFaseAtual){
+    if (idNum(idFaseAtual || 0) !== 4) {
+      return { ok: true };
+    }
+
+    const id = idNum(idTipo || 0);
+    const principal = idNum(selectEmpresaCard?.value || 0) || null;
+
+    if (!id) {
+      return { ok: false, msg: "Na fase 4, o Tipo de cliente é obrigatório." };
+    }
+
+    if (!principal) {
+      return { ok: false, msg: "Na fase 4, informe a empresa principal antes de salvar." };
+    }
+
+    return { ok: true };
   }
 
   function obterTemaTipoClienteDesconto(cardOuId){
@@ -5602,18 +5769,327 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     fecharListaAgenciasCombobox();
   }
 
+  function obterTextoClienteDiretoSelecionado(idEmp){
+    return obterTextoEmpresaSelecionada(idEmp);
+  }
+
+  function garantirOpcaoClienteDiretoNoSelect(idEmp){
+    if (!selectClienteDiretoCard) return;
+    const valor = safeStr(idEmp || "").trim();
+    if (!valor) return;
+    const jaExiste = Array.from(selectClienteDiretoCard.options || []).some((opt) => safeStr(opt.value || "").trim() === valor);
+    if (jaExiste) return;
+    const empresa = obterEmpresaCatalogoPorId(valor);
+    const texto = empresa ? textoOpcaoEmpresa(empresa) : `Empresa #${valor}`;
+    selectClienteDiretoCard.appendChild(el("option", { value: valor }, [texto]));
+  }
+
+  async function garantirClienteDiretoNoCatalogoPorId(idEmp){
+    const empresa = await garantirEmpresaNoCatalogoPorId(idEmp);
+    if (empresa) garantirOpcaoClienteDiretoNoSelect(idEmp);
+    return empresa;
+  }
+
+  function abrirListaClienteDiretoCombobox(){
+    if (!comboClienteDiretoCard || !listaClienteDiretoCardBusca) return;
+    comboClienteDiretoCard.classList.add("is-open");
+    listaClienteDiretoCardBusca.hidden = false;
+    renderizarListaClienteDiretoCombobox(inputClienteDiretoCardBusca?.value || "");
+  }
+
+  function fecharListaClienteDiretoCombobox(){
+    if (!comboClienteDiretoCard || !listaClienteDiretoCardBusca) return;
+    comboClienteDiretoCard.classList.remove("is-open");
+    listaClienteDiretoCardBusca.hidden = true;
+  }
+
+  function sincronizarBuscaClienteDiretoComSelect(){
+    if (!inputClienteDiretoCardBusca || !selectClienteDiretoCard) return;
+    inputClienteDiretoCardBusca.value = obterTextoClienteDiretoSelecionado(selectClienteDiretoCard.value || "");
+  }
+
+  async function selecionarClienteDiretoPorIdComGarantia(idEmp, dispararChange = false){
+    if (!selectClienteDiretoCard) return;
+    const novoValor = safeStr(idEmp || "").trim();
+    const valorAnterior = safeStr(selectClienteDiretoCard.value || "").trim();
+    if (!novoValor) {
+      selectClienteDiretoCard.value = "";
+      sincronizarBuscaClienteDiretoComSelect();
+      fecharListaClienteDiretoCombobox();
+      if (dispararChange && valorAnterior) {
+        selectClienteDiretoCard.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return;
+    }
+    await garantirClienteDiretoNoCatalogoPorId(novoValor);
+    garantirOpcaoClienteDiretoNoSelect(novoValor);
+    selectClienteDiretoCard.value = novoValor;
+    sincronizarBuscaClienteDiretoComSelect();
+    fecharListaClienteDiretoCombobox();
+    if (dispararChange && novoValor !== valorAnterior) {
+      selectClienteDiretoCard.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  function renderizarListaClienteDiretoCombobox(texto, opcoes = {}){
+    if (!listaClienteDiretoCardBusca) return;
+    const base = Array.isArray(opcoes.empresas) ? opcoes.empresas : filtrarEmpresasCombobox(texto);
+    const filtradas = (Array.isArray(base) ? base : []).slice(0, LIMITE_EMPRESAS_COMBOBOX);
+    clientesDiretoResultadoComboboxAtual = filtradas.slice();
+    const valorSelecionado = safeStr(selectClienteDiretoCard?.value || "").trim();
+    listaClienteDiretoCardBusca.innerHTML = "";
+    if (!filtradas.length) {
+      listaClienteDiretoCardBusca.appendChild(el("div", { class: "kb-combobox-vazio" }, ["Nenhum cliente direto encontrado."]));
+      return;
+    }
+    filtradas.forEach((item) => {
+      const id = safeStr(item?.IDEmpresa ?? item?.IDEmpresaProprietaria ?? item?.ID ?? "").trim();
+      if (!id) return;
+      const razao = safeStr(item?.RazaoSocial || item?.EmpresaRazaoSocial || "—").trim() || "—";
+      const cnpj = mascaraCnpj(item?.CNPJ || item?.EmpresaCNPJ || "");
+      const botao = el("button", { type: "button", class: `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}` }, [
+        el("strong", {}, [razao]),
+        el("span", {}, [cnpj || "Sem CNPJ"])
+      ]);
+      botao.addEventListener("mousedown", async (evento) => {
+        evento.preventDefault();
+        await selecionarClienteDiretoPorIdComGarantia(id, false);
+      });
+      listaClienteDiretoCardBusca.appendChild(botao);
+    });
+  }
+
+  function reconciliarBuscaClienteDiretoDigitada(){
+    if (!inputClienteDiretoCardBusca || !selectClienteDiretoCard) return;
+    const textoDigitado = safeStr(inputClienteDiretoCardBusca.value || "").trim();
+    if (!textoDigitado) {
+      selecionarClienteDiretoPorIdComGarantia("", false).catch((erro) => {
+        console.warn("reconciliarBuscaClienteDiretoDigitada: falhou ao limpar cliente direto", erro);
+      });
+      return;
+    }
+    const empresa = localizarEmpresaPorTextoDigitado(textoDigitado);
+    if (empresa) {
+      const id = safeStr(empresa?.IDEmpresa ?? empresa?.IDEmpresaProprietaria ?? empresa?.ID ?? "").trim();
+      if (id) {
+        selecionarClienteDiretoPorIdComGarantia(id, false).catch((erro) => {
+          console.warn("reconciliarBuscaClienteDiretoDigitada: falhou ao selecionar cliente direto", erro);
+        });
+        return;
+      }
+    }
+    sincronizarBuscaClienteDiretoComSelect();
+    fecharListaClienteDiretoCombobox();
+  }
+
+  function obterTextoBureauSelecionado(idEmp){
+    return obterTextoEmpresaSelecionada(idEmp);
+  }
+
+  function garantirOpcaoBureauNoSelect(idEmp){
+    if (!selectBureauCard) return;
+    const valor = safeStr(idEmp || "").trim();
+    if (!valor) return;
+    const jaExiste = Array.from(selectBureauCard.options || []).some((opt) => safeStr(opt.value || "").trim() === valor);
+    if (jaExiste) return;
+    const empresa = obterEmpresaCatalogoPorId(valor);
+    const texto = empresa ? textoOpcaoEmpresa(empresa) : `Empresa #${valor}`;
+    selectBureauCard.appendChild(el("option", { value: valor }, [texto]));
+  }
+
+  async function garantirBureauNoCatalogoPorId(idEmp){
+    const empresa = await garantirEmpresaNoCatalogoPorId(idEmp);
+    if (empresa) garantirOpcaoBureauNoSelect(idEmp);
+    return empresa;
+  }
+
+  function abrirListaBureauCombobox(){
+    if (!comboBureauCard || !listaBureauCardBusca) return;
+    comboBureauCard.classList.add("is-open");
+    listaBureauCardBusca.hidden = false;
+    renderizarListaBureauCombobox(inputBureauCardBusca?.value || "");
+  }
+
+  function fecharListaBureauCombobox(){
+    if (!comboBureauCard || !listaBureauCardBusca) return;
+    comboBureauCard.classList.remove("is-open");
+    listaBureauCardBusca.hidden = true;
+  }
+
+  function sincronizarBuscaBureauComSelect(){
+    if (!inputBureauCardBusca || !selectBureauCard) return;
+    inputBureauCardBusca.value = obterTextoBureauSelecionado(selectBureauCard.value || "");
+  }
+
+  async function selecionarBureauPorIdComGarantia(idEmp, dispararChange = false){
+    if (!selectBureauCard) return;
+    const novoValor = safeStr(idEmp || "").trim();
+    const valorAnterior = safeStr(selectBureauCard.value || "").trim();
+    if (!novoValor) {
+      selectBureauCard.value = "";
+      sincronizarBuscaBureauComSelect();
+      fecharListaBureauCombobox();
+      if (dispararChange && valorAnterior) {
+        selectBureauCard.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      return;
+    }
+    await garantirBureauNoCatalogoPorId(novoValor);
+    garantirOpcaoBureauNoSelect(novoValor);
+    selectBureauCard.value = novoValor;
+    sincronizarBuscaBureauComSelect();
+    fecharListaBureauCombobox();
+    if (dispararChange && novoValor !== valorAnterior) {
+      selectBureauCard.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  function renderizarListaBureauCombobox(texto, opcoes = {}){
+    if (!listaBureauCardBusca) return;
+    const base = Array.isArray(opcoes.empresas) ? opcoes.empresas : filtrarEmpresasCombobox(texto);
+    const filtradas = (Array.isArray(base) ? base : []).slice(0, LIMITE_EMPRESAS_COMBOBOX);
+    bureauResultadoComboboxAtual = filtradas.slice();
+    const valorSelecionado = safeStr(selectBureauCard?.value || "").trim();
+    listaBureauCardBusca.innerHTML = "";
+    if (!filtradas.length) {
+      listaBureauCardBusca.appendChild(el("div", { class: "kb-combobox-vazio" }, ["Nenhum bureau encontrado."]));
+      return;
+    }
+    filtradas.forEach((item) => {
+      const id = safeStr(item?.IDEmpresa ?? item?.IDEmpresaProprietaria ?? item?.ID ?? "").trim();
+      if (!id) return;
+      const razao = safeStr(item?.RazaoSocial || item?.EmpresaRazaoSocial || "—").trim() || "—";
+      const cnpj = mascaraCnpj(item?.CNPJ || item?.EmpresaCNPJ || "");
+      const botao = el("button", { type: "button", class: `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}` }, [
+        el("strong", {}, [razao]),
+        el("span", {}, [cnpj || "Sem CNPJ"])
+      ]);
+      botao.addEventListener("mousedown", async (evento) => {
+        evento.preventDefault();
+        await selecionarBureauPorIdComGarantia(id, false);
+      });
+      listaBureauCardBusca.appendChild(botao);
+    });
+  }
+
+  function reconciliarBuscaBureauDigitada(){
+    if (!inputBureauCardBusca || !selectBureauCard) return;
+    const textoDigitado = safeStr(inputBureauCardBusca.value || "").trim();
+    if (!textoDigitado) {
+      selecionarBureauPorIdComGarantia("", false).catch((erro) => {
+        console.warn("reconciliarBuscaBureauDigitada: falhou ao limpar bureau", erro);
+      });
+      return;
+    }
+    const empresa = localizarEmpresaPorTextoDigitado(textoDigitado);
+    if (empresa) {
+      const id = safeStr(empresa?.IDEmpresa ?? empresa?.IDEmpresaProprietaria ?? empresa?.ID ?? "").trim();
+      if (id) {
+        selecionarBureauPorIdComGarantia(id, false).catch((erro) => {
+          console.warn("reconciliarBuscaBureauDigitada: falhou ao selecionar bureau", erro);
+        });
+        return;
+      }
+    }
+    sincronizarBuscaBureauComSelect();
+    fecharListaBureauCombobox();
+  }
+
   function normalizarTelefoneContato(valor){
     return safeStr(valor || "").replace(/\D+/g, "").slice(0, 30);
   }
 
   function limparDadosNovoContratoFormulario(){
-    selecionarAgenciaPorIdComGarantia("", false).catch((erro) => {
-      console.warn("limparDadosNovoContratoFormulario: falhou ao limpar agência", erro);
-    });
-
     if (inputMarcaCard) inputMarcaCard.value = "";
     if (inputTelefoneCard) inputTelefoneCard.value = "";
     if (inputEmailCard) inputEmailCard.value = "";
+  }
+
+  function definirEstadoCampoEmpresaRelacionada({ inputBusca, botaoToggle, selectOculto, botaoLimpar, habilitado }){
+    const ativo = !!habilitado;
+
+    if (inputBusca) {
+      inputBusca.disabled = !ativo;
+      inputBusca.readOnly = !ativo;
+    }
+
+    if (botaoToggle) {
+      botaoToggle.disabled = !ativo;
+      botaoToggle.tabIndex = ativo ? 0 : -1;
+    }
+
+    if (selectOculto) {
+      selectOculto.disabled = !ativo;
+    }
+
+    if (botaoLimpar) {
+      botaoLimpar.disabled = !ativo;
+      botaoLimpar.tabIndex = ativo ? 0 : -1;
+    }
+  }
+
+  function definirVisibilidadeCampoEmpresaRelacionada(elemento, visivel){
+    if (!elemento) return;
+    const mostrar = !!visivel;
+    elemento.hidden = !mostrar;
+    elemento.style.display = mostrar ? "" : "none";
+  }
+
+  function campoEmpresaRelacionadaTemValor(selectOculto, inputBusca){
+    const idSelecionado = idNum(selectOculto?.value || 0);
+    if (idSelecionado > 0) return true;
+    return !!safeStr(inputBusca?.value || "").trim();
+  }
+
+  function atualizarVisibilidadeEmpresasRelacionadasCard(){
+    const config = obterConfigEmpresasRelacionadasPorTipo(selectTipoClienteDescontoCard?.value || "");
+    const idFaseAtualModal = idNum(modalCard?.dataset?.idFaseAtual || obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual || 0);
+    const exibirRelacionadasNaFase4 = idFaseAtualModal === 4;
+
+    if (labelEmpresaPrincipalCard) {
+      labelEmpresaPrincipalCard.textContent = config.labelEmpresaPrincipal || "Nome Empresa";
+    }
+
+    const agenciaTemValor = campoEmpresaRelacionadaTemValor(selectAgenciaCard, inputAgenciaCardBusca);
+    const clienteDiretoTemValor = campoEmpresaRelacionadaTemValor(selectClienteDiretoCard, inputClienteDiretoCardBusca);
+    const bureauTemValor = campoEmpresaRelacionadaTemValor(selectBureauCard, inputBureauCardBusca);
+
+    const mostrarAgencia = !!config.mostrarAgencia && (exibirRelacionadasNaFase4 || agenciaTemValor);
+    const mostrarClienteDireto = !!config.mostrarClienteDireto && (exibirRelacionadasNaFase4 || clienteDiretoTemValor);
+    const mostrarBureau = !!config.mostrarBureau && (exibirRelacionadasNaFase4 || bureauTemValor);
+    const mostrarWrapRelacionadas = !!config.mostrarWrap && (exibirRelacionadasNaFase4 || mostrarAgencia || mostrarClienteDireto || mostrarBureau);
+
+    definirVisibilidadeCampoEmpresaRelacionada(wrapEmpresasRelacionadasCard, mostrarWrapRelacionadas);
+
+    definirVisibilidadeCampoEmpresaRelacionada(wrapAgenciaRelacionadaCard, mostrarAgencia);
+    if (!mostrarAgencia) fecharListaAgenciasCombobox();
+    definirEstadoCampoEmpresaRelacionada({
+      inputBusca: inputAgenciaCardBusca,
+      botaoToggle: btnToggleAgenciaCard,
+      selectOculto: selectAgenciaCard,
+      botaoLimpar: btnLimparAgencia,
+      habilitado: mostrarAgencia,
+    });
+
+    definirVisibilidadeCampoEmpresaRelacionada(wrapClienteDiretoCard, mostrarClienteDireto);
+    if (!mostrarClienteDireto) fecharListaClienteDiretoCombobox();
+    definirEstadoCampoEmpresaRelacionada({
+      inputBusca: inputClienteDiretoCardBusca,
+      botaoToggle: btnToggleClienteDiretoCard,
+      selectOculto: selectClienteDiretoCard,
+      botaoLimpar: btnLimparClienteDireto,
+      habilitado: mostrarClienteDireto,
+    });
+
+    definirVisibilidadeCampoEmpresaRelacionada(wrapBureauCard, mostrarBureau);
+    if (!mostrarBureau) fecharListaBureauCombobox();
+    definirEstadoCampoEmpresaRelacionada({
+      inputBusca: inputBureauCardBusca,
+      botaoToggle: btnToggleBureauCard,
+      selectOculto: selectBureauCard,
+      botaoLimpar: btnLimparBureau,
+      habilitado: mostrarBureau,
+    });
   }
 
   function atualizarVisibilidadeDadosNovoContrato(){
@@ -5625,7 +6101,6 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     wrapDadosNovoContrato.hidden = !mostrar;
 
     if (!mostrar) {
-      fecharListaAgenciasCombobox();
       return;
     }
 
@@ -9385,6 +9860,11 @@ async function moverCard(idCard, idFasePara, posicao) {
       detalheFinal?.card || j.card || obterCardPorId(idC) || cardAtual
     );
 
+    if (idNum(cardAbertoId) === idC && modalCard?.style?.display === "block") {
+      modalCard.dataset.idFaseAtual = String(idNum(cardFinal.IDDimKanbanFaseAtual || idDestino) || "");
+      atualizarVisibilidadeEmpresasRelacionadasCard();
+    }
+
     const cardSaiDoQuadro = cardDeveSairDoQuadro(cardFinal);
 
     if (cardSaiDoQuadro) {
@@ -9543,7 +10023,10 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   function fecharModalCard(){
-    modalCard.style.display = "none";
+    if (modalCard) {
+      modalCard.style.display = "none";
+      modalCard.dataset.idFaseAtual = "";
+    }
     limparEstadoCardAberto();
   }
 
@@ -9826,6 +10309,184 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
   });
 
+  inputClienteDiretoCardBusca?.addEventListener("focus", () => {
+    abrirListaClienteDiretoCombobox();
+    buscarEmpresasRemoto(inputClienteDiretoCardBusca.value || "", {
+      tipo: "cliente_direto",
+      listaDestino: listaClienteDiretoCardBusca,
+      renderizador: renderizarListaClienteDiretoCombobox,
+    }).catch((erro) => {
+      console.warn("focus cliente direto: falhou", erro);
+    });
+  });
+
+  inputClienteDiretoCardBusca?.addEventListener("click", () => {
+    abrirListaClienteDiretoCombobox();
+    buscarEmpresasRemoto(inputClienteDiretoCardBusca.value || "", {
+      tipo: "cliente_direto",
+      listaDestino: listaClienteDiretoCardBusca,
+      renderizador: renderizarListaClienteDiretoCombobox,
+    }).catch((erro) => {
+      console.warn("click cliente direto: falhou", erro);
+    });
+  });
+
+  inputClienteDiretoCardBusca?.addEventListener("input", () => {
+    abrirListaClienteDiretoCombobox();
+    const termo = inputClienteDiretoCardBusca.value || "";
+    const termoDigits = normalizaCnpj(termo);
+    if (!safeStr(termo).trim()) {
+      buscarEmpresasRemoto("", {
+        tipo: "cliente_direto",
+        listaDestino: listaClienteDiretoCardBusca,
+        renderizador: renderizarListaClienteDiretoCombobox,
+      }).catch((erro) => {
+        console.warn("input cliente direto vazio: falhou", erro);
+      });
+      return;
+    }
+    if (safeStr(termo).trim().length >= 2 || termoDigits.length >= 4) {
+      buscarEmpresasRemoto(termo, {
+        tipo: "cliente_direto",
+        listaDestino: listaClienteDiretoCardBusca,
+        renderizador: renderizarListaClienteDiretoCombobox,
+      }).catch((erro) => {
+        console.warn("input cliente direto remoto: falhou", erro);
+        renderizarListaClienteDiretoCombobox(termo);
+      });
+      return;
+    }
+    renderizarListaClienteDiretoCombobox(termo);
+  });
+
+  inputClienteDiretoCardBusca?.addEventListener("keydown", (evento) => {
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      const primeira = clientesDiretoResultadoComboboxAtual[0] || filtrarEmpresasCombobox(inputClienteDiretoCardBusca.value || "")[0] || null;
+      if (primeira) {
+        const id = safeStr(primeira?.IDEmpresa ?? primeira?.IDEmpresaProprietaria ?? primeira?.ID ?? "").trim();
+        if (id) {
+          selecionarClienteDiretoPorIdComGarantia(id, false).catch((erro) => {
+            console.warn("keydown cliente direto: falhou ao selecionar primeira opção", erro);
+          });
+          return;
+        }
+      }
+      reconciliarBuscaClienteDiretoDigitada();
+      return;
+    }
+
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      sincronizarBuscaClienteDiretoComSelect();
+      fecharListaClienteDiretoCombobox();
+      return;
+    }
+  });
+
+  btnToggleClienteDiretoCard?.addEventListener("click", () => {
+    if (listaClienteDiretoCardBusca?.hidden) abrirListaClienteDiretoCombobox();
+    else {
+      sincronizarBuscaClienteDiretoComSelect();
+      fecharListaClienteDiretoCombobox();
+    }
+  });
+
+  btnLimparClienteDireto?.addEventListener("click", () => {
+    selecionarClienteDiretoPorIdComGarantia("", false).catch((erro) => {
+      console.warn("btnLimparClienteDireto: falhou", erro);
+    });
+  });
+
+  inputBureauCardBusca?.addEventListener("focus", () => {
+    abrirListaBureauCombobox();
+    buscarEmpresasRemoto(inputBureauCardBusca.value || "", {
+      tipo: "bureau",
+      listaDestino: listaBureauCardBusca,
+      renderizador: renderizarListaBureauCombobox,
+    }).catch((erro) => {
+      console.warn("focus bureau: falhou", erro);
+    });
+  });
+
+  inputBureauCardBusca?.addEventListener("click", () => {
+    abrirListaBureauCombobox();
+    buscarEmpresasRemoto(inputBureauCardBusca.value || "", {
+      tipo: "bureau",
+      listaDestino: listaBureauCardBusca,
+      renderizador: renderizarListaBureauCombobox,
+    }).catch((erro) => {
+      console.warn("click bureau: falhou", erro);
+    });
+  });
+
+  inputBureauCardBusca?.addEventListener("input", () => {
+    abrirListaBureauCombobox();
+    const termo = inputBureauCardBusca.value || "";
+    const termoDigits = normalizaCnpj(termo);
+    if (!safeStr(termo).trim()) {
+      buscarEmpresasRemoto("", {
+        tipo: "bureau",
+        listaDestino: listaBureauCardBusca,
+        renderizador: renderizarListaBureauCombobox,
+      }).catch((erro) => {
+        console.warn("input bureau vazio: falhou", erro);
+      });
+      return;
+    }
+    if (safeStr(termo).trim().length >= 2 || termoDigits.length >= 4) {
+      buscarEmpresasRemoto(termo, {
+        tipo: "bureau",
+        listaDestino: listaBureauCardBusca,
+        renderizador: renderizarListaBureauCombobox,
+      }).catch((erro) => {
+        console.warn("input bureau remoto: falhou", erro);
+        renderizarListaBureauCombobox(termo);
+      });
+      return;
+    }
+    renderizarListaBureauCombobox(termo);
+  });
+
+  inputBureauCardBusca?.addEventListener("keydown", (evento) => {
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      const primeira = bureauResultadoComboboxAtual[0] || filtrarEmpresasCombobox(inputBureauCardBusca.value || "")[0] || null;
+      if (primeira) {
+        const id = safeStr(primeira?.IDEmpresa ?? primeira?.IDEmpresaProprietaria ?? primeira?.ID ?? "").trim();
+        if (id) {
+          selecionarBureauPorIdComGarantia(id, false).catch((erro) => {
+            console.warn("keydown bureau: falhou ao selecionar primeira opção", erro);
+          });
+          return;
+        }
+      }
+      reconciliarBuscaBureauDigitada();
+      return;
+    }
+
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      sincronizarBuscaBureauComSelect();
+      fecharListaBureauCombobox();
+      return;
+    }
+  });
+
+  btnToggleBureauCard?.addEventListener("click", () => {
+    if (listaBureauCardBusca?.hidden) abrirListaBureauCombobox();
+    else {
+      sincronizarBuscaBureauComSelect();
+      fecharListaBureauCombobox();
+    }
+  });
+
+  btnLimparBureau?.addEventListener("click", () => {
+    selecionarBureauPorIdComGarantia("", false).catch((erro) => {
+      console.warn("btnLimparBureau: falhou", erro);
+    });
+  });
+
   inputTelefoneCard?.addEventListener("input", () => {
     inputTelefoneCard.value = normalizarTelefoneContato(inputTelefoneCard.value || "");
   });
@@ -9847,6 +10508,14 @@ async function moverCard(idCard, idFasePara, posicao) {
       reconciliarBuscaAgenciaDigitada();
     }
 
+    if (comboClienteDiretoCard && !comboClienteDiretoCard.contains(evento.target)) {
+      reconciliarBuscaClienteDiretoDigitada();
+    }
+
+    if (comboBureauCard && !comboBureauCard.contains(evento.target)) {
+      reconciliarBuscaBureauDigitada();
+    }
+
     for (const bloco of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])) {
       const comboPainel = bloco.querySelector('[data-role="combo-painel"]');
       if (comboPainel && !comboPainel.contains(evento.target)) {
@@ -9863,8 +10532,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     setEmpresaPreviewByObj(null);
     montarSelectTipoClienteDesconto(tipoClienteAtual);
     montarSelectOrigemAtendimento(origemAtual);
+    atualizarVisibilidadeEmpresasRelacionadasCard();
 
     resetarFluxoContrato();
+  });
+
+  selectTipoClienteDescontoCard?.addEventListener("change", () => {
+    atualizarVisibilidadeEmpresasRelacionadasCard();
   });
 
   selectContratoCard?.addEventListener("change", async () => {
@@ -10686,6 +11360,9 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const cardNormalizado = normalizarCardServidor(j.card);
+    if (modalCard) {
+      modalCard.dataset.idFaseAtual = String(idNum(cardNormalizado.IDDimKanbanFaseAtual || 0) || "");
+    }
     atualizarCabecalhoModalCard(cardNormalizado);
     const fluxoPersistido = extrairFluxoContratoPersistidoDoCard(cardNormalizado);
 
@@ -10720,8 +11397,9 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     if (selectEmpresaCard) {
-      const idEmpresa = cardNormalizado.IDEmpresaRelacionadaCard ?? "";
-      await selecionarEmpresaPorIdComGarantia(idEmpresa !== null && idEmpresa !== undefined ? String(idEmpresa) : "", false);
+      const empresasRelacionadas = obterEmpresasRelacionadasDoCard(cardNormalizado);
+      const idEmpresaPrincipal = empresasRelacionadas.principal ?? "";
+      await selecionarEmpresaPorIdComGarantia(idEmpresaPrincipal !== null && idEmpresaPrincipal !== undefined ? String(idEmpresaPrincipal) : "", false);
       setEmpresaPreviewById(selectEmpresaCard.value || "");
       await carregarFluxoContratoParaEmpresa(selectEmpresaCard.value || "", {
         preservarSelecao: true,
@@ -10730,14 +11408,13 @@ async function moverCard(idCard, idFasePara, posicao) {
         cod_ponto_contrato: fluxoPersistido.cod_ponto_contrato,
         cod_face_contrato: fluxoPersistido.cod_face_contrato
       });
+
+      await selecionarAgenciaPorIdComGarantia(empresasRelacionadas.agencia ? String(empresasRelacionadas.agencia) : "", false);
+      await selecionarClienteDiretoPorIdComGarantia(empresasRelacionadas.clienteDireto ? String(empresasRelacionadas.clienteDireto) : "", false);
+      await selecionarBureauPorIdComGarantia(empresasRelacionadas.bureau ? String(empresasRelacionadas.bureau) : "", false);
     } else {
       setEmpresaPreviewByObj(null);
       resetarFluxoContrato();
-    }
-
-    if (selectAgenciaCard) {
-      const idEmpresaAgencia = cardNormalizado.IDEmpresaAgencia ?? "";
-      await selecionarAgenciaPorIdComGarantia(idEmpresaAgencia !== null && idEmpresaAgencia !== undefined ? String(idEmpresaAgencia) : "", false);
     }
 
     if (inputMarcaCard) {
@@ -10753,11 +11430,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     atualizarVisibilidadeDadosNovoContrato();
+    atualizarVisibilidadeEmpresasRelacionadasCard();
 
     if (selectTipoClienteDescontoCard) {
       const idTipoCliente = cardNormalizado.IDDimKanbanTipoClienteDesconto ?? cardNormalizado.IDDimTipoCliente ?? "";
       montarSelectTipoClienteDesconto(idTipoCliente);
       selectTipoClienteDescontoCard.value = idTipoCliente !== null && idTipoCliente !== undefined ? String(idTipoCliente) : "";
+      atualizarVisibilidadeEmpresasRelacionadasCard();
     }
 
     if (selectOrigemAtendimentoCard) {
@@ -10935,6 +11614,11 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (idNum(cardAbertoId) === idC && modalCard.style.display === "block") {
       renderTagsNoCard(tagsAtualizadas);
+
+      if (modalCard) {
+        modalCard.dataset.idFaseAtual = String(idNum(cardServidor.IDDimKanbanFaseAtual || 0) || "");
+      }
+      atualizarVisibilidadeEmpresasRelacionadasCard();
 
       if (selectTagCard && idNum(opcoes.idTagSelecionada)) {
         selectTagCard.value = String(idNum(opcoes.idTagSelecionada));
@@ -11117,7 +11801,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       tipo_contrato_card: fluxoContratoAtual.modo_contrato,
       cod_ponto_contrato: safeStr(fluxoContratoAtual.cod_ponto_contrato || "").trim(),
       cod_face_contrato: safeStr(fluxoContratoAtual.cod_face_contrato || "").trim().toUpperCase(),
-      id_empresa_agencia: usarDadosNovoContrato && selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
+      id_empresa_agencia: selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
+      id_empresa_cliente_direto: selectClienteDiretoCard?.value ? Number(selectClienteDiretoCard.value) : null,
+      id_empresa_bureau: selectBureauCard?.value ? Number(selectBureauCard.value) : null,
       marca: usarDadosNovoContrato ? (safeStr(inputMarcaCard?.value || "").trim() || null) : null,
       telefone: usarDadosNovoContrato ? (normalizarTelefoneContato(inputTelefoneCard?.value || "") || null) : null,
       email: usarDadosNovoContrato ? (safeStr(inputEmailCard?.value || "").trim() || null) : null,
@@ -11161,6 +11847,13 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (!idTipoClienteDesconto) {
       mostrarMensagemCard("Tipo de cliente é obrigatório.");
+      return;
+    }
+
+    const idFaseAtualCardAberto = idNum(obterCardPorId(idCardSalvo)?.IDDimKanbanFaseAtual || 0);
+    const validacaoEmpresasFase4 = validarEmpresasRelacionadasFase4Formulario(idTipoClienteDesconto, idFaseAtualCardAberto);
+    if (!validacaoEmpresasFase4.ok) {
+      mostrarMensagemCard(validacaoEmpresasFase4.msg || "Existem pendências de empresas relacionadas para a fase 4.");
       return;
     }
 
