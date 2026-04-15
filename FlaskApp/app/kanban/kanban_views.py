@@ -10328,6 +10328,108 @@ def _obter_paineis_catalogo() -> list[dict[str, Any]]:
 
 
 
+def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
+    chave = _chave_cache_json("kanban:catalogo:painel_faces")
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return em_cache
+
+    sql = text("""
+        SELECT
+            f.IDDimFacesPaineis,
+            painel.IDDimPaineisEuromidia,
+            painel.CodPonto,
+            f.CodFace,
+            f.Face,
+            painel.Tipo,
+            painel.Cidade,
+            painel.UF,
+            painel.Logradouro,
+            painel.Bairro,
+            painel.Numero,
+            painel.CEP,
+            painel.QuantidadeFaces,
+            painel.BitAtivo
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        OUTER APPLY (
+            SELECT TOP (1)
+                p.IDDimPaineisEuromidia,
+                p.CodPonto,
+                p.Tipo,
+                p.Cidade,
+                p.UF,
+                p.Logradouro,
+                p.Bairro,
+                p.Numero,
+                p.CEP,
+                p.QuantidadeFaces,
+                p.BitAtivo
+            FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+            WHERE ISNULL(p.BitAtivo, 1) = 1
+              AND p.CodPonto IS NOT NULL
+              AND LTRIM(RTRIM(p.CodPonto)) <> ''
+              AND (
+                    TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, f.IDDimPaineisEuromidia)
+                    OR (
+                        TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, f.CodPonto)
+                        AND UPPER(LTRIM(RTRIM(ISNULL(p.Tipo, '')))) = UPPER(LTRIM(RTRIM(ISNULL(f.Tipo, ''))))
+                    )
+                  )
+            ORDER BY
+                CASE WHEN TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, f.IDDimPaineisEuromidia) THEN 0 ELSE 1 END,
+                p.DataAtualizacao DESC,
+                p.IDDimPaineisEuromidia DESC
+        ) painel
+        WHERE f.CodFace IS NOT NULL
+          AND LTRIM(RTRIM(f.CodFace)) <> ''
+          AND painel.IDDimPaineisEuromidia IS NOT NULL
+        ORDER BY
+            painel.Cidade ASC,
+            painel.Tipo ASC,
+            f.CodFace ASC,
+            painel.Logradouro ASC;
+    """)
+
+    rows = db.session.execute(sql).mappings().all()
+
+    resultado: list[dict[str, Any]] = []
+    chaves_vistas: set[tuple[int, str]] = set()
+
+    for row in rows:
+        id_painel = int(row.get("IDDimPaineisEuromidia") or 0) if row.get("IDDimPaineisEuromidia") is not None else 0
+        cod_face = _normalizar_texto(row.get("CodFace")).upper()
+        if not id_painel or not cod_face:
+            continue
+
+        chave_face = (id_painel, cod_face)
+        if chave_face in chaves_vistas:
+            continue
+        chaves_vistas.add(chave_face)
+
+        resultado.append(
+            {
+                "IDDimFacesPaineis": int(row.get("IDDimFacesPaineis") or 0) if row.get("IDDimFacesPaineis") is not None else None,
+                "IDDimPaineisEuromidia": id_painel,
+                "CodPonto": _normalizar_texto(row.get("CodPonto")) or None,
+                "CodFace": cod_face,
+                "Face": _normalizar_texto(row.get("Face")) or None,
+                "Tipo": _normalizar_texto(row.get("Tipo")) or None,
+                "Cidade": _normalizar_texto(row.get("Cidade")) or None,
+                "UF": _normalizar_texto(row.get("UF")) or None,
+                "Logradouro": _normalizar_texto(row.get("Logradouro")) or None,
+                "Bairro": _normalizar_texto(row.get("Bairro")) or None,
+                "Numero": _normalizar_texto(row.get("Numero")) or None,
+                "CEP": _normalizar_texto(row.get("CEP")) or None,
+                "QuantidadeFaces": int(row.get("QuantidadeFaces") or 0) if row.get("QuantidadeFaces") is not None else None,
+                "BitAtivo": int(row.get("BitAtivo") or 0) if row.get("BitAtivo") is not None else 0,
+            }
+        )
+
+    _cache_json_set(chave, resultado, TIMEOUT_CACHE_LONGO)
+    return resultado
+
+
+
 
 
 
@@ -11193,6 +11295,15 @@ def api_cnaes_buscar():
 def api_paineis_lista():
     _assert_login()
     return jsonify({"ok": True, "paineis": _obter_paineis_catalogo()})
+
+
+
+@kanban_bp.route("/api/painel-faces/catalogo", methods=["GET"])
+@login_required
+@limiter.limit("60/minute")
+def api_painel_faces_catalogo():
+    _assert_login()
+    return jsonify({"ok": True, "painel_faces": _obter_painel_faces_catalogo()})
 
 
 

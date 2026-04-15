@@ -1581,7 +1581,7 @@
 
   .kb-painel-item-grid{
     display:grid;
-    grid-template-columns: minmax(0, 1.5fr) minmax(180px, .9fr) auto;
+    grid-template-columns: minmax(170px, .95fr) minmax(190px, 1fr) minmax(0, 1.9fr) auto;
     gap:10px;
     align-items:center;
   }
@@ -3213,7 +3213,9 @@
 
   let kanbanCfg = {};
   let paineisCatalogo = [];
+  let painelFacesCatalogo = [];
   let paineisPorId = new Map();
+  let painelFacesPorChave = new Map();
 
   let empresasCatalogo = [];
   let empresasPorId = new Map();
@@ -3423,6 +3425,7 @@
   let debounceBuscaTimer = null;
   const LIMITE_EMPRESAS_COMBOBOX = 80;
   const LIMITE_PAINEIS_COMBOBOX = 80;
+  const LIMITE_PAINEL_FACES_COMBOBOX = 120;
 
   let cardArrastandoId = 0;
   let faseOrigemArrasteId = 0;
@@ -7081,12 +7084,37 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     return candidatos[0];
   }
 
+  function encontrarPainelFacePorContrato(codPonto, codFace, tipoPainel = "") {
+    const codPontoNormalizado = safeStr(codPonto).trim();
+    const codFaceNormalizado = safeStr(codFace).trim().toUpperCase();
+    if (!codPontoNormalizado || !codFaceNormalizado) return null;
+
+    const candidatos = (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : []).filter((item) => {
+      return safeStr(item?.CodPonto ?? '').trim() === codPontoNormalizado
+        && safeStr(item?.CodFace ?? '').trim().toUpperCase() === codFaceNormalizado;
+    });
+
+    if (!candidatos.length) return null;
+    if (candidatos.length === 1) return candidatos[0];
+
+    const tipoContratoNormalizado = normalizarTextoComparacaoPainelContrato(tipoPainel);
+    if (tipoContratoNormalizado) {
+      const itemMesmoTipo = candidatos.find((item) => {
+        const tipoCatalogo = normalizarTextoComparacaoPainelContrato(item?.Tipo ?? item?.TipoPainel ?? '');
+        return tipoCatalogo === tipoContratoNormalizado;
+      });
+      if (itemMesmoTipo) return itemMesmoTipo;
+    }
+
+    return candidatos[0];
+  }
+
   async function aplicarPainelFaceContratoNoPrimeiroBloco(codPonto, codFace, dadosContrato = null) {
     const fluxo = obterFluxoContratoAtual();
     const codPontoNormalizado = safeStr(codPonto).trim();
-    const codFaceNormalizado = safeStr(codFace).trim();
+    const codFaceNormalizado = safeStr(codFace).trim().toUpperCase();
     const pontoSelecionado = obterPontoContratoSelecionado(fluxo.id_contrato, codPontoNormalizado);
-    const tipoPainelContrato = safeStr(pontoSelecionado?.tipo ?? pontoSelecionado?.TipoPainel ?? "").trim();
+    const tipoPainelContrato = safeStr(pontoSelecionado?.tipo ?? pontoSelecionado?.TipoPainel ?? '').trim();
 
     if (!codPontoNormalizado || !codFaceNormalizado || !painelFaceLista) {
       return;
@@ -7099,25 +7127,21 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       atualizarTitulosPainelFace();
     }
 
-    const painel = encontrarPainelPorCodPonto(codPontoNormalizado, tipoPainelContrato);
-    if (!painel) {
-      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} existe no contrato, mas não foi encontrado na lista de painéis carregados do kanban.`, "alerta");
+    const painelFace = encontrarPainelFacePorContrato(codPontoNormalizado, codFaceNormalizado, tipoPainelContrato);
+    if (!painelFace) {
+      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} com a face ${codFaceNormalizado} existe no contrato, mas não foi encontrado no catálogo carregado do kanban.`, "alerta");
       return;
     }
-
-    const idPainel = idNum(painel.IDDimPaineisEuromidia || painel.ID || 0);
-    if (!idPainel) {
-      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado} foi encontrado, mas o painel não possui ID válido no catálogo do kanban.`, "alerta");
-      return;
-    }
-
-    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
-    if (!selectPainel) return;
 
     const dadosContratoNormalizados = dadosContrato && typeof dadosContrato === "object"
       ? {
+          IDDimPaineisEuromidia: idNum(painelFace?.IDDimPaineisEuromidia ?? 0) || null,
+          CodPonto: codPontoNormalizado,
+          cod_ponto: codPontoNormalizado,
           CodFace: codFaceNormalizado,
           cod_face: codFaceNormalizado,
+          TipoPainel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
+          tipo_painel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
           DataInicio: safeStr(dadosContrato.data_inicio_previsto ?? dadosContrato.DataInicioPrevisto ?? "").trim() || null,
           data_inicio: safeStr(dadosContrato.data_inicio_previsto ?? dadosContrato.DataInicioPrevisto ?? "").trim() || null,
           DataFim: safeStr(dadosContrato.data_termino_previsto ?? dadosContrato.DataTerminoPrevisto ?? "").trim() || null,
@@ -7129,10 +7153,18 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
             null
           )
         }
-      : { CodFace: codFaceNormalizado };
+      : {
+          IDDimPaineisEuromidia: idNum(painelFace?.IDDimPaineisEuromidia ?? 0) || null,
+          CodPonto: codPontoNormalizado,
+          cod_ponto: codPontoNormalizado,
+          CodFace: codFaceNormalizado,
+          cod_face: codFaceNormalizado,
+          TipoPainel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
+          tipo_painel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
+        };
 
-    selectPainel.value = String(idPainel);
-    await atualizarFacesDoBloco(bloco, dadosContratoNormalizados);
+    await selecionarPainelCombobox(bloco, painelFace, false);
+    await atualizarComercialDoBloco(bloco, dadosContratoNormalizados);
     setMensagemFluxoContrato(`Contrato existente selecionado. O painel ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} e a face ${codFaceNormalizado} foram carregados no primeiro bloco.`, "sucesso");
   }
 
@@ -8039,54 +8071,248 @@ function formatarNumeroParaInput(valor){
     return partes.length ? partes.join(" • ") : "—";
   }
 
-  function localizarPainelPorTextoDigitado(texto){
-    const bruto = safeStr(texto || "").trim();
-    if (!bruto) return null;
-
-    const textoNormalizado = normalizarTexto(bruto);
-    return (Array.isArray(paineisCatalogo) ? paineisCatalogo : []).find((item) => {
-      const id = idNum(item?.IDDimPaineisEuromidia ?? item?.ID ?? 0);
-      if (!id) return false;
-
-      const label = textoOpcaoPainel(item);
-      return normalizarTexto(label) === textoNormalizado;
-    }) || null;
+  function obterChavePainelFaceCatalogo(item){
+    const idPainel = idNum(item?.IDDimPaineisEuromidia ?? item?.id_painel ?? 0);
+    const codFace = safeStr(item?.CodFace ?? item?.cod_face ?? '').trim().toUpperCase();
+    if (!idPainel || !codFace) return '';
+    return `${idPainel}|${codFace}`;
   }
 
-  function filtrarPaineisCombobox(texto){
-    const termoBruto = safeStr(texto || "").trim();
-    const termoNormalizado = normalizarTexto(termoBruto);
+  function resumoPainelFace(item){
+    const logradouro = safeStr(item?.Logradouro ?? item?.logradouro ?? '').trim();
+    const cidade = safeStr(item?.Cidade ?? item?.cidade ?? '').trim();
+    const bairro = safeStr(item?.Bairro ?? item?.bairro ?? '').trim();
+    const tipo = safeStr(item?.Tipo ?? item?.tipo ?? item?.TipoPainel ?? item?.tipo_painel ?? '').trim();
+    return [logradouro, cidade, bairro, tipo].filter(Boolean).join(' • ') || '—';
+  }
 
-    if (!termoNormalizado) {
-      return (Array.isArray(paineisCatalogo) ? paineisCatalogo : []).slice(0, LIMITE_PAINEIS_COMBOBOX);
+  function textoOpcaoPainelFace(item){
+    const codFace = safeStr(item?.CodFace ?? item?.cod_face ?? '').trim().toUpperCase();
+    const resumo = resumoPainelFace(item);
+    return [codFace, resumo].filter(Boolean).join(' • ') || '—';
+  }
+
+  function atualizarMapaPainelFacesCatalogo(){
+    painelFacesPorChave = new Map();
+    for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
+      const chave = obterChavePainelFaceCatalogo(item);
+      if (!chave || painelFacesPorChave.has(chave)) continue;
+      painelFacesPorChave.set(chave, Object.assign({}, item || {}));
+    }
+  }
+
+  async function carregarCatalogoPainelFaces(){
+    if (!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard)) {
+      painelFacesCatalogo = [];
+      atualizarMapaPainelFacesCatalogo();
+      return [];
     }
 
-    return (Array.isArray(paineisCatalogo) ? paineisCatalogo : []).filter((item) => {
-      const codPonto = safeStr(item?.CodPonto || "");
-      const logradouro = safeStr(item?.Logradouro || "");
-      const tipo = safeStr(item?.Tipo || "");
-      const cidade = safeStr(item?.Cidade || "");
-      const label = textoOpcaoPainel(item);
+    if (Array.isArray(painelFacesCatalogo) && painelFacesCatalogo.length) {
+      return painelFacesCatalogo;
+    }
 
-      return normalizarTexto(codPonto).includes(termoNormalizado)
-        || normalizarTexto(logradouro).includes(termoNormalizado)
-        || normalizarTexto(tipo).includes(termoNormalizado)
-        || normalizarTexto(cidade).includes(termoNormalizado)
-        || normalizarTexto(label).includes(termoNormalizado);
-    }).slice(0, LIMITE_PAINEIS_COMBOBOX);
+    const r = await fetch('/kanban/api/painel-faces/catalogo', { credentials: 'same-origin' });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !j.ok) {
+      console.warn('carregarCatalogoPainelFaces: falhou', { http: r.status, body: j });
+      painelFacesCatalogo = [];
+      atualizarMapaPainelFacesCatalogo();
+      return [];
+    }
+
+    painelFacesCatalogo = Array.isArray(j.painel_faces) ? j.painel_faces.map((item) => Object.assign({}, item || {})) : [];
+    atualizarMapaPainelFacesCatalogo();
+    return painelFacesCatalogo;
+  }
+
+  function localizarPainelFaceCatalogo(criterios = {}){
+    const idPainel = idNum(criterios?.id_painel ?? criterios?.IDDimPaineisEuromidia ?? 0) || null;
+    const codPonto = safeStr(criterios?.cod_ponto ?? criterios?.CodPonto ?? '').trim();
+    const codFace = safeStr(criterios?.cod_face ?? criterios?.CodFace ?? '').trim().toUpperCase();
+    const tipoPainel = safeStr(criterios?.tipo_painel ?? criterios?.TipoPainel ?? criterios?.Tipo ?? '').trim();
+    if (!codFace && !idPainel && !codPonto) return null;
+
+    if (idPainel && codFace) {
+      const chave = `${idPainel}|${codFace}`;
+      if (painelFacesPorChave.has(chave)) {
+        return painelFacesPorChave.get(chave) || null;
+      }
+    }
+
+    const candidatos = (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : []).filter((item) => {
+      const codFaceItem = safeStr(item?.CodFace ?? '').trim().toUpperCase();
+      if (codFace && codFaceItem !== codFace) return false;
+      if (idPainel && idNum(item?.IDDimPaineisEuromidia ?? 0) !== idPainel) return false;
+      if (codPonto && safeStr(item?.CodPonto ?? '').trim() !== codPonto) return false;
+      return true;
+    });
+
+    if (!candidatos.length) return null;
+    if (candidatos.length === 1) return candidatos[0];
+
+    const tipoNormalizado = normalizarTextoComparacaoPainelContrato(tipoPainel);
+    if (tipoNormalizado) {
+      const mesmoTipo = candidatos.find((item) => {
+        const tipoItem = normalizarTextoComparacaoPainelContrato(item?.Tipo ?? item?.TipoPainel ?? '');
+        return tipoItem === tipoNormalizado;
+      });
+      if (mesmoTipo) return mesmoTipo;
+    }
+
+    return candidatos[0];
+  }
+
+  function preencherSelectFiltroPainelFace(selectEl, valores, placeholder){
+    if (!selectEl) return;
+    const valorAtual = safeStr(selectEl.value || '').trim();
+    selectEl.innerHTML = '';
+    selectEl.appendChild(el('option', { value:'' }, [placeholder]));
+    (Array.isArray(valores) ? valores : []).forEach((valor) => {
+      const texto = safeStr(valor || '').trim();
+      if (!texto) return;
+      selectEl.appendChild(el('option', { value:texto }, [texto]));
+    });
+    if (valorAtual && (Array.isArray(valores) ? valores : []).includes(valorAtual)) {
+      selectEl.value = valorAtual;
+    }
+  }
+
+  function definirValorSelectOculto(selectEl, valor, label = null){
+    if (!selectEl) return;
+    const valorTexto = safeStr(valor || '').trim();
+    const placeholder = safeStr(selectEl.dataset.placeholder || '').trim() || '—';
+    selectEl.innerHTML = '';
+    selectEl.appendChild(el('option', { value:'' }, [placeholder]));
+    if (valorTexto) {
+      selectEl.appendChild(el('option', { value:valorTexto }, [safeStr(label || valorTexto)]));
+      selectEl.value = valorTexto;
+    } else {
+      selectEl.value = '';
+    }
+  }
+
+  function obterPainelFaceSelecionadoDoBloco(bloco){
+    const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const idPainel = idNum(selectPainel?.value || 0);
+    const codFace = safeStr(selectFace?.value || '').trim().toUpperCase();
+    if (!idPainel || !codFace) return null;
+    return painelFacesPorChave.get(`${idPainel}|${codFace}`) || null;
+  }
+
+  function itemPainelFaceAtendeFiltros(item, filtros = {}, considerarTexto = true){
+    if (!item) return false;
+
+    const cidadeFiltro = safeStr(filtros?.cidade || '').trim();
+    const tipoFiltro = safeStr(filtros?.tipo || '').trim();
+    const termo = safeStr(filtros?.texto || '').trim();
+
+    const cidadeItem = safeStr(item?.Cidade ?? '').trim();
+    const tipoItem = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
+
+    if (cidadeFiltro && cidadeItem !== cidadeFiltro) return false;
+    if (tipoFiltro && tipoItem !== tipoFiltro) return false;
+
+    if (!considerarTexto || !termo) return true;
+
+    const termoNormalizado = normalizarTexto(termo);
+    const campos = [
+      safeStr(item?.CodFace ?? ''),
+      safeStr(item?.CodPonto ?? ''),
+      safeStr(item?.Logradouro ?? ''),
+      safeStr(item?.Cidade ?? ''),
+      safeStr(item?.Bairro ?? ''),
+      safeStr(item?.Tipo ?? item?.TipoPainel ?? ''),
+      textoOpcaoPainelFace(item),
+    ];
+
+    return campos.some((campo) => normalizarTexto(campo).includes(termoNormalizado));
+  }
+
+  function listarCidadesPainelFaceDoBloco(bloco){
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const tipoSelecionado = safeStr(selectTipo?.value || '').trim();
+    const conjunto = new Set();
+
+    for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
+      const tipoItem = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
+      if (tipoSelecionado && tipoItem !== tipoSelecionado) continue;
+      const cidade = safeStr(item?.Cidade ?? '').trim();
+      if (cidade) conjunto.add(cidade);
+    }
+
+    return Array.from(conjunto).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }
+
+  function listarTiposPainelFaceDoBloco(bloco){
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const cidadeSelecionada = safeStr(selectCidade?.value || '').trim();
+    const conjunto = new Set();
+
+    for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
+      const cidadeItem = safeStr(item?.Cidade ?? '').trim();
+      if (cidadeSelecionada && cidadeItem !== cidadeSelecionada) continue;
+      const tipo = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
+      if (tipo) conjunto.add(tipo);
+    }
+
+    return Array.from(conjunto).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }
+
+  function sincronizarFiltrosPainelFaceDoBloco(bloco, opcoes = {}){
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    if (!selectCidade || !selectTipo) return;
+
+    const cidadeAtual = safeStr(selectCidade.value || '').trim();
+    const tipoAtual = safeStr(selectTipo.value || '').trim();
+
+    const cidades = listarCidadesPainelFaceDoBloco(bloco);
+    preencherSelectFiltroPainelFace(selectCidade, cidades, '— Cidade —');
+    if (cidadeAtual && cidades.includes(cidadeAtual)) {
+      selectCidade.value = cidadeAtual;
+    }
+
+    const tipos = listarTiposPainelFaceDoBloco(bloco);
+    preencherSelectFiltroPainelFace(selectTipo, tipos, '— Tipo Produto —');
+    if (tipoAtual && tipos.includes(tipoAtual)) {
+      selectTipo.value = tipoAtual;
+    }
+
+    const selecionado = obterPainelFaceSelecionadoDoBloco(bloco);
+    if (!opcoes.manterSelecionadoInvalido && selecionado) {
+      const filtrosAtuais = {
+        cidade: safeStr(selectCidade.value || '').trim(),
+        tipo: safeStr(selectTipo.value || '').trim(),
+      };
+      if (!itemPainelFaceAtendeFiltros(selecionado, filtrosAtuais, false)) {
+        limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange: true });
+        return;
+      }
+    }
+
+    sincronizarBuscaPainelComSelect(bloco);
+  }
+
+  function filtrarPaineisCombobox(bloco, texto){
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+
+    const filtros = {
+      cidade: safeStr(selectCidade?.value || '').trim(),
+      tipo: safeStr(selectTipo?.value || '').trim(),
+      texto: safeStr(texto || '').trim(),
+    };
+
+    return (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])
+      .filter((item) => itemPainelFaceAtendeFiltros(item, filtros, true))
+      .slice(0, LIMITE_PAINEL_FACES_COMBOBOX);
   }
 
   function montarSelectPaineisNoElemento(selectEl){
     if (!selectEl) return;
-    selectEl.innerHTML = "";
-    selectEl.appendChild(el("option", { value:"" }, ["— Selecione um painel —"]));
-
-    paineisCatalogo.forEach(p => {
-      const id = Number(p.IDDimPaineisEuromidia ?? p.ID ?? 0);
-      if (!id) return;
-      const label = textoOpcaoPainel(p);
-      selectEl.appendChild(el("option", { value:String(id) }, [label]));
-    });
+    definirValorSelectOculto(selectEl, '', null);
   }
 
   function abrirListaPaineisCombobox(bloco){
@@ -8109,96 +8335,156 @@ function formatarNumeroParaInput(valor){
     lista.hidden = true;
   }
 
-  function obterTextoPainelSelecionado(selectEl){
-    const idPainel = idNum(selectEl?.value || 0);
-    if (!idPainel) return '';
-    return textoOpcaoPainel(paineisPorId.get(idPainel) || {});
+  function obterTextoPainelSelecionado(bloco){
+    const item = obterPainelFaceSelecionadoDoBloco(bloco);
+    return item ? textoOpcaoPainelFace(item) : '';
   }
 
   function sincronizarBuscaPainelComSelect(bloco){
     const input = bloco?.querySelector('[data-role="input-painel-busca"]');
-    const selectEl = bloco?.querySelector('[data-role="select-painel"]');
-    if (!input || !selectEl) return;
-
-    input.value = obterTextoPainelSelecionado(selectEl);
+    if (!input) return;
+    input.value = obterTextoPainelSelecionado(bloco);
   }
 
   function renderizarListaPaineisCombobox(bloco, texto){
     const lista = bloco?.querySelector('[data-role="lista-painel-busca"]');
-    const selectEl = bloco?.querySelector('[data-role="select-painel"]');
     if (!lista) return;
 
-    const filtrados = filtrarPaineisCombobox(texto);
+    const filtrados = filtrarPaineisCombobox(bloco, texto);
     bloco.__paineisResultadoComboboxAtual = filtrados.slice();
 
-    const valorSelecionado = safeStr(selectEl?.value || '').trim();
+    const selecionado = obterPainelFaceSelecionadoDoBloco(bloco);
+    const chaveSelecionada = obterChavePainelFaceCatalogo(selecionado);
     lista.innerHTML = '';
 
     if (!filtrados.length) {
-      lista.appendChild(el('div', { class:'kb-combobox-vazio' }, ['Nenhum painel encontrado.']));
+      lista.appendChild(el('div', { class:'kb-combobox-vazio' }, ['Nenhuma face encontrada para os filtros selecionados.']));
       return;
     }
 
     filtrados.forEach((item) => {
-      const id = safeStr(item?.IDDimPaineisEuromidia ?? item?.ID ?? '').trim();
-      if (!id) return;
+      const chave = obterChavePainelFaceCatalogo(item);
+      if (!chave) return;
 
       const botao = el('button', {
         type:'button',
-        class:`kb-combobox-opcao${id === valorSelecionado ? ' is-selected' : ''}`
+        class:`kb-combobox-opcao${chave === chaveSelecionada ? ' is-selected' : ''}`
       }, [
-        el('strong', {}, [safeStr(item?.CodPonto || '—')]),
-        el('span', {}, [textoOpcaoPainel(item)])
+        el('strong', {}, [safeStr(item?.CodFace || '—')]),
+        el('span', {}, [resumoPainelFace(item)])
       ]);
 
       botao.addEventListener('mousedown', async (evento) => {
         evento.preventDefault();
-        await selecionarPainelCombobox(bloco, id, true);
+        await selecionarPainelCombobox(bloco, item, true);
       });
 
       lista.appendChild(botao);
     });
   }
 
-  async function selecionarPainelCombobox(bloco, idPainel, dispararChange = true){
-    const selectEl = bloco?.querySelector('[data-role="select-painel"]');
-    if (!selectEl) return;
+  function limparSelecaoPainelFaceDoBloco(bloco, opcoes = {}){
+    const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const input = bloco?.querySelector('[data-role="input-painel-busca"]');
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const resetarFiltros = !!opcoes.resetarFiltros;
+    const manterBusca = !!opcoes.manterBusca;
+    const dispararChange = !!opcoes.dispararChange;
 
-    const novoValor = safeStr(idPainel || '').trim();
-    const valorAnterior = safeStr(selectEl.value || '').trim();
+    definirValorSelectOculto(selectPainel, '', null);
+    definirValorSelectOculto(selectFace, '', null);
 
-    selectEl.value = novoValor;
-    sincronizarBuscaPainelComSelect(bloco);
+    if (resetarFiltros) {
+      if (selectCidade) selectCidade.value = '';
+      if (selectTipo) selectTipo.value = '';
+      sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
+    }
+
+    if (input && !manterBusca) input.value = '';
+    fecharListaPaineisCombobox(bloco);
+    preencherPreviewPainel(bloco, null);
+    limparComercialBloco(bloco);
+
+    if (dispararChange && selectFace) {
+      selectFace.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  async function selecionarPainelCombobox(bloco, itemOuChave, dispararChange = true){
+    const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const input = bloco?.querySelector('[data-role="input-painel-busca"]');
+    if (!selectPainel || !selectFace) return;
+
+    const item = typeof itemOuChave === 'string'
+      ? (painelFacesPorChave.get(itemOuChave) || null)
+      : (itemOuChave || null);
+
+    const valorAnterior = `${idNum(selectPainel.value || 0)}|${safeStr(selectFace.value || '').trim().toUpperCase()}`;
+
+    if (!item) {
+      limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange });
+      return;
+    }
+
+    const idPainel = idNum(item?.IDDimPaineisEuromidia ?? item?.id_painel ?? 0);
+    const codFace = safeStr(item?.CodFace ?? item?.cod_face ?? '').trim().toUpperCase();
+    if (!idPainel || !codFace) {
+      limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange });
+      return;
+    }
+
+    if (selectCidade) selectCidade.value = safeStr(item?.Cidade ?? '').trim();
+    if (selectTipo) selectTipo.value = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
+    sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
+
+    definirValorSelectOculto(selectPainel, String(idPainel), textoOpcaoPainel(item));
+    definirValorSelectOculto(selectFace, codFace, codFace);
+
+    if (input) {
+      input.value = textoOpcaoPainelFace(item);
+    }
+
+    preencherPreviewPainel(bloco, item);
     fecharListaPaineisCombobox(bloco);
 
-    if (dispararChange && novoValor !== valorAnterior) {
-      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    const valorNovo = `${idPainel}|${codFace}`;
+    if (dispararChange && valorNovo !== valorAnterior) {
+      selectFace.dispatchEvent(new Event('change', { bubbles: true }));
     }
+  }
+
+  function localizarPainelFacePorTextoDigitado(bloco, texto){
+    const bruto = safeStr(texto || '').trim();
+    if (!bruto) return null;
+
+    const textoNormalizado = normalizarTexto(bruto);
+    const listaAtual = Array.isArray(bloco?.__paineisResultadoComboboxAtual) ? bloco.__paineisResultadoComboboxAtual : [];
+
+    return listaAtual.find((item) => normalizarTexto(textoOpcaoPainelFace(item)) === textoNormalizado) || null;
   }
 
   function reconciliarBuscaPainelDigitada(bloco){
     const input = bloco?.querySelector('[data-role="input-painel-busca"]');
-    const selectEl = bloco?.querySelector('[data-role="select-painel"]');
-    if (!input || !selectEl) return;
+    if (!input) return;
 
     const textoDigitado = safeStr(input.value || '').trim();
 
     if (!textoDigitado) {
-      selecionarPainelCombobox(bloco, '', true).catch((erro) => {
-        console.warn('reconciliarBuscaPainelDigitada: falhou ao limpar painel', erro);
-      });
+      limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange: true });
       return;
     }
 
-    const painel = localizarPainelPorTextoDigitado(textoDigitado);
-    if (painel) {
-      const id = safeStr(painel?.IDDimPaineisEuromidia ?? painel?.ID ?? '').trim();
-      if (id) {
-        selecionarPainelCombobox(bloco, id, true).catch((erro) => {
-          console.warn('reconciliarBuscaPainelDigitada: falhou ao selecionar painel', erro);
-        });
-        return;
-      }
+    const painelFace = localizarPainelFacePorTextoDigitado(bloco, textoDigitado);
+    if (painelFace) {
+      selecionarPainelCombobox(bloco, painelFace, true).catch((erro) => {
+        console.warn('reconciliarBuscaPainelDigitada: falhou ao selecionar face', erro);
+      });
+      return;
     }
 
     sincronizarBuscaPainelComSelect(bloco);
@@ -8207,8 +8493,7 @@ function formatarNumeroParaInput(valor){
 
   function limparSelectFacesNoElemento(selectEl){
     if (!selectEl) return;
-    selectEl.innerHTML = "";
-    selectEl.appendChild(el("option", { value:"" }, ["— Face (CodFace) —"]));
+    definirValorSelectOculto(selectEl, '', null);
   }
 
   function limparSelectPrecosNoElemento(selectEl){
@@ -8220,7 +8505,7 @@ function formatarNumeroParaInput(valor){
   function montarSelectFacesNoElemento(selectEl, faces){
     limparSelectFacesNoElemento(selectEl);
     (Array.isArray(faces) ? faces : []).forEach(f => {
-      const codFace = safeStr(f?.CodFace ?? f?.codFace ?? "");
+      const codFace = safeStr(f?.CodFace ?? f?.codFace ?? "").trim().toUpperCase();
       if (!codFace) return;
       const desc = safeStr(f?.Face ?? f?.Label ?? "").trim();
       const label = desc ? `${codFace} • ${desc}` : codFace;
@@ -8274,7 +8559,7 @@ function formatarNumeroParaInput(valor){
     setTxt('pn-faces', Number(painel.QuantidadeFaces || 0) ? String(painel.QuantidadeFaces) : '—');
   }
 
-  function limparComercialBloco(bloco, mensagem = 'Selecione painel e face para consultar custo e preços.'){
+  function limparComercialBloco(bloco, mensagem = 'Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.'){
     const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
     const selectPreco = bloco.querySelector('[data-role="select-preco"]');
 
@@ -8296,14 +8581,7 @@ function formatarNumeroParaInput(valor){
 
     facesCarregando = true;
     try{
-      const r = await fetch(`/kanban/api/paineis/id/${id}/faces`, { credentials: 'same-origin' });
-      const j = await r.json().catch(() => null);
-      if (!r.ok || !j || !j.ok){
-        console.warn('carregarFacesDoPainel: falhou', { idPainel: id, http: r.status, body: j });
-        facesPorPainelId.set(id, []);
-        return [];
-      }
-      const arr = Array.isArray(j.faces) ? j.faces : [];
+      const arr = (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : []).filter((item) => idNum(item?.IDDimPaineisEuromidia ?? 0) === id);
       facesPorPainelId.set(id, arr);
       return arr;
     } finally {
@@ -8328,6 +8606,239 @@ function formatarNumeroParaInput(valor){
 
     comercialPorPainelFace.set(chave, j);
     return j;
+  }
+
+  async function atualizarFacesDoBloco(bloco, dadosSalvos = null){
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+
+    const idPainelAtual = idNum(selectPainel?.value || 0);
+    const codFaceAtual = safeStr(selectFace?.value || '').trim().toUpperCase();
+    const idPainelSalvo = idNum(dadosSalvos?.IDDimPaineisEuromidia ?? dadosSalvos?.id_painel ?? 0) || null;
+    const codPontoSalvo = safeStr(dadosSalvos?.CodPonto ?? dadosSalvos?.cod_ponto ?? '').trim();
+    const codFaceSalvo = safeStr(dadosSalvos?.CodFace ?? dadosSalvos?.cod_face ?? '').trim().toUpperCase();
+    const tipoPainelSalvo = safeStr(dadosSalvos?.TipoPainel ?? dadosSalvos?.tipo_painel ?? '').trim();
+
+    const painelFace = localizarPainelFaceCatalogo({
+      id_painel: idPainelSalvo || idPainelAtual,
+      cod_ponto: codPontoSalvo,
+      cod_face: codFaceSalvo || codFaceAtual,
+      tipo_painel: tipoPainelSalvo,
+    });
+
+    if (!painelFace) {
+      const atual = obterPainelFaceSelecionadoDoBloco(bloco);
+      preencherPreviewPainel(bloco, atual);
+      if (!atual) {
+        limparComercialBloco(bloco);
+      }
+      return;
+    }
+
+    await selecionarPainelCombobox(bloco, painelFace, false);
+    await atualizarComercialDoBloco(bloco, dadosSalvos);
+  }
+
+  async function atualizarComercialDoBloco(bloco, dadosSalvos = null){
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+
+    const idPainel = idNum(selectPainel?.value || 0);
+    const painel = obterPainelFaceSelecionadoDoBloco(bloco) || paineisPorId.get(idPainel) || null;
+    const codFace = safeStr(selectFace?.value || '').trim();
+
+    preencherPreviewPainel(bloco, painel);
+    limparComercialBloco(bloco);
+
+    if (!idPainel || !painel || !codFace) return;
+
+    const comercial = await carregarComercialPainelFace(idPainel, codFace);
+    if (!comercial){
+      limparComercialBloco(bloco, 'Não foi possível consultar custos e preços para o CodFace selecionado.');
+      return;
+    }
+
+    renderizarComercialBloco(bloco, comercial, dadosSalvos);
+  }
+
+  function criarPainelFaceItem(dados = null){
+    const bloco = el('div', { class:'kb-painel-item' }, [
+      el('div', { class:'kb-painel-item-topo' }, [
+        el('div', { class:'kb-painel-item-titulo', 'data-role':'titulo-item' }, ['Painel / Face']),
+        el('div', { class:'kb-painel-item-acoes' }, [
+          el('button', {
+            class:'kb-btn sm kb-btn-orcamento',
+            type:'button',
+            'data-role':'btn-orcamento-item',
+            title:'Abrir orçamento deste card'
+          }, ['Orçamento']),
+          el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-duplicar' }, ['+']),
+          el('button', { class:'kb-btn sm danger', type:'button', 'data-role':'btn-remover' }, ['−'])
+        ])
+      ]),
+      el('div', { class:'kb-painel-item-grid' }, [
+        el('select', { class:'kb-select', 'data-role':'select-filtro-cidade' }),
+        el('select', { class:'kb-select', 'data-role':'select-filtro-tipo' }),
+        el('div', { class:'kb-combobox grow', 'data-role':'combo-painel' }, [
+          el('input', {
+            class:'kb-input kb-combobox-input',
+            type:'text',
+            autocomplete:'off',
+            spellcheck:'false',
+            placeholder:'Digite CodFace, logradouro, cidade, bairro ou tipo...',
+            'data-role':'input-painel-busca'
+          }),
+          el('button', {
+            class:'kb-combobox-toggle',
+            type:'button',
+            'data-role':'btn-toggle-painel',
+            'aria-label':'Abrir lista de faces'
+          }, ['▾']),
+          el('div', { class:'kb-combobox-lista', hidden:'hidden', 'data-role':'lista-painel-busca' }),
+          el('select', {
+            class:'kb-select grow kb-select-hidden',
+            tabindex:'-1',
+            'aria-hidden':'true',
+            'data-role':'select-painel',
+            'data-placeholder':'— Selecione um painel —'
+          }),
+          el('select', {
+            class:'kb-select grow kb-select-hidden',
+            tabindex:'-1',
+            'aria-hidden':'true',
+            'data-role':'select-face',
+            'data-placeholder':'— Face (CodFace) —'
+          })
+        ]),
+        el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-limpar' }, ['Sem painel'])
+      ]),
+      el('div', { class:'kb-painel-preview', 'data-role':'painel-preview', style:'display:none;' }, [
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['CodPonto:']), el('span', { class:'v', 'data-role':'pn-codponto' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Tipo:']), el('span', { class:'v', 'data-role':'pn-tipo' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Cidade/UF:']), el('span', { class:'v', 'data-role':'pn-cidadeuf' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Endereço:']), el('span', { class:'v', 'data-role':'pn-endereco' }, ['—'])]),
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Faces:']), el('span', { class:'v', 'data-role':'pn-faces' }, ['—'])])
+      ]),
+      el('div', { 'data-role':'comercial-wrap' }, [
+        el('div', { class:'kb-comercial-vazio' }, ['Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.'])
+      ])
+    ]);
+
+    const comboPainel = bloco.querySelector('[data-role="combo-painel"]');
+    const inputPainelBusca = bloco.querySelector('[data-role="input-painel-busca"]');
+    const btnTogglePainel = bloco.querySelector('[data-role="btn-toggle-painel"]');
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+    const selectFiltroCidade = bloco.querySelector('[data-role="select-filtro-cidade"]');
+    const selectFiltroTipo = bloco.querySelector('[data-role="select-filtro-tipo"]');
+
+    montarSelectPaineisNoElemento(selectPainel);
+    limparSelectFacesNoElemento(selectFace);
+    sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
+    preencherSelectFiltroPainelFace(selectFiltroCidade, listarCidadesPainelFaceDoBloco(bloco), '— Cidade —');
+    preencherSelectFiltroPainelFace(selectFiltroTipo, listarTiposPainelFaceDoBloco(bloco), '— Tipo Produto —');
+
+    bloco.querySelector('[data-role="btn-orcamento-item"]')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const idCardAtual = idNum(cardAbertoId || 0);
+      if (!idCardAtual) {
+        mostrarMensagemCard('Salve ou abra um card válido para gerar o orçamento.');
+        return;
+      }
+
+      await abrirOrcamentoCard(idCardAtual);
+    });
+
+    bloco.querySelector('[data-role="btn-duplicar"]')?.addEventListener('click', () => {
+      painelFaceLista?.appendChild(criarPainelFaceItem());
+      atualizarTitulosPainelFace();
+    });
+
+    bloco.querySelector('[data-role="btn-remover"]')?.addEventListener('click', () => {
+      bloco.remove();
+      if (!(painelFaceLista?.querySelector('.kb-painel-item'))) {
+        painelFaceLista?.appendChild(criarPainelFaceItem());
+      }
+      atualizarTitulosPainelFace();
+    });
+
+    bloco.querySelector('[data-role="btn-limpar"]')?.addEventListener('click', () => {
+      limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: true, manterBusca: false, dispararChange: false });
+    });
+
+    btnTogglePainel?.addEventListener('click', () => {
+      const listaPainel = bloco.querySelector('[data-role="lista-painel-busca"]');
+      if (listaPainel?.hidden) abrirListaPaineisCombobox(bloco);
+      else {
+        sincronizarBuscaPainelComSelect(bloco);
+        fecharListaPaineisCombobox(bloco);
+      }
+    });
+
+    selectFiltroCidade?.addEventListener('change', () => {
+      sincronizarFiltrosPainelFaceDoBloco(bloco);
+      if (comboPainel?.classList.contains('is-open')) {
+        renderizarListaPaineisCombobox(bloco, inputPainelBusca?.value || '');
+      }
+    });
+
+    selectFiltroTipo?.addEventListener('change', () => {
+      sincronizarFiltrosPainelFaceDoBloco(bloco);
+      if (comboPainel?.classList.contains('is-open')) {
+        renderizarListaPaineisCombobox(bloco, inputPainelBusca?.value || '');
+      }
+    });
+
+    inputPainelBusca?.addEventListener('focus', () => {
+      abrirListaPaineisCombobox(bloco);
+    });
+
+    inputPainelBusca?.addEventListener('click', () => {
+      abrirListaPaineisCombobox(bloco);
+    });
+
+    inputPainelBusca?.addEventListener('input', () => {
+      abrirListaPaineisCombobox(bloco);
+      renderizarListaPaineisCombobox(bloco, inputPainelBusca.value || '');
+    });
+
+    inputPainelBusca?.addEventListener('keydown', (evento) => {
+      if (evento.key === 'Enter') {
+        evento.preventDefault();
+        const primeira = bloco.__paineisResultadoComboboxAtual?.[0] || filtrarPaineisCombobox(bloco, inputPainelBusca.value || '')[0] || null;
+        if (primeira) {
+          selecionarPainelCombobox(bloco, primeira, true).catch((erro) => {
+            console.warn('keydown painel: falhou ao selecionar face', erro);
+          });
+          return;
+        }
+        reconciliarBuscaPainelDigitada(bloco);
+        return;
+      }
+
+      if (evento.key === 'Escape') {
+        evento.preventDefault();
+        sincronizarBuscaPainelComSelect(bloco);
+        fecharListaPaineisCombobox(bloco);
+        return;
+      }
+
+      if (evento.key === 'ArrowDown') {
+        abrirListaPaineisCombobox(bloco);
+      }
+    });
+
+    selectFace?.addEventListener('change', async () => {
+      await atualizarComercialDoBloco(bloco);
+    });
+
+    if (dados){
+      void atualizarFacesDoBloco(bloco, dados);
+    }
+
+    return bloco;
   }
 
   function obterPrecoSelecionadoDoBloco(bloco){
@@ -8747,224 +9258,6 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
   void inicializarCalendarioReservaDoBloco(bloco, valoresSalvos);
 }
 
-  async function atualizarFacesDoBloco(bloco, dadosSalvos = null){
-    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
-    const selectFace = bloco.querySelector('[data-role="select-face"]');
-    const idPainel = idNum(selectPainel?.value || 0);
-    const painel = paineisPorId.get(idPainel) || null;
-
-    preencherPreviewPainel(bloco, painel);
-    limparComercialBloco(bloco);
-    limparSelectFacesNoElemento(selectFace);
-
-    if (!idPainel || !painel) return;
-
-    selectFace.innerHTML = '';
-    selectFace.appendChild(el('option', { value:'' }, ['Carregando faces...']));
-
-    const faces = await carregarFacesDoPainel(idPainel);
-    montarSelectFacesNoElemento(selectFace, faces);
-
-    const codFaceSalvo = safeStr(dadosSalvos?.CodFace || dadosSalvos?.cod_face || '').trim();
-    if (codFaceSalvo){
-      selectFace.value = codFaceSalvo;
-
-      if (safeStr(selectFace.value).trim()){
-        await atualizarComercialDoBloco(bloco, dadosSalvos);
-      }
-    }
-  }
-
-  async function atualizarComercialDoBloco(bloco, dadosSalvos = null){
-    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
-    const selectFace = bloco.querySelector('[data-role="select-face"]');
-
-    const idPainel = idNum(selectPainel?.value || 0);
-    const painel = paineisPorId.get(idPainel) || null;
-    const codFace = safeStr(selectFace?.value || '').trim();
-
-    preencherPreviewPainel(bloco, painel);
-    limparComercialBloco(bloco);
-
-    if (!idPainel || !painel || !codFace) return;
-
-    const comercial = await carregarComercialPainelFace(idPainel, codFace);
-    if (!comercial){
-      limparComercialBloco(bloco, 'Não foi possível consultar custos e preços para este painel/face.');
-      return;
-    }
-
-    renderizarComercialBloco(bloco, comercial, dadosSalvos);
-  }
-
-  function criarPainelFaceItem(dados = null){
-    const bloco = el('div', { class:'kb-painel-item' }, [
-      el('div', { class:'kb-painel-item-topo' }, [
-        el('div', { class:'kb-painel-item-titulo', 'data-role':'titulo-item' }, ['Painel / Face']),
-        el('div', { class:'kb-painel-item-acoes' }, [
-          el('button', {
-            class:'kb-btn sm kb-btn-orcamento',
-            type:'button',
-            'data-role':'btn-orcamento-item',
-            title:'Abrir orçamento deste card'
-          }, ['Orçamento']),
-          el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-duplicar' }, ['+']),
-          el('button', { class:'kb-btn sm danger', type:'button', 'data-role':'btn-remover' }, ['−'])
-        ])
-      ]),
-      el('div', { class:'kb-painel-item-grid' }, [
-        el('div', { class:'kb-combobox grow', 'data-role':'combo-painel' }, [
-          el('input', {
-            class:'kb-input kb-combobox-input',
-            type:'text',
-            autocomplete:'off',
-            spellcheck:'false',
-            placeholder:'Digite CodPonto, logradouro, tipo ou cidade...',
-            'data-role':'input-painel-busca'
-          }),
-          el('button', {
-            class:'kb-combobox-toggle',
-            type:'button',
-            'data-role':'btn-toggle-painel',
-            'aria-label':'Abrir lista de painéis'
-          }, ['▾']),
-          el('div', { class:'kb-combobox-lista', hidden:'hidden', 'data-role':'lista-painel-busca' }),
-          el('select', {
-            class:'kb-select grow kb-select-hidden',
-            tabindex:'-1',
-            'aria-hidden':'true',
-            'data-role':'select-painel'
-          })
-        ]),
-        el('select', { class:'kb-select', 'data-role':'select-face' }),
-        el('button', { class:'kb-btn sm', type:'button', 'data-role':'btn-limpar' }, ['Sem painel'])
-      ]),
-      el('div', { class:'kb-painel-preview', 'data-role':'painel-preview', style:'display:none;' }, [
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['CodPonto:']), el('span', { class:'v', 'data-role':'pn-codponto' }, ['—'])]),
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Tipo:']), el('span', { class:'v', 'data-role':'pn-tipo' }, ['—'])]),
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Cidade/UF:']), el('span', { class:'v', 'data-role':'pn-cidadeuf' }, ['—'])]),
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Endereço:']), el('span', { class:'v', 'data-role':'pn-endereco' }, ['—'])]),
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Faces:']), el('span', { class:'v', 'data-role':'pn-faces' }, ['—'])])
-      ]),
-      el('div', { 'data-role':'comercial-wrap' }, [
-        el('div', { class:'kb-comercial-vazio' }, ['Selecione painel e face para consultar custo e preços.'])
-      ])
-    ]);
-
-    const comboPainel = bloco.querySelector('[data-role="combo-painel"]');
-    const inputPainelBusca = bloco.querySelector('[data-role="input-painel-busca"]');
-    const btnTogglePainel = bloco.querySelector('[data-role="btn-toggle-painel"]');
-    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
-    const selectFace = bloco.querySelector('[data-role="select-face"]');
-    montarSelectPaineisNoElemento(selectPainel);
-    sincronizarBuscaPainelComSelect(bloco);
-    limparSelectFacesNoElemento(selectFace);
-
-    bloco.querySelector('[data-role="btn-orcamento-item"]')?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const idCardAtual = idNum(cardAbertoId || 0);
-      if (!idCardAtual) {
-        mostrarMensagemCard('Salve ou abra um card válido para gerar o orçamento.');
-        return;
-      }
-
-      await abrirOrcamentoCard(idCardAtual);
-    });
-
-    bloco.querySelector('[data-role="btn-duplicar"]')?.addEventListener('click', () => {
-      painelFaceLista?.appendChild(criarPainelFaceItem());
-      atualizarTitulosPainelFace();
-    });
-
-    bloco.querySelector('[data-role="btn-remover"]')?.addEventListener('click', () => {
-      bloco.remove();
-      if (!(painelFaceLista?.querySelector('.kb-painel-item'))) {
-        painelFaceLista?.appendChild(criarPainelFaceItem());
-      }
-      atualizarTitulosPainelFace();
-    });
-
-    bloco.querySelector('[data-role="btn-limpar"]')?.addEventListener('click', () => {
-      if (selectPainel) selectPainel.value = '';
-      if (selectFace) selectFace.value = '';
-      sincronizarBuscaPainelComSelect(bloco);
-      fecharListaPaineisCombobox(bloco);
-      preencherPreviewPainel(bloco, null);
-      limparSelectFacesNoElemento(selectFace);
-      limparComercialBloco(bloco);
-    });
-
-    btnTogglePainel?.addEventListener('click', () => {
-      const listaPainel = bloco.querySelector('[data-role="lista-painel-busca"]');
-      if (listaPainel?.hidden) abrirListaPaineisCombobox(bloco);
-      else {
-        sincronizarBuscaPainelComSelect(bloco);
-        fecharListaPaineisCombobox(bloco);
-      }
-    });
-
-    inputPainelBusca?.addEventListener('focus', () => {
-      abrirListaPaineisCombobox(bloco);
-    });
-
-    inputPainelBusca?.addEventListener('click', () => {
-      abrirListaPaineisCombobox(bloco);
-    });
-
-    inputPainelBusca?.addEventListener('input', () => {
-      abrirListaPaineisCombobox(bloco);
-      renderizarListaPaineisCombobox(bloco, inputPainelBusca.value || '');
-    });
-
-    inputPainelBusca?.addEventListener('keydown', (evento) => {
-      if (evento.key === 'Enter') {
-        evento.preventDefault();
-        const primeira = bloco.__paineisResultadoComboboxAtual?.[0] || filtrarPaineisCombobox(inputPainelBusca.value || '')[0] || null;
-        if (primeira) {
-          const id = safeStr(primeira?.IDDimPaineisEuromidia ?? primeira?.ID ?? '').trim();
-          if (id) {
-            selecionarPainelCombobox(bloco, id, true).catch((erro) => {
-              console.warn('keydown painel: falhou ao selecionar primeira opção', erro);
-            });
-            return;
-          }
-        }
-        reconciliarBuscaPainelDigitada(bloco);
-        return;
-      }
-
-      if (evento.key === 'Escape') {
-        evento.preventDefault();
-        sincronizarBuscaPainelComSelect(bloco);
-        fecharListaPaineisCombobox(bloco);
-        return;
-      }
-
-      if (evento.key === 'ArrowDown') {
-        abrirListaPaineisCombobox(bloco);
-      }
-    });
-
-    selectPainel?.addEventListener('change', async () => {
-      sincronizarBuscaPainelComSelect(bloco);
-      await atualizarFacesDoBloco(bloco);
-    });
-
-    selectFace?.addEventListener('change', async () => {
-      await atualizarComercialDoBloco(bloco);
-    });
-
-    if (dados){
-      const idPainelSalvo = idNum(dados.IDDimPaineisEuromidia || dados.id_painel || 0);
-      if (idPainelSalvo) selectPainel.value = String(idPainelSalvo);
-      sincronizarBuscaPainelComSelect(bloco);
-      void atualizarFacesDoBloco(bloco, dados);
-    }
-
-    return bloco;
-  }
 
   function coletarPainelFacesDoFormulario(){
     const itens = [];
@@ -9014,6 +9307,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       const id = Number(p?.IDDimPaineisEuromidia || p?.ID || 0);
       if (id > 0) paineisPorId.set(id, p);
     }
+
+    atualizarMapaPainelFacesCatalogo();
 
     if (!(painelFaceLista?.querySelector('.kb-painel-item'))) {
       preencherPainelFacesDoCard([]);
@@ -9159,6 +9454,14 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     kanbanCfg = j.kanban_cfg || {};
     paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
+    if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard) {
+      await carregarCatalogoPainelFaces().catch((erro) => {
+        console.warn('init painel_faces: falhou', erro);
+      });
+    } else {
+      painelFacesCatalogo = [];
+      atualizarMapaPainelFacesCatalogo();
+    }
     renderizarResumoComercial(j.resumo_comercial || null);
 
     ativarPainelFaceSeNecessario();
