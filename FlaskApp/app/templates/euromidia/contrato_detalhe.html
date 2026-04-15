@@ -22,346 +22,765 @@
   </div>
 
   <style>
-    .kv{
+    .section-title{ margin:0; color:var(--euro-blue); font-size:16px; }
+    .section-sub{ font-size:12px; margin-top:4px; color:var(--muted); }
+    .grid-quick{
       display:grid;
-      grid-template-columns: repeat(4, minmax(180px, 1fr));
-      gap: 12px;
-      margin-top: 14px;
+      grid-template-columns:repeat(4,minmax(180px,1fr));
+      gap:12px;
+      margin-top:14px;
     }
-    .kv .item,
-    .summary-card,
-    .timeline-box,
-    .empty-box{
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      background: #fff;
+    .box, .summary-card, .timeline-box, .empty-box, .detail-card, .media-card{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      padding:12px;
     }
-    .kv .k,
-    .summary-card .k{
-      font-size: 11px;
-      font-weight: 900;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-    .kv .v{
-      font-size: 13px;
-      font-weight: 900;
-      color: var(--text);
-      word-break: break-word;
-    }
+    .quick-k{ font-size:11px; font-weight:900; color:var(--muted); margin-bottom:6px; }
+    .quick-v{ font-size:13px; font-weight:900; color:var(--text); word-break:break-word; }
     .summary-grid{
       display:grid;
-      grid-template-columns: repeat(6, minmax(150px, 1fr));
-      gap: 12px;
-      margin-top: 14px;
+      grid-template-columns:repeat(6,minmax(150px,1fr));
+      gap:12px;
+      margin-top:14px;
     }
-    .summary-card .v{
-      font-size: 24px;
-      font-weight: 900;
-      line-height: 1.1;
-      color: var(--euro-blue);
+    .summary-card .v{ font-size:24px; font-weight:900; line-height:1.1; color:var(--euro-blue); }
+    .summary-card .v.small{ font-size:15px; line-height:1.35; color:var(--text); }
+    .field-grid{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(190px,1fr));
+      gap:10px;
+      margin-top:14px;
     }
-    .summary-card .v.small{
-      font-size: 15px;
-      line-height: 1.35;
-      color: var(--text);
-    }
-    .section-title{
-      margin:0;
-      color:var(--euro-blue);
-      font-size:16px;
-    }
-    table.tbl{
-      width:100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      font-size: 13px;
-      overflow:hidden;
-      border: 1px solid var(--border);
-      border-radius: 12px;
+    .field-item{
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:10px;
       background:#fff;
-      margin-top: 14px;
+      min-width:0;
     }
-    .tbl th, .tbl td{
-      padding: 10px 10px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-      white-space: nowrap;
+    .field-k{
+      font-size:11px;
+      color:var(--muted);
+      font-weight:900;
+      margin-bottom:4px;
+      word-break:break-word;
     }
-    .tbl th{
-      background: #F8FAFC;
-      color: var(--muted);
-      font-weight: 900;
-      font-size: 12px;
-      text-align: left;
+    .field-v{
+      font-size:13px;
+      color:var(--text);
+      font-weight:800;
+      word-break:break-word;
+      white-space:normal;
     }
-    .tbl tr:last-child td{ border-bottom: 0; }
-    .td-ellipsis{
-      max-width: 360px;
-      overflow:hidden;
-      text-overflow: ellipsis;
-    }
-    .td-wrap{
-      max-width: 360px;
-      white-space: normal !important;
-      word-break: break-word;
-    }
+    .detail-stack{ display:flex; flex-direction:column; gap:12px; margin-top:14px; }
+    .detail-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .detail-title{ font-size:15px; font-weight:900; color:var(--euro-blue); }
+    .detail-sub{ font-size:12px; color:var(--muted); margin-top:4px; }
+    .mini-badges{ display:flex; flex-wrap:wrap; gap:8px; }
     .badge{
       display:inline-flex;
       align-items:center;
       gap:6px;
-      min-height: 26px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 900;
-      letter-spacing: .02em;
-      border: 1px solid transparent;
-      white-space: nowrap;
+      min-height:26px;
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:900;
+      letter-spacing:.02em;
+      border:1px solid transparent;
+      white-space:nowrap;
     }
     .badge.tipo{ background:#EEF2FF; color:#3730A3; border-color:#C7D2FE; }
-    .badge.aberto{ background:#ECFDF3; color:#166534; border-color:#BBF7D0; }
-    .badge.concluido{ background:#FFF7ED; color:#C2410C; border-color:#FED7AA; }
-    .badge.encerrado{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+    .badge.ok{ background:#ECFDF3; color:#166534; border-color:#BBF7D0; }
+    .badge.warn{ background:#FFF7ED; color:#C2410C; border-color:#FED7AA; }
+    .badge.danger{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
     .badge.timeline-MOVIMENTO{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
     .badge.timeline-OBSERVACAO{ background:#F5F3FF; color:#6D28D9; border-color:#DDD6FE; }
     .badge.timeline-LOG{ background:#F8FAFC; color:#334155; border-color:#CBD5E1; }
     .badge.timeline-NEGOCIACAO{ background:#ECFDF5; color:#047857; border-color:#A7F3D0; }
     .badge.timeline-ENCERRAMENTO{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
     .badge.timeline-CHECKIN{ background:#FFFBEB; color:#B45309; border-color:#FDE68A; }
-    .mini-meta{ display:flex; flex-wrap:wrap; gap:6px; }
-    .timeline-box{ margin-top: 14px; padding: 0; overflow: hidden; }
+    table.tbl{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      font-size:13px;
+      overflow:hidden;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      margin-top:14px;
+    }
+    .tbl th,.tbl td{
+      padding:10px 10px;
+      border-bottom:1px solid var(--border);
+      vertical-align:top;
+      white-space:nowrap;
+    }
+    .tbl th{
+      background:#F8FAFC;
+      color:var(--muted);
+      font-weight:900;
+      font-size:12px;
+      text-align:left;
+    }
+    .tbl tr:last-child td{ border-bottom:0; }
+    .td-wrap{ white-space:normal !important; word-break:break-word; }
+    .timeline-box{ margin-top:14px; padding:0; overflow:hidden; }
     .timeline-list{ list-style:none; margin:0; padding:0; }
     .timeline-item{
       display:grid;
-      grid-template-columns: 120px minmax(110px, 160px) 1fr;
-      gap: 12px;
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
+      grid-template-columns:120px minmax(110px,160px) 1fr;
+      gap:12px;
+      padding:14px 16px;
+      border-bottom:1px solid var(--border);
       align-items:flex-start;
     }
-    .timeline-item:last-child{ border-bottom: 0; }
+    .timeline-item:last-child{ border-bottom:0; }
     .timeline-date{ font-size:12px; font-weight:900; color:var(--text); }
     .timeline-content{ min-width:0; }
     .timeline-text{ white-space:normal; word-break:break-word; }
     .timeline-sub{ margin-top:6px; font-size:12px; color:var(--muted); display:flex; flex-wrap:wrap; gap:10px; }
-    .btn-link-historico{
+    .timeline-footer{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px 16px;
+      border-top:1px solid var(--border);
+      background:#fff;
+      flex-wrap:wrap;
+    }
+    .timeline-page-info{ font-size:12px; color:var(--muted); font-weight:800; }
+    .timeline-pager{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .timeline-pager .btn-page{
       display:inline-flex;
       align-items:center;
       justify-content:center;
-      padding: 6px 10px;
-      border-radius: 8px;
-      background: var(--euro-blue);
-      color: #fff;
+      min-width:38px;
+      min-height:34px;
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#fff;
+      color:var(--text);
       text-decoration:none;
-      font-size: 12px;
-      font-weight: 800;
+      font-size:12px;
+      font-weight:900;
     }
-    .btn-link-historico:hover{ filter: brightness(.96); }
+    .timeline-pager .btn-page.is-active{ background:var(--euro-blue); border-color:var(--euro-blue); color:#fff; }
+    .thumb-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:12px; }
+    .thumb-media{ width:100%; max-height:220px; object-fit:cover; border-radius:10px; border:1px solid var(--border); background:#f8fafc; }
+    .stack-sm{ display:flex; flex-direction:column; gap:10px; }
+    .surface-grid{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(220px,1fr));
+      gap:12px;
+      margin-top:16px;
+    }
+    .surface-card{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);
+      padding:14px;
+      min-width:0;
+      box-shadow:0 1px 2px rgba(15,23,42,.04);
+    }
+    .surface-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .surface-title{
+      font-size:13px;
+      font-weight:900;
+      color:var(--euro-blue);
+    }
+    .surface-value{
+      font-size:24px;
+      font-weight:900;
+      color:var(--text);
+      line-height:1.1;
+      margin-top:8px;
+    }
+    .surface-value.sm{
+      font-size:18px;
+    }
+    .surface-meta{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      margin-top:10px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .surface-meta strong{
+      color:var(--text);
+    }
+    .action-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    .btn-action{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:34px;
+      padding:8px 12px;
+      border-radius:10px;
+      border:1px solid var(--euro-blue);
+      background:var(--euro-blue);
+      color:#fff;
+      text-decoration:none;
+      font-size:12px;
+      font-weight:900;
+      cursor:pointer;
+    }
+    .btn-action:hover{ filter:brightness(.96); }
+    .btn-action.secondary{
+      background:#fff;
+      color:var(--euro-blue);
+    }
+    .btn-action[disabled]{
+      cursor:not-allowed;
+      opacity:.55;
+      filter:none;
+    }
+    .detail-toggle{
+      margin-top:16px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      overflow:hidden;
+    }
+    .detail-toggle > summary{
+      list-style:none;
+      cursor:pointer;
+      padding:12px 14px;
+      font-size:13px;
+      font-weight:900;
+      color:var(--text);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .detail-toggle > summary::-webkit-details-marker{ display:none; }
+    .detail-toggle > summary::after{
+      content:'▾';
+      color:var(--muted);
+      font-size:14px;
+    }
+    .detail-toggle[open] > summary::after{ content:'▴'; }
+    .detail-toggle .details-panel{
+      padding:0 14px 14px 14px;
+      border-top:1px solid var(--border);
+    }
+    .modal-overlay{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,.52);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      z-index:9999;
+    }
+    .modal-overlay.is-open{ display:flex; }
+    .modal-dialog{
+      width:min(1120px, 96vw);
+      max-height:88vh;
+      overflow:auto;
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:16px;
+      box-shadow:0 24px 60px rgba(15,23,42,.22);
+    }
+    .modal-header{
+      position:sticky;
+      top:0;
+      z-index:2;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      padding:16px 18px;
+      border-bottom:1px solid var(--border);
+      background:#fff;
+    }
+    .modal-title{
+      font-size:16px;
+      font-weight:900;
+      color:var(--euro-blue);
+    }
+    .modal-sub{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:4px;
+    }
+    .modal-body{ padding:16px 18px 20px 18px; }
+    .modal-close{
+      border:1px solid var(--border);
+      background:#fff;
+      color:var(--text);
+      width:36px;
+      height:36px;
+      border-radius:10px;
+      font-size:18px;
+      font-weight:900;
+      cursor:pointer;
+    }
+    .modal-close:hover{ border-color:var(--euro-blue); color:var(--euro-blue); }
+    .kv-lite{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(200px,1fr));
+      gap:10px;
+      margin-top:12px;
+    }
+    .kv-lite .field-item{ min-height:74px; }
+    .list-stack{ display:flex; flex-direction:column; gap:12px; }
 
-    @media (max-width: 1280px){
-      .summary-grid{ grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+    @media (max-width:1280px){
+      .summary-grid{ grid-template-columns:repeat(3,minmax(150px,1fr)); }
+      .field-grid{ grid-template-columns:repeat(3,minmax(180px,1fr)); }
+      .surface-grid{ grid-template-columns:repeat(2,minmax(220px,1fr)); }
+      .kv-lite{ grid-template-columns:repeat(2,minmax(200px,1fr)); }
     }
-    @media (max-width: 1100px){
-      .kv{ grid-template-columns: repeat(2, minmax(180px, 1fr)); }
-      .timeline-item{ grid-template-columns: 1fr; gap: 8px; }
+    @media (max-width:1100px){
+      .grid-quick{ grid-template-columns:repeat(2,minmax(180px,1fr)); }
+      .field-grid{ grid-template-columns:repeat(2,minmax(180px,1fr)); }
+      .surface-grid{ grid-template-columns:1fr; }
+      .timeline-item{ grid-template-columns:1fr; gap:8px; }
     }
-    @media (max-width: 760px){
-      .kv, .summary-grid{ grid-template-columns: 1fr; }
-      .tbl th, .tbl td{ white-space: normal; }
+    @media (max-width:760px){
+      .grid-quick,.summary-grid,.field-grid,.kv-lite{ grid-template-columns:1fr; }
+      .tbl th,.tbl td{ white-space:normal; }
+      .modal-overlay{ padding:10px; }
+      .modal-dialog{ width:100%; max-height:92vh; }
     }
   </style>
 
-  <div class="kv">
-    <div class="item">
-      <div class="k">Data de Lançamento</div>
-      <div class="v">
-        {% if contrato.DataLancamento %}
-          {{ contrato.DataLancamento.strftime("%d/%m/%Y") }}
-        {% else %}
-          —
-        {% endif %}
-      </div>
-    </div>
+  <div class="grid-quick">
+    <div class="box"><div class="quick-k">Razão Social do Contrato</div><div class="quick-v">{{ contrato.RazaoSocial or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Empresa (DimEmpresas)</div><div class="quick-v">{{ contrato.RazaoSocialEmpresa or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Nome Fantasia</div><div class="quick-v">{{ contrato.NomeFantasiaEmpresa or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Marca Exibida</div><div class="quick-v">{{ contrato.MarcaExibida or "—" }}</div></div>
+    <div class="box"><div class="quick-k">CNPJ</div><div class="quick-v">{{ contrato.CNPJ or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Origem</div><div class="quick-v">{{ contrato.Origem or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Tipo Documento</div><div class="quick-v">{{ contrato.TipoDocumento or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Pontos / Faces</div><div class="quick-v">{{ contrato.QuantidadePontos or contrato.QtdeCodPonto or 0 }} / {{ contrato.QuantidadeFaces or contrato.QtdeCodFace or 0 }}</div></div>
+    <div class="box"><div class="quick-k">Total Bruto Contrato</div><div class="quick-v">{{ contrato.TotalBrutoContrato if contrato.TotalBrutoContrato is not none else "—" }}</div></div>
+    <div class="box"><div class="quick-k">Total Líquido Mensal</div><div class="quick-v">{{ contrato.TotalFaturamentoLiquidoMensal if contrato.TotalFaturamentoLiquidoMensal is not none else "—" }}</div></div>
+    <div class="box"><div class="quick-k">Cidade de Exibição</div><div class="quick-v">{{ contrato.CidadeExibicao or "—" }}</div></div>
+    <div class="box"><div class="quick-k">Atualização</div><div class="quick-v">{{ contrato.DataAtualizacao.strftime("%d/%m/%Y %H:%M") if contrato.DataAtualizacao else "—" }}</div></div>
+  </div>
 
-    <div class="item">
-      <div class="k">Cidade de Exibição</div>
-      <div class="v">{{ contrato.CidadeExibicao or "—" }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">Razão Social</div>
-      <div class="v">{{ contrato.RazaoSocial or "—" }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">Marca Exibida</div>
-      <div class="v">{{ contrato.MarcaExibida or "—" }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">CNPJ</div>
-      <div class="v">{{ contrato.CNPJ or "—" }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">Origem</div>
-      <div class="v">{{ contrato.Origem or "—" }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">Tipo Documento</div>
-      <div class="v">{{ contrato.TipoDocumento or "—" }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">Qtde CodPonto / CodFace</div>
-      <div class="v">{{ contrato.QtdeCodPonto if contrato.QtdeCodPonto is defined and contrato.QtdeCodPonto is not none else 0 }} / {{ contrato.QtdeCodFace if contrato.QtdeCodFace is defined and contrato.QtdeCodFace is not none else 0 }}</div>
-    </div>
-
-    <div class="item">
-      <div class="k">Total Bruto Contrato</div>
-      <div class="v">
-        {{ ("R$ " ~ "{:,.2f}".format(contrato.TotalBrutoContrato).replace(",", "X").replace(".", ",").replace("X", "."))
-           if contrato.TotalBrutoContrato is defined and contrato.TotalBrutoContrato is not none else "—" }}
-      </div>
-    </div>
-
-    <div class="item">
-      <div class="k">Total Líquido Mensal Final</div>
-      <div class="v">
-        {{ ("R$ " ~ "{:,.2f}".format(contrato.TotalFaturamentoLiquidoMensalFinal).replace(",", "X").replace(".", ",").replace("X", "."))
-           if contrato.TotalFaturamentoLiquidoMensalFinal is defined and contrato.TotalFaturamentoLiquidoMensalFinal is not none else "—" }}
-      </div>
-    </div>
-
-    <div class="item">
-      <div class="k">Atualização</div>
-      <div class="v">
-        {% if contrato.DataAtualizacao %}
-          {{ contrato.DataAtualizacao.strftime("%d/%m/%Y %H:%M") }}
-        {% else %}
-          —
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="item">
-      <div class="k">ID Cliente Euromídia</div>
-      <div class="v">{{ contrato.IDDimClientesEuromidia or contrato.IDEmpresa or "—" }}</div>
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Contrato de Controle — todos os campos</h2>
+    <div class="section-sub">Campos vindos de FatoControleContratosEuromidia, com razão social e nome fantasia da DimEmpresas quando houver vínculo.</div>
+    <div class="field-grid">
+      {% for campo in contrato_campos %}
+        <div class="field-item">
+          <div class="field-k">{{ campo.rotulo }}</div>
+          <div class="field-v">{{ campo.valor }}</div>
+        </div>
+      {% endfor %}
     </div>
   </div>
 
   <div style="margin-top:18px;">
-    <h2 class="section-title">Painéis / Faces do Contrato</h2>
-    <div class="muted" style="font-size:12px;margin-top:4px;">
-      Estes são os pontos e faces atualmente vinculados ao contrato.
-    </div>
+    <h2 class="section-title">Empresa principal</h2>
+    <div class="section-sub">Dados completos da DimEmpresas para a empresa vinculada ao contrato.</div>
+    {% if empresa_principal_campos and empresa_principal_campos|length > 0 %}
+      <div class="field-grid">
+        {% for campo in empresa_principal_campos %}
+          <div class="field-item">
+            <div class="field-k">{{ campo.rotulo }}</div>
+            <div class="field-v">{{ campo.valor }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-box" style="margin-top:14px;">Nenhuma empresa principal encontrada na DimEmpresas para este contrato.</div>
+    {% endif %}
+  </div>
 
-    <div class="overflow-x">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>CodPonto</th>
-            <th>CodFace</th>
-            <th>Cidade</th>
-            <th>Marca</th>
-            <th>Início</th>
-            <th>Término</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if itens and itens|length > 0 %}
-            {% for it in itens %}
-              <tr>
-                <td>{{ it.CodPonto or "—" }}</td>
-                <td>{{ it.CodFace or "—" }}</td>
-                <td>{{ it.CidadeExibicao or "—" }}</td>
-                <td class="td-wrap">{{ it.MarcaExibida or "—" }}</td>
-                <td>
-                  {% if it.DataInicioPrevisto %}
-                    {{ it.DataInicioPrevisto.strftime("%d/%m/%Y") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>
-                  {% if it.DataTerminoPrevisto %}
-                    {{ it.DataTerminoPrevisto.strftime("%d/%m/%Y") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>{{ it.Status or "—" }}</td>
-              </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="7" class="muted" style="padding:14px;">Sem painéis/faces vinculados.</td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Empresas relacionadas</h2>
+    <div class="section-sub">Resumo compacto na tela principal. O detalhamento abre em pop-up para não esticar o contrato.</div>
+    <div class="surface-grid">
+      <div class="surface-card">
+        <div class="surface-head">
+          <div class="surface-title">Empresas relacionadas</div>
+          <span class="badge {% if empresas_relacionadas and empresas_relacionadas|length > 0 %}ok{% else %}warn{% endif %}">{{ empresas_relacionadas|length if empresas_relacionadas else 0 }} registro(s)</span>
+        </div>
+        <div class="surface-value sm">{% if empresas_relacionadas and empresas_relacionadas|length > 0 %}{{ empresas_relacionadas[0].RazaoSocial or empresas_relacionadas[0].NomeFantasia or "—" }}{% else %}Sem empresas adicionais{% endif %}</div>
+        <div class="surface-meta">
+          <div><strong>Primeira empresa:</strong> {% if empresas_relacionadas and empresas_relacionadas|length > 0 %}{{ empresas_relacionadas[0].NomeFantasia or empresas_relacionadas[0].RazaoSocial or "—" }}{% else %}—{% endif %}</div>
+          <div><strong>Quantidade:</strong> {{ empresas_relacionadas|length if empresas_relacionadas else 0 }}</div>
+          <div><strong>Uso:</strong> agência, intermediário ou outros vínculos encontrados no contrato e nos itens.</div>
+        </div>
+        <div class="action-row">
+          <button type="button" class="btn-action" {% if not (empresas_relacionadas and empresas_relacionadas|length > 0) %}disabled{% else %}data-modal-open="modal-empresas-relacionadas"{% endif %}>Ver empresas</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <div style="margin-top:18px;">
     <h2 class="section-title">Resumo dos Atendimentos</h2>
-    <div class="muted" style="font-size:12px;margin-top:4px;">
-      Visão consolidada dos cards, movimentações e check-ins vinculados a este contrato.
-    </div>
-
+    <div class="section-sub">Visão consolidada dos cards, movimentações e check-ins vinculados a este contrato.</div>
     <div class="summary-grid">
-      <div class="summary-card">
-        <div class="k">Total de Atendimentos</div>
-        <div class="v">{{ resumo_atendimentos.Total or 0 }}</div>
-      </div>
-      <div class="summary-card">
-        <div class="k">Abertos</div>
-        <div class="v">{{ resumo_atendimentos.Abertos or 0 }}</div>
-      </div>
-      <div class="summary-card">
-        <div class="k">Concluídos</div>
-        <div class="v">{{ resumo_atendimentos.Concluidos or 0 }}</div>
-      </div>
-      <div class="summary-card">
-        <div class="k">Encerrados</div>
-        <div class="v">{{ resumo_atendimentos.Encerrados or 0 }}</div>
-      </div>
-      <div class="summary-card">
-        <div class="k">Último Atendimento</div>
-        <div class="v small">
-          {% if resumo_atendimentos.UltimoAtendimento %}
-            {{ resumo_atendimentos.UltimoAtendimento.strftime("%d/%m/%Y %H:%M") }}
-          {% else %}
-            —
-          {% endif %}
-        </div>
-      </div>
-      <div class="summary-card">
-        <div class="k">Check-ins do Contrato</div>
-        <div class="v small">
-          <div>{{ resumo_atendimentos.TotalCheckins or 0 }} registro(s)</div>
-          <div style="margin-top:6px;">
-            {% if resumo_atendimentos.UltimoCheckin %}
-              Último em {{ resumo_atendimentos.UltimoCheckin.strftime("%d/%m/%Y %H:%M") }}
-            {% else %}
-              Sem check-in
-            {% endif %}
+      <div class="summary-card"><div class="quick-k">Total de Atendimentos</div><div class="v">{{ resumo_atendimentos.Total or 0 }}</div></div>
+      <div class="summary-card"><div class="quick-k">Abertos</div><div class="v">{{ resumo_atendimentos.Abertos or 0 }}</div></div>
+      <div class="summary-card"><div class="quick-k">Concluídos</div><div class="v">{{ resumo_atendimentos.Concluidos or 0 }}</div></div>
+      <div class="summary-card"><div class="quick-k">Encerrados</div><div class="v">{{ resumo_atendimentos.Encerrados or 0 }}</div></div>
+      <div class="summary-card"><div class="quick-k">Último Atendimento</div><div class="v small">{{ resumo_atendimentos.UltimoAtendimento.strftime("%d/%m/%Y %H:%M") if resumo_atendimentos.UltimoAtendimento else "—" }}</div></div>
+      <div class="summary-card"><div class="quick-k">Check-ins</div><div class="v small">{{ resumo_atendimentos.TotalCheckins or 0 }} registro(s){% if resumo_atendimentos.UltimoCheckin %}<div style="margin-top:6px;">Último em {{ resumo_atendimentos.UltimoCheckin.strftime("%d/%m/%Y %H:%M") }}</div>{% endif %}</div></div>
+    </div>
+  </div>
+
+  <div style="margin-top:18px;">
+    <h2 class="section-title">Painéis / Faces do Contrato</h2>
+    <div class="section-sub">Cada face mostra um resumo executivo na tela e abre pop-up somente quando o usuário quiser aprofundar check-in, negociação de preço ou preço praticado.</div>
+
+    {% if itens and itens|length > 0 %}
+      <div class="detail-stack">
+        {% for it in itens %}
+          {% set ultimo_checkin = it.CheckinsDetalhe[0] if it.CheckinsDetalhe and it.CheckinsDetalhe|length > 0 else none %}
+          {% set ultima_negociacao = it.HistoricoNegociacao[0] if it.HistoricoNegociacao and it.HistoricoNegociacao|length > 0 else none %}
+          {% set ultimo_preco = it.PrecosPraticados[0] if it.PrecosPraticados and it.PrecosPraticados|length > 0 else none %}
+          <div class="detail-card">
+            <div class="detail-head">
+              <div>
+                <div class="detail-title">{{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                <div class="detail-sub">Item #{{ it.IDFatoControleContratosItensEuromidia or it.IDFatoControleContratosItens or "—" }} | Status: {{ it.Status or "—" }}</div>
+              </div>
+              <div class="mini-badges">
+                <span class="badge tipo">Cota: {{ it.Cota or 0 }}</span>
+                <span class="badge ok">Atendimentos: {{ it.QtdeAtendimentos or 0 }}</span>
+                <span class="badge warn">Check-ins: {{ it.QtdeCheckins or 0 }}</span>
+                <span class="badge danger">Margem %: {{ it.MargemPct_Face if it.MargemPct_Face is not none else "—" }}</span>
+              </div>
+            </div>
+
+            <div class="kv-lite">
+              <div class="field-item">
+                <div class="field-k">Cidade / Marca</div>
+                <div class="field-v">{{ it.CidadeExibicao or "—" }}{% if it.MarcaExibida %}<div style="margin-top:4px; font-size:12px; color:var(--muted);">{{ it.MarcaExibida }}</div>{% endif %}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-k">Período</div>
+                <div class="field-v">{{ it.DataInicioPrevisto.strftime("%d/%m/%Y") if it.DataInicioPrevisto else "—" }} até {{ it.DataTerminoPrevisto.strftime("%d/%m/%Y") if it.DataTerminoPrevisto else "—" }}</div>
+              </div>
+              <div class="field-item">
+                <div class="field-k">Resultado financeiro da face</div>
+                <div class="field-v">Líquido final: {{ it.FatLiquidoFinal_Soma if it.FatLiquidoFinal_Soma is not none else "—" }}<div style="margin-top:4px; font-size:12px; color:var(--muted);">Custo: {{ it.CustoMensalAlocado_Soma if it.CustoMensalAlocado_Soma is not none else "—" }} | Margem R$: {{ it.MargemR_Face_Soma if it.MargemR_Face_Soma is not none else "—" }}</div></div>
+              </div>
+            </div>
+
+            <div class="surface-grid">
+              <div class="surface-card">
+                <div class="surface-head">
+                  <div class="surface-title">Check-in</div>
+                  <span class="badge {% if it.CheckinsDetalhe and it.CheckinsDetalhe|length > 0 %}ok{% else %}warn{% endif %}">{{ it.CheckinsDetalhe|length if it.CheckinsDetalhe else 0 }} registro(s)</span>
+                </div>
+                <div class="surface-value">{{ ultimo_checkin.DataChekin.strftime("%d/%m/%Y") if ultimo_checkin and ultimo_checkin.DataChekin else "—" }}</div>
+                <div class="surface-meta">
+                  <div><strong>Último evento:</strong> {{ ultimo_checkin.DataChekin.strftime("%d/%m/%Y %H:%M") if ultimo_checkin and ultimo_checkin.DataChekin else "Sem check-in" }}</div>
+                  <div><strong>Observação:</strong> {{ ultimo_checkin.Observacao or "—" if ultimo_checkin else "—" }}</div>
+                  <div><strong>Mídia:</strong> {% if ultimo_checkin %}{% if ultimo_checkin.UrlImagemUpload or ultimo_checkin.UrlImagemGerada %}Disponível{% else %}Sem mídia{% endif %}{% else %}Sem check-in{% endif %}</div>
+                </div>
+                <div class="action-row">
+                  <button type="button" class="btn-action" {% if not (it.CheckinsDetalhe and it.CheckinsDetalhe|length > 0) %}disabled{% else %}data-modal-open="modal-checkin-{{ loop.index }}"{% endif %}>Ver check-in</button>
+                </div>
+              </div>
+
+              <div class="surface-card">
+                <div class="surface-head">
+                  <div class="surface-title">Histórico de negociação</div>
+                  <span class="badge {% if it.HistoricoNegociacao and it.HistoricoNegociacao|length > 0 %}ok{% else %}warn{% endif %}">{{ it.HistoricoNegociacao|length if it.HistoricoNegociacao else 0 }} registro(s)</span>
+                </div>
+                <div class="surface-value sm">{{ ultima_negociacao.PrecoAprovado if ultima_negociacao and ultima_negociacao.PrecoAprovado is not none else (ultima_negociacao.PrecoProposto if ultima_negociacao and ultima_negociacao.PrecoProposto is not none else "—") }}</div>
+                <div class="surface-meta">
+                  <div><strong>Última proposta:</strong> {{ ultima_negociacao.DataPrecoProposto.strftime("%d/%m/%Y %H:%M") if ultima_negociacao and ultima_negociacao.DataPrecoProposto else "Sem negociação" }}</div>
+                  <div><strong>Desconto:</strong> {{ ultima_negociacao.DescontoAprovado if ultima_negociacao and ultima_negociacao.DescontoAprovado is not none else (ultima_negociacao.DescontoProposto if ultima_negociacao and ultima_negociacao.DescontoProposto is not none else "—") }}</div>
+                  <div><strong>Período:</strong> {% if ultima_negociacao %}{{ ultima_negociacao.PeriodoInicio.strftime("%d/%m/%Y") if ultima_negociacao.PeriodoInicio else "—" }} até {{ ultima_negociacao.PeriodoTermino.strftime("%d/%m/%Y") if ultima_negociacao.PeriodoTermino else "—" }}{% else %}—{% endif %}</div>
+                </div>
+                <div class="action-row">
+                  <button type="button" class="btn-action" {% if not (it.HistoricoNegociacao and it.HistoricoNegociacao|length > 0) %}disabled{% else %}data-modal-open="modal-negociacao-{{ loop.index }}"{% endif %}>Ver histórico</button>
+                </div>
+              </div>
+
+              <div class="surface-card">
+                <div class="surface-head">
+                  <div class="surface-title">Preço praticado</div>
+                  <span class="badge {% if it.PrecosPraticados and it.PrecosPraticados|length > 0 %}ok{% else %}warn{% endif %}">{{ it.PrecosPraticados|length if it.PrecosPraticados else 0 }} registro(s)</span>
+                </div>
+                <div class="surface-value sm">{{ ultimo_preco.PrecoPraticado if ultimo_preco and ultimo_preco.PrecoPraticado is not none else "—" }}</div>
+                <div class="surface-meta">
+                  <div><strong>Último cadastro:</strong> {{ ultimo_preco.DataCadastro.strftime("%d/%m/%Y %H:%M") if ultimo_preco and ultimo_preco.DataCadastro else "Sem preço praticado" }}</div>
+                  <div><strong>Margem %:</strong> {{ ultimo_preco.MargemPercentual if ultimo_preco and ultimo_preco.MargemPercentual is not none else "—" }}</div>
+                  <div><strong>Vigência:</strong> {% if ultimo_preco %}{{ ultimo_preco.DataInicio.strftime("%d/%m/%Y") if ultimo_preco.DataInicio else "—" }} até {{ ultimo_preco.DataTermino.strftime("%d/%m/%Y") if ultimo_preco.DataTermino else "—" }}{% else %}—{% endif %}</div>
+                </div>
+                <div class="action-row">
+                  <button type="button" class="btn-action" {% if not (it.PrecosPraticados and it.PrecosPraticados|length > 0) %}disabled{% else %}data-modal-open="modal-preco-{{ loop.index }}"{% endif %}>Ver preço</button>
+                </div>
+              </div>
+            </div>
+
+            <details class="detail-toggle">
+              <summary>Ver +</summary>
+              <div class="details-panel">
+                <div class="field-grid" style="margin-top:14px;">
+                  {% for campo in it._campos %}
+                    <div class="field-item">
+                      <div class="field-k">{{ campo.rotulo }}</div>
+                      <div class="field-v">{{ campo.valor }}</div>
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            </details>
+
           </div>
+
+          <div class="modal-overlay" id="modal-checkin-{{ loop.index }}" aria-hidden="true">
+            <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-checkin-title-{{ loop.index }}">
+              <div class="modal-header">
+                <div>
+                  <div class="modal-title" id="modal-checkin-title-{{ loop.index }}">Check-in da face {{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                  <div class="modal-sub">Resumo compacto na tela principal; detalhe completo aberto sob demanda.</div>
+                </div>
+                <button type="button" class="modal-close" data-modal-close="modal-checkin-{{ loop.index }}">×</button>
+              </div>
+              <div class="modal-body">
+                {% if it.CheckinsDetalhe and it.CheckinsDetalhe|length > 0 %}
+                  <div class="list-stack">
+                    {% for ck in it.CheckinsDetalhe %}
+                      <div class="media-card">
+                        <div class="detail-head">
+                          <div>
+                            <div class="detail-title">Check-in #{{ ck.IDDimCheckinHistorico or "—" }}</div>
+                            <div class="detail-sub">{{ ck.DataChekin.strftime("%d/%m/%Y %H:%M") if ck.DataChekin else "—" }} | {{ ck.CodPonto or "—" }}/{{ ck.CodFace or "—" }}</div>
+                          </div>
+                          <div class="mini-badges">
+                            <span class="badge tipo">{{ ck.TipoPainel or "—" }}</span>
+                            <span class="badge tipo">{{ ck.TipoFace or "—" }}</span>
+                            <span class="badge {% if ck.BitChekin %}ok{% else %}warn{% endif %}">{{ "Confirmado" if ck.BitChekin else "Pendente" }}</span>
+                          </div>
+                        </div>
+                        <div class="field-grid">
+                          {% for campo in ck._campos %}
+                            <div class="field-item">
+                              <div class="field-k">{{ campo.rotulo }}</div>
+                              <div class="field-v">{{ campo.valor }}</div>
+                            </div>
+                          {% endfor %}
+                        </div>
+                        {% if ck.UrlImagemUpload or ck.UrlImagemGerada %}
+                          <div class="thumb-grid">
+                            {% if ck.UrlImagemUpload %}
+                              <div>
+                                <div class="field-k" style="margin-bottom:8px;">Mídia enviada</div>
+                                {% if '.mp4' in (ck.UrlImagemUpload|string)|lower %}
+                                  <video class="thumb-media" controls src="{{ ck.UrlImagemUpload }}"></video>
+                                {% else %}
+                                  <img class="thumb-media" src="{{ ck.UrlImagemUpload }}" alt="Mídia upload checkin">
+                                {% endif %}
+                              </div>
+                            {% endif %}
+                            {% if ck.UrlImagemGerada %}
+                              <div>
+                                <div class="field-k" style="margin-bottom:8px;">Mídia gerada</div>
+                                {% if '.mp4' in (ck.UrlImagemGerada|string)|lower %}
+                                  <video class="thumb-media" controls src="{{ ck.UrlImagemGerada }}"></video>
+                                {% else %}
+                                  <img class="thumb-media" src="{{ ck.UrlImagemGerada }}" alt="Mídia gerada checkin">
+                                {% endif %}
+                              </div>
+                            {% endif %}
+                          </div>
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  <div class="empty-box">Sem check-in detalhado encontrado para esta face.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-overlay" id="modal-negociacao-{{ loop.index }}" aria-hidden="true">
+            <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-negociacao-title-{{ loop.index }}">
+              <div class="modal-header">
+                <div>
+                  <div class="modal-title" id="modal-negociacao-title-{{ loop.index }}">Histórico de negociação — {{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                  <div class="modal-sub">Negociações originadas do card/kanban vinculadas à face.</div>
+                </div>
+                <button type="button" class="modal-close" data-modal-close="modal-negociacao-{{ loop.index }}">×</button>
+              </div>
+              <div class="modal-body">
+                {% if it.HistoricoNegociacao and it.HistoricoNegociacao|length > 0 %}
+                  <div class="overflow-x">
+                    <table class="tbl">
+                      <thead>
+                        <tr>
+                          <th>Data Proposta</th>
+                          <th>Preço Atual</th>
+                          <th>Custo Atual</th>
+                          <th>Margem Atual</th>
+                          <th>Preço Proposto</th>
+                          <th>Custo Proposto</th>
+                          <th>Margem Proposta</th>
+                          <th>Desconto Proposto</th>
+                          <th>Preço Aprovado</th>
+                          <th>Desconto Aprovado</th>
+                          <th>Período</th>
+                          <th>Observações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for neg in it.HistoricoNegociacao %}
+                          <tr>
+                            <td>{{ neg.DataPrecoProposto.strftime("%d/%m/%Y %H:%M") if neg.DataPrecoProposto else "—" }}</td>
+                            <td>{{ neg.PrecoAtual if neg.PrecoAtual is not none else "—" }}</td>
+                            <td>{{ neg.CustoAtual if neg.CustoAtual is not none else "—" }}</td>
+                            <td>{{ neg.MargemAtual if neg.MargemAtual is not none else "—" }}</td>
+                            <td>{{ neg.PrecoProposto if neg.PrecoProposto is not none else "—" }}</td>
+                            <td>{{ neg.CustoProposto if neg.CustoProposto is not none else "—" }}</td>
+                            <td>{{ neg.MargemProposta if neg.MargemProposta is not none else "—" }}</td>
+                            <td>{{ neg.DescontoProposto if neg.DescontoProposto is not none else "—" }}</td>
+                            <td>{{ neg.PrecoAprovado if neg.PrecoAprovado is not none else "—" }}</td>
+                            <td>{{ neg.DescontoAprovado if neg.DescontoAprovado is not none else "—" }}</td>
+                            <td class="td-wrap">{{ neg.PeriodoInicio.strftime("%d/%m/%Y") if neg.PeriodoInicio else "—" }} até {{ neg.PeriodoTermino.strftime("%d/%m/%Y") if neg.PeriodoTermino else "—" }}</td>
+                            <td class="td-wrap">{{ neg.ObservacoesProposta or neg.ObservacoesAprovacao or "—" }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% else %}
+                  <div class="empty-box">Sem negociação de preço encontrada para esta face.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-overlay" id="modal-preco-{{ loop.index }}" aria-hidden="true">
+            <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-preco-title-{{ loop.index }}">
+              <div class="modal-header">
+                <div>
+                  <div class="modal-title" id="modal-preco-title-{{ loop.index }}">Preço praticado — {{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                  <div class="modal-sub">Preço efetivamente aplicado na face, separado do histórico de negociação.</div>
+                </div>
+                <button type="button" class="modal-close" data-modal-close="modal-preco-{{ loop.index }}">×</button>
+              </div>
+              <div class="modal-body">
+                {% if it.PrecosPraticados and it.PrecosPraticados|length > 0 %}
+                  <div class="overflow-x">
+                    <table class="tbl">
+                      <thead>
+                        <tr>
+                          <th>Data Cadastro</th>
+                          <th>Data Aprovação</th>
+                          <th>Exibições</th>
+                          <th>Custo Painel</th>
+                          <th>Custo Médio Painel</th>
+                          <th>Preço Proposto</th>
+                          <th>Preço Praticado</th>
+                          <th>Desconto %</th>
+                          <th>Margem %</th>
+                          <th>Início</th>
+                          <th>Término</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for preco in it.PrecosPraticados %}
+                          <tr>
+                            <td>{{ preco.DataCadastro.strftime("%d/%m/%Y %H:%M") if preco.DataCadastro else "—" }}</td>
+                            <td>{{ preco.DataAprovacaoContrato.strftime("%d/%m/%Y %H:%M") if preco.DataAprovacaoContrato else "—" }}</td>
+                            <td>{{ preco.Exibicoes if preco.Exibicoes is not none else "—" }}</td>
+                            <td>{{ preco.CustoPainel if preco.CustoPainel is not none else "—" }}</td>
+                            <td>{{ preco.CustoMedioPainel if preco.CustoMedioPainel is not none else "—" }}</td>
+                            <td>{{ preco.PrecoProposto if preco.PrecoProposto is not none else "—" }}</td>
+                            <td>{{ preco.PrecoPraticado if preco.PrecoPraticado is not none else "—" }}</td>
+                            <td>{{ preco.DescontoPercentual if preco.DescontoPercentual is not none else "—" }}</td>
+                            <td>{{ preco.MargemPercentual if preco.MargemPercentual is not none else "—" }}</td>
+                            <td>{{ preco.DataInicio.strftime("%d/%m/%Y") if preco.DataInicio else "—" }}</td>
+                            <td>{{ preco.DataTermino.strftime("%d/%m/%Y") if preco.DataTermino else "—" }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% else %}
+                  <div class="empty-box">Sem preço praticado encontrado para esta face.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-box" style="margin-top:14px;">Sem painéis/faces vinculados ao contrato.</div>
+    {% endif %}
+  </div>
+
+  <div class="modal-overlay" id="modal-empresas-relacionadas" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-empresas-relacionadas-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="modal-empresas-relacionadas-title">Empresas relacionadas ao contrato</div>
+          <div class="modal-sub">Detalhamento sob demanda para manter a tela do contrato curta e legível.</div>
         </div>
+        <button type="button" class="modal-close" data-modal-close="modal-empresas-relacionadas">×</button>
+      </div>
+      <div class="modal-body">
+        {% if empresas_relacionadas and empresas_relacionadas|length > 0 %}
+          <div class="list-stack">
+            {% for emp in empresas_relacionadas %}
+              <div class="detail-card">
+                <div class="detail-head">
+                  <div>
+                    <div class="detail-title">{{ emp.RazaoSocial or emp.NomeFantasia or "Empresa sem nome" }}</div>
+                    <div class="detail-sub">Empresa #{{ emp.IDEmpresa or "—" }}{% if emp.NomeFantasia and emp.RazaoSocial and emp.NomeFantasia != emp.RazaoSocial %} | {{ emp.NomeFantasia }}{% endif %}</div>
+                  </div>
+                  <div class="mini-badges">
+                    <span class="badge tipo">CNPJ: {{ emp.CNPJ or "—" }}</span>
+                    <span class="badge ok">Cidade: {{ emp.Municipio or "—" }}/{{ emp.UF or "—" }}</span>
+                  </div>
+                </div>
+                <div class="kv-lite">
+                  <div class="field-item"><div class="field-k">Razão Social</div><div class="field-v">{{ emp.RazaoSocial or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">Nome Fantasia</div><div class="field-v">{{ emp.NomeFantasia or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">CNPJ</div><div class="field-v">{{ emp.CNPJ or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">Município / UF</div><div class="field-v">{{ emp.Municipio or "—" }} / {{ emp.UF or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">Telefone 1</div><div class="field-v">{{ emp.TelefoneContato1 or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">Telefone 2</div><div class="field-v">{{ emp.TelefoneContato2 or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">E-mail</div><div class="field-v">{{ emp.Email or "—" }}</div></div>
+                  <div class="field-item"><div class="field-k">Logradouro</div><div class="field-v">{{ emp.Logradouro or "—" }}{% if emp.Numero %}, {{ emp.Numero }}{% endif %}</div></div>
+                  <div class="field-item"><div class="field-k">Bairro</div><div class="field-v">{{ emp.Bairro or "—" }}</div></div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-box">Nenhuma empresa relacionada encontrada para este contrato.</div>
+        {% endif %}
       </div>
     </div>
   </div>
 
   <div style="margin-top:18px;">
     <h2 class="section-title">Atendimentos do Contrato</h2>
-    <div class="muted" style="font-size:12px;margin-top:4px;">
-      Cards do Kanban relacionados ao contrato por vínculo histórico contrato × item × card.
-    </div>
-
+    <div class="section-sub">Cards do Kanban relacionados ao contrato por vínculo histórico contrato × item × card.</div>
     {% if cards_relacionados and cards_relacionados|length > 0 %}
       <div class="overflow-x">
         <table class="tbl">
@@ -391,27 +810,13 @@
                 </td>
                 <td><span class="badge tipo">{{ card.TipoCard }}</span></td>
                 <td class="td-wrap">{{ card.NomeFase or "—" }}</td>
-                <td>
-                  <span class="badge {{ card.Situacao }}">{{ card.NomeStatus or card.Situacao|capitalize }}</span>
-                </td>
-                <td>
-                  {% if card.CriadoEm %}
-                    {{ card.CriadoEm.strftime("%d/%m/%Y %H:%M") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>
-                  {% if card.DataReferencia %}
-                    {{ card.DataReferencia.strftime("%d/%m/%Y %H:%M") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
+                <td><span class="badge {{ card.Situacao }}">{{ card.NomeStatus or card.Situacao|capitalize }}</span></td>
+                <td>{{ card.CriadoEm.strftime("%d/%m/%Y %H:%M") if card.CriadoEm else "—" }}</td>
+                <td>{{ card.DataReferencia.strftime("%d/%m/%Y %H:%M") if card.DataReferencia else "—" }}</td>
                 <td class="td-wrap">{{ card.Usuario or "—" }}</td>
                 <td class="td-wrap">
                   {% if card.ItensAfetados and card.ItensAfetados|length > 0 %}
-                    <div class="mini-meta">
+                    <div class="mini-badges">
                       {% for item in card.ItensAfetados %}
                         <span class="badge tipo">{{ item }}</span>
                       {% endfor %}
@@ -420,38 +825,28 @@
                     —
                   {% endif %}
                 </td>
-                <td>
-                  <a class="btn-link-historico" href="{{ card.HrefHistorico }}" target="_blank" rel="noopener noreferrer">Ver histórico</a>
-                </td>
+                <td><a class="btn-link-historico" href="{{ card.HrefHistorico }}" target="_blank" rel="noopener noreferrer">Ver histórico</a></td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
-      <div class="empty-box" style="margin-top:14px;">
-        Nenhum atendimento encontrado para este contrato.
-      </div>
+      <div class="empty-box" style="margin-top:14px;">Nenhum atendimento encontrado para este contrato.</div>
     {% endif %}
   </div>
 
   <div style="margin-top:18px;">
     <h2 class="section-title">Linha do Tempo dos Atendimentos</h2>
-    <div class="muted" style="font-size:12px;margin-top:4px;">
-      Eventos recentes consolidados: movimentações, observações, logs, negociações, encerramentos e check-ins.
-    </div>
+    <div class="section-sub">Eventos recentes consolidados: movimentações, observações, logs, negociações, encerramentos e check-ins.</div>
 
     {% if timeline_atendimentos and timeline_atendimentos|length > 0 %}
       <div class="timeline-box">
         <ul class="timeline-list">
           {% for evento in timeline_atendimentos %}
             <li class="timeline-item">
-              <div class="timeline-date">
-                {{ evento.DataEvento.strftime("%d/%m/%Y %H:%M") if evento.DataEvento else "—" }}
-              </div>
-              <div>
-                <span class="badge timeline-{{ evento.TipoEvento }}">{{ evento.TipoEvento }}</span>
-              </div>
+              <div class="timeline-date">{{ evento.DataEvento.strftime("%d/%m/%Y %H:%M") if evento.DataEvento else "—" }}</div>
+              <div><span class="badge timeline-{{ evento.TipoEvento }}">{{ evento.TipoEvento }}</span></div>
               <div class="timeline-content">
                 <div class="timeline-text">{{ evento.Texto or "—" }}</div>
                 <div class="timeline-sub">
@@ -460,9 +855,7 @@
                   {% else %}
                     <span>Contrato</span>
                   {% endif %}
-                  {% if evento.NomeUsuario %}
-                    <span>Usuário: {{ evento.NomeUsuario }}</span>
-                  {% endif %}
+                  {% if evento.NomeUsuario %}<span>Usuário: {{ evento.NomeUsuario }}</span>{% endif %}
                   {% if evento.Extra and evento.Extra.CodPonto %}
                     <span>Ponto/Face: {{ evento.Extra.CodPonto or "—" }}/{{ evento.Extra.CodFace or "—" }}</span>
                   {% endif %}
@@ -471,90 +864,79 @@
             </li>
           {% endfor %}
         </ul>
+
+        {% if timeline_paginacao and timeline_paginacao.total_pages > 1 %}
+          <div class="timeline-footer">
+            <div class="timeline-page-info">Exibindo {{ timeline_paginacao.inicio }}–{{ timeline_paginacao.fim }} de {{ timeline_paginacao.total }} evento(s)</div>
+            <div class="timeline-pager">
+              {% if timeline_paginacao.has_prev %}
+                <a class="btn-page" href="{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.prev_page) }}">Anterior</a>
+              {% endif %}
+              {% for p in range(1, timeline_paginacao.total_pages + 1) %}
+                <a class="btn-page {% if p == timeline_paginacao.page %}is-active{% endif %}" href="{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=p) }}">{{ p }}</a>
+              {% endfor %}
+              {% if timeline_paginacao.has_next %}
+                <a class="btn-page" href="{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.next_page) }}">Próxima</a>
+              {% endif %}
+            </div>
+          </div>
+        {% elif timeline_paginacao %}
+          <div class="timeline-footer">
+            <div class="timeline-page-info">Exibindo {{ timeline_paginacao.inicio }}–{{ timeline_paginacao.fim }} de {{ timeline_paginacao.total }} evento(s)</div>
+          </div>
+        {% endif %}
       </div>
     {% else %}
-      <div class="empty-box" style="margin-top:14px;">
-        Ainda não há eventos para montar a timeline deste contrato.
-      </div>
+      <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
     {% endif %}
   </div>
 
-  <div style="margin-top:18px;">
-    <h2 class="section-title">Itens do Contrato</h2>
-    <div class="muted" style="font-size:12px;margin-top:4px;">
-      Total de itens: <b>{{ itens|length }}</b>
-    </div>
+<script>
+  (function(){
+    function abrirModal(id){
+      const modal = document.getElementById(id);
+      if(!modal) return;
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
 
-    <div class="overflow-x">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>ID Item</th>
-            <th>CodPonto</th>
-            <th>CodFace</th>
-            <th>Cota</th>
-            <th>Início</th>
-            <th>Término</th>
-            <th>Cidade</th>
-            <th>Marca</th>
-            <th>Faturamento Líquido Mensal Final</th>
-            <th>Atendimentos</th>
-            <th>Último Atendimento</th>
-            <th>Check-ins</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if itens and itens|length > 0 %}
-            {% for it in itens %}
-              <tr>
-                <td>#{{ it.IDFatoControleContratosItens or "—" }}</td>
-                <td>{{ it.CodPonto or "—" }}</td>
-                <td class="td-ellipsis">{{ it.CodFace or "—" }}</td>
-                <td>{{ it.Cota or 0 }}</td>
-                <td>
-                  {% if it.DataInicioPrevisto %}
-                    {{ it.DataInicioPrevisto.strftime("%d/%m/%Y") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>
-                  {% if it.DataTerminoPrevisto %}
-                    {{ it.DataTerminoPrevisto.strftime("%d/%m/%Y") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>{{ it.CidadeExibicao or "—" }}</td>
-                <td class="td-wrap">{{ it.MarcaExibida or "—" }}</td>
-                <td>
-                  {{ ("R$ " ~ "{:,.2f}".format(it.FaturamentoLiquidoMensalFinal).replace(",", "X").replace(".", ",").replace("X", "."))
-                     if it.FaturamentoLiquidoMensalFinal is not none else "—" }}
-                </td>
-                <td>{{ it.QtdeAtendimentos or 0 }}</td>
-                <td>
-                  {% if it.UltimoAtendimentoEm %}
-                    {{ it.UltimoAtendimentoEm.strftime("%d/%m/%Y %H:%M") }}
-                  {% else %}
-                    —
-                  {% endif %}
-                </td>
-                <td>
-                  {{ it.QtdeCheckins or 0 }}
-                  {% if it.UltimoCheckinEm %}
-                    <div class="muted" style="font-size:11px;margin-top:4px;">{{ it.UltimoCheckinEm.strftime("%d/%m/%Y %H:%M") }}</div>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          {% else %}
-            <tr>
-              <td colspan="12" class="muted" style="padding:14px;">Sem itens vinculados.</td>
-            </tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+    function fecharModal(id){
+      const modal = document.getElementById(id);
+      if(!modal) return;
+      modal.classList.remove('is-open');
+      modal.setAttribute('aria-hidden', 'true');
+      if(!document.querySelector('.modal-overlay.is-open')){
+        document.body.style.overflow = '';
+      }
+    }
+
+    document.addEventListener('click', function(ev){
+      const opener = ev.target.closest('[data-modal-open]');
+      if(opener && !opener.hasAttribute('disabled')){
+        abrirModal(opener.getAttribute('data-modal-open'));
+        return;
+      }
+
+      const closer = ev.target.closest('[data-modal-close]');
+      if(closer){
+        fecharModal(closer.getAttribute('data-modal-close'));
+        return;
+      }
+
+      const overlay = ev.target.classList && ev.target.classList.contains('modal-overlay') ? ev.target : null;
+      if(overlay){
+        fecharModal(overlay.id);
+      }
+    });
+
+    document.addEventListener('keydown', function(ev){
+      if(ev.key !== 'Escape') return;
+      document.querySelectorAll('.modal-overlay.is-open').forEach(function(modal){
+        fecharModal(modal.id);
+      });
+    });
+  })();
+</script>
 </div>
 {% endblock %}

@@ -2673,11 +2673,16 @@
       <input id="cardTitulo" class="kb-input" placeholder="Título" />
       <textarea id="cardDescricao" class="kb-textarea" rows="6" placeholder="Descrição"></textarea>
 
-      <div class="kb-row" style="justify-content:space-between;align-items:center;">
-        <div class="kb-section-title">Empresa</div>
-        <button class="kb-btn sm kb-btn-orcamento" id="btnAbrirCadastroEmpresa" type="button" title="Cadastrar ou editar empresa deste card">Cadastrar Empresa</button>
-      </div>
       <div class="kb-empresa-box">
+        <div class="kb-section-title" style="margin-top:0;">Tipo de cliente</div>
+        <select id="selectTipoClienteDescontoCard" class="kb-select">
+          <option value="">— Selecione —</option>
+        </select>
+
+        <div class="kb-row" style="justify-content:space-between;align-items:center;margin-top:10px;">
+          <div class="kb-section-title">Nome Empresa</div>
+          <button class="kb-btn sm kb-btn-orcamento" id="btnAbrirCadastroEmpresa" type="button" title="Cadastrar ou editar empresa deste card">Cadastrar Empresa</button>
+        </div>
         <div class="kb-row">
           <div id="comboEmpresaCard" class="kb-combobox grow">
             <input
@@ -2692,7 +2697,7 @@
             <div id="listaEmpresaCardBusca" class="kb-combobox-lista" hidden></div>
             <select id="selectEmpresaCard" class="kb-select grow kb-select-hidden" tabindex="-1" aria-hidden="true"></select>
           </div>
-          <button class="kb-btn sm" id="btnLimparEmpresa" type="button">Plano de Midia</button>
+          <button class="kb-btn sm" id="btnLimparEmpresa" type="button" style="display:none;">Plano de Midia</button>
         </div>
 
         <div id="empresaPreview" class="kb-empresa-preview">
@@ -2701,6 +2706,28 @@
           <div class="linha"><span class="k">CNAE:</span>  <span class="v" id="empPrevCnae">—</span></div>
           <div class="linha"><span class="k">Setor:</span> <span class="v" id="empPrevSetor">—</span></div>
           <div class="linha"><span class="k">Classe:</span><span class="v" id="empPrevClasse">—</span></div>
+        </div>
+
+        <div class="kb-section-title" style="margin-top:10px;">Origem de atendimento</div>
+        <select id="selectOrigemAtendimentoCard" class="kb-select">
+          <option value="">— Selecione —</option>
+        </select>
+
+        <div class="kb-section-title" style="margin-top:10px;">Segmento da empresa</div>
+        <div class="kb-row">
+          <div id="comboSegmentoCard" class="kb-combobox grow">
+            <input
+              id="inputSegmentoCardBusca"
+              class="kb-input kb-combobox-input"
+              type="text"
+              placeholder="Digite classe ou descrição do segmento..."
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button id="btnToggleSegmentoCard" class="kb-combobox-toggle" type="button" aria-label="Abrir lista de segmentos">▾</button>
+            <div id="listaSegmentoCardBusca" class="kb-combobox-lista" hidden></div>
+            <select id="selectSegmentoCard" class="kb-select grow kb-select-hidden" tabindex="-1" aria-hidden="true"></select>
+          </div>
         </div>
 
         <div id="wrapDadosNovoContrato" class="kb-contrato-box" hidden>
@@ -2768,16 +2795,6 @@
             <select id="selectCodFaceContratoCard" class="kb-select"></select>
           </div>
         </div>
-
-        <div class="kb-section-title" style="margin-top:10px;">Tipo de cliente</div>
-        <select id="selectTipoClienteDescontoCard" class="kb-select">
-          <option value="">— Selecione —</option>
-        </select>
-
-        <div class="kb-section-title" style="margin-top:10px;">Origem de atendimento</div>
-        <select id="selectOrigemAtendimentoCard" class="kb-select">
-          <option value="">— Selecione —</option>
-        </select>
       </div>
 
       <div id="painelFaceWrap" class="kb-painel-box">
@@ -3161,6 +3178,9 @@
   let empresaBuscaRemotaController = null;
   let agenciasResultadoComboboxAtual = [];
   let agenciaBuscaRemotaController = null;
+  let cnaesCatalogo = [];
+  let cnaesResultadoComboboxAtual = [];
+  let cnaeBuscaRemotaController = null;
   let empresasProprietariasCatalogo = [];
   const ID_TAG_TIPO_CONTRATO_ADITIVO = 8;
   const ID_TAG_TIPO_CONTRATO_NOVO = 9;
@@ -3191,6 +3211,11 @@
   const inputDescricaoCard = document.getElementById("cardDescricao");
   const selectTipoClienteDescontoCard = document.getElementById("selectTipoClienteDescontoCard");
   const selectOrigemAtendimentoCard = document.getElementById("selectOrigemAtendimentoCard");
+  const comboSegmentoCard = document.getElementById("comboSegmentoCard");
+  const inputSegmentoCardBusca = document.getElementById("inputSegmentoCardBusca");
+  const btnToggleSegmentoCard = document.getElementById("btnToggleSegmentoCard");
+  const listaSegmentoCardBusca = document.getElementById("listaSegmentoCardBusca");
+  const selectSegmentoCard = document.getElementById("selectSegmentoCard");
   const cardIdVisual = document.getElementById("cardIdVisual");
   const cardTipoClienteBadgeVisual = document.getElementById("cardTipoClienteBadgeVisual");
   const cardOrigemAtendimentoBadgeVisual = document.getElementById("cardOrigemAtendimentoBadgeVisual");
@@ -5839,6 +5864,188 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     fecharListaEmpresasCombobox();
   }
 
+  function textoOpcaoCnae(item){
+    const classe = safeStr(item?.Classe || "").trim();
+    const descricao = safeStr(item?.Descricao || "").trim();
+    if (classe && descricao) return `${classe} • ${descricao}`;
+    return classe || descricao || "";
+  }
+
+  function registrarCnaesNoCatalogo(lista){
+    const adicionadas = [];
+    for (const bruto of (Array.isArray(lista) ? lista : [])) {
+      const id = idNum(bruto?.IDDimCnaes || bruto?.id_dim_cnaes || 0);
+      if (!id) continue;
+      const registro = {
+        IDDimCnaes: id,
+        cnaepadrao: safeStr(bruto?.cnaepadrao || "").trim(),
+        Classe: safeStr(bruto?.Classe || "").trim(),
+        Descricao: safeStr(bruto?.Descricao || "").trim(),
+        Setor: safeStr(bruto?.Setor || "").trim(),
+        MacroSetor: safeStr(bruto?.MacroSetor || "").trim(),
+        SubClasse: safeStr(bruto?.SubClasse || "").trim()
+      };
+      const idx = cnaesCatalogo.findIndex((item) => idNum(item?.IDDimCnaes || 0) === id);
+      if (idx >= 0) cnaesCatalogo[idx] = registro;
+      else cnaesCatalogo.push(registro);
+      adicionadas.push(registro);
+    }
+
+    cnaesCatalogo.sort((a, b) => textoOpcaoCnae(a).localeCompare(textoOpcaoCnae(b), "pt-BR"));
+    return adicionadas;
+  }
+
+  function filtrarCnaesCombobox(texto){
+    const termo = normalizarTexto(safeStr(texto || "").trim());
+    if (!termo) return cnaesCatalogo.slice(0, LIMITE_EMPRESAS_COMBOBOX);
+    return cnaesCatalogo.filter((item) => {
+      return normalizarTexto(textoOpcaoCnae(item)).includes(termo)
+        || normalizarTexto(item?.Classe || "").includes(termo)
+        || normalizarTexto(item?.Descricao || "").includes(termo)
+        || normalizarTexto(item?.Setor || "").includes(termo)
+        || normalizarTexto(item?.cnaepadrao || "").includes(termo);
+    }).slice(0, LIMITE_EMPRESAS_COMBOBOX);
+  }
+
+  function obterTextoCnaeSelecionado(idCnae){
+    const id = idNum(idCnae || 0);
+    if (!id) return "";
+    const item = cnaesCatalogo.find((registro) => idNum(registro?.IDDimCnaes || 0) === id);
+    return item ? textoOpcaoCnae(item) : "";
+  }
+
+  function sincronizarBuscaSegmentoComSelect(){
+    if (!inputSegmentoCardBusca || !selectSegmentoCard) return;
+    inputSegmentoCardBusca.value = obterTextoCnaeSelecionado(selectSegmentoCard.value || "");
+  }
+
+  function renderizarListaCnaesCombobox(texto, opcoes = {}){
+    if (!listaSegmentoCardBusca) return;
+    const base = Array.isArray(opcoes.cnaes) ? opcoes.cnaes : filtrarCnaesCombobox(texto);
+    const filtradas = (Array.isArray(base) ? base : []).slice(0, LIMITE_EMPRESAS_COMBOBOX);
+    cnaesResultadoComboboxAtual = filtradas.slice();
+    const valorSelecionado = safeStr(selectSegmentoCard?.value || "").trim();
+    listaSegmentoCardBusca.innerHTML = "";
+
+    if (!filtradas.length){
+      listaSegmentoCardBusca.appendChild(el("div", { class: "kb-combobox-vazio" }, ["Nenhum segmento encontrado."]));
+      return;
+    }
+
+    filtradas.forEach((item) => {
+      const id = safeStr(item?.IDDimCnaes || "").trim();
+      if (!id) return;
+      const botao = el("button", { type: "button", class: `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}` }, [
+        el("strong", {}, [safeStr(item?.Classe || item?.Descricao || "—") || "—"]),
+        el("span", {}, [safeStr(item?.Descricao || item?.Classe || "Sem descrição") || "Sem descrição"])
+      ]);
+      botao.addEventListener("mousedown", async (evento) => {
+        evento.preventDefault();
+        await selecionarCnaePorIdComGarantia(id, true);
+      });
+      listaSegmentoCardBusca.appendChild(botao);
+    });
+  }
+
+  function abrirListaCnaesCombobox(){
+    if (!comboSegmentoCard || !listaSegmentoCardBusca) return;
+    comboSegmentoCard.classList.add("is-open");
+    listaSegmentoCardBusca.hidden = false;
+    renderizarListaCnaesCombobox(inputSegmentoCardBusca?.value || "");
+  }
+
+  function fecharListaCnaesCombobox(){
+    if (!comboSegmentoCard || !listaSegmentoCardBusca) return;
+    comboSegmentoCard.classList.remove("is-open");
+    listaSegmentoCardBusca.hidden = true;
+  }
+
+  async function buscarCnaesRemoto(textoBusca = ""){
+    const termo = safeStr(textoBusca || "").trim();
+    if (cnaeBuscaRemotaController) cnaeBuscaRemotaController.abort();
+    const controller = new AbortController();
+    cnaeBuscaRemotaController = controller;
+
+    if (listaSegmentoCardBusca){
+      listaSegmentoCardBusca.innerHTML = "";
+      listaSegmentoCardBusca.appendChild(el("div", { class: "kb-combobox-vazio" }, ["Buscando segmentos..."]))
+    }
+
+    const query = new URLSearchParams();
+    if (termo) query.set("q", termo);
+
+    try {
+      const url = query.toString() ? `/kanban/api/cnaes/buscar?${query.toString()}` : `/kanban/api/cnaes/buscar`;
+      const r = await fetch(url, { credentials: "same-origin", signal: controller.signal });
+      const j = await r.json().catch(() => null);
+      if (cnaeBuscaRemotaController !== controller) return [];
+      if (!r.ok || !j || !j.ok) throw new Error((j && (j.msg || j.erro)) || `Erro ao buscar segmentos (HTTP ${r.status})`);
+      const cnaes = registrarCnaesNoCatalogo(Array.isArray(j.cnaes) ? j.cnaes : []);
+      renderizarListaCnaesCombobox(termo, { cnaes });
+      return cnaes;
+    } catch (erro) {
+      if (erro?.name === "AbortError") return [];
+      console.warn("buscarCnaesRemoto: falhou", erro);
+      renderizarListaCnaesCombobox(termo);
+      return [];
+    } finally {
+      if (cnaeBuscaRemotaController === controller) cnaeBuscaRemotaController = null;
+    }
+  }
+
+  async function selecionarCnaePorIdComGarantia(idCnae, dispararChange = true){
+    if (!selectSegmentoCard) return;
+    const valor = safeStr(idCnae || "").trim();
+    if (!valor){
+      selectSegmentoCard.value = "";
+      sincronizarBuscaSegmentoComSelect();
+      fecharListaCnaesCombobox();
+      if (dispararChange) selectSegmentoCard.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    let item = cnaesCatalogo.find((registro) => safeStr(registro?.IDDimCnaes || "").trim() === valor);
+    if (!item){
+      const encontrados = await buscarCnaesRemoto(valor);
+      item = (encontrados || []).find((registro) => safeStr(registro?.IDDimCnaes || "").trim() === valor) || null;
+    }
+
+    if (!item) return;
+
+    let option = Array.from(selectSegmentoCard.options || []).find((opt) => safeStr(opt.value || "").trim() === valor);
+    if (!option){
+      option = new Option(textoOpcaoCnae(item), valor, false, false);
+      selectSegmentoCard.appendChild(option);
+    } else {
+      option.text = textoOpcaoCnae(item);
+    }
+
+    selectSegmentoCard.value = valor;
+    sincronizarBuscaSegmentoComSelect();
+    fecharListaCnaesCombobox();
+    if (dispararChange) selectSegmentoCard.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function reconciliarBuscaSegmentoDigitada(){
+    if (!inputSegmentoCardBusca || !selectSegmentoCard) return;
+    const textoDigitado = safeStr(inputSegmentoCardBusca.value || "").trim();
+    if (!textoDigitado){
+      selecionarCnaePorIdComGarantia("", true).catch((erro) => console.warn("limpar segmento falhou", erro));
+      return;
+    }
+
+    const textoNormalizado = normalizarTexto(textoDigitado);
+    const item = cnaesCatalogo.find((registro) => normalizarTexto(textoOpcaoCnae(registro)) === textoNormalizado);
+    if (item){
+      selecionarCnaePorIdComGarantia(String(item.IDDimCnaes), true).catch((erro) => console.warn("selecionar segmento falhou", erro));
+      return;
+    }
+
+    sincronizarBuscaSegmentoComSelect();
+    fecharListaCnaesCombobox();
+  }
+
+
 function montarSelectTipoClienteDesconto(valorSelecionado = null){
   if (!selectTipoClienteDescontoCard) return;
 
@@ -8482,6 +8689,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     ativarPainelFaceSeNecessario();
     montarSelectTipoClienteDesconto();
     montarSelectOrigemAtendimento();
+    buscarCnaesRemoto("").catch((erro) => console.warn("init cnaes: falhou", erro));
 
     mapaTagsPorCard = new Map();
     mapaNotasPorCard = new Map();
@@ -9389,6 +9597,73 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     await carregarFluxoContratoParaEmpresa(idEmp);
     atualizarVisibilidadeDadosNovoContrato();
+  });
+
+  inputSegmentoCardBusca?.addEventListener("focus", () => {
+    abrirListaCnaesCombobox();
+    buscarCnaesRemoto(inputSegmentoCardBusca.value || "").catch((erro) => {
+      console.warn("focus segmento: falhou", erro);
+    });
+  });
+
+  inputSegmentoCardBusca?.addEventListener("click", () => {
+    abrirListaCnaesCombobox();
+    buscarCnaesRemoto(inputSegmentoCardBusca.value || "").catch((erro) => {
+      console.warn("click segmento: falhou", erro);
+    });
+  });
+
+  inputSegmentoCardBusca?.addEventListener("input", () => {
+    abrirListaCnaesCombobox();
+    const termo = inputSegmentoCardBusca.value || "";
+    if (!safeStr(termo).trim()) {
+      renderizarListaCnaesCombobox(termo);
+      buscarCnaesRemoto(termo).catch((erro) => {
+        console.warn("input segmento vazio: falhou", erro);
+      });
+      return;
+    }
+
+    renderizarListaCnaesCombobox(termo);
+    buscarCnaesRemoto(termo).catch((erro) => {
+      console.warn("input segmento remoto: falhou", erro);
+    });
+  });
+
+  inputSegmentoCardBusca?.addEventListener("keydown", (evento) => {
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      const primeira = cnaesResultadoComboboxAtual[0] || filtrarCnaesCombobox(inputSegmentoCardBusca.value || "")[0] || null;
+      if (primeira && primeira.IDDimCnaes) {
+        selecionarCnaePorIdComGarantia(String(primeira.IDDimCnaes), true).catch((erro) => {
+          console.warn("keydown segmento: falhou ao selecionar primeira opção", erro);
+        });
+      } else {
+        reconciliarBuscaSegmentoDigitada();
+      }
+      return;
+    }
+
+    if (evento.key === "Escape") {
+      fecharListaCnaesCombobox();
+    }
+  });
+
+  inputSegmentoCardBusca?.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      reconciliarBuscaSegmentoDigitada();
+    }, 120);
+  });
+
+  btnToggleSegmentoCard?.addEventListener("click", () => {
+    if (listaSegmentoCardBusca?.hidden) {
+      abrirListaCnaesCombobox();
+      buscarCnaesRemoto(inputSegmentoCardBusca?.value || "").catch((erro) => {
+        console.warn("toggle segmento: falhou", erro);
+      });
+      return;
+    }
+    fecharListaCnaesCombobox();
   });
 
   inputEmpresaCardBusca?.addEventListener("focus", () => {
@@ -10491,6 +10766,11 @@ async function moverCard(idCard, idFasePara, posicao) {
       selectOrigemAtendimentoCard.value = idOrigemAtendimento !== null && idOrigemAtendimento !== undefined ? String(idOrigemAtendimento) : "";
     }
 
+    if (selectSegmentoCard) {
+      const idSegmento = cardNormalizado.IDDimCnaes ?? "";
+      await selecionarCnaePorIdComGarantia(idSegmento !== null && idSegmento !== undefined ? String(idSegmento) : "", false);
+    }
+
     if (selectResponsavelCard) {
       const idResponsavel = cardNormalizado.IDVendedorUsuario ?? cardNormalizado.IDDimUsuarios ?? "";
       selectResponsavelCard.value = idResponsavel !== null && idResponsavel !== undefined ? String(idResponsavel) : "";
@@ -10828,8 +11108,10 @@ async function moverCard(idCard, idFasePara, posicao) {
       titulo: safeStr(document.getElementById("cardTitulo")?.value || "").trim(),
       descricao: safeStr(document.getElementById("cardDescricao")?.value || ""),
       id_empresa: selectEmpresaCard?.value ? Number(selectEmpresaCard.value) : null,
+      nome_empresa: safeStr(obterTextoEmpresaSelecionada(selectEmpresaCard?.value || "") || inputEmpresaCardBusca?.value || "").trim() || null,
       id_tipo_cliente_desconto: selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null,
       id_origem_atendimento: selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null,
+      id_dim_cnaes: selectSegmentoCard?.value ? Number(selectSegmentoCard.value) : null,
       id_contrato_existente: fluxoContratoAtual.id_contrato,
       id_controle_contrato: fluxoContratoAtual.id_contrato,
       tipo_contrato_card: fluxoContratoAtual.modo_contrato,
@@ -10876,6 +11158,11 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const idCardSalvo = idNum(cardAbertoId);
+
+    if (!idTipoClienteDesconto) {
+      mostrarMensagemCard("Tipo de cliente é obrigatório.");
+      return;
+    }
 
     const estadoAtualEdicao = montarEstadoEdicaoCardAtual();
     const payload = {

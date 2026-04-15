@@ -7198,55 +7198,83 @@ def grade_painel_multi():
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def contrato_detalhe(id_fato_controle_contratos: int):
 
+    timeline_page = request.args.get("timeline_page", default=1, type=int) or 1
+    if timeline_page < 1:
+        timeline_page = 1
+    timeline_per_page = 10
+
+    def _fmt_valor(v):
+        if v is None:
+            return "—"
+        if isinstance(v, datetime):
+            return v.strftime("%d/%m/%Y %H:%M")
+        if isinstance(v, date):
+            return v.strftime("%d/%m/%Y")
+        if isinstance(v, bool):
+            return "Sim" if v else "Não"
+        if isinstance(v, Decimal):
+            try:
+                return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            except Exception:
+                return str(v)
+        if isinstance(v, float):
+            try:
+                return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            except Exception:
+                return str(v)
+        txt = str(v).strip()
+        return txt if txt else "—"
+
+    def _rotulo_campo(chave: str) -> str:
+        mapa = {
+            "IDFatoControleContratosEuromidia": "ID Contrato Controle",
+            "IDFatoControleContratos": "ID Contrato Controle",
+            "IDFatoSolicitacaoContratoEuromidia": "ID Solicitação Contrato",
+            "IDFatoSolicitacaoContratoItemEuromidia": "ID Solicitação Item",
+            "IDFatoControleContratosItensEuromidia": "ID Item Contrato",
+            "IDEmpresa": "ID Empresa",
+            "IDEmpresaAgencia": "ID Empresa Agência",
+            "IDDimFacesPaineis": "ID Face",
+            "IDPainelEuromidia": "ID Painel",
+            "IDDimCheckinHistorico": "ID Check-in",
+            "IDFatoKanbanCard": "ID Card Kanban",
+            "CNPJ": "CNPJ",
+            "CPF": "CPF",
+            "OBS": "Observação",
+        }
+        if chave in mapa:
+            return mapa[chave]
+        txt = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(chave or "")).replace("_", " ").strip()
+        return txt or str(chave)
+
+    def _campos_de_mapping(row, ignorar=None):
+        ignorar = set(ignorar or [])
+        if not row:
+            return []
+        campos = []
+        for chave, valor in row.items():
+            if chave in ignorar:
+                continue
+            campos.append(SimpleNamespace(
+                chave=chave,
+                rotulo=_rotulo_campo(chave),
+                valor=_fmt_valor(valor),
+                bruto=valor,
+            ))
+        return campos
+
     sql_contrato = text(r"""
         SELECT
-            c.IDFatoControleContratosEuromidia,
+            c.*,
             c.IDFatoControleContratosEuromidia AS IDFatoControleContratos,
-            c.DataAtualizacao,
-            c.Referencia,
-            c.NumeroContrato,
-            c.NumeroPrevia,
-            c.CNPJ,
-            c.DataAssinaturaRenovacao,
-            c.IDTrimestre,
-            c.DataLancamento,
-            c.RazaoSocial,
-            c.CPF,
-            c.MarcaExibida,
-            c.Vendedor,
-            c.TipoDocumento,
-            c.Origem,
-            c.SDR,
-            c.Agencia,
-            c.CnpjAgencia,
-            c.Bureau,
-            c.CnpjBureau,
-            c.Intermediario,
-            c.CnpjIntermediario,
-            c.QuantidadePontos,
-            c.QuantidadeFaces,
             c.QuantidadePontos AS QtdeCodPonto,
             c.QuantidadeFaces  AS QtdeCodFace,
-            c.TotalBrutoContrato,
-            c.TotalLiquidoContratoAGBRCTACORDO,
-            c.TotalLiquidoContratoAGBRVENDGERCOOR,
-            c.TotalValorMensalAgencia,
-            c.TotalValorBureauMensal,
-            c.TotalValorCartaAcordoMensal,
-            c.TotalValorOutrasComissoes,
-            c.TotalFaturamentoLiquidoMensal,
-            c.TotalFaturamentoLiquidoMensal AS TotalFaturamentoLiquidoMensalFinal,
-            c.TotalPercentualAgencia,
-            c.TotalPercentualBureau,
-            c.TotalPercentualCartaAcordo,
-            c.TotalPercentualComissaoVendedor,
-            c.TotalPercentualComissaoCoordenacao,
-            c.TotalValorVendedor,
-            c.ValorVendedorTotal,
-            c.IDEmpresa,
-            c.IDCategoriaMarca,
-            cidade.CidadeExibicao
+            cidade.CidadeExibicao,
+            emp.RazaoSocial AS RazaoSocialEmpresa,
+            emp.NomeFantasia AS NomeFantasiaEmpresa
         FROM [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+            ON emp.IDEmpresa = c.IDEmpresa
         OUTER APPLY (
             SELECT TOP (1)
                 i.CidadeExibicao
@@ -7265,6 +7293,8 @@ def contrato_detalhe(id_fato_controle_contratos: int):
 
     if not contrato:
         abort(404)
+
+    contrato = dict(contrato)
 
     sql_itens = text(r"""
     ;WITH ItensContrato AS (
@@ -7326,59 +7356,11 @@ def contrato_detalhe(id_fato_controle_contratos: int):
         GROUP BY ch.CodPonto, ch.CodFace
     )
     SELECT
-        i.IDFatoControleContratosItensEuromidia,
-        i.IDFatoControleContratosItens,
-        i.IDFatoControleContratoEuromidia,
-        i.DataAtualizacao,
-        i.Referencia,
-        i.NumeroContrato,
-        i.NumeroPrevia,
-        i.CNPJ,
-        i.DataLancamento,
-        i.DataAssinaturaRenovacao,
-        i.IDTrimestre,
+        i.*,
+        i.IDFatoControleContratosItensEuromidia AS IDFatoControleContratosItens,
         i.DataInicioPrevisto_dt  AS DataInicioPrevisto,
         i.DataTerminoPrevisto_dt AS DataTerminoPrevisto,
         i.DataCancelamento_dt    AS DataCancelamento,
-        i.CidadeExibicao,
-        i.Tipo,
-        i.Origem,
-        i.TipoDocumento,
-        i.RazaoSocial,
-        i.CPF,
-        i.MarcaExibida,
-        i.Vendedor,
-        i.SDR,
-        i.Cota,
-        i.CodPonto,
-        i.CodFace,
-        i.TexmpoExposicao AS TempoExposicaoDias,
-        i.NumeroParcelas  AS QuantidadeParcelas,
-        i.FaturamentoBrutoMensal,
-        i.ValorPermuta,
-        i.FaturamentoLiquidoPermuta,
-        i.TotalBrutoContrato,
-        i.TotalLiquidoContratoAGBRCTACORDO,
-        i.TotalLiquidoContratoAGBRVENDGERCOOR,
-        i.ValorMensalAgencia,
-        i.ValorBureauMensal,
-        i.ValorCartaAcordoMensal AS ValorAcordoMensal,
-        i.ValorOutrasComissoes   AS OutrasComissoes,
-        i.FaturamentoLiquidoMensal,
-        i.FaturamentoLiquidoFinalMensal AS FaturamentoLiquidoMensalFinal,
-        i.ValorVendedor,
-        i.ValorVendedorTotal,
-        i.ValorCoordenador,
-        i.ValorCoordenadorTotal,
-        i.ValorGerencia,
-        i.ValorGerenciaTotal,
-        i.PercentualAgencia,
-        i.PercentualBureau,
-        i.PercentualCartaAcordo,
-        i.PercentualComissaoVendedor,
-        i.PercentualComissaoCoordenacao,
-        i.PercentualComissaoGerencia,
-        i.Status,
         ISNULL(ai.QtdeAtendimentos, 0) AS QtdeAtendimentos,
         ai.UltimoAtendimentoEm,
         ISNULL(ci.QtdeCheckins, 0) AS QtdeCheckins,
@@ -7403,10 +7385,202 @@ def contrato_detalhe(id_fato_controle_contratos: int):
         i.IDFatoControleContratosItensEuromidia ASC
     """)
 
-    itens = db.session.execute(
-        sql_itens,
-        {"id": id_fato_controle_contratos}
-    ).mappings().all()
+    itens_rows = db.session.execute(sql_itens, {"id": id_fato_controle_contratos}).mappings().all()
+    itens = [dict(r) for r in itens_rows]
+    itens_por_id = {}
+    for it in itens:
+        it["HistoricoNegociacao"] = []
+        it["PrecosPraticados"] = []
+        it["CheckinsDetalhe"] = []
+        it["SolicitacoesItem"] = []
+        it["_campos"] = []
+        itens_por_id[it.get("IDFatoControleContratosItensEuromidia")] = it
+
+    solicitacao_contrato = None
+    solicitacao_contrato_campos = []
+    solicitacao_itens = []
+    empresa_principal = None
+    empresa_principal_campos = []
+    empresas_relacionadas = []
+
+    try:
+        sql_solicitacao = text(r"""
+            SELECT TOP (1) *
+            FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+            WHERE IDFatoControleContratosEuromidia = :id
+            ORDER BY COALESCE(DataAtualizacao, DataCriacao, DataLancamento) DESC,
+                     IDFatoSolicitacaoContratoEuromidia DESC
+        """)
+        row = db.session.execute(sql_solicitacao, {"id": id_fato_controle_contratos}).mappings().first()
+        if row:
+            solicitacao_contrato = dict(row)
+            solicitacao_contrato_campos = _campos_de_mapping(solicitacao_contrato)
+
+        sql_solicitacao_itens = text(r"""
+            SELECT *
+            FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
+            WHERE IDFatoControleContratosEuromidia = :id
+            ORDER BY CodPonto ASC, CodFace ASC, IDFatoSolicitacaoContratoItemEuromidia ASC
+        """)
+        rows = db.session.execute(sql_solicitacao_itens, {"id": id_fato_controle_contratos}).mappings().all()
+        for row in rows:
+            item = dict(row)
+            item["_campos"] = _campos_de_mapping(item)
+            solicitacao_itens.append(SimpleNamespace(**item))
+    except Exception:
+        solicitacao_contrato = None
+        solicitacao_contrato_campos = []
+        solicitacao_itens = []
+
+    try:
+        id_empresa_principal = contrato.get("IDEmpresa") or (solicitacao_contrato or {}).get("IDEmpresa")
+        if id_empresa_principal:
+            sql_empresa = text(r"""
+                SELECT TOP (1) *
+                FROM [Integracao].[Silver].[DimEmpresas]
+                WHERE IDEmpresa = :id_empresa
+            """)
+            row = db.session.execute(sql_empresa, {"id_empresa": int(id_empresa_principal)}).mappings().first()
+            if row:
+                empresa_principal = dict(row)
+                empresa_principal_campos = _campos_de_mapping(empresa_principal)
+
+        ids_empresas = set()
+        for v in [contrato.get("IDEmpresa"), (solicitacao_contrato or {}).get("IDEmpresa")]:
+            if v not in (None, "", 0):
+                try:
+                    ids_empresas.add(int(v))
+                except Exception:
+                    pass
+        for it in itens:
+            v = it.get("IDEmpresaAgencia")
+            if v not in (None, "", 0):
+                try:
+                    ids_empresas.add(int(v))
+                except Exception:
+                    pass
+        if ids_empresas:
+            ids_sql = ",".join(str(int(v)) for v in sorted(ids_empresas))
+            sql_empresas = text(f"""
+                SELECT *
+                FROM [Integracao].[Silver].[DimEmpresas]
+                WHERE IDEmpresa IN ({ids_sql})
+                ORDER BY IDEmpresa ASC
+            """)
+            rows = db.session.execute(sql_empresas).mappings().all()
+            for row in rows:
+                emp = dict(row)
+                emp["_campos"] = _campos_de_mapping(emp)
+                empresas_relacionadas.append(SimpleNamespace(**emp))
+    except Exception:
+        empresa_principal = None
+        empresa_principal_campos = []
+        empresas_relacionadas = []
+
+    try:
+        sql_negociacoes = text(r"""
+            SELECT
+                n.*,
+                fp.CodPonto AS CodPontoFace,
+                fp.CodFace AS CodFaceFace
+            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] n
+            LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] fp
+                ON fp.IDDimFacesPaineis = n.IDDimFacesPaineis
+            WHERE n.IDFatoControleContratosEuromidia = :id
+            ORDER BY COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, GETDATE()) DESC,
+                     n.IDFatoKanbanNegociacaoPreco DESC
+        """)
+        neg_rows = db.session.execute(sql_negociacoes, {"id": id_fato_controle_contratos}).mappings().all()
+        itens_por_face_id = {}
+        itens_por_face_codigo = {}
+        for it in itens:
+            id_face = it.get("IDDimFacesPaineis")
+            if id_face not in (None, ""):
+                itens_por_face_id[int(id_face)] = it
+            chave = (str(it.get("CodPonto") or "").strip(), str(it.get("CodFace") or "").strip().upper())
+            itens_por_face_codigo[chave] = it
+
+        for row in neg_rows:
+            neg = dict(row)
+            alvo = None
+            id_face = neg.get("IDDimFacesPaineis")
+            if id_face not in (None, ""):
+                try:
+                    alvo = itens_por_face_id.get(int(id_face))
+                except Exception:
+                    alvo = None
+            if alvo is None:
+                chave = (str(neg.get("CodPontoFace") or "").strip(), str(neg.get("CodFaceFace") or "").strip().upper())
+                alvo = itens_por_face_codigo.get(chave)
+            neg["_campos"] = _campos_de_mapping(neg)
+            if alvo is not None:
+                alvo["HistoricoNegociacao"].append(SimpleNamespace(**neg))
+    except Exception:
+        pass
+
+    try:
+        sql_precos = text(r"""
+            SELECT *
+            FROM [Integracao].[Silver].[FatoContratoItemPrecoPraticadoEuromidia]
+            WHERE IDFatoControleContratosEuromidia = :id
+            ORDER BY COALESCE(DataAprovacaoContrato, DataCadastro, DataInicio) DESC,
+                     IDFatoContratoItemPrecoPraticadoEuromidia DESC
+        """)
+        preco_rows = db.session.execute(sql_precos, {"id": id_fato_controle_contratos}).mappings().all()
+        for row in preco_rows:
+            preco = dict(row)
+            alvo = None
+            item_id = preco.get("IDFatoControleContratosItensEuromidia")
+            if item_id in itens_por_id:
+                alvo = itens_por_id[item_id]
+            elif preco.get("IDDimFacesPaineis") not in (None, ""):
+                for it in itens:
+                    if it.get("IDDimFacesPaineis") == preco.get("IDDimFacesPaineis"):
+                        alvo = it
+                        break
+            preco["_campos"] = _campos_de_mapping(preco)
+            if alvo is not None:
+                alvo["PrecosPraticados"].append(SimpleNamespace(**preco))
+    except Exception:
+        pass
+
+    try:
+        sql_checkins = text(r"""
+            SELECT *
+            FROM [Integracao].[Silver].[DimCheckinHistorico]
+            WHERE IDFatoControleContratosEuromidia = :id
+            ORDER BY COALESCE(DataChekin, DataAtualizacao) DESC,
+                     IDDimCheckinHistorico DESC
+        """)
+        ck_rows = db.session.execute(sql_checkins, {"id": id_fato_controle_contratos}).mappings().all()
+        itens_por_face_codigo = {}
+        for it in itens:
+            chave = (str(it.get("CodPonto") or "").strip(), str(it.get("CodFace") or "").strip().upper())
+            itens_por_face_codigo[chave] = it
+        for row in ck_rows:
+            ck = dict(row)
+            chave = (str(ck.get("CodPonto") or "").strip(), str(ck.get("CodFace") or "").strip().upper())
+            alvo = itens_por_face_codigo.get(chave)
+            ck["TemMidiaUpload"] = bool(ck.get("UrlImagemUpload"))
+            ck["TemMidiaGerada"] = bool(ck.get("UrlImagemGerada"))
+            ck["_campos"] = _campos_de_mapping(ck)
+            if alvo is not None:
+                alvo["CheckinsDetalhe"].append(SimpleNamespace(**ck))
+    except Exception:
+        pass
+
+    try:
+        solicitacao_por_face = {}
+        for sit in solicitacao_itens:
+            chave = (str(getattr(sit, "CodPonto", "") or "").strip(), str(getattr(sit, "CodFace", "") or "").strip().upper())
+            solicitacao_por_face.setdefault(chave, []).append(sit)
+        for it in itens:
+            chave = (str(it.get("CodPonto") or "").strip(), str(it.get("CodFace") or "").strip().upper())
+            it["SolicitacoesItem"] = list(solicitacao_por_face.get(chave, []))
+            it["_campos"] = _campos_de_mapping(it, ignorar={"HistoricoNegociacao", "PrecosPraticados", "CheckinsDetalhe", "SolicitacoesItem", "_campos"})
+    except Exception:
+        for it in itens:
+            it["_campos"] = _campos_de_mapping(it, ignorar={"HistoricoNegociacao", "PrecosPraticados", "CheckinsDetalhe", "SolicitacoesItem", "_campos"})
 
     resumo_atendimentos = {
         "Total": 0,
@@ -7620,7 +7794,7 @@ def contrato_detalhe(id_fato_controle_contratos: int):
                 ORDER BY tl.DataEvento DESC
             """)
             tl_rows = db.session.execute(sql_timeline, {"id_contrato": id_fato_controle_contratos}).mappings().all()
-            for row in tl_rows[:100]:
+            for row in tl_rows[:500]:
                 extra = None
                 if row.get("CodPonto") or row.get("CodFace"):
                     extra = SimpleNamespace(CodPonto=row.get("CodPonto"), CodFace=row.get("CodFace"))
@@ -7629,7 +7803,7 @@ def contrato_detalhe(id_fato_controle_contratos: int):
                 timeline_atendimentos.append(SimpleNamespace(**evento))
         else:
             sql_timeline_checkin = text(r"""
-                SELECT TOP (100)
+                SELECT TOP (500)
                     'CHECKIN' AS TipoEvento,
                     ch.DataChekin AS DataEvento,
                     CAST(NULL AS int) AS IDFatoKanbanCard,
@@ -7653,15 +7827,50 @@ def contrato_detalhe(id_fato_controle_contratos: int):
         cards_relacionados = []
         timeline_atendimentos = []
 
+    timeline_total = len(timeline_atendimentos)
+    timeline_total_pages = max((timeline_total + timeline_per_page - 1) // timeline_per_page, 1)
+    if timeline_page > timeline_total_pages:
+        timeline_page = timeline_total_pages
+
+    timeline_inicio_idx = (timeline_page - 1) * timeline_per_page
+    timeline_fim_idx = timeline_inicio_idx + timeline_per_page
+    timeline_atendimentos = timeline_atendimentos[timeline_inicio_idx:timeline_fim_idx]
+
+    timeline_paginacao = SimpleNamespace(
+        page=timeline_page,
+        per_page=timeline_per_page,
+        total=timeline_total,
+        total_pages=timeline_total_pages,
+        has_prev=timeline_page > 1,
+        has_next=timeline_page < timeline_total_pages,
+        prev_page=(timeline_page - 1 if timeline_page > 1 else 1),
+        next_page=(timeline_page + 1 if timeline_page < timeline_total_pages else timeline_total_pages),
+        inicio=(timeline_inicio_idx + 1 if timeline_total > 0 else 0),
+        fim=(min(timeline_fim_idx, timeline_total) if timeline_total > 0 else 0),
+    )
+
+    contrato_campos = _campos_de_mapping(contrato)
+    contrato_ns = SimpleNamespace(**contrato)
+    itens_ns = [SimpleNamespace(**it) for it in itens]
+    solicitacao_ns = SimpleNamespace(**solicitacao_contrato) if solicitacao_contrato else None
+    empresa_principal_ns = SimpleNamespace(**empresa_principal) if empresa_principal else None
+
     return render_template(
         "euromidia/contrato_detalhe.html",
-        contrato=contrato,
-        itens=itens,
+        contrato=contrato_ns,
+        contrato_campos=contrato_campos,
+        itens=itens_ns,
         resumo_atendimentos=SimpleNamespace(**resumo_atendimentos),
         cards_relacionados=cards_relacionados,
         timeline_atendimentos=timeline_atendimentos,
+        timeline_paginacao=timeline_paginacao,
+        solicitacao_contrato=solicitacao_ns,
+        solicitacao_contrato_campos=solicitacao_contrato_campos,
+        solicitacao_itens=solicitacao_itens,
+        empresa_principal=empresa_principal_ns,
+        empresa_principal_campos=empresa_principal_campos,
+        empresas_relacionadas=empresas_relacionadas,
     )
-
 
 
 def _sql_bool(v):

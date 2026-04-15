@@ -48,6 +48,7 @@ MAPA_TIPO_CLIENTE_DESCONTO_PADRAO = {
     1: "Planejador de Mídia",
     2: "Cliente Direto",
     3: "Agência de Publicidade",
+    4: "Bureau",
 }
 
 
@@ -87,6 +88,8 @@ TABELA_SOLICITACAO_CONTRATO_ITEM = "[Integracao].[Silver].[FatoSolicitacaoContra
 TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
 
 ID_TAG_CONTRATO_EM_AVALIACAO = 14
+ID_TAG_PLANO_MIDIA = 15
+FASES_COM_TAG_PLANO_MIDIA = {1, 2, 3, 4}
 NOME_TAG_CONTRATO_EM_AVALIACAO = "Contrato em Avaliação"
 NOME_TAG_TIPO_CONTRATO_NOVO = "Novo Contrato"
 NOME_TAG_TIPO_CONTRATO_ADITIVO = "Aditivo"
@@ -1813,20 +1816,20 @@ def _sincronizar_tipo_contrato_card(
 ) -> dict[str, object]:
     """
     Regras:
-    - ADITIVO => BitAditivo=1, BitContratoNovo=0, tag Aditivo ativa, tag Novo Contrato removida
-    - NOVO_CONTRATO => BitAditivo=0, BitContratoNovo=1, tag Novo Contrato ativa, tag Aditivo removida
+    - ADITIVO => BitAditivo=1, BitContratoNovo=0
+    - NOVO_CONTRATO => BitAditivo=0, BitContratoNovo=1
     - quando o fluxo estiver em NOVO_CONTRATO, eu limpo o vínculo persistido de contrato/ponto/face
     - quando o fluxo estiver em ADITIVO, eu persisto o contrato/ponto/face no card
+    - as tags de tipo de contrato (Aditivo / Novo Contrato) só devem aparecer quando o card estiver na fase 4
     """
     tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
         raise ValueError("Tipo de contrato inválido.")
 
-    tag_desejada = _obter_tag_tipo_contrato(id_kanban, tipo_norm)
-    tag_oposta = _obter_tag_tipo_contrato(
-        id_kanban,
-        TIPO_SOLICITACAO_NOVO if tipo_norm == TIPO_SOLICITACAO_ADITIVO else TIPO_SOLICITACAO_ADITIVO,
-    )
+    tag_novo = _obter_tag_tipo_contrato(id_kanban, TIPO_SOLICITACAO_NOVO)
+    tag_aditivo = _obter_tag_tipo_contrato(id_kanban, TIPO_SOLICITACAO_ADITIVO)
+    tag_desejada = tag_aditivo if tipo_norm == TIPO_SOLICITACAO_ADITIVO else tag_novo
+    deve_exibir_tag_tipo = aplicar_tags and int(id_fase_atual or 0) == 4
 
     campos_update: list[str] = []
     parametros_update: dict[str, object] = {"id_card": int(id_card)}
@@ -1866,22 +1869,26 @@ def _sincronizar_tipo_contrato_card(
     tags_adicionadas: list[int] = []
     tags_removidas: list[int] = []
 
-    if tag_oposta and int(tag_oposta.get("IDDimKanbanTag") or 0) > 0:
+    for tag in (tag_novo, tag_aditivo):
+        id_tag = int(tag.get("IDDimKanbanTag") or 0) if tag else 0
+        if id_tag <= 0:
+            continue
         if _remover_tag_do_card(
             id_card=int(id_card),
-            id_tag=int(tag_oposta.get("IDDimKanbanTag") or 0),
+            id_tag=id_tag,
             id_usuario=int(id_usuario),
         ):
-            tags_removidas.append(int(tag_oposta.get("IDDimKanbanTag") or 0))
+            tags_removidas.append(id_tag)
 
-    if aplicar_tags and tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
+    if deve_exibir_tag_tipo and tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
+        id_tag_desejada = int(tag_desejada.get("IDDimKanbanTag") or 0)
         if _aplicar_tag_no_card(
             id_card=int(id_card),
-            id_tag=int(tag_desejada.get("IDDimKanbanTag") or 0),
+            id_tag=id_tag_desejada,
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_empresa_proprietaria),
         ):
-            tags_adicionadas.append(int(tag_desejada.get("IDDimKanbanTag") or 0))
+            tags_adicionadas.append(id_tag_desejada)
 
     return {
         "tipo_contrato": tipo_norm,
@@ -1889,8 +1896,9 @@ def _sincronizar_tipo_contrato_card(
         "bit_contrato_novo": 1 if tipo_norm == TIPO_SOLICITACAO_NOVO else 0,
         "tags_adicionadas": tags_adicionadas,
         "tags_removidas": tags_removidas,
-        "id_tag_ativa": int(tag_desejada.get("IDDimKanbanTag") or 0) if tag_desejada else None,
+        "id_tag_ativa": int(tag_desejada.get("IDDimKanbanTag") or 0) if (deve_exibir_tag_tipo and tag_desejada) else None,
         "id_fase_atual": int(id_fase_atual or 0) or None,
+        "deve_exibir_tag_tipo": bool(deve_exibir_tag_tipo),
         "id_contrato_existente": int(id_contrato_para_persistir) if id_contrato_para_persistir not in (None, "", 0) else None,
         "cod_ponto_contrato": str(cod_ponto_para_persistir).strip() if cod_ponto_para_persistir not in (None, "") else None,
         "cod_face_contrato": str(cod_face_para_persistir).strip().upper() if cod_face_para_persistir not in (None, "") else None,
@@ -3137,6 +3145,9 @@ def _executar_movimento_card_core(
     if not fase_destino:
         raise ValueError("Fase de destino não encontrada.")
 
+    if int(id_fase_para) == 4 and not _obter_id_empresa_relacionada_card(row):
+        raise ValueError("Para mover o card para a fase 4, informe a empresa primeiro.")
+
     snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
     has_ordem = _coluna_existe(TABELA_CARD, "OrdemNaFase")
@@ -3397,6 +3408,13 @@ def _executar_movimento_card_core(
             id_empresa_proprietaria=int(id_emp),
         )
 
+    sincronizacao_tag_plano_midia = _sincronizar_tag_plano_midia_por_fase(
+        id_card=int(id_card),
+        id_fase_atual=int(id_fase_para),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_emp),
+    )
+
     sincronizacao_solicitacao_fase = None
     snapshot_preco_praticado = None
 
@@ -3475,6 +3493,7 @@ def _executar_movimento_card_core(
         "ordem_na_fase": proxima_ordem if has_ordem else None,
         "sincronizacao_solicitacao_fase": sincronizacao_solicitacao_fase,
         "snapshot_preco_praticado": snapshot_preco_praticado,
+        "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
     }
 
 
@@ -3499,6 +3518,7 @@ def _finalizar_pos_movimento_card(
     ordem_na_fase = resultado_core.get("ordem_na_fase")
     sincronizacao_solicitacao_fase = resultado_core.get("sincronizacao_solicitacao_fase")
     snapshot_preco_praticado = resultado_core.get("snapshot_preco_praticado")
+    sincronizacao_tag_plano_midia = resultado_core.get("sincronizacao_tag_plano_midia")
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
     detalhe = _obter_card_detalhe_payload(id_card)
@@ -3530,6 +3550,7 @@ def _finalizar_pos_movimento_card(
         "notas": detalhe.get("notas", []),
         "snapshot_solicitacao": sincronizacao_solicitacao_fase,
         "snapshot_preco_praticado": snapshot_preco_praticado,
+        "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
     }
 
 
@@ -5260,6 +5281,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
     bit_solicitacao_ativa: int,
     coluna_atividade_item: str | None,
     tipo_norm: str,
+    id_tipo_cliente: int | None = None,
     cod_ponto_contrato: object = None,
     cod_face_contrato: object = None,
 ) -> list[dict[str, Any]]:
@@ -5273,6 +5295,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
         return valor_int if valor_int > 0 else None
 
     descricao_limpa = (descricao_card or "").strip() or None
+    id_tipo_cliente_int = _int_positivo_ou_none_local(id_tipo_cliente)
     itens_resultado: list[dict[str, Any]] = []
 
     if tipo_norm == TIPO_SOLICITACAO_NOVO:
@@ -5390,7 +5413,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
                 "EmpresaEuro": None,
                 "CnpjExibibora": None,
                 "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
-                "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
+                "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 2 else None),
                 "CPF": (contrato_row or {}).get("CPF"),
                 "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
                 "Vendedor": (contrato_row or {}).get("Vendedor"),
@@ -5566,6 +5589,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     descricao_card: str | None = None,
     contrato_existente: dict[str, Any] | None = None,
     forcar_solicitacao_ativa: bool | None = None,
+    id_tipo_cliente: int | None = None,
 ) -> dict[str, Any]:
     tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
@@ -5768,6 +5792,14 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             {"id_empresa": int(id_empresa_relacionada)},
         ).mappings().first()
 
+    if id_tipo_cliente in (None, "", 0):
+        detalhe_card_snapshot = _obter_card_detalhe_payload(int(id_card))
+        card_snapshot = detalhe_card_snapshot.get("card") if isinstance(detalhe_card_snapshot, dict) else {}
+        try:
+            id_tipo_cliente = int(card_snapshot.get("IDDimTipoCliente") or card_snapshot.get("IDDimKanbanTipoClienteDesconto") or 0) or None
+        except Exception:
+            id_tipo_cliente = None
+
     contrato_row = dict(contrato_existente) if isinstance(contrato_existente, dict) else None
     if contrato_row is None and id_contrato_existente not in (None, "", 0):
         sql_contrato = text(
@@ -5820,12 +5852,19 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         ultima_solicitacao = _obter_ultima_solicitacao_contrato_por_card(int(id_card))
         id_solicitacao_existente = int(ultima_solicitacao.get("IDFatoSolicitacaoContratoEuromidia") or 0) if ultima_solicitacao else 0
 
+    id_tipo_cliente_int = _int_positivo_ou_none(id_tipo_cliente)
+    id_empresa_direto = _int_positivo_ou_none(id_empresa_relacionada) if id_tipo_cliente_int == 2 else None
+    id_empresa_agencia_snapshot = _int_positivo_ou_none(id_empresa_relacionada) if id_tipo_cliente_int == 3 else None
+    id_empresa_bureau_snapshot = _int_positivo_ou_none(id_empresa_relacionada) if id_tipo_cliente_int == 4 else None
+
     valores_solicitacao = {
         "IDFatoKanbanCard": int(id_card),
         "IDFatoControleContratosEuromidia": _int_positivo_ou_none(id_contrato_existente),
         "IDDimStatusContratos": _int_positivo_ou_none(_obter_id_status_contrato_em_avaliacao()),
         "IDDimUsuariosCriacao": _int_positivo_ou_none(id_usuario),
-        "IDEmpresa": _int_positivo_ou_none(id_empresa_relacionada),
+        "IDEmpresa": id_empresa_direto,
+        "IDEmpresaAgencia": id_empresa_agencia_snapshot,
+        "IDEmpresaBureau": id_empresa_bureau_snapshot,
         "IDEmpresaProprietaria": _int_positivo_ou_none(id_empresa_proprietaria),
         "TipoSolicitacao": tipo_norm,
         "Referencia": (contrato_row or {}).get("Referencia"),
@@ -5835,17 +5874,17 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "DataAssinaturaRenovacao": _para_data_sql_ou_none((contrato_row or {}).get("DataAssinaturaRenovacao")),
         "IDTrimestre": (contrato_row or {}).get("IDTrimestre"),
         "DataLancamento": _para_data_sql_ou_none((contrato_row or {}).get("DataLancamento")),
-        "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
+        "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 2 else None),
         "CPF": (contrato_row or {}).get("CPF"),
         "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
         "Vendedor": (contrato_row or {}).get("Vendedor"),
         "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
         "Origem": (contrato_row or {}).get("Origem"),
         "SDR": (contrato_row or {}).get("SDR"),
-        "Agencia": (contrato_row or {}).get("Agencia"),
-        "CnpjAgencia": (contrato_row or {}).get("CnpjAgencia"),
-        "Bureau": (contrato_row or {}).get("Bureau"),
-        "CnpjBureau": (contrato_row or {}).get("CnpjBureau"),
+        "Agencia": (contrato_row or {}).get("Agencia") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 3 else None),
+        "CnpjAgencia": (contrato_row or {}).get("CnpjAgencia") or ((empresa or {}).get("CNPJ") if id_tipo_cliente_int == 3 else None),
+        "Bureau": (contrato_row or {}).get("Bureau") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 4 else None),
+        "CnpjBureau": (contrato_row or {}).get("CnpjBureau") or ((empresa or {}).get("CNPJ") if id_tipo_cliente_int == 4 else None),
         "Intermediario": (contrato_row or {}).get("Intermediario"),
         "CnpjIntermediario": (contrato_row or {}).get("CnpjIntermediario"),
         "QuantidadePontos": (contrato_row or {}).get("QuantidadePontos"),
@@ -5883,7 +5922,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
 
     campos_header_comparacao = [
         "IDFatoKanbanCard", "IDFatoControleContratosEuromidia", "IDDimStatusContratos",
-        "IDEmpresa", "IDEmpresaProprietaria", "TipoSolicitacao", "Referencia",
+        "IDEmpresa", "IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaProprietaria", "TipoSolicitacao", "Referencia",
         "NumeroContrato", "NumeroPrevia", "CNPJ", "DataAssinaturaRenovacao", "IDTrimestre",
         "DataLancamento", "RazaoSocial", "CPF", "MarcaExibida", "Vendedor", "TipoDocumento",
         "Origem", "SDR", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario",
@@ -5943,6 +5982,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         bit_solicitacao_ativa=bit_solicitacao_ativa,
         coluna_atividade_item=coluna_atividade_item,
         tipo_norm=tipo_norm,
+        id_tipo_cliente=id_tipo_cliente,
         cod_ponto_contrato=cod_ponto_contrato,
         cod_face_contrato=cod_face_contrato,
     )
@@ -6956,6 +6996,28 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         else "CAST(NULL AS nvarchar(200)) AS Email,"
     )
 
+    select_id_tipo_cliente_card = (
+        "c.IDDimTipoCliente AS IDDimTipoCliente,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoCliente")
+        else (
+            "c.IDDimKanbanTipoClienteDesconto AS IDDimTipoCliente,"
+            if _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto")
+            else "CAST(NULL AS int) AS IDDimTipoCliente,"
+        )
+    )
+
+    select_id_dim_cnaes = (
+        "c.IDDimCnaes AS IDDimCnaes,"
+        if _coluna_existe(TABELA_CARD, "IDDimCnaes")
+        else "CAST(NULL AS int) AS IDDimCnaes,"
+    )
+
+    select_nome_empresa = (
+        "c.NomeEmpresa AS NomeEmpresa,"
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa")
+        else "CAST(NULL AS nvarchar(200)) AS NomeEmpresa,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -6980,6 +7042,9 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             {select_marca}
             {select_telefone}
             {select_email}
+            {select_id_tipo_cliente_card}
+            {select_id_dim_cnaes}
+            {select_nome_empresa}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             k.BitPrincipal,
@@ -9726,6 +9791,28 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         else "CAST(NULL AS nvarchar(200)) AS Email,"
     )
 
+    select_id_tipo_cliente_card = (
+        "c.IDDimTipoCliente AS IDDimTipoCliente,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoCliente")
+        else (
+            "c.IDDimKanbanTipoClienteDesconto AS IDDimTipoCliente,"
+            if _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto")
+            else "CAST(NULL AS int) AS IDDimTipoCliente,"
+        )
+    )
+
+    select_id_dim_cnaes = (
+        "c.IDDimCnaes AS IDDimCnaes,"
+        if _coluna_existe(TABELA_CARD, "IDDimCnaes")
+        else "CAST(NULL AS int) AS IDDimCnaes,"
+    )
+
+    select_nome_empresa = (
+        "c.NomeEmpresa AS NomeEmpresa,"
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa")
+        else "CAST(NULL AS nvarchar(200)) AS NomeEmpresa,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -9752,6 +9839,9 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             {select_marca}
             {select_telefone}
             {select_email}
+            {select_id_tipo_cliente_card}
+            {select_id_dim_cnaes}
+            {select_nome_empresa}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             {_sql_select_nome_usuario_relacionado_card('usuario')},
@@ -9780,6 +9870,20 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
     card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
     card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
+
+    if not str(card_dict.get("NomeEmpresa") or "").strip():
+        card_dict["NomeEmpresa"] = str(card_dict.get("EmpresaRazaoSocial") or "").strip() or None
+
+    cnae_card = _obter_cnae_por_id(card_dict.get("IDDimCnaes"))
+    if cnae_card:
+        card_dict["SegmentoClasse"] = cnae_card.get("Classe")
+        card_dict["SegmentoDescricao"] = cnae_card.get("Descricao")
+        card_dict["SegmentoSetor"] = cnae_card.get("Setor")
+    else:
+        card_dict["SegmentoClasse"] = None
+        card_dict["SegmentoDescricao"] = None
+        card_dict["SegmentoSetor"] = None
+
     card_dict = _aplicar_tipo_cliente_desconto_no_card_dict(card_dict)
     card_dict = _aplicar_origem_atendimento_no_card_dict(card_dict)
 
@@ -10976,6 +11080,84 @@ def api_empresas_buscar():
     _cache_json_set(chave, payload, TIMEOUT_CACHE_MEDIO)
     return jsonify(payload)
 
+
+
+
+
+@kanban_bp.route("/api/cnaes/buscar", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_cnaes_buscar():
+    _assert_login()
+
+    q = (request.args.get("q") or "").strip()
+
+    if not q:
+        sql = text(f"""
+            SELECT TOP 80
+                IDDimCnaes,
+                cnaepadrao,
+                Descricao,
+                Classe,
+                Setor,
+                MacroSetor,
+                SubClasse
+            FROM {TABELA_CNAES}
+            ORDER BY
+                CASE WHEN LTRIM(RTRIM(ISNULL(Classe, ''))) = '' THEN 1 ELSE 0 END,
+                Classe ASC,
+                Descricao ASC;
+        """)
+        rows = db.session.execute(sql).mappings().all()
+        return jsonify({"ok": True, "cnaes": _rows_para_dicts(rows)})
+
+    if len(q) < 2:
+        return jsonify({"ok": True, "cnaes": []})
+
+    chave = _chave_cache_json("kanban:api:cnaes:buscar", q.lower())
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return jsonify(em_cache)
+
+    sql = text(f"""
+        SELECT TOP 80
+            IDDimCnaes,
+            cnaepadrao,
+            Descricao,
+            Classe,
+            Setor,
+            MacroSetor,
+            SubClasse
+        FROM {TABELA_CNAES}
+        WHERE
+            ISNULL(Classe, '') LIKE :q_like
+            OR ISNULL(Descricao, '') LIKE :q_like
+            OR ISNULL(Setor, '') LIKE :q_like
+            OR ISNULL(SubClasse, '') LIKE :q_like
+            OR ISNULL(cnaepadrao, '') LIKE :q_like
+        ORDER BY
+            CASE
+                WHEN ISNULL(Classe, '') LIKE :q_inicio THEN 0
+                WHEN ISNULL(Descricao, '') LIKE :q_inicio THEN 1
+                WHEN ISNULL(Setor, '') LIKE :q_inicio THEN 2
+                WHEN ISNULL(cnaepadrao, '') LIKE :q_inicio THEN 3
+                ELSE 4
+            END,
+            Classe ASC,
+            Descricao ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "q_like": f"%{q}%",
+            "q_inicio": f"{q}%",
+        },
+    ).mappings().all()
+
+    payload = {"ok": True, "cnaes": _rows_para_dicts(rows)}
+    _cache_json_set(chave, payload, TIMEOUT_CACHE_MEDIO)
+    return jsonify(payload)
 
 
 
@@ -19014,6 +19196,9 @@ def _obter_tipos_cliente_desconto(*, incluir_inativos: bool = False) -> list[dic
         if not nome_tipo:
             continue
 
+        if id_tipo not in {2, 3, 4}:
+            continue
+
         resultado.append(
             {
                 "IDDimKanbanTipoClienteDesconto": id_tipo,
@@ -19219,7 +19404,69 @@ def _montar_bits_tipo_cliente_desconto(id_tipo_cliente_desconto: Any) -> dict[st
     }
 
 
+def _nome_coluna_tipo_cliente_card() -> str | None:
+    for nome_coluna in ("IDDimTipoCliente", "IDDimKanbanTipoClienteDesconto"):
+        if _coluna_existe(TABELA_CARD, nome_coluna):
+            return nome_coluna
+    return None
 
+
+def _obter_cnae_por_id(id_dim_cnaes: Any) -> dict[str, Any] | None:
+    try:
+        id_cnae = int(id_dim_cnaes or 0)
+    except Exception:
+        id_cnae = 0
+
+    if id_cnae <= 0:
+        return None
+
+    sql = text(f"""
+        SELECT TOP (1)
+            IDDimCnaes,
+            cnaepadrao,
+            Descricao,
+            Classe,
+            Setor,
+            MacroSetor,
+            SubClasse
+        FROM {TABELA_CNAES}
+        WHERE IDDimCnaes = :id_dim_cnaes;
+    """)
+
+    row = db.session.execute(sql, {"id_dim_cnaes": int(id_cnae)}).mappings().first()
+    return dict(row) if row else None
+
+
+def _sincronizar_tag_plano_midia_por_fase(
+    *,
+    id_card: int,
+    id_fase_atual: int,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+) -> dict[str, Any]:
+    resultado = {
+        "id_tag": int(ID_TAG_PLANO_MIDIA),
+        "fase": int(id_fase_atual or 0),
+        "adicionada": False,
+        "removida": False,
+        "deve_ter_tag": int(id_fase_atual or 0) in FASES_COM_TAG_PLANO_MIDIA,
+    }
+
+    if resultado["deve_ter_tag"]:
+        resultado["adicionada"] = _aplicar_tag_no_card(
+            id_card=int(id_card),
+            id_tag=int(ID_TAG_PLANO_MIDIA),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+        )
+    else:
+        resultado["removida"] = _remover_tag_do_card(
+            id_card=int(id_card),
+            id_tag=int(ID_TAG_PLANO_MIDIA),
+            id_usuario=int(id_usuario),
+        )
+
+    return resultado
 
 
 
@@ -19303,6 +19550,8 @@ def api_card_criar(id_kanban: int):
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
+        id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
+        nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
 
         if len(titulo) < 2:
             return jsonify({"ok": False, "msg": "Título inválido"}), 400
@@ -19373,6 +19622,13 @@ def api_card_criar(id_kanban: int):
             if id_tipo_cliente_desconto_int not in tipos_validos:
                 return jsonify({"ok": False, "msg": "Tipo de cliente inválido"}), 400
 
+        """
+        Na criação rápida do card eu não obrigo Tipo de Cliente.
+        Regra de UX:
+        - criar card: pode ser só título + fase;
+        - salvar edição do card: Tipo de Cliente continua obrigatório.
+        """
+
         id_origem_atendimento_int = None
         if origem_atendimento_informada and id_origem_atendimento not in (None, "", 0):
             try:
@@ -19387,6 +19643,25 @@ def api_card_criar(id_kanban: int):
 
             if id_origem_atendimento_int not in origens_validas:
                 return jsonify({"ok": False, "msg": "Origem de atendimento inválida"}), 400
+
+        id_dim_cnaes_int = None
+        if id_dim_cnaes not in (None, "", 0):
+            try:
+                id_dim_cnaes_int = int(id_dim_cnaes)
+            except Exception:
+                return jsonify({"ok": False, "msg": "Segmento inválido"}), 400
+
+            if not _obter_cnae_por_id(id_dim_cnaes_int):
+                return jsonify({"ok": False, "msg": "Segmento inválido"}), 400
+
+        nome_empresa_card_txt = str(nome_empresa_card or "").strip() or None
+        if id_empresa_relacionada_int not in (None, "", 0) and not nome_empresa_card_txt:
+            sql_nome_empresa = text(f"""
+                SELECT TOP (1) RazaoSocial
+                FROM {TABELA_EMPRESAS}
+                WHERE IDEmpresa = :id_empresa;
+            """)
+            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_relacionada_int)}).scalar()
 
         relacionamento_empresa_atual = None
         id_tipo_cliente_relacionamento_final = None
@@ -19537,6 +19812,21 @@ def api_card_criar(id_kanban: int):
             valores.append(":id_tipo_cliente_desconto")
             params["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
 
+        if _coluna_existe(TABELA_CARD, "IDDimTipoCliente"):
+            colunas.append("IDDimTipoCliente")
+            valores.append(":id_tipo_cliente_card")
+            params["id_tipo_cliente_card"] = id_tipo_cliente_desconto_int
+
+        if _coluna_existe(TABELA_CARD, "IDDimCnaes"):
+            colunas.append("IDDimCnaes")
+            valores.append(":id_dim_cnaes")
+            params["id_dim_cnaes"] = id_dim_cnaes_int
+
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa"):
+            colunas.append("NomeEmpresa")
+            valores.append(":nome_empresa")
+            params["nome_empresa"] = nome_empresa_card_txt
+
         if _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
             colunas.append("IDDimOrigemAtendimento")
             valores.append(":id_origem_atendimento")
@@ -19581,6 +19871,13 @@ def api_card_criar(id_kanban: int):
             aplicar_tags=aplicar_tags_automaticas_tipo_contrato,
         )
 
+        sincronizacao_tag_plano_midia = _sincronizar_tag_plano_midia_por_fase(
+            id_card=int(novo_id),
+            id_fase_atual=int(id_fase),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
         snapshot_solicitacao = _sincronizar_snapshot_solicitacao_contrato_do_card(
             id_card=int(novo_id),
             id_usuario=int(id_usuario),
@@ -19592,6 +19889,7 @@ def api_card_criar(id_kanban: int):
             cod_face_contrato=validacao_ponto_face.get("cod_face"),
             descricao_card=descricao,
             contrato_existente=contrato_existente,
+            id_tipo_cliente=id_tipo_cliente_desconto_int,
         )
 
         sincronizacao_item_contrato = {
@@ -19767,6 +20065,8 @@ def api_card_atualizar(id_card: int):
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
+        id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
+        nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
 
         if not titulo:
             return jsonify({"ok": False, "msg": "Título do card é obrigatório."}), 400
@@ -19806,6 +20106,9 @@ def api_card_atualizar(id_card: int):
             else:
                 id_tipo_cliente_desconto_int = None
 
+        if id_tipo_cliente_desconto_int in (None, 0):
+            return jsonify({"ok": False, "msg": "Tipo de cliente é obrigatório."}), 400
+
         id_origem_atendimento_int = None
         if origem_atendimento_informada:
             if id_origem_atendimento not in (None, "", 0):
@@ -19815,6 +20118,25 @@ def api_card_atualizar(id_card: int):
                     return jsonify({"ok": False, "msg": "Origem de atendimento inválida."}), 400
             else:
                 id_origem_atendimento_int = None
+
+        id_dim_cnaes_int = None
+        if id_dim_cnaes not in (None, "", 0):
+            try:
+                id_dim_cnaes_int = int(id_dim_cnaes)
+            except Exception:
+                return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
+
+            if not _obter_cnae_por_id(id_dim_cnaes_int):
+                return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
+
+        nome_empresa_card_txt = str(nome_empresa_card or "").strip() or None
+        if id_empresa_relacionada_int not in (None, "", 0) and not nome_empresa_card_txt:
+            sql_nome_empresa = text(f"""
+                SELECT TOP (1) RazaoSocial
+                FROM {TABELA_EMPRESAS}
+                WHERE IDEmpresa = :id_empresa;
+            """)
+            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_relacionada_int)}).scalar()
 
         relacionamento_empresa_atual = None
         id_tipo_cliente_relacionamento_final = None
@@ -19923,6 +20245,22 @@ def api_card_atualizar(id_card: int):
             campos_update.append("Email = :email")
             parametros_update["email"] = campos_complementares_novo_contrato.get("email")
 
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto"):
+            campos_update.append("IDDimKanbanTipoClienteDesconto = :id_tipo_cliente_desconto")
+            parametros_update["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
+
+        if _coluna_existe(TABELA_CARD, "IDDimTipoCliente"):
+            campos_update.append("IDDimTipoCliente = :id_tipo_cliente_card")
+            parametros_update["id_tipo_cliente_card"] = id_tipo_cliente_desconto_int
+
+        if _coluna_existe(TABELA_CARD, "IDDimCnaes"):
+            campos_update.append("IDDimCnaes = :id_dim_cnaes")
+            parametros_update["id_dim_cnaes"] = id_dim_cnaes_int
+
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa"):
+            campos_update.append("NomeEmpresa = :nome_empresa")
+            parametros_update["nome_empresa"] = nome_empresa_card_txt
+
         if origem_atendimento_informada and _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
             campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
             parametros_update["id_origem_atendimento"] = id_origem_atendimento_int
@@ -19980,6 +20318,13 @@ def api_card_atualizar(id_card: int):
             cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
             cod_face_contrato=validacao_ponto_face.get("cod_face"),
             aplicar_tags=True,
+        )
+
+        sincronizacao_tag_plano_midia = _sincronizar_tag_plano_midia_por_fase(
+            id_card=int(id_card),
+            id_fase_atual=int(id_fase_atual),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
         )
 
         sincronizacao_item_contrato = {
