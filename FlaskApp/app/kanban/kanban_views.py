@@ -5333,6 +5333,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
     cod_ponto_contrato: object = None,
     cod_face_contrato: object = None,
     dados_item_formulario: dict[str, Any] | None = None,
+    dados_itens_formulario: list[dict[str, Any]] | None = None,
     id_vendedor_formulario: int | None = None,
     nome_vendedor_formulario: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -5349,6 +5350,11 @@ def _montar_itens_snapshot_solicitacao_do_card(
     id_tipo_cliente_int = _int_positivo_ou_none_local(id_tipo_cliente)
     itens_resultado: list[dict[str, Any]] = []
     dados_item_formulario = dict(dados_item_formulario or {}) if isinstance(dados_item_formulario, dict) else {}
+    dados_itens_formulario = [
+        dict(item)
+        for item in (dados_itens_formulario or [])
+        if isinstance(item, dict)
+    ]
     nome_vendedor_formulario = str(nome_vendedor_formulario or "").strip() or None
     id_vendedor_formulario = _int_positivo_ou_none_local(id_vendedor_formulario)
 
@@ -5401,24 +5407,27 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "IDVendedor",
     }
 
-    def _tem_dados_item_formulario() -> bool:
-        for chave, valor in dados_item_formulario.items():
+    def _tem_dados_item_formulario(dados_item_atual: dict[str, Any] | None = None) -> bool:
+        dados_base = dados_item_atual if isinstance(dados_item_atual, dict) else dados_item_formulario
+        for chave, valor in dados_base.items():
             if chave in {"IDFatoSolicitacaoContratoEuromidia", "IDFatoControleContratosEuromidia", "IDFatoControleContratosItensEuromidia", "IDFatoKanbanCard"}:
                 continue
             if valor not in (None, "", []):
                 return True
         return False
 
-    def _aplicar_dados_formulario_item(valores_item: dict[str, Any]) -> dict[str, Any]:
+    def _aplicar_dados_formulario_item(valores_item: dict[str, Any], dados_item_atual: dict[str, Any] | None = None) -> dict[str, Any]:
         if not isinstance(valores_item, dict):
             valores_item = {}
+
+        dados_base = dados_item_atual if isinstance(dados_item_atual, dict) else dados_item_formulario
 
         if id_vendedor_formulario not in (None, "", 0):
             valores_item["IDVendedor"] = id_vendedor_formulario
         if nome_vendedor_formulario:
             valores_item["Vendedor"] = nome_vendedor_formulario
 
-        for chave, valor in dados_item_formulario.items():
+        for chave, valor in dados_base.items():
             if chave not in valores_item:
                 continue
 
@@ -5440,10 +5449,15 @@ def _montar_itens_snapshot_solicitacao_do_card(
 
     if tipo_norm == TIPO_SOLICITACAO_NOVO:
         paineis_card = _listar_paineis_vinculados_card(int(id_card))
-        if not paineis_card and _tem_dados_item_formulario():
+        if not paineis_card and (_tem_dados_item_formulario() or any(_tem_dados_item_formulario(item) for item in dados_itens_formulario)):
             paineis_card = [{}]
 
-        for painel_card in paineis_card:
+        for indice_item, painel_card in enumerate(paineis_card):
+            dados_item_atual = (
+                dados_itens_formulario[indice_item]
+                if indice_item < len(dados_itens_formulario)
+                else dados_item_formulario
+            )
             cod_ponto = str(painel_card.get("CodPonto") or "").strip() or None
             cod_face = str(painel_card.get("CodFace") or "").strip().upper() or None
 
@@ -5613,7 +5627,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
             if coluna_atividade_item == "BitSolicitacaoAtiva":
                 valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
 
-            valores_item = _aplicar_dados_formulario_item(valores_item)
+            valores_item = _aplicar_dados_formulario_item(valores_item, dados_item_atual)
             itens_resultado.append(valores_item)
 
         return itens_resultado
@@ -5711,7 +5725,8 @@ def _montar_itens_snapshot_solicitacao_do_card(
     if coluna_atividade_item == "BitSolicitacaoAtiva":
         valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
 
-    valores_item = _aplicar_dados_formulario_item(valores_item)
+    dados_item_atual = dados_itens_formulario[0] if dados_itens_formulario else dados_item_formulario
+    valores_item = _aplicar_dados_formulario_item(valores_item, dados_item_atual)
     itens_resultado.append(valores_item)
     return itens_resultado
 
@@ -5931,6 +5946,11 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         if isinstance(dados_formulario_solicitacao.get("item"), dict)
         else {}
     )
+    dados_itens_formulario = [
+        dict(item)
+        for item in (dados_formulario_solicitacao.get("itens") or [])
+        if isinstance(item, dict)
+    ]
 
     campos_data_header_formulario = {"DataAssinaturaRenovacao", "DataLancamento"}
     campos_decimal_header_formulario = {
@@ -6186,6 +6206,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         cod_ponto_contrato=cod_ponto_contrato,
         cod_face_contrato=cod_face_contrato,
         dados_item_formulario=dados_item_formulario,
+        dados_itens_formulario=dados_itens_formulario,
         id_vendedor_formulario=id_vendedor_formulario,
         nome_vendedor_formulario=nome_vendedor_formulario,
     )
