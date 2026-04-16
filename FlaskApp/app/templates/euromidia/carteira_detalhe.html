@@ -1,0 +1,957 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Carteira | {{ carteira.NomeVendedor }}{% endblock %}
+
+{% block content %}
+<style>
+  .grid-kpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}
+  .kpi-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:0 1px 8px rgba(0,0,0,.05)}
+  .kpi-title{font-size:12px;font-weight:900;color:var(--muted);margin-bottom:8px}
+  .kpi-value{font-size:30px;font-weight:1000;color:var(--euro-blue);line-height:1.1}
+  .kpi-sub{margin-top:6px;font-size:12px;font-weight:900}
+  .kpi-sub.up{color:#15803d}
+  .kpi-sub.down{color:#b91c1c}
+  .kpi-sub.flat{color:var(--muted)}
+
+  .split{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:14px;margin-top:14px}
+  .sec-box{background:#fff;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 1px 8px rgba(0,0,0,.05)}
+  .sec-box-h{padding:12px 14px;background:#F8FAFC;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .sec-box-title{font-weight:1000;color:var(--euro-blue)}
+  .sec-box-b{padding:14px}
+
+  .bar-list{display:flex;flex-direction:column;gap:10px}
+  .bar-row{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:10px;align-items:center}
+  .bar-meta{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:900;color:var(--text)}
+  .bar-track{height:12px;background:#E5E7EB;border-radius:999px;overflow:hidden;margin-top:6px}
+  .bar-fill{height:100%;background:linear-gradient(90deg,#1D4ED8,#38BDF8);border-radius:999px}
+  .bar-val{font-size:12px;font-weight:900;text-align:right;color:var(--text)}
+
+  .tbl-empresas{width:100%;border-collapse:separate;border-spacing:0}
+  .tbl-empresas th,.tbl-empresas td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  .tbl-empresas th{text-align:left;font-size:12px;color:var(--muted);font-weight:1000}
+  .empresa-nome{font-weight:1000;color:var(--text);font-size:13px}
+  .empresa-sub{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.35}
+
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:900;line-height:1;border:1px solid rgba(148,163,184,.25);background:#F8FAFC;color:#334155;white-space:nowrap}
+  .chip.green{background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28);color:#166534}
+  .chip.red{background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.24);color:#991b1b}
+  .chip.yellow{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.24);color:#92400e}
+  .chip.blue{background:rgba(59,130,246,.10);border-color:rgba(59,130,246,.22);color:#1D4ED8}
+  .chip.purple{background:rgba(124,58,237,.10);border-color:rgba(124,58,237,.22);color:#6D28D9}
+
+  .fat-var{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:900}
+  .fat-var.up{color:#15803d}
+  .fat-var.down{color:#b91c1c}
+  .fat-var.flat{color:var(--muted)}
+
+  .form-mover{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .form-mover select{min-width:200px}
+
+  .svg-wrap{background:#fff;border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:0 1px 8px rgba(0,0,0,.05)}
+  .chart-title{font-weight:1000;color:var(--euro-blue);margin-bottom:10px}
+  .chart-legend{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
+
+  .header-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .header-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+
+  .empresas-toolbar{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:12px;
+    padding-top:12px;
+  }
+  .empresas-toolbar-left{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    min-width:280px;
+    flex:1 1 360px;
+    position:relative;
+  }
+  .empresas-toolbar-right{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .search-wrap{
+    position:relative;
+    width:100%;
+    max-width:480px;
+  }
+  .search-input{
+    width:100%;
+    height:42px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    padding:0 14px;
+    outline:none;
+    font-size:14px;
+    color:var(--text);
+    box-shadow:0 1px 4px rgba(0,0,0,.03) inset;
+  }
+  .search-input:focus{
+    border-color:#93C5FD;
+    box-shadow:0 0 0 4px rgba(59,130,246,.10);
+  }
+  .search-suggestions{
+    position:absolute;
+    top:46px;
+    left:0;
+    right:0;
+    z-index:20;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:12px;
+    box-shadow:0 10px 24px rgba(15,23,42,.10);
+    overflow:hidden;
+    display:none;
+  }
+  .search-suggestions.show{display:block}
+  .search-suggestion-item{
+    width:100%;
+    border:none;
+    background:#fff;
+    text-align:left;
+    padding:10px 12px;
+    cursor:pointer;
+    font-size:13px;
+    color:var(--text);
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+  .search-suggestion-item:hover{
+    background:#F8FAFC;
+  }
+  .search-suggestion-title{
+    font-weight:900;
+    color:var(--text);
+  }
+  .search-suggestion-sub{
+    font-size:12px;
+    color:var(--muted);
+  }
+
+  .table-footer{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-top:14px;
+  }
+  .pagination{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  .pagination button{
+    min-width:36px;
+    height:36px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background:#fff;
+    color:var(--text);
+    font-weight:900;
+    cursor:pointer;
+  }
+  .pagination button:hover:not(:disabled){
+    background:#F8FAFC;
+  }
+  .pagination button:disabled{
+    opacity:.45;
+    cursor:not-allowed;
+  }
+  .pagination .is-active{
+    background:#1D4ED8;
+    color:#fff;
+    border-color:#1D4ED8;
+  }
+
+  .setor-chart-wrap{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+  }
+  .setor-chart-canvas{
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:440px;
+  }
+  .setor-chart-legend{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+  .setor-legend-card{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:12px 14px;
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:linear-gradient(180deg,#FFFFFF 0%, #F8FAFC 100%);
+  }
+  .setor-legend-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
+  }
+  .setor-legend-dot{
+    width:12px;
+    height:12px;
+    border-radius:999px;
+    flex:0 0 12px;
+    box-shadow:0 0 0 4px rgba(15,23,42,.05);
+  }
+  .setor-legend-text{
+    display:flex;
+    flex-direction:column;
+    min-width:0;
+  }
+  .setor-legend-title{
+    font-size:13px;
+    font-weight:1000;
+    color:var(--text);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .setor-legend-sub{
+    font-size:12px;
+    color:var(--muted);
+  }
+  .setor-legend-val{
+    font-size:18px;
+    font-weight:1000;
+    color:var(--euro-blue);
+    white-space:nowrap;
+  }
+
+  .empty-search{
+    padding:18px 12px;
+    border:1px dashed var(--border);
+    border-radius:12px;
+    text-align:center;
+    color:var(--muted);
+    background:#FAFCFF;
+    display:none;
+  }
+
+  @media (max-width: 1100px){
+    .split{grid-template-columns:1fr}
+  }
+
+  @media (max-width: 980px){
+    .grid-kpi{grid-template-columns:1fr 1fr}
+  }
+
+  @media (max-width: 680px){
+    .grid-kpi{grid-template-columns:1fr}
+    .bar-row{grid-template-columns:1fr}
+    .setor-chart-canvas{min-height:380px}
+    .table-footer{flex-direction:column;align-items:stretch}
+  }
+</style>
+
+{% set variacao_carteira = (carteira.VariacaoFaturamentoPct or 0)|float %}
+{% set classe_carteira = 'flat' %}
+{% set seta_carteira = '•' %}
+{% if variacao_carteira > 0 %}
+  {% set classe_carteira = 'up' %}
+  {% set seta_carteira = '▲' %}
+{% elif variacao_carteira < 0 %}
+  {% set classe_carteira = 'down' %}
+  {% set seta_carteira = '▼' %}
+{% endif %}
+
+<div class="container container-limit">
+  <div class="card">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px;">Carteiras › Detalhe da carteira</div>
+        <h1 class="page-title" style="margin-bottom:4px;">{{ carteira.NomeVendedor or 'Vendedor sem nome' }}</h1>
+        <div class="muted">ID vendedor: {{ carteira.IDVendedor }} • ID carteira: {{ carteira.IDFatoCarteiraVendedor }}</div>
+        <div class="header-badges">
+          <span class="chip blue">{{ carteira.QuantidadeEmpresas or 0 }} empresas</span>
+          <span class="chip green">{{ carteira.ClientesAtivos or 0 }} clientes ativos</span>
+          <span class="chip yellow">Atualização {{ carteira.DataAtualizacao.strftime('%d/%m/%Y %H:%M') if carteira.DataAtualizacao else '—' }}</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a href="{{ url_for('Paineis.carteiras_lista') }}" class="btn btn-secondary">← Voltar para lista</a>
+      </div>
+    </div>
+
+    <div class="grid-kpi">
+      <div class="kpi-card">
+        <div class="kpi-title">Faturamento mês</div>
+        <div class="kpi-value">R$ {{ "{:,.2f}".format((carteira.FaturamentoMes or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+        <div class="kpi-sub {{ classe_carteira }}">{{ seta_carteira }} {{ "{:,.2f}".format((variacao_carteira|abs)).replace(",", "X").replace(".", ",").replace("X", ".") }}% vs. mês anterior</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-title">Mês anterior</div>
+        <div class="kpi-value">R$ {{ "{:,.2f}".format((carteira.FaturamentoMesAnterior or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+        <div class="kpi-sub flat">Base de comparação mensal</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-title">Meta da carteira</div>
+        <div class="kpi-value">R$ {{ "{:,.2f}".format((carteira.Meta or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+        <div class="kpi-sub flat">Meta cadastrada no cabeçalho</div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-title">Atingimento da meta</div>
+        {% set atingimento = 0 %}
+        {% if (carteira.Meta or 0)|float > 0 %}
+          {% set atingimento = ((carteira.FaturamentoMes or 0)|float * 100 / (carteira.Meta or 1)|float) %}
+        {% endif %}
+        <div class="kpi-value">{{ "{:,.2f}".format(atingimento).replace(",", "X").replace(".", ",").replace("X", ".") }}%</div>
+        <div class="kpi-sub flat">Percentual da meta mensal</div>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="sec-box">
+        <div class="sec-box-h">
+          <div class="sec-box-title">Empresas da carteira</div>
+          <div class="muted">Quanto cada empresa representa e como está performando.</div>
+        </div>
+
+        <div class="sec-box-b" style="padding-top:0;">
+          <div class="empresas-toolbar">
+            <div class="empresas-toolbar-left">
+              <div class="search-wrap">
+                <input
+                  type="text"
+                  id="empresaSearchInput"
+                  class="search-input"
+                  placeholder="Pesquisar por razão social, CNPJ, cidade, UF ou setor..."
+                  autocomplete="off"
+                  spellcheck="false"
+                >
+                <div id="empresaSearchSuggestions" class="search-suggestions"></div>
+              </div>
+              <div class="muted" style="font-size:12px;">Busca com sugestão e paginação de 5 empresas por página.</div>
+            </div>
+
+            <div class="empresas-toolbar-right">
+              <span class="chip purple" id="empresaCountChip">0 resultados</span>
+              <button type="button" class="btn btn-secondary" id="empresaClearSearchBtn">Limpar busca</button>
+            </div>
+          </div>
+
+          <div class="overflow-x">
+            <table class="tbl-empresas" id="tblEmpresasCarteira">
+              <thead>
+                <tr>
+                  <th>Empresa</th>
+                  <th>Setor</th>
+                  <th>Faturamento mês</th>
+                  <th>Participação</th>
+                  <th>Desempenho</th>
+                  <th>Contratos</th>
+                  <th>Mover</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyEmpresasCarteira">
+                {% if empresas and empresas|length > 0 %}
+                  {% for row in empresas %}
+                    {% set variacao = (row.VariacaoFaturamentoPct or 0)|float %}
+                    {% set classe_var = 'flat' %}
+                    {% set seta = '•' %}
+                    {% if variacao > 0 %}
+                      {% set classe_var = 'up' %}
+                      {% set seta = '▲' %}
+                    {% elif variacao < 0 %}
+                      {% set classe_var = 'down' %}
+                      {% set seta = '▼' %}
+                    {% endif %}
+                    <tr
+                      class="empresa-row"
+                      data-razao-social="{{ (row.RazaoSocial or '')|lower }}"
+                      data-cnpj="{{ (row.CNPJ or '')|lower }}"
+                      data-municipio="{{ (row.Municipio or '')|lower }}"
+                      data-uf="{{ (row.UF or '')|lower }}"
+                      data-setor="{{ (row.Setor or '')|lower }}"
+                    >
+                      <td>
+                        <div class="empresa-nome">{{ row.RazaoSocial or 'Empresa sem nome' }}</div>
+                        <div class="empresa-sub">
+                          {{ row.CNPJ or '—' }} • {{ row.Municipio or '—' }}/{{ row.UF or '—' }}
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="empresa-sub" style="color:var(--text);font-weight:900;">{{ row.Setor or 'Sem setor' }}</div>
+                        <div class="empresa-sub">{{ row.ClassificacaoMacro or 'Sem classificação' }}</div>
+                      </td>
+
+                      <td>
+                        <div class="empresa-nome">R$ {{ "{:,.2f}".format((row.FaturamentoMes or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+                        <div class="empresa-sub">Mês anterior: R$ {{ "{:,.2f}".format((row.FaturamentoMesAnterior or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+                      </td>
+
+                      <td>
+                        <div class="empresa-nome">{{ "{:,.2f}".format((row.ParticipacaoCarteiraPct or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%</div>
+                        <div class="bar-track" style="width:120px;margin-top:8px;">
+                          <div class="bar-fill" style="width: {{ (row.ParticipacaoCarteiraPct or 0)|float }}%;"></div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="fat-var {{ classe_var }}">{{ seta }} {{ "{:,.2f}".format((variacao|abs)).replace(",", "X").replace(".", ",").replace("X", ".") }}%</div>
+                        <div class="empresa-sub">
+                          {% if (row.BitCliente or 0)|int == 1 %}
+                            <span class="chip green">Cliente</span>
+                          {% else %}
+                            <span class="chip">Lead</span>
+                          {% endif %}
+                        </div>
+                      </td>
+
+                      <td>
+                        <span class="chip blue">{{ row.ContratosAtivos or 0 }} ativos</span>
+                      </td>
+
+                      <td>
+                        <form method="post" action="{{ url_for('Paineis.carteira_mover_empresa', id_fato_carteira_vendedor=carteira.IDFatoCarteiraVendedor) }}" class="form-mover">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="id_empresa" value="{{ row.IDEmpresa }}">
+                          <select name="id_fato_carteira_destino" class="kb-select" required>
+                            <option value="">Mover para...</option>
+                            {% for dest in carteiras_destino %}
+                              <option value="{{ dest.IDFatoCarteiraVendedor }}">{{ dest.NomeVendedor }}</option>
+                            {% endfor %}
+                          </select>
+                          <button type="submit" class="btn btn-secondary">Mover</button>
+                        </form>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="7" class="muted" style="text-align:center;">Nenhuma empresa vinculada a esta carteira.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+
+          <div id="emptySearchState" class="empty-search">Nenhuma empresa encontrada para essa busca.</div>
+
+          <div class="table-footer">
+            <div class="muted" id="empresaPagingInfo">Página 1 de 1</div>
+            <div class="pagination" id="empresaPagination"></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="sec-box">
+          <div class="sec-box-h">
+            <div class="sec-box-title">Participação por setor</div>
+            <div class="muted">Composição da carteira por quantidade de empresas.</div>
+          </div>
+
+          <div class="sec-box-b">
+            {% if setores and setores|length > 0 %}
+              <div class="setor-chart-wrap">
+                <div class="setor-chart-canvas">
+                  <svg
+                    id="chartSetoresCarteira"
+                    viewBox="0 0 520 440"
+                    width="100%"
+                    height="440"
+                    role="img"
+                    aria-label="Gráfico de participação por setor da carteira"
+                  ></svg>
+                </div>
+
+                <div class="setor-chart-legend" id="chartLegendSetores"></div>
+              </div>
+            {% else %}
+              <div class="muted">Sem dados de setor para esta carteira.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="svg-wrap">
+          <div class="chart-title">Faturamento da carteira — últimos 6 meses</div>
+          <svg id="chartFaturamentoCarteira" viewBox="0 0 520 220" width="100%" height="220" role="img" aria-label="Gráfico de faturamento dos últimos 6 meses"></svg>
+          <div class="chart-legend" id="chartLegendFaturamento"></div>
+        </div>
+
+        <div class="sec-box">
+          <div class="sec-box-h">
+            <div class="sec-box-title">Empresas com maior participação</div>
+            <div class="muted">Top 8 em representatividade no mês.</div>
+          </div>
+          <div class="sec-box-b">
+            <div class="bar-list">
+              {% for row in top_empresas %}
+                <div class="bar-row">
+                  <div>
+                    <div class="bar-meta">
+                      <span>{{ row.empresa }}</span>
+                      <span>R$ {{ "{:,.2f}".format((row.valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+                    </div>
+                    <div class="bar-track">
+                      <div class="bar-fill" style="width: {{ (row.pct or 0)|float }}%;"></div>
+                    </div>
+                  </div>
+                  <div class="bar-val">{{ "{:,.2f}".format((row.pct or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%</div>
+                </div>
+              {% else %}
+                <div class="muted">Sem dados de representatividade.</div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const svg = document.getElementById('chartFaturamentoCarteira');
+  const legend = document.getElementById('chartLegendFaturamento');
+  const data = {{ historico_faturamento_json|safe }} || [];
+
+  if (!svg || !legend || !Array.isArray(data) || data.length === 0) {
+    return;
+  }
+
+  const width = 520;
+  const height = 220;
+  const pad = { top: 18, right: 16, bottom: 36, left: 54 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const maxVal = Math.max(...data.map(x => Number(x.valor || 0)), 1);
+  const minVal = 0;
+  const ns = 'http://www.w3.org/2000/svg';
+
+  const x = i => pad.left + (innerW * i / Math.max(data.length - 1, 1));
+  const y = v => pad.top + innerH - ((Number(v || 0) - minVal) / (maxVal - minVal || 1)) * innerH;
+
+  svg.innerHTML = '';
+
+  for (let i = 0; i < 5; i++) {
+    const val = minVal + ((maxVal - minVal) * i / 4);
+
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', pad.left);
+    line.setAttribute('x2', width - pad.right);
+    line.setAttribute('y1', y(val));
+    line.setAttribute('y2', y(val));
+    line.setAttribute('stroke', '#E5E7EB');
+    line.setAttribute('stroke-width', '1');
+    svg.appendChild(line);
+
+    const label = document.createElementNS(ns, 'text');
+    label.setAttribute('x', pad.left - 8);
+    label.setAttribute('y', y(val) + 4);
+    label.setAttribute('text-anchor', 'end');
+    label.setAttribute('font-size', '11');
+    label.setAttribute('fill', '#64748B');
+    label.textContent = 'R$ ' + Number(val).toLocaleString('pt-BR', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    svg.appendChild(label);
+  }
+
+  let points = '';
+  data.forEach((item, idx) => {
+    points += `${x(idx)},${y(item.valor)} `;
+  });
+
+  const polyline = document.createElementNS(ns, 'polyline');
+  polyline.setAttribute('fill', 'none');
+  polyline.setAttribute('stroke', '#1D4ED8');
+  polyline.setAttribute('stroke-width', '3');
+  polyline.setAttribute('stroke-linecap', 'round');
+  polyline.setAttribute('stroke-linejoin', 'round');
+  polyline.setAttribute('points', points.trim());
+  svg.appendChild(polyline);
+
+  data.forEach((item, idx) => {
+    const cx = x(idx);
+    const cy = y(item.valor);
+
+    const circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', cx);
+    circle.setAttribute('cy', cy);
+    circle.setAttribute('r', '4.5');
+    circle.setAttribute('fill', '#38BDF8');
+    circle.setAttribute('stroke', '#1D4ED8');
+    circle.setAttribute('stroke-width', '2');
+    svg.appendChild(circle);
+
+    const label = document.createElementNS(ns, 'text');
+    label.setAttribute('x', cx);
+    label.setAttribute('y', height - 12);
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('font-size', '11');
+    label.setAttribute('fill', '#64748B');
+    label.textContent = item.label;
+    svg.appendChild(label);
+  });
+
+  const ultimo = data[data.length - 1];
+  const primeiro = data[0];
+  legend.innerHTML = `
+    <span>Primeiro mês: <strong>R$ ${Number(primeiro.valor || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></span>
+    <span>Último mês: <strong>R$ ${Number(ultimo.valor || 0).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></span>
+  `;
+})();
+</script>
+
+<script>
+(function(){
+  const svg = document.getElementById('chartSetoresCarteira');
+  const legend = document.getElementById('chartLegendSetores');
+  const data = {{ setores_json|safe }} || [];
+
+  if (!svg || !legend || !Array.isArray(data) || data.length === 0) {
+    return;
+  }
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const palette = [
+    '#2563EB',
+    '#7C3AED',
+    '#0F766E',
+    '#EA580C',
+    '#DB2777',
+    '#0891B2',
+    '#65A30D',
+    '#DC2626',
+    '#4338CA',
+    '#D97706'
+  ];
+
+  const width = 520;
+  const height = 440;
+  const cx = width / 2;
+  const cy = 185;
+  const outerR = 150;
+  const innerR = 74;
+  const total = data.reduce((acc, item) => acc + Number(item.valor || 0), 0);
+
+  function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+    const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+    return {
+      x: centerX + (radius * Math.cos(angleInRadians)),
+      y: centerY + (radius * Math.sin(angleInRadians))
+    };
+  }
+
+  function describeArc(x, y, radius, startAngle, endAngle) {
+    const start = polarToCartesian(x, y, radius, endAngle);
+    const end = polarToCartesian(x, y, radius, startAngle);
+    const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+    return [
+      'M', start.x, start.y,
+      'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y
+    ].join(' ');
+  }
+
+  function describeDonutSegment(x, y, outerRadius, innerRadius, startAngle, endAngle) {
+    const outerStart = polarToCartesian(x, y, outerRadius, endAngle);
+    const outerEnd = polarToCartesian(x, y, outerRadius, startAngle);
+    const innerStart = polarToCartesian(x, y, innerRadius, startAngle);
+    const innerEnd = polarToCartesian(x, y, innerRadius, endAngle);
+    const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+
+    return [
+      'M', outerStart.x, outerStart.y,
+      'A', outerRadius, outerRadius, 0, largeArcFlag, 0, outerEnd.x, outerEnd.y,
+      'L', innerStart.x, innerStart.y,
+      'A', innerRadius, innerRadius, 0, largeArcFlag, 1, innerEnd.x, innerEnd.y,
+      'Z'
+    ].join(' ');
+  }
+
+  function formatPct(v) {
+    return Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  }
+
+  svg.innerHTML = '';
+  legend.innerHTML = '';
+
+  const bgRing = document.createElementNS(ns, 'circle');
+  bgRing.setAttribute('cx', cx);
+  bgRing.setAttribute('cy', cy);
+  bgRing.setAttribute('r', outerR);
+  bgRing.setAttribute('fill', '#F8FAFC');
+  bgRing.setAttribute('stroke', '#E5E7EB');
+  bgRing.setAttribute('stroke-width', '1');
+  svg.appendChild(bgRing);
+
+  let startAngle = 0;
+
+  data.forEach((item, index) => {
+    const valor = Number(item.valor || 0);
+    const pct = Number(item.pct || 0);
+    const angle = total > 0 ? (valor / total) * 360 : 0;
+    const endAngle = startAngle + angle;
+    const color = palette[index % palette.length];
+
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', describeDonutSegment(cx, cy, outerR, innerR, startAngle, endAngle));
+    path.setAttribute('fill', color);
+    path.setAttribute('stroke', '#FFFFFF');
+    path.setAttribute('stroke-width', '4');
+    svg.appendChild(path);
+
+    if (pct >= 7) {
+      const midAngle = startAngle + (angle / 2);
+      const labelRadius = innerR + ((outerR - innerR) * 0.58);
+      const labelPoint = polarToCartesian(cx, cy, labelRadius, midAngle);
+
+      const pctText = document.createElementNS(ns, 'text');
+      pctText.setAttribute('x', labelPoint.x);
+      pctText.setAttribute('y', labelPoint.y + 4);
+      pctText.setAttribute('text-anchor', 'middle');
+      pctText.setAttribute('font-size', '15');
+      pctText.setAttribute('font-weight', '1000');
+      pctText.setAttribute('fill', '#FFFFFF');
+      pctText.textContent = formatPct(pct);
+      svg.appendChild(pctText);
+    }
+
+    const card = document.createElement('div');
+    card.className = 'setor-legend-card';
+    card.innerHTML = `
+      <div class="setor-legend-left">
+        <span class="setor-legend-dot" style="background:${color};"></span>
+        <div class="setor-legend-text">
+          <div class="setor-legend-title">${item.label || 'Sem setor'}</div>
+          <div class="setor-legend-sub">${valor} empresa${valor === 1 ? '' : 's'}</div>
+        </div>
+      </div>
+      <div class="setor-legend-val">${formatPct(pct)}</div>
+    `;
+    legend.appendChild(card);
+
+    startAngle = endAngle;
+  });
+
+  const centerCircle = document.createElementNS(ns, 'circle');
+  centerCircle.setAttribute('cx', cx);
+  centerCircle.setAttribute('cy', cy);
+  centerCircle.setAttribute('r', innerR - 2);
+  centerCircle.setAttribute('fill', '#FFFFFF');
+  centerCircle.setAttribute('stroke', '#E5E7EB');
+  centerCircle.setAttribute('stroke-width', '1');
+  svg.appendChild(centerCircle);
+
+  const centerLabelTop = document.createElementNS(ns, 'text');
+  centerLabelTop.setAttribute('x', cx);
+  centerLabelTop.setAttribute('y', cy - 6);
+  centerLabelTop.setAttribute('text-anchor', 'middle');
+  centerLabelTop.setAttribute('font-size', '18');
+  centerLabelTop.setAttribute('fill', '#64748B');
+  centerLabelTop.textContent = 'Setores';
+  svg.appendChild(centerLabelTop);
+
+  const centerLabelValue = document.createElementNS(ns, 'text');
+  centerLabelValue.setAttribute('x', cx);
+  centerLabelValue.setAttribute('y', cy + 22);
+  centerLabelValue.setAttribute('text-anchor', 'middle');
+  centerLabelValue.setAttribute('font-size', '36');
+  centerLabelValue.setAttribute('font-weight', '1000');
+  centerLabelValue.setAttribute('fill', '#0F172A');
+  centerLabelValue.textContent = String(data.length);
+  svg.appendChild(centerLabelValue);
+})();
+</script>
+
+<script>
+(function(){
+  const input = document.getElementById('empresaSearchInput');
+  const suggestions = document.getElementById('empresaSearchSuggestions');
+  const clearBtn = document.getElementById('empresaClearSearchBtn');
+  const rows = Array.from(document.querySelectorAll('.empresa-row'));
+  const pagination = document.getElementById('empresaPagination');
+  const pagingInfo = document.getElementById('empresaPagingInfo');
+  const countChip = document.getElementById('empresaCountChip');
+  const emptyState = document.getElementById('emptySearchState');
+
+  if (!input || !suggestions || !pagination || !pagingInfo || !countChip || rows.length === 0) {
+    return;
+  }
+
+  const perPage = 5;
+  let currentPage = 1;
+  let filteredRows = [...rows];
+
+  function rowSearchText(row) {
+    return [
+      row.dataset.razaoSocial || '',
+      row.dataset.cnpj || '',
+      row.dataset.municipio || '',
+      row.dataset.uf || '',
+      row.dataset.setor || ''
+    ].join(' ').toLowerCase();
+  }
+
+  function getRazaoSocial(row) {
+    return row.dataset.razaoSocial || '';
+  }
+
+  function applyVisibility() {
+    rows.forEach(row => row.style.display = 'none');
+
+    const total = filteredRows.length;
+    const totalPages = Math.max(Math.ceil(total / perPage), 1);
+    if (currentPage > totalPages) currentPage = totalPages;
+
+    const start = (currentPage - 1) * perPage;
+    const end = start + perPage;
+    const visibleRows = filteredRows.slice(start, end);
+
+    visibleRows.forEach(row => row.style.display = '');
+
+    countChip.textContent = `${total} resultado${total === 1 ? '' : 's'}`;
+    pagingInfo.textContent = `Página ${total === 0 ? 0 : currentPage} de ${total === 0 ? 0 : totalPages}`;
+
+    emptyState.style.display = total === 0 ? 'block' : 'none';
+
+    renderPagination(totalPages);
+  }
+
+  function renderPagination(totalPages) {
+    pagination.innerHTML = '';
+
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.textContent = '‹';
+    prev.disabled = currentPage <= 1 || totalPages === 0;
+    prev.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage -= 1;
+        applyVisibility();
+      }
+    });
+    pagination.appendChild(prev);
+
+    for (let i = 1; i <= totalPages; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = String(i);
+      if (i === currentPage) btn.classList.add('is-active');
+      btn.addEventListener('click', () => {
+        currentPage = i;
+        applyVisibility();
+      });
+      pagination.appendChild(btn);
+    }
+
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.textContent = '›';
+    next.disabled = currentPage >= totalPages || totalPages === 0;
+    next.addEventListener('click', () => {
+      if (currentPage < totalPages) {
+        currentPage += 1;
+        applyVisibility();
+      }
+    });
+    pagination.appendChild(next);
+  }
+
+  function updateSuggestions(query) {
+    suggestions.innerHTML = '';
+    if (!query) {
+      suggestions.classList.remove('show');
+      return;
+    }
+
+    const normalized = query.toLowerCase().trim();
+    const matches = rows
+      .filter(row => rowSearchText(row).includes(normalized))
+      .slice(0, 6);
+
+    if (matches.length === 0) {
+      suggestions.classList.remove('show');
+      return;
+    }
+
+    matches.forEach(row => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'search-suggestion-item';
+
+      const title = getRazaoSocial(row) || 'Empresa sem nome';
+      const cnpj = row.dataset.cnpj || '—';
+      const municipio = row.dataset.municipio || '—';
+      const uf = row.dataset.uf || '—';
+      const setor = row.dataset.setor || '—';
+
+      item.innerHTML = `
+        <span class="search-suggestion-title">${title.toUpperCase()}</span>
+        <span class="search-suggestion-sub">${cnpj} • ${municipio}/${uf} • ${setor}</span>
+      `;
+
+      item.addEventListener('click', () => {
+        input.value = title;
+        suggestions.classList.remove('show');
+        filterRows();
+      });
+
+      suggestions.appendChild(item);
+    });
+
+    suggestions.classList.add('show');
+  }
+
+  function filterRows() {
+    const query = (input.value || '').trim().toLowerCase();
+
+    if (!query) {
+      filteredRows = [...rows];
+    } else {
+      filteredRows = rows.filter(row => rowSearchText(row).includes(query));
+    }
+
+    currentPage = 1;
+    applyVisibility();
+    updateSuggestions(query);
+  }
+
+  input.addEventListener('input', filterRows);
+
+  input.addEventListener('focus', () => {
+    updateSuggestions((input.value || '').trim());
+  });
+
+  clearBtn.addEventListener('click', () => {
+    input.value = '';
+    suggestions.classList.remove('show');
+    filteredRows = [...rows];
+    currentPage = 1;
+    applyVisibility();
+    input.focus();
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!suggestions.contains(event.target) && event.target !== input) {
+      suggestions.classList.remove('show');
+    }
+  });
+
+  applyVisibility();
+})();
+</script>
+{% endblock %}

@@ -1414,7 +1414,36 @@
   }
 
   .kb-cadastro-empresa-modal-card{
-    max-width: 1180px;
+    width: 100%;
+    max-width: min(1320px, calc(100vw - 32px));
+  }
+
+  #wrapFormularioSolicitacaoContrato{
+    width: 100%;
+    align-self: stretch;
+  }
+
+  #formSolicitacaoContratoHeader{
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    align-items: start;
+  }
+
+  #formSolicitacaoContratoItem{
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  #formSolicitacaoContratoItem .kb-contrato-item-secao{
+    display: grid;
+    gap: 10px;
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  #formSolicitacaoContratoItem .kb-cadastro-empresa-grid{
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    width: 100%;
   }
 
   .kb-cadastro-empresa-grid{
@@ -2666,7 +2695,7 @@
 <meta name="csrf-token" content="{{ csrf_token() }}">
 
 <div id="modalCard" class="kb-modal">
-  <div class="kb-modal-card">
+  <div class="kb-modal-card kb-cadastro-empresa-modal-card">
     <div class="kb-modal-head">
       <div class="kb-modal-head-info">
         <strong>Detalhes do Card</strong>
@@ -3481,6 +3510,44 @@
     return texto;
   }
 
+  function parseDataIsoFormularioSolicitacao(valor){
+    const dataIso = normalizarDataParaInput(valor);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataIso)) return null;
+
+    const partes = dataIso.split('-').map((parte) => Number(parte));
+    const ano = partes[0];
+    const mes = partes[1];
+    const dia = partes[2];
+
+    if (!Number.isInteger(ano) || !Number.isInteger(mes) || !Number.isInteger(dia)) return null;
+
+    const dataUtc = new Date(Date.UTC(ano, mes - 1, dia));
+    if (Number.isNaN(dataUtc.getTime())) return null;
+    return dataUtc;
+  }
+
+  function calcularTempoExposicaoDiasFormularioSolicitacao(dataInicio, dataFim){
+    const inicio = parseDataIsoFormularioSolicitacao(dataInicio);
+    const fim = parseDataIsoFormularioSolicitacao(dataFim);
+    if (!inicio || !fim) return null;
+
+    const diferencaMs = fim.getTime() - inicio.getTime();
+    if (diferencaMs < 0) return null;
+
+    const umDiaMs = 24 * 60 * 60 * 1000;
+    return Math.floor(diferencaMs / umDiaMs) + 1;
+  }
+
+  function atualizarTempoExposicaoFormularioSolicitacao(indice = null){
+    const inputInicio = obterInputFormularioSolicitacao("Item", "DataInicioPrevisto", indice);
+    const inputFim = obterInputFormularioSolicitacao("Item", "DataTerminoPrevisto", indice);
+    const inputTempo = obterInputFormularioSolicitacao("Item", "TexmpoExposicao", indice);
+    if (!inputTempo) return;
+
+    const totalDias = calcularTempoExposicaoDiasFormularioSolicitacao(inputInicio?.value, inputFim?.value);
+    inputTempo.value = Number.isInteger(totalDias) && totalDias > 0 ? String(totalDias) : "";
+  }
+
   function criarCampoFormularioSolicitacao(secao, meta, indice = null){
     const wrap = document.createElement("div");
     wrap.className = "kb-contrato-campo" + (meta.span === 2 ? " span-2" : "");
@@ -3508,9 +3575,16 @@
     if (indice !== null && indice !== undefined) {
       campo.dataset.indiceSolicitacao = String(indice);
     }
-    if (meta.somenteLeitura) {
+    if (meta.somenteLeitura || (secao === "Item" && meta.nome === "TexmpoExposicao")) {
       campo.readOnly = true;
     }
+
+    if (secao === "Item" && (meta.nome === "DataInicioPrevisto" || meta.nome === "DataTerminoPrevisto")) {
+      const recalcularTempo = () => atualizarTempoExposicaoFormularioSolicitacao(indice);
+      campo.addEventListener("input", recalcularTempo);
+      campo.addEventListener("change", recalcularTempo);
+    }
+
     wrap.appendChild(campo);
     return wrap;
   }
@@ -3529,7 +3603,7 @@
       formSolicitacaoContratoItem.innerHTML = "";
       for (let indice = 0; indice < quantidadeItensFormularioSolicitacaoAtual; indice += 1) {
         const secao = document.createElement("div");
-        secao.className = "kb-contrato-item-secao span-2";
+        secao.className = "kb-contrato-item-secao";
         secao.dataset.indiceSolicitacaoItem = String(indice);
 
         const titulo = document.createElement("div");
@@ -3539,7 +3613,7 @@
         secao.appendChild(titulo);
 
         const grid = document.createElement("div");
-        grid.className = "kb-cadastro-empresa-grid";
+        grid.className = "kb-cadastro-empresa-grid kb-solicitacao-grid";
         CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
           grid.appendChild(criarCampoFormularioSolicitacao("Item", meta, indice));
         });
@@ -3769,6 +3843,8 @@
       CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
         setValorFormularioSolicitacao("Item", meta, itemBase?.[meta.nome] ?? null, indice);
       });
+
+      atualizarTempoExposicaoFormularioSolicitacao(indice);
     }
   }
 

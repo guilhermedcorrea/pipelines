@@ -18199,3 +18199,801 @@ def checkin_publico_autenticar(token_publico: str):
         return redirect(url_for("Paineis.checkin_publico", token_publico=token_limpo))
 
     return redirect(url_for("Paineis.checkin_publico", token_publico=token_limpo))
+
+
+
+
+
+
+
+
+@paineis_bp.get("/carteiras")
+@login_required
+@requer_item_menu_paineis("empresas")
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def carteiras_lista():
+    q = (request.args.get("q") or "").strip()
+    page = max(int(request.args.get("page", 1) or 1), 1)
+    per_page = 20
+    offset = (page - 1) * per_page
+
+    hoje = date.today()
+    dt_inicio_mes = date(hoje.year, hoje.month, 1)
+
+    if hoje.month == 12:
+        dt_prox_mes = date(hoje.year + 1, 1, 1)
+    else:
+        dt_prox_mes = date(hoje.year, hoje.month + 1, 1)
+
+    if hoje.month == 1:
+        dt_inicio_mes_anterior = date(hoje.year - 1, 12, 1)
+    else:
+        dt_inicio_mes_anterior = date(hoje.year, hoje.month - 1, 1)
+
+    dt_fim_mes_anterior_exclusivo = dt_inicio_mes
+
+    sql_total = text("""
+        SELECT COUNT(1) AS Total
+        FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+        INNER JOIN [Integracao].[dbo].[Vendedores] v
+            ON v.IDVendedor = cv.IDVendedor
+        WHERE
+            ISNULL(v.BitAtivo, 1) = 1
+            AND (
+                :q = ''
+                OR v.NomeVendedor LIKE :q_like
+                OR CAST(v.IDVendedor AS VARCHAR(30)) LIKE :q_like
+            );
+    """)
+
+    total = db.session.execute(
+        sql_total,
+        {
+            "q": q,
+            "q_like": f"%{q}%"
+        }
+    ).scalar() or 0
+
+    sql = text("""
+        ;WITH CarteirasFiltradas AS
+        (
+            SELECT
+                cv.IDFatoCarteiraVendedor,
+                cv.IDVendedor,
+                cv.IDEmpresaProprietaria,
+                cv.IDUsuarioCoordenador,
+                cv.Meta,
+                cv.DataAtualizacao,
+                v.NomeVendedor
+            FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+            INNER JOIN [Integracao].[dbo].[Vendedores] v
+                ON v.IDVendedor = cv.IDVendedor
+            WHERE
+                ISNULL(v.BitAtivo, 1) = 1
+                AND (
+                    :q = ''
+                    OR v.NomeVendedor LIKE :q_like
+                    OR CAST(v.IDVendedor AS VARCHAR(30)) LIKE :q_like
+                )
+        ),
+        EmpresasCarteira AS
+        (
+            SELECT DISTINCT
+                cf.IDFatoCarteiraVendedor,
+                cve.IDEmpresa
+            FROM CarteirasFiltradas cf
+            LEFT JOIN [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+                ON cve.IDFatoCarteiraVendedor = cf.IDFatoCarteiraVendedor
+            WHERE cve.IDEmpresa IS NOT NULL
+        ),
+        ResumoEmpresas AS
+        (
+            SELECT
+                ec.IDFatoCarteiraVendedor,
+                COUNT(DISTINCT ec.IDEmpresa) AS QuantidadeEmpresas,
+                COUNT(DISTINCT CASE WHEN ISNULL(e.BitCliente, 0) = 1 THEN ec.IDEmpresa ELSE NULL END) AS ClientesAtivos
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
+                ON e.IDEmpresa = ec.IDEmpresa
+            GROUP BY ec.IDFatoCarteiraVendedor
+        ),
+        ResumoContratosCabecalho AS
+        (
+            SELECT
+                ec.IDFatoCarteiraVendedor,
+                CAST(SUM(ISNULL(ch.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ec.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            GROUP BY ec.IDFatoCarteiraVendedor
+        ),
+        ResumoContratosItens AS
+        (
+            SELECT
+                ec.IDFatoCarteiraVendedor,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_prox_mes
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ec.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
+                ON it.IDFatoControleContratoEuromidia = ch.IDFatoControleContratosEuromidia
+               AND ISNULL(it.BitAtivo, 1) = 1
+            GROUP BY ec.IDFatoCarteiraVendedor
+        ),
+        BaseCarteiras AS
+        (
+            SELECT
+                cf.IDFatoCarteiraVendedor,
+                cf.IDVendedor,
+                cf.NomeVendedor,
+                cf.Meta,
+                cf.DataAtualizacao,
+                ISNULL(re.QuantidadeEmpresas, 0) AS QuantidadeEmpresas,
+                ISNULL(re.ClientesAtivos, 0) AS ClientesAtivos,
+                CAST(
+                    ISNULL(
+                        NULLIF(ri.FaturamentoMesItens, 0),
+                        ISNULL(rc.FaturamentoMesCabecalho, 0)
+                    ) AS DECIMAL(18,2)
+                ) AS FaturamentoMes,
+                CAST(ISNULL(ri.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+                CAST(
+                    CASE
+                        WHEN ISNULL(ri.FaturamentoMesAnterior, 0) = 0
+                             AND ISNULL(NULLIF(ri.FaturamentoMesItens, 0), ISNULL(rc.FaturamentoMesCabecalho, 0)) > 0
+                            THEN 100
+                        WHEN ISNULL(ri.FaturamentoMesAnterior, 0) = 0
+                            THEN 0
+                        ELSE (
+                            (
+                                ISNULL(NULLIF(ri.FaturamentoMesItens, 0), ISNULL(rc.FaturamentoMesCabecalho, 0))
+                                - ISNULL(ri.FaturamentoMesAnterior, 0)
+                            ) * 100.0
+                        ) / NULLIF(ri.FaturamentoMesAnterior, 0)
+                    END AS DECIMAL(18,2)
+                ) AS VariacaoFaturamentoPct
+            FROM CarteirasFiltradas cf
+            LEFT JOIN ResumoEmpresas re
+                ON re.IDFatoCarteiraVendedor = cf.IDFatoCarteiraVendedor
+            LEFT JOIN ResumoContratosCabecalho rc
+                ON rc.IDFatoCarteiraVendedor = cf.IDFatoCarteiraVendedor
+            LEFT JOIN ResumoContratosItens ri
+                ON ri.IDFatoCarteiraVendedor = cf.IDFatoCarteiraVendedor
+        )
+        SELECT *
+        FROM BaseCarteiras
+        ORDER BY NomeVendedor ASC
+        OFFSET :offset ROWS FETCH NEXT :per_page ROWS ONLY;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "q": q,
+            "q_like": f"%{q}%",
+            "offset": offset,
+            "per_page": per_page,
+            "dt_inicio_mes": dt_inicio_mes,
+            "dt_prox_mes": dt_prox_mes,
+            "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
+            "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
+        }
+    ).mappings().all()
+
+    total_pages = max((int(total) + per_page - 1) // per_page, 1)
+
+    paginacao = {
+        "page": page,
+        "per_page": per_page,
+        "total": int(total),
+        "total_pages": total_pages,
+        "inicio": (offset + 1) if total > 0 else 0,
+        "fim": min(offset + per_page, int(total)) if total > 0 else 0,
+    }
+
+    return render_template(
+        "euromidia/carteiras_lista.html",
+        carteiras=rows,
+        q=q,
+        paginacao=paginacao,
+    )
+
+
+def _carteira_add_meses(dt_base: date, deslocamento: int) -> date:
+    ano = dt_base.year + ((dt_base.month - 1 + deslocamento) // 12)
+    mes = ((dt_base.month - 1 + deslocamento) % 12) + 1
+    return date(ano, mes, 1)
+
+
+@paineis_bp.post("/carteiras/<int:id_fato_carteira_vendedor>/mover-empresa")
+@login_required
+@requer_item_menu_paineis("empresas")
+@limiter.limit("40 per minute", methods=["POST"])
+def carteira_mover_empresa(id_fato_carteira_vendedor: int):
+    id_empresa = int((request.form.get("id_empresa") or 0) or 0)
+    id_carteira_destino = int((request.form.get("id_fato_carteira_destino") or 0) or 0)
+
+    if id_empresa <= 0 or id_carteira_destino <= 0:
+        flash("Informe a empresa e a carteira de destino.", "danger")
+        return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_fato_carteira_vendedor))
+
+    if id_carteira_destino == id_fato_carteira_vendedor:
+        flash("A carteira de destino deve ser diferente da carteira atual.", "danger")
+        return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_fato_carteira_vendedor))
+
+    sql_validar = text("""
+        SELECT TOP (1)
+            OrigemExiste = CASE WHEN EXISTS (
+                SELECT 1
+                FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+                WHERE cve.IDFatoCarteiraVendedor = :id_origem
+                  AND cve.IDEmpresa = :id_empresa
+            ) THEN 1 ELSE 0 END,
+            DestinoExiste = CASE WHEN EXISTS (
+                SELECT 1
+                FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+                WHERE cv.IDFatoCarteiraVendedor = :id_destino
+            ) THEN 1 ELSE 0 END;
+    """)
+
+    validacao = db.session.execute(
+        sql_validar,
+        {
+            "id_origem": id_fato_carteira_vendedor,
+            "id_destino": id_carteira_destino,
+            "id_empresa": id_empresa,
+        }
+    ).mappings().first()
+
+    if not validacao or int(validacao["OrigemExiste"] or 0) != 1:
+        flash("A empresa informada não está nesta carteira.", "danger")
+        return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_fato_carteira_vendedor))
+
+    if int(validacao["DestinoExiste"] or 0) != 1:
+        flash("A carteira de destino não foi encontrada.", "danger")
+        return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_fato_carteira_vendedor))
+
+    sql_mover = text("""
+        UPDATE cve
+           SET cve.IDFatoCarteiraVendedor = dest.IDFatoCarteiraVendedor,
+               cve.IDVendedor = dest.IDVendedor,
+               cve.IDUsuarioCoordenador = dest.IDUsuarioCoordenador,
+               cve.DataAtualizacao = GETDATE()
+        FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+        INNER JOIN [Integracao].[Silver].[FatoCarteiraVendedor] dest
+            ON dest.IDFatoCarteiraVendedor = :id_destino
+        WHERE cve.IDFatoCarteiraVendedor = :id_origem
+          AND cve.IDEmpresa = :id_empresa;
+    """)
+
+    try:
+        db.session.execute(
+            sql_mover,
+            {
+                "id_origem": id_fato_carteira_vendedor,
+                "id_destino": id_carteira_destino,
+                "id_empresa": id_empresa,
+            }
+        )
+        db.session.commit()
+        flash("Empresa movida de carteira com sucesso.", "success")
+        return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_carteira_destino))
+    except Exception as exc:
+        db.session.rollback()
+        flash(f"Falha ao mover empresa de carteira: {exc}", "danger")
+        return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_fato_carteira_vendedor))
+
+
+
+
+
+
+
+
+@paineis_bp.get("/carteiras/<int:id_fato_carteira_vendedor>")
+@login_required
+@requer_item_menu_paineis("empresas")
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def carteira_detalhe(id_fato_carteira_vendedor: int):
+    hoje = date.today()
+    dt_inicio_mes = date(hoje.year, hoje.month, 1)
+    dt_prox_mes = _carteira_add_meses(dt_inicio_mes, 1)
+    dt_inicio_mes_anterior = _carteira_add_meses(dt_inicio_mes, -1)
+    dt_fim_mes_anterior_exclusivo = dt_inicio_mes
+
+    meses_historico = []
+    for desloc in range(-5, 1):
+        dt_ref = _carteira_add_meses(dt_inicio_mes, desloc)
+        meses_historico.append(
+            {
+                "chave": dt_ref.strftime("%Y-%m"),
+                "label": dt_ref.strftime("%b/%y").capitalize(),
+                "dt_inicio": dt_ref,
+                "dt_fim_exclusivo": _carteira_add_meses(dt_ref, 1),
+            }
+        )
+
+    sql_header = text("""
+        ;WITH EmpresasCarteira AS
+        (
+            SELECT DISTINCT
+                cve.IDFatoCarteiraVendedor,
+                cve.IDEmpresa
+            FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+            WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+        ),
+        ResumoEmpresas AS
+        (
+            SELECT
+                ec.IDFatoCarteiraVendedor,
+                COUNT(DISTINCT ec.IDEmpresa) AS QuantidadeEmpresas,
+                COUNT(DISTINCT CASE WHEN ISNULL(e.BitCliente, 0) = 1 THEN ec.IDEmpresa ELSE NULL END) AS ClientesAtivos
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
+                ON e.IDEmpresa = ec.IDEmpresa
+            GROUP BY ec.IDFatoCarteiraVendedor
+        ),
+        ResumoContratoCabecalho AS
+        (
+            SELECT
+                ec.IDFatoCarteiraVendedor,
+                CAST(SUM(ISNULL(ch.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ec.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            GROUP BY ec.IDFatoCarteiraVendedor
+        ),
+        ResumoContratoItens AS
+        (
+            SELECT
+                ec.IDFatoCarteiraVendedor,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_prox_mes
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ec.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
+                ON it.IDFatoControleContratoEuromidia = ch.IDFatoControleContratosEuromidia
+               AND ISNULL(it.BitAtivo, 1) = 1
+            GROUP BY ec.IDFatoCarteiraVendedor
+        )
+        SELECT TOP (1)
+            cv.IDFatoCarteiraVendedor,
+            cv.IDVendedor,
+            cv.IDEmpresaProprietaria,
+            cv.IDUsuarioCoordenador,
+            cv.Meta,
+            cv.DataAtualizacao,
+            v.NomeVendedor,
+            ISNULL(re.QuantidadeEmpresas, 0) AS QuantidadeEmpresas,
+            ISNULL(re.ClientesAtivos, 0) AS ClientesAtivos,
+            CAST(
+                ISNULL(
+                    NULLIF(ri.FaturamentoMesItens, 0),
+                    ISNULL(rc.FaturamentoMesCabecalho, 0)
+                ) AS DECIMAL(18,2)
+            ) AS FaturamentoMes,
+            CAST(ISNULL(ri.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+            CAST(
+                CASE
+                    WHEN ISNULL(ri.FaturamentoMesAnterior, 0) = 0
+                         AND ISNULL(NULLIF(ri.FaturamentoMesItens, 0), ISNULL(rc.FaturamentoMesCabecalho, 0)) > 0
+                        THEN 100
+                    WHEN ISNULL(ri.FaturamentoMesAnterior, 0) = 0
+                        THEN 0
+                    ELSE (
+                        (
+                            ISNULL(NULLIF(ri.FaturamentoMesItens, 0), ISNULL(rc.FaturamentoMesCabecalho, 0))
+                            - ISNULL(ri.FaturamentoMesAnterior, 0)
+                        ) * 100.0
+                    ) / NULLIF(ri.FaturamentoMesAnterior, 0)
+                END AS DECIMAL(18,2)
+            ) AS VariacaoFaturamentoPct
+        FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+        INNER JOIN [Integracao].[dbo].[Vendedores] v
+            ON v.IDVendedor = cv.IDVendedor
+        LEFT JOIN ResumoEmpresas re
+            ON re.IDFatoCarteiraVendedor = cv.IDFatoCarteiraVendedor
+        LEFT JOIN ResumoContratoCabecalho rc
+            ON rc.IDFatoCarteiraVendedor = cv.IDFatoCarteiraVendedor
+        LEFT JOIN ResumoContratoItens ri
+            ON ri.IDFatoCarteiraVendedor = cv.IDFatoCarteiraVendedor
+        WHERE cv.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor;
+    """)
+
+    carteira = db.session.execute(
+        sql_header,
+        {
+            "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+            "dt_inicio_mes": dt_inicio_mes,
+            "dt_prox_mes": dt_prox_mes,
+            "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
+            "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
+        }
+    ).mappings().first()
+
+    if not carteira:
+        flash("Carteira não encontrada.", "danger")
+        return redirect(url_for("Paineis.carteiras_lista"))
+
+    sql_empresas = text("""
+        ;WITH EmpresasCarteira AS
+        (
+            SELECT DISTINCT
+                cve.IDFatoCarteiraVendedorEmpresas,
+                cve.IDFatoCarteiraVendedor,
+                cve.IDEmpresa,
+                cve.DataAtualizacao,
+                e.CNPJ,
+                e.RazaoSocial,
+                e.NomeFantasia,
+                e.Porte,
+                e.CNAE,
+                e.DescricaoCnae,
+                e.Municipio,
+                e.UF,
+                ISNULL(e.BitCliente, 0) AS BitCliente,
+                ISNULL(e.BitClienteDireto, 0) AS BitClienteDireto
+            FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
+                ON e.IDEmpresa = cve.IDEmpresa
+            WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+        ),
+        EmpresasComSetor AS
+        (
+            SELECT
+                ec.*,
+                ISNULL(cnaes.Setor, 'Sem setor') AS Setor,
+                ISNULL(cnaes.MacroSetor, 'Sem macrosetor') AS MacroSetor,
+                cnaes.ScoreSetor,
+                ISNULL(cnaes.ClassificacaoMacro, 'Sem classificação') AS ClassificacaoMacro,
+                COALESCE(
+                    NULLIF(LTRIM(RTRIM(ec.RazaoSocial)), ''),
+                    'Empresa ID ' + CAST(ec.IDEmpresa AS VARCHAR(30))
+                ) AS NomeEmpresaExibicao
+            FROM EmpresasCarteira ec
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    dc.Setor,
+                    dc.MacroSetor,
+                    dc.ScoreSetor,
+                    dc.ClassificacaoMacro
+                FROM [Integracao].[Silver].[DimCnaes] dc
+                WHERE LEFT(
+                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(dc.cnaepadrao, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
+                        7
+                      ) = LEFT(
+                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(ec.CNAE, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
+                        7
+                      )
+            ) cnaes
+        ),
+        ResumoContratosCabecalho AS
+        (
+            SELECT
+                ecs.IDEmpresa,
+                CAST(SUM(ISNULL(ch.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho,
+                COUNT(DISTINCT ch.IDFatoControleContratosEuromidia) AS ContratosAtivos
+            FROM EmpresasComSetor ecs
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ecs.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            GROUP BY ecs.IDEmpresa
+        ),
+        ResumoContratosItens AS
+        (
+            SELECT
+                ecs.IDEmpresa,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_prox_mes
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+            FROM EmpresasComSetor ecs
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ecs.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
+                ON it.IDFatoControleContratoEuromidia = ch.IDFatoControleContratosEuromidia
+               AND ISNULL(it.BitAtivo, 1) = 1
+            GROUP BY ecs.IDEmpresa
+        ),
+        TotalCarteira AS
+        (
+            SELECT
+                CAST(SUM(
+                    ISNULL(
+                        NULLIF(rci.FaturamentoMesItens, 0),
+                        ISNULL(rcc.FaturamentoMesCabecalho, 0)
+                    )
+                ) AS DECIMAL(18,2)) AS TotalFaturamentoMes
+            FROM EmpresasComSetor ecs
+            LEFT JOIN ResumoContratosCabecalho rcc
+                ON rcc.IDEmpresa = ecs.IDEmpresa
+            LEFT JOIN ResumoContratosItens rci
+                ON rci.IDEmpresa = ecs.IDEmpresa
+        )
+        SELECT
+            ecs.IDFatoCarteiraVendedorEmpresas,
+            ecs.IDEmpresa,
+            CAST(NULL AS INT) AS IDEmpresaProprietaria,
+            ecs.CNPJ,
+            ecs.RazaoSocial,
+            ecs.NomeFantasia,
+            ecs.NomeEmpresaExibicao,
+            ecs.Porte,
+            ecs.CNAE,
+            ecs.DescricaoCnae,
+            ecs.Municipio,
+            ecs.UF,
+            ecs.BitCliente,
+            ecs.BitClienteDireto,
+            ecs.DataAtualizacao,
+            ecs.Setor,
+            ecs.MacroSetor,
+            ecs.ScoreSetor,
+            ecs.ClassificacaoMacro,
+            CAST(
+                ISNULL(
+                    NULLIF(rci.FaturamentoMesItens, 0),
+                    ISNULL(rcc.FaturamentoMesCabecalho, 0)
+                ) AS DECIMAL(18,2)
+            ) AS FaturamentoMes,
+            CAST(ISNULL(rci.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+            ISNULL(rcc.ContratosAtivos, 0) AS ContratosAtivos,
+            CAST(
+                CASE
+                    WHEN ISNULL(rci.FaturamentoMesAnterior, 0) = 0
+                         AND ISNULL(
+                             NULLIF(rci.FaturamentoMesItens, 0),
+                             ISNULL(rcc.FaturamentoMesCabecalho, 0)
+                         ) > 0
+                        THEN 100
+                    WHEN ISNULL(rci.FaturamentoMesAnterior, 0) = 0
+                        THEN 0
+                    ELSE (
+                        (
+                            ISNULL(
+                                NULLIF(rci.FaturamentoMesItens, 0),
+                                ISNULL(rcc.FaturamentoMesCabecalho, 0)
+                            )
+                            - ISNULL(rci.FaturamentoMesAnterior, 0)
+                        ) * 100.0
+                    ) / NULLIF(rci.FaturamentoMesAnterior, 0)
+                END AS DECIMAL(18,2)
+            ) AS VariacaoFaturamentoPct,
+            CAST(
+                CASE
+                    WHEN ISNULL(tc.TotalFaturamentoMes, 0) = 0 THEN 0
+                    ELSE (
+                        ISNULL(
+                            NULLIF(rci.FaturamentoMesItens, 0),
+                            ISNULL(rcc.FaturamentoMesCabecalho, 0)
+                        ) * 100.0
+                    ) / NULLIF(tc.TotalFaturamentoMes, 0)
+                END AS DECIMAL(18,2)
+            ) AS ParticipacaoCarteiraPct
+        FROM EmpresasComSetor ecs
+        LEFT JOIN ResumoContratosCabecalho rcc
+            ON rcc.IDEmpresa = ecs.IDEmpresa
+        LEFT JOIN ResumoContratosItens rci
+            ON rci.IDEmpresa = ecs.IDEmpresa
+        CROSS JOIN TotalCarteira tc
+        ORDER BY
+            ISNULL(
+                NULLIF(rci.FaturamentoMesItens, 0),
+                ISNULL(rcc.FaturamentoMesCabecalho, 0)
+            ) DESC,
+            ecs.NomeEmpresaExibicao ASC;
+    """)
+
+    empresas = db.session.execute(
+        sql_empresas,
+        {
+            "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+            "dt_inicio_mes": dt_inicio_mes,
+            "dt_prox_mes": dt_prox_mes,
+            "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
+            "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
+        }
+    ).mappings().all()
+
+    sql_setores = text("""
+        ;WITH EmpresasCarteira AS
+        (
+            SELECT DISTINCT
+                cve.IDEmpresa,
+                e.CNAE
+            FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
+                ON e.IDEmpresa = cve.IDEmpresa
+            WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+        ),
+        Setores AS
+        (
+            SELECT
+                ISNULL(cnaes.Setor, 'Sem setor') AS Setor,
+                COUNT(DISTINCT ec.IDEmpresa) AS QuantidadeEmpresas
+            FROM EmpresasCarteira ec
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    dc.Setor
+                FROM [Integracao].[Silver].[DimCnaes] dc
+                WHERE LEFT(
+                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(dc.cnaepadrao, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
+                        7
+                      ) = LEFT(
+                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(ec.CNAE, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
+                        7
+                      )
+            ) cnaes
+            GROUP BY ISNULL(cnaes.Setor, 'Sem setor')
+        )
+        SELECT
+            s.Setor,
+            s.QuantidadeEmpresas,
+            CAST(
+                CASE
+                    WHEN SUM(s.QuantidadeEmpresas) OVER() = 0 THEN 0
+                    ELSE (s.QuantidadeEmpresas * 100.0) / NULLIF(SUM(s.QuantidadeEmpresas) OVER(), 0)
+                END AS DECIMAL(18,2)
+            ) AS ParticipacaoSetorPct
+        FROM Setores s
+        ORDER BY s.QuantidadeEmpresas DESC, s.Setor ASC;
+    """)
+
+    setores = db.session.execute(
+        sql_setores,
+        {"id_fato_carteira_vendedor": id_fato_carteira_vendedor}
+    ).mappings().all()
+
+    historico_rows = []
+    for mes_ref in meses_historico:
+        sql_hist = text("""
+            SELECT
+                CAST(SUM(
+                    ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                ) AS DECIMAL(18,2)) AS Valor
+            FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = cve.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
+                ON it.IDFatoControleContratoEuromidia = ch.IDFatoControleContratosEuromidia
+               AND ISNULL(it.BitAtivo, 1) = 1
+            WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+              AND it.DataInicioPrevisto < :dt_fim_exclusivo
+              AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio;
+        """)
+
+        valor = db.session.execute(
+            sql_hist,
+            {
+                "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+                "dt_inicio": mes_ref["dt_inicio"],
+                "dt_fim_exclusivo": mes_ref["dt_fim_exclusivo"],
+            }
+        ).scalar() or 0
+
+        historico_rows.append(
+            {
+                "chave": mes_ref["chave"],
+                "label": mes_ref["label"],
+                "valor": float(valor or 0),
+            }
+        )
+
+    sql_destinos = text("""
+        SELECT
+            cv.IDFatoCarteiraVendedor,
+            cv.IDVendedor,
+            NomeVendedor = COALESCE(
+                NULLIF(LTRIM(RTRIM(v.NomeVendedor)), ''),
+                'Carteira #' + CAST(cv.IDFatoCarteiraVendedor AS varchar(30))
+            )
+        FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+        LEFT JOIN [Integracao].[dbo].[Vendedores] v
+            ON v.IDVendedor = cv.IDVendedor
+        WHERE cv.IDFatoCarteiraVendedor <> :id_fato_carteira_vendedor
+          AND (
+                cv.IDEmpresaProprietaria = :id_empresa_proprietaria
+                OR :id_empresa_proprietaria IS NULL
+              )
+          AND ISNULL(v.BitAtivo, 1) = 1
+        ORDER BY
+            COALESCE(NULLIF(LTRIM(RTRIM(v.NomeVendedor)), ''), 'Carteira #' + CAST(cv.IDFatoCarteiraVendedor AS varchar(30))) ASC,
+            cv.IDFatoCarteiraVendedor ASC;
+    """)
+
+    carteiras_destino = db.session.execute(
+        sql_destinos,
+        {
+            "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+            "id_empresa_proprietaria": carteira["IDEmpresaProprietaria"],
+        }
+    ).mappings().all()
+
+    top_empresas = []
+    for row in empresas[:8]:
+        top_empresas.append(
+            {
+                "empresa": row.get("RazaoSocial") or row.get("NomeEmpresaExibicao") or "Empresa sem nome",
+                "valor": float(row.get("FaturamentoMes") or 0),
+                "pct": float(row.get("ParticipacaoCarteiraPct") or 0),
+            }
+        )
+
+    setores_json = []
+    for row in setores:
+        setores_json.append(
+            {
+                "label": row.get("Setor") or "Sem setor",
+                "valor": int(row.get("QuantidadeEmpresas") or 0),
+                "pct": float(row.get("ParticipacaoSetorPct") or 0),
+            }
+        )
+
+    return render_template(
+        "euromidia/carteira_detalhe.html",
+        carteira=carteira,
+        empresas=empresas,
+        setores=setores,
+        setores_json=json.dumps(setores_json, ensure_ascii=False),
+        historico_faturamento=historico_rows,
+        historico_faturamento_json=json.dumps(historico_rows, ensure_ascii=False),
+        top_empresas=top_empresas,
+        top_empresas_json=json.dumps(top_empresas, ensure_ascii=False),
+        carteiras_destino=carteiras_destino,
+    )

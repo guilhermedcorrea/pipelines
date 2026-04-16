@@ -1062,6 +1062,12 @@ input:disabled, select:disabled, textarea:disabled{
                      class="{% if request.path == url_for('admin.ativos') %}menu-link-current{% endif %}">
                     Performance Ativos
                   </a>
+
+
+                   <a href="{{ url_for('Paineis.carteiras_lista') }}"
+                     class="{% if request.path == url_for('Paineis.carteiras_lista') %}menu-link-current{% endif %}">
+                    Carteiras Euromidia
+                  </a>
                 </div>
               </div>
             {% endif %}

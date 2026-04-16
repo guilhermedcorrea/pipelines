@@ -19143,8 +19143,6 @@ def api_empresa_cadastro_buscar_por_cnpj():
 
 
     
-
-
 @kanban_bp.route("/api/empresas/cadastro/salvar", methods=["POST"])
 @login_required
 @limiter.limit("60/minute")
@@ -19211,7 +19209,10 @@ def api_empresa_cadastro_salvar():
     """)
 
     try:
-        row_existente_cnpj = db.session.execute(sql_lock_cnpj, {"cnpj": cnpj_normalizado}).mappings().first()
+        row_existente_cnpj = db.session.execute(
+            sql_lock_cnpj,
+            {"cnpj": cnpj_normalizado},
+        ).mappings().first()
 
         row_existente_id = None
         if not row_existente_cnpj and id_empresa_informado:
@@ -19310,6 +19311,7 @@ def api_empresa_cadastro_salvar():
                     Longitude,
                     BitCliente
                 )
+                OUTPUT INSERTED.IDEmpresa
                 VALUES (
                     :IDEmpresaProprietaria,
                     :CNPJ,
@@ -19347,12 +19349,13 @@ def api_empresa_cadastro_salvar():
                     :Longitude,
                     :BitCliente
                 );
-
-                SELECT CAST(SCOPE_IDENTITY() AS int) AS IDEmpresa;
             """)
 
             novo_id = db.session.execute(sql_insert, dados_sql).scalar()
             id_empresa_alvo = int(novo_id or 0)
+
+            if id_empresa_alvo <= 0:
+                raise RuntimeError("O INSERT da empresa não retornou um IDEmpresa válido.")
 
         db.session.commit()
 
@@ -19374,7 +19377,6 @@ def api_empresa_cadastro_salvar():
             "empresas_proprietarias": _listar_empresas_proprietarias_para_cadastro(),
         }
     )
-
 
 
 
