@@ -1364,6 +1364,10 @@
     display:none !important;
   }
 
+  .kb-contrato-box[hidden]{
+    display:none !important;
+  }
+
   .kb-contrato-label{
     font-size: 12px;
     font-weight: 950;
@@ -2865,6 +2869,17 @@
         <button class="kb-btn" id="btnAddTag">Adicionar</button>
       </div>
 
+      <div id="wrapFormularioSolicitacaoContrato" class="kb-contrato-box" hidden>
+        <div class="kb-section-title">Formulário do contrato</div>
+        
+
+        <div class="kb-section-title" style="margin-top:12px;">Cabeçalho do contrato</div>
+        <div id="formSolicitacaoContratoHeader" class="kb-cadastro-empresa-grid"></div>
+
+        <div class="kb-section-title" style="margin-top:14px;">Item do contrato</div>
+        <div id="formSolicitacaoContratoItem" class="kb-cadastro-empresa-grid"></div>
+      </div>
+
       <div id="tagsNoCard" class="kb-tags"></div>
 
       <div class="kb-divider" style="margin:4px 0;"></div>
@@ -3355,10 +3370,244 @@
   const wrapSelectCodPontoContratoCard = document.getElementById("wrapSelectCodPontoContratoCard");
   const wrapSelectCodFaceContratoCard = document.getElementById("wrapSelectCodFaceContratoCard");
   const msgFluxoContrato = document.getElementById("msgFluxoContrato");
+  const wrapFormularioSolicitacaoContrato = document.getElementById("wrapFormularioSolicitacaoContrato");
+  const formSolicitacaoContratoHeader = document.getElementById("formSolicitacaoContratoHeader");
+  const formSolicitacaoContratoItem = document.getElementById("formSolicitacaoContratoItem");
+  const ID_FASE_FORMULARIO_CONTRATO = 4;
   const modalCadastroEmpresa = document.getElementById("modalCadastroEmpresa");
   const btnFecharCadastroEmpresa = document.getElementById("btnFecharCadastroEmpresa");
   const btnSalvarCadastroEmpresa = document.getElementById("btnSalvarCadastroEmpresa");
   const msgCadastroEmpresa = document.getElementById("msgCadastroEmpresa");
+
+  const CAMPOS_SOLICITACAO_HEADER = [
+    { nome: "NumeroPrevia", label: "Número Prévia" },
+    { nome: "CNPJ", label: "CNPJ", somenteLeitura: true },
+    { nome: "DataAssinaturaRenovacao", label: "Data Assinatura / Renovação", tipo: "date" },
+    { nome: "IDTrimestre", label: "Trimestre" },
+    { nome: "DataLancamento", label: "Data Lançamento", tipo: "date" },
+    { nome: "RazaoSocial", label: "Razão Social", span: 2 },
+    { nome: "CPF", label: "CPF" },
+    { nome: "MarcaExibida", label: "Marca Exibida" },
+    { nome: "Vendedor", label: "Vendedor", somenteLeitura: true },
+    { nome: "TipoDocumento", label: "Tipo Documento" },
+    { nome: "Origem", label: "Origem" },
+    { nome: "SDR", label: "SDR" }
+  ];
+
+  const CAMPOS_SOLICITACAO_ITEM = [
+    { nome: "DataLancamento", label: "Data Lançamento", tipo: "date" },
+    { nome: "Cota", label: "Cota" },
+    { nome: "CidadeExibicao", label: "Cidade Exibição" },
+    { nome: "Tipo", label: "Tipo" },
+    { nome: "Origem", label: "Origem" },
+    { nome: "EmpresaEuro", label: "Empresa Euro" },
+    { nome: "CnpjExibibora", label: "CNPJ Exibidora" },
+    { nome: "TipoDocumento", label: "Tipo Documento" },
+    { nome: "RazaoSocial", label: "Razão Social", span: 2 },
+    { nome: "CPF", label: "CPF" },
+    { nome: "MarcaExibida", label: "Marca Exibida" },
+    { nome: "Vendedor", label: "Vendedor", somenteLeitura: true },
+    { nome: "SDR", label: "SDR" },
+    { nome: "Intermediario", label: "Intermediário" },
+    { nome: "CnpjIntermediario", label: "CNPJ Intermediário" },
+    { nome: "DataAssinaturaRenovacao", label: "Data Assinatura / Renovação", tipo: "date" },
+    { nome: "IDTrimestre", label: "Trimestre" },
+    { nome: "TexmpoExposicao", label: "Tempo Exposição" },
+    { nome: "DataInicioPrevisto", label: "Data Início Previsto", tipo: "date" },
+    { nome: "DataTerminoPrevisto", label: "Data Término Previsto", tipo: "date" },
+    { nome: "InicioRenovacao", label: "Início Renovação" },
+    { nome: "FaturamentoBrutoMensal", label: "Faturamento Bruto Mensal" },
+    { nome: "PercentualPermuta", label: "% Permuta" },
+    { nome: "CotaOportunidade", label: "Cota Oportunidade" },
+    { nome: "ValorPermuta", label: "Valor Permuta" },
+    { nome: "FaturamentoLiquidoPermuta", label: "Faturamento Líquido Permuta" },
+    { nome: "NumeroParcelas", label: "Número Parcelas" },
+    { nome: "DataInicioVencimento", label: "Data Início Vencimento", tipo: "date" },
+    { nome: "TotalBrutoContrato", label: "Total Bruto Contrato" },
+    { nome: "TotalLiquidoContratoAGBRCTACORDO", label: "Total Líquido Contrato AGBR CTA Acordo" },
+    { nome: "TotalLiquidoContratoAGBRVENDGERCOOR", label: "Total Líquido Contrato AGBR Vend/Ger/Coor" },
+    { nome: "PercentualAgencia", label: "% Agência" },
+    { nome: "ValorMensalAgencia", label: "Valor Mensal Agência" },
+    { nome: "PercentualBureau", label: "% Bureau" },
+    { nome: "ValorBureauMensal", label: "Valor Bureau Mensal" },
+    { nome: "PercentualCartaAcordo", label: "% Carta Acordo" },
+    { nome: "ValorCartaAcordoMensal", label: "Valor Carta Acordo Mensal" },
+    { nome: "ValorOutrasComissoes", label: "Valor Outras Comissões" },
+    { nome: "FaturamentoLiquidoMensal", label: "Faturamento Líquido Mensal" },
+    { nome: "PercentualComissaoVendedor", label: "% Comissão Vendedor" },
+    { nome: "ValorVendedor", label: "Valor Vendedor" },
+    { nome: "ValorVendedorTotal", label: "Valor Vendedor Total" },
+    { nome: "PercentualComissaoCoordenacao", label: "% Comissão Coordenação" },
+    { nome: "ValorCoordenador", label: "Valor Coordenador" },
+    { nome: "ValorCoordenadorTotal", label: "Valor Coordenador Total" },
+    { nome: "PercentualComissaoGerencia", label: "% Comissão Gerência" },
+    { nome: "ValorGerencia", label: "Valor Gerência" },
+    { nome: "ValorGerenciaTotal", label: "Valor Gerência Total" },
+    { nome: "AtivoCancelamento", label: "Ativo Cancelamento" },
+    { nome: "FaturamentoLiquidoFinalMensal", label: "Faturamento Líquido Final Mensal" },
+    { nome: "ComissaoGerenciaNordeste", label: "Comissão Gerência Nordeste" },
+    { nome: "Faturamento", label: "Faturamento" },
+    { nome: "DataCancelamento", label: "Data Cancelamento", tipo: "date" },
+    { nome: "Status", label: "Status" },
+    { nome: "OBS", label: "OBS", tipo: "textarea", span: 2 }
+  ];
+
+  function idCampoSolicitacao(secao, nomeCampo){
+    return `solicitacao${secao}${nomeCampo}`;
+  }
+
+  function normalizarDataParaInput(valor){
+    const texto = safeStr(valor || "").trim();
+    if (!texto) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
+    const match = texto.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    return texto;
+  }
+
+  function criarCampoFormularioSolicitacao(secao, meta){
+    const wrap = document.createElement("div");
+    wrap.className = "kb-contrato-campo" + (meta.span === 2 ? " span-2" : "");
+
+    const label = document.createElement("label");
+    label.className = "kb-contrato-label";
+    label.setAttribute("for", idCampoSolicitacao(secao, meta.nome));
+    label.textContent = meta.label;
+    wrap.appendChild(label);
+
+    let campo;
+    if (meta.tipo === "textarea") {
+      campo = document.createElement("textarea");
+      campo.rows = 3;
+      campo.className = "kb-textarea";
+    } else {
+      campo = document.createElement("input");
+      campo.type = meta.tipo === "date" ? "date" : "text";
+      campo.className = "kb-input";
+    }
+
+    campo.id = idCampoSolicitacao(secao, meta.nome);
+    campo.dataset.campoSolicitacao = meta.nome;
+    campo.dataset.secaoSolicitacao = secao;
+    if (meta.somenteLeitura) {
+      campo.readOnly = true;
+    }
+    wrap.appendChild(campo);
+    return wrap;
+  }
+
+  function renderizarFormularioSolicitacaoContrato(){
+    if (formSolicitacaoContratoHeader) {
+      formSolicitacaoContratoHeader.innerHTML = "";
+      CAMPOS_SOLICITACAO_HEADER.forEach((meta) => {
+        formSolicitacaoContratoHeader.appendChild(criarCampoFormularioSolicitacao("Header", meta));
+      });
+    }
+
+    if (formSolicitacaoContratoItem) {
+      formSolicitacaoContratoItem.innerHTML = "";
+      CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
+        formSolicitacaoContratoItem.appendChild(criarCampoFormularioSolicitacao("Item", meta));
+      });
+    }
+  }
+
+  function obterInputFormularioSolicitacao(secao, nomeCampo){
+    return document.getElementById(idCampoSolicitacao(secao, nomeCampo));
+  }
+
+  function setValorFormularioSolicitacao(secao, meta, valor){
+    const input = obterInputFormularioSolicitacao(secao, meta.nome);
+    if (!input) return;
+    if (meta.tipo === "date") {
+      input.value = normalizarDataParaInput(valor);
+      return;
+    }
+    input.value = valor == null ? "" : String(valor);
+  }
+
+  function limparFormularioSolicitacaoContrato(){
+    CAMPOS_SOLICITACAO_HEADER.forEach((meta) => setValorFormularioSolicitacao("Header", meta, ""));
+    CAMPOS_SOLICITACAO_ITEM.forEach((meta) => setValorFormularioSolicitacao("Item", meta, ""));
+  }
+
+  function preencherFormularioSolicitacaoContrato(snapshotEditavel, card, vendedorLogado){
+    limparFormularioSolicitacaoContrato();
+
+    const header = snapshotEditavel && typeof snapshotEditavel.header === "object" ? snapshotEditavel.header : {};
+    const item = snapshotEditavel && typeof snapshotEditavel.item === "object" ? snapshotEditavel.item : {};
+    const vendedorNome = safeStr(header?.Vendedor || item?.Vendedor || vendedorLogado?.NomeVendedor || nomeVendedorDoCard(card) || "").trim();
+    const cnpjPrincipal = safeStr(header?.CNPJ || card?.EmpresaCNPJ || card?.CNPJ || "").trim();
+    const razaoPrincipal = safeStr(header?.RazaoSocial || item?.RazaoSocial || card?.EmpresaRazaoSocial || card?.NomeEmpresa || "").trim();
+    const marcaPadrao = safeStr(header?.MarcaExibida || item?.MarcaExibida || card?.Marca || "").trim();
+
+    CAMPOS_SOLICITACAO_HEADER.forEach((meta) => {
+      let valor = header?.[meta.nome];
+      if (meta.nome === "CNPJ" && !safeStr(valor || "").trim()) valor = cnpjPrincipal;
+      if (meta.nome === "RazaoSocial" && !safeStr(valor || "").trim()) valor = razaoPrincipal;
+      if (meta.nome === "MarcaExibida" && !safeStr(valor || "").trim()) valor = marcaPadrao;
+      if (meta.nome === "Vendedor" && !safeStr(valor || "").trim()) valor = vendedorNome;
+      setValorFormularioSolicitacao("Header", meta, valor);
+    });
+
+    CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
+      let valor = item?.[meta.nome];
+      if (meta.nome === "RazaoSocial" && !safeStr(valor || "").trim()) valor = razaoPrincipal;
+      if (meta.nome === "MarcaExibida" && !safeStr(valor || "").trim()) valor = marcaPadrao;
+      if (meta.nome === "Vendedor" && !safeStr(valor || "").trim()) valor = vendedorNome;
+      if (meta.nome === "CNPJ" && !safeStr(valor || "").trim()) valor = cnpjPrincipal;
+      if (meta.nome === "DataInicioPrevisto" && !safeStr(valor || "").trim()) valor = item?.DataInicioPrevisto || card?.DataInicioPrevisto || "";
+      setValorFormularioSolicitacao("Item", meta, valor);
+    });
+  }
+
+  function coletarFormularioSolicitacaoContrato(){
+    const header = {};
+    const item = {};
+
+    CAMPOS_SOLICITACAO_HEADER.forEach((meta) => {
+      const input = obterInputFormularioSolicitacao("Header", meta.nome);
+      if (!input) return;
+      const valor = safeStr(input.value || "").trim();
+      header[meta.nome] = valor || null;
+    });
+
+    CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
+      const input = obterInputFormularioSolicitacao("Item", meta.nome);
+      if (!input) return;
+      const valor = safeStr(input.value || "").trim();
+      item[meta.nome] = valor || null;
+    });
+
+    return { header, item };
+  }
+
+  function obterIdFaseAtualDoCardAbertoNoModal(){
+    const idFaseDoDataset = idNum(modalCard?.dataset?.idFaseAtual || 0);
+    if (idFaseDoDataset > 0) {
+      return idFaseDoDataset;
+    }
+
+    const idFaseDoCardAberto = idNum(obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual || 0);
+    return idFaseDoCardAberto;
+  }
+
+  function modalCardEstaNaFaseQuatro(){
+    return obterIdFaseAtualDoCardAbertoNoModal() === ID_FASE_FORMULARIO_CONTRATO;
+  }
+
+  function atualizarVisibilidadeFormularioSolicitacaoContrato(){
+    if (!wrapFormularioSolicitacaoContrato) return;
+
+    const deveExibirFormularioContrato = modalCardEstaNaFaseQuatro();
+
+    wrapFormularioSolicitacaoContrato.hidden = !deveExibirFormularioContrato;
+    wrapFormularioSolicitacaoContrato.style.display = deveExibirFormularioContrato ? "" : "none";
+    wrapFormularioSolicitacaoContrato.setAttribute("aria-hidden", deveExibirFormularioContrato ? "false" : "true");
+  }
+
+  renderizarFormularioSolicitacaoContrato();
+  atualizarVisibilidadeFormularioSolicitacaoContrato();
 
   let clientesDiretoResultadoComboboxAtual = [];
   let bureauResultadoComboboxAtual = [];
@@ -10410,6 +10659,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (idNum(cardAbertoId) === idC && modalCard?.style?.display === "block") {
       modalCard.dataset.idFaseAtual = String(idNum(cardFinal.IDDimKanbanFaseAtual || idDestino) || "");
+      atualizarVisibilidadeFormularioSolicitacaoContrato();
       atualizarVisibilidadeEmpresasRelacionadasCard();
     }
 
@@ -10563,10 +10813,14 @@ async function moverCard(idCard, idFasePara, posicao) {
     versaoConcorrenciaCardAberto = "";
     cardAbertoConflitoExterno = false;
     estadoInicialCardAberto = null;
+    if (modalCard) {
+      modalCard.dataset.idFaseAtual = "";
+    }
     msgCard.style.display = "none";
     msgCard.textContent = "";
     limparDadosNovoContratoFormulario();
     atualizarVisibilidadeDadosNovoContrato();
+    atualizarVisibilidadeFormularioSolicitacaoContrato();
     atualizarEstadoSalvarCard();
   }
 
@@ -11146,6 +11400,7 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   function atualizarEstadoSalvarCard(){
+    atualizarVisibilidadeFormularioSolicitacaoContrato();
     if (!btnSalvarCard) return;
 
     const temVersao = !!safeStr(versaoConcorrenciaCardAberto);
@@ -11895,6 +12150,10 @@ async function moverCard(idCard, idFasePara, posicao) {
     cardAbertoId = idNum(idCard);
     versaoConcorrenciaCardAberto = "";
     cardAbertoConflitoExterno = false;
+    if (modalCard) {
+      modalCard.dataset.idFaseAtual = "";
+    }
+    atualizarVisibilidadeFormularioSolicitacaoContrato();
     msgCard.style.display = "none";
     msgCard.textContent = "";
     atualizarEstadoSalvarCard();
@@ -11910,6 +12169,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     const cardNormalizado = normalizarCardServidor(j.card);
     if (modalCard) {
       modalCard.dataset.idFaseAtual = String(idNum(cardNormalizado.IDDimKanbanFaseAtual || 0) || "");
+      atualizarVisibilidadeFormularioSolicitacaoContrato();
     }
     atualizarCabecalhoModalCard(cardNormalizado);
     const fluxoPersistido = extrairFluxoContratoPersistidoDoCard(cardNormalizado);
@@ -12046,6 +12306,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       preencherPainelFacesDoCard(painelFaces);
     }
 
+    preencherFormularioSolicitacaoContrato(j?.solicitacao_snapshot_editavel || null, cardNormalizado, j?.vendedor_logado_solicitacao || null);
+    atualizarVisibilidadeFormularioSolicitacaoContrato();
+
     estadoInicialCardAberto = montarEstadoEdicaoCardAtual();
     atualizarEstadoSalvarCard();
 
@@ -12165,6 +12428,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       if (modalCard) {
         modalCard.dataset.idFaseAtual = String(idNum(cardServidor.IDDimKanbanFaseAtual || 0) || "");
+        atualizarVisibilidadeFormularioSolicitacaoContrato();
       }
       atualizarVisibilidadeEmpresasRelacionadasCard();
 
@@ -12355,6 +12619,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       marca: usarDadosNovoContrato ? (safeStr(inputMarcaCard?.value || "").trim() || null) : null,
       telefone: usarDadosNovoContrato ? (normalizarTelefoneContato(inputTelefoneCard?.value || "") || null) : null,
       email: usarDadosNovoContrato ? (safeStr(inputEmailCard?.value || "").trim() || null) : null,
+      solicitacao_contrato: coletarFormularioSolicitacaoContrato(),
       painel_faces: painelFaces
     };
   }

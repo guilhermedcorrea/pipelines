@@ -11,7 +11,6 @@ from sqlalchemy import text
 from flask_socketio import disconnect, emit, join_room, leave_room
 from ..extensions import cache, db, limiter, socketio
 from decimal import Decimal
-
 from ..retry_deadlock import (
     eh_deadlock_sql_server,
     executar_transacao_com_retry_deadlock_ou_enfileirar,
@@ -44,14 +43,6 @@ TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
 TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
 TABELA_TIPO_CLIENTE_DESCONTO = "[Integracao].[Silver].[DimTipoCliente]"
 TABELA_ORIGEM_ATENDIMENTO = "[Integracao].[Silver].[DimOrigemAtendimento]"
-MAPA_TIPO_CLIENTE_DESCONTO_PADRAO = {
-    1: "Planejador de Mídia",
-    2: "Cliente Direto",
-    3: "Agência de Publicidade",
-    4: "Bureau",
-}
-
-
 
 
 
@@ -78,11 +69,6 @@ ID_EMPRESA_PROPRIETARIA_CONTRATOS = 3
 
 
 
-
-
-
-
-
 TABELA_SOLICITACAO_CONTRATO = "[Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]"
 TABELA_SOLICITACAO_CONTRATO_ITEM = "[Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]"
 TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
@@ -93,10 +79,6 @@ FASES_COM_TAG_PLANO_MIDIA = {1, 2, 3, 4}
 NOME_TAG_CONTRATO_EM_AVALIACAO = "Contrato em Avaliação"
 NOME_TAG_TIPO_CONTRATO_NOVO = "Novo Contrato"
 NOME_TAG_TIPO_CONTRATO_ADITIVO = "Aditivo"
-
-
-
-
 
 
 
@@ -665,6 +647,61 @@ def _normalizar_tipo_contrato_card(valor: object) -> str | None:
     return mapa.get(texto)
 
 
+
+
+
+
+
+
+
+
+
+
+def _montar_campos_empresas_relacionadas_card_sql(
+    empresas_relacionadas_card: Mapping[str, Any] | dict[str, Any] | None,
+    *,
+    id_tipo_cliente: Any | None = None,
+) -> dict[str, Any]:
+    """
+    Eu monto os campos dinâmicos do card ligados à estrutura de empresas relacionadas.
+
+    Regras:
+    - calculo os bits a partir do id_tipo_cliente final já resolvido no fluxo;
+    - persisto apenas campos de empresas relacionadas;
+    - NÃO persisto IDDimTipoCliente aqui para evitar duplicidade e ambiguidade;
+    - o IDDimTipoCliente deve ser salvo diretamente na api_card_atualizar.
+    """
+    dados = dict(empresas_relacionadas_card or {})
+    id_tipo_cliente_final = _int_ou_none(id_tipo_cliente)
+    mapa_bits_tipo_cliente = _montar_bits_tipo_cliente_desconto(id_tipo_cliente_final)
+
+    campos: list[str] = []
+    parametros: dict[str, Any] = {}
+
+    if _coluna_existe(TABELA_CARD, "BitClienteDireto"):
+        campos.append("BitClienteDireto = :bit_cliente_direto")
+        parametros["bit_cliente_direto"] = int(mapa_bits_tipo_cliente.get("BitClienteDireto") or 0)
+
+    if _coluna_existe(TABELA_CARD, "BitAgencia"):
+        campos.append("BitAgencia = :bit_agencia")
+        parametros["bit_agencia"] = int(mapa_bits_tipo_cliente.get("BitAgencia") or 0)
+
+    if _coluna_existe(TABELA_CARD, "BitPlanejador"):
+        campos.append("BitPlanejador = :bit_planejador")
+        parametros["bit_planejador"] = int(mapa_bits_tipo_cliente.get("BitPlanejador") or 0)
+
+    if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia"):
+        campos.append("IDEmpresaAgencia = :id_empresa_agencia_card")
+        parametros["id_empresa_agencia_card"] = _int_ou_none(dados.get("id_empresa_agencia_card"))
+
+    if _coluna_existe(TABELA_CARD, "IDEmpresaBureau"):
+        campos.append("IDEmpresaBureau = :id_empresa_bureau_card")
+        parametros["id_empresa_bureau_card"] = _int_ou_none(dados.get("id_empresa_bureau_card"))
+
+    return {
+        "campos": campos,
+        "parametros": parametros,
+    }
 
 
 
@@ -5295,6 +5332,9 @@ def _montar_itens_snapshot_solicitacao_do_card(
     id_tipo_cliente: int | None = None,
     cod_ponto_contrato: object = None,
     cod_face_contrato: object = None,
+    dados_item_formulario: dict[str, Any] | None = None,
+    id_vendedor_formulario: int | None = None,
+    nome_vendedor_formulario: str | None = None,
 ) -> list[dict[str, Any]]:
     def _int_positivo_ou_none_local(valor: object) -> int | None:
         if valor in (None, "", 0):
@@ -5308,9 +5348,100 @@ def _montar_itens_snapshot_solicitacao_do_card(
     descricao_limpa = (descricao_card or "").strip() or None
     id_tipo_cliente_int = _int_positivo_ou_none_local(id_tipo_cliente)
     itens_resultado: list[dict[str, Any]] = []
+    dados_item_formulario = dict(dados_item_formulario or {}) if isinstance(dados_item_formulario, dict) else {}
+    nome_vendedor_formulario = str(nome_vendedor_formulario or "").strip() or None
+    id_vendedor_formulario = _int_positivo_ou_none_local(id_vendedor_formulario)
+
+    campos_data_item_formulario = {
+        "DataLancamento",
+        "DataAssinaturaRenovacao",
+        "DataInicioPrevisto",
+        "DataTerminoPrevisto",
+        "DataInicioVencimento",
+        "DataCancelamento",
+        "DataFimEfetiva",
+    }
+    campos_decimal_item_formulario = {
+        "FaturamentoBrutoMensal",
+        "PercentualPermuta",
+        "CotaOportunidade",
+        "ValorPermuta",
+        "FaturamentoLiquidoPermuta",
+        "TotalBrutoContrato",
+        "TotalLiquidoContratoAGBRCTACORDO",
+        "TotalLiquidoContratoAGBRVENDGERCOOR",
+        "PercentualAgencia",
+        "ValorMensalAgencia",
+        "PercentualBureau",
+        "ValorBureauMensal",
+        "PercentualCartaAcordo",
+        "ValorCartaAcordoMensal",
+        "ValorOutrasComissoes",
+        "FaturamentoLiquidoMensal",
+        "PercentualComissaoVendedor",
+        "ValorVendedor",
+        "ValorVendedorTotal",
+        "PercentualComissaoCoordenacao",
+        "ValorCoordenador",
+        "ValorCoordenadorTotal",
+        "PercentualComissaoGerencia",
+        "ValorGerencia",
+        "ValorGerenciaTotal",
+        "FaturamentoLiquidoFinalMensal",
+        "ComissaoGerenciaNordeste",
+        "Faturamento",
+    }
+    campos_int_item_formulario = {
+        "Cota",
+        "TexmpoExposicao",
+        "NumeroParcelas",
+        "IDPainelEuromidia",
+        "IDDimFacesPaineis",
+        "IDDimCheckingHistorico",
+        "IDVendedor",
+    }
+
+    def _tem_dados_item_formulario() -> bool:
+        for chave, valor in dados_item_formulario.items():
+            if chave in {"IDFatoSolicitacaoContratoEuromidia", "IDFatoControleContratosEuromidia", "IDFatoControleContratosItensEuromidia", "IDFatoKanbanCard"}:
+                continue
+            if valor not in (None, "", []):
+                return True
+        return False
+
+    def _aplicar_dados_formulario_item(valores_item: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(valores_item, dict):
+            valores_item = {}
+
+        if id_vendedor_formulario not in (None, "", 0):
+            valores_item["IDVendedor"] = id_vendedor_formulario
+        if nome_vendedor_formulario:
+            valores_item["Vendedor"] = nome_vendedor_formulario
+
+        for chave, valor in dados_item_formulario.items():
+            if chave not in valores_item:
+                continue
+
+            if chave in campos_data_item_formulario:
+                valores_item[chave] = _para_data_sql_ou_none(valor)
+            elif chave in campos_decimal_item_formulario:
+                valores_item[chave] = _valor_decimal(valor)
+            elif chave in campos_int_item_formulario:
+                valores_item[chave] = _int_positivo_ou_none_local(valor)
+            elif chave in {"CodPonto", "CodFace", "Status", "OBS", "Tipo", "Origem", "EmpresaEuro", "CnpjExibibora", "TipoDocumento", "RazaoSocial", "CPF", "MarcaExibida", "SDR", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario", "CnpjIntermediario", "InicioRenovacao", "AtivoCancelamento", "CNPJ", "NumeroContrato", "NumeroPrevia", "Referencia", "CidadeExibicao"}:
+                texto = str(valor or "").strip() or None
+                if chave == "CodFace" and texto:
+                    texto = texto.upper()
+                valores_item[chave] = texto
+            else:
+                valores_item[chave] = valor
+
+        return valores_item
 
     if tipo_norm == TIPO_SOLICITACAO_NOVO:
         paineis_card = _listar_paineis_vinculados_card(int(id_card))
+        if not paineis_card and _tem_dados_item_formulario():
+            paineis_card = [{}]
 
         for painel_card in paineis_card:
             cod_ponto = str(painel_card.get("CodPonto") or "").strip() or None
@@ -5482,6 +5613,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
             if coluna_atividade_item == "BitSolicitacaoAtiva":
                 valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
 
+            valores_item = _aplicar_dados_formulario_item(valores_item)
             itens_resultado.append(valores_item)
 
         return itens_resultado
@@ -5579,6 +5711,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
     if coluna_atividade_item == "BitSolicitacaoAtiva":
         valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
 
+    valores_item = _aplicar_dados_formulario_item(valores_item)
     itens_resultado.append(valores_item)
     return itens_resultado
 
@@ -5601,6 +5734,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     contrato_existente: dict[str, Any] | None = None,
     forcar_solicitacao_ativa: bool | None = None,
     id_tipo_cliente: int | None = None,
+    dados_formulario_solicitacao: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
@@ -5786,6 +5920,58 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             parametros,
         )
 
+    dados_formulario_solicitacao = dict(dados_formulario_solicitacao or {}) if isinstance(dados_formulario_solicitacao, dict) else {}
+    dados_header_formulario = (
+        dict(dados_formulario_solicitacao.get("header") or {})
+        if isinstance(dados_formulario_solicitacao.get("header"), dict)
+        else {}
+    )
+    dados_item_formulario = (
+        dict(dados_formulario_solicitacao.get("item") or {})
+        if isinstance(dados_formulario_solicitacao.get("item"), dict)
+        else {}
+    )
+
+    campos_data_header_formulario = {"DataAssinaturaRenovacao", "DataLancamento"}
+    campos_decimal_header_formulario = {
+        "TotalFaturamentoBrutoMensal", "TotalPercentualPermuta", "TotalCotaOportunidade",
+        "TotalValorPermuta", "TotalFaturamentoLiquidoPermuta", "TotalBrutoContrato",
+        "TotalLiquidoContratoAGBRCTACORDO", "TotalLiquidoContratoAGBRVENDGERCOOR",
+        "TotalPercentualAgencia", "TotalValorMensalAgencia", "TotalPercentualBureau",
+        "TotalValorBureauMensal", "TotalPercentualCartaAcordo", "TotalValorCartaAcordoMensal",
+        "TotalValorOutrasComissoes", "TotalFaturamentoLiquidoMensal", "TotalPercentualComissaoVendedor",
+        "TotalValorVendedor", "ValorVendedorTotal", "TotalPercentualComissaoCoordenacao",
+    }
+    campos_int_header_formulario = {
+        "IDFatoControleContratosEuromidia", "IDDimStatusContratos", "IDDimUsuariosCriacao",
+        "IDEmpresa", "IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaProprietaria",
+        "QuantidadePontos", "QuantidadeFaces", "BitAtivo"
+    }
+
+    def _aplicar_dados_formulario_header(valores_solicitacao: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(valores_solicitacao, dict):
+            valores_solicitacao = {}
+
+        for chave, valor in dados_header_formulario.items():
+            if chave not in valores_solicitacao:
+                continue
+
+            if chave in campos_data_header_formulario:
+                valores_solicitacao[chave] = _para_data_sql_ou_none(valor)
+            elif chave in campos_decimal_header_formulario:
+                valores_solicitacao[chave] = _valor_decimal(valor)
+            elif chave in campos_int_header_formulario:
+                valores_solicitacao[chave] = _int_positivo_ou_none(valor)
+            else:
+                texto = str(valor or "").strip() or None
+                valores_solicitacao[chave] = texto
+
+        return valores_solicitacao
+
+    vendedor_formulario = _obter_vendedor_logado_reserva_kanban(int(id_empresa_proprietaria)) or {}
+    id_vendedor_formulario = int(vendedor_formulario.get("IDVendedor") or 0) or None
+    nome_vendedor_formulario = str(vendedor_formulario.get("NomeVendedor") or "").strip() or None
+
     empresa = None
     if id_empresa_relacionada not in (None, "", 0):
         sql_empresa = text(
@@ -5923,6 +6109,9 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "Observacao": "Solicitação enviada para avaliação a partir do card.",
         "BitAtivo": bit_registro_ativo,
     }
+    if nome_vendedor_formulario and not str(valores_solicitacao.get("Vendedor") or "").strip():
+        valores_solicitacao["Vendedor"] = nome_vendedor_formulario
+    valores_solicitacao = _aplicar_dados_formulario_header(valores_solicitacao)
 
     snapshot_existente_payload = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
     header_existente = (
@@ -5996,6 +6185,9 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         id_tipo_cliente=id_tipo_cliente,
         cod_ponto_contrato=cod_ponto_contrato,
         cod_face_contrato=cod_face_contrato,
+        dados_item_formulario=dados_item_formulario,
+        id_vendedor_formulario=id_vendedor_formulario,
+        nome_vendedor_formulario=nome_vendedor_formulario,
     )
 
     if not itens_snapshot:
@@ -6383,6 +6575,7 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     id_card: int,
     id_usuario: int,
     id_empresa_proprietaria: int,
+    dados_formulario_solicitacao: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Eu sincronizo a solicitação de contrato após movimento de fase do card.
@@ -6439,6 +6632,7 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         cod_face_contrato=cod_face_contrato,
         descricao_card=str(card.get("Descricao") or "").strip() or None,
         forcar_solicitacao_ativa=True if int(id_fase_atual) == 4 else None,
+        dados_formulario_solicitacao=dados_formulario_solicitacao,
     )
 
     if not resultado.get("sincronizado"):
@@ -10015,6 +10209,9 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
 
     paineis_vinculados = _listar_paineis_vinculados_card(id_card)
 
+    snapshot_solicitacao_editavel = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
+    vendedor_logado_solicitacao = _obter_vendedor_logado_reserva_kanban(int(_id_empresa_usuario_or_403()))
+
     retorno = {
         "ok": True,
         "card": card_dict,
@@ -10024,6 +10221,8 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         "paineis_vinculados": paineis_vinculados,
         "painel_faces": paineis_vinculados,
         "painelFaces": paineis_vinculados,
+        "solicitacao_snapshot_editavel": snapshot_solicitacao_editavel,
+        "vendedor_logado_solicitacao": dict(vendedor_logado_solicitacao) if vendedor_logado_solicitacao else None,
     }
 
     print(
@@ -19827,6 +20026,7 @@ def api_card_criar(id_kanban: int):
         email_card = payload.get("email")
         id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
         nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
+        solicitacao_contrato_payload = payload.get("solicitacao_contrato") if isinstance(payload.get("solicitacao_contrato"), dict) else None
 
         if len(titulo) < 2:
             return jsonify({"ok": False, "msg": "Título inválido"}), 400
@@ -20367,7 +20567,9 @@ def api_card_atualizar(id_card: int):
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
+        solicitacao_contrato_payload = payload.get("solicitacao_contrato") if isinstance(payload.get("solicitacao_contrato"), dict) else None
         id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
+        segmento_informado = "id_dim_cnaes" in payload
         nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
 
         if not titulo:
@@ -20387,6 +20589,25 @@ def api_card_atualizar(id_card: int):
                         "card_atual": detalhe_atual.get("card"),
                     }
                 ), 409
+
+        sql_campos_card_atual = text(f"""
+            SELECT TOP (1)
+                IDDimTipoCliente,
+                IDDimOrigemAtendimento,
+                IDDimCnaes,
+                IDEmpresa
+            FROM {TABELA_CARD}
+            WHERE IDFatoKanbanCard = :id_card;
+        """)
+        campos_card_atual = db.session.execute(
+            sql_campos_card_atual,
+            {"id_card": int(id_card)},
+        ).mappings().first() or {}
+
+        id_tipo_cliente_atual_card = int(campos_card_atual.get("IDDimTipoCliente") or 0) or None
+        id_origem_atendimento_atual_card = int(campos_card_atual.get("IDDimOrigemAtendimento") or 0) or None
+        id_dim_cnaes_atual_card = int(campos_card_atual.get("IDDimCnaes") or 0) or None
+        id_empresa_atual_card = int(campos_card_atual.get("IDEmpresa") or 0) or None
 
         id_empresa_relacionada_int = int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
 
@@ -20408,26 +20629,14 @@ def api_card_atualizar(id_card: int):
             else:
                 id_tipo_cliente_desconto_int = None
 
-        if id_tipo_cliente_desconto_int in (None, 0):
-            return jsonify({"ok": False, "msg": "Tipo de cliente é obrigatório."}), 400
-
-        empresas_relacionadas_card = _resolver_ids_empresas_card_por_tipo_cliente(
-            id_tipo_cliente=id_tipo_cliente_desconto_int,
-            id_empresa_principal=id_empresa_relacionada_int,
-            id_empresa_agencia=id_empresa_agencia,
-            id_empresa_bureau=id_empresa_bureau,
-            id_empresa_cliente_direto=id_empresa_cliente_direto,
+        id_tipo_cliente_final_card = (
+            id_tipo_cliente_desconto_int
+            if tipo_cliente_desconto_informado
+            else id_tipo_cliente_atual_card
         )
 
-        if int(id_fase_atual or 0) == 4:
-            _validar_preenchimento_empresas_fase_4(
-                id_tipo_cliente=id_tipo_cliente_desconto_int,
-                id_empresa_principal=empresas_relacionadas_card.get("id_empresa_principal"),
-                id_empresa_agencia=empresas_relacionadas_card.get("id_empresa_agencia_card"),
-                id_empresa_bureau=empresas_relacionadas_card.get("id_empresa_bureau_card"),
-                id_empresa_cliente_direto=empresas_relacionadas_card.get("id_empresa_cliente_direto"),
-                contexto="salvar o card na fase 4",
-            )
+        if id_tipo_cliente_final_card in (None, 0):
+            return jsonify({"ok": False, "msg": "Tipo de cliente é obrigatório."}), 400
 
         id_origem_atendimento_int = None
         if origem_atendimento_informada:
@@ -20439,58 +20648,80 @@ def api_card_atualizar(id_card: int):
             else:
                 id_origem_atendimento_int = None
 
-        id_dim_cnaes_int = None
-        if id_dim_cnaes not in (None, "", 0):
-            try:
-                id_dim_cnaes_int = int(id_dim_cnaes)
-            except Exception:
-                return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
+        id_origem_atendimento_final_card = (
+            id_origem_atendimento_int
+            if origem_atendimento_informada
+            else id_origem_atendimento_atual_card
+        )
 
-            if not _obter_cnae_por_id(id_dim_cnaes_int):
-                return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
+        id_dim_cnaes_int = None
+        if segmento_informado:
+            if id_dim_cnaes not in (None, "", 0):
+                try:
+                    id_dim_cnaes_int = int(id_dim_cnaes)
+                except Exception:
+                    return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
+
+                if not _obter_cnae_por_id(id_dim_cnaes_int):
+                    return jsonify({"ok": False, "msg": "Segmento inválido."}), 400
+            else:
+                id_dim_cnaes_int = None
+
+        id_dim_cnaes_final_card = (
+            id_dim_cnaes_int
+            if segmento_informado
+            else id_dim_cnaes_atual_card
+        )
+
+        id_empresa_principal_final = id_empresa_relacionada_int or id_empresa_atual_card
+
+        empresas_relacionadas_card = _resolver_ids_empresas_card_por_tipo_cliente(
+            id_tipo_cliente=id_tipo_cliente_final_card,
+            id_empresa_principal=id_empresa_principal_final,
+            id_empresa_agencia=id_empresa_agencia,
+            id_empresa_bureau=id_empresa_bureau,
+            id_empresa_cliente_direto=id_empresa_cliente_direto,
+        )
+
+        if int(id_fase_atual or 0) == 4:
+            _validar_preenchimento_empresas_fase_4(
+                id_tipo_cliente=id_tipo_cliente_final_card,
+                id_empresa_principal=empresas_relacionadas_card.get("id_empresa_principal"),
+                id_empresa_agencia=empresas_relacionadas_card.get("id_empresa_agencia_card"),
+                id_empresa_bureau=empresas_relacionadas_card.get("id_empresa_bureau_card"),
+                id_empresa_cliente_direto=empresas_relacionadas_card.get("id_empresa_cliente_direto"),
+                contexto="salvar o card na fase 4",
+            )
 
         nome_empresa_card_txt = str(nome_empresa_card or "").strip() or None
-        id_empresa_nome_base = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int
+        id_empresa_nome_base = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final
         if id_empresa_nome_base not in (None, "", 0) and not nome_empresa_card_txt:
             sql_nome_empresa = text(f"""
                 SELECT TOP (1) RazaoSocial
                 FROM {TABELA_EMPRESAS}
                 WHERE IDEmpresa = :id_empresa;
             """)
-            nome_empresa_card_txt = db.session.execute(sql_nome_empresa, {"id_empresa": int(id_empresa_nome_base)}).scalar()
+            nome_empresa_card_txt = db.session.execute(
+                sql_nome_empresa,
+                {"id_empresa": int(id_empresa_nome_base)},
+            ).scalar()
 
         relacionamento_empresa_atual = None
         id_tipo_cliente_relacionamento_final = None
         id_origem_atendimento_relacionamento_final = None
-        id_origem_atendimento_atual_card = _obter_id_origem_atendimento_atual_do_card(int(id_card))
 
-        id_empresa_relacionamento = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int
+        id_empresa_relacionamento = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final
         if id_empresa_relacionamento not in (None, "", 0):
             relacionamento_empresa_atual = _obter_relacionamento_empresa_proprietaria(
                 id_empresa=int(id_empresa_relacionamento),
                 id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
             )
 
-            if tipo_cliente_desconto_informado:
-                id_tipo_cliente_relacionamento_final = id_tipo_cliente_desconto_int
-            else:
-                id_tipo_cliente_relacionamento_final = (
-                    int(relacionamento_empresa_atual.get("IDDimTipoCliente") or 0) or None
-                    if relacionamento_empresa_atual
-                    else None
-                )
-
-            if origem_atendimento_informada:
-                id_origem_atendimento_relacionamento_final = id_origem_atendimento_int
-            else:
-                id_origem_atendimento_relacionamento_final = (
-                    int(relacionamento_empresa_atual.get("IDDimOrigemAtendimento") or 0) or None
-                    if relacionamento_empresa_atual
-                    else (int(id_origem_atendimento_atual_card or 0) or None)
-                )
+            id_tipo_cliente_relacionamento_final = id_tipo_cliente_final_card
+            id_origem_atendimento_relacionamento_final = id_origem_atendimento_final_card
 
         contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
-            id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int,
+            id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
             id_contrato_existente=id_contrato_existente,
             tipo_contrato_card=tipo_contrato_card,
         )
@@ -20542,63 +20773,73 @@ def api_card_atualizar(id_card: int):
             campos_update.append("BitContratoNovo = :bit_contrato_novo")
             parametros_update["bit_contrato_novo"] = int(contexto_tipo_contrato["bit_contrato_novo"])
 
-        _anexar_campos_vinculo_contrato_card(
-            campos_sql=campos_update,
-            parametros=parametros_update,
-            id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
-            cod_ponto_contrato=validacao_ponto_face.get("cod_ponto"),
-            cod_face_contrato=validacao_ponto_face.get("cod_face"),
-            prefixo_parametros="sync_",
-        )
-
-        if _coluna_existe(TABELA_CARD, "IDEmpresaAgencia"):
-            campos_update.append("IDEmpresaAgencia = :id_empresa_agencia")
-            parametros_update["id_empresa_agencia"] = empresas_relacionadas_card.get("id_empresa_agencia_card")
-
-        if _coluna_existe(TABELA_CARD, "IDEmpresaBureau"):
-            campos_update.append("IDEmpresaBureau = :id_empresa_bureau")
-            parametros_update["id_empresa_bureau"] = empresas_relacionadas_card.get("id_empresa_bureau_card")
-
-        if _coluna_existe(TABELA_CARD, "Marca"):
-            campos_update.append("Marca = :marca")
-            parametros_update["marca"] = campos_complementares_novo_contrato.get("marca")
-
-        if _coluna_existe(TABELA_CARD, "Telefone"):
-            campos_update.append("Telefone = :telefone")
-            parametros_update["telefone"] = campos_complementares_novo_contrato.get("telefone")
-
-        if _coluna_existe(TABELA_CARD, "Email"):
-            campos_update.append("Email = :email")
-            parametros_update["email"] = campos_complementares_novo_contrato.get("email")
-
-        if _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto"):
-            campos_update.append("IDDimKanbanTipoClienteDesconto = :id_tipo_cliente_desconto")
-            parametros_update["id_tipo_cliente_desconto"] = id_tipo_cliente_desconto_int
-
         if _coluna_existe(TABELA_CARD, "IDDimTipoCliente"):
             campos_update.append("IDDimTipoCliente = :id_tipo_cliente_card")
-            parametros_update["id_tipo_cliente_card"] = id_tipo_cliente_desconto_int
+            parametros_update["id_tipo_cliente_card"] = id_tipo_cliente_final_card
+
+        if _coluna_existe(TABELA_CARD, "IDDimTipoClienteDesconto"):
+            campos_update.append("IDDimTipoClienteDesconto = :id_tipo_cliente_desconto")
+            parametros_update["id_tipo_cliente_desconto"] = id_tipo_cliente_final_card
+
+        if _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
+            campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
+            parametros_update["id_origem_atendimento"] = id_origem_atendimento_final_card
 
         if _coluna_existe(TABELA_CARD, "IDDimCnaes"):
             campos_update.append("IDDimCnaes = :id_dim_cnaes")
-            parametros_update["id_dim_cnaes"] = id_dim_cnaes_int
+            parametros_update["id_dim_cnaes"] = id_dim_cnaes_final_card
 
         if _coluna_existe(TABELA_CARD, "NomeEmpresa"):
-            campos_update.append("NomeEmpresa = :nome_empresa")
-            parametros_update["nome_empresa"] = nome_empresa_card_txt
+            campos_update.append("NomeEmpresa = :nome_empresa_card")
+            parametros_update["nome_empresa_card"] = nome_empresa_card_txt
 
-        if origem_atendimento_informada and _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
-            campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
-            parametros_update["id_origem_atendimento"] = id_origem_atendimento_int
+        if _coluna_existe(TABELA_CARD, "Marca"):
+            campos_update.append("Marca = :marca_card")
+            parametros_update["marca_card"] = campos_complementares_novo_contrato.get("marca")
+
+        if _coluna_existe(TABELA_CARD, "Telefone"):
+            campos_update.append("Telefone = :telefone_card")
+            parametros_update["telefone_card"] = campos_complementares_novo_contrato.get("telefone")
+
+        if _coluna_existe(TABELA_CARD, "Email"):
+            campos_update.append("Email = :email_card")
+            parametros_update["email_card"] = campos_complementares_novo_contrato.get("email")
+
+        empresas_relacionadas_sql = _montar_campos_empresas_relacionadas_card_sql(
+            empresas_relacionadas_card,
+            id_tipo_cliente=id_tipo_cliente_final_card,
+        )
+        campos_update.extend(empresas_relacionadas_sql["campos"])
+        parametros_update.update(empresas_relacionadas_sql["parametros"])
+
+        _anexar_campos_vinculo_contrato_card(
+            campos_sql=campos_update,
+            parametros=parametros_update,
+            id_contrato_existente=(
+                contexto_tipo_contrato["id_contrato_existente"]
+                if str(contexto_tipo_contrato.get("tipo_contrato") or "").upper() == TIPO_SOLICITACAO_ADITIVO
+                else None
+            ),
+            cod_ponto_contrato=(
+                validacao_ponto_face.get("cod_ponto")
+                if str(contexto_tipo_contrato.get("tipo_contrato") or "").upper() == TIPO_SOLICITACAO_ADITIVO
+                else None
+            ),
+            cod_face_contrato=(
+                validacao_ponto_face.get("cod_face")
+                if str(contexto_tipo_contrato.get("tipo_contrato") or "").upper() == TIPO_SOLICITACAO_ADITIVO
+                else None
+            ),
+        )
 
         if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
             campos_update.append("AtualizadoEm = GETDATE()")
 
         if not campos_update:
-            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização no card."}), 400
+            return jsonify({"ok": False, "msg": "Nenhum campo disponível para atualização do card."}), 400
 
-        output_versao = ", INSERTED.VersaoConcorrencia" if has_versao else ""
-        where_versao = " AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
+        output_versao = ", INSERTED.VersaoConcorrencia AS VersaoConcorrencia" if has_versao else ""
+        where_versao = "AND VersaoConcorrencia = :versao_concorrencia" if has_versao else ""
 
         if has_versao:
             parametros_update["versao_concorrencia"] = versao_concorrencia_bytes
@@ -20611,8 +20852,6 @@ def api_card_atualizar(id_card: int):
                 INSERTED.IDFatoKanbanCard,
                 INSERTED.IDDimKanban,
                 INSERTED.IDDimKanbanFaseAtual,
-                INSERTED.Titulo,
-                INSERTED.Descricao,
                 INSERTED.StatusCard,
                 INSERTED.IDEmpresaProprietaria
                 {output_versao}
@@ -20669,7 +20908,7 @@ def api_card_atualizar(id_card: int):
                 sincronizacao_item_contrato["motivo_itens_controle_contrato"] = "card_sem_cod_face_contrato"
             else:
                 quantidade_itens_controle_contrato_atualizados = _atualizar_card_nos_itens_contrato_euromidia(
-                    id_empresa=int(id_empresa_relacionada_int) if id_empresa_relacionada_int not in (None, "", 0) else None,
+                    id_empresa=int(empresas_relacionadas_card.get("id_empresa_card") or 0) or None,
                     id_contrato=int(contexto_tipo_contrato["id_contrato_existente"]),
                     cod_ponto=cod_ponto_salvo,
                     cod_face=cod_face_salva,
@@ -20798,6 +21037,7 @@ def api_card_atualizar(id_card: int):
             id_card=int(id_card),
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_emp),
+            dados_formulario_solicitacao=solicitacao_contrato_payload,
         )
 
         if contexto_tipo_contrato["tipo_contrato"] in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
@@ -20812,9 +21052,10 @@ def api_card_atualizar(id_card: int):
                 )
 
         relacionamento_empresa_tipo_cliente = None
-        if id_empresa_relacionada_int not in (None, "", 0):
+        id_empresa_para_relacionamento = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final
+        if id_empresa_para_relacionamento not in (None, "", 0):
             relacionamento_empresa_tipo_cliente = _garantir_relacionamento_empresa_tipo_cliente(
-                id_empresa=int(id_empresa_relacionada_int),
+                id_empresa=int(id_empresa_para_relacionamento),
                 id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_CONTRATOS),
                 id_dim_tipo_cliente=id_tipo_cliente_relacionamento_final,
                 id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
@@ -20828,13 +21069,14 @@ def api_card_atualizar(id_card: int):
             f" | id_contrato_existente={contexto_tipo_contrato.get('id_contrato_existente')}"
             f" | cod_ponto={validacao_ponto_face.get('cod_ponto')}"
             f" | cod_face={validacao_ponto_face.get('cod_face')}"
-            f" | id_empresa={id_empresa_relacionada_int if id_empresa_relacionada_int not in (None, '', 0) else 'NULL'}"
+            f" | id_empresa={id_empresa_principal_final if id_empresa_principal_final not in (None, '', 0) else 'NULL'}"
             f" | id_empresa_agencia={campos_complementares_novo_contrato.get('id_empresa_agencia') if campos_complementares_novo_contrato.get('id_empresa_agencia') not in (None, '', 0) else 'NULL'}"
             f" | marca={campos_complementares_novo_contrato.get('marca') or 'NULL'}"
             f" | telefone={campos_complementares_novo_contrato.get('telefone') or 'NULL'}"
             f" | email={campos_complementares_novo_contrato.get('email') or 'NULL'}"
             f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else 'NULL'}"
+            f" | id_dim_cnaes={id_dim_cnaes_final_card if id_dim_cnaes_final_card not in (None, '', 0) else 'NULL'}"
         )
 
         _registrar_log_card(
@@ -20870,6 +21112,7 @@ def api_card_atualizar(id_card: int):
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
+                "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
             },
         )
 
@@ -20891,6 +21134,7 @@ def api_card_atualizar(id_card: int):
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
+                "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
             }
         )
 
