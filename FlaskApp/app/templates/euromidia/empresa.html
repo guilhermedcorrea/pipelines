@@ -6,6 +6,10 @@
 
 {% set segmentacao_safe = (segmentacao if segmentacao is defined and segmentacao else {}) %}
 
+{% set carteira_atual_safe = (carteira_atual if carteira_atual is defined and carteira_atual else {}) %}
+{% set carteiras_disponiveis_safe = (carteiras_disponiveis if carteiras_disponiveis is defined and carteiras_disponiveis else []) %}
+
+
 {% set score_setor_val = segmentacao_safe.get('ScoreSetor') %}
 {% if score_setor_val is none and classificacao %}
   {% set score_setor_val = classificacao.get('ScoreSetor') %}
@@ -183,6 +187,162 @@
     background: rgba(16,185,129,.10);
     color: #064e3b;
   }
+
+  .carteira-toolbar{
+    margin-top:12px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .btn-carteira{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    min-height:40px;
+    padding:8px 14px;
+    border-radius:999px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    color:var(--text);
+    font-size:12px;
+    font-weight:1000;
+    line-height:1;
+    white-space:nowrap;
+    box-shadow: 0 1px 6px rgba(15,23,42,.06);
+  }
+  .btn-carteira[disabled]{
+    cursor:default;
+    opacity:1;
+  }
+  .btn-carteira-label{
+    color:var(--muted);
+    font-weight:1000;
+  }
+  .btn-carteira-valor{
+    color:var(--euro-blue);
+    font-weight:1000;
+  }
+  .btn-carteira-atual{
+    border-color: rgba(59,130,246,.22);
+    background: rgba(59,130,246,.08);
+  }
+  .btn-carteira-sem{
+    border-color: rgba(148,163,184,.25);
+    background: rgba(148,163,184,.08);
+  }
+  .btn-carteira-acao{
+    cursor:pointer;
+    text-decoration:none;
+    border-color: rgba(0,40,132,.18);
+    background: rgba(0,40,132,.06);
+    color: var(--euro-blue);
+  }
+  .btn-carteira-acao:hover{
+    background: rgba(0,40,132,.10);
+  }
+  .btn-carteira-acao:focus{
+    outline:none;
+    box-shadow: 0 0 0 4px rgba(11,78,162,.14);
+  }
+  .btn-carteira-acao[disabled]{
+    cursor:not-allowed;
+    opacity:.55;
+  }
+  .carteira-meta{
+    margin-top:2px;
+    font-size:12px;
+    font-weight:900;
+    color:var(--muted);
+  }
+  .modal-carteira{
+    position:fixed;
+    inset:0;
+    z-index:1100;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    background: rgba(2,6,23,.45);
+    backdrop-filter: blur(2px);
+  }
+  .modal-carteira[hidden]{
+    display:none !important;
+  }
+  .modal-carteira-box{
+    width:min(520px, 100%);
+    border-radius:18px;
+    background:#fff;
+    border:1px solid rgba(15,23,42,.10);
+    box-shadow: 0 20px 50px rgba(2,6,23,.20);
+    overflow:hidden;
+  }
+  .modal-carteira-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    padding:16px 18px;
+    border-bottom:1px solid var(--border);
+    background:#F8FAFC;
+  }
+  .modal-carteira-title{
+    font-size:16px;
+    font-weight:1000;
+    color:var(--euro-blue);
+    margin:0;
+  }
+  .modal-carteira-subtitle{
+    margin-top:6px;
+    font-size:12px;
+    font-weight:900;
+    color:var(--muted);
+    line-height:1.4;
+  }
+  .modal-carteira-body{
+    padding:18px;
+  }
+  .modal-carteira-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-top:16px;
+  }
+  .campo-carteira{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .campo-carteira label{
+    font-size:12px;
+    font-weight:1000;
+    color:var(--muted);
+  }
+  .campo-carteira select{
+    width:100%;
+    min-height:42px;
+    border-radius:12px;
+    border:1px solid rgba(15,23,42,.14);
+    padding:0 12px;
+    font-size:13px;
+    font-weight:900;
+    color:var(--text);
+    background:#fff;
+  }
+  .carteira-feedback{
+    min-height:18px;
+    margin-top:10px;
+    font-size:12px;
+    font-weight:900;
+  }
+  .carteira-feedback.erro{
+    color:#b91c1c;
+  }
+  .carteira-feedback.ok{
+    color:#166534;
+  }
+
 
   .sec{
     margin-top: 14px;
@@ -613,6 +773,39 @@
           <span class="badge blue">CNPJ {{ cnpj14 }}</span>
         {% endif %}
       </div>
+
+      <div class="carteira-toolbar">
+        {% if carteira_atual_safe %}
+          <button type="button" class="btn-carteira btn-carteira-atual" title="Carteira atual da empresa" disabled>
+            <span class="btn-carteira-label">Carteira Atual</span>
+            <span class="btn-carteira-valor">{{ carteira_atual_safe.NomeVendedor or "Sem vendedor" }}</span>
+          </button>
+        {% else %}
+          <button type="button" class="btn-carteira btn-carteira-sem" title="Empresa sem carteira vinculada" disabled>
+            <span class="btn-carteira-label">Carteira Atual</span>
+            <span class="btn-carteira-valor">Sem carteira</span>
+          </button>
+        {% endif %}
+
+        <button
+          type="button"
+          class="btn-carteira btn-carteira-acao"
+          id="btnAbrirModalCarteira"
+          {% if not carteiras_disponiveis_safe %}disabled{% endif %}
+        >
+          {{ "Mover Carteira" if carteira_atual_safe else "Adicionar Carteira" }}
+        </button>
+      </div>
+
+      {% if carteira_atual_safe %}
+        <div class="carteira-meta">
+          Carteira ID {{ carteira_atual_safe.IDFatoCarteiraVendedor }} • Vendedor ID {{ carteira_atual_safe.IDVendedor }}
+        </div>
+      {% elif not carteiras_disponiveis_safe %}
+        <div class="carteira-meta">
+          Nenhuma carteira disponível para esta empresa proprietária.
+        </div>
+      {% endif %}
     </div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
@@ -622,6 +815,57 @@
       </a>
     </div>
   </div>
+
+
+  <div class="modal-carteira" id="modalCarteiraEmpresa" hidden>
+    <div class="modal-carteira-box" role="dialog" aria-modal="true" aria-labelledby="modalCarteiraEmpresaTitulo">
+      <div class="modal-carteira-head">
+        <div>
+          <h2 class="modal-carteira-title" id="modalCarteiraEmpresaTitulo">
+            {{ "Mover carteira da empresa" if carteira_atual_safe else "Adicionar empresa em uma carteira" }}
+          </h2>
+          <div class="modal-carteira-subtitle">
+            Selecione a carteira do vendedor responsável por esta empresa.
+          </div>
+        </div>
+
+        <button type="button" class="btn-mini" id="btnFecharModalCarteira" aria-label="Fechar">×</button>
+      </div>
+
+      <div class="modal-carteira-body">
+        <form
+          id="formCarteiraEmpresa"
+          method="post"
+          action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
+        >
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <div class="campo-carteira">
+            <label for="selectCarteiraEmpresa">Carteira / Vendedor</label>
+            <select id="selectCarteiraEmpresa" name="id_fato_carteira_vendedor" required>
+              <option value="">Selecione...</option>
+              {% for carteira in carteiras_disponiveis_safe %}
+                <option
+                  value="{{ carteira.IDFatoCarteiraVendedor }}"
+                  {% if carteira_atual_safe and carteira_atual_safe.IDFatoCarteiraVendedor == carteira.IDFatoCarteiraVendedor %}selected{% endif %}
+                >{{ carteira.NomeVendedor or "Sem vendedor" }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="carteira-feedback" id="feedbackCarteiraEmpresa"></div>
+
+          <div class="modal-carteira-actions">
+            <button type="button" class="btn btn-secondary" id="btnCancelarCarteira">Cancelar</button>
+            <button type="submit" class="btn" id="btnSalvarCarteira">
+              {{ "Salvar movimentação" if carteira_atual_safe else "Adicionar na carteira" }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Segmentação -->
   <div class="sec">
@@ -1537,10 +1781,92 @@
 
     document.addEventListener("click", function(e){
       var btn = e.target && e.target.closest ? e.target.closest(".js-toggle") : null;
-      if(!btn) return;
-      e.preventDefault();
-      toggleDetalhe(btn);
+      if(btn){
+        e.preventDefault();
+        toggleDetalhe(btn);
+        return;
+      }
     });
+
+    var modalCarteira = document.getElementById("modalCarteiraEmpresa");
+    var btnAbrirModalCarteira = document.getElementById("btnAbrirModalCarteira");
+    var btnFecharModalCarteira = document.getElementById("btnFecharModalCarteira");
+    var btnCancelarCarteira = document.getElementById("btnCancelarCarteira");
+    var formCarteiraEmpresa = document.getElementById("formCarteiraEmpresa");
+    var selectCarteiraEmpresa = document.getElementById("selectCarteiraEmpresa");
+    var feedbackCarteiraEmpresa = document.getElementById("feedbackCarteiraEmpresa");
+    var btnSalvarCarteira = document.getElementById("btnSalvarCarteira");
+
+    function abrirModalCarteira(){
+      if(!modalCarteira) return;
+      modalCarteira.hidden = false;
+      document.body.style.overflow = "hidden";
+      if(selectCarteiraEmpresa){
+        window.setTimeout(function(){
+          selectCarteiraEmpresa.focus();
+        }, 10);
+      }
+    }
+
+    function fecharModalCarteira(){
+      if(!modalCarteira) return;
+      modalCarteira.hidden = true;
+      document.body.style.overflow = "";
+      if(feedbackCarteiraEmpresa){
+        feedbackCarteiraEmpresa.textContent = "";
+        feedbackCarteiraEmpresa.className = "carteira-feedback";
+      }
+    }
+
+    if(btnAbrirModalCarteira && !btnAbrirModalCarteira.disabled){
+      btnAbrirModalCarteira.addEventListener("click", function(){
+        abrirModalCarteira();
+      });
+    }
+
+    if(btnFecharModalCarteira){
+      btnFecharModalCarteira.addEventListener("click", fecharModalCarteira);
+    }
+
+    if(btnCancelarCarteira){
+      btnCancelarCarteira.addEventListener("click", fecharModalCarteira);
+    }
+
+    if(modalCarteira){
+      modalCarteira.addEventListener("click", function(e){
+        if(e.target === modalCarteira){
+          fecharModalCarteira();
+        }
+      });
+    }
+
+    document.addEventListener("keydown", function(e){
+      if(e.key === "Escape" && modalCarteira && !modalCarteira.hidden){
+        fecharModalCarteira();
+      }
+    });
+
+    if(formCarteiraEmpresa){
+      formCarteiraEmpresa.addEventListener("submit", function(e){
+        if(!selectCarteiraEmpresa || !selectCarteiraEmpresa.value){
+          e.preventDefault();
+          if(feedbackCarteiraEmpresa){
+            feedbackCarteiraEmpresa.textContent = "Selecione uma carteira antes de continuar.";
+            feedbackCarteiraEmpresa.className = "carteira-feedback erro";
+          }
+          return;
+        }
+
+        if(btnSalvarCarteira){
+          btnSalvarCarteira.disabled = true;
+        }
+
+        if(feedbackCarteiraEmpresa){
+          feedbackCarteiraEmpresa.textContent = "Salvando carteira...";
+          feedbackCarteiraEmpresa.className = "carteira-feedback";
+        }
+      });
+    }
   })();
 </script>
 

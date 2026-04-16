@@ -11194,6 +11194,205 @@ def _matriz_filial_label(valor) -> str:
 
 
 
+
+
+
+
+
+@paineis_bp.post("/clientes/<int:id_empresa>/carteira")
+def cliente_carteira_atualizar(id_empresa: int):
+
+    id_fato_carteira_vendedor = request.form.get("id_fato_carteira_vendedor", type=int)
+
+    if not id_fato_carteira_vendedor:
+        flash("Selecione uma carteira válida.", "warning")
+        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+
+    empresa_row = (
+        db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    IDEmpresa,
+                    IDEmpresaProprietaria
+                FROM Integracao.Silver.DimEmpresas
+                WHERE IDEmpresa = :id_empresa
+            """),
+            {"id_empresa": id_empresa},
+        )
+        .mappings()
+        .first()
+    )
+
+    if not empresa_row:
+        abort(404)
+
+    id_empresa_proprietaria = empresa_row.get("IDEmpresaProprietaria")
+
+    carteira_destino_row = (
+        db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    IDFatoCarteiraVendedor,
+                    IDVendedor,
+                    IDEmpresaProprietaria,
+                    IDUsuarioCoordenador
+                FROM Integracao.Silver.FatoCarteiraVendedor
+                WHERE IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+            """),
+            {"id_fato_carteira_vendedor": id_fato_carteira_vendedor},
+        )
+        .mappings()
+        .first()
+    )
+
+    if not carteira_destino_row:
+        flash("Carteira selecionada não foi encontrada.", "danger")
+        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+
+    if carteira_destino_row.get("IDEmpresaProprietaria") != id_empresa_proprietaria:
+        flash("A carteira selecionada não pertence à mesma empresa proprietária da empresa.", "danger")
+        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+
+    id_vendedor_destino = carteira_destino_row.get("IDVendedor")
+    id_usuario_coordenador_destino = carteira_destino_row.get("IDUsuarioCoordenador")
+
+    try:
+        relacao_atual_row = (
+            db.session.execute(
+                text("""
+                    SELECT
+                        IDFatoCarteiraVendedorEmpresas,
+                        IDFatoCarteiraVendedor,
+                        IDVendedor
+                    FROM Integracao.Silver.FatoCarteiraVendedorEmpresas
+                    WHERE IDEmpresa = :id_empresa
+                      AND IDEmpresaProprietaria = :id_empresa_proprietaria
+                """),
+                {
+                    "id_empresa": id_empresa,
+                    "id_empresa_proprietaria": id_empresa_proprietaria,
+                },
+            )
+            .mappings()
+            .all()
+        )
+
+        relacao_atual = [dict(r) for r in relacao_atual_row]
+
+        ja_esta_na_mesma_carteira = any(
+            r.get("IDFatoCarteiraVendedor") == id_fato_carteira_vendedor
+            for r in relacao_atual
+        )
+
+        if ja_esta_na_mesma_carteira:
+            db.session.execute(
+                text("""
+                    UPDATE Integracao.Silver.FatoCarteiraVendedorEmpresas
+                    SET
+                        IDVendedor = :id_vendedor,
+                        IDUsuarioCoordenador = :id_usuario_coordenador,
+                        DataAtualizacao = GETDATE()
+                    WHERE IDEmpresa = :id_empresa
+                      AND IDEmpresaProprietaria = :id_empresa_proprietaria
+                      AND IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+                """),
+                {
+                    "id_empresa": id_empresa,
+                    "id_empresa_proprietaria": id_empresa_proprietaria,
+                    "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+                    "id_vendedor": id_vendedor_destino,
+                    "id_usuario_coordenador": id_usuario_coordenador_destino,
+                },
+            )
+
+            db.session.commit()
+            flash("A empresa já estava nesta carteira. Data de atualização renovada.", "success")
+            return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+
+        db.session.execute(
+            text("""
+                DELETE FROM Integracao.Silver.FatoCarteiraVendedorEmpresas
+                WHERE IDEmpresa = :id_empresa
+                  AND IDEmpresaProprietaria = :id_empresa_proprietaria
+            """),
+            {
+                "id_empresa": id_empresa,
+                "id_empresa_proprietaria": id_empresa_proprietaria,
+            },
+        )
+
+        db.session.execute(
+            text("""
+                INSERT INTO Integracao.Silver.FatoCarteiraVendedorEmpresas
+                (
+                    IDFatoCarteiraVendedor,
+                    IDEmpresa,
+                    IDVendedor,
+                    IDEmpresaProprietaria,
+                    IDUsuarioCoordenador,
+                    DataAtualizacao
+                )
+                VALUES
+                (
+                    :id_fato_carteira_vendedor,
+                    :id_empresa,
+                    :id_vendedor,
+                    :id_empresa_proprietaria,
+                    :id_usuario_coordenador,
+                    GETDATE()
+                )
+            """),
+            {
+                "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+                "id_empresa": id_empresa,
+                "id_vendedor": id_vendedor_destino,
+                "id_empresa_proprietaria": id_empresa_proprietaria,
+                "id_usuario_coordenador": id_usuario_coordenador_destino,
+            },
+        )
+
+        db.session.commit()
+
+        flash("Carteira da empresa atualizada com sucesso.", "success")
+        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Erro ao atualizar carteira da empresa | id_empresa=%s | id_fato_carteira_vendedor=%s",
+            id_empresa,
+            id_fato_carteira_vendedor,
+        )
+        flash(f"Erro ao atualizar carteira da empresa: {e}", "danger")
+        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @paineis_bp.get("/clientes/<int:id_empresa>")
 def cliente_detalhe(id_empresa: int):
 
@@ -11269,6 +11468,102 @@ def cliente_detalhe(id_empresa: int):
         )
     else:
         empresa["LogoEmpresaProprietariaUrl"] = ""
+
+    carteira_atual = None
+    carteiras_disponiveis = []
+
+    try:
+        sql_carteira_atual = text("""
+            SELECT TOP (1)
+                cve.IDFatoCarteiraVendedorEmpresas,
+                cve.IDFatoCarteiraVendedor,
+                cve.IDEmpresa,
+                cve.IDVendedor,
+                cve.IDEmpresaProprietaria,
+                cve.IDUsuarioCoordenador,
+                cve.DataAtualizacao,
+                cv.Meta AS MetaCarteira,
+                v.NomeVendedor,
+                v.BitAtivo,
+                v.IDDimUsuarios
+            FROM Integracao.Silver.FatoCarteiraVendedorEmpresas cve
+            INNER JOIN Integracao.Silver.FatoCarteiraVendedor cv
+                ON cv.IDFatoCarteiraVendedor = cve.IDFatoCarteiraVendedor
+            LEFT JOIN Integracao.dbo.Vendedores v
+                ON v.IDVendedor = cve.IDVendedor
+               AND v.IDEmpresaProprietaria = cve.IDEmpresaProprietaria
+            WHERE cve.IDEmpresa = :id_empresa
+              AND cve.IDEmpresaProprietaria = :id_empresa_proprietaria
+            ORDER BY
+                cve.DataAtualizacao DESC,
+                cve.IDFatoCarteiraVendedorEmpresas DESC
+        """)
+
+        carteira_atual_row = (
+            db.session.execute(
+                sql_carteira_atual,
+                {
+                    "id_empresa": id_empresa,
+                    "id_empresa_proprietaria": empresa.get("IDEmpresaProprietaria"),
+                },
+            )
+            .mappings()
+            .first()
+        )
+
+        carteira_atual = dict(carteira_atual_row) if carteira_atual_row else None
+
+    except Exception:
+        carteira_atual = None
+
+    try:
+        sql_carteiras_disponiveis = text("""
+            SELECT
+                cv.IDFatoCarteiraVendedor,
+                cv.IDVendedor,
+                cv.IDEmpresaProprietaria,
+                cv.IDUsuarioCoordenador,
+                cv.Meta,
+                cv.DataAtualizacao,
+                v.NomeVendedor,
+                v.BitAtivo,
+                v.IDDimUsuarios
+            FROM Integracao.Silver.FatoCarteiraVendedor cv
+            LEFT JOIN Integracao.dbo.Vendedores v
+                ON v.IDVendedor = cv.IDVendedor
+               AND v.IDEmpresaProprietaria = cv.IDEmpresaProprietaria
+            WHERE cv.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND COALESCE(v.BitAtivo, 1) = 1
+            ORDER BY
+                v.NomeVendedor ASC,
+                cv.IDFatoCarteiraVendedor ASC
+        """)
+
+        carteiras_disponiveis_rows = (
+            db.session.execute(
+                sql_carteiras_disponiveis,
+                {"id_empresa_proprietaria": empresa.get("IDEmpresaProprietaria")},
+            )
+            .mappings()
+            .all()
+        )
+
+        carteiras_disponiveis = [dict(r) for r in carteiras_disponiveis_rows]
+
+        id_carteira_atual = (
+            carteira_atual.get("IDFatoCarteiraVendedor")
+            if carteira_atual and carteira_atual.get("IDFatoCarteiraVendedor") is not None
+            else None
+        )
+
+        for carteira in carteiras_disponiveis:
+            carteira["Selecionado"] = (
+                id_carteira_atual is not None
+                and carteira.get("IDFatoCarteiraVendedor") == id_carteira_atual
+            )
+
+    except Exception:
+        carteiras_disponiveis = []
 
     classificacao = {}
     try:
@@ -11725,9 +12020,9 @@ def cliente_detalhe(id_empresa: int):
         contratos_itens=contratos_itens,
         contratos_itens_por_contrato=contratos_itens_por_contrato,
         contratos_paginacao=contratos_paginacao,
+        carteira_atual=carteira_atual,
+        carteiras_disponiveis=carteiras_disponiveis,
     )
-
-
 
 
 
