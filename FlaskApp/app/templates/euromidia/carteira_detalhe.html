@@ -62,14 +62,25 @@
     flex-wrap:wrap;
     margin-bottom:12px;
     padding-top:12px;
+    position:relative;
+    overflow:visible;
   }
   .empresas-toolbar-left{
     display:flex;
     flex-direction:column;
     gap:6px;
     min-width:280px;
-    flex:1 1 360px;
+    flex:1 1 720px;
     position:relative;
+    overflow:visible;
+  }
+  .empresas-toolbar-row{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    flex-wrap:wrap;
+    width:100%;
+    overflow:visible;
   }
   .empresas-toolbar-right{
     display:flex;
@@ -81,6 +92,153 @@
     position:relative;
     width:100%;
     max-width:480px;
+    flex:1 1 420px;
+  }
+  .classe-filter-wrap{
+    flex:0 0 320px;
+    min-width:280px;
+    position:relative;
+    align-self:flex-start;
+    z-index:35;
+  }
+  .dd{
+    position:relative;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    overflow:visible;
+    box-shadow:0 1px 4px rgba(0,0,0,.03);
+  }
+  .dd[open]{
+    box-shadow:0 10px 24px rgba(15,23,42,.08);
+  }
+  .dd-summary{
+    list-style:none;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    min-height:42px;
+    padding:0 14px;
+    font-size:14px;
+    font-weight:800;
+    color:var(--text);
+    user-select:none;
+  }
+  .dd-summary::-webkit-details-marker{display:none}
+  .dd-label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-width:0;
+  }
+  .dd-label-text{
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .dd-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:20px;
+    height:20px;
+    padding:0 6px;
+    border-radius:999px;
+    background:#DBEAFE;
+    color:#1D4ED8;
+    font-size:11px;
+    font-weight:900;
+  }
+  .dd-caret{
+    color:#64748B;
+    transition:transform .18s ease;
+  }
+  .dd[open] .dd-caret{
+    transform:rotate(180deg);
+  }
+  .dd-panel{
+    position:absolute;
+    top:calc(100% + 8px);
+    left:0;
+    right:0;
+    z-index:40;
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:10px;
+    background:#fff;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    box-shadow:0 12px 28px rgba(15,23,42,.14);
+    overflow:visible;
+  }
+  .dd-search{
+    width:100%;
+    height:38px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:#fff;
+    padding:0 12px;
+    outline:none;
+    font-size:13px;
+    color:var(--text);
+  }
+  .dd-search:focus{
+    border-color:#93C5FD;
+    box-shadow:0 0 0 4px rgba(59,130,246,.10);
+  }
+  .dd-hint{
+    font-size:11px;
+    color:var(--muted);
+    padding:0 2px;
+  }
+  .dd-items{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    max-height:220px;
+    overflow-y:auto;
+    overflow-x:hidden;
+    padding-right:2px;
+  }
+  .dd-item{
+    display:grid;
+    grid-template-columns:16px minmax(0,1fr);
+    align-items:start;
+    gap:10px;
+    width:100%;
+    box-sizing:border-box;
+    padding:8px 10px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:13px;
+    color:var(--text);
+    transition:background .15s ease;
+  }
+  .dd-item:hover{
+    background:#F8FAFC;
+  }
+  .dd-item input{
+    margin:2px 0 0 0;
+    width:16px;
+    height:16px;
+  }
+  .dd-item span{
+    display:block;
+    min-width:0;
+    line-height:1.35;
+    white-space:normal;
+    word-break:break-word;
+    font-weight:800;
+  }
+  .dd-empty{
+    padding:10px;
+    font-size:12px;
+    color:var(--muted);
+    text-align:center;
+    display:none;
   }
   .search-input{
     width:100%;
@@ -260,6 +418,8 @@
     .bar-row{grid-template-columns:1fr}
     .setor-chart-canvas{min-height:380px}
     .table-footer{flex-direction:column;align-items:stretch}
+    .classe-filter-wrap{flex:1 1 100%;min-width:100%}
+    .dd-panel{left:0;right:0}
   }
 </style>
 
@@ -326,29 +486,58 @@
       <div class="sec-box">
         <div class="sec-box-h">
           <div class="sec-box-title">Empresas da carteira</div>
-          <div class="muted">Quanto cada empresa representa e como está performando.</div>
+          
         </div>
 
         <div class="sec-box-b" style="padding-top:0;">
           <div class="empresas-toolbar">
             <div class="empresas-toolbar-left">
-              <div class="search-wrap">
-                <input
-                  type="text"
-                  id="empresaSearchInput"
-                  class="search-input"
-                  placeholder="Pesquisar por razão social, CNPJ, cidade, UF ou setor..."
-                  autocomplete="off"
-                  spellcheck="false"
-                >
-                <div id="empresaSearchSuggestions" class="search-suggestions"></div>
+              <div class="empresas-toolbar-row">
+                <div class="search-wrap">
+                  <input
+                    type="text"
+                    id="empresaSearchInput"
+                    class="search-input"
+                    placeholder="Pesquisar por razão social, CNPJ ou classe..."
+                    autocomplete="off"
+                    spellcheck="false"
+                  >
+                  <div id="empresaSearchSuggestions" class="search-suggestions"></div>
+                </div>
+
+                <div class="classe-filter-wrap">
+                  <details class="dd" data-dd="classe">
+                    <summary class="dd-summary">
+                      <span class="dd-label">
+                        <span class="dd-label-text" id="classeFilterSummaryText">Classe</span>
+                        <span class="dd-badge" id="classeFilterCount">0</span>
+                      </span>
+                      <span class="dd-caret">▾</span>
+                    </summary>
+
+                    <div class="dd-panel">
+                      <input
+                        type="text"
+                        id="classeFilterSearch"
+                        class="dd-search"
+                        placeholder="Pesquisar classe..."
+                        autocomplete="off"
+                        spellcheck="false"
+                      >
+                      <div class="dd-hint">Selecione uma ou mais classes existentes nesta carteira</div>
+                      <div class="dd-items" id="classeFilterItems"></div>
+                      <div class="dd-empty" id="classeFilterEmpty">Nenhuma classe encontrada.</div>
+                    </div>
+                  </details>
+                </div>
               </div>
-              <div class="muted" style="font-size:12px;">Busca com sugestão e paginação de 5 empresas por página.</div>
+
+             
             </div>
 
             <div class="empresas-toolbar-right">
               <span class="chip purple" id="empresaCountChip">0 resultados</span>
-              <button type="button" class="btn btn-secondary" id="empresaClearSearchBtn">Limpar busca</button>
+              <button type="button" class="btn btn-secondary" id="empresaClearSearchBtn">Limpar filtros</button>
             </div>
           </div>
 
@@ -380,22 +569,24 @@
                     {% endif %}
                     <tr
                       class="empresa-row"
-                      data-razao-social="{{ (row.RazaoSocial or '')|lower }}"
-                      data-cnpj="{{ (row.CNPJ or '')|lower }}"
-                      data-municipio="{{ (row.Municipio or '')|lower }}"
-                      data-uf="{{ (row.UF or '')|lower }}"
-                      data-setor="{{ (row.Setor or '')|lower }}"
+                      data-razao-social="{{ row.RazaoSocial or '' }}"
+                      data-cnpj="{{ row.CNPJ or '' }}"
+                      data-municipio="{{ row.Municipio or '' }}"
+                      data-uf="{{ row.UF or '' }}"
+                      data-setor="{{ row.Setor or '' }}"
+                      data-classe="{{ row.Classe or 'Sem classe' }}"
                     >
                       <td>
                         <div class="empresa-nome">{{ row.RazaoSocial or 'Empresa sem nome' }}</div>
                         <div class="empresa-sub">
-                          {{ row.CNPJ or '—' }} • {{ row.Municipio or '—' }}/{{ row.UF or '—' }}
+                          {{ row.CNPJ or '—' }} • {{ row.Classe or 'Sem classe' }} • {{ row.Municipio or '—' }}/{{ row.UF or '—' }}
                         </div>
                       </td>
 
                       <td>
                         <div class="empresa-sub" style="color:var(--text);font-weight:900;">{{ row.Setor or 'Sem setor' }}</div>
                         <div class="empresa-sub">{{ row.ClassificacaoMacro or 'Sem classificação' }}</div>
+                        <div class="empresa-sub">Classe: {{ row.Classe or 'Sem classe' }}</div>
                       </td>
 
                       <td>
@@ -462,7 +653,7 @@
         <div class="sec-box">
           <div class="sec-box-h">
             <div class="sec-box-title">Participação por setor</div>
-            <div class="muted">Composição da carteira por quantidade de empresas.</div>
+            
           </div>
 
           <div class="sec-box-b">
@@ -788,13 +979,21 @@
   const countChip = document.getElementById('empresaCountChip');
   const emptyState = document.getElementById('emptySearchState');
 
+  const classeItemsWrap = document.getElementById('classeFilterItems');
+  const classeSearch = document.getElementById('classeFilterSearch');
+  const classeEmpty = document.getElementById('classeFilterEmpty');
+  const classeSummaryText = document.getElementById('classeFilterSummaryText');
+  const classeSummaryCount = document.getElementById('classeFilterCount');
+
   if (!input || !suggestions || !pagination || !pagingInfo || !countChip || rows.length === 0) {
     return;
   }
 
+  const classesData = {{ classes_filtro_json|default('[]')|safe }} || [];
   const perPage = 5;
   let currentPage = 1;
   let filteredRows = [...rows];
+  let selectedClasses = new Set();
 
   function rowSearchText(row) {
     return [
@@ -802,12 +1001,81 @@
       row.dataset.cnpj || '',
       row.dataset.municipio || '',
       row.dataset.uf || '',
-      row.dataset.setor || ''
+      row.dataset.setor || '',
+      row.dataset.classe || ''
     ].join(' ').toLowerCase();
   }
 
   function getRazaoSocial(row) {
     return row.dataset.razaoSocial || '';
+  }
+
+  function getClasse(row) {
+    return row.dataset.classe || '';
+  }
+
+  function normalizeText(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function updateClasseSummary() {
+    const total = selectedClasses.size;
+    classeSummaryCount.textContent = String(total);
+
+    if (total === 0) {
+      classeSummaryText.textContent = 'Classe';
+      return;
+    }
+
+    if (total === 1) {
+      classeSummaryText.textContent = Array.from(selectedClasses)[0];
+      return;
+    }
+
+    classeSummaryText.textContent = `${total} classes selecionadas`;
+  }
+
+  function renderClasseItems(filterText = '') {
+    if (!classeItemsWrap) {
+      return;
+    }
+
+    classeItemsWrap.innerHTML = '';
+    const normalized = normalizeText(filterText);
+
+    const filtered = classesData.filter(item => {
+      const label = normalizeText(item.label || item.value || '');
+      return !normalized || label.includes(normalized);
+    });
+
+    if (classeEmpty) {
+      classeEmpty.style.display = filtered.length === 0 ? 'block' : 'none';
+    }
+
+    filtered.forEach(item => {
+      const label = String(item.label || item.value || '').trim();
+      const value = String(item.value || item.label || '').trim();
+
+      const node = document.createElement('label');
+      node.className = 'dd-item';
+      node.innerHTML = `
+        <input type="checkbox" value="${value.replace(/"/g, '&quot;')}" ${selectedClasses.has(value) ? 'checked' : ''}>
+        <span>${label}</span>
+      `;
+
+      const checkbox = node.querySelector('input[type="checkbox"]');
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          selectedClasses.add(value);
+        } else {
+          selectedClasses.delete(value);
+        }
+        updateClasseSummary();
+        filterRows();
+      });
+
+      classeItemsWrap.appendChild(node);
+    });
   }
 
   function applyVisibility() {
@@ -825,7 +1093,6 @@
 
     countChip.textContent = `${total} resultado${total === 1 ? '' : 's'}`;
     pagingInfo.textContent = `Página ${total === 0 ? 0 : currentPage} de ${total === 0 ? 0 : totalPages}`;
-
     emptyState.style.display = total === 0 ? 'block' : 'none';
 
     renderPagination(totalPages);
@@ -878,7 +1145,7 @@
       return;
     }
 
-    const normalized = query.toLowerCase().trim();
+    const normalized = normalizeText(query);
     const matches = rows
       .filter(row => rowSearchText(row).includes(normalized))
       .slice(0, 6);
@@ -895,13 +1162,11 @@
 
       const title = getRazaoSocial(row) || 'Empresa sem nome';
       const cnpj = row.dataset.cnpj || '—';
-      const municipio = row.dataset.municipio || '—';
-      const uf = row.dataset.uf || '—';
-      const setor = row.dataset.setor || '—';
+      const classe = getClasse(row) || 'Sem classe';
 
       item.innerHTML = `
         <span class="search-suggestion-title">${title.toUpperCase()}</span>
-        <span class="search-suggestion-sub">${cnpj} • ${municipio}/${uf} • ${setor}</span>
+        <span class="search-suggestion-sub">${cnpj} • ${classe}</span>
       `;
 
       item.addEventListener('click', () => {
@@ -916,14 +1181,22 @@
     suggestions.classList.add('show');
   }
 
-  function filterRows() {
-    const query = (input.value || '').trim().toLowerCase();
-
-    if (!query) {
-      filteredRows = [...rows];
-    } else {
-      filteredRows = rows.filter(row => rowSearchText(row).includes(query));
+  function rowMatchesClasse(row) {
+    if (selectedClasses.size === 0) {
+      return true;
     }
+    const classe = String(row.dataset.classe || '').trim();
+    return selectedClasses.has(classe);
+  }
+
+  function filterRows() {
+    const query = normalizeText(input.value || '');
+
+    filteredRows = rows.filter(row => {
+      const matchesText = !query || rowSearchText(row).includes(query);
+      const matchesClasse = rowMatchesClasse(row);
+      return matchesText && matchesClasse;
+    });
 
     currentPage = 1;
     applyVisibility();
@@ -936,9 +1209,18 @@
     updateSuggestions((input.value || '').trim());
   });
 
+  if (classeSearch) {
+    classeSearch.addEventListener('input', () => {
+      renderClasseItems(classeSearch.value || '');
+    });
+  }
+
   clearBtn.addEventListener('click', () => {
     input.value = '';
     suggestions.classList.remove('show');
+    selectedClasses = new Set();
+    updateClasseSummary();
+    renderClasseItems(classeSearch ? (classeSearch.value = '') : '');
     filteredRows = [...rows];
     currentPage = 1;
     applyVisibility();
@@ -951,6 +1233,8 @@
     }
   });
 
+  updateClasseSummary();
+  renderClasseItems('');
   applyVisibility();
 })();
 </script>

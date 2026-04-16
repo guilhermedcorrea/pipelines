@@ -18504,11 +18504,6 @@ def carteira_mover_empresa(id_fato_carteira_vendedor: int):
 
 
 
-
-
-
-
-
 @paineis_bp.get("/carteiras/<int:id_fato_carteira_vendedor>")
 @login_required
 @requer_item_menu_paineis("empresas")
@@ -18680,6 +18675,7 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ec.*,
+                ISNULL(cnaes.Classe, 'Sem classe') AS Classe,
                 ISNULL(cnaes.Setor, 'Sem setor') AS Setor,
                 ISNULL(cnaes.MacroSetor, 'Sem macrosetor') AS MacroSetor,
                 cnaes.ScoreSetor,
@@ -18692,18 +18688,14 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
             OUTER APPLY
             (
                 SELECT TOP (1)
+                    dc.Classe,
                     dc.Setor,
                     dc.MacroSetor,
                     dc.ScoreSetor,
                     dc.ClassificacaoMacro
                 FROM [Integracao].[Silver].[DimCnaes] dc
-                WHERE LEFT(
-                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(dc.cnaepadrao, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
-                        7
-                      ) = LEFT(
-                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(ec.CNAE, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
-                        7
-                      )
+                WHERE dc.cnaepadrao = ec.CNAE
+                ORDER BY dc.IDDimCnaes DESC
             ) cnaes
         ),
         ResumoContratosCabecalho AS
@@ -18780,6 +18772,7 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
             ecs.BitCliente,
             ecs.BitClienteDireto,
             ecs.DataAtualizacao,
+            ecs.Classe,
             ecs.Setor,
             ecs.MacroSetor,
             ecs.ScoreSetor,
@@ -18849,6 +18842,20 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         }
     ).mappings().all()
 
+    classes_disponiveis = []
+    classes_seen = set()
+    for row in empresas:
+        classe = str(row.get("Classe") or "").strip()
+        if not classe:
+            continue
+        chave = classe.upper()
+        if chave in classes_seen:
+            continue
+        classes_seen.add(chave)
+        classes_disponiveis.append(classe)
+
+    classes_disponiveis = sorted(classes_disponiveis, key=lambda x: x.upper())
+
     sql_setores = text("""
         ;WITH EmpresasCarteira AS
         (
@@ -18871,13 +18878,8 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                 SELECT TOP (1)
                     dc.Setor
                 FROM [Integracao].[Silver].[DimCnaes] dc
-                WHERE LEFT(
-                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(dc.cnaepadrao, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
-                        7
-                      ) = LEFT(
-                        REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(ec.CNAE, ''), '.', ''), '-', ''), '/', ''), ' ', ''),
-                        7
-                      )
+                WHERE dc.cnaepadrao = ec.CNAE
+                ORDER BY dc.IDDimCnaes DESC
             ) cnaes
             GROUP BY ISNULL(cnaes.Setor, 'Sem setor')
         )
@@ -18985,6 +18987,8 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
             }
         )
 
+    classes_filtro = [{"value": classe, "label": classe} for classe in classes_disponiveis]
+
     return render_template(
         "euromidia/carteira_detalhe.html",
         carteira=carteira,
@@ -18996,4 +19000,6 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         top_empresas=top_empresas,
         top_empresas_json=json.dumps(top_empresas, ensure_ascii=False),
         carteiras_destino=carteiras_destino,
+        classes_disponiveis=classes_disponiveis,
+        classes_filtro_json=json.dumps(classes_filtro, ensure_ascii=False),
     )
