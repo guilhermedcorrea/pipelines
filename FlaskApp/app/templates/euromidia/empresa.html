@@ -234,20 +234,37 @@
   .btn-carteira-acao{
     cursor:pointer;
     text-decoration:none;
+  }
+  .btn-carteira-adicionar{
     border-color: rgba(0,40,132,.18);
     background: rgba(0,40,132,.06);
     color: var(--euro-blue);
   }
-  .btn-carteira-acao:hover{
+  .btn-carteira-adicionar:hover{
     background: rgba(0,40,132,.10);
   }
-  .btn-carteira-acao:focus{
+  .btn-carteira-adicionar:focus{
     outline:none;
     box-shadow: 0 0 0 4px rgba(11,78,162,.14);
+  }
+  .btn-carteira-remover{
+    border-color: rgba(220,38,38,.18);
+    background: rgba(220,38,38,.08);
+    color: #B91C1C;
+  }
+  .btn-carteira-remover:hover{
+    background: rgba(220,38,38,.14);
+  }
+  .btn-carteira-remover:focus{
+    outline:none;
+    box-shadow: 0 0 0 4px rgba(220,38,38,.14);
   }
   .btn-carteira-acao[disabled]{
     cursor:not-allowed;
     opacity:.55;
+  }
+  .form-carteira-inline{
+    margin:0;
   }
   .carteira-meta{
     margin-top:2px;
@@ -789,12 +806,34 @@
 
         <button
           type="button"
-          class="btn-carteira btn-carteira-acao"
+          class="btn-carteira btn-carteira-acao btn-carteira-adicionar"
           id="btnAbrirModalCarteira"
           {% if not carteiras_disponiveis_safe %}disabled{% endif %}
         >
           {{ "Mover Carteira" if carteira_atual_safe else "Adicionar Carteira" }}
         </button>
+
+        <form
+          method="post"
+          action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
+          class="form-carteira-inline"
+          onsubmit="return confirm('Deseja remover esta empresa da carteira atual?');"
+        >
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="{{ return_to or '' }}">
+          <input type="hidden" name="contratos_page" value="{{ contratos_paginacao.page if contratos_paginacao else 1 }}">
+          <input type="hidden" name="acao" value="remover">
+
+          <button
+            type="submit"
+            class="btn-carteira btn-carteira-acao btn-carteira-remover"
+            id="btnRemoverCarteira"
+            {% if not carteira_atual_safe %}disabled{% endif %}
+            title="{% if carteira_atual_safe %}Remover empresa da carteira atual{% else %}Empresa já está sem carteira{% endif %}"
+          >
+            Remover Carteira
+          </button>
+        </form>
       </div>
 
       {% if carteira_atual_safe %}
@@ -810,7 +849,7 @@
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
       <a class="btn btn-secondary" style="text-decoration:none;"
-         href="{{ url_for('Paineis.clientes_lista', page=1) }}">
+         href="{{ return_to or url_for('Paineis.clientes_lista', page=1) }}">
         ← Voltar
       </a>
     </div>
@@ -839,6 +878,8 @@
           action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
         >
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="return_to" value="{{ return_to or '' }}">
+          <input type="hidden" name="contratos_page" value="{{ contratos_paginacao.page if contratos_paginacao else 1 }}">
 
           <div class="campo-carteira">
             <label for="selectCarteiraEmpresa">Carteira / Vendedor</label>
@@ -1712,7 +1753,7 @@
             <div class="pager-right">
               {% if page > 1 %}
                 <a
-                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=1, _anchor='sec-contratos') }}"
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=1, return_to=return_to, _anchor='sec-contratos') }}"
                   class="btn js-pager-link"
                 >« Primeiro</a>
               {% else %}
@@ -1721,7 +1762,7 @@
 
               {% if page > 1 %}
                 <a
-                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=page-1, _anchor='sec-contratos') }}"
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=page-1, return_to=return_to, _anchor='sec-contratos') }}"
                   class="btn js-pager-link"
                 >‹ Anterior</a>
               {% else %}
@@ -1730,7 +1771,7 @@
 
               {% if page < total_pages %}
                 <a
-                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=page+1, _anchor='sec-contratos') }}"
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=page+1, return_to=return_to, _anchor='sec-contratos') }}"
                   class="btn js-pager-link"
                 >Próximo ›</a>
               {% else %}
@@ -1739,7 +1780,7 @@
 
               {% if page < total_pages %}
                 <a
-                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=total_pages, _anchor='sec-contratos') }}"
+                  href="{{ url_for('Paineis.cliente_detalhe', id_empresa=empresa.IDDimClientesEuromidia, contratos_page=total_pages, return_to=return_to, _anchor='sec-contratos') }}"
                   class="btn js-pager-link"
                 >Último »</a>
               {% else %}

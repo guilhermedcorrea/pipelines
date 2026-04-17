@@ -335,64 +335,79 @@
   .setor-chart-wrap{
     display:flex;
     flex-direction:column;
-    gap:18px;
+    gap:12px;
   }
   .setor-chart-canvas{
+    position:relative;
     display:flex;
     justify-content:center;
     align-items:center;
     min-height:440px;
+    width:100%;
+    overflow:visible;
   }
-  .setor-chart-legend{
-    display:grid;
-    grid-template-columns:1fr;
-    gap:10px;
+  .setor-chart-tooltip{
+    position:absolute;
+    left:0;
+    top:0;
+    min-width:190px;
+    max-width:260px;
+    padding:10px 12px;
+    border:1px solid rgba(148,163,184,.24);
+    border-radius:12px;
+    background:rgba(15,23,42,.96);
+    color:#FFFFFF;
+    box-shadow:0 16px 36px rgba(15,23,42,.24);
+    pointer-events:none;
+    opacity:0;
+    transform:translate(-50%, calc(-100% - 14px)) scale(.98);
+    transform-origin:bottom center;
+    transition:opacity .12s ease, transform .12s ease;
+    z-index:6;
   }
-  .setor-legend-card{
+  .setor-chart-tooltip.is-visible{
+    opacity:1;
+    transform:translate(-50%, calc(-100% - 14px)) scale(1);
+  }
+  .setor-chart-tooltip::after{
+    content:'';
+    position:absolute;
+    left:50%;
+    bottom:-7px;
+    width:12px;
+    height:12px;
+    background:rgba(15,23,42,.96);
+    border-right:1px solid rgba(148,163,184,.24);
+    border-bottom:1px solid rgba(148,163,184,.24);
+    transform:translateX(-50%) rotate(45deg);
+  }
+  .setor-tooltip-title{
+    font-size:13px;
+    font-weight:1000;
+    line-height:1.25;
+    margin-bottom:6px;
+  }
+  .setor-tooltip-row{
     display:flex;
     align-items:center;
     justify-content:space-between;
-    gap:12px;
-    padding:12px 14px;
-    border:1px solid var(--border);
-    border-radius:14px;
-    background:linear-gradient(180deg,#FFFFFF 0%, #F8FAFC 100%);
+    gap:10px;
+    font-size:12px;
   }
-  .setor-legend-left{
+  .setor-tooltip-info{
     display:flex;
     align-items:center;
-    gap:10px;
+    gap:8px;
     min-width:0;
   }
-  .setor-legend-dot{
-    width:12px;
-    height:12px;
+  .setor-tooltip-dot{
+    width:10px;
+    height:10px;
     border-radius:999px;
-    flex:0 0 12px;
-    box-shadow:0 0 0 4px rgba(15,23,42,.05);
+    flex:0 0 10px;
   }
-  .setor-legend-text{
-    display:flex;
-    flex-direction:column;
-    min-width:0;
-  }
-  .setor-legend-title{
-    font-size:13px;
-    font-weight:1000;
-    color:var(--text);
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-  }
-  .setor-legend-sub{
-    font-size:12px;
-    color:var(--muted);
-  }
-  .setor-legend-val{
-    font-size:18px;
-    font-weight:1000;
-    color:var(--euro-blue);
-    white-space:nowrap;
+  .setor-tooltip-muted{
+    color:#CBD5E1;
   }
 
   .empty-search{
@@ -659,7 +674,7 @@
           <div class="sec-box-b">
             {% if setores and setores|length > 0 %}
               <div class="setor-chart-wrap">
-                <div class="setor-chart-canvas">
+                <div class="setor-chart-canvas" id="chartSetoresCarteiraCanvas">
                   <svg
                     id="chartSetoresCarteira"
                     viewBox="0 0 520 440"
@@ -668,9 +683,8 @@
                     role="img"
                     aria-label="Gráfico de participação por setor da carteira"
                   ></svg>
+                  <div class="setor-chart-tooltip" id="chartSetoresCarteiraTooltip" aria-hidden="true"></div>
                 </div>
-
-                <div class="setor-chart-legend" id="chartLegendSetores"></div>
               </div>
             {% else %}
               <div class="muted">Sem dados de setor para esta carteira.</div>
@@ -810,10 +824,11 @@
 <script>
 (function(){
   const svg = document.getElementById('chartSetoresCarteira');
-  const legend = document.getElementById('chartLegendSetores');
+  const canvas = document.getElementById('chartSetoresCarteiraCanvas');
+  const tooltip = document.getElementById('chartSetoresCarteiraTooltip');
   const data = {{ setores_json|safe }} || [];
 
-  if (!svg || !legend || !Array.isArray(data) || data.length === 0) {
+  if (!svg || !canvas || !tooltip || !Array.isArray(data) || data.length === 0) {
     return;
   }
 
@@ -832,7 +847,6 @@
   ];
 
   const width = 520;
-  const height = 440;
   const cx = width / 2;
   const cy = 185;
   const outerR = 150;
@@ -845,16 +859,6 @@
       x: centerX + (radius * Math.cos(angleInRadians)),
       y: centerY + (radius * Math.sin(angleInRadians))
     };
-  }
-
-  function describeArc(x, y, radius, startAngle, endAngle) {
-    const start = polarToCartesian(x, y, radius, endAngle);
-    const end = polarToCartesian(x, y, radius, startAngle);
-    const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
-    return [
-      'M', start.x, start.y,
-      'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y
-    ].join(' ');
   }
 
   function describeDonutSegment(x, y, outerRadius, innerRadius, startAngle, endAngle) {
@@ -874,11 +878,93 @@
   }
 
   function formatPct(v) {
-    return Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+    return Number(v || 0).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }) + '%';
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[char] || char));
+  }
+
+  function shortLabel(value, maxLen) {
+    const texto = String(value || 'Sem setor').trim();
+    if (texto.length <= maxLen) {
+      return texto;
+    }
+    return texto.slice(0, Math.max(1, maxLen - 1)).trim() + '…';
+  }
+
+  function showTooltip(event, item, color) {
+    const valor = Number(item.valor || 0);
+    tooltip.innerHTML = `
+      <div class="setor-tooltip-title">${escapeHtml(item.label || 'Sem setor')}</div>
+      <div class="setor-tooltip-row">
+        <span class="setor-tooltip-info">
+          <span class="setor-tooltip-dot" style="background:${color};"></span>
+          <span class="setor-tooltip-muted">${valor} empresa${valor === 1 ? '' : 's'}</span>
+        </span>
+        <strong>${formatPct(item.pct || 0)}</strong>
+      </div>
+    `;
+    positionTooltip(event);
+    tooltip.classList.add('is-visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+  }
+
+  function positionTooltip(event) {
+    const rect = canvas.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth || 220;
+    const tooltipHeight = tooltip.offsetHeight || 76;
+
+    const x = clamp(
+      event.clientX - rect.left,
+      (tooltipWidth / 2) + 10,
+      rect.width - (tooltipWidth / 2) - 10
+    );
+
+    const y = clamp(
+      event.clientY - rect.top,
+      tooltipHeight + 18,
+      rect.height - 10
+    );
+
+    tooltip.style.left = `${x}px`;
+    tooltip.style.top = `${y}px`;
+  }
+
+  function hideTooltip() {
+    tooltip.classList.remove('is-visible');
+    tooltip.setAttribute('aria-hidden', 'true');
+  }
+
+  function addTextLine(group, x, y, text, fontSize, fontWeight) {
+    const textNode = document.createElementNS(ns, 'text');
+    textNode.setAttribute('x', x);
+    textNode.setAttribute('y', y);
+    textNode.setAttribute('text-anchor', 'middle');
+    textNode.setAttribute('font-size', String(fontSize));
+    textNode.setAttribute('font-weight', String(fontWeight));
+    textNode.setAttribute('fill', '#FFFFFF');
+    textNode.setAttribute('pointer-events', 'none');
+    textNode.textContent = text;
+    group.appendChild(textNode);
   }
 
   svg.innerHTML = '';
-  legend.innerHTML = '';
+  tooltip.innerHTML = '';
+  hideTooltip();
 
   const bgRing = document.createElementNS(ns, 'circle');
   bgRing.setAttribute('cx', cx);
@@ -897,43 +983,60 @@
     const angle = total > 0 ? (valor / total) * 360 : 0;
     const endAngle = startAngle + angle;
     const color = palette[index % palette.length];
+    const label = String(item.label || 'Sem setor').trim() || 'Sem setor';
+    const midAngle = startAngle + (angle / 2);
 
     const path = document.createElementNS(ns, 'path');
     path.setAttribute('d', describeDonutSegment(cx, cy, outerR, innerR, startAngle, endAngle));
     path.setAttribute('fill', color);
     path.setAttribute('stroke', '#FFFFFF');
     path.setAttribute('stroke-width', '4');
+    path.style.cursor = 'pointer';
+    path.style.transition = 'opacity .12s ease, stroke-width .12s ease';
+
+    const title = document.createElementNS(ns, 'title');
+    title.textContent = `${label} — ${formatPct(pct)} — ${valor} empresa${valor === 1 ? '' : 's'}`;
+    path.appendChild(title);
+
+    path.addEventListener('mouseenter', (event) => {
+      path.setAttribute('stroke-width', '6');
+      path.style.opacity = '0.94';
+      showTooltip(event, item, color);
+    });
+
+    path.addEventListener('mousemove', (event) => {
+      positionTooltip(event);
+    });
+
+    path.addEventListener('mouseleave', () => {
+      path.setAttribute('stroke-width', '4');
+      path.style.opacity = '1';
+      hideTooltip();
+    });
+
     svg.appendChild(path);
 
-    if (pct >= 7) {
-      const midAngle = startAngle + (angle / 2);
+    if (pct >= 11) {
+      const labelRadius = innerR + ((outerR - innerR) * 0.53);
+      const labelPoint = polarToCartesian(cx, cy, labelRadius, midAngle);
+      const textGroup = document.createElementNS(ns, 'g');
+      addTextLine(textGroup, labelPoint.x, labelPoint.y - 6, shortLabel(label, 15), 12, 1000);
+      addTextLine(textGroup, labelPoint.x, labelPoint.y + 12, formatPct(pct), 14, 1000);
+      svg.appendChild(textGroup);
+    } else if (pct >= 7) {
       const labelRadius = innerR + ((outerR - innerR) * 0.58);
       const labelPoint = polarToCartesian(cx, cy, labelRadius, midAngle);
-
       const pctText = document.createElementNS(ns, 'text');
       pctText.setAttribute('x', labelPoint.x);
       pctText.setAttribute('y', labelPoint.y + 4);
       pctText.setAttribute('text-anchor', 'middle');
-      pctText.setAttribute('font-size', '15');
+      pctText.setAttribute('font-size', '13');
       pctText.setAttribute('font-weight', '1000');
       pctText.setAttribute('fill', '#FFFFFF');
+      pctText.setAttribute('pointer-events', 'none');
       pctText.textContent = formatPct(pct);
       svg.appendChild(pctText);
     }
-
-    const card = document.createElement('div');
-    card.className = 'setor-legend-card';
-    card.innerHTML = `
-      <div class="setor-legend-left">
-        <span class="setor-legend-dot" style="background:${color};"></span>
-        <div class="setor-legend-text">
-          <div class="setor-legend-title">${item.label || 'Sem setor'}</div>
-          <div class="setor-legend-sub">${valor} empresa${valor === 1 ? '' : 's'}</div>
-        </div>
-      </div>
-      <div class="setor-legend-val">${formatPct(pct)}</div>
-    `;
-    legend.appendChild(card);
 
     startAngle = endAngle;
   });

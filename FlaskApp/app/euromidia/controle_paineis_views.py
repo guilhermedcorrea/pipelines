@@ -70,6 +70,44 @@ TTL_SESSAO_CHECKIN_PUBLICO_HORAS = 12
 
 
 
+
+
+
+
+
+
+def _url_request_atual():
+    qs = (request.query_string or b"").decode("utf-8", errors="ignore").strip()
+    if qs:
+        return f"{request.path}?{qs}"
+    return request.path
+
+
+def _resolver_return_to_clientes():
+    candidatos = [
+        request.args.get("return_to"),
+        request.form.get("return_to"),
+        session.get("clientes_lista_return_to"),
+    ]
+
+    for candidato in candidatos:
+        url = str(candidato or "").strip()
+        if not url:
+            continue
+
+        
+        if url.startswith("/paineis/clientes"):
+            return url
+
+    return url_for("Paineis.clientes_lista", page=1)
+
+
+
+
+
+
+
+
 def _obter_pasta_temp_checkin() -> Path:
     """Eu resolvo a pasta temporária do checkin com fallback seguro."""
     candidatos = [
@@ -10740,7 +10778,8 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
     if "q" not in excluir and filtros["q"]:
         like = f"%{filtros['q']}%"
         query = query.filter(
-            (DimEmpresas.RazaoSocial.like(like))
+            (cast(DimEmpresas.IDEmpresa, String).like(like))
+            | (DimEmpresas.RazaoSocial.like(like))
             | (DimEmpresas.NomeFantasia.like(like))
             | (DimEmpresas.CNPJ.like(like))
             | (DimEmpresas.Porte.like(like))
@@ -10787,6 +10826,107 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
             query = query.filter(func.coalesce(DimEmpresas.BitCliente, 0) == 0)
 
     return query
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@paineis_bp.get("/clientes/autocomplete")
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def clientes_autocomplete():
+    q = (request.args.get("q") or "").strip()
+
+    if len(q) < 2:
+        return jsonify({"items": []})
+
+    q_like = f"%{q}%"
+    q_prefix = f"{q}%"
+
+    sql = text("""
+        SELECT TOP (15)
+            e.IDEmpresa,
+            RazaoSocial = LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))),
+            Classe = LTRIM(RTRIM(COALESCE(c.Classe, '')))
+        FROM [Integracao].[Silver].[DimEmpresas] e
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] c
+            ON c.cnaepadrao = e.CNAE
+        WHERE
+            e.IDEmpresa IS NOT NULL
+            AND NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))), '') IS NOT NULL
+            AND (
+                CAST(e.IDEmpresa AS varchar(30)) LIKE :q_prefix
+                OR COALESCE(e.RazaoSocial, '') LIKE :q_like
+                OR COALESCE(e.NomeFantasia, '') LIKE :q_like
+                OR COALESCE(CAST(e.CNPJ AS varchar(30)), '') LIKE :q_like
+                OR COALESCE(c.Classe, '') LIKE :q_like
+            )
+        ORDER BY
+            CASE
+                WHEN CAST(e.IDEmpresa AS varchar(30)) = :q THEN 0
+                WHEN COALESCE(e.RazaoSocial, '') LIKE :q_prefix THEN 1
+                WHEN COALESCE(e.NomeFantasia, '') LIKE :q_prefix THEN 2
+                WHEN COALESCE(c.Classe, '') LIKE :q_prefix THEN 3
+                ELSE 4
+            END,
+            e.RazaoSocial ASC,
+            e.IDEmpresa ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "q": q,
+            "q_like": q_like,
+            "q_prefix": q_prefix,
+        },
+    ).mappings().all()
+
+    items = []
+    vistos = set()
+
+    for row in rows:
+        id_empresa = row.get("IDEmpresa")
+        razao_social = (row.get("RazaoSocial") or "").strip()
+        classe = (row.get("Classe") or "").strip()
+
+        if id_empresa is None or not razao_social:
+            continue
+
+        chave = (int(id_empresa), razao_social.upper(), classe.upper())
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+
+        items.append(
+            {
+                "id_empresa": int(id_empresa),
+                "razao_social": razao_social,
+                "classe": classe,
+            }
+        )
+
+    return jsonify({"items": items})
+
+
+
+
+
+
 
 
 def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros):
@@ -10996,6 +11136,11 @@ def _obter_itens_clientes_cacheados(filtros, page: int, per_page: int):
     return itens
 
 
+
+
+
+
+
 @paineis_bp.get("/clientes")
 @login_required
 def clientes_lista():
@@ -11135,6 +11280,10 @@ def clientes_lista():
 
     filtros["per_page"] = pag["per_page"]
 
+    query_string = (request.query_string or b"").decode("utf-8", errors="ignore").strip()
+    retorno_lista = f"{request.path}?{query_string}" if query_string else request.path
+    session["clientes_lista_return_to"] = retorno_lista
+
     return render_template(
         "euromidia/clientes_lista.html",
         itens=itens,
@@ -11156,7 +11305,10 @@ def clientes_lista():
         tipos_uso_territorio=tipos_uso_territorio,
         classificacoes_macro=classificacoes_macro,
         opcoes_cliente=opcoes_cliente,
+        retorno_lista=retorno_lista,
     )
+
+
 
 
 def _cnpj_somente_digitos(valor: str) -> str:
@@ -11198,15 +11350,39 @@ def _matriz_filial_label(valor) -> str:
 
 
 
-
 @paineis_bp.post("/clientes/<int:id_empresa>/carteira")
 def cliente_carteira_atualizar(id_empresa: int):
 
-    id_fato_carteira_vendedor = request.form.get("id_fato_carteira_vendedor", type=int)
+    def _resolver_return_to_local():
+        candidatos = [
+            request.form.get("return_to"),
+            request.args.get("return_to"),
+            session.get("clientes_lista_return_to"),
+        ]
 
-    if not id_fato_carteira_vendedor:
-        flash("Selecione uma carteira válida.", "warning")
-        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+        for candidato in candidatos:
+            url = str(candidato or "").strip()
+            if not url:
+                continue
+
+            if url.startswith("/paineis/clientes"):
+                return url
+
+        return url_for("Paineis.clientes_lista", page=1)
+
+    return_to = _resolver_return_to_local()
+    session["clientes_lista_return_to"] = return_to
+
+    try:
+        contratos_page = int((request.form.get("contratos_page") or request.args.get("contratos_page") or "1").strip())
+    except Exception:
+        contratos_page = 1
+
+    if contratos_page < 1:
+        contratos_page = 1
+
+    acao = (request.form.get("acao") or "atribuir").strip().lower()
+    id_fato_carteira_vendedor = request.form.get("id_fato_carteira_vendedor", type=int)
 
     empresa_row = (
         db.session.execute(
@@ -11228,6 +11404,85 @@ def cliente_carteira_atualizar(id_empresa: int):
 
     id_empresa_proprietaria = empresa_row.get("IDEmpresaProprietaria")
 
+    if acao == "remover":
+        try:
+            relacao_atual_row = (
+                db.session.execute(
+                    text("""
+                        SELECT
+                            IDFatoCarteiraVendedorEmpresas
+                        FROM Integracao.Silver.FatoCarteiraVendedorEmpresas
+                        WHERE IDEmpresa = :id_empresa
+                    """),
+                    {
+                        "id_empresa": id_empresa,
+    
+                    },
+                )
+                .mappings()
+                .all()
+            )
+
+            if not relacao_atual_row:
+                flash("A empresa já está sem carteira.", "warning")
+                return redirect(
+                    url_for(
+                        "Paineis.cliente_detalhe",
+                        id_empresa=id_empresa,
+                        contratos_page=contratos_page,
+                        return_to=return_to,
+                    )
+                )
+
+            db.session.execute(
+                text("""
+                    DELETE FROM Integracao.Silver.FatoCarteiraVendedorEmpresas
+                    WHERE IDEmpresa = :id_empresa
+                """),
+                {
+                    "id_empresa": id_empresa,
+
+                },
+            )
+
+            db.session.commit()
+            flash("Carteira da empresa removida com sucesso.", "success")
+            return redirect(
+                url_for(
+                    "Paineis.cliente_detalhe",
+                    id_empresa=id_empresa,
+                    contratos_page=contratos_page,
+                    return_to=return_to,
+                )
+            )
+
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.exception(
+                "Erro ao remover carteira da empresa | id_empresa=%s",
+                id_empresa,
+            )
+            flash(f"Erro ao remover carteira da empresa: {e}", "danger")
+            return redirect(
+                url_for(
+                    "Paineis.cliente_detalhe",
+                    id_empresa=id_empresa,
+                    contratos_page=contratos_page,
+                    return_to=return_to,
+                )
+            )
+
+    if not id_fato_carteira_vendedor:
+        flash("Selecione uma carteira válida.", "warning")
+        return redirect(
+            url_for(
+                "Paineis.cliente_detalhe",
+                id_empresa=id_empresa,
+                contratos_page=contratos_page,
+                return_to=return_to,
+            )
+        )
+
     carteira_destino_row = (
         db.session.execute(
             text("""
@@ -11247,11 +11502,14 @@ def cliente_carteira_atualizar(id_empresa: int):
 
     if not carteira_destino_row:
         flash("Carteira selecionada não foi encontrada.", "danger")
-        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
-
-    if carteira_destino_row.get("IDEmpresaProprietaria") != id_empresa_proprietaria:
-        flash("A carteira selecionada não pertence à mesma empresa proprietária da empresa.", "danger")
-        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+        return redirect(
+            url_for(
+                "Paineis.cliente_detalhe",
+                id_empresa=id_empresa,
+                contratos_page=contratos_page,
+                return_to=return_to,
+            )
+        )
 
     id_vendedor_destino = carteira_destino_row.get("IDVendedor")
     id_usuario_coordenador_destino = carteira_destino_row.get("IDUsuarioCoordenador")
@@ -11266,11 +11524,10 @@ def cliente_carteira_atualizar(id_empresa: int):
                         IDVendedor
                     FROM Integracao.Silver.FatoCarteiraVendedorEmpresas
                     WHERE IDEmpresa = :id_empresa
-                      AND IDEmpresaProprietaria = :id_empresa_proprietaria
                 """),
                 {
                     "id_empresa": id_empresa,
-                    "id_empresa_proprietaria": id_empresa_proprietaria,
+
                 },
             )
             .mappings()
@@ -11293,12 +11550,11 @@ def cliente_carteira_atualizar(id_empresa: int):
                         IDUsuarioCoordenador = :id_usuario_coordenador,
                         DataAtualizacao = GETDATE()
                     WHERE IDEmpresa = :id_empresa
-                      AND IDEmpresaProprietaria = :id_empresa_proprietaria
                       AND IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
                 """),
                 {
                     "id_empresa": id_empresa,
-                    "id_empresa_proprietaria": id_empresa_proprietaria,
+
                     "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
                     "id_vendedor": id_vendedor_destino,
                     "id_usuario_coordenador": id_usuario_coordenador_destino,
@@ -11307,17 +11563,22 @@ def cliente_carteira_atualizar(id_empresa: int):
 
             db.session.commit()
             flash("A empresa já estava nesta carteira. Data de atualização renovada.", "success")
-            return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+            return redirect(
+                url_for(
+                    "Paineis.cliente_detalhe",
+                    id_empresa=id_empresa,
+                    contratos_page=contratos_page,
+                    return_to=return_to,
+                )
+            )
 
         db.session.execute(
             text("""
                 DELETE FROM Integracao.Silver.FatoCarteiraVendedorEmpresas
                 WHERE IDEmpresa = :id_empresa
-                  AND IDEmpresaProprietaria = :id_empresa_proprietaria
             """),
             {
                 "id_empresa": id_empresa,
-                "id_empresa_proprietaria": id_empresa_proprietaria,
             },
         )
 
@@ -11346,7 +11607,7 @@ def cliente_carteira_atualizar(id_empresa: int):
                 "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
                 "id_empresa": id_empresa,
                 "id_vendedor": id_vendedor_destino,
-                "id_empresa_proprietaria": id_empresa_proprietaria,
+                "id_empresa_proprietaria": carteira_destino_row.get("IDEmpresaProprietaria"),
                 "id_usuario_coordenador": id_usuario_coordenador_destino,
             },
         )
@@ -11354,7 +11615,14 @@ def cliente_carteira_atualizar(id_empresa: int):
         db.session.commit()
 
         flash("Carteira da empresa atualizada com sucesso.", "success")
-        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
+        return redirect(
+            url_for(
+                "Paineis.cliente_detalhe",
+                id_empresa=id_empresa,
+                contratos_page=contratos_page,
+                return_to=return_to,
+            )
+        )
 
     except Exception as e:
         db.session.rollback()
@@ -11364,14 +11632,14 @@ def cliente_carteira_atualizar(id_empresa: int):
             id_fato_carteira_vendedor,
         )
         flash(f"Erro ao atualizar carteira da empresa: {e}", "danger")
-        return redirect(url_for("Paineis.cliente_detalhe", id_empresa=id_empresa))
-
-
-
-
-
-
-
+        return redirect(
+            url_for(
+                "Paineis.cliente_detalhe",
+                id_empresa=id_empresa,
+                contratos_page=contratos_page,
+                return_to=return_to,
+            )
+        )
 
 
 
@@ -11395,6 +11663,26 @@ def cliente_carteira_atualizar(id_empresa: int):
 
 @paineis_bp.get("/clientes/<int:id_empresa>")
 def cliente_detalhe(id_empresa: int):
+
+    def _resolver_return_to_local():
+        candidatos = [
+            request.args.get("return_to"),
+            request.form.get("return_to"),
+            session.get("clientes_lista_return_to"),
+        ]
+
+        for candidato in candidatos:
+            url = str(candidato or "").strip()
+            if not url:
+                continue
+
+            if url.startswith("/paineis/clientes"):
+                return url
+
+        return url_for("Paineis.clientes_lista", page=1)
+
+    return_to = _resolver_return_to_local()
+    session["clientes_lista_return_to"] = return_to
 
     row = (
         db.session.query(
@@ -11493,7 +11781,6 @@ def cliente_detalhe(id_empresa: int):
                 ON v.IDVendedor = cve.IDVendedor
                AND v.IDEmpresaProprietaria = cve.IDEmpresaProprietaria
             WHERE cve.IDEmpresa = :id_empresa
-              AND cve.IDEmpresaProprietaria = :id_empresa_proprietaria
             ORDER BY
                 cve.DataAtualizacao DESC,
                 cve.IDFatoCarteiraVendedorEmpresas DESC
@@ -11504,7 +11791,6 @@ def cliente_detalhe(id_empresa: int):
                 sql_carteira_atual,
                 {
                     "id_empresa": id_empresa,
-                    "id_empresa_proprietaria": empresa.get("IDEmpresaProprietaria"),
                 },
             )
             .mappings()
@@ -11532,8 +11818,7 @@ def cliente_detalhe(id_empresa: int):
             LEFT JOIN Integracao.dbo.Vendedores v
                 ON v.IDVendedor = cv.IDVendedor
                AND v.IDEmpresaProprietaria = cv.IDEmpresaProprietaria
-            WHERE cv.IDEmpresaProprietaria = :id_empresa_proprietaria
-              AND COALESCE(v.BitAtivo, 1) = 1
+            WHERE COALESCE(v.BitAtivo, 1) = 1
             ORDER BY
                 v.NomeVendedor ASC,
                 cv.IDFatoCarteiraVendedor ASC
@@ -11542,7 +11827,7 @@ def cliente_detalhe(id_empresa: int):
         carteiras_disponiveis_rows = (
             db.session.execute(
                 sql_carteiras_disponiveis,
-                {"id_empresa_proprietaria": empresa.get("IDEmpresaProprietaria")},
+                {},
             )
             .mappings()
             .all()
@@ -12022,7 +12307,10 @@ def cliente_detalhe(id_empresa: int):
         contratos_paginacao=contratos_paginacao,
         carteira_atual=carteira_atual,
         carteiras_disponiveis=carteiras_disponiveis,
+        return_to=return_to,
     )
+
+
 
 
 

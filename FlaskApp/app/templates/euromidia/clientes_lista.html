@@ -52,6 +52,89 @@
   }
 
   /* =========================
+     COMBOBOX BUSCA EMPRESAS
+     ========================= */
+  .kb-combobox{
+    position:relative;
+    width:100%;
+  }
+
+  .kb-combobox-input{
+    width:100%;
+    padding-right:40px;
+  }
+
+  .kb-combobox-toggle{
+    position:absolute;
+    top:50%;
+    right:8px;
+    transform:translateY(-50%);
+    border:none;
+    background:transparent;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:14px;
+    font-weight:1000;
+    line-height:1;
+    padding:4px 6px;
+  }
+
+  .kb-combobox-lista{
+    position:absolute;
+    top:calc(100% + 6px);
+    left:0;
+    right:0;
+    z-index:80;
+    max-height:320px;
+    overflow:auto;
+    border:1px solid rgba(15,23,42,.12);
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 18px 40px rgba(15,23,42,.16);
+    padding:6px;
+  }
+
+  .kb-combobox-opcao{
+    width:100%;
+    border:none;
+    background:transparent;
+    text-align:left;
+    cursor:pointer;
+    padding:10px 12px;
+    border-radius:12px;
+    display:block;
+  }
+
+  .kb-combobox-opcao:hover,
+  .kb-combobox-opcao.is-active{
+    background:rgba(0,40,132,.06);
+  }
+
+  .kb-combobox-opcao strong{
+    display:block;
+    font-size:12px;
+    font-weight:1000;
+    color:var(--text);
+    line-height:1.25;
+  }
+
+  .kb-combobox-opcao span{
+    display:block;
+    margin-top:4px;
+    font-size:11px;
+    font-weight:900;
+    color:var(--muted);
+    line-height:1.2;
+  }
+
+  .kb-combobox-vazio{
+    padding:10px 12px;
+    font-size:12px;
+    font-weight:900;
+    color:var(--muted);
+  }
+
+  /* =========================
      DROPDOWN MULTI (details)
      ========================= */
   details.dd{
@@ -702,8 +785,29 @@
 
       <div class="campo">
         <label for="q">Buscar</label>
-        <input id="q" name="q" value="{{ filtros.q }}"
-               placeholder="Razão, CNPJ, Município, UF, Classe, Setor, SubClasse, Proprietária, Classe Valor, Escala, Estrutural, Geo, Frequência, Recência, Perfil, Uso Território, Classificação Macro, Grupo Empresa, Score Perfil, Classificação Perfil">
+
+        <div id="comboBuscaClientes" class="kb-combobox">
+          <input
+            id="q"
+            name="q"
+            class="kb-input kb-combobox-input"
+            type="text"
+            value="{{ filtros.q }}"
+            placeholder="Digite IDEmpresa, Razão Social, CNPJ ou Classe..."
+            autocomplete="off"
+            spellcheck="false"
+          >
+
+          <button
+            id="btnToggleBuscaClientes"
+            class="kb-combobox-toggle"
+            type="button"
+            aria-label="Abrir sugestões de empresas"
+            tabindex="0"
+          >▾</button>
+
+          <div id="listaBuscaClientes" class="kb-combobox-lista" hidden></div>
+        </div>
       </div>
 
       <div class="campo-dd">
@@ -1436,7 +1540,7 @@
               {% set classificacao_perfil_css = 'baixo' %}
             {% endif %}
 
-            <tr data-href="{{ url_for('Paineis.cliente_detalhe', id_empresa=e['IDDimClientesEuromidia']) }}">
+            <tr data-href="{{ url_for('Paineis.cliente_detalhe', id_empresa=e['IDDimClientesEuromidia'], return_to=retorno_lista) }}">
 
               <td>
                 <div class="logo-wrap" title="{{ e.get('RazaoSocialEmpresaProprietaria','') or 'Sem proprietária' }}">
@@ -1783,6 +1887,218 @@
 
       atualizarLabelDropdown(dd);
     });
+
+    const formBusca = document.querySelector(".emp-filtros");
+    const comboBusca = document.getElementById("comboBuscaClientes");
+    const inputBusca = document.getElementById("q");
+    const btnToggleBusca = document.getElementById("btnToggleBuscaClientes");
+    const listaBusca = document.getElementById("listaBuscaClientes");
+
+    if (formBusca && comboBusca && inputBusca && btnToggleBusca && listaBusca){
+      let debounceTimer = null;
+      let abortController = null;
+      let sugestoes = [];
+      let indiceAtivo = -1;
+
+      function escaparHtml(valor){
+        return String(valor || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function fecharSugestoes(){
+        listaBusca.hidden = true;
+        listaBusca.innerHTML = "";
+        sugestoes = [];
+        indiceAtivo = -1;
+        comboBusca.classList.remove("is-open");
+      }
+
+      function abrirSugestoes(){
+        listaBusca.hidden = false;
+        comboBusca.classList.add("is-open");
+      }
+
+      function renderizarSugestoes(items){
+        sugestoes = Array.isArray(items) ? items : [];
+        indiceAtivo = -1;
+
+        if (!sugestoes.length){
+          listaBusca.innerHTML = '<div class="kb-combobox-vazio">Nenhuma empresa encontrada.</div>';
+          abrirSugestoes();
+          return;
+        }
+
+        listaBusca.innerHTML = sugestoes.map((item, idx) => {
+          const classe = item.classe && String(item.classe).trim()
+            ? String(item.classe).trim()
+            : "Sem classe";
+
+          return `
+            <button
+              type="button"
+              class="kb-combobox-opcao"
+              data-idx="${idx}"
+              data-razao-social="${escaparHtml(item.razao_social)}"
+              data-id-empresa="${escaparHtml(item.id_empresa)}"
+            >
+              <strong>${escaparHtml(item.id_empresa)} • ${escaparHtml(item.razao_social)}</strong>
+              <span>Classe: ${escaparHtml(classe)}</span>
+            </button>
+          `;
+        }).join("");
+
+        abrirSugestoes();
+      }
+
+      async function buscarSugestoes(forcar = false){
+        const termo = (inputBusca.value || "").trim();
+
+        if (!forcar && termo.length < 2){
+          fecharSugestoes();
+          return;
+        }
+
+        if (abortController){
+          abortController.abort();
+        }
+
+        abortController = new AbortController();
+
+        try{
+          const url = new URL("{{ url_for('Paineis.clientes_autocomplete') }}", window.location.origin);
+          url.searchParams.set("q", termo);
+
+          const resp = await fetch(url.toString(), {
+            method: "GET",
+            headers: {
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            signal: abortController.signal
+          });
+
+          if (!resp.ok){
+            fecharSugestoes();
+            return;
+          }
+
+          const payload = await resp.json();
+          renderizarSugestoes(payload.items || []);
+        }catch(err){
+          if (err && err.name === "AbortError"){
+            return;
+          }
+          fecharSugestoes();
+        }
+      }
+
+      function aplicarSugestaoPorIndice(idx){
+        const item = sugestoes[idx];
+        if (!item){
+          return;
+        }
+
+        inputBusca.value = item.razao_social || "";
+        fecharSugestoes();
+        formBusca.submit();
+      }
+
+      function atualizarItemAtivo(){
+        const botoes = Array.from(listaBusca.querySelectorAll(".kb-combobox-opcao"));
+        botoes.forEach((btn, idx) => {
+          btn.classList.toggle("is-active", idx === indiceAtivo);
+        });
+      }
+
+      inputBusca.addEventListener("input", function(){
+        clearTimeout(debounceTimer);
+        debounceTimer = window.setTimeout(function(){
+          buscarSugestoes(false);
+        }, 180);
+      });
+
+      inputBusca.addEventListener("focus", function(){
+        const termo = (inputBusca.value || "").trim();
+        if (termo.length >= 2){
+          buscarSugestoes(false);
+        }
+      });
+
+      inputBusca.addEventListener("keydown", function(ev){
+        const botoes = Array.from(listaBusca.querySelectorAll(".kb-combobox-opcao"));
+
+        if (ev.key === "ArrowDown"){
+          if (listaBusca.hidden){
+            ev.preventDefault();
+            buscarSugestoes(true);
+            return;
+          }
+
+          if (!botoes.length){
+            return;
+          }
+
+          ev.preventDefault();
+          indiceAtivo = (indiceAtivo + 1) % botoes.length;
+          atualizarItemAtivo();
+          return;
+        }
+
+        if (ev.key === "ArrowUp"){
+          if (!botoes.length){
+            return;
+          }
+
+          ev.preventDefault();
+          indiceAtivo = (indiceAtivo <= 0) ? (botoes.length - 1) : (indiceAtivo - 1);
+          atualizarItemAtivo();
+          return;
+        }
+
+        if (ev.key === "Enter"){
+          if (!listaBusca.hidden && indiceAtivo >= 0){
+            ev.preventDefault();
+            aplicarSugestaoPorIndice(indiceAtivo);
+          }
+          return;
+        }
+
+        if (ev.key === "Escape"){
+          fecharSugestoes();
+        }
+      });
+
+      btnToggleBusca.addEventListener("click", function(){
+        if (!listaBusca.hidden){
+          fecharSugestoes();
+          return;
+        }
+        buscarSugestoes(true);
+      });
+
+      listaBusca.addEventListener("click", function(ev){
+        const botao = ev.target.closest(".kb-combobox-opcao");
+        if (!botao){
+          return;
+        }
+
+        const idx = Number(botao.getAttribute("data-idx"));
+        if (Number.isNaN(idx)){
+          return;
+        }
+
+        aplicarSugestaoPorIndice(idx);
+      });
+
+      document.addEventListener("click", function(ev){
+        if (!comboBusca.contains(ev.target)){
+          fecharSugestoes();
+        }
+      });
+    }
   })();
 </script>
 

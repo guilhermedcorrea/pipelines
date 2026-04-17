@@ -539,7 +539,7 @@
     overflow-x:auto;
     overflow-y:hidden;
     padding: 8px 10px 12px 10px;
-    scroll-snap-type: x mandatory;
+    scroll-snap-type: x proximity;
     scroll-padding-left: 10px;
     overscroll-behavior-x: contain;
     overscroll-behavior-y: auto;
@@ -556,6 +556,13 @@
 
   .kb-board.is-dragging *{
     cursor: grabbing !important;
+  }
+
+  .kb-board.is-scrolling-x .kb-card,
+  .kb-board.is-scrolling-x .kb-card:hover,
+  .kb-board.is-scrolling-x .kb-card:active{
+    transition: none !important;
+    transform: none !important;
   }
 
   .kb-board::-webkit-scrollbar{
@@ -750,14 +757,12 @@
     padding: 10px 10px 9px 10px;
     cursor: grab;
     box-shadow: 0 2px 8px rgba(15,23,42,.08);
-    transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease, opacity .12s ease, background .12s ease;
+    transition: box-shadow .12s ease, border-color .12s ease, opacity .12s ease, background .12s ease;
     position: relative;
-    will-change: transform;
-    backface-visibility: hidden;
   }
 
   .kb-card:hover{
-    transform: translateY(-1px);
+    transform: none;
     box-shadow: 0 10px 22px rgba(15,23,42,.12);
     border-color: rgba(15,23,42,.16);
   }
@@ -778,7 +783,7 @@
 
   .kb-card:active{
     cursor: grabbing;
-    transform: translateY(0);
+    transform: none;
   }
 
   .kb-board.is-dragging .kb-card{
@@ -3230,7 +3235,20 @@
 
   function configurarScrollKanban(){
     if (!board || board.dataset.scrollKanbanAjustado === "1") return;
-    board.dataset.scrollKanbanAjustado = "pagina";
+
+    let scrollTimer = null;
+
+    board.addEventListener("scroll", () => {
+      if (board.classList.contains("is-dragging")) return;
+
+      board.classList.add("is-scrolling-x");
+      window.clearTimeout(scrollTimer);
+      scrollTimer = window.setTimeout(() => {
+        board.classList.remove("is-scrolling-x");
+      }, 90);
+    }, { passive: true });
+
+    board.dataset.scrollKanbanAjustado = "1";
   }
 
 
