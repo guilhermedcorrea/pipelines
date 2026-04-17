@@ -3745,6 +3745,13 @@
       nomeVendedorDoCard(card) ||
       ""
     ).trim() || null;
+    const marcaExibida = safeStr(
+      valoresDigitadosHeader?.MarcaExibida ||
+      inputMarcaCard?.value ||
+      headerSnapshot?.MarcaExibida ||
+      card?.Marca ||
+      ""
+    ).trim() || null;
 
     const header = Object.assign({}, headerSnapshot, valoresDigitadosHeader || {});
 
@@ -3754,6 +3761,7 @@
     header.CnpjAgencia = empresaAgencia?.CNPJ || null;
     header.Bureau = empresaBureau?.RazaoSocial || null;
     header.CnpjBureau = empresaBureau?.CNPJ || null;
+    header.MarcaExibida = marcaExibida;
 
     if (origemTexto) {
       header.Origem = origemTexto;
@@ -6995,6 +7003,67 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
   function sincronizarBuscaSegmentoComSelect(){
     if (!inputSegmentoCardBusca || !selectSegmentoCard) return;
     inputSegmentoCardBusca.value = obterTextoCnaeSelecionado(selectSegmentoCard.value || "");
+  }
+
+  function normalizarCnaeComparacao(valor){
+    return safeStr(valor || "").replace(/\D+/g, "").trim();
+  }
+
+  function localizarCnaePorCodigoNoCatalogo(cnaeEmpresa){
+    const alvo = normalizarCnaeComparacao(cnaeEmpresa);
+    if (!alvo) return null;
+
+    return cnaesCatalogo.find((item) => normalizarCnaeComparacao(item?.cnaepadrao) === alvo) || null;
+  }
+
+  async function garantirCnaeNoCatalogoPorCodigo(cnaeEmpresa){
+    const alvo = normalizarCnaeComparacao(cnaeEmpresa);
+    if (!alvo) return null;
+
+    let existente = localizarCnaePorCodigoNoCatalogo(alvo);
+    if (existente) return existente;
+
+    try {
+      const resposta = await buscarCnaesRemoto(alvo);
+      const lista = Array.isArray(resposta) ? resposta : (Array.isArray(resposta?.cnaes) ? resposta.cnaes : []);
+      registrarCnaesNoCatalogo(lista);
+      existente = localizarCnaePorCodigoNoCatalogo(alvo);
+      if (existente) return existente;
+    } catch (erro) {
+      console.warn("garantirCnaeNoCatalogoPorCodigo: falhou ao buscar CNAE remoto", erro);
+    }
+
+    return null;
+  }
+
+  async function aplicarSegmentoAutomaticoDaEmpresaSelecionada(idEmp){
+    const idEmpresa = idNum(idEmp || 0);
+    if (!idEmpresa || !selectSegmentoCard) return;
+
+    let empresa = obterEmpresaCatalogoPorId(idEmpresa);
+
+    if (!empresa || (!safeStr(empresa?.CNAE).trim() && !safeStr(empresa?.Classe).trim())) {
+      try {
+        const resposta = await consultarCadastroEmpresa({ idEmpresa });
+        if (resposta?.empresa) {
+          atualizarCatalogoEmpresa(resposta.empresa);
+          empresa = resposta.empresa;
+        }
+      } catch (erro) {
+        console.warn("aplicarSegmentoAutomaticoDaEmpresaSelecionada: falhou ao consultar cadastro da empresa", erro);
+      }
+    }
+
+    if (!empresa) return;
+
+    const cnaeEmpresa = safeStr(empresa?.CNAE || "").trim();
+    if (!cnaeEmpresa) return;
+
+    const cnaeEncontrado = await garantirCnaeNoCatalogoPorCodigo(cnaeEmpresa);
+    if (!cnaeEncontrado?.IDDimCnaes) return;
+
+    await selecionarCnaePorIdComGarantia(String(cnaeEncontrado.IDDimCnaes), false);
+    agendarSincronizacaoFormularioSolicitacao();
   }
 
   function renderizarListaCnaesCombobox(texto, opcoes = {}){
@@ -11223,6 +11292,8 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (!idEmp) {
       limparDadosNovoContratoFormulario();
+    } else {
+      await aplicarSegmentoAutomaticoDaEmpresaSelecionada(idEmp);
     }
 
     await carregarFluxoContratoParaEmpresa(idEmp);
@@ -11694,6 +11765,10 @@ async function moverCard(idCard, idFasePara, posicao) {
   });
 
   selectOrigemAtendimentoCard?.addEventListener("change", () => {
+    agendarSincronizacaoFormularioSolicitacao();
+  });
+
+  inputMarcaCard?.addEventListener("input", () => {
     agendarSincronizacaoFormularioSolicitacao();
   });
 

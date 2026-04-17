@@ -5735,6 +5735,8 @@ def _montar_itens_snapshot_solicitacao_do_card(
 
 
 
+
+
 def _sincronizar_snapshot_solicitacao_contrato_do_card(
     *,
     id_card: int,
@@ -5935,6 +5937,26 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             parametros,
         )
 
+    def _buscar_empresa_por_id(id_empresa: int | None) -> dict[str, Any] | None:
+        if id_empresa in (None, "", 0):
+            return None
+
+        row = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (1)
+                    e.IDEmpresa,
+                    e.CNPJ,
+                    e.RazaoSocial
+                FROM {TABELA_EMPRESAS} e
+                WHERE e.IDEmpresa = :id_empresa;
+                """
+            ),
+            {"id_empresa": int(id_empresa)},
+        ).mappings().first()
+
+        return dict(row) if row else None
+
     dados_formulario_solicitacao = dict(dados_formulario_solicitacao or {}) if isinstance(dados_formulario_solicitacao, dict) else {}
     dados_header_formulario = (
         dict(dados_formulario_solicitacao.get("header") or {})
@@ -5992,30 +6014,30 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     id_vendedor_formulario = int(vendedor_formulario.get("IDVendedor") or 0) or None
     nome_vendedor_formulario = str(vendedor_formulario.get("NomeVendedor") or "").strip() or None
 
-    empresa = None
-    if id_empresa_relacionada not in (None, "", 0):
-        sql_empresa = text(
-            f"""
-            SELECT TOP (1)
-                e.IDEmpresa,
-                e.CNPJ,
-                e.RazaoSocial
-            FROM {TABELA_EMPRESAS} e
-            WHERE e.IDEmpresa = :id_empresa;
-            """
-        )
-        empresa = db.session.execute(
-            sql_empresa,
-            {"id_empresa": int(id_empresa_relacionada)},
-        ).mappings().first()
+    detalhe_card_snapshot = _obter_card_detalhe_payload(int(id_card))
+    card_snapshot = detalhe_card_snapshot.get("card") if isinstance(detalhe_card_snapshot, dict) else {}
+    card_snapshot = card_snapshot if isinstance(card_snapshot, dict) else {}
 
     if id_tipo_cliente in (None, "", 0):
-        detalhe_card_snapshot = _obter_card_detalhe_payload(int(id_card))
-        card_snapshot = detalhe_card_snapshot.get("card") if isinstance(detalhe_card_snapshot, dict) else {}
         try:
-            id_tipo_cliente = int(card_snapshot.get("IDDimTipoCliente") or card_snapshot.get("IDDimKanbanTipoClienteDesconto") or 0) or None
+            id_tipo_cliente = int(
+                card_snapshot.get("IDDimTipoCliente")
+                or card_snapshot.get("IDDimKanbanTipoClienteDesconto")
+                or 0
+            ) or None
         except Exception:
             id_tipo_cliente = None
+
+    id_empresa_principal_snapshot = (
+        _int_positivo_ou_none(card_snapshot.get("IDEmpresa"))
+        or _int_positivo_ou_none(id_empresa_relacionada)
+    )
+    id_empresa_agencia_snapshot = _int_positivo_ou_none(card_snapshot.get("IDEmpresaAgencia"))
+    id_empresa_bureau_snapshot = _int_positivo_ou_none(card_snapshot.get("IDEmpresaBureau"))
+
+    empresa_principal_snapshot = _buscar_empresa_por_id(id_empresa_principal_snapshot)
+    empresa_agencia_snapshot = _buscar_empresa_por_id(id_empresa_agencia_snapshot)
+    empresa_bureau_snapshot = _buscar_empresa_por_id(id_empresa_bureau_snapshot)
 
     contrato_row = dict(contrato_existente) if isinstance(contrato_existente, dict) else None
     if contrato_row is None and id_contrato_existente not in (None, "", 0):
@@ -6053,6 +6075,9 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         payload={
             "tipo_contrato": tipo_norm,
             "id_empresa_relacionada": id_empresa_relacionada,
+            "id_empresa_principal_snapshot": id_empresa_principal_snapshot,
+            "id_empresa_agencia_snapshot": id_empresa_agencia_snapshot,
+            "id_empresa_bureau_snapshot": id_empresa_bureau_snapshot,
             "id_contrato_existente": id_contrato_existente,
             "cod_ponto_contrato": cod_ponto_contrato,
             "cod_face_contrato": cod_face_contrato,
@@ -6069,17 +6094,12 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         ultima_solicitacao = _obter_ultima_solicitacao_contrato_por_card(int(id_card))
         id_solicitacao_existente = int(ultima_solicitacao.get("IDFatoSolicitacaoContratoEuromidia") or 0) if ultima_solicitacao else 0
 
-    id_tipo_cliente_int = _int_positivo_ou_none(id_tipo_cliente)
-    id_empresa_direto = _int_positivo_ou_none(id_empresa_relacionada) if id_tipo_cliente_int == 2 else None
-    id_empresa_agencia_snapshot = _int_positivo_ou_none(id_empresa_relacionada) if id_tipo_cliente_int == 3 else None
-    id_empresa_bureau_snapshot = _int_positivo_ou_none(id_empresa_relacionada) if id_tipo_cliente_int == 4 else None
-
     valores_solicitacao = {
         "IDFatoKanbanCard": int(id_card),
         "IDFatoControleContratosEuromidia": _int_positivo_ou_none(id_contrato_existente),
         "IDDimStatusContratos": _int_positivo_ou_none(_obter_id_status_contrato_em_avaliacao()),
         "IDDimUsuariosCriacao": _int_positivo_ou_none(id_usuario),
-        "IDEmpresa": id_empresa_direto,
+        "IDEmpresa": id_empresa_principal_snapshot,
         "IDEmpresaAgencia": id_empresa_agencia_snapshot,
         "IDEmpresaBureau": id_empresa_bureau_snapshot,
         "IDEmpresaProprietaria": _int_positivo_ou_none(id_empresa_proprietaria),
@@ -6087,21 +6107,21 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "Referencia": (contrato_row or {}).get("Referencia"),
         "NumeroContrato": (contrato_row or {}).get("NumeroContrato"),
         "NumeroPrevia": (contrato_row or {}).get("NumeroPrevia"),
-        "CNPJ": (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
+        "CNPJ": (contrato_row or {}).get("CNPJ") or (empresa_principal_snapshot or {}).get("CNPJ"),
         "DataAssinaturaRenovacao": _para_data_sql_ou_none((contrato_row or {}).get("DataAssinaturaRenovacao")),
         "IDTrimestre": (contrato_row or {}).get("IDTrimestre"),
         "DataLancamento": _para_data_sql_ou_none((contrato_row or {}).get("DataLancamento")),
-        "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 2 else None),
+        "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or (empresa_principal_snapshot or {}).get("RazaoSocial"),
         "CPF": (contrato_row or {}).get("CPF"),
         "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
         "Vendedor": (contrato_row or {}).get("Vendedor"),
         "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
         "Origem": (contrato_row or {}).get("Origem"),
         "SDR": (contrato_row or {}).get("SDR"),
-        "Agencia": (contrato_row or {}).get("Agencia") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 3 else None),
-        "CnpjAgencia": (contrato_row or {}).get("CnpjAgencia") or ((empresa or {}).get("CNPJ") if id_tipo_cliente_int == 3 else None),
-        "Bureau": (contrato_row or {}).get("Bureau") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 4 else None),
-        "CnpjBureau": (contrato_row or {}).get("CnpjBureau") or ((empresa or {}).get("CNPJ") if id_tipo_cliente_int == 4 else None),
+        "Agencia": (contrato_row or {}).get("Agencia") or (empresa_agencia_snapshot or {}).get("RazaoSocial"),
+        "CnpjAgencia": (contrato_row or {}).get("CnpjAgencia") or (empresa_agencia_snapshot or {}).get("CNPJ"),
+        "Bureau": (contrato_row or {}).get("Bureau") or (empresa_bureau_snapshot or {}).get("RazaoSocial"),
+        "CnpjBureau": (contrato_row or {}).get("CnpjBureau") or (empresa_bureau_snapshot or {}).get("CNPJ"),
         "Intermediario": (contrato_row or {}).get("Intermediario"),
         "CnpjIntermediario": (contrato_row or {}).get("CnpjIntermediario"),
         "QuantidadePontos": (contrato_row or {}).get("QuantidadePontos"),
@@ -6129,8 +6149,10 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "Observacao": "Solicitação enviada para avaliação a partir do card.",
         "BitAtivo": bit_registro_ativo,
     }
+
     if nome_vendedor_formulario and not str(valores_solicitacao.get("Vendedor") or "").strip():
         valores_solicitacao["Vendedor"] = nome_vendedor_formulario
+
     valores_solicitacao = _aplicar_dados_formulario_header(valores_solicitacao)
 
     snapshot_existente_payload = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
@@ -6196,7 +6218,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         id_contrato_existente=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
         item_contrato=item_contrato if isinstance(item_contrato, dict) else None,
         contrato_row=contrato_row if isinstance(contrato_row, dict) else None,
-        empresa=empresa if empresa else None,
+        empresa=empresa_principal_snapshot if empresa_principal_snapshot else None,
         descricao_card=descricao_card,
         bit_registro_ativo=bit_registro_ativo,
         bit_solicitacao_ativa=bit_solicitacao_ativa,
@@ -6301,6 +6323,9 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "id_solicitacao_existente": id_solicitacao_existente,
         "quantidade_itens_snapshot": len(itens_snapshot),
     }
+
+
+
 
 
 
@@ -18439,21 +18464,16 @@ def _resolver_ids_empresas_card_por_tipo_cliente(
     id_empresa_cliente_direto: Any = None,
 ) -> dict[str, Any]:
     """
-    Regras de persistência do card:
-    - Tipo 2 (Cliente Direto):
-        IDEmpresa = principal
-        IDEmpresaAgencia = agência informada
-        IDEmpresaBureau = bureau informado
-    - Tipo 3 (Agência de Publicidade):
-        IDEmpresa = cliente direto informado
-        IDEmpresaAgencia = principal
-        IDEmpresaBureau = bureau informado
-    - Tipo 4 (Bureau):
-        IDEmpresa = cliente direto informado
-        IDEmpresaAgencia = agência informada
-        IDEmpresaBureau = principal
-    - Demais tipos:
-        IDEmpresa = principal
+    Regra correta de persistência do card:
+    - IDEmpresa = sempre a empresa principal informada no primeiro campo
+    - IDEmpresaAgencia = agência informada
+    - IDEmpresaBureau = bureau informado
+
+    Observação importante:
+    - id_empresa_cliente_direto continua sendo validado e retornado,
+      mas NÃO sobrescreve IDEmpresa.
+    - hoje não existe coluna própria para persistir cliente direto sem
+      conflitar com a empresa principal.
     """
     id_tipo = _int_ou_none(id_tipo_cliente)
     id_principal = _int_ou_none(id_empresa_principal)
@@ -18474,54 +18494,105 @@ def _resolver_ids_empresas_card_por_tipo_cliente(
         if valor_int is not None and not _empresa_existe_por_id(valor_int):
             raise ValueError(f"{nome_campo.capitalize()} não encontrado(a).")
 
-    if id_tipo == 3:
-        return {
-            "id_empresa_card": id_cliente_direto,
-            "id_empresa_agencia_card": id_principal,
-            "id_empresa_bureau_card": id_bureau,
-            "id_empresa_principal": id_principal,
-            "id_empresa_cliente_direto": id_cliente_direto,
-        }
-
-    if id_tipo == 4:
-        return {
-            "id_empresa_card": id_cliente_direto,
-            "id_empresa_agencia_card": id_agencia,
-            "id_empresa_bureau_card": id_principal,
-            "id_empresa_principal": id_principal,
-            "id_empresa_cliente_direto": id_cliente_direto,
-        }
-
     return {
         "id_empresa_card": id_principal,
         "id_empresa_agencia_card": id_agencia,
         "id_empresa_bureau_card": id_bureau,
         "id_empresa_principal": id_principal,
-        "id_empresa_cliente_direto": id_principal if id_tipo == 2 else id_cliente_direto,
+        "id_empresa_cliente_direto": id_cliente_direto,
+        "id_tipo_cliente": id_tipo,
     }
+
+
+
 
 
 
 def _resolver_id_empresa_principal_por_tipo_cliente(
     card: Mapping[str, Any] | dict[str, Any] | None,
 ) -> int | None:
+    """
+    Regra correta:
+    - a empresa principal do card é sempre IDEmpresa.
+    - agência e bureau são complementares, nunca substituem a principal.
+    """
     if not card:
         return None
 
-    id_tipo = _resolver_id_tipo_cliente_desconto_por_bits(card)
-
-    if id_tipo == 3:
-        return _int_ou_none(card.get("IDEmpresaAgencia")) or _int_ou_none(card.get("IDEmpresa"))
-
-    if id_tipo == 4:
-        return _int_ou_none(card.get("IDEmpresaBureau")) or _int_ou_none(card.get("IDEmpresa"))
-
     return (
         _int_ou_none(card.get("IDEmpresa"))
+        or _int_ou_none(card.get("IDEmpresaRelacionadaCard"))
         or _int_ou_none(card.get("IDEmpresaAgencia"))
         or _int_ou_none(card.get("IDEmpresaBureau"))
-        or _int_ou_none(card.get("IDEmpresaRelacionadaCard"))
     )
+
+
+
+
+
+
+
+def _resolver_empresas_snapshot_solicitacao_do_card(
+    *,
+    id_card: int,
+    id_empresa_principal: Any = None,
+) -> dict[str, Any]:
+    """
+    Resolve as empresas do snapshot da solicitação com a regra correta:
+    - IDEmpresa = empresa principal
+    - IDEmpresaAgencia = agência
+    - IDEmpresaBureau = bureau
+    """
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card = detalhe.get("card") if isinstance(detalhe, dict) else {}
+    card = card if isinstance(card, dict) else {}
+
+    id_empresa_principal_int = _int_ou_none(id_empresa_principal) or _int_ou_none(card.get("IDEmpresa"))
+    id_empresa_agencia_int = _int_ou_none(card.get("IDEmpresaAgencia"))
+    id_empresa_bureau_int = _int_ou_none(card.get("IDEmpresaBureau"))
+    id_tipo_cliente_int = _int_ou_none(
+        card.get("IDDimTipoCliente") or card.get("IDDimKanbanTipoClienteDesconto")
+    )
+
+    def _buscar_empresa(id_empresa: Any) -> dict[str, Any] | None:
+        id_empresa_int = _int_ou_none(id_empresa)
+        if id_empresa_int in (None, 0):
+            return None
+
+        row = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (1)
+                    e.IDEmpresa,
+                    e.CNPJ,
+                    e.RazaoSocial
+                FROM {TABELA_EMPRESAS} e
+                WHERE e.IDEmpresa = :id_empresa;
+                """
+            ),
+            {"id_empresa": int(id_empresa_int)},
+        ).mappings().first()
+
+        return dict(row) if row else None
+
+    empresa_principal = _buscar_empresa(id_empresa_principal_int)
+    empresa_agencia = _buscar_empresa(id_empresa_agencia_int)
+    empresa_bureau = _buscar_empresa(id_empresa_bureau_int)
+
+    return {
+        "id_tipo_cliente": id_tipo_cliente_int,
+        "id_empresa_principal": id_empresa_principal_int,
+        "id_empresa_agencia": id_empresa_agencia_int,
+        "id_empresa_bureau": id_empresa_bureau_int,
+        "empresa_principal": empresa_principal,
+        "empresa_agencia": empresa_agencia,
+        "empresa_bureau": empresa_bureau,
+    }
+
+
+
+
+
 
 
 
