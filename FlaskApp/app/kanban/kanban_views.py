@@ -3461,6 +3461,7 @@ def _executar_movimento_card_core(
 
     sincronizacao_solicitacao_fase = None
     snapshot_preco_praticado = None
+    sincronizacao_reservas = {"criadas": 0, "canceladas": 0, "mantidas": 0}
 
     try:
         sincronizacao_solicitacao_fase = _sincronizar_ativacao_solicitacao_por_fase_do_card(
@@ -3473,6 +3474,13 @@ def _executar_movimento_card_core(
             sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
 
         if int(id_fase_para) == 4:
+            sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
+                id_card=int(id_card),
+                titulo_card=str(row.get("Titulo") or "").strip(),
+                id_empresa_relacionada=_obter_id_empresa_relacionada_card(row),
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+            )
             try:
                 snapshot_preco_praticado = _sincronizar_snapshot_preco_praticado_fase_4(
                     id_card=int(id_card),
@@ -3538,6 +3546,7 @@ def _executar_movimento_card_core(
         "sincronizacao_solicitacao_fase": sincronizacao_solicitacao_fase,
         "snapshot_preco_praticado": snapshot_preco_praticado,
         "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
+        "sincronizacao_reservas": sincronizacao_reservas,
     }
 
 
@@ -3563,6 +3572,7 @@ def _finalizar_pos_movimento_card(
     sincronizacao_solicitacao_fase = resultado_core.get("sincronizacao_solicitacao_fase")
     snapshot_preco_praticado = resultado_core.get("snapshot_preco_praticado")
     sincronizacao_tag_plano_midia = resultado_core.get("sincronizacao_tag_plano_midia")
+    sincronizacao_reservas = resultado_core.get("sincronizacao_reservas")
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
     detalhe = _obter_card_detalhe_payload(id_card)
@@ -3580,6 +3590,7 @@ def _finalizar_pos_movimento_card(
             "notas": detalhe.get("notas", []),
             "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             "snapshot_preco_praticado": snapshot_preco_praticado,
+            "sincronizacao_reservas": sincronizacao_reservas,
         },
     )
 
@@ -3595,6 +3606,7 @@ def _finalizar_pos_movimento_card(
         "snapshot_solicitacao": sincronizacao_solicitacao_fase,
         "snapshot_preco_praticado": snapshot_preco_praticado,
         "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
+        "sincronizacao_reservas": sincronizacao_reservas,
     }
 
 
@@ -8620,6 +8632,246 @@ def _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada: Any) -> s
     return str(valor or "").strip()
 
 
+ORIGEM_RESERVA_CARD_KANBAN = "KANBAN"
+
+
+def _marcador_reserva_card_kanban(id_card: int, cod_face: str) -> str:
+    return f"[CARD_ID={int(id_card)}][COD_FACE={str(cod_face or '').strip().upper()}]"
+
+
+def _marcador_reserva_card_kanban_legacy(id_card: int, cod_face: str) -> str:
+    return f"[KANBAN_CARD={int(id_card)}][COD_FACE={str(cod_face or '').strip().upper()}]"
+
+
+def _obter_chave_reserva_card_kanban(cod_face: Any, data_inicio: Any, data_fim: Any) -> tuple[str, date | None, date | None]:
+    return (
+        str(cod_face or "").strip().upper(),
+        _normalizar_data_reserva_kanban(data_inicio),
+        _normalizar_data_reserva_kanban(data_fim),
+    )
+
+
+def _listar_reservas_ativas_do_card_kanban(id_card: int) -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT
+            fo.IDFatoOcupacaoPaineisEuromidia,
+            fo.CodPonto,
+            fo.CodFace,
+            fo.DataInicio,
+            fo.DataFim,
+            fo.Origem,
+            fo.Status,
+            fo.Observacao
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+        WHERE fo.CanceladoEm IS NULL
+          AND fo.Status IN ('ATIVO', 'RESERVADO')
+          AND (
+                COALESCE(fo.Origem, '') = :origem_card
+                OR COALESCE(fo.Observacao, '') LIKE :marcador_novo
+                OR COALESCE(fo.Observacao, '') LIKE :marcador_antigo
+          )
+        ORDER BY fo.IDFatoOcupacaoPaineisEuromidia ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
+            "marcador_novo": f"[CARD_ID={int(id_card)}][COD_FACE=%",
+            "marcador_antigo": f"[KANBAN_CARD={int(id_card)}][COD_FACE=%",
+        },
+    ).mappings().all()
+
+    return [dict(row) for row in rows]
+
+
+def _card_tem_reservas_ativas_kanban(id_card: int) -> bool:
+    sql = text("""
+        SELECT TOP 1 1
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+        WHERE fo.CanceladoEm IS NULL
+          AND fo.Status IN ('ATIVO', 'RESERVADO')
+          AND (
+                COALESCE(fo.Origem, '') = :origem_card
+                OR COALESCE(fo.Observacao, '') LIKE :marcador_novo
+                OR COALESCE(fo.Observacao, '') LIKE :marcador_antigo
+          );
+    """)
+
+    valor = db.session.execute(
+        sql,
+        {
+            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
+            "marcador_novo": f"[CARD_ID={int(id_card)}][COD_FACE=%",
+            "marcador_antigo": f"[KANBAN_CARD={int(id_card)}][COD_FACE=%",
+        },
+    ).scalar()
+    return bool(valor)
+
+
+def _cancelar_reservas_card_kanban(
+    *,
+    id_card: int,
+    id_usuario: int,
+    chaves_manter: set[tuple[str, date | None, date | None]] | None = None,
+    motivo: str | None = None,
+) -> int:
+    chaves_manter = set(chaves_manter or set())
+    reservas_ativas = _listar_reservas_ativas_do_card_kanban(int(id_card))
+    if not reservas_ativas:
+        return 0
+
+    sql_cancel = text("""
+        UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+        SET
+            Status = 'CANCELADO',
+            CanceladoEm = SYSDATETIME(),
+            CanceladoPorIDUsuario = :id_usuario,
+            DataAtualizacao = SYSDATETIME(),
+            Observacao = CASE
+                WHEN :motivo IS NULL OR LTRIM(RTRIM(:motivo)) = '' THEN Observacao
+                WHEN Observacao IS NULL OR LTRIM(RTRIM(Observacao)) = '' THEN :motivo
+                ELSE CONCAT(Observacao, CHAR(10), :motivo)
+            END
+        WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
+          AND CanceladoEm IS NULL;
+    """)
+
+    canceladas = 0
+    motivo_final = str(motivo or '').strip() or f"[CARD_ID={int(id_card)}] Reserva cancelada por sincronização do card."
+
+    for reserva in reservas_ativas:
+        chave_reserva = _obter_chave_reserva_card_kanban(
+            reserva.get("CodFace"),
+            reserva.get("DataInicio"),
+            reserva.get("DataFim"),
+        )
+        if chave_reserva in chaves_manter:
+            continue
+
+        db.session.execute(
+            sql_cancel,
+            {
+                "id_usuario": int(id_usuario),
+                "motivo": motivo_final[:1000],
+                "id_ocupacao": int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or 0),
+            },
+        )
+        canceladas += 1
+
+    return canceladas
+
+
+def _normalizar_payload_reservas_card_kanban(itens: list[Any] | None) -> list[dict[str, Any]]:
+    normalizados: list[dict[str, Any]] = []
+
+    for item in (itens or []):
+        if not isinstance(item, dict):
+            continue
+
+        cod_face = str(item.get("cod_face") or item.get("CodFace") or "").strip().upper()
+
+        id_painel = item.get("id_painel")
+        if id_painel in (None, "", 0):
+            id_painel = item.get("IDDimPaineisEuromidia")
+
+        data_inicio = (
+            item.get("data_inicio")
+            or item.get("DataInicio")
+            or item.get("data_inicio_reserva")
+            or item.get("DataInicioReserva")
+        )
+        data_fim = (
+            item.get("data_fim")
+            or item.get("DataFim")
+            or item.get("data_fim_reserva")
+            or item.get("DataFimReserva")
+        )
+
+        normalizados.append(
+            {
+                "id_painel": int(id_painel or 0) or None,
+                "cod_face": cod_face,
+                "data_inicio": _normalizar_data_reserva_kanban(data_inicio),
+                "data_fim": _normalizar_data_reserva_kanban(data_fim),
+                "exibicoes_dia": item.get("exibicoes_dia") or item.get("ExibicoesDia"),
+                "cod_ponto": item.get("cod_ponto") or item.get("CodPonto"),
+            }
+        )
+
+    return normalizados
+
+
+def _sincronizar_reservas_painel_faces_kanban(
+    *,
+    id_card: int,
+    titulo_card: str,
+    id_empresa_relacionada: int | None,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+    painel_faces_payload: list[Any] | None = None,
+    vinculos_preparados: list[dict[str, Any]] | None = None,
+    cancelar_todas: bool = False,
+) -> dict[str, int]:
+    if cancelar_todas:
+        canceladas = _cancelar_reservas_card_kanban(
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            chaves_manter=set(),
+            motivo=f"[CARD_ID={int(id_card)}] Reserva cancelada porque o card foi removido/inativado.",
+        )
+        return {"criadas": 0, "canceladas": int(canceladas), "mantidas": 0}
+
+    itens_para_sincronizar = _normalizar_payload_reservas_card_kanban(
+        painel_faces_payload if isinstance(painel_faces_payload, list) else vinculos_preparados
+    )
+    if not itens_para_sincronizar:
+        itens_para_sincronizar = _normalizar_payload_reservas_card_kanban(_listar_paineis_vinculados_card(int(id_card)))
+
+    chaves_desejadas: set[tuple[str, date | None, date | None]] = set()
+    itens_validos: list[dict[str, Any]] = []
+    for item in itens_para_sincronizar:
+        data_inicio = item.get("data_inicio")
+        data_fim = item.get("data_fim")
+        cod_face = str(item.get("cod_face") or "").strip().upper()
+
+        if not cod_face:
+            continue
+        if data_inicio is None and data_fim is None:
+            continue
+        if data_inicio is None or data_fim is None:
+            raise ValueError("Preencha Data de e Data até para reservar o painel/face.")
+        if data_fim < data_inicio:
+            raise ValueError("A Data até não pode ser menor que a Data de.")
+
+        chave = _obter_chave_reserva_card_kanban(cod_face, data_inicio, data_fim)
+        chaves_desejadas.add(chave)
+        itens_validos.append(item)
+
+    canceladas = _cancelar_reservas_card_kanban(
+        id_card=int(id_card),
+        id_usuario=int(id_usuario),
+        chaves_manter=chaves_desejadas,
+        motivo=f"[CARD_ID={int(id_card)}] Reserva cancelada por atualização do card.",
+    )
+
+    criadas = _criar_reservas_painel_faces_kanban(
+        id_card=int(id_card),
+        titulo_card=titulo_card,
+        id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+        painel_faces_payload=itens_validos,
+        vinculos_preparados=vinculos_preparados if isinstance(vinculos_preparados, list) and vinculos_preparados else itens_validos,
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+    )
+
+    return {
+        "criadas": int(criadas or 0),
+        "canceladas": int(canceladas or 0),
+        "mantidas": int(max(len(chaves_desejadas) - int(criadas or 0), 0)),
+    }
+
+
 def _obter_capacidade_face_reserva_kanban(cod_face: str) -> dict[str, Any]:
     sql = text("""
         SELECT TOP 1
@@ -8657,11 +8909,14 @@ def _obter_capacidade_face_reserva_kanban(cod_face: str) -> dict[str, Any]:
 
 def _reserva_kanban_ja_existe(
     *,
+    id_card: int,
     cod_face: str,
     data_inicio: date,
     data_fim: date,
-    marcador_observacao: str,
 ) -> bool:
+    marcador_novo = _marcador_reserva_card_kanban(int(id_card), cod_face)
+    marcador_antigo = _marcador_reserva_card_kanban_legacy(int(id_card), cod_face)
+
     sql = text("""
         SELECT TOP 1 1
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
@@ -8670,7 +8925,11 @@ def _reserva_kanban_ja_existe(
           AND Status IN ('ATIVO', 'RESERVADO')
           AND TRY_CONVERT(date, DataInicio) = :data_inicio
           AND TRY_CONVERT(date, DataFim) = :data_fim
-          AND COALESCE(Observacao, '') LIKE :marcador_prefixo
+          AND (
+                COALESCE(Origem, '') = :origem_card
+                OR COALESCE(Observacao, '') LIKE :marcador_novo
+                OR COALESCE(Observacao, '') LIKE :marcador_antigo
+          )
     """)
 
     existe = db.session.execute(
@@ -8679,7 +8938,9 @@ def _reserva_kanban_ja_existe(
             "cod_face": str(cod_face or "").strip(),
             "data_inicio": data_inicio,
             "data_fim": data_fim,
-            "marcador_prefixo": f"{marcador_observacao}%",
+            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
+            "marcador_novo": f"{marcador_novo}%",
+            "marcador_antigo": f"{marcador_antigo}%",
         },
     ).scalar()
 
@@ -8862,13 +9123,13 @@ def _criar_reservas_painel_faces_kanban(
         if not cod_ponto:
             raise ValueError(f"Não foi possível resolver o CodPonto da face {cod_face}.")
 
-        marcador_observacao = f"[KANBAN_CARD={int(id_card)}][COD_FACE={cod_face}]"
+        marcador_observacao = _marcador_reserva_card_kanban(int(id_card), cod_face)
 
         if _reserva_kanban_ja_existe(
+            id_card=int(id_card),
             cod_face=cod_face,
             data_inicio=data_inicio,
             data_fim=data_fim,
-            marcador_observacao=marcador_observacao,
         ):
             continue
 
@@ -8954,7 +9215,7 @@ def _criar_reservas_painel_faces_kanban(
                 :cod_ponto,
                 :cod_face,
                 :id_painel,
-                'KANBAN',
+                :origem,
                 'RESERVADO',
                 :data_inicio,
                 :data_fim,
@@ -8983,6 +9244,7 @@ def _criar_reservas_painel_faces_kanban(
                 "cod_ponto": int(cod_ponto),
                 "cod_face": cod_face,
                 "id_painel": id_painel_final,
+                "origem": ORIGEM_RESERVA_CARD_KANBAN,
                 "data_inicio": data_inicio,
                 "data_fim": data_fim,
                 "spanqtd": spanqtd_novo,
@@ -9281,7 +9543,7 @@ def _listar_estado_atual_negociacao_card(id_card: int) -> list[dict[str, Any]]:
             pf.IDFatoKanbanCardPainelFace;
     """)
 
-    rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
+    rows = db.session.execute(sql, {"id_card": int(id_card), "origem_card": ORIGEM_RESERVA_CARD_KANBAN}).mappings().all()
     return [dict(row) for row in rows]
 
 
@@ -9532,7 +9794,6 @@ def _registrar_negociacao_preco_card(
     
 
 
-
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     sql = text("""
         SELECT
@@ -9578,18 +9839,31 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = UPPER(LTRIM(RTRIM(COALESCE(r.CodFace, ''))))
               AND fo.CanceladoEm IS NULL
               AND fo.Status IN ('ATIVO', 'RESERVADO')
-              AND COALESCE(fo.Observacao, '') LIKE (
-                    '[KANBAN_CARD=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' + UPPER(LTRIM(RTRIM(COALESCE(r.CodFace, '')))) + ']%'
-                  )
+              AND (
+                    COALESCE(fo.Origem, '') = :origem_card
+                    OR COALESCE(fo.Observacao, '') LIKE (
+                        '[CARD_ID=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' + UPPER(LTRIM(RTRIM(COALESCE(r.CodFace, '')))) + ']%'
+                    )
+                    OR COALESCE(fo.Observacao, '') LIKE (
+                        '[KANBAN_CARD=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' + UPPER(LTRIM(RTRIM(COALESCE(r.CodFace, '')))) + ']%'
+                    )
+              )
             ORDER BY fo.CriadoEm DESC, fo.DataAtualizacao DESC
         ) rv
         WHERE r.IDFatoKanbanCard = :id_card
           AND r.Ativo = 1
         ORDER BY r.Ordem ASC, r.IDFatoKanbanCardPainelFace ASC;
     """)
-    rows = db.session.execute(sql, {"id_card": int(id_card)}).mappings().all()
-    return _rows_para_dicts(rows)
 
+    rows = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
+        },
+    ).mappings().all()
+
+    return [dict(row) for row in rows]
 
 
 
@@ -13592,6 +13866,16 @@ def api_card_inativar(id_card: int):
             id_usuario=int(id_usuario),
         )
 
+        sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
+            id_card=int(id_card),
+            titulo_card=str(card_escopo.get("Titulo") or "").strip(),
+            id_empresa_relacionada=_obter_id_empresa_relacionada_card(card_escopo),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+            cancelar_todas=True,
+        )
+        print(f"[KANBAN][api_card_inativar] sincronizacao_reservas={sincronizacao_reservas!r}")
+
         print("[KANBAN][api_card_inativar] capturando snapshot_depois")
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
@@ -13631,6 +13915,7 @@ def api_card_inativar(id_card: int):
                 "motivo_codigo": motivo_normalizado.get("Codigo"),
                 "id_motivo_encerramento": id_motivo_encerramento,
                 "descricao": descricao or None,
+                "sincronizacao_reservas": sincronizacao_reservas,
             },
         )
 
@@ -20120,6 +20405,7 @@ def api_card_criar(id_kanban: int):
         email_card = payload.get("email")
         id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
         nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
+        painel_faces_payload = payload.get("painel_faces")
         solicitacao_contrato_payload = payload.get("solicitacao_contrato") if isinstance(payload.get("solicitacao_contrato"), dict) else None
 
         if len(titulo) < 2:
@@ -20472,6 +20758,111 @@ def api_card_criar(id_kanban: int):
             id_empresa_proprietaria=int(id_emp),
         )
 
+        vinculos_preparados: list[dict[str, object]] = []
+        sincronizacao_reservas = {"criadas": 0, "canceladas": 0, "mantidas": 0}
+
+        if isinstance(painel_faces_payload, list):
+            vinculos_preparados = _preparar_vinculos_painel_faces(
+                painel_faces_payload,
+                int(id_emp),
+            )
+
+            for ordem_rel, vinculo in enumerate(vinculos_preparados, start=1):
+                db.session.execute(
+                    text(
+                        f"""
+                        INSERT INTO {TABELA_CARD_PAINEL_FACE} (
+                            IDFatoKanbanCard,
+                            Ordem,
+                            IDDimPaineisEuromidia,
+                            IDDimFacesPaineis,
+                            CodPonto,
+                            CodFace,
+                            TipoPainel,
+                            AnoCusto,
+                            CustoTabela,
+                            IDDimTabelaPrecosEuromidia,
+                            PeriodoExibicao,
+                            ExibicoesDia,
+                            ValorTabela,
+                            Tabela,
+                            PoliticaTrocas,
+                            ValorTroca,
+                            NovoValor,
+                            PercentualDesconto,
+                            ValorVendaFinal,
+                            MargemValor,
+                            MargemPercentual,
+                            DataInicio,
+                            DataFim,
+                            Ativo
+                        )
+                        VALUES (
+                            :id_card,
+                            :ordem,
+                            :id_painel,
+                            :id_face,
+                            :cod_ponto,
+                            :cod_face,
+                            :tipo_painel,
+                            :ano_custo,
+                            :custo_tabela,
+                            :id_tabela_preco,
+                            :periodo_exibicao,
+                            :exibicoes_dia,
+                            :valor_tabela,
+                            :tabela,
+                            :politica_trocas,
+                            :valor_troca,
+                            :novo_valor,
+                            :percentual_desconto,
+                            :valor_venda_final,
+                            :margem_valor,
+                            :margem_percentual,
+                            :data_inicio,
+                            :data_fim,
+                            1
+                        );
+                        """
+                    ),
+                    {
+                        "id_card": int(novo_id),
+                        "ordem": int(ordem_rel),
+                        "id_painel": int(vinculo.get("IDDimPaineisEuromidia") or vinculo.get("id_painel") or 0) or None,
+                        "id_face": int(vinculo.get("IDDimFacesPaineis") or vinculo.get("id_face") or 0) or None,
+                        "cod_ponto": vinculo.get("CodPonto") or vinculo.get("cod_ponto"),
+                        "cod_face": vinculo.get("CodFace") or vinculo.get("cod_face"),
+                        "tipo_painel": vinculo.get("TipoPainel") or vinculo.get("tipo_painel"),
+                        "ano_custo": vinculo.get("AnoCusto") or vinculo.get("ano_custo"),
+                        "custo_tabela": vinculo.get("CustoTabela") or vinculo.get("custo_tabela"),
+                        "id_tabela_preco": vinculo.get("IDDimTabelaPrecosEuromidia") or vinculo.get("id_tabela_preco") or vinculo.get("id_preco"),
+                        "periodo_exibicao": vinculo.get("PeriodoExibicao") or vinculo.get("periodo_exibicao"),
+                        "exibicoes_dia": vinculo.get("ExibicoesDia") or vinculo.get("exibicoes_dia"),
+                        "valor_tabela": vinculo.get("ValorTabela") or vinculo.get("valor_tabela"),
+                        "tabela": vinculo.get("Tabela") or vinculo.get("tabela"),
+                        "politica_trocas": vinculo.get("PoliticaTrocas") or vinculo.get("politica_trocas"),
+                        "valor_troca": vinculo.get("ValorTroca") or vinculo.get("valor_troca"),
+                        "novo_valor": vinculo.get("NovoValor") or vinculo.get("novo_valor"),
+                        "percentual_desconto": vinculo.get("PercentualDesconto") or vinculo.get("percentual_desconto"),
+                        "valor_venda_final": vinculo.get("ValorVendaFinal") or vinculo.get("valor_venda_final"),
+                        "margem_valor": vinculo.get("MargemValor") or vinculo.get("margem_valor"),
+                        "margem_percentual": vinculo.get("MargemPercentual") or vinculo.get("margem_percentual"),
+                        "data_inicio": _para_data_sql_ou_none(vinculo.get("DataInicio") or vinculo.get("data_inicio")),
+                        "data_fim": _para_data_sql_ou_none(vinculo.get("DataFim") or vinculo.get("data_fim")),
+                    },
+                )
+
+        if int(id_fase or 0) == 4:
+            sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
+                id_card=int(novo_id),
+                titulo_card=titulo,
+                id_empresa_relacionada=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+                painel_faces_payload=painel_faces_payload if isinstance(painel_faces_payload, list) else None,
+                vinculos_preparados=vinculos_preparados,
+            )
+
         snapshot_solicitacao = _sincronizar_snapshot_solicitacao_contrato_do_card(
             id_card=int(novo_id),
             id_usuario=int(id_usuario),
@@ -20589,13 +20980,18 @@ def api_card_criar(id_kanban: int):
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
+                "sincronizacao_reservas": sincronizacao_reservas,
             },
         )
 
         return jsonify(
             {
                 "ok": True,
-                "msg": "Card criado com sucesso.",
+                "msg": (
+                    f"Card criado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} reserva(s) criada(s)."
+                    if int(sincronizacao_reservas.get('criadas') or 0) > 0
+                    else "Card criado com sucesso."
+                ),
                 "id": int(novo_id),
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
@@ -20605,6 +21001,7 @@ def api_card_criar(id_kanban: int):
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
+                "sincronizacao_reservas": sincronizacao_reservas,
             }
         ), 201
 
@@ -21022,7 +21419,7 @@ def api_card_atualizar(id_card: int):
                     )
 
         vinculos_preparados: list[dict[str, object]] = []
-        reservas_criadas = 0
+        sincronizacao_reservas = {"criadas": 0, "canceladas": 0, "mantidas": 0}
 
         if isinstance(painel_faces_payload, list):
             vinculos_preparados = _preparar_vinculos_painel_faces(
@@ -21127,6 +21524,17 @@ def api_card_atualizar(id_card: int):
                     },
                 )
 
+        if int(id_fase_atual or 0) == 4 or _card_tem_reservas_ativas_kanban(int(id_card)):
+            sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
+                id_card=int(id_card),
+                titulo_card=titulo,
+                id_empresa_relacionada=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+                painel_faces_payload=painel_faces_payload if isinstance(painel_faces_payload, list) else None,
+                vinculos_preparados=vinculos_preparados,
+            )
+
         snapshot_solicitacao = _sincronizar_ativacao_solicitacao_por_fase_do_card(
             id_card=int(id_card),
             id_usuario=int(id_usuario),
@@ -21207,6 +21615,7 @@ def api_card_atualizar(id_card: int):
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
+                "sincronizacao_reservas": sincronizacao_reservas,
             },
         )
 
@@ -21214,11 +21623,11 @@ def api_card_atualizar(id_card: int):
             {
                 "ok": True,
                 "msg": (
-                    f"Card atualizado com sucesso. {int(reservas_criadas)} reserva(s) criada(s)."
-                    if int(reservas_criadas or 0) > 0
+                    f"Card atualizado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} reserva(s) criada(s)."
+                    if int(sincronizacao_reservas.get('criadas') or 0) > 0
                     else "Card atualizado com sucesso."
                 ),
-                "reservas_criadas": int(reservas_criadas or 0),
+                "reservas_criadas": int(sincronizacao_reservas.get('criadas') or 0),
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
@@ -21229,6 +21638,7 @@ def api_card_atualizar(id_card: int):
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
+                "sincronizacao_reservas": sincronizacao_reservas,
             }
         )
 
