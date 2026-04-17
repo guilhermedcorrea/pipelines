@@ -18234,6 +18234,11 @@ def _marcar_compartilhamentos_publicos_anteriores_inativos(
     )
 
 
+
+
+
+
+
 def _criar_ou_regerar_compartilhamento_publico_checkin(
     *,
     id_checkin: int,
@@ -18995,10 +19000,16 @@ def carteiras_lista():
     )
 
 
+
+
+
 def _carteira_add_meses(dt_base: date, deslocamento: int) -> date:
     ano = dt_base.year + ((dt_base.month - 1 + deslocamento) // 12)
     mes = ((dt_base.month - 1 + deslocamento) % 12) + 1
     return date(ano, mes, 1)
+
+
+
 
 
 @paineis_bp.post("/carteiras/<int:id_fato_carteira_vendedor>/mover-empresa")
@@ -19078,6 +19089,10 @@ def carteira_mover_empresa(id_fato_carteira_vendedor: int):
         db.session.rollback()
         flash(f"Falha ao mover empresa de carteira: {exc}", "danger")
         return redirect(url_for("Paineis.carteira_detalhe", id_fato_carteira_vendedor=id_fato_carteira_vendedor))
+
+
+
+
 
 
 
