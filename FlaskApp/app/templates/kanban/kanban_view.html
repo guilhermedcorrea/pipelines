@@ -5424,7 +5424,8 @@ function normalizarCardServidor(card){
 
   function tagAfetaCorDoCard(tag){
     const nomeTag = normalizarTexto(tag?.NomeTag || tag?.nomeTag || "");
-    return idNum(tag?.AfetaCorCard || 0) === 1 || nomeTag === "aprovacao desconto";
+    const idTag = idNum(tag?.IDDimKanbanTag || tag?.id_dim_kanban_tag || tag?.id_tag || 0);
+    return idTag === 4 || idNum(tag?.AfetaCorCard || 0) === 1 || nomeTag === "aprovacao desconto";
   }
 
   function obterCorEspecialDoCard(card){

@@ -9,6 +9,14 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
 {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%
 {%- endmacro %}
 
+{% macro percentual_ou_traco(valor) -%}
+{%- if valor is not none -%}
+{{ percentual(valor) }}
+{%- else -%}
+—
+{%- endif -%}
+{%- endmacro %}
+
 {% block content %}
 <style>
   .apv-wrap{
@@ -234,6 +242,23 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
     </div>
   </div>
 
+  {% set ns = namespace(cards_com_proposta=0, cards_com_desconto=0) %}
+  {% for item in cards %}
+    {% set preco_atual_base = item.preco_atual %}
+    {% set preco_proposto_base = item.preco_proposto %}
+    {% if preco_proposto_base is not none %}
+      {% set ns.cards_com_proposta = ns.cards_com_proposta + 1 %}
+    {% endif %}
+
+    {% set desconto_exibicao_contador = item.desconto_proposto %}
+    {% if (desconto_exibicao_contador is none or desconto_exibicao_contador|float == 0) and preco_atual_base is not none and preco_proposto_base is not none and preco_atual_base|float > 0 and preco_atual_base|float != preco_proposto_base|float %}
+      {% set desconto_exibicao_contador = ((preco_atual_base|float - preco_proposto_base|float) / preco_atual_base|float) * 100 %}
+    {% endif %}
+    {% if desconto_exibicao_contador is not none %}
+      {% set ns.cards_com_desconto = ns.cards_com_desconto + 1 %}
+    {% endif %}
+  {% endfor %}
+
   <div class="apv-badges">
     <article class="apv-badge">
       <p class="apv-badge-label">Cards aguardando</p>
@@ -247,12 +272,12 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
 
     <article class="apv-badge">
       <p class="apv-badge-label">Cards com proposta</p>
-      <p class="apv-badge-valor">{{ cards|selectattr('preco_proposto')|list|length }}</p>
+      <p class="apv-badge-valor">{{ ns.cards_com_proposta }}</p>
     </article>
 
     <article class="apv-badge">
       <p class="apv-badge-label">Cards com desconto</p>
-      <p class="apv-badge-valor">{{ cards|selectattr('desconto_proposto')|list|length }}</p>
+      <p class="apv-badge-valor">{{ ns.cards_com_desconto }}</p>
     </article>
   </div>
 
@@ -280,6 +305,19 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
       </thead>
       <tbody id="tbodyAprovacao">
         {% for item in cards %}
+        {% set custo_atual_exibicao = item.custo_atual %}
+        {% set preco_atual_exibicao = item.preco_atual %}
+        {% set preco_proposto_exibicao = item.preco_proposto if item.preco_proposto is not none else item.preco_atual %}
+        {% set desconto_exibicao = item.desconto_proposto %}
+        {% set desconto_calculado = false %}
+        {% if (desconto_exibicao is none or desconto_exibicao|float == 0) and preco_atual_exibicao is not none and preco_proposto_exibicao is not none and preco_atual_exibicao|float > 0 and preco_atual_exibicao|float != preco_proposto_exibicao|float %}
+          {% set desconto_exibicao = ((preco_atual_exibicao|float - preco_proposto_exibicao|float) / preco_atual_exibicao|float) * 100 %}
+          {% set desconto_calculado = true %}
+        {% endif %}
+        {% set margem_exibicao = item.margem_proposta %}
+        {% if (margem_exibicao is none or margem_exibicao|float == 0) and preco_proposto_exibicao is not none and custo_atual_exibicao is not none and preco_proposto_exibicao|float > 0 %}
+          {% set margem_exibicao = ((preco_proposto_exibicao|float - custo_atual_exibicao|float) / preco_proposto_exibicao|float) * 100 %}
+        {% endif %}
         <tr data-url="{{ url_for('kanban.aprovacao_preco_detalhe', id_card=item.id_card) }}">
           <td>
             <div class="apv-card-nome">
@@ -294,11 +332,18 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
             </div>
           </td>
           <td>{{ item.nome_fase or '—' }}</td>
-          <td>{{ moeda(item.custo_atual) }}</td>
-          <td>{{ moeda(item.preco_atual) }}</td>
-          <td>{{ moeda(item.preco_proposto) }}</td>
-          <td>{{ percentual(item.desconto_proposto) }}</td>
-          <td>{{ percentual(item.margem_proposta) }}</td>
+          <td>{{ moeda(custo_atual_exibicao) }}</td>
+          <td>{{ moeda(preco_atual_exibicao) }}</td>
+          <td>{{ moeda(preco_proposto_exibicao) }}</td>
+          <td>
+            <div class="apv-card-nome">
+              <strong>{{ percentual_ou_traco(desconto_exibicao) }}</strong>
+              {% if desconto_calculado %}
+              <span>Calculado pelo preço atual × preço proposto</span>
+              {% endif %}
+            </div>
+          </td>
+          <td>{{ percentual_ou_traco(margem_exibicao) }}</td>
           <td>{{ item.nome_usuario_responsavel or '—' }}</td>
           <td>{{ item.data_preco_proposto.strftime('%d/%m/%Y %H:%M') if item.data_preco_proposto else '—' }}</td>
           <td><span class="apv-tag">Aguardando aprovação</span></td>

@@ -14585,7 +14585,6 @@ def api_ocupacao_reserva_criar():
 
 
 
-
 @paineis_bp.route("/ocupacao", methods=["GET"])
 @login_required
 @limiter.limit("80 per minute", methods=["GET"])
@@ -14620,7 +14619,6 @@ def lista_ocupacao():
     filtros_sql = []
     params = {}
 
-  
     filtros_sql.append("ftcp.CodFace <> '0' AND ftcp.CodFace IS NOT NULL")
 
     if status:
@@ -14643,7 +14641,6 @@ def lista_ocupacao():
 
     where_sql = " AND ".join([f"({x})" for x in filtros_sql]) if filtros_sql else "1=1"
 
-   
     sql_total = text(f"""
         ;WITH dedupe AS (
             SELECT
@@ -14699,7 +14696,6 @@ def lista_ocupacao():
     params_page = dict(params)
     params_page.update({"start_rn": start_rn, "end_rn": end_rn})
 
-
     sql_rows = text(f"""
         ;WITH dedupe AS (
             SELECT
@@ -14744,8 +14740,8 @@ def lista_ocupacao():
                 *,
                 ROW_NUMBER() OVER (
                     ORDER BY
-                        ISNULL(CAST(DataInicio AS date), '1900-01-01') DESC,
-                        ISNULL(CodFace, '') ASC
+                        ISNULL(CAST(CriadoEm AS datetime2), ISNULL(CAST(DataAtualizacao AS datetime2), CAST('1900-01-01' AS datetime2))) DESC,
+                        IDFatoOcupacaoPaineisEuromidia DESC
                 ) AS rn
             FROM filtrada
         )
@@ -14782,7 +14778,6 @@ def lista_ocupacao():
             "RazaoSocial": (r[9] or "").strip(),
         })
 
-    
     sql_status = text("""
         SELECT DISTINCT Status
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
@@ -14819,7 +14814,6 @@ def lista_ocupacao():
             "fim": fim,
         },
     )
-
 
 
 

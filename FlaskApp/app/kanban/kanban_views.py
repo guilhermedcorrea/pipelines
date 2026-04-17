@@ -14650,6 +14650,8 @@ def _contar_cards_resumo_historico(
 
 
 
+
+
 @kanban_bp.route("/historico-cards", methods=["GET"])
 @login_required
 @limiter.limit("60/minute")
@@ -14676,7 +14678,10 @@ def historico_cards_lista():
     page = max(1, page)
     offset = (page - 1) * per_page
 
-    somente_ativos = str(request.args.get("somente_ativos", "1")).strip() != "0"
+    # Regra nova:
+    # histórico deve mostrar TODOS os cards, inclusive removidos/inativados.
+    # Por isso não leio mais request.args.get("somente_ativos").
+    somente_ativos = False
 
     total = _contar_cards_resumo_historico(
         id_empresa_proprietaria=id_empresa_proprietaria,
@@ -14709,7 +14714,7 @@ def historico_cards_lista():
         "q": termo_busca,
         "id_fase": id_fase,
         "status": status_card or "",
-        "somente_ativos": somente_ativos,
+        "somente_ativos": False,
         "per_page": per_page,
     }
 
@@ -14734,8 +14739,6 @@ def historico_cards_lista():
         paginacao=paginacao,
         total_cards=total,
     )
-
-
 
 
 
@@ -17970,6 +17973,79 @@ def _avaliar_tags_aprovacao_desconto_card(
 
 
 
+
+def _reconciliar_tags_aprovacao_desconto_pendentes(
+    *,
+    id_empresa_proprietaria: int,
+    id_usuario: int,
+    id_kanban: int | None = None,
+) -> dict[str, int]:
+    """
+    Recalcula as tags automáticas de aprovação/desconto para cards já existentes.
+
+    Objetivo:
+    - recuperar cards que ficaram sem a tag automática por regressão de código;
+    - restaurar a presença na lista /kanban/aprovacao-preco sem depender de edição manual.
+    """
+    filtro_kanban = ""
+    parametros: dict[str, object] = {
+        "id_empresa_proprietaria": int(id_empresa_proprietaria),
+    }
+
+    if id_kanban not in (None, "", 0):
+        filtro_kanban = "AND c.IDDimKanban = :id_kanban"
+        parametros["id_kanban"] = int(id_kanban)
+
+    sql = text(f"""
+        SELECT DISTINCT
+            c.IDFatoKanbanCard,
+            c.IDDimKanban
+        FROM {TABELA_CARD} c
+        INNER JOIN {TABELA_CARD_NEGOCIACAO_PRECO} np
+            ON np.IDFatoKanbanCard = c.IDFatoKanbanCard
+           AND np.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+        WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND c.Ativo = 1
+          {filtro_kanban};
+    """)
+
+    rows = db.session.execute(sql, parametros).mappings().all()
+
+    cards_avaliados = 0
+    cards_com_erro = 0
+
+    for row in rows:
+        id_card = int(row.get("IDFatoKanbanCard") or 0)
+        id_kanban_card = int(row.get("IDDimKanban") or 0)
+
+        if id_card <= 0 or id_kanban_card <= 0:
+            continue
+
+        cards_avaliados += 1
+
+        try:
+            estados_atuais = _listar_estado_atual_negociacao_card(id_card)
+            _sincronizar_tag_aprovacao_diretoria_card(
+                id_card=id_card,
+                id_kanban=id_kanban_card,
+                estados_atuais=estados_atuais,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_empresa_proprietaria),
+            )
+        except Exception:
+            cards_com_erro += 1
+            current_app.logger.exception(
+                "Falha ao reconciliar tags automáticas de aprovação de desconto. id_card=%s",
+                id_card,
+            )
+
+    return {
+        "cards_avaliados": int(cards_avaliados),
+        "cards_com_erro": int(cards_com_erro),
+    }
+
+
+
 def _buscar_cards_lista_aprovacao_preco(id_empresa_proprietaria: int) -> list[dict[str, Any]]:
     sql = text("""
         ;WITH CardsComTag AS (
@@ -18388,8 +18464,14 @@ def _buscar_negociacao_preco_para_aprovacao(
 @login_required
 @limiter.limit("60/minute")
 def lista_aprovacao_preco():
-    _assert_login()
+    id_usuario = _assert_login()
     id_empresa_proprietaria = _id_empresa_usuario_or_403()
+
+    _reconciliar_tags_aprovacao_desconto_pendentes(
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_usuario=int(id_usuario),
+    )
+    db.session.commit()
 
     cards = _buscar_cards_lista_aprovacao_preco(int(id_empresa_proprietaria))
 
@@ -20921,6 +21003,15 @@ def api_card_criar(id_kanban: int):
                 id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
             )
 
+        estados_atuais_aprovacao_desconto = _listar_estado_atual_negociacao_card(int(novo_id))
+        _sincronizar_tag_aprovacao_diretoria_card(
+            id_card=int(novo_id),
+            id_kanban=int(id_kanban),
+            estados_atuais=estados_atuais_aprovacao_desconto,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
         _garantir_tag_em_atendimento_no_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -21562,6 +21653,15 @@ def api_card_atualizar(id_card: int):
                 id_dim_tipo_cliente=id_tipo_cliente_relacionamento_final,
                 id_dim_origem_atendimento=id_origem_atendimento_relacionamento_final,
             )
+
+        estados_atuais_aprovacao_desconto = _listar_estado_atual_negociacao_card(int(id_card))
+        _sincronizar_tag_aprovacao_diretoria_card(
+            id_card=int(id_card),
+            id_kanban=int(id_kanban),
+            estados_atuais=estados_atuais_aprovacao_desconto,
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
