@@ -3260,6 +3260,10 @@
 
   let fases = [];
   let cards = [];
+  let indiceCardsPorId = new Map();
+  let indiceCardsPorFase = new Map();
+  let indiceCardsVisiveisPorFase = new Map();
+  let totalCardsVisiveisCache = 0;
   let tagsCatalogo = [];
   let vendedoresCatalogo = [];
   let tiposClienteDescontoCatalogo = [];
@@ -5308,10 +5312,12 @@ function normalizarCardServidor(card){
       idNum(cardId),
       Array.isArray(tags) ? tags.map(t => Object.assign({}, t || {})) : []
     );
+    reconstruirIndicesCards();
   }
 
   function removerTagsDoCard(cardId){
     mapaTagsPorCard.delete(idNum(cardId));
+    reconstruirIndicesCards();
   }
 
   function normalizaCnpj(v){
@@ -5504,23 +5510,55 @@ function normalizarCardServidor(card){
     return faseEhFinalDoQuadro(idFaseAtual) || statusCardEhFinal(card.StatusCard || card.status_card);
   }
 
+  function reconstruirIndicesCards(){
+    const porId = new Map();
+    const porFase = new Map();
+    const visiveisPorFase = new Map();
+    let totalVisiveis = 0;
+
+    for (const card of (Array.isArray(cards) ? cards : [])) {
+      const idCard = idNum(card?.IDFatoKanbanCard || 0);
+      const idFase = idNum(card?.IDDimKanbanFaseAtual || card?.id_fase_atual || 0);
+
+      if (idCard) {
+        porId.set(idCard, card);
+      }
+
+      if (!porFase.has(idFase)) {
+        porFase.set(idFase, []);
+      }
+      porFase.get(idFase).push(card);
+
+      if (cardPassaFiltros(card)) {
+        if (!visiveisPorFase.has(idFase)) {
+          visiveisPorFase.set(idFase, []);
+        }
+        visiveisPorFase.get(idFase).push(card);
+        totalVisiveis += 1;
+      }
+    }
+
+    indiceCardsPorId = porId;
+    indiceCardsPorFase = porFase;
+    indiceCardsVisiveisPorFase = visiveisPorFase;
+    totalCardsVisiveisCache = totalVisiveis;
+  }
+
   function listaCardsDaFase(idFase, considerarFiltros = true){
-    const idF = idNum(idFase);
-    return cards
-      .filter(c => idNum(c.IDDimKanbanFaseAtual) === idF)
-      .filter(c => considerarFiltros ? cardPassaFiltros(c) : true);
+    const mapa = considerarFiltros ? indiceCardsVisiveisPorFase : indiceCardsPorFase;
+    return mapa.get(idNum(idFase)) || [];
   }
 
   function contarCardsNaFaseCarregados(idFase){
-    return listaCardsDaFase(idFase, false).length;
+    return (indiceCardsPorFase.get(idNum(idFase)) || []).length;
   }
 
   function contarCardsNaFaseVisiveis(idFase){
-    return listaCardsDaFase(idFase, true).length;
+    return (indiceCardsVisiveisPorFase.get(idNum(idFase)) || []).length;
   }
 
   function contarCardsVisiveis(){
-    return cards.filter(c => cardPassaFiltros(c)).length;
+    return totalCardsVisiveisCache;
   }
 
   function totalServidorDoQuadro(){
@@ -5740,6 +5778,7 @@ function normalizarCardServidor(card){
   }
 
   function aplicarBusca(){
+    reconstruirIndicesCards();
     const idsFases = fases.map(f => idNum(f.IDDimKanbanFase)).filter(Boolean);
     idsFases.forEach(idFase => preencherCabecalhoFase(idFase));
     redesenharFasesLocalmente(idsFases, null, true);
@@ -5889,8 +5928,7 @@ function normalizarCardServidor(card){
   }
 
   function obterCardPorId(idCard){
-    const id = idNum(idCard);
-    return cards.find(c => idNum(c.IDFatoKanbanCard) === id) || null;
+    return indiceCardsPorId.get(idNum(idCard)) || null;
   }
 
   function inserirOuAtualizarCardLocal(card){
@@ -5912,19 +5950,25 @@ function normalizarCardServidor(card){
     }
 
     const idx = cards.findIndex(c => idNum(c.IDFatoKanbanCard) === cardNorm.IDFatoKanbanCard);
+    let cardAtualizado = null;
+
     if (idx >= 0){
       cards[idx] = Object.assign({}, cards[idx], cardNorm);
-      return cards[idx];
+      cardAtualizado = cards[idx];
+    } else {
+      cards.unshift(cardNorm);
+      cardAtualizado = cardNorm;
     }
 
-    cards.unshift(cardNorm);
-    return cardNorm;
+    reconstruirIndicesCards();
+    return cardAtualizado;
   }
 
   function removerCardLocal(idCard){
     const id = idNum(idCard);
     cards = cards.filter(c => idNum(c.IDFatoKanbanCard) !== id);
-    removerTagsDoCard(id);
+    mapaTagsPorCard.delete(id);
+    reconstruirIndicesCards();
   }
 
 
@@ -5972,6 +6016,7 @@ function normalizarCardServidor(card){
   }
 
   cards.splice(indiceInsercao, 0, cardMovido);
+  reconstruirIndicesCards();
 
   return {
     ok: true,
@@ -6013,6 +6058,7 @@ function restaurarMovimentoCardLocal(movimento){
   }
 
   cards.splice(indiceInsercao, 0, cardRestaurado);
+  reconstruirIndicesCards();
   return true;
 }
 
@@ -8647,16 +8693,22 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     }
   }
 
-  function agendarRecarregarResumoComercial(atrasoMs = 450){
-    if (temporizadorResumoComercial) {
-      window.clearTimeout(temporizadorResumoComercial);
-    }
 
-    temporizadorResumoComercial = window.setTimeout(() => {
-      temporizadorResumoComercial = null;
-      agendarRecarregarResumoComercial();
-    }, Math.max(0, Number(atrasoMs) || 0));
+function agendarRecarregarResumoComercial(atrasoMs = 450){
+  if (temporizadorResumoComercial) {
+    window.clearTimeout(temporizadorResumoComercial);
   }
+
+  temporizadorResumoComercial = window.setTimeout(async () => {
+    temporizadorResumoComercial = null;
+
+    if (document.hidden) return;
+    await recarregarResumoComercial();
+  }, Math.max(0, Number(atrasoMs) || 0));
+}
+
+
+
 function parseNumeroInput(valor){
   if (valor === null || valor === undefined) return null;
 
@@ -10326,6 +10378,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       await enriquecerCardsCarregados(cardsNovos, mapaTagsLote);
     }
 
+    reconstruirIndicesCards();
     return cardsNovos.length;
   } finally {
     st.carregandoServidor = false;
@@ -10387,12 +10440,14 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       mapaTagsPorCard.set(idCard, arr);
     });
 
+    reconstruirIndicesCards();
     renderizarFiltrosMultiselect();
     renderBoardCompleto();
     atualizarResumoBusca();
   }
 
   function renderBoardCompleto() {
+    reconstruirIndicesCards();
     board.innerHTML = "";
     estadoFase.clear();
 
@@ -13027,8 +13082,10 @@ async function moverCard(idCard, idFasePara, posicao) {
   function montarEstadoEdicaoCardAtual(){
     const fluxoContratoAtual = obterFluxoContratoAtual();
     const usarDadosNovoContrato = !!fluxoContratoAtual.usar_novo_contrato;
+    const usarVinculoContratoExistente = !usarDadosNovoContrato && !!idNum(fluxoContratoAtual.id_contrato);
     const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
     const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
+    const solicitacaoContrato = coletarFormularioSolicitacaoContrato();
 
     return {
       titulo: safeStr(document.getElementById("cardTitulo")?.value || "").trim(),
@@ -13038,18 +13095,18 @@ async function moverCard(idCard, idFasePara, posicao) {
       id_tipo_cliente_desconto: selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null,
       id_origem_atendimento: selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null,
       id_dim_cnaes: selectSegmentoCard?.value ? Number(selectSegmentoCard.value) : null,
-      id_contrato_existente: fluxoContratoAtual.id_contrato,
-      id_controle_contrato: fluxoContratoAtual.id_contrato,
-      tipo_contrato_card: fluxoContratoAtual.modo_contrato,
-      cod_ponto_contrato: safeStr(fluxoContratoAtual.cod_ponto_contrato || "").trim(),
-      cod_face_contrato: safeStr(fluxoContratoAtual.cod_face_contrato || "").trim().toUpperCase(),
+      id_contrato_existente: usarVinculoContratoExistente ? fluxoContratoAtual.id_contrato : null,
+      id_controle_contrato: usarVinculoContratoExistente ? fluxoContratoAtual.id_contrato : null,
+      tipo_contrato_card: usarVinculoContratoExistente ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO,
+      cod_ponto_contrato: usarVinculoContratoExistente ? safeStr(fluxoContratoAtual.cod_ponto_contrato || "").trim() : null,
+      cod_face_contrato: usarVinculoContratoExistente ? safeStr(fluxoContratoAtual.cod_face_contrato || "").trim().toUpperCase() : null,
       id_empresa_agencia: selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
       id_empresa_cliente_direto: selectClienteDiretoCard?.value ? Number(selectClienteDiretoCard.value) : null,
       id_empresa_bureau: selectBureauCard?.value ? Number(selectBureauCard.value) : null,
       marca: usarDadosNovoContrato ? (safeStr(inputMarcaCard?.value || "").trim() || null) : null,
       telefone: usarDadosNovoContrato ? (normalizarTelefoneContato(inputTelefoneCard?.value || "") || null) : null,
       email: usarDadosNovoContrato ? (safeStr(inputEmailCard?.value || "").trim() || null) : null,
-      solicitacao_contrato: coletarFormularioSolicitacaoContrato(),
+      solicitacao_contrato: solicitacaoContrato,
       painel_faces: painelFaces
     };
   }
