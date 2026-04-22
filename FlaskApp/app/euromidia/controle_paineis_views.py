@@ -15724,6 +15724,25 @@ def _localizar_fundo_checkin(cod_ponto: str, cod_face: str) -> Path:
     return _localizar_arquivo_imagem(pasta_fundo)
 
 
+def _normalizar_segmento_pasta_checkin(valor, *, forcar_maiusculo: bool = False, valor_padrao: str = "0") -> str:
+    """Eu normalizo cada segmento usado na pasta final do checkin para evitar variações e subpastas indevidas."""
+    texto = _normalizar_texto_checkin(valor)
+    if forcar_maiusculo:
+        texto = texto.upper()
+
+    if not texto:
+        texto = str(valor_padrao)
+
+    texto = texto.replace("..", "").replace("/", "").replace("\\", "")
+    texto = texto.strip()
+
+    if not texto:
+        texto = str(valor_padrao)
+
+    return texto
+
+
+
 def _montar_pasta_destino_final_checkin(
     *,
     cod_ponto: str | int,
@@ -15731,13 +15750,23 @@ def _montar_pasta_destino_final_checkin(
     id_fato_controle_contratos: int,
     id_fato_contrato_destinatario_externo: int,
 ) -> Path:
-    """Eu monto a pasta final no padrão pontos/CodPonto/CodFace/Contrato/Destinatario."""
+    """Eu monto sempre a mesma pasta final do checkin: pontos/CodPonto/CodFace/Contrato/Destinatario."""
     pasta_base = _obter_pasta_base_checkin()
-    pasta_face = pasta_base / str(cod_ponto) / str(cod_face)
-    pasta_contrato = pasta_face / str(int(id_fato_controle_contratos))
-    pasta_destinatario = pasta_contrato / str(int(id_fato_contrato_destinatario_externo))
-    _garantir_pasta(pasta_destinatario)
-    return pasta_destinatario
+    cod_ponto_txt = _normalizar_segmento_pasta_checkin(cod_ponto)
+    cod_face_txt = _normalizar_segmento_pasta_checkin(cod_face, forcar_maiusculo=True)
+    id_contrato_txt = _normalizar_segmento_pasta_checkin(int(id_fato_controle_contratos))
+    id_destinatario_txt = _normalizar_segmento_pasta_checkin(int(id_fato_contrato_destinatario_externo or 0))
+
+    pasta_destino = (
+        pasta_base
+        / cod_ponto_txt
+        / cod_face_txt
+        / id_contrato_txt
+        / id_destinatario_txt
+    )
+
+    _garantir_pasta(pasta_destino)
+    return pasta_destino
 
 def _salvar_upload_original_checkin(
     *,
@@ -16065,6 +16094,15 @@ def _processar_upload_checkin_por_caminho(
             cod_face=cod_face_txt,
             id_fato_controle_contratos=int(id_fato_controle_contratos),
             id_fato_contrato_destinatario_externo=id_fato_contrato_destinatario_externo_int,
+        )
+
+        current_app.logger.info(
+            "[CHECKIN] Pasta final resolvida | contrato=%s | ponto=%s | face=%s | destinatario=%s | pasta=%s",
+            int(id_fato_controle_contratos),
+            cod_ponto_int,
+            cod_face_txt,
+            id_fato_contrato_destinatario_externo_int,
+            str(pasta_destino_final),
         )
 
         nome_original_cliente, caminho_midia_upload = _salvar_upload_original_checkin(

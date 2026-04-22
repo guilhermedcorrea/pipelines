@@ -1,0 +1,299 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Produto {{ produto.referencia_produto }} | Estoque Omie{% endblock %}
+
+
+{% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+<style>
+  .estoque-euromidia-ajuste {
+    width: 100%;
+  }
+
+  .estoque-euromidia-ajuste .card {
+    background: #fff;
+    color: #212529;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  .estoque-euromidia-ajuste .card-body {
+    min-width: 0;
+  }
+
+  .estoque-euromidia-ajuste .table {
+    --bs-table-bg: #fff;
+    --bs-table-color: #212529;
+  }
+
+  .estoque-euromidia-ajuste .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .estoque-euromidia-ajuste .form-label,
+  .estoque-euromidia-ajuste .campo-filtro label,
+  .estoque-euromidia-ajuste .dado-label,
+  .estoque-euromidia-ajuste .kpi-titulo,
+  .estoque-euromidia-ajuste .vinculo-label,
+  .estoque-euromidia-ajuste label {
+    display: block;
+    margin-bottom: 0.35rem;
+  }
+
+  .estoque-euromidia-ajuste .btn {
+    font-weight: 600;
+  }
+
+  .estoque-euromidia-ajuste .pagination {
+    margin-bottom: 0;
+  }
+</style>
+<style>
+  .pagina-detalhe .card {
+    border-radius: 18px;
+    overflow: hidden;
+  }
+
+  .pagina-detalhe .kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .pagina-detalhe .kpi {
+    background: #f8faff;
+    border: 1px solid #e6eefc;
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+  }
+
+  .pagina-detalhe .kpi-titulo {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+  }
+
+  .pagina-detalhe .kpi-valor {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .pagina-detalhe .grade-cabecalho {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 1rem;
+  }
+
+  .pagina-detalhe .lista-dados {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(200px, 1fr));
+    gap: 0.75rem 1rem;
+  }
+
+  .pagina-detalhe .dado-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 0.2rem;
+  }
+
+  .pagina-detalhe .dado-valor {
+    font-weight: 600;
+    color: #1f2937;
+    word-break: break-word;
+  }
+
+  .pagina-detalhe .empresa-card + .empresa-card {
+    margin-top: 1rem;
+  }
+
+  .pagina-detalhe .badge-ambiente {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.45rem 0.7rem;
+    border-radius: 999px;
+    background: #eef4ff;
+    color: #0d6efd;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+
+  .pagina-detalhe .table {
+    min-width: 980px;
+  }
+
+  @media (max-width: 1200px) {
+    .pagina-detalhe .kpis {
+      grid-template-columns: repeat(2, minmax(140px, 1fr));
+    }
+
+    .pagina-detalhe .grade-cabecalho {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .pagina-detalhe .lista-dados {
+      grid-template-columns: 1fr;
+    }
+
+    .pagina-detalhe .kpis {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+<div class="estoque-euromidia-ajuste">
+<div class="pagina-detalhe d-flex flex-column gap-3">
+  <div>
+    <a href="{{ url_for('estoques_bp.listar_produtos') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>
+      Voltar para produtos
+    </a>
+  </div>
+
+  <div class="card border-0 shadow-sm">
+    <div class="card-body d-flex flex-column gap-3">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
+        <div>
+          <h1 class="h3 mb-1">{{ produto.descricao }}</h1>
+          <div class="text-muted">
+            Referência: <strong>{{ produto.referencia_produto }}</strong>
+            {% if produto.codigo_interno %} • Código interno: <strong>{{ produto.codigo_interno }}</strong>{% endif %}
+            {% if produto.unidade %} • Unidade: <strong>{{ produto.unidade }}</strong>{% endif %}
+          </div>
+        </div>
+        <div class="d-flex align-items-start">
+          {% if produto.bit_ativo %}
+            <span class="badge text-bg-success">Ativo</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Inativo</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="kpi-titulo">Saldo total</div>
+          <div class="kpi-valor">{{ resumo.saldo_total }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-titulo">Reservado total</div>
+          <div class="kpi-valor">{{ resumo.reservado_total }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-titulo">Físico total</div>
+          <div class="kpi-valor">{{ resumo.fisico_total }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-titulo">Pendente total</div>
+          <div class="kpi-valor">{{ resumo.pendente_total }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-titulo">Ambientes / locais</div>
+          <div class="kpi-valor">{{ resumo.quantidade_ambientes }} / {{ resumo.quantidade_locais }}</div>
+        </div>
+      </div>
+
+      <div class="grade-cabecalho">
+        <div class="card border bg-white">
+          <div class="card-body">
+            <h2 class="h6 mb-3">Cadastro oficial do produto</h2>
+            <div class="lista-dados">
+              <div><div class="dado-label">ID</div><div class="dado-valor">{{ produto.id_fato_produto }}</div></div>
+              <div><div class="dado-label">Tipo</div><div class="dado-valor">{{ produto.tipo_item or '-' }}</div></div>
+              <div><div class="dado-label">Marca</div><div class="dado-valor">{{ produto.marca or '-' }}</div></div>
+              <div><div class="dado-label">Modelo</div><div class="dado-valor">{{ produto.modelo or '-' }}</div></div>
+              <div><div class="dado-label">NCM</div><div class="dado-valor">{{ produto.ncm or '-' }}</div></div>
+              <div><div class="dado-label">EAN</div><div class="dado-valor">{{ produto.ean or '-' }}</div></div>
+              <div><div class="dado-label">Família</div><div class="dado-valor">{{ produto.descricao_familia or '-' }}</div></div>
+              <div><div class="dado-label">Origem cadastro</div><div class="dado-valor">{{ produto.origem_cadastro or '-' }}</div></div>
+              <div><div class="dado-label">Origem imposto</div><div class="dado-valor">{{ produto.origem_imposto or '-' }}</div></div>
+              <div><div class="dado-label">Atualizado em UTC</div><div class="dado-valor">{{ produto.data_ultima_atualizacao_utc or '-' }}</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card border bg-white">
+          <div class="card-body">
+            <h2 class="h6 mb-3">Ambientes vinculados</h2>
+            <div class="d-flex flex-wrap gap-2">
+              {% for empresa in empresas_vinculadas %}
+                <span class="badge-ambiente">{{ (empresa.razao_social or '').strip().split(' ') | first }}</span>
+              {% else %}
+                <span class="text-muted">Nenhum ambiente vinculado.</span>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% for grupo in estoques_por_empresa %}
+  <div class="card border-0 shadow-sm empresa-card">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1">{{ grupo.empresa.razao_social }}</h2>
+          <div class="text-muted small">
+            Código produto integração: <strong>{{ grupo.vinculo.codigo_produto_integracao or '-' }}</strong>
+            • Código produto Omie: <strong>{{ grupo.vinculo.codigo_produto_omie or '-' }}</strong>
+            • Código Omie: <strong>{{ grupo.vinculo.codigo_omie or '-' }}</strong>
+          </div>
+        </div>
+        <div class="text-muted small">
+          Descrição Omie: <strong>{{ grupo.vinculo.descricao_omie or '-' }}</strong>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Local</th>
+              <th>Status</th>
+              <th>Saldo</th>
+              <th>Reservado</th>
+              <th>Físico</th>
+              <th>Pendente</th>
+              <th>CMC</th>
+              <th>Preço unitário</th>
+              <th>Data posição</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in grupo.itens %}
+            <tr>
+              <td>{{ item.codigo_local_estoque or '-' }}</td>
+              <td>{{ item.descricao_status or '-' }}</td>
+              <td>{{ item.saldo or 0 }}</td>
+              <td>{{ item.reservado or 0 }}</td>
+              <td>{{ item.fisico or 0 }}</td>
+              <td>{{ item.pendente or 0 }}</td>
+              <td>{{ item.cmc or 0 }}</td>
+              <td>{{ item.preco_unitario or 0 }}</td>
+              <td>{{ item.data_posicao or '-' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="9" class="text-center text-muted py-4">Nenhuma posição de estoque encontrada para este ambiente.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body text-center text-muted py-5">
+      Nenhum estoque encontrado para este produto.
+    </div>
+  </div>
+  {% endfor %}
+</div>
+</div>
+{% endblock %}

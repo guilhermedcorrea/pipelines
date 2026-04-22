@@ -122,11 +122,13 @@ def create_app() -> Flask:
     from .autenticacao.autenticacao_views import autenticacao_bp
     from .admin.admin_views import admin
     from .kanban.kanban_views import kanban_bp
+    from .admin.estoque_views import estoques_bp
 
     app.register_blueprint(paineis_bp, url_prefix="/paineis")
     app.register_blueprint(autenticacao_bp, url_prefix="/autenticacao")
     app.register_blueprint(admin, url_prefix="/admin")
     app.register_blueprint(kanban_bp, url_prefix="/kanban")
+    app.register_blueprint(estoques_bp, url_prefix="/estoques")
 
  
     from . import socket_events 

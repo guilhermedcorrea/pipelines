@@ -969,7 +969,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% if exibir_menu_paineis %}
         <div class="menu-item" data-menu="paineis">
           <button type="button"
-                  class="menu-btn {% if request.path.startswith('/paineis') and not request.path.startswith('/paineis/ocupacao') and not request.path.startswith('/paineis/clientes') %}active{% endif %}">
+                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') %}active{% endif %}">
             Painéis <span style="opacity:.9;">▾</span>
           </button>
 
@@ -997,23 +997,54 @@ input:disabled, select:disabled, textarea:disabled{
                       Lista Ocupação
                     </a>
                   {% endif %}
+
+                  <a href="{{ url_for('estoques_bp.listar_pedidos_compra') }}"
+                     class="{% if request.path == url_for('estoques_bp.listar_pedidos_compra') %}menu-link-current{% endif %}">
+                    Lista de Pedidos de Compra
+                  </a>
+
+                  <a href="{{ url_for('estoques_bp.novo_pedido_compra') }}"
+                     class="{% if request.path == url_for('estoques_bp.novo_pedido_compra') %}menu-link-current{% endif %}">
+                    Novo Pedido de Compra
+                  </a>
                 </div>
               </div>
             {% endif %}
 
-            {% if menu_paineis_disponibilidades %}
-              <a href="{{ url_for('Paineis.checkin_novo') }}"
-                 class="{% if request.path == url_for('Paineis.checkin_novo') %}menu-link-current{% endif %}">
-                Realizar Checkin
+            <div class="submenu-item">
+              <a href="#" class="submenu-link">
+                <span>Cadastros</span>
+                <span class="submenu-caret">▸</span>
               </a>
-            {% endif %}
 
-            {% if menu_paineis_disponibilidades %}
-              <a href="{{ url_for('Paineis.lista_checkins') }}"
-                 class="{% if request.path == url_for('Paineis.lista_checkins') %}menu-link-current{% endif %}">
-                Lista Checkins
-              </a>
-            {% endif %}
+              <div class="submenu-dropdown">
+                <a href="{{ url_for('estoques_bp.listar_produtos') }}"
+                   class="{% if request.path == url_for('estoques_bp.listar_produtos') or request.path.startswith('/estoques/produtos/') %}menu-link-current{% endif %}">
+                  Lista de Produtos
+                </a>
+
+                {% if menu_paineis_empresas %}
+                  <a href="{{ url_for('Paineis.clientes_lista') }}"
+                     class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
+                    Empresas
+                  </a>
+                {% endif %}
+
+                {% if menu_paineis_disponibilidades %}
+                  <a href="{{ url_for('Paineis.checkin_novo') }}"
+                     class="{% if request.path == url_for('Paineis.checkin_novo') %}menu-link-current{% endif %}">
+                    Realizar Checkin
+                  </a>
+                {% endif %}
+
+                {% if menu_paineis_disponibilidades %}
+                  <a href="{{ url_for('Paineis.lista_checkins') }}"
+                     class="{% if request.path == url_for('Paineis.lista_checkins') %}menu-link-current{% endif %}">
+                    Lista Checkins
+                  </a>
+                {% endif %}
+              </div>
+            </div>
 
             {% if menu_paineis_atendimento %}
               <div class="submenu-item">
@@ -1141,12 +1172,6 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_empresas %}
-              <a href="{{ url_for('Paineis.clientes_lista') }}"
-                 class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
-                Empresas
-              </a>
-            {% endif %}
           </div>
         </div>
         {% endif %}
