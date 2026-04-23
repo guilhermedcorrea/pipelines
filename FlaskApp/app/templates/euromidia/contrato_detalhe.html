@@ -172,6 +172,22 @@
     .timeline-pager .btn-page.is-active{ background:var(--euro-blue); border-color:var(--euro-blue); color:#fff; }
     .thumb-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:12px; }
     .thumb-media{ width:100%; max-height:220px; object-fit:cover; border-radius:10px; border:1px solid var(--border); background:#f8fafc; }
+    .thumb-media[data-src]:not([src]){ min-height:180px; }
+    .media-placeholder{
+      width:100%;
+      min-height:180px;
+      border-radius:10px;
+      border:1px dashed #cbd5e1;
+      background:#f8fafc;
+      color:#64748b;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      font-size:12px;
+      font-weight:800;
+      padding:12px;
+    }
     .stack-sm{ display:flex; flex-direction:column; gap:10px; }
     .surface-grid{
       display:grid;
@@ -345,6 +361,253 @@
     .kv-lite .field-item{ min-height:74px; }
     .list-stack{ display:flex; flex-direction:column; gap:12px; }
 
+    .status-flow-card{
+      margin-top:14px;
+      border:1px solid var(--border);
+      border-radius:18px;
+      background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow:0 16px 30px rgba(2,6,23,.06);
+      overflow:hidden;
+    }
+    .status-flow-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      padding:16px 18px 0 18px;
+      flex-wrap:wrap;
+    }
+    .status-flow-title{
+      color:var(--euro-blue);
+      font-size:18px;
+      font-weight:900;
+      margin:0;
+    }
+    .status-flow-subtitle{
+      color:#64748b;
+      font-size:13px;
+      font-weight:700;
+      margin-top:4px;
+      line-height:1.45;
+    }
+    .status-flow-current{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:38px;
+      padding:8px 12px;
+      border-radius:999px;
+      font-weight:900;
+      font-size:13px;
+      border:1px solid rgba(0,40,132,.15);
+      background:rgba(0,40,132,.06);
+      color:var(--euro-blue);
+    }
+    .status-flow-current::before{
+      content:"";
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      background:currentColor;
+      box-shadow:0 0 0 4px rgba(255,255,255,.95);
+      opacity:.9;
+    }
+    .status-flow-current.sucesso{
+      background:#ecfdf3;
+      border-color:#bbf7d0;
+      color:#15803d;
+    }
+    .status-flow-current.erro{
+      background:#fff1f2;
+      border-color:#fecdd3;
+      color:#be123c;
+    }
+    .status-flow-track-wrap{
+      padding:16px 18px 18px 18px;
+    }
+    .status-flow-track{
+      display:flex;
+      align-items:stretch;
+      gap:10px;
+      overflow-x:auto;
+      padding-bottom:4px;
+    }
+    .status-flow-track::-webkit-scrollbar{
+      height:8px;
+    }
+    .status-flow-track::-webkit-scrollbar-thumb{
+      background:#cbd5e1;
+      border-radius:999px;
+    }
+    .status-node{
+      position:relative;
+      flex:0 0 180px;
+      min-height:132px;
+      padding:14px 64px 12px 12px;
+      border-radius:18px;
+      border:1px solid #dbe7f6;
+      background:#ffffff;
+      display:flex;
+      flex-direction:column;
+      align-items:flex-start;
+      justify-content:flex-start;
+      gap:10px;
+      box-shadow:0 10px 24px rgba(2,6,23,.05);
+    }
+    .status-node.pendente{
+      background:linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border-color:#e2e8f0;
+    }
+    .status-node.concluido{
+      background:linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+      border-color:#93c5fd;
+    }
+    .status-node.atual{
+      background:linear-gradient(180deg, #ecfdf3 0%, #dcfce7 100%);
+      border-color:#86efac;
+      box-shadow:0 14px 28px rgba(34,197,94,.14);
+    }
+    .status-node.terminal-sucesso{
+      background:linear-gradient(180deg, #ecfdf3 0%, #dcfce7 100%);
+      border-color:#86efac;
+      box-shadow:0 14px 28px rgba(34,197,94,.14);
+    }
+    .status-node.terminal-erro{
+      background:linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+      border-color:#fda4af;
+      box-shadow:0 14px 28px rgba(244,63,94,.12);
+    }
+    .status-node-icon{
+      position:relative;
+      width:42px;
+      height:42px;
+      border-radius:999px;
+      border:2px solid #cbd5e1;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:900;
+      font-size:18px;
+      color:#475569;
+      background:#fff;
+      flex:none;
+    }
+    .status-node.concluido .status-node-icon{
+      border-color:#3b82f6;
+      background:#dbeafe;
+      color:#1d4ed8;
+    }
+    .status-node.atual .status-node-icon,
+    .status-node.terminal-sucesso .status-node-icon{
+      border-color:#22c55e;
+      background:#f0fdf4;
+      color:#16a34a;
+    }
+    .status-node.terminal-erro .status-node-icon{
+      border-color:#f43f5e;
+      background:#fff1f2;
+      color:#e11d48;
+    }
+    .status-node-icon.pulsando::after{
+      content:"";
+      position:absolute;
+      inset:-6px;
+      border-radius:999px;
+      border:2px solid rgba(34,197,94,.18);
+      animation:statusPulse 1.8s ease-out infinite;
+    }
+    @keyframes statusPulse{
+      0%{ transform:scale(.85); opacity:.85; }
+      100%{ transform:scale(1.25); opacity:0; }
+    }
+    .status-node-logo{
+      position:absolute;
+      top:12px;
+      right:12px;
+      width:38px;
+      height:38px;
+      border-radius:12px;
+      overflow:hidden;
+      border:1px solid #dbe7f6;
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .status-node-logo img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+    .status-node-logo.fallback-texto{
+      background:#eff6ff;
+      color:#1d4ed8;
+      font-weight:900;
+      font-size:12px;
+    }
+    .status-node-id{
+      font-size:11px;
+      font-weight:900;
+      color:#64748b;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+    .status-node-title{
+      font-size:16px;
+      font-weight:900;
+      color:#0f172a;
+      line-height:1.2;
+      word-break:break-word;
+    }
+    .status-node-desc{
+      font-size:12px;
+      color:#475569;
+      line-height:1.45;
+      word-break:break-word;
+    }
+    .status-arrow{
+      align-self:center;
+      flex:none;
+      color:#94a3b8;
+      font-size:24px;
+      font-weight:900;
+      margin:0 2px;
+    }
+    .status-arrow.done{
+      color:#2563eb;
+    }
+    .status-arrow.final-sucesso{
+      color:#16a34a;
+    }
+    .status-arrow.final-erro{
+      color:#e11d48;
+    }
+    .status-flow-legend{
+      display:flex;
+      align-items:center;
+      gap:16px;
+      flex-wrap:wrap;
+      padding:0 18px 18px 18px;
+    }
+    .status-flow-legend-item{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      color:#475569;
+      font-size:12px;
+      font-weight:800;
+    }
+    .status-flow-legend-dot{
+      width:10px;
+      height:10px;
+      border-radius:999px;
+      display:inline-block;
+    }
+    .status-flow-legend-dot.verde{ background:#22c55e; }
+    .status-flow-legend-dot.azul{ background:#3b82f6; }
+    .status-flow-legend-dot.cinza{ background:#cbd5e1; }
+
+
     @media (max-width:1280px){
       .summary-grid{ grid-template-columns:repeat(3,minmax(150px,1fr)); }
       .field-grid{ grid-template-columns:repeat(3,minmax(180px,1fr)); }
@@ -356,6 +619,7 @@
       .field-grid{ grid-template-columns:repeat(2,minmax(180px,1fr)); }
       .surface-grid{ grid-template-columns:1fr; }
       .timeline-item{ grid-template-columns:1fr; gap:8px; }
+      .status-node{ flex-basis:164px; min-height:128px; }
     }
     @media (max-width:760px){
       .grid-quick,.summary-grid,.field-grid,.kv-lite{ grid-template-columns:1fr; }
@@ -364,6 +628,197 @@
       .modal-dialog{ width:100%; max-height:92vh; }
     }
   </style>
+
+
+  {% set diagrama_status_existe = diagrama_status is defined and diagrama_status %}
+  {% set mapa_status_nome = {
+    1: 'Em Digitação',
+    2: 'Pendente Geração',
+    3: 'Documento Gerado',
+    4: 'Pendente Envio',
+    5: 'Enviado Assinatura',
+    6: 'Em Assinatura',
+    7: 'Ativo',
+    8: 'Concluído',
+    9: 'Cancelado',
+    10: 'Reprovado'
+  } %}
+  {% set status_atual_id_bruto = (
+    diagrama_status.status_atual_id
+    if diagrama_status_existe and diagrama_status.status_atual_id is not none
+    else (
+      contrato.IDDimStatusContratos
+      if contrato.IDDimStatusContratos is defined and contrato.IDDimStatusContratos is not none
+      else (
+        contrato.IDStatusContrato
+        if contrato.IDStatusContrato is defined and contrato.IDStatusContrato is not none
+        else (
+          contrato.idDimStatusContratos
+          if contrato.idDimStatusContratos is defined and contrato.idDimStatusContratos is not none
+          else none
+        )
+      )
+    )
+  ) %}
+  {% set status_atual_id = status_atual_id_bruto|int if status_atual_id_bruto is not none else 0 %}
+  {% set status_atual_nome = (
+    diagrama_status.status_atual_nome
+    if diagrama_status_existe and diagrama_status.status_atual_nome
+    else mapa_status_nome.get(status_atual_id, 'Sem status definido')
+  ) %}
+
+  <div class="status-flow-card">
+    <div class="status-flow-head">
+      <div>
+        <div class="status-flow-title">Fluxo do contrato</div>
+        <div class="status-flow-subtitle">
+          Visualização do andamento do contrato conforme o status atual cadastrado no controle.
+        </div>
+      </div>
+
+      <div class="status-flow-current {% if diagrama_status_existe and diagrama_status.terminal_atual %}{{ 'sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'erro' }}{% elif status_atual_id in [1,2,3,4,5,6,7,8] %}sucesso{% elif status_atual_id in [9,10] %}erro{% endif %}">
+        {{ status_atual_nome }}
+      </div>
+    </div>
+
+    <div class="status-flow-track-wrap">
+      <div class="status-flow-track">
+        {% if diagrama_status_existe and diagrama_status.etapas %}
+          {% for etapa in diagrama_status.etapas %}
+            <div class="status-node {{ 'atual' if etapa.atual else 'concluido' if etapa.concluido else 'pendente' }}">
+              <div class="status-node-icon {{ 'pulsando' if etapa.atual else '' }}">
+                {% if etapa.concluido %}
+                  ✓
+                {% elif etapa.atual %}
+                  ●
+                {% else %}
+                  {{ etapa.id }}
+                {% endif %}
+              </div>
+
+              {% if etapa.id in [2, 3, 4, 5, 6] %}
+                <div class="status-node-logo" title="Fluxo integrado ao D4Sign">
+                  <img
+                    src="{{ url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}"
+                    alt="Logo D4Sign"
+                    loading="lazy"
+                    decoding="async"
+                    onerror="this.style.display='none'; this.parentElement.classList.add('fallback-texto'); this.parentElement.innerHTML = '<span>D4</span>';"
+                  >
+                </div>
+              {% endif %}
+
+              <div class="status-node-id">Status {{ etapa.id }}</div>
+              <div class="status-node-title">{{ etapa.nome }}</div>
+              <div class="status-node-desc">
+                {% if etapa.atual %}
+                  Etapa atual do contrato.
+                {% elif etapa.concluido %}
+                  Etapa concluída com sucesso.
+                {% else %}
+                  Etapa ainda não alcançada.
+                {% endif %}
+              </div>
+            </div>
+
+            {% if not loop.last %}
+              <div class="status-arrow {{ 'done' if etapa.concluido else '' }}">→</div>
+            {% endif %}
+          {% endfor %}
+
+          {% if diagrama_status.terminal_atual %}
+            <div class="status-arrow {{ 'final-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'final-erro' }}">→</div>
+            <div class="status-node {{ 'terminal-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'terminal-erro' }}">
+              <div class="status-node-icon {{ 'pulsando' if diagrama_status.terminal_atual.classe == 'sucesso' else '' }}">
+                {{ diagrama_status.terminal_atual.icone }}
+              </div>
+              <div class="status-node-id">Status {{ diagrama_status.terminal_atual.id }}</div>
+              <div class="status-node-title">{{ diagrama_status.terminal_atual.nome }}</div>
+              <div class="status-node-desc">
+                {% if diagrama_status.terminal_atual.id == 8 %}
+                  Fluxo concluído e contrato já está ativo/concluído.
+                {% elif diagrama_status.terminal_atual.id == 9 %}
+                  Fluxo interrompido por cancelamento.
+                {% else %}
+                  Fluxo interrompido por erro e exige revisão.
+                {% endif %}
+              </div>
+            </div>
+          {% endif %}
+        {% else %}
+          {% for etapa_id in range(1, 8) %}
+            {% set etapa_nome = mapa_status_nome.get(etapa_id, 'Status ' ~ etapa_id) %}
+            {% set etapa_atual = status_atual_id == etapa_id %}
+            {% set etapa_concluida = status_atual_id > etapa_id %}
+            <div class="status-node {{ 'atual' if etapa_atual else 'concluido' if etapa_concluida else 'pendente' }}">
+              <div class="status-node-icon {{ 'pulsando' if etapa_atual else '' }}">
+                {% if etapa_concluida %}
+                  ✓
+                {% elif etapa_atual %}
+                  ●
+                {% else %}
+                  {{ etapa_id }}
+                {% endif %}
+              </div>
+
+              {% if etapa_id in [2, 3, 4, 5, 6] %}
+                <div class="status-node-logo" title="Fluxo integrado ao D4Sign">
+                  <img
+                    src="{{ url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}"
+                    alt="Logo D4Sign"
+                    loading="lazy"
+                    decoding="async"
+                    onerror="this.style.display='none'; this.parentElement.classList.add('fallback-texto'); this.parentElement.innerHTML = '<span>D4</span>';"
+                  >
+                </div>
+              {% endif %}
+
+              <div class="status-node-id">Status {{ etapa_id }}</div>
+              <div class="status-node-title">{{ etapa_nome }}</div>
+              <div class="status-node-desc">
+                {% if etapa_atual %}
+                  Etapa atual do contrato.
+                {% elif etapa_concluida %}
+                  Etapa concluída com sucesso.
+                {% else %}
+                  Etapa ainda não alcançada.
+                {% endif %}
+              </div>
+            </div>
+
+            {% if not loop.last or status_atual_id in [8, 9, 10] %}
+              <div class="status-arrow {{ 'done' if etapa_concluida else '' }} {{ 'final-sucesso' if loop.last and status_atual_id == 8 else 'final-erro' if loop.last and status_atual_id in [9,10] else '' }}">→</div>
+            {% endif %}
+          {% endfor %}
+
+          {% if status_atual_id in [8, 9, 10] %}
+            <div class="status-node {{ 'terminal-sucesso' if status_atual_id == 8 else 'terminal-erro' }}">
+              <div class="status-node-icon {{ 'pulsando' if status_atual_id == 8 else '' }}">
+                {{ '✓' if status_atual_id == 8 else '✕' if status_atual_id == 9 else '!' }}
+              </div>
+              <div class="status-node-id">Status {{ status_atual_id }}</div>
+              <div class="status-node-title">{{ mapa_status_nome.get(status_atual_id, 'Status final') }}</div>
+              <div class="status-node-desc">
+                {% if status_atual_id == 8 %}
+                  Fluxo concluído e contrato já está ativo/concluído.
+                {% elif status_atual_id == 9 %}
+                  Fluxo interrompido por cancelamento.
+                {% else %}
+                  Fluxo interrompido por reprovação ou erro e exige revisão.
+                {% endif %}
+              </div>
+            </div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="status-flow-legend">
+        <span class="status-flow-legend-item"><span class="status-flow-legend-dot verde"></span> Etapa atual</span>
+        <span class="status-flow-legend-item"><span class="status-flow-legend-dot azul"></span> Etapa já concluída</span>
+        <span class="status-flow-legend-item"><span class="status-flow-legend-dot cinza"></span> Etapa pendente</span>
+      </div>
+    </div>
+  </div>
 
   <div class="grid-quick">
     <div class="box"><div class="quick-k">Razão Social do Contrato</div><div class="quick-v">{{ contrato.RazaoSocial or "—" }}</div></div>
@@ -588,20 +1043,48 @@
                             {% if ck.UrlImagemUpload %}
                               <div>
                                 <div class="field-k" style="margin-bottom:8px;">Mídia enviada</div>
+                                <div class="media-placeholder">A mídia será carregada somente quando você abrir este modal.</div>
                                 {% if '.mp4' in (ck.UrlImagemUpload|string)|lower %}
-                                  <video class="thumb-media" controls src="{{ ck.UrlImagemUpload }}"></video>
+                                  <video
+                                    class="thumb-media js-modal-lazy-media"
+                                    controls
+                                    preload="none"
+                                    data-src="{{ ck.UrlImagemUpload }}"
+                                    style="display:none;"
+                                  ></video>
                                 {% else %}
-                                  <img class="thumb-media" src="{{ ck.UrlImagemUpload }}" alt="Mídia upload checkin">
+                                  <img
+                                    class="thumb-media js-modal-lazy-media"
+                                    data-src="{{ ck.UrlImagemUpload }}"
+                                    alt="Mídia upload checkin"
+                                    loading="lazy"
+                                    decoding="async"
+                                    style="display:none;"
+                                  >
                                 {% endif %}
                               </div>
                             {% endif %}
                             {% if ck.UrlImagemGerada %}
                               <div>
                                 <div class="field-k" style="margin-bottom:8px;">Mídia gerada</div>
+                                <div class="media-placeholder">A mídia será carregada somente quando você abrir este modal.</div>
                                 {% if '.mp4' in (ck.UrlImagemGerada|string)|lower %}
-                                  <video class="thumb-media" controls src="{{ ck.UrlImagemGerada }}"></video>
+                                  <video
+                                    class="thumb-media js-modal-lazy-media"
+                                    controls
+                                    preload="none"
+                                    data-src="{{ ck.UrlImagemGerada }}"
+                                    style="display:none;"
+                                  ></video>
                                 {% else %}
-                                  <img class="thumb-media" src="{{ ck.UrlImagemGerada }}" alt="Mídia gerada checkin">
+                                  <img
+                                    class="thumb-media js-modal-lazy-media"
+                                    data-src="{{ ck.UrlImagemGerada }}"
+                                    alt="Mídia gerada checkin"
+                                    loading="lazy"
+                                    decoding="async"
+                                    style="display:none;"
+                                  >
                                 {% endif %}
                               </div>
                             {% endif %}
@@ -893,12 +1376,74 @@
 
 <script>
   (function(){
+    function carregarMidiasDoModal(modal){
+      if(!modal) return;
+
+      modal.querySelectorAll('.js-modal-lazy-media[data-src]').forEach(function(el){
+        if(el.getAttribute('data-carregado') === '1'){
+          return;
+        }
+
+        const src = (el.getAttribute('data-src') || '').trim();
+        if(!src){
+          return;
+        }
+
+        const placeholder = el.parentElement ? el.parentElement.querySelector('.media-placeholder') : null;
+
+        if(el.tagName === 'VIDEO'){
+          el.setAttribute('src', src);
+          el.load();
+        }else{
+          el.setAttribute('src', src);
+        }
+
+        el.style.display = '';
+        el.setAttribute('data-carregado', '1');
+
+        if(placeholder){
+          placeholder.style.display = 'none';
+        }
+
+        el.onerror = function(){
+          if(placeholder){
+            placeholder.textContent = 'Arquivo não encontrado ou URL inválida.';
+            placeholder.style.display = 'flex';
+          }
+          el.style.display = 'none';
+        };
+      });
+    }
+
+    function descarregarVideosDoModal(modal){
+      if(!modal) return;
+
+      modal.querySelectorAll('video.js-modal-lazy-media[data-src]').forEach(function(video){
+        try{
+          video.pause();
+        }catch(e){}
+
+        video.removeAttribute('src');
+        video.style.display = 'none';
+        video.removeAttribute('data-carregado');
+        try{
+          video.load();
+        }catch(e){}
+
+        const placeholder = video.parentElement ? video.parentElement.querySelector('.media-placeholder') : null;
+        if(placeholder){
+          placeholder.style.display = 'flex';
+        }
+      });
+    }
+
     function abrirModal(id){
       const modal = document.getElementById(id);
       if(!modal) return;
       modal.classList.add('is-open');
       modal.setAttribute('aria-hidden', 'false');
       document.body.style.overflow = 'hidden';
+      carregarMidiasDoModal(modal);
     }
 
     function fecharModal(id){
@@ -906,6 +1451,7 @@
       if(!modal) return;
       modal.classList.remove('is-open');
       modal.setAttribute('aria-hidden', 'true');
+      descarregarVideosDoModal(modal);
       if(!document.querySelector('.modal-overlay.is-open')){
         document.body.style.overflow = '';
       }

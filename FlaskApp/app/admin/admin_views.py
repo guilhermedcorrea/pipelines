@@ -3084,6 +3084,37 @@ def _obter_id_dim_acao_solicitacao_contrato(nome_acao: str, fallback: int | None
     return _obter_id_acao_solicitacao_contrato(nome_acao=nome_acao, fallback=fallback)
 
 
+def _resolver_id_fato_controle_contratos_para_historico(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_solicitacao: int | None,
+) -> int | None:
+    id_contrato_informado = _int_ou_none(id_fato_controle_contratos)
+    if id_contrato_informado not in (None, '', 0):
+        return int(id_contrato_informado)
+
+    id_solicitacao_int = _int_ou_none(id_fato_solicitacao)
+    if id_solicitacao_int in (None, '', 0):
+        return None
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP 1 IDFatoControleContratosEuromidia
+            FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+            WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+        """),
+        {"id_solicitacao": int(id_solicitacao_int)},
+    ).mappings().first()
+
+    if row and row.get("IDFatoControleContratosEuromidia") not in (None, '', 0):
+        try:
+            return int(row["IDFatoControleContratosEuromidia"])
+        except Exception:
+            return None
+
+    return None
+
+
 def _registrar_historico_contrato_euromidia(
     *,
     id_fato_controle_contratos: int | None,
@@ -3097,6 +3128,11 @@ def _registrar_historico_contrato_euromidia(
     descricao_evento: str | None,
     id_dim_usuario_acao: int | None,
 ) -> None:
+    id_fato_controle_contratos_resolvido = _resolver_id_fato_controle_contratos_para_historico(
+        id_fato_controle_contratos=id_fato_controle_contratos,
+        id_fato_solicitacao=id_fato_solicitacao,
+    )
+
     tabela_historico_existe = db.session.execute(
         text("""
             SELECT CASE WHEN OBJECT_ID(N'[Integracao].[Silver].[FatoHistoricoContratoEuromidia]', N'U') IS NOT NULL THEN 1 ELSE 0 END AS Existe
@@ -3138,7 +3174,7 @@ def _registrar_historico_contrato_euromidia(
             )
         """),
         {
-            "id_fato_controle_contratos": int(id_fato_controle_contratos) if id_fato_controle_contratos not in (None, '', 0) else None,
+            "id_fato_controle_contratos": int(id_fato_controle_contratos_resolvido) if id_fato_controle_contratos_resolvido not in (None, '', 0) else None,
             "id_fato_solicitacao": int(id_fato_solicitacao) if id_fato_solicitacao not in (None, '', 0) else None,
             "id_dim_acao": int(id_dim_acao) if id_dim_acao not in (None, '', 0) else None,
             "id_empresa": int(id_empresa) if id_empresa not in (None, '', 0) else None,
@@ -5372,6 +5408,13 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                 id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa"))
                 id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria"))
                 tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
+
+                cab_aprovada = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao)) or {}
+                id_fato_controle = _int_ou_none(id_fato_controle) or _int_ou_none(cab_aprovada.get("IDFatoControleContratosEuromidia"))
+                id_card = _int_ou_none(id_card) or _int_ou_none(cab_aprovada.get("IDFatoKanbanCard"))
+                id_empresa = _int_ou_none(id_empresa) or _int_ou_none(cab_aprovada.get("IDEmpresa"))
+                id_empresa_proprietaria = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(cab_aprovada.get("IDEmpresaProprietaria"))
+                tipo_solicitacao = _tipo_solicitacao_normalizado(cab_aprovada.get("TipoSolicitacao")) or tipo_solicitacao
 
                 _sincronizar_contato_contrato_se_fase_4(
                     id_fato_kanban_card=id_card,

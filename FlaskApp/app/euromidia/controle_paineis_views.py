@@ -13,7 +13,7 @@ from ..models.autenticacao import (DimUsuarios,DimPerfilUsuario, DimPermissoes, 
 from ..forms.euromidia_forms import (FormCadastroCliente,CadastroContratoManualForm,FormUsuarioNovo,
 FormUsuarioEditar, FormTrocarSenha, FormPermissaoExtraUpsert, FormPermissaoExtraRemover,ReservaOcupacaoForm)
 from ..models.admin_models import DimCalendario,DimEmpresaProprietaria,DimRecorrencia,DimPublicoAlvo
-from sqlalchemy import case, String,cast, or_, and_,func,text,  select
+from sqlalchemy import case, String,cast, or_, and_,func,text,  select, desc
 from datetime import date, datetime, timedelta
 from sqlalchemy.exc import OperationalError
 from functools import wraps
@@ -42,6 +42,7 @@ from celery.result import AsyncResult
 from ..celery_app import celery_app
 from ..tasks.checkin_tasks import processar_checkin_upload
 import secrets
+
 
 
 
@@ -215,6 +216,150 @@ def retry_get_view(db, attempts: int = 6, base_delay: float = 0.2, max_delay: fl
         return _wrapped
     return _decorator
 
+
+
+
+
+
+def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
+    mapa_padrao = {
+        1: "Em Digitação",
+        2: "Pendente Geração",
+        3: "Documento Gerado",
+        4: "Pendente Envio",
+        5: "Enviado Assinatura",
+        6: "Em Assinatura",
+        7: "Ativo",
+        8: "Concluido",
+        9: "Cancelado",
+        10: "ERRO",
+    }
+
+    try:
+        id_empresa = int(id_empresa_proprietaria or 0)
+    except Exception:
+        id_empresa = 0
+
+    if id_empresa <= 0:
+        return [
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": nome,
+            }
+            for id_status, nome in mapa_padrao.items()
+        ]
+
+    sql = text("""
+        SELECT
+             [IDDimStatusContratos]
+            ,[Status]
+        FROM [Integracao].[Silver].[DimStatusContratos]
+        WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
+          AND [IDDimStatusContratos] BETWEEN 1 AND 10
+        ORDER BY [IDDimStatusContratos] ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_empresa_proprietaria": id_empresa},
+    ).mappings().all()
+
+    if not rows:
+        return [
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": nome,
+            }
+            for id_status, nome in mapa_padrao.items()
+        ]
+
+    retorno = []
+    ids_existentes = set()
+
+    for row in rows:
+        id_status = int(row.get("IDDimStatusContratos") or 0)
+        if id_status <= 0:
+            continue
+
+        ids_existentes.add(id_status)
+        retorno.append(
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+            }
+        )
+
+    for id_status, nome in mapa_padrao.items():
+        if id_status not in ids_existentes:
+            retorno.append(
+                {
+                    "IDDimStatusContratos": id_status,
+                    "Status": nome,
+                }
+            )
+
+    retorno.sort(key=lambda x: int(x.get("IDDimStatusContratos") or 0))
+    return retorno
+
+
+def _montar_diagrama_status_contrato(
+    id_empresa_proprietaria: int | None,
+    id_status_atual: int | None,
+    nome_status_atual: str | None = None,
+):
+    status_rows = _obter_status_contratos_empresa(id_empresa_proprietaria)
+    mapa_status = {
+        int(row.get("IDDimStatusContratos") or 0): (row.get("Status") or "").strip()
+        for row in status_rows
+        if int(row.get("IDDimStatusContratos") or 0) > 0
+    }
+
+    try:
+        id_status_corrente = int(id_status_atual or 0)
+    except Exception:
+        id_status_corrente = 0
+
+    nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+
+    etapas_principais = []
+    for id_status in range(1, 8):
+        nome = mapa_status.get(id_status) or f"Status {id_status}"
+        concluido = False
+        atual = False
+
+        if id_status_corrente in range(1, 8):
+            concluido = id_status < id_status_corrente
+            atual = id_status == id_status_corrente
+        elif id_status_corrente == 8:
+            concluido = True
+
+        etapas_principais.append(
+            {
+                "id": id_status,
+                "nome": nome,
+                "concluido": concluido,
+                "atual": atual,
+                "pendente": (not concluido) and (not atual),
+                "mostra_d4sign": 2 <= id_status <= 6,
+                "logo_d4sign_url": None,
+            }
+        )
+
+    terminal_atual = None
+    if id_status_corrente in (8, 9, 10):
+        terminal_atual = {
+            "id": id_status_corrente,
+            "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+            "classe": "sucesso" if id_status_corrente == 8 else "erro",
+            "icone": "✓" if id_status_corrente == 8 else "!",
+        }
+
+    return {
+        "status_atual_id": id_status_corrente if id_status_corrente > 0 else None,
+        "status_atual_nome": nome_status_corrente or (mapa_status.get(id_status_corrente) if id_status_corrente > 0 else None),
+        "etapas": etapas_principais,
+        "terminal_atual": terminal_atual,
+    }
 
 
 
@@ -9692,7 +9837,84 @@ def checkout_disponibilidade():
 
 
 
-from sqlalchemy import or_, desc, func, text
+
+def _obter_lista_int_request(nome_campo: str) -> list[int]:
+    """
+    Eu leio parâmetros repetidos do tipo ?status=1&status=2
+    e também aceito valor único separado por vírgula.
+    """
+
+    valores_brutos: list[str] = []
+    valores_brutos.extend(request.args.getlist(nome_campo))
+
+    valor_unico = (request.args.get(nome_campo) or "").strip()
+    if valor_unico:
+        valores_brutos.append(valor_unico)
+
+    ids: list[int] = []
+    vistos: set[int] = set()
+
+    for valor_bruto in valores_brutos:
+        for pedaco in str(valor_bruto).split(","):
+            pedaco = pedaco.strip()
+            if not pedaco:
+                continue
+
+            try:
+                valor_int = int(pedaco)
+            except ValueError:
+                continue
+
+            if valor_int <= 0 or valor_int in vistos:
+                continue
+
+            vistos.add(valor_int)
+            ids.append(valor_int)
+
+    return ids
+
+
+def _texto_sem_mascara_documento(valor: str) -> str:
+    """
+    Eu removo caracteres comuns de máscara para permitir busca
+    por CNPJ/CPF com ou sem pontuação.
+    """
+    return (
+        (valor or "")
+        .replace(".", "")
+        .replace("/", "")
+        .replace("-", "")
+        .replace(" ", "")
+        .strip()
+    )
+
+
+def _filtro_exists_cidade_exibicao_like(valor_like: str):
+    """
+    Eu monto um EXISTS correlacionado para buscar cidade do item
+    sem explodir a consulta principal com join desnecessário.
+    """
+    return (
+        db.session.query(
+            FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
+        )
+        .filter(
+            FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
+            == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
+            FatoControleContratosItensEuromidia.CidadeExibicao.like(valor_like),
+        )
+        .exists()
+    )
+
+
+
+
+
+
+
+
+
+
 
 @paineis_bp.get("/contratos")
 @login_required
@@ -9700,6 +9922,7 @@ def contratos_lista():
     tempo_inicio = time.perf_counter()
 
     q = (request.args.get("q") or "").strip()
+    ids_status_selecionados = _obter_lista_int_request("status")
 
     try:
         page = int(request.args.get("page") or 1)
@@ -9720,22 +9943,76 @@ def contratos_lista():
 
     calcular_total = (request.args.get("calcular_total") == "1")
 
+    status_opcoes = (
+        db.session.query(
+            DimStatusContratos.IDDimStatusContratos.label("IDDimStatusContratos"),
+            DimStatusContratos.Status.label("Status"),
+        )
+        .join(
+            FatoControleContratosEuromidia,
+            FatoControleContratosEuromidia.IDDimStatusContratos
+            == DimStatusContratos.IDDimStatusContratos,
+        )
+        .group_by(
+            DimStatusContratos.IDDimStatusContratos,
+            DimStatusContratos.Status,
+        )
+        .order_by(func.lower(func.coalesce(DimStatusContratos.Status, "")))
+        .all()
+    )
+
+    mapa_status = {
+        int(linha.IDDimStatusContratos): (linha.Status or "").strip()
+        for linha in status_opcoes
+    }
+
+    nomes_status_selecionados = [
+        mapa_status[id_status]
+        for id_status in ids_status_selecionados
+        if id_status in mapa_status
+    ]
+
+    q_exibicao = q
+    if q.isdigit():
+        contrato_q_exibicao = (
+            db.session.query(
+                FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.label("IDContrato"),
+                FatoControleContratosEuromidia.RazaoSocial.label("RazaoSocial"),
+                FatoControleContratosEuromidia.MarcaExibida.label("MarcaExibida"),
+                FatoControleContratosEuromidia.NumeroContrato.label("NumeroContrato"),
+            )
+            .filter(
+                FatoControleContratosEuromidia.IDFatoControleContratosEuromidia == int(q)
+            )
+            .first()
+        )
+
+        if contrato_q_exibicao:
+            nome_principal = (
+                contrato_q_exibicao.RazaoSocial
+                or contrato_q_exibicao.MarcaExibida
+                or contrato_q_exibicao.NumeroContrato
+                or f"Contrato {contrato_q_exibicao.IDContrato}"
+            )
+            q_exibicao = f"#{contrato_q_exibicao.IDContrato} • {nome_principal}"
+
     consulta_base_ids = db.session.query(
         FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
     )
+
+    if ids_status_selecionados:
+        consulta_base_ids = consulta_base_ids.filter(
+            FatoControleContratosEuromidia.IDDimStatusContratos.in_(ids_status_selecionados)
+        )
 
     if q:
         like_prefixo = f"{q}%"
         like_contendo = f"%{q}%"
 
-        texto_sem_mascara = (
-            q.replace(".", "")
-             .replace("/", "")
-             .replace("-", "")
-             .replace(" ", "")
-        )
-
+        texto_sem_mascara = _texto_sem_mascara_documento(q)
         busca_documental = texto_sem_mascara.isdigit()
+
+        filtro_cidade = _filtro_exists_cidade_exibicao_like(like_contendo)
 
         if busca_documental:
             consulta_base_ids = consulta_base_ids.filter(
@@ -9746,7 +10023,7 @@ def contratos_lista():
                     FatoControleContratosEuromidia.CPF.like(like_prefixo),
                     func.cast(
                         FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
-                        db.String
+                        db.String,
                     ).like(like_prefixo),
                 )
             )
@@ -9766,6 +10043,7 @@ def contratos_lista():
                     FatoControleContratosEuromidia.TipoDocumento.like(like_contendo),
                     FatoControleContratosEuromidia.Origem.like(like_contendo),
                     FatoControleContratosEuromidia.SDR.like(like_contendo),
+                    filtro_cidade,
                 )
             )
 
@@ -9821,12 +10099,14 @@ def contratos_lista():
         t_logo0 = time.perf_counter()
 
         row_logo = db.session.execute(
-            text("""
+            text(
+                """
                 SELECT TOP 1
                     Logo
                 FROM [Integracao].[dbo].[EmpresaProprietaria]
                 WHERE IDEmpresaProprietaria = 3
-            """)
+                """
+            )
         ).mappings().first()
 
         logo_empresa_raw = (row_logo.get("Logo") if row_logo else "") or ""
@@ -9870,11 +10150,13 @@ def contratos_lista():
             )
             .outerjoin(
                 subquery_cidades,
-                subquery_cidades.c.id_contrato == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
+                subquery_cidades.c.id_contrato
+                == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
             )
             .outerjoin(
                 DimStatusContratos,
-                DimStatusContratos.IDDimStatusContratos == FatoControleContratosEuromidia.IDDimStatusContratos
+                DimStatusContratos.IDDimStatusContratos
+                == FatoControleContratosEuromidia.IDDimStatusContratos,
             )
             .filter(
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.in_(ids_pagina)
@@ -9884,7 +10166,7 @@ def contratos_lista():
 
         tempo_detalhes = time.perf_counter() - t_detalhes0
 
-        mapa_contratos = {}
+        mapa_contratos: dict[int, SimpleNamespace] = {}
 
         for linha in linhas_contratos:
             dados = dict(linha._mapping)
@@ -9922,15 +10204,19 @@ def contratos_lista():
 
     filtros = {
         "q": q,
+        "q_exibicao": q_exibicao,
         "per_page": per_page,
+        "status_ids": ids_status_selecionados,
+        "status_nomes": nomes_status_selecionados,
     }
 
     tempo_total = time.perf_counter() - tempo_inicio
 
     current_app.logger.warning(
-        "contratos_lista | q=%r | page=%s | per_page=%s | total=%s | "
+        "contratos_lista | q=%r | status=%s | page=%s | per_page=%s | total=%s | "
         "count=%.3fs | ids=%.3fs | logo=%.3fs | detalhes=%.3fs | total_req=%.3fs",
         q,
+        ids_status_selecionados,
         page,
         per_page,
         total,
@@ -9946,7 +10232,295 @@ def contratos_lista():
         contratos=contratos,
         paginacao=paginacao,
         filtros=filtros,
+        status_opcoes=status_opcoes,
     )
+
+
+
+
+
+
+
+
+
+
+
+
+@paineis_bp.get("/contratos/sugestoes-busca")
+@login_required
+def contratos_busca_sugestoes():
+    termo = (request.args.get("q") or "").strip()
+
+    cidade_exibicao_subquery = (
+        db.session.query(
+            func.min(FatoControleContratosItensEuromidia.CidadeExibicao)
+        )
+        .filter(
+            FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
+            == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
+        )
+        .correlate(FatoControleContratosEuromidia)
+        .scalar_subquery()
+    )
+
+    consulta = (
+        db.session.query(
+            FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.label("IDContrato"),
+            FatoControleContratosEuromidia.NumeroContrato.label("NumeroContrato"),
+            FatoControleContratosEuromidia.NumeroPrevia.label("NumeroPrevia"),
+            FatoControleContratosEuromidia.RazaoSocial.label("RazaoSocial"),
+            FatoControleContratosEuromidia.MarcaExibida.label("MarcaExibida"),
+            FatoControleContratosEuromidia.CNPJ.label("CNPJ"),
+            FatoControleContratosEuromidia.CPF.label("CPF"),
+            FatoControleContratosEuromidia.DataLancamento.label("DataLancamento"),
+            DimStatusContratos.Status.label("StatusContrato"),
+            cidade_exibicao_subquery.label("CidadeExibicao"),
+        )
+        .outerjoin(
+            DimStatusContratos,
+            DimStatusContratos.IDDimStatusContratos
+            == FatoControleContratosEuromidia.IDDimStatusContratos,
+        )
+    )
+
+    if termo:
+        like_prefixo = f"{termo}%"
+        like_contendo = f"%{termo}%"
+
+        texto_sem_mascara = _texto_sem_mascara_documento(termo)
+        busca_documental = texto_sem_mascara.isdigit()
+
+        if busca_documental:
+            consulta = consulta.filter(
+                or_(
+                    FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
+                    FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
+                    FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
+                    FatoControleContratosEuromidia.CPF.like(like_prefixo),
+                    func.cast(
+                        FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
+                        db.String,
+                    ).like(like_prefixo),
+                )
+            )
+        else:
+            consulta = consulta.filter(
+                or_(
+                    FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
+                    FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
+                    FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
+                    FatoControleContratosEuromidia.CPF.like(like_prefixo),
+                    FatoControleContratosEuromidia.RazaoSocial.like(like_contendo),
+                    FatoControleContratosEuromidia.MarcaExibida.like(like_contendo),
+                    FatoControleContratosEuromidia.Vendedor.like(like_contendo),
+                    FatoControleContratosEuromidia.Agencia.like(like_contendo),
+                    FatoControleContratosEuromidia.Bureau.like(like_contendo),
+                    FatoControleContratosEuromidia.Intermediario.like(like_contendo),
+                    FatoControleContratosEuromidia.TipoDocumento.like(like_contendo),
+                    FatoControleContratosEuromidia.Origem.like(like_contendo),
+                    FatoControleContratosEuromidia.SDR.like(like_contendo),
+                    _filtro_exists_cidade_exibicao_like(like_contendo),
+                )
+            )
+
+    linhas = (
+        consulta
+        .order_by(
+            desc(FatoControleContratosEuromidia.DataLancamento),
+            desc(FatoControleContratosEuromidia.IDFatoControleContratosEuromidia),
+        )
+        .limit(15)
+        .all()
+    )
+
+    itens: list[dict] = []
+
+    for linha in linhas:
+        id_contrato = int(linha.IDContrato)
+        nome_principal = (
+            (linha.RazaoSocial or "").strip()
+            or (linha.MarcaExibida or "").strip()
+            or (linha.NumeroContrato or "").strip()
+            or f"Contrato {id_contrato}"
+        )
+
+        rotulo = f"#{id_contrato} • {nome_principal}"
+
+        subtitulos: list[str] = []
+        if linha.NumeroContrato:
+            subtitulos.append(f"Contrato: {linha.NumeroContrato}")
+        if linha.NumeroPrevia:
+            subtitulos.append(f"Prévia: {linha.NumeroPrevia}")
+        if linha.CNPJ:
+            subtitulos.append(f"CNPJ: {linha.CNPJ}")
+        elif linha.CPF:
+            subtitulos.append(f"CPF: {linha.CPF}")
+        if linha.CidadeExibicao:
+            subtitulos.append(f"Cidade: {linha.CidadeExibicao}")
+        if linha.StatusContrato:
+            subtitulos.append(f"Status: {linha.StatusContrato}")
+
+        itens.append(
+            {
+                "id": id_contrato,
+                "rotulo": rotulo,
+                "valor_busca": str(id_contrato),
+                "subtitulo": " • ".join(subtitulos),
+            }
+        )
+
+    return jsonify({"itens": itens})
+
+
+
+
+
+
+def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
+    mapa_padrao = {
+        1: "Em Digitação",
+        2: "Pendente Geração",
+        3: "Documento Gerado",
+        4: "Pendente Envio",
+        5: "Enviado Assinatura",
+        6: "Em Assinatura",
+        7: "Ativo",
+        8: "Concluido",
+        9: "Cancelado",
+        10: "ERRO",
+    }
+
+    try:
+        id_empresa = int(id_empresa_proprietaria or 0)
+    except Exception:
+        id_empresa = 0
+
+    if id_empresa <= 0:
+        return [
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": nome,
+            }
+            for id_status, nome in mapa_padrao.items()
+        ]
+
+    sql = text("""
+        SELECT
+             [IDDimStatusContratos]
+            ,[Status]
+        FROM [Integracao].[Silver].[DimStatusContratos]
+        WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
+          AND [IDDimStatusContratos] BETWEEN 1 AND 10
+        ORDER BY [IDDimStatusContratos] ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_empresa_proprietaria": id_empresa},
+    ).mappings().all()
+
+    if not rows:
+        return [
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": nome,
+            }
+            for id_status, nome in mapa_padrao.items()
+        ]
+
+    retorno = []
+    ids_existentes = set()
+
+    for row in rows:
+        id_status = int(row.get("IDDimStatusContratos") or 0)
+        if id_status <= 0:
+            continue
+
+        ids_existentes.add(id_status)
+        retorno.append(
+            {
+                "IDDimStatusContratos": id_status,
+                "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+            }
+        )
+
+    for id_status, nome in mapa_padrao.items():
+        if id_status not in ids_existentes:
+            retorno.append(
+                {
+                    "IDDimStatusContratos": id_status,
+                    "Status": nome,
+                }
+            )
+
+    retorno.sort(key=lambda x: int(x.get("IDDimStatusContratos") or 0))
+    return retorno
+
+
+def _montar_diagrama_status_contrato(
+    id_empresa_proprietaria: int | None,
+    id_status_atual: int | None,
+    nome_status_atual: str | None = None,
+):
+    status_rows = _obter_status_contratos_empresa(id_empresa_proprietaria)
+
+    mapa_status = {
+        int(row.get("IDDimStatusContratos") or 0): (row.get("Status") or "").strip()
+        for row in status_rows
+        if int(row.get("IDDimStatusContratos") or 0) > 0
+    }
+
+    try:
+        id_status_corrente = int(id_status_atual or 0)
+    except Exception:
+        id_status_corrente = 0
+
+    nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+
+    etapas_principais = []
+    for id_status in range(1, 8):
+        nome = mapa_status.get(id_status) or f"Status {id_status}"
+
+        if id_status_corrente in range(1, 8):
+            concluido = id_status < id_status_corrente
+            atual = id_status == id_status_corrente
+        elif id_status_corrente == 8:
+            concluido = True
+            atual = False
+        else:
+            concluido = False
+            atual = False
+
+        etapas_principais.append(
+            {
+                "id": id_status,
+                "nome": nome,
+                "concluido": concluido,
+                "atual": atual,
+                "pendente": (not concluido) and (not atual),
+                "mostra_d4sign": 2 <= id_status <= 6,
+                "logo_d4sign_url": url_for("static", filename="imagens/LogoSistemas/d4sign.jpg"),
+            }
+        )
+
+    terminal_atual = None
+    if id_status_corrente in (8, 9, 10):
+        terminal_atual = {
+            "id": id_status_corrente,
+            "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+            "classe": "sucesso" if id_status_corrente == 8 else "erro",
+            "icone": "✓" if id_status_corrente == 8 else "!",
+        }
+
+    return {
+        "status_atual_id": id_status_corrente,
+        "status_atual_nome": nome_status_corrente or "Sem status definido",
+        "etapas": etapas_principais,
+        "terminal_atual": terminal_atual,
+    }
+
+
+
 
 
 
@@ -10009,6 +10583,161 @@ def contratos_detalhe(id_contrato: int):
             return "concluido"
         return "aberto"
 
+    def _obter_status_contratos_empresa_local(id_empresa_proprietaria):
+        mapa_padrao = {
+            1: "Em Digitação",
+            2: "Pendente Geração",
+            3: "Documento Gerado",
+            4: "Pendente Envio",
+            5: "Enviado Assinatura",
+            6: "Em Assinatura",
+            7: "Ativo",
+            8: "Concluido",
+            9: "Cancelado",
+            10: "ERRO",
+        }
+
+        try:
+            id_empresa = int(id_empresa_proprietaria or 0)
+        except Exception:
+            id_empresa = 0
+
+        if id_empresa <= 0:
+            return [
+                {
+                    "IDDimStatusContratos": id_status,
+                    "Status": nome,
+                }
+                for id_status, nome in mapa_padrao.items()
+            ]
+
+        sql_status_empresa = text("""
+            SELECT
+                ds.IDDimStatusContratos,
+                ds.Status
+            FROM [Integracao].[Silver].[DimStatusContratos] ds
+            WHERE ds.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ds.IDDimStatusContratos BETWEEN 1 AND 10
+            ORDER BY ds.IDDimStatusContratos ASC
+        """)
+
+        try:
+            rows = db.session.execute(
+                sql_status_empresa,
+                {"id_empresa_proprietaria": id_empresa},
+            ).mappings().all()
+        except Exception:
+            current_app.logger.exception(
+                "Falha ao carregar DimStatusContratos da empresa proprietária %s no detalhe do contrato %s.",
+                id_empresa,
+                id_contrato,
+            )
+            rows = []
+
+        if not rows:
+            return [
+                {
+                    "IDDimStatusContratos": id_status,
+                    "Status": nome,
+                }
+                for id_status, nome in mapa_padrao.items()
+            ]
+
+        retorno = []
+        ids_existentes = set()
+
+        for row in rows:
+            try:
+                id_status = int(row.get("IDDimStatusContratos") or 0)
+            except Exception:
+                id_status = 0
+
+            if id_status <= 0:
+                continue
+
+            ids_existentes.add(id_status)
+            retorno.append(
+                {
+                    "IDDimStatusContratos": id_status,
+                    "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+                }
+            )
+
+        for id_status, nome in mapa_padrao.items():
+            if id_status not in ids_existentes:
+                retorno.append(
+                    {
+                        "IDDimStatusContratos": id_status,
+                        "Status": nome,
+                    }
+                )
+
+        retorno.sort(key=lambda x: int(x.get("IDDimStatusContratos") or 0))
+        return retorno
+
+    def _montar_diagrama_status_contrato_local(id_empresa_proprietaria, id_status_atual, nome_status_atual=None):
+        status_rows = _obter_status_contratos_empresa_local(id_empresa_proprietaria)
+
+        mapa_status = {}
+        for row in status_rows:
+            try:
+                id_status = int(row.get("IDDimStatusContratos") or 0)
+            except Exception:
+                id_status = 0
+
+            if id_status <= 0:
+                continue
+
+            mapa_status[id_status] = (row.get("Status") or f"Status {id_status}").strip()
+
+        try:
+            id_status_corrente = int(id_status_atual or 0)
+        except Exception:
+            id_status_corrente = 0
+
+        nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+
+        etapas_principais = []
+        for id_status in range(1, 8):
+            nome = mapa_status.get(id_status) or f"Status {id_status}"
+
+            if id_status_corrente in range(1, 8):
+                concluido = id_status < id_status_corrente
+                atual = id_status == id_status_corrente
+            elif id_status_corrente == 8:
+                concluido = True
+                atual = False
+            else:
+                concluido = False
+                atual = False
+
+            etapas_principais.append(
+                {
+                    "id": id_status,
+                    "nome": nome,
+                    "concluido": concluido,
+                    "atual": atual,
+                    "pendente": (not concluido) and (not atual),
+                    "logo_d4sign_url": url_for("static", filename="imagens/LogoSistemas/d4sign.jpg"),
+                }
+            )
+
+        terminal_atual = None
+        if id_status_corrente in (8, 9, 10):
+            terminal_atual = {
+                "id": id_status_corrente,
+                "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+                "classe": "sucesso" if id_status_corrente == 8 else "erro",
+                "icone": "✓" if id_status_corrente == 8 else "!",
+            }
+
+        return {
+            "status_atual_id": id_status_corrente,
+            "status_atual_nome": nome_status_corrente or "Sem status definido",
+            "etapas": etapas_principais,
+            "terminal_atual": terminal_atual,
+        }
+
     itens_base = list(contrato.Itens or [])
 
     itens = []
@@ -10038,7 +10767,10 @@ def contratos_detalhe(id_contrato: int):
         itens.append(item_dict)
 
         if id_item is not None:
-            itens_por_id[int(id_item)] = item_dict
+            try:
+                itens_por_id[int(id_item)] = item_dict
+            except Exception:
+                pass
 
         chave_face = (str(cod_ponto or "").strip(), cod_face.upper())
         if chave_face[0] or chave_face[1]:
@@ -10125,7 +10857,10 @@ def contratos_detalhe(id_contrato: int):
         try:
             cards_rows = db.session.execute(sql_cards, card_params).mappings().all()
         except Exception:
-            current_app.logger.exception("Falha ao carregar dimensões de fase/status do Kanban no detalhe do contrato %s.", id_contrato)
+            current_app.logger.exception(
+                "Falha ao carregar dimensões de fase/status do Kanban no detalhe do contrato %s.",
+                id_contrato,
+            )
             sql_cards_fallback = text(
                 f"""
                 SELECT
@@ -10214,7 +10949,14 @@ def contratos_detalhe(id_contrato: int):
                 "IDFaseDe": row.get("IDFaseDe"),
                 "IDFasePara": row.get("IDFasePara"),
             }
-            _adicionar_evento(row.get("IDFatoKanbanCard"), "MOVIMENTO", row.get("MovidoEm"), txt, row.get("MovidoPor"), extra)
+            _adicionar_evento(
+                row.get("IDFatoKanbanCard"),
+                "MOVIMENTO",
+                row.get("MovidoEm"),
+                txt,
+                row.get("MovidoPor"),
+                extra,
+            )
 
         sql_obs = text(
             f"""
@@ -10234,7 +10976,14 @@ def contratos_detalhe(id_contrato: int):
                 "IDDimKanbanFase": row.get("IDDimKanbanFase"),
                 "IDDimKanbanStatusCard": row.get("IDDimKanbanStatusCard"),
             }
-            _adicionar_evento(row.get("IDFatoKanbanCard"), "OBSERVACAO", row.get("CriadoEm"), row.get("Observacao"), row.get("IDDimUsuarios"), extra)
+            _adicionar_evento(
+                row.get("IDFatoKanbanCard"),
+                "OBSERVACAO",
+                row.get("CriadoEm"),
+                row.get("Observacao"),
+                row.get("IDDimUsuarios"),
+                extra,
+            )
 
         sql_log = text(
             f"""
@@ -10263,7 +11012,14 @@ def contratos_detalhe(id_contrato: int):
                 "TipoLog": row.get("TipoEvento"),
                 "SubtipoLog": row.get("SubtipoEvento"),
             }
-            _adicionar_evento(row.get("IDFatoKanbanCard"), "LOG", row.get("OcorridoEm"), texto_log, row.get("IDUsuarioAcao"), extra)
+            _adicionar_evento(
+                row.get("IDFatoKanbanCard"),
+                "LOG",
+                row.get("OcorridoEm"),
+                texto_log,
+                row.get("IDUsuarioAcao"),
+                extra,
+            )
 
         sql_neg = text(
             f"""
@@ -10303,7 +11059,14 @@ def contratos_detalhe(id_contrato: int):
                 "IDDimPaineisEuromidia": row.get("IDDimPaineisEuromidia"),
                 "IDDimFacesPaineis": row.get("IDDimFacesPaineis"),
             }
-            _adicionar_evento(row.get("IDFatoKanbanCard"), "NEGOCIACAO", row.get("DataEvento"), texto_neg, row.get("IDUsuario"), extra)
+            _adicionar_evento(
+                row.get("IDFatoKanbanCard"),
+                "NEGOCIACAO",
+                row.get("DataEvento"),
+                texto_neg,
+                row.get("IDUsuario"),
+                extra,
+            )
 
         sql_enc = text(
             f"""
@@ -10324,7 +11087,14 @@ def contratos_detalhe(id_contrato: int):
                 "IDDimKanbanFase": row.get("IDDimKanbanFase"),
                 "NomeMotivo": row.get("NomeMotivo"),
             }
-            _adicionar_evento(row.get("IDFatoKanbanCard"), "ENCERRAMENTO", row.get("DataAtualizacao"), texto_enc, row.get("IDDimUsuarios"), extra)
+            _adicionar_evento(
+                row.get("IDFatoKanbanCard"),
+                "ENCERRAMENTO",
+                row.get("DataAtualizacao"),
+                texto_enc,
+                row.get("IDDimUsuarios"),
+                extra,
+            )
 
     for row in checkin_rows:
         data_evento = row.get("DataConfirmacao") or row.get("DataChekin") or row.get("DataAtualizacao")
@@ -10357,7 +11127,10 @@ def contratos_detalhe(id_contrato: int):
             )
             usuarios_por_id = {int(idu): (nome or f"Usuário #{idu}") for idu, nome in rows_users}
         except Exception:
-            current_app.logger.exception("Falha ao resolver nomes de usuários no detalhe do contrato %s.", id_contrato)
+            current_app.logger.exception(
+                "Falha ao resolver nomes de usuários no detalhe do contrato %s.",
+                id_contrato,
+            )
             usuarios_por_id = {}
 
     for evento in timeline_eventos:
@@ -10465,6 +11238,66 @@ def contratos_detalhe(id_contrato: int):
         "TotalCheckins": len(checkin_rows),
     }
 
+    id_empresa_proprietaria_status = None
+    id_status_atual = None
+    nome_status_atual = None
+
+    try:
+        sql_status_contrato = text("""
+            SELECT TOP 1
+                c.IDEmpresaProprietaria,
+                c.IDDimStatusContratos,
+                NomeStatusContrato = ds.Status
+            FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
+            LEFT JOIN [Integracao].[Silver].[DimStatusContratos] ds
+                ON ds.IDDimStatusContratos = c.IDDimStatusContratos
+               AND (
+                    ds.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+                    OR ds.IDEmpresaProprietaria IS NULL
+                    OR c.IDEmpresaProprietaria IS NULL
+               )
+            WHERE c.IDFatoControleContratosEuromidia = :id_contrato
+        """)
+        row_status_contrato = db.session.execute(
+            sql_status_contrato,
+            {"id_contrato": id_contrato},
+        ).mappings().first()
+
+        if row_status_contrato:
+            id_empresa_proprietaria_status = row_status_contrato.get("IDEmpresaProprietaria")
+            id_status_atual = row_status_contrato.get("IDDimStatusContratos")
+            nome_status_atual = row_status_contrato.get("NomeStatusContrato")
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao carregar status do contrato %s por SQL direto. Vou tentar fallback pelo objeto ORM.",
+            id_contrato,
+        )
+
+    if id_empresa_proprietaria_status is None:
+        id_empresa_proprietaria_status = _valor_attr(contrato, "IDEmpresaProprietaria")
+
+    if id_status_atual is None:
+        id_status_atual = _valor_attr(
+            contrato,
+            "IDDimStatusContratos",
+            "IDStatusContrato",
+            "IDStatus",
+        )
+
+    if not nome_status_atual:
+        nome_status_atual = _valor_attr(
+            contrato,
+            "StatusContrato",
+            "Status",
+            "NomeStatusContrato",
+        )
+
+    diagrama_status = _montar_diagrama_status_contrato_local(
+        id_empresa_proprietaria=id_empresa_proprietaria_status,
+        id_status_atual=id_status_atual,
+        nome_status_atual=nome_status_atual,
+    )
+
     return render_template(
         "euromidia/contratos_detalhe.html",
         contrato=contrato,
@@ -10472,10 +11305,8 @@ def contratos_detalhe(id_contrato: int):
         cards_relacionados=cards_relacionados,
         timeline_atendimentos=timeline_eventos[:200],
         resumo_atendimentos=resumo_atendimentos,
+        diagrama_status=diagrama_status,
     )
-
-
-
 
 
 
