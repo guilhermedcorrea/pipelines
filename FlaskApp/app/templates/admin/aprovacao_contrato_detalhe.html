@@ -725,6 +725,7 @@
   </style>
 
   <form method="POST" class="page-wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="solicitacao-topbar">
       <div class="solicitacao-topbar-left">
         <div class="logo-box">
@@ -756,9 +757,9 @@
 
       <div class="actions">
         <a class="btn-x" href="{{ url_for('admin.lista_aprovacao_contratos') }}">← Voltar</a>
-        <button type="submit" class="btn-x primary">💾 Salvar</button>
-        <button type="button" class="btn-x success">✔ Aprovar</button>
-        <button type="button" class="btn-x danger">✖ Reprovar</button>
+        <button type="submit" class="btn-x primary" name="acao" value="salvar">💾 Salvar</button>
+        <button type="submit" class="btn-x success" name="acao" value="aprovar" onclick="return confirm('Confirmar aprovação desta solicitação?');">✔ Aprovar</button>
+        <button type="submit" class="btn-x danger" name="acao" value="reprovar" onclick="return confirm('Confirmar reprovação desta solicitação?');">✖ Reprovar</button>
       </div>
     </div>
 
@@ -1259,9 +1260,9 @@
     <div class="sticky-actions">
       <div class="bar">
         <a class="btn-x" href="{{ url_for('admin.lista_aprovacao_contratos') }}">← Voltar</a>
-        <button type="submit" class="btn-x primary">💾 Salvar</button>
-        <button type="button" class="btn-x success">✔ Aprovar</button>
-        <button type="button" class="btn-x danger">✖ Reprovar</button>
+        <button type="submit" class="btn-x primary" name="acao" value="salvar">💾 Salvar</button>
+        <button type="submit" class="btn-x success" name="acao" value="aprovar" onclick="return confirm('Confirmar aprovação desta solicitação?');">✔ Aprovar</button>
+        <button type="submit" class="btn-x danger" name="acao" value="reprovar" onclick="return confirm('Confirmar reprovação desta solicitação?');">✖ Reprovar</button>
       </div>
     </div>
   </form>

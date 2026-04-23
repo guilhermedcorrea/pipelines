@@ -72,6 +72,7 @@ ID_EMPRESA_PROPRIETARIA_CONTRATOS = 3
 TABELA_SOLICITACAO_CONTRATO = "[Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]"
 TABELA_SOLICITACAO_CONTRATO_ITEM = "[Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]"
 TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
+TABELA_CONTATOS_CONTRATO = "[Integracao].[Silver].[DimContatosContrato]"
 
 ID_TAG_CONTRATO_EM_AVALIACAO = 14
 ID_TAG_PLANO_MIDIA = 15
@@ -246,7 +247,7 @@ def _obter_painel_por_codponto(cod_ponto: int | str | None) -> dict[str, Any] | 
             p.QuantidadeFaces,
             p.BitAtivo
         FROM [Integracao].[Silver].[DimPaineisEuromidia] p
-        WHERE TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+        WHERE p.CodPonto = :cod_ponto
         ORDER BY p.DataAtualizacao DESC, p.IDDimPaineisEuromidia DESC;
     """)
     row = db.session.execute(sql, {"cod_ponto": cod_ponto_int}).mappings().first()
@@ -3461,6 +3462,7 @@ def _executar_movimento_card_core(
 
     sincronizacao_solicitacao_fase = None
     snapshot_preco_praticado = None
+    sincronizacao_contato_contrato = None
     sincronizacao_reservas = {"criadas": 0, "canceladas": 0, "mantidas": 0}
 
     try:
@@ -3480,6 +3482,12 @@ def _executar_movimento_card_core(
                 id_empresa_relacionada=_obter_id_empresa_relacionada_card(row),
                 id_usuario=int(id_usuario),
                 id_empresa_proprietaria=int(id_emp),
+            )
+            sincronizacao_contato_contrato = _upsert_dim_contatos_contrato_por_card(
+                id_card=int(id_card),
+                id_empresa=_resolver_id_empresa_principal_por_tipo_cliente(row),
+                id_empresa_proprietaria=int(id_emp),
+                id_fato_controle_contratos=_int_ou_none(row.get("IDFatoControleContratosEuromidia")),
             )
             try:
                 snapshot_preco_praticado = _sincronizar_snapshot_preco_praticado_fase_4(
@@ -3547,6 +3555,7 @@ def _executar_movimento_card_core(
         "snapshot_preco_praticado": snapshot_preco_praticado,
         "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
         "sincronizacao_reservas": sincronizacao_reservas,
+        "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
     }
 
 
@@ -5748,7 +5757,6 @@ def _montar_itens_snapshot_solicitacao_do_card(
 
 
 
-
 def _sincronizar_snapshot_solicitacao_contrato_do_card(
     *,
     id_card: int,
@@ -5969,6 +5977,132 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
 
         return dict(row) if row else None
 
+    def _parse_nome_tabela_sql(nome_tabela_sql: str) -> tuple[str | None, str | None]:
+        texto_tabela = str(nome_tabela_sql or "").strip()
+        if not texto_tabela:
+            return None, None
+
+        partes = [parte.strip("[] ") for parte in texto_tabela.split(".") if parte.strip("[] ")]
+        if len(partes) >= 2:
+            return partes[-2], partes[-1]
+        if len(partes) == 1:
+            return "dbo", partes[0]
+        return None, None
+
+    cache_tamanho_colunas_texto: dict[tuple[str, str], int | None] = {}
+
+    def _obter_tamanho_maximo_coluna_texto(nome_tabela_sql: str, nome_coluna: str) -> int | None:
+        chave_cache = (str(nome_tabela_sql or ""), str(nome_coluna or ""))
+        if chave_cache in cache_tamanho_colunas_texto:
+            return cache_tamanho_colunas_texto[chave_cache]
+
+        schema_nome, tabela_nome = _parse_nome_tabela_sql(nome_tabela_sql)
+        if not schema_nome or not tabela_nome or not nome_coluna:
+            cache_tamanho_colunas_texto[chave_cache] = None
+            return None
+
+        try:
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT TOP (1)
+                        c.max_length AS max_length,
+                        tp.name AS tipo_sql
+                    FROM sys.columns c
+                    INNER JOIN sys.tables t
+                        ON t.object_id = c.object_id
+                    INNER JOIN sys.schemas s
+                        ON s.schema_id = t.schema_id
+                    INNER JOIN sys.types tp
+                        ON tp.user_type_id = c.user_type_id
+                    WHERE s.name = :schema_nome
+                      AND t.name = :tabela_nome
+                      AND c.name = :nome_coluna;
+                    """
+                ),
+                {
+                    "schema_nome": schema_nome,
+                    "tabela_nome": tabela_nome,
+                    "nome_coluna": str(nome_coluna),
+                },
+            ).mappings().first()
+
+            if not row:
+                cache_tamanho_colunas_texto[chave_cache] = None
+                return None
+
+            max_length = row.get("max_length")
+            tipo_sql = str(row.get("tipo_sql") or "").lower()
+
+            if max_length in (None, -1):
+                cache_tamanho_colunas_texto[chave_cache] = None
+                return None
+
+            try:
+                max_length_int = int(max_length)
+            except Exception:
+                cache_tamanho_colunas_texto[chave_cache] = None
+                return None
+
+            if tipo_sql in {"nvarchar", "nchar"}:
+                tamanho_final = max_length_int // 2
+            else:
+                tamanho_final = max_length_int
+
+            cache_tamanho_colunas_texto[chave_cache] = tamanho_final if tamanho_final > 0 else None
+            return cache_tamanho_colunas_texto[chave_cache]
+        except Exception:
+            cache_tamanho_colunas_texto[chave_cache] = None
+            return None
+
+    def _texto_formulario_ou_none(
+        valor: Any,
+        *,
+        nome_coluna: str | None = None,
+        nome_tabela_sql: str | None = None,
+    ) -> str | None:
+        if valor is None:
+            return None
+
+        texto = str(valor).strip()
+        if not texto:
+            return None
+
+        texto_normalizado = _normalizar_texto_comparacao(texto)
+
+        placeholders_invalidos = {
+            "selecione",
+            "selecione...",
+            "escolha",
+            "escolha...",
+            "todos",
+            "todas",
+            "nenhum",
+            "nenhuma",
+            "n/a",
+            "na",
+            "null",
+            "none",
+            "nao informado",
+            "não informado",
+            "-",
+            "--",
+            "---",
+        }
+
+        if texto_normalizado in placeholders_invalidos:
+            return None
+
+        if "selecione" in texto_normalizado:
+            return None
+
+        if nome_coluna and nome_tabela_sql:
+            tamanho_maximo = _obter_tamanho_maximo_coluna_texto(nome_tabela_sql, nome_coluna)
+            if tamanho_maximo not in (None, 0) and len(texto) > int(tamanho_maximo):
+                texto = texto[: int(tamanho_maximo)]
+
+        return texto or None
+
     dados_formulario_solicitacao = dict(dados_formulario_solicitacao or {}) if isinstance(dados_formulario_solicitacao, dict) else {}
     dados_header_formulario = (
         dict(dados_formulario_solicitacao.get("header") or {})
@@ -5999,7 +6133,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     campos_int_header_formulario = {
         "IDFatoControleContratosEuromidia", "IDDimStatusContratos", "IDDimUsuariosCriacao",
         "IDEmpresa", "IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaProprietaria",
-        "QuantidadePontos", "QuantidadeFaces", "BitAtivo"
+        "IDTrimestre", "QuantidadePontos", "QuantidadeFaces", "BitAtivo"
     }
 
     def _aplicar_dados_formulario_header(valores_solicitacao: dict[str, Any]) -> dict[str, Any]:
@@ -6017,8 +6151,11 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             elif chave in campos_int_header_formulario:
                 valores_solicitacao[chave] = _int_positivo_ou_none(valor)
             else:
-                texto = str(valor or "").strip() or None
-                valores_solicitacao[chave] = texto
+                valores_solicitacao[chave] = _texto_formulario_ou_none(
+                    valor,
+                    nome_coluna=chave,
+                    nome_tabela_sql=TABELA_SOLICITACAO_CONTRATO,
+                )
 
         return valores_solicitacao
 
@@ -6335,6 +6472,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "id_solicitacao_existente": id_solicitacao_existente,
         "quantidade_itens_snapshot": len(itens_snapshot),
     }
+
 
 
 
@@ -11376,8 +11514,8 @@ def api_kanban_dados(id_kanban: int):
                   AND f_final.IDDimKanban = c.IDDimKanban
                   AND ISNULL(f_final.Ativo, 1) = 1
                   AND (
-                        LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
-                     OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                        f_final.NomeFase = 'concluido'
+                     OR f_final.TipoFase = 'SUCESSO'
                   )
             )
         GROUP BY c.IDDimKanbanFaseAtual;
@@ -11433,8 +11571,8 @@ def api_kanban_dados(id_kanban: int):
                       AND f_final.IDDimKanban = c.IDDimKanban
                       AND ISNULL(f_final.Ativo, 1) = 1
                       AND (
-                            LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
-                         OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                            f_final.NomeFase = 'concluido'
+                         OR f_final.TipoFase = 'SUCESSO'
                       )
                 )
         )
@@ -11668,8 +11806,8 @@ def api_cards_listar_por_fase(id_kanban: int):
                       AND f_final.IDDimKanban = c.IDDimKanban
                       AND ISNULL(f_final.Ativo, 1) = 1
                       AND (
-                            LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
-                         OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                            f_final.NomeFase = 'concluido'
+                         OR f_final.TipoFase = 'SUCESSO'
                       )
                 );
         """)
@@ -11731,8 +11869,8 @@ def api_cards_listar_por_fase(id_kanban: int):
                           AND f_final.IDDimKanban = c.IDDimKanban
                           AND ISNULL(f_final.Ativo, 1) = 1
                           AND (
-                                LOWER(LTRIM(RTRIM(ISNULL(f_final.NomeFase, '')))) = 'concluido'
-                             OR UPPER(LTRIM(RTRIM(ISNULL(f_final.TipoFase, '')))) = 'SUCESSO'
+                                f_final.NomeFase = 'concluido'
+                             OR f_final.TipoFase = 'SUCESSO'
                           )
                     )
             )
@@ -12074,7 +12212,7 @@ def api_empresas_lista():
         LEFT JOIN {TABELA_CNAES} cn
           ON cn.cnaepadrao = e.CNAE
         WHERE e.RazaoSocial IS NOT NULL
-          AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
+          AND e.RazaoSocial <> ''
         ORDER BY e.RazaoSocial ASC;
     """)
 
@@ -12114,7 +12252,7 @@ def api_empresas_buscar():
             LEFT JOIN {TABELA_CNAES} c
               ON c.cnaepadrao = e.CNAE
             WHERE e.RazaoSocial IS NOT NULL
-              AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
+              AND e.RazaoSocial <> ''
             ORDER BY e.RazaoSocial ASC;
         """)
 
@@ -12206,7 +12344,7 @@ def api_cnaes_buscar():
                 SubClasse
             FROM {TABELA_CNAES}
             ORDER BY
-                CASE WHEN LTRIM(RTRIM(ISNULL(Classe, ''))) = '' THEN 1 ELSE 0 END,
+                CASE WHEN Classe = '' THEN 1 ELSE 0 END,
                 Classe ASC,
                 Descricao ASC;
         """)
@@ -12306,10 +12444,10 @@ def api_faces_por_painel(cod_ponto: int):
         FROM [Integracao].[Silver].[DimFacesPaineis] f
         WHERE f.CodPonto = :cod_ponto
           AND f.CodFace IS NOT NULL
-          AND LTRIM(RTRIM(f.CodFace)) <> ''
+          AND f.CodFace <> ''
         GROUP BY f.CodFace, f.Face
         ORDER BY
-            CASE WHEN f.Face IS NULL OR LTRIM(RTRIM(f.Face)) = '' THEN 1 ELSE 0 END,
+            CASE WHEN f.Face IS NULL OR f.Face = '' THEN 1 ELSE 0 END,
             f.Face ASC,
             f.CodFace ASC;
     """)
@@ -12331,6 +12469,9 @@ def api_faces_por_painel(cod_ponto: int):
     payload = {"ok": True, "cod_ponto": cod_ponto, "total": len(faces), "faces": faces}
     _cache_json_set(chave, payload, TIMEOUT_CACHE_LONGO)
     return jsonify(payload)
+
+
+
 
 
 @kanban_bp.route("/api/paineis/id/<int:id_painel>/faces", methods=["GET"])
@@ -12357,15 +12498,15 @@ def api_faces_por_id_painel(id_painel: int):
         WHERE f.CodFace IS NOT NULL
           AND LTRIM(RTRIM(f.CodFace)) <> ''
           AND (
-                TRY_CONVERT(int, f.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+                f.IDDimPaineisEuromidia = :id_painel
                 OR (
-                    TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, :cod_ponto)
-                    AND UPPER(LTRIM(RTRIM(ISNULL(f.Tipo, '')))) = UPPER(LTRIM(RTRIM(:tipo_painel)))
+                    f.CodPonto = :cod_ponto
+                    AND f.Tipo = :tipo_painel
                 )
               )
         GROUP BY f.IDDimFacesPaineis, f.CodFace, f.Face, f.Tipo
         ORDER BY
-            CASE WHEN f.Face IS NULL OR LTRIM(RTRIM(f.Face)) = '' THEN 1 ELSE 0 END,
+            CASE WHEN f.Face IS NULL OR f.Face = '' THEN 1 ELSE 0 END,
             f.Face ASC,
             f.CodFace ASC;
     """)
@@ -12405,6 +12546,11 @@ def api_faces_por_id_painel(id_painel: int):
     }
     _cache_json_set(chave, payload, TIMEOUT_CACHE_LONGO)
     return jsonify(payload)
+
+
+
+
+
 
 
 @kanban_bp.route("/api/paineis/id/<int:id_painel>/faces/<string:cod_face>/comercial", methods=["GET"])
@@ -13721,43 +13867,32 @@ def api_card_nota_criar(id_card: int):
     return jsonify({"ok": True, "nota": nota_payload})
 
 
+
+
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/inativar", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
 def api_card_inativar(id_card: int):
-   
-
     id_usuario = _assert_login()
- 
-
     card_escopo = _obter_card_autorizado(id_card)
-  
-
     id_emp = _id_empresa_usuario_or_403()
-  
-
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
-  
 
     payload = request.get_json(silent=True) or {}
-  
 
     motivo_informado = payload.get("motivo")
     descricao = (payload.get("descricao") or "").strip()
 
-  
     motivo_normalizado = _normalizar_motivo_encerramento_card(motivo_informado)
 
-
     if not motivo_normalizado:
-     
         return jsonify({"ok": False, "msg": "Motivo inválido"}), 400
 
     codigo_motivo = _normalizar_codigo_dominio(motivo_normalizado.get("Codigo"))
     if codigo_motivo in {"OUTROS", "OUTRO_MOTIVO"} and len(descricao) < 2:
-   
         return jsonify({"ok": False, "msg": "Descreva o motivo"}), 400
-
 
     snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
@@ -13773,16 +13908,12 @@ def api_card_inativar(id_card: int):
           AND c.Ativo = 1;
     """)
 
-   
     row = db.session.execute(sql_card, {"id_card": id_card}).mappings().first()
-  
 
     if not row:
-     
         return jsonify({"ok": False, "msg": "Card não encontrado ou já inativo"}), 404
 
     if int(row["IDDimKanban"]) != id_kanban:
-        
         return jsonify({"ok": False, "msg": "Card fora do escopo do usuário"}), 403
 
     id_fase_atual = int(row["IDDimKanbanFaseAtual"] or 0)
@@ -13792,12 +13923,17 @@ def api_card_inativar(id_card: int):
     motivo_texto = str(motivo_normalizado.get("Descricao") or "").strip()
 
     observacao_inativacao = f"[INATIVADO] Motivo: {motivo_texto}" + (f" | {descricao}" if descricao else "")
-    
 
     id_status_inativacao = _resolver_id_status_card_movimento(card_inativado=True)
     status_inativacao_texto = "CANCELADO"
 
-  
+    """
+    Corrige o NameError:
+    esse fluxo não gera sincronização de contato/contrato,
+    então deixo explícito como None.
+    """
+    sincronizacao_contato_contrato = None
+    sincronizacao_reservas = None
 
     try:
         campos_update = ["Ativo = 0"]
@@ -13840,8 +13976,6 @@ def api_card_inativar(id_card: int):
         if _coluna_existe(TABELA_CARD, "AtualizadoPor"):
             campos_update.append("AtualizadoPor = :id_usuario")
 
-  
-
         sql_upd = text(f"""
             UPDATE {TABELA_CARD}
             SET {', '.join(campos_update)}
@@ -13849,9 +13983,10 @@ def api_card_inativar(id_card: int):
               AND Ativo = 1;
         """)
 
-      
         resultado_upd = db.session.execute(sql_upd, params_update)
-       
+
+        if int(getattr(resultado_upd, "rowcount", 0) or 0) <= 0:
+            raise RuntimeError("Nenhuma linha foi atualizada ao inativar o card.")
 
         id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
             id_kanban=id_kanban,
@@ -13898,13 +14033,9 @@ def api_card_inativar(id_card: int):
             "id_status_card": int(id_status_inativacao) if id_status_inativacao is not None else None,
             "id_kanban": int(id_kanban),
         }
-       
 
-      
         row_mov = db.session.execute(sql_ins_mov, params_mov).mappings().first()
-   
 
-     
         row_hist_enc = _registrar_historico_encerramento_card(
             id_card=id_card,
             id_motivo_encerramento=id_motivo_encerramento,
@@ -13913,7 +14044,6 @@ def api_card_inativar(id_card: int):
             id_usuario=id_usuario,
             observacoes=descricao,
         )
-       
 
         _registrar_status_historico_card(
             id_card=int(id_card),
@@ -13930,7 +14060,6 @@ def api_card_inativar(id_card: int):
             id_status_card=id_status_inativacao,
             id_fase=id_fase_para_movimento,
         )
-     
 
         _remover_tag_em_atendimento_do_card(
             id_card=int(id_card),
@@ -13946,12 +14075,9 @@ def api_card_inativar(id_card: int):
             id_empresa_proprietaria=int(id_emp),
             cancelar_todas=True,
         )
-       
 
-      
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
-       
         _registrar_log_card(
             id_card=id_card,
             id_kanban=id_kanban,
@@ -13967,15 +14093,11 @@ def api_card_inativar(id_card: int):
             payload_antes=snapshot_antes,
             payload_depois=snapshot_depois,
         )
-      
 
-    
         db.session.commit()
 
-      
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
 
-       
         _emitir_evento_kanban(
             id_kanban,
             "card_inativado",
@@ -13988,10 +14110,12 @@ def api_card_inativar(id_card: int):
                 "id_motivo_encerramento": id_motivo_encerramento,
                 "descricao": descricao or None,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
+                "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
             },
         )
 
-        
         current_app.logger.info(
             "KANBAN: card inativado com sucesso. id_card=%s id_usuario=%s motivo=%s codigo=%s id_motivo=%s",
             id_card,
@@ -14007,13 +14131,22 @@ def api_card_inativar(id_card: int):
                 "motivo": motivo_texto,
                 "motivo_codigo": motivo_normalizado.get("Codigo"),
                 "id_motivo_encerramento": id_motivo_encerramento,
+                "sincronizacao_reservas": sincronizacao_reservas,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
+                "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
             }
         )
+
     except Exception as exc:
-       
         db.session.rollback()
         current_app.logger.exception("Erro ao inativar card id_card=%s", id_card)
         return jsonify({"ok": False, "msg": f"Erro ao inativar card: {str(exc)}"}), 500
+
+
+
+
+
 
 
 
@@ -19024,6 +19157,163 @@ def _normalizar_telefone_card(valor: Any, tamanho_maximo: int = 30) -> str | Non
     return telefone[: int(tamanho_maximo)]
 
 
+def _obter_dados_card_para_contato_contrato(id_card: int) -> dict[str, Any] | None:
+    if int(id_card or 0) <= 0:
+        return None
+
+    col_id_empresa = (
+        'c.IDEmpresa AS IDEmpresa,'
+        if _coluna_existe(TABELA_CARD, 'IDEmpresa')
+        else 'CAST(NULL AS int) AS IDEmpresa,'
+    )
+    col_id_empresa_prop = (
+        'c.IDEmpresaProprietaria AS IDEmpresaProprietaria,'
+        if _coluna_existe(TABELA_CARD, 'IDEmpresaProprietaria')
+        else 'CAST(NULL AS int) AS IDEmpresaProprietaria,'
+    )
+    col_telefone = (
+        'c.Telefone AS Telefone,'
+        if _coluna_existe(TABELA_CARD, 'Telefone')
+        else 'CAST(NULL AS varchar(30)) AS Telefone,'
+    )
+    col_email = (
+        'c.Email AS Email,'
+        if _coluna_existe(TABELA_CARD, 'Email')
+        else 'CAST(NULL AS nvarchar(200)) AS Email,'
+    )
+    col_id_contrato = (
+        'c.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidia'
+        if _coluna_existe(TABELA_CARD, 'IDFatoControleContratosEuromidia')
+        else 'CAST(NULL AS int) AS IDFatoControleContratosEuromidia'
+    )
+
+    row = db.session.execute(
+        text(
+            f"""
+            SELECT TOP 1
+                c.IDFatoKanbanCard,
+                {col_id_empresa}
+                {col_id_empresa_prop}
+                {col_telefone}
+                {col_email}
+                {col_id_contrato}
+            FROM {TABELA_CARD} c
+            WHERE c.IDFatoKanbanCard = :id_card
+            """
+        ),
+        {'id_card': int(id_card)},
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+
+def _upsert_dim_contatos_contrato_por_card(
+    *,
+    id_card: int,
+    id_empresa: int | None = None,
+    id_empresa_proprietaria: int | None = None,
+    id_fato_controle_contratos: int | None = None,
+) -> dict[str, Any]:
+    if not _objeto_existe(TABELA_CONTATOS_CONTRATO):
+        return {'ok': False, 'motivo': 'tabela_dim_contatos_contrato_ausente'}
+
+    dados_card = _obter_dados_card_para_contato_contrato(int(id_card))
+    if not dados_card:
+        return {'ok': False, 'motivo': 'card_nao_encontrado'}
+
+    id_empresa_final = _int_ou_none(id_empresa) or _resolver_id_empresa_principal_por_tipo_cliente(dados_card)
+    id_empresa_proprietaria_final = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(dados_card.get('IDEmpresaProprietaria'))
+    id_contrato_final = _int_ou_none(id_fato_controle_contratos) or _int_ou_none(dados_card.get('IDFatoControleContratosEuromidia'))
+    telefone = _normalizar_telefone_card(dados_card.get('Telefone'), 30)
+    email = _texto_ou_none(dados_card.get('Email'), 200)
+
+    if id_empresa_final in (None, 0) and not telefone and not email:
+        return {'ok': False, 'motivo': 'card_sem_empresa_e_sem_contato'}
+
+    row_existente = db.session.execute(
+        text(f"""
+            SELECT TOP 1 IDDimContatosContrato
+            FROM {TABELA_CONTATOS_CONTRATO}
+            WHERE IDFatoKanbanCard = :id_card
+            ORDER BY IDDimContatosContrato DESC
+        """),
+        {'id_card': int(id_card)},
+    ).mappings().first()
+
+    if row_existente and row_existente.get('IDDimContatosContrato') not in (None, '', 0):
+        id_contato = int(row_existente['IDDimContatosContrato'])
+        db.session.execute(
+            text(f"""
+                UPDATE {TABELA_CONTATOS_CONTRATO}
+                   SET Telefone = :telefone,
+                       Email = :email,
+                       IDFatoControleContratosEuromidia = COALESCE(:id_fato_controle_contratos, IDFatoControleContratosEuromidia),
+                       IDEmpresa = COALESCE(:id_empresa, IDEmpresa),
+                       IDEmpresaProprietaria = COALESCE(:id_empresa_proprietaria, IDEmpresaProprietaria),
+                       IDFatoKanbanCard = :id_card
+                 WHERE IDDimContatosContrato = :id_contato
+            """),
+            {
+                'telefone': telefone,
+                'email': email,
+                'id_fato_controle_contratos': id_contrato_final,
+                'id_empresa': id_empresa_final,
+                'id_empresa_proprietaria': id_empresa_proprietaria_final,
+                'id_card': int(id_card),
+                'id_contato': id_contato,
+            },
+        )
+        return {
+            'ok': True,
+            'acao': 'atualizado',
+            'IDDimContatosContrato': id_contato,
+            'IDFatoControleContratosEuromidia': id_contrato_final,
+            'IDEmpresa': id_empresa_final,
+        }
+
+    row_novo = db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_CONTATOS_CONTRATO}
+            (
+                Telefone,
+                Email,
+                IDFatoControleContratosEuromidia,
+                IDEmpresa,
+                IDEmpresaProprietaria,
+                IDFatoKanbanCard
+            )
+            OUTPUT INSERTED.IDDimContatosContrato AS id_contato
+            VALUES
+            (
+                :telefone,
+                :email,
+                :id_fato_controle_contratos,
+                :id_empresa,
+                :id_empresa_proprietaria,
+                :id_card
+            )
+        """),
+        {
+            'telefone': telefone,
+            'email': email,
+            'id_fato_controle_contratos': id_contrato_final,
+            'id_empresa': id_empresa_final,
+            'id_empresa_proprietaria': id_empresa_proprietaria_final,
+            'id_card': int(id_card),
+        },
+    ).mappings().first()
+
+    return {
+        'ok': True,
+        'acao': 'inserido',
+        'IDDimContatosContrato': int(row_novo.get('id_contato') or 0) if row_novo else None,
+        'IDFatoControleContratosEuromidia': id_contrato_final,
+        'IDEmpresa': id_empresa_final,
+    }
+
+
+
 def _empresa_existe_por_id(id_empresa: int | None) -> bool:
     """Eu valido se a empresa existe na DimEmpresas."""
     if id_empresa in (None, 0):
@@ -20110,7 +20400,7 @@ def api_kanban_ocupacao_calendario():
         (
             SELECT TOP (1) fo.CodPonto
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = @CodFace
+            WHERE fo.CodFace = @CodFace
               AND fo.CodPonto IS NOT NULL
             ORDER BY fo.DataAtualizacao DESC
         );
@@ -20119,7 +20409,7 @@ def api_kanban_ocupacao_calendario():
         Painel AS (
             SELECT TOP (1)
                 p.CodPonto,
-                TipoPainel = UPPER(LTRIM(RTRIM(p.Tipo))),
+                TipoPainel = p.Tipo,
                 QuantidadeFaces = NULLIF(p.QuantidadeFaces, 0),
                 BitAtivo = COALESCE(p.BitAtivo, 1)
             FROM [Integracao].[Silver].[DimPaineisEuromidia] p
@@ -20147,8 +20437,8 @@ def api_kanban_ocupacao_calendario():
         OcupacoesBase AS (
             SELECT
                 fo.CodFace,
-                DataInicio = CAST(fo.DataInicio AS date),
-                DataFim = CAST(fo.DataFim AS date),
+                DataInicio = fo.DataInicio,
+                DataFim = fo.DataFim,
                 SpanQtd = fo.SpanQtd,
                 Cota = fo.Cota,
                 NumeroContrato = fo.NumeroContrato,
@@ -20295,13 +20585,6 @@ def api_kanban_ocupacao_calendario():
         }
 
     return jsonify({"ok": True, "cal": calendario})
-
-
-
-
-
-
-
 
 
 
@@ -21075,6 +21358,8 @@ def api_card_criar(id_kanban: int):
             and _normalizar_tipo_contrato_card(contexto_tipo_contrato["tipo_contrato"]) == TIPO_SOLICITACAO_NOVO
         )
 
+        sincronizacao_contato_contrato = None
+
         sincronizacao_tipo = _sincronizar_tipo_contrato_card(
             id_card=int(novo_id),
             id_kanban=int(id_kanban),
@@ -21353,6 +21638,7 @@ def api_card_criar(id_kanban: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "sincronizacao_reservas": sincronizacao_reservas,
             },
@@ -21374,8 +21660,10 @@ def api_card_criar(id_kanban: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
             }
         ), 201
 
@@ -21914,6 +22202,15 @@ def api_card_atualizar(id_card: int):
             id_empresa_proprietaria=int(id_emp),
             dados_formulario_solicitacao=solicitacao_contrato_payload,
         )
+
+        sincronizacao_contato_contrato = None
+        if int(id_fase_atual or 0) == 4:
+            sincronizacao_contato_contrato = _upsert_dim_contatos_contrato_por_card(
+                id_card=int(id_card),
+                id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
+                id_empresa_proprietaria=int(id_emp),
+                id_fato_controle_contratos=contexto_tipo_contrato.get("id_contrato_existente"),
+            )
 
         if contexto_tipo_contrato["tipo_contrato"] in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
             motivo_snapshot = snapshot_solicitacao.get("motivo") or "sincronizacao_solicitacao_nao_realizada"
