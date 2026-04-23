@@ -2,151 +2,266 @@
 
 {% block title %}Produto {{ produto.referencia_produto }} | Estoque Omie{% endblock %}
 
-
 {% block content %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+
 <style>
-  .estoque-euromidia-ajuste {
+  .produto-detalhe-pagina {
     width: 100%;
   }
 
-  .estoque-euromidia-ajuste .card {
-    background: #fff;
-    color: #212529;
+  .produto-detalhe-pagina .card {
     border: 1px solid rgba(15, 23, 42, 0.08);
-    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
-  }
-
-  .estoque-euromidia-ajuste .card-body {
-    min-width: 0;
-  }
-
-  .estoque-euromidia-ajuste .table {
-    --bs-table-bg: #fff;
-    --bs-table-color: #212529;
-  }
-
-  .estoque-euromidia-ajuste .table-responsive {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .estoque-euromidia-ajuste .form-label,
-  .estoque-euromidia-ajuste .campo-filtro label,
-  .estoque-euromidia-ajuste .dado-label,
-  .estoque-euromidia-ajuste .kpi-titulo,
-  .estoque-euromidia-ajuste .vinculo-label,
-  .estoque-euromidia-ajuste label {
-    display: block;
-    margin-bottom: 0.35rem;
-  }
-
-  .estoque-euromidia-ajuste .btn {
-    font-weight: 600;
-  }
-
-  .estoque-euromidia-ajuste .pagination {
-    margin-bottom: 0;
-  }
-</style>
-<style>
-  .pagina-detalhe .card {
     border-radius: 18px;
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
     overflow: hidden;
   }
 
-  .pagina-detalhe .kpis {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(140px, 1fr));
-    gap: 0.75rem;
+  .produto-detalhe-pagina .hero-card {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   }
 
-  .pagina-detalhe .kpi {
-    background: #f8faff;
-    border: 1px solid #e6eefc;
+  .produto-detalhe-pagina .hero-topo {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .produto-detalhe-pagina .hero-titulo h1 {
+    margin: 0;
+    font-size: 1.9rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .produto-detalhe-pagina .hero-meta {
+    margin-top: 0.45rem;
+    color: #64748b;
+    line-height: 1.5;
+  }
+
+  .produto-detalhe-pagina .kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
+    gap: 0.85rem;
+  }
+
+  .produto-detalhe-pagina .kpi {
+    background: #ffffff;
+    border: 1px solid #e5edf9;
+    border-radius: 16px;
+    padding: 0.95rem 1rem;
+  }
+
+  .produto-detalhe-pagina .kpi-titulo {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
+    margin-bottom: 0.25rem;
+    font-weight: 700;
+  }
+
+  .produto-detalhe-pagina .kpi-valor {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .produto-detalhe-pagina .grade-topo {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .produto-detalhe-pagina .card-titulo {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .produto-detalhe-pagina .card-titulo h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .produto-detalhe-pagina .card-subtitulo {
+    margin: 0.25rem 0 0 0;
+    color: #64748b;
+    font-size: 0.92rem;
+  }
+
+  .produto-detalhe-pagina .alerta-integracao {
+    border: 1px solid #ffe3a3;
+    background: #fff9e8;
+    color: #7c5a00;
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    margin-bottom: 1rem;
+  }
+
+  .produto-detalhe-pagina .form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 0.9rem 1rem;
+  }
+
+  .produto-detalhe-pagina .campo-largo {
+    grid-column: 1 / -1;
+  }
+
+  .produto-detalhe-pagina .form-label {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #475569;
+    margin-bottom: 0.35rem;
+  }
+
+  .produto-detalhe-pagina .form-control,
+  .produto-detalhe-pagina .form-select {
+    min-height: 44px;
+    border-radius: 12px;
+    border-color: #d9e3f0;
+  }
+
+  .produto-detalhe-pagina textarea.form-control {
+    min-height: 110px;
+    resize: vertical;
+  }
+
+  .produto-detalhe-pagina .bloco-readonly {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
     border-radius: 14px;
     padding: 0.9rem 1rem;
   }
 
-  .pagina-detalhe .kpi-titulo {
-    font-size: 0.8rem;
-    color: #6c757d;
-    margin-bottom: 0.25rem;
-  }
-
-  .pagina-detalhe .kpi-valor {
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: #1f2937;
-  }
-
-  .pagina-detalhe .grade-cabecalho {
+  .produto-detalhe-pagina .lista-readonly {
     display: grid;
-    grid-template-columns: 1.3fr 1fr;
-    gap: 1rem;
-  }
-
-  .pagina-detalhe .lista-dados {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(200px, 1fr));
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
     gap: 0.75rem 1rem;
   }
 
-  .pagina-detalhe .dado-label {
-    font-size: 0.78rem;
+  .produto-detalhe-pagina .dado-label {
+    font-size: 0.76rem;
     text-transform: uppercase;
-    color: #6c757d;
-    margin-bottom: 0.2rem;
+    color: #64748b;
+    margin-bottom: 0.15rem;
+    font-weight: 700;
   }
 
-  .pagina-detalhe .dado-valor {
-    font-weight: 600;
-    color: #1f2937;
+  .produto-detalhe-pagina .dado-valor {
+    color: #0f172a;
+    font-weight: 700;
     word-break: break-word;
   }
 
-  .pagina-detalhe .empresa-card + .empresa-card {
-    margin-top: 1rem;
+  .produto-detalhe-pagina .acoes-formulario {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
   }
 
-  .pagina-detalhe .badge-ambiente {
+  .produto-detalhe-pagina .badge-ambiente {
     display: inline-flex;
     align-items: center;
-    padding: 0.45rem 0.7rem;
+    padding: 0.45rem 0.72rem;
     border-radius: 999px;
-    background: #eef4ff;
+    background: #edf4ff;
     color: #0d6efd;
-    font-weight: 600;
-    font-size: 0.8rem;
+    font-weight: 700;
+    font-size: 0.82rem;
   }
 
-  .pagina-detalhe .table {
+  .produto-detalhe-pagina .vinculo-item + .vinculo-item {
+    margin-top: 0.9rem;
+  }
+
+  .produto-detalhe-pagina .vinculo-item {
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    border-radius: 14px;
+    padding: 0.95rem 1rem;
+  }
+
+  .produto-detalhe-pagina .vinculo-topo {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+  }
+
+  .produto-detalhe-pagina .vinculo-topo h3 {
+    margin: 0;
+    font-size: 0.98rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .produto-detalhe-pagina .vinculo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    gap: 0.75rem 1rem;
+  }
+
+  .produto-detalhe-pagina .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .produto-detalhe-pagina .table {
     min-width: 980px;
+    margin-bottom: 0;
+  }
+
+  .produto-detalhe-pagina .btn {
+    font-weight: 700;
+    border-radius: 12px;
   }
 
   @media (max-width: 1200px) {
-    .pagina-detalhe .kpis {
+    .produto-detalhe-pagina .kpis {
       grid-template-columns: repeat(2, minmax(140px, 1fr));
     }
 
-    .pagina-detalhe .grade-cabecalho {
+    .produto-detalhe-pagina .grade-topo {
       grid-template-columns: 1fr;
     }
   }
 
   @media (max-width: 768px) {
-    .pagina-detalhe .lista-dados {
+    .produto-detalhe-pagina .hero-titulo h1 {
+      font-size: 1.45rem;
+    }
+
+    .produto-detalhe-pagina .kpis,
+    .produto-detalhe-pagina .form-grid,
+    .produto-detalhe-pagina .lista-readonly,
+    .produto-detalhe-pagina .vinculo-grid {
       grid-template-columns: 1fr;
     }
 
-    .pagina-detalhe .kpis {
-      grid-template-columns: 1fr;
+    .produto-detalhe-pagina .acoes-formulario .btn {
+      width: 100%;
     }
   }
 </style>
-<div class="estoque-euromidia-ajuste">
-<div class="pagina-detalhe d-flex flex-column gap-3">
+
+<div class="produto-detalhe-pagina d-flex flex-column gap-3">
   <div>
     <a href="{{ url_for('estoques_bp.listar_produtos') }}" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-arrow-left me-1"></i>
@@ -154,18 +269,19 @@
     </a>
   </div>
 
-  <div class="card border-0 shadow-sm">
+  <div class="card hero-card border-0">
     <div class="card-body d-flex flex-column gap-3">
-      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
-        <div>
-          <h1 class="h3 mb-1">{{ produto.descricao }}</h1>
-          <div class="text-muted">
-            Referência: <strong>{{ produto.referencia_produto }}</strong>
+      <div class="hero-topo">
+        <div class="hero-titulo">
+          <h1>{{ produto.descricao or '-' }}</h1>
+          <div class="hero-meta">
+            Referência: <strong>{{ produto.referencia_produto or '-' }}</strong>
             {% if produto.codigo_interno %} • Código interno: <strong>{{ produto.codigo_interno }}</strong>{% endif %}
             {% if produto.unidade %} • Unidade: <strong>{{ produto.unidade }}</strong>{% endif %}
           </div>
         </div>
-        <div class="d-flex align-items-start">
+
+        <div>
           {% if produto.bit_ativo %}
             <span class="badge text-bg-success">Ativo</span>
           {% else %}
@@ -196,44 +312,203 @@
           <div class="kpi-valor">{{ resumo.quantidade_ambientes }} / {{ resumo.quantidade_locais }}</div>
         </div>
       </div>
+    </div>
+  </div>
 
-      <div class="grade-cabecalho">
-        <div class="card border bg-white">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Cadastro oficial do produto</h2>
-            <div class="lista-dados">
-              <div><div class="dado-label">ID</div><div class="dado-valor">{{ produto.id_fato_produto }}</div></div>
-              <div><div class="dado-label">Tipo</div><div class="dado-valor">{{ produto.tipo_item or '-' }}</div></div>
-              <div><div class="dado-label">Marca</div><div class="dado-valor">{{ produto.marca or '-' }}</div></div>
-              <div><div class="dado-label">Modelo</div><div class="dado-valor">{{ produto.modelo or '-' }}</div></div>
-              <div><div class="dado-label">NCM</div><div class="dado-valor">{{ produto.ncm or '-' }}</div></div>
-              <div><div class="dado-label">EAN</div><div class="dado-valor">{{ produto.ean or '-' }}</div></div>
-              <div><div class="dado-label">Família</div><div class="dado-valor">{{ produto.descricao_familia or '-' }}</div></div>
-              <div><div class="dado-label">Origem cadastro</div><div class="dado-valor">{{ produto.origem_cadastro or '-' }}</div></div>
-              <div><div class="dado-label">Origem imposto</div><div class="dado-valor">{{ produto.origem_imposto or '-' }}</div></div>
-              <div><div class="dado-label">Atualizado em UTC</div><div class="dado-valor">{{ produto.data_ultima_atualizacao_utc or '-' }}</div></div>
-            </div>
+  <div class="grade-topo">
+    <div class="card border-0">
+      <div class="card-body">
+        <div class="card-titulo">
+          <div>
+            <h2>Editar cadastro do produto</h2>
+           
           </div>
         </div>
 
-        <div class="card border bg-white">
-          <div class="card-body">
-            <h2 class="h6 mb-3">Ambientes vinculados</h2>
-            <div class="d-flex flex-wrap gap-2">
-              {% for empresa in empresas_vinculadas %}
-                <span class="badge-ambiente">{{ (empresa.razao_social or '').strip().split(' ') | first }}</span>
-              {% else %}
-                <span class="text-muted">Nenhum ambiente vinculado.</span>
-              {% endfor %}
+        
+
+        <form method="post" action="{{ url_for('estoques_bp.atualizar_produto', id_fato_produto=produto.id_fato_produto) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token_estoques() }}">
+
+          <div class="form-grid">
+            <div>
+              <label class="form-label" for="referencia_produto">Referência</label>
+              <input id="referencia_produto" name="referencia_produto" type="text" class="form-control" value="{{ produto.referencia_produto or '' }}" required>
+            </div>
+
+            <div>
+              <label class="form-label" for="codigo_interno">Código interno</label>
+              <input id="codigo_interno" name="codigo_interno" type="text" class="form-control" value="{{ produto.codigo_interno or '' }}">
+            </div>
+
+            <div class="campo-largo">
+              <label class="form-label" for="descricao">Descrição do produto</label>
+              <input id="descricao" name="descricao" type="text" class="form-control" value="{{ produto.descricao or '' }}" required>
+            </div>
+
+            <div class="campo-largo">
+              <label class="form-label" for="descricao_resumida">Descrição resumida</label>
+              <input id="descricao_resumida" name="descricao_resumida" type="text" class="form-control" value="{{ produto.descricao_resumida or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="unidade">Unidade</label>
+              <input id="unidade" name="unidade" type="text" class="form-control" value="{{ produto.unidade or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="tipo_item">Tipo</label>
+              <input id="tipo_item" name="tipo_item" type="text" class="form-control" value="{{ produto.tipo_item or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="marca">Marca</label>
+              <input id="marca" name="marca" type="text" class="form-control" value="{{ produto.marca or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="modelo">Modelo</label>
+              <input id="modelo" name="modelo" type="text" class="form-control" value="{{ produto.modelo or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="ncm">NCM</label>
+              <input id="ncm" name="ncm" type="text" class="form-control" value="{{ produto.ncm or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="ean">EAN</label>
+              <input id="ean" name="ean" type="text" class="form-control" value="{{ produto.ean or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="codigo_familia">Código da família</label>
+              <input id="codigo_familia" name="codigo_familia" type="text" class="form-control" value="{{ produto.codigo_familia or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="descricao_familia">Descrição da família</label>
+              <input id="descricao_familia" name="descricao_familia" type="text" class="form-control" value="{{ produto.descricao_familia or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="origem_imposto">Origem do imposto</label>
+              <input id="origem_imposto" name="origem_imposto" type="text" class="form-control" value="{{ produto.origem_imposto or '' }}">
+            </div>
+
+            <div>
+              <label class="form-label" for="bit_ativo">Status</label>
+              <select id="bit_ativo" name="bit_ativo" class="form-select">
+                <option value="1" {% if produto.bit_ativo %}selected{% endif %}>Ativo</option>
+                <option value="0" {% if not produto.bit_ativo %}selected{% endif %}>Inativo</option>
+              </select>
+            </div>
+
+            <div class="campo-largo">
+              <label class="form-label" for="observacao_interna">Observação interna</label>
+              <textarea id="observacao_interna" name="observacao_interna" class="form-control">{{ produto.observacao_interna or '' }}</textarea>
             </div>
           </div>
+
+          <div class="acoes-formulario">
+            <a href="{{ url_for('estoques_bp.detalhar_produto', id_fato_produto=produto.id_fato_produto) }}" class="btn btn-outline-secondary">
+              Recarregar
+            </a>
+            <button type="submit" class="btn btn-warning">
+              <i class="bi bi-floppy me-1"></i>
+              Salvar alterações
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="d-flex flex-column gap-3">
+      <div class="card border-0">
+        <div class="card-body">
+          <div class="card-titulo">
+            <div>
+              <h2>Dados somente leitura</h2>
+              <p class="card-subtitulo">Campos importantes do cadastro para conferência rápida.</p>
+            </div>
+          </div>
+
+          <div class="bloco-readonly">
+            <div class="lista-readonly">
+              <div>
+                <div class="dado-label">ID do produto</div>
+                <div class="dado-valor">{{ produto.id_fato_produto }}</div>
+              </div>
+              <div>
+                <div class="dado-label">Código integração</div>
+                <div class="dado-valor">{{ produto.codigo_produto_integracao or '-' }}</div>
+              </div>
+              <div>
+                <div class="dado-label">Origem cadastro</div>
+                <div class="dado-valor">{{ produto.origem_cadastro or '-' }}</div>
+              </div>
+              <div>
+                <div class="dado-label">Critério criação</div>
+                <div class="dado-valor">{{ produto.criterio_criacao or '-' }}</div>
+              </div>
+              <div>
+                <div class="dado-label">Hash cadastro base</div>
+                <div class="dado-valor">{{ produto.hash_cadastro_base or '-' }}</div>
+              </div>
+              <div>
+                <div class="dado-label">Atualizado em UTC</div>
+                <div class="dado-valor">{{ produto.data_ultima_atualizacao_utc or '-' }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card border-0">
+        <div class="card-body">
+          <div class="card-titulo">
+            <div>
+              <h2>Vínculos Omie por ambiente</h2>
+              <p class="card-subtitulo">Esses registros são atualizados em conjunto quando você salva o produto.</p>
+            </div>
+          </div>
+
+          {% for item in vinculos_detalhados %}
+            <div class="vinculo-item">
+              <div class="vinculo-topo">
+                <h3>{{ item.empresa.razao_social }}</h3>
+                <span class="badge-ambiente">{{ (item.empresa.razao_social or '').strip().split(' ') | first }}</span>
+              </div>
+
+              <div class="vinculo-grid">
+                <div>
+                  <div class="dado-label">Código produto integração</div>
+                  <div class="dado-valor">{{ item.vinculo.codigo_produto_integracao or '-' }}</div>
+                </div>
+                <div>
+                  <div class="dado-label">Código produto Omie</div>
+                  <div class="dado-valor">{{ item.vinculo.codigo_produto_omie or '-' }}</div>
+                </div>
+                <div>
+                  <div class="dado-label">Código Omie</div>
+                  <div class="dado-valor">{{ item.vinculo.codigo_omie or '-' }}</div>
+                </div>
+                <div>
+                  <div class="dado-label">Descrição Omie atual</div>
+                  <div class="dado-valor">{{ item.vinculo.descricao_omie or '-' }}</div>
+                </div>
+              </div>
+            </div>
+          {% else %}
+            <div class="text-muted">Nenhum vínculo Omie ativo encontrado para este produto.</div>
+          {% endfor %}
         </div>
       </div>
     </div>
   </div>
 
   {% for grupo in estoques_por_empresa %}
-  <div class="card border-0 shadow-sm empresa-card">
+  <div class="card border-0 empresa-card">
     <div class="card-body">
       <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
         <div>
@@ -288,12 +563,11 @@
     </div>
   </div>
   {% else %}
-  <div class="card border-0 shadow-sm">
+  <div class="card border-0">
     <div class="card-body text-center text-muted py-5">
       Nenhum estoque encontrado para este produto.
     </div>
   </div>
   {% endfor %}
-</div>
 </div>
 {% endblock %}

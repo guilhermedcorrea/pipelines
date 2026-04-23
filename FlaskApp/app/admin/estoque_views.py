@@ -147,6 +147,12 @@ def injetar_csrf_para_templates_estoque():
     return {"csrf_token_estoques": generate_csrf}
 
 
+
+
+def _normalizar_booleano_formulario(valor) -> bool:
+    return str(valor).strip().lower() in {"1", "true", "t", "sim", "s", "on", "yes", "y"}
+
+
 @estoques_bp.get("/")
 @limiter.limit("60 per minute")
 @proteger_rota_estoque()
@@ -413,13 +419,70 @@ def detalhar_produto(id_fato_produto: int):
 
     resumo["quantidade_locais"] = len(locais)
 
+    vinculos_detalhados = [
+        {"vinculo": vinculo, "empresa": empresa}
+        for vinculo, empresa in vinculos
+    ]
+
     return render_template(
         "admin/detalhe_produto.html",
         produto=produto,
         empresas_vinculadas=empresas_vinculadas,
+        vinculos_detalhados=vinculos_detalhados,
         estoques_por_empresa=list(estoques_por_empresa.values()),
         resumo=resumo,
     )
+
+
+@estoques_bp.post("/produtos/<int:id_fato_produto>")
+@limiter.limit("20 per minute")
+@proteger_rota_estoque()
+def atualizar_produto(id_fato_produto: int):
+    produto = db.session.get(FatoProduto, id_fato_produto)
+    if not produto:
+        abort(404)
+
+    campos_texto = (
+        "referencia_produto",
+        "codigo_interno",
+        "descricao",
+        "descricao_resumida",
+        "unidade",
+        "tipo_item",
+        "marca",
+        "modelo",
+        "ncm",
+        "ean",
+        "codigo_familia",
+        "descricao_familia",
+        "origem_imposto",
+        "observacao_interna",
+    )
+
+    for nome_campo in campos_texto:
+        valor = request.form.get(nome_campo, "")
+        valor_limpo = valor.strip() if isinstance(valor, str) else valor
+        setattr(produto, nome_campo, valor_limpo or None)
+
+    produto.bit_ativo = _normalizar_booleano_formulario(request.form.get("bit_ativo", "1"))
+
+    if not (produto.referencia_produto or "").strip():
+        flash("A referência do produto é obrigatória.", "warning")
+        return redirect(url_for("estoques_bp.detalhar_produto", id_fato_produto=id_fato_produto))
+
+    if not (produto.descricao or "").strip():
+        flash("A descrição do produto é obrigatória.", "warning")
+        return redirect(url_for("estoques_bp.detalhar_produto", id_fato_produto=id_fato_produto))
+
+    try:
+        db.session.commit()
+        flash("Produto atualizado com sucesso.", "success")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao atualizar produto | id_fato_produto=%s", id_fato_produto)
+        flash("Não foi possível atualizar o produto.", "danger")
+
+    return redirect(url_for("estoques_bp.detalhar_produto", id_fato_produto=id_fato_produto))
 
 
 
@@ -573,6 +636,489 @@ def listar_pedidos_compra():
         pedidos=pedidos,
         paginacao=paginacao,
     )
+
+
+
+def _buscar_cabecalho_pedido_compra(id_nota_fornecedor_omie: int):
+    sql = text(
+        """
+        SELECT TOP (1)
+            nfo.[IDNotaFornecedorOmie] AS id_nota_fornecedor_omie,
+            nfo.[IDEmpresaProprietaria] AS id_empresa_proprietaria,
+            nfo.[IDFatoEmpresasOmie] AS id_fato_empresas_omie,
+            nfo.[CodigoFornecedorOmie] AS codigo_fornecedor_omie,
+            nfo.[CodigoFornecedorIntegracao] AS codigo_fornecedor_integracao,
+            nfo.[RazaoSocialFornecedor] AS razao_social_fornecedor,
+            nfo.[NomeFantasiaFornecedor] AS nome_fantasia_fornecedor,
+            nfo.[ContatoFornecedor] AS contato_fornecedor,
+            nfo.[EmailFornecedor] AS email_fornecedor,
+            nfo.[CnpjCpfFornecedor] AS cnpj_cpf_fornecedor,
+            nfo.[CodigoIntegracaoNota] AS codigo_integracao_nota,
+            nfo.[DataPrevisao] AS data_previsao,
+            nfo.[Observacoes] AS observacoes,
+            nfo.[Status] AS status,
+            nfo.[DataCadastroUtc] AS data_cadastro_utc,
+            nfo.[DataConfirmacaoUtc] AS data_confirmacao_utc,
+            dep.[RazaoSocial] AS razao_social_empresa_proprietaria,
+            dep.[CNPJ] AS cnpj_empresa_proprietaria
+        FROM [Integracao].[Silver].[NotaFornecedorOmie] nfo
+        LEFT JOIN [Integracao].[dbo].[EmpresaProprietaria] dep
+            ON dep.[IDEmpresaProprietaria] = nfo.[IDEmpresaProprietaria]
+        WHERE nfo.[IDNotaFornecedorOmie] = :id_nota_fornecedor_omie
+          AND ISNULL(nfo.[BitAtivo], 1) = 1
+        """
+    )
+
+    return db.session.execute(
+        sql,
+        {"id_nota_fornecedor_omie": id_nota_fornecedor_omie},
+    ).mappings().first()
+
+
+
+def _buscar_itens_pedido_compra(id_nota_fornecedor_omie: int):
+    sql = text(
+        """
+        SELECT
+            nfi.[IDNotaFornecedorItemOmie] AS id_nota_fornecedor_item_omie,
+            nfi.[IDNotaFornecedorOmie] AS id_nota_fornecedor_omie,
+            nfi.[NumeroItem] AS numero_item,
+            nfi.[IDEmpresaProprietaria] AS id_empresa_proprietaria,
+            nfi.[IDFatoEmpresasOmie] AS id_fato_empresas_omie,
+            nfi.[CodigoFornecedorOmie] AS codigo_fornecedor_omie,
+            nfi.[IDFatoProduto] AS id_fato_produto,
+            nfi.[IDFatoProdutoOmieVinculo] AS id_fato_produto_omie_vinculo,
+            nfi.[CodigoProdutoOmie] AS codigo_produto_omie,
+            nfi.[CodigoOmie] AS codigo_omie,
+            nfi.[CodigoProdutoIntegracao] AS codigo_produto_integracao,
+            nfi.[CodigoProdutoFornecedorOmie] AS codigo_produto_fornecedor,
+            nfi.[NomeProdutoOmie] AS descricao,
+            nfi.[NomeProdutoFornecedor] AS descricao_produto_fornecedor,
+            nfi.[Unidade] AS unidade,
+            nfi.[Quantidade] AS quantidade,
+            nfi.[ValorUnitario] AS valor_unitario,
+            nfi.[QuantidadeConfirmada] AS quantidade_confirmada,
+            nfi.[PrecoUnitarioConfirmado] AS preco_unitario_confirmado,
+            nfi.[BitVinculoProdutoFornecedor] AS bit_vinculo_produto_fornecedor,
+            fp.[ReferenciaProduto] AS referencia_produto,
+            fp.[DescricaoResumida] AS descricao_resumida,
+            fp.[Marca] AS marca,
+            fp.[Modelo] AS modelo,
+            dep.[RazaoSocial] AS razao_social_empresa_proprietaria
+        FROM [Integracao].[Silver].[NotaFornecedorItemOmie] nfi
+        LEFT JOIN [Integracao].[Silver].[FatoProdutos] fp
+            ON fp.[IDFatoProduto] = nfi.[IDFatoProduto]
+        LEFT JOIN [Integracao].[dbo].[EmpresaProprietaria] dep
+            ON dep.[IDEmpresaProprietaria] = nfi.[IDEmpresaProprietaria]
+        WHERE nfi.[IDNotaFornecedorOmie] = :id_nota_fornecedor_omie
+          AND ISNULL(nfi.[BitAtivo], 1) = 1
+        ORDER BY nfi.[NumeroItem] ASC, nfi.[IDNotaFornecedorItemOmie] ASC
+        """
+    )
+
+    return db.session.execute(
+        sql,
+        {"id_nota_fornecedor_omie": id_nota_fornecedor_omie},
+    ).mappings().all()
+
+
+
+def _serializar_data_input(valor):
+    if not valor:
+        return None
+
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%Y-%m-%d")
+
+    return str(valor)
+
+
+
+def _montar_payload_inicial_pedido_compra(cabecalho, itens):
+    if not cabecalho:
+        return None
+
+    pedido = {
+        "id_nota_fornecedor_omie": int(cabecalho["id_nota_fornecedor_omie"]),
+        "status": cabecalho.get("status") or "-",
+        "status_confirmado": (cabecalho.get("status") or "").strip().lower() == "recebido total",
+        "cabecalho": {
+            "id_empresa_proprietaria": cabecalho.get("id_empresa_proprietaria"),
+            "razao_social_empresa_proprietaria": cabecalho.get("razao_social_empresa_proprietaria"),
+            "cnpj_empresa_proprietaria": cabecalho.get("cnpj_empresa_proprietaria"),
+            "id_fato_empresas_omie": cabecalho.get("id_fato_empresas_omie"),
+            "codigo_fornecedor_omie": cabecalho.get("codigo_fornecedor_omie"),
+            "codigo_fornecedor_integracao": cabecalho.get("codigo_fornecedor_integracao"),
+            "razao_social_fornecedor": cabecalho.get("razao_social_fornecedor"),
+            "nome_fantasia_fornecedor": cabecalho.get("nome_fantasia_fornecedor"),
+            "contato_fornecedor": cabecalho.get("contato_fornecedor"),
+            "email_fornecedor": cabecalho.get("email_fornecedor"),
+            "cnpj_cpf_fornecedor": cabecalho.get("cnpj_cpf_fornecedor"),
+            "codigo_integracao_nota": cabecalho.get("codigo_integracao_nota"),
+            "data_previsao": _serializar_data_input(cabecalho.get("data_previsao")),
+            "observacoes": cabecalho.get("observacoes"),
+        },
+        "itens": [],
+    }
+
+    for item in itens:
+        quantidade = float(item.get("quantidade") or 0)
+        valor_unitario = float(item.get("valor_unitario") or 0)
+        razao_social = item.get("razao_social_empresa_proprietaria") or ""
+
+        pedido["itens"].append(
+            {
+                "id_nota_fornecedor_item_omie": item.get("id_nota_fornecedor_item_omie"),
+                "numero_item": item.get("numero_item"),
+                "id_fato_produto": item.get("id_fato_produto"),
+                "referencia_produto": item.get("referencia_produto") or "",
+                "descricao": item.get("descricao") or "",
+                "descricao_resumida": item.get("descricao_resumida") or "",
+                "unidade": item.get("unidade") or "",
+                "marca": item.get("marca") or "",
+                "modelo": item.get("modelo") or "",
+                "codigo_produto_integracao": item.get("codigo_produto_integracao") or "",
+                "id_fato_produto_omie_vinculo": item.get("id_fato_produto_omie_vinculo"),
+                "codigo_produto_omie": item.get("codigo_produto_omie"),
+                "codigo_omie": item.get("codigo_omie") or "",
+                "razao_social": razao_social,
+                "razao_social_curta": razao_social.strip().split(" ")[0] if razao_social else "-",
+                "codigo_produto_fornecedor": item.get("codigo_produto_fornecedor") or "",
+                "descricao_produto_fornecedor": item.get("descricao_produto_fornecedor") or "",
+                "tem_vinculo_fornecedor": bool(item.get("bit_vinculo_produto_fornecedor")),
+                "quantidade": quantidade,
+                "valor_unitario": valor_unitario,
+                "valor_total": quantidade * valor_unitario,
+            }
+        )
+
+    return pedido
+
+
+
+def _reverter_pendente_do_item_salvo(item: dict, cabecalho: dict):
+    quantidade_total = _para_decimal(item.get("quantidade"))
+    quantidade_confirmada = _para_decimal(item.get("quantidade_confirmada"))
+    quantidade_em_aberto = _arredondar_6(quantidade_total - quantidade_confirmada)
+
+    if quantidade_em_aberto <= 0:
+        return
+
+    estoque = _obter_ou_criar_estoque_atual(
+        id_empresa_proprietaria=cabecalho["id_empresa_proprietaria"],
+        id_fato_produto=item.get("id_fato_produto"),
+        id_fato_produto_omie_vinculo=item.get("id_fato_produto_omie_vinculo"),
+        codigo_produto_omie=item.get("codigo_produto_omie"),
+        codigo_omie=item.get("codigo_omie"),
+        codigo_produto_integracao=item.get("codigo_produto_integracao"),
+        nome_produto=item.get("descricao"),
+        unidade=item.get("unidade"),
+    )
+
+    pendente_antes = _para_decimal(estoque["Pendente"])
+    reservado_antes = _para_decimal(estoque["Reservado"])
+    fisico_antes = _para_decimal(estoque["Fisico"])
+    saldo_antes = _para_decimal(estoque["Saldo"])
+    cmc_antes = _para_decimal(estoque["Cmc"])
+    preco_unitario_antes = _para_decimal(estoque["PrecoUnitario"])
+
+    pendente_depois = _arredondar_6(max(pendente_antes - quantidade_em_aberto, Decimal("0")))
+
+    sql_update = text(
+        """
+        UPDATE [Integracao].[Silver].[FatoEstoqueAtual]
+        SET
+            [Pendente] = :pendente_depois,
+            [DataUltimaMovimentacaoUtc] = SYSUTCDATETIME(),
+            [DataUltimaAtualizacaoUtc] = SYSUTCDATETIME()
+        WHERE [IDFatoEstoqueAtual] = :id_fato_estoque_atual
+        """
+    )
+
+    db.session.execute(
+        sql_update,
+        {
+            "id_fato_estoque_atual": estoque["IDFatoEstoqueAtual"],
+            "pendente_depois": pendente_depois,
+        },
+    )
+
+    _registrar_movimento_estoque(
+        id_fato_estoque_atual=estoque["IDFatoEstoqueAtual"],
+        id_empresa_proprietaria=cabecalho["id_empresa_proprietaria"],
+        id_fato_produto=item.get("id_fato_produto"),
+        id_fato_produto_omie_vinculo=item.get("id_fato_produto_omie_vinculo"),
+        id_nota_fornecedor_omie=cabecalho["id_nota_fornecedor_omie"],
+        id_nota_fornecedor_item_omie=item.get("id_nota_fornecedor_item_omie"),
+        tipo_movimento="PEDIDO_PENDENTE_REVERSO",
+        observacao="Reversão do pendente para atualização do pedido de compra.",
+        quantidade_movimento=quantidade_em_aberto,
+        preco_unitario_entrada=item.get("valor_unitario") or 0,
+        pendente_antes=pendente_antes,
+        pendente_depois=pendente_depois,
+        reservado_antes=reservado_antes,
+        reservado_depois=reservado_antes,
+        fisico_antes=fisico_antes,
+        fisico_depois=fisico_antes,
+        saldo_antes=saldo_antes,
+        saldo_depois=saldo_antes,
+        cmc_antes=cmc_antes,
+        cmc_depois=cmc_antes,
+        preco_unitario_depois=preco_unitario_antes,
+    )
+
+
+@estoques_bp.get("/compras/pedido/<int:id_nota_fornecedor_omie>")
+@limiter.limit("60 per minute")
+@proteger_rota_estoque()
+def detalhar_pedido_compra(id_nota_fornecedor_omie: int):
+    cabecalho = _buscar_cabecalho_pedido_compra(id_nota_fornecedor_omie)
+    if not cabecalho:
+        abort(404)
+
+    itens = _buscar_itens_pedido_compra(id_nota_fornecedor_omie)
+    empresas_proprietarias = db.session.scalars(
+        select(DimEmpresaProprietaria)
+        .where(
+            or_(
+                DimEmpresaProprietaria.bit_ativo == True,
+                DimEmpresaProprietaria.bit_ativo.is_(None),
+            )
+        )
+        .order_by(asc(DimEmpresaProprietaria.razao_social))
+    ).all()
+
+    pedido_inicial = _montar_payload_inicial_pedido_compra(cabecalho, itens)
+    pedido_bloqueado = (cabecalho.get("status") or "").strip().lower() == "recebido total"
+
+    return render_template(
+        "admin/pedido_compra_detalhes.html",
+        empresas_proprietarias=empresas_proprietarias,
+        pedido_inicial=pedido_inicial,
+        pedido_bloqueado=pedido_bloqueado,
+    )
+
+
+@estoques_bp.post("/api/compras/pedido/<int:id_nota_fornecedor_omie>/salvar")
+@limiter.limit("20 per minute")
+@proteger_rota_estoque()
+def atualizar_pedido_compra(id_nota_fornecedor_omie: int):
+    payload = request.get_json(silent=True) or {}
+
+    cabecalho_payload = payload.get("cabecalho") or {}
+    itens_payload = payload.get("itens") or []
+
+    cabecalho_existente = _buscar_cabecalho_pedido_compra(id_nota_fornecedor_omie)
+    if not cabecalho_existente:
+        return jsonify({"ok": False, "mensagem": "Pedido não encontrado."}), 404
+
+    if (cabecalho_existente.get("status") or "").strip().lower() == "recebido total":
+        return jsonify({"ok": False, "mensagem": "Este pedido já foi confirmado e não pode mais ser editado."}), 400
+
+    itens_existentes = [dict(item) for item in _buscar_itens_pedido_compra(id_nota_fornecedor_omie)]
+    if any(_para_decimal(item.get("quantidade_confirmada")) > 0 for item in itens_existentes):
+        return jsonify(
+            {
+                "ok": False,
+                "mensagem": "Este pedido já possui itens confirmados. Para evitar divergência no estoque, essa tela não permite regravar esse caso.",
+            }
+        ), 400
+
+    id_empresa_proprietaria = cabecalho_payload.get("id_empresa_proprietaria")
+    id_fato_empresas_omie = cabecalho_payload.get("id_fato_empresas_omie")
+    codigo_fornecedor_omie = cabecalho_payload.get("codigo_fornecedor_omie")
+    codigo_fornecedor_integracao = (cabecalho_payload.get("codigo_fornecedor_integracao") or "").strip() or None
+    razao_social_fornecedor = (cabecalho_payload.get("razao_social_fornecedor") or "").strip()
+    nome_fantasia_fornecedor = (cabecalho_payload.get("nome_fantasia_fornecedor") or "").strip() or None
+    contato_fornecedor = (cabecalho_payload.get("contato_fornecedor") or "").strip() or None
+    email_fornecedor = (cabecalho_payload.get("email_fornecedor") or "").strip() or None
+    cnpj_cpf_fornecedor = (cabecalho_payload.get("cnpj_cpf_fornecedor") or "").strip() or None
+    codigo_integracao_nota = (cabecalho_payload.get("codigo_integracao_nota") or "").strip() or None
+    data_previsao = (cabecalho_payload.get("data_previsao") or "").strip() or None
+    observacoes = (cabecalho_payload.get("observacoes") or "").strip() or None
+
+    if not id_empresa_proprietaria:
+        return jsonify({"ok": False, "mensagem": "Selecione a empresa proprietária."}), 400
+
+    if not id_fato_empresas_omie:
+        return jsonify({"ok": False, "mensagem": "Selecione o fornecedor."}), 400
+
+    if not razao_social_fornecedor:
+        return jsonify({"ok": False, "mensagem": "A razão social do fornecedor é obrigatória."}), 400
+
+    if not itens_payload:
+        return jsonify({"ok": False, "mensagem": "Adicione pelo menos um item antes de salvar."}), 400
+
+    for indice, item in enumerate(itens_payload, start=1):
+        if not item.get("id_fato_produto"):
+            return jsonify({"ok": False, "mensagem": f"O item {indice} precisa estar vinculado a um produto interno."}), 400
+
+        quantidade = _para_decimal(item.get("quantidade"))
+        valor_unitario = _para_decimal(item.get("valor_unitario"))
+
+        if quantidade <= 0:
+            return jsonify({"ok": False, "mensagem": f"O item {indice} precisa ter quantidade maior que zero."}), 400
+
+        if valor_unitario < 0:
+            return jsonify({"ok": False, "mensagem": f"O item {indice} precisa ter valor unitário válido."}), 400
+
+    sql_update_cabecalho = text(
+        """
+        UPDATE [Integracao].[Silver].[NotaFornecedorOmie]
+        SET
+            [IDEmpresaProprietaria] = :id_empresa_proprietaria,
+            [IDFatoEmpresasOmie] = :id_fato_empresas_omie,
+            [CodigoFornecedorOmie] = :codigo_fornecedor_omie,
+            [CodigoFornecedorIntegracao] = :codigo_fornecedor_integracao,
+            [RazaoSocialFornecedor] = :razao_social_fornecedor,
+            [NomeFantasiaFornecedor] = :nome_fantasia_fornecedor,
+            [ContatoFornecedor] = :contato_fornecedor,
+            [EmailFornecedor] = :email_fornecedor,
+            [CnpjCpfFornecedor] = :cnpj_cpf_fornecedor,
+            [CodigoIntegracaoNota] = :codigo_integracao_nota,
+            [DataPrevisao] = :data_previsao,
+            [Observacoes] = :observacoes,
+            [Status] = 'Salvo',
+            [DataConfirmacaoUtc] = NULL,
+            [DataUltimaAtualizacaoUtc] = SYSUTCDATETIME()
+        WHERE [IDNotaFornecedorOmie] = :id_nota_fornecedor_omie
+        """
+    )
+
+    sql_inativar_itens = text(
+        """
+        UPDATE [Integracao].[Silver].[NotaFornecedorItemOmie]
+        SET
+            [BitAtivo] = 0,
+            [DataUltimaAtualizacaoUtc] = SYSUTCDATETIME()
+        WHERE [IDNotaFornecedorOmie] = :id_nota_fornecedor_omie
+          AND ISNULL([BitAtivo], 1) = 1
+        """
+    )
+
+    sql_insert_item = text(
+        """
+        INSERT INTO [Integracao].[Silver].[NotaFornecedorItemOmie] (
+            [IDNotaFornecedorOmie],
+            [NumeroItem],
+            [IDEmpresaProprietaria],
+            [IDFatoEmpresasOmie],
+            [CodigoFornecedorOmie],
+            [IDFatoProduto],
+            [IDFatoProdutoOmieVinculo],
+            [CodigoProdutoOmie],
+            [CodigoOmie],
+            [CodigoProdutoIntegracao],
+            [CodigoProdutoFornecedorOmie],
+            [NomeProdutoOmie],
+            [NomeProdutoFornecedor],
+            [Unidade],
+            [Quantidade],
+            [ValorUnitario],
+            [BitVinculoProdutoFornecedor]
+        )
+        OUTPUT INSERTED.[IDNotaFornecedorItemOmie]
+        VALUES (
+            :id_nota_fornecedor_omie,
+            :numero_item,
+            :id_empresa_proprietaria,
+            :id_fato_empresas_omie,
+            :codigo_fornecedor_omie,
+            :id_fato_produto,
+            :id_fato_produto_omie_vinculo,
+            :codigo_produto_omie,
+            :codigo_omie,
+            :codigo_produto_integracao,
+            :codigo_produto_fornecedor_omie,
+            :nome_produto_omie,
+            :nome_produto_fornecedor,
+            :unidade,
+            :quantidade,
+            :valor_unitario,
+            :bit_vinculo_produto_fornecedor
+        )
+        """
+    )
+
+    try:
+        for item_existente in itens_existentes:
+            _reverter_pendente_do_item_salvo(item_existente, dict(cabecalho_existente))
+
+        db.session.execute(
+            sql_update_cabecalho,
+            {
+                "id_nota_fornecedor_omie": id_nota_fornecedor_omie,
+                "id_empresa_proprietaria": id_empresa_proprietaria,
+                "id_fato_empresas_omie": id_fato_empresas_omie,
+                "codigo_fornecedor_omie": codigo_fornecedor_omie,
+                "codigo_fornecedor_integracao": codigo_fornecedor_integracao,
+                "razao_social_fornecedor": razao_social_fornecedor,
+                "nome_fantasia_fornecedor": nome_fantasia_fornecedor,
+                "contato_fornecedor": contato_fornecedor,
+                "email_fornecedor": email_fornecedor,
+                "cnpj_cpf_fornecedor": cnpj_cpf_fornecedor,
+                "codigo_integracao_nota": codigo_integracao_nota,
+                "data_previsao": data_previsao,
+                "observacoes": observacoes,
+            },
+        )
+
+        db.session.execute(
+            sql_inativar_itens,
+            {"id_nota_fornecedor_omie": id_nota_fornecedor_omie},
+        )
+
+        for numero_item, item in enumerate(itens_payload, start=1):
+            id_nota_fornecedor_item_omie = db.session.execute(
+                sql_insert_item,
+                {
+                    "id_nota_fornecedor_omie": id_nota_fornecedor_omie,
+                    "numero_item": numero_item,
+                    "id_empresa_proprietaria": id_empresa_proprietaria,
+                    "id_fato_empresas_omie": id_fato_empresas_omie,
+                    "codigo_fornecedor_omie": codigo_fornecedor_omie,
+                    "id_fato_produto": item.get("id_fato_produto"),
+                    "id_fato_produto_omie_vinculo": item.get("id_fato_produto_omie_vinculo"),
+                    "codigo_produto_omie": item.get("codigo_produto_omie"),
+                    "codigo_omie": item.get("codigo_omie"),
+                    "codigo_produto_integracao": item.get("codigo_produto_integracao"),
+                    "codigo_produto_fornecedor_omie": item.get("codigo_produto_fornecedor"),
+                    "nome_produto_omie": item.get("descricao"),
+                    "nome_produto_fornecedor": item.get("descricao_produto_fornecedor") or item.get("descricao"),
+                    "unidade": item.get("unidade"),
+                    "quantidade": item.get("quantidade"),
+                    "valor_unitario": item.get("valor_unitario"),
+                    "bit_vinculo_produto_fornecedor": 1 if item.get("tem_vinculo_fornecedor") else 0,
+                },
+            ).scalar_one()
+
+            _aplicar_pendente_no_salvar(
+                id_empresa_proprietaria=id_empresa_proprietaria,
+                id_fato_produto=item.get("id_fato_produto"),
+                id_fato_produto_omie_vinculo=item.get("id_fato_produto_omie_vinculo"),
+                codigo_produto_omie=item.get("codigo_produto_omie"),
+                codigo_omie=item.get("codigo_omie"),
+                codigo_produto_integracao=item.get("codigo_produto_integracao"),
+                nome_produto=item.get("descricao"),
+                unidade=item.get("unidade"),
+                quantidade=item.get("quantidade"),
+                valor_unitario=item.get("valor_unitario"),
+                id_nota_fornecedor_omie=id_nota_fornecedor_omie,
+                id_nota_fornecedor_item_omie=id_nota_fornecedor_item_omie,
+            )
+
+        db.session.commit()
+
+        return jsonify(
+            {
+                "ok": True,
+                "mensagem": "Pedido atualizado com sucesso e pendente recalculado com base nos itens atuais.",
+                "id_nota_fornecedor_omie": id_nota_fornecedor_omie,
+            }
+        )
+    except Exception as erro:
+        db.session.rollback()
+        return jsonify({"ok": False, "mensagem": f"Erro ao atualizar pedido: {erro}"}), 500
 
 @estoques_bp.get("/api/compras/produtos/buscar")
 @limiter.limit("120 per minute")
@@ -1630,3 +2176,375 @@ def confirmar_pedido_compra(id_nota_fornecedor_omie: int):
 
 
 
+@estoques_bp.get("/saldo")
+@limiter.limit("60 per minute")
+@proteger_rota_estoque()
+def visualizar_saldo_estoque():
+    pagina = max(request.args.get("pagina", default=1, type=int) or 1, 1)
+    por_pagina = 10
+    busca = (request.args.get("busca", default="", type=str) or "").strip()
+
+    where = ""
+    parametros = {}
+
+    if busca:
+        where = """
+        WHERE (
+               ISNULL(fp.[ReferenciaProduto], '') LIKE :busca
+            OR ISNULL(fea.[NomeProduto], '') LIKE :busca
+            OR ISNULL(fp.[Descricao], '') LIKE :busca
+            OR ISNULL(dep.[RazaoSocial], '') LIKE :busca
+            OR ISNULL(fea.[CodigoProdutoIntegracao], '') LIKE :busca
+        )
+        """
+        parametros["busca"] = f"%{busca}%"
+
+    sql_total = text(
+        f"""
+        SELECT COUNT(1) AS total
+        FROM [Integracao].[Silver].[FatoEstoqueAtual] fea
+        LEFT JOIN [Integracao].[Silver].[FatoProdutos] fp
+            ON fp.[IDFatoProduto] = fea.[IDFatoProduto]
+        LEFT JOIN [Integracao].[dbo].[EmpresaProprietaria] dep
+            ON dep.[IDEmpresaProprietaria] = fea.[IDEmpresaProprietaria]
+        {where}
+        """
+    )
+
+    total = db.session.execute(sql_total, parametros).scalar_one()
+    total_paginas = ceil(total / por_pagina) if total > 0 else 0
+
+    if pagina > 1 and total > 0 and pagina > total_paginas:
+        abort(404)
+
+    offset = (pagina - 1) * por_pagina
+
+    sql_lista = text(
+        f"""
+        SELECT
+            fea.[IDFatoEstoqueAtual] AS id_fato_estoque_atual,
+            fea.[IDEmpresaProprietaria] AS id_empresa_proprietaria,
+            dep.[RazaoSocial] AS estoque,
+            fp.[ReferenciaProduto] AS referencia_produto,
+            fea.[NomeProduto] AS nome_produto,
+            fea.[Unidade] AS unidade,
+            fp.[BitAtivo] AS bit_ativo,
+            fea.[Saldo] AS saldo,
+            fea.[Cmc] AS cmc,
+            fea.[Pendente] AS pendente,
+            fea.[EstoqueMinimo] AS estoque_minimo,
+            fea.[Reservado] AS reservado,
+            fea.[Fisico] AS fisico,
+            fea.[PrecoUnitario] AS preco_unitario,
+            fea.[DataUltimaMovimentacaoUtc] AS data_ultima_movimentacao_utc
+        FROM [Integracao].[Silver].[FatoEstoqueAtual] fea
+        LEFT JOIN [Integracao].[Silver].[FatoProdutos] fp
+            ON fp.[IDFatoProduto] = fea.[IDFatoProduto]
+        LEFT JOIN [Integracao].[dbo].[EmpresaProprietaria] dep
+            ON dep.[IDEmpresaProprietaria] = fea.[IDEmpresaProprietaria]
+        {where}
+        ORDER BY
+            fea.[DataUltimaMovimentacaoUtc] DESC,
+            fea.[IDFatoEstoqueAtual] DESC
+        OFFSET :offset ROWS FETCH NEXT :por_pagina ROWS ONLY
+        """
+    )
+
+    parametros_lista = dict(parametros)
+    parametros_lista.update(
+        {
+            "offset": offset,
+            "por_pagina": por_pagina,
+        }
+    )
+
+    linhas = db.session.execute(sql_lista, parametros_lista).mappings().all()
+
+    saldos = []
+    for linha in linhas:
+        registro = dict(linha)
+
+        data_movimentacao = registro.get("data_ultima_movimentacao_utc")
+        registro["data_ultima_movimentacao_formatada"] = (
+            data_movimentacao.strftime("%d/%m/%Y %H:%M") if data_movimentacao else "-"
+        )
+
+        saldos.append(registro)
+
+    class PaginacaoManual:
+        def __init__(self, page, per_page, total):
+            self.page = page
+            self.per_page = per_page
+            self.total = total
+
+        @property
+        def pages(self):
+            if self.total == 0:
+                return 0
+            return ceil(self.total / self.per_page)
+
+        @property
+        def has_prev(self):
+            return self.page > 1
+
+        @property
+        def has_next(self):
+            return self.page < self.pages
+
+        @property
+        def prev_num(self):
+            return self.page - 1
+
+        @property
+        def next_num(self):
+            return self.page + 1
+
+        @property
+        def inicio(self):
+            if self.total == 0:
+                return 0
+            return ((self.page - 1) * self.per_page) + 1
+
+        @property
+        def fim(self):
+            if self.total == 0:
+                return 0
+            return min(self.page * self.per_page, self.total)
+
+    paginacao = PaginacaoManual(
+        page=pagina,
+        per_page=por_pagina,
+        total=total,
+    )
+
+    return render_template(
+        "admin/lista_saldo_estoque.html",
+        saldos=saldos,
+        paginacao=paginacao,
+        busca=busca,
+    )
+
+
+
+
+
+
+@estoques_bp.get("/produtos/vinculos")
+@limiter.limit("60 per minute")
+@proteger_rota_estoque()
+def listar_vinculos_produto():
+    pagina = max(request.args.get("page", default=1, type=int) or 1, 1)
+    por_pagina = 10
+
+    filtro_fornecedor = (request.args.get("fornecedor", default="", type=str) or "").strip()
+    filtro_produto_omie = (request.args.get("produto_omie", default="", type=str) or "").strip()
+
+    filtros = {
+        "fornecedor": filtro_fornecedor,
+        "produto_omie": filtro_produto_omie,
+        "per_page": por_pagina,
+    }
+
+    class PaginacaoTela:
+        def __init__(self, page: int, per_page: int, total: int):
+            self.page = page
+            self.per_page = per_page
+            self.total = total
+
+        @property
+        def total_pages(self):
+            if self.total <= 0:
+                return 0
+            return ceil(self.total / self.per_page)
+
+        @property
+        def inicio(self):
+            if self.total <= 0:
+                return 0
+            return ((self.page - 1) * self.per_page) + 1
+
+        @property
+        def fim(self):
+            if self.total <= 0:
+                return 0
+            return min(self.page * self.per_page, self.total)
+
+    sql_total = text(
+        """
+        WITH base AS (
+            SELECT
+                v.[IDFatoProdutoFornecedorOmieVinculo]
+            FROM [Integracao].[Bronze].[FatoProdutoFornecedorOmieVinculo] v
+            OUTER APPLY (
+                SELECT TOP (1)
+                    fpov.[CodigoProdutoOmie],
+                    fpov.[CodigoProdutoIntegracao],
+                    fpov.[DescricaoOmie],
+                    fp.[Descricao] AS descricao_interna
+                FROM [Integracao].[Silver].[FatoProdutoOmieVinculo] fpov
+                LEFT JOIN [Integracao].[Silver].[FatoProdutos] fp
+                    ON fp.[IDFatoProduto] = fpov.[IDFatoProduto]
+                WHERE
+                    fpov.[IDEmpresaProprietaria] = v.[IDEmpresaProprietaria]
+                    AND (
+                           (
+                               ISNULL(v.[CodigoProdutoIntegracao], '') <> ''
+                               AND ISNULL(fpov.[CodigoProdutoIntegracao], '') = ISNULL(v.[CodigoProdutoIntegracao], '')
+                           )
+                        OR (
+                               TRY_CONVERT(VARCHAR(60), fpov.[CodigoProdutoOmie]) = TRY_CONVERT(VARCHAR(60), v.[CodigoProdutoOmie])
+                           )
+                    )
+                ORDER BY
+                    ISNULL(fpov.[BitAtivo], 1) DESC,
+                    fpov.[DataUltimaAtualizacaoUtc] DESC,
+                    fpov.[IDFatoProdutoOmieVinculo] DESC
+            ) produto_omie
+            WHERE 1 = 1
+              AND (
+                    :fornecedor = ''
+                    OR (
+                        CASE
+                            WHEN REPLACE(REPLACE(REPLACE(ISNULL(v.[CpfCnpjFornecedor], ''), '.', ''), '/', ''), '-', '') <> '' THEN
+                                CONCAT('CNPJ:', REPLACE(REPLACE(REPLACE(ISNULL(v.[CpfCnpjFornecedor], ''), '.', ''), '/', ''), '-', ''))
+                            WHEN TRY_CONVERT(VARCHAR(60), v.[CodigoFornecedorOmie]) IS NOT NULL THEN
+                                CONCAT('COD:', TRY_CONVERT(VARCHAR(60), v.[CodigoFornecedorOmie]))
+                            WHEN ISNULL(v.[CodigoFornecedorIntegracao], '') <> '' THEN
+                                CONCAT('INT:', ISNULL(v.[CodigoFornecedorIntegracao], ''))
+                            ELSE CONCAT('RAZAO:', UPPER(ISNULL(v.[RazaoSocialFornecedor], '')))
+                        END
+                    ) = :fornecedor
+                  )
+              AND (
+                    :produto_omie = ''
+                    OR (
+                        CASE
+                            WHEN TRY_CONVERT(VARCHAR(60), COALESCE(produto_omie.[CodigoProdutoOmie], v.[CodigoProdutoOmie])) IS NOT NULL THEN
+                                CONCAT('COD:', TRY_CONVERT(VARCHAR(60), COALESCE(produto_omie.[CodigoProdutoOmie], v.[CodigoProdutoOmie])))
+                            WHEN ISNULL(COALESCE(produto_omie.[CodigoProdutoIntegracao], v.[CodigoProdutoIntegracao]), '') <> '' THEN
+                                CONCAT('INT:', ISNULL(COALESCE(produto_omie.[CodigoProdutoIntegracao], v.[CodigoProdutoIntegracao]), ''))
+                            ELSE CONCAT('NOME:', UPPER(COALESCE(produto_omie.[DescricaoOmie], produto_omie.[descricao_interna], '')))
+                        END
+                    ) = :produto_omie
+                  )
+        )
+        SELECT COUNT(1) AS total FROM base
+        """
+    )
+
+    total = db.session.execute(
+        sql_total,
+        {
+            "fornecedor": filtro_fornecedor,
+            "produto_omie": filtro_produto_omie,
+        },
+    ).scalar_one()
+
+    total_paginas = ceil(total / por_pagina) if total > 0 else 0
+    if pagina > 1 and total > 0 and pagina > total_paginas:
+        abort(404)
+
+    offset = (pagina - 1) * por_pagina
+
+    sql_itens = text(
+        """
+        SELECT
+            dep.[RazaoSocial] AS RazaoSocialEmpresaProprietaria,
+            v.[NomeAmbiente] AS NomeAmbiente,
+            v.[RazaoSocialFornecedor] AS RazaoSocialFornecedor,
+            v.[CpfCnpjFornecedor] AS CpfCnpjFornecedor,
+            v.[CodigoProdutoFornecedor] AS CodigoProdutoFornecedor,
+            v.[DescricaoProdutoFornecedor] AS DescricaoProdutoFornecedor,
+            COALESCE(produto_omie.[CodigoProdutoOmie], v.[CodigoProdutoOmie]) AS CodigoProdutoOmie,
+            COALESCE(produto_omie.[DescricaoOmie], produto_omie.[descricao_interna], '-') AS NomeProdutoOmie
+        FROM [Integracao].[Bronze].[FatoProdutoFornecedorOmieVinculo] v
+        LEFT JOIN [Integracao].[dbo].[EmpresaProprietaria] dep
+            ON dep.[IDEmpresaProprietaria] = v.[IDEmpresaProprietaria]
+        OUTER APPLY (
+            SELECT TOP (1)
+                fpov.[CodigoProdutoOmie],
+                fpov.[CodigoProdutoIntegracao],
+                fpov.[DescricaoOmie],
+                fp.[Descricao] AS descricao_interna,
+                fpov.[DataUltimaAtualizacaoUtc],
+                fpov.[IDFatoProdutoOmieVinculo]
+            FROM [Integracao].[Silver].[FatoProdutoOmieVinculo] fpov
+            LEFT JOIN [Integracao].[Silver].[FatoProdutos] fp
+                ON fp.[IDFatoProduto] = fpov.[IDFatoProduto]
+            WHERE
+                fpov.[IDEmpresaProprietaria] = v.[IDEmpresaProprietaria]
+                AND (
+                       (
+                           ISNULL(v.[CodigoProdutoIntegracao], '') <> ''
+                           AND ISNULL(fpov.[CodigoProdutoIntegracao], '') = ISNULL(v.[CodigoProdutoIntegracao], '')
+                       )
+                    OR (
+                           TRY_CONVERT(VARCHAR(60), fpov.[CodigoProdutoOmie]) = TRY_CONVERT(VARCHAR(60), v.[CodigoProdutoOmie])
+                       )
+                )
+            ORDER BY
+                ISNULL(fpov.[BitAtivo], 1) DESC,
+                fpov.[DataUltimaAtualizacaoUtc] DESC,
+                fpov.[IDFatoProdutoOmieVinculo] DESC
+        ) produto_omie
+        WHERE 1 = 1
+          AND (
+                :fornecedor = ''
+                OR (
+                    CASE
+                        WHEN REPLACE(REPLACE(REPLACE(ISNULL(v.[CpfCnpjFornecedor], ''), '.', ''), '/', ''), '-', '') <> '' THEN
+                            CONCAT('CNPJ:', REPLACE(REPLACE(REPLACE(ISNULL(v.[CpfCnpjFornecedor], ''), '.', ''), '/', ''), '-', ''))
+                        WHEN TRY_CONVERT(VARCHAR(60), v.[CodigoFornecedorOmie]) IS NOT NULL THEN
+                            CONCAT('COD:', TRY_CONVERT(VARCHAR(60), v.[CodigoFornecedorOmie]))
+                        WHEN ISNULL(v.[CodigoFornecedorIntegracao], '') <> '' THEN
+                            CONCAT('INT:', ISNULL(v.[CodigoFornecedorIntegracao], ''))
+                        ELSE CONCAT('RAZAO:', UPPER(ISNULL(v.[RazaoSocialFornecedor], '')))
+                    END
+                ) = :fornecedor
+              )
+          AND (
+                :produto_omie = ''
+                OR (
+                    CASE
+                        WHEN TRY_CONVERT(VARCHAR(60), COALESCE(produto_omie.[CodigoProdutoOmie], v.[CodigoProdutoOmie])) IS NOT NULL THEN
+                            CONCAT('COD:', TRY_CONVERT(VARCHAR(60), COALESCE(produto_omie.[CodigoProdutoOmie], v.[CodigoProdutoOmie])))
+                        WHEN ISNULL(COALESCE(produto_omie.[CodigoProdutoIntegracao], v.[CodigoProdutoIntegracao]), '') <> '' THEN
+                            CONCAT('INT:', ISNULL(COALESCE(produto_omie.[CodigoProdutoIntegracao], v.[CodigoProdutoIntegracao]), ''))
+                        ELSE CONCAT('NOME:', UPPER(COALESCE(produto_omie.[DescricaoOmie], produto_omie.[descricao_interna], '')))
+                    END
+                ) = :produto_omie
+              )
+        ORDER BY
+            dep.[RazaoSocial] ASC,
+            v.[RazaoSocialFornecedor] ASC,
+            v.[DescricaoProdutoFornecedor] ASC,
+            COALESCE(produto_omie.[DescricaoOmie], produto_omie.[descricao_interna], '-') ASC,
+            v.[IDFatoProdutoFornecedorOmieVinculo] DESC
+        OFFSET :offset ROWS FETCH NEXT :por_pagina ROWS ONLY
+        """
+    )
+
+    itens = db.session.execute(
+        sql_itens,
+        {
+            "fornecedor": filtro_fornecedor,
+            "produto_omie": filtro_produto_omie,
+            "offset": offset,
+            "por_pagina": por_pagina,
+        },
+    ).mappings().all()
+
+    paginacao = PaginacaoTela(
+        page=pagina,
+        per_page=por_pagina,
+        total=total,
+    )
+
+    return render_template(
+        "admin/vinculo_produto_lista.html",
+        itens=[dict(item) for item in itens],
+        fornecedores_combo=[],
+        produtos_omie_combo=[],
+        filtros=filtros,
+        paginacao=paginacao,
+    )

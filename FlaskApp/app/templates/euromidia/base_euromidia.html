@@ -998,15 +998,10 @@ input:disabled, select:disabled, textarea:disabled{
                     </a>
                   {% endif %}
 
-                  <a href="{{ url_for('estoques_bp.listar_pedidos_compra') }}"
-                     class="{% if request.path == url_for('estoques_bp.listar_pedidos_compra') %}menu-link-current{% endif %}">
-                    Lista de Pedidos de Compra
-                  </a>
+                 
+              
+                
 
-                  <a href="{{ url_for('estoques_bp.novo_pedido_compra') }}"
-                     class="{% if request.path == url_for('estoques_bp.novo_pedido_compra') %}menu-link-current{% endif %}">
-                    Novo Pedido de Compra
-                  </a>
                 </div>
               </div>
             {% endif %}
@@ -1018,10 +1013,7 @@ input:disabled, select:disabled, textarea:disabled{
               </a>
 
               <div class="submenu-dropdown">
-                <a href="{{ url_for('estoques_bp.listar_produtos') }}"
-                   class="{% if request.path == url_for('estoques_bp.listar_produtos') or request.path.startswith('/estoques/produtos/') %}menu-link-current{% endif %}">
-                  Lista de Produtos
-                </a>
+               
 
                 {% if menu_paineis_empresas %}
                   <a href="{{ url_for('Paineis.clientes_lista') }}"

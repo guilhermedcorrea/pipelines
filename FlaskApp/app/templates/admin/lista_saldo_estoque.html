@@ -1,0 +1,275 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Saldo de Estoque | Euromídia{% endblock %}
+
+{% block content %}
+<style>
+  .saldo-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:12px;
+  }
+
+  .saldo-title{
+    flex:1 1 320px;
+    min-width:min(320px, 100%);
+  }
+
+  .saldo-filtros{
+    flex:1 1 540px;
+    min-width:min(540px, 100%);
+    display:flex;
+    gap:8px;
+    align-items:flex-end;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+  }
+
+  .saldo-filtros .campo{
+    flex:1 1 360px;
+    min-width:min(360px, 100%);
+  }
+
+  .overflow-x{
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .tbl{
+    width:100%;
+    min-width:1480px;
+    border-collapse:separate;
+    border-spacing:0;
+    border:1px solid var(--border);
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+  }
+
+  .tbl thead th{
+    text-align:left;
+    font-size:11px;
+    letter-spacing:.1px;
+    color:var(--muted);
+    font-weight:1000;
+    padding:9px 8px;
+    border-bottom:1px solid var(--border);
+    background:#F8FAFC;
+    white-space:normal;
+    line-height:1.15;
+  }
+
+  .tbl tbody td{
+    padding:9px 8px;
+    border-bottom:1px solid rgba(15,23,42,.06);
+    vertical-align:middle;
+    font-size:12px;
+    font-weight:900;
+    color:var(--text);
+    line-height:1.25;
+    word-break:break-word;
+  }
+
+  .tbl tbody tr:hover{
+    background:rgba(0,40,132,.04);
+  }
+
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 8px;
+    border-radius:999px;
+    border:1px solid rgba(0,40,132,.18);
+    background:rgba(0,40,132,.06);
+    color:var(--euro-blue);
+    font-weight:1000;
+    font-size:11px;
+    line-height:1.1;
+    white-space:nowrap;
+  }
+
+  .badge.green{
+    border-color:rgba(16,185,129,.30);
+    background:rgba(16,185,129,.14);
+    color:#065f46;
+  }
+
+  .badge.red{
+    border-color:rgba(239,68,68,.30);
+    background:rgba(239,68,68,.14);
+    color:#7f1d1d;
+  }
+
+  .muted-small{
+    font-size:12px;
+    font-weight:1000;
+    color:var(--muted);
+  }
+
+  .numero{
+    white-space:nowrap;
+  }
+
+  .pager{
+    margin-top:12px;
+    padding:10px 12px;
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .pager .left,
+  .pager .right{
+    font-size:12px;
+    font-weight:1000;
+    color:var(--muted);
+  }
+
+  .pager .center{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+
+  @media (max-width: 900px){
+    .saldo-filtros{
+      justify-content:flex-start;
+    }
+
+    .saldo-filtros .campo{
+      flex:1 1 100%;
+      min-width:100%;
+    }
+  }
+</style>
+
+<div class="card" style="padding:14px;">
+  <div class="saldo-header">
+    <div class="saldo-title">
+      <h1 class="page-title" style="margin:0;">Visualizar Saldo</h1>
+      <div class="muted" style="font-weight:900;margin-top:6px;">
+        {% if paginacao %}
+          Total: {{ paginacao.total }}
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="GET" action="{{ url_for('estoques_bp.visualizar_saldo_estoque') }}" class="saldo-filtros">
+      <div class="campo">
+        <label for="busca">Buscar</label>
+        <input
+          id="busca"
+          name="busca"
+          class="kb-input"
+          type="text"
+          value="{{ busca or '' }}"
+          placeholder="Digite referência, produto, estoque ou código integração..."
+          autocomplete="off"
+          spellcheck="false"
+        >
+      </div>
+
+      <div>
+        <button type="submit" class="btn btn-primary">Buscar</button>
+      </div>
+
+      <div>
+        <a href="{{ url_for('estoques_bp.visualizar_saldo_estoque') }}" class="btn btn-secondary" style="text-decoration:none;">Limpar</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="overflow-x">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Referência Produto</th>
+          <th>Nome Produto</th>
+          <th>Unidade</th>
+          <th>BitAtivo</th>
+          <th>Saldo</th>
+          <th>CMC</th>
+          <th>Pendente</th>
+          <th>Estoque Mínimo</th>
+          <th>Reservado</th>
+          <th>Físico</th>
+          <th>Preço Unitário</th>
+          <th>Data Última Movimentação</th>
+          <th>Estoque</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if saldos %}
+          {% for item in saldos %}
+            <tr>
+              <td>{{ item.referencia_produto or '-' }}</td>
+              <td>{{ item.nome_produto or '-' }}</td>
+              <td>{{ item.unidade or '-' }}</td>
+              <td>
+                {% if item.bit_ativo in [True, 1] %}
+                  <span class="badge green">Ativo</span>
+                {% else %}
+                  <span class="badge red">Inativo</span>
+                {% endif %}
+              </td>
+              <td class="numero">{{ item.saldo if item.saldo is not none else 0 }}</td>
+              <td class="numero">{{ item.cmc if item.cmc is not none else 0 }}</td>
+              <td class="numero">{{ item.pendente if item.pendente is not none else 0 }}</td>
+              <td class="numero">{{ item.estoque_minimo if item.estoque_minimo is not none else 0 }}</td>
+              <td class="numero">{{ item.reservado if item.reservado is not none else 0 }}</td>
+              <td class="numero">{{ item.fisico if item.fisico is not none else 0 }}</td>
+              <td class="numero">{{ item.preco_unitario if item.preco_unitario is not none else 0 }}</td>
+              <td>{{ item.data_ultima_movimentacao_formatada }}</td>
+              <td>{{ item.estoque or '-' }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="13" class="muted-small" style="padding:14px;">
+              Nenhum saldo encontrado para os filtros atuais.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    <div class="left">
+      {% if paginacao %}
+        Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} registros
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </div>
+
+    <div class="center">
+      {% if paginacao %}
+        {% set p = paginacao.page %}
+        {% set tp = paginacao.pages %}
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ url_for('estoques_bp.visualizar_saldo_estoque', pagina=1, busca=busca) }}">«</a>
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ url_for('estoques_bp.visualizar_saldo_estoque', pagina=(p - 1 if p > 1 else 1), busca=busca) }}">‹</a>
+
+        <span class="muted-small">Página {{ p }} de {{ tp if tp > 0 else 1 }}</span>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ url_for('estoques_bp.visualizar_saldo_estoque', pagina=(p + 1 if p < tp else tp if tp > 0 else 1), busca=busca) }}">›</a>
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ url_for('estoques_bp.visualizar_saldo_estoque', pagina=(tp if tp > 0 else 1), busca=busca) }}">»</a>
+      {% endif %}
+    </div>
+
+    <div class="right">10 por página</div>
+  </div>
+</div>
+{% endblock %}

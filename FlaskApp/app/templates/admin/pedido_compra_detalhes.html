@@ -1,0 +1,1510 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Pedido de Compra | Estoque Omie{% endblock %}
+
+
+{% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+<style>
+  .estoque-euromidia-ajuste {
+    width: 100%;
+  }
+
+  .estoque-euromidia-ajuste .card {
+    background: #fff;
+    color: #212529;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
+  }
+
+  .estoque-euromidia-ajuste .card-body {
+    min-width: 0;
+  }
+
+  .estoque-euromidia-ajuste .table {
+    --bs-table-bg: #fff;
+    --bs-table-color: #212529;
+  }
+
+  .estoque-euromidia-ajuste .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .estoque-euromidia-ajuste .form-label,
+  .estoque-euromidia-ajuste .campo-filtro label,
+  .estoque-euromidia-ajuste .dado-label,
+  .estoque-euromidia-ajuste .kpi-titulo,
+  .estoque-euromidia-ajuste .vinculo-label,
+  .estoque-euromidia-ajuste label {
+    display: block;
+    margin-bottom: 0.35rem;
+  }
+
+  .estoque-euromidia-ajuste .btn {
+    font-weight: 600;
+  }
+
+  .estoque-euromidia-ajuste .pagination {
+    margin-bottom: 0;
+  }
+</style>
+<style>
+  .pagina-pedido-compra .card { border-radius: 18px; overflow: visible; }
+  .pagina-pedido-compra .grid-cabecalho { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 1rem; }
+  .pagina-pedido-compra .grid-resumo { display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 1rem; }
+  .pagina-pedido-compra .kpi { background: #f8faff; border: 1px solid #e6eefc; border-radius: 14px; padding: 0.9rem 1rem; }
+  .pagina-pedido-compra .kpi-titulo { font-size: 0.8rem; color: #6c757d; margin-bottom: 0.25rem; }
+  .pagina-pedido-compra .kpi-valor { font-size: 1.2rem; font-weight: 700; color: #1f2937; }
+  .pagina-pedido-compra .combobox-wrap { position: relative; z-index: 30; }
+  .pagina-pedido-compra .card-body { overflow: visible; }
+  .pagina-pedido-compra .row, .pagina-pedido-compra [class*="col-"] { overflow: visible; }
+  .pagina-pedido-compra .lista-sugestoes {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 3000;
+    background: #fff; border: 1px solid #dee2e6; border-radius: 14px;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14); max-height: 320px; overflow-y: auto; display: none;
+  }
+  .pagina-pedido-compra .lista-sugestoes.ativa { display: block; }
+  .pagina-pedido-compra .item-sugestao { padding: 0.85rem 1rem; border-bottom: 1px solid #f1f3f5; cursor: pointer; }
+  .pagina-pedido-compra .item-sugestao:last-child { border-bottom: 0; }
+  .pagina-pedido-compra .item-sugestao-empresa {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid #f1f3f5;
+    cursor: pointer;
+  }
+  .pagina-pedido-compra .item-sugestao-empresa:last-child { border-bottom: 0; }
+  .pagina-pedido-compra .item-sugestao-empresa:hover,
+  .pagina-pedido-compra .item-sugestao-empresa.ativo { background: #f8fbff; }
+  .pagina-pedido-compra .item-sugestao:hover, .pagina-pedido-compra .item-sugestao.ativo { background: #f8fbff; }
+  .pagina-pedido-compra .sugestao-titulo { font-weight: 700; color: #111827; }
+  .pagina-pedido-compra .sugestao-subtitulo { color: #6b7280; font-size: 0.88rem; margin-top: 0.15rem; }
+  .pagina-pedido-compra .tabela-itens table { min-width: 1100px; }
+  .pagina-pedido-compra .coluna-produto { min-width: 320px; }
+  .pagina-pedido-compra .produto-card { display: flex; flex-direction: column; gap: 0.15rem; }
+  .pagina-pedido-compra .produto-principal { font-weight: 700; color: #111827; }
+  .pagina-pedido-compra .produto-secundario { color: #6b7280; font-size: 0.85rem; }
+  .pagina-pedido-compra .badge-ambiente { display: inline-flex; align-items: center; padding: 0.4rem 0.65rem; border-radius: 999px; background: #eef4ff; color: #0d6efd; font-weight: 600; font-size: 0.78rem; }
+  .pagina-pedido-compra .campo-monetario, .pagina-pedido-compra .campo-quantidade { min-width: 120px; }
+  .pagina-pedido-compra .rodape-acoes { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .pagina-pedido-compra .campo-obrigatorio::after { content: " *"; color: #dc3545; font-weight: 700; }
+  .pagina-pedido-compra .ajuda-cadastro { font-size: 0.82rem; color: #6c757d; }
+  .pagina-pedido-compra .bloco-vinculo {
+    border: 1px dashed #dbe4f0;
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+    background: #fbfdff;
+  }
+  .pagina-pedido-compra .vinculo-label {
+    font-size: 0.78rem;
+    color: #6c757d;
+    margin-bottom: 0.2rem;
+  }
+  .pagina-pedido-compra .vinculo-valor {
+    font-size: 0.95rem;
+    color: #1f2937;
+    font-weight: 600;
+  }
+  .pagina-pedido-compra .badge-vinculo-ok {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.65rem;
+    border-radius: 999px;
+    background: #e8f7ee;
+    color: #198754;
+    font-weight: 700;
+    font-size: 0.78rem;
+  }
+  .pagina-pedido-compra .badge-vinculo-pendente {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.65rem;
+    border-radius: 999px;
+    background: #fff4db;
+    color: #a36a00;
+    font-weight: 700;
+    font-size: 0.78rem;
+  }
+
+  @media (max-width: 1200px) {
+    .pagina-pedido-compra .grid-cabecalho, .pagina-pedido-compra .grid-resumo { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+  }
+  @media (max-width: 768px) {
+    .pagina-pedido-compra .grid-cabecalho, .pagina-pedido-compra .grid-resumo { grid-template-columns: 1fr; }
+  }
+</style>
+<div class="estoque-euromidia-ajuste">
+<div class="pagina-pedido-compra d-flex flex-column gap-3">
+  <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
+    <div>
+      <h1 class="h3 mb-1">Pedido de compra</h1>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <span class="text-muted small" id="texto_referencia_pedido">Pedido #{{ pedido_inicial.id_nota_fornecedor_omie }}</span>
+        <span class="badge text-bg-secondary" id="badge_status_pedido">{{ pedido_inicial.status }}</span>
+      </div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('estoques_bp.listar_pedidos_compra') }}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>
+        Voltar para pedidos
+      </a>
+      <a href="{{ url_for('estoques_bp.novo_pedido_compra') }}" class="btn btn-outline-primary">
+        <i class="bi bi-plus-circle me-1"></i>
+        Novo pedido
+      </a>
+    </div>
+  </div>
+
+  {% if pedido_bloqueado %}
+  <div class="alert alert-success border-0 shadow-sm mb-0">
+    Este pedido já foi confirmado e, por segurança, está em modo somente leitura.
+  </div>
+  {% endif %}
+
+  <form id="form-pedido-compra" class="d-flex flex-column gap-3" onsubmit="return false;">
+    <input type="hidden" id="csrf_token_pedido" value="{{ csrf_token_estoques() }}">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body d-flex flex-column gap-3">
+        <h2 class="h5 mb-0">Cabeçalho</h2>
+        <div class="grid-cabecalho">
+          <div>
+            <label class="form-label">Empresa proprietária</label>
+            <div class="combobox-wrap">
+              <input
+                id="campo_busca_empresa"
+                class="form-control"
+                type="text"
+                placeholder="Digite razão social ou CNPJ..."
+                autocomplete="off"
+                spellcheck="false"
+              >
+              <div id="lista_sugestoes_empresas" class="lista-sugestoes"></div>
+            </div>
+            <input type="hidden" id="id_empresa_proprietaria">
+            <div class="ajuda-cadastro mt-1">Selecione a empresa do ambiente Omie pela Razão Social ou pelo CNPJ.</div>
+          </div>
+
+          <div>
+            <label class="form-label">Fornecedor</label>
+            <div class="combobox-wrap">
+              <input
+                type="text"
+                id="campo_busca_fornecedor"
+                class="form-control"
+                placeholder="Digite razão social, nome fantasia, CNPJ ou código..."
+                autocomplete="off"
+              >
+              <div id="lista_sugestoes_fornecedores" class="lista-sugestoes"></div>
+            </div>
+          </div>
+
+          <div>
+            <label class="form-label">Data previsão</label>
+            <input type="date" id="data_previsao" class="form-control">
+          </div>
+
+          <div>
+            <label class="form-label">Código integração do pedido</label>
+            <input type="text" id="codigo_integracao_pedido" class="form-control" placeholder="Ex.: PCP-2026-0001">
+          </div>
+        </div>
+
+        <div class="grid-cabecalho">
+          <div>
+            <label class="form-label">CNPJ da empresa proprietária</label>
+            <input type="text" id="empresa_cnpj_selecionada" class="form-control" readonly>
+          </div>
+          <div>
+            <label class="form-label">Contato do fornecedor</label>
+            <input type="text" id="fornecedor_contato" class="form-control" readonly>
+          </div>
+          <div>
+            <label class="form-label">CNPJ / CPF do fornecedor</label>
+            <input type="text" id="fornecedor_cnpj_cpf" class="form-control" readonly>
+          </div>
+          <div>
+            <label class="form-label">E-mail do fornecedor</label>
+            <input type="text" id="fornecedor_email" class="form-control" readonly>
+          </div>
+        </div>
+
+        <div class="grid-cabecalho">
+          <div>
+            <label class="form-label">Código Omie do fornecedor</label>
+            <input type="text" id="fornecedor_codigo_omie" class="form-control" readonly>
+          </div>
+          <div></div>
+          <div></div>
+          <div></div>
+        </div>
+
+        <div>
+          <label class="form-label">Observações</label>
+          <textarea id="observacoes" class="form-control" rows="3" placeholder="Observações do pedido..."></textarea>
+        </div>
+
+        <input type="hidden" id="fornecedor_id_fato_empresa_omie">
+        <input type="hidden" id="fornecedor_codigo_integracao">
+        <input type="hidden" id="fornecedor_razao_social">
+        <input type="hidden" id="fornecedor_nome_fantasia">
+      </div>
+    </div>
+
+    
+    <div class="card border-0 shadow-sm">
+      <div class="card-body d-flex flex-column gap-3">
+        <h2 class="h5 mb-0">Adicionar item</h2>
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-xl-6">
+            <label class="form-label">Produto</label>
+            <div class="d-flex gap-2 align-items-start">
+              <div class="combobox-wrap flex-grow-1">
+                <input
+                  type="text"
+                  id="campo_busca_produto"
+                  class="form-control"
+                  placeholder="Digite descrição, referência, código interno, código integração ou CódigoProdutoOmie..."
+                  autocomplete="off"
+                >
+                <div id="lista_sugestoes_produtos" class="lista-sugestoes"></div>
+              </div>
+              <button
+                type="button"
+                class="btn btn-outline-primary"
+                id="botao_abrir_modal_cadastro_produto"
+                data-bs-toggle="modal"
+                data-bs-target="#modalCadastroProdutoOmie"
+                title="Cadastrar novo produto no Omie"
+              >
+                <i class="bi bi-plus-lg"></i>
+              </button>
+            </div>
+            
+          </div>
+          <div class="col-6 col-xl-2">
+            <label class="form-label">Quantidade</label>
+            <input type="number" id="campo_quantidade" class="form-control campo-quantidade" min="0.0001" step="0.0001" value="1">
+          </div>
+          <div class="col-6 col-xl-2">
+            <label class="form-label">Valor unitário (R$)</label>
+            <input type="number" id="campo_valor_unitario" class="form-control campo-monetario" min="0" step="0.0001" value="0">
+          </div>
+          <div class="col-12 col-xl-2 d-grid">
+            <button type="button" id="botao_adicionar_item" class="btn btn-primary">
+              <i class="bi bi-plus-circle me-1"></i>
+              Adicionar item
+            </button>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-12 col-lg-3">
+            <div class="bloco-vinculo">
+              <div class="vinculo-label">Status do vínculo fornecedor</div>
+              <div id="status_vinculo_produto_fornecedor" class="vinculo-valor">Nenhum produto selecionado</div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-3">
+            <div class="bloco-vinculo">
+              <div class="vinculo-label">Código produto fornecedor</div>
+              <div id="codigo_produto_fornecedor_visual" class="vinculo-valor">-</div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-4">
+            <div class="bloco-vinculo">
+              <div class="vinculo-label">Descrição produto fornecedor</div>
+              <div id="descricao_produto_fornecedor_visual" class="vinculo-valor">-</div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-2">
+            <div class="bloco-vinculo">
+              <div class="vinculo-label">CódigoProdutoOmie</div>
+              <div id="codigo_produto_omie_visual" class="vinculo-valor">-</div>
+            </div>
+          </div>
+        </div>
+
+        <input type="hidden" id="produto_id_fato_produto">
+        <input type="hidden" id="produto_codigo_integracao">
+        <input type="hidden" id="produto_codigo_omie">
+        <input type="hidden" id="produto_codigo_produto_omie">
+        <input type="hidden" id="produto_id_fato_produto_omie_vinculo">
+        <input type="hidden" id="produto_descricao">
+        <input type="hidden" id="produto_unidade">
+        <input type="hidden" id="produto_marca">
+        <input type="hidden" id="produto_modelo">
+        <input type="hidden" id="produto_tem_vinculo_fornecedor">
+        <input type="hidden" id="produto_codigo_produto_fornecedor">
+        <input type="hidden" id="produto_descricao_produto_fornecedor">
+      </div>
+    </div>
+
+
+    <div class="grid-resumo">
+      <div class="kpi"><div class="kpi-titulo">Itens</div><div class="kpi-valor" id="resumo_quantidade_itens">0</div></div>
+      <div class="kpi"><div class="kpi-titulo">Quantidade total</div><div class="kpi-valor" id="resumo_quantidade_total">0,0000</div></div>
+      <div class="kpi"><div class="kpi-titulo">Valor bruto</div><div class="kpi-valor" id="resumo_valor_bruto">R$ 0,00</div></div>
+      <div class="kpi"><div class="kpi-titulo">Empresa / ambiente</div><div class="kpi-valor" id="resumo_empresa">-</div></div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-body d-flex flex-column gap-3">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-2 align-items-lg-center">
+          <h2 class="h5 mb-0">Itens do pedido</h2>
+        </div>
+
+        <div class="table-responsive tabela-itens">
+          <table class="table table-striped table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>#</th>
+                <th class="coluna-produto">Produto</th>
+                <th>Ambiente</th>
+                <th>Unidade</th>
+                <th>Quantidade</th>
+                <th>Valor unitário</th>
+                <th>Total</th>
+                <th>Cód. integração</th>
+                <th>Cód. Omie</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tabela_itens_pedido">
+              <tr id="linha_vazia">
+                <td colspan="10" class="text-center text-muted py-4">Nenhum item adicionado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="rodape-acoes">
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-outline-danger" id="botao_limpar_itens">
+              <i class="bi bi-trash me-1"></i>
+              Limpar itens
+            </button>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-success" id="botao_salvar_pedido">
+              <i class="bi bi-save me-1"></i>
+              Salvar alterações
+            </button>
+            <button type="button" class="btn btn-outline-success" id="botao_confirmar_pedido" disabled>
+              <i class="bi bi-check2-circle me-1"></i>
+              Confirmar
+            </button>
+            <button type="button" class="btn btn-success" disabled>
+              <i class="bi bi-cloud-upload me-1"></i>
+              enviar ao Omie
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal fade" id="modalCadastroProdutoOmie" tabindex="-1" aria-labelledby="modalCadastroProdutoOmieLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header">
+            <h2 class="modal-title fs-5" id="modalCadastroProdutoOmieLabel">Cadastro mínimo de produto Omie</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+          </div>
+
+          <div class="modal-body">
+            <div class="alert alert-light border mb-4">
+              <div class="fw-semibold mb-1">Campos mínimos para o cadastro</div>
+             
+            </div>
+
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Empresa proprietária</label>
+                <input type="text" id="modal_empresa_proprietaria_nome" class="form-control" readonly>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">ID Empresa proprietária</label>
+                <input type="text" id="modal_empresa_proprietaria_id" class="form-control" readonly>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Fornecedor selecionado</label>
+                <input type="text" id="modal_fornecedor_razao_social" class="form-control" readonly>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label">Produto pesquisado na tela</label>
+                <input type="text" id="modal_produto_digitado" class="form-control" readonly>
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label campo-obrigatorio">Código de integração do produto</label>
+                <input
+                  type="text"
+                  id="modal_codigo_produto_integracao"
+                  class="form-control"
+                  maxlength="60"
+                  placeholder="Ex.: PROD-INT-0001"
+                >
+              </div>
+
+              <div class="col-md-6">
+                <label class="form-label campo-obrigatorio">Código do produto</label>
+                <input
+                  type="text"
+                  id="modal_codigo_produto"
+                  class="form-control"
+                  maxlength="60"
+                  placeholder="Ex.: PARAF-001"
+                >
+              </div>
+
+              <div class="col-12">
+                <label class="form-label campo-obrigatorio">Descrição do produto</label>
+                <input
+                  type="text"
+                  id="modal_descricao_produto"
+                  class="form-control"
+                  maxlength="120"
+                  placeholder="Ex.: Parafuso sextavado inox 3/8"
+                >
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label campo-obrigatorio">Unidade</label>
+                <input
+                  type="text"
+                  id="modal_unidade_produto"
+                  class="form-control text-uppercase"
+                  maxlength="6"
+                  placeholder="Ex.: UN"
+                >
+              </div>
+
+              <div class="col-md-8">
+                <label class="form-label">Observação visual</label>
+                <input
+                  type="text"
+                  id="modal_observacao_visual"
+                  class="form-control"
+                  value="Insira aqui"
+                  readonly
+                >
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer justify-content-between">
+            <div class="small text-muted">
+             
+            </div>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>
+              <button type="button" class="btn btn-primary" id="botao_simular_cadastro_produto_omie">
+                cadastro do produto
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </form>
+</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+  const campoBuscaEmpresa = document.getElementById("campo_busca_empresa");
+  const listaSugestoesEmpresas = document.getElementById("lista_sugestoes_empresas");
+  const campoIdEmpresa = document.getElementById("id_empresa_proprietaria");
+  const campoEmpresaCnpjSelecionada = document.getElementById("empresa_cnpj_selecionada");
+
+  const campoBuscaFornecedor = document.getElementById("campo_busca_fornecedor");
+  const listaSugestoesFornecedores = document.getElementById("lista_sugestoes_fornecedores");
+  const campoFornecedorContato = document.getElementById("fornecedor_contato");
+  const campoFornecedorCnpjCpf = document.getElementById("fornecedor_cnpj_cpf");
+  const campoFornecedorEmail = document.getElementById("fornecedor_email");
+  const campoFornecedorCodigoOmie = document.getElementById("fornecedor_codigo_omie");
+
+  const campoBuscaProduto = document.getElementById("campo_busca_produto");
+  const listaSugestoesProdutos = document.getElementById("lista_sugestoes_produtos");
+  const botaoAdicionarItem = document.getElementById("botao_adicionar_item");
+  const botaoAbrirModalCadastroProduto = document.getElementById("botao_abrir_modal_cadastro_produto");
+  const modalCadastroProduto = document.getElementById("modalCadastroProdutoOmie");
+  const campoModalEmpresaNome = document.getElementById("modal_empresa_proprietaria_nome");
+  const campoModalEmpresaId = document.getElementById("modal_empresa_proprietaria_id");
+  const campoModalFornecedor = document.getElementById("modal_fornecedor_razao_social");
+  const campoModalProdutoDigitado = document.getElementById("modal_produto_digitado");
+  const campoModalCodigoIntegracao = document.getElementById("modal_codigo_produto_integracao");
+  const campoModalCodigo = document.getElementById("modal_codigo_produto");
+  const campoModalDescricao = document.getElementById("modal_descricao_produto");
+  const campoModalUnidade = document.getElementById("modal_unidade_produto");
+  const botaoSimularCadastroProdutoOmie = document.getElementById("botao_simular_cadastro_produto_omie");
+  const tabelaItensPedido = document.getElementById("tabela_itens_pedido");
+  const botaoLimparItens = document.getElementById("botao_limpar_itens");
+  const botaoSalvarPedido = document.getElementById("botao_salvar_pedido");
+  const botaoConfirmarPedido = document.getElementById("botao_confirmar_pedido");
+  const campoCsrfPedido = document.getElementById("csrf_token_pedido");
+
+  const empresasDisponiveis = [
+    {% for empresa in empresas_proprietarias %}
+      {
+        id_empresa_proprietaria: {{ empresa.id_dim_empresa_proprietaria | int }},
+        razao_social: {{ (empresa.razao_social or "") | tojson }},
+        cnpj: {{ (empresa.cnpj or "") | tojson }}
+      }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  const estado = {
+    empresas: [],
+    indiceEmpresaAtivo: -1,
+    empresaSelecionada: null,
+    fornecedores: [],
+    indiceFornecedorAtivo: -1,
+    fornecedorSelecionado: null,
+    produtos: [],
+    indiceProdutoAtivo: -1,
+    itemSelecionado: null,
+    itens: [],
+    idPedidoSalvo: null,
+  };
+
+  const pedidoInicial = {{ pedido_inicial | tojson }};
+  const pedidoBloqueado = {{ "true" if pedido_bloqueado else "false" }};
+
+  const camposFornecedor = {
+    id_fato_empresas_omie: document.getElementById("fornecedor_id_fato_empresa_omie"),
+    codigo_integracao: document.getElementById("fornecedor_codigo_integracao"),
+    razao_social: document.getElementById("fornecedor_razao_social"),
+    nome_fantasia: document.getElementById("fornecedor_nome_fantasia"),
+  };
+
+  const camposProduto = {
+    id_fato_produto: document.getElementById("produto_id_fato_produto"),
+    codigo_integracao: document.getElementById("produto_codigo_integracao"),
+    codigo_omie: document.getElementById("produto_codigo_omie"),
+    codigo_produto_omie: document.getElementById("produto_codigo_produto_omie"),
+    id_fato_produto_omie_vinculo: document.getElementById("produto_id_fato_produto_omie_vinculo"),
+    descricao: document.getElementById("produto_descricao"),
+    unidade: document.getElementById("produto_unidade"),
+    marca: document.getElementById("produto_marca"),
+    modelo: document.getElementById("produto_modelo"),
+    tem_vinculo_fornecedor: document.getElementById("produto_tem_vinculo_fornecedor"),
+    codigo_produto_fornecedor: document.getElementById("produto_codigo_produto_fornecedor"),
+    descricao_produto_fornecedor: document.getElementById("produto_descricao_produto_fornecedor"),
+  };
+
+  const campoQuantidade = document.getElementById("campo_quantidade");
+  const campoValorUnitario = document.getElementById("campo_valor_unitario");
+  const statusVinculoProdutoFornecedor = document.getElementById("status_vinculo_produto_fornecedor");
+  const codigoProdutoFornecedorVisual = document.getElementById("codigo_produto_fornecedor_visual");
+  const descricaoProdutoFornecedorVisual = document.getElementById("descricao_produto_fornecedor_visual");
+  const codigoProdutoOmieVisual = document.getElementById("codigo_produto_omie_visual");
+
+  function obterTokenCsrfPedido() {
+    return String(campoCsrfPedido?.value || "").trim();
+  }
+
+  function obterHeadersJsonProtegidos() {
+    const tokenCsrf = obterTokenCsrfPedido();
+    return {
+      "Content-Type": "application/json",
+      "X-CSRFToken": tokenCsrf,
+      "X-CSRF-Token": tokenCsrf,
+    };
+  }
+
+  function formatarMoeda(valor) {
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(valor || 0));
+  }
+
+  function formatarNumero(valor, casas = 4) {
+    return Number(valor || 0).toLocaleString("pt-BR", {
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas,
+    });
+  }
+
+  function normalizarTexto(texto) {
+    return String(texto || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\D+/g, (valor) => valor)
+      .toLowerCase();
+  }
+
+  function somenteNumeros(texto) {
+    return String(texto || "").replace(/\D+/g, "");
+  }
+
+  function filtrarEmpresasDisponiveis(termo) {
+    const termoTratado = String(termo || "").trim();
+    const termoNormalizado = normalizarTexto(termoTratado);
+    const termoNumeros = somenteNumeros(termoTratado);
+
+    return empresasDisponiveis.filter((empresa) => {
+      if (!termoTratado) return true;
+      const razao = normalizarTexto(empresa.razao_social);
+      const cnpj = somenteNumeros(empresa.cnpj);
+      return razao.includes(termoNormalizado) || (termoNumeros && cnpj.includes(termoNumeros));
+    }).slice(0, 20);
+  }
+
+  function tentarSelecionarEmpresaPorTexto() {
+    const termo = campoBuscaEmpresa.value.trim();
+    if (!termo || campoIdEmpresa.value) return false;
+
+    const termoNormalizado = normalizarTexto(termo);
+    const termoNumeros = somenteNumeros(termo);
+    const correspondencias = filtrarEmpresasDisponiveis(termo);
+
+    const correspondenciaExata = correspondencias.find((empresa) => {
+      const razao = normalizarTexto(empresa.razao_social);
+      const cnpj = somenteNumeros(empresa.cnpj);
+      return razao === termoNormalizado || (termoNumeros && cnpj === termoNumeros);
+    });
+
+    if (correspondenciaExata) {
+      estado.empresas = [correspondenciaExata];
+      selecionarEmpresa(0);
+      return true;
+    }
+
+    if (correspondencias.length === 1) {
+      estado.empresas = correspondencias;
+      selecionarEmpresa(0);
+      return true;
+    }
+
+    return false;
+  }
+
+  function fecharSugestoesEmpresa() {
+    estado.empresas = [];
+    estado.indiceEmpresaAtivo = -1;
+    listaSugestoesEmpresas.innerHTML = "";
+    listaSugestoesEmpresas.classList.remove("ativa");
+  }
+
+  function renderizarSugestoesEmpresa() {
+    if (!estado.empresas.length) {
+      listaSugestoesEmpresas.innerHTML = '<div class="item-sugestao-empresa"><div class="sugestao-titulo">Nenhuma empresa encontrada</div><div class="sugestao-subtitulo">Tente outra razão social ou CNPJ.</div></div>';
+      listaSugestoesEmpresas.classList.add("ativa");
+      return;
+    }
+
+    listaSugestoesEmpresas.innerHTML = estado.empresas.map((empresa, indice) => `
+      <div class="item-sugestao-empresa ${indice === estado.indiceEmpresaAtivo ? "ativo" : ""}" data-indice="${indice}">
+        <div class="sugestao-titulo">${empresa.razao_social || "-"}</div>
+        <div class="sugestao-subtitulo">CNPJ: ${empresa.cnpj || "-"}</div>
+      </div>
+    `).join("");
+
+    listaSugestoesEmpresas.classList.add("ativa");
+    listaSugestoesEmpresas.querySelectorAll(".item-sugestao-empresa").forEach((elemento) => {
+      elemento.addEventListener("click", () => selecionarEmpresa(Number(elemento.dataset.indice)));
+    });
+  }
+
+  function limparSelecaoEmpresa() {
+    estado.empresaSelecionada = null;
+    campoIdEmpresa.value = "";
+    campoEmpresaCnpjSelecionada.value = "";
+  }
+
+  function selecionarEmpresa(indice) {
+    const empresa = estado.empresas[indice];
+    if (!empresa) return;
+
+    estado.empresaSelecionada = empresa;
+    estado.indiceEmpresaAtivo = indice;
+    campoBuscaEmpresa.value = empresa.razao_social || "";
+    campoIdEmpresa.value = empresa.id_empresa_proprietaria || "";
+    campoEmpresaCnpjSelecionada.value = empresa.cnpj || "";
+    fecharSugestoesEmpresa();
+
+    campoBuscaFornecedor.value = "";
+    campoBuscaProduto.value = "";
+    limparSelecaoFornecedor();
+    limparSelecaoProduto();
+    fecharSugestoesFornecedor();
+    fecharSugestoesProduto();
+    atualizarPainelVinculoProduto(null);
+    marcarPedidoComoNaoSalvo();
+    atualizarResumo();
+  }
+
+  function obterNomeCurtoEmpresaSelecionada() {
+    const texto = estado.empresaSelecionada?.razao_social || campoBuscaEmpresa.value || "";
+    return texto.trim().split(" ")[0] || "-";
+  }
+
+  function limparSelecaoFornecedor() {
+    estado.fornecedorSelecionado = null;
+    Object.values(camposFornecedor).forEach((campo) => { campo.value = ""; });
+    campoFornecedorContato.value = "";
+    campoFornecedorCnpjCpf.value = "";
+    campoFornecedorEmail.value = "";
+    campoFornecedorCodigoOmie.value = "";
+  }
+
+  function limparSelecaoProduto() {
+    estado.itemSelecionado = null;
+    Object.values(camposProduto).forEach((campo) => { campo.value = ""; });
+    atualizarPainelVinculoProduto(null);
+  }
+
+  function atualizarPainelVinculoProduto(produto) {
+    if (!produto) {
+      statusVinculoProdutoFornecedor.textContent = "Nenhum produto selecionado";
+      statusVinculoProdutoFornecedor.className = "vinculo-valor";
+      codigoProdutoFornecedorVisual.textContent = "-";
+      descricaoProdutoFornecedorVisual.textContent = "-";
+      codigoProdutoOmieVisual.textContent = "-";
+      return;
+    }
+
+    const temVinculo = Boolean(produto.tem_vinculo_fornecedor);
+    statusVinculoProdutoFornecedor.textContent = temVinculo ? "Vínculo encontrado" : "Sem vínculo com produto do fornecedor";
+    statusVinculoProdutoFornecedor.className = temVinculo ? "badge-vinculo-ok" : "badge-vinculo-pendente";
+    codigoProdutoFornecedorVisual.textContent = produto.codigo_produto_fornecedor || "-";
+    descricaoProdutoFornecedorVisual.textContent = produto.descricao_produto_fornecedor || "-";
+    codigoProdutoOmieVisual.textContent = produto.codigo_produto_omie || "-";
+  }
+
+  function fecharSugestoesFornecedor() {
+    estado.fornecedores = [];
+    estado.indiceFornecedorAtivo = -1;
+    listaSugestoesFornecedores.innerHTML = "";
+    listaSugestoesFornecedores.classList.remove("ativa");
+  }
+
+  function fecharSugestoesProduto() {
+    estado.produtos = [];
+    estado.indiceProdutoAtivo = -1;
+    listaSugestoesProdutos.innerHTML = "";
+    listaSugestoesProdutos.classList.remove("ativa");
+  }
+
+  function renderizarSugestoesFornecedor() {
+    if (!estado.fornecedores.length) {
+      listaSugestoesFornecedores.innerHTML = '<div class="item-sugestao"><div class="sugestao-titulo">Nenhum fornecedor encontrado</div><div class="sugestao-subtitulo">Verifique a empresa proprietária e tente outro termo.</div></div>';
+      listaSugestoesFornecedores.classList.add("ativa");
+      return;
+    }
+
+    listaSugestoesFornecedores.innerHTML = estado.fornecedores.map((fornecedor, indice) => `
+      <div class="item-sugestao ${indice === estado.indiceFornecedorAtivo ? "ativo" : ""}" data-indice="${indice}">
+        <div class="sugestao-titulo">${fornecedor.razao_social || "-"}</div>
+        <div class="sugestao-subtitulo">
+          Fantasia: ${fornecedor.nome_fantasia || "-"} • CNPJ/CPF: ${fornecedor.cnpj_cpf || "-"} • Código Omie: ${fornecedor.codigo_cliente_omie || "-"}
+        </div>
+      </div>
+    `).join("");
+
+    listaSugestoesFornecedores.classList.add("ativa");
+    listaSugestoesFornecedores.querySelectorAll(".item-sugestao").forEach((elemento) => {
+      elemento.addEventListener("click", () => selecionarFornecedor(Number(elemento.dataset.indice)));
+    });
+  }
+
+  function renderizarSugestoesProduto() {
+    if (!estado.produtos.length) {
+      listaSugestoesProdutos.innerHTML = '<div class="item-sugestao"><div class="sugestao-titulo">Nenhum produto encontrado</div><div class="sugestao-subtitulo">Tente outro termo, descrição, referência, código interno, código integração ou CódigoProdutoOmie.</div></div>';
+      listaSugestoesProdutos.classList.add("ativa");
+      return;
+    }
+
+    listaSugestoesProdutos.innerHTML = estado.produtos.map((produto, indice) => {
+      const ambiente = (produto.razao_social_curta || produto.razao_social || "-");
+      const statusVinculo = produto.tem_vinculo_fornecedor
+        ? '<span class="badge-vinculo-ok">Vínculo fornecedor</span>'
+        : '<span class="badge-vinculo-pendente">Sem vínculo fornecedor</span>';
+
+      return `
+        <div class="item-sugestao ${indice === estado.indiceProdutoAtivo ? "ativo" : ""}" data-indice="${indice}">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div class="sugestao-titulo">${produto.descricao || "-"}</div>
+            <div>${statusVinculo}</div>
+          </div>
+          <div class="sugestao-subtitulo">
+            Ref.: ${produto.referencia_produto || "-"} • Cód. interno: ${produto.codigo_interno || "-"} • Cód. integração: ${produto.codigo_produto_integracao || "-"} • CódigoProdutoOmie: ${produto.codigo_produto_omie || "-"} • Ambiente: ${ambiente}
+          </div>
+          <div class="sugestao-subtitulo">
+            Produto fornecedor: ${produto.codigo_produto_fornecedor || "-"} • ${produto.descricao_produto_fornecedor || "-"}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    listaSugestoesProdutos.classList.add("ativa");
+    listaSugestoesProdutos.querySelectorAll(".item-sugestao").forEach((elemento) => {
+      elemento.addEventListener("click", () => selecionarProduto(Number(elemento.dataset.indice)));
+    });
+  }
+
+  function selecionarFornecedor(indice) {
+    const fornecedor = estado.fornecedores[indice];
+    if (!fornecedor) return;
+
+    estado.fornecedorSelecionado = fornecedor;
+    estado.indiceFornecedorAtivo = indice;
+
+    campoBuscaFornecedor.value = fornecedor.razao_social || "";
+    camposFornecedor.id_fato_empresas_omie.value = fornecedor.id_fato_empresas_omie || "";
+    camposFornecedor.codigo_integracao.value = fornecedor.codigo_cliente_integracao || "";
+    camposFornecedor.razao_social.value = fornecedor.razao_social || "";
+    camposFornecedor.nome_fantasia.value = fornecedor.nome_fantasia || "";
+
+    campoFornecedorContato.value = fornecedor.contato || "";
+    campoFornecedorCnpjCpf.value = fornecedor.cnpj_cpf || "";
+    campoFornecedorEmail.value = fornecedor.email || "";
+    campoFornecedorCodigoOmie.value = fornecedor.codigo_cliente_omie || "";
+
+    marcarPedidoComoNaoSalvo();
+    fecharSugestoesFornecedor();
+
+    if (campoBuscaProduto.value.trim().length >= 2) {
+      campoBuscaProduto.dispatchEvent(new Event("input"));
+    }
+  }
+
+  function selecionarProduto(indice) {
+    const produto = estado.produtos[indice];
+    if (!produto) return;
+
+    estado.itemSelecionado = produto;
+    estado.indiceProdutoAtivo = indice;
+
+    campoBuscaProduto.value = produto.descricao || "";
+    camposProduto.id_fato_produto.value = produto.id_fato_produto || "";
+    camposProduto.codigo_integracao.value = produto.codigo_produto_integracao || "";
+    camposProduto.codigo_omie.value = produto.codigo_omie || "";
+    camposProduto.codigo_produto_omie.value = produto.codigo_produto_omie || "";
+    camposProduto.id_fato_produto_omie_vinculo.value = produto.id_fato_produto_omie_vinculo || "";
+    camposProduto.descricao.value = produto.descricao || "";
+    camposProduto.unidade.value = produto.unidade || "";
+    camposProduto.marca.value = produto.marca || "";
+    camposProduto.modelo.value = produto.modelo || "";
+    camposProduto.tem_vinculo_fornecedor.value = produto.tem_vinculo_fornecedor ? "1" : "0";
+    camposProduto.codigo_produto_fornecedor.value = produto.codigo_produto_fornecedor || "";
+    camposProduto.descricao_produto_fornecedor.value = produto.descricao_produto_fornecedor || "";
+
+    atualizarPainelVinculoProduto(produto);
+    fecharSugestoesProduto();
+  }
+
+  let timeoutFornecedor = null;
+  let timeoutProduto = null;
+
+  campoBuscaFornecedor.addEventListener("input", () => {
+    limparSelecaoFornecedor();
+    const termo = campoBuscaFornecedor.value.trim();
+    const idEmpresa = campoIdEmpresa.value || "";
+
+    if (timeoutFornecedor) clearTimeout(timeoutFornecedor);
+
+    if (!idEmpresa) {
+      fecharSugestoesFornecedor();
+      return;
+    }
+
+    if (termo.length < 2) {
+      fecharSugestoesFornecedor();
+      return;
+    }
+
+    timeoutFornecedor = setTimeout(async () => {
+      try {
+        const url = new URL("{{ url_for('estoques_bp.buscar_fornecedores_compra') }}", window.location.origin);
+        url.searchParams.set("termo", termo);
+        url.searchParams.set("id_empresa_proprietaria", idEmpresa);
+
+        const resposta = await fetch(url);
+        const dados = await resposta.json();
+        estado.fornecedores = Array.isArray(dados.itens) ? dados.itens : [];
+        estado.indiceFornecedorAtivo = estado.fornecedores.length ? 0 : -1;
+        renderizarSugestoesFornecedor();
+      } catch (erro) {
+        console.error(erro);
+        estado.fornecedores = [];
+        renderizarSugestoesFornecedor();
+      }
+    }, 250);
+  });
+
+  campoBuscaProduto.addEventListener("input", () => {
+    limparSelecaoProduto();
+    const termo = campoBuscaProduto.value.trim();
+
+    if (!campoIdEmpresa.value) {
+      tentarSelecionarEmpresaPorTexto();
+    }
+
+    const idEmpresa = campoIdEmpresa.value || "";
+
+    if (timeoutProduto) clearTimeout(timeoutProduto);
+    if (!idEmpresa) { fecharSugestoesProduto(); return; }
+    if (termo.length < 2) { fecharSugestoesProduto(); return; }
+
+    timeoutProduto = setTimeout(async () => {
+      try {
+        const url = new URL("{{ url_for('estoques_bp.buscar_produtos_compra') }}", window.location.origin);
+        url.searchParams.set("termo", termo);
+        if (idEmpresa) url.searchParams.set("id_empresa_proprietaria", idEmpresa);
+        url.searchParams.set("codigo_fornecedor_omie", campoFornecedorCodigoOmie.value || "");
+        url.searchParams.set("codigo_fornecedor_integracao", camposFornecedor.codigo_integracao.value || "");
+        url.searchParams.set("cnpj_fornecedor", campoFornecedorCnpjCpf.value || "");
+
+        const resposta = await fetch(url);
+        const dados = await resposta.json();
+        estado.produtos = Array.isArray(dados.itens) ? dados.itens : [];
+        estado.indiceProdutoAtivo = estado.produtos.length ? 0 : -1;
+        renderizarSugestoesProduto();
+      } catch (erro) {
+        console.error(erro);
+        estado.produtos = [];
+        renderizarSugestoesProduto();
+      }
+    }, 250);
+  });
+
+  campoBuscaFornecedor.addEventListener("keydown", (evento) => {
+    if (!listaSugestoesFornecedores.classList.contains("ativa") || !estado.fornecedores.length) return;
+
+    if (evento.key === "ArrowDown") {
+      evento.preventDefault();
+      estado.indiceFornecedorAtivo = Math.min(estado.indiceFornecedorAtivo + 1, estado.fornecedores.length - 1);
+      renderizarSugestoesFornecedor();
+      return;
+    }
+    if (evento.key === "ArrowUp") {
+      evento.preventDefault();
+      estado.indiceFornecedorAtivo = Math.max(estado.indiceFornecedorAtivo - 1, 0);
+      renderizarSugestoesFornecedor();
+      return;
+    }
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      if (estado.indiceFornecedorAtivo >= 0) selecionarFornecedor(estado.indiceFornecedorAtivo);
+      return;
+    }
+    if (evento.key === "Escape") fecharSugestoesFornecedor();
+  });
+
+  campoBuscaProduto.addEventListener("keydown", (evento) => {
+    if (!listaSugestoesProdutos.classList.contains("ativa") || !estado.produtos.length) return;
+
+    if (evento.key === "ArrowDown") {
+      evento.preventDefault();
+      estado.indiceProdutoAtivo = Math.min(estado.indiceProdutoAtivo + 1, estado.produtos.length - 1);
+      renderizarSugestoesProduto();
+      return;
+    }
+    if (evento.key === "ArrowUp") {
+      evento.preventDefault();
+      estado.indiceProdutoAtivo = Math.max(estado.indiceProdutoAtivo - 1, 0);
+      renderizarSugestoesProduto();
+      return;
+    }
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      if (estado.indiceProdutoAtivo >= 0) selecionarProduto(estado.indiceProdutoAtivo);
+      return;
+    }
+    if (evento.key === "Escape") fecharSugestoesProduto();
+  });
+
+  document.addEventListener("click", (evento) => {
+    if (!evento.target.closest("#campo_busca_empresa") && !evento.target.closest("#lista_sugestoes_empresas")) {
+      fecharSugestoesEmpresa();
+    }
+    if (!evento.target.closest("#campo_busca_fornecedor") && !evento.target.closest("#lista_sugestoes_fornecedores")) {
+      fecharSugestoesFornecedor();
+    }
+    if (!evento.target.closest("#campo_busca_produto") && !evento.target.closest("#lista_sugestoes_produtos")) {
+      fecharSugestoesProduto();
+    }
+  });
+
+  function marcarPedidoComoNaoSalvo() {
+    if (pedidoBloqueado) {
+      botaoSalvarPedido.disabled = true;
+      botaoConfirmarPedido.disabled = true;
+      return;
+    }
+
+    botaoSalvarPedido.disabled = false;
+    botaoConfirmarPedido.disabled = true;
+  }
+
+  function atualizarResumo() {
+    const quantidadeItens = estado.itens.length;
+    const quantidadeTotal = estado.itens.reduce((a, item) => a + Number(item.quantidade || 0), 0);
+    const valorBruto = estado.itens.reduce((a, item) => a + Number(item.valor_total || 0), 0);
+
+    document.getElementById("resumo_quantidade_itens").textContent = String(quantidadeItens);
+    document.getElementById("resumo_quantidade_total").textContent = formatarNumero(quantidadeTotal, 4);
+    document.getElementById("resumo_valor_bruto").textContent = formatarMoeda(valorBruto);
+    document.getElementById("resumo_empresa").textContent = obterNomeCurtoEmpresaSelecionada();
+  }
+
+  function renderizarTabelaItens() {
+    if (!estado.itens.length) {
+      tabelaItensPedido.innerHTML = '<tr id="linha_vazia"><td colspan="10" class="text-center text-muted py-4">Nenhum item adicionado.</td></tr>';
+      atualizarResumo();
+      return;
+    }
+
+    tabelaItensPedido.innerHTML = estado.itens.map((item, indice) => `
+      <tr>
+        <td>${indice + 1}</td>
+        <td class="coluna-produto">
+          <div class="produto-card">
+            <div class="produto-principal">${item.descricao}</div>
+            <div class="produto-secundario">Ref.: ${item.referencia_produto || "-"} • Marca: ${item.marca || "-"} • Modelo: ${item.modelo || "-"}</div>
+          </div>
+        </td>
+        <td><span class="badge-ambiente">${item.razao_social_curta || "-"}</span></td>
+        <td>${item.unidade || "-"}</td>
+        <td>${formatarNumero(item.quantidade, 4)}</td>
+        <td>${formatarMoeda(item.valor_unitario)}</td>
+        <td>${formatarMoeda(item.valor_total)}</td>
+        <td>${item.codigo_produto_integracao || "-"}</td>
+        <td>${item.codigo_produto_omie || item.codigo_omie || "-"}</td>
+        <td>${pedidoBloqueado ? '<span class="text-muted small">Bloqueado</span>' : `<button type="button" class="btn btn-sm btn-outline-danger" data-acao="remover" data-indice="${indice}">Remover</button>`}</td>
+      </tr>
+    `).join("");
+
+    tabelaItensPedido.querySelectorAll('button[data-acao="remover"]').forEach((botao) => {
+      botao.addEventListener("click", () => {
+        estado.itens.splice(Number(botao.dataset.indice), 1);
+        marcarPedidoComoNaoSalvo();
+        renderizarTabelaItens();
+      });
+    });
+
+    atualizarResumo();
+  }
+
+
+  async function salvarPedido() {
+    if (pedidoBloqueado) {
+      alert("Este pedido já foi confirmado e não pode mais ser alterado.");
+      return;
+    }
+
+    const idEmpresa = campoIdEmpresa.value || "";
+    const idFatoEmpresasOmie = camposFornecedor.id_fato_empresas_omie.value || "";
+    const razaoSocialFornecedor = camposFornecedor.razao_social.value || campoBuscaFornecedor.value || "";
+
+    if (!estado.idPedidoSalvo) {
+      alert("Não foi possível identificar o pedido que será atualizado.");
+      return;
+    }
+
+    if (!idEmpresa) {
+      alert("Selecione a Empresa proprietária.");
+      return;
+    }
+
+    if (!idFatoEmpresasOmie) {
+      alert("Selecione o fornecedor antes de salvar.");
+      return;
+    }
+
+    if (!estado.itens.length) {
+      alert("Adicione pelo menos um item antes de salvar.");
+      return;
+    }
+
+    const payload = {
+      csrf_token: obterTokenCsrfPedido(),
+      cabecalho: {
+        id_empresa_proprietaria: Number(idEmpresa),
+        id_fato_empresas_omie: Number(idFatoEmpresasOmie),
+        codigo_fornecedor_omie: campoFornecedorCodigoOmie.value ? Number(campoFornecedorCodigoOmie.value) : null,
+        codigo_fornecedor_integracao: camposFornecedor.codigo_integracao.value || null,
+        razao_social_fornecedor: razaoSocialFornecedor,
+        nome_fantasia_fornecedor: camposFornecedor.nome_fantasia.value || null,
+        contato_fornecedor: campoFornecedorContato.value || null,
+        email_fornecedor: campoFornecedorEmail.value || null,
+        cnpj_cpf_fornecedor: campoFornecedorCnpjCpf.value || null,
+        codigo_integracao_nota: document.getElementById("codigo_integracao_pedido").value || null,
+        data_previsao: document.getElementById("data_previsao").value || null,
+        observacoes: document.getElementById("observacoes").value || null,
+      },
+      itens: estado.itens.map((item) => ({
+        id_fato_produto: item.id_fato_produto || null,
+        id_fato_produto_omie_vinculo: item.id_fato_produto_omie_vinculo || null,
+        codigo_produto_omie: item.codigo_produto_omie ? Number(item.codigo_produto_omie) : null,
+        codigo_omie: item.codigo_omie || null,
+        codigo_produto_integracao: item.codigo_produto_integracao || null,
+        codigo_produto_fornecedor: item.codigo_produto_fornecedor || null,
+        descricao: item.descricao || null,
+        descricao_produto_fornecedor: item.descricao_produto_fornecedor || null,
+        unidade: item.unidade || null,
+        quantidade: Number(item.quantidade || 0),
+        valor_unitario: Number(item.valor_unitario || 0),
+        tem_vinculo_fornecedor: !!item.tem_vinculo_fornecedor,
+      })),
+    };
+
+    botaoSalvarPedido.disabled = true;
+
+    try {
+      const resposta = await fetch(`/estoques/api/compras/pedido/${estado.idPedidoSalvo}/salvar`, {
+        method: "POST",
+        headers: obterHeadersJsonProtegidos(),
+        body: JSON.stringify(payload)
+      });
+
+      const dados = await resposta.json();
+
+      if (!resposta.ok || !dados.ok) {
+        throw new Error(dados.mensagem || "Não foi possível salvar as alterações do pedido.");
+      }
+
+      estado.idPedidoSalvo = dados.id_nota_fornecedor_omie;
+      botaoConfirmarPedido.disabled = false;
+      botaoSalvarPedido.disabled = true;
+      document.getElementById("badge_status_pedido").textContent = "Salvo";
+
+      alert(dados.mensagem || "Pedido atualizado com sucesso.");
+    } catch (erro) {
+      console.error(erro);
+      alert(erro.message || "Erro ao salvar o pedido.");
+      botaoSalvarPedido.disabled = false;
+    }
+  }
+
+  async function confirmarPedido() {
+    if (!estado.idPedidoSalvo) {
+      alert("Salve o pedido antes de confirmar.");
+      return;
+    }
+
+    botaoConfirmarPedido.disabled = true;
+
+    try {
+      const resposta = await fetch(`/estoques/api/compras/pedido/${estado.idPedidoSalvo}/confirmar`, {
+        method: "POST",
+        headers: obterHeadersJsonProtegidos(),
+        body: JSON.stringify({ csrf_token: obterTokenCsrfPedido() })
+      });
+
+      const dados = await resposta.json();
+
+      if (!resposta.ok || !dados.ok) {
+        throw new Error(dados.mensagem || "Não foi possível confirmar o pedido.");
+      }
+
+      alert(dados.mensagem);
+      window.location.href = "{{ url_for('estoques_bp.listar_pedidos_compra') }}";
+    } catch (erro) {
+      console.error(erro);
+      alert(erro.message || "Erro ao confirmar o pedido.");
+      botaoConfirmarPedido.disabled = false;
+    }
+  }
+
+  function adicionarItem() {
+    const produto = estado.itemSelecionado;
+    if (!produto) { alert("Selecione um produto nas sugestões antes de adicionar."); return; }
+
+    const quantidade = Number(campoQuantidade.value || 0);
+    const valorUnitario = Number(campoValorUnitario.value || 0);
+
+    if (quantidade <= 0) { alert("Informe uma quantidade maior que zero."); return; }
+    if (valorUnitario < 0) { alert("O valor unitário não pode ser negativo."); return; }
+
+    marcarPedidoComoNaoSalvo();
+    estado.itens.push({
+      id_fato_produto: produto.id_fato_produto || null,
+      referencia_produto: produto.referencia_produto || "",
+      descricao: produto.descricao || "",
+      descricao_resumida: produto.descricao_resumida || "",
+      unidade: produto.unidade || "",
+      marca: produto.marca || "",
+      modelo: produto.modelo || "",
+      codigo_produto_integracao: produto.codigo_produto_integracao || "",
+      id_fato_produto_omie_vinculo: produto.id_fato_produto_omie_vinculo || null,
+      codigo_produto_omie: produto.codigo_produto_omie || "",
+      codigo_omie: produto.codigo_omie || "",
+      razao_social: produto.razao_social || "",
+      razao_social_curta: produto.razao_social_curta || "",
+      codigo_produto_fornecedor: produto.codigo_produto_fornecedor || "",
+      descricao_produto_fornecedor: produto.descricao_produto_fornecedor || "",
+      tem_vinculo_fornecedor: !!produto.tem_vinculo_fornecedor,
+      quantidade: quantidade,
+      valor_unitario: valorUnitario,
+      valor_total: quantidade * valorUnitario,
+    });
+
+    renderizarTabelaItens();
+    campoBuscaProduto.value = "";
+    campoQuantidade.value = "1";
+    campoValorUnitario.value = "0";
+    limparSelecaoProduto();
+    fecharSugestoesProduto();
+  }
+
+  function preencherTelaComPedidoInicial() {
+    if (!pedidoInicial || !pedidoInicial.id_nota_fornecedor_omie) {
+      return;
+    }
+
+    estado.idPedidoSalvo = Number(pedidoInicial.id_nota_fornecedor_omie);
+
+    const cabecalho = pedidoInicial.cabecalho || {};
+    const empresa = empresasDisponiveis.find((item) => Number(item.id_empresa_proprietaria) === Number(cabecalho.id_empresa_proprietaria));
+
+    if (empresa) {
+      estado.empresaSelecionada = empresa;
+      campoBuscaEmpresa.value = empresa.razao_social || "";
+      campoIdEmpresa.value = empresa.id_empresa_proprietaria || "";
+      campoEmpresaCnpjSelecionada.value = empresa.cnpj || cabecalho.cnpj_empresa_proprietaria || "";
+    } else {
+      campoBuscaEmpresa.value = cabecalho.razao_social_empresa_proprietaria || "";
+      campoIdEmpresa.value = cabecalho.id_empresa_proprietaria || "";
+      campoEmpresaCnpjSelecionada.value = cabecalho.cnpj_empresa_proprietaria || "";
+    }
+
+    estado.fornecedorSelecionado = {
+      id_fato_empresas_omie: cabecalho.id_fato_empresas_omie || null,
+      codigo_cliente_omie: cabecalho.codigo_fornecedor_omie || null,
+      codigo_cliente_integracao: cabecalho.codigo_fornecedor_integracao || "",
+      razao_social: cabecalho.razao_social_fornecedor || "",
+      nome_fantasia: cabecalho.nome_fantasia_fornecedor || "",
+      contato: cabecalho.contato_fornecedor || "",
+      email: cabecalho.email_fornecedor || "",
+      cnpj_cpf: cabecalho.cnpj_cpf_fornecedor || "",
+    };
+
+    campoBuscaFornecedor.value = cabecalho.razao_social_fornecedor || "";
+    camposFornecedor.id_fato_empresas_omie.value = cabecalho.id_fato_empresas_omie || "";
+    camposFornecedor.codigo_integracao.value = cabecalho.codigo_fornecedor_integracao || "";
+    camposFornecedor.razao_social.value = cabecalho.razao_social_fornecedor || "";
+    camposFornecedor.nome_fantasia.value = cabecalho.nome_fantasia_fornecedor || "";
+    campoFornecedorContato.value = cabecalho.contato_fornecedor || "";
+    campoFornecedorCnpjCpf.value = cabecalho.cnpj_cpf_fornecedor || "";
+    campoFornecedorEmail.value = cabecalho.email_fornecedor || "";
+    campoFornecedorCodigoOmie.value = cabecalho.codigo_fornecedor_omie || "";
+
+    document.getElementById("data_previsao").value = cabecalho.data_previsao || "";
+    document.getElementById("codigo_integracao_pedido").value = cabecalho.codigo_integracao_nota || "";
+    document.getElementById("observacoes").value = cabecalho.observacoes || "";
+
+    estado.itens = Array.isArray(pedidoInicial.itens)
+      ? pedidoInicial.itens.map((item) => ({
+          ...item,
+          quantidade: Number(item.quantidade || 0),
+          valor_unitario: Number(item.valor_unitario || 0),
+          valor_total: Number(item.quantidade || 0) * Number(item.valor_unitario || 0),
+        }))
+      : [];
+
+    renderizarTabelaItens();
+
+    const textoReferencia = document.getElementById("texto_referencia_pedido");
+    if (textoReferencia) {
+      const referenciaVisual = cabecalho.codigo_integracao_nota || `Pedido #${estado.idPedidoSalvo}`;
+      textoReferencia.textContent = referenciaVisual;
+    }
+
+    const badgeStatus = document.getElementById("badge_status_pedido");
+    if (badgeStatus) {
+      badgeStatus.textContent = pedidoInicial.status || "-";
+    }
+
+    botaoSalvarPedido.disabled = true;
+    botaoConfirmarPedido.disabled = !!pedidoBloqueado;
+  }
+
+  function aplicarModoSomenteLeitura() {
+    if (!pedidoBloqueado) {
+      return;
+    }
+
+    [
+      campoBuscaEmpresa,
+      campoBuscaFornecedor,
+      document.getElementById("data_previsao"),
+      document.getElementById("codigo_integracao_pedido"),
+      document.getElementById("observacoes"),
+      campoBuscaProduto,
+      campoQuantidade,
+      campoValorUnitario,
+    ].forEach((campo) => {
+      if (campo) {
+        campo.disabled = true;
+      }
+    });
+
+    botaoAdicionarItem.disabled = true;
+    botaoLimparItens.disabled = true;
+    botaoSalvarPedido.disabled = true;
+    botaoConfirmarPedido.disabled = true;
+
+    if (botaoAbrirModalCadastroProduto) {
+      botaoAbrirModalCadastroProduto.disabled = true;
+    }
+  }
+
+  botaoAdicionarItem.addEventListener("click", adicionarItem);
+  botaoLimparItens.addEventListener("click", () => {
+    estado.itens = [];
+    marcarPedidoComoNaoSalvo();
+    renderizarTabelaItens();
+  });
+
+  botaoSalvarPedido.addEventListener("click", salvarPedido);
+  botaoConfirmarPedido.addEventListener("click", confirmarPedido);
+
+  campoBuscaEmpresa.addEventListener("focus", () => {
+    const termo = campoBuscaEmpresa.value.trim();
+    estado.empresas = filtrarEmpresasDisponiveis(termo);
+    estado.indiceEmpresaAtivo = estado.empresas.length ? 0 : -1;
+    renderizarSugestoesEmpresa();
+  });
+
+  campoBuscaEmpresa.addEventListener("input", () => {
+    limparSelecaoEmpresa();
+    const termo = campoBuscaEmpresa.value.trim();
+
+    if (termo.length < 1) {
+      fecharSugestoesEmpresa();
+      campoBuscaFornecedor.value = "";
+      campoBuscaProduto.value = "";
+      limparSelecaoFornecedor();
+      limparSelecaoProduto();
+      return;
+    }
+
+    estado.empresas = filtrarEmpresasDisponiveis(termo);
+    estado.indiceEmpresaAtivo = estado.empresas.length ? 0 : -1;
+    renderizarSugestoesEmpresa();
+  });
+
+  campoBuscaEmpresa.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      tentarSelecionarEmpresaPorTexto();
+    }, 150);
+  });
+
+  campoBuscaEmpresa.addEventListener("keydown", (evento) => {
+    if (!listaSugestoesEmpresas.classList.contains("ativa") || !estado.empresas.length) return;
+
+    if (evento.key === "ArrowDown") {
+      evento.preventDefault();
+      estado.indiceEmpresaAtivo = Math.min(estado.indiceEmpresaAtivo + 1, estado.empresas.length - 1);
+      renderizarSugestoesEmpresa();
+      return;
+    }
+    if (evento.key === "ArrowUp") {
+      evento.preventDefault();
+      estado.indiceEmpresaAtivo = Math.max(estado.indiceEmpresaAtivo - 1, 0);
+      renderizarSugestoesEmpresa();
+      return;
+    }
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      if (estado.indiceEmpresaAtivo >= 0) selecionarEmpresa(estado.indiceEmpresaAtivo);
+      else tentarSelecionarEmpresaPorTexto();
+      return;
+    }
+    if (evento.key === "Tab") {
+      tentarSelecionarEmpresaPorTexto();
+      return;
+    }
+    if (evento.key === "Escape") fecharSugestoesEmpresa();
+  });
+
+  function preencherModalCadastroProduto() {
+    const textoEmpresa = estado.empresaSelecionada?.razao_social || campoBuscaEmpresa.value || "";
+    const idEmpresa = campoIdEmpresa.value || "";
+    const fornecedorSelecionado = camposFornecedor.razao_social.value || campoBuscaFornecedor.value || "";
+    const textoProduto = campoBuscaProduto.value.trim();
+
+    campoModalEmpresaNome.value = textoEmpresa;
+    campoModalEmpresaId.value = idEmpresa;
+    campoModalFornecedor.value = fornecedorSelecionado;
+    campoModalProdutoDigitado.value = textoProduto;
+
+    if (!campoModalDescricao.value) {
+      campoModalDescricao.value = textoProduto;
+    }
+
+    if (!campoModalCodigo.value && textoProduto) {
+      campoModalCodigo.value = textoProduto
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^A-Za-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .toUpperCase()
+        .slice(0, 60);
+    }
+
+    if (!campoModalCodigoIntegracao.value && idEmpresa) {
+      const baseCodigo = (campoModalCodigo.value || "NOVO-PRODUTO").slice(0, 45);
+      campoModalCodigoIntegracao.value = `EMP${idEmpresa}-${baseCodigo}`.slice(0, 60);
+    }
+  }
+
+  botaoAbrirModalCadastroProduto.addEventListener("click", (evento) => {
+    if (!campoIdEmpresa.value) {
+      evento.preventDefault();
+      alert("Selecione a Empresa proprietária antes de abrir o cadastro do produto Omie.");
+      return;
+    }
+    preencherModalCadastroProduto();
+  });
+
+  modalCadastroProduto.addEventListener("shown.bs.modal", () => {
+    preencherModalCadastroProduto();
+    campoModalDescricao.focus();
+  });
+
+  botaoSimularCadastroProdutoOmie.addEventListener("click", () => {
+    const codigoIntegracao = campoModalCodigoIntegracao.value.trim();
+    const codigo = campoModalCodigo.value.trim();
+    const descricao = campoModalDescricao.value.trim();
+    const unidade = campoModalUnidade.value.trim().toUpperCase();
+
+    if (!campoIdEmpresa.value) {
+      alert("Selecione a Empresa proprietária.");
+      return;
+    }
+
+    if (!codigoIntegracao || !codigo || !descricao || !unidade) {
+      alert("Preencha os 4 campos mínimos do cadastro do produto Omie: código de integração, código, descrição e unidade.");
+      return;
+    }
+
+    const payloadSimulado = {
+      empresa_proprietaria_id: campoIdEmpresa.value,
+      empresa_proprietaria_nome: estado.empresaSelecionada?.razao_social || campoBuscaEmpresa.value || "",
+      codigo_produto_integracao: codigoIntegracao,
+      codigo: codigo,
+      descricao: descricao,
+      unidade: unidade,
+    };
+
+    console.log("Payload mínimo simulado para IncluirProduto/UpsertProduto:", payloadSimulado);
+    alert("Cadastro mínimo validado na tela. Por enquanto ele só simula e envia o payload para o console do navegador.");
+  });
+
+  if (pedidoInicial && pedidoInicial.id_nota_fornecedor_omie) {
+    preencherTelaComPedidoInicial();
+    aplicarModoSomenteLeitura();
+    atualizarPainelVinculoProduto(null);
+  } else {
+    marcarPedidoComoNaoSalvo();
+    atualizarPainelVinculoProduto(null);
+    renderizarTabelaItens();
+    atualizarResumo();
+  }
+})();
+</script>
+{% endblock %}

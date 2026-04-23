@@ -1,0 +1,558 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Vínculo de Produtos | Estoques{% endblock %}
+
+{% block content %}
+<style>
+  .vp-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .vp-title{
+    flex:1 1 300px;
+    min-width:min(300px, 100%);
+  }
+
+  .vp-filtros{
+    flex:2 1 900px;
+    min-width:min(900px, 100%);
+    display:flex;
+    gap:8px;
+    align-items:flex-end;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+  }
+
+  .vp-filtros .campo{
+    width:min(420px, 100%);
+    flex:1 1 320px;
+  }
+
+  .vp-actions{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+  }
+
+  .kb-combobox{
+    position:relative;
+    width:100%;
+  }
+
+  .kb-combobox-input{
+    width:100%;
+    padding-right:40px;
+  }
+
+  .kb-combobox-toggle{
+    position:absolute;
+    top:50%;
+    right:8px;
+    transform:translateY(-50%);
+    border:none;
+    background:transparent;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:14px;
+    font-weight:1000;
+    line-height:1;
+    padding:4px 6px;
+  }
+
+  .kb-combobox-lista{
+    position:absolute;
+    top:calc(100% + 6px);
+    left:0;
+    right:0;
+    z-index:80;
+    max-height:320px;
+    overflow:auto;
+    border:1px solid rgba(15,23,42,.12);
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 18px 40px rgba(15,23,42,.16);
+    padding:6px;
+  }
+
+  .kb-combobox-opcao{
+    width:100%;
+    border:none;
+    background:transparent;
+    text-align:left;
+    cursor:pointer;
+    padding:10px 12px;
+    border-radius:12px;
+    display:block;
+  }
+
+  .kb-combobox-opcao:hover,
+  .kb-combobox-opcao.is-active{
+    background:rgba(0,40,132,.06);
+  }
+
+  .kb-combobox-opcao strong{
+    display:block;
+    font-size:12px;
+    font-weight:1000;
+    color:var(--text);
+    line-height:1.25;
+  }
+
+  .kb-combobox-opcao span{
+    display:block;
+    margin-top:4px;
+    font-size:11px;
+    font-weight:900;
+    color:var(--muted);
+    line-height:1.2;
+  }
+
+  .kb-combobox-vazio{
+    padding:10px 12px;
+    font-size:12px;
+    font-weight:900;
+    color:var(--muted);
+  }
+
+  .kb-select-hidden{
+    position:absolute !important;
+    left:-99999px !important;
+    width:1px !important;
+    height:1px !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
+
+  .overflow-x{
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .tbl{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    border:1px solid var(--border);
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+    table-layout:fixed;
+  }
+
+  .tbl thead th{
+    text-align:left;
+    font-size:11px;
+    letter-spacing:.1px;
+    color:var(--muted);
+    font-weight:1000;
+    padding:9px 8px;
+    border-bottom:1px solid var(--border);
+    background:#F8FAFC;
+    position:sticky;
+    top:0;
+    z-index:2;
+    white-space:normal;
+    line-height:1.15;
+    word-break:break-word;
+  }
+
+  .tbl tbody td{
+    padding:10px 8px;
+    border-bottom:1px solid rgba(15,23,42,.06);
+    vertical-align:middle;
+    font-size:12px;
+    font-weight:900;
+    color:var(--text);
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    line-height:1.25;
+  }
+
+  .tbl tbody tr:hover{
+    background:rgba(0,40,132,.04);
+  }
+
+  .col-ambiente{ width: 190px; }
+  .col-fornecedor{ width: 230px; }
+  .col-cod-forn{ width: 140px; }
+  .col-desc-forn{ width: 300px; }
+  .col-cod-omie{ width: 130px; }
+  .col-prod-omie{ width: 260px; }
+
+  .texto-principal{
+    display:block;
+    white-space:normal;
+    line-height:1.3;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    max-width:100%;
+  }
+
+  .texto-secundario{
+    color:var(--muted);
+    font-weight:800;
+    font-size:10px;
+    line-height:1.2;
+    margin-top:3px;
+    word-break:break-word;
+  }
+
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 8px;
+    border-radius:999px;
+    border:1px solid rgba(0,40,132,.18);
+    background:rgba(0,40,132,.06);
+    color:var(--euro-blue);
+    font-weight:1000;
+    font-size:11px;
+    line-height:1.1;
+    white-space:normal;
+    text-align:center;
+    max-width:100%;
+  }
+
+  .badge.gray{
+    border-color:rgba(100,116,139,.25);
+    background:rgba(100,116,139,.10);
+    color:#334155;
+  }
+
+  .pager{
+    margin-top:12px;
+    padding:10px 12px;
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .pager .left,
+  .pager .right{
+    font-size:12px;
+    font-weight:1000;
+    color:var(--muted);
+  }
+
+  .pager .center{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+
+  @media (max-width: 1200px){
+    .tbl{ min-width: 1220px; }
+  }
+
+  @media (max-width: 980px){
+    .vp-filtros{ justify-content:flex-start; }
+    .vp-filtros .campo{ flex:1 1 100%; width:100%; }
+  }
+</style>
+
+<div class="card" style="padding:14px;">
+  <div class="vp-header">
+    <div class="vp-title">
+      <h1 class="page-title" style="margin:0;">Vínculo de Produtos</h1>
+      <div class="muted" style="font-weight:900;margin-top:6px;">
+        {% if paginacao and paginacao.total is defined %}
+          Total: {{ paginacao.total }}
+        {% else %}
+          Total: 0
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="GET" action="{{ request.path }}" class="vp-filtros">
+      <input type="hidden" name="page" value="1">
+      <input type="hidden" name="per_page" value="10">
+
+      <div class="campo">
+        <label for="inputFornecedorBusca">Fornecedor</label>
+        <div id="comboFornecedor" class="kb-combobox">
+          <input id="inputFornecedorBusca"
+                 class="kb-input kb-combobox-input"
+                 type="text"
+                 placeholder="Digite razão social ou CNPJ..."
+                 autocomplete="off"
+                 spellcheck="false">
+          <button id="btnToggleFornecedor" class="kb-combobox-toggle" type="button" aria-label="Abrir lista de fornecedores">▾</button>
+          <div id="listaFornecedorBusca" class="kb-combobox-lista" hidden></div>
+          <input type="hidden" id="fornecedorSelecionado" name="fornecedor" value="{{ filtros.fornecedor if filtros else '' }}">
+          <select id="selectFornecedor" class="kb-select-hidden" tabindex="-1" aria-hidden="true">
+            <option value="">— Todos os fornecedores —</option>
+            {% for item in (fornecedores_combo or []) %}
+              <option value="{{ item.valor }}"
+                      data-subtitulo="{{ item.cnpj or '' }}"
+                      {% if filtros and filtros.fornecedor == item.valor %}selected{% endif %}>
+                {{ item.rotulo }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="campo">
+        <label for="inputProdutoOmieBusca">Produto Omie</label>
+        <div id="comboProdutoOmie" class="kb-combobox">
+          <input id="inputProdutoOmieBusca"
+                 class="kb-input kb-combobox-input"
+                 type="text"
+                 placeholder="Digite código ou nome do produto Omie..."
+                 autocomplete="off"
+                 spellcheck="false">
+          <button id="btnToggleProdutoOmie" class="kb-combobox-toggle" type="button" aria-label="Abrir lista de produtos Omie">▾</button>
+          <div id="listaProdutoOmieBusca" class="kb-combobox-lista" hidden></div>
+          <input type="hidden" id="produtoOmieSelecionado" name="produto_omie" value="{{ filtros.produto_omie if filtros else '' }}">
+          <select id="selectProdutoOmie" class="kb-select-hidden" tabindex="-1" aria-hidden="true">
+            <option value="">— Todos os produtos Omie —</option>
+            {% for item in (produtos_omie_combo or []) %}
+              <option value="{{ item.valor }}"
+                      data-subtitulo="{{ item.codigo or '' }}"
+                      {% if filtros and filtros.produto_omie == item.valor %}selected{% endif %}>
+                {{ item.rotulo }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="vp-actions">
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+        <a class="btn btn-secondary" style="text-decoration:none;" href="{{ request.path }}?page=1&per_page=10">Limpar</a>
+      </div>
+    </form>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  <div class="overflow-x">
+    <table class="tbl" id="tblVinculosProdutos">
+      <thead>
+        <tr>
+          <th class="col-ambiente">Ambiente</th>
+          <th class="col-fornecedor">Fornecedor</th>
+          <th class="col-cod-forn">Cód. Produto Fornecedor</th>
+          <th class="col-desc-forn">Descrição Produto Fornecedor</th>
+          <th class="col-cod-omie">Cód. Produto Omie</th>
+          <th class="col-prod-omie">Nome Produto Omie</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if itens and itens|length > 0 %}
+          {% for item in itens %}
+            <tr>
+              <td>
+                <div class="texto-principal">{{ item.get('RazaoSocialEmpresaProprietaria', '') or item.get('Ambiente', '') or '-' }}</div>
+                {% if item.get('NomeAmbiente') %}
+                  <div class="texto-secundario">{{ item.get('NomeAmbiente') }}</div>
+                {% endif %}
+              </td>
+
+              <td>
+                <div class="texto-principal">{{ item.get('RazaoSocialFornecedor', '') or '-' }}</div>
+                <div class="texto-secundario">{{ item.get('CpfCnpjFornecedor', '') or 'CNPJ n/d' }}</div>
+              </td>
+
+              <td>
+                {% if item.get('CodigoProdutoFornecedor') %}
+                  <span class="badge">{{ item.get('CodigoProdutoFornecedor') }}</span>
+                {% else %}
+                  <span class="badge gray">Sem código</span>
+                {% endif %}
+              </td>
+
+              <td>
+                <div class="texto-principal">{{ item.get('DescricaoProdutoFornecedor', '') or '-' }}</div>
+              </td>
+
+              <td>
+                {% if item.get('CodigoProdutoOmie') %}
+                  <span class="badge">{{ item.get('CodigoProdutoOmie') }}</span>
+                {% else %}
+                  <span class="badge gray">Sem código</span>
+                {% endif %}
+              </td>
+
+              <td>
+                <div class="texto-principal">{{ item.get('NomeProdutoOmie', '') or item.get('DescricaoOmie', '') or item.get('Descricao', '') or '-' }}</div>
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="6" class="muted" style="padding:14px;font-weight:1000;">
+              Nenhum vínculo encontrado com os filtros atuais.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    <div class="left">
+      {% if paginacao %}
+        Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} vínculos
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </div>
+
+    <div class="center">
+      {% if paginacao %}
+        {% set p = paginacao.page %}
+        {% set tp = paginacao.total_pages %}
+        {% set fornecedor_qs = filtros.fornecedor if filtros else '' %}
+        {% set produto_omie_qs = filtros.produto_omie if filtros else '' %}
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ request.path }}?page=1&per_page=10&fornecedor={{ fornecedor_qs }}&produto_omie={{ produto_omie_qs }}">«</a>
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ request.path }}?page={{ p-1 if p > 1 else 1 }}&per_page=10&fornecedor={{ fornecedor_qs }}&produto_omie={{ produto_omie_qs }}">‹</a>
+
+        <span style="font-size:12px;font-weight:1000;color:var(--text);padding:0 8px;">
+          {{ p }} / {{ tp }}
+        </span>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ request.path }}?page={{ p+1 if p < tp else tp }}&per_page=10&fornecedor={{ fornecedor_qs }}&produto_omie={{ produto_omie_qs }}">›</a>
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;" href="{{ request.path }}?page={{ tp }}&per_page=10&fornecedor={{ fornecedor_qs }}&produto_omie={{ produto_omie_qs }}">»</a>
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </div>
+
+    <div class="right">10 por página</div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    function criarCombobox(config){
+      const input = document.getElementById(config.inputId);
+      const botao = document.getElementById(config.botaoId);
+      const lista = document.getElementById(config.listaId);
+      const hidden = document.getElementById(config.hiddenId);
+      const select = document.getElementById(config.selectId);
+      if (!input || !botao || !lista || !hidden || !select) return;
+
+      function obterOpcoes(){
+        return Array.from(select.options)
+          .filter(op => op.value !== "")
+          .map(op => ({
+            valor: op.value,
+            rotulo: (op.textContent || "").trim(),
+            subtitulo: (op.dataset.subtitulo || "").trim()
+          }));
+      }
+
+      function obterSelecionado(){
+        return Array.from(select.options).find(op => op.value === hidden.value) || null;
+      }
+
+      function aplicarSelecionadoInicial(){
+        const atual = obterSelecionado();
+        if (atual && atual.value){
+          input.value = (atual.textContent || "").trim();
+          select.value = atual.value;
+        } else {
+          input.value = "";
+          select.value = "";
+        }
+      }
+
+      function renderizar(termo, manterAberto){
+        const termoNormalizado = (termo || "").trim().toLowerCase();
+        const opcoes = obterOpcoes().filter(item => {
+          const alvo = `${item.rotulo} ${item.subtitulo}`.toLowerCase();
+          return !termoNormalizado || alvo.includes(termoNormalizado);
+        });
+
+        if (opcoes.length === 0){
+          lista.innerHTML = '<div class="kb-combobox-vazio">Nenhum registro encontrado.</div>';
+          lista.hidden = !manterAberto;
+          return;
+        }
+
+        lista.innerHTML = opcoes.map(item => `
+          <button type="button" class="kb-combobox-opcao" data-valor="${String(item.valor).replace(/"/g, '&quot;')}">
+            <strong>${item.rotulo}</strong>
+            <span>${item.subtitulo || ' '}</span>
+          </button>
+        `).join('');
+
+        lista.hidden = !manterAberto;
+
+        lista.querySelectorAll('.kb-combobox-opcao').forEach(btn => {
+          btn.addEventListener('click', function(){
+            const valor = btn.getAttribute('data-valor') || '';
+            const opcao = Array.from(select.options).find(op => op.value === valor);
+            hidden.value = valor;
+            select.value = valor;
+            input.value = opcao ? (opcao.textContent || '').trim() : '';
+            lista.hidden = true;
+          });
+        });
+      }
+
+      input.addEventListener('focus', function(){
+        renderizar(input.value, true);
+      });
+
+      input.addEventListener('input', function(){
+        if (!input.value.trim()){
+          hidden.value = '';
+          select.value = '';
+        }
+        renderizar(input.value, true);
+      });
+
+      botao.addEventListener('click', function(){
+        const abrir = lista.hidden;
+        renderizar(input.value, abrir);
+      });
+
+      document.addEventListener('click', function(ev){
+        const wrapper = input.closest('.kb-combobox');
+        if (wrapper && !wrapper.contains(ev.target)){
+          lista.hidden = true;
+          if (!input.value.trim()){
+            hidden.value = '';
+            select.value = '';
+          }
+        }
+      });
+
+      aplicarSelecionadoInicial();
+    }
+
+    criarCombobox({
+      inputId: 'inputFornecedorBusca',
+      botaoId: 'btnToggleFornecedor',
+      listaId: 'listaFornecedorBusca',
+      hiddenId: 'fornecedorSelecionado',
+      selectId: 'selectFornecedor'
+    });
+
+    criarCombobox({
+      inputId: 'inputProdutoOmieBusca',
+      botaoId: 'btnToggleProdutoOmie',
+      listaId: 'listaProdutoOmieBusca',
+      hiddenId: 'produtoOmieSelecionado',
+      selectId: 'selectProdutoOmie'
+    });
+  })();
+</script>
+{% endblock %}

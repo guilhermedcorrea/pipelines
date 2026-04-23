@@ -128,7 +128,7 @@ def create_app() -> Flask:
     app.register_blueprint(autenticacao_bp, url_prefix="/autenticacao")
     app.register_blueprint(admin, url_prefix="/admin")
     app.register_blueprint(kanban_bp, url_prefix="/kanban")
-    app.register_blueprint(estoques_bp, url_prefix="/estoques")
+    #app.register_blueprint(estoques_bp, url_prefix="/estoques")
 
  
     from . import socket_events 
