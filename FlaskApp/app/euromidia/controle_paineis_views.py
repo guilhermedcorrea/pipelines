@@ -42,6 +42,9 @@ from celery.result import AsyncResult
 from ..celery_app import celery_app
 from ..tasks.checkin_tasks import processar_checkin_upload
 import secrets
+import hashlib
+from sqlalchemy.orm import aliased
+from ..extensions import cache
 
 
 
@@ -61,6 +64,12 @@ paineis_bp = Blueprint("Paineis", __name__)
 
 
 
+
+
+TEMPO_CACHE_TOTAL_CLIENTES_SEGUNDOS = 120
+TEMPO_CACHE_ITENS_CLIENTES_SEGUNDOS = 120
+TEMPO_CACHE_FILTROS_CLIENTES_SEGUNDOS = 300
+TEMPO_CACHE_OPCOES_CLIENTE_SEGUNDOS = 300
 
 
 
@@ -11317,21 +11326,6 @@ def contratos_detalhe(id_contrato: int):
 
 
 
-import hashlib
-import json
-import os
-import re
-
-from sqlalchemy import String, cast, func
-from sqlalchemy.orm import aliased
-
-from ..extensions import cache
-
-
-TEMPO_CACHE_TOTAL_CLIENTES_SEGUNDOS = 120
-TEMPO_CACHE_ITENS_CLIENTES_SEGUNDOS = 120
-TEMPO_CACHE_FILTROS_CLIENTES_SEGUNDOS = 300
-TEMPO_CACHE_OPCOES_CLIENTE_SEGUNDOS = 300
 
 
 def _so_digitos(v: str) -> str:
