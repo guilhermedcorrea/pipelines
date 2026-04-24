@@ -969,7 +969,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% if exibir_menu_paineis %}
         <div class="menu-item" data-menu="paineis">
           <button type="button"
-                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') %}active{% endif %}">
+                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') %}active{% endif %}">
             Painéis <span style="opacity:.9;">▾</span>
           </button>
 
@@ -1062,16 +1062,6 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            <div class="submenu-item">
-              <a href="#" class="submenu-link">
-                <span>Kanban</span>
-                <span class="submenu-caret">▸</span>
-              </a>
-
-              <div class="submenu-dropdown">
-                <a href="">Lista Kanbans</a>
-              </div>
-            </div>
 
             {% if menu_paineis_performance %}
               <div class="submenu-item">

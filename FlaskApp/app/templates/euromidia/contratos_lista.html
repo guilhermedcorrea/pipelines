@@ -44,12 +44,21 @@
       }
 
       .filters .field{
-        min-width: 280px;
+        min-width: 260px;
         flex: 1;
       }
 
-      .filters .field.field-status{
-        flex: 0 1 320px;
+      .filters .field.field-busca{
+        min-width: 360px;
+        flex: 1 1 420px;
+      }
+
+      .filters .field.field-filtro{
+        flex: 0 1 280px;
+      }
+
+      .filters .field.field-ativo{
+        flex: 0 1 220px;
       }
 
       .btn-pill{
@@ -128,7 +137,7 @@
         top: calc(100% + 6px);
         left:0;
         right:0;
-        z-index:60;
+        z-index:90;
         background:#fff;
         border:1px solid var(--border);
         border-radius:14px;
@@ -182,7 +191,7 @@
       }
 
       .multi-dd[open]{
-        z-index:70;
+        z-index:80;
       }
 
       .dd-summary{
@@ -286,6 +295,12 @@
         margin:0;
       }
 
+      .dd-option span{
+        min-width:0;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+      }
+
       .dd-option[hidden]{
         display:none !important;
       }
@@ -294,13 +309,15 @@
         margin-top:14px;
         border:1px solid var(--border);
         border-radius:14px;
-        overflow:hidden;
+        overflow-x:auto;
+        overflow-y:visible;
         background:#fff;
       }
 
       .list-head{
         display:grid;
-        grid-template-columns: 86px 170px 130px 180px 170px 1fr 1fr;
+        grid-template-columns: 76px 112px 116px 115px 160px 160px 190px minmax(220px, 1.2fr) minmax(200px, 1fr);
+        min-width: 1320px;
         gap:0;
         padding: 12px 14px;
         border-bottom:1px solid var(--border);
@@ -312,11 +329,12 @@
 
       .row{
         display:grid;
-        grid-template-columns: 86px 170px 130px 180px 170px 1fr 1fr;
+        grid-template-columns: 76px 112px 116px 115px 160px 160px 190px minmax(220px, 1.2fr) minmax(200px, 1fr);
+        min-width: 1320px;
         gap:0;
         padding: 14px 14px;
         border-bottom:1px solid var(--border);
-        align-items:center;
+        align-items:start;
         background:#fff;
         cursor:pointer;
       }
@@ -361,27 +379,15 @@
         user-select:none;
       }
 
-      .id-pill{
-        display:inline-flex;
-        align-items:center;
-        gap:10px;
-        padding:8px 12px;
-        border-radius:999px;
-        border:1px solid var(--border);
-        background:#fff;
+      .id-contrato-texto{
+        display:inline-block;
         font-weight:900;
         font-size:13px;
-        line-height:1;
-        white-space:nowrap;
-        user-select:none;
-      }
-
-      .id-pill .dot{
-        width:9px;
-        height:9px;
-        border-radius:999px;
-        background: rgba(0,40,132,.45);
-        box-shadow: 0 0 0 2px rgba(255,255,255,.9);
+        line-height:1.25;
+        color:var(--text);
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:break-word;
       }
 
       .muted-small{
@@ -397,12 +403,26 @@
         white-space:nowrap;
       }
 
+      .texto-quebra{
+        min-width:0;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.25;
+        font-weight:800;
+        color:var(--text);
+        padding-right:12px;
+      }
+
       .data-col{
         font-weight:900;
         color:var(--text);
       }
 
-      .status-badge{
+      .status-badge,
+      .ativo-badge{
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -425,7 +445,96 @@
         color: #475569;
       }
 
+      .ativo-badge.ativo-sim{
+        border-color: rgba(22,163,74,.25);
+        background: rgba(22,163,74,.09);
+        color:#166534;
+      }
+
+      .ativo-badge.ativo-nao{
+        border-color: rgba(239,68,68,.28);
+        background: rgba(239,68,68,.09);
+        color:#991b1b;
+      }
+
+      .segmento-badge{
+        --segmento-cor: #64748B;
+        display:inline-flex;
+        align-items:flex-start;
+        gap:8px;
+        width:fit-content;
+        max-width:100%;
+        min-height:34px;
+        padding:7px 12px;
+        border-radius:16px;
+        border:1px solid color-mix(in srgb, var(--segmento-cor) 34%, #ffffff);
+        background:
+          linear-gradient(180deg,
+            color-mix(in srgb, var(--segmento-cor) 16%, #ffffff),
+            color-mix(in srgb, var(--segmento-cor) 7%, #ffffff)
+          );
+        color:#0f172a;
+        font-size:12px;
+        font-weight:950;
+        line-height:1.18;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,.80),
+          0 8px 18px color-mix(in srgb, var(--segmento-cor) 16%, transparent);
+      }
+
+      .segmento-badge-dot{
+        width:10px;
+        height:10px;
+        min-width:10px;
+        margin-top:2px;
+        border-radius:999px;
+        background:var(--segmento-cor);
+        box-shadow:
+          0 0 0 3px color-mix(in srgb, var(--segmento-cor) 18%, #ffffff),
+          0 0 0 1px rgba(15,23,42,.05);
+      }
+
+      .segmento-badge-texto{
+        display:block;
+        min-width:0;
+        max-width:100%;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.18;
+      }
+
+      .segmento-badge.segmento-vazio{
+        --segmento-cor:#94A3B8;
+        color:#64748b;
+        background:rgba(148,163,184,.10);
+        border-color:rgba(148,163,184,.24);
+        box-shadow:none;
+      }
+
+      .dd-option.dd-option-segmento{
+        position:relative;
+      }
+
+      .dd-option.dd-option-segmento::before{
+        content:"";
+        width:10px;
+        height:10px;
+        min-width:10px;
+        border-radius:999px;
+        background:var(--segmento-cor, #64748B);
+        box-shadow:
+          0 0 0 3px color-mix(in srgb, var(--segmento-cor, #64748B) 16%, #ffffff),
+          0 0 0 1px rgba(15,23,42,.06);
+      }
+
       .pager{
+        min-width:1320px;
         padding: 12px 14px;
         display:flex;
         align-items:center;
@@ -434,42 +543,13 @@
         flex-wrap:wrap;
       }
 
-      @media (max-width: 1360px){
-        .list-head,
-        .row{
-          grid-template-columns: 86px 170px 130px 180px 1fr 1fr;
-        }
-
-        .hide-xl{
-          display:none;
-        }
-      }
-
-      @media (max-width: 1120px){
-        .list-head,
-        .row{
-          grid-template-columns: 86px 170px 130px 180px 1fr;
-        }
-
-        .hide-lg{
-          display:none;
-        }
-      }
-
-      @media (max-width: 760px){
+      @media (max-width: 900px){
         .filters .field,
-        .filters .field.field-status{
+        .filters .field.field-busca,
+        .filters .field.field-filtro,
+        .filters .field.field-ativo{
           min-width: 100%;
           flex-basis:100%;
-        }
-
-        .list-head,
-        .row{
-          grid-template-columns: 72px 1fr 140px;
-        }
-
-        .hide-md{
-          display:none;
         }
 
         .logo-empresa,
@@ -489,7 +569,7 @@
 
     <form id="formFiltrosContratos" method="GET" action="{{ url_for('Paineis.contratos_lista') }}">
       <div class="filters">
-        <div class="field">
+        <div class="field field-busca">
           <label>Buscar</label>
 
           <div id="comboBuscaContratos" class="combo-busca">
@@ -500,13 +580,20 @@
               value="{{ filtros.q or '' }}"
             >
 
+            <input
+              type="hidden"
+              name="id_contrato"
+              id="inputBuscaContratosId"
+              value="{{ filtros.id_contrato or '' }}"
+            >
+
             <div class="combo-busca-controle">
               <input
                 id="inputBuscaContratosTexto"
                 class="combo-busca-input"
                 type="text"
                 value="{{ filtros.q_exibicao or filtros.q or '' }}"
-                placeholder="Digite ID, razão social, marca, cidade, CNPJ/CPF, nº contrato ou nº prévia..."
+                placeholder="Digite ID, razão social, marca, cidade, segmento, CNPJ/CPF, nº contrato ou nº prévia..."
                 autocomplete="off"
                 spellcheck="false"
               >
@@ -522,7 +609,7 @@
           </div>
         </div>
 
-        <div class="field field-status">
+        <div class="field field-filtro">
           <label>Status</label>
 
           <details class="multi-dd" id="filtroStatusDetalhes">
@@ -557,7 +644,7 @@
                 {% for status in status_opcoes %}
                   <label
                     class="dd-option"
-                    data-status-texto="{{ (status.Status or '')|lower }}"
+                    data-texto-filtro="{{ (status.Status or '')|lower }}"
                   >
                     <input
                       type="checkbox"
@@ -573,6 +660,152 @@
           </details>
         </div>
 
+        <div class="field field-filtro">
+          <label>Cidade do Contrato</label>
+
+          <details class="multi-dd" id="filtroCidadeDetalhes">
+            <summary class="dd-summary">
+              <span id="cidadeResumoTexto" class="dd-label">
+                {% if filtros.cidade_nomes and filtros.cidade_nomes|length > 0 %}
+                  {{ filtros.cidade_nomes|join(", ") }}
+                {% else %}
+                  Todas as cidades
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnMarcarTodasCidades">Marcar todas</button>
+                <button type="button" class="dd-action-btn" id="btnLimparCidades">Limpar</button>
+              </div>
+
+              <div class="dd-search-wrap">
+                <input
+                  id="inputBuscaCidadeLocal"
+                  class="dd-search"
+                  type="text"
+                  placeholder="Filtrar cidade..."
+                  autocomplete="off"
+                >
+              </div>
+
+              <div class="dd-options" id="listaOpcoesCidade">
+                {% for cidade in cidade_opcoes %}
+                  {% set nome_cidade = (cidade.CidadeExibicao or '') %}
+                  <label
+                    class="dd-option"
+                    data-texto-filtro="{{ nome_cidade|lower }}"
+                  >
+                    <input
+                      type="checkbox"
+                      name="cidade"
+                      value="{{ nome_cidade }}"
+                      {% if nome_cidade in filtros.cidades %}checked{% endif %}
+                    >
+                    <span>{{ nome_cidade or "—" }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="field field-filtro">
+          <label>Segmento do Contrato</label>
+
+          <details class="multi-dd" id="filtroSegmentoDetalhes">
+            <summary class="dd-summary">
+              <span id="segmentoResumoTexto" class="dd-label">
+                {% if filtros.segmento_nomes and filtros.segmento_nomes|length > 0 %}
+                  {{ filtros.segmento_nomes|join(", ") }}
+                {% else %}
+                  Todos os segmentos
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnMarcarTodosSegmentos">Marcar todos</button>
+                <button type="button" class="dd-action-btn" id="btnLimparSegmentos">Limpar</button>
+              </div>
+
+              <div class="dd-search-wrap">
+                <input
+                  id="inputBuscaSegmentoLocal"
+                  class="dd-search"
+                  type="text"
+                  placeholder="Filtrar segmento..."
+                  autocomplete="off"
+                >
+              </div>
+
+              <div class="dd-options" id="listaOpcoesSegmento">
+                {% for segmento in segmento_opcoes %}
+                  {% set nome_segmento = (segmento.Classe or '') %}
+                  {% set cor_segmento = (segmento.Hex or '#64748B') %}
+                  <label
+                    class="dd-option dd-option-segmento"
+                    data-texto-filtro="{{ nome_segmento|lower }}"
+                    style="--segmento-cor: {{ cor_segmento }};"
+                  >
+                    <input
+                      type="checkbox"
+                      name="segmento"
+                      value="{{ nome_segmento }}"
+                      {% if nome_segmento in filtros.segmentos %}checked{% endif %}
+                    >
+                    <span>{{ nome_segmento or "—" }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="field field-ativo">
+          <label>Contrato Ativo</label>
+
+          <details class="multi-dd" id="filtroAtivoDetalhes">
+            <summary class="dd-summary">
+              <span id="ativoResumoTexto" class="dd-label">
+                {% if filtros.contrato_ativo_nome %}
+                  {{ filtros.contrato_ativo_nome }}
+                {% else %}
+                  Todos
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnLimparAtivo">Limpar</button>
+              </div>
+
+              <div class="dd-options" id="listaOpcoesAtivo">
+                {% for ativo in contrato_ativo_opcoes %}
+                  <label
+                    class="dd-option"
+                    data-texto-filtro="{{ ativo.nome|lower }}"
+                  >
+                    <input
+                      type="checkbox"
+                      name="contrato_ativo"
+                      value="{{ ativo.valor }}"
+                      {% if filtros.contrato_ativo == ativo.valor %}checked{% endif %}
+                    >
+                    <span>{{ ativo.nome }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
         <input type="hidden" name="per_page" value="{{ filtros.per_page }}">
         <input type="hidden" name="calcular_total" value="{{ 1 if paginacao.calcular_total else 0 }}">
 
@@ -581,7 +814,7 @@
         </button>
 
         <a class="btn-pill danger"
-           href="{{ url_for('Paineis.contratos_lista', per_page=filtros.per_page, calcular_total=(1 if paginacao.calcular_total else 0)) }}"
+           href="{{ url_for('Paineis.contratos_lista', per_page=filtros.per_page, calcular_total=(1 if paginacao.calcular_total else 0), limpar_filtros=1) }}"
            title="Limpa busca e volta para a lista completa">
           ⌁ Limpar
         </a>
@@ -592,17 +825,19 @@
       <div class="list-head">
         <div>Logo</div>
         <div>IDContrato</div>
-        <div class="hide-md">Data</div>
+        <div>Data</div>
+        <div>Ativo</div>
         <div>Status</div>
-        <div class="hide-xl">Cidade</div>
-        <div class="hide-md">Razão Social</div>
-        <div class="hide-lg">Marca</div>
+        <div>Cidade</div>
+        <div>Segmento</div>
+        <div>Razão Social</div>
+        <div>Marca</div>
       </div>
 
       {% if contratos and contratos|length > 0 %}
         {% for c in contratos %}
           <div class="row"
-               ondblclick="window.location.href='{{ url_for('Paineis.contratos_detalhe', id_contrato=c.IDFatoControleContratosEuromidia) }}'"
+               ondblclick="window.location.href='{{ url_for('Paineis.contratos_detalhe', id_contrato=c.IDFatoControleContratosEuromidia, return_to=filtros.url_atual) }}'"
                title="Duplo clique para abrir">
 
             <div class="logo-box">
@@ -619,17 +854,26 @@
             </div>
 
             <div>
-              <span class="id-pill">
-                <span class="dot"></span>
-                #{{ c.IDContrato or c.IDFatoControleContratosEuromidia }}
+              <span class="id-contrato-texto">
+                {{ c.IDContrato or c.IDFatoControleContratosEuromidia }}
               </span>
             </div>
 
-            <div class="data-col hide-md">
+            <div class="data-col">
               {% if c.DataLancamento %}
                 {{ c.DataLancamento.strftime("%d/%m/%Y") }}
               {% else %}
                 —
+              {% endif %}
+            </div>
+
+            <div>
+              {% if c.BitAtivo is not none and c.BitAtivo|int == 1 %}
+                <span class="ativo-badge ativo-sim">Ativo</span>
+              {% elif c.BitAtivo is not none and c.BitAtivo|int == 0 %}
+                <span class="ativo-badge ativo-nao">Inativo</span>
+              {% else %}
+                <span class="ativo-badge">—</span>
               {% endif %}
             </div>
 
@@ -639,15 +883,33 @@
               </span>
             </div>
 
-            <div class="ellipsis hide-xl" style="font-weight:900;color:var(--text);">
+            <div class="texto-quebra">
               {{ c.CidadeExibicao or "—" }}
             </div>
 
-            <div class="hide-md ellipsis">
+            <div class="texto-quebra">
+              {% if c.SegmentoContrato %}
+                <span
+                  class="segmento-badge"
+                  style="--segmento-cor: {{ c.SegmentoHex or '#64748B' }};"
+                  title="{{ c.SegmentoContrato }}"
+                >
+                  <span class="segmento-badge-dot" aria-hidden="true"></span>
+                  <span class="segmento-badge-texto">{{ c.SegmentoContrato }}</span>
+                </span>
+              {% else %}
+                <span class="segmento-badge segmento-vazio">
+                  <span class="segmento-badge-dot" aria-hidden="true"></span>
+                  <span class="segmento-badge-texto">Sem segmento</span>
+                </span>
+              {% endif %}
+            </div>
+
+            <div class="texto-quebra">
               {{ c.RazaoSocial or "—" }}
             </div>
 
-            <div class="hide-lg ellipsis">
+            <div class="texto-quebra">
               {{ c.MarcaExibida or "—" }}
             </div>
           </div>
@@ -673,7 +935,11 @@
                               page=1,
                               per_page=filtros.per_page,
                               q=filtros.q,
+                              id_contrato=filtros.id_contrato,
                               status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
                               calcular_total=(1 if paginacao.calcular_total else 0)) }}">
             «
           </a>
@@ -684,7 +950,11 @@
                               page=(p-1 if p>1 else 1),
                               per_page=filtros.per_page,
                               q=filtros.q,
+                              id_contrato=filtros.id_contrato,
                               status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
                               calcular_total=(1 if paginacao.calcular_total else 0)) }}">
             ‹
           </a>
@@ -699,7 +969,11 @@
                               page=(p+1 if p<tp else tp),
                               per_page=filtros.per_page,
                               q=filtros.q,
+                              id_contrato=filtros.id_contrato,
                               status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
                               calcular_total=(1 if paginacao.calcular_total else 0)) }}">
             ›
           </a>
@@ -710,7 +984,11 @@
                               page=tp,
                               per_page=filtros.per_page,
                               q=filtros.q,
+                              id_contrato=filtros.id_contrato,
                               status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
                               calcular_total=(1 if paginacao.calcular_total else 0)) }}">
             »
           </a>
@@ -729,6 +1007,7 @@
         const comboBusca = document.getElementById("comboBuscaContratos");
         const inputBuscaTexto = document.getElementById("inputBuscaContratosTexto");
         const inputBuscaValor = document.getElementById("inputBuscaContratosValor");
+        const inputBuscaId = document.getElementById("inputBuscaContratosId");
         const btnBuscaToggle = document.getElementById("btnBuscaContratosToggle");
         const listaBusca = document.getElementById("listaBuscaContratos");
         const urlSugestoesBusca = "{{ url_for('Paineis.contratos_busca_sugestoes') }}";
@@ -745,16 +1024,28 @@
           indiceBuscaAtivo = -1;
         }
 
+        function submeterFormularioFiltros() {
+          if (formFiltros.requestSubmit) {
+            formFiltros.requestSubmit();
+            return;
+          }
+
+          formFiltros.submit();
+        }
+
         function marcarBuscaComoLivre() {
           inputBuscaTexto.dataset.selecionado = "0";
           inputBuscaValor.value = inputBuscaTexto.value.trim();
+          inputBuscaId.value = "";
         }
 
         function aplicarSugestaoBusca(item) {
           inputBuscaTexto.value = item.rotulo || item.valor_busca || "";
           inputBuscaValor.value = item.valor_busca || "";
+          inputBuscaId.value = item.id || item.valor_busca || "";
           inputBuscaTexto.dataset.selecionado = "1";
           fecharListaBusca();
+          submeterFormularioFiltros();
         }
 
         function atualizarOpcaoAtivaBusca() {
@@ -892,6 +1183,7 @@
         formFiltros.addEventListener("submit", function () {
           if (inputBuscaTexto.dataset.selecionado !== "1") {
             inputBuscaValor.value = inputBuscaTexto.value.trim();
+            inputBuscaId.value = "";
           }
         });
 
@@ -901,76 +1193,183 @@
           }
         });
 
-        const filtroStatusDetalhes = document.getElementById("filtroStatusDetalhes");
-        const statusResumoTexto = document.getElementById("statusResumoTexto");
-        const inputBuscaStatusLocal = document.getElementById("inputBuscaStatusLocal");
-        const btnMarcarTodosStatus = document.getElementById("btnMarcarTodosStatus");
-        const btnLimparStatus = document.getElementById("btnLimparStatus");
-        const checkboxesStatus = Array.from(
-          document.querySelectorAll('#listaOpcoesStatus input[type="checkbox"][name="status"]')
-        );
+        function configurarMultiFiltro(config) {
+          const detalhes = document.getElementById(config.idDetalhes);
+          const resumo = document.getElementById(config.idResumo);
+          const busca = document.getElementById(config.idBusca);
+          const botaoMarcarTodos = config.idMarcarTodos ? document.getElementById(config.idMarcarTodos) : null;
+          const botaoLimpar = config.idLimpar ? document.getElementById(config.idLimpar) : null;
+          const checkboxes = Array.from(document.querySelectorAll(config.seletorCheckboxes));
 
-        function obterNomeStatusCheckbox(checkbox) {
-          const label = checkbox.closest(".dd-option");
-          const span = label ? label.querySelector("span") : null;
-          return (span ? span.textContent : "").trim();
+          function nomeCheckbox(checkbox) {
+            const label = checkbox.closest(".dd-option");
+            const span = label ? label.querySelector("span") : null;
+            return (span ? span.textContent : "").trim();
+          }
+
+          function atualizarResumo() {
+            const nomesMarcados = checkboxes
+              .filter((checkbox) => checkbox.checked)
+              .map((checkbox) => nomeCheckbox(checkbox))
+              .filter(Boolean);
+
+            if (!nomesMarcados.length) {
+              resumo.textContent = config.textoPadrao;
+              return;
+            }
+
+            if (nomesMarcados.length <= 2) {
+              resumo.textContent = nomesMarcados.join(", ");
+              return;
+            }
+
+            resumo.textContent = `${nomesMarcados.length} ${config.nomePluralSelecionado}`;
+          }
+
+          checkboxes.forEach((checkbox) => {
+            checkbox.addEventListener("change", atualizarResumo);
+          });
+
+          if (botaoMarcarTodos) {
+            botaoMarcarTodos.addEventListener("click", function () {
+              checkboxes.forEach((checkbox) => {
+                checkbox.checked = true;
+              });
+              atualizarResumo();
+            });
+          }
+
+          if (botaoLimpar) {
+            botaoLimpar.addEventListener("click", function () {
+              checkboxes.forEach((checkbox) => {
+                checkbox.checked = false;
+              });
+              atualizarResumo();
+            });
+          }
+
+          if (busca) {
+            busca.addEventListener("input", function () {
+              const termo = busca.value.trim().toLowerCase();
+
+              checkboxes.forEach((checkbox) => {
+                const opcao = checkbox.closest(".dd-option");
+                const texto = (opcao ? (opcao.dataset.textoFiltro || "") : "").trim().toLowerCase();
+                if (opcao) {
+                  opcao.hidden = termo && !texto.includes(termo);
+                }
+              });
+            });
+          }
+
+          if (detalhes && busca) {
+            detalhes.addEventListener("toggle", function () {
+              if (detalhes.open) {
+                setTimeout(function () {
+                  busca.focus();
+                }, 0);
+              }
+            });
+          }
+
+          atualizarResumo();
         }
 
-        function atualizarResumoStatus() {
-          const nomesMarcados = checkboxesStatus
-            .filter((checkbox) => checkbox.checked)
-            .map((checkbox) => obterNomeStatusCheckbox(checkbox))
-            .filter(Boolean);
+        function configurarFiltroUnico(config) {
+          const detalhes = document.getElementById(config.idDetalhes);
+          const resumo = document.getElementById(config.idResumo);
+          const botaoLimpar = config.idLimpar ? document.getElementById(config.idLimpar) : null;
+          const checkboxes = Array.from(document.querySelectorAll(config.seletorCheckboxes));
 
-          if (!nomesMarcados.length) {
-            statusResumoTexto.textContent = "Todos os status";
-            return;
+          function nomeCheckbox(checkbox) {
+            const label = checkbox.closest(".dd-option");
+            const span = label ? label.querySelector("span") : null;
+            return (span ? span.textContent : "").trim();
           }
 
-          if (nomesMarcados.length <= 2) {
-            statusResumoTexto.textContent = nomesMarcados.join(", ");
-            return;
+          function atualizarResumo() {
+            const marcado = checkboxes.find((checkbox) => checkbox.checked);
+            resumo.textContent = marcado ? nomeCheckbox(marcado) : config.textoPadrao;
           }
 
-          statusResumoTexto.textContent = `${nomesMarcados.length} status selecionados`;
+          checkboxes.forEach((checkbox) => {
+            checkbox.addEventListener("change", function () {
+              if (checkbox.checked) {
+                checkboxes.forEach((outro) => {
+                  if (outro !== checkbox) {
+                    outro.checked = false;
+                  }
+                });
+              }
+              atualizarResumo();
+            });
+          });
+
+          if (botaoLimpar) {
+            botaoLimpar.addEventListener("click", function () {
+              checkboxes.forEach((checkbox) => {
+                checkbox.checked = false;
+              });
+              atualizarResumo();
+            });
+          }
+
+          if (detalhes) {
+            detalhes.addEventListener("toggle", function () {
+              if (detalhes.open) {
+                setTimeout(function () {
+                  const primeiro = detalhes.querySelector('input[type="checkbox"]');
+                  if (primeiro) {
+                    primeiro.focus();
+                  }
+                }, 0);
+              }
+            });
+          }
+
+          atualizarResumo();
         }
 
-        checkboxesStatus.forEach((checkbox) => {
-          checkbox.addEventListener("change", atualizarResumoStatus);
+        configurarMultiFiltro({
+          idDetalhes: "filtroStatusDetalhes",
+          idResumo: "statusResumoTexto",
+          idBusca: "inputBuscaStatusLocal",
+          idMarcarTodos: "btnMarcarTodosStatus",
+          idLimpar: "btnLimparStatus",
+          seletorCheckboxes: '#listaOpcoesStatus input[type="checkbox"][name="status"]',
+          textoPadrao: "Todos os status",
+          nomePluralSelecionado: "status selecionados"
         });
 
-        btnMarcarTodosStatus.addEventListener("click", function () {
-          checkboxesStatus.forEach((checkbox) => {
-            checkbox.checked = true;
-          });
-          atualizarResumoStatus();
+        configurarMultiFiltro({
+          idDetalhes: "filtroCidadeDetalhes",
+          idResumo: "cidadeResumoTexto",
+          idBusca: "inputBuscaCidadeLocal",
+          idMarcarTodos: "btnMarcarTodasCidades",
+          idLimpar: "btnLimparCidades",
+          seletorCheckboxes: '#listaOpcoesCidade input[type="checkbox"][name="cidade"]',
+          textoPadrao: "Todas as cidades",
+          nomePluralSelecionado: "cidades selecionadas"
         });
 
-        btnLimparStatus.addEventListener("click", function () {
-          checkboxesStatus.forEach((checkbox) => {
-            checkbox.checked = false;
-          });
-          atualizarResumoStatus();
+        configurarMultiFiltro({
+          idDetalhes: "filtroSegmentoDetalhes",
+          idResumo: "segmentoResumoTexto",
+          idBusca: "inputBuscaSegmentoLocal",
+          idMarcarTodos: "btnMarcarTodosSegmentos",
+          idLimpar: "btnLimparSegmentos",
+          seletorCheckboxes: '#listaOpcoesSegmento input[type="checkbox"][name="segmento"]',
+          textoPadrao: "Todos os segmentos",
+          nomePluralSelecionado: "segmentos selecionados"
         });
 
-        inputBuscaStatusLocal.addEventListener("input", function () {
-          const termo = inputBuscaStatusLocal.value.trim().toLowerCase();
-
-          document.querySelectorAll("#listaOpcoesStatus .dd-option").forEach((opcao) => {
-            const texto = (opcao.dataset.statusTexto || "").trim();
-            opcao.hidden = termo && !texto.includes(termo);
-          });
+        configurarFiltroUnico({
+          idDetalhes: "filtroAtivoDetalhes",
+          idResumo: "ativoResumoTexto",
+          idLimpar: "btnLimparAtivo",
+          seletorCheckboxes: '#listaOpcoesAtivo input[type="checkbox"][name="contrato_ativo"]',
+          textoPadrao: "Todos"
         });
-
-        filtroStatusDetalhes.addEventListener("toggle", function () {
-          if (filtroStatusDetalhes.open) {
-            setTimeout(function () {
-              inputBuscaStatusLocal.focus();
-            }, 0);
-          }
-        });
-
-        atualizarResumoStatus();
       });
     </script>
   </div>

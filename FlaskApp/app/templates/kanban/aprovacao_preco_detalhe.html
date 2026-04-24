@@ -1,15 +1,80 @@
 {% extends "euromidia/base_euromidia.html" %}
-{% block title %}Aprovação de Preço do Card #{{ card.id_card }}{% endblock %}
+{% set v_id_card = card.id_card or card.IDFatoKanbanCard %}
+{% block title %}Aprovação de Preço do Card #{{ v_id_card }}{% endblock %}
+
+{% macro texto(valor) -%}
+{{ valor if valor not in (none, '', 'None') else '—' }}
+{%- endmacro %}
 
 {% macro moeda(valor) -%}
+{% if valor not in (none, '', 'None') %}
 R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+{% else %}
+—
+{% endif %}
 {%- endmacro %}
 
 {% macro percentual(valor) -%}
+{% if valor not in (none, '', 'None') %}
 {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}%
+{% else %}
+—
+{% endif %}
+{%- endmacro %}
+
+{% macro cnpj_fmt(valor) -%}
+{% if valor not in (none, '', 'None') %}
+{% set limpo = (valor|string).replace('.', '').replace('/', '').replace('-', '').replace(' ', '') %}
+{% if limpo|length == 14 %}
+{{ limpo[0:2] }}.{{ limpo[2:5] }}.{{ limpo[5:8] }}/{{ limpo[8:12] }}-{{ limpo[12:14] }}
+{% else %}
+{{ valor }}
+{% endif %}
+{% else %}
+—
+{% endif %}
 {%- endmacro %}
 
 {% block content %}
+{% set v_titulo = card.titulo or card.Titulo %}
+{% set v_empresa = card.nome_empresa or card.NomeEmpresa or card.nome_fantasia or card.NomeFantasia or card.razao_social or card.EmpresaRazaoSocial or card.RazaoSocial %}
+{% set v_razao_social = card.razao_social or card.EmpresaRazaoSocial or card.RazaoSocial or v_empresa %}
+{% set v_nome_fantasia = card.nome_fantasia or card.NomeFantasia %}
+{% set v_cnpj = card.cnpj or card.EmpresaCNPJ or card.CNPJ %}
+{% set v_cnae = card.cnae_empresa or card.EmpresaCNAE or card.CNAE or card.cnaepadrao %}
+{% set v_descricao_cnae = card.descricao_cnae or card.DescricaoCnae or card.CnaeDescricao or card.Descricao %}
+{% set v_classe = card.classe_cnae or card.EmpresaClasse or card.CnaeClasse or card.Classe %}
+{% set v_setor = card.setor_cnae or card.EmpresaSetor or card.CnaeSetor or card.Setor %}
+{% set v_macro_setor = card.macro_setor or card.MacroSetor or card.CnaeMacroSetor %}
+{% set v_hex_cnae = card.hex_cnae or card.CnaeHex or card.Hex %}
+{% set v_subclasse = card.subclasse_cnae or card.CnaeSubClasse or card.SubClasse %}
+{% set v_classificacao_macro = card.classificacao_macro or card.CnaeClassificacaoMacro or card.ClassificacaoMacro %}
+{% set v_score_setor = card.score_setor or card.ScoreSetor %}
+{% set v_email = card.email_empresa or card.Email or card.email or card.EmailEmpresa %}
+{% set v_telefone = card.telefone_empresa or card.Telefone or card.TelefoneContato1 or card.TelefoneContato2 %}
+{% set v_telefone2 = card.TelefoneContato2 or card.telefone2 %}
+{% set v_municipio = card.municipio or card.Municipio %}
+{% set v_uf = card.uf or card.UF %}
+{% set v_bairro = card.bairro or card.Bairro %}
+{% set v_logradouro = card.logradouro or card.Logradouro %}
+{% set v_numero = card.numero or card.Numero %}
+{% set v_complemento = card.complemento or card.Complemento %}
+{% set v_cep = card.cep or card.CEP %}
+{% set v_endereco_completo = card.endereco_completo or card.EnderecoCompleto %}
+{% set v_origem = card.OrigemAtendimento or card.NomeOrigemAtendimento or card.OrigemAtendimentoEmpresa or card.Origem %}
+{% set v_tipo_cliente = card.TipoClienteDesconto or card.TipoCliente or card.NomeTipoCliente or card.TipoClienteEmpresa %}
+{% set v_tipo_solicitacao = card.TipoSolicitacao or card.tipo_contrato or card.TipoContrato %}
+{% set v_nome_fase = card.nome_fase or card.NomeFase or card.FaseAtual %}
+{% set v_responsavel = card.nome_usuario_responsavel or card.NomeUsuarioResponsavel or card.NomeUsuario or card.Vendedor or 'Não informado' %}
+{% set v_porte = card.porte or card.Porte %}
+{% set v_natureza_juridica = card.natureza_juridica or card.NaturezaJuridica %}
+{% set v_situacao = card.situacao_cadastral or card.DescricaoSituacaoCadastral or card.SituacaoCadastral %}
+{% set v_motivo_situacao = card.DescricaoMotivoSituacaoCadastral or card.MotivoSituacaoCadastral %}
+{% set v_capital_social = card.capital_social or card.CapitalSocial %}
+{% set v_data_inicio = card.data_inicio_atividades or card.DataInicioAtividades %}
+{% set v_latitude = card.latitude or card.Latitude %}
+{% set v_longitude = card.longitude or card.Longitude %}
+
 <style>
   .apd-wrap{
     display:flex;
@@ -46,6 +111,7 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
     color:#475569;
     font-size:14px;
     line-height:1.45;
+    font-weight:700;
   }
 
   .apd-acoes{
@@ -124,6 +190,7 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
     font-size:24px;
     color:#0f172a;
     font-weight:950;
+    word-break:break-word;
   }
 
   .apd-dados-grid{
@@ -137,6 +204,14 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
     border-radius:14px;
     background:#fff;
     padding:12px 14px;
+  }
+
+  .apd-dado.largo{
+    grid-column:span 2;
+  }
+
+  .apd-dado.cheio{
+    grid-column:1 / -1;
   }
 
   .apd-dado-label{
@@ -304,6 +379,23 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
     background:#fff;
   }
 
+
+  .apd-cnae-badge{
+    display:inline-flex;
+    align-items:center;
+    width:max-content;
+    max-width:100%;
+    border-radius:999px;
+    padding:5px 9px;
+    border:1px solid rgba(15,23,42,.12);
+    background:#f8fafc;
+    font-size:12px;
+    line-height:1.25;
+    font-weight:950;
+    word-break:break-word;
+    white-space:normal;
+  }
+
   .apd-muted{
     color:#64748b;
     font-size:12px;
@@ -314,11 +406,14 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
   @media (max-width: 1180px){
     .apd-grid-resumo,
     .apd-dados-grid{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+    .apd-dado.largo{ grid-column:span 2; }
   }
 
   @media (max-width: 760px){
     .apd-grid-resumo,
     .apd-dados-grid{ grid-template-columns:1fr; }
+    .apd-dado.largo,
+    .apd-dado.cheio{ grid-column:1; }
   }
 </style>
 
@@ -326,25 +421,28 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
   <section class="apd-card">
     <div class="apd-topo">
       <div class="apd-titulo">
-        <h1>Card #{{ card.id_card }} • {{ card.titulo or '—' }}</h1>
+        <h1>Card #{{ v_id_card }} • {{ v_titulo or '—' }}</h1>
+        <p class="apd-subtitulo">
+          {{ v_razao_social or v_empresa or 'Empresa não identificada' }}{% if v_cnpj %} • {{ cnpj_fmt(v_cnpj) }}{% endif %}
+        </p>
       </div>
 
       <div class="apd-acoes">
         <a class="apd-btn" href="{{ url_for('kanban.lista_aprovacao_preco') }}">← Voltar para lista</a>
-        <a class="apd-btn" href="{{ url_for('kanban.historico_card_visualizacao', id_card=card.id_card) }}">Histórico do card</a>
-        <a class="apd-btn" href="{{ url_for('kanban.historico_precos_visualizacao', id_card=card.id_card) }}">Histórico de preços</a>
+        <a class="apd-btn" href="{{ url_for('kanban.historico_card_visualizacao', id_card=v_id_card) }}">Histórico do card</a>
+        <a class="apd-btn" href="{{ url_for('kanban.historico_precos_visualizacao', id_card=v_id_card) }}">Histórico de preços</a>
       </div>
     </div>
 
     <div class="apd-grid-resumo" style="margin-top:18px;">
       <article class="apd-bloco">
         <p class="apd-kpi-label">Empresa</p>
-        <p class="apd-kpi-valor" style="font-size:18px;">{{ card.nome_fantasia or card.razao_social or '—' }}</p>
+        <p class="apd-kpi-valor" style="font-size:18px;">{{ v_nome_fantasia or v_razao_social or v_empresa or '—' }}</p>
       </article>
 
       <article class="apd-bloco">
         <p class="apd-kpi-label">Fase atual</p>
-        <p class="apd-kpi-valor" style="font-size:18px;">{{ card.nome_fase or '—' }}</p>
+        <p class="apd-kpi-valor" style="font-size:18px;">{{ v_nome_fase or '—' }}</p>
       </article>
 
       <article class="apd-bloco">
@@ -354,53 +452,119 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
 
       <article class="apd-bloco">
         <p class="apd-kpi-label">Responsável</p>
-        <p class="apd-kpi-valor" style="font-size:18px;">{{ card.nome_usuario_responsavel or '—' }}</p>
+        <p class="apd-kpi-valor" style="font-size:18px;">{{ v_responsavel or '—' }}</p>
       </article>
     </div>
 
     <div class="apd-dados-grid" style="margin-top:16px;">
-      <div class="apd-dado">
+      <div class="apd-dado largo">
         <span class="apd-dado-label">Razão social</span>
-        <div class="apd-dado-valor">{{ card.razao_social or '—' }}</div>
+        <div class="apd-dado-valor">{{ texto(v_razao_social) }}</div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">Nome fantasia</span>
-        <div class="apd-dado-valor">{{ card.nome_fantasia or '—' }}</div>
+        <div class="apd-dado-valor">{{ texto(v_nome_fantasia) }}</div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">CNPJ</span>
-        <div class="apd-dado-valor">{{ card.cnpj or '—' }}</div>
+        <div class="apd-dado-valor">{{ cnpj_fmt(v_cnpj) }}</div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">CNAE</span>
-        <div class="apd-dado-valor">{{ card.cnae_empresa or '—' }}</div>
+        <div class="apd-dado-valor">
+          {% if v_hex_cnae and v_cnae %}
+          <span class="apd-cnae-badge" style="border-color:{{ v_hex_cnae }}66; background:{{ v_hex_cnae }}14;">{{ v_cnae }}</span>
+          {% else %}
+          {{ texto(v_cnae) }}
+          {% endif %}
+          {% if v_descricao_cnae %}<br><span class="apd-muted">{{ v_descricao_cnae }}</span>{% endif %}
+        </div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">Classe / Setor</span>
-        <div class="apd-dado-valor">{{ card.classe_cnae or '—' }} • {{ card.setor_cnae or '—' }}</div>
+        <div class="apd-dado-valor">{{ texto(v_classe) }} • {{ texto(v_setor) }}</div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">Macro setor</span>
-        <div class="apd-dado-valor">{{ card.macro_setor or '—' }}</div>
+        <div class="apd-dado-valor">{{ texto(v_macro_setor) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Subclasse / Classificação</span>
+        <div class="apd-dado-valor">
+          {% if v_hex_cnae and v_subclasse %}
+          <span class="apd-cnae-badge" style="border-color:{{ v_hex_cnae }}66; background:{{ v_hex_cnae }}14;">{{ v_subclasse }}</span>
+          {% else %}
+          {{ texto(v_subclasse) }}
+          {% endif %}
+          {% if v_classificacao_macro %}<br><span class="apd-muted">{{ v_classificacao_macro }}</span>{% endif %}
+        </div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">Email empresa</span>
-        <div class="apd-dado-valor">{{ card.email_empresa or '—' }}</div>
+        <div class="apd-dado-valor">{{ texto(v_email) }}</div>
       </div>
       <div class="apd-dado">
         <span class="apd-dado-label">Telefone</span>
-        <div class="apd-dado-valor">{{ card.telefone_empresa or '—' }}</div>
+        <div class="apd-dado-valor">
+          {{ texto(v_telefone) }}{% if v_telefone2 and v_telefone2 != v_telefone %}<br><span class="apd-muted">{{ v_telefone2 }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="apd-dado cheio">
+        <span class="apd-dado-label">Localização</span>
+        <div class="apd-dado-valor">
+          {% if v_endereco_completo %}
+            {{ v_endereco_completo }}
+          {% else %}
+            {% if v_logradouro %}{{ v_logradouro }}{% endif %}{% if v_numero %}, {{ v_numero }}{% endif %}{% if v_complemento %} - {{ v_complemento }}{% endif %}{% if v_bairro %} • {{ v_bairro }}{% endif %}{% if v_municipio or v_uf %} • {{ v_municipio or '—' }}/{{ v_uf or '—' }}{% endif %}{% if v_cep %} • CEP {{ v_cep }}{% endif %}
+            {% if not (v_logradouro or v_numero or v_complemento or v_bairro or v_municipio or v_uf or v_cep) %}—{% endif %}
+          {% endif %}
+        </div>
       </div>
       <div class="apd-dado">
-        <span class="apd-dado-label">Localização</span>
-        <div class="apd-dado-valor">{{ card.municipio or '—' }}/{{ card.uf or '—' }} • {{ card.bairro or '—' }}</div>
+        <span class="apd-dado-label">Origem atendimento</span>
+        <div class="apd-dado-valor">{{ texto(v_origem) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Tipo cliente</span>
+        <div class="apd-dado-valor">{{ texto(v_tipo_cliente) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Tipo solicitação</span>
+        <div class="apd-dado-valor">{{ texto(v_tipo_solicitacao) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Porte</span>
+        <div class="apd-dado-valor">{{ texto(v_porte) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Natureza jurídica</span>
+        <div class="apd-dado-valor">{{ texto(v_natureza_juridica) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Situação cadastral</span>
+        <div class="apd-dado-valor">
+          {{ texto(v_situacao) }}
+          {% if v_motivo_situacao %}<br><span class="apd-muted">{{ v_motivo_situacao }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Capital social</span>
+        <div class="apd-dado-valor">{{ moeda(v_capital_social) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Início atividades</span>
+        <div class="apd-dado-valor">{{ texto(v_data_inicio.strftime('%d/%m/%Y') if v_data_inicio and v_data_inicio.strftime is defined else v_data_inicio) }}</div>
+      </div>
+      <div class="apd-dado">
+        <span class="apd-dado-label">Latitude / Longitude</span>
+        <div class="apd-dado-valor">{{ texto(v_latitude) }} • {{ texto(v_longitude) }}</div>
       </div>
     </div>
 
     {% if tags_ativas %}
     <div class="apd-tags">
       {% for tag in tags_ativas %}
-      <span class="apd-tag">{{ tag.NomeTag }}</span>
+      <span class="apd-tag" {% if tag.CorHex %}style="border-color:{{ tag.CorHex }}33; background:{{ tag.CorHex }}14;"{% endif %}>{{ tag.NomeTag }}</span>
       {% endfor %}
     </div>
     {% endif %}
@@ -438,26 +602,27 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
           {% for item in pendencias %}
           {% set custo_base = item.custo_atual if item.custo_atual is not none else item.custo_tabela_operacional %}
           {% set preco_padrao = item.preco_proposto if item.preco_proposto is not none else item.preco_atual %}
+          {% set id_negociacao = item.id_negociacao_preco or item.id_aprova_preco or item.IDFatoAprovaPreco %}
           <tr class="js-linha-pendencia"
-              data-id-negociacao="{{ item.id_negociacao_preco }}"
+              data-id-negociacao="{{ id_negociacao }}"
               data-custo="{{ (custo_base or 0)|float }}">
             <td>
-              <strong>#{{ item.id_negociacao_preco }}</strong><br>
-              <span class="apd-muted">{{ item.data_preco_proposto.strftime('%d/%m/%Y %H:%M') if item.data_preco_proposto else '—' }}</span>
+              <strong>#{{ id_negociacao }}</strong><br>
+              <span class="apd-muted">{{ item.data_preco_proposto.strftime('%d/%m/%Y %H:%M') if item.data_preco_proposto and item.data_preco_proposto.strftime is defined else (item.data_preco_proposto or '—') }}</span>
             </td>
             <td>
-              <strong>{{ item.cod_ponto or 'Painel não informado' }}</strong><br>
-              <span class="apd-muted">{{ item.cod_face or 'Face não informada' }} • {{ item.tipo_painel or '—' }}</span>
+              <strong>{{ item.cod_ponto or item.CodPonto or 'Painel não informado' }}</strong><br>
+              <span class="apd-muted">{{ item.cod_face or item.CodFace or 'Face não informada' }} • {{ item.tipo_painel or item.TipoPainel or item.Tipo or '—' }}</span>
             </td>
             <td>
-              <strong>{{ item.nome_usuario_solicitante or '—' }}</strong><br>
-              <span class="apd-muted">{{ item.observacoes_proposta or 'Sem observação da proposta' }}</span>
+              <strong>{{ item.nome_usuario_solicitante or item.NomeUsuarioSolicitante or '—' }}</strong><br>
+              <span class="apd-muted">{{ item.observacoes_proposta or item.ObservacoesProposta or 'Sem observação da proposta' }}</span>
             </td>
-            <td>{{ moeda(item.custo_atual or item.custo_tabela_operacional) }}</td>
-            <td>{{ moeda(item.preco_atual) }}</td>
-            <td>{{ moeda(item.preco_proposto or item.valor_venda_final_operacional or item.novo_valor_operacional) }}</td>
-            <td>{{ percentual(item.desconto_proposto or item.percentual_desconto_operacional) }}</td>
-            <td>{{ percentual(item.margem_proposta) }}</td>
+            <td>{{ moeda(item.custo_atual or item.CustoAtual or item.custo_tabela_operacional or item.CustoTabela) }}</td>
+            <td>{{ moeda(item.preco_atual or item.PrecoAtual) }}</td>
+            <td>{{ moeda(item.preco_proposto or item.PrecoProposto or item.valor_venda_final_operacional or item.ValorVendaFinal or item.novo_valor_operacional or item.NovoValor) }}</td>
+            <td>{{ percentual(item.desconto_proposto or item.DescontoProposto or item.percentual_desconto_operacional or item.PercentualDesconto) }}</td>
+            <td>{{ percentual(item.margem_proposta or item.MargemProposta) }}</td>
             <td>
               <input type="text"
                      class="apd-input js-preco-aprovado"
@@ -510,8 +675,9 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
         </thead>
         <tbody>
           {% for item in historico_precos %}
+          {% set data_historico = item.data_aprovacao_preco or item.data_preco_proposto %}
           <tr>
-            <td>{{ (item.data_aprovacao_preco or item.data_preco_proposto).strftime('%d/%m/%Y %H:%M') if (item.data_aprovacao_preco or item.data_preco_proposto) else '—' }}</td>
+            <td>{{ data_historico.strftime('%d/%m/%Y %H:%M') if data_historico and data_historico.strftime is defined else (data_historico or '—') }}</td>
             <td><strong>{{ item.status_negociacao or '—' }}</strong></td>
             <td>{{ item.nome_usuario_solicitante or '—' }}</td>
             <td>{{ item.nome_usuario_aprovador or '—' }}</td>
@@ -627,7 +793,7 @@ R$ {{ "{:,.2f}".format((valor or 0)|float).replace(",", "X").replace(".", ",").r
     mostrarMensagem(null, "");
 
     try {
-      const resposta = await fetch("{{ url_for('kanban.api_aprovacao_preco_aprovar', id_card=card.id_card) }}", {
+      const resposta = await fetch("{{ url_for('kanban.api_aprovacao_preco_aprovar', id_card=v_id_card) }}", {
         method: "POST",
         credentials: "same-origin",
         headers: headersJSON,

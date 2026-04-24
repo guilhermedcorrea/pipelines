@@ -29,6 +29,7 @@ import math
 from flask_login import current_user
 import threading
 import os
+from urllib.parse import parse_qs, urlsplit
 from types import SimpleNamespace
 from PIL import Image, ImageOps
 from pathlib import Path
@@ -93,6 +94,40 @@ def _url_request_atual():
     return request.path
 
 
+def _valor_query_contratos_preenchido(valor):
+    """
+    Eu trato valores vazios gerados por url_for/Jinja para não considerar
+    q=, id_contrato=None ou contrato_ativo= como filtro real.
+    """
+    texto = str(valor or "").strip()
+    if not texto:
+        return False
+
+    return texto.lower() not in {"none", "null", "undefined"}
+
+
+def _url_contratos_tem_filtro_real(url):
+    """
+    Eu verifico se uma URL da lista de contratos possui filtro real.
+
+    Não considero page, per_page e calcular_total como filtros, porque esses
+    parâmetros são paginação/controle visual. O objetivo é preservar somente
+    busca, status, cidade, segmento, contrato ativo ou contrato selecionado.
+    """
+    try:
+        partes = urlsplit(str(url or "").strip())
+        parametros = parse_qs(partes.query, keep_blank_values=False)
+    except Exception:
+        return False
+
+    for chave in ("q", "id_contrato", "status", "cidade", "segmento", "contrato_ativo"):
+        valores = parametros.get(chave) or []
+        if any(_valor_query_contratos_preenchido(valor) for valor in valores):
+            return True
+
+    return False
+
+
 def _resolver_return_to_clientes():
     candidatos = [
         request.args.get("return_to"),
@@ -110,6 +145,47 @@ def _resolver_return_to_clientes():
             return url
 
     return url_for("Paineis.clientes_lista", page=1)
+
+
+
+
+
+
+
+
+
+
+
+
+def _resolver_return_to_contratos():
+    """
+    Eu resolvo a URL de retorno da lista de contratos preservando filtros.
+
+    Aceito somente URLs internas da lista:
+    /paineis/contratos
+    /paineis/contratos?q=...&status=...
+    """
+    candidatos = [
+        request.args.get("return_to"),
+        request.form.get("return_to"),
+        session.get("contratos_lista_return_to"),
+    ]
+
+    for candidato in candidatos:
+        url = str(candidato or "").strip()
+
+        if not url:
+            continue
+
+        if url == "/paineis/contratos" or url.startswith("/paineis/contratos?"):
+            session["contratos_lista_return_to"] = url
+            return url
+
+    return url_for("Paineis.contratos_lista")
+
+
+
+
 
 
 
@@ -9919,9 +9995,76 @@ def _filtro_exists_cidade_exibicao_like(valor_like: str):
 
 
 
+def _obter_lista_texto_request(chave: str) -> list[str]:
+    """
+    Eu leio parâmetros repetidos da query string e devolvo uma lista de textos únicos.
+
+    Exemplos aceitos:
+    ?cidade=Campinas&cidade=São Paulo
+    ?segmento=Comércio|Serviços
+    ?segmento=Comércio,Serviços
+    """
+    valores: list[str] = []
+
+    for bruto in request.args.getlist(chave):
+        if bruto is None:
+            continue
+
+        texto = str(bruto).strip()
+        if not texto:
+            continue
+
+        partes = [texto]
+
+        if "|" in texto:
+            partes = texto.split("|")
+        elif ";" in texto:
+            partes = texto.split(";")
+        elif "," in texto:
+            partes = texto.split(",")
+
+        for parte in partes:
+            valor = str(parte or "").strip()
+            if valor:
+                valores.append(valor)
+
+    retorno: list[str] = []
+    vistos: set[str] = set()
+
+    for valor in valores:
+        chave_vista = valor.upper()
+
+        if chave_vista in vistos:
+            continue
+
+        vistos.add(chave_vista)
+        retorno.append(valor)
+
+    return retorno
 
 
 
+
+
+
+
+
+def _normalizar_hex_css(valor, padrao="#64748B"):
+    """
+    Eu valido a cor hexadecimal antes de mandar para o HTML.
+
+    Isso evita CSS quebrado e também impede que um valor incorreto vindo do banco
+    seja usado dentro do atributo style da etiqueta de segmento.
+    """
+    texto = str(valor or "").strip()
+
+    if re.fullmatch(r"#[0-9A-Fa-f]{6}", texto) or re.fullmatch(r"#[0-9A-Fa-f]{3}", texto):
+        return texto.upper()
+
+    if re.fullmatch(r"[0-9A-Fa-f]{6}", texto) or re.fullmatch(r"[0-9A-Fa-f]{3}", texto):
+        return f"#{texto.upper()}"
+
+    return padrao
 
 
 
@@ -9930,13 +10073,69 @@ def _filtro_exists_cidade_exibicao_like(valor_like: str):
 def contratos_lista():
     tempo_inicio = time.perf_counter()
 
+    limpar_filtros = request.args.get("limpar_filtros") == "1"
+    tem_filtro_real_na_requisicao = (
+        _valor_query_contratos_preenchido(request.args.get("q"))
+        or _valor_query_contratos_preenchido(request.args.get("id_contrato"))
+        or _valor_query_contratos_preenchido(request.args.get("contrato_ativo"))
+        or any(_valor_query_contratos_preenchido(valor) for valor in request.args.getlist("status"))
+        or any(_valor_query_contratos_preenchido(valor) for valor in request.args.getlist("cidade"))
+        or any(_valor_query_contratos_preenchido(valor) for valor in request.args.getlist("segmento"))
+    )
+
+    if limpar_filtros:
+        session.pop("contratos_lista_return_to", None)
+
+    elif not tem_filtro_real_na_requisicao:
+        url_lista_salva = str(session.get("contratos_lista_return_to") or "").strip()
+        url_lista_atual_requisicao = _url_request_atual()
+
+        if (
+            url_lista_salva
+            and url_lista_salva != url_lista_atual_requisicao
+            and (
+                url_lista_salva == "/paineis/contratos"
+                or url_lista_salva.startswith("/paineis/contratos?")
+            )
+            and _url_contratos_tem_filtro_real(url_lista_salva)
+        ):
+            return redirect(url_lista_salva)
+
     q = (request.args.get("q") or "").strip()
     ids_status_selecionados = _obter_lista_int_request("status")
+    cidades_selecionadas = _obter_lista_texto_request("cidade")
+    segmentos_selecionados = _obter_lista_texto_request("segmento")
+
+    try:
+        id_contrato_selecionado = int(request.args.get("id_contrato") or 0)
+    except ValueError:
+        id_contrato_selecionado = 0
+
+    if id_contrato_selecionado <= 0:
+        id_contrato_selecionado = None
+
+    contrato_ativo = (request.args.get("contrato_ativo") or "").strip()
+
+    if contrato_ativo not in {"0", "1"}:
+        contrato_ativo = ""
+
+    contrato_ativo_opcoes = [
+        {"valor": "1", "nome": "Ativos"},
+        {"valor": "0", "nome": "Inativos"},
+    ]
+
+    mapa_contrato_ativo = {
+        item["valor"]: item["nome"]
+        for item in contrato_ativo_opcoes
+    }
+
+    contrato_ativo_nome = mapa_contrato_ativo.get(contrato_ativo, "")
 
     try:
         page = int(request.args.get("page") or 1)
     except ValueError:
         page = 1
+
     if page < 1:
         page = 1
 
@@ -9947,10 +10146,11 @@ def contratos_lista():
 
     if per_page < 10:
         per_page = 10
+
     if per_page > 100:
         per_page = 100
 
-    calcular_total = (request.args.get("calcular_total") == "1")
+    calcular_total = request.args.get("calcular_total") == "1"
 
     status_opcoes = (
         db.session.query(
@@ -9966,13 +10166,89 @@ def contratos_lista():
             DimStatusContratos.IDDimStatusContratos,
             DimStatusContratos.Status,
         )
-        .order_by(func.lower(func.coalesce(DimStatusContratos.Status, "")))
+        .order_by(
+            func.lower(
+                func.coalesce(DimStatusContratos.Status, "")
+            )
+        )
         .all()
     )
+
+    cidade_opcoes = (
+        db.session.query(
+            FatoControleContratosItensEuromidia.CidadeExibicao.label("CidadeExibicao")
+        )
+        .filter(
+            FatoControleContratosItensEuromidia.CidadeExibicao.isnot(None),
+            FatoControleContratosItensEuromidia.CidadeExibicao != "",
+        )
+        .group_by(
+            FatoControleContratosItensEuromidia.CidadeExibicao
+        )
+        .order_by(
+            func.lower(
+                func.coalesce(
+                    FatoControleContratosItensEuromidia.CidadeExibicao,
+                    "",
+                )
+            )
+        )
+        .all()
+    )
+
+    segmento_opcoes = (
+        db.session.query(
+            DimCnaes.Classe.label("Classe"),
+            func.max(DimCnaes.Hex).label("Hex"),
+        )
+        .select_from(FatoControleContratosEuromidia)
+        .join(
+            DimEmpresas,
+            DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa,
+        )
+        .join(
+            DimCnaes,
+            DimCnaes.cnaepadrao == DimEmpresas.CNAE,
+        )
+        .filter(
+            DimCnaes.Classe.isnot(None),
+            DimCnaes.Classe != "",
+        )
+        .group_by(
+            DimCnaes.Classe
+        )
+        .order_by(
+            func.lower(
+                func.coalesce(DimCnaes.Classe, "")
+            )
+        )
+        .all()
+    )
+
+    segmento_opcoes = [
+        SimpleNamespace(
+            Classe=(linha.Classe or "").strip(),
+            Hex=_normalizar_hex_css(getattr(linha, "Hex", None)),
+        )
+        for linha in segmento_opcoes
+        if (linha.Classe or "").strip()
+    ]
 
     mapa_status = {
         int(linha.IDDimStatusContratos): (linha.Status or "").strip()
         for linha in status_opcoes
+    }
+
+    mapa_cidades = {
+        (linha.CidadeExibicao or "").strip(): (linha.CidadeExibicao or "").strip()
+        for linha in cidade_opcoes
+        if (linha.CidadeExibicao or "").strip()
+    }
+
+    mapa_segmentos = {
+        (linha.Classe or "").strip(): (linha.Classe or "").strip()
+        for linha in segmento_opcoes
+        if (linha.Classe or "").strip()
     }
 
     nomes_status_selecionados = [
@@ -9981,8 +10257,28 @@ def contratos_lista():
         if id_status in mapa_status
     ]
 
+    nomes_cidades_selecionadas = [
+        mapa_cidades[cidade]
+        for cidade in cidades_selecionadas
+        if cidade in mapa_cidades
+    ]
+
+    nomes_segmentos_selecionados = [
+        mapa_segmentos[segmento]
+        for segmento in segmentos_selecionados
+        if segmento in mapa_segmentos
+    ]
+
     q_exibicao = q
-    if q.isdigit():
+    id_para_exibir = id_contrato_selecionado
+
+    if id_para_exibir is None and q.isdigit():
+        try:
+            id_para_exibir = int(q)
+        except ValueError:
+            id_para_exibir = None
+
+    if id_para_exibir:
         contrato_q_exibicao = (
             db.session.query(
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.label("IDContrato"),
@@ -9991,7 +10287,7 @@ def contratos_lista():
                 FatoControleContratosEuromidia.NumeroContrato.label("NumeroContrato"),
             )
             .filter(
-                FatoControleContratosEuromidia.IDFatoControleContratosEuromidia == int(q)
+                FatoControleContratosEuromidia.IDFatoControleContratosEuromidia == id_para_exibir
             )
             .first()
         )
@@ -10003,68 +10299,132 @@ def contratos_lista():
                 or contrato_q_exibicao.NumeroContrato
                 or f"Contrato {contrato_q_exibicao.IDContrato}"
             )
-            q_exibicao = f"#{contrato_q_exibicao.IDContrato} • {nome_principal}"
+
+            q_exibicao = f"{contrato_q_exibicao.IDContrato} • {nome_principal}"
 
     consulta_base_ids = db.session.query(
         FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
     )
 
-    if ids_status_selecionados:
+    if id_contrato_selecionado:
         consulta_base_ids = consulta_base_ids.filter(
-            FatoControleContratosEuromidia.IDDimStatusContratos.in_(ids_status_selecionados)
+            FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
+            == id_contrato_selecionado
         )
 
-    if q:
-        like_prefixo = f"{q}%"
-        like_contendo = f"%{q}%"
+    else:
+        if q:
+            like_prefixo = f"{q}%"
+            like_contendo = f"%{q}%"
 
-        texto_sem_mascara = _texto_sem_mascara_documento(q)
-        busca_documental = texto_sem_mascara.isdigit()
+            texto_sem_mascara = _texto_sem_mascara_documento(q)
+            busca_documental = texto_sem_mascara.isdigit()
 
-        filtro_cidade = _filtro_exists_cidade_exibicao_like(like_contendo)
+            filtro_cidade_busca = _filtro_exists_cidade_exibicao_like(like_contendo)
 
-        if busca_documental:
-            consulta_base_ids = consulta_base_ids.filter(
-                or_(
-                    FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
-                    FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
-                    FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
-                    FatoControleContratosEuromidia.CPF.like(like_prefixo),
-                    func.cast(
-                        FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
-                        db.String,
-                    ).like(like_prefixo),
+            filtro_segmento_busca = (
+                db.session.query(DimEmpresas.IDEmpresa)
+                .join(
+                    DimCnaes,
+                    DimCnaes.cnaepadrao == DimEmpresas.CNAE,
                 )
-            )
-        else:
-            consulta_base_ids = consulta_base_ids.filter(
-                or_(
-                    FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
-                    FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
-                    FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
-                    FatoControleContratosEuromidia.CPF.like(like_prefixo),
-                    FatoControleContratosEuromidia.RazaoSocial.like(like_contendo),
-                    FatoControleContratosEuromidia.MarcaExibida.like(like_contendo),
-                    FatoControleContratosEuromidia.Vendedor.like(like_contendo),
-                    FatoControleContratosEuromidia.Agencia.like(like_contendo),
-                    FatoControleContratosEuromidia.Bureau.like(like_contendo),
-                    FatoControleContratosEuromidia.Intermediario.like(like_contendo),
-                    FatoControleContratosEuromidia.TipoDocumento.like(like_contendo),
-                    FatoControleContratosEuromidia.Origem.like(like_contendo),
-                    FatoControleContratosEuromidia.SDR.like(like_contendo),
-                    filtro_cidade,
+                .filter(
+                    DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa,
+                    DimCnaes.Classe.like(like_contendo),
                 )
+                .exists()
             )
+
+            if busca_documental:
+                consulta_base_ids = consulta_base_ids.filter(
+                    or_(
+                        FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
+                        FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
+                        FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
+                        FatoControleContratosEuromidia.CPF.like(like_prefixo),
+                        FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
+                        == int(texto_sem_mascara),
+                    )
+                )
+
+            else:
+                consulta_base_ids = consulta_base_ids.filter(
+                    or_(
+                        FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
+                        FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
+                        FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
+                        FatoControleContratosEuromidia.CPF.like(like_prefixo),
+                        FatoControleContratosEuromidia.RazaoSocial.like(like_contendo),
+                        FatoControleContratosEuromidia.MarcaExibida.like(like_contendo),
+                        FatoControleContratosEuromidia.Vendedor.like(like_contendo),
+                        FatoControleContratosEuromidia.Agencia.like(like_contendo),
+                        FatoControleContratosEuromidia.Bureau.like(like_contendo),
+                        FatoControleContratosEuromidia.Intermediario.like(like_contendo),
+                        FatoControleContratosEuromidia.TipoDocumento.like(like_contendo),
+                        FatoControleContratosEuromidia.Origem.like(like_contendo),
+                        FatoControleContratosEuromidia.SDR.like(like_contendo),
+                        filtro_cidade_busca,
+                        filtro_segmento_busca,
+                    )
+                )
+
+    if ids_status_selecionados:
+        consulta_base_ids = consulta_base_ids.filter(
+            FatoControleContratosEuromidia.IDDimStatusContratos.in_(
+                ids_status_selecionados
+            )
+        )
+
+    if cidades_selecionadas:
+        filtro_cidade_selecionada = (
+            db.session.query(
+                FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
+            )
+            .filter(
+                FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
+                == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
+                FatoControleContratosItensEuromidia.CidadeExibicao.in_(
+                    cidades_selecionadas
+                ),
+            )
+            .exists()
+        )
+
+        consulta_base_ids = consulta_base_ids.filter(
+            filtro_cidade_selecionada
+        )
+
+    if segmentos_selecionados:
+        filtro_segmento_selecionado = (
+            db.session.query(DimEmpresas.IDEmpresa)
+            .join(
+                DimCnaes,
+                DimCnaes.cnaepadrao == DimEmpresas.CNAE,
+            )
+            .filter(
+                DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa,
+                DimCnaes.Classe.in_(segmentos_selecionados),
+            )
+            .exists()
+        )
+
+        consulta_base_ids = consulta_base_ids.filter(
+            filtro_segmento_selecionado
+        )
+
+    if contrato_ativo in {"0", "1"}:
+        consulta_base_ids = consulta_base_ids.filter(
+            FatoControleContratosEuromidia.BitAtivo == int(contrato_ativo)
+        )
 
     total = None
     total_pages = None
-
     tempo_count = 0.0
+
     if calcular_total:
         t_count0 = time.perf_counter()
 
         total = consulta_base_ids.order_by(None).count()
-
         total_pages = max(1, (total + per_page - 1) // per_page)
 
         if page > total_pages:
@@ -10094,10 +10454,9 @@ def contratos_lista():
 
     has_next = len(ids_plus) > per_page
     ids_pagina = ids_plus[:per_page]
-    has_prev = (page > 1)
+    has_prev = page > 1
 
     contratos = []
-
     tempo_logo = 0.0
     tempo_detalhes = 0.0
 
@@ -10122,7 +10481,10 @@ def contratos_lista():
         logo_empresa_raw = logo_empresa_raw.strip()
 
         if logo_empresa_raw:
-            nome_arquivo_logo = os.path.basename(logo_empresa_raw.replace("\\", "/"))
+            nome_arquivo_logo = os.path.basename(
+                logo_empresa_raw.replace("\\", "/")
+            )
+
             logo_empresa_url = url_for(
                 "static",
                 filename=f"LogoEmpresaProprietaria/{nome_arquivo_logo}",
@@ -10135,13 +10497,33 @@ def contratos_lista():
         subquery_cidades = (
             db.session.query(
                 FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia.label("id_contrato"),
-                func.min(FatoControleContratosItensEuromidia.CidadeExibicao).label("CidadeExibicao"),
+                func.min(
+                    FatoControleContratosItensEuromidia.CidadeExibicao
+                ).label("CidadeExibicao"),
             )
             .filter(
-                FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia.in_(ids_pagina)
+                FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia.in_(
+                    ids_pagina
+                )
             )
             .group_by(
                 FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
+            )
+            .subquery()
+        )
+
+        subquery_segmentos = (
+            db.session.query(
+                DimEmpresas.IDEmpresa.label("id_empresa"),
+                func.min(DimCnaes.Classe).label("SegmentoContrato"),
+                func.max(DimCnaes.Hex).label("SegmentoHex"),
+            )
+            .outerjoin(
+                DimCnaes,
+                DimCnaes.cnaepadrao == DimEmpresas.CNAE,
+            )
+            .group_by(
+                DimEmpresas.IDEmpresa
             )
             .subquery()
         )
@@ -10154,8 +10536,11 @@ def contratos_lista():
                 FatoControleContratosEuromidia.RazaoSocial.label("RazaoSocial"),
                 FatoControleContratosEuromidia.MarcaExibida.label("MarcaExibida"),
                 FatoControleContratosEuromidia.IDDimStatusContratos.label("IDDimStatusContratos"),
+                FatoControleContratosEuromidia.BitAtivo.label("BitAtivo"),
                 DimStatusContratos.Status.label("StatusContrato"),
                 subquery_cidades.c.CidadeExibicao.label("CidadeExibicao"),
+                subquery_segmentos.c.SegmentoContrato.label("SegmentoContrato"),
+                subquery_segmentos.c.SegmentoHex.label("SegmentoHex"),
             )
             .outerjoin(
                 subquery_cidades,
@@ -10163,12 +10548,19 @@ def contratos_lista():
                 == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
             )
             .outerjoin(
+                subquery_segmentos,
+                subquery_segmentos.c.id_empresa
+                == FatoControleContratosEuromidia.IDEmpresa,
+            )
+            .outerjoin(
                 DimStatusContratos,
                 DimStatusContratos.IDDimStatusContratos
                 == FatoControleContratosEuromidia.IDDimStatusContratos,
             )
             .filter(
-                FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.in_(ids_pagina)
+                FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.in_(
+                    ids_pagina
+                )
             )
             .all()
         )
@@ -10181,7 +10573,11 @@ def contratos_lista():
             dados = dict(linha._mapping)
             dados["LogoEmpresaProprietaria"] = logo_empresa_raw
             dados["LogoEmpresaProprietariaUrl"] = logo_empresa_url
-            mapa_contratos[dados["IDFatoControleContratosEuromidia"]] = SimpleNamespace(**dados)
+            dados["SegmentoHex"] = _normalizar_hex_css(dados.get("SegmentoHex"))
+
+            mapa_contratos[
+                dados["IDFatoControleContratosEuromidia"]
+            ] = SimpleNamespace(**dados)
 
         contratos = [
             mapa_contratos[id_contrato]
@@ -10190,10 +10586,10 @@ def contratos_lista():
         ]
 
     if total is None:
-        inicio = 0 if len(contratos) == 0 else (offset + 1)
+        inicio = 0 if len(contratos) == 0 else offset + 1
         fim = offset + len(contratos)
     else:
-        inicio = 0 if total == 0 else (offset + 1)
+        inicio = 0 if total == 0 else offset + 1
         fim = min(offset + per_page, total)
 
     if total_pages is None:
@@ -10211,21 +10607,45 @@ def contratos_lista():
         "calcular_total": calcular_total,
     }
 
+    if limpar_filtros:
+        url_lista_atual = url_for(
+            "Paineis.contratos_lista",
+            per_page=per_page,
+            calcular_total=(1 if calcular_total else 0),
+        )
+    else:
+        url_lista_atual = _url_request_atual()
+
+    session["contratos_lista_return_to"] = url_lista_atual
+
     filtros = {
         "q": q,
         "q_exibicao": q_exibicao,
+        "id_contrato": id_contrato_selecionado,
         "per_page": per_page,
         "status_ids": ids_status_selecionados,
         "status_nomes": nomes_status_selecionados,
+        "cidades": cidades_selecionadas,
+        "cidade_nomes": nomes_cidades_selecionadas,
+        "segmentos": segmentos_selecionados,
+        "segmento_nomes": nomes_segmentos_selecionados,
+        "contrato_ativo": contrato_ativo,
+        "contrato_ativo_nome": contrato_ativo_nome,
+        "url_atual": url_lista_atual,
     }
 
     tempo_total = time.perf_counter() - tempo_inicio
 
     current_app.logger.warning(
-        "contratos_lista | q=%r | status=%s | page=%s | per_page=%s | total=%s | "
-        "count=%.3fs | ids=%.3fs | logo=%.3fs | detalhes=%.3fs | total_req=%.3fs",
+        "contratos_lista | q=%r | id_contrato=%s | status=%s | cidades=%s | segmentos=%s | "
+        "contrato_ativo=%r | page=%s | per_page=%s | total=%s | count=%.3fs | ids=%.3fs | "
+        "logo=%.3fs | detalhes=%.3fs | total_req=%.3fs",
         q,
+        id_contrato_selecionado,
         ids_status_selecionados,
+        cidades_selecionadas,
+        segmentos_selecionados,
+        contrato_ativo,
         page,
         per_page,
         total,
@@ -10242,10 +10662,10 @@ def contratos_lista():
         paginacao=paginacao,
         filtros=filtros,
         status_opcoes=status_opcoes,
+        cidade_opcoes=cidade_opcoes,
+        segmento_opcoes=segmento_opcoes,
+        contrato_ativo_opcoes=contrato_ativo_opcoes,
     )
-
-
-
 
 
 
@@ -10533,6 +10953,7 @@ def _montar_diagrama_status_contrato(
 
 
 
+
 @paineis_bp.get("/contratos/<int:id_contrato>")
 @login_required
 def contratos_detalhe(id_contrato: int):
@@ -10544,6 +10965,34 @@ def contratos_detalhe(id_contrato: int):
 
     if not contrato:
         abort(404, description="Contrato não encontrado.")
+
+    def _resolver_return_to_contratos_local():
+        """
+        Eu resolvo a URL de retorno para a lista de contratos preservando os filtros.
+
+        Aceito somente a rota da lista:
+        /paineis/contratos
+        /paineis/contratos?filtros=...
+        """
+        candidatos = [
+            request.args.get("return_to"),
+            request.form.get("return_to"),
+            session.get("contratos_lista_return_to"),
+        ]
+
+        for candidato in candidatos:
+            url = str(candidato or "").strip()
+
+            if not url:
+                continue
+
+            if url == "/paineis/contratos" or url.startswith("/paineis/contratos?"):
+                session["contratos_lista_return_to"] = url
+                return url
+
+        return url_for("Paineis.contratos_lista")
+
+    return_to = _resolver_return_to_contratos_local()
 
     def _valor_attr(obj, *nomes, padrao=None):
         for nome in nomes:
@@ -11315,13 +11764,8 @@ def contratos_detalhe(id_contrato: int):
         timeline_atendimentos=timeline_eventos[:200],
         resumo_atendimentos=resumo_atendimentos,
         diagrama_status=diagrama_status,
+        return_to=return_to,
     )
-
-
-
-
-
-
 
 
 

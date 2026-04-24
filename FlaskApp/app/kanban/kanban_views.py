@@ -27,9 +27,71 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
+TABELA_PERMISSOES_USUARIO = "[Integracao].[Silver].[PermissoesUsuario]"
+TABELA_DIM_PERMISSOES = "[Integracao].[Silver].[DimPermissoes]"
+TABELA_PERMISSAO_DESCONTO = "[Kanban].[Silver].[DimKanbanPermissaoDesconto]"
+TABELA_CARD_APROVA_PRECO = "[Kanban].[Silver].[FatoAprovaPreco]"
+
 TABELA_CARD_PAINEL_FACE = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
 TABELA_DIM_PAINEIS_EUROMIDIA = "[Integracao].[Silver].[DimPaineisEuromidia]"
 TABELA_DIM_FACES_PAINEIS = "[Integracao].[Silver].[DimFacesPaineis]"
+TABELA_TABELA_PRECOS_EUROMIDIA = "[Integracao].[Silver].[FatoTabelaPrecosEuromidia]"
+
+
+HEALTH_CHECK_KANBAN_PADRAO = 1
+
+MAPA_TAGS_HEALTH_CHECK = {
+    "novo_contrato": ["novo contrato"],
+    "aditivo": ["aditivo"],
+    "perda_preco": [
+        "perda por preco",
+        "perda preço",
+        "perda de preco",
+        "perda de preço",
+        "preco",
+        "preço",
+    ],
+    "perda_concorrente": [
+        "perda por concorrente",
+        "concorrente",
+    ],
+    "perda_falta_painel": [
+        "perda por falta de painel",
+        "falta de painel",
+        "sem painel",
+    ],
+}
+
+MAPA_MOTIVOS_HEALTH_CHECK = {
+    "perda_preco": [
+        "preco",
+        "preço",
+        "perda por preco",
+        "perda preço",
+        "valor alto",
+        "valor",
+    ],
+    "perda_concorrente": [
+        "concorrente",
+        "concorrencia",
+        "concorrência",
+    ],
+    "perda_falta_painel": [
+        "falta de painel",
+        "sem painel",
+        "sem disponibilidade",
+        "sem inventario",
+        "sem inventário",
+    ],
+}
+
+
+
+
+
+
+
+
 
 
 TABELA_RELACIONAMENTO_EMPRESA = "[Integracao].[Silver].[DimRelacionamentoEmpresa]"
@@ -151,6 +213,130 @@ def _id_empresa_usuario_or_403() -> int:
 
 
 
+
+
+
+
+
+
+
+def _valor_booleano_verdadeiro(valor: Any) -> bool:
+    """Eu converto flags comuns de usuário em booleano verdadeiro."""
+    if isinstance(valor, bool):
+        return valor
+
+    if valor is None:
+        return False
+
+    texto = str(valor).strip().lower()
+    return texto in {"1", "true", "sim", "s", "yes", "y", "admin", "administrador"}
+
+
+def _usuario_logado_eh_admin_aprovacao_desconto() -> bool:
+    """
+    Eu valido se o usuário logado pode acessar a aprovação de desconto.
+
+    Regra correta:
+    - a tela de aprovação é de Admin;
+    - o vendedor/usuário que deu o desconto não deve enxergar a fila de aprovação;
+    - a permissão do Admin serve para acessar/aprovar;
+    - a permissão do Admin não serve para recalcular o limite do desconto solicitado.
+    """
+    id_usuario = int(_assert_login() or 0)
+
+    for atributo in (
+        "BitAdmin",
+        "IsAdmin",
+        "EhAdmin",
+        "Admin",
+        "Administrador",
+        "is_admin",
+        "eh_admin",
+    ):
+        if _valor_booleano_verdadeiro(getattr(current_user, atributo, None)):
+            return True
+
+    for atributo in ("IDDimPermissoes", "id_permissao", "id_perfil"):
+        try:
+            if int(getattr(current_user, atributo, 0) or 0) == 1:
+                return True
+        except Exception:
+            pass
+
+    if id_usuario <= 0:
+        return False
+
+    if not _objeto_existe(TABELA_PERMISSOES_USUARIO):
+        return False
+
+    filtros = ["pu.IDDimUsuarios = :id_usuario"]
+
+    if _coluna_existe(TABELA_PERMISSOES_USUARIO, "TipoAtribuicao"):
+        filtros.append("UPPER(LTRIM(RTRIM(ISNULL(pu.TipoAtribuicao, 'CONCEDER')))) = 'CONCEDER'")
+
+    if _coluna_existe(TABELA_PERMISSOES_USUARIO, "DataExpiracao"):
+        filtros.append("(pu.DataExpiracao IS NULL OR pu.DataExpiracao >= GETDATE())")
+
+    if _coluna_existe(TABELA_PERMISSOES_USUARIO, "BitAtivo"):
+        filtros.append("ISNULL(pu.BitAtivo, 1) = 1")
+
+    condicoes_admin = ["TRY_CONVERT(int, pu.IDDimPermissoes) = 1"]
+    join_dim_permissoes = ""
+
+    if _objeto_existe(TABELA_DIM_PERMISSOES):
+        join_dim_permissoes = f"""
+        LEFT JOIN {TABELA_DIM_PERMISSOES} p
+            ON p.IDDimPermissoes = pu.IDDimPermissoes
+        """
+
+        for coluna in ("NomePermissao", "Nome", "Descricao", "Codigo", "Chave", "Slug"):
+            if _coluna_existe(TABELA_DIM_PERMISSOES, coluna):
+                condicoes_admin.append(f"""
+                    UPPER(LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(300), p.{coluna}), '')))) IN (
+                        'ADMIN',
+                        'ADMINISTRADOR',
+                        'ADMINISTRADOR GERAL',
+                        'ADMINISTRADOR DO SISTEMA',
+                        'SUPER ADMIN',
+                        'SUPERADMIN'
+                    )
+                    OR UPPER(LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(300), p.{coluna}), '')))) LIKE '%ADMIN%'
+                """)
+
+    sql = text(f"""
+        SELECT TOP (1) 1
+        FROM {TABELA_PERMISSOES_USUARIO} pu
+        {join_dim_permissoes}
+        WHERE {' AND '.join(filtros)}
+          AND (
+                {' OR '.join(condicoes_admin)}
+          );
+    """)
+
+    try:
+        return bool(db.session.execute(sql, {"id_usuario": id_usuario}).scalar() or 0)
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_DESCONTO | falha ao validar permissão Admin | id_usuario=%s",
+            id_usuario,
+        )
+        return False
+
+
+def _exigir_admin_aprovacao_desconto() -> None:
+    """Eu bloqueio a tela/API de aprovação para qualquer usuário que não seja Admin."""
+    if not _usuario_logado_eh_admin_aprovacao_desconto():
+        abort(403, "Somente Admin pode acessar a aprovação de descontos.")
+
+
+
+
+
+
+
+
+
+
 def _resolver_id_empresa_proprietaria_movimento(id_kanban: int, id_empresa_padrao: int) -> int:
     """
     Regra de negócio:
@@ -218,6 +404,210 @@ def _obter_relacionamento_empresa_proprietaria(
     ).mappings().first()
 
     return dict(row) if row else None
+
+
+
+
+
+def _resolver_id_usuario_solicitante_desconto_card(
+    *,
+    id_card: int,
+    id_usuario_fallback: int | None = None,
+) -> int | None:
+    """
+    Eu resolvo qual usuário deve ser usado para validar o limite de desconto do card.
+
+    Problema que esta função resolve:
+    - o card pode ser salvo por um usuário;
+    - a tela de aprovação pode ser aberta por outro;
+    - mas o desconto precisa ser comparado contra o limite de quem solicitou/deu o desconto.
+
+    Ordem de prioridade:
+    1) usuário da pendência já existente em FatoAprovaPreco;
+    2) usuário do último histórico em FatoKanbanNegociacaoPreco;
+    3) usuário vinculado ao próprio card;
+    4) usuário logado/fallback.
+
+    Assim, se o usuário com limite de 5% der 15% de desconto,
+    o sistema compara 15% contra 5%, e não contra o limite de um gestor com 99%.
+    """
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    try:
+        id_usuario_fallback_int = int(id_usuario_fallback or 0)
+    except Exception:
+        id_usuario_fallback_int = 0
+
+    if id_card_int <= 0:
+        return id_usuario_fallback_int if id_usuario_fallback_int > 0 else None
+
+    candidatos: list[int] = []
+
+    def _adicionar_candidato(valor: object) -> None:
+        try:
+            valor_int = int(valor or 0)
+            if valor_int > 0 and valor_int not in candidatos:
+                candidatos.append(valor_int)
+        except Exception:
+            pass
+
+    """
+    1) Se já existir pendência em FatoAprovaPreco, ela é a fonte mais forte.
+    Essa tabela representa justamente a solicitação pendente de aprovação.
+    """
+    try:
+        if _objeto_existe(TABELA_CARD_APROVA_PRECO):
+            sql_aprovacao = text(f"""
+                SELECT TOP (1)
+                    TRY_CONVERT(int, IDDimUsuarios) AS IDDimUsuarios
+                FROM {TABELA_CARD_APROVA_PRECO}
+                WHERE IDFatoKanbanCard = :id_card
+                  AND IDDimUsuarios IS NOT NULL
+                ORDER BY
+                    CASE
+                        WHEN PrecoAprovado IS NULL
+                         AND DataAprovacaoPreco IS NULL
+                        THEN 0
+                        ELSE 1
+                    END,
+                    DataPrecoProposto DESC,
+                    IDFatoAprovaPreco DESC;
+            """)
+
+            row_aprovacao = db.session.execute(
+                sql_aprovacao,
+                {"id_card": id_card_int},
+            ).mappings().first()
+
+            if row_aprovacao:
+                _adicionar_candidato(row_aprovacao.get("IDDimUsuarios"))
+
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_DESCONTO | falha ao buscar usuário solicitante em FatoAprovaPreco | id_card=%s",
+            id_card_int,
+        )
+
+    """
+    2) Se não tiver pendência ainda, uso o último histórico de negociação de preço.
+    Normalmente esse histórico carrega o usuário que fez a proposta.
+    """
+    try:
+        if _objeto_existe(TABELA_CARD_NEGOCIACAO_PRECO):
+            sql_negociacao = text(f"""
+                SELECT TOP (1)
+                    TRY_CONVERT(int, IDDimUsuarios) AS IDDimUsuarios
+                FROM {TABELA_CARD_NEGOCIACAO_PRECO}
+                WHERE IDFatoKanbanCard = :id_card
+                  AND IDDimUsuarios IS NOT NULL
+                ORDER BY
+                    DataPrecoProposto DESC,
+                    IDFatoKanbanNegociacaoPreco DESC;
+            """)
+
+            row_negociacao = db.session.execute(
+                sql_negociacao,
+                {"id_card": id_card_int},
+            ).mappings().first()
+
+            if row_negociacao:
+                _adicionar_candidato(row_negociacao.get("IDDimUsuarios"))
+
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_DESCONTO | falha ao buscar usuário solicitante em FatoKanbanNegociacaoPreco | id_card=%s",
+            id_card_int,
+        )
+
+    """
+    3) Fallback pelo próprio card.
+    Uso _coluna_existe para não quebrar caso alguma coluna não exista no schema físico.
+    """
+    try:
+        colunas_select: list[str] = []
+
+        if _coluna_existe(TABELA_CARD, "IDVendedorUsuario"):
+            colunas_select.append("TRY_CONVERT(int, c.IDVendedorUsuario) AS IDVendedorUsuario")
+        else:
+            colunas_select.append("CAST(NULL AS int) AS IDVendedorUsuario")
+
+        if _coluna_existe(TABELA_CARD, "IDDimUsuarios"):
+            colunas_select.append("TRY_CONVERT(int, c.IDDimUsuarios) AS IDDimUsuarios")
+        else:
+            colunas_select.append("CAST(NULL AS int) AS IDDimUsuarios")
+
+        if _coluna_existe(TABELA_CARD, "IDUsuarioCriacao"):
+            colunas_select.append("TRY_CONVERT(int, c.IDUsuarioCriacao) AS IDUsuarioCriacao")
+        else:
+            colunas_select.append("CAST(NULL AS int) AS IDUsuarioCriacao")
+
+        if _coluna_existe(TABELA_CARD, "IDUsuarioAtualizacao"):
+            colunas_select.append("TRY_CONVERT(int, c.IDUsuarioAtualizacao) AS IDUsuarioAtualizacao")
+        else:
+            colunas_select.append("CAST(NULL AS int) AS IDUsuarioAtualizacao")
+
+        if _coluna_existe(TABELA_CARD, "CriadoPorIDDimUsuarios"):
+            colunas_select.append("TRY_CONVERT(int, c.CriadoPorIDDimUsuarios) AS CriadoPorIDDimUsuarios")
+        else:
+            colunas_select.append("CAST(NULL AS int) AS CriadoPorIDDimUsuarios")
+
+        if _coluna_existe(TABELA_CARD, "AtualizadoPorIDDimUsuarios"):
+            colunas_select.append("TRY_CONVERT(int, c.AtualizadoPorIDDimUsuarios) AS AtualizadoPorIDDimUsuarios")
+        else:
+            colunas_select.append("CAST(NULL AS int) AS AtualizadoPorIDDimUsuarios")
+
+        sql_card = text(f"""
+            SELECT TOP (1)
+                {", ".join(colunas_select)}
+            FROM {TABELA_CARD} c
+            WHERE c.IDFatoKanbanCard = :id_card;
+        """)
+
+        row_card = db.session.execute(
+            sql_card,
+            {"id_card": id_card_int},
+        ).mappings().first()
+
+        if row_card:
+            _adicionar_candidato(row_card.get("IDVendedorUsuario"))
+            _adicionar_candidato(row_card.get("IDDimUsuarios"))
+            _adicionar_candidato(row_card.get("IDUsuarioAtualizacao"))
+            _adicionar_candidato(row_card.get("AtualizadoPorIDDimUsuarios"))
+            _adicionar_candidato(row_card.get("IDUsuarioCriacao"))
+            _adicionar_candidato(row_card.get("CriadoPorIDDimUsuarios"))
+
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_DESCONTO | falha ao buscar usuário solicitante no card | id_card=%s",
+            id_card_int,
+        )
+
+ 
+ 
+    _adicionar_candidato(id_usuario_fallback_int)
+
+    try:
+        _adicionar_candidato(_obter_id_dim_usuario_logado())
+    except Exception:
+        pass
+
+    if candidatos:
+        return int(candidatos[0])
+
+    return None
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -406,6 +796,331 @@ def _resolver_item_base_snapshot_preco_praticado(
 
 
 
+
+
+
+def _mover_aprovacao_preco_para_historico(
+    *,
+    id_aprova_preco: int,
+    id_card: int,
+    id_empresa_proprietaria: int,
+    id_usuario_aprovador: int,
+    preco_aprovado: Decimal,
+    desconto_aprovado: Decimal | None,
+    observacoes_aprovacao: str | None,
+) -> dict[str, Any]:
+    """
+    Eu aprovo uma pendência de preço/desconto.
+
+    Regra correta:
+    - FatoAprovaPreco guarda somente pendências.
+    - FatoKanbanNegociacaoPreco guarda o histórico de preços.
+    - Ao aprovar, eu tento atualizar a linha histórica já criada no salvamento do card.
+    - Se não existir histórico compatível, eu insiro uma linha.
+    - Depois excluo a pendência de FatoAprovaPreco.
+    - ObservacoesProposta no histórico aprovado fica como 'Desconto Aprovado'.
+    """
+
+    id_aprova_preco_int = int(id_aprova_preco)
+    id_card_int = int(id_card)
+    id_empresa_prop_int = int(id_empresa_proprietaria)
+    id_usuario_aprovador_int = int(id_usuario_aprovador)
+
+    preco_aprovado_dec = _valor_decimal(preco_aprovado)
+    desconto_aprovado_dec = _valor_decimal(desconto_aprovado)
+
+    if preco_aprovado_dec is None:
+        raise ValueError("Preço aprovado inválido.")
+
+    sql_buscar_pendencia = text(f"""
+        SELECT TOP (1)
+            *
+        FROM {TABELA_CARD_APROVA_PRECO}
+        WHERE IDFatoAprovaPreco = :id_aprova_preco
+          AND IDFatoKanbanCard = :id_card
+          AND IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND DataAprovacaoPreco IS NULL
+          AND PrecoAprovado IS NULL;
+    """)
+
+    pendencia = db.session.execute(
+        sql_buscar_pendencia,
+        {
+            "id_aprova_preco": id_aprova_preco_int,
+            "id_card": id_card_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+        },
+    ).mappings().first()
+
+    if not pendencia:
+        raise ValueError("Pendência de aprovação de preço não encontrada ou já aprovada.")
+
+    pendencia_dict = dict(pendencia)
+
+    id_painel = pendencia_dict.get("IDDimPaineisEuromidia")
+    id_face = pendencia_dict.get("IDDimFacesPaineis")
+    preco_proposto = _valor_decimal(pendencia_dict.get("PrecoProposto"))
+
+    if desconto_aprovado_dec is None:
+        desconto_aprovado_dec = _valor_decimal(pendencia_dict.get("DescontoProposto"))
+
+    observacoes_aprovacao_txt = str(observacoes_aprovacao or "").strip()[:1000] or None
+
+    sql_buscar_historico = text(f"""
+        SELECT TOP (1)
+            h.IDFatoKanbanNegociacaoPreco
+        FROM {TABELA_CARD_NEGOCIACAO_PRECO} h
+        WHERE h.IDFatoKanbanCard = :id_card
+          AND h.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND ISNULL(h.IDDimPaineisEuromidia, 0) = ISNULL(:id_painel, 0)
+          AND ISNULL(h.IDDimFacesPaineis, 0) = ISNULL(:id_face, 0)
+        ORDER BY
+            CASE
+                WHEN h.DataAprovacaoPreco IS NULL
+                 AND h.PrecoAprovado IS NULL
+                THEN 0
+                ELSE 1
+            END,
+            CASE
+                WHEN :preco_proposto IS NOT NULL
+                 AND h.PrecoProposto IS NOT NULL
+                 AND ABS(
+                        TRY_CONVERT(decimal(19, 4), h.PrecoProposto)
+                        - TRY_CONVERT(decimal(19, 4), :preco_proposto)
+                     ) <= 0.01
+                THEN 0
+                ELSE 1
+            END,
+            h.IDFatoKanbanNegociacaoPreco DESC;
+    """)
+
+    id_historico_existente = db.session.execute(
+        sql_buscar_historico,
+        {
+            "id_card": id_card_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+            "id_painel": int(id_painel) if id_painel not in (None, "", 0) else None,
+            "id_face": int(id_face) if id_face not in (None, "", 0) else None,
+            "preco_proposto": preco_proposto,
+        },
+    ).scalar()
+
+    acao_historico = None
+    id_historico_final = None
+
+    if id_historico_existente:
+        sql_update_historico = text(f"""
+            UPDATE {TABELA_CARD_NEGOCIACAO_PRECO}
+               SET
+                    IDDimUsuarios = COALESCE(IDDimUsuarios, :id_usuario_solicitante),
+                    IDEmpresaProprietaria = :id_empresa_proprietaria,
+                    IDDimTabelaPrecosEuromidia = COALESCE(:id_tabela_preco, IDDimTabelaPrecosEuromidia),
+                    IDEmpresa = COALESCE(:id_empresa, IDEmpresa),
+                    IDDimKanbanFase = COALESCE(:id_fase, IDDimKanbanFase),
+                    IDDimKanbanStatusCard = COALESCE(:id_status_card, IDDimKanbanStatusCard),
+                    IDFatoControleContratosEuromidia = COALESCE(:id_contrato, IDFatoControleContratosEuromidia),
+                    BitAditivoContrato = COALESCE(:bit_aditivo, BitAditivoContrato),
+
+                    ObservacoesProposta = :observacoes_proposta,
+
+                    IDDimPaineisEuromidia = COALESCE(:id_painel, IDDimPaineisEuromidia),
+                    IDDimFacesPaineis = COALESCE(:id_face, IDDimFacesPaineis),
+
+                    CustoAtual = COALESCE(:custo_atual, CustoAtual),
+                    PrecoAtual = COALESCE(:preco_atual, PrecoAtual),
+                    MargemAtual = COALESCE(:margem_atual, MargemAtual),
+
+                    CustoAtualRateado = COALESCE(:custo_atual_rateado, CustoAtualRateado),
+                    PrecoAtualRateado = COALESCE(:preco_atual_rateado, PrecoAtualRateado),
+                    MargemAtualRateado = COALESCE(:margem_atual_rateado, MargemAtualRateado),
+
+                    DataPrecoProposto = COALESCE(DataPrecoProposto, :data_preco_proposto, GETDATE()),
+
+                    CustoProposto = COALESCE(:custo_proposto, CustoProposto),
+                    PrecoProposto = COALESCE(:preco_proposto, PrecoProposto),
+                    MargemProposta = COALESCE(:margem_proposta, MargemProposta),
+
+                    CustoPropostoRateado = COALESCE(:custo_proposto_rateado, CustoPropostoRateado),
+                    PrecoPropostoRateado = COALESCE(:preco_proposto_rateado, PrecoPropostoRateado),
+
+                    DescontoProposto = COALESCE(:desconto_proposto, DescontoProposto),
+                    PeriodoInicio = COALESCE(:periodo_inicio, PeriodoInicio),
+                    PeriodoTermino = COALESCE(:periodo_termino, PeriodoTermino),
+
+                    IDDimUsuariosAprovacaoPreco = :id_usuario_aprovador,
+                    DataAprovacaoPreco = GETDATE(),
+                    PrecoAprovado = :preco_aprovado,
+                    DescontoAprovado = :desconto_aprovado,
+                    ObservacoesAprovacao = :observacoes_aprovacao,
+
+                    BitAutorizacaoDiretoria = COALESCE(:bit_autorizacao_diretoria, BitAutorizacaoDiretoria),
+                    BitAutorizacaoCoordenador = COALESCE(:bit_autorizacao_coordenador, BitAutorizacaoCoordenador)
+
+             WHERE IDFatoKanbanNegociacaoPreco = :id_historico;
+        """)
+
+        db.session.execute(
+            sql_update_historico,
+            {
+                "id_historico": int(id_historico_existente),
+                "id_usuario_solicitante": pendencia_dict.get("IDDimUsuarios"),
+                "id_empresa_proprietaria": id_empresa_prop_int,
+                "id_tabela_preco": pendencia_dict.get("IDDimTabelaPrecosEuromidia"),
+                "id_empresa": pendencia_dict.get("IDEmpresa"),
+                "id_fase": pendencia_dict.get("IDDimKanbanFase"),
+                "id_status_card": pendencia_dict.get("IDDimKanbanStatusCard"),
+                "id_contrato": pendencia_dict.get("IDFatoControleContratosEuromidia"),
+                "bit_aditivo": pendencia_dict.get("BitAditivoContrato"),
+                "observacoes_proposta": "Desconto Aprovado",
+                "id_painel": pendencia_dict.get("IDDimPaineisEuromidia"),
+                "id_face": pendencia_dict.get("IDDimFacesPaineis"),
+                "custo_atual": pendencia_dict.get("CustoAtual"),
+                "preco_atual": pendencia_dict.get("PrecoAtual"),
+                "margem_atual": pendencia_dict.get("MargemAtual"),
+                "custo_atual_rateado": pendencia_dict.get("CustoAtualRateado"),
+                "preco_atual_rateado": pendencia_dict.get("PrecoAtualRateado"),
+                "margem_atual_rateado": pendencia_dict.get("MargemAtualRateado"),
+                "data_preco_proposto": pendencia_dict.get("DataPrecoProposto"),
+                "custo_proposto": pendencia_dict.get("CustoProposto"),
+                "preco_proposto": pendencia_dict.get("PrecoProposto"),
+                "margem_proposta": pendencia_dict.get("MargemProposta"),
+                "custo_proposto_rateado": pendencia_dict.get("CustoPropostoRateado"),
+                "preco_proposto_rateado": pendencia_dict.get("PrecoPropostoRateado"),
+                "desconto_proposto": pendencia_dict.get("DescontoProposto"),
+                "periodo_inicio": pendencia_dict.get("PeriodoInicio"),
+                "periodo_termino": pendencia_dict.get("PeriodoTermino"),
+                "id_usuario_aprovador": id_usuario_aprovador_int,
+                "preco_aprovado": preco_aprovado_dec,
+                "desconto_aprovado": desconto_aprovado_dec,
+                "observacoes_aprovacao": observacoes_aprovacao_txt,
+                "bit_autorizacao_diretoria": pendencia_dict.get("BitAutorizacaoDiretoria"),
+                "bit_autorizacao_coordenador": pendencia_dict.get("BitAutorizacaoCoordenador"),
+            },
+        )
+
+        id_historico_final = int(id_historico_existente)
+        acao_historico = "atualizado"
+
+    else:
+        sql_insert_historico = text(f"""
+            INSERT INTO {TABELA_CARD_NEGOCIACAO_PRECO}
+            (
+                IDDimUsuarios,
+                IDEmpresaProprietaria,
+                IDDimTabelaPrecosEuromidia,
+                IDEmpresa,
+                IDFatoKanbanCard,
+                IDDimKanbanFase,
+                IDDimKanbanStatusCard,
+                IDFatoControleContratosEuromidia,
+                BitAditivoContrato,
+                ObservacoesProposta,
+                IDDimPaineisEuromidia,
+                IDDimFacesPaineis,
+                CustoAtual,
+                PrecoAtual,
+                MargemAtual,
+                CustoAtualRateado,
+                PrecoAtualRateado,
+                MargemAtualRateado,
+                DataPrecoProposto,
+                CustoProposto,
+                PrecoProposto,
+                MargemProposta,
+                CustoPropostoRateado,
+                PrecoPropostoRateado,
+                DescontoProposto,
+                PeriodoInicio,
+                PeriodoTermino,
+                IDDimUsuariosAprovacaoPreco,
+                DataAprovacaoPreco,
+                PrecoAprovado,
+                DescontoAprovado,
+                ObservacoesAprovacao,
+                BitAutorizacaoDiretoria,
+                BitAutorizacaoCoordenador
+            )
+            OUTPUT INSERTED.IDFatoKanbanNegociacaoPreco
+            SELECT
+                IDDimUsuarios,
+                IDEmpresaProprietaria,
+                IDDimTabelaPrecosEuromidia,
+                IDEmpresa,
+                IDFatoKanbanCard,
+                IDDimKanbanFase,
+                IDDimKanbanStatusCard,
+                IDFatoControleContratosEuromidia,
+                BitAditivoContrato,
+                :observacoes_proposta,
+                IDDimPaineisEuromidia,
+                IDDimFacesPaineis,
+                CustoAtual,
+                PrecoAtual,
+                MargemAtual,
+                CustoAtualRateado,
+                PrecoAtualRateado,
+                MargemAtualRateado,
+                COALESCE(DataPrecoProposto, GETDATE()),
+                CustoProposto,
+                PrecoProposto,
+                MargemProposta,
+                CustoPropostoRateado,
+                PrecoPropostoRateado,
+                DescontoProposto,
+                PeriodoInicio,
+                PeriodoTermino,
+                :id_usuario_aprovador,
+                GETDATE(),
+                :preco_aprovado,
+                :desconto_aprovado,
+                :observacoes_aprovacao,
+                BitAutorizacaoDiretoria,
+                BitAutorizacaoCoordenador
+            FROM {TABELA_CARD_APROVA_PRECO}
+            WHERE IDFatoAprovaPreco = :id_aprova_preco
+              AND IDFatoKanbanCard = :id_card
+              AND IDEmpresaProprietaria = :id_empresa_proprietaria;
+        """)
+
+        id_historico_final = db.session.execute(
+            sql_insert_historico,
+            {
+                "id_aprova_preco": id_aprova_preco_int,
+                "id_card": id_card_int,
+                "id_empresa_proprietaria": id_empresa_prop_int,
+                "id_usuario_aprovador": id_usuario_aprovador_int,
+                "preco_aprovado": preco_aprovado_dec,
+                "desconto_aprovado": desconto_aprovado_dec,
+                "observacoes_aprovacao": observacoes_aprovacao_txt,
+                "observacoes_proposta": "Desconto Aprovado",
+            },
+        ).scalar()
+
+        acao_historico = "inserido"
+
+    sql_delete_pendencia = text(f"""
+        DELETE FROM {TABELA_CARD_APROVA_PRECO}
+        WHERE IDFatoAprovaPreco = :id_aprova_preco
+          AND IDFatoKanbanCard = :id_card
+          AND IDEmpresaProprietaria = :id_empresa_proprietaria;
+    """)
+
+    db.session.execute(
+        sql_delete_pendencia,
+        {
+            "id_aprova_preco": id_aprova_preco_int,
+            "id_card": id_card_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+        },
+    )
+
+    return {
+        "ok": True,
+        "id_aprova_preco_removido": id_aprova_preco_int,
+        "id_historico_negociacao_preco": int(id_historico_final) if id_historico_final else None,
+        "acao_historico": acao_historico,
+        "observacoes_proposta": "Desconto Aprovado",
+    }
 
 
 
@@ -7886,6 +8601,265 @@ def _obter_preco_por_id(id_preco: int, id_painel: int, id_dim_face: int | None, 
     return dict(row) if row else None
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _primeiro_valor_preenchido_local(*valores: Any) -> Any:
+    """
+    Eu retorno o primeiro valor realmente preenchido.
+
+    Uso isso para aceitar payloads vindos com nomes diferentes:
+    - id_preco
+    - IDDimTabelaPrecosEuromidia
+    - id_tabela_preco
+    - ValorTabela
+    - valor_tabela
+    """
+    for valor in valores:
+        if valor is None:
+            continue
+
+        if isinstance(valor, str) and not valor.strip():
+            continue
+
+        return valor
+
+    return None
+
+
+def _resolver_face_unica_do_painel(id_painel: int | None) -> dict[str, Any] | None:
+    """
+    Eu tento resolver uma face quando o card salvou IDDimFacesPaineis como NULL.
+
+    Regra:
+    - se o painel tiver exatamente 1 face cadastrada, posso preencher com segurança;
+    - se tiver mais de 1 face, não escolho no chute, porque isso poderia aprovar preço na face errada.
+    """
+    if id_painel in (None, "", 0):
+        return None
+
+    sql = text("""
+        ;WITH Faces AS (
+            SELECT
+                f.IDDimFacesPaineis,
+                f.IDDimPaineisEuromidia,
+                f.CodPonto,
+                f.Face,
+                f.CodFace,
+                f.Tipo,
+                COUNT(1) OVER () AS QuantidadeFaces
+            FROM [Integracao].[Silver].[DimFacesPaineis] f
+            WHERE TRY_CONVERT(int, f.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+        )
+        SELECT TOP (1)
+            IDDimFacesPaineis,
+            IDDimPaineisEuromidia,
+            CodPonto,
+            Face,
+            CodFace,
+            Tipo
+        FROM Faces
+        WHERE QuantidadeFaces = 1
+        ORDER BY IDDimFacesPaineis DESC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {"id_painel": int(id_painel)},
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _obter_preco_padrao_painel_face(
+    *,
+    id_painel: int | None,
+    id_face: int | None,
+    tipo_painel: str | None,
+    id_preco: int | None = None,
+) -> dict[str, Any] | None:
+    """
+    Eu resolvo o preço de tabela do painel/face.
+
+    Ordem:
+    1) se veio IDDimTabelaPrecosEuromidia, valido e uso esse preço;
+    2) se não veio, busco o preço mais recente/ativo em FatoTabelaPrecosEuromidia;
+    3) se não existir preço cadastrado, retorno None para o fluxo usar preço praticado.
+    """
+    if id_painel in (None, "", 0):
+        return None
+
+    tipo_painel_txt = _normalizar_texto(tipo_painel)
+
+    if not tipo_painel_txt:
+        painel = _obter_painel_por_id(int(id_painel))
+        tipo_painel_txt = _normalizar_texto((painel or {}).get("Tipo"))
+
+    if not tipo_painel_txt:
+        return None
+
+    if id_preco not in (None, "", 0):
+        preco_por_id = _obter_preco_por_id(
+            id_preco=int(id_preco),
+            id_painel=int(id_painel),
+            id_dim_face=int(id_face) if id_face not in (None, "", 0) else None,
+            tipo_painel=tipo_painel_txt,
+        )
+
+        if preco_por_id:
+            return preco_por_id
+
+    precos = _obter_precos_painel_face(
+        id_painel=int(id_painel),
+        id_dim_face=int(id_face) if id_face not in (None, "", 0) else None,
+        tipo_painel=tipo_painel_txt,
+    )
+
+    return dict(precos[0]) if precos else None
+
+
+def _buscar_preco_praticado_base_card_painel_face(
+    *,
+    id_card: int | None,
+    id_painel: int | None,
+    id_face: int | None,
+    id_contrato: int | None = None,
+) -> Decimal | None:
+    """
+    Eu busco o preço praticado quando não existe preço cadastrado em FatoTabelaPrecosEuromidia.
+
+    Regra:
+    - primeiro tento FatoContratoItemPrecoPraticadoEuromidia;
+    - priorizo PrecoPraticado;
+    - depois PrecoProposto;
+    - depois qualquer preço aprovado/proposto que existir.
+    """
+    if not _objeto_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO):
+        return None
+
+    filtros = []
+    params: dict[str, Any] = {}
+
+    if id_card not in (None, "", 0) and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "IDFatoKanbanCard"):
+        filtros.append("TRY_CONVERT(int, IDFatoKanbanCard) = TRY_CONVERT(int, :id_card)")
+        params["id_card"] = int(id_card)
+
+    if id_painel not in (None, "", 0) and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "IDDimPaineisEuromidia"):
+        filtros.append("TRY_CONVERT(int, IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)")
+        params["id_painel"] = int(id_painel)
+
+    if id_face not in (None, "", 0) and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "IDDimFacesPaineis"):
+        filtros.append("TRY_CONVERT(int, IDDimFacesPaineis) = TRY_CONVERT(int, :id_face)")
+        params["id_face"] = int(id_face)
+
+    if id_contrato not in (None, "", 0) and _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "IDFatoControleContratosEuromidia"):
+        filtros.append("TRY_CONVERT(int, IDFatoControleContratosEuromidia) = TRY_CONVERT(int, :id_contrato)")
+        params["id_contrato"] = int(id_contrato)
+
+    if not filtros:
+        return None
+
+    coluna_ordem = COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO
+
+    if not _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, coluna_ordem):
+        return None
+
+    ordem_data = "DataCadastro DESC," if _coluna_existe(TABELA_CONTRATO_ITEM_PRECO_PRATICADO, "DataCadastro") else ""
+
+    sql = text(f"""
+        SELECT TOP (1)
+            *
+        FROM {TABELA_CONTRATO_ITEM_PRECO_PRATICADO}
+        WHERE {' AND '.join(filtros)}
+        ORDER BY
+            {ordem_data}
+            [{coluna_ordem}] DESC;
+    """)
+
+    row = db.session.execute(sql, params).mappings().first()
+
+    if not row:
+        return None
+
+    dados = dict(row)
+
+    for campo in (
+        "PrecoPraticado",
+        "PrecoAtual",
+        "PrecoAprovado",
+        "PrecoProposto",
+        "ValorVendaFinal",
+        "NovoValor",
+        "ValorTabela",
+    ):
+        valor = _valor_decimal(dados.get(campo))
+        if valor is not None and valor > 0:
+            return valor
+
+    return None
+
+
+def _calcular_percentual_desconto_seguro(
+    *,
+    valor_tabela: Any,
+    valor_final: Any,
+) -> Decimal | None:
+    """
+    Eu calculo o percentual de desconto.
+
+    Fórmula em texto:
+    desconto = (valor_tabela - valor_final) / valor_tabela * 100
+
+    Exemplo:
+    valor_tabela = 7.000
+    valor_final = 5.950
+
+    desconto = (7.000 - 5.950) / 7.000 * 100
+    desconto = 1.050 / 7.000 * 100
+    desconto = 15%
+    """
+    valor_tabela_dec = _valor_decimal(valor_tabela)
+    valor_final_dec = _valor_decimal(valor_final)
+
+    if valor_tabela_dec is None or valor_tabela_dec <= 0:
+        return None
+
+    if valor_final_dec is None:
+        return None
+
+    desconto = ((valor_tabela_dec - valor_final_dec) / valor_tabela_dec) * Decimal("100")
+
+    if desconto < 0:
+        return Decimal("0")
+
+    return desconto
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def _buscar_snapshot_preco_praticado_por_item_contrato(
     id_item_contrato: int | None,
 ) -> dict[str, Any] | None:
@@ -9408,21 +10382,63 @@ def _criar_reservas_painel_faces_kanban(
 
 
 
+def _preparar_vinculos_painel_faces(
+    painel_faces_payload: list[Any],
+    id_empresa_proprietaria: int,
+    id_card: int | None = None,
+    id_contrato_existente: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Eu preparo painel/face para salvar em Kanban.Silver.FatoKanbanCardPainelFace.
 
-def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_proprietaria: int) -> list[dict[str, Any]]:
+    Correção principal:
+    - aceito vários nomes possíveis para ID de tabela de preço;
+    - se o preço não vier no payload, busco em Integracao.Silver.FatoTabelaPrecosEuromidia;
+    - se não existir preço cadastrado na tabela de preços, uso preço praticado como base;
+    - calculo PercentualDesconto automaticamente quando vier ValorTabela e NovoValor;
+    - resolvo IDDimFacesPaineis para não deixar a face NULL.
+    """
     vinculos_preparados: list[dict[str, Any]] = []
 
     for ordem_rel, item in enumerate((painel_faces_payload or []), start=1):
         if not isinstance(item, dict):
             raise ValueError("Cada item de painel_faces deve ser um objeto")
 
-        id_painel_item = int(item.get("id_painel") or 0)
-        cod_face_item = _normalizar_texto(item.get("cod_face"))
+        id_painel_item = int(
+            _primeiro_valor_preenchido_local(
+                item.get("id_painel"),
+                item.get("IDDimPaineisEuromidia"),
+                item.get("IDPainel"),
+                item.get("id_dim_paineis_euromidia"),
+            )
+            or 0
+        )
+
+        cod_face_item = _normalizar_texto(
+            _primeiro_valor_preenchido_local(
+                item.get("cod_face"),
+                item.get("CodFace"),
+                item.get("Face"),
+                item.get("face"),
+            )
+        )
+
+        id_face_payload = _primeiro_valor_preenchido_local(
+            item.get("id_face"),
+            item.get("IDDimFacesPaineis"),
+            item.get("IDFace"),
+            item.get("id_dim_faces_paineis"),
+        )
+
+        id_face_item = None
+        if id_face_payload not in (None, "", 0):
+            try:
+                id_face_item = int(id_face_payload)
+            except Exception:
+                id_face_item = None
 
         if not id_painel_item:
             raise ValueError("Painel é obrigatório em cada vinculação")
-        if not cod_face_item:
-            raise ValueError("Face é obrigatória em cada vinculação")
 
         data_inicio_item = _normalizar_data_reserva_kanban(
             item.get("data_inicio")
@@ -9430,6 +10446,7 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             or item.get("data_inicio_reserva")
             or item.get("DataInicioReserva")
         )
+
         data_fim_item = _normalizar_data_reserva_kanban(
             item.get("data_fim")
             or item.get("DataFim")
@@ -9447,13 +10464,42 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
         if not painel_item:
             raise ValueError(f"Painel {id_painel_item} não encontrado")
 
-        face_item = _resolver_face_do_painel(id_painel_item, cod_face_item)
+        face_item = None
+
+        if id_face_item:
+            face_item = _obter_face_por_id(id_face_item)
+
+        if not face_item and cod_face_item:
+            face_item = _resolver_face_do_painel(id_painel_item, cod_face_item)
+
         if not face_item:
-            raise ValueError(f"A face {cod_face_item} não pertence ao painel selecionado")
+            face_item = _resolver_face_unica_do_painel(id_painel_item)
+
+        if not face_item:
+            raise ValueError(
+                "Não consegui resolver a face do painel. "
+                "Informe a face no payload ou corrija o cadastro em DimFacesPaineis."
+            )
+
+        id_face_final = int(face_item.get("IDDimFacesPaineis") or 0)
+        cod_face_final = _normalizar_texto(face_item.get("CodFace") or cod_face_item)
+
+        if not id_face_final:
+            raise ValueError("Face inválida: IDDimFacesPaineis não resolvido.")
+
+        if not cod_face_final:
+            raise ValueError("Face inválida: CodFace não resolvido.")
 
         custo_item = _obter_custo_por_codponto(int(painel_item.get("CodPonto") or 0))
 
-        id_preco_item = item.get("id_preco")
+        id_preco_item = _primeiro_valor_preenchido_local(
+            item.get("id_preco"),
+            item.get("IDDimTabelaPrecosEuromidia"),
+            item.get("id_dim_tabela_precos_euromidia"),
+            item.get("IDTabelaPreco"),
+            item.get("id_tabela_preco"),
+        )
+
         if id_preco_item in ("", None):
             id_preco_item = None
         else:
@@ -9462,45 +10508,108 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
             except Exception as exc:
                 raise ValueError("Preço selecionado inválido") from exc
 
-        preco_item = None
-        if id_preco_item:
-            preco_item = _obter_preco_por_id(
-                id_preco=id_preco_item,
-                id_painel=id_painel_item,
-                id_dim_face=int(face_item.get("IDDimFacesPaineis") or 0)
-                if face_item.get("IDDimFacesPaineis") is not None
-                else None,
-                tipo_painel=_normalizar_texto(painel_item.get("Tipo")),
+        tipo_painel_item = _normalizar_texto(
+            _primeiro_valor_preenchido_local(
+                item.get("tipo_painel"),
+                item.get("TipoPainel"),
+                painel_item.get("Tipo"),
+                face_item.get("Tipo"),
             )
-            if not preco_item:
-                raise ValueError(
-                    f"O preço selecionado não é válido para o painel/face informado ({cod_face_item})"
-                )
+        )
 
-        novo_valor_item = _valor_decimal(item.get("novo_valor"))
-        percentual_item = _valor_decimal(item.get("percentual_desconto"))
-        if novo_valor_item is not None and percentual_item is not None:
-            percentual_item = None
+        preco_item = _obter_preco_padrao_painel_face(
+            id_painel=id_painel_item,
+            id_face=id_face_final,
+            tipo_painel=tipo_painel_item,
+            id_preco=id_preco_item,
+        )
+
+        valor_tabela_payload = _valor_decimal(
+            _primeiro_valor_preenchido_local(
+                item.get("valor_tabela"),
+                item.get("ValorTabela"),
+                item.get("preco_tabela"),
+                item.get("PrecoTabela"),
+                item.get("preco_atual"),
+                item.get("PrecoAtual"),
+            )
+        )
+
+        valor_tabela_preco = _valor_decimal((preco_item or {}).get("Valor"))
+
+        preco_praticado_base = _buscar_preco_praticado_base_card_painel_face(
+            id_card=int(id_card) if id_card not in (None, "", 0) else None,
+            id_painel=id_painel_item,
+            id_face=id_face_final,
+            id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        )
+
+        novo_valor_item = _valor_decimal(
+            _primeiro_valor_preenchido_local(
+                item.get("novo_valor"),
+                item.get("NovoValor"),
+                item.get("valor_negociado"),
+                item.get("ValorNegociado"),
+            )
+        )
+
+        valor_venda_final_item = _valor_decimal(
+            _primeiro_valor_preenchido_local(
+                item.get("valor_venda_final"),
+                item.get("ValorVendaFinal"),
+                item.get("valor_venda"),
+                item.get("ValorVenda"),
+            )
+        )
+
+        percentual_item = _valor_decimal(
+            _primeiro_valor_preenchido_local(
+                item.get("percentual_desconto"),
+                item.get("PercentualDesconto"),
+                item.get("DescontoPercentual"),
+                item.get("desconto_percentual"),
+            )
+        )
+
+        valor_tabela_final = (
+            valor_tabela_preco
+            or valor_tabela_payload
+            or preco_praticado_base
+        )
+
+        valor_final_negociado = (
+            novo_valor_item
+            if novo_valor_item is not None
+            else valor_venda_final_item
+        )
+
+        if percentual_item is None and valor_tabela_final is not None and valor_final_negociado is not None:
+            percentual_item = _calcular_percentual_desconto_seguro(
+                valor_tabela=valor_tabela_final,
+                valor_final=valor_final_negociado,
+            )
+
+        if valor_tabela_final is None:
+            valor_tabela_final = valor_final_negociado
 
         metricas = _calcular_margens_comerciais(
             custo_item.get("Valor") if custo_item else None,
-            preco_item.get("Valor") if preco_item else None,
-            novo_valor_item,
+            valor_tabela_final,
+            valor_final_negociado,
             percentual_item,
+            valor_base_referencia=valor_tabela_final,
         )
 
         vinculos_preparados.append(
             {
                 "ordem": ordem_rel,
                 "id_painel": int(id_painel_item),
-                "id_dim_face": int(face_item.get("IDDimFacesPaineis") or 0)
-                if face_item.get("IDDimFacesPaineis") is not None
-                else None,
+                "id_dim_face": int(id_face_final),
                 "cod_ponto": int(painel_item.get("CodPonto") or 0)
                 if painel_item.get("CodPonto") is not None
                 else None,
-                "cod_face": cod_face_item,
-                "tipo_painel": _normalizar_texto(painel_item.get("Tipo")) or None,
+                "cod_face": cod_face_final,
+                "tipo_painel": tipo_painel_item or None,
                 "ano_custo": int(custo_item.get("Ano") or 0)
                 if custo_item and custo_item.get("Ano") is not None
                 else None,
@@ -9527,6 +10636,323 @@ def _preparar_vinculos_painel_faces(painel_faces_payload: list[Any], id_empresa_
         )
 
     return vinculos_preparados
+
+
+
+
+
+
+
+
+
+
+def _corrigir_estado_operacional_preco_card(
+    *,
+    id_card: int,
+    id_empresa_proprietaria: int,
+    id_contrato_existente: int | None = None,
+) -> dict[str, Any]:
+    """
+    Eu corrijo linhas ativas já existentes em FatoKanbanCardPainelFace.
+
+    Por que isso é necessário:
+    - já existem cards salvos com ValorTabela NULL;
+    - já existem cards salvos com PercentualDesconto NULL;
+    - já existem cards salvos com IDDimFacesPaineis NULL;
+    - sem esses campos, a aprovação de desconto não consegue funcionar.
+
+    Esta função:
+    1) resolve face;
+    2) busca preço de tabela;
+    3) usa preço praticado como fallback;
+    4) calcula PercentualDesconto;
+    5) atualiza somente campos faltantes/inconsistentes.
+    """
+    id_card_int = int(id_card or 0)
+
+    if id_card_int <= 0:
+        return {
+            "ok": False,
+            "linhas_avaliadas": 0,
+            "linhas_corrigidas": 0,
+            "motivo": "id_card_invalido",
+        }
+
+    sql = text(f"""
+        SELECT
+            pf.IDFatoKanbanCardPainelFace,
+            pf.IDFatoKanbanCard,
+            pf.Ordem,
+            pf.IDDimPaineisEuromidia,
+            pf.IDDimFacesPaineis,
+            pf.CodPonto,
+            pf.CodFace,
+            pf.TipoPainel,
+            pf.CustoTabela,
+            pf.IDDimTabelaPrecosEuromidia,
+            pf.PeriodoExibicao,
+            pf.ExibicoesDia,
+            pf.ValorTabela,
+            pf.Tabela,
+            pf.PoliticaTrocas,
+            pf.ValorTroca,
+            pf.NovoValor,
+            pf.PercentualDesconto,
+            pf.ValorVendaFinal,
+            pf.MargemValor,
+            pf.MargemPercentual,
+            pf.DataInicio,
+            pf.DataFim
+        FROM {TABELA_CARD_PAINEL_FACE} pf
+        WHERE pf.IDFatoKanbanCard = :id_card
+          AND ISNULL(pf.Ativo, 1) = 1
+        ORDER BY
+            ISNULL(pf.Ordem, 0),
+            pf.IDFatoKanbanCardPainelFace;
+    """)
+
+    linhas = db.session.execute(
+        sql,
+        {"id_card": id_card_int},
+    ).mappings().all()
+
+    linhas_avaliadas = 0
+    linhas_corrigidas = 0
+    problemas: list[dict[str, Any]] = []
+
+    for row in linhas:
+        linhas_avaliadas += 1
+        linha = dict(row)
+
+        id_linha = int(linha.get("IDFatoKanbanCardPainelFace") or 0)
+        id_painel = int(linha.get("IDDimPaineisEuromidia") or 0) or None
+        id_face = int(linha.get("IDDimFacesPaineis") or 0) or None
+        cod_face = _normalizar_texto(linha.get("CodFace"))
+        cod_ponto = _normalizar_texto(linha.get("CodPonto"))
+
+        painel = _obter_painel_por_id(int(id_painel)) if id_painel else None
+
+        face = _obter_face_por_id(int(id_face)) if id_face else None
+
+        if not face and id_painel and cod_face:
+            face = _resolver_face_do_painel(int(id_painel), cod_face)
+
+        if not face and cod_ponto and cod_face:
+            face = _obter_face_por_codponto_codface(cod_ponto, cod_face)
+
+        if not face and id_painel:
+            face = _resolver_face_unica_do_painel(int(id_painel))
+
+        if not painel and face and face.get("IDDimPaineisEuromidia") not in (None, "", 0):
+            painel = _obter_painel_por_id(int(face.get("IDDimPaineisEuromidia")))
+
+        id_painel_final = int(
+            (painel or {}).get("IDDimPaineisEuromidia")
+            or id_painel
+            or 0
+        ) or None
+
+        id_face_final = int(
+            (face or {}).get("IDDimFacesPaineis")
+            or id_face
+            or 0
+        ) or None
+
+        cod_ponto_final = _normalizar_texto(
+            (painel or {}).get("CodPonto")
+            or (face or {}).get("CodPonto")
+            or cod_ponto
+        )
+
+        cod_face_final = _normalizar_texto(
+            (face or {}).get("CodFace")
+            or cod_face
+        )
+
+        tipo_painel_final = _normalizar_texto(
+            linha.get("TipoPainel")
+            or (painel or {}).get("Tipo")
+            or (face or {}).get("Tipo")
+        )
+
+        if not id_linha:
+            continue
+
+        if not id_painel_final:
+            problemas.append(
+                {
+                    "id_linha": id_linha,
+                    "motivo": "painel_nao_resolvido",
+                }
+            )
+            continue
+
+        if not id_face_final:
+            problemas.append(
+                {
+                    "id_linha": id_linha,
+                    "motivo": "face_nao_resolvida",
+                    "id_painel": id_painel_final,
+                    "cod_ponto": cod_ponto_final,
+                    "cod_face": cod_face_final,
+                }
+            )
+            continue
+
+        id_preco_atual = int(linha.get("IDDimTabelaPrecosEuromidia") or 0) or None
+
+        preco_item = _obter_preco_padrao_painel_face(
+            id_painel=id_painel_final,
+            id_face=id_face_final,
+            tipo_painel=tipo_painel_final,
+            id_preco=id_preco_atual,
+        )
+
+        valor_tabela_atual = _valor_decimal(linha.get("ValorTabela"))
+        valor_tabela_preco = _valor_decimal((preco_item or {}).get("Valor"))
+
+        preco_praticado_base = _buscar_preco_praticado_base_card_painel_face(
+            id_card=id_card_int,
+            id_painel=id_painel_final,
+            id_face=id_face_final,
+            id_contrato=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        )
+
+        valor_tabela_final = (
+            valor_tabela_atual
+            or valor_tabela_preco
+            or preco_praticado_base
+        )
+
+        valor_final_negociado = _valor_decimal(linha.get("NovoValor"))
+        if valor_final_negociado is None:
+            valor_final_negociado = _valor_decimal(linha.get("ValorVendaFinal"))
+
+        if valor_tabela_final is None:
+            valor_tabela_final = valor_final_negociado
+
+        percentual_final = _valor_decimal(linha.get("PercentualDesconto"))
+
+        if percentual_final is None and valor_tabela_final is not None and valor_final_negociado is not None:
+            percentual_final = _calcular_percentual_desconto_seguro(
+                valor_tabela=valor_tabela_final,
+                valor_final=valor_final_negociado,
+            )
+
+        custo_final = _valor_decimal(linha.get("CustoTabela"))
+
+        if custo_final is None and cod_ponto_final not in (None, ""):
+            try:
+                custo_ref = _obter_custo_por_codponto(int(cod_ponto_final))
+            except Exception:
+                custo_ref = None
+
+            custo_final = _valor_decimal((custo_ref or {}).get("Valor") if isinstance(custo_ref, dict) else None)
+
+        metricas = _calcular_margens_comerciais(
+            custo_final,
+            valor_tabela_final,
+            valor_final_negociado,
+            percentual_final,
+            valor_base_referencia=valor_tabela_final,
+        )
+
+        sets: list[str] = []
+        params: dict[str, Any] = {
+            "id_linha": id_linha,
+        }
+
+        def adicionar_set(campo: str, parametro: str, valor: Any) -> None:
+            sets.append(f"{campo} = :{parametro}")
+            params[parametro] = valor
+
+        if id_face_final and int(linha.get("IDDimFacesPaineis") or 0) != int(id_face_final):
+            adicionar_set("IDDimFacesPaineis", "id_face", int(id_face_final))
+
+        if id_painel_final and int(linha.get("IDDimPaineisEuromidia") or 0) != int(id_painel_final):
+            adicionar_set("IDDimPaineisEuromidia", "id_painel", int(id_painel_final))
+
+        if cod_ponto_final and _normalizar_texto(linha.get("CodPonto")) != cod_ponto_final:
+            adicionar_set("CodPonto", "cod_ponto", cod_ponto_final)
+
+        if cod_face_final and _normalizar_texto(linha.get("CodFace")) != cod_face_final:
+            adicionar_set("CodFace", "cod_face", cod_face_final)
+
+        if tipo_painel_final and _normalizar_texto(linha.get("TipoPainel")) != tipo_painel_final:
+            adicionar_set("TipoPainel", "tipo_painel", tipo_painel_final)
+
+        if preco_item:
+            id_preco_final = int(preco_item.get("IDDimTabelaPrecosEuromidia") or 0) or None
+            if id_preco_final and int(linha.get("IDDimTabelaPrecosEuromidia") or 0) != id_preco_final:
+                adicionar_set("IDDimTabelaPrecosEuromidia", "id_tabela_preco", id_preco_final)
+
+            if _normalizar_texto(linha.get("PeriodoExibicao")) != _normalizar_texto(preco_item.get("PeriodoExibicao")):
+                adicionar_set("PeriodoExibicao", "periodo_exibicao", preco_item.get("PeriodoExibicao"))
+
+            if int(linha.get("ExibicoesDia") or 0) != int(preco_item.get("ExibicoesDia") or 0):
+                adicionar_set("ExibicoesDia", "exibicoes_dia", int(preco_item.get("ExibicoesDia") or 0) or None)
+
+            if _normalizar_texto(linha.get("Tabela")) != _normalizar_texto(preco_item.get("Tabela")):
+                adicionar_set("Tabela", "tabela", preco_item.get("Tabela"))
+
+            if _normalizar_texto(linha.get("PoliticaTrocas")) != _normalizar_texto(preco_item.get("PoliticaTrocas")):
+                adicionar_set("PoliticaTrocas", "politica_trocas", preco_item.get("PoliticaTrocas"))
+
+            if _valor_decimal(linha.get("ValorTroca")) != _valor_decimal(preco_item.get("ValorTroca")):
+                adicionar_set("ValorTroca", "valor_troca", _valor_decimal(preco_item.get("ValorTroca")))
+
+        if _valor_decimal(linha.get("CustoTabela")) != _valor_decimal(metricas.get("Custo")):
+            adicionar_set("CustoTabela", "custo_tabela", metricas.get("Custo"))
+
+        if _valor_decimal(linha.get("ValorTabela")) != _valor_decimal(metricas.get("ValorTabela")):
+            adicionar_set("ValorTabela", "valor_tabela", metricas.get("ValorTabela"))
+
+        if _valor_decimal(linha.get("PercentualDesconto")) != _valor_decimal(metricas.get("PercentualDesconto")):
+            adicionar_set("PercentualDesconto", "percentual_desconto", metricas.get("PercentualDesconto"))
+
+        if _valor_decimal(linha.get("ValorVendaFinal")) != _valor_decimal(metricas.get("ValorVendaFinal")):
+            adicionar_set("ValorVendaFinal", "valor_venda_final", metricas.get("ValorVendaFinal"))
+
+        if _valor_decimal(linha.get("MargemValor")) != _valor_decimal(metricas.get("MargemValor")):
+            adicionar_set("MargemValor", "margem_valor", metricas.get("MargemValor"))
+
+        if _valor_decimal(linha.get("MargemPercentual")) != _valor_decimal(metricas.get("MargemPercentual")):
+            adicionar_set("MargemPercentual", "margem_percentual", metricas.get("MargemPercentual"))
+
+        if not sets:
+            continue
+
+        sets.append("DataAtualizacao = GETDATE()")
+
+        sql_update = text(f"""
+            UPDATE {TABELA_CARD_PAINEL_FACE}
+               SET {", ".join(sets)}
+             WHERE IDFatoKanbanCardPainelFace = :id_linha
+               AND ISNULL(Ativo, 1) = 1;
+        """)
+
+        resultado = db.session.execute(sql_update, params)
+
+        if int(resultado.rowcount or 0) > 0:
+            linhas_corrigidas += 1
+
+    return {
+        "ok": True,
+        "linhas_avaliadas": int(linhas_avaliadas),
+        "linhas_corrigidas": int(linhas_corrigidas),
+        "problemas": problemas,
+    }
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -10211,6 +11637,439 @@ def _registrar_negociacao_preco_card(
         int(id_card),
         int(quantidade_inserida),
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _registrar_historico_negociacao_preco_operacional(
+    *,
+    id_card: int,
+    id_kanban: int,
+    id_fase_atual: int | None,
+    id_usuario: int,
+    id_empresa_proprietaria: int,
+    id_empresa_relacionada: int | None = None,
+    status_card: str | None = None,
+    observacoes_proposta: str | None = None,
+    forcar_novo_registro: bool = False,
+) -> dict[str, Any]:
+    """
+    Eu gravo o histórico real da negociação de preço na tabela
+    Kanban.Silver.FatoKanbanNegociacaoPreco usando como fonte a tabela
+    operacional Kanban.Silver.FatoKanbanCardPainelFace.
+
+    Regra de negócio:
+    - FatoKanbanCardPainelFace guarda o estado atual do preço no card.
+    - FatoKanbanNegociacaoPreco guarda o histórico transacional da negociação.
+    - Sempre que o card tiver preço/custo/desconto/período salvo, esta função
+      garante que exista um registro histórico.
+    - Para não poluir o histórico, eu não insiro uma nova linha quando a última
+      negociação do mesmo card/painel/face tem a mesma assinatura comercial.
+    """
+
+    id_card_int = int(id_card or 0)
+    id_kanban_int = int(id_kanban or 0)
+    id_usuario_int = int(id_usuario or 0)
+    id_empresa_prop_int = int(id_empresa_proprietaria or 0)
+    id_fase_int = int(id_fase_atual or 0) if id_fase_atual not in (None, "", 0) else None
+    id_empresa_rel_int = int(id_empresa_relacionada or 0) if id_empresa_relacionada not in (None, "", 0) else None
+
+    if id_card_int <= 0:
+        return {
+            "ok": False,
+            "linhas_inseridas": 0,
+            "motivo": "id_card_invalido",
+        }
+
+    if id_usuario_int <= 0:
+        return {
+            "ok": False,
+            "linhas_inseridas": 0,
+            "motivo": "id_usuario_invalido",
+        }
+
+    if id_empresa_prop_int <= 0:
+        return {
+            "ok": False,
+            "linhas_inseridas": 0,
+            "motivo": "id_empresa_proprietaria_invalido",
+        }
+
+    if not _objeto_existe(TABELA_CARD_NEGOCIACAO_PRECO):
+        return {
+            "ok": False,
+            "linhas_inseridas": 0,
+            "motivo": "tabela_fato_kanban_negociacao_preco_nao_existe",
+        }
+
+    id_empresa_proprietaria_negociacao = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban_int,
+        id_empresa_padrao=id_empresa_prop_int,
+    )
+
+    id_status_card = None
+    try:
+        id_status_card = _obter_id_status_card_por_codigo(status_card)
+    except Exception:
+        id_status_card = None
+
+    select_id_contrato = (
+        "TRY_CONVERT(int, c.IDFatoControleContratosEuromidia)"
+        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia")
+        else (
+            "TRY_CONVERT(int, c.IDFatoControleContratoEuromidia)"
+            if _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia")
+            else "CAST(NULL AS int)"
+        )
+    )
+
+    select_bit_aditivo = (
+        "TRY_CONVERT(int, c.BitAditivo)"
+        if _coluna_existe(TABELA_CARD, "BitAditivo")
+        else "CAST(0 AS int)"
+    )
+
+    select_id_fase_card = (
+        "TRY_CONVERT(int, c.IDDimKanbanFaseAtual)"
+        if _coluna_existe(TABELA_CARD, "IDDimKanbanFaseAtual")
+        else "CAST(NULL AS int)"
+    )
+
+    select_id_empresa_card = (
+        "TRY_CONVERT(int, c.IDEmpresa)"
+        if _coluna_existe(TABELA_CARD, "IDEmpresa")
+        else "CAST(NULL AS int)"
+    )
+
+    sql_qtd_antes = text(f"""
+        SELECT COUNT(1)
+        FROM {TABELA_CARD_NEGOCIACAO_PRECO}
+        WHERE IDFatoKanbanCard = :id_card;
+    """)
+
+    qtd_antes = int(
+        db.session.execute(
+            sql_qtd_antes,
+            {"id_card": id_card_int},
+        ).scalar()
+        or 0
+    )
+
+    sql_insert = text(f"""
+        ;WITH BaseOperacional AS (
+            SELECT
+                pf.IDFatoKanbanCardPainelFace,
+                TRY_CONVERT(int, pf.IDFatoKanbanCard) AS IDFatoKanbanCard,
+                TRY_CONVERT(int, pf.IDDimPaineisEuromidia) AS IDDimPaineisEuromidia,
+                TRY_CONVERT(int, pf.IDDimFacesPaineis) AS IDDimFacesPaineis,
+                TRY_CONVERT(int, pf.IDDimTabelaPrecosEuromidia) AS IDDimTabelaPrecosEuromidia,
+
+                TRY_CONVERT(decimal(19, 2), pf.CustoTabela) AS CustoAtual,
+                TRY_CONVERT(decimal(19, 2), pf.ValorTabela) AS PrecoAtual,
+
+                TRY_CONVERT(decimal(19, 2), pf.NovoValor) AS NovoValor,
+                TRY_CONVERT(float, pf.PercentualDesconto) AS PercentualDesconto,
+                TRY_CONVERT(decimal(19, 2), pf.ValorVendaFinal) AS ValorVendaFinal,
+
+                TRY_CONVERT(date, pf.DataInicio) AS PeriodoInicio,
+                TRY_CONVERT(date, pf.DataFim) AS PeriodoTermino,
+
+                {select_id_contrato} AS IDFatoControleContratosEuromidia,
+                {select_bit_aditivo} AS BitAditivoContrato,
+                COALESCE(:id_fase_atual, {select_id_fase_card}) AS IDDimKanbanFase,
+                COALESCE(:id_empresa_relacionada, {select_id_empresa_card}) AS IDEmpresa
+            FROM {TABELA_CARD_PAINEL_FACE} pf
+            INNER JOIN {TABELA_CARD} c
+                ON c.IDFatoKanbanCard = pf.IDFatoKanbanCard
+            WHERE pf.IDFatoKanbanCard = :id_card
+              AND ISNULL(pf.Ativo, 1) = 1
+        ),
+        BaseCalculada AS (
+            SELECT
+                b.*,
+
+                PrecoProposto =
+                    COALESCE(
+                        b.NovoValor,
+                        b.ValorVendaFinal,
+                        CASE
+                            WHEN b.PercentualDesconto IS NOT NULL
+                             AND b.PrecoAtual IS NOT NULL
+                            THEN
+                                TRY_CONVERT(
+                                    decimal(19, 2),
+                                    b.PrecoAtual * (
+                                        CAST(1 AS decimal(19, 6))
+                                        - (
+                                            TRY_CONVERT(decimal(19, 6), b.PercentualDesconto)
+                                            / CAST(100 AS decimal(19, 6))
+                                        )
+                                    )
+                                )
+                            ELSE b.PrecoAtual
+                        END
+                    ),
+
+                DescontoProposto =
+                    COALESCE(
+                        b.PercentualDesconto,
+                        CASE
+                            WHEN b.PrecoAtual IS NOT NULL
+                             AND b.PrecoAtual > 0
+                             AND COALESCE(b.NovoValor, b.ValorVendaFinal) IS NOT NULL
+                            THEN
+                                TRY_CONVERT(
+                                    float,
+                                    (
+                                        (
+                                            b.PrecoAtual
+                                            - COALESCE(b.NovoValor, b.ValorVendaFinal)
+                                        )
+                                        / b.PrecoAtual
+                                    ) * 100
+                                )
+                            ELSE NULL
+                        END
+                    ),
+
+                MargemAtual =
+                    CASE
+                        WHEN b.PrecoAtual IS NOT NULL
+                         AND b.PrecoAtual > 0
+                         AND b.CustoAtual IS NOT NULL
+                        THEN
+                            TRY_CONVERT(
+                                decimal(19, 2),
+                                ((b.PrecoAtual - b.CustoAtual) / b.PrecoAtual) * 100
+                            )
+                        ELSE NULL
+                    END
+            FROM BaseOperacional b
+        ),
+        BaseFinal AS (
+            SELECT
+                b.*,
+
+                CustoProposto = b.CustoAtual,
+
+                MargemProposta =
+                    CASE
+                        WHEN b.PrecoProposto IS NOT NULL
+                         AND b.PrecoProposto > 0
+                         AND b.CustoAtual IS NOT NULL
+                        THEN
+                            TRY_CONVERT(
+                                decimal(19, 2),
+                                ((b.PrecoProposto - b.CustoAtual) / b.PrecoProposto) * 100
+                            )
+                        ELSE NULL
+                    END,
+
+                BitAutorizacaoDiretoria =
+                    CASE
+                        WHEN b.CustoAtual IS NOT NULL
+                         AND b.CustoAtual > 0
+                         AND b.PrecoProposto IS NOT NULL
+                         AND b.PrecoProposto <= (
+                                b.CustoAtual
+                                * (
+                                    CAST(1 AS decimal(19, 6))
+                                    + (
+                                        TRY_CONVERT(decimal(19, 6), :percentual_limite_diretoria)
+                                        / CAST(100 AS decimal(19, 6))
+                                    )
+                                )
+                             )
+                        THEN 1
+                        ELSE 0
+                    END
+            FROM BaseCalculada b
+        )
+        INSERT INTO {TABELA_CARD_NEGOCIACAO_PRECO}
+        (
+            IDDimUsuarios,
+            IDEmpresaProprietaria,
+            IDDimTabelaPrecosEuromidia,
+            IDEmpresa,
+            IDFatoKanbanCard,
+            IDDimKanbanFase,
+            IDDimKanbanStatusCard,
+            IDFatoControleContratosEuromidia,
+            BitAditivoContrato,
+            ObservacoesProposta,
+            IDDimPaineisEuromidia,
+            IDDimFacesPaineis,
+            CustoAtual,
+            PrecoAtual,
+            MargemAtual,
+            CustoAtualRateado,
+            PrecoAtualRateado,
+            MargemAtualRateado,
+            DataPrecoProposto,
+            CustoProposto,
+            PrecoProposto,
+            MargemProposta,
+            CustoPropostoRateado,
+            PrecoPropostoRateado,
+            DescontoProposto,
+            PeriodoInicio,
+            PeriodoTermino,
+            IDDimUsuariosAprovacaoPreco,
+            DataAprovacaoPreco,
+            PrecoAprovado,
+            DescontoAprovado,
+            ObservacoesAprovacao,
+            BitAutorizacaoDiretoria,
+            BitAutorizacaoCoordenador
+        )
+        SELECT
+            :id_usuario,
+            :id_empresa_proprietaria_negociacao,
+            b.IDDimTabelaPrecosEuromidia,
+            b.IDEmpresa,
+            b.IDFatoKanbanCard,
+            b.IDDimKanbanFase,
+            :id_status_card,
+            b.IDFatoControleContratosEuromidia,
+            b.BitAditivoContrato,
+            :observacoes_proposta,
+            b.IDDimPaineisEuromidia,
+            b.IDDimFacesPaineis,
+            b.CustoAtual,
+            b.PrecoAtual,
+            b.MargemAtual,
+            b.CustoAtual,
+            b.PrecoAtual,
+            b.MargemAtual,
+            GETDATE(),
+            b.CustoProposto,
+            b.PrecoProposto,
+            b.MargemProposta,
+            b.CustoProposto,
+            b.PrecoProposto,
+            b.DescontoProposto,
+            b.PeriodoInicio,
+            b.PeriodoTermino,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            b.BitAutorizacaoDiretoria,
+            0
+        FROM BaseFinal b
+        OUTER APPLY (
+            SELECT TOP (1)
+                np.IDFatoKanbanNegociacaoPreco,
+                np.IDDimTabelaPrecosEuromidia,
+                np.CustoAtual,
+                np.PrecoAtual,
+                np.MargemAtual,
+                np.CustoProposto,
+                np.PrecoProposto,
+                np.MargemProposta,
+                np.DescontoProposto,
+                np.PeriodoInicio,
+                np.PeriodoTermino
+            FROM {TABELA_CARD_NEGOCIACAO_PRECO} np
+            WHERE np.IDFatoKanbanCard = b.IDFatoKanbanCard
+              AND ISNULL(np.IDDimPaineisEuromidia, 0) = ISNULL(b.IDDimPaineisEuromidia, 0)
+              AND ISNULL(np.IDDimFacesPaineis, 0) = ISNULL(b.IDDimFacesPaineis, 0)
+            ORDER BY np.IDFatoKanbanNegociacaoPreco DESC
+        ) ultima
+        WHERE
+            (
+                b.IDDimPaineisEuromidia IS NOT NULL
+                OR b.IDDimFacesPaineis IS NOT NULL
+            )
+            AND (
+                b.CustoAtual IS NOT NULL
+                OR b.PrecoAtual IS NOT NULL
+                OR b.PrecoProposto IS NOT NULL
+                OR b.DescontoProposto IS NOT NULL
+                OR b.PeriodoInicio IS NOT NULL
+                OR b.PeriodoTermino IS NOT NULL
+            )
+            AND (
+                :forcar_novo_registro = 1
+                OR ultima.IDFatoKanbanNegociacaoPreco IS NULL
+                OR ISNULL(TRY_CONVERT(int, ultima.IDDimTabelaPrecosEuromidia), -1)
+                    <> ISNULL(TRY_CONVERT(int, b.IDDimTabelaPrecosEuromidia), -1)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.CustoAtual), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.CustoAtual), -999999999.9999)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.PrecoAtual), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.PrecoAtual), -999999999.9999)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.MargemAtual), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.MargemAtual), -999999999.9999)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.CustoProposto), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.CustoProposto), -999999999.9999)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.PrecoProposto), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.PrecoProposto), -999999999.9999)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.MargemProposta), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.MargemProposta), -999999999.9999)
+                OR ISNULL(TRY_CONVERT(decimal(19, 4), ultima.DescontoProposto), -999999999.9999)
+                    <> ISNULL(TRY_CONVERT(decimal(19, 4), b.DescontoProposto), -999999999.9999)
+                OR ISNULL(CONVERT(varchar(10), ultima.PeriodoInicio, 23), '')
+                    <> ISNULL(CONVERT(varchar(10), b.PeriodoInicio, 23), '')
+                OR ISNULL(CONVERT(varchar(10), ultima.PeriodoTermino, 23), '')
+                    <> ISNULL(CONVERT(varchar(10), b.PeriodoTermino, 23), '')
+            );
+    """)
+
+    db.session.execute(
+        sql_insert,
+        {
+            "id_card": id_card_int,
+            "id_usuario": id_usuario_int,
+            "id_empresa_proprietaria_negociacao": int(id_empresa_proprietaria_negociacao),
+            "id_fase_atual": id_fase_int,
+            "id_empresa_relacionada": id_empresa_rel_int,
+            "id_status_card": int(id_status_card) if id_status_card not in (None, "", 0) else None,
+            "observacoes_proposta": str(observacoes_proposta or "").strip()[:1000] or None,
+            "percentual_limite_diretoria": PERCENTUAL_LIMITE_APROVACAO_DIRETORIA_SOBRE_CUSTO,
+            "forcar_novo_registro": 1 if forcar_novo_registro else 0,
+        },
+    )
+
+    qtd_depois = int(
+        db.session.execute(
+            sql_qtd_antes,
+            {"id_card": id_card_int},
+        ).scalar()
+        or 0
+    )
+
+    linhas_inseridas = max(qtd_depois - qtd_antes, 0)
+
+    current_app.logger.warning(
+        "NEGOCIACAO_PRECO_HISTORICO_OPERACIONAL | id_card=%s | linhas_inseridas=%s | qtd_antes=%s | qtd_depois=%s",
+        id_card_int,
+        linhas_inseridas,
+        qtd_antes,
+        qtd_depois,
+    )
+
+    return {
+        "ok": True,
+        "linhas_inseridas": int(linhas_inseridas),
+        "qtd_antes": int(qtd_antes),
+        "qtd_depois": int(qtd_depois),
+        "motivo": "historico_negociacao_preco_sincronizado",
+    }
+
+
 
 
 
@@ -15542,24 +17401,68 @@ def _decimal_para_float_seguro(valor: Any) -> float | None:
 
 
 
-
 def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) -> list[dict]:
-    """Eu busco o histórico de negociação de preços do card já enriquecido e compatível com a tela de histórico."""
-    sql = """
-    ;WITH NegociacoesBase AS (
+    """
+    Eu busco o histórico real de negociação de preços.
+
+    Regra:
+    - pendências NÃO entram aqui; pendência fica em FatoAprovaPreco;
+    - histórico vem de FatoKanbanNegociacaoPreco;
+    - se o card estiver vinculado a contrato, também trago negociações do contrato vinculado;
+    - filtro por empresa proprietária para não misturar histórico de outro contexto.
+    """
+
+    sql = f"""
+    ;WITH ContratosDoCard AS (
+        SELECT DISTINCT
+            TRY_CONVERT(int, i.IDFatoControleContratoEuromidia) AS IDFatoControleContratosEuromidia
+        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+        WHERE i.IDFatoKanbanCard = :id_card
+          AND TRY_CONVERT(int, i.IDFatoControleContratoEuromidia) IS NOT NULL
+          AND ISNULL(i.BitAtivo, 1) = 1
+
+        UNION
+
+        SELECT DISTINCT
+            TRY_CONVERT(int, np_card.IDFatoControleContratosEuromidia) AS IDFatoControleContratosEuromidia
+        FROM {TABELA_CARD_NEGOCIACAO_PRECO} np_card
+        WHERE np_card.IDFatoKanbanCard = :id_card
+          AND np_card.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND TRY_CONVERT(int, np_card.IDFatoControleContratosEuromidia) IS NOT NULL
+
+        UNION
+
+        SELECT DISTINCT
+            TRY_CONVERT(int, ap_card.IDFatoControleContratosEuromidia) AS IDFatoControleContratosEuromidia
+        FROM {TABELA_CARD_APROVA_PRECO} ap_card
+        WHERE ap_card.IDFatoKanbanCard = :id_card
+          AND ap_card.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND TRY_CONVERT(int, ap_card.IDFatoControleContratosEuromidia) IS NOT NULL
+    ),
+    NegociacoesBase AS (
         SELECT
             np.*,
+            CASE
+                WHEN np.IDFatoKanbanCard = :id_card THEN 'CARD'
+                ELSE 'CONTRATO'
+            END AS OrigemHistorico,
             ROW_NUMBER() OVER (
                 PARTITION BY
-                    ISNULL(np.IDDimPaineisEuromidia, -1),
-                    ISNULL(np.IDDimFacesPaineis, -1)
+                    np.IDFatoKanbanNegociacaoPreco
                 ORDER BY
                     COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino) DESC,
                     np.IDFatoKanbanNegociacaoPreco DESC
-            ) AS rn_painel_face
-        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] np
-        WHERE np.IDFatoKanbanCard = :id_card
-          AND np.IDEmpresaProprietaria = :id_empresa_proprietaria
+            ) AS rn_registro
+        FROM {TABELA_CARD_NEGOCIACAO_PRECO} np
+        WHERE np.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND (
+                np.IDFatoKanbanCard = :id_card
+                OR EXISTS (
+                    SELECT 1
+                    FROM ContratosDoCard cc
+                    WHERE cc.IDFatoControleContratosEuromidia = TRY_CONVERT(int, np.IDFatoControleContratosEuromidia)
+                )
+          )
     )
     SELECT
         np.IDFatoKanbanNegociacaoPreco AS id_negociacao_preco,
@@ -15567,12 +17470,17 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
         np.IDEmpresa AS id_empresa_relacionada,
         np.IDDimPaineisEuromidia AS id_painel,
         np.IDDimFacesPaineis AS id_face,
+        np.IDFatoControleContratosEuromidia AS id_contrato,
+        np.OrigemHistorico AS origem_historico,
 
         cli.RazaoSocial AS razao_social_cliente,
         cli.NomeFantasia AS nome_fantasia_cliente,
+
         COALESCE(
             NULLIF(LTRIM(RTRIM(cli.NomeFantasia)), ''),
             NULLIF(LTRIM(RTRIM(cli.RazaoSocial)), ''),
+            NULLIF(LTRIM(RTRIM(contrato.RazaoSocial)), ''),
+            NULLIF(LTRIM(RTRIM(contrato.MarcaExibida)), ''),
             CONCAT('Empresa #', CAST(COALESCE(np.IDEmpresa, card_aut.IDEmpresa) AS VARCHAR(30)))
         ) AS nome_cliente_exibicao,
 
@@ -15593,7 +17501,13 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
         np.DataAprovacaoPreco AS data_aprovacao_preco,
         np.PeriodoInicio AS periodo_inicio,
         np.PeriodoTermino AS periodo_termino,
-        COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino) AS data_referencia_preco,
+
+        COALESCE(
+            np.DataAprovacaoPreco,
+            np.DataPrecoProposto,
+            np.PeriodoInicio,
+            np.PeriodoTermino
+        ) AS data_referencia_preco,
 
         np.CustoAtual AS custo_original,
         np.PrecoAtual AS preco_original,
@@ -15614,14 +17528,32 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
         np.BitAutorizacaoDiretoria AS bit_autorizacao_diretoria,
         np.BitAutorizacaoCoordenador AS bit_autorizacao_coordenador,
 
-        pf.CodPonto AS cod_ponto,
-        pf.CodFace AS cod_face,
-        pf.TipoPainel AS tipo_painel,
+        COALESCE(pf.CodPonto, item_contrato.CodPonto) AS cod_ponto,
+        COALESCE(pf.CodFace, item_contrato.CodFace) AS cod_face,
+        COALESCE(pf.TipoPainel, item_contrato.Tipo) AS tipo_painel,
 
-        COALESCE(pf.ValorTabela, np.PrecoAtual) AS valor_tabela,
-        COALESCE(np.PrecoProposto, pf.NovoValor, np.PrecoAprovado) AS novo_valor,
+        COALESCE(
+            pf.ValorTabela,
+            np.PrecoAtual,
+            item_contrato.FaturamentoLiquidoMensal,
+            item_contrato.TotalLiquidoContratoAGBRCTACORDO
+        ) AS valor_tabela,
+
+        COALESCE(
+            np.PrecoProposto,
+            pf.NovoValor,
+            np.PrecoAprovado
+        ) AS novo_valor,
+
         np.DescontoProposto AS percentual_desconto,
-        COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual) AS valor_venda_final,
+
+        COALESCE(
+            np.PrecoAprovado,
+            np.PrecoProposto,
+            pf.ValorVendaFinal,
+            np.PrecoAtual,
+            item_contrato.FaturamentoLiquidoMensal
+        ) AS valor_venda_final,
 
         CASE
             WHEN COALESCE(np.PrecoAprovado, np.PrecoProposto, pf.ValorVendaFinal, np.PrecoAtual) IS NOT NULL
@@ -15652,19 +17584,19 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
               OR np.IDDimUsuariosAprovacaoPreco IS NOT NULL
               OR np.DataAprovacaoPreco IS NOT NULL
             THEN 'APROVADO'
-            ELSE 'PENDENTE'
+            ELSE 'NEGOCIADO'
         END AS status_negociacao,
 
-        CASE WHEN np.rn_painel_face = 1 THEN 1 ELSE 0 END AS ativo,
+        CAST(1 AS bit) AS ativo,
         CAST(NULL AS DATETIME) AS removido_em
 
     FROM NegociacoesBase np
 
-    INNER JOIN [Kanban].[Silver].[FatoKanbanCard] card_aut
-        ON card_aut.IDFatoKanbanCard = np.IDFatoKanbanCard
+    INNER JOIN {TABELA_CARD} card_aut
+        ON card_aut.IDFatoKanbanCard = :id_card
        AND card_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
 
-    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+    LEFT JOIN {TABELA_KANBAN_FASE} fase
         ON fase.IDDimKanbanFase = np.IDDimKanbanFase
        AND (
             fase.IDEmpresaProprietaria = np.IDEmpresaProprietaria
@@ -15685,8 +17617,11 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
             OR usu_apr.IDEmpresaProprietaria IS NULL
        )
 
-    LEFT JOIN [Integracao].[Silver].[DimEmpresas] cli
-        ON cli.IDEmpresa = COALESCE(np.IDEmpresa, card_aut.IDEmpresa)
+    LEFT JOIN {TABELA_CONTROLE_CONTRATOS} contrato
+        ON contrato.IDFatoControleContratosEuromidia = np.IDFatoControleContratosEuromidia
+
+    LEFT JOIN {TABELA_EMPRESAS} cli
+        ON cli.IDEmpresa = COALESCE(np.IDEmpresa, card_aut.IDEmpresa, contrato.IDEmpresa)
        AND (
             cli.IDEmpresaProprietaria = np.IDEmpresaProprietaria
             OR cli.IDEmpresaProprietaria IS NULL
@@ -15708,20 +17643,46 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
             pf_hist.RemovidoEm,
             pf_hist.CriadoEm,
             pf_hist.DataAtualizacao
-        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf_hist
+        FROM {TABELA_CARD_PAINEL_FACE} pf_hist
         WHERE pf_hist.IDFatoKanbanCard = np.IDFatoKanbanCard
           AND ISNULL(pf_hist.IDDimPaineisEuromidia, 0) = ISNULL(np.IDDimPaineisEuromidia, 0)
           AND ISNULL(pf_hist.IDDimFacesPaineis, 0) = ISNULL(np.IDDimFacesPaineis, 0)
         ORDER BY
-            CASE WHEN ISNULL(pf_hist.Ativo, 1) = 1 AND pf_hist.RemovidoEm IS NULL THEN 0 ELSE 1 END,
+            CASE
+                WHEN ISNULL(pf_hist.Ativo, 1) = 1
+                 AND pf_hist.RemovidoEm IS NULL
+                THEN 0
+                ELSE 1
+            END,
             COALESCE(pf_hist.DataAtualizacao, pf_hist.CriadoEm, pf_hist.RemovidoEm) DESC,
             pf_hist.IDFatoKanbanCardPainelFace DESC
     ) pf
 
+    OUTER APPLY (
+        SELECT TOP (1)
+            i.CodPonto,
+            i.CodFace,
+            i.Tipo,
+            i.FaturamentoLiquidoMensal,
+            i.TotalLiquidoContratoAGBRCTACORDO
+        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+        WHERE i.IDFatoControleContratoEuromidia = np.IDFatoControleContratosEuromidia
+          AND ISNULL(i.BitAtivo, 1) = 1
+          AND (
+                ISNULL(i.IDPainelEuromidia, 0) = ISNULL(np.IDDimPaineisEuromidia, 0)
+             OR ISNULL(i.IDDimFacesPaineis, 0) = ISNULL(np.IDDimFacesPaineis, 0)
+          )
+        ORDER BY
+            i.IDFatoControleContratosItensEuromidia DESC
+    ) item_contrato
+
+    WHERE np.rn_registro = 1
+
     ORDER BY
         COALESCE(np.DataAprovacaoPreco, np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino) DESC,
-        np.IDFatoKanbanNegociacaoPreco DESC
+        np.IDFatoKanbanNegociacaoPreco DESC;
     """
+
     return _executar_sql_mapeado(
         sql,
         {
@@ -15729,6 +17690,8 @@ def _buscar_historico_precos_card(id_card: int, id_empresa_proprietaria: int) ->
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
         },
     )
+
+
 
 
 
@@ -16321,40 +18284,159 @@ def _calcular_preco_final_aprovacao_diretoria(
 
 
 
-def _estado_precisa_aprovacao_diretoria(estado: Mapping[str, Any] | dict[str, Any] | None) -> bool:
-    """Eu marco diretoria quando o preço final ficar em até 12% acima do custo."""
+
+
+def _obter_desconto_maximo_usuario_ativo(id_usuario: int | None) -> Decimal:
+    """
+    Eu busco o limite máximo de desconto ativo para o usuário.
+
+    Regra:
+    - uso apenas BitAtivo = 1;
+    - se existir mais de uma linha ativa, pego a mais recente;
+    - se não existir permissão ativa, retorno 0 por segurança.
+    """
+
+    try:
+        id_usuario_int = int(id_usuario or 0)
+    except Exception:
+        id_usuario_int = 0
+
+    if id_usuario_int <= 0:
+        return Decimal("0")
+
+    sql = text(f"""
+        SELECT TOP (1)
+            DescontoMaximo
+        FROM {TABELA_PERMISSAO_DESCONTO}
+        WHERE IDDimUsuarios = :id_usuario
+          AND ISNULL(BitAtivo, 0) = 1
+        ORDER BY
+            DataAtualizado DESC,
+            IDDimKanbanPermissaoDesconto DESC;
+    """)
+
+    valor = db.session.execute(
+        sql,
+        {"id_usuario": id_usuario_int},
+    ).scalar()
+
+    desconto_maximo = _valor_decimal(valor)
+
+    if desconto_maximo is None:
+        return Decimal("0")
+
+    return desconto_maximo
+
+
+def _calcular_desconto_percentual_estado(estado: Mapping[str, Any] | dict[str, Any] | None) -> Decimal | None:
+    """
+    Eu calculo o desconto real do item do card.
+
+    Prioridade:
+    1) se PercentualDesconto veio preenchido, uso ele;
+    2) senão, calculo usando ValorTabela e preço final;
+    3) preço final pode vir de NovoValor, ValorVendaFinal ou ValorTabela com desconto.
+    """
+
     if not estado:
-        return False
+        return None
 
-    custo_dec = _valor_decimal(estado.get("CustoTabela"))
-    if custo_dec is None or custo_dec <= 0:
-        return False
+    desconto_informado = _valor_decimal(estado.get("PercentualDesconto"))
 
-    preco_final_dec = _calcular_preco_final_aprovacao_diretoria(
+    if desconto_informado is not None:
+        if desconto_informado < 0:
+            return Decimal("0")
+        return desconto_informado
+
+    valor_tabela = _valor_decimal(estado.get("ValorTabela"))
+
+    if valor_tabela is None or valor_tabela <= 0:
+        return None
+
+    preco_final = _calcular_preco_final_aprovacao_diretoria(
         preco_tabela=estado.get("ValorTabela"),
         novo_valor=estado.get("NovoValor"),
         percentual_desconto=estado.get("PercentualDesconto"),
         valor_venda_final=estado.get("ValorVendaFinal"),
     )
-    if preco_final_dec is None:
+
+    if preco_final is None:
+        return None
+
+    desconto_calculado = ((valor_tabela - preco_final) / valor_tabela) * Decimal("100")
+
+    if desconto_calculado < 0:
+        return Decimal("0")
+
+    return desconto_calculado
+
+
+def _estado_precisa_aprovacao_diretoria(
+    estado: Mapping[str, Any] | dict[str, Any] | None,
+    *,
+    id_usuario: int | None = None,
+) -> bool:
+    """
+    Compatibilidade de nome:
+    - mantenho o nome antigo para não quebrar chamadas existentes;
+    - mas a regra agora é permissão de desconto do usuário.
+
+    Regra nova:
+    - se DescontoProposto/PercentualDesconto for maior que DescontoMaximo ativo do usuário,
+      precisa aprovação.
+    """
+
+    if not estado:
         return False
 
-    limite_diretoria = custo_dec * (Decimal("1") + (PERCENTUAL_LIMITE_APROVACAO_DIRETORIA_SOBRE_CUSTO / Decimal("100")))
-    return preco_final_dec <= limite_diretoria
+    id_usuario_resolvido = int(
+        id_usuario
+        or _obter_id_dim_usuario_logado()
+        or _id_usuario()
+        or 0
+    )
+
+    desconto_maximo = _obter_desconto_maximo_usuario_ativo(id_usuario_resolvido)
+    desconto_atual = _calcular_desconto_percentual_estado(estado)
+
+    if desconto_atual is None:
+        return False
+
+    return desconto_atual > desconto_maximo
 
 
+def _estados_precisam_aprovacao_diretoria(
+    estados: list[dict[str, Any]] | None,
+    *,
+    id_usuario: int | None = None,
+) -> bool:
+    id_usuario_resolvido = int(
+        id_usuario
+        or _obter_id_dim_usuario_logado()
+        or _id_usuario()
+        or 0
+    )
+
+    return any(
+        _estado_precisa_aprovacao_diretoria(
+            estado,
+            id_usuario=id_usuario_resolvido,
+        )
+        for estado in (estados or [])
+    )
 
 
+def _card_precisa_aprovacao_diretoria_por_estado_atual(
+    id_card: int,
+    *,
+    id_usuario: int | None = None,
+) -> bool:
+    return _estados_precisam_aprovacao_diretoria(
+        _listar_estado_atual_negociacao_card(int(id_card)),
+        id_usuario=id_usuario,
+    )
 
-def _estados_precisam_aprovacao_diretoria(estados: list[dict[str, Any]] | None) -> bool:
-    return any(_estado_precisa_aprovacao_diretoria(estado) for estado in (estados or []))
 
-
-
-
-
-def _card_precisa_aprovacao_diretoria_por_estado_atual(id_card: int) -> bool:
-    return _estados_precisam_aprovacao_diretoria(_listar_estado_atual_negociacao_card(int(id_card)))
 
 
 
@@ -16366,17 +18448,116 @@ def _sincronizar_tag_aprovacao_diretoria_card(
     id_usuario: int,
     id_empresa_proprietaria: int | None,
 ) -> bool:
-    avaliacao = _avaliar_tags_aprovacao_desconto_card(
-        id_card=int(id_card),
-        estados_atuais=estados_atuais or [],
-        id_empresa_proprietaria=int(id_empresa_proprietaria or 0),
-    )
+    """
+    Eu sincronizo as tags de aprovação de desconto do card.
 
-    precisa_aprovacao = bool(avaliacao.get("precisa_aprovacao_pendente"))
-    tem_desconto_aprovado_ativo = bool(avaliacao.get("tem_desconto_aprovado_ativo"))
+    Regra correta:
+    - busca o DescontoMaximo ativo do usuário em Kanban.Silver.DimKanbanPermissaoDesconto;
+    - se algum painel/face do card tiver desconto acima do permitido, aplica a tag "Aprovação Desconto";
+    - se não precisar mais de aprovação, remove a tag "Aprovação Desconto";
+    - se existir preço aprovado compatível com o preço atual, aplica "Desconto Aprovado";
+    - se não existir aprovação compatível, remove "Desconto Aprovado".
+    """
+
+    id_card_int = int(id_card or 0)
+    id_kanban_int = int(id_kanban or 0)
+    id_usuario_int = int(id_usuario or 0)
+    id_empresa_prop_int = int(id_empresa_proprietaria or 0)
+
+    if id_card_int <= 0:
+        return False
+
+    if id_kanban_int <= 0:
+        return False
+
+    if id_usuario_int <= 0:
+        id_usuario_int = int(_obter_id_dim_usuario_logado() or _id_usuario() or 0)
+
+    if id_empresa_prop_int <= 0:
+        id_empresa_prop_int = int(_obter_id_empresa_proprietaria_usuario_logado() or _id_empresa_usuario() or 0)
+
+    def _desconto_maximo_usuario() -> Decimal:
+        sql = text("""
+            SELECT TOP (1)
+                TRY_CONVERT(decimal(19, 6), DescontoMaximo) AS DescontoMaximo
+            FROM [Kanban].[Silver].[DimKanbanPermissaoDesconto]
+            WHERE IDDimUsuarios = :id_usuario
+              AND ISNULL(BitAtivo, 0) = 1
+            ORDER BY
+                DataAtualizado DESC,
+                IDDimKanbanPermissaoDesconto DESC;
+        """)
+
+        valor = db.session.execute(
+            sql,
+            {"id_usuario": id_usuario_int},
+        ).scalar()
+
+        desconto_maximo = _valor_decimal(valor)
+
+        if desconto_maximo is None:
+            return Decimal("0")
+
+        return desconto_maximo
+
+    def _calcular_desconto_estado(estado: Mapping[str, Any] | dict[str, Any] | None) -> Decimal | None:
+        if not estado:
+            return None
+
+        desconto_informado = _valor_decimal(estado.get("PercentualDesconto"))
+
+        if desconto_informado is not None:
+            if desconto_informado < 0:
+                return Decimal("0")
+            return desconto_informado
+
+        preco_tabela = _valor_decimal(estado.get("ValorTabela"))
+
+        if preco_tabela is None or preco_tabela <= 0:
+            return None
+
+        preco_final = _calcular_preco_final_aprovacao_diretoria(
+            preco_tabela=estado.get("ValorTabela"),
+            novo_valor=estado.get("NovoValor"),
+            percentual_desconto=estado.get("PercentualDesconto"),
+            valor_venda_final=estado.get("ValorVendaFinal"),
+        )
+
+        if preco_final is None:
+            return None
+
+        desconto_calculado = ((preco_tabela - preco_final) / preco_tabela) * Decimal("100")
+
+        if desconto_calculado < 0:
+            return Decimal("0")
+
+        return desconto_calculado
+
+    desconto_maximo = _desconto_maximo_usuario()
+
+    precisa_aprovacao = False
+    tem_desconto_aprovado_ativo = False
+
+    for estado in (estados_atuais or []):
+        desconto_estado = _calcular_desconto_estado(estado)
+
+        if desconto_estado is None:
+            continue
+
+        if desconto_estado <= desconto_maximo:
+            continue
+
+        if _estado_tem_aprovacao_compativel_para_preco_atual(
+            id_card=id_card_int,
+            estado=estado,
+            id_empresa_proprietaria=id_empresa_prop_int,
+        ):
+            tem_desconto_aprovado_ativo = True
+        else:
+            precisa_aprovacao = True
 
     tag_aprovacao = _obter_tag_por_nome(
-        int(id_kanban),
+        id_kanban_int,
         NOME_TAG_APROVACAO_DESCONTO,
         somente_ativa=True,
     )
@@ -16388,94 +18569,54 @@ def _sincronizar_tag_aprovacao_diretoria_card(
 
     if precisa_aprovacao and tag_aprovacao:
         _aplicar_tag_no_card(
-            id_card=int(id_card),
+            id_card=id_card_int,
             id_tag=int(tag_aprovacao.get("IDDimKanbanTag") or 0),
-            id_usuario=int(id_usuario),
+            id_usuario=id_usuario_int,
             id_empresa_proprietaria=(
-                int(tag_aprovacao.get("IDEmpresaProprietaria") or id_empresa_proprietaria or 0) or None
+                int(tag_aprovacao.get("IDEmpresaProprietaria") or id_empresa_prop_int or 0) or None
             ),
         )
+
         _remover_tag_por_nome_card(
-            id_card=int(id_card),
-            id_kanban=int(id_kanban),
+            id_card=id_card_int,
+            id_kanban=id_kanban_int,
             nome_tag=NOME_TAG_DESCONTO_APROVADO,
-            id_usuario=int(id_usuario),
+            id_usuario=id_usuario_int,
         )
+
         return True
 
     if tag_aprovacao:
         _remover_tag_do_card(
-            id_card=int(id_card),
+            id_card=id_card_int,
             id_tag=int(tag_aprovacao.get("IDDimKanbanTag") or 0),
-            id_usuario=int(id_usuario),
+            id_usuario=id_usuario_int,
         )
 
     if tem_desconto_aprovado_ativo:
         _aplicar_tag_por_nome_card(
-            id_card=int(id_card),
-            id_kanban=int(id_kanban),
+            id_card=id_card_int,
+            id_kanban=id_kanban_int,
             nome_tag=NOME_TAG_DESCONTO_APROVADO,
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=id_empresa_proprietaria,
+            id_usuario=id_usuario_int,
+            id_empresa_proprietaria=id_empresa_prop_int,
         )
     else:
         _remover_tag_por_nome_card(
-            id_card=int(id_card),
-            id_kanban=int(id_kanban),
+            id_card=id_card_int,
+            id_kanban=id_kanban_int,
             nome_tag=NOME_TAG_DESCONTO_APROVADO,
-            id_usuario=int(id_usuario),
+            id_usuario=id_usuario_int,
         )
 
     return False
 
 
 
-HEALTH_CHECK_KANBAN_PADRAO = 1
 
-MAPA_TAGS_HEALTH_CHECK = {
-    "novo_contrato": ["novo contrato"],
-    "aditivo": ["aditivo"],
-    "perda_preco": [
-        "perda por preco",
-        "perda preço",
-        "perda de preco",
-        "perda de preço",
-        "preco",
-        "preço",
-    ],
-    "perda_concorrente": [
-        "perda por concorrente",
-        "concorrente",
-    ],
-    "perda_falta_painel": [
-        "perda por falta de painel",
-        "falta de painel",
-        "sem painel",
-    ],
-}
 
-MAPA_MOTIVOS_HEALTH_CHECK = {
-    "perda_preco": [
-        "preco",
-        "preço",
-        "perda por preco",
-        "perda preço",
-        "valor alto",
-        "valor",
-    ],
-    "perda_concorrente": [
-        "concorrente",
-        "concorrencia",
-        "concorrência",
-    ],
-    "perda_falta_painel": [
-        "falta de painel",
-        "sem painel",
-        "sem disponibilidade",
-        "sem inventario",
-        "sem inventário",
-    ],
-}
+
+
 
 
 def _normalizar_texto_health_check(valor: Any) -> str:
@@ -18142,17 +20283,29 @@ def _estado_tem_aprovacao_compativel_para_preco_atual(
 
 
 
+
 def _avaliar_tags_aprovacao_desconto_card(
     *,
     id_card: int,
     estados_atuais: list[dict[str, Any]] | None,
     id_empresa_proprietaria: int,
+    id_usuario: int | None = None,
 ) -> dict[str, bool]:
     precisa_aprovacao_pendente = False
     tem_desconto_aprovado_ativo = False
 
+    id_usuario_resolvido = int(
+        id_usuario
+        or _obter_id_dim_usuario_logado()
+        or _id_usuario()
+        or 0
+    )
+
     for estado in (estados_atuais or []):
-        if not _estado_precisa_aprovacao_diretoria(estado):
+        if not _estado_precisa_aprovacao_diretoria(
+            estado,
+            id_usuario=id_usuario_resolvido,
+        ):
             continue
 
         if _estado_tem_aprovacao_compativel_para_preco_atual(
@@ -18173,10 +20326,6 @@ def _avaliar_tags_aprovacao_desconto_card(
 
 
 
-
-
-
-
 def _reconciliar_tags_aprovacao_desconto_pendentes(
     *,
     id_empresa_proprietaria: int,
@@ -18186,9 +20335,10 @@ def _reconciliar_tags_aprovacao_desconto_pendentes(
     """
     Recalcula as tags automáticas de aprovação/desconto para cards já existentes.
 
-    Objetivo:
-    - recuperar cards que ficaram sem a tag automática por regressão de código;
-    - restaurar a presença na lista /kanban/aprovacao-preco sem depender de edição manual.
+    Correção importante:
+    - a tela pode ser aberta pelo Admin;
+    - mas a regra de desconto precisa usar o usuário solicitante do desconto;
+    - nunca uso o limite do Admin para decidir se a pendência do vendedor ainda existe.
     """
     filtro_kanban = ""
     parametros: dict[str, object] = {
@@ -18204,12 +20354,25 @@ def _reconciliar_tags_aprovacao_desconto_pendentes(
             c.IDFatoKanbanCard,
             c.IDDimKanban
         FROM {TABELA_CARD} c
-        INNER JOIN {TABELA_CARD_NEGOCIACAO_PRECO} np
-            ON np.IDFatoKanbanCard = c.IDFatoKanbanCard
-           AND np.IDEmpresaProprietaria = c.IDEmpresaProprietaria
         WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
-          AND c.Ativo = 1
-          {filtro_kanban};
+          AND ISNULL(c.Ativo, 1) = 1
+          {filtro_kanban}
+          AND (
+                EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CARD_NEGOCIACAO_PRECO} np
+                    WHERE np.IDFatoKanbanCard = c.IDFatoKanbanCard
+                      AND np.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CARD_APROVA_PRECO} ap
+                    WHERE ap.IDFatoKanbanCard = c.IDFatoKanbanCard
+                      AND ap.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+                      AND ap.PrecoAprovado IS NULL
+                      AND ap.DataAprovacaoPreco IS NULL
+                )
+          );
     """)
 
     rows = db.session.execute(sql, parametros).mappings().all()
@@ -18227,14 +20390,21 @@ def _reconciliar_tags_aprovacao_desconto_pendentes(
         cards_avaliados += 1
 
         try:
+            id_usuario_solicitante = _resolver_id_usuario_solicitante_desconto_card(
+                id_card=id_card,
+                id_usuario_fallback=int(id_usuario),
+            )
+
             estados_atuais = _listar_estado_atual_negociacao_card(id_card)
+
             _sincronizar_tag_aprovacao_diretoria_card(
                 id_card=id_card,
                 id_kanban=id_kanban_card,
                 estados_atuais=estados_atuais,
-                id_usuario=int(id_usuario),
+                id_usuario=int(id_usuario_solicitante or id_usuario),
                 id_empresa_proprietaria=int(id_empresa_proprietaria),
             )
+
         except Exception:
             cards_com_erro += 1
             current_app.logger.exception(
@@ -18249,21 +20419,737 @@ def _reconciliar_tags_aprovacao_desconto_pendentes(
 
 
 
-def _buscar_cards_lista_aprovacao_preco(id_empresa_proprietaria: int) -> list[dict[str, Any]]:
-    sql = text("""
-        ;WITH CardsComTag AS (
+
+
+
+def _materializar_negociacao_preco_pendente_card(
+    *,
+    id_card: int,
+    id_empresa_proprietaria: int,
+    id_usuario: int | None = None,
+) -> dict[str, Any]:
+    """
+    Eu garanto que o card tenha linha real em FatoAprovaPreco
+    quando o desconto informado ultrapassa o limite permitido para o usuário.
+
+    Regra correta:
+    - FatoAprovaPreco guarda pendências de aprovação.
+    - FatoKanbanNegociacaoPreco guarda histórico de preços.
+    - Esta função NÃO grava no histórico.
+    - A aprovação é exigida quando DescontoProposto > DescontoMaximo ativo do usuário.
+    - DescontoMaximo vem de Kanban.Silver.DimKanbanPermissaoDesconto.
+    - A comparação é feita por Card + Painel + Face.
+    """
+
+    id_card_int = int(id_card or 0)
+    id_empresa_prop_int = int(id_empresa_proprietaria or 0)
+    id_usuario_resolvido = int(id_usuario or _obter_id_dim_usuario_logado() or _id_usuario() or 0)
+
+    if id_card_int <= 0 or id_empresa_prop_int <= 0:
+        return {
+            "ok": False,
+            "materializado": False,
+            "motivo": "parametros_invalidos",
+            "id_card": id_card_int,
+        }
+
+    if id_usuario_resolvido <= 0:
+        return {
+            "ok": False,
+            "materializado": False,
+            "motivo": "usuario_nao_resolvido",
+            "id_card": id_card_int,
+        }
+
+    if not _objeto_existe(TABELA_CARD_APROVA_PRECO):
+        return {
+            "ok": False,
+            "materializado": False,
+            "motivo": "tabela_fato_aprova_preco_nao_existe",
+            "id_card": id_card_int,
+        }
+
+    sql_card = text(f"""
+        SELECT TOP (1)
+            c.IDFatoKanbanCard,
+            c.IDDimKanban,
+            c.IDDimKanbanFaseAtual,
+            c.IDEmpresa,
+            c.IDEmpresaProprietaria,
+            c.Ativo
+        FROM {TABELA_CARD} c
+        WHERE c.IDFatoKanbanCard = :id_card
+          AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND ISNULL(c.Ativo, 1) = 1;
+    """)
+
+    card = db.session.execute(
+        sql_card,
+        {
+            "id_card": id_card_int,
+            "id_empresa_proprietaria": id_empresa_prop_int,
+        },
+    ).mappings().first()
+
+    if not card:
+        return {
+            "ok": False,
+            "materializado": False,
+            "motivo": "card_nao_encontrado_ou_inativo",
+            "id_card": id_card_int,
+        }
+
+    id_kanban = int(card.get("IDDimKanban") or 0)
+    id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0) or None
+    id_empresa_relacionada = int(card.get("IDEmpresa") or 0) or None
+
+    id_empresa_proprietaria_aprovacao = _resolver_id_empresa_proprietaria_movimento(
+        id_kanban=id_kanban,
+        id_empresa_padrao=id_empresa_prop_int,
+    )
+
+    estados_atuais = _listar_estado_atual_negociacao_card(id_card_int)
+
+    if not estados_atuais:
+        return {
+            "ok": True,
+            "materializado": False,
+            "motivo": "card_sem_paineis_faces_ativos",
+            "id_card": id_card_int,
+        }
+
+    def _desconto_maximo_usuario() -> Decimal:
+        sql = text(f"""
+            SELECT TOP (1)
+                TRY_CONVERT(decimal(19, 6), DescontoMaximo) AS DescontoMaximo
+            FROM {TABELA_PERMISSAO_DESCONTO}
+            WHERE IDDimUsuarios = :id_usuario
+              AND ISNULL(BitAtivo, 0) = 1
+            ORDER BY
+                DataAtualizado DESC,
+                IDDimKanbanPermissaoDesconto DESC;
+        """)
+
+        valor = db.session.execute(
+            sql,
+            {"id_usuario": id_usuario_resolvido},
+        ).scalar()
+
+        desconto_maximo = _valor_decimal(valor)
+
+        if desconto_maximo is None:
+            return Decimal("0")
+
+        return desconto_maximo
+
+    def _calcular_desconto_estado(estado: Mapping[str, Any] | dict[str, Any] | None) -> Decimal | None:
+        if not estado:
+            return None
+
+        desconto_informado = _valor_decimal(estado.get("PercentualDesconto"))
+
+        if desconto_informado is not None:
+            if desconto_informado < 0:
+                return Decimal("0")
+            return desconto_informado
+
+        preco_tabela = _valor_decimal(estado.get("ValorTabela"))
+
+        if preco_tabela is None or preco_tabela <= 0:
+            return None
+
+        preco_final = _calcular_preco_final_aprovacao_diretoria(
+            preco_tabela=estado.get("ValorTabela"),
+            novo_valor=estado.get("NovoValor"),
+            percentual_desconto=estado.get("PercentualDesconto"),
+            valor_venda_final=estado.get("ValorVendaFinal"),
+        )
+
+        if preco_final is None:
+            return None
+
+        desconto_calculado = ((preco_tabela - preco_final) / preco_tabela) * Decimal("100")
+
+        if desconto_calculado < 0:
+            return Decimal("0")
+
+        return desconto_calculado
+
+    desconto_maximo = _desconto_maximo_usuario()
+
+    estados_que_exigem_aprovacao: list[dict[str, Any]] = []
+
+    for estado in estados_atuais or []:
+        desconto_estado = _calcular_desconto_estado(estado)
+
+        if desconto_estado is None:
+            continue
+
+        if desconto_estado <= desconto_maximo:
+            continue
+
+        tem_aprovacao_compativel = _estado_tem_aprovacao_compativel_para_preco_atual(
+            id_card=id_card_int,
+            estado=estado,
+            id_empresa_proprietaria=int(id_empresa_proprietaria_aprovacao),
+        )
+
+        if tem_aprovacao_compativel:
+            continue
+
+        estados_que_exigem_aprovacao.append(dict(estado))
+
+    precisa_aprovacao = bool(estados_que_exigem_aprovacao)
+
+    if not precisa_aprovacao:
+        sql_limpar_pendencias = text(f"""
+            DELETE FROM {TABELA_CARD_APROVA_PRECO}
+            WHERE IDFatoKanbanCard = :id_card
+              AND IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND PrecoAprovado IS NULL
+              AND DataAprovacaoPreco IS NULL;
+        """)
+
+        pendencias_removidas = db.session.execute(
+            sql_limpar_pendencias,
+            {
+                "id_card": id_card_int,
+                "id_empresa_proprietaria": int(id_empresa_proprietaria_aprovacao),
+            },
+        ).rowcount
+
+        if id_kanban > 0:
+            _sincronizar_tag_aprovacao_diretoria_card(
+                id_card=id_card_int,
+                id_kanban=id_kanban,
+                estados_atuais=estados_atuais,
+                id_usuario=id_usuario_resolvido,
+                id_empresa_proprietaria=int(id_empresa_proprietaria_aprovacao),
+            )
+
+        return {
+            "ok": True,
+            "materializado": False,
+            "motivo": "estado_atual_nao_exige_aprovacao",
+            "id_card": id_card_int,
+            "id_usuario": id_usuario_resolvido,
+            "desconto_maximo_usuario": float(desconto_maximo),
+            "pendencias_removidas": int(pendencias_removidas or 0),
+        }
+
+    sql_qtd_antes = text(f"""
+        SELECT COUNT(1)
+        FROM {TABELA_CARD_APROVA_PRECO}
+        WHERE IDFatoKanbanCard = :id_card
+          AND IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND PrecoAprovado IS NULL
+          AND DataAprovacaoPreco IS NULL;
+    """)
+
+    qtd_pendentes_antes = int(
+        db.session.execute(
+            sql_qtd_antes,
+            {
+                "id_card": id_card_int,
+                "id_empresa_proprietaria": int(id_empresa_proprietaria_aprovacao),
+            },
+        ).scalar()
+        or 0
+    )
+
+    select_id_contrato = (
+        "TRY_CONVERT(int, c.IDFatoControleContratosEuromidia)"
+        if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia")
+        else (
+            "TRY_CONVERT(int, c.IDFatoControleContratoEuromidia)"
+            if _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia")
+            else "CAST(NULL AS int)"
+        )
+    )
+
+    select_bit_aditivo = (
+        "TRY_CONVERT(bit, c.BitAditivo)"
+        if _coluna_existe(TABELA_CARD, "BitAditivo")
+        else "CAST(0 AS bit)"
+    )
+
+    sql_materializar = text(f"""
+        ;WITH PermissaoUsuario AS (
+            SELECT TOP (1)
+                TRY_CONVERT(decimal(19, 6), DescontoMaximo) AS DescontoMaximo
+            FROM {TABELA_PERMISSAO_DESCONTO}
+            WHERE IDDimUsuarios = :id_usuario
+              AND ISNULL(BitAtivo, 0) = 1
+            ORDER BY
+                DataAtualizado DESC,
+                IDDimKanbanPermissaoDesconto DESC
+        ),
+        BaseOperacional AS (
+            SELECT
+                pf.IDFatoKanbanCardPainelFace,
+                TRY_CONVERT(int, pf.IDFatoKanbanCard) AS IDFatoKanbanCard,
+                TRY_CONVERT(int, pf.IDDimPaineisEuromidia) AS IDDimPaineisEuromidia,
+                TRY_CONVERT(int, pf.IDDimFacesPaineis) AS IDDimFacesPaineis,
+                TRY_CONVERT(int, pf.IDDimTabelaPrecosEuromidia) AS IDDimTabelaPrecosEuromidia,
+
+                TRY_CONVERT(decimal(19, 2), pf.CustoTabela) AS CustoAtual,
+                TRY_CONVERT(decimal(19, 2), pf.ValorTabela) AS PrecoAtual,
+                TRY_CONVERT(decimal(19, 2), pf.NovoValor) AS NovoValor,
+                TRY_CONVERT(decimal(19, 6), pf.PercentualDesconto) AS PercentualDesconto,
+                TRY_CONVERT(decimal(19, 2), pf.ValorVendaFinal) AS ValorVendaFinal,
+
+                TRY_CONVERT(date, pf.DataInicio) AS PeriodoInicio,
+                TRY_CONVERT(date, pf.DataFim) AS PeriodoTermino,
+
+                {select_id_contrato} AS IDFatoControleContratosEuromidia,
+                {select_bit_aditivo} AS BitAditivoContrato
+            FROM {TABELA_CARD_PAINEL_FACE} pf
+            INNER JOIN {TABELA_CARD} c
+                ON c.IDFatoKanbanCard = pf.IDFatoKanbanCard
+            WHERE pf.IDFatoKanbanCard = :id_card
+              AND ISNULL(pf.Ativo, 1) = 1
+        ),
+        BaseCalculada AS (
+            SELECT
+                b.*,
+
+                PrecoProposto =
+                    COALESCE(
+                        b.NovoValor,
+                        b.ValorVendaFinal,
+                        CASE
+                            WHEN b.PercentualDesconto IS NOT NULL
+                             AND b.PrecoAtual IS NOT NULL
+                            THEN
+                                TRY_CONVERT(
+                                    decimal(19, 2),
+                                    b.PrecoAtual * (
+                                        CAST(1 AS decimal(19, 6))
+                                        - (
+                                            b.PercentualDesconto
+                                            / CAST(100 AS decimal(19, 6))
+                                        )
+                                    )
+                                )
+                            ELSE b.PrecoAtual
+                        END
+                    ),
+
+                DescontoProposto =
+                    COALESCE(
+                        b.PercentualDesconto,
+                        CASE
+                            WHEN b.PrecoAtual IS NOT NULL
+                             AND b.PrecoAtual > 0
+                             AND COALESCE(b.NovoValor, b.ValorVendaFinal) IS NOT NULL
+                            THEN
+                                TRY_CONVERT(
+                                    decimal(19, 6),
+                                    (
+                                        (
+                                            b.PrecoAtual
+                                            - COALESCE(b.NovoValor, b.ValorVendaFinal)
+                                        )
+                                        / b.PrecoAtual
+                                    ) * 100
+                                )
+                            ELSE NULL
+                        END
+                    ),
+
+                MargemAtual =
+                    CASE
+                        WHEN b.PrecoAtual IS NOT NULL
+                         AND b.PrecoAtual > 0
+                         AND b.CustoAtual IS NOT NULL
+                        THEN
+                            TRY_CONVERT(
+                                decimal(19, 2),
+                                ((b.PrecoAtual - b.CustoAtual) / b.PrecoAtual) * 100
+                            )
+                        ELSE NULL
+                    END
+            FROM BaseOperacional b
+        ),
+        Fonte AS (
+            SELECT
+                :id_usuario AS IDDimUsuarios,
+                :id_empresa_proprietaria_aprovacao AS IDEmpresaProprietaria,
+                b.IDDimTabelaPrecosEuromidia,
+                :id_empresa_relacionada AS IDEmpresa,
+                b.IDFatoKanbanCard,
+                :id_fase_atual AS IDDimKanbanFase,
+                CAST(NULL AS int) AS IDDimKanbanStatusCard,
+                b.IDFatoControleContratosEuromidia,
+                b.BitAditivoContrato,
+                :observacoes_proposta AS ObservacoesProposta,
+                b.IDDimPaineisEuromidia,
+                b.IDDimFacesPaineis,
+                b.CustoAtual,
+                b.PrecoAtual,
+                b.MargemAtual,
+                b.CustoAtual AS CustoAtualRateado,
+                b.PrecoAtual AS PrecoAtualRateado,
+                b.MargemAtual AS MargemAtualRateado,
+                b.CustoAtual AS CustoProposto,
+                b.PrecoProposto,
+                CASE
+                    WHEN b.PrecoProposto IS NOT NULL
+                     AND b.PrecoProposto > 0
+                     AND b.CustoAtual IS NOT NULL
+                    THEN
+                        TRY_CONVERT(
+                            decimal(19, 2),
+                            ((b.PrecoProposto - b.CustoAtual) / b.PrecoProposto) * 100
+                        )
+                    ELSE NULL
+                END AS MargemProposta,
+                b.CustoAtual AS CustoPropostoRateado,
+                b.PrecoProposto AS PrecoPropostoRateado,
+                TRY_CONVERT(float, b.DescontoProposto) AS DescontoProposto,
+                b.PeriodoInicio,
+                b.PeriodoTermino,
+                CAST(1 AS bit) AS BitAutorizacaoDiretoria,
+                CAST(0 AS bit) AS BitAutorizacaoCoordenador
+            FROM BaseCalculada b
+            OUTER APPLY (
+                SELECT TOP (1)
+                    DescontoMaximo
+                FROM PermissaoUsuario
+            ) permissao
+            WHERE ISNULL(b.DescontoProposto, 0) > ISNULL(permissao.DescontoMaximo, 0)
+              AND b.IDFatoKanbanCard IS NOT NULL
+              AND b.IDDimPaineisEuromidia IS NOT NULL
+              AND b.IDDimFacesPaineis IS NOT NULL
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CARD_NEGOCIACAO_PRECO} h
+                    WHERE h.IDFatoKanbanCard = b.IDFatoKanbanCard
+                      AND h.IDEmpresaProprietaria = :id_empresa_proprietaria_aprovacao
+                      AND ISNULL(h.IDDimPaineisEuromidia, 0) = ISNULL(b.IDDimPaineisEuromidia, 0)
+                      AND ISNULL(h.IDDimFacesPaineis, 0) = ISNULL(b.IDDimFacesPaineis, 0)
+                      AND h.PrecoAprovado IS NOT NULL
+                      AND h.DataAprovacaoPreco IS NOT NULL
+                      AND ABS(
+                            TRY_CONVERT(decimal(19, 2), h.PrecoAprovado)
+                            - TRY_CONVERT(decimal(19, 2), b.PrecoProposto)
+                          ) <= 0.01
+              )
+        )
+        MERGE {TABELA_CARD_APROVA_PRECO} AS alvo
+        USING Fonte AS fonte
+           ON alvo.IDFatoKanbanCard = fonte.IDFatoKanbanCard
+          AND alvo.IDEmpresaProprietaria = fonte.IDEmpresaProprietaria
+          AND ISNULL(alvo.IDDimPaineisEuromidia, 0) = ISNULL(fonte.IDDimPaineisEuromidia, 0)
+          AND ISNULL(alvo.IDDimFacesPaineis, 0) = ISNULL(fonte.IDDimFacesPaineis, 0)
+          AND alvo.PrecoAprovado IS NULL
+          AND alvo.DataAprovacaoPreco IS NULL
+
+        WHEN MATCHED THEN
+            UPDATE SET
+                alvo.IDDimUsuarios = fonte.IDDimUsuarios,
+                alvo.IDDimTabelaPrecosEuromidia = fonte.IDDimTabelaPrecosEuromidia,
+                alvo.IDEmpresa = fonte.IDEmpresa,
+                alvo.IDDimKanbanFase = fonte.IDDimKanbanFase,
+                alvo.IDDimKanbanStatusCard = fonte.IDDimKanbanStatusCard,
+                alvo.IDFatoControleContratosEuromidia = fonte.IDFatoControleContratosEuromidia,
+                alvo.BitAditivoContrato = fonte.BitAditivoContrato,
+                alvo.ObservacoesProposta = fonte.ObservacoesProposta,
+                alvo.CustoAtual = fonte.CustoAtual,
+                alvo.PrecoAtual = fonte.PrecoAtual,
+                alvo.MargemAtual = fonte.MargemAtual,
+                alvo.CustoAtualRateado = fonte.CustoAtualRateado,
+                alvo.PrecoAtualRateado = fonte.PrecoAtualRateado,
+                alvo.MargemAtualRateado = fonte.MargemAtualRateado,
+                alvo.DataPrecoProposto = GETDATE(),
+                alvo.CustoProposto = fonte.CustoProposto,
+                alvo.PrecoProposto = fonte.PrecoProposto,
+                alvo.MargemProposta = fonte.MargemProposta,
+                alvo.CustoPropostoRateado = fonte.CustoPropostoRateado,
+                alvo.PrecoPropostoRateado = fonte.PrecoPropostoRateado,
+                alvo.DescontoProposto = fonte.DescontoProposto,
+                alvo.PeriodoInicio = fonte.PeriodoInicio,
+                alvo.PeriodoTermino = fonte.PeriodoTermino,
+                alvo.BitAutorizacaoDiretoria = fonte.BitAutorizacaoDiretoria,
+                alvo.BitAutorizacaoCoordenador = fonte.BitAutorizacaoCoordenador
+
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT
+            (
+                IDDimUsuarios,
+                IDEmpresaProprietaria,
+                IDDimTabelaPrecosEuromidia,
+                IDEmpresa,
+                IDFatoKanbanCard,
+                IDDimKanbanFase,
+                IDDimKanbanStatusCard,
+                IDFatoControleContratosEuromidia,
+                BitAditivoContrato,
+                ObservacoesProposta,
+                IDDimPaineisEuromidia,
+                IDDimFacesPaineis,
+                CustoAtual,
+                PrecoAtual,
+                MargemAtual,
+                CustoAtualRateado,
+                PrecoAtualRateado,
+                MargemAtualRateado,
+                DataPrecoProposto,
+                CustoProposto,
+                PrecoProposto,
+                MargemProposta,
+                CustoPropostoRateado,
+                PrecoPropostoRateado,
+                DescontoProposto,
+                PeriodoInicio,
+                PeriodoTermino,
+                IDDimUsuariosAprovacaoPreco,
+                DataAprovacaoPreco,
+                PrecoAprovado,
+                DescontoAprovado,
+                ObservacoesAprovacao,
+                BitAutorizacaoDiretoria,
+                BitAutorizacaoCoordenador
+            )
+            VALUES
+            (
+                fonte.IDDimUsuarios,
+                fonte.IDEmpresaProprietaria,
+                fonte.IDDimTabelaPrecosEuromidia,
+                fonte.IDEmpresa,
+                fonte.IDFatoKanbanCard,
+                fonte.IDDimKanbanFase,
+                fonte.IDDimKanbanStatusCard,
+                fonte.IDFatoControleContratosEuromidia,
+                fonte.BitAditivoContrato,
+                fonte.ObservacoesProposta,
+                fonte.IDDimPaineisEuromidia,
+                fonte.IDDimFacesPaineis,
+                fonte.CustoAtual,
+                fonte.PrecoAtual,
+                fonte.MargemAtual,
+                fonte.CustoAtualRateado,
+                fonte.PrecoAtualRateado,
+                fonte.MargemAtualRateado,
+                GETDATE(),
+                fonte.CustoProposto,
+                fonte.PrecoProposto,
+                fonte.MargemProposta,
+                fonte.CustoPropostoRateado,
+                fonte.PrecoPropostoRateado,
+                fonte.DescontoProposto,
+                fonte.PeriodoInicio,
+                fonte.PeriodoTermino,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                fonte.BitAutorizacaoDiretoria,
+                fonte.BitAutorizacaoCoordenador
+            );
+    """)
+
+    resultado_materializacao = db.session.execute(
+        sql_materializar,
+        {
+            "id_card": id_card_int,
+            "id_usuario": id_usuario_resolvido,
+            "id_empresa_proprietaria_aprovacao": int(id_empresa_proprietaria_aprovacao),
+            "id_empresa_relacionada": id_empresa_relacionada,
+            "id_fase_atual": id_fase_atual,
+            "observacoes_proposta": "Desconto Aguardando Aprovação",
+        },
+    )
+
+    sql_remover_pendencias_que_nao_exigem_mais = text(f"""
+        DELETE ap
+        FROM {TABELA_CARD_APROVA_PRECO} ap
+        WHERE ap.IDFatoKanbanCard = :id_card
+          AND ap.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND ap.PrecoAprovado IS NULL
+          AND ap.DataAprovacaoPreco IS NULL
+          AND NOT EXISTS (
+                SELECT 1
+                FROM {TABELA_CARD_PAINEL_FACE} pf
+                OUTER APPLY (
+                    SELECT TOP (1)
+                        TRY_CONVERT(decimal(19, 6), p.DescontoMaximo) AS DescontoMaximo
+                    FROM {TABELA_PERMISSAO_DESCONTO} p
+                    WHERE p.IDDimUsuarios = :id_usuario
+                      AND ISNULL(p.BitAtivo, 0) = 1
+                    ORDER BY
+                        p.DataAtualizado DESC,
+                        p.IDDimKanbanPermissaoDesconto DESC
+                ) permissao
+                OUTER APPLY (
+                    SELECT
+                        DescontoProposto =
+                            COALESCE(
+                                TRY_CONVERT(decimal(19, 6), pf.PercentualDesconto),
+                                CASE
+                                    WHEN TRY_CONVERT(decimal(19, 2), pf.ValorTabela) IS NOT NULL
+                                     AND TRY_CONVERT(decimal(19, 2), pf.ValorTabela) > 0
+                                     AND COALESCE(
+                                            TRY_CONVERT(decimal(19, 2), pf.NovoValor),
+                                            TRY_CONVERT(decimal(19, 2), pf.ValorVendaFinal)
+                                         ) IS NOT NULL
+                                    THEN
+                                        TRY_CONVERT(
+                                            decimal(19, 6),
+                                            (
+                                                (
+                                                    TRY_CONVERT(decimal(19, 2), pf.ValorTabela)
+                                                    - COALESCE(
+                                                        TRY_CONVERT(decimal(19, 2), pf.NovoValor),
+                                                        TRY_CONVERT(decimal(19, 2), pf.ValorVendaFinal)
+                                                      )
+                                                )
+                                                / TRY_CONVERT(decimal(19, 2), pf.ValorTabela)
+                                            ) * 100
+                                        )
+                                    ELSE NULL
+                                END
+                            )
+                ) calc
+                WHERE pf.IDFatoKanbanCard = ap.IDFatoKanbanCard
+                  AND ISNULL(pf.Ativo, 1) = 1
+                  AND ISNULL(TRY_CONVERT(int, pf.IDDimPaineisEuromidia), 0) = ISNULL(ap.IDDimPaineisEuromidia, 0)
+                  AND ISNULL(TRY_CONVERT(int, pf.IDDimFacesPaineis), 0) = ISNULL(ap.IDDimFacesPaineis, 0)
+                  AND ISNULL(calc.DescontoProposto, 0) > ISNULL(permissao.DescontoMaximo, 0)
+          );
+    """)
+
+    resultado_limpeza = db.session.execute(
+        sql_remover_pendencias_que_nao_exigem_mais,
+        {
+            "id_card": id_card_int,
+            "id_empresa_proprietaria": int(id_empresa_proprietaria_aprovacao),
+            "id_usuario": id_usuario_resolvido,
+        },
+    )
+
+    qtd_pendentes_depois = int(
+        db.session.execute(
+            sql_qtd_antes,
+            {
+                "id_card": id_card_int,
+                "id_empresa_proprietaria": int(id_empresa_proprietaria_aprovacao),
+            },
+        ).scalar()
+        or 0
+    )
+
+    if id_kanban > 0:
+        _sincronizar_tag_aprovacao_diretoria_card(
+            id_card=id_card_int,
+            id_kanban=id_kanban,
+            estados_atuais=estados_atuais,
+            id_usuario=id_usuario_resolvido,
+            id_empresa_proprietaria=int(id_empresa_proprietaria_aprovacao),
+        )
+
+    return {
+        "ok": True,
+        "materializado": qtd_pendentes_depois > qtd_pendentes_antes,
+        "motivo": "aprovacao_preco_materializada_em_fato_aprova_preco",
+        "id_card": id_card_int,
+        "id_usuario": id_usuario_resolvido,
+        "desconto_maximo_usuario": float(desconto_maximo),
+        "qtd_pendentes_antes": qtd_pendentes_antes,
+        "qtd_pendentes_depois": qtd_pendentes_depois,
+        "linhas_merge_afetadas": int(getattr(resultado_materializacao, "rowcount", 0) or 0),
+        "linhas_limpeza_afetadas": int(getattr(resultado_limpeza, "rowcount", 0) or 0),
+    }
+
+
+
+
+def _materializar_negociacoes_preco_pendentes_empresa(
+    *,
+    id_empresa_proprietaria: int,
+    id_usuario: int,
+    limite_cards: int = 300,
+) -> dict[str, int]:
+    """
+    Eu varro cards candidatos e materializo pendências em FatoAprovaPreco.
+
+    Correção importante:
+    - esta rotina normalmente roda quando o Admin abre a tela;
+    - o Admin só pode enxergar/aprovar;
+    - o limite usado para decidir se precisa aprovação é o limite do usuário que solicitou o desconto;
+    - portanto a busca inicial não compara contra o limite do Admin.
+    """
+    id_empresa_prop_int = int(id_empresa_proprietaria or 0)
+    id_usuario_int = int(id_usuario or 0)
+
+    if id_empresa_prop_int <= 0 or id_usuario_int <= 0:
+        return {
+            "cards_avaliados": 0,
+            "cards_materializados": 0,
+            "cards_com_erro": 0,
+        }
+
+    sql = text(f"""
+        ;WITH CardsPorEstadoOperacional AS (
             SELECT DISTINCT
                 c.IDFatoKanbanCard,
-                c.IDDimKanban,
-                c.IDDimKanbanFaseAtual,
-                c.Titulo,
-                c.CriadoEm,
-                c.AtualizadoEm,
-                c.IDEmpresa,
-                c.IDVendedorUsuario,
-                c.IDDimUsuarios,
-                c.IDEmpresaProprietaria
-            FROM [Kanban].[Silver].[FatoKanbanCard] c
+                c.IDDimKanban
+            FROM {TABELA_CARD} c
+            INNER JOIN {TABELA_CARD_PAINEL_FACE} pf
+                ON pf.IDFatoKanbanCard = c.IDFatoKanbanCard
+               AND ISNULL(pf.Ativo, 1) = 1
+            OUTER APPLY (
+                SELECT
+                    COALESCE(
+                        TRY_CONVERT(decimal(19, 6), pf.PercentualDesconto),
+                        CASE
+                            WHEN TRY_CONVERT(decimal(19, 2), pf.ValorTabela) IS NOT NULL
+                             AND TRY_CONVERT(decimal(19, 2), pf.ValorTabela) > 0
+                             AND COALESCE(
+                                    TRY_CONVERT(decimal(19, 2), pf.NovoValor),
+                                    TRY_CONVERT(decimal(19, 2), pf.ValorVendaFinal)
+                                 ) IS NOT NULL
+                            THEN
+                                TRY_CONVERT(
+                                    decimal(19, 6),
+                                    (
+                                        (
+                                            TRY_CONVERT(decimal(19, 2), pf.ValorTabela)
+                                            - COALESCE(
+                                                TRY_CONVERT(decimal(19, 2), pf.NovoValor),
+                                                TRY_CONVERT(decimal(19, 2), pf.ValorVendaFinal)
+                                              )
+                                        )
+                                        / TRY_CONVERT(decimal(19, 2), pf.ValorTabela)
+                                    ) * 100
+                                )
+                            ELSE NULL
+                        END
+                    ) AS DescontoProposto
+            ) calc
+            WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ISNULL(c.Ativo, 1) = 1
+              AND ISNULL(calc.DescontoProposto, 0) > 0
+        ),
+        CardsComAprovacaoPendente AS (
+            SELECT DISTINCT
+                c.IDFatoKanbanCard,
+                c.IDDimKanban
+            FROM {TABELA_CARD} c
+            INNER JOIN {TABELA_CARD_APROVA_PRECO} ap
+                ON ap.IDFatoKanbanCard = c.IDFatoKanbanCard
+               AND ap.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+               AND ap.PrecoAprovado IS NULL
+               AND ap.DataAprovacaoPreco IS NULL
+            WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ISNULL(c.Ativo, 1) = 1
+        ),
+        CardsComTagAprovacao AS (
+            SELECT DISTINCT
+                c.IDFatoKanbanCard,
+                c.IDDimKanban
+            FROM {TABELA_CARD} c
             INNER JOIN [Kanban].[Silver].[FatoKanbanCardTag] ct
                 ON ct.IDFatoKanbanCard = c.IDFatoKanbanCard
                AND ct.RemovidoEm IS NULL
@@ -18271,71 +21157,265 @@ def _buscar_cards_lista_aprovacao_preco(id_empresa_proprietaria: int) -> list[di
                 ON t.IDDimKanbanTag = ct.IDDimKanbanTag
                AND ISNULL(t.Ativo, 1) = 1
             WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
-              AND c.Ativo = 1
-              AND UPPER(LTRIM(RTRIM(ISNULL(t.NomeTag, '')))) = UPPER(LTRIM(RTRIM(:nome_tag)))
+              AND ISNULL(c.Ativo, 1) = 1
+              AND UPPER(LTRIM(RTRIM(ISNULL(t.NomeTag, '')))) = UPPER(LTRIM(RTRIM(:nome_tag_aprovacao)))
         ),
-        UltimaNegociacao AS (
+        Candidatos AS (
+            SELECT IDFatoKanbanCard, IDDimKanban FROM CardsPorEstadoOperacional
+            UNION
+            SELECT IDFatoKanbanCard, IDDimKanban FROM CardsComAprovacaoPendente
+            UNION
+            SELECT IDFatoKanbanCard, IDDimKanban FROM CardsComTagAprovacao
+        )
+        SELECT TOP (:limite_cards)
+            IDFatoKanbanCard,
+            IDDimKanban
+        FROM Candidatos
+        ORDER BY IDFatoKanbanCard DESC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_empresa_proprietaria": id_empresa_prop_int,
+            "nome_tag_aprovacao": NOME_TAG_APROVACAO_DESCONTO,
+            "limite_cards": int(limite_cards or 300),
+        },
+    ).mappings().all()
+
+    cards_avaliados = 0
+    cards_materializados = 0
+    cards_com_erro = 0
+
+    for row in rows:
+        id_card = int(row.get("IDFatoKanbanCard") or 0)
+
+        if id_card <= 0:
+            continue
+
+        cards_avaliados += 1
+
+        try:
+            id_usuario_solicitante = _resolver_id_usuario_solicitante_desconto_card(
+                id_card=id_card,
+                id_usuario_fallback=id_usuario_int,
+            )
+
+            resultado = _materializar_negociacao_preco_pendente_card(
+                id_card=id_card,
+                id_empresa_proprietaria=id_empresa_prop_int,
+                id_usuario=int(id_usuario_solicitante or id_usuario_int),
+            )
+
+            if resultado.get("materializado"):
+                cards_materializados += 1
+
+        except Exception:
+            cards_com_erro += 1
+            current_app.logger.exception(
+                "APROVACAO_PRECO | erro ao materializar pendência em FatoAprovaPreco | id_card=%s",
+                id_card,
+            )
+
+    return {
+        "cards_avaliados": int(cards_avaliados),
+        "cards_materializados": int(cards_materializados),
+        "cards_com_erro": int(cards_com_erro),
+    }
+
+
+
+@kanban_bp.route("/aprovacao-preco", methods=["GET"])
+@login_required
+@limiter.limit("60/minute")
+def lista_aprovacao_preco():
+    id_usuario = _assert_login()
+    _exigir_admin_aprovacao_desconto()
+    id_empresa_proprietaria = _id_empresa_usuario_or_403()
+
+    try:
+        resultado_materializacao = _materializar_negociacoes_preco_pendentes_empresa(
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_usuario=int(id_usuario),
+            limite_cards=300,
+        )
+
+        resultado_reconciliacao = _reconciliar_tags_aprovacao_desconto_pendentes(
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_usuario=int(id_usuario),
+        )
+
+        db.session.commit()
+
+        current_app.logger.info(
+            "APROVACAO_PRECO_LISTA | FatoAprovaPreco | materializacao=%s | reconciliacao=%s",
+            resultado_materializacao,
+            resultado_reconciliacao,
+        )
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "APROVACAO_PRECO_LISTA | falha ao materializar/reconciliar pendências antes da listagem"
+        )
+
+    cards = _buscar_cards_lista_aprovacao_preco(int(id_empresa_proprietaria))
+
+    return render_template(
+        "kanban/lista_aprovacao_preco.html",
+        cards=cards,
+        nome_tag=NOME_TAG_APROVACAO_DESCONTO,
+    )
+
+
+
+
+def _buscar_cards_lista_aprovacao_preco(id_empresa_proprietaria: int) -> list[dict[str, Any]]:
+    """
+    Eu busco a lista de aprovação lendo somente FatoAprovaPreco.
+
+    Regra:
+    - tela /kanban/aprovacao-preco mostra apenas pendências;
+    - pendência = linha em FatoAprovaPreco sem PrecoAprovado e sem DataAprovacaoPreco;
+    - FatoKanbanNegociacaoPreco não entra aqui.
+    """
+
+    def _expr_texto_coluna(tabela: str, alias: str, coluna: str, tamanho: int = 300) -> str:
+        if _coluna_existe(tabela, coluna):
+            return f"NULLIF(LTRIM(RTRIM(CONVERT(nvarchar({int(tamanho)}), {alias}.{coluna}))), '')"
+        return f"CAST(NULL AS nvarchar({int(tamanho)}))"
+
+    expr_card_nome_empresa = _expr_texto_coluna(TABELA_CARD, "c", "NomeEmpresa", 300)
+
+    expr_empresa_card_nome_fantasia = _expr_texto_coluna(TABELA_EMPRESAS, "empresa_card", "NomeFantasia", 300)
+    expr_empresa_card_razao_social = _expr_texto_coluna(TABELA_EMPRESAS, "empresa_card", "RazaoSocial", 300)
+    expr_empresa_card_cnpj = _expr_texto_coluna(TABELA_EMPRESAS, "empresa_card", "CNPJ", 40)
+
+    expr_empresa_ap_nome_fantasia = _expr_texto_coluna(TABELA_EMPRESAS, "empresa_ap", "NomeFantasia", 300)
+    expr_empresa_ap_razao_social = _expr_texto_coluna(TABELA_EMPRESAS, "empresa_ap", "RazaoSocial", 300)
+    expr_empresa_ap_cnpj = _expr_texto_coluna(TABELA_EMPRESAS, "empresa_ap", "CNPJ", 40)
+
+    expr_contrato_razao_social = _expr_texto_coluna(TABELA_CONTROLE_CONTRATOS, "contrato", "RazaoSocial", 300)
+    expr_contrato_marca = _expr_texto_coluna(TABELA_CONTROLE_CONTRATOS, "contrato", "MarcaExibida", 300)
+    expr_contrato_cnpj = _expr_texto_coluna(TABELA_CONTROLE_CONTRATOS, "contrato", "CNPJ", 40)
+
+    expr_usuario_nome = _expr_texto_coluna("[Integracao].[Silver].[DimUsuarios]", "usu", "NomeUsuario", 300)
+
+    sql = text(f"""
+        ;WITH Pendencias AS (
             SELECT
-                np.*,
+                ap.*,
                 ROW_NUMBER() OVER (
-                    PARTITION BY np.IDFatoKanbanCard
+                    PARTITION BY ap.IDFatoKanbanCard
                     ORDER BY
-                        COALESCE(np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino, np.DataAprovacaoPreco) DESC,
-                        np.IDFatoKanbanNegociacaoPreco DESC
-                ) AS rn
-            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] np
-            WHERE np.IDEmpresaProprietaria = :id_empresa_proprietaria
+                        COALESCE(ap.DataPrecoProposto, ap.PeriodoInicio, ap.PeriodoTermino) DESC,
+                        ap.IDFatoAprovaPreco DESC
+                ) AS rn_card
+            FROM {TABELA_CARD_APROVA_PRECO} ap
+            INNER JOIN {TABELA_CARD} c_aut
+                ON c_aut.IDFatoKanbanCard = ap.IDFatoKanbanCard
+               AND c_aut.IDEmpresaProprietaria = :id_empresa_proprietaria
+            WHERE ap.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ap.PrecoAprovado IS NULL
+              AND ap.DataAprovacaoPreco IS NULL
+              AND ISNULL(c_aut.Ativo, 1) = 1
         )
         SELECT
-            cc.IDFatoKanbanCard AS id_card,
-            cc.IDDimKanban AS id_kanban,
-            cc.Titulo AS titulo,
-            cc.CriadoEm AS criado_em,
-            cc.AtualizadoEm AS atualizado_em,
-            cc.IDEmpresa AS id_empresa,
+            c.IDFatoKanbanCard AS id_card,
+            c.IDDimKanban AS id_kanban,
+            c.Titulo AS titulo,
+            c.CriadoEm AS criado_em,
+            c.AtualizadoEm AS atualizado_em,
+
+            COALESCE(c.IDEmpresa, ap.IDEmpresa) AS id_empresa,
 
             fase.NomeFase AS nome_fase,
-            COALESCE(
-                NULLIF(LTRIM(RTRIM(cli.NomeFantasia)), ''),
-                NULLIF(LTRIM(RTRIM(cli.RazaoSocial)), ''),
-                CONCAT('Empresa #', CAST(cc.IDEmpresa AS VARCHAR(30)))
-            ) AS nome_empresa,
-            cli.RazaoSocial AS razao_social,
-            cli.NomeFantasia AS nome_fantasia,
-            cli.CNPJ AS cnpj,
-            usu.NomeUsuario AS nome_usuario_responsavel,
 
-            un.IDFatoKanbanNegociacaoPreco AS id_negociacao_preco,
-            un.DataPrecoProposto AS data_preco_proposto,
-            un.CustoAtual AS custo_atual,
-            un.PrecoAtual AS preco_atual,
-            un.PrecoProposto AS preco_proposto,
-            un.DescontoProposto AS desconto_proposto,
-            un.MargemProposta AS margem_proposta,
-            un.IDDimUsuarios AS id_usuario_solicitante
-        FROM CardsComTag cc
-        LEFT JOIN UltimaNegociacao un
-            ON un.IDFatoKanbanCard = cc.IDFatoKanbanCard
-           AND un.rn = 1
-        LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
-            ON fase.IDDimKanbanFase = cc.IDDimKanbanFaseAtual
-           AND fase.IDEmpresaProprietaria = cc.IDEmpresaProprietaria
-        LEFT JOIN [Integracao].[Silver].[DimEmpresas] cli
-            ON cli.IDEmpresa = cc.IDEmpresa
-           AND cli.IDEmpresaProprietaria = cc.IDEmpresaProprietaria
+            COALESCE(
+                {expr_empresa_card_nome_fantasia},
+                {expr_empresa_card_razao_social},
+                {expr_empresa_ap_nome_fantasia},
+                {expr_empresa_ap_razao_social},
+                {expr_card_nome_empresa},
+                {expr_contrato_razao_social},
+                {expr_contrato_marca},
+                N'Empresa não identificada'
+            ) AS nome_empresa,
+
+            COALESCE(
+                {expr_empresa_card_razao_social},
+                {expr_empresa_ap_razao_social},
+                {expr_card_nome_empresa},
+                {expr_contrato_razao_social},
+                {expr_contrato_marca}
+            ) AS razao_social,
+
+            COALESCE(
+                {expr_empresa_card_nome_fantasia},
+                {expr_empresa_ap_nome_fantasia},
+                {expr_card_nome_empresa},
+                {expr_contrato_marca}
+            ) AS nome_fantasia,
+
+            COALESCE(
+                {expr_empresa_card_cnpj},
+                {expr_empresa_ap_cnpj},
+                {expr_contrato_cnpj}
+            ) AS cnpj,
+
+            COALESCE(
+                {expr_usuario_nome},
+                N'—'
+            ) AS nome_usuario_responsavel,
+
+            ap.IDFatoAprovaPreco AS id_aprova_preco,
+            ap.IDFatoAprovaPreco AS id_negociacao_preco,
+            ap.DataPrecoProposto AS data_preco_proposto,
+            ap.CustoAtual AS custo_atual,
+            ap.PrecoAtual AS preco_atual,
+            ap.PrecoProposto AS preco_proposto,
+            ap.DescontoProposto AS desconto_proposto,
+            ap.MargemProposta AS margem_proposta,
+            ap.IDDimUsuarios AS id_usuario_solicitante,
+
+            CAST(0 AS bit) AS bit_sem_linha_negociacao
+
+        FROM Pendencias ap
+
+        INNER JOIN {TABELA_CARD} c
+            ON c.IDFatoKanbanCard = ap.IDFatoKanbanCard
+           AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+        LEFT JOIN {TABELA_KANBAN_FASE} fase
+            ON fase.IDDimKanbanFase = COALESCE(ap.IDDimKanbanFase, c.IDDimKanbanFaseAtual)
+           AND (
+                fase.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+                OR fase.IDEmpresaProprietaria IS NULL
+           )
+
+        LEFT JOIN {TABELA_EMPRESAS} empresa_card
+            ON empresa_card.IDEmpresa = c.IDEmpresa
+
+        LEFT JOIN {TABELA_EMPRESAS} empresa_ap
+            ON empresa_ap.IDEmpresa = ap.IDEmpresa
+
+        LEFT JOIN {TABELA_CONTROLE_CONTRATOS} contrato
+            ON contrato.IDFatoControleContratosEuromidia = ap.IDFatoControleContratosEuromidia
+
         LEFT JOIN [Integracao].[Silver].[DimUsuarios] usu
-            ON usu.IDDimUsuarios = COALESCE(cc.IDVendedorUsuario, cc.IDDimUsuarios)
-           AND usu.IDEmpresaProprietaria = cc.IDEmpresaProprietaria
+            ON usu.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios, ap.IDDimUsuarios)
+
+        WHERE ap.rn_card = 1
+
         ORDER BY
-            COALESCE(un.DataPrecoProposto, cc.AtualizadoEm, cc.CriadoEm) DESC,
-            cc.IDFatoKanbanCard DESC;
+            COALESCE(ap.DataPrecoProposto, c.AtualizadoEm, c.CriadoEm) DESC,
+            c.IDFatoKanbanCard DESC;
     """)
 
     rows = db.session.execute(
         sql,
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
-            "nome_tag": NOME_TAG_APROVACAO_DESCONTO,
         },
     ).mappings().all()
 
@@ -18343,56 +21423,336 @@ def _buscar_cards_lista_aprovacao_preco(id_empresa_proprietaria: int) -> list[di
 
 
 
+
+
+
+
+
+
+
+
+
 def _buscar_cabecalho_aprovacao_preco(id_card: int, id_empresa_proprietaria: int) -> dict[str, Any] | None:
-    sql = text("""
+    """
+    Eu busco o cabeçalho da tela de aprovação de preço com os dados cadastrais da empresa.
+
+    Ajuste principal:
+    - uso joins diretos nas chaves já numéricas;
+    - não uso TRY_CONVERT/LTRIM/RTRIM para montar a tela;
+    - resolvo a empresa na prioridade correta: card -> pendência -> solicitação -> contrato;
+    - trago CNAE, CNPJ, SubClasse/Classificação, Nome Fantasia, Origem, Porte,
+      Tipo Cliente e Situação Cadastral para o template aprovacao_preco_detalhe.html.
+    """
+
+    def _expr_int_coluna(tabela: str, alias: str, coluna: str) -> str:
+        if _coluna_existe(tabela, coluna):
+            return f"{alias}.{coluna}"
+        return "CAST(NULL AS int)"
+
+    def _expr_bit_coluna(tabela: str, alias: str, coluna: str) -> str:
+        if _coluna_existe(tabela, coluna):
+            return f"{alias}.{coluna}"
+        return "CAST(NULL AS bit)"
+
+    def _expr_texto_coluna(tabela: str, alias: str, coluna: str, tamanho: int = 300) -> str:
+        if _coluna_existe(tabela, coluna):
+            return f"CAST({alias}.{coluna} AS nvarchar({int(tamanho)}))"
+        return f"CAST(NULL AS nvarchar({int(tamanho)}))"
+
+    id_empresa_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresa")
+    id_empresa_relacionada_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaRelacionadaCard")
+    id_empresa_agencia_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaAgencia")
+    id_empresa_bureau_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaBureau")
+    id_cnae_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimCnaes")
+    id_origem_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimOrigemAtendimento")
+    id_tipo_cliente_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimTipoCliente")
+
+    if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia"):
+        id_contrato_card_expr = "c.IDFatoControleContratosEuromidia"
+    elif _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia"):
+        id_contrato_card_expr = "c.IDFatoControleContratoEuromidia"
+    else:
+        id_contrato_card_expr = "CAST(NULL AS int)"
+
+    nome_empresa_card_expr = _expr_texto_coluna(TABELA_CARD, "c", "NomeEmpresa", 300)
+    telefone_card_expr = _expr_texto_coluna(TABELA_CARD, "c", "Telefone", 80)
+    email_card_expr = _expr_texto_coluna(TABELA_CARD, "c", "Email", 300)
+    marca_card_expr = _expr_texto_coluna(TABELA_CARD, "c", "Marca", 300)
+
+    bit_cliente_direto_expr = _expr_bit_coluna(TABELA_CARD, "c", "BitClienteDireto")
+    bit_agencia_expr = _expr_bit_coluna(TABELA_CARD, "c", "BitAgencia")
+    bit_planejador_expr = _expr_bit_coluna(TABELA_CARD, "c", "BitPlanejador")
+    bit_aditivo_expr = _expr_bit_coluna(TABELA_CARD, "c", "BitAditivo")
+    bit_contrato_novo_expr = _expr_bit_coluna(TABELA_CARD, "c", "BitContratoNovo")
+
+    id_usuario_expr = "COALESCE("
+    candidatos_usuario = []
+    for coluna_usuario in (
+        "IDVendedorUsuario",
+        "IDDimUsuarios",
+        "IDUsuarioCriacao",
+        "CriadoPorIDDimUsuarios",
+    ):
+        if _coluna_existe(TABELA_CARD, coluna_usuario):
+            candidatos_usuario.append(f"c.{coluna_usuario}")
+
+    candidatos_usuario.extend([
+        "ap.IDDimUsuarios",
+        "sol.IDDimUsuariosCriacao",
+        "CAST(NULL AS int)",
+    ])
+    id_usuario_expr += ", ".join(candidatos_usuario)
+    id_usuario_expr += ")"
+
+    nome_origem_card_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_card", "NomeOrigemAtendimento", 200)
+    desc_origem_card_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_card", "Descricao", 200)
+    nome_origem_emp_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_emp", "NomeOrigemAtendimento", 200)
+    desc_origem_emp_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_emp", "Descricao", 200)
+
+    tipo_cliente_desc_expr = _expr_texto_coluna(TABELA_TIPO_CLIENTE_DESCONTO, "tipo_cliente", "Descricao", 200)
+    tipo_cliente_nome_expr = _expr_texto_coluna(TABELA_TIPO_CLIENTE_DESCONTO, "tipo_cliente", "NomeTipoCliente", 200)
+
+    sql = text(f"""
+        ;WITH PendenciaCard AS (
+            SELECT TOP (1)
+                ap.*
+            FROM {TABELA_CARD_APROVA_PRECO} ap
+            WHERE ap.IDFatoKanbanCard = :id_card
+              AND ap.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ap.PrecoAprovado IS NULL
+              AND ap.DataAprovacaoPreco IS NULL
+            ORDER BY
+                ap.DataPrecoProposto DESC,
+                ap.IDFatoAprovaPreco DESC
+        ),
+        SolicitacaoCard AS (
+            SELECT TOP (1)
+                sol_base.*
+            FROM {TABELA_SOLICITACAO_CONTRATO} sol_base
+            WHERE sol_base.IDFatoKanbanCard = :id_card
+              AND sol_base.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ISNULL(sol_base.BitAtivo, 1) = 1
+            ORDER BY
+                sol_base.DataAtualizacao DESC,
+                sol_base.IDFatoSolicitacaoContratoEuromidia DESC
+        )
         SELECT TOP (1)
             c.IDFatoKanbanCard AS id_card,
+            c.IDFatoKanbanCard AS IDFatoKanbanCard,
             c.IDDimKanban AS id_kanban,
+            c.IDDimKanban AS IDDimKanban,
             c.IDDimKanbanFaseAtual AS id_fase_atual,
+            c.IDDimKanbanFaseAtual AS IDDimKanbanFaseAtual,
             c.Titulo AS titulo,
+            c.Titulo AS Titulo,
             c.Descricao AS descricao,
+            c.Descricao AS Descricao,
             c.CriadoEm AS criado_em,
+            c.CriadoEm AS CriadoEm,
             c.AtualizadoEm AS atualizado_em,
-            c.IDEmpresa AS id_empresa,
+            c.AtualizadoEm AS AtualizadoEm,
             c.Ativo AS ativo,
+            c.Ativo AS Ativo,
+            c.IDEmpresaProprietaria AS id_empresa_proprietaria,
+            c.IDEmpresaProprietaria AS IDEmpresaProprietaria,
+
+            COALESCE({id_empresa_relacionada_expr}, {id_empresa_card_expr}, ap.IDEmpresa, sol.IDEmpresa, contrato.IDEmpresa) AS id_empresa,
+            COALESCE({id_empresa_relacionada_expr}, {id_empresa_card_expr}, ap.IDEmpresa, sol.IDEmpresa, contrato.IDEmpresa) AS IDEmpresa,
+            COALESCE({id_empresa_relacionada_expr}, {id_empresa_card_expr}, ap.IDEmpresa, sol.IDEmpresa, contrato.IDEmpresa) AS id_empresa_relacionada,
+            COALESCE({id_empresa_relacionada_expr}, {id_empresa_card_expr}, ap.IDEmpresa, sol.IDEmpresa, contrato.IDEmpresa) AS IDEmpresaRelacionadaCard,
+
+            {id_empresa_agencia_expr} AS IDEmpresaAgencia,
+            {id_empresa_bureau_expr} AS IDEmpresaBureau,
+
+            COALESCE(ap.IDFatoControleContratosEuromidia, sol.IDFatoControleContratosEuromidia, {id_contrato_card_expr}, contrato.IDFatoControleContratosEuromidia) AS id_contrato,
+            COALESCE(ap.IDFatoControleContratosEuromidia, sol.IDFatoControleContratosEuromidia, {id_contrato_card_expr}, contrato.IDFatoControleContratosEuromidia) AS IDFatoControleContratosEuromidia,
 
             fase.NomeFase AS nome_fase,
+            fase.NomeFase AS NomeFase,
             fase.CorHex AS cor_fase,
             fase.CorTextoHex AS cor_texto_fase,
 
             usu.NomeUsuario AS nome_usuario_responsavel,
+            usu.NomeUsuario AS NomeUsuarioResponsavel,
             usu.Email AS email_usuario_responsavel,
 
-            cli.RazaoSocial AS razao_social,
-            cli.NomeFantasia AS nome_fantasia,
-            cli.CNPJ AS cnpj,
-            cli.CNAE AS cnae_empresa,
-            cli.Email AS email_empresa,
-            cli.TelefoneContato1 AS telefone_empresa,
-            cli.Municipio AS municipio,
-            cli.UF AS uf,
-            cli.Bairro AS bairro,
-            cli.Logradouro AS logradouro,
-            cli.Numero AS numero,
+            COALESCE(emp.NomeFantasia, emp.RazaoSocial, {nome_empresa_card_expr}, sol.MarcaExibida, contrato.MarcaExibida, c.Titulo, N'Empresa não identificada') AS nome_empresa,
+            COALESCE(emp.NomeFantasia, emp.RazaoSocial, {nome_empresa_card_expr}, sol.MarcaExibida, contrato.MarcaExibida, c.Titulo, N'Empresa não identificada') AS NomeEmpresa,
 
-            cnae.Descricao AS descricao_cnae,
-            cnae.Classe AS classe_cnae,
-            cnae.Setor AS setor_cnae,
-            cnae.MacroSetor AS macro_setor
-        FROM [Kanban].[Silver].[FatoKanbanCard] c
-        LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+            COALESCE(emp.RazaoSocial, {nome_empresa_card_expr}, sol.RazaoSocial, contrato.RazaoSocial, c.Titulo) AS razao_social,
+            COALESCE(emp.RazaoSocial, {nome_empresa_card_expr}, sol.RazaoSocial, contrato.RazaoSocial, c.Titulo) AS EmpresaRazaoSocial,
+            emp.RazaoSocial AS RazaoSocial,
+
+            COALESCE(emp.NomeFantasia, {nome_empresa_card_expr}, {marca_card_expr}, sol.MarcaExibida, contrato.MarcaExibida) AS nome_fantasia,
+            COALESCE(emp.NomeFantasia, {nome_empresa_card_expr}, {marca_card_expr}, sol.MarcaExibida, contrato.MarcaExibida) AS NomeFantasia,
+
+            COALESCE(emp.CNPJ, sol.CNPJ, contrato.CNPJ) AS cnpj,
+            COALESCE(emp.CNPJ, sol.CNPJ, contrato.CNPJ) AS EmpresaCNPJ,
+            COALESCE(emp.CNPJ, sol.CNPJ, contrato.CNPJ) AS CNPJ,
+
+            COALESCE(emp.CNAE, cnae_card.cnaepadrao) AS cnae_empresa,
+            COALESCE(emp.CNAE, cnae_card.cnaepadrao) AS EmpresaCNAE,
+            COALESCE(emp.CNAE, cnae_card.cnaepadrao) AS CNAE,
+
+            COALESCE(cnae_emp.Descricao, cnae_card.Descricao, emp.DescricaoCnae) AS descricao_cnae,
+            COALESCE(cnae_emp.Descricao, cnae_card.Descricao, emp.DescricaoCnae) AS DescricaoCnae,
+            COALESCE(cnae_emp.Descricao, cnae_card.Descricao, emp.DescricaoCnae) AS CnaeDescricao,
+
+            COALESCE(cnae_emp.Classe, cnae_card.Classe) AS classe_cnae,
+            COALESCE(cnae_emp.Classe, cnae_card.Classe) AS EmpresaClasse,
+            COALESCE(cnae_emp.Classe, cnae_card.Classe) AS CnaeClasse,
+
+            COALESCE(cnae_emp.Setor, cnae_card.Setor) AS setor_cnae,
+            COALESCE(cnae_emp.Setor, cnae_card.Setor) AS EmpresaSetor,
+            COALESCE(cnae_emp.Setor, cnae_card.Setor) AS CnaeSetor,
+
+            COALESCE(cnae_emp.MacroSetor, cnae_card.MacroSetor) AS macro_setor,
+            COALESCE(cnae_emp.MacroSetor, cnae_card.MacroSetor) AS MacroSetor,
+            COALESCE(cnae_emp.MacroSetor, cnae_card.MacroSetor) AS CnaeMacroSetor,
+
+            COALESCE(cnae_emp.SubClasse, cnae_card.SubClasse) AS subclasse_cnae,
+            COALESCE(cnae_emp.SubClasse, cnae_card.SubClasse) AS SubClasse,
+            COALESCE(cnae_emp.SubClasse, cnae_card.SubClasse) AS CnaeSubClasse,
+
+            COALESCE(cnae_emp.ClassificacaoMacro, cnae_card.ClassificacaoMacro) AS classificacao_macro,
+            COALESCE(cnae_emp.ClassificacaoMacro, cnae_card.ClassificacaoMacro) AS ClassificacaoMacro,
+            COALESCE(cnae_emp.ClassificacaoMacro, cnae_card.ClassificacaoMacro) AS CnaeClassificacaoMacro,
+
+            COALESCE(cnae_emp.ScoreSetor, cnae_card.ScoreSetor) AS score_setor,
+            COALESCE(cnae_emp.ScoreSetor, cnae_card.ScoreSetor) AS ScoreSetor,
+            COALESCE(cnae_emp.Hex, cnae_card.Hex) AS hex_cnae,
+            COALESCE(cnae_emp.Hex, cnae_card.Hex) AS CnaeHex,
+
+            COALESCE(emp.Email, {email_card_expr}) AS email_empresa,
+            COALESCE(emp.Email, {email_card_expr}) AS Email,
+            COALESCE(emp.TelefoneContato1, emp.TelefoneContato2, {telefone_card_expr}) AS telefone_empresa,
+            COALESCE(emp.TelefoneContato1, emp.TelefoneContato2, {telefone_card_expr}) AS Telefone,
+            emp.TelefoneContato1,
+            emp.TelefoneContato2,
+
+            emp.UF AS uf,
+            emp.UF AS UF,
+            emp.CEP AS cep,
+            emp.CEP AS CEP,
+            emp.Pais AS pais,
+            emp.Pais AS Pais,
+            emp.Bairro AS bairro,
+            emp.Bairro AS Bairro,
+            emp.Numero AS numero,
+            emp.Numero AS Numero,
+            emp.Municipio AS municipio,
+            emp.Municipio AS Municipio,
+            emp.Logradouro AS logradouro,
+            emp.Logradouro AS Logradouro,
+            emp.Complemento AS complemento,
+            emp.Complemento AS Complemento,
+            emp.DescricaoTipoLogradouro,
+            emp.Latitude AS latitude,
+            emp.Latitude AS Latitude,
+            emp.Longitude AS longitude,
+            emp.Longitude AS Longitude,
+
+            emp.Porte AS porte,
+            emp.Porte AS Porte,
+            emp.CodigoPorte,
+            emp.NaturezaJuridica AS natureza_juridica,
+            emp.NaturezaJuridica AS NaturezaJuridica,
+            emp.CapitalSocial AS capital_social,
+            emp.CapitalSocial AS CapitalSocial,
+            emp.DataInicioAtividades AS data_inicio_atividades,
+            emp.DataInicioAtividades AS DataInicioAtividades,
+            emp.DataSituacaoCadastral,
+            emp.DescricaoSituacaoCadastral AS situacao_cadastral,
+            emp.DescricaoSituacaoCadastral AS DescricaoSituacaoCadastral,
+            emp.DescricaoSituacaoCadastral AS SituacaoCadastral,
+            emp.DescricaoMotivoSituacaoCadastral,
+            emp.IdentificadorMatrizFilial,
+            emp.DescricaoIdentificadorMatrizFilial,
+
+            COALESCE({id_origem_card_expr}, emp.IDDimOrigemAtendimento) AS IDDimOrigemAtendimento,
+            COALESCE({nome_origem_card_expr}, {desc_origem_card_expr}, {nome_origem_emp_expr}, {desc_origem_emp_expr}) AS NomeOrigemAtendimento,
+            COALESCE({nome_origem_card_expr}, {desc_origem_card_expr}, {nome_origem_emp_expr}, {desc_origem_emp_expr}) AS OrigemAtendimento,
+
+            {id_tipo_cliente_card_expr} AS IDDimTipoCliente,
+            COALESCE({tipo_cliente_desc_expr}, {tipo_cliente_nome_expr}) AS TipoClienteDesconto,
+            COALESCE({tipo_cliente_desc_expr}, {tipo_cliente_nome_expr}) AS TipoCliente,
+            COALESCE({tipo_cliente_desc_expr}, {tipo_cliente_nome_expr}) AS NomeTipoCliente,
+
+            {bit_cliente_direto_expr} AS BitClienteDireto,
+            {bit_agencia_expr} AS BitAgencia,
+            {bit_planejador_expr} AS BitPlanejador,
+            {bit_aditivo_expr} AS BitAditivo,
+            {bit_contrato_novo_expr} AS BitContratoNovo,
+
+            CASE
+                WHEN {bit_aditivo_expr} = 1 THEN 'ADITIVO'
+                WHEN {bit_contrato_novo_expr} = 1 THEN 'NOVO CONTRATO'
+                ELSE sol.TipoSolicitacao
+            END AS TipoSolicitacao,
+
+            contrato.NumeroContrato AS numero_contrato,
+            contrato.NumeroPrevia AS numero_previa,
+            contrato.Referencia AS referencia_contrato,
+
+            ap.IDFatoAprovaPreco AS id_aprova_preco,
+            ap.IDFatoAprovaPreco AS id_negociacao_preco,
+            ap.DataPrecoProposto AS data_preco_proposto,
+            ap.CustoAtual AS custo_atual,
+            ap.PrecoAtual AS preco_atual,
+            ap.PrecoProposto AS preco_proposto,
+            ap.DescontoProposto AS desconto_proposto,
+            ap.MargemProposta AS margem_proposta,
+            ap.IDDimUsuarios AS id_usuario_solicitante
+
+        FROM {TABELA_CARD} c
+
+        LEFT JOIN PendenciaCard ap
+            ON 1 = 1
+
+        LEFT JOIN SolicitacaoCard sol
+            ON 1 = 1
+
+        LEFT JOIN {TABELA_CONTROLE_CONTRATOS} contrato
+            ON contrato.IDFatoControleContratosEuromidia = COALESCE(
+                ap.IDFatoControleContratosEuromidia,
+                sol.IDFatoControleContratosEuromidia,
+                {id_contrato_card_expr}
+            )
+
+        LEFT JOIN {TABELA_EMPRESAS} emp
+            ON emp.IDEmpresa = COALESCE(
+                {id_empresa_relacionada_expr},
+                {id_empresa_card_expr},
+                ap.IDEmpresa,
+                sol.IDEmpresa,
+                contrato.IDEmpresa
+            )
+
+        LEFT JOIN {TABELA_CNAES} cnae_emp
+            ON cnae_emp.cnaepadrao = emp.CNAE
+
+        LEFT JOIN {TABELA_CNAES} cnae_card
+            ON cnae_card.IDDimCnaes = {id_cnae_card_expr}
+
+        LEFT JOIN {TABELA_KANBAN_FASE} fase
             ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
-           AND fase.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+           AND fase.IDDimKanban = c.IDDimKanban
+
         LEFT JOIN [Integracao].[Silver].[DimUsuarios] usu
-            ON usu.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
-           AND usu.IDEmpresaProprietaria = c.IDEmpresaProprietaria
-        LEFT JOIN [Integracao].[Silver].[DimEmpresas] cli
-            ON cli.IDEmpresa = c.IDEmpresa
-           AND cli.IDEmpresaProprietaria = c.IDEmpresaProprietaria
-        LEFT JOIN [Integracao].[Silver].[DimCnaes] cnae
-            ON cnae.cnaepadrao = cli.CNAE
+            ON usu.IDDimUsuarios = {id_usuario_expr}
+
+        LEFT JOIN {TABELA_ORIGEM_ATENDIMENTO} origem_card
+            ON origem_card.IDDimOrigemAtendimento = {id_origem_card_expr}
+
+        LEFT JOIN {TABELA_ORIGEM_ATENDIMENTO} origem_emp
+            ON origem_emp.IDDimOrigemAtendimento = emp.IDDimOrigemAtendimento
+
+        LEFT JOIN {TABELA_TIPO_CLIENTE_DESCONTO} tipo_cliente
+            ON tipo_cliente.IDDimTipoCliente = {id_tipo_cliente_card_expr}
+
         WHERE c.IDFatoKanbanCard = :id_card
-          AND c.IDEmpresaProprietaria = :id_empresa_proprietaria;
+          AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND ISNULL(c.Ativo, 1) = 1;
     """)
 
     row = db.session.execute(
@@ -18403,257 +21763,144 @@ def _buscar_cabecalho_aprovacao_preco(id_card: int, id_empresa_proprietaria: int
         },
     ).mappings().first()
 
-    return dict(row) if row else None
+    if not row:
+        return None
 
+    card = dict(row)
+    partes_endereco = [
+        card.get("DescricaoTipoLogradouro"),
+        card.get("Logradouro"),
+        card.get("Numero"),
+        card.get("Complemento"),
+        card.get("Bairro"),
+        card.get("Municipio"),
+        card.get("UF"),
+        card.get("CEP"),
+    ]
+    card["endereco_completo"] = " - ".join(str(parte) for parte in partes_endereco if parte not in (None, "")) or None
+
+    return card
 
 
 
 def _buscar_itens_pendentes_aprovacao_preco(id_card: int, id_empresa_proprietaria: int) -> list[dict[str, Any]]:
-    def _para_int_ou_none(valor: Any) -> int | None:
-        if valor in (None, ""):
-            return None
-        try:
-            return int(valor)
-        except (TypeError, ValueError):
-            return None
+    """
+    Eu busco os itens pendentes lendo somente FatoAprovaPreco.
 
-    def _tem_valor_informado(valor: Any) -> bool:
-        if valor is None:
-            return False
-        if isinstance(valor, str) and not valor.strip():
-            return False
-        return True
+    Importante:
+    - mantenho id_negociacao_preco como alias de IDFatoAprovaPreco
+      para não quebrar o HTML/JS atual.
+    """
 
-    def _valor_decimal_local(valor: Any) -> Decimal | None:
-        if valor in (None, ""):
-            return None
-        return _valor_decimal(valor)
-
-    def _calcular_margem_percentual(custo: Any, preco: Any) -> Decimal | None:
-        custo_dec = _valor_decimal_local(custo)
-        preco_dec = _valor_decimal_local(preco)
-
-        if custo_dec is None:
-            return None
-        if preco_dec in (None, Decimal("0")):
-            return None
-
-        return ((preco_dec - custo_dec) / preco_dec) * Decimal("100")
-
-    sql_historico = text("""
-        ;WITH UltimaLinhaPorPainelFace AS (
-            SELECT
-                np.*,
-                ROW_NUMBER() OVER (
-                    PARTITION BY
-                        ISNULL(np.IDDimPaineisEuromidia, -1),
-                        ISNULL(np.IDDimFacesPaineis, -1)
-                    ORDER BY
-                        COALESCE(np.DataPrecoProposto, np.PeriodoInicio, np.PeriodoTermino, np.DataAprovacaoPreco) DESC,
-                        np.IDFatoKanbanNegociacaoPreco DESC
-                ) AS rn
-            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] np
-            WHERE np.IDFatoKanbanCard = :id_card
-              AND np.IDEmpresaProprietaria = :id_empresa_proprietaria
-        )
+    sql = text(f"""
         SELECT
-            ul.IDFatoKanbanNegociacaoPreco AS id_negociacao_preco,
-            ul.IDFatoKanbanCard AS id_card,
-            ul.IDDimPaineisEuromidia AS id_painel,
-            ul.IDDimFacesPaineis AS id_face,
-            ul.DataPrecoProposto AS data_preco_proposto,
-            ul.PeriodoInicio AS periodo_inicio,
-            ul.PeriodoTermino AS periodo_termino,
-            ul.ObservacoesProposta AS observacoes_proposta,
-            ul.CustoAtual AS custo_atual,
-            ul.PrecoAtual AS preco_atual,
-            ul.PrecoProposto AS preco_proposto,
-            ul.MargemProposta AS margem_proposta,
-            ul.DescontoProposto AS desconto_proposto,
-            ul.IDDimUsuarios AS id_usuario_solicitante,
+            ap.IDFatoAprovaPreco AS id_aprova_preco,
+            ap.IDFatoAprovaPreco AS id_negociacao_preco,
+            ap.IDFatoKanbanCard AS id_card,
+            ap.IDDimPaineisEuromidia AS id_painel,
+            ap.IDDimFacesPaineis AS id_face,
+
+            ap.DataPrecoProposto AS data_preco_proposto,
+            ap.PeriodoInicio AS periodo_inicio,
+            ap.PeriodoTermino AS periodo_termino,
+            ap.ObservacoesProposta AS observacoes_proposta,
+
+            ap.CustoAtual AS custo_atual,
+            ap.PrecoAtual AS preco_atual,
+            ap.PrecoProposto AS preco_proposto,
+            ap.MargemProposta AS margem_proposta,
+            ap.DescontoProposto AS desconto_proposto,
+
+            ap.IDDimUsuarios AS id_usuario_solicitante,
             usu.NomeUsuario AS nome_usuario_solicitante,
 
-            pf.CodPonto AS cod_ponto,
-            pf.CodFace AS cod_face,
-            pf.TipoPainel AS tipo_painel,
-            pf.CustoTabela AS custo_tabela_operacional,
-            pf.ValorTabela AS valor_tabela_operacional,
-            pf.NovoValor AS novo_valor_operacional,
-            pf.PercentualDesconto AS percentual_desconto_operacional,
-            pf.ValorVendaFinal AS valor_venda_final_operacional,
-            pf.MargemPercentual AS margem_percentual_operacional
-        FROM UltimaLinhaPorPainelFace ul
-        LEFT JOIN [Integracao].[Silver].[DimUsuarios] usu
-            ON usu.IDDimUsuarios = ul.IDDimUsuarios
-           AND usu.IDEmpresaProprietaria = ul.IDEmpresaProprietaria
-        LEFT JOIN [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
-            ON pf.IDFatoKanbanCard = ul.IDFatoKanbanCard
-           AND ISNULL(pf.Ativo, 1) = 1
-           AND ISNULL(pf.IDDimPaineisEuromidia, 0) = ISNULL(ul.IDDimPaineisEuromidia, 0)
-           AND ISNULL(pf.IDDimFacesPaineis, 0) = ISNULL(ul.IDDimFacesPaineis, 0)
-        WHERE ul.rn = 1
-          AND ul.PrecoAprovado IS NULL
-          AND ul.DataAprovacaoPreco IS NULL
-        ORDER BY
-            ul.DataPrecoProposto DESC,
-            ul.IDFatoKanbanNegociacaoPreco DESC;
-    """)
+            COALESCE(pf.CodPonto, item_contrato.CodPonto) AS cod_ponto,
+            COALESCE(pf.CodFace, item_contrato.CodFace) AS cod_face,
+            COALESCE(pf.TipoPainel, item_contrato.Tipo) AS tipo_painel,
 
-    rows_historico = db.session.execute(
-        sql_historico,
-        {
-            "id_card": int(id_card),
-            "id_empresa_proprietaria": int(id_empresa_proprietaria),
-        },
-    ).mappings().all()
-
-    itens_historico = _rows_para_dicts(rows_historico)
-    mapa_historico: dict[tuple[int, int], dict[str, Any]] = {}
-
-    for item in itens_historico:
-        id_painel = _para_int_ou_none(item.get("id_painel"))
-        id_face = _para_int_ou_none(item.get("id_face"))
-        if not id_painel or not id_face:
-            continue
-        mapa_historico[(int(id_painel), int(id_face))] = dict(item)
-
-    sql_operacional = text("""
-        SELECT
-            pf.IDFatoKanbanCard AS id_card,
-            pf.IDDimPaineisEuromidia AS id_painel,
-            pf.IDDimFacesPaineis AS id_face,
-            pf.CodPonto AS cod_ponto,
-            pf.CodFace AS cod_face,
-            pf.TipoPainel AS tipo_painel,
             pf.CustoTabela AS custo_tabela_operacional,
             pf.ValorTabela AS valor_tabela_operacional,
             pf.NovoValor AS novo_valor_operacional,
             pf.PercentualDesconto AS percentual_desconto_operacional,
             pf.ValorVendaFinal AS valor_venda_final_operacional,
             pf.MargemPercentual AS margem_percentual_operacional,
-            pf.DataInicio AS periodo_inicio_operacional,
-            pf.DataFim AS periodo_termino_operacional,
-            pf.IDDimTabelaPrecosEuromidia AS id_tabela_preco_operacional
-        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
-        WHERE pf.IDFatoKanbanCard = :id_card
-          AND ISNULL(pf.Ativo, 1) = 1
+
+            'fato_aprova_preco' AS origem_dados
+
+        FROM {TABELA_CARD_APROVA_PRECO} ap
+
+        INNER JOIN {TABELA_CARD} c
+            ON c.IDFatoKanbanCard = ap.IDFatoKanbanCard
+           AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] usu
+            ON usu.IDDimUsuarios = ap.IDDimUsuarios
+           AND (
+                usu.IDEmpresaProprietaria = ap.IDEmpresaProprietaria
+                OR usu.IDEmpresaProprietaria IS NULL
+           )
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                pf1.CodPonto,
+                pf1.CodFace,
+                pf1.TipoPainel,
+                pf1.CustoTabela,
+                pf1.ValorTabela,
+                pf1.NovoValor,
+                pf1.PercentualDesconto,
+                pf1.ValorVendaFinal,
+                pf1.MargemPercentual
+            FROM {TABELA_CARD_PAINEL_FACE} pf1
+            WHERE pf1.IDFatoKanbanCard = ap.IDFatoKanbanCard
+              AND ISNULL(pf1.Ativo, 1) = 1
+              AND ISNULL(pf1.IDDimPaineisEuromidia, 0) = ISNULL(ap.IDDimPaineisEuromidia, 0)
+              AND ISNULL(pf1.IDDimFacesPaineis, 0) = ISNULL(ap.IDDimFacesPaineis, 0)
+            ORDER BY
+                COALESCE(pf1.DataAtualizacao, pf1.CriadoEm, GETDATE()) DESC,
+                pf1.IDFatoKanbanCardPainelFace DESC
+        ) pf
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                i.CodPonto,
+                i.CodFace,
+                i.Tipo
+            FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+            WHERE i.IDFatoControleContratoEuromidia = ap.IDFatoControleContratosEuromidia
+              AND ISNULL(i.BitAtivo, 1) = 1
+              AND (
+                    ISNULL(i.IDPainelEuromidia, 0) = ISNULL(ap.IDDimPaineisEuromidia, 0)
+                 OR ISNULL(i.IDDimFacesPaineis, 0) = ISNULL(ap.IDDimFacesPaineis, 0)
+              )
+            ORDER BY
+                i.IDFatoControleContratosItensEuromidia DESC
+        ) item_contrato
+
+        WHERE ap.IDFatoKanbanCard = :id_card
+          AND ap.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND ap.PrecoAprovado IS NULL
+          AND ap.DataAprovacaoPreco IS NULL
+          AND ISNULL(c.Ativo, 1) = 1
+
         ORDER BY
-            ISNULL(pf.Ordem, 0),
-            pf.IDFatoKanbanCardPainelFace;
+            ap.DataPrecoProposto DESC,
+            ap.IDFatoAprovaPreco DESC;
     """)
 
-    rows_operacional = db.session.execute(
-        sql_operacional,
-        {"id_card": int(id_card)},
+    rows = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+        },
     ).mappings().all()
 
-    itens_operacionais = _rows_para_dicts(rows_operacional)
-    resultado: list[dict[str, Any]] = []
+    return _rows_para_dicts(rows)
 
-    for item_operacional in itens_operacionais:
-        id_painel = _para_int_ou_none(item_operacional.get("id_painel"))
-        id_face = _para_int_ou_none(item_operacional.get("id_face"))
-        if not id_painel or not id_face:
-            continue
 
-        chave = (int(id_painel), int(id_face))
-        item_historico = mapa_historico.get(chave)
 
-        if item_historico:
-            item_final = dict(item_historico)
 
-            if not _tem_valor_informado(item_final.get("cod_ponto")):
-                item_final["cod_ponto"] = item_operacional.get("cod_ponto")
-            if not _tem_valor_informado(item_final.get("cod_face")):
-                item_final["cod_face"] = item_operacional.get("cod_face")
-            if not _tem_valor_informado(item_final.get("tipo_painel")):
-                item_final["tipo_painel"] = item_operacional.get("tipo_painel")
-
-            item_final["custo_tabela_operacional"] = item_operacional.get("custo_tabela_operacional")
-            item_final["valor_tabela_operacional"] = item_operacional.get("valor_tabela_operacional")
-            item_final["novo_valor_operacional"] = item_operacional.get("novo_valor_operacional")
-            item_final["percentual_desconto_operacional"] = item_operacional.get("percentual_desconto_operacional")
-            item_final["valor_venda_final_operacional"] = item_operacional.get("valor_venda_final_operacional")
-            item_final["margem_percentual_operacional"] = item_operacional.get("margem_percentual_operacional")
-            item_final["origem_dados"] = "historico_negociacao"
-            resultado.append(item_final)
-            continue
-
-        custo_atual = item_operacional.get("custo_tabela_operacional")
-        preco_atual = item_operacional.get("valor_tabela_operacional")
-        preco_proposto = item_operacional.get("novo_valor_operacional")
-
-        if not _tem_valor_informado(preco_proposto):
-            preco_proposto = item_operacional.get("valor_venda_final_operacional")
-        if not _tem_valor_informado(preco_proposto):
-            preco_proposto = preco_atual
-
-        margem_proposta = item_operacional.get("margem_percentual_operacional")
-        if not _tem_valor_informado(margem_proposta):
-            margem_proposta = _calcular_margem_percentual(custo_atual, preco_proposto)
-
-        item_fallback = {
-            "id_negociacao_preco": None,
-            "id_card": int(id_card),
-            "id_painel": int(id_painel),
-            "id_face": int(id_face),
-            "data_preco_proposto": None,
-            "periodo_inicio": item_operacional.get("periodo_inicio_operacional"),
-            "periodo_termino": item_operacional.get("periodo_termino_operacional"),
-            "observacoes_proposta": None,
-            "custo_atual": custo_atual,
-            "preco_atual": preco_atual,
-            "preco_proposto": preco_proposto,
-            "margem_proposta": margem_proposta,
-            "desconto_proposto": item_operacional.get("percentual_desconto_operacional"),
-            "id_usuario_solicitante": None,
-            "nome_usuario_solicitante": None,
-            "cod_ponto": item_operacional.get("cod_ponto"),
-            "cod_face": item_operacional.get("cod_face"),
-            "tipo_painel": item_operacional.get("tipo_painel"),
-            "custo_tabela_operacional": item_operacional.get("custo_tabela_operacional"),
-            "valor_tabela_operacional": item_operacional.get("valor_tabela_operacional"),
-            "novo_valor_operacional": item_operacional.get("novo_valor_operacional"),
-            "percentual_desconto_operacional": item_operacional.get("percentual_desconto_operacional"),
-            "valor_venda_final_operacional": item_operacional.get("valor_venda_final_operacional"),
-            "margem_percentual_operacional": item_operacional.get("margem_percentual_operacional"),
-            "origem_dados": "operacional_sem_historico",
-        }
-
-        estado_para_regra = {
-            "IDDimPaineisEuromidia": item_fallback.get("id_painel"),
-            "IDDimFacesPaineis": item_fallback.get("id_face"),
-            "IDDimTabelaPrecosEuromidia": item_operacional.get("id_tabela_preco_operacional"),
-            "CustoTabela": item_operacional.get("custo_tabela_operacional"),
-            "ValorTabela": item_operacional.get("valor_tabela_operacional"),
-            "NovoValor": item_operacional.get("novo_valor_operacional"),
-            "PercentualDesconto": item_operacional.get("percentual_desconto_operacional"),
-            "ValorVendaFinal": item_operacional.get("valor_venda_final_operacional"),
-            "DataInicio": item_operacional.get("periodo_inicio_operacional"),
-            "DataFim": item_operacional.get("periodo_termino_operacional"),
-            "PeriodoInicio": item_operacional.get("periodo_inicio_operacional"),
-            "PeriodoTermino": item_operacional.get("periodo_termino_operacional"),
-        }
-
-        if not _estado_precisa_aprovacao_diretoria(estado_para_regra):
-            continue
-
-        resultado.append(item_fallback)
-
-    if not resultado:
-        return []
-
-    def _ordenacao(item: dict[str, Any]):
-        return (
-            0 if item.get("id_negociacao_preco") not in (None, "", 0) else 1,
-            item.get("data_preco_proposto") or item.get("periodo_inicio") or item.get("periodo_termino") or "",
-            item.get("id_negociacao_preco") or 0,
-            item.get("id_painel") or 0,
-            item.get("id_face") or 0,
-        )
-
-    resultado.sort(key=_ordenacao, reverse=True)
-    return resultado
 
 
 
@@ -18810,26 +22057,36 @@ def _atualizar_item_operacional_aprovado(
 
 
 
-
 def _buscar_negociacao_preco_para_aprovacao(
     *,
     id_card: int,
     id_negociacao_preco: int,
     id_empresa_proprietaria: int,
 ) -> dict[str, Any] | None:
-    sql = text("""
+    """
+    Compatibilidade de nome.
+
+    O front ainda envia id_negociacao_preco, mas enquanto está pendente
+    esse ID representa IDFatoAprovaPreco.
+    """
+
+    sql = text(f"""
         SELECT TOP (1)
-            *
-        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
-        WHERE IDFatoKanbanNegociacaoPreco = :id_negociacao_preco
-          AND IDFatoKanbanCard = :id_card
-          AND IDEmpresaProprietaria = :id_empresa_proprietaria;
+            ap.*,
+            ap.IDFatoAprovaPreco AS IDFatoAprovaPreco,
+            ap.IDFatoAprovaPreco AS IDFatoKanbanNegociacaoPreco
+        FROM {TABELA_CARD_APROVA_PRECO} ap
+        WHERE ap.IDFatoAprovaPreco = :id_aprova_preco
+          AND ap.IDFatoKanbanCard = :id_card
+          AND ap.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND ap.PrecoAprovado IS NULL
+          AND ap.DataAprovacaoPreco IS NULL;
     """)
 
     row = db.session.execute(
         sql,
         {
-            "id_negociacao_preco": int(id_negociacao_preco),
+            "id_aprova_preco": int(id_negociacao_preco),
             "id_card": int(id_card),
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
         },
@@ -18841,27 +22098,233 @@ def _buscar_negociacao_preco_para_aprovacao(
 
 
 
-@kanban_bp.route("/aprovacao-preco", methods=["GET"])
-@login_required
-@limiter.limit("60/minute")
-def lista_aprovacao_preco():
-    id_usuario = _assert_login()
-    id_empresa_proprietaria = _id_empresa_usuario_or_403()
 
-    _reconciliar_tags_aprovacao_desconto_pendentes(
-        id_empresa_proprietaria=int(id_empresa_proprietaria),
-        id_usuario=int(id_usuario),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def _buscar_empresa_completa_aprovacao_preco(
+    *,
+    id_card: int,
+    id_empresa_proprietaria: int,
+    id_empresa_preferencial: int | None = None,
+) -> dict[str, Any] | None:
+    """
+    Eu busco os dados completos da empresa para a tela de aprovação de preço.
+
+    Regra:
+    - não faço conversões nem tratamento pesado na query;
+    - resolvo IDEmpresa por prioridade: parâmetro -> card -> pendência -> solicitação -> contrato;
+    - trago DimEmpresas + DimCnaes + origem + tipo de cliente direto para o template.
+    """
+
+    def _expr_int_coluna(tabela: str, alias: str, coluna: str) -> str:
+        if _coluna_existe(tabela, coluna):
+            return f"{alias}.{coluna}"
+        return "CAST(NULL AS int)"
+
+    def _expr_texto_coluna(tabela: str, alias: str, coluna: str, tamanho: int = 300) -> str:
+        if _coluna_existe(tabela, coluna):
+            return f"CAST({alias}.{coluna} AS nvarchar({int(tamanho)}))"
+        return f"CAST(NULL AS nvarchar({int(tamanho)}))"
+
+    id_empresa_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresa")
+    id_empresa_relacionada_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaRelacionadaCard")
+    id_cnae_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimCnaes")
+    id_origem_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimOrigemAtendimento")
+    id_tipo_cliente_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimTipoCliente")
+
+    if _coluna_existe(TABELA_CARD, "IDFatoControleContratosEuromidia"):
+        id_contrato_card_expr = "c.IDFatoControleContratosEuromidia"
+    elif _coluna_existe(TABELA_CARD, "IDFatoControleContratoEuromidia"):
+        id_contrato_card_expr = "c.IDFatoControleContratoEuromidia"
+    else:
+        id_contrato_card_expr = "CAST(NULL AS int)"
+
+    nome_origem_card_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_card", "NomeOrigemAtendimento", 200)
+    desc_origem_card_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_card", "Descricao", 200)
+    nome_origem_emp_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_emp", "NomeOrigemAtendimento", 200)
+    desc_origem_emp_expr = _expr_texto_coluna(TABELA_ORIGEM_ATENDIMENTO, "origem_emp", "Descricao", 200)
+
+    tipo_cliente_desc_expr = _expr_texto_coluna(TABELA_TIPO_CLIENTE_DESCONTO, "tipo_cliente", "Descricao", 200)
+    tipo_cliente_nome_expr = _expr_texto_coluna(TABELA_TIPO_CLIENTE_DESCONTO, "tipo_cliente", "NomeTipoCliente", 200)
+
+    id_empresa_preferencial_param = (
+        int(id_empresa_preferencial)
+        if id_empresa_preferencial not in (None, "", 0)
+        else None
     )
-    db.session.commit()
 
-    cards = _buscar_cards_lista_aprovacao_preco(int(id_empresa_proprietaria))
+    sql = text(f"""
+        ;WITH CardBase AS (
+            SELECT TOP (1)
+                c.*
+            FROM {TABELA_CARD} c
+            WHERE c.IDFatoKanbanCard = :id_card
+              AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+        ),
+        PendenciaCard AS (
+            SELECT TOP (1)
+                ap.*
+            FROM {TABELA_CARD_APROVA_PRECO} ap
+            WHERE ap.IDFatoKanbanCard = :id_card
+              AND ap.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ap.PrecoAprovado IS NULL
+              AND ap.DataAprovacaoPreco IS NULL
+            ORDER BY
+                ap.DataPrecoProposto DESC,
+                ap.IDFatoAprovaPreco DESC
+        ),
+        SolicitacaoCard AS (
+            SELECT TOP (1)
+                sol_base.*
+            FROM {TABELA_SOLICITACAO_CONTRATO} sol_base
+            WHERE sol_base.IDFatoKanbanCard = :id_card
+              AND sol_base.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ISNULL(sol_base.BitAtivo, 1) = 1
+            ORDER BY
+                sol_base.DataAtualizacao DESC,
+                sol_base.IDFatoSolicitacaoContratoEuromidia DESC
+        ),
+        ResolverEmpresa AS (
+            SELECT
+                COALESCE(
+                    :id_empresa_preferencial,
+                    {id_empresa_relacionada_expr},
+                    {id_empresa_card_expr},
+                    ap.IDEmpresa,
+                    sol.IDEmpresa,
+                    contrato.IDEmpresa
+                ) AS IDEmpresaResolvida
+            FROM CardBase c
+            LEFT JOIN PendenciaCard ap ON 1 = 1
+            LEFT JOIN SolicitacaoCard sol ON 1 = 1
+            LEFT JOIN {TABELA_CONTROLE_CONTRATOS} contrato
+                ON contrato.IDFatoControleContratosEuromidia = COALESCE(
+                    ap.IDFatoControleContratosEuromidia,
+                    sol.IDFatoControleContratosEuromidia,
+                    {id_contrato_card_expr}
+                )
+        )
+        SELECT TOP (1)
+            emp.IDEmpresa,
+            emp.IDEmpresaProprietaria,
+            emp.CNPJ,
+            emp.UF,
+            emp.CEP,
+            emp.CodigoPorte,
+            emp.Pais,
+            emp.Email,
+            emp.Porte,
+            emp.Bairro,
+            emp.Numero,
+            emp.TelefoneContato1,
+            emp.TelefoneContato2,
+            emp.Municipio,
+            emp.Logradouro,
+            emp.CNAE,
+            emp.Complemento,
+            emp.RazaoSocial,
+            emp.NomeFantasia,
+            emp.CapitalSocial,
+            emp.NaturezaJuridica,
+            emp.DescricaoCnae,
+            emp.DataInicioAtividades,
+            emp.DataSituacaoEspecial,
+            emp.DataOpcaoPeloSimples,
+            emp.DataSituacaoCadastral,
+            emp.DataExclusaoSimples,
+            emp.IdentificadorMatrizFilial,
+            emp.DescricaoSituacaoCadastral,
+            emp.DescricaoMotivoSituacaoCadastral,
+            emp.DescricaoIdentificadorMatrizFilial,
+            emp.DescricaoTipoLogradouro,
+            emp.DataAtualizacao,
+            emp.Latitude,
+            emp.Longitude,
+            emp.BitCliente,
+            emp.BitClienteDireto,
+            emp.IDDimOrigemAtendimento,
 
-    return render_template(
-        "kanban/lista_aprovacao_preco.html",
-        cards=cards,
-        nome_tag=NOME_TAG_APROVACAO_DESCONTO,
-    )
+            COALESCE(cnae_emp.IDDimCnaes, cnae_card.IDDimCnaes) AS IDDimCnaes,
+            COALESCE(cnae_emp.cnaepadrao, cnae_card.cnaepadrao) AS cnaepadrao,
+            COALESCE(cnae_emp.Descricao, cnae_card.Descricao, emp.DescricaoCnae) AS CnaeDescricao,
+            COALESCE(cnae_emp.Classe, cnae_card.Classe) AS CnaeClasse,
+            COALESCE(cnae_emp.Setor, cnae_card.Setor) AS CnaeSetor,
+            COALESCE(cnae_emp.MacroSetor, cnae_card.MacroSetor) AS CnaeMacroSetor,
+            COALESCE(cnae_emp.SubClasse, cnae_card.SubClasse) AS CnaeSubClasse,
+            COALESCE(cnae_emp.ClassificacaoMacro, cnae_card.ClassificacaoMacro) AS CnaeClassificacaoMacro,
+            COALESCE(cnae_emp.ScoreSetor, cnae_card.ScoreSetor) AS ScoreSetor,
+            COALESCE(cnae_emp.Hex, cnae_card.Hex) AS CnaeHex,
 
+            COALESCE({id_origem_card_expr}, emp.IDDimOrigemAtendimento) AS IDDimOrigemAtendimentoFinal,
+            COALESCE({nome_origem_card_expr}, {desc_origem_card_expr}, {nome_origem_emp_expr}, {desc_origem_emp_expr}) AS NomeOrigemAtendimento,
+
+            {id_tipo_cliente_card_expr} AS IDDimTipoCliente,
+            COALESCE({tipo_cliente_desc_expr}, {tipo_cliente_nome_expr}) AS TipoClienteDesconto,
+            COALESCE({tipo_cliente_desc_expr}, {tipo_cliente_nome_expr}) AS TipoCliente,
+            COALESCE({tipo_cliente_desc_expr}, {tipo_cliente_nome_expr}) AS NomeTipoCliente
+
+        FROM ResolverEmpresa r
+        INNER JOIN {TABELA_EMPRESAS} emp
+            ON emp.IDEmpresa = r.IDEmpresaResolvida
+        LEFT JOIN CardBase c
+            ON 1 = 1
+        LEFT JOIN {TABELA_CNAES} cnae_emp
+            ON cnae_emp.cnaepadrao = emp.CNAE
+        LEFT JOIN {TABELA_CNAES} cnae_card
+            ON cnae_card.IDDimCnaes = {id_cnae_card_expr}
+        LEFT JOIN {TABELA_ORIGEM_ATENDIMENTO} origem_card
+            ON origem_card.IDDimOrigemAtendimento = {id_origem_card_expr}
+        LEFT JOIN {TABELA_ORIGEM_ATENDIMENTO} origem_emp
+            ON origem_emp.IDDimOrigemAtendimento = emp.IDDimOrigemAtendimento
+        LEFT JOIN {TABELA_TIPO_CLIENTE_DESCONTO} tipo_cliente
+            ON tipo_cliente.IDDimTipoCliente = {id_tipo_cliente_card_expr}
+        WHERE r.IDEmpresaResolvida IS NOT NULL;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            "id_empresa_preferencial": id_empresa_preferencial_param,
+        },
+    ).mappings().first()
+
+    if not row:
+        return None
+
+    empresa = dict(row)
+
+    partes_endereco = [
+        empresa.get("DescricaoTipoLogradouro"),
+        empresa.get("Logradouro"),
+        empresa.get("Numero"),
+        empresa.get("Complemento"),
+        empresa.get("Bairro"),
+        empresa.get("Municipio"),
+        empresa.get("UF"),
+        empresa.get("CEP"),
+    ]
+
+    empresa["endereco_completo"] = " - ".join(
+        str(parte)
+        for parte in partes_endereco
+        if parte not in (None, "")
+    ) or None
+
+    return empresa
 
 
 
@@ -18870,35 +22333,331 @@ def lista_aprovacao_preco():
 @login_required
 @limiter.limit("60/minute")
 def aprovacao_preco_detalhe(id_card: int):
-    _assert_login()
+    id_usuario = _assert_login()
+    _exigir_admin_aprovacao_desconto()
     id_empresa_proprietaria = _id_empresa_usuario_or_403()
 
-    _obter_card_autorizado(int(id_card))
-
-    card = _buscar_cabecalho_aprovacao_preco(int(id_card), int(id_empresa_proprietaria))
-    if not card:
+    card_escopo = _obter_card_autorizado(int(id_card))
+    if not card_escopo:
         abort(404)
 
-    pendencias = _buscar_itens_pendentes_aprovacao_preco(int(id_card), int(id_empresa_proprietaria))
-    historico_precos = _buscar_historico_precos_card(int(id_card), int(id_empresa_proprietaria))
-    tags_ativas = _obter_tags_do_card(int(id_card))
+    id_kanban = int(card_escopo.get("IDDimKanban") or card_escopo.get("id_kanban") or 0)
+
+    try:
+        id_usuario_solicitante = _resolver_id_usuario_solicitante_desconto_card(
+            id_card=int(id_card),
+            id_usuario_fallback=int(id_usuario),
+        )
+
+        resultado_materializacao = _materializar_negociacao_preco_pendente_card(
+            id_card=int(id_card),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_usuario=int(id_usuario_solicitante or id_usuario),
+        )
+
+        db.session.commit()
+
+        current_app.logger.info(
+            "APROVACAO_PRECO_DETALHE | materializacao_ok | id_card=%s | id_usuario_solicitante=%s | resultado=%s",
+            int(id_card),
+            int(id_usuario_solicitante or id_usuario),
+            resultado_materializacao,
+        )
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "APROVACAO_PRECO_DETALHE | falha ao materializar pendência | id_card=%s",
+            int(id_card),
+        )
+
+    try:
+        card_cabecalho = _buscar_cabecalho_aprovacao_preco(
+            int(id_card),
+            int(id_empresa_proprietaria),
+        )
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_PRECO_DETALHE | falha ao buscar cabeçalho enriquecido | id_card=%s",
+            int(id_card),
+        )
+        card_cabecalho = None
+
+    card = dict(card_cabecalho or card_escopo or {})
+
+    id_empresa_preferencial = (
+        card.get("IDEmpresa")
+        or card.get("id_empresa")
+        or card.get("IDEmpresaRelacionadaCard")
+        or card.get("id_empresa_relacionada")
+        or card_escopo.get("IDEmpresa")
+        or card_escopo.get("IDEmpresaRelacionadaCard")
+    )
+
+    try:
+        empresa = _buscar_empresa_completa_aprovacao_preco(
+            id_card=int(id_card),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_empresa_preferencial=int(id_empresa_preferencial) if id_empresa_preferencial not in (None, "", 0) else None,
+        )
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_PRECO_DETALHE | falha ao buscar empresa completa | id_card=%s | id_empresa_preferencial=%s",
+            int(id_card),
+            id_empresa_preferencial,
+        )
+        empresa = None
+
+    if empresa:
+        card["id_empresa"] = empresa.get("IDEmpresa")
+        card["IDEmpresa"] = empresa.get("IDEmpresa")
+        card["IDEmpresaRelacionadaCard"] = empresa.get("IDEmpresa")
+
+        card["nome_empresa"] = (
+            empresa.get("NomeFantasia")
+            or empresa.get("RazaoSocial")
+            or card.get("NomeEmpresa")
+            or card.get("EmpresaRazaoSocial")
+            or card.get("Titulo")
+            or "Empresa não identificada"
+        )
+        card["NomeEmpresa"] = card["nome_empresa"]
+
+        card["razao_social"] = empresa.get("RazaoSocial") or card.get("razao_social")
+        card["EmpresaRazaoSocial"] = card.get("razao_social")
+        card["RazaoSocial"] = card.get("razao_social")
+
+        card["nome_fantasia"] = empresa.get("NomeFantasia") or card.get("nome_fantasia")
+        card["NomeFantasia"] = card.get("nome_fantasia")
+
+        card["cnpj"] = empresa.get("CNPJ") or card.get("cnpj")
+        card["EmpresaCNPJ"] = card.get("cnpj")
+        card["CNPJ"] = card.get("cnpj")
+
+        card["cnae_empresa"] = empresa.get("CNAE") or empresa.get("cnaepadrao") or card.get("cnae_empresa")
+        card["EmpresaCNAE"] = card.get("cnae_empresa")
+        card["CNAE"] = card.get("cnae_empresa")
+
+        card["descricao_cnae"] = empresa.get("CnaeDescricao") or empresa.get("DescricaoCnae") or card.get("descricao_cnae")
+        card["DescricaoCnae"] = card.get("descricao_cnae")
+        card["CnaeDescricao"] = card.get("descricao_cnae")
+
+        card["classe_cnae"] = empresa.get("CnaeClasse") or card.get("classe_cnae")
+        card["EmpresaClasse"] = card.get("classe_cnae")
+        card["CnaeClasse"] = card.get("classe_cnae")
+
+        card["setor_cnae"] = empresa.get("CnaeSetor") or card.get("setor_cnae")
+        card["EmpresaSetor"] = card.get("setor_cnae")
+        card["CnaeSetor"] = card.get("setor_cnae")
+
+        card["macro_setor"] = empresa.get("CnaeMacroSetor") or card.get("macro_setor")
+        card["MacroSetor"] = card.get("macro_setor")
+        card["CnaeMacroSetor"] = card.get("macro_setor")
+
+        card["subclasse_cnae"] = empresa.get("CnaeSubClasse") or card.get("subclasse_cnae")
+        card["SubClasse"] = card.get("subclasse_cnae")
+        card["CnaeSubClasse"] = card.get("subclasse_cnae")
+
+        card["classificacao_macro"] = empresa.get("CnaeClassificacaoMacro") or card.get("classificacao_macro")
+        card["ClassificacaoMacro"] = card.get("classificacao_macro")
+        card["CnaeClassificacaoMacro"] = card.get("classificacao_macro")
+
+        card["score_setor"] = empresa.get("ScoreSetor") or card.get("score_setor")
+        card["ScoreSetor"] = card.get("score_setor")
+        card["hex_cnae"] = empresa.get("CnaeHex") or card.get("hex_cnae")
+        card["CnaeHex"] = card.get("hex_cnae")
+
+        card["email_empresa"] = empresa.get("Email") or card.get("email_empresa")
+        card["Email"] = card.get("email_empresa")
+
+        card["telefone_empresa"] = empresa.get("TelefoneContato1") or empresa.get("TelefoneContato2") or card.get("telefone_empresa")
+        card["Telefone"] = card.get("telefone_empresa")
+        card["TelefoneContato1"] = empresa.get("TelefoneContato1") or card.get("TelefoneContato1")
+        card["TelefoneContato2"] = empresa.get("TelefoneContato2") or card.get("TelefoneContato2")
+
+        card["municipio"] = empresa.get("Municipio") or card.get("municipio")
+        card["Municipio"] = card.get("municipio")
+
+        card["uf"] = empresa.get("UF") or card.get("uf")
+        card["UF"] = card.get("uf")
+
+        card["bairro"] = empresa.get("Bairro") or card.get("bairro")
+        card["Bairro"] = card.get("bairro")
+
+        card["logradouro"] = empresa.get("Logradouro") or card.get("logradouro")
+        card["Logradouro"] = card.get("logradouro")
+
+        card["numero"] = empresa.get("Numero") or card.get("numero")
+        card["Numero"] = card.get("numero")
+
+        card["cep"] = empresa.get("CEP") or card.get("cep")
+        card["CEP"] = card.get("cep")
+
+        card["complemento"] = empresa.get("Complemento") or card.get("complemento")
+        card["Complemento"] = card.get("complemento")
+
+        card["endereco_completo"] = empresa.get("endereco_completo") or card.get("endereco_completo")
+
+        card["latitude"] = empresa.get("Latitude") or card.get("latitude")
+        card["Latitude"] = card.get("latitude")
+        card["longitude"] = empresa.get("Longitude") or card.get("longitude")
+        card["Longitude"] = card.get("longitude")
+
+        card["porte"] = empresa.get("Porte") or card.get("porte")
+        card["Porte"] = card.get("porte")
+
+        card["capital_social"] = empresa.get("CapitalSocial") or card.get("capital_social")
+        card["CapitalSocial"] = card.get("capital_social")
+
+        card["natureza_juridica"] = empresa.get("NaturezaJuridica") or card.get("natureza_juridica")
+        card["NaturezaJuridica"] = card.get("natureza_juridica")
+
+        card["situacao_cadastral"] = empresa.get("DescricaoSituacaoCadastral") or card.get("situacao_cadastral")
+        card["DescricaoSituacaoCadastral"] = card.get("situacao_cadastral")
+        card["SituacaoCadastral"] = card.get("situacao_cadastral")
+        card["DescricaoMotivoSituacaoCadastral"] = empresa.get("DescricaoMotivoSituacaoCadastral") or card.get("DescricaoMotivoSituacaoCadastral")
+
+        card["data_inicio_atividades"] = empresa.get("DataInicioAtividades") or card.get("data_inicio_atividades")
+        card["DataInicioAtividades"] = card.get("data_inicio_atividades")
+
+        card["IDDimOrigemAtendimento"] = empresa.get("IDDimOrigemAtendimentoFinal") or empresa.get("IDDimOrigemAtendimento") or card.get("IDDimOrigemAtendimento")
+        card["NomeOrigemAtendimento"] = empresa.get("NomeOrigemAtendimento") or card.get("NomeOrigemAtendimento")
+        card["OrigemAtendimento"] = card.get("NomeOrigemAtendimento") or card.get("OrigemAtendimento")
+
+        card["IDDimTipoCliente"] = empresa.get("IDDimTipoCliente") or card.get("IDDimTipoCliente")
+        card["TipoClienteDesconto"] = empresa.get("TipoClienteDesconto") or empresa.get("TipoCliente") or empresa.get("NomeTipoCliente") or card.get("TipoClienteDesconto")
+        card["TipoCliente"] = card.get("TipoClienteDesconto")
+        card["NomeTipoCliente"] = card.get("TipoClienteDesconto")
+
+    else:
+        nome_empresa = (
+            card.get("NomeEmpresa")
+            or card.get("EmpresaRazaoSocial")
+            or card.get("RazaoSocial")
+            or card.get("Titulo")
+            or "Empresa não identificada"
+        )
+
+        card["nome_empresa"] = nome_empresa
+        card["NomeEmpresa"] = nome_empresa
+        card["razao_social"] = card.get("EmpresaRazaoSocial") or card.get("RazaoSocial") or nome_empresa
+        card["EmpresaRazaoSocial"] = card["razao_social"]
+        card["nome_fantasia"] = card.get("NomeFantasia")
+        card["cnpj"] = card.get("EmpresaCNPJ") or card.get("CNPJ")
+        card["EmpresaCNPJ"] = card["cnpj"]
+        card["cnae_empresa"] = card.get("EmpresaCNAE") or card.get("CNAE")
+        card["classe_cnae"] = card.get("EmpresaClasse") or card.get("CnaeClasse")
+        card["setor_cnae"] = card.get("EmpresaSetor") or card.get("CnaeSetor")
+        card["macro_setor"] = card.get("MacroSetor") or card.get("CnaeMacroSetor")
+        card["subclasse_cnae"] = card.get("SubClasse") or card.get("CnaeSubClasse")
+        card["classificacao_macro"] = card.get("ClassificacaoMacro") or card.get("CnaeClassificacaoMacro")
+        card["situacao_cadastral"] = card.get("DescricaoSituacaoCadastral") or card.get("SituacaoCadastral")
+
+    card["id_card"] = int(card.get("id_card") or card.get("IDFatoKanbanCard") or id_card)
+    card["IDFatoKanbanCard"] = int(card.get("IDFatoKanbanCard") or card.get("id_card") or id_card)
+
+    card["id_kanban"] = int(card.get("id_kanban") or card.get("IDDimKanban") or id_kanban or 0)
+    card["IDDimKanban"] = int(card.get("IDDimKanban") or card.get("id_kanban") or id_kanban or 0)
+
+    card["titulo"] = card.get("titulo") or card.get("Titulo")
+    card["Titulo"] = card.get("Titulo") or card.get("titulo")
+
+    card["nome_fase"] = card.get("nome_fase") or card.get("NomeFase") or card.get("FaseAtual")
+    card["NomeFase"] = card.get("NomeFase") or card.get("nome_fase")
+
+    card["nome_usuario_responsavel"] = (
+        card.get("nome_usuario_responsavel")
+        or card.get("NomeUsuarioResponsavel")
+        or card.get("NomeUsuario")
+        or "Não informado"
+    )
+    card["NomeUsuarioResponsavel"] = card["nome_usuario_responsavel"]
+
+    card["TipoSolicitacao"] = (
+        card.get("TipoSolicitacao")
+        or card.get("tipo_contrato")
+        or card.get("TipoContrato")
+        or (
+            "ADITIVO"
+            if bool(card.get("BitAditivo"))
+            else "NOVO CONTRATO"
+            if bool(card.get("BitContratoNovo"))
+            else None
+        )
+    )
+
+    card["TipoClienteDesconto"] = (
+        card.get("TipoClienteDesconto")
+        or card.get("TipoCliente")
+        or card.get("NomeTipoCliente")
+        or (
+            "Cliente Direto"
+            if int(card.get("BitClienteDireto") or 0) == 1
+            else "Agência"
+            if int(card.get("BitAgencia") or 0) == 1
+            else "Planejador"
+            if int(card.get("BitPlanejador") or 0) == 1
+            else None
+        )
+    )
+
+    try:
+        pendencias = _buscar_itens_pendentes_aprovacao_preco(
+            int(id_card),
+            int(id_empresa_proprietaria),
+        )
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_PRECO_DETALHE | falha ao buscar pendências | id_card=%s",
+            int(id_card),
+        )
+        pendencias = []
+
+    try:
+        historico_precos = _buscar_historico_precos_card(
+            int(id_card),
+            int(id_empresa_proprietaria),
+        )
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_PRECO_DETALHE | falha ao buscar histórico de preços | id_card=%s",
+            int(id_card),
+        )
+        historico_precos = []
+
+    try:
+        tags_ativas = _obter_tags_do_card(int(id_card))
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_PRECO_DETALHE | falha ao buscar tags | id_card=%s",
+            int(id_card),
+        )
+        tags_ativas = []
+
+    current_app.logger.info(
+        "APROVACAO_PRECO_DETALHE | render | id_card=%s | id_empresa=%s | nome_fantasia=%s | cnpj=%s | cnae=%s | subclasse=%s | classificacao=%s | origem=%s | porte=%s | tipo_cliente=%s | situacao=%s | pendencias=%s",
+        int(id_card),
+        card.get("id_empresa") or card.get("IDEmpresa") or card.get("IDEmpresaRelacionadaCard"),
+        card.get("nome_fantasia") or card.get("NomeFantasia"),
+        card.get("cnpj") or card.get("EmpresaCNPJ"),
+        card.get("cnae_empresa") or card.get("EmpresaCNAE"),
+        card.get("subclasse_cnae") or card.get("SubClasse") or card.get("CnaeSubClasse"),
+        card.get("classificacao_macro") or card.get("ClassificacaoMacro") or card.get("CnaeClassificacaoMacro"),
+        card.get("OrigemAtendimento") or card.get("NomeOrigemAtendimento"),
+        card.get("porte") or card.get("Porte"),
+        card.get("TipoClienteDesconto") or card.get("TipoCliente"),
+        card.get("situacao_cadastral") or card.get("DescricaoSituacaoCadastral"),
+        len(pendencias or []),
+    )
 
     return render_template(
         "kanban/aprovacao_preco_detalhe.html",
         card=card,
+        empresa=card,
         pendencias=pendencias,
         historico_precos=historico_precos,
         tags_ativas=tags_ativas,
     )
-
-
-
-
-
-
-
-
-
 
 
 
@@ -18907,6 +22666,7 @@ def aprovacao_preco_detalhe(id_card: int):
 @limiter.limit("120/minute")
 def api_aprovacao_preco_aprovar(id_card: int):
     id_usuario = _assert_login()
+    _exigir_admin_aprovacao_desconto()
     id_empresa_proprietaria = _id_empresa_usuario_or_403()
     card_escopo = _obter_card_autorizado(int(id_card))
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
@@ -18914,85 +22674,87 @@ def api_aprovacao_preco_aprovar(id_card: int):
     payload = request.get_json(silent=True) or {}
 
     try:
-        id_negociacao_preco = int(payload.get("id_negociacao_preco") or 0)
+        id_aprova_preco = int(
+            payload.get("id_aprova_preco")
+            or payload.get("id_negociacao_preco")
+            or 0
+        )
     except Exception:
-        id_negociacao_preco = 0
+        id_aprova_preco = 0
 
     preco_aprovado = _valor_decimal(payload.get("preco_aprovado"))
     observacoes_aprovacao = (payload.get("observacoes_aprovacao") or "").strip()
 
-    if id_negociacao_preco <= 0:
-        return jsonify({"ok": False, "msg": "ID da negociação é obrigatório."}), 400
+    if id_aprova_preco <= 0:
+        return jsonify({"ok": False, "msg": "ID da pendência de aprovação é obrigatório."}), 400
 
     if preco_aprovado is None or preco_aprovado <= 0:
         return jsonify({"ok": False, "msg": "Informe um preço aprovado válido."}), 400
 
-    negociacao = _buscar_negociacao_preco_para_aprovacao(
+    pendencia = _buscar_negociacao_preco_para_aprovacao(
         id_card=int(id_card),
-        id_negociacao_preco=int(id_negociacao_preco),
+        id_negociacao_preco=int(id_aprova_preco),
         id_empresa_proprietaria=int(id_empresa_proprietaria),
     )
 
-    if not negociacao:
-        return jsonify({"ok": False, "msg": "Negociação não encontrada."}), 404
+    if not pendencia:
+        return jsonify({"ok": False, "msg": "Pendência de aprovação de preço não encontrada."}), 404
 
-    if negociacao.get("PrecoAprovado") not in (None, "") or negociacao.get("DataAprovacaoPreco") is not None:
-        return jsonify({"ok": False, "msg": "Essa negociação já foi aprovada."}), 409
+    id_usuario_solicitante_aprovacao = int(pendencia.get("IDDimUsuarios") or id_usuario or 0)
 
-    preco_base_desconto = _valor_decimal(
-        negociacao.get("PrecoProposto")
-        if negociacao.get("PrecoProposto") not in (None, "")
-        else negociacao.get("PrecoAtual")
-    )
+    preco_base_desconto = _valor_decimal(pendencia.get("PrecoAtual"))
+
+    if preco_base_desconto is None or preco_base_desconto <= 0:
+        preco_base_desconto = _valor_decimal(pendencia.get("PrecoProposto"))
+
     custo_base = _valor_decimal(
-        negociacao.get("CustoProposto")
-        if negociacao.get("CustoProposto") not in (None, "")
-        else negociacao.get("CustoAtual")
+        pendencia.get("CustoProposto")
+        if pendencia.get("CustoProposto") not in (None, "")
+        else pendencia.get("CustoAtual")
     ) or Decimal("0")
 
     desconto_aprovado_percentual = None
     desconto_valor = None
+
     if preco_base_desconto is not None and preco_base_desconto > 0:
         desconto_valor = preco_base_desconto - preco_aprovado
         desconto_aprovado_percentual = (desconto_valor / preco_base_desconto) * Decimal("100")
 
     margem_valor = preco_aprovado - custo_base
     margem_percentual = None
+
     if preco_aprovado > 0:
         margem_percentual = (margem_valor / preco_aprovado) * Decimal("100")
 
     etapa = "inicio"
+    snapshot_preco_praticado = None
+    resultado_movimento = None
+    id_historico_negociacao_preco = None
+
     try:
-        etapa = "update_negociacao_preco"
-        sql_update_negociacao = text("""
-            UPDATE [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
-            SET
-                IDDimUsuariosAprovacaoPreco = :id_usuario_aprovacao,
-                DataAprovacaoPreco = GETDATE(),
-                PrecoAprovado = :preco_aprovado,
-                DescontoAprovado = :desconto_aprovado,
-                ObservacoesAprovacao = :observacoes_aprovacao,
-                BitAutorizacaoDiretoria = 1
-            WHERE IDFatoKanbanNegociacaoPreco = :id_negociacao_preco
-              AND IDFatoKanbanCard = :id_card
-              AND IDEmpresaProprietaria = :id_empresa_proprietaria;
-        """)
-        db.session.execute(
-            sql_update_negociacao,
-            {
-                "id_usuario_aprovacao": int(id_usuario),
-                "preco_aprovado": preco_aprovado,
-                "desconto_aprovado": desconto_aprovado_percentual,
-                "observacoes_aprovacao": observacoes_aprovacao or None,
-                "id_negociacao_preco": int(id_negociacao_preco),
-                "id_card": int(id_card),
-                "id_empresa_proprietaria": int(id_empresa_proprietaria),
-            },
+        etapa = "mover_aprovacao_preco_para_historico"
+        resultado_movimento = _mover_aprovacao_preco_para_historico(
+            id_aprova_preco=int(id_aprova_preco),
+            id_card=int(id_card),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_usuario_aprovador=int(id_usuario),
+            preco_aprovado=preco_aprovado,
+            desconto_aprovado=desconto_aprovado_percentual,
+            observacoes_aprovacao=observacoes_aprovacao,
         )
+
+        id_historico_negociacao_preco = int(
+            resultado_movimento.get("id_historico_negociacao_preco") or 0
+        ) or None
+
+        if not id_historico_negociacao_preco:
+            raise RuntimeError(
+                "A aprovação foi processada, mas o ID histórico da negociação não foi retornado."
+            )
 
         etapa = "update_operacional"
         _atualizar_item_operacional_aprovado(
-            negociacao=negociacao,
+            negociacao=pendencia,
             preco_aprovado=preco_aprovado,
             desconto_aprovado_percentual=desconto_aprovado_percentual,
             id_usuario=int(id_usuario),
@@ -19003,17 +22765,10 @@ def api_aprovacao_preco_aprovar(id_card: int):
             id_card=int(id_card),
             id_usuario_aprovacao=int(id_usuario),
             id_empresa_proprietaria=int(id_empresa_proprietaria),
-            negociacao=negociacao,
+            negociacao=pendencia,
             preco_aprovado=preco_aprovado,
             desconto_aprovado_percentual=desconto_aprovado_percentual,
             margem_percentual=margem_percentual,
-        )
-
-        current_app.logger.warning(
-            "KANBAN SNAPSHOT PRECO PRATICADO APROVACAO PRECO: id_card=%s id_negociacao=%s resultado=%s",
-            id_card,
-            id_negociacao_preco,
-            snapshot_preco_praticado,
         )
 
         if not snapshot_preco_praticado or not snapshot_preco_praticado.get("ok"):
@@ -19029,22 +22784,30 @@ def api_aprovacao_preco_aprovar(id_card: int):
 
         etapa = "sincronizar_tags"
         estados_atuais = _listar_estado_atual_negociacao_card(int(id_card))
+
         _sincronizar_tag_aprovacao_diretoria_card(
             id_card=int(id_card),
             id_kanban=int(id_kanban),
             estados_atuais=estados_atuais,
-            id_usuario=int(id_usuario),
+            id_usuario=int(id_usuario_solicitante_aprovacao or id_usuario),
             id_empresa_proprietaria=int(id_empresa_proprietaria),
         )
 
-        nome_usuario = getattr(current_user, "NomeUsuario", None) or getattr(current_user, "nome", None) or f"Usuário #{int(id_usuario)}"
+        nome_usuario = (
+            getattr(current_user, "NomeUsuario", None)
+            or getattr(current_user, "nome", None)
+            or f"Usuário #{int(id_usuario)}"
+        )
+
         texto_nota = (
-            f"Desconto aprovado: { _formatar_decimal_br(desconto_aprovado_percentual, 2) if desconto_aprovado_percentual is not None else '0,00' }% | "
-            f"Valor do desconto: R$ { _formatar_decimal_br(desconto_valor, 2) if desconto_valor is not None else '0,00' } | "
-            f"Preço aprovado: R$ { _formatar_decimal_br(preco_aprovado, 2) } | "
-            f"Margem aprovada: { _formatar_decimal_br(margem_percentual, 2) if margem_percentual is not None else '0,00' }% | "
+            f"Desconto aprovado: "
+            f"{_formatar_decimal_br(desconto_aprovado_percentual, 2) if desconto_aprovado_percentual is not None else '0,00'}% | "
+            f"Valor do desconto: R$ {_formatar_decimal_br(desconto_valor, 2) if desconto_valor is not None else '0,00'} | "
+            f"Preço aprovado: R$ {_formatar_decimal_br(preco_aprovado, 2)} | "
+            f"Margem aprovada: {_formatar_decimal_br(margem_percentual, 2) if margem_percentual is not None else '0,00'}% | "
             f"Aprovado por: {nome_usuario}"
         )
+
         if observacoes_aprovacao:
             texto_nota += f" | Observações: {observacoes_aprovacao}"
 
@@ -19052,7 +22815,7 @@ def api_aprovacao_preco_aprovar(id_card: int):
         _inserir_nota_aprovacao_desconto_card(
             id_card=int(id_card),
             id_empresa_proprietaria=int(id_empresa_proprietaria),
-            id_empresa_relacionada=int(negociacao.get("IDEmpresa") or 0) or None,
+            id_empresa_relacionada=int(pendencia.get("IDEmpresa") or 0) or None,
             id_usuario=int(id_usuario),
             texto_nota=texto_nota,
         )
@@ -19066,6 +22829,7 @@ def api_aprovacao_preco_aprovar(id_card: int):
 
         etapa = "registrar_log"
         snapshot_depois = _obter_snapshot_card_log(int(id_card), incluir_inativo=True)
+
         _registrar_log_card(
             id_card=int(id_card),
             id_kanban=int(id_kanban),
@@ -19075,31 +22839,43 @@ def api_aprovacao_preco_aprovar(id_card: int):
             subtipo_evento="APROVACAO_DESCONTO",
             observacao=texto_nota,
             tabela_origem=TABELA_CARD_NEGOCIACAO_PRECO,
-            id_registro_origem=int(id_negociacao_preco),
+            id_registro_origem=int(id_historico_negociacao_preco),
             payload_depois=snapshot_depois,
         )
 
         etapa = "commit"
         db.session.commit()
+
     except Exception as exc:
         db.session.rollback()
         current_app.logger.exception(
-            "Erro ao aprovar preço do card. etapa=%s id_card=%s id_negociacao=%s",
+            "Erro ao aprovar preço do card. etapa=%s id_card=%s id_aprova_preco=%s",
             etapa,
             id_card,
-            id_negociacao_preco,
+            id_aprova_preco,
         )
         return jsonify({"ok": False, "msg": f"Erro ao aprovar preço: {str(exc)}"}), 500
 
-    _invalidar_kanban(id_emp=int(id_empresa_proprietaria), id_kanban=int(id_kanban), id_card=int(id_card))
-    _emitir_evento_kanban(int(id_kanban), "card_atualizado", {"id_card": int(id_card)})
+    _invalidar_kanban(
+        id_emp=int(id_empresa_proprietaria),
+        id_kanban=int(id_kanban),
+        id_card=int(id_card),
+    )
+
+    _emitir_evento_kanban(
+        int(id_kanban),
+        "card_atualizado",
+        {"id_card": int(id_card)},
+    )
 
     return jsonify(
         {
             "ok": True,
             "msg": "Preço aprovado com sucesso.",
             "id_card": int(id_card),
-            "id_negociacao_preco": int(id_negociacao_preco),
+            "id_aprova_preco_removido": int(id_aprova_preco),
+            "id_negociacao_preco": int(id_historico_negociacao_preco),
+            "resultado_movimento": resultado_movimento,
             "tags": _obter_tags_do_card(int(id_card)),
             "nota": texto_nota,
             "snapshot_preco_praticado": snapshot_preco_praticado,
@@ -19107,12 +22883,6 @@ def api_aprovacao_preco_aprovar(id_card: int):
             "historico_card_url": url_for("kanban.historico_card_visualizacao", id_card=int(id_card)),
         }
     )
-
-
-
-
-
-
 
 
 
@@ -21689,6 +25459,24 @@ def api_card_atualizar(id_card: int):
     id_usuario = _assert_login()
     id_emp = _id_empresa_usuario_or_403()
 
+    def _valor_vinculo(vinculo: dict, *chaves: str):
+        """
+        Eu busco o primeiro campo preenchido no dicionário do vínculo.
+
+        Motivo:
+        - alguns fluxos usam chave em português/minúsculo;
+        - outros usam o nome real da coluna;
+        - não posso usar apenas "or", porque valor 0 também pode ser válido em alguns campos.
+        """
+        for chave in chaves:
+            valor = vinculo.get(chave)
+            if valor is None:
+                continue
+            if isinstance(valor, str) and not valor.strip():
+                continue
+            return valor
+        return None
+
     try:
         card_atual = _obter_card_autorizado(id_card)
         if not card_atual:
@@ -21847,6 +25635,7 @@ def api_card_atualizar(id_card: int):
 
         nome_empresa_card_txt = str(nome_empresa_card or "").strip() or None
         id_empresa_nome_base = empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final
+
         if id_empresa_nome_base not in (None, "", 0) and not nome_empresa_card_txt:
             sql_nome_empresa = text(f"""
                 SELECT TOP (1) RazaoSocial
@@ -21876,6 +25665,12 @@ def api_card_atualizar(id_card: int):
             id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
             id_contrato_existente=id_contrato_existente,
             tipo_contrato_card=tipo_contrato_card,
+        )
+
+        id_contrato_existente_final = (
+            int(contexto_tipo_contrato.get("id_contrato_existente"))
+            if contexto_tipo_contrato.get("id_contrato_existente") not in (None, "", 0)
+            else None
         )
 
         contrato_existente = _validar_contrato_empresa(
@@ -22081,18 +25876,27 @@ def api_card_atualizar(id_card: int):
 
         vinculos_preparados: list[dict[str, object]] = []
         sincronizacao_reservas = {"criadas": 0, "canceladas": 0, "mantidas": 0}
+        correcao_estado_preco_card = {
+            "ok": True,
+            "linhas_avaliadas": 0,
+            "linhas_corrigidas": 0,
+            "motivo": "nao_executado_ainda",
+        }
 
         if isinstance(painel_faces_payload, list):
             vinculos_preparados = _preparar_vinculos_painel_faces(
                 painel_faces_payload,
                 int(id_emp),
+                id_card=int(id_card),
+                id_contrato_existente=id_contrato_existente_final,
             )
 
             db.session.execute(
                 text(
                     f"""
                     UPDATE {TABELA_CARD_PAINEL_FACE}
-                       SET Ativo = 0
+                       SET Ativo = 0,
+                           DataAtualizacao = GETDATE()
                      WHERE IDFatoKanbanCard = :id_card
                        AND ISNULL(Ativo, 1) = 1;
                     """
@@ -22161,29 +25965,58 @@ def api_card_atualizar(id_card: int):
                     {
                         "id_card": int(id_card),
                         "ordem": int(ordem_rel),
-                        "id_painel": int(vinculo.get("IDDimPaineisEuromidia") or vinculo.get("id_painel") or 0) or None,
-                        "id_face": int(vinculo.get("IDDimFacesPaineis") or vinculo.get("id_face") or 0) or None,
-                        "cod_ponto": vinculo.get("CodPonto") or vinculo.get("cod_ponto"),
-                        "cod_face": vinculo.get("CodFace") or vinculo.get("cod_face"),
-                        "tipo_painel": vinculo.get("TipoPainel") or vinculo.get("tipo_painel"),
-                        "ano_custo": vinculo.get("AnoCusto") or vinculo.get("ano_custo"),
-                        "custo_tabela": vinculo.get("CustoTabela") or vinculo.get("custo_tabela"),
-                        "id_tabela_preco": vinculo.get("IDDimTabelaPrecosEuromidia") or vinculo.get("id_tabela_preco") or vinculo.get("id_preco"),
-                        "periodo_exibicao": vinculo.get("PeriodoExibicao") or vinculo.get("periodo_exibicao"),
-                        "exibicoes_dia": vinculo.get("ExibicoesDia") or vinculo.get("exibicoes_dia"),
-                        "valor_tabela": vinculo.get("ValorTabela") or vinculo.get("valor_tabela"),
-                        "tabela": vinculo.get("Tabela") or vinculo.get("tabela"),
-                        "politica_trocas": vinculo.get("PoliticaTrocas") or vinculo.get("politica_trocas"),
-                        "valor_troca": vinculo.get("ValorTroca") or vinculo.get("valor_troca"),
-                        "novo_valor": vinculo.get("NovoValor") or vinculo.get("novo_valor"),
-                        "percentual_desconto": vinculo.get("PercentualDesconto") or vinculo.get("percentual_desconto"),
-                        "valor_venda_final": vinculo.get("ValorVendaFinal") or vinculo.get("valor_venda_final"),
-                        "margem_valor": vinculo.get("MargemValor") or vinculo.get("margem_valor"),
-                        "margem_percentual": vinculo.get("MargemPercentual") or vinculo.get("margem_percentual"),
-                        "data_inicio": _para_data_sql_ou_none(vinculo.get("DataInicio") or vinculo.get("data_inicio")),
-                        "data_fim": _para_data_sql_ou_none(vinculo.get("DataFim") or vinculo.get("data_fim")),
+                        "id_painel": (
+                            int(_valor_vinculo(vinculo, "IDDimPaineisEuromidia", "id_painel") or 0)
+                            or None
+                        ),
+                        "id_face": (
+                            int(_valor_vinculo(vinculo, "IDDimFacesPaineis", "id_dim_face", "id_face") or 0)
+                            or None
+                        ),
+                        "cod_ponto": _valor_vinculo(vinculo, "CodPonto", "cod_ponto"),
+                        "cod_face": _valor_vinculo(vinculo, "CodFace", "cod_face"),
+                        "tipo_painel": _valor_vinculo(vinculo, "TipoPainel", "tipo_painel"),
+                        "ano_custo": _valor_vinculo(vinculo, "AnoCusto", "ano_custo"),
+                        "custo_tabela": _valor_vinculo(vinculo, "CustoTabela", "custo_tabela"),
+                        "id_tabela_preco": _valor_vinculo(
+                            vinculo,
+                            "IDDimTabelaPrecosEuromidia",
+                            "id_tabela_preco",
+                            "id_preco",
+                        ),
+                        "periodo_exibicao": _valor_vinculo(vinculo, "PeriodoExibicao", "periodo_exibicao"),
+                        "exibicoes_dia": _valor_vinculo(vinculo, "ExibicoesDia", "exibicoes_dia"),
+                        "valor_tabela": _valor_vinculo(vinculo, "ValorTabela", "valor_tabela"),
+                        "tabela": _valor_vinculo(vinculo, "Tabela", "tabela"),
+                        "politica_trocas": _valor_vinculo(vinculo, "PoliticaTrocas", "politica_trocas"),
+                        "valor_troca": _valor_vinculo(vinculo, "ValorTroca", "valor_troca"),
+                        "novo_valor": _valor_vinculo(vinculo, "NovoValor", "novo_valor"),
+                        "percentual_desconto": _valor_vinculo(
+                            vinculo,
+                            "PercentualDesconto",
+                            "percentual_desconto",
+                        ),
+                        "valor_venda_final": _valor_vinculo(
+                            vinculo,
+                            "ValorVendaFinal",
+                            "valor_venda_final",
+                        ),
+                        "margem_valor": _valor_vinculo(vinculo, "MargemValor", "margem_valor"),
+                        "margem_percentual": _valor_vinculo(vinculo, "MargemPercentual", "margem_percentual"),
+                        "data_inicio": _para_data_sql_ou_none(
+                            _valor_vinculo(vinculo, "DataInicio", "data_inicio")
+                        ),
+                        "data_fim": _para_data_sql_ou_none(
+                            _valor_vinculo(vinculo, "DataFim", "data_fim")
+                        ),
                     },
                 )
+
+        correcao_estado_preco_card = _corrigir_estado_operacional_preco_card(
+            id_card=int(id_card),
+            id_empresa_proprietaria=int(id_emp),
+            id_contrato_existente=id_contrato_existente_final,
+        )
 
         if int(id_fase_atual or 0) == 4 or _card_tem_reservas_ativas_kanban(int(id_card)):
             sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
@@ -22241,6 +26074,20 @@ def api_card_atualizar(id_card: int):
                 or solicitacao_contrato_payload.get("observacoes")
             )
 
+        sql_qtd_negociacao = text(f"""
+            SELECT COUNT(1)
+            FROM {TABELA_CARD_NEGOCIACAO_PRECO}
+            WHERE IDFatoKanbanCard = :id_card;
+        """)
+
+        qtd_negociacao_antes = int(
+            db.session.execute(
+                sql_qtd_negociacao,
+                {"id_card": int(id_card)},
+            ).scalar()
+            or 0
+        )
+
         _registrar_negociacao_preco_card(
             id_card=int(id_card),
             id_kanban=int(id_kanban),
@@ -22251,13 +26098,62 @@ def api_card_atualizar(id_card: int):
             observacoes_proposta=observacoes_proposta_negociacao,
         )
 
+        qtd_negociacao_depois = int(
+            db.session.execute(
+                sql_qtd_negociacao,
+                {"id_card": int(id_card)},
+            ).scalar()
+            or 0
+        )
+
+        linhas_historico_negociacao_inseridas = max(
+            qtd_negociacao_depois - qtd_negociacao_antes,
+            0,
+        )
+
+        resultado_historico_negociacao_preco = {
+            "ok": True,
+            "qtd_antes": int(qtd_negociacao_antes),
+            "qtd_depois": int(qtd_negociacao_depois),
+            "linhas_inseridas": int(linhas_historico_negociacao_inseridas),
+            "motivo": "historico_negociacao_preco_sincronizado_por_funcao_unica_sem_insert_duplicado",
+        }
+
+        current_app.logger.warning(
+            "NEGOCIACAO_PRECO_HISTORICO | id_card=%s | linhas_inseridas=%s | qtd_antes=%s | qtd_depois=%s",
+            int(id_card),
+            int(linhas_historico_negociacao_inseridas),
+            int(qtd_negociacao_antes),
+            int(qtd_negociacao_depois),
+        )
+
         estados_atuais_aprovacao_desconto = _listar_estado_atual_negociacao_card(int(id_card))
+
+        id_usuario_solicitante_aprovacao = _resolver_id_usuario_solicitante_desconto_card(
+            id_card=int(id_card),
+            id_usuario_fallback=int(id_usuario),
+        )
+
+        if not id_usuario_solicitante_aprovacao:
+            id_usuario_solicitante_aprovacao = int(id_usuario)
+
+        id_empresa_proprietaria_aprovacao = _resolver_id_empresa_proprietaria_movimento(
+            id_kanban=int(id_kanban),
+            id_empresa_padrao=int(id_emp),
+        )
+
         _sincronizar_tag_aprovacao_diretoria_card(
             id_card=int(id_card),
             id_kanban=int(id_kanban),
             estados_atuais=estados_atuais_aprovacao_desconto,
-            id_usuario=int(id_usuario),
+            id_usuario=int(id_usuario_solicitante_aprovacao),
+            id_empresa_proprietaria=int(id_empresa_proprietaria_aprovacao),
+        )
+
+        resultado_aprovacao_preco = _materializar_negociacao_preco_pendente_card(
+            id_card=int(id_card),
             id_empresa_proprietaria=int(id_emp),
+            id_usuario=int(id_usuario_solicitante_aprovacao),
         )
 
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
@@ -22276,6 +26172,9 @@ def api_card_atualizar(id_card: int):
             f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_dim_cnaes={id_dim_cnaes_final_card if id_dim_cnaes_final_card not in (None, '', 0) else 'NULL'}"
+            f" | historico_negociacao_preco_linhas={resultado_historico_negociacao_preco.get('linhas_inseridas')}"
+            f" | correcao_estado_preco_linhas={correcao_estado_preco_card.get('linhas_corrigidas')}"
+            f" | aprovacao_preco_materializado={resultado_aprovacao_preco.get('materializado')}"
         )
 
         _registrar_log_card(
@@ -22309,10 +26208,14 @@ def api_card_atualizar(id_card: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "historico_negociacao_preco": resultado_historico_negociacao_preco,
+                "correcao_estado_preco_card": correcao_estado_preco_card,
+                "aprovacao_preco": resultado_aprovacao_preco,
             },
         )
 
@@ -22321,10 +26224,10 @@ def api_card_atualizar(id_card: int):
                 "ok": True,
                 "msg": (
                     f"Card atualizado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} reserva(s) criada(s)."
-                    if int(sincronizacao_reservas.get('criadas') or 0) > 0
+                    if int(sincronizacao_reservas.get("criadas") or 0) > 0
                     else "Card atualizado com sucesso."
                 ),
-                "reservas_criadas": int(sincronizacao_reservas.get('criadas') or 0),
+                "reservas_criadas": int(sincronizacao_reservas.get("criadas") or 0),
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
@@ -22332,10 +26235,14 @@ def api_card_atualizar(id_card: int):
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,
+                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "historico_negociacao_preco": resultado_historico_negociacao_preco,
+                "correcao_estado_preco_card": correcao_estado_preco_card,
+                "aprovacao_preco": resultado_aprovacao_preco,
             }
         )
 

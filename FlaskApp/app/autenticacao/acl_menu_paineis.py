@@ -5,13 +5,41 @@ from flask import abort
 from flask_login import current_user
 
 
+"""Controle de acesso do menu Painéis.
+
+Regra principal:
+- ADMIN_TUDO vê tudo.
+- Perfil USUARIO é restrito e só vê itens liberados por permissão.
+- Atendimento/Kanban Atendimento aparece quando o usuário tem KANBAN_VER ou KANBAN_EDITAR.
+"""
 
 
-ITENS_MENU_PAINEIS_USUARIO = {
+ITENS_MENU_PAINEIS_USUARIO_LEGADO = {
     "disponibilidades",
     "empresas",
     "lista_ocupacao",
     "contratos",
+}
+
+
+MAPA_ITEM_MENU_PERMISSOES = {
+    "atendimento": {"KANBAN_VER", "KANBAN_EDITAR"},
+    "kanban": {"KANBAN_VER", "KANBAN_EDITAR"},
+    "kanban_atendimento": {"KANBAN_VER", "KANBAN_EDITAR"},
+
+    "disponibilidades": {"PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+    "paineis": {"PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+    "empresas": {"CLIENTES_LISTA_VER", "ADMIN_TUDO"},
+    "clientes": {"CLIENTES_LISTA_VER", "ADMIN_TUDO"},
+    "lista_ocupacao": {"OCUPACAO_LISTA_VER", "ADMIN_TUDO"},
+    "contratos": {"CONTRATOS_LISTA_VER", "CONTRATOS_VER", "ADMIN_TUDO"},
+
+    "performance_paineis": {"ADMIN_TUDO"},
+    "movimentacao_financeira": {"ADMIN_TUDO"},
+    "inadimplentes": {"ADMIN_TUDO"},
+    "auvo_produtos": {"ADMIN_TUDO"},
+    "tickets_auvo": {"ADMIN_TUDO"},
+    "criar_os_auvo": {"ADMIN_TUDO"},
 }
 
 
@@ -48,6 +76,7 @@ def _perfil_usuario_logado() -> str:
             getattr(perfil_rel, "NomePerfil", None),
             getattr(perfil_rel, "Descricao", None),
             getattr(perfil_rel, "DescricaoPerfil", None),
+            getattr(perfil_rel, "NomePerfilUsuario", None),
         ])
 
     for valor in candidatos:
@@ -58,6 +87,38 @@ def _perfil_usuario_logado() -> str:
     return ""
 
 
+def _usuario_tem_permissao(codigo_permissao: str) -> bool:
+    """_usuario_tem_permissao
+    - Eu consulto o método has_permission do usuário logado.
+    - Se o método não existir ou falhar, retorno False para não liberar indevidamente.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    codigo = str(codigo_permissao or "").strip().upper()
+    if not codigo:
+        return False
+
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        if not metodo:
+            return False
+        return bool(metodo(codigo))
+    except Exception:
+        return False
+
+
+def _usuario_tem_alguma_permissao(codigos_permissao) -> bool:
+    """_usuario_tem_alguma_permissao
+    - Eu libero quando pelo menos uma permissão da lista existir.
+    - Exemplo: KANBAN_EDITAR também deve permitir visualizar o menu Atendimento.
+    """
+    for codigo in codigos_permissao or []:
+        if _usuario_tem_permissao(codigo):
+            return True
+    return False
+
+
 def usuario_eh_perfil_restrito_menu_paineis() -> bool:
     """usuario_eh_perfil_restrito_menu_paineis
     - Eu digo se o usuário atual é do perfil 'Usuário'.
@@ -66,39 +127,41 @@ def usuario_eh_perfil_restrito_menu_paineis() -> bool:
     if not getattr(current_user, "is_authenticated", False):
         return False
 
-    try:
-        if getattr(current_user, "has_permission", None):
-            if current_user.has_permission("ADMIN_TUDO"):
-                return False
-    except Exception:
-        pass
+    if _usuario_tem_permissao("ADMIN_TUDO"):
+        return False
 
     perfil = _perfil_usuario_logado()
     return perfil == "usuario"
 
 
 def pode_acessar_menu_paineis(item_menu: str) -> bool:
-   
+    """pode_acessar_menu_paineis
+    - Eu controlo a visibilidade dos itens do menu Painéis.
+    - Para 'atendimento', exijo KANBAN_VER ou KANBAN_EDITAR.
+    - Para perfil USUARIO, não basta estar no perfil: precisa passar pela permissão do item.
+    """
     if not getattr(current_user, "is_authenticated", False):
         return False
 
     chave = _normalizar_texto_acl(item_menu)
 
-    try:
-        if getattr(current_user, "has_permission", None):
-            if current_user.has_permission("ADMIN_TUDO"):
-                return True
-    except Exception:
-        pass
+    if _usuario_tem_permissao("ADMIN_TUDO"):
+        return True
+
+    permissoes_exigidas = MAPA_ITEM_MENU_PERMISSOES.get(chave)
+    if permissoes_exigidas:
+        return _usuario_tem_alguma_permissao(permissoes_exigidas)
 
     if usuario_eh_perfil_restrito_menu_paineis():
-        return chave in ITENS_MENU_PAINEIS_USUARIO
+        return chave in ITENS_MENU_PAINEIS_USUARIO_LEGADO
 
     return True
 
 
 def requer_item_menu_paineis(item_menu: str):
-    
+    """requer_item_menu_paineis
+    - Eu bloqueio endpoint quando o usuário não deveria acessar o item do menu.
+    """
     def decorator(view_func):
         @wraps(view_func)
         def wrapper(*args, **kwargs):
@@ -111,6 +174,3 @@ def requer_item_menu_paineis(item_menu: str):
             return view_func(*args, **kwargs)
         return wrapper
     return decorator
-
-
-

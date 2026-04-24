@@ -352,6 +352,7 @@ class FatoControleContratosEuromidia(db.Model):
     TotalPercentualComissaoCoordenacao = db.Column(db.Numeric(5, 2), nullable=True)
     IDCategoriaMarca = db.Column(db.Integer, nullable=True)
     IDDimStatusContratos = db.Column(db.Integer, nullable=True)
+    BitAtivo = db.Column(db.Boolean)
 
 
     itens = db.relationship(
@@ -700,6 +701,7 @@ class DimCnaes(db.Model):
     ScoreSetor = db.Column(db.Numeric(5, 2), nullable=True)
     ClassificacaoMacro = db.Column(db.Unicode(100), nullable=True)
     DataAtualizacao = db.Column(db.DateTime, nullable=True)
+    Hex = db.Column(db.CHAR(7), nullable=True)
 
     def __repr__(self) -> str:
         return (
