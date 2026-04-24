@@ -16785,27 +16785,28 @@ def _obter_base_url_publica_checkin() -> str:
 
 
 def _localizar_arquivo_imagem(pasta: Path) -> Path:
-    extensoes = ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG")
+    """Eu localizo a primeira imagem válida dentro de uma pasta.
+
+    Aceito JPG, JPEG, PNG e WEBP porque o upload já permite WEBP e alguns fundos
+    podem estar nesse formato.
+    """
+    pasta = Path(pasta)
+
+    if not pasta.exists() or not pasta.is_dir():
+        raise FileNotFoundError(f"Pasta de imagem não encontrada: {pasta}")
+
+    extensoes = ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.JPG", "*.JPEG", "*.PNG", "*.WEBP")
 
     arquivos = []
     for ext in extensoes:
         arquivos.extend(pasta.glob(ext))
 
+    arquivos = [arq for arq in arquivos if arq.is_file()]
+
     if not arquivos:
         raise FileNotFoundError(f"Nenhuma imagem encontrada em: {pasta}")
 
-    arquivos = [arq for arq in arquivos if arq.is_file()]
-    if not arquivos:
-        raise FileNotFoundError(f"Nenhum arquivo de imagem válido encontrado em: {pasta}")
-
-    return sorted(arquivos)[0]
-
-
-
-
-
-
-
+    return sorted(arquivos, key=lambda arq: arq.name.lower())[0]
 def _normalizar_texto_checkin(valor) -> str:
     try:
         return str(valor or "").strip()
@@ -16825,7 +16826,15 @@ def _garantir_pasta(caminho: Path) -> None:
 
 
 def _obter_pasta_base_checkin() -> Path:
-    """Eu resolvo a pasta raiz do checkin usando config quando existir e um padrão seguro quando não existir."""
+    """Eu resolvo a pasta raiz real dos checkins.
+
+    Regra correta do projeto:
+    /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/pontos
+
+    Também trato o caso em que alguma configuração venha apontando para
+    /chekin em vez de /chekin/pontos, porque isso muda completamente o caminho
+    final e faz o sistema procurar /chekin/245 em vez de /chekin/pontos/245.
+    """
     candidatos = [
         current_app.config.get("PASTA_BASE_CHECKIN"),
         current_app.config.get("CHECKIN_PASTA_BASE"),
@@ -16835,12 +16844,18 @@ def _obter_pasta_base_checkin() -> Path:
 
     for candidato in candidatos:
         texto = str(candidato or "").strip()
-        if texto:
-            return Path(texto)
+        if not texto:
+            continue
+
+        caminho = Path(texto).expanduser()
+        nome_pasta = caminho.name.lower()
+
+        if nome_pasta != "pontos" and (nome_pasta in {"chekin", "checkin"} or (caminho / "pontos").exists()):
+            caminho = caminho / "pontos"
+
+        return caminho
 
     raise RuntimeError("Não foi possível resolver a pasta base do checkin.")
-
-
 def _normalizar_extensao_arquivo(nome_arquivo: str) -> str:
     """Eu extraio a extensão do arquivo e devolvo sempre em minúsculo."""
     nome_arquivo = str(nome_arquivo or "").strip()
@@ -16979,20 +16994,37 @@ def _validar_e_classificar_arquivo_upload_checkin(
 
 
 def _localizar_fundo_checkin(cod_ponto: str, cod_face: str) -> Path:
-    """Eu localizo o fundo oficial da face sempre dentro da pasta /fundo da própria face."""
-    pasta_base = _obter_pasta_base_checkin()
-    pasta_face = pasta_base / str(cod_ponto) / str(cod_face)
+    """Eu localizo o fundo oficial do ponto/face.
 
-    if not pasta_face.exists():
+    Regra principal do projeto: o fundo fica em:
+    pontos/CodPonto/fundo
+
+    Também mantenho fallback para pontos/CodPonto/CodFace/fundo para não quebrar
+    cadastros antigos, mas a prioridade agora é a pasta fundo dentro do CodPonto.
+    """
+    pasta_base = _obter_pasta_base_checkin()
+    cod_ponto_txt = _normalizar_segmento_pasta_checkin(cod_ponto)
+    cod_face_txt = _normalizar_segmento_pasta_checkin(cod_face, forcar_maiusculo=True)
+
+    pasta_ponto = _resolver_pasta_filha_checkin(pasta_base, cod_ponto_txt)
+    if not pasta_ponto.exists() or not pasta_ponto.is_dir():
+        raise FileNotFoundError(f"Pasta do ponto não encontrada: {pasta_ponto}")
+
+    pasta_face = _resolver_pasta_filha_checkin(pasta_ponto, cod_face_txt)
+    if not pasta_face.exists() or not pasta_face.is_dir():
         raise FileNotFoundError(f"Pasta da face não encontrada: {pasta_face}")
 
-    pasta_fundo = pasta_face / "fundo"
-    if not pasta_fundo.exists() or not pasta_fundo.is_dir():
-        raise FileNotFoundError(f"Pasta do fundo não encontrada: {pasta_fundo}")
+    candidatos_pasta_fundo = [
+        _resolver_pasta_filha_checkin(pasta_ponto, "fundo"),
+        _resolver_pasta_filha_checkin(pasta_face, "fundo"),
+    ]
+
+    pasta_fundo = next((p for p in candidatos_pasta_fundo if p.exists() and p.is_dir()), None)
+    if pasta_fundo is None:
+        caminhos_testados = " | ".join(str(p) for p in candidatos_pasta_fundo)
+        raise FileNotFoundError(f"Pasta do fundo não encontrada. Caminhos testados: {caminhos_testados}")
 
     return _localizar_arquivo_imagem(pasta_fundo)
-
-
 def _normalizar_segmento_pasta_checkin(valor, *, forcar_maiusculo: bool = False, valor_padrao: str = "0") -> str:
     """Eu normalizo cada segmento usado na pasta final do checkin para evitar variações e subpastas indevidas."""
     texto = _normalizar_texto_checkin(valor)
@@ -17012,6 +17044,38 @@ def _normalizar_segmento_pasta_checkin(valor, *, forcar_maiusculo: bool = False,
 
 
 
+def _resolver_pasta_filha_checkin(pasta_pai: Path, nome_pasta: str, *, criar: bool = False) -> Path:
+    """Eu resolvo uma subpasta direta sem criar duplicidade por diferença de maiúsculas/minúsculas.
+
+    Exemplo: se o usuário manda 245AD, mas a pasta física estiver 245Ad, eu reutilizo
+    a pasta existente em vez de criar outra. Em Linux isso importa porque o sistema de
+    arquivos diferencia maiúsculas de minúsculas.
+    """
+    pasta_pai = Path(pasta_pai)
+    nome_limpo = str(nome_pasta or "").strip().replace("..", "").replace("/", "").replace("\\", "")
+
+    if not nome_limpo:
+        nome_limpo = "0"
+
+    caminho_direto = pasta_pai / nome_limpo
+
+    if caminho_direto.exists():
+        return caminho_direto
+
+    if pasta_pai.exists() and pasta_pai.is_dir():
+        nome_casefold = nome_limpo.casefold()
+        try:
+            for filho in pasta_pai.iterdir():
+                if filho.is_dir() and filho.name.casefold() == nome_casefold:
+                    return filho
+        except Exception:
+            pass
+
+    if criar:
+        _garantir_pasta(caminho_direto)
+
+    return caminho_direto
+
 def _montar_pasta_destino_final_checkin(
     *,
     cod_ponto: str | int,
@@ -17019,24 +17083,24 @@ def _montar_pasta_destino_final_checkin(
     id_fato_controle_contratos: int,
     id_fato_contrato_destinatario_externo: int,
 ) -> Path:
-    """Eu monto sempre a mesma pasta final do checkin: pontos/CodPonto/CodFace/Contrato/Destinatario."""
+    """Eu monto a pasta final do upload dentro de pontos/CodPonto/CodFace/Contrato/Destinatario."""
     pasta_base = _obter_pasta_base_checkin()
     cod_ponto_txt = _normalizar_segmento_pasta_checkin(cod_ponto)
     cod_face_txt = _normalizar_segmento_pasta_checkin(cod_face, forcar_maiusculo=True)
     id_contrato_txt = _normalizar_segmento_pasta_checkin(int(id_fato_controle_contratos))
     id_destinatario_txt = _normalizar_segmento_pasta_checkin(int(id_fato_contrato_destinatario_externo or 0))
 
+    pasta_ponto = _resolver_pasta_filha_checkin(pasta_base, cod_ponto_txt, criar=True)
+    pasta_face = _resolver_pasta_filha_checkin(pasta_ponto, cod_face_txt, criar=True)
+
     pasta_destino = (
-        pasta_base
-        / cod_ponto_txt
-        / cod_face_txt
+        pasta_face
         / id_contrato_txt
         / id_destinatario_txt
     )
 
     _garantir_pasta(pasta_destino)
     return pasta_destino
-
 def _salvar_upload_original_checkin(
     *,
     pasta_destino: Path,
@@ -18312,41 +18376,44 @@ def _sincronizar_tag_checkin_confirmado_com_card(checkin: DimCheckinHistorico) -
 
 
 
-def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path, Path]:
-    """Eu resolvo os caminhos do painel e do fundo aceitando os dois padrões de pasta."""
+def _buscar_paths_mockup(cod_ponto: int, cod_face: str) -> tuple[Path, Path | None, Path]:
+    """Eu resolvo os caminhos necessários para gerar o mockup do checkin.
 
+    Estrutura correta esperada:
+    pontos/CodPonto/CodFace
+    pontos/CodPonto/fundo
+
+    O ponto importante: eu NÃO exijo mais uma imagem dentro de pontos/CodPonto/CodFace,
+    porque o mockup usa a imagem importada pelo usuário + a imagem de fundo. Exigir uma
+    imagem solta dentro da pasta da face fazia o upload falhar sem necessidade.
+    """
     pasta_raiz = _obter_pasta_base_checkin()
-    pasta_ponto = pasta_raiz / str(cod_ponto)
-    pasta_face = pasta_ponto / str(cod_face)
+    cod_ponto_txt = _normalizar_segmento_pasta_checkin(cod_ponto)
+    cod_face_txt = _normalizar_segmento_pasta_checkin(cod_face, forcar_maiusculo=True)
 
-    if not pasta_ponto.exists():
+    pasta_ponto = _resolver_pasta_filha_checkin(pasta_raiz, cod_ponto_txt)
+    pasta_face = _resolver_pasta_filha_checkin(pasta_ponto, cod_face_txt)
+
+    if not pasta_ponto.exists() or not pasta_ponto.is_dir():
         raise FileNotFoundError(f"Pasta do ponto não encontrada: {pasta_ponto}")
 
-    if not pasta_face.exists():
+    if not pasta_face.exists() or not pasta_face.is_dir():
         raise FileNotFoundError(f"Pasta da face não encontrada: {pasta_face}")
 
     candidatos_pasta_fundo = [
-        pasta_face / "fundo",
-        pasta_ponto / "fundo",
+        _resolver_pasta_filha_checkin(pasta_ponto, "fundo"),
+        _resolver_pasta_filha_checkin(pasta_face, "fundo"),
     ]
 
-    pasta_fundo = next((p for p in candidatos_pasta_fundo if p.exists()), None)
+    pasta_fundo = next((p for p in candidatos_pasta_fundo if p.exists() and p.is_dir()), None)
 
     if pasta_fundo is None:
         caminhos_testados = " | ".join(str(p) for p in candidatos_pasta_fundo)
         raise FileNotFoundError(f"Pasta do fundo não encontrada. Caminhos testados: {caminhos_testados}")
 
-    caminho_imagem_face = _localizar_arquivo_imagem(pasta_face)
     caminho_fundo = _localizar_arquivo_imagem(pasta_fundo)
 
-    return pasta_face, caminho_imagem_face, caminho_fundo
-
-
-
-
-
-
-
+    return pasta_face, None, caminho_fundo
 def _gerar_mockup_checkin(
     caminho_fundo: Path,
     caminho_imagem_upload: Path,

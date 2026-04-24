@@ -72,6 +72,7 @@
   let versaoConcorrenciaCardAberto = "";
   let cardAbertoConflitoExterno = false;
   let estadoInicialCardAberto = null;
+  let fluxoContratoPersistidoCardAberto = null;
   let faseEditandoId = null;
 
   let kanbanCfg = {};
@@ -99,6 +100,8 @@
   const contratosPorEmpresaCache = new Map();
   const pontosPorContratoCache = new Map();
   const facesPorContratoPontoCache = new Map();
+  let contratosCardCatalogo = [];
+  let contratosResultadoComboboxAtual = [];
   let empresaCadastroConsultaTimer = null;
   let empresaCadastroConsultaController = null;
   let empresaCadastroUltimoCnpjConsultado = "";
@@ -203,6 +206,10 @@
   const inputTelefoneCard = document.getElementById("inputTelefoneCard");
   const inputEmailCard = document.getElementById("inputEmailCard");
   const btnAbrirCadastroEmpresa = document.getElementById("btnAbrirCadastroEmpresa");
+  const comboContratoCard = document.getElementById("comboContratoCard");
+  const inputContratoCardBusca = document.getElementById("inputContratoCardBusca");
+  const btnToggleContratoCard = document.getElementById("btnToggleContratoCard");
+  const listaContratoCardBusca = document.getElementById("listaContratoCardBusca");
   const selectContratoCard = document.getElementById("selectContratoCard");
   const selectModoContratoCard = document.getElementById("selectModoContratoCard");
   const selectCodPontoContratoCard = document.getElementById("selectCodPontoContratoCard");
@@ -3531,14 +3538,15 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
   function atualizarVisibilidadeDadosNovoContrato(){
     if (!wrapDadosNovoContrato) return;
 
-    const fluxo = obterFluxoContratoAtual();
-    const mostrar = !!(fluxo && fluxo.usar_novo_contrato);
-
-    wrapDadosNovoContrato.hidden = !mostrar;
-
-    if (!mostrar) {
-      return;
-    }
+    /*
+     * Marca, telefone e email não são dados exclusivos de "Novo Contrato".
+     * Eles são dados comerciais do atendimento/card e precisam continuar visíveis
+     * no fluxo de Aditivo. Antes, ao selecionar Aditivo, o bloco era ocultado e,
+     * no salvamento seguinte, esses campos podiam ser enviados como nulos.
+     */
+    wrapDadosNovoContrato.hidden = false;
+    wrapDadosNovoContrato.style.display = "";
+    wrapDadosNovoContrato.setAttribute("aria-hidden", "false");
 
     sincronizarBuscaAgenciaComSelect();
   }
@@ -4154,6 +4162,11 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     limparMensagemFluxoContrato();
 
     limparSelectComPlaceholder(selectContratoCard, "— Selecione um contrato —");
+    contratosCardCatalogo = [];
+    contratosResultadoComboboxAtual = [];
+    if (inputContratoCardBusca) inputContratoCardBusca.value = "";
+    fecharListaContratosCombobox();
+
     limparSelectComPlaceholder(selectModoContratoCard, "— Selecione o tipo —");
     limparSelectComPlaceholder(selectCodPontoContratoCard, "— Selecione o CodPonto —");
     limparSelectComPlaceholder(selectCodFaceContratoCard, "— Selecione o CodFace —");
@@ -4248,12 +4261,18 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     if (cidade || uf) partes.push(`${cidade}${cidade && uf ? "/" : ""}${uf}`);
     if (Number.isFinite(valorMensal)) partes.push(formatarMoedaBR(valorMensal));
 
+    const dataInicioPrevisto = safeStr(item.DataInicioPrevisto ?? item.data_inicio_previsto ?? item.DataInicioContrato ?? "").trim() || null;
+    const dataTerminoPrevisto = safeStr(item.DataTerminoPrevisto ?? item.data_termino_previsto ?? item.DataTerminoContrato ?? "").trim() || null;
+
     return {
       cod_ponto: codPonto,
       tipo,
       cidade,
       uf,
       valor_mensal: Number.isFinite(valorMensal) ? valorMensal : null,
+      data_inicio_previsto: dataInicioPrevisto,
+      data_termino_previsto: dataTerminoPrevisto,
+      quantidade_faces: idNum(item.QuantidadeFaces ?? item.quantidade_faces ?? 0) || null,
       label: partes.join(" • ")
     };
   }
@@ -4287,6 +4306,15 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     const dataTerminoPrevisto = safeStr(item.DataTerminoPrevisto ?? item.data_termino_previsto ?? "").trim() || null;
     const idPainelEuromidia = idNum(item.IDPainelEuromidia ?? item.id_painel ?? 0) || null;
     const idDimFacesPaineis = idNum(item.IDDimFacesPaineis ?? item.id_dim_faces_paineis ?? 0) || null;
+    const idItemContrato = idNum(item.IDFatoControleContratosItensEuromidia ?? item.id_item_contrato ?? item.id_contrato_item ?? 0) || null;
+    const cidadeExibicao = safeStr(item.CidadeExibicao ?? item.cidade_exibicao ?? item.Cidade ?? "").trim() || null;
+    const faturamentoBrutoMensal = converterValorContratoParaNumero(item.FaturamentoBrutoMensal ?? item.faturamento_bruto_mensal ?? null);
+    const faturamentoLiquidoFinalMensal = converterValorContratoParaNumero(item.FaturamentoLiquidoFinalMensal ?? item.faturamento_liquido_final_mensal ?? null);
+    const totalBrutoContrato = converterValorContratoParaNumero(item.TotalBrutoContrato ?? item.total_bruto_contrato ?? null);
+    const percentualPermuta = converterValorContratoParaNumero(item.PercentualPermuta ?? item.percentual_permuta ?? null);
+    const valorPermuta = converterValorContratoParaNumero(item.ValorPermuta ?? item.valor_permuta ?? null);
+    const numeroParcelas = safeStr(item.NumeroParcelas ?? item.numero_parcelas ?? "").trim() || null;
+    const dataInicioVencimento = safeStr(item.DataInicioVencimento ?? item.data_inicio_vencimento ?? "").trim() || null;
     const labelServidor = safeStr(item.label ?? item.Label ?? "").trim();
 
     const partes = [codFace];
@@ -4307,6 +4335,15 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       data_termino_previsto: dataTerminoPrevisto,
       id_painel: idPainelEuromidia,
       id_dim_faces_paineis: idDimFacesPaineis,
+      id_item_contrato: idItemContrato,
+      cidade_exibicao: cidadeExibicao,
+      faturamento_bruto_mensal: Number.isFinite(faturamentoBrutoMensal) ? faturamentoBrutoMensal : null,
+      faturamento_liquido_final_mensal: Number.isFinite(faturamentoLiquidoFinalMensal) ? faturamentoLiquidoFinalMensal : null,
+      total_bruto_contrato: Number.isFinite(totalBrutoContrato) ? totalBrutoContrato : null,
+      percentual_permuta: Number.isFinite(percentualPermuta) ? percentualPermuta : null,
+      valor_permuta: Number.isFinite(valorPermuta) ? valorPermuta : null,
+      numero_parcelas: numeroParcelas,
+      data_inicio_vencimento: dataInicioVencimento,
       label: labelServidor || labelMontado || codFace
     };
   }
@@ -4380,18 +4417,240 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     return faces;
   }
 
+  function normalizarContratoComboboxItem(item) {
+    if (!item || typeof item !== "object") return null;
+
+    const idContrato = safeStr(item.id_contrato ?? item.IDFatoControleContratosEuromidia ?? item.value ?? "").trim();
+    const label = safeStr(item.label ?? item.texto ?? item.text ?? "").trim();
+
+    if (!idContrato || !label) return null;
+
+    return {
+      id_contrato: idContrato,
+      label,
+      numero_contrato: safeStr(item.numero_contrato ?? item.NumeroContrato ?? "").trim(),
+      razao_social: safeStr(item.razao_social ?? item.RazaoSocial ?? "").trim(),
+      cnpj: safeStr(item.cnpj ?? item.CNPJ ?? "").trim(),
+      referencia: safeStr(item.referencia ?? item.Referencia ?? "").trim(),
+      eh_novo_contrato: idContrato === VALOR_OPCAO_NOVO_CONTRATO
+    };
+  }
+
+  function textoContratoCombobox(item) {
+    const label = safeStr(item?.label || "").trim();
+    if (label) return label;
+
+    const idContrato = safeStr(item?.id_contrato || "").trim();
+    if (idContrato === VALOR_OPCAO_NOVO_CONTRATO) return "Novo Contrato";
+    return idContrato ? `Contrato #${idContrato}` : "";
+  }
+
+  function obterTextoContratoSelecionado(valor) {
+    const valorComparacao = safeStr(valor || "").trim();
+    if (!valorComparacao) return "";
+
+    if (valorComparacao === VALOR_OPCAO_NOVO_CONTRATO) {
+      return "Novo Contrato";
+    }
+
+    const itemCatalogo = contratosCardCatalogo.find((item) => {
+      return safeStr(item?.id_contrato || "").trim() === valorComparacao;
+    });
+
+    if (itemCatalogo) {
+      return textoContratoCombobox(itemCatalogo);
+    }
+
+    const opcaoSelect = Array.from(selectContratoCard?.options || []).find((opcao) => {
+      return safeStr(opcao?.value || "").trim() === valorComparacao;
+    });
+
+    return safeStr(opcaoSelect?.textContent || "").trim();
+  }
+
+  function filtrarContratosCombobox(texto) {
+    const termoBruto = safeStr(texto || "").trim();
+    const termoNormalizado = normalizarTexto(termoBruto);
+    const termoDigitos = normalizaCnpj(termoBruto);
+
+    if (!termoNormalizado && !termoDigitos) {
+      return contratosCardCatalogo.slice(0, 60);
+    }
+
+    return contratosCardCatalogo.filter((item) => {
+      const textoOpcao = textoContratoCombobox(item);
+      const textoBusca = [
+        textoOpcao,
+        item?.numero_contrato,
+        item?.razao_social,
+        item?.cnpj,
+        item?.referencia,
+        item?.id_contrato
+      ].map((parte) => safeStr(parte || "")).join(" ");
+
+      const bateTexto = termoNormalizado
+        ? normalizarTexto(textoBusca).includes(termoNormalizado)
+        : false;
+
+      const bateDigitos = termoDigitos
+        ? normalizaCnpj(textoBusca).includes(termoDigitos)
+        : false;
+
+      return bateTexto || bateDigitos;
+    }).slice(0, 60);
+  }
+
+  function abrirListaContratosCombobox() {
+    if (wrapSelectContratoCard?.hidden) return;
+    if (!comboContratoCard || !listaContratoCardBusca) return;
+    comboContratoCard.classList.add("is-open");
+    listaContratoCardBusca.hidden = false;
+    renderizarListaContratosCombobox(inputContratoCardBusca?.value || "");
+  }
+
+  function fecharListaContratosCombobox() {
+    if (!comboContratoCard || !listaContratoCardBusca) return;
+    comboContratoCard.classList.remove("is-open");
+    listaContratoCardBusca.hidden = true;
+  }
+
+  function sincronizarBuscaContratoComSelect() {
+    if (!inputContratoCardBusca || !selectContratoCard) return;
+    inputContratoCardBusca.value = obterTextoContratoSelecionado(selectContratoCard.value || "");
+  }
+
+  function renderizarListaContratosCombobox(texto) {
+    if (!listaContratoCardBusca) return;
+
+    const filtradas = filtrarContratosCombobox(texto);
+    contratosResultadoComboboxAtual = filtradas.slice();
+
+    const valorSelecionado = safeStr(selectContratoCard?.value || "").trim();
+    listaContratoCardBusca.innerHTML = "";
+
+    if (!filtradas.length) {
+      listaContratoCardBusca.appendChild(
+        el("div", { class: "kb-combobox-vazio" }, ["Nenhum contrato encontrado."])
+      );
+      return;
+    }
+
+    filtradas.forEach((item) => {
+      const idContrato = safeStr(item?.id_contrato || "").trim();
+      if (!idContrato) return;
+
+      const textoOpcao = textoContratoCombobox(item);
+      const partes = textoOpcao.split("|").map((parte) => safeStr(parte).trim()).filter(Boolean);
+      const titulo = partes[0] || textoOpcao || "Contrato";
+      const detalhe = partes.slice(1).join(" | ") || (item?.eh_novo_contrato ? "Criar uma nova solicitação de contrato" : `ID ${idContrato}`);
+
+      const botao = el("button", { type: "button", class: `kb-combobox-opcao${idContrato === valorSelecionado ? " is-selected" : ""}` }, [
+        el("strong", {}, [titulo]),
+        el("span", {}, [detalhe])
+      ]);
+
+      botao.addEventListener("mousedown", (evento) => {
+        evento.preventDefault();
+        selecionarContratoCombobox(idContrato, true);
+      });
+
+      listaContratoCardBusca.appendChild(botao);
+    });
+  }
+
+  function localizarContratoPorTextoDigitado(texto) {
+    const textoDigitado = safeStr(texto || "").trim();
+    const textoNormalizado = normalizarTexto(textoDigitado);
+    const digitos = normalizaCnpj(textoDigitado);
+
+    if (!textoNormalizado && !digitos) return null;
+
+    return contratosCardCatalogo.find((item) => {
+      const idContrato = safeStr(item?.id_contrato || "").trim();
+      const textoOpcao = textoContratoCombobox(item);
+
+      return normalizarTexto(textoOpcao) === textoNormalizado
+        || normalizarTexto(idContrato) === textoNormalizado
+        || (!!digitos && normalizaCnpj(textoOpcao).includes(digitos));
+    }) || null;
+  }
+
+  function selecionarContratoSilenciosamente(valor) {
+    if (!selectContratoCard) return false;
+    selectContratoCard.value = safeStr(valor || "").trim();
+    sincronizarBuscaContratoComSelect();
+    renderizarListaContratosCombobox(inputContratoCardBusca?.value || "");
+    return true;
+  }
+
+  function selecionarContratoCombobox(valor, dispararChange = true) {
+    if (!selectContratoCard) return false;
+
+    const valorComparacao = safeStr(valor || "").trim();
+    selecionarValorOuAcrescentarOpcao(
+      selectContratoCard,
+      valorComparacao,
+      valorComparacao === VALOR_OPCAO_NOVO_CONTRATO ? "Novo Contrato" : `Contrato #${valorComparacao}`
+    );
+
+    sincronizarBuscaContratoComSelect();
+    fecharListaContratosCombobox();
+
+    if (dispararChange) {
+      selectContratoCard.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    return true;
+  }
+
+  function reconciliarBuscaContratoDigitada() {
+    if (!inputContratoCardBusca || !selectContratoCard) return;
+
+    const textoDigitado = safeStr(inputContratoCardBusca.value || "").trim();
+
+    if (!textoDigitado) {
+      selecionarContratoCombobox("", true);
+      return;
+    }
+
+    const contrato = localizarContratoPorTextoDigitado(textoDigitado);
+    if (contrato) {
+      selecionarContratoCombobox(contrato.id_contrato, true);
+      return;
+    }
+
+    sincronizarBuscaContratoComSelect();
+    fecharListaContratosCombobox();
+  }
+
   function montarSelectContratoCard(contratos) {
     limparSelectComPlaceholder(selectContratoCard, "— Selecione um contrato —");
+    contratosCardCatalogo = [];
+    contratosResultadoComboboxAtual = [];
 
     (Array.isArray(contratos) ? contratos : []).forEach((contrato) => {
+      const item = normalizarContratoComboboxItem(contrato);
+      if (!item) return;
+
+      contratosCardCatalogo.push(item);
       selectContratoCard.appendChild(
-        el("option", { value: String(contrato.id_contrato) }, [contrato.label])
+        el("option", { value: String(item.id_contrato) }, [item.label])
       );
     });
 
+    const itemNovoContrato = {
+      id_contrato: VALOR_OPCAO_NOVO_CONTRATO,
+      label: "Novo Contrato",
+      eh_novo_contrato: true
+    };
+
+    contratosCardCatalogo.push(itemNovoContrato);
     selectContratoCard.appendChild(
       el("option", { value: VALOR_OPCAO_NOVO_CONTRATO }, ["Novo Contrato"])
     );
+
+    sincronizarBuscaContratoComSelect();
+    renderizarListaContratosCombobox("");
   }
 
   function montarSelectModoContratoCard(modoSelecionado = VALOR_MODO_CONTRATO_NOVO, incluirAditivo = false) {
@@ -4453,6 +4712,53 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     };
   }
 
+  function resolverFluxoContratoParaSalvamento(){
+    const fluxoAtual = obterFluxoContratoAtual();
+    const fluxoPersistido = fluxoContratoPersistidoCardAberto && typeof fluxoContratoPersistidoCardAberto === "object"
+      ? fluxoContratoPersistidoCardAberto
+      : {};
+
+    const idContratoAtual = idNum(fluxoAtual?.id_contrato || 0) || null;
+    const idContratoPersistido = idNum(fluxoPersistido?.id_contrato_existente || 0) || null;
+    const idContratoFinal = idContratoAtual || idContratoPersistido || null;
+
+    let modoFinal = normalizarModoContratoPersistido(
+      fluxoAtual?.modo_contrato || fluxoPersistido?.tipo_contrato_card || "",
+      idContratoFinal ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO
+    );
+
+    /*
+     * Proteção contra perda da tag Aditivo:
+     * se o card já estava persistido como Aditivo e o select visual voltou para
+     * "Novo Contrato" por falha de reaplicação do combobox, eu preservo o Aditivo
+     * no payload. Isso evita remover a tag IDDimKanbanTag = 8 no segundo salvamento.
+     */
+    if (idContratoPersistido && (!idContratoAtual || fluxoPersistido?.tipo_contrato_card === VALOR_MODO_CONTRATO_ADITIVO)) {
+      modoFinal = VALOR_MODO_CONTRATO_ADITIVO;
+    }
+
+    if (!idContratoFinal) {
+      modoFinal = VALOR_MODO_CONTRATO_NOVO;
+    }
+
+    const codPontoFinal = safeStr(
+      fluxoAtual?.cod_ponto_contrato || fluxoPersistido?.cod_ponto_contrato || ""
+    ).trim() || null;
+
+    const codFaceFinal = safeStr(
+      fluxoAtual?.cod_face_contrato || fluxoPersistido?.cod_face_contrato || ""
+    ).trim().toUpperCase() || null;
+
+    return {
+      id_contrato: idContratoFinal,
+      modo_contrato: modoFinal,
+      cod_ponto_contrato: codPontoFinal,
+      cod_face_contrato: codFaceFinal,
+      usar_novo_contrato: !idContratoFinal || modoFinal === VALOR_MODO_CONTRATO_NOVO,
+      usar_novo_painel: codPontoFinal === VALOR_OPCAO_NOVO_PAINEL
+    };
+  }
+
   function normalizarModoContratoPersistido(valor, modoFallback = VALOR_MODO_CONTRATO_NOVO) {
     const texto = safeStr(valor).trim().toUpperCase();
 
@@ -4493,36 +4799,140 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     }
 
     selectEl.value = valorComparacao;
+
+    if (selectEl === selectContratoCard) {
+      sincronizarBuscaContratoComSelect();
+      renderizarListaContratosCombobox(inputContratoCardBusca?.value || "");
+    }
+
     return safeStr(selectEl.value || "").trim() === valorComparacao;
   }
 
-  function extrairFluxoContratoPersistidoDoCard(card) {
+  function extrairFluxoContratoPersistidoDoCard(card, contexto = {}) {
     const cardNormalizado = normalizarCardServidor(card || {});
-    const idContrato = idNum(
-      cardNormalizado.IDFatoControleContratosEuromidia ??
-      cardNormalizado.IDFatoControleContratoEuromidia ??
-      0
+    const snapshot = contexto && typeof contexto === "object" ? (contexto.snapshot || {}) : {};
+    const headerSnapshot = snapshot && typeof snapshot === "object" ? (snapshot.header || {}) : {};
+    const itemSnapshot = snapshot && typeof snapshot === "object" ? (snapshot.item || {}) : {};
+    const itensSnapshot = Array.isArray(snapshot?.itens) ? snapshot.itens : [];
+    const primeiroItemSnapshot = itensSnapshot.find((item) => item && typeof item === "object") || {};
+    const painelFaces = Array.isArray(contexto?.painelFaces) ? contexto.painelFaces : [];
+    const primeiroPainelFace = painelFaces.find((item) => item && typeof item === "object") || {};
+    const tagsContexto = Array.isArray(contexto?.tags) ? contexto.tags : [];
+
+    const obterPrimeiroNumero = (...valores) => {
+      for (const valor of valores) {
+        const numero = idNum(valor || 0);
+        if (numero) return numero;
+      }
+      return null;
+    };
+
+    const obterPrimeiroTexto = (...valores) => {
+      for (const valor of valores) {
+        const texto = safeStr(valor ?? "").trim();
+        if (texto) return texto;
+      }
+      return "";
+    };
+
+    const temTagAditivo = tagsContexto.some((tag) => {
+      const idTag = idNum(tag?.IDDimKanbanTag ?? tag?.id_dim_kanban_tag ?? tag?.id ?? 0);
+      const nomeTag = safeStr(tag?.NomeTag ?? tag?.nomeTag ?? tag?.nome ?? "").trim().toUpperCase();
+      return idTag === ID_TAG_TIPO_CONTRATO_ADITIVO || nomeTag === "ADITIVO";
+    });
+
+    const temTagNovoContrato = tagsContexto.some((tag) => {
+      const idTag = idNum(tag?.IDDimKanbanTag ?? tag?.id_dim_kanban_tag ?? tag?.id ?? 0);
+      const nomeTag = safeStr(tag?.NomeTag ?? tag?.nomeTag ?? tag?.nome ?? "").trim().toUpperCase();
+      return idTag === ID_TAG_TIPO_CONTRATO_NOVO || nomeTag === "NOVO CONTRATO";
+    });
+
+    const idContrato = obterPrimeiroNumero(
+      cardNormalizado.IDFatoControleContratosEuromidia,
+      cardNormalizado.IDFatoControleContratoEuromidia,
+      cardNormalizado.id_contrato_existente,
+      cardNormalizado.id_controle_contrato,
+      headerSnapshot.IDFatoControleContratosEuromidia,
+      headerSnapshot.IDFatoControleContratoEuromidia,
+      headerSnapshot.id_contrato_existente,
+      itemSnapshot.IDFatoControleContratosEuromidia,
+      itemSnapshot.IDFatoControleContratoEuromidia,
+      primeiroItemSnapshot.IDFatoControleContratosEuromidia,
+      primeiroItemSnapshot.IDFatoControleContratoEuromidia
+    );
+
+    const codPontoContrato = obterPrimeiroTexto(
+      cardNormalizado.CodPontoContrato,
+      cardNormalizado.cod_ponto_contrato,
+      headerSnapshot.CodPontoContrato,
+      headerSnapshot.cod_ponto_contrato,
+      itemSnapshot.CodPonto,
+      itemSnapshot.cod_ponto,
+      primeiroItemSnapshot.CodPonto,
+      primeiroItemSnapshot.cod_ponto,
+      primeiroPainelFace.CodPontoContratoAditivo,
+      primeiroPainelFace.cod_ponto_contrato_aditivo,
+      primeiroPainelFace.CodPontoContrato,
+      primeiroPainelFace.cod_ponto_contrato,
+      primeiroPainelFace.CodPonto,
+      primeiroPainelFace.cod_ponto
     ) || null;
 
-    let modoPersistido = normalizarModoContratoPersistido(
+    const codFaceContrato = obterPrimeiroTexto(
+      cardNormalizado.CodFaceContrato,
+      cardNormalizado.cod_face_contrato,
+      headerSnapshot.CodFaceContrato,
+      headerSnapshot.cod_face_contrato,
+      itemSnapshot.CodFace,
+      itemSnapshot.cod_face,
+      primeiroItemSnapshot.CodFace,
+      primeiroItemSnapshot.cod_face,
+      primeiroPainelFace.CodFaceContratoAditivo,
+      primeiroPainelFace.cod_face_contrato_aditivo,
+      primeiroPainelFace.CodFaceContrato,
+      primeiroPainelFace.cod_face_contrato,
+      primeiroPainelFace.CodFace,
+      primeiroPainelFace.cod_face
+    ).toUpperCase() || null;
+
+    const tipoContratoBruto = obterPrimeiroTexto(
       cardNormalizado.tipo_contrato,
+      cardNormalizado.tipo_contrato_card,
+      cardNormalizado.TipoSolicitacao,
+      headerSnapshot.TipoSolicitacao,
+      headerSnapshot.tipo_contrato,
+      headerSnapshot.tipo_contrato_card,
+      itemSnapshot.TipoSolicitacao,
+      primeiroItemSnapshot.TipoSolicitacao
+    );
+
+    let modoPersistido = normalizarModoContratoPersistido(
+      tipoContratoBruto,
       idContrato ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO
     );
 
-    if (!idContrato) {
+    if (temTagAditivo) {
+      modoPersistido = VALOR_MODO_CONTRATO_ADITIVO;
+    } else if (temTagNovoContrato && !idContrato) {
+      modoPersistido = VALOR_MODO_CONTRATO_NOVO;
+    } else if (idContrato && !temTagNovoContrato) {
+      modoPersistido = VALOR_MODO_CONTRATO_ADITIVO;
+    }
+
+    if (!idContrato && modoPersistido === VALOR_MODO_CONTRATO_ADITIVO && !temTagAditivo) {
       modoPersistido = VALOR_MODO_CONTRATO_NOVO;
     }
 
     return {
       id_contrato_existente: idContrato,
       tipo_contrato_card: modoPersistido,
-      cod_ponto_contrato: safeStr(cardNormalizado.CodPontoContrato ?? cardNormalizado.cod_ponto_contrato ?? "").trim() || null,
-      cod_face_contrato: safeStr(cardNormalizado.CodFaceContrato ?? cardNormalizado.cod_face_contrato ?? "").trim().toUpperCase() || null
+      cod_ponto_contrato: codPontoContrato,
+      cod_face_contrato: codFaceContrato
     };
   }
 
   function obterIdTagTipoContratoDesejada() {
-    const fluxo = obterFluxoContratoAtual();
+    const fluxo = resolverFluxoContratoParaSalvamento();
     return fluxo.id_contrato && fluxo.modo_contrato === VALOR_MODO_CONTRATO_ADITIVO
       ? ID_TAG_TIPO_CONTRATO_ADITIVO
       : ID_TAG_TIPO_CONTRATO_NOVO;
@@ -4603,12 +5013,305 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     return candidatos[0];
   }
 
-  async function aplicarPainelFaceContratoNoPrimeiroBloco(codPonto, codFace, dadosContrato = null) {
+  function formatarDataContratoAditivo(valor) {
+    const texto = safeStr(valor || "").trim();
+    if (!texto) return "—";
+    const matchIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (matchIso) {
+      return `${matchIso[3]}/${matchIso[2]}/${matchIso[1]}`;
+    }
+    return texto;
+  }
+
+  function formatarNumeroContratoAditivo(valor, casas = 2) {
+    const numero = converterValorContratoParaNumero(valor);
+    if (!Number.isFinite(numero)) return "—";
+    return numero.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+  }
+
+  function montarTextoResumoItemContratoAditivo(faceSelecionada) {
+    if (!faceSelecionada) return "Selecione um CodPonto e uma Face do contrato para carregar as informações do item original.";
+
+    const partes = [];
+    const codPonto = safeStr(faceSelecionada.cod_ponto || faceSelecionada.CodPonto || "").trim();
+    const codFace = safeStr(faceSelecionada.cod_face || faceSelecionada.CodFace || "").trim().toUpperCase();
+    const tipo = safeStr(faceSelecionada.tipo_face || faceSelecionada.TipoPainel || faceSelecionada.tipo || "").trim();
+    const cota = safeStr(faceSelecionada.cota || faceSelecionada.Cota || "").trim();
+    const dataInicio = faceSelecionada.data_inicio_previsto || faceSelecionada.DataInicioPrevisto || null;
+    const dataFim = faceSelecionada.data_termino_previsto || faceSelecionada.DataTerminoPrevisto || null;
+    const precoAtual = converterValorContratoParaNumero(
+      faceSelecionada.preco_venda_atual ??
+      faceSelecionada.TotalLiquidoContratoAGBRCTACORDO ??
+      faceSelecionada.faturamento_liquido_final_mensal ??
+      faceSelecionada.valor_mensal ??
+      null
+    );
+
+    if (codPonto) partes.push(`CodPonto ${codPonto}`);
+    if (codFace) partes.push(`Face ${codFace}`);
+    if (tipo) partes.push(tipo);
+    if (cota) partes.push(`Cota ${cota}`);
+    if (dataInicio || dataFim) partes.push(`${formatarDataContratoAditivo(dataInicio)} até ${formatarDataContratoAditivo(dataFim)}`);
+    if (Number.isFinite(precoAtual)) partes.push(`Preço atual ${formatarMoedaBR(precoAtual)}`);
+
+    return partes.length ? partes.join(" • ") : "Item do contrato selecionado.";
+  }
+
+  function renderizarInfoItemContratoAditivo(bloco, faceSelecionada = null, mensagem = "") {
+    const info = bloco?.querySelector('[data-role="contrato-item-info"]');
+    if (!info) return;
+
+    info.innerHTML = "";
+
+    if (!faceSelecionada) {
+      info.appendChild(el("div", { class: "kb-contrato-item-vazio" }, [
+        mensagem || "Selecione um CodPonto e uma Face do contrato para carregar o item original. Se for incluir um novo ponto/face, use o seletor manual de painéis abaixo."
+      ]));
+      return;
+    }
+
+    const precoAtual = converterValorContratoParaNumero(
+      faceSelecionada.preco_venda_atual ??
+      faceSelecionada.TotalLiquidoContratoAGBRCTACORDO ??
+      faceSelecionada.faturamento_liquido_final_mensal ??
+      faceSelecionada.valor_mensal ??
+      null
+    );
+    const brutoMensal = converterValorContratoParaNumero(faceSelecionada.faturamento_bruto_mensal ?? faceSelecionada.FaturamentoBrutoMensal ?? null);
+    const liquidoMensal = converterValorContratoParaNumero(faceSelecionada.valor_mensal ?? faceSelecionada.FaturamentoLiquidoMensal ?? null);
+    const totalBruto = converterValorContratoParaNumero(faceSelecionada.total_bruto_contrato ?? faceSelecionada.TotalBrutoContrato ?? null);
+    const valorPermuta = converterValorContratoParaNumero(faceSelecionada.valor_permuta ?? faceSelecionada.ValorPermuta ?? null);
+    const percentualPermuta = converterValorContratoParaNumero(faceSelecionada.percentual_permuta ?? faceSelecionada.PercentualPermuta ?? null);
+
+    const linhas = [
+      ["CodPonto", safeStr(faceSelecionada.cod_ponto || faceSelecionada.CodPonto || "—")],
+      ["Face", safeStr(faceSelecionada.cod_face || faceSelecionada.CodFace || "—").toUpperCase()],
+      ["Tipo", safeStr(faceSelecionada.tipo_face || faceSelecionada.TipoPainel || faceSelecionada.tipo || "—")],
+      ["Cidade", safeStr(faceSelecionada.cidade_exibicao || faceSelecionada.CidadeExibicao || "—")],
+      ["Cota", safeStr(faceSelecionada.cota || faceSelecionada.Cota || "—")],
+      ["Início", formatarDataContratoAditivo(faceSelecionada.data_inicio_previsto || faceSelecionada.DataInicioPrevisto)],
+      ["Término", formatarDataContratoAditivo(faceSelecionada.data_termino_previsto || faceSelecionada.DataTerminoPrevisto)],
+      ["Preço atual", Number.isFinite(precoAtual) ? formatarMoedaBR(precoAtual) : "—"],
+      ["Bruto mensal", Number.isFinite(brutoMensal) ? formatarMoedaBR(brutoMensal) : "—"],
+      ["Líquido mensal", Number.isFinite(liquidoMensal) ? formatarMoedaBR(liquidoMensal) : "—"],
+      ["Total bruto", Number.isFinite(totalBruto) ? formatarMoedaBR(totalBruto) : "—"],
+      ["Permuta", Number.isFinite(percentualPermuta) ? `${formatarNumeroContratoAditivo(percentualPermuta)}%` : (Number.isFinite(valorPermuta) ? formatarMoedaBR(valorPermuta) : "—")]
+    ];
+
+    info.appendChild(el("div", { class: "kb-contrato-item-resumo" }, [montarTextoResumoItemContratoAditivo(faceSelecionada)]));
+
+    const grid = el("div", { class: "kb-contrato-item-info-grid" });
+    linhas.forEach(([rotulo, valor]) => {
+      grid.appendChild(el("div", { class: "kb-contrato-item-info-linha" }, [
+        el("span", { class: "k" }, [rotulo]),
+        el("span", { class: "v" }, [safeStr(valor || "—")])
+      ]));
+    });
+    info.appendChild(grid);
+  }
+
+  function limparSelecaoContratoAditivoDoBloco(bloco, opcoes = {}) {
+    if (!bloco) return;
+    bloco.__itemContratoAditivoSelecionado = null;
+
+    const selectCodFaceItem = bloco.querySelector('[data-role="select-codface-contrato-item"]');
+    if (selectCodFaceItem) limparSelectComPlaceholder(selectCodFaceItem, "— Face do contrato —");
+    renderizarInfoItemContratoAditivo(bloco, null, opcoes.mensagem || "Selecione um item existente do contrato ou escolha um novo painel/face no seletor manual abaixo.");
+  }
+
+  function preencherPontosContratoNoBloco(bloco, opcoes = {}) {
+    const selectCodPontoItem = bloco?.querySelector('[data-role="select-codponto-contrato-item"]');
+    if (!selectCodPontoItem) return;
+
+    const fluxo = obterFluxoContratoAtual();
+    limparSelectComPlaceholder(selectCodPontoItem, "— CodPonto do contrato —");
+
+    const pontos = fluxo.id_contrato ? (pontosPorContratoCache.get(idNum(fluxo.id_contrato)) || []) : [];
+    (Array.isArray(pontos) ? pontos : []).forEach((ponto) => {
+      selectCodPontoItem.appendChild(el("option", { value: safeStr(ponto.cod_ponto || "").trim() }, [ponto.label || ponto.cod_ponto]));
+    });
+
+    selectCodPontoItem.appendChild(el("option", { value: VALOR_OPCAO_NOVO_PAINEL }, ["Novo Painel / Face"]));
+
+    const valorDesejado = safeStr(opcoes.cod_ponto || bloco.__codPontoContratoItemDesejado || "").trim();
+    if (valorDesejado && possuiOpcaoNoSelect(selectCodPontoItem, valorDesejado)) {
+      selectCodPontoItem.value = valorDesejado;
+    }
+  }
+
+  async function preencherFacesContratoNoBloco(bloco, codPonto, opcoes = {}) {
+    const selectCodFaceItem = bloco?.querySelector('[data-role="select-codface-contrato-item"]');
+    if (!selectCodFaceItem) return [];
+
+    limparSelectComPlaceholder(selectCodFaceItem, "— Face do contrato —");
+    const fluxo = obterFluxoContratoAtual();
+    const codPontoNormalizado = safeStr(codPonto || "").trim();
+
+    if (!fluxo.id_contrato || !codPontoNormalizado || codPontoNormalizado === VALOR_OPCAO_NOVO_PAINEL) {
+      return [];
+    }
+
+    const faces = await carregarFacesDoContrato(fluxo.id_contrato, codPontoNormalizado);
+    (Array.isArray(faces) ? faces : []).forEach((face) => {
+      selectCodFaceItem.appendChild(el("option", { value: safeStr(face.cod_face || "").trim().toUpperCase() }, [face.label || face.cod_face]));
+    });
+
+    const valorDesejado = safeStr(opcoes.cod_face || bloco.__codFaceContratoItemDesejada || "").trim().toUpperCase();
+    if (valorDesejado && possuiOpcaoNoSelect(selectCodFaceItem, valorDesejado)) {
+      selectCodFaceItem.value = valorDesejado;
+    }
+
+    return faces;
+  }
+
+  async function reaplicarSelecaoContratoAditivoSalvaNoBloco(bloco) {
+    if (!bloco || bloco.__reaplicandoContratoAditivo === true) return;
+
+    const fluxo = obterFluxoContratoAtual();
+    if (!fluxo.id_contrato || fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO) return;
+
+    const codPontoDesejado = safeStr(bloco.__codPontoContratoItemDesejado || "").trim();
+    const codFaceDesejada = safeStr(bloco.__codFaceContratoItemDesejada || "").trim().toUpperCase();
+
+    if (!codPontoDesejado) return;
+
+    bloco.__reaplicandoContratoAditivo = true;
+    try {
+      preencherPontosContratoNoBloco(bloco, { cod_ponto: codPontoDesejado });
+
+      const selectCodPontoItem = bloco.querySelector('[data-role="select-codponto-contrato-item"]');
+      const selectCodFaceItem = bloco.querySelector('[data-role="select-codface-contrato-item"]');
+      selecionarValorOuAcrescentarOpcao(
+        selectCodPontoItem,
+        codPontoDesejado,
+        codPontoDesejado === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel / Face" : codPontoDesejado
+      );
+
+      if (codPontoDesejado === VALOR_OPCAO_NOVO_PAINEL) {
+        if (selectCodFaceItem) limparSelectComPlaceholder(selectCodFaceItem, "— Face do contrato —");
+        renderizarInfoItemContratoAditivo(bloco, null, "Novo Painel / Face selecionado neste aditivo. Preencha o painel e a face no seletor manual abaixo.");
+        return;
+      }
+
+      const faces = await preencherFacesContratoNoBloco(bloco, codPontoDesejado, { cod_face: codFaceDesejada });
+      if (!codFaceDesejada) return;
+
+      const faceSelecionada = (Array.isArray(faces) ? faces : []).find((face) => {
+        return safeStr(face?.cod_face || face?.CodFace || "").trim().toUpperCase() === codFaceDesejada;
+      }) || null;
+
+      if (faceSelecionada) {
+        marcarSelecaoContratoAditivoNoBloco(bloco, codPontoDesejado, codFaceDesejada, faceSelecionada);
+      } else {
+        selecionarValorOuAcrescentarOpcao(selectCodFaceItem, codFaceDesejada, codFaceDesejada);
+        renderizarInfoItemContratoAditivo(bloco, null, "A face salva foi reaplicada, mas os detalhes do contrato não vieram no cache. Selecione novamente para recarregar os detalhes.");
+      }
+    } catch (erro) {
+      console.warn("reaplicarSelecaoContratoAditivoSalvaNoBloco: falhou", erro);
+    } finally {
+      bloco.__reaplicandoContratoAditivo = false;
+    }
+  }
+
+  function atualizarVisibilidadeContratoAditivoDoBloco(bloco) {
+    const wrap = bloco?.querySelector('[data-role="wrap-item-contrato-aditivo"]');
+    if (!wrap) return;
+
+    const fluxo = obterFluxoContratoAtual();
+    const deveMostrar = !!(fluxo.id_contrato && fluxo.modo_contrato === VALOR_MODO_CONTRATO_ADITIVO);
+    wrap.hidden = !deveMostrar;
+
+    if (!deveMostrar) {
+      bloco.__itemContratoAditivoSelecionado = null;
+      return;
+    }
+
+    preencherPontosContratoNoBloco(bloco);
+    renderizarInfoItemContratoAditivo(bloco, bloco.__itemContratoAditivoSelecionado || null);
+    reaplicarSelecaoContratoAditivoSalvaNoBloco(bloco);
+  }
+
+  function sincronizarSeletoresContratoAditivoEmTodosBlocos() {
+    if (!painelFaceLista) return;
+    painelFaceLista.querySelectorAll('.kb-painel-item').forEach((bloco) => {
+      atualizarVisibilidadeContratoAditivoDoBloco(bloco);
+    });
+  }
+
+  function marcarSelecaoContratoAditivoNoBloco(bloco, codPonto, codFace, faceSelecionada = null) {
+    if (!bloco) return;
+    const selectCodPontoItem = bloco.querySelector('[data-role="select-codponto-contrato-item"]');
+    const selectCodFaceItem = bloco.querySelector('[data-role="select-codface-contrato-item"]');
+
+    const codPontoNormalizado = safeStr(codPonto || "").trim();
+    const codFaceNormalizado = safeStr(codFace || "").trim().toUpperCase();
+
+    if (selectCodPontoItem && codPontoNormalizado) {
+      selecionarValorOuAcrescentarOpcao(selectCodPontoItem, codPontoNormalizado, codPontoNormalizado === VALOR_OPCAO_NOVO_PAINEL ? "Novo Painel / Face" : codPontoNormalizado);
+    }
+
+    if (selectCodFaceItem && codFaceNormalizado) {
+      selecionarValorOuAcrescentarOpcao(selectCodFaceItem, codFaceNormalizado, faceSelecionada?.label || codFaceNormalizado);
+    }
+
+    bloco.__itemContratoAditivoSelecionado = faceSelecionada || null;
+    renderizarInfoItemContratoAditivo(bloco, faceSelecionada || null);
+  }
+
+  async function aplicarPainelFaceContratoNoBloco(bloco, codPonto, codFace, dadosContrato = null) {
     const fluxo = obterFluxoContratoAtual();
     const codPontoNormalizado = safeStr(codPonto).trim();
     const codFaceNormalizado = safeStr(codFace).trim().toUpperCase();
     const pontoSelecionado = obterPontoContratoSelecionado(fluxo.id_contrato, codPontoNormalizado);
     const tipoPainelContrato = safeStr(pontoSelecionado?.tipo ?? pontoSelecionado?.TipoPainel ?? '').trim();
+
+    if (!bloco || !codPontoNormalizado || !codFaceNormalizado) {
+      return false;
+    }
+
+    const painelFace = encontrarPainelFacePorContrato(codPontoNormalizado, codFaceNormalizado, tipoPainelContrato);
+    if (!painelFace) {
+      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} com a face ${codFaceNormalizado} existe no contrato, mas não foi encontrado no catálogo carregado do kanban.`, "alerta");
+      return false;
+    }
+
+    const fonteContrato = dadosContrato && typeof dadosContrato === "object" ? dadosContrato : {};
+    const precoAtualNormalizado = converterValorContratoParaNumero(
+      fonteContrato.preco_venda_atual ??
+      fonteContrato.TotalLiquidoContratoAGBRCTACORDO ??
+      fonteContrato.faturamento_liquido_final_mensal ??
+      fonteContrato.valor_mensal ??
+      null
+    );
+
+    const dadosContratoNormalizados = {
+      IDDimPaineisEuromidia: idNum(painelFace?.IDDimPaineisEuromidia ?? fonteContrato.id_painel ?? fonteContrato.IDPainelEuromidia ?? 0) || null,
+      IDDimFacesPaineis: idNum(painelFace?.IDDimFacesPaineis ?? fonteContrato.id_dim_faces_paineis ?? fonteContrato.IDDimFacesPaineis ?? 0) || null,
+      CodPonto: codPontoNormalizado,
+      cod_ponto: codPontoNormalizado,
+      CodFace: codFaceNormalizado,
+      cod_face: codFaceNormalizado,
+      TipoPainel: safeStr(tipoPainelContrato || painelFace?.Tipo || fonteContrato.tipo_face || '').trim() || null,
+      tipo_painel: safeStr(tipoPainelContrato || painelFace?.Tipo || fonteContrato.tipo_face || '').trim() || null,
+      DataInicio: safeStr(fonteContrato.data_inicio_previsto ?? fonteContrato.DataInicioPrevisto ?? "").trim() || null,
+      data_inicio: safeStr(fonteContrato.data_inicio_previsto ?? fonteContrato.DataInicioPrevisto ?? "").trim() || null,
+      DataFim: safeStr(fonteContrato.data_termino_previsto ?? fonteContrato.DataTerminoPrevisto ?? "").trim() || null,
+      data_fim: safeStr(fonteContrato.data_termino_previsto ?? fonteContrato.DataTerminoPrevisto ?? "").trim() || null,
+      PrecoVendaAtualContrato: Number.isFinite(precoAtualNormalizado) ? precoAtualNormalizado : null,
+      preco_venda_atual: Number.isFinite(precoAtualNormalizado) ? precoAtualNormalizado : null
+    };
+
+    bloco.__itemContratoAditivoSelecionado = fonteContrato;
+    marcarSelecaoContratoAditivoNoBloco(bloco, codPontoNormalizado, codFaceNormalizado, fonteContrato);
+    await selecionarPainelCombobox(bloco, painelFace, false);
+    await atualizarComercialDoBloco(bloco, dadosContratoNormalizados);
+    renderizarInfoItemContratoAditivo(bloco, fonteContrato);
+    return true;
+  }
+
+  async function aplicarPainelFaceContratoNoPrimeiroBloco(codPonto, codFace, dadosContrato = null) {
+    const codPontoNormalizado = safeStr(codPonto).trim();
+    const codFaceNormalizado = safeStr(codFace).trim().toUpperCase();
 
     if (!codPontoNormalizado || !codFaceNormalizado || !painelFaceLista) {
       return;
@@ -4621,45 +5324,13 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       atualizarTitulosPainelFace();
     }
 
-    const painelFace = encontrarPainelFacePorContrato(codPontoNormalizado, codFaceNormalizado, tipoPainelContrato);
-    if (!painelFace) {
-      setMensagemFluxoContrato(`O CodPonto ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} com a face ${codFaceNormalizado} existe no contrato, mas não foi encontrado no catálogo carregado do kanban.`, "alerta");
-      return;
+    const aplicado = await aplicarPainelFaceContratoNoBloco(bloco, codPontoNormalizado, codFaceNormalizado, dadosContrato);
+    if (aplicado) {
+      const fluxo = obterFluxoContratoAtual();
+      const pontoSelecionado = obterPontoContratoSelecionado(fluxo.id_contrato, codPontoNormalizado);
+      const tipoPainelContrato = safeStr(pontoSelecionado?.tipo ?? pontoSelecionado?.TipoPainel ?? '').trim();
+      setMensagemFluxoContrato(`Contrato existente selecionado. O painel ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} e a face ${codFaceNormalizado} foram carregados no primeiro bloco.`, "sucesso");
     }
-
-    const dadosContratoNormalizados = dadosContrato && typeof dadosContrato === "object"
-      ? {
-          IDDimPaineisEuromidia: idNum(painelFace?.IDDimPaineisEuromidia ?? 0) || null,
-          CodPonto: codPontoNormalizado,
-          cod_ponto: codPontoNormalizado,
-          CodFace: codFaceNormalizado,
-          cod_face: codFaceNormalizado,
-          TipoPainel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
-          tipo_painel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
-          DataInicio: safeStr(dadosContrato.data_inicio_previsto ?? dadosContrato.DataInicioPrevisto ?? "").trim() || null,
-          data_inicio: safeStr(dadosContrato.data_inicio_previsto ?? dadosContrato.DataInicioPrevisto ?? "").trim() || null,
-          DataFim: safeStr(dadosContrato.data_termino_previsto ?? dadosContrato.DataTerminoPrevisto ?? "").trim() || null,
-          data_fim: safeStr(dadosContrato.data_termino_previsto ?? dadosContrato.DataTerminoPrevisto ?? "").trim() || null,
-          PrecoVendaAtualContrato: converterValorContratoParaNumero(
-            dadosContrato.preco_venda_atual ??
-            dadosContrato.TotalLiquidoContratoAGBRCTACORDO ??
-            dadosContrato.valor_mensal ??
-            null
-          )
-        }
-      : {
-          IDDimPaineisEuromidia: idNum(painelFace?.IDDimPaineisEuromidia ?? 0) || null,
-          CodPonto: codPontoNormalizado,
-          cod_ponto: codPontoNormalizado,
-          CodFace: codFaceNormalizado,
-          cod_face: codFaceNormalizado,
-          TipoPainel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
-          tipo_painel: safeStr(tipoPainelContrato || painelFace?.Tipo || '').trim() || null,
-        };
-
-    await selecionarPainelCombobox(bloco, painelFace, false);
-    await atualizarComercialDoBloco(bloco, dadosContratoNormalizados);
-    setMensagemFluxoContrato(`Contrato existente selecionado. O painel ${codPontoNormalizado}${tipoPainelContrato ? ` (${tipoPainelContrato})` : ""} e a face ${codFaceNormalizado} foram carregados no primeiro bloco.`, "sucesso");
   }
 
   async function carregarFluxoContratoParaEmpresa(idEmpresa, opcoes = {}) {
@@ -4703,7 +5374,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
             contratoSelecionado?.label || `Contrato #${idContratoSalvo}`
           );
         } else {
-          selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+          selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
         }
 
         montarSelectModoContratoCard(modoSalvo, contratoSalvoDisponivel);
@@ -4716,6 +5387,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
 
           const pontos = await carregarPontosDoContrato(idContratoSalvo);
           montarSelectPontosContratoCard(pontos);
+          sincronizarSeletoresContratoAditivoEmTodosBlocos();
 
           if (codPontoSalvo) {
             const pontoSelecionado = (Array.isArray(pontos) ? pontos : []).find((ponto) => safeStr(ponto?.cod_ponto || "").trim() === codPontoSalvo) || null;
@@ -4740,6 +5412,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
           if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = false;
           const faces = await carregarFacesDoContrato(idContratoSalvo, codPontoSalvo);
           montarSelectFacesContratoCard(faces);
+          sincronizarSeletoresContratoAditivoEmTodosBlocos();
 
           if (codFaceSalva) {
             const faceSelecionada = (Array.isArray(faces) ? faces : []).find((face) => safeStr(face?.cod_face || "").trim().toUpperCase() === codFaceSalva) || null;
@@ -4764,12 +5437,12 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       }
 
       if (contratos.length) {
-        selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+        selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
         montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
         if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
         setMensagemFluxoContrato("A empresa já possui contratos. Por padrão, o fluxo ficou em Novo Contrato. Se quiser reaproveitar um contrato existente, selecione-o acima.", "alerta");
       } else {
-        selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+        selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
         montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
         if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
         setMensagemFluxoContrato("Nenhum contrato existente foi encontrado para esta empresa. O fluxo foi definido como Novo Contrato.", "info");
@@ -4786,7 +5459,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
             `Contrato #${idContratoSalvo}`
           );
         } else {
-          selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+          selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
         }
         montarSelectModoContratoCard(modoSalvo, !!idContratoSalvo);
         if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
@@ -4813,7 +5486,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
         return;
       }
 
-      selectContratoCard.value = VALOR_OPCAO_NOVO_CONTRATO;
+      selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
       montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
       if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
       setMensagemFluxoContrato("Não foi possível consultar os contratos da empresa. O template caiu no fluxo seguro de Novo Contrato até o backend responder essa busca.", "alerta");
@@ -4821,6 +5494,9 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
   }
 
   async function onContratoCardChange() {
+    sincronizarBuscaContratoComSelect();
+    fecharListaContratosCombobox();
+
     const valorContrato = safeStr(selectContratoCard?.value || "").trim();
 
     limparSelectComPlaceholder(selectCodPontoContratoCard, "— Selecione o CodPonto —");
@@ -4833,6 +5509,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
       setMensagemFluxoContrato("Fluxo definido como Novo Contrato. Agora você pode escolher livremente os painéis e faces abaixo.", "info");
       atualizarVisibilidadeDadosNovoContrato();
+      sincronizarSeletoresContratoAditivoEmTodosBlocos();
       return;
     }
 
@@ -4863,6 +5540,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       if (wrapSelectCodPontoContratoCard) wrapSelectCodPontoContratoCard.hidden = true;
       setMensagemFluxoContrato("Tipo definido como Novo Contrato. O vínculo será tratado como contrato novo no salvamento.", "info");
       atualizarVisibilidadeDadosNovoContrato();
+      sincronizarSeletoresContratoAditivoEmTodosBlocos();
       return;
     }
 
@@ -4872,6 +5550,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     try {
       const pontos = await carregarPontosDoContrato(fluxo.id_contrato);
       montarSelectPontosContratoCard(pontos);
+      sincronizarSeletoresContratoAditivoEmTodosBlocos();
       setMensagemFluxoContrato("Selecione um CodPonto já existente do contrato ou escolha Novo Painel para incluir um painel novo no aditivo.", "info");
     } catch (erro) {
       console.warn("onModoContratoCardChange: falhou ao carregar pontos", erro);
@@ -4907,6 +5586,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     try {
       const faces = await carregarFacesDoContrato(fluxo.id_contrato, fluxo.cod_ponto_contrato);
       montarSelectFacesContratoCard(faces);
+      sincronizarSeletoresContratoAditivoEmTodosBlocos();
       setMensagemFluxoContrato("Agora selecione a face já existente do contrato.", "info");
     } catch (erro) {
       console.warn("onCodPontoContratoCardChange: falhou ao carregar faces", erro);
@@ -6394,6 +7074,26 @@ function formatarNumeroParaInput(valor){
           el('button', { class:'kb-btn sm danger', type:'button', 'data-role':'btn-remover' }, ['−'])
         ])
       ]),
+      el('div', { class:'kb-contrato-item-wrap', 'data-role':'wrap-item-contrato-aditivo', hidden:'hidden' }, [
+        el('div', { class:'kb-contrato-item-titulo' }, ['Item existente do contrato para aditivo']),
+        el('div', { class:'kb-contrato-item-grid' }, [
+          el('div', { class:'kb-campo' }, [
+            el('div', { class:'kb-campo-label' }, ['CodPonto do contrato']),
+            el('select', { class:'kb-select', 'data-role':'select-codponto-contrato-item' }, [
+              el('option', { value:'' }, ['— CodPonto do contrato —'])
+            ])
+          ]),
+          el('div', { class:'kb-campo' }, [
+            el('div', { class:'kb-campo-label' }, ['Face do contrato']),
+            el('select', { class:'kb-select', 'data-role':'select-codface-contrato-item' }, [
+              el('option', { value:'' }, ['— Face do contrato —'])
+            ])
+          ]),
+          el('div', { class:'kb-contrato-item-info', 'data-role':'contrato-item-info' }, [
+            el('div', { class:'kb-contrato-item-vazio' }, ['Selecione um CodPonto e uma Face do contrato, ou use o seletor manual abaixo para incluir um novo painel/face.'])
+          ])
+        ])
+      ]),
       el('div', { class:'kb-painel-item-grid' }, [
         el('select', { class:'kb-select', 'data-role':'select-filtro-cidade' }),
         el('select', { class:'kb-select', 'data-role':'select-filtro-tipo' }),
@@ -6462,6 +7162,36 @@ function formatarNumeroParaInput(valor){
     const selectFiltroTipo = bloco.querySelector('[data-role="select-filtro-tipo"]');
     const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
     const selectPeriodoExibicao = bloco.querySelector('[data-role="select-periodo-exibicao"]');
+    const selectCodPontoContratoItem = bloco.querySelector('[data-role="select-codponto-contrato-item"]');
+    const selectCodFaceContratoItem = bloco.querySelector('[data-role="select-codface-contrato-item"]');
+
+    const codPontoContratoAditivoSalvo = safeStr(
+      dados?.CodPontoContratoAditivo ??
+      dados?.cod_ponto_contrato_aditivo ??
+      dados?.CodPontoContrato ??
+      dados?.cod_ponto_contrato ??
+      dados?.CodPonto ??
+      dados?.cod_ponto ??
+      ""
+    ).trim();
+
+    const codFaceContratoAditivoSalva = safeStr(
+      dados?.CodFaceContratoAditivo ??
+      dados?.cod_face_contrato_aditivo ??
+      dados?.CodFaceContrato ??
+      dados?.cod_face_contrato ??
+      dados?.CodFace ??
+      dados?.cod_face ??
+      ""
+    ).trim().toUpperCase();
+
+    if (codPontoContratoAditivoSalvo) {
+      bloco.__codPontoContratoItemDesejado = codPontoContratoAditivoSalvo;
+    }
+
+    if (codFaceContratoAditivoSalva) {
+      bloco.__codFaceContratoItemDesejada = codFaceContratoAditivoSalva;
+    }
 
     montarSelectPaineisNoElemento(selectPainel);
     limparSelectFacesNoElemento(selectFace);
@@ -6484,8 +7214,11 @@ function formatarNumeroParaInput(valor){
     });
 
     bloco.querySelector('[data-role="btn-duplicar"]')?.addEventListener('click', () => {
-      painelFaceLista?.appendChild(criarPainelFaceItem());
+      const novoBloco = criarPainelFaceItem();
+      painelFaceLista?.appendChild(novoBloco);
       atualizarTitulosPainelFace();
+      atualizarVisibilidadeContratoAditivoDoBloco(novoBloco);
+      novoBloco?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
     });
 
     bloco.querySelector('[data-role="btn-remover"]')?.addEventListener('click', () => {
@@ -6494,6 +7227,71 @@ function formatarNumeroParaInput(valor){
         painelFaceLista?.appendChild(criarPainelFaceItem());
       }
       atualizarTitulosPainelFace();
+    });
+
+
+    selectCodPontoContratoItem?.addEventListener('change', async () => {
+      const fluxo = obterFluxoContratoAtual();
+      const codPontoSelecionado = safeStr(selectCodPontoContratoItem.value || "").trim();
+      bloco.__codPontoContratoItemDesejado = codPontoSelecionado;
+      bloco.__codFaceContratoItemDesejada = "";
+      limparSelecaoContratoAditivoDoBloco(bloco);
+
+      if (!fluxo.id_contrato || fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO) {
+        return;
+      }
+
+      if (!codPontoSelecionado) {
+        renderizarInfoItemContratoAditivo(bloco, null, "Selecione um CodPonto do contrato ou escolha Novo Painel / Face para preencher manualmente.");
+        return;
+      }
+
+      if (codPontoSelecionado === VALOR_OPCAO_NOVO_PAINEL) {
+        limparSelectComPlaceholder(selectCodFaceContratoItem, "— Face do contrato —");
+        renderizarInfoItemContratoAditivo(bloco, null, "Novo Painel / Face selecionado. Agora escolha o painel e a face no seletor manual abaixo.");
+        setMensagemFluxoContrato("Novo Painel / Face no aditivo: o contrato continua como aditivo, mas este bloco será preenchido pelo seletor manual de painéis.", "alerta");
+        return;
+      }
+
+      try {
+        const faces = await preencherFacesContratoNoBloco(bloco, codPontoSelecionado);
+        renderizarInfoItemContratoAditivo(bloco, null, faces.length ? "Agora selecione a face existente deste CodPonto." : "Nenhuma face ativa foi encontrada para este CodPonto no contrato.");
+      } catch (erro) {
+        console.warn('selectCodPontoContratoItem: falhou ao carregar faces do contrato', erro);
+        renderizarInfoItemContratoAditivo(bloco, null, "Não foi possível carregar as faces deste CodPonto. Você ainda pode preencher pelo seletor manual abaixo.");
+      }
+    });
+
+    selectCodFaceContratoItem?.addEventListener('change', async () => {
+      const fluxo = obterFluxoContratoAtual();
+      const codPontoSelecionado = safeStr(selectCodPontoContratoItem?.value || "").trim();
+      const codFaceSelecionado = safeStr(selectCodFaceContratoItem?.value || "").trim().toUpperCase();
+      bloco.__codPontoContratoItemDesejado = codPontoSelecionado;
+      bloco.__codFaceContratoItemDesejada = codFaceSelecionado;
+
+      if (!fluxo.id_contrato || fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO) return;
+      if (!codPontoSelecionado || !codFaceSelecionado || codPontoSelecionado === VALOR_OPCAO_NOVO_PAINEL) return;
+
+      const chaveFaces = `${idNum(fluxo.id_contrato)}|${safeStr(codPontoSelecionado).trim()}`;
+      const facesDisponiveis = facesPorContratoPontoCache.get(chaveFaces) || await carregarFacesDoContrato(fluxo.id_contrato, codPontoSelecionado);
+      const faceSelecionada = (Array.isArray(facesDisponiveis) ? facesDisponiveis : []).find((face) => {
+        return safeStr(face?.cod_face || "").trim().toUpperCase() === codFaceSelecionado;
+      }) || null;
+
+      if (!faceSelecionada) {
+        renderizarInfoItemContratoAditivo(bloco, null, "Face não encontrada no cache do contrato. Tente selecionar novamente o CodPonto.");
+        return;
+      }
+
+      const aplicado = await aplicarPainelFaceContratoNoBloco(bloco, codPontoSelecionado, codFaceSelecionado, faceSelecionada);
+      if (aplicado) {
+        selecionarValorOuAcrescentarOpcao(selectCodPontoContratoCard, codPontoSelecionado, codPontoSelecionado);
+        if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = false;
+        const facesGlobais = facesPorContratoPontoCache.get(chaveFaces) || [];
+        montarSelectFacesContratoCard(facesGlobais);
+        selecionarValorOuAcrescentarOpcao(selectCodFaceContratoCard, codFaceSelecionado, faceSelecionada.label || codFaceSelecionado);
+        setMensagemFluxoContrato(`Item do contrato carregado neste bloco: ${montarTextoResumoItemContratoAditivo(faceSelecionada)}.`, "sucesso");
+      }
     });
 
 
@@ -6562,6 +7360,15 @@ function formatarNumeroParaInput(valor){
     });
 
     selectFace?.addEventListener('change', async () => {
+      const codFaceManual = safeStr(selectFace?.value || "").trim().toUpperCase();
+      const itemContratoAtual = bloco.__itemContratoAditivoSelecionado || null;
+      const codFaceContratoAtual = safeStr(itemContratoAtual?.cod_face || itemContratoAtual?.CodFace || "").trim().toUpperCase();
+
+      if (itemContratoAtual && codFaceManual && codFaceManual !== codFaceContratoAtual) {
+        bloco.__itemContratoAditivoSelecionado = null;
+        renderizarInfoItemContratoAditivo(bloco, null, "Você alterou manualmente a face neste bloco. Para usar um item existente do contrato, selecione novamente CodPonto e Face no seletor do aditivo.");
+      }
+
       atualizarSelectFaceVisualDoBloco(bloco);
       await atualizarComercialDoBloco(bloco);
     });
@@ -6582,6 +7389,7 @@ function formatarNumeroParaInput(valor){
       atualizarSelectFaceVisualDoBloco(bloco);
     }
 
+    atualizarVisibilidadeContratoAditivoDoBloco(bloco);
     return bloco;
   }
 
@@ -7012,6 +7820,10 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       if (!idPainel && !codFace && !idPreco && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
 
       const precoVendaAtualContrato = Number(bloco.__dadosContratoAtual?.preco_venda_atual);
+      const itemContratoAditivo = bloco.__itemContratoAditivoSelecionado || null;
+      const idItemContratoAditivo = idNum(itemContratoAditivo?.id_item_contrato ?? itemContratoAditivo?.IDFatoControleContratosItensEuromidia ?? 0) || null;
+      const codPontoContratoAditivo = safeStr(itemContratoAditivo?.cod_ponto ?? itemContratoAditivo?.CodPonto ?? "").trim() || null;
+      const codFaceContratoAditivo = safeStr(itemContratoAditivo?.cod_face ?? itemContratoAditivo?.CodFace ?? "").trim().toUpperCase() || null;
 
       itens.push({
         id_painel: idPainel || null,
@@ -7022,6 +7834,10 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
         preco_venda_atual_contrato: Number.isFinite(precoVendaAtualContrato) ? precoVendaAtualContrato : null,
         data_inicio: dataInicio || null,
         data_fim: dataFim || null,
+        origem_aditivo: itemContratoAditivo ? "ITEM_CONTRATO_EXISTENTE" : null,
+        id_item_contrato_aditivo: idItemContratoAditivo,
+        cod_ponto_contrato_aditivo: codPontoContratoAditivo,
+        cod_face_contrato_aditivo: codFaceContratoAditivo,
       });
     }
     return itens;
@@ -7033,6 +7849,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     const arr = Array.isArray(lista) && lista.length ? lista : [null];
     arr.forEach(item => painelFaceLista.appendChild(criarPainelFaceItem(item)));
     atualizarTitulosPainelFace();
+    sincronizarSeletoresContratoAditivoEmTodosBlocos();
   }
 
   function ativarPainelFaceSeNecessario(){
@@ -8252,6 +9069,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     versaoConcorrenciaCardAberto = "";
     cardAbertoConflitoExterno = false;
     estadoInicialCardAberto = null;
+    fluxoContratoPersistidoCardAberto = null;
     if (modalCard) {
       modalCard.dataset.idFaseAtual = "";
     }
@@ -8750,6 +9568,10 @@ async function moverCard(idCard, idFasePara, posicao) {
       reconciliarBuscaEmpresaDigitada();
     }
 
+    if (comboContratoCard && !wrapSelectContratoCard?.hidden && !comboContratoCard.contains(evento.target)) {
+      reconciliarBuscaContratoDigitada();
+    }
+
     if (comboAgenciaCard && !comboAgenciaCard.contains(evento.target)) {
       reconciliarBuscaAgenciaDigitada();
     }
@@ -8795,6 +9617,51 @@ async function moverCard(idCard, idFasePara, posicao) {
 
   inputMarcaCard?.addEventListener("input", () => {
     agendarSincronizacaoFormularioSolicitacao();
+  });
+
+  inputContratoCardBusca?.addEventListener("focus", () => {
+    abrirListaContratosCombobox();
+  });
+
+  inputContratoCardBusca?.addEventListener("click", () => {
+    abrirListaContratosCombobox();
+  });
+
+  inputContratoCardBusca?.addEventListener("input", () => {
+    abrirListaContratosCombobox();
+    renderizarListaContratosCombobox(inputContratoCardBusca.value || "");
+  });
+
+  inputContratoCardBusca?.addEventListener("keydown", (evento) => {
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      const primeira = contratosResultadoComboboxAtual[0] || filtrarContratosCombobox(inputContratoCardBusca.value || "")[0] || null;
+      if (primeira?.id_contrato) {
+        selecionarContratoCombobox(primeira.id_contrato, true);
+        return;
+      }
+      reconciliarBuscaContratoDigitada();
+      return;
+    }
+
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      sincronizarBuscaContratoComSelect();
+      fecharListaContratosCombobox();
+      return;
+    }
+
+    if (evento.key === "ArrowDown") {
+      abrirListaContratosCombobox();
+    }
+  });
+
+  btnToggleContratoCard?.addEventListener("click", () => {
+    if (listaContratoCardBusca?.hidden) abrirListaContratosCombobox();
+    else {
+      sincronizarBuscaContratoComSelect();
+      fecharListaContratosCombobox();
+    }
   });
 
   selectContratoCard?.addEventListener("change", async () => {
@@ -9626,7 +10493,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       atualizarVisibilidadeFormularioSolicitacaoContrato();
     }
     atualizarCabecalhoModalCard(cardNormalizado);
-    const fluxoPersistido = extrairFluxoContratoPersistidoDoCard(cardNormalizado);
+    const fluxoPersistido = extrairFluxoContratoPersistidoDoCard(cardNormalizado, {
+      tags: Array.isArray(j.tags) ? j.tags : [],
+      snapshot: j?.solicitacao_snapshot_editavel || null,
+      painelFaces: Array.isArray(j.painel_faces) ? j.painel_faces : (Array.isArray(j.painelFaces) ? j.painelFaces : [])
+    });
+    fluxoContratoPersistidoCardAberto = Object.assign({}, fluxoPersistido || {});
 
     /*
      * Aqui eu uso a versão canônica já normalizada pelo próprio template.
@@ -10034,7 +10906,11 @@ async function moverCard(idCard, idFasePara, posicao) {
         margem_valor: safeStr(item?.MargemValor ?? item?.margem_valor ?? "").trim(),
         margem_percentual: safeStr(item?.MargemPercentual ?? item?.margem_percentual ?? "").trim(),
         data_inicio: safeStr(item?.DataInicio ?? item?.data_inicio ?? "").trim(),
-        data_fim: safeStr(item?.DataFim ?? item?.data_fim ?? "").trim()
+        data_fim: safeStr(item?.DataFim ?? item?.data_fim ?? "").trim(),
+        origem_aditivo: safeStr(item?.OrigemAditivo ?? item?.origem_aditivo ?? "").trim(),
+        id_item_contrato_aditivo: idNum(item?.IDFatoControleContratosItensEuromidia ?? item?.id_item_contrato_aditivo ?? item?.id_item_contrato ?? 0) || null,
+        cod_ponto_contrato_aditivo: safeStr(item?.CodPontoContratoAditivo ?? item?.cod_ponto_contrato_aditivo ?? "").trim(),
+        cod_face_contrato_aditivo: safeStr(item?.CodFaceContratoAditivo ?? item?.cod_face_contrato_aditivo ?? "").trim().toUpperCase()
       }))
       .filter((item) => {
         return !!(
@@ -10042,16 +10918,16 @@ async function moverCard(idCard, idFasePara, posicao) {
           item.ano_custo || item.custo_tabela || item.id_tabela_preco || item.periodo_exibicao ||
           item.exibicoes_dia || item.valor_tabela || item.tabela || item.politica_trocas ||
           item.valor_troca || item.novo_valor || item.percentual_desconto || item.valor_venda_final ||
-          item.margem_valor || item.margem_percentual || item.data_inicio || item.data_fim
+          item.margem_valor || item.margem_percentual || item.data_inicio || item.data_fim ||
+          item.origem_aditivo || item.id_item_contrato_aditivo || item.cod_ponto_contrato_aditivo || item.cod_face_contrato_aditivo
         );
       })
       .sort((a, b) => a.ordem - b.ordem);
   }
 
   function montarEstadoEdicaoCardAtual(){
-    const fluxoContratoAtual = obterFluxoContratoAtual();
-    const usarDadosNovoContrato = !!fluxoContratoAtual.usar_novo_contrato;
-    const usarVinculoContratoExistente = !usarDadosNovoContrato && !!idNum(fluxoContratoAtual.id_contrato);
+    const fluxoContratoAtual = resolverFluxoContratoParaSalvamento();
+    const usarVinculoContratoExistente = !fluxoContratoAtual.usar_novo_contrato && !!idNum(fluxoContratoAtual.id_contrato);
     const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
     const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
     const solicitacaoContrato = coletarFormularioSolicitacaoContrato();
@@ -10072,9 +10948,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       id_empresa_agencia: selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
       id_empresa_cliente_direto: selectClienteDiretoCard?.value ? Number(selectClienteDiretoCard.value) : null,
       id_empresa_bureau: selectBureauCard?.value ? Number(selectBureauCard.value) : null,
-      marca: usarDadosNovoContrato ? (safeStr(inputMarcaCard?.value || "").trim() || null) : null,
-      telefone: usarDadosNovoContrato ? (normalizarTelefoneContato(inputTelefoneCard?.value || "") || null) : null,
-      email: usarDadosNovoContrato ? (safeStr(inputEmailCard?.value || "").trim() || null) : null,
+      marca: safeStr(inputMarcaCard?.value || "").trim() || null,
+      telefone: normalizarTelefoneContato(inputTelefoneCard?.value || "") || null,
+      email: safeStr(inputEmailCard?.value || "").trim() || null,
       solicitacao_contrato: solicitacaoContrato,
       painel_faces: painelFaces
     };

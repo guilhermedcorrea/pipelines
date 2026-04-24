@@ -43,6 +43,7 @@ x-airflow-common: &airflow-common
     TZ: America/Sao_Paulo
     PYTHONPATH: /opt/airflow:/opt/airflow/src
     CAMINHO_STATIC_FLASK: /opt/airflow/FlaskApp/app/static
+    CAMINHO_BASE_FLASK_APP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags
@@ -57,7 +58,8 @@ x-airflow-common: &airflow-common
     - ./airflow/sharepoint_teste:/opt/airflow/sharepoint_teste
     - ./FlaskApp/app/static:/opt/airflow/FlaskApp/app/static:ro
     - "/run/desktop/mnt/host/c/CargaSQL/Euromidia/Contratos:/opt/airflow/Dados/Euromidia/Comercial/CargasSQL"
-    - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+    - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin:rw
+    - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis:rw
 
   user: "${AIRFLOW_UID}:0"
 
@@ -203,6 +205,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+      PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
     expose:
       - "8000"
     extra_hosts:
@@ -212,6 +215,7 @@ services:
         condition: service_healthy
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+      - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 
@@ -234,6 +238,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+      PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
     command: python -m celery -A app.celery_app.celery_app worker -Q checkin_upload -l info --concurrency=2
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -244,6 +249,7 @@ services:
         condition: service_started
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+      - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 

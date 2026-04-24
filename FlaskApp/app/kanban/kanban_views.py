@@ -2276,7 +2276,11 @@ def _listar_cod_ponto_por_contrato(id_contrato: int) -> list[dict[str, object]]:
             i.CodPonto,
             MAX(i.CidadeExibicao) AS CidadeExibicao,
             MAX(i.Tipo) AS TipoPainel,
-            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(i.CodFace, ''))), '')) AS QuantidadeFaces
+            COUNT(DISTINCT NULLIF(LTRIM(RTRIM(ISNULL(i.CodFace, ''))), '')) AS QuantidadeFaces,
+            MIN(i.DataInicioPrevisto) AS DataInicioPrevisto,
+            MAX(i.DataTerminoPrevisto) AS DataTerminoPrevisto,
+            SUM(i.FaturamentoLiquidoMensal) AS FaturamentoLiquidoMensalTotal,
+            SUM(i.FaturamentoBrutoMensal) AS FaturamentoBrutoMensalTotal
         FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
         WHERE i.IDFatoControleContratoEuromidia = :id_contrato
           AND ISNULL(i.BitAtivo, 1) = 1
@@ -2290,11 +2294,46 @@ def _listar_cod_ponto_por_contrato(id_contrato: int) -> list[dict[str, object]]:
     resultado: list[dict[str, object]] = []
     for row in rows:
         item = dict(row)
-        item["label"] = (
-            f"{item.get('CodPonto')}"
-            f" | {str(item.get('TipoPainel') or '').strip()}"
-            f" | {str(item.get('CidadeExibicao') or '').strip()}"
-        ).strip(" |")
+
+        item["FaturamentoLiquidoMensalTotal"] = _decimal_para_float(item.get("FaturamentoLiquidoMensalTotal"))
+        item["FaturamentoBrutoMensalTotal"] = _decimal_para_float(item.get("FaturamentoBrutoMensalTotal"))
+
+        data_inicio_previsto = item.get("DataInicioPrevisto")
+        data_termino_previsto = item.get("DataTerminoPrevisto")
+
+        if hasattr(data_inicio_previsto, "date"):
+            try:
+                data_inicio_previsto = data_inicio_previsto.date()
+            except Exception:
+                pass
+
+        if hasattr(data_termino_previsto, "date"):
+            try:
+                data_termino_previsto = data_termino_previsto.date()
+            except Exception:
+                pass
+
+        item["DataInicioPrevisto"] = (
+            data_inicio_previsto.isoformat()
+            if hasattr(data_inicio_previsto, "isoformat")
+            else (str(data_inicio_previsto) if data_inicio_previsto not in (None, "") else None)
+        )
+        item["DataTerminoPrevisto"] = (
+            data_termino_previsto.isoformat()
+            if hasattr(data_termino_previsto, "isoformat")
+            else (str(data_termino_previsto) if data_termino_previsto not in (None, "") else None)
+        )
+
+        partes_label = [
+            str(item.get("CodPonto") or "").strip(),
+            str(item.get("TipoPainel") or "").strip(),
+            str(item.get("CidadeExibicao") or "").strip(),
+        ]
+
+        if item.get("QuantidadeFaces") not in (None, "", 0):
+            partes_label.append(f"{item.get('QuantidadeFaces')} face(s)")
+
+        item["label"] = " | ".join([parte for parte in partes_label if str(parte).strip()])
         resultado.append(item)
 
     return resultado
@@ -2309,13 +2348,21 @@ def _listar_cod_ponto_por_contrato(id_contrato: int) -> list[dict[str, object]]:
 def _listar_cod_face_por_contrato_ponto(id_contrato: int, cod_ponto: str) -> list[dict[str, object]]:
     sql = text(f"""
         SELECT
+            MAX(i.IDFatoControleContratosItensEuromidia) AS IDFatoControleContratosItensEuromidia,
             MAX(i.CodPonto) AS CodPonto,
             i.CodFace,
             MAX(i.Tipo) AS TipoPainel,
             MAX(i.CidadeExibicao) AS CidadeExibicao,
             MAX(i.Cota) AS Cota,
+            MAX(i.FaturamentoBrutoMensal) AS FaturamentoBrutoMensal,
             MAX(i.FaturamentoLiquidoMensal) AS FaturamentoLiquidoMensal,
+            MAX(i.FaturamentoLiquidoFinalMensal) AS FaturamentoLiquidoFinalMensal,
+            MAX(i.TotalBrutoContrato) AS TotalBrutoContrato,
             MAX(i.TotalLiquidoContratoAGBRCTACORDO) AS TotalLiquidoContratoAGBRCTACORDO,
+            MAX(i.PercentualPermuta) AS PercentualPermuta,
+            MAX(i.ValorPermuta) AS ValorPermuta,
+            MAX(i.NumeroParcelas) AS NumeroParcelas,
+            MAX(i.DataInicioVencimento) AS DataInicioVencimento,
             MAX(i.DataInicioPrevisto) AS DataInicioPrevisto,
             MAX(i.DataTerminoPrevisto) AS DataTerminoPrevisto,
             MAX(i.IDPainelEuromidia) AS IDPainelEuromidia,
@@ -2343,28 +2390,38 @@ def _listar_cod_face_por_contrato_ponto(id_contrato: int, cod_ponto: str) -> lis
 
         preco_venda_atual = item.get("TotalLiquidoContratoAGBRCTACORDO")
         if preco_venda_atual in (None, ""):
+            preco_venda_atual = item.get("FaturamentoLiquidoFinalMensal")
+        if preco_venda_atual in (None, ""):
             preco_venda_atual = item.get("FaturamentoLiquidoMensal")
 
-        item["TotalLiquidoContratoAGBRCTACORDO"] = _decimal_para_float(preco_venda_atual)
-        item["FaturamentoLiquidoMensal"] = _decimal_para_float(item.get("FaturamentoLiquidoMensal"))
-        item["preco_venda_atual"] = item.get("TotalLiquidoContratoAGBRCTACORDO")
+        for campo_decimal in (
+            "FaturamentoBrutoMensal",
+            "FaturamentoLiquidoMensal",
+            "FaturamentoLiquidoFinalMensal",
+            "TotalBrutoContrato",
+            "TotalLiquidoContratoAGBRCTACORDO",
+            "PercentualPermuta",
+            "ValorPermuta",
+        ):
+            item[campo_decimal] = _decimal_para_float(item.get(campo_decimal))
 
-        data_inicio_previsto = item.get("DataInicioPrevisto")
-        data_termino_previsto = item.get("DataTerminoPrevisto")
+        item["preco_venda_atual"] = _decimal_para_float(preco_venda_atual)
+        item["valor_mensal"] = item.get("FaturamentoLiquidoMensal")
 
-        if hasattr(data_inicio_previsto, "date"):
-            try:
-                data_inicio_previsto = data_inicio_previsto.date()
-            except Exception:
-                pass
-        if hasattr(data_termino_previsto, "date"):
-            try:
-                data_termino_previsto = data_termino_previsto.date()
-            except Exception:
-                pass
+        for campo_data in ("DataInicioPrevisto", "DataTerminoPrevisto", "DataInicioVencimento"):
+            valor_data = item.get(campo_data)
 
-        item["DataInicioPrevisto"] = data_inicio_previsto.isoformat() if hasattr(data_inicio_previsto, "isoformat") else (str(data_inicio_previsto) if data_inicio_previsto not in (None, "") else None)
-        item["DataTerminoPrevisto"] = data_termino_previsto.isoformat() if hasattr(data_termino_previsto, "isoformat") else (str(data_termino_previsto) if data_termino_previsto not in (None, "") else None)
+            if hasattr(valor_data, "date"):
+                try:
+                    valor_data = valor_data.date()
+                except Exception:
+                    pass
+
+            item[campo_data] = (
+                valor_data.isoformat()
+                if hasattr(valor_data, "isoformat")
+                else (str(valor_data) if valor_data not in (None, "") else None)
+            )
 
         partes_label: list[str] = [str(item.get("CodFace") or "").strip()]
 
@@ -2375,6 +2432,11 @@ def _listar_cod_face_por_contrato_ponto(id_contrato: int, cod_ponto: str) -> lis
         cota = item.get("Cota")
         if cota not in (None, ""):
             partes_label.append(f"Cota {cota}")
+
+        if item.get("DataInicioPrevisto") or item.get("DataTerminoPrevisto"):
+            partes_label.append(
+                f"{item.get('DataInicioPrevisto') or '—'} até {item.get('DataTerminoPrevisto') or '—'}"
+            )
 
         valor_label = item.get("preco_venda_atual")
         if valor_label not in (None, ""):
@@ -2582,7 +2644,9 @@ def _sincronizar_tipo_contrato_card(
     tag_novo = _obter_tag_tipo_contrato(id_kanban, TIPO_SOLICITACAO_NOVO)
     tag_aditivo = _obter_tag_tipo_contrato(id_kanban, TIPO_SOLICITACAO_ADITIVO)
     tag_desejada = tag_aditivo if tipo_norm == TIPO_SOLICITACAO_ADITIVO else tag_novo
-    deve_exibir_tag_tipo = aplicar_tags and int(id_fase_atual or 0) == 4
+    # A tag de tipo do contrato precisa refletir o estado persistido do card.
+    # Se eu remover a tag fora da fase 4, o card perde o rótulo Aditivo no segundo salvamento.
+    deve_exibir_tag_tipo = bool(aplicar_tags)
 
     campos_update: list[str] = []
     parametros_update: dict[str, object] = {"id_card": int(id_card)}
@@ -2622,16 +2686,15 @@ def _sincronizar_tipo_contrato_card(
     tags_adicionadas: list[int] = []
     tags_removidas: list[int] = []
 
-    for tag in (tag_novo, tag_aditivo):
-        id_tag = int(tag.get("IDDimKanbanTag") or 0) if tag else 0
-        if id_tag <= 0:
-            continue
+    tag_oposta = tag_novo if tipo_norm == TIPO_SOLICITACAO_ADITIVO else tag_aditivo
+    id_tag_oposta = int(tag_oposta.get("IDDimKanbanTag") or 0) if tag_oposta else 0
+    if id_tag_oposta > 0:
         if _remover_tag_do_card(
             id_card=int(id_card),
-            id_tag=id_tag,
+            id_tag=id_tag_oposta,
             id_usuario=int(id_usuario),
         ):
-            tags_removidas.append(id_tag)
+            tags_removidas.append(id_tag_oposta)
 
     if deve_exibir_tag_tipo and tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
         id_tag_desejada = int(tag_desejada.get("IDDimKanbanTag") or 0)
@@ -5895,9 +5958,12 @@ def _obter_ultima_solicitacao_contrato_por_card(id_card: int) -> dict[str, Any] 
     resultado = {
         "IDFatoSolicitacaoContratoEuromidia": header.get("IDFatoSolicitacaoContratoEuromidia"),
         "IDFatoKanbanCard": header.get("IDFatoKanbanCard"),
-        "IDFatoControleContratosEuromidia": header.get("IDFatoControleContratosEuromidia"),
+        "IDFatoControleContratosEuromidia": (
+            header.get("IDFatoControleContratosEuromidia")
+            or item.get("IDFatoControleContratosEuromidia")
+        ),
         "IDDimStatusContratos": header.get("IDDimStatusContratos"),
-        "TipoSolicitacao": header.get("TipoSolicitacao"),
+        "TipoSolicitacao": header.get("TipoSolicitacao") or item.get("TipoSolicitacao"),
         "IDEmpresa": header.get("IDEmpresa"),
         "CNPJ": header.get("CNPJ"),
         "RazaoSocial": header.get("RazaoSocial"),
@@ -7487,6 +7553,11 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     id_usuario: int,
     id_empresa_proprietaria: int,
     dados_formulario_solicitacao: dict[str, Any] | None = None,
+    tipo_contrato_fallback: object = None,
+    id_contrato_existente_fallback: object = None,
+    cod_ponto_contrato_fallback: object = None,
+    cod_face_contrato_fallback: object = None,
+    id_empresa_relacionada_fallback: object = None,
 ) -> dict[str, Any]:
     """
     Eu sincronizo a solicitação de contrato após movimento de fase do card.
@@ -7502,35 +7573,67 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
 
     id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
-    id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
 
-    tipo_solicitacao = (
+    id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
+    if id_empresa_relacionada in (None, "", 0) and id_empresa_relacionada_fallback not in (None, "", 0):
+        id_empresa_relacionada = int(id_empresa_relacionada_fallback)
+
+    snapshot_solicitacao_existente = _obter_ultima_solicitacao_contrato_por_card(int(id_card)) or {}
+
+    tipo_solicitacao_bruto = (
         card.get("tipo_contrato")
+        or card.get("tipo_contrato_card")
         or card.get("TipoSolicitacao")
+        or tipo_contrato_fallback
+        or snapshot_solicitacao_existente.get("TipoSolicitacao")
         or (TIPO_SOLICITACAO_ADITIVO if card.get("BitAditivo") else None)
         or (TIPO_SOLICITACAO_NOVO if card.get("BitContratoNovo") else None)
     )
 
+    tipo_solicitacao = _normalizar_tipo_contrato_card(tipo_solicitacao_bruto)
+
     id_contrato_existente = (
         card.get("IDFatoControleContratosEuromidia")
         or card.get("IDFatoControleContratoEuromidia")
+        or id_contrato_existente_fallback
+        or snapshot_solicitacao_existente.get("IDFatoControleContratosEuromidia")
+        or snapshot_solicitacao_existente.get("IDFatoControleContratoEuromidia")
         or None
     )
 
     cod_ponto_contrato = (
         card.get("CodPontoContrato")
         or card.get("cod_ponto_contrato")
+        or cod_ponto_contrato_fallback
+        or snapshot_solicitacao_existente.get("SolicitacaoCodPonto")
+        or snapshot_solicitacao_existente.get("CodPonto")
         or None
     )
 
     cod_face_contrato = (
         card.get("CodFaceContrato")
         or card.get("cod_face_contrato")
+        or cod_face_contrato_fallback
+        or snapshot_solicitacao_existente.get("SolicitacaoCodFace")
+        or snapshot_solicitacao_existente.get("CodFace")
         or None
     )
 
     if tipo_solicitacao not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
-        return {"sincronizado": False, "motivo": "card_sem_tipo_solicitacao"}
+        if id_contrato_existente not in (None, "", 0):
+            tipo_solicitacao = TIPO_SOLICITACAO_ADITIVO
+        else:
+            tipo_solicitacao = TIPO_SOLICITACAO_NOVO
+
+    current_app.logger.info(
+        "KANBAN: sincronizacao solicitacao pos-salvar | id_card=%s | tipo=%s | id_contrato=%s | cod_ponto=%s | cod_face=%s | origem_tipo=%r",
+        id_card,
+        tipo_solicitacao,
+        id_contrato_existente,
+        cod_ponto_contrato,
+        cod_face_contrato,
+        tipo_solicitacao_bruto,
+    )
 
     resultado = _sincronizar_snapshot_solicitacao_contrato_do_card(
         id_card=int(id_card),
@@ -12813,6 +12916,21 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         if not str(card_dict.get("TipoSolicitacao") or "").strip():
             card_dict["TipoSolicitacao"] = str(snapshot_solicitacao.get("TipoSolicitacao") or "").strip() or None
 
+        tipo_solicitacao_snapshot = str(card_dict.get("TipoSolicitacao") or "").strip().upper()
+        if tipo_solicitacao_snapshot in {"ADITIVO", "ADITIVO DE CONTRATO"}:
+            card_dict["BitAditivo"] = 1
+            card_dict["BitContratoNovo"] = 0
+            card_dict["tipo_contrato"] = "ADITIVO"
+            card_dict["tipo_contrato_card"] = "ADITIVO"
+        elif tipo_solicitacao_snapshot in {"NOVO CONTRATO", "NOVO_CONTRATO"}:
+            card_dict["BitAditivo"] = 0
+            card_dict["BitContratoNovo"] = 1
+            card_dict["tipo_contrato"] = "NOVO_CONTRATO"
+            card_dict["tipo_contrato_card"] = "NOVO_CONTRATO"
+        elif card_dict.get("IDFatoControleContratosEuromidia") not in (None, "", 0):
+            card_dict["tipo_contrato"] = "ADITIVO"
+            card_dict["tipo_contrato_card"] = "ADITIVO"
+
         if snapshot_solicitacao.get("SolicitacaoPrecoVendaAtual") not in (None, ""):
             card_dict["preco_venda_atual_contrato"] = snapshot_solicitacao.get("SolicitacaoPrecoVendaAtual")
 
@@ -13972,6 +14090,41 @@ def api_card_detalhe(id_card: int):
 
     if card_payload.get("IDFatoKanbanCard") is None:
         card_payload["IDFatoKanbanCard"] = int(id_card)
+
+    tags_payload_tipo = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+    tem_tag_aditivo_payload = any(
+        int((tag or {}).get("IDDimKanbanTag") or 0) == ID_TAG_TIPO_CONTRATO_ADITIVO
+        or _normalizar_texto_comparacao((tag or {}).get("NomeTag")) == "aditivo"
+        for tag in tags_payload_tipo
+        if isinstance(tag, dict)
+    )
+    tem_tag_novo_payload = any(
+        int((tag or {}).get("IDDimKanbanTag") or 0) == ID_TAG_TIPO_CONTRATO_NOVO
+        or _normalizar_texto_comparacao((tag or {}).get("NomeTag")) == "novo contrato"
+        for tag in tags_payload_tipo
+        if isinstance(tag, dict)
+    )
+
+    id_contrato_payload_tipo = _int_ou_none(
+        card_payload.get("IDFatoControleContratosEuromidia")
+        or card_payload.get("IDFatoControleContratoEuromidia")
+    )
+
+    if tem_tag_aditivo_payload:
+        card_payload["tipo_contrato"] = TIPO_SOLICITACAO_ADITIVO
+        card_payload["tipo_contrato_card"] = TIPO_SOLICITACAO_ADITIVO
+        card_payload["BitAditivo"] = 1
+        card_payload["BitContratoNovo"] = 0
+    elif id_contrato_payload_tipo and not tem_tag_novo_payload:
+        card_payload["tipo_contrato"] = TIPO_SOLICITACAO_ADITIVO
+        card_payload["tipo_contrato_card"] = TIPO_SOLICITACAO_ADITIVO
+        card_payload["BitAditivo"] = 1
+        card_payload["BitContratoNovo"] = 0
+    elif tem_tag_novo_payload and not id_contrato_payload_tipo:
+        card_payload["tipo_contrato"] = TIPO_SOLICITACAO_NOVO
+        card_payload["tipo_contrato_card"] = TIPO_SOLICITACAO_NOVO
+        card_payload["BitAditivo"] = 0
+        card_payload["BitContratoNovo"] = 1
 
     payload["card"] = card_payload
 
@@ -23105,15 +23258,14 @@ def _resolver_campos_complementares_novo_contrato(
     telefone: Any,
     email: Any,
 ) -> dict[str, Any]:
-    """Eu resolvo os campos complementares usados somente em Novo Contrato."""
-    if not usar_novo_contrato:
-        return {
-            "id_empresa_agencia": None,
-            "marca": None,
-            "telefone": None,
-            "email": None,
-        }
+    """
+    Eu resolvo os campos comerciais do card.
 
+    Observação importante:
+    - apesar do nome histórico da função falar "novo contrato", Marca, Telefone
+      e Email não podem ser apagados quando o fluxo é Aditivo;
+    - esses campos pertencem ao atendimento/card e devem ser persistidos nos dois fluxos.
+    """
     id_empresa_agencia_int = _int_ou_none(id_empresa_agencia)
     if id_empresa_agencia not in (None, "", 0) and id_empresa_agencia_int is None:
         raise ValueError("Agência inválida.")
@@ -24781,6 +24933,13 @@ def api_card_criar(id_kanban: int):
         tipo_contrato_card = payload.get("tipo_contrato_card")
         cod_ponto_contrato = payload.get("cod_ponto_contrato")
         cod_face_contrato = payload.get("cod_face_contrato")
+
+        # Variáveis efetivas usadas no fluxo de criação.
+        # No update elas podem receber fallback do card já salvo; na criação ainda não existe card,
+        # então elas devem começar exatamente com o que veio do payload.
+        cod_ponto_contrato_payload = cod_ponto_contrato
+        cod_face_contrato_payload = cod_face_contrato
+
         id_empresa_agencia = payload.get("id_empresa_agencia")
         id_empresa_bureau = payload.get("id_empresa_bureau")
         id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
@@ -24836,8 +24995,8 @@ def api_card_criar(id_kanban: int):
 
         validacao_ponto_face = _validar_ponto_face_contrato(
             id_contrato_existente=contexto_tipo_contrato["id_contrato_existente"],
-            cod_ponto=cod_ponto_contrato,
-            cod_face=cod_face_contrato,
+            cod_ponto=cod_ponto_contrato_payload,
+            cod_face=cod_face_contrato_payload,
         )
 
         campos_complementares_novo_contrato = _resolver_campos_complementares_novo_contrato(
@@ -25661,10 +25820,38 @@ def api_card_atualizar(id_card: int):
             id_tipo_cliente_relacionamento_final = id_tipo_cliente_final_card
             id_origem_atendimento_relacionamento_final = id_origem_atendimento_final_card
 
+        id_contrato_existente_payload = id_contrato_existente
+        tipo_contrato_card_payload = tipo_contrato_card
+        cod_ponto_contrato_payload = cod_ponto_contrato
+        cod_face_contrato_payload = cod_face_contrato
+
+        # Proteção contra o segundo salvamento perder Aditivo:
+        # se o front vier sem contrato, mas o card já estava vinculado a um
+        # contrato existente, eu preservo o contexto atual do banco.
+        # Isso também cobre o caso em que o combobox visual cai para "Novo Contrato"
+        # e manda tipo_contrato_card=NOVO_CONTRATO indevidamente.
+        payload_veio_sem_contrato = id_contrato_existente_payload in (None, "", 0)
+        id_contrato_atual_card = _int_ou_none(card_atual.get("IDFatoControleContratosEuromidia"))
+        bit_aditivo_atual_card = bool(_int_ou_none(card_atual.get("BitAditivo")) or 0)
+
+        if payload_veio_sem_contrato and id_contrato_atual_card:
+            id_contrato_existente_payload = id_contrato_atual_card
+
+        if id_contrato_atual_card and bit_aditivo_atual_card and payload_veio_sem_contrato:
+            tipo_contrato_card_payload = TIPO_SOLICITACAO_ADITIVO
+        elif not str(tipo_contrato_card_payload or "").strip() and id_contrato_atual_card:
+            tipo_contrato_card_payload = TIPO_SOLICITACAO_ADITIVO if bit_aditivo_atual_card else tipo_contrato_card_payload
+
+        if cod_ponto_contrato_payload in (None, "") and str(card_atual.get("CodPontoContrato") or "").strip():
+            cod_ponto_contrato_payload = card_atual.get("CodPontoContrato")
+
+        if cod_face_contrato_payload in (None, "") and str(card_atual.get("CodFaceContrato") or "").strip():
+            cod_face_contrato_payload = card_atual.get("CodFaceContrato")
+
         contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
             id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
-            id_contrato_existente=id_contrato_existente,
-            tipo_contrato_card=tipo_contrato_card,
+            id_contrato_existente=id_contrato_existente_payload,
+            tipo_contrato_card=tipo_contrato_card_payload,
         )
 
         id_contrato_existente_final = (
@@ -26034,6 +26221,11 @@ def api_card_atualizar(id_card: int):
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_emp),
             dados_formulario_solicitacao=solicitacao_contrato_payload,
+            tipo_contrato_fallback=contexto_tipo_contrato.get("tipo_contrato"),
+            id_contrato_existente_fallback=contexto_tipo_contrato.get("id_contrato_existente"),
+            cod_ponto_contrato_fallback=validacao_ponto_face.get("cod_ponto"),
+            cod_face_contrato_fallback=validacao_ponto_face.get("cod_face"),
+            id_empresa_relacionada_fallback=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
         )
 
         sincronizacao_contato_contrato = None
