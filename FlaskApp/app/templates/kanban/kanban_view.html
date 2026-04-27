@@ -1263,6 +1263,63 @@
     line-height:1.2;
   }
 
+
+
+  /* Ajuste do multiselect de CodPonto/CodFace dentro do combobox de painel.
+     Mantém o dropdown dentro da largura do campo e evita scrollbar horizontal. */
+  .kb-painel-item-grid .kb-combobox[data-role="combo-painel"]{
+    min-width: 0;
+    width: 100%;
+  }
+
+  .kb-combobox-lista[data-role="lista-painel-busca"]{
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+
+  .kb-combobox-opcao.kb-painel-face-opcao{
+    display: grid !important;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .kb-painel-face-opcao-check{
+    width: 16px;
+    height: 16px;
+    margin: 2px 0 0 0;
+    flex: 0 0 auto;
+    accent-color: var(--kb-primary);
+    pointer-events: none;
+  }
+
+  .kb-painel-face-opcao-texto{
+    min-width: 0;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .kb-combobox-opcao.kb-painel-face-opcao strong,
+  .kb-combobox-opcao.kb-painel-face-opcao span{
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .kb-combobox-opcao.kb-painel-face-opcao strong{
+    white-space: nowrap;
+  }
+
   .kb-combobox-vazio{
     padding:12px;
     border-radius:12px;

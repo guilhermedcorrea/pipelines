@@ -184,6 +184,7 @@
   const wrapClienteDiretoCard = document.getElementById("wrapClienteDiretoCard");
   const wrapBureauCard = document.getElementById("wrapBureauCard");
   const wrapDadosNovoContrato = document.getElementById("wrapDadosNovoContrato");
+  const contratoFlowBox = document.getElementById("contratoFlowBox");
   const comboAgenciaCard = document.getElementById("comboAgenciaCard");
   const inputAgenciaCardBusca = document.getElementById("inputAgenciaCardBusca");
   const btnToggleAgenciaCard = document.getElementById("btnToggleAgenciaCard");
@@ -315,6 +316,8 @@
   let vendedorLogadoSolicitacaoAtual = null;
   let quantidadeItensFormularioSolicitacaoAtual = 1;
   let timerSincronizacaoFormularioSolicitacao = null;
+  let timestampBloqueioReconciliacaoPainelFace = 0;
+  const JANELA_BLOQUEIO_RECONCILIACAO_PAINEL_FACE_MS = 450;
 
   function idCampoSolicitacao(secao, nomeCampo, indice = null){
     const sufixoIndice = indice === null || indice === undefined ? "" : String(indice);
@@ -442,6 +445,8 @@
         formSolicitacaoContratoItem.appendChild(secao);
       }
     }
+
+    aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
   function obterInputFormularioSolicitacao(secao, nomeCampo, indice = null){
@@ -456,6 +461,67 @@
       return;
     }
     input.value = valor == null ? "" : String(valor);
+  }
+
+  function obterIdTipoClienteAtualFormularioSolicitacao(){
+    const valorSelect = idNum(selectTipoClienteDescontoCard?.value || 0);
+    if (valorSelect > 0) return valorSelect;
+
+    const card = obterCardPorId(cardAbertoId) || {};
+    return idNum(card.IDDimTipoCliente ?? card.IDDimKanbanTipoClienteDesconto ?? 0);
+  }
+
+  function campoFormularioSolicitacaoOcultoPorTipoCliente(nomeCampo, idTipoCliente){
+    const nome = safeStr(nomeCampo || "").trim();
+    const idTipo = idNum(idTipoCliente || 0);
+
+    /*
+     * Regra do formulário da solicitação, não dos selects de painel/face:
+     * - IDDimTipoCliente = 3 (Agência de Publicidade): a agência é a empresa principal do card.
+     *   Portanto não exibo Bureau/CNPJ Bureau no cabeçalho nem nos itens.
+     * - IDDimTipoCliente = 4 (Bureau): o bureau é a empresa principal do card.
+     *   Portanto não exibo Agência/CNPJ Agência no cabeçalho nem nos itens.
+     * - Cliente Direto mantém Agência e Bureau como campos complementares opcionais.
+     *
+     * Importante: esta regra não mexe em DataInicioPrevisto/DataTerminoPrevisto,
+     * CodPonto, CodFace, painel/face ou nas opções dos selects de contrato/aditivo.
+     */
+    if (idTipo === 3) {
+      return nome === "Bureau" || nome === "CnpjBureau";
+    }
+
+    if (idTipo === 4) {
+      return nome === "Agencia" || nome === "CnpjAgencia";
+    }
+
+    if (idTipo === 1) {
+      return nome === "Agencia" || nome === "CnpjAgencia" || nome === "Bureau" || nome === "CnpjBureau";
+    }
+
+    return false;
+  }
+
+  function aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente(){
+    const idTipoCliente = obterIdTipoClienteAtualFormularioSolicitacao();
+    const campos = [
+      ...(formSolicitacaoContratoHeader?.querySelectorAll("[data-campo-solicitacao]") || []),
+      ...(formSolicitacaoContratoItem?.querySelectorAll("[data-campo-solicitacao]") || []),
+    ];
+
+    campos.forEach((campo) => {
+      const nomeCampo = campo.dataset.campoSolicitacao || "";
+      const deveOcultar = campoFormularioSolicitacaoOcultoPorTipoCliente(nomeCampo, idTipoCliente);
+      const wrapCampo = campo.closest(".kb-contrato-campo");
+
+      if (wrapCampo) {
+        wrapCampo.hidden = deveOcultar;
+        wrapCampo.style.display = deveOcultar ? "none" : "";
+      }
+
+      if (deveOcultar) {
+        campo.value = "";
+      }
+    });
   }
 
   function obterTextoSelectSelecionado(selectEl){
@@ -506,9 +572,17 @@
 
   function coletarHeaderFormularioSolicitacaoExistente(){
     const header = {};
+    const idTipoCliente = obterIdTipoClienteAtualFormularioSolicitacao();
+
     CAMPOS_SOLICITACAO_HEADER.forEach((meta) => {
       const input = obterInputFormularioSolicitacao("Header", meta.nome);
       if (!input) return;
+
+      if (campoFormularioSolicitacaoOcultoPorTipoCliente(meta.nome, idTipoCliente)) {
+        header[meta.nome] = null;
+        return;
+      }
+
       const valor = safeStr(input.value || "").trim();
       header[meta.nome] = valor || null;
     });
@@ -517,12 +591,20 @@
 
   function coletarItensFormularioSolicitacaoExistentes(){
     const itens = [];
+    const idTipoCliente = obterIdTipoClienteAtualFormularioSolicitacao();
+
     for (let indice = 0; indice < quantidadeItensFormularioSolicitacaoAtual; indice += 1) {
       const item = {};
       let possuiValor = false;
       CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
         const input = obterInputFormularioSolicitacao("Item", meta.nome, indice);
         if (!input) return;
+
+        if (campoFormularioSolicitacaoOcultoPorTipoCliente(meta.nome, idTipoCliente)) {
+          item[meta.nome] = null;
+          return;
+        }
+
         const valor = safeStr(input.value || "").trim();
         item[meta.nome] = valor || null;
         if (valor) possuiValor = true;
@@ -674,12 +756,15 @@
 
       atualizarTempoExposicaoFormularioSolicitacao(indice);
     }
+
+    aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
   function limparFormularioSolicitacaoContrato(){
     renderizarFormularioSolicitacaoContrato(1);
     CAMPOS_SOLICITACAO_HEADER.forEach((meta) => setValorFormularioSolicitacao("Header", meta, ""));
     CAMPOS_SOLICITACAO_ITEM.forEach((meta) => setValorFormularioSolicitacao("Item", meta, "", 0));
+    aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
   function preencherFormularioSolicitacaoContrato(snapshotEditavel, card, vendedorLogado){
@@ -725,14 +810,42 @@
     return obterIdFaseAtualDoCardAbertoNoModal() === ID_FASE_FORMULARIO_CONTRATO;
   }
 
-  function atualizarVisibilidadeFormularioSolicitacaoContrato(){
-    if (!wrapFormularioSolicitacaoContrato) return;
+  function definirVisibilidadeContratoFlowBox(visivel){
+    const deveMostrar = !!visivel;
 
+    if (contratoFlowBox) {
+      contratoFlowBox.hidden = !deveMostrar;
+      contratoFlowBox.style.display = deveMostrar ? "" : "none";
+      contratoFlowBox.setAttribute("aria-hidden", deveMostrar ? "false" : "true");
+    }
+
+    if (!deveMostrar) {
+      if (wrapSelectContratoCard) wrapSelectContratoCard.hidden = true;
+      if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = true;
+      if (wrapSelectCodPontoContratoCard) wrapSelectCodPontoContratoCard.hidden = true;
+      if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = true;
+      fecharListaContratosCombobox();
+    }
+  }
+
+  function atualizarVisibilidadeFormularioSolicitacaoContrato(){
     const deveExibirFormularioContrato = modalCardEstaNaFaseQuatro();
 
-    wrapFormularioSolicitacaoContrato.hidden = !deveExibirFormularioContrato;
-    wrapFormularioSolicitacaoContrato.style.display = deveExibirFormularioContrato ? "" : "none";
-    wrapFormularioSolicitacaoContrato.setAttribute("aria-hidden", deveExibirFormularioContrato ? "false" : "true");
+    if (wrapFormularioSolicitacaoContrato) {
+      wrapFormularioSolicitacaoContrato.hidden = !deveExibirFormularioContrato;
+      wrapFormularioSolicitacaoContrato.style.display = deveExibirFormularioContrato ? "" : "none";
+      wrapFormularioSolicitacaoContrato.setAttribute("aria-hidden", deveExibirFormularioContrato ? "false" : "true");
+    }
+
+    definirVisibilidadeContratoFlowBox(deveExibirFormularioContrato);
+
+    try {
+      sincronizarSeletoresContratoAditivoEmTodosBlocos();
+    } catch (erro) {
+      if (!(erro instanceof ReferenceError)) {
+        console.warn("atualizarVisibilidadeFormularioSolicitacaoContrato: falha ao sincronizar seletores de aditivo", erro);
+      }
+    }
   }
 
   renderizarFormularioSolicitacaoContrato();
@@ -859,6 +972,73 @@
   function safeStr(v){
     if (v === null || v === undefined) return "";
     return String(v);
+  }
+
+  function montarUrlKanban(caminho){
+    const texto = safeStr(caminho || "").trim();
+    if (!texto) return texto;
+    if (/^https?:\/\//i.test(texto)) return texto;
+
+    const raiz = safeStr(SCRIPT_ROOT || "").replace(/\/+$/, "");
+    if (!raiz) return texto;
+    if (texto === raiz || texto.startsWith(`${raiz}/`)) return texto;
+
+    return texto.startsWith("/") ? `${raiz}${texto}` : `${raiz}/${texto}`;
+  }
+
+  function resumirTextoRespostaHttp(texto, limite = 300){
+    const bruto = safeStr(texto || "").replace(/\s+/g, " ").trim();
+    if (!bruto) return "";
+    return bruto.length > limite ? `${bruto.slice(0, limite)}...` : bruto;
+  }
+
+  async function fetchJsonKanban(url, opcoes = {}){
+    const resposta = await fetch(
+      montarUrlKanban(url),
+      Object.assign({ credentials: "same-origin" }, opcoes || {})
+    );
+
+    const texto = await resposta.text().catch(() => "");
+    let corpo = null;
+    let jsonValido = false;
+
+    if (safeStr(texto || "").trim()) {
+      try {
+        corpo = JSON.parse(texto);
+        jsonValido = true;
+      } catch (_erroJson) {
+        corpo = null;
+      }
+    }
+
+    return {
+      resposta,
+      corpo,
+      jsonValido,
+      textoBruto: texto,
+      resumoTexto: resumirTextoRespostaHttp(texto),
+      contentType: safeStr(resposta.headers?.get?.("content-type") || "")
+    };
+  }
+
+  function respostaJsonKanbanOk(resultado){
+    return !!(
+      resultado &&
+      resultado.resposta &&
+      resultado.resposta.ok &&
+      resultado.corpo &&
+      resultado.corpo.ok
+    );
+  }
+
+  function detalhesFalhaJsonKanban(resultado){
+    return {
+      http: resultado?.resposta?.status || 0,
+      body: resultado?.corpo || null,
+      jsonValido: !!resultado?.jsonValido,
+      contentType: resultado?.contentType || "",
+      preview: resultado?.resumoTexto || ""
+    };
   }
 
   const URL_FLATPICKR_JS = "https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js";
@@ -1684,19 +1864,19 @@
     if (id === 3) {
       return {
         labelEmpresaPrincipal: "Agência de Publicidade",
-        mostrarWrap: true,
+        mostrarWrap: false,
         mostrarAgencia: false,
-        mostrarClienteDireto: true,
-        mostrarBureau: true,
+        mostrarClienteDireto: false,
+        mostrarBureau: false,
       };
     }
 
     if (id === 4) {
       return {
         labelEmpresaPrincipal: "Bureau",
-        mostrarWrap: true,
-        mostrarAgencia: true,
-        mostrarClienteDireto: true,
+        mostrarWrap: false,
+        mostrarAgencia: false,
+        mostrarClienteDireto: false,
         mostrarBureau: false,
       };
     }
@@ -1729,18 +1909,18 @@
 
     if (idTipo === 3) {
       return {
-        principal: idAgencia || idEmpresa,
+        principal: idEmpresa || idAgencia,
         agencia: null,
-        clienteDireto: idEmpresa,
-        bureau: idBureau,
+        clienteDireto: null,
+        bureau: null,
       };
     }
 
     if (idTipo === 4) {
       return {
-        principal: idBureau || idEmpresa,
-        agencia: idAgencia,
-        clienteDireto: idEmpresa,
+        principal: idEmpresa || idBureau,
+        agencia: null,
+        clienteDireto: null,
         bureau: null,
       };
     }
@@ -2946,18 +3126,24 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
   async function carregarEmpresas() {
     if (empresasCatalogo.length) return;
 
-    const r = await fetch(`/kanban/api/empresas`, { credentials: "same-origin" });
-    const j = await r.json().catch(() => null);
+    try {
+      const resultado = await fetchJsonKanban(`/kanban/api/empresas`);
+      const j = resultado.corpo;
 
-    if (!r.ok || !j || !j.ok) {
-      console.warn("carregarEmpresas: falhou", { http: r.status, body: j });
-      return;
+      if (!respostaJsonKanbanOk(resultado)) {
+        console.warn("carregarEmpresas: resposta inválida", detalhesFalhaJsonKanban(resultado));
+        montarSelectEmpresas();
+        return;
+      }
+
+      empresasCatalogo = [];
+      empresasPorId = new Map();
+      registrarEmpresasNoCatalogo(Array.isArray(j.empresas) ? j.empresas : []);
+      montarSelectEmpresas();
+    } catch (erro) {
+      console.warn("carregarEmpresas: falhou", erro);
+      montarSelectEmpresas();
     }
-
-    empresasCatalogo = [];
-    empresasPorId = new Map();
-    registrarEmpresasNoCatalogo(Array.isArray(j.empresas) ? j.empresas : []);
-    montarSelectEmpresas();
   }
 
   function montarSelectEmpresas() {
@@ -3484,6 +3670,16 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     return !!safeStr(inputBusca?.value || "").trim();
   }
 
+  function coletarEmpresasRelacionadasPermitidasParaPayload(idTipoCliente){
+    const config = obterConfigEmpresasRelacionadasPorTipo(idTipoCliente);
+
+    return {
+      id_empresa_agencia: config.mostrarAgencia && selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
+      id_empresa_cliente_direto: config.mostrarClienteDireto && selectClienteDiretoCard?.value ? Number(selectClienteDiretoCard.value) : null,
+      id_empresa_bureau: config.mostrarBureau && selectBureauCard?.value ? Number(selectBureauCard.value) : null,
+    };
+  }
+
   function atualizarVisibilidadeEmpresasRelacionadasCard(){
     const config = obterConfigEmpresasRelacionadasPorTipo(selectTipoClienteDescontoCard?.value || "");
     const idFaseAtualModal = idNum(modalCard?.dataset?.idFaseAtual || obterCardPorId(cardAbertoId)?.IDDimKanbanFaseAtual || 0);
@@ -3835,7 +4031,128 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
   function sincronizarBuscaSegmentoComSelect(){
     if (!inputSegmentoCardBusca || !selectSegmentoCard) return;
-    inputSegmentoCardBusca.value = obterTextoCnaeSelecionado(selectSegmentoCard.value || "");
+
+    const textoSelecionado = obterTextoCnaeSelecionado(selectSegmentoCard.value || "");
+    if (textoSelecionado) {
+      inputSegmentoCardBusca.value = textoSelecionado;
+      return;
+    }
+
+    if (!safeStr(selectSegmentoCard.value || "").trim()) {
+      inputSegmentoCardBusca.value = "";
+    }
+  }
+
+  function registrarSegmentoDoCardNoCatalogo(card){
+    const origem = card || {};
+    const idSegmento = idNum(
+      origem.IDDimCnaes ??
+      origem.id_dim_cnaes ??
+      origem.IDDimCnae ??
+      origem.id_dim_cnae ??
+      0
+    );
+
+    if (!idSegmento) return "";
+
+    const cnaePadrao = safeStr(
+      origem.cnaepadrao ??
+      origem.CnaePadrao ??
+      origem.SegmentoCnae ??
+      origem.EmpresaCNAE ??
+      origem.CNAE ??
+      origem.cnae_empresa ??
+      ""
+    ).trim();
+
+    const classe = safeStr(
+      origem.SegmentoClasse ??
+      origem.EmpresaClasse ??
+      origem.Classe ??
+      origem.classe ??
+      ""
+    ).trim();
+
+    const descricao = safeStr(
+      origem.SegmentoDescricao ??
+      origem.DescricaoCnae ??
+      origem.EmpresaDescricaoCnae ??
+      origem.Descricao ??
+      origem.descricao ??
+      classe ??
+      ""
+    ).trim();
+
+    const setor = safeStr(
+      origem.SegmentoSetor ??
+      origem.EmpresaSetor ??
+      origem.Setor ??
+      origem.setor ??
+      ""
+    ).trim();
+
+    const macroSetor = safeStr(
+      origem.SegmentoMacroSetor ??
+      origem.EmpresaMacroSetor ??
+      origem.MacroSetor ??
+      origem.macro_setor ??
+      ""
+    ).trim();
+
+    const subClasse = safeStr(
+      origem.SegmentoSubClasse ??
+      origem.EmpresaSubClasse ??
+      origem.SubClasse ??
+      origem.sub_classe ??
+      ""
+    ).trim();
+
+    registrarCnaesNoCatalogo([{
+      IDDimCnaes: idSegmento,
+      cnaepadrao: cnaePadrao,
+      Classe: classe || descricao || `Segmento ${idSegmento}`,
+      Descricao: descricao || classe || `Segmento ${idSegmento}`,
+      Setor: setor,
+      MacroSetor: macroSetor,
+      SubClasse: subClasse
+    }]);
+
+    return String(idSegmento);
+  }
+
+  async function restaurarSegmentoCard(card){
+    if (!selectSegmentoCard) return;
+
+    const idSegmentoPersistido = registrarSegmentoDoCardNoCatalogo(card);
+    if (idSegmentoPersistido) {
+      await selecionarCnaePorIdComGarantia(idSegmentoPersistido, false);
+      if (safeStr(selectSegmentoCard.value || "").trim()) return;
+    }
+
+    const cnaeEmpresa = safeStr(
+      card?.EmpresaCNAE ??
+      card?.CNAE ??
+      card?.cnae_empresa ??
+      card?.cnaepadrao ??
+      ""
+    ).trim();
+
+    if (cnaeEmpresa) {
+      const cnaeEncontrado = await garantirCnaeNoCatalogoPorCodigo(cnaeEmpresa);
+      if (cnaeEncontrado?.IDDimCnaes) {
+        await selecionarCnaePorIdComGarantia(String(cnaeEncontrado.IDDimCnaes), false);
+        if (safeStr(selectSegmentoCard.value || "").trim()) return;
+      }
+    }
+
+    const classeFallback = safeStr(card?.SegmentoClasse ?? card?.EmpresaClasse ?? card?.Classe ?? "").trim();
+    const descricaoFallback = safeStr(card?.SegmentoDescricao ?? card?.DescricaoCnae ?? card?.Descricao ?? "").trim();
+
+    if (inputSegmentoCardBusca && (classeFallback || descricaoFallback)) {
+      inputSegmentoCardBusca.value = classeFallback && descricaoFallback
+        ? `${classeFallback} • ${descricaoFallback}`
+        : (classeFallback || descricaoFallback);
+    }
   }
 
   function normalizarCnaeComparacao(valor){
@@ -3956,10 +4273,16 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     try {
       const url = query.toString() ? `/kanban/api/cnaes/buscar?${query.toString()}` : `/kanban/api/cnaes/buscar`;
-      const r = await fetch(url, { credentials: "same-origin", signal: controller.signal });
-      const j = await r.json().catch(() => null);
+      const resultado = await fetchJsonKanban(url, { signal: controller.signal });
+      const j = resultado.corpo;
       if (cnaeBuscaRemotaController !== controller) return [];
-      if (!r.ok || !j || !j.ok) throw new Error((j && (j.msg || j.erro)) || `Erro ao buscar segmentos (HTTP ${r.status})`);
+
+      if (!respostaJsonKanbanOk(resultado)) {
+        console.warn("buscarCnaesRemoto: resposta inválida", detalhesFalhaJsonKanban(resultado));
+        renderizarListaCnaesCombobox(termo);
+        return [];
+      }
+
       const cnaes = registrarCnaesNoCatalogo(Array.isArray(j.cnaes) ? j.cnaes : []);
       renderizarListaCnaesCombobox(termo, { cnaes });
       return cnaes;
@@ -4150,6 +4473,10 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     else if (tipo === "sucesso") msgFluxoContrato.classList.add("is-sucesso");
     else if (tipo === "alerta") msgFluxoContrato.classList.add("is-alerta");
     else msgFluxoContrato.classList.add("is-info");
+  }
+
+  function textoAvisoEmpresaJaTemContratos() {
+    return "Essa empresa já tem contratos conosco. Caso precise fazer um aditivo, selecione o contrato abaixo; se for uma venda totalmente nova, pode continuar como Novo Contrato.";
   }
 
   function limparSelectComPlaceholder(selectEl, textoPlaceholder) {
@@ -4957,6 +5284,126 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     }) || null;
   }
 
+  function obterCodPontoManualDoBloco(bloco){
+    const painelSelecionado = obterPainelFaceSelecionadoDoBloco(bloco) || null;
+    const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
+    const idPainel = idNum(selectPainel?.value || painelSelecionado?.IDDimPaineisEuromidia || 0);
+    const painel = (idPainel ? paineisPorId.get(idPainel) : null) || null;
+    return safeStr(painelSelecionado?.CodPonto || painel?.CodPonto || "").trim();
+  }
+
+  function obterCodFaceManualDoBloco(bloco){
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const painelSelecionado = obterPainelFaceSelecionadoDoBloco(bloco) || null;
+    return safeStr(selectFace?.value || painelSelecionado?.CodFace || "").trim().toUpperCase();
+  }
+
+  function encontrarFaceContratoEmLista(faces, codFace){
+    const codFaceNormalizado = safeStr(codFace || "").trim().toUpperCase();
+    if (!codFaceNormalizado) return null;
+
+    return (Array.isArray(faces) ? faces : []).find((face) => {
+      return safeStr(face?.cod_face || face?.CodFace || "").trim().toUpperCase() === codFaceNormalizado;
+    }) || null;
+  }
+
+  function confirmarCarregamentoItemContratoExistente({ codPonto, codFace, faceSelecionada } = {}){
+    const codPontoTxt = safeStr(codPonto || faceSelecionada?.cod_ponto || faceSelecionada?.CodPonto || "").trim();
+    const codFaceTxt = safeStr(codFace || faceSelecionada?.cod_face || faceSelecionada?.CodFace || "").trim().toUpperCase();
+
+    return window.confirm(
+      `Você está selecionando um CodFace já existente nesse contrato.\n\n` +
+      `CodPonto: ${codPontoTxt || "—"}\n` +
+      `CodFace: ${codFaceTxt || "—"}\n\n` +
+      `Deseja prosseguir e alterar as inserções e o período?`
+    );
+  }
+
+  function itemContratoSelecionadoEhMesmoPainelFace(bloco, codPonto, codFace){
+    const item = bloco?.__itemContratoAditivoSelecionado || null;
+    if (!item) return false;
+
+    const codPontoItem = safeStr(item?.cod_ponto ?? item?.CodPonto ?? "").trim();
+    const codFaceItem = safeStr(item?.cod_face ?? item?.CodFace ?? "").trim().toUpperCase();
+
+    return codPontoItem === safeStr(codPonto || "").trim()
+      && codFaceItem === safeStr(codFace || "").trim().toUpperCase();
+  }
+
+  async function validarPainelFaceManualAditivoNoBloco(bloco){
+    if (!bloco || !modalCardEstaNaFaseQuatro()) return { ok: true, existe_no_contrato: false };
+
+    const fluxo = obterFluxoContratoAtual();
+    if (!fluxo.id_contrato || fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO) {
+      return { ok: true, existe_no_contrato: false };
+    }
+
+    const codPontoManual = obterCodPontoManualDoBloco(bloco);
+    const codFaceManual = obterCodFaceManualDoBloco(bloco);
+
+    if (!codPontoManual || !codFaceManual) {
+      return { ok: true, existe_no_contrato: false };
+    }
+
+    if (itemContratoSelecionadoEhMesmoPainelFace(bloco, codPontoManual, codFaceManual)) {
+      return { ok: true, existe_no_contrato: true, ja_carregado: true };
+    }
+
+    try {
+      const faces = await carregarFacesDoContrato(fluxo.id_contrato, codPontoManual);
+      const faceSelecionada = encontrarFaceContratoEmLista(faces, codFaceManual);
+
+      if (!faceSelecionada) {
+        bloco.__itemContratoAditivoSelecionado = null;
+        bloco.__codPontoContratoItemDesejado = VALOR_OPCAO_NOVO_PAINEL;
+        bloco.__codFaceContratoItemDesejada = codFaceManual;
+        renderizarInfoItemContratoAditivo(
+          bloco,
+          null,
+          `CodPonto ${codPontoManual} / CodFace ${codFaceManual} não existe neste contrato. O sistema vai tratar como inclusão de novo item no aditivo.`
+        );
+        setMensagemFluxoContrato(
+          `CodPonto ${codPontoManual} / CodFace ${codFaceManual} não existe no contrato selecionado. Pode prosseguir como novo item do aditivo.`,
+          "info"
+        );
+        return { ok: true, existe_no_contrato: false };
+      }
+
+      const confirmado = confirmarCarregamentoItemContratoExistente({
+        codPonto: codPontoManual,
+        codFace: codFaceManual,
+        faceSelecionada
+      });
+
+      if (!confirmado) {
+        limparSelecaoPainelFaceDoBloco(bloco, false);
+        bloco.__itemContratoAditivoSelecionado = null;
+        renderizarInfoItemContratoAditivo(
+          bloco,
+          null,
+          "Seleção cancelada. O CodFace existe no contrato, mas os dados não foram carregados para edição."
+        );
+        setMensagemFluxoContrato("Seleção cancelada. Nenhum item existente do contrato foi carregado.", "alerta");
+        return { ok: false, cancelado: true };
+      }
+
+      const aplicado = await aplicarPainelFaceContratoNoBloco(bloco, codPontoManual, codFaceManual, faceSelecionada);
+      if (aplicado) {
+        selecionarValorOuAcrescentarOpcao(selectCodPontoContratoCard, codPontoManual, codPontoManual);
+        if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = false;
+        montarSelectFacesContratoCard(faces);
+        selecionarValorOuAcrescentarOpcao(selectCodFaceContratoCard, codFaceManual, faceSelecionada.label || codFaceManual);
+        setMensagemFluxoContrato(`Item existente do contrato carregado para edição: ${montarTextoResumoItemContratoAditivo(faceSelecionada)}.`, "sucesso");
+      }
+
+      return { ok: true, existe_no_contrato: true, face: faceSelecionada };
+    } catch (erro) {
+      console.warn("validarPainelFaceManualAditivoNoBloco: falhou ao validar CodPonto/CodFace no contrato", erro);
+      setMensagemFluxoContrato("Não foi possível validar se este CodPonto/CodFace já existe no contrato. Confira antes de salvar.", "alerta");
+      return { ok: false, erro };
+    }
+  }
+
   function encontrarPainelPorCodPonto(codPonto, tipoPainel = "") {
     const cod = safeStr(codPonto).trim();
     if (!cod) return null;
@@ -5218,7 +5665,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     if (!wrap) return;
 
     const fluxo = obterFluxoContratoAtual();
-    const deveMostrar = !!(fluxo.id_contrato && fluxo.modo_contrato === VALOR_MODO_CONTRATO_ADITIVO);
+    const deveMostrar = modalCardEstaNaFaseQuatro() && !!(fluxo.id_contrato && fluxo.modo_contrato === VALOR_MODO_CONTRATO_ADITIVO);
     wrap.hidden = !deveMostrar;
 
     if (!deveMostrar) {
@@ -5236,6 +5683,60 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     painelFaceLista.querySelectorAll('.kb-painel-item').forEach((bloco) => {
       atualizarVisibilidadeContratoAditivoDoBloco(bloco);
     });
+  }
+
+  async function sincronizarCodPontoContratoCardNoPrimeiroBloco(codPonto) {
+    const fluxo = obterFluxoContratoAtual();
+    const codPontoNormalizado = safeStr(codPonto || "").trim();
+
+    if (!painelFaceLista || !fluxo.id_contrato || fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO || !codPontoNormalizado) {
+      return;
+    }
+
+    let bloco = painelFaceLista.querySelector('.kb-painel-item');
+    if (!bloco) {
+      bloco = criarPainelFaceItem();
+      painelFaceLista.appendChild(bloco);
+      atualizarTitulosPainelFace();
+    }
+
+    const wrapAditivo = bloco.querySelector('[data-role="wrap-item-contrato-aditivo"]');
+    if (wrapAditivo) wrapAditivo.hidden = false;
+
+    bloco.__codPontoContratoItemDesejado = codPontoNormalizado;
+    bloco.__codFaceContratoItemDesejada = "";
+    bloco.__itemContratoAditivoSelecionado = null;
+
+    preencherPontosContratoNoBloco(bloco, { cod_ponto: codPontoNormalizado });
+
+    const selectCodPontoItem = bloco.querySelector('[data-role="select-codponto-contrato-item"]');
+    const selectCodFaceItem = bloco.querySelector('[data-role="select-codface-contrato-item"]');
+    const pontoSelecionado = obterPontoContratoSelecionado(fluxo.id_contrato, codPontoNormalizado);
+    const labelCodPonto = codPontoNormalizado === VALOR_OPCAO_NOVO_PAINEL
+      ? "Novo Painel / Face"
+      : (pontoSelecionado?.label || pontoSelecionado?.cod_ponto || codPontoNormalizado);
+
+    selecionarValorOuAcrescentarOpcao(selectCodPontoItem, codPontoNormalizado, labelCodPonto);
+    limparSelectComPlaceholder(selectCodFaceItem, "— Face do contrato —");
+
+    if (codPontoNormalizado === VALOR_OPCAO_NOVO_PAINEL) {
+      renderizarInfoItemContratoAditivo(bloco, null, "Novo Painel / Face selecionado automaticamente no primeiro bloco. Agora escolha o painel e a face no seletor manual abaixo.");
+      return;
+    }
+
+    try {
+      const faces = await preencherFacesContratoNoBloco(bloco, codPontoNormalizado);
+      renderizarInfoItemContratoAditivo(
+        bloco,
+        null,
+        faces.length
+          ? "CodPonto do contrato selecionado automaticamente neste bloco. Agora escolha a face existente deste CodPonto."
+          : "CodPonto do contrato selecionado automaticamente neste bloco, mas nenhuma face ativa foi encontrada para ele."
+      );
+    } catch (erro) {
+      console.warn("sincronizarCodPontoContratoCardNoPrimeiroBloco: falhou ao carregar faces", erro);
+      renderizarInfoItemContratoAditivo(bloco, null, "CodPonto selecionado automaticamente, mas não foi possível carregar as faces deste ponto.");
+    }
   }
 
   function marcarSelecaoContratoAditivoNoBloco(bloco, codPonto, codFace, faceSelecionada = null) {
@@ -5405,6 +5906,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
 
           if (codPontoSalvo === VALOR_OPCAO_NOVO_PAINEL) {
             if (wrapSelectCodFaceContratoCard) wrapSelectCodFaceContratoCard.hidden = true;
+            await sincronizarCodPontoContratoCardNoPrimeiroBloco(codPontoSalvo);
             setMensagemFluxoContrato("Contrato salvo reaplicado em modo Aditivo com Novo Painel selecionado.", "alerta");
             return;
           }
@@ -5413,6 +5915,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
           const faces = await carregarFacesDoContrato(idContratoSalvo, codPontoSalvo);
           montarSelectFacesContratoCard(faces);
           sincronizarSeletoresContratoAditivoEmTodosBlocos();
+          await sincronizarCodPontoContratoCardNoPrimeiroBloco(codPontoSalvo);
 
           if (codFaceSalva) {
             const faceSelecionada = (Array.isArray(faces) ? faces : []).find((face) => safeStr(face?.cod_face || "").trim().toUpperCase() === codFaceSalva) || null;
@@ -5421,7 +5924,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
               codFaceSalva,
               faceSelecionada?.label || codFaceSalva
             );
-            await onCodFaceContratoCardChange();
+            await onCodFaceContratoCardChange({ confirmar: false });
             setMensagemFluxoContrato("Contrato, tipo da solicitação, CodPonto e CodFace salvos foram reaplicados no card.", "sucesso");
           } else {
             setMensagemFluxoContrato("Contrato salvo reaplicado. Agora selecione a face do CodPonto salvo.", "info");
@@ -5440,7 +5943,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
         selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
         montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
         if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
-        setMensagemFluxoContrato("A empresa já possui contratos. Por padrão, o fluxo ficou em Novo Contrato. Se quiser reaproveitar um contrato existente, selecione-o acima.", "alerta");
+        setMensagemFluxoContrato(textoAvisoEmpresaJaTemContratos(), "alerta");
       } else {
         selecionarContratoSilenciosamente(VALOR_OPCAO_NOVO_CONTRATO);
         montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
@@ -5507,7 +6010,16 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     if (!valorContrato || valorContrato === VALOR_OPCAO_NOVO_CONTRATO) {
       montarSelectModoContratoCard(VALOR_MODO_CONTRATO_NOVO, false);
       if (wrapSelectModoContratoCard) wrapSelectModoContratoCard.hidden = false;
-      setMensagemFluxoContrato("Fluxo definido como Novo Contrato. Agora você pode escolher livremente os painéis e faces abaixo.", "info");
+
+      const empresaPossuiContratos = Array.isArray(contratosCardCatalogo)
+        && contratosCardCatalogo.some((contrato) => idNum(contrato?.id_contrato || 0) > 0);
+
+      if (empresaPossuiContratos) {
+        setMensagemFluxoContrato(textoAvisoEmpresaJaTemContratos(), "alerta");
+      } else {
+        setMensagemFluxoContrato("Fluxo definido como Novo Contrato. Agora você pode escolher livremente os painéis e faces abaixo.", "info");
+      }
+
       atualizarVisibilidadeDadosNovoContrato();
       sincronizarSeletoresContratoAditivoEmTodosBlocos();
       return;
@@ -5576,6 +6088,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     }
 
     if (fluxo.usar_novo_painel) {
+      await sincronizarCodPontoContratoCardNoPrimeiroBloco(fluxo.cod_ponto_contrato);
       setMensagemFluxoContrato("Você escolheu Novo Painel dentro de um contrato existente. O salvamento continuará como Aditivo, mas com inclusão de um novo painel.", "alerta");
       return;
     }
@@ -5587,27 +6100,49 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       const faces = await carregarFacesDoContrato(fluxo.id_contrato, fluxo.cod_ponto_contrato);
       montarSelectFacesContratoCard(faces);
       sincronizarSeletoresContratoAditivoEmTodosBlocos();
-      setMensagemFluxoContrato("Agora selecione a face já existente do contrato.", "info");
+      await sincronizarCodPontoContratoCardNoPrimeiroBloco(fluxo.cod_ponto_contrato);
+      setMensagemFluxoContrato("CodPonto selecionado no contrato e aplicado automaticamente no primeiro bloco. Agora selecione a face já existente do contrato.", "info");
     } catch (erro) {
       console.warn("onCodPontoContratoCardChange: falhou ao carregar faces", erro);
       setMensagemFluxoContrato("Não foi possível carregar as faces do CodPonto selecionado. Até o backend responder, você ainda pode continuar a seleção manual abaixo.", "alerta");
     }
   }
 
-  async function onCodFaceContratoCardChange() {
+  async function onCodFaceContratoCardChange(opcoes = {}) {
     const fluxo = obterFluxoContratoAtual();
     if (!fluxo.id_contrato || fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO) return;
     if (fluxo.usar_novo_painel) return;
     if (!fluxo.cod_ponto_contrato || !fluxo.cod_face_contrato) return;
 
     const chaveFaces = `${idNum(fluxo.id_contrato)}|${safeStr(fluxo.cod_ponto_contrato).trim()}`;
-    const facesDisponiveis = facesPorContratoPontoCache.get(chaveFaces) || [];
-    const faceSelecionada = (Array.isArray(facesDisponiveis) ? facesDisponiveis : []).find((face) => {
-      return safeStr(face?.cod_face || "").trim().toUpperCase() === safeStr(fluxo.cod_face_contrato).trim().toUpperCase();
-    }) || null;
+    const facesDisponiveis = facesPorContratoPontoCache.get(chaveFaces) || await carregarFacesDoContrato(fluxo.id_contrato, fluxo.cod_ponto_contrato);
+    const faceSelecionada = encontrarFaceContratoEmLista(facesDisponiveis, fluxo.cod_face_contrato);
+
+    if (!faceSelecionada) {
+      setMensagemFluxoContrato(
+        `CodPonto ${fluxo.cod_ponto_contrato} / CodFace ${fluxo.cod_face_contrato} não existe no contrato selecionado. Pode prosseguir como novo item do aditivo.`,
+        "info"
+      );
+      return;
+    }
+
+    const deveConfirmar = opcoes.confirmar !== false;
+    if (deveConfirmar) {
+      const confirmado = confirmarCarregamentoItemContratoExistente({
+        codPonto: fluxo.cod_ponto_contrato,
+        codFace: fluxo.cod_face_contrato,
+        faceSelecionada
+      });
+
+      if (!confirmado) {
+        if (selectCodFaceContratoCard) selectCodFaceContratoCard.value = "";
+        setMensagemFluxoContrato("Seleção cancelada. O item existente do contrato não foi carregado para edição.", "alerta");
+        return;
+      }
+    }
 
     const precoAtualContrato = Number(faceSelecionada?.preco_venda_atual);
-    if (faceSelecionada && Number.isFinite(precoAtualContrato)) {
+    if (Number.isFinite(precoAtualContrato)) {
       setMensagemFluxoContrato(
         `Face ${fluxo.cod_face_contrato} selecionada no contrato. Preço de venda atual no contrato: ${formatarMoedaBR(precoAtualContrato)}.`,
         "sucesso"
@@ -6064,6 +6599,10 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     });
   }
 
+  function formatarNumeroBR(valor, casas = 2){
+    return formatarNumeroBrSemSimbolo(valor, casas) || "—";
+  }
+
   function formatarValorContabilParaInput(valor){
     return formatarNumeroBrSemSimbolo(valor, 2);
   }
@@ -6292,18 +6831,26 @@ function formatarNumeroParaInput(valor){
       return painelFacesCatalogo;
     }
 
-    const r = await fetch('/kanban/api/painel-faces/catalogo', { credentials: 'same-origin' });
-    const j = await r.json().catch(() => null);
-    if (!r.ok || !j || !j.ok) {
-      console.warn('carregarCatalogoPainelFaces: falhou', { http: r.status, body: j });
+    try {
+      const resultado = await fetchJsonKanban('/kanban/api/painel-faces/catalogo');
+      const j = resultado.corpo;
+
+      if (!respostaJsonKanbanOk(resultado)) {
+        console.warn('carregarCatalogoPainelFaces: resposta inválida', detalhesFalhaJsonKanban(resultado));
+        painelFacesCatalogo = [];
+        atualizarMapaPainelFacesCatalogo();
+        return [];
+      }
+
+      painelFacesCatalogo = Array.isArray(j.painel_faces) ? j.painel_faces.map((item) => Object.assign({}, item || {})) : [];
+      atualizarMapaPainelFacesCatalogo();
+      return painelFacesCatalogo;
+    } catch (erro) {
+      console.warn('carregarCatalogoPainelFaces: falhou', erro);
       painelFacesCatalogo = [];
       atualizarMapaPainelFacesCatalogo();
       return [];
     }
-
-    painelFacesCatalogo = Array.isArray(j.painel_faces) ? j.painel_faces.map((item) => Object.assign({}, item || {})) : [];
-    atualizarMapaPainelFacesCatalogo();
-    return painelFacesCatalogo;
   }
 
   function localizarPainelFaceCatalogo(criterios = {}){
@@ -6526,6 +7073,132 @@ function formatarNumeroParaInput(valor){
     input.value = obterTextoPainelSelecionado(bloco);
   }
 
+  function obterChavePainelFaceSelecionadaDoBloco(bloco){
+    const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const idPainel = idNum(selectPainel?.value || 0);
+    const codFace = safeStr(selectFace?.value || '').trim().toUpperCase();
+    return idPainel && codFace ? `${idPainel}|${codFace}` : '';
+  }
+
+  function listarChavesPainelFacesSelecionadas(){
+    const chaves = new Set();
+    for (const blocoItem of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])) {
+      const chave = obterChavePainelFaceSelecionadaDoBloco(blocoItem);
+      if (chave) chaves.add(chave);
+    }
+    return chaves;
+  }
+
+  function encontrarBlocoPainelFacePorChave(chave){
+    const chaveBusca = safeStr(chave || '').trim().toUpperCase();
+    if (!chaveBusca) return null;
+
+    for (const blocoItem of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])) {
+      const chaveBloco = obterChavePainelFaceSelecionadaDoBloco(blocoItem).toUpperCase();
+      if (chaveBloco === chaveBusca) return blocoItem;
+    }
+
+    return null;
+  }
+
+  function encontrarBlocoPainelFaceVazio(blocoPreferencial = null){
+    if (blocoPreferencial && !obterChavePainelFaceSelecionadaDoBloco(blocoPreferencial)) {
+      return blocoPreferencial;
+    }
+
+    for (const blocoItem of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])) {
+      if (!obterChavePainelFaceSelecionadaDoBloco(blocoItem)) return blocoItem;
+    }
+
+    return null;
+  }
+
+  async function garantirBlocoPainelFaceSelecionado(blocoOrigem, item){
+    if (!painelFaceLista || !item) return null;
+
+    const chave = obterChavePainelFaceCatalogo(item);
+    if (!chave) return null;
+
+    const blocoExistente = encontrarBlocoPainelFacePorChave(chave);
+    if (blocoExistente) return blocoExistente;
+
+    let blocoDestino = encontrarBlocoPainelFaceVazio(blocoOrigem);
+
+    if (!blocoDestino) {
+      blocoDestino = criarPainelFaceItem();
+      painelFaceLista.appendChild(blocoDestino);
+      atualizarVisibilidadeContratoAditivoDoBloco(blocoDestino);
+    }
+
+    await selecionarPainelCombobox(blocoDestino, item, true);
+    atualizarTitulosPainelFace();
+
+    return blocoDestino;
+  }
+
+  function removerBlocoPainelFaceSelecionadoPorChave(chave){
+    const blocoSelecionado = encontrarBlocoPainelFacePorChave(chave);
+    if (!blocoSelecionado) return;
+
+    const blocos = [...(painelFaceLista?.querySelectorAll('.kb-painel-item') || [])];
+
+    if (blocos.length <= 1) {
+      limparSelecaoPainelFaceDoBloco(blocoSelecionado, {
+        resetarFiltros: false,
+        manterBusca: false,
+        dispararChange: true,
+      });
+    } else {
+      destruirCalendariosReservaDoBloco(blocoSelecionado);
+      blocoSelecionado.remove();
+    }
+
+    atualizarTitulosPainelFace();
+
+    if (typeof agendarSincronizacaoFormularioSolicitacao === 'function') {
+      agendarSincronizacaoFormularioSolicitacao();
+    }
+  }
+
+  function bloquearReconciliacaoPainelFace(){
+    timestampBloqueioReconciliacaoPainelFace = Date.now() + JANELA_BLOQUEIO_RECONCILIACAO_PAINEL_FACE_MS;
+  }
+
+  function reconciliacaoPainelFaceEstaBloqueada(){
+    return Date.now() < Number(timestampBloqueioReconciliacaoPainelFace || 0);
+  }
+
+  async function alternarPainelFaceComboboxMultiplo(bloco, item, textoBusca = ''){
+    const chave = obterChavePainelFaceCatalogo(item);
+    if (!chave) return;
+
+    bloquearReconciliacaoPainelFace();
+
+    const combo = bloco?.querySelector('[data-role="combo-painel"]');
+    const lista = bloco?.querySelector('[data-role="lista-painel-busca"]');
+    const input = bloco?.querySelector('[data-role="input-painel-busca"]');
+    const termoOriginal = safeStr(textoBusca ?? input?.value ?? '').trim();
+
+    if (encontrarBlocoPainelFacePorChave(chave)) {
+      removerBlocoPainelFaceSelecionadoPorChave(chave);
+    } else {
+      await garantirBlocoPainelFaceSelecionado(bloco, item);
+    }
+
+    if (combo && lista) {
+      combo.classList.add('is-open');
+      lista.hidden = false;
+    }
+
+    if (input) {
+      input.value = termoOriginal;
+      input.focus();
+    }
+
+    renderizarListaPaineisCombobox(bloco, termoOriginal);
+  }
+
   function renderizarListaPaineisCombobox(bloco, texto){
     const lista = bloco?.querySelector('[data-role="lista-painel-busca"]');
     if (!lista) return;
@@ -6533,8 +7206,7 @@ function formatarNumeroParaInput(valor){
     const filtrados = filtrarPaineisCombobox(bloco, texto);
     bloco.__paineisResultadoComboboxAtual = filtrados.slice();
 
-    const selecionado = obterPainelFaceSelecionadoDoBloco(bloco);
-    const chaveSelecionada = obterChavePainelFaceCatalogo(selecionado);
+    const chavesSelecionadas = listarChavesPainelFacesSelecionadas();
     lista.innerHTML = '';
 
     if (!filtrados.length) {
@@ -6546,17 +7218,41 @@ function formatarNumeroParaInput(valor){
       const chave = obterChavePainelFaceCatalogo(item);
       if (!chave) return;
 
+      const jaSelecionado = chavesSelecionadas.has(chave);
+      const checkboxAttrs = {
+        type:'checkbox',
+        class:'kb-painel-multi-check kb-painel-face-opcao-check',
+        tabindex:'-1',
+        'aria-hidden':'true'
+      };
+
+      if (jaSelecionado) {
+        checkboxAttrs.checked = 'checked';
+      }
+
       const botao = el('button', {
         type:'button',
-        class:`kb-combobox-opcao${chave === chaveSelecionada ? ' is-selected' : ''}`
+        class:`kb-combobox-opcao kb-painel-face-opcao${jaSelecionado ? ' is-selected' : ''}`,
+        'data-painel-face-chave': chave
       }, [
-        el('strong', {}, [safeStr(item?.CodFace || '—')]),
-        el('span', {}, [resumoPainelFace(item)])
+        el('input', checkboxAttrs),
+        el('div', { class:'kb-painel-face-opcao-texto' }, [
+          el('strong', {}, [safeStr(item?.CodFace || '—')]),
+          el('span', {}, [resumoPainelFace(item)])
+        ])
       ]);
 
       botao.addEventListener('mousedown', async (evento) => {
         evento.preventDefault();
-        await selecionarPainelCombobox(bloco, item, true);
+        evento.stopPropagation();
+        bloquearReconciliacaoPainelFace();
+        await alternarPainelFaceComboboxMultiplo(bloco, item, texto);
+      });
+
+      botao.addEventListener('click', (evento) => {
+        evento.preventDefault();
+        evento.stopPropagation();
+        bloquearReconciliacaoPainelFace();
       });
 
       lista.appendChild(botao);
@@ -6654,10 +7350,17 @@ function formatarNumeroParaInput(valor){
     const input = bloco?.querySelector('[data-role="input-painel-busca"]');
     if (!input) return;
 
+    if (reconciliacaoPainelFaceEstaBloqueada()) {
+      return;
+    }
+
     const textoDigitado = safeStr(input.value || '').trim();
 
     if (!textoDigitado) {
-      limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange: true });
+      if (obterChavePainelFaceSelecionadaDoBloco(bloco)) {
+        sincronizarBuscaPainelComSelect(bloco);
+      }
+      fecharListaPaineisCombobox(bloco);
       return;
     }
 
@@ -7274,12 +7977,34 @@ function formatarNumeroParaInput(valor){
 
       const chaveFaces = `${idNum(fluxo.id_contrato)}|${safeStr(codPontoSelecionado).trim()}`;
       const facesDisponiveis = facesPorContratoPontoCache.get(chaveFaces) || await carregarFacesDoContrato(fluxo.id_contrato, codPontoSelecionado);
-      const faceSelecionada = (Array.isArray(facesDisponiveis) ? facesDisponiveis : []).find((face) => {
-        return safeStr(face?.cod_face || "").trim().toUpperCase() === codFaceSelecionado;
-      }) || null;
+      const faceSelecionada = encontrarFaceContratoEmLista(facesDisponiveis, codFaceSelecionado);
 
       if (!faceSelecionada) {
-        renderizarInfoItemContratoAditivo(bloco, null, "Face não encontrada no cache do contrato. Tente selecionar novamente o CodPonto.");
+        bloco.__itemContratoAditivoSelecionado = null;
+        renderizarInfoItemContratoAditivo(
+          bloco,
+          null,
+          `CodPonto ${codPontoSelecionado} / CodFace ${codFaceSelecionado} não existe neste contrato. O sistema vai tratar como inclusão de novo item no aditivo.`
+        );
+        setMensagemFluxoContrato("Face não encontrada no contrato selecionado. Pode prosseguir como novo item do aditivo.", "info");
+        return;
+      }
+
+      const confirmado = confirmarCarregamentoItemContratoExistente({
+        codPonto: codPontoSelecionado,
+        codFace: codFaceSelecionado,
+        faceSelecionada
+      });
+
+      if (!confirmado) {
+        if (selectCodFaceContratoItem) selectCodFaceContratoItem.value = "";
+        bloco.__itemContratoAditivoSelecionado = null;
+        renderizarInfoItemContratoAditivo(
+          bloco,
+          null,
+          "Seleção cancelada. O CodFace existe no contrato, mas os dados não foram carregados para edição."
+        );
+        setMensagemFluxoContrato("Seleção cancelada. Nenhum item existente do contrato foi carregado.", "alerta");
         return;
       }
 
@@ -7338,8 +8063,8 @@ function formatarNumeroParaInput(valor){
         evento.preventDefault();
         const primeira = bloco.__paineisResultadoComboboxAtual?.[0] || filtrarPaineisCombobox(bloco, inputPainelBusca.value || '')[0] || null;
         if (primeira) {
-          selecionarPainelCombobox(bloco, primeira, true).catch((erro) => {
-            console.warn('keydown painel: falhou ao selecionar face', erro);
+          alternarPainelFaceComboboxMultiplo(bloco, primeira, inputPainelBusca.value || '').catch((erro) => {
+            console.warn('keydown painel: falhou ao alternar face', erro);
           });
           return;
         }
@@ -7371,6 +8096,7 @@ function formatarNumeroParaInput(valor){
 
       atualizarSelectFaceVisualDoBloco(bloco);
       await atualizarComercialDoBloco(bloco);
+      await validarPainelFaceManualAditivoNoBloco(bloco);
     });
 
     selectExibicoesDia?.addEventListener('change', () => {
@@ -7883,11 +8609,20 @@ async function buscarDetalheCard(idCard, opcoes = {}) {
     ? `/kanban/api/cards/${id}?fresh=1`
     : `/kanban/api/cards/${id}`;
 
-  const r = await fetch(url, { credentials: "same-origin" });
-  const j = await r.json().catch(() => null);
+  try {
+    const resultado = await fetchJsonKanban(url);
+    const j = resultado.corpo;
 
-  if (!r.ok || !j || !j.ok) return null;
-  return j;
+    if (!respostaJsonKanbanOk(resultado)) {
+      console.warn("buscarDetalheCard: resposta inválida", detalhesFalhaJsonKanban(resultado));
+      return null;
+    }
+
+    return j;
+  } catch (erro) {
+    console.warn("buscarDetalheCard: falhou", erro);
+    return null;
+  }
 }
 
   async function enriquecerCardsCarregados(cardsNovos, mapaTagsLote = null){
@@ -9564,6 +10299,8 @@ async function moverCard(idCard, idFasePara, posicao) {
   });
 
   document.addEventListener("click", (evento) => {
+    const clicouDentroListaPainelFace = !!evento.target?.closest?.('[data-role="lista-painel-busca"], .kb-painel-face-opcao, .kb-painel-face-opcao-check');
+
     if (comboEmpresaCard && !comboEmpresaCard.contains(evento.target)) {
       reconciliarBuscaEmpresaDigitada();
     }
@@ -9582,6 +10319,10 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (comboBureauCard && !comboBureauCard.contains(evento.target)) {
       reconciliarBuscaBureauDigitada();
+    }
+
+    if (clicouDentroListaPainelFace || reconciliacaoPainelFaceEstaBloqueada()) {
+      return;
     }
 
     for (const bloco of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])) {
@@ -9608,6 +10349,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
   selectTipoClienteDescontoCard?.addEventListener("change", () => {
     atualizarVisibilidadeEmpresasRelacionadasCard();
+    aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
     agendarSincronizacaoFormularioSolicitacao();
   });
 
@@ -9711,8 +10453,10 @@ async function moverCard(idCard, idFasePara, posicao) {
   });
 
   btnAdicionarPainelFace?.addEventListener("click", () => {
-    painelFaceLista?.appendChild(criarPainelFaceItem());
+    const novoBloco = criarPainelFaceItem();
+    painelFaceLista?.appendChild(novoBloco);
     atualizarTitulosPainelFace();
+    atualizarVisibilidadeContratoAditivoDoBloco(novoBloco);
   });
 
   function mostrarMensagemCard(texto){
@@ -10450,12 +11194,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       return;
     }
 
-    const resposta = await fetch(`/kanban/api/cards/${id}/orcamento`, {
-      credentials: "same-origin"
-    });
+    const resultado = await fetchJsonKanban(`/kanban/api/cards/${id}/orcamento`);
+    const resposta = resultado.resposta;
+    const corpo = resultado.corpo;
 
-    const corpo = await resposta.json().catch(() => null);
-    if (!resposta.ok || !corpo || !corpo.ok){
+    if (!respostaJsonKanbanOk(resultado)){
+      console.warn("abrirOrcamentoCard: resposta inválida", detalhesFalhaJsonKanban(resultado));
       mostrarMensagemBoard(mensagemErroHttp(resposta, corpo, "Não foi possível gerar o orçamento deste card."));
       return;
     }
@@ -10468,24 +11212,27 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   async function abrirCard(idCard) {
-    cardAbertoId = idNum(idCard);
-    versaoConcorrenciaCardAberto = "";
-    cardAbertoConflitoExterno = false;
-    if (modalCard) {
-      modalCard.dataset.idFaseAtual = "";
-    }
-    atualizarVisibilidadeFormularioSolicitacaoContrato();
-    msgCard.style.display = "none";
-    msgCard.textContent = "";
-    atualizarEstadoSalvarCard();
+    try {
+      cardAbertoId = idNum(idCard);
+      versaoConcorrenciaCardAberto = "";
+      cardAbertoConflitoExterno = false;
+      if (modalCard) {
+        modalCard.dataset.idFaseAtual = "";
+      }
+      atualizarVisibilidadeFormularioSolicitacaoContrato();
+      if (msgCard) {
+        msgCard.style.display = "none";
+        msgCard.textContent = "";
+      }
+      atualizarEstadoSalvarCard();
 
-    await carregarEmpresas();
+      await carregarEmpresas();
 
-    const j = await buscarDetalheCard(idCard, { fresh: true });
-    if (!j || !j.card) {
-      mostrarMensagemCard("Não foi possível carregar os detalhes do card.");
-      return;
-    }
+      const j = await buscarDetalheCard(idCard, { fresh: true });
+      if (!j || !j.card) {
+        mostrarMensagemCard("Não foi possível carregar os detalhes do card. Veja no console se a API retornou HTML/vazio em vez de JSON.");
+        return;
+      }
 
     const cardNormalizado = normalizarCardServidor(j.card);
     if (modalCard) {
@@ -10580,8 +11327,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     if (selectSegmentoCard) {
-      const idSegmento = cardNormalizado.IDDimCnaes ?? "";
-      await selecionarCnaePorIdComGarantia(idSegmento !== null && idSegmento !== undefined ? String(idSegmento) : "", false);
+      await restaurarSegmentoCard(cardNormalizado);
     }
 
     if (selectResponsavelCard) {
@@ -10651,6 +11397,10 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     modalCard.style.display = "block";
+    } catch (erro) {
+      console.error("abrirCard: falha inesperada", erro);
+      mostrarMensagemCard("Erro inesperado ao abrir o card. Veja o console para o detalhe técnico.");
+    }
   }
 
   function renderTagsNoCard(tags) {
@@ -10849,6 +11599,24 @@ async function moverCard(idCard, idFasePara, posicao) {
     return { ok: true, fez: true };
   }
 
+  function validarFluxoContratoFase4ParaSalvar(){
+    if (!modalCardEstaNaFaseQuatro()) {
+      return { ok: true };
+    }
+
+    const fluxo = resolverFluxoContratoParaSalvamento();
+    const modoSelecionado = safeStr(selectModoContratoCard?.value || fluxo.modo_contrato || "").trim();
+
+    if (modoSelecionado === VALOR_MODO_CONTRATO_ADITIVO && !idNum(fluxo.id_contrato || 0)) {
+      return {
+        ok: false,
+        msg: "Para salvar como Aditivo, selecione primeiro um contrato existente no campo Contrato da empresa."
+      };
+    }
+
+    return { ok: true };
+  }
+
   function validarReservasPainelFacesFormulario(){
     for (const bloco of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])){
       const titulo = safeStr(bloco.querySelector('[data-role="titulo-item"]')?.textContent || '').trim() || 'Painel / Face';
@@ -10932,12 +11700,15 @@ async function moverCard(idCard, idFasePara, posicao) {
     const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
     const solicitacaoContrato = coletarFormularioSolicitacaoContrato();
 
+    const idTipoClienteAtual = selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null;
+    const empresasRelacionadasPayload = coletarEmpresasRelacionadasPermitidasParaPayload(idTipoClienteAtual);
+
     return {
       titulo: safeStr(document.getElementById("cardTitulo")?.value || "").trim(),
       descricao: safeStr(document.getElementById("cardDescricao")?.value || ""),
       id_empresa: selectEmpresaCard?.value ? Number(selectEmpresaCard.value) : null,
       nome_empresa: safeStr(obterTextoEmpresaSelecionada(selectEmpresaCard?.value || "") || inputEmpresaCardBusca?.value || "").trim() || null,
-      id_tipo_cliente_desconto: selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null,
+      id_tipo_cliente_desconto: idTipoClienteAtual,
       id_origem_atendimento: selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null,
       id_dim_cnaes: selectSegmentoCard?.value ? Number(selectSegmentoCard.value) : null,
       id_contrato_existente: usarVinculoContratoExistente ? fluxoContratoAtual.id_contrato : null,
@@ -10945,9 +11716,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       tipo_contrato_card: usarVinculoContratoExistente ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO,
       cod_ponto_contrato: usarVinculoContratoExistente ? safeStr(fluxoContratoAtual.cod_ponto_contrato || "").trim() : null,
       cod_face_contrato: usarVinculoContratoExistente ? safeStr(fluxoContratoAtual.cod_face_contrato || "").trim().toUpperCase() : null,
-      id_empresa_agencia: selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
-      id_empresa_cliente_direto: selectClienteDiretoCard?.value ? Number(selectClienteDiretoCard.value) : null,
-      id_empresa_bureau: selectBureauCard?.value ? Number(selectBureauCard.value) : null,
+      id_empresa_agencia: empresasRelacionadasPayload.id_empresa_agencia,
+      id_empresa_cliente_direto: empresasRelacionadasPayload.id_empresa_cliente_direto,
+      id_empresa_bureau: empresasRelacionadasPayload.id_empresa_bureau,
       marca: safeStr(inputMarcaCard?.value || "").trim() || null,
       telefone: normalizarTelefoneContato(inputTelefoneCard?.value || "") || null,
       email: safeStr(inputEmailCard?.value || "").trim() || null,
@@ -10985,6 +11756,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     const validacaoReservas = validarReservasPainelFacesFormulario();
     if (!validacaoReservas.ok){
       mostrarMensagemCard(validacaoReservas.msg || "Existem datas inválidas no painel / face.");
+      return;
+    }
+
+    const validacaoFluxoContratoFase4 = validarFluxoContratoFase4ParaSalvar();
+    if (!validacaoFluxoContratoFase4.ok){
+      mostrarMensagemCard(validacaoFluxoContratoFase4.msg || "Existem pendências no fluxo de contrato.");
       return;
     }
 

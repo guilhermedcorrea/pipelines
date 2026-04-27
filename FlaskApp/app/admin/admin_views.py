@@ -2944,6 +2944,148 @@ def _gerar_referencia_contrato_temporaria(*, id_fato_solicitacao: int | None, cn
     )
 
 
+def _gerar_referencia_item_contrato_hash(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_solicitacao_item: int | None,
+    cod_ponto: str | int | None,
+    cod_face: str | None,
+    id_painel: int | None,
+    id_face: int | None,
+    cnpj: str | None,
+    tentativa: int = 0,
+) -> str:
+    """
+    Eu gero uma Referencia própria para o item do contrato.
+
+    Motivo:
+    - a tabela de itens tem índice único em Referencia;
+    - o cabeçalho do contrato também tem Referencia;
+    - vários itens não podem herdar a mesma Referencia do cabeçalho.
+    """
+    return _gerar_hash_sha256_hex(
+        'ITEM_CONTRATO',
+        int(id_fato_controle_contratos) if id_fato_controle_contratos not in (None, '', 0) else '',
+        int(id_fato_solicitacao_item) if id_fato_solicitacao_item not in (None, '', 0) else '',
+        _texto_ou_vazio(cod_ponto),
+        _texto_ou_vazio(cod_face).upper(),
+        int(id_painel) if id_painel not in (None, '', 0) else '',
+        int(id_face) if id_face not in (None, '', 0) else '',
+        _texto_ou_vazio(cnpj),
+        int(tentativa or 0),
+    )
+
+
+def _referencia_item_controle_esta_livre(
+    *,
+    referencia: str | None,
+    id_item_controle_atual: int | None = None,
+) -> bool:
+    """Eu verifico se a Referencia do item não está sendo usada por outro item."""
+    referencia_limpa = _texto_ou_none(referencia)
+    if not referencia_limpa:
+        return False
+
+    id_item_atual_int = _int_ou_none(id_item_controle_atual)
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP 1
+                   i.IDFatoControleContratosItensEuromidia
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+            WHERE i.Referencia = :referencia
+              AND (
+                    :id_item_controle_atual IS NULL
+                    OR i.IDFatoControleContratosItensEuromidia <> :id_item_controle_atual
+                  )
+        """),
+        {
+            "referencia": referencia_limpa,
+            "id_item_controle_atual": id_item_atual_int,
+        },
+    ).mappings().first()
+
+    return row is None
+
+
+def _resolver_referencia_item_controle(
+    *,
+    id_fato_controle_contratos: int,
+    id_item_controle_atual: int | None,
+    id_item_solicitacao: int | None,
+    referencia_informada: str | None,
+    referencia_contrato: str | None,
+    referencia_atual: str | None,
+    cod_ponto: str | int | None,
+    cod_face: str | None,
+    id_painel: int | None,
+    id_face: int | None,
+    cnpj: str | None,
+) -> str:
+    """
+    Eu resolvo uma Referencia segura para o item antes do INSERT/UPDATE.
+
+    Regra principal:
+    - se o item já existe, preservo a Referencia atual dele;
+    - se veio uma Referencia própria e livre, uso ela;
+    - se veio a mesma Referencia do cabeçalho, gero uma Referencia exclusiva do item;
+    - se a Referencia informada já estiver em outro item, gero uma nova.
+    """
+    id_item_controle_atual_int = _int_ou_none(id_item_controle_atual)
+    referencia_atual_limpa = _texto_ou_none(referencia_atual)
+    referencia_informada_limpa = _texto_ou_none(referencia_informada)
+    referencia_contrato_limpa = _texto_ou_none(referencia_contrato)
+
+    if (
+        referencia_atual_limpa
+        and _referencia_item_controle_esta_livre(
+            referencia=referencia_atual_limpa,
+            id_item_controle_atual=id_item_controle_atual_int,
+        )
+    ):
+        return referencia_atual_limpa
+
+    referencia_informada_eh_do_cabecalho = (
+        bool(referencia_informada_limpa)
+        and bool(referencia_contrato_limpa)
+        and referencia_informada_limpa == referencia_contrato_limpa
+    )
+
+    if (
+        referencia_informada_limpa
+        and not referencia_informada_eh_do_cabecalho
+        and _referencia_item_controle_esta_livre(
+            referencia=referencia_informada_limpa,
+            id_item_controle_atual=id_item_controle_atual_int,
+        )
+    ):
+        return referencia_informada_limpa
+
+    for tentativa in range(0, 25):
+        referencia_gerada = _gerar_referencia_item_contrato_hash(
+            id_fato_controle_contratos=id_fato_controle_contratos,
+            id_fato_solicitacao_item=id_item_solicitacao,
+            cod_ponto=cod_ponto,
+            cod_face=cod_face,
+            id_painel=id_painel,
+            id_face=id_face,
+            cnpj=cnpj,
+            tentativa=tentativa,
+        )
+
+        if _referencia_item_controle_esta_livre(
+            referencia=referencia_gerada,
+            id_item_controle_atual=id_item_controle_atual_int,
+        ):
+            return referencia_gerada
+
+    raise RuntimeError(
+        "Não foi possível gerar uma Referencia única para o item do contrato. "
+        f"Contrato={id_fato_controle_contratos}, ItemSolicitacao={id_item_solicitacao}, "
+        f"CodPonto={cod_ponto}, CodFace={cod_face}."
+    )
+
+
 def _decimal_ou_none(valor):
     valor = _texto_ou_none(valor)
     if valor is None:
@@ -3301,7 +3443,8 @@ def _upsert_item_controle_a_partir_item_solicitacao(
     row_existente = db.session.execute(
         text("""
             SELECT TOP 1
-                   i.IDFatoControleContratosItensEuromidia
+                   i.IDFatoControleContratosItensEuromidia,
+                   i.Referencia AS ReferenciaAtual
             FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
             WHERE i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
               AND (
@@ -3322,9 +3465,29 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         },
     ).mappings().first()
 
+    id_item_controle_existente = (
+        int(row_existente["IDFatoControleContratosItensEuromidia"])
+        if row_existente and row_existente.get("IDFatoControleContratosItensEuromidia") is not None
+        else None
+    )
+
+    referencia_item_resolvida = _resolver_referencia_item_controle(
+        id_fato_controle_contratos=int(id_fato_controle_contratos),
+        id_item_controle_atual=id_item_controle_existente,
+        id_item_solicitacao=item_solicitacao.get("IDFatoSolicitacaoContratoItemEuromidia"),
+        referencia_informada=item_solicitacao.get("Referencia"),
+        referencia_contrato=referencia_padrao,
+        referencia_atual=(row_existente or {}).get("ReferenciaAtual"),
+        cod_ponto=cod_ponto,
+        cod_face=cod_face,
+        id_painel=item_solicitacao.get("IDPainelEuromidia"),
+        id_face=item_solicitacao.get("IDDimFacesPaineis"),
+        cnpj=item_solicitacao.get("CNPJ"),
+    )
+
     params_item = {
         "IDFatoControleContratoEuromidia": int(id_fato_controle_contratos),
-        "Referencia": item_solicitacao.get("Referencia") or referencia_padrao,
+        "Referencia": referencia_item_resolvida,
         "NumeroContrato": item_solicitacao.get("NumeroContrato"),
         "NumeroPrevia": item_solicitacao.get("NumeroPrevia"),
         "CNPJ": item_solicitacao.get("CNPJ"),
@@ -4177,7 +4340,8 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         row_item_existente = db.session.execute(
             text("""
                 SELECT TOP 1
-                       i.IDFatoControleContratosItensEuromidia
+                       i.IDFatoControleContratosItensEuromidia,
+                       i.Referencia AS ReferenciaAtual
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
                 WHERE
                     i.IDFatoControleContratoEuromidia = :id_contrato_controle
@@ -4201,9 +4365,41 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             },
         ).mappings().first()
 
+        id_item_controle_existente = (
+            int(row_item_existente["IDFatoControleContratosItensEuromidia"])
+            if row_item_existente and row_item_existente.get("IDFatoControleContratosItensEuromidia") is not None
+            else None
+        )
+
+        referencia_item_resolvida = _resolver_referencia_item_controle(
+            id_fato_controle_contratos=int(id_contrato_controle),
+            id_item_controle_atual=id_item_controle_existente,
+            id_item_solicitacao=id_item_solicitacao,
+            referencia_informada=item.get("Referencia"),
+            referencia_contrato=referencia_final,
+            referencia_atual=(row_item_existente or {}).get("ReferenciaAtual"),
+            cod_ponto=item.get("CodPonto"),
+            cod_face=item.get("CodFace"),
+            id_painel=item.get("IDPainelEuromidia"),
+            id_face=item.get("IDDimFacesPaineis"),
+            cnpj=item.get("CNPJ") or cab.get("CNPJ"),
+        )
+
+        print(
+            "APROVACAO_CONTRATO | item controle | "
+            f"solicitacao={id_solicitacao} | "
+            f"item_solicitacao={id_item_solicitacao} | "
+            f"contrato={id_contrato_controle} | "
+            f"item_existente={id_item_controle_existente} | "
+            f"cod_ponto={item.get('CodPonto')} | "
+            f"cod_face={item.get('CodFace')} | "
+            f"referencia_item={referencia_item_resolvida}",
+            flush=True,
+        )
+
         params_item = {
             "IDFatoControleContratoEuromidia": int(id_contrato_controle),
-            "Referencia": item.get("Referencia") or referencia_final,
+            "Referencia": referencia_item_resolvida,
             "NumeroContrato": item.get("NumeroContrato") or cab.get("NumeroContrato"),
             "NumeroPrevia": item.get("NumeroPrevia") or cab.get("NumeroPrevia"),
             "CNPJ": item.get("CNPJ") or cab.get("CNPJ"),
@@ -5341,6 +5537,10 @@ def lista_aprovacao_contratos():
         filtros=filtros,
         paginacao=paginacao,
     )
+
+
+
+
 
 
 

@@ -14,7 +14,7 @@
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <a class="btn btn-secondary"
-         href="{{ url_for('Paineis.contratos_lista') }}"
+         href="{{ return_to if return_to is defined and return_to else url_for('Paineis.contratos_lista') }}"
          style="text-decoration:none;display:inline-flex;align-items:center;">
         Voltar
       </a>
@@ -101,6 +101,7 @@
     .badge.timeline-NEGOCIACAO{ background:#ECFDF5; color:#047857; border-color:#A7F3D0; }
     .badge.timeline-ENCERRAMENTO{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
     .badge.timeline-CHECKIN{ background:#FFFBEB; color:#B45309; border-color:#FDE68A; }
+    .badge.timeline-CARD{ background:#ECFEFF; color:#0E7490; border-color:#A5F3FC; }
     table.tbl{
       width:100%;
       border-collapse:separate;
@@ -1353,13 +1354,13 @@
             <div class="timeline-page-info">Exibindo {{ timeline_paginacao.inicio }}–{{ timeline_paginacao.fim }} de {{ timeline_paginacao.total }} evento(s)</div>
             <div class="timeline-pager">
               {% if timeline_paginacao.has_prev %}
-                <a class="btn-page" href="{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.prev_page) }}">Anterior</a>
+                <a class="btn-page" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.prev_page) }}">Anterior</a>
               {% endif %}
               {% for p in range(1, timeline_paginacao.total_pages + 1) %}
-                <a class="btn-page {% if p == timeline_paginacao.page %}is-active{% endif %}" href="{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=p) }}">{{ p }}</a>
+                <a class="btn-page {% if p == timeline_paginacao.page %}is-active{% endif %}" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=p) }}">{{ p }}</a>
               {% endfor %}
               {% if timeline_paginacao.has_next %}
-                <a class="btn-page" href="{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.next_page) }}">Próxima</a>
+                <a class="btn-page" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.next_page) }}">Próxima</a>
               {% endif %}
             </div>
           </div>

@@ -26,7 +26,7 @@ kanban_bp = Blueprint("kanban", __name__)
 
 
 
-
+TABELA_ORIGEM_ATENDIMENTO = "[Integracao].[Silver].[DimOrigemAtendimento]"
 TABELA_PERMISSOES_USUARIO = "[Integracao].[Silver].[PermissoesUsuario]"
 TABELA_DIM_PERMISSOES = "[Integracao].[Silver].[DimPermissoes]"
 TABELA_PERMISSAO_DESCONTO = "[Kanban].[Silver].[DimKanbanPermissaoDesconto]"
@@ -6357,7 +6357,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
                 "IDDimFacesPaineis": id_face_final,
                 "IDDimCheckingHistorico": None,
                 "IDEmpresaProprietaria": _int_positivo_ou_none_local(id_empresa_proprietaria),
-                "Referencia": (contrato_row or {}).get("Referencia"),
+                "Referencia": None,
                 "NumeroContrato": (contrato_row or {}).get("NumeroContrato"),
                 "NumeroPrevia": (contrato_row or {}).get("NumeroPrevia"),
                 "CNPJ": (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),
@@ -6455,7 +6455,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "IDDimFacesPaineis": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimFacesPaineis")),
         "IDDimCheckingHistorico": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimCheckingHistorico")),
         "IDEmpresaProprietaria": _int_positivo_ou_none_local(id_empresa_proprietaria),
-        "Referencia": (item_contrato or {}).get("Referencia") or (contrato_row or {}).get("Referencia"),
+        "Referencia": (item_contrato or {}).get("Referencia"),
         "NumeroContrato": (item_contrato or {}).get("NumeroContrato") or (contrato_row or {}).get("NumeroContrato"),
         "NumeroPrevia": (item_contrato or {}).get("NumeroPrevia") or (contrato_row or {}).get("NumeroPrevia"),
         "CNPJ": (item_contrato or {}).get("CNPJ") or (contrato_row or {}).get("CNPJ") or (empresa or {}).get("CNPJ"),

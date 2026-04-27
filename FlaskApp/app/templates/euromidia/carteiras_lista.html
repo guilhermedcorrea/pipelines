@@ -89,12 +89,16 @@
                 </td>
 
                 <td style="text-align:right;">
-                  <a
-                    href="{{ url_for('Paineis.carteira_detalhe', id_fato_carteira_vendedor=row.IDFatoCarteiraVendedor) }}"
-                    class="btn btn-secondary"
-                  >
-                    Ver carteira
-                  </a>
+                  {% if row.IDFatoCarteiraVendedor %}
+                    <a
+                      href="{{ url_for('Paineis.carteira_detalhe', id_fato_carteira_vendedor=row.IDFatoCarteiraVendedor) }}"
+                      class="btn btn-secondary"
+                    >
+                      Ver carteira
+                    </a>
+                  {% else %}
+                    <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Sem ID</span>
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}
