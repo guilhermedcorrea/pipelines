@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 import requests
 from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import text
+from sqlalchemy import text,bindparam
 from flask_socketio import disconnect, emit, join_room, leave_room
 from ..extensions import cache, db, limiter, socketio
 from decimal import Decimal
@@ -114,6 +114,8 @@ TABELA_CONTRATO_CARD_EUROMIDIA = "[Integracao].[Silver].[FatoContratoCardEuromid
 
 TABELA_CONTROLE_CONTRATOS = "[Integracao].[Silver].[FatoControleContratosEuromidia]"
 TABELA_CONTROLE_CONTRATOS_ITENS = "[Integracao].[Silver].[FatoControleContratosItensEuromidia]"
+TABELA_CHECKIN_HISTORICO = "[Integracao].[Silver].[DimCheckinHistorico]"
+TABELA_CHECKIN_COMPARTILHAMENTO_PUBLICO = "[Integracao].[Silver].[FatoCheckinCompartilhamentoPublico]"
 TABELA_CONTRATO_ITEM_PRECO_PRATICADO = "[Integracao].[Silver].[FatoContratoItemPrecoPraticadoEuromidia]"
 COLUNA_ID_CONTRATO_ITEM_PRECO_PRATICADO = "IDFatoContratoItemPrecoPraticadoEuromidia"
 ID_TAG_CONTRATO_APROVADO = 13
@@ -208,6 +210,385 @@ def _id_empresa_usuario_or_403() -> int:
     if not id_emp:
         abort(403, "Usuário sem IDEmpresaProprietaria definida")
     return id_emp
+
+
+
+
+
+
+
+
+def _converter_card_historico_para_dict(card):
+    """
+    Converto a linha do SQLAlchemy para dict sem quebrar o template.
+    O Jinja aceita dict como atributo: card.id_card funciona.
+    """
+    if card is None:
+        return {}
+
+    if isinstance(card, dict):
+        return dict(card)
+
+    mapping = getattr(card, "_mapping", None)
+    if mapping is not None:
+        return dict(mapping)
+
+    if hasattr(card, "_asdict"):
+        return dict(card._asdict())
+
+    try:
+        return dict(card)
+    except Exception:
+        return {
+            chave: getattr(card, chave)
+            for chave in dir(card)
+            if not chave.startswith("_") and not callable(getattr(card, chave))
+        }
+
+
+def _enriquecer_cards_historico_com_dados_euromidia(cards, id_empresa_proprietaria: int):
+    """
+    Enriqueco somente os cards da página atual.
+
+    Aqui entram:
+    - Razão Social da empresa relacionada;
+    - CNPJ;
+    - Classe/segmento;
+    - Setor;
+    - quantidade de itens do card;
+    - quantidade de históricos de preço;
+    - quantidade de check-ins realizados.
+    """
+    cards_dict = [_converter_card_historico_para_dict(card) for card in (cards or [])]
+
+    ids_cards = []
+
+    for card in cards_dict:
+        valor_id_card = (
+            card.get("id_card")
+            or card.get("IDFatoKanbanCard")
+            or card.get("id_fato_kanban_card")
+        )
+
+        try:
+            id_card = int(valor_id_card)
+        except Exception:
+            continue
+
+        card["id_card"] = id_card
+        ids_cards.append(id_card)
+
+    ids_cards = sorted(set(ids_cards))
+
+    if not ids_cards:
+        return cards_dict
+
+    consulta = text("""
+        SELECT
+            kcard.IDFatoKanbanCard AS id_card,
+
+            empresa.IDEmpresa AS id_empresa_relacionada,
+            empresa.RazaoSocial AS razao_social_empresa_relacionada,
+            empresa.NomeFantasia AS nome_fantasia_empresa_relacionada,
+            empresa.CNPJ AS cnpj_empresa_relacionada,
+            empresa.CNAE AS cnae_empresa_relacionada,
+
+            cnae.Classe AS classe_empresa_relacionada,
+            cnae.Setor AS setor_empresa_relacionada,
+
+            ISNULL(itens.total_itens_ativos, 0) AS total_itens_ativos,
+            ISNULL(precos.total_alteracoes_preco, 0) AS total_alteracoes_preco,
+            ISNULL(checkins.total_checkins_realizados, 0) AS total_checkins_realizados
+
+        FROM [Kanban].[Silver].[FatoKanbanCard] AS kcard
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                negociacao.IDEmpresa
+            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS negociacao
+            WHERE negociacao.IDFatoKanbanCard = kcard.IDFatoKanbanCard
+              AND negociacao.IDEmpresa IS NOT NULL
+              AND negociacao.IDEmpresaProprietaria = :id_empresa_proprietaria
+            ORDER BY
+                negociacao.DataPrecoProposto DESC,
+                negociacao.IDFatoKanbanNegociacaoPreco DESC
+        ) AS empresa_preco
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                contrato.IDEmpresa
+            FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS vinculo_contrato_card
+            INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS contrato
+                ON contrato.IDFatoControleContratosEuromidia = vinculo_contrato_card.IDFatoControleContratosEuromidia
+            WHERE vinculo_contrato_card.IDFatoKanbanCard = kcard.IDFatoKanbanCard
+              AND contrato.IDEmpresa IS NOT NULL
+            ORDER BY
+                vinculo_contrato_card.DataAtualizacao DESC,
+                vinculo_contrato_card.IDFatoContratoCardEuromidia DESC
+        ) AS empresa_contrato
+
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS empresa
+            ON empresa.IDEmpresa = COALESCE(
+                kcard.IDEmpresa,
+                empresa_preco.IDEmpresa,
+                empresa_contrato.IDEmpresa
+            )
+
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] AS cnae
+            ON LTRIM(RTRIM(CONVERT(VARCHAR(30), empresa.CNAE))) COLLATE Latin1_General_CI_AI
+             = LTRIM(RTRIM(CONVERT(VARCHAR(30), cnae.cnaepadrao))) COLLATE Latin1_General_CI_AI
+
+        OUTER APPLY (
+            SELECT
+                COUNT(1) AS total_itens_ativos
+            FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] AS item_card
+            WHERE item_card.IDFatoKanbanCard = kcard.IDFatoKanbanCard
+              AND item_card.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND ISNULL(item_card.Ativo, 1) = 1
+              AND item_card.RemovidoEm IS NULL
+        ) AS itens
+
+        OUTER APPLY (
+            SELECT
+                COUNT(1) AS total_alteracoes_preco
+            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS negociacao
+            WHERE negociacao.IDFatoKanbanCard = kcard.IDFatoKanbanCard
+              AND negociacao.IDEmpresaProprietaria = :id_empresa_proprietaria
+        ) AS precos
+
+        OUTER APPLY (
+            SELECT
+                COUNT(DISTINCT checkin.IDDimCheckinHistorico) AS total_checkins_realizados
+            FROM [Integracao].[Silver].[DimCheckinHistorico] AS checkin
+            WHERE (
+                    ISNULL(checkin.BitChekin, 0) = 1
+                    OR checkin.DataConfirmacao IS NOT NULL
+                  )
+              AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS vinculo_contrato_card
+                        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS contrato
+                            ON contrato.IDFatoControleContratosEuromidia = vinculo_contrato_card.IDFatoControleContratosEuromidia
+                        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_contrato
+                            ON item_contrato.IDFatoControleContratosItensEuromidia = vinculo_contrato_card.IDFatoControleContratosItensEuromidia
+                           AND item_contrato.IDFatoControleContratoEuromidia = vinculo_contrato_card.IDFatoControleContratosEuromidia
+                        WHERE vinculo_contrato_card.IDFatoKanbanCard = kcard.IDFatoKanbanCard
+                          AND checkin.IDFatoControleContratosEuromidia = vinculo_contrato_card.IDFatoControleContratosEuromidia
+                          AND LTRIM(RTRIM(CONVERT(VARCHAR(80), checkin.CodPonto))) COLLATE Latin1_General_CI_AI
+                            = LTRIM(RTRIM(CONVERT(VARCHAR(80), item_contrato.CodPonto))) COLLATE Latin1_General_CI_AI
+                          AND LTRIM(RTRIM(CONVERT(VARCHAR(80), checkin.CodFace))) COLLATE Latin1_General_CI_AI
+                            = LTRIM(RTRIM(CONVERT(VARCHAR(80), item_contrato.CodFace))) COLLATE Latin1_General_CI_AI
+                    )
+
+                    OR EXISTS (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_contrato_direto
+                        WHERE item_contrato_direto.IDFatoKanbanCard = kcard.IDFatoKanbanCard
+                          AND checkin.IDFatoControleContratosEuromidia = item_contrato_direto.IDFatoControleContratoEuromidia
+                          AND LTRIM(RTRIM(CONVERT(VARCHAR(80), checkin.CodPonto))) COLLATE Latin1_General_CI_AI
+                            = LTRIM(RTRIM(CONVERT(VARCHAR(80), item_contrato_direto.CodPonto))) COLLATE Latin1_General_CI_AI
+                          AND LTRIM(RTRIM(CONVERT(VARCHAR(80), checkin.CodFace))) COLLATE Latin1_General_CI_AI
+                            = LTRIM(RTRIM(CONVERT(VARCHAR(80), item_contrato_direto.CodFace))) COLLATE Latin1_General_CI_AI
+                    )
+                  )
+        ) AS checkins
+
+        WHERE kcard.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND kcard.IDFatoKanbanCard IN :ids_cards
+    """).bindparams(bindparam("ids_cards", expanding=True))
+
+    linhas = (
+        db.session.execute(
+            consulta,
+            {
+                "id_empresa_proprietaria": id_empresa_proprietaria,
+                "ids_cards": ids_cards,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    dados_por_card = {
+        int(linha["id_card"]): dict(linha)
+        for linha in linhas
+        if linha.get("id_card") is not None
+    }
+
+    for card in cards_dict:
+        id_card = card.get("id_card")
+
+        try:
+            id_card = int(id_card)
+        except Exception:
+            id_card = None
+
+        dados = dados_por_card.get(id_card)
+
+        if dados:
+            card.update(dados)
+
+        card["total_itens_ativos"] = int(card.get("total_itens_ativos") or 0)
+        card["total_alteracoes_preco"] = int(card.get("total_alteracoes_preco") or 0)
+        card["total_checkins_realizados"] = int(card.get("total_checkins_realizados") or 0)
+        card["tem_checkin_realizado"] = card["total_checkins_realizados"] > 0
+
+    return cards_dict
+
+
+
+
+
+
+
+
+
+
+def _converter_linha_sqlalchemy_para_dict(linha):
+    if linha is None:
+        return {}
+
+    if isinstance(linha, dict):
+        return dict(linha)
+
+    mapping = getattr(linha, "_mapping", None)
+    if mapping is not None:
+        return dict(mapping)
+
+    if hasattr(linha, "_asdict"):
+        return dict(linha._asdict())
+
+    try:
+        return dict(linha)
+    except Exception:
+        return {
+            chave: getattr(linha, chave)
+            for chave in dir(linha)
+            if not chave.startswith("_") and not callable(getattr(linha, chave))
+        }
+
+
+def _inteiro_ou_none(valor):
+    try:
+        if valor is None or valor == "":
+            return None
+        return int(valor)
+    except Exception:
+        return None
+
+
+def _buscar_empresa_relacionada_historico_card(
+    id_card: int,
+    id_empresa_proprietaria: int,
+    id_empresa_relacionada_atual=None,
+):
+    id_empresa_relacionada_atual = _inteiro_ou_none(id_empresa_relacionada_atual)
+
+    consulta = text("""
+        ;WITH EmpresasPossiveis AS (
+            SELECT
+                1 AS Prioridade,
+                CAST(:id_empresa_relacionada_atual AS INT) AS IDEmpresa
+            WHERE :id_empresa_relacionada_atual IS NOT NULL
+
+            UNION ALL
+
+            SELECT
+                2 AS Prioridade,
+                card.IDEmpresa AS IDEmpresa
+            FROM [Kanban].[Silver].[FatoKanbanCard] AS card
+            WHERE card.IDFatoKanbanCard = :id_card
+              AND card.IDEmpresaProprietaria = :id_empresa_proprietaria
+              AND card.IDEmpresa IS NOT NULL
+
+            UNION ALL
+
+            SELECT
+                3 AS Prioridade,
+                empresa_preco.IDEmpresa
+            FROM (
+                SELECT TOP (1)
+                    preco.IDEmpresa
+                FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS preco
+                WHERE preco.IDFatoKanbanCard = :id_card
+                  AND preco.IDEmpresaProprietaria = :id_empresa_proprietaria
+                  AND preco.IDEmpresa IS NOT NULL
+                ORDER BY
+                    preco.DataPrecoProposto DESC,
+                    preco.IDFatoKanbanNegociacaoPreco DESC
+            ) AS empresa_preco
+
+            UNION ALL
+
+            SELECT
+                4 AS Prioridade,
+                empresa_contrato.IDEmpresa
+            FROM (
+                SELECT TOP (1)
+                    contrato.IDEmpresa
+                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS vinculo
+                INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS contrato
+                    ON contrato.IDFatoControleContratosEuromidia = vinculo.IDFatoControleContratosEuromidia
+                WHERE vinculo.IDFatoKanbanCard = :id_card
+                  AND contrato.IDEmpresa IS NOT NULL
+                ORDER BY
+                    vinculo.DataAtualizacao DESC,
+                    vinculo.IDFatoContratoCardEuromidia DESC
+            ) AS empresa_contrato
+        )
+
+        SELECT TOP (1)
+            empresa.IDEmpresa AS id_empresa_relacionada,
+            empresa.RazaoSocial AS razao_social_empresa_relacionada,
+            empresa.NomeFantasia AS nome_fantasia_empresa_relacionada,
+            empresa.CNPJ AS cnpj_empresa_relacionada,
+            empresa.CNAE AS cnae_empresa_relacionada,
+            cnae.Classe AS classe_empresa_relacionada,
+            cnae.Setor AS setor_empresa_relacionada
+        FROM EmpresasPossiveis AS possivel
+        INNER JOIN [Integracao].[Silver].[DimEmpresas] AS empresa
+            ON empresa.IDEmpresa = possivel.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] AS cnae
+            ON LTRIM(RTRIM(CONVERT(VARCHAR(30), empresa.CNAE))) COLLATE Latin1_General_CI_AI
+             = LTRIM(RTRIM(CONVERT(VARCHAR(30), cnae.cnaepadrao))) COLLATE Latin1_General_CI_AI
+        WHERE possivel.IDEmpresa IS NOT NULL
+        ORDER BY possivel.Prioridade
+    """)
+
+    linha = (
+        db.session.execute(
+            consulta,
+            {
+                "id_card": id_card,
+                "id_empresa_proprietaria": id_empresa_proprietaria,
+                "id_empresa_relacionada_atual": id_empresa_relacionada_atual,
+            },
+        )
+        .mappings()
+        .first()
+    )
+
+    return dict(linha) if linha else {}
+
+
+def _enriquecer_cabecalho_historico_card(cabecalho, id_card: int, id_empresa_proprietaria: int):
+    card = _converter_linha_sqlalchemy_para_dict(cabecalho)
+
+    dados_empresa = _buscar_empresa_relacionada_historico_card(
+        id_card=id_card,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        id_empresa_relacionada_atual=card.get("id_empresa_relacionada"),
+    )
+
+    if dados_empresa:
+        card.update(dados_empresa)
+
+    return card
+
+
+
+
 
 
 
@@ -3761,6 +4142,32 @@ def _normalizar_hex_sql(valor: Any) -> str | None:
         return None
 
     return texto
+
+
+def _extrair_versao_concorrencia_dict(dados: Any) -> str | None:
+    """Eu leio a versão de concorrência em qualquer alias usado pelo backend/front."""
+    if not isinstance(dados, dict):
+        return None
+
+    return _normalizar_hex_sql(
+        dados.get("VersaoConcorrenciaHex")
+        or dados.get("versao_concorrencia")
+        or dados.get("versaoConcorrencia")
+        or dados.get("VersaoConcorrencia")
+        or dados.get("VersaoConcorrenciaHexSql")
+    )
+
+
+def _aplicar_versao_concorrencia_dict(dados: dict[str, Any], versao_hex: Any) -> str | None:
+    """Eu padronizo todos os nomes da versão para o JS não abrir o card sem controle de concorrência."""
+    versao_normalizada = _normalizar_hex_sql(versao_hex)
+
+    dados["VersaoConcorrenciaHex"] = versao_normalizada
+    dados["VersaoConcorrencia"] = versao_normalizada
+    dados["versaoConcorrencia"] = versao_normalizada
+    dados["versao_concorrencia"] = versao_normalizada
+
+    return versao_normalizada
 
 
 def _garantir_versao_concorrencia_card(id_card: int, id_kanban: int) -> str | None:
@@ -12308,7 +12715,19 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             p.QuantidadeFaces,
 
             rv.DataInicioReserva,
-            rv.DataFimReserva
+            rv.DataFimReserva,
+
+            checkin_publico.IDDimCheckinHistorico AS IDDimCheckinHistorico,
+            checkin_publico.IDFatoCheckinCompartilhamentoPublico AS IDFatoCheckinCompartilhamentoPublico,
+            checkin_publico.TokenPublico AS TokenPublicoCheckin,
+            checkin_publico.TemSenha AS TemSenhaCheckinPublico,
+            checkin_publico.DataChekin AS DataChekinCheckinPublico,
+            checkin_publico.DataConfirmacao AS DataConfirmacaoCheckinPublico,
+            checkin_publico.DataCriacao AS DataCriacaoCheckinPublico,
+            checkin_publico.DataAtualizacao AS DataAtualizacaoCheckinPublico,
+            checkin_publico.DataExpiracao AS DataExpiracaoCheckinPublico,
+            checkin_publico.DataUltimoAcesso AS DataUltimoAcessoCheckinPublico,
+            checkin_publico.QuantidadeAcessos AS QuantidadeAcessosCheckinPublico
         FROM {TABELA_CARD_PAINEL_FACE} r
 
         OUTER APPLY (
@@ -12375,6 +12794,79 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             ORDER BY fo.DataInicio DESC
         ) rv
 
+        OUTER APPLY (
+            SELECT TOP (1)
+                ch.IDDimCheckinHistorico,
+                cp.IDFatoCheckinCompartilhamentoPublico,
+                cp.TokenPublico,
+                CASE
+                    WHEN NULLIF(LTRIM(RTRIM(CONVERT(varchar(4000), cp.SenhaHash))), '') IS NOT NULL
+                    THEN 1
+                    ELSE 0
+                END AS TemSenha,
+                CONVERT(varchar(19), ch.DataChekin, 120) AS DataChekin,
+                CONVERT(varchar(19), ch.DataConfirmacao, 120) AS DataConfirmacao,
+                CONVERT(varchar(19), cp.DataCriacao, 120) AS DataCriacao,
+                CONVERT(varchar(19), cp.DataAtualizacao, 120) AS DataAtualizacao,
+                CONVERT(varchar(19), cp.DataExpiracao, 120) AS DataExpiracao,
+                CONVERT(varchar(19), cp.DataUltimoAcesso, 120) AS DataUltimoAcesso,
+                TRY_CONVERT(int, cp.QuantidadeAcessos) AS QuantidadeAcessos
+            FROM {TABELA_CHECKIN_HISTORICO} ch
+            INNER JOIN {TABELA_CHECKIN_COMPARTILHAMENTO_PUBLICO} cp
+                ON cp.IDDimCheckinHistorico = ch.IDDimCheckinHistorico
+            WHERE NULLIF(LTRIM(RTRIM(CONVERT(varchar(500), cp.TokenPublico))), '') IS NOT NULL
+              AND ISNULL(cp.BitAtivo, 1) = 1
+              AND cp.DataRevogacao IS NULL
+              AND (cp.DataExpiracao IS NULL OR cp.DataExpiracao >= GETDATE())
+              AND (
+                    ISNULL(ch.BitChekin, 0) = 1
+                    OR ch.DataConfirmacao IS NOT NULL
+                  )
+              AND LTRIM(RTRIM(CONVERT(varchar(80), ch.CodPonto))) = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), r.CodPonto))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), f_resolvida.CodPonto))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), p.CodPonto))), ''),
+                    ''
+                  )
+              AND UPPER(LTRIM(RTRIM(CONVERT(varchar(80), ch.CodFace)))) = UPPER(COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), r.CodFace))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), f_resolvida.CodFace))), ''),
+                    ''
+                  ))
+              AND (
+                    EXISTS (
+                        SELECT 1
+                        FROM {TABELA_CONTRATO_CARD_EUROMIDIA} vcc
+                        INNER JOIN {TABELA_CONTROLE_CONTRATOS_ITENS} item_contrato
+                            ON item_contrato.IDFatoControleContratosItensEuromidia = vcc.IDFatoControleContratosItensEuromidia
+                           AND item_contrato.IDFatoControleContratoEuromidia = vcc.IDFatoControleContratosEuromidia
+                        WHERE vcc.IDFatoKanbanCard = :id_card
+                          AND ch.IDFatoControleContratosEuromidia = vcc.IDFatoControleContratosEuromidia
+                          AND LTRIM(RTRIM(CONVERT(varchar(80), ch.CodPonto))) = LTRIM(RTRIM(CONVERT(varchar(80), item_contrato.CodPonto)))
+                          AND UPPER(LTRIM(RTRIM(CONVERT(varchar(80), ch.CodFace)))) = UPPER(LTRIM(RTRIM(CONVERT(varchar(80), item_contrato.CodFace))))
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM {TABELA_CONTRATO_CARD_EUROMIDIA} vcc_header
+                        WHERE vcc_header.IDFatoKanbanCard = :id_card
+                          AND vcc_header.IDFatoControleContratosEuromidia = ch.IDFatoControleContratosEuromidia
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} item_contrato_direto
+                        WHERE item_contrato_direto.IDFatoKanbanCard = :id_card
+                          AND ch.IDFatoControleContratosEuromidia = item_contrato_direto.IDFatoControleContratoEuromidia
+                          AND LTRIM(RTRIM(CONVERT(varchar(80), ch.CodPonto))) = LTRIM(RTRIM(CONVERT(varchar(80), item_contrato_direto.CodPonto)))
+                          AND UPPER(LTRIM(RTRIM(CONVERT(varchar(80), ch.CodFace)))) = UPPER(LTRIM(RTRIM(CONVERT(varchar(80), item_contrato_direto.CodFace))))
+                    )
+                  )
+            ORDER BY
+                ISNULL(ch.DataConfirmacao, ch.DataChekin) DESC,
+                cp.DataAtualizacao DESC,
+                cp.IDFatoCheckinCompartilhamentoPublico DESC,
+                ch.IDDimCheckinHistorico DESC
+        ) checkin_publico
+
         WHERE r.IDFatoKanbanCard = :id_card
           AND ISNULL(r.Ativo, 1) = 1
 
@@ -12391,7 +12883,24 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
         },
     ).mappings().all()
 
-    return _rows_para_dicts(rows)
+    itens = _rows_para_dicts(rows)
+
+    for item in itens:
+        token_publico = str(item.get("TokenPublicoCheckin") or "").strip()
+        if token_publico:
+            item["UrlCheckinPublico"] = f"/paineis/checkin/publico/{token_publico}"
+            item["SenhaCheckinPublico"] = None
+            item["SenhaCheckinStatus"] = (
+                "Senha cadastrada, mas não é possível exibir a senha original porque a tabela guarda apenas o hash."
+                if int(item.get("TemSenhaCheckinPublico") or 0) == 1
+                else "Sem senha cadastrada para este compartilhamento."
+            )
+        else:
+            item["UrlCheckinPublico"] = None
+            item["SenhaCheckinPublico"] = None
+            item["SenhaCheckinStatus"] = None
+
+    return itens
 
 
 
@@ -13029,8 +13538,13 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     if not versao_hex_convertida:
         versao_hex_convertida = _rowversion_para_hex(valor_versao_hex_sql)
 
-    card_dict["VersaoConcorrenciaHex"] = versao_hex_convertida
-    card_dict["VersaoConcorrencia"] = versao_hex_convertida
+    if not versao_hex_convertida:
+        versao_hex_convertida = _garantir_versao_concorrencia_card(
+            int(id_card),
+            int(card_dict.get("IDDimKanban") or 0),
+        )
+
+    _aplicar_versao_concorrencia_dict(card_dict, versao_hex_convertida)
 
     sql_tags = text("""
         SELECT
@@ -14075,6 +14589,9 @@ def api_card_detalhe(id_card: int):
     card_escopo = _obter_card_autorizado(id_card)
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
 
+    # Garante que cards antigos/legados não abram sem VersaoConcorrencia.
+    versao_garantida = _garantir_versao_concorrencia_card(id_card, id_kanban)
+
     usar_cache = not _request_pede_dado_fresco()
 
     chave = _chave_cache_json(
@@ -14089,7 +14606,18 @@ def api_card_detalhe(id_card: int):
     if usar_cache:
         em_cache = _cache_json_get(chave)
         if em_cache is not None:
-            return jsonify(em_cache)
+            card_cache = em_cache.get("card") if isinstance(em_cache, dict) else None
+            versao_cache = _extrair_versao_concorrencia_dict(card_cache)
+
+            if versao_cache:
+                _aplicar_versao_concorrencia_dict(card_cache, versao_cache)
+                return jsonify(em_cache)
+
+            current_app.logger.warning(
+                "KANBAN: cache do detalhe do card sem VersaoConcorrencia; ignorando cache. id_card=%s id_kanban=%s",
+                id_card,
+                id_kanban,
+            )
 
     payload = _obter_card_detalhe_payload(id_card)
 
@@ -14131,19 +14659,12 @@ def api_card_detalhe(id_card: int):
         elif int(card_payload.get("BitContratoNovo") or 0) == 1:
             card_payload["tipo_contrato"] = TIPO_SOLICITACAO_NOVO
 
-    versao_hex = (
-        card_payload.get("VersaoConcorrenciaHex")
-        or card_payload.get("versao_concorrencia")
-        or card_payload.get("versaoConcorrencia")
-        or card_payload.get("VersaoConcorrencia")
-    )
+    versao_hex = _extrair_versao_concorrencia_dict(card_payload) or _normalizar_hex_sql(versao_garantida)
 
-    versao_hex = _normalizar_hex_sql(versao_hex)
+    if not versao_hex:
+        versao_hex = _garantir_versao_concorrencia_card(id_card, id_kanban)
 
-    card_payload["VersaoConcorrenciaHex"] = versao_hex
-    card_payload["VersaoConcorrencia"] = versao_hex
-    card_payload["versaoConcorrencia"] = versao_hex
-    card_payload["versao_concorrencia"] = versao_hex
+    _aplicar_versao_concorrencia_dict(card_payload, versao_hex)
 
     if card_payload.get("IDFatoKanbanCard") is None:
         card_payload["IDFatoKanbanCard"] = int(id_card)
@@ -16924,6 +17445,7 @@ def _contar_cards_resumo_historico(
 
 
 
+
 @kanban_bp.route("/historico-cards", methods=["GET"])
 @login_required
 @limiter.limit("60/minute")
@@ -16950,9 +17472,6 @@ def historico_cards_lista():
     page = max(1, page)
     offset = (page - 1) * per_page
 
-    # Regra nova:
-    # histórico deve mostrar TODOS os cards, inclusive removidos/inativados.
-    # Por isso não leio mais request.args.get("somente_ativos").
     somente_ativos = False
 
     total = _contar_cards_resumo_historico(
@@ -16977,6 +17496,11 @@ def historico_cards_lista():
         somente_ativos=somente_ativos,
         offset=offset,
         limit=per_page,
+    )
+
+    cards = _enriquecer_cards_historico_com_dados_euromidia(
+        cards=cards,
+        id_empresa_proprietaria=id_empresa_proprietaria,
     )
 
     fases = _listar_fases_historico_cards(id_empresa_proprietaria)
@@ -17011,8 +17535,6 @@ def historico_cards_lista():
         paginacao=paginacao,
         total_cards=total,
     )
-
-
 
 
 
@@ -18349,7 +18871,6 @@ def _buscar_tags_historico_card(id_card: int, id_empresa_proprietaria: int) -> l
 
 
 
-
 @kanban_bp.route("/historico-card/<int:id_card>", methods=["GET"])
 @login_required
 @limiter.limit("60/minute")
@@ -18360,6 +18881,12 @@ def historico_card_visualizacao(id_card: int):
     cabecalho = _buscar_cabecalho_historico_card(id_card, id_empresa_proprietaria)
     if not cabecalho:
         abort(404)
+
+    card_enriquecido = _enriquecer_cabecalho_historico_card(
+        cabecalho=cabecalho,
+        id_card=id_card,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+    )
 
     movimentacoes = _buscar_movimentacoes_historico_card(id_card, id_empresa_proprietaria)
     observacoes = _buscar_observacoes_historico_card(id_card, id_empresa_proprietaria)
@@ -18394,7 +18921,7 @@ def historico_card_visualizacao(id_card: int):
 
     return render_template(
         "kanban/historico_card_visualizacao.html",
-        card=cabecalho,
+        card=card_enriquecido,
         resumo=resumo,
         timeline=timeline,
         movimentacoes=movimentacoes,

@@ -18981,6 +18981,135 @@ def lista_checkins():
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+def _texto_limpo(valor):
+    if valor is None:
+        return None
+
+    valor_texto = str(valor).strip()
+    return valor_texto or None
+
+
+def _extensao_arquivo(valor):
+    valor_texto = _texto_limpo(valor)
+
+    if not valor_texto:
+        return ""
+
+    valor_texto = valor_texto.split("?")[0].split("#")[0]
+    return Path(valor_texto).suffix.lower()
+
+
+
+
+
+def _resolver_tipo_midia_checkin(item):
+    extensoes_video = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+    extensoes_imagem = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
+    campos_arquivo = [
+        "NomeArquivoSalvo",
+        "NomeArquivoOriginal",
+        "CaminhoImagemGerada",
+        "CaminhoImagemUpload",
+        "UrlImagemGerada",
+        "UrlImagemUpload",
+    ]
+
+    for campo in campos_arquivo:
+        extensao = _extensao_arquivo(item.get(campo))
+
+        if extensao in extensoes_video:
+            return "video"
+
+        if extensao in extensoes_imagem:
+            return "imagem"
+
+    id_tipo_midia = _texto_limpo(item.get("IDDimTipoMidia"))
+
+    if id_tipo_midia == "2":
+        return "video"
+
+    if id_tipo_midia == "1":
+        return "imagem"
+
+    return "arquivo"
+
+
+def _resolver_caminho_local(valor):
+    valor_texto = _texto_limpo(valor)
+
+    if not valor_texto:
+        return None
+
+    if valor_texto.startswith(("http://", "https://")):
+        return None
+
+    caminho = Path(valor_texto)
+
+    candidatos = []
+
+    if caminho.is_absolute():
+        candidatos.append(caminho)
+    else:
+        candidatos.extend([
+            Path(current_app.root_path) / caminho,
+            Path(current_app.root_path).parent / caminho,
+            Path.cwd() / caminho,
+        ])
+
+    for candidato in candidatos:
+        if candidato.exists() and candidato.is_file():
+            return candidato
+
+    return None
+
+
+def _resolver_mime_arquivo(caminho, tipo_midia):
+    mime_type, _ = mimetypes.guess_type(str(caminho))
+
+    if mime_type:
+        return mime_type
+
+    if tipo_midia == "video":
+        return "video/mp4"
+
+    if tipo_midia == "imagem":
+        return "image/jpeg"
+
+    return "application/octet-stream"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @paineis_bp.route("/checkin/<int:id_checkin>", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
@@ -18988,8 +19117,10 @@ def visualizar_checkin(id_checkin: int):
     sql = text("""
         SELECT TOP (1)
             ch.IDDimCheckinHistorico,
+            ch.IDDimCheckinHistorico AS IDDimCheckingHistorico,
             ch.DataAtualizacao,
             ch.DataChekin AS DataCheckin,
+            ch.DataChekin AS DataChecking,
             ch.IDEmpresa,
             CNPJ = COALESCE(
                 NULLIF(LTRIM(RTRIM(emp.CNPJ)), ''),
@@ -19096,19 +19227,94 @@ def visualizar_checkin(id_checkin: int):
         WHERE ch.IDDimCheckinHistorico = :id_checkin
     """)
 
-    item = db.session.execute(
+    registro = db.session.execute(
         sql,
         {"id_checkin": id_checkin}
     ).mappings().first()
 
-    if not item:
+    if not registro:
         abort(404)
 
+    item = dict(registro)
+
+    nome_arquivo_salvo = str(item.get("NomeArquivoSalvo") or "").strip().lower()
+    nome_arquivo_original = str(item.get("NomeArquivoOriginal") or "").strip().lower()
+    caminho_upload = str(item.get("CaminhoImagemUpload") or "").strip().lower()
+    caminho_gerado = str(item.get("CaminhoImagemGerada") or "").strip().lower()
+    url_upload = str(item.get("UrlImagemUpload") or "").strip().lower()
+    url_gerada = str(item.get("UrlImagemGerada") or "").strip().lower()
+
+    texto_arquivos = " ".join([
+        nome_arquivo_salvo,
+        nome_arquivo_original,
+        caminho_upload,
+        caminho_gerado,
+        url_upload,
+        url_gerada,
+    ])
+
+    extensoes_video = (
+        ".mp4",
+        ".mov",
+        ".avi",
+        ".mkv",
+        ".webm",
+        ".m4v",
+    )
+
+    extensoes_imagem = (
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif",
+        ".bmp",
+    )
+
+    id_tipo_midia = item.get("IDDimTipoMidia")
+
+    eh_video = any(extensao in texto_arquivos for extensao in extensoes_video)
+    eh_imagem = any(extensao in texto_arquivos for extensao in extensoes_imagem)
+
+    if not eh_video and not eh_imagem:
+        try:
+            id_tipo_midia_int = int(id_tipo_midia) if id_tipo_midia is not None else None
+        except (TypeError, ValueError):
+            id_tipo_midia_int = None
+
+        if id_tipo_midia_int == 2:
+            eh_video = True
+        elif id_tipo_midia_int == 1:
+            eh_imagem = True
+
+    if eh_video:
+        item["TipoMidiaPreview"] = "video"
+    elif eh_imagem:
+        item["TipoMidiaPreview"] = "imagem"
+    else:
+        item["TipoMidiaPreview"] = "arquivo"
+
+    item["UrlMidiaPreview"] = url_for(
+        "Paineis.checkin_arquivo",
+        id_checkin=id_checkin
+    )
+
+    print("=" * 120, flush=True)
+    print(
+        "VISUALIZAR CHECKIN | "
+        f"id_checkin={id_checkin} | "
+        f"IDDimTipoMidia={item.get('IDDimTipoMidia')} | "
+        f"NomeArquivoOriginal={item.get('NomeArquivoOriginal')} | "
+        f"NomeArquivoSalvo={item.get('NomeArquivoSalvo')} | "
+        f"CaminhoImagemUpload={item.get('CaminhoImagemUpload')} | "
+        f"CaminhoImagemGerada={item.get('CaminhoImagemGerada')} | "
+        f"TipoMidiaPreview={item.get('TipoMidiaPreview')} | "
+        f"UrlMidiaPreview={item.get('UrlMidiaPreview')}",
+        flush=True
+    )
+    print("=" * 120, flush=True)
+
     return render_template("euromidia/visualizar_checkin.html", item=item)
-
-
-
-
 
 
 

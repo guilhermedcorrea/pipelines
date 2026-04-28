@@ -653,23 +653,29 @@
               </div>
 
               <div>
-  <span class="rotulo-mobile">Empresa Relacionada</span>
-  <div class="coluna-empresa-relacionada">
-    {% if card.razao_social_empresa_relacionada %}
-      <span class="texto-forte" title="{{ card.razao_social_empresa_relacionada }}">{{ card.razao_social_empresa_relacionada }}</span>
-      {% if card.cnpj_empresa_relacionada %}
-        <span class="texto-secundario">{{ card.cnpj_empresa_relacionada }}</span>
-      {% endif %}
-    {% elif card.nome_fantasia_empresa_relacionada %}
-      <span class="texto-forte" title="{{ card.nome_fantasia_empresa_relacionada }}">{{ card.nome_fantasia_empresa_relacionada }}</span>
-      {% if card.cnpj_empresa_relacionada %}
-        <span class="texto-secundario">{{ card.cnpj_empresa_relacionada }}</span>
-      {% endif %}
-    {% else %}
-      <span class="texto-secundario">Não informada</span>
-    {% endif %}
-  </div>
-</div>
+                <span class="rotulo-mobile">Empresa Relacionada</span>
+                <div class="coluna-empresa-relacionada">
+                  {% if card.razao_social_empresa_relacionada %}
+                    <span class="texto-forte" title="{{ card.razao_social_empresa_relacionada }}">{{ card.razao_social_empresa_relacionada }}</span>
+                  {% elif card.nome_fantasia_empresa_relacionada %}
+                    <span class="texto-forte" title="{{ card.nome_fantasia_empresa_relacionada }}">{{ card.nome_fantasia_empresa_relacionada }}</span>
+                  {% else %}
+                    <span class="texto-secundario">Não informada</span>
+                  {% endif %}
+
+                  {% if card.cnpj_empresa_relacionada %}
+                    <span class="texto-secundario">{{ card.cnpj_empresa_relacionada }}</span>
+                  {% endif %}
+
+                  {% if card.classe_empresa_relacionada or card.setor_empresa_relacionada %}
+                    <span class="texto-secundario">
+                      {% if card.classe_empresa_relacionada %}{{ card.classe_empresa_relacionada }}{% endif %}
+                      {% if card.classe_empresa_relacionada and card.setor_empresa_relacionada %} • {% endif %}
+                      {% if card.setor_empresa_relacionada %}{{ card.setor_empresa_relacionada }}{% endif %}
+                    </span>
+                  {% endif %}
+                </div>
+              </div>
 
               <div>
                 <span class="rotulo-mobile">Fase</span>
@@ -726,11 +732,15 @@
               <div class="item-historico-card__indicadores-titulo">Indicadores</div>
               <div class="item-historico-card__indicadores-conteudo">
                 <div class="grupo-contadores">
+                  {% set total_checkins_realizados = card.total_checkins_realizados|default(0)|int %}
                   <span class="contador-chip">📝 {{ card.total_observacoes or 0 }} Obs</span>
                   <span class="contador-chip">🔁 {{ card.total_movimentacoes or 0 }} Mov</span>
                   <span class="contador-chip">🏷 {{ card.total_tags_ativas or 0 }} Tags</span>
                   <span class="contador-chip">🧩 {{ card.total_itens_ativos or 0 }} Itens</span>
                   <span class="contador-chip">💰 {{ card.total_alteracoes_preco or 0 }} Preço</span>
+                  {% if total_checkins_realizados > 0 %}
+                    <span class="contador-chip">📸 {{ total_checkins_realizados }} Check-in</span>
+                  {% endif %}
                 </div>
               </div>
             </div>

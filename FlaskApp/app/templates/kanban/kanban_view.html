@@ -1869,11 +1869,118 @@
     background: rgba(15,23,42,.02);
   }
 
+  .kb-checkin-publico{
+    margin-top:10px;
+    border:1px solid rgba(11,78,162,.16);
+    border-radius:14px;
+    background:rgba(11,78,162,.04);
+    padding:12px;
+    display:grid;
+    gap:10px;
+  }
+
+  .kb-checkin-publico-topo{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .kb-checkin-publico-titulo{
+    font-weight:950;
+    color:var(--kb-text);
+    font-size:13px;
+  }
+
+  .kb-checkin-publico-status{
+    border:1px solid rgba(11,78,162,.18);
+    background:#fff;
+    color:rgba(15,23,42,.72);
+    border-radius:999px;
+    padding:5px 9px;
+    font-size:11px;
+    font-weight:950;
+  }
+
+  .kb-checkin-publico-grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    align-items:end;
+  }
+
+  .kb-checkin-publico-grid-url-unica{
+    grid-template-columns:1fr;
+  }
+
+  .kb-checkin-publico-linha{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-width:0;
+  }
+
+  .kb-checkin-publico-valor{
+    min-height:44px;
+    border:1px solid rgba(15,23,42,.10);
+    background:#fff;
+    border-radius:12px;
+    padding:10px 12px;
+    display:flex;
+    align-items:center;
+    min-width:0;
+    color:rgba(15,23,42,.86);
+    font-size:12px;
+    font-weight:850;
+    line-height:1.25;
+  }
+
+  .kb-checkin-publico-url{
+    flex:1 1 auto;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .kb-checkin-publico-acao{
+    text-decoration:none;
+    flex:0 0 auto;
+  }
+
+  .kb-checkin-publico-vazio{
+    border:1px dashed rgba(15,23,42,.14);
+    border-radius:12px;
+    padding:10px 12px;
+    color:rgba(15,23,42,.62);
+    background:#fff;
+    font-size:12px;
+    font-weight:850;
+  }
+
+  .kb-checkin-publico-meta{
+    color:rgba(15,23,42,.58);
+    font-size:11px;
+    font-weight:850;
+  }
+
   @media (max-width: 900px){
     .kb-painel-item-grid,
     .kb-painel-item-grid-2,
-    .kb-painel-item-grid-3{
+    .kb-painel-item-grid-3,
+    .kb-checkin-publico-grid{
       grid-template-columns: 1fr;
+    }
+
+    .kb-checkin-publico-linha{
+      align-items:stretch;
+      flex-direction:column;
+    }
+
+    .kb-checkin-publico-url,
+    .kb-checkin-publico-acao,
+    .kb-checkin-publico-linha .kb-btn{
+      width:100%;
     }
 
     .kb-contrato-item-grid,

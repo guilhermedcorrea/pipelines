@@ -534,7 +534,6 @@
         <div>
           <h1 class="titulo-card">{{ card.titulo or 'Card sem título' }}</h1>
 
-```
       <p class="subtitulo-card">
         Histórico completo do card #{{ card.id_card }}
       </p>
@@ -610,8 +609,52 @@
     <div class="bloco-dado">
       <span class="bloco-dado__rotulo">Empresa relacionada</span>
       <div class="bloco-dado__valor">
-        {% if card.id_empresa_relacionada %}
-          {{ card.id_empresa_relacionada }}
+        {% if card.razao_social_empresa_relacionada %}
+          <div class="texto-forte">{{ card.razao_social_empresa_relacionada }}</div>
+
+          {% if card.cnpj_empresa_relacionada %}
+            <div class="texto-suave">CNPJ: {{ card.cnpj_empresa_relacionada }}</div>
+          {% endif %}
+
+          {% if card.classe_empresa_relacionada or card.setor_empresa_relacionada %}
+            <div class="texto-suave">
+              {% if card.classe_empresa_relacionada %}
+                Segmento: {{ card.classe_empresa_relacionada }}
+              {% endif %}
+
+              {% if card.classe_empresa_relacionada and card.setor_empresa_relacionada %}
+                •
+              {% endif %}
+
+              {% if card.setor_empresa_relacionada %}
+                Setor: {{ card.setor_empresa_relacionada }}
+              {% endif %}
+            </div>
+          {% endif %}
+
+        {% elif card.nome_fantasia_empresa_relacionada %}
+          <div class="texto-forte">{{ card.nome_fantasia_empresa_relacionada }}</div>
+
+          {% if card.cnpj_empresa_relacionada %}
+            <div class="texto-suave">CNPJ: {{ card.cnpj_empresa_relacionada }}</div>
+          {% endif %}
+
+          {% if card.classe_empresa_relacionada or card.setor_empresa_relacionada %}
+            <div class="texto-suave">
+              {% if card.classe_empresa_relacionada %}
+                Segmento: {{ card.classe_empresa_relacionada }}
+              {% endif %}
+
+              {% if card.classe_empresa_relacionada and card.setor_empresa_relacionada %}
+                •
+              {% endif %}
+
+              {% if card.setor_empresa_relacionada %}
+                Setor: {{ card.setor_empresa_relacionada }}
+              {% endif %}
+            </div>
+          {% endif %}
+
         {% else %}
           Não informada
         {% endif %}
@@ -1179,7 +1222,6 @@
     </section>
   </div>
 </div>
-```
 
   </div>
 </div>

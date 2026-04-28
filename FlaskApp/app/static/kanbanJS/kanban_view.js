@@ -8125,6 +8125,98 @@ function formatarNumeroParaInput(valor){
     return precos.find(p => idNum(p.IDDimTabelaPrecosEuromidia) === idPreco) || null;
   }
 
+  function obterPrimeiroValorObjeto(objeto, nomesCampos){
+    if (!objeto || typeof objeto !== 'object') return '';
+
+    for (const nome of nomesCampos || []) {
+      const valor = objeto[nome];
+      if (valor !== null && valor !== undefined && safeStr(valor).trim() !== '') {
+        return valor;
+      }
+    }
+
+    return '';
+  }
+
+  function copiarTextoParaAreaTransferencia(texto, mensagemSucesso){
+    const valor = safeStr(texto || '').trim();
+    if (!valor) return;
+
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(valor)
+        .then(() => mostrarMensagemCard(mensagemSucesso || 'Copiado para a área de transferência.', 'sucesso'))
+        .catch(() => mostrarMensagemCard('Não consegui copiar automaticamente. Selecione e copie manualmente.', 'alerta'));
+      return;
+    }
+
+    const temporario = document.createElement('textarea');
+    temporario.value = valor;
+    temporario.setAttribute('readonly', 'readonly');
+    temporario.style.position = 'fixed';
+    temporario.style.left = '-9999px';
+    document.body.appendChild(temporario);
+    temporario.select();
+
+    try {
+      document.execCommand('copy');
+      mostrarMensagemCard(mensagemSucesso || 'Copiado para a área de transferência.', 'sucesso');
+    } catch (erro) {
+      console.warn('copiarTextoParaAreaTransferencia: falhou', erro);
+      mostrarMensagemCard('Não consegui copiar automaticamente. Selecione e copie manualmente.', 'alerta');
+    } finally {
+      temporario.remove();
+    }
+  }
+
+  function montarBlocoCheckinPublico(valoresSalvos = null){
+    const dados = valoresSalvos && typeof valoresSalvos === 'object' ? valoresSalvos : {};
+
+    const tokenPublico = safeStr(obterPrimeiroValorObjeto(dados, [
+      'TokenPublicoCheckin',
+      'token_publico_checkin',
+      'TokenPublico',
+      'token_publico'
+    ])).trim();
+
+    const urlBruta = safeStr(obterPrimeiroValorObjeto(dados, [
+      'UrlCheckinPublico',
+      'url_checkin_publico',
+      'URLCheckinPublico',
+      'url_publica_checkin'
+    ])).trim();
+
+    const urlCheckin = montarUrlKanban(
+      urlBruta || (tokenPublico ? `/paineis/checkin/publico/${encodeURIComponent(tokenPublico)}` : '')
+    );
+
+    if (!urlCheckin) {
+      return document.createDocumentFragment();
+    }
+
+    const box = el('div', { class:'kb-checkin-publico', 'data-role':'checkin-publico-wrap' }, []);
+
+    const valorUrl = el('div', { class:'kb-checkin-publico-valor kb-checkin-publico-url', title:urlCheckin }, [urlCheckin]);
+    const linkAbrir = el('a', {
+      class:'kb-btn sm kb-checkin-publico-acao',
+      href:urlCheckin,
+      target:'_blank',
+      rel:'noopener noreferrer'
+    }, ['Abrir']);
+    const btnCopiarUrl = el('button', { class:'kb-btn sm', type:'button' }, ['Copiar URL']);
+    btnCopiarUrl.addEventListener('click', () => copiarTextoParaAreaTransferencia(urlCheckin, 'URL do check-in copiada.'));
+
+    const grid = el('div', { class:'kb-checkin-publico-grid kb-checkin-publico-grid-url-unica' }, [
+      el('div', { class:'kb-campo kb-checkin-publico-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['URL Check-in']),
+        el('div', { class:'kb-checkin-publico-linha' }, [valorUrl, linkAbrir, btnCopiarUrl])
+      ])
+    ]);
+
+    box.appendChild(grid);
+
+    return box;
+  }
+
 
 
 
@@ -8424,6 +8516,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       el('div', { class:'kb-kpi', 'data-role':'kpi-margem-final' }, ['—'])
     ])
   ]));
+
+  wrap.appendChild(montarBlocoCheckinPublico(valoresSalvos));
 
   const inputNovoValor = bloco.querySelector('[data-role="input-novo-valor"]');
   const inputPercentual = bloco.querySelector('[data-role="input-percentual"]');
