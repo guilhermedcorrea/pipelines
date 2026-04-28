@@ -7462,6 +7462,8 @@ def grade_painel_multi():
 
 
 
+
+
 @paineis_bp.get("/contratos/<int:id_fato_controle_contratos>", strict_slashes=False)
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def contrato_detalhe(id_fato_controle_contratos: int):
@@ -7747,36 +7749,71 @@ def contrato_detalhe(id_fato_controle_contratos: int):
 
     try:
         sql_negociacoes = text(r"""
+            ;WITH CardsContrato AS (
+                SELECT DISTINCT
+                    rel.IDFatoKanbanCard
+                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS rel
+                WHERE rel.IDFatoControleContratosEuromidia = :id
+                  AND rel.IDFatoKanbanCard IS NOT NULL
+            )
             SELECT
                 n.*,
+
                 rel.IDFatoContratoCardEuromidia,
                 rel.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidiaVinculo,
                 rel.IDFatoControleContratosItensEuromidia AS IDFatoControleContratosItensEuromidiaVinculo,
                 rel.IDDimUsuarios AS IDDimUsuariosContratoCard,
                 rel.DataAtualizacao AS DataAtualizacaoContratoCard,
 
-                it.IDFatoControleContratosItensEuromidia AS IDItemContrato,
-                it.CodPonto AS CodPontoContrato,
-                it.CodFace AS CodFaceContrato,
-                it.IDDimFacesPaineis AS IDDimFacesPaineisContrato,
-                it.IDPainelEuromidia AS IDPainelEuromidiaContrato,
+                rel.IDItemContrato,
+                rel.CodPontoContrato,
+                rel.CodFaceContrato,
+                rel.IDDimFacesPaineisContrato,
+                rel.IDPainelEuromidiaContrato,
 
                 fp.CodPonto AS CodPontoFace,
-                fp.CodFace AS CodFaceFace
-            FROM [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
-            INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS it
-                ON it.IDFatoControleContratoEuromidia = c.IDFatoControleContratosEuromidia
-            INNER JOIN [Integracao].[Silver].[FatoContratoCardEuromidia] AS rel
-                ON rel.IDFatoControleContratosEuromidia = c.IDFatoControleContratosEuromidia
-               AND rel.IDFatoControleContratosItensEuromidia = it.IDFatoControleContratosItensEuromidia
-            INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
-                ON n.IDFatoKanbanCard = rel.IDFatoKanbanCard
+                fp.CodFace AS CodFaceFace,
+
+                pf.CodPonto AS CodPontoCardPainelFace,
+                pf.CodFace AS CodFaceCardPainelFace
+            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+            INNER JOIN CardsContrato AS cc
+                ON cc.IDFatoKanbanCard = n.IDFatoKanbanCard
             LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS fp
                 ON fp.IDDimFacesPaineis = n.IDDimFacesPaineis
-            WHERE c.IDFatoControleContratosEuromidia = :id
+            LEFT JOIN [Kanban].[Silver].[FatoKanbanCardPainelFace] AS pf
+                ON pf.IDFatoKanbanCard = n.IDFatoKanbanCard
+               AND n.IDDimFacesPaineis IS NOT NULL
+               AND pf.IDDimFacesPaineis = n.IDDimFacesPaineis
+            OUTER APPLY (
+                SELECT TOP (1)
+                    rel0.IDFatoContratoCardEuromidia,
+                    rel0.IDFatoControleContratosEuromidia,
+                    rel0.IDFatoControleContratosItensEuromidia,
+                    rel0.IDDimUsuarios,
+                    rel0.DataAtualizacao,
+
+                    it0.IDFatoControleContratosItensEuromidia AS IDItemContrato,
+                    it0.CodPonto AS CodPontoContrato,
+                    it0.CodFace AS CodFaceContrato,
+                    it0.IDDimFacesPaineis AS IDDimFacesPaineisContrato,
+                    it0.IDPainelEuromidia AS IDPainelEuromidiaContrato
+                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS rel0
+                LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS it0
+                    ON it0.IDFatoControleContratosItensEuromidia = rel0.IDFatoControleContratosItensEuromidia
+                WHERE rel0.IDFatoControleContratosEuromidia = :id
+                  AND rel0.IDFatoKanbanCard = n.IDFatoKanbanCard
+                ORDER BY
+                    CASE
+                        WHEN n.IDDimFacesPaineis IS NOT NULL
+                             AND it0.IDDimFacesPaineis = n.IDDimFacesPaineis
+                        THEN 0
+                        ELSE 1
+                    END,
+                    rel0.DataAtualizacao DESC,
+                    rel0.IDFatoContratoCardEuromidia DESC
+            ) AS rel
             ORDER BY
-                it.IDFatoControleContratosItensEuromidia ASC,
-                rel.DataAtualizacao DESC,
                 COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto) DESC,
                 n.IDFatoKanbanNegociacaoPreco DESC
         """)
@@ -7794,93 +7831,141 @@ def contrato_detalhe(id_fato_controle_contratos: int):
             flush=True,
         )
 
+        def _id_int_seguro(valor):
+            if valor in (None, ""):
+                return None
+            try:
+                return int(valor)
+            except Exception:
+                try:
+                    return int(str(valor).strip())
+                except Exception:
+                    return None
+
+        def _texto_chave(valor):
+            if valor is None:
+                return ""
+            texto = str(valor).strip()
+            if not texto:
+                return ""
+            if re.fullmatch(r"\d+\.0+", texto):
+                texto = texto.split(".", 1)[0]
+            return texto.upper()
+
+        def _chave_face(cod_ponto, cod_face):
+            ponto = _texto_chave(cod_ponto)
+            face = _texto_chave(cod_face)
+            if not ponto or not face:
+                return None
+            return (ponto, face)
+
+        itens_por_id_normalizado = {}
         itens_por_face_id = {}
         itens_por_face_codigo = {}
         itens_por_painel = {}
 
         for it in itens:
-            id_face = it.get("IDDimFacesPaineis")
-            if id_face not in (None, ""):
-                try:
-                    itens_por_face_id[int(id_face)] = it
-                except Exception:
-                    pass
+            id_item = _id_int_seguro(it.get("IDFatoControleContratosItensEuromidia"))
+            if id_item is not None:
+                itens_por_id_normalizado[id_item] = it
 
-            id_painel = it.get("IDPainelEuromidia") or it.get("IDDimPaineisEuromidia")
-            if id_painel not in (None, ""):
-                try:
-                    itens_por_painel.setdefault(int(id_painel), []).append(it)
-                except Exception:
-                    pass
+            id_face = _id_int_seguro(it.get("IDDimFacesPaineis"))
+            if id_face is not None:
+                itens_por_face_id.setdefault(id_face, it)
 
-            chave = (
-                str(it.get("CodPonto") or "").strip(),
-                str(it.get("CodFace") or "").strip().upper(),
-            )
-            itens_por_face_codigo[chave] = it
+            id_painel = _id_int_seguro(it.get("IDPainelEuromidia") or it.get("IDDimPaineisEuromidia"))
+            if id_painel is not None:
+                itens_por_painel.setdefault(id_painel, []).append(it)
+
+            chave = _chave_face(it.get("CodPonto"), it.get("CodFace"))
+            if chave is not None:
+                itens_por_face_codigo.setdefault(chave, it)
 
         for idx_neg, row in enumerate(neg_rows, start=1):
             neg = dict(row)
             alvo = None
+            fonte_mapeamento = None
 
-            id_item_vinculo = neg.get("IDFatoControleContratosItensEuromidiaVinculo") or neg.get("IDItemContrato")
-            if id_item_vinculo not in (None, ""):
-                try:
-                    alvo = itens_por_id.get(int(id_item_vinculo)) or itens_por_id.get(id_item_vinculo)
-                except Exception:
-                    alvo = itens_por_id.get(id_item_vinculo)
+            """Primeiro eu mapeio pela face da negociação.
+            O card pode ter mais de um CodPonto/CodFace, então o IDFatoKanbanCard sozinho não identifica o item correto.
+            A negociação de preço, quando tem IDDimFacesPaineis, pertence àquela face específica.
+            Só uso o vínculo contrato-card como fallback, nunca como primeira regra.
+            """
 
-            if alvo is None:
-                id_face_contrato = neg.get("IDDimFacesPaineisContrato")
-                if id_face_contrato not in (None, ""):
-                    try:
-                        alvo = itens_por_face_id.get(int(id_face_contrato))
-                    except Exception:
-                        alvo = None
+            id_face_negociacao = _id_int_seguro(neg.get("IDDimFacesPaineis"))
+            if id_face_negociacao is not None:
+                alvo = itens_por_face_id.get(id_face_negociacao)
+                if alvo is not None:
+                    fonte_mapeamento = "IDDimFacesPaineis da negociação"
 
             if alvo is None:
-                id_face_neg = neg.get("IDDimFacesPaineis")
-                if id_face_neg not in (None, ""):
-                    try:
-                        alvo = itens_por_face_id.get(int(id_face_neg))
-                    except Exception:
-                        alvo = None
-
-            if alvo is None:
-                id_painel_contrato = neg.get("IDPainelEuromidiaContrato")
-                if id_painel_contrato not in (None, ""):
-                    try:
-                        lista_painel = itens_por_painel.get(int(id_painel_contrato)) or []
-                        if len(lista_painel) == 1:
-                            alvo = lista_painel[0]
-                    except Exception:
-                        alvo = None
-
-            if alvo is None:
-                chave_contrato = (
-                    str(neg.get("CodPontoContrato") or "").strip(),
-                    str(neg.get("CodFaceContrato") or "").strip().upper(),
+                chave_face_negociacao = _chave_face(
+                    neg.get("CodPontoFace"),
+                    neg.get("CodFaceFace"),
                 )
-                alvo = itens_por_face_codigo.get(chave_contrato)
+                if chave_face_negociacao is not None:
+                    alvo = itens_por_face_codigo.get(chave_face_negociacao)
+                    if alvo is not None:
+                        fonte_mapeamento = "CodPonto/CodFace da DimFacesPaineis"
 
             if alvo is None:
-                chave_face = (
-                    str(neg.get("CodPontoFace") or "").strip(),
-                    str(neg.get("CodFaceFace") or "").strip().upper(),
+                chave_card_painel_face = _chave_face(
+                    neg.get("CodPontoCardPainelFace"),
+                    neg.get("CodFaceCardPainelFace"),
                 )
-                alvo = itens_por_face_codigo.get(chave_face)
+                if chave_card_painel_face is not None:
+                    alvo = itens_por_face_codigo.get(chave_card_painel_face)
+                    if alvo is not None:
+                        fonte_mapeamento = "CodPonto/CodFace do FatoKanbanCardPainelFace"
+
+            if alvo is None:
+                chave_contrato = _chave_face(
+                    neg.get("CodPontoContrato"),
+                    neg.get("CodFaceContrato"),
+                )
+                if chave_contrato is not None:
+                    alvo = itens_por_face_codigo.get(chave_contrato)
+                    if alvo is not None:
+                        fonte_mapeamento = "CodPonto/CodFace do item vinculado ao card"
+
+            id_item_vinculo = _id_int_seguro(
+                neg.get("IDFatoControleContratosItensEuromidiaVinculo")
+                or neg.get("IDItemContrato")
+            )
+
+            if alvo is None and id_item_vinculo is not None:
+                alvo = itens_por_id_normalizado.get(id_item_vinculo)
+                if alvo is not None:
+                    fonte_mapeamento = "ID item vinculado ao card"
+
+            if alvo is None:
+                id_painel_negociacao = _id_int_seguro(neg.get("IDDimPaineisEuromidia"))
+                if id_painel_negociacao is None:
+                    id_painel_negociacao = _id_int_seguro(neg.get("IDPainelEuromidiaContrato"))
+                if id_painel_negociacao is not None:
+                    lista_painel = itens_por_painel.get(id_painel_negociacao) or []
+                    if len(lista_painel) == 1:
+                        alvo = lista_painel[0]
+                        fonte_mapeamento = "painel único no contrato"
 
             print(
                 f"NEGOCIACAO MAPEADA [{idx_neg}] | "
                 f"IDNegociacao={neg.get('IDFatoKanbanNegociacaoPreco')} | "
                 f"IDCard={neg.get('IDFatoKanbanCard')} | "
+                f"IDFaceNegociacao={neg.get('IDDimFacesPaineis')} | "
                 f"IDItemVinculo={id_item_vinculo} | "
+                f"CodPontoFace={neg.get('CodPontoFace')} | "
+                f"CodFaceFace={neg.get('CodFaceFace')} | "
                 f"CodPontoContrato={neg.get('CodPontoContrato')} | "
                 f"CodFaceContrato={neg.get('CodFaceContrato')} | "
-                f"AlvoIDItem={(alvo or {}).get('IDFatoControleContratosItensEuromidia') if isinstance(alvo, dict) else None}",
+                f"FonteMapeamento={fonte_mapeamento or 'NAO_MAPEADO'} | "
+                f"AlvoIDItem={(alvo or {}).get('IDFatoControleContratosItensEuromidia') if isinstance(alvo, dict) else None} | "
+                f"AlvoCodPonto={(alvo or {}).get('CodPonto') if isinstance(alvo, dict) else None} | "
+                f"AlvoCodFace={(alvo or {}).get('CodFace') if isinstance(alvo, dict) else None}",
                 flush=True,
             )
 
+            neg["FonteMapeamentoHistoricoNegociacao"] = fonte_mapeamento or "Não mapeado"
             neg["_campos"] = _campos_de_mapping(neg)
 
             if alvo is not None:
@@ -7890,6 +7975,16 @@ def contrato_detalhe(id_fato_controle_contratos: int):
                 )
                 if not ja_existe:
                     alvo["HistoricoNegociacao"].append(SimpleNamespace(**neg))
+
+        for it in itens:
+            print(
+                f"RESUMO HISTORICO NEGOCIACAO POR ITEM | "
+                f"IDItem={it.get('IDFatoControleContratosItensEuromidia')} | "
+                f"CodPonto={it.get('CodPonto')} | "
+                f"CodFace={it.get('CodFace')} | "
+                f"QtdHistorico={len(it.get('HistoricoNegociacao') or [])}",
+                flush=True,
+            )
 
         print("=" * 120, flush=True)
 
@@ -8260,6 +8355,8 @@ def contrato_detalhe(id_fato_controle_contratos: int):
         empresa_principal_campos=empresa_principal_campos,
         empresas_relacionadas=empresas_relacionadas,
     )
+
+
 
 
 def _sql_bool(v):
@@ -10196,7 +10293,6 @@ def _normalizar_hex_css(valor, padrao="#64748B"):
 
 
 
-
 @paineis_bp.get("/contratos")
 @login_required
 def contratos_lista():
@@ -10565,11 +10661,20 @@ def contratos_lista():
 
     t_ids0 = time.perf_counter()
 
+    ordenacao_data_nula_por_ultimo = case(
+        (
+            FatoControleContratosEuromidia.DataLancamento.is_(None),
+            1,
+        ),
+        else_=0,
+    )
+
     ids_plus = [
         linha[0]
         for linha in (
             consulta_base_ids
             .order_by(
+                ordenacao_data_nula_por_ultimo.asc(),
                 desc(FatoControleContratosEuromidia.DataLancamento),
                 desc(FatoControleContratosEuromidia.IDFatoControleContratosEuromidia),
             )
@@ -10766,7 +10871,7 @@ def contratos_lista():
     tempo_total = time.perf_counter() - tempo_inicio
 
     current_app.logger.warning(
-        "contratos_lista | q=%r | id_contrato=%s | status=%s | cidades=%s | segmentos=%s | "
+        "contratos_lista | ordem=DataLancamento DESC, IDContrato DESC | q=%r | id_contrato=%s | status=%s | cidades=%s | segmentos=%s | "
         "contrato_ativo=%r | page=%s | per_page=%s | total=%s | count=%.3fs | ids=%.3fs | "
         "logo=%.3fs | detalhes=%.3fs | total_req=%.3fs",
         q,
@@ -10795,8 +10900,6 @@ def contratos_lista():
         segmento_opcoes=segmento_opcoes,
         contrato_ativo_opcoes=contrato_ativo_opcoes,
     )
-
-
 
 
 

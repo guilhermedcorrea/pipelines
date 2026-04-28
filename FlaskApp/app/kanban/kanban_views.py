@@ -9092,6 +9092,10 @@ def _montar_payload_snapshot_preco_praticado(
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
     id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
 
+    negociacao_base_dict = negociacao_base if isinstance(negociacao_base, dict) else {}
+    id_painel_preferido = int(negociacao_base_dict.get("IDDimPaineisEuromidia") or 0) or None
+    id_face_preferida = int(negociacao_base_dict.get("IDDimFacesPaineis") or 0) or None
+
     sql_vinculo = text("""
         SELECT TOP 1
             pf.IDFatoKanbanCardPainelFace,
@@ -9122,11 +9126,39 @@ def _montar_payload_snapshot_preco_praticado(
         WHERE pf.IDFatoKanbanCard = :id_card
           AND ISNULL(pf.Ativo, 1) = 1
         ORDER BY
+            CASE
+                WHEN :id_painel_preferido IS NOT NULL
+                 AND :id_face_preferida IS NOT NULL
+                 AND TRY_CONVERT(int, pf.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel_preferido)
+                 AND TRY_CONVERT(int, pf.IDDimFacesPaineis) = TRY_CONVERT(int, :id_face_preferida)
+                THEN 0
+                ELSE 1
+            END,
+            CASE
+                WHEN :id_painel_preferido IS NOT NULL
+                 AND TRY_CONVERT(int, pf.IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel_preferido)
+                THEN 0
+                ELSE 1
+            END,
+            CASE
+                WHEN :id_face_preferida IS NOT NULL
+                 AND TRY_CONVERT(int, pf.IDDimFacesPaineis) = TRY_CONVERT(int, :id_face_preferida)
+                THEN 0
+                ELSE 1
+            END,
             ISNULL(pf.Ordem, 0),
             pf.IDFatoKanbanCardPainelFace;
     """)
 
-    vinculo = db.session.execute(sql_vinculo, {"id_card": int(id_card)}).mappings().first()
+    vinculo = db.session.execute(
+        sql_vinculo,
+        {
+            "id_card": int(id_card),
+            "id_painel_preferido": int(id_painel_preferido) if id_painel_preferido not in (None, "", 0) else None,
+            "id_face_preferida": int(id_face_preferida) if id_face_preferida not in (None, "", 0) else None,
+        },
+    ).mappings().first()
+
     if not vinculo:
         return {
             "ok": False,
@@ -9693,8 +9725,33 @@ def _sincronizar_aprovacao_preco_no_snapshot_preco_praticado(
     if not contexto.get("ok"):
         return contexto
 
+    payload = dict(contexto.get("payload") or {})
+
+    id_painel_negociacao = int(negociacao.get("IDDimPaineisEuromidia") or 0) or None
+    id_face_negociacao = int(negociacao.get("IDDimFacesPaineis") or 0) or None
+
+    if id_painel_negociacao:
+        payload["IDDimPaineisEuromidia"] = int(id_painel_negociacao)
+    if id_face_negociacao:
+        payload["IDDimFacesPaineis"] = int(id_face_negociacao)
+
+    payload["IDDimTabelaPrecosEuromidia"] = (
+        int(negociacao.get("IDDimTabelaPrecosEuromidia") or 0)
+        or payload.get("IDDimTabelaPrecosEuromidia")
+    )
+    payload["IDFatoControleContratosEuromidia"] = (
+        int(negociacao.get("IDFatoControleContratosEuromidia") or 0)
+        or payload.get("IDFatoControleContratosEuromidia")
+    )
+    payload["PrecoProposto"] = _valor_decimal(negociacao.get("PrecoProposto")) or payload.get("PrecoProposto")
+    payload["PrecoPraticado"] = _valor_decimal(preco_aprovado) or payload.get("PrecoPraticado")
+    payload["DescontoPercentual"] = _valor_decimal(desconto_aprovado_percentual) or payload.get("DescontoPercentual")
+    payload["MargemPercentual"] = _valor_decimal(margem_percentual) or payload.get("MargemPercentual")
+    payload["DataInicio"] = negociacao.get("PeriodoInicio") or payload.get("DataInicio")
+    payload["DataTermino"] = negociacao.get("PeriodoTermino") or payload.get("DataTermino")
+
     return _upsert_snapshot_preco_praticado(
-        payload_snapshot=contexto.get("payload") or {},
+        payload_snapshot=payload,
         marcar_data_aprovacao_contrato=False,
     )
 
