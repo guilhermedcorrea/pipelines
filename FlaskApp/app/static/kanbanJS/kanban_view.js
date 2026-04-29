@@ -947,6 +947,83 @@
     return parseNumeroInput(bloco?.querySelector(seletor)?.textContent || null);
   }
 
+  function obterExibicoesDiaSelecionadasDoBloco(bloco){
+    const selectExibicoesDia = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const selecionadas = obterValoresSelecionadosSelect(selectExibicoesDia)
+      .map((valor) => safeStr(valor || "").trim())
+      .filter(Boolean);
+
+    const unicas = Array.from(new Set(selecionadas));
+    if (unicas.length) return unicas;
+
+    const precoSelecionado = typeof obterPrecoSelecionadoDoBloco === "function"
+      ? obterPrecoSelecionadoDoBloco(bloco)
+      : null;
+
+    const exibicoesPreco = safeStr(
+      precoSelecionado?.ExibicoesDia ??
+      precoSelecionado?.exibicoes_dia ??
+      bloco?.__dadosComerciais?.preco?.ExibicoesDia ??
+      bloco?.__dadosComerciais?.preco?.exibicoes_dia ??
+      ""
+    ).trim();
+
+    return exibicoesPreco ? [exibicoesPreco] : [""];
+  }
+
+  function calcularDadosComerciaisPainelFacePorExibicao(bloco, exibicoesDia = "", periodoPreferido = ""){
+    const exibicoesTexto = safeStr(exibicoesDia || "").trim();
+    const periodoAtual = safeStr(
+      periodoPreferido ||
+      bloco?.querySelector('[data-role="select-periodo-exibicao"]')?.value ||
+      ""
+    ).trim();
+
+    const precoPorExibicao = exibicoesTexto
+      ? (
+          localizarPrecoPorFiltrosDoBloco(bloco, {
+            exibicoes_dia: exibicoesTexto,
+            periodo_exibicao: periodoAtual,
+          }) || localizarPrecoPorFiltrosDoBloco(bloco, {
+            exibicoes_dia: exibicoesTexto,
+          })
+        )
+      : null;
+
+    const precoSelecionado = precoPorExibicao || obterPrecoSelecionadoDoBloco(bloco);
+    const valorTabelaNumero = Number(precoSelecionado?.Valor);
+    const valorTabela = Number.isFinite(valorTabelaNumero) ? valorTabelaNumero : null;
+    const novoValorInformado = parseNumeroInput(bloco?.querySelector('[data-role="input-novo-valor"]')?.value);
+    const percentualInformado = parseNumeroInput(bloco?.querySelector('[data-role="input-percentual"]')?.value);
+    const origemEdicao = bloco?.__origemEdicaoComercial || (
+      novoValorInformado !== null
+        ? "novo_valor"
+        : (percentualInformado !== null ? "percentual" : null)
+    );
+
+    let valorFinal = valorTabela;
+
+    if (origemEdicao === "novo_valor" && novoValorInformado !== null) {
+      valorFinal = novoValorInformado;
+    } else if (origemEdicao === "percentual" && percentualInformado !== null) {
+      valorFinal = calcularNovoValorPorPercentual(valorTabela, percentualInformado);
+    } else if (novoValorInformado !== null) {
+      valorFinal = novoValorInformado;
+    } else if (percentualInformado !== null) {
+      valorFinal = calcularNovoValorPorPercentual(valorTabela, percentualInformado);
+    }
+
+    return {
+      id_preco: idNum(precoSelecionado?.IDDimTabelaPrecosEuromidia || 0) || null,
+      periodo_exibicao: safeStr(precoSelecionado?.PeriodoExibicao || periodoAtual || "").trim() || null,
+      exibicoes_dia: exibicoesTexto || null,
+      valor_tabela: valorTabela,
+      valor_venda_final: valorFinal,
+      novo_valor: novoValorInformado,
+      percentual_desconto: novoValorInformado !== null ? null : percentualInformado,
+    };
+  }
+
   function obterResumoPainelFaceDoBloco(bloco){
     if (!bloco) return null;
 
@@ -979,7 +1056,27 @@
   }
 
   function listarResumosPainelFaceDoFormulario(){
-    return [...(painelFaceLista?.querySelectorAll('.kb-painel-item') || [])].map((bloco) => obterResumoPainelFaceDoBloco(bloco)).filter(Boolean);
+    const resumos = [];
+
+    for (const bloco of [...(painelFaceLista?.querySelectorAll('.kb-painel-item') || [])]) {
+      const resumoBase = obterResumoPainelFaceDoBloco(bloco);
+      if (!resumoBase) continue;
+
+      const periodoAtual = safeStr(bloco.querySelector('[data-role="select-periodo-exibicao"]')?.value || "").trim();
+      const exibicoesParaGerar = obterExibicoesDiaSelecionadasDoBloco(bloco);
+
+      exibicoesParaGerar.forEach((exibicoesDia) => {
+        const dadosComerciais = calcularDadosComerciaisPainelFacePorExibicao(bloco, exibicoesDia, periodoAtual);
+        resumos.push({
+          ...resumoBase,
+          ...dadosComerciais,
+          exibicoes_dia: dadosComerciais.exibicoes_dia || resumoBase.exibicoes_dia || null,
+          valor_venda_final: dadosComerciais.valor_venda_final,
+        });
+      });
+    }
+
+    return resumos.filter(Boolean);
   }
 
   function coletarHeaderFormularioSolicitacaoExistente(){
@@ -7285,7 +7382,17 @@ function formatarNumeroParaInput(valor){
     const itens = [...(painelFaceLista?.querySelectorAll('.kb-painel-item') || [])];
     itens.forEach((item, idx) => {
       const titulo = item.querySelector('[data-role="titulo-item"]');
-      if (titulo) titulo.textContent = `Painel / Face ${idx + 1}`;
+      if (!titulo) return;
+
+      const exibicoes = obterExibicoesDiaSelecionadasDoBloco(item)
+        .map((valor) => safeStr(valor || '').trim())
+        .filter(Boolean);
+
+      const sufixoExibicoes = exibicoes.length === 1
+        ? ` • ${exibicoes[0]}`
+        : (exibicoes.length > 1 ? ` • ${exibicoes.join(', ')}` : '');
+
+      titulo.textContent = `Painel / Face ${idx + 1}${sufixoExibicoes}`;
     });
   }
 
@@ -7987,17 +8094,30 @@ function formatarNumeroParaInput(valor){
     return wrap?.querySelector?.('[data-role="dd-exibicoes-dia"]') || null;
   }
 
+  function listarOpcoesUnicasSelectExibicoesDia(selectEl){
+    const mapa = new Map();
+
+    Array.from(selectEl?.options || []).forEach((option) => {
+      const valor = safeStr(option?.value || '').trim();
+      if (!valor || option.disabled || mapa.has(valor)) return;
+
+      const label = safeStr(option?.textContent || option?.value || '').trim() || valor;
+      mapa.set(valor, { valor, label });
+    });
+
+    return Array.from(mapa.values());
+  }
+
   function atualizarResumoDropdownExibicoesDia(selectEl){
     const dd = obterDropdownExibicoesDia(selectEl);
     const resumo = dd?.querySelector('[data-role="exibicoes-dia-resumo"]');
     if (!resumo) return;
 
-    const opcoes = Array.from(selectEl?.options || [])
-      .filter((option) => safeStr(option?.value || '').trim() && !option.disabled);
+    const opcoes = listarOpcoesUnicasSelectExibicoesDia(selectEl);
     const valores = new Set(obterValoresSelecionadosSelect(selectEl));
     const labelsSelecionadas = opcoes
-      .filter((option) => valores.has(safeStr(option.value || '').trim()))
-      .map((option) => safeStr(option.textContent || option.value || '').trim())
+      .filter((opcao) => valores.has(opcao.valor))
+      .map((opcao) => opcao.label)
       .filter(Boolean);
 
     if (!labelsSelecionadas.length) {
@@ -8020,13 +8140,7 @@ function formatarNumeroParaInput(valor){
     if (!lista) return;
 
     const termoBusca = normalizarTexto(busca?.value || '');
-    const opcoes = Array.from(selectEl.options || [])
-      .map((option) => ({
-        valor: safeStr(option?.value || '').trim(),
-        label: safeStr(option?.textContent || option?.value || '').trim(),
-        disabled: Boolean(option?.disabled),
-      }))
-      .filter((opcao) => opcao.valor && !opcao.disabled);
+    const opcoes = listarOpcoesUnicasSelectExibicoesDia(selectEl);
     const selecionados = new Set(obterValoresSelecionadosSelect(selectEl));
 
     lista.innerHTML = '';
@@ -8159,14 +8273,20 @@ function formatarNumeroParaInput(valor){
       selectEl.appendChild(el('option', attrsPlaceholder, [placeholder]));
     }
 
+    const opcoesUnicas = new Map();
     opcoesLista.forEach((opcao) => {
       const valor = safeStr(opcao?.valor ?? '').trim();
-      if (!valor) return;
+      if (!valor || opcoesUnicas.has(valor)) return;
+
       const label = safeStr(opcao?.label ?? valor).trim() || valor;
-      selectEl.appendChild(el('option', { value: valor }, [label]));
+      opcoesUnicas.set(valor, { valor, label });
     });
 
-    const valoresParaRestaurar = valoresAtuais.filter((valor) => valoresValidos.has(valor));
+    opcoesUnicas.forEach((opcao) => {
+      selectEl.appendChild(el('option', { value: opcao.valor }, [opcao.label]));
+    });
+
+    const valoresParaRestaurar = Array.from(new Set(valoresAtuais.filter((valor) => valoresValidos.has(valor))));
     selecionarValoresNoSelect(selectEl, valoresParaRestaurar);
     atualizarDropdownExibicoesDia(selectEl);
   }
@@ -8550,6 +8670,38 @@ function formatarNumeroParaInput(valor){
     };
   }
 
+  function obterChaveBlocoPainelFacePeriodo(bloco, periodoPreferido = ''){
+    const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco?.querySelector('[data-role="select-face"]');
+    const selectPeriodo = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
+    const painelFace = obterPainelFaceSelecionadoDoBloco(bloco) || null;
+
+    const idPainel = idNum(selectPainel?.value || painelFace?.IDDimPaineisEuromidia || 0) || 0;
+    const codFace = safeStr(selectFace?.value || painelFace?.CodFace || '').trim().toUpperCase();
+    const periodo = safeStr(periodoPreferido || selectPeriodo?.value || '').trim();
+
+    if (!idPainel || !codFace) return '';
+    return `${idPainel}|${codFace}|${periodo}`;
+  }
+
+  function listarExibicoesJaRepresentadasEmOutrosBlocos(blocoReferencia, periodoPreferido = ''){
+    const chaveReferencia = obterChaveBlocoPainelFacePeriodo(blocoReferencia, periodoPreferido);
+    const exibicoes = new Set();
+    if (!chaveReferencia || !painelFaceLista) return exibicoes;
+
+    for (const outroBloco of painelFaceLista.querySelectorAll('.kb-painel-item')) {
+      if (outroBloco === blocoReferencia) continue;
+      if (obterChaveBlocoPainelFacePeriodo(outroBloco, periodoPreferido) !== chaveReferencia) continue;
+
+      obterExibicoesDiaSelecionadasDoBloco(outroBloco)
+        .map((valor) => safeStr(valor || '').trim())
+        .filter(Boolean)
+        .forEach((valor) => exibicoes.add(valor));
+    }
+
+    return exibicoes;
+  }
+
   function dividirBlocoPorMultiplasExibicoesDia(bloco){
     const selectExibicoesDia = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
     const selectPeriodoExibicao = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
@@ -8563,24 +8715,30 @@ function formatarNumeroParaInput(valor){
     if (unicas.length <= 1) return false;
 
     const periodoAtual = safeStr(selectPeriodoExibicao?.value || '').trim();
-    const primeiraExibicao = unicas[0];
-    const dadosPrimeira = montarDadosPainelFaceParaExibicao(bloco, primeiraExibicao, periodoAtual);
-    const idPrecoPrimeira = idNum(dadosPrimeira?.id_preco || dadosPrimeira?.IDDimTabelaPrecosEuromidia || 0) || null;
+    const exibicoesJaRepresentadas = listarExibicoesJaRepresentadasEmOutrosBlocos(bloco, periodoAtual);
+    const exibicaoMantidaNoBloco = unicas.find((valor) => !exibicoesJaRepresentadas.has(valor)) || unicas[0];
+    const dadosMantidos = montarDadosPainelFaceParaExibicao(bloco, exibicaoMantidaNoBloco, periodoAtual);
+    const idPrecoMantido = idNum(dadosMantidos?.id_preco || dadosMantidos?.IDDimTabelaPrecosEuromidia || 0) || null;
 
     bloco.__bloqueioDivisaoExibicoesDia = true;
-    selecionarValoresNoSelect(selectExibicoesDia, [primeiraExibicao]);
-    sincronizarSeletoresTabelaPrecoDoBloco(bloco, { id_preco: idPrecoPrimeira || null, origem: 'divisao_exibicoes' });
+    selecionarValoresNoSelect(selectExibicoesDia, [exibicaoMantidaNoBloco]);
+    sincronizarSeletoresTabelaPrecoDoBloco(bloco, { id_preco: idPrecoMantido || null, origem: 'divisao_exibicoes' });
     atualizarResumoComercial(bloco, { formatarCampos: true });
     bloco.__bloqueioDivisaoExibicoesDia = false;
 
     let referenciaInsercao = bloco;
-    unicas.slice(1).forEach((exibicoesDia) => {
-      const dadosClone = montarDadosPainelFaceParaExibicao(bloco, exibicoesDia, periodoAtual);
-      const novoBloco = criarPainelFaceItem(dadosClone);
-      novoBloco.dataset.origemDivisaoExibicoesDia = '1';
-      referenciaInsercao.insertAdjacentElement('afterend', novoBloco);
-      referenciaInsercao = novoBloco;
-    });
+    unicas
+      .filter((exibicoesDia) => exibicoesDia !== exibicaoMantidaNoBloco)
+      .forEach((exibicoesDia) => {
+        if (exibicoesJaRepresentadas.has(exibicoesDia)) return;
+
+        const dadosClone = montarDadosPainelFaceParaExibicao(bloco, exibicoesDia, periodoAtual);
+        const novoBloco = criarPainelFaceItem(dadosClone);
+        novoBloco.dataset.origemDivisaoExibicoesDia = '1';
+        referenciaInsercao.insertAdjacentElement('afterend', novoBloco);
+        referenciaInsercao = novoBloco;
+        exibicoesJaRepresentadas.add(exibicoesDia);
+      });
 
     atualizarTitulosPainelFace();
     sincronizarSeletoresContratoAditivoEmTodosBlocos();
@@ -8953,11 +9111,20 @@ function formatarNumeroParaInput(valor){
     });
 
     selectExibicoesDia?.addEventListener('change', () => {
-      sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'exibicoes' });
+      /*
+       * Regra de negócio: cada inserção/dia selecionada precisa virar um bloco visual
+       * separado do mesmo CodPonto/CodFace. Ex.: 540 e 1080 = dois itens.
+       * A função de divisão já protege contra duplicidade quando o usuário clica
+       * em "(Todas)" mais de uma vez.
+       */
       if (dividirBlocoPorMultiplasExibicoesDia(bloco)) {
         return;
       }
+
+      sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'exibicoes' });
+      atualizarResumoDropdownExibicoesDia(selectExibicoesDia);
       atualizarResumoComercial(bloco, { formatarCampos: true });
+      atualizarTitulosPainelFace();
       agendarSincronizacaoFormularioSolicitacao();
     });
 
@@ -9490,48 +9657,56 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
   function coletarPainelFacesDoFormulario(){
     const itens = [];
+
     for (const bloco of (painelFaceLista?.querySelectorAll('.kb-painel-item') || [])){
       const idPainel = idNum(bloco.querySelector('[data-role="select-painel"]')?.value || 0);
-      const codFace = safeStr(bloco.querySelector('[data-role="select-face"]')?.value || '').trim();
-      const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
-      const selectPeriodoExibicao = bloco.querySelector('[data-role="select-periodo-exibicao"]');
+      const painelFace = obterPainelFaceSelecionadoDoBloco(bloco) || null;
+      const codFace = safeStr(bloco.querySelector('[data-role="select-face"]')?.value || '').trim().toUpperCase();
+      const periodoSelecionado = safeStr(bloco.querySelector('[data-role="select-periodo-exibicao"]')?.value || '').trim();
       const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0) || null;
       const novoValor = parseNumeroInput(bloco.querySelector('[data-role="input-novo-valor"]')?.value);
       const percentual = parseNumeroInput(bloco.querySelector('[data-role="input-percentual"]')?.value);
       const dataInicio = normalizarDataParaInput(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '');
       const dataFim = normalizarDataParaInput(bloco.querySelector('[data-role="input-data-fim"]')?.value || '');
-      const exibicoesSelecionadas = obterValoresSelecionadosSelect(selectExibicoesDia);
-      const periodoSelecionado = safeStr(selectPeriodoExibicao?.value || '').trim();
+      const exibicoesParaGerar = obterExibicoesDiaSelecionadasDoBloco(bloco);
 
-      if (!idPainel && !codFace && !idPreco && !exibicoesSelecionadas.length && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
+      if (!idPainel && !codFace && !idPreco && !exibicoesParaGerar.some(Boolean) && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
 
       const precoVendaAtualContrato = Number(bloco.__dadosContratoAtual?.preco_venda_atual);
       const itemContratoAditivo = bloco.__itemContratoAditivoSelecionado || null;
       const idItemContratoAditivo = idNum(itemContratoAditivo?.id_item_contrato ?? itemContratoAditivo?.IDFatoControleContratosItensEuromidia ?? 0) || null;
       const codPontoContratoAditivo = safeStr(itemContratoAditivo?.cod_ponto ?? itemContratoAditivo?.CodPonto ?? "").trim() || null;
       const codFaceContratoAditivo = safeStr(itemContratoAditivo?.cod_face ?? itemContratoAditivo?.CodFace ?? "").trim().toUpperCase() || null;
-      const exibicoesParaGerar = exibicoesSelecionadas.length ? exibicoesSelecionadas : [''];
 
       for (const exibicoesDia of exibicoesParaGerar) {
-        const precoPorInsercao = exibicoesDia
-          ? (
-              localizarPrecoPorFiltrosDoBloco(bloco, {
-                exibicoes_dia: exibicoesDia,
-                periodo_exibicao: periodoSelecionado,
-              }) || localizarPrecoPorFiltrosDoBloco(bloco, {
-                exibicoes_dia: exibicoesDia,
-              })
-            )
-          : null;
-
-        const idPrecoFinal = idNum(precoPorInsercao?.IDDimTabelaPrecosEuromidia || 0) || idPreco;
+        const dadosComerciais = calcularDadosComerciaisPainelFacePorExibicao(bloco, exibicoesDia, periodoSelecionado);
+        const idPrecoFinal = idNum(dadosComerciais?.id_preco || 0) || idPreco;
 
         itens.push({
+          IDDimPaineisEuromidia: idPainel || null,
           id_painel: idPainel || null,
+          IDDimFacesPaineis: idNum(painelFace?.IDDimFacesPaineis ?? 0) || null,
+          id_face: idNum(painelFace?.IDDimFacesPaineis ?? 0) || null,
+          CodPonto: safeStr(painelFace?.CodPonto || "").trim() || null,
+          cod_ponto: safeStr(painelFace?.CodPonto || "").trim() || null,
+          CodFace: codFace || null,
           cod_face: codFace || null,
+          TipoPainel: safeStr(painelFace?.Tipo || "").trim() || null,
+          tipo_painel: safeStr(painelFace?.Tipo || "").trim() || null,
+          IDDimTabelaPrecosEuromidia: idPrecoFinal || null,
           id_preco: idPrecoFinal || null,
-          novo_valor: novoValor,
-          percentual_desconto: novoValor !== null ? null : percentual,
+          PeriodoExibicao: dadosComerciais.periodo_exibicao || periodoSelecionado || null,
+          periodo_exibicao: dadosComerciais.periodo_exibicao || periodoSelecionado || null,
+          ExibicoesDia: dadosComerciais.exibicoes_dia || null,
+          exibicoes_dia: dadosComerciais.exibicoes_dia || null,
+          ValorTabela: dadosComerciais.valor_tabela,
+          valor_tabela: dadosComerciais.valor_tabela,
+          ValorVendaFinal: dadosComerciais.valor_venda_final,
+          valor_venda_final: dadosComerciais.valor_venda_final,
+          NovoValor: dadosComerciais.novo_valor,
+          novo_valor: dadosComerciais.novo_valor,
+          PercentualDesconto: dadosComerciais.percentual_desconto,
+          percentual_desconto: dadosComerciais.percentual_desconto,
           preco_venda_atual_contrato: Number.isFinite(precoVendaAtualContrato) ? precoVendaAtualContrato : null,
           data_inicio: dataInicio || null,
           data_fim: dataFim || null,
@@ -9542,6 +9717,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
         });
       }
     }
+
     return itens;
   }
 
