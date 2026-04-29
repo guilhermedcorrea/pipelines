@@ -9138,6 +9138,14 @@ def _obter_precos_painel_face(id_painel: int, id_dim_face: int | None, tipo_pain
                 OR TRY_CONVERT(int, tp.IDDimFacesPaineis) = TRY_CONVERT(int, :id_dim_face)
               )
         ORDER BY
+            CASE
+                WHEN :id_dim_face IS NOT NULL
+                 AND TRY_CONVERT(int, tp.IDDimFacesPaineis) = TRY_CONVERT(int, :id_dim_face)
+                THEN 0
+                WHEN tp.IDDimFacesPaineis IS NULL
+                THEN 1
+                ELSE 2
+            END,
             CASE WHEN ISNULL(tp.BitAtivo, 0) = 1 THEN 0 ELSE 1 END,
             ISNULL(tp.DataValidade, '9999-12-31') DESC,
             ISNULL(tp.DataPublicacao, '9999-12-31') DESC,
@@ -15253,6 +15261,9 @@ def api_comercial_painel_face(id_painel: int, cod_face: str):
     for row in precos:
         linha = {
             "IDDimTabelaPrecosEuromidia": int(row.get("IDDimTabelaPrecosEuromidia") or 0),
+            "IDDimPaineisEuromidia": int(row.get("IDDimPaineisEuromidia") or 0) if row.get("IDDimPaineisEuromidia") is not None else None,
+            "IDDimFacesPaineis": int(row.get("IDDimFacesPaineis") or 0) if row.get("IDDimFacesPaineis") is not None else None,
+            "Tipo": row.get("Tipo"),
             "PeriodoExibicao": row.get("PeriodoExibicao"),
             "ExibicoesDia": row.get("ExibicoesDia"),
             "Valor": _decimal_para_float(row.get("Valor")),

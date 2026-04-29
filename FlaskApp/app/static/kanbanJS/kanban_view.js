@@ -948,6 +948,9 @@
   }
 
   function obterExibicoesDiaSelecionadasDoBloco(bloco){
+    const exibicaoAtiva = obterExibicaoDiaAtivaDoBloco(bloco);
+    if (exibicaoAtiva) return [exibicaoAtiva];
+
     const selectExibicoesDia = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
     const selecionadas = obterValoresSelecionadosSelect(selectExibicoesDia)
       .map((valor) => safeStr(valor || "").trim())
@@ -991,8 +994,7 @@
       : null;
 
     const precoSelecionado = precoPorExibicao || obterPrecoSelecionadoDoBloco(bloco);
-    const valorTabelaNumero = Number(precoSelecionado?.Valor);
-    const valorTabela = Number.isFinite(valorTabelaNumero) ? valorTabelaNumero : null;
+    const valorTabela = obterValorPrecoTabela(precoSelecionado);
     const novoValorInformado = parseNumeroInput(bloco?.querySelector('[data-role="input-novo-valor"]')?.value);
     const percentualInformado = parseNumeroInput(bloco?.querySelector('[data-role="input-percentual"]')?.value);
     const origemEdicao = bloco?.__origemEdicaoComercial || (
@@ -8094,6 +8096,66 @@ function formatarNumeroParaInput(valor){
     return wrap?.querySelector?.('[data-role="dd-exibicoes-dia"]') || null;
   }
 
+  function obterBlocoDoSelectExibicoesDia(selectEl){
+    return selectEl?.closest?.('.kb-painel-item') || null;
+  }
+
+  function normalizarListaExibicoesDia(valores){
+    const lista = Array.isArray(valores) ? valores : [valores];
+    return Array.from(new Set(
+      lista
+        .flatMap((valor) => safeStr(valor || '').split(','))
+        .map((valor) => safeStr(valor || '').trim())
+        .filter(Boolean)
+    ));
+  }
+
+  function obterGrupoVisualExibicoesDiaDoBloco(bloco){
+    const textoGrupo = safeStr(bloco?.dataset?.exibicoesDiaGrupo || '').trim();
+    return normalizarListaExibicoesDia(textoGrupo);
+  }
+
+  function obterExibicaoDiaAtivaDoBloco(bloco){
+    return safeStr(bloco?.dataset?.exibicaoDiaAtiva || '').trim();
+  }
+
+  function aplicarGrupoVisualExibicoesDiaNoBloco(bloco, valoresGrupo, exibicaoAtiva){
+    if (!bloco) return;
+
+    const grupo = normalizarListaExibicoesDia(valoresGrupo);
+    const ativa = safeStr(exibicaoAtiva || '').trim();
+
+    if (grupo.length > 1) {
+      bloco.dataset.exibicoesDiaGrupo = grupo.join(',');
+    } else {
+      delete bloco.dataset.exibicoesDiaGrupo;
+    }
+
+    if (ativa) {
+      bloco.dataset.exibicaoDiaAtiva = ativa;
+    } else {
+      delete bloco.dataset.exibicaoDiaAtiva;
+    }
+
+    const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
+    if (selectExibicoesDia) {
+      atualizarResumoDropdownExibicoesDia(selectExibicoesDia);
+    }
+  }
+
+  function limparGrupoVisualExibicoesDiaDoSelect(selectEl){
+    const bloco = obterBlocoDoSelectExibicoesDia(selectEl);
+    if (!bloco) return;
+    delete bloco.dataset.exibicoesDiaGrupo;
+    delete bloco.dataset.exibicaoDiaAtiva;
+  }
+
+  function obterValoresVisuaisDropdownExibicoesDia(selectEl){
+    const bloco = obterBlocoDoSelectExibicoesDia(selectEl);
+    const grupo = obterGrupoVisualExibicoesDiaDoBloco(bloco);
+    return grupo.length ? grupo : obterValoresSelecionadosSelect(selectEl);
+  }
+
   function listarOpcoesUnicasSelectExibicoesDia(selectEl){
     const mapa = new Map();
 
@@ -8114,19 +8176,24 @@ function formatarNumeroParaInput(valor){
     if (!resumo) return;
 
     const opcoes = listarOpcoesUnicasSelectExibicoesDia(selectEl);
-    const valores = new Set(obterValoresSelecionadosSelect(selectEl));
+    const valoresVisuais = obterValoresVisuaisDropdownExibicoesDia(selectEl);
+    const valores = new Set(valoresVisuais);
     const labelsSelecionadas = opcoes
       .filter((opcao) => valores.has(opcao.valor))
       .map((opcao) => opcao.label)
       .filter(Boolean);
 
-    if (!labelsSelecionadas.length) {
+    const labelsFinais = labelsSelecionadas.length
+      ? labelsSelecionadas
+      : valoresVisuais.filter(Boolean);
+
+    if (!labelsFinais.length) {
       resumo.textContent = '— Inserções / dia —';
       resumo.title = '';
       return;
     }
 
-    const texto = labelsSelecionadas.join(', ');
+    const texto = labelsFinais.join(', ');
     resumo.textContent = texto;
     resumo.title = texto;
   }
@@ -8141,7 +8208,7 @@ function formatarNumeroParaInput(valor){
 
     const termoBusca = normalizarTexto(busca?.value || '');
     const opcoes = listarOpcoesUnicasSelectExibicoesDia(selectEl);
-    const selecionados = new Set(obterValoresSelecionadosSelect(selectEl));
+    const selecionados = new Set(obterValoresVisuaisDropdownExibicoesDia(selectEl));
 
     lista.innerHTML = '';
 
@@ -8169,6 +8236,7 @@ function formatarNumeroParaInput(valor){
     checkboxTodos.addEventListener('change', (evento) => {
       const marcado = Boolean(evento.currentTarget?.checked);
       const valores = marcado ? valoresOpcoes : [valoresOpcoes[0]].filter(Boolean);
+      limparGrupoVisualExibicoesDiaDoSelect(selectEl);
       selecionarValoresNoSelect(selectEl, valores, { sincronizarDropdown: false });
       selectEl.dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -8193,7 +8261,7 @@ function formatarNumeroParaInput(valor){
       ]);
 
       checkbox.addEventListener('change', (evento) => {
-        const atuais = new Set(obterValoresSelecionadosSelect(selectEl));
+        const atuais = new Set(obterValoresVisuaisDropdownExibicoesDia(selectEl));
         const valor = safeStr(evento.currentTarget?.value || '').trim();
         if (!valor) return;
 
@@ -8208,6 +8276,7 @@ function formatarNumeroParaInput(valor){
           evento.currentTarget.checked = true;
         }
 
+        limparGrupoVisualExibicoesDiaDoSelect(selectEl);
         selecionarValoresNoSelect(selectEl, Array.from(atuais), { sincronizarDropdown: false });
         selectEl.dispatchEvent(new Event('change', { bubbles: true }));
       });
@@ -8351,6 +8420,49 @@ function formatarNumeroParaInput(valor){
     return Array.from(mapa.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
   }
 
+  function obterIdFaceAtualDoBloco(bloco){
+    const painelFace = obterPainelFaceSelecionadoDoBloco(bloco) || null;
+    return idNum(
+      painelFace?.IDDimFacesPaineis ??
+      bloco?.__dadosComerciais?.face?.IDDimFacesPaineis ??
+      0
+    ) || null;
+  }
+
+  function obterValorPrecoTabela(preco){
+    const valor = Number(
+      preco?.Valor ??
+      preco?.valor ??
+      preco?.ValorTabela ??
+      preco?.valor_tabela ??
+      null
+    );
+    return Number.isFinite(valor) ? valor : null;
+  }
+
+  function ordenarPrecosPorPrioridadeDoBloco(bloco, precos){
+    const idFaceAtual = obterIdFaceAtualDoBloco(bloco);
+
+    return (Array.isArray(precos) ? precos.slice() : []).sort((a, b) => {
+      const idFaceA = idNum(a?.IDDimFacesPaineis ?? a?.id_face ?? 0) || null;
+      const idFaceB = idNum(b?.IDDimFacesPaineis ?? b?.id_face ?? 0) || null;
+
+      const prioridadeFaceA = idFaceAtual && idFaceA === idFaceAtual ? 0 : (idFaceA ? 1 : 2);
+      const prioridadeFaceB = idFaceAtual && idFaceB === idFaceAtual ? 0 : (idFaceB ? 1 : 2);
+      if (prioridadeFaceA !== prioridadeFaceB) return prioridadeFaceA - prioridadeFaceB;
+
+      const ativoA = idNum(a?.BitAtivo ?? 0) === 1 ? 0 : 1;
+      const ativoB = idNum(b?.BitAtivo ?? 0) === 1 ? 0 : 1;
+      if (ativoA !== ativoB) return ativoA - ativoB;
+
+      const dataA = new Date(a?.DataPublicacao || a?.DataAtualizacao || 0).getTime() || 0;
+      const dataB = new Date(b?.DataPublicacao || b?.DataAtualizacao || 0).getTime() || 0;
+      if (dataA !== dataB) return dataB - dataA;
+
+      return (idNum(b?.IDDimTabelaPrecosEuromidia || 0) || 0) - (idNum(a?.IDDimTabelaPrecosEuromidia || 0) || 0);
+    });
+  }
+
   function localizarPrecoPorFiltrosDoBloco(bloco, filtros = {}){
     const precos = obterPrecosComerciaisDoBloco(bloco);
     const usarInsercoesDigitais = painelFaceUsaInsercoesDigitais(bloco);
@@ -8366,12 +8478,14 @@ function formatarNumeroParaInput(valor){
       return true;
     });
 
+    const ordenados = ordenarPrecosPorPrioridadeDoBloco(bloco, candidatos);
+
     if (idPreferido) {
-      const encontrado = candidatos.find((preco) => idNum(preco?.IDDimTabelaPrecosEuromidia) === idPreferido);
+      const encontrado = ordenados.find((preco) => idNum(preco?.IDDimTabelaPrecosEuromidia) === idPreferido);
       if (encontrado) return encontrado;
     }
 
-    return candidatos[0] || null;
+    return ordenados[0] || null;
   }
 
   function ocultarCamposTabelaPrecoDoBloco(bloco){
@@ -8412,8 +8526,11 @@ function formatarNumeroParaInput(valor){
     const opcoesExibicoes = listarOpcoesExibicoesDiaDoBloco(bloco, '');
     const valoresValidosExibicoes = new Set(opcoesExibicoes.map((opcao) => safeStr(opcao?.valor || '').trim()).filter(Boolean));
 
-    let exibicoesSelecionadas = obterValoresSelecionadosSelect(selectExibicoes)
-      .filter((valor) => valoresValidosExibicoes.has(valor));
+    const exibicaoAtiva = obterExibicaoDiaAtivaDoBloco(bloco);
+    let exibicoesSelecionadas = exibicaoAtiva && valoresValidosExibicoes.has(exibicaoAtiva)
+      ? [exibicaoAtiva]
+      : obterValoresSelecionadosSelect(selectExibicoes)
+          .filter((valor) => valoresValidosExibicoes.has(valor));
     let periodoDesejado = safeStr(selectPeriodo.value || '').trim();
 
     if (!exibicoesSelecionadas.length && precoPreferido) {
@@ -8467,7 +8584,7 @@ function formatarNumeroParaInput(valor){
       const exibicoesFinais = chaveExibicoesDiaDoPreco(precoSelecionado, usarInsercoesDigitais);
       const labelPreco = exibicoesSelecionadas.length > 1
         ? `${exibicoesSelecionadas.length} inserções selecionadas | ${safeStr(selectPeriodo.value || periodoDesejado || '—')} | preço por inserção no salvamento`
-        : `${safeStr(precoSelecionado?.PeriodoExibicao || '—')} | ${labelExibicoesDiaDoPreco(exibicoesFinais)} | ${formatarMoedaBR(precoSelecionado?.Valor)}`;
+        : `${safeStr(precoSelecionado?.PeriodoExibicao || '—')} | ${labelExibicoesDiaDoPreco(exibicoesFinais)} | ${formatarMoedaBR(obterValorPrecoTabela(precoSelecionado))}`;
 
       definirValorSelectOculto(
         selectPreco,
@@ -8642,6 +8759,15 @@ function formatarNumeroParaInput(valor){
     const codPontoContratoAditivo = safeStr(itemContratoAditivo?.cod_ponto ?? itemContratoAditivo?.CodPonto ?? '').trim() || null;
     const codFaceContratoAditivo = safeStr(itemContratoAditivo?.cod_face ?? itemContratoAditivo?.CodFace ?? '').trim().toUpperCase() || null;
 
+    const valorTabela = obterValorPrecoTabela(preco);
+    let valorVendaFinal = valorTabela;
+
+    if (novoValor !== null) {
+      valorVendaFinal = novoValor;
+    } else if (percentual !== null) {
+      valorVendaFinal = calcularNovoValorPorPercentual(valorTabela, percentual);
+    }
+
     return {
       IDDimPaineisEuromidia: idPainel,
       id_painel: idPainel,
@@ -8655,6 +8781,10 @@ function formatarNumeroParaInput(valor){
       exibicoes_dia: exibicoesTexto || null,
       NovoValor: novoValor,
       novo_valor: novoValor,
+      ValorTabela: valorTabela,
+      valor_tabela: valorTabela,
+      ValorVendaFinal: valorVendaFinal,
+      valor_venda_final: valorVendaFinal,
       PercentualDesconto: novoValor !== null ? null : percentual,
       percentual_desconto: novoValor !== null ? null : percentual,
       DataInicio: dataInicio || null,
@@ -8722,7 +8852,9 @@ function formatarNumeroParaInput(valor){
 
     bloco.__bloqueioDivisaoExibicoesDia = true;
     selecionarValoresNoSelect(selectExibicoesDia, [exibicaoMantidaNoBloco]);
+    aplicarGrupoVisualExibicoesDiaNoBloco(bloco, unicas, exibicaoMantidaNoBloco);
     sincronizarSeletoresTabelaPrecoDoBloco(bloco, { id_preco: idPrecoMantido || null, origem: 'divisao_exibicoes' });
+    atualizarResumoDropdownExibicoesDia(selectExibicoesDia);
     atualizarResumoComercial(bloco, { formatarCampos: true });
     bloco.__bloqueioDivisaoExibicoesDia = false;
 
@@ -8735,6 +8867,7 @@ function formatarNumeroParaInput(valor){
         const dadosClone = montarDadosPainelFaceParaExibicao(bloco, exibicoesDia, periodoAtual);
         const novoBloco = criarPainelFaceItem(dadosClone);
         novoBloco.dataset.origemDivisaoExibicoesDia = '1';
+        aplicarGrupoVisualExibicoesDiaNoBloco(novoBloco, unicas, exibicoesDia);
         referenciaInsercao.insertAdjacentElement('afterend', novoBloco);
         referenciaInsercao = novoBloco;
         exibicoesJaRepresentadas.add(exibicoesDia);
@@ -9131,6 +9264,8 @@ function formatarNumeroParaInput(valor){
     selectPeriodoExibicao?.addEventListener('change', () => {
       sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'periodo' });
       atualizarResumoComercial(bloco, { formatarCampos: true });
+      atualizarTitulosPainelFace();
+      agendarSincronizacaoFormularioSolicitacao();
     });
 
     if (dados){
@@ -9144,8 +9279,36 @@ function formatarNumeroParaInput(valor){
   }
 
   function obterPrecoSelecionadoDoBloco(bloco){
-    const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0);
-    const precos = Array.isArray(bloco.__dadosComerciais?.precos) ? bloco.__dadosComerciais.precos : [];
+    const selectPreco = bloco?.querySelector('[data-role="select-preco"]');
+    const idPreco = idNum(selectPreco?.value || 0) || null;
+    const precos = Array.isArray(bloco?.__dadosComerciais?.precos) ? bloco.__dadosComerciais.precos : [];
+
+    const selectExibicoesDia = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodoExibicao = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
+    const exibicaoAtiva = obterExibicaoDiaAtivaDoBloco(bloco);
+    const exibicoesReferencia = exibicaoAtiva || obterValoresSelecionadosSelect(selectExibicoesDia)[0] || '';
+    const periodoReferencia = safeStr(selectPeriodoExibicao?.value || '').trim();
+
+    const precoPelaSelecaoAtual = localizarPrecoPorFiltrosDoBloco(bloco, {
+      exibicoes_dia: exibicoesReferencia,
+      periodo_exibicao: periodoReferencia,
+    }) || localizarPrecoPorFiltrosDoBloco(bloco, {
+      exibicoes_dia: exibicoesReferencia,
+    });
+
+    if (precoPelaSelecaoAtual) {
+      const idPrecoCorreto = idNum(precoPelaSelecaoAtual?.IDDimTabelaPrecosEuromidia || 0) || null;
+      if (selectPreco && idPrecoCorreto && idPrecoCorreto !== idPreco) {
+        const exibicoesFinais = chaveExibicoesDiaDoPreco(precoPelaSelecaoAtual, painelFaceUsaInsercoesDigitais(bloco));
+        definirValorSelectOculto(
+          selectPreco,
+          String(idPrecoCorreto),
+          `${safeStr(precoPelaSelecaoAtual?.PeriodoExibicao || '—')} | ${labelExibicoesDiaDoPreco(exibicoesFinais)} | ${formatarMoedaBR(obterValorPrecoTabela(precoPelaSelecaoAtual))}`
+        );
+      }
+      return precoPelaSelecaoAtual;
+    }
+
     return precos.find(p => idNum(p.IDDimTabelaPrecosEuromidia) === idPreco) || null;
   }
 
@@ -9256,8 +9419,7 @@ function atualizarResumoComercial(bloco, opcoes = {}){
 
   const precoSel = obterPrecoSelecionadoDoBloco(bloco);
   const custo = Number(bloco.__dadosComerciais?.custo?.Valor);
-  const valorTabelaSelecionada = Number(precoSel?.Valor);
-  const valorBaseTabela = Number.isFinite(valorTabelaSelecionada) ? valorTabelaSelecionada : null;
+  const valorBaseTabela = obterValorPrecoTabela(precoSel);
 
   const novoValorInformado = parseNumeroInput(inputNovoValor?.value);
   const percentualInformado = parseNumeroInput(inputPercentual?.value);
