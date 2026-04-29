@@ -3793,10 +3793,13 @@ def _salvar_vinculos_painel_face_card(
 
         return linha
 
-    def chave_principal(linha: dict) -> tuple[int | None, int | None]:
+    def chave_principal(linha: dict) -> tuple[int | None, int | None, int | None, str | None, int | None]:
         return (
             normalizar_inteiro(linha.get("IDDimPaineisEuromidia")),
             normalizar_inteiro(linha.get("IDDimFacesPaineis")),
+            normalizar_inteiro(linha.get("IDDimTabelaPrecosEuromidia")),
+            normalizar_texto(linha.get("PeriodoExibicao")),
+            normalizar_inteiro(linha.get("ExibicoesDia")),
         )
 
     def assinatura_estado(linha: dict) -> tuple:
@@ -3861,7 +3864,7 @@ def _salvar_vinculos_painel_face_card(
         for linha in db.session.execute(sql_buscar_ativos, {"id_card": int(id_card)})
     ]
 
-    ativos_por_chave: dict[tuple[int | None, int | None], dict] = {}
+    ativos_por_chave: dict[tuple[int | None, int | None, int | None, str | None, int | None], dict] = {}
     for linha in linhas_ativas:
         linha_normalizada = {
             "IDFatoKanbanCardPainelFace": normalizar_inteiro(linha.get("IDFatoKanbanCardPainelFace")),
@@ -3893,7 +3896,7 @@ def _salvar_vinculos_painel_face_card(
         if chave[0] and chave[1] and chave not in ativos_por_chave:
             ativos_por_chave[chave] = linha_normalizada
 
-    novos_por_chave: dict[tuple[int | None, int | None], dict] = {}
+    novos_por_chave: dict[tuple[int | None, int | None, int | None, str | None, int | None], dict] = {}
     for indice, item in enumerate(itens_entrada, start=1):
         if not isinstance(item, dict):
             continue
@@ -3997,6 +4000,11 @@ def _salvar_vinculos_painel_face_card(
             item[0] or 0,
             item[1] is None,
             item[1] or 0,
+            item[2] is None,
+            item[2] or 0,
+            item[3] or '',
+            item[4] is None,
+            item[4] or 0,
         ),
     ):
         linha_ativa = ativos_por_chave[chave_removida]
