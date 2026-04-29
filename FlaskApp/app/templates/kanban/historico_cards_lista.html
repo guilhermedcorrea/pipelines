@@ -570,6 +570,252 @@
       white-space: normal;
     }
   }
+
+
+  /* ==========================================================
+     AJUSTE RESPONSIVO FINAL
+     Objetivo: impedir estouro horizontal e evitar corte do botão
+     "Abrir histórico" em telas médias, notebooks e zoom alto.
+     ========================================================== */
+  .pagina-historico-cards,
+  .bloco-historico-cards,
+  .lista-historico-cards,
+  .item-historico-card,
+  .item-historico-card__principal,
+  .item-historico-card__principal > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .pagina-historico-cards {
+    overflow-x: hidden;
+  }
+
+  .bloco-historico-cards {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .coluna-titulo strong,
+  .coluna-titulo small,
+  .texto-forte,
+  .texto-secundario,
+  .pill-fase,
+  .pill-status,
+  .btn-abrir-historico {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .pill-fase,
+  .pill-status {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.15;
+  }
+
+  .texto-data-forte {
+    white-space: normal;
+  }
+
+  .btn-abrir-historico {
+    min-width: 0;
+    line-height: 1.15;
+  }
+
+  @media (min-width: 1861px) {
+    .cabecalho-historico-cards,
+    .item-historico-card__principal {
+      grid-template-columns:
+        minmax(82px, 0.55fr)
+        minmax(150px, 1.25fr)
+        minmax(185px, 1.45fr)
+        minmax(118px, 0.90fr)
+        minmax(88px, 0.70fr)
+        minmax(112px, 0.80fr)
+        minmax(94px, 0.68fr)
+        minmax(102px, 0.72fr)
+        minmax(120px, 0.82fr);
+      gap: 10px;
+    }
+
+    .cabecalho-historico-cards,
+    .item-historico-card {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .btn-abrir-historico {
+      width: 100%;
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+  }
+
+  @media (max-width: 1860px) and (min-width: 1121px) {
+    .pagina-historico-cards {
+      padding: 14px;
+    }
+
+    .cabecalho-historico-cards {
+      display: none;
+    }
+
+    .lista-historico-cards {
+      padding: 14px;
+      box-sizing: border-box;
+    }
+
+    .item-historico-card {
+      padding: 16px;
+      margin-bottom: 14px;
+      border: 1px solid #e7edf5;
+      border-radius: 18px;
+      background: #ffffff;
+      box-shadow: 0 6px 16px rgba(19, 44, 89, 0.05);
+    }
+
+    .item-historico-card:last-child {
+      margin-bottom: 0;
+    }
+
+    .item-historico-card__principal {
+      display: grid;
+      grid-template-columns:
+        minmax(92px, 0.55fr)
+        minmax(170px, 1.20fr)
+        minmax(230px, 1.45fr)
+        minmax(135px, 0.88fr)
+        minmax(110px, 0.72fr)
+        minmax(132px, 0.78fr);
+      grid-template-areas:
+        "id titulo empresa fase status acao"
+        "id responsavel criado ultima ultima acao";
+      gap: 14px;
+      align-items: start;
+    }
+
+    .item-historico-card__principal > div {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 5px;
+    }
+
+    .item-historico-card__principal > div:nth-child(1) { grid-area: id; }
+    .item-historico-card__principal > div:nth-child(2) { grid-area: titulo; }
+    .item-historico-card__principal > div:nth-child(3) { grid-area: empresa; }
+    .item-historico-card__principal > div:nth-child(4) { grid-area: fase; }
+    .item-historico-card__principal > div:nth-child(5) { grid-area: status; }
+    .item-historico-card__principal > div:nth-child(6) { grid-area: responsavel; }
+    .item-historico-card__principal > div:nth-child(7) { grid-area: criado; }
+    .item-historico-card__principal > div:nth-child(8) { grid-area: ultima; }
+    .item-historico-card__principal > div:nth-child(9) { grid-area: acao; }
+
+    .rotulo-mobile {
+      display: inline-block;
+      color: #5d708b;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      line-height: 1.25;
+    }
+
+    .pill-id-card {
+      min-height: 34px;
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+
+    .coluna-acao {
+      width: 100%;
+      height: 100%;
+      justify-content: stretch;
+      align-self: stretch;
+    }
+
+    .btn-abrir-historico {
+      width: 100%;
+      min-height: 44px;
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+
+    .item-historico-card__indicadores {
+      margin-top: 16px;
+    }
+  }
+
+  @media (max-width: 1320px) and (min-width: 1121px) {
+    .item-historico-card__principal {
+      grid-template-columns:
+        minmax(88px, 0.55fr)
+        minmax(160px, 1.1fr)
+        minmax(210px, 1.35fr)
+        minmax(122px, 0.78fr)
+        minmax(112px, 0.78fr);
+      grid-template-areas:
+        "id titulo empresa fase acao"
+        "id responsavel criado status acao"
+        "id ultima ultima ultima acao";
+      gap: 12px;
+    }
+  }
+
+  @media (max-width: 1120px) {
+    .pagina-historico-cards {
+      overflow-x: hidden;
+    }
+
+    .bloco-historico-cards {
+      border-radius: 18px;
+    }
+
+    .item-historico-card__principal {
+      grid-template-areas: none;
+    }
+
+    .item-historico-card__principal > div {
+      min-width: 0;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .pagina-historico-cards {
+      padding: 8px;
+    }
+
+    .bloco-historico-cards {
+      border-radius: 14px;
+    }
+
+    .topo-historico-cards {
+      align-items: stretch;
+    }
+
+    .topo-historico-cards__contador {
+      width: 100%;
+      justify-content: center;
+    }
+
+    .btn-filtrar-historico,
+    .btn-limpar-historico {
+      width: 100%;
+    }
+
+    .rodape-paginacao__acoes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .btn-paginacao {
+      width: 100%;
+    }
+  }
+
 </style>
 
 {% set page = paginacao.page if paginacao else 1 %}

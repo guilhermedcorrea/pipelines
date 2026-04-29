@@ -223,7 +223,11 @@
   const wrapFormularioSolicitacaoContrato = document.getElementById("wrapFormularioSolicitacaoContrato");
   const formSolicitacaoContratoHeader = document.getElementById("formSolicitacaoContratoHeader");
   const formSolicitacaoContratoItem = document.getElementById("formSolicitacaoContratoItem");
+  const wrapContatoClienteDiretoFormulario = document.getElementById("wrapContatoClienteDiretoFormulario");
+  const formContatoClienteDiretoAssinatura = document.getElementById("formContatoClienteDiretoAssinatura");
+  const formContatoClienteDiretoFinanceiro = document.getElementById("formContatoClienteDiretoFinanceiro");
   const ID_FASE_FORMULARIO_CONTRATO = 4;
+  const ID_TIPO_CLIENTE_DIRETO = 2;
   const modalCadastroEmpresa = document.getElementById("modalCadastroEmpresa");
   const btnFecharCadastroEmpresa = document.getElementById("btnFecharCadastroEmpresa");
   const btnSalvarCadastroEmpresa = document.getElementById("btnSalvarCadastroEmpresa");
@@ -231,16 +235,16 @@
 
   const CAMPOS_SOLICITACAO_HEADER = [
     { nome: "NumeroPrevia", label: "Número Prévia" },
-    { nome: "CNPJ", label: "CNPJ", somenteLeitura: true },
+    { nome: "CNPJ", label: "CNPJ", somenteLeitura: true, obrigatorio: true },
     { nome: "DataAssinaturaRenovacao", label: "Data Assinatura / Renovação", tipo: "date" },
     { nome: "IDTrimestre", label: "Trimestre" },
     { nome: "DataLancamento", label: "Data Lançamento", tipo: "date" },
     { nome: "RazaoSocial", label: "Razão Social", span: 2 },
     { nome: "CPF", label: "CPF" },
-    { nome: "MarcaExibida", label: "Marca Exibida" },
-    { nome: "Vendedor", label: "Vendedor", somenteLeitura: true },
-    { nome: "TipoDocumento", label: "Tipo Documento" },
-    { nome: "Origem", label: "Origem" },
+    { nome: "MarcaExibida", label: "Marca Exibida", obrigatorio: true },
+    { nome: "Vendedor", label: "Vendedor", somenteLeitura: true, obrigatorio: true },
+    { nome: "TipoDocumento", label: "Tipo Documento", obrigatorio: true },
+    { nome: "Origem", label: "Origem", obrigatorio: true },
     { nome: "SDR", label: "SDR" },
     { nome: "Agencia", label: "Agência", span: 2 },
     { nome: "CnpjAgencia", label: "CNPJ Agência" },
@@ -248,6 +252,20 @@
     { nome: "CnpjBureau", label: "CNPJ Bureau" },
     { nome: "Intermediario", label: "Intermediário", span: 2 },
     { nome: "CnpjIntermediario", label: "CNPJ Intermediário" }
+  ];
+
+  const CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA = [
+    { nome: "NomeResponsavelLegalProcuradorEmpresa", label: "Nome Responsável Legal / Procurador", span: 2, obrigatorio: true },
+    { nome: "WhatsappEmpresa", label: "WhatsApp Empresa", obrigatorio: true },
+    { nome: "NomeTestemunha", label: "Nome Testemunha", span: 2, obrigatorio: true },
+    { nome: "Email", label: "E-mail", obrigatorio: true },
+    { nome: "Telefone", label: "Telefone", obrigatorio: true }
+  ];
+
+  const CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO = [
+    { nome: "NomeFinanceiro", label: "Nome Financeiro", span: 2, obrigatorio: true },
+    { nome: "EmailFinanceiro", label: "E-mail Financeiro", obrigatorio: true },
+    { nome: "TelefoneFinanceiro", label: "Telefone Financeiro", obrigatorio: true }
   ];
 
   const CAMPOS_SOLICITACAO_ITEM = [
@@ -327,9 +345,20 @@
   function normalizarDataParaInput(valor){
     const texto = safeStr(valor || "").trim();
     if (!texto) return "";
+
     if (/^\d{4}-\d{2}-\d{2}$/.test(texto)) return texto;
-    const match = texto.match(/^(\d{4}-\d{2}-\d{2})/);
-    if (match) return match[1];
+
+    const matchIso = texto.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (matchIso) return `${matchIso[1]}-${matchIso[2]}-${matchIso[3]}`;
+
+    const matchBr = texto.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (matchBr) {
+      const dia = matchBr[1];
+      const mes = matchBr[2];
+      const ano = matchBr[3];
+      return `${ano}-${mes}-${dia}`;
+    }
+
     return texto;
   }
 
@@ -375,6 +404,10 @@
     const wrap = document.createElement("div");
     wrap.className = "kb-contrato-campo" + (meta.span === 2 ? " span-2" : "");
 
+    if (meta.obrigatorio) {
+      wrap.classList.add("is-obrigatorio");
+    }
+
     const label = document.createElement("label");
     label.className = "kb-contrato-label";
     label.setAttribute("for", idCampoSolicitacao(secao, meta.nome, indice));
@@ -395,12 +428,31 @@
     campo.id = idCampoSolicitacao(secao, meta.nome, indice);
     campo.dataset.campoSolicitacao = meta.nome;
     campo.dataset.secaoSolicitacao = secao;
+
+    if (meta.obrigatorio) {
+      campo.required = true;
+      campo.setAttribute("aria-required", "true");
+      campo.dataset.obrigatorioSolicitacao = "1";
+      campo.dataset.labelObrigatorioSolicitacao = meta.label;
+    }
+
     if (indice !== null && indice !== undefined) {
       campo.dataset.indiceSolicitacao = String(indice);
     }
+
     if (meta.somenteLeitura || (secao === "Item" && meta.nome === "TexmpoExposicao")) {
       campo.readOnly = true;
     }
+
+    const limparErroCampo = () => {
+      const wrapCampo = campo.closest(".kb-contrato-campo");
+      if (wrapCampo && safeStr(campo.value || "").trim()) {
+        wrapCampo.classList.remove("is-invalido");
+      }
+    };
+
+    campo.addEventListener("input", limparErroCampo);
+    campo.addEventListener("change", limparErroCampo);
 
     if (secao === "Item" && (meta.nome === "DataInicioPrevisto" || meta.nome === "DataTerminoPrevisto")) {
       const recalcularTempo = () => atualizarTempoExposicaoFormularioSolicitacao(indice);
@@ -409,6 +461,14 @@
     }
 
     wrap.appendChild(campo);
+
+    if (meta.obrigatorio) {
+      const mensagemErro = document.createElement("small");
+      mensagemErro.className = "kb-campo-obrigatorio-erro";
+      mensagemErro.textContent = `${meta.label} é obrigatório.`;
+      wrap.appendChild(mensagemErro);
+    }
+
     return wrap;
   }
 
@@ -446,6 +506,7 @@
       }
     }
 
+    renderizarFormularioContatoClienteDireto();
     aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
@@ -463,6 +524,81 @@
     input.value = valor == null ? "" : String(valor);
   }
 
+  function renderizarFormularioContatoClienteDireto(){
+    if (formContatoClienteDiretoAssinatura && formContatoClienteDiretoAssinatura.dataset.renderizado !== "1") {
+      formContatoClienteDiretoAssinatura.innerHTML = "";
+      CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA.forEach((meta) => {
+        formContatoClienteDiretoAssinatura.appendChild(criarCampoFormularioSolicitacao("ContatoClienteDireto", meta));
+      });
+      formContatoClienteDiretoAssinatura.dataset.renderizado = "1";
+    }
+
+    if (formContatoClienteDiretoFinanceiro && formContatoClienteDiretoFinanceiro.dataset.renderizado !== "1") {
+      formContatoClienteDiretoFinanceiro.innerHTML = "";
+      CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO.forEach((meta) => {
+        formContatoClienteDiretoFinanceiro.appendChild(criarCampoFormularioSolicitacao("ContatoClienteDireto", meta));
+      });
+      formContatoClienteDiretoFinanceiro.dataset.renderizado = "1";
+    }
+  }
+
+  function aplicarVisibilidadeFormularioContatoClienteDireto(){
+    renderizarFormularioContatoClienteDireto();
+
+    const deveExibir = obterIdTipoClienteAtualFormularioSolicitacao() === ID_TIPO_CLIENTE_DIRETO;
+
+    if (wrapContatoClienteDiretoFormulario) {
+      wrapContatoClienteDiretoFormulario.hidden = !deveExibir;
+      wrapContatoClienteDiretoFormulario.style.display = deveExibir ? "" : "none";
+    }
+
+    [...CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA, ...CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO].forEach((meta) => {
+      const input = obterInputFormularioSolicitacao("ContatoClienteDireto", meta.nome);
+      if (!input) return;
+
+      input.required = Boolean(deveExibir && meta.obrigatorio);
+      input.disabled = !deveExibir;
+
+      if (!deveExibir) {
+        input.value = "";
+        const wrapCampo = input.closest(".kb-contrato-campo");
+        if (wrapCampo) wrapCampo.classList.remove("is-invalido");
+      }
+    });
+  }
+
+  function setValorFormularioContatoClienteDireto(meta, valor){
+    const input = obterInputFormularioSolicitacao("ContatoClienteDireto", meta.nome);
+    if (!input) return;
+    input.value = valor == null ? "" : String(valor);
+  }
+
+  function preencherFormularioContatoClienteDireto(dadosContato){
+    renderizarFormularioContatoClienteDireto();
+    const contato = dadosContato && typeof dadosContato === "object" ? dadosContato : {};
+    [...CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA, ...CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO].forEach((meta) => {
+      setValorFormularioContatoClienteDireto(meta, contato?.[meta.nome] ?? null);
+    });
+    aplicarVisibilidadeFormularioContatoClienteDireto();
+  }
+
+  function coletarFormularioContatoClienteDireto(){
+    renderizarFormularioContatoClienteDireto();
+
+    if (obterIdTipoClienteAtualFormularioSolicitacao() !== ID_TIPO_CLIENTE_DIRETO) {
+      return null;
+    }
+
+    const contato = {};
+    [...CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA, ...CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO].forEach((meta) => {
+      const input = obterInputFormularioSolicitacao("ContatoClienteDireto", meta.nome);
+      const valor = safeStr(input?.value || "").trim();
+      contato[meta.nome] = valor || null;
+    });
+
+    return contato;
+  }
+
   function obterIdTipoClienteAtualFormularioSolicitacao(){
     const valorSelect = idNum(selectTipoClienteDescontoCard?.value || 0);
     if (valorSelect > 0) return valorSelect;
@@ -475,17 +611,35 @@
     const nome = safeStr(nomeCampo || "").trim();
     const idTipo = idNum(idTipoCliente || 0);
 
+    const camposIntermediacao = new Set([
+      "Agencia",
+      "CnpjAgencia",
+      "Bureau",
+      "CnpjBureau",
+      "Intermediario",
+      "CnpjIntermediario",
+      "PercentualAgencia",
+      "ValorMensalAgencia",
+      "PercentualBureau",
+      "ValorBureauMensal"
+    ]);
+
     /*
      * Regra do formulário da solicitação, não dos selects de painel/face:
+     * - IDDimTipoCliente = 2 (Cliente Direto): não exibe Agência, Bureau, Intermediário, CNPJs relacionados
+     *   nem os campos comerciais de comissão/valor de agência e bureau.
      * - IDDimTipoCliente = 3 (Agência de Publicidade): a agência é a empresa principal do card.
      *   Portanto não exibo Bureau/CNPJ Bureau no cabeçalho nem nos itens.
      * - IDDimTipoCliente = 4 (Bureau): o bureau é a empresa principal do card.
      *   Portanto não exibo Agência/CNPJ Agência no cabeçalho nem nos itens.
-     * - Cliente Direto mantém Agência e Bureau como campos complementares opcionais.
      *
      * Importante: esta regra não mexe em DataInicioPrevisto/DataTerminoPrevisto,
      * CodPonto, CodFace, painel/face ou nas opções dos selects de contrato/aditivo.
      */
+    if (idTipo === ID_TIPO_CLIENTE_DIRETO) {
+      return camposIntermediacao.has(nome);
+    }
+
     if (idTipo === 3) {
       return nome === "Bureau" || nome === "CnpjBureau";
     }
@@ -522,6 +676,77 @@
         campo.value = "";
       }
     });
+
+    aplicarVisibilidadeFormularioContatoClienteDireto();
+  }
+
+
+  function validarCamposObrigatoriosFormularioSolicitacaoContrato(){
+    if (!modalCardEstaNaFaseQuatro()) {
+      return { ok: true, msg: "" };
+    }
+
+    const container = wrapFormularioSolicitacaoContrato;
+    if (!container || container.hidden || container.style.display === "none") {
+      return { ok: true, msg: "" };
+    }
+
+    const camposObrigatorios = [
+      ...container.querySelectorAll('[data-obrigatorio-solicitacao="1"]')
+    ];
+
+    const camposInvalidos = [];
+
+    camposObrigatorios.forEach((campo) => {
+      const wrapCampo = campo.closest(".kb-contrato-campo");
+
+      if (!wrapCampo || wrapCampo.hidden || wrapCampo.style.display === "none") {
+        return;
+      }
+
+      if (campo.closest("[hidden]")) {
+        return;
+      }
+
+      if (campo.disabled) {
+        return;
+      }
+
+      wrapCampo.classList.remove("is-invalido");
+
+      const valor = safeStr(campo.value || "").trim();
+      if (valor) {
+        return;
+      }
+
+      wrapCampo.classList.add("is-invalido");
+      camposInvalidos.push({
+        campo,
+        label: safeStr(campo.dataset.labelObrigatorioSolicitacao || campo.dataset.campoSolicitacao || "Campo").trim()
+      });
+    });
+
+    if (!camposInvalidos.length) {
+      return { ok: true, msg: "" };
+    }
+
+    const primeiroCampo = camposInvalidos[0].campo;
+    primeiroCampo.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => primeiroCampo.focus({ preventScroll: true }), 250);
+
+    const nomesCampos = camposInvalidos
+      .slice(0, 6)
+      .map((item) => item.label)
+      .join(", ");
+
+    const complemento = camposInvalidos.length > 6
+      ? ` e mais ${camposInvalidos.length - 6} campo(s)`
+      : "";
+
+    return {
+      ok: false,
+      msg: `Preencha os campos obrigatórios do formulário do contrato: ${nomesCampos}${complemento}.`
+    };
   }
 
   function obterTextoSelectSelecionado(selectEl){
@@ -550,7 +775,14 @@
     const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
     const painelFace = obterPainelFaceSelecionadoDoBloco(bloco) || null;
     const idPainel = idNum(selectPainel?.value || painelFace?.IDDimPaineisEuromidia || 0) || null;
-    const painel = (idPainel ? paineisPorId.get(idPainel) : null) || null;
+    const codPontoSelecionado = safeStr(painelFace?.CodPonto || "").trim();
+    const painel =
+      (idPainel ? paineisPorId.get(idPainel) : null) ||
+      (codPontoSelecionado
+        ? (Array.isArray(paineisCatalogo) ? paineisCatalogo : []).find((item) => {
+            return safeStr(item?.CodPonto || "").trim() === codPontoSelecionado;
+          }) || null
+        : null);
 
     return {
       id_painel: idPainel,
@@ -558,11 +790,11 @@
       cod_ponto: safeStr(painelFace?.CodPonto || painel?.CodPonto || "").trim() || null,
       cod_face: safeStr(selectFace?.value || painelFace?.CodFace || "").trim().toUpperCase() || null,
       tipo_painel: safeStr(painelFace?.Tipo || painel?.Tipo || "").trim() || null,
-      cidade: safeStr(painelFace?.Cidade || painel?.Cidade || "").trim() || null,
+      cidade: safeStr(painel?.Cidade || painelFace?.Cidade || "").trim() || null,
       exibicoes_dia: safeStr(selectExibicoesDia?.value || bloco.__dadosComerciais?.preco?.ExibicoesDia || "").trim() || null,
       valor_venda_final: obterValorResumoPainelFace(bloco, '[data-role="kpi-valor-final"]'),
-      data_inicio: safeStr(bloco.querySelector('[data-role="input-data-inicio"]')?.value || "").trim() || null,
-      data_fim: safeStr(bloco.querySelector('[data-role="input-data-fim"]')?.value || "").trim() || null,
+      data_inicio: normalizarDataParaInput(bloco.querySelector('[data-role="input-data-inicio"]')?.value || "") || null,
+      data_fim: normalizarDataParaInput(bloco.querySelector('[data-role="input-data-fim"]')?.value || "") || null,
     };
   }
 
@@ -674,6 +906,13 @@
       nomeVendedorDoCard(card) ||
       ""
     ).trim() || null;
+    const marcaExibidaItem = safeStr(
+      valoresDigitadosItem?.MarcaExibida ||
+      inputMarcaCard?.value ||
+      snapshotItem?.MarcaExibida ||
+      card?.Marca ||
+      ""
+    ).trim() || null;
 
     const item = Object.assign({}, snapshotItem || {}, valoresDigitadosItem || {});
 
@@ -694,6 +933,10 @@
       item.Vendedor = vendedorNome;
     }
 
+    if (marcaExibidaItem) {
+      item.MarcaExibida = marcaExibidaItem;
+    }
+
     if (resumoPainel) {
       item.IDPainelEuromidia = resumoPainel.id_painel || null;
       item.IDDimFacesPaineis = resumoPainel.id_face || null;
@@ -705,6 +948,10 @@
       item.DataInicioPrevisto = resumoPainel.data_inicio || null;
       item.DataTerminoPrevisto = resumoPainel.data_fim || null;
       item.TotalBrutoContrato = resumoPainel.valor_venda_final == null ? null : resumoPainel.valor_venda_final;
+
+      if (!item.MarcaExibida && marcaExibidaItem) {
+        item.MarcaExibida = marcaExibidaItem;
+      }
     }
 
     return item;
@@ -720,8 +967,9 @@
       ? {
           header: coletarHeaderFormularioSolicitacaoExistente(),
           itens: coletarItensFormularioSolicitacaoExistentes(),
+          contatoClienteDireto: coletarFormularioContatoClienteDireto(),
         }
-      : { header: {}, itens: [] };
+      : { header: {}, itens: [], contatoClienteDireto: null };
 
     const itensSnapshot = Array.isArray(snapshotEditavel?.itens)
       ? snapshotEditavel.itens
@@ -757,6 +1005,9 @@
       atualizarTempoExposicaoFormularioSolicitacao(indice);
     }
 
+    preencherFormularioContatoClienteDireto(
+      valoresDigitados.contatoClienteDireto || snapshotEditavel?.contato_cliente_direto || snapshotEditavel?.contatoClienteDireto || null
+    );
     aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
@@ -764,6 +1015,7 @@
     renderizarFormularioSolicitacaoContrato(1);
     CAMPOS_SOLICITACAO_HEADER.forEach((meta) => setValorFormularioSolicitacao("Header", meta, ""));
     CAMPOS_SOLICITACAO_ITEM.forEach((meta) => setValorFormularioSolicitacao("Item", meta, "", 0));
+    preencherFormularioContatoClienteDireto(null);
     aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
@@ -781,7 +1033,14 @@
   function coletarFormularioSolicitacaoContrato(){
     const header = coletarHeaderFormularioSolicitacaoExistente();
     const itens = coletarItensFormularioSolicitacaoExistentes();
-    return { header, item: itens[0] || {}, itens };
+    const contatoClienteDireto = coletarFormularioContatoClienteDireto();
+    return {
+      header,
+      item: itens[0] || {},
+      itens,
+      contato_cliente_direto: contatoClienteDireto,
+      contatoClienteDireto
+    };
   }
 
   function agendarSincronizacaoFormularioSolicitacao(){
@@ -1483,6 +1742,7 @@
       }
 
       atualizarResumoDisponibilidadeDoBloco(bloco);
+      agendarSincronizacaoFormularioSolicitacao();
     };
 
     const aoAlterarDataFim = () => {
@@ -1508,6 +1768,7 @@
       }
 
       atualizarResumoDisponibilidadeDoBloco(bloco);
+      agendarSincronizacaoFormularioSolicitacao();
     };
 
     inputDataInicio.__kbReservaOnChange = aoAlterarDataInicio;
@@ -1579,6 +1840,7 @@
           }
 
           atualizarResumoDisponibilidadeDoBloco(bloco);
+          agendarSincronizacaoFormularioSolicitacao();
         }
       });
 
@@ -1613,6 +1875,7 @@
         },
         onChange: function(){
           atualizarResumoDisponibilidadeDoBloco(bloco);
+          agendarSincronizacaoFormularioSolicitacao();
         },
         onOpen: function(_selectedDates, _dataStr, instance){
           const dataInicio = safeStr(inputDataInicio.value || '').trim();
@@ -1851,13 +2114,13 @@
   function obterConfigEmpresasRelacionadasPorTipo(idTipo){
     const id = idNum(idTipo || 0);
 
-    if (id === 2) {
+    if (id === ID_TIPO_CLIENTE_DIRETO) {
       return {
         labelEmpresaPrincipal: "Cliente Direto",
-        mostrarWrap: true,
-        mostrarAgencia: true,
+        mostrarWrap: false,
+        mostrarAgencia: false,
         mostrarClienteDireto: false,
-        mostrarBureau: true,
+        mostrarBureau: false,
       };
     }
 
@@ -7287,6 +7550,8 @@ function formatarNumeroParaInput(valor){
     if (dispararChange && selectFace) {
       selectFace.dispatchEvent(new Event('change', { bubbles: true }));
     }
+
+    agendarSincronizacaoFormularioSolicitacao();
   }
 
   async function selecionarPainelCombobox(bloco, itemOuChave, dispararChange = true){
@@ -7334,6 +7599,8 @@ function formatarNumeroParaInput(valor){
     if (dispararChange && valorNovo !== valorAnterior) {
       selectFace.dispatchEvent(new Event('change', { bubbles: true }));
     }
+
+    agendarSincronizacaoFormularioSolicitacao();
   }
 
   function localizarPainelFacePorTextoDigitado(bloco, texto){
@@ -8526,6 +8793,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
   selectPreco.addEventListener('change', () => {
     atualizarResumoComercial(bloco, { formatarCampos: true });
+    agendarSincronizacaoFormularioSolicitacao();
   });
 
   inputNovoValor?.addEventListener('input', () => {
@@ -8534,10 +8802,12 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       origemEdicao: 'novo_valor',
       preservarNovoValorEmDigitacao: true
     });
+    agendarSincronizacaoFormularioSolicitacao();
   });
 
   inputNovoValor?.addEventListener('blur', () => {
     atualizarResumoComercial(bloco, { origemEdicao: 'novo_valor', formatarCampos: true });
+    agendarSincronizacaoFormularioSolicitacao();
   });
 
   inputPercentual?.addEventListener('input', () => {
@@ -8546,10 +8816,12 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       origemEdicao: 'percentual',
       preservarPercentualEmDigitacao: true
     });
+    agendarSincronizacaoFormularioSolicitacao();
   });
 
   inputPercentual?.addEventListener('blur', () => {
     atualizarResumoComercial(bloco, { origemEdicao: 'percentual', formatarCampos: true });
+    agendarSincronizacaoFormularioSolicitacao();
   });
 
   let idPrecoSalvo = 0;
@@ -8634,8 +8906,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       const idPreco = idNum(bloco.querySelector('[data-role="select-preco"]')?.value || 0) || null;
       const novoValor = parseNumeroInput(bloco.querySelector('[data-role="input-novo-valor"]')?.value);
       const percentual = parseNumeroInput(bloco.querySelector('[data-role="input-percentual"]')?.value);
-      const dataInicio = safeStr(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '').trim();
-      const dataFim = safeStr(bloco.querySelector('[data-role="input-data-fim"]')?.value || '').trim();
+      const dataInicio = normalizarDataParaInput(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '');
+      const dataFim = normalizarDataParaInput(bloco.querySelector('[data-role="input-data-fim"]')?.value || '');
 
       if (!idPainel && !codFace && !idPreco && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
 
@@ -10455,6 +10727,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     agendarSincronizacaoFormularioSolicitacao();
   });
 
+  document.addEventListener("input", (evento) => {
+    const alvo = evento.target;
+    if (alvo?.closest?.("#wrapContatoClienteDiretoFormulario")) {
+      agendarSincronizacaoFormularioSolicitacao();
+    }
+  });
+
   inputContratoCardBusca?.addEventListener("focus", () => {
     abrirListaContratosCombobox();
   });
@@ -11870,6 +12149,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     const validacaoEmpresasFase4 = validarEmpresasRelacionadasFase4Formulario(idTipoClienteDesconto, idFaseAtualCardAberto);
     if (!validacaoEmpresasFase4.ok) {
       mostrarMensagemCard(validacaoEmpresasFase4.msg || "Existem pendências de empresas relacionadas para a fase 4.");
+      return;
+    }
+
+    const validacaoFormularioContrato = validarCamposObrigatoriosFormularioSolicitacaoContrato();
+    if (!validacaoFormularioContrato.ok) {
+      mostrarMensagemCard(validacaoFormularioContrato.msg || "Preencha os campos obrigatórios do formulário do contrato.");
       return;
     }
 

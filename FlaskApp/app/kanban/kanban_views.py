@@ -137,6 +137,8 @@ TABELA_SOLICITACAO_CONTRATO = "[Integracao].[Silver].[FatoSolicitacaoContratoEur
 TABELA_SOLICITACAO_CONTRATO_ITEM = "[Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]"
 TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
 TABELA_CONTATOS_CONTRATO = "[Integracao].[Silver].[DimContatosContrato]"
+TABELA_CONTATO_CLIENTE_DIRETO = "[Integracao].[Silver].[FatoContatoClienteDiretoEuromidia]"
+ID_TIPO_CLIENTE_DIRETO = 2
 
 ID_TAG_CONTRATO_EM_AVALIACAO = 14
 ID_TAG_PLANO_MIDIA = 15
@@ -6176,6 +6178,7 @@ def _obter_snapshot_solicitacao_editavel_por_card(id_card: int) -> dict[str, Any
         "header": dict(header),
         "item": None,
         "itens": [],
+        "contato_cliente_direto": _obter_contato_cliente_direto_por_card(int(id_card)),
     }
 
     if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
@@ -7307,6 +7310,19 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         for item in (dados_formulario_solicitacao.get("itens") or [])
         if isinstance(item, dict)
     ]
+    dados_contato_cliente_direto = (
+        dict(
+            dados_formulario_solicitacao.get("contato_cliente_direto")
+            or dados_formulario_solicitacao.get("contatoClienteDireto")
+            or {}
+        )
+        if isinstance(
+            dados_formulario_solicitacao.get("contato_cliente_direto")
+            or dados_formulario_solicitacao.get("contatoClienteDireto"),
+            dict,
+        )
+        else {}
+    )
 
     campos_data_header_formulario = {"DataAssinaturaRenovacao", "DataLancamento"}
     campos_decimal_header_formulario = {
@@ -7650,6 +7666,13 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
                 coluna_atividade_item=coluna_atividade_item,
             )
 
+    contato_cliente_direto_resultado = _upsert_contato_cliente_direto_euromidia(
+        id_card=int(id_card),
+        id_fato_controle_contratos=int(id_contrato_existente) if id_contrato_existente not in (None, "", 0) else None,
+        id_tipo_cliente=id_tipo_cliente,
+        dados_contato=dados_contato_cliente_direto,
+    )
+
     return {
         "sincronizado": True,
         "sem_alteracao": bool(header_igual and sem_alteracao_itens),
@@ -7659,6 +7682,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "bit_solicitacao_ativa": bit_solicitacao_ativa,
         "id_solicitacao_existente": id_solicitacao_existente,
         "quantidade_itens_snapshot": len(itens_snapshot),
+        "contato_cliente_direto": contato_cliente_direto_resultado,
     }
 
 
@@ -7980,6 +8004,9 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
 
     id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
+    id_tipo_cliente_card = _int_ou_none(
+        card.get("IDDimTipoCliente") or card.get("IDDimKanbanTipoClienteDesconto")
+    )
 
     id_empresa_relacionada = _obter_id_empresa_relacionada_card(card)
     if id_empresa_relacionada in (None, "", 0) and id_empresa_relacionada_fallback not in (None, "", 0):
@@ -8053,6 +8080,7 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         cod_face_contrato=cod_face_contrato,
         descricao_card=str(card.get("Descricao") or "").strip() or None,
         forcar_solicitacao_ativa=True if int(id_fase_atual) == 4 else None,
+        id_tipo_cliente=id_tipo_cliente_card,
         dados_formulario_solicitacao=dados_formulario_solicitacao,
     )
 
@@ -23664,6 +23692,127 @@ def _normalizar_telefone_card(valor: Any, tamanho_maximo: int = 30) -> str | Non
     return telefone[: int(tamanho_maximo)]
 
 
+CAMPOS_CONTATO_CLIENTE_DIRETO = (
+    "NomeResponsavelLegalProcuradorEmpresa",
+    "WhatsappEmpresa",
+    "NomeTestemunha",
+    "Email",
+    "Telefone",
+    "NomeFinanceiro",
+    "EmailFinanceiro",
+    "TelefoneFinanceiro",
+)
+
+
+def _normalizar_contato_cliente_direto_payload(dados_contato: dict[str, Any] | None) -> dict[str, Any]:
+    """Eu normalizo os campos específicos do cliente direto antes de gravar."""
+    dados = dados_contato if isinstance(dados_contato, dict) else {}
+
+    return {
+        "NomeResponsavelLegalProcuradorEmpresa": _texto_ou_none(
+            dados.get("NomeResponsavelLegalProcuradorEmpresa"), 200
+        ),
+        "WhatsappEmpresa": _normalizar_telefone_card(dados.get("WhatsappEmpresa"), 25),
+        "NomeTestemunha": _texto_ou_none(dados.get("NomeTestemunha"), 200),
+        "Email": _texto_ou_none(dados.get("Email"), 200),
+        "Telefone": _normalizar_telefone_card(dados.get("Telefone"), 25),
+        "NomeFinanceiro": _texto_ou_none(dados.get("NomeFinanceiro"), 200),
+        "EmailFinanceiro": _texto_ou_none(dados.get("EmailFinanceiro"), 200),
+        "TelefoneFinanceiro": _normalizar_telefone_card(dados.get("TelefoneFinanceiro"), 25),
+    }
+
+
+def _contato_cliente_direto_tem_algum_valor(dados_contato: dict[str, Any] | None) -> bool:
+    if not isinstance(dados_contato, dict):
+        return False
+    return any(dados_contato.get(campo) not in (None, "") for campo in CAMPOS_CONTATO_CLIENTE_DIRETO)
+
+
+def _obter_contato_cliente_direto_por_card(id_card: int) -> dict[str, Any] | None:
+    """Eu busco o último contato complementar de Cliente Direto salvo para o card."""
+    if int(id_card or 0) <= 0:
+        return None
+
+    if not _objeto_existe(TABELA_CONTATO_CLIENTE_DIRETO):
+        return None
+
+    ordem = []
+    if _coluna_existe(TABELA_CONTATO_CLIENTE_DIRETO, "DataCriacao"):
+        ordem.append("DataCriacao DESC")
+    if _coluna_existe(TABELA_CONTATO_CLIENTE_DIRETO, "IDFatoContatoClienteDiretoEuromidia"):
+        ordem.append("IDFatoContatoClienteDiretoEuromidia DESC")
+
+    sql = text(f"""
+        SELECT TOP (1)
+            *
+        FROM {TABELA_CONTATO_CLIENTE_DIRETO}
+        WHERE IDFatoKanbanCard = :id_card
+        ORDER BY {', '.join(ordem) if ordem else 'IDFatoKanbanCard DESC'};
+    """)
+
+    row = db.session.execute(sql, {"id_card": int(id_card)}).mappings().first()
+    return dict(row) if row else None
+
+
+def _upsert_contato_cliente_direto_euromidia(
+    *,
+    id_card: int,
+    id_fato_controle_contratos: int | None = None,
+    id_tipo_cliente: int | None = None,
+    dados_contato: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Eu salvo os dados extras usados somente para Cliente Direto."""
+    if int(id_card or 0) <= 0:
+        return {"ok": False, "motivo": "card_invalido"}
+
+    if not _objeto_existe(TABELA_CONTATO_CLIENTE_DIRETO):
+        return {"ok": False, "motivo": "tabela_contato_cliente_direto_ausente"}
+
+    id_tipo = _int_ou_none(id_tipo_cliente)
+    if id_tipo != ID_TIPO_CLIENTE_DIRETO:
+        return {"ok": False, "motivo": "tipo_cliente_nao_e_cliente_direto"}
+
+    dados_normalizados = _normalizar_contato_cliente_direto_payload(dados_contato)
+    contato_existente = _obter_contato_cliente_direto_por_card(int(id_card))
+
+    if not contato_existente and not _contato_cliente_direto_tem_algum_valor(dados_normalizados):
+        return {"ok": False, "motivo": "contato_cliente_direto_vazio"}
+
+    valores = {
+        "IDFatoControleContratosEuromidia": _int_ou_none(id_fato_controle_contratos),
+        "IDFatoKanbanCard": int(id_card),
+        "IDDimTipoCliente": int(id_tipo),
+        **dados_normalizados,
+    }
+
+    if contato_existente and contato_existente.get("IDFatoContatoClienteDiretoEuromidia") not in (None, "", 0):
+        id_contato = int(contato_existente.get("IDFatoContatoClienteDiretoEuromidia") or 0)
+        _atualizar_registro_dinamico_por_id(
+            TABELA_CONTATO_CLIENTE_DIRETO,
+            "IDFatoContatoClienteDiretoEuromidia",
+            id_contato,
+            valores,
+        )
+        return {
+            "ok": True,
+            "acao": "atualizado",
+            "IDFatoContatoClienteDiretoEuromidia": id_contato,
+        }
+
+    id_contato = _inserir_registro_dinamico_output_id(
+        TABELA_CONTATO_CLIENTE_DIRETO,
+        "IDFatoContatoClienteDiretoEuromidia",
+        valores,
+        colunas_getdate=("DataCriacao",),
+    )
+
+    return {
+        "ok": True,
+        "acao": "inserido",
+        "IDFatoContatoClienteDiretoEuromidia": int(id_contato or 0) or None,
+    }
+
+
 def _obter_dados_card_para_contato_contrato(id_card: int) -> dict[str, Any] | None:
     if int(id_card or 0) <= 0:
         return None
@@ -26013,6 +26162,7 @@ def api_card_criar(id_kanban: int):
             descricao_card=descricao,
             contrato_existente=contrato_existente,
             id_tipo_cliente=id_tipo_cliente_desconto_int,
+            dados_formulario_solicitacao=solicitacao_contrato_payload,
         )
 
         etapa = "sincronizar_item_contrato"

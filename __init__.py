@@ -181,3 +181,11 @@ docker compose exec airflow-apiserver airflow users create \
 #docker compose down
 #docker compose build --no-cache flask-app celery-checking-worker celery-kanban-worker
 #docker compose up -d
+
+
+
+
+
+#Limpar cache builder
+
+#wsl -d Ubuntu-24.04 -- docker builder prune -a -f
