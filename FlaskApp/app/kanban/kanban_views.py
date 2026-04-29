@@ -105,6 +105,7 @@ TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
 TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
 TABELA_TIPO_CLIENTE_DESCONTO = "[Integracao].[Silver].[DimTipoCliente]"
 TABELA_ORIGEM_ATENDIMENTO = "[Integracao].[Silver].[DimOrigemAtendimento]"
+TABELA_TIPO_DOCUMENTO = "[Integracao].[Silver].[DimTipoDocumento]"
 
 
 
@@ -6617,6 +6618,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "IDDimFacesPaineis",
         "IDDimCheckingHistorico",
         "IDVendedor",
+        "IDDimTipoDocumento",
     }
 
     def _tem_dados_item_formulario(dados_item_atual: dict[str, Any] | None = None) -> bool:
@@ -6781,6 +6783,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
                 "EmpresaEuro": None,
                 "CnpjExibibora": None,
                 "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
+                "IDDimTipoDocumento": _int_positivo_ou_none_local((contrato_row or {}).get("IDDimTipoDocumento")),
                 "RazaoSocial": (contrato_row or {}).get("RazaoSocial") or ((empresa or {}).get("RazaoSocial") if id_tipo_cliente_int == 2 else None),
                 "CPF": (contrato_row or {}).get("CPF"),
                 "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
@@ -6840,6 +6843,8 @@ def _montar_itens_snapshot_solicitacao_do_card(
                 valores_item["BitSolicitacaoAtiva"] = bit_solicitacao_ativa
 
             valores_item = _aplicar_dados_formulario_item(valores_item, dados_item_atual)
+            if valores_item.get("IDDimTipoDocumento") and not valores_item.get("TipoDocumento"):
+                valores_item["TipoDocumento"] = _nome_tipo_documento_por_id(valores_item.get("IDDimTipoDocumento"))
             itens_resultado.append(valores_item)
 
         return itens_resultado
@@ -6879,6 +6884,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "EmpresaEuro": (item_contrato or {}).get("EmpresaEuro"),
         "CnpjExibibora": (item_contrato or {}).get("CnpjExibibora"),
         "TipoDocumento": (item_contrato or {}).get("TipoDocumento") or (contrato_row or {}).get("TipoDocumento"),
+        "IDDimTipoDocumento": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimTipoDocumento") or (contrato_row or {}).get("IDDimTipoDocumento")),
         "RazaoSocial": (item_contrato or {}).get("RazaoSocial") or (contrato_row or {}).get("RazaoSocial") or (empresa or {}).get("RazaoSocial"),
         "CPF": (item_contrato or {}).get("CPF") or (contrato_row or {}).get("CPF"),
         "MarcaExibida": (item_contrato or {}).get("MarcaExibida") or (contrato_row or {}).get("MarcaExibida"),
@@ -6939,6 +6945,8 @@ def _montar_itens_snapshot_solicitacao_do_card(
 
     dados_item_atual = dados_itens_formulario[0] if dados_itens_formulario else dados_item_formulario
     valores_item = _aplicar_dados_formulario_item(valores_item, dados_item_atual)
+    if valores_item.get("IDDimTipoDocumento") and not valores_item.get("TipoDocumento"):
+        valores_item["TipoDocumento"] = _nome_tipo_documento_por_id(valores_item.get("IDDimTipoDocumento"))
     itens_resultado.append(valores_item)
     return itens_resultado
 
@@ -7324,6 +7332,46 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         else {}
     )
 
+    def _resolver_tipo_documento_do_header_formulario() -> tuple[int | None, str | None]:
+        id_tipo = _int_positivo_ou_none(
+            dados_header_formulario.get("IDDimTipoDocumento")
+            or dados_header_formulario.get("id_dim_tipo_documento")
+            or dados_header_formulario.get("idTipoDocumento")
+        )
+
+        nome_tipo = str(
+            dados_header_formulario.get("TipoDocumento")
+            or dados_header_formulario.get("NomeTipoDocumento")
+            or dados_header_formulario.get("nome_tipo_documento")
+            or ""
+        ).strip() or None
+
+        if not id_tipo and nome_tipo:
+            nome_norm = _normalizar_texto_busca(nome_tipo)
+            for tipo_documento in _obter_tipos_documento(incluir_inativos=True):
+                nome_cadastrado_norm = _normalizar_texto_busca(tipo_documento.get("NomeTipoDocumento"))
+                if nome_cadastrado_norm and nome_cadastrado_norm == nome_norm:
+                    id_tipo = _int_positivo_ou_none(tipo_documento.get("IDDimTipoDocumento"))
+                    break
+
+        if id_tipo and not nome_tipo:
+            nome_tipo = _nome_tipo_documento_por_id(id_tipo)
+
+        return id_tipo, nome_tipo
+
+    id_tipo_documento_header_formulario, nome_tipo_documento_header_formulario = _resolver_tipo_documento_do_header_formulario()
+
+    if id_tipo_documento_header_formulario:
+        if not dados_item_formulario.get("IDDimTipoDocumento"):
+            dados_item_formulario["IDDimTipoDocumento"] = id_tipo_documento_header_formulario
+        if nome_tipo_documento_header_formulario and not dados_item_formulario.get("TipoDocumento"):
+            dados_item_formulario["TipoDocumento"] = nome_tipo_documento_header_formulario
+
+        for dados_item_atual in dados_itens_formulario:
+            dados_item_atual["IDDimTipoDocumento"] = id_tipo_documento_header_formulario
+            if nome_tipo_documento_header_formulario:
+                dados_item_atual["TipoDocumento"] = nome_tipo_documento_header_formulario
+
     campos_data_header_formulario = {"DataAssinaturaRenovacao", "DataLancamento"}
     campos_decimal_header_formulario = {
         "TotalFaturamentoBrutoMensal", "TotalPercentualPermuta", "TotalCotaOportunidade",
@@ -7611,7 +7659,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             "IDFatoControleContratosItensEuromidia", "IDFatoKanbanCard", "IDVendedor", "IDPainelEuromidia",
             "IDDimFacesPaineis", "IDDimCheckingHistorico", "IDEmpresaProprietaria", "Referencia",
             "NumeroContrato", "NumeroPrevia", "CNPJ", "CodPonto", "CodFace", "DataLancamento", "Cota",
-            "CidadeExibicao", "Tipo", "Origem", "TipoDocumento", "RazaoSocial", "MarcaExibida", "Vendedor",
+            "CidadeExibicao", "Tipo", "Origem", "TipoDocumento", "IDDimTipoDocumento", "RazaoSocial", "MarcaExibida", "Vendedor",
             "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario", "CnpjIntermediario",
             "DataAssinaturaRenovacao", "IDTrimestre", "DataInicioPrevisto", "DataTerminoPrevisto",
             "InicioRenovacao", "FaturamentoBrutoMensal", "PercentualPermuta", "CotaOportunidade",
@@ -14073,6 +14121,7 @@ def api_kanban_dados(id_kanban: int):
     vendedores_catalogo = _obter_vendedores_kanban(id_kanban)
     tipos_cliente_desconto_catalogo = _obter_tipos_cliente_desconto()
     origens_atendimento_catalogo = _obter_origens_atendimento()
+    tipos_documento_catalogo = _obter_tipos_documento()
     paineis_catalogo = _obter_paineis_catalogo() if kanban_cfg["MostrarPainelFaceNoCard"] else []
 
     sql_totais = text(f"""
@@ -14268,6 +14317,7 @@ def api_kanban_dados(id_kanban: int):
         "vendedores": vendedores_catalogo,
         "tipos_cliente_desconto": tipos_cliente_desconto_catalogo,
         "origens_atendimento": origens_atendimento_catalogo,
+        "tipos_documento": tipos_documento_catalogo,
         "card_tags": card_tags_iniciais,
         "paineis": paineis_catalogo,
         "resumo_comercial": _obter_resumo_comercial_kanban(id_kanban),
@@ -15776,6 +15826,132 @@ def api_tag_criar(id_kanban: int):
 
 
 
+
+def _copiar_tipo_documento_solicitacao_para_item_controle_do_card(id_card: int) -> dict[str, Any]:
+    """
+    Eu levo o IDDimTipoDocumento escolhido na solicitação para o item oficial do contrato.
+
+    Uso duas chaves para evitar atualizar o item errado:
+    1) IDFatoControleContratosItensEuromidia, quando a solicitação já conhece o item oficial;
+    2) contrato + CodPonto + CodFace, quando o item ainda foi identificado pela chave comercial.
+    """
+    resultado = {
+        "ok": True,
+        "executado": False,
+        "linhas_atualizadas": 0,
+        "motivo": None,
+    }
+
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+        resultado.update({"ok": False, "motivo": "tabela_solicitacao_item_ausente"})
+        return resultado
+
+    if not _objeto_existe(TABELA_CONTROLE_CONTRATOS_ITENS):
+        resultado.update({"ok": False, "motivo": "tabela_controle_itens_ausente"})
+        return resultado
+
+    if not _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "IDDimTipoDocumento"):
+        resultado.update({"ok": False, "motivo": "coluna_IDDimTipoDocumento_ausente_na_solicitacao"})
+        return resultado
+
+    if not _coluna_existe(TABELA_CONTROLE_CONTRATOS_ITENS, "IDDimTipoDocumento"):
+        resultado.update({"ok": False, "motivo": "coluna_IDDimTipoDocumento_ausente_no_item_controle"})
+        return resultado
+
+    set_tipo_documento_nome = ""
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS_ITENS, "TipoDocumento"):
+        set_tipo_documento_nome = ",\n                i.TipoDocumento = COALESCE(NULLIF(fonte.NomeTipoDocumento, ''), i.TipoDocumento)"
+
+    set_data_atualizacao = ""
+    if _coluna_existe(TABELA_CONTROLE_CONTRATOS_ITENS, "DataAtualizacao"):
+        set_data_atualizacao = ",\n                i.DataAtualizacao = GETDATE()"
+
+    filtro_solicitacao_ativa = []
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitAtivo"):
+        filtro_solicitacao_ativa.append("ISNULL(s.BitAtivo, 1) = 1")
+    if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitSolicitacaoAtiva"):
+        filtro_solicitacao_ativa.append("ISNULL(s.BitSolicitacaoAtiva, 1) = 1")
+
+    filtro_solicitacao_ativa_sql = ""
+    if filtro_solicitacao_ativa:
+        filtro_solicitacao_ativa_sql = " AND " + " AND ".join(filtro_solicitacao_ativa)
+
+    join_dim_tipo_documento = ""
+    nome_tipo_documento_expr = "NULL"
+    if _objeto_existe(TABELA_TIPO_DOCUMENTO):
+        join_dim_tipo_documento = f"""
+        LEFT JOIN {TABELA_TIPO_DOCUMENTO} td
+            ON td.IDDimTipoDocumento = s.IDDimTipoDocumento
+        """
+        nome_tipo_documento_expr = "td.NomeTipoDocumento"
+
+    sql = text(f"""
+        ;WITH fonte AS (
+            SELECT
+                i.IDFatoControleContratosItensEuromidia,
+                s.IDDimTipoDocumento,
+                COALESCE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(100), s.TipoDocumento))), ''), {nome_tipo_documento_expr}) AS NomeTipoDocumento,
+                ROW_NUMBER() OVER (
+                    PARTITION BY i.IDFatoControleContratosItensEuromidia
+                    ORDER BY
+                        CASE
+                            WHEN s.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia THEN 0
+                            ELSE 1
+                        END,
+                        s.DataAtualizacao DESC,
+                        s.IDFatoSolicitacaoContratoItemEuromidia DESC
+                ) AS rn
+            FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+            INNER JOIN {TABELA_SOLICITACAO_CONTRATO_ITEM} s
+                ON s.IDFatoKanbanCard = :id_card
+               AND s.IDDimTipoDocumento IS NOT NULL
+               {filtro_solicitacao_ativa_sql}
+               AND (
+                    (
+                        s.IDFatoControleContratosItensEuromidia IS NOT NULL
+                        AND s.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+                    )
+                    OR
+                    (
+                        s.IDFatoControleContratosEuromidia IS NOT NULL
+                        AND s.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+                        AND NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), s.CodPonto))), '') IS NOT NULL
+                        AND NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), s.CodFace))), '') IS NOT NULL
+                        AND LTRIM(RTRIM(CONVERT(varchar(80), s.CodPonto))) COLLATE Latin1_General_CI_AI
+                          = LTRIM(RTRIM(CONVERT(varchar(80), i.CodPonto))) COLLATE Latin1_General_CI_AI
+                        AND LTRIM(RTRIM(CONVERT(varchar(80), s.CodFace))) COLLATE Latin1_General_CI_AI
+                          = LTRIM(RTRIM(CONVERT(varchar(80), i.CodFace))) COLLATE Latin1_General_CI_AI
+                    )
+               )
+            {join_dim_tipo_documento}
+            WHERE i.IDFatoKanbanCard = :id_card
+        )
+        UPDATE i
+            SET
+                i.IDDimTipoDocumento = fonte.IDDimTipoDocumento
+                {set_tipo_documento_nome}
+                {set_data_atualizacao}
+        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+        INNER JOIN fonte
+            ON fonte.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+           AND fonte.rn = 1;
+    """)
+
+    try:
+        res = db.session.execute(sql, {"id_card": int(id_card)})
+        resultado["executado"] = True
+        resultado["linhas_atualizadas"] = int(res.rowcount or 0)
+        resultado["motivo"] = "tipo_documento_copiado"
+        return resultado
+    except Exception as exc:
+        current_app.logger.exception(
+            "KANBAN | falha ao copiar IDDimTipoDocumento da solicitação para item oficial | id_card=%s",
+            id_card,
+        )
+        resultado.update({"ok": False, "motivo": str(exc)})
+        return resultado
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/tags", methods=["POST"])
 @login_required
 @limiter.limit("180/minute")
@@ -15889,6 +16065,15 @@ def api_card_tag_adicionar(id_card: int):
                         "Falha ao sincronizar a foto do preço praticado na aprovação do contrato. "
                         f"Motivo: {motivo_snapshot}"
                     )
+
+                sincronizacao_tipo_documento_contrato = _copiar_tipo_documento_solicitacao_para_item_controle_do_card(
+                    int(id_card)
+                )
+                current_app.logger.warning(
+                    "KANBAN TIPO DOCUMENTO CONTRATO TAG 13: id_card=%s resultado=%s",
+                    id_card,
+                    sincronizacao_tipo_documento_contrato,
+                )
 
             id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
                 id_kanban=id_kanban,
@@ -25330,6 +25515,90 @@ def _sql_select_id_origem_atendimento_card(alias_card: str = "c") -> str:
     if _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
         return f"{alias_card}.IDDimOrigemAtendimento AS IDDimOrigemAtendimento,"
     return "CAST(NULL AS int) AS IDDimOrigemAtendimento,"
+
+
+
+def _obter_tipos_documento(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
+    chave = _chave_cache_json(
+        "kanban:dominio:tipo_documento",
+        ID_EMPRESA_PROPRIETARIA_CONTRATOS,
+        incluir_inativos,
+    )
+    em_cache = _cache_json_get(chave)
+    if em_cache is not None:
+        return em_cache
+
+    if not _objeto_existe(TABELA_TIPO_DOCUMENTO):
+        return []
+
+    sql_where = """
+        WHERE IDEmpresaProprietaria = :id_empresa
+    """
+    if not incluir_inativos:
+        sql_where += """
+          AND ISNULL(BitAtivo, 1) = 1
+        """
+
+    sql = text(f"""
+        SELECT
+            IDDimTipoDocumento,
+            NomeTipoDocumento,
+            IDEmpresaProprietaria,
+            ISNULL(BitAtivo, 1) AS BitAtivo
+        FROM {TABELA_TIPO_DOCUMENTO}
+        {sql_where}
+        ORDER BY NomeTipoDocumento ASC, IDDimTipoDocumento ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {"id_empresa": int(ID_EMPRESA_PROPRIETARIA_CONTRATOS)},
+    ).mappings().all()
+
+    resultado: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            id_tipo_documento = int(row.get("IDDimTipoDocumento") or 0)
+        except Exception:
+            id_tipo_documento = 0
+
+        if not id_tipo_documento:
+            continue
+
+        nome_tipo_documento = str(row.get("NomeTipoDocumento") or "").strip()
+        if not nome_tipo_documento:
+            continue
+
+        resultado.append(
+            {
+                "IDDimTipoDocumento": id_tipo_documento,
+                "NomeTipoDocumento": nome_tipo_documento,
+                "IDEmpresaProprietaria": int(row.get("IDEmpresaProprietaria") or 0),
+                "BitAtivo": int(row.get("BitAtivo") or 0),
+            }
+        )
+
+    _cache_json_set(chave, resultado, TIMEOUT_CACHE_LONGO)
+    return resultado
+
+
+def _nome_tipo_documento_por_id(id_tipo_documento: Any) -> str | None:
+    try:
+        id_tipo = int(id_tipo_documento or 0)
+    except Exception:
+        id_tipo = 0
+
+    if id_tipo <= 0:
+        return None
+
+    for item in _obter_tipos_documento(incluir_inativos=True):
+        try:
+            if int(item.get("IDDimTipoDocumento") or 0) == id_tipo:
+                return str(item.get("NomeTipoDocumento") or "").strip() or None
+        except Exception:
+            continue
+
+    return None
 
 
 def _obter_origens_atendimento(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:

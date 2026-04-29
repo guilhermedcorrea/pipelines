@@ -61,6 +61,8 @@
   let tiposClienteDescontoPorId = new Map();
   let origensAtendimentoCatalogo = [];
   let origensAtendimentoPorId = new Map();
+  let tiposDocumentoCatalogo = [];
+  let tiposDocumentoPorId = new Map();
   let vendedoresSelecionados = new Set();
   let tagsSelecionadasFiltro = new Set();
   let mapaTagsPorCard = new Map();
@@ -228,6 +230,7 @@
   const formContatoClienteDiretoFinanceiro = document.getElementById("formContatoClienteDiretoFinanceiro");
   const ID_FASE_FORMULARIO_CONTRATO = 4;
   const ID_TIPO_CLIENTE_DIRETO = 2;
+  const ID_TIPO_DOCUMENTO_ADITIVO = 3;
   const modalCadastroEmpresa = document.getElementById("modalCadastroEmpresa");
   const btnFecharCadastroEmpresa = document.getElementById("btnFecharCadastroEmpresa");
   const btnSalvarCadastroEmpresa = document.getElementById("btnSalvarCadastroEmpresa");
@@ -243,7 +246,7 @@
     { nome: "CPF", label: "CPF" },
     { nome: "MarcaExibida", label: "Marca Exibida", obrigatorio: true },
     { nome: "Vendedor", label: "Vendedor", somenteLeitura: true, obrigatorio: true },
-    { nome: "TipoDocumento", label: "Tipo Documento", obrigatorio: true },
+    { nome: "TipoDocumento", label: "Tipo Documento", tipo: "tipo_documento", obrigatorio: true },
     { nome: "Origem", label: "Origem", obrigatorio: true },
     { nome: "SDR", label: "SDR" },
     { nome: "Agencia", label: "Agência", span: 2 },
@@ -276,7 +279,6 @@
     { nome: "Origem", label: "Origem" },
     { nome: "EmpresaEuro", label: "Empresa Euro" },
     { nome: "CnpjExibibora", label: "CNPJ Exibidora" },
-    { nome: "TipoDocumento", label: "Tipo Documento" },
     { nome: "RazaoSocial", label: "Razão Social", span: 2 },
     { nome: "CPF", label: "CPF" },
     { nome: "MarcaExibida", label: "Marca Exibida" },
@@ -400,6 +402,132 @@
     inputTempo.value = Number.isInteger(totalDias) && totalDias > 0 ? String(totalDias) : "";
   }
 
+  function nomeTipoDocumentoRegistro(item){
+    return safeStr(item?.NomeTipoDocumento ?? item?.TipoDocumento ?? item?.nome_tipo_documento ?? "").trim();
+  }
+
+  function obterTipoDocumentoPorId(idTipoDocumento){
+    const idTipo = idNum(idTipoDocumento || 0);
+    if (!idTipo) return null;
+    return tiposDocumentoPorId.get(idTipo) || null;
+  }
+
+  function obterTipoDocumentoPorNome(nomeTipoDocumento){
+    const nomeNormalizado = normalizarTexto(nomeTipoDocumento || "");
+    if (!nomeNormalizado) return null;
+    return (Array.isArray(tiposDocumentoCatalogo) ? tiposDocumentoCatalogo : []).find((item) => {
+      return normalizarTexto(nomeTipoDocumentoRegistro(item)) === nomeNormalizado;
+    }) || null;
+  }
+
+  function obterIdTipoDocumentoAditivoDisponivel(){
+    const porId = obterTipoDocumentoPorId(ID_TIPO_DOCUMENTO_ADITIVO);
+    if (porId) return ID_TIPO_DOCUMENTO_ADITIVO;
+
+    const porNome = obterTipoDocumentoPorNome("ADITIVO");
+    return idNum(porNome?.IDDimTipoDocumento || 0) || null;
+  }
+
+  function obterNomeTipoDocumentoPorId(idTipoDocumento){
+    const item = obterTipoDocumentoPorId(idTipoDocumento);
+    return nomeTipoDocumentoRegistro(item) || "";
+  }
+
+  function resolverIdTipoDocumentoFormulario(registro = {}, valorFallback = null){
+    const idDireto = idNum(
+      registro?.IDDimTipoDocumento ??
+      registro?.id_dim_tipo_documento ??
+      registro?.idTipoDocumento ??
+      valorFallback ??
+      0
+    );
+    if (idDireto && obterTipoDocumentoPorId(idDireto)) return idDireto;
+
+    const nome = safeStr(
+      registro?.TipoDocumento ??
+      registro?.NomeTipoDocumento ??
+      registro?.nome_tipo_documento ??
+      valorFallback ??
+      ""
+    ).trim();
+    const porNome = obterTipoDocumentoPorNome(nome);
+    return idNum(porNome?.IDDimTipoDocumento || 0) || null;
+  }
+
+  function preencherOpcoesSelectTipoDocumento(selectEl){
+    if (!selectEl) return;
+    const valorAtual = safeStr(selectEl.value || "").trim();
+    selectEl.innerHTML = "";
+    selectEl.appendChild(el("option", { value: "" }, ["— Selecione —"]));
+
+    (Array.isArray(tiposDocumentoCatalogo) ? tiposDocumentoCatalogo : []).forEach((item) => {
+      const idTipo = idNum(item?.IDDimTipoDocumento || 0);
+      const nomeTipo = nomeTipoDocumentoRegistro(item);
+      if (!idTipo || !nomeTipo) return;
+      selectEl.appendChild(el("option", { value: String(idTipo) }, [nomeTipo]));
+    });
+
+    if (valorAtual && [...selectEl.options].some((option) => option.value === valorAtual)) {
+      selectEl.value = valorAtual;
+    }
+  }
+
+  function aplicarTipoDocumentoAditivoPadraoNosItensFormulario(){
+    const fluxo = obterFluxoContratoAtual();
+    if (fluxo.modo_contrato !== VALOR_MODO_CONTRATO_ADITIVO) return;
+
+    const idAditivo = obterIdTipoDocumentoAditivoDisponivel();
+    if (!idAditivo) return;
+
+    const selectTipoDocumentoHeader = obterInputFormularioSolicitacao("Header", "TipoDocumento");
+    if (!selectTipoDocumentoHeader || selectTipoDocumentoHeader.tagName !== "SELECT") return;
+    if (safeStr(selectTipoDocumentoHeader.value || "").trim()) return;
+    if (![...selectTipoDocumentoHeader.options].some((option) => option.value === String(idAditivo))) return;
+
+    selectTipoDocumentoHeader.value = String(idAditivo);
+  }
+
+
+  function substituirInputsTipoDocumentoLegadosPorSelect(){
+    const campoHeader = obterInputFormularioSolicitacao("Header", "TipoDocumento");
+
+    if (campoHeader) {
+      if (campoHeader.tagName === "SELECT") {
+        preencherOpcoesSelectTipoDocumento(campoHeader);
+      } else if (campoHeader.tagName === "INPUT") {
+        const valorAtual = safeStr(campoHeader.value || "").trim();
+        const select = document.createElement("select");
+        select.className = "kb-select";
+        select.id = campoHeader.id;
+
+        Array.from(campoHeader.attributes || []).forEach((attr) => {
+          if (["type", "value", "class"].includes(String(attr.name || "").toLowerCase())) return;
+          select.setAttribute(attr.name, attr.value);
+        });
+
+        select.dataset.tipoCampoSolicitacao = "tipo_documento";
+        preencherOpcoesSelectTipoDocumento(select);
+
+        const idTipoDocumento = resolverIdTipoDocumentoFormulario({}, valorAtual);
+        select.value = idTipoDocumento ? String(idTipoDocumento) : "";
+
+        campoHeader.replaceWith(select);
+      }
+    }
+
+    for (let indice = 0; indice < quantidadeItensFormularioSolicitacaoAtual; indice += 1) {
+      const campoItemLegado = obterInputFormularioSolicitacao("Item", "TipoDocumento", indice);
+      if (!campoItemLegado) continue;
+
+      const wrapCampo = campoItemLegado.closest(".kb-contrato-campo");
+      if (wrapCampo) {
+        wrapCampo.remove();
+      } else {
+        campoItemLegado.remove();
+      }
+    }
+  }
+
   function criarCampoFormularioSolicitacao(secao, meta, indice = null){
     const wrap = document.createElement("div");
     wrap.className = "kb-contrato-campo" + (meta.span === 2 ? " span-2" : "");
@@ -414,11 +542,18 @@
     label.textContent = meta.label;
     wrap.appendChild(label);
 
+    const deveCriarSelectTipoDocumento = meta.tipo === "tipo_documento" || (secao === "Header" && meta.nome === "TipoDocumento");
+
     let campo;
     if (meta.tipo === "textarea") {
       campo = document.createElement("textarea");
       campo.rows = 3;
       campo.className = "kb-textarea";
+    } else if (deveCriarSelectTipoDocumento) {
+      campo = document.createElement("select");
+      campo.className = "kb-select";
+      campo.dataset.tipoCampoSolicitacao = "tipo_documento";
+      preencherOpcoesSelectTipoDocumento(campo);
     } else {
       campo = document.createElement("input");
       campo.type = meta.tipo === "date" ? "date" : "text";
@@ -507,6 +642,8 @@
     }
 
     renderizarFormularioContatoClienteDireto();
+    substituirInputsTipoDocumentoLegadosPorSelect();
+    aplicarTipoDocumentoAditivoPadraoNosItensFormulario();
     aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
@@ -514,13 +651,56 @@
     return document.getElementById(idCampoSolicitacao(secao, nomeCampo, indice));
   }
 
-  function setValorFormularioSolicitacao(secao, meta, valor, indice = null){
+  function sincronizarMarcaExibidaHeaderComInputTopo(){
+    const inputMarcaHeader = obterInputFormularioSolicitacao("Header", "MarcaExibida");
+    if (!inputMarcaHeader || !inputMarcaCard) return;
+
+    inputMarcaHeader.value = inputMarcaCard.value || "";
+
+    const wrapCampo = inputMarcaHeader.closest(".kb-contrato-campo");
+    if (wrapCampo && safeStr(inputMarcaHeader.value || "").trim()) {
+      wrapCampo.classList.remove("is-invalido");
+    }
+  }
+
+  function obterTipoDocumentoSelecionadoNoHeaderSolicitacao(){
+    const selectTipoDocumento = obterInputFormularioSolicitacao("Header", "TipoDocumento");
+    const idTipoDocumento = idNum(selectTipoDocumento?.value || 0) || null;
+    const nomeTipoDocumento = obterNomeTipoDocumentoPorId(idTipoDocumento) || null;
+
+    return {
+      IDDimTipoDocumento: idTipoDocumento,
+      TipoDocumento: nomeTipoDocumento,
+    };
+  }
+
+  function setValorFormularioSolicitacao(secao, meta, valor, indice = null, registro = {}){
     const input = obterInputFormularioSolicitacao(secao, meta.nome, indice);
     if (!input) return;
+
     if (meta.tipo === "date") {
       input.value = normalizarDataParaInput(valor);
       return;
     }
+
+    if (meta.tipo === "tipo_documento" || (secao === "Header" && meta.nome === "TipoDocumento")) {
+      if (input.tagName !== "SELECT") {
+        substituirInputsTipoDocumentoLegadosPorSelect();
+      }
+
+      const selectTipoDocumento = obterInputFormularioSolicitacao(secao, meta.nome, indice);
+      if (!selectTipoDocumento || selectTipoDocumento.tagName !== "SELECT") return;
+
+      preencherOpcoesSelectTipoDocumento(selectTipoDocumento);
+      const idTipoDocumento = resolverIdTipoDocumentoFormulario(registro, valor);
+      selectTipoDocumento.value = idTipoDocumento ? String(idTipoDocumento) : "";
+      if (!selectTipoDocumento.value && obterFluxoContratoAtual().modo_contrato === VALOR_MODO_CONTRATO_ADITIVO) {
+        const idAditivo = obterIdTipoDocumentoAditivoDisponivel();
+        selectTipoDocumento.value = idAditivo ? String(idAditivo) : "";
+      }
+      return;
+    }
+
     input.value = valor == null ? "" : String(valor);
   }
 
@@ -816,6 +996,15 @@
       }
 
       const valor = safeStr(input.value || "").trim();
+
+      if (meta.tipo === "tipo_documento") {
+        const idTipoDocumento = idNum(valor || 0) || null;
+        const nomeTipoDocumento = obterNomeTipoDocumentoPorId(idTipoDocumento);
+        header.IDDimTipoDocumento = idTipoDocumento;
+        header[meta.nome] = nomeTipoDocumento || null;
+        return;
+      }
+
       header[meta.nome] = valor || null;
     });
     return header;
@@ -838,9 +1027,25 @@
         }
 
         const valor = safeStr(input.value || "").trim();
+
+        if (meta.tipo === "tipo_documento") {
+          const idTipoDocumento = idNum(valor || 0) || null;
+          const nomeTipoDocumento = obterNomeTipoDocumentoPorId(idTipoDocumento);
+          item.IDDimTipoDocumento = idTipoDocumento;
+          item.TipoDocumento = nomeTipoDocumento || null;
+          if (idTipoDocumento) possuiValor = true;
+          return;
+        }
+
         item[meta.nome] = valor || null;
         if (valor) possuiValor = true;
       });
+      const tipoDocumentoHeader = obterTipoDocumentoSelecionadoNoHeaderSolicitacao();
+      if (tipoDocumentoHeader.IDDimTipoDocumento) {
+        item.IDDimTipoDocumento = tipoDocumentoHeader.IDDimTipoDocumento;
+        item.TipoDocumento = tipoDocumentoHeader.TipoDocumento;
+      }
+
       if (possuiValor || indice === 0) {
         itens.push(item);
       }
@@ -916,6 +1121,18 @@
 
     const item = Object.assign({}, snapshotItem || {}, valoresDigitadosItem || {});
 
+    const tipoDocumentoHeader = obterTipoDocumentoSelecionadoNoHeaderSolicitacao();
+    if (tipoDocumentoHeader.IDDimTipoDocumento) {
+      item.IDDimTipoDocumento = tipoDocumentoHeader.IDDimTipoDocumento;
+      item.TipoDocumento = tipoDocumentoHeader.TipoDocumento || item.TipoDocumento || null;
+    } else if (obterFluxoContratoAtual().modo_contrato === VALOR_MODO_CONTRATO_ADITIVO && !idNum(item.IDDimTipoDocumento || 0)) {
+      const idAditivo = obterIdTipoDocumentoAditivoDisponivel();
+      if (idAditivo) {
+        item.IDDimTipoDocumento = idAditivo;
+        item.TipoDocumento = obterNomeTipoDocumentoPorId(idAditivo) || item.TipoDocumento || "ADITIVO";
+      }
+    }
+
     item.CNPJ = empresaPrincipal?.CNPJ || null;
     item.RazaoSocial = empresaPrincipal?.RazaoSocial || null;
     item.Agencia = empresaAgencia?.RazaoSocial || null;
@@ -986,8 +1203,10 @@
 
     const header = montarHeaderSolicitacaoBase(snapshotEditavel, card, vendedorLogado, valoresDigitados.header || {});
     CAMPOS_SOLICITACAO_HEADER.forEach((meta) => {
-      setValorFormularioSolicitacao("Header", meta, header?.[meta.nome] ?? null);
+      setValorFormularioSolicitacao("Header", meta, header?.[meta.nome] ?? null, null, header || {});
     });
+    sincronizarMarcaExibidaHeaderComInputTopo();
+    substituirInputsTipoDocumentoLegadosPorSelect();
 
     for (let indice = 0; indice < quantidadeItens; indice += 1) {
       const itemBase = montarItemSolicitacaoBasePorIndice(
@@ -999,7 +1218,7 @@
       );
 
       CAMPOS_SOLICITACAO_ITEM.forEach((meta) => {
-        setValorFormularioSolicitacao("Item", meta, itemBase?.[meta.nome] ?? null, indice);
+        setValorFormularioSolicitacao("Item", meta, itemBase?.[meta.nome] ?? null, indice, itemBase || {});
       });
 
       atualizarTempoExposicaoFormularioSolicitacao(indice);
@@ -1014,6 +1233,8 @@
   function limparFormularioSolicitacaoContrato(){
     renderizarFormularioSolicitacaoContrato(1);
     CAMPOS_SOLICITACAO_HEADER.forEach((meta) => setValorFormularioSolicitacao("Header", meta, ""));
+    substituirInputsTipoDocumentoLegadosPorSelect();
+    sincronizarMarcaExibidaHeaderComInputTopo();
     CAMPOS_SOLICITACAO_ITEM.forEach((meta) => setValorFormularioSolicitacao("Item", meta, "", 0));
     preencherFormularioContatoClienteDireto(null);
     aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
@@ -1043,6 +1264,25 @@
     };
   }
 
+  function usuarioEstaDigitandoNoFormularioSolicitacao(){
+    const ativo = document.activeElement;
+    if (!ativo || typeof ativo.closest !== "function") return false;
+
+    const dentroFormularioContrato = ativo.closest("#wrapFormularioSolicitacaoContrato");
+    const dentroContatoClienteDireto = ativo.closest("#wrapContatoClienteDiretoFormulario");
+    if (!dentroFormularioContrato && !dentroContatoClienteDireto) return false;
+
+    if (ativo.disabled || ativo.readOnly) return false;
+
+    const tag = safeStr(ativo.tagName || "").toUpperCase();
+    if (tag === "TEXTAREA" || tag === "SELECT") return true;
+
+    if (tag !== "INPUT") return false;
+
+    const tipo = safeStr(ativo.getAttribute("type") || "text").toLowerCase();
+    return !["button", "submit", "reset", "hidden", "checkbox", "radio", "file"].includes(tipo);
+  }
+
   function agendarSincronizacaoFormularioSolicitacao(){
     if (timerSincronizacaoFormularioSolicitacao) {
       window.clearTimeout(timerSincronizacaoFormularioSolicitacao);
@@ -1051,8 +1291,13 @@
     timerSincronizacaoFormularioSolicitacao = window.setTimeout(() => {
       timerSincronizacaoFormularioSolicitacao = null;
       if (!wrapFormularioSolicitacaoContrato) return;
+
+      if (usuarioEstaDigitandoNoFormularioSolicitacao()) {
+        return;
+      }
+
       sincronizarFormularioSolicitacaoContratoComEstadoAtual({ preservarDigitado: true });
-    }, 60);
+    }, 180);
   }
 
   function obterIdFaseAtualDoCardAbertoNoModal(){
@@ -6306,6 +6551,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
 
   async function onModoContratoCardChange() {
     const fluxo = obterFluxoContratoAtual();
+    aplicarTipoDocumentoAditivoPadraoNosItensFormulario();
 
     limparSelectComPlaceholder(selectCodPontoContratoCard, "— Selecione o CodPonto —");
     limparSelectComPlaceholder(selectCodFaceContratoCard, "— Selecione o CodFace —");
@@ -9117,6 +9363,13 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       if (idOrigem) origensAtendimentoPorId.set(idOrigem, item);
     });
 
+    tiposDocumentoCatalogo = Array.isArray(j.tipos_documento) ? j.tipos_documento.map(t => Object.assign({}, t || {})) : [];
+    tiposDocumentoPorId = new Map();
+    tiposDocumentoCatalogo.forEach(item => {
+      const idTipoDocumento = idNum(item?.IDDimTipoDocumento || 0);
+      if (idTipoDocumento) tiposDocumentoPorId.set(idTipoDocumento, item);
+    });
+
     kanbanCfg = j.kanban_cfg || {};
     paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
     if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard) {
@@ -10724,13 +10977,22 @@ async function moverCard(idCard, idFasePara, posicao) {
   });
 
   inputMarcaCard?.addEventListener("input", () => {
+    sincronizarMarcaExibidaHeaderComInputTopo();
+    agendarSincronizacaoFormularioSolicitacao();
+  });
+
+  inputMarcaCard?.addEventListener("change", () => {
+    sincronizarMarcaExibidaHeaderComInputTopo();
     agendarSincronizacaoFormularioSolicitacao();
   });
 
   document.addEventListener("input", (evento) => {
     const alvo = evento.target;
-    if (alvo?.closest?.("#wrapContatoClienteDiretoFormulario")) {
-      agendarSincronizacaoFormularioSolicitacao();
+    if (!alvo?.closest?.("#wrapContatoClienteDiretoFormulario")) return;
+
+    const wrapCampo = alvo.closest?.(".kb-contrato-campo");
+    if (wrapCampo && safeStr(alvo.value || "").trim()) {
+      wrapCampo.classList.remove("is-invalido");
     }
   });
 
@@ -10784,6 +11046,7 @@ async function moverCard(idCard, idFasePara, posicao) {
   });
 
   selectModoContratoCard?.addEventListener("change", async () => {
+    aplicarTipoDocumentoAditivoPadraoNosItensFormulario();
     await onModoContratoCardChange();
   });
 
@@ -11673,6 +11936,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (inputMarcaCard) {
       inputMarcaCard.value = cardNormalizado.Marca ?? "";
+      sincronizarMarcaExibidaHeaderComInputTopo();
     }
 
     if (inputTelefoneCard) {

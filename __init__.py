@@ -189,3 +189,42 @@ docker compose exec airflow-apiserver airflow users create \
 #Limpar cache builder
 
 #wsl -d Ubuntu-24.04 -- docker builder prune -a -f
+
+
+
+
+#Limpando cache Docker
+
+#wsl -d Ubuntu-24.04 -- docker builder prune -a -f   (limpa cache)
+
+#wsl -d Ubuntu-24.04 -- docker system df (verificação)
+
+#wsl -d Ubuntu-24.04 -- df -h (verificação)
+
+
+
+#wsl --shutdown (desliga o WSL)
+
+
+
+
+#Get-ChildItem "$env:LOCALAPPDATA\wsl" -Recurse -Filter ext4.vhdx | Select-Object FullName, Length (descobre o caminho do ext4.vhdx)
+
+
+
+
+#wsl -d Ubuntu-24.04 -- sudo fstrim -av (Roda TRIM dentro do WSL)
+
+
+
+#diskpart (acessa Diskpart)
+
+
+#e executa o comando para desanexar
+
+
+#select vdisk file="C:\Users\Guilherme Correa\AppData\Local\wsl\{6a37620c-2e8a-45b6-b5ad-553e8d141179}\ext4.vhdx"
+#attach vdisk readonly
+#compact vdisk
+#detach vdisk
+#exit

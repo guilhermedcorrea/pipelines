@@ -4010,6 +4010,192 @@ def _sincronizar_contato_contrato_se_fase_4(
 
 
 
+
+
+def _campo_form_ou_none(form, *nomes: str) -> str | None:
+    if form is None:
+        return None
+
+    for nome in nomes:
+        valor = _texto_ou_none(form.get(nome))
+        if valor:
+            return valor
+
+    return None
+
+
+
+def _resolver_id_dim_tipo_cliente_para_contato_cliente_direto(
+    *,
+    id_fato_kanban_card: int | None,
+    form=None,
+    cabecalho_solicitacao: dict | None = None,
+) -> int | None:
+    id_tipo_form = _int_ou_none(_campo_form_ou_none(form, "IDDimTipoCliente", "id_dim_tipo_cliente", "TipoCliente"))
+    if id_tipo_form not in (None, "", 0):
+        return int(id_tipo_form)
+
+    if cabecalho_solicitacao:
+        id_tipo_cab = _int_ou_none(cabecalho_solicitacao.get("IDDimTipoCliente"))
+        if id_tipo_cab not in (None, "", 0):
+            return int(id_tipo_cab)
+
+    if id_fato_kanban_card in (None, "", 0):
+        return None
+
+    row_coluna_tipo = db.session.execute(
+        text("""
+            SELECT TOP 1 c.name AS NomeColunaTipoCliente
+            FROM [Kanban].sys.columns c
+            INNER JOIN [Kanban].sys.objects o
+                    ON o.object_id = c.object_id
+            INNER JOIN [Kanban].sys.schemas s
+                    ON s.schema_id = o.schema_id
+            WHERE s.name = 'Silver'
+              AND o.name = 'FatoKanbanCard'
+              AND c.name = 'IDDimTipoCliente'
+        """),
+    ).mappings().first()
+
+    if not row_coluna_tipo:
+        return None
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP 1
+                   TRY_CONVERT(int, c.[IDDimTipoCliente]) AS IDDimTipoCliente
+            FROM [Kanban].[Silver].[FatoKanbanCard] c
+            WHERE c.[IDFatoKanbanCard] = :id_card
+        """),
+        {"id_card": int(id_fato_kanban_card)},
+    ).mappings().first()
+
+    return _int_ou_none((row or {}).get("IDDimTipoCliente"))
+
+
+
+def _upsert_contato_cliente_direto_euromidia(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+    form=None,
+    cabecalho_solicitacao: dict | None = None,
+) -> int | None:
+    """
+    Eu amarro o contato de Cliente Direto ao contrato aprovado.
+    A regra é:
+    - primeiro tento achar registro existente pelo card ou pelo contrato;
+    - se existir, atualizo o IDFatoControleContratosEuromidia e preservo dados já preenchidos;
+    - se não existir, crio o registro com o contrato, card, tipo de cliente e campos recebidos do formulário.
+    """
+    id_contrato_int = _int_ou_none(id_fato_controle_contratos)
+    id_card_int = _int_ou_none(id_fato_kanban_card)
+
+    if id_contrato_int in (None, "", 0):
+        return None
+
+    id_tipo_cliente = _resolver_id_dim_tipo_cliente_para_contato_cliente_direto(
+        id_fato_kanban_card=id_card_int,
+        form=form,
+        cabecalho_solicitacao=cabecalho_solicitacao,
+    )
+
+    params = {
+        "id_contrato": int(id_contrato_int),
+        "id_card": int(id_card_int) if id_card_int not in (None, "", 0) else None,
+        "id_tipo_cliente": int(id_tipo_cliente) if id_tipo_cliente not in (None, "", 0) else None,
+        "nome_responsavel": _campo_form_ou_none(
+            form,
+            "NomeResponsavelLegalProcuradorEmpresa",
+            "NomeCompletoResponsavelLegalProcuradorEmpresa",
+            "NomeCompletoResolvavelLegalProcuradorEmpresa",
+            "NomeCompletoResposavelLegalProcuradorEmpresa",
+        ),
+        "whatsapp_empresa": _campo_form_ou_none(form, "WhatsappEmpresa", "WhatsAppEmpresa", "TelefoneEmpresa"),
+        "nome_testemunha": _campo_form_ou_none(form, "NomeTestemunha"),
+        "email": _campo_form_ou_none(form, "Email", "EmailTestemunha", "EmailEmpresa"),
+        "telefone": _campo_form_ou_none(form, "Telefone", "TelefoneTestemunha"),
+        "nome_financeiro": _campo_form_ou_none(form, "NomeFinanceiro"),
+        "email_financeiro": _campo_form_ou_none(form, "EmailFinanceiro"),
+        "telefone_financeiro": _campo_form_ou_none(form, "TelefoneFinanceiro"),
+    }
+
+    row_existente = db.session.execute(
+        text("""
+            SELECT TOP 1
+                   f.IDFatoContatoClienteDiretoEuromidia
+            FROM [Integracao].[Silver].[FatoContatoClienteDiretoEuromidia] f
+            WHERE f.IDFatoControleContratosEuromidia = :id_contrato
+               OR (:id_card IS NOT NULL AND f.IDFatoKanbanCard = :id_card)
+            ORDER BY
+                CASE WHEN :id_card IS NOT NULL AND f.IDFatoKanbanCard = :id_card THEN 0 ELSE 1 END,
+                f.IDFatoContatoClienteDiretoEuromidia DESC
+        """),
+        params,
+    ).mappings().first()
+
+    if row_existente and row_existente.get("IDFatoContatoClienteDiretoEuromidia") not in (None, "", 0):
+        id_contato = int(row_existente["IDFatoContatoClienteDiretoEuromidia"])
+        params_update = dict(params)
+        params_update["id_contato"] = id_contato
+
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoContatoClienteDiretoEuromidia]
+                   SET IDFatoControleContratosEuromidia = :id_contrato,
+                       IDFatoKanbanCard = COALESCE(:id_card, IDFatoKanbanCard),
+                       IDDimTipoCliente = COALESCE(:id_tipo_cliente, IDDimTipoCliente),
+                       NomeResponsavelLegalProcuradorEmpresa = COALESCE(:nome_responsavel, NomeResponsavelLegalProcuradorEmpresa),
+                       WhatsappEmpresa = COALESCE(:whatsapp_empresa, WhatsappEmpresa),
+                       NomeTestemunha = COALESCE(:nome_testemunha, NomeTestemunha),
+                       Email = COALESCE(:email, Email),
+                       Telefone = COALESCE(:telefone, Telefone),
+                       NomeFinanceiro = COALESCE(:nome_financeiro, NomeFinanceiro),
+                       EmailFinanceiro = COALESCE(:email_financeiro, EmailFinanceiro),
+                       TelefoneFinanceiro = COALESCE(:telefone_financeiro, TelefoneFinanceiro)
+                 WHERE IDFatoContatoClienteDiretoEuromidia = :id_contato
+            """),
+            params_update,
+        )
+        return id_contato
+
+    row_novo = db.session.execute(
+        text("""
+            INSERT INTO [Integracao].[Silver].[FatoContatoClienteDiretoEuromidia]
+            (
+                IDFatoControleContratosEuromidia,
+                IDFatoKanbanCard,
+                IDDimTipoCliente,
+                NomeResponsavelLegalProcuradorEmpresa,
+                WhatsappEmpresa,
+                NomeTestemunha,
+                Email,
+                Telefone,
+                NomeFinanceiro,
+                EmailFinanceiro,
+                TelefoneFinanceiro
+            )
+            OUTPUT INSERTED.IDFatoContatoClienteDiretoEuromidia AS id_contato
+            VALUES
+            (
+                :id_contrato,
+                :id_card,
+                :id_tipo_cliente,
+                :nome_responsavel,
+                :whatsapp_empresa,
+                :nome_testemunha,
+                :email,
+                :telefone,
+                :nome_financeiro,
+                :email_financeiro,
+                :telefone_financeiro
+            )
+        """),
+        params,
+    ).mappings().first()
+
+    return int(row_novo.get("id_contato") or 0) if row_novo else None
+
 def _upsert_destinatarios_externos_contrato(*, id_fato_controle_contratos: int | None, id_empresa_destinatario: int | None, id_empresa: int | None, ids_itens_controle: list[int] | None) -> int | None:
     if id_fato_controle_contratos in (None, '', 0) or id_empresa_destinatario in (None, '', 0):
         return None
@@ -6252,6 +6438,13 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     id_fato_controle_contratos=id_fato_controle,
                 )
 
+
+                _upsert_contato_cliente_direto_euromidia(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_kanban_card=id_card,
+                    form=request.form,
+                    cabecalho_solicitacao=cab_aprovada,
+                )
                 _upsert_destinatarios_externos_contrato(
                     id_fato_controle_contratos=id_fato_controle,
                     id_empresa_destinatario=id_empresa,
