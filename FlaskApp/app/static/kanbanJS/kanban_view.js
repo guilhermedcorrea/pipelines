@@ -236,7 +236,11 @@
   const formSolicitacaoContratoHeader = document.getElementById("formSolicitacaoContratoHeader");
   const formSolicitacaoContratoItem = document.getElementById("formSolicitacaoContratoItem");
   const wrapContatoClienteDiretoFormulario = document.getElementById("wrapContatoClienteDiretoFormulario");
+  const wrapContatoClienteDiretoAssinatura = document.getElementById("wrapContatoClienteDiretoAssinatura");
+  const tituloContatoClienteDiretoAssinatura = document.getElementById("tituloContatoClienteDiretoAssinatura");
   const formContatoClienteDiretoAssinatura = document.getElementById("formContatoClienteDiretoAssinatura");
+  const wrapContatoClienteDiretoFinanceiro = document.getElementById("wrapContatoClienteDiretoFinanceiro");
+  const tituloContatoClienteDiretoFinanceiro = document.getElementById("tituloContatoClienteDiretoFinanceiro");
   const formContatoClienteDiretoFinanceiro = document.getElementById("formContatoClienteDiretoFinanceiro");
   const ID_FASE_FORMULARIO_CONTRATO = 4;
   const ID_TIPO_CLIENTE_DIRETO = 2;
@@ -263,6 +267,7 @@
     { nome: "CnpjAgencia", label: "CNPJ Agência" },
     { nome: "PercentualAgencia", label: "% Agência" },
     { nome: "Bureau", label: "Bureau", tipo: "empresa_header", span: 2 },
+    { nome: "PercentualBureau", label: "% Bureau" },
     { nome: "CnpjBureau", label: "CNPJ Bureau" },
     { nome: "Intermediario", label: "Intermediário", tipo: "empresa_header", span: 2 },
     { nome: "CnpjIntermediario", label: "CNPJ Intermediário" },
@@ -344,6 +349,7 @@
 
   let snapshotSolicitacaoEditavelAtual = null;
   let vendedorLogadoSolicitacaoAtual = null;
+  let formularioSolicitacaoLiberadoNestaAbertura = false;
   let quantidadeItensFormularioSolicitacaoAtual = 1;
   let timerSincronizacaoFormularioSolicitacao = null;
   let timestampBloqueioReconciliacaoPainelFace = 0;
@@ -741,6 +747,7 @@
       selectEl.value = "";
       if (inputBusca) inputBusca.value = "";
       atualizarCnpjAgenciaHeaderFormularioPorEmpresa("");
+      sincronizarAgenciaBureauHeaderNosItensFormulario();
       fecharListaAgenciaFormulario(comboEl, listaEl);
       if (valorAnterior) selectEl.dispatchEvent(new Event("change", { bubbles: true }));
       if (opcoes.atualizarCard) {
@@ -755,6 +762,7 @@
     selectEl.value = novoValor;
     atualizarInputAgenciaFormulario(selectEl, inputBusca);
     atualizarCnpjAgenciaHeaderFormularioPorEmpresa(novoValor);
+    sincronizarAgenciaBureauHeaderNosItensFormulario();
     fecharListaAgenciaFormulario(comboEl, listaEl);
 
     if (novoValor !== valorAnterior) {
@@ -832,6 +840,7 @@
 
     selectEl.addEventListener("change", () => {
       atualizarCnpjAgenciaHeaderFormularioPorEmpresa(selectEl.value || "");
+      sincronizarAgenciaBureauHeaderNosItensFormulario();
       agendarSincronizacaoFormularioSolicitacao();
     });
 
@@ -889,12 +898,14 @@
       selectEl.value = idEmp;
       atualizarInputAgenciaFormulario(selectEl, inputBusca);
       atualizarCnpjAgenciaHeaderFormularioPorEmpresa(idEmp);
+      sincronizarAgenciaBureauHeaderNosItensFormulario();
       return;
     }
 
     selectEl.value = "";
     if (inputBusca) inputBusca.value = safeStr(valor || "").trim();
     definirCnpjAgenciaHeaderFormulario(registro?.CnpjAgencia ?? registro?.CNPJAgencia ?? "");
+    sincronizarAgenciaBureauHeaderNosItensFormulario();
     fecharListaAgenciaFormulario(comboEl, listaEl);
   }
 
@@ -1101,6 +1112,7 @@
       selectEl.value = "";
       if (inputBusca) inputBusca.value = "";
       atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, "");
+      if (nomeCampo === "Bureau") sincronizarAgenciaBureauHeaderNosItensFormulario();
       fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
       if (valorAnterior) selectEl.dispatchEvent(new Event("change", { bubbles: true }));
       agendarSincronizacaoFormularioSolicitacao();
@@ -1112,6 +1124,7 @@
     selectEl.value = novoValor;
     atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
     atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, novoValor);
+    if (nomeCampo === "Bureau") sincronizarAgenciaBureauHeaderNosItensFormulario();
     fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
 
     if (novoValor !== valorAnterior) {
@@ -1186,6 +1199,7 @@
 
     selectEl.addEventListener("change", () => {
       atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, selectEl.value || "");
+      if (nomeCampo === "Bureau") sincronizarAgenciaBureauHeaderNosItensFormulario();
       agendarSincronizacaoFormularioSolicitacao();
     });
 
@@ -1244,12 +1258,14 @@
       selectEl.value = idEmp;
       atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
       atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, idEmp);
+      if (nomeCampo === "Bureau") sincronizarAgenciaBureauHeaderNosItensFormulario();
       return;
     }
 
     selectEl.value = "";
     if (inputBusca) inputBusca.value = safeStr(valor || "").trim();
     definirCnpjEmpresaHeaderFormulario(nomeCampo, registro?.[cfg.campoCnpj] ?? "");
+    if (nomeCampo === "Bureau") sincronizarAgenciaBureauHeaderNosItensFormulario();
     fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
   }
 
@@ -1279,6 +1295,48 @@
       [cfg.nomeCampo]: safeStr(empresa?.RazaoSocial || textoDigitado || "").trim() || null,
       [cfg.campoCnpj]: safeStr(empresa?.CNPJ || empresa?.EmpresaCNPJ || cnpjDigitado || "").trim() || null,
     };
+  }
+
+
+  function definirValorCampoItemFormularioPorIndice(nomeCampo, valor, indice){
+    const input = obterInputFormularioSolicitacao("Item", nomeCampo, indice);
+    if (!input) return;
+
+    const novoValor = valor == null ? "" : String(valor);
+    if (input.value === novoValor) return;
+
+    input.value = novoValor;
+
+    const wrapCampo = input.closest(".kb-contrato-campo");
+    if (wrapCampo && safeStr(novoValor || "").trim()) {
+      wrapCampo.classList.remove("is-invalido");
+    }
+
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function obterRelacionamentosComerciaisHeaderParaItens(){
+    const dadosAgencia = obterAgenciaHeaderFormularioSelecionada();
+    const dadosBureau = obterEmpresaHeaderFormularioSelecionada("Bureau");
+
+    return {
+      Agencia: dadosAgencia.Agencia || null,
+      CnpjAgencia: dadosAgencia.CnpjAgencia || null,
+      Bureau: dadosBureau.Bureau || null,
+      CnpjBureau: dadosBureau.CnpjBureau || null,
+    };
+  }
+
+  function sincronizarAgenciaBureauHeaderNosItensFormulario(){
+    const dados = obterRelacionamentosComerciaisHeaderParaItens();
+
+    for (let indice = 0; indice < quantidadeItensFormularioSolicitacaoAtual; indice += 1) {
+      definirValorCampoItemFormularioPorIndice("Agencia", dados.Agencia, indice);
+      definirValorCampoItemFormularioPorIndice("CnpjAgencia", dados.CnpjAgencia, indice);
+      definirValorCampoItemFormularioPorIndice("Bureau", dados.Bureau, indice);
+      definirValorCampoItemFormularioPorIndice("CnpjBureau", dados.CnpjBureau, indice);
+    }
   }
 
   function criarCampoFormularioSolicitacao(secao, meta, indice = null){
@@ -1593,28 +1651,97 @@
     }
   }
 
-  function aplicarVisibilidadeFormularioContatoClienteDireto(){
-    renderizarFormularioContatoClienteDireto();
+  function campoContatoClienteDiretoTemConteudo(meta){
+    const input = obterInputFormularioSolicitacao("ContatoClienteDireto", meta.nome);
+    return campoFormularioSolicitacaoTemConteudo(input);
+  }
 
-    const deveExibir = obterIdTipoClienteAtualFormularioSolicitacao() === ID_TIPO_CLIENTE_DIRETO;
+  function grupoContatoClienteDiretoTemConteudo(camposGrupo){
+    return (camposGrupo || []).some((meta) => campoContatoClienteDiretoTemConteudo(meta));
+  }
 
-    if (wrapContatoClienteDiretoFormulario) {
-      wrapContatoClienteDiretoFormulario.hidden = !deveExibir;
-      wrapContatoClienteDiretoFormulario.style.display = deveExibir ? "" : "none";
+  function definirVisibilidadeGrupoContatoClienteDireto(opcoes){
+    const wrapGrupo = opcoes?.wrapGrupo || null;
+    const tituloGrupo = opcoes?.tituloGrupo || null;
+    const formGrupo = opcoes?.formGrupo || null;
+    const camposGrupo = opcoes?.camposGrupo || [];
+    const deveExibirGrupo = Boolean(opcoes?.deveExibirGrupo);
+    const estaNaFaseQuatro = Boolean(opcoes?.estaNaFaseQuatro);
+    const ehClienteDireto = Boolean(opcoes?.ehClienteDireto);
+
+    if (wrapGrupo) {
+      wrapGrupo.hidden = !deveExibirGrupo;
+      wrapGrupo.style.display = deveExibirGrupo ? "" : "none";
     }
 
-    [...CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA, ...CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO].forEach((meta) => {
+    if (tituloGrupo) {
+      tituloGrupo.hidden = !deveExibirGrupo;
+      tituloGrupo.style.display = deveExibirGrupo ? "" : "none";
+    }
+
+    if (formGrupo) {
+      formGrupo.hidden = !deveExibirGrupo;
+      formGrupo.style.display = deveExibirGrupo ? "" : "none";
+    }
+
+    camposGrupo.forEach((meta) => {
       const input = obterInputFormularioSolicitacao("ContatoClienteDireto", meta.nome);
       if (!input) return;
 
-      input.required = Boolean(deveExibir && meta.obrigatorio);
-      input.disabled = !deveExibir;
+      const temValor = campoFormularioSolicitacaoTemConteudo(input);
+      const deveExibirCampo = Boolean(deveExibirGrupo && (estaNaFaseQuatro || temValor));
+      const wrapCampo = input.closest(".kb-contrato-campo");
 
-      if (!deveExibir) {
-        input.value = "";
-        const wrapCampo = input.closest(".kb-contrato-campo");
-        if (wrapCampo) wrapCampo.classList.remove("is-invalido");
+      input.required = Boolean(ehClienteDireto && estaNaFaseQuatro && meta.obrigatorio);
+      input.disabled = !ehClienteDireto;
+
+      if (wrapCampo) {
+        wrapCampo.hidden = !deveExibirCampo;
+        wrapCampo.style.display = deveExibirCampo ? "" : "none";
+
+        if (!deveExibirCampo) {
+          wrapCampo.classList.remove("is-invalido");
+        }
       }
+    });
+  }
+
+  function aplicarVisibilidadeFormularioContatoClienteDireto(){
+    renderizarFormularioContatoClienteDireto();
+
+    const ehClienteDireto = obterIdTipoClienteAtualFormularioSolicitacao() === ID_TIPO_CLIENTE_DIRETO;
+    const estaNaFaseQuatro = modalCardEstaNaFaseQuatro();
+
+    const assinaturaTemConteudo = grupoContatoClienteDiretoTemConteudo(CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA);
+    const financeiroTemConteudo = grupoContatoClienteDiretoTemConteudo(CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO);
+
+    const deveExibirAssinatura = Boolean(ehClienteDireto && (estaNaFaseQuatro || assinaturaTemConteudo));
+    const deveExibirFinanceiro = Boolean(ehClienteDireto && (estaNaFaseQuatro || financeiroTemConteudo));
+    const deveExibirContainer = deveExibirAssinatura || deveExibirFinanceiro;
+
+    if (wrapContatoClienteDiretoFormulario) {
+      wrapContatoClienteDiretoFormulario.hidden = !deveExibirContainer;
+      wrapContatoClienteDiretoFormulario.style.display = deveExibirContainer ? "" : "none";
+    }
+
+    definirVisibilidadeGrupoContatoClienteDireto({
+      wrapGrupo: wrapContatoClienteDiretoAssinatura,
+      tituloGrupo: tituloContatoClienteDiretoAssinatura,
+      formGrupo: formContatoClienteDiretoAssinatura,
+      camposGrupo: CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA,
+      deveExibirGrupo: deveExibirAssinatura,
+      estaNaFaseQuatro,
+      ehClienteDireto,
+    });
+
+    definirVisibilidadeGrupoContatoClienteDireto({
+      wrapGrupo: wrapContatoClienteDiretoFinanceiro,
+      tituloGrupo: tituloContatoClienteDiretoFinanceiro,
+      formGrupo: formContatoClienteDiretoFinanceiro,
+      camposGrupo: CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO,
+      deveExibirGrupo: deveExibirFinanceiro,
+      estaNaFaseQuatro,
+      ehClienteDireto,
     });
   }
 
@@ -1641,11 +1768,18 @@
     }
 
     const contato = {};
+    let temAlgumValor = false;
+
     [...CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA, ...CAMPOS_CONTATO_CLIENTE_DIRETO_FINANCEIRO].forEach((meta) => {
       const input = obterInputFormularioSolicitacao("ContatoClienteDireto", meta.nome);
       const valor = safeStr(input?.value || "").trim();
       contato[meta.nome] = valor || null;
+      if (valor) temAlgumValor = true;
     });
+
+    if (!modalCardEstaNaFaseQuatro() && !temAlgumValor) {
+      return null;
+    }
 
     return contato;
   }
@@ -2077,6 +2211,12 @@
         item.TipoDocumento = tipoDocumentoHeader.TipoDocumento;
       }
 
+      const relacionamentosHeader = obterRelacionamentosComerciaisHeaderParaItens();
+      item.Agencia = relacionamentosHeader.Agencia;
+      item.CnpjAgencia = relacionamentosHeader.CnpjAgencia;
+      item.Bureau = relacionamentosHeader.Bureau;
+      item.CnpjBureau = relacionamentosHeader.CnpjBureau;
+
       const percentualAgenciaHeader = obterValorPercentualAgenciaHeaderFormulario();
       const percentualBureauHeader = obterValorPercentualBureauHeaderFormulario();
       const percentualIntermediarioHeader = obterValorPercentualIntermediarioHeaderFormulario();
@@ -2223,9 +2363,7 @@
   function montarItemSolicitacaoBasePorIndice(indice, snapshotItem, card, vendedorLogado, valoresDigitadosItem = {}){
     const empresaPrincipal = obterEmpresaSelecionadaDoCampo(selectEmpresaCard);
     const idTipoClienteAtual = obterIdTipoClienteAtualFormularioSolicitacao();
-    const empresaAgencia = idTipoClienteAtual === 3
-      ? empresaPrincipal
-      : obterEmpresaSelecionadaDoCampo(selectAgenciaCard);
+    const dadosAgenciaHeader = obterAgenciaHeaderFormularioSelecionada();
     const dadosBureauHeader = obterEmpresaHeaderFormularioSelecionada("Bureau");
     const dadosIntermediarioHeader = obterEmpresaHeaderFormularioSelecionada("Intermediario");
     const empresaBureau = dadosBureauHeader.IDEmpresaBureau
@@ -2268,8 +2406,8 @@
 
     item.CNPJ = empresaPrincipal?.CNPJ || null;
     item.RazaoSocial = empresaPrincipal?.RazaoSocial || null;
-    item.Agencia = empresaAgencia?.RazaoSocial || null;
-    item.CnpjAgencia = empresaAgencia?.CNPJ || null;
+    item.Agencia = dadosAgenciaHeader.Agencia || null;
+    item.CnpjAgencia = dadosAgenciaHeader.CnpjAgencia || null;
     const percentualAgenciaHeader = obterValorPercentualAgenciaHeaderFormulario();
     const percentualBureauHeader = obterValorPercentualBureauHeaderFormulario();
     const percentualIntermediarioHeader = obterValorPercentualIntermediarioHeaderFormulario();
@@ -2384,6 +2522,7 @@
     preencherFormularioContatoClienteDireto(
       valoresDigitados.contatoClienteDireto || snapshotEditavel?.contato_cliente_direto || snapshotEditavel?.contatoClienteDireto || null
     );
+    sincronizarAgenciaBureauHeaderNosItensFormulario();
     aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
   }
 
@@ -2471,6 +2610,157 @@
     return obterIdFaseAtualDoCardAbertoNoModal() === ID_FASE_FORMULARIO_CONTRATO;
   }
 
+  function valorFormularioSolicitacaoTemConteudo(valor){
+    if (valor === null || valor === undefined) return false;
+
+    if (typeof valor === "number") {
+      return Number.isFinite(valor);
+    }
+
+    if (typeof valor === "boolean") {
+      return valor === true;
+    }
+
+    return safeStr(valor).trim() !== "";
+  }
+
+  function estruturaFormularioSolicitacaoTemConteudo(valor){
+    if (valor === null || valor === undefined) return false;
+
+    if (Array.isArray(valor)) {
+      return valor.some((item) => estruturaFormularioSolicitacaoTemConteudo(item));
+    }
+
+    if (typeof valor === "object") {
+      return Object.values(valor).some((item) => estruturaFormularioSolicitacaoTemConteudo(item));
+    }
+
+    return valorFormularioSolicitacaoTemConteudo(valor);
+  }
+
+  function formularioSolicitacaoContratoTemDadosPersistidos(){
+    const snapshot = snapshotSolicitacaoEditavelAtual;
+    if (!snapshot || typeof snapshot !== "object") return false;
+
+    return estruturaFormularioSolicitacaoTemConteudo(snapshot.header)
+      || estruturaFormularioSolicitacaoTemConteudo(snapshot.item)
+      || estruturaFormularioSolicitacaoTemConteudo(snapshot.itens)
+      || estruturaFormularioSolicitacaoTemConteudo(snapshot.contato_cliente_direto)
+      || estruturaFormularioSolicitacaoTemConteudo(snapshot.contatoClienteDireto);
+  }
+
+  function cardAbertoJaPassouPelaFaseFormularioContrato(){
+    /*
+     * Regra correta do formulário:
+     * - selecionar empresa no card NÃO libera o formulário;
+     * - o formulário nasce visualmente quando o card está na fase 4;
+     * - depois que o card já passou pela fase 4 e existe snapshot salvo, os campos preenchidos continuam visíveis.
+     */
+    if (modalCard?.dataset?.jaPassouFaseFormularioContrato === "1") return true;
+    if (modalCardEstaNaFaseQuatro()) return true;
+
+    const card = obterCardPorId(cardAbertoId) || {};
+    const flagBackend = idNum(
+      card.BitJaPassouPelaFaseFormularioContrato ??
+      card.bit_ja_passou_pela_fase_formulario_contrato ??
+      card.JaPassouPelaFaseFormularioContrato ??
+      0
+    );
+
+    return flagBackend === 1;
+  }
+
+  function formularioSolicitacaoContratoTemDadosPersistidosValidosParaExibir(){
+    return formularioSolicitacaoContratoTemDadosPersistidos()
+      && cardAbertoJaPassouPelaFaseFormularioContrato();
+  }
+
+  function campoFormularioSolicitacaoTemConteudo(campo){
+    if (!campo) return false;
+
+    const tag = safeStr(campo.tagName || "").toUpperCase();
+    if (tag === "INPUT") {
+      const tipo = safeStr(campo.getAttribute("type") || "text").toLowerCase();
+      if (["button", "submit", "reset", "file"].includes(tipo)) return false;
+      if (["checkbox", "radio"].includes(tipo)) return campo.checked;
+    }
+
+    return valorFormularioSolicitacaoTemConteudo(campo.value);
+  }
+
+  function formularioSolicitacaoContratoTemValoresNoDom(){
+    if (!wrapFormularioSolicitacaoContrato) return false;
+    return [...wrapFormularioSolicitacaoContrato.querySelectorAll("[data-campo-solicitacao]")]
+      .some((campo) => campoFormularioSolicitacaoTemConteudo(campo));
+  }
+
+  function formularioSolicitacaoContratoDevePersistirNoPayload(){
+    /*
+     * Regra de negócio:
+     * - antes da fase 4, selecionar empresa, origem, marca ou painel NÃO deve criar solicitação;
+     * - na fase 4, o formulário é liberado e pode ser salvo;
+     * - depois que o card passou pela fase 4, o snapshot existente continua sendo preservado.
+     */
+    if (modalCardEstaNaFaseQuatro()) return true;
+    if (formularioSolicitacaoContratoTemDadosPersistidosValidosParaExibir()) return true;
+    return !!formularioSolicitacaoLiberadoNestaAbertura && formularioSolicitacaoContratoTemValoresNoDom();
+  }
+
+  function obterSolicitacaoContratoParaPayload(){
+    if (!formularioSolicitacaoContratoDevePersistirNoPayload()) {
+      return null;
+    }
+
+    return coletarFormularioSolicitacaoContrato();
+  }
+
+  function aplicarVisibilidadeCamposPreenchidosFormularioSolicitacaoForaDaFaseQuatro(estaNaFaseQuatro){
+    if (!wrapFormularioSolicitacaoContrato) return;
+
+    const wrapsCampos = [...wrapFormularioSolicitacaoContrato.querySelectorAll(".kb-contrato-campo")];
+
+    wrapsCampos.forEach((wrapCampo) => {
+      const campos = [...wrapCampo.querySelectorAll("[data-campo-solicitacao]")];
+      if (!campos.length) return;
+
+      if (estaNaFaseQuatro) {
+        if (wrapCampo.dataset.ocultoForaFaseQuatro === "1") {
+          wrapCampo.hidden = false;
+          wrapCampo.style.display = "";
+          delete wrapCampo.dataset.ocultoForaFaseQuatro;
+        }
+        return;
+      }
+
+      const temValor = campos.some((campo) => campoFormularioSolicitacaoTemConteudo(campo));
+      wrapCampo.hidden = !temValor;
+      wrapCampo.style.display = temValor ? "" : "none";
+
+      if (temValor) {
+        delete wrapCampo.dataset.ocultoForaFaseQuatro;
+      } else {
+        wrapCampo.dataset.ocultoForaFaseQuatro = "1";
+      }
+    });
+
+    if (!estaNaFaseQuatro) {
+      [...wrapFormularioSolicitacaoContrato.querySelectorAll(".kb-contrato-item-secao")].forEach((secao) => {
+        const temCampoVisivel = [...secao.querySelectorAll(".kb-contrato-campo")].some((wrapCampo) => {
+          return !wrapCampo.hidden && wrapCampo.style.display !== "none";
+        });
+        secao.hidden = !temCampoVisivel;
+        secao.style.display = temCampoVisivel ? "" : "none";
+      });
+
+      aplicarVisibilidadeFormularioContatoClienteDireto();
+    } else {
+      [...wrapFormularioSolicitacaoContrato.querySelectorAll(".kb-contrato-item-secao")].forEach((secao) => {
+        secao.hidden = false;
+        secao.style.display = "";
+      });
+    }
+  }
+
   function definirVisibilidadeContratoFlowBox(visivel){
     const deveMostrar = !!visivel;
 
@@ -2490,7 +2780,22 @@
   }
 
   function atualizarVisibilidadeFormularioSolicitacaoContrato(){
-    const deveExibirFormularioContrato = modalCardEstaNaFaseQuatro();
+    const estaNaFaseQuatro = modalCardEstaNaFaseQuatro();
+
+    if (estaNaFaseQuatro) {
+      formularioSolicitacaoLiberadoNestaAbertura = true;
+      if (modalCard) {
+        modalCard.dataset.jaPassouFaseFormularioContrato = "1";
+      }
+    }
+
+    const temDadosPersistidosValidos = formularioSolicitacaoContratoTemDadosPersistidosValidosParaExibir();
+    const temDadosDigitadosNestaAbertura = formularioSolicitacaoLiberadoNestaAbertura
+      && formularioSolicitacaoContratoTemValoresNoDom();
+
+    const deveExibirFormularioContrato = estaNaFaseQuatro
+      || temDadosPersistidosValidos
+      || temDadosDigitadosNestaAbertura;
 
     if (wrapFormularioSolicitacaoContrato) {
       wrapFormularioSolicitacaoContrato.hidden = !deveExibirFormularioContrato;
@@ -2498,7 +2803,15 @@
       wrapFormularioSolicitacaoContrato.setAttribute("aria-hidden", deveExibirFormularioContrato ? "false" : "true");
     }
 
-    definirVisibilidadeContratoFlowBox(deveExibirFormularioContrato);
+    if (deveExibirFormularioContrato) {
+      aplicarVisibilidadeCamposPreenchidosFormularioSolicitacaoForaDaFaseQuatro(estaNaFaseQuatro);
+
+      if (estaNaFaseQuatro) {
+        aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
+      }
+    }
+
+    definirVisibilidadeContratoFlowBox(estaNaFaseQuatro);
 
     try {
       sincronizarSeletoresContratoAditivoEmTodosBlocos();
@@ -2972,12 +3285,12 @@
     }
 
     if (!dataInicio && dataFim){
-      atualizarMensagemReservaDoBloco(bloco, 'Preencha primeiro a Data de.', 'erro');
+      atualizarMensagemReservaDoBloco(bloco, 'Preencha primeiro a Data de início.', 'erro');
       return;
     }
 
     if (dataFim < dataInicio){
-      atualizarMensagemReservaDoBloco(bloco, 'A Data até não pode ser menor que a Data de.', 'erro');
+      atualizarMensagemReservaDoBloco(bloco, 'A Data até não pode ser menor que a Data de início.', 'erro');
       return;
     }
 
@@ -9731,7 +10044,7 @@ function formatarNumeroParaInput(valor){
     if (wrapExibicoes) wrapExibicoes.hidden = true;
     if (wrapPeriodo) wrapPeriodo.hidden = true;
     if (selectExibicoes) preencherSelectOpcoesSimples(selectExibicoes, [], '— Inserções / dia —');
-    if (selectPeriodo) preencherSelectOpcoesSimples(selectPeriodo, [], '— Período —');
+    if (selectPeriodo) preencherSelectOpcoesSimples(selectPeriodo, [], '— Período de campanha —');
   }
 
   function sincronizarSeletoresTabelaPrecoDoBloco(bloco, opcoes = {}){
@@ -9797,7 +10110,7 @@ function formatarNumeroParaInput(valor){
     preencherSelectOpcoesSimples(selectExibicoes, opcoesExibicoes, '— Inserções / dia —');
     selecionarValoresNoSelect(selectExibicoes, exibicoesSelecionadas);
 
-    preencherSelectOpcoesSimples(selectPeriodo, opcoesPeriodo, '— Período —');
+    preencherSelectOpcoesSimples(selectPeriodo, opcoesPeriodo, '— Período de campanha —');
     if (periodoDesejado) {
       selectPeriodo.value = periodoDesejado;
     }
@@ -10215,9 +10528,9 @@ function formatarNumeroParaInput(valor){
           ])
         ]),
         el('div', { class:'kb-campo', 'data-role':'wrap-periodo-exibicao', hidden:'hidden' }, [
-          el('div', { class:'kb-campo-label' }, ['Período']),
+          el('div', { class:'kb-campo-label' }, ['Período de campanha']),
           el('select', { class:'kb-select', 'data-role':'select-periodo-exibicao' }, [
-            el('option', { value:'' }, ['— Período —'])
+            el('option', { value:'' }, ['— Período de campanha —'])
           ])
         ])
       ]),
@@ -10857,7 +11170,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       el('div', { class:'kb-kpi', 'data-role':'kpi-custo' }, ['—'])
     ]),
     el('div', { class:'kb-campo' }, [
-      el('div', { class:'kb-campo-label' }, ['Preço de venda atual']),
+      el('div', { class:'kb-campo-label' }, ['Valor período']),
       el('div', { class:'kb-kpi', 'data-role':'kpi-preco-atual' }, ['—'])
     ]),
     el('div', { class:'kb-campo' }, [
@@ -10868,7 +11181,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
   wrap.appendChild(el('div', { class:'kb-row' }, [
     el('div', { class:'kb-campo grow' }, [
-      el('div', { class:'kb-campo-label' }, ['Data de']),
+      el('div', { class:'kb-campo-label' }, ['Data de início']),
       el('input', {
         class:'kb-input',
         'data-role':'input-data-inicio',
@@ -10928,7 +11241,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       })
     ]),
     el('div', { class:'kb-campo' }, [
-      el('div', { class:'kb-campo-label' }, ['Valor final']),
+      el('div', { class:'kb-campo-label' }, ['Valor negociado período']),
       el('div', { class:'kb-kpi', 'data-role':'kpi-valor-final' }, ['—'])
     ]),
     el('div', { class:'kb-campo' }, [
@@ -12064,6 +12377,31 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
 
 
+function obterSolicitacaoContratoAtualParaMovimento(idCardMovido) {
+  const idC = idNum(idCardMovido);
+
+  if (!idC) return null;
+  if (idNum(cardAbertoId) !== idC) return null;
+  if (!modalCard || modalCard.style.display !== "block") return null;
+
+  try {
+    const solicitacao = obterSolicitacaoContratoParaPayload();
+    if (!solicitacao || typeof solicitacao !== "object") return null;
+
+    const temConteudo = estruturaFormularioSolicitacaoTemConteudo(solicitacao.header)
+      || estruturaFormularioSolicitacaoTemConteudo(solicitacao.item)
+      || estruturaFormularioSolicitacaoTemConteudo(solicitacao.itens)
+      || estruturaFormularioSolicitacaoTemConteudo(solicitacao.contato_cliente_direto)
+      || estruturaFormularioSolicitacaoTemConteudo(solicitacao.contatoClienteDireto);
+
+    return temConteudo ? solicitacao : null;
+  } catch (erro) {
+    console.warn("obterSolicitacaoContratoAtualParaMovimento: falha ao coletar formulário antes de mover", erro);
+    return null;
+  }
+}
+
+
 async function moverCard(idCard, idFasePara, posicao) {
   const idC = idNum(idCard);
   const idDestino = idNum(idFasePara);
@@ -12117,6 +12455,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const textoNotaMovimento = ((inputNotaTexto && inputNotaTexto.value) || "").trim();
+    const solicitacaoContratoMovimento = obterSolicitacaoContratoAtualParaMovimento(idC);
 
     const payload = {
       id_fase_para: idDestino,
@@ -12124,6 +12463,10 @@ async function moverCard(idCard, idFasePara, posicao) {
       versao_concorrencia: safeStr(cardAtual.VersaoConcorrenciaHex),
       observacao: textoNotaMovimento
     };
+
+    if (solicitacaoContratoMovimento) {
+      payload.solicitacao_contrato = solicitacaoContratoMovimento;
+    }
 
     const r = await fetch(`/kanban/api/cards/${idC}/mover`, {
       method: "POST",
@@ -12204,7 +12547,15 @@ async function moverCard(idCard, idFasePara, posicao) {
     );
 
     if (idNum(cardAbertoId) === idC && modalCard?.style?.display === "block") {
-      modalCard.dataset.idFaseAtual = String(idNum(cardFinal.IDDimKanbanFaseAtual || idDestino) || "");
+      const idFaseFinalModal = idNum(cardFinal.IDDimKanbanFaseAtual || idDestino);
+      const jaPassouFaseFormulario = modalCard.dataset.jaPassouFaseFormularioContrato === "1"
+        || idFaseFinalModal === ID_FASE_FORMULARIO_CONTRATO
+        || idNum(idFaseOrigem) === ID_FASE_FORMULARIO_CONTRATO
+        || idNum(idDestino) === ID_FASE_FORMULARIO_CONTRATO
+        || idNum(cardFinal.BitJaPassouPelaFaseFormularioContrato ?? cardFinal.bit_ja_passou_pela_fase_formulario_contrato ?? 0) === 1;
+
+      modalCard.dataset.idFaseAtual = String(idFaseFinalModal || "");
+      modalCard.dataset.jaPassouFaseFormularioContrato = jaPassouFaseFormulario ? "1" : "0";
       atualizarVisibilidadeFormularioSolicitacaoContrato();
       atualizarVisibilidadeEmpresasRelacionadasCard();
     }
@@ -12356,12 +12707,14 @@ async function moverCard(idCard, idFasePara, posicao) {
 
   function limparEstadoCardAberto(){
     cardAbertoId = null;
+    formularioSolicitacaoLiberadoNestaAbertura = false;
     versaoConcorrenciaCardAberto = "";
     cardAbertoConflitoExterno = false;
     estadoInicialCardAberto = null;
     fluxoContratoPersistidoCardAberto = null;
     if (modalCard) {
       modalCard.dataset.idFaseAtual = "";
+      modalCard.dataset.jaPassouFaseFormularioContrato = "0";
     }
     msgCard.style.display = "none";
     msgCard.textContent = "";
@@ -12375,6 +12728,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     if (modalCard) {
       modalCard.style.display = "none";
       modalCard.dataset.idFaseAtual = "";
+      modalCard.dataset.jaPassouFaseFormularioContrato = "0";
     }
     limparEstadoCardAberto();
   }
@@ -13019,15 +13373,24 @@ async function moverCard(idCard, idFasePara, posicao) {
     agendarSincronizacaoFormularioSolicitacao();
   });
 
-  document.addEventListener("input", (evento) => {
-    const alvo = evento.target;
-    if (!alvo?.closest?.("#wrapContatoClienteDiretoFormulario")) return;
+  function registrarAlteracaoCampoFormularioSolicitacao(evento) {
+    const alvo = evento?.target || null;
+    if (!alvo?.closest?.("#wrapFormularioSolicitacaoContrato")) return;
 
     const wrapCampo = alvo.closest?.(".kb-contrato-campo");
     if (wrapCampo && safeStr(alvo.value || "").trim()) {
       wrapCampo.classList.remove("is-invalido");
     }
-  });
+
+    agendarSincronizacaoFormularioSolicitacao();
+
+    if (typeof atualizarEstadoSalvarCard === "function") {
+      atualizarEstadoSalvarCard();
+    }
+  }
+
+  document.addEventListener("input", registrarAlteracaoCampoFormularioSolicitacao);
+  document.addEventListener("change", registrarAlteracaoCampoFormularioSolicitacao);
 
   inputContratoCardBusca?.addEventListener("focus", () => {
     abrirListaContratosCombobox();
@@ -13341,7 +13704,7 @@ async function moverCard(idCard, idFasePara, posicao) {
             ]),
             el("div", {class:"kb-orcamento-dados-grid"}, [
               criarCampoOrcamento("Painel", safeStr(item.nome_painel || `Painel ${indice}`)),
-              criarCampoOrcamento("Período de exibição", safeStr(item.periodo_exibicao || "Período não informado") + (item.exibicoes_dia ? ` • ${item.exibicoes_dia} exibições/dia` : ""))
+              criarCampoOrcamento("Período de campanha", safeStr(item.periodo_exibicao || "Período de campanha não informado") + (item.exibicoes_dia ? ` • ${item.exibicoes_dia} exibições/dia` : ""))
             ])
           ])
         ]);
@@ -13883,10 +14246,14 @@ async function moverCard(idCard, idFasePara, posicao) {
   async function abrirCard(idCard) {
     try {
       cardAbertoId = idNum(idCard);
+      formularioSolicitacaoLiberadoNestaAbertura = false;
+      snapshotSolicitacaoEditavelAtual = null;
+      vendedorLogadoSolicitacaoAtual = null;
       versaoConcorrenciaCardAberto = "";
       cardAbertoConflitoExterno = false;
       if (modalCard) {
         modalCard.dataset.idFaseAtual = "";
+        modalCard.dataset.jaPassouFaseFormularioContrato = "0";
       }
       atualizarVisibilidadeFormularioSolicitacaoContrato();
       if (msgCard) {
@@ -13906,6 +14273,11 @@ async function moverCard(idCard, idFasePara, posicao) {
     const cardNormalizado = normalizarCardServidor(j.card);
     if (modalCard) {
       modalCard.dataset.idFaseAtual = String(idNum(cardNormalizado.IDDimKanbanFaseAtual || 0) || "");
+      modalCard.dataset.jaPassouFaseFormularioContrato = idNum(
+        cardNormalizado.BitJaPassouPelaFaseFormularioContrato ??
+        cardNormalizado.bit_ja_passou_pela_fase_formulario_contrato ??
+        0
+      ) === 1 ? "1" : "0";
       atualizarVisibilidadeFormularioSolicitacaoContrato();
     }
     atualizarCabecalhoModalCard(cardNormalizado);
@@ -14175,6 +14547,11 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       if (modalCard) {
         modalCard.dataset.idFaseAtual = String(idNum(cardServidor.IDDimKanbanFaseAtual || 0) || "");
+        modalCard.dataset.jaPassouFaseFormularioContrato = idNum(
+          cardServidor.BitJaPassouPelaFaseFormularioContrato ??
+          cardServidor.bit_ja_passou_pela_fase_formulario_contrato ??
+          0
+        ) === 1 ? "1" : "0";
         atualizarVisibilidadeFormularioSolicitacaoContrato();
       }
       atualizarVisibilidadeEmpresasRelacionadasCard();
@@ -14303,11 +14680,11 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
 
       if ((dataInicio && !dataFim) || (!dataInicio && dataFim)){
-        return { ok: false, msg: `${titulo}: preencha Data de e Data até.` };
+        return { ok: false, msg: `${titulo}: preencha Data de início e Data até.` };
       }
 
       if (dataInicio && dataFim && dataFim < dataInicio){
-        return { ok: false, msg: `${titulo}: a Data até não pode ser menor que a Data de.` };
+        return { ok: false, msg: `${titulo}: a Data até não pode ser menor que a Data de início.` };
       }
 
       if (dataInicio && dataFim && bloco.__calendarioOcupacao && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)){
@@ -14369,7 +14746,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     const usarVinculoContratoExistente = !fluxoContratoAtual.usar_novo_contrato && !!idNum(fluxoContratoAtual.id_contrato);
     const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
     const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
-    const solicitacaoContrato = coletarFormularioSolicitacaoContrato();
+    const solicitacaoContrato = obterSolicitacaoContratoParaPayload();
 
     const idTipoClienteAtual = selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null;
     const empresasRelacionadasPayload = coletarEmpresasRelacionadasPermitidasParaPayload(idTipoClienteAtual);

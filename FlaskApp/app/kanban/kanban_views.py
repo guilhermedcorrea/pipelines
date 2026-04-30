@@ -140,6 +140,7 @@ TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
 TABELA_CONTATOS_CONTRATO = "[Integracao].[Silver].[DimContatosContrato]"
 TABELA_CONTATO_CLIENTE_DIRETO = "[Integracao].[Silver].[FatoContatoClienteDiretoEuromidia]"
 ID_TIPO_CLIENTE_DIRETO = 2
+ID_FASE_FORMULARIO_CONTRATO = 4
 
 ID_TAG_CONTRATO_EM_AVALIACAO = 14
 ID_TAG_PLANO_MIDIA = 15
@@ -4356,6 +4357,11 @@ def _executar_movimento_card_core(
     observacao = (payload.get("observacao") or "").strip()
     nota_movimento = (payload.get("nota_movimento") or "").strip()
     versao_concorrencia = payload.get("versao_concorrencia")
+    dados_formulario_solicitacao_movimento = (
+        payload.get("solicitacao_contrato")
+        if isinstance(payload.get("solicitacao_contrato"), dict)
+        else None
+    )
 
     if not id_fase_para:
         raise ValueError("Fase de destino inválida.")
@@ -4670,6 +4676,7 @@ def _executar_movimento_card_core(
             id_card=int(id_card),
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_emp),
+            dados_formulario_solicitacao=dados_formulario_solicitacao_movimento,
         )
 
         if isinstance(sincronizacao_solicitacao_fase, dict):
@@ -6163,7 +6170,82 @@ def _registro_dinamico_equivalente(
 
 
 
-def _obter_snapshot_solicitacao_editavel_por_card(id_card: int) -> dict[str, Any] | None:
+def _card_esta_ou_ja_passou_pela_fase_formulario_contrato(id_card: int) -> bool:
+    """
+    Eu uso esta função para separar duas coisas diferentes:
+    - selecionar empresa no card não libera o formulário de contrato;
+    - chegar na fase 4 libera o formulário;
+    - depois que o card já passou pela fase 4, o snapshot salvo pode continuar visível.
+    """
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    if id_card_int <= 0:
+        return False
+
+    try:
+        if _objeto_existe(TABELA_CARD):
+            fase_atual = db.session.execute(
+                text(
+                    f"""
+                    SELECT TOP (1)
+                        TRY_CONVERT(int, IDDimKanbanFaseAtual) AS IDDimKanbanFaseAtual
+                    FROM {TABELA_CARD}
+                    WHERE IDFatoKanbanCard = :id_card;
+                    """
+                ),
+                {"id_card": int(id_card_int)},
+            ).scalar()
+
+            if int(fase_atual or 0) == int(ID_FASE_FORMULARIO_CONTRATO):
+                return True
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN | falha ao verificar fase atual do card para regra do formulário | id_card=%s",
+            id_card_int,
+        )
+
+    try:
+        if not _objeto_existe(TABELA_CARD_MOVIMENTO):
+            return False
+
+        passou = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (1) 1
+                FROM {TABELA_CARD_MOVIMENTO}
+                WHERE IDFatoKanbanCard = :id_card
+                  AND (
+                        TRY_CONVERT(int, IDFasePara) = :id_fase_formulario
+                     OR TRY_CONVERT(int, IDFaseDe) = :id_fase_formulario
+                  );
+                """
+            ),
+            {
+                "id_card": int(id_card_int),
+                "id_fase_formulario": int(ID_FASE_FORMULARIO_CONTRATO),
+            },
+        ).scalar()
+
+        return bool(passou)
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN | falha ao verificar histórico de fase 4 do card | id_card=%s",
+            id_card_int,
+        )
+        return False
+
+
+def _obter_snapshot_solicitacao_editavel_por_card(
+    id_card: int,
+    *,
+    exigir_passagem_fase_formulario: bool = True,
+) -> dict[str, Any] | None:
+    if exigir_passagem_fase_formulario and not _card_esta_ou_ja_passou_pela_fase_formulario_contrato(int(id_card)):
+        return None
+
     if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO):
         return None
 
@@ -7374,6 +7456,10 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     id_tipo_documento_header_formulario, nome_tipo_documento_header_formulario = _resolver_tipo_documento_do_header_formulario()
 
     if id_tipo_documento_header_formulario:
+        dados_header_formulario["IDDimTipoDocumento"] = id_tipo_documento_header_formulario
+        if nome_tipo_documento_header_formulario:
+            dados_header_formulario["TipoDocumento"] = nome_tipo_documento_header_formulario
+
         if not dados_item_formulario.get("IDDimTipoDocumento"):
             dados_item_formulario["IDDimTipoDocumento"] = id_tipo_documento_header_formulario
         if nome_tipo_documento_header_formulario and not dados_item_formulario.get("TipoDocumento"):
@@ -7397,7 +7483,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     campos_int_header_formulario = {
         "IDFatoControleContratosEuromidia", "IDDimStatusContratos", "IDDimUsuariosCriacao",
         "IDEmpresa", "IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaProprietaria",
-        "IDTrimestre", "QuantidadePontos", "QuantidadeFaces", "BitAtivo"
+        "IDTrimestre", "IDDimTipoDocumento", "QuantidadePontos", "QuantidadeFaces", "BitAtivo"
     }
 
     def _aplicar_dados_formulario_header(valores_solicitacao: dict[str, Any]) -> dict[str, Any]:
@@ -7529,6 +7615,7 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         "MarcaExibida": (contrato_row or {}).get("MarcaExibida"),
         "Vendedor": (contrato_row or {}).get("Vendedor"),
         "TipoDocumento": (contrato_row or {}).get("TipoDocumento"),
+        "IDDimTipoDocumento": _int_positivo_ou_none((contrato_row or {}).get("IDDimTipoDocumento")),
         "Origem": (contrato_row or {}).get("Origem"),
         "SDR": (contrato_row or {}).get("SDR"),
         "Agencia": (contrato_row or {}).get("Agencia") or (empresa_agencia_snapshot or {}).get("RazaoSocial"),
@@ -7575,12 +7662,37 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
         else None
     )
 
+    def _valor_vazio_para_preservacao(valor: Any) -> bool:
+        return valor is None or (isinstance(valor, str) and not valor.strip())
+
+    if isinstance(header_existente, dict):
+        campos_header_preservar_sem_payload = {
+            "NumeroPrevia", "CNPJ", "DataAssinaturaRenovacao", "IDTrimestre",
+            "DataLancamento", "RazaoSocial", "CPF", "MarcaExibida", "Vendedor",
+            "TipoDocumento", "IDDimTipoDocumento", "Origem", "SDR", "Agencia",
+            "CnpjAgencia", "PercentualAgencia", "Bureau", "PercentualBureau",
+            "CnpjBureau", "Intermediario", "CnpjIntermediario",
+            "PercentualIntermediario", "PercentualCartaAcordo",
+        }
+        chaves_header_payload = set(dados_header_formulario.keys())
+
+        for campo_preservar in campos_header_preservar_sem_payload:
+            if campo_preservar in chaves_header_payload:
+                continue
+
+            valor_existente = header_existente.get(campo_preservar)
+            if _valor_vazio_para_preservacao(valor_existente):
+                continue
+
+            if _valor_vazio_para_preservacao(valores_solicitacao.get(campo_preservar)):
+                valores_solicitacao[campo_preservar] = valor_existente
+
     campos_header_comparacao = [
         "IDFatoKanbanCard", "IDFatoControleContratosEuromidia", "IDDimStatusContratos",
         "IDEmpresa", "IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaProprietaria", "TipoSolicitacao", "Referencia",
         "NumeroContrato", "NumeroPrevia", "CNPJ", "DataAssinaturaRenovacao", "IDTrimestre",
         "DataLancamento", "RazaoSocial", "CPF", "MarcaExibida", "Vendedor", "TipoDocumento",
-        "Origem", "SDR", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario",
+        "IDDimTipoDocumento", "Origem", "SDR", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario",
         "CnpjIntermediario", "QuantidadePontos", "QuantidadeFaces", "TotalFaturamentoBrutoMensal",
         "TotalPercentualPermuta", "TotalCotaOportunidade", "TotalValorPermuta",
         "TotalFaturamentoLiquidoPermuta", "TotalBrutoContrato", "TotalLiquidoContratoAGBRCTACORDO",
@@ -7665,6 +7777,26 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             cod_ponto=valores_item.get("CodPonto"),
             cod_face=valores_item.get("CodFace"),
         )
+
+        if isinstance(item_existente, dict) and not dados_item_formulario and not dados_itens_formulario:
+            campos_item_preservar_sem_payload = {
+                "TipoDocumento", "IDDimTipoDocumento", "MarcaExibida", "Origem",
+                "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau",
+                "Intermediario", "CnpjIntermediario", "DataInicioPrevisto",
+                "DataTerminoPrevisto", "NumeroParcelas", "DataInicioVencimento",
+                "TotalBrutoContrato", "TotalLiquidoContratoAGBRCTACORDO",
+                "TotalLiquidoContratoAGBRVENDGERCOOR", "ValorMensalAgencia",
+                "ValorBureauMensal", "ValorCartaAcordoMensal",
+                "FaturamentoLiquidoMensal", "OBS", "Status",
+            }
+
+            for campo_preservar in campos_item_preservar_sem_payload:
+                valor_existente = item_existente.get(campo_preservar)
+                if _valor_vazio_para_preservacao(valor_existente):
+                    continue
+
+                if _valor_vazio_para_preservacao(valores_item.get(campo_preservar)):
+                    valores_item[campo_preservar] = valor_existente
 
         campos_item_comparacao = [
             "IDFatoSolicitacaoContratoEuromidia", "IDFatoControleContratosEuromidia",
@@ -8073,6 +8205,53 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
         id_empresa_relacionada = int(id_empresa_relacionada_fallback)
 
     snapshot_solicitacao_existente = _obter_ultima_solicitacao_contrato_por_card(int(id_card)) or {}
+    card_ja_passou_fase_formulario = _card_esta_ou_ja_passou_pela_fase_formulario_contrato(int(id_card))
+
+    def _dados_formulario_tem_conteudo(valor: object) -> bool:
+        if valor is None:
+            return False
+
+        if isinstance(valor, dict):
+            return any(_dados_formulario_tem_conteudo(item) for item in valor.values())
+
+        if isinstance(valor, (list, tuple, set)):
+            return any(_dados_formulario_tem_conteudo(item) for item in valor)
+
+        if isinstance(valor, bool):
+            return bool(valor)
+
+        if isinstance(valor, (int, float, Decimal)):
+            return True
+
+        return str(valor).strip() != ""
+
+    tem_dados_formulario_payload = _dados_formulario_tem_conteudo(dados_formulario_solicitacao)
+
+    if (
+        int(id_fase_atual or 0) != int(ID_FASE_FORMULARIO_CONTRATO)
+        and not snapshot_solicitacao_existente
+        and not tem_dados_formulario_payload
+    ):
+        return {
+            "sincronizado": True,
+            "sem_alteracao": True,
+            "motivo": "fora_fase_4_sem_solicitacao_existente",
+            "id_fase_atual": int(id_fase_atual or 0),
+            "bit_solicitacao_ativa": False,
+            "quantidade_itens_atualizados": 0,
+            "motivo_itens": "formulario_nao_liberado",
+        }
+
+    if int(id_fase_atual or 0) != int(ID_FASE_FORMULARIO_CONTRATO) and not card_ja_passou_fase_formulario:
+        return {
+            "sincronizado": True,
+            "sem_alteracao": True,
+            "motivo": "snapshot_ignorado_card_nao_passou_fase_4",
+            "id_fase_atual": int(id_fase_atual or 0),
+            "bit_solicitacao_ativa": False,
+            "quantidade_itens_atualizados": 0,
+            "motivo_itens": "formulario_nao_liberado",
+        }
 
     tipo_solicitacao_bruto = (
         card.get("tipo_contrato")
@@ -13556,6 +13735,8 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         abort(404, "Card não encontrado")
 
     card_dict = dict(card)
+    card_dict["BitJaPassouPelaFaseFormularioContrato"] = 1 if _card_esta_ou_ja_passou_pela_fase_formulario_contrato(int(id_card)) else 0
+    card_dict["bit_ja_passou_pela_fase_formulario_contrato"] = bool(card_dict["BitJaPassouPelaFaseFormularioContrato"])
     card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
     card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
     card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
@@ -23996,14 +24177,48 @@ def _upsert_contato_cliente_direto_euromidia(
     if id_tipo != ID_TIPO_CLIENTE_DIRETO:
         return {"ok": False, "motivo": "tipo_cliente_nao_e_cliente_direto"}
 
-    dados_normalizados = _normalizar_contato_cliente_direto_payload(dados_contato)
     contato_existente = _obter_contato_cliente_direto_por_card(int(id_card))
+    dados_contato_foi_enviado = isinstance(dados_contato, dict)
+    dados_normalizados = _normalizar_contato_cliente_direto_payload(dados_contato if dados_contato_foi_enviado else None)
+    contato_payload_tem_valor = _contato_cliente_direto_tem_algum_valor(dados_normalizados)
 
-    if not contato_existente and not _contato_cliente_direto_tem_algum_valor(dados_normalizados):
+    id_contrato_payload = _int_ou_none(id_fato_controle_contratos)
+    id_contrato_final = id_contrato_payload
+
+    if id_contrato_final is None and contato_existente:
+        id_contrato_final = _int_ou_none(contato_existente.get("IDFatoControleContratosEuromidia"))
+
+    if not contato_payload_tem_valor:
+        if contato_existente and contato_existente.get("IDFatoContatoClienteDiretoEuromidia") not in (None, "", 0):
+            id_contato = int(contato_existente.get("IDFatoContatoClienteDiretoEuromidia") or 0)
+
+            valores_vinculo = {
+                "IDFatoKanbanCard": int(id_card),
+                "IDDimTipoCliente": int(id_tipo),
+            }
+
+            if id_contrato_payload is not None:
+                valores_vinculo["IDFatoControleContratosEuromidia"] = int(id_contrato_payload)
+
+            if valores_vinculo:
+                _atualizar_registro_dinamico_por_id(
+                    TABELA_CONTATO_CLIENTE_DIRETO,
+                    "IDFatoContatoClienteDiretoEuromidia",
+                    id_contato,
+                    valores_vinculo,
+                )
+
+            return {
+                "ok": True,
+                "acao": "preservado",
+                "motivo": "payload_sem_dados_de_contato; valores_existentes_preservados",
+                "IDFatoContatoClienteDiretoEuromidia": id_contato,
+            }
+
         return {"ok": False, "motivo": "contato_cliente_direto_vazio"}
 
     valores = {
-        "IDFatoControleContratosEuromidia": _int_ou_none(id_fato_controle_contratos),
+        "IDFatoControleContratosEuromidia": id_contrato_final,
         "IDFatoKanbanCard": int(id_card),
         "IDDimTipoCliente": int(id_tipo),
         **dados_normalizados,

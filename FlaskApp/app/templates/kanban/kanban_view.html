@@ -3280,7 +3280,7 @@
         </div>
 
         <div id="wrapDadosNovoContrato" class="kb-contrato-box" hidden>
-          <div class="kb-section-title">Dados comerciais do atendimento</div>
+          <div class="kb-section-title">NOVO PLANEJAMENTO</div>
 
           <div class="kb-cadastro-empresa-grid">
             <div class="kb-contrato-campo">
@@ -3301,7 +3301,7 @@
         </div>
 
         <div id="contratoFlowBox" class="kb-contrato-box">
-          <div class="kb-section-title">Contrato</div>
+          <div class="kb-section-title">NOVO PLANEJAMENTO</div>
           <div id="msgFluxoContrato" class="kb-contrato-status"></div>
 
           <div id="wrapSelectContratoCard" class="kb-contrato-campo" hidden>
@@ -3379,14 +3379,16 @@
         <div id="formSolicitacaoContratoHeader" class="kb-cadastro-empresa-grid"></div>
 
         <div id="wrapContatoClienteDiretoFormulario" hidden>
-          <div class="kb-section-title" style="margin-top:14px;">Dados Para Assinatura do Contrato Digital</div>
-          <div id="formContatoClienteDiretoAssinatura" class="kb-cadastro-empresa-grid"></div>
+          <div id="wrapContatoClienteDiretoAssinatura" data-grupo-contato-cliente-direto="assinatura" hidden>
+            <div id="tituloContatoClienteDiretoAssinatura" class="kb-section-title" style="margin-top:14px;">Dados Para Assinatura do Contrato Digital</div>
+            <div id="formContatoClienteDiretoAssinatura" class="kb-cadastro-empresa-grid"></div>
+          </div>
 
-          <div class="kb-section-title" style="margin-top:14px;">Dados Responsável Financeiro para Envio de NF, Boleto ou Cobrança</div>
-          <div id="formContatoClienteDiretoFinanceiro" class="kb-cadastro-empresa-grid"></div>
+          <div id="wrapContatoClienteDiretoFinanceiro" data-grupo-contato-cliente-direto="financeiro" hidden>
+            <div id="tituloContatoClienteDiretoFinanceiro" class="kb-section-title" style="margin-top:14px;">Dados Responsável Financeiro para Envio de NF, Boleto ou Cobrança</div>
+            <div id="formContatoClienteDiretoFinanceiro" class="kb-cadastro-empresa-grid"></div>
+          </div>
         </div>
-
-        <div class="kb-section-title" style="margin-top:14px;">Item do contrato</div>
         <div id="formSolicitacaoContratoItem" class="kb-cadastro-empresa-grid"></div>
       </div>
 
@@ -3708,5 +3710,5 @@
     "urlCabecalhoOrcamentoPadrao": url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG')
   } | tojson }}
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260429_marca_tipo_documento_v4') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260430_contato_cliente_direto_visibilidade_v1') }}"></script>
 {% endblock %}
