@@ -206,6 +206,26 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
       PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
+    command: >
+      gunicorn
+      --bind 0.0.0.0:8000
+      --workers 2
+      --worker-class gthread
+      --threads 30
+      --timeout 120
+      --graceful-timeout 30
+      --keep-alive 10
+      --access-logfile -
+      --error-logfile -
+      --log-level info
+      --capture-output
+      --worker-tmp-dir /dev/shm
+      --max-requests 2000
+      --max-requests-jitter 200
+      wsgi:app
+
+    shm_size: "512mb"
+
     expose:
       - "8000"
     extra_hosts:

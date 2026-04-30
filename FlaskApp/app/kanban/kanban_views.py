@@ -1798,6 +1798,10 @@ def _montar_campos_empresas_relacionadas_card_sql(
         campos.append("IDEmpresaBureau = :id_empresa_bureau_card")
         parametros["id_empresa_bureau_card"] = _int_ou_none(dados.get("id_empresa_bureau_card"))
 
+    if _coluna_existe(TABELA_CARD, "IDEmpresaIntermediario"):
+        campos.append("IDEmpresaIntermediario = :id_empresa_intermediario_card")
+        parametros["id_empresa_intermediario_card"] = _int_ou_none(dados.get("id_empresa_intermediario_card"))
+
     return {
         "campos": campos,
         "parametros": parametros,
@@ -8694,6 +8698,12 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         else "CAST(NULL AS int) AS IDEmpresaBureau,"
     )
 
+    select_id_empresa_intermediario = (
+        "c.IDEmpresaIntermediario AS IDEmpresaIntermediario,"
+        if _coluna_existe(TABELA_CARD, "IDEmpresaIntermediario")
+        else "CAST(NULL AS int) AS IDEmpresaIntermediario,"
+    )
+
     select_marca = (
         "c.Marca AS Marca,"
         if _coluna_existe(TABELA_CARD, "Marca")
@@ -8756,6 +8766,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             {select_bit_contrato_novo}
             {select_id_empresa_agencia}
             {select_id_empresa_bureau}
+            {select_id_empresa_intermediario}
             {select_marca}
             {select_telefone}
             {select_email}
@@ -13443,6 +13454,12 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         else "CAST(NULL AS int) AS IDEmpresaBureau,"
     )
 
+    select_id_empresa_intermediario = (
+        "c.IDEmpresaIntermediario AS IDEmpresaIntermediario,"
+        if _coluna_existe(TABELA_CARD, "IDEmpresaIntermediario")
+        else "CAST(NULL AS int) AS IDEmpresaIntermediario,"
+    )
+
     select_marca = (
         "c.Marca AS Marca,"
         if _coluna_existe(TABELA_CARD, "Marca")
@@ -13507,6 +13524,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             {select_bit_contrato_novo}
             {select_id_empresa_agencia}
             {select_id_empresa_bureau}
+            {select_id_empresa_intermediario}
             {select_marca}
             {select_telefone}
             {select_email}
@@ -22432,6 +22450,7 @@ def _buscar_cabecalho_aprovacao_preco(id_card: int, id_empresa_proprietaria: int
     id_empresa_relacionada_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaRelacionadaCard")
     id_empresa_agencia_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaAgencia")
     id_empresa_bureau_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaBureau")
+    id_empresa_intermediario_expr = _expr_int_coluna(TABELA_CARD, "c", "IDEmpresaIntermediario")
     id_cnae_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimCnaes")
     id_origem_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimOrigemAtendimento")
     id_tipo_cliente_card_expr = _expr_int_coluna(TABELA_CARD, "c", "IDDimTipoCliente")
@@ -22532,6 +22551,7 @@ def _buscar_cabecalho_aprovacao_preco(id_card: int, id_empresa_proprietaria: int
 
             {id_empresa_agencia_expr} AS IDEmpresaAgencia,
             {id_empresa_bureau_expr} AS IDEmpresaBureau,
+            {id_empresa_intermediario_expr} AS IDEmpresaIntermediario,
 
             COALESCE(ap.IDFatoControleContratosEuromidia, sol.IDFatoControleContratosEuromidia, {id_contrato_card_expr}, contrato.IDFatoControleContratosEuromidia) AS id_contrato,
             COALESCE(ap.IDFatoControleContratosEuromidia, sol.IDFatoControleContratosEuromidia, {id_contrato_card_expr}, contrato.IDFatoControleContratosEuromidia) AS IDFatoControleContratosEuromidia,
@@ -24225,6 +24245,7 @@ def _resolver_ids_empresas_card_por_tipo_cliente(
     id_empresa_principal: Any,
     id_empresa_agencia: Any = None,
     id_empresa_bureau: Any = None,
+    id_empresa_intermediario: Any = None,
     id_empresa_cliente_direto: Any = None,
 ) -> dict[str, Any]:
     """
@@ -24232,6 +24253,7 @@ def _resolver_ids_empresas_card_por_tipo_cliente(
     - IDEmpresa = sempre a empresa principal informada no primeiro campo
     - IDEmpresaAgencia = agência informada
     - IDEmpresaBureau = bureau informado
+    - IDEmpresaIntermediario = intermediário informado
 
     Observação importante:
     - id_empresa_cliente_direto continua sendo validado e retornado,
@@ -24243,12 +24265,14 @@ def _resolver_ids_empresas_card_por_tipo_cliente(
     id_principal = _int_ou_none(id_empresa_principal)
     id_agencia = _int_ou_none(id_empresa_agencia)
     id_bureau = _int_ou_none(id_empresa_bureau)
+    id_intermediario = _int_ou_none(id_empresa_intermediario)
     id_cliente_direto = _int_ou_none(id_empresa_cliente_direto)
 
     validacoes = (
         ("empresa principal", id_empresa_principal, id_principal),
         ("agência", id_empresa_agencia, id_agencia),
         ("bureau", id_empresa_bureau, id_bureau),
+        ("intermediário", id_empresa_intermediario, id_intermediario),
         ("cliente direto", id_empresa_cliente_direto, id_cliente_direto),
     )
 
@@ -24262,6 +24286,7 @@ def _resolver_ids_empresas_card_por_tipo_cliente(
         "id_empresa_card": id_principal,
         "id_empresa_agencia_card": id_agencia,
         "id_empresa_bureau_card": id_bureau,
+        "id_empresa_intermediario_card": id_intermediario,
         "id_empresa_principal": id_principal,
         "id_empresa_cliente_direto": id_cliente_direto,
         "id_tipo_cliente": id_tipo,
@@ -24288,6 +24313,7 @@ def _resolver_id_empresa_principal_por_tipo_cliente(
         or _int_ou_none(card.get("IDEmpresaRelacionadaCard"))
         or _int_ou_none(card.get("IDEmpresaAgencia"))
         or _int_ou_none(card.get("IDEmpresaBureau"))
+        or _int_ou_none(card.get("IDEmpresaIntermediario"))
     )
 
 
@@ -24306,6 +24332,7 @@ def _resolver_empresas_snapshot_solicitacao_do_card(
     - IDEmpresa = empresa principal
     - IDEmpresaAgencia = agência
     - IDEmpresaBureau = bureau
+    - IDEmpresaIntermediario = intermediário
     """
     detalhe = _obter_card_detalhe_payload(int(id_card))
     card = detalhe.get("card") if isinstance(detalhe, dict) else {}
@@ -24314,6 +24341,7 @@ def _resolver_empresas_snapshot_solicitacao_do_card(
     id_empresa_principal_int = _int_ou_none(id_empresa_principal) or _int_ou_none(card.get("IDEmpresa"))
     id_empresa_agencia_int = _int_ou_none(card.get("IDEmpresaAgencia"))
     id_empresa_bureau_int = _int_ou_none(card.get("IDEmpresaBureau"))
+    id_empresa_intermediario_int = _int_ou_none(card.get("IDEmpresaIntermediario"))
     id_tipo_cliente_int = _int_ou_none(
         card.get("IDDimTipoCliente") or card.get("IDDimKanbanTipoClienteDesconto")
     )
@@ -24342,15 +24370,18 @@ def _resolver_empresas_snapshot_solicitacao_do_card(
     empresa_principal = _buscar_empresa(id_empresa_principal_int)
     empresa_agencia = _buscar_empresa(id_empresa_agencia_int)
     empresa_bureau = _buscar_empresa(id_empresa_bureau_int)
+    empresa_intermediario = _buscar_empresa(id_empresa_intermediario_int)
 
     return {
         "id_tipo_cliente": id_tipo_cliente_int,
         "id_empresa_principal": id_empresa_principal_int,
         "id_empresa_agencia": id_empresa_agencia_int,
         "id_empresa_bureau": id_empresa_bureau_int,
+        "id_empresa_intermediario": id_empresa_intermediario_int,
         "empresa_principal": empresa_principal,
         "empresa_agencia": empresa_agencia,
         "empresa_bureau": empresa_bureau,
+        "empresa_intermediario": empresa_intermediario,
     }
 
 
@@ -24366,6 +24397,7 @@ def _validar_preenchimento_empresas_fase_4(
     id_empresa_principal: Any,
     id_empresa_agencia: Any = None,
     id_empresa_bureau: Any = None,
+    id_empresa_intermediario: Any = None,
     id_empresa_cliente_direto: Any = None,
     contexto: str = "salvar o card na fase 4",
 ) -> None:
@@ -25467,7 +25499,7 @@ def _sql_select_tipo_cliente_desconto_card(alias_card: str = "c") -> str:
 
 def _obter_tipos_cliente_desconto(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
     chave = _chave_cache_json(
-        "kanban:dominio:tipo_cliente_desconto",
+        "kanban:dominio:tipo_cliente_desconto:v2",
         ID_EMPRESA_PROPRIETARIA_CONTRATOS,
         incluir_inativos,
     )
@@ -25513,7 +25545,7 @@ def _obter_tipos_cliente_desconto(*, incluir_inativos: bool = False) -> list[dic
         if not nome_tipo:
             continue
 
-        if id_tipo not in {2, 3, 4}:
+        if id_tipo not in {1, 2, 3, 4}:
             continue
 
         resultado.append(
@@ -25963,6 +25995,7 @@ def api_card_criar(id_kanban: int):
 
         id_empresa_agencia = payload.get("id_empresa_agencia")
         id_empresa_bureau = payload.get("id_empresa_bureau")
+        id_empresa_intermediario = payload.get("id_empresa_intermediario")
         id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
@@ -26050,6 +26083,7 @@ def api_card_criar(id_kanban: int):
             id_empresa_principal=id_empresa_relacionada_int,
             id_empresa_agencia=id_empresa_agencia,
             id_empresa_bureau=id_empresa_bureau,
+            id_empresa_intermediario=id_empresa_intermediario,
             id_empresa_cliente_direto=id_empresa_cliente_direto,
         )
 
@@ -26059,6 +26093,7 @@ def api_card_criar(id_kanban: int):
                 id_empresa_principal=empresas_relacionadas_card.get("id_empresa_principal"),
                 id_empresa_agencia=empresas_relacionadas_card.get("id_empresa_agencia_card"),
                 id_empresa_bureau=empresas_relacionadas_card.get("id_empresa_bureau_card"),
+                id_empresa_intermediario=empresas_relacionadas_card.get("id_empresa_intermediario_card"),
                 id_empresa_cliente_direto=empresas_relacionadas_card.get("id_empresa_cliente_direto"),
                 contexto="criar o card já na fase 4",
             )
@@ -26235,6 +26270,11 @@ def api_card_criar(id_kanban: int):
             colunas.append("IDEmpresaBureau")
             valores.append(":id_empresa_bureau")
             params["id_empresa_bureau"] = empresas_relacionadas_card.get("id_empresa_bureau_card")
+
+        if _coluna_existe(TABELA_CARD, "IDEmpresaIntermediario"):
+            colunas.append("IDEmpresaIntermediario")
+            valores.append(":id_empresa_intermediario")
+            params["id_empresa_intermediario"] = empresas_relacionadas_card.get("id_empresa_intermediario_card")
 
         if _coluna_existe(TABELA_CARD, "Marca"):
             colunas.append("Marca")
@@ -26684,6 +26724,7 @@ def api_card_atualizar(id_card: int):
         cod_face_contrato = payload.get("cod_face_contrato")
         id_empresa_agencia = payload.get("id_empresa_agencia")
         id_empresa_bureau = payload.get("id_empresa_bureau")
+        id_empresa_intermediario = payload.get("id_empresa_intermediario")
         id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
         marca_card = payload.get("marca")
         telefone_card = payload.get("telefone")
@@ -26801,6 +26842,7 @@ def api_card_atualizar(id_card: int):
             id_empresa_principal=id_empresa_principal_final,
             id_empresa_agencia=id_empresa_agencia,
             id_empresa_bureau=id_empresa_bureau,
+            id_empresa_intermediario=id_empresa_intermediario,
             id_empresa_cliente_direto=id_empresa_cliente_direto,
         )
 
@@ -26810,6 +26852,7 @@ def api_card_atualizar(id_card: int):
                 id_empresa_principal=empresas_relacionadas_card.get("id_empresa_principal"),
                 id_empresa_agencia=empresas_relacionadas_card.get("id_empresa_agencia_card"),
                 id_empresa_bureau=empresas_relacionadas_card.get("id_empresa_bureau_card"),
+                id_empresa_intermediario=empresas_relacionadas_card.get("id_empresa_intermediario_card"),
                 id_empresa_cliente_direto=empresas_relacionadas_card.get("id_empresa_cliente_direto"),
                 contexto="salvar o card na fase 4",
             )

@@ -185,6 +185,7 @@
   const wrapAgenciaRelacionadaCard = document.getElementById("wrapAgenciaRelacionadaCard");
   const wrapClienteDiretoCard = document.getElementById("wrapClienteDiretoCard");
   const wrapBureauCard = document.getElementById("wrapBureauCard");
+  const wrapIntermediarioCard = document.getElementById("wrapIntermediarioCard");
   const wrapDadosNovoContrato = document.getElementById("wrapDadosNovoContrato");
   const contratoFlowBox = document.getElementById("contratoFlowBox");
   const comboAgenciaCard = document.getElementById("comboAgenciaCard");
@@ -193,6 +194,7 @@
   const listaAgenciaCardBusca = document.getElementById("listaAgenciaCardBusca");
   const selectAgenciaCard = document.getElementById("selectAgenciaCard");
   const btnLimparAgencia = document.getElementById("btnLimparAgencia");
+  const inputCnpjAgenciaCard = document.getElementById("inputCnpjAgenciaCard");
   const comboClienteDiretoCard = document.getElementById("comboClienteDiretoCard");
   const inputClienteDiretoCardBusca = document.getElementById("inputClienteDiretoCardBusca");
   const btnToggleClienteDiretoCard = document.getElementById("btnToggleClienteDiretoCard");
@@ -205,6 +207,14 @@
   const listaBureauCardBusca = document.getElementById("listaBureauCardBusca");
   const selectBureauCard = document.getElementById("selectBureauCard");
   const btnLimparBureau = document.getElementById("btnLimparBureau");
+  const inputCnpjBureauCard = document.getElementById("inputCnpjBureauCard");
+  const comboIntermediarioCard = document.getElementById("comboIntermediarioCard");
+  const inputIntermediarioCardBusca = document.getElementById("inputIntermediarioCardBusca");
+  const btnToggleIntermediarioCard = document.getElementById("btnToggleIntermediarioCard");
+  const listaIntermediarioCardBusca = document.getElementById("listaIntermediarioCardBusca");
+  const selectIntermediarioCard = document.getElementById("selectIntermediarioCard");
+  const btnLimparIntermediario = document.getElementById("btnLimparIntermediario");
+  const inputCnpjIntermediarioCard = document.getElementById("inputCnpjIntermediarioCard");
   const inputMarcaCard = document.getElementById("inputMarcaCard");
   const inputTelefoneCard = document.getElementById("inputTelefoneCard");
   const inputEmailCard = document.getElementById("inputEmailCard");
@@ -251,10 +261,11 @@
     { nome: "SDR", label: "SDR" },
     { nome: "Agencia", label: "Agência", tipo: "empresa_agencia" },
     { nome: "PercentualAgencia", label: "% Agência" },
+    { nome: "PercentualCartaAcordo", label: "% Carta Acordo" },
     { nome: "CnpjAgencia", label: "CNPJ Agência" },
-    { nome: "Bureau", label: "Bureau", span: 2 },
+    { nome: "Bureau", label: "Bureau", tipo: "empresa_header", span: 2 },
     { nome: "CnpjBureau", label: "CNPJ Bureau" },
-    { nome: "Intermediario", label: "Intermediário", span: 2 },
+    { nome: "Intermediario", label: "Intermediário", tipo: "empresa_header", span: 2 },
     { nome: "CnpjIntermediario", label: "CNPJ Intermediário" }
   ];
 
@@ -310,7 +321,6 @@
     { nome: "ValorMensalAgencia", label: "Valor Mensal Agência" },
     { nome: "PercentualBureau", label: "% Bureau" },
     { nome: "ValorBureauMensal", label: "Valor Bureau Mensal" },
-    { nome: "PercentualCartaAcordo", label: "% Carta Acordo" },
     { nome: "ValorCartaAcordoMensal", label: "Valor Carta Acordo Mensal" },
     { nome: "ValorOutrasComissoes", label: "Valor Outras Comissões" },
     { nome: "FaturamentoLiquidoMensal", label: "Faturamento Líquido Mensal" },
@@ -531,6 +541,11 @@
 
   function obterValorPercentualAgenciaHeaderFormulario(){
     const input = obterInputFormularioSolicitacao("Header", "PercentualAgencia");
+    return safeStr(input?.value || "").trim();
+  }
+
+  function obterValorPercentualCartaAcordoHeaderFormulario(){
+    const input = obterInputFormularioSolicitacao("Header", "PercentualCartaAcordo");
     return safeStr(input?.value || "").trim();
   }
 
@@ -904,6 +919,358 @@
     };
   }
 
+
+  function obterConfigEmpresaHeaderFormulario(nomeCampo){
+    const nome = safeStr(nomeCampo || "").trim();
+    const configs = {
+      Bureau: {
+        nomeCampo: "Bureau",
+        nomeId: "IDEmpresaBureau",
+        campoCnpj: "CnpjBureau",
+        rotulo: "Bureau",
+        placeholder: "Digite razão social ou CNPJ do bureau...",
+        aria: "Abrir lista de bureaus",
+        textoVazio: "Nenhum bureau encontrado.",
+        dataRole: "bureau-header",
+      },
+      Intermediario: {
+        nomeCampo: "Intermediario",
+        nomeId: "IDEmpresaIntermediario",
+        campoCnpj: "CnpjIntermediario",
+        rotulo: "Intermediário",
+        placeholder: "Digite razão social ou CNPJ do intermediário...",
+        aria: "Abrir lista de intermediários",
+        textoVazio: "Nenhum intermediário encontrado.",
+        dataRole: "intermediario-header",
+      },
+    };
+    return configs[nome] || null;
+  }
+
+  function campoHeaderEmpresaEhCombobox(nomeCampo){
+    return !!obterConfigEmpresaHeaderFormulario(nomeCampo);
+  }
+
+  function resolverIdEmpresaHeaderFormulario(nomeCampo, valor, registro = {}){
+    const cfg = obterConfigEmpresaHeaderFormulario(nomeCampo);
+    if (!cfg) return "";
+
+    const nomeLower = cfg.nomeCampo === "Bureau" ? "bureau" : "intermediario";
+    const aliases = [
+      cfg.nomeId,
+      `id_empresa_${nomeLower}`,
+      `ID${cfg.nomeCampo}`,
+      `id_${nomeLower}`,
+    ];
+
+    for (const chave of aliases) {
+      const idDireto = idNum(registro?.[chave] ?? 0);
+      if (idDireto > 0) return String(idDireto);
+    }
+
+    const valorTexto = safeStr(valor || "").trim();
+    if (/^\d+$/.test(valorTexto)) return valorTexto;
+
+    const empresaPorTexto = localizarEmpresaPorTextoDigitado(valorTexto);
+    const idPorTexto = safeStr(
+      empresaPorTexto?.IDEmpresa ??
+      empresaPorTexto?.IDEmpresaProprietaria ??
+      empresaPorTexto?.ID ??
+      ""
+    ).trim();
+
+    return idPorTexto || "";
+  }
+
+  function garantirOpcaoEmpresaHeaderFormularioNoSelect(selectEl, idEmp){
+    if (!selectEl) return;
+    const valor = safeStr(idEmp || "").trim();
+    if (!valor) return;
+
+    const jaExiste = Array.from(selectEl.options || []).some((opt) => safeStr(opt.value || "").trim() === valor);
+    if (jaExiste) return;
+
+    const empresa = obterEmpresaCatalogoPorId(valor);
+    const texto = empresa ? textoOpcaoEmpresa(empresa) : `Empresa #${valor}`;
+    selectEl.appendChild(el("option", { value: valor }, [texto]));
+  }
+
+  function atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca){
+    if (!selectEl || !inputBusca) return;
+    const idEmp = safeStr(selectEl.value || "").trim();
+    inputBusca.value = idEmp ? obterTextoEmpresaSelecionada(idEmp) : "";
+  }
+
+  function definirCnpjEmpresaHeaderFormulario(nomeCampo, cnpj){
+    const cfg = obterConfigEmpresaHeaderFormulario(nomeCampo);
+    if (!cfg) return;
+
+    const inputCnpj = obterInputFormularioSolicitacao("Header", cfg.campoCnpj);
+    if (!inputCnpj) return;
+
+    const valorFormatado = safeStr(cnpj || "").trim() ? mascaraCnpj(cnpj) : "";
+    const valorAnterior = safeStr(inputCnpj.value || "").trim();
+    inputCnpj.value = valorFormatado;
+
+    const wrapCampo = inputCnpj.closest(".kb-contrato-campo");
+    if (wrapCampo && valorFormatado) {
+      wrapCampo.classList.remove("is-invalido");
+    }
+
+    if (valorAnterior !== valorFormatado) {
+      inputCnpj.dispatchEvent(new Event("input", { bubbles: true }));
+      inputCnpj.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  function atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, idEmp){
+    const cnpj = obterCnpjEmpresaCatalogoFormatado(idEmp);
+    definirCnpjEmpresaHeaderFormulario(nomeCampo, cnpj);
+  }
+
+  function fecharListaEmpresaHeaderFormulario(comboEl, listaEl){
+    if (comboEl) comboEl.classList.remove("is-open");
+    if (listaEl) listaEl.hidden = true;
+  }
+
+  function renderizarListaEmpresaHeaderFormulario(nomeCampo, texto, refs, opcoes = {}){
+    const cfg = obterConfigEmpresaHeaderFormulario(nomeCampo);
+    const listaEl = refs?.listaEl || null;
+    const selectEl = refs?.selectEl || null;
+    const inputBusca = refs?.inputBusca || null;
+    const comboEl = refs?.comboEl || null;
+    if (!cfg || !listaEl || !selectEl) return;
+
+    const base = Array.isArray(opcoes.empresas)
+      ? opcoes.empresas
+      : filtrarEmpresasCombobox(texto);
+
+    const filtradas = (Array.isArray(base) ? base : []).slice(0, LIMITE_EMPRESAS_COMBOBOX);
+    const valorSelecionado = safeStr(selectEl.value || "").trim();
+
+    listaEl.innerHTML = "";
+    if (!filtradas.length) {
+      listaEl.appendChild(el("div", { class: "kb-combobox-vazio" }, [cfg.textoVazio]));
+      return;
+    }
+
+    filtradas.forEach((item) => {
+      const id = safeStr(item?.IDEmpresa ?? item?.IDEmpresaProprietaria ?? item?.ID ?? "").trim();
+      if (!id) return;
+
+      const razao = safeStr(item?.RazaoSocial || item?.EmpresaRazaoSocial || "—").trim() || "—";
+      const cnpj = mascaraCnpj(item?.CNPJ || item?.EmpresaCNPJ || "");
+      const botao = el("button", { type: "button", class: `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}` }, [
+        el("strong", {}, [razao]),
+        el("span", {}, [cnpj || "Sem CNPJ"])
+      ]);
+
+      botao.addEventListener("mousedown", async (evento) => {
+        evento.preventDefault();
+        await selecionarEmpresaHeaderFormularioPorId(nomeCampo, selectEl, inputBusca, listaEl, comboEl, id);
+      });
+
+      listaEl.appendChild(botao);
+    });
+  }
+
+  function abrirListaEmpresaHeaderFormulario(nomeCampo, comboEl, inputBusca, listaEl, selectEl){
+    if (!comboEl || !listaEl || !selectEl) return;
+    comboEl.classList.add("is-open");
+    listaEl.hidden = false;
+    renderizarListaEmpresaHeaderFormulario(nomeCampo, inputBusca?.value || "", { comboEl, inputBusca, listaEl, selectEl });
+  }
+
+  async function selecionarEmpresaHeaderFormularioPorId(nomeCampo, selectEl, inputBusca, listaEl, comboEl, idEmp){
+    if (!selectEl) return;
+
+    const novoValor = safeStr(idEmp || "").trim();
+    const valorAnterior = safeStr(selectEl.value || "").trim();
+
+    if (!novoValor) {
+      selectEl.value = "";
+      if (inputBusca) inputBusca.value = "";
+      atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, "");
+      fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
+      if (valorAnterior) selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+      agendarSincronizacaoFormularioSolicitacao();
+      return;
+    }
+
+    await garantirEmpresaNoCatalogoPorId(novoValor);
+    garantirOpcaoEmpresaHeaderFormularioNoSelect(selectEl, novoValor);
+    selectEl.value = novoValor;
+    atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
+    atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, novoValor);
+    fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
+
+    if (novoValor !== valorAnterior) {
+      selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    agendarSincronizacaoFormularioSolicitacao();
+  }
+
+  function reconciliarBuscaEmpresaHeaderFormularioDigitada(nomeCampo, selectEl, inputBusca, listaEl, comboEl){
+    if (!selectEl || !inputBusca) return;
+
+    const textoDigitado = safeStr(inputBusca.value || "").trim();
+    if (!textoDigitado) {
+      selecionarEmpresaHeaderFormularioPorId(nomeCampo, selectEl, inputBusca, listaEl, comboEl, "").catch((erro) => {
+        console.warn("reconciliarBuscaEmpresaHeaderFormularioDigitada: falhou ao limpar empresa", erro);
+      });
+      return;
+    }
+
+    const empresa = localizarEmpresaPorTextoDigitado(textoDigitado);
+    const id = safeStr(empresa?.IDEmpresa ?? empresa?.IDEmpresaProprietaria ?? empresa?.ID ?? "").trim();
+    if (id) {
+      selecionarEmpresaHeaderFormularioPorId(nomeCampo, selectEl, inputBusca, listaEl, comboEl, id).catch((erro) => {
+        console.warn("reconciliarBuscaEmpresaHeaderFormularioDigitada: falhou ao selecionar empresa", erro);
+      });
+      return;
+    }
+
+    atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
+    fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
+  }
+
+  function configurarComboboxEmpresaHeaderFormularioSolicitacao(nomeCampo, comboEl, inputBusca, btnToggle, listaEl, selectEl){
+    const cfg = obterConfigEmpresaHeaderFormulario(nomeCampo);
+    if (!cfg || !comboEl || !inputBusca || !btnToggle || !listaEl || !selectEl) return;
+    if (comboEl.dataset.comboEmpresaHeaderConfigurado === "1") return;
+    comboEl.dataset.comboEmpresaHeaderConfigurado = "1";
+
+    const buscarRemoto = () => {
+      const termo = inputBusca.value || "";
+      abrirListaEmpresaHeaderFormulario(nomeCampo, comboEl, inputBusca, listaEl, selectEl);
+
+      if (!safeStr(termo).trim()) {
+        buscarEmpresasRemoto("", {
+          tipo: "empresa",
+          listaDestino: listaEl,
+          renderizador: (texto, opcoes) => renderizarListaEmpresaHeaderFormulario(nomeCampo, texto, { comboEl, inputBusca, listaEl, selectEl }, opcoes),
+        }).catch((erro) => console.warn(`${cfg.rotulo} header vazio: falhou`, erro));
+        return;
+      }
+
+      const termoDigits = normalizaCnpj(termo);
+      if (safeStr(termo).trim().length >= 2 || termoDigits.length >= 4) {
+        buscarEmpresasRemoto(termo, {
+          tipo: "empresa",
+          listaDestino: listaEl,
+          renderizador: (texto, opcoes) => renderizarListaEmpresaHeaderFormulario(nomeCampo, texto, { comboEl, inputBusca, listaEl, selectEl }, opcoes),
+        }).catch((erro) => {
+          console.warn(`${cfg.rotulo} header remoto: falhou`, erro);
+          renderizarListaEmpresaHeaderFormulario(nomeCampo, termo, { comboEl, inputBusca, listaEl, selectEl });
+        });
+        return;
+      }
+
+      renderizarListaEmpresaHeaderFormulario(nomeCampo, termo, { comboEl, inputBusca, listaEl, selectEl });
+    };
+
+    inputBusca.addEventListener("focus", buscarRemoto);
+    inputBusca.addEventListener("click", buscarRemoto);
+    inputBusca.addEventListener("input", buscarRemoto);
+
+    selectEl.addEventListener("change", () => {
+      atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, selectEl.value || "");
+      agendarSincronizacaoFormularioSolicitacao();
+    });
+
+    inputBusca.addEventListener("keydown", (evento) => {
+      if (evento.key === "Enter") {
+        evento.preventDefault();
+        const primeira = filtrarEmpresasCombobox(inputBusca.value || "")[0] || null;
+        const id = safeStr(primeira?.IDEmpresa ?? primeira?.IDEmpresaProprietaria ?? primeira?.ID ?? "").trim();
+        if (id) {
+          selecionarEmpresaHeaderFormularioPorId(nomeCampo, selectEl, inputBusca, listaEl, comboEl, id).catch((erro) => {
+            console.warn(`keydown ${cfg.rotulo} header: falhou ao selecionar primeira opção`, erro);
+          });
+          return;
+        }
+        reconciliarBuscaEmpresaHeaderFormularioDigitada(nomeCampo, selectEl, inputBusca, listaEl, comboEl);
+        return;
+      }
+
+      if (evento.key === "Escape") {
+        evento.preventDefault();
+        atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
+        fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
+        return;
+      }
+
+      if (evento.key === "ArrowDown") {
+        abrirListaEmpresaHeaderFormulario(nomeCampo, comboEl, inputBusca, listaEl, selectEl);
+      }
+    });
+
+    btnToggle.addEventListener("click", () => {
+      if (listaEl.hidden) abrirListaEmpresaHeaderFormulario(nomeCampo, comboEl, inputBusca, listaEl, selectEl);
+      else {
+        atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
+        fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
+      }
+    });
+
+    inputBusca.addEventListener("blur", () => {
+      window.setTimeout(() => reconciliarBuscaEmpresaHeaderFormularioDigitada(nomeCampo, selectEl, inputBusca, listaEl, comboEl), 140);
+    });
+  }
+
+  function setValorEmpresaHeaderFormulario(nomeCampo, valor, registro = {}){
+    const selectEl = obterInputFormularioSolicitacao("Header", nomeCampo);
+    const cfg = obterConfigEmpresaHeaderFormulario(nomeCampo);
+    if (!selectEl || !cfg) return;
+
+    const comboEl = selectEl.closest(".kb-combobox");
+    const inputBusca = comboEl?.querySelector(`[data-role="input-${cfg.dataRole}-busca"]`) || null;
+    const listaEl = comboEl?.querySelector(`[data-role="lista-${cfg.dataRole}-busca"]`) || null;
+
+    const idEmp = resolverIdEmpresaHeaderFormulario(nomeCampo, valor, registro);
+    if (idEmp) {
+      garantirOpcaoEmpresaHeaderFormularioNoSelect(selectEl, idEmp);
+      selectEl.value = idEmp;
+      atualizarInputEmpresaHeaderFormulario(selectEl, inputBusca);
+      atualizarCnpjEmpresaHeaderFormularioPorEmpresa(nomeCampo, idEmp);
+      return;
+    }
+
+    selectEl.value = "";
+    if (inputBusca) inputBusca.value = safeStr(valor || "").trim();
+    definirCnpjEmpresaHeaderFormulario(nomeCampo, registro?.[cfg.campoCnpj] ?? "");
+    fecharListaEmpresaHeaderFormulario(comboEl, listaEl);
+  }
+
+  function obterEmpresaHeaderFormularioSelecionada(nomeCampo){
+    const cfg = obterConfigEmpresaHeaderFormulario(nomeCampo);
+    if (!cfg) return {};
+
+    const idTipoCliente = obterIdTipoClienteAtualFormularioSolicitacao();
+    if (campoFormularioSolicitacaoOcultoPorTipoCliente(nomeCampo, idTipoCliente, "Header")) {
+      return {
+        [cfg.nomeId]: null,
+        [cfg.nomeCampo]: null,
+        [cfg.campoCnpj]: null,
+      };
+    }
+
+    const selectEl = obterInputFormularioSolicitacao("Header", nomeCampo);
+    const idEmp = safeStr(selectEl?.value || "").trim();
+    const empresa = idEmp ? obterEmpresaCatalogoPorId(idEmp) : null;
+    const comboEl = selectEl?.closest?.(".kb-combobox") || null;
+    const textoDigitado = safeStr(comboEl?.querySelector(`[data-role="input-${cfg.dataRole}-busca"]`)?.value || "").trim();
+    const inputCnpj = obterInputFormularioSolicitacao("Header", cfg.campoCnpj);
+    const cnpjDigitado = safeStr(inputCnpj?.value || "").trim();
+
+    return {
+      [cfg.nomeId]: idEmp ? Number(idEmp) : null,
+      [cfg.nomeCampo]: safeStr(empresa?.RazaoSocial || textoDigitado || "").trim() || null,
+      [cfg.campoCnpj]: safeStr(empresa?.CNPJ || empresa?.EmpresaCNPJ || cnpjDigitado || "").trim() || null,
+    };
+  }
+
   function criarCampoFormularioSolicitacao(secao, meta, indice = null){
     const wrap = document.createElement("div");
     wrap.className = "kb-contrato-campo" + (meta.span === 2 ? " span-2" : "");
@@ -920,10 +1287,12 @@
 
     const deveCriarSelectTipoDocumento = meta.tipo === "tipo_documento" || (secao === "Header" && meta.nome === "TipoDocumento");
     const deveCriarComboboxAgenciaHeader = secao === "Header" && meta.nome === "Agencia";
+    const deveCriarComboboxEmpresaHeader = secao === "Header" && campoHeaderEmpresaEhCombobox(meta.nome);
 
     let campo;
     let elementoRenderizado = null;
     let refsComboboxAgencia = null;
+    let refsComboboxEmpresaHeader = null;
 
     if (meta.tipo === "textarea") {
       campo = document.createElement("textarea");
@@ -970,6 +1339,43 @@
       combo.appendChild(campo);
       elementoRenderizado = combo;
       refsComboboxAgencia = { combo, inputBusca, btnToggle, lista, selectEl: campo };
+    } else if (deveCriarComboboxEmpresaHeader) {
+      const cfgEmpresaHeader = obterConfigEmpresaHeaderFormulario(meta.nome);
+      const combo = document.createElement("div");
+      combo.className = "kb-combobox grow";
+      combo.dataset.role = `combo-${cfgEmpresaHeader.dataRole}`;
+
+      const inputBusca = document.createElement("input");
+      inputBusca.className = "kb-input kb-combobox-input";
+      inputBusca.type = "text";
+      inputBusca.autocomplete = "off";
+      inputBusca.spellcheck = false;
+      inputBusca.placeholder = cfgEmpresaHeader.placeholder;
+      inputBusca.dataset.role = `input-${cfgEmpresaHeader.dataRole}-busca`;
+
+      const btnToggle = document.createElement("button");
+      btnToggle.className = "kb-combobox-toggle";
+      btnToggle.type = "button";
+      btnToggle.setAttribute("aria-label", cfgEmpresaHeader.aria);
+      btnToggle.textContent = "▾";
+
+      const lista = document.createElement("div");
+      lista.className = "kb-combobox-lista";
+      lista.dataset.role = `lista-${cfgEmpresaHeader.dataRole}-busca`;
+      lista.hidden = true;
+
+      campo = document.createElement("select");
+      campo.className = "kb-select grow kb-select-hidden";
+      campo.tabIndex = -1;
+      campo.setAttribute("aria-hidden", "true");
+      campo.appendChild(el("option", { value: "" }, [`— Selecione ${cfgEmpresaHeader.rotulo.toLowerCase()} —`]));
+
+      combo.appendChild(inputBusca);
+      combo.appendChild(btnToggle);
+      combo.appendChild(lista);
+      combo.appendChild(campo);
+      elementoRenderizado = combo;
+      refsComboboxEmpresaHeader = { nomeCampo: meta.nome, combo, inputBusca, btnToggle, lista, selectEl: campo };
     } else {
       campo = document.createElement("input");
       campo.type = meta.tipo === "date" ? "date" : "text";
@@ -995,7 +1401,11 @@
       campo.dataset.indiceSolicitacao = String(indice);
     }
 
-    if (meta.somenteLeitura || (secao === "Item" && meta.nome === "TexmpoExposicao") || (secao === "Header" && meta.nome === "CnpjAgencia")) {
+    if (
+      meta.somenteLeitura
+      || (secao === "Item" && meta.nome === "TexmpoExposicao")
+      || (secao === "Header" && ["CnpjAgencia", "CnpjBureau", "CnpjIntermediario"].includes(meta.nome))
+    ) {
       campo.readOnly = true;
     }
 
@@ -1022,6 +1432,17 @@
         refsComboboxAgencia.btnToggle,
         refsComboboxAgencia.lista,
         refsComboboxAgencia.selectEl
+      );
+    }
+
+    if (refsComboboxEmpresaHeader) {
+      configurarComboboxEmpresaHeaderFormularioSolicitacao(
+        refsComboboxEmpresaHeader.nomeCampo,
+        refsComboboxEmpresaHeader.combo,
+        refsComboboxEmpresaHeader.inputBusca,
+        refsComboboxEmpresaHeader.btnToggle,
+        refsComboboxEmpresaHeader.lista,
+        refsComboboxEmpresaHeader.selectEl
       );
     }
 
@@ -1110,6 +1531,11 @@
 
     if (secao === "Header" && meta.nome === "Agencia") {
       setValorAgenciaHeaderFormulario(valor, registro || {});
+      return;
+    }
+
+    if (secao === "Header" && campoHeaderEmpresaEhCombobox(meta.nome)) {
+      setValorEmpresaHeaderFormulario(meta.nome, valor, registro || {});
       return;
     }
 
@@ -1231,6 +1657,10 @@
       return secaoNormalizada === "Header" ? idTipo !== 3 : true;
     }
 
+    if (nome === "PercentualCartaAcordo") {
+      return secaoNormalizada === "Header" ? idTipo !== 3 : true;
+    }
+
     const camposIntermediacao = new Set([
       "Agencia",
       "CnpjAgencia",
@@ -1260,7 +1690,11 @@
     }
 
     if (idTipo === 3) {
-      return nome === "Agencia" || nome === "Bureau" || nome === "CnpjBureau";
+      return nome === "Agencia"
+        || nome === "Bureau"
+        || nome === "CnpjBureau"
+        || nome === "PercentualBureau"
+        || nome === "ValorBureauMensal";
     }
 
     if (idTipo === 4) {
@@ -1268,7 +1702,7 @@
     }
 
     if (idTipo === 1) {
-      return nome === "Agencia" || nome === "CnpjAgencia" || nome === "Bureau" || nome === "CnpjBureau";
+      return nome === "ValorMensalAgencia" || nome === "PercentualBureau" || nome === "ValorBureauMensal";
     }
 
     return false;
@@ -1299,6 +1733,14 @@
           const comboAgenciaHeader = campo.closest?.(".kb-combobox") || null;
           const listaAgenciaHeader = comboAgenciaHeader?.querySelector('[data-role="lista-agencia-header-busca"]') || null;
           fecharListaAgenciaFormulario(comboAgenciaHeader, listaAgenciaHeader);
+        }
+
+        if (campoHeaderEmpresaEhCombobox(nomeCampo)) {
+          const cfgEmpresaHeader = obterConfigEmpresaHeaderFormulario(nomeCampo);
+          const comboEmpresaHeader = campo.closest?.(".kb-combobox") || null;
+          const listaEmpresaHeader = comboEmpresaHeader?.querySelector(`[data-role="lista-${cfgEmpresaHeader.dataRole}-busca"]`) || null;
+          fecharListaEmpresaHeaderFormulario(comboEmpresaHeader, listaEmpresaHeader);
+          definirCnpjEmpresaHeaderFormulario(nomeCampo, "");
         }
       }
     });
@@ -1544,6 +1986,19 @@
         return;
       }
 
+      if (campoHeaderEmpresaEhCombobox(meta.nome)) {
+        if (campoFormularioSolicitacaoOcultoPorTipoCliente(meta.nome, idTipoCliente, "Header")) {
+          const cfgEmpresaHeader = obterConfigEmpresaHeaderFormulario(meta.nome);
+          header[cfgEmpresaHeader.nomeId] = null;
+          header[cfgEmpresaHeader.nomeCampo] = null;
+          header[cfgEmpresaHeader.campoCnpj] = null;
+          return;
+        }
+
+        Object.assign(header, obterEmpresaHeaderFormularioSelecionada(meta.nome));
+        return;
+      }
+
       if (campoFormularioSolicitacaoOcultoPorTipoCliente(meta.nome, idTipoCliente, "Header")) {
         header[meta.nome] = null;
         return;
@@ -1601,10 +2056,13 @@
       }
 
       const percentualAgenciaHeader = obterValorPercentualAgenciaHeaderFormulario();
+      const percentualCartaAcordoHeader = obterValorPercentualCartaAcordoHeaderFormulario();
       if (idTipoCliente === 3) {
         item.PercentualAgencia = percentualAgenciaHeader || null;
+        item.PercentualCartaAcordo = percentualCartaAcordoHeader || null;
       } else {
         item.PercentualAgencia = null;
+        item.PercentualCartaAcordo = null;
       }
 
       if (possuiValor || indice === 0) {
@@ -1621,12 +2079,33 @@
     const idEmpresaAgenciaFormulario = idNum(
       valoresDigitadosHeader?.IDEmpresaAgencia ??
       valoresDigitadosHeader?.id_empresa_agencia ??
+      headerSnapshot?.IDEmpresaAgencia ??
+      card?.IDEmpresaAgencia ??
       0
     );
     const empresaAgencia = idEmpresaAgenciaFormulario > 0
       ? obterEmpresaCatalogoPorId(idEmpresaAgenciaFormulario)
       : (idTipoClienteAtual === 3 ? empresaPrincipal : obterEmpresaSelecionadaDoCampo(selectAgenciaCard));
-    const empresaBureau = obterEmpresaSelecionadaDoCampo(selectBureauCard);
+    const idEmpresaBureauFormulario = idNum(
+      valoresDigitadosHeader?.IDEmpresaBureau ??
+      valoresDigitadosHeader?.id_empresa_bureau ??
+      headerSnapshot?.IDEmpresaBureau ??
+      card?.IDEmpresaBureau ??
+      0
+    );
+    const idEmpresaIntermediarioFormulario = idNum(
+      valoresDigitadosHeader?.IDEmpresaIntermediario ??
+      valoresDigitadosHeader?.id_empresa_intermediario ??
+      headerSnapshot?.IDEmpresaIntermediario ??
+      card?.IDEmpresaIntermediario ??
+      0
+    );
+    const empresaBureau = idEmpresaBureauFormulario > 0
+      ? obterEmpresaCatalogoPorId(idEmpresaBureauFormulario)
+      : obterEmpresaSelecionadaDoCampo(selectBureauCard);
+    const empresaIntermediario = idEmpresaIntermediarioFormulario > 0
+      ? obterEmpresaCatalogoPorId(idEmpresaIntermediarioFormulario)
+      : obterEmpresaSelecionadaDoCampo(selectIntermediarioCard);
     const origemTexto = obterOrigemAtendimentoSelecionadaTexto();
     const vendedorNome = safeStr(
       valoresDigitadosHeader?.Vendedor ||
@@ -1651,8 +2130,15 @@
     header.Agencia = empresaAgencia?.RazaoSocial || valoresDigitadosHeader?.Agencia || null;
     header.CnpjAgencia = empresaAgencia?.CNPJ || valoresDigitadosHeader?.CnpjAgencia || null;
     header.PercentualAgencia = safeStr(valoresDigitadosHeader?.PercentualAgencia || headerSnapshot?.PercentualAgencia || "").trim() || null;
-    header.Bureau = empresaBureau?.RazaoSocial || null;
-    header.CnpjBureau = empresaBureau?.CNPJ || null;
+    header.PercentualCartaAcordo = idTipoClienteAtual === 3
+      ? (safeStr(valoresDigitadosHeader?.PercentualCartaAcordo || headerSnapshot?.PercentualCartaAcordo || "").trim() || null)
+      : null;
+    header.IDEmpresaBureau = empresaBureau?.IDEmpresa || empresaBureau?.ID || idEmpresaBureauFormulario || null;
+    header.Bureau = empresaBureau?.RazaoSocial || valoresDigitadosHeader?.Bureau || null;
+    header.CnpjBureau = empresaBureau?.CNPJ || valoresDigitadosHeader?.CnpjBureau || null;
+    header.IDEmpresaIntermediario = empresaIntermediario?.IDEmpresa || empresaIntermediario?.ID || idEmpresaIntermediarioFormulario || null;
+    header.Intermediario = empresaIntermediario?.RazaoSocial || valoresDigitadosHeader?.Intermediario || null;
+    header.CnpjIntermediario = empresaIntermediario?.CNPJ || valoresDigitadosHeader?.CnpjIntermediario || null;
     header.MarcaExibida = marcaExibida;
 
     if (origemTexto) {
@@ -1674,7 +2160,14 @@
     const empresaAgencia = idTipoClienteAtual === 3
       ? empresaPrincipal
       : obterEmpresaSelecionadaDoCampo(selectAgenciaCard);
-    const empresaBureau = obterEmpresaSelecionadaDoCampo(selectBureauCard);
+    const dadosBureauHeader = obterEmpresaHeaderFormularioSelecionada("Bureau");
+    const dadosIntermediarioHeader = obterEmpresaHeaderFormularioSelecionada("Intermediario");
+    const empresaBureau = dadosBureauHeader.IDEmpresaBureau
+      ? obterEmpresaCatalogoPorId(dadosBureauHeader.IDEmpresaBureau)
+      : obterEmpresaSelecionadaDoCampo(selectBureauCard);
+    const empresaIntermediario = dadosIntermediarioHeader.IDEmpresaIntermediario
+      ? obterEmpresaCatalogoPorId(dadosIntermediarioHeader.IDEmpresaIntermediario)
+      : obterEmpresaSelecionadaDoCampo(selectIntermediarioCard);
     const origemTexto = obterOrigemAtendimentoSelecionadaTexto();
     const resumosPainel = listarResumosPainelFaceDoFormulario();
     const resumoPainel = resumosPainel[indice] || null;
@@ -1711,11 +2204,16 @@
     item.RazaoSocial = empresaPrincipal?.RazaoSocial || null;
     item.Agencia = empresaAgencia?.RazaoSocial || null;
     item.CnpjAgencia = empresaAgencia?.CNPJ || null;
-    item.PercentualAgencia = obterIdTipoClienteAtualFormularioSolicitacao() === 3
+    item.PercentualAgencia = idTipoClienteAtual === 3
       ? (obterValorPercentualAgenciaHeaderFormulario() || item.PercentualAgencia || null)
       : null;
-    item.Bureau = empresaBureau?.RazaoSocial || null;
-    item.CnpjBureau = empresaBureau?.CNPJ || null;
+    item.PercentualCartaAcordo = idTipoClienteAtual === 3
+      ? (obterValorPercentualCartaAcordoHeaderFormulario() || item.PercentualCartaAcordo || null)
+      : null;
+    item.Bureau = empresaBureau?.RazaoSocial || dadosBureauHeader.Bureau || null;
+    item.CnpjBureau = empresaBureau?.CNPJ || dadosBureauHeader.CnpjBureau || null;
+    item.Intermediario = empresaIntermediario?.RazaoSocial || dadosIntermediarioHeader.Intermediario || null;
+    item.CnpjIntermediario = empresaIntermediario?.CNPJ || dadosIntermediarioHeader.CnpjIntermediario || null;
 
     if (origemTexto) {
       item.Origem = origemTexto;
@@ -1952,6 +2450,7 @@
 
   let clientesDiretoResultadoComboboxAtual = [];
   let bureauResultadoComboboxAtual = [];
+  let intermediariosResultadoComboboxAtual = [];
 
   const cadEmpresaId = document.getElementById("cadEmpresaId");
   const cadEmpresaCnpj = document.getElementById("cadEmpresaCnpj");
@@ -2943,6 +3442,7 @@
         mostrarAgencia: false,
         mostrarClienteDireto: false,
         mostrarBureau: false,
+        mostrarIntermediario: false,
       };
     }
 
@@ -2953,6 +3453,7 @@
         mostrarAgencia: false,
         mostrarClienteDireto: false,
         mostrarBureau: false,
+        mostrarIntermediario: false,
       };
     }
 
@@ -2963,6 +3464,7 @@
         mostrarAgencia: false,
         mostrarClienteDireto: false,
         mostrarBureau: false,
+        mostrarIntermediario: false,
       };
     }
 
@@ -2970,9 +3472,10 @@
       return {
         labelEmpresaPrincipal: "Planejador de Mídia",
         mostrarWrap: false,
-        mostrarAgencia: false,
+        mostrarAgencia: true,
         mostrarClienteDireto: false,
-        mostrarBureau: false,
+        mostrarBureau: true,
+        mostrarIntermediario: true,
       };
     }
 
@@ -2982,6 +3485,7 @@
       mostrarAgencia: false,
       mostrarClienteDireto: false,
       mostrarBureau: false,
+      mostrarIntermediario: false,
     };
   }
 
@@ -2991,6 +3495,7 @@
     const idEmpresa = idNum(c.IDEmpresa ?? c.IDEmpresaRelacionadaCard ?? 0) || null;
     const idAgencia = idNum(c.IDEmpresaAgencia ?? 0) || null;
     const idBureau = idNum(c.IDEmpresaBureau ?? 0) || null;
+    const idIntermediario = idNum(c.IDEmpresaIntermediario ?? 0) || null;
 
     if (idTipo === 3) {
       return {
@@ -2998,6 +3503,7 @@
         agencia: null,
         clienteDireto: null,
         bureau: null,
+        intermediario: null,
       };
     }
 
@@ -3007,6 +3513,7 @@
         agencia: null,
         clienteDireto: null,
         bureau: null,
+        intermediario: null,
       };
     }
 
@@ -3015,6 +3522,7 @@
       agencia: idAgencia,
       clienteDireto: null,
       bureau: idBureau,
+      intermediario: idIntermediario,
     };
   }
 
@@ -3228,6 +3736,15 @@ function normalizarCardServidor(card){
     idEmpRelacionadaBruto === ""
       ? null
       : idNum(idEmpRelacionadaBruto);
+
+  for (const nomeCampoEmpresaRelacionada of ["IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaIntermediario"]) {
+    c[nomeCampoEmpresaRelacionada] =
+      c[nomeCampoEmpresaRelacionada] === null ||
+      c[nomeCampoEmpresaRelacionada] === undefined ||
+      c[nomeCampoEmpresaRelacionada] === ""
+        ? null
+        : idNum(c[nomeCampoEmpresaRelacionada]);
+  }
 
   const versaoHexBruta = safeStr(
     c.VersaoConcorrenciaHex ??
@@ -4397,6 +4914,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       if (dispararChange && valorAnterior) {
         selectAgenciaCard.dispatchEvent(new Event("change", { bubbles: true }));
       }
+      sincronizarCnpjsEmpresasRelacionadasCard();
       agendarSincronizacaoFormularioSolicitacao();
       return;
     }
@@ -4412,6 +4930,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       selectAgenciaCard.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
+    sincronizarCnpjsEmpresasRelacionadasCard();
     agendarSincronizacaoFormularioSolicitacao();
   }
 
@@ -4643,6 +5162,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       if (dispararChange && valorAnterior) {
         selectBureauCard.dispatchEvent(new Event("change", { bubbles: true }));
       }
+      sincronizarCnpjsEmpresasRelacionadasCard();
       agendarSincronizacaoFormularioSolicitacao();
       return;
     }
@@ -4655,6 +5175,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       selectBureauCard.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
+    sincronizarCnpjsEmpresasRelacionadasCard();
     agendarSincronizacaoFormularioSolicitacao();
   }
 
@@ -4709,6 +5230,123 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     fecharListaBureauCombobox();
   }
 
+  function obterTextoIntermediarioSelecionado(idEmp){
+    return obterTextoEmpresaSelecionada(idEmp);
+  }
+
+  function garantirOpcaoIntermediarioNoSelect(idEmp){
+    if (!selectIntermediarioCard) return;
+    const valor = safeStr(idEmp || "").trim();
+    if (!valor) return;
+    const jaExiste = Array.from(selectIntermediarioCard.options || []).some((opt) => safeStr(opt.value || "").trim() === valor);
+    if (jaExiste) return;
+    const empresa = obterEmpresaCatalogoPorId(valor);
+    const texto = empresa ? textoOpcaoEmpresa(empresa) : `Empresa #${valor}`;
+    selectIntermediarioCard.appendChild(el("option", { value: valor }, [texto]));
+  }
+
+  async function garantirIntermediarioNoCatalogoPorId(idEmp){
+    const empresa = await garantirEmpresaNoCatalogoPorId(idEmp);
+    if (empresa) garantirOpcaoIntermediarioNoSelect(idEmp);
+    return empresa;
+  }
+
+  function abrirListaIntermediarioCombobox(){
+    if (!comboIntermediarioCard || !listaIntermediarioCardBusca) return;
+    comboIntermediarioCard.classList.add("is-open");
+    listaIntermediarioCardBusca.hidden = false;
+    renderizarListaIntermediarioCombobox(inputIntermediarioCardBusca?.value || "");
+  }
+
+  function fecharListaIntermediarioCombobox(){
+    if (!comboIntermediarioCard || !listaIntermediarioCardBusca) return;
+    comboIntermediarioCard.classList.remove("is-open");
+    listaIntermediarioCardBusca.hidden = true;
+  }
+
+  function sincronizarBuscaIntermediarioComSelect(){
+    if (!inputIntermediarioCardBusca || !selectIntermediarioCard) return;
+    inputIntermediarioCardBusca.value = obterTextoIntermediarioSelecionado(selectIntermediarioCard.value || "");
+  }
+
+  async function selecionarIntermediarioPorIdComGarantia(idEmp, dispararChange = false){
+    if (!selectIntermediarioCard) return;
+    const novoValor = safeStr(idEmp || "").trim();
+    const valorAnterior = safeStr(selectIntermediarioCard.value || "").trim();
+    if (!novoValor) {
+      selectIntermediarioCard.value = "";
+      sincronizarBuscaIntermediarioComSelect();
+      fecharListaIntermediarioCombobox();
+      if (dispararChange && valorAnterior) {
+        selectIntermediarioCard.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      sincronizarCnpjsEmpresasRelacionadasCard();
+      agendarSincronizacaoFormularioSolicitacao();
+      return;
+    }
+    await garantirIntermediarioNoCatalogoPorId(novoValor);
+    garantirOpcaoIntermediarioNoSelect(novoValor);
+    selectIntermediarioCard.value = novoValor;
+    sincronizarBuscaIntermediarioComSelect();
+    fecharListaIntermediarioCombobox();
+    if (dispararChange && novoValor !== valorAnterior) {
+      selectIntermediarioCard.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    sincronizarCnpjsEmpresasRelacionadasCard();
+    agendarSincronizacaoFormularioSolicitacao();
+  }
+
+  function renderizarListaIntermediarioCombobox(texto, opcoes = {}){
+    if (!listaIntermediarioCardBusca) return;
+    const base = Array.isArray(opcoes.empresas) ? opcoes.empresas : filtrarEmpresasCombobox(texto);
+    const filtradas = (Array.isArray(base) ? base : []).slice(0, LIMITE_EMPRESAS_COMBOBOX);
+    intermediariosResultadoComboboxAtual = filtradas.slice();
+    const valorSelecionado = safeStr(selectIntermediarioCard?.value || "").trim();
+    listaIntermediarioCardBusca.innerHTML = "";
+    if (!filtradas.length) {
+      listaIntermediarioCardBusca.appendChild(el("div", { class: "kb-combobox-vazio" }, ["Nenhum intermediário encontrado."]));
+      return;
+    }
+    filtradas.forEach((item) => {
+      const id = safeStr(item?.IDEmpresa ?? item?.IDEmpresaProprietaria ?? item?.ID ?? "").trim();
+      if (!id) return;
+      const razao = safeStr(item?.RazaoSocial || item?.EmpresaRazaoSocial || "—").trim() || "—";
+      const cnpj = mascaraCnpj(item?.CNPJ || item?.EmpresaCNPJ || "");
+      const botao = el("button", { type: "button", class: `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}` }, [
+        el("strong", {}, [razao]),
+        el("span", {}, [cnpj || "Sem CNPJ"])
+      ]);
+      botao.addEventListener("mousedown", async (evento) => {
+        evento.preventDefault();
+        await selecionarIntermediarioPorIdComGarantia(id, false);
+      });
+      listaIntermediarioCardBusca.appendChild(botao);
+    });
+  }
+
+  function reconciliarBuscaIntermediarioDigitada(){
+    if (!inputIntermediarioCardBusca || !selectIntermediarioCard) return;
+    const textoDigitado = safeStr(inputIntermediarioCardBusca.value || "").trim();
+    if (!textoDigitado) {
+      selecionarIntermediarioPorIdComGarantia("", false).catch((erro) => {
+        console.warn("reconciliarBuscaIntermediarioDigitada: falhou ao limpar intermediário", erro);
+      });
+      return;
+    }
+    const empresa = localizarEmpresaPorTextoDigitado(textoDigitado);
+    if (empresa) {
+      const id = safeStr(empresa?.IDEmpresa ?? empresa?.IDEmpresaProprietaria ?? empresa?.ID ?? "").trim();
+      if (id) {
+        selecionarIntermediarioPorIdComGarantia(id, false).catch((erro) => {
+          console.warn("reconciliarBuscaIntermediarioDigitada: falhou ao selecionar intermediário", erro);
+        });
+        return;
+      }
+    }
+    sincronizarBuscaIntermediarioComSelect();
+    fecharListaIntermediarioCombobox();
+  }
+
   function normalizarTelefoneContato(valor){
     return safeStr(valor || "").replace(/\D+/g, "").slice(0, 30);
   }
@@ -4755,13 +5393,35 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     return !!safeStr(inputBusca?.value || "").trim();
   }
 
+  function atualizarCnpjEmpresaRelacionadaInput(inputDestino, idEmpresa){
+    if (!inputDestino) return;
+    const empresa = obterEmpresaCatalogoPorId(idEmpresa || "");
+    inputDestino.value = empresa?.CNPJ ? mascaraCnpj(empresa.CNPJ) : "";
+  }
+
+  function sincronizarCnpjsEmpresasRelacionadasCard(){
+    atualizarCnpjEmpresaRelacionadaInput(inputCnpjAgenciaCard, selectAgenciaCard?.value || "");
+    atualizarCnpjEmpresaRelacionadaInput(inputCnpjBureauCard, selectBureauCard?.value || "");
+    atualizarCnpjEmpresaRelacionadaInput(inputCnpjIntermediarioCard, selectIntermediarioCard?.value || "");
+  }
+
   function coletarEmpresasRelacionadasPermitidasParaPayload(idTipoCliente){
     const config = obterConfigEmpresasRelacionadasPorTipo(idTipoCliente);
+    const dadosAgenciaHeader = obterAgenciaHeaderFormularioSelecionada();
+    const dadosBureauHeader = obterEmpresaHeaderFormularioSelecionada("Bureau");
+    const dadosIntermediarioHeader = obterEmpresaHeaderFormularioSelecionada("Intermediario");
 
     return {
-      id_empresa_agencia: config.mostrarAgencia && selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null,
+      id_empresa_agencia: config.mostrarAgencia
+        ? (dadosAgenciaHeader.IDEmpresaAgencia || (selectAgenciaCard?.value ? Number(selectAgenciaCard.value) : null))
+        : null,
       id_empresa_cliente_direto: config.mostrarClienteDireto && selectClienteDiretoCard?.value ? Number(selectClienteDiretoCard.value) : null,
-      id_empresa_bureau: config.mostrarBureau && selectBureauCard?.value ? Number(selectBureauCard.value) : null,
+      id_empresa_bureau: config.mostrarBureau
+        ? (dadosBureauHeader.IDEmpresaBureau || (selectBureauCard?.value ? Number(selectBureauCard.value) : null))
+        : null,
+      id_empresa_intermediario: config.mostrarIntermediario
+        ? (dadosIntermediarioHeader.IDEmpresaIntermediario || (selectIntermediarioCard?.value ? Number(selectIntermediarioCard.value) : null))
+        : null,
     };
   }
 
@@ -4777,11 +5437,13 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const agenciaTemValor = campoEmpresaRelacionadaTemValor(selectAgenciaCard, inputAgenciaCardBusca);
     const clienteDiretoTemValor = campoEmpresaRelacionadaTemValor(selectClienteDiretoCard, inputClienteDiretoCardBusca);
     const bureauTemValor = campoEmpresaRelacionadaTemValor(selectBureauCard, inputBureauCardBusca);
+    const intermediarioTemValor = campoEmpresaRelacionadaTemValor(selectIntermediarioCard, inputIntermediarioCardBusca);
 
     const mostrarAgencia = !!config.mostrarAgencia && (exibirRelacionadasNaFase4 || agenciaTemValor);
     const mostrarClienteDireto = !!config.mostrarClienteDireto && (exibirRelacionadasNaFase4 || clienteDiretoTemValor);
     const mostrarBureau = !!config.mostrarBureau && (exibirRelacionadasNaFase4 || bureauTemValor);
-    const mostrarWrapRelacionadas = !!config.mostrarWrap && (exibirRelacionadasNaFase4 || mostrarAgencia || mostrarClienteDireto || mostrarBureau);
+    const mostrarIntermediario = !!config.mostrarIntermediario && (exibirRelacionadasNaFase4 || intermediarioTemValor);
+    const mostrarWrapRelacionadas = !!config.mostrarWrap && (exibirRelacionadasNaFase4 || mostrarAgencia || mostrarClienteDireto || mostrarBureau || mostrarIntermediario);
 
     definirVisibilidadeCampoEmpresaRelacionada(wrapEmpresasRelacionadasCard, mostrarWrapRelacionadas);
 
@@ -4814,6 +5476,18 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       botaoLimpar: btnLimparBureau,
       habilitado: mostrarBureau,
     });
+
+    definirVisibilidadeCampoEmpresaRelacionada(wrapIntermediarioCard, mostrarIntermediario);
+    if (!mostrarIntermediario) fecharListaIntermediarioCombobox();
+    definirEstadoCampoEmpresaRelacionada({
+      inputBusca: inputIntermediarioCardBusca,
+      botaoToggle: btnToggleIntermediarioCard,
+      selectOculto: selectIntermediarioCard,
+      botaoLimpar: btnLimparIntermediario,
+      habilitado: mostrarIntermediario,
+    });
+
+    sincronizarCnpjsEmpresasRelacionadasCard();
   }
 
   function atualizarVisibilidadeDadosNovoContrato(){
@@ -12087,6 +12761,96 @@ async function moverCard(idCard, idFasePara, posicao) {
     agendarSincronizacaoFormularioSolicitacao();
   });
 
+  inputIntermediarioCardBusca?.addEventListener("focus", () => {
+    abrirListaIntermediarioCombobox();
+    buscarEmpresasRemoto(inputIntermediarioCardBusca.value || "", {
+      tipo: "intermediario",
+      listaDestino: listaIntermediarioCardBusca,
+      renderizador: renderizarListaIntermediarioCombobox,
+    }).catch((erro) => {
+      console.warn("focus intermediário: falhou", erro);
+    });
+  });
+
+  inputIntermediarioCardBusca?.addEventListener("click", () => {
+    abrirListaIntermediarioCombobox();
+    buscarEmpresasRemoto(inputIntermediarioCardBusca.value || "", {
+      tipo: "intermediario",
+      listaDestino: listaIntermediarioCardBusca,
+      renderizador: renderizarListaIntermediarioCombobox,
+    }).catch((erro) => {
+      console.warn("click intermediário: falhou", erro);
+    });
+  });
+
+  inputIntermediarioCardBusca?.addEventListener("input", () => {
+    abrirListaIntermediarioCombobox();
+    const termo = inputIntermediarioCardBusca.value || "";
+    const termoDigits = normalizaCnpj(termo);
+    if (!safeStr(termo).trim()) {
+      buscarEmpresasRemoto("", {
+        tipo: "intermediario",
+        listaDestino: listaIntermediarioCardBusca,
+        renderizador: renderizarListaIntermediarioCombobox,
+      }).catch((erro) => {
+        console.warn("input intermediário vazio: falhou", erro);
+      });
+      return;
+    }
+    if (safeStr(termo).trim().length >= 2 || termoDigits.length >= 4) {
+      buscarEmpresasRemoto(termo, {
+        tipo: "intermediario",
+        listaDestino: listaIntermediarioCardBusca,
+        renderizador: renderizarListaIntermediarioCombobox,
+      }).catch((erro) => {
+        console.warn("input intermediário remoto: falhou", erro);
+        renderizarListaIntermediarioCombobox(termo);
+      });
+      return;
+    }
+    renderizarListaIntermediarioCombobox(termo);
+  });
+
+  inputIntermediarioCardBusca?.addEventListener("keydown", (evento) => {
+    if (evento.key === "Enter") {
+      evento.preventDefault();
+      const primeira = intermediariosResultadoComboboxAtual[0] || filtrarEmpresasCombobox(inputIntermediarioCardBusca.value || "")[0] || null;
+      if (primeira) {
+        const id = safeStr(primeira?.IDEmpresa ?? primeira?.IDEmpresaProprietaria ?? primeira?.ID ?? "").trim();
+        if (id) {
+          selecionarIntermediarioPorIdComGarantia(id, false).catch((erro) => {
+            console.warn("keydown intermediário: falhou ao selecionar primeira opção", erro);
+          });
+          return;
+        }
+      }
+      reconciliarBuscaIntermediarioDigitada();
+      return;
+    }
+
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      sincronizarBuscaIntermediarioComSelect();
+      fecharListaIntermediarioCombobox();
+      return;
+    }
+  });
+
+  btnToggleIntermediarioCard?.addEventListener("click", () => {
+    if (listaIntermediarioCardBusca?.hidden) abrirListaIntermediarioCombobox();
+    else {
+      sincronizarBuscaIntermediarioComSelect();
+      fecharListaIntermediarioCombobox();
+    }
+  });
+
+  btnLimparIntermediario?.addEventListener("click", () => {
+    selecionarIntermediarioPorIdComGarantia("", false).catch((erro) => {
+      console.warn("btnLimparIntermediario: falhou", erro);
+    });
+    agendarSincronizacaoFormularioSolicitacao();
+  });
+
   inputTelefoneCard?.addEventListener("input", () => {
     inputTelefoneCard.value = normalizarTelefoneContato(inputTelefoneCard.value || "");
   });
@@ -12120,6 +12884,10 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (comboBureauCard && !comboBureauCard.contains(evento.target)) {
       reconciliarBuscaBureauDigitada();
+    }
+
+    if (comboIntermediarioCard && !comboIntermediarioCard.contains(evento.target)) {
+      reconciliarBuscaIntermediarioDigitada();
     }
 
     if (clicouDentroListaPainelFace || reconciliacaoPainelFaceEstaBloqueada()) {
@@ -13112,6 +13880,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       await selecionarAgenciaPorIdComGarantia(empresasRelacionadas.agencia ? String(empresasRelacionadas.agencia) : "", false);
       await selecionarClienteDiretoPorIdComGarantia(empresasRelacionadas.clienteDireto ? String(empresasRelacionadas.clienteDireto) : "", false);
       await selecionarBureauPorIdComGarantia(empresasRelacionadas.bureau ? String(empresasRelacionadas.bureau) : "", false);
+      await selecionarIntermediarioPorIdComGarantia(empresasRelacionadas.intermediario ? String(empresasRelacionadas.intermediario) : "", false);
     } else {
       setEmpresaPreviewByObj(null);
       resetarFluxoContrato();
@@ -13539,6 +14308,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       id_empresa_agencia: empresasRelacionadasPayload.id_empresa_agencia,
       id_empresa_cliente_direto: empresasRelacionadasPayload.id_empresa_cliente_direto,
       id_empresa_bureau: empresasRelacionadasPayload.id_empresa_bureau,
+      id_empresa_intermediario: empresasRelacionadasPayload.id_empresa_intermediario,
       marca: safeStr(inputMarcaCard?.value || "").trim() || null,
       telefone: normalizarTelefoneContato(inputTelefoneCard?.value || "") || null,
       email: safeStr(inputEmailCard?.value || "").trim() || null,
