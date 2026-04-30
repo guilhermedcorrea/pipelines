@@ -4803,9 +4803,36 @@ function normalizarCardServidor(card){
   }
 
   function obterCorFase(fase, indice){
-    const corPersistida = normalizarCorHex(fase?.CorHex || "");
+    const corPersistida = normalizarCorHex(
+      fase?.CorHex ?? fase?.cor_hex ?? fase?.cor_fase ?? ""
+    );
     if (corPersistida) return corPersistida;
     return corColunaPorIndice(indice);
+  }
+
+  function obterCorTextoFase(fase, corFundo){
+    return normalizarCorHex(
+      fase?.CorTextoHex ?? fase?.cor_texto_hex ?? fase?.cor_texto_fase ?? ""
+    ) || corTextoPorFundo(corFundo);
+  }
+
+  function aplicarFaseRetornadaServidor(faseServidor){
+    if (!faseServidor || typeof faseServidor !== "object") return;
+
+    const idFase = idNum(faseServidor.IDDimKanbanFase || faseServidor.id_fase || 0);
+    if (!idFase) return;
+
+    const idx = fases.findIndex(f => idNum(f?.IDDimKanbanFase || 0) === idFase);
+    if (idx >= 0) {
+      fases[idx] = Object.assign({}, fases[idx], faseServidor);
+    } else {
+      fases.push(Object.assign({}, faseServidor));
+      fases.sort((a, b) => {
+        const ordemA = idNum(a?.OrdemFase || 999999);
+        const ordemB = idNum(b?.OrdemFase || 999999);
+        return ordemA - ordemB;
+      });
+    }
   }
 
   function resetModalFase(){
@@ -11691,9 +11718,12 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       const qtdTotalServidor = idNum(f.QuantidadeCardsTotal || contarCardsNaFaseCarregados(idFase));
       const qtdCarregadaInicial = idNum(f.QuantidadeCardsCarregadosInicialmente || contarCardsNaFaseCarregados(idFase));
       const colAccent = obterCorFase(f, idx);
+      const colText = obterCorTextoFase(f, colAccent);
 
       const col = el("div", {class:"kb-col", "data-fase": idFase});
       col.style.setProperty("--col-accent", colAccent);
+      col.style.setProperty("--col-head-bg", colAccent);
+      col.style.setProperty("--col-text", colText);
 
       const head = el("div", {class:"kb-col-head"}, [
         el("div", {class:"kb-col-title"}, [
@@ -15067,11 +15097,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     const nome = (faseNomeInput?.value || "").trim();
     const tipo = faseTipoSelect?.value || "ATIVA";
     const corHex = faseUsarCor?.checked ? normalizarCorHex(faseCorHex?.value || "") : null;
+    const corTextoHex = corHex ? corTextoPorFundo(corHex) : null;
 
     msgFase.style.display = "none";
     msgFase.textContent = "";
 
-    const payload = { nome, tipo, cor_hex: corHex };
+    const payload = { nome, tipo, cor_hex: corHex, cor_texto_hex: corTextoHex };
     const url = faseEditandoId
       ? `/kanban/api/fases/${faseEditandoId}`
       : `/kanban/api/kanbans/${ID_KANBAN}/fases`;
@@ -15091,9 +15122,16 @@ async function moverCard(idCard, idFasePara, posicao) {
       return;
     }
 
+    aplicarFaseRetornadaServidor(j.fase);
     modalFase.style.display = "none";
     resetModalFase();
-    await carregar();
+
+    if (j.fase) {
+      renderBoardCompleto();
+      atualizarResumoBusca();
+    } else {
+      await carregar();
+    }
   });
 
   function atualizarTagsCatalogoSeNecessario(tag){

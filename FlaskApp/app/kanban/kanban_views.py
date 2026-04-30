@@ -5499,7 +5499,70 @@ def _json_para_log(valor: Any) -> str | None:
 def _cor_hex_valida(cor_hex: str | None) -> bool:
     if not cor_hex:
         return False
-    return bool(re.fullmatch(r"#[0-9A-Fa-f]{6}", cor_hex.strip()))
+    return bool(re.fullmatch(r"#[0-9A-Fa-f]{6}", str(cor_hex).strip()))
+
+
+def _normalizar_cor_hex_ou_none(cor_hex: Any) -> str | None:
+    """Eu normalizo cores HEX para o padrão #RRGGBB usado no banco."""
+    texto = str(cor_hex or "").strip()
+    if not texto:
+        return None
+
+    if not texto.startswith("#"):
+        texto = f"#{texto}"
+
+    texto = texto.upper()
+    return texto if _cor_hex_valida(texto) else None
+
+
+def _cor_texto_por_cor_fundo(cor_hex: str | None) -> str | None:
+    """Eu escolho automaticamente uma cor de texto legível para o fundo da fase."""
+    cor = _normalizar_cor_hex_ou_none(cor_hex)
+    if not cor:
+        return None
+
+    vermelho = int(cor[1:3], 16) / 255
+    verde = int(cor[3:5], 16) / 255
+    azul = int(cor[5:7], 16) / 255
+
+    def _canal_linear(canal: float) -> float:
+        return canal / 12.92 if canal <= 0.03928 else ((canal + 0.055) / 1.055) ** 2.4
+
+    luminancia = (
+        0.2126 * _canal_linear(vermelho)
+        + 0.7152 * _canal_linear(verde)
+        + 0.0722 * _canal_linear(azul)
+    )
+
+    return "#0F172A" if luminancia > 0.56 else "#FFFFFF"
+
+
+def _preparar_cores_fase_payload(payload: Mapping[str, Any], *, exigir_chave_cor: bool = False) -> tuple[bool, str | None, str | None, str | None]:
+    """Eu preparo CorHex e CorTextoHex vindas do front para gravar na fase."""
+    tem_cor = "cor_hex" in payload or "CorHex" in payload
+
+    if exigir_chave_cor and not tem_cor:
+        return False, None, None, None
+
+    valor_cor = payload.get("cor_hex", payload.get("CorHex"))
+    cor_hex = _normalizar_cor_hex_ou_none(valor_cor)
+
+    if tem_cor and str(valor_cor or "").strip() and not cor_hex:
+        return True, None, None, "CorHex inválida. Use #RRGGBB"
+
+    valor_cor_texto = payload.get("cor_texto_hex", payload.get("CorTextoHex"))
+    cor_texto_hex = _normalizar_cor_hex_ou_none(valor_cor_texto)
+
+    if str(valor_cor_texto or "").strip() and not cor_texto_hex:
+        return True, None, None, "CorTextoHex inválida. Use #RRGGBB"
+
+    if cor_hex and not cor_texto_hex:
+        cor_texto_hex = _cor_texto_por_cor_fundo(cor_hex)
+
+    if not cor_hex:
+        cor_texto_hex = None
+
+    return tem_cor, cor_hex, cor_texto_hex, None
 
 
 
@@ -8551,6 +8614,7 @@ def _obter_fase_autorizada(id_fase: int, *, incluir_inativa: bool = False) -> di
     id_emp = _id_empresa_usuario_or_403()
     filtro_ativo = "" if incluir_inativa else "AND f.Ativo = 1"
     cor_select = "f.CorHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorHex") else "CAST(NULL AS varchar(7)) AS CorHex,"
+    cor_texto_select = "f.CorTextoHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorTextoHex") else "CAST(NULL AS varchar(7)) AS CorTextoHex,"
     sql = text(f"""
         SELECT
             f.IDDimKanbanFase,
@@ -8559,6 +8623,7 @@ def _obter_fase_autorizada(id_fase: int, *, incluir_inativa: bool = False) -> di
             f.OrdemFase,
             f.TipoFase,
             {cor_select}
+            {cor_texto_select}
             f.Ativo,
             k.IDEmpresaProprietaria,
             k.BitPrincipal
@@ -8988,13 +9053,16 @@ def _fase_deve_aparecer_no_template(id_fase: int | None) -> bool:
 
 def _obter_fases_kanban(id_kanban: int) -> list[dict[str, Any]]:
     cor_select = "CorHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorHex") else "CAST(NULL AS varchar(7)) AS CorHex,"
+    cor_texto_select = "CorTextoHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorTextoHex") else "CAST(NULL AS varchar(7)) AS CorTextoHex,"
     sql_fases = text(f"""
         SELECT
             IDDimKanbanFase,
+            IDDimKanban,
             NomeFase,
             OrdemFase,
             TipoFase,
             {cor_select}
+            {cor_texto_select}
             Ativo
         FROM {TABELA_KANBAN_FASE}
         WHERE IDDimKanban = :id_kanban
@@ -15548,21 +15616,22 @@ def api_kanban_criar():
 def api_fase_criar(id_kanban: int):
     id_usuario = _assert_login()
     id_emp = _id_empresa_usuario_or_403()
-    _obter_kanban_autorizado(id_kanban)
+    kanban_autorizado = _obter_kanban_autorizado(id_kanban)
+    id_emp_kanban = int(kanban_autorizado.get("IDEmpresaProprietaria") or id_emp)
 
     payload = request.get_json(silent=True) or {}
     nome = (payload.get("nome") or "").strip()
-    tipo = _normalizar_codigo_dominio(payload.get("tipo")) or _obter_tipo_fase_padrao(id_kanban=id_kanban, id_emp=id_emp)
+    tipo = _normalizar_codigo_dominio(payload.get("tipo")) or _obter_tipo_fase_padrao(id_kanban=id_kanban, id_emp=id_emp_kanban)
     ordem = payload.get("ordem")
-    cor_hex = (payload.get("cor_hex") or "").strip() or None
+    _, cor_hex, cor_texto_hex, erro_cor = _preparar_cores_fase_payload(payload)
 
     if len(nome) < 2:
         return jsonify({"ok": False, "msg": "Nome da fase inválido"}), 400
-    tipos_fase_validos = _obter_tipos_fase_configurados(id_kanban=id_kanban, id_emp=id_emp)
+    tipos_fase_validos = _obter_tipos_fase_configurados(id_kanban=id_kanban, id_emp=id_emp_kanban)
     if tipos_fase_validos and tipo not in tipos_fase_validos:
         return jsonify({"ok": False, "msg": "TipoFase inválido", "tipos_fase_validos": tipos_fase_validos}), 400
-    if cor_hex and not _cor_hex_valida(cor_hex):
-        return jsonify({"ok": False, "msg": "CorHex inválida. Use #RRGGBB"}), 400
+    if erro_cor:
+        return jsonify({"ok": False, "msg": erro_cor}), 400
 
     if ordem is None:
         sql_max = text(f"""
@@ -15600,13 +15669,18 @@ def api_fase_criar(id_kanban: int):
         "ordem": ordem,
         "tipo": tipo,
         "id_usuario": id_usuario,
-        "id_emp": id_emp,
+        "id_emp": id_emp_kanban,
     }
 
     if _coluna_existe(TABELA_KANBAN_FASE, "CorHex"):
         colunas.append("CorHex")
         valores.append(":cor_hex")
         params["cor_hex"] = cor_hex
+
+    if _coluna_existe(TABELA_KANBAN_FASE, "CorTextoHex"):
+        colunas.append("CorTextoHex")
+        valores.append(":cor_texto_hex")
+        params["cor_texto_hex"] = cor_texto_hex
 
     sql = text(
         f"""
@@ -15620,7 +15694,7 @@ def api_fase_criar(id_kanban: int):
     novo_id = db.session.execute(sql, params).scalar()
 
     db.session.commit()
-    _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban)
+    _invalidar_kanban(id_emp=id_emp_kanban, id_kanban=id_kanban)
 
     _emitir_evento_kanban(
         id_kanban,
@@ -15631,10 +15705,26 @@ def api_fase_criar(id_kanban: int):
             "OrdemFase": ordem,
             "TipoFase": tipo,
             "CorHex": cor_hex,
+            "CorTextoHex": cor_texto_hex,
+            "IDEmpresaProprietaria": id_emp_kanban,
         },
     )
 
-    return jsonify({"ok": True, "IDDimKanbanFase": int(novo_id)})
+    return jsonify({
+        "ok": True,
+        "IDDimKanbanFase": int(novo_id),
+        "fase": {
+            "IDDimKanbanFase": int(novo_id),
+            "IDDimKanban": id_kanban,
+            "NomeFase": nome[:100],
+            "OrdemFase": ordem,
+            "TipoFase": tipo,
+            "CorHex": cor_hex,
+            "CorTextoHex": cor_texto_hex,
+            "IDEmpresaProprietaria": id_emp_kanban,
+            "Ativo": 1,
+        },
+    })
 
 
 @kanban_bp.route("/api/fases/<int:id_fase>", methods=["PUT"])
@@ -15645,14 +15735,17 @@ def api_fase_atualizar(id_fase: int):
     id_emp = _id_empresa_usuario_or_403()
     fase = _obter_fase_autorizada(id_fase)
     id_kanban = int(fase.get("IDDimKanban") or 0)
+    id_emp_kanban = int(fase.get("IDEmpresaProprietaria") or id_emp)
 
     payload = request.get_json(silent=True) or {}
     nome = payload.get("nome")
     tipo = payload.get("tipo")
-    cor_hex = payload.get("cor_hex")
+    tem_cor_payload, cor_hex, cor_texto_hex, erro_cor = _preparar_cores_fase_payload(payload, exigir_chave_cor=True)
+    if erro_cor:
+        return jsonify({"ok": False, "msg": erro_cor}), 400
 
     campos: list[str] = []
-    params: dict[str, Any] = {"id_fase": id_fase}
+    params: dict[str, Any] = {"id_fase": id_fase, "id_kanban": id_kanban}
 
     if nome is not None:
         nome = str(nome).strip()
@@ -15663,21 +15756,26 @@ def api_fase_atualizar(id_fase: int):
 
     if tipo is not None:
         tipo = str(tipo).strip().upper()
-        tipos_fase_validos = _obter_tipos_fase_configurados(id_kanban=id_kanban, id_emp=id_emp)
+        tipos_fase_validos = _obter_tipos_fase_configurados(id_kanban=id_kanban, id_emp=id_emp_kanban)
         if tipos_fase_validos and tipo not in tipos_fase_validos:
             return jsonify({"ok": False, "msg": "TipoFase inválido", "tipos_fase_validos": tipos_fase_validos}), 400
         campos.append("TipoFase = :tipo")
         params["tipo"] = tipo
 
-    if cor_hex is not None and _coluna_existe(TABELA_KANBAN_FASE, "CorHex"):
-        cor_hex = str(cor_hex).strip() or None
-        if cor_hex and not _cor_hex_valida(cor_hex):
-            return jsonify({"ok": False, "msg": "CorHex inválida. Use #RRGGBB"}), 400
+    if tem_cor_payload and _coluna_existe(TABELA_KANBAN_FASE, "CorHex"):
         campos.append("CorHex = :cor_hex")
         params["cor_hex"] = cor_hex
 
+    if tem_cor_payload and _coluna_existe(TABELA_KANBAN_FASE, "CorTextoHex"):
+        campos.append("CorTextoHex = :cor_texto_hex")
+        params["cor_texto_hex"] = cor_texto_hex
+
     if not campos:
         return jsonify({"ok": False, "msg": "Nenhuma alteração enviada para a fase"}), 400
+
+    if _coluna_existe(TABELA_KANBAN_FASE, "IDEmpresaProprietaria"):
+        campos.append("IDEmpresaProprietaria = :id_emp_kanban")
+        params["id_emp_kanban"] = id_emp_kanban
 
     if _coluna_existe(TABELA_KANBAN_FASE, "AtualizadoEm"):
         campos.append("AtualizadoEm = GETDATE()")
@@ -15690,12 +15788,13 @@ def api_fase_atualizar(id_fase: int):
             UPDATE {TABELA_KANBAN_FASE}
             SET {', '.join(campos)}
             WHERE IDDimKanbanFase = :id_fase
+              AND IDDimKanban = :id_kanban
               AND Ativo = 1;
         """)
         db.session.execute(sql, params)
         db.session.commit()
 
-        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban)
+        _invalidar_kanban(id_emp=id_emp_kanban, id_kanban=id_kanban)
         _emitir_evento_kanban(
             id_kanban,
             "fase_atualizada",
@@ -15704,9 +15803,24 @@ def api_fase_atualizar(id_fase: int):
                 "NomeFase": params.get("nome", fase.get("NomeFase")),
                 "TipoFase": params.get("tipo", fase.get("TipoFase")),
                 "CorHex": params.get("cor_hex", fase.get("CorHex")),
+                "CorTextoHex": params.get("cor_texto_hex", fase.get("CorTextoHex")),
+                "IDEmpresaProprietaria": id_emp_kanban,
             },
         )
-        return jsonify({"ok": True})
+        return jsonify({
+            "ok": True,
+            "fase": {
+                "IDDimKanbanFase": id_fase,
+                "IDDimKanban": id_kanban,
+                "NomeFase": params.get("nome", fase.get("NomeFase")),
+                "OrdemFase": fase.get("OrdemFase"),
+                "TipoFase": params.get("tipo", fase.get("TipoFase")),
+                "CorHex": params.get("cor_hex", fase.get("CorHex")),
+                "CorTextoHex": params.get("cor_texto_hex", fase.get("CorTextoHex")),
+                "IDEmpresaProprietaria": id_emp_kanban,
+                "Ativo": fase.get("Ativo"),
+            },
+        })
     except Exception as exc:
         db.session.rollback()
         current_app.logger.exception("Erro ao atualizar fase id_fase=%s", id_fase)
