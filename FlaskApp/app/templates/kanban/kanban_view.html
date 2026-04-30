@@ -358,6 +358,130 @@
     background:#fff;
   }
 
+
+  .kb-search-combobox{
+    position: relative;
+    flex: 1 1 420px;
+    min-width: min(320px, 100%);
+    z-index: 45;
+  }
+
+  .kb-search-combobox .kb-search-box{
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .kb-search-sugestoes{
+    position:absolute;
+    top: calc(100% + 8px);
+    left:0;
+    right:0;
+    z-index: 80;
+    max-height: min(58vh, 520px);
+    overflow:auto;
+    background:#fff;
+    border:1px solid var(--kb-line);
+    border-radius:16px;
+    box-shadow: 0 18px 42px rgba(15,23,42,.18);
+    padding:8px;
+  }
+
+  .kb-search-sugestoes[hidden]{
+    display:none;
+  }
+
+  .kb-search-sugestao-card{
+    width:100%;
+    border:0;
+    background:transparent;
+    text-align:left;
+    cursor:pointer;
+    border-radius:13px;
+    padding:10px 12px;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    color:var(--kb-text);
+  }
+
+  .kb-search-sugestao-card:hover,
+  .kb-search-sugestao-card.is-active{
+    background: var(--kb-primary-weak);
+  }
+
+  .kb-search-sugestao-topo{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    min-width:0;
+  }
+
+  .kb-search-sugestao-titulo{
+    font-size:13px;
+    font-weight:950;
+    line-height:1.25;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .kb-search-sugestao-id{
+    flex:0 0 auto;
+    font-size:11px;
+    font-weight:950;
+    color:#fff;
+    background:var(--kb-primary);
+    border-radius:999px;
+    padding:4px 8px;
+    line-height:1;
+  }
+
+  .kb-search-sugestao-meta,
+  .kb-search-sugestao-desc{
+    font-size:12px;
+    line-height:1.35;
+    color:rgba(15,23,42,.68);
+    font-weight:750;
+  }
+
+  .kb-search-sugestao-desc{
+    color:rgba(15,23,42,.58);
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+
+  .kb-search-sugestao-badges{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+  }
+
+  .kb-search-sugestao-badge{
+    display:inline-flex;
+    align-items:center;
+    max-width:100%;
+    border:1px solid rgba(15,23,42,.10);
+    background:rgba(248,250,252,.95);
+    border-radius:999px;
+    padding:4px 8px;
+    font-size:11px;
+    font-weight:900;
+    color:rgba(15,23,42,.72);
+    line-height:1;
+  }
+
+  .kb-search-sugestoes-status{
+    padding:12px;
+    font-size:12px;
+    font-weight:850;
+    color:rgba(15,23,42,.62);
+  }
+
   .kb-search-count{
     display:inline-flex;
     align-items:center;
@@ -3152,16 +3276,22 @@
     <div class="kb-search">
       <label class="kb-search-label" for="buscaKanban">Pesquisar cards</label>
       <div class="kb-search-main">
-        <div class="kb-search-box">
-          <span class="kb-search-icon">🔎</span>
-          <input
-            id="buscaKanban"
-            class="kb-search-input"
-            type="search"
-            placeholder="Pesquisar por nome do card, nome da face, empresa ou vendedor..."
-            autocomplete="off"
-            spellcheck="false"
-          />
+        <div id="comboBuscaKanban" class="kb-search-combobox">
+          <div class="kb-search-box">
+            <span class="kb-search-icon">🔎</span>
+            <input
+              id="buscaKanban"
+              class="kb-search-input"
+              type="search"
+              placeholder="Pesquisar por nome do card, ID, fase, descrição, empresa, vendedor ou face..."
+              autocomplete="off"
+              spellcheck="false"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="listaBuscaKanban"
+            />
+          </div>
+          <div id="listaBuscaKanban" class="kb-search-sugestoes" hidden></div>
         </div>
 
         <div class="kb-filtros">
@@ -3729,5 +3859,5 @@
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260430_api_card_url_json_v2') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260430_busca_card_combobox_v1') }}"></script>
 {% endblock %}

@@ -14940,6 +14940,161 @@ def api_cards_listar_por_fase(id_kanban: int):
 
 
 
+
+@kanban_bp.route("/api/kanbans/<int:id_kanban>/cards/sugestoes", methods=["GET"])
+@login_required
+@limiter.limit("180/minute")
+def api_cards_sugestoes_busca(id_kanban: int):
+    """
+    Eu retorno sugestões leves para o campo buscaKanban.
+
+    O objetivo não é carregar o card inteiro. Esta API entrega só o bastante
+    para o autocomplete: ID, título, fase, usuário criador, descrição, empresa
+    e quantidade de CodFace vinculada ao card.
+    """
+    _assert_login()
+    _obter_kanban_autorizado(id_kanban)
+    id_emp = _id_empresa_usuario_or_403()
+
+    termo = _normalizar_texto_filtro(request.args.get("q"))
+    termo_digits = re.sub(r"\D+", "", termo or "")
+
+    try:
+        limite = int(request.args.get("limit") or 12)
+    except Exception:
+        limite = 12
+
+    limite = max(1, min(limite, 20))
+
+    if len(termo) < 2 and len(termo_digits) < 1:
+        resposta = jsonify({"ok": True, "sugestoes": []})
+        resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return resposta
+
+    if _coluna_existe(TABELA_CARD, "IDDimUsuarios"):
+        expr_id_usuario_criador = "c.IDDimUsuarios"
+    elif _coluna_existe(TABELA_CARD, "IDVendedorUsuario"):
+        expr_id_usuario_criador = "c.IDVendedorUsuario"
+    else:
+        expr_id_usuario_criador = "CAST(NULL AS int)"
+
+    q_like = f"%{termo}%"
+    q_inicio = f"{termo}%"
+    q_digits_like = f"%{termo_digits}%" if termo_digits else ""
+
+    sql = text(f"""
+        SELECT TOP (:limite)
+            c.IDFatoKanbanCard,
+            c.Titulo,
+            c.Descricao,
+            c.CriadoEm,
+            c.AtualizadoEm,
+            c.IDDimKanbanFaseAtual,
+            fase.NomeFase,
+            {expr_id_usuario_criador} AS IDUsuarioCriador,
+            NULLIF(LTRIM(RTRIM(ISNULL(usuario_criador.NomeUsuario, ''))), '') AS NomeUsuarioCriador,
+            e.IDEmpresa AS IDEmpresaRelacionadaCard,
+            e.RazaoSocial AS EmpresaRazaoSocial,
+            e.NomeFantasia AS EmpresaNomeFantasia,
+            e.CNPJ AS EmpresaCNPJ,
+            ISNULL(resumo_faces.QuantidadePaineisVinculados, 0) AS QuantidadePaineisVinculados,
+            ISNULL(resumo_faces.QuantidadeCodFaces, 0) AS QuantidadeCodFaces
+        FROM {TABELA_CARD} c
+        INNER JOIN {TABELA_KANBAN} k
+            ON k.IDDimKanban = c.IDDimKanban
+        LEFT JOIN {TABELA_KANBAN_FASE} fase
+            ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+           AND fase.IDDimKanban = c.IDDimKanban
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_criador
+            ON usuario_criador.IDDimUsuarios = {expr_id_usuario_criador}
+           AND (usuario_criador.IDEmpresaProprietaria = c.IDEmpresaProprietaria OR usuario_criador.IDEmpresaProprietaria IS NULL)
+        {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+        OUTER APPLY (
+            SELECT
+                COUNT(1) AS QuantidadePaineisVinculados,
+                COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodFace))), '')) AS QuantidadeCodFaces
+            FROM {TABELA_CARD_PAINEL_FACE} pf
+            WHERE pf.IDFatoKanbanCard = c.IDFatoKanbanCard
+              AND ISNULL(pf.Ativo, 1) = 1
+              AND pf.RemovidoEm IS NULL
+        ) resumo_faces
+        WHERE c.IDDimKanban = :id_kanban
+          AND k.IDEmpresaProprietaria = :id_empresa_proprietaria
+          AND k.Ativo = 1
+          AND c.Ativo = 1
+          {_sql_filtro_status_card_visiveis('c')}
+          {_sql_filtro_cards_nao_concluidos_no_quadro('c')}
+          AND (
+                CONVERT(varchar(30), c.IDFatoKanbanCard) LIKE :q_digits_like
+             OR ISNULL(c.Titulo, '') LIKE :q_like
+             OR ISNULL(c.Descricao, '') LIKE :q_like
+             OR ISNULL(fase.NomeFase, '') LIKE :q_like
+             OR ISNULL(usuario_criador.NomeUsuario, '') LIKE :q_like
+             OR ISNULL(e.RazaoSocial, '') LIKE :q_like
+             OR ISNULL(e.NomeFantasia, '') LIKE :q_like
+             OR ISNULL(e.CNPJ, '') LIKE :q_like
+             OR EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CARD_PAINEL_FACE} pf_busca
+                    LEFT JOIN {TABELA_DIM_PAINEIS_EUROMIDIA} painel_busca
+                        ON painel_busca.IDDimPaineisEuromidia = pf_busca.IDDimPaineisEuromidia
+                    LEFT JOIN {TABELA_DIM_FACES_PAINEIS} face_busca
+                        ON face_busca.IDDimFacesPaineis = pf_busca.IDDimFacesPaineis
+                    WHERE pf_busca.IDFatoKanbanCard = c.IDFatoKanbanCard
+                      AND ISNULL(pf_busca.Ativo, 1) = 1
+                      AND pf_busca.RemovidoEm IS NULL
+                      AND (
+                            CONVERT(varchar(80), pf_busca.CodPonto) LIKE :q_like
+                         OR CONVERT(varchar(80), pf_busca.CodFace) LIKE :q_like
+                         OR ISNULL(pf_busca.TipoPainel, '') LIKE :q_like
+                         OR ISNULL(painel_busca.Logradouro, '') LIKE :q_like
+                         OR ISNULL(painel_busca.Cidade, '') LIKE :q_like
+                         OR ISNULL(painel_busca.Bairro, '') LIKE :q_like
+                         OR ISNULL(face_busca.CodFace, '') LIKE :q_like
+                         OR ISNULL(face_busca.Tipo, '') LIKE :q_like
+                      )
+                )
+          )
+        ORDER BY
+            CASE
+                WHEN CONVERT(varchar(30), c.IDFatoKanbanCard) = :q_digits THEN 0
+                WHEN ISNULL(c.Titulo, '') LIKE :q_inicio THEN 1
+                WHEN ISNULL(e.RazaoSocial, '') LIKE :q_inicio THEN 2
+                WHEN ISNULL(fase.NomeFase, '') LIKE :q_inicio THEN 3
+                ELSE 9
+            END,
+            COALESCE(c.AtualizadoEm, c.CriadoEm) DESC,
+            c.IDFatoKanbanCard DESC;
+    """)
+
+    linhas = db.session.execute(
+        sql,
+        {
+            "limite": limite,
+            "id_kanban": int(id_kanban),
+            "id_empresa_proprietaria": int(id_emp),
+            "q_like": q_like,
+            "q_inicio": q_inicio,
+            "q_digits": termo_digits,
+            "q_digits_like": q_digits_like or "__SEM_DIGITOS__",
+        },
+    ).mappings().all()
+
+    sugestoes = []
+    for linha in linhas:
+        item = dict(linha)
+        item["QuantidadePaineisVinculados"] = int(item.get("QuantidadePaineisVinculados") or 0)
+        item["QuantidadeCodFaces"] = int(item.get("QuantidadeCodFaces") or 0)
+        sugestoes.append(item)
+
+    resposta = jsonify({"ok": True, "sugestoes": sugestoes})
+    resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resposta.headers["Pragma"] = "no-cache"
+    resposta.headers["Expires"] = "0"
+    return resposta
+
+
+
 @kanban_bp.route("/api/cards/<int:id_card>", methods=["GET"])
 @login_required
 @limiter.limit("180/minute")

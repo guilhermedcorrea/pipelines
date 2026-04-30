@@ -153,6 +153,8 @@
   const msgFase = document.getElementById("msgFase");
 
   const buscaKanban = document.getElementById("buscaKanban");
+  const comboBuscaKanban = document.getElementById("comboBuscaKanban");
+  const listaBuscaKanban = document.getElementById("listaBuscaKanban");
   const btnLimparBusca = document.getElementById("btnLimparBusca");
   const contadorPesquisa = document.getElementById("contadorPesquisa");
 
@@ -2917,6 +2919,12 @@
   const comercialPorPainelFace = new Map();
   let facesCarregando = false;
   let debounceBuscaTimer = null;
+  let debounceSugestaoBuscaTimer = null;
+  let buscaKanbanSugestoesController = null;
+  let sugestoesBuscaKanbanAtual = [];
+  let indiceSugestaoBuscaKanbanAtiva = -1;
+  const LIMITE_SUGESTOES_BUSCA_KANBAN = 12;
+  const MIN_CARACTERES_SUGESTAO_BUSCA_KANBAN = 2;
   const LIMITE_EMPRESAS_COMBOBOX = 80;
   const LIMITE_PAINEIS_COMBOBOX = 80;
   const LIMITE_PAINEL_FACES_COMBOBOX = 120;
@@ -4439,9 +4447,16 @@ function normalizarCardServidor(card){
   }
 
   function textoBuscaDoCard(card){
+    const idFase = idNum(card?.IDDimKanbanFaseAtual || card?.id_fase_atual || 0);
+    const fase = fasePorId(idFase);
+
     return [
+      safeStr(card?.IDFatoKanbanCard),
       safeStr(card?.Titulo),
+      safeStr(card?.Descricao),
       safeStr(card?.EmpresaRazaoSocial),
+      safeStr(card?.EmpresaCNPJ),
+      safeStr(fase?.NomeFase),
       obterTextoFaceCard(card),
       nomeVendedorDoCard(card),
       nomesTagsDoCard(card).join(" ")
@@ -4795,6 +4810,232 @@ function normalizarCardServidor(card){
     idsFases.forEach(idFase => preencherCabecalhoFase(idFase));
     redesenharFasesLocalmente(idsFases, null, true);
     atualizarResumoBusca();
+  }
+
+
+  function abrirListaSugestoesBuscaKanban(){
+    if (!comboBuscaKanban || !listaBuscaKanban) return;
+    comboBuscaKanban.classList.add("is-open");
+    listaBuscaKanban.hidden = false;
+    if (buscaKanban) buscaKanban.setAttribute("aria-expanded", "true");
+  }
+
+  function fecharListaSugestoesBuscaKanban(){
+    if (!comboBuscaKanban || !listaBuscaKanban) return;
+    comboBuscaKanban.classList.remove("is-open");
+    listaBuscaKanban.hidden = true;
+    indiceSugestaoBuscaKanbanAtiva = -1;
+    if (buscaKanban) buscaKanban.setAttribute("aria-expanded", "false");
+  }
+
+  function textoCurtoBuscaKanban(valor, limite = 180){
+    const texto = safeStr(valor || "").replace(/\s+/g, " ").trim();
+    if (!texto) return "";
+    return texto.length > limite ? `${texto.slice(0, limite - 1)}…` : texto;
+  }
+
+  function normalizarSugestaoBuscaKanban(item){
+    const c = Object.assign({}, item || {});
+    c.IDFatoKanbanCard = idNum(c.IDFatoKanbanCard || c.id_card || 0);
+    c.Titulo = safeStr(c.Titulo || c.titulo || "").trim() || `Card #${c.IDFatoKanbanCard}`;
+    c.Descricao = safeStr(c.Descricao || c.descricao || "").trim();
+    c.NomeFase = safeStr(c.NomeFase || c.nome_fase || "Sem fase").trim() || "Sem fase";
+    c.NomeUsuarioCriador = safeStr(c.NomeUsuarioCriador || c.nome_usuario_criador || c.NomeUsuarioResponsavel || "").trim();
+    c.EmpresaRazaoSocial = safeStr(c.EmpresaRazaoSocial || c.empresa_razao_social || c.NomeEmpresa || "").trim();
+    c.EmpresaCNPJ = mascaraCnpj(c.EmpresaCNPJ || c.empresa_cnpj || "");
+    c.QuantidadeCodFaces = idNum(c.QuantidadeCodFaces || c.quantidade_codfaces || 0);
+    c.QuantidadePaineisVinculados = idNum(c.QuantidadePaineisVinculados || c.quantidade_paineis_vinculados || 0);
+    return c;
+  }
+
+  function sugestoesBuscaKanbanLocais(texto){
+    const termo = normalizarTexto(texto);
+    if (!termo) return [];
+
+    return (Array.isArray(cards) ? cards : [])
+      .filter(card => normalizarTexto(textoBuscaDoCard(card)).includes(termo))
+      .slice(0, LIMITE_SUGESTOES_BUSCA_KANBAN)
+      .map(card => {
+        const idFase = idNum(card?.IDDimKanbanFaseAtual || 0);
+        const fase = fasePorId(idFase);
+        return normalizarSugestaoBuscaKanban({
+          IDFatoKanbanCard: card?.IDFatoKanbanCard,
+          Titulo: card?.Titulo,
+          Descricao: card?.Descricao,
+          NomeFase: fase?.NomeFase,
+          NomeUsuarioCriador: card?.NomeUsuarioResponsavel,
+          EmpresaRazaoSocial: card?.EmpresaRazaoSocial,
+          EmpresaCNPJ: card?.EmpresaCNPJ,
+          QuantidadeCodFaces: card?.QuantidadeCodFaces || card?.QuantidadePaineisVinculados,
+          QuantidadePaineisVinculados: card?.QuantidadePaineisVinculados
+        });
+      });
+  }
+
+  function definirItemAtivoSugestaoBuscaKanban(indice){
+    if (!listaBuscaKanban) return;
+    const botoes = Array.from(listaBuscaKanban.querySelectorAll(".kb-search-sugestao-card"));
+    if (!botoes.length) {
+      indiceSugestaoBuscaKanbanAtiva = -1;
+      return;
+    }
+
+    const ultimoIndice = botoes.length - 1;
+    const indiceNormalizado = Math.max(0, Math.min(indice, ultimoIndice));
+    indiceSugestaoBuscaKanbanAtiva = indiceNormalizado;
+
+    botoes.forEach((botao, i) => {
+      botao.classList.toggle("is-active", i === indiceNormalizado);
+      if (i === indiceNormalizado) {
+        botao.scrollIntoView({ block: "nearest" });
+      }
+    });
+  }
+
+  function renderizarListaSugestoesBuscaKanban(itens, opcoes = {}){
+    if (!listaBuscaKanban) return;
+
+    const lista = (Array.isArray(itens) ? itens : [])
+      .map(normalizarSugestaoBuscaKanban)
+      .filter(item => item.IDFatoKanbanCard > 0)
+      .slice(0, LIMITE_SUGESTOES_BUSCA_KANBAN);
+
+    sugestoesBuscaKanbanAtual = lista;
+    indiceSugestaoBuscaKanbanAtiva = -1;
+    listaBuscaKanban.innerHTML = "";
+
+    const mensagem = safeStr(opcoes.mensagem || "").trim();
+    if (mensagem && !lista.length) {
+      listaBuscaKanban.appendChild(el("div", { class: "kb-search-sugestoes-status" }, [mensagem]));
+      abrirListaSugestoesBuscaKanban();
+      return;
+    }
+
+    if (!lista.length) {
+      fecharListaSugestoesBuscaKanban();
+      return;
+    }
+
+    lista.forEach((item, indice) => {
+      const partesMeta = [
+        `Fase: ${item.NomeFase}`,
+        item.NomeUsuarioCriador ? `Criado por: ${item.NomeUsuarioCriador}` : "Criador não informado"
+      ];
+
+      const badges = [];
+      if (item.EmpresaRazaoSocial) badges.push(`Empresa: ${textoCurtoBuscaKanban(item.EmpresaRazaoSocial, 70)}`);
+      if (item.EmpresaCNPJ) badges.push(item.EmpresaCNPJ);
+      if (item.QuantidadeCodFaces > 0) {
+        badges.push(`${item.QuantidadeCodFaces} CodFace${item.QuantidadeCodFaces === 1 ? "" : "s"}`);
+      } else if (item.QuantidadePaineisVinculados > 0) {
+        badges.push(`${item.QuantidadePaineisVinculados} painel/face${item.QuantidadePaineisVinculados === 1 ? "" : "s"}`);
+      }
+
+      const botao = el("button", {
+        type: "button",
+        class: "kb-search-sugestao-card",
+        "data-id-card": String(item.IDFatoKanbanCard)
+      }, [
+        el("div", { class: "kb-search-sugestao-topo" }, [
+          el("div", { class: "kb-search-sugestao-titulo", title: item.Titulo }, [item.Titulo]),
+          el("span", { class: "kb-search-sugestao-id" }, [`#${item.IDFatoKanbanCard}`])
+        ]),
+        el("div", { class: "kb-search-sugestao-meta" }, [partesMeta.join(" • ")]),
+        item.Descricao
+          ? el("div", { class: "kb-search-sugestao-desc" }, [textoCurtoBuscaKanban(item.Descricao, 220)])
+          : el("div", { class: "kb-search-sugestao-desc" }, ["Sem descrição informada."]),
+        el("div", { class: "kb-search-sugestao-badges" }, badges.map(txt => el("span", { class: "kb-search-sugestao-badge" }, [txt])))
+      ]);
+
+      botao.addEventListener("mouseenter", () => definirItemAtivoSugestaoBuscaKanban(indice));
+      botao.addEventListener("mousedown", async (evento) => {
+        evento.preventDefault();
+        await selecionarSugestaoBuscaKanban(item);
+      });
+
+      listaBuscaKanban.appendChild(botao);
+    });
+
+    abrirListaSugestoesBuscaKanban();
+  }
+
+  async function buscarSugestoesBuscaKanban(texto){
+    const termo = safeStr(texto || "").trim();
+    if (!buscaKanban || !listaBuscaKanban) return;
+
+    if (buscaKanbanSugestoesController) {
+      buscaKanbanSugestoesController.abort();
+      buscaKanbanSugestoesController = null;
+    }
+
+    if (termo.length < MIN_CARACTERES_SUGESTAO_BUSCA_KANBAN) {
+      sugestoesBuscaKanbanAtual = [];
+      fecharListaSugestoesBuscaKanban();
+      return;
+    }
+
+    const locais = sugestoesBuscaKanbanLocais(termo);
+    if (locais.length) {
+      renderizarListaSugestoesBuscaKanban(locais);
+    } else {
+      renderizarListaSugestoesBuscaKanban([], { mensagem: "Buscando cards..." });
+    }
+
+    const controller = new AbortController();
+    buscaKanbanSugestoesController = controller;
+
+    try {
+      const url = `/kanban/api/kanbans/${ID_KANBAN}/cards/sugestoes?q=${encodeURIComponent(termo)}&limit=${LIMITE_SUGESTOES_BUSCA_KANBAN}`;
+      const resultado = await fetchJsonKanban(url, { signal: controller.signal });
+      const corpo = resultado.corpo;
+
+      if (controller.signal.aborted) return;
+
+      if (!respostaJsonKanbanOk(resultado)) {
+        console.warn("buscarSugestoesBuscaKanban: resposta inválida", detalhesFalhaJsonKanban(resultado));
+        if (!locais.length) renderizarListaSugestoesBuscaKanban([], { mensagem: "Não foi possível buscar sugestões agora." });
+        return;
+      }
+
+      const sugestoes = Array.isArray(corpo?.sugestoes) ? corpo.sugestoes : [];
+      renderizarListaSugestoesBuscaKanban(sugestoes.length ? sugestoes : locais, {
+        mensagem: "Nenhum card encontrado para este texto."
+      });
+    } catch (erro) {
+      if (erro?.name === "AbortError") return;
+      console.warn("buscarSugestoesBuscaKanban: falhou", erro);
+      if (!locais.length) renderizarListaSugestoesBuscaKanban([], { mensagem: "Erro ao buscar sugestões." });
+    } finally {
+      if (buscaKanbanSugestoesController === controller) buscaKanbanSugestoesController = null;
+    }
+  }
+
+  function agendarSugestoesBuscaKanban(){
+    window.clearTimeout(debounceSugestaoBuscaTimer);
+    debounceSugestaoBuscaTimer = window.setTimeout(() => {
+      buscarSugestoesBuscaKanban(buscaKanban?.value || "");
+    }, 180);
+  }
+
+  async function selecionarSugestaoBuscaKanban(item){
+    const sugestao = normalizarSugestaoBuscaKanban(item);
+    if (!sugestao.IDFatoKanbanCard) return;
+
+    if (buscaKanban) {
+      buscaKanban.value = `#${sugestao.IDFatoKanbanCard} ${sugestao.Titulo}`.trim();
+    }
+
+    termoBusca = String(sugestao.IDFatoKanbanCard);
+    fecharListaSugestoesBuscaKanban();
+    aplicarBusca();
+
+    try {
+      await sincronizarCardPorDetalhe(sugestao.IDFatoKanbanCard, true);
+      await abrirCard(sugestao.IDFatoKanbanCard);
+    } catch (erro) {
+      console.warn("selecionarSugestaoBuscaKanban: falhou ao abrir card", erro);
+      mostrarMensagemBoard("Encontrei o card, mas não consegui abrir os detalhes agora.");
+    }
   }
 
   function corColunaPorIndice(i){
@@ -15003,6 +15244,46 @@ async function moverCard(idCard, idFasePara, posicao) {
         termoBusca = buscaKanban.value || "";
         aplicarBusca();
       }, 120);
+
+      agendarSugestoesBuscaKanban();
+    });
+
+    buscaKanban.addEventListener("focus", () => {
+      if (safeStr(buscaKanban.value || "").trim().length >= MIN_CARACTERES_SUGESTAO_BUSCA_KANBAN) {
+        agendarSugestoesBuscaKanban();
+      }
+    });
+
+    buscaKanban.addEventListener("keydown", async (evento) => {
+      if (!listaBuscaKanban || listaBuscaKanban.hidden) return;
+
+      if (evento.key === "Escape") {
+        evento.preventDefault();
+        fecharListaSugestoesBuscaKanban();
+        return;
+      }
+
+      if (evento.key === "ArrowDown") {
+        evento.preventDefault();
+        definirItemAtivoSugestaoBuscaKanban(indiceSugestaoBuscaKanbanAtiva + 1);
+        return;
+      }
+
+      if (evento.key === "ArrowUp") {
+        evento.preventDefault();
+        definirItemAtivoSugestaoBuscaKanban(
+          indiceSugestaoBuscaKanbanAtiva <= 0
+            ? sugestoesBuscaKanbanAtual.length - 1
+            : indiceSugestaoBuscaKanbanAtiva - 1
+        );
+        return;
+      }
+
+      if (evento.key === "Enter" && indiceSugestaoBuscaKanbanAtiva >= 0) {
+        evento.preventDefault();
+        const item = sugestoesBuscaKanbanAtual[indiceSugestaoBuscaKanbanAtiva];
+        if (item) await selecionarSugestaoBuscaKanban(item);
+      }
     });
   }
 
@@ -15036,8 +15317,10 @@ async function moverCard(idCard, idFasePara, posicao) {
 
   document.addEventListener("click", (evento) => {
     const alvo = evento.target;
+    if (comboBuscaKanban && comboBuscaKanban.contains(alvo)) return;
     if (filtroVendedorWrap && filtroVendedorWrap.contains(alvo)) return;
     if (filtroTagWrap && filtroTagWrap.contains(alvo)) return;
+    fecharListaSugestoesBuscaKanban();
     fecharMenusFiltros();
   });
 
@@ -15051,6 +15334,8 @@ async function moverCard(idCard, idFasePara, posicao) {
         buscaKanban.value = "";
         buscaKanban.focus();
       }
+
+      fecharListaSugestoesBuscaKanban();
 
       if (inputFiltroVendedor) {
         inputFiltroVendedor.value = "";
