@@ -816,6 +816,158 @@
     }
   }
 
+
+  /* ==========================================================
+     COMBOBOX DA BUSCA DO HISTÓRICO DE CARDS
+     ========================================================== */
+  .campo-filtro-historico--busca {
+    position: relative;
+    z-index: 30;
+  }
+
+  .historico-busca-combobox {
+    position: relative;
+    width: 100%;
+  }
+
+  .historico-busca-combobox.is-open input#q {
+    border-color: #3d63f2;
+    box-shadow: 0 0 0 3px rgba(61, 99, 242, 0.12);
+  }
+
+  .historico-busca-lista {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    z-index: 90;
+    max-height: min(520px, 64vh);
+    overflow-y: auto;
+    border: 1px solid #d6e0ec;
+    border-radius: 18px;
+    background: #ffffff;
+    box-shadow: 0 22px 50px rgba(19, 44, 89, 0.18);
+    padding: 8px;
+    box-sizing: border-box;
+  }
+
+  .historico-busca-lista[hidden] {
+    display: none;
+  }
+
+  .historico-busca-opcao {
+    width: 100%;
+    border: 0;
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: flex-start;
+    text-align: left;
+    cursor: pointer;
+    color: #172b4d;
+    box-sizing: border-box;
+  }
+
+  .historico-busca-opcao:hover,
+  .historico-busca-opcao.is-active {
+    background: #f3f7ff;
+  }
+
+  .historico-busca-opcao__id {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: #edf3ff;
+    border: 1px solid #c9dafd;
+    color: #244dbf;
+    font-size: 13px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .historico-busca-opcao__conteudo {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .historico-busca-opcao__titulo {
+    color: #10294f;
+    font-size: 15px;
+    font-weight: 950;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .historico-busca-opcao__descricao {
+    color: #667892;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .historico-busca-opcao__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+  }
+
+  .historico-busca-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 26px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid #dbe4ef;
+    background: #f8fafc;
+    color: #405772;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.15;
+    max-width: 100%;
+  }
+
+  .historico-busca-opcao__acao {
+    align-self: center;
+    color: #1f365b;
+    font-size: 12px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .historico-busca-estado {
+    padding: 12px 14px;
+    color: #5d708b;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .historico-busca-estado--erro {
+    color: #a12626;
+  }
+
+  @media (max-width: 640px) {
+    .historico-busca-opcao {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .historico-busca-opcao__id,
+    .historico-busca-opcao__acao {
+      justify-self: flex-start;
+    }
+  }
+
 </style>
 
 {% set page = paginacao.page if paginacao else 1 %}
@@ -829,11 +981,26 @@
       <div class="topo-historico-cards__contador"><span>☰</span><strong>{{ total_cards }}</strong></div>
     </div>
 
-    <form method="get" class="painel-filtros-historico">
+    <form method="get" class="painel-filtros-historico" autocomplete="off">
       <label class="painel-filtros-historico__titulo" for="q">Buscar</label>
       <div class="painel-filtros-historico__linha">
         <div class="campo-filtro-historico campo-filtro-historico--busca">
-          <input type="text" id="q" name="q" placeholder="ID, título, descrição, razão social, nome fantasia, CNPJ, responsável..." value="{{ filtros.q or '' }}">
+          <div id="comboBuscaHistoricoCards" class="historico-busca-combobox">
+            <input
+              type="text"
+              id="q"
+              name="q"
+              placeholder="ID, título, descrição, razão social, nome fantasia, CNPJ, responsável..."
+              value="{{ filtros.q or '' }}"
+              autocomplete="off"
+              spellcheck="false"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="listaBuscaHistoricoCards"
+            >
+            <div id="listaBuscaHistoricoCards" class="historico-busca-lista" role="listbox" hidden></div>
+          </div>
         </div>
 
         <div class="campo-filtro-historico">
@@ -1023,4 +1190,258 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+(function(){
+  const combo = document.getElementById("comboBuscaHistoricoCards");
+  const input = document.getElementById("q");
+  const lista = document.getElementById("listaBuscaHistoricoCards");
+  const form = document.querySelector("form.painel-filtros-historico");
+  const selectFase = document.getElementById("id_fase");
+  const selectStatus = document.getElementById("status");
+  const selectSomenteAtivos = document.getElementById("somente_ativos");
+
+  if (!combo || !input || !lista || !form) return;
+
+  const URL_SUGESTOES = "{{ url_for('kanban.historico_cards_sugestoes') }}";
+  let controllerAtual = null;
+  let timerBusca = null;
+  let sugestoesAtuais = [];
+  let indiceAtivo = -1;
+
+  function texto(valor){
+    return String(valor == null ? "" : valor).trim();
+  }
+
+  function limitar(valor, tamanho){
+    const bruto = texto(valor);
+    if (!bruto) return "";
+    return bruto.length > tamanho ? `${bruto.slice(0, tamanho - 3)}...` : bruto;
+  }
+
+  function criarElemento(tag, classe, conteudo){
+    const el = document.createElement(tag);
+    if (classe) el.className = classe;
+    if (conteudo !== undefined && conteudo !== null) el.textContent = conteudo;
+    return el;
+  }
+
+  function abrirLista(){
+    combo.classList.add("is-open");
+    lista.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  function fecharLista(){
+    combo.classList.remove("is-open");
+    lista.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    indiceAtivo = -1;
+    marcarItemAtivo();
+  }
+
+  function limparLista(){
+    lista.innerHTML = "";
+    sugestoesAtuais = [];
+    indiceAtivo = -1;
+  }
+
+  function mostrarEstado(mensagem, classeExtra){
+    lista.innerHTML = "";
+    const div = criarElemento("div", `historico-busca-estado${classeExtra ? ` ${classeExtra}` : ""}`, mensagem);
+    lista.appendChild(div);
+    abrirLista();
+  }
+
+  function montarQuerySugestoes(){
+    const params = new URLSearchParams();
+    params.set("q", input.value || "");
+    params.set("limit", "12");
+
+    if (selectFase && selectFase.value) params.set("id_fase", selectFase.value);
+    if (selectStatus && selectStatus.value) params.set("status", selectStatus.value);
+    if (selectSomenteAtivos && selectSomenteAtivos.value) params.set("somente_ativos", selectSomenteAtivos.value);
+
+    return params;
+  }
+
+  function criarChip(textoChip){
+    const valor = texto(textoChip);
+    if (!valor) return null;
+    return criarElemento("span", "historico-busca-chip", valor);
+  }
+
+  function renderizarSugestoes(itens){
+    limparLista();
+    sugestoesAtuais = Array.isArray(itens) ? itens : [];
+    lista.innerHTML = "";
+
+    if (!sugestoesAtuais.length){
+      mostrarEstado("Nenhum card encontrado para essa busca.");
+      return;
+    }
+
+    sugestoesAtuais.forEach((item, indice) => {
+      const idCard = texto(item.id_card);
+      const titulo = texto(item.titulo) || "Card sem título";
+      const descricao = limitar(item.descricao, 130) || "Sem descrição informada";
+      const empresa = texto(item.razao_social_empresa_relacionada) || texto(item.nome_fantasia_empresa_relacionada);
+      const cnpj = texto(item.cnpj_empresa_relacionada);
+      const fase = texto(item.nome_fase_atual) || "Sem fase";
+      const usuarioCriador = texto(item.nome_usuario_criador) || texto(item.nome_usuario_responsavel) || "Usuário não identificado";
+      const qtdCodFaces = Number(item.total_codfaces || 0);
+      const qtdItens = Number(item.total_itens_ativos || 0);
+
+      const botao = criarElemento("button", "historico-busca-opcao");
+      botao.type = "button";
+      botao.setAttribute("role", "option");
+      botao.dataset.index = String(indice);
+
+      const id = criarElemento("span", "historico-busca-opcao__id", idCard ? `#${idCard}` : "#—");
+      const conteudo = criarElemento("span", "historico-busca-opcao__conteudo");
+      const tituloEl = criarElemento("strong", "historico-busca-opcao__titulo", titulo);
+      const descEl = criarElemento("span", "historico-busca-opcao__descricao", descricao);
+      const meta = criarElemento("span", "historico-busca-opcao__meta");
+
+      [
+        criarChip(`Fase: ${fase}`),
+        criarChip(`Criado por: ${usuarioCriador}`),
+        empresa ? criarChip(`Empresa: ${empresa}`) : null,
+        cnpj ? criarChip(`CNPJ: ${cnpj}`) : null,
+        qtdCodFaces > 0 ? criarChip(`${qtdCodFaces} CodFace${qtdCodFaces === 1 ? "" : "s"}`) : null,
+        qtdItens > 0 ? criarChip(`${qtdItens} item${qtdItens === 1 ? "" : "s"}`) : null,
+      ].filter(Boolean).forEach(chip => meta.appendChild(chip));
+
+      conteudo.appendChild(tituloEl);
+      conteudo.appendChild(descEl);
+      conteudo.appendChild(meta);
+
+      const acao = criarElemento("span", "historico-busca-opcao__acao", "Abrir histórico →");
+
+      botao.appendChild(id);
+      botao.appendChild(conteudo);
+      botao.appendChild(acao);
+
+      botao.addEventListener("mouseenter", () => {
+        indiceAtivo = indice;
+        marcarItemAtivo();
+      });
+
+      botao.addEventListener("mousedown", (evento) => {
+        evento.preventDefault();
+        abrirSugestao(item);
+      });
+
+      lista.appendChild(botao);
+    });
+
+    abrirLista();
+  }
+
+  function marcarItemAtivo(){
+    const botoes = lista.querySelectorAll(".historico-busca-opcao");
+    botoes.forEach((botao, indice) => {
+      const ativo = indice === indiceAtivo;
+      botao.classList.toggle("is-active", ativo);
+      if (ativo) botao.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function abrirSugestao(item){
+    const idCard = texto(item && item.id_card);
+    if (!idCard) return;
+    const url = texto(item.url_historico) || `/kanban/historico-card/${encodeURIComponent(idCard)}`;
+    window.location.href = url;
+  }
+
+  async function buscarSugestoesAgora(){
+    const termo = texto(input.value);
+
+    if (controllerAtual) controllerAtual.abort();
+
+    if (termo.length < 2 && !/^\d+$/.test(termo)){
+      limparLista();
+      fecharLista();
+      return;
+    }
+
+    controllerAtual = new AbortController();
+    mostrarEstado("Buscando cards...");
+
+    try {
+      const resposta = await fetch(`${URL_SUGESTOES}?${montarQuerySugestoes().toString()}`, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" },
+        signal: controllerAtual.signal,
+      });
+
+      const dados = await resposta.json().catch(() => null);
+
+      if (!resposta.ok || !dados || dados.ok === false){
+        throw new Error((dados && dados.erro) || "Falha ao buscar sugestões.");
+      }
+
+      renderizarSugestoes(dados.items || []);
+    } catch (erro) {
+      if (erro && erro.name === "AbortError") return;
+      console.error("Falha ao buscar sugestões do histórico de cards", erro);
+      mostrarEstado("Não foi possível carregar sugestões agora.", "historico-busca-estado--erro");
+    }
+  }
+
+  function agendarBuscaSugestoes(){
+    window.clearTimeout(timerBusca);
+    timerBusca = window.setTimeout(buscarSugestoesAgora, 260);
+  }
+
+  input.addEventListener("input", agendarBuscaSugestoes);
+
+  input.addEventListener("focus", () => {
+    if (texto(input.value).length >= 2 || /^\d+$/.test(texto(input.value))) {
+      agendarBuscaSugestoes();
+    }
+  });
+
+  input.addEventListener("keydown", (evento) => {
+    if (lista.hidden) return;
+
+    if (evento.key === "ArrowDown") {
+      evento.preventDefault();
+      indiceAtivo = Math.min(indiceAtivo + 1, sugestoesAtuais.length - 1);
+      marcarItemAtivo();
+      return;
+    }
+
+    if (evento.key === "ArrowUp") {
+      evento.preventDefault();
+      indiceAtivo = Math.max(indiceAtivo - 1, 0);
+      marcarItemAtivo();
+      return;
+    }
+
+    if (evento.key === "Enter" && indiceAtivo >= 0 && sugestoesAtuais[indiceAtivo]) {
+      evento.preventDefault();
+      abrirSugestao(sugestoesAtuais[indiceAtivo]);
+      return;
+    }
+
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      fecharLista();
+    }
+  });
+
+  document.addEventListener("mousedown", (evento) => {
+    if (!combo.contains(evento.target)) fecharLista();
+  });
+
+  [selectFase, selectStatus, selectSomenteAtivos].filter(Boolean).forEach((select) => {
+    select.addEventListener("change", () => {
+      if (!lista.hidden) agendarBuscaSugestoes();
+    });
+  });
+})();
+</script>
+
 {% endblock %}

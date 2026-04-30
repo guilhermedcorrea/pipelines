@@ -18144,6 +18144,264 @@ def _contar_cards_resumo_historico(
 
 
 
+def _listar_sugestoes_historico_cards(
+    id_empresa_proprietaria: int,
+    termo_busca: str = "",
+    id_fase: int | None = None,
+    status_card: str | None = None,
+    somente_ativos: bool = False,
+    limit: int = 12,
+) -> list[dict]:
+    """Eu retorno sugestões leves para o combobox da tela /historico-cards."""
+    termo_busca = _normalizar_texto_filtro(termo_busca)
+
+    try:
+        limit = int(limit or 12)
+    except Exception:
+        limit = 12
+
+    limit = max(1, min(limit, 20))
+
+    if not termo_busca:
+        return []
+
+    termo_like = f"%{termo_busca}%"
+    termo_prefixo = f"{termo_busca}%"
+
+    sql = """
+    SELECT TOP (:limit)
+        c.IDFatoKanbanCard AS id_card,
+        c.Titulo AS titulo,
+        c.Descricao AS descricao,
+        c.CriadoEm AS criado_em,
+        c.AtualizadoEm AS atualizado_em,
+        c.EncerradoEm AS encerrado_em,
+        c.Ativo AS ativo,
+        c.StatusCard AS status_card,
+        c.IDEmpresa AS id_empresa_card,
+        c.IDDimKanban AS id_kanban,
+        c.IDDimKanbanFaseAtual AS id_fase_atual,
+
+        fase.NomeFase AS nome_fase_atual,
+        NULLIF(LTRIM(RTRIM(ISNULL(fase.CorHex, ''))), '') AS cor_fase,
+        NULLIF(LTRIM(RTRIM(ISNULL(fase.CorTextoHex, ''))), '') AS cor_texto_fase,
+
+        usuario_criador.NomeUsuario AS nome_usuario_criador,
+        usuario_responsavel.NomeUsuario AS nome_usuario_responsavel,
+
+        empresa.IDEmpresa AS id_empresa_relacionada,
+        NULLIF(LTRIM(RTRIM(ISNULL(empresa.RazaoSocial, ''))), '') AS razao_social_empresa_relacionada,
+        NULLIF(LTRIM(RTRIM(ISNULL(empresa.NomeFantasia, ''))), '') AS nome_fantasia_empresa_relacionada,
+        NULLIF(LTRIM(RTRIM(ISNULL(empresa.CNPJ, ''))), '') AS cnpj_empresa_relacionada,
+
+        ISNULL(itens.total_itens_ativos, 0) AS total_itens_ativos,
+        ISNULL(itens.total_codfaces, 0) AS total_codfaces,
+        atividade.ultima_atividade_em AS ultima_atividade_em
+
+    FROM [Kanban].[Silver].[FatoKanbanCard] c
+
+    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
+        ON fase.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+       AND fase.IDDimKanban = c.IDDimKanban
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_criador
+        ON usuario_criador.IDDimUsuarios = c.IDDimUsuarios
+       AND (
+            usuario_criador.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+            OR usuario_criador.IDEmpresaProprietaria IS NULL
+       )
+
+    LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_responsavel
+        ON usuario_responsavel.IDDimUsuarios = COALESCE(c.IDVendedorUsuario, c.IDDimUsuarios)
+       AND (
+            usuario_responsavel.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+            OR usuario_responsavel.IDEmpresaProprietaria IS NULL
+       )
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            negociacao.IDEmpresa
+        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS negociacao
+        WHERE negociacao.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND negociacao.IDEmpresa IS NOT NULL
+          AND negociacao.IDEmpresaProprietaria = :id_empresa_proprietaria
+        ORDER BY
+            negociacao.DataPrecoProposto DESC,
+            negociacao.IDFatoKanbanNegociacaoPreco DESC
+    ) AS empresa_preco
+
+    OUTER APPLY (
+        SELECT TOP (1)
+            contrato.IDEmpresa
+        FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS vinculo_contrato_card
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS contrato
+            ON contrato.IDFatoControleContratosEuromidia = vinculo_contrato_card.IDFatoControleContratosEuromidia
+        WHERE vinculo_contrato_card.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND contrato.IDEmpresa IS NOT NULL
+        ORDER BY
+            vinculo_contrato_card.DataAtualizacao DESC,
+            vinculo_contrato_card.IDFatoContratoCardEuromidia DESC
+    ) AS empresa_contrato
+
+    LEFT JOIN [Integracao].[Silver].[DimEmpresas] empresa
+        ON empresa.IDEmpresa = COALESCE(c.IDEmpresa, empresa_preco.IDEmpresa, empresa_contrato.IDEmpresa)
+
+    OUTER APPLY (
+        SELECT
+            SUM(
+                CASE
+                    WHEN ISNULL(item_card.Ativo, 1) = 1 AND item_card.RemovidoEm IS NULL THEN 1
+                    ELSE 0
+                END
+            ) AS total_itens_ativos,
+            COUNT(DISTINCT COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(80), item_card.CodFace))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(VARCHAR(80), item_card.IDDimFacesPaineis))), '')
+            )) AS total_codfaces,
+            MAX(COALESCE(item_card.RemovidoEm, item_card.DataAtualizacao, item_card.CriadoEm)) AS ultimo_item_em
+        FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] item_card
+        WHERE item_card.IDFatoKanbanCard = c.IDFatoKanbanCard
+          AND item_card.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+          AND ISNULL(item_card.Ativo, 1) = 1
+          AND item_card.RemovidoEm IS NULL
+    ) AS itens
+
+    OUTER APPLY (
+        SELECT
+            MAX(v.data_evento) AS ultima_atividade_em
+        FROM (
+            VALUES
+                (c.CriadoEm),
+                (c.AtualizadoEm),
+                (c.EncerradoEm),
+                (itens.ultimo_item_em)
+        ) v(data_evento)
+    ) atividade
+
+    WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
+      AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
+      AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
+      AND (
+            ISNULL(c.Titulo, '') LIKE :termo_like
+            OR ISNULL(c.Descricao, '') LIKE :termo_like
+            OR CAST(c.IDFatoKanbanCard AS VARCHAR(30)) LIKE :termo_like
+            OR CAST(ISNULL(c.IDEmpresa, '') AS VARCHAR(30)) LIKE :termo_like
+            OR ISNULL(fase.NomeFase, '') LIKE :termo_like
+            OR ISNULL(usuario_criador.NomeUsuario, '') LIKE :termo_like
+            OR ISNULL(usuario_responsavel.NomeUsuario, '') LIKE :termo_like
+            OR ISNULL(empresa.RazaoSocial, '') LIKE :termo_like
+            OR ISNULL(empresa.NomeFantasia, '') LIKE :termo_like
+            OR ISNULL(empresa.CNPJ, '') LIKE :termo_like
+            OR EXISTS (
+                SELECT 1
+                FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] busca_item
+                WHERE busca_item.IDFatoKanbanCard = c.IDFatoKanbanCard
+                  AND busca_item.IDEmpresaProprietaria = c.IDEmpresaProprietaria
+                  AND ISNULL(busca_item.Ativo, 1) = 1
+                  AND busca_item.RemovidoEm IS NULL
+                  AND (
+                        CONVERT(VARCHAR(80), busca_item.CodPonto) LIKE :termo_like
+                     OR CONVERT(VARCHAR(80), busca_item.CodFace) LIKE :termo_like
+                     OR CONVERT(VARCHAR(80), busca_item.IDDimFacesPaineis) LIKE :termo_like
+                  )
+            )
+          )
+
+    ORDER BY
+        CASE
+            WHEN CAST(c.IDFatoKanbanCard AS VARCHAR(30)) = :termo_busca THEN 0
+            WHEN ISNULL(c.Titulo, '') LIKE :termo_prefixo THEN 1
+            WHEN ISNULL(empresa.RazaoSocial, '') LIKE :termo_prefixo THEN 2
+            WHEN ISNULL(empresa.NomeFantasia, '') LIKE :termo_prefixo THEN 3
+            ELSE 9
+        END,
+        COALESCE(atividade.ultima_atividade_em, c.AtualizadoEm, c.CriadoEm) DESC,
+        c.IDFatoKanbanCard DESC;
+    """
+
+    sugestoes = _executar_sql_mapeado(
+        sql,
+        {
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            "id_fase": id_fase,
+            "status_card": status_card,
+            "somente_ativos": 1 if somente_ativos else 0,
+            "termo_busca": termo_busca,
+            "termo_like": termo_like,
+            "termo_prefixo": termo_prefixo,
+            "limit": limit,
+        },
+    )
+
+    for item in sugestoes:
+        try:
+            id_card = int(item.get("id_card") or 0)
+        except Exception:
+            id_card = 0
+
+        item["id_card"] = id_card
+        item["total_itens_ativos"] = int(item.get("total_itens_ativos") or 0)
+        item["total_codfaces"] = int(item.get("total_codfaces") or 0)
+        item["url_historico"] = url_for("kanban.historico_card_visualizacao", id_card=id_card) if id_card else ""
+
+    return sugestoes
+
+
+@kanban_bp.route("/historico-cards/sugestoes", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def historico_cards_sugestoes():
+    """Eu alimento o autocomplete da barra de busca da tela de histórico de cards."""
+    _assert_login()
+    id_empresa_proprietaria = _id_empresa_usuario_or_403()
+
+    termo_busca = _normalizar_texto_filtro(request.args.get("q") or "")
+
+    try:
+        limit = int(request.args.get("limit") or "12")
+    except Exception:
+        limit = 12
+
+    try:
+        id_fase = int(request.args.get("id_fase") or "0")
+        if id_fase <= 0:
+            id_fase = None
+    except Exception:
+        id_fase = None
+
+    status_card = (request.args.get("status") or "").strip() or None
+
+    try:
+        somente_ativos = int(request.args.get("somente_ativos") or "0") == 1
+    except Exception:
+        somente_ativos = False
+
+    if len(termo_busca) < 2 and not termo_busca.isdigit():
+        return jsonify({"ok": True, "items": []})
+
+    try:
+        sugestoes = _listar_sugestoes_historico_cards(
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            termo_busca=termo_busca,
+            id_fase=id_fase,
+            status_card=status_card,
+            somente_ativos=somente_ativos,
+            limit=limit,
+        )
+    except Exception:
+        current_app.logger.exception(
+            "HISTORICO_CARDS_SUGESTOES | falha ao buscar sugestões | termo=%s | empresa=%s",
+            termo_busca,
+            id_empresa_proprietaria,
+        )
+        return jsonify({"ok": False, "erro": "Não foi possível buscar sugestões do histórico de cards."}), 500
+
+    return jsonify({"ok": True, "items": sugestoes})
+
+
+
+
 
 
 @kanban_bp.route("/historico-cards", methods=["GET"])
