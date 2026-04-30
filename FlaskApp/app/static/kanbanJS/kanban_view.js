@@ -259,14 +259,15 @@
     { nome: "TipoDocumento", label: "Tipo Documento", tipo: "tipo_documento", obrigatorio: true },
     { nome: "Origem", label: "Origem", obrigatorio: true },
     { nome: "SDR", label: "SDR" },
-    { nome: "Agencia", label: "Agência", tipo: "empresa_agencia" },
-    { nome: "PercentualAgencia", label: "% Agência" },
-    { nome: "PercentualCartaAcordo", label: "% Carta Acordo" },
+    { nome: "Agencia", label: "Agência", tipo: "empresa_agencia", span: 2 },
     { nome: "CnpjAgencia", label: "CNPJ Agência" },
+    { nome: "PercentualAgencia", label: "% Agência" },
     { nome: "Bureau", label: "Bureau", tipo: "empresa_header", span: 2 },
     { nome: "CnpjBureau", label: "CNPJ Bureau" },
     { nome: "Intermediario", label: "Intermediário", tipo: "empresa_header", span: 2 },
-    { nome: "CnpjIntermediario", label: "CNPJ Intermediário" }
+    { nome: "CnpjIntermediario", label: "CNPJ Intermediário" },
+    { nome: "PercentualIntermediario", label: "% Intermediário" },
+    { nome: "PercentualCartaAcordo", label: "% Carta Acordo" }
   ];
 
   const CAMPOS_CONTATO_CLIENTE_DIRETO_ASSINATURA = [
@@ -319,7 +320,6 @@
     { nome: "TotalLiquidoContratoAGBRCTACORDO", label: "Total Líquido Contrato AGBR CTA Acordo" },
     { nome: "TotalLiquidoContratoAGBRVENDGERCOOR", label: "Total Líquido Contrato AGBR Vend/Ger/Coor" },
     { nome: "ValorMensalAgencia", label: "Valor Mensal Agência" },
-    { nome: "PercentualBureau", label: "% Bureau" },
     { nome: "ValorBureauMensal", label: "Valor Bureau Mensal" },
     { nome: "ValorCartaAcordoMensal", label: "Valor Carta Acordo Mensal" },
     { nome: "ValorOutrasComissoes", label: "Valor Outras Comissões" },
@@ -546,6 +546,16 @@
 
   function obterValorPercentualCartaAcordoHeaderFormulario(){
     const input = obterInputFormularioSolicitacao("Header", "PercentualCartaAcordo");
+    return safeStr(input?.value || "").trim();
+  }
+
+  function obterValorPercentualBureauHeaderFormulario(){
+    const input = obterInputFormularioSolicitacao("Header", "PercentualBureau");
+    return safeStr(input?.value || "").trim();
+  }
+
+  function obterValorPercentualIntermediarioHeaderFormulario(){
+    const input = obterInputFormularioSolicitacao("Header", "PercentualIntermediario");
     return safeStr(input?.value || "").trim();
   }
 
@@ -1653,12 +1663,23 @@
     const idTipo = idNum(idTipoCliente || 0);
     const secaoNormalizada = safeStr(secao || "").trim();
 
-    if (nome === "PercentualAgencia") {
-      return secaoNormalizada === "Header" ? idTipo !== 3 : true;
-    }
+    const camposPercentuaisCabecalho = new Set([
+      "PercentualAgencia",
+      "PercentualBureau",
+      "PercentualIntermediario",
+      "PercentualCartaAcordo"
+    ]);
 
-    if (nome === "PercentualCartaAcordo") {
-      return secaoNormalizada === "Header" ? idTipo !== 3 : true;
+    if (camposPercentuaisCabecalho.has(nome)) {
+      if (secaoNormalizada !== "Header") return true;
+
+      if (nome === "PercentualAgencia" || nome === "PercentualCartaAcordo") {
+        return !(idTipo === 1 || idTipo === 3);
+      }
+
+      if (nome === "PercentualBureau" || nome === "PercentualIntermediario") {
+        return idTipo !== 1;
+      }
     }
 
     const camposIntermediacao = new Set([
@@ -1670,6 +1691,7 @@
       "CnpjIntermediario",
       "ValorMensalAgencia",
       "PercentualBureau",
+      "PercentualIntermediario",
       "ValorBureauMensal"
     ]);
 
@@ -1702,7 +1724,7 @@
     }
 
     if (idTipo === 1) {
-      return nome === "ValorMensalAgencia" || nome === "PercentualBureau" || nome === "ValorBureauMensal";
+      return nome === "ValorMensalAgencia" || nome === "ValorBureauMensal";
     }
 
     return false;
@@ -2056,12 +2078,23 @@
       }
 
       const percentualAgenciaHeader = obterValorPercentualAgenciaHeaderFormulario();
+      const percentualBureauHeader = obterValorPercentualBureauHeaderFormulario();
+      const percentualIntermediarioHeader = obterValorPercentualIntermediarioHeaderFormulario();
       const percentualCartaAcordoHeader = obterValorPercentualCartaAcordoHeaderFormulario();
-      if (idTipoCliente === 3) {
+      if (idTipoCliente === 1) {
         item.PercentualAgencia = percentualAgenciaHeader || null;
+        item.PercentualBureau = percentualBureauHeader || null;
+        item.PercentualIntermediario = percentualIntermediarioHeader || null;
+        item.PercentualCartaAcordo = percentualCartaAcordoHeader || null;
+      } else if (idTipoCliente === 3) {
+        item.PercentualAgencia = percentualAgenciaHeader || null;
+        item.PercentualBureau = null;
+        item.PercentualIntermediario = null;
         item.PercentualCartaAcordo = percentualCartaAcordoHeader || null;
       } else {
         item.PercentualAgencia = null;
+        item.PercentualBureau = null;
+        item.PercentualIntermediario = null;
         item.PercentualCartaAcordo = null;
       }
 
@@ -2129,10 +2162,43 @@
     header.IDEmpresaAgencia = empresaAgencia?.IDEmpresa || empresaAgencia?.ID || null;
     header.Agencia = empresaAgencia?.RazaoSocial || valoresDigitadosHeader?.Agencia || null;
     header.CnpjAgencia = empresaAgencia?.CNPJ || valoresDigitadosHeader?.CnpjAgencia || null;
-    header.PercentualAgencia = safeStr(valoresDigitadosHeader?.PercentualAgencia || headerSnapshot?.PercentualAgencia || "").trim() || null;
-    header.PercentualCartaAcordo = idTipoClienteAtual === 3
-      ? (safeStr(valoresDigitadosHeader?.PercentualCartaAcordo || headerSnapshot?.PercentualCartaAcordo || "").trim() || null)
-      : null;
+    const percentualAgenciaHeader = safeStr(
+      valoresDigitadosHeader?.PercentualAgencia ||
+      valoresDigitadosHeader?.TotalPercentualAgencia ||
+      headerSnapshot?.PercentualAgencia ||
+      headerSnapshot?.TotalPercentualAgencia ||
+      ""
+    ).trim() || null;
+    const percentualBureauHeader = safeStr(
+      valoresDigitadosHeader?.PercentualBureau ||
+      valoresDigitadosHeader?.TotalPercentualBureau ||
+      headerSnapshot?.PercentualBureau ||
+      headerSnapshot?.TotalPercentualBureau ||
+      ""
+    ).trim() || null;
+    const percentualIntermediarioHeader = safeStr(
+      valoresDigitadosHeader?.PercentualIntermediario ||
+      valoresDigitadosHeader?.TotalPercentualIntermediario ||
+      headerSnapshot?.PercentualIntermediario ||
+      headerSnapshot?.TotalPercentualIntermediario ||
+      ""
+    ).trim() || null;
+    const percentualCartaAcordoHeader = safeStr(
+      valoresDigitadosHeader?.PercentualCartaAcordo ||
+      valoresDigitadosHeader?.TotalPercentualCartaAcordo ||
+      headerSnapshot?.PercentualCartaAcordo ||
+      headerSnapshot?.TotalPercentualCartaAcordo ||
+      ""
+    ).trim() || null;
+
+    header.PercentualAgencia = (idTipoClienteAtual === 1 || idTipoClienteAtual === 3) ? percentualAgenciaHeader : null;
+    header.PercentualBureau = idTipoClienteAtual === 1 ? percentualBureauHeader : null;
+    header.PercentualIntermediario = idTipoClienteAtual === 1 ? percentualIntermediarioHeader : null;
+    header.PercentualCartaAcordo = (idTipoClienteAtual === 1 || idTipoClienteAtual === 3) ? percentualCartaAcordoHeader : null;
+    header.TotalPercentualAgencia = header.PercentualAgencia;
+    header.TotalPercentualBureau = header.PercentualBureau;
+    header.TotalPercentualIntermediario = header.PercentualIntermediario;
+    header.TotalPercentualCartaAcordo = header.PercentualCartaAcordo;
     header.IDEmpresaBureau = empresaBureau?.IDEmpresa || empresaBureau?.ID || idEmpresaBureauFormulario || null;
     header.Bureau = empresaBureau?.RazaoSocial || valoresDigitadosHeader?.Bureau || null;
     header.CnpjBureau = empresaBureau?.CNPJ || valoresDigitadosHeader?.CnpjBureau || null;
@@ -2204,12 +2270,28 @@
     item.RazaoSocial = empresaPrincipal?.RazaoSocial || null;
     item.Agencia = empresaAgencia?.RazaoSocial || null;
     item.CnpjAgencia = empresaAgencia?.CNPJ || null;
-    item.PercentualAgencia = idTipoClienteAtual === 3
-      ? (obterValorPercentualAgenciaHeaderFormulario() || item.PercentualAgencia || null)
-      : null;
-    item.PercentualCartaAcordo = idTipoClienteAtual === 3
-      ? (obterValorPercentualCartaAcordoHeaderFormulario() || item.PercentualCartaAcordo || null)
-      : null;
+    const percentualAgenciaHeader = obterValorPercentualAgenciaHeaderFormulario();
+    const percentualBureauHeader = obterValorPercentualBureauHeaderFormulario();
+    const percentualIntermediarioHeader = obterValorPercentualIntermediarioHeaderFormulario();
+    const percentualCartaAcordoHeader = obterValorPercentualCartaAcordoHeaderFormulario();
+
+    if (idTipoClienteAtual === 1) {
+      item.PercentualAgencia = percentualAgenciaHeader || item.PercentualAgencia || null;
+      item.PercentualBureau = percentualBureauHeader || item.PercentualBureau || null;
+      item.PercentualIntermediario = percentualIntermediarioHeader || item.PercentualIntermediario || null;
+      item.PercentualCartaAcordo = percentualCartaAcordoHeader || item.PercentualCartaAcordo || null;
+    } else if (idTipoClienteAtual === 3) {
+      item.PercentualAgencia = percentualAgenciaHeader || item.PercentualAgencia || null;
+      item.PercentualBureau = null;
+      item.PercentualIntermediario = null;
+      item.PercentualCartaAcordo = percentualCartaAcordoHeader || item.PercentualCartaAcordo || null;
+    } else {
+      item.PercentualAgencia = null;
+      item.PercentualBureau = null;
+      item.PercentualIntermediario = null;
+      item.PercentualCartaAcordo = null;
+    }
+
     item.Bureau = empresaBureau?.RazaoSocial || dadosBureauHeader.Bureau || null;
     item.CnpjBureau = empresaBureau?.CNPJ || dadosBureauHeader.CnpjBureau || null;
     item.Intermediario = empresaIntermediario?.RazaoSocial || dadosIntermediarioHeader.Intermediario || null;
