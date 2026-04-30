@@ -3707,8 +3707,10 @@
     "idKanban": kanban.IDDimKanban,
     "scriptRoot": request.script_root or "",
     "urlPainelPublicidade": url_for('static', filename='imagens/painel-publicitario.png'),
-    "urlCabecalhoOrcamentoPadrao": url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG')
+    "urlCabecalhoOrcamentoPadrao": url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG'),
+    "urlApiCardDetalheTemplate": url_for('kanban.api_card_detalhe', id_card=0).replace('/0', '/__ID_CARD__'),
+    "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260430_contato_cliente_direto_visibilidade_v1') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260430_api_card_url_json_v2') }}"></script>
 {% endblock %}

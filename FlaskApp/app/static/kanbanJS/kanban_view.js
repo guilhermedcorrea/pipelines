@@ -21,6 +21,8 @@
   const SCRIPT_ROOT = String(KANBAN_VIEW_CONFIG.scriptRoot || "").trim();
   const URL_IMAGEM_PAINEL_PUBLICITARIO = String(KANBAN_VIEW_CONFIG.urlPainelPublicidade || "").trim();
   const URL_CABECALHO_ORCAMENTO_PADRAO = String(KANBAN_VIEW_CONFIG.urlCabecalhoOrcamentoPadrao || "").trim();
+  const URL_API_CARD_DETALHE_TEMPLATE = String(KANBAN_VIEW_CONFIG.urlApiCardDetalheTemplate || "").trim();
+  const URL_API_CARD_ORCAMENTO_TEMPLATE = String(KANBAN_VIEW_CONFIG.urlApiCardOrcamentoTemplate || "").trim();
   const SOCKET_IO_NAMESPACE = "/kanban";
   const SOCKET_IO_PATH = `${SCRIPT_ROOT}/socket.io`;
 
@@ -2968,10 +2970,17 @@
   }
 
   async function fetchJsonKanban(url, opcoes = {}){
-    const resposta = await fetch(
-      montarUrlKanban(url),
-      Object.assign({ credentials: "same-origin" }, opcoes || {})
+    const urlFinal = montarUrlKanban(url);
+    const opcoesFetch = Object.assign({ credentials: "same-origin" }, opcoes || {});
+    opcoesFetch.headers = Object.assign(
+      {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      opcoesFetch.headers || {}
     );
+
+    const resposta = await fetch(urlFinal, opcoesFetch);
 
     const texto = await resposta.text().catch(() => "");
     let corpo = null;
@@ -2992,7 +3001,8 @@
       jsonValido,
       textoBruto: texto,
       resumoTexto: resumirTextoRespostaHttp(texto),
-      contentType: safeStr(resposta.headers?.get?.("content-type") || "")
+      contentType: safeStr(resposta.headers?.get?.("content-type") || ""),
+      urlFinal
     };
   }
 
@@ -3012,6 +3022,7 @@
       body: resultado?.corpo || null,
       jsonValido: !!resultado?.jsonValido,
       contentType: resultado?.contentType || "",
+      urlFinal: resultado?.urlFinal || "",
       preview: resultado?.resumoTexto || ""
     };
   }
@@ -11461,14 +11472,33 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
 
 
+function montarUrlPorTemplate(template, marcador, valor, parametros = {}){
+  const valorSeguro = encodeURIComponent(String(valor || "").trim());
+  const templateSeguro = safeStr(template || "").trim();
+  const caminhoBase = templateSeguro
+    ? templateSeguro.replace(marcador, valorSeguro)
+    : "";
+
+  const pares = [];
+  Object.entries(parametros || {}).forEach(([chave, valorParametro]) => {
+    if (valorParametro === undefined || valorParametro === null || valorParametro === false || valorParametro === "") return;
+    pares.push(`${encodeURIComponent(chave)}=${encodeURIComponent(String(valorParametro))}`);
+  });
+
+  return pares.length ? `${caminhoBase}?${pares.join("&")}` : caminhoBase;
+}
+
+function montarUrlApiCardDetalhe(idCard, opcoes = {}){
+  const id = idNum(idCard);
+  const template = URL_API_CARD_DETALHE_TEMPLATE || "/kanban/api/cards/__ID_CARD__";
+  return montarUrlPorTemplate(template, "__ID_CARD__", id, { fresh: opcoes.fresh ? 1 : "" });
+}
+
 async function buscarDetalheCard(idCard, opcoes = {}) {
   const id = idNum(idCard);
   if (!id) return null;
 
-  const fresh = !!opcoes.fresh;
-  const url = fresh
-    ? `/kanban/api/cards/${id}?fresh=1`
-    : `/kanban/api/cards/${id}`;
+  const url = montarUrlApiCardDetalhe(id, opcoes);
 
   try {
     const resultado = await fetchJsonKanban(url);
@@ -14226,7 +14256,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       return;
     }
 
-    const resultado = await fetchJsonKanban(`/kanban/api/cards/${id}/orcamento`);
+    const urlOrcamento = montarUrlPorTemplate(
+      URL_API_CARD_ORCAMENTO_TEMPLATE || "/kanban/api/cards/__ID_CARD__/orcamento",
+      "__ID_CARD__",
+      id
+    );
+    const resultado = await fetchJsonKanban(urlOrcamento);
     const resposta = resultado.resposta;
     const corpo = resultado.corpo;
 
