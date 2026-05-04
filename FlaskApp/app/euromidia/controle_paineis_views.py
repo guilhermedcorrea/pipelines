@@ -17,7 +17,7 @@ from sqlalchemy import case, String,cast, or_, and_,func,text,  select, desc
 from datetime import date, datetime, timedelta
 from sqlalchemy.exc import OperationalError
 from functools import wraps
-import time,random,calendar,re,requests
+import time,random,calendar,re,requests,unicodedata
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from openpyxl import Workbook
@@ -9243,7 +9243,30 @@ def detalhe_painel(codponto: int):
 
 
 def _limpar_email(email: str) -> str:
-    return (email or "").strip().lower()
+    """
+    Eu normalizo o email antes de validar/salvar.
+
+    O problema que gerava "Email inválido" era comum quando o email vinha
+    com espaço invisível no final, principalmente o caractere Unicode NBSP
+    (\u00A0), que visualmente parece um espaço normal.
+    """
+    if not email:
+        return ""
+
+    texto = str(email)
+
+    try:
+        texto = unicodedata.normalize("NFKC", texto)
+    except Exception:
+        pass
+
+    for caractere_invisivel in ("\u00A0", "\u200B", "\u200C", "\u200D", "\ufeff"):
+        texto = texto.replace(caractere_invisivel, "")
+
+    texto = texto.strip()
+    texto = re.sub(r"\s+", "", texto)
+
+    return texto.lower()
 
 def _parse_data_yyyy_mm_dd(txt: str):
     s = (txt or "").strip()
@@ -9258,6 +9281,122 @@ def _senha_hash(senha_plana: str) -> str:
   
    
     return generate_password_hash(senha_plana, method="pbkdf2:sha256")
+
+
+
+ID_PERFIL_ADMIN_PADRAO = 1
+ID_EMPRESA_PROPRIETARIA_ADMIN_PADRAO = 3
+OBS_PERMISSAO_ADMIN_TOTAL = "Acesso total liberado automaticamente para perfil administrador."
+
+
+def _id_usuario_executor_atual():
+    try:
+        id_usuario = int(getattr(current_user, "IDDimUsuarios", 0) or 0)
+        return id_usuario if id_usuario > 0 else None
+    except Exception:
+        return None
+
+
+def _perfil_usuario_eh_admin(id_perfil_usuario: int) -> bool:
+    try:
+        id_perfil = int(id_perfil_usuario or 0)
+    except Exception:
+        id_perfil = 0
+
+    if id_perfil == ID_PERFIL_ADMIN_PADRAO:
+        return True
+
+    perfil = (
+        db.session.query(DimPerfilUsuario)
+        .filter(DimPerfilUsuario.IDDimPerfilUsuario == id_perfil)
+        .first()
+    )
+
+    nome_perfil = (getattr(perfil, "NomePerfil", "") or "").strip().upper()
+    return nome_perfil in {"ADMIN", "ADMINISTRADOR", "ADM", "ADMIN_TUDO", "ADMIN EUROMIDIA"}
+
+
+def _aplicar_acesso_total_usuario_admin(
+    id_usuario: int,
+    id_usuario_executor: int | None = None,
+    id_empresa_proprietaria: int = ID_EMPRESA_PROPRIETARIA_ADMIN_PADRAO,
+) -> int:
+    agora = datetime.now()
+
+    usuario_admin = (
+        db.session.query(DimUsuarios)
+        .filter(DimUsuarios.IDDimUsuarios == int(id_usuario))
+        .first()
+    )
+
+    if not usuario_admin:
+        raise ValueError("Usuário informado não existe na tabela DimUsuarios.")
+
+    usuario_admin.IDDimPerfilUsuario = ID_PERFIL_ADMIN_PADRAO
+    usuario_admin.BitAtivo = True
+    usuario_admin.IDEmpresaProprietaria = int(id_empresa_proprietaria)
+    usuario_admin.UpdateAt = agora
+
+    permissoes_ativas = (
+        db.session.query(DimPermissoes)
+        .filter(DimPermissoes.BitAtivo == True)
+        .order_by(DimPermissoes.IDDimPermissoes.asc())
+        .all()
+    )
+
+    permissoes_usuario = (
+        db.session.query(PermissoesUsuario)
+        .filter(PermissoesUsuario.IDDimUsuarios == int(id_usuario))
+        .all()
+    )
+
+    permissoes_usuario_por_id = {
+        int(row.IDDimPermissoes): row
+        for row in permissoes_usuario
+        if row.IDDimPermissoes is not None
+    }
+
+    total_permissoes_aplicadas = 0
+
+    for permissao in permissoes_ativas:
+        id_permissao = int(permissao.IDDimPermissoes)
+        row_existente = permissoes_usuario_por_id.get(id_permissao)
+
+        if row_existente:
+            row_existente.DataExpiracao = None
+            row_existente.DataAtualizacao = agora
+            row_existente.TipoAtribuicao = "CONCEDER"
+            if not row_existente.CriadoPorIDDimUsuarios:
+                row_existente.CriadoPorIDDimUsuarios = id_usuario_executor
+            row_existente.Observacao = OBS_PERMISSAO_ADMIN_TOTAL
+        else:
+            db.session.add(
+                PermissoesUsuario(
+                    IDDimUsuarios=int(id_usuario),
+                    IDDimPermissoes=id_permissao,
+                    TipoAtribuicao="CONCEDER",
+                    DataExpiracao=None,
+                    DataCriacao=agora,
+                    DataAtualizacao=agora,
+                    CriadoPorIDDimUsuarios=id_usuario_executor,
+                    Observacao=OBS_PERMISSAO_ADMIN_TOTAL,
+                )
+            )
+
+        total_permissoes_aplicadas += 1
+
+    return total_permissoes_aplicadas
+
+
+def _remover_acesso_total_admin_automatico(id_usuario: int) -> int:
+    removidas = (
+        db.session.query(PermissoesUsuario)
+        .filter(PermissoesUsuario.IDDimUsuarios == int(id_usuario))
+        .filter(PermissoesUsuario.Observacao == OBS_PERMISSAO_ADMIN_TOTAL)
+        .delete(synchronize_session=False)
+    )
+
+    return int(removidas or 0)
 
 
 
@@ -9334,6 +9473,9 @@ def admin_usuarios_novo_post():
         for p in perfis
     ]
 
+    # Limpa o email antes do validate_on_submit para remover espaços invisíveis.
+    form_usuario.email.data = _limpar_email(form_usuario.email.data)
+
     if not form_usuario.validate_on_submit():
         flash("Revise os campos do formulário.", "danger")
         return render_template(
@@ -9355,7 +9497,7 @@ def admin_usuarios_novo_post():
     id_perfil_int = int(form_usuario.id_perfil.data)
     ativo = (form_usuario.ativo.data or "1").strip()
 
-    existe = db.session.query(DimUsuarios).filter(func.lower(DimUsuarios.Email) == email).first()
+    existe = db.session.query(DimUsuarios).filter(func.lower(DimUsuarios.Email) == email.lower()).first()
     if existe:
         flash("Já existe usuário com esse email.", "danger")
         return render_template(
@@ -9382,8 +9524,34 @@ def admin_usuarios_novo_post():
         UltimoLogin=None,
     )
 
-    db.session.add(novo)
-    db.session.commit()
+    try:
+        db.session.add(novo)
+        db.session.flush()
+
+        if _perfil_usuario_eh_admin(id_perfil_int):
+            _aplicar_acesso_total_usuario_admin(
+                id_usuario=int(novo.IDDimUsuarios),
+                id_usuario_executor=_id_usuario_executor_atual(),
+            )
+
+        db.session.commit()
+
+    except Exception as erro:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao criar usuário e aplicar permissões administrativas.")
+        flash(f"Erro ao criar usuário: {str(erro)}", "danger")
+        return render_template(
+            "euromidia/usuarios_form.html",
+            modo="novo",
+            usuario=None,
+            perfis=perfis,
+            permissoes_todas=[],
+            extras=[],
+            form_usuario=form_usuario,
+            form_senha=None,
+            form_perm_extra=None,
+            remover_forms={},
+        )
 
     flash("Usuário criado com sucesso.", "success")
     return redirect(url_for("Paineis.admin_usuarios_editar_form", id_usuario=novo.IDDimUsuarios))
@@ -9482,6 +9650,9 @@ def admin_usuarios_editar_post(id_usuario: int):
         for p in perfis
     ]
 
+    # Limpa o email antes do validate_on_submit para remover espaços invisíveis.
+    form_usuario.email.data = _limpar_email(form_usuario.email.data)
+
     if not form_usuario.validate_on_submit():
         flash("Revise os campos do formulário.", "danger")
 
@@ -9522,7 +9693,7 @@ def admin_usuarios_editar_post(id_usuario: int):
 
     existe = (
         db.session.query(DimUsuarios)
-        .filter(func.lower(DimUsuarios.Email) == email)
+        .filter(func.lower(DimUsuarios.Email) == email.lower())
         .filter(DimUsuarios.IDDimUsuarios != id_usuario)
         .first()
     )
@@ -9530,15 +9701,35 @@ def admin_usuarios_editar_post(id_usuario: int):
         flash("Já existe outro usuário com esse email.", "danger")
         return redirect(url_for("Paineis.admin_usuarios_editar_form", id_usuario=id_usuario))
 
-    usuario.NomeUsuario = nome or None
-    usuario.Email = email
-    usuario.IDDimPerfilUsuario = id_perfil_int
-    usuario.BitAtivo = True if ativo == "1" else False
-    usuario.UpdateAt = datetime.now()
+    try:
+        usuario.NomeUsuario = nome or None
+        usuario.Email = email
+        usuario.IDDimPerfilUsuario = id_perfil_int
+        usuario.BitAtivo = True if ativo == "1" else False
+        usuario.UpdateAt = datetime.now()
 
-    db.session.commit()
+        if _perfil_usuario_eh_admin(id_perfil_int):
+            total_permissoes = _aplicar_acesso_total_usuario_admin(
+                id_usuario=int(id_usuario),
+                id_usuario_executor=_id_usuario_executor_atual(),
+            )
+            mensagem_sucesso = f"Usuário atualizado com sucesso. Acesso total de administrador aplicado ({total_permissoes} permissões)."
+        else:
+            permissoes_removidas = _remover_acesso_total_admin_automatico(id_usuario=int(id_usuario))
+            if permissoes_removidas > 0:
+                mensagem_sucesso = f"Usuário atualizado com sucesso. Permissões automáticas de administrador removidas ({permissoes_removidas})."
+            else:
+                mensagem_sucesso = "Usuário atualizado com sucesso."
 
-    flash("Usuário atualizado com sucesso.", "success")
+        db.session.commit()
+
+    except Exception as erro:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao atualizar usuário e aplicar permissões administrativas.")
+        flash(f"Erro ao atualizar usuário: {str(erro)}", "danger")
+        return redirect(url_for("Paineis.admin_usuarios_editar_form", id_usuario=id_usuario))
+
+    flash(mensagem_sucesso, "success")
     return redirect(url_for("Paineis.admin_usuarios_editar_form", id_usuario=id_usuario))
 
 
