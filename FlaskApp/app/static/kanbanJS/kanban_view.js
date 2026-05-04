@@ -15,6 +15,7 @@
   }
 
   const KANBAN_VIEW_CONFIG = lerConfiguracaoKanbanView();
+  const PODE_VER_CUSTO_MARGEM = KANBAN_VIEW_CONFIG.podeVerCustoMargem === true;
   const ID_KANBAN = Number(KANBAN_VIEW_CONFIG.idKanban || 0);
   const board = document.getElementById("board");
   const msgBoard = document.getElementById("msgBoard");
@@ -9082,7 +9083,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
         : "—";
     }
 
-    if (kpiCustoTotal) {
+    if (kpiCustoTotal && PODE_VER_CUSTO_MARGEM) {
       kpiCustoTotal.textContent = resumoComercial
         ? formatarMoedaBR(resumoComercial.ValorCustoTotal)
         : "—";
@@ -9094,7 +9095,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
         : "—";
     }
 
-    if (kpiMargemPercentual) {
+    if (kpiMargemPercentual && PODE_VER_CUSTO_MARGEM) {
       const margem = resumoComercial ? Number(resumoComercial.MargemPercentualTotal) : NaN;
       kpiMargemPercentual.textContent = Number.isFinite(margem) ? formatarPercentualBR(margem) : "—";
       kpiMargemPercentual.classList.remove("positivo", "negativo");
@@ -11255,7 +11256,7 @@ function atualizarResumoComercial(bloco, opcoes = {}){
   const preservarNovoValorEmDigitacao = opcoes.preservarNovoValorEmDigitacao === true;
   const preservarPercentualEmDigitacao = opcoes.preservarPercentualEmDigitacao === true;
 
-  if (kpiCusto){
+  if (kpiCusto && PODE_VER_CUSTO_MARGEM){
     kpiCusto.textContent = Number.isFinite(custo) ? formatarMoedaBR(custo) : '—';
   }
 
@@ -11274,7 +11275,7 @@ function atualizarResumoComercial(bloco, opcoes = {}){
       ? (margemBase / valorBaseTabela) * 100
       : null;
 
-  if (kpiMargemBase){
+  if (kpiMargemBase && PODE_VER_CUSTO_MARGEM){
     kpiMargemBase.textContent =
       margemBasePerc === null
         ? '—'
@@ -11376,7 +11377,7 @@ function atualizarResumoComercial(bloco, opcoes = {}){
     kpiValorFinal.textContent = valorFinal === null ? '—' : formatarMoedaBR(valorFinal);
   }
 
-  if (kpiMargemFinal){
+  if (kpiMargemFinal && PODE_VER_CUSTO_MARGEM){
     kpiMargemFinal.textContent =
       margemFinalPerc === null
         ? '—'
@@ -11443,20 +11444,34 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
   montarSelectPrecosNoElemento(selectPreco, comercial?.precos || []);
   wrap.innerHTML = '';
 
-  wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, [
-    el('div', { class:'kb-campo' }, [
-      el('div', { class:'kb-campo-label' }, ['Custo atual']),
-      el('div', { class:'kb-kpi', 'data-role':'kpi-custo' }, ['—'])
-    ]),
+  const camposResumoComercialInicial = [];
+
+  if (PODE_VER_CUSTO_MARGEM) {
+    camposResumoComercialInicial.push(
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Custo atual']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-custo' }, ['—'])
+      ])
+    );
+  }
+
+  camposResumoComercialInicial.push(
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Valor período']),
       el('div', { class:'kb-kpi', 'data-role':'kpi-preco-atual' }, ['—'])
-    ]),
-    el('div', { class:'kb-campo' }, [
-      el('div', { class:'kb-campo-label' }, ['Margem atual']),
-      el('div', { class:'kb-kpi', 'data-role':'kpi-margem-base' }, ['—'])
     ])
-  ]));
+  );
+
+  if (PODE_VER_CUSTO_MARGEM) {
+    camposResumoComercialInicial.push(
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Margem atual']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-margem-base' }, ['—'])
+      ])
+    );
+  }
+
+  wrap.appendChild(el('div', { class:'kb-painel-item-grid-2' }, camposResumoComercialInicial));
 
   wrap.appendChild(el('div', { class:'kb-row' }, [
     el('div', { class:'kb-campo grow' }, [
@@ -11496,7 +11511,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     )
   );
 
-  wrap.appendChild(el('div', { class:'kb-painel-item-grid-3' }, [
+  const camposResumoComercialFinal = [
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Novo valor']),
       el('input', {
@@ -11522,12 +11537,19 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     el('div', { class:'kb-campo' }, [
       el('div', { class:'kb-campo-label' }, ['Valor negociado período']),
       el('div', { class:'kb-kpi', 'data-role':'kpi-valor-final' }, ['—'])
-    ]),
-    el('div', { class:'kb-campo' }, [
-      el('div', { class:'kb-campo-label' }, ['Margem final']),
-      el('div', { class:'kb-kpi', 'data-role':'kpi-margem-final' }, ['—'])
     ])
-  ]));
+  ];
+
+  if (PODE_VER_CUSTO_MARGEM) {
+    camposResumoComercialFinal.push(
+      el('div', { class:'kb-campo' }, [
+        el('div', { class:'kb-campo-label' }, ['Margem final']),
+        el('div', { class:'kb-kpi', 'data-role':'kpi-margem-final' }, ['—'])
+      ])
+    );
+  }
+
+  wrap.appendChild(el('div', { class:'kb-painel-item-grid-3' }, camposResumoComercialFinal));
 
   wrap.appendChild(montarBlocoCheckinPublico(valoresSalvos));
 

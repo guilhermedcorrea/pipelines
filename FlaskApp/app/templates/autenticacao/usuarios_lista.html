@@ -1,0 +1,90 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Usuários | Euromídia{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <h1 class="page-title">Usuários</h1>
+
+  <p class="muted">
+    Clique em um usuário para alterar perfil e permissões individuais.
+  </p>
+
+  <form method="get" style="margin: 16px 0;">
+    <div class="grid">
+      <div>
+        <label>Buscar usuário</label>
+        <input type="text"
+               name="q"
+               value="{{ q }}"
+               placeholder="Digite nome ou email...">
+      </div>
+
+      <div style="display:flex; align-items:end; gap:10px;">
+        <button type="submit" class="btn btn-primary">Pesquisar</button>
+        <a href="{{ url_for('Autenticacao.usuarios_lista') }}" class="btn btn-secondary">Limpar</a>
+      </div>
+    </div>
+  </form>
+
+  <div class="overflow-x">
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">ID</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Nome</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Email</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Perfil</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Ativo</th>
+          <th style="text-align:right; padding:10px; border-bottom:1px solid var(--border);">Ação</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for u in usuarios %}
+          <tr>
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              {{ u.IDDimUsuarios }}
+            </td>
+
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              <b>{{ u.NomeUsuario or "-" }}</b>
+            </td>
+
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              {{ u.Email or "-" }}
+            </td>
+
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              {{ u.perfil.NomePerfil if u.perfil else "-" }}
+            </td>
+
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              {% if u.BitAtivo %}
+                <span style="font-weight:900; color:#16a34a;">Ativo</span>
+              {% else %}
+                <span style="font-weight:900; color:#dc2626;">Inativo</span>
+              {% endif %}
+            </td>
+
+            <td style="padding:10px; border-bottom:1px solid var(--border); text-align:right;">
+              <a class="btn btn-primary"
+                 href="{{ url_for('Autenticacao.usuarios_editar', id_usuario=u.IDDimUsuarios) }}">
+                Editar permissões
+              </a>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" style="padding:16px; text-align:center;" class="muted">
+              Nenhum usuário encontrado.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

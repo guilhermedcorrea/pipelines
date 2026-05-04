@@ -56,6 +56,11 @@ class DimPermissoes(db.Model):
     )
 
 
+
+
+
+
+
 class DimUsuarios(db.Model, UserMixin):
     __tablename__ = "DimUsuarios"
     __table_args__ = {"schema": "Silver"}
@@ -79,8 +84,11 @@ class DimUsuarios(db.Model, UserMixin):
     UltimoLogin = db.Column(db.DateTime, nullable=True)
     IDEmpresaProprietaria = db.Column(db.Integer, nullable=True)
 
- 
-    perfil = db.relationship("DimPerfilUsuario", back_populates="usuarios", lazy="joined")
+    perfil = db.relationship(
+        "DimPerfilUsuario",
+        back_populates="usuarios",
+        lazy="joined",
+    )
 
     permissoes_extras = db.relationship(
         "PermissoesUsuario",
@@ -90,60 +98,119 @@ class DimUsuarios(db.Model, UserMixin):
         cascade="all, delete-orphan",
     )
 
-    
     def get_id(self):
         return str(self.IDDimUsuarios)
 
     def is_active(self):
-        
         return bool(self.BitAtivo)
 
-
     def has_permission(self, codigo_permissao: str) -> bool:
-        
+        """has_permission
+        Eu verifico se o usuário possui uma permissão efetiva.
+
+        A regra é:
+
+        1. O perfil do usuário concede permissões padrão.
+        2. A tabela PermissoesUsuario pode conceder permissões extras.
+        3. A tabela PermissoesUsuario pode revogar permissões específicas.
+        4. ADMIN_TUDO funciona como permissão coringa.
+        5. Permissões expiradas são ignoradas.
+        6. REVOGAR tem prioridade sobre CONCEDER e sobre o perfil.
+        """
+
         if not codigo_permissao:
             return False
 
         codigo = str(codigo_permissao).strip().upper()
+
+        if not codigo:
+            return False
+
         agora = datetime.now()
 
-      
-        perfil_ok = bool(getattr(self.perfil, "BitAtivo", False))
-        perfil_tem = False
+        codigos_perfil = set()
+        codigos_concedidos = set()
+        codigos_revogados = set()
 
-        if perfil_ok and self.perfil and self.perfil.permissoes:
-            for p in self.perfil.permissoes:
-                if bool(getattr(p, "BitAtivo", True)) and (p.CodigoPermissao or "").strip().upper() == codigo:
-                    perfil_tem = True
-                    break
+        perfil = getattr(self, "perfil", None)
+        perfil_ativo = bool(getattr(perfil, "BitAtivo", False))
 
+        if perfil and perfil_ativo:
+            for permissao in getattr(perfil, "permissoes", None) or []:
+                if not permissao:
+                    continue
 
-        excecao_concede = False
-        excecao_revoga = False
+                if not bool(getattr(permissao, "BitAtivo", True)):
+                    continue
 
-        for row in self.permissoes_extras or []:
-            perm = row.permissao
-            if not perm or not bool(getattr(perm, "BitAtivo", True)):
+                codigo_perfil = (getattr(permissao, "CodigoPermissao", "") or "").strip().upper()
+
+                if codigo_perfil:
+                    codigos_perfil.add(codigo_perfil)
+
+        for row in getattr(self, "permissoes_extras", None) or []:
+            permissao = getattr(row, "permissao", None)
+
+            if not permissao:
                 continue
 
-            if (perm.CodigoPermissao or "").strip().upper() != codigo:
+            if not bool(getattr(permissao, "BitAtivo", True)):
                 continue
 
-            if row.DataExpiracao is not None and row.DataExpiracao <= agora:
+            data_expiracao = getattr(row, "DataExpiracao", None)
+
+            if data_expiracao is not None and data_expiracao <= agora:
                 continue
 
-            tipo = (row.TipoAtribuicao or "").strip().upper()
-            if tipo == "REVOGAR":
-                excecao_revoga = True
-            elif tipo == "CONCEDER":
-                excecao_concede = True
+            codigo_extra = (getattr(permissao, "CodigoPermissao", "") or "").strip().upper()
+            tipo_atribuicao = (getattr(row, "TipoAtribuicao", "") or "").strip().upper()
 
-        if excecao_revoga:
+            if not codigo_extra:
+                continue
+
+            if tipo_atribuicao == "REVOGAR":
+                codigos_revogados.add(codigo_extra)
+
+            elif tipo_atribuicao == "CONCEDER":
+                codigos_concedidos.add(codigo_extra)
+
+        if codigo in codigos_revogados:
             return False
-        if excecao_concede:
+
+        if codigo in codigos_concedidos:
             return True
 
-        return bool(perfil_tem)
+        admin_tudo_revogado = "ADMIN_TUDO" in codigos_revogados
+        admin_tudo_por_perfil = "ADMIN_TUDO" in codigos_perfil
+        admin_tudo_por_excecao = "ADMIN_TUDO" in codigos_concedidos
+
+        if not admin_tudo_revogado and (admin_tudo_por_perfil or admin_tudo_por_excecao):
+            return True
+
+        return codigo in codigos_perfil
+
+    def has_any_permission(self, *codigos_permissao) -> bool:
+        """has_any_permission
+        Eu verifico se o usuário possui pelo menos uma permissão da lista.
+        Isso ajuda em menus onde mais de uma permissão pode liberar acesso.
+        """
+
+        for codigo in codigos_permissao or []:
+            if self.has_permission(codigo):
+                return True
+
+        return False
+
+    def is_admin_total(self) -> bool:
+        """is_admin_total
+        Eu verifico se o usuário tem acesso administrativo total.
+        """
+
+        return self.has_permission("ADMIN_TUDO")
+
+
+
+
 
 
 
@@ -217,3 +284,10 @@ def load_user(user_id: str):
         .filter(DimUsuarios.IDDimUsuarios == uid)
         .first()
     )
+
+
+
+
+
+
+

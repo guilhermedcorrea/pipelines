@@ -10,6 +10,7 @@ from flask_login import current_user
 Regra principal:
 - ADMIN_TUDO vê tudo.
 - Perfil USUARIO é restrito e só vê itens liberados por permissão.
+- Perfil VENDEDOR vê apenas itens liberados por permissão.
 - Atendimento/Kanban Atendimento aparece quando o usuário tem KANBAN_VER ou KANBAN_EDITAR.
 """
 
@@ -29,8 +30,15 @@ MAPA_ITEM_MENU_PERMISSOES = {
 
     "disponibilidades": {"PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
     "paineis": {"PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+    "grade_painel": {"PAINEIS_GRADE_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+
     "empresas": {"CLIENTES_LISTA_VER", "ADMIN_TUDO"},
     "clientes": {"CLIENTES_LISTA_VER", "ADMIN_TUDO"},
+    "clientes_detalhe": {"CLIENTES_DETALHE_VER", "CLIENTES_LISTA_VER", "ADMIN_TUDO"},
+
+    "carteiras": {"CARTEIRA_PROPRIA_VER", "CARTEIRAS_VER", "ADMIN_TUDO"},
+    "carteira_propria": {"CARTEIRA_PROPRIA_VER", "ADMIN_TUDO"},
+
     "lista_ocupacao": {"OCUPACAO_LISTA_VER", "ADMIN_TUDO"},
     "contratos": {"CONTRATOS_LISTA_VER", "CONTRATOS_VER", "ADMIN_TUDO"},
 
@@ -121,7 +129,7 @@ def _usuario_tem_alguma_permissao(codigos_permissao) -> bool:
 
 def usuario_eh_perfil_restrito_menu_paineis() -> bool:
     """usuario_eh_perfil_restrito_menu_paineis
-    - Eu digo se o usuário atual é do perfil 'Usuário'.
+    - Eu digo se o usuário atual é de perfil restrito.
     - Admin total nunca entra nessa regra restrita.
     """
     if not getattr(current_user, "is_authenticated", False):
@@ -131,14 +139,18 @@ def usuario_eh_perfil_restrito_menu_paineis() -> bool:
         return False
 
     perfil = _perfil_usuario_logado()
-    return perfil == "usuario"
+
+    return perfil in {
+        "usuario",
+        "vendedor",
+    }
 
 
 def pode_acessar_menu_paineis(item_menu: str) -> bool:
     """pode_acessar_menu_paineis
     - Eu controlo a visibilidade dos itens do menu Painéis.
     - Para 'atendimento', exijo KANBAN_VER ou KANBAN_EDITAR.
-    - Para perfil USUARIO, não basta estar no perfil: precisa passar pela permissão do item.
+    - Para perfil restrito, não basta estar no perfil: precisa passar pela permissão do item.
     """
     if not getattr(current_user, "is_authenticated", False):
         return False

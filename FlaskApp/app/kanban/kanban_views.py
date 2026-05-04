@@ -88,12 +88,6 @@ MAPA_MOTIVOS_HEALTH_CHECK = {
 
 
 
-
-
-
-
-
-
 TABELA_RELACIONAMENTO_EMPRESA = "[Integracao].[Silver].[DimRelacionamentoEmpresa]"
 TABELA_KANBAN = "[Kanban].[Silver].[DimKanban]"
 TABELA_KANBAN_FASE = "[Kanban].[Silver].[DimKanbanFase]"
@@ -195,6 +189,49 @@ def _id_empresa_usuario() -> int:
 
 def _id_usuario() -> int:
     return int(getattr(current_user, "IDDimUsuarios", 0) or 0)
+
+
+
+def _usuario_pode_ver_custo_margem_kanban() -> bool:
+    """Eu verifico se o usuário logado pode visualizar custo e margem no Kanban."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        if not metodo:
+            return False
+        return bool(metodo("KANBAN_CUSTO_MARGEM_VER"))
+    except Exception:
+        return False
+
+
+
+def _ocultar_custo_margem_payload(valor):
+    """Eu removo custo e margem do payload enviado ao navegador.
+
+    Isso é segurança de backend: o vendedor não recebe custo/margem nem pelo HTML
+    nem pelo JSON da aba Network do navegador.
+    """
+    if isinstance(valor, list):
+        return [_ocultar_custo_margem_payload(item) for item in valor]
+
+    if isinstance(valor, tuple):
+        return tuple(_ocultar_custo_margem_payload(item) for item in valor)
+
+    if isinstance(valor, dict):
+        novo = {}
+        for chave, item in valor.items():
+            chave_texto = str(chave or "").strip().lower()
+
+            if "custo" in chave_texto or "margem" in chave_texto:
+                novo[chave] = None
+            else:
+                novo[chave] = _ocultar_custo_margem_payload(item)
+
+        return novo
+
+    return valor
 
 
 
@@ -14206,12 +14243,16 @@ def api_kanban_resumo_comercial(id_kanban: int):
 
     usar_cache = not _request_pede_dado_fresco()
 
+    pode_ver_custo_margem = _usuario_pode_ver_custo_margem_kanban()
+
     chave = _chave_cache_json(
         "kanban:api:resumo-comercial",
         id_emp,
         id_kanban,
         _versao_empresa(id_emp),
         _versao_kanban(id_kanban),
+        "custo_margem",
+        int(pode_ver_custo_margem),
     )
 
     if usar_cache:
@@ -14219,9 +14260,14 @@ def api_kanban_resumo_comercial(id_kanban: int):
         if em_cache is not None:
             return jsonify(em_cache)
 
+    resumo_comercial = _obter_resumo_comercial_kanban(id_kanban)
+
+    if not pode_ver_custo_margem:
+        resumo_comercial = _ocultar_custo_margem_payload(resumo_comercial)
+
     payload = {
         "ok": True,
-        "resumo_comercial": _obter_resumo_comercial_kanban(id_kanban),
+        "resumo_comercial": resumo_comercial,
     }
 
     if usar_cache:
@@ -15110,6 +15156,8 @@ def api_card_detalhe(id_card: int):
 
     usar_cache = not _request_pede_dado_fresco()
 
+    pode_ver_custo_margem = _usuario_pode_ver_custo_margem_kanban()
+
     chave = _chave_cache_json(
         "kanban:api:card:detalhe",
         id_emp,
@@ -15117,6 +15165,8 @@ def api_card_detalhe(id_card: int):
         id_card,
         _versao_kanban(id_kanban),
         _versao_card(id_card),
+        "custo_margem",
+        int(pode_ver_custo_margem),
     )
 
     if usar_cache:
@@ -15227,6 +15277,9 @@ def api_card_detalhe(id_card: int):
 
     if "painelFaces" not in payload:
         payload["painelFaces"] = payload.get("painel_faces", []) or []
+
+    if not pode_ver_custo_margem:
+        payload = _ocultar_custo_margem_payload(payload)
 
     if usar_cache:
         _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)

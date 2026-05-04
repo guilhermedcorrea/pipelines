@@ -206,6 +206,10 @@
     width:100%;
   }
 
+  .kb-resumo-grid.kb-resumo-grid-sem-custo-margem{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .kb-resumo-card{
     position:relative;
     overflow:hidden;
@@ -3207,6 +3211,8 @@
 
 </style>
 
+{% set pode_ver_custo_margem = current_user.has_permission('KANBAN_CUSTO_MARGEM_VER') %}
+
 <div class="kb-wrap">
   <div class="kb-top">
     <div class="kb-title">
@@ -3224,7 +3230,7 @@
   <div class="kb-divider"></div>
 
   <div class="kb-resumo" id="kbResumoComercial">
-    <div class="kb-resumo-grid">
+    <div class="kb-resumo-grid {% if not pode_ver_custo_margem %}kb-resumo-grid-sem-custo-margem{% endif %}">
       <article class="kb-resumo-card" style="--resumo-accent:#2563EB;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Atendimentos Ativos</p>
@@ -3243,6 +3249,7 @@
       
       </article>
 
+      {% if pode_ver_custo_margem %}
       <article class="kb-resumo-card" style="--resumo-accent:#7C3AED;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Custo</p>
@@ -3251,6 +3258,7 @@
         <p class="kb-resumo-valor" id="kpiCustoTotal">—</p>
       
       </article>
+      {% endif %}
 
       <article class="kb-resumo-card" style="--resumo-accent:#0F766E;">
         <div class="kb-resumo-topo">
@@ -3261,6 +3269,7 @@
        
       </article>
 
+      {% if pode_ver_custo_margem %}
       <article class="kb-resumo-card" style="--resumo-accent:#16A34A;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Margem</p>
@@ -3269,6 +3278,7 @@
         <p class="kb-resumo-valor" id="kpiMargemPercentual">—</p>
      
       </article>
+      {% endif %}
     </div>
   </div>
 
@@ -3853,6 +3863,7 @@
   {{ {
     "idKanban": kanban.IDDimKanban,
     "scriptRoot": request.script_root or "",
+    "podeVerCustoMargem": pode_ver_custo_margem,
     "urlPainelPublicidade": url_for('static', filename='imagens/painel-publicitario.png'),
     "urlCabecalhoOrcamentoPadrao": url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG'),
     "urlApiCardDetalheTemplate": url_for('kanban.api_card_detalhe', id_card=0).replace('/0', '/__ID_CARD__'),

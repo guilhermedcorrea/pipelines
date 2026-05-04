@@ -1062,6 +1062,7 @@ def api_pontos():
 
 
 @paineis_bp.route("/api/pontos/<int:codponto>/faces", methods=["GET"])
+@login_required
 @limiter.limit("120 per minute", methods=["GET"])
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def api_faces_do_ponto(codponto: int):
@@ -7465,6 +7466,7 @@ def grade_painel_multi():
 
 
 @paineis_bp.get("/contratos/<int:id_fato_controle_contratos>", strict_slashes=False)
+@login_required
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def contrato_detalhe(id_fato_controle_contratos: int):
 
@@ -8427,6 +8429,7 @@ def _bool_from_situacao_receita(descricao_situacao: str):
 
 
 @paineis_bp.get("/api/receita/<cnpj>")
+@login_required
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def paineis_api_buscar_receita(cnpj: str):
     cnpj_limpo = _somente_digitos(cnpj)
@@ -8498,6 +8501,7 @@ def paineis_api_buscar_receita(cnpj: str):
 
 
 @paineis_bp.get("/api/clientes/buscar/<cnpj>")
+@login_required
 @limiter.limit("60 per minute", methods=["GET"])
 def paineis_api_clientes_buscar(cnpj: str):
     cnpj_limpo = _normalizar_cnpj(cnpj)
@@ -8723,6 +8727,7 @@ def _to_bool_ou_none(v):
 
 
 @paineis_bp.post("/api/clientes/salvar")
+@login_required
 @limiter.limit("20 per minute", methods=["POST"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def paineis_api_clientes_salvar():
@@ -8906,6 +8911,7 @@ def paineis_api_clientes_salvar():
 
 
 @paineis_bp.get("/clientes/novo")
+@login_required
 def paineis_clientes_novo():
     form = FormCadastroCliente()
     return render_template("euromidia/novo.html", form=form)
@@ -12466,6 +12472,7 @@ def _matriz_filial_label(valor) -> str:
 
 
 @paineis_bp.post("/clientes/<int:id_empresa>/carteira")
+@login_required
 def cliente_carteira_atualizar(id_empresa: int):
 
     def _resolver_return_to_local():
@@ -12777,6 +12784,7 @@ def cliente_carteira_atualizar(id_empresa: int):
 
 
 @paineis_bp.get("/clientes/<int:id_empresa>")
+@login_required
 def cliente_detalhe(id_empresa: int):
 
     def _resolver_return_to_local():
@@ -13881,6 +13889,7 @@ def _excel_montar_aba_grade_ano(
 
 
 @paineis_bp.route("/painel-detalhes/<int:codponto>", methods=["GET"])
+@login_required
 def painel_detalhes(codponto: int):
     def _texto_limpo(valor):
         try:
@@ -14765,6 +14774,7 @@ def reserva_nova():
 
 
 @paineis_bp.route("/api/ocupacao/calendario", methods=["GET"])
+@login_required
 def api_ocupacao_calendario():
 
     cod_face = (request.args.get("cod_face") or request.args.get("codface") or "").strip()
@@ -14971,6 +14981,7 @@ def api_ocupacao_calendario():
 
 
 @paineis_bp.route("/api/ocupacao/reserva/dados-modal", methods=["GET"])
+@login_required
 def api_ocupacao_reserva_dados_modal():
 
     cod_face = (request.args.get("cod_face") or request.args.get("codface") or "").strip()
@@ -20083,6 +20094,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
 
 
 @paineis_bp.route("/checkin/publico/<string:token_publico>", methods=["GET"])
+@login_required
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_publico(token_publico: str):
     token_limpo = str(token_publico or "").strip()
@@ -20158,6 +20170,7 @@ def checkin_publico(token_publico: str):
 
 
 @paineis_bp.route("/checkin/publico/<string:token_publico>/autenticar", methods=["POST"])
+@login_required
 def checkin_publico_autenticar(token_publico: str):
     token_limpo = str(token_publico or "").strip()
     if not token_limpo:
