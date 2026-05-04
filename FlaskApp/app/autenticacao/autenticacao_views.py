@@ -370,10 +370,7 @@ def trocar_senha():
 @login_required
 @requer_permissao("USUARIOS_VER")
 def usuarios_lista():
-    """usuarios_lista
-    Eu listo usuários para o administrador abrir e editar perfil/permissões.
-    """
-
+   
     q = _texto(request.args.get("q")).lower()
 
     consulta = db.session.query(DimUsuarios)
@@ -397,6 +394,9 @@ def usuarios_lista():
         usuarios=usuarios,
         q=q,
     )
+
+
+
 
 
 @autenticacao_bp.route("/seguranca/usuarios/<int:id_usuario>", methods=["GET", "POST"])
