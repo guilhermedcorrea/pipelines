@@ -189,6 +189,144 @@ def _id_usuario() -> int:
     return int(getattr(current_user, "IDDimUsuarios", 0) or 0)
 
 
+def _normalizar_acl_kanban(valor: Any) -> str:
+    texto = str(valor or "").strip().lower()
+    if not texto:
+        return ""
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    return texto.strip()
+
+
+def _usuario_eh_perfil_vendedor_kanban() -> bool:
+    """Identifica o perfil Vendedor pela regra fixa: IDDimPerfilUsuario = 3."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 3:
+            return True
+    except Exception:
+        pass
+
+    perfil = getattr(current_user, "perfil", None)
+    nomes_perfil = [
+        getattr(current_user, "NomePerfil", None),
+        getattr(current_user, "Perfil", None),
+        getattr(current_user, "DescricaoPerfil", None),
+        getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+        getattr(perfil, "Descricao", None) if perfil is not None else None,
+    ]
+
+    return any(_normalizar_acl_kanban(nome) == "vendedor" for nome in nomes_perfil)
+
+
+def _obter_vendedor_logado_kanban(id_empresa_proprietaria: int | None = None) -> dict[str, Any] | None:
+    """Resolve o vendedor vinculado ao usuário logado pela tabela Integracao.dbo.Vendedores."""
+    id_usuario = _id_usuario()
+    if not id_usuario:
+        return None
+
+    id_empresa = int(id_empresa_proprietaria or _id_empresa_usuario() or 0)
+
+    sql = text("""
+        SELECT TOP (1)
+            v.IDVendedor,
+            v.NomeVendedor,
+            v.IDEmpresaProprietaria,
+            v.IDDimUsuarios
+        FROM [Integracao].[dbo].[Vendedores] v
+        WHERE v.IDDimUsuarios = :id_usuario
+          AND COALESCE(v.BitAtivo, 1) = 1
+          AND (
+                :id_empresa = 0
+                OR COALESCE(v.IDEmpresaProprietaria, 0) = :id_empresa
+              )
+        ORDER BY
+            CASE WHEN COALESCE(v.IDEmpresaProprietaria, 0) = :id_empresa THEN 0 ELSE 1 END,
+            v.IDVendedor ASC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_usuario": int(id_usuario),
+            "id_empresa": int(id_empresa),
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _resolver_escopo_vendedor_kanban(id_empresa_proprietaria: int | None = None) -> dict[str, Any]:
+    """Monta o escopo de dados aplicado somente ao perfil Vendedor."""
+    if not _usuario_eh_perfil_vendedor_kanban():
+        return {"ativo": False}
+
+    vendedor = _obter_vendedor_logado_kanban(id_empresa_proprietaria) or {}
+
+    return {
+        "ativo": True,
+        "id_usuario": int(_id_usuario() or 0),
+        "id_vendedor": int(vendedor.get("IDVendedor") or 0),
+        "nome_vendedor": (
+            str(vendedor.get("NomeVendedor") or "").strip()
+            or str(getattr(current_user, "NomeUsuario", "") or "").strip()
+        ),
+    }
+
+
+def _sql_filtro_escopo_vendedor_kanban(alias_card: str = "c", escopo: dict[str, Any] | None = None) -> str:
+    """Retorna o filtro SQL que limita o Vendedor aos próprios cards."""
+    escopo = escopo or _resolver_escopo_vendedor_kanban()
+    if not escopo.get("ativo"):
+        return ""
+
+    condicoes: list[str] = []
+
+    if int(escopo.get("id_vendedor") or 0) > 0 and _coluna_existe(TABELA_CARD, "IDVendedor"):
+        condicoes.append(f"TRY_CONVERT(int, {alias_card}.IDVendedor) = :escopo_id_vendedor")
+
+    if _coluna_existe(TABELA_CARD, "IDVendedorUsuario"):
+        condicoes.append(f"TRY_CONVERT(int, {alias_card}.IDVendedorUsuario) = :escopo_id_usuario")
+
+    if _coluna_existe(TABELA_CARD, "IDDimUsuarios"):
+        condicoes.append(f"TRY_CONVERT(int, {alias_card}.IDDimUsuarios) = :escopo_id_usuario")
+
+    if not condicoes:
+        return "AND 1 = 0"
+
+    return "AND (" + " OR ".join(condicoes) + ")"
+
+
+def _params_escopo_vendedor_kanban(escopo: dict[str, Any] | None = None) -> dict[str, int]:
+    escopo = escopo or _resolver_escopo_vendedor_kanban()
+    if not escopo.get("ativo"):
+        return {}
+
+    return {
+        "escopo_id_usuario": int(escopo.get("id_usuario") or 0),
+        "escopo_id_vendedor": int(escopo.get("id_vendedor") or 0),
+    }
+
+
+def _chave_cache_escopo_vendedor_kanban(escopo: dict[str, Any] | None = None) -> tuple:
+    escopo = escopo or _resolver_escopo_vendedor_kanban()
+    if not escopo.get("ativo"):
+        return ("geral",)
+
+    return (
+        "vendedor",
+        int(escopo.get("id_usuario") or 0),
+        int(escopo.get("id_vendedor") or 0),
+    )
+
+
+def _sql_select_id_vendedor_card(alias_card: str = "c") -> str:
+    if _coluna_existe(TABELA_CARD, "IDVendedor"):
+        return f"{alias_card}.IDVendedor AS IDVendedor"
+    return "CAST(NULL AS int) AS IDVendedor"
+
+
 
 def _usuario_pode_ver_custo_margem_kanban() -> bool:
     """Eu verifico se o usuário logado pode visualizar custo e margem no Kanban."""
@@ -4836,9 +4974,6 @@ def _finalizar_pos_movimento_card(
             "id_fase_de": id_fase_de,
             "id_fase_para": id_fase_para,
             "ordem_na_fase": ordem_na_fase,
-            "card": detalhe.get("card"),
-            "tags": detalhe.get("tags", []),
-            "notas": detalhe.get("notas", []),
             "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             "snapshot_preco_praticado": snapshot_preco_praticado,
             "sincronizacao_reservas": sincronizacao_reservas,
@@ -8523,6 +8658,7 @@ def _obter_snapshot_card_log(id_card: int, *, incluir_inativo: bool = True) -> d
             c.CriadoEm,
             c.AtualizadoEm,
             c.IDEmpresaProprietaria,
+            {_sql_select_id_vendedor_card('c')},
             {_sql_select_id_origem_atendimento_card('c')}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')}
@@ -8930,6 +9066,8 @@ def _registrar_historico_encerramento_card(
 def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> dict[str, Any]:
     id_emp = _id_empresa_usuario_or_403()
     filtro_ativo = "" if incluir_inativo else "AND c.Ativo = 1"
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
 
     select_id_contrato = (
         "c.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidia,"
@@ -9037,6 +9175,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             c.IDDimKanbanMotivoEncerramento,
             c.MotivoEncerramentoObs,
             c.IDEmpresaProprietaria,
+            {_sql_select_id_vendedor_card('c')},
             {_sql_select_id_origem_atendimento_card('c')}
             {select_id_contrato}
             {select_cod_ponto_contrato}
@@ -9062,12 +9201,17 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         WHERE c.IDFatoKanbanCard = :id_card
           AND k.IDEmpresaProprietaria = :id_emp
           AND k.Ativo = 1
-          {filtro_ativo};
+          {filtro_ativo}
+          {filtro_escopo_vendedor};
     """)
 
     row = db.session.execute(
         sql,
-        {"id_card": int(id_card), "id_emp": int(id_emp)},
+        {
+            "id_card": int(id_card),
+            "id_emp": int(id_emp),
+            **_params_escopo_vendedor_kanban(escopo_vendedor),
+        },
     ).mappings().first()
 
     if not row:
@@ -14070,7 +14214,16 @@ def kanban_view(id_kanban: int):
     _assert_login()
     try:
         kanban = _obter_kanban_autorizado(id_kanban)
-        return render_template("kanban/kanban_view.html", kanban=kanban)
+        id_emp = int(kanban.get("IDEmpresaProprietaria") or _id_empresa_usuario_or_403() or 0)
+        escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+
+        return render_template(
+            "kanban/kanban_view.html",
+            kanban=kanban,
+            usuario_eh_vendedor_kanban=bool(escopo_vendedor.get("ativo")),
+            id_usuario_logado_kanban=int(escopo_vendedor.get("id_usuario") or _id_usuario() or 0),
+            id_vendedor_logado_kanban=int(escopo_vendedor.get("id_vendedor") or 0) or None,
+        )
     except Exception as exc:
         current_app.logger.exception("Erro no kanban_view id_kanban=%s: %s", id_kanban, exc)
         return render_template("erros/500.html"), 500
@@ -14146,6 +14299,11 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
       (venda_total - custo_total) / venda_total * 100
       e não pela média simples das margens linha a linha
     """
+    id_emp = _id_empresa_usuario_or_403()
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
     sql = text(f"""
         ;WITH CardsBase AS (
             SELECT c.IDFatoKanbanCard
@@ -14154,6 +14312,7 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
               AND c.Ativo = 1
               AND c.IDDimKanbanFaseAtual IN (1, 2, 3, 4, 5, 6)
               {_sql_filtro_status_card_visiveis('c')}
+              {filtro_escopo_vendedor}
         ),
         TagsAtivas AS (
             SELECT DISTINCT
@@ -14217,7 +14376,13 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
         FROM TotaisFinanceiros tf;
     """)
 
-    row = db.session.execute(sql, {"id_kanban": int(id_kanban)}).mappings().first() or {}
+    row = db.session.execute(
+        sql,
+        {
+            "id_kanban": int(id_kanban),
+            **params_escopo_vendedor,
+        },
+    ).mappings().first() or {}
 
     return {
         "QuantidadeAtendimentosAtivos": int(row.get("QuantidadeAtendimentosAtivos") or 0),
@@ -14238,6 +14403,7 @@ def api_kanban_resumo_comercial(id_kanban: int):
     _assert_login()
     _obter_kanban_autorizado(id_kanban)
     id_emp = _id_empresa_usuario_or_403()
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
 
     usar_cache = not _request_pede_dado_fresco()
 
@@ -14247,6 +14413,7 @@ def api_kanban_resumo_comercial(id_kanban: int):
         "kanban:api:resumo-comercial",
         id_emp,
         id_kanban,
+        *_chave_cache_escopo_vendedor_kanban(escopo_vendedor),
         _versao_empresa(id_emp),
         _versao_kanban(id_kanban),
         "custo_margem",
@@ -14420,6 +14587,9 @@ def api_kanban_dados(id_kanban: int):
     _assert_login()
     kanban_cfg = _obter_cfg_kanban(id_kanban)
     id_emp = _id_empresa_usuario_or_403()
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
 
     try:
         limite_inicial_por_fase = int(request.args.get("limit_inicial") or 8)
@@ -14434,6 +14604,7 @@ def api_kanban_dados(id_kanban: int):
         id_emp,
         id_kanban,
         limite_inicial_por_fase,
+        *_chave_cache_escopo_vendedor_kanban(escopo_vendedor),
         _versao_empresa(id_emp),
         _versao_kanban(id_kanban),
     )
@@ -14459,6 +14630,7 @@ def api_kanban_dados(id_kanban: int):
         WHERE c.IDDimKanban = :id_kanban
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')}
+          {filtro_escopo_vendedor}
           AND NOT EXISTS (
                 SELECT 1
                 FROM {TABELA_KANBAN_FASE} f_final
@@ -14472,7 +14644,13 @@ def api_kanban_dados(id_kanban: int):
             )
         GROUP BY c.IDDimKanbanFaseAtual;
     """)
-    rows_totais = db.session.execute(sql_totais, {"id_kanban": id_kanban}).mappings().all()
+    rows_totais = db.session.execute(
+        sql_totais,
+        {
+            "id_kanban": id_kanban,
+            **params_escopo_vendedor,
+        },
+    ).mappings().all()
     mapa_totais_por_fase = {
         int(r["IDDimKanbanFase"]): int(r["QuantidadeCardsTotal"] or 0)
         for r in rows_totais
@@ -14491,6 +14669,7 @@ def api_kanban_dados(id_kanban: int):
                 c.AtualizadoEm,
                 {_sql_select_versao_concorrencia_card('c')},
                 c.IDEmpresaProprietaria,
+                {_sql_select_id_vendedor_card('c')},
                 {_sql_select_id_origem_atendimento_card('c')}
                 {_sql_select_empresa_relacionada_card('c')},
                 {_sql_select_usuario_relacionado_card('c')},
@@ -14516,6 +14695,7 @@ def api_kanban_dados(id_kanban: int):
             WHERE c.IDDimKanban = :id_kanban
               AND c.Ativo = 1
               {_sql_filtro_status_card_visiveis('c')}
+              {filtro_escopo_vendedor}
               AND NOT EXISTS (
                     SELECT 1
                     FROM {TABELA_KANBAN_FASE} f_final
@@ -14538,6 +14718,7 @@ def api_kanban_dados(id_kanban: int):
             AtualizadoEm,
             VersaoConcorrencia,
             IDEmpresaProprietaria,
+            IDVendedor,
             IDDimOrigemAtendimento,
             IDEmpresaRelacionadaCard,
             IDUsuarioRelacionadoCard,
@@ -14561,6 +14742,7 @@ def api_kanban_dados(id_kanban: int):
         {
             "id_kanban": id_kanban,
             "limite_inicial_por_fase": limite_inicial_por_fase,
+            **params_escopo_vendedor,
         },
     ).mappings().all()
 
@@ -14694,6 +14876,9 @@ def api_cards_listar_por_fase(id_kanban: int):
     _assert_login()
     _obter_kanban_autorizado(id_kanban)
     id_emp = _id_empresa_usuario_or_403()
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
 
     try:
         try:
@@ -14735,6 +14920,7 @@ def api_cards_listar_por_fase(id_kanban: int):
             id_fase,
             offset,
             limit,
+            *_chave_cache_escopo_vendedor_kanban(escopo_vendedor),
             _versao_kanban(id_kanban),
         )
 
@@ -14752,6 +14938,7 @@ def api_cards_listar_por_fase(id_kanban: int):
               AND c.IDDimKanbanFaseAtual = :id_fase
               AND c.Ativo = 1
               {_sql_filtro_status_card_visiveis('c')}
+              {filtro_escopo_vendedor}
               AND NOT EXISTS (
                     SELECT 1
                     FROM {TABELA_KANBAN_FASE} f_final
@@ -14771,6 +14958,7 @@ def api_cards_listar_por_fase(id_kanban: int):
                 {
                     "id_kanban": id_kanban,
                     "id_fase": id_fase,
+                    **params_escopo_vendedor,
                 },
             ).scalar() or 0
         )
@@ -14787,6 +14975,7 @@ def api_cards_listar_por_fase(id_kanban: int):
                     c.AtualizadoEm,
                     {_sql_select_versao_concorrencia_card('c')},
                     c.IDEmpresaProprietaria,
+                    {_sql_select_id_vendedor_card('c')},
                     {_sql_select_id_origem_atendimento_card('c')}
                     {_sql_select_empresa_relacionada_card('c')},
                     {_sql_select_usuario_relacionado_card('c')},
@@ -14815,6 +15004,7 @@ def api_cards_listar_por_fase(id_kanban: int):
                   AND c.IDDimKanbanFaseAtual = :id_fase
                   AND c.Ativo = 1
                   {_sql_filtro_status_card_visiveis('c')}
+                  {filtro_escopo_vendedor}
                   AND NOT EXISTS (
                         SELECT 1
                         FROM {TABELA_KANBAN_FASE} f_final
@@ -14837,6 +15027,7 @@ def api_cards_listar_por_fase(id_kanban: int):
                 AtualizadoEm,
                 VersaoConcorrencia,
                 IDEmpresaProprietaria,
+                IDVendedor,
                 IDDimOrigemAtendimento,
                 IDEmpresaRelacionadaCard,
                 IDUsuarioRelacionadoCard,
@@ -14860,6 +15051,7 @@ def api_cards_listar_por_fase(id_kanban: int):
             {
                 "id_kanban": id_kanban,
                 "id_fase": id_fase,
+                **params_escopo_vendedor,
                 "row_inicio": row_inicio,
                 "row_fim": row_fim,
             },
@@ -14999,6 +15191,9 @@ def api_cards_sugestoes_busca(id_kanban: int):
     _assert_login()
     _obter_kanban_autorizado(id_kanban)
     id_emp = _id_empresa_usuario_or_403()
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
 
     termo = _normalizar_texto_filtro(request.args.get("q"))
     termo_digits = re.sub(r"\D+", "", termo or "")
@@ -15034,6 +15229,7 @@ def api_cards_sugestoes_busca(id_kanban: int):
             c.CriadoEm,
             c.AtualizadoEm,
             c.IDDimKanbanFaseAtual,
+            {_sql_select_id_vendedor_card('c')},
             fase.NomeFase,
             {expr_id_usuario_criador} AS IDUsuarioCriador,
             NULLIF(LTRIM(RTRIM(ISNULL(usuario_criador.NomeUsuario, ''))), '') AS NomeUsuarioCriador,
@@ -15067,6 +15263,7 @@ def api_cards_sugestoes_busca(id_kanban: int):
           AND k.Ativo = 1
           AND c.Ativo = 1
           {_sql_filtro_status_card_visiveis('c')}
+          {filtro_escopo_vendedor}
           {_sql_filtro_cards_nao_concluidos_no_quadro('c')}
           AND (
                 CONVERT(varchar(30), c.IDFatoKanbanCard) LIKE :q_digits_like
@@ -15117,6 +15314,7 @@ def api_cards_sugestoes_busca(id_kanban: int):
             "limite": limite,
             "id_kanban": int(id_kanban),
             "id_empresa_proprietaria": int(id_emp),
+            **params_escopo_vendedor,
             "q_like": q_like,
             "q_inicio": q_inicio,
             "q_digits": termo_digits,
@@ -17707,7 +17905,11 @@ def _normalizar_texto_filtro(texto: str | None) -> str:
 
 """Eu busco as fases disponíveis para montar o filtro da tela."""
 def _listar_fases_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
+
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    sql = f"""
     SELECT
         f.IDDimKanbanFase AS id_fase,
         f.IDDimKanban AS id_kanban,
@@ -17722,6 +17924,7 @@ def _listar_fases_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
             SELECT 1
             FROM [Kanban].[Silver].[FatoKanbanCard] c
             WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+              {filtro_escopo_vendedor}
               AND c.IDDimKanban = f.IDDimKanban
       )
     ORDER BY
@@ -17731,7 +17934,10 @@ def _listar_fases_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
     """
     return _executar_sql_mapeado(
         sql,
-        {"id_empresa_proprietaria": id_empresa_proprietaria},
+        {
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+            **params_escopo_vendedor,
+        },
     )
 
 
@@ -17760,7 +17966,11 @@ def _listar_cards_resumo_historico(
     limit = max(1, min(limit, 100))
     termo_like = f"%{termo_busca}%"
 
-    sql = """
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
+    sql = f"""
     SELECT
         c.IDFatoKanbanCard AS id_card,
         c.Titulo AS titulo,
@@ -17891,6 +18101,7 @@ def _listar_cards_resumo_historico(
     ) atividade
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      {filtro_escopo_vendedor}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -17917,6 +18128,7 @@ def _listar_cards_resumo_historico(
         sql,
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            **params_escopo_vendedor,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -17934,18 +18146,26 @@ def _listar_cards_resumo_historico(
 
 """Eu busco os status existentes para montar o filtro da tela."""
 def _listar_status_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
-    sql = """
+
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    sql = f"""
     SELECT DISTINCT
         LTRIM(RTRIM(c.StatusCard)) AS status_card
     FROM [Kanban].[Silver].[FatoKanbanCard] c
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+              {filtro_escopo_vendedor}
       AND NULLIF(LTRIM(RTRIM(c.StatusCard)), '') IS NOT NULL
     ORDER BY
         LTRIM(RTRIM(c.StatusCard))
     """
     return _executar_sql_mapeado(
         sql,
-        {"id_empresa_proprietaria": id_empresa_proprietaria},
+        {
+            "id_empresa_proprietaria": id_empresa_proprietaria,
+            **params_escopo_vendedor,
+        },
     )
 
 
@@ -17978,7 +18198,11 @@ def _listar_cards_resumo_historico(
     limit = max(1, min(limit, 100))
     termo_like = f"%{termo_busca}%"
 
-    sql = """
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
+    sql = f"""
     SELECT
         c.IDFatoKanbanCard AS id_card,
         c.Titulo AS titulo,
@@ -18101,6 +18325,7 @@ def _listar_cards_resumo_historico(
     ) atividade
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      {filtro_escopo_vendedor}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18124,6 +18349,7 @@ def _listar_cards_resumo_historico(
         sql,
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            **params_escopo_vendedor,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18148,7 +18374,11 @@ def _contar_cards_resumo_historico(
     termo_busca = _normalizar_texto_filtro(termo_busca)
     termo_like = f"%{termo_busca}%"
 
-    sql = """
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
+    sql = f"""
     SELECT
         COUNT(1) AS total
     FROM [Kanban].[Silver].[FatoKanbanCard] c
@@ -18157,6 +18387,7 @@ def _contar_cards_resumo_historico(
         ON emp.IDEmpresa = c.IDEmpresa
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      {filtro_escopo_vendedor}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18176,6 +18407,7 @@ def _contar_cards_resumo_historico(
         sql,
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            **params_escopo_vendedor,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18219,7 +18451,11 @@ def _listar_sugestoes_historico_cards(
     termo_like = f"%{termo_busca}%"
     termo_prefixo = f"{termo_busca}%"
 
-    sql = """
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
+    sql = f"""
     SELECT TOP (:limit)
         c.IDFatoKanbanCard AS id_card,
         c.Titulo AS titulo,
@@ -18330,6 +18566,7 @@ def _listar_sugestoes_historico_cards(
     ) atividade
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      {filtro_escopo_vendedor}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18375,6 +18612,7 @@ def _listar_sugestoes_historico_cards(
         sql,
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            **params_escopo_vendedor,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18586,7 +18824,11 @@ def _normalizar_data_evento_historico(valor):
 
 
 def _buscar_cabecalho_historico_card(id_card: int, id_empresa_proprietaria: int) -> dict | None:
-    sql = """
+
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    sql = f"""
     SELECT TOP 1
         c.IDFatoKanbanCard AS id_card,
         c.IDDimKanban AS id_kanban,
@@ -18652,11 +18894,13 @@ def _buscar_cabecalho_historico_card(id_card: int, id_empresa_proprietaria: int)
 
     WHERE c.IDFatoKanbanCard = :id_card
       AND c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      {filtro_escopo_vendedor}
     """
     linhas = _executar_sql_mapeado(
         sql,
         {
             "id_card": id_card,
+            **params_escopo_vendedor,
             "id_empresa_proprietaria": id_empresa_proprietaria,
         },
     )
@@ -19593,7 +19837,10 @@ def _montar_resumo_historico_card(
 
 def _listar_cards_com_historico_precos(id_empresa_proprietaria: int) -> list[dict]:
     """Eu listo os cards que possuem histórico de preços, trazendo contagem e última movimentação."""
-    sql = """
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    sql = f"""
     SELECT
         c.IDFatoKanbanCard AS id_card,
         c.Titulo AS titulo,
@@ -19612,6 +19859,7 @@ def _listar_cards_com_historico_precos(id_empresa_proprietaria: int) -> list[dic
         ON p.IDFatoKanbanCard = c.IDFatoKanbanCard
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+      {filtro_escopo_vendedor}
 
     GROUP BY
         c.IDFatoKanbanCard,
@@ -19631,6 +19879,7 @@ def _listar_cards_com_historico_precos(id_empresa_proprietaria: int) -> list[dic
         sql,
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            **params_escopo_vendedor,
         },
     )
 
@@ -19977,6 +20226,23 @@ def _sql_select_nome_usuario_relacionado_card(alias_usuario: str = "usuario") ->
 
 
 def _obter_vendedores_kanban(id_kanban: int) -> list[dict[str, Any]]:
+    if _usuario_eh_perfil_vendedor_kanban():
+        vendedor = _obter_vendedor_logado_kanban(_id_empresa_usuario()) or {}
+        nome = (
+            str(vendedor.get("NomeVendedor") or "").strip()
+            or str(getattr(current_user, "NomeUsuario", "") or "").strip()
+            or "Meu usuário"
+        )
+        return [
+            {
+                "IDDimUsuarios": int(_id_usuario() or 0) or None,
+                "IDVendedor": int(vendedor.get("IDVendedor") or 0) or None,
+                "NomeUsuario": nome,
+                "NomeVendedor": nome,
+                "VendedorRestritoAoUsuarioLogado": True,
+            }
+        ]
+
     nome_coluna_usuario = _nome_coluna_usuario_relacionado_card()
     if not nome_coluna_usuario:
         return []
@@ -19997,9 +20263,6 @@ def _obter_vendedores_kanban(id_kanban: int) -> list[dict[str, Any]]:
     """)
     vendedores = db.session.execute(sql_vendedores, {"id_kanban": int(id_kanban)}).mappings().all()
     return _rows_para_dicts(vendedores)
-
-
-
 
 
 
@@ -26972,6 +27235,8 @@ def api_card_criar(id_kanban: int):
         nome_coluna_empresa = _nome_coluna_empresa_relacionada_card()
         coluna_id_dim_usuarios_existe = _coluna_existe(TABELA_CARD, "IDDimUsuarios")
         coluna_iddimkanbanorigem_existe = _coluna_existe(TABELA_CARD, "IDDimKanbanOrigem")
+        vendedor_logado_para_card = _obter_vendedor_logado_kanban(id_emp) or {}
+        id_vendedor_logado_para_card = int(vendedor_logado_para_card.get("IDVendedor") or 0) or None
 
         status_card_inicial = _obter_status_card_para_fase(id_fase)
         id_status_card_inicial = _obter_id_status_card_por_codigo(status_card_inicial)
@@ -27088,6 +27353,11 @@ def api_card_criar(id_kanban: int):
             colunas.append("Email")
             valores.append(":email")
             params["email"] = campos_complementares_novo_contrato.get("email")
+
+        if _coluna_existe(TABELA_CARD, "IDVendedor"):
+            colunas.append("IDVendedor")
+            valores.append(":id_vendedor_logado")
+            params["id_vendedor_logado"] = id_vendedor_logado_para_card
 
         if coluna_id_dim_usuarios_existe:
             colunas.append("IDDimUsuarios")
@@ -27420,15 +27690,9 @@ def api_card_criar(id_kanban: int):
             id_kanban,
             "card_criado",
             {
-                "card": detalhe.get("card"),
-                "tags": detalhe.get("tags", []),
-                "notas": detalhe.get("notas", []),
-                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
-                "tipo_contrato": sincronizacao_tipo,
-                "contrato_existente": contrato_existente,
+                "id_card": int(novo_id),
+                "id_fase": int(id_fase),
                 "snapshot_solicitacao": snapshot_solicitacao,
-                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
-                "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "sincronizacao_reservas": sincronizacao_reservas,
             },
         )
@@ -28256,20 +28520,10 @@ def api_card_atualizar(id_card: int):
             id_kanban,
             "card_atualizado",
             {
-                "card": detalhe.get("card"),
-                "tags": detalhe.get("tags", []),
-                "notas": detalhe.get("notas", []),
-                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
-                "tipo_contrato": sincronizacao_tipo,
-                "contrato_existente": contrato_existente,
+                "id_card": int(id_card),
                 "snapshot_solicitacao": snapshot_solicitacao,
-                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
-                "sincronizacao_item_contrato": sincronizacao_item_contrato,
-                "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
-                "historico_negociacao_preco": resultado_historico_negociacao_preco,
-                "correcao_estado_preco_card": correcao_estado_preco_card,
                 "aprovacao_preco": resultado_aprovacao_preco,
             },
         )

@@ -962,6 +962,11 @@ input:disabled, select:disabled, textarea:disabled{
           Perfil Vendedor = IDDimPerfilUsuario 3 não pode ver nem acessar ADMIN_TUDO.
         #}
         {% set usuario_perfil_id = (current_user.IDDimPerfilUsuario|int if current_user.is_authenticated else 0) %}
+        {% if usuario_perfil_id == 3 %}
+          {# Vendedor pode acessar Histórico Atendimento, mas não pode acessar Health Check Comercial. #}
+          {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}
+          {% set menu_paineis_health_check = False %}
+        {% endif %}
         {% set menu_admin = (
           current_user.is_authenticated
           and usuario_perfil_id != 3

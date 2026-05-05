@@ -16,6 +16,9 @@
 
   const KANBAN_VIEW_CONFIG = lerConfiguracaoKanbanView();
   const PODE_VER_CUSTO_MARGEM = KANBAN_VIEW_CONFIG.podeVerCustoMargem === true;
+  const USUARIO_EH_VENDEDOR = KANBAN_VIEW_CONFIG.usuarioEhVendedor === true;
+  const ID_USUARIO_LOGADO = Number(KANBAN_VIEW_CONFIG.idUsuarioLogado || 0);
+  const ID_VENDEDOR_LOGADO = Number(KANBAN_VIEW_CONFIG.idVendedorLogado || 0);
   const ID_KANBAN = Number(KANBAN_VIEW_CONFIG.idKanban || 0);
   const board = document.getElementById("board");
   const msgBoard = document.getElementById("msgBoard");
@@ -4183,6 +4186,26 @@ function normalizarCardServidor(card){
       ? null
       : idNum(c.IDDimOrigemAtendimento);
 
+  c.IDVendedor =
+    c.IDVendedor === null || c.IDVendedor === undefined || c.IDVendedor === ""
+      ? null
+      : idNum(c.IDVendedor);
+
+  c.IDVendedorUsuario =
+    c.IDVendedorUsuario === null || c.IDVendedorUsuario === undefined || c.IDVendedorUsuario === ""
+      ? null
+      : idNum(c.IDVendedorUsuario);
+
+  c.IDDimUsuarios =
+    c.IDDimUsuarios === null || c.IDDimUsuarios === undefined || c.IDDimUsuarios === ""
+      ? null
+      : idNum(c.IDDimUsuarios);
+
+  c.IDUsuarioRelacionadoCard =
+    c.IDUsuarioRelacionadoCard === null || c.IDUsuarioRelacionadoCard === undefined || c.IDUsuarioRelacionadoCard === ""
+      ? null
+      : idNum(c.IDUsuarioRelacionadoCard);
+
   c.OrigemAtendimento = safeStr(
     c.OrigemAtendimento ??
     c.NomeOrigemAtendimento ??
@@ -4472,7 +4495,28 @@ function normalizarCardServidor(card){
     return base.includes(termo);
   }
 
+  function cardPertenceAoVendedorLogado(card){
+    if (!USUARIO_EH_VENDEDOR) return true;
+
+    const idVendedorCard = idNum(card?.IDVendedor || card?.id_vendedor || 0);
+    const idUsuarioCard = idNum(
+      card?.IDUsuarioRelacionadoCard ||
+      card?.IDVendedorUsuario ||
+      card?.IDDimUsuarios ||
+      card?.id_usuario_relacionado ||
+      0
+    );
+
+    if (ID_VENDEDOR_LOGADO && idVendedorCard === ID_VENDEDOR_LOGADO) return true;
+    if (ID_USUARIO_LOGADO && idUsuarioCard === ID_USUARIO_LOGADO) return true;
+
+    return false;
+  }
+
   function cardPassaFiltroVendedor(card){
+    if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(card)) return false;
+    if (USUARIO_EH_VENDEDOR) return true;
+
     if (!vendedoresSelecionados.size) return true;
     const nome = normalizarTexto(nomeVendedorDoCard(card));
     return !!nome && vendedoresSelecionados.has(nome);
@@ -4603,20 +4647,22 @@ function normalizarCardServidor(card){
     const mapa = new Map();
 
     vendedoresCatalogo.forEach(item => {
-      const nome = safeStr(item?.NomeUsuario || item?.nome_usuario || "").trim();
+      const nome = safeStr(item?.NomeUsuario || item?.NomeVendedor || item?.nome_usuario || item?.nome_vendedor || "").trim();
       const chave = normalizarTexto(nome);
       if (nome && chave && !mapa.has(chave)) {
         mapa.set(chave, nome);
       }
     });
 
-    cards.forEach(card => {
-      const nome = nomeVendedorDoCard(card);
-      const chave = normalizarTexto(nome);
-      if (nome && chave && !mapa.has(chave)) {
-        mapa.set(chave, nome);
-      }
-    });
+    if (!USUARIO_EH_VENDEDOR) {
+      cards.forEach(card => {
+        const nome = nomeVendedorDoCard(card);
+        const chave = normalizarTexto(nome);
+        if (nome && chave && !mapa.has(chave)) {
+          mapa.set(chave, nome);
+        }
+      });
+    }
 
     return [...mapa.entries()]
       .sort((a, b) => a[1].localeCompare(b[1], "pt-BR", { sensitivity: "base" }))
@@ -5215,6 +5261,11 @@ function normalizarCardServidor(card){
   function inserirOuAtualizarCardLocal(card){
     const cardNorm = normalizarCardServidor(card);
     if (!cardNorm.IDFatoKanbanCard) return null;
+
+    if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(cardNorm)) {
+      removerCardLocal(cardNorm.IDFatoKanbanCard);
+      return null;
+    }
 
     if (cardDeveSairDoQuadro(cardNorm)) {
       removerCardLocal(cardNorm.IDFatoKanbanCard);
@@ -11915,7 +11966,9 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     if (!j || !j.ok) return;
 
     fases = Array.isArray(j.fases) ? j.fases.map(f => Object.assign({}, f || {})) : [];
-    cards = Array.isArray(j.cards) ? j.cards.map(normalizarCardServidor) : [];
+    cards = Array.isArray(j.cards)
+      ? j.cards.map(normalizarCardServidor).filter(cardPertenceAoVendedorLogado)
+      : [];
     tagsCatalogo = Array.isArray(j.tags) ? j.tags.map(t => Object.assign({}, t || {})) : [];
     vendedoresCatalogo = Array.isArray(j.vendedores) ? j.vendedores.map(v => Object.assign({}, v || {})) : [];
     tiposClienteDescontoCatalogo = Array.isArray(j.tipos_cliente_desconto) ? j.tipos_cliente_desconto.map(t => Object.assign({}, t || {})) : [];
@@ -15578,6 +15631,20 @@ async function moverCard(idCard, idFasePara, posicao) {
       const cardAntes = obterCardPorId(idCard);
       const idFaseAntes = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
       const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
+
+      if (!cardPayload) {
+        await carregar();
+        agendarRecarregarResumoComercial();
+        return;
+      }
+
+      if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(cardPayload)) {
+        removerCardLocal(idCard);
+        if (idFaseAntes) redesenharFasesLocalmente([idFaseAntes], null, true);
+        agendarRecarregarResumoComercial();
+        return;
+      }
+
       const cardSaiDoQuadro = !!(cardPayload && cardDeveSairDoQuadro(cardPayload));
 
       if (cardSaiDoQuadro) {
@@ -15634,6 +15701,21 @@ async function moverCard(idCard, idFasePara, posicao) {
       const idFasePara = idNum(payload.id_fase_para);
 
       const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
+
+      if (!cardPayload) {
+        await carregar();
+        agendarRecarregarResumoComercial();
+        return;
+      }
+
+      if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(cardPayload)) {
+        removerCardLocal(idCard);
+        const idsFasesRemocao = [idFaseDe, idFasePara].filter(Boolean);
+        if (idsFasesRemocao.length) redesenharFasesLocalmente(idsFasesRemocao, null, true);
+        agendarRecarregarResumoComercial();
+        return;
+      }
+
       const cardSaiDoQuadro = !!(
         (cardPayload && cardDeveSairDoQuadro(cardPayload, idFasePara)) ||
         (!cardPayload && faseEhFinalDoQuadro(idFasePara))

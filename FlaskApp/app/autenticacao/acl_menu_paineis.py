@@ -71,9 +71,6 @@ ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR = {
     "lista_checkins",
     "checkin_arquivo",
     "checkin_visualizar",
-    "historico_atendimento",
-    "historico_cards",
-    "historico_cards_lista",
     "health_check_comercial",
 }
 
