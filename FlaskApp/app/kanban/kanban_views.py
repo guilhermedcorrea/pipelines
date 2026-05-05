@@ -17903,6 +17903,139 @@ def _normalizar_texto_filtro(texto: str | None) -> str:
     return " ".join((texto or "").strip().split())
 
 
+
+def _normalizar_ids_vendedores_historico(valores) -> list[int]:
+    """Eu normalizo os IDs de vendedores recebidos no filtro multi-select."""
+    if valores is None:
+        return []
+
+    if isinstance(valores, (str, int)):
+        valores_iteraveis = [valores]
+    else:
+        valores_iteraveis = list(valores or [])
+
+    ids: list[int] = []
+
+    for valor in valores_iteraveis:
+        partes = str(valor or "").replace(";", ",").split(",")
+        for parte in partes:
+            texto = str(parte or "").strip()
+            if not texto:
+                continue
+            try:
+                id_vendedor = int(texto)
+            except Exception:
+                continue
+            if id_vendedor > 0 and id_vendedor not in ids:
+                ids.append(id_vendedor)
+
+    return ids
+
+
+def _params_vendedores_historico_cards(ids_vendedores: list[int] | None = None) -> dict[str, int]:
+    """Eu monto parâmetros nomeados para evitar SQL dinâmico com valores concatenados."""
+    ids = _normalizar_ids_vendedores_historico(ids_vendedores)
+    return {f"filtro_id_vendedor_{indice}": int(id_vendedor) for indice, id_vendedor in enumerate(ids)}
+
+
+def _sql_filtro_vendedores_historico_cards(alias_card: str = "c", ids_vendedores: list[int] | None = None) -> str:
+    """Eu retorno o filtro SQL do multi-select de vendedores do Histórico Atendimento."""
+    ids = _normalizar_ids_vendedores_historico(ids_vendedores)
+    if not ids:
+        return ""
+
+    placeholders = ", ".join(f":filtro_id_vendedor_{indice}" for indice, _ in enumerate(ids))
+
+    return f"""
+      AND EXISTS (
+            SELECT 1
+            FROM [Integracao].[dbo].[Vendedores] vendedor_filtro
+            WHERE vendedor_filtro.IDVendedor IN ({placeholders})
+              AND COALESCE(vendedor_filtro.BitAtivo, 1) = 1
+              AND (
+                    TRY_CONVERT(int, {alias_card}.IDVendedor) = TRY_CONVERT(int, vendedor_filtro.IDVendedor)
+                 OR TRY_CONVERT(int, {alias_card}.IDVendedorUsuario) = TRY_CONVERT(int, vendedor_filtro.IDDimUsuarios)
+                 OR TRY_CONVERT(int, {alias_card}.IDDimUsuarios) = TRY_CONVERT(int, vendedor_filtro.IDDimUsuarios)
+              )
+        )
+    """.rstrip()
+
+
+def _listar_vendedores_historico_cards(
+    id_empresa_proprietaria: int,
+    termo_busca: str = "",
+    id_fase: int | None = None,
+    status_card: str | None = None,
+    somente_ativos: bool = False,
+) -> list[dict]:
+    """Eu listo somente vendedores que possuem cards visíveis no Histórico Atendimento.
+
+    Regra importante:
+    - Admin/gestor vê os vendedores responsáveis por cards da empresa.
+    - Perfil Vendedor continua preso ao próprio escopo, então só aparece ele mesmo.
+    """
+    termo_busca = _normalizar_texto_filtro(termo_busca)
+    termo_like = f"%{termo_busca}%"
+
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
+    sql = f"""
+    SELECT DISTINCT
+        v.IDVendedor AS id_vendedor,
+        NULLIF(LTRIM(RTRIM(ISNULL(v.NomeVendedor, ''))), '') AS nome_vendedor
+    FROM [Integracao].[dbo].[Vendedores] v
+    WHERE COALESCE(v.BitAtivo, 1) = 1
+      AND (
+            :id_empresa_proprietaria = 0
+            OR COALESCE(v.IDEmpresaProprietaria, 0) = :id_empresa_proprietaria
+          )
+      AND EXISTS (
+            SELECT 1
+            FROM [Kanban].[Silver].[FatoKanbanCard] c
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+                ON emp.IDEmpresa = c.IDEmpresa
+            WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
+              {filtro_escopo_vendedor}
+              AND (
+                    TRY_CONVERT(int, c.IDVendedor) = TRY_CONVERT(int, v.IDVendedor)
+                 OR TRY_CONVERT(int, c.IDVendedorUsuario) = TRY_CONVERT(int, v.IDDimUsuarios)
+                 OR TRY_CONVERT(int, c.IDDimUsuarios) = TRY_CONVERT(int, v.IDDimUsuarios)
+              )
+              AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
+              AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
+              AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
+              AND (
+                    :termo_busca = ''
+                    OR ISNULL(c.Titulo, '') LIKE :termo_like
+                    OR ISNULL(c.Descricao, '') LIKE :termo_like
+                    OR CAST(c.IDFatoKanbanCard AS VARCHAR(30)) LIKE :termo_like
+                    OR CAST(ISNULL(c.IDEmpresa, '') AS VARCHAR(30)) LIKE :termo_like
+                    OR ISNULL(emp.RazaoSocial, '') LIKE :termo_like
+                    OR ISNULL(emp.NomeFantasia, '') LIKE :termo_like
+                    OR ISNULL(emp.CNPJ, '') LIKE :termo_like
+                  )
+      )
+    ORDER BY
+        nome_vendedor,
+        v.IDVendedor
+    """
+
+    return _executar_sql_mapeado(
+        sql,
+        {
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+            **params_escopo_vendedor,
+            "id_fase": id_fase,
+            "status_card": status_card,
+            "somente_ativos": 1 if somente_ativos else 0,
+            "termo_busca": termo_busca,
+            "termo_like": termo_like,
+        },
+    )
+
+
 """Eu busco as fases disponíveis para montar o filtro da tela."""
 def _listar_fases_historico_cards(id_empresa_proprietaria: int) -> list[dict]:
 
@@ -17948,6 +18081,7 @@ def _listar_cards_resumo_historico(
     id_fase: int | None = None,
     status_card: str | None = None,
     somente_ativos: bool = True,
+    ids_vendedores: list[int] | None = None,
     offset: int = 0,
     limit: int = 10,
 ) -> list[dict]:
@@ -17969,6 +18103,9 @@ def _listar_cards_resumo_historico(
     escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
     filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
     params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    ids_vendedores = _normalizar_ids_vendedores_historico(ids_vendedores)
+    filtro_vendedores_historico = _sql_filtro_vendedores_historico_cards("c", ids_vendedores)
+    params_vendedores_historico = _params_vendedores_historico_cards(ids_vendedores)
 
     sql = f"""
     SELECT
@@ -18102,6 +18239,7 @@ def _listar_cards_resumo_historico(
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
       {filtro_escopo_vendedor}
+      {filtro_vendedores_historico}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18129,6 +18267,7 @@ def _listar_cards_resumo_historico(
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
             **params_escopo_vendedor,
+            **params_vendedores_historico,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18180,6 +18319,7 @@ def _listar_cards_resumo_historico(
     id_fase: int | None = None,
     status_card: str | None = None,
     somente_ativos: bool = True,
+    ids_vendedores: list[int] | None = None,
     offset: int = 0,
     limit: int = 10,
 ) -> list[dict]:
@@ -18201,6 +18341,9 @@ def _listar_cards_resumo_historico(
     escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
     filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
     params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    ids_vendedores = _normalizar_ids_vendedores_historico(ids_vendedores)
+    filtro_vendedores_historico = _sql_filtro_vendedores_historico_cards("c", ids_vendedores)
+    params_vendedores_historico = _params_vendedores_historico_cards(ids_vendedores)
 
     sql = f"""
     SELECT
@@ -18326,6 +18469,7 @@ def _listar_cards_resumo_historico(
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
       {filtro_escopo_vendedor}
+      {filtro_vendedores_historico}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18350,6 +18494,7 @@ def _listar_cards_resumo_historico(
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
             **params_escopo_vendedor,
+            **params_vendedores_historico,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18370,6 +18515,7 @@ def _contar_cards_resumo_historico(
     id_fase: int | None = None,
     status_card: str | None = None,
     somente_ativos: bool = True,
+    ids_vendedores: list[int] | None = None,
 ) -> int:
     termo_busca = _normalizar_texto_filtro(termo_busca)
     termo_like = f"%{termo_busca}%"
@@ -18377,6 +18523,9 @@ def _contar_cards_resumo_historico(
     escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
     filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
     params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    ids_vendedores = _normalizar_ids_vendedores_historico(ids_vendedores)
+    filtro_vendedores_historico = _sql_filtro_vendedores_historico_cards("c", ids_vendedores)
+    params_vendedores_historico = _params_vendedores_historico_cards(ids_vendedores)
 
     sql = f"""
     SELECT
@@ -18388,6 +18537,7 @@ def _contar_cards_resumo_historico(
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
       {filtro_escopo_vendedor}
+      {filtro_vendedores_historico}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18408,6 +18558,7 @@ def _contar_cards_resumo_historico(
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
             **params_escopo_vendedor,
+            **params_vendedores_historico,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18433,6 +18584,7 @@ def _listar_sugestoes_historico_cards(
     id_fase: int | None = None,
     status_card: str | None = None,
     somente_ativos: bool = False,
+    ids_vendedores: list[int] | None = None,
     limit: int = 12,
 ) -> list[dict]:
     """Eu retorno sugestões leves para o combobox da tela /historico-cards."""
@@ -18454,6 +18606,9 @@ def _listar_sugestoes_historico_cards(
     escopo_vendedor = _resolver_escopo_vendedor_kanban(id_empresa_proprietaria)
     filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
     params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+    ids_vendedores = _normalizar_ids_vendedores_historico(ids_vendedores)
+    filtro_vendedores_historico = _sql_filtro_vendedores_historico_cards("c", ids_vendedores)
+    params_vendedores_historico = _params_vendedores_historico_cards(ids_vendedores)
 
     sql = f"""
     SELECT TOP (:limit)
@@ -18567,6 +18722,7 @@ def _listar_sugestoes_historico_cards(
 
     WHERE c.IDEmpresaProprietaria = :id_empresa_proprietaria
       {filtro_escopo_vendedor}
+      {filtro_vendedores_historico}
       AND (:id_fase IS NULL OR c.IDDimKanbanFaseAtual = :id_fase)
       AND (:status_card IS NULL OR LTRIM(RTRIM(ISNULL(c.StatusCard, ''))) = :status_card)
       AND (:somente_ativos = 0 OR ISNULL(c.Ativo, 1) = 1)
@@ -18613,6 +18769,7 @@ def _listar_sugestoes_historico_cards(
         {
             "id_empresa_proprietaria": int(id_empresa_proprietaria),
             **params_escopo_vendedor,
+            **params_vendedores_historico,
             "id_fase": id_fase,
             "status_card": status_card,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -18661,6 +18818,7 @@ def historico_cards_sugestoes():
         id_fase = None
 
     status_card = (request.args.get("status") or "").strip() or None
+    ids_vendedores = _normalizar_ids_vendedores_historico(request.args.getlist("vendedor"))
 
     try:
         somente_ativos = int(request.args.get("somente_ativos") or "0") == 1
@@ -18677,6 +18835,7 @@ def historico_cards_sugestoes():
             id_fase=id_fase,
             status_card=status_card,
             somente_ativos=somente_ativos,
+            ids_vendedores=ids_vendedores,
             limit=limit,
         )
     except Exception:
@@ -18704,6 +18863,7 @@ def historico_cards_lista():
 
     termo_busca = _normalizar_texto_filtro(request.args.get("q") or "")
     status_card = (request.args.get("status") or "").strip() or None
+    ids_vendedores = _normalizar_ids_vendedores_historico(request.args.getlist("vendedor"))
 
     try:
         id_fase = int(request.args.get("id_fase") or "0")
@@ -18729,6 +18889,7 @@ def historico_cards_lista():
         id_fase=id_fase,
         status_card=status_card,
         somente_ativos=somente_ativos,
+        ids_vendedores=ids_vendedores,
     )
 
     total_pages = max(1, (total + per_page - 1) // per_page)
@@ -18743,6 +18904,7 @@ def historico_cards_lista():
         id_fase=id_fase,
         status_card=status_card,
         somente_ativos=somente_ativos,
+        ids_vendedores=ids_vendedores,
         offset=offset,
         limit=per_page,
     )
@@ -18754,12 +18916,20 @@ def historico_cards_lista():
 
     fases = _listar_fases_historico_cards(id_empresa_proprietaria)
     opcoes_status = _listar_status_historico_cards(id_empresa_proprietaria)
+    opcoes_vendedores = _listar_vendedores_historico_cards(
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        termo_busca=termo_busca,
+        id_fase=id_fase,
+        status_card=status_card,
+        somente_ativos=somente_ativos,
+    )
 
     filtros = {
         "q": termo_busca,
         "id_fase": id_fase,
         "status": status_card or "",
         "somente_ativos": False,
+        "vendedores_ids": ids_vendedores,
         "per_page": per_page,
     }
 
@@ -18780,6 +18950,7 @@ def historico_cards_lista():
         cards=cards,
         fases=fases,
         opcoes_status=opcoes_status,
+        opcoes_vendedores=opcoes_vendedores,
         filtros=filtros,
         paginacao=paginacao,
         total_cards=total,
