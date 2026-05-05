@@ -7,7 +7,7 @@ from werkzeug.security import check_password_hash
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..extensions import db,limiter
-from ..models.autenticacao import DimUsuarios,DimPerfilUsuario,PermissoesUsuario,DimPermissoes
+from ..models.autenticacao import DimUsuarios,DimPerfilUsuario,PermissoesUsuario,DimPermissoes,PermissoesPerfil
 from functools import wraps
 
 from urllib.parse import urlparse, urljoin
@@ -16,7 +16,6 @@ from wtforms import StringField, PasswordField, SubmitField
 from flask_wtf import RecaptchaField
 from wtforms.validators import DataRequired
 import requests
-
 
 
 
@@ -314,6 +313,8 @@ def perfil():
     )
 
 
+
+
 @autenticacao_bp.route("/perfil/senha", methods=["POST"])
 @login_required
 @limiter.limit("10 per hour")
@@ -398,7 +399,6 @@ def usuarios_lista():
 
 
 
-
 @autenticacao_bp.route("/seguranca/usuarios/<int:id_usuario>", methods=["GET", "POST"])
 @login_required
 @requer_permissao("USUARIOS_EDITAR")
@@ -410,6 +410,11 @@ def usuarios_editar(id_usuario):
     - HERDAR: usa a permissão do perfil.
     - CONCEDER: adiciona uma permissão individual.
     - REVOGAR: remove uma permissão mesmo que o perfil tenha.
+
+    Correção importante:
+    - Eu não monto mais permissoes_extras_map usando usuario.permissoes_extras.
+    - Eu busco direto da tabela PermissoesUsuario.
+    - Assim, se está salvo no banco, aparece corretamente na tela.
     """
 
     usuario = (
@@ -438,8 +443,35 @@ def usuarios_editar(id_usuario):
 
     if request.method == "POST":
         try:
-            id_perfil = int(request.form.get("id_perfil"))
+            id_perfil_raw = _texto(request.form.get("id_perfil"))
+
+            if not id_perfil_raw:
+                flash("Informe o perfil do usuário.", "warning")
+                return redirect(
+                    url_for(
+                        "Autenticacao.usuarios_editar",
+                        id_usuario=usuario.IDDimUsuarios,
+                    )
+                )
+
+            id_perfil = int(id_perfil_raw)
             bit_ativo = request.form.get("bit_ativo") == "1"
+
+            perfil_existe = (
+                db.session.query(DimPerfilUsuario.IDDimPerfilUsuario)
+                .filter(DimPerfilUsuario.IDDimPerfilUsuario == id_perfil)
+                .filter(DimPerfilUsuario.BitAtivo == True)
+                .first()
+            )
+
+            if not perfil_existe:
+                flash("Perfil informado não existe ou está inativo.", "danger")
+                return redirect(
+                    url_for(
+                        "Autenticacao.usuarios_editar",
+                        id_usuario=usuario.IDDimUsuarios,
+                    )
+                )
 
             usuario.IDDimPerfilUsuario = id_perfil
             usuario.BitAtivo = bit_ativo
@@ -447,7 +479,17 @@ def usuarios_editar(id_usuario):
 
             db.session.query(PermissoesUsuario).filter(
                 PermissoesUsuario.IDDimUsuarios == usuario.IDDimUsuarios
-            ).delete()
+            ).delete(synchronize_session=False)
+
+            db.session.flush()
+
+            agora = _agora()
+            id_usuario_executor = None
+
+            try:
+                id_usuario_executor = int(current_user.get_id())
+            except Exception:
+                id_usuario_executor = None
 
             for permissao in permissoes:
                 nome_campo = f"perm_{permissao.IDDimPermissoes}"
@@ -460,15 +502,18 @@ def usuarios_editar(id_usuario):
                     IDDimUsuarios=usuario.IDDimUsuarios,
                     IDDimPermissoes=permissao.IDDimPermissoes,
                     TipoAtribuicao=tipo,
-                    DataCriacao=_agora(),
-                    DataAtualizacao=None,
-                    CriadoPorIDDimUsuarios=int(current_user.get_id()),
+                    DataExpiracao=None,
+                    DataCriacao=agora,
+                    DataAtualizacao=agora,
+                    CriadoPorIDDimUsuarios=id_usuario_executor,
                     Observacao="Alterado pela tela de permissões de usuários.",
                 )
 
                 db.session.add(nova_permissao_usuario)
 
             db.session.commit()
+            db.session.expire_all()
+
             flash("Usuário atualizado com sucesso.", "success")
 
             return redirect(
@@ -483,19 +528,62 @@ def usuarios_editar(id_usuario):
             current_app.logger.exception("Erro ao atualizar usuário/permissões.")
             flash("Erro ao atualizar usuário.", "danger")
 
+            return redirect(
+                url_for(
+                    "Autenticacao.usuarios_editar",
+                    id_usuario=usuario.IDDimUsuarios,
+                )
+            )
+
+    usuario = (
+        db.session.query(DimUsuarios)
+        .filter(DimUsuarios.IDDimUsuarios == id_usuario)
+        .first()
+    )
+
+    permissoes_usuario_linhas = (
+        db.session.query(PermissoesUsuario, DimPermissoes)
+        .join(
+            DimPermissoes,
+            PermissoesUsuario.IDDimPermissoes == DimPermissoes.IDDimPermissoes,
+        )
+        .filter(PermissoesUsuario.IDDimUsuarios == usuario.IDDimUsuarios)
+        .filter(DimPermissoes.BitAtivo == True)
+        .all()
+    )
+
     permissoes_extras_map = {}
 
-    for row in usuario.permissoes_extras or []:
-        permissoes_extras_map[row.IDDimPermissoes] = (
-            row.TipoAtribuicao or ""
-        ).strip().upper()
+    for permissao_usuario, permissao in permissoes_usuario_linhas:
+        tipo = _texto(permissao_usuario.TipoAtribuicao).upper()
+        codigo = _texto(permissao.CodigoPermissao).upper()
+
+        permissoes_extras_map[permissao_usuario.IDDimPermissoes] = tipo
+
+        if codigo:
+            permissoes_extras_map[codigo] = tipo
+
+    permissoes_perfil_linhas = (
+        db.session.query(PermissoesPerfil, DimPermissoes)
+        .join(
+            DimPermissoes,
+            PermissoesPerfil.IDDimPermissoes == DimPermissoes.IDDimPermissoes,
+        )
+        .filter(PermissoesPerfil.IDDimPerfilUsuario == usuario.IDDimPerfilUsuario)
+        .filter(DimPermissoes.BitAtivo == True)
+        .all()
+    )
 
     permissoes_perfil_ids = set()
+    permissoes_perfil_codigos = set()
 
-    if usuario.perfil and usuario.perfil.permissoes:
-        for permissao_perfil in usuario.perfil.permissoes:
-            if permissao_perfil and bool(getattr(permissao_perfil, "BitAtivo", True)):
-                permissoes_perfil_ids.add(permissao_perfil.IDDimPermissoes)
+    for permissao_perfil, permissao in permissoes_perfil_linhas:
+        permissoes_perfil_ids.add(permissao_perfil.IDDimPermissoes)
+
+        codigo = _texto(permissao.CodigoPermissao).upper()
+
+        if codigo:
+            permissoes_perfil_codigos.add(codigo)
 
     return render_template(
         "autenticacao/usuarios_editar.html",
@@ -504,4 +592,5 @@ def usuarios_editar(id_usuario):
         permissoes=permissoes,
         permissoes_extras_map=permissoes_extras_map,
         permissoes_perfil_ids=permissoes_perfil_ids,
+        permissoes_perfil_codigos=permissoes_perfil_codigos,
     )

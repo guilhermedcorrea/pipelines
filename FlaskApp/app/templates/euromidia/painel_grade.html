@@ -1244,6 +1244,8 @@
 
     {% set custo_total = (custo_total if custo_total is defined and custo_total else None) %}
 
+    {% set pode_ver_kpis_financeiros = (pode_ver_kpis_financeiros if pode_ver_kpis_financeiros is defined else true) %}
+
  <div class="kpi-wrap">
   <div class="kpi-grid">
 
@@ -1271,6 +1273,7 @@
       </div>
     </div>
 
+    {% if pode_ver_kpis_financeiros %}
     <div class="kpi-card kpi--rev">
       <img class="kpi-ico-img"
            src="{{ url_for('static', filename='imagens/receita.png') }}"
@@ -1381,6 +1384,7 @@
         <div class="kpi-sub">Custos do período</div>
       </div>
     </div>
+    {% endif %}
 
   </div>
 </div>

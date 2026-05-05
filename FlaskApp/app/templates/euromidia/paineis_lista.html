@@ -2,6 +2,8 @@
 {% block title %}Lista de Painéis | Euromídia{% endblock %}
 {% block content %}
 
+{% set pode_abrir_detalhes_painel = (pode_abrir_detalhes_painel if pode_abrir_detalhes_painel is defined else true) %}
+
 {% set GRID_COLS = "34px clamp(118px, 8.2vw, 146px) 40px minmax(220px, 1.72fr) minmax(110px, 0.90fr) 44px minmax(128px, 0.88fr) minmax(168px, 1.12fr) minmax(96px, 0.76fr) 82px minmax(220px, 1.16fr) clamp(132px, 10.5vw, 168px)" %}
 {% set ponto_ativo_val = (filtros.ponto_ativo if filtros.ponto_ativo is not none else '1')|string %}
 <div class="card card-no-clip">
@@ -1999,9 +2001,13 @@
                       </div>
 
                       <div class="codface-cell"
-                           style="display:flex;align-items:center;gap:10px;cursor:pointer;min-width:0;"
-                           ondblclick="window.location.href='{{ url_for('Paineis.painel_detalhes', codponto=x.CodPonto) }}'"
-                           title="Duplo clique para ver detalhes do painel (CodPonto {{ x.CodPonto }})">
+                           style="display:flex;align-items:center;gap:10px;cursor:{% if pode_abrir_detalhes_painel %}pointer{% else %}default{% endif %};min-width:0;"
+                           {% if pode_abrir_detalhes_painel %}
+                             ondblclick="window.location.href='{{ url_for('Paineis.painel_detalhes', codponto=x.CodPonto) }}'"
+                             title="Duplo clique para ver detalhes do painel (CodPonto {{ x.CodPonto }})"
+                           {% else %}
+                             title="Detalhes do painel indisponíveis para perfil Vendedor"
+                           {% endif %}>
                         <div class="codface-codigo">
                           {{ x.CodFace }}
                         </div>
@@ -2021,7 +2027,7 @@
                       <div style="display:flex;align-items:center;justify-content:center;">
                         <img src="{{ x.UrlImagemPainel or url_for('static', filename='imagens/painel-publicitario.png') }}"
                              alt="Painel"
-                             title="Abrir detalhes do painel"
+                             title="{% if pode_abrir_detalhes_painel %}Abrir detalhes do painel{% else %}Detalhes do painel indisponíveis para perfil Vendedor{% endif %}"
                              style="width:28px;height:28px;opacity:.95;filter: drop-shadow(0 2px 6px rgba(0,0,0,.10));object-fit:cover;border-radius:6px;background:#fff;"
                              loading="lazy"
                              draggable="false"

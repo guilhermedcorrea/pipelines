@@ -1115,6 +1115,36 @@ def api_faces_do_ponto(codponto: int):
 
 CAPACIDADE_DIGITAL_FIXA = 16
 
+ID_PERFIL_VENDEDOR_PADRAO = 3
+
+
+def _usuario_logado_eh_perfil_vendedor() -> bool:
+    """
+    Retorna True quando o usuário logado pertence ao perfil Vendedor.
+
+    Regra de negócio atual:
+    - DimPerfilUsuario.IDDimPerfilUsuario = 3 representa o perfil Vendedor.
+
+    Eu também faço fallback pelo nome do perfil para evitar falha caso
+    o objeto current_user esteja com o relacionamento perfil carregado.
+    """
+    try:
+        id_perfil = int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0)
+        if id_perfil == ID_PERFIL_VENDEDOR_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    try:
+        perfil = getattr(current_user, "perfil", None)
+        nome_perfil = str(getattr(perfil, "NomePerfil", "") or "").strip().upper()
+        if nome_perfil == "VENDEDOR":
+            return True
+    except Exception:
+        pass
+
+    return False
+
 
 def _primeiro_ultimo_dia_mes(ano: int, mes: int):
     primeiro = date(ano, mes, 1)
@@ -3184,6 +3214,9 @@ def lista_paineis():
         "ano": (date(hoje.year, 1, 1), hoje),
     }
 
+    usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
+    pode_abrir_detalhes_painel = not usuario_logado_eh_perfil_vendedor
+
     return render_template(
         "euromidia/paineis_lista.html",
         itens=itens,
@@ -3200,6 +3233,8 @@ def lista_paineis():
         area_total_max_global=area_total_max_global,
         ranges_rapidos=ranges_rapidos,
         pode_ver_exibidora=pode_ver_exibidora,
+        usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
+        pode_abrir_detalhes_painel=pode_abrir_detalhes_painel,
         bisemanas_select=bisemanas_select,
 
         filtros={
@@ -5339,6 +5374,18 @@ def grade_painel(codponto: int):
         dt_cursor = dt_cursor + timedelta(days=1)
         idx += 1
 
+    usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
+    pode_ver_kpis_financeiros = not usuario_logado_eh_perfil_vendedor
+
+    if usuario_logado_eh_perfil_vendedor:
+        receita_liquida_periodo = None
+        custo_total = None
+        margem_pct = None
+        rentabilidade_valor = None
+        qtd_contratos = None
+        ticket_medio = None
+        custos_mes = []
+
     return render_template(
         "euromidia/painel_grade.html",
         codponto=codponto,
@@ -5384,6 +5431,8 @@ def grade_painel(codponto: int):
         receita_total=receita_liquida_periodo,
         qtd_contratos=qtd_contratos,
         ticket_medio=ticket_medio,
+        usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
+        pode_ver_kpis_financeiros=pode_ver_kpis_financeiros,
         opcoes_clientes=opcoes_clientes,
         opcoes_vendedores=opcoes_vendedores,
         opcoes_vendedores_grade=opcoes_vendedores_grade,
@@ -14082,6 +14131,9 @@ def _excel_montar_aba_grade_ano(
 @paineis_bp.route("/painel-detalhes/<int:codponto>", methods=["GET"])
 @login_required
 def painel_detalhes(codponto: int):
+    if _usuario_logado_eh_perfil_vendedor():
+        abort(403)
+
     def _texto_limpo(valor):
         try:
             return str(valor or "").strip()
@@ -17753,6 +17805,7 @@ def _processar_upload_checkin(
 
 @paineis_bp.route("/checkin/status/<string:task_id>", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_status(task_id: str):
     """Eu devolvo o estado atual do processamento assíncrono do checkin."""
@@ -17897,6 +17950,7 @@ def _buscar_dados_select_checkin(id_empresa: int | None = None):
 
 @paineis_bp.route("/checkin/empresas/buscar", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_empresas_buscar():
     q = _normalizar_texto_checkin(request.args.get("q"))
@@ -18547,6 +18601,7 @@ def _obter_condicao_sql_tag_ativa_checkin_confirmado() -> str:
 
 @paineis_bp.route("/checkin/contratos/<int:id_fato_controle_contratos>/pontos", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_pontos_do_contrato(id_fato_controle_contratos: int):
     sql = text("""
@@ -18601,6 +18656,7 @@ def checkin_pontos_do_contrato(id_fato_controle_contratos: int):
 
 @paineis_bp.route("/checkin/contratos/<int:id_fato_controle_contratos>/pontos/<int:codponto>/faces", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_faces_do_contrato(id_fato_controle_contratos: int, codponto: int):
     sql = text("""
@@ -18665,6 +18721,7 @@ def checkin_faces_do_contrato(id_fato_controle_contratos: int, codponto: int):
 
 @paineis_bp.route("/checkin/contratos/<int:id_fato_controle_contratos>/pontos/<int:codponto>/faces/<string:codface>/destinatarios", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_destinatarios_externos_do_item(id_fato_controle_contratos: int, codponto: int, codface: str):
     item = _obter_item_contrato_checkin(
@@ -18734,6 +18791,7 @@ def checkin_destinatarios_externos_do_item(id_fato_controle_contratos: int, codp
 
 @paineis_bp.route("/checkin/novo", methods=["GET", "POST"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 @limiter.limit("25 per minute", methods=["POST"])
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def checkin_novo():
@@ -18970,6 +19028,7 @@ def checkin_novo():
 
 @paineis_bp.route("/checkin/arquivo/<int:id_checkin>", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_arquivo")
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def checkin_arquivo(id_checkin: int):
     row = (
@@ -19005,6 +19064,7 @@ def checkin_arquivo(id_checkin: int):
 
 @paineis_bp.route("/checkin/<int:id_checkin>/confirmar", methods=["POST"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 def checkin_confirmar(id_checkin: int):
     csrf_token = (
         request.form.get("csrf_token")
@@ -19119,6 +19179,7 @@ def _paginacao_basica(page: int, per_page: int, total: int):
 
 @paineis_bp.route("/checkin/lista", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("lista_checkins")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def lista_checkins():
     page = request.args.get("page", default=1, type=int) or 1
@@ -19314,6 +19375,7 @@ def _resolver_mime_arquivo(caminho, tipo_midia):
 
 @paineis_bp.route("/checkin/<int:id_checkin>", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_visualizar")
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def visualizar_checkin(id_checkin: int):
     sql = text("""
@@ -19594,6 +19656,7 @@ def _sessao_checkin_publico_autorizada(token_publico: str) -> bool:
 
 @paineis_bp.route("/checkin/contratos/buscar", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("checkin_novo")
 def checkin_contratos():
     """Eu carrego os contratos do combo de checkin de forma resiliente."""
 
@@ -23468,6 +23531,9 @@ DEFINICOES_FILTROS_CLIENTES = {
         "multiplo": True,
     },
 }
+
+
+
 
 
 def _deduplicar_textos_preservando_ordem(valores):

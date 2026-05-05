@@ -11,10 +11,8 @@ from sqlalchemy import text,bindparam
 from flask_socketio import disconnect, emit, join_room, leave_room
 from ..extensions import cache, db, limiter, socketio
 from decimal import Decimal
-from ..retry_deadlock import (
-    eh_deadlock_sql_server,
-    executar_transacao_com_retry_deadlock_ou_enfileirar,
-)
+from ..retry_deadlock import (eh_deadlock_sql_server,executar_transacao_com_retry_deadlock_ou_enfileirar,)
+from ..autenticacao.acl_menu_paineis import requer_item_menu_paineis
 
 
 
@@ -18403,6 +18401,7 @@ def _listar_sugestoes_historico_cards(
 
 @kanban_bp.route("/historico-cards/sugestoes", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("historico_atendimento")
 @limiter.limit("120/minute")
 def historico_cards_sugestoes():
     """Eu alimento o autocomplete da barra de busca da tela de histórico de cards."""
@@ -18459,6 +18458,7 @@ def historico_cards_sugestoes():
 
 @kanban_bp.route("/historico-cards", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("historico_atendimento")
 @limiter.limit("60/minute")
 def historico_cards_lista():
     _assert_login()
@@ -19494,6 +19494,7 @@ def _montar_resumo_historico_precos(registros: list[dict]) -> dict:
 
 @kanban_bp.route("/historico-precos/<int:id_card>", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("historico_atendimento")
 @limiter.limit("60/minute")
 def historico_precos_visualizacao(id_card: int):
     """Eu renderizo a tela didática de histórico de preços do card."""
@@ -19884,6 +19885,7 @@ def _buscar_tags_historico_card(id_card: int, id_empresa_proprietaria: int) -> l
 
 @kanban_bp.route("/historico-card/<int:id_card>", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("historico_atendimento")
 @limiter.limit("60/minute")
 def historico_card_visualizacao(id_card: int):
     _assert_login()
@@ -21640,6 +21642,7 @@ def _obter_series_temporais_mercado_health_check() -> list[dict[str, Any]]:
 
 @kanban_bp.route("/health-check-comercial", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("health_check_comercial")
 def health_check_comercial():
     """Eu alimento o dashboard do health check comercial com dados reais do mês."""
     _assert_login()

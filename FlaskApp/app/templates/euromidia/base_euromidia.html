@@ -951,12 +951,40 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_produtos_auvo = (pode_acessar_menu_paineis('auvo_produtos') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_tickets_auvo = (pode_acessar_menu_paineis('tickets_auvo') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_criar_os_auvo = (pode_acessar_menu_paineis('criar_os_auvo') if pode_acessar_menu_paineis is defined else True) %}
+        {% set menu_paineis_aprovacao_contratos = (pode_acessar_menu_paineis('aprovacao_contratos') if pode_acessar_menu_paineis is defined else False) %}
+        {% set menu_paineis_checkin_novo = (pode_acessar_menu_paineis('checkin_novo') if pode_acessar_menu_paineis is defined else menu_paineis_disponibilidades) %}
+        {% set menu_paineis_lista_checkins = (pode_acessar_menu_paineis('lista_checkins') if pode_acessar_menu_paineis is defined else menu_paineis_disponibilidades) %}
+        {% set menu_paineis_health_check = (pode_acessar_menu_paineis('health_check_comercial') if pode_acessar_menu_paineis is defined else menu_paineis_atendimento) %}
+        {% set menu_paineis_historico_atendimento = (pode_acessar_menu_paineis('historico_atendimento') if pode_acessar_menu_paineis is defined else menu_paineis_atendimento) %}
+
+        {#
+          Admin precisa ser fechado por permissão, não pode ficar solto no HTML.
+          Perfil Vendedor = IDDimPerfilUsuario 3 não pode ver nem acessar ADMIN_TUDO.
+        #}
+        {% set usuario_perfil_id = (current_user.IDDimPerfilUsuario|int if current_user.is_authenticated else 0) %}
+        {% set menu_admin = (
+          current_user.is_authenticated
+          and usuario_perfil_id != 3
+          and (pode_acessar_menu_paineis('admin') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+        ) %}
+        {% set menu_admin_permissao_desconto = (
+          menu_admin
+          and (pode_acessar_menu_paineis('permissao_desconto') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+        ) %}
+        {% set menu_admin_aprovacao_desconto = (
+          menu_admin
+          and (pode_acessar_menu_paineis('aprovacao_desconto') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+        ) %}
 
         {% set exibir_menu_paineis =
           menu_paineis_disponibilidades
           or menu_paineis_atendimento
           or menu_paineis_performance
           or menu_paineis_empresas
+          or menu_paineis_checkin_novo
+          or menu_paineis_lista_checkins
+          or menu_paineis_health_check
+          or menu_paineis_historico_atendimento
           or menu_paineis_lista_ocupacao
           or menu_paineis_contratos
           or menu_paineis_mov_fin
@@ -964,6 +992,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_produtos_auvo
           or menu_paineis_tickets_auvo
           or menu_paineis_criar_os_auvo
+          or menu_paineis_aprovacao_contratos
         %}
 
         {% if exibir_menu_paineis %}
@@ -1006,37 +1035,39 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            <div class="submenu-item">
-              <a href="#" class="submenu-link">
-                <span>Cadastros</span>
-                <span class="submenu-caret">▸</span>
-              </a>
+            {% if menu_paineis_empresas or menu_paineis_checkin_novo or menu_paineis_lista_checkins %}
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Cadastros</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
 
-              <div class="submenu-dropdown">
-               
+                <div class="submenu-dropdown">
+                 
 
-                {% if menu_paineis_empresas %}
-                  <a href="{{ url_for('Paineis.clientes_lista') }}"
-                     class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
-                    Empresas
-                  </a>
-                {% endif %}
+                  {% if menu_paineis_empresas %}
+                    <a href="{{ url_for('Paineis.clientes_lista') }}"
+                       class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
+                      Empresas
+                    </a>
+                  {% endif %}
 
-                {% if menu_paineis_disponibilidades %}
-                  <a href="{{ url_for('Paineis.checkin_novo') }}"
-                     class="{% if request.path == url_for('Paineis.checkin_novo') %}menu-link-current{% endif %}">
-                    Realizar Checkin
-                  </a>
-                {% endif %}
+                  {% if menu_paineis_checkin_novo %}
+                    <a href="{{ url_for('Paineis.checkin_novo') }}"
+                       class="{% if request.path == url_for('Paineis.checkin_novo') %}menu-link-current{% endif %}">
+                      Realizar Checkin
+                    </a>
+                  {% endif %}
 
-                {% if menu_paineis_disponibilidades %}
-                  <a href="{{ url_for('Paineis.lista_checkins') }}"
-                     class="{% if request.path == url_for('Paineis.lista_checkins') %}menu-link-current{% endif %}">
-                    Lista Checkins
-                  </a>
-                {% endif %}
+                  {% if menu_paineis_lista_checkins %}
+                    <a href="{{ url_for('Paineis.lista_checkins') }}"
+                       class="{% if request.path == url_for('Paineis.lista_checkins') %}menu-link-current{% endif %}">
+                      Lista Checkins
+                    </a>
+                  {% endif %}
+                </div>
               </div>
-            </div>
+            {% endif %}
 
             {% if menu_paineis_atendimento %}
               <div class="submenu-item">
@@ -1050,14 +1081,20 @@ input:disabled, select:disabled, textarea:disabled{
                      class="{% if request.path == url_for('kanban.atendimento_redirect') %}menu-link-current{% endif %}">
                     Kanban Atendimento
                   </a>
-                  <a href="{{ url_for('kanban.health_check_comercial') }}"
-                     class="{% if request.path == url_for('kanban.health_check_comercial') %}menu-link-current{% endif %}">
-                    Health Check Comercial
-                  </a>
-                  <a href="{{ url_for('kanban.historico_cards_lista') }}"
-                     class="{% if request.path == url_for('kanban.historico_cards_lista') %}menu-link-current{% endif %}">
-                    Historico Atendimento
-                  </a>
+
+                  {% if menu_paineis_health_check %}
+                    <a href="{{ url_for('kanban.health_check_comercial') }}"
+                       class="{% if request.path == url_for('kanban.health_check_comercial') %}menu-link-current{% endif %}">
+                      Health Check Comercial
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_historico_atendimento %}
+                    <a href="{{ url_for('kanban.historico_cards_lista') }}"
+                       class="{% if request.path == url_for('kanban.historico_cards_lista') %}menu-link-current{% endif %}">
+                      Historico Atendimento
+                    </a>
+                  {% endif %}
                 </div>
               </div>
             {% endif %}
@@ -1085,7 +1122,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_contratos or menu_paineis_mov_fin or menu_paineis_inadimplentes %}
+            {% if menu_paineis_contratos or menu_paineis_mov_fin or menu_paineis_inadimplentes or menu_paineis_aprovacao_contratos %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Financeiro</span>
@@ -1114,10 +1151,12 @@ input:disabled, select:disabled, textarea:disabled{
                     </a>
                   {% endif %}
 
-                  <a href="{{ url_for('admin.lista_aprovacao_contratos') }}"
-                     class="{% if request.path == url_for('admin.lista_aprovacao_contratos') %}menu-link-current{% endif %}">
-                    Aprovação Contratos Euromidia
-                  </a>
+                  {% if menu_paineis_aprovacao_contratos %}
+                    <a href="{{ url_for('admin.lista_aprovacao_contratos') }}"
+                       class="{% if request.path == url_for('admin.lista_aprovacao_contratos') %}menu-link-current{% endif %}">
+                      Aprovação Contratos Euromidia
+                    </a>
+                  {% endif %}
                 </div>
               </div>
             {% endif %}
@@ -1160,36 +1199,41 @@ input:disabled, select:disabled, textarea:disabled{
 
 
 
- <div class="menu-item" data-menu="admin">
-  <button type="button"
-          class="menu-btn {% if request.path.startswith('/admin') %}active{% endif %}">
-    Admin <span style="opacity:.9;">▾</span>
-  </button>
+        {% if menu_admin and (menu_admin_permissao_desconto or menu_admin_aprovacao_desconto) %}
+          <div class="menu-item" data-menu="admin">
+            <button type="button"
+                    class="menu-btn {% if request.path.startswith('/admin') %}active{% endif %}">
+              Admin <span style="opacity:.9;">▾</span>
+            </button>
 
-  <div class="menu-dropdown">
-    <div class="desc">Ações administrativas</div>
+            <div class="menu-dropdown">
+              <div class="desc">Ações administrativas</div>
 
-    <div class="submenu-item">
-      <a href="#" class="submenu-link">
-        <span>Permissões</span>
-        <span class="submenu-caret">▸</span>
-      </a>
+              <div class="submenu-item">
+                <a href="#" class="submenu-link">
+                  <span>Permissões</span>
+                  <span class="submenu-caret">▸</span>
+                </a>
 
-      <div class="submenu-dropdown">
-        <a href="{{ url_for('admin.permissao_desconto') }}"
-           class="{% if request.path == url_for('admin.permissao_desconto') %}menu-link-current{% endif %}">
-          Permissão Desconto
-        </a>
+                <div class="submenu-dropdown">
+                  {% if menu_admin_permissao_desconto %}
+                    <a href="{{ url_for('admin.permissao_desconto') }}"
+                       class="{% if request.path == url_for('admin.permissao_desconto') %}menu-link-current{% endif %}">
+                      Permissão Desconto
+                    </a>
+                  {% endif %}
 
-
-          <a href="{{ url_for('kanban.lista_aprovacao_preco') }}"
-           class="{% if request.path == url_for('kanban.lista_aprovacao_preco') %}menu-link-current{% endif %}">
-          Aprovação Desconto
-        </a>
-      </div>
-    </div>
-  </div>
-</div>
+                  {% if menu_admin_aprovacao_desconto %}
+                    <a href="{{ url_for('kanban.lista_aprovacao_preco') }}"
+                       class="{% if request.path == url_for('kanban.lista_aprovacao_preco') %}menu-link-current{% endif %}">
+                      Aprovação Desconto
+                    </a>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
 
 
 

@@ -184,8 +184,6 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 
-
-
 #Limpar cache builder
 
 #wsl -d Ubuntu-24.04 -- docker builder prune -a -f

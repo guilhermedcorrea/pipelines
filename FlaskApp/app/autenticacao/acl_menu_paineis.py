@@ -5,15 +5,6 @@ from flask import abort
 from flask_login import current_user
 
 
-"""Controle de acesso do menu Painéis.
-
-Regra principal:
-- ADMIN_TUDO vê tudo.
-- Perfil USUARIO é restrito e só vê itens liberados por permissão.
-- Perfil VENDEDOR vê apenas itens liberados por permissão.
-- Atendimento/Kanban Atendimento aparece quando o usuário tem KANBAN_VER ou KANBAN_EDITAR.
-"""
-
 
 ITENS_MENU_PAINEIS_USUARIO_LEGADO = {
     "disponibilidades",
@@ -27,6 +18,15 @@ MAPA_ITEM_MENU_PERMISSOES = {
     "atendimento": {"KANBAN_VER", "KANBAN_EDITAR"},
     "kanban": {"KANBAN_VER", "KANBAN_EDITAR"},
     "kanban_atendimento": {"KANBAN_VER", "KANBAN_EDITAR"},
+    "historico_atendimento": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "historico_cards": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "historico_cards_lista": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "health_check_comercial": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+
+    "checkin_novo": {"CHECKIN_CRIAR", "CHECKIN_VER", "PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+    "lista_checkins": {"CHECKIN_LISTA_VER", "CHECKIN_VER", "PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+    "checkin_arquivo": {"CHECKIN_LISTA_VER", "CHECKIN_VER", "PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
+    "checkin_visualizar": {"CHECKIN_LISTA_VER", "CHECKIN_VER", "PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
 
     "disponibilidades": {"PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
     "paineis": {"PAINEIS_LISTA_VER", "PAINEIS_VER", "ADMIN_TUDO"},
@@ -48,6 +48,33 @@ MAPA_ITEM_MENU_PERMISSOES = {
     "auvo_produtos": {"ADMIN_TUDO"},
     "tickets_auvo": {"ADMIN_TUDO"},
     "criar_os_auvo": {"ADMIN_TUDO"},
+
+    "admin": {"ADMIN_TUDO"},
+    "permissao_desconto": {"ADMIN_TUDO"},
+    "aprovacao_desconto": {"ADMIN_TUDO"},
+    "aprovacao_contratos": {"ADMIN_TUDO"},
+}
+
+
+ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR = {
+    "admin",
+    "permissao_desconto",
+    "aprovacao_desconto",
+    "aprovacao_contratos",
+    "performance_paineis",
+    "movimentacao_financeira",
+    "inadimplentes",
+    "auvo_produtos",
+    "tickets_auvo",
+    "criar_os_auvo",
+    "checkin_novo",
+    "lista_checkins",
+    "checkin_arquivo",
+    "checkin_visualizar",
+    "historico_atendimento",
+    "historico_cards",
+    "historico_cards_lista",
+    "health_check_comercial",
 }
 
 
@@ -127,6 +154,23 @@ def _usuario_tem_alguma_permissao(codigos_permissao) -> bool:
     return False
 
 
+def usuario_eh_perfil_vendedor() -> bool:
+    """usuario_eh_perfil_vendedor
+    - Eu identifico o perfil Vendedor pelo ID fixo informado: IDDimPerfilUsuario = 3.
+    - Também mantenho uma conferência pelo nome, para evitar falha se algum carregamento vier sem ID.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 3:
+            return True
+    except Exception:
+        pass
+
+    return _perfil_usuario_logado() == "vendedor"
+
+
 def usuario_eh_perfil_restrito_menu_paineis() -> bool:
     """usuario_eh_perfil_restrito_menu_paineis
     - Eu digo se o usuário atual é de perfil restrito.
@@ -134,6 +178,9 @@ def usuario_eh_perfil_restrito_menu_paineis() -> bool:
     """
     if not getattr(current_user, "is_authenticated", False):
         return False
+
+    if usuario_eh_perfil_vendedor():
+        return True
 
     if _usuario_tem_permissao("ADMIN_TUDO"):
         return False
@@ -156,6 +203,9 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
         return False
 
     chave = _normalizar_texto_acl(item_menu)
+
+    if usuario_eh_perfil_vendedor() and chave in ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR:
+        return False
 
     if _usuario_tem_permissao("ADMIN_TUDO"):
         return True
