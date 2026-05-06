@@ -18,6 +18,8 @@ admin = Blueprint("admin", __name__)
 
 
 ID_STATUS_CONTRATO_APROVADO = 2
+ID_FASE_FORMULARIO_CONTRATO = 4
+TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
 
 
 
@@ -5594,6 +5596,121 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
 
 
 
+
+def _resolver_id_dim_tipo_documento_admin(nome_tipo_documento: str | None, id_empresa_proprietaria: int | None = None) -> int | None:
+    """Resolve o IDDimTipoDocumento pelo nome salvo na solicitação."""
+    nome = _texto_ou_none(nome_tipo_documento)
+    if not nome:
+        return None
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                   td.IDDimTipoDocumento
+            FROM [Integracao].[Silver].[DimTipoDocumento] td
+            WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(200), td.NomeTipoDocumento)))) COLLATE Latin1_General_CI_AI
+                = UPPER(LTRIM(RTRIM(CONVERT(nvarchar(200), :nome_tipo_documento)))) COLLATE Latin1_General_CI_AI
+              AND ISNULL(td.BitAtivo, 1) = 1
+              AND (
+                    :id_empresa_proprietaria IS NULL
+                    OR td.IDEmpresaProprietaria = :id_empresa_proprietaria
+                    OR td.IDEmpresaProprietaria IS NULL
+                  )
+            ORDER BY
+                CASE WHEN td.IDEmpresaProprietaria = :id_empresa_proprietaria THEN 0 ELSE 1 END,
+                td.IDDimTipoDocumento ASC;
+        """),
+        {
+            "nome_tipo_documento": nome,
+            "id_empresa_proprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+        },
+    ).mappings().first()
+
+    return _int_ou_none(row.get("IDDimTipoDocumento")) if row else None
+
+
+def _card_admin_esta_na_fase_formulario_contrato(id_fato_kanban_card: int | None) -> bool:
+    """Confirma que o card ainda está na fase 4 antes de registrar a ocorrência."""
+    id_card = _int_ou_none(id_fato_kanban_card)
+    if id_card in (None, "", 0):
+        return False
+
+    fase_atual = db.session.execute(
+        text("""
+            SELECT TOP (1) IDDimKanbanFaseAtual
+            FROM [Kanban].[Silver].[FatoKanbanCard]
+            WHERE IDFatoKanbanCard = :id_card;
+        """),
+        {"id_card": int(id_card)},
+    ).scalar()
+
+    return _int_ou_none(fase_atual) == ID_FASE_FORMULARIO_CONTRATO
+
+
+def _registrar_ocorrencia_card_tipo_documento_admin(
+    *,
+    id_fato_kanban_card: int | None,
+    id_dim_tipo_documento: int | None,
+    id_usuario_logado: int | None = None,
+    id_empresa_proprietaria: int | None = None,
+    id_fato_solicitacao: int | None = None,
+    id_fato_controle_contratos: int | None = None,
+    tipo_ocorrencia: str = "APROVADO",
+    observacao: str | None = None,
+) -> None:
+    """Registra a ocorrência do card com o tipo de documento aprovado/removido."""
+    id_card = _int_ou_none(id_fato_kanban_card)
+    if id_card in (None, "", 0):
+        return
+
+    tipo = (tipo_ocorrencia or "").strip().upper() or "APROVADO"
+    id_tipo_documento = _int_ou_none(id_dim_tipo_documento)
+
+    if tipo == "APROVADO" and id_tipo_documento in (None, "", 0):
+        raise ValueError(
+            "Não foi possível registrar a ocorrência do card porque o IDDimTipoDocumento não foi resolvido."
+        )
+
+    db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_CARD_OCORRENCIA}
+            (
+                IDFatoKanbanCard,
+                IDDimTipoDocumento,
+                TipoOcorrencia,
+                IDEmpresaProprietaria,
+                IDDimUsuarios,
+                IDFatoSolicitacaoContratoEuromidia,
+                IDFatoControleContratosEuromidia,
+                Observacao,
+                DataOcorrencia
+            )
+            VALUES
+            (
+                :id_card,
+                :id_tipo_documento,
+                :tipo_ocorrencia,
+                :id_empresa_proprietaria,
+                :id_usuario,
+                :id_solicitacao,
+                :id_contrato,
+                :observacao,
+                SYSDATETIME()
+            );
+        """),
+        {
+            "id_card": int(id_card),
+            "id_tipo_documento": int(id_tipo_documento) if id_tipo_documento not in (None, "", 0) else None,
+            "tipo_ocorrencia": tipo[:30],
+            "id_empresa_proprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+            "id_usuario": int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None,
+            "id_solicitacao": int(id_fato_solicitacao) if id_fato_solicitacao not in (None, "", 0) else None,
+            "id_contrato": int(id_fato_controle_contratos) if id_fato_controle_contratos not in (None, "", 0) else None,
+            "observacao": (observacao or "")[:500] if observacao else None,
+        },
+    )
+
+
 def _aplicar_resultado_aprovacao_no_card(*, id_fato_kanban_card: int | None, id_usuario_logado: int | None, id_empresa_proprietaria: int | None, aprovar: bool) -> None:
     if id_fato_kanban_card in (None, '', 0):
         return
@@ -6458,6 +6575,25 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     id_empresa_proprietaria=id_empresa_proprietaria,
                     aprovar=True,
                 )
+
+                id_dim_tipo_documento = _int_ou_none(cab_aprovada.get("IDDimTipoDocumento"))
+                if id_dim_tipo_documento in (None, "", 0):
+                    id_dim_tipo_documento = _resolver_id_dim_tipo_documento_admin(
+                        cab_aprovada.get("TipoDocumento"),
+                        id_empresa_proprietaria,
+                    )
+
+                if _card_admin_esta_na_fase_formulario_contrato(id_card):
+                    _registrar_ocorrencia_card_tipo_documento_admin(
+                        id_fato_kanban_card=id_card,
+                        id_dim_tipo_documento=id_dim_tipo_documento,
+                        id_usuario_logado=id_usuario_logado,
+                        id_empresa_proprietaria=id_empresa_proprietaria,
+                        id_fato_solicitacao=int(id_solicitacao),
+                        id_fato_controle_contratos=id_fato_controle,
+                        tipo_ocorrencia="APROVADO",
+                        observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos.",
+                    )
 
                 _registrar_historico_contrato_euromidia(
                     id_fato_controle_contratos=id_fato_controle,

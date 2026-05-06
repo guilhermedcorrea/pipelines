@@ -3212,6 +3212,26 @@
 </style>
 
 {% set pode_ver_custo_margem = current_user.has_permission('KANBAN_CUSTO_MARGEM_VER') %}
+{% set usuario_eh_vendedor_kanban = usuario_eh_vendedor_kanban|default(false) %}
+
+{% if usuario_eh_vendedor_kanban %}
+<style>
+  #btnNovaFase,
+  .kb-col-edit,
+  .kb-col-del{
+    display:none !important;
+    visibility:hidden !important;
+    pointer-events:none !important;
+  }
+
+  #modalFase,
+  #modalInativarFase{
+    display:none !important;
+    visibility:hidden !important;
+    pointer-events:none !important;
+  }
+</style>
+{% endif %}
 
 <div class="kb-wrap">
   <div class="kb-top">
@@ -3222,8 +3242,21 @@
 
     <div class="kb-actions">
       <a class="kb-btn ghost" href="{{ url_for('kanban.kanbans_lista') }}">← Voltar</a>
-      <a class="kb-btn" href="{{ url_for('kanban.kanban_tags_view', id_kanban=kanban.IDDimKanban) }}">Tags</a>
-      <button class="kb-btn primary" id="btnNovaFase">+ Fase</button>
+      {% if not usuario_eh_vendedor_kanban %}
+        <a class="kb-btn" href="{{ url_for('kanban.kanban_tags_view', id_kanban=kanban.IDDimKanban) }}">Tags</a>
+        <button class="kb-btn primary" id="btnNovaFase" type="button">+ Fase</button>
+      {% else %}
+        <button
+          class="kb-btn primary"
+          id="btnNovaFase"
+          type="button"
+          hidden
+          disabled
+          aria-hidden="true"
+          tabindex="-1"
+          style="display:none !important;"
+        ></button>
+      {% endif %}
     </div>
   </div>
 

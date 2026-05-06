@@ -98,6 +98,7 @@ TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
 TABELA_TIPO_CLIENTE_DESCONTO = "[Integracao].[Silver].[DimTipoCliente]"
 TABELA_ORIGEM_ATENDIMENTO = "[Integracao].[Silver].[DimOrigemAtendimento]"
 TABELA_TIPO_DOCUMENTO = "[Integracao].[Silver].[DimTipoDocumento]"
+TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
 
 
 
@@ -218,6 +219,24 @@ def _usuario_eh_perfil_vendedor_kanban() -> bool:
     ]
 
     return any(_normalizar_acl_kanban(nome) == "vendedor" for nome in nomes_perfil)
+
+
+
+def _bloquear_gestao_kanban_para_vendedor_html() -> None:
+    """Bloqueia telas administrativas do Kanban para o perfil Vendedor."""
+    if _usuario_eh_perfil_vendedor_kanban():
+        abort(403, description="Perfil Vendedor não pode acessar a gestão de kanbans, tags ou fases.")
+
+
+def _bloquear_gestao_kanban_para_vendedor_json():
+    """Bloqueia APIs administrativas do Kanban para o perfil Vendedor."""
+    if _usuario_eh_perfil_vendedor_kanban():
+        return jsonify({
+            "ok": False,
+            "msg": "Perfil Vendedor não pode gerenciar kanbans, tags ou fases.",
+        }), 403
+
+    return None
 
 
 def _obter_vendedor_logado_kanban(id_empresa_proprietaria: int | None = None) -> dict[str, Any] | None:
@@ -14204,7 +14223,11 @@ def kanbans_lista():
         ORDER BY CriadoEm DESC;
     """)
     kanbans = db.session.execute(sql, {"id_emp": id_emp}).mappings().all()
-    return render_template("kanban/kanbans_lista.html", kanbans=kanbans)
+    return render_template(
+        "kanban/kanbans_lista.html",
+        kanbans=kanbans,
+        usuario_eh_vendedor_kanban=_usuario_eh_perfil_vendedor_kanban(),
+    )
 
 
 @kanban_bp.route("/<int:id_kanban>", methods=["GET"])
@@ -14234,6 +14257,7 @@ def kanban_view(id_kanban: int):
 
 def kanban_tags_view(id_kanban: int):
     _assert_login()
+    _bloquear_gestao_kanban_para_vendedor_html()
     kanban = _obter_kanban_autorizado(id_kanban)
 
     sql_tags = text("""
@@ -15971,6 +15995,10 @@ def api_comercial_painel_face(id_painel: int, cod_face: str):
 @limiter.limit("30/minute")
 def api_kanban_criar():
     id_usuario = _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
+
     id_emp = _id_empresa_usuario_or_403()
 
     payload = request.get_json(silent=True) or {}
@@ -16019,6 +16047,9 @@ def api_kanban_criar():
 @limiter.limit("60/minute")
 def api_fase_criar(id_kanban: int):
     id_usuario = _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
     id_emp = _id_empresa_usuario_or_403()
     kanban_autorizado = _obter_kanban_autorizado(id_kanban)
     id_emp_kanban = int(kanban_autorizado.get("IDEmpresaProprietaria") or id_emp)
@@ -16136,6 +16167,9 @@ def api_fase_criar(id_kanban: int):
 @limiter.limit("120/minute")
 def api_fase_atualizar(id_fase: int):
     id_usuario = _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
     id_emp = _id_empresa_usuario_or_403()
     fase = _obter_fase_autorizada(id_fase)
     id_kanban = int(fase.get("IDDimKanban") or 0)
@@ -16237,6 +16271,9 @@ def api_fase_atualizar(id_fase: int):
 @limiter.limit("60/minute")
 def api_fases_reordenar():
     _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
     id_emp = _id_empresa_usuario_or_403()
 
     payload = request.get_json(silent=True) or {}
@@ -16501,6 +16538,9 @@ def api_card_mover(id_card: int):
 @limiter.limit("60/minute")
 def api_tag_criar(id_kanban: int):
     id_usuario = _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
     id_emp = _id_empresa_usuario_or_403()
     _obter_kanban_autorizado(id_kanban)
 
@@ -17410,6 +17450,58 @@ def api_card_nota_criar(id_card: int):
 
 
 
+
+def _registrar_ocorrencia_card_tipo_documento_kanban(
+    *,
+    id_fato_kanban_card: int | None,
+    id_dim_tipo_documento: int | None,
+    id_usuario_logado: int | None = None,
+    id_empresa_proprietaria: int | None = None,
+    tipo_ocorrencia: str = "REMOVIDO",
+    observacao: str | None = None,
+) -> None:
+    """Registra a ocorrência do card na Integracao.Silver.FatoCardOCorrencia."""
+    id_card = _int_ou_none(id_fato_kanban_card)
+    if id_card in (None, "", 0):
+        return
+
+    id_tipo_documento = _int_ou_none(id_dim_tipo_documento)
+    tipo = (tipo_ocorrencia or "").strip().upper() or "REMOVIDO"
+
+    db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_CARD_OCORRENCIA}
+            (
+                IDFatoKanbanCard,
+                IDDimTipoDocumento,
+                TipoOcorrencia,
+                IDEmpresaProprietaria,
+                IDDimUsuarios,
+                Observacao,
+                DataOcorrencia
+            )
+            VALUES
+            (
+                :id_card,
+                :id_tipo_documento,
+                :tipo_ocorrencia,
+                :id_empresa_proprietaria,
+                :id_usuario,
+                :observacao,
+                SYSDATETIME()
+            );
+        """),
+        {
+            "id_card": int(id_card),
+            "id_tipo_documento": int(id_tipo_documento) if id_tipo_documento not in (None, "", 0) else None,
+            "tipo_ocorrencia": tipo[:30],
+            "id_empresa_proprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+            "id_usuario": int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None,
+            "observacao": (observacao or "")[:500] if observacao else None,
+        },
+    )
+
+
 @kanban_bp.route("/api/cards/<int:id_card>/inativar", methods=["POST"])
 @login_required
 @limiter.limit("120/minute")
@@ -17615,6 +17707,15 @@ def api_card_inativar(id_card: int):
             cancelar_todas=True,
         )
 
+        _registrar_ocorrencia_card_tipo_documento_kanban(
+            id_fato_kanban_card=id_card,
+            id_dim_tipo_documento=None,
+            id_usuario_logado=id_usuario,
+            id_empresa_proprietaria=id_emp,
+            tipo_ocorrencia="REMOVIDO",
+            observacao=observacao_inativacao,
+        )
+
         snapshot_depois = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
         _registrar_log_card(
@@ -17733,6 +17834,9 @@ def _obter_tag_por_nome(id_kanban: int, nome_tag: str, *, somente_ativa: bool = 
 @limiter.limit("60/minute")
 def api_fase_inativar(id_fase: int):
     id_usuario = _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
     fase_escopo = _obter_fase_autorizada(id_fase)
     id_emp = _id_empresa_usuario_or_403()
     id_kanban = int(fase_escopo.get("IDDimKanban") or 0)

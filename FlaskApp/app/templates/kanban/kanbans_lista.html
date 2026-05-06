@@ -2,13 +2,16 @@
 {% block title %}Kanbans | Euromídia{% endblock %}
 
 {% block content %}
+{% set usuario_eh_vendedor = usuario_eh_vendedor_kanban|default(false) %}
 <div class="card">
   <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
     <div>
       <h2 style="margin:0;">Kanbans</h2>
       <div style="opacity:.75;margin-top:4px;">Crie e gerencie seus quadros.</div>
     </div>
-    <button class="btn btn-primary" id="btnNovoKanban">+ Novo Kanban</button>
+    {% if not usuario_eh_vendedor %}
+      <button class="btn btn-primary" id="btnNovoKanban">+ Novo Kanban</button>
+    {% endif %}
   </div>
 
   <hr style="opacity:.12;margin:14px 0;">
@@ -33,6 +36,7 @@
 <!-- Token CSRF pro fetch -->
 <meta name="csrf-token" content="{{ csrf_token() }}">
 
+{% if not usuario_eh_vendedor %}
 <!-- Modal simples -->
 <div id="modalNovoKanban" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;">
   <div style="max-width:560px;margin:8vh auto;background:#fff;border-radius:16px;padding:16px;box-shadow:0 20px 70px rgba(0,0,0,.25);">
@@ -93,4 +97,5 @@
   });
 })();
 </script>
+{% endif %}
 {% endblock %}

@@ -13683,6 +13683,9 @@ def cliente_detalhe(id_empresa: int):
 @login_required
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def exportar_excel_ano():
+    if _usuario_logado_eh_perfil_vendedor():
+        abort(403, description="Perfil Vendedor não tem permissão para exportar Excel.")
+
     try:
         ano = int((request.args.get("ano") or "").strip())
     except Exception:

@@ -17,6 +17,7 @@
   const KANBAN_VIEW_CONFIG = lerConfiguracaoKanbanView();
   const PODE_VER_CUSTO_MARGEM = KANBAN_VIEW_CONFIG.podeVerCustoMargem === true;
   const USUARIO_EH_VENDEDOR = KANBAN_VIEW_CONFIG.usuarioEhVendedor === true;
+  const USUARIO_PODE_GERENCIAR_FASES_E_TAGS = !USUARIO_EH_VENDEDOR;
   const ID_USUARIO_LOGADO = Number(KANBAN_VIEW_CONFIG.idUsuarioLogado || 0);
   const ID_VENDEDOR_LOGADO = Number(KANBAN_VIEW_CONFIG.idVendedorLogado || 0);
   const ID_KANBAN = Number(KANBAN_VIEW_CONFIG.idKanban || 0);
@@ -5140,11 +5141,13 @@ function normalizarCardServidor(card){
   }
 
   function abrirModalNovaFase(){
+    if (!USUARIO_PODE_GERENCIAR_FASES_E_TAGS || !modalFase) return;
     resetModalFase();
-    modalFase.style.display = "block";
+    if (modalFase) modalFase.style.display = "block";
   }
 
   function abrirModalEditarFase(idFase){
+    if (!USUARIO_PODE_GERENCIAR_FASES_E_TAGS || !modalFase) return;
     const fase = fasePorId(idFase);
     if (!fase) return;
 
@@ -12041,6 +12044,19 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       col.style.setProperty("--col-head-bg", colAccent);
       col.style.setProperty("--col-text", colText);
 
+      const botoesAcaoFase = [];
+
+      if (USUARIO_PODE_GERENCIAR_FASES_E_TAGS) {
+        botoesAcaoFase.push(
+          el("button", {class:"kb-col-edit", title:"Editar fase", onclick: () => abrirModalEditarFase(idFase)}, ["✎"]),
+          el("button", {class:"kb-col-del", title:"Inativar fase", onclick: () => abrirModalInativarFase(idFase)}, ["−"])
+        );
+      }
+
+      botoesAcaoFase.push(
+        el("button", {class:"kb-add", title:"Adicionar card", onclick: () => criarCardPrompt(idFase)}, ["+"])
+      );
+
       const head = el("div", {class:"kb-col-head"}, [
         el("div", {class:"kb-col-title"}, [
           el("strong", {title: f.NomeFase || ""}, [`${(f.NomeFase || "—")} (${qtdTotalServidor})`]),
@@ -12048,11 +12064,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
             el("span", {class:"kb-count"}, [String(f.TipoFase || "").toLowerCase()])
           ])
         ]),
-        el("div", {class:"kb-col-actions"}, [
-          el("button", {class:"kb-col-edit", title:"Editar fase", onclick: () => abrirModalEditarFase(idFase)}, ["✎"]),
-          el("button", {class:"kb-col-del", title:"Inativar fase", onclick: () => abrirModalInativarFase(idFase)}, ["−"]),
-          el("button", {class:"kb-add", title:"Adicionar card", onclick: () => criarCardPrompt(idFase)}, ["+"])
-        ])
+        el("div", {class:"kb-col-actions"}, botoesAcaoFase)
       ]);
 
       const body = el("div", {class:"kb-col-body"}, []);
@@ -13041,27 +13053,31 @@ async function moverCard(idCard, idFasePara, posicao) {
   });
 
   function abrirModalInativarFase(idFase){
+    if (!USUARIO_PODE_GERENCIAR_FASES_E_TAGS || !modalInativarFase) return;
     faseParaInativar = idFase;
-    msgInativarFase.style.display = "none";
+    if (msgInativarFase) msgInativarFase.style.display = "none";
     modalInativarFase.style.display = "block";
   }
 
   function fecharModalInativarFase(){
-    modalInativarFase.style.display = "none";
+    if (modalInativarFase) modalInativarFase.style.display = "none";
     faseParaInativar = null;
   }
 
-  btnFecharInativarFase.addEventListener("click", fecharModalInativarFase);
-  modalInativarFase.addEventListener("click", (e) => {
+  btnFecharInativarFase?.addEventListener("click", fecharModalInativarFase);
+  modalInativarFase?.addEventListener("click", (e) => {
     if (e.target === modalInativarFase) fecharModalInativarFase();
   });
 
-  btnConfirmarInativarFase.addEventListener("click", async () => {
-    msgInativarFase.style.display = "none";
+  btnConfirmarInativarFase?.addEventListener("click", async () => {
+    if (!USUARIO_PODE_GERENCIAR_FASES_E_TAGS) return;
+    if (msgInativarFase) msgInativarFase.style.display = "none";
 
     if (!faseParaInativar){
-      msgInativarFase.textContent = "Fase inválida.";
-      msgInativarFase.style.display = "block";
+      if (msgInativarFase) {
+        msgInativarFase.textContent = "Fase inválida.";
+        msgInativarFase.style.display = "block";
+      }
       return;
     }
 
@@ -13069,10 +13085,12 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (!res.ok){
       const qtdAtivos = idNum(res.body?.QuantidadeCardsAtivos || 0);
-      msgInativarFase.textContent = qtdAtivos > 0
-        ? `${(res.body && (res.body.msg || res.body.erro)) || "Não foi possível inativar a fase."} Cards ativos encontrados: ${qtdAtivos}.`
-        : ((res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar fase (HTTP ${res.http}).`);
-      msgInativarFase.style.display = "block";
+      if (msgInativarFase) {
+        msgInativarFase.textContent = qtdAtivos > 0
+          ? `${(res.body && (res.body.msg || res.body.erro)) || "Não foi possível inativar a fase."} Cards ativos encontrados: ${qtdAtivos}.`
+          : ((res.body && (res.body.msg || res.body.erro)) || `Erro ao inativar fase (HTTP ${res.http}).`);
+        msgInativarFase.style.display = "block";
+      }
       return;
     }
 
@@ -15425,16 +15443,17 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
   }
 
-  document.getElementById("btnNovaFase").addEventListener("click", () => {
+  document.getElementById("btnNovaFase")?.addEventListener("click", () => {
+    if (!USUARIO_PODE_GERENCIAR_FASES_E_TAGS) return;
     abrirModalNovaFase();
   });
 
-  document.getElementById("btnFecharFase").addEventListener("click", () => {
-    modalFase.style.display = "none";
+  document.getElementById("btnFecharFase")?.addEventListener("click", () => {
+    if (modalFase) modalFase.style.display = "none";
     resetModalFase();
   });
 
-  modalFase.addEventListener("click", (e) => {
+  modalFase?.addEventListener("click", (e) => {
     if (e.target === modalFase) {
       modalFase.style.display = "none";
       resetModalFase();
@@ -15453,7 +15472,8 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
   });
 
-  document.getElementById("btnSalvarFase").addEventListener("click", async () => {
+  document.getElementById("btnSalvarFase")?.addEventListener("click", async () => {
+    if (!USUARIO_PODE_GERENCIAR_FASES_E_TAGS) return;
     const nome = (faseNomeInput?.value || "").trim();
     const tipo = faseTipoSelect?.value || "ATIVA";
     const corHex = faseUsarCor?.checked ? normalizarCorHex(faseCorHex?.value || "") : null;
@@ -15483,7 +15503,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     aplicarFaseRetornadaServidor(j.fase);
-    modalFase.style.display = "none";
+    if (modalFase) modalFase.style.display = "none";
     resetModalFase();
 
     if (j.fase) {
