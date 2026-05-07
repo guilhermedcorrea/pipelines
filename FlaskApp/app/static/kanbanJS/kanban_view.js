@@ -17,6 +17,8 @@
   const KANBAN_VIEW_CONFIG = lerConfiguracaoKanbanView();
   const PODE_VER_CUSTO_MARGEM = KANBAN_VIEW_CONFIG.podeVerCustoMargem === true;
   const USUARIO_EH_VENDEDOR = KANBAN_VIEW_CONFIG.usuarioEhVendedor === true;
+  const USUARIO_EH_ADMIN_KANBAN = KANBAN_VIEW_CONFIG.usuarioEhAdminKanban === true;
+  const USUARIO_TEM_BLOQUEIO_CARTEIRA = KANBAN_VIEW_CONFIG.usuarioTemBloqueioCarteira === true || (USUARIO_EH_VENDEDOR && !USUARIO_EH_ADMIN_KANBAN);
   const USUARIO_PODE_GERENCIAR_FASES_E_TAGS = !USUARIO_EH_VENDEDOR;
   const ID_USUARIO_LOGADO = Number(KANBAN_VIEW_CONFIG.idUsuarioLogado || 0);
   const ID_VENDEDOR_LOGADO = Number(KANBAN_VIEW_CONFIG.idVendedorLogado || 0);
@@ -42,6 +44,35 @@
   }
 
   removerControlesGestaoFasesParaVendedor();
+
+  function injetarEstiloBloqueioCarteiraVendedor(){
+    if (document.getElementById("kb-estilo-bloqueio-carteira-vendedor")) return;
+
+    const style = document.createElement("style");
+    style.id = "kb-estilo-bloqueio-carteira-vendedor";
+    style.textContent = `
+      .kb-combobox-opcao.is-disabled{
+        opacity:.70;
+        cursor:not-allowed;
+        background:rgba(239,68,68,.06);
+        border-color:rgba(239,68,68,.18);
+      }
+      .kb-combobox-opcao.is-disabled:hover{
+        background:rgba(239,68,68,.10);
+      }
+      .kb-combobox-aviso{
+        display:block;
+        margin-top:4px;
+        font-size:11px;
+        font-weight:900;
+        color:#991b1b;
+        line-height:1.25;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  injetarEstiloBloqueioCarteiraVendedor();
 
   function configurarScrollKanban(){
     if (!board || board.dataset.scrollKanbanAjustado === "1") return;
@@ -106,6 +137,7 @@
   let empresasPorId = new Map();
   let empresasResultadoComboboxAtual = [];
   let empresaBuscaRemotaController = null;
+  let empresaPrincipalBloqueadaCarteiraAtual = null;
   let agenciasResultadoComboboxAtual = [];
   let agenciaBuscaRemotaController = null;
   let cnaesCatalogo = [];
@@ -5518,6 +5550,222 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     return cnpj ? `${razao} • ${cnpj}` : razao;
   }
 
+  function empresaBloqueadaCarteiraParaVendedor(item){
+    if (!item) return false;
+
+    const bloqueada = item.EmpresaBloqueadaCarteiraVendedor ?? item.empresa_bloqueada_carteira_vendedor ?? false;
+    return bloqueada === true || bloqueada === 1 || bloqueada === "1" || safeStr(bloqueada).toLowerCase() === "true";
+  }
+
+  function nomeVendedorCarteiraEmpresa(item){
+    return safeStr(item?.NomeVendedorCarteira || item?.nome_vendedor_carteira || "Vendedor responsável").trim() || "Vendedor responsável";
+  }
+
+  function nomeEmpresaCarteiraEmpresa(item){
+    return safeStr(
+      item?.RazaoSocial ||
+      item?.EmpresaRazaoSocial ||
+      item?.NomeEmpresaCarteira ||
+      item?.nome_empresa ||
+      item?.nome_empresa_carteira ||
+      item?.NomeFantasia ||
+      item?.EmpresaNomeFantasia ||
+      "Empresa selecionada"
+    ).trim() || "Empresa selecionada";
+  }
+
+  function mensagemEmpresaBloqueadaCarteira(item){
+    const nomeEmpresa = nomeEmpresaCarteiraEmpresa(item);
+    const nomeVendedor = nomeVendedorCarteiraEmpresa(item);
+    return `A Empresa ${nomeEmpresa} pertence à Carteira ${nomeVendedor}. Favor verificar com o Coordenador.`;
+  }
+
+  function definirBloqueioCarteiraEmpresaPrincipal(empresa = null, mensagem = ""){
+    if (empresa) {
+      empresaPrincipalBloqueadaCarteiraAtual = Object.assign({}, empresa || {}, {
+        MensagemBloqueioCarteiraVendedor: safeStr(mensagem || empresa?.MensagemBloqueioCarteiraVendedor || empresa?.msg || "").trim() || mensagemEmpresaBloqueadaCarteira(empresa)
+      });
+      if (selectEmpresaCard) {
+        selectEmpresaCard.dataset.carteiraBloqueada = "1";
+        selectEmpresaCard.dataset.msgCarteiraBloqueada = empresaPrincipalBloqueadaCarteiraAtual.MensagemBloqueioCarteiraVendedor;
+      }
+      if (inputEmpresaCardBusca) {
+        inputEmpresaCardBusca.setAttribute("aria-invalid", "true");
+        inputEmpresaCardBusca.title = empresaPrincipalBloqueadaCarteiraAtual.MensagemBloqueioCarteiraVendedor;
+      }
+    } else {
+      empresaPrincipalBloqueadaCarteiraAtual = null;
+      if (selectEmpresaCard) {
+        selectEmpresaCard.dataset.carteiraBloqueada = "0";
+        selectEmpresaCard.dataset.msgCarteiraBloqueada = "";
+      }
+      if (inputEmpresaCardBusca) {
+        inputEmpresaCardBusca.removeAttribute("aria-invalid");
+        inputEmpresaCardBusca.title = "";
+      }
+    }
+
+    if (typeof atualizarEstadoSalvarCard === "function") {
+      atualizarEstadoSalvarCard();
+    }
+  }
+
+  function mostrarAvisoEmpresaBloqueadaCarteira(item, mensagemForcada = "", opcoes = {}){
+    const msg = safeStr(mensagemForcada || item?.MensagemBloqueioCarteiraVendedor || item?.msg || "").trim() || mensagemEmpresaBloqueadaCarteira(item);
+    const exibirPopup = opcoes?.exibirPopup !== false;
+
+    if (typeof mostrarMensagemCard === "function") {
+      mostrarMensagemCard(msg);
+    } else if (msgCard) {
+      msgCard.textContent = msg;
+      msgCard.style.display = "block";
+    }
+
+    // O popup aparece somente na tentativa ativa de selecionar a empresa bloqueada.
+    // Em fechar/reabrir card e em validação de salvamento, a mensagem fica só no modal.
+    if (exibirPopup) {
+      window.alert(msg);
+    }
+  }
+
+  function limparSelecaoEmpresaBloqueadaSemPopup(valorSeguro = ""){
+    const valorFinal = safeStr(valorSeguro || "").trim();
+
+    definirBloqueioCarteiraEmpresaPrincipal(null);
+
+    if (selectEmpresaCard) {
+      if (valorFinal) {
+        garantirOpcaoEmpresaNoSelect(valorFinal);
+      }
+
+      selectEmpresaCard.value = valorFinal;
+      selectEmpresaCard.dataset.valorCarteiraPermitido = valorFinal;
+      selectEmpresaCard.dataset.carteiraBloqueada = "0";
+      selectEmpresaCard.dataset.msgCarteiraBloqueada = "";
+      selectEmpresaCard.dataset.validandoCarteira = "0";
+    }
+
+    if (inputEmpresaCardBusca) {
+      inputEmpresaCardBusca.removeAttribute("aria-invalid");
+      inputEmpresaCardBusca.title = "";
+      inputEmpresaCardBusca.value = valorFinal ? obterTextoEmpresaSelecionada(valorFinal) : "";
+    }
+
+    if (!valorFinal) {
+      setEmpresaPreviewById("");
+      limparDadosNovoContratoFormulario();
+      if (typeof resetarFluxoContrato === "function") {
+        resetarFluxoContrato();
+      }
+    }
+
+    fecharListaEmpresasCombobox();
+    atualizarVisibilidadeDadosNovoContrato();
+    aplicarVisibilidadeCamposFormularioSolicitacaoPorTipoCliente();
+    agendarSincronizacaoFormularioSolicitacao();
+    atualizarEstadoSalvarCard();
+  }
+
+  function solicitarAtualizacaoAoVivoCardDescartado(idCard){
+    const idCardInt = idNum(idCard || 0);
+    if (!idCardInt) return;
+
+    if (socketKanban && socketConectado) {
+      try {
+        socketKanban.emit("card_edicao_descartada", {
+          id_kanban: ID_KANBAN,
+          id_card: idCardInt
+        });
+        return;
+      } catch (erro) {
+        console.warn("Falha ao emitir card_edicao_descartada. Vou atualizar por HTTP.", erro);
+      }
+    }
+
+    sincronizarCardPorDetalhe(idCardInt, true).catch((erro) => {
+      console.warn("Falha ao sincronizar card descartado por detalhe. Vou recarregar o quadro.", erro);
+      carregar().catch((erroCarregar) => console.warn("Falha ao recarregar quadro após descarte.", erroCarregar));
+    });
+  }
+
+  function montarEmpresaComStatusCarteira(idEmp, empresaBase, statusCarteira){
+    const idEmpresa = idNum(idEmp || empresaBase?.IDEmpresa || empresaBase?.ID || 0);
+    const status = statusCarteira || {};
+    const bloqueada = status.bloqueada === true || status.bloqueada === 1 || status.bloqueada === "1";
+    const temCarteira = status.tem_carteira === true || status.tem_carteira === 1 || status.tem_carteira === "1";
+
+    return Object.assign({}, empresaBase || {}, {
+      IDEmpresa: idEmpresa || empresaBase?.IDEmpresa || empresaBase?.ID || null,
+      EmpresaTemCarteira: temCarteira,
+      EmpresaBloqueadaCarteiraVendedor: bloqueada,
+      EmpresaPermitidaCarteiraVendedor: !bloqueada,
+      IDVendedorCarteira: status.id_vendedor_carteira || null,
+      NomeVendedorCarteira: status.nome_vendedor_carteira || empresaBase?.NomeVendedorCarteira || null,
+      NomeEmpresaCarteira: status.nome_empresa || empresaBase?.RazaoSocial || empresaBase?.EmpresaRazaoSocial || null,
+      IDFatoCarteiraVendedorEmpresa: status.id_fato_carteira_vendedor || null,
+      MensagemBloqueioCarteiraVendedor: status.msg || null
+    });
+  }
+
+  async function validarEmpresaCarteiraVendedorPorId(idEmp, empresaBase = null){
+    const idEmpresa = idNum(idEmp || 0);
+
+    if (!idEmpresa) {
+      return { permitida: true, empresa: empresaBase || null, status: null };
+    }
+
+    try {
+      const r = await fetch(montarUrlKanban(`/kanban/api/empresas/${idEmpresa}/status-carteira`), {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+      });
+
+      const j = await r.json().catch(() => null);
+      const status = j?.empresa_carteira || {};
+      const empresaAtualizada = montarEmpresaComStatusCarteira(idEmpresa, empresaBase, status);
+      if (j?.msg || j?.erro) {
+        empresaAtualizada.MensagemBloqueioCarteiraVendedor = j.msg || j.erro;
+      }
+      registrarEmpresasNoCatalogo([empresaAtualizada]);
+
+      const bloqueada = empresaBloqueadaCarteiraParaVendedor(empresaAtualizada) || status.bloqueada === true || status.bloqueada === 1 || status.bloqueada === "1";
+
+      if (bloqueada || r.status === 403) {
+        return {
+          permitida: false,
+          empresa: empresaAtualizada,
+          status,
+          msg: status.msg || j?.msg || mensagemEmpresaBloqueadaCarteira(empresaAtualizada)
+        };
+      }
+
+      if (!r.ok || !j) {
+        throw new Error((j && (j.msg || j.erro)) || `Erro ao validar carteira da empresa (HTTP ${r.status})`);
+      }
+
+      return { permitida: true, empresa: empresaAtualizada, status };
+    } catch (erro) {
+      console.warn("validarEmpresaCarteiraVendedorPorId: falhou", { idEmpresa, erro });
+
+      if (empresaBloqueadaCarteiraParaVendedor(empresaBase)) {
+        return {
+          permitida: false,
+          empresa: empresaBase,
+          status: null,
+          msg: mensagemEmpresaBloqueadaCarteira(empresaBase)
+        };
+      }
+
+      return {
+        permitida: false,
+        empresa: empresaBase || { NomeVendedorCarteira: "Vendedor responsável" },
+        status: null,
+        msg: "Não foi possível validar a carteira desta empresa. Por segurança, o vendedor não pode vincular esta empresa ao card agora."
+      };
+    }
+  }
+
   function obterEmpresaCatalogoPorId(idEmp){
     const id = idNum(idEmp || 0);
     if (!id) return null;
@@ -5575,7 +5823,9 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const valorAnterior = safeStr(selectEmpresaCard.value || "").trim();
 
     if (!novoValor) {
+      definirBloqueioCarteiraEmpresaPrincipal(null);
       selectEmpresaCard.value = "";
+      selectEmpresaCard.dataset.valorCarteiraPermitido = "";
       sincronizarBuscaEmpresaComSelect();
       fecharListaEmpresasCombobox();
 
@@ -5585,10 +5835,24 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       return;
     }
 
-    await garantirEmpresaNoCatalogoPorId(novoValor);
+    const empresaSelecionada = await garantirEmpresaNoCatalogoPorId(novoValor);
+    const validacaoCarteira = await validarEmpresaCarteiraVendedorPorId(novoValor, empresaSelecionada);
+
+    if (!validacaoCarteira.permitida) {
+      const empresaBloqueada = validacaoCarteira.empresa || empresaSelecionada || { NomeVendedorCarteira: "Vendedor responsável" };
+      const mensagemBloqueio = safeStr(validacaoCarteira.msg || empresaBloqueada?.MensagemBloqueioCarteiraVendedor || "").trim() || mensagemEmpresaBloqueadaCarteira(empresaBloqueada);
+      const valorSeguroAnterior = safeStr(selectEmpresaCard.dataset.valorCarteiraPermitido || valorAnterior || "").trim();
+
+      mostrarAvisoEmpresaBloqueadaCarteira(empresaBloqueada, mensagemBloqueio, { exibirPopup: true });
+      limparSelecaoEmpresaBloqueadaSemPopup(valorSeguroAnterior);
+      return;
+    }
+
+    definirBloqueioCarteiraEmpresaPrincipal(null);
     garantirOpcaoEmpresaNoSelect(novoValor);
 
     selectEmpresaCard.value = novoValor;
+    selectEmpresaCard.dataset.valorCarteiraPermitido = novoValor;
     sincronizarBuscaEmpresaComSelect();
     fecharListaEmpresasCombobox();
 
@@ -6275,8 +6539,30 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     return adicionadas;
   }
 
+  function limparTermoBuscaEmpresaRemota(textoBusca){
+    let termo = safeStr(textoBusca || "").trim();
+
+    // Evita HTTP 414 quando algum HTML/template entra no campo por cache, colagem ou estado antigo.
+    if (termo.includes("{%") || termo.includes("%}") || /<\/?[a-z][\s\S]*>/i.test(termo)) {
+      termo = termo
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/\{[%#][\s\S]*?[%#]\}/g, " ")
+        .replace(/\{\{[\s\S]*?\}\}/g, " ");
+    }
+
+    termo = termo.replace(/\s+/g, " ").trim();
+
+    if (termo.length > 120) {
+      termo = termo.slice(0, 120).trim();
+    }
+
+    return termo;
+  }
+
   async function buscarEmpresasRemoto(textoBusca = "", opcoes = {}) {
-    const termo = safeStr(textoBusca || "").trim();
+    const termo = limparTermoBuscaEmpresaRemota(textoBusca);
     const tipoBusca = safeStr(opcoes?.tipo || "empresa").trim().toLowerCase() === "agencia" ? "agencia" : "empresa";
     const listaDestino = opcoes?.listaDestino || (tipoBusca === "agencia" ? listaAgenciaCardBusca : listaEmpresaCardBusca);
     const renderizador = typeof opcoes?.renderizador === "function"
@@ -6302,13 +6588,14 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
     const query = new URLSearchParams();
     if (termo) query.set("q", termo);
+    query.set("_", String(Date.now()));
 
     try {
       const url = query.toString()
         ? `/kanban/api/empresas/buscar?${query.toString()}`
         : `/kanban/api/empresas/buscar`;
 
-      const r = await fetch(url, {
+      const r = await fetch(montarUrlKanban(url), {
         credentials: "same-origin",
         signal: controller.signal,
       });
@@ -6438,13 +6725,34 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
 
       const razao = safeStr(item?.RazaoSocial || item?.EmpresaRazaoSocial || "—").trim() || "—";
       const cnpj = mascaraCnpj(item?.CNPJ || item?.EmpresaCNPJ || "");
-      const botao = el("button", { type: "button", class: `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}` }, [
+      const bloqueadaCarteira = empresaBloqueadaCarteiraParaVendedor(item);
+      const classeBotao = `kb-combobox-opcao${id === valorSelecionado ? " is-selected" : ""}${bloqueadaCarteira ? " is-disabled" : ""}`;
+      const filhosBotao = [
         el("strong", {}, [razao]),
         el("span", {}, [cnpj || "Sem CNPJ"])
-      ]);
+      ];
+
+      if (bloqueadaCarteira) {
+        filhosBotao.push(el("span", { class: "kb-combobox-aviso" }, [mensagemEmpresaBloqueadaCarteira(item)]));
+      }
+
+      const botao = el("button", {
+        type: "button",
+        class: classeBotao,
+        title: bloqueadaCarteira ? mensagemEmpresaBloqueadaCarteira(item) : "",
+        "aria-disabled": bloqueadaCarteira ? "true" : "false"
+      }, filhosBotao);
 
       botao.addEventListener("mousedown", async (evento) => {
         evento.preventDefault();
+
+        if (bloqueadaCarteira) {
+          const valorSeguroAnterior = safeStr(selectEmpresaCard?.dataset?.valorCarteiraPermitido || selectEmpresaCard?.value || "").trim();
+          mostrarAvisoEmpresaBloqueadaCarteira(item, "", { exibirPopup: true });
+          limparSelecaoEmpresaBloqueadaSemPopup(valorSeguroAnterior);
+          return;
+        }
+
         await selecionarEmpresaCombobox(id, true);
       });
 
@@ -13133,12 +13441,28 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   function fecharModalCard(){
+    const idCardFechado = idNum(cardAbertoId || inputIdCard?.value || 0);
+    const tinhaBloqueioCarteira = Boolean(
+      empresaPrincipalBloqueadaCarteiraAtual ||
+      selectEmpresaCard?.dataset?.carteiraBloqueada === "1" ||
+      safeStr(selectEmpresaCard?.dataset?.msgCarteiraBloqueada || "").trim()
+    );
+
     if (modalCard) {
       modalCard.style.display = "none";
       modalCard.dataset.idFaseAtual = "";
       modalCard.dataset.jaPassouFaseFormularioContrato = "0";
     }
+
+    if (tinhaBloqueioCarteira) {
+      limparSelecaoEmpresaBloqueadaSemPopup("");
+    }
+
     limparEstadoCardAberto();
+
+    if (idCardFechado && tinhaBloqueioCarteira) {
+      solicitarAtualizacaoAoVivoCardDescartado(idCardFechado);
+    }
   }
 
   function fecharModalOrcamentoCard(){
@@ -13178,6 +13502,31 @@ async function moverCard(idCard, idFasePara, posicao) {
   selectEmpresaCard.addEventListener("change", async () => {
     sincronizarBuscaEmpresaComSelect();
     const idEmp = selectEmpresaCard.value || "";
+
+    if (USUARIO_TEM_BLOQUEIO_CARTEIRA && idEmp && selectEmpresaCard.dataset.validandoCarteira !== "1") {
+      const valorAnteriorSeguro = safeStr(selectEmpresaCard.dataset.valorCarteiraPermitido || "").trim();
+      selectEmpresaCard.dataset.validandoCarteira = "1";
+      try {
+        const empresaSelecionada = obterEmpresaCatalogoPorId(idEmp);
+        const validacaoCarteira = await validarEmpresaCarteiraVendedorPorId(idEmp, empresaSelecionada);
+        if (!validacaoCarteira.permitida) {
+          const empresaBloqueada = validacaoCarteira.empresa || empresaSelecionada || { NomeVendedorCarteira: "Vendedor responsável" };
+          const mensagemBloqueio = safeStr(validacaoCarteira.msg || empresaBloqueada?.MensagemBloqueioCarteiraVendedor || "").trim() || mensagemEmpresaBloqueadaCarteira(empresaBloqueada);
+          mostrarAvisoEmpresaBloqueadaCarteira(empresaBloqueada, mensagemBloqueio, { exibirPopup: true });
+          limparSelecaoEmpresaBloqueadaSemPopup(valorAnteriorSeguro);
+          return;
+        } else {
+          definirBloqueioCarteiraEmpresaPrincipal(null);
+          selectEmpresaCard.dataset.valorCarteiraPermitido = safeStr(idEmp).trim();
+        }
+      } finally {
+        selectEmpresaCard.dataset.validandoCarteira = "0";
+      }
+    } else if (!idEmp) {
+      definirBloqueioCarteiraEmpresaPrincipal(null);
+      selectEmpresaCard.dataset.valorCarteiraPermitido = "";
+    }
+
     const tipoClienteAtual = safeStr(selectTipoClienteDescontoCard?.value || "").trim();
     const origemAtual = safeStr(selectOrigemAtendimentoCard?.value || "").trim();
 
@@ -13911,6 +14260,8 @@ async function moverCard(idCard, idFasePara, posicao) {
     const temVersao = !!safeStr(versaoConcorrenciaCardAberto);
     const podeSalvar = temVersao && !cardAbertoConflitoExterno;
 
+    // Carteira bloqueada não desabilita o botão.
+    // O vendedor precisa conseguir clicar para receber o popup; o salvamento é barrado no clique e no backend.
     btnSalvarCard.disabled = !podeSalvar;
     btnSalvarCard.title = podeSalvar
       ? ""
@@ -15199,9 +15550,31 @@ async function moverCard(idCard, idFasePara, posicao) {
     const idEmpresa = selectEmpresaCard.value ? Number(selectEmpresaCard.value) : null;
     const idTipoClienteDesconto = selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null;
     const idOrigemAtendimento = selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null;
+    const empresaPrincipalSelecionada = idEmpresa ? obterEmpresaCatalogoPorId(idEmpresa) : null;
 
     msgCard.style.display = "none";
     msgCard.textContent = "";
+
+    if (empresaPrincipalBloqueadaCarteiraAtual) {
+      mostrarAvisoEmpresaBloqueadaCarteira(
+        empresaPrincipalBloqueadaCarteiraAtual,
+        empresaPrincipalBloqueadaCarteiraAtual.MensagemBloqueioCarteiraVendedor,
+        { exibirPopup: false }
+      );
+      return;
+    }
+
+    if (idEmpresa) {
+      const validacaoCarteiraSalvar = await validarEmpresaCarteiraVendedorPorId(idEmpresa, empresaPrincipalSelecionada);
+      if (!validacaoCarteiraSalvar.permitida) {
+        const empresaBloqueada = validacaoCarteiraSalvar.empresa || empresaPrincipalSelecionada || { NomeVendedorCarteira: "Vendedor responsável" };
+        const mensagemBloqueio = safeStr(validacaoCarteiraSalvar.msg || empresaBloqueada?.MensagemBloqueioCarteiraVendedor || "").trim() || mensagemEmpresaBloqueadaCarteira(empresaBloqueada);
+        definirBloqueioCarteiraEmpresaPrincipal(empresaBloqueada, mensagemBloqueio);
+        mostrarAvisoEmpresaBloqueadaCarteira(empresaBloqueada, mensagemBloqueio, { exibirPopup: false });
+        return;
+      }
+      definirBloqueioCarteiraEmpresaPrincipal(null);
+    }
 
     if (!cardAbertoId || !safeStr(versaoConcorrenciaCardAberto)) {
       mostrarMensagemCard("A versão atual do card não está carregada. O detalhe abriu para visualização, mas o backend não devolveu a versão de concorrência necessária para salvar.");
@@ -15658,6 +16031,21 @@ async function moverCard(idCard, idFasePara, posicao) {
       console.warn("kanban socket erro", payload || {});
       const msg = payload?.msg || payload?.erro;
       if (msg) mostrarMensagemBoard(msg);
+    });
+
+    socketKanban.on("card_edicao_descartada", async (payload = {}) => {
+      const idCard = idNum(payload.id_card || 0);
+      if (!idCard) {
+        await carregar();
+        return;
+      }
+
+      try {
+        await sincronizarCardPorDetalhe(idCard, true);
+      } catch (erro) {
+        console.warn("Falha ao sincronizar card após descarte de edição. Vou recarregar o quadro.", erro);
+        await carregar();
+      }
     });
 
     socketKanban.on("card_atualizado", async (payload = {}) => {

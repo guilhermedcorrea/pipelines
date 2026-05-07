@@ -95,6 +95,9 @@ TABELA_CARD_NOTA = "[Kanban].[Silver].[FatoKanbanCardNota]"
 TABELA_CARD_LOG = "[Kanban].[Silver].[FatoKanbanCardLog]"
 TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
 TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
+TABELA_CARTEIRA_VENDEDOR = "[Integracao].[Silver].[FatoCarteiraVendedor]"
+TABELA_CARTEIRA_VENDEDOR_EMPRESAS = "[Integracao].[Silver].[FatoCarteiraVendedorEmpresas]"
+TABELA_VENDEDORES = "[Integracao].[dbo].[Vendedores]"
 TABELA_TIPO_CLIENTE_DESCONTO = "[Integracao].[Silver].[DimTipoCliente]"
 TABELA_ORIGEM_ATENDIMENTO = "[Integracao].[Silver].[DimOrigemAtendimento]"
 TABELA_TIPO_DOCUMENTO = "[Integracao].[Silver].[DimTipoDocumento]"
@@ -239,13 +242,133 @@ def _bloquear_gestao_kanban_para_vendedor_json():
     return None
 
 
+def _usuario_eh_admin_kanban() -> bool:
+    """Identifica Admin real, mas nunca deixa perfil Vendedor furar a regra de carteira.
+
+    Regra crítica do bloqueio de carteira:
+    - Se IDDimPerfilUsuario = 3 ou nome do perfil = Vendedor, NÃO é tratado como Admin,
+      mesmo que tenha alguma permissão extra por engano.
+    - Admin real continua sendo IDDimPerfilUsuario = 1 ou perfil administrativo.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    # Vendedor nunca pode usar bypass de Admin na regra de carteira.
+    # Isso evita o caso de um vendedor ter ADMIN_TUDO/permissão extra e passar pelo bloqueio.
+    if _usuario_eh_perfil_vendedor_kanban():
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 1:
+            return True
+    except Exception:
+        pass
+
+    perfil = getattr(current_user, "perfil", None)
+    nomes_perfil = [
+        getattr(current_user, "NomePerfil", None),
+        getattr(current_user, "Perfil", None),
+        getattr(current_user, "DescricaoPerfil", None),
+        getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+        getattr(perfil, "Descricao", None) if perfil is not None else None,
+    ]
+
+    if any(
+        _normalizar_acl_kanban(nome) in {
+            "admin",
+            "administrador",
+            "administrador geral",
+            "super admin",
+            "superadmin",
+        }
+        for nome in nomes_perfil
+    ):
+        return True
+
+    # Permissão ADMIN_TUDO só vale depois de garantir que não é perfil Vendedor.
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        if metodo and bool(metodo("ADMIN_TUDO")):
+            return True
+    except Exception:
+        pass
+
+    for atributo in (
+        "BitAdmin",
+        "IsAdmin",
+        "EhAdmin",
+        "Admin",
+        "Administrador",
+        "is_admin",
+        "eh_admin",
+    ):
+        if _valor_booleano_verdadeiro(getattr(current_user, atributo, None)):
+            return True
+
+    return False
+
+
+
+
+def _usuario_eh_admin_real_carteira_kanban() -> bool:
+    """Admin real para a regra de carteira.
+
+    Eu separo esta regra da permissão geral do Kanban.
+    Para carteira comercial, só usuário com perfil Admin real pode furar o bloqueio.
+    Perfil Vendedor nunca é tratado como Admin aqui.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 1:
+            return True
+    except Exception:
+        pass
+
+    perfil = getattr(current_user, "perfil", None)
+    nomes_perfil = [
+        getattr(current_user, "NomePerfil", None),
+        getattr(current_user, "Perfil", None),
+        getattr(current_user, "DescricaoPerfil", None),
+        getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+        getattr(perfil, "Descricao", None) if perfil is not None else None,
+    ]
+
+    return any(
+        _normalizar_acl_kanban(nome) in {
+            "admin",
+            "administrador",
+            "administrador geral",
+            "super admin",
+            "superadmin",
+        }
+        for nome in nomes_perfil
+    )
+
+
+def _usuario_tem_bloqueio_carteira_kanban() -> bool:
+    """Diz se o usuário deve respeitar a carteira comercial.
+
+    Regra operacional pedida:
+    - Admin real: pode selecionar qualquer empresa.
+    - Demais usuários, inclusive Vendedor: precisam respeitar FatoCarteiraVendedorEmpresas.
+    """
+    return not _usuario_eh_admin_real_carteira_kanban()
+
 def _obter_vendedor_logado_kanban(id_empresa_proprietaria: int | None = None) -> dict[str, Any] | None:
-    """Resolve o vendedor vinculado ao usuário logado pela tabela Integracao.dbo.Vendedores."""
+    """Resolve o vendedor do usuário logado pela regra correta.
+
+    Regra usada:
+    DimUsuarios.IDDimUsuarios -> Vendedores.IDDimUsuarios -> Vendedores.IDVendedor.
+
+    Importante:
+    - NÃO filtra por IDEmpresaProprietaria.
+    - O parâmetro id_empresa_proprietaria fica só para compatibilidade com chamadas antigas.
+    """
     id_usuario = _id_usuario()
     if not id_usuario:
         return None
-
-    id_empresa = int(id_empresa_proprietaria or _id_empresa_usuario() or 0)
 
     sql = text("""
         SELECT TOP (1)
@@ -255,22 +378,13 @@ def _obter_vendedor_logado_kanban(id_empresa_proprietaria: int | None = None) ->
             v.IDDimUsuarios
         FROM [Integracao].[dbo].[Vendedores] v
         WHERE v.IDDimUsuarios = :id_usuario
-          AND COALESCE(v.BitAtivo, 1) = 1
-          AND (
-                :id_empresa = 0
-                OR COALESCE(v.IDEmpresaProprietaria, 0) = :id_empresa
-              )
-        ORDER BY
-            CASE WHEN COALESCE(v.IDEmpresaProprietaria, 0) = :id_empresa THEN 0 ELSE 1 END,
-            v.IDVendedor ASC;
+          AND ISNULL(v.BitAtivo, 1) = 1
+        ORDER BY v.IDVendedor ASC;
     """)
 
     row = db.session.execute(
         sql,
-        {
-            "id_usuario": int(id_usuario),
-            "id_empresa": int(id_empresa),
-        },
+        {"id_usuario": int(id_usuario)},
     ).mappings().first()
 
     return dict(row) if row else None
@@ -292,6 +406,328 @@ def _resolver_escopo_vendedor_kanban(id_empresa_proprietaria: int | None = None)
             or str(getattr(current_user, "NomeUsuario", "") or "").strip()
         ),
     }
+
+
+
+def _obter_status_carteira_empresa_para_vendedor(id_empresa: int | None) -> dict[str, Any]:
+    """Valida carteira do vendedor usando exatamente a regra operacional.
+
+    Regra forte:
+    1. Usuário logado vem de Integracao.Silver.DimUsuarios.IDDimUsuarios.
+    2. Vendedor logado vem de Integracao.dbo.Vendedores.IDDimUsuarios.
+    3. Empresa da carteira vem de Integracao.Silver.FatoCarteiraVendedorEmpresas.IDEmpresa.
+    4. Carteira da empresa vem de FatoCarteiraVendedorEmpresas.IDFatoCarteiraVendedor.
+    5. Dono da carteira vem de FatoCarteiraVendedor.IDVendedor.
+    6. A comparação é FatoCarteiraVendedor.IDVendedor versus Vendedores.IDVendedor do usuário logado.
+    7. NÃO usa IDEmpresaProprietaria para decidir bloqueio.
+    8. Só Admin real passa direto: IDDimUsuarios = 1 ou IDDimPerfilUsuario = 1.
+    """
+    id_empresa_int = _int_ou_none(id_empresa)
+    id_usuario_logado = int(_id_usuario() or 0)
+
+    retorno_base = {
+        "ok": True,
+        "permitida": True,
+        "bloqueada": False,
+        "tem_carteira": False,
+        "id_empresa": id_empresa_int,
+        "id_usuario_logado": id_usuario_logado or None,
+        "id_dim_perfil_usuario": None,
+        "nome_usuario": None,
+        "id_vendedor_logado": None,
+        "nome_vendedor_logado": None,
+        "id_vendedor_carteira": None,
+        "id_fato_carteira_vendedor_empresas": None,
+        "id_fato_carteira_vendedor": None,
+        "nome_vendedor_carteira": None,
+        "nome_empresa": None,
+        "cnpj_empresa": None,
+        "msg": None,
+    }
+
+    if not id_empresa_int:
+        return retorno_base
+
+    if not id_usuario_logado:
+        retorno_base.update({
+            "ok": False,
+            "permitida": False,
+            "bloqueada": True,
+            "msg": "Não foi possível identificar o usuário logado para validar a carteira comercial. O card não foi salvo.",
+        })
+        return retorno_base
+
+    sql = text(f"""
+        ;WITH UsuarioLogado AS (
+            SELECT TOP (1)
+                u.IDDimUsuarios,
+                u.IDDimPerfilUsuario,
+                u.NomeUsuario,
+                u.Email
+            FROM [Integracao].[Silver].[DimUsuarios] u
+            WHERE u.IDDimUsuarios = :id_usuario_logado
+        ),
+        VendedorLogado AS (
+            SELECT TOP (1)
+                v.IDVendedor,
+                v.NomeVendedor,
+                v.IDDimUsuarios
+            FROM {TABELA_VENDEDORES} v
+            WHERE v.IDDimUsuarios = :id_usuario_logado
+              AND ISNULL(v.BitAtivo, 1) = 1
+            ORDER BY v.IDVendedor ASC
+        ),
+        EmpresaSelecionada AS (
+            SELECT TOP (1)
+                e.IDEmpresa,
+                e.RazaoSocial,
+                e.NomeFantasia,
+                e.CNPJ
+            FROM {TABELA_EMPRESAS} e
+            WHERE e.IDEmpresa = :id_empresa
+        ),
+        CarteiraDaEmpresa AS (
+            SELECT TOP (1)
+                cve.IDFatoCarteiraVendedorEmpresas,
+                cve.IDFatoCarteiraVendedor,
+                cve.IDEmpresa,
+                cv.IDVendedor AS IDVendedorCarteira,
+                v.NomeVendedor AS NomeVendedorCarteira,
+                COALESCE(cve.IDUsuarioCoordenador, cv.IDUsuarioCoordenador) AS IDUsuarioCoordenador,
+                COALESCE(cve.DataAtualizacao, cv.DataAtualizacao) AS DataAtualizacao
+            FROM {TABELA_CARTEIRA_VENDEDOR_EMPRESAS} cve
+            LEFT JOIN {TABELA_CARTEIRA_VENDEDOR} cv
+                ON cv.IDFatoCarteiraVendedor = cve.IDFatoCarteiraVendedor
+            LEFT JOIN {TABELA_VENDEDORES} v
+                ON v.IDVendedor = cv.IDVendedor
+            WHERE cve.IDEmpresa = :id_empresa
+            ORDER BY
+                COALESCE(cve.DataAtualizacao, cv.DataAtualizacao) DESC,
+                cve.IDFatoCarteiraVendedorEmpresas DESC
+        )
+        SELECT
+            u.IDDimUsuarios AS IDDimUsuariosLogado,
+            u.NomeUsuario,
+            u.IDDimPerfilUsuario,
+            vl.IDVendedor AS IDVendedorLogado,
+            vl.NomeVendedor AS NomeVendedorLogado,
+            e.IDEmpresa,
+            e.RazaoSocial,
+            e.NomeFantasia,
+            e.CNPJ,
+            ce.IDFatoCarteiraVendedorEmpresas,
+            ce.IDFatoCarteiraVendedor,
+            ce.IDVendedorCarteira,
+            ce.NomeVendedorCarteira,
+            CASE
+                WHEN u.IDDimUsuarios = 1 OR u.IDDimPerfilUsuario = 1
+                    THEN 'PERMITE_ADMIN_REAL'
+                WHEN ce.IDFatoCarteiraVendedorEmpresas IS NULL
+                    THEN 'PERMITE_SEM_CARTEIRA'
+                WHEN vl.IDVendedor IS NOT NULL AND ce.IDVendedorCarteira = vl.IDVendedor
+                    THEN 'PERMITE_CARTEIRA_PROPRIA'
+                ELSE 'BLOQUEIA_OUTRO_VENDEDOR'
+            END AS ResultadoCarteira
+        FROM UsuarioLogado u
+        LEFT JOIN VendedorLogado vl ON 1 = 1
+        LEFT JOIN EmpresaSelecionada e ON 1 = 1
+        LEFT JOIN CarteiraDaEmpresa ce ON 1 = 1;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_usuario_logado": int(id_usuario_logado),
+            "id_empresa": int(id_empresa_int),
+        },
+    ).mappings().first()
+
+    if not row:
+        retorno_base.update({
+            "ok": False,
+            "permitida": False,
+            "bloqueada": True,
+            "msg": "Não foi possível validar usuário/empresa na regra de carteira comercial. O card não foi salvo.",
+        })
+        return retorno_base
+
+    resultado = str(row.get("ResultadoCarteira") or "").strip().upper()
+    id_vendedor_logado = _int_ou_none(row.get("IDVendedorLogado"))
+    id_vendedor_carteira = _int_ou_none(row.get("IDVendedorCarteira"))
+    nome_vendedor_carteira = str(row.get("NomeVendedorCarteira") or "Vendedor responsável").strip() or "Vendedor responsável"
+    nome_empresa = (
+        str(row.get("RazaoSocial") or "").strip()
+        or str(row.get("NomeFantasia") or "").strip()
+        or "Empresa selecionada"
+    )
+
+    bloqueada = resultado == "BLOQUEIA_OUTRO_VENDEDOR"
+    mensagem = None
+    if bloqueada:
+        mensagem = f'A Empresa {nome_empresa} pertence à Carteira {nome_vendedor_carteira}. Favor verificar com o Coordenador.'
+
+    return {
+        "ok": not bloqueada,
+        "permitida": not bloqueada,
+        "bloqueada": bloqueada,
+        "tem_carteira": row.get("IDFatoCarteiraVendedorEmpresas") is not None,
+        "id_empresa": id_empresa_int,
+        "id_usuario_logado": _int_ou_none(row.get("IDDimUsuariosLogado")),
+        "id_dim_perfil_usuario": _int_ou_none(row.get("IDDimPerfilUsuario")),
+        "nome_usuario": str(row.get("NomeUsuario") or "").strip() or None,
+        "id_vendedor_logado": id_vendedor_logado,
+        "nome_vendedor_logado": str(row.get("NomeVendedorLogado") or "").strip() or None,
+        "id_vendedor_carteira": id_vendedor_carteira,
+        "id_fato_carteira_vendedor_empresas": _int_ou_none(row.get("IDFatoCarteiraVendedorEmpresas")),
+        "id_fato_carteira_vendedor": _int_ou_none(row.get("IDFatoCarteiraVendedor")),
+        "nome_vendedor_carteira": nome_vendedor_carteira if row.get("IDFatoCarteiraVendedorEmpresas") is not None else None,
+        "nome_empresa": nome_empresa,
+        "cnpj_empresa": str(row.get("CNPJ") or "").strip() or None,
+        "resultado_carteira": resultado,
+        "msg": mensagem,
+    }
+
+
+def _resposta_bloqueio_empresa_carteira_vendedor(id_empresa: int | None):
+    status = _obter_status_carteira_empresa_para_vendedor(id_empresa)
+    if status.get("bloqueada"):
+        mensagem = status.get("msg") or "Empresa bloqueada por carteira comercial. Favor verificar com o Coordenador."
+        return jsonify({
+            "ok": False,
+            "msg": mensagem,
+            "erro": mensagem,
+            "empresa_carteira": status,
+        }), 403
+    return None
+
+
+def _resposta_bloqueio_empresas_carteira_vendedor(*ids_empresa: int | None):
+    """Bloqueia qualquer empresa do payload que pertença à carteira de outro vendedor."""
+    ids_vistos: set[int] = set()
+
+    for id_empresa in ids_empresa:
+        id_empresa_int = _int_ou_none(id_empresa)
+        if not id_empresa_int or id_empresa_int in ids_vistos:
+            continue
+
+        ids_vistos.add(id_empresa_int)
+        bloqueio = _resposta_bloqueio_empresa_carteira_vendedor(id_empresa_int)
+        if bloqueio is not None:
+            return bloqueio
+
+    return None
+
+
+def _select_status_carteira_empresa_kanban_sql() -> str:
+    return """
+            cart.IDFatoCarteiraVendedorEmpresas AS IDFatoCarteiraVendedorEmpresas,
+            cart.IDFatoCarteiraVendedor AS IDFatoCarteiraVendedorEmpresa,
+            cart.IDVendedorCarteira AS IDVendedorCarteira,
+            cart.NomeVendedorCarteira AS NomeVendedorCarteira,
+            CAST(CASE WHEN cart.IDFatoCarteiraVendedorEmpresas IS NULL THEN 0 ELSE 1 END AS bit) AS EmpresaTemCarteira,
+            CAST(CASE
+                    WHEN :usuario_sem_bloqueio_carteira = 1 THEN 0
+                    WHEN cart.IDFatoCarteiraVendedorEmpresas IS NOT NULL
+                     AND (
+                            :id_vendedor_logado = 0
+                            OR cart.IDVendedorCarteira IS NULL
+                            OR cart.IDVendedorCarteira <> :id_vendedor_logado
+                         )
+                    THEN 1 ELSE 0
+                 END AS bit) AS EmpresaBloqueadaCarteiraVendedor,
+            CAST(CASE
+                    WHEN :usuario_sem_bloqueio_carteira = 1 THEN 1
+                    WHEN cart.IDFatoCarteiraVendedorEmpresas IS NULL THEN 1
+                    WHEN :id_vendedor_logado > 0 AND cart.IDVendedorCarteira = :id_vendedor_logado THEN 1
+                    ELSE 0
+                 END AS bit) AS EmpresaPermitidaCarteiraVendedor,
+            CASE
+                WHEN :usuario_sem_bloqueio_carteira = 1 THEN NULL
+                WHEN cart.IDFatoCarteiraVendedorEmpresas IS NOT NULL
+                 AND (
+                        :id_vendedor_logado = 0
+                        OR cart.IDVendedorCarteira IS NULL
+                        OR cart.IDVendedorCarteira <> :id_vendedor_logado
+                     )
+                THEN CONCAT(
+                    'A Empresa ',
+                    ISNULL(NULLIF(LTRIM(RTRIM(e.RazaoSocial)), ''), 'Empresa selecionada'),
+                    ' pertence à Carteira ',
+                    ISNULL(NULLIF(LTRIM(RTRIM(cart.NomeVendedorCarteira)), ''), 'Vendedor responsável'),
+                    '. Favor verificar com o Coordenador.'
+                )
+                ELSE NULL
+            END AS MensagemBloqueioCarteiraVendedor
+    """
+
+
+def _outer_apply_status_carteira_empresa_kanban_sql(alias_empresa: str = "e") -> str:
+    return f"""
+        OUTER APPLY (
+            SELECT TOP (1)
+                cve.IDFatoCarteiraVendedorEmpresas,
+                cve.IDFatoCarteiraVendedor,
+                cv.IDVendedor AS IDVendedorCarteira,
+                COALESCE(v.NomeVendedor, 'Vendedor responsável') AS NomeVendedorCarteira
+            FROM {TABELA_CARTEIRA_VENDEDOR_EMPRESAS} cve
+            LEFT JOIN {TABELA_CARTEIRA_VENDEDOR} cv
+                ON cv.IDFatoCarteiraVendedor = cve.IDFatoCarteiraVendedor
+            LEFT JOIN {TABELA_VENDEDORES} v
+                ON v.IDVendedor = cv.IDVendedor
+            WHERE cve.IDEmpresa = {alias_empresa}.IDEmpresa
+            ORDER BY
+                COALESCE(cve.DataAtualizacao, cv.DataAtualizacao) DESC,
+                cve.IDFatoCarteiraVendedorEmpresas DESC
+        ) cart
+    """
+
+
+def _params_status_carteira_empresa_kanban() -> dict[str, int]:
+    vendedor = _obter_vendedor_logado_kanban() or {}
+    return {
+        "usuario_sem_bloqueio_carteira": 0 if _usuario_tem_bloqueio_carteira_kanban() else 1,
+        "usuario_eh_admin": 1 if _usuario_eh_admin_real_carteira_kanban() else 0,
+        "usuario_eh_vendedor": 1 if _usuario_eh_perfil_vendedor_kanban() else 0,
+        "id_vendedor_logado": int(vendedor.get("IDVendedor") or 0),
+        "id_usuario_logado": int(_id_usuario() or 0),
+    }
+
+
+def _aplicar_status_carteira_empresa_no_dict(empresa: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(empresa, dict):
+        return empresa
+
+    id_empresa = _int_ou_none(
+        empresa.get("IDEmpresa")
+        or empresa.get("id_empresa")
+        or empresa.get("ID")
+    )
+
+    if not id_empresa:
+        empresa.update({
+            "EmpresaTemCarteira": False,
+            "EmpresaBloqueadaCarteiraVendedor": False,
+            "EmpresaPermitidaCarteiraVendedor": True,
+            "IDVendedorCarteira": None,
+            "NomeVendedorCarteira": None,
+            "NomeEmpresaCarteira": None,
+            "MensagemBloqueioCarteiraVendedor": None,
+            "IDFatoCarteiraVendedorEmpresa": None,
+        })
+        return empresa
+
+    status = _obter_status_carteira_empresa_para_vendedor(id_empresa)
+    empresa.update({
+        "EmpresaTemCarteira": bool(status.get("tem_carteira")),
+        "EmpresaBloqueadaCarteiraVendedor": bool(status.get("bloqueada")),
+        "EmpresaPermitidaCarteiraVendedor": bool(status.get("permitida")),
+        "IDVendedorCarteira": status.get("id_vendedor_carteira"),
+        "NomeVendedorCarteira": status.get("nome_vendedor_carteira"),
+        "NomeEmpresaCarteira": status.get("nome_empresa"),
+        "MensagemBloqueioCarteiraVendedor": status.get("msg"),
+        "IDFatoCarteiraVendedorEmpresa": status.get("id_fato_carteira_vendedor"),
+    })
+    return empresa
 
 
 def _sql_filtro_escopo_vendedor_kanban(alias_card: str = "c", escopo: dict[str, Any] | None = None) -> str:
@@ -9479,6 +9915,62 @@ def socket_sair_kanban(payload: Any | None = None):
     )
 
 
+@socketio.on("card_edicao_descartada", namespace=NAMESPACE_SOCKET_KANBAN)
+def socket_card_edicao_descartada(payload: Any | None = None):
+    """Atualiza o quadro quando o usuário fecha o modal sem salvar.
+
+    Uso principal:
+    - o vendedor tentou selecionar uma empresa bloqueada por carteira;
+    - o backend não salvou;
+    - ao fechar o card, a tela precisa voltar ao estado salvo no banco;
+    - os clientes conectados recebem o aviso e sincronizam o card ao vivo.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        emit("socket_erro", {"ok": False, "msg": "Usuário não autenticado."})
+        disconnect()
+        return
+
+    dados = payload if isinstance(payload, dict) else {}
+
+    try:
+        id_kanban = int(dados.get("id_kanban") or 0)
+    except Exception:
+        id_kanban = 0
+
+    try:
+        id_card = int(dados.get("id_card") or 0)
+    except Exception:
+        id_card = 0
+
+    if not id_kanban or not id_card:
+        emit("socket_erro", {"ok": False, "msg": "id_kanban ou id_card inválido para atualizar o card descartado."})
+        return
+
+    try:
+        _obter_kanban_autorizado(id_kanban)
+    except Exception:
+        emit(
+            "socket_erro",
+            {
+                "ok": False,
+                "id_kanban": id_kanban,
+                "id_card": id_card,
+                "msg": "Você não tem permissão para atualizar este kanban em tempo real.",
+            },
+        )
+        return
+
+    _emitir_evento_kanban(
+        id_kanban,
+        "card_edicao_descartada",
+        {
+            "id_card": id_card,
+            "id_usuario": _id_usuario(),
+        },
+    )
+
+
+
 def _obter_painel_por_id(id_painel: int) -> dict[str, Any] | None:
     sql = text("""
         SELECT TOP 1
@@ -14239,11 +14731,15 @@ def kanban_view(id_kanban: int):
         kanban = _obter_kanban_autorizado(id_kanban)
         id_emp = int(kanban.get("IDEmpresaProprietaria") or _id_empresa_usuario_or_403() or 0)
         escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+        usuario_eh_admin_kanban = _usuario_eh_admin_real_carteira_kanban()
+        usuario_tem_bloqueio_carteira_kanban = _usuario_tem_bloqueio_carteira_kanban()
 
         return render_template(
             "kanban/kanban_view.html",
             kanban=kanban,
             usuario_eh_vendedor_kanban=bool(escopo_vendedor.get("ativo")),
+            usuario_eh_admin_kanban=bool(usuario_eh_admin_kanban),
+            usuario_tem_bloqueio_carteira_kanban=bool(usuario_tem_bloqueio_carteira_kanban),
             id_usuario_logado_kanban=int(escopo_vendedor.get("id_usuario") or _id_usuario() or 0),
             id_vendedor_logado_kanban=int(escopo_vendedor.get("id_vendedor") or 0) or None,
         )
@@ -15569,10 +16065,15 @@ def api_card_orcamento(id_card: int):
 def api_empresas_lista():
     _assert_login()
 
-    chave = _chave_cache_json("kanban:api:empresas:lista:global")
-    em_cache = _cache_json_get(chave)
-    if em_cache is not None:
-        return jsonify(em_cache)
+    params_carteira = _params_status_carteira_empresa_kanban()
+    usar_cache = not _usuario_tem_bloqueio_carteira_kanban()
+    escopo_cache = _chave_cache_escopo_vendedor_kanban()
+    chave = _chave_cache_json("kanban:api:empresas:lista", escopo_cache)
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
 
     sql = text(f"""
         SELECT TOP 500
@@ -15586,18 +16087,21 @@ def api_empresas_lista():
             e.BitClienteDireto,
             e.IDDimOrigemAtendimento,
             cn.Classe,
-            cn.Setor
+            cn.Setor,
+{_select_status_carteira_empresa_kanban_sql()}
         FROM {TABELA_EMPRESAS} e
         LEFT JOIN {TABELA_CNAES} cn
           ON cn.cnaepadrao = e.CNAE
+{_outer_apply_status_carteira_empresa_kanban_sql("e")}
         WHERE e.RazaoSocial IS NOT NULL
           AND e.RazaoSocial <> ''
         ORDER BY e.RazaoSocial ASC;
     """)
 
-    rows = db.session.execute(sql).mappings().all()
+    rows = db.session.execute(sql, params_carteira).mappings().all()
     payload = {"ok": True, "empresas": _rows_para_dicts(rows)}
-    _cache_json_set(chave, payload, TIMEOUT_CACHE_LONGO)
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_LONGO)
     return jsonify(payload)
 
 
@@ -15611,7 +16115,10 @@ def api_empresas_buscar():
     _assert_login()
 
     q = (request.args.get("q") or "").strip()
-    q_digits = "".join([c for c in q if c.isdigit()])
+    if len(q) > 120:
+        q = q[:120].strip()
+    q_digits = "".join([c for c in q if c.isdigit()])[:30]
+    params_carteira = _params_status_carteira_empresa_kanban()
 
     if not q and not q_digits:
         sql = text(f"""
@@ -15626,25 +16133,31 @@ def api_empresas_buscar():
                 e.BitClienteDireto,
                 e.IDDimOrigemAtendimento,
                 c.Classe,
-                c.Setor
+                c.Setor,
+{_select_status_carteira_empresa_kanban_sql()}
             FROM {TABELA_EMPRESAS} e
             LEFT JOIN {TABELA_CNAES} c
               ON c.cnaepadrao = e.CNAE
+{_outer_apply_status_carteira_empresa_kanban_sql("e")}
             WHERE e.RazaoSocial IS NOT NULL
               AND e.RazaoSocial <> ''
             ORDER BY e.RazaoSocial ASC;
         """)
 
-        empresas = db.session.execute(sql).mappings().all()
+        empresas = db.session.execute(sql, params_carteira).mappings().all()
         return jsonify({"ok": True, "empresas": _rows_para_dicts(empresas)})
 
     if len(q) < 2 and len(q_digits) < 4:
         return jsonify({"ok": True, "empresas": []})
 
-    chave = _chave_cache_json("kanban:api:empresas:buscar:global", q.lower(), q_digits)
-    em_cache = _cache_json_get(chave)
-    if em_cache is not None:
-        return jsonify(em_cache)
+    usar_cache = not _usuario_tem_bloqueio_carteira_kanban()
+    escopo_cache = _chave_cache_escopo_vendedor_kanban()
+    chave = _chave_cache_json("kanban:api:empresas:buscar", escopo_cache, q.lower(), q_digits)
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
 
     sql = text(f"""
         SELECT TOP 80
@@ -15658,10 +16171,12 @@ def api_empresas_buscar():
             e.BitClienteDireto,
             e.IDDimOrigemAtendimento,
             c.Classe,
-            c.Setor
+            c.Setor,
+{_select_status_carteira_empresa_kanban_sql()}
         FROM {TABELA_EMPRESAS} e
         LEFT JOIN {TABELA_CNAES} c
           ON c.cnaepadrao = e.CNAE
+{_outer_apply_status_carteira_empresa_kanban_sql("e")}
         WHERE e.RazaoSocial IS NOT NULL
           AND LTRIM(RTRIM(e.RazaoSocial)) <> ''
           AND (
@@ -15684,23 +16199,45 @@ def api_empresas_buscar():
             e.RazaoSocial ASC;
     """)
 
-    empresas = db.session.execute(
-        sql,
-        {
-            "q_like": f"%{q}%",
-            "q_like_inicio": f"{q}%",
-            "q_digits": q_digits,
-            "q_digits_like": f"%{q_digits}%",
-            "q_digits_inicio": f"{q_digits}%",
-        },
-    ).mappings().all()
+    params = {
+        **params_carteira,
+        "q_like": f"%{q}%",
+        "q_like_inicio": f"{q}%",
+        "q_digits": q_digits,
+        "q_digits_like": f"%{q_digits}%",
+        "q_digits_inicio": f"{q_digits}%",
+    }
+
+    empresas = db.session.execute(sql, params).mappings().all()
 
     payload = {"ok": True, "empresas": _rows_para_dicts(empresas)}
-    _cache_json_set(chave, payload, TIMEOUT_CACHE_MEDIO)
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_MEDIO)
     return jsonify(payload)
 
 
 
+
+
+@kanban_bp.route("/api/empresas/<int:id_empresa>/status-carteira", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_empresa_status_carteira_vendedor(id_empresa: int):
+    """Valida em tempo real se o vendedor pode vincular a empresa ao card."""
+    _assert_login()
+
+    status = _obter_status_carteira_empresa_para_vendedor(id_empresa)
+    bloqueada = bool(status.get("bloqueada"))
+
+    payload = {
+        "ok": not bloqueada,
+        "permitida": bool(status.get("permitida")),
+        "bloqueada": bloqueada,
+        "msg": status.get("msg"),
+        "empresa_carteira": status,
+    }
+
+    return jsonify(payload), (403 if bloqueada else 200)
 
 
 @kanban_bp.route("/api/cnaes/buscar", methods=["GET"])
@@ -26269,6 +26806,8 @@ def api_empresa_cadastro_por_id(id_empresa: int):
     if not empresa:
         return jsonify({"ok": False, "erro": "Empresa não encontrada."}), 404
 
+    _aplicar_status_carteira_empresa_no_dict(empresa)
+
     return jsonify(
         {
             "ok": True,
@@ -26301,6 +26840,7 @@ def api_empresa_cadastro_buscar_por_cnpj():
 
         empresa_banco = _buscar_empresa_completa_por_cnpj_normalizado(cnpj_normalizado)
         if empresa_banco:
+            _aplicar_status_carteira_empresa_no_dict(empresa_banco)
             return jsonify(
                 {
                     "ok": True,
@@ -26313,6 +26853,7 @@ def api_empresa_cadastro_buscar_por_cnpj():
 
         empresa_api = _buscar_empresa_na_api_minha_receita(cnpj_normalizado)
         if empresa_api:
+            _aplicar_status_carteira_empresa_no_dict(empresa_api)
             return jsonify(
                 {
                     "ok": True,
@@ -26575,6 +27116,8 @@ def api_empresa_cadastro_salvar():
     empresa_salva = _buscar_empresa_completa_por_id(id_empresa_alvo)
     if not empresa_salva:
         return jsonify({"ok": False, "erro": "Empresa salva, mas não foi possível reler o cadastro."}), 500
+
+    _aplicar_status_carteira_empresa_no_dict(empresa_salva)
 
     return jsonify(
         {
@@ -27374,6 +27917,10 @@ def api_card_criar(id_kanban: int):
             if not empresa_existe:
                 return jsonify({"ok": False, "msg": "Empresa não encontrada"}), 400
 
+            bloqueio_empresa_carteira = _resposta_bloqueio_empresa_carteira_vendedor(id_empresa_relacionada_int)
+            if bloqueio_empresa_carteira is not None:
+                return bloqueio_empresa_carteira
+
         etapa = "resolver_contexto_tipo_contrato"
         contexto_tipo_contrato = _resolver_contexto_tipo_contrato_payload(
             id_empresa=id_empresa_relacionada_int,
@@ -27425,6 +27972,17 @@ def api_card_criar(id_kanban: int):
             id_empresa_intermediario=id_empresa_intermediario,
             id_empresa_cliente_direto=id_empresa_cliente_direto,
         )
+
+        bloqueio_empresas_resolvidas = _resposta_bloqueio_empresas_carteira_vendedor(
+            empresas_relacionadas_card.get("id_empresa_card"),
+            empresas_relacionadas_card.get("id_empresa_principal"),
+            empresas_relacionadas_card.get("id_empresa_agencia_card"),
+            empresas_relacionadas_card.get("id_empresa_bureau_card"),
+            empresas_relacionadas_card.get("id_empresa_intermediario_card"),
+            empresas_relacionadas_card.get("id_empresa_cliente_direto"),
+        )
+        if bloqueio_empresas_resolvidas is not None:
+            return bloqueio_empresas_resolvidas
 
         if int(id_fase or 0) == 4:
             _validar_preenchimento_empresas_fase_4(
@@ -28177,6 +28735,11 @@ def api_card_atualizar(id_card: int):
 
         id_empresa_principal_final = id_empresa_relacionada_int or id_empresa_atual_card
 
+        if id_empresa_principal_final not in (None, "", 0):
+            bloqueio_empresa_carteira = _resposta_bloqueio_empresa_carteira_vendedor(id_empresa_principal_final)
+            if bloqueio_empresa_carteira is not None:
+                return bloqueio_empresa_carteira
+
         empresas_relacionadas_card = _resolver_ids_empresas_card_por_tipo_cliente(
             id_tipo_cliente=id_tipo_cliente_final_card,
             id_empresa_principal=id_empresa_principal_final,
@@ -28185,6 +28748,17 @@ def api_card_atualizar(id_card: int):
             id_empresa_intermediario=id_empresa_intermediario,
             id_empresa_cliente_direto=id_empresa_cliente_direto,
         )
+
+        bloqueio_empresas_resolvidas = _resposta_bloqueio_empresas_carteira_vendedor(
+            empresas_relacionadas_card.get("id_empresa_card"),
+            empresas_relacionadas_card.get("id_empresa_principal"),
+            empresas_relacionadas_card.get("id_empresa_agencia_card"),
+            empresas_relacionadas_card.get("id_empresa_bureau_card"),
+            empresas_relacionadas_card.get("id_empresa_intermediario_card"),
+            empresas_relacionadas_card.get("id_empresa_cliente_direto"),
+        )
+        if bloqueio_empresas_resolvidas is not None:
+            return bloqueio_empresas_resolvidas
 
         if int(id_fase_atual or 0) == 4:
             _validar_preenchimento_empresas_fase_4(
