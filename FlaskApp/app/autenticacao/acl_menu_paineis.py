@@ -11,6 +11,7 @@ ITENS_MENU_PAINEIS_USUARIO_LEGADO = {
     "empresas",
     "lista_ocupacao",
     "contratos",
+    "carteiras",
 }
 
 
@@ -200,6 +201,9 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
         return False
 
     chave = _normalizar_texto_acl(item_menu)
+
+    if usuario_eh_perfil_vendedor() and chave in {"carteiras", "carteira_propria"}:
+        return True
 
     if usuario_eh_perfil_vendedor() and chave in ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR:
         return False

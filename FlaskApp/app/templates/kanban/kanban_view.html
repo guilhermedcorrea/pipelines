@@ -3245,17 +3245,6 @@
       {% if not usuario_eh_vendedor_kanban %}
         <a class="kb-btn" href="{{ url_for('kanban.kanban_tags_view', id_kanban=kanban.IDDimKanban) }}">Tags</a>
         <button class="kb-btn primary" id="btnNovaFase" type="button">+ Fase</button>
-      {% else %}
-        <button
-          class="kb-btn primary"
-          id="btnNovaFase"
-          type="button"
-          hidden
-          disabled
-          aria-hidden="true"
-          tabindex="-1"
-          style="display:none !important;"
-        ></button>
       {% endif %}
     </div>
   </div>
@@ -3802,6 +3791,7 @@
   </div>
 </div>
 
+{% if not usuario_eh_vendedor_kanban %}
 <div id="modalFase" class="kb-modal">
   <div class="kb-modal-card" style="max-width:560px;">
     <div class="kb-modal-head">
@@ -3837,6 +3827,8 @@
   </div>
 </div>
 
+{% endif %}
+
 <div id="modalRemoverCard" class="kb-modal">
   <div class="kb-modal-card" style="max-width:620px;">
     <div class="kb-modal-head">
@@ -3870,6 +3862,7 @@
   </div>
 </div>
 
+{% if not usuario_eh_vendedor_kanban %}
 <div id="modalInativarFase" class="kb-modal">
   <div class="kb-modal-card" style="max-width:620px;">
     <div class="kb-modal-head">
@@ -3891,6 +3884,8 @@
     </div>
   </div>
 </div>
+
+{% endif %}
 
 <script id="kanban-view-config" type="application/json">
   {{ {

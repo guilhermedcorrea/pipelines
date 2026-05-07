@@ -566,7 +566,9 @@
                   <th>Participação</th>
                   <th>Desempenho</th>
                   <th>Contratos</th>
-                  <th>Mover</th>
+                  {% if not usuario_logado_eh_vendedor %}
+                    <th>Mover</th>
+                  {% endif %}
                 </tr>
               </thead>
               <tbody id="tbodyEmpresasCarteira">
@@ -631,24 +633,26 @@
                         <span class="chip blue">{{ row.ContratosAtivos or 0 }} ativos</span>
                       </td>
 
-                      <td>
-                        <form method="post" action="{{ url_for('Paineis.carteira_mover_empresa', id_fato_carteira_vendedor=carteira.IDFatoCarteiraVendedor) }}" class="form-mover">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                          <input type="hidden" name="id_empresa" value="{{ row.IDEmpresa }}">
-                          <select name="id_fato_carteira_destino" class="kb-select" required>
-                            <option value="">Mover para...</option>
-                            {% for dest in carteiras_destino %}
-                              <option value="{{ dest.IDFatoCarteiraVendedor }}">{{ dest.NomeVendedor }}</option>
-                            {% endfor %}
-                          </select>
-                          <button type="submit" class="btn btn-secondary">Mover</button>
-                        </form>
-                      </td>
+                      {% if not usuario_logado_eh_vendedor %}
+                        <td>
+                          <form method="post" action="{{ url_for('Paineis.carteira_mover_empresa', id_fato_carteira_vendedor=carteira.IDFatoCarteiraVendedor) }}" class="form-mover">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="id_empresa" value="{{ row.IDEmpresa }}">
+                            <select name="id_fato_carteira_destino" class="kb-select" required>
+                              <option value="">Mover para...</option>
+                              {% for dest in carteiras_destino %}
+                                <option value="{{ dest.IDFatoCarteiraVendedor }}">{{ dest.NomeVendedor }}</option>
+                              {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-secondary">Mover</button>
+                          </form>
+                        </td>
+                      {% endif %}
                     </tr>
                   {% endfor %}
                 {% else %}
                   <tr>
-                    <td colspan="7" class="muted" style="text-align:center;">Nenhuma empresa vinculada a esta carteira.</td>
+                    <td colspan="{{ 6 if usuario_logado_eh_vendedor else 7 }}" class="muted" style="text-align:center;">Nenhuma empresa vinculada a esta carteira.</td>
                   </tr>
                 {% endif %}
               </tbody>

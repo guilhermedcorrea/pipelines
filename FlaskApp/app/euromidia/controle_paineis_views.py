@@ -1116,6 +1116,7 @@ def api_faces_do_ponto(codponto: int):
 CAPACIDADE_DIGITAL_FIXA = 16
 
 ID_PERFIL_VENDEDOR_PADRAO = 3
+ID_PERFIL_ADMIN_PADRAO = 1
 
 
 def _usuario_logado_eh_perfil_vendedor() -> bool:
@@ -1145,6 +1146,109 @@ def _usuario_logado_eh_perfil_vendedor() -> bool:
 
     return False
 
+
+
+
+def _id_usuario_logado_carteira() -> int:
+    """Eu retorno o IDDimUsuarios do usuário logado para filtrar carteira com segurança."""
+    try:
+        return int(getattr(current_user, "IDDimUsuarios", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _resolver_id_vendedor_logado_carteira() -> int:
+    """Eu encontro o IDVendedor vinculado ao usuário logado.
+
+    A ligação usada é:
+    - Integracao.Silver.DimUsuarios.IDDimUsuarios
+    - Integracao.dbo.Vendedores.IDDimUsuarios
+
+    Isso permite identificar a carteira própria do perfil Vendedor.
+    """
+    id_usuario = _id_usuario_logado_carteira()
+    if id_usuario <= 0:
+        return 0
+
+    id_empresa = 0
+    try:
+        id_empresa = int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0)
+    except Exception:
+        id_empresa = 0
+
+    sql = text("""
+        SELECT TOP (1)
+            v.IDVendedor
+        FROM [Integracao].[dbo].[Vendedores] v
+        WHERE v.IDDimUsuarios = :id_usuario
+          AND ISNULL(v.BitAtivo, 1) = 1
+          AND (
+                :id_empresa = 0
+                OR ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa
+              )
+        ORDER BY
+            CASE WHEN ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa THEN 0 ELSE 1 END,
+            v.IDVendedor ASC;
+    """)
+
+    try:
+        valor = db.session.execute(
+            sql,
+            {
+                "id_usuario": id_usuario,
+                "id_empresa": id_empresa,
+            },
+        ).scalar()
+        return int(valor or 0)
+    except Exception:
+        return 0
+
+
+def _carteira_eh_do_admin_ou_propria_para_vendedor(carteira_row, id_usuario_logado: int, id_vendedor_logado: int) -> bool:
+    """Eu valido acesso direto à carteira quando o usuário logado é Vendedor.
+
+    Regra aplicada:
+    - permite a carteira do próprio vendedor;
+    - permite a carteira do Admin.
+
+    Para a carteira do Admin eu uso uma regra tolerante:
+    - usuário vinculado ao vendedor com IDDimPerfilUsuario = 1;
+    - ou nome do vendedor/usuário contendo ADMIN ou ADMINISTRADOR.
+    """
+    if not carteira_row:
+        return False
+
+    try:
+        id_vendedor_carteira = int(carteira_row.get("IDVendedor") or 0)
+    except Exception:
+        id_vendedor_carteira = 0
+
+    try:
+        id_usuario_vendedor = int(carteira_row.get("IDDimUsuariosVendedor") or 0)
+    except Exception:
+        id_usuario_vendedor = 0
+
+    if id_vendedor_logado > 0 and id_vendedor_carteira == id_vendedor_logado:
+        return True
+
+    if id_usuario_logado > 0 and id_usuario_vendedor == id_usuario_logado:
+        return True
+
+    try:
+        id_perfil_vendedor_carteira = int(carteira_row.get("IDDimPerfilUsuarioVendedor") or 0)
+    except Exception:
+        id_perfil_vendedor_carteira = 0
+
+    if id_perfil_vendedor_carteira == ID_PERFIL_ADMIN_PADRAO:
+        return True
+
+    nome_vendedor = str(carteira_row.get("NomeVendedor") or "").strip().upper()
+    nome_usuario = str(carteira_row.get("NomeUsuarioVendedor") or "").strip().upper()
+
+    return any(
+        termo in nome_vendedor or termo in nome_usuario
+        for termo in ("ADMIN", "ADMINISTRADOR")
+    )
 
 def _primeiro_ultimo_dia_mes(ano: int, mes: int):
     primeiro = date(ano, mes, 1)
@@ -20487,7 +20591,7 @@ def checkin_publico_autenticar(token_publico: str):
 
 @paineis_bp.get("/carteiras")
 @login_required
-@requer_item_menu_paineis("empresas")
+@requer_item_menu_paineis("carteiras")
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def carteiras_lista():
     q = (request.args.get("q") or "").strip()
@@ -20510,13 +20614,40 @@ def carteiras_lista():
 
     dt_fim_mes_anterior_exclusivo = dt_inicio_mes
 
-    sql_total = text("""
+    usuario_logado_eh_vendedor = _usuario_logado_eh_perfil_vendedor()
+    id_usuario_logado = _id_usuario_logado_carteira()
+    id_vendedor_logado = _resolver_id_vendedor_logado_carteira() if usuario_logado_eh_vendedor else 0
+
+    filtro_visibilidade_carteiras_sql = ""
+    if usuario_logado_eh_vendedor:
+        filtro_visibilidade_carteiras_sql = """
+            AND (
+                   cv.IDVendedor = :id_vendedor_logado
+                OR v.IDDimUsuarios = :id_usuario_logado
+                OR ISNULL(usuario_vendedor.IDDimPerfilUsuario, 0) = :id_perfil_admin_padrao
+                OR UPPER(LTRIM(RTRIM(ISNULL(v.NomeVendedor, '')))) LIKE '%ADMIN%'
+                OR UPPER(LTRIM(RTRIM(ISNULL(usuario_vendedor.NomeUsuario, '')))) LIKE '%ADMIN%'
+            )
+        """
+
+    params_base = {
+        "q": q,
+        "q_like": f"%{q}%",
+        "id_usuario_logado": id_usuario_logado,
+        "id_vendedor_logado": id_vendedor_logado,
+        "id_perfil_admin_padrao": ID_PERFIL_ADMIN_PADRAO,
+    }
+
+    sql_total = text(f"""
         SELECT COUNT(1) AS Total
         FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
         INNER JOIN [Integracao].[dbo].[Vendedores] v
             ON v.IDVendedor = cv.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_vendedor
+            ON usuario_vendedor.IDDimUsuarios = v.IDDimUsuarios
         WHERE
             ISNULL(v.BitAtivo, 1) = 1
+            {filtro_visibilidade_carteiras_sql}
             AND (
                 :q = ''
                 OR v.NomeVendedor LIKE :q_like
@@ -20524,15 +20655,9 @@ def carteiras_lista():
             );
     """)
 
-    total = db.session.execute(
-        sql_total,
-        {
-            "q": q,
-            "q_like": f"%{q}%"
-        }
-    ).scalar() or 0
+    total = db.session.execute(sql_total, params_base).scalar() or 0
 
-    sql = text("""
+    sql = text(f"""
         ;WITH CarteirasFiltradas AS
         (
             SELECT
@@ -20542,12 +20667,29 @@ def carteiras_lista():
                 cv.IDUsuarioCoordenador,
                 cv.Meta,
                 cv.DataAtualizacao,
-                v.NomeVendedor
+                v.NomeVendedor,
+                v.IDDimUsuarios AS IDDimUsuariosVendedor,
+                usuario_vendedor.NomeUsuario AS NomeUsuarioVendedor,
+                usuario_vendedor.IDDimPerfilUsuario AS IDDimPerfilUsuarioVendedor,
+                CASE
+                    WHEN cv.IDVendedor = :id_vendedor_logado
+                      OR v.IDDimUsuarios = :id_usuario_logado
+                    THEN 1 ELSE 0
+                END AS BitCarteiraPropria,
+                CASE
+                    WHEN ISNULL(usuario_vendedor.IDDimPerfilUsuario, 0) = :id_perfil_admin_padrao
+                      OR UPPER(LTRIM(RTRIM(ISNULL(v.NomeVendedor, '')))) LIKE '%ADMIN%'
+                      OR UPPER(LTRIM(RTRIM(ISNULL(usuario_vendedor.NomeUsuario, '')))) LIKE '%ADMIN%'
+                    THEN 1 ELSE 0
+                END AS BitCarteiraAdmin
             FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
             INNER JOIN [Integracao].[dbo].[Vendedores] v
                 ON v.IDVendedor = cv.IDVendedor
+            LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_vendedor
+                ON usuario_vendedor.IDDimUsuarios = v.IDDimUsuarios
             WHERE
                 ISNULL(v.BitAtivo, 1) = 1
+                {filtro_visibilidade_carteiras_sql}
                 AND (
                     :q = ''
                     OR v.NomeVendedor LIKE :q_like
@@ -20623,6 +20765,11 @@ def carteiras_lista():
                 cf.IDFatoCarteiraVendedor,
                 cf.IDVendedor,
                 cf.NomeVendedor,
+                cf.IDDimUsuariosVendedor,
+                cf.NomeUsuarioVendedor,
+                cf.IDDimPerfilUsuarioVendedor,
+                cf.BitCarteiraPropria,
+                cf.BitCarteiraAdmin,
                 cf.Meta,
                 cf.DataAtualizacao,
                 ISNULL(re.QuantidadeEmpresas, 0) AS QuantidadeEmpresas,
@@ -20659,23 +20806,25 @@ def carteiras_lista():
         )
         SELECT *
         FROM BaseCarteiras
-        ORDER BY NomeVendedor ASC
+        ORDER BY
+            CASE WHEN :usuario_logado_eh_vendedor = 1 AND BitCarteiraAdmin = 1 THEN 0 ELSE 1 END,
+            CASE WHEN :usuario_logado_eh_vendedor = 1 AND BitCarteiraPropria = 1 THEN 0 ELSE 1 END,
+            NomeVendedor ASC
         OFFSET :offset ROWS FETCH NEXT :per_page ROWS ONLY;
     """)
 
-    rows = db.session.execute(
-        sql,
-        {
-            "q": q,
-            "q_like": f"%{q}%",
-            "offset": offset,
-            "per_page": per_page,
-            "dt_inicio_mes": dt_inicio_mes,
-            "dt_prox_mes": dt_prox_mes,
-            "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
-            "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
-        }
-    ).mappings().all()
+    params_sql = dict(params_base)
+    params_sql.update({
+        "offset": offset,
+        "per_page": per_page,
+        "dt_inicio_mes": dt_inicio_mes,
+        "dt_prox_mes": dt_prox_mes,
+        "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
+        "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
+        "usuario_logado_eh_vendedor": 1 if usuario_logado_eh_vendedor else 0,
+    })
+
+    rows = db.session.execute(sql, params_sql).mappings().all()
 
     total_pages = max((int(total) + per_page - 1) // per_page, 1)
 
@@ -20693,6 +20842,7 @@ def carteiras_lista():
         carteiras=rows,
         q=q,
         paginacao=paginacao,
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
     )
 
 
@@ -20701,7 +20851,7 @@ def carteiras_lista():
 
 @paineis_bp.get("/carteiras/<int:id_fato_carteira_vendedor>")
 @login_required
-@requer_item_menu_paineis("empresas")
+@requer_item_menu_paineis("carteiras")
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def carteira_detalhe(id_fato_carteira_vendedor: int):
     """Eu abro o detalhe de uma carteira de vendedor."""
@@ -20717,6 +20867,10 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
     page = _inteiro_query("page", 1)
     per_page = 20
     offset = (page - 1) * per_page
+
+    usuario_logado_eh_vendedor = _usuario_logado_eh_perfil_vendedor()
+    id_usuario_logado = _id_usuario_logado_carteira()
+    id_vendedor_logado = _resolver_id_vendedor_logado_carteira() if usuario_logado_eh_vendedor else 0
 
     hoje = date.today()
     dt_inicio_mes = date(hoje.year, hoje.month, 1)
@@ -20735,10 +20889,15 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
             cv.Meta,
             cv.DataAtualizacao,
             v.NomeVendedor,
+            v.IDDimUsuarios AS IDDimUsuariosVendedor,
+            usuario_vendedor.NomeUsuario AS NomeUsuarioVendedor,
+            usuario_vendedor.IDDimPerfilUsuario AS IDDimPerfilUsuarioVendedor,
             u.NomeUsuario AS NomeCoordenador
         FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
         LEFT JOIN [Integracao].[dbo].[Vendedores] v
             ON v.IDVendedor = cv.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] usuario_vendedor
+            ON usuario_vendedor.IDDimUsuarios = v.IDDimUsuarios
         LEFT JOIN [Integracao].[Silver].[DimUsuarios] u
             ON u.IDDimUsuarios = cv.IDUsuarioCoordenador
         WHERE cv.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor;
@@ -20751,6 +20910,13 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
 
     if not carteira_row:
         abort(404, description="Carteira não encontrada.")
+
+    if usuario_logado_eh_vendedor and not _carteira_eh_do_admin_ou_propria_para_vendedor(
+        carteira_row,
+        id_usuario_logado,
+        id_vendedor_logado,
+    ):
+        abort(403, description="Perfil Vendedor só pode acessar a carteira do Admin e a própria carteira.")
 
     sql_resumo = text("""
         ;WITH EmpresasCarteira AS
@@ -20960,22 +21126,25 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         },
     ).mappings().all()
 
-    sql_carteiras_destino = text("""
-        SELECT
-            cv.IDFatoCarteiraVendedor,
-            cv.IDVendedor,
-            v.NomeVendedor
-        FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
-        LEFT JOIN [Integracao].[dbo].[Vendedores] v
-            ON v.IDVendedor = cv.IDVendedor
-        WHERE cv.IDFatoCarteiraVendedor <> :id_fato_carteira_vendedor
-        ORDER BY v.NomeVendedor ASC, cv.IDFatoCarteiraVendedor ASC;
-    """)
+    carteiras_destino_rows = []
 
-    carteiras_destino_rows = db.session.execute(
-        sql_carteiras_destino,
-        {"id_fato_carteira_vendedor": id_fato_carteira_vendedor},
-    ).mappings().all()
+    if not usuario_logado_eh_vendedor:
+        sql_carteiras_destino = text("""
+            SELECT
+                cv.IDFatoCarteiraVendedor,
+                cv.IDVendedor,
+                v.NomeVendedor
+            FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+            LEFT JOIN [Integracao].[dbo].[Vendedores] v
+                ON v.IDVendedor = cv.IDVendedor
+            WHERE cv.IDFatoCarteiraVendedor <> :id_fato_carteira_vendedor
+            ORDER BY v.NomeVendedor ASC, cv.IDFatoCarteiraVendedor ASC;
+        """)
+
+        carteiras_destino_rows = db.session.execute(
+            sql_carteiras_destino,
+            {"id_fato_carteira_vendedor": id_fato_carteira_vendedor},
+        ).mappings().all()
 
     total_pages = max((int(total_filtrado) + per_page - 1) // per_page, 1)
 
@@ -21012,6 +21181,7 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         carteiras_destino=carteiras_destino_rows,
         q=q,
         paginacao=paginacao,
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
     )
 
 
@@ -21032,6 +21202,9 @@ def _carteira_add_meses(dt_base: date, deslocamento: int) -> date:
 @requer_item_menu_paineis("empresas")
 @limiter.limit("40 per minute", methods=["POST"])
 def carteira_mover_empresa(id_fato_carteira_vendedor: int):
+    if _usuario_logado_eh_perfil_vendedor():
+        abort(403, description="Perfil Vendedor não pode mover empresas entre carteiras.")
+
     id_empresa = int((request.form.get("id_empresa") or 0) or 0)
     id_carteira_destino = int((request.form.get("id_fato_carteira_destino") or 0) or 0)
 

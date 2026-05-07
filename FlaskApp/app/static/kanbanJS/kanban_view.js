@@ -31,6 +31,18 @@
   const SOCKET_IO_NAMESPACE = "/kanban";
   const SOCKET_IO_PATH = `${SCRIPT_ROOT}/socket.io`;
 
+  function removerControlesGestaoFasesParaVendedor(){
+    if (!USUARIO_EH_VENDEDOR) return;
+
+    document.querySelectorAll(
+      "#btnNovaFase, .kb-col-edit, .kb-col-del, #modalFase, #modalInativarFase"
+    ).forEach((elemento) => {
+      elemento.remove();
+    });
+  }
+
+  removerControlesGestaoFasesParaVendedor();
+
   function configurarScrollKanban(){
     if (!board || board.dataset.scrollKanbanAjustado === "1") return;
 
@@ -12179,6 +12191,8 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       preencherCabecalhoFase(idFase);
       void preencherCardsInicial(idFase);
     });
+
+    removerControlesGestaoFasesParaVendedor();
   }
 
   function preencherCabecalhoFase(idFase){

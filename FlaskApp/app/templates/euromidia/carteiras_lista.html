@@ -21,7 +21,11 @@
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
       <div>
         <h1 class="page-title" style="margin-bottom:4px;">Carteiras de Vendedores</h1>
-        <div class="muted">Visualize as carteiras cadastradas e abra o detalhe de cada vendedor.</div>
+        {% if usuario_logado_eh_vendedor %}
+          <div class="muted">Perfil Vendedor: você visualiza somente a carteira do Admin e a sua própria carteira.</div>
+        {% else %}
+          <div class="muted">Visualize as carteiras cadastradas e abra o detalhe de cada vendedor.</div>
+        {% endif %}
       </div>
 
       <form method="get" action="{{ url_for('Paineis.carteiras_lista') }}" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
@@ -66,6 +70,13 @@
                   <div style="font-weight:900;color:var(--text);">{{ row.NomeVendedor or 'Sem nome' }}</div>
                   <div class="muted" style="font-size:12px;">ID vendedor: {{ row.IDVendedor }}</div>
                   <div class="muted" style="font-size:12px;">ID carteira: {{ row.IDFatoCarteiraVendedor }}</div>
+                  {% if usuario_logado_eh_vendedor %}
+                    {% if (row.BitCarteiraAdmin or 0)|int == 1 %}
+                      <div class="muted" style="font-size:12px;font-weight:900;color:#1D4ED8;">Carteira do Admin</div>
+                    {% elif (row.BitCarteiraPropria or 0)|int == 1 %}
+                      <div class="muted" style="font-size:12px;font-weight:900;color:#166534;">Minha carteira</div>
+                    {% endif %}
+                  {% endif %}
                 </td>
 
                 <td style="font-weight:900;">{{ row.QuantidadeEmpresas or 0 }}</td>

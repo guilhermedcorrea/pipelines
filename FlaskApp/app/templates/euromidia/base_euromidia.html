@@ -943,6 +943,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_disponibilidades = (pode_acessar_menu_paineis('disponibilidades') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_atendimento = (pode_acessar_menu_paineis('atendimento') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_performance = (pode_acessar_menu_paineis('performance_paineis') if pode_acessar_menu_paineis is defined else True) %}
+        {% set menu_paineis_carteiras = (pode_acessar_menu_paineis('carteiras') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_empresas = (pode_acessar_menu_paineis('empresas') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_lista_ocupacao = (pode_acessar_menu_paineis('lista_ocupacao') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_contratos = (pode_acessar_menu_paineis('contratos') if pode_acessar_menu_paineis is defined else True) %}
@@ -985,6 +986,7 @@ input:disabled, select:disabled, textarea:disabled{
           menu_paineis_disponibilidades
           or menu_paineis_atendimento
           or menu_paineis_performance
+          or menu_paineis_carteiras
           or menu_paineis_empresas
           or menu_paineis_checkin_novo
           or menu_paineis_lista_checkins
@@ -1105,7 +1107,7 @@ input:disabled, select:disabled, textarea:disabled{
             {% endif %}
 
 
-            {% if menu_paineis_performance %}
+            {% if menu_paineis_performance or menu_paineis_carteiras %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Ativos</span>
@@ -1113,16 +1115,19 @@ input:disabled, select:disabled, textarea:disabled{
                 </a>
 
                 <div class="submenu-dropdown">
-                  <a href="{{ url_for('admin.ativos') }}"
-                     class="{% if request.path == url_for('admin.ativos') %}menu-link-current{% endif %}">
-                    Performance Ativos
-                  </a>
+                  {% if menu_paineis_performance %}
+                    <a href="{{ url_for('admin.ativos') }}"
+                       class="{% if request.path == url_for('admin.ativos') %}menu-link-current{% endif %}">
+                      Performance Ativos
+                    </a>
+                  {% endif %}
 
-
-                   <a href="{{ url_for('Paineis.carteiras_lista') }}"
-                     class="{% if request.path == url_for('Paineis.carteiras_lista') %}menu-link-current{% endif %}">
-                    Carteiras Euromidia
-                  </a>
+                  {% if menu_paineis_carteiras %}
+                    <a href="{{ url_for('Paineis.carteiras_lista') }}"
+                       class="{% if request.path == url_for('Paineis.carteiras_lista') %}menu-link-current{% endif %}">
+                      Carteiras Euromidia
+                    </a>
+                  {% endif %}
                 </div>
               </div>
             {% endif %}

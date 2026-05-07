@@ -17894,6 +17894,9 @@ def api_fase_inativar(id_fase: int):
 @limiter.limit("30/minute")
 def api_kanban_inativar(id_kanban: int):
     id_usuario = _assert_login()
+    bloqueio_vendedor = _bloquear_gestao_kanban_para_vendedor_json()
+    if bloqueio_vendedor is not None:
+        return bloqueio_vendedor
     kanban = _obter_kanban_autorizado(id_kanban)
     id_emp = _id_empresa_usuario_or_403()
 
