@@ -1,67 +1,110 @@
+from flask_login import current_user
+from sqlalchemy import text
 from flask import request
 from flask_socketio import emit, join_room, leave_room
+from app.extensions import socketio, db
 
-from app.extensions import socketio
 
 
-@socketio.on("connect", namespace="/kanban")
-def ao_conectar() -> None:
-    """Evento disparado quando o cliente conecta no namespace do kanban."""
-    emit(
-        "conexao_ok",
+
+NAMESPACE_MENSAGENS = "/mensagens"
+
+
+def _id_usuario_socket_logado() -> int | None:
+    """Eu descubro o IDDimUsuarios do usuário logado para entrar na sala correta."""
+    candidatos = [
+        getattr(current_user, "IDDimUsuarios", None),
+        getattr(current_user, "id", None),
+        getattr(current_user, "Id", None),
+        getattr(current_user, "ID", None),
+    ]
+
+    for valor in candidatos:
+        try:
+            if valor is not None and str(valor).strip() != "":
+                return int(valor)
+        except Exception:
+            pass
+
+    return None
+
+
+def room_mensagens_usuario(id_usuario: int) -> str:
+    """Eu gero o nome da sala exclusiva de mensagens do usuário."""
+    return f"mensagens_usuario:{int(id_usuario)}"
+
+
+def contar_mensagens_nao_lidas(id_usuario: int) -> int:
+    """Eu conto as mensagens ativas e não lidas do usuário."""
+    row = db.session.execute(
+        text("""
+            SELECT COUNT(1) AS Total
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] WITH (NOLOCK)
+            WHERE IDDimUsuariosDestinatario = :id_usuario
+              AND ISNULL(BitAtivo, 1) = 1
+              AND ISNULL(BitLida, 0) = 0
+        """),
+        {"id_usuario": int(id_usuario)}
+    ).mappings().first()
+
+    return int(row["Total"] or 0) if row else 0
+
+
+def emitir_resumo_mensagens_usuario(id_usuario: int, evento: str = "mensagens:resumo") -> None:
+    """Eu envio para o navegador do usuário a quantidade atual de mensagens novas."""
+    total = contar_mensagens_nao_lidas(int(id_usuario))
+
+    socketio.emit(
+        evento,
         {
-            "mensagem": "Conectado com sucesso ao Socket.IO do kanban.",
-            "sid": request.sid,
+            "ok": True,
+            "id_usuario": int(id_usuario),
+            "nao_lidas": total,
         },
+        namespace=NAMESPACE_MENSAGENS,
+        to=room_mensagens_usuario(int(id_usuario)),
     )
 
 
-@socketio.on("disconnect", namespace="/kanban")
-def ao_desconectar() -> None:
-    """Evento disparado quando o cliente desconecta."""
-   
-    pass
+@socketio.on("connect", namespace=NAMESPACE_MENSAGENS)
+def mensagens_conectar():
+    """Eu conecto o usuário logado na sala privada de mensagens dele."""
+    if not current_user.is_authenticated:
+        return False
 
+    id_usuario = _id_usuario_socket_logado()
+    if not id_usuario:
+        return False
 
-@socketio.on("entrar_kanban", namespace="/kanban")
-def entrar_kanban(dados: dict) -> None:
-    """Coloca o cliente na sala do kanban informado."""
-    id_kanban = dados.get("id_kanban")
-
-    if not id_kanban:
-        emit("erro_socket", {"mensagem": "id_kanban não informado."})
-        return
-
-    nome_sala = f"kanban:{id_kanban}"
-    join_room(nome_sala)
+    join_room(room_mensagens_usuario(id_usuario))
 
     emit(
-        "entrou_kanban",
+        "mensagens:resumo",
         {
-            "mensagem": "Cliente entrou na sala do kanban.",
-            "sala": nome_sala,
-            "id_kanban": id_kanban,
+            "ok": True,
+            "id_usuario": int(id_usuario),
+            "nao_lidas": contar_mensagens_nao_lidas(id_usuario),
         },
+        namespace=NAMESPACE_MENSAGENS,
     )
 
 
-@socketio.on("sair_kanban", namespace="/kanban")
-def sair_kanban(dados: dict) -> None:
-    """Remove o cliente da sala do kanban informado."""
-    id_kanban = dados.get("id_kanban")
+@socketio.on("mensagens:pedir_resumo", namespace=NAMESPACE_MENSAGENS)
+def mensagens_pedir_resumo(dados=None):
+    """Eu atualizo o contador quando o front pedir o resumo."""
+    if not current_user.is_authenticated:
+        return False
 
-    if not id_kanban:
-        emit("erro_socket", {"mensagem": "id_kanban não informado."})
-        return
-
-    nome_sala = f"kanban:{id_kanban}"
-    leave_room(nome_sala)
+    id_usuario = _id_usuario_socket_logado()
+    if not id_usuario:
+        return False
 
     emit(
-        "saiu_kanban",
+        "mensagens:resumo",
         {
-            "mensagem": "Cliente saiu da sala do kanban.",
-            "sala": nome_sala,
-            "id_kanban": id_kanban,
+            "ok": True,
+            "id_usuario": int(id_usuario),
+            "nao_lidas": contar_mensagens_nao_lidas(id_usuario),
         },
+        namespace=NAMESPACE_MENSAGENS,
     )

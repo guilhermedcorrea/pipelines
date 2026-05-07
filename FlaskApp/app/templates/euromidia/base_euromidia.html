@@ -630,6 +630,49 @@ input:disabled, select:disabled, textarea:disabled{
   min-width: 0;
 }
 
+
+/* =========================================================
+   MENSAGENS DO USUÁRIO - BADGE AO VIVO
+   ========================================================= */
+.user-message-badge{
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 10020;
+
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+
+  display: none;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  text-decoration: none;
+
+  border: 2px solid var(--euro-blue);
+  box-shadow: 0 6px 16px rgba(0,0,0,.25);
+}
+
+.user-message-badge.is-visible{
+  display: inline-flex;
+}
+
+.user-message-badge:hover{
+  filter: brightness(.95);
+}
+
+.user-btn.has-new-messages{
+  box-shadow: 0 0 0 3px rgba(220,38,38,.22);
+}
+
 .user-btn{
   appearance:none;
   border: 0;
@@ -1289,6 +1332,15 @@ input:disabled, select:disabled, textarea:disabled{
 -->
         {% if current_user.is_authenticated %}
           <div class="user-menu" id="userMenu">
+            <a href="/admin/mensagens"
+               class="user-message-badge"
+               id="userMessageBadge"
+               title="Mensagens novas"
+               aria-label="Mensagens novas"
+               hidden>
+              <span id="userMessageBadgeCount">0</span>
+            </a>
+
             <button type="button" class="user-btn" id="btnUserMenu" title="Conta">
               <span class="avatar" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1697,6 +1749,109 @@ input:disabled, select:disabled, textarea:disabled{
     };
   })();
 </script>
+
+
+{% if current_user.is_authenticated %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+  (function(){
+    const badge = document.getElementById("userMessageBadge");
+    const badgeCount = document.getElementById("userMessageBadgeCount");
+    const userBtn = document.getElementById("btnUserMenu");
+
+    if (!badge || !badgeCount) {
+      return;
+    }
+
+    function atualizarBadgeMensagens(total){
+      const qtd = Number(total || 0);
+
+      if (qtd > 0){
+        badgeCount.textContent = qtd > 99 ? "99+" : String(qtd);
+        badge.hidden = false;
+        badge.classList.add("is-visible");
+
+        if (userBtn){
+          userBtn.classList.add("has-new-messages");
+        }
+      } else {
+        badgeCount.textContent = "0";
+        badge.hidden = true;
+        badge.classList.remove("is-visible");
+
+        if (userBtn){
+          userBtn.classList.remove("has-new-messages");
+        }
+      }
+    }
+
+    async function carregarResumoMensagens(){
+      try{
+        const resp = await fetch("/admin/api/mensagens/resumo", {
+          method: "GET",
+          credentials: "same-origin",
+          headers: {
+            "Accept": "application/json"
+          }
+        });
+
+        if (!resp.ok){
+          atualizarBadgeMensagens(0);
+          return;
+        }
+
+        const data = await resp.json();
+
+        if (data && data.ok){
+          atualizarBadgeMensagens(data.nao_lidas);
+        }
+      }catch(e){
+        console.warn("Falha ao carregar resumo de mensagens.", e);
+      }
+    }
+
+    carregarResumoMensagens();
+
+    if (typeof io === "undefined"){
+      console.warn("Socket.IO client não carregado. O badge carregará apenas pelo resumo inicial.");
+      return;
+    }
+
+    const socketMensagens = io("/mensagens", {
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000
+    });
+
+    socketMensagens.on("connect", function(){
+      socketMensagens.emit("mensagens:pedir_resumo", {});
+    });
+
+    socketMensagens.on("mensagens:resumo", function(payload){
+      atualizarBadgeMensagens(payload && payload.nao_lidas);
+    });
+
+    socketMensagens.on("mensagens:nova", function(payload){
+      atualizarBadgeMensagens(payload && payload.nao_lidas);
+    });
+
+    socketMensagens.on("mensagens:lida", function(payload){
+      atualizarBadgeMensagens(payload && payload.nao_lidas);
+    });
+
+    socketMensagens.on("mensagens:todas_lidas", function(payload){
+      atualizarBadgeMensagens(payload && payload.nao_lidas);
+    });
+
+    window.EURO_MENSAGENS = {
+      atualizarBadgeMensagens,
+      carregarResumoMensagens,
+      socket: socketMensagens
+    };
+  })();
+</script>
+{% endif %}
 
 </body>
 </html>

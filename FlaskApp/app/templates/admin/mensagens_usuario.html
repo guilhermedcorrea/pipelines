@@ -1,0 +1,1009 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Euromídia | Minhas Mensagens{% endblock %}
+
+{% block content %}
+
+<style>
+  .msg-page{
+    width: 100%;
+    max-width: 1380px;
+    margin: 0 auto;
+  }
+
+  .msg-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  .msg-title-wrap{
+    min-width: 0;
+  }
+
+  .msg-title{
+    margin: 0;
+    color: var(--euro-blue);
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+  }
+
+  .msg-subtitle{
+    margin: 6px 0 0 0;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .msg-header-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .msg-btn{
+    border: 0;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 900;
+    font-size: 13px;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap: 8px;
+    line-height: 1;
+    text-decoration:none;
+  }
+
+  .msg-btn-primary{
+    background: var(--euro-yellow);
+    color: #0b1a3a;
+  }
+
+  .msg-btn-primary:hover{
+    filter: brightness(.96);
+  }
+
+  .msg-btn-secondary{
+    background: rgba(0,40,132,.10);
+    color: var(--euro-blue);
+    border: 1px solid rgba(0,40,132,.18);
+  }
+
+  .msg-btn-secondary:hover{
+    background: rgba(0,40,132,.14);
+  }
+
+  .msg-btn-danger{
+    background: rgba(220,38,38,.10);
+    color: #b91c1c;
+    border: 1px solid rgba(220,38,38,.20);
+  }
+
+  .msg-btn:disabled{
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  .msg-kpis{
+    display:grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .msg-kpi{
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 1px 8px rgba(0,0,0,.05);
+  }
+
+  .msg-kpi-label{
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 6px;
+  }
+
+  .msg-kpi-value{
+    color: var(--text);
+    font-size: 24px;
+    font-weight: 950;
+    line-height: 1;
+  }
+
+  .msg-layout{
+    display:grid;
+    grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
+    gap: 16px;
+    align-items:start;
+  }
+
+  .msg-card{
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 1px 8px rgba(0,0,0,.06);
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .msg-panel-header{
+    padding: 14px 16px;
+    background: #F8FAFC;
+    border-bottom: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+  }
+
+  .msg-panel-title{
+    font-size: 14px;
+    font-weight: 950;
+    color: var(--text);
+  }
+
+  .msg-filter-row{
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display:flex;
+    gap: 10px;
+    align-items:center;
+    flex-wrap: wrap;
+  }
+
+  .msg-search{
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+
+  .msg-search input{
+    height: 40px;
+    border-radius: 12px;
+  }
+
+  .msg-select{
+    flex: 0 0 150px;
+  }
+
+  .msg-select select{
+    height: 40px;
+    border-radius: 12px;
+    padding: 8px 10px;
+  }
+
+  .msg-list{
+    max-height: calc(100vh - 330px);
+    min-height: 420px;
+    overflow:auto;
+  }
+
+  .msg-item{
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+    text-align:left;
+    cursor:pointer;
+    padding: 14px 16px;
+    display:block;
+  }
+
+  .msg-item:hover{
+    background: #F8FAFC;
+  }
+
+  .msg-item.is-active{
+    background: rgba(3,64,167,.08);
+    box-shadow: inset 4px 0 0 var(--euro-blue-2);
+  }
+
+  .msg-item.is-unread{
+    background: #FFF7ED;
+  }
+
+  .msg-item.is-unread:hover{
+    background: #FFEDD5;
+  }
+
+  .msg-item-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 10px;
+    margin-bottom: 7px;
+  }
+
+  .msg-item-title{
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 950;
+    line-height: 1.25;
+    min-width: 0;
+  }
+
+  .msg-pill{
+    flex: 0 0 auto;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-weight: 950;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .msg-pill-new{
+    background: #dc2626;
+    color: #fff;
+  }
+
+  .msg-pill-read{
+    background: #E2E8F0;
+    color: #475569;
+  }
+
+  .msg-item-meta{
+    display:flex;
+    gap: 8px;
+    align-items:center;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+
+  .msg-dot{
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(100,116,139,.55);
+    display:inline-block;
+  }
+
+  .msg-item-resumo{
+    color: #334155;
+    font-size: 13px;
+    line-height: 1.45;
+    font-weight: 650;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .msg-detail{
+    min-height: 540px;
+  }
+
+  .msg-detail-body{
+    padding: 20px;
+  }
+
+  .msg-empty{
+    padding: 24px;
+    color: var(--muted);
+    font-weight: 800;
+    text-align:center;
+  }
+
+  .msg-empty-strong{
+    color: var(--text);
+    font-weight: 950;
+    display:block;
+    margin-bottom: 6px;
+  }
+
+  .msg-detail-title{
+    margin: 0 0 8px 0;
+    color: var(--text);
+    font-size: 24px;
+    font-weight: 950;
+    line-height: 1.2;
+  }
+
+  .msg-detail-meta{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 850;
+    margin-bottom: 18px;
+  }
+
+  .msg-detail-text{
+    color: #1e293b;
+    font-size: 15px;
+    line-height: 1.7;
+    font-weight: 650;
+    white-space: pre-wrap;
+    background: #F8FAFC;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 18px;
+  }
+
+  .msg-detail-grid{
+    display:grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .msg-info-box{
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .msg-info-label{
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 950;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    margin-bottom: 5px;
+  }
+
+  .msg-info-value{
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 950;
+    overflow-wrap:anywhere;
+  }
+
+  .msg-detail-actions{
+    display:flex;
+    align-items:center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .msg-alert{
+    border-radius: 14px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    font-weight: 850;
+    display:none;
+  }
+
+  .msg-alert.show{
+    display:block;
+  }
+
+  .msg-alert-ok{
+    background: rgba(22,163,74,.08);
+    color: #166534;
+    border: 1px solid rgba(22,163,74,.20);
+  }
+
+  .msg-alert-error{
+    background: rgba(220,38,38,.08);
+    color: #991b1b;
+    border: 1px solid rgba(220,38,38,.20);
+  }
+
+  .msg-loading{
+    padding: 28px;
+    color: var(--muted);
+    font-weight: 900;
+    text-align:center;
+  }
+
+  @media (max-width: 980px){
+    .msg-layout{
+      grid-template-columns: 1fr;
+    }
+
+    .msg-list{
+      max-height: 420px;
+      min-height: 280px;
+    }
+
+    .msg-detail-grid{
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 760px){
+    .msg-header{
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .msg-header-actions{
+      justify-content: stretch;
+    }
+
+    .msg-header-actions .msg-btn{
+      width: 100%;
+    }
+
+    .msg-kpis{
+      grid-template-columns: 1fr;
+    }
+
+    .msg-filter-row{
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .msg-select{
+      flex: 1 1 auto;
+    }
+  }
+</style>
+
+<div class="msg-page">
+  <div class="msg-header">
+    <div class="msg-title-wrap">
+      <h1 class="msg-title">Minhas mensagens</h1>
+      <p class="msg-subtitle">
+        Avisos automáticos de campanhas, contratos, vencimentos e movimentações importantes.
+      </p>
+    </div>
+
+    <div class="msg-header-actions">
+      <button type="button" class="msg-btn msg-btn-secondary" id="btnAtualizarMensagens">
+        Atualizar
+      </button>
+
+      <button type="button" class="msg-btn msg-btn-primary" id="btnMarcarTodasLidas">
+        Marcar todas como lidas
+      </button>
+    </div>
+  </div>
+
+  <div class="msg-kpis">
+    <div class="msg-kpi">
+      <div class="msg-kpi-label">Total de mensagens</div>
+      <div class="msg-kpi-value" id="kpiTotalMensagens">0</div>
+    </div>
+
+    <div class="msg-kpi">
+      <div class="msg-kpi-label">Não lidas</div>
+      <div class="msg-kpi-value" id="kpiNaoLidas">0</div>
+    </div>
+
+    <div class="msg-kpi">
+      <div class="msg-kpi-label">Lidas</div>
+      <div class="msg-kpi-value" id="kpiLidas">0</div>
+    </div>
+  </div>
+
+  <div class="msg-alert msg-alert-ok" id="msgAlertaOk"></div>
+  <div class="msg-alert msg-alert-error" id="msgAlertaErro"></div>
+
+  <div class="msg-layout">
+    <section class="msg-card">
+      <div class="msg-panel-header">
+        <div class="msg-panel-title">Assuntos</div>
+        <div class="muted" id="msgListaStatus" style="font-size:12px;font-weight:900;">—</div>
+      </div>
+
+      <div class="msg-filter-row">
+        <div class="msg-search">
+          <input type="text"
+                 id="inputBuscaMensagem"
+                 placeholder="Buscar por título, texto, tipo, contrato..."
+                 autocomplete="off">
+        </div>
+
+        <div class="msg-select">
+          <select id="selectFiltroMensagem">
+            <option value="todas">Todas</option>
+            <option value="nao_lidas">Não lidas</option>
+            <option value="lidas">Lidas</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="msg-list" id="listaMensagens">
+        <div class="msg-loading">Carregando mensagens...</div>
+      </div>
+    </section>
+
+    <section class="msg-card msg-detail">
+      <div class="msg-panel-header">
+        <div class="msg-panel-title">Leitura da mensagem</div>
+        <div class="muted" id="msgDetalheStatus" style="font-size:12px;font-weight:900;">Selecione uma mensagem</div>
+      </div>
+
+      <div class="msg-detail-body" id="detalheMensagem">
+        <div class="msg-empty">
+          <span class="msg-empty-strong">Nenhuma mensagem selecionada</span>
+          Clique em um assunto na lista para abrir o texto completo.
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  const lista = document.getElementById("listaMensagens");
+  const detalhe = document.getElementById("detalheMensagem");
+
+  const btnAtualizar = document.getElementById("btnAtualizarMensagens");
+  const btnMarcarTodas = document.getElementById("btnMarcarTodasLidas");
+
+  const inputBusca = document.getElementById("inputBuscaMensagem");
+  const selectFiltro = document.getElementById("selectFiltroMensagem");
+
+  const kpiTotal = document.getElementById("kpiTotalMensagens");
+  const kpiNaoLidas = document.getElementById("kpiNaoLidas");
+  const kpiLidas = document.getElementById("kpiLidas");
+
+  const msgListaStatus = document.getElementById("msgListaStatus");
+  const msgDetalheStatus = document.getElementById("msgDetalheStatus");
+
+  const alertaOk = document.getElementById("msgAlertaOk");
+  const alertaErro = document.getElementById("msgAlertaErro");
+
+  const URL_LISTA = "{{ url_for('admin.api_mensagens_lista') }}";
+  const URL_MARCAR_TODAS = "{{ url_for('admin.api_mensagens_marcar_todas_lidas') }}";
+
+  let mensagensCache = [];
+  let mensagemAbertaId = null;
+
+  function getCsrfToken(){
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute("content") : "";
+  }
+
+  function limparElemento(el){
+    if (!el) return;
+    while (el.firstChild){
+      el.removeChild(el.firstChild);
+    }
+  }
+
+  function criarEl(tag, classe, texto){
+    const el = document.createElement(tag);
+    if (classe) el.className = classe;
+    if (texto !== undefined && texto !== null) el.textContent = texto;
+    return el;
+  }
+
+  function mostrarAlerta(tipo, texto){
+    const alvo = tipo === "ok" ? alertaOk : alertaErro;
+    const outro = tipo === "ok" ? alertaErro : alertaOk;
+
+    if (outro){
+      outro.classList.remove("show");
+      outro.textContent = "";
+    }
+
+    if (!alvo) return;
+
+    alvo.textContent = texto || "";
+    alvo.classList.add("show");
+
+    setTimeout(function(){
+      alvo.classList.remove("show");
+      alvo.textContent = "";
+    }, 4500);
+  }
+
+  function formatarNumero(n){
+    return String(Number(n || 0));
+  }
+
+  function atualizarKpis(itens){
+    const total = itens.length;
+    const naoLidas = itens.filter(function(x){ return !x.bit_lida; }).length;
+    const lidas = total - naoLidas;
+
+    if (kpiTotal) kpiTotal.textContent = formatarNumero(total);
+    if (kpiNaoLidas) kpiNaoLidas.textContent = formatarNumero(naoLidas);
+    if (kpiLidas) kpiLidas.textContent = formatarNumero(lidas);
+
+    if (msgListaStatus){
+      msgListaStatus.textContent = total === 1 ? "1 mensagem" : `${total} mensagens`;
+    }
+  }
+
+  function textoBuscaMensagem(msg){
+    return [
+      msg.id,
+      msg.tipo,
+      msg.titulo,
+      msg.resumo,
+      msg.link,
+      msg.id_contrato,
+      msg.id_item,
+      msg.id_vencimento,
+      msg.data_criacao
+    ].join(" ").toLowerCase();
+  }
+
+  function mensagensFiltradas(){
+    const termo = (inputBusca && inputBusca.value ? inputBusca.value : "").trim().toLowerCase();
+    const filtro = selectFiltro ? selectFiltro.value : "todas";
+
+    return mensagensCache.filter(function(msg){
+      if (filtro === "nao_lidas" && msg.bit_lida) return false;
+      if (filtro === "lidas" && !msg.bit_lida) return false;
+
+      if (!termo) return true;
+
+      return textoBuscaMensagem(msg).includes(termo);
+    });
+  }
+
+  function renderizarLista(){
+    limparElemento(lista);
+
+    const itens = mensagensFiltradas();
+
+    atualizarKpis(mensagensCache);
+
+    if (!itens.length){
+      const empty = criarEl("div", "msg-empty");
+      const strong = criarEl("span", "msg-empty-strong", "Nenhuma mensagem encontrada");
+      empty.appendChild(strong);
+      empty.appendChild(document.createTextNode("Ajuste os filtros ou aguarde novas mensagens."));
+      lista.appendChild(empty);
+      return;
+    }
+
+    itens.forEach(function(msg){
+      const btn = criarEl("button", "msg-item");
+      btn.type = "button";
+      btn.dataset.id = String(msg.id);
+
+      if (!msg.bit_lida){
+        btn.classList.add("is-unread");
+      }
+
+      if (mensagemAbertaId && Number(mensagemAbertaId) === Number(msg.id)){
+        btn.classList.add("is-active");
+      }
+
+      const top = criarEl("div", "msg-item-top");
+
+      const title = criarEl("div", "msg-item-title", msg.titulo || "Sem título");
+      top.appendChild(title);
+
+      const pill = criarEl(
+        "span",
+        "msg-pill " + (msg.bit_lida ? "msg-pill-read" : "msg-pill-new"),
+        msg.bit_lida ? "Lida" : "Nova"
+      );
+      top.appendChild(pill);
+
+      btn.appendChild(top);
+
+      const meta = criarEl("div", "msg-item-meta");
+
+      const tipo = criarEl("span", "", msg.tipo || "Mensagem");
+      const dot1 = criarEl("span", "msg-dot");
+      const data = criarEl("span", "", msg.data_criacao || "Sem data");
+
+      meta.appendChild(tipo);
+      meta.appendChild(dot1);
+      meta.appendChild(data);
+
+      if (msg.id_contrato){
+        const dot2 = criarEl("span", "msg-dot");
+        const contrato = criarEl("span", "", `Contrato ${msg.id_contrato}`);
+        meta.appendChild(dot2);
+        meta.appendChild(contrato);
+      }
+
+      btn.appendChild(meta);
+
+      const resumo = criarEl("div", "msg-item-resumo", msg.resumo || "");
+      btn.appendChild(resumo);
+
+      btn.addEventListener("click", function(){
+        abrirMensagem(msg.id);
+      });
+
+      lista.appendChild(btn);
+    });
+  }
+
+  function renderizarDetalheVazio(texto){
+    limparElemento(detalhe);
+
+    const empty = criarEl("div", "msg-empty");
+    const strong = criarEl("span", "msg-empty-strong", texto || "Nenhuma mensagem selecionada");
+
+    empty.appendChild(strong);
+    empty.appendChild(document.createTextNode("Clique em uma mensagem da lista para visualizar."));
+
+    detalhe.appendChild(empty);
+
+    if (msgDetalheStatus){
+      msgDetalheStatus.textContent = "Selecione uma mensagem";
+    }
+  }
+
+  function renderizarDetalhe(msg){
+    limparElemento(detalhe);
+
+    mensagemAbertaId = msg.id;
+
+    if (msgDetalheStatus){
+      msgDetalheStatus.textContent = msg.bit_lida ? "Mensagem lida" : "Mensagem nova";
+    }
+
+    const h2 = criarEl("h2", "msg-detail-title", msg.titulo || "Sem título");
+    detalhe.appendChild(h2);
+
+    const meta = criarEl("div", "msg-detail-meta");
+    meta.appendChild(criarEl("span", "", msg.tipo || "Mensagem"));
+    meta.appendChild(criarEl("span", "msg-dot"));
+    meta.appendChild(criarEl("span", "", `Criada em ${msg.data_criacao || "sem data"}`));
+
+    if (msg.bit_lida && msg.data_leitura){
+      meta.appendChild(criarEl("span", "msg-dot"));
+      meta.appendChild(criarEl("span", "", `Lida em ${msg.data_leitura}`));
+    }
+
+    detalhe.appendChild(meta);
+
+    const texto = criarEl("div", "msg-detail-text", msg.texto || "");
+    detalhe.appendChild(texto);
+
+    const grid = criarEl("div", "msg-detail-grid");
+
+    const infoContrato = criarEl("div", "msg-info-box");
+    infoContrato.appendChild(criarEl("div", "msg-info-label", "Contrato"));
+    infoContrato.appendChild(criarEl("div", "msg-info-value", msg.id_contrato ? String(msg.id_contrato) : "—"));
+    grid.appendChild(infoContrato);
+
+    const infoItem = criarEl("div", "msg-info-box");
+    infoItem.appendChild(criarEl("div", "msg-info-label", "Item contrato"));
+    infoItem.appendChild(criarEl("div", "msg-info-value", msg.id_item ? String(msg.id_item) : "—"));
+    grid.appendChild(infoItem);
+
+    const infoVencimento = criarEl("div", "msg-info-box");
+    infoVencimento.appendChild(criarEl("div", "msg-info-label", "Vencimento campanha"));
+    infoVencimento.appendChild(criarEl("div", "msg-info-value", msg.id_vencimento ? String(msg.id_vencimento) : "—"));
+    grid.appendChild(infoVencimento);
+
+    detalhe.appendChild(grid);
+
+    const actions = criarEl("div", "msg-detail-actions");
+
+    if (msg.link){
+      const link = criarEl("a", "msg-btn msg-btn-primary", "Abrir destino");
+      link.href = msg.link;
+      actions.appendChild(link);
+    }
+
+    const btnLida = criarEl(
+      "button",
+      "msg-btn " + (msg.bit_lida ? "msg-btn-secondary" : "msg-btn-danger"),
+      msg.bit_lida ? "Mensagem já está lida" : "Marcar como lida"
+    );
+    btnLida.type = "button";
+    btnLida.disabled = !!msg.bit_lida;
+
+    btnLida.addEventListener("click", async function(){
+      await marcarMensagemLida(msg.id);
+      await abrirMensagem(msg.id, true);
+      await carregarMensagens(false);
+    });
+
+    actions.appendChild(btnLida);
+
+    detalhe.appendChild(actions);
+
+    renderizarLista();
+  }
+
+  async function carregarMensagens(mostrarLoading){
+    try{
+      if (mostrarLoading !== false){
+        limparElemento(lista);
+        lista.appendChild(criarEl("div", "msg-loading", "Carregando mensagens..."));
+      }
+
+      const resp = await fetch(URL_LISTA, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      const data = await resp.json();
+
+      if (!data || !data.ok){
+        throw new Error((data && data.erro) ? data.erro : "Erro ao carregar mensagens.");
+      }
+
+      mensagensCache = Array.isArray(data.itens) ? data.itens : [];
+
+      renderizarLista();
+
+      if (mensagemAbertaId){
+        const aindaExiste = mensagensCache.some(function(x){
+          return Number(x.id) === Number(mensagemAbertaId);
+        });
+
+        if (!aindaExiste){
+          mensagemAbertaId = null;
+          renderizarDetalheVazio("Mensagem não encontrada");
+        }
+      }
+    }catch(e){
+      limparElemento(lista);
+      lista.appendChild(criarEl("div", "msg-empty", e.message || "Erro ao carregar mensagens."));
+      mostrarAlerta("erro", e.message || "Erro ao carregar mensagens.");
+    }
+  }
+
+  async function abrirMensagem(id, silencioso){
+    try{
+      const resp = await fetch(`/admin/api/mensagens/${encodeURIComponent(id)}`, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+      const data = await resp.json();
+
+      if (!data || !data.ok){
+        throw new Error((data && data.erro) ? data.erro : "Erro ao abrir mensagem.");
+      }
+
+      renderizarDetalhe(data.mensagem);
+    }catch(e){
+      if (!silencioso){
+        mostrarAlerta("erro", e.message || "Erro ao abrir mensagem.");
+      }
+
+      renderizarDetalheVazio("Não consegui abrir a mensagem");
+    }
+  }
+
+  async function marcarMensagemLida(id){
+    const resp = await fetch(`/admin/api/mensagens/${encodeURIComponent(id)}/marcar-lida`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Accept": "application/json",
+        "X-CSRFToken": getCsrfToken()
+      }
+    });
+
+    const data = await resp.json();
+
+    if (!data || !data.ok){
+      throw new Error((data && data.erro) ? data.erro : "Erro ao marcar mensagem como lida.");
+    }
+
+    const item = mensagensCache.find(function(x){
+      return Number(x.id) === Number(id);
+    });
+
+    if (item){
+      item.bit_lida = true;
+    }
+
+    mostrarAlerta("ok", "Mensagem marcada como lida.");
+  }
+
+  async function marcarTodasLidas(){
+    try{
+      if (btnMarcarTodas){
+        btnMarcarTodas.disabled = true;
+      }
+
+      const resp = await fetch(URL_MARCAR_TODAS, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Accept": "application/json",
+          "X-CSRFToken": getCsrfToken()
+        }
+      });
+
+      const data = await resp.json();
+
+      if (!data || !data.ok){
+        throw new Error((data && data.erro) ? data.erro : "Erro ao marcar todas como lidas.");
+      }
+
+      mensagensCache.forEach(function(msg){
+        msg.bit_lida = true;
+      });
+
+      renderizarLista();
+
+      if (mensagemAbertaId){
+        await abrirMensagem(mensagemAbertaId, true);
+      }
+
+      mostrarAlerta("ok", "Todas as mensagens foram marcadas como lidas.");
+    }catch(e){
+      mostrarAlerta("erro", e.message || "Erro ao marcar todas como lidas.");
+    }finally{
+      if (btnMarcarTodas){
+        btnMarcarTodas.disabled = false;
+      }
+    }
+  }
+
+  if (btnAtualizar){
+    btnAtualizar.addEventListener("click", function(){
+      carregarMensagens(true);
+    });
+  }
+
+  if (btnMarcarTodas){
+    btnMarcarTodas.addEventListener("click", function(){
+      marcarTodasLidas();
+    });
+  }
+
+  if (inputBusca){
+    inputBusca.addEventListener("input", function(){
+      renderizarLista();
+    });
+  }
+
+  if (selectFiltro){
+    selectFiltro.addEventListener("change", function(){
+      renderizarLista();
+    });
+  }
+
+  carregarMensagens(true);
+  renderizarDetalheVazio();
+
+  if (typeof io !== "undefined"){
+    const socketMensagensPagina = io("/mensagens", {
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 8000
+    });
+
+    socketMensagensPagina.on("connect", function(){
+      socketMensagensPagina.emit("mensagens:pedir_resumo", {});
+    });
+
+    socketMensagensPagina.on("mensagens:nova", function(){
+      carregarMensagens(false);
+      mostrarAlerta("ok", "Nova mensagem recebida.");
+    });
+
+    socketMensagensPagina.on("mensagens:lida", function(){
+      carregarMensagens(false);
+    });
+
+    socketMensagensPagina.on("mensagens:todas_lidas", function(){
+      carregarMensagens(false);
+    });
+
+    socketMensagensPagina.on("mensagens:resumo", function(){
+      carregarMensagens(false);
+    });
+  }
+})();
+</script>
+
+{% endblock %}

@@ -226,3 +226,19 @@ docker compose exec airflow-apiserver airflow users create \
 #compact vdisk
 #detach vdisk
 #exit
+
+
+
+#openssl rand -hex 32
+
+
+
+
+
+#docker compose down --remove-orphans
+
+#docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker
+
+#docker compose up -d
+
+#docker compose logs -f nginx-flask flask-app-1 flask-app-2

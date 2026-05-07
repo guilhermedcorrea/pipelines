@@ -45,6 +45,10 @@ x-airflow-common: &airflow-common
     CAMINHO_STATIC_FLASK: /opt/airflow/FlaskApp/app/static
     CAMINHO_BASE_FLASK_APP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp
 
+    # DAG de mensageria chama o Nginx interno, e o Nginx distribui para as 2 instâncias Flask.
+    FLASK_MENSAGERIA_NOTIFICAR_URL: http://nginx-flask/admin/api/mensagens/notificar
+    MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
+
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/queries:/opt/airflow/queries
@@ -72,6 +76,58 @@ x-airflow-common: &airflow-common
     redis:
       condition: service_healthy
 
+x-flask-common: &flask-common
+  build:
+    context: ./FlaskApp
+    dockerfile: Dockerfile
+  image: flaskapp-guilherme:latest
+  env_file:
+    - ./.env
+  environment:
+    TZ: America/Sao_Paulo
+    PYTHONUNBUFFERED: "1"
+
+    CACHE_REDIS_URL: redis://redis:6379/2
+    SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
+    SOCKETIO_CHANNEL: flaskapp_socketio
+    RATELIMIT_STORAGE_URI: redis://redis:6379/4
+
+    CELERY_BROKER_URL: redis://redis:6379/1
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+    PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
+
+    MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
+  command: >
+    gunicorn
+    --bind 0.0.0.0:8000
+    --workers 1
+    --worker-class gthread
+    --threads 60
+    --timeout 120
+    --graceful-timeout 30
+    --keep-alive 10
+    --access-logfile -
+    --error-logfile -
+    --log-level info
+    --capture-output
+    --worker-tmp-dir /dev/shm
+    --max-requests 2000
+    --max-requests-jitter 200
+    wsgi:app
+  shm_size: "512mb"
+  expose:
+    - "8000"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    redis:
+      condition: service_healthy
+  volumes:
+    - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+    - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
+    - ./FlaskApp/app/static:/app/app/static
+  restart: unless-stopped
 
 services:
   postgres:
@@ -186,58 +242,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  flask-app:
-    build:
-      context: ./FlaskApp
-      dockerfile: Dockerfile
-    image: flaskapp-guilherme:latest
-    env_file:
-      - ./.env
-    environment:
-      TZ: America/Sao_Paulo
-      PYTHONUNBUFFERED: "1"
+  # Instância Flask 1.
+  # Mantém 1 worker para não quebrar Socket.IO, mas usa threads para concorrência.
+  flask-app-1:
+    <<: *flask-common
 
-      CACHE_REDIS_URL: redis://redis:6379/2
-      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
-      SOCKETIO_CHANNEL: flaskapp_socketio
-      RATELIMIT_STORAGE_URI: redis://redis:6379/4
-
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-      CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
-      PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
-    command: >
-      gunicorn
-      --bind 0.0.0.0:8000
-      --workers 2
-      --worker-class gthread
-      --threads 30
-      --timeout 120
-      --graceful-timeout 30
-      --keep-alive 10
-      --access-logfile -
-      --error-logfile -
-      --log-level info
-      --capture-output
-      --worker-tmp-dir /dev/shm
-      --max-requests 2000
-      --max-requests-jitter 200
-      wsgi:app
-
-    shm_size: "512mb"
-
-    expose:
-      - "8000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
-      - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
-      - ./FlaskApp/app/static:/app/app/static
-    restart: unless-stopped
+  # Instância Flask 2.
+  # Segunda instância para ganhar capacidade sem usar gunicorn --workers 2 no mesmo container.
+  flask-app-2:
+    <<: *flask-common
 
   celery-checking-worker:
     build:
@@ -259,13 +272,16 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
       PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
+      MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
     command: python -m celery -A app.celery_app.celery_app worker -Q checkin_upload -l info --concurrency=2
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
-      flask-app:
+      flask-app-1:
+        condition: service_started
+      flask-app-2:
         condition: service_started
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
@@ -292,13 +308,16 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+      MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
     command: python -m celery -A app.celery_app.celery_app worker -Q kanban_retry_rapido -l info --concurrency=2
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
-      flask-app:
+      flask-app-1:
+        condition: service_started
+      flask-app-2:
         condition: service_started
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
@@ -308,14 +327,15 @@ services:
   nginx-flask:
     image: nginx:1.27-alpine
     depends_on:
-      flask-app:
+      flask-app-1:
+        condition: service_started
+      flask-app-2:
         condition: service_started
     ports:
       - "5000:80"
     volumes:
       - ./FlaskApp/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
-
 
 volumes:
   postgres-db-volume:

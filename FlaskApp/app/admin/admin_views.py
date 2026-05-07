@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from ..extensions import db,limiter
+from ..extensions import db, limiter, csrf
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app,abort
 from ..models.admin_models import FatoMovimentoFinanceiroEmpresas, DimEmpresaProprietaria,DimProdutoAuvo
 from datetime import datetime, date, timedelta
@@ -9,7 +9,8 @@ from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
 import hashlib
 
-
+import os
+from app.socket_events import emitir_resumo_mensagens_usuario
 
 
 admin = Blueprint("admin", __name__)
@@ -20,6 +21,15 @@ admin = Blueprint("admin", __name__)
 ID_STATUS_CONTRATO_APROVADO = 2
 ID_FASE_FORMULARIO_CONTRATO = 4
 TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
+TABELA_VENCIMENTO_CAMPANHA = "[Integracao].[Silver].[FatoVencimentoCampanhaEuromidia]"
+
+ID_STATUS_CAMPANHA_FUTURA = 1
+ID_STATUS_CAMPANHA_ATIVA = 2
+ID_STATUS_CAMPANHA_VENCIDA = 4
+ID_STATUS_CAMPANHA_CANCELADA = 5
+ID_STATUS_CAMPANHA_SEM_DATA_TERMINO = 6
+
+ID_TIPOS_DOCUMENTO_GERAM_CAMPANHA = {1, 3}
 
 
 
@@ -4938,6 +4948,225 @@ def _upsert_vinculo_contrato_card_euromidia(
     )
     return False
 
+
+def _bit_ativo_campanha_admin(valor) -> int:
+    """Normaliza BitAtivo para 1 ou 0, aceitando int, bool e texto."""
+    if isinstance(valor, bool):
+        return 1 if valor else 0
+
+    texto = _texto_ou_vazio(valor).lower()
+    if texto in {"0", "false", "falso", "não", "nao", "no", "n"}:
+        return 0
+
+    inteiro = _int_ou_none(valor)
+    if inteiro is not None:
+        return 1 if inteiro != 0 else 0
+
+    return 1
+
+
+def _resolver_id_status_campanha_aprovada_admin(
+    *,
+    data_inicio_campanha,
+    data_termino_previsto,
+    bit_ativo,
+) -> int:
+    """Resolve o status inicial da campanha no momento da aprovação do contrato."""
+
+    if _bit_ativo_campanha_admin(bit_ativo) == 0:
+        return ID_STATUS_CAMPANHA_CANCELADA
+
+    data_inicio = _data_ou_none(data_inicio_campanha) if isinstance(data_inicio_campanha, str) else data_inicio_campanha
+    data_termino = _data_ou_none(data_termino_previsto) if isinstance(data_termino_previsto, str) else data_termino_previsto
+
+    if hasattr(data_inicio, "date"):
+        data_inicio = data_inicio.date()
+    if hasattr(data_termino, "date"):
+        data_termino = data_termino.date()
+
+    hoje = date.today()
+
+    if data_termino in (None, ""):
+        return ID_STATUS_CAMPANHA_SEM_DATA_TERMINO
+
+    if data_inicio not in (None, "") and data_inicio > hoje:
+        return ID_STATUS_CAMPANHA_FUTURA
+
+    if data_termino < hoje:
+        return ID_STATUS_CAMPANHA_VENCIDA
+
+    return ID_STATUS_CAMPANHA_ATIVA
+
+
+def _upsert_vencimento_campanha_aprovada_admin(
+    *,
+    cabecalho_solicitacao: dict,
+    item_solicitacao: dict,
+    id_contrato_controle: int | None,
+    id_item_controle: int | None,
+    id_fato_kanban_card: int | None,
+    id_dim_tipo_documento: int | None,
+) -> dict:
+    """Cria/atualiza o vencimento da campanha quando contrato/aditivo é aprovado na fase 4."""
+
+    id_contrato = _int_ou_none(id_contrato_controle)
+    id_item = _int_ou_none(id_item_controle)
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_tipo_documento = _int_ou_none(id_dim_tipo_documento)
+
+    retorno_ignorado = {
+        "ok": True,
+        "acao": "ignorado",
+        "id_contrato": id_contrato,
+        "id_item": id_item,
+        "id_card": id_card,
+        "id_dim_tipo_documento": id_tipo_documento,
+    }
+
+    if id_contrato in (None, "", 0) or id_item in (None, "", 0):
+        retorno_ignorado["motivo"] = "contrato_ou_item_nao_resolvido"
+        return retorno_ignorado
+
+    if id_tipo_documento not in ID_TIPOS_DOCUMENTO_GERAM_CAMPANHA:
+        retorno_ignorado["motivo"] = "tipo_documento_nao_gera_campanha"
+        return retorno_ignorado
+
+    if not _card_admin_esta_na_fase_formulario_contrato(id_card):
+        retorno_ignorado["motivo"] = "card_nao_esta_na_fase_4"
+        return retorno_ignorado
+
+    data_inicio = item_solicitacao.get("DataInicioPrevisto")
+    data_termino = item_solicitacao.get("DataTerminoPrevisto")
+    bit_ativo = item_solicitacao.get("BitAtivo") if item_solicitacao.get("BitAtivo") is not None else 1
+
+    id_status_campanha = _resolver_id_status_campanha_aprovada_admin(
+        data_inicio_campanha=data_inicio,
+        data_termino_previsto=data_termino,
+        bit_ativo=bit_ativo,
+    )
+
+    id_vendedor = _int_ou_none(item_solicitacao.get("IDVendedor"))
+    id_empresa = _int_ou_none(item_solicitacao.get("IDEmpresa")) or _int_ou_none(cabecalho_solicitacao.get("IDEmpresa"))
+    marca_exibida = (
+        _texto_ou_none(item_solicitacao.get("MarcaExibida"))
+        or _texto_ou_none(cabecalho_solicitacao.get("MarcaExibida"))
+        or _texto_ou_none(item_solicitacao.get("RazaoSocial"))
+        or _texto_ou_none(cabecalho_solicitacao.get("RazaoSocial"))
+    )
+
+    params = {
+        "id_contrato": int(id_contrato),
+        "id_item": int(id_item),
+        "id_status_campanha": int(id_status_campanha),
+        "id_vendedor": int(id_vendedor) if id_vendedor not in (None, "", 0) else None,
+        "id_empresa": int(id_empresa) if id_empresa not in (None, "", 0) else None,
+        "marca_exibida": marca_exibida,
+        "data_inicio": data_inicio,
+        "data_termino": data_termino,
+        "bit_ativo": _bit_ativo_campanha_admin(bit_ativo),
+    }
+
+    db.session.execute(
+        text(f"""
+            UPDATE vc
+               SET vc.IDDimStatusCampanha = :id_status_campanha,
+                   vc.IDVendedor = :id_vendedor,
+                   vc.IDEmpresa = :id_empresa,
+                   vc.MarcaExibida = :marca_exibida,
+                   vc.DataInicioCampanha = :data_inicio,
+                   vc.DataTerminoPrevisto = :data_termino,
+                   vc.DiasParaVencer = CASE
+                                           WHEN :data_termino IS NULL THEN NULL
+                                           ELSE DATEDIFF(DAY, CONVERT(date, GETDATE()), CONVERT(date, :data_termino))
+                                        END,
+                   vc.BitAtivo = :bit_ativo,
+                   vc.DataAtualizacao = SYSDATETIME()
+              FROM {TABELA_VENCIMENTO_CAMPANHA} vc
+             WHERE vc.IDFatoControleContratosEuromidia = :id_contrato
+               AND vc.IDFatoControleContratosItensEuromidia = :id_item;
+
+            IF @@ROWCOUNT = 0
+            BEGIN
+                INSERT INTO {TABELA_VENCIMENTO_CAMPANHA}
+                (
+                    IDFatoControleContratosEuromidia,
+                    IDFatoControleContratosItensEuromidia,
+                    IDDimStatusCampanha,
+                    IDVendedor,
+                    IDEmpresa,
+                    MarcaExibida,
+                    DataInicioCampanha,
+                    DataTerminoPrevisto,
+                    DiasParaVencer,
+                    BitAtivo,
+                    DataCriacao,
+                    DataAtualizacao
+                )
+                SELECT
+                    :id_contrato,
+                    :id_item,
+                    :id_status_campanha,
+                    :id_vendedor,
+                    :id_empresa,
+                    :marca_exibida,
+                    :data_inicio,
+                    :data_termino,
+                    CASE
+                        WHEN :data_termino IS NULL THEN NULL
+                        ELSE DATEDIFF(DAY, CONVERT(date, GETDATE()), CONVERT(date, :data_termino))
+                    END,
+                    :bit_ativo,
+                    SYSDATETIME(),
+                    SYSDATETIME()
+                WHERE NOT EXISTS
+                (
+                    SELECT 1
+                    FROM {TABELA_VENCIMENTO_CAMPANHA} WITH (UPDLOCK, HOLDLOCK)
+                    WHERE IDFatoControleContratosEuromidia = :id_contrato
+                      AND IDFatoControleContratosItensEuromidia = :id_item
+                );
+            END;
+        """),
+        params,
+    )
+
+    row_check = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                   IDFatoVencimentoCampanhaEuromidia,
+                   IDDimStatusCampanha,
+                   DiasParaVencer
+            FROM {TABELA_VENCIMENTO_CAMPANHA}
+            WHERE IDFatoControleContratosEuromidia = :id_contrato
+              AND IDFatoControleContratosItensEuromidia = :id_item
+            ORDER BY IDFatoVencimentoCampanhaEuromidia DESC;
+        """),
+        {
+            "id_contrato": int(id_contrato),
+            "id_item": int(id_item),
+        },
+    ).mappings().first()
+
+    print(
+        "APROVACAO_CONTRATO | vencimento campanha sincronizado | "
+        f"id_contrato={id_contrato} | id_item={id_item} | "
+        f"id_status_campanha={id_status_campanha} | id_vencimento={(row_check or {}).get('IDFatoVencimentoCampanhaEuromidia')}",
+        flush=True,
+    )
+
+    return {
+        "ok": True,
+        "acao": "upsert",
+        "id_contrato": int(id_contrato),
+        "id_item": int(id_item),
+        "id_card": id_card,
+        "id_dim_tipo_documento": id_tipo_documento,
+        "id_status_campanha": int(id_status_campanha),
+        "id_vencimento_campanha": _int_ou_none((row_check or {}).get("IDFatoVencimentoCampanhaEuromidia")),
+        "dias_para_vencer": _int_ou_none((row_check or {}).get("DiasParaVencer")),
+    }
+
+
 def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario_logado: int | None) -> dict:
     cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao))
     if not cab:
@@ -4949,6 +5178,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     referencia_informada = _texto_ou_none(cab.get("Referencia"))
     ids_itens_controle: list[int] = []
     precos_praticados: list[dict] = []
+    vencimentos_campanha: list[dict] = []
 
     referencia_resolvida = referencia_informada
     if not referencia_resolvida:
@@ -5546,6 +5776,23 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         )
         precos_praticados.append(resultado_preco_praticado)
 
+        id_dim_tipo_documento_campanha = _int_ou_none(cab.get("IDDimTipoDocumento"))
+        if id_dim_tipo_documento_campanha in (None, "", 0):
+            id_dim_tipo_documento_campanha = _resolver_id_dim_tipo_documento_admin(
+                cab.get("TipoDocumento"),
+                cab.get("IDEmpresaProprietaria"),
+            )
+
+        resultado_vencimento_campanha = _upsert_vencimento_campanha_aprovada_admin(
+            cabecalho_solicitacao=cab,
+            item_solicitacao=item,
+            id_contrato_controle=int(id_contrato_controle),
+            id_item_controle=int(id_item_controle),
+            id_fato_kanban_card=id_card_vinculo,
+            id_dim_tipo_documento=id_dim_tipo_documento_campanha,
+        )
+        vencimentos_campanha.append(resultado_vencimento_campanha)
+
         if id_item_solicitacao not in (None, "", 0):
             db.session.execute(
                 text("""
@@ -5583,6 +5830,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "id_contrato_controle": int(id_contrato_controle),
         "ids_itens_controle": ids_itens_controle,
         "precos_praticados": precos_praticados,
+        "vencimentos_campanha": vencimentos_campanha,
         "id_card": _int_ou_none(cab.get("IDFatoKanbanCard")),
         "id_empresa": _int_ou_none(cab.get("IDEmpresa")),
         "id_empresa_proprietaria": _int_ou_none(cab.get("IDEmpresaProprietaria")),
@@ -6668,3 +6916,323 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
         itens=dados["itens"],
         diagrama_status=dados["diagrama_status"],
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@admin.route("/mensagens", methods=["GET"])
+@login_required
+@limiter.limit("80 per minute", methods=["GET"])
+def mensagens_usuario():
+    return render_template("admin/mensagens_usuario.html")
+
+
+@admin.route("/api/mensagens/resumo", methods=["GET"])
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+def api_mensagens_resumo():
+    id_usuario = _id_usuario_logado()
+
+    if not id_usuario:
+        return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
+
+    row = db.session.execute(
+        text("""
+            SELECT COUNT(1) AS Total
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] WITH (NOLOCK)
+            WHERE IDDimUsuariosDestinatario = :id_usuario
+              AND ISNULL(BitAtivo, 1) = 1
+              AND ISNULL(BitLida, 0) = 0
+        """),
+        {"id_usuario": int(id_usuario)}
+    ).mappings().first()
+
+    total = int(row["Total"] or 0) if row else 0
+
+    return jsonify({
+        "ok": True,
+        "nao_lidas": total,
+    })
+
+
+@admin.route("/api/mensagens", methods=["GET"])
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+def api_mensagens_lista():
+    id_usuario = _id_usuario_logado()
+
+    if not id_usuario:
+        return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
+
+    rows = db.session.execute(
+        text("""
+            SELECT TOP (100)
+                 m.IDFatoMensagemUsuario
+                ,m.IDDimTipoMensagem
+                ,tm.NomeTipoMensagem
+                ,m.IDFatoVencimentoCampanhaEuromidia
+                ,m.IDFatoControleContratosEuromidia
+                ,m.IDFatoControleContratosItensEuromidia
+                ,m.TituloMensagem
+                ,LEFT(ISNULL(m.TextoMensagem, ''), 260) AS ResumoMensagem
+                ,m.LinkDestino
+                ,ISNULL(m.BitLida, 0) AS BitLida
+                ,m.DataLeitura
+                ,m.DataCriacao
+                ,m.DataAtualizacao
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] m WITH (NOLOCK)
+            LEFT JOIN [Integracao].[Silver].[DimTipoMensagem] tm WITH (NOLOCK)
+                ON tm.IDDimTipoMensagem = m.IDDimTipoMensagem
+            WHERE m.IDDimUsuariosDestinatario = :id_usuario
+              AND ISNULL(m.BitAtivo, 1) = 1
+            ORDER BY
+                CASE WHEN ISNULL(m.BitLida, 0) = 0 THEN 0 ELSE 1 END,
+                m.DataCriacao DESC,
+                m.IDFatoMensagemUsuario DESC
+        """),
+        {"id_usuario": int(id_usuario)}
+    ).mappings().all()
+
+    itens = []
+
+    for r in rows:
+        data_criacao = r.get("DataCriacao")
+        data_leitura = r.get("DataLeitura")
+
+        itens.append({
+            "id": int(r["IDFatoMensagemUsuario"]),
+            "id_tipo": r.get("IDDimTipoMensagem"),
+            "tipo": r.get("NomeTipoMensagem") or "Mensagem",
+            "titulo": r.get("TituloMensagem") or "Sem título",
+            "resumo": r.get("ResumoMensagem") or "",
+            "link": r.get("LinkDestino") or "",
+            "bit_lida": bool(r.get("BitLida")),
+            "data_criacao": data_criacao.strftime("%d/%m/%Y %H:%M") if data_criacao else "",
+            "data_leitura": data_leitura.strftime("%d/%m/%Y %H:%M") if data_leitura else "",
+            "id_vencimento": r.get("IDFatoVencimentoCampanhaEuromidia"),
+            "id_contrato": r.get("IDFatoControleContratosEuromidia"),
+            "id_item": r.get("IDFatoControleContratosItensEuromidia"),
+        })
+
+    return jsonify({
+        "ok": True,
+        "itens": itens,
+    })
+
+
+@admin.route("/api/mensagens/<int:id_mensagem>", methods=["GET"])
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+def api_mensagens_detalhe(id_mensagem: int):
+    id_usuario = _id_usuario_logado()
+
+    if not id_usuario:
+        return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
+
+    r = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                 m.IDFatoMensagemUsuario
+                ,m.IDDimTipoMensagem
+                ,tm.NomeTipoMensagem
+                ,m.IDFatoVencimentoCampanhaEuromidia
+                ,m.IDFatoControleContratosEuromidia
+                ,m.IDFatoControleContratosItensEuromidia
+                ,m.TituloMensagem
+                ,m.TextoMensagem
+                ,m.LinkDestino
+                ,ISNULL(m.BitLida, 0) AS BitLida
+                ,m.DataLeitura
+                ,m.DataCriacao
+                ,m.DataAtualizacao
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] m WITH (NOLOCK)
+            LEFT JOIN [Integracao].[Silver].[DimTipoMensagem] tm WITH (NOLOCK)
+                ON tm.IDDimTipoMensagem = m.IDDimTipoMensagem
+            WHERE m.IDFatoMensagemUsuario = :id_mensagem
+              AND m.IDDimUsuariosDestinatario = :id_usuario
+              AND ISNULL(m.BitAtivo, 1) = 1
+        """),
+        {
+            "id_mensagem": int(id_mensagem),
+            "id_usuario": int(id_usuario),
+        }
+    ).mappings().first()
+
+    if not r:
+        return jsonify({"ok": False, "erro": "Mensagem não encontrada."}), 404
+
+    data_criacao = r.get("DataCriacao")
+    data_leitura = r.get("DataLeitura")
+
+    return jsonify({
+        "ok": True,
+        "mensagem": {
+            "id": int(r["IDFatoMensagemUsuario"]),
+            "id_tipo": r.get("IDDimTipoMensagem"),
+            "tipo": r.get("NomeTipoMensagem") or "Mensagem",
+            "titulo": r.get("TituloMensagem") or "Sem título",
+            "texto": r.get("TextoMensagem") or "",
+            "link": r.get("LinkDestino") or "",
+            "bit_lida": bool(r.get("BitLida")),
+            "data_criacao": data_criacao.strftime("%d/%m/%Y %H:%M") if data_criacao else "",
+            "data_leitura": data_leitura.strftime("%d/%m/%Y %H:%M") if data_leitura else "",
+            "id_vencimento": r.get("IDFatoVencimentoCampanhaEuromidia"),
+            "id_contrato": r.get("IDFatoControleContratosEuromidia"),
+            "id_item": r.get("IDFatoControleContratosItensEuromidia"),
+        }
+    })
+
+
+@admin.route("/api/mensagens/<int:id_mensagem>/marcar-lida", methods=["POST"])
+@login_required
+@limiter.limit("120 per minute", methods=["POST"])
+def api_mensagens_marcar_lida(id_mensagem: int):
+    id_usuario = _id_usuario_logado()
+
+    if not id_usuario:
+        return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
+
+    resultado = db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoMensagemUsuario]
+               SET BitLida = 1,
+                   DataLeitura = COALESCE(DataLeitura, GETDATE()),
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoMensagemUsuario = :id_mensagem
+               AND IDDimUsuariosDestinatario = :id_usuario
+               AND ISNULL(BitAtivo, 1) = 1
+        """),
+        {
+            "id_mensagem": int(id_mensagem),
+            "id_usuario": int(id_usuario),
+        }
+    )
+
+    db.session.commit()
+
+    emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:lida")
+
+    return jsonify({
+        "ok": True,
+        "linhas": int(resultado.rowcount or 0),
+    })
+
+
+@admin.route("/api/mensagens/marcar-todas-lidas", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute", methods=["POST"])
+def api_mensagens_marcar_todas_lidas():
+    id_usuario = _id_usuario_logado()
+
+    if not id_usuario:
+        return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
+
+    resultado = db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoMensagemUsuario]
+               SET BitLida = 1,
+                   DataLeitura = COALESCE(DataLeitura, GETDATE()),
+                   DataAtualizacao = GETDATE()
+             WHERE IDDimUsuariosDestinatario = :id_usuario
+               AND ISNULL(BitAtivo, 1) = 1
+               AND ISNULL(BitLida, 0) = 0
+        """),
+        {"id_usuario": int(id_usuario)}
+    )
+
+    db.session.commit()
+
+    emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:todas_lidas")
+
+    return jsonify({
+        "ok": True,
+        "linhas": int(resultado.rowcount or 0),
+    })
+
+
+@admin.route("/api/mensagens/notificar", methods=["POST"])
+@csrf.exempt
+@limiter.limit("300 per minute", methods=["POST"])
+def api_mensagens_notificar():
+    token_esperado = (
+        current_app.config.get("MENSAGERIA_SOCKET_TOKEN")
+        or os.getenv("MENSAGERIA_SOCKET_TOKEN")
+        or ""
+    )
+
+    token_recebido = (
+        request.headers.get("X-Mensageria-Token")
+        or request.headers.get("X-Internal-Token")
+        or ""
+    )
+
+    if not token_esperado or token_recebido != token_esperado:
+        return jsonify({"ok": False, "erro": "Token inválido."}), 401
+
+    payload = request.get_json(silent=True) or {}
+
+    usuarios_raw = (
+        payload.get("usuarios")
+        or payload.get("ids_usuarios")
+        or payload.get("id_usuario")
+        or []
+    )
+
+    if isinstance(usuarios_raw, (int, str)):
+        usuarios_raw = [usuarios_raw]
+
+    usuarios = []
+
+    for item in usuarios_raw:
+        try:
+            id_usuario = int(item)
+            if id_usuario > 0 and id_usuario not in usuarios:
+                usuarios.append(id_usuario)
+        except Exception:
+            pass
+
+    if not usuarios:
+        return jsonify({"ok": False, "erro": "Nenhum usuário informado."}), 400
+
+    for id_usuario in usuarios:
+        emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:nova")
+
+    return jsonify({
+        "ok": True,
+        "usuarios_notificados": usuarios,
+    })
