@@ -737,7 +737,7 @@
 (function(){
   const svg = document.getElementById('chartFaturamentoCarteira');
   const legend = document.getElementById('chartLegendFaturamento');
-  const data = {{ historico_faturamento_json|safe }} || [];
+  const data = {{ historico_faturamento_json|default('[]')|safe }} || [];
 
   if (!svg || !legend || !Array.isArray(data) || data.length === 0) {
     return;
@@ -830,7 +830,7 @@
   const svg = document.getElementById('chartSetoresCarteira');
   const canvas = document.getElementById('chartSetoresCarteiraCanvas');
   const tooltip = document.getElementById('chartSetoresCarteiraTooltip');
-  const data = {{ setores_json|safe }} || [];
+  const data = {{ setores_json|default('[]')|safe }} || [];
 
   if (!svg || !canvas || !tooltip || !Array.isArray(data) || data.length === 0) {
     return;

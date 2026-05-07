@@ -8,6 +8,7 @@
 
 {% set carteira_atual_safe = (carteira_atual if carteira_atual is defined and carteira_atual else {}) %}
 {% set carteiras_disponiveis_safe = (carteiras_disponiveis if carteiras_disponiveis is defined and carteiras_disponiveis else []) %}
+{% set usuario_logado_eh_perfil_vendedor_safe = (usuario_logado_eh_perfil_vendedor if usuario_logado_eh_perfil_vendedor is defined else false) %}
 
 
 {% set score_setor_val = segmentacao_safe.get('ScoreSetor') %}
@@ -804,36 +805,38 @@
           </button>
         {% endif %}
 
-        <button
-          type="button"
-          class="btn-carteira btn-carteira-acao btn-carteira-adicionar"
-          id="btnAbrirModalCarteira"
-          {% if not carteiras_disponiveis_safe %}disabled{% endif %}
-        >
-          {{ "Mover Carteira" if carteira_atual_safe else "Adicionar Carteira" }}
-        </button>
-
-        <form
-          method="post"
-          action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
-          class="form-carteira-inline"
-          onsubmit="return confirm('Deseja remover esta empresa da carteira atual?');"
-        >
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="return_to" value="{{ return_to or '' }}">
-          <input type="hidden" name="contratos_page" value="{{ contratos_paginacao.page if contratos_paginacao else 1 }}">
-          <input type="hidden" name="acao" value="remover">
-
+        {% if not usuario_logado_eh_perfil_vendedor_safe %}
           <button
-            type="submit"
-            class="btn-carteira btn-carteira-acao btn-carteira-remover"
-            id="btnRemoverCarteira"
-            {% if not carteira_atual_safe %}disabled{% endif %}
-            title="{% if carteira_atual_safe %}Remover empresa da carteira atual{% else %}Empresa já está sem carteira{% endif %}"
+            type="button"
+            class="btn-carteira btn-carteira-acao btn-carteira-adicionar"
+            id="btnAbrirModalCarteira"
+            {% if not carteiras_disponiveis_safe %}disabled{% endif %}
           >
-            Remover Carteira
+            {{ "Mover Carteira" if carteira_atual_safe else "Adicionar Carteira" }}
           </button>
-        </form>
+
+          <form
+            method="post"
+            action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
+            class="form-carteira-inline"
+            onsubmit="return confirm('Deseja remover esta empresa da carteira atual?');"
+          >
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="return_to" value="{{ return_to or '' }}">
+            <input type="hidden" name="contratos_page" value="{{ contratos_paginacao.page if contratos_paginacao else 1 }}">
+            <input type="hidden" name="acao" value="remover">
+
+            <button
+              type="submit"
+              class="btn-carteira btn-carteira-acao btn-carteira-remover"
+              id="btnRemoverCarteira"
+              {% if not carteira_atual_safe %}disabled{% endif %}
+              title="{% if carteira_atual_safe %}Remover empresa da carteira atual{% else %}Empresa já está sem carteira{% endif %}"
+            >
+              Remover Carteira
+            </button>
+          </form>
+        {% endif %}
       </div>
 
       {% if carteira_atual_safe %}
@@ -856,56 +859,58 @@
   </div>
 
 
-  <div class="modal-carteira" id="modalCarteiraEmpresa" hidden>
-    <div class="modal-carteira-box" role="dialog" aria-modal="true" aria-labelledby="modalCarteiraEmpresaTitulo">
-      <div class="modal-carteira-head">
-        <div>
-          <h2 class="modal-carteira-title" id="modalCarteiraEmpresaTitulo">
-            {{ "Mover carteira da empresa" if carteira_atual_safe else "Adicionar empresa em uma carteira" }}
-          </h2>
-          <div class="modal-carteira-subtitle">
-            Selecione a carteira do vendedor responsável por esta empresa.
+  {% if not usuario_logado_eh_perfil_vendedor_safe %}
+    <div class="modal-carteira" id="modalCarteiraEmpresa" hidden>
+      <div class="modal-carteira-box" role="dialog" aria-modal="true" aria-labelledby="modalCarteiraEmpresaTitulo">
+        <div class="modal-carteira-head">
+          <div>
+            <h2 class="modal-carteira-title" id="modalCarteiraEmpresaTitulo">
+              {{ "Mover carteira da empresa" if carteira_atual_safe else "Adicionar empresa em uma carteira" }}
+            </h2>
+            <div class="modal-carteira-subtitle">
+              Selecione a carteira do vendedor responsável por esta empresa.
+            </div>
           </div>
+
+          <button type="button" class="btn-mini" id="btnFecharModalCarteira" aria-label="Fechar">×</button>
         </div>
 
-        <button type="button" class="btn-mini" id="btnFecharModalCarteira" aria-label="Fechar">×</button>
-      </div>
+        <div class="modal-carteira-body">
+          <form
+            id="formCarteiraEmpresa"
+            method="post"
+            action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
+          >
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="return_to" value="{{ return_to or '' }}">
+            <input type="hidden" name="contratos_page" value="{{ contratos_paginacao.page if contratos_paginacao else 1 }}">
 
-      <div class="modal-carteira-body">
-        <form
-          id="formCarteiraEmpresa"
-          method="post"
-          action="{{ url_for('Paineis.cliente_carteira_atualizar', id_empresa=empresa.IDDimClientesEuromidia) }}"
-        >
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="return_to" value="{{ return_to or '' }}">
-          <input type="hidden" name="contratos_page" value="{{ contratos_paginacao.page if contratos_paginacao else 1 }}">
+            <div class="campo-carteira">
+              <label for="selectCarteiraEmpresa">Carteira / Vendedor</label>
+              <select id="selectCarteiraEmpresa" name="id_fato_carteira_vendedor" required>
+                <option value="">Selecione...</option>
+                {% for carteira in carteiras_disponiveis_safe %}
+                  <option
+                    value="{{ carteira.IDFatoCarteiraVendedor }}"
+                    {% if carteira_atual_safe and carteira_atual_safe.IDFatoCarteiraVendedor == carteira.IDFatoCarteiraVendedor %}selected{% endif %}
+                  >{{ carteira.NomeVendedor or "Sem vendedor" }}</option>
+                {% endfor %}
+              </select>
+            </div>
 
-          <div class="campo-carteira">
-            <label for="selectCarteiraEmpresa">Carteira / Vendedor</label>
-            <select id="selectCarteiraEmpresa" name="id_fato_carteira_vendedor" required>
-              <option value="">Selecione...</option>
-              {% for carteira in carteiras_disponiveis_safe %}
-                <option
-                  value="{{ carteira.IDFatoCarteiraVendedor }}"
-                  {% if carteira_atual_safe and carteira_atual_safe.IDFatoCarteiraVendedor == carteira.IDFatoCarteiraVendedor %}selected{% endif %}
-                >{{ carteira.NomeVendedor or "Sem vendedor" }}</option>
-              {% endfor %}
-            </select>
-          </div>
+            <div class="carteira-feedback" id="feedbackCarteiraEmpresa"></div>
 
-          <div class="carteira-feedback" id="feedbackCarteiraEmpresa"></div>
-
-          <div class="modal-carteira-actions">
-            <button type="button" class="btn btn-secondary" id="btnCancelarCarteira">Cancelar</button>
-            <button type="submit" class="btn" id="btnSalvarCarteira">
-              {{ "Salvar movimentação" if carteira_atual_safe else "Adicionar na carteira" }}
-            </button>
-          </div>
-        </form>
+            <div class="modal-carteira-actions">
+              <button type="button" class="btn btn-secondary" id="btnCancelarCarteira">Cancelar</button>
+              <button type="submit" class="btn" id="btnSalvarCarteira">
+                {{ "Salvar movimentação" if carteira_atual_safe else "Adicionar na carteira" }}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
-  </div>
+  {% endif %}
 
 
   <!-- Segmentação -->

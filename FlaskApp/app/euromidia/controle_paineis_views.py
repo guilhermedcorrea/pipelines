@@ -12818,6 +12818,8 @@ def _matriz_filial_label(valor) -> str:
 @paineis_bp.post("/clientes/<int:id_empresa>/carteira")
 @login_required
 def cliente_carteira_atualizar(id_empresa: int):
+    if _usuario_logado_eh_perfil_vendedor():
+        abort(403, description="Perfil Vendedor não pode mover ou remover empresas de carteira.")
 
     def _resolver_return_to_local():
         candidatos = [
@@ -13150,6 +13152,8 @@ def cliente_detalhe(id_empresa: int):
 
     return_to = _resolver_return_to_local()
     session["clientes_lista_return_to"] = return_to
+
+    usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
 
     row = (
         db.session.query(
@@ -13774,6 +13778,7 @@ def cliente_detalhe(id_empresa: int):
         contratos_paginacao=contratos_paginacao,
         carteira_atual=carteira_atual,
         carteiras_disponiveis=carteiras_disponiveis,
+        usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
         return_to=return_to,
     )
 
@@ -20854,7 +20859,7 @@ def carteiras_lista():
 @requer_item_menu_paineis("carteiras")
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def carteira_detalhe(id_fato_carteira_vendedor: int):
-    """Eu abro o detalhe de uma carteira de vendedor."""
+    """Eu abro o detalhe de uma carteira de vendedor com KPIs, gráficos, rankings e ações."""
 
     def _inteiro_query(nome: str, padrao: int) -> int:
         try:
@@ -20863,9 +20868,25 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         except Exception:
             return padrao
 
+    def _add_meses(dt_base: date, deslocamento: int) -> date:
+        ano = dt_base.year + ((dt_base.month - 1 + deslocamento) // 12)
+        mes = ((dt_base.month - 1 + deslocamento) % 12) + 1
+        return date(ano, mes, 1)
+
+    def _float_seguro(valor, padrao: float = 0.0) -> float:
+        try:
+            if valor is None:
+                return padrao
+            return float(valor)
+        except Exception:
+            return padrao
+
     q = (request.args.get("q") or "").strip()
     page = _inteiro_query("page", 1)
-    per_page = 20
+
+    # A tela faz paginação/filtro no navegador. Carregar só 20 linhas quebrava ranking,
+    # filtro de classes e gráfico quando a carteira tinha mais empresas.
+    per_page = 1000
     offset = (page - 1) * per_page
 
     usuario_logado_eh_vendedor = _usuario_logado_eh_perfil_vendedor()
@@ -20874,11 +20895,9 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
 
     hoje = date.today()
     dt_inicio_mes = date(hoje.year, hoje.month, 1)
-
-    if hoje.month == 12:
-        dt_prox_mes = date(hoje.year + 1, 1, 1)
-    else:
-        dt_prox_mes = date(hoje.year, hoje.month + 1, 1)
+    dt_prox_mes = _add_meses(dt_inicio_mes, 1)
+    dt_inicio_mes_anterior = _add_meses(dt_inicio_mes, -1)
+    dt_fim_mes_anterior_exclusivo = dt_inicio_mes
 
     sql_carteira = text("""
         SELECT TOP (1)
@@ -20930,11 +20949,11 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         ContratosEmpresa AS
         (
             SELECT
-                ch.IDEmpresa,
+                ec.IDEmpresa,
                 ch.IDFatoControleContratosEuromidia,
                 ch.TotalFaturamentoLiquidoMensal
             FROM EmpresasCarteira ec
-            INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
                 ON ch.IDEmpresa = ec.IDEmpresa
                AND ISNULL(ch.BitAtivo, 1) = 1
         ),
@@ -20950,7 +20969,16 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                         THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
                         ELSE 0
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesItens
+                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
             FROM ContratosEmpresa ce
             LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
                 ON it.IDFatoControleContratoEuromidia = ce.IDFatoControleContratosEuromidia
@@ -20964,23 +20992,45 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                 CAST(SUM(ISNULL(ce.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
             FROM ContratosEmpresa ce
             GROUP BY ce.IDEmpresa
+        ),
+        BaseEmpresas AS
+        (
+            SELECT
+                ec.IDEmpresa,
+                CAST(
+                    ISNULL(
+                        NULLIF(fi.FaturamentoMesItens, 0),
+                        ISNULL(fc.FaturamentoMesCabecalho, 0)
+                    ) AS DECIMAL(18,2)
+                ) AS FaturamentoMes,
+                CAST(ISNULL(fi.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+            FROM EmpresasCarteira ec
+            LEFT JOIN FaturamentoItens fi
+                ON fi.IDEmpresa = ec.IDEmpresa
+            LEFT JOIN FaturamentoCabecalho fc
+                ON fc.IDEmpresa = ec.IDEmpresa
         )
         SELECT
             COUNT(DISTINCT ec.IDEmpresa) AS QuantidadeEmpresas,
             COUNT(DISTINCT CASE WHEN ISNULL(e.BitCliente, 0) = 1 THEN ec.IDEmpresa ELSE NULL END) AS ClientesAtivos,
-            CAST(SUM(
-                ISNULL(
-                    NULLIF(fi.FaturamentoMesItens, 0),
-                    ISNULL(fc.FaturamentoMesCabecalho, 0)
-                )
-            ) AS DECIMAL(18,2)) AS FaturamentoMes
+            CAST(ISNULL(SUM(be.FaturamentoMes), 0) AS DECIMAL(18,2)) AS FaturamentoMes,
+            CAST(ISNULL(SUM(be.FaturamentoMesAnterior), 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+            CAST(
+                CASE
+                    WHEN ISNULL(SUM(be.FaturamentoMesAnterior), 0) = 0
+                         AND ISNULL(SUM(be.FaturamentoMes), 0) > 0
+                        THEN 100
+                    WHEN ISNULL(SUM(be.FaturamentoMesAnterior), 0) = 0
+                        THEN 0
+                    ELSE ((ISNULL(SUM(be.FaturamentoMes), 0) - ISNULL(SUM(be.FaturamentoMesAnterior), 0)) * 100.0)
+                         / NULLIF(SUM(be.FaturamentoMesAnterior), 0)
+                END AS DECIMAL(18,2)
+            ) AS VariacaoFaturamentoPct
         FROM EmpresasCarteira ec
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
             ON e.IDEmpresa = ec.IDEmpresa
-        LEFT JOIN FaturamentoItens fi
-            ON fi.IDEmpresa = ec.IDEmpresa
-        LEFT JOIN FaturamentoCabecalho fc
-            ON fc.IDEmpresa = ec.IDEmpresa;
+        LEFT JOIN BaseEmpresas be
+            ON be.IDEmpresa = ec.IDEmpresa;
     """)
 
     resumo_row = db.session.execute(
@@ -20989,16 +21039,21 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
             "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
             "dt_inicio_mes": dt_inicio_mes,
             "dt_prox_mes": dt_prox_mes,
+            "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
+            "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
         },
     ).mappings().first() or {}
 
     total_empresas = int((resumo_row.get("QuantidadeEmpresas") if resumo_row else 0) or 0)
+    total_faturamento_mes = _float_seguro(resumo_row.get("FaturamentoMes") if resumo_row else 0)
 
     sql_empresas_total = text("""
         SELECT COUNT(1) AS Total
         FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
             ON e.IDEmpresa = cve.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] cn
+            ON cn.cnaepadrao = e.CNAE
         WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
           AND (
                 :q = ''
@@ -21008,6 +21063,9 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                 OR e.CNPJ LIKE :q_like
                 OR e.Municipio LIKE :q_like
                 OR e.UF LIKE :q_like
+                OR cn.Classe LIKE :q_like
+                OR cn.Setor LIKE :q_like
+                OR cn.ClassificacaoMacro LIKE :q_like
           );
     """)
 
@@ -21039,10 +21097,15 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                 e.Porte,
                 e.CNAE,
                 e.DescricaoCnae,
-                e.BitCliente
+                e.BitCliente,
+                Classe = COALESCE(NULLIF(LTRIM(RTRIM(cn.Classe)), ''), 'Sem classe'),
+                Setor = COALESCE(NULLIF(LTRIM(RTRIM(cn.Setor)), ''), 'Sem setor'),
+                ClassificacaoMacro = COALESCE(NULLIF(LTRIM(RTRIM(cn.ClassificacaoMacro)), ''), 'Sem classificação')
             FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
             LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
                 ON e.IDEmpresa = cve.IDEmpresa
+            LEFT JOIN [Integracao].[Silver].[DimCnaes] cn
+                ON cn.cnaepadrao = e.CNAE
             WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
               AND (
                     :q = ''
@@ -21052,6 +21115,9 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                     OR e.CNPJ LIKE :q_like
                     OR e.Municipio LIKE :q_like
                     OR e.UF LIKE :q_like
+                    OR cn.Classe LIKE :q_like
+                    OR cn.Setor LIKE :q_like
+                    OR cn.ClassificacaoMacro LIKE :q_like
               )
         ),
         ContratosEmpresa AS
@@ -21077,7 +21143,16 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                         THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
                         ELSE 0
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesItens
+                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
             FROM ContratosEmpresa ce
             LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
                 ON it.IDFatoControleContratoEuromidia = ce.IDFatoControleContratosEuromidia
@@ -21091,6 +21166,15 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                 CAST(SUM(ISNULL(ce.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
             FROM ContratosEmpresa ce
             GROUP BY ce.IDEmpresa
+        ),
+        ContratosAtivos AS
+        (
+            SELECT
+                ce.IDEmpresa,
+                COUNT(DISTINCT ce.IDFatoControleContratosEuromidia) AS ContratosAtivos
+            FROM ContratosEmpresa ce
+            WHERE ce.IDFatoControleContratosEuromidia IS NOT NULL
+            GROUP BY ce.IDEmpresa
         )
         SELECT
             ef.*,
@@ -21099,12 +21183,41 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
                     NULLIF(fi.FaturamentoMesItens, 0),
                     ISNULL(fc.FaturamentoMesCabecalho, 0)
                 ) AS DECIMAL(18,2)
-            ) AS FaturamentoMes
+            ) AS FaturamentoMes,
+            CAST(ISNULL(fi.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+            CAST(
+                CASE
+                    WHEN ISNULL(fi.FaturamentoMesAnterior, 0) = 0
+                         AND ISNULL(NULLIF(fi.FaturamentoMesItens, 0), ISNULL(fc.FaturamentoMesCabecalho, 0)) > 0
+                        THEN 100
+                    WHEN ISNULL(fi.FaturamentoMesAnterior, 0) = 0
+                        THEN 0
+                    ELSE (
+                        (
+                            ISNULL(NULLIF(fi.FaturamentoMesItens, 0), ISNULL(fc.FaturamentoMesCabecalho, 0))
+                            - ISNULL(fi.FaturamentoMesAnterior, 0)
+                        ) * 100.0
+                    ) / NULLIF(fi.FaturamentoMesAnterior, 0)
+                END AS DECIMAL(18,2)
+            ) AS VariacaoFaturamentoPct,
+            CAST(
+                CASE
+                    WHEN :total_faturamento_mes > 0
+                    THEN (
+                        ISNULL(NULLIF(fi.FaturamentoMesItens, 0), ISNULL(fc.FaturamentoMesCabecalho, 0))
+                        * 100.0
+                    ) / :total_faturamento_mes
+                    ELSE 0
+                END AS DECIMAL(18,2)
+            ) AS ParticipacaoCarteiraPct,
+            ISNULL(ca.ContratosAtivos, 0) AS ContratosAtivos
         FROM EmpresasFiltradas ef
         LEFT JOIN FaturamentoItens fi
             ON fi.IDEmpresa = ef.IDEmpresa
         LEFT JOIN FaturamentoCabecalho fc
             ON fc.IDEmpresa = ef.IDEmpresa
+        LEFT JOIN ContratosAtivos ca
+            ON ca.IDEmpresa = ef.IDEmpresa
         ORDER BY
             CASE WHEN NULLIF(LTRIM(RTRIM(ISNULL(ef.NomeFantasia, ''))), '') IS NULL THEN 1 ELSE 0 END,
             ef.NomeFantasia ASC,
@@ -21113,18 +21226,24 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         OFFSET :offset ROWS FETCH NEXT :per_page ROWS ONLY;
     """)
 
-    empresas_rows = db.session.execute(
-        sql_empresas,
-        {
-            "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
-            "q": q,
-            "q_like": f"%{q}%",
-            "offset": offset,
-            "per_page": per_page,
-            "dt_inicio_mes": dt_inicio_mes,
-            "dt_prox_mes": dt_prox_mes,
-        },
-    ).mappings().all()
+    empresas_rows = [
+        dict(row)
+        for row in db.session.execute(
+            sql_empresas,
+            {
+                "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+                "q": q,
+                "q_like": f"%{q}%",
+                "offset": offset,
+                "per_page": per_page,
+                "dt_inicio_mes": dt_inicio_mes,
+                "dt_prox_mes": dt_prox_mes,
+                "dt_inicio_mes_anterior": dt_inicio_mes_anterior,
+                "dt_fim_mes_anterior_exclusivo": dt_fim_mes_anterior_exclusivo,
+                "total_faturamento_mes": total_faturamento_mes,
+            },
+        ).mappings().all()
+    ]
 
     carteiras_destino_rows = []
 
@@ -21133,11 +21252,12 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
             SELECT
                 cv.IDFatoCarteiraVendedor,
                 cv.IDVendedor,
-                v.NomeVendedor
+                COALESCE(NULLIF(LTRIM(RTRIM(v.NomeVendedor)), ''), CONCAT('Carteira ', cv.IDFatoCarteiraVendedor)) AS NomeVendedor
             FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
             LEFT JOIN [Integracao].[dbo].[Vendedores] v
                 ON v.IDVendedor = cv.IDVendedor
             WHERE cv.IDFatoCarteiraVendedor <> :id_fato_carteira_vendedor
+              AND ISNULL(v.BitAtivo, 1) = 1
             ORDER BY v.NomeVendedor ASC, cv.IDFatoCarteiraVendedor ASC;
         """)
 
@@ -21159,9 +21279,11 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
 
     meta = carteira_row.get("Meta") or 0
     faturamento_mes = resumo_row.get("FaturamentoMes") if resumo_row else 0
+    faturamento_mes_anterior = resumo_row.get("FaturamentoMesAnterior") if resumo_row else 0
+    variacao_faturamento_pct = resumo_row.get("VariacaoFaturamentoPct") if resumo_row else 0
 
     try:
-        atingimento_meta_pct = (float(faturamento_mes or 0) / float(meta or 0)) * 100 if float(meta or 0) > 0 else 0
+        atingimento_meta_pct = (_float_seguro(faturamento_mes) / _float_seguro(meta)) * 100 if _float_seguro(meta) > 0 else 0
     except Exception:
         atingimento_meta_pct = 0
 
@@ -21169,24 +21291,148 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         "QuantidadeEmpresas": total_empresas,
         "ClientesAtivos": int((resumo_row.get("ClientesAtivos") if resumo_row else 0) or 0),
         "FaturamentoMes": faturamento_mes or 0,
+        "FaturamentoMesAnterior": faturamento_mes_anterior or 0,
+        "VariacaoFaturamentoPct": variacao_faturamento_pct or 0,
         "Meta": meta or 0,
         "AtingimentoMetaPct": atingimento_meta_pct,
     }
 
+    carteira = dict(carteira_row)
+    carteira.update(resumo)
+
+    classes_unicas = []
+    classes_vistas = set()
+    for row in empresas_rows:
+        classe = str(row.get("Classe") or "Sem classe").strip() or "Sem classe"
+        chave = classe.casefold()
+        if chave in classes_vistas:
+            continue
+        classes_vistas.add(chave)
+        classes_unicas.append(classe)
+
+    classes_unicas.sort(key=lambda valor: (valor == "Sem classe", valor.casefold()))
+    classes_filtro = [{"label": classe, "value": classe} for classe in classes_unicas]
+
+    setores_agg = {}
+    for row in empresas_rows:
+        setor = str(row.get("Setor") or "Sem setor").strip() or "Sem setor"
+        setores_agg[setor] = setores_agg.get(setor, 0) + 1
+
+    setores = []
+    total_setores_base = sum(setores_agg.values()) or 0
+    for setor, quantidade in sorted(setores_agg.items(), key=lambda item: (-item[1], item[0].casefold())):
+        pct = (quantidade * 100.0 / total_setores_base) if total_setores_base > 0 else 0
+        setores.append({"label": setor, "valor": int(quantidade), "pct": round(pct, 2)})
+
+    top_empresas = []
+    for row in sorted(empresas_rows, key=lambda item: _float_seguro(item.get("FaturamentoMes")), reverse=True)[:8]:
+        nome_empresa = (
+            str(row.get("RazaoSocial") or "").strip()
+            or str(row.get("NomeFantasia") or "").strip()
+            or f"Empresa {row.get('IDEmpresa')}"
+        )
+        top_empresas.append({
+            "empresa": nome_empresa,
+            "valor": _float_seguro(row.get("FaturamentoMes")),
+            "pct": _float_seguro(row.get("ParticipacaoCarteiraPct")),
+        })
+
+    sql_faturamento_periodo = text("""
+        ;WITH EmpresasCarteira AS
+        (
+            SELECT DISTINCT
+                cve.IDEmpresa
+            FROM [Integracao].[Silver].[FatoCarteiraVendedorEmpresas] cve
+            WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
+              AND cve.IDEmpresa IS NOT NULL
+        ),
+        ContratosEmpresa AS
+        (
+            SELECT
+                ec.IDEmpresa,
+                ch.IDFatoControleContratosEuromidia,
+                ch.TotalFaturamentoLiquidoMensal
+            FROM EmpresasCarteira ec
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ch
+                ON ch.IDEmpresa = ec.IDEmpresa
+               AND ISNULL(ch.BitAtivo, 1) = 1
+        ),
+        FaturamentoItens AS
+        (
+            SELECT
+                ce.IDEmpresa,
+                CAST(SUM(
+                    CASE
+                        WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
+                             AND it.DataInicioPrevisto < :dt_fim
+                             AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio
+                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
+                        ELSE 0
+                    END
+                ) AS DECIMAL(18,2)) AS FaturamentoMesItens
+            FROM ContratosEmpresa ce
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
+                ON it.IDFatoControleContratoEuromidia = ce.IDFatoControleContratosEuromidia
+               AND ISNULL(it.BitAtivo, 1) = 1
+            GROUP BY ce.IDEmpresa
+        ),
+        FaturamentoCabecalho AS
+        (
+            SELECT
+                ce.IDEmpresa,
+                CAST(SUM(ISNULL(ce.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
+            FROM ContratosEmpresa ce
+            GROUP BY ce.IDEmpresa
+        )
+        SELECT
+            CAST(SUM(
+                ISNULL(
+                    NULLIF(fi.FaturamentoMesItens, 0),
+                    ISNULL(fc.FaturamentoMesCabecalho, 0)
+                )
+            ) AS DECIMAL(18,2)) AS Valor
+        FROM EmpresasCarteira ec
+        LEFT JOIN FaturamentoItens fi
+            ON fi.IDEmpresa = ec.IDEmpresa
+        LEFT JOIN FaturamentoCabecalho fc
+            ON fc.IDEmpresa = ec.IDEmpresa;
+    """)
+
+    historico_faturamento = []
+    for deslocamento in range(-5, 1):
+        dt_ini_periodo = _add_meses(dt_inicio_mes, deslocamento)
+        dt_fim_periodo = _add_meses(dt_ini_periodo, 1)
+        valor = db.session.execute(
+            sql_faturamento_periodo,
+            {
+                "id_fato_carteira_vendedor": id_fato_carteira_vendedor,
+                "dt_inicio": dt_ini_periodo,
+                "dt_fim": dt_fim_periodo,
+            },
+        ).scalar() or 0
+
+        historico_faturamento.append({
+            "label": dt_ini_periodo.strftime("%m/%Y"),
+            "valor": round(_float_seguro(valor), 2),
+        })
+
     return render_template(
         "euromidia/carteira_detalhe.html",
-        carteira=carteira_row,
+        carteira=carteira,
         resumo=resumo,
         empresas=empresas_rows,
         carteiras_destino=carteiras_destino_rows,
         q=q,
         paginacao=paginacao,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        setores=setores,
+        setores_json=json.dumps(setores, ensure_ascii=False),
+        historico_faturamento=historico_faturamento,
+        historico_faturamento_json=json.dumps(historico_faturamento, ensure_ascii=False),
+        top_empresas=top_empresas,
+        classes_filtro=classes_filtro,
+        classes_filtro_json=json.dumps(classes_filtro, ensure_ascii=False),
     )
-
-
-
-
 
 def _carteira_add_meses(dt_base: date, deslocamento: int) -> date:
     ano = dt_base.year + ((dt_base.month - 1 + deslocamento) // 12)
@@ -21199,7 +21445,7 @@ def _carteira_add_meses(dt_base: date, deslocamento: int) -> date:
 
 @paineis_bp.post("/carteiras/<int:id_fato_carteira_vendedor>/mover-empresa")
 @login_required
-@requer_item_menu_paineis("empresas")
+@requer_item_menu_paineis("carteiras")
 @limiter.limit("40 per minute", methods=["POST"])
 def carteira_mover_empresa(id_fato_carteira_vendedor: int):
     if _usuario_logado_eh_perfil_vendedor():
