@@ -1746,7 +1746,7 @@
 
               <a class="btn btn-secondary js-preservar-faces-url"
                  data-preservar-faces="1"
-                 href="{{ url_for('Paineis.lista_paineis', per_page=filtros.per_page) }}"
+                 href="{{ url_for('Paineis.lista_paineis', per_page=filtros.per_page, limpar_filtros=1) }}"
                  style="text-decoration:none;display:flex;align-items:center;gap:8px;justify-content:center;"
                  title="Remove todos os filtros e volta ao padrão">
                 ⌫ Limpar Filtros
@@ -2216,7 +2216,8 @@
 
                               mes_ref=(filtros.mes_atual if filtros.mes_atual else None),
                               tudo=(filtros.tudo if filtros.tudo else None),
-                              tipo=(x.TipoProd if x.TipoProd else None)
+                              tipo=(x.TipoProd if x.TipoProd else None),
+                              return_to=return_to_paineis
                         ) }}"
                         title="Abrir grade"
                         style="text-decoration:none;">
@@ -3066,6 +3067,7 @@
 
     const rotaGradeBase = {{ url_for('Paineis.grade_painel', codponto=0)|tojson }};
     const rotaGradeMulti = {{ url_for('Paineis.grade_painel_multi')|tojson }};
+    const returnToPaineis = {{ (return_to_paineis or url_for('Paineis.lista_paineis'))|tojson }};
     const filtrosServidorFaces = {{ (filtros.selected_codface or [])|tojson }};
     const filtrosServidorPontos = {{ (filtros.selected_codponto or [])|tojson }};
 
@@ -3304,6 +3306,10 @@
         }
       });
 
+      if (normalizarTexto(returnToPaineis)){
+        url.searchParams.set("return_to", returnToPaineis);
+      }
+
       return url;
     }
 
@@ -3322,6 +3328,10 @@
           url.searchParams.append("codface", item.codface);
         }
       });
+
+      if (normalizarTexto(returnToPaineis)){
+        url.searchParams.set("return_to", returnToPaineis);
+      }
 
       return url;
     }

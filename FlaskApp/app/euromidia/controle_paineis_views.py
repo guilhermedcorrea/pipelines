@@ -94,6 +94,198 @@ def _url_request_atual():
     return request.path
 
 
+
+
+
+def _id_usuario_logado_para_sessao_paineis() -> str:
+    """
+    Eu monto um identificador estável do usuário logado para isolar
+    a URL filtrada da lista de painéis dentro da sessão.
+
+    Isso evita que, no mesmo navegador, um usuário B herde o filtro
+    que o usuário A deixou salvo antes de sair do sistema.
+    """
+    try:
+        if current_user and current_user.is_authenticated:
+            id_dim = getattr(current_user, "IDDimUsuarios", None)
+            if id_dim is not None:
+                return f"usuario:{int(id_dim)}"
+
+            get_id = getattr(current_user, "get_id", None)
+            if callable(get_id):
+                valor = get_id()
+                if valor:
+                    return f"usuario:{valor}"
+    except Exception:
+        pass
+
+    return "usuario:anonimo"
+
+
+def _chave_sessao_lista_paineis_return_to() -> str:
+    """Eu separo a URL filtrada da lista de painéis por usuário logado."""
+    return f"paineis_lista_return_to:{_id_usuario_logado_para_sessao_paineis()}"
+
+
+def _valor_query_paineis_preenchido(chave: str, valor) -> bool:
+    """
+    Eu trato valores vazios ou padrões para decidir se a URL da lista
+    realmente representa um filtro escolhido pelo usuário.
+    """
+    texto = str(valor or "").strip()
+    if not texto:
+        return False
+
+    texto_lower = texto.lower()
+    if texto_lower in {"none", "null", "undefined"}:
+        return False
+
+    chave_lower = str(chave or "").strip().lower()
+
+    if chave_lower == "status" and texto_lower == "todos":
+        return False
+
+    if chave_lower == "ponto_ativo" and texto_lower == "1":
+        return False
+
+    if chave_lower == "mes_atual" and texto_lower == "1":
+        return False
+
+    return True
+
+
+def _url_lista_paineis_segura(url: str) -> bool:
+    """
+    Eu aceito somente URLs internas da própria lista de painéis.
+
+    Isso impede redirect aberto e também evita salvar retorno para outra tela.
+    """
+    texto = str(url or "").strip()
+    if not texto:
+        return False
+
+    if texto.startswith("//"):
+        return False
+
+    try:
+        partes = urlsplit(texto)
+    except Exception:
+        return False
+
+    if partes.scheme or partes.netloc:
+        return False
+
+    caminho = (partes.path or "").rstrip("/")
+
+    try:
+        caminho_lista = url_for("Paineis.lista_paineis").rstrip("/")
+    except Exception:
+        caminho_lista = "/paineis"
+
+    return caminho == caminho_lista
+
+
+def _url_paineis_tem_filtro_real(url: str) -> bool:
+    """
+    Eu verifico se a URL da lista de painéis tem filtro real.
+
+    Não considero page, per_page e parâmetros técnicos como filtro, mas
+    preservo a URL inteira quando existe pelo menos um filtro de verdade.
+    """
+    try:
+        partes = urlsplit(str(url or "").strip())
+        parametros = parse_qs(partes.query, keep_blank_values=False)
+    except Exception:
+        return False
+
+    chaves_filtro = (
+        "q",
+        "tipo",
+        "exibidora",
+        "cidade_exibicao",
+        "tipo_documento",
+        "vendedor",
+        "marca_exibida",
+        "status",
+        "formato",
+        "altxlarg",
+        "iluminado",
+        "area_min",
+        "area_max",
+        "ponto_ativo",
+        "dt_ini",
+        "dt_fim",
+        "periodo",
+        "ano",
+        "anomes",
+        "mes",
+        "dia",
+        "trimestre",
+        "semana_iso",
+        "dia_semana_iso",
+        "quinzena",
+        "bi_semana",
+        "bisemana",
+        "fim_de_semana",
+        "tudo",
+        "selected_codface",
+        "selected_codponto",
+    )
+
+    for chave in chaves_filtro:
+        valores = parametros.get(chave) or []
+        if any(_valor_query_paineis_preenchido(chave, valor) for valor in valores):
+            return True
+
+    return False
+
+
+def _registrar_lista_paineis_return_to_na_sessao() -> str:
+    """
+    Eu salvo a URL atual da lista quando ela possui filtros reais.
+
+    Como a chave da sessão contém o usuário logado, cada usuário mantém
+    seu próprio estado de navegação.
+    """
+    url_atual = _url_request_atual()
+    chave = _chave_sessao_lista_paineis_return_to()
+
+    if _url_lista_paineis_segura(url_atual) and _url_paineis_tem_filtro_real(url_atual):
+        session[chave] = url_atual
+
+    return session.get(chave) or url_atual
+
+
+def _resolver_return_to_paineis() -> str:
+    """
+    Eu resolvo para onde a grade deve voltar.
+
+    Prioridade:
+    1. return_to vindo da URL;
+    2. return_to vindo de formulário;
+    3. última URL filtrada da lista salva para o usuário logado;
+    4. lista de painéis sem filtros.
+    """
+    chave = _chave_sessao_lista_paineis_return_to()
+
+    candidatos = [
+        request.args.get("return_to"),
+        request.form.get("return_to"),
+        session.get(chave),
+    ]
+
+    for candidato in candidatos:
+        url = str(candidato or "").strip()
+        if not url:
+            continue
+
+        if _url_lista_paineis_segura(url):
+            session[chave] = url
+            return url
+
+    return url_for("Paineis.lista_paineis")
+
+
 def _valor_query_contratos_preenchido(valor):
     """
     Eu trato valores vazios gerados por url_for/Jinja para não considerar
@@ -1903,11 +2095,17 @@ def lista_paineis():
         except:
             return None
 
-    def _fim_efetivo_item(df_prev, dc):
+    def _fim_efetivo_item(df_prev, dc=None):
+        """
+        Eu uso somente DataTerminoPrevisto na grade de ocupação.
+
+        Regra correta da tela /paineis/<codponto>/grade:
+        - DataInicioPrevisto define o início da ocupação.
+        - DataTerminoPrevisto define o fim da ocupação.
+        - DataCancelamento não entra no cálculo nem no desenho da barra, porque
+          estava alongando/encurtando períodos e distorcendo a grade.
+        """
         try:
-            dc_dt = _coerce_to_date(dc)
-            if dc_dt:
-                return dc_dt
             return _coerce_to_date(df_prev)
         except:
             return None
@@ -2066,9 +2264,19 @@ def lista_paineis():
 
                 key = (cp_int, cf_norm, tp_up)
 
+                """
+                REGRA OFICIAL DE OCUPAÇÃO DA LISTA DE PAINÉIS
+
+                A lista precisa usar a mesma lógica da grade:
+                - capacidade disponível = quantidade de dias do período × QuantidadeFaces;
+                - ocupado = soma de slot-dia ocupado dentro do período;
+                - cada contrato/campanha ocupa 1 slot-dia por dia;
+                - cota, SpanQtd e 1080/cota NÃO multiplicam o percentual oficial.
+
+                A cota pode continuar servindo para outras telas/regras comerciais,
+                mas não pode inflar a ocupação oficial da lista.
+                """
                 slots = 1.0
-                if tp_up == "PAINEL DIGITAL":
-                    slots = _slots_por_cota(cota)
 
                 por_face_tipo.setdefault(key, []).append((di_dt, df_dt, slots))
 
@@ -2102,11 +2310,11 @@ def lista_paineis():
                 uso_medio = float(uso_slots_dias) / float(total_dias)
 
                 cap_total = float(denom) * float(total_dias)
-                pct_uso = int(round((float(uso_slots_dias) / cap_total) * 100.0, 0)) if cap_total > 0 else 0
+                pct_uso = round((float(uso_slots_dias) / cap_total) * 100.0, 1) if cap_total > 0 else 0.0
                 if pct_uso < 0:
-                    pct_uso = 0
+                    pct_uso = 0.0
                 if pct_uso > 100:
-                    pct_uso = 100
+                    pct_uso = 100.0
 
                 ocupadas_vis = int(round(uso_medio, 0))
                 if ocupadas_vis < 0:
@@ -2118,7 +2326,7 @@ def lista_paineis():
                     "ocupadas": int(ocupadas_vis),
                     "denominador": int(denom),
                     "conflitos": int(conflitos),
-                    "pct_uso": int(pct_uso),
+                    "pct_uso": float(pct_uso),
                     "uso_medio": float(uso_medio),
                     "uso_slots_dias": float(uso_slots_dias),
                     "total_dias": int(total_dias),
@@ -2148,6 +2356,24 @@ def lista_paineis():
             return False
         except Exception:
             return False
+
+    chave_return_to_paineis = _chave_sessao_lista_paineis_return_to()
+
+    if (request.args.get("limpar_filtros") or "").strip() == "1":
+        session.pop(chave_return_to_paineis, None)
+
+        try:
+            per_page_limpo = int(request.args.get("per_page") or 20)
+        except Exception:
+            per_page_limpo = 20
+
+        per_page_limpo = max(5, min(per_page_limpo, 100))
+        return redirect(url_for("Paineis.lista_paineis", per_page=per_page_limpo))
+
+    if not request.args:
+        url_lista_salva = session.get(chave_return_to_paineis)
+        if url_lista_salva and _url_lista_paineis_segura(url_lista_salva):
+            return redirect(url_lista_salva)
 
     hoje = date.today()
     primeiro_dia_mes_atual = date(hoje.year, hoje.month, 1)
@@ -2587,11 +2813,7 @@ def lista_paineis():
 
     filtro_ativo_cancelamento = (FatoControleContratosItensEuromidia.AtivoCancelamento == "A")
 
-    fim_efetivo_sql = func.coalesce(
-        FatoControleContratosItensEuromidia.DataCancelamento,
-        FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-        date(9999, 12, 31),
-    )
+    fim_efetivo_sql = FatoControleContratosItensEuromidia.DataTerminoPrevisto
 
     if tudo:
         filtro_periodo_itens_ocup = and_(
@@ -3176,18 +3398,68 @@ def lista_paineis():
             {"ocupadas": 0, "denominador": denom_padrao, "conflitos": 0, "pct_uso": 0, "uso_medio": 0.0, "uso_slots_dias": 0.0, "total_dias": 0, "max_simult_sem_teto": 0.0},
         )
 
-        ocupadas = int(info.get("ocupadas") or 0)
         denominador = int(info.get("denominador") or 0)
         conflitos = int(info.get("conflitos") or 0)
 
         if denominador <= 0:
             denominador = denom_padrao
 
-        pct = int(info.get("pct_uso") or 0)
+        try:
+            total_dias_periodo = int(info.get("total_dias") or 0)
+        except Exception:
+            total_dias_periodo = 0
+
+        if total_dias_periodo <= 0:
+            try:
+                total_dias_periodo = int((dt_fim_ocup - dt_ini_ocup).days) + 1
+            except Exception:
+                total_dias_periodo = 1
+
+        if total_dias_periodo <= 0:
+            total_dias_periodo = 1
+
+        total_espacos_disponiveis = int(denominador) * int(total_dias_periodo)
+
+        try:
+            total_espacos_ocupados = int(round(float(info.get("uso_slots_dias") or 0.0), 0))
+        except Exception:
+            total_espacos_ocupados = 0
+
+        if total_espacos_ocupados < 0:
+            total_espacos_ocupados = 0
+
+        if total_espacos_disponiveis > 0 and total_espacos_ocupados > total_espacos_disponiveis:
+            total_espacos_ocupados = total_espacos_disponiveis
+
+        total_espacos_desocupados = max(
+            0,
+            int(total_espacos_disponiveis) - int(total_espacos_ocupados),
+        )
+
+        if total_espacos_disponiveis > 0:
+            pct = round(
+                (float(total_espacos_ocupados) / float(total_espacos_disponiveis)) * 100.0,
+                1,
+            )
+        else:
+            pct = 0.0
+
         if pct < 0:
-            pct = 0
+            pct = 0.0
         if pct > 100:
-            pct = 100
+            pct = 100.0
+
+        # Mantém Ocupadas como média diária arredondada para compatibilidade
+        # com filtros/visual antigo. O percentual oficial usa slot-dia total.
+        try:
+            ocupadas = int(round(float(total_espacos_ocupados) / float(total_dias_periodo), 0))
+        except Exception:
+            ocupadas = 0
+
+        if ocupadas < 0:
+            ocupadas = 0
+        if ocupadas > denominador:
+            ocupadas = denominador
 
         status_calc = "livre"
         if pct > 0:
@@ -3280,8 +3552,15 @@ def lista_paineis():
 
                 "UsoMedio": float(info.get("uso_medio") or 0.0),
                 "UsoSlotsDias": float(info.get("uso_slots_dias") or 0.0),
-                "TotalDiasPeriodo": int(info.get("total_dias") or 0),
+                "TotalDiasPeriodo": int(total_dias_periodo),
                 "MaxSimultaneoSemTeto": float(info.get("max_simult_sem_teto") or 0.0),
+
+                # Campos oficiais para a lista usar a mesma regra da grade:
+                # Total disponível = dias do período × QuantidadeFaces
+                # Percentual = ocupado no período ÷ total disponível × 100
+                "TotalEspacosDisponiveis": int(total_espacos_disponiveis),
+                "TotalEspacosOcupados": int(total_espacos_ocupados),
+                "TotalEspacosDesocupados": int(total_espacos_desocupados),
             }
         )
 
@@ -3320,6 +3599,7 @@ def lista_paineis():
 
     usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
     pode_abrir_detalhes_painel = not usuario_logado_eh_perfil_vendedor
+    return_to_paineis = _registrar_lista_paineis_return_to_na_sessao()
 
     return render_template(
         "euromidia/paineis_lista.html",
@@ -3339,6 +3619,7 @@ def lista_paineis():
         pode_ver_exibidora=pode_ver_exibidora,
         usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
         pode_abrir_detalhes_painel=pode_abrir_detalhes_painel,
+        return_to_paineis=return_to_paineis,
         bisemanas_select=bisemanas_select,
 
         filtros={
@@ -3421,6 +3702,8 @@ def grade_painel(codponto: int):
 
     bi_semana_sel = (request.args.get("bi_semana") or "").strip()
 
+    return_to_paineis = _resolver_return_to_paineis()
+
     LOOPS_PERMITIDOS = [f"SPAN{n:02d}" for n in range(1, CAPACIDADE_DIGITAL_FIXA + 1)]
     hoje = date.today()
 
@@ -3478,11 +3761,16 @@ def grade_painel(codponto: int):
         except:
             return None
 
-    def _fim_efetivo_item(df_prev, dc):
+    def _fim_efetivo_item(df_prev, dc=None):
+        """
+        Eu uso somente DataTerminoPrevisto na grade de ocupação.
+
+        Regra correta da tela /paineis/<codponto>/grade:
+        - DataInicioPrevisto define o início da ocupação.
+        - DataTerminoPrevisto define o fim da ocupação.
+        - Nenhum outro campo de data entra no cálculo nem no desenho da barra.
+        """
         try:
-            dc_dt = _coerce_to_date(dc)
-            if dc_dt:
-                return dc_dt
             return _coerce_to_date(df_prev)
         except:
             return None
@@ -3981,6 +4269,7 @@ def grade_painel(codponto: int):
 
     total_dias = (dt_fim - dt_ini).days + 1
     ultimo_dia = total_dias
+    dt_fim_exclusivo = dt_fim + timedelta(days=1)
 
 
     rows_codfaces_select = (
@@ -4108,9 +4397,15 @@ def grade_painel(codponto: int):
     eh_digital = any(((tp or "").strip().upper() == "PAINEL DIGITAL") for (_, _, tp, _, _) in (faces_info or []))
 
     if eh_digital:
-        num_faces = int(CAPACIDADE_DIGITAL_FIXA) if int(CAPACIDADE_DIGITAL_FIXA or 0) > 0 else 0
+        capacidade_digital_grade = int(qtd_faces_painel_max or 0)
+        if capacidade_digital_grade <= 0:
+            capacidade_digital_grade = int(CAPACIDADE_DIGITAL_FIXA or 16)
+
+        num_faces = int(capacidade_digital_grade)
+        LOOPS_PERMITIDOS = [f"SPAN{n:02d}" for n in range(1, capacidade_digital_grade + 1)]
         tipo_prod = "PAINEL DIGITAL"
     else:
+        capacidade_digital_grade = 0
         if qtd_faces_painel_max and int(qtd_faces_painel_max) > 0:
             num_faces = int(qtd_faces_painel_max)
         else:
@@ -4184,8 +4479,8 @@ def grade_painel(codponto: int):
             WHERE i.CodPonto = :codponto
               AND i.AtivoCancelamento = 'A'
               AND i.DataInicioPrevisto IS NOT NULL
-              AND i.DataInicioPrevisto <= :dt_fim
-              AND COALESCE(i.DataCancelamento, i.DataTerminoPrevisto, CONVERT(date,'9999-12-31')) >= :dt_ini
+              AND i.DataInicioPrevisto < :dt_fim_exclusivo
+              AND i.DataTerminoPrevisto >= :dt_ini
               AND NULLIF(LTRIM(RTRIM(cn.Classe)), '') IS NOT NULL
             """
         ]
@@ -4194,6 +4489,7 @@ def grade_painel(codponto: int):
             "codponto": int(codponto),
             "dt_ini": dt_ini,
             "dt_fim": dt_fim,
+            "dt_fim_exclusivo": dt_fim_exclusivo,
         }
 
         binds_segmentos = []
@@ -4283,8 +4579,8 @@ def grade_painel(codponto: int):
                 WHERE i.CodPonto = :codponto
                   AND i.AtivoCancelamento = 'A'
                   AND i.DataInicioPrevisto IS NOT NULL
-                  AND i.DataInicioPrevisto <= :dt_fim
-                  AND COALESCE(i.DataCancelamento, i.DataTerminoPrevisto, CONVERT(date,'9999-12-31')) >= :dt_ini
+                  AND i.DataInicioPrevisto < :dt_fim_exclusivo
+                  AND i.DataTerminoPrevisto >= :dt_ini
                   AND NULLIF(LTRIM(RTRIM(cn.Classe)), '') IS NOT NULL
                 """
             ]
@@ -4293,6 +4589,7 @@ def grade_painel(codponto: int):
                 "codponto": int(codponto),
                 "dt_ini": dt_ini,
                 "dt_fim": dt_fim,
+                "dt_fim_exclusivo": dt_fim_exclusivo,
             }
 
             binds_ids_segmento = []
@@ -4354,11 +4651,7 @@ def grade_painel(codponto: int):
         except:
             contratos_segmento_permitidos = []
 
-    fim_efetivo_sql = func.coalesce(
-        FatoControleContratosItensEuromidia.DataCancelamento,
-        FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-        date(9999, 12, 31),
-    )
+    fim_efetivo_sql = FatoControleContratosItensEuromidia.DataTerminoPrevisto
 
     q_oc = (
         db.session.query(
@@ -4369,7 +4662,7 @@ def grade_painel(codponto: int):
             FatoControleContratosItensEuromidia.Vendedor,
             FatoControleContratosItensEuromidia.DataInicioPrevisto,
             FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-            FatoControleContratosItensEuromidia.DataCancelamento,
+            sa_false().label("DataAuxiliarIgnorada"),
             FatoControleContratosItensEuromidia.Cota,
             FatoControleContratosItensEuromidia.NumeroContrato,
             FatoControleContratosItensEuromidia.NumeroPrevia,
@@ -4380,7 +4673,8 @@ def grade_painel(codponto: int):
             FatoControleContratosItensEuromidia.CodPonto == codponto,
             FatoControleContratosItensEuromidia.AtivoCancelamento == "A",
             FatoControleContratosItensEuromidia.DataInicioPrevisto != None,
-            FatoControleContratosItensEuromidia.DataInicioPrevisto <= dt_fim,
+            FatoControleContratosItensEuromidia.DataTerminoPrevisto != None,
+            FatoControleContratosItensEuromidia.DataInicioPrevisto < dt_fim_exclusivo,
             fim_efetivo_sql >= dt_ini,
         )
     )
@@ -5013,7 +5307,7 @@ def grade_painel(codponto: int):
     caminho_sql = Path(current_app.root_path) / "euromidia" / "querys" / "sql_periodo_grade.sql"
     SQL_KPI_PERIODO = caminho_sql.read_text(encoding="utf-8")
 
-    k_digital = int(CAPACIDADE_DIGITAL_FIXA or 16)
+    k_digital = int((num_faces if eh_digital else 1) or CAPACIDADE_DIGITAL_FIXA or 16)
     face_padrao = (faces[0] if faces else "").strip()
 
     cliente_like = _like_param(filtro_cliente)
@@ -5084,9 +5378,150 @@ def grade_painel(codponto: int):
     ocupacao_pct = None
 
     if row_kpi:
-        slots_total = int(row_kpi[2] or 0)
-        ocupacao_pct = float(row_kpi[5]) if row_kpi[5] is not None else None
-        slots_ocupados = int(row_kpi[6] or 0)
+        """
+        Eu leio o primeiro result set da sql_periodo_grade.sql usando a regra oficial
+        de ocupação por slot-dia do período.
+
+        Ordem esperada do SELECT da query corrigida:
+        0 = QtdFaces selecionadas na grade
+        1 = TotalDias do período
+        2 = SlotsTotalDia
+        3 = OcupadoSlotDiasTotal
+        4 = CapacidadeSlotDiasTotal
+        5 = OcupacaoPct
+        6 = SlotsOcupadosPicoOficial
+
+        Antes o card usava row_kpi[2] e row_kpi[6], o que mostrava pico diário
+        como 4/16. Para ocupação mensal, o correto é mostrar ocupado/capacidade
+        do período inteiro, por exemplo 93/480.
+        """
+        try:
+            slots_ocupados = int(round(float(row_kpi[3] or 0)))
+        except Exception:
+            slots_ocupados = 0
+
+        try:
+            slots_total = int(round(float(row_kpi[4] or 0)))
+        except Exception:
+            slots_total = 0
+
+        try:
+            ocupacao_pct = float(row_kpi[5]) if row_kpi[5] is not None else None
+        except Exception:
+            ocupacao_pct = None
+
+    def _calcular_kpi_ocupacao_por_slot_dia_oficial():
+        """
+        Eu calculo a ocupação oficial usando a base de contratos/locações,
+        não usando as barras renderizadas na grade.
+
+        Regra oficial do Guilherme:
+        - Capacidade do período = quantidade de dias do período × QuantidadeFaces.
+        - Ocupado = soma dos dias efetivamente ocupados no período filtrado.
+        - Percentual = ocupado ÷ capacidade do período × 100.
+
+        Importante:
+        - Reserva não entra no percentual oficial de ocupação.
+        - Barras extras da grade visual não podem inflar o KPI.
+        - Conflito não altera a capacidade; conflito é alerta visual, não denominador.
+        """
+        try:
+            total_dias_kpi = int(total_dias or 0)
+        except:
+            total_dias_kpi = 0
+
+        if total_dias_kpi <= 0:
+            return None
+
+        try:
+            qtd_faces_selecionadas_kpi = max(1, len(faces or []))
+        except Exception:
+            qtd_faces_selecionadas_kpi = 1
+
+        if eh_digital:
+            try:
+                slots_por_face_kpi = int(k_digital or 0)
+            except Exception:
+                slots_por_face_kpi = 0
+
+            if slots_por_face_kpi <= 0:
+                try:
+                    slots_por_face_kpi = int(num_faces or 0)
+                except Exception:
+                    slots_por_face_kpi = 0
+
+            if slots_por_face_kpi <= 0:
+                slots_por_face_kpi = int(CAPACIDADE_DIGITAL_FIXA or 16)
+
+            quantidade_faces_kpi = int(slots_por_face_kpi) * int(qtd_faces_selecionadas_kpi)
+        else:
+            try:
+                quantidade_faces_kpi = int(num_faces or 0)
+            except Exception:
+                quantidade_faces_kpi = 0
+
+            if quantidade_faces_kpi <= 0:
+                quantidade_faces_kpi = int(qtd_faces_selecionadas_kpi)
+
+        capacidade_total_periodo = int(total_dias_kpi) * int(quantidade_faces_kpi)
+        if capacidade_total_periodo <= 0:
+            return None
+
+        slot_dias_ocupados = 0
+
+        for r in (rows or []):
+            try:
+                id_item = r[0]
+            except:
+                continue
+
+            """Reservas entram na grade, mas não entram na ocupação oficial."""
+            try:
+                if int(id_item) < 0:
+                    continue
+            except:
+                pass
+
+            try:
+                cf = _normalizar_codface(r[2]) if r[2] is not None else ""
+                di = _coerce_to_date(r[5])
+                df_prev = _coerce_to_date(r[6])
+                dc = _coerce_to_date(r[7])
+            except:
+                continue
+
+            if tem_filtro_codface and (cf.casefold() not in filtros_codface_ci):
+                continue
+
+            if not cf:
+                continue
+
+            if di is None:
+                continue
+
+            df = _fim_efetivo_item(df_prev, dc)
+            df = _coerce_to_date(df)
+
+            if df is None:
+                continue
+
+            if df < di:
+                continue
+
+            inicio_considerado = max(di, dt_ini)
+            fim_considerado = min(df, dt_fim)
+
+            if fim_considerado < inicio_considerado:
+                continue
+
+            slot_dias_ocupados += (fim_considerado - inicio_considerado).days + 1
+
+        ocupacao_pct_calc = (float(slot_dias_ocupados) / float(capacidade_total_periodo)) * 100.0
+        return float(ocupacao_pct_calc), int(slot_dias_ocupados), int(capacidade_total_periodo)
+
+    kpi_ocupacao_oficial = _calcular_kpi_ocupacao_por_slot_dia_oficial()
+    if kpi_ocupacao_oficial is not None:
+        ocupacao_pct, slots_ocupados, slots_total = kpi_ocupacao_oficial
 
     receita_periodo_sql = None
     custo_periodo_sql = None
@@ -5562,6 +5997,7 @@ def grade_painel(codponto: int):
         uf_painel=uf_painel,
         bairro_painel=bairro_painel,
         logradouro_painel=logradouro_painel,
+        return_to_paineis=return_to_paineis,
     )
 
 
@@ -5599,6 +6035,8 @@ def grade_painel_multi():
         CAPACIDADE_DIGITAL_PADRAO = int(globals().get("CAPACIDADE_DIGITAL_FIXA", 16) or 16)
     except:
         CAPACIDADE_DIGITAL_PADRAO = 16
+
+    return_to_paineis = _resolver_return_to_paineis()
 
     def _normalizar_texto(valor):
         try:
@@ -5968,6 +6406,10 @@ def grade_painel_multi():
         modo = _normalizar_texto(request.args.get("modo"))
         data_ref = _normalizar_texto(request.args.get("data_ref"))
         bi_semana = _normalizar_texto(request.args.get("bi_semana"))
+        return_to = _resolver_return_to_paineis()
+
+        if return_to:
+            parametros.append(("return_to", return_to))
 
         if mes_ref:
             parametros.append(("mes_ref", mes_ref))
@@ -6118,6 +6560,7 @@ def grade_painel_multi():
                 DimPaineisEuromidia.UF.label("UF"),
                 DimPaineisEuromidia.Bairro.label("Bairro"),
                 DimPaineisEuromidia.Logradouro.label("Logradouro"),
+                DimPaineisEuromidia.QuantidadeFaces.label("QuantidadeFaces"),
                 rn,
             )
             .filter(DimPaineisEuromidia.CodPonto == int(codponto_local))
@@ -6139,6 +6582,7 @@ def grade_painel_multi():
                 "UF": "",
                 "Bairro": "",
                 "Logradouro": "",
+                "QuantidadeFaces": None,
             }
 
         return {
@@ -6149,6 +6593,7 @@ def grade_painel_multi():
             "UF": (_normalizar_texto(getattr(row, "UF", ""))),
             "Bairro": (_normalizar_texto(getattr(row, "Bairro", ""))),
             "Logradouro": (_normalizar_texto(getattr(row, "Logradouro", ""))),
+            "QuantidadeFaces": int(getattr(row, "QuantidadeFaces", 0) or 0) or None,
         }
 
     def _montar_localizacao(resumo_painel: dict):
@@ -6918,7 +7363,14 @@ def grade_painel_multi():
         eh_digital = "PAINEL DIGITAL" == _normalizar_texto(tipo_painel_info).upper()
 
         if eh_digital:
-            capacidade_digital = int(CAPACIDADE_DIGITAL_PADRAO or 16)
+            try:
+                capacidade_digital = int(resumo_painel.get("QuantidadeFaces") or 0)
+            except:
+                capacidade_digital = 0
+
+            if capacidade_digital <= 0:
+                capacidade_digital = int(CAPACIDADE_DIGITAL_PADRAO or 16)
+
             loops_permitidos_multi = _montar_slots_digitais(capacidade_digital)
         else:
             capacidade_digital = 0
@@ -7270,28 +7722,117 @@ def grade_painel_multi():
         if total_dias <= 0:
             total_dias = 1
 
-        if eh_digital:
-            slots_total = int(capacidade_digital) * max(1, len(faces))
+        def _calcular_kpi_ocupacao_visual_multi():
+            try:
+                total_dias_kpi = int(total_dias or 0)
+            except:
+                total_dias_kpi = 0
+
+            if total_dias_kpi <= 0:
+                return None
+
+            faces_validas_kpi = [
+                str(face).strip()
+                for face in (faces or [])
+                if str(face or "").strip()
+            ]
+
+            if not faces_validas_kpi:
+                return None
+
+            slot_dias_ocupados = 0
+            linhas_capacidade = 0
+
+            if eh_digital:
+                slots_validos_kpi = [
+                    str(loop).strip()
+                    for loop in (loops_permitidos_multi or [])
+                    if str(loop or "").strip()
+                ]
+
+                if not slots_validos_kpi:
+                    return None
+
+                linhas_capacidade = len(faces_validas_kpi) * len(slots_validos_kpi)
+
+                for cf_kpi in faces_validas_kpi:
+                    for lp_kpi in slots_validos_kpi:
+                        itens_slot = ocupacoes_por_slot.get((cf_kpi, lp_kpi), []) or []
+                        if not itens_slot:
+                            continue
+
+                        dias_ocupados_slot = set()
+
+                        for item_slot in itens_slot:
+                            data_inicio_item = _coerce_to_date(item_slot.get("DataInicio"))
+                            data_fim_item = _coerce_to_date(item_slot.get("DataFim"))
+
+                            if data_inicio_item is None or data_fim_item is None:
+                                continue
+
+                            if data_fim_item < data_inicio_item:
+                                continue
+
+                            inicio_considerado = max(data_inicio_item, dt_ini)
+                            fim_considerado = min(data_fim_item, dt_fim)
+
+                            if fim_considerado < inicio_considerado:
+                                continue
+
+                            data_cursor = inicio_considerado
+                            while data_cursor <= fim_considerado:
+                                dias_ocupados_slot.add(data_cursor)
+                                data_cursor = data_cursor + timedelta(days=1)
+
+                        slot_dias_ocupados += len(dias_ocupados_slot)
+
+            else:
+                linhas_capacidade = len(faces_validas_kpi)
+
+                for cf_kpi in faces_validas_kpi:
+                    itens_face = ocupacoes_por_face.get(cf_kpi, []) or []
+                    if not itens_face:
+                        continue
+
+                    dias_ocupados_face = set()
+
+                    for item_face in itens_face:
+                        data_inicio_item = _coerce_to_date(item_face.get("DataInicio"))
+                        data_fim_item = _coerce_to_date(item_face.get("DataFim"))
+
+                        if data_inicio_item is None or data_fim_item is None:
+                            continue
+
+                        if data_fim_item < data_inicio_item:
+                            continue
+
+                        inicio_considerado = max(data_inicio_item, dt_ini)
+                        fim_considerado = min(data_fim_item, dt_fim)
+
+                        if fim_considerado < inicio_considerado:
+                            continue
+
+                        data_cursor = inicio_considerado
+                        while data_cursor <= fim_considerado:
+                            dias_ocupados_face.add(data_cursor)
+                            data_cursor = data_cursor + timedelta(days=1)
+
+                    slot_dias_ocupados += len(dias_ocupados_face)
+
+            capacidade_total_periodo = int(linhas_capacidade) * int(total_dias_kpi)
+            if capacidade_total_periodo <= 0:
+                return None
+
+            ocupacao_pct_calc = (float(slot_dias_ocupados) / float(capacidade_total_periodo)) * 100.0
+            return float(ocupacao_pct_calc), int(slot_dias_ocupados), int(capacidade_total_periodo)
+
+        kpi_ocupacao_visual = _calcular_kpi_ocupacao_visual_multi()
+        if kpi_ocupacao_visual is not None:
+            ocupacao_pct, slots_ocupados, slots_total = kpi_ocupacao_visual
         else:
-            slots_total = max(1, len(faces))
-
-        uso_slots_dias, max_simultaneo = _uso_no_periodo_por_intervalos(
-            intervalos=itens_agregados_kpi,
-            dt_ini=dt_ini,
-            dt_fim=dt_fim,
-            denom_cap=max(1, slots_total),
-        )
-
-        ocupacao_pct = None
-        if slots_total > 0 and total_dias > 0:
-            capacidade_total_periodo = float(slots_total) * float(total_dias)
-            if capacidade_total_periodo > 0:
-                ocupacao_pct = float(uso_slots_dias) / float(capacidade_total_periodo) * 100.0
-
-        try:
-            slots_ocupados = int(min(float(slots_total), math.ceil(float(max_simultaneo)))) if max_simultaneo > 0 else 0
-        except:
+            ocupacao_pct = None
             slots_ocupados = 0
+            slots_total = 0
 
         financeiros = _buscar_financeiro_periodo(
             codponto_local=int(codponto_local),
@@ -7467,7 +8008,7 @@ def grade_painel_multi():
 
     if not codpontos_alvo:
         flash("Nenhuma face válida foi encontrada para abrir a multi-grade.", "warning")
-        return redirect(url_for("Paineis.lista_paineis"))
+        return redirect(return_to_paineis)
 
     if len(codpontos_alvo) == 1:
         codponto_unico = int(codpontos_alvo[0])
@@ -7583,6 +8124,8 @@ def grade_painel_multi():
         cdi_percent_periodo=cdi_percent_periodo_global,
         ooh_percent_periodo=ooh_percent_periodo_global,
         ooh_global_percent_periodo=ooh_global_percent_periodo_global,
+
+        return_to_paineis=return_to_paineis,
 
         filtros={
             "mes_ref": info_periodo["mes_ref"],

@@ -4,6 +4,8 @@
 
 {% block content %}
 
+  {% set return_to_paineis_safe = (return_to_paineis if return_to_paineis is defined and return_to_paineis else url_for('Paineis.lista_paineis')) %}
+
   {% set eh_digital = (tipo_prod or "")|trim|upper == "PAINEL DIGITAL" %}
 
   {% set total_dias = (total_dias if total_dias is defined and total_dias else ultimo_dia) %}
@@ -446,7 +448,7 @@
 
         <div class="grade-nav">
           <a class="btn btn-secondary" style="text-decoration:none;"
-             href="{{ url_for('Paineis.lista_paineis', mes_ref=mes_ref) }}">
+             href="{{ return_to_paineis_safe }}">
             ← Voltar
           </a>
 
@@ -456,13 +458,15 @@
                               mes_ref=mes_ref_prev,
                               tipo=tipo_prod,
                               cliente=filtros.cliente,
-                              face_principal=face_principal_ref) }}"
+                              face_principal=face_principal_ref,
+                              return_to=return_to_paineis_safe) }}"
              href="{{ url_for('Paineis.grade_painel',
                               codponto=codponto,
                               mes_ref=mes_ref_prev,
                               tipo=tipo_prod,
                               cliente=filtros.cliente,
-                              face_principal=face_principal_ref) }}">
+                              face_principal=face_principal_ref,
+                              return_to=return_to_paineis_safe) }}">
             ‹ Mês anterior
           </a>
 
@@ -472,13 +476,15 @@
                               mes_ref=mes_ref_next,
                               tipo=tipo_prod,
                               cliente=filtros.cliente,
-                              face_principal=face_principal_ref) }}"
+                              face_principal=face_principal_ref,
+                              return_to=return_to_paineis_safe) }}"
              href="{{ url_for('Paineis.grade_painel',
                               codponto=codponto,
                               mes_ref=mes_ref_next,
                               tipo=tipo_prod,
                               cliente=filtros.cliente,
-                              face_principal=face_principal_ref) }}">
+                              face_principal=face_principal_ref,
+                              return_to=return_to_paineis_safe) }}">
             Próximo mês ›
           </a>
         </div>
@@ -489,6 +495,7 @@
               class="grade-filtros">
 
           <input type="hidden" name="tipo" value="{{ tipo_prod }}">
+          <input type="hidden" name="return_to" value="{{ return_to_paineis_safe }}">
           <input type="hidden" id="inpModo" name="modo" value="{{ request.args.get('modo','') }}">
           <input type="hidden" id="inpDataRef" name="data_ref" value="{{ request.args.get('data_ref','') }}">
           <input type="hidden" id="inpFacePrincipal" name="face_principal" value="{{ face_principal_ref }}">
@@ -1265,7 +1272,7 @@
         </div>
         <div class="kpi-sub">
           {% if slots_ocupados is not none and slots_total is not none %}
-            {{ slots_ocupados }}/{{ slots_total }} slots ocupados
+            {{ slots_ocupados }}/{{ slots_total }} espaços ocupados
           {% else %}
             --
           {% endif %}

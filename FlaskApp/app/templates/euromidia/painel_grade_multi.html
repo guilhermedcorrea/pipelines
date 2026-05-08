@@ -4,6 +4,8 @@
 
 {% block content %}
 
+{% set return_to_paineis_safe = (return_to_paineis if return_to_paineis is defined and return_to_paineis else url_for('Paineis.lista_paineis')) %}
+
 {% set total_paineis = (paineis_grade|length if paineis_grade is defined and paineis_grade else 0) %}
 {% set filtros_safe = (filtros if filtros is defined and filtros else {}) %}
 {% set codfaces_request = (codfaces_selecionadas if codfaces_selecionadas is defined and codfaces_selecionadas else request.args.getlist('codface')) %}
@@ -181,7 +183,7 @@
             </div>
             <div class="kpi-sub">
               {% if slots_ocupados_p is not none and slots_total_p is not none %}
-                {{ slots_ocupados_p }}/{{ slots_total_p }} slots ocupados
+                {{ slots_ocupados_p }}/{{ slots_total_p }} espaços ocupados
               {% else %}
                 --
               {% endif %}
@@ -1937,21 +1939,21 @@
       <div class="grade-topo-right">
         <div class="grade-nav">
           <a class="btn btn-secondary" style="text-decoration:none;"
-             href="{{ url_for('Paineis.lista_paineis', mes_ref=mes_ref) }}">
+             href="{{ return_to_paineis_safe }}">
             ← Voltar
           </a>
 
           <a class="btn btn-secondary js-preserva-filtros-link"
              style="text-decoration:none;"
-             data-base-href="{{ url_for(request.endpoint, mes_ref=mes_ref_prev, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana) }}"
-             href="{{ url_for(request.endpoint, mes_ref=mes_ref_prev, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana) }}">
+             data-base-href="{{ url_for(request.endpoint, mes_ref=mes_ref_prev, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}"
+             href="{{ url_for(request.endpoint, mes_ref=mes_ref_prev, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}">
             ‹ Mês anterior
           </a>
 
           <a class="btn btn-secondary js-preserva-filtros-link"
              style="text-decoration:none;"
-             data-base-href="{{ url_for(request.endpoint, mes_ref=mes_ref_next, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana) }}"
-             href="{{ url_for(request.endpoint, mes_ref=mes_ref_next, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana) }}">
+             data-base-href="{{ url_for(request.endpoint, mes_ref=mes_ref_next, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}"
+             href="{{ url_for(request.endpoint, mes_ref=mes_ref_next, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}">
             Próximo mês ›
           </a>
         </div>
@@ -1962,6 +1964,7 @@
               class="grade-filtros">
 
           <input type="hidden" name="tipo" value="{{ filtros_safe.tipo if filtros_safe is defined else '' }}">
+          <input type="hidden" name="return_to" value="{{ return_to_paineis_safe }}">
           <input type="hidden" id="inpModo" name="modo" value="{{ modo_atual }}">
           <input type="hidden" id="inpDataRef" name="data_ref" value="{{ data_ref_atual }}">
 
