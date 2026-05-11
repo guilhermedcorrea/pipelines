@@ -7858,3 +7858,353 @@ def lista_precos_euromidia_alterar_bitativo(id_preco: int):
         tipos=tipos_selecionados,
         tabelas=tabelas_selecionadas,
     ))
+
+
+# ==========================================================
+# VENCIMENTOS DE CAMPANHAS EUROMÍDIA
+# ==========================================================
+
+
+def _campanhas_vencimentos_usuario_logado_id() -> int | None:
+    """Retorna o IDDimUsuarios do usuário logado com fallback para nomes comuns usados no projeto."""
+
+    try:
+        id_usuario = _id_usuario_logado_admin_ou_none()
+        if id_usuario:
+            return int(id_usuario)
+    except Exception:
+        pass
+
+    for nome_atributo in (
+        "IDDimUsuarios",
+        "IDDimUsuario",
+        "IDUsuario",
+        "id_usuario",
+        "id_dim_usuarios",
+        "id",
+    ):
+        valor = getattr(current_user, nome_atributo, None)
+        try:
+            if valor is not None and str(valor).strip() != "":
+                return int(valor)
+        except Exception:
+            continue
+
+    return None
+
+
+def _campanhas_vencimentos_usuario_eh_vendedor() -> bool:
+    """Identifica Perfil = VENDEDOR reaproveitando a regra robusta já usada na lista de preços."""
+
+    try:
+        return bool(_usuario_logado_tem_perfil_vendedor_lista_precos())
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao identificar perfil VENDEDOR na tela de vencimentos de campanha."
+        )
+        return False
+
+
+def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
+    """Converte o nome do status em classe CSS segura para o badge."""
+
+    nome = (nome_status or "").strip().upper()
+
+    if nome == "CAMPANHA ATIVA":
+        return "ativa"
+    if nome == "CAMPANHA VENCENDO":
+        return "vencendo"
+    if nome == "CAMPANHA VENCIDA":
+        return "vencida"
+    if nome == "CANCELADA":
+        return "cancelada"
+    if nome == "SEM DATA TERMINO":
+        return "sem-data"
+    if nome == "CAMPANHA FUTURA":
+        return "futura"
+
+    return "neutro"
+
+
+def _campanhas_vencimentos_atualizar_status_e_dias() -> None:
+    """
+    Atualiza automaticamente os campos de acompanhamento da campanha antes de carregar a tela.
+
+    Regras:
+    - DiasParaVencer corre conforme a data atual.
+    - IDDimStatusCampanha acompanha a situação real.
+    - BitAtivo vira 0 quando a campanha já terminou por data.
+    - Linhas canceladas manualmente, com BitAtivo = 0 antes do vencimento, ficam como CANCELADA.
+    - DataAtualizacao só muda quando algum valor realmente precisar mudar.
+    """
+
+    sql = text("""
+        SET NOCOUNT ON;
+
+        DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
+
+        DECLARE @IDStatusFutura INT;
+        DECLARE @IDStatusAtiva INT;
+        DECLARE @IDStatusVencendo INT;
+        DECLARE @IDStatusVencida INT;
+        DECLARE @IDStatusCancelada INT;
+        DECLARE @IDStatusSemDataTermino INT;
+
+        SELECT @IDStatusFutura = IDDimStatusCampanha
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        WHERE NomeStatus = N'CAMPANHA FUTURA';
+
+        SELECT @IDStatusAtiva = IDDimStatusCampanha
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        WHERE NomeStatus = N'CAMPANHA ATIVA';
+
+        SELECT @IDStatusVencendo = IDDimStatusCampanha
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        WHERE NomeStatus = N'CAMPANHA VENCENDO';
+
+        SELECT @IDStatusVencida = IDDimStatusCampanha
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        WHERE NomeStatus = N'CAMPANHA VENCIDA';
+
+        SELECT @IDStatusCancelada = IDDimStatusCampanha
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        WHERE NomeStatus = N'CANCELADA';
+
+        SELECT @IDStatusSemDataTermino = IDDimStatusCampanha
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        WHERE NomeStatus = N'SEM DATA TERMINO';
+
+        ;WITH StatusCalculado AS
+        (
+            SELECT
+                f.IDFatoVencimentoCampanhaEuromidia,
+
+                DiasParaVencerCalculado =
+                    CASE
+                        WHEN f.DataTerminoPrevisto IS NULL THEN NULL
+                        ELSE DATEDIFF(DAY, @Hoje, CAST(f.DataTerminoPrevisto AS DATE))
+                    END,
+
+                BitAtivoCalculado =
+                    CASE
+                        WHEN ISNULL(f.BitAtivo, 1) = 0 THEN 0
+                        WHEN f.DataTerminoPrevisto IS NOT NULL
+                             AND CAST(f.DataTerminoPrevisto AS DATE) < @Hoje THEN 0
+                        ELSE 1
+                    END,
+
+                IDDimStatusCampanhaCalculado =
+                    CASE
+                        WHEN ISNULL(f.BitAtivo, 1) = 0
+                             AND (
+                                    f.DataTerminoPrevisto IS NULL
+                                    OR CAST(f.DataTerminoPrevisto AS DATE) >= @Hoje
+                                 ) THEN @IDStatusCancelada
+
+                        WHEN f.DataTerminoPrevisto IS NULL THEN @IDStatusSemDataTermino
+
+                        WHEN f.DataInicioCampanha IS NOT NULL
+                             AND CAST(f.DataInicioCampanha AS DATE) > @Hoje THEN @IDStatusFutura
+
+                        WHEN CAST(f.DataTerminoPrevisto AS DATE) < @Hoje THEN @IDStatusVencida
+
+                        WHEN DATEDIFF(DAY, @Hoje, CAST(f.DataTerminoPrevisto AS DATE)) BETWEEN 0 AND 45 THEN @IDStatusVencendo
+
+                        ELSE @IDStatusAtiva
+                    END
+            FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS f
+        )
+        UPDATE f
+        SET
+            f.DiasParaVencer = sc.DiasParaVencerCalculado,
+            f.IDDimStatusCampanha = COALESCE(sc.IDDimStatusCampanhaCalculado, f.IDDimStatusCampanha),
+            f.BitAtivo = sc.BitAtivoCalculado,
+            f.DataAtualizacao = SYSDATETIME()
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS f
+        INNER JOIN StatusCalculado AS sc
+            ON sc.IDFatoVencimentoCampanhaEuromidia = f.IDFatoVencimentoCampanhaEuromidia
+        WHERE
+            ISNULL(f.DiasParaVencer, -999999) <> ISNULL(sc.DiasParaVencerCalculado, -999999)
+            OR ISNULL(f.IDDimStatusCampanha, -1) <> ISNULL(sc.IDDimStatusCampanhaCalculado, -1)
+            OR ISNULL(f.BitAtivo, 1) <> ISNULL(sc.BitAtivoCalculado, 1);
+    """)
+
+    try:
+        db.session.execute(sql)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao atualizar status/dias da tela de vencimentos de campanha."
+        )
+        raise
+
+
+
+@admin.route("/campanhas/vencimentos", methods=["GET"])
+@admin.route("/vencimentos-campanhas", methods=["GET"])
+@login_required
+@limiter.limit("80 per minute", methods=["GET"])
+def vencimentos_campanhas_euromidia():
+    """
+    Tela de vencimentos de campanhas da Euromídia.
+
+    Admin / perfis não vendedores:
+        - visualizam todos os contratos/campanhas.
+
+    Perfil VENDEDOR:
+        - visualiza somente campanhas cujo IDVendedor esteja ligado ao seu IDDimUsuarios
+          em Integracao.dbo.Vendedores.
+    """
+
+    _campanhas_vencimentos_atualizar_status_e_dias()
+
+    usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+    id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
+
+    q = (request.args.get("q") or "").strip()[:160]
+    status_raw = (request.args.get("status") or "").strip()
+    status_id = _parse_int(status_raw)
+
+    try:
+        page = int(request.args.get("page") or "1")
+    except Exception:
+        page = 1
+
+    per_page = 10
+    page = max(1, page)
+
+    filtros_sql = []
+    params = {
+        "usuario_logado_eh_vendedor": 1 if usuario_logado_eh_vendedor else 0,
+        "id_usuario_logado": int(id_usuario_logado or 0),
+    }
+
+    if usuario_logado_eh_vendedor:
+        filtros_sql.append("ISNULL(vend.IDDimUsuarios, 0) = :id_usuario_logado")
+
+    if q:
+        filtros_sql.append("""
+            (
+                CAST(venc.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
+                OR ISNULL(ctr.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(ctr.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(venc.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(st.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+            )
+        """)
+        params["q_like"] = f"%{q}%"
+
+    if status_id is not None:
+        filtros_sql.append("venc.IDDimStatusCampanha = :status_id")
+        params["status_id"] = int(status_id)
+
+    where_sql = " AND ".join(f"({item})" for item in filtros_sql) if filtros_sql else "1=1"
+
+    sql_from_where = f"""
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
+            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+            ON vend.IDVendedor = venc.IDVendedor
+        WHERE {where_sql}
+    """
+
+    sql_total = text(f"""
+        SELECT COUNT(1) AS Total
+        {sql_from_where}
+    """)
+
+    total = int((db.session.execute(sql_total, params).scalar() or 0))
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+
+    sql_rows = text(f"""
+        SELECT
+            venc.IDFatoVencimentoCampanhaEuromidia,
+            venc.IDFatoControleContratosEuromidia,
+            venc.IDFatoControleContratosItensEuromidia,
+            venc.IDDimStatusCampanha,
+            st.NomeStatus,
+            venc.IDVendedor,
+            vend.NomeVendedor,
+            vend.IDDimUsuarios AS IDDimUsuariosVendedor,
+            ctr.RazaoSocial,
+            MarcaExibida = COALESCE(NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), '')),
+            venc.DataInicioCampanha,
+            DataTermino = venc.DataTerminoPrevisto,
+            venc.DiasParaVencer,
+            venc.BitAtivo,
+            venc.DataCriacao,
+            venc.DataAtualizacao
+        {sql_from_where}
+        ORDER BY
+            CASE WHEN venc.DataTerminoPrevisto IS NULL THEN 1 ELSE 0 END ASC,
+            venc.DataTerminoPrevisto ASC,
+            venc.IDFatoVencimentoCampanhaEuromidia DESC
+        OFFSET :offset ROWS
+        FETCH NEXT :per_page ROWS ONLY
+    """)
+
+    params_rows = dict(params)
+    params_rows.update({"offset": offset, "per_page": per_page})
+
+    rows = db.session.execute(sql_rows, params_rows).mappings().all()
+
+    itens = []
+    for r in rows:
+        d = dict(r)
+        d["ClasseStatus"] = _campanhas_vencimentos_classe_status(d.get("NomeStatus"))
+
+        dias = d.get("DiasParaVencer")
+        try:
+            dias_int = int(dias) if dias is not None else None
+        except Exception:
+            dias_int = None
+
+        if dias_int is None:
+            d["ClasseDias"] = "sem-data"
+        elif dias_int < 0:
+            d["ClasseDias"] = "vencido"
+        elif dias_int <= 45:
+            d["ClasseDias"] = "perto"
+        else:
+            d["ClasseDias"] = "normal"
+
+        itens.append(d)
+
+    status_opcoes = db.session.execute(text("""
+        SELECT
+            IDDimStatusCampanha,
+            NomeStatus
+        FROM [Integracao].[Silver].[DimStatusCampanha]
+        ORDER BY IDDimStatusCampanha ASC
+    """)).mappings().all()
+
+    pagina_inicio = max(1, page - 3)
+    pagina_fim = min(total_pages, page + 3)
+    paginas_visiveis = list(range(pagina_inicio, pagina_fim + 1))
+
+    return render_template(
+        "admin/vencimentos_campanhas_euromidia.html",
+        itens=itens,
+        status_opcoes=status_opcoes,
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        q=q,
+        status_id=status_id if status_id is not None else "",
+        paginacao={
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "inicio": (offset + 1) if total > 0 else 0,
+            "fim": min(offset + per_page, total),
+            "paginas_visiveis": paginas_visiveis,
+        },
+    )

@@ -239,6 +239,19 @@ SET NOCOUNT ON;
 
 DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
 
+/*
+    Atualização diária/recorrente da campanha.
+
+    Regras:
+    1. DiasParaVencer é recalculado com base na data de hoje.
+    2. IDDimStatusCampanha é recalculado conforme o prazo/status operacional.
+    3. BitAtivo é encerrado automaticamente quando a campanha passou da DataTerminoPrevisto.
+    4. Campanha cancelada manualmente continua BitAtivo = 0 e recebe status CANCELADA,
+       desde que ainda não esteja vencida por data.
+    5. O UPDATE só acontece quando algum campo realmente precisa mudar.
+       Assim, mesmo com DAG rodando várias vezes por dia, a linha não fica sendo atualizada sem necessidade.
+*/
+
 ;WITH StatusCalculado AS
 (
     SELECT
@@ -250,8 +263,32 @@ DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
                 ELSE DATEDIFF(DAY, @Hoje, f.DataTerminoPrevisto)
             END,
 
+        BitAtivoCalculado =
+            CASE
+                WHEN f.DataTerminoPrevisto IS NOT NULL
+                     AND f.DataTerminoPrevisto < @Hoje THEN 0
+                ELSE ISNULL(f.BitAtivo, 1)
+            END,
+
         IDDimStatusCampanhaCalculado =
             CASE
+                /*
+                    Primeiro verificamos vencimento por data.
+                    Motivo: se a campanha terminou naturalmente, ela deve ficar como CAMPANHA VENCIDA,
+                    mesmo que o BitAtivo tenha sido desligado automaticamente.
+                */
+                WHEN f.DataTerminoPrevisto IS NOT NULL
+                     AND f.DataTerminoPrevisto < @Hoje THEN
+                    (
+                        SELECT TOP (1) s.IDDimStatusCampanha
+                        FROM Silver.DimStatusCampanha s
+                        WHERE s.NomeStatus = N'CAMPANHA VENCIDA'
+                    )
+
+                /*
+                    Depois verificamos cancelamento/inativação manual.
+                    Se BitAtivo já veio 0 e ainda não venceu por data, tratamos como CANCELADA.
+                */
                 WHEN ISNULL(f.BitAtivo, 1) = 0 THEN
                     (
                         SELECT TOP (1) s.IDDimStatusCampanha
@@ -274,13 +311,6 @@ DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
                         WHERE s.NomeStatus = N'CAMPANHA FUTURA'
                     )
 
-                WHEN f.DataTerminoPrevisto < @Hoje THEN
-                    (
-                        SELECT TOP (1) s.IDDimStatusCampanha
-                        FROM Silver.DimStatusCampanha s
-                        WHERE s.NomeStatus = N'CAMPANHA VENCIDA'
-                    )
-
                 WHEN DATEDIFF(DAY, @Hoje, f.DataTerminoPrevisto) BETWEEN 0 AND 45 THEN
                     (
                         SELECT TOP (1) s.IDDimStatusCampanha
@@ -301,13 +331,15 @@ UPDATE f
 SET
     f.DiasParaVencer = sc.DiasParaVencerCalculado,
     f.IDDimStatusCampanha = sc.IDDimStatusCampanhaCalculado,
+    f.BitAtivo = sc.BitAtivoCalculado,
     f.DataAtualizacao = SYSDATETIME()
 FROM Silver.FatoVencimentoCampanhaEuromidia f
 INNER JOIN StatusCalculado sc
     ON sc.IDFatoVencimentoCampanhaEuromidia = f.IDFatoVencimentoCampanhaEuromidia
 WHERE
     ISNULL(f.DiasParaVencer, -999999) <> ISNULL(sc.DiasParaVencerCalculado, -999999)
-    OR ISNULL(f.IDDimStatusCampanha, -1) <> ISNULL(sc.IDDimStatusCampanhaCalculado, -1);
+    OR ISNULL(f.IDDimStatusCampanha, -1) <> ISNULL(sc.IDDimStatusCampanhaCalculado, -1)
+    OR ISNULL(f.BitAtivo, -1) <> ISNULL(sc.BitAtivoCalculado, -1);
 """
 
 
@@ -344,19 +376,19 @@ END;
     Base consolidada por contrato/período/vendedor.
 
     Regra principal desta DAG:
-    - gera INICIO CAMPANHA para campanhas novas/registradas;
-    - gera CAMPANHA QUASE ACABANDO;
-    - gera CAMPANHA TERMINADA;
+    - gera INICIO CAMPANHA para campanhas novas/registradas e ainda ativas;
+    - gera CAMPANHA QUASE ACABANDO para campanhas ativas com 0 a 45 dias para vencer;
+    - gera CAMPANHA TERMINADA para campanhas vencidas por data, mesmo que o BitAtivo já tenha virado 0;
     - não gera uma mensagem por face;
     - agrupa todas as faces do mesmo contrato/período/vendedor;
     - mantém um IDFatoVencimentoCampanhaEuromidia de referência;
     - mantém um item de referência;
-    - gera texto único e profissional.
+    - evita duplicidade usando NOT EXISTS.
 
-    Observação técnica:
-    No SQL Server, uma CTE só vale para o próximo comando.
-    Como precisamos usar a base em mais de um INSERT, gravamos o agrupamento
-    em uma tabela temporária #CampanhaAgrupada.
+    Observação importante:
+    Como a task anterior pode colocar BitAtivo = 0 em campanhas vencidas,
+    a base abaixo precisa manter campanhas vencidas por data para permitir a geração
+    da mensagem CAMPANHA TERMINADA.
 */
 
 ;WITH BaseCampanha AS
@@ -371,6 +403,15 @@ END;
         f.DataInicioCampanha,
         f.DataTerminoPrevisto,
         f.BitAtivo,
+
+        BitAtivoAtual = ISNULL(f.BitAtivo, 1),
+
+        CampanhaTerminadaPorData =
+            CASE
+                WHEN f.DataTerminoPrevisto IS NOT NULL
+                     AND f.DataTerminoPrevisto < @Hoje THEN 1
+                ELSE 0
+            END,
 
         v.NomeVendedor,
         v.IDDimUsuarios AS IDDimUsuariosDestinatario,
@@ -397,7 +438,14 @@ END;
     LEFT JOIN Silver.DimEmpresas e
         ON e.IDEmpresa = f.IDEmpresa
     WHERE
-        ISNULL(f.BitAtivo, 1) = 1
+        (
+            ISNULL(f.BitAtivo, 1) = 1
+            OR
+            (
+                f.DataTerminoPrevisto IS NOT NULL
+                AND f.DataTerminoPrevisto < @Hoje
+            )
+        )
 ),
 CampanhaAgrupada AS
 (
@@ -413,6 +461,12 @@ CampanhaAgrupada AS
         b.MarcaExibida,
         b.DataInicioCampanha,
         b.DataTerminoPrevisto,
+
+        BitAtivoAgrupado =
+            MAX(CASE WHEN b.BitAtivoAtual = 1 THEN 1 ELSE 0 END),
+
+        CampanhaTerminadaPorData =
+            MAX(b.CampanhaTerminadaPorData),
 
         DiasParaVencer =
             CASE
@@ -450,6 +504,8 @@ SELECT
     ca.MarcaExibida,
     ca.DataInicioCampanha,
     ca.DataTerminoPrevisto,
+    ca.BitAtivoAgrupado,
+    ca.CampanhaTerminadaPorData,
     ca.DiasParaVencer,
     ca.NumContrato,
     ca.Faces
@@ -527,6 +583,7 @@ SELECT
 FROM #CampanhaAgrupada ca
 WHERE
     @IDTipoInicioCampanha IS NOT NULL
+    AND ca.BitAtivoAgrupado = 1
     AND NOT EXISTS
     (
         SELECT 1
@@ -544,6 +601,7 @@ WHERE
     CAMPANHA QUASE ACABANDO
 
     Regra:
+    - Campanha precisa estar ativa;
     - DataTerminoPrevisto não pode ser nula;
     - DiasParaVencer precisa estar entre 0 e 45;
     - Não pode existir mensagem ativa igual para o mesmo contrato/vencimento.
@@ -610,6 +668,7 @@ SELECT
 FROM #CampanhaAgrupada ca
 WHERE
     @IDTipoCampanhaQuaseAcabando IS NOT NULL
+    AND ca.BitAtivoAgrupado = 1
     AND ca.DataTerminoPrevisto IS NOT NULL
     AND ca.DiasParaVencer BETWEEN 0 AND 45
     AND NOT EXISTS
@@ -631,6 +690,7 @@ WHERE
     Regra:
     - DataTerminoPrevisto não pode ser nula;
     - DataTerminoPrevisto precisa ser menor do que hoje;
+    - Funciona mesmo quando BitAtivo já foi virado para 0 pela task de atualização;
     - Não pode existir mensagem ativa igual para o mesmo contrato/vencimento.
 */
 
@@ -693,6 +753,7 @@ SELECT
 FROM #CampanhaAgrupada ca
 WHERE
     @IDTipoCampanhaTerminada IS NOT NULL
+    AND ca.CampanhaTerminadaPorData = 1
     AND ca.DataTerminoPrevisto IS NOT NULL
     AND ca.DataTerminoPrevisto < @Hoje
     AND NOT EXISTS

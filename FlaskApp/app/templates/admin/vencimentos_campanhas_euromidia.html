@@ -1,0 +1,436 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Euromídia | Vencimentos de Campanhas{% endblock %}
+
+{% block content %}
+<style>
+  .vc-page{
+    width:100%;
+    max-width:1380px;
+    margin:0 auto;
+  }
+
+  .vc-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+
+  .vc-title{
+    margin:0 0 4px 0;
+    color:var(--euro-blue);
+    font-size:24px;
+    font-weight:950;
+    letter-spacing:-.02em;
+  }
+
+  .vc-subtitle{
+    margin:0;
+    color:var(--muted);
+    font-size:14px;
+    font-weight:750;
+  }
+
+  .vc-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:18px;
+    box-shadow:0 1px 8px rgba(0,0,0,.06);
+    overflow:hidden;
+  }
+
+  .vc-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    padding:14px 16px;
+    background:#F8FAFC;
+    border-bottom:1px solid var(--border);
+  }
+
+  .vc-form{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    width:100%;
+  }
+
+  .vc-form input,
+  .vc-form select{
+    height:40px;
+    border-radius:12px;
+  }
+
+  .vc-form input{
+    min-width:280px;
+    flex:1 1 320px;
+  }
+
+  .vc-form select{
+    flex:0 0 230px;
+    padding:8px 10px;
+  }
+
+  .vc-table{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+  }
+
+  .vc-table th,
+  .vc-table td{
+    padding:12px 10px;
+    border-bottom:1px solid var(--border);
+    vertical-align:middle;
+    font-size:13px;
+  }
+
+  .vc-table th{
+    text-align:left;
+    color:#475569;
+    background:#fff;
+    font-size:12px;
+    font-weight:950;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    white-space:nowrap;
+  }
+
+  .vc-contrato{
+    font-weight:950;
+    color:var(--euro-blue);
+    white-space:nowrap;
+  }
+
+  .vc-razao{
+    font-weight:900;
+    color:var(--text);
+    min-width:260px;
+  }
+
+  .vc-marca{
+    color:#334155;
+    font-weight:850;
+    min-width:150px;
+  }
+
+  .vc-data{
+    white-space:nowrap;
+    color:#334155;
+    font-weight:850;
+  }
+
+  .vc-dias{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:54px;
+    padding:6px 9px;
+    border-radius:999px;
+    font-weight:950;
+    line-height:1;
+  }
+
+  .vc-dias.normal{
+    color:#0f172a;
+    background:#E2E8F0;
+  }
+
+  .vc-dias.perto{
+    color:#B91C1C;
+    background:#FEE2E2;
+    border:1px solid rgba(185,28,28,.20);
+  }
+
+  .vc-dias.vencido{
+    color:#475569;
+    background:#E5E7EB;
+    border:1px solid rgba(71,85,105,.20);
+  }
+
+  .vc-dias.sem-data{
+    color:#166534;
+    background:#DCFCE7;
+    border:1px solid rgba(22,101,52,.20);
+  }
+
+  .vc-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    border-radius:999px;
+    padding:6px 10px;
+    font-size:11px;
+    font-weight:950;
+    line-height:1;
+    white-space:nowrap;
+    text-transform:uppercase;
+  }
+
+  .vc-badge.ativa{
+    background:#DBEAFE;
+    color:#1D4ED8;
+    border:1px solid rgba(29,78,216,.20);
+  }
+
+  .vc-badge.vencendo{
+    background:#FEE2E2;
+    color:#B91C1C;
+    border:1px solid rgba(185,28,28,.22);
+  }
+
+  .vc-badge.vencida,
+  .vc-badge.cancelada{
+    background:#E5E7EB;
+    color:#475569;
+    border:1px solid rgba(71,85,105,.20);
+  }
+
+  .vc-badge.sem-data{
+    background:#DCFCE7;
+    color:#166534;
+    border:1px solid rgba(22,101,52,.20);
+  }
+
+  .vc-badge.futura{
+    background:#F3E8FF;
+    color:#7E22CE;
+    border:1px solid rgba(126,34,206,.20);
+  }
+
+  .vc-badge.neutro{
+    background:#F1F5F9;
+    color:#475569;
+    border:1px solid rgba(71,85,105,.18);
+  }
+
+  .vc-bit{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    padding:5px 8px;
+    font-size:11px;
+    font-weight:950;
+    white-space:nowrap;
+  }
+
+  .vc-bit.ativo{
+    background:#E0F2FE;
+    color:#0369A1;
+  }
+
+  .vc-bit.inativo{
+    background:#F1F5F9;
+    color:#64748B;
+  }
+
+  .vc-footer{
+    padding:14px 16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    background:#fff;
+  }
+
+  .vc-pages{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .vc-empty{
+    padding:22px 12px;
+    text-align:center;
+    color:var(--muted);
+    font-weight:850;
+  }
+
+  .vc-help{
+    margin-top:10px;
+    color:var(--muted);
+    font-size:12px;
+    font-weight:800;
+  }
+
+  @media (max-width: 900px){
+    .vc-form input,
+    .vc-form select,
+    .vc-form .btn{
+      width:100%;
+      flex:1 1 100%;
+    }
+  }
+</style>
+
+<div class="container container-limit vc-page">
+  <div class="vc-header">
+    <div>
+      <h1 class="vc-title">Vencimentos de Campanhas</h1>
+      {% if usuario_logado_eh_vendedor %}
+        <p class="vc-subtitle">Controle de Vencimentos</p>
+      {% else %}
+        <p class="vc-subtitle">Visão geral dos contratos, campanhas, prazos e status de vencimento.</p>
+      {% endif %}
+      <div class="vc-help">
+        Os Prazos são Atualizados diariamente
+      </div>
+    </div>
+  </div>
+
+  <div class="vc-card">
+    <div class="vc-toolbar">
+      <form method="get" action="{{ url_for('admin.vencimentos_campanhas_euromidia') }}" class="vc-form">
+        <input
+          type="text"
+          name="q"
+          value="{{ q or '' }}"
+          placeholder="Buscar por contrato, razão social, marca ou status..."
+          autocomplete="off"
+        >
+
+        <select name="status">
+          <option value="">Todos os status</option>
+          {% for st in status_opcoes %}
+            <option value="{{ st.IDDimStatusCampanha }}" {% if status_id|string == st.IDDimStatusCampanha|string %}selected{% endif %}>
+              {{ st.NomeStatus }}
+            </option>
+          {% endfor %}
+        </select>
+
+        <button type="submit" class="btn btn-primary">Buscar</button>
+
+        {% if q or status_id %}
+          <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}">Limpar</a>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="overflow-x">
+      <table class="vc-table">
+        <thead>
+          <tr>
+            <th>Contrato</th>
+            <th>Razão Social</th>
+            <th>Marca</th>
+            <th>Status</th>
+            <th>Início</th>
+            <th>Término</th>
+            <th>Dias</th>
+            <th>Ativo</th>
+            <th>Atualização</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if itens and itens|length > 0 %}
+            {% for row in itens %}
+              <tr>
+                <td>
+                  <a class="vc-contrato" href="{{ '/contratos/' ~ row.IDFatoControleContratosEuromidia }}">
+                    {{ row.IDFatoControleContratosEuromidia }}
+                  </a>
+                </td>
+
+                <td>
+                  <div class="vc-razao">{{ row.RazaoSocial or '—' }}</div>
+                  {% if row.NomeVendedor %}
+                    <div class="muted" style="font-size:12px;font-weight:800;margin-top:3px;">Vendedor: {{ row.NomeVendedor }}</div>
+                  {% endif %}
+                </td>
+
+                <td>
+                  <div class="vc-marca">{{ row.MarcaExibida or '—' }}</div>
+                </td>
+
+                <td>
+                  <span class="vc-badge {{ row.ClasseStatus }}">{{ row.NomeStatus or 'Sem status' }}</span>
+                </td>
+
+                <td class="vc-data">
+                  {{ row.DataInicioCampanha.strftime('%d/%m/%Y') if row.DataInicioCampanha else '—' }}
+                </td>
+
+                <td class="vc-data">
+                  {{ row.DataTermino.strftime('%d/%m/%Y') if row.DataTermino else '—' }}
+                </td>
+
+                <td>
+                  <span class="vc-dias {{ row.ClasseDias }}">
+                    {% if row.DiasParaVencer is not none %}
+                      {{ row.DiasParaVencer }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </span>
+                </td>
+
+                <td>
+                  {% if (row.BitAtivo or 0)|int == 1 %}
+                    <span class="vc-bit ativo">Ativo</span>
+                  {% else %}
+                    <span class="vc-bit inativo">Inativo</span>
+                  {% endif %}
+                </td>
+
+                <td class="vc-data">
+                  {{ row.DataAtualizacao.strftime('%d/%m/%Y %H:%M') if row.DataAtualizacao else '—' }}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="9" class="vc-empty">Nenhuma campanha encontrada.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if paginacao %}
+      <div class="vc-footer">
+        <div class="muted" style="font-weight:850;">
+          Exibindo {{ paginacao.inicio }}–{{ paginacao.fim }} de {{ paginacao.total }}
+          • Página {{ paginacao.page }} / {{ paginacao.total_pages }}
+          • 10 por página
+        </div>
+
+        <div class="vc-pages">
+          {% if paginacao.page > 1 %}
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=1) }}">« Primeiro</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=paginacao.page-1) }}">‹ Anterior</a>
+          {% else %}
+            <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">« Primeiro</span>
+            <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">‹ Anterior</span>
+          {% endif %}
+
+          {% for p in paginacao.paginas_visiveis %}
+            {% if p == paginacao.page %}
+              <span class="btn btn-primary" style="pointer-events:none;">{{ p }}</span>
+            {% else %}
+              <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=p) }}">{{ p }}</a>
+            {% endif %}
+          {% endfor %}
+
+          {% if paginacao.page < paginacao.total_pages %}
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=paginacao.page+1) }}">Próximo ›</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=paginacao.total_pages) }}">Último »</a>
+          {% else %}
+            <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Próximo ›</span>
+            <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Último »</span>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

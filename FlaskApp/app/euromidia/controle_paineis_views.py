@@ -2366,31 +2366,48 @@ def lista_paineis():
 
  
     def _slots_por_cota(cota):
+        """
+        Regra de slot da grade digital:
+        - COTA 1080 ocupa 2 slots.
+        - COTA 540 ocupa 1 slot.
+        - Valores antigos 1/2 continuam tratados por compatibilidade.
+        """
         try:
             if cota is None:
-                return 0.0
+                return 1.0
 
             if isinstance(cota, (int, float)):
                 c = float(cota)
             else:
                 s = str(cota).strip()
                 if not s:
-                    return 0.0
+                    return 1.0
                 d = _somente_digitos(s)
                 if d:
                     c = float(d)
                 else:
                     try:
                         c = float(s.replace(",", "."))
-                    except:
-                        return 0.0
+                    except Exception:
+                        return 1.0
 
             if c <= 0:
-                return 0.0
+                return 1.0
 
-            return float(1080.0 / float(c))
-        except:
-            return 0.0
+            if c == 1080:
+                return 2.0
+            if c == 540:
+                return 1.0
+
+            # Compatibilidade com cadastros antigos que guardavam 1/2 em vez de 1080/540.
+            if c == 1:
+                return 2.0
+            if c == 2:
+                return 1.0
+
+            return 1.0
+        except Exception:
+            return 1.0
 
 
     def _uso_no_periodo_por_intervalos(intervalos, dt_ini, dt_fim, denom_cap):
@@ -2521,16 +2538,23 @@ def lista_paineis():
                 """
                 REGRA OFICIAL DE OCUPAÇÃO DA LISTA DE PAINÉIS
 
-                A lista precisa usar a mesma lógica da grade:
+                A lista precisa usar a mesma lógica visual da grade do painel:
                 - capacidade disponível = quantidade de dias do período × QuantidadeFaces;
                 - ocupado = soma de slot-dia ocupado dentro do período;
-                - cada contrato/campanha ocupa 1 slot-dia por dia;
-                - cota, SpanQtd e 1080/cota NÃO multiplicam o percentual oficial.
+                - para PAINEL DIGITAL, a ocupação deve respeitar o span da campanha;
+                - COTA 1080 ocupa 2 slots por dia;
+                - COTA 540 ocupa 1 slot por dia;
+                - valores legados 1/2 continuam aceitos por compatibilidade.
 
-                A cota pode continuar servindo para outras telas/regras comerciais,
-                mas não pode inflar a ocupação oficial da lista.
+                Observação importante:
+                - Em painel NÃO digital, a face física continua valendo 1 espaço por dia.
+                - Em painel digital, o slot-dia precisa bater com a grade; caso contrário,
+                  a lista mostra percentual menor que a grade, como no caso 215/480.
                 """
-                slots = 1.0
+                if tp_up == "PAINEL DIGITAL":
+                    slots = float(_slots_por_cota(cota) or 1.0)
+                else:
+                    slots = 1.0
 
                 por_face_tipo.setdefault(key, []).append((di_dt, df_dt, slots))
 
@@ -5755,22 +5779,28 @@ def grade_painel(codponto: int):
 
     def _calcular_kpi_ocupacao_por_slot_dia_oficial():
         """
-        Eu calculo a ocupação oficial usando a base de contratos/locações,
-        não usando as barras renderizadas na grade.
+        Eu calculo a ocupação oficial da grade usando a mesma lógica visual
+        de slot-dia que o usuário enxerga na tela.
 
         Regra oficial do Guilherme:
-        - Capacidade do período = quantidade de dias do período × QuantidadeFaces.
-        - Ocupado = soma dos dias efetivamente ocupados no período filtrado.
+        - Capacidade do período = quantidade de dias do período × quantidade de slots/faces.
+        - Ocupado = soma dos slot-dias efetivamente ocupados dentro do período filtrado.
         - Percentual = ocupado ÷ capacidade do período × 100.
 
+        Correção crítica:
+        - Em PAINEL DIGITAL, COTA 1080 ocupa 2 slots por dia.
+        - Em PAINEL DIGITAL, COTA 540 ocupa 1 slot por dia.
+        - Portanto, uma campanha COTA 1080 durante 30 dias conta 60 slot-dias,
+          não 30 slot-dias.
+
         Importante:
-        - Reserva não entra no percentual oficial de ocupação.
-        - Barras extras da grade visual não podem inflar o KPI.
+        - Reserva entra na grade visual, mas não entra na ocupação oficial.
         - Conflito não altera a capacidade; conflito é alerta visual, não denominador.
+        - O numerador é limitado pela capacidade diária da face para evitar percentual acima de 100%.
         """
         try:
             total_dias_kpi = int(total_dias or 0)
-        except:
+        except Exception:
             total_dias_kpi = 0
 
         if total_dias_kpi <= 0:
@@ -5796,8 +5826,10 @@ def grade_painel(codponto: int):
             if slots_por_face_kpi <= 0:
                 slots_por_face_kpi = int(CAPACIDADE_DIGITAL_FIXA or 16)
 
+            slots_por_face_kpi = max(1, int(slots_por_face_kpi))
             quantidade_faces_kpi = int(slots_por_face_kpi) * int(qtd_faces_selecionadas_kpi)
         else:
+            slots_por_face_kpi = 1
             try:
                 quantidade_faces_kpi = int(num_faces or 0)
             except Exception:
@@ -5810,19 +5842,19 @@ def grade_painel(codponto: int):
         if capacidade_total_periodo <= 0:
             return None
 
-        slot_dias_ocupados = 0
+        ocupacao_por_face_dia = {}
 
         for r in (rows or []):
             try:
                 id_item = r[0]
-            except:
+            except Exception:
                 continue
 
             """Reservas entram na grade, mas não entram na ocupação oficial."""
             try:
                 if int(id_item) < 0:
                     continue
-            except:
+            except Exception:
                 pass
 
             try:
@@ -5830,7 +5862,8 @@ def grade_painel(codponto: int):
                 di = _coerce_to_date(r[5])
                 df_prev = _coerce_to_date(r[6])
                 dc = _coerce_to_date(r[7])
-            except:
+                cota_item = r[8]
+            except Exception:
                 continue
 
             if tem_filtro_codface and (cf.casefold() not in filtros_codface_ci):
@@ -5857,10 +5890,39 @@ def grade_painel(codponto: int):
             if fim_considerado < inicio_considerado:
                 continue
 
-            slot_dias_ocupados += (fim_considerado - inicio_considerado).days + 1
+            if eh_digital:
+                try:
+                    slots_item = int(_span_por_cota(cota_item) or 1)
+                except Exception:
+                    slots_item = 1
+
+                slots_item = max(1, min(int(slots_item), int(slots_por_face_kpi)))
+            else:
+                slots_item = 1
+
+            data_cursor = inicio_considerado
+            while data_cursor <= fim_considerado:
+                chave = (cf, data_cursor)
+                ocupacao_por_face_dia[chave] = float(ocupacao_por_face_dia.get(chave, 0.0)) + float(slots_item)
+                data_cursor = data_cursor + timedelta(days=1)
+
+        if eh_digital:
+            limite_por_face_dia = float(slots_por_face_kpi)
+        else:
+            limite_por_face_dia = 1.0
+
+        slot_dias_ocupados = 0.0
+        for valor_ocupado in ocupacao_por_face_dia.values():
+            ocupado_dia_face = float(valor_ocupado or 0.0)
+            if ocupado_dia_face < 0:
+                ocupado_dia_face = 0.0
+            if ocupado_dia_face > limite_por_face_dia:
+                ocupado_dia_face = limite_por_face_dia
+
+            slot_dias_ocupados += ocupado_dia_face
 
         ocupacao_pct_calc = (float(slot_dias_ocupados) / float(capacidade_total_periodo)) * 100.0
-        return float(ocupacao_pct_calc), int(slot_dias_ocupados), int(capacidade_total_periodo)
+        return float(ocupacao_pct_calc), int(round(slot_dias_ocupados, 0)), int(capacidade_total_periodo)
 
     kpi_ocupacao_oficial = _calcular_kpi_ocupacao_por_slot_dia_oficial()
     if kpi_ocupacao_oficial is not None:

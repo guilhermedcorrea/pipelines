@@ -1000,6 +1000,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_lista_checkins = (pode_acessar_menu_paineis('lista_checkins') if pode_acessar_menu_paineis is defined else menu_paineis_disponibilidades) %}
         {% set menu_paineis_health_check = (pode_acessar_menu_paineis('health_check_comercial') if pode_acessar_menu_paineis is defined else menu_paineis_atendimento) %}
         {% set menu_paineis_historico_atendimento = (pode_acessar_menu_paineis('historico_atendimento') if pode_acessar_menu_paineis is defined else menu_paineis_atendimento) %}
+        {% set menu_paineis_vencimentos_campanhas = (pode_acessar_menu_paineis('vencimentos_campanhas_euromidia') if pode_acessar_menu_paineis is defined else menu_paineis_atendimento) %}
 
         {#
           Admin precisa ser fechado por permissão, não pode ficar solto no HTML.
@@ -1051,6 +1052,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_lista_checkins
           or menu_paineis_health_check
           or menu_paineis_historico_atendimento
+          or menu_paineis_vencimentos_campanhas
           or menu_paineis_lista_ocupacao
           or menu_paineis_contratos
           or menu_paineis_mov_fin
@@ -1064,7 +1066,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% if exibir_menu_paineis %}
         <div class="menu-item" data-menu="paineis">
           <button type="button"
-                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') %}active{% endif %}">
+                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') or request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}active{% endif %}">
             Painéis <span style="opacity:.9;">▾</span>
           </button>
 
@@ -1135,7 +1137,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_atendimento %}
+            {% if menu_paineis_atendimento or menu_paineis_vencimentos_campanhas %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Atendimento</span>
@@ -1159,6 +1161,13 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('kanban.historico_cards_lista') }}"
                        class="{% if request.path == url_for('kanban.historico_cards_lista') %}menu-link-current{% endif %}">
                       Historico Atendimento
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_vencimentos_campanhas %}
+                    <a href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}"
+                       class="{% if request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}menu-link-current{% endif %}">
+                      Vencimento Campanhas
                     </a>
                   {% endif %}
                 </div>
@@ -1275,7 +1284,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% if menu_admin and (menu_admin_permissao_desconto or menu_admin_aprovacao_desconto or menu_admin_lista_precos) %}
           <div class="menu-item" data-menu="admin">
             <button type="button"
-                    class="menu-btn {% if request.path.startswith('/admin') or request.path.startswith('/lista-precos') or request.path.startswith('/listas-precos') or request.path.startswith('/precos/euromidia') %}active{% endif %}">
+                    class="menu-btn {% if (request.path.startswith('/admin') and request.endpoint != 'admin.vencimentos_campanhas_euromidia') or request.path.startswith('/lista-precos') or request.path.startswith('/listas-precos') or request.path.startswith('/precos/euromidia') %}active{% endif %}">
               Admin <span style="opacity:.9;">▾</span>
             </button>
 
