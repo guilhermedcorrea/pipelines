@@ -74,10 +74,11 @@ Cron:
 
 1. Atualizar `DiasParaVencer`.
 2. Atualizar `IDDimStatusCampanha`.
-3. Gerar mensagem de campanha quase acabando.
-4. Gerar mensagem de campanha terminada.
-5. Consolidar várias faces do mesmo contrato em uma única mensagem.
-6. Evitar duplicidade de mensagens ativas.
+3. Gerar mensagem de início de campanha.
+4. Gerar mensagem de campanha quase acabando.
+5. Gerar mensagem de campanha terminada.
+6. Consolidar várias faces do mesmo contrato em uma única mensagem.
+7. Evitar duplicidade de mensagens ativas.
 
 ## Regras de status
 
@@ -92,6 +93,10 @@ Cron:
 
 ## Regras de mensagem
 
+### INICIO CAMPANHA
+
+Criada uma vez para cada campanha agrupada por contrato, período, vendedor, empresa e marca.
+
 ### CAMPANHA QUASE ACABANDO
 
 Criada quando faltarem até 45 dias para o término da campanha.
@@ -99,12 +104,6 @@ Criada quando faltarem até 45 dias para o término da campanha.
 ### CAMPANHA TERMINADA
 
 Criada quando a campanha já passou da data de término.
-
-## Regra importante
-
-Este DAG não gera mensagem de início de campanha.
-
-A mensagem `INICIO CAMPANHA` deve ficar fora deste processo, porque este DAG roda periodicamente e trabalha com vencimento de campanha.
 
 ## Regra de agrupamento
 
@@ -320,8 +319,13 @@ SET XACT_ABORT ON;
 
 DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
 
+DECLARE @IDTipoInicioCampanha INT;
 DECLARE @IDTipoCampanhaQuaseAcabando INT;
 DECLARE @IDTipoCampanhaTerminada INT;
+
+SELECT @IDTipoInicioCampanha = IDDimTipoMensagem
+FROM Silver.DimTipoMensagem
+WHERE NomeTipoMensagem = N'INICIO CAMPANHA';
 
 SELECT @IDTipoCampanhaQuaseAcabando = IDDimTipoMensagem
 FROM Silver.DimTipoMensagem
@@ -340,9 +344,9 @@ END;
     Base consolidada por contrato/período/vendedor.
 
     Regra principal desta DAG:
-    - esta DAG NÃO gera INICIO CAMPANHA;
-    - gera somente CAMPANHA QUASE ACABANDO;
-    - gera somente CAMPANHA TERMINADA;
+    - gera INICIO CAMPANHA para campanhas novas/registradas;
+    - gera CAMPANHA QUASE ACABANDO;
+    - gera CAMPANHA TERMINADA;
     - não gera uma mensagem por face;
     - agrupa todas as faces do mesmo contrato/período/vendedor;
     - mantém um IDFatoVencimentoCampanhaEuromidia de referência;
@@ -455,6 +459,88 @@ FROM CampanhaAgrupada ca;
 
 /*
     Mensagem 1:
+    INICIO CAMPANHA
+
+    Regra:
+    - Cria uma mensagem de início/cadastro da campanha para o vendedor responsável;
+    - A mensagem é criada uma única vez para o mesmo contrato/campanha agrupada;
+    - A campanha precisa estar ativa em FatoVencimentoCampanhaEuromidia;
+    - Não cria duplicidade quando a DAG roda novamente.
+*/
+
+INSERT INTO Silver.FatoMensagemUsuario
+(
+    IDDimUsuariosDestinatario,
+    IDDimTipoMensagem,
+    IDFatoVencimentoCampanhaEuromidia,
+    IDFatoControleContratosEuromidia,
+    IDFatoControleContratosItensEuromidia,
+    TituloMensagem,
+    TextoMensagem,
+    LinkDestino,
+    BitLida,
+    DataLeitura,
+    BitAtivo,
+    DataCriacao,
+    DataAtualizacao
+)
+SELECT
+    ca.IDDimUsuariosDestinatario,
+    @IDTipoInicioCampanha,
+    ca.IDFatoVencimentoCampanhaEuromidiaReferencia,
+    ca.IDFatoControleContratosEuromidia,
+    ca.IDFatoControleContratosItensEuromidiaReferencia,
+
+    TituloMensagem =
+        CONCAT(
+            N'INÍCIO DE CAMPANHA - Contrato ',
+            ca.NumContrato,
+            N' / AC ',
+            ca.NomeVendedor
+        ),
+
+    TextoMensagem =
+        CONCAT(
+            N'A campanha do contrato ',
+            ca.NumContrato,
+            N', referente à empresa ',
+            COALESCE(ca.RazaoSocial, N'empresa não informada'),
+            N', marca ',
+            COALESCE(ca.MarcaExibida, N'não informada'),
+            N', foi cadastrada/iniciada no sistema. Face(s): ',
+            COALESCE(ca.Faces, N'não informada'),
+            N'. Início da campanha: ',
+            COALESCE(CONVERT(NVARCHAR(10), ca.DataInicioCampanha, 103), N'não informado'),
+            N'. Término previsto: ',
+            COALESCE(CONVERT(NVARCHAR(10), ca.DataTerminoPrevisto, 103), N'não informado'),
+            N'.'
+        ),
+
+    LinkDestino =
+        CONCAT(N'/contratos/', ca.IDFatoControleContratosEuromidia),
+
+    BitLida = 0,
+    DataLeitura = NULL,
+    BitAtivo = 1,
+    DataCriacao = SYSDATETIME(),
+    DataAtualizacao = SYSDATETIME()
+FROM #CampanhaAgrupada ca
+WHERE
+    @IDTipoInicioCampanha IS NOT NULL
+    AND NOT EXISTS
+    (
+        SELECT 1
+        FROM Silver.FatoMensagemUsuario m
+        WHERE
+            m.IDDimTipoMensagem = @IDTipoInicioCampanha
+            AND m.IDFatoVencimentoCampanhaEuromidia = ca.IDFatoVencimentoCampanhaEuromidiaReferencia
+            AND m.IDFatoControleContratosEuromidia = ca.IDFatoControleContratosEuromidia
+            AND ISNULL(m.BitAtivo, 1) = 1
+    );
+
+
+/*
+    Mensagem 2:
     CAMPANHA QUASE ACABANDO
 
     Regra:
@@ -539,7 +625,7 @@ WHERE
 
 
 /*
-    Mensagem 2:
+    Mensagem 3:
     CAMPANHA TERMINADA
 
     Regra:
