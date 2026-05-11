@@ -18,6 +18,9 @@
 {% set mes_de_atual = (filtros_safe.mes_de if filtros_safe.mes_de is defined and filtros_safe.mes_de else request.args.get('mes_de','')) %}
 {% set mes_ate_atual = (filtros_safe.mes_ate if filtros_safe.mes_ate is defined and filtros_safe.mes_ate else request.args.get('mes_ate','')) %}
 {% set bi_semana_atual = (filtros_safe.bi_semana if filtros_safe.bi_semana is defined and filtros_safe.bi_semana else request.args.get('bi_semana','')) %}
+{% set usuario_logado_eh_perfil_vendedor = (usuario_logado_eh_perfil_vendedor if usuario_logado_eh_perfil_vendedor is defined else false) %}
+{% set id_vendedor_logado = (id_vendedor_logado if id_vendedor_logado is defined else none) %}
+{% set nome_vendedor_logado = (nome_vendedor_logado if nome_vendedor_logado is defined else '') %}
 
 {% macro moeda(valor) -%}
   {% if valor is not none %}
@@ -551,6 +554,7 @@
                              --barra-font: {{ barra_font }};
                            "
                            data-contrato-id="{{ it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '' }}"
+                           data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                            data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                            data-eh-reserva="{{ 1 if eh_reserva else 0 }}"
                            data-item-id="{{ it.ID if it.ID is defined else '' }}"
@@ -643,6 +647,7 @@
                            height: calc(var(--trilho-h) - (var(--pad-y) * 2));
                          "
                          data-contrato-id="{{ it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '' }}"
+                         data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                          data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                          data-eh-reserva="{{ 1 if eh_reserva2 else 0 }}"
                          data-item-id="{{ it.ID if it.ID is defined else '' }}"
@@ -2339,6 +2344,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const tooltip = document.getElementById("tooltip");
   const urlBaseContrato = "{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=0) }}";
+  const USUARIO_LOGADO_EH_PERFIL_VENDEDOR = {{ 'true' if usuario_logado_eh_perfil_vendedor else 'false' }};
+  const ID_VENDEDOR_LOGADO = String({{ (id_vendedor_logado if id_vendedor_logado is not none else '')|tojson }}).trim();
+  const NOME_VENDEDOR_LOGADO = String({{ (nome_vendedor_logado or '')|tojson }}).trim();
 
   function montarUrlContratoPorId(idContrato){
     const id = String(idContrato || "").trim();
@@ -2369,6 +2377,36 @@ document.addEventListener("DOMContentLoaded", () => {
     if (itemId && /^-/.test(itemId)) return true;
 
     return false;
+  }
+
+  function normalizarTextoComparacao(valor){
+    return String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  function vendedorPodeAbrirContrato(el){
+    if (!USUARIO_LOGADO_EH_PERFIL_VENDEDOR) return true;
+
+    const idVendedorBarra = String(el.getAttribute("data-vendedor-id") || "").trim();
+    if (ID_VENDEDOR_LOGADO && idVendedorBarra) {
+      return idVendedorBarra === ID_VENDEDOR_LOGADO;
+    }
+
+    const nomeLogado = normalizarTextoComparacao(NOME_VENDEDOR_LOGADO);
+    const nomeBarra = normalizarTextoComparacao(el.getAttribute("data-tooltip-vendedor") || "");
+    if (nomeLogado && nomeBarra) {
+      return nomeBarra === nomeLogado;
+    }
+
+    return false;
+  }
+
+  function avisarBloqueioVendedor(){
+    alert("Este contrato pertence a outro vendedor. Seu perfil VENDEDOR só pode abrir contratos vinculados a você.");
   }
 
   function showTooltip(e, el){
@@ -2452,6 +2490,11 @@ document.addEventListener("DOMContentLoaded", () => {
     e.stopPropagation();
 
     if (isReserva(el)) {
+      return;
+    }
+
+    if (!vendedorPodeAbrirContrato(el)) {
+      avisarBloqueioVendedor();
       return;
     }
 

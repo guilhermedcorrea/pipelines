@@ -64,7 +64,7 @@ paineis_bp = Blueprint("Paineis", __name__)
 
 
 
-
+LIMITE_GET_TELAS_NAVEGACAO = "600 per minute"
 
 
 TEMPO_CACHE_TOTAL_CLIENTES_SEGUNDOS = 120
@@ -242,29 +242,37 @@ def _url_paineis_tem_filtro_real(url: str) -> bool:
 
 def _registrar_lista_paineis_return_to_na_sessao() -> str:
     """
-    Eu salvo a URL atual da lista quando ela possui filtros reais.
+    Eu salvo a URL atual da lista somente quando ela possui filtro real.
 
-    Como a chave da sessão contém o usuário logado, cada usuário mantém
-    seu próprio estado de navegação.
+    Regra crítica:
+    - /paineis/ limpo NÃO pode ser salvo na sessão como return_to, porque
+      depois a própria rota /paineis/ pode tentar redirecionar para /paineis/
+      de novo e gerar ERR_TOO_MANY_REDIRECTS.
+    - URL filtrada pode ser salva, pois melhora a navegação ao voltar da grade.
     """
     url_atual = _url_request_atual()
     chave = _chave_sessao_lista_paineis_return_to()
 
     if _url_lista_paineis_segura(url_atual) and _url_paineis_tem_filtro_real(url_atual):
         session[chave] = url_atual
+        return url_atual
 
-    return session.get(chave) or url_atual
+    url_salva = session.get(chave)
+    if url_salva and _url_lista_paineis_segura(url_salva) and _url_paineis_tem_filtro_real(url_salva):
+        return url_salva
+
+    session.pop(chave, None)
+    return url_atual
 
 
 def _resolver_return_to_paineis() -> str:
     """
     Eu resolvo para onde a grade deve voltar.
 
-    Prioridade:
-    1. return_to vindo da URL;
-    2. return_to vindo de formulário;
-    3. última URL filtrada da lista salva para o usuário logado;
-    4. lista de painéis sem filtros.
+    Regra crítica:
+    - Posso retornar /paineis/ limpo como destino de volta.
+    - Mas só salvo na sessão quando existe filtro real.
+    - Isso evita loop: /paineis/ -> redirect para /paineis/ -> redirect para /paineis/.
     """
     chave = _chave_sessao_lista_paineis_return_to()
 
@@ -280,7 +288,11 @@ def _resolver_return_to_paineis() -> str:
             continue
 
         if _url_lista_paineis_segura(url):
-            session[chave] = url
+            if _url_paineis_tem_filtro_real(url):
+                session[chave] = url
+            elif session.get(chave) == url:
+                session.pop(chave, None)
+
             return url
 
     return url_for("Paineis.lista_paineis")
@@ -412,8 +424,42 @@ ID_TAG_CHECKIN_CONFIRMADO_KANBAN = 12
 
 @paineis_bp.app_context_processor
 def injetar_acl_menu_paineis():
+    """Eu injeto helpers do menu de Painéis nos templates.
+
+    Regras importantes:
+    - Vendedor vê a carteira própria pelo menu do usuário, não pelo submenu Ativos.
+    - A URL é resolvida pelo vínculo DimUsuarios -> Vendedores -> FatoCarteiraVendedor.
+    - Se não existir carteira vinculada, o item Minha Carteira simplesmente não aparece.
+    """
+    usuario_logado_eh_vendedor = False
+    id_minha_carteira = 0
+    minha_carteira_url = None
+
+    try:
+        usuario_logado_eh_vendedor = bool(
+            getattr(current_user, "is_authenticated", False)
+            and _usuario_logado_eh_perfil_vendedor()
+        )
+    except Exception:
+        usuario_logado_eh_vendedor = False
+
+    if usuario_logado_eh_vendedor:
+        try:
+            id_minha_carteira = _resolver_id_fato_carteira_vendedor_logado()
+            if id_minha_carteira > 0:
+                minha_carteira_url = url_for(
+                    "Paineis.carteira_detalhe",
+                    id_fato_carteira_vendedor=id_minha_carteira,
+                )
+        except Exception:
+            id_minha_carteira = 0
+            minha_carteira_url = None
+
     return {
         "pode_acessar_menu_paineis": pode_acessar_menu_paineis,
+        "usuario_logado_eh_vendedor_paineis": usuario_logado_eh_vendedor,
+        "id_minha_carteira_vendedor": id_minha_carteira,
+        "minha_carteira_url": minha_carteira_url,
     }
 
 
@@ -1396,6 +1442,214 @@ def _resolver_id_vendedor_logado_carteira() -> int:
         return 0
 
 
+
+
+
+def _resolver_id_fato_carteira_vendedor_logado() -> int:
+    """Eu encontro o IDFatoCarteiraVendedor da carteira própria do usuário logado.
+
+    Fluxo usado:
+    - usuário logado -> IDDimUsuarios;
+    - IDDimUsuarios -> Integracao.dbo.Vendedores.IDDimUsuarios;
+    - IDVendedor -> Integracao.Silver.FatoCarteiraVendedor.IDVendedor.
+
+    Esse ID é o que monta a URL: /paineis/carteiras/<IDFatoCarteiraVendedor>.
+    """
+    if not _usuario_logado_eh_perfil_vendedor():
+        return 0
+
+    id_usuario = _id_usuario_logado_carteira()
+    id_vendedor = _resolver_id_vendedor_logado_carteira()
+
+    if id_usuario <= 0 and id_vendedor <= 0:
+        return 0
+
+    id_empresa = 0
+    try:
+        id_empresa = int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0)
+    except Exception:
+        id_empresa = 0
+
+    sql = text("""
+        SELECT TOP (1)
+            cv.IDFatoCarteiraVendedor
+        FROM [Integracao].[Silver].[FatoCarteiraVendedor] cv
+        INNER JOIN [Integracao].[dbo].[Vendedores] v
+            ON v.IDVendedor = cv.IDVendedor
+        WHERE ISNULL(v.BitAtivo, 1) = 1
+          AND (
+                 (:id_vendedor > 0 AND cv.IDVendedor = :id_vendedor)
+              OR (:id_usuario > 0 AND v.IDDimUsuarios = :id_usuario)
+          )
+          AND (
+                 :id_empresa = 0
+              OR ISNULL(cv.IDEmpresaProprietaria, 0) = :id_empresa
+              OR ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa
+          )
+        ORDER BY
+            CASE WHEN :id_vendedor > 0 AND cv.IDVendedor = :id_vendedor THEN 0 ELSE 1 END,
+            CASE WHEN :id_usuario > 0 AND v.IDDimUsuarios = :id_usuario THEN 0 ELSE 1 END,
+            cv.IDFatoCarteiraVendedor ASC;
+    """)
+
+    try:
+        valor = db.session.execute(
+            sql,
+            {
+                "id_usuario": id_usuario,
+                "id_vendedor": id_vendedor,
+                "id_empresa": id_empresa,
+            },
+        ).scalar()
+        return int(valor or 0)
+    except Exception:
+        return 0
+
+
+def _carteira_eh_propria_para_vendedor(carteira_row, id_usuario_logado: int, id_vendedor_logado: int) -> bool:
+    """Eu valido se a carteira acessada pertence ao vendedor logado.
+
+    Aqui não libero carteira do Admin, porque a regra nova é: vendedor acessa
+    somente "Minha Carteira".
+    """
+    if not carteira_row:
+        return False
+
+    try:
+        id_vendedor_carteira = int(carteira_row.get("IDVendedor") or 0)
+    except Exception:
+        id_vendedor_carteira = 0
+
+    try:
+        id_usuario_vendedor = int(carteira_row.get("IDDimUsuariosVendedor") or 0)
+    except Exception:
+        id_usuario_vendedor = 0
+
+    if id_vendedor_logado > 0 and id_vendedor_carteira == id_vendedor_logado:
+        return True
+
+    if id_usuario_logado > 0 and id_usuario_vendedor == id_usuario_logado:
+        return True
+
+    return False
+
+
+def _normalizar_vendedor_para_comparacao(valor) -> str:
+    """Normaliza nome de vendedor para comparação segura em regra de acesso."""
+    try:
+        texto = str(valor or "").strip().casefold()
+        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+        texto = re.sub(r"\s+", " ", texto).strip()
+        return texto
+    except Exception:
+        return ""
+
+
+def _resolver_vendedor_logado_info() -> dict:
+    """Retorna o vendedor vinculado ao usuário logado pela tabela Integracao.dbo.Vendedores."""
+    id_usuario = _id_usuario_logado_carteira()
+    if id_usuario <= 0:
+        return {"IDVendedor": 0, "NomeVendedor": ""}
+
+    try:
+        id_empresa = int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0)
+    except Exception:
+        id_empresa = 0
+
+    sql = text("""
+        SELECT TOP (1)
+             v.IDVendedor
+            ,v.NomeVendedor
+        FROM [Integracao].[dbo].[Vendedores] v WITH (NOLOCK)
+        WHERE v.IDDimUsuarios = :id_usuario
+          AND ISNULL(v.BitAtivo, 1) = 1
+          AND (
+                :id_empresa = 0
+                OR ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa
+              )
+        ORDER BY
+            CASE WHEN ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa THEN 0 ELSE 1 END,
+            v.IDVendedor ASC;
+    """)
+
+    try:
+        row = db.session.execute(
+            sql,
+            {
+                "id_usuario": id_usuario,
+                "id_empresa": id_empresa,
+            },
+        ).mappings().first()
+    except Exception:
+        row = None
+
+    if not row:
+        return {"IDVendedor": 0, "NomeVendedor": ""}
+
+    try:
+        id_vendedor = int(row.get("IDVendedor") or 0)
+    except Exception:
+        id_vendedor = 0
+
+    return {
+        "IDVendedor": id_vendedor,
+        "NomeVendedor": str(row.get("NomeVendedor") or "").strip(),
+    }
+
+
+def _contrato_pertence_ao_vendedor_logado(
+    id_fato_controle_contratos: int,
+    id_vendedor_logado: int | None = None,
+    nome_vendedor_logado: str | None = None,
+) -> bool:
+    """Valida se o contrato possui pelo menos um item vinculado ao vendedor logado."""
+    try:
+        id_contrato = int(id_fato_controle_contratos or 0)
+    except Exception:
+        id_contrato = 0
+
+    if id_contrato <= 0:
+        return False
+
+    try:
+        id_vendedor = int(id_vendedor_logado or 0)
+    except Exception:
+        id_vendedor = 0
+
+    nome_vendedor_norm = _normalizar_vendedor_para_comparacao(nome_vendedor_logado)
+
+    if id_vendedor <= 0 and not nome_vendedor_norm:
+        return False
+
+    sql = text("""
+        SELECT
+             i.IDVendedor
+            ,i.Vendedor
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
+        WHERE i.IDFatoControleContratoEuromidia = :id_contrato;
+    """)
+
+    try:
+        rows = db.session.execute(sql, {"id_contrato": id_contrato}).mappings().all()
+    except Exception:
+        return False
+
+    for row in rows or []:
+        try:
+            id_vendedor_item = int(row.get("IDVendedor") or 0)
+        except Exception:
+            id_vendedor_item = 0
+
+        if id_vendedor > 0 and id_vendedor_item == id_vendedor:
+            return True
+
+        nome_item_norm = _normalizar_vendedor_para_comparacao(row.get("Vendedor"))
+        if nome_vendedor_norm and nome_item_norm and nome_item_norm == nome_vendedor_norm:
+            return True
+
+    return False
+
+
 def _carteira_eh_do_admin_ou_propria_para_vendedor(carteira_row, id_usuario_logado: int, id_vendedor_logado: int) -> bool:
     """Eu valido acesso direto à carteira quando o usuário logado é Vendedor.
 
@@ -1660,7 +1914,7 @@ def _marcar_conflitos_por_face(ocupacoes_por_face):
 
 @paineis_bp.route("/", methods=["GET"])
 @login_required
-@limiter.limit("80 per minute", methods=["GET"])
+@limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def lista_paineis():
 
@@ -2372,8 +2626,16 @@ def lista_paineis():
 
     if not request.args:
         url_lista_salva = session.get(chave_return_to_paineis)
-        if url_lista_salva and _url_lista_paineis_segura(url_lista_salva):
+
+        if (
+            url_lista_salva
+            and _url_lista_paineis_segura(url_lista_salva)
+            and _url_paineis_tem_filtro_real(url_lista_salva)
+        ):
             return redirect(url_lista_salva)
+
+        if url_lista_salva:
+            session.pop(chave_return_to_paineis, None)
 
     hoje = date.today()
     primeiro_dia_mes_atual = date(hoje.year, hoje.month, 1)
@@ -3684,7 +3946,7 @@ def lista_paineis():
 
 @paineis_bp.route("/<int:codponto>/grade", methods=["GET", "POST"])
 @login_required
-@limiter.limit("80 per minute", methods=["GET"])
+@limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def grade_painel(codponto: int):
 
@@ -4668,6 +4930,7 @@ def grade_painel(codponto: int):
             FatoControleContratosItensEuromidia.NumeroPrevia,
             FatoControleContratosItensEuromidia.FaturamentoLiquidoFinalMensal,
             FatoControleContratosItensEuromidia.TotalLiquidoContratoAGBRCTACORDO,
+            FatoControleContratosItensEuromidia.IDVendedor,
         )
         .filter(
             FatoControleContratosItensEuromidia.CodPonto == codponto,
@@ -4870,6 +5133,7 @@ def grade_painel(codponto: int):
                 _num_previa,
                 None,
                 None,
+                None,
             )
         )
 
@@ -5063,6 +5327,10 @@ def grade_painel(codponto: int):
             cota = r[8]
             num_contrato = r[9] or ""
             num_previa = r[10] or ""
+            try:
+                id_vendedor_item = int(r[13]) if r[13] is not None else None
+            except Exception:
+                id_vendedor_item = None
 
             if di is None:
                 continue
@@ -5115,6 +5383,7 @@ def grade_painel(codponto: int):
                     "MarcaExibida": marca,
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
+                    "IDVendedor": id_vendedor_item,
                     "DataInicio": di,
                     "DataFim": df,
                     "DiaInicio": dia_ini,
@@ -5257,6 +5526,10 @@ def grade_painel(codponto: int):
             cota = r[8]
             num_contrato = r[9] or ""
             num_previa = r[10] or ""
+            try:
+                id_vendedor_item = int(r[13]) if r[13] is not None else None
+            except Exception:
+                id_vendedor_item = None
 
             if di is None:
                 continue
@@ -5283,6 +5556,7 @@ def grade_painel(codponto: int):
                     "MarcaExibida": marca,
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
+                    "IDVendedor": id_vendedor_item,
                     "DataInicio": di,
                     "DataFim": df,
                     "DiaInicio": dia_ini,
@@ -5914,6 +6188,9 @@ def grade_painel(codponto: int):
         idx += 1
 
     usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
+    vendedor_logado_info = _resolver_vendedor_logado_info() if usuario_logado_eh_perfil_vendedor else {"IDVendedor": 0, "NomeVendedor": ""}
+    id_vendedor_logado = int(vendedor_logado_info.get("IDVendedor") or 0)
+    nome_vendedor_logado = str(vendedor_logado_info.get("NomeVendedor") or "").strip()
     pode_ver_kpis_financeiros = not usuario_logado_eh_perfil_vendedor
 
     if usuario_logado_eh_perfil_vendedor:
@@ -5971,6 +6248,8 @@ def grade_painel(codponto: int):
         qtd_contratos=qtd_contratos,
         ticket_medio=ticket_medio,
         usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
+        id_vendedor_logado=id_vendedor_logado,
+        nome_vendedor_logado=nome_vendedor_logado,
         pode_ver_kpis_financeiros=pode_ver_kpis_financeiros,
         opcoes_clientes=opcoes_clientes,
         opcoes_vendedores=opcoes_vendedores,
@@ -6019,7 +6298,7 @@ def grade_painel(codponto: int):
 
 @paineis_bp.route("/grade/multi", methods=["GET"])
 @login_required
-@limiter.limit("80 per minute", methods=["GET"])
+@limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def grade_painel_multi():
 
@@ -7406,6 +7685,7 @@ def grade_painel_multi():
                 FatoControleContratosItensEuromidia.NumeroContrato,
                 FatoControleContratosItensEuromidia.NumeroPrevia,
                 FatoControleContratosItensEuromidia.CodPonto,
+                FatoControleContratosItensEuromidia.IDVendedor,
             )
             .filter(
                 FatoControleContratosItensEuromidia.CodPonto == int(codponto_local),
@@ -7467,6 +7747,10 @@ def grade_painel_multi():
                 cota = r[8]
                 num_contrato = r[9] or ""
                 num_previa = r[10] or ""
+                try:
+                    id_vendedor_item = int(r[12]) if r[12] is not None else None
+                except Exception:
+                    id_vendedor_item = None
 
                 if di is None:
                     continue
@@ -7503,6 +7787,7 @@ def grade_painel_multi():
                     "MarcaExibida": marca,
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
+                    "IDVendedor": id_vendedor_item,
                     "DataInicio": di,
                     "DataFim": df,
                     "DiaInicio": dia_ini,
@@ -7662,6 +7947,10 @@ def grade_painel_multi():
                 cota = r[8]
                 num_contrato = r[9] or ""
                 num_previa = r[10] or ""
+                try:
+                    id_vendedor_item = int(r[12]) if r[12] is not None else None
+                except Exception:
+                    id_vendedor_item = None
 
                 if di is None:
                     continue
@@ -7697,6 +7986,7 @@ def grade_painel_multi():
                         "MarcaExibida": marca,
                         "Loop": f"COTA {cota}",
                         "Vendedor": vend,
+                        "IDVendedor": id_vendedor_item,
                         "DataInicio": di,
                         "DataFim": df,
                         "DiaInicio": dia_ini,
@@ -8093,6 +8383,11 @@ def grade_painel_multi():
 
     total_grades = len(grades)
 
+    usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
+    vendedor_logado_info = _resolver_vendedor_logado_info() if usuario_logado_eh_perfil_vendedor else {"IDVendedor": 0, "NomeVendedor": ""}
+    id_vendedor_logado = int(vendedor_logado_info.get("IDVendedor") or 0)
+    nome_vendedor_logado = str(vendedor_logado_info.get("NomeVendedor") or "").strip()
+
     return render_template(
         "euromidia/painel_grade_multi.html",
 
@@ -8126,6 +8421,9 @@ def grade_painel_multi():
         ooh_global_percent_periodo=ooh_global_percent_periodo_global,
 
         return_to_paineis=return_to_paineis,
+        usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
+        id_vendedor_logado=id_vendedor_logado,
+        nome_vendedor_logado=nome_vendedor_logado,
 
         filtros={
             "mes_ref": info_periodo["mes_ref"],
@@ -8263,6 +8561,18 @@ def contrato_detalhe(id_fato_controle_contratos: int):
         abort(404)
 
     contrato = dict(contrato)
+
+    if _usuario_logado_eh_perfil_vendedor():
+        vendedor_logado_info = _resolver_vendedor_logado_info()
+        id_vendedor_logado = int(vendedor_logado_info.get("IDVendedor") or 0)
+        nome_vendedor_logado = str(vendedor_logado_info.get("NomeVendedor") or "").strip()
+
+        if not _contrato_pertence_ao_vendedor_logado(
+            id_fato_controle_contratos,
+            id_vendedor_logado=id_vendedor_logado,
+            nome_vendedor_logado=nome_vendedor_logado,
+        ):
+            abort(403, description="Perfil Vendedor só pode abrir contratos vinculados ao próprio vendedor.")
 
     sql_itens = text(r"""
     ;WITH ItensContrato AS (
@@ -21166,6 +21476,15 @@ def carteiras_lista():
     id_usuario_logado = _id_usuario_logado_carteira()
     id_vendedor_logado = _resolver_id_vendedor_logado_carteira() if usuario_logado_eh_vendedor else 0
 
+    if usuario_logado_eh_vendedor:
+        id_minha_carteira = _resolver_id_fato_carteira_vendedor_logado()
+        if id_minha_carteira > 0:
+            return redirect(url_for(
+                "Paineis.carteira_detalhe",
+                id_fato_carteira_vendedor=id_minha_carteira,
+            ))
+        abort(404, description="Nenhuma carteira própria foi encontrada para o vendedor logado.")
+
     filtro_visibilidade_carteiras_sql = ""
     if usuario_logado_eh_vendedor:
         filtro_visibilidade_carteiras_sql = """
@@ -21473,12 +21792,12 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
     if not carteira_row:
         abort(404, description="Carteira não encontrada.")
 
-    if usuario_logado_eh_vendedor and not _carteira_eh_do_admin_ou_propria_para_vendedor(
+    if usuario_logado_eh_vendedor and not _carteira_eh_propria_para_vendedor(
         carteira_row,
         id_usuario_logado,
         id_vendedor_logado,
     ):
-        abort(403, description="Perfil Vendedor só pode acessar a carteira do Admin e a própria carteira.")
+        abort(403, description="Perfil Vendedor só pode acessar a própria carteira.")
 
     sql_resumo = text("""
         ;WITH EmpresasCarteira AS

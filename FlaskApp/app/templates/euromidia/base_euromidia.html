@@ -1029,7 +1029,7 @@ input:disabled, select:disabled, textarea:disabled{
           menu_paineis_disponibilidades
           or menu_paineis_atendimento
           or menu_paineis_performance
-          or menu_paineis_carteiras
+          or (menu_paineis_carteiras and not (usuario_logado_eh_vendedor_paineis | default(False)))
           or menu_paineis_empresas
           or menu_paineis_checkin_novo
           or menu_paineis_lista_checkins
@@ -1150,7 +1150,11 @@ input:disabled, select:disabled, textarea:disabled{
             {% endif %}
 
 
-            {% if menu_paineis_performance or menu_paineis_carteiras %}
+            {#
+              Regra: perfil VENDEDOR não deve ver nem acessar o agrupador "Ativos" pelo menu.
+              A carteira própria do vendedor passa a ficar no menu do usuário como "Minha Carteira".
+            #}
+            {% if (not (usuario_logado_eh_vendedor_paineis | default(False))) and (menu_paineis_performance or menu_paineis_carteiras) %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Ativos</span>
@@ -1366,6 +1370,17 @@ input:disabled, select:disabled, textarea:disabled{
                 </svg>
                 Meu perfil
               </a>
+
+              {% if usuario_logado_eh_vendedor_paineis|default(False) and minha_carteira_url %}
+                <a href="{{ minha_carteira_url }}">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 5V3h8v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 11h8M8 15h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  Minha Carteira
+                </a>
+              {% endif %}
 
               <a href="{{ url_for('Autenticacao.logout') }}">
                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
