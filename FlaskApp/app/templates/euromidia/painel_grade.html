@@ -1559,13 +1559,20 @@
   .grade-wrap{
     width: 100%;
     overflow: auto;
-    max-height: 72vh;
+    max-height: min(72vh, calc(100vh - 260px));
     overscroll-behavior: contain;
     background: #fff;
+    border-radius: 14px;
   }
 
   .grade{
-    min-width: calc({{ 180 + (90 if eh_digital else 0) }}px + ({{ total_dias }} * var(--dia-col-w)));
+    /*
+      A largura real passa a ser definida pelo conteúdo da própria grade
+      (coluna fixa + dias). Isso evita calc() com multiplicação, que é instável
+      em CSS, e permite que o JavaScript ajuste --dia-col-w pelo espaço visível.
+    */
+    width: max-content;
+    min-width: 100%;
     padding: 0;
   }
 
@@ -1582,9 +1589,16 @@
   .hscroll-top::-webkit-scrollbar{ height: 12px; }
 
   :root{
-    --dia-col-w: clamp(38px, 4.2vw, 54px);
-    --dia-font: 12px;
-    --dia-pad-y: 10px;
+    /*
+      Responsividade da grade:
+      - antes cada dia tinha no mínimo 38px, o que estourava meses com 30/31 dias;
+      - agora a largura das colunas é compacta por padrão e o JS abaixo ajusta pelo espaço real disponível.
+    */
+    --grade-face-col-w: clamp(126px, 10vw, 160px);
+    --grade-loop-col-w: clamp(58px, 5vw, 76px);
+    --dia-col-w: clamp(26px, 2.35vw, 42px);
+    --dia-font: clamp(10px, .72vw, 12px);
+    --dia-pad-y: 8px;
 
     --dias-bg-1: rgba(2, 132, 199, .08);
     --dias-bg-2: rgba(2, 132, 199, .03);
@@ -1597,8 +1611,8 @@
     --barra-tx: rgba(15, 23, 42, .92);
     --barra-shadow: rgba(2, 6, 23, .06);
 
-    --trilho-h: 56px;
-    --pad-y: 10px;
+    --trilho-h: clamp(44px, 4.1vh, 52px);
+    --pad-y: 7px;
 
     --linha-gap: 0px;
 
@@ -1619,9 +1633,9 @@
   .grade-head{
     display:grid;
     {% if eh_digital %}
-      grid-template-columns: 180px 90px repeat({{ total_dias }}, var(--dia-col-w));
+      grid-template-columns: var(--grade-face-col-w) var(--grade-loop-col-w) repeat({{ total_dias }}, var(--dia-col-w));
     {% else %}
-      grid-template-columns: 180px repeat({{ total_dias }}, var(--dia-col-w));
+      grid-template-columns: var(--grade-face-col-w) repeat({{ total_dias }}, var(--dia-col-w));
     {% endif %}
     grid-auto-rows: auto;
     gap:0;
@@ -1648,7 +1662,7 @@
   .head-top-spacer-loop{
     grid-row: 1;
     position: sticky;
-    left: 180px;
+    left: var(--grade-face-col-w);
     z-index: 43;
     background:#fff;
     border-right:1px solid rgba(15,23,42,.10);
@@ -1688,7 +1702,7 @@
     z-index: 40;
     background:#fff;
     border-right:1px solid rgba(15,23,42,.10);
-    padding: 10px 12px;
+    padding: 8px 10px;
     font-weight: 900;
     color: var(--euro-blue);
     display:flex;
@@ -1699,11 +1713,11 @@
   .col-loop-head{
     grid-row: 2;
     position: sticky;
-    left: 180px;
+    left: var(--grade-face-col-w);
     z-index: 39;
     background:#fff;
     border-right:1px solid rgba(15,23,42,.10);
-    padding: 10px 12px;
+    padding: 8px 8px;
     font-weight: 900;
     color: var(--euro-blue);
     display:flex;
@@ -1748,7 +1762,7 @@
   }
 
   .dia-head .dia-date{
-    font-size: 12px;
+    font-size: clamp(10px, .72vw, 12px);
     font-weight: 950;
     line-height: 1;
   }
@@ -1756,9 +1770,9 @@
   .linha{
     display:grid;
     {% if eh_digital %}
-      grid-template-columns: 180px 90px 1fr;
+      grid-template-columns: var(--grade-face-col-w) var(--grade-loop-col-w) 1fr;
     {% else %}
-      grid-template-columns: 180px 1fr;
+      grid-template-columns: var(--grade-face-col-w) 1fr;
     {% endif %}
     margin-bottom: var(--linha-gap);
     background: #fff;
@@ -1785,7 +1799,7 @@
     height: var(--trilho-h);
     box-sizing: border-box;
 
-    padding: 8px 12px;
+    padding: 7px 9px;
     display:flex;
     flex-direction:column;
     justify-content:center;
@@ -1859,7 +1873,7 @@
 
   .loop-col{
     position: sticky;
-    left: 180px;
+    left: var(--grade-face-col-w);
     z-index: 19;
     background:#fff;
     border-right:1px solid rgba(15,23,42,.10);
@@ -1867,7 +1881,7 @@
     height: var(--trilho-h);
     box-sizing: border-box;
 
-    padding: 0 12px;
+    padding: 0 8px;
     display:flex;
     flex-direction:column;
     justify-content:center;
@@ -1921,18 +1935,18 @@
     height: var(--barra-h, var(--barra-h-1));
     border-radius: 10px;
 
-    padding: clamp(4px, .8vw, 6px) clamp(6px, 1.2vw, 10px);
+    padding: clamp(3px, .55vw, 5px) clamp(5px, .75vw, 8px);
 
     display:flex;
     align-items:center;
-    gap: 10px;
+    gap: 6px;
 
     overflow:hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 
     font-weight: 900;
-    font-size: clamp(11px, 1.1vw, var(--barra-font, var(--barra-font-1)));
+    font-size: clamp(10px, .72vw, var(--barra-font, var(--barra-font-1)));
 
     border: 1px solid var(--barra-bd);
     box-shadow: 0 6px 14px var(--barra-shadow);
@@ -1967,7 +1981,7 @@
     border-radius: 999px;
     background: rgba(37,99,235,.55);
     color: #fff;
-    font-size: 11px;
+    font-size: clamp(9px, .65vw, 11px);
     font-weight: 950;
     flex: 0 0 auto;
   }
@@ -2010,6 +2024,65 @@
     background: rgba(148,163,184,.08);
   }
 
+
+  @media (max-width: 1440px){
+    .grade-wrap{
+      max-height: min(70vh, calc(100vh - 230px));
+    }
+
+    .barra .vend{
+      display:none;
+    }
+  }
+
+  @media (max-width: 1180px){
+    :root{
+      --grade-face-col-w: 118px;
+      --grade-loop-col-w: 54px;
+    }
+
+    .col-face-head,
+    .col-loop-head,
+    .face-col,
+    .loop-col{
+      font-size: 11px;
+    }
+
+    .face-col .meta,
+    .face-col .painel-extra{
+      display:none;
+    }
+
+    .barra .chip{
+      display:none;
+    }
+  }
+
+  @media (max-width: 760px){
+    :root{
+      --grade-face-col-w: 104px;
+      --grade-loop-col-w: 48px;
+    }
+
+    .grade-wrap{
+      max-height: 68vh;
+    }
+
+    .periodo-band-head{
+      font-size: 10px;
+      letter-spacing: .15px;
+      padding-inline: 6px;
+    }
+
+    .dia-head .dia-dow{
+      display:none;
+    }
+
+    .barra{
+      gap: 4px;
+    }
+  }
+
   .tooltip{
     position:absolute;
     display:none;
@@ -2047,8 +2120,8 @@
 </div>
 
 <style>
-  .linha{ --linha-h: var(--linha-h-1, 44px); }
-  .linha.linha-alta{ --linha-h: var(--linha-h-2, 88px); }
+  .linha{ --linha-h: var(--trilho-h); }
+  .linha.linha-alta{ --linha-h: calc(var(--trilho-h) * 2); }
 
   .linha{ min-height: var(--linha-h); }
   .linha .trilho{
@@ -2073,7 +2146,9 @@
 </style>
 
 <div class="grade-wrap" id="gradeWrap">
-  <div class="grade" id="gradeInner">
+  <div class="grade" id="gradeInner"
+       data-total-dias="{{ total_dias }}"
+       data-eh-digital="{% if eh_digital %}1{% else %}0{% endif %}">
 
     <div class="grade-head">
       <div class="head-top-spacer-face"></div>
@@ -2678,7 +2753,47 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let syncing = false;
 
+    function numeroCssVar(nome, fallback){
+      const brutoInner = getComputedStyle(inner).getPropertyValue(nome);
+      const brutoRoot = getComputedStyle(document.documentElement).getPropertyValue(nome);
+      const valor = parseFloat(brutoInner || brutoRoot);
+      return Number.isFinite(valor) ? valor : fallback;
+    }
+
+    function ajustarGradeAoViewport(){
+      const totalDias = parseInt(inner.dataset.totalDias || "0", 10);
+      if (!totalDias || !wrap.clientWidth) return;
+
+      const ehDigitalAtual = (inner.dataset.ehDigital || "0") === "1";
+      const faceW = numeroCssVar("--grade-face-col-w", 140);
+      const loopW = ehDigitalAtual ? numeroCssVar("--grade-loop-col-w", 64) : 0;
+
+      /*
+        O objetivo é usar a largura real da área visível.
+        Assim, em vez de forçar zoom 75%, a grade compacta os dias até caber.
+        Em telas muito estreitas, mantemos um mínimo legível e deixamos rolagem horizontal.
+      */
+      const larguraUtil = Math.max(0, wrap.clientWidth - faceW - loopW - 4);
+      const larguraCalculadaDia = larguraUtil / totalDias;
+
+      let minDia = 26;
+      let maxDia = 42;
+
+      if (wrap.clientWidth >= 1600){
+        minDia = 30;
+        maxDia = 48;
+      } else if (wrap.clientWidth <= 1180){
+        minDia = 22;
+        maxDia = 34;
+      }
+
+      const larguraDia = Math.max(minDia, Math.min(maxDia, larguraCalculadaDia));
+      inner.style.setProperty("--dia-col-w", larguraDia.toFixed(2) + "px");
+    }
+
     function refreshTopScroll(){
+      ajustarGradeAoViewport();
+
       const wInner = inner.scrollWidth || 0;
       const precisa = (wInner > (wrap.clientWidth + 2));
 
