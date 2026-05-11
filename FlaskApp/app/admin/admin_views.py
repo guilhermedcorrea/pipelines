@@ -7236,3 +7236,625 @@ def api_mensagens_notificar():
         "ok": True,
         "usuarios_notificados": usuarios,
     })
+
+# ==========================================================
+# LISTA DE PREÇOS EUROMÍDIA
+# ==========================================================
+
+
+def _id_usuario_logado_admin_ou_none():
+    """Retorna um ID de usuário possível para gravar em AlteradoPor, sem depender de um único nome de atributo."""
+
+    for nome_atributo in (
+        "IDDimUsuarios",
+        "IDDimUsuario",
+        "IDUsuario",
+        "id_usuario",
+        "id_dim_usuarios",
+        "id",
+    ):
+        valor = getattr(current_user, nome_atributo, None)
+        try:
+            if valor is not None and str(valor).strip() != "":
+                return int(valor)
+        except Exception:
+            continue
+
+    return None
+
+
+def _normalizar_texto_perfil_lista_precos(valor) -> str:
+    """Normaliza o texto do perfil para comparar com segurança."""
+
+    import unicodedata
+
+    texto = str(valor or "").strip().upper()
+    if not texto:
+        return ""
+
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    return " ".join(texto.split())
+
+
+def _usuario_logado_tem_perfil_vendedor_lista_precos() -> bool:
+    """
+    Bloqueio explícito para Perfil = VENDEDOR.
+
+    Regra principal:
+    - IDDimPerfilUsuario = 3 é VENDEDOR.
+
+    Por segurança, também confiro textos de perfil no current_user, na relação
+    current_user.perfil e, em último caso, no banco. Assim o endpoint não depende
+    de um único nome de atributo carregado no login.
+    """
+
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    def _eh_vendedor_por_texto(valor) -> bool:
+        return _normalizar_texto_perfil_lista_precos(valor) == "VENDEDOR"
+
+    def _eh_vendedor_por_id(valor) -> bool:
+        try:
+            return int(valor or 0) == 3
+        except Exception:
+            return False
+
+    # 1) Regra mais confiável: ID do perfil carregado no usuário logado.
+    for nome_atributo in (
+        "IDDimPerfilUsuario",
+        "id_dim_perfil_usuario",
+        "id_perfil_usuario",
+        "IDPerfilUsuario",
+        "IDPerfil",
+        "PerfilID",
+        "perfil_id",
+    ):
+        if _eh_vendedor_por_id(getattr(current_user, nome_atributo, None)):
+            return True
+
+    # 2) Campos textuais diretamente no usuário.
+    for nome_atributo in (
+        "Perfil",
+        "NomePerfil",
+        "nome_perfil",
+        "DescricaoPerfil",
+        "descricao_perfil",
+        "TipoPerfil",
+        "tipo_perfil",
+        "PerfilUsuario",
+        "perfil_usuario",
+        "Role",
+        "role",
+        "Papel",
+        "papel",
+    ):
+        valor = getattr(current_user, nome_atributo, None)
+        if _eh_vendedor_por_texto(valor):
+            return True
+
+    # 3) Relação current_user.perfil usada no módulo de autenticação.
+    perfil_rel = getattr(current_user, "perfil", None)
+    if perfil_rel is not None:
+        for nome_atributo in (
+            "IDDimPerfilUsuario",
+            "id_dim_perfil_usuario",
+            "IDPerfilUsuario",
+            "IDPerfil",
+            "id",
+        ):
+            if _eh_vendedor_por_id(getattr(perfil_rel, nome_atributo, None)):
+                return True
+
+        for nome_atributo in (
+            "Perfil",
+            "NomePerfil",
+            "nome_perfil",
+            "Descricao",
+            "descricao",
+            "DescricaoPerfil",
+            "descricao_perfil",
+            "NomePerfilUsuario",
+            "nome",
+        ):
+            if _eh_vendedor_por_texto(getattr(perfil_rel, nome_atributo, None)):
+                return True
+
+    # 4) Fallback no banco: primeiro tenta pela própria DimUsuarios.
+    id_usuario = _id_usuario_logado_admin_ou_none()
+    if not id_usuario:
+        return False
+
+    try:
+        row_usuario = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                       u.*
+                FROM [Integracao].[Silver].[DimUsuarios] AS u
+                WHERE u.IDDimUsuarios = :id_usuario
+            """),
+            {"id_usuario": int(id_usuario)},
+        ).mappings().first()
+
+        if row_usuario:
+            if _eh_vendedor_por_id(row_usuario.get("IDDimPerfilUsuario")):
+                return True
+
+            for nome_coluna in (
+                "Perfil",
+                "NomePerfil",
+                "DescricaoPerfil",
+                "TipoPerfil",
+                "PerfilUsuario",
+                "Role",
+                "Papel",
+            ):
+                if _eh_vendedor_por_texto(row_usuario.get(nome_coluna)):
+                    return True
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao verificar DimUsuarios para bloqueio da lista de preços."
+        )
+
+    # 5) Fallback extra: tenta resolver o nome do perfil pela dimensão de perfil.
+    #    Mantive try/except porque o nome físico das colunas pode variar no banco.
+    try:
+        row_perfil = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                       p.*
+                FROM [Integracao].[Silver].[DimUsuarios] AS u
+                INNER JOIN [Integracao].[Silver].[DimPerfilUsuario] AS p
+                    ON p.IDDimPerfilUsuario = u.IDDimPerfilUsuario
+                WHERE u.IDDimUsuarios = :id_usuario
+            """),
+            {"id_usuario": int(id_usuario)},
+        ).mappings().first()
+
+        if row_perfil:
+            if _eh_vendedor_por_id(row_perfil.get("IDDimPerfilUsuario")):
+                return True
+
+            for nome_coluna in (
+                "Perfil",
+                "NomePerfil",
+                "Descricao",
+                "DescricaoPerfil",
+                "NomePerfilUsuario",
+                "TipoPerfil",
+            ):
+                if _eh_vendedor_por_texto(row_perfil.get(nome_coluna)):
+                    return True
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao verificar DimPerfilUsuario para bloqueio da lista de preços."
+        )
+
+    return False
+
+
+def _bloquear_vendedor_lista_precos():
+    """Interrompe a requisição da lista de preços quando o perfil logado é VENDEDOR."""
+
+    if _usuario_logado_tem_perfil_vendedor_lista_precos():
+        current_app.logger.warning(
+            "Acesso bloqueado ao endpoint de lista de preços para usuário com perfil VENDEDOR."
+        )
+        abort(403, description="Usuário com perfil VENDEDOR não pode acessar a lista de preços.")
+
+
+def _normalizar_lista_filtro_lista_precos(valores) -> list[str]:
+    """Remove vazios, duplicados e preserva a ordem dos filtros múltiplos."""
+
+    resultado: list[str] = []
+    vistos: set[str] = set()
+
+    for valor in valores or []:
+        texto = str(valor or "").strip()
+        if not texto:
+            continue
+        chave = texto.upper()
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        resultado.append(texto)
+
+    return resultado
+
+
+def _adicionar_filtro_in_lista_precos(where: list[str], params: dict, coluna_sql: str, nome_base: str, valores: list[str]):
+    """Cria um filtro IN com parâmetros nomeados, sem concatenar valores do usuário no SQL."""
+
+    if not valores:
+        return
+
+    placeholders = []
+    for indice, valor in enumerate(valores):
+        chave = f"{nome_base}_{indice}"
+        placeholders.append(f":{chave}")
+        params[chave] = valor
+
+    where.append(f"{coluna_sql} IN ({', '.join(placeholders)})")
+
+
+def _url_lista_precos_euromidia(page: int, q: str, ativo: str, tipos: list[str], tabelas: list[str]) -> str:
+    """Monta URL preservando filtros múltiplos de tipo e tabela."""
+
+    from urllib.parse import urlencode
+
+    parametros = []
+    parametros.append(("page", max(1, int(page or 1))))
+
+    if q:
+        parametros.append(("q", q))
+
+    if ativo and ativo != "todos":
+        parametros.append(("ativo", ativo))
+    elif ativo == "todos":
+        parametros.append(("ativo", "todos"))
+
+    for tipo in tipos or []:
+        parametros.append(("tipo", tipo))
+
+    for tabela in tabelas or []:
+        parametros.append(("tabela", tabela))
+
+    query_string = urlencode(parametros, doseq=True)
+    url_base = url_for("admin.lista_precos_euromidia")
+    return f"{url_base}?{query_string}" if query_string else url_base
+
+
+def _query_string_sem_page_lista_precos(q: str, ativo: str, tipos: list[str], tabelas: list[str]) -> str:
+    """Retorna a querystring dos filtros atuais, sem o parâmetro page."""
+
+    from urllib.parse import urlencode
+
+    parametros = []
+
+    if q:
+        parametros.append(("q", q))
+
+    if ativo:
+        parametros.append(("ativo", ativo))
+
+    for tipo in tipos or []:
+        parametros.append(("tipo", tipo))
+
+    for tabela in tabelas or []:
+        parametros.append(("tabela", tabela))
+
+    return urlencode(parametros, doseq=True)
+
+
+def _formatar_moeda_brasil_lista_precos(valor) -> str:
+    """Formata valor monetário no padrão brasileiro para retorno JSON das sugestões."""
+
+    if valor is None:
+        return "—"
+
+    try:
+        numero = float(valor)
+    except Exception:
+        return "—"
+
+    return "R$ " + f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+@admin.route("/lista-precos", methods=["GET"])
+@admin.route("/listas-precos", methods=["GET"])
+@admin.route("/precos/euromidia", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("80 per minute", methods=["GET"])
+def lista_precos_euromidia():
+    _bloquear_vendedor_lista_precos()
+
+    q = (request.args.get("q") or "").strip()
+    ativo = (request.args.get("ativo") or "todos").strip().lower()
+    tipos_selecionados = _normalizar_lista_filtro_lista_precos(request.args.getlist("tipo"))
+    tabelas_selecionadas = _normalizar_lista_filtro_lista_precos(request.args.getlist("tabela"))
+
+    try:
+        page = int(request.args.get("page") or "1")
+    except Exception:
+        page = 1
+
+    page = max(1, page)
+    per_page = 10
+
+    where = ["1 = 1"]
+    params = {}
+
+    if q:
+        where.append("""
+            (
+                COALESCE(pn.CodPonto, '') LIKE '%' + :q + '%'
+                OR COALESCE(fp.CodFace, '') LIKE '%' + :q + '%'
+                OR COALESCE(tp.Tipo, '') LIKE '%' + :q + '%'
+                OR COALESCE(tp.PeriodoExibicao, '') LIKE '%' + :q + '%'
+                OR COALESCE(CAST(tp.ExibicoesDia AS varchar(50)), '') LIKE '%' + :q + '%'
+                OR COALESCE(CAST(tp.Valor AS varchar(50)), '') LIKE '%' + :q + '%'
+                OR COALESCE(tp.PoliticaTrocas, '') LIKE '%' + :q + '%'
+                OR COALESCE(tp.Tabela, '') LIKE '%' + :q + '%'
+                OR COALESCE(pn.Cidade, '') LIKE '%' + :q + '%'
+                OR COALESCE(pn.UF, '') LIKE '%' + :q + '%'
+                OR COALESCE(pn.Referencia, '') LIKE '%' + :q + '%'
+            )
+        """)
+        params["q"] = q
+
+    if ativo in ("1", "ativo", "ativos"):
+        where.append("ISNULL(tp.BitAtivo, 0) = 1")
+        ativo = "1"
+    elif ativo in ("0", "inativo", "inativos"):
+        where.append("ISNULL(tp.BitAtivo, 0) = 0")
+        ativo = "0"
+    else:
+        ativo = "todos"
+
+    _adicionar_filtro_in_lista_precos(where, params, "tp.Tipo", "tipo", tipos_selecionados)
+    _adicionar_filtro_in_lista_precos(where, params, "tp.Tabela", "tabela", tabelas_selecionadas)
+
+    where_sql = "\n        AND ".join(where)
+
+    sql_count = text(f"""
+        SELECT COUNT(1) AS Total
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tp
+        INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS pn
+            ON pn.IDDimPaineisEuromidia = tp.IDDimPaineisEuromidia
+        INNER JOIN [Integracao].[Silver].[DimFacesPaineis] AS fp
+            ON fp.IDDimFacesPaineis = tp.IDDimFacesPaineis
+        WHERE {where_sql}
+    """)
+
+    total = int(db.session.execute(sql_count, params).scalar() or 0)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+
+    params_lista = dict(params)
+    params_lista["offset"] = offset
+    params_lista["per_page"] = per_page
+
+    sql_itens = text(f"""
+        SELECT
+             tp.IDDimTabelaPrecosEuromidia
+            ,tp.IDDimPaineisEuromidia
+            ,tp.IDDimFacesPaineis
+            ,tp.Tipo
+            ,tp.PeriodoExibicao
+            ,tp.ExibicoesDia
+            ,tp.Valor
+            ,tp.PoliticaTrocas
+            ,tp.Tabela
+            ,tp.DataPublicacao
+            ,tp.DataValidade
+            ,tp.DataAtualizacao
+            ,tp.BitAtivo
+            ,tp.AlteradoPor
+            ,tp.ValorTroca
+            ,pn.CodPonto
+            ,pn.QuantidadeFaces
+            ,pn.Cidade
+            ,pn.UF
+            ,pn.Logradouro
+            ,pn.Bairro
+            ,pn.Referencia AS ReferenciaPainel
+            ,pn.Exibidora
+            ,fp.CodFace
+            ,fp.Face
+            ,fp.Tipo AS TipoFace
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tp
+        INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS pn
+            ON pn.IDDimPaineisEuromidia = tp.IDDimPaineisEuromidia
+        INNER JOIN [Integracao].[Silver].[DimFacesPaineis] AS fp
+            ON fp.IDDimFacesPaineis = tp.IDDimFacesPaineis
+        WHERE {where_sql}
+        ORDER BY
+            ISNULL(tp.DataAtualizacao, CONVERT(datetime2, '19000101')) DESC,
+            tp.IDDimTabelaPrecosEuromidia DESC
+        OFFSET :offset ROWS
+        FETCH NEXT :per_page ROWS ONLY
+    """)
+
+    rows = db.session.execute(sql_itens, params_lista).mappings().all()
+    itens = [dict(row) for row in rows]
+
+    tipos_rows = db.session.execute(text("""
+        SELECT DISTINCT tp.Tipo
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tp
+        WHERE tp.Tipo IS NOT NULL
+          AND LTRIM(RTRIM(tp.Tipo)) <> ''
+        ORDER BY tp.Tipo ASC
+    """)).scalars().all()
+
+    tabelas_rows = db.session.execute(text("""
+        SELECT DISTINCT tp.Tabela
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tp
+        WHERE tp.Tabela IS NOT NULL
+          AND LTRIM(RTRIM(tp.Tabela)) <> ''
+        ORDER BY tp.Tabela ASC
+    """)).scalars().all()
+
+    pagina_inicio = max(1, page - 3)
+    pagina_fim = min(total_pages, page + 3)
+    paginas_visiveis = list(range(pagina_inicio, pagina_fim + 1))
+    query_string_sem_page = _query_string_sem_page_lista_precos(
+        q=q,
+        ativo=ativo,
+        tipos=tipos_selecionados,
+        tabelas=tabelas_selecionadas,
+    )
+
+    return render_template(
+        "admin/lista_precos_euromidia.html",
+        itens=itens,
+        tipos=[x for x in tipos_rows if x],
+        tabelas=[x for x in tabelas_rows if x],
+        filtros={
+            "q": q,
+            "ativo": ativo,
+            "tipos": tipos_selecionados,
+            "tabelas": tabelas_selecionadas,
+        },
+        paginacao={
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "inicio": (offset + 1) if total > 0 else 0,
+            "fim": min(offset + per_page, total),
+            "paginas_visiveis": paginas_visiveis,
+            "query_string_sem_page": query_string_sem_page,
+        },
+    )
+
+
+@admin.route("/lista-precos/api/sugestoes", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("120 per minute", methods=["GET"])
+def api_lista_precos_sugestoes():
+    _bloquear_vendedor_lista_precos()
+
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 1:
+        return jsonify({"ok": True, "itens": []})
+
+    sql = text("""
+        SELECT TOP (12)
+             pn.CodPonto
+            ,fp.CodFace
+            ,fp.Face
+            ,COALESCE(tp.Tipo, fp.Tipo) AS Tipo
+            ,tp.PeriodoExibicao
+            ,tp.ExibicoesDia
+            ,tp.Valor
+            ,tp.ValorTroca
+            ,tp.Tabela
+            ,pn.Cidade
+            ,pn.UF
+            ,pn.Referencia AS ReferenciaPainel
+        FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tp
+        INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS pn
+            ON pn.IDDimPaineisEuromidia = tp.IDDimPaineisEuromidia
+        INNER JOIN [Integracao].[Silver].[DimFacesPaineis] AS fp
+            ON fp.IDDimFacesPaineis = tp.IDDimFacesPaineis
+        WHERE
+            COALESCE(pn.CodPonto, '') LIKE '%' + :q + '%'
+            OR COALESCE(fp.CodFace, '') LIKE '%' + :q + '%'
+            OR COALESCE(tp.Tipo, '') LIKE '%' + :q + '%'
+            OR COALESCE(tp.PeriodoExibicao, '') LIKE '%' + :q + '%'
+            OR COALESCE(CAST(tp.ExibicoesDia AS varchar(50)), '') LIKE '%' + :q + '%'
+            OR COALESCE(CAST(tp.Valor AS varchar(50)), '') LIKE '%' + :q + '%'
+            OR COALESCE(tp.Tabela, '') LIKE '%' + :q + '%'
+            OR COALESCE(pn.Cidade, '') LIKE '%' + :q + '%'
+            OR COALESCE(pn.UF, '') LIKE '%' + :q + '%'
+            OR COALESCE(pn.Referencia, '') LIKE '%' + :q + '%'
+        ORDER BY
+            CASE
+                WHEN fp.CodFace = :q THEN 0
+                WHEN pn.CodPonto = :q THEN 1
+                WHEN fp.CodFace LIKE :q_prefixo THEN 2
+                WHEN pn.CodPonto LIKE :q_prefixo THEN 3
+                ELSE 9
+            END,
+            fp.CodFace ASC,
+            tp.Tabela DESC,
+            tp.ExibicoesDia DESC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "q": q,
+            "q_prefixo": f"{q}%",
+        },
+    ).mappings().all()
+
+    itens = []
+    for r in rows:
+        valor = r.get("Valor")
+        itens.append({
+            "CodPonto": r.get("CodPonto") or "",
+            "CodFace": r.get("CodFace") or "",
+            "Face": r.get("Face") or "",
+            "Tipo": r.get("Tipo") or "",
+            "PeriodoExibicao": r.get("PeriodoExibicao") or "",
+            "ExibicoesDia": r.get("ExibicoesDia"),
+            "Valor": float(valor) if valor is not None else None,
+            "ValorFormatado": _formatar_moeda_brasil_lista_precos(valor),
+            "ValorTrocaFormatado": _formatar_moeda_brasil_lista_precos(r.get("ValorTroca")),
+            "Tabela": r.get("Tabela") or "",
+            "Cidade": r.get("Cidade") or "",
+            "UF": r.get("UF") or "",
+            "ReferenciaPainel": r.get("ReferenciaPainel") or "",
+            "TermoBusca": r.get("CodFace") or r.get("CodPonto") or q,
+        })
+
+    return jsonify({"ok": True, "itens": itens})
+
+
+@admin.route("/lista-precos/<int:id_preco>/bitativo", methods=["POST"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("120 per minute", methods=["POST"])
+def lista_precos_euromidia_alterar_bitativo(id_preco: int):
+    _bloquear_vendedor_lista_precos()
+
+    q = (request.form.get("q") or request.args.get("q") or "").strip()
+    ativo = (request.form.get("ativo") or request.args.get("ativo") or "todos").strip()
+    tipos_selecionados = _normalizar_lista_filtro_lista_precos(
+        request.form.getlist("tipo") or request.args.getlist("tipo")
+    )
+    tabelas_selecionadas = _normalizar_lista_filtro_lista_precos(
+        request.form.getlist("tabela") or request.args.getlist("tabela")
+    )
+
+    try:
+        page = int(request.form.get("page") or request.args.get("page") or "1")
+    except Exception:
+        page = 1
+
+    bit_ativo_raw = (request.form.get("bit_ativo") or "0").strip().lower()
+    bit_ativo = 1 if bit_ativo_raw in ("1", "true", "on", "sim", "s") else 0
+
+    params_update = {
+        "id_preco": int(id_preco),
+        "bit_ativo": int(bit_ativo),
+        "alterado_por": _id_usuario_logado_admin_ou_none(),
+    }
+
+    try:
+        resultado = db.session.execute(text("""
+            UPDATE [Integracao].[Silver].[FatoTabelaPrecosEuromidia]
+               SET BitAtivo = :bit_ativo,
+                   DataAtualizacao = SYSDATETIME(),
+                   AlteradoPor = :alterado_por
+             WHERE IDDimTabelaPrecosEuromidia = :id_preco
+        """), params_update)
+
+        db.session.commit()
+
+        if int(resultado.rowcount or 0) <= 0:
+            flash("Preço não encontrado para atualizar o status ativo/inativo.", "warning")
+        else:
+            flash("Status do preço atualizado com sucesso.", "success")
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao atualizar BitAtivo da lista de preços Euromídia.")
+        flash(f"Erro ao atualizar o status do preço: {exc}", "danger")
+
+    return redirect(_url_lista_precos_euromidia(
+        page=page,
+        q=q,
+        ativo=ativo,
+        tipos=tipos_selecionados,
+        tabelas=tabelas_selecionadas,
+    ))

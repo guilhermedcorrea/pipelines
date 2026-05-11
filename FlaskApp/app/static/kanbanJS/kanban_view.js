@@ -16295,3 +16295,5 @@ async function moverCard(idCard, idFasePara, posicao) {
   configurarScrollKanban();
   void inicializarKanban();
 })();
+
+

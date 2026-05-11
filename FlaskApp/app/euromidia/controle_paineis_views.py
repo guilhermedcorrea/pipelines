@@ -2649,6 +2649,8 @@ def lista_paineis():
     selected_codpontos = faces_selecionadas_info["codpontos"]
     tem_faces_selecionadas = bool(selected_face_pairs or selected_codfaces_norm)
 
+    usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
+
     tipo_list = _getlist_limpo("tipo")
     exibidora_list = _getlist_limpo("exibidora")
     cidade_exibicao_list = _getlist_limpo("cidade_exibicao")
@@ -2673,6 +2675,10 @@ def lista_paineis():
     if not pode_ver_exibidora:
         exibidora_list = []
         exibidora_single = ""
+
+    if usuario_logado_eh_perfil_vendedor:
+        tipo_documento_list = []
+        tipo_documento_single = ""
 
     if tipo_single and (tipo_single not in tipo_list):
         tipo_list.append(tipo_single)
@@ -2719,6 +2725,12 @@ def lista_paineis():
         ponto_ativo = ""
 
     if ponto_ativo_raw is None:
+        ponto_ativo = "1"
+
+    if usuario_logado_eh_perfil_vendedor:
+        # Regra de negócio: perfil VENDEDOR só pode enxergar painéis ativos.
+        # Mesmo que tente forçar ?ponto_ativo=0 ou ?ponto_ativo=todos pela URL,
+        # o backend normaliza para ativo antes de montar a query.
         ponto_ativo = "1"
 
     dt_ini_str = (request.args.get("dt_ini") or "").strip()
@@ -2902,6 +2914,13 @@ def lista_paineis():
 
         dt_ini_calc = dt_ini_ocup
         dt_fim_calc = dt_fim_ocup
+
+
+    if usuario_logado_eh_perfil_vendedor:
+        # Reforço de segurança: alguns atalhos, como o parâmetro tudo=1,
+        # limpam filtros para administradores. Para VENDEDOR, painel inativo
+        # nunca deve voltar para a listagem.
+        ponto_ativo = "1"
 
 
     bisemanas_select = []
@@ -3859,7 +3878,6 @@ def lista_paineis():
         "ano": (date(hoje.year, 1, 1), hoje),
     }
 
-    usuario_logado_eh_perfil_vendedor = _usuario_logado_eh_perfil_vendedor()
     pode_abrir_detalhes_painel = not usuario_logado_eh_perfil_vendedor
     return_to_paineis = _registrar_lista_paineis_return_to_na_sessao()
 

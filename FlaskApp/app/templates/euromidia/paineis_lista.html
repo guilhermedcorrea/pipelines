@@ -3,9 +3,14 @@
 {% block content %}
 
 {% set pode_abrir_detalhes_painel = (pode_abrir_detalhes_painel if pode_abrir_detalhes_painel is defined else true) %}
+{% set usuario_eh_vendedor_lista = (usuario_logado_eh_perfil_vendedor if usuario_logado_eh_perfil_vendedor is defined else (usuario_logado_eh_vendedor_paineis if usuario_logado_eh_vendedor_paineis is defined else false)) %}
 
 {% set GRID_COLS = "34px clamp(118px, 8.2vw, 146px) 40px minmax(220px, 1.72fr) minmax(110px, 0.90fr) 44px minmax(128px, 0.88fr) minmax(168px, 1.12fr) minmax(96px, 0.76fr) 82px minmax(220px, 1.16fr) clamp(132px, 10.5vw, 168px)" %}
-{% set ponto_ativo_val = (filtros.ponto_ativo if filtros.ponto_ativo is not none else '1')|string %}
+{% if usuario_eh_vendedor_lista %}
+  {% set ponto_ativo_val = '1' %}
+{% else %}
+  {% set ponto_ativo_val = (filtros.ponto_ativo if filtros.ponto_ativo is not none else '1')|string %}
+{% endif %}
 <div class="card card-no-clip">
 
  <style>
@@ -123,7 +128,25 @@
   }
 
   @media (min-width: 1280px){
-    .filters-row-1{
+    /*
+      A linha 1 dos filtros precisa se ajustar à quantidade real de campos visíveis.
+      Quando o usuário é VENDEDOR, o filtro Tipo Documento não é renderizado.
+      Se a grade continuar fixa em 9 colunas, sobra buraco à direita e os botões ficam desalinhados.
+
+      Regra:
+      - cols-7 = 5 filtros visíveis + Filtrar + Limpar Filtros
+      - cols-8 = 6 filtros visíveis + Filtrar + Limpar Filtros
+      - cols-9 = 7 filtros visíveis + Filtrar + Limpar Filtros
+    */
+    .filters-row-1.filters-row-1--cols-7{
+      grid-template-columns: repeat(5, minmax(120px, 1fr)) minmax(132px, 172px) minmax(150px, 200px);
+    }
+
+    .filters-row-1.filters-row-1--cols-8{
+      grid-template-columns: repeat(6, minmax(120px, 1fr)) minmax(132px, 172px) minmax(150px, 200px);
+    }
+
+    .filters-row-1.filters-row-1--cols-9{
       grid-template-columns: repeat(7, minmax(120px, 1fr)) minmax(132px, 172px) minmax(150px, 200px);
     }
   }
@@ -1407,7 +1430,8 @@
         <div class="filters-wrap">
           <div class="filters-top-shell">
 
-            <div class="filters-row-1">
+            {% set qtd_colunas_filtros_linha_1 = 7 + (1 if filtros.pode_ver_exibidora else 0) + (1 if not usuario_eh_vendedor_lista else 0) %}
+            <div class="filters-row-1 filters-row-1--cols-{{ qtd_colunas_filtros_linha_1 }}">
 
               <!-- ✅ CIDADE (cidade_exibicao) -->
               <details class="dd" data-dd="cidade_exibicao">
@@ -1541,6 +1565,7 @@
                 {% endfor %}
               </select>
 
+              {% if not usuario_eh_vendedor_lista %}
               <details class="dd" data-dd="tipo_documento">
                 <summary class="dd-summary">
                   <span class="dd-label">Tipo Documento</span>
@@ -1585,6 +1610,7 @@
                   </option>
                 {% endfor %}
               </select>
+              {% endif %}
 
               <details class="dd" data-dd="vendedor">
                 <summary class="dd-summary">
@@ -1804,27 +1830,29 @@
 
                 <details class="dd" data-dd="ponto_ativo" data-dd-mode="single" style="flex:0 1 240px;min-width:210px;max-width:280px;">
                   <summary class="dd-summary">
-                    <span class="dd-label">Painéis</span>
+                    <span class="dd-label">{% if usuario_eh_vendedor_lista %}Painéis: Ativos{% else %}Painéis{% endif %}</span>
                     <span class="dd-caret">▾</span>
                   </summary>
                   <div class="dd-panel">
                     <label class="dd-item">
                       <input type="checkbox" name="ponto_ativo_ui" value="1"
-                        {% if ponto_ativo_val == '1' %}checked{% endif %}>
+                        {% if usuario_eh_vendedor_lista or ponto_ativo_val == '1' %}checked{% endif %}>
                       <span>Ativos</span>
                     </label>
 
-                    <label class="dd-item">
-                      <input type="checkbox" name="ponto_ativo_ui" value="0"
-                        {% if ponto_ativo_val == '0' %}checked{% endif %}>
-                      <span>Inativos</span>
-                    </label>
+                    {% if not usuario_eh_vendedor_lista %}
+                      <label class="dd-item">
+                        <input type="checkbox" name="ponto_ativo_ui" value="0"
+                          {% if ponto_ativo_val == '0' %}checked{% endif %}>
+                        <span>Inativos</span>
+                      </label>
 
-                    <label class="dd-item">
-                      <input type="checkbox" name="ponto_ativo_ui" value="todos"
-                        {% if ponto_ativo_val == '' %}checked{% endif %}>
-                      <span>Todos</span>
-                    </label>
+                      <label class="dd-item">
+                        <input type="checkbox" name="ponto_ativo_ui" value="todos"
+                          {% if ponto_ativo_val == '' %}checked{% endif %}>
+                        <span>Todos</span>
+                      </label>
+                    {% endif %}
                   </div>
                 </details>
 
@@ -1926,7 +1954,7 @@
         <input type="hidden" name="iluminado" value="{{ filtros.iluminado or '' }}">
         <input type="hidden" name="area_min" value="{{ filtros.area_min if filtros.area_min is not none else '' }}">
         <input type="hidden" name="area_max" value="{{ filtros.area_max if filtros.area_max is not none else '' }}">
-        <input type="hidden" id="pontoAtivoReal" name="ponto_ativo" value="{{ filtros.ponto_ativo if filtros.ponto_ativo is not none else '1' }}">
+        <input type="hidden" id="pontoAtivoReal" name="ponto_ativo" value="{% if usuario_eh_vendedor_lista %}1{% else %}{{ filtros.ponto_ativo if filtros.ponto_ativo is not none else '1' }}{% endif %}">
 
         <div id="facesSelecionadasContainer"></div>
 
@@ -2283,6 +2311,7 @@
                   ">
                   {% set p = paginacao.page %}
                   {% set tp = paginacao.total_pages %}
+                  {% set tipo_documento_url = [] if usuario_eh_vendedor_lista else filtros.tipo_documento %}
 
                   <a class="btn btn-secondary js-preservar-faces-url" data-preservar-faces="1" style="text-decoration:none;padding:8px 10px;"
                      href="{{ url_for('Paineis.lista_paineis',
@@ -2292,7 +2321,7 @@
                                       tipo=filtros.tipo,
                                       exibidora=filtros.exibidora,
                                       cidade_exibicao=filtros.cidade_exibicao,
-                                      tipo_documento=filtros.tipo_documento,
+                                      tipo_documento=tipo_documento_url,
                                       vendedor=filtros.vendedor,
                                       marca_exibida=filtros.marca_exibida,
                                       status=filtros.status,
@@ -2318,7 +2347,7 @@
                                       tipo=filtros.tipo,
                                       exibidora=filtros.exibidora,
                                       cidade_exibicao=filtros.cidade_exibicao,
-                                      tipo_documento=filtros.tipo_documento,
+                                      tipo_documento=tipo_documento_url,
                                       vendedor=filtros.vendedor,
                                       marca_exibida=filtros.marca_exibida,
                                       status=filtros.status,
@@ -2348,7 +2377,7 @@
                                       tipo=filtros.tipo,
                                       exibidora=filtros.exibidora,
                                       cidade_exibicao=filtros.cidade_exibicao,
-                                      tipo_documento=filtros.tipo_documento,
+                                      tipo_documento=tipo_documento_url,
                                       vendedor=filtros.vendedor,
                                       marca_exibida=filtros.marca_exibida,
                                       status=filtros.status,
@@ -2374,7 +2403,7 @@
                                       tipo=filtros.tipo,
                                       exibidora=filtros.exibidora,
                                       cidade_exibicao=filtros.cidade_exibicao,
-                                      tipo_documento=filtros.tipo_documento,
+                                      tipo_documento=tipo_documento_url,
                                       vendedor=filtros.vendedor,
                                       marca_exibida=filtros.marca_exibida,
                                       status=filtros.status,

@@ -1006,14 +1006,26 @@ input:disabled, select:disabled, textarea:disabled{
           Perfil Vendedor = IDDimPerfilUsuario 3 não pode ver nem acessar ADMIN_TUDO.
         #}
         {% set usuario_perfil_id = (current_user.IDDimPerfilUsuario|int if current_user.is_authenticated else 0) %}
-        {% if usuario_perfil_id == 3 %}
+        {% set usuario_perfil_rel = (current_user.perfil if current_user.is_authenticated and current_user.perfil is defined else none) %}
+        {% set usuario_perfil_nome = (
+          current_user.Perfil|default('', true)
+          or current_user.NomePerfil|default('', true)
+          or current_user.DescricaoPerfil|default('', true)
+          or (usuario_perfil_rel.Perfil|default('', true) if usuario_perfil_rel else '')
+          or (usuario_perfil_rel.NomePerfil|default('', true) if usuario_perfil_rel else '')
+          or (usuario_perfil_rel.Descricao|default('', true) if usuario_perfil_rel else '')
+          or (usuario_perfil_rel.DescricaoPerfil|default('', true) if usuario_perfil_rel else '')
+          or (usuario_perfil_rel.NomePerfilUsuario|default('', true) if usuario_perfil_rel else '')
+        ) %}
+        {% set usuario_eh_vendedor_menu = (usuario_perfil_id == 3 or (usuario_perfil_nome|string|trim|upper == 'VENDEDOR')) %}
+        {% if usuario_eh_vendedor_menu %}
           {# Vendedor pode acessar Histórico Atendimento, mas não pode acessar Health Check Comercial. #}
           {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}
           {% set menu_paineis_health_check = False %}
         {% endif %}
         {% set menu_admin = (
           current_user.is_authenticated
-          and usuario_perfil_id != 3
+          and (not usuario_eh_vendedor_menu)
           and (pode_acessar_menu_paineis('admin') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
         ) %}
         {% set menu_admin_permissao_desconto = (
@@ -1023,6 +1035,10 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_admin_aprovacao_desconto = (
           menu_admin
           and (pode_acessar_menu_paineis('aprovacao_desconto') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+        ) %}
+        {% set menu_admin_lista_precos = (
+          menu_admin
+          and (pode_acessar_menu_paineis('lista_precos_euromidia') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
         ) %}
 
         {% set exibir_menu_paineis =
@@ -1256,38 +1272,56 @@ input:disabled, select:disabled, textarea:disabled{
 
 
 
-        {% if menu_admin and (menu_admin_permissao_desconto or menu_admin_aprovacao_desconto) %}
+        {% if menu_admin and (menu_admin_permissao_desconto or menu_admin_aprovacao_desconto or menu_admin_lista_precos) %}
           <div class="menu-item" data-menu="admin">
             <button type="button"
-                    class="menu-btn {% if request.path.startswith('/admin') %}active{% endif %}">
+                    class="menu-btn {% if request.path.startswith('/admin') or request.path.startswith('/lista-precos') or request.path.startswith('/listas-precos') or request.path.startswith('/precos/euromidia') %}active{% endif %}">
               Admin <span style="opacity:.9;">▾</span>
             </button>
 
             <div class="menu-dropdown">
               <div class="desc">Ações administrativas</div>
 
-              <div class="submenu-item">
-                <a href="#" class="submenu-link">
-                  <span>Permissões</span>
-                  <span class="submenu-caret">▸</span>
-                </a>
+              {% if menu_admin_permissao_desconto or menu_admin_aprovacao_desconto %}
+                <div class="submenu-item">
+                  <a href="#" class="submenu-link">
+                    <span>Permissões</span>
+                    <span class="submenu-caret">▸</span>
+                  </a>
 
-                <div class="submenu-dropdown">
-                  {% if menu_admin_permissao_desconto %}
-                    <a href="{{ url_for('admin.permissao_desconto') }}"
-                       class="{% if request.path == url_for('admin.permissao_desconto') %}menu-link-current{% endif %}">
-                      Permissão Desconto
-                    </a>
-                  {% endif %}
+                  <div class="submenu-dropdown">
+                    {% if menu_admin_permissao_desconto %}
+                      <a href="{{ url_for('admin.permissao_desconto') }}"
+                         class="{% if request.path == url_for('admin.permissao_desconto') %}menu-link-current{% endif %}">
+                        Permissão Desconto
+                      </a>
+                    {% endif %}
 
-                  {% if menu_admin_aprovacao_desconto %}
-                    <a href="{{ url_for('kanban.lista_aprovacao_preco') }}"
-                       class="{% if request.path == url_for('kanban.lista_aprovacao_preco') %}menu-link-current{% endif %}">
-                      Aprovação Desconto
-                    </a>
-                  {% endif %}
+                    {% if menu_admin_aprovacao_desconto %}
+                      <a href="{{ url_for('kanban.lista_aprovacao_preco') }}"
+                         class="{% if request.path == url_for('kanban.lista_aprovacao_preco') %}menu-link-current{% endif %}">
+                        Aprovação Desconto
+                      </a>
+                    {% endif %}
+                  </div>
                 </div>
-              </div>
+              {% endif %}
+
+              {% if menu_admin_lista_precos %}
+                <div class="submenu-item">
+                  <a href="#" class="submenu-link">
+                    <span>Preços</span>
+                    <span class="submenu-caret">▸</span>
+                  </a>
+
+                  <div class="submenu-dropdown">
+                    <a href="{{ url_for('admin.lista_precos_euromidia') }}"
+                       class="{% if request.path == url_for('admin.lista_precos_euromidia') or request.path.startswith('/lista-precos') or request.path.startswith('/listas-precos') or request.path.startswith('/precos/euromidia') %}menu-link-current{% endif %}">
+                      Lista de Preços
+                    </a>
+                  </div>
+                </div>
+              {% endif %}
             </div>
           </div>
         {% endif %}
