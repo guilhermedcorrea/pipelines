@@ -1020,7 +1020,12 @@ input:disabled, select:disabled, textarea:disabled{
         ) %}
         {% set usuario_eh_vendedor_menu = (usuario_perfil_id == 3 or (usuario_perfil_nome|string|trim|upper == 'VENDEDOR')) %}
         {% if usuario_eh_vendedor_menu %}
-          {# Vendedor pode acessar Histórico Atendimento, mas não pode acessar Health Check Comercial. #}
+          {#
+            Vendedor deve acessar Vencimento Campanhas.
+            O filtro de dados fica no backend: vendedor vê somente contratos/campanhas vinculados a ele.
+            Não liberamos Health Check Comercial para perfil VENDEDOR.
+          #}
+          {% set menu_paineis_vencimentos_campanhas = True %}
           {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}
           {% set menu_paineis_health_check = False %}
         {% endif %}
@@ -1145,10 +1150,12 @@ input:disabled, select:disabled, textarea:disabled{
                 </a>
 
                 <div class="submenu-dropdown">
-                  <a href="{{ url_for('kanban.atendimento_redirect') }}"
-                     class="{% if request.path == url_for('kanban.atendimento_redirect') %}menu-link-current{% endif %}">
-                    Kanban Atendimento
-                  </a>
+                  {% if menu_paineis_atendimento %}
+                    <a href="{{ url_for('kanban.atendimento_redirect') }}"
+                       class="{% if request.path == url_for('kanban.atendimento_redirect') %}menu-link-current{% endif %}">
+                      Kanban Atendimento
+                    </a>
+                  {% endif %}
 
                   {% if menu_paineis_health_check %}
                     <a href="{{ url_for('kanban.health_check_comercial') }}"
