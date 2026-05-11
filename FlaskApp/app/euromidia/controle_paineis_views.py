@@ -4974,6 +4974,13 @@ def grade_painel(codponto: int):
     if filtro_cliente:
         q_oc = q_oc.filter(FatoControleContratosItensEuromidia.MarcaExibida.like(f"%{filtro_cliente}%"))
 
+    # Base específica para montar o dropdown de vendedores da grade.
+    # Aqui eu congelo a consulta depois de aplicar período, CodPonto, CodFace e cliente,
+    # mas antes do filtro de vendedor. Assim, ao selecionar um vendedor, a lista não
+    # vira apenas o vendedor selecionado; ela continua mostrando os vendedores que têm
+    # ocupação no período carregado da grade.
+    q_oc_opcoes_vendedores = q_oc
+
     if vendedores_selecionados or vendedores_termos_livres:
         filtros_sql_vendedor = []
 
@@ -5061,6 +5068,10 @@ def grade_painel(codponto: int):
             rr for rr in (rows_reservas_raw or [])
             if filtro_cliente_low in str(rr[3] or "").lower()
         ]
+
+    # Mesma regra do dropdown para reservas: considera período, CodPonto, CodFace
+    # e cliente, mas não deixa o próprio filtro de vendedor reduzir a lista de opções.
+    rows_reservas_raw_opcoes_vendedores = list(rows_reservas_raw or [])
 
     if vendedores_selecionados or vendedores_termos_livres:
         vendedores_sel_ci = {str(v).strip().casefold() for v in (vendedores_selecionados or []) if str(v).strip()}
@@ -5169,16 +5180,56 @@ def grade_painel(codponto: int):
         return x if x else None
 
     opcoes_clientes = sorted({_limpa_str(r[3]) for r in (rows or []) if _limpa_str(r[3])})
-    opcoes_vendedores_grade = sorted({_limpa_str(r[4]) for r in (rows or []) if _limpa_str(r[4])})
 
-    opcoes_vendedores = [
-        (str(v["NomeVendedor"]).strip())
-        for v in (vendedores_select or [])
-        if str(v.get("NomeVendedor") or "").strip()
+    opcoes_vendedores_grade_set = set()
+
+    try:
+        rows_vendedores_grade_contratos = (
+            q_oc_opcoes_vendedores
+            .with_entities(FatoControleContratosItensEuromidia.Vendedor)
+            .filter(FatoControleContratosItensEuromidia.Vendedor != None)
+            .distinct()
+            .order_by(FatoControleContratosItensEuromidia.Vendedor.asc())
+            .all()
+        )
+
+        for rv_grade in (rows_vendedores_grade_contratos or []):
+            nome_grade = _limpa_str(rv_grade[0])
+            if nome_grade:
+                opcoes_vendedores_grade_set.add(nome_grade)
+    except Exception:
+        pass
+
+    for rr_grade in (rows_reservas_raw_opcoes_vendedores or []):
+        try:
+            nome_grade = _limpa_str(rr_grade[4])
+        except Exception:
+            nome_grade = None
+
+        if nome_grade:
+            opcoes_vendedores_grade_set.add(nome_grade)
+
+    opcoes_vendedores_grade = sorted(opcoes_vendedores_grade_set)
+
+    # REGRA DA GRADE:
+    # O dropdown de vendedor não deve listar todos os vendedores cadastrados na empresa.
+    # Ele deve listar somente vendedores que têm contrato/ocupação/reserva no período
+    # carregado da grade, respeitando CodPonto, CodFace e cliente.
+    vendedores_select = [
+        {
+            "IDVendedor": None,
+            "NomeVendedor": nome_vendedor_grade,
+        }
+        for nome_vendedor_grade in opcoes_vendedores_grade
     ]
 
-    if not opcoes_vendedores:
-        opcoes_vendedores = list(opcoes_vendedores_grade)
+    nomes_vendedores_validos_ci = {
+        str(v["NomeVendedor"] or "").strip().casefold(): str(v["NomeVendedor"] or "").strip()
+        for v in vendedores_select
+        if str(v.get("NomeVendedor") or "").strip()
+    }
+
+    opcoes_vendedores = list(opcoes_vendedores_grade)
 
     opcoes_segmentos = list(segmentos_select or [])
     opcoes_contratos = sorted({_limpa_str(r[9]) for r in (rows or []) if _limpa_str(r[9])})
