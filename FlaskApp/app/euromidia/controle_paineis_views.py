@@ -21823,24 +21823,32 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ce.IDEmpresa,
-                CAST(SUM(
+                SUM(
                     CASE
                         WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
                              AND it.DataInicioPrevisto < :dt_prox_mes
                              AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes
-                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
-                        ELSE 0
+                        THEN COALESCE(
+                                NULLIF(TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoFinalMensal), CONVERT(DECIMAL(38,6), 0)),
+                                TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoMensal),
+                                CONVERT(DECIMAL(38,6), 0)
+                             )
+                        ELSE CONVERT(DECIMAL(38,6), 0)
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
-                CAST(SUM(
+                ) AS FaturamentoMesItens,
+                SUM(
                     CASE
                         WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
                              AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
                              AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
-                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
-                        ELSE 0
+                        THEN COALESCE(
+                                NULLIF(TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoFinalMensal), CONVERT(DECIMAL(38,6), 0)),
+                                TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoMensal),
+                                CONVERT(DECIMAL(38,6), 0)
+                             )
+                        ELSE CONVERT(DECIMAL(38,6), 0)
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+                ) AS FaturamentoMesAnterior
             FROM ContratosEmpresa ce
             LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
                 ON it.IDFatoControleContratoEuromidia = ce.IDFatoControleContratosEuromidia
@@ -21851,7 +21859,12 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ce.IDEmpresa,
-                CAST(SUM(ISNULL(ce.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
+                SUM(
+                    COALESCE(
+                        TRY_CONVERT(DECIMAL(38,6), ce.TotalFaturamentoLiquidoMensal),
+                        CONVERT(DECIMAL(38,6), 0)
+                    )
+                ) AS FaturamentoMesCabecalho
             FROM ContratosEmpresa ce
             GROUP BY ce.IDEmpresa
         ),
@@ -21859,13 +21872,12 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ec.IDEmpresa,
-                CAST(
-                    ISNULL(
-                        NULLIF(fi.FaturamentoMesItens, 0),
-                        ISNULL(fc.FaturamentoMesCabecalho, 0)
-                    ) AS DECIMAL(18,2)
+                COALESCE(
+                    NULLIF(fi.FaturamentoMesItens, CONVERT(DECIMAL(38,6), 0)),
+                    fc.FaturamentoMesCabecalho,
+                    CONVERT(DECIMAL(38,6), 0)
                 ) AS FaturamentoMes,
-                CAST(ISNULL(fi.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+                COALESCE(fi.FaturamentoMesAnterior, CONVERT(DECIMAL(38,6), 0)) AS FaturamentoMesAnterior
             FROM EmpresasCarteira ec
             LEFT JOIN FaturamentoItens fi
                 ON fi.IDEmpresa = ec.IDEmpresa
@@ -21875,18 +21887,20 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         SELECT
             COUNT(DISTINCT ec.IDEmpresa) AS QuantidadeEmpresas,
             COUNT(DISTINCT CASE WHEN ISNULL(e.BitCliente, 0) = 1 THEN ec.IDEmpresa ELSE NULL END) AS ClientesAtivos,
-            CAST(ISNULL(SUM(be.FaturamentoMes), 0) AS DECIMAL(18,2)) AS FaturamentoMes,
-            CAST(ISNULL(SUM(be.FaturamentoMesAnterior), 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+            CAST(COALESCE(SUM(be.FaturamentoMes), CONVERT(DECIMAL(38,6), 0)) AS DECIMAL(38,2)) AS FaturamentoMes,
+            CAST(COALESCE(SUM(be.FaturamentoMesAnterior), CONVERT(DECIMAL(38,6), 0)) AS DECIMAL(38,2)) AS FaturamentoMesAnterior,
             CAST(
                 CASE
-                    WHEN ISNULL(SUM(be.FaturamentoMesAnterior), 0) = 0
-                         AND ISNULL(SUM(be.FaturamentoMes), 0) > 0
-                        THEN 100
-                    WHEN ISNULL(SUM(be.FaturamentoMesAnterior), 0) = 0
-                        THEN 0
-                    ELSE ((ISNULL(SUM(be.FaturamentoMes), 0) - ISNULL(SUM(be.FaturamentoMesAnterior), 0)) * 100.0)
-                         / NULLIF(SUM(be.FaturamentoMesAnterior), 0)
-                END AS DECIMAL(18,2)
+                    WHEN COALESCE(SUM(be.FaturamentoMesAnterior), CONVERT(DECIMAL(38,6), 0)) = 0
+                         AND COALESCE(SUM(be.FaturamentoMes), CONVERT(DECIMAL(38,6), 0)) > 0
+                        THEN CONVERT(DECIMAL(38,6), 100)
+                    WHEN COALESCE(SUM(be.FaturamentoMesAnterior), CONVERT(DECIMAL(38,6), 0)) = 0
+                        THEN CONVERT(DECIMAL(38,6), 0)
+                    ELSE (
+                        (COALESCE(SUM(be.FaturamentoMes), CONVERT(DECIMAL(38,6), 0)) - COALESCE(SUM(be.FaturamentoMesAnterior), CONVERT(DECIMAL(38,6), 0)))
+                        * CONVERT(DECIMAL(38,6), 100)
+                    ) / NULLIF(SUM(be.FaturamentoMesAnterior), CONVERT(DECIMAL(38,6), 0))
+                END AS DECIMAL(38,2)
             ) AS VariacaoFaturamentoPct
         FROM EmpresasCarteira ec
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
@@ -21997,24 +22011,32 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ce.IDEmpresa,
-                CAST(SUM(
+                SUM(
                     CASE
                         WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
                              AND it.DataInicioPrevisto < :dt_prox_mes
                              AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes
-                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
-                        ELSE 0
+                        THEN COALESCE(
+                                NULLIF(TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoFinalMensal), CONVERT(DECIMAL(38,6), 0)),
+                                TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoMensal),
+                                CONVERT(DECIMAL(38,6), 0)
+                             )
+                        ELSE CONVERT(DECIMAL(38,6), 0)
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesItens,
-                CAST(SUM(
+                ) AS FaturamentoMesItens,
+                SUM(
                     CASE
                         WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
                              AND it.DataInicioPrevisto < :dt_fim_mes_anterior_exclusivo
                              AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio_mes_anterior
-                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
-                        ELSE 0
+                        THEN COALESCE(
+                                NULLIF(TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoFinalMensal), CONVERT(DECIMAL(38,6), 0)),
+                                TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoMensal),
+                                CONVERT(DECIMAL(38,6), 0)
+                             )
+                        ELSE CONVERT(DECIMAL(38,6), 0)
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesAnterior
+                ) AS FaturamentoMesAnterior
             FROM ContratosEmpresa ce
             LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
                 ON it.IDFatoControleContratoEuromidia = ce.IDFatoControleContratosEuromidia
@@ -22025,7 +22047,12 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ce.IDEmpresa,
-                CAST(SUM(ISNULL(ce.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
+                SUM(
+                    COALESCE(
+                        TRY_CONVERT(DECIMAL(38,6), ce.TotalFaturamentoLiquidoMensal),
+                        CONVERT(DECIMAL(38,6), 0)
+                    )
+                ) AS FaturamentoMesCabecalho
             FROM ContratosEmpresa ce
             GROUP BY ce.IDEmpresa
         ),
@@ -22041,36 +22068,37 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         SELECT
             ef.*,
             CAST(
-                ISNULL(
-                    NULLIF(fi.FaturamentoMesItens, 0),
-                    ISNULL(fc.FaturamentoMesCabecalho, 0)
-                ) AS DECIMAL(18,2)
+                COALESCE(
+                    NULLIF(fi.FaturamentoMesItens, CONVERT(DECIMAL(38,6), 0)),
+                    fc.FaturamentoMesCabecalho,
+                    CONVERT(DECIMAL(38,6), 0)
+                ) AS DECIMAL(38,2)
             ) AS FaturamentoMes,
-            CAST(ISNULL(fi.FaturamentoMesAnterior, 0) AS DECIMAL(18,2)) AS FaturamentoMesAnterior,
+            CAST(COALESCE(fi.FaturamentoMesAnterior, CONVERT(DECIMAL(38,6), 0)) AS DECIMAL(38,2)) AS FaturamentoMesAnterior,
             CAST(
                 CASE
-                    WHEN ISNULL(fi.FaturamentoMesAnterior, 0) = 0
-                         AND ISNULL(NULLIF(fi.FaturamentoMesItens, 0), ISNULL(fc.FaturamentoMesCabecalho, 0)) > 0
-                        THEN 100
-                    WHEN ISNULL(fi.FaturamentoMesAnterior, 0) = 0
-                        THEN 0
+                    WHEN COALESCE(fi.FaturamentoMesAnterior, CONVERT(DECIMAL(38,6), 0)) = 0
+                         AND COALESCE(NULLIF(fi.FaturamentoMesItens, CONVERT(DECIMAL(38,6), 0)), fc.FaturamentoMesCabecalho, CONVERT(DECIMAL(38,6), 0)) > 0
+                        THEN CONVERT(DECIMAL(38,6), 100)
+                    WHEN COALESCE(fi.FaturamentoMesAnterior, CONVERT(DECIMAL(38,6), 0)) = 0
+                        THEN CONVERT(DECIMAL(38,6), 0)
                     ELSE (
                         (
-                            ISNULL(NULLIF(fi.FaturamentoMesItens, 0), ISNULL(fc.FaturamentoMesCabecalho, 0))
-                            - ISNULL(fi.FaturamentoMesAnterior, 0)
-                        ) * 100.0
-                    ) / NULLIF(fi.FaturamentoMesAnterior, 0)
-                END AS DECIMAL(18,2)
+                            COALESCE(NULLIF(fi.FaturamentoMesItens, CONVERT(DECIMAL(38,6), 0)), fc.FaturamentoMesCabecalho, CONVERT(DECIMAL(38,6), 0))
+                            - COALESCE(fi.FaturamentoMesAnterior, CONVERT(DECIMAL(38,6), 0))
+                        ) * CONVERT(DECIMAL(38,6), 100)
+                    ) / NULLIF(fi.FaturamentoMesAnterior, CONVERT(DECIMAL(38,6), 0))
+                END AS DECIMAL(38,2)
             ) AS VariacaoFaturamentoPct,
             CAST(
                 CASE
-                    WHEN :total_faturamento_mes > 0
+                    WHEN TRY_CONVERT(DECIMAL(38,6), :total_faturamento_mes) > 0
                     THEN (
-                        ISNULL(NULLIF(fi.FaturamentoMesItens, 0), ISNULL(fc.FaturamentoMesCabecalho, 0))
-                        * 100.0
-                    ) / :total_faturamento_mes
-                    ELSE 0
-                END AS DECIMAL(18,2)
+                        COALESCE(NULLIF(fi.FaturamentoMesItens, CONVERT(DECIMAL(38,6), 0)), fc.FaturamentoMesCabecalho, CONVERT(DECIMAL(38,6), 0))
+                        * CONVERT(DECIMAL(38,6), 100)
+                    ) / NULLIF(TRY_CONVERT(DECIMAL(38,6), :total_faturamento_mes), CONVERT(DECIMAL(38,6), 0))
+                    ELSE CONVERT(DECIMAL(38,6), 0)
+                END AS DECIMAL(38,2)
             ) AS ParticipacaoCarteiraPct,
             ISNULL(ca.ContratosAtivos, 0) AS ContratosAtivos
         FROM EmpresasFiltradas ef
@@ -22223,15 +22251,19 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ce.IDEmpresa,
-                CAST(SUM(
+                SUM(
                     CASE
                         WHEN it.IDFatoControleContratosItensEuromidia IS NOT NULL
                              AND it.DataInicioPrevisto < :dt_fim
                              AND COALESCE(it.DataFimEfetiva, it.DataCancelamento, it.DataTerminoPrevisto, CONVERT(date, '9999-12-31')) >= :dt_inicio
-                        THEN ISNULL(NULLIF(it.FaturamentoLiquidoFinalMensal, 0), ISNULL(it.FaturamentoLiquidoMensal, 0))
-                        ELSE 0
+                        THEN COALESCE(
+                                NULLIF(TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoFinalMensal), CONVERT(DECIMAL(38,6), 0)),
+                                TRY_CONVERT(DECIMAL(38,6), it.FaturamentoLiquidoMensal),
+                                CONVERT(DECIMAL(38,6), 0)
+                             )
+                        ELSE CONVERT(DECIMAL(38,6), 0)
                     END
-                ) AS DECIMAL(18,2)) AS FaturamentoMesItens
+                ) AS FaturamentoMesItens
             FROM ContratosEmpresa ce
             LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
                 ON it.IDFatoControleContratoEuromidia = ce.IDFatoControleContratosEuromidia
@@ -22242,17 +22274,28 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         (
             SELECT
                 ce.IDEmpresa,
-                CAST(SUM(ISNULL(ce.TotalFaturamentoLiquidoMensal, 0)) AS DECIMAL(18,2)) AS FaturamentoMesCabecalho
+                SUM(
+                    COALESCE(
+                        TRY_CONVERT(DECIMAL(38,6), ce.TotalFaturamentoLiquidoMensal),
+                        CONVERT(DECIMAL(38,6), 0)
+                    )
+                ) AS FaturamentoMesCabecalho
             FROM ContratosEmpresa ce
             GROUP BY ce.IDEmpresa
         )
         SELECT
-            CAST(SUM(
-                ISNULL(
-                    NULLIF(fi.FaturamentoMesItens, 0),
-                    ISNULL(fc.FaturamentoMesCabecalho, 0)
-                )
-            ) AS DECIMAL(18,2)) AS Valor
+            CAST(
+                COALESCE(
+                    SUM(
+                        COALESCE(
+                            NULLIF(fi.FaturamentoMesItens, CONVERT(DECIMAL(38,6), 0)),
+                            fc.FaturamentoMesCabecalho,
+                            CONVERT(DECIMAL(38,6), 0)
+                        )
+                    ),
+                    CONVERT(DECIMAL(38,6), 0)
+                ) AS DECIMAL(38,2)
+            ) AS Valor
         FROM EmpresasCarteira ec
         LEFT JOIN FaturamentoItens fi
             ON fi.IDEmpresa = ec.IDEmpresa
