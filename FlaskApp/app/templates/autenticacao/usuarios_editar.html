@@ -11,8 +11,14 @@
     {{ usuario.NomeUsuario }} — {{ usuario.Email }}
   </p>
 
-  <form method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% set token_csrf_usuario = csrf_token() %}
+
+  <form method="post"
+        action="{{ url_for('Autenticacao.usuarios_editar', id_usuario=usuario.IDDimUsuarios) }}"
+        autocomplete="off"
+        data-form-editar-usuario="1">
+    <input type="hidden" name="csrf_token" value="{{ token_csrf_usuario }}">
+    <input type="hidden" name="_csrf_origem" value="usuarios_editar">
 
     <div class="grid">
       <div>
@@ -36,9 +42,63 @@
       </div>
     </div>
 
-    <div style="margin-top:24px;">
-      <h2 class="page-title" style="font-size:18px;">Permissões individuais</h2>
+    <style>
+      .perm-section{margin-top:24px;}
+      .perm-alert{margin-top:10px;border:1px solid rgba(0,40,132,.14);background:rgba(0,40,132,.04);border-radius:14px;padding:12px;color:var(--muted);font-weight:900;font-size:12px;line-height:1.45;}
+      .perm-tag{display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(0,40,132,.16);background:rgba(0,40,132,.06);color:var(--euro-blue);font-size:11px;font-weight:1000;}
+    </style>
 
+    <div class="perm-section">
+      <h2 class="page-title" style="font-size:18px;">Filtros avançados da lista de empresas</h2>
+      <div class="perm-alert">
+        Para usuário com perfil <b>VENDEDOR</b>, estes filtros ficam ocultos por padrão.
+        Use <b>Conceder</b> para liberar um filtro específico para este usuário.
+      </div>
+    </div>
+
+    {% if permissoes_filtros_clientes and permissoes_filtros_clientes|length > 0 %}
+      <div class="overflow-x">
+        <table style="width:100%; border-collapse:collapse; margin-top:14px;">
+          <thead>
+            <tr>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Filtro</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Permissão técnica</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Perfil concede?</th>
+              <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Regra individual</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in permissoes_filtros_clientes %}
+              {% set permissao = item.permissao %}
+              {% set tipo_atual = permissoes_extras_map.get(permissao.IDDimPermissoes, "HERDAR") %}
+              {% set perfil_concede = permissao.IDDimPermissoes in permissoes_perfil_ids %}
+              <tr>
+                <td style="padding:10px; border-bottom:1px solid var(--border);"><b>{{ item.rotulo }}</b></td>
+                <td style="padding:10px; border-bottom:1px solid var(--border);">
+                  <span class="perm-tag">{{ permissao.CodigoPermissao }}</span>
+                  <div class="muted" style="margin-top:4px;">{{ permissao.Descricao or item.descricao }}</div>
+                </td>
+                <td style="padding:10px; border-bottom:1px solid var(--border);">
+                  {% if perfil_concede %}<span style="font-weight:900; color:#16a34a;">Sim</span>{% else %}<span class="muted">Não</span>{% endif %}
+                </td>
+                <td style="padding:10px; border-bottom:1px solid var(--border);">
+                  <select name="perm_{{ permissao.IDDimPermissoes }}">
+                    <option value="HERDAR" {% if tipo_atual == "HERDAR" %}selected{% endif %}>Herdar do perfil</option>
+                    <option value="CONCEDER" {% if tipo_atual == "CONCEDER" %}selected{% endif %}>Conceder</option>
+                    <option value="REVOGAR" {% if tipo_atual == "REVOGAR" %}selected{% endif %}>Revogar</option>
+                  </select>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="perm-alert">As permissões de filtros ainda não foram encontradas na tabela DimPermissoes.</div>
+    {% endif %}
+
+    <div style="margin-top:24px;">
+      <h2 class="page-title" style="font-size:18px;">Demais permissões individuais</h2>
       <p class="muted">
         <b>Herdar</b> usa a permissão do perfil.
         <b>Conceder</b> libera permissão extra.
@@ -59,8 +119,9 @@
 
         <tbody>
           {% for permissao in permissoes %}
-            {% set tipo_atual = permissoes_extras_map.get(permissao.IDDimPermissoes, "HERDAR") %}
-            {% set perfil_concede = permissao.IDDimPermissoes in permissoes_perfil_ids %}
+            {% if permissao.IDDimPermissoes not in (permissoes_filtros_clientes_ids or []) %}
+              {% set tipo_atual = permissoes_extras_map.get(permissao.IDDimPermissoes, "HERDAR") %}
+              {% set perfil_concede = permissao.IDDimPermissoes in permissoes_perfil_ids %}
 
             <tr>
               <td style="padding:10px; border-bottom:1px solid var(--border);">
@@ -95,6 +156,7 @@
                 </select>
               </td>
             </tr>
+            {% endif %}
           {% endfor %}
         </tbody>
       </table>
@@ -111,5 +173,23 @@
     </div>
   </form>
 </div>
+
+
+<script>
+  (function(){
+    const form = document.querySelector('form[data-form-editar-usuario="1"]');
+    if(!form){ return; }
+
+    form.addEventListener('submit', function(evento){
+      const campoCsrf = form.querySelector('input[name="csrf_token"]');
+
+      if(!campoCsrf || !String(campoCsrf.value || '').trim()){
+        evento.preventDefault();
+        alert('Sua sessão de segurança expirou. Recarregue a página, faça login novamente se necessário e tente salvar de novo.');
+        window.location.reload();
+      }
+    });
+  })();
+</script>
 
 {% endblock %}

@@ -4,10 +4,17 @@
 
 {% block content %}
 <style>
+  .container.container-limit.vc-page,
   .vc-page{
-    width:100%;
-    max-width:1380px;
-    margin:0 auto;
+    width:100% !important;
+    max-width:none !important;
+    margin:0 !important;
+    padding:0 16px 24px 16px;
+    box-sizing:border-box;
+  }
+
+  .vc-page *{
+    box-sizing:border-box;
   }
 
   .vc-header{
@@ -22,7 +29,7 @@
   .vc-title{
     margin:0 0 4px 0;
     color:var(--euro-blue);
-    font-size:24px;
+    font-size:clamp(20px, 2vw, 26px);
     font-weight:950;
     letter-spacing:-.02em;
   }
@@ -35,14 +42,20 @@
   }
 
   .vc-card{
+    width:100%;
+    min-height:calc(100vh - 170px);
+    display:flex;
+    flex-direction:column;
     background:#fff;
     border:1px solid var(--border);
     border-radius:18px;
     box-shadow:0 1px 8px rgba(0,0,0,.06);
-    overflow:hidden;
+    overflow:visible;
   }
 
   .vc-toolbar{
+    position:relative;
+    z-index:20;
     display:flex;
     align-items:center;
     justify-content:space-between;
@@ -51,34 +64,588 @@
     padding:14px 16px;
     background:#F8FAFC;
     border-bottom:1px solid var(--border);
+    border-radius:18px 18px 0 0;
   }
 
   .vc-form{
+    width:100%;
+    display:grid;
+    grid-template-columns:minmax(300px, 1.2fr) minmax(380px, 520px) minmax(180px, 230px) minmax(180px, 240px) minmax(180px, 240px) auto auto;
+    align-items:start;
+    gap:10px;
+  }
+
+  .vc-form .btn{
+    min-height:40px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    white-space:nowrap;
+  }
+
+  .vc-search-combobox{
+    position:relative;
+    width:100%;
+    min-width:0;
+  }
+
+  .vc-search-box{
+    width:100%;
+    height:40px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:0 12px;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:12px;
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
+  }
+
+  .vc-search-icon{
+    flex:0 0 auto;
+    opacity:.75;
+  }
+
+  .vc-search-input{
+    width:100%;
+    min-width:0;
+    height:38px;
+    border:0 !important;
+    outline:0 !important;
+    box-shadow:none !important;
+    background:transparent;
+    font-size:13px;
+    font-weight:800;
+    color:var(--text);
+  }
+
+  .vc-search-input::placeholder{
+    color:#94A3B8;
+    font-weight:750;
+  }
+
+  .vc-search-sugestoes{
+    display:none;
+    position:absolute;
+    top:calc(100% + 8px);
+    left:0;
+    right:0;
+    z-index:80;
+    max-height:390px;
+    overflow:auto;
+    padding:8px;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:16px;
+    box-shadow:0 18px 42px rgba(15,23,42,.18);
+  }
+
+  .vc-search-combobox.is-open .vc-search-sugestoes{
+    display:block;
+  }
+
+  .vc-search-empty,
+  .vc-search-loading{
+    padding:12px;
+    color:#64748B;
+    font-size:12px;
+    font-weight:850;
+  }
+
+  .vc-search-sugestao-card{
+    width:100%;
+    display:block;
+    text-align:left;
+    border:1px solid transparent;
+    background:#fff;
+    border-radius:12px;
+    padding:10px;
+    cursor:pointer;
+  }
+
+  .vc-search-sugestao-card:hover{
+    background:#F8FAFC;
+    border-color:#E2E8F0;
+  }
+
+  .vc-search-sugestao-card + .vc-search-sugestao-card{
+    margin-top:6px;
+  }
+
+  .vc-search-sugestao-topo{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:5px;
+  }
+
+  .vc-search-sugestao-titulo{
+    color:#0F172A;
+    font-size:13px;
+    font-weight:950;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .vc-search-sugestao-contrato{
+    flex:0 0 auto;
+    color:var(--euro-blue);
+    font-size:12px;
+    font-weight:950;
+    white-space:nowrap;
+  }
+
+  .vc-search-sugestao-meta{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    flex-wrap:wrap;
+    color:#475569;
+    font-size:12px;
+    font-weight:850;
+  }
+
+  .vc-search-sugestao-desc{
+    margin-top:5px;
+    color:#64748B;
+    font-size:12px;
+    font-weight:800;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .vc-dd{
+    position:relative;
+    width:100%;
+    min-width:0;
+  }
+
+  .vc-dd-summary{
+    width:100%;
+    height:40px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:0 12px;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:12px;
+    cursor:pointer;
+    list-style:none;
+    box-shadow:0 1px 2px rgba(15,23,42,.04);
+  }
+
+  .vc-dd-summary::-webkit-details-marker{
+    display:none;
+  }
+
+  .vc-dd-label{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:#0F172A;
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .vc-dd-caret{
+    color:#64748B;
+    font-weight:950;
+  }
+
+  .vc-dd-panel{
+    position:absolute;
+    top:calc(100% + 8px);
+    left:0;
+    right:0;
+    z-index:70;
+    max-height:320px;
+    overflow:auto;
+    padding:8px;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 18px 42px rgba(15,23,42,.18);
+  }
+
+  .vc-dd-search{
+    width:100%;
+    height:36px;
+    margin-bottom:6px;
+    padding:8px 10px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    outline:0;
+    font-size:12px;
+    font-weight:800;
+  }
+
+  .vc-dd-hint{
+    margin:0 0 6px 2px;
+    color:#94A3B8;
+    font-size:11px;
+    font-weight:800;
+  }
+
+  .vc-dd-item{
+    min-height:34px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:7px 8px;
+    border-radius:10px;
+    color:#334155;
+    font-size:12px;
+    font-weight:850;
+    cursor:pointer;
+  }
+
+  .vc-dd-item:hover{
+    background:#F8FAFC;
+  }
+
+  .vc-dd-item input{
+    flex:0 0 auto;
+  }
+
+  .vc-dd-item span{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .vc-page .vc-dd-item .vc-dd-text{
+    display:inline-block !important;
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    white-space:nowrap !important;
+    color:#334155 !important;
+    font-size:12px !important;
+    font-weight:850 !important;
+    line-height:1.25 !important;
+    opacity:1 !important;
+    visibility:visible !important;
+  }
+
+  .vc-page .vc-dd-item input[type="checkbox"]{
+    width:14px !important;
+    height:14px !important;
+    min-width:14px !important;
+    margin:0 !important;
+    flex:0 0 auto !important;
+  }
+
+  /* =========================================================
+     ✅ SELETOR DE PERÍODO
+     ========================================================= */
+  .periodo-shell{
+    position: relative;
+    width: 100%;
+    max-width: 520px;
+    flex: 0 1 auto;
+    min-width: 280px;
+  }
+
+  .periodo-topbar{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 8px 18px rgba(2,6,23,.06);
+  }
+
+  .periodo-chip{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    font-weight: 800;
+    font-size: 12.9px;
+    color: rgba(15,23,42,.86);
+    cursor: pointer;
+    user-select: none;
+    transition: background .12s ease, border-color .12s ease, transform .12s ease;
+    white-space: nowrap;
+  }
+
+  .periodo-chip:hover{
+    background: rgba(37,99,235,.08);
+    border-color: rgba(37,99,235,.22);
+    transform: translateY(-1px);
+  }
+
+  .periodo-chip.ativo{
+    background: rgba(37,99,235,.14);
+    border-color: rgba(37,99,235,.30);
+    color: rgba(29,78,216,.98);
+  }
+
+  .periodo-open{
+    margin-left:auto;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    height: 32px;
+    padding: 0 11px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    font-weight: 800;
+    font-size: 12.9px;
+    color: rgba(15,23,42,.90);
+    cursor:pointer;
+    user-select:none;
+    white-space: nowrap;
+  }
+
+  .periodo-open:hover{
+    background: rgba(2,132,199,.08);
+    border-color: rgba(2,132,199,.22);
+  }
+
+  .periodo-panel{
+    position:absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 420px;
+    max-width: 92vw;
+    background: #fff;
+    border:1px solid rgba(15,23,42,.14);
+    border-radius: 14px;
+    box-shadow: 0 24px 44px rgba(2,6,23,.14);
+    padding: 10px;
+    z-index: 9999;
+    display:none;
+  }
+
+  .periodo-panel.aberto{
+    display:block;
+  }
+
+  .periodo-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding: 4px 6px 10px 6px;
+    border-bottom: 1px solid rgba(15,23,42,.10);
+    margin-bottom: 10px;
+  }
+
+  .periodo-ano{
     display:flex;
     align-items:center;
     gap:10px;
-    flex-wrap:wrap;
+    font-weight: 950;
+    font-size: 14px;
+    color: rgba(15,23,42,.92);
+  }
+
+  .periodo-nav{
+    width: 34px;
+    height: 30px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    cursor:pointer;
+    font-weight: 950;
+    color: rgba(15,23,42,.90);
+  }
+
+  .periodo-nav:hover{
+    background: rgba(37,99,235,.10);
+    border-color: rgba(37,99,235,.22);
+  }
+
+  .periodo-meses{
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 0 4px 10px 4px;
+  }
+
+  .periodo-mes{
+    height: 34px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.12);
+    background: #fff;
+    font-weight: 950;
+    font-size: 12.3px;
+    color: rgba(15,23,42,.86);
+    cursor:pointer;
+  }
+
+  .periodo-mes:hover{
+    background: rgba(2,132,199,.08);
+    border-color: rgba(2,132,199,.22);
+  }
+
+  .periodo-mes.sel{
+    background: rgba(37,99,235,.14);
+    border-color: rgba(37,99,235,.30);
+    color: rgba(29,78,216,.98);
+  }
+
+  .periodo-range{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 10px 4px 8px 4px;
+    border-top: 1px solid rgba(15,23,42,.10);
+  }
+
+  .periodo-range label{
+    display:block;
+    font-weight: 900;
+    color: rgba(15,23,42,.72);
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .periodo-range input{
+    width: 100%;
+    height: 36px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.14);
+    padding: 0 10px;
+    font-weight: 900;
+    font-size: 13px;
+    color: rgba(15,23,42,.92);
+    background: #fff;
+  }
+
+  /* ✅ NOVO: BI-SEMANA */
+  .periodo-bisemana-solo{
+    padding: 2px 4px 8px 4px;
+  }
+
+  .periodo-bisemana-solo label{
+    display:block;
+    font-weight: 900;
+    color: rgba(15,23,42,.72);
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .periodo-bisemana-solo select{
     width:100%;
+    height: 36px;
+    border-radius: 10px;
+    border:1px solid rgba(15,23,42,.14);
+    padding: 0 10px;
+    font-weight: 900;
+    font-size: 13px;
+    color: rgba(15,23,42,.92);
+    background:#fff;
+    outline:none;
   }
 
-  .vc-form input,
-  .vc-form select{
-    height:40px;
-    border-radius:12px;
+  .periodo-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap: 10px;
+    padding: 8px 4px 2px 4px;
   }
 
-  .vc-form input{
-    min-width:280px;
-    flex:1 1 320px;
+  .periodo-btn{
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(15,23,42,.12);
+    background: rgba(2,6,23,.02);
+    font-weight: 950;
+    font-size: 13px;
+    cursor:pointer;
+    color: rgba(15,23,42,.90);
   }
 
-  .vc-form select{
-    flex:0 0 230px;
-    padding:8px 10px;
+  .periodo-btn:hover{
+    background: rgba(2,132,199,.08);
+    border-color: rgba(2,132,199,.22);
+  }
+
+  .periodo-btn.primary{
+    background: rgba(37,99,235,.92);
+    border-color: rgba(37,99,235,.92);
+    color: #fff;
+  }
+
+  .periodo-inputs-reais{
+    position:absolute;
+    width:1px;
+    height:1px;
+    overflow:hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+    border:0;
+    padding:0;
+    margin:-1px;
+  }
+
+  @media (max-width: 820px){
+    .periodo-shell{
+      max-width: 100%;
+      min-width: 0;
+    }
+    .periodo-panel{
+      right: 0;
+      left: auto;
+      width: min(92vw, 420px);
+    }
+  }
+
+
+  .vc-form .periodo-shell{
+    max-width:none;
+    min-width:0;
+  }
+
+  .vc-form .periodo-topbar{
+    min-height:40px;
+    padding:4px 6px;
+  }
+
+  .vc-form .periodo-chip,
+  .vc-form .periodo-open{
+    height:30px;
+    font-size:12px;
+    padding:0 8px;
+  }
+
+  .vc-valor{
+    white-space:nowrap;
+    color:#0F172A;
+    font-weight:950;
+  }
+
+  .vc-table-wrap{
+    width:100%;
+    flex:1 1 auto;
+    overflow:auto;
+    -webkit-overflow-scrolling:touch;
   }
 
   .vc-table{
     width:100%;
+    min-width:1280px;
     border-collapse:separate;
     border-spacing:0;
   }
@@ -92,6 +659,9 @@
   }
 
   .vc-table th{
+    position:sticky;
+    top:0;
+    z-index:2;
     text-align:left;
     color:#475569;
     background:#fff;
@@ -102,22 +672,38 @@
     white-space:nowrap;
   }
 
+  .vc-table tr:hover td{
+    background:#F8FAFC;
+  }
+
   .vc-contrato{
     font-weight:950;
     color:var(--euro-blue);
     white-space:nowrap;
   }
 
+  .vc-contrato-disabled{
+    color:#64748B;
+    cursor:default;
+    text-decoration:none;
+  }
+
   .vc-razao{
     font-weight:900;
     color:var(--text);
-    min-width:260px;
+    min-width:220px;
+    max-width:420px;
+    white-space:normal;
+    overflow-wrap:anywhere;
   }
 
   .vc-marca{
     color:#334155;
     font-weight:850;
-    min-width:150px;
+    min-width:130px;
+    max-width:260px;
+    white-space:normal;
+    overflow-wrap:anywhere;
   }
 
   .vc-data{
@@ -240,13 +826,23 @@
     gap:10px;
     flex-wrap:wrap;
     background:#fff;
+    border-top:1px solid var(--border);
+    border-radius:0 0 18px 18px;
   }
 
   .vc-pages{
     display:flex;
     align-items:center;
+    justify-content:flex-end;
     gap:8px;
     flex-wrap:wrap;
+  }
+
+  .vc-pages .btn{
+    min-height:36px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
   }
 
   .vc-empty{
@@ -263,12 +859,157 @@
     font-weight:800;
   }
 
-  @media (max-width: 900px){
-    .vc-form input,
-    .vc-form select,
+  @media (max-width: 1200px){
+    .vc-page{
+      padding-left:12px;
+      padding-right:12px;
+    }
+
+    .vc-form{
+      grid-template-columns:minmax(320px, 1fr) minmax(360px, 1fr) minmax(200px, 240px);
+    }
+
     .vc-form .btn{
       width:100%;
-      flex:1 1 100%;
+    }
+
+    .vc-table{
+      min-width:1180px;
+    }
+
+    .vc-table th,
+    .vc-table td{
+      padding:10px 8px;
+      font-size:12px;
+    }
+  }
+
+  @media (max-width: 900px){
+    .vc-form{
+      grid-template-columns:1fr 1fr;
+    }
+
+    .vc-search-combobox{
+      grid-column:1 / -1;
+    }
+
+    .vc-footer{
+      align-items:stretch;
+    }
+
+    .vc-footer > .muted,
+    .vc-pages{
+      width:100%;
+      justify-content:center;
+    }
+  }
+
+  @media (max-width: 720px){
+    .vc-page{
+      padding:0 10px 18px 10px;
+    }
+
+    .vc-card{
+      min-height:auto;
+      border-radius:14px;
+    }
+
+    .vc-toolbar{
+      padding:12px;
+      border-radius:14px 14px 0 0;
+    }
+
+    .vc-form{
+      grid-template-columns:1fr;
+    }
+
+    .vc-form .btn,
+    .vc-search-combobox,
+    .vc-dd{
+      width:100%;
+    }
+
+    .vc-dd-panel,
+    .vc-search-sugestoes{
+      position:static;
+      margin-top:8px;
+      box-shadow:0 8px 24px rgba(15,23,42,.12);
+    }
+
+    .vc-table-wrap{
+      overflow:visible;
+    }
+
+    .vc-table,
+    .vc-table thead,
+    .vc-table tbody,
+    .vc-table tr,
+    .vc-table td{
+      display:block;
+      width:100%;
+      min-width:0;
+    }
+
+    .vc-table thead{
+      display:none;
+    }
+
+    .vc-table tr{
+      margin:12px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#fff;
+      box-shadow:0 1px 5px rgba(0,0,0,.04);
+    }
+
+    .vc-table tr:hover td{
+      background:#fff;
+    }
+
+    .vc-table td{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      padding:10px 12px;
+      border-bottom:1px solid var(--border);
+      text-align:right;
+    }
+
+    .vc-table td:last-child{
+      border-bottom:0;
+    }
+
+    .vc-table td::before{
+      content:attr(data-label);
+      flex:0 0 112px;
+      text-align:left;
+      color:#64748B;
+      font-size:11px;
+      font-weight:950;
+      text-transform:uppercase;
+      letter-spacing:.03em;
+    }
+
+    .vc-table td.vc-empty{
+      display:block;
+      text-align:center;
+    }
+
+    .vc-table td.vc-empty::before{
+      display:none;
+    }
+
+    .vc-razao,
+    .vc-marca{
+      min-width:0;
+      max-width:none;
+      text-align:right;
+    }
+
+    .vc-data{
+      white-space:normal;
     }
   }
 </style>
@@ -282,41 +1023,190 @@
       {% else %}
         <p class="vc-subtitle">Visão geral dos contratos, campanhas, prazos e status de vencimento.</p>
       {% endif %}
-      <div class="vc-help">
-        Os Prazos são Atualizados diariamente
-      </div>
+      <div class="vc-help">Os Prazos são Atualizados diariamente</div>
     </div>
   </div>
 
   <div class="vc-card">
     <div class="vc-toolbar">
-      <form method="get" action="{{ url_for('admin.vencimentos_campanhas_euromidia') }}" class="vc-form">
-        <input
-          type="text"
-          name="q"
-          value="{{ q or '' }}"
-          placeholder="Buscar por contrato, razão social, marca ou status..."
-          autocomplete="off"
+      <form id="formVencimentosCampanhas" method="get" action="{{ url_for('admin.vencimentos_campanhas_euromidia') }}" class="vc-form">
+        <div
+          id="comboBuscaVencimentosCampanhas"
+          class="vc-search-combobox"
+          data-sugestoes-url="{{ url_for('admin.vencimentos_campanhas_sugestoes') }}"
         >
+          <div class="vc-search-box">
+            <span class="vc-search-icon">🔎</span>
+            <input
+              id="buscaVencimentosCampanhas"
+              class="vc-search-input"
+              type="search"
+              name="q"
+              value="{{ q or '' }}"
+              placeholder="Pesquisar por razão social, número do contrato, marca ou status..."
+              autocomplete="off"
+              spellcheck="false"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="listaBuscaVencimentosCampanhas"
+            >
+          </div>
+          <div id="listaBuscaVencimentosCampanhas" class="vc-search-sugestoes"></div>
+        </div>
 
-        <select name="status">
-          <option value="">Todos os status</option>
-          {% for st in status_opcoes %}
-            <option value="{{ st.IDDimStatusCampanha }}" {% if status_id|string == st.IDDimStatusCampanha|string %}selected{% endif %}>
-              {{ st.NomeStatus }}
-            </option>
-          {% endfor %}
-        </select>
+        <div class="periodo-shell" id="periodoShell" title="Período usado para filtrar campanhas pelo vencimento (DataTerminoPrevisto)">
+          <div class="periodo-topbar">
+            <span class="periodo-chip" data-modo="dia">Dia</span>
+            <span class="periodo-chip" data-modo="semana">Semana</span>
+            <span class="periodo-chip" data-modo="mes">Mês</span>
+            <span class="periodo-chip" data-modo="ano">Ano</span>
+            <span class="periodo-chip" id="btnHoje">Hoje</span>
+
+            <span class="periodo-open" id="btnAbrirPeriodo" title="Abrir seletor de período">
+              <span id="lblPeriodoTopo">Período</span>
+              <span style="font-weight:950;opacity:.85;">▾</span>
+            </span>
+          </div>
+
+          <div class="periodo-panel" id="periodoPanel" aria-hidden="true">
+            <div class="periodo-header">
+              <button type="button" class="periodo-nav" id="anoPrev">‹</button>
+              <div class="periodo-ano"><span id="lblAno">{{ ano_periodo or 2026 }}</span></div>
+              <button type="button" class="periodo-nav" id="anoNext">›</button>
+            </div>
+
+            <div class="periodo-meses" id="gridMeses">
+              <button type="button" class="periodo-mes" data-mes="01">JANEIRO</button>
+              <button type="button" class="periodo-mes" data-mes="02">FEVEREIRO</button>
+              <button type="button" class="periodo-mes" data-mes="03">MARÇO</button>
+              <button type="button" class="periodo-mes" data-mes="04">ABRIL</button>
+              <button type="button" class="periodo-mes" data-mes="05">MAIO</button>
+              <button type="button" class="periodo-mes" data-mes="06">JUNHO</button>
+              <button type="button" class="periodo-mes" data-mes="07">JULHO</button>
+              <button type="button" class="periodo-mes" data-mes="08">AGOSTO</button>
+              <button type="button" class="periodo-mes" data-mes="09">SETEMBRO</button>
+              <button type="button" class="periodo-mes" data-mes="10">OUTUBRO</button>
+              <button type="button" class="periodo-mes" data-mes="11">NOVEMBRO</button>
+              <button type="button" class="periodo-mes" data-mes="12">DEZEMBRO</button>
+            </div>
+
+            <div class="periodo-range">
+              <div>
+                <label>De</label>
+                <input type="date" id="pickerDe" value="{{ dt_ini or '' }}">
+              </div>
+              <div>
+                <label>Até</label>
+                <input type="date" id="pickerAte" value="{{ dt_fim or '' }}">
+              </div>
+            </div>
+
+            <div class="periodo-bisemana-solo">
+              <div style="grid-column: 1 / -1;">
+                <label>Bi-Semana</label>
+                <select id="selBiSemana" name="bi_semana" aria-label="Selecionar bi-semana">
+                  <option value="">Selecione...</option>
+                  {% for bi in (bisemanas_select or []) %}
+                    <option
+                      value="{{ bi.value }}"
+                      data-inicio="{{ bi.inicio }}"
+                      data-fim="{{ bi.fim }}"
+                      {% if (bi_semana_filtro or '')|string == (bi.value|string) %}selected{% endif %}>
+                      {{ bi.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+
+            <div class="periodo-actions">
+              <button type="button" class="periodo-btn" id="btnFecharPeriodo">Fechar</button>
+              <button type="button" class="periodo-btn primary" id="btnAplicarPeriodo">Filtrar</button>
+            </div>
+          </div>
+
+          <div class="periodo-inputs-reais">
+            <input type="date" id="dtIniReal" name="dt_ini" value="{{ dt_ini or '' }}">
+            <input type="date" id="dtFimReal" name="dt_fim" value="{{ dt_fim or '' }}">
+          </div>
+        </div>
+
+        <details class="vc-dd" data-dd="status">
+          <summary class="vc-dd-summary">
+            <span class="vc-dd-label" data-default="Status">Status</span>
+            <span class="vc-dd-caret">▾</span>
+          </summary>
+          <div class="vc-dd-panel">
+            <input type="text" class="vc-dd-search" placeholder="Pesquisar status..." autocomplete="off">
+            <div class="vc-dd-hint">Selecione um ou mais status</div>
+            <label class="vc-dd-item">
+              <input type="checkbox" name="status" value="" data-dd-all="1" {% if not status_ids_selecionados %}checked{% endif %}>
+              <span class="vc-dd-text">(Todos)</span>
+            </label>
+            {% for st in status_opcoes %}
+              {% set status_valor = st.IDDimStatusCampanha|int %}
+              <label class="vc-dd-item">
+                <input type="checkbox" name="status" value="{{ st.IDDimStatusCampanha }}" {% if status_valor in status_ids_selecionados %}checked{% endif %}>
+                <span class="vc-dd-text">{{ st.NomeStatus }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </details>
+
+        <details class="vc-dd" data-dd="marca">
+          <summary class="vc-dd-summary">
+            <span class="vc-dd-label" data-default="Marca">Marca</span>
+            <span class="vc-dd-caret">▾</span>
+          </summary>
+          <div class="vc-dd-panel">
+            <input type="text" class="vc-dd-search" placeholder="Pesquisar marca..." autocomplete="off">
+            <div class="vc-dd-hint">Selecione uma ou mais marcas</div>
+            <label class="vc-dd-item">
+              <input type="checkbox" name="marca" value="" data-dd-all="1" {% if not marcas_selecionadas %}checked{% endif %}>
+              <span class="vc-dd-text">(Todas)</span>
+            </label>
+            {% for marca in marca_opcoes %}
+              <label class="vc-dd-item">
+                <input type="checkbox" name="marca" value="{{ marca }}" {% if marca in marcas_selecionadas %}checked{% endif %}>
+                <span class="vc-dd-text">{{ marca }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </details>
+
+        {% if usuario_logado_eh_admin %}
+          <details class="vc-dd" data-dd="vendedor">
+            <summary class="vc-dd-summary">
+              <span class="vc-dd-label" data-default="Vendedor">Vendedor</span>
+              <span class="vc-dd-caret">▾</span>
+            </summary>
+            <div class="vc-dd-panel">
+              <input type="text" class="vc-dd-search" placeholder="Pesquisar vendedor..." autocomplete="off">
+              <div class="vc-dd-hint">Selecione um ou mais vendedores</div>
+              <label class="vc-dd-item">
+                <input type="checkbox" name="vendedor" value="" data-dd-all="1" {% if not vendedores_ids_selecionados %}checked{% endif %}>
+                <span class="vc-dd-text">(Todos)</span>
+              </label>
+              {% for vendedor in vendedor_opcoes %}
+                {% set vendedor_valor = vendedor.IDVendedor|int %}
+                <label class="vc-dd-item">
+                  <input type="checkbox" name="vendedor" value="{{ vendedor.IDVendedor }}" {% if vendedor_valor in vendedores_ids_selecionados %}checked{% endif %}>
+                  <span class="vc-dd-text">{{ vendedor.NomeVendedor }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </details>
+        {% endif %}
 
         <button type="submit" class="btn btn-primary">Buscar</button>
 
-        {% if q or status_id %}
+        {% if q or status_ids_selecionados or marcas_selecionadas or vendedores_ids_selecionados or periodo_filtro_ativo %}
           <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}">Limpar</a>
         {% endif %}
       </form>
     </div>
 
-    <div class="overflow-x">
+    <div class="vc-table-wrap">
       <table class="vc-table">
         <thead>
           <tr>
@@ -328,6 +1218,7 @@
             <th>Término</th>
             <th>Dias</th>
             <th>Ativo</th>
+            <th>Total Líquido Contrato</th>
             <th>Atualização</th>
           </tr>
         </thead>
@@ -335,61 +1226,64 @@
           {% if itens and itens|length > 0 %}
             {% for row in itens %}
               <tr>
-                <td>
-                  <a class="vc-contrato" href="{{ '/contratos/' ~ row.IDFatoControleContratosEuromidia }}">
-                    {{ row.IDFatoControleContratosEuromidia }}
-                  </a>
+                <td data-label="Contrato">
+                  {% if usuario_logado_eh_vendedor %}
+                    <span class="vc-contrato vc-contrato-disabled" title="Perfil Vendedor não abre a página de contratos por esta tela.">
+                      {{ row.NumeroContratoExibicao }}
+                    </span>
+                  {% else %}
+                    <a class="vc-contrato" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=url_for('Paineis.contratos_lista', id_contrato=row.IDFatoControleContratosEuromidia)) }}">
+                      {{ row.NumeroContratoExibicao }}
+                    </a>
+                  {% endif %}
+                  {% if row.IDFatoControleContratosEuromidia %}
+                    <div class="muted" style="font-size:11px;font-weight:800;margin-top:3px;">ID: {{ row.IDFatoControleContratosEuromidia }}</div>
+                  {% endif %}
                 </td>
 
-                <td>
+                <td data-label="Razão Social">
                   <div class="vc-razao">{{ row.RazaoSocial or '—' }}</div>
                   {% if row.NomeVendedor %}
                     <div class="muted" style="font-size:12px;font-weight:800;margin-top:3px;">Vendedor: {{ row.NomeVendedor }}</div>
                   {% endif %}
                 </td>
 
-                <td>
+                <td data-label="Marca">
                   <div class="vc-marca">{{ row.MarcaExibida or '—' }}</div>
                 </td>
 
-                <td>
+                <td data-label="Status">
                   <span class="vc-badge {{ row.ClasseStatus }}">{{ row.NomeStatus or 'Sem status' }}</span>
                 </td>
 
-                <td class="vc-data">
+                <td class="vc-data" data-label="Início">
                   {{ row.DataInicioCampanha.strftime('%d/%m/%Y') if row.DataInicioCampanha else '—' }}
                 </td>
 
-                <td class="vc-data">
+                <td class="vc-data" data-label="Término">
                   {{ row.DataTermino.strftime('%d/%m/%Y') if row.DataTermino else '—' }}
                 </td>
 
-                <td>
-                  <span class="vc-dias {{ row.ClasseDias }}">
-                    {% if row.DiasParaVencer is not none %}
-                      {{ row.DiasParaVencer }}
-                    {% else %}
-                      —
-                    {% endif %}
-                  </span>
+                <td data-label="Dias">
+                  <span class="vc-dias {{ row.ClasseDias }}">{{ row.DiasTexto }}</span>
                 </td>
 
-                <td>
-                  {% if (row.BitAtivo or 0)|int == 1 %}
-                    <span class="vc-bit ativo">Ativo</span>
-                  {% else %}
-                    <span class="vc-bit inativo">Inativo</span>
-                  {% endif %}
+                <td data-label="Ativo">
+                  <span class="vc-bit {{ row.ClasseBitAtivo }}">{{ row.BitAtivoTexto }}</span>
                 </td>
 
-                <td class="vc-data">
+                <td class="vc-valor" data-label="Total Líquido Contrato">
+                  {{ row.TotalLiquidoContratoTexto or '—' }}
+                </td>
+
+                <td class="vc-data" data-label="Atualização">
                   {{ row.DataAtualizacao.strftime('%d/%m/%Y %H:%M') if row.DataAtualizacao else '—' }}
                 </td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="9" class="vc-empty">Nenhuma campanha encontrada.</td>
+              <td colspan="10" class="vc-empty">Nenhuma campanha encontrada.</td>
             </tr>
           {% endif %}
         </tbody>
@@ -406,8 +1300,8 @@
 
         <div class="vc-pages">
           {% if paginacao.page > 1 %}
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=1) }}">« Primeiro</a>
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=paginacao.page-1) }}">‹ Anterior</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=1) }}">« Primeiro</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.page-1) }}">‹ Anterior</a>
           {% else %}
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">« Primeiro</span>
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">‹ Anterior</span>
@@ -417,13 +1311,13 @@
             {% if p == paginacao.page %}
               <span class="btn btn-primary" style="pointer-events:none;">{{ p }}</span>
             {% else %}
-              <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=p) }}">{{ p }}</a>
+              <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=p) }}">{{ p }}</a>
             {% endif %}
           {% endfor %}
 
           {% if paginacao.page < paginacao.total_pages %}
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=paginacao.page+1) }}">Próximo ›</a>
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, status=status_id, page=paginacao.total_pages) }}">Último »</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.page+1) }}">Próximo ›</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.total_pages) }}">Último »</a>
           {% else %}
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Próximo ›</span>
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Último »</span>
@@ -433,4 +1327,647 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+(function(){
+    const shell = document.getElementById("periodoShell");
+    if (!shell) return;
+
+    const panel = document.getElementById("periodoPanel");
+    const btnAbrir = document.getElementById("btnAbrirPeriodo");
+    const btnFechar = document.getElementById("btnFecharPeriodo");
+    const btnAplicar = document.getElementById("btnAplicarPeriodo");
+    const btnHoje = document.getElementById("btnHoje");
+
+    const lblTopo = document.getElementById("lblPeriodoTopo");
+    const lblAno  = document.getElementById("lblAno");
+    const anoPrev = document.getElementById("anoPrev");
+    const anoNext = document.getElementById("anoNext");
+
+    const pickerDe  = document.getElementById("pickerDe");
+    const pickerAte = document.getElementById("pickerAte");
+    const selBiSemana = document.getElementById("selBiSemana");
+
+    /* ✅ PATCH: tenta por ID e, se não existir, tenta por name (evita quebrar se você mudou o HTML) */
+    const dtIniReal =
+      document.getElementById("dtIniReal") ||
+      shell.querySelector('input[name="mes_de"]') ||
+      document.querySelector('input[name="mes_de"]');
+
+    const dtFimReal =
+      document.getElementById("dtFimReal") ||
+      shell.querySelector('input[name="mes_ate"]') ||
+      document.querySelector('input[name="mes_ate"]');
+
+    const chips = Array.from(shell.querySelectorAll(".periodo-chip[data-modo]"));
+    const mesesBtns = Array.from(document.querySelectorAll(".periodo-mes"));
+
+    /* ✅ PATCH: painel e labels são obrigatórios pra funcionar direito */
+    if (!panel || !lblTopo || !lblAno || !dtIniReal || !dtFimReal){
+      try{
+        console.warn("Periodo: faltando elemento no DOM", {
+          shell: !!shell,
+          panel: !!panel,
+          btnAbrir: !!btnAbrir,
+          lblTopo: !!lblTopo,
+          lblAno: !!lblAno,
+          dtIniReal: !!dtIniReal,
+          dtFimReal: !!dtFimReal,
+          selBiSemana: !!selBiSemana
+        });
+      }catch(e){}
+      return;
+    }
+
+    function pad2(n){ return String(n).padStart(2, "0"); }
+    function toISO(d){
+      const y = d.getFullYear();
+      const m = pad2(d.getMonth() + 1);
+      const day = pad2(d.getDate());
+      return y + "-" + m + "-" + day;
+    }
+    function fromISO(s){
+      if (!s || typeof s !== "string") return null;
+      const p = s.split("-");
+      if (p.length !== 3) return null;
+      const y = parseInt(p[0], 10);
+      const m = parseInt(p[1], 10);
+      const d = parseInt(p[2], 10);
+      if (!y || !m || !d) return null;
+      const dt = new Date(y, m - 1, d);
+      if (isNaN(dt.getTime())) return null;
+      return dt;
+    }
+    function ultimoDiaDoMes(ano, mes){
+      return new Date(ano, mes, 0).getDate();
+    }
+
+    function nomeMesPt(mes){
+      const nomes = [
+        "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+        "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+      ];
+      return nomes[(mes - 1)] || "";
+    }
+
+    function limparChipsAtivos(){
+      chips.forEach(c => c.classList.remove("ativo"));
+    }
+
+    function limparBiSemana(){
+      if (selBiSemana){
+        selBiSemana.value = "";
+      }
+    }
+
+    function aplicarBiSemanaSelecionadaNoRange(){
+      if (!selBiSemana || !selBiSemana.value) return false;
+
+      const opt = selBiSemana.options[selBiSemana.selectedIndex];
+      if (!opt) return false;
+
+      const ini = (opt.getAttribute("data-inicio") || "").trim();
+      const fim = (opt.getAttribute("data-fim") || "").trim();
+
+      if (pickerDe)  pickerDe.value  = ini;
+      if (pickerAte) pickerAte.value = fim;
+
+      dtIniReal.value = ini;
+      dtFimReal.value = fim;
+
+      return !!(ini && fim);
+    }
+
+    function setTopoLabelPorDatas(){
+      if (selBiSemana && selBiSemana.value){
+        const opt = selBiSemana.options[selBiSemana.selectedIndex];
+        if (opt){
+          lblTopo.textContent = (opt.textContent || "Bi-Semana").trim();
+          return;
+        }
+      }
+
+      const di = dtIniReal.value || "";
+      const df = dtFimReal.value || "";
+      if (!di && !df){
+        lblTopo.textContent = "Período";
+        return;
+      }
+      const d1 = fromISO(di);
+      const d2 = fromISO(df);
+      if (d1 && d2){
+        const y1 = d1.getFullYear(), m1 = d1.getMonth()+1, day1 = d1.getDate();
+        const y2 = d2.getFullYear(), m2 = d2.getMonth()+1, day2 = d2.getDate();
+        if (y1===y2 && m1===m2 && day1===1 && day2===ultimoDiaDoMes(y2, m2)){
+          lblTopo.textContent = nomeMesPt(m1) + " de " + y1;
+          return;
+        }
+      }
+      lblTopo.textContent = di + " até " + df;
+    }
+
+    function getForm(){
+      return shell.closest("form");
+    }
+
+    function submitForm(){
+      const form = getForm();
+      if (!form) return;
+
+      if (form.dataset._submitting === "1") return;
+      form.dataset._submitting = "1";
+
+      try{
+        form.submit();
+      } finally {
+        setTimeout(() => { try{ delete form.dataset._submitting; }catch(e){} }, 600);
+      }
+    }
+
+    function abrir(){
+      panel.classList.add("aberto");
+      panel.setAttribute("aria-hidden", "false");
+    }
+    function fechar(){
+      panel.classList.remove("aberto");
+      panel.setAttribute("aria-hidden", "true");
+    }
+
+    function marcarChip(modo){
+      chips.forEach(c => c.classList.toggle("ativo", c.getAttribute("data-modo") === modo));
+    }
+
+    function marcarMesSelecionado(ano, mes){
+      const anoStr = String(ano);
+      const mesStr = pad2(mes);
+      mesesBtns.forEach(b => {
+        const mm = (b.getAttribute("data-mes") || "").trim();
+        const isSel = (mm === mesStr) && (String(lblAno.textContent || "") === anoStr);
+        b.classList.toggle("sel", isSel);
+      });
+    }
+
+    function limparSelecaoMes(){
+      mesesBtns.forEach(b => b.classList.remove("sel"));
+    }
+
+    function syncPickersFromReal(){
+      if (pickerDe)  pickerDe.value  = dtIniReal.value || "";
+      if (pickerAte) pickerAte.value = dtFimReal.value || "";
+      setTopoLabelPorDatas();
+
+      const d1 = fromISO(dtIniReal.value);
+      if (d1){
+        lblAno.textContent = String(d1.getFullYear());
+      } else {
+        lblAno.textContent = String(new Date().getFullYear());
+      }
+    }
+
+    function aplicarPickersParaReal(){
+      const di = (pickerDe && pickerDe.value) ? pickerDe.value : "";
+      const df = (pickerAte && pickerAte.value) ? pickerAte.value : "";
+      dtIniReal.value = di;
+      dtFimReal.value = df;
+      setTopoLabelPorDatas();
+    }
+
+    function setRange(iniDateObj, fimDateObj){
+      const di = toISO(iniDateObj);
+      const df = toISO(fimDateObj);
+      if (pickerDe)  pickerDe.value  = di;
+      if (pickerAte) pickerAte.value = df;
+      aplicarPickersParaReal();
+    }
+
+    function aplicarModoRapido(modo, autoSubmit){
+      const hoje = new Date();
+      const y = hoje.getFullYear();
+      const m = hoje.getMonth() + 1;
+
+      limparBiSemana();
+
+      if (modo === "dia"){
+        setRange(hoje, hoje);
+        if (autoSubmit) submitForm();
+        return;
+      }
+      if (modo === "semana"){
+        const ini = new Date(hoje);
+        ini.setDate(ini.getDate() - 6);
+        setRange(ini, hoje);
+        if (autoSubmit) submitForm();
+        return;
+      }
+      if (modo === "mes"){
+        const ini = new Date(y, m - 1, 1);
+        const fim = new Date(y, m - 1, ultimoDiaDoMes(y, m));
+        setRange(ini, fim);
+        lblAno.textContent = String(y);
+        marcarMesSelecionado(y, m);
+        if (autoSubmit) submitForm();
+        return;
+      }
+      if (modo === "ano"){
+        const ini = new Date(y, 0, 1);
+        const fim = new Date(y, 11, 31);
+        setRange(ini, fim);
+        lblAno.textContent = String(y);
+        limparSelecaoMes();
+        if (autoSubmit) submitForm();
+        return;
+      }
+    }
+
+    if (btnAbrir){
+      btnAbrir.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (panel.classList.contains("aberto")){
+          fechar();
+        } else {
+          syncPickersFromReal();
+          abrir();
+        }
+      });
+    }
+
+    if (btnFechar){
+      btnFechar.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        fechar();
+      });
+    }
+
+    document.addEventListener("click", function(ev){
+      if (!panel.classList.contains("aberto")) return;
+
+      if (shell.contains(ev.target)) return;
+      if (panel.contains(ev.target)) return;
+
+      fechar();
+    });
+
+    document.addEventListener("keydown", function(ev){
+      if (ev.key !== "Escape") return;
+      if (!panel.classList.contains("aberto")) return;
+      fechar();
+    });
+
+    chips.forEach(ch => {
+      ch.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        const modo = ch.getAttribute("data-modo");
+        marcarChip(modo);
+        aplicarModoRapido(modo, true);
+      });
+    });
+
+    if (btnHoje){
+      btnHoje.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        marcarChip("dia");
+        aplicarModoRapido("dia", true);
+      });
+    }
+
+    if (anoPrev){
+      anoPrev.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        const a = parseInt(lblAno.textContent || "2026", 10) || 2026;
+        lblAno.textContent = String(a - 1);
+        limparSelecaoMes();
+      });
+    }
+
+    if (anoNext){
+      anoNext.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        const a = parseInt(lblAno.textContent || "2026", 10) || 2026;
+        lblAno.textContent = String(a + 1);
+        limparSelecaoMes();
+      });
+    }
+
+    mesesBtns.forEach(btn => {
+      btn.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        const ano = parseInt(lblAno.textContent || "2026", 10) || 2026;
+        const mes = parseInt((btn.getAttribute("data-mes") || "1").trim(), 10) || 1;
+
+        const ini = new Date(ano, mes - 1, 1);
+        const fim = new Date(ano, mes - 1, ultimoDiaDoMes(ano, mes));
+
+        marcarChip("mes");
+        limparBiSemana();
+        setRange(ini, fim);
+
+        limparSelecaoMes();
+        btn.classList.add("sel");
+
+        submitForm();
+      });
+    });
+
+    if (pickerDe){
+      pickerDe.addEventListener("change", function(){
+        limparBiSemana();
+        limparChipsAtivos();
+        aplicarPickersParaReal();
+      });
+    }
+    if (pickerAte){
+      pickerAte.addEventListener("change", function(){
+        limparBiSemana();
+        limparChipsAtivos();
+        aplicarPickersParaReal();
+      });
+    }
+
+    if (selBiSemana){
+      selBiSemana.addEventListener("change", function(ev){
+        ev.stopPropagation();
+        limparChipsAtivos();
+        aplicarBiSemanaSelecionadaNoRange();
+        setTopoLabelPorDatas();
+      });
+    }
+
+    if (btnAplicar){
+      btnAplicar.addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+
+        if (!(selBiSemana && selBiSemana.value)){
+          aplicarPickersParaReal();
+        } else {
+          aplicarBiSemanaSelecionadaNoRange();
+        }
+
+        submitForm();
+      });
+    }
+
+    if (selBiSemana && selBiSemana.value){
+      limparChipsAtivos();
+      aplicarBiSemanaSelecionadaNoRange();
+    }
+
+    setTopoLabelPorDatas();
+  })();
+</script>
+
+<script>
+(function(){
+  const form = document.getElementById('formVencimentosCampanhas');
+  const combo = document.getElementById('comboBuscaVencimentosCampanhas');
+  const inputBusca = document.getElementById('buscaVencimentosCampanhas');
+  const listaSugestoes = document.getElementById('listaBuscaVencimentosCampanhas');
+
+  function textoNormalizado(valor){
+    return String(valor || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function fecharOutrosDropdowns(ddAtual){
+    document.querySelectorAll('.vc-page details.vc-dd[open]').forEach(function(dd){
+      if(dd !== ddAtual){ dd.removeAttribute('open'); }
+    });
+  }
+
+  function atualizarLabelDropdown(dd){
+    const label = dd.querySelector('.vc-dd-label');
+    const padrao = label ? (label.dataset.default || 'Filtro') : 'Filtro';
+    const todos = dd.querySelector('input[type="checkbox"][data-dd-all="1"]');
+    const selecionados = Array.from(dd.querySelectorAll('input[type="checkbox"]:checked:not([data-dd-all="1"])'));
+
+    if(!label){ return; }
+
+    if(todos && todos.checked){
+      if(padrao === 'Marca'){
+        label.textContent = 'Todas as marcas';
+      }else if(padrao === 'Vendedor'){
+        label.textContent = 'Todos os vendedores';
+      }else{
+        label.textContent = 'Todos os status';
+      }
+      return;
+    }
+
+    if(selecionados.length === 0){
+      label.textContent = padrao;
+      return;
+    }
+
+    const nomes = selecionados.map(function(chk){
+      const item = chk.closest('.vc-dd-item');
+      const span = item ? (item.querySelector('.vc-dd-text') || item.querySelector('span')) : null;
+      return span ? span.textContent.trim() : chk.value;
+    });
+
+    label.textContent = nomes.length <= 2 ? nomes.join(', ') : `${nomes.length} selecionados`;
+  }
+
+  function configurarDropdown(dd){
+    const search = dd.querySelector('.vc-dd-search');
+    const todos = dd.querySelector('input[type="checkbox"][data-dd-all="1"]');
+    const checks = Array.from(dd.querySelectorAll('input[type="checkbox"]'));
+
+    dd.addEventListener('toggle', function(){
+      if(dd.open){
+        fecharOutrosDropdowns(dd);
+        if(search){ setTimeout(function(){ search.focus(); }, 30); }
+      }
+    });
+
+    checks.forEach(function(chk){
+      chk.addEventListener('change', function(){
+        if(chk.dataset.ddAll === '1'){
+          if(chk.checked){
+            checks.forEach(function(outro){
+              if(outro !== chk){ outro.checked = false; }
+            });
+          }
+        }else{
+          if(chk.checked && todos){ todos.checked = false; }
+          const algumMarcado = checks.some(function(outro){
+            return outro !== todos && outro.checked;
+          });
+          if(!algumMarcado && todos){ todos.checked = true; }
+        }
+
+        atualizarLabelDropdown(dd);
+        buscarSugestoes();
+      });
+    });
+
+    if(search){
+      search.addEventListener('input', function(){
+        const termo = textoNormalizado(search.value);
+        dd.querySelectorAll('.vc-dd-item').forEach(function(item){
+          const texto = textoNormalizado(item.textContent);
+          item.style.display = texto.includes(termo) ? '' : 'none';
+        });
+      });
+    }
+
+    atualizarLabelDropdown(dd);
+  }
+
+  function criarElemento(tag, classe, texto){
+    const el = document.createElement(tag);
+    if(classe){ el.className = classe; }
+    if(texto !== undefined && texto !== null){ el.textContent = texto; }
+    return el;
+  }
+
+  function parametrosSugestoes(){
+    const params = new URLSearchParams();
+    params.set('q', inputBusca.value.trim());
+    params.set('limit', '8');
+
+    const dados = new FormData(form);
+    dados.getAll('status').forEach(function(valor){
+      if(String(valor || '').trim()){ params.append('status', valor); }
+    });
+    dados.getAll('marca').forEach(function(valor){
+      if(String(valor || '').trim()){ params.append('marca', valor); }
+    });
+    dados.getAll('vendedor').forEach(function(valor){
+      if(String(valor || '').trim()){ params.append('vendedor', valor); }
+    });
+
+    const dtIni = dados.get('dt_ini');
+    const dtFim = dados.get('dt_fim');
+    const biSemana = dados.get('bi_semana');
+
+    if(String(dtIni || '').trim()){ params.set('dt_ini', dtIni); }
+    if(String(dtFim || '').trim()){ params.set('dt_fim', dtFim); }
+    if(String(biSemana || '').trim()){ params.set('bi_semana', biSemana); }
+
+    return params;
+  }
+
+  function abrirSugestoes(){
+    combo.classList.add('is-open');
+    inputBusca.setAttribute('aria-expanded', 'true');
+  }
+
+  function fecharSugestoes(){
+    combo.classList.remove('is-open');
+    inputBusca.setAttribute('aria-expanded', 'false');
+  }
+
+  function limparSugestoes(){
+    listaSugestoes.replaceChildren();
+    fecharSugestoes();
+  }
+
+  function renderizarSugestoes(items){
+    listaSugestoes.replaceChildren();
+
+    if(!items || items.length === 0){
+      listaSugestoes.appendChild(criarElemento('div', 'vc-search-empty', 'Nenhuma sugestão encontrada.'));
+      abrirSugestoes();
+      return;
+    }
+
+    items.forEach(function(item){
+      const botao = criarElemento('button', 'vc-search-sugestao-card');
+      botao.type = 'button';
+
+      const topo = criarElemento('div', 'vc-search-sugestao-topo');
+      const titulo = criarElemento('div', 'vc-search-sugestao-titulo', item.razao_social || '—');
+      titulo.title = item.razao_social || '';
+      const contrato = criarElemento('span', 'vc-search-sugestao-contrato', `Contrato: ${item.numero_contrato || '—'}`);
+      topo.appendChild(titulo);
+      topo.appendChild(contrato);
+
+      const meta = criarElemento('div', 'vc-search-sugestao-meta');
+      meta.appendChild(criarElemento('span', `vc-badge ${item.classe_status || 'neutro'}`, item.status || 'Sem status'));
+      meta.appendChild(criarElemento('span', `vc-dias ${item.classe_dias || 'normal'}`, item.dias || '—'));
+      meta.appendChild(criarElemento('span', `vc-bit ${item.classe_ativo || 'inativo'}`, item.ativo || 'Inativo'));
+
+      const desc = criarElemento('div', 'vc-search-sugestao-desc');
+      const partes = [];
+      if(item.marca){ partes.push(`Marca: ${item.marca}`); }
+      if(item.data_termino){ partes.push(`Término: ${item.data_termino}`); }
+      if(item.vendedor){ partes.push(`Vendedor: ${item.vendedor}`); }
+      desc.textContent = partes.length ? partes.join(' • ') : 'Sem detalhes adicionais.';
+
+      botao.appendChild(topo);
+      botao.appendChild(meta);
+      botao.appendChild(desc);
+
+      botao.addEventListener('click', function(){
+        inputBusca.value = item.numero_contrato_original || item.numero_contrato || String(item.id_contrato || '');
+        fecharSugestoes();
+        form.submit();
+      });
+
+      listaSugestoes.appendChild(botao);
+    });
+
+    abrirSugestoes();
+  }
+
+  let timerBusca = null;
+  let controllerAtual = null;
+
+  function buscarSugestoes(){
+    if(!combo || !inputBusca || !listaSugestoes){ return; }
+
+    const termo = inputBusca.value.trim();
+    if(termo.length < 1){
+      limparSugestoes();
+      return;
+    }
+
+    clearTimeout(timerBusca);
+    timerBusca = setTimeout(function(){
+      if(controllerAtual){ controllerAtual.abort(); }
+      controllerAtual = new AbortController();
+
+      listaSugestoes.replaceChildren(criarElemento('div', 'vc-search-loading', 'Buscando sugestões...'));
+      abrirSugestoes();
+
+      const url = `${combo.dataset.sugestoesUrl}?${parametrosSugestoes().toString()}`;
+
+      fetch(url, {
+        method:'GET',
+        headers:{'Accept':'application/json'},
+        signal:controllerAtual.signal
+      })
+        .then(function(resp){ return resp.json(); })
+        .then(function(data){ renderizarSugestoes(data.items || []); })
+        .catch(function(err){
+          if(err && err.name === 'AbortError'){ return; }
+          listaSugestoes.replaceChildren(criarElemento('div', 'vc-search-empty', 'Falha ao buscar sugestões.'));
+          abrirSugestoes();
+        });
+    }, 180);
+  }
+
+  document.querySelectorAll('.vc-page details.vc-dd').forEach(configurarDropdown);
+
+  if(inputBusca){
+    inputBusca.addEventListener('input', buscarSugestoes);
+    inputBusca.addEventListener('focus', function(){
+      if(inputBusca.value.trim()){ buscarSugestoes(); }
+    });
+  }
+
+  document.addEventListener('click', function(event){
+    if(combo && !combo.contains(event.target)){
+      fecharSugestoes();
+    }
+  });
+})();
+</script>
 {% endblock %}

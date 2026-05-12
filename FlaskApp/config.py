@@ -42,6 +42,7 @@ RECAPTCHA_PUBLIC_KEY = obter_variavel_obrigatoria("RECAPTCHA_PUBLIC_KEY")
 RECAPTCHA_PRIVATE_KEY = obter_variavel_obrigatoria("RECAPTCHA_PRIVATE_KEY")
 RATELIMIT_STORAGE_URI = obter_variavel_obrigatoria("RATELIMIT_STORAGE_URI")
 CACHE_REDIS_URL = obter_variavel_obrigatoria("CACHE_REDIS_URL")
+MENSAGERIA_SOCKET_TOKEN = os.getenv("MENSAGERIA_SOCKET_TOKEN", "")
 
 
 parametros_odbc = urllib.parse.quote_plus(

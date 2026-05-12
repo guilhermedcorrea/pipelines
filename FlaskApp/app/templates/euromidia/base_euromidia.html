@@ -665,6 +665,16 @@ input:disabled, select:disabled, textarea:disabled{
   display: inline-flex;
 }
 
+.user-message-badge.is-pulse{
+  animation: euroMessagePulse .85s ease-in-out 0s 2;
+}
+
+@keyframes euroMessagePulse{
+  0%{ transform: scale(1); }
+  35%{ transform: scale(1.22); }
+  100%{ transform: scale(1); }
+}
+
 .user-message-badge:hover{
   filter: brightness(.95);
 }
@@ -1823,26 +1833,58 @@ input:disabled, select:disabled, textarea:disabled{
     const badge = document.getElementById("userMessageBadge");
     const badgeCount = document.getElementById("userMessageBadgeCount");
     const userBtn = document.getElementById("btnUserMenu");
+    const tituloOriginal = document.title;
+
+    let socketMensagens = null;
+    let ultimoTotalMensagens = 0;
+    let resumoEmAndamento = false;
 
     if (!badge || !badgeCount) {
       return;
     }
 
-    function atualizarBadgeMensagens(total){
+    function normalizarQuantidade(total){
       const qtd = Number(total || 0);
+      if (!Number.isFinite(qtd) || qtd < 0){
+        return 0;
+      }
+      return Math.floor(qtd);
+    }
+
+    function pulsarBadge(){
+      badge.classList.remove("is-pulse");
+      void badge.offsetWidth;
+      badge.classList.add("is-pulse");
+    }
+
+    function atualizarBadgeMensagens(total, origem){
+      const qtd = normalizarQuantidade(total);
+      const aumentou = qtd > ultimoTotalMensagens;
+
+      ultimoTotalMensagens = qtd;
 
       if (qtd > 0){
         badgeCount.textContent = qtd > 99 ? "99+" : String(qtd);
         badge.hidden = false;
         badge.classList.add("is-visible");
+        badge.setAttribute("aria-label", qtd === 1 ? "1 mensagem nova" : `${qtd} mensagens novas`);
+        badge.title = qtd === 1 ? "1 mensagem nova" : `${qtd} mensagens novas`;
+        document.title = `(${qtd > 99 ? "99+" : qtd}) ${tituloOriginal}`;
 
         if (userBtn){
           userBtn.classList.add("has-new-messages");
         }
+
+        if (aumentou && origem !== "carga_inicial"){
+          pulsarBadge();
+        }
       } else {
         badgeCount.textContent = "0";
         badge.hidden = true;
-        badge.classList.remove("is-visible");
+        badge.classList.remove("is-visible", "is-pulse");
+        badge.setAttribute("aria-label", "Sem mensagens novas");
+        badge.title = "Sem mensagens novas";
+        document.title = tituloOriginal;
 
         if (userBtn){
           userBtn.classList.remove("has-new-messages");
@@ -1850,64 +1892,104 @@ input:disabled, select:disabled, textarea:disabled{
       }
     }
 
-    async function carregarResumoMensagens(){
+    async function carregarResumoMensagens(origem){
+      if (resumoEmAndamento){
+        return;
+      }
+
+      resumoEmAndamento = true;
+
       try{
         const resp = await fetch("/admin/api/mensagens/resumo", {
           method: "GET",
           credentials: "same-origin",
+          cache: "no-store",
           headers: {
             "Accept": "application/json"
           }
         });
 
         if (!resp.ok){
-          atualizarBadgeMensagens(0);
           return;
         }
 
         const data = await resp.json();
 
         if (data && data.ok){
-          atualizarBadgeMensagens(data.nao_lidas);
+          atualizarBadgeMensagens(data.nao_lidas, origem || "http");
         }
       }catch(e){
         console.warn("Falha ao carregar resumo de mensagens.", e);
+      }finally{
+        resumoEmAndamento = false;
       }
     }
 
-    carregarResumoMensagens();
+    function iniciarPollingSeguranca(){
+      carregarResumoMensagens("carga_inicial");
 
-    if (typeof io === "undefined"){
-      console.warn("Socket.IO client não carregado. O badge carregará apenas pelo resumo inicial.");
-      return;
+      window.setInterval(function(){
+        if (document.hidden){
+          return;
+        }
+        carregarResumoMensagens("polling_seguranca");
+      }, 30000);
+
+      document.addEventListener("visibilitychange", function(){
+        if (!document.hidden){
+          carregarResumoMensagens("volta_aba");
+        }
+      });
     }
 
-    const socketMensagens = io("/mensagens", {
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 8000
-    });
+    function conectarSocketMensagens(){
+      if (typeof io === "undefined"){
+        console.warn("Socket.IO client não carregado. O badge ficará no polling de segurança.");
+        return null;
+      }
 
-    socketMensagens.on("connect", function(){
-      socketMensagens.emit("mensagens:pedir_resumo", {});
-    });
+      const socket = io("/mensagens", {
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 8000,
+        transports: ["websocket", "polling"],
+        withCredentials: true
+      });
 
-    socketMensagens.on("mensagens:resumo", function(payload){
-      atualizarBadgeMensagens(payload && payload.nao_lidas);
-    });
+      socket.on("connect", function(){
+        socket.emit("mensagens:pedir_resumo", {});
+      });
 
-    socketMensagens.on("mensagens:nova", function(payload){
-      atualizarBadgeMensagens(payload && payload.nao_lidas);
-    });
+      socket.on("connect_error", function(erro){
+        console.warn("Falha ao conectar no Socket.IO de mensagens.", erro);
+      });
 
-    socketMensagens.on("mensagens:lida", function(payload){
-      atualizarBadgeMensagens(payload && payload.nao_lidas);
-    });
+      socket.on("disconnect", function(motivo){
+        console.warn("Socket.IO de mensagens desconectado.", motivo);
+      });
 
-    socketMensagens.on("mensagens:todas_lidas", function(payload){
-      atualizarBadgeMensagens(payload && payload.nao_lidas);
-    });
+      socket.on("mensagens:resumo", function(payload){
+        atualizarBadgeMensagens(payload && payload.nao_lidas, "socket_resumo");
+      });
+
+      socket.on("mensagens:nova", function(payload){
+        atualizarBadgeMensagens(payload && payload.nao_lidas, "socket_nova");
+      });
+
+      socket.on("mensagens:lida", function(payload){
+        atualizarBadgeMensagens(payload && payload.nao_lidas, "socket_lida");
+      });
+
+      socket.on("mensagens:todas_lidas", function(payload){
+        atualizarBadgeMensagens(payload && payload.nao_lidas, "socket_todas_lidas");
+      });
+
+      return socket;
+    }
+
+    iniciarPollingSeguranca();
+    socketMensagens = conectarSocketMensagens();
 
     window.EURO_MENSAGENS = {
       atualizarBadgeMensagens,

@@ -3,6 +3,7 @@
 {% block title %}Empresas | Euromídia{% endblock %}
 
 {% block content %}
+{% set filtros_clientes_visiveis = filtros_clientes_visiveis or {} %}
 
 <style>
   /* =========================
@@ -894,6 +895,7 @@
         </select>
       </div>
 
+      {% if filtros_clientes_visiveis.get('classe') %}
       <div class="campo-dd">
         <label>Classe</label>
         <details class="dd" data-dd="classe">
@@ -933,6 +935,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('setor') %}
       <div class="campo-dd">
         <label>Setor</label>
         <details class="dd" data-dd="setor">
@@ -972,6 +976,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classificacao_macro') %}
       <div class="campo-dd">
         <label>Classificação Score Macro</label>
         <details class="dd" data-dd="classificacao_macro">
@@ -1011,6 +1017,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('subclasse') %}
       <div class="campo-dd">
         <label>SubClasse</label>
         <details class="dd" data-dd="subclasse">
@@ -1050,45 +1058,9 @@
         </select>
       </div>
 
-      <div class="campo-dd">
-        <label>Proprietária</label>
-        <details class="dd" data-dd="empresa_proprietaria">
-          <summary class="dd-summary">
-            <span class="dd-label">Proprietária</span>
-            <span class="dd-caret">▾</span>
-          </summary>
-          <div class="dd-panel">
-            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
-            <div class="dd-hint">Digite para filtrar a lista</div>
-            <div class="dd-list">
-              <label class="dd-item">
-                <input type="checkbox" name="empresa_proprietaria" value="" data-dd-all="1"
-                  {% if (filtros.empresa_proprietaria or [])|length == 0 %}checked{% endif %}>
-                <span>(Todos)</span>
-              </label>
 
-              {% for v in (empresas_proprietarias or []) %}
-                <label class="dd-item" data-dd-text="{{ v|lower }}">
-                  <input type="checkbox" name="empresa_proprietaria" value="{{ v }}"
-                    {% if v in (filtros.empresa_proprietaria or []) %}checked{% endif %}>
-                  <span>{{ v }}</span>
-                </label>
-              {% endfor %}
-            </div>
-          </div>
-        </details>
-
-        <select name="empresa_proprietaria__single" class="legacy-hidden" disabled>
-          <option value="">Proprietária</option>
-          {% for v in (empresas_proprietarias or []) %}
-            <option value="{{ v }}"
-              {% if (filtros.empresa_proprietaria or [])|length and (v in (filtros.empresa_proprietaria or [])) %}selected{% endif %}>
-              {{ v }}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
-
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_valor') %}
       <div class="campo-dd">
         <label>Classe Valor</label>
         <details class="dd" data-dd="classe_valor">
@@ -1128,6 +1100,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('tipo_escala_operacional') %}
       <div class="campo-dd">
         <label>Escala Operacional</label>
         <details class="dd" data-dd="tipo_escala_operacional">
@@ -1167,6 +1141,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_estrutural') %}
       <div class="campo-dd">
         <label>Classe Estrutural</label>
         <details class="dd" data-dd="classe_estrutural">
@@ -1206,6 +1182,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_geo') %}
       <div class="campo-dd">
         <label>Classe Geo</label>
         <details class="dd" data-dd="classe_geo">
@@ -1245,6 +1223,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_frequencia') %}
       <div class="campo-dd">
         <label>Classe Frequência</label>
         <details class="dd" data-dd="classe_frequencia">
@@ -1284,6 +1264,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_recencia') %}
       <div class="campo-dd">
         <label>Classe Recência</label>
         <details class="dd" data-dd="classe_recencia">
@@ -1323,6 +1305,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('nome_perfil_publico') %}
       <div class="campo-dd">
         <label>Perfil (Público Alvo)</label>
         <details class="dd" data-dd="nome_perfil_publico">
@@ -1362,6 +1346,8 @@
         </select>
       </div>
 
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('tipo_uso_territorio') %}
       <div class="campo-dd">
         <label>Uso do Território</label>
         <details class="dd" data-dd="tipo_uso_territorio">
@@ -1401,6 +1387,7 @@
         </select>
       </div>
 
+      {% endif %}
       <div class="campo-dd">
         <label>Cliente</label>
         <details class="dd" data-dd="cliente" data-single="1">
@@ -1478,7 +1465,6 @@
     <table class="tbl" id="tblEmpresas">
       <thead>
         <tr>
-          <th class="col-logo">Proprietária</th>
           <th class="col-cnpj">CNPJ</th>
           <th class="col-razao-social">Razão Social</th>
           <th class="col-mun hide-sm">Município</th>
@@ -1542,20 +1528,9 @@
 
             <tr data-href="{{ url_for('Paineis.cliente_detalhe', id_empresa=e['IDDimClientesEuromidia'], return_to=retorno_lista) }}">
 
-              <td>
-                <div class="logo-wrap" title="{{ e.get('RazaoSocialEmpresaProprietaria','') or 'Sem proprietária' }}">
-                  {% if e.get('LogoEmpresaProprietariaUrl','') %}
-                    <img src="{{ e.get('LogoEmpresaProprietariaUrl','') }}" alt="Logo proprietária"
-                         onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=&quot;logo-fallback&quot;>LOGO</div>';">
-                  {% else %}
-                    <div class="logo-fallback">LOGO</div>
-                  {% endif %}
-                </div>
-              </td>
 
               <td>
                 <div style="font-weight:1000;">{{ e.get('CNPJ','') }}</div>
-                <div class="muted-2">{{ e.get('RazaoSocialEmpresaProprietaria','') }}</div>
               </td>
 
               <td class="td-razao-social">
@@ -1637,7 +1612,7 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="12" class="muted" style="padding:14px;font-weight:1000;">
+            <td colspan="11" class="muted" style="padding:14px;font-weight:1000;">
               Nenhuma empresa encontrada com os filtros atuais.
             </td>
           </tr>
@@ -1671,7 +1646,6 @@
                             setor=filtros.setor,
                             classificacao_macro=filtros.classificacao_macro,
                             subclasse=filtros.subclasse,
-                            empresa_proprietaria=filtros.empresa_proprietaria,
                             classe_valor=filtros.classe_valor,
                             tipo_escala_operacional=filtros.tipo_escala_operacional,
                             classe_estrutural=filtros.classe_estrutural,
@@ -1693,7 +1667,6 @@
                             setor=filtros.setor,
                             classificacao_macro=filtros.classificacao_macro,
                             subclasse=filtros.subclasse,
-                            empresa_proprietaria=filtros.empresa_proprietaria,
                             classe_valor=filtros.classe_valor,
                             tipo_escala_operacional=filtros.tipo_escala_operacional,
                             classe_estrutural=filtros.classe_estrutural,
@@ -1719,7 +1692,6 @@
                             setor=filtros.setor,
                             classificacao_macro=filtros.classificacao_macro,
                             subclasse=filtros.subclasse,
-                            empresa_proprietaria=filtros.empresa_proprietaria,
                             classe_valor=filtros.classe_valor,
                             tipo_escala_operacional=filtros.tipo_escala_operacional,
                             classe_estrutural=filtros.classe_estrutural,
@@ -1741,7 +1713,6 @@
                             setor=filtros.setor,
                             classificacao_macro=filtros.classificacao_macro,
                             subclasse=filtros.subclasse,
-                            empresa_proprietaria=filtros.empresa_proprietaria,
                             classe_valor=filtros.classe_valor,
                             tipo_escala_operacional=filtros.tipo_escala_operacional,
                             classe_estrutural=filtros.classe_estrutural,
@@ -1806,7 +1777,6 @@
       if (dataDd === "setor") return "Setor";
       if (dataDd === "classificacao_macro") return "Classificação Score Macro";
       if (dataDd === "subclasse") return "SubClasse";
-      if (dataDd === "empresa_proprietaria") return "Proprietária";
       if (dataDd === "classe_valor") return "Classe Valor";
       if (dataDd === "tipo_escala_operacional") return "Escala Operacional";
       if (dataDd === "classe_estrutural") return "Classe Estrutural";
@@ -1818,6 +1788,166 @@
       if (dataDd === "cliente") return "Cliente";
       return "Selecionar";
     }
+
+
+    const filtrosDinamicosClientes = new Set([
+      "municipio",
+      "porte",
+      "classe",
+      "setor",
+      "classificacao_macro",
+      "subclasse",
+      "classe_valor",
+      "tipo_escala_operacional",
+      "classe_estrutural",
+      "classe_geo",
+      "classe_frequencia",
+      "classe_recencia",
+      "nome_perfil_publico",
+      "tipo_uso_territorio"
+    ]);
+
+    const urlFiltroClientesModelo = "{{ url_for('Paineis.clientes_filtro_opcoes', nome_filtro='__FILTRO__') }}";
+
+    function escaparHtml(valor){
+      return String(valor || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escaparAtributo(valor){
+      return escaparHtml(valor).replaceAll("`", "&#096;");
+    }
+
+    function nomeDoFiltroDropdown(dd){
+      return dd.getAttribute("data-dd") || "";
+    }
+
+    function renderizarEstadoFiltro(dd, mensagem){
+      const lista = dd.querySelector(".dd-list");
+      if (!lista) return;
+      lista.innerHTML = `
+        <label class="dd-item">
+          <input type="checkbox" data-dd-all="1" checked disabled>
+          <span>${escaparHtml(mensagem)}</span>
+        </label>
+      `;
+    }
+
+    function renderizarOpcoesFiltro(dd, opcoes){
+      const nomeFiltro = nomeDoFiltroDropdown(dd);
+      const lista = dd.querySelector(".dd-list");
+      if (!lista) return;
+
+      const itens = Array.isArray(opcoes) ? opcoes : [];
+      const algumSelecionado = itens.some(x => !!x.selecionado);
+      const todosMarcado = !algumSelecionado;
+
+      let html = `
+        <label class="dd-item">
+          <input type="checkbox" name="${escaparAtributo(nomeFiltro)}" value="" data-dd-all="1" ${todosMarcado ? "checked" : ""}>
+          <span>(Todos)</span>
+        </label>
+      `;
+
+      if (!itens.length){
+        html += `<div class="kb-combobox-vazio">Nenhuma opção encontrada.</div>`;
+      } else {
+        html += itens.map(item => {
+          const valor = String(item.valor || "");
+          const rotulo = String(item.rotulo || valor);
+          const selecionado = item.selecionado ? "checked" : "";
+          return `
+            <label class="dd-item" data-dd-text="${escaparAtributo(rotulo.toLowerCase())}">
+              <input type="checkbox" name="${escaparAtributo(nomeFiltro)}" value="${escaparAtributo(valor)}" ${selecionado}>
+              <span>${escaparHtml(rotulo)}</span>
+            </label>
+          `;
+        }).join("");
+      }
+
+      lista.innerHTML = html;
+      dd.dataset.filtroCarregado = "1";
+      atualizarLabelDropdown(dd);
+    }
+
+    async function carregarOpcoesFiltro(dd, forcar = false){
+      const nomeFiltro = nomeDoFiltroDropdown(dd);
+      if (!filtrosDinamicosClientes.has(nomeFiltro)) return;
+
+      const inputBuscaFiltro = dd.querySelector("[data-dd-search]");
+      const termo = inputBuscaFiltro ? (inputBuscaFiltro.value || "").trim() : "";
+      const termoAnterior = dd.dataset.termoCarregado || "";
+
+      if (!forcar && dd.dataset.filtroCarregado === "1" && termo === termoAnterior){
+        return;
+      }
+
+      dd.dataset.termoCarregado = termo;
+
+      const parametrosFormulario = [];
+      const form = dd.closest("form");
+      if (form){
+        const dados = new FormData(form);
+        for (const [chave, valor] of dados.entries()){
+          if (String(chave || "").endsWith("__single")) continue;
+          if (chave === "page") continue;
+          parametrosFormulario.push([chave, valor]);
+        }
+      }
+
+      renderizarEstadoFiltro(dd, "Carregando opções...");
+
+      try{
+        const caminho = urlFiltroClientesModelo.replace("__FILTRO__", encodeURIComponent(nomeFiltro));
+        const url = new URL(caminho, window.location.origin);
+
+        parametrosFormulario.forEach(([chave, valor]) => {
+          url.searchParams.append(chave, valor);
+        });
+
+        if (termo){
+          url.searchParams.set("termo", termo);
+        }
+
+        const resp = await fetch(url.toString(), {
+          method: "GET",
+          headers: {"X-Requested-With": "XMLHttpRequest"}
+        });
+
+        if (!resp.ok){
+          renderizarEstadoFiltro(dd, "Erro ao carregar opções");
+          return;
+        }
+
+        const payload = await resp.json();
+        renderizarOpcoesFiltro(dd, payload.opcoes || []);
+      }catch(err){
+        renderizarEstadoFiltro(dd, "Erro ao carregar opções");
+      }
+    }
+
+    document.querySelectorAll("details.dd").forEach(dd => {
+      dd.addEventListener("toggle", function(){
+        if (dd.open){
+          carregarOpcoesFiltro(dd, false);
+        }
+      });
+
+      const inputBuscaFiltro = dd.querySelector("[data-dd-search]");
+      if (inputBuscaFiltro && filtrosDinamicosClientes.has(nomeDoFiltroDropdown(dd))){
+        let timerFiltro = null;
+        inputBuscaFiltro.addEventListener("input", function(){
+          clearTimeout(timerFiltro);
+          timerFiltro = window.setTimeout(function(){
+            carregarOpcoesFiltro(dd, true);
+          }, 220);
+        });
+      }
+    });
 
     function atualizarLabelDropdown(dd){
       const label = dd.querySelector(".dd-label");

@@ -16,6 +16,7 @@ from wtforms import StringField, PasswordField, SubmitField
 from flask_wtf import RecaptchaField
 from wtforms.validators import DataRequired
 import requests
+from sqlalchemy import text
 
 
 
@@ -367,6 +368,97 @@ def trocar_senha():
 
 
 
+
+
+# ============================================================
+# Permissões dos filtros avançados da lista de empresas
+# ============================================================
+PERMISSOES_FILTROS_CLIENTES = [
+    {"codigo": "CLIENTES_FILTRO_CLASSE_VER", "rotulo": "Classe", "descricao": "Permite que vendedor visualize e use o filtro Classe na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_SETOR_VER", "rotulo": "Setor", "descricao": "Permite que vendedor visualize e use o filtro Setor na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_CLASSIFICACAO_MACRO_VER", "rotulo": "Classificação Score Macro", "descricao": "Permite que vendedor visualize e use o filtro Classificação Score Macro na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_SUBCLASSE_VER", "rotulo": "SubClasse", "descricao": "Permite que vendedor visualize e use o filtro SubClasse na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_CLASSE_VALOR_VER", "rotulo": "Classe Valor", "descricao": "Permite que vendedor visualize e use o filtro Classe Valor na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_ESCALA_OPERACIONAL_VER", "rotulo": "Escala Operacional", "descricao": "Permite que vendedor visualize e use o filtro Escala Operacional na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_CLASSE_ESTRUTURAL_VER", "rotulo": "Classe Estrutural", "descricao": "Permite que vendedor visualize e use o filtro Classe Estrutural na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_CLASSE_GEO_VER", "rotulo": "Classe Geo", "descricao": "Permite que vendedor visualize e use o filtro Classe Geo na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_CLASSE_FREQUENCIA_VER", "rotulo": "Classe Frequência", "descricao": "Permite que vendedor visualize e use o filtro Classe Frequência na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_CLASSE_RECENCIA_VER", "rotulo": "Classe Recência", "descricao": "Permite que vendedor visualize e use o filtro Classe Recência na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_PERFIL_PUBLICO_VER", "rotulo": "Perfil (Público Alvo)", "descricao": "Permite que vendedor visualize e use o filtro Perfil (Público Alvo) na lista de empresas."},
+    {"codigo": "CLIENTES_FILTRO_USO_TERRITORIO_VER", "rotulo": "Uso do Território", "descricao": "Permite que vendedor visualize e use o filtro Uso do Território na lista de empresas."},
+]
+
+
+def _codigos_permissoes_filtros_clientes() -> set[str]:
+    return {item["codigo"] for item in PERMISSOES_FILTROS_CLIENTES}
+
+
+def _garantir_permissoes_filtros_clientes() -> None:
+    """_garantir_permissoes_filtros_clientes
+    - Eu crio/ativo as permissões dos filtros avançados, caso ainda não existam.
+    - Assim a tela /autenticacao/seguranca/usuarios/<id> consegue liberar filtro por filtro.
+    """
+    codigos = sorted(_codigos_permissoes_filtros_clientes())
+    agora = _agora()
+
+    existentes = (
+        db.session.query(DimPermissoes)
+        .filter(DimPermissoes.CodigoPermissao.in_(codigos))
+        .all()
+    )
+    por_codigo = {_texto(row.CodigoPermissao).upper(): row for row in existentes}
+
+    alterou = False
+
+    for item in PERMISSOES_FILTROS_CLIENTES:
+        codigo = item["codigo"].strip().upper()
+        descricao = item["descricao"].strip()
+        row = por_codigo.get(codigo)
+
+        if row is None:
+            row = DimPermissoes()
+            row.CodigoPermissao = codigo
+            row.Descricao = descricao
+            row.BitAtivo = True
+            if hasattr(row, "DataCriacao"):
+                row.DataCriacao = agora
+            if hasattr(row, "DataAtualizacao"):
+                row.DataAtualizacao = agora
+            db.session.add(row)
+            alterou = True
+            continue
+
+        mudou_linha = False
+        if _texto(row.Descricao) != descricao:
+            row.Descricao = descricao
+            mudou_linha = True
+
+        if not bool(getattr(row, "BitAtivo", False)):
+            row.BitAtivo = True
+            mudou_linha = True
+
+        if mudou_linha and hasattr(row, "DataAtualizacao"):
+            row.DataAtualizacao = agora
+
+        alterou = alterou or mudou_linha
+
+    if alterou:
+        db.session.commit()
+
+
+def _montar_permissoes_filtros_clientes(permissoes) -> list[dict]:
+    por_codigo = {_texto(p.CodigoPermissao).upper(): p for p in (permissoes or [])}
+    itens = []
+
+    for item in PERMISSOES_FILTROS_CLIENTES:
+        permissao = por_codigo.get(item["codigo"].upper())
+        if permissao is None:
+            continue
+        itens.append({"permissao": permissao, "rotulo": item["rotulo"], "codigo": item["codigo"], "descricao": item["descricao"]})
+
+    return itens
+
+
 @autenticacao_bp.route("/seguranca/usuarios", methods=["GET"])
 @login_required
 @requer_permissao("USUARIOS_VER")
@@ -434,6 +526,12 @@ def usuarios_editar(id_usuario):
         .all()
     )
 
+    try:
+        _garantir_permissoes_filtros_clientes()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao garantir permissões de filtros avançados de clientes.")
+
     permissoes = (
         db.session.query(DimPermissoes)
         .filter(DimPermissoes.BitAtivo == True)
@@ -473,16 +571,7 @@ def usuarios_editar(id_usuario):
                     )
                 )
 
-            usuario.IDDimPerfilUsuario = id_perfil
-            usuario.BitAtivo = bit_ativo
-            usuario.UpdateAt = _agora()
-
-            db.session.query(PermissoesUsuario).filter(
-                PermissoesUsuario.IDDimUsuarios == usuario.IDDimUsuarios
-            ).delete(synchronize_session=False)
-
-            db.session.flush()
-
+            id_usuario_int = int(usuario.IDDimUsuarios)
             agora = _agora()
             id_usuario_executor = None
 
@@ -491,6 +580,39 @@ def usuarios_editar(id_usuario):
             except Exception:
                 id_usuario_executor = None
 
+            """Correção SQL Server/pyodbc:
+            - Eu não atualizo DimUsuarios pelo objeto ORM aqui.
+            - Em alguns ambientes SQL Server, o pyodbc retorna rowcount = -1 no UPDATE.
+            - O SQLAlchemy interpreta isso como StaleDataError quando o objeto ORM é atualizado.
+            - Por isso faço UPDATE/DELETE/INSERT via SQL explícito, evitando o flush automático do ORM.
+            """
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[DimUsuarios]
+                    SET
+                        IDDimPerfilUsuario = :id_perfil,
+                        BitAtivo = :bit_ativo,
+                        UpdateAt = :agora
+                    WHERE IDDimUsuarios = :id_usuario
+                """),
+                {
+                    "id_perfil": int(id_perfil),
+                    "bit_ativo": 1 if bit_ativo else 0,
+                    "agora": agora,
+                    "id_usuario": id_usuario_int,
+                },
+            )
+
+            db.session.execute(
+                text("""
+                    DELETE FROM [Integracao].[Silver].[PermissoesUsuario]
+                    WHERE IDDimUsuarios = :id_usuario
+                """),
+                {"id_usuario": id_usuario_int},
+            )
+
+            linhas_permissoes = []
+
             for permissao in permissoes:
                 nome_campo = f"perm_{permissao.IDDimPermissoes}"
                 tipo = _texto(request.form.get(nome_campo)).upper()
@@ -498,18 +620,44 @@ def usuarios_editar(id_usuario):
                 if tipo not in {"CONCEDER", "REVOGAR"}:
                     continue
 
-                nova_permissao_usuario = PermissoesUsuario(
-                    IDDimUsuarios=usuario.IDDimUsuarios,
-                    IDDimPermissoes=permissao.IDDimPermissoes,
-                    TipoAtribuicao=tipo,
-                    DataExpiracao=None,
-                    DataCriacao=agora,
-                    DataAtualizacao=agora,
-                    CriadoPorIDDimUsuarios=id_usuario_executor,
-                    Observacao="Alterado pela tela de permissões de usuários.",
+                linhas_permissoes.append(
+                    {
+                        "id_usuario": id_usuario_int,
+                        "id_permissao": int(permissao.IDDimPermissoes),
+                        "tipo_atribuicao": tipo,
+                        "data_criacao": agora,
+                        "data_atualizacao": agora,
+                        "id_usuario_executor": id_usuario_executor,
+                        "observacao": "Alterado pela tela de permissões de usuários.",
+                    }
                 )
 
-                db.session.add(nova_permissao_usuario)
+            if linhas_permissoes:
+                db.session.execute(
+                    text("""
+                        INSERT INTO [Integracao].[Silver].[PermissoesUsuario] (
+                            IDDimUsuarios,
+                            IDDimPermissoes,
+                            TipoAtribuicao,
+                            DataExpiracao,
+                            DataCriacao,
+                            DataAtualizacao,
+                            CriadoPorIDDimUsuarios,
+                            Observacao
+                        )
+                        VALUES (
+                            :id_usuario,
+                            :id_permissao,
+                            :tipo_atribuicao,
+                            NULL,
+                            :data_criacao,
+                            :data_atualizacao,
+                            :id_usuario_executor,
+                            :observacao
+                        )
+                    """),
+                    linhas_permissoes,
+                )
 
             db.session.commit()
             db.session.expire_all()
@@ -519,7 +667,7 @@ def usuarios_editar(id_usuario):
             return redirect(
                 url_for(
                     "Autenticacao.usuarios_editar",
-                    id_usuario=usuario.IDDimUsuarios,
+                    id_usuario=id_usuario_int,
                 )
             )
 
@@ -585,11 +733,20 @@ def usuarios_editar(id_usuario):
         if codigo:
             permissoes_perfil_codigos.add(codigo)
 
+    permissoes_filtros_clientes = _montar_permissoes_filtros_clientes(permissoes)
+    permissoes_filtros_clientes_ids = {
+        int(item["permissao"].IDDimPermissoes)
+        for item in permissoes_filtros_clientes
+        if getattr(item["permissao"], "IDDimPermissoes", None) is not None
+    }
+
     return render_template(
         "autenticacao/usuarios_editar.html",
         usuario=usuario,
         perfis=perfis,
         permissoes=permissoes,
+        permissoes_filtros_clientes=permissoes_filtros_clientes,
+        permissoes_filtros_clientes_ids=permissoes_filtros_clientes_ids,
         permissoes_extras_map=permissoes_extras_map,
         permissoes_perfil_ids=permissoes_perfil_ids,
         permissoes_perfil_codigos=permissoes_perfil_codigos,

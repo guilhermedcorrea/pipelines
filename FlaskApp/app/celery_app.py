@@ -20,7 +20,7 @@ def _obter_result_backend() -> str:
     )
 
 
-celery_app = Celery("flaskapp_checkin")
+celery_app = Celery("flaskapp")
 
 celery_app.conf.update(
     broker_url=_obter_broker_url(),
@@ -36,7 +36,11 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
     result_expires=86400,
-    imports=("app.tasks.checkin_tasks",),
+    imports=("app.tasks.checkin_tasks", "app.tasks.clientes_cache_tasks"),
+    task_routes={
+        "clientes_cache.*": {"queue": "clientes_cache"},
+        "app.tasks.checkin_tasks.*": {"queue": "checkin_upload"},
+    },
 )
 
 _app_flask_cache = None

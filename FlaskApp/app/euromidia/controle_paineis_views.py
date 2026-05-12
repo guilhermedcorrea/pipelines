@@ -67,10 +67,11 @@ paineis_bp = Blueprint("Paineis", __name__)
 LIMITE_GET_TELAS_NAVEGACAO = "600 per minute"
 
 
-TEMPO_CACHE_TOTAL_CLIENTES_SEGUNDOS = 120
-TEMPO_CACHE_ITENS_CLIENTES_SEGUNDOS = 120
-TEMPO_CACHE_FILTROS_CLIENTES_SEGUNDOS = 300
-TEMPO_CACHE_OPCOES_CLIENTE_SEGUNDOS = 300
+TEMPO_CACHE_TOTAL_CLIENTES_SEGUNDOS = 300
+TEMPO_CACHE_ITENS_CLIENTES_SEGUNDOS = 300
+TEMPO_CACHE_FILTROS_CLIENTES_SEGUNDOS = 1800
+TEMPO_CACHE_OPCOES_CLIENTE_SEGUNDOS = 1800
+LIMITE_OPCOES_FILTRO_CLIENTES = 500
 
 
 
@@ -12857,34 +12858,67 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
     pub = DimPublicoAlvo
 
     if "q" not in excluir and filtros["q"]:
-        like = f"%{filtros['q']}%"
-        query = query.filter(
-            (cast(DimEmpresas.IDEmpresa, String).like(like))
-            | (DimEmpresas.RazaoSocial.like(like))
-            | (DimEmpresas.NomeFantasia.like(like))
-            | (DimEmpresas.CNPJ.like(like))
-            | (DimEmpresas.Porte.like(like))
-            | (DimEmpresas.Municipio.like(like))
-            | (DimEmpresas.UF.like(like))
-            | (DimEmpresas.DescricaoSituacaoCadastral.like(like))
-            | (DimEmpresas.DescricaoIdentificadorMatrizFilial.like(like))
-            | (DimCnaes.Setor.like(like))
-            | (DimCnaes.Classe.like(like))
-            | (DimCnaes.SubClasse.like(like))
-            | (DimCnaes.ClassificacaoMacro.like(like))
-            | (cls.ClusterGrupoCliente.like(like))
-            | (cast(cls.ScorePerfilEmpresa, String).like(like))
-            | (cls.ClassificacaoPerfilEmpresa.like(like))
-            | (DimEmpresaProprietaria.RazaoSocial.like(like))
-            | (cls.ClasseValor.like(like))
-            | (cls.TipoEscalaOperacional.like(like))
-            | (cls.ClasseEstrutural.like(like))
-            | (cls.ClasseGeo.like(like))
-            | (rec.ClasseFrequencia.like(like))
-            | (rec.ClasseRecencia.like(like))
-            | (pub.NomePerfil.like(like))
-            | (pub.TipoUsoTerritorio.like(like))
-        )
+        q_texto = str(filtros["q"] or "").strip()
+        q_digitos = re.sub(r"\D+", "", q_texto)
+        condicoes_busca = []
+
+        """
+        Eu separo busca numérica de busca textual para reduzir varredura.
+        - Número curto: tenta IDEmpresa direto.
+        - Número maior: tenta CNPJ por prefixo.
+        - Texto: prioriza prefixo; mantém contains somente com 4+ letras para não matar o índice em buscas curtas.
+        """
+        if q_digitos:
+            if len(q_digitos) <= 9:
+                try:
+                    condicoes_busca.append(DimEmpresas.IDEmpresa == int(q_digitos))
+                except Exception:
+                    pass
+
+            if len(q_digitos) >= 3:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"{q_digitos}%"))
+
+            if len(q_digitos) >= 8:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"%{q_digitos}%"))
+        else:
+            like_prefixo = f"{q_texto}%"
+            condicoes_busca.extend([
+                DimEmpresas.RazaoSocial.like(like_prefixo),
+                DimEmpresas.NomeFantasia.like(like_prefixo),
+                DimEmpresas.Municipio.like(like_prefixo),
+                DimEmpresas.UF.like(like_prefixo),
+                DimEmpresas.Porte.like(like_prefixo),
+                DimCnaes.Setor.like(like_prefixo),
+                DimCnaes.Classe.like(like_prefixo),
+                DimCnaes.SubClasse.like(like_prefixo),
+                DimCnaes.ClassificacaoMacro.like(like_prefixo),
+                DimEmpresaProprietaria.RazaoSocial.like(like_prefixo),
+                cls.ClusterGrupoCliente.like(like_prefixo),
+                cls.ClassificacaoPerfilEmpresa.like(like_prefixo),
+                cls.ClasseValor.like(like_prefixo),
+                cls.TipoEscalaOperacional.like(like_prefixo),
+                cls.ClasseEstrutural.like(like_prefixo),
+                cls.ClasseGeo.like(like_prefixo),
+                rec.ClasseFrequencia.like(like_prefixo),
+                rec.ClasseRecencia.like(like_prefixo),
+                pub.NomePerfil.like(like_prefixo),
+                pub.TipoUsoTerritorio.like(like_prefixo),
+            ])
+
+            if len(q_texto) >= 4:
+                like_contem = f"%{q_texto}%"
+                condicoes_busca.extend([
+                    DimEmpresas.RazaoSocial.like(like_contem),
+                    DimEmpresas.NomeFantasia.like(like_contem),
+                    DimEmpresas.Municipio.like(like_contem),
+                    DimCnaes.Setor.like(like_contem),
+                    DimCnaes.Classe.like(like_contem),
+                    DimCnaes.SubClasse.like(like_contem),
+                    DimCnaes.ClassificacaoMacro.like(like_contem),
+                ])
+
+        if condicoes_busca:
+            query = query.filter(or_(*condicoes_busca))
 
     for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
         if nome in excluir:
@@ -12907,6 +12941,7 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
             query = query.filter(func.coalesce(DimEmpresas.BitCliente, 0) == 0)
 
     return query
+
 
 
 
@@ -13225,34 +13260,67 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
     pub = DimPublicoAlvo
 
     if "q" not in excluir and filtros["q"]:
-        like = f"%{filtros['q']}%"
-        query = query.filter(
-            (cast(DimEmpresas.IDEmpresa, String).like(like))
-            | (DimEmpresas.RazaoSocial.like(like))
-            | (DimEmpresas.NomeFantasia.like(like))
-            | (DimEmpresas.CNPJ.like(like))
-            | (DimEmpresas.Porte.like(like))
-            | (DimEmpresas.Municipio.like(like))
-            | (DimEmpresas.UF.like(like))
-            | (DimEmpresas.DescricaoSituacaoCadastral.like(like))
-            | (DimEmpresas.DescricaoIdentificadorMatrizFilial.like(like))
-            | (DimCnaes.Setor.like(like))
-            | (DimCnaes.Classe.like(like))
-            | (DimCnaes.SubClasse.like(like))
-            | (DimCnaes.ClassificacaoMacro.like(like))
-            | (cls.ClusterGrupoCliente.like(like))
-            | (cast(cls.ScorePerfilEmpresa, String).like(like))
-            | (cls.ClassificacaoPerfilEmpresa.like(like))
-            | (DimEmpresaProprietaria.RazaoSocial.like(like))
-            | (cls.ClasseValor.like(like))
-            | (cls.TipoEscalaOperacional.like(like))
-            | (cls.ClasseEstrutural.like(like))
-            | (cls.ClasseGeo.like(like))
-            | (rec.ClasseFrequencia.like(like))
-            | (rec.ClasseRecencia.like(like))
-            | (pub.NomePerfil.like(like))
-            | (pub.TipoUsoTerritorio.like(like))
-        )
+        q_texto = str(filtros["q"] or "").strip()
+        q_digitos = re.sub(r"\D+", "", q_texto)
+        condicoes_busca = []
+
+        """
+        Eu separo busca numérica de busca textual para reduzir varredura.
+        - Número curto: tenta IDEmpresa direto.
+        - Número maior: tenta CNPJ por prefixo.
+        - Texto: prioriza prefixo; mantém contains somente com 4+ letras para não matar o índice em buscas curtas.
+        """
+        if q_digitos:
+            if len(q_digitos) <= 9:
+                try:
+                    condicoes_busca.append(DimEmpresas.IDEmpresa == int(q_digitos))
+                except Exception:
+                    pass
+
+            if len(q_digitos) >= 3:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"{q_digitos}%"))
+
+            if len(q_digitos) >= 8:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"%{q_digitos}%"))
+        else:
+            like_prefixo = f"{q_texto}%"
+            condicoes_busca.extend([
+                DimEmpresas.RazaoSocial.like(like_prefixo),
+                DimEmpresas.NomeFantasia.like(like_prefixo),
+                DimEmpresas.Municipio.like(like_prefixo),
+                DimEmpresas.UF.like(like_prefixo),
+                DimEmpresas.Porte.like(like_prefixo),
+                DimCnaes.Setor.like(like_prefixo),
+                DimCnaes.Classe.like(like_prefixo),
+                DimCnaes.SubClasse.like(like_prefixo),
+                DimCnaes.ClassificacaoMacro.like(like_prefixo),
+                DimEmpresaProprietaria.RazaoSocial.like(like_prefixo),
+                cls.ClusterGrupoCliente.like(like_prefixo),
+                cls.ClassificacaoPerfilEmpresa.like(like_prefixo),
+                cls.ClasseValor.like(like_prefixo),
+                cls.TipoEscalaOperacional.like(like_prefixo),
+                cls.ClasseEstrutural.like(like_prefixo),
+                cls.ClasseGeo.like(like_prefixo),
+                rec.ClasseFrequencia.like(like_prefixo),
+                rec.ClasseRecencia.like(like_prefixo),
+                pub.NomePerfil.like(like_prefixo),
+                pub.TipoUsoTerritorio.like(like_prefixo),
+            ])
+
+            if len(q_texto) >= 4:
+                like_contem = f"%{q_texto}%"
+                condicoes_busca.extend([
+                    DimEmpresas.RazaoSocial.like(like_contem),
+                    DimEmpresas.NomeFantasia.like(like_contem),
+                    DimEmpresas.Municipio.like(like_contem),
+                    DimCnaes.Setor.like(like_contem),
+                    DimCnaes.Classe.like(like_contem),
+                    DimCnaes.SubClasse.like(like_contem),
+                    DimCnaes.ClassificacaoMacro.like(like_contem),
+                ])
+
+        if condicoes_busca:
+            query = query.filter(or_(*condicoes_busca))
 
     for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
         if nome in excluir:
@@ -13293,6 +13361,7 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
 
 
 
+
 @paineis_bp.get("/clientes/autocomplete")
 @login_required
 @limiter.limit("120 per minute", methods=["GET"])
@@ -13303,47 +13372,75 @@ def clientes_autocomplete():
     if len(q) < 2:
         return jsonify({"items": []})
 
-    q_like = f"%{q}%"
+    chave_cache = _gerar_chave_cache_clientes(
+        "autocomplete",
+        {"q": q.casefold()},
+    )
+    itens_cache = cache.get(chave_cache)
+    if itens_cache is not None:
+        return jsonify({"items": itens_cache})
+
     q_prefix = f"{q}%"
+    q_digitos = re.sub(r"\D+", "", q)
 
-    sql = text("""
-        SELECT TOP (15)
-            e.IDEmpresa,
-            RazaoSocial = LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))),
-            Classe = LTRIM(RTRIM(COALESCE(c.Classe, '')))
-        FROM [Integracao].[Silver].[DimEmpresas] e
-        LEFT JOIN [Integracao].[Silver].[DimCnaes] c
-            ON c.cnaepadrao = e.CNAE
-        WHERE
-            e.IDEmpresa IS NOT NULL
-            AND NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))), '') IS NOT NULL
-            AND (
-                CAST(e.IDEmpresa AS varchar(30)) LIKE :q_prefix
-                OR COALESCE(e.RazaoSocial, '') LIKE :q_like
-                OR COALESCE(e.NomeFantasia, '') LIKE :q_like
-                OR COALESCE(CAST(e.CNPJ AS varchar(30)), '') LIKE :q_like
-                OR COALESCE(c.Classe, '') LIKE :q_like
-            )
-        ORDER BY
-            CASE
-                WHEN CAST(e.IDEmpresa AS varchar(30)) = :q THEN 0
-                WHEN COALESCE(e.RazaoSocial, '') LIKE :q_prefix THEN 1
-                WHEN COALESCE(e.NomeFantasia, '') LIKE :q_prefix THEN 2
-                WHEN COALESCE(c.Classe, '') LIKE :q_prefix THEN 3
-                ELSE 4
-            END,
-            e.RazaoSocial ASC,
-            e.IDEmpresa ASC
-    """)
+    if q_digitos:
+        sql = text("""
+            SELECT TOP (15)
+                e.IDEmpresa,
+                RazaoSocial = LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))),
+                Classe = LTRIM(RTRIM(COALESCE(c.Classe, '')))
+            FROM [Integracao].[Silver].[DimEmpresas] e
+            LEFT JOIN [Integracao].[Silver].[DimCnaes] c
+                ON c.cnaepadrao = e.CNAE
+            WHERE
+                e.IDEmpresa IS NOT NULL
+                AND NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))), '') IS NOT NULL
+                AND (
+                    CAST(e.IDEmpresa AS varchar(30)) = :q_digitos
+                    OR CAST(e.IDEmpresa AS varchar(30)) LIKE :q_prefix
+                    OR COALESCE(CAST(e.CNPJ AS varchar(30)), '') LIKE :q_prefix
+                )
+            ORDER BY
+                CASE
+                    WHEN CAST(e.IDEmpresa AS varchar(30)) = :q_digitos THEN 0
+                    WHEN CAST(e.IDEmpresa AS varchar(30)) LIKE :q_prefix THEN 1
+                    WHEN COALESCE(CAST(e.CNPJ AS varchar(30)), '') LIKE :q_prefix THEN 2
+                    ELSE 3
+                END,
+                e.RazaoSocial ASC,
+                e.IDEmpresa ASC
+        """)
+        parametros = {"q_digitos": q_digitos, "q_prefix": f"{q_digitos}%"}
+    else:
+        sql = text("""
+            SELECT TOP (15)
+                e.IDEmpresa,
+                RazaoSocial = LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))),
+                Classe = LTRIM(RTRIM(COALESCE(c.Classe, '')))
+            FROM [Integracao].[Silver].[DimEmpresas] e
+            LEFT JOIN [Integracao].[Silver].[DimCnaes] c
+                ON c.cnaepadrao = e.CNAE
+            WHERE
+                e.IDEmpresa IS NOT NULL
+                AND NULLIF(LTRIM(RTRIM(COALESCE(e.RazaoSocial, ''))), '') IS NOT NULL
+                AND (
+                    COALESCE(e.RazaoSocial, '') LIKE :q_prefix
+                    OR COALESCE(e.NomeFantasia, '') LIKE :q_prefix
+                    OR COALESCE(c.Classe, '') LIKE :q_prefix
+                )
+            ORDER BY
+                CASE
+                    WHEN COALESCE(e.RazaoSocial, '') LIKE :q_prefix THEN 0
+                    WHEN COALESCE(e.NomeFantasia, '') LIKE :q_prefix THEN 1
+                    WHEN COALESCE(c.Classe, '') LIKE :q_prefix THEN 2
+                    ELSE 3
+                END,
+                e.RazaoSocial ASC,
+                e.IDEmpresa ASC
+        """)
+        parametros = {"q_prefix": q_prefix}
 
-    rows = db.session.execute(
-        sql,
-        {
-            "q": q,
-            "q_like": q_like,
-            "q_prefix": q_prefix,
-        },
-    ).mappings().all()
+    rows = db.session.execute(sql, parametros).mappings().all()
 
     items = []
     vistos = set()
@@ -13369,6 +13466,7 @@ def clientes_autocomplete():
             }
         )
 
+    cache.set(chave_cache, items, timeout=TEMPO_CACHE_OPCOES_CLIENTE_SEGUNDOS)
     return jsonify({"items": items})
 
 
@@ -13378,13 +13476,114 @@ def clientes_autocomplete():
 
 
 
-def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros):
+
+def _ler_filtros_clientes_request_args():
+    """Eu leio os filtros da tela para APIs auxiliares sem recalcular a página inteira."""
+    cliente = (request.args.get("cliente") or "todos").strip().lower()
+    if cliente not in {"todos", "1", "0"}:
+        cliente = "todos"
+
+    return {
+        "q": (request.args.get("q") or "").strip(),
+        "municipio": (request.args.get("municipio") or "").strip(),
+        "porte": (request.args.get("porte") or "").strip(),
+        "classe": [x.strip() for x in (request.args.getlist("classe") or []) if (x or "").strip()],
+        "setor": [x.strip() for x in (request.args.getlist("setor") or []) if (x or "").strip()],
+        "subclasse": [x.strip() for x in (request.args.getlist("subclasse") or []) if (x or "").strip()],
+        "empresa_proprietaria": [x.strip() for x in (request.args.getlist("empresa_proprietaria") or []) if (x or "").strip()],
+        "classe_valor": [x.strip() for x in (request.args.getlist("classe_valor") or []) if (x or "").strip()],
+        "tipo_escala_operacional": [x.strip() for x in (request.args.getlist("tipo_escala_operacional") or []) if (x or "").strip()],
+        "classe_estrutural": [x.strip() for x in (request.args.getlist("classe_estrutural") or []) if (x or "").strip()],
+        "classe_geo": [x.strip() for x in (request.args.getlist("classe_geo") or []) if (x or "").strip()],
+        "classe_frequencia": [x.strip() for x in (request.args.getlist("classe_frequencia") or []) if (x or "").strip()],
+        "classe_recencia": [x.strip() for x in (request.args.getlist("classe_recencia") or []) if (x or "").strip()],
+        "nome_perfil_publico": [x.strip() for x in (request.args.getlist("nome_perfil_publico") or []) if (x or "").strip()],
+        "tipo_uso_territorio": [x.strip() for x in (request.args.getlist("tipo_uso_territorio") or []) if (x or "").strip()],
+        "classificacao_macro": [x.strip() for x in (request.args.getlist("classificacao_macro") or []) if (x or "").strip()],
+        "cliente": cliente,
+    }
+
+
+@paineis_bp.get("/clientes/filtros/<nome_filtro>")
+@login_required
+@limiter.limit("240 per minute", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def clientes_filtro_opcoes(nome_filtro: str):
+    """
+    Eu carrego opções de um filtro sob demanda.
+
+    A lista principal deixa de calcular todos os SELECT DISTINCT no primeiro carregamento.
+    Cada dropdown busca somente suas opções quando o usuário abre ou pesquisa nele.
+    """
+    nome_filtro = (nome_filtro or "").strip()
+
+    if nome_filtro == "cliente":
+        return jsonify(
+            {
+                "nome_filtro": nome_filtro,
+                "opcoes": [
+                    {"valor": "todos", "rotulo": "Todos", "selecionado": False},
+                    {"valor": "1", "rotulo": "Cliente", "selecionado": False},
+                    {"valor": "0", "rotulo": "Não cliente", "selecionado": False},
+                ],
+            }
+        )
+
+    if nome_filtro not in DEFINICOES_FILTROS_CLIENTES:
+        abort(404)
+
+    if not _usuario_pode_ver_filtro_clientes(nome_filtro):
+        abort(403)
+
+    filtros = _ler_filtros_clientes_request_args()
     filtros_normalizados = _normalizar_filtros_clientes_para_backend(filtros)
+    termo = (request.args.get("termo") or "").strip()
+
+    valores = _obter_valores_distintos_filtro_clientes(
+        nome_filtro=nome_filtro,
+        filtros=filtros_normalizados,
+        termo=termo,
+        limite=LIMITE_OPCOES_FILTRO_CLIENTES,
+    )
+
+    meta = DEFINICOES_FILTROS_CLIENTES[nome_filtro]
+    valor_atual = filtros_normalizados.get(nome_filtro)
+    if meta["multiplo"]:
+        selecionados = {str(x).strip() for x in (valor_atual or []) if str(x or "").strip()}
+    else:
+        selecionados = {str(valor_atual or "").strip()} if str(valor_atual or "").strip() else set()
+
+    opcoes = [
+        {
+            "valor": valor,
+            "rotulo": valor,
+            "selecionado": valor in selecionados,
+        }
+        for valor in valores
+    ]
+
+    return jsonify(
+        {
+            "nome_filtro": nome_filtro,
+            "opcoes": opcoes,
+            "limite": LIMITE_OPCOES_FILTRO_CLIENTES,
+            "termo": termo,
+        }
+    )
+
+
+def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros, termo: str = "", limite: int | None = None):
+    filtros_normalizados = _normalizar_filtros_clientes_para_backend(filtros)
+    termo = str(termo or "").strip()
+    limite = int(limite or LIMITE_OPCOES_FILTRO_CLIENTES)
+    limite = max(20, min(limite, 1000))
 
     payload_cache = {
         "nome_filtro": nome_filtro,
         "filtros": filtros_normalizados,
         "excluir": [nome_filtro],
+        "termo": termo,
+        "limite": limite,
     }
     chave_cache = _gerar_chave_cache_clientes("filtro_distinto", payload_cache)
 
@@ -13398,6 +13597,10 @@ def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros):
     query = _query_clientes_base_ids()
     query = _aplicar_filtros_clientes(query, filtros_normalizados, excluir={nome_filtro})
 
+    if termo:
+        # Prefixo primeiro para o SQL Server conseguir aproveitar índice quando existir.
+        query = query.filter(coluna.like(f"{termo}%"))
+
     valores_banco = [
         row[0]
         for row in (
@@ -13406,6 +13609,7 @@ def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros):
             .filter(coluna != "")
             .distinct()
             .order_by(coluna.asc())
+            .limit(limite)
             .all()
         )
     ]
@@ -13422,7 +13626,7 @@ def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros):
     else:
         selecionados = [str(valor_selecionado).strip()] if str(valor_selecionado or "").strip() else []
 
-    valores = _deduplicar_textos_preservando_ordem(valores_banco + selecionados)
+    valores = _deduplicar_textos_preservando_ordem(selecionados + valores_banco)
 
     if nome_filtro == "classificacao_macro":
         valores = _ordenar_classificacao_macro(valores)
@@ -13435,6 +13639,7 @@ def _obter_valores_distintos_filtro_clientes(nome_filtro, filtros):
         timeout=TEMPO_CACHE_FILTROS_CLIENTES_SEGUNDOS,
     )
     return valores
+
 
 
 def _obter_opcoes_cliente_dinamicas(filtros):
@@ -13485,25 +13690,44 @@ def _obter_opcoes_cliente_dinamicas(filtros):
 
 
 def _obter_listas_filtros_clientes_dinamicas(filtros):
+    """
+    Eu não carrego mais todos os DISTINCT dos filtros na abertura da tela.
+
+    Antes a página /paineis/clientes calculava todas as listas de filtros no request inicial,
+    o que fazia vários SELECT DISTINCT pesados. Agora eu mando apenas os valores já
+    selecionados para manter a tela correta e o JavaScript carrega as opções sob demanda.
+    """
     filtros = _normalizar_filtros_clientes_para_backend(filtros)
 
+    def _selecionados(nome_filtro: str):
+        meta = DEFINICOES_FILTROS_CLIENTES[nome_filtro]
+        valor = filtros.get(nome_filtro)
+        if meta["multiplo"]:
+            return _deduplicar_textos_preservando_ordem(valor or [])
+        texto = str(valor or "").strip()
+        return [texto] if texto else []
+
     return {
-        "municipios": _obter_valores_distintos_filtro_clientes("municipio", filtros),
-        "portes": _obter_valores_distintos_filtro_clientes("porte", filtros),
-        "classes": _obter_valores_distintos_filtro_clientes("classe", filtros),
-        "setores": _obter_valores_distintos_filtro_clientes("setor", filtros),
-        "subclasses": _obter_valores_distintos_filtro_clientes("subclasse", filtros),
-        "empresas_proprietarias": _obter_valores_distintos_filtro_clientes("empresa_proprietaria", filtros),
-        "classes_valor": _obter_valores_distintos_filtro_clientes("classe_valor", filtros),
-        "tipos_escala_operacional": _obter_valores_distintos_filtro_clientes("tipo_escala_operacional", filtros),
-        "classes_estruturais": _obter_valores_distintos_filtro_clientes("classe_estrutural", filtros),
-        "classes_geo": _obter_valores_distintos_filtro_clientes("classe_geo", filtros),
-        "classes_frequencia": _obter_valores_distintos_filtro_clientes("classe_frequencia", filtros),
-        "classes_recencia": _obter_valores_distintos_filtro_clientes("classe_recencia", filtros),
-        "nomes_perfil_publico": _obter_valores_distintos_filtro_clientes("nome_perfil_publico", filtros),
-        "tipos_uso_territorio": _obter_valores_distintos_filtro_clientes("tipo_uso_territorio", filtros),
-        "classificacoes_macro": _obter_valores_distintos_filtro_clientes("classificacao_macro", filtros),
-        "opcoes_cliente": _obter_opcoes_cliente_dinamicas(filtros),
+        "municipios": _selecionados("municipio"),
+        "portes": _selecionados("porte"),
+        "classes": _selecionados("classe"),
+        "setores": _selecionados("setor"),
+        "subclasses": _selecionados("subclasse"),
+        "empresas_proprietarias": _selecionados("empresa_proprietaria"),
+        "classes_valor": _selecionados("classe_valor"),
+        "tipos_escala_operacional": _selecionados("tipo_escala_operacional"),
+        "classes_estruturais": _selecionados("classe_estrutural"),
+        "classes_geo": _selecionados("classe_geo"),
+        "classes_frequencia": _selecionados("classe_frequencia"),
+        "classes_recencia": _selecionados("classe_recencia"),
+        "nomes_perfil_publico": _selecionados("nome_perfil_publico"),
+        "tipos_uso_territorio": _selecionados("tipo_uso_territorio"),
+        "classificacoes_macro": _selecionados("classificacao_macro"),
+        "opcoes_cliente": [
+            {"valor": "todos", "rotulo": "Todos"},
+            {"valor": "1", "rotulo": "Cliente"},
+            {"valor": "0", "rotulo": "Não cliente"},
+        ],
     }
 
 
@@ -13568,10 +13792,13 @@ def _obter_itens_clientes_cacheados(filtros, page: int, per_page: int):
         logo_path = (d.get("LogoEmpresaProprietaria") or "").strip()
         if logo_path:
             nome_arquivo = os.path.basename(logo_path.replace("\\", "/"))
-            d["LogoEmpresaProprietariaUrl"] = url_for(
-                "static",
-                filename=f"LogoEmpresaProprietaria/{nome_arquivo}",
-            )
+            try:
+                d["LogoEmpresaProprietariaUrl"] = url_for(
+                    "static",
+                    filename=f"LogoEmpresaProprietaria/{nome_arquivo}",
+                )
+            except RuntimeError:
+                d["LogoEmpresaProprietariaUrl"] = f"/static/LogoEmpresaProprietaria/{nome_arquivo}"
         else:
             d["LogoEmpresaProprietariaUrl"] = ""
 
@@ -13698,6 +13925,10 @@ def clientes_lista():
         "cliente": cliente,
     }
 
+    filtros = _bloquear_filtros_clientes_sem_permissao(filtros)
+    filtros["per_page"] = per_page
+    filtros_clientes_visiveis = _mapa_filtros_clientes_visiveis()
+
     total = _obter_total_clientes_cacheado(filtros)
 
     pag = _paginacao_basica(page, per_page, total)
@@ -13707,6 +13938,12 @@ def clientes_lista():
         page=pag["page"],
         per_page=pag["per_page"],
     )
+
+    try:
+        from ..tasks.clientes_cache_tasks import aquecer_cache_clientes_lista
+        aquecer_cache_clientes_lista.delay(filtros, pag["page"], pag["per_page"])
+    except Exception:
+        current_app.logger.debug("Não foi possível disparar aquecimento assíncrono do cache de clientes.", exc_info=True)
 
     listas = _obter_listas_filtros_clientes_dinamicas(filtros)
 
@@ -13754,6 +13991,7 @@ def clientes_lista():
         tipos_uso_territorio=tipos_uso_territorio,
         classificacoes_macro=classificacoes_macro,
         opcoes_cliente=opcoes_cliente,
+        filtros_clientes_visiveis=filtros_clientes_visiveis,
         retorno_lista=retorno_lista,
     )
 
@@ -24362,34 +24600,67 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
     pub = DimPublicoAlvo
 
     if "q" not in excluir and filtros["q"]:
-        like = f"%{filtros['q']}%"
-        query = query.filter(
-            (cast(DimEmpresas.IDEmpresa, String).like(like))
-            | (DimEmpresas.RazaoSocial.like(like))
-            | (DimEmpresas.NomeFantasia.like(like))
-            | (DimEmpresas.CNPJ.like(like))
-            | (DimEmpresas.Porte.like(like))
-            | (DimEmpresas.Municipio.like(like))
-            | (DimEmpresas.UF.like(like))
-            | (DimEmpresas.DescricaoSituacaoCadastral.like(like))
-            | (DimEmpresas.DescricaoIdentificadorMatrizFilial.like(like))
-            | (DimCnaes.Setor.like(like))
-            | (DimCnaes.Classe.like(like))
-            | (DimCnaes.SubClasse.like(like))
-            | (DimCnaes.ClassificacaoMacro.like(like))
-            | (cls.ClusterGrupoCliente.like(like))
-            | (cast(cls.ScorePerfilEmpresa, String).like(like))
-            | (cls.ClassificacaoPerfilEmpresa.like(like))
-            | (DimEmpresaProprietaria.RazaoSocial.like(like))
-            | (cls.ClasseValor.like(like))
-            | (cls.TipoEscalaOperacional.like(like))
-            | (cls.ClasseEstrutural.like(like))
-            | (cls.ClasseGeo.like(like))
-            | (rec.ClasseFrequencia.like(like))
-            | (rec.ClasseRecencia.like(like))
-            | (pub.NomePerfil.like(like))
-            | (pub.TipoUsoTerritorio.like(like))
-        )
+        q_texto = str(filtros["q"] or "").strip()
+        q_digitos = re.sub(r"\D+", "", q_texto)
+        condicoes_busca = []
+
+        """
+        Eu separo busca numérica de busca textual para reduzir varredura.
+        - Número curto: tenta IDEmpresa direto.
+        - Número maior: tenta CNPJ por prefixo.
+        - Texto: prioriza prefixo; mantém contains somente com 4+ letras para não matar o índice em buscas curtas.
+        """
+        if q_digitos:
+            if len(q_digitos) <= 9:
+                try:
+                    condicoes_busca.append(DimEmpresas.IDEmpresa == int(q_digitos))
+                except Exception:
+                    pass
+
+            if len(q_digitos) >= 3:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"{q_digitos}%"))
+
+            if len(q_digitos) >= 8:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"%{q_digitos}%"))
+        else:
+            like_prefixo = f"{q_texto}%"
+            condicoes_busca.extend([
+                DimEmpresas.RazaoSocial.like(like_prefixo),
+                DimEmpresas.NomeFantasia.like(like_prefixo),
+                DimEmpresas.Municipio.like(like_prefixo),
+                DimEmpresas.UF.like(like_prefixo),
+                DimEmpresas.Porte.like(like_prefixo),
+                DimCnaes.Setor.like(like_prefixo),
+                DimCnaes.Classe.like(like_prefixo),
+                DimCnaes.SubClasse.like(like_prefixo),
+                DimCnaes.ClassificacaoMacro.like(like_prefixo),
+                DimEmpresaProprietaria.RazaoSocial.like(like_prefixo),
+                cls.ClusterGrupoCliente.like(like_prefixo),
+                cls.ClassificacaoPerfilEmpresa.like(like_prefixo),
+                cls.ClasseValor.like(like_prefixo),
+                cls.TipoEscalaOperacional.like(like_prefixo),
+                cls.ClasseEstrutural.like(like_prefixo),
+                cls.ClasseGeo.like(like_prefixo),
+                rec.ClasseFrequencia.like(like_prefixo),
+                rec.ClasseRecencia.like(like_prefixo),
+                pub.NomePerfil.like(like_prefixo),
+                pub.TipoUsoTerritorio.like(like_prefixo),
+            ])
+
+            if len(q_texto) >= 4:
+                like_contem = f"%{q_texto}%"
+                condicoes_busca.extend([
+                    DimEmpresas.RazaoSocial.like(like_contem),
+                    DimEmpresas.NomeFantasia.like(like_contem),
+                    DimEmpresas.Municipio.like(like_contem),
+                    DimCnaes.Setor.like(like_contem),
+                    DimCnaes.Classe.like(like_contem),
+                    DimCnaes.SubClasse.like(like_contem),
+                    DimCnaes.ClassificacaoMacro.like(like_contem),
+                ])
+
+        if condicoes_busca:
+            query = query.filter(or_(*condicoes_busca))
 
     for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
         if nome in excluir:
@@ -24412,6 +24683,7 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
             query = query.filter(func.coalesce(DimEmpresas.BitCliente, 0) == 0)
 
     return query
+
 
 
 
@@ -24727,34 +24999,67 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
     pub = DimPublicoAlvo
 
     if "q" not in excluir and filtros["q"]:
-        like = f"%{filtros['q']}%"
-        query = query.filter(
-            (cast(DimEmpresas.IDEmpresa, String).like(like))
-            | (DimEmpresas.RazaoSocial.like(like))
-            | (DimEmpresas.NomeFantasia.like(like))
-            | (DimEmpresas.CNPJ.like(like))
-            | (DimEmpresas.Porte.like(like))
-            | (DimEmpresas.Municipio.like(like))
-            | (DimEmpresas.UF.like(like))
-            | (DimEmpresas.DescricaoSituacaoCadastral.like(like))
-            | (DimEmpresas.DescricaoIdentificadorMatrizFilial.like(like))
-            | (DimCnaes.Setor.like(like))
-            | (DimCnaes.Classe.like(like))
-            | (DimCnaes.SubClasse.like(like))
-            | (DimCnaes.ClassificacaoMacro.like(like))
-            | (cls.ClusterGrupoCliente.like(like))
-            | (cast(cls.ScorePerfilEmpresa, String).like(like))
-            | (cls.ClassificacaoPerfilEmpresa.like(like))
-            | (DimEmpresaProprietaria.RazaoSocial.like(like))
-            | (cls.ClasseValor.like(like))
-            | (cls.TipoEscalaOperacional.like(like))
-            | (cls.ClasseEstrutural.like(like))
-            | (cls.ClasseGeo.like(like))
-            | (rec.ClasseFrequencia.like(like))
-            | (rec.ClasseRecencia.like(like))
-            | (pub.NomePerfil.like(like))
-            | (pub.TipoUsoTerritorio.like(like))
-        )
+        q_texto = str(filtros["q"] or "").strip()
+        q_digitos = re.sub(r"\D+", "", q_texto)
+        condicoes_busca = []
+
+        """
+        Eu separo busca numérica de busca textual para reduzir varredura.
+        - Número curto: tenta IDEmpresa direto.
+        - Número maior: tenta CNPJ por prefixo.
+        - Texto: prioriza prefixo; mantém contains somente com 4+ letras para não matar o índice em buscas curtas.
+        """
+        if q_digitos:
+            if len(q_digitos) <= 9:
+                try:
+                    condicoes_busca.append(DimEmpresas.IDEmpresa == int(q_digitos))
+                except Exception:
+                    pass
+
+            if len(q_digitos) >= 3:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"{q_digitos}%"))
+
+            if len(q_digitos) >= 8:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"%{q_digitos}%"))
+        else:
+            like_prefixo = f"{q_texto}%"
+            condicoes_busca.extend([
+                DimEmpresas.RazaoSocial.like(like_prefixo),
+                DimEmpresas.NomeFantasia.like(like_prefixo),
+                DimEmpresas.Municipio.like(like_prefixo),
+                DimEmpresas.UF.like(like_prefixo),
+                DimEmpresas.Porte.like(like_prefixo),
+                DimCnaes.Setor.like(like_prefixo),
+                DimCnaes.Classe.like(like_prefixo),
+                DimCnaes.SubClasse.like(like_prefixo),
+                DimCnaes.ClassificacaoMacro.like(like_prefixo),
+                DimEmpresaProprietaria.RazaoSocial.like(like_prefixo),
+                cls.ClusterGrupoCliente.like(like_prefixo),
+                cls.ClassificacaoPerfilEmpresa.like(like_prefixo),
+                cls.ClasseValor.like(like_prefixo),
+                cls.TipoEscalaOperacional.like(like_prefixo),
+                cls.ClasseEstrutural.like(like_prefixo),
+                cls.ClasseGeo.like(like_prefixo),
+                rec.ClasseFrequencia.like(like_prefixo),
+                rec.ClasseRecencia.like(like_prefixo),
+                pub.NomePerfil.like(like_prefixo),
+                pub.TipoUsoTerritorio.like(like_prefixo),
+            ])
+
+            if len(q_texto) >= 4:
+                like_contem = f"%{q_texto}%"
+                condicoes_busca.extend([
+                    DimEmpresas.RazaoSocial.like(like_contem),
+                    DimEmpresas.NomeFantasia.like(like_contem),
+                    DimEmpresas.Municipio.like(like_contem),
+                    DimCnaes.Setor.like(like_contem),
+                    DimCnaes.Classe.like(like_contem),
+                    DimCnaes.SubClasse.like(like_contem),
+                    DimCnaes.ClassificacaoMacro.like(like_contem),
+                ])
+
+        if condicoes_busca:
+            query = query.filter(or_(*condicoes_busca))
 
     for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
         if nome in excluir:
@@ -24777,6 +25082,7 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
             query = query.filter(func.coalesce(DimEmpresas.BitCliente, 0) == 0)
 
     return query
+
 
 
 
@@ -25071,34 +25377,67 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
     pub = DimPublicoAlvo
 
     if "q" not in excluir and filtros["q"]:
-        like = f"%{filtros['q']}%"
-        query = query.filter(
-            (cast(DimEmpresas.IDEmpresa, String).like(like))
-            | (DimEmpresas.RazaoSocial.like(like))
-            | (DimEmpresas.NomeFantasia.like(like))
-            | (DimEmpresas.CNPJ.like(like))
-            | (DimEmpresas.Porte.like(like))
-            | (DimEmpresas.Municipio.like(like))
-            | (DimEmpresas.UF.like(like))
-            | (DimEmpresas.DescricaoSituacaoCadastral.like(like))
-            | (DimEmpresas.DescricaoIdentificadorMatrizFilial.like(like))
-            | (DimCnaes.Setor.like(like))
-            | (DimCnaes.Classe.like(like))
-            | (DimCnaes.SubClasse.like(like))
-            | (DimCnaes.ClassificacaoMacro.like(like))
-            | (cls.ClusterGrupoCliente.like(like))
-            | (cast(cls.ScorePerfilEmpresa, String).like(like))
-            | (cls.ClassificacaoPerfilEmpresa.like(like))
-            | (DimEmpresaProprietaria.RazaoSocial.like(like))
-            | (cls.ClasseValor.like(like))
-            | (cls.TipoEscalaOperacional.like(like))
-            | (cls.ClasseEstrutural.like(like))
-            | (cls.ClasseGeo.like(like))
-            | (rec.ClasseFrequencia.like(like))
-            | (rec.ClasseRecencia.like(like))
-            | (pub.NomePerfil.like(like))
-            | (pub.TipoUsoTerritorio.like(like))
-        )
+        q_texto = str(filtros["q"] or "").strip()
+        q_digitos = re.sub(r"\D+", "", q_texto)
+        condicoes_busca = []
+
+        """
+        Eu separo busca numérica de busca textual para reduzir varredura.
+        - Número curto: tenta IDEmpresa direto.
+        - Número maior: tenta CNPJ por prefixo.
+        - Texto: prioriza prefixo; mantém contains somente com 4+ letras para não matar o índice em buscas curtas.
+        """
+        if q_digitos:
+            if len(q_digitos) <= 9:
+                try:
+                    condicoes_busca.append(DimEmpresas.IDEmpresa == int(q_digitos))
+                except Exception:
+                    pass
+
+            if len(q_digitos) >= 3:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"{q_digitos}%"))
+
+            if len(q_digitos) >= 8:
+                condicoes_busca.append(cast(DimEmpresas.CNPJ, String).like(f"%{q_digitos}%"))
+        else:
+            like_prefixo = f"{q_texto}%"
+            condicoes_busca.extend([
+                DimEmpresas.RazaoSocial.like(like_prefixo),
+                DimEmpresas.NomeFantasia.like(like_prefixo),
+                DimEmpresas.Municipio.like(like_prefixo),
+                DimEmpresas.UF.like(like_prefixo),
+                DimEmpresas.Porte.like(like_prefixo),
+                DimCnaes.Setor.like(like_prefixo),
+                DimCnaes.Classe.like(like_prefixo),
+                DimCnaes.SubClasse.like(like_prefixo),
+                DimCnaes.ClassificacaoMacro.like(like_prefixo),
+                DimEmpresaProprietaria.RazaoSocial.like(like_prefixo),
+                cls.ClusterGrupoCliente.like(like_prefixo),
+                cls.ClassificacaoPerfilEmpresa.like(like_prefixo),
+                cls.ClasseValor.like(like_prefixo),
+                cls.TipoEscalaOperacional.like(like_prefixo),
+                cls.ClasseEstrutural.like(like_prefixo),
+                cls.ClasseGeo.like(like_prefixo),
+                rec.ClasseFrequencia.like(like_prefixo),
+                rec.ClasseRecencia.like(like_prefixo),
+                pub.NomePerfil.like(like_prefixo),
+                pub.TipoUsoTerritorio.like(like_prefixo),
+            ])
+
+            if len(q_texto) >= 4:
+                like_contem = f"%{q_texto}%"
+                condicoes_busca.extend([
+                    DimEmpresas.RazaoSocial.like(like_contem),
+                    DimEmpresas.NomeFantasia.like(like_contem),
+                    DimEmpresas.Municipio.like(like_contem),
+                    DimCnaes.Setor.like(like_contem),
+                    DimCnaes.Classe.like(like_contem),
+                    DimCnaes.SubClasse.like(like_contem),
+                    DimCnaes.ClassificacaoMacro.like(like_contem),
+                ])
+
+        if condicoes_busca:
+            query = query.filter(or_(*condicoes_busca))
 
     for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
         if nome in excluir:
@@ -25122,24 +25461,107 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
 
     return query
 
+# ============================================================
+# ACL dos filtros avançados da lista de empresas
+# ============================================================
+FILTROS_CLIENTES_SEMPRE_VISIVEIS = {"municipio", "porte", "cliente"}
+
+MAPA_PERMISSAO_FILTRO_CLIENTES_VENDEDOR = {
+    "classe": "CLIENTES_FILTRO_CLASSE_VER",
+    "setor": "CLIENTES_FILTRO_SETOR_VER",
+    "classificacao_macro": "CLIENTES_FILTRO_CLASSIFICACAO_MACRO_VER",
+    "subclasse": "CLIENTES_FILTRO_SUBCLASSE_VER",
+    "classe_valor": "CLIENTES_FILTRO_CLASSE_VALOR_VER",
+    "tipo_escala_operacional": "CLIENTES_FILTRO_ESCALA_OPERACIONAL_VER",
+    "classe_estrutural": "CLIENTES_FILTRO_CLASSE_ESTRUTURAL_VER",
+    "classe_geo": "CLIENTES_FILTRO_CLASSE_GEO_VER",
+    "classe_frequencia": "CLIENTES_FILTRO_CLASSE_FREQUENCIA_VER",
+    "classe_recencia": "CLIENTES_FILTRO_CLASSE_RECENCIA_VER",
+    "nome_perfil_publico": "CLIENTES_FILTRO_PERFIL_PUBLICO_VER",
+    "tipo_uso_territorio": "CLIENTES_FILTRO_USO_TERRITORIO_VER",
+}
+
+FILTROS_CLIENTES_REMOVIDOS_DA_TELA = {"empresa_proprietaria"}
 
 
+def _usuario_pode_ver_filtro_clientes(nome_filtro: str) -> bool:
+    """_usuario_pode_ver_filtro_clientes
+    - Eu controlo quais filtros da lista de empresas aparecem para o usuário logado.
+    - Proprietária foi removido da tela para todos.
+    - Vendedor só vê filtros avançados quando tiver permissão individual concedida.
+    """
+    nome = str(nome_filtro or "").strip()
+    if not nome:
+        return False
+
+    if nome in FILTROS_CLIENTES_REMOVIDOS_DA_TELA:
+        return False
+
+    if nome in FILTROS_CLIENTES_SEMPRE_VISIVEIS:
+        return True
+
+    if not _usuario_logado_eh_perfil_vendedor():
+        return True
+
+    codigo_permissao = MAPA_PERMISSAO_FILTRO_CLIENTES_VENDEDOR.get(nome)
+    if not codigo_permissao:
+        return False
+
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        return bool(callable(metodo) and metodo(codigo_permissao))
+    except Exception:
+        return False
 
 
+def _mapa_filtros_clientes_visiveis() -> dict:
+    """_mapa_filtros_clientes_visiveis
+    - Eu gero um mapa simples para o Jinja decidir quais filtros renderizar.
+    """
+    nomes = set(DEFINICOES_FILTROS_CLIENTES.keys()) | {"cliente"}
+    return {nome: _usuario_pode_ver_filtro_clientes(nome) for nome in sorted(nomes)}
 
 
+def _bloquear_filtros_clientes_sem_permissao(filtros: dict) -> dict:
+    """_bloquear_filtros_clientes_sem_permissao
+    - Eu limpo no backend qualquer filtro que o usuário não pode usar.
+    - Isso impede o vendedor de aplicar filtro escondido digitando parâmetro direto na URL.
+    """
+    saida = dict(filtros or {})
+
+    for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
+        if _usuario_pode_ver_filtro_clientes(nome):
+            continue
+
+        saida[nome] = [] if bool(meta.get("multiplo")) else ""
+
+    return saida
 
 
+def _normalizar_filtros_clientes_para_backend(filtros):
+    """_normalizar_filtros_clientes_para_backend
+    - Eu normalizo os filtros e aplico o bloqueio final de ACL.
+    - Esta definição fica no fim do arquivo para prevalecer sobre cópias antigas.
+    """
+    saida = {}
 
+    for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():
+        valor = (filtros or {}).get(nome)
 
+        if meta["multiplo"]:
+            saida[nome] = [
+                str(x).strip()
+                for x in (valor or [])
+                if str(x or "").strip()
+            ]
+        else:
+            saida[nome] = str(valor or "").strip()
 
+    saida["q"] = str((filtros or {}).get("q") or "").strip()
+    saida["cliente"] = str((filtros or {}).get("cliente") or "todos").strip().lower()
 
+    if saida["cliente"] not in {"todos", "1", "0"}:
+        saida["cliente"] = "todos"
 
-
-
-
-
-
-
-
+    return _bloquear_filtros_clientes_sem_permissao(saida)
 

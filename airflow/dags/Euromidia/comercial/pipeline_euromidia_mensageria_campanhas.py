@@ -11,6 +11,11 @@ try:
 except ImportError:
     from airflow.decorators import dag, task
 
+try:
+    from airflow.sdk import get_current_context
+except ImportError:
+    from airflow.operators.python import get_current_context
+
 from hooks.BancodeDados.SqlServer import HookSqlServer
 
 
@@ -64,11 +69,29 @@ E grava mensagens na tabela:
 
 ## Frequência
 
-Executa a cada 10 minutos.
+Executa a cada 10 minutos e também pode ser disparada sob demanda pela API pública do Airflow.
 
 Cron:
 
 */10 * * * *
+
+## Execução sob demanda pela API
+
+Quando a DAG for chamada pelo Flask via `/api/v2/dags/{dag_id}/dagRuns`, ela aceita `conf.id_contrato`.
+
+Exemplo de `conf`:
+
+```json
+{
+  "origem": "flask_admin_aprovacao_contrato",
+  "id_contrato": 5835,
+  "id_solicitacao": 123,
+  "id_card": 456
+}
+```
+
+Se `id_contrato` vier preenchido, a DAG filtra status e mensagens somente daquele contrato.
+Se não vier preenchido, comportamento permanece igual ao agendamento: processa todas as campanhas elegíveis.
 
 ## Principais responsabilidades
 
@@ -232,12 +255,84 @@ def executar_sql(sql: str) -> None:
                 logger.exception("Falha ao fechar conexão no DAG de mensageria de campanhas.")
 
 
+def _int_positivo_ou_none(valor) -> int | None:
+    """Converte um valor recebido no dag_run.conf para int positivo ou None."""
+
+    if valor in (None, "", 0, "0"):
+        return None
+
+    try:
+        valor_int = int(str(valor).strip())
+    except Exception:
+        return None
+
+    return valor_int if valor_int > 0 else None
+
+
+def _resolver_parametros_dag_run() -> dict:
+    """
+    Lê os parâmetros recebidos no dag_run.conf.
+
+    A DAG continua funcionando pelo agendamento normal.
+    Quando o Flask disparar via API, ele pode enviar:
+
+        conf = {
+            "id_contrato": 5835,
+            "id_solicitacao": 123,
+            "id_card": 456,
+            "origem": "flask_admin_aprovacao_contrato"
+        }
+    """
+
+    contexto = get_current_context()
+    dag_run = contexto.get("dag_run")
+    conf = getattr(dag_run, "conf", None) or {}
+
+    id_contrato = _int_positivo_ou_none(conf.get("id_contrato"))
+    id_solicitacao = _int_positivo_ou_none(conf.get("id_solicitacao"))
+    id_card = _int_positivo_ou_none(conf.get("id_card"))
+    id_usuario_logado = _int_positivo_ou_none(conf.get("id_usuario_logado"))
+    origem = str(conf.get("origem") or "schedule").strip() or "schedule"
+
+    parametros = {
+        "origem": origem,
+        "id_contrato": id_contrato,
+        "id_solicitacao": id_solicitacao,
+        "id_card": id_card,
+        "id_usuario_logado": id_usuario_logado,
+    }
+
+    logger.info("Parâmetros resolvidos para execução da DAG: %s", parametros)
+
+    return parametros
+
+
+def preparar_sql_com_filtro_contrato(sql: str, id_contrato: int | None) -> str:
+    """
+    Injeta um filtro seguro de contrato no SQL.
+
+    Observação:
+    - O valor é convertido para int antes de entrar aqui.
+    - Quando id_contrato é None, @IDContratoFiltro fica NULL.
+    - As queries foram escritas para processar tudo quando @IDContratoFiltro IS NULL.
+    """
+
+    valor_filtro = "NULL" if id_contrato in (None, "", 0) else str(int(id_contrato))
+
+    return sql.replace(
+        "DECLARE @IDContratoFiltro INT = NULL;",
+        f"DECLARE @IDContratoFiltro INT = {valor_filtro};",
+        1,
+    )
+
+
 SQL_ATUALIZAR_STATUS_CAMPANHA = """
 USE [Integracao];
 
 SET NOCOUNT ON;
 
 DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
+DECLARE @IDContratoFiltro INT = NULL;
 
 /*
     Atualização diária/recorrente da campanha.
@@ -326,6 +421,11 @@ DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
                     )
             END
     FROM Silver.FatoVencimentoCampanhaEuromidia f
+    WHERE
+        (
+            @IDContratoFiltro IS NULL
+            OR f.IDFatoControleContratosEuromidia = @IDContratoFiltro
+        )
 )
 UPDATE f
 SET
@@ -350,6 +450,7 @@ SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
 DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
+DECLARE @IDContratoFiltro INT = NULL;
 
 DECLARE @IDTipoInicioCampanha INT;
 DECLARE @IDTipoCampanhaQuaseAcabando INT;
@@ -445,6 +546,11 @@ END;
                 f.DataTerminoPrevisto IS NOT NULL
                 AND f.DataTerminoPrevisto < @Hoje
             )
+        )
+        AND
+        (
+            @IDContratoFiltro IS NULL
+            OR f.IDFatoControleContratosEuromidia = @IDContratoFiltro
         )
 ),
 CampanhaAgrupada AS
@@ -791,17 +897,35 @@ DROP TABLE #CampanhaAgrupada;
 def euromidia_mensageria_campanhas():
 
     @task(
+        task_id="resolver_parametros_execucao",
+        retries=0,
+    )
+    def resolver_parametros_execucao():
+        """
+        Lê dag_run.conf para descobrir se a execução deve filtrar um contrato específico.
+        """
+
+        return _resolver_parametros_dag_run()
+
+    @task(
         task_id="atualizar_status_campanha",
         retries=2,
         retry_delay=timedelta(minutes=1),
     )
-    def atualizar_status_campanha():
+    def atualizar_status_campanha(parametros: dict):
         """
         Atualiza DiasParaVencer e IDDimStatusCampanha.
         """
 
-        logger.info("Iniciando atualização de status das campanhas.")
-        executar_sql(SQL_ATUALIZAR_STATUS_CAMPANHA)
+        id_contrato = _int_positivo_ou_none((parametros or {}).get("id_contrato"))
+        sql = preparar_sql_com_filtro_contrato(SQL_ATUALIZAR_STATUS_CAMPANHA, id_contrato)
+
+        if id_contrato:
+            logger.info("Iniciando atualização de status das campanhas para o contrato %s.", id_contrato)
+        else:
+            logger.info("Iniciando atualização de status de todas as campanhas elegíveis.")
+
+        executar_sql(sql)
         logger.info("Status das campanhas atualizado com sucesso.")
 
     @task(
@@ -809,19 +933,27 @@ def euromidia_mensageria_campanhas():
         retries=2,
         retry_delay=timedelta(minutes=1),
     )
-    def gerar_mensagens_campanhas():
+    def gerar_mensagens_campanhas(parametros: dict):
         """
         Gera mensagens consolidadas de início, vencimento próximo e término de campanha.
         """
 
-        logger.info("Iniciando geração de mensagens de campanhas.")
-        executar_sql(SQL_GERAR_MENSAGENS_CAMPANHAS)
+        id_contrato = _int_positivo_ou_none((parametros or {}).get("id_contrato"))
+        sql = preparar_sql_com_filtro_contrato(SQL_GERAR_MENSAGENS_CAMPANHAS, id_contrato)
+
+        if id_contrato:
+            logger.info("Iniciando geração de mensagens de campanhas para o contrato %s.", id_contrato)
+        else:
+            logger.info("Iniciando geração de mensagens de todas as campanhas elegíveis.")
+
+        executar_sql(sql)
         logger.info("Mensagens de campanhas geradas com sucesso.")
 
-    status = atualizar_status_campanha()
-    mensagens = gerar_mensagens_campanhas()
+    parametros = resolver_parametros_execucao()
+    status = atualizar_status_campanha(parametros)
+    mensagens = gerar_mensagens_campanhas(parametros)
 
-    status >> mensagens
+    parametros >> status >> mensagens
 
 
 euromidia_mensageria_campanhas()

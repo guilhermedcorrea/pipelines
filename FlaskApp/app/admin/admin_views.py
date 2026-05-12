@@ -10,7 +10,13 @@ from pathlib import Path
 import hashlib
 
 import os
-from app.socket_events import emitir_resumo_mensagens_usuario
+
+try:
+    import requests
+except ImportError:  # pragma: no cover
+    requests = None
+
+from app.socket_events import emitir_resumo_mensagens_usuario, emitir_nova_mensagem_usuario
 
 
 admin = Blueprint("admin", __name__)
@@ -30,6 +36,235 @@ ID_STATUS_CAMPANHA_CANCELADA = 5
 ID_STATUS_CAMPANHA_SEM_DATA_TERMINO = 6
 
 ID_TIPOS_DOCUMENTO_GERAM_CAMPANHA = {1, 3}
+
+
+def _env_bool(nome_variavel: str, padrao: str = "0") -> bool:
+    valor = (os.getenv(nome_variavel, padrao) or "").strip().lower()
+    return valor in ("1", "true", "sim", "yes", "y", "on")
+
+
+def _airflow_timeout_segundos() -> int:
+    try:
+        return max(1, int(os.getenv("AIRFLOW_API_TIMEOUT_SEGUNDOS", "5") or "5"))
+    except Exception:
+        return 5
+
+
+def _airflow_base_url() -> str:
+    base_url = (os.getenv("AIRFLOW_API_BASE_URL") or "").strip().rstrip("/")
+
+    if not base_url:
+        raise RuntimeError(
+            "AIRFLOW_API_BASE_URL não foi definido no .env do Flask. "
+            "Exemplo: AIRFLOW_API_BASE_URL=http://airflow-apiserver:8080"
+        )
+
+    return base_url
+
+
+def _airflow_credenciais_api() -> tuple[str, str]:
+    usuario = (
+        os.getenv("AIRFLOW_API_USERNAME")
+        or os.getenv("AIRFLOW_ADMIN_USERNAME")
+        or ""
+    ).strip()
+
+    senha = (
+        os.getenv("AIRFLOW_API_PASSWORD")
+        or os.getenv("AIRFLOW_ADMIN_PASSWORD")
+        or ""
+    ).strip()
+
+    if not usuario or not senha:
+        raise RuntimeError(
+            "Credenciais da API do Airflow não foram definidas. "
+            "Defina AIRFLOW_API_USERNAME e AIRFLOW_API_PASSWORD no .env do Flask."
+        )
+
+    return usuario, senha
+
+
+def _airflow_obter_token_api() -> str:
+    """
+    Obtém o token JWT na API pública do Airflow.
+
+    Primeiro tenta JSON. Se o Airflow responder que o formato não foi aceito,
+    tenta form-data como fallback.
+    """
+
+    if requests is None:
+        raise RuntimeError(
+            "A biblioteca 'requests' não está instalada no container Flask. "
+            "Adicione requests no requirements.txt ou instale a dependência na imagem."
+        )
+
+    base_url = _airflow_base_url()
+    usuario, senha = _airflow_credenciais_api()
+    timeout = _airflow_timeout_segundos()
+    url_token = f"{base_url}/auth/token"
+
+    resposta = requests.post(
+        url_token,
+        json={
+            "username": usuario,
+            "password": senha,
+        },
+        timeout=timeout,
+    )
+
+    if resposta.status_code in (400, 415, 422):
+        resposta = requests.post(
+            url_token,
+            data={
+                "username": usuario,
+                "password": senha,
+            },
+            timeout=timeout,
+        )
+
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        corpo = (resposta.text or "")[:1000]
+        raise RuntimeError(
+            f"Falha ao obter token do Airflow. "
+            f"Status={resposta.status_code}. Resposta={corpo}"
+        ) from exc
+
+    dados = resposta.json() or {}
+    token = dados.get("access_token") or dados.get("token")
+
+    if not token:
+        raise RuntimeError(
+            f"Airflow respondeu sem access_token. Resposta={dados}"
+        )
+
+    return token
+
+
+def _airflow_disparar_dag_mensageria_campanhas(
+    *,
+    id_contrato: int | None,
+    id_solicitacao: int | None = None,
+    id_card: int | None = None,
+    id_usuario_logado: int | None = None,
+) -> dict:
+    """
+    Dispara a DAG de mensageria de campanhas no Airflow.
+
+    Importante:
+    - esta função só dispara a DAG;
+    - não espera a DAG terminar;
+    - se falhar, a aprovação do contrato não deve ser desfeita;
+    - o schedule de 10 em 10 minutos continua como rede de segurança.
+    """
+
+    if not _env_bool("AIRFLOW_TRIGGER_MENSAGERIA_HABILITADO", "1"):
+        return {
+            "ok": False,
+            "status": "desabilitado",
+            "mensagem": "Disparo automático da DAG está desabilitado por env.",
+        }
+
+    if id_contrato in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_id_contrato",
+            "mensagem": "Não disparei a DAG porque id_contrato veio vazio.",
+        }
+
+    if requests is None:
+        raise RuntimeError(
+            "A biblioteca 'requests' não está instalada no container Flask. "
+            "Adicione requests no requirements.txt ou instale a dependência na imagem."
+        )
+
+    base_url = _airflow_base_url()
+    token = _airflow_obter_token_api()
+
+    dag_id = (
+        os.getenv("AIRFLOW_DAG_MENSAGERIA_CAMPANHAS")
+        or "euromidia_mensageria_campanhas"
+    ).strip()
+
+    id_contrato_int = int(id_contrato)
+    id_solicitacao_int = int(id_solicitacao) if id_solicitacao not in (None, "", 0) else 0
+    id_card_int = int(id_card) if id_card not in (None, "", 0) else None
+    id_usuario_int = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
+
+    dag_run_id = f"contrato_aprovado__{id_contrato_int}__solicitacao__{id_solicitacao_int}"
+
+    payload = {
+        "dag_run_id": dag_run_id,
+        "logical_date": None,
+        "conf": {
+            "origem": "flask_admin_aprovacao_contrato",
+            "id_contrato": id_contrato_int,
+            "id_solicitacao": id_solicitacao_int or None,
+            "id_card": id_card_int,
+            "id_usuario_logado": id_usuario_int,
+        },
+        "note": f"Disparo automático após aprovação do contrato {id_contrato_int}",
+    }
+
+    timeout = _airflow_timeout_segundos()
+    url_trigger = f"{base_url}/api/v2/dags/{dag_id}/dagRuns"
+
+    resposta = requests.post(
+        url_trigger,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        timeout=timeout,
+    )
+
+    if resposta.status_code == 409:
+        current_app.logger.warning(
+            "AIRFLOW_MENSAGERIA | DAG run já existia | dag_id=%s | dag_run_id=%s | id_contrato=%s",
+            dag_id,
+            dag_run_id,
+            id_contrato_int,
+        )
+
+        return {
+            "ok": True,
+            "status": "ja_existia",
+            "dag_id": dag_id,
+            "dag_run_id": dag_run_id,
+            "id_contrato": id_contrato_int,
+        }
+
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        corpo = (resposta.text or "")[:1500]
+        raise RuntimeError(
+            f"Falha ao disparar DAG no Airflow. "
+            f"Status={resposta.status_code}. Resposta={corpo}"
+        ) from exc
+
+    try:
+        dados_resposta = resposta.json() or {}
+    except Exception:
+        dados_resposta = {"texto": (resposta.text or "")[:1500]}
+
+    current_app.logger.info(
+        "AIRFLOW_MENSAGERIA | DAG disparada com sucesso | dag_id=%s | dag_run_id=%s | id_contrato=%s",
+        dag_id,
+        dag_run_id,
+        id_contrato_int,
+    )
+
+    return {
+        "ok": True,
+        "status": "disparado",
+        "dag_id": dag_id,
+        "dag_run_id": dag_run_id,
+        "id_contrato": id_contrato_int,
+        "resposta": dados_resposta,
+    }
 
 
 
@@ -6857,6 +7092,29 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                 )
 
                 db.session.commit()
+
+                try:
+                    resultado_airflow = _airflow_disparar_dag_mensageria_campanhas(
+                        id_contrato=id_fato_controle,
+                        id_solicitacao=int(id_solicitacao),
+                        id_card=id_card,
+                        id_usuario_logado=id_usuario_logado,
+                    )
+
+                    current_app.logger.info(
+                        "APROVACAO_CONTRATO | disparo Airflow mensageria | resultado=%s",
+                        resultado_airflow,
+                    )
+
+                except Exception:
+                    current_app.logger.exception(
+                        "APROVACAO_CONTRATO | contrato aprovado, mas falhou ao disparar DAG de mensageria | "
+                        "id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                        id_fato_controle,
+                        id_solicitacao,
+                        id_card,
+                    )
+
                 flash("Solicitação aprovada com sucesso.", "success")
                 return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
@@ -7229,12 +7487,19 @@ def api_mensagens_notificar():
     if not usuarios:
         return jsonify({"ok": False, "erro": "Nenhum usuário informado."}), 400
 
+    resumos = []
+
     for id_usuario in usuarios:
-        emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:nova")
+        payload_socket = emitir_nova_mensagem_usuario(int(id_usuario))
+        resumos.append({
+            "id_usuario": int(id_usuario),
+            "nao_lidas": int(payload_socket.get("nao_lidas") or 0),
+        })
 
     return jsonify({
         "ok": True,
         "usuarios_notificados": usuarios,
+        "resumos": resumos,
     })
 
 # ==========================================================
@@ -7905,6 +8170,21 @@ def _campanhas_vencimentos_usuario_eh_vendedor() -> bool:
         return False
 
 
+def _campanhas_vencimentos_usuario_eh_admin() -> bool:
+    """Identifica se o usuário logado tem ADMIN_TUDO para exibir filtros administrativos."""
+
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        if not metodo:
+            return False
+        return bool(metodo("ADMIN_TUDO"))
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao identificar perfil ADMIN na tela de vencimentos de campanha."
+        )
+        return False
+
+
 def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
     """Converte o nome do status em classe CSS segura para o badge."""
 
@@ -7924,6 +8204,298 @@ def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
         return "futura"
 
     return "neutro"
+
+
+def _campanhas_vencimentos_normalizar_lista_int(valores) -> list[int]:
+    """Remove vazios, valores inválidos e duplicados de filtros múltiplos inteiros."""
+
+    resultado: list[int] = []
+    vistos: set[int] = set()
+
+    for valor in valores or []:
+        numero = _parse_int(valor)
+        if numero is None:
+            continue
+        if numero in vistos:
+            continue
+        vistos.add(numero)
+        resultado.append(int(numero))
+
+    return resultado
+
+
+def _campanhas_vencimentos_normalizar_lista_texto(valores) -> list[str]:
+    """Remove vazios e duplicados de filtros múltiplos de texto preservando a ordem."""
+
+    resultado: list[str] = []
+    vistos: set[str] = set()
+
+    for valor in valores or []:
+        texto = str(valor or "").strip()
+        if not texto:
+            continue
+
+        chave = texto.upper()
+        if chave in vistos:
+            continue
+
+        vistos.add(chave)
+        resultado.append(texto)
+
+    return resultado
+
+
+def _campanhas_vencimentos_marca_sql() -> str:
+    """Expressão SQL única para a marca exibida usada em SELECT, filtro e sugestões."""
+
+    return "COALESCE(NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), ''))"
+
+
+def _campanhas_vencimentos_adicionar_filtro_in(
+    filtros_sql: list[str],
+    params: dict,
+    coluna_sql: str,
+    prefixo: str,
+    valores,
+) -> None:
+    """Monta filtro IN com parâmetros nomeados para evitar SQL Injection."""
+
+    valores_limpos = list(valores or [])
+    if not valores_limpos:
+        return
+
+    nomes_parametros = []
+    for idx, valor in enumerate(valores_limpos):
+        nome_parametro = f"{prefixo}_{idx}"
+        nomes_parametros.append(f":{nome_parametro}")
+        params[nome_parametro] = valor
+
+    filtros_sql.append(f"{coluna_sql} IN ({', '.join(nomes_parametros)})")
+
+
+def _campanhas_vencimentos_montar_filtros_sql(
+    *,
+    q: str,
+    status_ids_selecionados: list[int],
+    marcas_selecionadas: list[str],
+    vendedores_ids_selecionados: list[int],
+    usuario_logado_eh_vendedor: bool,
+    usuario_logado_eh_admin: bool,
+    id_usuario_logado: int | None,
+    data_inicio_filtro: date | None = None,
+    data_fim_filtro: date | None = None,
+) -> tuple[str, dict]:
+    """Centraliza os filtros usados pela lista e pela busca de sugestões."""
+
+    marca_sql = _campanhas_vencimentos_marca_sql()
+
+    filtros_sql: list[str] = []
+    params = {
+        "usuario_logado_eh_vendedor": 1 if usuario_logado_eh_vendedor else 0,
+        "id_usuario_logado": int(id_usuario_logado or 0),
+    }
+
+    if usuario_logado_eh_vendedor:
+        filtros_sql.append("ISNULL(vend.IDDimUsuarios, 0) = :id_usuario_logado")
+
+    if q:
+        filtros_sql.append(f"""
+            (
+                CAST(venc.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
+                OR COALESCE(CONVERT(varchar(80), ctr.NumeroContrato), '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR COALESCE(CONVERT(varchar(80), ctr.NumeroPrevia), '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(ctr.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(ctr.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(venc.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(st.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+            )
+        """)
+        params["q_like"] = f"%{q}%"
+
+    if data_inicio_filtro is not None:
+        filtros_sql.append("venc.DataTerminoPrevisto IS NOT NULL AND CAST(venc.DataTerminoPrevisto AS date) >= :data_inicio_filtro")
+        params["data_inicio_filtro"] = data_inicio_filtro
+
+    if data_fim_filtro is not None:
+        filtros_sql.append("venc.DataTerminoPrevisto IS NOT NULL AND CAST(venc.DataTerminoPrevisto AS date) <= :data_fim_filtro")
+        params["data_fim_filtro"] = data_fim_filtro
+
+    _campanhas_vencimentos_adicionar_filtro_in(
+        filtros_sql,
+        params,
+        "venc.IDDimStatusCampanha",
+        "status_id",
+        status_ids_selecionados,
+    )
+
+    _campanhas_vencimentos_adicionar_filtro_in(
+        filtros_sql,
+        params,
+        f"{marca_sql} COLLATE Latin1_General_CI_AI",
+        "marca",
+        marcas_selecionadas,
+    )
+
+    if usuario_logado_eh_admin:
+        _campanhas_vencimentos_adicionar_filtro_in(
+            filtros_sql,
+            params,
+            "venc.IDVendedor",
+            "vendedor_id",
+            vendedores_ids_selecionados,
+        )
+
+    where_sql = " AND ".join(f"({item})" for item in filtros_sql) if filtros_sql else "1=1"
+    return where_sql, params
+
+
+def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
+    """FROM/JOIN padrão para a tela de vencimentos de campanhas."""
+
+    return f"""
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
+            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+            ON vend.IDVendedor = venc.IDVendedor
+        WHERE {where_sql}
+    """
+
+
+def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
+    """Adiciona classes CSS e textos auxiliares usados na tabela e nas sugestões."""
+
+    d["ClasseStatus"] = _campanhas_vencimentos_classe_status(d.get("NomeStatus"))
+
+    dias = d.get("DiasParaVencer")
+    try:
+        dias_int = int(dias) if dias is not None else None
+    except Exception:
+        dias_int = None
+
+    if dias_int is None:
+        d["ClasseDias"] = "sem-data"
+        d["DiasTexto"] = "—"
+    elif dias_int < 0:
+        d["ClasseDias"] = "vencido"
+        d["DiasTexto"] = str(dias_int)
+    elif dias_int <= 45:
+        d["ClasseDias"] = "perto"
+        d["DiasTexto"] = str(dias_int)
+    else:
+        d["ClasseDias"] = "normal"
+        d["DiasTexto"] = str(dias_int)
+
+    d["BitAtivoTexto"] = "Ativo" if int(d.get("BitAtivo") or 0) == 1 else "Inativo"
+    d["ClasseBitAtivo"] = "ativo" if int(d.get("BitAtivo") or 0) == 1 else "inativo"
+
+    numero_contrato = str(d.get("NumeroContrato") or "").strip()
+    if not numero_contrato:
+        numero_contrato = str(d.get("IDFatoControleContratosEuromidia") or "").strip()
+
+    d["NumeroContratoExibicao"] = numero_contrato or "—"
+
+    valor_total_liquido = d.get("TotalLiquidoContrato")
+    if valor_total_liquido is None:
+        d["TotalLiquidoContratoTexto"] = "—"
+    else:
+        try:
+            valor_float = float(valor_total_liquido)
+            texto = f"R$ {valor_float:,.2f}"
+            d["TotalLiquidoContratoTexto"] = texto.replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            d["TotalLiquidoContratoTexto"] = str(valor_total_liquido)
+
+    return d
+
+
+def _campanhas_vencimentos_opcoes_marca(
+    usuario_logado_eh_vendedor: bool,
+    id_usuario_logado: int | None,
+) -> list[str]:
+    """Busca as marcas disponíveis respeitando a restrição do perfil VENDEDOR."""
+
+    marca_sql = _campanhas_vencimentos_marca_sql()
+    filtros_sql: list[str] = [f"NULLIF(LTRIM(RTRIM({marca_sql})), '') IS NOT NULL"]
+    params = {"id_usuario_logado": int(id_usuario_logado or 0)}
+
+    if usuario_logado_eh_vendedor:
+        filtros_sql.append("ISNULL(vend.IDDimUsuarios, 0) = :id_usuario_logado")
+
+    where_sql = " AND ".join(f"({item})" for item in filtros_sql)
+
+    sql = text(f"""
+        SELECT DISTINCT
+            MarcaExibida = {marca_sql}
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+            ON vend.IDVendedor = venc.IDVendedor
+        WHERE {where_sql}
+        ORDER BY MarcaExibida ASC
+    """)
+
+    rows = db.session.execute(sql, params).mappings().all()
+    return [str(row.get("MarcaExibida") or "").strip() for row in rows if str(row.get("MarcaExibida") or "").strip()]
+
+
+
+
+def _campanhas_vencimentos_opcoes_vendedor(
+    usuario_logado_eh_admin: bool,
+) -> list[dict]:
+    """Busca os vendedores disponíveis para o filtro visível somente para Admin."""
+
+    if not usuario_logado_eh_admin:
+        return []
+
+    sql = text("""
+        SELECT DISTINCT
+            vend.IDVendedor,
+            vend.NomeVendedor
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+            ON vend.IDVendedor = venc.IDVendedor
+        WHERE vend.IDVendedor IS NOT NULL
+          AND NULLIF(LTRIM(RTRIM(vend.NomeVendedor)), '') IS NOT NULL
+        ORDER BY vend.NomeVendedor ASC
+    """)
+
+    rows = db.session.execute(sql).mappings().all()
+    vendedores = []
+
+    for row in rows:
+        try:
+            id_vendedor = int(row.get("IDVendedor") or 0)
+        except Exception:
+            id_vendedor = 0
+
+        nome_vendedor = str(row.get("NomeVendedor") or "").strip()
+        if id_vendedor <= 0 or not nome_vendedor:
+            continue
+
+        vendedores.append({
+            "IDVendedor": id_vendedor,
+            "NomeVendedor": nome_vendedor,
+        })
+
+    return vendedores
+
+
+def _campanhas_vencimentos_data_json(valor):
+    """Formata datas para o JSON de sugestões."""
+
+    if not valor:
+        return None
+    try:
+        return valor.strftime("%d/%m/%Y")
+    except Exception:
+        return str(valor)
 
 
 def _campanhas_vencimentos_atualizar_status_e_dias() -> None:
@@ -8041,6 +8613,92 @@ def _campanhas_vencimentos_atualizar_status_e_dias() -> None:
 
 
 
+def _campanhas_vencimentos_bisemanas_select(
+    *,
+    dt_ini_base: date | None,
+    dt_fim_base: date | None,
+) -> list[dict]:
+    """Monta as opções de bi-semana para o seletor de período da tela."""
+
+    hoje = date.today()
+    inicio_base = dt_ini_base or date(hoje.year, hoje.month, 1)
+    fim_base = dt_fim_base or hoje
+
+    if inicio_base and fim_base and inicio_base > fim_base:
+        inicio_base, fim_base = fim_base, inicio_base
+
+    try:
+        rows = db.session.execute(
+            text("""
+                SELECT
+                    c.bi_semana_numero,
+                    c.inicio_bi_semana,
+                    c.fim_bi_semana
+                FROM [Integracao].[Silver].[DimCalendario] AS c
+                WHERE c.bi_semana_numero IS NOT NULL
+                  AND c.inicio_bi_semana IS NOT NULL
+                  AND c.fim_bi_semana IS NOT NULL
+                  AND c.inicio_bi_semana <= :dt_fim_base
+                  AND c.fim_bi_semana >= :dt_ini_base
+                GROUP BY
+                    c.bi_semana_numero,
+                    c.inicio_bi_semana,
+                    c.fim_bi_semana
+                ORDER BY c.inicio_bi_semana ASC
+            """),
+            {
+                "dt_ini_base": inicio_base,
+                "dt_fim_base": fim_base,
+            },
+        ).mappings().all()
+    except Exception:
+        current_app.logger.exception("Falha ao carregar bi-semanas da tela de vencimentos de campanhas.")
+        return []
+
+    retorno: list[dict] = []
+    vistos: set[tuple] = set()
+
+    for row in rows:
+        numero = row.get("bi_semana_numero")
+        inicio = row.get("inicio_bi_semana")
+        fim = row.get("fim_bi_semana")
+
+        if numero is None or inicio is None or fim is None:
+            continue
+
+        try:
+            value = str(int(numero))
+        except Exception:
+            value = str(numero).strip()
+
+        if not value:
+            continue
+
+        chave = (value, inicio, fim)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+
+        try:
+            inicio_iso = inicio.strftime("%Y-%m-%d")
+            fim_iso = fim.strftime("%Y-%m-%d")
+            label = f"{value} — {inicio.strftime('%d/%m')} a {fim.strftime('%d/%m')}"
+        except Exception:
+            inicio_iso = str(inicio)[:10]
+            fim_iso = str(fim)[:10]
+            label = f"{value} — {inicio_iso} a {fim_iso}"
+
+        retorno.append({
+            "value": value,
+            "label": label,
+            "inicio": inicio_iso,
+            "fim": fim_iso,
+        })
+
+    return retorno
+
+
+
 @admin.route("/campanhas/vencimentos", methods=["GET"])
 @admin.route("/vencimentos-campanhas", methods=["GET"])
 @login_required
@@ -8060,11 +8718,28 @@ def vencimentos_campanhas_euromidia():
     _campanhas_vencimentos_atualizar_status_e_dias()
 
     usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+    usuario_logado_eh_admin = _campanhas_vencimentos_usuario_eh_admin()
     id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
 
     q = (request.args.get("q") or "").strip()[:160]
-    status_raw = (request.args.get("status") or "").strip()
-    status_id = _parse_int(status_raw)
+    status_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("status"))
+    marcas_selecionadas = _campanhas_vencimentos_normalizar_lista_texto(request.args.getlist("marca"))
+    vendedores_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("vendedor")) if usuario_logado_eh_admin else []
+
+    dt_ini_raw = (request.args.get("dt_ini") or "").strip()
+    dt_fim_raw = (request.args.get("dt_fim") or "").strip()
+    bi_semana_filtro = (request.args.get("bi_semana") or request.args.get("bisemana") or "").strip()
+
+    data_inicio_filtro = _parse_date_br(dt_ini_raw)
+    data_fim_filtro = _parse_date_br(dt_fim_raw)
+
+    if data_inicio_filtro and data_fim_filtro and data_fim_filtro < data_inicio_filtro:
+        data_inicio_filtro, data_fim_filtro = data_fim_filtro, data_inicio_filtro
+
+    dt_ini = data_inicio_filtro.strftime("%Y-%m-%d") if data_inicio_filtro else ""
+    dt_fim = data_fim_filtro.strftime("%Y-%m-%d") if data_fim_filtro else ""
+    periodo_filtro_ativo = bool(dt_ini or dt_fim or bi_semana_filtro)
+    ano_periodo = int((data_inicio_filtro or data_fim_filtro or date.today()).year)
 
     try:
         page = int(request.args.get("page") or "1")
@@ -8074,43 +8749,20 @@ def vencimentos_campanhas_euromidia():
     per_page = 10
     page = max(1, page)
 
-    filtros_sql = []
-    params = {
-        "usuario_logado_eh_vendedor": 1 if usuario_logado_eh_vendedor else 0,
-        "id_usuario_logado": int(id_usuario_logado or 0),
-    }
+    where_sql, params = _campanhas_vencimentos_montar_filtros_sql(
+        q=q,
+        status_ids_selecionados=status_ids_selecionados,
+        marcas_selecionadas=marcas_selecionadas,
+        vendedores_ids_selecionados=vendedores_ids_selecionados,
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_eh_admin=usuario_logado_eh_admin,
+        id_usuario_logado=id_usuario_logado,
+        data_inicio_filtro=data_inicio_filtro,
+        data_fim_filtro=data_fim_filtro,
+    )
 
-    if usuario_logado_eh_vendedor:
-        filtros_sql.append("ISNULL(vend.IDDimUsuarios, 0) = :id_usuario_logado")
-
-    if q:
-        filtros_sql.append("""
-            (
-                CAST(venc.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
-                OR ISNULL(ctr.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(ctr.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(venc.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(st.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-            )
-        """)
-        params["q_like"] = f"%{q}%"
-
-    if status_id is not None:
-        filtros_sql.append("venc.IDDimStatusCampanha = :status_id")
-        params["status_id"] = int(status_id)
-
-    where_sql = " AND ".join(f"({item})" for item in filtros_sql) if filtros_sql else "1=1"
-
-    sql_from_where = f"""
-        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
-            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
-        INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
-            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
-        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = venc.IDVendedor
-        WHERE {where_sql}
-    """
+    sql_from_where = _campanhas_vencimentos_sql_from_where(where_sql)
+    marca_sql = _campanhas_vencimentos_marca_sql()
 
     sql_total = text(f"""
         SELECT COUNT(1) AS Total
@@ -8135,8 +8787,11 @@ def vencimentos_campanhas_euromidia():
             venc.IDVendedor,
             vend.NomeVendedor,
             vend.IDDimUsuarios AS IDDimUsuariosVendedor,
+            ctr.NumeroContrato,
+            ctr.NumeroPrevia,
             ctr.RazaoSocial,
-            MarcaExibida = COALESCE(NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), '')),
+            ctr.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
+            MarcaExibida = {marca_sql},
             venc.DataInicioCampanha,
             DataTermino = venc.DataTerminoPrevisto,
             venc.DiasParaVencer,
@@ -8156,28 +8811,7 @@ def vencimentos_campanhas_euromidia():
     params_rows.update({"offset": offset, "per_page": per_page})
 
     rows = db.session.execute(sql_rows, params_rows).mappings().all()
-
-    itens = []
-    for r in rows:
-        d = dict(r)
-        d["ClasseStatus"] = _campanhas_vencimentos_classe_status(d.get("NomeStatus"))
-
-        dias = d.get("DiasParaVencer")
-        try:
-            dias_int = int(dias) if dias is not None else None
-        except Exception:
-            dias_int = None
-
-        if dias_int is None:
-            d["ClasseDias"] = "sem-data"
-        elif dias_int < 0:
-            d["ClasseDias"] = "vencido"
-        elif dias_int <= 45:
-            d["ClasseDias"] = "perto"
-        else:
-            d["ClasseDias"] = "normal"
-
-        itens.append(d)
+    itens = [_campanhas_vencimentos_enriquecer_item(dict(r)) for r in rows]
 
     status_opcoes = db.session.execute(text("""
         SELECT
@@ -8187,6 +8821,20 @@ def vencimentos_campanhas_euromidia():
         ORDER BY IDDimStatusCampanha ASC
     """)).mappings().all()
 
+    marca_opcoes = _campanhas_vencimentos_opcoes_marca(
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        id_usuario_logado=id_usuario_logado,
+    )
+
+    vendedor_opcoes = _campanhas_vencimentos_opcoes_vendedor(
+        usuario_logado_eh_admin=usuario_logado_eh_admin,
+    )
+
+    bisemanas_select = _campanhas_vencimentos_bisemanas_select(
+        dt_ini_base=data_inicio_filtro,
+        dt_fim_base=data_fim_filtro,
+    )
+
     pagina_inicio = max(1, page - 3)
     pagina_fim = min(total_pages, page + 3)
     paginas_visiveis = list(range(pagina_inicio, pagina_fim + 1))
@@ -8195,9 +8843,20 @@ def vencimentos_campanhas_euromidia():
         "admin/vencimentos_campanhas_euromidia.html",
         itens=itens,
         status_opcoes=status_opcoes,
+        marca_opcoes=marca_opcoes,
+        vendedor_opcoes=vendedor_opcoes,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_eh_admin=usuario_logado_eh_admin,
         q=q,
-        status_id=status_id if status_id is not None else "",
+        dt_ini=dt_ini,
+        dt_fim=dt_fim,
+        ano_periodo=ano_periodo,
+        bi_semana_filtro=bi_semana_filtro,
+        periodo_filtro_ativo=periodo_filtro_ativo,
+        bisemanas_select=bisemanas_select,
+        status_ids_selecionados=status_ids_selecionados,
+        marcas_selecionadas=marcas_selecionadas,
+        vendedores_ids_selecionados=vendedores_ids_selecionados,
         paginacao={
             "page": page,
             "per_page": per_page,
@@ -8208,3 +8867,104 @@ def vencimentos_campanhas_euromidia():
             "paginas_visiveis": paginas_visiveis,
         },
     )
+
+
+@admin.route("/vencimentos-campanhas/sugestoes", methods=["GET"])
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+def vencimentos_campanhas_sugestoes():
+    """Retorna sugestões para a busca da tela de vencimentos de campanhas."""
+
+    usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+    usuario_logado_eh_admin = _campanhas_vencimentos_usuario_eh_admin()
+    id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
+
+    q = (request.args.get("q") or "").strip()[:160]
+    if len(q) < 1:
+        return jsonify({"ok": True, "items": []})
+
+    status_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("status"))
+    marcas_selecionadas = _campanhas_vencimentos_normalizar_lista_texto(request.args.getlist("marca"))
+    vendedores_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("vendedor")) if usuario_logado_eh_admin else []
+
+    data_inicio_filtro = _parse_date_br((request.args.get("dt_ini") or "").strip())
+    data_fim_filtro = _parse_date_br((request.args.get("dt_fim") or "").strip())
+
+    if data_inicio_filtro and data_fim_filtro and data_fim_filtro < data_inicio_filtro:
+        data_inicio_filtro, data_fim_filtro = data_fim_filtro, data_inicio_filtro
+
+    try:
+        limite = int(request.args.get("limit") or "8")
+    except Exception:
+        limite = 8
+    limite = max(1, min(limite, 15))
+
+    where_sql, params = _campanhas_vencimentos_montar_filtros_sql(
+        q=q,
+        status_ids_selecionados=status_ids_selecionados,
+        marcas_selecionadas=marcas_selecionadas,
+        vendedores_ids_selecionados=vendedores_ids_selecionados,
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_eh_admin=usuario_logado_eh_admin,
+        id_usuario_logado=id_usuario_logado,
+        data_inicio_filtro=data_inicio_filtro,
+        data_fim_filtro=data_fim_filtro,
+    )
+
+    sql_from_where = _campanhas_vencimentos_sql_from_where(where_sql)
+    marca_sql = _campanhas_vencimentos_marca_sql()
+
+    sql = text(f"""
+        SELECT
+            venc.IDFatoVencimentoCampanhaEuromidia,
+            venc.IDFatoControleContratosEuromidia,
+            venc.IDFatoControleContratosItensEuromidia,
+            venc.IDDimStatusCampanha,
+            st.NomeStatus,
+            vend.NomeVendedor,
+            ctr.NumeroContrato,
+            ctr.NumeroPrevia,
+            ctr.RazaoSocial,
+            MarcaExibida = {marca_sql},
+            venc.DataInicioCampanha,
+            DataTermino = venc.DataTerminoPrevisto,
+            venc.DiasParaVencer,
+            venc.BitAtivo,
+            venc.DataAtualizacao
+        {sql_from_where}
+        ORDER BY
+            CASE WHEN venc.DataTerminoPrevisto IS NULL THEN 1 ELSE 0 END ASC,
+            venc.DataTerminoPrevisto ASC,
+            venc.IDFatoVencimentoCampanhaEuromidia DESC
+        OFFSET 0 ROWS
+        FETCH NEXT :limite ROWS ONLY
+    """)
+
+    params_rows = dict(params)
+    params_rows["limite"] = limite
+
+    rows = db.session.execute(sql, params_rows).mappings().all()
+
+    items = []
+    for row in rows:
+        d = _campanhas_vencimentos_enriquecer_item(dict(row))
+        items.append({
+            "id_vencimento": int(d.get("IDFatoVencimentoCampanhaEuromidia") or 0),
+            "id_contrato": int(d.get("IDFatoControleContratosEuromidia") or 0),
+            "numero_contrato": d.get("NumeroContratoExibicao") or "—",
+            "numero_contrato_original": str(d.get("NumeroContrato") or ""),
+            "razao_social": str(d.get("RazaoSocial") or "—"),
+            "marca": str(d.get("MarcaExibida") or "—"),
+            "status": str(d.get("NomeStatus") or "Sem status"),
+            "classe_status": d.get("ClasseStatus") or "neutro",
+            "dias": d.get("DiasTexto") or "—",
+            "classe_dias": d.get("ClasseDias") or "normal",
+            "ativo": d.get("BitAtivoTexto") or "Inativo",
+            "classe_ativo": d.get("ClasseBitAtivo") or "inativo",
+            "data_inicio": _campanhas_vencimentos_data_json(d.get("DataInicioCampanha")),
+            "data_termino": _campanhas_vencimentos_data_json(d.get("DataTermino")),
+            "vendedor": str(d.get("NomeVendedor") or ""),
+        })
+
+    return jsonify({"ok": True, "items": items})
+
