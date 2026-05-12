@@ -99,6 +99,14 @@
     border:1px solid rgba(220,38,38,.20);
   }
 
+  .msg-btn-disabled{
+    background:#F1F5F9;
+    color:#64748B;
+    border:1px solid #CBD5E1;
+    cursor:not-allowed;
+    pointer-events:none;
+  }
+
   .msg-btn:disabled{
     opacity:.55;
     cursor:not-allowed;
@@ -880,10 +888,15 @@
 
     const actions = criarEl("div", "msg-detail-actions");
 
-    if (msg.link){
+    if (msg.link && msg.pode_abrir_destino !== false){
       const link = criarEl("a", "msg-btn msg-btn-primary", "Abrir destino");
       link.href = msg.link;
+      link.rel = "noopener";
       actions.appendChild(link);
+    } else if (msg.id_contrato){
+      const bloqueado = criarEl("span", "msg-btn msg-btn-disabled", "Destino bloqueado");
+      bloqueado.title = msg.motivo_destino || "Contrato não liberado para este usuário.";
+      actions.appendChild(bloqueado);
     }
 
     const btnLida = criarEl(

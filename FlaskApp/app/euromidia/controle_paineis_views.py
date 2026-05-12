@@ -1624,10 +1624,13 @@ def _contrato_pertence_ao_vendedor_logado(
 
     sql = text("""
         SELECT
-             i.IDVendedor
+             ctr.Vendedor AS VendedorContrato
+            ,i.IDVendedor
             ,i.Vendedor
-        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
-        WHERE i.IDFatoControleContratoEuromidia = :id_contrato;
+        FROM [Integracao].[Silver].[FatoControleContratosEuromidia] ctr WITH (NOLOCK)
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
+            ON i.IDFatoControleContratoEuromidia = ctr.IDFatoControleContratosEuromidia
+        WHERE ctr.IDFatoControleContratosEuromidia = :id_contrato;
     """)
 
     try:
@@ -1644,9 +1647,10 @@ def _contrato_pertence_ao_vendedor_logado(
         if id_vendedor > 0 and id_vendedor_item == id_vendedor:
             return True
 
-        nome_item_norm = _normalizar_vendedor_para_comparacao(row.get("Vendedor"))
-        if nome_vendedor_norm and nome_item_norm and nome_item_norm == nome_vendedor_norm:
-            return True
+        for campo_vendedor in ("Vendedor", "VendedorContrato"):
+            nome_item_norm = _normalizar_vendedor_para_comparacao(row.get(campo_vendedor))
+            if nome_vendedor_norm and nome_item_norm and nome_item_norm == nome_vendedor_norm:
+                return True
 
     return False
 
@@ -22838,6 +22842,36 @@ def contratos_detalhe(id_contrato: int):
         f"RazaoSocial={getattr(contrato, 'RazaoSocial', None)}",
         flush=True,
     )
+
+    usuario_eh_vendedor_restrito = False
+    try:
+        usuario_eh_vendedor_restrito = bool(_usuario_logado_eh_perfil_vendedor())
+    except Exception:
+        usuario_eh_vendedor_restrito = False
+
+    usuario_tem_admin_tudo = False
+    try:
+        metodo_permissao = getattr(current_user, "has_permission", None)
+        usuario_tem_admin_tudo = bool(metodo_permissao and metodo_permissao("ADMIN_TUDO"))
+    except Exception:
+        usuario_tem_admin_tudo = False
+
+    if usuario_eh_vendedor_restrito and not usuario_tem_admin_tudo:
+        vendedor_logado_info = _resolver_vendedor_logado_info()
+        contrato_liberado = _contrato_pertence_ao_vendedor_logado(
+            id_fato_controle_contratos=int(id_contrato),
+            id_vendedor_logado=vendedor_logado_info.get("IDVendedor"),
+            nome_vendedor_logado=vendedor_logado_info.get("NomeVendedor"),
+        )
+
+        if not contrato_liberado:
+            current_app.logger.warning(
+                "CONTRATO_DETALHE | acesso bloqueado para vendedor | id_contrato=%s | id_usuario=%s | id_vendedor=%s",
+                id_contrato,
+                getattr(current_user, "IDDimUsuarios", None),
+                vendedor_logado_info.get("IDVendedor"),
+            )
+            abort(403, description="Você não pode acessar este contrato porque ele não pertence ao vendedor logado.")
 
     def _resolver_return_to_contratos_local():
         candidatos = [

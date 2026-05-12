@@ -7213,6 +7213,212 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
 
 
 
+
+
+# ==========================================================
+# MENSAGENS DO USUÁRIO - DESTINO SEGURO PARA CONTRATOS
+# ==========================================================
+
+def _mensagens_normalizar_texto(valor) -> str:
+    """Eu normalizo nomes para comparar vendedor sem depender de acento/caixa."""
+    try:
+        import unicodedata
+        texto = str(valor or "").strip().casefold()
+        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+        return " ".join(texto.split())
+    except Exception:
+        return ""
+
+
+def _mensagens_usuario_tem_admin_tudo() -> bool:
+    """Eu libero rotas administrativas quando o usuário possui ADMIN_TUDO."""
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        if not metodo:
+            return False
+        return bool(metodo("ADMIN_TUDO"))
+    except Exception:
+        return False
+
+
+def _mensagens_usuario_eh_vendedor() -> bool:
+    """Eu identifico se o usuário logado é perfil VENDEDOR."""
+    try:
+        return bool(_campanhas_vencimentos_usuario_eh_vendedor())
+    except Exception:
+        return False
+
+
+def _mensagens_resolver_vendedor_logado(id_usuario_logado: int | None) -> dict:
+    """Eu encontro o vendedor vinculado ao IDDimUsuarios do usuário logado."""
+    try:
+        id_usuario = int(id_usuario_logado or 0)
+    except Exception:
+        id_usuario = 0
+
+    if id_usuario <= 0:
+        return {"id_vendedor": 0, "nome_vendedor": ""}
+
+    try:
+        id_empresa = int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0)
+    except Exception:
+        id_empresa = 0
+
+    try:
+        row = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                     v.IDVendedor
+                    ,v.NomeVendedor
+                FROM [Integracao].[dbo].[Vendedores] v WITH (NOLOCK)
+                WHERE v.IDDimUsuarios = :id_usuario
+                  AND ISNULL(v.BitAtivo, 1) = 1
+                  AND (
+                        :id_empresa = 0
+                        OR ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa
+                      )
+                ORDER BY
+                    CASE WHEN ISNULL(v.IDEmpresaProprietaria, 0) = :id_empresa THEN 0 ELSE 1 END,
+                    v.IDVendedor ASC;
+            """),
+            {
+                "id_usuario": int(id_usuario),
+                "id_empresa": int(id_empresa),
+            },
+        ).mappings().first()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "MENSAGENS | Falha ao resolver vendedor logado | id_usuario=%s",
+            id_usuario,
+        )
+        return {"id_vendedor": 0, "nome_vendedor": ""}
+
+    if not row:
+        return {"id_vendedor": 0, "nome_vendedor": ""}
+
+    try:
+        id_vendedor = int(row.get("IDVendedor") or 0)
+    except Exception:
+        id_vendedor = 0
+
+    return {
+        "id_vendedor": id_vendedor,
+        "nome_vendedor": str(row.get("NomeVendedor") or "").strip(),
+    }
+
+
+def _mensagens_contrato_pertence_ao_vendedor(
+    id_contrato: int | None,
+    id_usuario_logado: int | None,
+) -> bool:
+    """Eu valido se o contrato possui item ou cabeçalho vinculado ao vendedor logado."""
+    try:
+        id_contrato_int = int(id_contrato or 0)
+    except Exception:
+        id_contrato_int = 0
+
+    if id_contrato_int <= 0:
+        return False
+
+    vendedor = _mensagens_resolver_vendedor_logado(id_usuario_logado)
+    id_vendedor_logado = int(vendedor.get("id_vendedor") or 0)
+    nome_vendedor_logado_norm = _mensagens_normalizar_texto(vendedor.get("nome_vendedor"))
+
+    if id_vendedor_logado <= 0 and not nome_vendedor_logado_norm:
+        return False
+
+    try:
+        rows = db.session.execute(
+            text("""
+                SELECT
+                     ctr.Vendedor AS VendedorContrato
+                    ,i.IDVendedor AS IDVendedorItem
+                    ,i.Vendedor AS VendedorItem
+                FROM [Integracao].[Silver].[FatoControleContratosEuromidia] ctr WITH (NOLOCK)
+                LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
+                    ON i.IDFatoControleContratoEuromidia = ctr.IDFatoControleContratosEuromidia
+                WHERE ctr.IDFatoControleContratosEuromidia = :id_contrato;
+            """),
+            {"id_contrato": int(id_contrato_int)},
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "MENSAGENS | Falha ao validar contrato do vendedor | id_contrato=%s | id_usuario=%s",
+            id_contrato_int,
+            id_usuario_logado,
+        )
+        return False
+
+    for row in rows or []:
+        try:
+            id_vendedor_item = int(row.get("IDVendedorItem") or 0)
+        except Exception:
+            id_vendedor_item = 0
+
+        if id_vendedor_logado > 0 and id_vendedor_item == id_vendedor_logado:
+            return True
+
+        for campo in ("VendedorItem", "VendedorContrato"):
+            nome_norm = _mensagens_normalizar_texto(row.get(campo))
+            if nome_vendedor_logado_norm and nome_norm and nome_norm == nome_vendedor_logado_norm:
+                return True
+
+    return False
+
+
+def _mensagens_montar_destino_seguro(row_mensagem, id_usuario_logado: int | None) -> dict:
+    """Eu monto o botão Abrir destino apontando para o detalhe do contrato."""
+    id_contrato = _int_ou_none(row_mensagem.get("IDFatoControleContratosEuromidia"))
+    link_original = str(row_mensagem.get("LinkDestino") or "").strip()
+
+    usuario_eh_vendedor = _mensagens_usuario_eh_vendedor()
+    usuario_eh_admin = _mensagens_usuario_tem_admin_tudo()
+
+    if id_contrato:
+        pode_abrir = True
+        motivo_bloqueio = ""
+
+        if usuario_eh_vendedor and not usuario_eh_admin:
+            pode_abrir = _mensagens_contrato_pertence_ao_vendedor(
+                id_contrato=int(id_contrato),
+                id_usuario_logado=id_usuario_logado,
+            )
+            if not pode_abrir:
+                motivo_bloqueio = "Contrato não pertence ao vendedor logado."
+
+        if not pode_abrir:
+            return {
+                "link": "",
+                "pode_abrir_destino": False,
+                "motivo_destino": motivo_bloqueio,
+            }
+
+        return {
+            "link": url_for(
+                "Paineis.contratos_detalhe",
+                id_contrato=int(id_contrato),
+                return_to=url_for("Paineis.contratos_lista", id_contrato=int(id_contrato)),
+            ),
+            "pode_abrir_destino": True,
+            "motivo_destino": "",
+        }
+
+    if link_original and not usuario_eh_vendedor:
+        return {
+            "link": link_original,
+            "pode_abrir_destino": True,
+            "motivo_destino": "",
+        }
+
+    return {
+        "link": "",
+        "pode_abrir_destino": False,
+        "motivo_destino": "Mensagem sem contrato de destino liberado.",
+    }
+
+
 @admin.route("/mensagens", methods=["GET"])
 @login_required
 @limiter.limit("80 per minute", methods=["GET"])
@@ -7292,13 +7498,17 @@ def api_mensagens_lista():
         data_criacao = r.get("DataCriacao")
         data_leitura = r.get("DataLeitura")
 
+        destino = _mensagens_montar_destino_seguro(r, id_usuario)
+
         itens.append({
             "id": int(r["IDFatoMensagemUsuario"]),
             "id_tipo": r.get("IDDimTipoMensagem"),
             "tipo": r.get("NomeTipoMensagem") or "Mensagem",
             "titulo": r.get("TituloMensagem") or "Sem título",
             "resumo": r.get("ResumoMensagem") or "",
-            "link": r.get("LinkDestino") or "",
+            "link": destino.get("link") or "",
+            "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
+            "motivo_destino": destino.get("motivo_destino") or "",
             "bit_lida": bool(r.get("BitLida")),
             "data_criacao": data_criacao.strftime("%d/%m/%Y %H:%M") if data_criacao else "",
             "data_leitura": data_leitura.strftime("%d/%m/%Y %H:%M") if data_leitura else "",
@@ -7357,6 +7567,8 @@ def api_mensagens_detalhe(id_mensagem: int):
     data_criacao = r.get("DataCriacao")
     data_leitura = r.get("DataLeitura")
 
+    destino = _mensagens_montar_destino_seguro(r, id_usuario)
+
     return jsonify({
         "ok": True,
         "mensagem": {
@@ -7365,7 +7577,9 @@ def api_mensagens_detalhe(id_mensagem: int):
             "tipo": r.get("NomeTipoMensagem") or "Mensagem",
             "titulo": r.get("TituloMensagem") or "Sem título",
             "texto": r.get("TextoMensagem") or "",
-            "link": r.get("LinkDestino") or "",
+            "link": destino.get("link") or "",
+            "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
+            "motivo_destino": destino.get("motivo_destino") or "",
             "bit_lida": bool(r.get("BitLida")),
             "data_criacao": data_criacao.strftime("%d/%m/%Y %H:%M") if data_criacao else "",
             "data_leitura": data_leitura.strftime("%d/%m/%Y %H:%M") if data_leitura else "",

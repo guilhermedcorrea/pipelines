@@ -19,7 +19,7 @@
     border: 1px solid #d7dfeb;
     border-radius: 22px;
     box-shadow: 0 10px 26px rgba(19, 44, 89, 0.06);
-    overflow: hidden;
+    overflow: visible;
     box-sizing: border-box;
   }
 
@@ -932,15 +932,17 @@
 
   /* ==========================================================
      COMBOBOX DA BUSCA DO HISTÓRICO DE CARDS
+     Ajustado para não quebrar os chips/meta em colunas estreitas.
      ========================================================== */
   .campo-filtro-historico--busca {
     position: relative;
-    z-index: 30;
+    z-index: 120;
   }
 
   .historico-busca-combobox {
     position: relative;
     width: 100%;
+    min-width: 0;
   }
 
   .historico-busca-combobox.is-open input#q {
@@ -952,10 +954,13 @@
     position: absolute;
     top: calc(100% + 8px);
     left: 0;
-    right: 0;
-    z-index: 90;
-    max-height: min(520px, 64vh);
+    right: auto;
+    z-index: 140;
+    width: min(900px, calc(100vw - 56px));
+    max-width: calc(100vw - 56px);
+    max-height: min(560px, 64vh);
     overflow-y: auto;
+    overflow-x: hidden;
     border: 1px solid #d6e0ec;
     border-radius: 18px;
     background: #ffffff;
@@ -968,20 +973,40 @@
     display: none;
   }
 
+  .historico-busca-lista::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .historico-busca-lista::-webkit-scrollbar-thumb {
+    border: 3px solid #ffffff;
+    border-radius: 999px;
+    background: #9aa8bb;
+  }
+
   .historico-busca-opcao {
     width: 100%;
+    min-width: 0;
     border: 0;
     background: #ffffff;
     border-radius: 14px;
-    padding: 12px 14px;
+    padding: 12px;
     display: grid;
-    grid-template-columns: minmax(72px, auto) minmax(0, 1fr) auto;
-    gap: 12px;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "id conteudo"
+      "id conteudo"
+      "acao acao";
+    column-gap: 12px;
+    row-gap: 9px;
     align-items: flex-start;
     text-align: left;
     cursor: pointer;
     color: #172b4d;
     box-sizing: border-box;
+  }
+
+  .historico-busca-opcao + .historico-busca-opcao {
+    margin-top: 6px;
   }
 
   .historico-busca-opcao:hover,
@@ -990,11 +1015,12 @@
   }
 
   .historico-busca-opcao__id {
+    grid-area: id;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 32px;
-    padding: 0 10px;
+    min-height: 34px;
+    padding: 0 12px;
     border-radius: 999px;
     background: #edf3ff;
     border: 1px solid #c9dafd;
@@ -1005,7 +1031,9 @@
   }
 
   .historico-busca-opcao__conteudo {
+    grid-area: conteudo;
     min-width: 0;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     gap: 5px;
@@ -1017,6 +1045,7 @@
     font-weight: 950;
     line-height: 1.25;
     overflow-wrap: anywhere;
+    word-break: normal;
   }
 
   .historico-busca-opcao__descricao {
@@ -1025,33 +1054,51 @@
     font-weight: 700;
     line-height: 1.35;
     overflow-wrap: anywhere;
+    word-break: normal;
   }
 
   .historico-busca-opcao__meta {
+    width: 100%;
+    min-width: 0;
     display: flex;
     flex-wrap: wrap;
+    align-items: flex-start;
     gap: 6px;
-    margin-top: 2px;
+    margin-top: 3px;
   }
 
   .historico-busca-chip {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 5px;
-    min-height: 26px;
-    padding: 4px 8px;
-    border-radius: 999px;
+    min-height: 28px;
+    max-width: 100%;
+    padding: 5px 9px;
+    border-radius: 12px;
     border: 1px solid #dbe4ef;
     background: #f8fafc;
     color: #405772;
     font-size: 12px;
     font-weight: 850;
-    line-height: 1.15;
-    max-width: 100%;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    text-align: left;
+    box-sizing: border-box;
   }
 
   .historico-busca-opcao__acao {
-    align-self: center;
+    grid-area: acao;
+    justify-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 0 11px;
+    border-radius: 999px;
+    border: 1px solid #dbe4ef;
+    background: #ffffff;
     color: #1f365b;
     font-size: 12px;
     font-weight: 950;
@@ -1069,14 +1116,56 @@
     color: #a12626;
   }
 
-  @media (max-width: 640px) {
-    .historico-busca-opcao {
-      grid-template-columns: 1fr;
-      gap: 8px;
+  @media (max-width: 1340px) {
+    .historico-busca-lista {
+      width: min(820px, calc(100vw - 48px));
+      max-width: calc(100vw - 48px);
+    }
+  }
+
+  @media (max-width: 760px) {
+    .historico-busca-lista {
+      width: calc(100vw - 32px);
+      max-width: calc(100vw - 32px);
+      max-height: min(520px, 62vh);
+      padding: 7px;
+      border-radius: 16px;
     }
 
-    .historico-busca-opcao__id,
+    .historico-busca-opcao {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        "id conteudo"
+        "acao acao";
+      padding: 11px;
+      column-gap: 10px;
+    }
+
+    .historico-busca-opcao__meta {
+      gap: 5px;
+    }
+
+    .historico-busca-chip {
+      width: 100%;
+      justify-content: flex-start;
+    }
+
     .historico-busca-opcao__acao {
+      justify-self: stretch;
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .historico-busca-opcao {
+      grid-template-columns: 1fr;
+      grid-template-areas:
+        "id"
+        "conteudo"
+        "acao";
+    }
+
+    .historico-busca-opcao__id {
       justify-self: flex-start;
     }
   }
