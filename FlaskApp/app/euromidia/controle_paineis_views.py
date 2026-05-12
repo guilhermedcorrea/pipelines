@@ -3969,6 +3969,8 @@ def lista_paineis():
             "bisemana": bi_semana_filtro,
 
             "fim_de_semana": fim_de_semana_filtro,
+            "dt_ini_ocup": dt_ini_ocup.strftime("%Y-%m-%d") if dt_ini_ocup else "",
+            "dt_fim_ocup": dt_fim_ocup.strftime("%Y-%m-%d") if dt_fim_ocup else "",
             "periodo_label": periodo_label,
             "per_page": per_page,
             "pode_ver_exibidora": pode_ver_exibidora,

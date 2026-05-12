@@ -1090,6 +1090,21 @@
     padding:0 5px !important;
   }
 
+
+  .ocupacao-bar-live{
+    transition: box-shadow .18s ease, border-color .18s ease, opacity .18s ease;
+  }
+
+  .ocupacao-bar-live.ocupacao-atualizando{
+    opacity:.78;
+    border-color:#2563EB !important;
+    box-shadow: inset 0 0 0 1px #93C5FD, 0 0 0 3px rgba(37,99,235,.10) !important;
+  }
+
+  .ocupacao-preenchimento-live{
+    transition: width .22s ease, background-color .22s ease;
+  }
+
   .paneis-grid--head .cell-ocupacao,
   .paneis-grid--row .cell-ocupacao{
     justify-content: center !important;
@@ -2016,7 +2031,12 @@
                   {% for x in itens %}
                     {% set mostrar_infra_abaixo = (request.args.get('infra') or '')|string == '1' %}
 
-                    <div class="paneis-grid paneis-grid--row">
+                    <div class="paneis-grid paneis-grid--row"
+                         data-painel-row="1"
+                         data-codponto="{{ x.CodPonto }}"
+                         data-codface="{{ x.CodFace }}"
+                         data-tipo-prod="{{ x.TipoProd or x.Tipo or '' }}"
+                         data-denominador="{{ x.NumFacesOcupacao if x.NumFacesOcupacao is defined else x.NumFaces }}">
 
                       <div>
                         <input
@@ -2171,7 +2191,13 @@
                       </div>
 
                       <div class="cell-ocupacao">
-                        <div data-ocupacao-bar style="
+                        <div data-ocupacao-bar
+                             class="ocupacao-bar-live"
+                             data-codponto="{{ x.CodPonto }}"
+                             data-codface="{{ x.CodFace }}"
+                             data-tipo-prod="{{ x.TipoProd or x.Tipo or '' }}"
+                             data-denominador="{{ x.NumFacesOcupacao if x.NumFacesOcupacao is defined else x.NumFaces }}"
+                             style="
                           position:relative;
                           height: 22px;
                           border-radius: 9px;
@@ -2182,14 +2208,16 @@
                           width:100%;
                           min-width:0;
                         ">
-                          <div style="
+                          <div data-ocupacao-preenchimento
+                               class="ocupacao-preenchimento-live"
+                               style="
                             position:absolute;
                             left:0;top:0;bottom:0;
                             width: {{ x.Pct }}%;
                             background: {% if x.Conflitos > 0 %}#F59E0B{% elif x.Pct >= 80 %}#059669{% else %}#FBBF24{% endif %};
                           "></div>
 
-                          <div style="
+                          <div data-ocupacao-texto style="
                             position:absolute;
                             inset:0;
                             display:flex;
@@ -2209,19 +2237,19 @@
                           </div>
                         </div>
 
-                        <div class="muted ocupacao-legenda" style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                          <span>{{ filtros.periodo_label }}</span>
+                        <div class="muted ocupacao-legenda" data-ocupacao-legenda style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                          <span data-ocupacao-periodo>{{ filtros.periodo_label }}</span>
 
                           {% if x.Conflitos > 0 %}
-                            <span style="display:inline-flex;align-items:center;gap:6px;color:#b91c1c;font-weight:900;">
+                            <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#b91c1c;font-weight:900;">
                               ▲ Conflito ({{ x.Conflitos }}/{{ x.NumFaces }})
                             </span>
                           {% elif x.Ocupadas > 0 %}
-                            <span style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
+                            <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
                               ● Ocupado ({{ x.Ocupadas }}/{{ x.NumFaces }})
                             </span>
                           {% else %}
-                            <span style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
+                            <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
                               ● Livre (0/{{ x.NumFaces }})
                             </span>
                           {% endif %}
@@ -3589,6 +3617,202 @@
     });
 
     carregarStatusEMarcarBotoes();
+  })();
+</script>
+
+
+<script>
+  (function(){
+    const linhas = Array.from(document.querySelectorAll('[data-painel-row="1"]'));
+    if (!linhas.length) return;
+
+    const configTempoReal = {
+      dt_ini: {{ (filtros.dt_ini_ocup or filtros.dt_ini or '')|tojson }},
+      dt_fim: {{ (filtros.dt_fim_ocup or filtros.dt_fim or '')|tojson }},
+      periodo_label: {{ (filtros.periodo_label or '')|tojson }},
+      namespace: "/paineis"
+    };
+
+    function textoLimpo(valor){
+      return String(valor || "").trim();
+    }
+
+    function numeroInteiro(valor, padrao){
+      const n = parseInt(String(valor || "").replace(",", "."), 10);
+      return Number.isFinite(n) ? n : (padrao || 0);
+    }
+
+    function numeroDecimal(valor, padrao){
+      const n = parseFloat(String(valor || "").replace(",", "."));
+      return Number.isFinite(n) ? n : (padrao || 0);
+    }
+
+    function chaveItem(codponto, codface, tipoProd){
+      return [numeroInteiro(codponto, 0), textoLimpo(codface).toUpperCase(), textoLimpo(tipoProd).toUpperCase()].join("|");
+    }
+
+    function corOcupacao(pct, conflitos){
+      if (numeroInteiro(conflitos, 0) > 0) return "#F59E0B";
+      if (numeroDecimal(pct, 0) >= 80) return "#059669";
+      return "#FBBF24";
+    }
+
+    function montarItensVisiveis(){
+      const vistos = new Set();
+      const itens = [];
+
+      linhas.forEach(function(linha){
+        const codponto = numeroInteiro(linha.getAttribute("data-codponto"), 0);
+        const codface = textoLimpo(linha.getAttribute("data-codface"));
+        const tipoProd = textoLimpo(linha.getAttribute("data-tipo-prod"));
+        const denominador = numeroInteiro(linha.getAttribute("data-denominador"), 1);
+
+        if (!codponto || !codface) return;
+
+        const chave = chaveItem(codponto, codface, tipoProd);
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+
+        itens.push({
+          codponto: codponto,
+          codface: codface,
+          tipo_prod: tipoProd,
+          denominador: denominador
+        });
+      });
+
+      return itens;
+    }
+
+    function marcarAtualizando(ativo){
+      linhas.forEach(function(linha){
+        const barra = linha.querySelector('[data-ocupacao-bar]');
+        if (barra) barra.classList.toggle("ocupacao-atualizando", !!ativo);
+      });
+    }
+
+    function aplicarItem(item){
+      if (!item) return;
+
+      const chave = chaveItem(item.codponto, item.codface, item.tipo_prod);
+      const linha = linhas.find(function(el){
+        return chaveItem(el.getAttribute("data-codponto"), el.getAttribute("data-codface"), el.getAttribute("data-tipo-prod")) === chave;
+      });
+      if (!linha) return;
+
+      const pct = Math.max(0, Math.min(100, numeroDecimal(item.pct, 0)));
+      const conflitos = numeroInteiro(item.conflitos, 0);
+      const textoBarra = textoLimpo(item.texto_barra) || ((item.pct_texto || pct.toFixed(1).replace(".", ",")) + "%");
+      const textoLegenda = textoLimpo(item.texto_legenda);
+
+      linha.setAttribute("data-denominador", item.denominador || item.num_faces || linha.getAttribute("data-denominador") || "1");
+      linha.setAttribute("data-ocupacao-status", item.status || "");
+
+      const barra = linha.querySelector('[data-ocupacao-bar]');
+      const preenchimento = linha.querySelector('[data-ocupacao-preenchimento]');
+      const texto = linha.querySelector('[data-ocupacao-texto]');
+      const legenda = linha.querySelector('[data-ocupacao-status-texto]');
+      const periodo = linha.querySelector('[data-ocupacao-periodo]');
+
+      if (barra){
+        barra.classList.remove("ocupacao-atualizando");
+        barra.setAttribute("title", "Ocupado: " + (item.total_espacos_ocupados || 0) + " / " + (item.total_espacos_disponiveis || 0) + " slot-dia");
+      }
+
+      if (preenchimento){
+        preenchimento.style.width = pct + "%";
+        preenchimento.style.background = corOcupacao(pct, conflitos);
+      }
+
+      if (texto){
+        texto.textContent = textoBarra;
+      }
+
+      if (legenda){
+        legenda.textContent = textoLegenda || (pct > 0 ? "● Ocupado" : "● Livre");
+        legenda.style.color = conflitos > 0 ? "#b91c1c" : "#64748B";
+      }
+
+      if (periodo){
+        periodo.textContent = configTempoReal.periodo_label || periodo.textContent;
+      }
+    }
+
+    function aplicarPayload(payload){
+      if (!payload || !payload.ok || !Array.isArray(payload.itens)) return;
+      payload.itens.forEach(aplicarItem);
+      marcarAtualizando(false);
+    }
+
+    function mostrarErro(mensagem){
+      linhas.forEach(function(linha){
+        const barra = linha.querySelector('[data-ocupacao-bar]');
+        if (barra) barra.classList.remove("ocupacao-atualizando");
+      });
+      if (mensagem && window.console) console.warn("Painéis Socket.IO:", mensagem);
+    }
+
+    function iniciarSocket(){
+      if (typeof io === "undefined"){
+        mostrarErro("socket_indisponivel");
+        return;
+      }
+
+      const itens = montarItensVisiveis();
+      if (!configTempoReal.dt_ini || !configTempoReal.dt_fim || !itens.length){
+        mostrarErro("periodo_ausente");
+        return;
+      }
+
+      const socket = io(configTempoReal.namespace, {
+        transports: ["polling", "websocket"],
+        upgrade: true,
+        reconnection: true,
+        reconnectionAttempts: 20,
+        reconnectionDelay: 1500,
+        timeout: 20000
+      });
+
+      function pedirAtualizacao(){
+        marcarAtualizando(true);
+        socket.emit("paineis:lista:inscrever", {
+          dt_ini: configTempoReal.dt_ini,
+          dt_fim: configTempoReal.dt_fim,
+          itens: itens
+        });
+      }
+
+      socket.on("connect", pedirAtualizacao);
+      socket.on("paineis:ocupacao:lote", aplicarPayload);
+      socket.on("paineis:ocupacao:erro", function(payload){
+        mostrarErro((payload && payload.erro) ? "erro" : "erro");
+      });
+      socket.on("connect_error", function(){ mostrarErro("conexao_socket"); });
+      socket.on("disconnect", function(){ mostrarErro("socket_desconectado"); });
+
+      window.addEventListener("focus", function(){
+        if (socket.connected) pedirAtualizacao();
+      });
+
+      setInterval(function(){
+        if (socket.connected) socket.emit("paineis:lista:pedir_atualizacao", {
+          dt_ini: configTempoReal.dt_ini,
+          dt_fim: configTempoReal.dt_fim,
+          itens: itens
+        });
+      }, 30000);
+    }
+
+    if (typeof io === "undefined"){
+      const script = document.createElement("script");
+      script.src = "https://cdn.socket.io/4.7.5/socket.io.min.js";
+      script.async = true;
+      script.onload = iniciarSocket;
+      script.onerror = function(){ mostrarErro("socket_js"); };
+      document.head.appendChild(script);
+    } else {
+      iniciarSocket();
+    }
   })();
 </script>
 

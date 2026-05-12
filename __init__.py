@@ -241,8 +241,10 @@ docker compose exec airflow-apiserver airflow users create \
 
 #usar esse
 
-#docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker
+
+#docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker
 
 #docker compose up -d
 
 #docker compose logs -f nginx-flask flask-app-1 flask-app-2
+#docker compose logs -f nginx-flask flask-app-1 flask-app-2 celery-paineis-worker

@@ -126,3 +126,261 @@ def mensagens_pedir_resumo(dados=None):
         montar_payload_resumo_mensagens(id_usuario),
         namespace=NAMESPACE_MENSAGENS,
     )
+
+
+# =========================================================
+# PAINÉIS — atualização em tempo real da lista/ocupação
+# =========================================================
+import hashlib
+import json
+from datetime import datetime
+from typing import Any
+
+from app.extensions import cache
+
+
+NAMESPACE_PAINEIS = "/paineis"
+
+
+def _room_paineis_lista_usuario(id_usuario: int, chave_tela: str) -> str:
+    """Eu gero uma sala isolada por usuário e por conjunto de filtros visível."""
+    return f"paineis_lista_usuario:{int(id_usuario)}:{chave_tela}"
+
+
+def _normalizar_texto_socket(valor: Any) -> str:
+    return str(valor or "").strip()
+
+
+def _normalizar_codface_socket(valor: Any) -> str:
+    return _normalizar_texto_socket(valor).upper()
+
+
+def _normalizar_tipo_socket(valor: Any) -> str:
+    return _normalizar_texto_socket(valor).upper()
+
+
+def _int_socket(valor: Any, padrao: int = 0) -> int:
+    try:
+        if valor is None:
+            return padrao
+        texto = str(valor).strip()
+        if not texto:
+            return padrao
+        return int(float(texto.replace(",", ".")))
+    except Exception:
+        return padrao
+
+
+def _data_iso_socket(valor: Any) -> str:
+    try:
+        texto = _normalizar_texto_socket(valor)
+        if not texto:
+            return ""
+        if len(texto) >= 10:
+            texto = texto[:10]
+        datetime.strptime(texto, "%Y-%m-%d")
+        return texto
+    except Exception:
+        return ""
+
+
+def _normalizar_itens_socket(dados: dict | None) -> list[dict[str, Any]]:
+    itens = []
+    vistos = set()
+
+    for item in ((dados or {}).get("itens") or []):
+        codponto = _int_socket(item.get("codponto"))
+        codface = _normalizar_codface_socket(item.get("codface"))
+        tipo_prod = _normalizar_tipo_socket(item.get("tipo_prod"))
+
+        if codponto <= 0 or not codface:
+            continue
+
+        chave = (codponto, codface, tipo_prod)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+
+        itens.append(
+            {
+                "codponto": codponto,
+                "codface": codface,
+                "tipo_prod": tipo_prod,
+            }
+        )
+
+    return itens[:120]
+
+
+def _hash_tela_paineis(dt_ini: str, dt_fim: str, itens: list[dict[str, Any]]) -> str:
+    base = {
+        "dt_ini": dt_ini,
+        "dt_fim": dt_fim,
+        "itens": itens,
+    }
+    bruto = json.dumps(base, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(bruto.encode("utf-8")).hexdigest()[:24]
+
+
+def _cache_key_tela_paineis(dt_ini: str, dt_fim: str, itens: list[dict[str, Any]]) -> str:
+    return f"paineis:ocupacao:lista:{_hash_tela_paineis(dt_ini, dt_fim, itens)}"
+
+
+def _emitir_payload_cacheado_paineis(cache_key: str) -> bool:
+    try:
+        payload_cacheado = cache.get(cache_key)
+    except Exception:
+        payload_cacheado = None
+
+    if not payload_cacheado:
+        return False
+
+    try:
+        payload_cacheado = dict(payload_cacheado)
+        payload_cacheado["origem"] = "redis_cache"
+        emit("paineis:ocupacao:lote", payload_cacheado, namespace=NAMESPACE_PAINEIS)
+        return True
+    except Exception:
+        return False
+
+
+@socketio.on("connect", namespace=NAMESPACE_PAINEIS)
+def paineis_conectar():
+    """Eu aceito somente usuário autenticado no canal de painéis."""
+    if not current_user.is_authenticated:
+        return False
+
+    id_usuario = _id_usuario_socket_logado()
+    if not id_usuario:
+        return False
+
+    join_room(f"paineis_usuario:{int(id_usuario)}")
+    emit(
+        "paineis:conectado",
+        {
+            "ok": True,
+            "id_usuario": int(id_usuario),
+        },
+        namespace=NAMESPACE_PAINEIS,
+    )
+
+
+@socketio.on("disconnect", namespace=NAMESPACE_PAINEIS)
+def paineis_desconectar():
+    """Eu retiro o usuário da sala base quando ele desconecta."""
+    id_usuario = _id_usuario_socket_logado()
+    if id_usuario:
+        leave_room(f"paineis_usuario:{int(id_usuario)}")
+
+
+@socketio.on("paineis:lista:inscrever", namespace=NAMESPACE_PAINEIS)
+def paineis_lista_inscrever(dados=None):
+    """Eu inscrevo a tela atual e disparo recálculo assíncrono da ocupação."""
+    if not current_user.is_authenticated:
+        return False
+
+    id_usuario = _id_usuario_socket_logado()
+    if not id_usuario:
+        return False
+
+    dados = dados or {}
+    dt_ini = _data_iso_socket(dados.get("dt_ini"))
+    dt_fim = _data_iso_socket(dados.get("dt_fim"))
+    itens = _normalizar_itens_socket(dados)
+
+    if not dt_ini or not dt_fim or not itens:
+        emit(
+            "paineis:ocupacao:erro",
+            {
+                "ok": False,
+                "erro": "Não foi possível identificar período e faces visíveis para atualizar a ocupação.",
+            },
+            namespace=NAMESPACE_PAINEIS,
+        )
+        return False
+
+    chave_tela = _hash_tela_paineis(dt_ini, dt_fim, itens)
+    room = _room_paineis_lista_usuario(int(id_usuario), chave_tela)
+    join_room(room)
+
+    cache_key = _cache_key_tela_paineis(dt_ini, dt_fim, itens)
+    lock_key = f"{cache_key}:lock"
+
+    emit(
+        "paineis:ocupacao:status",
+        {
+            "ok": True,
+            "status": "inscrito",
+            "room": room,
+            "cache_key": cache_key,
+        },
+        namespace=NAMESPACE_PAINEIS,
+    )
+
+    if _emitir_payload_cacheado_paineis(cache_key):
+        return True
+
+    try:
+        lock_criado = cache.add(lock_key, "1", timeout=12)
+    except Exception:
+        lock_criado = True
+
+    if not lock_criado:
+        emit(
+            "paineis:ocupacao:status",
+            {
+                "ok": True,
+                "status": "recalculo_em_andamento",
+                "cache_key": cache_key,
+            },
+            namespace=NAMESPACE_PAINEIS,
+        )
+        return True
+
+    try:
+        from app.tasks.paineis_tempo_real_tasks import atualizar_ocupacao_lista_paineis_socket
+
+        atualizar_ocupacao_lista_paineis_socket.apply_async(
+            kwargs={
+                "room": room,
+                "dt_ini": dt_ini,
+                "dt_fim": dt_fim,
+                "itens": itens,
+                "cache_key": cache_key,
+            },
+            queue="paineis_ocupacao",
+        )
+
+        emit(
+            "paineis:ocupacao:status",
+            {
+                "ok": True,
+                "status": "recalculo_agendado",
+                "cache_key": cache_key,
+            },
+            namespace=NAMESPACE_PAINEIS,
+        )
+        return True
+
+    except Exception as exc:
+        try:
+            cache.delete(lock_key)
+        except Exception:
+            pass
+
+        emit(
+            "paineis:ocupacao:erro",
+            {
+                "ok": False,
+                "erro": str(exc),
+                "cache_key": cache_key,
+            },
+            namespace=NAMESPACE_PAINEIS,
+        )
+        return False
+
+
+@socketio.on("paineis:lista:pedir_atualizacao", namespace=NAMESPACE_PAINEIS)
+def paineis_lista_pedir_atualizacao(dados=None):
+    """Eu reaproveito a mesma inscrição quando o front pedir novo recálculo."""
+    return paineis_lista_inscrever(dados or {})
