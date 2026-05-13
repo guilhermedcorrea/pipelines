@@ -14760,6 +14760,38 @@ def cliente_detalhe(id_empresa: int):
     classificacao["ClassificacaoPerfilEmpresa"] = segmentacao["ClassificacaoPerfilEmpresa"]
 
     valor_total_contratos_cliente = 0
+
+    if usuario_logado_eh_perfil_vendedor:
+        valor_total_contratos_cliente = None
+        contratos_cab = []
+        contratos_itens = []
+        contratos_itens_por_contrato = {}
+        contratos_paginacao = {
+            "page": 1,
+            "per_page": 6,
+            "total": 0,
+            "total_pages": 1,
+            "inicio": 0,
+            "fim": 0,
+        }
+
+        return render_template(
+            "euromidia/empresa.html",
+            empresa=empresa,
+            cnpj14=cnpj14_formatado,
+            classificacao=classificacao,
+            segmentacao=segmentacao,
+            valor_total_contratos_cliente=valor_total_contratos_cliente,
+            contratos_cab=contratos_cab,
+            contratos_itens=contratos_itens,
+            contratos_itens_por_contrato=contratos_itens_por_contrato,
+            contratos_paginacao=contratos_paginacao,
+            carteira_atual=carteira_atual,
+            carteiras_disponiveis=carteiras_disponiveis,
+            usuario_logado_eh_perfil_vendedor=usuario_logado_eh_perfil_vendedor,
+            return_to=return_to,
+        )
+
     try:
         sql_total_contratos_cliente = text("""
             SELECT
