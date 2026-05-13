@@ -16435,11 +16435,6 @@ def reserva_nova():
 
 
 
-
-
-
-
-
 @paineis_bp.get("/preferencia-reservas")
 @login_required
 @limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])

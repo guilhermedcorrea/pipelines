@@ -1020,6 +1020,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_carteiras = (pode_acessar_menu_paineis('carteiras') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_empresas = (pode_acessar_menu_paineis('empresas') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_lista_ocupacao = (pode_acessar_menu_paineis('lista_ocupacao') if pode_acessar_menu_paineis is defined else True) %}
+        {% set menu_paineis_preferencia_reservas = (pode_acessar_menu_paineis('preferencia_reservas_lista') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_contratos = (pode_acessar_menu_paineis('contratos') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_mov_fin = (pode_acessar_menu_paineis('movimentacao_financeira') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_inadimplentes = (pode_acessar_menu_paineis('inadimplentes') if pode_acessar_menu_paineis is defined else True) %}
@@ -1059,6 +1060,7 @@ input:disabled, select:disabled, textarea:disabled{
           #}
           {% set menu_paineis_disponibilidades = True %}
           {% set menu_paineis_lista_ocupacao = True %}
+          {% set menu_paineis_preferencia_reservas = True %}
           {% set menu_paineis_atendimento = True %}
           {% set menu_paineis_health_check = True %}
           {% set menu_paineis_historico_atendimento = True %}
@@ -1083,6 +1085,7 @@ input:disabled, select:disabled, textarea:disabled{
             Não liberamos Health Check Comercial para perfil VENDEDOR.
           #}
           {% set menu_paineis_vencimentos_campanhas = True %}
+          {% set menu_paineis_preferencia_reservas = True %}
           {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}
           {% set menu_paineis_health_check = False %}
         {% endif %}
@@ -1124,6 +1127,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_historico_atendimento
           or menu_paineis_vencimentos_campanhas
           or menu_paineis_lista_ocupacao
+          or menu_paineis_preferencia_reservas
           or menu_paineis_contratos
           or menu_paineis_mov_fin
           or menu_paineis_inadimplentes
@@ -1143,7 +1147,7 @@ input:disabled, select:disabled, textarea:disabled{
           <div class="menu-dropdown">
             <div class="desc">Consulta e gestão do inventário</div>
 
-            {% if menu_paineis_disponibilidades or menu_paineis_lista_ocupacao %}
+            {% if menu_paineis_disponibilidades or menu_paineis_lista_ocupacao or menu_paineis_preferencia_reservas %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Estoques</span>
@@ -1165,9 +1169,12 @@ input:disabled, select:disabled, textarea:disabled{
                     </a>
                   {% endif %}
 
-                 
-              
-                
+                  {% if menu_paineis_preferencia_reservas %}
+                    <a href="{{ url_for('Paineis.preferencia_reservas_lista') }}"
+                       class="{% if request.endpoint == 'Paineis.preferencia_reservas_lista' %}menu-link-current{% endif %}">
+                      Preferência de Reservas
+                    </a>
+                  {% endif %}
 
                 </div>
               </div>

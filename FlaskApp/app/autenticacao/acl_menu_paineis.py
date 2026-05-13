@@ -369,6 +369,14 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     chave = _normalizar_texto_acl(item_menu)
 
+    if chave in {"preferencia_reservas", "preferencia_reservas_lista"}:
+        return (
+            usuario_eh_perfil_admin()
+            or usuario_eh_perfil_coordenador()
+            or usuario_eh_perfil_vendedor()
+            or _usuario_tem_permissao("ADMIN_TUDO")
+        )
+
     if usuario_eh_perfil_vendedor() and chave in {"carteiras", "carteira_propria"}:
         return True
 
