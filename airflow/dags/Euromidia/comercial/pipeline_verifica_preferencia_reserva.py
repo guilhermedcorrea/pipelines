@@ -445,7 +445,7 @@ def criar_tabelas_temporarias_preferencia(conexao, config: ConfiguracaoPreferenc
         IDVendedor INT NULL,
         IDUsuario INT NULL,
         TotalLiquidoContrato DECIMAL(18, 2) NULL,
-        MarcaExibida NVARCHAR(255) NULL
+        MarcaExibida NVARCHAR(255) COLLATE DATABASE_DEFAULT NULL
     );
 
     ;WITH contratos_elegiveis AS
@@ -484,7 +484,7 @@ def criar_tabelas_temporarias_preferencia(conexao, config: ConfiguracaoPreferenc
         vendedor_contrato.IDVendedor,
         vendedor_contrato.IDUsuario,
         CAST(contrato.TotalLiquidoContratoAGBRVENDGERCOOR AS DECIMAL(18, 2)) AS TotalLiquidoContrato,
-        contrato.MarcaExibida
+        CAST(contrato.MarcaExibida AS NVARCHAR(255)) COLLATE DATABASE_DEFAULT AS MarcaExibida
     FROM {config.tabela_contratos} AS contrato
     INNER JOIN contratos_elegiveis AS item_contrato
         ON item_contrato.IDFatoControleContratoEuromidia = contrato.IDFatoControleContratosEuromidia
@@ -606,7 +606,7 @@ def sincronizar_cabecalho_preferencia(conexao, config: ConfiguracaoPreferenciaRe
            destino.IDVendedor = origem.IDVendedor,
            destino.IDUsuario = origem.IDUsuario,
            destino.TotalLiquidoContrato = origem.TotalLiquidoContrato,
-           destino.MarcaExibida = origem.MarcaExibida,
+           destino.MarcaExibida = origem.MarcaExibida COLLATE DATABASE_DEFAULT,
            destino.BitAtivo = 1,
            destino.DataAtualizacao = SYSDATETIME()
     FROM {config.tabela_preferencia} AS destino
@@ -617,7 +617,7 @@ def sincronizar_cabecalho_preferencia(conexao, config: ConfiguracaoPreferenciaRe
         OR ISNULL(destino.IDVendedor, -1) <> ISNULL(origem.IDVendedor, -1)
         OR ISNULL(destino.IDUsuario, -1) <> ISNULL(origem.IDUsuario, -1)
         OR ISNULL(destino.TotalLiquidoContrato, -999999999.99) <> ISNULL(origem.TotalLiquidoContrato, -999999999.99)
-        OR ISNULL(destino.MarcaExibida, N'') <> ISNULL(origem.MarcaExibida, N'')
+        OR ISNULL(destino.MarcaExibida COLLATE DATABASE_DEFAULT, N'') <> ISNULL(origem.MarcaExibida COLLATE DATABASE_DEFAULT, N'')
         OR ISNULL(destino.BitAtivo, 0) <> 1;
     """
 
@@ -642,7 +642,7 @@ def sincronizar_cabecalho_preferencia(conexao, config: ConfiguracaoPreferenciaRe
         origem.IDVendedor,
         origem.IDUsuario,
         origem.TotalLiquidoContrato,
-        origem.MarcaExibida,
+        origem.MarcaExibida COLLATE DATABASE_DEFAULT,
         1 AS BitAtivo,
         SYSDATETIME() AS DataCriacao,
         SYSDATETIME() AS DataAtualizacao
