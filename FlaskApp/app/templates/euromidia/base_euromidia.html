@@ -789,6 +789,27 @@ input:disabled, select:disabled, textarea:disabled{
   flex: 0 0 auto;
 }
 
+
+.user-dropdown-badge{
+  margin-left:auto;
+  min-width:20px;
+  height:20px;
+  padding:0 6px;
+  border-radius:999px;
+  background:#dc2626;
+  color:#fff;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  font-weight:950;
+  line-height:1;
+}
+
+.user-dropdown-badge.hidden{
+  display:none;
+}
+
 @media (max-width: 760px){
   .top-actions{
     width: 100%;
@@ -1029,6 +1050,32 @@ input:disabled, select:disabled, textarea:disabled{
           or (usuario_perfil_rel.NomePerfilUsuario|default('', true) if usuario_perfil_rel else '')
         ) %}
         {% set usuario_eh_vendedor_menu = (usuario_perfil_id == 3 or (usuario_perfil_nome|string|trim|upper == 'VENDEDOR')) %}
+        {% set usuario_eh_coordenador_menu = (usuario_perfil_id == 5 or (usuario_perfil_nome|string|trim|upper == 'COORDENADOR')) %}
+        {% if usuario_eh_coordenador_menu %}
+          {#
+            Coordenador tem acesso operacional amplo a Painéis/Kanban/Clientes/Carteiras,
+            mas não deve ver Checkin, Financeiro, Solicitações Auvo, Performance Ativos,
+            Segurança nem o submenu administrativo de Permissões.
+          #}
+          {% set menu_paineis_disponibilidades = True %}
+          {% set menu_paineis_lista_ocupacao = True %}
+          {% set menu_paineis_atendimento = True %}
+          {% set menu_paineis_health_check = True %}
+          {% set menu_paineis_historico_atendimento = True %}
+          {% set menu_paineis_vencimentos_campanhas = True %}
+          {% set menu_paineis_empresas = True %}
+          {% set menu_paineis_carteiras = True %}
+          {% set menu_paineis_contratos = False %}
+          {% set menu_paineis_mov_fin = False %}
+          {% set menu_paineis_inadimplentes = False %}
+          {% set menu_paineis_aprovacao_contratos = False %}
+          {% set menu_paineis_performance = False %}
+          {% set menu_paineis_checkin_novo = False %}
+          {% set menu_paineis_lista_checkins = False %}
+          {% set menu_paineis_produtos_auvo = False %}
+          {% set menu_paineis_tickets_auvo = False %}
+          {% set menu_paineis_criar_os_auvo = False %}
+        {% endif %}
         {% if usuario_eh_vendedor_menu %}
           {#
             Vendedor deve acessar Vencimento Campanhas.
@@ -1042,19 +1089,27 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_admin = (
           current_user.is_authenticated
           and (not usuario_eh_vendedor_menu)
-          and (pode_acessar_menu_paineis('admin') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+          and (
+            usuario_eh_coordenador_menu
+            or (pode_acessar_menu_paineis('admin') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+          )
         ) %}
         {% set menu_admin_permissao_desconto = (
           menu_admin
+          and (not usuario_eh_coordenador_menu)
           and (pode_acessar_menu_paineis('permissao_desconto') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
         ) %}
         {% set menu_admin_aprovacao_desconto = (
           menu_admin
+          and (not usuario_eh_coordenador_menu)
           and (pode_acessar_menu_paineis('aprovacao_desconto') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
         ) %}
         {% set menu_admin_lista_precos = (
           menu_admin
-          and (pode_acessar_menu_paineis('lista_precos_euromidia') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+          and (
+            usuario_eh_coordenador_menu
+            or (pode_acessar_menu_paineis('lista_precos_euromidia') if pode_acessar_menu_paineis is defined else current_user.has_permission('ADMIN_TUDO'))
+          )
         ) %}
 
         {% set exibir_menu_paineis =
@@ -1221,7 +1276,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_contratos or menu_paineis_mov_fin or menu_paineis_inadimplentes or menu_paineis_aprovacao_contratos %}
+            {% if (not usuario_eh_coordenador_menu) and (menu_paineis_contratos or menu_paineis_mov_fin or menu_paineis_inadimplentes or menu_paineis_aprovacao_contratos) %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Financeiro</span>
@@ -1355,7 +1410,7 @@ input:disabled, select:disabled, textarea:disabled{
 
 
 
-        {% if current_user.is_authenticated and current_user.has_permission('ADMIN_TUDO') %}
+        {% if current_user.is_authenticated and (not usuario_eh_coordenador_menu) and current_user.has_permission('ADMIN_TUDO') %}
           <div class="menu-item" data-menu="seguranca">
 
             <button type="button"
@@ -1429,6 +1484,15 @@ input:disabled, select:disabled, textarea:disabled{
                   <path d="M12 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
                 Meu perfil
+              </a>
+
+              <a href="{{ url_for('admin.mensagens_usuario') }}">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M5 7l7 6 7-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Mensagens
+                <span id="userDropdownMessageCount" class="user-dropdown-badge hidden">0</span>
               </a>
 
               {% if usuario_logado_eh_vendedor_paineis|default(False) and minha_carteira_url %}
@@ -1832,6 +1896,7 @@ input:disabled, select:disabled, textarea:disabled{
   (function(){
     const badge = document.getElementById("userMessageBadge");
     const badgeCount = document.getElementById("userMessageBadgeCount");
+    const dropdownBadgeCount = document.getElementById("userDropdownMessageCount");
     const userBtn = document.getElementById("btnUserMenu");
     const tituloOriginal = document.title;
 
@@ -1865,6 +1930,10 @@ input:disabled, select:disabled, textarea:disabled{
 
       if (qtd > 0){
         badgeCount.textContent = qtd > 99 ? "99+" : String(qtd);
+        if (dropdownBadgeCount){
+          dropdownBadgeCount.textContent = qtd > 99 ? "99+" : String(qtd);
+          dropdownBadgeCount.classList.remove("hidden");
+        }
         badge.hidden = false;
         badge.classList.add("is-visible");
         badge.setAttribute("aria-label", qtd === 1 ? "1 mensagem nova" : `${qtd} mensagens novas`);
@@ -1880,6 +1949,10 @@ input:disabled, select:disabled, textarea:disabled{
         }
       } else {
         badgeCount.textContent = "0";
+        if (dropdownBadgeCount){
+          dropdownBadgeCount.textContent = "0";
+          dropdownBadgeCount.classList.add("hidden");
+        }
         badge.hidden = true;
         badge.classList.remove("is-visible", "is-pulse");
         badge.setAttribute("aria-label", "Sem mensagens novas");
@@ -1983,6 +2056,10 @@ input:disabled, select:disabled, textarea:disabled{
 
       socket.on("mensagens:todas_lidas", function(payload){
         atualizarBadgeMensagens(payload && payload.nao_lidas, "socket_todas_lidas");
+      });
+
+      socket.on("mensagens:excluida", function(payload){
+        atualizarBadgeMensagens(payload && payload.nao_lidas, "socket_excluida");
       });
 
       return socket;

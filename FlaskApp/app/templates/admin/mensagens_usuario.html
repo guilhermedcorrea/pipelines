@@ -453,6 +453,62 @@
     text-align:center;
   }
 
+
+  .msg-pagination{
+    flex:0 0 auto;
+    border-top:1px solid var(--border);
+    background:#fff;
+    padding:12px 14px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .msg-pagination-info{
+    color:var(--muted);
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .msg-pagination-buttons{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+
+  .msg-page-btn{
+    min-width:34px;
+    height:34px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background:#fff;
+    color:var(--text);
+    font-weight:950;
+    font-size:12px;
+    cursor:pointer;
+    padding:0 10px;
+  }
+
+  .msg-page-btn:hover{
+    background:rgba(0,40,132,.08);
+  }
+
+  .msg-page-btn.is-active{
+    background:var(--euro-blue);
+    color:#fff;
+    border-color:var(--euro-blue);
+  }
+
+  .msg-page-btn:disabled{
+    opacity:.45;
+    cursor:not-allowed;
+    background:#F8FAFC;
+  }
+
   @media (min-width: 1500px){
     .msg-layout{
       grid-template-columns:minmax(380px, 30vw) minmax(0, 1fr);
@@ -621,6 +677,12 @@
       <div class="msg-list" id="listaMensagens">
         <div class="msg-loading">Carregando mensagens...</div>
       </div>
+
+
+      <div class="msg-pagination" id="paginacaoMensagens" hidden>
+        <div class="msg-pagination-info" id="paginacaoInfoMensagens">—</div>
+        <div class="msg-pagination-buttons" id="paginacaoBotoesMensagens"></div>
+      </div>
     </section>
 
     <section class="msg-card msg-detail">
@@ -660,11 +722,25 @@
   const alertaOk = document.getElementById("msgAlertaOk");
   const alertaErro = document.getElementById("msgAlertaErro");
 
+  const paginacao = document.getElementById("paginacaoMensagens");
+  const paginacaoInfo = document.getElementById("paginacaoInfoMensagens");
+  const paginacaoBotoes = document.getElementById("paginacaoBotoesMensagens");
+
   const URL_LISTA = "{{ url_for('admin.api_mensagens_lista') }}";
   const URL_MARCAR_TODAS = "{{ url_for('admin.api_mensagens_marcar_todas_lidas') }}";
+  const TAMANHO_PAGINA = 10;
 
   let mensagensCache = [];
   let mensagemAbertaId = null;
+  let paginaAtual = 1;
+  let totalPaginas = 1;
+  let totalFiltrado = 0;
+  let debounceBusca = null;
+  let resumoAtual = {
+    total: 0,
+    nao_lidas: 0,
+    lidas: 0
+  };
 
   function getCsrfToken(){
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -709,56 +785,116 @@
     return String(Number(n || 0));
   }
 
-  function atualizarKpis(itens){
-    const total = itens.length;
-    const naoLidas = itens.filter(function(x){ return !x.bit_lida; }).length;
-    const lidas = total - naoLidas;
+  function atualizarKpis(resumo){
+    const total = Number(resumo && resumo.total !== undefined ? resumo.total : mensagensCache.length) || 0;
+    const naoLidas = Number(resumo && resumo.nao_lidas !== undefined ? resumo.nao_lidas : mensagensCache.filter(function(x){ return !x.bit_lida; }).length) || 0;
+    const lidas = Number(resumo && resumo.lidas !== undefined ? resumo.lidas : Math.max(0, total - naoLidas)) || 0;
 
     if (kpiTotal) kpiTotal.textContent = formatarNumero(total);
     if (kpiNaoLidas) kpiNaoLidas.textContent = formatarNumero(naoLidas);
     if (kpiLidas) kpiLidas.textContent = formatarNumero(lidas);
-
-    if (msgListaStatus){
-      msgListaStatus.textContent = total === 1 ? "1 mensagem" : `${total} mensagens`;
-    }
   }
 
-  function textoBuscaMensagem(msg){
-    return [
-      msg.id,
-      msg.tipo,
-      msg.titulo,
-      msg.resumo,
-      msg.link,
-      msg.id_contrato,
-      msg.id_item,
-      msg.id_vencimento,
-      msg.data_criacao
-    ].join(" ").toLowerCase();
-  }
-
-  function mensagensFiltradas(){
-    const termo = (inputBusca && inputBusca.value ? inputBusca.value : "").trim().toLowerCase();
+  function montarUrlLista(){
+    const url = new URL(URL_LISTA, window.location.origin);
+    const termo = inputBusca && inputBusca.value ? inputBusca.value.trim() : "";
     const filtro = selectFiltro ? selectFiltro.value : "todas";
 
-    return mensagensCache.filter(function(msg){
-      if (filtro === "nao_lidas" && msg.bit_lida) return false;
-      if (filtro === "lidas" && !msg.bit_lida) return false;
+    url.searchParams.set("page", String(paginaAtual));
+    url.searchParams.set("per_page", String(TAMANHO_PAGINA));
+    url.searchParams.set("filtro", filtro || "todas");
 
-      if (!termo) return true;
+    if (termo){
+      url.searchParams.set("q", termo);
+    }
 
-      return textoBuscaMensagem(msg).includes(termo);
-    });
+    return url.toString();
+  }
+
+  function atualizarStatusLista(paginacaoDados){
+    if (!msgListaStatus) return;
+
+    const total = Number(paginacaoDados && paginacaoDados.total !== undefined ? paginacaoDados.total : totalFiltrado) || 0;
+    const inicio = Number(paginacaoDados && paginacaoDados.inicio !== undefined ? paginacaoDados.inicio : 0) || 0;
+    const fim = Number(paginacaoDados && paginacaoDados.fim !== undefined ? paginacaoDados.fim : 0) || 0;
+
+    if (total <= 0){
+      msgListaStatus.textContent = "Nenhuma mensagem";
+      return;
+    }
+
+    msgListaStatus.textContent = `Exibindo ${inicio}-${fim} de ${total}`;
+  }
+
+  function renderizarPaginacao(paginacaoDados){
+    if (!paginacao || !paginacaoInfo || !paginacaoBotoes) return;
+
+    const total = Number(paginacaoDados && paginacaoDados.total !== undefined ? paginacaoDados.total : 0) || 0;
+    const page = Number(paginacaoDados && paginacaoDados.page !== undefined ? paginacaoDados.page : paginaAtual) || 1;
+    const pages = Number(paginacaoDados && paginacaoDados.total_pages !== undefined ? paginacaoDados.total_pages : 1) || 1;
+    const inicio = Number(paginacaoDados && paginacaoDados.inicio !== undefined ? paginacaoDados.inicio : 0) || 0;
+    const fim = Number(paginacaoDados && paginacaoDados.fim !== undefined ? paginacaoDados.fim : 0) || 0;
+
+    totalFiltrado = total;
+    paginaAtual = page;
+    totalPaginas = Math.max(1, pages);
+
+    limparElemento(paginacaoBotoes);
+
+    if (total <= 0){
+      paginacao.hidden = true;
+      return;
+    }
+
+    paginacao.hidden = false;
+    paginacaoInfo.textContent = `Página ${page} de ${totalPaginas} • ${inicio}-${fim} de ${total}`;
+
+    function adicionarBotao(rotulo, destino, desabilitado, ativo){
+      const btn = criarEl("button", "msg-page-btn" + (ativo ? " is-active" : ""), rotulo);
+      btn.type = "button";
+      btn.disabled = !!desabilitado;
+      btn.addEventListener("click", function(){
+        if (btn.disabled) return;
+        paginaAtual = destino;
+        carregarMensagens(true);
+      });
+      paginacaoBotoes.appendChild(btn);
+    }
+
+    adicionarBotao("‹", Math.max(1, page - 1), page <= 1, false);
+
+    let inicioJanela = Math.max(1, page - 2);
+    let fimJanela = Math.min(totalPaginas, inicioJanela + 4);
+    inicioJanela = Math.max(1, fimJanela - 4);
+
+    if (inicioJanela > 1){
+      adicionarBotao("1", 1, false, page === 1);
+      if (inicioJanela > 2){
+        const pontos = criarEl("span", "msg-pagination-info", "...");
+        paginacaoBotoes.appendChild(pontos);
+      }
+    }
+
+    for (let p = inicioJanela; p <= fimJanela; p += 1){
+      adicionarBotao(String(p), p, false, p === page);
+    }
+
+    if (fimJanela < totalPaginas){
+      if (fimJanela < totalPaginas - 1){
+        const pontos = criarEl("span", "msg-pagination-info", "...");
+        paginacaoBotoes.appendChild(pontos);
+      }
+      adicionarBotao(String(totalPaginas), totalPaginas, false, page === totalPaginas);
+    }
+
+    adicionarBotao("›", Math.min(totalPaginas, page + 1), page >= totalPaginas, false);
   }
 
   function renderizarLista(){
     limparElemento(lista);
+    atualizarKpis(resumoAtual);
 
-    const itens = mensagensFiltradas();
-
-    atualizarKpis(mensagensCache);
-
-    if (!itens.length){
+    if (!mensagensCache.length){
       const empty = criarEl("div", "msg-empty");
       const strong = criarEl("span", "msg-empty-strong", "Nenhuma mensagem encontrada");
       empty.appendChild(strong);
@@ -767,7 +903,7 @@
       return;
     }
 
-    itens.forEach(function(msg){
+    mensagensCache.forEach(function(msg){
       const btn = criarEl("button", "msg-item");
       btn.type = "button";
       btn.dataset.id = String(msg.id);
@@ -781,7 +917,6 @@
       }
 
       const top = criarEl("div", "msg-item-top");
-
       const title = criarEl("div", "msg-item-title", msg.titulo || "Sem título");
       top.appendChild(title);
 
@@ -795,26 +930,17 @@
       btn.appendChild(top);
 
       const meta = criarEl("div", "msg-item-meta");
-
-      const tipo = criarEl("span", "", msg.tipo || "Mensagem");
-      const dot1 = criarEl("span", "msg-dot");
-      const data = criarEl("span", "", msg.data_criacao || "Sem data");
-
-      meta.appendChild(tipo);
-      meta.appendChild(dot1);
-      meta.appendChild(data);
+      meta.appendChild(criarEl("span", "", msg.tipo || "Mensagem"));
+      meta.appendChild(criarEl("span", "msg-dot"));
+      meta.appendChild(criarEl("span", "", msg.data_criacao || "Sem data"));
 
       if (msg.id_contrato){
-        const dot2 = criarEl("span", "msg-dot");
-        const contrato = criarEl("span", "", `Contrato ${msg.id_contrato}`);
-        meta.appendChild(dot2);
-        meta.appendChild(contrato);
+        meta.appendChild(criarEl("span", "msg-dot"));
+        meta.appendChild(criarEl("span", "", `Contrato ${msg.id_contrato}`));
       }
 
       btn.appendChild(meta);
-
-      const resumo = criarEl("div", "msg-item-resumo", msg.resumo || "");
-      btn.appendChild(resumo);
+      btn.appendChild(criarEl("div", "msg-item-resumo", msg.resumo || ""));
 
       btn.addEventListener("click", function(){
         abrirMensagem(msg.id);
@@ -842,7 +968,6 @@
 
   function renderizarDetalhe(msg){
     limparElemento(detalhe);
-
     mensagemAbertaId = msg.id;
 
     if (msgDetalheStatus){
@@ -906,17 +1031,21 @@
     );
     btnLida.type = "button";
     btnLida.disabled = !!msg.bit_lida;
-
     btnLida.addEventListener("click", async function(){
       await marcarMensagemLida(msg.id);
       await abrirMensagem(msg.id, true);
       await carregarMensagens(false);
     });
-
     actions.appendChild(btnLida);
 
-    detalhe.appendChild(actions);
+    const btnExcluir = criarEl("button", "msg-btn msg-btn-danger", "Excluir mensagem");
+    btnExcluir.type = "button";
+    btnExcluir.addEventListener("click", async function(){
+      await excluirMensagem(msg.id);
+    });
+    actions.appendChild(btnExcluir);
 
+    detalhe.appendChild(actions);
     renderizarLista();
   }
 
@@ -927,12 +1056,10 @@
         lista.appendChild(criarEl("div", "msg-loading", "Carregando mensagens..."));
       }
 
-      const resp = await fetch(URL_LISTA, {
+      const resp = await fetch(montarUrlLista(), {
         method: "GET",
         credentials: "same-origin",
-        headers: {
-          "Accept": "application/json"
-        }
+        headers: { "Accept": "application/json" }
       });
 
       const data = await resp.json();
@@ -942,8 +1069,26 @@
       }
 
       mensagensCache = Array.isArray(data.itens) ? data.itens : [];
+      resumoAtual = data.resumo || resumoAtual;
 
+      const paginacaoDados = data.paginacao || {
+        page: paginaAtual,
+        per_page: TAMANHO_PAGINA,
+        total: mensagensCache.length,
+        total_pages: 1,
+        inicio: mensagensCache.length ? 1 : 0,
+        fim: mensagensCache.length
+      };
+
+      if (!mensagensCache.length && Number(paginacaoDados.total || 0) > 0 && paginaAtual > 1){
+        paginaAtual = Math.max(1, paginaAtual - 1);
+        await carregarMensagens(true);
+        return;
+      }
+
+      atualizarStatusLista(paginacaoDados);
       renderizarLista();
+      renderizarPaginacao(paginacaoDados);
 
       if (mensagemAbertaId){
         const aindaExiste = mensagensCache.some(function(x){
@@ -952,7 +1097,7 @@
 
         if (!aindaExiste){
           mensagemAbertaId = null;
-          renderizarDetalheVazio("Mensagem não encontrada");
+          renderizarDetalheVazio("Mensagem não encontrada nesta página");
         }
       }
     }catch(e){
@@ -967,9 +1112,7 @@
       const resp = await fetch(`/admin/api/mensagens/${encodeURIComponent(id)}`, {
         method: "GET",
         credentials: "same-origin",
-        headers: {
-          "Accept": "application/json"
-        }
+        headers: { "Accept": "application/json" }
       });
 
       const data = await resp.json();
@@ -983,7 +1126,6 @@
       if (!silencioso){
         mostrarAlerta("erro", e.message || "Erro ao abrir mensagem.");
       }
-
       renderizarDetalheVazio("Não consegui abrir a mensagem");
     }
   }
@@ -1004,10 +1146,7 @@
       throw new Error((data && data.erro) ? data.erro : "Erro ao marcar mensagem como lida.");
     }
 
-    const item = mensagensCache.find(function(x){
-      return Number(x.id) === Number(id);
-    });
-
+    const item = mensagensCache.find(function(x){ return Number(x.id) === Number(id); });
     if (item){
       item.bit_lida = true;
     }
@@ -1015,11 +1154,43 @@
     mostrarAlerta("ok", "Mensagem marcada como lida.");
   }
 
+  async function excluirMensagem(id){
+    const confirmar = window.confirm("Excluir esta mensagem? Ela deixará de aparecer na sua lista.");
+    if (!confirmar) return;
+
+    try{
+      const resp = await fetch(`/admin/api/mensagens/${encodeURIComponent(id)}/excluir`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Accept": "application/json",
+          "X-CSRFToken": getCsrfToken()
+        }
+      });
+
+      const data = await resp.json();
+
+      if (!data || !data.ok){
+        throw new Error((data && data.erro) ? data.erro : "Erro ao excluir mensagem.");
+      }
+
+      mensagensCache = mensagensCache.filter(function(x){ return Number(x.id) !== Number(id); });
+
+      if (Number(mensagemAbertaId) === Number(id)){
+        mensagemAbertaId = null;
+        renderizarDetalheVazio("Mensagem excluída");
+      }
+
+      mostrarAlerta("ok", "Mensagem excluída com sucesso.");
+      await carregarMensagens(false);
+    }catch(e){
+      mostrarAlerta("erro", e.message || "Erro ao excluir mensagem.");
+    }
+  }
+
   async function marcarTodasLidas(){
     try{
-      if (btnMarcarTodas){
-        btnMarcarTodas.disabled = true;
-      }
+      if (btnMarcarTodas){ btnMarcarTodas.disabled = true; }
 
       const resp = await fetch(URL_MARCAR_TODAS, {
         method: "POST",
@@ -1036,11 +1207,8 @@
         throw new Error((data && data.erro) ? data.erro : "Erro ao marcar todas como lidas.");
       }
 
-      mensagensCache.forEach(function(msg){
-        msg.bit_lida = true;
-      });
-
-      renderizarLista();
+      mensagensCache.forEach(function(msg){ msg.bit_lida = true; });
+      await carregarMensagens(false);
 
       if (mensagemAbertaId){
         await abrirMensagem(mensagemAbertaId, true);
@@ -1050,33 +1218,32 @@
     }catch(e){
       mostrarAlerta("erro", e.message || "Erro ao marcar todas como lidas.");
     }finally{
-      if (btnMarcarTodas){
-        btnMarcarTodas.disabled = false;
-      }
+      if (btnMarcarTodas){ btnMarcarTodas.disabled = false; }
     }
   }
 
   if (btnAtualizar){
-    btnAtualizar.addEventListener("click", function(){
-      carregarMensagens(true);
-    });
+    btnAtualizar.addEventListener("click", function(){ carregarMensagens(true); });
   }
 
   if (btnMarcarTodas){
-    btnMarcarTodas.addEventListener("click", function(){
-      marcarTodasLidas();
-    });
+    btnMarcarTodas.addEventListener("click", function(){ marcarTodasLidas(); });
   }
 
   if (inputBusca){
     inputBusca.addEventListener("input", function(){
-      renderizarLista();
+      clearTimeout(debounceBusca);
+      debounceBusca = setTimeout(function(){
+        paginaAtual = 1;
+        carregarMensagens(true);
+      }, 350);
     });
   }
 
   if (selectFiltro){
     selectFiltro.addEventListener("change", function(){
-      renderizarLista();
+      paginaAtual = 1;
+      carregarMensagens(true);
     });
   }
 
@@ -1096,21 +1263,15 @@
     });
 
     socketMensagensPagina.on("mensagens:nova", function(){
+      paginaAtual = 1;
       carregarMensagens(false);
       mostrarAlerta("ok", "Nova mensagem recebida.");
     });
 
-    socketMensagensPagina.on("mensagens:lida", function(){
-      carregarMensagens(false);
-    });
-
-    socketMensagensPagina.on("mensagens:todas_lidas", function(){
-      carregarMensagens(false);
-    });
-
-    socketMensagensPagina.on("mensagens:resumo", function(){
-      carregarMensagens(false);
-    });
+    socketMensagensPagina.on("mensagens:lida", function(){ carregarMensagens(false); });
+    socketMensagensPagina.on("mensagens:todas_lidas", function(){ carregarMensagens(false); });
+    socketMensagensPagina.on("mensagens:excluida", function(){ carregarMensagens(false); });
+    socketMensagensPagina.on("mensagens:resumo", function(){ carregarMensagens(false); });
   }
 })();
 </script>

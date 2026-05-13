@@ -184,6 +184,11 @@ TABELA_EMPRESAS = "[Integracao].[Silver].[DimEmpresas]"
 TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
 
 
+ID_PERFIL_ADMIN_PADRAO = 1
+ID_PERFIL_VENDEDOR_PADRAO = 3
+ID_PERFIL_COORDENADOR_PADRAO = 5
+
+
 def _id_empresa_usuario() -> int:
     return int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0)
 
@@ -207,7 +212,7 @@ def _usuario_eh_perfil_vendedor_kanban() -> bool:
         return False
 
     try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 3:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_VENDEDOR_PADRAO:
             return True
     except Exception:
         pass
@@ -222,6 +227,34 @@ def _usuario_eh_perfil_vendedor_kanban() -> bool:
     ]
 
     return any(_normalizar_acl_kanban(nome) == "vendedor" for nome in nomes_perfil)
+
+
+def _usuario_eh_perfil_coordenador_kanban() -> bool:
+    """Identifica o perfil Coordenador pela regra fixa: IDDimPerfilUsuario = 5."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_COORDENADOR_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    perfil = getattr(current_user, "perfil", None)
+    nomes_perfil = [
+        getattr(current_user, "NomePerfil", None),
+        getattr(current_user, "Perfil", None),
+        getattr(current_user, "DescricaoPerfil", None),
+        getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+        getattr(perfil, "Descricao", None) if perfil is not None else None,
+    ]
+
+    return any(_normalizar_acl_kanban(nome) == "coordenador" for nome in nomes_perfil)
+
+
+def _usuario_eh_admin_ou_coordenador_kanban() -> bool:
+    """Admin e Coordenador têm visão operacional completa do Kanban."""
+    return _usuario_eh_admin_kanban() or _usuario_eh_perfil_coordenador_kanban()
 
 
 
@@ -248,7 +281,7 @@ def _usuario_eh_admin_kanban() -> bool:
     Regra crítica do bloqueio de carteira:
     - Se IDDimPerfilUsuario = 3 ou nome do perfil = Vendedor, NÃO é tratado como Admin,
       mesmo que tenha alguma permissão extra por engano.
-    - Admin real continua sendo IDDimPerfilUsuario = 1 ou perfil administrativo.
+    - Admin real continua sendo IDDimPerfilUsuario = 1; Coordenador (ID 5) recebe visão operacional completa.
     """
     if not getattr(current_user, "is_authenticated", False):
         return False
@@ -258,8 +291,11 @@ def _usuario_eh_admin_kanban() -> bool:
     if _usuario_eh_perfil_vendedor_kanban():
         return False
 
+    if _usuario_eh_perfil_coordenador_kanban():
+        return True
+
     try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 1:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_ADMIN_PADRAO:
             return True
     except Exception:
         pass
@@ -320,8 +356,11 @@ def _usuario_eh_admin_real_carteira_kanban() -> bool:
     if not getattr(current_user, "is_authenticated", False):
         return False
 
+    if _usuario_eh_perfil_coordenador_kanban():
+        return True
+
     try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 1:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_ADMIN_PADRAO:
             return True
     except Exception:
         pass
@@ -420,7 +459,7 @@ def _obter_status_carteira_empresa_para_vendedor(id_empresa: int | None) -> dict
     5. Dono da carteira vem de FatoCarteiraVendedor.IDVendedor.
     6. A comparação é FatoCarteiraVendedor.IDVendedor versus Vendedores.IDVendedor do usuário logado.
     7. NÃO usa IDEmpresaProprietaria para decidir bloqueio.
-    8. Só Admin real passa direto: IDDimUsuarios = 1 ou IDDimPerfilUsuario = 1.
+    8. Admin real e Coordenador passam direto: IDDimUsuarios = 1 ou IDDimPerfilUsuario IN (1, 5).
     """
     id_empresa_int = _int_ou_none(id_empresa)
     id_usuario_logado = int(_id_usuario() or 0)
@@ -520,8 +559,8 @@ def _obter_status_carteira_empresa_para_vendedor(id_empresa: int | None) -> dict
             ce.IDVendedorCarteira,
             ce.NomeVendedorCarteira,
             CASE
-                WHEN u.IDDimUsuarios = 1 OR u.IDDimPerfilUsuario = 1
-                    THEN 'PERMITE_ADMIN_REAL'
+                WHEN u.IDDimUsuarios = 1 OR u.IDDimPerfilUsuario IN (1, 5)
+                    THEN 'PERMITE_ADMIN_OU_COORDENADOR'
                 WHEN ce.IDFatoCarteiraVendedorEmpresas IS NULL
                     THEN 'PERMITE_SEM_CARTEIRA'
                 WHEN vl.IDVendedor IS NOT NULL AND ce.IDVendedorCarteira = vl.IDVendedor
@@ -787,6 +826,9 @@ def _usuario_pode_ver_custo_margem_kanban() -> bool:
     """Eu verifico se o usuário logado pode visualizar custo e margem no Kanban."""
     if not getattr(current_user, "is_authenticated", False):
         return False
+
+    if _usuario_eh_admin_ou_coordenador_kanban():
+        return True
 
     try:
         metodo = getattr(current_user, "has_permission", None)
@@ -1256,6 +1298,9 @@ def _usuario_logado_eh_admin_aprovacao_desconto() -> bool:
     - a permissão do Admin não serve para recalcular o limite do desconto solicitado.
     """
     id_usuario = int(_assert_login() or 0)
+
+    if _usuario_eh_perfil_coordenador_kanban():
+        return True
 
     for atributo in (
         "BitAdmin",
@@ -5307,7 +5352,18 @@ def _executar_movimento_card_core(
             dados_formulario_solicitacao=dados_formulario_solicitacao_movimento,
         )
 
+        id_tipo_documento_movimento, nome_tipo_documento_movimento = _resolver_tipo_documento_card_payload(
+            payload,
+            dados_formulario_solicitacao_movimento,
+        )
+        resultado_tipo_documento_movimento = _atualizar_tipo_documento_no_card(
+            id_card=int(id_card),
+            id_tipo_documento=id_tipo_documento_movimento,
+            atualizar_timestamp=True,
+        )
+
         if isinstance(sincronizacao_solicitacao_fase, dict):
+            sincronizacao_solicitacao_fase["tipo_documento_card"] = resultado_tipo_documento_movimento
             sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
 
         if int(id_fase_para) == 4:
@@ -9616,6 +9672,12 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         else "CAST(NULL AS nvarchar(200)) AS NomeEmpresa,"
     )
 
+    select_id_tipo_documento = (
+        "c.IDDimTipoDocumento AS IDDimTipoDocumento,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento")
+        else "CAST(NULL AS int) AS IDDimTipoDocumento,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -9646,6 +9708,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
             {select_id_tipo_cliente_card}
             {select_id_dim_cnaes}
             {select_nome_empresa}
+            {select_id_tipo_documento}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             k.BitPrincipal,
@@ -9751,6 +9814,12 @@ def _obter_card_tags_kanban(id_kanban: int) -> list[dict[str, Any]]:
 
 
 def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
+    select_id_tipo_documento = (
+        "c.IDDimTipoDocumento AS IDDimTipoDocumento,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento")
+        else "CAST(NULL AS int) AS IDDimTipoDocumento,"
+    )
+
     sql_cards = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -9761,6 +9830,7 @@ def _obter_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
             c.CriadoEm,
             c.AtualizadoEm,
             c.IDEmpresaProprietaria,
+            {select_id_tipo_documento}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             e.RazaoSocial AS EmpresaRazaoSocial,
@@ -14437,6 +14507,12 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         else "CAST(NULL AS nvarchar(200)) AS NomeEmpresa,"
     )
 
+    select_id_tipo_documento = (
+        "c.IDDimTipoDocumento AS IDDimTipoDocumento,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento")
+        else "CAST(NULL AS int) AS IDDimTipoDocumento,"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -14468,6 +14544,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             {select_id_tipo_cliente_card}
             {select_id_dim_cnaes}
             {select_nome_empresa}
+            {select_id_tipo_documento}
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             {_sql_select_nome_usuario_relacionado_card('usuario')},
@@ -14719,6 +14796,7 @@ def kanbans_lista():
         "kanban/kanbans_lista.html",
         kanbans=kanbans,
         usuario_eh_vendedor_kanban=_usuario_eh_perfil_vendedor_kanban(),
+        usuario_eh_coordenador_kanban=_usuario_eh_perfil_coordenador_kanban(),
     )
 
 
@@ -14733,13 +14811,17 @@ def kanban_view(id_kanban: int):
         escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
         usuario_eh_admin_kanban = _usuario_eh_admin_real_carteira_kanban()
         usuario_tem_bloqueio_carteira_kanban = _usuario_tem_bloqueio_carteira_kanban()
+        usuario_eh_coordenador_kanban = _usuario_eh_perfil_coordenador_kanban()
+        pode_ver_custo_margem = _usuario_pode_ver_custo_margem_kanban()
 
         return render_template(
             "kanban/kanban_view.html",
             kanban=kanban,
             usuario_eh_vendedor_kanban=bool(escopo_vendedor.get("ativo")),
             usuario_eh_admin_kanban=bool(usuario_eh_admin_kanban),
+            usuario_eh_coordenador_kanban=bool(usuario_eh_coordenador_kanban),
             usuario_tem_bloqueio_carteira_kanban=bool(usuario_tem_bloqueio_carteira_kanban),
+            pode_ver_custo_margem=bool(pode_ver_custo_margem),
             id_usuario_logado_kanban=int(escopo_vendedor.get("id_usuario") or _id_usuario() or 0),
             id_vendedor_logado_kanban=int(escopo_vendedor.get("id_vendedor") or 0) or None,
         )
@@ -15483,6 +15565,12 @@ def api_cards_listar_por_fase(id_kanban: int):
             ).scalar() or 0
         )
 
+        select_id_tipo_documento = (
+            "c.IDDimTipoDocumento AS IDDimTipoDocumento,"
+            if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento")
+            else "CAST(NULL AS int) AS IDDimTipoDocumento,"
+        )
+
         sql_cards = text(f"""
             ;WITH CardsPaginados AS (
                 SELECT
@@ -15495,6 +15583,7 @@ def api_cards_listar_por_fase(id_kanban: int):
                     c.AtualizadoEm,
                     {_sql_select_versao_concorrencia_card('c')},
                     c.IDEmpresaProprietaria,
+                    {select_id_tipo_documento}
                     {_sql_select_id_vendedor_card('c')},
                     {_sql_select_id_origem_atendimento_card('c')}
                     {_sql_select_empresa_relacionada_card('c')},
@@ -15547,6 +15636,7 @@ def api_cards_listar_por_fase(id_kanban: int):
                 AtualizadoEm,
                 VersaoConcorrencia,
                 IDEmpresaProprietaria,
+                IDDimTipoDocumento,
                 IDVendedor,
                 IDDimOrigemAtendimento,
                 IDEmpresaRelacionadaCard,
@@ -27534,6 +27624,128 @@ def _nome_tipo_documento_por_id(id_tipo_documento: Any) -> str | None:
     return None
 
 
+
+
+
+def _resolver_tipo_documento_card_payload(
+    payload: Mapping[str, Any] | dict[str, Any] | None,
+    solicitacao_contrato_payload: Mapping[str, Any] | dict[str, Any] | None = None,
+) -> tuple[int | None, str | None]:
+    """Resolve o IDDimTipoDocumento que deve ficar gravado no card.
+
+    Regra operacional:
+    - o front normalmente envia o tipo de documento dentro de solicitacao_contrato.header;
+    - em alguns fluxos também pode vir no item ou em campo direto do payload;
+    - aqui eu centralizo a leitura para o INSERT, UPDATE e movimento do card gravarem
+      [Kanban].[Silver].[FatoKanbanCard].IDDimTipoDocumento.
+    """
+    fontes: list[Mapping[str, Any] | dict[str, Any]] = []
+
+    if isinstance(payload, Mapping):
+        fontes.append(payload)
+
+    if isinstance(solicitacao_contrato_payload, Mapping):
+        for chave_header in ("header", "Header", "cabecalho", "Cabecalho"):
+            valor_header = solicitacao_contrato_payload.get(chave_header)
+            if isinstance(valor_header, Mapping):
+                fontes.append(valor_header)
+
+        for chave_item in ("item", "Item"):
+            valor_item = solicitacao_contrato_payload.get(chave_item)
+            if isinstance(valor_item, Mapping):
+                fontes.append(valor_item)
+
+        itens = solicitacao_contrato_payload.get("itens") or solicitacao_contrato_payload.get("Itens")
+        if isinstance(itens, list):
+            for item in itens:
+                if isinstance(item, Mapping):
+                    fontes.append(item)
+
+    ids_validos: dict[int, str] = {}
+    nomes_validos: dict[str, tuple[int, str]] = {}
+
+    for tipo_documento in _obter_tipos_documento(incluir_inativos=True):
+        id_tipo = _int_ou_none(tipo_documento.get("IDDimTipoDocumento"))
+        nome_tipo = str(tipo_documento.get("NomeTipoDocumento") or "").strip()
+        if not id_tipo or id_tipo <= 0 or not nome_tipo:
+            continue
+        ids_validos[int(id_tipo)] = nome_tipo
+        nomes_validos[_normalizar_texto_comparacao(nome_tipo)] = (int(id_tipo), nome_tipo)
+
+    campos_id = (
+        "IDDimTipoDocumento",
+        "id_dim_tipo_documento",
+        "idTipoDocumento",
+        "id_tipo_documento",
+    )
+    campos_nome = (
+        "TipoDocumento",
+        "NomeTipoDocumento",
+        "tipo_documento",
+        "nome_tipo_documento",
+    )
+
+    for fonte in fontes:
+        for campo_id in campos_id:
+            id_tipo = _int_ou_none(fonte.get(campo_id))
+            if not id_tipo or id_tipo <= 0:
+                continue
+            if id_tipo in ids_validos:
+                return int(id_tipo), ids_validos[int(id_tipo)]
+            raise ValueError(f"Tipo de documento inválido para o card: IDDimTipoDocumento={id_tipo}.")
+
+    for fonte in fontes:
+        for campo_nome in campos_nome:
+            nome_tipo = str(fonte.get(campo_nome) or "").strip()
+            if not nome_tipo:
+                continue
+            encontrado = nomes_validos.get(_normalizar_texto_comparacao(nome_tipo))
+            if encontrado:
+                return encontrado
+
+    return None, None
+
+
+def _atualizar_tipo_documento_no_card(
+    *,
+    id_card: int,
+    id_tipo_documento: int | None,
+    atualizar_timestamp: bool = True,
+) -> dict[str, Any]:
+    """Atualiza o IDDimTipoDocumento direto na FatoKanbanCard quando o valor vier do formulário."""
+    id_tipo = _int_ou_none(id_tipo_documento)
+    if not id_tipo or id_tipo <= 0:
+        return {"executado": False, "linhas": 0, "motivo": "tipo_documento_ausente"}
+
+    if not _coluna_existe(TABELA_CARD, "IDDimTipoDocumento"):
+        return {"executado": False, "linhas": 0, "motivo": "coluna_IDDimTipoDocumento_ausente"}
+
+    campos = ["IDDimTipoDocumento = :id_tipo_documento"]
+    if atualizar_timestamp and _coluna_existe(TABELA_CARD, "AtualizadoEm"):
+        campos.append("AtualizadoEm = GETDATE()")
+
+    sql = text(f"""
+        UPDATE {TABELA_CARD}
+           SET {', '.join(campos)}
+         WHERE IDFatoKanbanCard = :id_card
+           AND Ativo = 1;
+    """)
+
+    result = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card),
+            "id_tipo_documento": int(id_tipo),
+        },
+    )
+
+    return {
+        "executado": True,
+        "linhas": int(result.rowcount or 0),
+        "motivo": "tipo_documento_card_atualizado",
+    }
+
+
 def _obter_origens_atendimento(*, incluir_inativos: bool = False) -> list[dict[str, Any]]:
     chave = _chave_cache_json(
         "kanban:dominio:origem_atendimento",
@@ -27886,6 +28098,10 @@ def api_card_criar(id_kanban: int):
         nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
         painel_faces_payload = payload.get("painel_faces")
         solicitacao_contrato_payload = payload.get("solicitacao_contrato") if isinstance(payload.get("solicitacao_contrato"), dict) else None
+        id_tipo_documento_card, nome_tipo_documento_card = _resolver_tipo_documento_card_payload(
+            payload,
+            solicitacao_contrato_payload,
+        )
 
         if len(titulo) < 2:
             return jsonify({"ok": False, "msg": "Título inválido"}), 400
@@ -28224,6 +28440,11 @@ def api_card_criar(id_kanban: int):
             valores.append(":id_origem_atendimento")
             params["id_origem_atendimento"] = id_origem_atendimento_int
 
+        if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento"):
+            colunas.append("IDDimTipoDocumento")
+            valores.append(":id_tipo_documento_card")
+            params["id_tipo_documento_card"] = id_tipo_documento_card
+
         if _coluna_existe(TABELA_CARD, "IDDimKanbanStatusCard") and id_status_card_inicial is not None:
             colunas.append("IDDimKanbanStatusCard")
             valores.append(":id_status_card_inicial")
@@ -28492,6 +28713,7 @@ def api_card_criar(id_kanban: int):
             f" | cod_face_contrato={validacao_ponto_face.get('cod_face') or 'NULL'}"
             f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else (id_origem_atendimento_int if id_origem_atendimento_int not in (None, '', 0) else 'NULL')}"
+            f" | id_tipo_documento={id_tipo_documento_card if id_tipo_documento_card not in (None, '', 0) else 'NULL'}"
         )
 
         _registrar_log_card(
@@ -28628,6 +28850,10 @@ def api_card_atualizar(id_card: int):
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
         solicitacao_contrato_payload = payload.get("solicitacao_contrato") if isinstance(payload.get("solicitacao_contrato"), dict) else None
+        id_tipo_documento_card, nome_tipo_documento_card = _resolver_tipo_documento_card_payload(
+            payload,
+            solicitacao_contrato_payload,
+        )
         id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
         segmento_informado = "id_dim_cnaes" in payload
         nome_empresa_card = payload.get("nome_empresa") if "nome_empresa" in payload else None
@@ -28650,11 +28876,18 @@ def api_card_atualizar(id_card: int):
                     }
                 ), 409
 
+        select_id_tipo_documento_atual = (
+            "IDDimTipoDocumento,"
+            if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento")
+            else "CAST(NULL AS int) AS IDDimTipoDocumento,"
+        )
+
         sql_campos_card_atual = text(f"""
             SELECT TOP (1)
                 IDDimTipoCliente,
                 IDDimOrigemAtendimento,
                 IDDimCnaes,
+                {select_id_tipo_documento_atual}
                 IDEmpresa
             FROM {TABELA_CARD}
             WHERE IDFatoKanbanCard = :id_card;
@@ -28667,6 +28900,7 @@ def api_card_atualizar(id_card: int):
         id_tipo_cliente_atual_card = int(campos_card_atual.get("IDDimTipoCliente") or 0) or None
         id_origem_atendimento_atual_card = int(campos_card_atual.get("IDDimOrigemAtendimento") or 0) or None
         id_dim_cnaes_atual_card = int(campos_card_atual.get("IDDimCnaes") or 0) or None
+        id_tipo_documento_atual_card = int(campos_card_atual.get("IDDimTipoDocumento") or 0) or None
         id_empresa_atual_card = int(campos_card_atual.get("IDEmpresa") or 0) or None
 
         id_empresa_relacionada_int = int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None
@@ -28732,6 +28966,8 @@ def api_card_atualizar(id_card: int):
             if segmento_informado
             else id_dim_cnaes_atual_card
         )
+
+        id_tipo_documento_final_card = id_tipo_documento_card or id_tipo_documento_atual_card
 
         id_empresa_principal_final = id_empresa_relacionada_int or id_empresa_atual_card
 
@@ -28897,6 +29133,10 @@ def api_card_atualizar(id_card: int):
         if _coluna_existe(TABELA_CARD, "IDDimOrigemAtendimento"):
             campos_update.append("IDDimOrigemAtendimento = :id_origem_atendimento")
             parametros_update["id_origem_atendimento"] = id_origem_atendimento_final_card
+
+        if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento") and id_tipo_documento_final_card:
+            campos_update.append("IDDimTipoDocumento = :id_tipo_documento_card")
+            parametros_update["id_tipo_documento_card"] = int(id_tipo_documento_final_card)
 
         if _coluna_existe(TABELA_CARD, "IDDimCnaes"):
             campos_update.append("IDDimCnaes = :id_dim_cnaes")
@@ -29343,6 +29583,7 @@ def api_card_atualizar(id_card: int):
             f" | id_tipo_cliente={id_tipo_cliente_relacionamento_final if id_tipo_cliente_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_origem_atendimento={id_origem_atendimento_relacionamento_final if id_origem_atendimento_relacionamento_final not in (None, '', 0) else 'NULL'}"
             f" | id_dim_cnaes={id_dim_cnaes_final_card if id_dim_cnaes_final_card not in (None, '', 0) else 'NULL'}"
+            f" | id_tipo_documento={id_tipo_documento_final_card if id_tipo_documento_final_card not in (None, '', 0) else 'NULL'}"
             f" | historico_negociacao_preco_linhas={resultado_historico_negociacao_preco.get('linhas_inseridas')}"
             f" | correcao_estado_preco_linhas={correcao_estado_preco_card.get('linhas_corrigidas')}"
             f" | aprovacao_preco_materializado={resultado_aprovacao_preco.get('materializado')}"

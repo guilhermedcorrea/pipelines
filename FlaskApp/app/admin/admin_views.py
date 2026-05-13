@@ -5661,6 +5661,12 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             flush=True,
         )
 
+        id_dim_tipo_documento_item = _resolver_id_dim_tipo_documento_solicitacao_admin(
+            id_solicitacao=int(id_solicitacao),
+            cabecalho_solicitacao=cab,
+            item_solicitacao=item,
+        )
+
         params_item = {
             "IDFatoControleContratoEuromidia": int(id_contrato_controle),
             "Referencia": referencia_item_resolvida,
@@ -5734,6 +5740,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "Status": item.get("Status"),
             "IDDimCheckinHistorico": item.get("IDDimCheckingHistorico"),
             "IDFatoKanbanCard": item.get("IDFatoKanbanCard"),
+            "IDDimTipoDocumento": id_dim_tipo_documento_item,
             "BitAtivo": item.get("BitAtivo") if item.get("BitAtivo") is not None else 1,
             "IDEmpresaAgencia": item.get("IDEmpresaAgencia") or cab.get("IDEmpresaAgencia"),
         }
@@ -5816,6 +5823,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                                Status = :Status,
                            IDDimCheckinHistorico = :IDDimCheckinHistorico,
                            IDFatoKanbanCard = :IDFatoKanbanCard,
+                           IDDimTipoDocumento = :IDDimTipoDocumento,
                            BitAtivo = :BitAtivo,
                            IDEmpresaAgencia = :IDEmpresaAgencia
                      WHERE IDFatoControleContratosItensEuromidia = :id_item_controle
@@ -5902,6 +5910,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                                 Status,
                         IDDimCheckinHistorico,
                         IDFatoKanbanCard,
+                        IDDimTipoDocumento,
                         BitAtivo,
                         IDEmpresaAgencia
                     )
@@ -5980,6 +5989,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                                 :Status,
                         :IDDimCheckinHistorico,
                         :IDFatoKanbanCard,
+                        :IDDimTipoDocumento,
                         :BitAtivo,
                         :IDEmpresaAgencia
                     )
@@ -6011,12 +6021,11 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         )
         precos_praticados.append(resultado_preco_praticado)
 
-        id_dim_tipo_documento_campanha = _int_ou_none(cab.get("IDDimTipoDocumento"))
-        if id_dim_tipo_documento_campanha in (None, "", 0):
-            id_dim_tipo_documento_campanha = _resolver_id_dim_tipo_documento_admin(
-                cab.get("TipoDocumento"),
-                cab.get("IDEmpresaProprietaria"),
-            )
+        id_dim_tipo_documento_campanha = _resolver_id_dim_tipo_documento_solicitacao_admin(
+            id_solicitacao=int(id_solicitacao),
+            cabecalho_solicitacao=cab,
+            item_solicitacao=item,
+        )
 
         resultado_vencimento_campanha = _upsert_vencimento_campanha_aprovada_admin(
             cabecalho_solicitacao=cab,
@@ -6110,6 +6119,134 @@ def _resolver_id_dim_tipo_documento_admin(nome_tipo_documento: str | None, id_em
     ).mappings().first()
 
     return _int_ou_none(row.get("IDDimTipoDocumento")) if row else None
+
+
+def _resolver_id_dim_tipo_documento_solicitacao_admin(
+    *,
+    id_solicitacao: int | None,
+    cabecalho_solicitacao: dict | None = None,
+    item_solicitacao: dict | None = None,
+) -> int | None:
+    """Resolve o IDDimTipoDocumento da solicitação priorizando o item.
+
+    O cabeçalho da solicitação mantém o nome do tipo em TipoDocumento, mas o ID
+    normalizado fica nos itens em FatoSolicitacaoContratoItemEuromidia.
+    Por isso, na aprovação eu busco primeiro o ID do item e só depois faço
+    fallback por nome na DimTipoDocumento.
+    """
+    cab = cabecalho_solicitacao or {}
+    item = item_solicitacao or {}
+
+    id_tipo_documento = _int_ou_none(item.get("IDDimTipoDocumento"))
+    if id_tipo_documento not in (None, "", 0):
+        return int(id_tipo_documento)
+
+    id_tipo_documento = _int_ou_none(cab.get("IDDimTipoDocumento"))
+    if id_tipo_documento not in (None, "", 0):
+        return int(id_tipo_documento)
+
+    id_solicitacao_int = _int_ou_none(id_solicitacao)
+    tipo_documento_primeiro_item = None
+
+    if id_solicitacao_int not in (None, "", 0):
+        row_tipo = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                       fsci.IDDimTipoDocumento,
+                       fsci.TipoDocumento,
+                       fsci.IDEmpresaProprietaria
+                FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] fsci
+                WHERE fsci.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                ORDER BY
+                    CASE
+                        WHEN fsci.IDDimTipoDocumento IS NOT NULL AND fsci.IDDimTipoDocumento > 0 THEN 0
+                        ELSE 1
+                    END,
+                    fsci.IDFatoSolicitacaoContratoItemEuromidia ASC;
+            """),
+            {"id_solicitacao": int(id_solicitacao_int)},
+        ).mappings().first()
+
+        if row_tipo:
+            id_tipo_documento = _int_ou_none(row_tipo.get("IDDimTipoDocumento"))
+            if id_tipo_documento not in (None, "", 0):
+                return int(id_tipo_documento)
+            tipo_documento_primeiro_item = _texto_ou_none(row_tipo.get("TipoDocumento"))
+
+    id_empresa_proprietaria = (
+        _int_ou_none(item.get("IDEmpresaProprietaria"))
+        or _int_ou_none(cab.get("IDEmpresaProprietaria"))
+    )
+
+    for nome_tipo_documento in (
+        item.get("TipoDocumento"),
+        cab.get("TipoDocumento"),
+        tipo_documento_primeiro_item,
+    ):
+        id_tipo_documento = _resolver_id_dim_tipo_documento_admin(
+            nome_tipo_documento,
+            id_empresa_proprietaria,
+        )
+        if id_tipo_documento not in (None, "", 0):
+            return int(id_tipo_documento)
+
+    return None
+
+
+def _fato_kanban_card_tem_coluna_tipo_documento_admin() -> bool:
+    """Confirma se FatoKanbanCard possui a coluna IDDimTipoDocumento antes de atualizar."""
+    existe = db.session.execute(
+        text("""
+            SELECT TOP (1) 1
+            FROM [Kanban].sys.columns c
+            INNER JOIN [Kanban].sys.objects o
+                    ON o.object_id = c.object_id
+            INNER JOIN [Kanban].sys.schemas s
+                    ON s.schema_id = o.schema_id
+            WHERE s.name = 'Silver'
+              AND o.name = 'FatoKanbanCard'
+              AND c.name = 'IDDimTipoDocumento';
+        """)
+    ).scalar()
+    return bool(existe)
+
+
+def _atualizar_id_tipo_documento_card_admin(
+    *,
+    id_fato_kanban_card: int | None,
+    id_dim_tipo_documento: int | None,
+) -> None:
+    """Atualiza o IDDimTipoDocumento direto no card quando a coluna existe."""
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_tipo_documento = _int_ou_none(id_dim_tipo_documento)
+
+    if id_card in (None, "", 0) or id_tipo_documento in (None, "", 0):
+        return
+
+    if not _fato_kanban_card_tem_coluna_tipo_documento_admin():
+        current_app.logger.warning(
+            "APROVACAO_CONTRATO | FatoKanbanCard sem coluna IDDimTipoDocumento | id_card=%s | id_tipo_documento=%s",
+            id_card,
+            id_tipo_documento,
+        )
+        return
+
+    db.session.execute(
+        text("""
+            UPDATE [Kanban].[Silver].[FatoKanbanCard]
+               SET IDDimTipoDocumento = :id_tipo_documento,
+                   AtualizadoEm = GETDATE()
+             WHERE IDFatoKanbanCard = :id_card
+               AND (
+                    IDDimTipoDocumento IS NULL
+                    OR IDDimTipoDocumento <> :id_tipo_documento
+               );
+        """),
+        {
+            "id_card": int(id_card),
+            "id_tipo_documento": int(id_tipo_documento),
+        },
+    )
 
 
 def _card_admin_esta_na_fase_formulario_contrato(id_fato_kanban_card: int | None) -> bool:
@@ -6635,6 +6772,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                   ,fsci.[DataCriacao]
                   ,fsci.[DataAtualizacao]
                   ,fsci.[BitSolicitacaoAtiva]
+                  ,fsci.[IDDimTipoDocumento]
                   ,df.[Face] AS [FaceDescricaoCadastro]
                   ,df.[CodFace] AS [CodFaceCadastro]
                   ,df.[Tipo] AS [TipoFaceCadastro]
@@ -7059,12 +7197,15 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     aprovar=True,
                 )
 
-                id_dim_tipo_documento = _int_ou_none(cab_aprovada.get("IDDimTipoDocumento"))
-                if id_dim_tipo_documento in (None, "", 0):
-                    id_dim_tipo_documento = _resolver_id_dim_tipo_documento_admin(
-                        cab_aprovada.get("TipoDocumento"),
-                        id_empresa_proprietaria,
-                    )
+                id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
+                    id_solicitacao=int(id_solicitacao),
+                    cabecalho_solicitacao=cab_aprovada,
+                )
+
+                _atualizar_id_tipo_documento_card_admin(
+                    id_fato_kanban_card=id_card,
+                    id_dim_tipo_documento=id_dim_tipo_documento,
+                )
 
                 if _card_admin_esta_na_fase_formulario_contrato(id_card):
                     _registrar_ocorrencia_card_tipo_documento_admin(
@@ -7419,6 +7560,77 @@ def _mensagens_montar_destino_seguro(row_mensagem, id_usuario_logado: int | None
     }
 
 
+
+def _mensagens_param_int(nome: str, padrao: int, minimo: int, maximo: int) -> int:
+    try:
+        valor = int(request.args.get(nome) or padrao)
+    except Exception:
+        valor = padrao
+
+    if valor < minimo:
+        valor = minimo
+    if valor > maximo:
+        valor = maximo
+
+    return valor
+
+
+def _mensagens_formatar_data(valor) -> str:
+    if not valor:
+        return ""
+
+    try:
+        return valor.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return str(valor or "")
+
+
+def _mensagens_payload_lista(row_mensagem, id_usuario_logado: int) -> dict:
+    destino = _mensagens_montar_destino_seguro(row_mensagem, id_usuario_logado)
+    data_criacao = row_mensagem.get("DataCriacao")
+    data_leitura = row_mensagem.get("DataLeitura")
+
+    return {
+        "id": int(row_mensagem["IDFatoMensagemUsuario"]),
+        "id_tipo": row_mensagem.get("IDDimTipoMensagem"),
+        "tipo": row_mensagem.get("NomeTipoMensagem") or "Mensagem",
+        "titulo": row_mensagem.get("TituloMensagem") or "Sem título",
+        "resumo": row_mensagem.get("ResumoMensagem") or "",
+        "link": destino.get("link") or "",
+        "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
+        "motivo_destino": destino.get("motivo_destino") or "",
+        "bit_lida": bool(row_mensagem.get("BitLida")),
+        "data_criacao": _mensagens_formatar_data(data_criacao),
+        "data_leitura": _mensagens_formatar_data(data_leitura),
+        "id_vencimento": row_mensagem.get("IDFatoVencimentoCampanhaEuromidia"),
+        "id_contrato": row_mensagem.get("IDFatoControleContratosEuromidia"),
+        "id_item": row_mensagem.get("IDFatoControleContratosItensEuromidia"),
+    }
+
+
+def _mensagens_payload_detalhe(row_mensagem, id_usuario_logado: int) -> dict:
+    destino = _mensagens_montar_destino_seguro(row_mensagem, id_usuario_logado)
+    data_criacao = row_mensagem.get("DataCriacao")
+    data_leitura = row_mensagem.get("DataLeitura")
+
+    return {
+        "id": int(row_mensagem["IDFatoMensagemUsuario"]),
+        "id_tipo": row_mensagem.get("IDDimTipoMensagem"),
+        "tipo": row_mensagem.get("NomeTipoMensagem") or "Mensagem",
+        "titulo": row_mensagem.get("TituloMensagem") or "Sem título",
+        "texto": row_mensagem.get("TextoMensagem") or "",
+        "link": destino.get("link") or "",
+        "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
+        "motivo_destino": destino.get("motivo_destino") or "",
+        "bit_lida": bool(row_mensagem.get("BitLida")),
+        "data_criacao": _mensagens_formatar_data(data_criacao),
+        "data_leitura": _mensagens_formatar_data(data_leitura),
+        "id_vencimento": row_mensagem.get("IDFatoVencimentoCampanhaEuromidia"),
+        "id_contrato": row_mensagem.get("IDFatoControleContratosEuromidia"),
+        "id_item": row_mensagem.get("IDFatoControleContratosItensEuromidia"),
+    }
+
+
 @admin.route("/mensagens", methods=["GET"])
 @login_required
 @limiter.limit("80 per minute", methods=["GET"])
@@ -7437,20 +7649,26 @@ def api_mensagens_resumo():
 
     row = db.session.execute(
         text("""
-            SELECT COUNT(1) AS Total
+            SELECT
+                COUNT(1) AS Total,
+                SUM(CASE WHEN ISNULL(BitLida, 0) = 0 THEN 1 ELSE 0 END) AS NaoLidas,
+                SUM(CASE WHEN ISNULL(BitLida, 0) = 1 THEN 1 ELSE 0 END) AS Lidas
             FROM [Integracao].[Silver].[FatoMensagemUsuario] WITH (NOLOCK)
             WHERE IDDimUsuariosDestinatario = :id_usuario
               AND ISNULL(BitAtivo, 1) = 1
-              AND ISNULL(BitLida, 0) = 0
         """),
-        {"id_usuario": int(id_usuario)}
+        {"id_usuario": int(id_usuario)},
     ).mappings().first()
 
-    total = int(row["Total"] or 0) if row else 0
+    total = int(row.get("Total") or 0) if row else 0
+    nao_lidas = int(row.get("NaoLidas") or 0) if row else 0
+    lidas = int(row.get("Lidas") or 0) if row else 0
 
     return jsonify({
         "ok": True,
-        "nao_lidas": total,
+        "total": total,
+        "nao_lidas": nao_lidas,
+        "lidas": lidas,
     })
 
 
@@ -7463,9 +7681,68 @@ def api_mensagens_lista():
     if not id_usuario:
         return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
 
+    pagina = _mensagens_param_int("page", 1, 1, 100000)
+    por_pagina = 10
+    offset = (pagina - 1) * por_pagina
+
+    filtro = (request.args.get("filtro") or "todas").strip().lower()
+    if filtro not in {"todas", "nao_lidas", "lidas"}:
+        filtro = "todas"
+
+    termo = (request.args.get("q") or "").strip()
+
+    where_sql = [
+        "m.IDDimUsuariosDestinatario = :id_usuario",
+        "ISNULL(m.BitAtivo, 1) = 1",
+    ]
+    parametros = {
+        "id_usuario": int(id_usuario),
+        "offset": int(offset),
+        "por_pagina": int(por_pagina),
+    }
+
+    if filtro == "nao_lidas":
+        where_sql.append("ISNULL(m.BitLida, 0) = 0")
+    elif filtro == "lidas":
+        where_sql.append("ISNULL(m.BitLida, 0) = 1")
+
+    if termo:
+        parametros["termo_like"] = f"%{termo}%"
+        where_sql.append("""
+            (
+                ISNULL(m.TituloMensagem, '') LIKE :termo_like
+                OR ISNULL(m.TextoMensagem, '') LIKE :termo_like
+                OR ISNULL(tm.NomeTipoMensagem, '') LIKE :termo_like
+                OR CONVERT(varchar(30), ISNULL(m.IDFatoControleContratosEuromidia, 0)) LIKE :termo_like
+                OR CONVERT(varchar(30), ISNULL(m.IDFatoControleContratosItensEuromidia, 0)) LIKE :termo_like
+                OR CONVERT(varchar(30), ISNULL(m.IDFatoVencimentoCampanhaEuromidia, 0)) LIKE :termo_like
+            )
+        """)
+
+    where_final = " AND ".join(where_sql)
+
+    row_total = db.session.execute(
+        text(f"""
+            SELECT COUNT(1) AS Total
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] m WITH (NOLOCK)
+            LEFT JOIN [Integracao].[Silver].[DimTipoMensagem] tm WITH (NOLOCK)
+                ON tm.IDDimTipoMensagem = m.IDDimTipoMensagem
+            WHERE {where_final}
+        """),
+        parametros,
+    ).mappings().first()
+
+    total_filtrado = int(row_total.get("Total") or 0) if row_total else 0
+    total_paginas = max(1, (total_filtrado + por_pagina - 1) // por_pagina)
+
+    if pagina > total_paginas:
+        pagina = total_paginas
+        offset = (pagina - 1) * por_pagina
+        parametros["offset"] = int(offset)
+
     rows = db.session.execute(
-        text("""
-            SELECT TOP (100)
+        text(f"""
+            SELECT
                  m.IDFatoMensagemUsuario
                 ,m.IDDimTipoMensagem
                 ,tm.NomeTipoMensagem
@@ -7482,44 +7759,50 @@ def api_mensagens_lista():
             FROM [Integracao].[Silver].[FatoMensagemUsuario] m WITH (NOLOCK)
             LEFT JOIN [Integracao].[Silver].[DimTipoMensagem] tm WITH (NOLOCK)
                 ON tm.IDDimTipoMensagem = m.IDDimTipoMensagem
-            WHERE m.IDDimUsuariosDestinatario = :id_usuario
-              AND ISNULL(m.BitAtivo, 1) = 1
+            WHERE {where_final}
             ORDER BY
                 CASE WHEN ISNULL(m.BitLida, 0) = 0 THEN 0 ELSE 1 END,
                 m.DataCriacao DESC,
                 m.IDFatoMensagemUsuario DESC
+            OFFSET :offset ROWS FETCH NEXT :por_pagina ROWS ONLY;
         """),
-        {"id_usuario": int(id_usuario)}
+        parametros,
     ).mappings().all()
 
-    itens = []
+    row_resumo = db.session.execute(
+        text("""
+            SELECT
+                COUNT(1) AS Total,
+                SUM(CASE WHEN ISNULL(BitLida, 0) = 0 THEN 1 ELSE 0 END) AS NaoLidas,
+                SUM(CASE WHEN ISNULL(BitLida, 0) = 1 THEN 1 ELSE 0 END) AS Lidas
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] WITH (NOLOCK)
+            WHERE IDDimUsuariosDestinatario = :id_usuario
+              AND ISNULL(BitAtivo, 1) = 1
+        """),
+        {"id_usuario": int(id_usuario)},
+    ).mappings().first()
 
-    for r in rows:
-        data_criacao = r.get("DataCriacao")
-        data_leitura = r.get("DataLeitura")
+    itens = [_mensagens_payload_lista(r, int(id_usuario)) for r in rows]
 
-        destino = _mensagens_montar_destino_seguro(r, id_usuario)
-
-        itens.append({
-            "id": int(r["IDFatoMensagemUsuario"]),
-            "id_tipo": r.get("IDDimTipoMensagem"),
-            "tipo": r.get("NomeTipoMensagem") or "Mensagem",
-            "titulo": r.get("TituloMensagem") or "Sem título",
-            "resumo": r.get("ResumoMensagem") or "",
-            "link": destino.get("link") or "",
-            "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
-            "motivo_destino": destino.get("motivo_destino") or "",
-            "bit_lida": bool(r.get("BitLida")),
-            "data_criacao": data_criacao.strftime("%d/%m/%Y %H:%M") if data_criacao else "",
-            "data_leitura": data_leitura.strftime("%d/%m/%Y %H:%M") if data_leitura else "",
-            "id_vencimento": r.get("IDFatoVencimentoCampanhaEuromidia"),
-            "id_contrato": r.get("IDFatoControleContratosEuromidia"),
-            "id_item": r.get("IDFatoControleContratosItensEuromidia"),
-        })
+    inicio = offset + 1 if total_filtrado > 0 else 0
+    fim = min(offset + por_pagina, total_filtrado) if total_filtrado > 0 else 0
 
     return jsonify({
         "ok": True,
         "itens": itens,
+        "resumo": {
+            "total": int(row_resumo.get("Total") or 0) if row_resumo else 0,
+            "nao_lidas": int(row_resumo.get("NaoLidas") or 0) if row_resumo else 0,
+            "lidas": int(row_resumo.get("Lidas") or 0) if row_resumo else 0,
+        },
+        "paginacao": {
+            "page": int(pagina),
+            "per_page": int(por_pagina),
+            "total": int(total_filtrado),
+            "total_pages": int(total_paginas),
+            "inicio": int(inicio),
+            "fim": int(fim),
+        },
     })
 
 
@@ -7558,35 +7841,15 @@ def api_mensagens_detalhe(id_mensagem: int):
         {
             "id_mensagem": int(id_mensagem),
             "id_usuario": int(id_usuario),
-        }
+        },
     ).mappings().first()
 
     if not r:
         return jsonify({"ok": False, "erro": "Mensagem não encontrada."}), 404
 
-    data_criacao = r.get("DataCriacao")
-    data_leitura = r.get("DataLeitura")
-
-    destino = _mensagens_montar_destino_seguro(r, id_usuario)
-
     return jsonify({
         "ok": True,
-        "mensagem": {
-            "id": int(r["IDFatoMensagemUsuario"]),
-            "id_tipo": r.get("IDDimTipoMensagem"),
-            "tipo": r.get("NomeTipoMensagem") or "Mensagem",
-            "titulo": r.get("TituloMensagem") or "Sem título",
-            "texto": r.get("TextoMensagem") or "",
-            "link": destino.get("link") or "",
-            "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
-            "motivo_destino": destino.get("motivo_destino") or "",
-            "bit_lida": bool(r.get("BitLida")),
-            "data_criacao": data_criacao.strftime("%d/%m/%Y %H:%M") if data_criacao else "",
-            "data_leitura": data_leitura.strftime("%d/%m/%Y %H:%M") if data_leitura else "",
-            "id_vencimento": r.get("IDFatoVencimentoCampanhaEuromidia"),
-            "id_contrato": r.get("IDFatoControleContratosEuromidia"),
-            "id_item": r.get("IDFatoControleContratosItensEuromidia"),
-        }
+        "mensagem": _mensagens_payload_detalhe(r, int(id_usuario)),
     })
 
 
@@ -7612,11 +7875,10 @@ def api_mensagens_marcar_lida(id_mensagem: int):
         {
             "id_mensagem": int(id_mensagem),
             "id_usuario": int(id_usuario),
-        }
+        },
     )
 
     db.session.commit()
-
     emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:lida")
 
     return jsonify({
@@ -7644,12 +7906,44 @@ def api_mensagens_marcar_todas_lidas():
                AND ISNULL(BitAtivo, 1) = 1
                AND ISNULL(BitLida, 0) = 0
         """),
-        {"id_usuario": int(id_usuario)}
+        {"id_usuario": int(id_usuario)},
     )
 
     db.session.commit()
-
     emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:todas_lidas")
+
+    return jsonify({
+        "ok": True,
+        "linhas": int(resultado.rowcount or 0),
+    })
+
+
+@admin.route("/api/mensagens/<int:id_mensagem>/excluir", methods=["POST", "DELETE"])
+@login_required
+@limiter.limit("120 per minute", methods=["POST", "DELETE"])
+def api_mensagens_excluir(id_mensagem: int):
+    id_usuario = _id_usuario_logado()
+
+    if not id_usuario:
+        return jsonify({"ok": False, "erro": "Usuário logado não identificado."}), 401
+
+    resultado = db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoMensagemUsuario]
+               SET BitAtivo = 0,
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoMensagemUsuario = :id_mensagem
+               AND IDDimUsuariosDestinatario = :id_usuario
+               AND ISNULL(BitAtivo, 1) = 1
+        """),
+        {
+            "id_mensagem": int(id_mensagem),
+            "id_usuario": int(id_usuario),
+        },
+    )
+
+    db.session.commit()
+    emitir_resumo_mensagens_usuario(int(id_usuario), evento="mensagens:excluida")
 
     return jsonify({
         "ok": True,

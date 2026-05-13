@@ -5,6 +5,10 @@ from flask import abort
 from flask_login import current_user
 
 
+ID_PERFIL_ADMIN_PADRAO = 1
+ID_PERFIL_VENDEDOR_PADRAO = 3
+ID_PERFIL_COORDENADOR_PADRAO = 5
+
 
 ITENS_MENU_PAINEIS_USUARIO_LEGADO = {
     "disponibilidades",
@@ -53,6 +57,10 @@ MAPA_ITEM_MENU_PERMISSOES = {
     "listas_precos": {"ADMIN_TUDO"},
     "lista_precos_euromidia": {"ADMIN_TUDO"},
     "precos_euromidia": {"ADMIN_TUDO"},
+    "vencimentos_campanhas": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "vencimentos_campanhas_euromidia": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "aprovacao_preco": {"KANBAN_CUSTO_MARGEM_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "aprovacao_desconto_kanban": {"KANBAN_CUSTO_MARGEM_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
 
     "admin": {"ADMIN_TUDO"},
     "permissao_desconto": {"ADMIN_TUDO"},
@@ -81,6 +89,35 @@ ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR = {
     "checkin_arquivo",
     "checkin_visualizar",
     "health_check_comercial",
+}
+
+
+ITENS_MENU_BLOQUEADOS_PARA_COORDENADOR = {
+    "financeiro",
+    "contratos",
+    "contratos_lista",
+    "movimentacao_financeira",
+    "lista_movimentacao_empresas",
+    "inadimplentes",
+    "listadevedores",
+    "aprovacao_contratos",
+    "lista_aprovacao_contratos",
+    "performance_paineis",
+    "auvo_produtos",
+    "tickets_auvo",
+    "criar_os_auvo",
+    "checkin_novo",
+    "lista_checkins",
+    "checkin_arquivo",
+    "checkin_visualizar",
+    "permissao_desconto",
+    "aprovacao_desconto",
+    "aprovacao_desconto_kanban",
+    "seguranca",
+    "usuarios",
+    "usuarios_lista",
+    "usuarios_editar",
+    "admin_usuarios_novo",
 }
 
 
@@ -169,12 +206,66 @@ def usuario_eh_perfil_vendedor() -> bool:
         return False
 
     try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == 3:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_VENDEDOR_PADRAO:
             return True
     except Exception:
         pass
 
     return _perfil_usuario_logado() == "vendedor"
+
+
+def usuario_eh_perfil_coordenador() -> bool:
+    """usuario_eh_perfil_coordenador
+    - Eu identifico o perfil Coordenador pelo ID fixo informado: IDDimPerfilUsuario = 5.
+    - Esse perfil deve ter acesso operacional amplo em Painéis/Kanban/Clientes/Carteiras,
+      mas sem liberar Segurança, Checkin, Solicitações, Ativos ou Financeiro.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_COORDENADOR_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    return _perfil_usuario_logado() == "coordenador"
+
+
+def usuario_eh_perfil_admin() -> bool:
+    """usuario_eh_perfil_admin
+    - Eu identifico Admin real pelo ID 1 ou pelo nome do perfil.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_ADMIN_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    return _perfil_usuario_logado() in {
+        "admin",
+        "administrador",
+        "administrador do sistema",
+        "administrador geral",
+        "super admin",
+        "superadmin",
+    }
+
+
+def usuario_eh_perfil_acesso_operacional_total() -> bool:
+    """Eu libero o perfil Coordenador como gestor operacional sem transformar o usuário em Segurança/Admin técnico."""
+    return usuario_eh_perfil_admin() or usuario_eh_perfil_coordenador()
+
+
+def item_menu_bloqueado_para_coordenador(item_menu: str) -> bool:
+    """item_menu_bloqueado_para_coordenador
+    - Eu centralizo os itens que o perfil Coordenador não pode ver nem acessar.
+    - Isso evita que o Coordenador vire Admin técnico por causa de permissões amplas.
+    """
+    return _normalizar_texto_acl(item_menu) in ITENS_MENU_BLOQUEADOS_PARA_COORDENADOR
 
 
 def usuario_eh_perfil_restrito_menu_paineis() -> bool:
@@ -187,6 +278,9 @@ def usuario_eh_perfil_restrito_menu_paineis() -> bool:
 
     if usuario_eh_perfil_vendedor():
         return True
+
+    if usuario_eh_perfil_acesso_operacional_total():
+        return False
 
     if _usuario_tem_permissao("ADMIN_TUDO"):
         return False
@@ -215,6 +309,12 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     if usuario_eh_perfil_vendedor() and chave in ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR:
         return False
+
+    if usuario_eh_perfil_coordenador() and item_menu_bloqueado_para_coordenador(chave):
+        return False
+
+    if usuario_eh_perfil_acesso_operacional_total():
+        return True
 
     if _usuario_tem_permissao("ADMIN_TUDO"):
         return True

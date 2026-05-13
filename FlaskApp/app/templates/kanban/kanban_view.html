@@ -3211,8 +3211,9 @@
 
 </style>
 
-{% set pode_ver_custo_margem = current_user.has_permission('KANBAN_CUSTO_MARGEM_VER') %}
 {% set usuario_eh_vendedor_kanban = usuario_eh_vendedor_kanban|default(false) %}
+{% set usuario_eh_coordenador_kanban = usuario_eh_coordenador_kanban|default(false) %}
+{% set pode_ver_custo_margem = pode_ver_custo_margem|default(usuario_eh_coordenador_kanban or current_user.has_permission('KANBAN_CUSTO_MARGEM_VER')) %}
 
 {% if usuario_eh_vendedor_kanban %}
 <style>
@@ -3893,6 +3894,7 @@
     "scriptRoot": request.script_root or "",
     "podeVerCustoMargem": pode_ver_custo_margem,
     "usuarioEhVendedor": usuario_eh_vendedor_kanban,
+    "usuarioEhCoordenador": usuario_eh_coordenador_kanban,
     "usuarioEhAdminKanban": usuario_eh_admin_kanban,
     "usuarioTemBloqueioCarteira": usuario_tem_bloqueio_carteira_kanban,
     "idUsuarioLogado": id_usuario_logado_kanban,
@@ -3903,5 +3905,5 @@
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260507_bloqueio_carteira_combobox_FINAL_v1') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260513_coordenador_total_v1') }}"></script>
 {% endblock %}

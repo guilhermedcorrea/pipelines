@@ -219,6 +219,174 @@ def me():
 
 
 
+ID_PERFIL_ADMIN_PADRAO = 1
+ID_PERFIL_VENDEDOR_PADRAO = 3
+ID_PERFIL_COORDENADOR_PADRAO = 5
+
+
+PERMISSOES_OPERACIONAIS_COORDENADOR = {
+    "KANBAN_VER",
+    "KANBAN_EDITAR",
+    "KANBAN_CUSTO_MARGEM_VER",
+    "PAINEIS_VER",
+    "PAINEIS_LISTA_VER",
+    "PAINEIS_GRADE_VER",
+    "OCUPACAO_LISTA_VER",
+    "CLIENTES_LISTA_VER",
+    "CLIENTES_DETALHE_VER",
+    "CARTEIRAS_VER",
+    "CARTEIRA_PROPRIA_VER",
+    "PRECOS_EUROMIDIA_VER",
+    "LISTA_PRECOS_EUROMIDIA_VER",
+    "VENCIMENTOS_CAMPANHAS_VER",
+}
+
+
+PERMISSOES_BLOQUEADAS_COORDENADOR = {
+    "USUARIOS_VER",
+    "USUARIOS_EDITAR",
+    "USUARIOS_CRIAR",
+    "USUARIOS_EXCLUIR",
+    "PERFIS_VER",
+    "PERFIS_EDITAR",
+    "PERMISSOES_VER",
+    "PERMISSOES_EDITAR",
+    "CHECKIN_VER",
+    "CHECKIN_CRIAR",
+    "CHECKIN_LISTA_VER",
+    "APROVACAO_PRECO_VER",
+    "APROVACAO_DESCONTO_VER",
+    "APROVACAO_DESCONTO",
+    "PERMISSAO_DESCONTO_VER",
+    "PERMISSAO_DESCONTO_EDITAR",
+    "AUVO_PRODUTOS_VER",
+    "TICKETS_AUVO_VER",
+    "CRIAR_OS_AUVO",
+    "CONTRATOS_VER",
+    "CONTRATOS_LISTA_VER",
+    "MOVIMENTACAO_FINANCEIRA_VER",
+    "MOVIMENTACAO_FINANCEIRA_LISTA_VER",
+    "INADIMPLENTES_VER",
+    "APROVACAO_CONTRATOS_VER",
+    "APROVACAO_CONTRATOS",
+    "FINANCEIRO_VER",
+    "ATIVOS_VER",
+    "PERFORMANCE_ATIVOS_VER",
+}
+
+
+ROTAS_ADMIN_OPERACIONAIS_COORDENADOR = (
+    "/admin/vencimentos-campanhas",
+    "/admin/precos/euromidia",
+    "/precos/euromidia",
+    "/lista-precos",
+    "/listas-precos",
+)
+
+
+ROTAS_BLOQUEADAS_COORDENADOR = (
+    "/autenticacao/seguranca",
+    "/paineis/seguranca",
+    "/paineis/usuarios",
+    "/paineis/permissoes",
+    "/paineis/admin/usuarios",
+    "/paineis/checkin/novo",
+    "/paineis/checkin/lista",
+    "/paineis/checkin/",
+    "/paineis/contratos",
+    "/admin/listadevedores",
+    "/admin/inadimplentes",
+    "/admin/movimentacao",
+    "/admin/movimentacoes",
+    "/admin/aprovacao_contratos",
+    "/admin/aprovacao-contratos",
+    "/admin/contratos",
+    "/admin/financeiro",
+    "/admin/ativos",
+    "/admin/auvo/produtos",
+    "/admin/tickets/auvo",
+    "/admin/criar_os_auvo",
+    "/admin/criar-os-auvo",
+    "/admin/permissao_desconto",
+    "/admin/permissao-desconto",
+    "/admin/aprovacao_desconto",
+    "/admin/aprovacao-desconto",
+    "/kanban/aprovacao-preco",
+)
+
+
+def _normalizar_perfil_autenticacao(valor) -> str:
+    texto = str(valor or "").strip().lower()
+    if not texto:
+        return ""
+    try:
+        import unicodedata
+        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        pass
+    return texto.strip()
+
+
+def _usuario_logado_eh_perfil_coordenador_autenticacao() -> bool:
+    """Eu libero o perfil Coordenador pelo ID fixo 5 e por fallback de nome."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_COORDENADOR_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    perfil = getattr(current_user, "perfil", None)
+    candidatos = [
+        getattr(current_user, "NomePerfil", None),
+        getattr(current_user, "Perfil", None),
+        getattr(current_user, "DescricaoPerfil", None),
+        getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+        getattr(perfil, "Descricao", None) if perfil is not None else None,
+    ]
+
+    return any(_normalizar_perfil_autenticacao(valor) == "coordenador" for valor in candidatos)
+
+
+def _coordenador_acesso_bloqueado_no_request(codigo: str) -> bool:
+    """_coordenador_acesso_bloqueado_no_request
+    - Eu bloqueio rotas sensíveis para o perfil Coordenador antes de consultar permissões individuais.
+    - Assim, mesmo que o Coordenador herde ADMIN_TUDO por engano, ele não acessa Segurança,
+      Checkin, Financeiro, Solicitações Auvo, Performance Ativos ou Permissões de desconto/aprovação.
+    """
+    if not _usuario_logado_eh_perfil_coordenador_autenticacao():
+        return False
+
+    codigo = str(codigo or "").strip().upper()
+    caminho = str(getattr(request, "path", "") or "").strip()
+
+    if codigo in PERMISSOES_BLOQUEADAS_COORDENADOR:
+        return True
+
+    return any(caminho.startswith(prefixo) for prefixo in ROTAS_BLOQUEADAS_COORDENADOR)
+
+
+def _coordenador_pode_usar_permissao_operacional(codigo: str) -> bool:
+    """Eu libero o Coordenador para rotas operacionais sem abrir Segurança/Admin técnico inteiro."""
+    codigo = str(codigo or "").strip().upper()
+    if not codigo or not _usuario_logado_eh_perfil_coordenador_autenticacao():
+        return False
+
+    if _coordenador_acesso_bloqueado_no_request(codigo):
+        return False
+
+    if codigo in PERMISSOES_OPERACIONAIS_COORDENADOR:
+        return True
+
+    if codigo == "ADMIN_TUDO":
+        caminho = str(getattr(request, "path", "") or "").strip()
+        return any(caminho.startswith(prefixo) for prefixo in ROTAS_ADMIN_OPERACIONAIS_COORDENADOR)
+
+    return False
+
+
 def requer_permissao(codigo_permissao: str):
     codigo = (str(codigo_permissao or "").strip().upper())
 
@@ -239,6 +407,15 @@ def requer_permissao(codigo_permissao: str):
             if not codigo:
 
                 abort(500, description="Permissão não configurada no endpoint.")
+
+
+            if _coordenador_acesso_bloqueado_no_request(codigo):
+                flash("Seu perfil Coordenador não possui acesso a esta página.", "danger")
+                abort(403)
+
+
+            if _coordenador_pode_usar_permissao_operacional(codigo):
+                return view_func(*args, **kwargs)
 
 
             if not getattr(current_user, "has_permission", None):

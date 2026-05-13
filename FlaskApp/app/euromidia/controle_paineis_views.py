@@ -1356,6 +1356,77 @@ CAPACIDADE_DIGITAL_FIXA = 16
 
 ID_PERFIL_VENDEDOR_PADRAO = 3
 ID_PERFIL_ADMIN_PADRAO = 1
+ID_PERFIL_COORDENADOR_PADRAO = 5
+
+
+def _normalizar_nome_perfil_paineis(valor) -> str:
+    texto = str(valor or "").strip().lower()
+    if not texto:
+        return ""
+    try:
+        texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        pass
+    return texto.strip()
+
+
+def _usuario_logado_eh_perfil_admin() -> bool:
+    """Eu identifico Admin real pelo ID 1 ou pelo nome do perfil."""
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_ADMIN_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    try:
+        perfil = getattr(current_user, "perfil", None)
+        candidatos = [
+            getattr(current_user, "NomePerfil", None),
+            getattr(current_user, "Perfil", None),
+            getattr(current_user, "DescricaoPerfil", None),
+            getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+            getattr(perfil, "Descricao", None) if perfil is not None else None,
+        ]
+        return any(
+            _normalizar_nome_perfil_paineis(valor) in {
+                "admin",
+                "administrador",
+                "administrador geral",
+                "administrador do sistema",
+                "super admin",
+                "superadmin",
+            }
+            for valor in candidatos
+        )
+    except Exception:
+        return False
+
+
+def _usuario_logado_eh_perfil_coordenador() -> bool:
+    """Eu identifico Coordenador pelo ID 5 e por fallback pelo nome do perfil."""
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_COORDENADOR_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    try:
+        perfil = getattr(current_user, "perfil", None)
+        candidatos = [
+            getattr(current_user, "NomePerfil", None),
+            getattr(current_user, "Perfil", None),
+            getattr(current_user, "DescricaoPerfil", None),
+            getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+            getattr(perfil, "Descricao", None) if perfil is not None else None,
+        ]
+        return any(_normalizar_nome_perfil_paineis(valor) == "coordenador" for valor in candidatos)
+    except Exception:
+        return False
+
+
+def _usuario_logado_tem_acesso_operacional_total_paineis() -> bool:
+    """Admin e Coordenador enxergam os filtros e ações operacionais completas."""
+    return _usuario_logado_eh_perfil_admin() or _usuario_logado_eh_perfil_coordenador()
 
 
 def _usuario_logado_eh_perfil_vendedor() -> bool:
@@ -1377,8 +1448,14 @@ def _usuario_logado_eh_perfil_vendedor() -> bool:
 
     try:
         perfil = getattr(current_user, "perfil", None)
-        nome_perfil = str(getattr(perfil, "NomePerfil", "") or "").strip().upper()
-        if nome_perfil == "VENDEDOR":
+        candidatos = [
+            getattr(current_user, "NomePerfil", None),
+            getattr(current_user, "Perfil", None),
+            getattr(current_user, "DescricaoPerfil", None),
+            getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+            getattr(perfil, "Descricao", None) if perfil is not None else None,
+        ]
+        if any(_normalizar_nome_perfil_paineis(valor) == "vendedor" for valor in candidatos):
             return True
     except Exception:
         pass
@@ -25530,7 +25607,7 @@ def _usuario_pode_ver_filtro_clientes(nome_filtro: str) -> bool:
     if not nome:
         return False
 
-    if nome in FILTROS_CLIENTES_REMOVIDOS_DA_TELA:
+    if nome in FILTROS_CLIENTES_REMOVIDOS_DA_TELA and not _usuario_logado_tem_acesso_operacional_total_paineis():
         return False
 
     if nome in FILTROS_CLIENTES_SEMPRE_VISIVEIS:

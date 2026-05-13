@@ -17,7 +17,8 @@
   const KANBAN_VIEW_CONFIG = lerConfiguracaoKanbanView();
   const PODE_VER_CUSTO_MARGEM = KANBAN_VIEW_CONFIG.podeVerCustoMargem === true;
   const USUARIO_EH_VENDEDOR = KANBAN_VIEW_CONFIG.usuarioEhVendedor === true;
-  const USUARIO_EH_ADMIN_KANBAN = KANBAN_VIEW_CONFIG.usuarioEhAdminKanban === true;
+  const USUARIO_EH_COORDENADOR = KANBAN_VIEW_CONFIG.usuarioEhCoordenador === true;
+  const USUARIO_EH_ADMIN_KANBAN = KANBAN_VIEW_CONFIG.usuarioEhAdminKanban === true || USUARIO_EH_COORDENADOR === true;
   const USUARIO_TEM_BLOQUEIO_CARTEIRA = KANBAN_VIEW_CONFIG.usuarioTemBloqueioCarteira === true || (USUARIO_EH_VENDEDOR && !USUARIO_EH_ADMIN_KANBAN);
   const USUARIO_PODE_GERENCIAR_FASES_E_TAGS = !USUARIO_EH_VENDEDOR;
   const ID_USUARIO_LOGADO = Number(KANBAN_VIEW_CONFIG.idUsuarioLogado || 0);
@@ -15513,6 +15514,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     const painelFaceLigado = !!(painelFaceWrap && painelFaceWrap.classList.contains("is-on"));
     const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
     const solicitacaoContrato = obterSolicitacaoContratoParaPayload();
+    const tipoDocumentoAtual = obterTipoDocumentoSelecionadoNoHeaderSolicitacao();
 
     const idTipoClienteAtual = selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null;
     const empresasRelacionadasPayload = coletarEmpresasRelacionadasPermitidasParaPayload(idTipoClienteAtual);
@@ -15525,6 +15527,8 @@ async function moverCard(idCard, idFasePara, posicao) {
       id_tipo_cliente_desconto: idTipoClienteAtual,
       id_origem_atendimento: selectOrigemAtendimentoCard?.value ? Number(selectOrigemAtendimentoCard.value) : null,
       id_dim_cnaes: selectSegmentoCard?.value ? Number(selectSegmentoCard.value) : null,
+      id_dim_tipo_documento: tipoDocumentoAtual.IDDimTipoDocumento || null,
+      tipo_documento: tipoDocumentoAtual.TipoDocumento || null,
       id_contrato_existente: usarVinculoContratoExistente ? fluxoContratoAtual.id_contrato : null,
       id_controle_contrato: usarVinculoContratoExistente ? fluxoContratoAtual.id_contrato : null,
       tipo_contrato_card: usarVinculoContratoExistente ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO,
