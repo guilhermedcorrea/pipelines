@@ -309,7 +309,7 @@
       <input type="hidden" id="f_data_inicio" name="data_inicio" value="{{ dt_ini or '' }}">
       <input type="hidden" id="f_data_fim" name="data_fim" value="{{ dt_fim or '' }}">
 
-      <input type="hidden" id="f_dias" name="dias" value="7">
+      <input type="hidden" id="f_dias" name="dias" value="2">
 
       <input type="hidden" id="f_id_cliente" name="id_cliente" value="">
       <input type="hidden" id="f_id_vendedor" name="id_vendedor" value="">
@@ -364,7 +364,7 @@
 
         <div>
           <label style="font-weight:900;display:block;margin-bottom:6px;">Prazo (dias)</label>
-          <input id="prazoDias" type="number" class="form-control" value="7" min="1">
+          <input id="prazoDias" type="number" class="form-control" value="2" min="2" max="2" step="1" readonly aria-readonly="true" tabindex="-1">
          
         </div>
       </div>
@@ -471,6 +471,8 @@
   const DT_INI_INICIAL   = "{{ (dt_ini or '')|e }}";
   const DT_FIM_INICIAL   = "{{ (dt_fim or '')|e }}";
 
+  const PRAZO_RESERVA_FIXO_DIAS = 2;
+
   const elCodFace    = document.getElementById("codFace");
   const elCota       = document.getElementById("cota");
   const elDataInicio = document.getElementById("dataInicio");
@@ -541,6 +543,21 @@
     if(!elMsg) return;
     elMsg.textContent = txt || "";
     elMsg.style.color = ok ? "#0a7a2f" : "#b00020";
+  }
+
+  function travarPrazoReserva(){
+    if(elPrazoDias){
+      elPrazoDias.value = String(PRAZO_RESERVA_FIXO_DIAS);
+      elPrazoDias.min = String(PRAZO_RESERVA_FIXO_DIAS);
+      elPrazoDias.max = String(PRAZO_RESERVA_FIXO_DIAS);
+      elPrazoDias.step = "1";
+      elPrazoDias.readOnly = true;
+      elPrazoDias.setAttribute("aria-readonly", "true");
+    }
+
+    if(fDias){
+      fDias.value = String(PRAZO_RESERVA_FIXO_DIAS);
+    }
   }
 
   function getEmpresaId(e){
@@ -1356,8 +1373,8 @@
     fDtIni.value = (elDataInicio.value || "").trim();
     fDtFim.value = (elDataFim.value || "").trim();
 
-    const dias = parseInt((elPrazoDias.value || "7"), 10);
-    fDias.value = (Number.isFinite(dias) && dias > 0) ? String(dias) : "7";
+    travarPrazoReserva();
+    fDias.value = String(PRAZO_RESERVA_FIXO_DIAS);
 
     const idCli = (elIdCliente.value || "").trim();
     const idVen = (elIdVendedor.value || "").trim();
@@ -1413,7 +1430,7 @@
     formData.set("cota", fCota.value);
     formData.set("data_inicio", fDtIni.value);
     formData.set("data_fim", fDtFim.value);
-    formData.set("dias", fDias.value);
+    formData.set("dias", String(PRAZO_RESERVA_FIXO_DIAS));
 
     formData.set("id_cliente", fIdCliente.value);
     formData.set("id_vendedor", fIdVendedor.value);
@@ -1465,13 +1482,12 @@
   // ✅ eventos
   // =========================================================
   elPrazoDias.addEventListener("change", function(){
+    travarPrazoReserva();
+
     const diStr = (elDataInicio.value || "").trim();
-    const prazoStr = (elPrazoDias.value || "").trim();
-    if(!diStr || !prazoStr) return;
+    if(!diStr) return;
 
-    const prazo = parseInt(prazoStr, 10);
-    if(!prazo || prazo < 1) return;
-
+    const prazo = PRAZO_RESERVA_FIXO_DIAS;
     const di = yyyy_mm_dd_para_date(diStr);
     if(!di) return;
 
@@ -1483,7 +1499,7 @@
     const dfStr = date_para_yyyy_mm_dd(df);
 
     if(ranges_tem_conflito(diStr, dfStr)){
-      setMsg("Prazo cai em dia CHEIO/INDISPONÍVEL. Ajuste Data início ou reduza o prazo.", false);
+      setMsg("Prazo fixo de 2 dias cai em dia CHEIO/INDISPONÍVEL. Ajuste Data início.", false);
       return;
     }
 
@@ -1524,6 +1540,8 @@
   // ✅ boot
   // =========================================================
   async function boot(){
+    travarPrazoReserva();
+
     if(COD_FACE_INICIAL && elCodFace){
       elCodFace.value = COD_FACE_INICIAL;
     }

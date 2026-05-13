@@ -187,6 +187,7 @@ TABELA_CNAES = "[Integracao].[Silver].[DimCnaes]"
 ID_PERFIL_ADMIN_PADRAO = 1
 ID_PERFIL_VENDEDOR_PADRAO = 3
 ID_PERFIL_COORDENADOR_PADRAO = 5
+ID_EMPRESA_PROPRIETARIA_KANBAN_PADRAO = 3
 
 
 def _id_empresa_usuario() -> int:
@@ -245,11 +246,17 @@ def _usuario_eh_perfil_coordenador_kanban() -> bool:
         getattr(current_user, "NomePerfil", None),
         getattr(current_user, "Perfil", None),
         getattr(current_user, "DescricaoPerfil", None),
+        getattr(current_user, "perfil_nome", None),
+        getattr(current_user, "nome_perfil", None),
         getattr(perfil, "NomePerfil", None) if perfil is not None else None,
         getattr(perfil, "Descricao", None) if perfil is not None else None,
+        getattr(perfil, "Perfil", None) if perfil is not None else None,
     ]
 
-    return any(_normalizar_acl_kanban(nome) == "coordenador" for nome in nomes_perfil)
+    return any(
+        _normalizar_acl_kanban(nome) == "coordenador" or "coordenador" in _normalizar_acl_kanban(nome)
+        for nome in nomes_perfil
+    )
 
 
 def _usuario_eh_admin_ou_coordenador_kanban() -> bool:
@@ -881,9 +888,13 @@ def _assert_login() -> int:
 def _id_empresa_usuario_or_403() -> int:
     _assert_login()
     id_emp = _id_empresa_usuario()
-    if not id_emp:
-        abort(403, "Usuário sem IDEmpresaProprietaria definida")
-    return id_emp
+    if id_emp:
+        return id_emp
+
+    if _usuario_eh_admin_ou_coordenador_kanban():
+        return ID_EMPRESA_PROPRIETARIA_KANBAN_PADRAO
+
+    abort(403, "Usuário sem IDEmpresaProprietaria definida")
 
 
 
@@ -9258,21 +9269,39 @@ def _contar_cards_ativos_kanban(id_kanban: int) -> int:
 def _obter_kanban_autorizado(id_kanban: int, *, incluir_inativo: bool = False) -> dict[str, Any]:
     id_emp = _id_empresa_usuario_or_403()
     filtro_ativo = "" if incluir_inativo else "AND k.Ativo = 1"
-    sql = text(f"""
-        SELECT
-            k.IDDimKanban,
-            k.NomeKanban,
-            k.Descricao,
-            k.Ativo,
-            k.CriadoEm,
-            k.BitPrincipal,
-            k.IDEmpresaProprietaria
-        FROM {TABELA_KANBAN} k
-        WHERE k.IDDimKanban = :id_kanban
-          AND k.IDEmpresaProprietaria = :id_emp
-          {filtro_ativo};
-    """)
-    row = db.session.execute(sql, {"id_kanban": id_kanban, "id_emp": id_emp}).mappings().first()
+
+    if _usuario_eh_admin_ou_coordenador_kanban():
+        sql = text(f"""
+            SELECT
+                k.IDDimKanban,
+                k.NomeKanban,
+                k.Descricao,
+                k.Ativo,
+                k.CriadoEm,
+                k.BitPrincipal,
+                k.IDEmpresaProprietaria
+            FROM {TABELA_KANBAN} k
+            WHERE k.IDDimKanban = :id_kanban
+              {filtro_ativo};
+        """)
+        row = db.session.execute(sql, {"id_kanban": id_kanban}).mappings().first()
+    else:
+        sql = text(f"""
+            SELECT
+                k.IDDimKanban,
+                k.NomeKanban,
+                k.Descricao,
+                k.Ativo,
+                k.CriadoEm,
+                k.BitPrincipal,
+                k.IDEmpresaProprietaria
+            FROM {TABELA_KANBAN} k
+            WHERE k.IDDimKanban = :id_kanban
+              AND k.IDEmpresaProprietaria = :id_emp
+              {filtro_ativo};
+        """)
+        row = db.session.execute(sql, {"id_kanban": id_kanban, "id_emp": id_emp}).mappings().first()
+
     if not row:
         abort(403, "Você não tem permissão para acessar este kanban")
     return dict(row)
@@ -9295,6 +9324,8 @@ def _obter_cfg_kanban(id_kanban: int) -> dict[str, Any]:
 def _obter_fase_autorizada(id_fase: int, *, incluir_inativa: bool = False) -> dict[str, Any]:
     id_emp = _id_empresa_usuario_or_403()
     filtro_ativo = "" if incluir_inativa else "AND f.Ativo = 1"
+    filtro_empresa = "" if _usuario_eh_admin_ou_coordenador_kanban() else "AND k.IDEmpresaProprietaria = :id_emp"
+    params = {"id_fase": int(id_fase)} if _usuario_eh_admin_ou_coordenador_kanban() else {"id_fase": int(id_fase), "id_emp": int(id_emp)}
     cor_select = "f.CorHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorHex") else "CAST(NULL AS varchar(7)) AS CorHex,"
     cor_texto_select = "f.CorTextoHex," if _coluna_existe(TABELA_KANBAN_FASE, "CorTextoHex") else "CAST(NULL AS varchar(7)) AS CorTextoHex,"
     sql = text(f"""
@@ -9313,11 +9344,11 @@ def _obter_fase_autorizada(id_fase: int, *, incluir_inativa: bool = False) -> di
         JOIN {TABELA_KANBAN} k
           ON k.IDDimKanban = f.IDDimKanban
         WHERE f.IDDimKanbanFase = :id_fase
-          AND k.IDEmpresaProprietaria = :id_emp
+          {filtro_empresa}
           AND k.Ativo = 1
           {filtro_ativo};
     """)
-    row = db.session.execute(sql, {"id_fase": id_fase, "id_emp": id_emp}).mappings().first()
+    row = db.session.execute(sql, params).mappings().first()
     if not row:
         abort(403, "Você não tem permissão para acessar esta fase")
     return dict(row)
@@ -9579,6 +9610,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
     filtro_ativo = "" if incluir_inativo else "AND c.Ativo = 1"
     escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
     filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    filtro_empresa = "" if _usuario_eh_admin_ou_coordenador_kanban() else "AND k.IDEmpresaProprietaria = :id_emp"
 
     select_id_contrato = (
         "c.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidia,"
@@ -9717,20 +9749,20 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
         JOIN {TABELA_KANBAN} k
           ON k.IDDimKanban = c.IDDimKanban
         WHERE c.IDFatoKanbanCard = :id_card
-          AND k.IDEmpresaProprietaria = :id_emp
+          {filtro_empresa}
           AND k.Ativo = 1
           {filtro_ativo}
           {filtro_escopo_vendedor};
     """)
 
-    row = db.session.execute(
-        sql,
-        {
-            "id_card": int(id_card),
-            "id_emp": int(id_emp),
-            **_params_escopo_vendedor_kanban(escopo_vendedor),
-        },
-    ).mappings().first()
+    params_card = {
+        "id_card": int(id_card),
+        **_params_escopo_vendedor_kanban(escopo_vendedor),
+    }
+    if not _usuario_eh_admin_ou_coordenador_kanban():
+        params_card["id_emp"] = int(id_emp)
+
+    row = db.session.execute(sql, params_card).mappings().first()
 
     if not row:
         abort(403, "Você não tem permissão para acessar este card")
@@ -14739,31 +14771,42 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
 
 @kanban_bp.route("/atendimento", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("kanban")
 def atendimento_redirect():
     _assert_login()
     id_emp = _id_empresa_usuario_or_403()
 
-    sql_principal = text("""
+    params = {"id_emp": int(id_emp)}
+    filtro_empresa = "AND IDEmpresaProprietaria = :id_emp"
+
+    if _usuario_eh_admin_ou_coordenador_kanban():
+        filtro_empresa = ""
+        params = {}
+
+    sql_principal = text(f"""
         SELECT TOP 1 IDDimKanban
         FROM [Kanban].[Silver].[DimKanban]
         WHERE Ativo = 1
-          AND IDEmpresaProprietaria = :id_emp
+          {filtro_empresa}
           AND BitPrincipal = 1
-        ORDER BY CriadoEm DESC;
+        ORDER BY
+          CASE WHEN IDEmpresaProprietaria = {ID_EMPRESA_PROPRIETARIA_KANBAN_PADRAO} THEN 0 ELSE 1 END,
+          CriadoEm DESC;
     """)
-    id_kanban = db.session.execute(sql_principal, {"id_emp": id_emp}).scalar()
+    id_kanban = db.session.execute(sql_principal, params).scalar()
 
     if not id_kanban:
-        sql_fallback = text("""
+        sql_fallback = text(f"""
             SELECT TOP 1 IDDimKanban
             FROM [Kanban].[Silver].[DimKanban]
             WHERE Ativo = 1
-              AND IDEmpresaProprietaria = :id_emp
+              {filtro_empresa}
             ORDER BY
               CASE WHEN BitPrincipal = 1 THEN 0 ELSE 1 END,
+              CASE WHEN IDEmpresaProprietaria = {ID_EMPRESA_PROPRIETARIA_KANBAN_PADRAO} THEN 0 ELSE 1 END,
               CriadoEm DESC;
         """)
-        id_kanban = db.session.execute(sql_fallback, {"id_emp": id_emp}).scalar()
+        id_kanban = db.session.execute(sql_fallback, params).scalar()
 
     if not id_kanban:
         abort(404, "Nenhum kanban ativo encontrado para essa empresa")
@@ -14773,7 +14816,7 @@ def atendimento_redirect():
 
 @kanban_bp.route("/kanbans", methods=["GET"])
 @login_required
-
+@requer_item_menu_paineis("kanban")
 def kanbans_lista():
     _log_debug_usuario()
     _assert_login()
@@ -14802,7 +14845,7 @@ def kanbans_lista():
 
 @kanban_bp.route("/<int:id_kanban>", methods=["GET"])
 @login_required
-
+@requer_item_menu_paineis("kanban")
 def kanban_view(id_kanban: int):
     _assert_login()
     try:

@@ -16947,15 +16947,10 @@ def api_ocupacao_reserva_criar():
     except Exception:
         return jsonify({"ok": False, "erro": "id_fato_controle_contratos inválido"}), 400
 
-    dias_int = None
-    try:
-        if dias_raw not in ("", None, "null", "None"):
-            dias_int = int(dias_raw)
-    except Exception:
-        return jsonify({"ok": False, "erro": "dias inválido"}), 400
-
-    if dias_int is None:
-        dias_int = 7
+    # Regra de negócio: reserva sempre expira em 2 dias.
+    # Mesmo que o front-end ou uma requisição manual envie outro valor,
+    # o backend força 2 para não gravar prazo maior ou menor.
+    dias_int = 2
 
     sql_painel = text("""
         SELECT TOP 1

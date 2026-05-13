@@ -23,6 +23,9 @@ MAPA_ITEM_MENU_PERMISSOES = {
     "atendimento": {"KANBAN_VER", "KANBAN_EDITAR"},
     "kanban": {"KANBAN_VER", "KANBAN_EDITAR"},
     "kanban_atendimento": {"KANBAN_VER", "KANBAN_EDITAR"},
+    "kanban_view": {"KANBAN_VER", "KANBAN_EDITAR"},
+    "kanbans": {"KANBAN_VER", "KANBAN_EDITAR"},
+    "kanbans_lista": {"KANBAN_VER", "KANBAN_EDITAR"},
     "historico_atendimento": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
     "historico_cards": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
     "historico_cards_lista": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
@@ -121,6 +124,35 @@ ITENS_MENU_BLOQUEADOS_PARA_COORDENADOR = {
 }
 
 
+ITENS_MENU_LIBERADOS_PARA_COORDENADOR = {
+    "atendimento",
+    "kanban",
+    "kanban_atendimento",
+    "kanban_view",
+    "kanbans",
+    "kanbans_lista",
+    "historico_atendimento",
+    "historico_cards",
+    "historico_cards_lista",
+    "health_check_comercial",
+    "vencimentos_campanhas",
+    "vencimentos_campanhas_euromidia",
+    "disponibilidades",
+    "paineis",
+    "grade_painel",
+    "empresas",
+    "clientes",
+    "clientes_detalhe",
+    "carteiras",
+    "carteira_propria",
+    "lista_ocupacao",
+    "lista_precos",
+    "listas_precos",
+    "lista_precos_euromidia",
+    "precos_euromidia",
+}
+
+
 def _normalizar_texto_acl(valor) -> str:
     """_normalizar_texto_acl
     - Eu normalizo texto removendo acento, espaços extras e caixa.
@@ -141,6 +173,8 @@ def _perfil_usuario_logado() -> str:
 
     candidatos = [
         getattr(current_user, "Perfil", None),
+        getattr(current_user, "perfil_nome", None),
+        getattr(current_user, "nome_perfil", None),
         getattr(current_user, "NomePerfil", None),
         getattr(current_user, "DescricaoPerfil", None),
         getattr(current_user, "TipoUsuario", None),
@@ -197,6 +231,45 @@ def _usuario_tem_alguma_permissao(codigos_permissao) -> bool:
     return False
 
 
+def _id_perfil_usuario_logado() -> int:
+    """_id_perfil_usuario_logado
+    - Eu descubro o ID do perfil do usuário logado testando nomes de atributos comuns.
+    - Isso evita falha quando o modelo expõe IDDimPerfilUsuario com outro alias.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return 0
+
+    candidatos = [
+        getattr(current_user, "IDDimPerfilUsuario", None),
+        getattr(current_user, "id_dim_perfil_usuario", None),
+        getattr(current_user, "IDPerfilUsuario", None),
+        getattr(current_user, "id_perfil_usuario", None),
+        getattr(current_user, "IDPerfil", None),
+        getattr(current_user, "id_perfil", None),
+    ]
+
+    perfil_rel = getattr(current_user, "perfil", None)
+    if perfil_rel is not None:
+        candidatos.extend([
+            getattr(perfil_rel, "IDDimPerfilUsuario", None),
+            getattr(perfil_rel, "id_dim_perfil_usuario", None),
+            getattr(perfil_rel, "IDPerfilUsuario", None),
+            getattr(perfil_rel, "id_perfil_usuario", None),
+            getattr(perfil_rel, "IDPerfil", None),
+            getattr(perfil_rel, "id_perfil", None),
+        ])
+
+    for valor in candidatos:
+        try:
+            id_perfil = int(valor or 0)
+        except Exception:
+            id_perfil = 0
+        if id_perfil > 0:
+            return id_perfil
+
+    return 0
+
+
 def usuario_eh_perfil_vendedor() -> bool:
     """usuario_eh_perfil_vendedor
     - Eu identifico o perfil Vendedor pelo ID fixo informado: IDDimPerfilUsuario = 3.
@@ -205,11 +278,8 @@ def usuario_eh_perfil_vendedor() -> bool:
     if not getattr(current_user, "is_authenticated", False):
         return False
 
-    try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_VENDEDOR_PADRAO:
-            return True
-    except Exception:
-        pass
+    if _id_perfil_usuario_logado() == ID_PERFIL_VENDEDOR_PADRAO:
+        return True
 
     return _perfil_usuario_logado() == "vendedor"
 
@@ -223,13 +293,11 @@ def usuario_eh_perfil_coordenador() -> bool:
     if not getattr(current_user, "is_authenticated", False):
         return False
 
-    try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_COORDENADOR_PADRAO:
-            return True
-    except Exception:
-        pass
+    if _id_perfil_usuario_logado() == ID_PERFIL_COORDENADOR_PADRAO:
+        return True
 
-    return _perfil_usuario_logado() == "coordenador"
+    perfil = _perfil_usuario_logado()
+    return perfil == "coordenador" or "coordenador" in perfil
 
 
 def usuario_eh_perfil_admin() -> bool:
@@ -239,11 +307,8 @@ def usuario_eh_perfil_admin() -> bool:
     if not getattr(current_user, "is_authenticated", False):
         return False
 
-    try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_ADMIN_PADRAO:
-            return True
-    except Exception:
-        pass
+    if _id_perfil_usuario_logado() == ID_PERFIL_ADMIN_PADRAO:
+        return True
 
     return _perfil_usuario_logado() in {
         "admin",
@@ -312,6 +377,9 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     if usuario_eh_perfil_coordenador() and item_menu_bloqueado_para_coordenador(chave):
         return False
+
+    if usuario_eh_perfil_coordenador() and chave in ITENS_MENU_LIBERADOS_PARA_COORDENADOR:
+        return True
 
     if usuario_eh_perfil_acesso_operacional_total():
         return True

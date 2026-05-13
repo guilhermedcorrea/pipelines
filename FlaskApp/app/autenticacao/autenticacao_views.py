@@ -284,6 +284,17 @@ ROTAS_ADMIN_OPERACIONAIS_COORDENADOR = (
 )
 
 
+ROTAS_OPERACIONAIS_COORDENADOR = (
+    "/kanban/atendimento",
+    "/kanban/kanbans",
+    "/kanban/historico-cards",
+    "/kanban/historico-card",
+    "/kanban/health-check-comercial",
+    "/kanban/api/",
+    "/kanban/",
+)
+
+
 ROTAS_BLOQUEADAS_COORDENADOR = (
     "/autenticacao/seguranca",
     "/paineis/seguranca",
@@ -328,26 +339,73 @@ def _normalizar_perfil_autenticacao(valor) -> str:
 
 
 def _usuario_logado_eh_perfil_coordenador_autenticacao() -> bool:
-    """Eu libero o perfil Coordenador pelo ID fixo 5 e por fallback de nome."""
+    """Eu libero o perfil Coordenador pelo ID fixo 5, pelo nome carregado no usuário e por conferência no banco."""
     if not getattr(current_user, "is_authenticated", False):
         return False
 
-    try:
-        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_COORDENADOR_PADRAO:
-            return True
-    except Exception:
-        pass
+    candidatos_id = [
+        getattr(current_user, "IDDimPerfilUsuario", None),
+        getattr(current_user, "id_dim_perfil_usuario", None),
+        getattr(current_user, "IDPerfilUsuario", None),
+        getattr(current_user, "id_perfil_usuario", None),
+        getattr(current_user, "IDPerfil", None),
+        getattr(current_user, "id_perfil", None),
+    ]
 
     perfil = getattr(current_user, "perfil", None)
-    candidatos = [
+    if perfil is not None:
+        candidatos_id.extend([
+            getattr(perfil, "IDDimPerfilUsuario", None),
+            getattr(perfil, "id_dim_perfil_usuario", None),
+            getattr(perfil, "IDPerfilUsuario", None),
+            getattr(perfil, "id_perfil_usuario", None),
+            getattr(perfil, "IDPerfil", None),
+            getattr(perfil, "id_perfil", None),
+        ])
+
+    id_perfil_encontrado = 0
+    for valor in candidatos_id:
+        try:
+            id_perfil = int(valor or 0)
+        except Exception:
+            id_perfil = 0
+
+        if id_perfil > 0:
+            id_perfil_encontrado = id_perfil
+
+        if id_perfil == ID_PERFIL_COORDENADOR_PADRAO:
+            return True
+
+    candidatos_nome = [
         getattr(current_user, "NomePerfil", None),
         getattr(current_user, "Perfil", None),
         getattr(current_user, "DescricaoPerfil", None),
+        getattr(current_user, "perfil_nome", None),
+        getattr(current_user, "nome_perfil", None),
         getattr(perfil, "NomePerfil", None) if perfil is not None else None,
         getattr(perfil, "Descricao", None) if perfil is not None else None,
+        getattr(perfil, "Perfil", None) if perfil is not None else None,
     ]
 
-    return any(_normalizar_perfil_autenticacao(valor) == "coordenador" for valor in candidatos)
+    for valor in candidatos_nome:
+        texto = _normalizar_perfil_autenticacao(valor)
+        if texto == "coordenador" or "coordenador" in texto:
+            return True
+
+    if id_perfil_encontrado > 0:
+        try:
+            nome_perfil = (
+                db.session.query(DimPerfilUsuario.NomePerfil)
+                .filter(DimPerfilUsuario.IDDimPerfilUsuario == int(id_perfil_encontrado))
+                .scalar()
+            )
+            texto = _normalizar_perfil_autenticacao(nome_perfil)
+            if texto == "coordenador" or "coordenador" in texto:
+                return True
+        except Exception:
+            db.session.rollback()
+
+    return False
 
 
 def _coordenador_acesso_bloqueado_no_request(codigo: str) -> bool:
@@ -377,11 +435,15 @@ def _coordenador_pode_usar_permissao_operacional(codigo: str) -> bool:
     if _coordenador_acesso_bloqueado_no_request(codigo):
         return False
 
+    caminho = str(getattr(request, "path", "") or "").strip()
+
     if codigo in PERMISSOES_OPERACIONAIS_COORDENADOR:
         return True
 
+    if any(caminho.startswith(prefixo) for prefixo in ROTAS_OPERACIONAIS_COORDENADOR):
+        return True
+
     if codigo == "ADMIN_TUDO":
-        caminho = str(getattr(request, "path", "") or "").strip()
         return any(caminho.startswith(prefixo) for prefixo in ROTAS_ADMIN_OPERACIONAIS_COORDENADOR)
 
     return False
