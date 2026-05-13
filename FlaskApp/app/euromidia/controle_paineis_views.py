@@ -16433,6 +16433,193 @@ def reserva_nova():
 
 
 
+
+
+
+
+
+
+
+@paineis_bp.get("/preferencia-reservas")
+@login_required
+@limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def preferencia_reservas_lista():
+    """
+    Eu listo as preferências de reserva com regra de visibilidade por perfil.
+
+    Regra de acesso:
+    - Admin e Coordenador enxergam todas as preferências ativas.
+    - Vendedor enxerga somente as preferências ligadas ao seu IDVendedor.
+    - Outros perfis não acessam esta tela.
+    """
+    usuario_eh_admin = _usuario_logado_eh_perfil_admin()
+    usuario_eh_coordenador = _usuario_logado_eh_perfil_coordenador()
+    usuario_eh_vendedor = _usuario_logado_eh_perfil_vendedor()
+    usuario_tem_visao_total = usuario_eh_admin or usuario_eh_coordenador
+
+    if not (usuario_tem_visao_total or usuario_eh_vendedor):
+        abort(403, description="Perfil sem permissão para visualizar preferências de reserva.")
+
+    try:
+        page = int((request.args.get("page") or "1").strip())
+    except Exception:
+        page = 1
+
+    if page < 1:
+        page = 1
+
+    per_page = 10
+    limite_resultados = 1000
+
+    id_vendedor_logado = 0
+    filtro_visibilidade_sql = ""
+    params = {}
+
+    if usuario_eh_vendedor and not usuario_tem_visao_total:
+        id_vendedor_logado = _resolver_id_vendedor_logado_carteira()
+
+        if id_vendedor_logado <= 0:
+            filtro_visibilidade_sql = " AND 1 = 0"
+        else:
+            filtro_visibilidade_sql = " AND PR.IDVendedor = :id_vendedor_logado"
+            params["id_vendedor_logado"] = id_vendedor_logado
+
+    sql_total = text(f"""
+        SELECT COUNT_BIG(1) AS Total
+        FROM [Integracao].[Silver].[FatoPreferenciaReserva] AS PR
+        INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS PRI
+            ON PRI.IDFatoPreferenciaReserva = PR.IDFatoPreferenciaReserva
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS V
+            ON V.IDVendedor = PR.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS F
+            ON F.IDDimFacesPaineis = PRI.IDDimFacesPaineis
+        WHERE ISNULL(PR.BitAtivo, 0) = 1
+          AND ISNULL(PRI.BitAtivo, 0) = 1
+          {filtro_visibilidade_sql};
+    """)
+
+    total_bruto = int(db.session.execute(sql_total, params).scalar() or 0)
+    total = min(total_bruto, limite_resultados)
+    total_pages = max(int(math.ceil(total / per_page)), 1) if total > 0 else 1
+
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+
+    sql_itens = text(f"""
+        SELECT
+             PR.IDFatoControleContratosEuromidia
+            ,V.NomeVendedor
+            ,PR.TotalLiquidoContrato
+            ,PR.MarcaExibida
+            ,F.CodFace
+            ,PR.DataCriacao
+            ,PRI.DataInicioPrevisto AS DataInicio
+            ,PRI.DataTerminoPrevisto AS DataTermino
+        FROM [Integracao].[Silver].[FatoPreferenciaReserva] AS PR
+        INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS PRI
+            ON PRI.IDFatoPreferenciaReserva = PR.IDFatoPreferenciaReserva
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS V
+            ON V.IDVendedor = PR.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS F
+            ON F.IDDimFacesPaineis = PRI.IDDimFacesPaineis
+        WHERE ISNULL(PR.BitAtivo, 0) = 1
+          AND ISNULL(PRI.BitAtivo, 0) = 1
+          {filtro_visibilidade_sql}
+        ORDER BY
+             PR.DataCriacao DESC
+            ,PR.IDFatoPreferenciaReserva DESC
+            ,PRI.IDFatoPreferenciaReservaItens DESC
+        OFFSET :offset ROWS
+        FETCH NEXT :per_page ROWS ONLY;
+    """)
+
+    params_itens = dict(params)
+    params_itens.update({
+        "offset": offset,
+        "per_page": per_page,
+    })
+
+    rows = db.session.execute(sql_itens, params_itens).mappings().all()
+
+    def _formatar_moeda_preferencia(valor):
+        """Eu formato valor monetário em pt-BR sem depender de filtro externo do Jinja."""
+        if valor is None:
+            return "—"
+
+        try:
+            numero = float(valor)
+        except Exception:
+            return str(valor)
+
+        return "R$ " + f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def _formatar_data_preferencia(valor, com_hora: bool = False):
+        """Eu formato datas da tela em pt-BR e mantenho fallback seguro para strings."""
+        if valor is None:
+            return "—"
+
+        if isinstance(valor, str):
+            texto = valor.strip()
+            if not texto:
+                return "—"
+
+            for formato in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    valor_convertido = datetime.strptime(texto[:26], formato)
+                    valor = valor_convertido
+                    break
+                except Exception:
+                    continue
+            else:
+                return texto
+
+        try:
+            if com_hora:
+                return valor.strftime("%d/%m/%Y %H:%M")
+            return valor.strftime("%d/%m/%Y")
+        except Exception:
+            return str(valor)
+
+    itens = []
+    for row in rows:
+        item = dict(row)
+        item["TotalLiquidoContratoFormatado"] = _formatar_moeda_preferencia(item.get("TotalLiquidoContrato"))
+        item["DataCriacaoFormatada"] = _formatar_data_preferencia(item.get("DataCriacao"), com_hora=True)
+        item["DataInicioFormatada"] = _formatar_data_preferencia(item.get("DataInicio"), com_hora=False)
+        item["DataTerminoFormatada"] = _formatar_data_preferencia(item.get("DataTermino"), com_hora=False)
+        itens.append(item)
+
+    paginacao = {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_bruto": total_bruto,
+        "total_pages": total_pages,
+        "inicio": (offset + 1) if total > 0 else 0,
+        "fim": min(offset + per_page, total) if total > 0 else 0,
+        "tem_anterior": page > 1,
+        "tem_proxima": page < total_pages,
+        "limite_resultados": limite_resultados,
+    }
+
+    return render_template(
+        "euromidia/preferencia_reservas_lista.html",
+        itens=itens,
+        paginacao=paginacao,
+        usuario_logado_eh_perfil_vendedor=usuario_eh_vendedor,
+        usuario_logado_eh_perfil_admin=usuario_eh_admin,
+        usuario_logado_eh_perfil_coordenador=usuario_eh_coordenador,
+        usuario_tem_visao_total_preferencia_reserva=usuario_tem_visao_total,
+        id_vendedor_logado=id_vendedor_logado,
+    )
+
+
+
+
+
 @paineis_bp.route("/api/ocupacao/calendario", methods=["GET"])
 @login_required
 def api_ocupacao_calendario():
