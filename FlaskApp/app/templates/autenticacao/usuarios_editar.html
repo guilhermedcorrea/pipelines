@@ -1,11 +1,11 @@
 {% extends "euromidia/base_euromidia.html" %}
 
-{% block title %}Editar Usuário | Euromídia{% endblock %}
+{% block title %}Editar Usuário, Senha e Permissões | Euromídia{% endblock %}
 
 {% block content %}
 
 <div class="card">
-  <h1 class="page-title">Editar Usuário</h1>
+  <h1 class="page-title">Editar Usuário, Senha e Permissões</h1>
 
   <p class="muted">
     {{ usuario.NomeUsuario }} — {{ usuario.Email }}
@@ -45,14 +45,83 @@
     <style>
       .perm-section{margin-top:24px;}
       .perm-alert{margin-top:10px;border:1px solid rgba(0,40,132,.14);background:rgba(0,40,132,.04);border-radius:14px;padding:12px;color:var(--muted);font-weight:900;font-size:12px;line-height:1.45;}
+      .perm-alert.warning{border-color:rgba(245,158,11,.30);background:rgba(245,158,11,.08);color:#92400e;}
       .perm-tag{display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(0,40,132,.16);background:rgba(0,40,132,.06);color:var(--euro-blue);font-size:11px;font-weight:1000;}
+      .senha-box{margin-top:24px;border:1px solid var(--border);border-radius:16px;padding:16px;background:#fff;box-shadow:0 1px 8px rgba(0,0,0,.04);}
+      .senha-row{display:flex;align-items:center;gap:10px;}
+      .senha-row input{flex:1 1 auto;}
+      .senha-row button{flex:0 0 auto;white-space:nowrap;}
+      .senha-help{font-size:12px;color:var(--muted);font-weight:800;line-height:1.45;margin-top:8px;}
+      @media (max-width:760px){.senha-row{flex-direction:column;align-items:stretch;}.senha-row button{width:100%;}}
     </style>
+
+    <div class="senha-box">
+      <h2 class="page-title" style="font-size:18px; margin-bottom:8px;">Senha do usuário</h2>
+
+      <div class="perm-alert warning">
+        A senha real não aparece porque o sistema salva <b>HashSenha</b>, não a senha em texto puro.
+        Este campo permite visualizar o hash atual para conferência técnica e trocar a senha gerando um novo hash seguro.
+      </div>
+
+      <div style="margin-top:14px;">
+        <label>HashSenha atual</label>
+        <div class="senha-row">
+          <input id="hashSenhaAtual"
+                 type="password"
+                 value="{{ usuario.HashSenha or '' }}"
+                 readonly
+                 autocomplete="off"
+                 placeholder="Sem hash de senha cadastrado">
+          <button type="button" class="btn btn-secondary" id="btnToggleHashSenha">
+            Visualizar hash
+          </button>
+        </div>
+        <div class="senha-help">
+          Isso não mostra a senha digitada pelo usuário; mostra apenas o hash salvo no banco.
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:14px;">
+        <div>
+          <label>Nova senha</label>
+          <div class="senha-row">
+            <input id="novaSenhaAdmin"
+                   name="nova_senha_admin"
+                   type="password"
+                   minlength="10"
+                   autocomplete="new-password"
+                   placeholder="Deixe em branco para não alterar">
+            <button type="button" class="btn btn-secondary" data-toggle-senha="#novaSenhaAdmin">
+              Ver
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label>Confirmar nova senha</label>
+          <div class="senha-row">
+            <input id="confirmarSenhaAdmin"
+                   name="confirmar_senha_admin"
+                   type="password"
+                   minlength="10"
+                   autocomplete="new-password"
+                   placeholder="Repita a nova senha">
+            <button type="button" class="btn btn-secondary" data-toggle-senha="#confirmarSenhaAdmin">
+              Ver
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="senha-help">
+        Regra aplicada no backend: se preencher senha, precisa preencher confirmação igual e com no mínimo 10 caracteres.
+      </div>
+    </div>
 
     <div class="perm-section">
       <h2 class="page-title" style="font-size:18px;">Filtros avançados da lista de empresas</h2>
       <div class="perm-alert">
-        Para usuário com perfil <b>VENDEDOR</b>, estes filtros ficam ocultos por padrão.
-        Use <b>Conceder</b> para liberar um filtro específico para este usuário.
+       
       </div>
     </div>
 
@@ -180,13 +249,61 @@
     const form = document.querySelector('form[data-form-editar-usuario="1"]');
     if(!form){ return; }
 
+    const botaoHash = document.getElementById('btnToggleHashSenha');
+    const campoHash = document.getElementById('hashSenhaAtual');
+
+    if(botaoHash && campoHash){
+      botaoHash.addEventListener('click', function(){
+        const estaOculto = campoHash.type === 'password';
+        campoHash.type = estaOculto ? 'text' : 'password';
+        botaoHash.textContent = estaOculto ? 'Ocultar hash' : 'Visualizar hash';
+      });
+    }
+
+    document.querySelectorAll('[data-toggle-senha]').forEach(function(botao){
+      botao.addEventListener('click', function(){
+        const seletor = botao.getAttribute('data-toggle-senha');
+        const campo = document.querySelector(seletor);
+        if(!campo){ return; }
+
+        const estaOculto = campo.type === 'password';
+        campo.type = estaOculto ? 'text' : 'password';
+        botao.textContent = estaOculto ? 'Ocultar' : 'Ver';
+      });
+    });
+
     form.addEventListener('submit', function(evento){
       const campoCsrf = form.querySelector('input[name="csrf_token"]');
+      const novaSenha = document.getElementById('novaSenhaAdmin');
+      const confirmarSenha = document.getElementById('confirmarSenhaAdmin');
+      const valorNovaSenha = String((novaSenha && novaSenha.value) || '').trim();
+      const valorConfirmarSenha = String((confirmarSenha && confirmarSenha.value) || '').trim();
 
       if(!campoCsrf || !String(campoCsrf.value || '').trim()){
         evento.preventDefault();
         alert('Sua sessão de segurança expirou. Recarregue a página, faça login novamente se necessário e tente salvar de novo.');
         window.location.reload();
+        return;
+      }
+
+      if(valorNovaSenha || valorConfirmarSenha){
+        if(!valorNovaSenha || !valorConfirmarSenha){
+          evento.preventDefault();
+          alert('Para alterar a senha, preencha a nova senha e a confirmação.');
+          return;
+        }
+
+        if(valorNovaSenha !== valorConfirmarSenha){
+          evento.preventDefault();
+          alert('A confirmação da nova senha não confere.');
+          return;
+        }
+
+        if(valorNovaSenha.length < 10){
+          evento.preventDefault();
+          alert('A nova senha deve ter pelo menos 10 caracteres.');
+          return;
+        }
       }
     });
   })();

@@ -8,7 +8,7 @@
   <h1 class="page-title">Usuários</h1>
 
   <p class="muted">
-    Clique em um usuário para alterar perfil e permissões individuais.
+    Clique em um usuário para alterar perfil, senha e permissões individuais.
   </p>
 
   <form method="get" style="margin: 16px 0;">
@@ -71,7 +71,7 @@
             <td style="padding:10px; border-bottom:1px solid var(--border); text-align:right;">
               <a class="btn btn-primary"
                  href="{{ url_for('Autenticacao.usuarios_editar', id_usuario=u.IDDimUsuarios) }}">
-                Editar permissões
+                Editar usuário
               </a>
             </td>
           </tr>

@@ -794,6 +794,40 @@ def usuarios_editar(id_usuario):
             id_perfil = int(id_perfil_raw)
             bit_ativo = request.form.get("bit_ativo") == "1"
 
+            nova_senha_admin = _texto(request.form.get("nova_senha_admin"))
+            confirmar_senha_admin = _texto(request.form.get("confirmar_senha_admin"))
+            hash_senha_nova = None
+
+            if nova_senha_admin or confirmar_senha_admin:
+                if not nova_senha_admin or not confirmar_senha_admin:
+                    flash("Para alterar a senha, preencha a nova senha e a confirmação.", "warning")
+                    return redirect(
+                        url_for(
+                            "Autenticacao.usuarios_editar",
+                            id_usuario=usuario.IDDimUsuarios,
+                        )
+                    )
+
+                if nova_senha_admin != confirmar_senha_admin:
+                    flash("A confirmação da nova senha não confere.", "danger")
+                    return redirect(
+                        url_for(
+                            "Autenticacao.usuarios_editar",
+                            id_usuario=usuario.IDDimUsuarios,
+                        )
+                    )
+
+                if len(nova_senha_admin) < 10:
+                    flash("A nova senha deve ter pelo menos 10 caracteres.", "danger")
+                    return redirect(
+                        url_for(
+                            "Autenticacao.usuarios_editar",
+                            id_usuario=usuario.IDDimUsuarios,
+                        )
+                    )
+
+                hash_senha_nova = generate_password_hash(nova_senha_admin)
+
             perfil_existe = (
                 db.session.query(DimPerfilUsuario.IDDimPerfilUsuario)
                 .filter(DimPerfilUsuario.IDDimPerfilUsuario == id_perfil)
@@ -825,21 +859,37 @@ def usuarios_editar(id_usuario):
             - O SQLAlchemy interpreta isso como StaleDataError quando o objeto ORM é atualizado.
             - Por isso faço UPDATE/DELETE/INSERT via SQL explícito, evitando o flush automático do ORM.
             """
-            db.session.execute(
-                text("""
+            parametros_update_usuario = {
+                "id_perfil": int(id_perfil),
+                "bit_ativo": 1 if bit_ativo else 0,
+                "agora": agora,
+                "id_usuario": id_usuario_int,
+            }
+
+            if hash_senha_nova:
+                parametros_update_usuario["hash_senha"] = hash_senha_nova
+                sql_update_usuario = """
+                    UPDATE [Integracao].[Silver].[DimUsuarios]
+                    SET
+                        IDDimPerfilUsuario = :id_perfil,
+                        BitAtivo = :bit_ativo,
+                        HashSenha = :hash_senha,
+                        UpdateAt = :agora
+                    WHERE IDDimUsuarios = :id_usuario
+                """
+            else:
+                sql_update_usuario = """
                     UPDATE [Integracao].[Silver].[DimUsuarios]
                     SET
                         IDDimPerfilUsuario = :id_perfil,
                         BitAtivo = :bit_ativo,
                         UpdateAt = :agora
                     WHERE IDDimUsuarios = :id_usuario
-                """),
-                {
-                    "id_perfil": int(id_perfil),
-                    "bit_ativo": 1 if bit_ativo else 0,
-                    "agora": agora,
-                    "id_usuario": id_usuario_int,
-                },
+                """
+
+            db.session.execute(
+                text(sql_update_usuario),
+                parametros_update_usuario,
             )
 
             db.session.execute(
@@ -901,7 +951,10 @@ def usuarios_editar(id_usuario):
             db.session.commit()
             db.session.expire_all()
 
-            flash("Usuário atualizado com sucesso.", "success")
+            if hash_senha_nova:
+                flash("Usuário, permissões e senha atualizados com sucesso.", "success")
+            else:
+                flash("Usuário atualizado com sucesso.", "success")
 
             return redirect(
                 url_for(
