@@ -16473,12 +16473,18 @@ def reserva_nova():
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def preferencia_reservas_lista():
     """
-    Eu listo as preferências de reserva com regra de visibilidade por perfil.
+    Eu listo as preferências de reserva com filtros de período, busca e vendedor.
 
-    Regra de acesso:
+    Regras de acesso:
     - Admin e Coordenador enxergam todas as preferências ativas.
     - Vendedor enxerga somente as preferências ligadas ao seu IDVendedor.
     - Outros perfis não acessam esta tela.
+
+    Regras de filtro:
+    - q pesquisa contrato, prévia, razão social, marca, vendedor e CodFace.
+    - dt_ini/dt_fim filtram por sobreposição do período reservado:
+      DataInicioPrevisto <= dt_fim e DataTerminoPrevisto >= dt_ini.
+    - vendedor é filtro múltiplo apenas para quem tem visão total.
     """
     usuario_eh_admin = _usuario_logado_eh_perfil_admin()
     usuario_eh_coordenador = _usuario_logado_eh_perfil_coordenador()
@@ -16488,88 +16494,54 @@ def preferencia_reservas_lista():
     if not (usuario_tem_visao_total or usuario_eh_vendedor):
         abort(403, description="Perfil sem permissão para visualizar preferências de reserva.")
 
-    try:
-        page = int((request.args.get("page") or "1").strip())
-    except Exception:
-        page = 1
+    def _parse_data_preferencia(valor):
+        texto = str(valor or "").strip()
+        if not texto:
+            return None
 
-    if page < 1:
-        page = 1
+        for formato in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(texto, formato).date()
+            except Exception:
+                continue
 
-    per_page = 10
-    limite_resultados = 1000
+        return None
 
-    id_vendedor_logado = 0
-    filtro_visibilidade_sql = ""
-    params = {}
+    def _normalizar_lista_int_preferencia(valores):
+        resultado = []
+        vistos = set()
 
-    if usuario_eh_vendedor and not usuario_tem_visao_total:
-        id_vendedor_logado = _resolver_id_vendedor_logado_carteira()
+        for valor in valores or []:
+            texto = str(valor or "").strip()
+            if not texto:
+                continue
 
-        if id_vendedor_logado <= 0:
-            filtro_visibilidade_sql = " AND 1 = 0"
-        else:
-            filtro_visibilidade_sql = " AND PR.IDVendedor = :id_vendedor_logado"
-            params["id_vendedor_logado"] = id_vendedor_logado
+            try:
+                numero = int(texto)
+            except Exception:
+                continue
 
-    sql_total = text(f"""
-        SELECT COUNT_BIG(1) AS Total
-        FROM [Integracao].[Silver].[FatoPreferenciaReserva] AS PR
-        INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS PRI
-            ON PRI.IDFatoPreferenciaReserva = PR.IDFatoPreferenciaReserva
-        LEFT JOIN [Integracao].[dbo].[Vendedores] AS V
-            ON V.IDVendedor = PR.IDVendedor
-        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS F
-            ON F.IDDimFacesPaineis = PRI.IDDimFacesPaineis
-        WHERE ISNULL(PR.BitAtivo, 0) = 1
-          AND ISNULL(PRI.BitAtivo, 0) = 1
-          {filtro_visibilidade_sql};
-    """)
+            if numero <= 0 or numero in vistos:
+                continue
 
-    total_bruto = int(db.session.execute(sql_total, params).scalar() or 0)
-    total = min(total_bruto, limite_resultados)
-    total_pages = max(int(math.ceil(total / per_page)), 1) if total > 0 else 1
+            vistos.add(numero)
+            resultado.append(numero)
 
-    if page > total_pages:
-        page = total_pages
+        return resultado
 
-    offset = (page - 1) * per_page
+    def _adicionar_filtro_in_preferencia(filtros_sql, params, coluna_sql, prefixo, valores):
+        valores_validos = _normalizar_lista_int_preferencia(valores)
+        if not valores_validos:
+            return []
 
-    sql_itens = text(f"""
-        SELECT
-             PR.IDFatoControleContratosEuromidia
-            ,V.NomeVendedor
-            ,PR.TotalLiquidoContrato
-            ,PR.MarcaExibida
-            ,F.CodFace
-            ,PR.DataCriacao
-            ,PRI.DataInicioPrevisto AS DataInicio
-            ,PRI.DataTerminoPrevisto AS DataTermino
-        FROM [Integracao].[Silver].[FatoPreferenciaReserva] AS PR
-        INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS PRI
-            ON PRI.IDFatoPreferenciaReserva = PR.IDFatoPreferenciaReserva
-        LEFT JOIN [Integracao].[dbo].[Vendedores] AS V
-            ON V.IDVendedor = PR.IDVendedor
-        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS F
-            ON F.IDDimFacesPaineis = PRI.IDDimFacesPaineis
-        WHERE ISNULL(PR.BitAtivo, 0) = 1
-          AND ISNULL(PRI.BitAtivo, 0) = 1
-          {filtro_visibilidade_sql}
-        ORDER BY
-             PR.DataCriacao DESC
-            ,PR.IDFatoPreferenciaReserva DESC
-            ,PRI.IDFatoPreferenciaReservaItens DESC
-        OFFSET :offset ROWS
-        FETCH NEXT :per_page ROWS ONLY;
-    """)
+        placeholders = []
+        for idx, valor in enumerate(valores_validos):
+            chave = f"{prefixo}_{idx}"
+            placeholders.append(f":{chave}")
+            params[chave] = int(valor)
 
-    params_itens = dict(params)
-    params_itens.update({
-        "offset": offset,
-        "per_page": per_page,
-    })
-
-    rows = db.session.execute(sql_itens, params_itens).mappings().all()
+        filtros_sql.append(f"{coluna_sql} IN ({', '.join(placeholders)})")
+        return valores_validos
 
     def _formatar_moeda_preferencia(valor):
         """Eu formato valor monetário em pt-BR sem depender de filtro externo do Jinja."""
@@ -16595,8 +16567,7 @@ def preferencia_reservas_lista():
 
             for formato in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
                 try:
-                    valor_convertido = datetime.strptime(texto[:26], formato)
-                    valor = valor_convertido
+                    valor = datetime.strptime(texto[:26], formato)
                     break
                 except Exception:
                     continue
@@ -16610,14 +16581,215 @@ def preferencia_reservas_lista():
         except Exception:
             return str(valor)
 
+    try:
+        page = int((request.args.get("page") or "1").strip())
+    except Exception:
+        page = 1
+
+    page = max(1, page)
+    per_page = 10
+    limite_resultados = 1000
+
+    q = (request.args.get("q") or "").strip()[:160]
+    dt_ini_raw = (request.args.get("dt_ini") or "").strip()
+    dt_fim_raw = (request.args.get("dt_fim") or "").strip()
+
+    data_inicio_filtro = _parse_data_preferencia(dt_ini_raw)
+    data_fim_filtro = _parse_data_preferencia(dt_fim_raw)
+
+    if data_inicio_filtro and data_fim_filtro and data_fim_filtro < data_inicio_filtro:
+        data_inicio_filtro, data_fim_filtro = data_fim_filtro, data_inicio_filtro
+
+    dt_ini = data_inicio_filtro.strftime("%Y-%m-%d") if data_inicio_filtro else ""
+    dt_fim = data_fim_filtro.strftime("%Y-%m-%d") if data_fim_filtro else ""
+    periodo_filtro_ativo = bool(dt_ini or dt_fim)
+    ano_periodo = int((data_inicio_filtro or data_fim_filtro or date.today()).year)
+
+    vendedores_ids_selecionados = (
+        _normalizar_lista_int_preferencia(request.args.getlist("vendedor"))
+        if usuario_tem_visao_total
+        else []
+    )
+
+    id_vendedor_logado = 0
+    filtros_sql = [
+        "ISNULL(PR.BitAtivo, 0) = 1",
+        "ISNULL(PRI.BitAtivo, 0) = 1",
+    ]
+    params = {}
+
+    if usuario_eh_vendedor and not usuario_tem_visao_total:
+        id_vendedor_logado = _resolver_id_vendedor_logado_carteira()
+
+        if id_vendedor_logado <= 0:
+            filtros_sql.append("1 = 0")
+        else:
+            filtros_sql.append("PR.IDVendedor = :id_vendedor_logado")
+            params["id_vendedor_logado"] = id_vendedor_logado
+
+    if q:
+        filtros_sql.append("""
+            (
+                CAST(PR.IDFatoControleContratosEuromidia AS varchar(40)) LIKE :q_like
+                OR ISNULL(CTR.NumeroContrato, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(CTR.NumeroPrevia, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(CTR.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(PR.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(V.NomeVendedor, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(F.CodFace, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+            )
+        """)
+        params["q_like"] = f"%{q}%"
+
+    if data_inicio_filtro is not None and data_fim_filtro is not None:
+        filtros_sql.append("""
+            PRI.DataInicioPrevisto IS NOT NULL
+            AND PRI.DataTerminoPrevisto IS NOT NULL
+            AND CAST(PRI.DataInicioPrevisto AS date) <= :data_fim_filtro
+            AND CAST(PRI.DataTerminoPrevisto AS date) >= :data_inicio_filtro
+        """)
+        params["data_inicio_filtro"] = data_inicio_filtro
+        params["data_fim_filtro"] = data_fim_filtro
+    elif data_inicio_filtro is not None:
+        filtros_sql.append("PRI.DataTerminoPrevisto IS NOT NULL AND CAST(PRI.DataTerminoPrevisto AS date) >= :data_inicio_filtro")
+        params["data_inicio_filtro"] = data_inicio_filtro
+    elif data_fim_filtro is not None:
+        filtros_sql.append("PRI.DataInicioPrevisto IS NOT NULL AND CAST(PRI.DataInicioPrevisto AS date) <= :data_fim_filtro")
+        params["data_fim_filtro"] = data_fim_filtro
+
+    if usuario_tem_visao_total:
+        _adicionar_filtro_in_preferencia(
+            filtros_sql,
+            params,
+            "PR.IDVendedor",
+            "vendedor_id",
+            vendedores_ids_selecionados,
+        )
+
+    where_sql = " AND ".join(f"({filtro})" for filtro in filtros_sql)
+
+    sql_from_where = f"""
+        FROM [Integracao].[Silver].[FatoPreferenciaReserva] AS PR
+        INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS PRI
+            ON PRI.IDFatoPreferenciaReserva = PR.IDFatoPreferenciaReserva
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS V
+            ON V.IDVendedor = PR.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS F
+            ON F.IDDimFacesPaineis = PRI.IDDimFacesPaineis
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS CTR
+            ON CTR.IDFatoControleContratosEuromidia = PR.IDFatoControleContratosEuromidia
+        WHERE {where_sql}
+    """
+
+    sql_total = text(f"""
+        SELECT COUNT_BIG(1) AS Total
+        {sql_from_where};
+    """)
+
+    total_bruto = int(db.session.execute(sql_total, params).scalar() or 0)
+    total = min(total_bruto, limite_resultados)
+    total_pages = max(int(math.ceil(total / per_page)), 1) if total > 0 else 1
+
+    if page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+
+    sql_itens = text(f"""
+        SELECT
+             PR.IDFatoPreferenciaReserva
+            ,PRI.IDFatoPreferenciaReservaItens
+            ,PR.IDFatoControleContratosEuromidia
+            ,PR.IDVendedor
+            ,V.NomeVendedor
+            ,CTR.NumeroContrato
+            ,CTR.NumeroPrevia
+            ,CTR.RazaoSocial
+            ,PR.TotalLiquidoContrato
+            ,PR.MarcaExibida
+            ,F.CodFace
+            ,PR.DataCriacao
+            ,PRI.DataInicioPrevisto AS DataInicio
+            ,PRI.DataTerminoPrevisto AS DataTermino
+        {sql_from_where}
+        ORDER BY
+             PR.DataCriacao DESC
+            ,PR.IDFatoPreferenciaReserva DESC
+            ,PRI.IDFatoPreferenciaReservaItens DESC
+        OFFSET :offset ROWS
+        FETCH NEXT :per_page ROWS ONLY;
+    """)
+
+    params_itens = dict(params)
+    params_itens.update({
+        "offset": offset,
+        "per_page": per_page,
+    })
+
+    rows = db.session.execute(sql_itens, params_itens).mappings().all()
+
     itens = []
     for row in rows:
         item = dict(row)
+        id_contrato = item.get("IDFatoControleContratosEuromidia")
+        numero_contrato = str(item.get("NumeroContrato") or "").strip()
+        numero_previa = str(item.get("NumeroPrevia") or "").strip()
+
+        if numero_contrato:
+            item["NumeroContratoExibicao"] = numero_contrato
+        elif numero_previa:
+            item["NumeroContratoExibicao"] = numero_previa
+        elif id_contrato:
+            item["NumeroContratoExibicao"] = f"Contrato {id_contrato}"
+        else:
+            item["NumeroContratoExibicao"] = "Sem contrato"
+
         item["TotalLiquidoContratoFormatado"] = _formatar_moeda_preferencia(item.get("TotalLiquidoContrato"))
         item["DataCriacaoFormatada"] = _formatar_data_preferencia(item.get("DataCriacao"), com_hora=True)
         item["DataInicioFormatada"] = _formatar_data_preferencia(item.get("DataInicio"), com_hora=False)
         item["DataTerminoFormatada"] = _formatar_data_preferencia(item.get("DataTermino"), com_hora=False)
         itens.append(item)
+
+    vendedor_opcoes = []
+    if usuario_tem_visao_total:
+        try:
+            rows_vendedores = db.session.execute(text("""
+                SELECT DISTINCT
+                     PR.IDVendedor
+                    ,V.NomeVendedor
+                FROM [Integracao].[Silver].[FatoPreferenciaReserva] AS PR
+                INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS PRI
+                    ON PRI.IDFatoPreferenciaReserva = PR.IDFatoPreferenciaReserva
+                LEFT JOIN [Integracao].[dbo].[Vendedores] AS V
+                    ON V.IDVendedor = PR.IDVendedor
+                WHERE ISNULL(PR.BitAtivo, 0) = 1
+                  AND ISNULL(PRI.BitAtivo, 0) = 1
+                  AND PR.IDVendedor IS NOT NULL
+                  AND NULLIF(LTRIM(RTRIM(V.NomeVendedor)), '') IS NOT NULL
+                ORDER BY V.NomeVendedor ASC;
+            """)).mappings().all()
+
+            for row in rows_vendedores:
+                try:
+                    id_vendedor = int(row.get("IDVendedor") or 0)
+                except Exception:
+                    id_vendedor = 0
+
+                nome_vendedor = str(row.get("NomeVendedor") or "").strip()
+                if id_vendedor <= 0 or not nome_vendedor:
+                    continue
+
+                vendedor_opcoes.append({
+                    "IDVendedor": id_vendedor,
+                    "NomeVendedor": nome_vendedor,
+                })
+        except Exception:
+            current_app.logger.exception("Falha ao carregar vendedores da tela de preferências de reserva.")
+            vendedor_opcoes = []
+
+    pagina_inicio = max(1, page - 3)
+    pagina_fim = min(total_pages, page + 3)
+    paginas_visiveis = list(range(pagina_inicio, pagina_fim + 1))
 
     paginacao = {
         "page": page,
@@ -16630,18 +16802,27 @@ def preferencia_reservas_lista():
         "tem_anterior": page > 1,
         "tem_proxima": page < total_pages,
         "limite_resultados": limite_resultados,
+        "paginas_visiveis": paginas_visiveis,
     }
 
     return render_template(
         "euromidia/preferencia_reservas_lista.html",
         itens=itens,
         paginacao=paginacao,
+        q=q,
+        dt_ini=dt_ini,
+        dt_fim=dt_fim,
+        ano_periodo=ano_periodo,
+        periodo_filtro_ativo=periodo_filtro_ativo,
+        vendedor_opcoes=vendedor_opcoes,
+        vendedores_ids_selecionados=vendedores_ids_selecionados,
         usuario_logado_eh_perfil_vendedor=usuario_eh_vendedor,
         usuario_logado_eh_perfil_admin=usuario_eh_admin,
         usuario_logado_eh_perfil_coordenador=usuario_eh_coordenador,
         usuario_tem_visao_total_preferencia_reserva=usuario_tem_visao_total,
         id_vendedor_logado=id_vendedor_logado,
     )
+
 
 
 
