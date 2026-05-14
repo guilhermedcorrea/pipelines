@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import hashlib
 import logging
 from datetime import date, datetime
@@ -9,34 +7,108 @@ from typing import Any
 import pandas as pd
 import pendulum
 import polars as pl
-from airflow.sdk import dag, task
+try:
+    from airflow.sdk import dag, task
+except ImportError:
+    from airflow.decorators import dag, task
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from dags._libs.auditoria_task import (
-    adicionar_observacao,
-    adicionar_validacao,
-    criar_resumo_auditoria,
-    definir_amostra,
-    publicar_resumo_auditoria,
-    registrar_erro_no_resumo,
-)
+try:
+    from dags._libs.auditoria_task import (
+        adicionar_observacao,
+        adicionar_validacao,
+        criar_resumo_auditoria,
+        definir_amostra,
+        publicar_resumo_auditoria,
+        registrar_erro_no_resumo,
+    )
+except Exception:
+    class _ResumoAuditoriaFallback:
+        """Resumo mínimo para o DAG continuar sendo importado mesmo sem a lib de auditoria."""
+        def __init__(
+            self,
+            nome_amigavel: str,
+            descricao_etapa: str,
+            origem_dados: str | None = None,
+            destino_dados: str | None = None,
+        ) -> None:
+            self.nome_amigavel = nome_amigavel
+            self.descricao_etapa = descricao_etapa
+            self.origem_dados = origem_dados
+            self.destino_dados = destino_dados
+            self.status = "PENDING"
+            self.metricas_extras: dict[str, Any] = {}
+            self.validacoes: list[dict[str, Any]] = []
+            self.observacoes: list[str] = []
+            self.amostra: list[dict[str, Any]] = []
+            self.linhas_lidas = 0
+            self.linhas_inseridas = 0
+            self.erro: str | None = None
+
+    def criar_resumo_auditoria(
+        nome_amigavel: str,
+        descricao_etapa: str,
+        origem_dados: str | None = None,
+        destino_dados: str | None = None,
+    ) -> _ResumoAuditoriaFallback:
+        return _ResumoAuditoriaFallback(
+            nome_amigavel=nome_amigavel,
+            descricao_etapa=descricao_etapa,
+            origem_dados=origem_dados,
+            destino_dados=destino_dados,
+        )
+
+    def adicionar_observacao(resumo: _ResumoAuditoriaFallback, observacao: str) -> None:
+        resumo.observacoes.append(observacao)
+
+    def adicionar_validacao(
+        resumo: _ResumoAuditoriaFallback,
+        nome: str,
+        status: str,
+        detalhe: str,
+    ) -> None:
+        resumo.validacoes.append({"nome": nome, "status": status, "detalhe": detalhe})
+
+    def definir_amostra(
+        resumo: _ResumoAuditoriaFallback,
+        amostra: list[dict[str, Any]],
+        limite: int = 10,
+    ) -> None:
+        resumo.amostra = amostra[:limite]
+
+    def publicar_resumo_auditoria(resumo: _ResumoAuditoriaFallback) -> None:
+        logger.info(
+            "Auditoria | etapa=%s | status=%s | origem=%s | destino=%s | metricas=%s",
+            resumo.nome_amigavel,
+            resumo.status,
+            resumo.origem_dados,
+            resumo.destino_dados,
+            resumo.metricas_extras,
+        )
+
+    def registrar_erro_no_resumo(resumo: _ResumoAuditoriaFallback, erro: Exception) -> None:
+        resumo.erro = repr(erro)
 from hooks.BancodeDados.SqlServer import HookSqlServer
 
 
 logger = logging.getLogger(__name__)
 
 
-DAG_ID = "etl_ctr_controle_contratos_euromidia"
+# Nome que deve aparecer no painel do Airflow.
+DAG_ID = "pipeline_controle_contratos_euromidia"
 FUSO_HORARIO = "America/Sao_Paulo"
-CRON_AGENDAMENTO = "0 9,18 * * 1-6"
+CRON_AGENDAMENTO = "0 8,11,15,18 * * *"
 
 CONN_ID_SQL_SERVER = "mssql_integracao"
 
 PASTA_SHAREPOINT_CONTAINER = Path("/opt/airflow/sharepoint_teste")
 PASTA_CARGA_CONTAINER = Path("/opt/airflow/Artefatos/CargasSQL/CTR")
 
-CAMINHO_ARQUIVO_EXCEL = PASTA_SHAREPOINT_CONTAINER / "CTR_Atualizado_copia.xlsm"
+# Este é o caminho visto DENTRO dos containers do Airflow.
+# No host Linux, por causa do bind mount do docker-compose, o arquivo deve ficar em:
+# ./airflow/sharepoint_teste/Copia-Controle de Contratos Euromidia.xlsm
+CAMINHO_ARQUIVO_EXCEL = PASTA_SHAREPOINT_CONTAINER / "Copia-Controle de Contratos Euromidia.xlsm"
 NOME_ABA_EXCEL = "CTR"
 
 TABELA_STAGE = "dbo.df_fatocontrolecontratos"
@@ -1700,7 +1772,7 @@ O pipeline existe para transformar uma planilha operacional de contratos em uma 
 
 Arquivo Excel montado no container:
 
-`/opt/airflow/sharepoint_teste/CTR_Atualizado_copia.xlsm`
+`/opt/airflow/sharepoint_teste/Copia-Controle de Contratos Euromidia.xlsm`
 
 Aba lida:
 
@@ -1869,7 +1941,7 @@ Isso foi feito para que a execução fique legível no painel e não dependa só
 ---
 """,
 )
-def etl_ctr_controle_contratos_euromidia():
+def pipeline_controle_contratos_euromidia():
     @task(task_id="gerar_csv_ctr")
     def gerar_csv_ctr() -> dict[str, Any]:
         resumo = criar_resumo_auditoria(
@@ -2436,4 +2508,4 @@ def etl_ctr_controle_contratos_euromidia():
     info_csv >> stage >> contratos >> itens >> fk >> vendedor >> empresa >> painel >> face >> calendario >> ocupacao
 
 
-dag = etl_ctr_controle_contratos_euromidia()
+dag = pipeline_controle_contratos_euromidia()

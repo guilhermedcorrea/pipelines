@@ -57,7 +57,7 @@ DOC_MD = """
 
 ## Objetivo
 
-Atualiza o status das campanhas comerciais da Euromídia e gera mensagens automáticas para os usuários responsáveis.
+Alimenta a base de vencimento das campanhas comerciais da Euromídia, atualiza o status das campanhas e gera mensagens automáticas para os usuários responsáveis.
 
 O DAG trabalha sobre a tabela:
 
@@ -95,13 +95,15 @@ Se não vier preenchido, comportamento permanece igual ao agendamento: processa 
 
 ## Principais responsabilidades
 
-1. Atualizar `DiasParaVencer`.
-2. Atualizar `IDDimStatusCampanha`.
-3. Gerar mensagem de início de campanha.
-4. Gerar mensagem de campanha quase acabando.
-5. Gerar mensagem de campanha terminada.
-6. Consolidar várias faces do mesmo contrato em uma única mensagem.
-7. Evitar duplicidade de mensagens ativas.
+1. Fazer upsert em `Integracao.Silver.FatoVencimentoCampanhaEuromidia` a partir dos itens dos contratos.
+2. Evitar duplicidade usando a chave natural contrato + item de contrato.
+3. Atualizar `DiasParaVencer`.
+4. Atualizar `IDDimStatusCampanha`.
+5. Gerar mensagem de início de campanha.
+6. Gerar mensagem de campanha quase acabando.
+7. Gerar mensagem de campanha terminada.
+8. Consolidar várias faces do mesmo contrato em uma única mensagem.
+9. Evitar duplicidade de mensagens ativas.
 
 ## Regras de status
 
@@ -136,7 +138,10 @@ Se um contrato possuir várias faces, o DAG cria uma única mensagem consolidada
 
 ## Regra de idempotência
 
-O DAG usa `NOT EXISTS` antes de inserir mensagens, evitando duplicidade de mensagens ativas mesmo rodando a cada 10 minutos.
+O DAG usa duas proteções:
+
+1. Na tabela `FatoVencimentoCampanhaEuromidia`, faz `UPDATE` quando o par contrato + item já existe e faz `INSERT` somente quando não existe.
+2. Na tabela `FatoMensagemUsuario`, usa `NOT EXISTS` antes de inserir mensagens, evitando duplicidade de mensagens ativas mesmo rodando a cada 10 minutos.
 
 ## Relação vendedor → usuário
 
@@ -324,6 +329,271 @@ def preparar_sql_com_filtro_contrato(sql: str, id_contrato: int | None) -> str:
         f"DECLARE @IDContratoFiltro INT = {valor_filtro};",
         1,
     )
+
+
+SQL_UPSERT_VENCIMENTO_CAMPANHA = """
+USE [Integracao];
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @Hoje DATE = CAST(SYSDATETIME() AS DATE);
+DECLARE @IDContratoFiltro INT = NULL;
+
+DECLARE @IDStatusCancelada INT;
+DECLARE @IDStatusSemDataTermino INT;
+DECLARE @IDStatusCampanhaFutura INT;
+DECLARE @IDStatusCampanhaVencida INT;
+DECLARE @IDStatusCampanhaVencendo INT;
+DECLARE @IDStatusCampanhaAtiva INT;
+
+SELECT @IDStatusCancelada = s.IDDimStatusCampanha
+FROM Silver.DimStatusCampanha s
+WHERE s.NomeStatus = N'CANCELADA';
+
+SELECT @IDStatusSemDataTermino = s.IDDimStatusCampanha
+FROM Silver.DimStatusCampanha s
+WHERE s.NomeStatus = N'SEM DATA TERMINO';
+
+SELECT @IDStatusCampanhaFutura = s.IDDimStatusCampanha
+FROM Silver.DimStatusCampanha s
+WHERE s.NomeStatus = N'CAMPANHA FUTURA';
+
+SELECT @IDStatusCampanhaVencida = s.IDDimStatusCampanha
+FROM Silver.DimStatusCampanha s
+WHERE s.NomeStatus = N'CAMPANHA VENCIDA';
+
+SELECT @IDStatusCampanhaVencendo = s.IDDimStatusCampanha
+FROM Silver.DimStatusCampanha s
+WHERE s.NomeStatus = N'CAMPANHA VENCENDO';
+
+SELECT @IDStatusCampanhaAtiva = s.IDDimStatusCampanha
+FROM Silver.DimStatusCampanha s
+WHERE s.NomeStatus = N'CAMPANHA ATIVA';
+
+IF @IDStatusCancelada IS NULL
+   OR @IDStatusSemDataTermino IS NULL
+   OR @IDStatusCampanhaFutura IS NULL
+   OR @IDStatusCampanhaVencida IS NULL
+   OR @IDStatusCampanhaVencendo IS NULL
+   OR @IDStatusCampanhaAtiva IS NULL
+BEGIN
+    THROW 50001, 'DimStatusCampanha está incompleta. Verifique os status: CANCELADA, SEM DATA TERMINO, CAMPANHA FUTURA, CAMPANHA VENCIDA, CAMPANHA VENCENDO e CAMPANHA ATIVA.', 1;
+END;
+
+/*
+    Alimentação da tabela Silver.FatoVencimentoCampanhaEuromidia.
+
+    Chave natural usada para idempotência:
+    - IDFatoControleContratosEuromidia
+    - IDFatoControleContratosItensEuromidia
+
+    Motivo:
+    Cada item de contrato representa uma campanha/face/período controlável.
+    Se a DAG rodar várias vezes, ela atualiza o registro existente.
+    Se aparecer um item novo de contrato, ela insere uma nova campanha.
+
+    Fonte principal:
+    - Silver.FatoControleContratosEuromidia = cabeçalho do contrato
+    - Silver.FatoControleContratosItensEuromidia = item/período da campanha
+*/
+
+IF OBJECT_ID(N'tempdb..#OrigemVencimentoCampanha', N'U') IS NOT NULL
+BEGIN
+    DROP TABLE #OrigemVencimentoCampanha;
+END;
+
+;WITH OrigemContratoItem AS
+(
+    SELECT
+        IDFatoControleContratosEuromidia =
+            CONVERT(INT, ftc.IDFatoControleContratosEuromidia),
+
+        IDFatoControleContratosItensEuromidia =
+            CONVERT(INT, ftci.IDFatoControleContratosItensEuromidia),
+
+        IDVendedor =
+            TRY_CONVERT(INT, ftci.IDVendedor),
+
+        IDEmpresa =
+            TRY_CONVERT(INT, ftc.IDEmpresa),
+
+        MarcaExibida =
+            LEFT(
+                NULLIF(
+                    LTRIM(RTRIM(
+                        COALESCE(ftci.MarcaExibida, ftc.MarcaExibida)
+                    )),
+                    N''
+                ),
+                300
+            ),
+
+        DataInicioCampanha =
+            TRY_CONVERT(DATE, ftci.DataInicioPrevisto),
+
+        DataTerminoPrevisto =
+            TRY_CONVERT(DATE, ftci.DataTerminoPrevisto),
+
+        BitAtivoOrigem =
+            CONVERT(BIT, ISNULL(ftc.BitAtivo, 1)),
+
+        OrdemPreferencia =
+            ROW_NUMBER() OVER
+            (
+                PARTITION BY
+                    ftc.IDFatoControleContratosEuromidia,
+                    ftci.IDFatoControleContratosItensEuromidia
+                ORDER BY
+                    ftci.DataAtualizacao DESC,
+                    ftci.DataLancamento DESC,
+                    ftci.IDFatoControleContratosItensEuromidia DESC
+            )
+    FROM Silver.FatoControleContratosEuromidia AS ftc
+    INNER JOIN Silver.FatoControleContratosItensEuromidia AS ftci
+        ON ftci.IDFatoControleContratoEuromidia = ftc.IDFatoControleContratosEuromidia
+    WHERE
+        ftc.IDFatoControleContratosEuromidia IS NOT NULL
+        AND ftci.IDFatoControleContratosItensEuromidia IS NOT NULL
+        AND
+        (
+            @IDContratoFiltro IS NULL
+            OR ftc.IDFatoControleContratosEuromidia = @IDContratoFiltro
+        )
+),
+OrigemDeduplicada AS
+(
+    SELECT
+        o.IDFatoControleContratosEuromidia,
+        o.IDFatoControleContratosItensEuromidia,
+        o.IDVendedor,
+        o.IDEmpresa,
+        o.MarcaExibida,
+        o.DataInicioCampanha,
+        o.DataTerminoPrevisto,
+        o.BitAtivoOrigem,
+
+        DiasParaVencer =
+            CASE
+                WHEN o.DataTerminoPrevisto IS NULL THEN NULL
+                ELSE DATEDIFF(DAY, @Hoje, o.DataTerminoPrevisto)
+            END,
+
+        BitAtivoCalculado =
+            CASE
+                WHEN o.DataTerminoPrevisto IS NOT NULL
+                     AND o.DataTerminoPrevisto < @Hoje THEN CONVERT(BIT, 0)
+                ELSE o.BitAtivoOrigem
+            END,
+
+        IDDimStatusCampanha =
+            CASE
+                WHEN o.DataTerminoPrevisto IS NOT NULL
+                     AND o.DataTerminoPrevisto < @Hoje THEN @IDStatusCampanhaVencida
+
+                WHEN ISNULL(o.BitAtivoOrigem, 1) = 0 THEN @IDStatusCancelada
+
+                WHEN o.DataTerminoPrevisto IS NULL THEN @IDStatusSemDataTermino
+
+                WHEN o.DataInicioCampanha IS NOT NULL
+                     AND o.DataInicioCampanha > @Hoje THEN @IDStatusCampanhaFutura
+
+                WHEN DATEDIFF(DAY, @Hoje, o.DataTerminoPrevisto) BETWEEN 0 AND 45 THEN @IDStatusCampanhaVencendo
+
+                ELSE @IDStatusCampanhaAtiva
+            END
+    FROM OrigemContratoItem o
+    WHERE o.OrdemPreferencia = 1
+)
+SELECT
+    o.IDFatoControleContratosEuromidia,
+    o.IDFatoControleContratosItensEuromidia,
+    o.IDDimStatusCampanha,
+    o.IDVendedor,
+    o.IDEmpresa,
+    o.MarcaExibida,
+    o.DataInicioCampanha,
+    o.DataTerminoPrevisto,
+    o.DiasParaVencer,
+    BitAtivo = o.BitAtivoCalculado
+INTO #OrigemVencimentoCampanha
+FROM OrigemDeduplicada o;
+
+/*
+    Primeiro atualiza o que já existe.
+    Isso evita criar outra linha para o mesmo contrato/item.
+*/
+
+UPDATE destino
+SET
+    destino.IDDimStatusCampanha = origem.IDDimStatusCampanha,
+    destino.IDVendedor = origem.IDVendedor,
+    destino.IDEmpresa = origem.IDEmpresa,
+    destino.MarcaExibida = origem.MarcaExibida,
+    destino.DataInicioCampanha = origem.DataInicioCampanha,
+    destino.DataTerminoPrevisto = origem.DataTerminoPrevisto,
+    destino.DiasParaVencer = origem.DiasParaVencer,
+    destino.BitAtivo = origem.BitAtivo,
+    destino.DataAtualizacao = SYSDATETIME()
+FROM Silver.FatoVencimentoCampanhaEuromidia AS destino
+INNER JOIN #OrigemVencimentoCampanha AS origem
+    ON origem.IDFatoControleContratosEuromidia = destino.IDFatoControleContratosEuromidia
+   AND origem.IDFatoControleContratosItensEuromidia = destino.IDFatoControleContratosItensEuromidia
+WHERE
+    ISNULL(destino.IDDimStatusCampanha, -1) <> ISNULL(origem.IDDimStatusCampanha, -1)
+    OR ISNULL(destino.IDVendedor, -1) <> ISNULL(origem.IDVendedor, -1)
+    OR ISNULL(destino.IDEmpresa, -1) <> ISNULL(origem.IDEmpresa, -1)
+    OR ISNULL(destino.MarcaExibida, N'') <> ISNULL(origem.MarcaExibida, N'')
+    OR ISNULL(destino.DataInicioCampanha, CONVERT(DATE, '19000101')) <> ISNULL(origem.DataInicioCampanha, CONVERT(DATE, '19000101'))
+    OR ISNULL(destino.DataTerminoPrevisto, CONVERT(DATE, '19000101')) <> ISNULL(origem.DataTerminoPrevisto, CONVERT(DATE, '19000101'))
+    OR ISNULL(destino.DiasParaVencer, -999999) <> ISNULL(origem.DiasParaVencer, -999999)
+    OR ISNULL(destino.BitAtivo, 0) <> ISNULL(origem.BitAtivo, 0);
+
+/*
+    Depois insere apenas o que ainda não existe.
+    O WITH (UPDLOCK, HOLDLOCK) reduz risco de corrida se duas execuções tentarem inserir o mesmo item.
+*/
+
+INSERT INTO Silver.FatoVencimentoCampanhaEuromidia
+(
+    IDFatoControleContratosEuromidia,
+    IDFatoControleContratosItensEuromidia,
+    IDDimStatusCampanha,
+    IDVendedor,
+    IDEmpresa,
+    MarcaExibida,
+    DataInicioCampanha,
+    DataTerminoPrevisto,
+    DiasParaVencer,
+    BitAtivo,
+    DataCriacao,
+    DataAtualizacao
+)
+SELECT
+    origem.IDFatoControleContratosEuromidia,
+    origem.IDFatoControleContratosItensEuromidia,
+    origem.IDDimStatusCampanha,
+    origem.IDVendedor,
+    origem.IDEmpresa,
+    origem.MarcaExibida,
+    origem.DataInicioCampanha,
+    origem.DataTerminoPrevisto,
+    origem.DiasParaVencer,
+    origem.BitAtivo,
+    SYSDATETIME(),
+    SYSDATETIME()
+FROM #OrigemVencimentoCampanha AS origem
+WHERE NOT EXISTS
+(
+    SELECT 1
+    FROM Silver.FatoVencimentoCampanhaEuromidia AS destino WITH (UPDLOCK, HOLDLOCK)
+    WHERE
+        destino.IDFatoControleContratosEuromidia = origem.IDFatoControleContratosEuromidia
+        AND destino.IDFatoControleContratosItensEuromidia = origem.IDFatoControleContratosItensEuromidia
+);
+
+DROP TABLE #OrigemVencimentoCampanha;
+"""
 
 
 SQL_ATUALIZAR_STATUS_CAMPANHA = """
@@ -908,6 +1178,27 @@ def euromidia_mensageria_campanhas():
         return _resolver_parametros_dag_run()
 
     @task(
+        task_id="alimentar_vencimento_campanha",
+        retries=2,
+        retry_delay=timedelta(minutes=1),
+    )
+    def alimentar_vencimento_campanha(parametros: dict):
+        """
+        Faz upsert da tabela FatoVencimentoCampanhaEuromidia a partir dos itens dos contratos.
+        """
+
+        id_contrato = _int_positivo_ou_none((parametros or {}).get("id_contrato"))
+        sql = preparar_sql_com_filtro_contrato(SQL_UPSERT_VENCIMENTO_CAMPANHA, id_contrato)
+
+        if id_contrato:
+            logger.info("Iniciando upsert de vencimento de campanha para o contrato %s.", id_contrato)
+        else:
+            logger.info("Iniciando upsert de vencimento de campanha para todos os contratos elegíveis.")
+
+        executar_sql(sql)
+        logger.info("Upsert de vencimento de campanha concluído com sucesso.")
+
+    @task(
         task_id="atualizar_status_campanha",
         retries=2,
         retry_delay=timedelta(minutes=1),
@@ -950,10 +1241,11 @@ def euromidia_mensageria_campanhas():
         logger.info("Mensagens de campanhas geradas com sucesso.")
 
     parametros = resolver_parametros_execucao()
+    vencimento = alimentar_vencimento_campanha(parametros)
     status = atualizar_status_campanha(parametros)
     mensagens = gerar_mensagens_campanhas(parametros)
 
-    parametros >> status >> mensagens
+    parametros >> vencimento >> status >> mensagens
 
 
 euromidia_mensageria_campanhas()

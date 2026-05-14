@@ -13587,6 +13587,10 @@ def _ler_filtros_clientes_request_args():
     }
 
 
+
+
+
+
 @paineis_bp.get("/clientes/filtros/<nome_filtro>")
 @login_required
 @limiter.limit("240 per minute", methods=["GET"])

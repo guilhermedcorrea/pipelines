@@ -49,6 +49,15 @@ x-airflow-common: &airflow-common
     FLASK_MENSAGERIA_NOTIFICAR_URL: http://nginx-flask/admin/api/mensagens/notificar
     MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
 
+    # Rclone / SharePoint - BaseDados
+    # Remote confirmado no servidor: sharepoint_basedados:
+    # Pasta confirmada no SharePoint: 01- Controle de Contratos
+    # Caminho remoto final: sharepoint_basedados:01- Controle de Contratos
+    RCLONE_CONFIG: /opt/airflow/config/rclone/rclone.conf
+    SHAREPOINT_BASEDADOS_DIR: "sharepoint_basedados:01- Controle de Contratos"
+    SHAREPOINT_BASEDADOS_ARQUIVO_DISPONIBILIDADE: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
+    CAMINHO_LOCAL_SHAREPOINT_BASEDADOS: /opt/airflow/Dados/SharePoint/BaseDados
+
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/queries:/opt/airflow/queries
@@ -57,6 +66,10 @@ x-airflow-common: &airflow-common
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/config:/opt/airflow/config
+    # Monta o rclone.conf já configurado no host dentro dos containers do Airflow.
+    # No host, o arquivo esperado é: /root/.config/rclone/rclone.conf
+    # Como o Airflow roda com grupo 0, deixe o arquivo legível pelo grupo: chmod 640 /root/.config/rclone/rclone.conf
+    - /root/.config/rclone:/opt/airflow/config/rclone:ro
     - ./airflow/simple_auth:/opt/airflow/simple_auth
     - ./airflow/src:/opt/airflow/src
     - ./airflow/sharepoint_teste:/opt/airflow/sharepoint_teste
