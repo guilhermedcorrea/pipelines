@@ -5361,6 +5361,43 @@ def grade_painel(codponto: int):
             return f"{cota_txt} - {vend_txt}".strip()
         return cota_txt
 
+    def _resolver_id_real_reserva_grade(id_item, eh_reserva):
+        """Eu recupero o ID real da reserva para exibir na grade."""
+        if not eh_reserva:
+            return None
+
+        try:
+            id_mapeado = reserva_id_original_por_iditem.get(int(id_item))
+            if id_mapeado not in (None, ""):
+                return int(id_mapeado)
+        except Exception:
+            pass
+
+        try:
+            id_item_int = int(id_item)
+            if id_item_int < 0:
+                return abs(id_item_int)
+        except Exception:
+            pass
+
+        return None
+
+    def _prefixar_id_reserva_no_texto(texto, id_reserva, eh_reserva):
+        """Eu adiciono o IDFatoOcupacaoPaineisEuromidia só no texto visual da reserva."""
+        texto_limpo = str(texto or "").strip()
+
+        if not eh_reserva:
+            return texto_limpo
+
+        id_txt = str(id_reserva or "").strip()
+        if not id_txt:
+            return texto_limpo
+
+        if texto_limpo.startswith(f"{id_txt} "):
+            return texto_limpo
+
+        return f"{id_txt} {texto_limpo}".strip()
+
     def _intersecao_periodo(di_item: date, df_item: date, dt_ini_periodo: date, dt_fim_periodo: date):
         if di_item is None or df_item is None:
             return (None, None)
@@ -5539,6 +5576,10 @@ def grade_painel(codponto: int):
             except:
                 eh_reserva = False
 
+            id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+            marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
+            barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
+
             spans_kpi = spans_grade
             if eh_reserva:
                 try:
@@ -5557,7 +5598,8 @@ def grade_painel(codponto: int):
                     "ID": _id_item,
                     "IDFatoControleContratos": _id_contrato,
                     "CodFace": cf,
-                    "MarcaExibida": marca,
+                    "MarcaExibida": marca_exibida_grade,
+                    "MarcaExibidaOriginal": marca,
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
                     "IDVendedor": id_vendedor_item,
@@ -5569,13 +5611,14 @@ def grade_painel(codponto: int):
                     "Cota": cota,
                     "Spans": spans_grade,
                     "SpansKpi": spans_kpi,
-                    "BarraTexto": _texto_barra(cota, marca, vend),
+                    "BarraTexto": barra_texto_grade,
                     "EhReserva": bool(eh_reserva),
                     "OrigemItem": ("RESERVA" if eh_reserva else "CONTRATO"),
                     "CorBarra": ("#92400e" if eh_reserva else None),
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
-                    "ReservaIDOriginal": (reserva_id_original_por_iditem.get(int(_id_item)) if eh_reserva else None),
+                    "ReservaIDOriginal": id_reserva_original,
+                    "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                 }
             )
 
@@ -5725,12 +5768,17 @@ def grade_painel(codponto: int):
             except:
                 eh_reserva = False
 
+            id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+            marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
+            barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
+
             ocupacoes_por_face.setdefault(cf, []).append(
                 {
                     "ID": _id_item,
                     "IDFatoControleContratos": _id_contrato,
                     "CodFace": cf,
-                    "MarcaExibida": marca,
+                    "MarcaExibida": marca_exibida_grade,
+                    "MarcaExibidaOriginal": marca,
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
                     "IDVendedor": id_vendedor_item,
@@ -5739,13 +5787,14 @@ def grade_painel(codponto: int):
                     "DiaInicio": dia_ini,
                     "DiaFim": dia_fim,
                     "TextoOriginal": f"CONTRATO:{num_contrato} | PRÉVIA:{num_previa}",
-                    "BarraTexto": _texto_barra(cota, marca, vend),
+                    "BarraTexto": barra_texto_grade,
                     "EhReserva": bool(eh_reserva),
                     "OrigemItem": ("RESERVA" if eh_reserva else "CONTRATO"),
                     "CorBarra": ("#92400e" if eh_reserva else None),
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
-                    "ReservaIDOriginal": (reserva_id_original_por_iditem.get(int(_id_item)) if eh_reserva else None),
+                    "ReservaIDOriginal": id_reserva_original,
+                    "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                 }
             )
 
@@ -7164,6 +7213,36 @@ def grade_painel_multi():
 
         return " • ".join([p for p in partes if p])
 
+    def _resolver_id_real_reserva_grade(id_item, eh_reserva):
+        """Eu recupero o ID real da reserva quando a grade usa ID interno negativo."""
+        if not eh_reserva:
+            return None
+
+        try:
+            id_item_int = int(id_item)
+            if id_item_int < 0:
+                return abs(id_item_int)
+        except Exception:
+            pass
+
+        return None
+
+    def _prefixar_id_reserva_no_texto(texto, id_reserva, eh_reserva):
+        """Eu adiciono o IDFatoOcupacaoPaineisEuromidia só no texto visual da reserva."""
+        texto_limpo = _normalizar_texto(texto)
+
+        if not eh_reserva:
+            return texto_limpo
+
+        id_txt = str(id_reserva or "").strip()
+        if not id_txt:
+            return texto_limpo
+
+        if texto_limpo.startswith(f"{id_txt} "):
+            return texto_limpo
+
+        return f"{id_txt} {texto_limpo}".strip()
+
     def _marcar_conflitos_por_face(ocupacoes_por_face):
         faces_conflitadas = set()
 
@@ -8193,12 +8272,17 @@ def grade_painel_multi():
                 except:
                     eh_reserva = False
 
+                id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+                marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
+                barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
+
                 ocupacoes_por_face.setdefault(cf, []).append(
                     {
                         "ID": _id_item,
                         "IDFatoControleContratos": _id_contrato,
                         "CodFace": cf,
-                        "MarcaExibida": marca,
+                        "MarcaExibida": marca_exibida_grade,
+                        "MarcaExibidaOriginal": marca,
                         "Loop": f"COTA {cota}",
                         "Vendedor": vend,
                         "IDVendedor": id_vendedor_item,
@@ -8207,13 +8291,14 @@ def grade_painel_multi():
                         "DiaInicio": dia_ini,
                         "DiaFim": dia_fim,
                         "TextoOriginal": f"CONTRATO:{num_contrato} | PRÉVIA:{num_previa}",
-                        "BarraTexto": _texto_barra(cota, marca, vend),
+                        "BarraTexto": barra_texto_grade,
                         "EhReserva": bool(eh_reserva),
                         "OrigemItem": ("RESERVA" if eh_reserva else "CONTRATO"),
                         "CorBarra": ("#92400e" if eh_reserva else None),
                         "StatusDb": ("RESERVADO" if eh_reserva else None),
                         "OrigemDb": ("RESERVA" if eh_reserva else None),
-                        "ReservaIDOriginal": None,
+                        "ReservaIDOriginal": id_reserva_original,
+                        "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                         "NumeroContrato": num_contrato,
                         "NumeroPrevia": num_previa,
                     }

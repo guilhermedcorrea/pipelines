@@ -1973,6 +1973,25 @@
     color: rgba(146,64,14,.85) !important;
   }
 
+  .barra .reserva-id{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+    max-width: 84px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(146,64,14,.22);
+    background: rgba(255,255,255,.78);
+    color: #92400e;
+    font-size: clamp(8px, .58vw, 10px);
+    font-weight: 950;
+    line-height: 1.1;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
   .barra .chip{
     display:inline-flex;
     align-items:center;
@@ -2277,8 +2296,21 @@
                     {% set span_altura = 2 %}
                   {% endif %}
 
+                  {% set reserva_id_chave = '' %}
+                  {% if eh_reserva_item %}
+                    {% if it.ReservaIDOriginal is defined and it.ReservaIDOriginal %}
+                      {% set reserva_id_chave = it.ReservaIDOriginal %}
+                    {% elif it.IDFatoOcupacaoPaineisEuromidia is defined and it.IDFatoOcupacaoPaineisEuromidia %}
+                      {% set reserva_id_chave = it.IDFatoOcupacaoPaineisEuromidia %}
+                    {% elif it.ID is defined and (it.ID|int) < 0 %}
+                      {% set reserva_id_chave = ((it.ID|int) * -1) %}
+                    {% endif %}
+                  {% endif %}
+
                   {% set chave = (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else None) %}
-                  {% if not chave %}
+                  {% if eh_reserva_item and reserva_id_chave %}
+                    {% set chave = 'RESERVA|' ~ (reserva_id_chave|string) %}
+                  {% elif not chave %}
                     {% set chave = ((it.MarcaExibida or it.BarraTexto or 'SEM_TEXTO') ~ '|' ~ (it.Loop|string) ~ '|' ~ (dia_ini|string) ~ '|' ~ (dia_fim|string)) %}
                   {% endif %}
 
@@ -2311,7 +2343,12 @@
                         'EhReserva': novo_eh_reserva,
                         'Cota': nova_cota,
 
+                        'ID': (atual.ID if atual.ID is defined and atual.ID not in (none, '') else (it.ID if it.ID is defined else '')),
                         'IDFatoControleContratos': (atual.IDFatoControleContratos if atual.IDFatoControleContratos is not none else (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '')),
+                        'IDFatoOcupacaoPaineisEuromidia': (atual.IDFatoOcupacaoPaineisEuromidia if atual.IDFatoOcupacaoPaineisEuromidia is defined and atual.IDFatoOcupacaoPaineisEuromidia not in (none, '') else (it.IDFatoOcupacaoPaineisEuromidia if it.IDFatoOcupacaoPaineisEuromidia is defined else '')),
+                        'ReservaIDOriginal': (atual.ReservaIDOriginal if atual.ReservaIDOriginal is defined and atual.ReservaIDOriginal not in (none, '') else (it.ReservaIDOriginal if it.ReservaIDOriginal is defined else '')),
+                        'IDVendedor': (atual.IDVendedor if atual.IDVendedor is defined and atual.IDVendedor not in (none, '') else (it.IDVendedor if it.IDVendedor is defined else '')),
+                        'OrigemItem': (atual.OrigemItem if atual.OrigemItem is defined and atual.OrigemItem else (it.OrigemItem if it.OrigemItem is defined else '')),
                         'BarraTexto': (atual.BarraTexto if atual.BarraTexto else (it.BarraTexto if it.BarraTexto is defined else '')),
                         'MarcaExibida': (atual.MarcaExibida if atual.MarcaExibida else (it.MarcaExibida if it.MarcaExibida is defined else '')),
                         'Vendedor': (atual.Vendedor if atual.Vendedor else (it.Vendedor if it.Vendedor is defined else '')),
@@ -2334,7 +2371,12 @@
                         'EhReserva': eh_reserva_item,
                         'Cota': (it.Cota if it.Cota is defined else ''),
 
+                        'ID': (it.ID if it.ID is defined else ''),
                         'IDFatoControleContratos': (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else ''),
+                        'IDFatoOcupacaoPaineisEuromidia': (it.IDFatoOcupacaoPaineisEuromidia if it.IDFatoOcupacaoPaineisEuromidia is defined else ''),
+                        'ReservaIDOriginal': (it.ReservaIDOriginal if it.ReservaIDOriginal is defined else ''),
+                        'IDVendedor': (it.IDVendedor if it.IDVendedor is defined else ''),
+                        'OrigemItem': (it.OrigemItem if it.OrigemItem is defined else ''),
                         'BarraTexto': (it.BarraTexto if it.BarraTexto is defined else ''),
                         'MarcaExibida': (it.MarcaExibida if it.MarcaExibida is defined else ''),
                         'Vendedor': (it.Vendedor if it.Vendedor is defined else ''),
@@ -2371,13 +2413,42 @@
                 {% endif %}
 
                 {% set eh_reserva = (it.EhReserva if it.EhReserva is defined else False) %}
+                {% set reserva_id_visivel = '' %}
+                {% if eh_reserva %}
+                  {% if it.ReservaIDOriginal is defined and it.ReservaIDOriginal %}
+                    {% set reserva_id_visivel = it.ReservaIDOriginal %}
+                  {% elif it.IDFatoOcupacaoPaineisEuromidia is defined and it.IDFatoOcupacaoPaineisEuromidia %}
+                    {% set reserva_id_visivel = it.IDFatoOcupacaoPaineisEuromidia %}
+                  {% elif it.ID is defined and (it.ID|int) < 0 %}
+                    {% set reserva_id_visivel = ((it.ID|int) * -1) %}
+                  {% endif %}
+                {% endif %}
 
                 {% if eh_reserva %}
                   {% set cota_val = (it.Cota if it.Cota is defined else '') %}
                   {% set vend_txt = (it.Vendedor if it.Vendedor is defined and it.Vendedor else '') %}
 
                   {% set chip_txt = ('Cota ' ~ (cota_val|string)) if cota_val not in (None,'') else 'Cota' %}
-                  {% set resto_txt = 'RESERVADO' ~ (' - ' ~ vend_txt if vend_txt else '') %}
+
+                  {% set base_txt_reserva = (it.MarcaExibida if it.MarcaExibida is defined and it.MarcaExibida else '') %}
+                  {% if not base_txt_reserva %}
+                    {% set base_txt_reserva = (it.BarraTexto if it.BarraTexto is defined and it.BarraTexto else '') %}
+                  {% endif %}
+                  {% if base_txt_reserva and (base_txt_reserva|string).lower().startswith('cota ') %}
+                    {% set partes_base_reserva = base_txt_reserva.split(' ', 2) %}
+                    {% set base_txt_reserva = (partes_base_reserva[2] if partes_base_reserva|length == 3 else base_txt_reserva) %}
+                  {% endif %}
+                  {% if not base_txt_reserva %}
+                    {% set base_txt_reserva = 'RESERVADO' %}
+                  {% endif %}
+                  {% if vend_txt and vend_txt not in base_txt_reserva %}
+                    {% set base_txt_reserva = base_txt_reserva ~ ' - ' ~ vend_txt %}
+                  {% endif %}
+
+                  {% set resto_txt = base_txt_reserva %}
+                  {% if reserva_id_visivel and not ((resto_txt|string).startswith((reserva_id_visivel|string) ~ ' ')) %}
+                    {% set resto_txt = (reserva_id_visivel|string) ~ ' ' ~ resto_txt %}
+                  {% endif %}
                   {% set barra_txt = chip_txt ~ ' - ' ~ resto_txt %}
                 {% else %}
                   {% set barra_txt = (it.MarcaExibida or it.BarraTexto or '') %}
@@ -2414,8 +2485,9 @@
                      data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                      data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                      data-eh-reserva="{{ 1 if eh_reserva else 0 }}"
+                     data-reserva-id="{{ reserva_id_visivel }}"
                      data-item-id="{{ it.ID if it.ID is defined else '' }}"
-                     title="Duplo clique para abrir o contrato"
+                     title="{{ ('Reserva #' ~ reserva_id_visivel) if reserva_id_visivel else 'Duplo clique para abrir o contrato' }}"
                      data-tooltip-title="{{ barra_txt|e }}"
                      data-tooltip-loop="{{ it.Loop|e }}"
                      data-tooltip-vendedor="{{ it.Vendedor|e }}"
@@ -2482,12 +2554,39 @@
               {% set dia_fim = it.DiaFim if it.DiaFim is not none else dia_ini %}
 
               {% set eh_reserva2 = (it.EhReserva if it.EhReserva is defined else False) %}
+              {% set reserva_id_visivel2 = '' %}
+              {% if eh_reserva2 %}
+                {% if it.ReservaIDOriginal is defined and it.ReservaIDOriginal %}
+                  {% set reserva_id_visivel2 = it.ReservaIDOriginal %}
+                {% elif it.IDFatoOcupacaoPaineisEuromidia is defined and it.IDFatoOcupacaoPaineisEuromidia %}
+                  {% set reserva_id_visivel2 = it.IDFatoOcupacaoPaineisEuromidia %}
+                {% elif it.ID is defined and (it.ID|int) < 0 %}
+                  {% set reserva_id_visivel2 = ((it.ID|int) * -1) %}
+                {% endif %}
+              {% endif %}
               {% set cota2 = (it.Cota if it.Cota is defined else '') %}
               {% set vend2 = (it.Vendedor if it.Vendedor is defined and it.Vendedor else '') %}
 
               {% if eh_reserva2 %}
                 {% set chip2 = ('Cota ' ~ (cota2|string)) if cota2 not in (None,'') else 'Cota' %}
-                {% set txt2 = 'RESERVADO' ~ (' - ' ~ vend2 if vend2 else '') %}
+                {% set base_txt_reserva2 = (it.MarcaExibida if it.MarcaExibida is defined and it.MarcaExibida else '') %}
+                {% if not base_txt_reserva2 %}
+                  {% set base_txt_reserva2 = (it.BarraTexto if it.BarraTexto is defined and it.BarraTexto else '') %}
+                {% endif %}
+                {% if base_txt_reserva2 and (base_txt_reserva2|string).lower().startswith('cota ') %}
+                  {% set partes_base_reserva2 = base_txt_reserva2.split(' ', 2) %}
+                  {% set base_txt_reserva2 = (partes_base_reserva2[2] if partes_base_reserva2|length == 3 else base_txt_reserva2) %}
+                {% endif %}
+                {% if not base_txt_reserva2 %}
+                  {% set base_txt_reserva2 = 'RESERVADO' %}
+                {% endif %}
+                {% if vend2 and vend2 not in base_txt_reserva2 %}
+                  {% set base_txt_reserva2 = base_txt_reserva2 ~ ' - ' ~ vend2 %}
+                {% endif %}
+                {% set txt2 = base_txt_reserva2 %}
+                {% if reserva_id_visivel2 and not ((txt2|string).startswith((reserva_id_visivel2|string) ~ ' ')) %}
+                  {% set txt2 = (reserva_id_visivel2|string) ~ ' ' ~ txt2 %}
+                {% endif %}
                 {% set barra_txt = chip2 ~ ' - ' ~ txt2 %}
               {% else %}
                 {% set barra_txt = (it.BarraTexto or (it.MarcaExibida ~ ' - ' ~ it.Vendedor)) %}
@@ -2506,15 +2605,16 @@
                    data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                    data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                    data-eh-reserva="{{ 1 if eh_reserva2 else 0 }}"
+                   data-reserva-id="{{ reserva_id_visivel2 }}"
                    data-item-id="{{ it.ID if it.ID is defined else '' }}"
-                   title="Duplo clique para abrir o contrato"
+                   title="{{ ('Reserva #' ~ reserva_id_visivel2) if reserva_id_visivel2 else 'Duplo clique para abrir o contrato' }}"
                    data-tooltip-title="{{ barra_txt|e }}"
                    data-tooltip-loop="{{ it.Loop|e }}"
                    data-tooltip-vendedor="{{ it.Vendedor|e }}"
                    data-tooltip-di="{{ it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '' }}"
                    data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
                    data-tooltip-txt="{{ it.TextoOriginal|e }}">
-                <span class="txt">{{ barra_txt }}</span>
+                <span class="txt">{{ txt2 if eh_reserva2 else barra_txt }}</span>
               </div>
             {% endfor %}
           </div>
@@ -2652,13 +2752,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const di = el.getAttribute("data-tooltip-di") || "";
     const df = el.getAttribute("data-tooltip-df") || "";
     const txt = el.getAttribute("data-tooltip-txt") || "";
+    const reservaId = (el.getAttribute("data-reserva-id") || "").trim();
 
     const reserva = isReserva(el);
     const tipoLinha = reserva ? "RESERVA" : "CONTRATO";
+    const linhaReservaId = reserva && reservaId ? `<div class="t-row"><b>ID Reserva:</b> ${reservaId}</div>` : "";
 
     tooltip.innerHTML = `
       <div class="t-title">${title}</div>
       <div class="t-row"><b>Tipo:</b> ${tipoLinha}</div>
+      ${linhaReservaId}
       <div class="t-row"><b>Loop:</b> ${loop}</div>
       <div class="t-row"><b>Vendedor:</b> ${vendedor}</div>
       <div class="t-row"><b>Período:</b> ${di} → ${df}</div>

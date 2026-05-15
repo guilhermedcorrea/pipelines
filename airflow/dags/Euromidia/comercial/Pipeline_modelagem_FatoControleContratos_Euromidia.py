@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 import pendulum
-# Polars foi removido do parse do DAG para evitar SIGILL no Airflow.
+
 try:
     from airflow.sdk import dag, task, get_current_context
 except ImportError:
@@ -101,8 +101,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 
-# Nome que deve aparecer no painel do Airflow.
-# Se a variável AIRFLOW_DAG_CONTROLE_CONTRATOS existir no .env, ela precisa apontar para este mesmo DAG.
+
 DAG_ID_PADRAO = "pipeline_controle_contratos_euromidia"
 DAG_ID = os.getenv("AIRFLOW_DAG_CONTROLE_CONTRATOS", DAG_ID_PADRAO).strip() or DAG_ID_PADRAO
 FUSO_HORARIO = "America/Sao_Paulo"
@@ -110,15 +109,12 @@ CRON_AGENDAMENTO = "0 8,11,15,18 * * *"
 
 CONN_ID_SQL_SERVER = "mssql_integracao"
 
-# Variáveis usadas por aplicações externas, como Flask, para chamar a API REST do Airflow.
-# O DAG não usa usuário/senha para se autoexecutar; ele apenas registra se recebeu dag_run.conf.
+
 AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO = os.getenv("AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO", "1").strip()
 AIRFLOW_API_BASE_URL_CONFIGURADA = os.getenv("AIRFLOW_API_BASE_URL", "").strip()
 AIRFLOW_API_TIMEOUT_SEGUNDOS_CONFIGURADO = os.getenv("AIRFLOW_API_TIMEOUT_SEGUNDOS", "").strip()
 
-# Configuração do SharePoint via rclone.
-# O SharePoint é a fonte oficial. Antes de qualquer tratamento, a DAG baixa o arquivo mais recente
-# e substitui a cópia local dentro do container.
+
 RCLONE_REMOTE_CONTROLE_CONTRATOS = os.getenv(
     "RCLONE_REMOTE_CONTROLE_CONTRATOS",
     "sharepoint_basedados",
@@ -136,8 +132,7 @@ RCLONE_ARQUIVO_ORIGEM = os.getenv(
     f"{RCLONE_REMOTE_CONTROLE_CONTRATOS}:{RCLONE_PASTA_CONTROLE_CONTRATOS}/{NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS}",
 )
 
-# Caminho visto DENTRO dos containers do Airflow.
-# Este é o caminho que você informou existir dentro do Docker.
+
 PASTA_SHAREPOINT_CONTAINER = Path(
     os.getenv(
         "PASTA_BASE_DADOS_CONTRATOS_CONTAINER",
@@ -238,7 +233,7 @@ mapeamento_colunas = {
 
 ORDEM_COLUNAS_SAIDA = list(mapeamento_colunas.values()) + ["OBS"]
 
-schema_overrides: dict[str, Any] = {}  # Mantido apenas por compatibilidade; o pipeline agora usa pandas/openpyxl.
+schema_overrides: dict[str, Any] = {}  
 
 
 def obter_engine_sql_server() -> Engine:
