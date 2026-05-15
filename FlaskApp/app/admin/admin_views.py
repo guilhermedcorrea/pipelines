@@ -5402,6 +5402,67 @@ def _upsert_vencimento_campanha_aprovada_admin(
     }
 
 
+
+
+
+def _efetivar_reservas_card_kanban_admin(
+    *,
+    id_card: int | None,
+    id_contrato_controle: int | None,
+    id_usuario_logado: int | None,
+) -> int:
+    """Efetiva reservas vinculadas ao card quando a solicitação é aprovada.
+
+    Regras aplicadas:
+    - só mexe em reservas não canceladas;
+    - aceita tanto reservas criadas automaticamente pelo Kanban quanto reservas informadas manualmente;
+    - muda Status para ATIVO;
+    - registra Observacao com o texto exigido e o IDFatoKanbanCard.
+    """
+    id_card_int = _int_ou_none(id_card)
+    if not id_card_int:
+        return 0
+
+    id_contrato_int = _int_ou_none(id_contrato_controle)
+    id_usuario_int = _int_ou_none(id_usuario_logado)
+
+    observacao_efetivacao = f"Reserva Efetivada pelo Card IDFatoKanbanCard={int(id_card_int)}"
+
+    resultado = db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+               SET Status = 'ATIVO',
+                   IDFatoControleContratos = COALESCE(IDFatoControleContratos, :id_contrato_controle),
+                   DataAtualizacao = SYSDATETIME(),
+                   Observacao = CASE
+                       WHEN COALESCE(Observacao, '') LIKE :like_observacao_efetivada THEN Observacao
+                       ELSE CONCAT(
+                           COALESCE(Observacao, ''),
+                           CASE WHEN COALESCE(Observacao, '') = '' THEN '' ELSE ' | ' END,
+                           :observacao_efetivacao
+                       )
+                   END
+             WHERE CanceladoEm IS NULL
+               AND UPPER(LTRIM(RTRIM(COALESCE(Status, '')))) <> 'CANCELADO'
+               AND (
+                    COALESCE(Observacao, '') LIKE :like_reserva_informada
+                    OR COALESCE(Observacao, '') LIKE :like_card_id
+                    OR COALESCE(Observacao, '') LIKE :like_kanban_card
+               );
+        """),
+        {
+            "id_contrato_controle": id_contrato_int,
+            "id_usuario_logado": id_usuario_int,
+            "observacao_efetivacao": observacao_efetivacao,
+            "like_observacao_efetivada": f"%Reserva Efetivada pelo Card%IDFatoKanbanCard={int(id_card_int)}%",
+            "like_reserva_informada": f"%[RESERVA_CARD_ATIVO={int(id_card_int)}]%",
+            "like_card_id": f"%[CARD_ID={int(id_card_int)}]%",
+            "like_kanban_card": f"%[KANBAN_CARD={int(id_card_int)}]%",
+        },
+    )
+
+    return int(resultado.rowcount or 0)
+
 def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario_logado: int | None) -> dict:
     cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao))
     if not cab:
@@ -6054,6 +6115,12 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                 },
             )
 
+    reservas_efetivadas = _efetivar_reservas_card_kanban_admin(
+        id_card=_int_ou_none(cab.get("IDFatoKanbanCard")),
+        id_contrato_controle=int(id_contrato_controle),
+        id_usuario_logado=id_usuario_logado,
+    )
+
     db.session.execute(text("""
         UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
            SET IDFatoControleContratosEuromidia = :id_contrato_controle,
@@ -6075,6 +6142,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "ids_itens_controle": ids_itens_controle,
         "precos_praticados": precos_praticados,
         "vencimentos_campanha": vencimentos_campanha,
+        "reservas_efetivadas": int(reservas_efetivadas or 0),
         "id_card": _int_ou_none(cab.get("IDFatoKanbanCard")),
         "id_empresa": _int_ou_none(cab.get("IDEmpresa")),
         "id_empresa_proprietaria": _int_ou_none(cab.get("IDEmpresaProprietaria")),

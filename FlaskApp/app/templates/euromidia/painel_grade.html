@@ -1594,7 +1594,7 @@
       - antes cada dia tinha no mínimo 38px, o que estourava meses com 30/31 dias;
       - agora a largura das colunas é compacta por padrão e o JS abaixo ajusta pelo espaço real disponível.
     */
-    --grade-face-col-w: clamp(126px, 10vw, 160px);
+    --grade-face-col-w: clamp(150px, 11vw, 190px);
     --grade-loop-col-w: clamp(58px, 5vw, 76px);
     --dia-col-w: clamp(26px, 2.35vw, 42px);
     --dia-font: clamp(10px, .72vw, 12px);
@@ -1812,13 +1812,16 @@
   }
 
   .face-col .face{
-    font-weight: 900;
+    font-weight: 950;
     color: var(--euro-blue);
-    font-size: 15px;
-    line-height: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: clamp(14px, .92vw, 16px);
+    line-height: 1.18;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    max-width: 100%;
   }
   .face-col .meta{
     color: var(--muted);
@@ -2056,7 +2059,7 @@
 
   @media (max-width: 1180px){
     :root{
-      --grade-face-col-w: 118px;
+      --grade-face-col-w: 138px;
       --grade-loop-col-w: 54px;
     }
 
@@ -2079,7 +2082,7 @@
 
   @media (max-width: 760px){
     :root{
-      --grade-face-col-w: 104px;
+      --grade-face-col-w: 124px;
       --grade-loop-col-w: 48px;
     }
 

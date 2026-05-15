@@ -4187,6 +4187,22 @@ function normalizarCardServidor(card){
       ? null
       : idNum(idEmpRelacionadaBruto);
 
+  const idReservaBruto =
+    c.IDReserva ??
+    c.IDFatoOcupacaoPaineisEuromidia ??
+    c.id_reserva ??
+    c.Reserva ??
+    c.reserva ??
+    null;
+
+  c.IDReserva =
+    idReservaBruto === null ||
+    idReservaBruto === undefined ||
+    idReservaBruto === ""
+      ? null
+      : idNum(idReservaBruto);
+  c.id_reserva = c.IDReserva;
+
   for (const nomeCampoEmpresaRelacionada of ["IDEmpresaAgencia", "IDEmpresaBureau", "IDEmpresaIntermediario"]) {
     c[nomeCampoEmpresaRelacionada] =
       c[nomeCampoEmpresaRelacionada] === null ||
@@ -10931,6 +10947,238 @@ function formatarNumeroParaInput(valor){
   }
 
 
+
+
+function obterIdReservaDoBloco(bloco){
+  const input = bloco?.querySelector('[data-role="input-reserva-id"]');
+  return idNum(input?.value || 0) || null;
+}
+
+function obterIdReservaDeObjeto(valor){
+  return idNum(
+    valor?.IDReserva ??
+    valor?.id_reserva ??
+    valor?.IDFatoOcupacaoPaineisEuromidia ??
+    valor?.Reserva ??
+    valor?.reserva ??
+    0
+  ) || null;
+}
+
+function formatarResumoReservaKanban(reserva){
+  if (!reserva || typeof reserva !== 'object') return '';
+
+  const idReserva = obterIdReservaDeObjeto(reserva);
+  const codPonto = safeStr(reserva.CodPonto ?? reserva.cod_ponto ?? '').trim();
+  const codFace = safeStr(reserva.CodFace ?? reserva.cod_face ?? '').trim().toUpperCase();
+  const cota = safeStr(reserva.Cota ?? reserva.cota ?? reserva.ExibicoesDia ?? reserva.exibicoes_dia ?? '').trim();
+  const dataInicio = normalizarDataParaInput(reserva.DataInicio ?? reserva.data_inicio ?? reserva.DataInicioReserva ?? reserva.data_inicio_reserva ?? '');
+  const dataFim = normalizarDataParaInput(reserva.DataFim ?? reserva.data_fim ?? reserva.DataFimReserva ?? reserva.data_fim_reserva ?? '');
+  const status = safeStr(reserva.Status ?? reserva.status ?? '').trim().toUpperCase();
+  const vendedor = safeStr(reserva.Vendedor ?? reserva.vendedor ?? '').trim();
+  const marca = safeStr(reserva.MarcaExibida ?? reserva.marca_exibida ?? '').trim();
+  const empresa = reserva.EmpresaCliente ?? reserva.empresa_cliente ?? reserva.Empresa ?? reserva.empresa ?? null;
+  const nomeEmpresa = safeStr(empresa?.RazaoSocial ?? empresa?.NomeFantasia ?? reserva.NomeCliente ?? reserva.nome_cliente ?? '').trim();
+
+  const partes = [];
+  if (idReserva) partes.push(`Reserva ${idReserva}`);
+  if (status) partes.push(`Status ${status}`);
+  if (marca) partes.push(`Marca ${marca}`);
+  if (nomeEmpresa) partes.push(`Cliente ${nomeEmpresa}`);
+  if (codPonto || codFace) partes.push(`CodPonto/CodFace ${codPonto || '—'} / ${codFace || '—'}`);
+  if (cota) partes.push(`Inserções/dia ${cota}`);
+  if (dataInicio || dataFim) partes.push(`${formatarDataIsoParaBr(dataInicio) || '—'} até ${formatarDataIsoParaBr(dataFim) || '—'}`);
+  if (vendedor) partes.push(`Vendedor ${vendedor}`);
+
+  return partes.join(' • ');
+}
+
+function mostrarInfoReservaNoBloco(bloco, texto, tipo = 'info'){
+  return;
+}
+
+async function buscarReservaKanban(idReserva){
+  const idReservaInt = idNum(idReserva || 0);
+  if (!idReservaInt) {
+    throw new Error('Informe um número de reserva válido.');
+  }
+
+  const resultado = await fetchJsonKanban(`/kanban/api/reservas/${idReservaInt}`);
+  const corpo = resultado.corpo || {};
+
+  if (!respostaJsonKanbanOk(resultado)) {
+    throw new Error(corpo.msg || corpo.erro || detalhesFalhaJsonKanban(resultado) || 'Reserva inválida.');
+  }
+
+  const reserva = corpo.reserva || null;
+  if (!reserva) {
+    throw new Error('Reserva não encontrada.');
+  }
+
+  return reserva;
+}
+
+
+function obterEmpresaClienteDaReservaKanban(reserva){
+  if (!reserva || typeof reserva !== 'object') return null;
+
+  const empresa =
+    reserva.EmpresaCliente ??
+    reserva.empresa_cliente ??
+    reserva.Cliente ??
+    reserva.cliente ??
+    reserva.Empresa ??
+    reserva.empresa ??
+    null;
+
+  if (empresa && typeof empresa === 'object') {
+    return empresa;
+  }
+
+  return null;
+}
+
+async function aplicarDadosClienteMarcaDaReservaKanban(reserva){
+  if (!reserva || typeof reserva !== 'object') return;
+
+  const marcaReserva = safeStr(
+    reserva.MarcaExibida ??
+    reserva.marca_exibida ??
+    reserva.Marca ??
+    reserva.marca ??
+    ''
+  ).trim();
+
+  if (inputMarcaCard && marcaReserva) {
+    inputMarcaCard.value = marcaReserva;
+    inputMarcaCard.dispatchEvent(new Event('input', { bubbles: true }));
+    inputMarcaCard.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  const empresaReserva = obterEmpresaClienteDaReservaKanban(reserva);
+  if (empresaReserva) {
+    atualizarCatalogoEmpresa(empresaReserva);
+  }
+
+  const idClienteReserva = idNum(
+    reserva.IDCliente ??
+    reserva.id_cliente ??
+    empresaReserva?.IDEmpresa ??
+    empresaReserva?.ID ??
+    0
+  ) || null;
+
+  if (!idClienteReserva) return;
+
+  try {
+    await selecionarEmpresaPorIdComGarantia(idClienteReserva, true);
+  } catch (erro) {
+    console.warn('aplicarDadosClienteMarcaDaReservaKanban: falhou ao selecionar empresa da reserva', erro);
+    mostrarMensagemCard(
+      erro?.message ||
+      'A reserva foi carregada, mas não consegui selecionar automaticamente a empresa do IDCliente.'
+    );
+  }
+}
+
+
+async function aplicarReservaNoBloco(bloco, reserva, opcoes = {}){
+  if (!bloco || !reserva) return;
+
+  const idReserva = obterIdReservaDeObjeto(reserva);
+  const inputReserva = bloco.querySelector('[data-role="input-reserva-id"]');
+  if (inputReserva && idReserva) {
+    inputReserva.value = String(idReserva);
+  }
+
+  bloco.__reservaOcupacaoSelecionada = Object.assign({}, reserva || {});
+  mostrarInfoReservaNoBloco(bloco, formatarResumoReservaKanban(reserva), opcoes.tipoInfo || 'ok');
+
+  const codFaceReserva = safeStr(reserva.CodFace ?? reserva.cod_face ?? '').trim().toUpperCase();
+  const codPontoReserva = safeStr(reserva.CodPonto ?? reserva.cod_ponto ?? '').trim();
+  const idPainelReserva = idNum(reserva.IDPainelEuromidia ?? reserva.id_painel ?? reserva.IDDimPaineisEuromidia ?? 0) || null;
+  const cotaReserva = safeStr(reserva.Cota ?? reserva.cota ?? reserva.ExibicoesDia ?? reserva.exibicoes_dia ?? '').trim();
+  const dataInicioReserva = normalizarDataParaInput(reserva.DataInicio ?? reserva.data_inicio ?? '');
+  const dataFimReserva = normalizarDataParaInput(reserva.DataFim ?? reserva.data_fim ?? '');
+
+  await aplicarDadosClienteMarcaDaReservaKanban(reserva);
+
+  await carregarCatalogoPainelFaces();
+
+  const itemCatalogo = localizarPainelFaceCatalogo({
+    id_painel: idPainelReserva,
+    cod_ponto: codPontoReserva,
+    cod_face: codFaceReserva,
+  });
+
+  const dadosReserva = Object.assign({}, reserva || {}, {
+    IDFatoOcupacaoPaineisEuromidia: idReserva,
+    id_reserva: idReserva,
+    IDDimPaineisEuromidia: itemCatalogo?.IDDimPaineisEuromidia ?? idPainelReserva,
+    id_painel: itemCatalogo?.IDDimPaineisEuromidia ?? idPainelReserva,
+    IDDimFacesPaineis: itemCatalogo?.IDDimFacesPaineis ?? reserva.IDDimFacesPaineis ?? reserva.id_face ?? null,
+    id_face: itemCatalogo?.IDDimFacesPaineis ?? reserva.IDDimFacesPaineis ?? reserva.id_face ?? null,
+    CodPonto: itemCatalogo?.CodPonto ?? codPontoReserva,
+    cod_ponto: itemCatalogo?.CodPonto ?? codPontoReserva,
+    CodFace: itemCatalogo?.CodFace ?? codFaceReserva,
+    cod_face: itemCatalogo?.CodFace ?? codFaceReserva,
+    ExibicoesDia: cotaReserva || null,
+    exibicoes_dia: cotaReserva || null,
+    DataInicio: dataInicioReserva || null,
+    data_inicio: dataInicioReserva || null,
+    DataFim: dataFimReserva || null,
+    data_fim: dataFimReserva || null,
+  });
+
+  if (itemCatalogo) {
+    selecionarPainelCombobox(bloco, itemCatalogo, false);
+    await atualizarComercialDoBloco(bloco, dadosReserva);
+  }
+
+  const inputDataInicio = bloco.querySelector('[data-role="input-data-inicio"]');
+  const inputDataFim = bloco.querySelector('[data-role="input-data-fim"]');
+  if (inputDataInicio && dataInicioReserva) inputDataInicio.value = dataInicioReserva;
+  if (inputDataFim && dataFimReserva) {
+    inputDataFim.value = dataFimReserva;
+    inputDataFim.min = dataInicioReserva || '';
+  }
+
+  const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
+  if (selectExibicoesDia && cotaReserva) {
+    selecionarValoresNoSelect(selectExibicoesDia, [cotaReserva]);
+    atualizarResumoDropdownExibicoesDia(selectExibicoesDia);
+    sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'reserva' });
+    atualizarResumoComercial(bloco, { formatarCampos: true });
+  }
+
+  sincronizarRestricoesDataFimDoBloco(bloco);
+  agendarSincronizacaoFormularioSolicitacao();
+}
+
+async function aplicarReservaDigitadaNoBloco(bloco){
+  const inputReserva = bloco?.querySelector('[data-role="input-reserva-id"]');
+  if (!inputReserva) return;
+
+  const idReserva = idNum(inputReserva.value || 0) || null;
+  if (!idReserva) {
+    bloco.__reservaOcupacaoSelecionada = null;
+    mostrarInfoReservaNoBloco(bloco, '', 'info');
+    agendarSincronizacaoFormularioSolicitacao();
+    return;
+  }
+
+  mostrarInfoReservaNoBloco(bloco, `Validando reserva ${idReserva}...`, 'info');
+
+  try {
+    const reserva = await buscarReservaKanban(idReserva);
+    await aplicarReservaNoBloco(bloco, reserva, { tipoInfo: 'ok' });
+  } catch (erro) {
+    bloco.__reservaOcupacaoSelecionada = null;
+    mostrarInfoReservaNoBloco(bloco, erro?.message || 'Reserva inválida.', 'erro');
+    mostrarMensagemCard(erro?.message || 'Reserva inválida.');
+  }
+}
+
   function montarDadosPainelFaceParaExibicao(bloco, exibicoesDia, periodoPreferido = ''){
     const selectPainel = bloco?.querySelector('[data-role="select-painel"]');
     const selectFace = bloco?.querySelector('[data-role="select-face"]');
@@ -10952,6 +11200,7 @@ function formatarNumeroParaInput(valor){
     const percentual = parseNumeroInput(bloco?.querySelector('[data-role="input-percentual"]')?.value);
     const dataInicio = normalizarDataParaInput(bloco?.querySelector('[data-role="input-data-inicio"]')?.value || '');
     const dataFim = normalizarDataParaInput(bloco?.querySelector('[data-role="input-data-fim"]')?.value || '');
+    const idReserva = obterIdReservaDoBloco(bloco);
     const itemContratoAditivo = bloco?.__itemContratoAditivoSelecionado || null;
     const idItemContratoAditivo = idNum(itemContratoAditivo?.id_item_contrato ?? itemContratoAditivo?.IDFatoControleContratosItensEuromidia ?? 0) || null;
     const codPontoContratoAditivo = safeStr(itemContratoAditivo?.cod_ponto ?? itemContratoAditivo?.CodPonto ?? '').trim() || null;
@@ -10971,6 +11220,9 @@ function formatarNumeroParaInput(valor){
       id_painel: idPainel,
       CodFace: codFace,
       cod_face: codFace,
+      IDFatoOcupacaoPaineisEuromidia: idReserva,
+      id_reserva: idReserva,
+      Reserva: idReserva,
       IDDimTabelaPrecosEuromidia: idPrecoFinal,
       id_preco: idPrecoFinal,
       PeriodoExibicao: periodoFinal,
@@ -11113,6 +11365,21 @@ function formatarNumeroParaInput(valor){
           ])
         ])
       ]),
+      el('div', { class:'kb-painel-reserva-wrap', 'data-role':'wrap-reserva-painel-face' }, [
+        el('div', { class:'kb-campo' }, [
+          el('div', { class:'kb-campo-label' }, ['Reserva']),
+          el('input', {
+            class:'kb-input kb-input-reserva-id',
+            type:'number',
+            inputmode:'numeric',
+            min:'1',
+            step:'1',
+            autocomplete:'off',
+            placeholder:'Ex: 18619',
+            'data-role':'input-reserva-id'
+          })
+        ])
+      ]),
       el('div', { class:'kb-painel-item-grid' }, [
         el('select', { class:'kb-select', 'data-role':'select-filtro-cidade' }),
         el('select', { class:'kb-select', 'data-role':'select-filtro-tipo' }),
@@ -11206,6 +11473,13 @@ function formatarNumeroParaInput(valor){
     const selectFiltroTipo = bloco.querySelector('[data-role="select-filtro-tipo"]');
     const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
     const selectPeriodoExibicao = bloco.querySelector('[data-role="select-periodo-exibicao"]');
+    const inputReservaId = bloco.querySelector('[data-role="input-reserva-id"]');
+    const idReservaSalva = obterIdReservaDeObjeto(dados || {});
+    if (inputReservaId && idReservaSalva) {
+      inputReservaId.value = String(idReservaSalva);
+      bloco.__reservaOcupacaoSelecionada = Object.assign({}, dados || {}, { id_reserva: idReservaSalva });
+      mostrarInfoReservaNoBloco(bloco, formatarResumoReservaKanban(bloco.__reservaOcupacaoSelecionada) || `Reserva ${idReservaSalva} vinculada ao card.`, 'info');
+    }
     atualizarDropdownExibicoesDia(selectExibicoesDia);
     const selectCodPontoContratoItem = bloco.querySelector('[data-role="select-codponto-contrato-item"]');
     const selectCodFaceContratoItem = bloco.querySelector('[data-role="select-codface-contrato-item"]');
@@ -11272,6 +11546,16 @@ function formatarNumeroParaInput(valor){
         painelFaceLista?.appendChild(criarPainelFaceItem());
       }
       atualizarTitulosPainelFace();
+    });
+
+    inputReservaId?.addEventListener('change', () => {
+      void aplicarReservaDigitadaNoBloco(bloco);
+    });
+
+    inputReservaId?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      void aplicarReservaDigitadaNoBloco(bloco);
     });
 
 
@@ -11467,7 +11751,11 @@ function formatarNumeroParaInput(valor){
     });
 
     if (dados){
-      void atualizarFacesDoBloco(bloco, dados);
+      if (idReservaSalva) {
+        void aplicarReservaNoBloco(bloco, Object.assign({}, dados || {}, { id_reserva: idReservaSalva }), { tipoInfo: 'info' });
+      } else {
+        void atualizarFacesDoBloco(bloco, dados);
+      }
     } else {
       atualizarSelectFaceVisualDoBloco(bloco);
     }
@@ -12055,9 +12343,10 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
       const percentual = parseNumeroInput(bloco.querySelector('[data-role="input-percentual"]')?.value);
       const dataInicio = normalizarDataParaInput(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '');
       const dataFim = normalizarDataParaInput(bloco.querySelector('[data-role="input-data-fim"]')?.value || '');
+      const idReserva = obterIdReservaDoBloco(bloco);
       const exibicoesParaGerar = obterExibicoesDiaSelecionadasDoBloco(bloco);
 
-      if (!idPainel && !codFace && !idPreco && !exibicoesParaGerar.some(Boolean) && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
+      if (!idReserva && !idPainel && !codFace && !idPreco && !exibicoesParaGerar.some(Boolean) && novoValor === null && percentual === null && !dataInicio && !dataFim) continue;
 
       const precoVendaAtualContrato = Number(bloco.__dadosContratoAtual?.preco_venda_atual);
       const itemContratoAditivo = bloco.__itemContratoAditivoSelecionado || null;
@@ -12078,6 +12367,9 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
           cod_ponto: safeStr(painelFace?.CodPonto || "").trim() || null,
           CodFace: codFace || null,
           cod_face: codFace || null,
+          IDFatoOcupacaoPaineisEuromidia: idReserva || null,
+          id_reserva: idReserva || null,
+          Reserva: idReserva || null,
           TipoPainel: safeStr(painelFace?.Tipo || "").trim() || null,
           tipo_painel: safeStr(painelFace?.Tipo || "").trim() || null,
           IDDimTabelaPrecosEuromidia: idPrecoFinal || null,
@@ -12108,10 +12400,27 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     return itens;
   }
 
-  function preencherPainelFacesDoCard(lista){
+  function preencherPainelFacesDoCard(lista, opcoes = {}){
     if (!painelFaceLista) return;
     painelFaceLista.innerHTML = '';
-    const arr = Array.isArray(lista) && lista.length ? lista : [null];
+
+    const idReservaCard = idNum(
+      opcoes?.idReservaCard ??
+      opcoes?.IDReserva ??
+      opcoes?.id_reserva ??
+      0
+    ) || null;
+
+    const arrBase = Array.isArray(lista) && lista.length ? lista : [null];
+    const arr = idReservaCard
+      ? arrBase.map((item) => Object.assign({}, item || {}, {
+          IDReserva: idReservaCard,
+          id_reserva: idReservaCard,
+          IDFatoOcupacaoPaineisEuromidia: idReservaCard,
+          Reserva: idReservaCard
+        }))
+      : arrBase;
+
     arr.forEach(item => painelFaceLista.appendChild(criarPainelFaceItem(item)));
     atualizarTitulosPainelFace();
     sincronizarSeletoresContratoAditivoEmTodosBlocos();
@@ -13169,6 +13478,12 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     const textoNotaMovimento = ((inputNotaTexto && inputNotaTexto.value) || "").trim();
     const solicitacaoContratoMovimento = obterSolicitacaoContratoAtualParaMovimento(idC);
+    const painelFacesMovimento = idNum(cardAbertoId) === idC
+      ? coletarPainelFacesDoFormulario()
+      : null;
+    const idReservaMovimento = Array.isArray(painelFacesMovimento)
+      ? (painelFacesMovimento.map((item) => obterIdReservaDeObjeto(item)).find(Boolean) || null)
+      : null;
 
     const payload = {
       id_fase_para: idDestino,
@@ -13179,6 +13494,12 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     if (solicitacaoContratoMovimento) {
       payload.solicitacao_contrato = solicitacaoContratoMovimento;
+    }
+
+    if (Array.isArray(painelFacesMovimento)) {
+      payload.painel_faces = painelFacesMovimento;
+      payload.IDReserva = idReservaMovimento || null;
+      payload.id_reserva = idReservaMovimento || null;
     }
 
     const r = await fetch(`/kanban/api/cards/${idC}/mover`, {
@@ -15185,7 +15506,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         (Array.isArray(j.painel_faces) && j.painel_faces) ||
         (Array.isArray(j.painelFaces) && j.painelFaces) ||
         [];
-      preencherPainelFacesDoCard(painelFaces);
+      preencherPainelFacesDoCard(painelFaces, { idReservaCard: cardNormalizado.IDReserva });
     }
 
     preencherFormularioSolicitacaoContrato(j?.solicitacao_snapshot_editavel || null, cardNormalizado, j?.vendedor_logado_solicitacao || null);
@@ -15471,6 +15792,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         ordem: idNum(item?.Ordem ?? item?.ordem ?? (indice + 1)),
         id_painel: idNum(item?.IDDimPaineisEuromidia ?? item?.id_painel ?? 0) || null,
         id_face: idNum(item?.IDDimFacesPaineis ?? item?.id_face ?? 0) || null,
+        id_reserva: idNum(item?.IDFatoOcupacaoPaineisEuromidia ?? item?.id_reserva ?? item?.IDReserva ?? item?.Reserva ?? 0) || null,
         cod_ponto: safeStr(item?.CodPonto ?? item?.cod_ponto ?? "").trim(),
         cod_face: safeStr(item?.CodFace ?? item?.cod_face ?? "").trim().toUpperCase(),
         tipo_painel: safeStr(item?.TipoPainel ?? item?.tipo_painel ?? "").trim(),
@@ -15497,7 +15819,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       }))
       .filter((item) => {
         return !!(
-          item.id_painel || item.id_face || item.cod_ponto || item.cod_face || item.tipo_painel ||
+          item.id_painel || item.id_face || item.id_reserva || item.cod_ponto || item.cod_face || item.tipo_painel ||
           item.ano_custo || item.custo_tabela || item.id_tabela_preco || item.periodo_exibicao ||
           item.exibicoes_dia || item.valor_tabela || item.tabela || item.politica_trocas ||
           item.valor_troca || item.novo_valor || item.percentual_desconto || item.valor_venda_final ||
