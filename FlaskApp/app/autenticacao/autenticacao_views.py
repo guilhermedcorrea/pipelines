@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, session, abort
 from flask_login import login_user, logout_user, login_required, current_user
@@ -15,6 +15,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from flask_wtf import RecaptchaField
 from wtforms.validators import DataRequired
+import os
 import requests
 from sqlalchemy import text
 
@@ -498,13 +499,215 @@ def requer_permissao(codigo_permissao: str):
 
 
 
+
+
+ID_EMPRESA_PROPRIETARIA_EUROMIDIA = 3
+
+
+def _converter_int_seguro(valor, padrao: int = 0) -> int:
+    """Converte valores vindos do banco/sessão para int sem quebrar a request."""
+    try:
+        if valor is None:
+            return padrao
+        return int(valor)
+    except Exception:
+        return padrao
+
+
+def _config_ambiente(nome: str, padrao: str = "") -> str:
+    """Busca configuração primeiro no Flask config e depois no .env/os.environ."""
+    valor = current_app.config.get(nome)
+    if valor is None:
+        valor = os.getenv(nome, padrao)
+    return str(valor or padrao).strip()
+
+
+def _normalizar_airflow_base_url(base_url: str) -> str:
+    """Normaliza a URL base para evitar montar /api/v2/api/v2 por engano."""
+    base = str(base_url or "").strip().rstrip("/")
+
+    for sufixo in ("/api/v2", "/api/v1", "/api"):
+        if base.lower().endswith(sufixo):
+            base = base[: -len(sufixo)].rstrip("/")
+            break
+
+    return base
+
+
+def _sanitizar_detalhe_erro_airflow(texto: str, usuario_api: str = "", senha_api: str = "") -> str:
+    """Remove credenciais antes de mostrar o detalhe na tela/log."""
+    saida = str(texto or "")
+
+    for segredo in (senha_api, usuario_api):
+        segredo = str(segredo or "").strip()
+        if segredo:
+            saida = saida.replace(segredo, "***")
+
+    return saida
+
+
+def _flag_habilitada(valor: str) -> bool:
+    texto = str(valor or "").strip().lower()
+    return texto in {"1", "true", "t", "sim", "s", "yes", "y", "on"}
+
+
+def _usuario_logado_empresa_proprietaria() -> int:
+    """Lê a empresa proprietária do usuário logado, preferindo o banco para evitar sessão desatualizada."""
+    if not getattr(current_user, "is_authenticated", False):
+        return 0
+
+    id_usuario = _converter_int_seguro(getattr(current_user, "IDDimUsuarios", None))
+    if id_usuario <= 0:
+        id_usuario = _converter_int_seguro(current_user.get_id())
+
+    if id_usuario > 0:
+        try:
+            valor_banco = (
+                db.session.query(DimUsuarios.IDEmpresaProprietaria)
+                .filter(DimUsuarios.IDDimUsuarios == id_usuario)
+                .scalar()
+            )
+            return _converter_int_seguro(valor_banco)
+        except Exception:
+            db.session.rollback()
+
+    return _converter_int_seguro(getattr(current_user, "IDEmpresaProprietaria", None))
+
+
+def _usuario_logado_pode_executar_controle_contratos() -> bool:
+    """Somente usuários ativos da empresa proprietária 3 podem ver e executar o botão."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    if not bool(getattr(current_user, "BitAtivo", False)):
+        return False
+
+    return _usuario_logado_empresa_proprietaria() == ID_EMPRESA_PROPRIETARIA_EUROMIDIA
+
+
+def _agora_utc_iso_airflow() -> str:
+    """Retorna a data/hora UTC no formato aceito pela API pública v2 do Airflow."""
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _montar_payload_airflow_controle_contratos(dag_run_id: str, logical_date_utc: str) -> dict:
+    """Monta o corpo oficial do POST /api/v2/dags/{dag_id}/dagRuns.
+
+    Correção importante:
+    - No Airflow 3.x, o schema da API v2 exige o campo logical_date no corpo.
+    - Sem logical_date, o Airflow retorna HTTP 422: Field required.
+    - O campo fica no mesmo nível de dag_run_id e conf.
+    """
+    return {
+        "dag_run_id": dag_run_id,
+        "logical_date": logical_date_utc,
+        "conf": {
+            "origem": "flask_perfil_usuario",
+            "origem_disparo": "endpoint_flask",
+            "acionado_por_id_usuario": _converter_int_seguro(getattr(current_user, "IDDimUsuarios", None) or current_user.get_id()),
+            "acionado_por_nome": getattr(current_user, "NomeUsuario", None),
+            "acionado_por_email": getattr(current_user, "Email", None),
+            "id_empresa_proprietaria": _usuario_logado_empresa_proprietaria(),
+            "caminho_host_controle_contratos": _config_ambiente("CAMINHO_HOST_CONTROLE_CONTRATOS", ""),
+            "data_hora_acionamento": _agora().strftime("%Y-%m-%d %H:%M:%S"),
+            "logical_date_utc": logical_date_utc,
+        },
+    }
+
+
+def _detalhe_resposta_airflow(resposta: requests.Response, limite: int = 700) -> str:
+    """Extrai uma mensagem útil da resposta do Airflow sem expor senha."""
+    try:
+        dados = resposta.json()
+    except Exception:
+        texto = resposta.text or ""
+        return texto[:limite]
+
+    if isinstance(dados, dict):
+        partes = []
+        for chave in ("detail", "title", "message", "error", "reason"):
+            valor = dados.get(chave)
+            if valor:
+                partes.append(f"{chave}={valor}")
+
+        if partes:
+            return " | ".join(partes)[:limite]
+
+        return str(dados)[:limite]
+
+    return str(dados)[:limite]
+
+
+def _obter_token_airflow_v3(base_url: str, usuario: str, senha: str, timeout_segundos: int) -> tuple[str | None, list[str], int | None]:
+    """Obtém JWT para Airflow 3.x usando o formato oficial do endpoint /auth/token.
+
+    Importante:
+    - Airflow 3.x espera JSON no /auth/token.
+    - Não envio form-url-encoded porque isso gera HTTP 422 no Airflow 3.x.
+    - Retorno também o status HTTP para decidir se faz sentido tentar fallback legado v1.
+    """
+    endpoint = f"{base_url.rstrip('/')}/auth/token"
+
+    try:
+        resposta = requests.post(
+            endpoint,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            json={
+                "username": usuario,
+                "password": senha,
+            },
+            timeout=timeout_segundos,
+        )
+    except requests.Timeout:
+        return None, [f"{endpoint} [json] -> timeout após {timeout_segundos}s"], None
+    except requests.RequestException as erro:
+        return None, [f"{endpoint} [json] -> erro de conexão: {erro}"], None
+
+    if resposta.status_code in (200, 201):
+        try:
+            dados = resposta.json()
+        except Exception:
+            dados = {}
+
+        token = dados.get("access_token")
+        if token:
+            return str(token), [], resposta.status_code
+
+        return None, [f"{endpoint} [json] -> HTTP {resposta.status_code}: resposta sem access_token"], resposta.status_code
+
+    return None, [f"{endpoint} [json] -> HTTP {resposta.status_code}: {_detalhe_resposta_airflow(resposta)}"], resposta.status_code
+
+
+def _erro_airflow_hash_scrypt(erros: list[str]) -> bool:
+    """Identifica o erro clássico de usuário do Airflow salvo com hash scrypt incompatível."""
+    texto = " || ".join(erros or []).lower()
+    return "unsupported hash type" in texto and "scrypt" in texto
+
+
+def _post_airflow_dag_run_bearer(endpoint: str, token: str, timeout_segundos: int, payload: dict) -> requests.Response:
+    return requests.post(
+        endpoint,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        json=payload,
+        timeout=timeout_segundos,
+    )
+
+
+
 @autenticacao_bp.route("/perfil", methods=["GET"])
 @login_required
 def perfil():
     """Tela HTML com informações do usuário logado + permissões + troca de senha."""
     u = current_user
 
-  
+
     perfil = getattr(u, "perfil", None)
 
     permissoes_perfil = []
@@ -519,7 +722,7 @@ def perfil():
 
     permissoes_perfil = sorted(permissoes_perfil, key=lambda x: x["codigo"])
 
-  
+
     permissoes_extras = []
     agora = datetime.now()
 
@@ -550,8 +753,156 @@ def perfil():
         perfil=perfil,
         permissoes_perfil=permissoes_perfil,
         permissoes_extras=permissoes_extras,
+        pode_executar_controle_contratos=_usuario_logado_pode_executar_controle_contratos(),
     )
 
+
+
+
+
+
+@autenticacao_bp.route("/perfil/controle-contratos/executar", methods=["POST"])
+@login_required
+@limiter.limit("6 per minute")
+def executar_pipeline_controle_contratos():
+    """Aciona a DAG de Controle de Contratos no Airflow 3.x via API pública v2.
+
+    Fluxo correto:
+    1. Obtém JWT em POST /auth/token.
+    2. Dispara a DAG em POST /api/v2/dags/{dag_id}/dagRuns.
+    3. Envia logical_date, obrigatório no schema v2 do Airflow usado neste ambiente.
+
+    Observação:
+    - Não faço fallback para /api/v1 neste ambiente, porque o token JWT já comprova Airflow 3.x.
+    - O fallback antigo gerava HTTP 405 e confundia o diagnóstico.
+    """
+    if not _usuario_logado_pode_executar_controle_contratos():
+        flash("Você não tem permissão para executar esta ação.", "danger")
+        abort(403)
+
+    trigger_habilitado = _config_ambiente("AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO", "1")
+    if not _flag_habilitada(trigger_habilitado):
+        flash("Execução manual desabilitada no ambiente.", "warning")
+        return redirect(url_for("Autenticacao.perfil"))
+
+    base_url_original = _config_ambiente("AIRFLOW_API_BASE_URL", "")
+    base_url = _normalizar_airflow_base_url(base_url_original)
+    usuario_api = _config_ambiente("AIRFLOW_API_USERNAME", "")
+    senha_api = _config_ambiente("AIRFLOW_API_PASSWORD", "")
+    dag_id = _config_ambiente("AIRFLOW_DAG_CONTROLE_CONTRATOS", "pipeline_controle_contratos_euromidia")
+
+    try:
+        timeout_segundos = int(_config_ambiente("AIRFLOW_API_TIMEOUT_SEGUNDOS", "15"))
+    except Exception:
+        timeout_segundos = 15
+
+    if timeout_segundos < 5:
+        timeout_segundos = 5
+
+    if not base_url or not usuario_api or not senha_api or not dag_id:
+        detalhe_config = (
+            f"base_url_configurada={bool(base_url)} | "
+            f"usuario_configurado={bool(usuario_api)} | "
+            f"senha_configurada={bool(senha_api)} | "
+            f"dag_id={dag_id or 'VAZIO'}"
+        )
+        current_app.logger.error("Configuração incompleta para acionar Airflow | %s", detalhe_config)
+        flash(f"Configuração incompleta para executar. {detalhe_config}", "danger")
+        return redirect(url_for("Autenticacao.perfil"))
+
+    logical_date_utc = _agora_utc_iso_airflow()
+    agora_utc_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    dag_run_id = f"manual__controle_contratos__{agora_utc_id}"
+    payload = _montar_payload_airflow_controle_contratos(dag_run_id, logical_date_utc)
+
+    erros: list[str] = []
+
+    token, erros_token, status_token = _obter_token_airflow_v3(
+        base_url=base_url,
+        usuario=usuario_api,
+        senha=senha_api,
+        timeout_segundos=timeout_segundos,
+    )
+    erros.extend(erros_token)
+
+    if not token:
+        detalhe_log = " || ".join(erros) if erros else "sem detalhe retornado"
+        detalhe_seguro = _sanitizar_detalhe_erro_airflow(
+            detalhe_log,
+            usuario_api=usuario_api,
+            senha_api=senha_api,
+        )
+
+        current_app.logger.error(
+            "Falha ao obter token do Airflow | dag_id=%s | usuario_flask=%s | base_url_original=%s | base_url_normalizada=%s | status_token=%s | erros=%s",
+            dag_id,
+            getattr(current_user, "Email", None),
+            base_url_original,
+            base_url,
+            status_token,
+            detalhe_seguro,
+        )
+
+        if _erro_airflow_hash_scrypt(erros_token):
+            flash(
+                "Falha ao executar Controle de Contratos: o usuário configurado na API do Airflow está com hash de senha incompatível (scrypt). "
+                "Recrie ou resete a senha desse usuário dentro do container do Airflow e tente novamente. "
+                f"Detalhe técnico: {detalhe_seguro[:1200]}",
+                "danger",
+            )
+        else:
+            flash(f"Falha ao executar Controle de Contratos: {detalhe_seguro[:1800]}", "danger")
+
+        return redirect(url_for("Autenticacao.perfil"))
+
+    endpoint_v2 = f"{base_url}/api/v2/dags/{dag_id}/dagRuns"
+
+    try:
+        resposta = _post_airflow_dag_run_bearer(
+            endpoint=endpoint_v2,
+            token=token,
+            timeout_segundos=timeout_segundos,
+            payload=payload,
+        )
+
+        if resposta.status_code in (200, 201):
+            try:
+                dados = resposta.json()
+            except Exception:
+                dados = {}
+
+            dag_run_retorno = dados.get("dag_run_id") or dados.get("run_id") or dag_run_id
+            estado = dados.get("state") or "queued"
+
+            flash(f"Controle de Contratos executado. Run: {dag_run_retorno} | Estado: {estado}.", "success")
+            return redirect(url_for("Autenticacao.perfil"))
+
+        erros.append(f"{endpoint_v2} -> HTTP {resposta.status_code}: {_detalhe_resposta_airflow(resposta)}")
+
+    except requests.Timeout:
+        erros.append(f"{endpoint_v2} -> timeout após {timeout_segundos}s")
+    except requests.RequestException as erro:
+        erros.append(f"{endpoint_v2} -> erro de conexão: {erro}")
+
+    detalhe_log = " || ".join(erros) if erros else "sem detalhe retornado"
+    detalhe_seguro = _sanitizar_detalhe_erro_airflow(
+        detalhe_log,
+        usuario_api=usuario_api,
+        senha_api=senha_api,
+    )
+
+    current_app.logger.error(
+        "Falha ao acionar DAG Controle de Contratos via API v2 | dag_id=%s | usuario_flask=%s | base_url_original=%s | base_url_normalizada=%s | payload=%s | erros=%s",
+        dag_id,
+        getattr(current_user, "Email", None),
+        base_url_original,
+        base_url,
+        payload,
+        detalhe_seguro,
+    )
+
+    flash(f"Falha ao executar Controle de Contratos: {detalhe_seguro[:1800]}", "danger")
+    return redirect(url_for("Autenticacao.perfil"))
 
 
 

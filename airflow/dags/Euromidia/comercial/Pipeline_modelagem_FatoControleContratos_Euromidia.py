@@ -1,16 +1,23 @@
+from __future__ import annotations
 import hashlib
+import json
 import logging
+import os
+import shlex
+import shutil
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pendulum
-import polars as pl
+# Polars foi removido do parse do DAG para evitar SIGILL no Airflow.
 try:
-    from airflow.sdk import dag, task
+    from airflow.sdk import dag, task, get_current_context
 except ImportError:
     from airflow.decorators import dag, task
+    from airflow.operators.python import get_current_context
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -89,29 +96,80 @@ except Exception:
 
     def registrar_erro_no_resumo(resumo: _ResumoAuditoriaFallback, erro: Exception) -> None:
         resumo.erro = repr(erro)
-from hooks.BancodeDados.SqlServer import HookSqlServer
 
 
 logger = logging.getLogger(__name__)
 
 
 # Nome que deve aparecer no painel do Airflow.
-DAG_ID = "pipeline_controle_contratos_euromidia"
+# Se a variável AIRFLOW_DAG_CONTROLE_CONTRATOS existir no .env, ela precisa apontar para este mesmo DAG.
+DAG_ID_PADRAO = "pipeline_controle_contratos_euromidia"
+DAG_ID = os.getenv("AIRFLOW_DAG_CONTROLE_CONTRATOS", DAG_ID_PADRAO).strip() or DAG_ID_PADRAO
 FUSO_HORARIO = "America/Sao_Paulo"
 CRON_AGENDAMENTO = "0 8,11,15,18 * * *"
 
 CONN_ID_SQL_SERVER = "mssql_integracao"
 
-PASTA_SHAREPOINT_CONTAINER = Path("/opt/airflow/sharepoint_teste")
-PASTA_CARGA_CONTAINER = Path("/opt/airflow/Artefatos/CargasSQL/CTR")
+# Variáveis usadas por aplicações externas, como Flask, para chamar a API REST do Airflow.
+# O DAG não usa usuário/senha para se autoexecutar; ele apenas registra se recebeu dag_run.conf.
+AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO = os.getenv("AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO", "1").strip()
+AIRFLOW_API_BASE_URL_CONFIGURADA = os.getenv("AIRFLOW_API_BASE_URL", "").strip()
+AIRFLOW_API_TIMEOUT_SEGUNDOS_CONFIGURADO = os.getenv("AIRFLOW_API_TIMEOUT_SEGUNDOS", "").strip()
 
-# Este é o caminho visto DENTRO dos containers do Airflow.
-# No host Linux, por causa do bind mount do docker-compose, o arquivo deve ficar em:
-# ./airflow/sharepoint_teste/Copia-Controle de Contratos Euromidia.xlsm
-CAMINHO_ARQUIVO_EXCEL = PASTA_SHAREPOINT_CONTAINER / "Copia-Controle de Contratos Euromidia.xlsm"
+# Configuração do SharePoint via rclone.
+# O SharePoint é a fonte oficial. Antes de qualquer tratamento, a DAG baixa o arquivo mais recente
+# e substitui a cópia local dentro do container.
+RCLONE_REMOTE_CONTROLE_CONTRATOS = os.getenv(
+    "RCLONE_REMOTE_CONTROLE_CONTRATOS",
+    "sharepoint_basedados",
+)
+RCLONE_PASTA_CONTROLE_CONTRATOS = os.getenv(
+    "RCLONE_PASTA_CONTROLE_CONTRATOS",
+    "01- Controle de Contratos",
+)
+NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS = os.getenv(
+    "NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS",
+    "Copia-Controle de Contratos Euromidia.xlsm",
+)
+RCLONE_ARQUIVO_ORIGEM = os.getenv(
+    "RCLONE_ARQUIVO_ORIGEM_CONTROLE_CONTRATOS",
+    f"{RCLONE_REMOTE_CONTROLE_CONTRATOS}:{RCLONE_PASTA_CONTROLE_CONTRATOS}/{NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS}",
+)
+
+# Caminho visto DENTRO dos containers do Airflow.
+# Este é o caminho que você informou existir dentro do Docker.
+PASTA_SHAREPOINT_CONTAINER = Path(
+    os.getenv(
+        "PASTA_BASE_DADOS_CONTRATOS_CONTAINER",
+        "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos",
+    )
+)
+
+PASTA_CARGA_CONTAINER = Path(
+    os.getenv(
+        "PASTA_CARGA_CONTROLE_CONTRATOS_CONTAINER",
+        "/opt/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia",
+    )
+)
+
+CAMINHO_ARQUIVO_EXCEL = Path(
+    os.getenv(
+        "CAMINHO_CONTROLE_CONTRATOS_XLSM",
+        str(PASTA_SHAREPOINT_CONTAINER / NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS),
+    )
+)
+
 NOME_ABA_EXCEL = "CTR"
 
-TABELA_STAGE = "dbo.df_fatocontrolecontratos"
+BANCO_STAGE_CONTROLE_CONTRATOS = os.getenv(
+    "BANCO_STAGE_CONTROLE_CONTRATOS",
+    "Integracao",
+)
+
+TABELA_STAGE = os.getenv(
+    "TABELA_STAGE_CONTROLE_CONTRATOS",
+    f"{BANCO_STAGE_CONTROLE_CONTRATOS}.dbo.df_fatocontrolecontratos",
+)
 
 mapeamento_colunas = {
     "DATA DO LANÇAMENTO": "DataLancamento",
@@ -180,11 +238,18 @@ mapeamento_colunas = {
 
 ORDEM_COLUNAS_SAIDA = list(mapeamento_colunas.values()) + ["OBS"]
 
-schema_overrides = {col: pl.Utf8 for col in mapeamento_colunas.keys()}
+schema_overrides: dict[str, Any] = {}  # Mantido apenas por compatibilidade; o pipeline agora usa pandas/openpyxl.
 
 
 def obter_engine_sql_server() -> Engine:
-    """Obtém a engine SQL Server via hook centralizado do Airflow."""
+    """Obtém a engine SQL Server via hook centralizado do Airflow.
+
+    Importo o hook dentro da função para evitar que uma falha de path em plugins
+    derrube o parse do DAG inteiro no Airflow. Se o hook estiver ausente, a task
+    falha de forma explícita na execução, mas o DAG continua aparecendo na UI.
+    """
+    from hooks.BancodeDados.SqlServer import HookSqlServer
+
     hook_sql = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
     return hook_sql.obter_engine()
 
@@ -206,28 +271,27 @@ def normalizar_valor_auditoria(valor: Any) -> Any:
     return valor
 
 
-def df_polars_para_amostra(
-    df: pl.DataFrame,
+def df_para_amostra(
+    df: pd.DataFrame,
     limite: int = 5,
     colunas: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Converte DataFrame Polars para amostra amigável no painel."""
-    if df.is_empty():
+    """Converte DataFrame pandas para amostra amigável no painel."""
+    if df is None or df.empty:
         return []
 
     base = df
     if colunas:
         colunas_existentes = [col for col in colunas if col in df.columns]
         if colunas_existentes:
-            base = df.select(colunas_existentes)
+            base = df.loc[:, colunas_existentes]
 
-    linhas = base.head(limite).to_dicts()
+    linhas = base.head(limite).to_dict(orient="records")
 
     return [
         {chave: normalizar_valor_auditoria(valor) for chave, valor in linha.items()}
         for linha in linhas
     ]
-
 
 def consultar_amostra_sql(
     engine: Engine,
@@ -252,125 +316,314 @@ def consultar_amostra_sql(
 
 
 def _somente_existentes(nomes: list[str], existentes: set[str]) -> list[str]:
+    """Mantida por compatibilidade com versões antigas do pipeline."""
     return [n for n in nomes if n in existentes]
 
 
-def _limpar_texto(expr: pl.Expr) -> pl.Expr:
-    return (
-        expr.cast(pl.Utf8, strict=False)
-        .str.replace_all("\u00A0", " ", literal=True)
-        .str.replace_all("\u200B", "", literal=True)
-        .str.replace_all("\u200C", "", literal=True)
-        .str.replace_all("\u200D", "", literal=True)
-        .str.replace_all("\ufeff", "", literal=True)
-        .str.strip_chars()
+def _norm_text(valor: Any) -> str:
+    if valor is None:
+        return "SEM"
+
+    try:
+        if pd.isna(valor):
+            return "SEM"
+    except Exception:
+        pass
+
+    texto = str(valor).strip()
+    if not texto:
+        return "SEM"
+
+    texto = " ".join(texto.split())
+    return texto.upper()
+
+
+def _only_digits(valor: Any) -> str:
+    if valor is None:
+        return "SEM"
+
+    try:
+        if pd.isna(valor):
+            return "SEM"
+    except Exception:
+        pass
+
+    texto = str(valor)
+    if texto.endswith(".0"):
+        texto = texto[:-2]
+
+    digitos = "".join(ch for ch in texto if ch.isdigit())
+    return digitos if digitos else "SEM"
+
+
+def _norm_date(valor: Any) -> str:
+    if valor is None:
+        return "SEM"
+
+    try:
+        if pd.isna(valor):
+            return "SEM"
+    except Exception:
+        pass
+
+    if isinstance(valor, date) and not isinstance(valor, datetime):
+        return valor.strftime("%Y-%m-%d")
+
+    if isinstance(valor, datetime):
+        return valor.date().strftime("%Y-%m-%d")
+
+    texto = str(valor).strip()
+    if not texto:
+        return "SEM"
+
+    return texto
+
+
+def _to_base36(numero: int) -> str:
+    if numero == 0:
+        return "0"
+
+    alfabeto = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    saida = []
+
+    while numero > 0:
+        numero, resto = divmod(numero, 36)
+        saida.append(alfabeto[resto])
+
+    return "".join(reversed(saida))
+
+
+def _hash_base36_16(assinatura: str) -> str:
+    digest = hashlib.sha256(assinatura.encode("utf-8")).digest()
+    inteiro = int.from_bytes(digest, byteorder="big", signed=False)
+    base36 = _to_base36(inteiro)
+    return base36[:16]
+
+
+def normalizar_nome_coluna_excel(nome_coluna: Any) -> str:
+    """Normaliza o cabeçalho da planilha para casar mesmo com espaços invisíveis."""
+    if nome_coluna is None:
+        return ""
+
+    texto = str(nome_coluna)
+    texto = (
+        texto.replace("\u00A0", " ")
+        .replace("\u200B", "")
+        .replace("\u200C", "")
+        .replace("\u200D", "")
+        .replace("\ufeff", "")
+    )
+    texto = " ".join(texto.strip().upper().split())
+    return texto
+
+
+def limpar_texto_valor(valor: Any) -> str | None:
+    """Limpa textos vindos do Excel preservando valor nulo quando estiver vazio."""
+    if valor is None:
+        return None
+
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+
+    texto = str(valor)
+    texto = (
+        texto.replace("\u00A0", " ")
+        .replace("\u200B", "")
+        .replace("\u200C", "")
+        .replace("\u200D", "")
+        .replace("\ufeff", "")
+        .strip()
     )
 
+    if texto == "":
+        return None
 
-def parse_data_br(expr: pl.Expr) -> pl.Expr:
-    s = _limpar_texto(expr)
+    return texto
 
-    iso_d = s.str.to_date("%Y-%m-%d", strict=False)
-    iso_dt1 = s.str.to_datetime("%Y-%m-%d %H:%M:%S", strict=False).dt.date()
-    iso_dt2 = s.str.to_datetime("%Y-%m-%d %H:%M", strict=False).dt.date()
-    iso_t1 = s.str.to_datetime("%Y-%m-%dT%H:%M:%S", strict=False).dt.date()
-    iso_t2 = s.str.to_datetime("%Y-%m-%dT%H:%M", strict=False).dt.date()
-    iso_ms1 = s.str.to_datetime("%Y-%m-%d %H:%M:%S%.f", strict=False).dt.date()
-    iso_ms2 = s.str.to_datetime("%Y-%m-%dT%H:%M:%S%.f", strict=False).dt.date()
 
-    br_d = s.str.to_date("%d/%m/%Y", strict=False)
-    br_dt1 = s.str.to_datetime("%d/%m/%Y %H:%M:%S", strict=False).dt.date()
-    br_dt2 = s.str.to_datetime("%d/%m/%Y %H:%M", strict=False).dt.date()
-    br_ms = s.str.to_datetime("%d/%m/%Y %H:%M:%S%.f", strict=False).dt.date()
+def parse_data_br_pandas(valor: Any) -> str | None:
+    """Converte datas brasileiras, ISO, datetime e serial Excel para YYYY-MM-DD."""
+    valor_limpo = limpar_texto_valor(valor)
 
-    excel_serial = (
-        s.str.replace_all(".", "", literal=True)
-        .str.replace_all(",", ".", literal=True)
-        .cast(pl.Float64, strict=False)
-    )
-    dias_int = excel_serial.floor().cast(pl.Int64, strict=False)
-    base = pl.lit("1899-12-30").str.to_date("%Y-%m-%d", strict=True).cast(pl.Date)
-    d_serial = base + pl.duration(days=dias_int)
+    if valor_limpo is None:
+        return None
 
-    return pl.coalesce(
+    if isinstance(valor, datetime):
+        return valor.date().strftime("%Y-%m-%d")
+
+    if isinstance(valor, date):
+        return valor.strftime("%Y-%m-%d")
+
+    numero_serial = None
+
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        numero_serial = float(valor)
+    else:
+        texto_numero = valor_limpo.strip()
+        if "," in texto_numero:
+            texto_numero = texto_numero.replace(".", "").replace(",", ".")
+        try:
+            numero_serial = float(texto_numero)
+        except Exception:
+            numero_serial = None
+
+    if numero_serial is not None and 1 <= numero_serial <= 80000:
+        try:
+            data_excel = pd.Timestamp("1899-12-30") + pd.to_timedelta(int(numero_serial), unit="D")
+            return data_excel.date().strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    formatos = [
+        "%d/%m/%Y",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+    ]
+
+    for formato in formatos:
+        try:
+            return datetime.strptime(valor_limpo, formato).date().strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    data_convertida = pd.to_datetime(valor_limpo, errors="coerce", dayfirst=True)
+    if pd.isna(data_convertida):
+        return None
+
+    return data_convertida.date().strftime("%Y-%m-%d")
+
+
+def parse_numero_br_pandas(valor: Any) -> float | None:
+    """Converte número brasileiro para float."""
+    valor_limpo = limpar_texto_valor(valor)
+
+    if valor_limpo is None:
+        return None
+
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        try:
+            return float(valor)
+        except Exception:
+            return None
+
+    texto = valor_limpo.replace("R$", "").replace('"', "").replace(" ", "").strip()
+
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+
+    try:
+        return float(texto)
+    except Exception:
+        return None
+
+
+def parse_inteiro_pandas(valor: Any) -> int | None:
+    """Converte inteiro vindo do Excel."""
+    numero = parse_numero_br_pandas(valor)
+    if numero is None:
+        return None
+
+    try:
+        return int(numero)
+    except Exception:
+        return None
+
+
+def parse_id_trimestre_pandas(valor: Any) -> str | None:
+    texto = limpar_texto_valor(valor)
+    if texto is None:
+        return None
+
+    texto = " ".join(texto.split())
+    texto = texto.replace("TRI", "Tri").replace("tri", "Tri")
+    return texto
+
+
+def parse_cnpj_pandas(valor: Any) -> str | None:
+    """Remove pontuação de CNPJ/CPF preservando apenas dígitos."""
+    valor_limpo = limpar_texto_valor(valor)
+
+    if valor_limpo is None:
+        return None
+
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        try:
+            valor_limpo = str(int(valor))
+        except Exception:
+            valor_limpo = str(valor)
+
+    if valor_limpo.endswith(".0"):
+        valor_limpo = valor_limpo[:-2]
+
+    digitos = "".join(ch for ch in valor_limpo if ch.isdigit())
+    return digitos or None
+
+
+def localizar_caminho_excel_controle_contratos() -> Path:
+    """Localiza o arquivo original do controle de contratos dentro do container."""
+    nome_arquivo_excel = NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS
+
+    caminho_env = os.getenv("CAMINHO_CONTROLE_CONTRATOS_XLSM")
+    candidatos: list[Path] = []
+
+    if caminho_env:
+        candidatos.append(Path(caminho_env))
+
+    candidatos.extend(
         [
-            br_d,
-            br_dt1,
-            br_dt2,
-            br_ms,
-            iso_d,
-            iso_dt1,
-            iso_dt2,
-            iso_t1,
-            iso_t2,
-            iso_ms1,
-            iso_ms2,
-            d_serial,
+            CAMINHO_ARQUIVO_EXCEL,
+            PASTA_SHAREPOINT_CONTAINER / nome_arquivo_excel,
+            Path("/root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
+            Path("/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
+            Path("/root/SHEMPO/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
+            Path("/opt/airflow/SHEMPO/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
+            Path("/root/PythonJobs/pipelines/SHEMPO/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
         ]
     )
 
+    for caminho in candidatos:
+        if caminho.exists():
+            return caminho
 
-def parse_float_br(expr: pl.Expr) -> pl.Expr:
-    s = _limpar_texto(expr)
+    raizes_busca = [
+        Path("/opt/airflow"),
+        Path("/root/PythonJobs/pipelines"),
+        Path("/root/SHEMPO"),
+    ]
 
-    s_norm = (
-        pl.when(s.str.contains(",", literal=True))
-        .then(
-            s.str.replace_all(".", "", literal=True).str.replace_all(",", ".", literal=True)
-        )
-        .otherwise(s)
-    )
+    for raiz in raizes_busca:
+        if not raiz.exists():
+            continue
 
-    return s_norm.cast(pl.Float64, strict=False)
+        try:
+            encontrados = sorted(
+                raiz.rglob(nome_arquivo_excel),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except Exception:
+            encontrados = []
 
+        if encontrados:
+            return encontrados[0]
 
-def parse_int(expr: pl.Expr) -> pl.Expr:
-    return _limpar_texto(expr).cast(pl.Int32, strict=False)
-
-
-def parse_br_money(expr: pl.Expr) -> pl.Expr:
-    s = _limpar_texto(expr)
-
-    s = (
-        s.str.replace_all('"', "", literal=True)
-        .str.replace_all("R$", "", literal=True)
-        .str.replace_all(" ", "", literal=True)
-        .str.strip_chars()
-    )
-
-    s_norm = (
-        pl.when(s.str.contains(",", literal=True))
-        .then(
-            s.str.replace_all(".", "", literal=True).str.replace_all(",", ".", literal=True)
-        )
-        .otherwise(s)
-    )
-
-    return s_norm.cast(pl.Float64, strict=False)
-
-
-def parse_id_trimestre(expr: pl.Expr) -> pl.Expr:
-    s = _limpar_texto(expr)
-    return (
-        s.str.replace_all(r"\s+", " ")
-        .str.replace_all("TRI", "Tri", literal=True)
-        .str.replace_all("tri", "Tri", literal=True)
-        .cast(pl.Utf8, strict=False)
+    caminhos_testados = "\n".join(str(c) for c in candidatos)
+    raise FileNotFoundError(
+        "Arquivo Excel do controle de contratos não encontrado dentro do container.\n"
+        f"Nome esperado: {nome_arquivo_excel}\n"
+        f"Caminhos testados:\n{caminhos_testados}"
     )
 
 
-def parse_cnpj(expr: pl.Expr) -> pl.Expr:
-    s = _limpar_texto(expr)
-    s = (
-        s.str.replace_all(".", "", literal=True)
-        .str.replace_all("-", "", literal=True)
-        .str.replace_all("/", "", literal=True)
-        .str.replace_all(" ", "", literal=True)
-    )
-    return s.str.replace_all(r"\D+", "").cast(pl.Utf8, strict=False)
-
-
-def ler_aba_ctr_xlsm_lazy(caminho_arquivo: str) -> pl.LazyFrame:
+def ler_aba_ctr_xlsm_pandas(caminho_arquivo: str | Path) -> pd.DataFrame:
     caminho = Path(caminho_arquivo)
 
     if not caminho.exists():
@@ -381,66 +634,126 @@ def ler_aba_ctr_xlsm_lazy(caminho_arquivo: str) -> pl.LazyFrame:
             f"Extensão inesperada ({caminho.suffix}). Esperado Excel (.xlsm/.xlsx/.xls)."
         )
 
-    df = pl.read_excel(
-        str(caminho),
-        sheet_name=NOME_ABA_EXCEL,
-        engine="calamine",
-        infer_schema_length=0,
-        schema_overrides=schema_overrides,
-    )
-    return df.lazy()
+    try:
+        return pd.read_excel(
+            caminho,
+            sheet_name=NOME_ABA_EXCEL,
+            engine="openpyxl",
+            dtype=object,
+        )
+    except ImportError as erro:
+        raise RuntimeError(
+            "A biblioteca openpyxl não está instalada no container do Airflow. "
+            "Instale com: pip install openpyxl"
+        ) from erro
 
 
-def _norm_text(v: Any) -> str:
-    if v is None:
-        return "SEM"
-    s = str(v).strip()
-    if not s:
-        return "SEM"
-    s = " ".join(s.split())
-    return s.upper()
+def tratar_dataframe_ctr_pandas(df_original: pd.DataFrame) -> pd.DataFrame:
+    """Aplica o tratamento da aba CTR sem usar Polars/calamine."""
+    df = df_original.copy()
+
+    mapa_normalizado = {
+        normalizar_nome_coluna_excel(origem): destino
+        for origem, destino in mapeamento_colunas.items()
+    }
+
+    renomear: dict[Any, str] = {}
+    for coluna in df.columns:
+        destino = mapa_normalizado.get(normalizar_nome_coluna_excel(coluna))
+        if destino:
+            renomear[coluna] = destino
+
+    df = df.rename(columns=renomear)
+
+    colunas_datas = [
+        "DataLancamento",
+        "DataAssinaturaRenovacao",
+        "DataInicioPrevisto",
+        "DataTerminoPrevisto",
+        "DataInicioVencimento",
+        "DataCancelamento",
+    ]
+
+    colunas_int = [
+        "CodPonto",
+        "TexmpoExposicao",
+        "NumeroParcelas",
+    ]
+
+    colunas_float = [
+        "Cota",
+        "PercentualPermuta",
+        "CotaOportunidade",
+        "PercentualAgencia",
+        "PercentualBureau",
+        "PercentualCartaAcordo",
+        "PercentualComissaoVendedor",
+        "PercentualComissaoCoordenacao",
+        "PercentualComissaoGerencia",
+    ]
+
+    colunas_money = [
+        "FaturamentoBrutoMensal",
+        "ValorPermuta",
+        "FaturamentoLiquidoPermuta",
+        "TotalBrutoContrato",
+        "TotalLiquidoContratoAGBRCTACORDO",
+        "TotalLiquidoContratoAGBRVENDGERCOOR",
+        "ValorMensalAgencia",
+        "ValorBureauMensal",
+        "ValorCartaAcordoMensal",
+        "ValorOutrasComissoes",
+        "FaturamentoLiquidoMensal",
+        "ValorVendedor",
+        "ValorVendedorTotal",
+        "ValorCoordenador",
+        "ValorCoordenadorTotal",
+        "ValorGerencia",
+        "ValorGerenciaTotal",
+        "FaturamentoLiquidoFinalMensal",
+        "ComissaoGerenciaNordeste",
+        "Faturamento",
+    ]
+
+    colunas_cnpj = [
+        "CNPJ",
+        "CnpjAgencia",
+        "CnpjBureau",
+        "CnpjIntermediario",
+        "CnpjExibibora",
+        "CPF",
+    ]
+
+    for coluna in colunas_datas:
+        if coluna in df.columns:
+            df[coluna] = df[coluna].map(parse_data_br_pandas)
+
+    for coluna in colunas_int:
+        if coluna in df.columns:
+            df[coluna] = df[coluna].map(parse_inteiro_pandas)
+
+    for coluna in colunas_float + colunas_money:
+        if coluna in df.columns:
+            df[coluna] = df[coluna].map(parse_numero_br_pandas)
+
+    for coluna in colunas_cnpj:
+        if coluna in df.columns:
+            df[coluna] = df[coluna].map(parse_cnpj_pandas)
+
+    if "IDTrimestre" in df.columns:
+        df["IDTrimestre"] = df["IDTrimestre"].map(parse_id_trimestre_pandas)
+
+    for coluna in df.columns:
+        if coluna not in set(colunas_datas + colunas_int + colunas_float + colunas_money + colunas_cnpj + ["IDTrimestre"]):
+            df[coluna] = df[coluna].map(limpar_texto_valor)
+
+    df = aplicar_hash_contrato_e_previa(df)
+    df = garantir_colunas_saida(df)
+
+    return df
 
 
-def _only_digits(v: Any) -> str:
-    if v is None:
-        return "SEM"
-    s = str(v)
-    digits = "".join(ch for ch in s if ch.isdigit())
-    return digits if digits else "SEM"
-
-
-def _norm_date(v: Any) -> str:
-    if v is None:
-        return "SEM"
-    if isinstance(v, date) and not isinstance(v, datetime):
-        return v.strftime("%Y-%m-%d")
-    if isinstance(v, datetime):
-        return v.date().strftime("%Y-%m-%d")
-    s = str(v).strip()
-    if not s:
-        return "SEM"
-    return s
-
-
-def _to_base36(n: int) -> str:
-    if n == 0:
-        return "0"
-    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    out = []
-    while n > 0:
-        n, r = divmod(n, 36)
-        out.append(alphabet[r])
-    return "".join(reversed(out))
-
-
-def _hash_base36_16(assinatura: str) -> str:
-    digest = hashlib.sha256(assinatura.encode("utf-8")).digest()
-    as_int = int.from_bytes(digest, byteorder="big", signed=False)
-    b36 = _to_base36(as_int)
-    return b36[:16]
-
-
-def aplicar_hash_contrato_e_previa(df: pl.DataFrame) -> pl.DataFrame:
+def aplicar_hash_contrato_e_previa(df: pd.DataFrame) -> pd.DataFrame:
     colunas_necessarias = [
         "DataLancamento",
         "Origem",
@@ -451,111 +764,309 @@ def aplicar_hash_contrato_e_previa(df: pl.DataFrame) -> pl.DataFrame:
         "NumeroContrato",
         "NumeroPrevia",
     ]
-    faltantes = [c for c in colunas_necessarias if c not in df.columns]
+    faltantes = [coluna for coluna in colunas_necessarias if coluna not in df.columns]
     if faltantes:
-        raise ValueError(f"Faltam colunas no df para aplicar hash: {faltantes}")
+        raise ValueError(f"Faltam colunas no dataframe para aplicar hash: {faltantes}")
 
-    df_out = (
-        df.with_columns(
-            [
-                pl.struct(
-                    [
-                        "DataLancamento",
-                        "Origem",
-                        "CNPJ",
-                        "MarcaExibida",
-                        "DataAssinaturaRenovacao",
-                        "DataTerminoPrevisto",
-                    ]
-                )
-                .map_elements(
-                    lambda r: (
-                        _norm_date(r["DataLancamento"])
-                        + "|"
-                        + _norm_text(r["Origem"])
-                        + "|"
-                        + _only_digits(r["CNPJ"])
-                        + "|"
-                        + _norm_text(r["MarcaExibida"])
-                        + "|"
-                        + _norm_date(r["DataAssinaturaRenovacao"])
-                        + "|"
-                        + _norm_date(r["DataTerminoPrevisto"])
-                    ),
-                    return_dtype=pl.Utf8,
-                )
-                .alias("__assinatura_contrato"),
-                pl.struct(
-                    [
-                        "DataLancamento",
-                        "CNPJ",
-                        "MarcaExibida",
-                        "DataAssinaturaRenovacao",
-                        "DataTerminoPrevisto",
-                    ]
-                )
-                .map_elements(
-                    lambda r: (
-                        _norm_date(r["DataLancamento"])
-                        + "|"
-                        + _only_digits(r["CNPJ"])
-                        + "|"
-                        + _norm_text(r["MarcaExibida"])
-                        + "|"
-                        + _norm_date(r["DataAssinaturaRenovacao"])
-                        + "|"
-                        + _norm_date(r["DataTerminoPrevisto"])
-                    ),
-                    return_dtype=pl.Utf8,
-                )
-                .alias("__assinatura_previa"),
-            ]
+    df_out = df.copy()
+
+    def montar_assinatura_contrato(linha: pd.Series) -> str:
+        return (
+            _norm_date(linha.get("DataLancamento"))
+            + "|"
+            + _norm_text(linha.get("Origem"))
+            + "|"
+            + _only_digits(linha.get("CNPJ"))
+            + "|"
+            + _norm_text(linha.get("MarcaExibida"))
+            + "|"
+            + _norm_date(linha.get("DataAssinaturaRenovacao"))
+            + "|"
+            + _norm_date(linha.get("DataTerminoPrevisto"))
         )
-        .with_columns(
-            [
-                pl.col("__assinatura_contrato")
-                .map_elements(lambda s: "HASHC-" + _hash_base36_16(s), return_dtype=pl.Utf8)
-                .alias("__hash_contrato"),
-                pl.col("__assinatura_previa")
-                .map_elements(lambda s: "HASHP-" + _hash_base36_16(s), return_dtype=pl.Utf8)
-                .alias("__hash_previa"),
-            ]
+
+    def montar_assinatura_previa(linha: pd.Series) -> str:
+        return (
+            _norm_date(linha.get("DataLancamento"))
+            + "|"
+            + _only_digits(linha.get("CNPJ"))
+            + "|"
+            + _norm_text(linha.get("MarcaExibida"))
+            + "|"
+            + _norm_date(linha.get("DataAssinaturaRenovacao"))
+            + "|"
+            + _norm_date(linha.get("DataTerminoPrevisto"))
         )
-        .with_columns(
-            [
-                pl.when(
-                    pl.col("NumeroContrato").is_null()
-                    | (pl.col("NumeroContrato").cast(pl.Utf8, strict=False).str.strip_chars() == "")
-                )
-                .then(pl.col("__hash_contrato"))
-                .otherwise(pl.col("NumeroContrato"))
-                .alias("NumeroContrato"),
-                pl.when(
-                    pl.col("NumeroPrevia").is_null()
-                    | (pl.col("NumeroPrevia").cast(pl.Utf8, strict=False).str.strip_chars() == "")
-                )
-                .then(pl.col("__hash_previa"))
-                .otherwise(pl.col("NumeroPrevia"))
-                .alias("NumeroPrevia"),
-            ]
-        )
+
+    def esta_vazio(valor: Any) -> bool:
+        texto = limpar_texto_valor(valor)
+        return texto is None
+
+    assinaturas_contrato = df_out.apply(montar_assinatura_contrato, axis=1)
+    assinaturas_previa = df_out.apply(montar_assinatura_previa, axis=1)
+
+    hashes_contrato = assinaturas_contrato.map(lambda valor: "HASHC-" + _hash_base36_16(valor))
+    hashes_previa = assinaturas_previa.map(lambda valor: "HASHP-" + _hash_base36_16(valor))
+
+    mascara_contrato_vazio = df_out["NumeroContrato"].map(esta_vazio)
+    mascara_previa_vazia = df_out["NumeroPrevia"].map(esta_vazio)
+
+    df_out.loc[mascara_contrato_vazio, "NumeroContrato"] = hashes_contrato[mascara_contrato_vazio]
+    df_out.loc[mascara_previa_vazia, "NumeroPrevia"] = hashes_previa[mascara_previa_vazia]
+
+    return df_out
+
+
+def garantir_colunas_saida(df: pd.DataFrame) -> pd.DataFrame:
+    df_out = df.copy()
+
+    for coluna in ORDEM_COLUNAS_SAIDA:
+        if coluna not in df_out.columns:
+            df_out[coluna] = None
+
+    return df_out.loc[:, ORDEM_COLUNAS_SAIDA]
+
+
+def obter_ultimo_csv_carga(pasta: Path) -> Path:
+    arquivos = sorted(
+        pasta.glob("df_fatocontrolecontratos_*.csv"),
+        key=lambda caminho: (caminho.stat().st_mtime, caminho.name),
+        reverse=True,
     )
 
-    return df_out.drop(
-        [
-            "__assinatura_contrato",
-            "__assinatura_previa",
-            "__hash_contrato",
-            "__hash_previa",
-        ]
+    if not arquivos:
+        raise FileNotFoundError(
+            f"Nenhum CSV df_fatocontrolecontratos_*.csv encontrado em {pasta}"
+        )
+
+    return arquivos[0]
+
+
+def normalizar_partes_tabela_stage(nome_completo: str) -> tuple[str, str, str]:
+    """Normaliza o nome da stage para sempre carregar no banco correto.
+
+    Aceita:
+    - tabela
+    - schema.tabela
+    - banco.schema.tabela
+
+    Como os MERGEs do próprio DAG leem [Integracao].[dbo].[df_fatocontrolecontratos],
+    quando o nome vier apenas como dbo.tabela, o banco padrão será Integracao.
+    """
+    if not nome_completo or not str(nome_completo).strip():
+        raise ValueError("Nome da tabela stage não pode ser vazio.")
+
+    partes = [
+        parte.strip().strip("[]")
+        for parte in str(nome_completo).split(".")
+        if parte.strip()
+    ]
+
+    if len(partes) == 1:
+        banco = BANCO_STAGE_CONTROLE_CONTRATOS
+        schema = "dbo"
+        tabela = partes[0]
+    elif len(partes) == 2:
+        banco = BANCO_STAGE_CONTROLE_CONTRATOS
+        schema, tabela = partes
+    elif len(partes) == 3:
+        banco, schema, tabela = partes
+    else:
+        raise ValueError(
+            "Nome da tabela stage deve estar em um destes formatos: tabela, schema.tabela "
+            f"ou banco.schema.tabela. Valor recebido: {nome_completo}"
+        )
+
+    return banco, schema, tabela
+
+
+def nome_tabela_stage_sql(nome_completo: str) -> str:
+    """Retorna o nome qualificado e protegido da stage para SQL Server."""
+    banco, schema, tabela = normalizar_partes_tabela_stage(nome_completo)
+    return f"[{banco}].[{schema}].[{tabela}]"
+
+
+def nome_objeto_stage_sql(nome_completo: str) -> str:
+    """Retorna nome 3-part sem colchetes para OBJECT_ID."""
+    banco, schema, tabela = normalizar_partes_tabela_stage(nome_completo)
+    return f"{banco}.{schema}.{tabela}"
+
+
+def gerar_sql_create_stage(df: pd.DataFrame, tabela_stage: str) -> str:
+    """Gera CREATE TABLE da stage com colunas textuais.
+
+    A stage é uma tabela técnica: todos os campos entram como NVARCHAR(MAX), porque as conversões
+    tipadas acontecem nos MERGEs posteriores com TRY_CONVERT. Isso evita erro de tipo na carga bruta.
+    """
+    if df is None or df.empty:
+        colunas = ORDEM_COLUNAS_SAIDA
+    else:
+        colunas = list(df.columns)
+
+    if not colunas:
+        raise ValueError("Não existem colunas para criar a stage.")
+
+    nome_sql = nome_tabela_stage_sql(tabela_stage)
+    colunas_sql = ",\n        ".join(f"[{coluna}] NVARCHAR(MAX) NULL" for coluna in colunas)
+
+    return f"""
+IF OBJECT_ID(N'{nome_objeto_stage_sql(tabela_stage)}', N'U') IS NULL
+BEGIN
+    CREATE TABLE {nome_sql}
+    (
+        {colunas_sql}
+    );
+END;
+"""
+
+
+def garantir_colunas_stage_sql_server(conn: Any, df: pd.DataFrame, tabela_stage: str) -> None:
+    """Garante que a tabela stage existe e que todas as colunas do DataFrame existem nela."""
+    nome_sql = nome_tabela_stage_sql(tabela_stage)
+    banco, schema, tabela = normalizar_partes_tabela_stage(tabela_stage)
+
+    conn.exec_driver_sql(gerar_sql_create_stage(df, tabela_stage))
+
+    sql_colunas_existentes = """
+SELECT c.name AS nome_coluna
+FROM [{banco}].sys.columns AS c
+INNER JOIN [{banco}].sys.objects AS o
+    ON o.object_id = c.object_id
+INNER JOIN [{banco}].sys.schemas AS s
+    ON s.schema_id = o.schema_id
+WHERE
+    s.name = :schema
+    AND o.name = :tabela
+    AND o.type = 'U';
+""".format(banco=banco)
+
+    linhas = conn.execute(
+        text(sql_colunas_existentes),
+        {"schema": schema, "tabela": tabela},
+    ).mappings().fetchall()
+
+    existentes = {str(linha["nome_coluna"]) for linha in linhas}
+
+    for coluna in df.columns:
+        if coluna not in existentes:
+            logger.warning(
+                "Coluna ausente na stage e será criada como NVARCHAR(MAX): tabela=%s | coluna=%s",
+                nome_sql,
+                coluna,
+            )
+            conn.exec_driver_sql(f"ALTER TABLE {nome_sql} ADD [{coluna}] NVARCHAR(MAX) NULL;")
+
+
+def limpar_stage_sql_server(conn: Any, tabela_stage: str) -> str:
+    """Limpa a stage.
+
+    Primeiro tenta TRUNCATE. Se o usuário SQL não tiver permissão de ALTER para TRUNCATE,
+    cai para DELETE, que é mais permissivo. Isso resolve o erro comum:
+    Cannot find the object ... or you do not have permissions.
+    """
+    nome_sql = nome_tabela_stage_sql(tabela_stage)
+
+    try:
+        conn.exec_driver_sql(f"TRUNCATE TABLE {nome_sql};")
+        return "TRUNCATE"
+    except Exception as erro_truncate:
+        logger.warning(
+            "Não foi possível executar TRUNCATE na stage %s. Tentando DELETE. Erro original: %r",
+            nome_sql,
+            erro_truncate,
+        )
+        conn.exec_driver_sql(f"DELETE FROM {nome_sql};")
+        return "DELETE"
+
+
+def inserir_dataframe_stage_sql_server(
+    conn: Any,
+    df_stage: pd.DataFrame,
+    tabela_stage: str,
+    tamanho_lote: int = 1000,
+) -> int:
+    """Insere o DataFrame na stage usando SQL parametrizado e tabela 3-part.
+
+    Não usa pandas.to_sql porque to_sql depende do banco default da conexão.
+    Aqui o INSERT aponta explicitamente para [Integracao].[dbo].[df_fatocontrolecontratos].
+    """
+    if df_stage.empty:
+        return 0
+
+    nome_sql = nome_tabela_stage_sql(tabela_stage)
+    colunas = list(df_stage.columns)
+
+    colunas_sql = ", ".join(f"[{coluna}]" for coluna in colunas)
+    parametros_sql = ", ".join(f":{coluna}" for coluna in colunas)
+    sql_insert = text(f"INSERT INTO {nome_sql} ({colunas_sql}) VALUES ({parametros_sql})")
+
+    total_inserido = 0
+
+    for inicio in range(0, len(df_stage), tamanho_lote):
+        fim = inicio + tamanho_lote
+        lote = df_stage.iloc[inicio:fim]
+        registros = lote.to_dict(orient="records")
+
+        if registros:
+            conn.execute(sql_insert, registros)
+            total_inserido += len(registros)
+
+        logger.info(
+            "Stage %s | lote inserido: início=%s | fim=%s | linhas_lote=%s | total_inserido=%s",
+            nome_sql,
+            inicio,
+            min(fim, len(df_stage)),
+            len(registros),
+            total_inserido,
+        )
+
+    return total_inserido
+
+
+def carregar_dataframe_stage_sql_server(df: pd.DataFrame, tabela_stage: str) -> None:
+    """Cria/limpa/recarrega a stage técnica no SQL Server.
+
+    Corrige dois problemas:
+    1. A stage pode não existir ainda.
+    2. A conexão pode estar apontando para outro banco; por isso usamos nome 3-part explícito.
+    """
+    df_stage = df.copy()
+
+    for coluna in df_stage.columns:
+        df_stage[coluna] = df_stage[coluna].map(
+            lambda valor: None if pd.isna(valor) or str(valor) == "" else str(valor)
+        )
+
+    banco, schema, nome_tabela = normalizar_partes_tabela_stage(tabela_stage)
+    tabela_qualificada = nome_tabela_stage_sql(tabela_stage)
+
+    logger.info(
+        "Preparando carga da stage SQL Server | banco=%s | schema=%s | tabela=%s | tabela_qualificada=%s | linhas=%s | colunas=%s",
+        banco,
+        schema,
+        nome_tabela,
+        tabela_qualificada,
+        len(df_stage),
+        len(df_stage.columns),
     )
 
+    engine = obter_engine_sql_server()
 
-def garantir_colunas_saida(df: pl.DataFrame) -> pl.DataFrame:
-    colunas_faltantes = [c for c in ORDEM_COLUNAS_SAIDA if c not in df.columns]
-    if colunas_faltantes:
-        df = df.with_columns([pl.lit(None, dtype=pl.Utf8).alias(c) for c in colunas_faltantes])
-    return df.select(ORDEM_COLUNAS_SAIDA)
+    try:
+        with engine.begin() as conn:
+            garantir_colunas_stage_sql_server(conn, df_stage, tabela_stage)
+            metodo_limpeza = limpar_stage_sql_server(conn, tabela_stage)
+            linhas_inseridas = inserir_dataframe_stage_sql_server(conn, df_stage, tabela_stage)
+
+        logger.info(
+            "Stage %s carregada com sucesso. Método limpeza: %s | Linhas inseridas: %s | Colunas: %s",
+            tabela_qualificada,
+            metodo_limpeza,
+            linhas_inseridas,
+            len(df_stage.columns),
+        )
+    finally:
+        engine.dispose()
 
 
 def executar_sql(nome_etapa: str, sql: str) -> None:
@@ -578,49 +1089,402 @@ def garantir_pasta_escrita(pasta: Path) -> None:
     arquivo_teste.unlink(missing_ok=True)
 
 
-def separar_schema_tabela(nome_completo: str) -> tuple[str, str]:
-    partes = nome_completo.split(".", maxsplit=1)
-    if len(partes) != 2:
-        raise ValueError(
-            f"TABELA_STAGE deve estar no formato schema.tabela. Valor recebido: {nome_completo}"
+
+CAMINHO_DADOS_CONTAINER_RAIZ = Path("/opt/airflow/Dados")
+
+PASTA_SHAREPOINT_OBRIGATORIA_CONTAINER = Path(
+    "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos"
+)
+
+PASTA_CARGA_OBRIGATORIA_CONTAINER = Path(
+    "/opt/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia"
+)
+
+
+def caminho_esta_dentro(caminho: Path, raiz: Path) -> bool:
+    """Retorna True quando caminho está dentro da raiz informada."""
+    try:
+        caminho.resolve().relative_to(raiz.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def detectar_mount_sobreposto_em_dados(caminho: Path) -> Path | None:
+    """Detecta bind mounts sobrepostos dentro de /opt/airflow/Dados.
+
+    Por regra deste DAG, queremos que tudo que a task gere em /opt/airflow/Dados
+    apareça no host em:
+      /root/PythonJobs/pipelines/airflow/Dados
+
+    Portanto, o único mount esperado é a raiz /opt/airflow/Dados. Se existir outro
+    mount mais específico, como:
+      /opt/airflow/Dados/Euromidia/Comercial/CargasSQL
+      /opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos
+
+    então o arquivo vai aparecer em outro lugar do host e o Guilherme não conseguirá
+    acompanhar no caminho combinado.
+    """
+    raiz = CAMINHO_DADOS_CONTAINER_RAIZ.resolve()
+    atual = caminho.resolve()
+
+    if not caminho_esta_dentro(atual, raiz):
+        return None
+
+    partes = []
+    cursor = atual
+    while True:
+        partes.append(cursor)
+        if cursor == raiz or cursor.parent == cursor:
+            break
+        cursor = cursor.parent
+
+    for candidato in reversed(partes):
+        if candidato == raiz:
+            continue
+        try:
+            if candidato.exists() and os.path.ismount(candidato):
+                return candidato
+        except Exception:
+            pass
+
+    return None
+
+
+def validar_caminho_visivel_no_host(caminho: Path, nome_contexto: str) -> None:
+    """Bloqueia caminhos que seriam gravados fora do histórico visível do host."""
+    if not caminho_esta_dentro(caminho, CAMINHO_DADOS_CONTAINER_RAIZ):
+        raise PermissionError(
+            f"{nome_contexto} | caminho fora da raiz obrigatória {CAMINHO_DADOS_CONTAINER_RAIZ}: {caminho}. "
+            "Este DAG foi configurado para gravar apenas em /opt/airflow/Dados, que deve estar montado no host em "
+            "/root/PythonJobs/pipelines/airflow/Dados."
         )
-    return partes[0], partes[1]
+
+    mount_sobreposto = detectar_mount_sobreposto_em_dados(caminho)
+    if mount_sobreposto is not None:
+        raise PermissionError(
+            f"{nome_contexto} | foi detectado um volume/mount sobreposto dentro de /opt/airflow/Dados: {mount_sobreposto}. "
+            "Isso desvia os arquivos para outro caminho do host e impede acompanhar o histórico em "
+            "/root/PythonJobs/pipelines/airflow/Dados. Remova do docker-compose os volumes específicos que montam "
+            "/opt/airflow/Dados/Euromidia/Comercial/CargasSQL ou "
+            "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos. "
+            "Deixe somente o volume raiz: /root/PythonJobs/pipelines/airflow/Dados:/opt/airflow/Dados:rw"
+        )
 
 
-def carregar_dataframe_stage_sql_server(df: pl.DataFrame, tabela_stage: str) -> None:
-    schema_sql, nome_tabela = separar_schema_tabela(tabela_stage)
+def resolver_pasta_gravavel(
+    pasta_preferida: Path,
+    candidatos_fallback: list[Path],
+    nome_contexto: str,
+) -> Path:
+    """Resolve uma pasta gravável SEM fallback invisível.
 
-    df_stage = df.with_columns(
-        [pl.col(col).cast(pl.Utf8, strict=False).alias(col) for col in df.columns]
-    )
+    Regra operacional deste DAG:
+    - Arquivo baixado do SharePoint deve aparecer no host em:
+      /root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos
 
-    df_pandas = df_stage.to_pandas()
-    df_pandas = df_pandas.where(pd.notnull(df_pandas), None)
+    - CSVs técnicos gerados/importados devem aparecer no host em:
+      /root/PythonJobs/pipelines/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia
 
-    engine = obter_engine_sql_server()
+    Por isso, este DAG não pode cair para /home/airflow nem /tmp. Se a pasta correta não
+    estiver montada ou gravável, a task falha com diagnóstico claro.
+    """
+    if nome_contexto == "download_sharepoint_controle_contratos":
+        pasta_obrigatoria = PASTA_SHAREPOINT_OBRIGATORIA_CONTAINER
+    elif nome_contexto == "gerar_csv_controle_contratos":
+        pasta_obrigatoria = PASTA_CARGA_OBRIGATORIA_CONTAINER
+    else:
+        pasta_obrigatoria = Path(pasta_preferida)
+
+    logger.info("%s | pasta obrigatória configurada: %s", nome_contexto, pasta_obrigatoria)
 
     try:
-        with engine.begin() as conn:
-            conn.execute(text(f"TRUNCATE TABLE {tabela_stage}"))
-
-        df_pandas.to_sql(
-            name=nome_tabela,
-            con=engine,
-            schema=schema_sql,
-            if_exists="append",
-            index=False,
-            chunksize=2000,
-            method=None,
-        )
-
+        garantir_pasta_escrita(pasta_obrigatoria)
+        validar_caminho_visivel_no_host(pasta_obrigatoria, nome_contexto)
         logger.info(
-            "Stage %s carregada com sucesso via INSERT em lote. Linhas: %s | Colunas: %s",
-            tabela_stage,
-            len(df_pandas),
-            len(df_pandas.columns),
+            "%s | pasta gravável e visível via volume raiz validada: %s",
+            nome_contexto,
+            pasta_obrigatoria,
         )
-    finally:
-        engine.dispose()
+        return pasta_obrigatoria
+    except Exception as erro:
+        raise PermissionError(
+            f"{nome_contexto} | a pasta obrigatória não está pronta para uso: {pasta_obrigatoria}. "
+            "Corrija o docker-compose/volumes/permissões. O DAG foi bloqueado para não gravar arquivo em pasta invisível. "
+            f"Erro original: {type(erro).__name__}: {erro}"
+        ) from erro
+
+
+# Sem fallbacks invisíveis.
+# Se a pasta correta falhar, a DAG deve falhar para não esconder arquivo em /home/airflow ou /tmp.
+PASTAS_FALLBACK_SHAREPOINT: list[Path] = []
+PASTAS_FALLBACK_CARGA: list[Path] = []
+
+
+def obter_info_arquivo_local(caminho: Path) -> dict[str, Any]:
+    """Retorna metadados simples do arquivo local para logs, auditoria e amostra do plugin."""
+    if not caminho.exists():
+        return {
+            "existe": False,
+            "caminho": str(caminho),
+        }
+
+    stat = caminho.stat()
+    return {
+        "existe": True,
+        "nome": caminho.name,
+        "caminho": str(caminho),
+        "tamanho_bytes": int(stat.st_size),
+        "tamanho_mb": round(stat.st_size / 1024 / 1024, 4),
+        "modificado_em_local": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+    }
+
+
+def executar_comando_sistema(
+    comando: list[str],
+    nome: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Executa comando externo com logs detalhados, preservando stdout/stderr no Airflow."""
+    comando_legivel = shlex.join(comando)
+    logger.info("%s | comando: %s", nome, comando_legivel)
+
+    env_execucao = env if env is not None else os.environ.copy()
+
+    resultado = subprocess.run(
+        comando,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=env_execucao,
+    )
+
+    if resultado.stdout:
+        logger.info("%s | stdout:\n%s", nome, resultado.stdout.strip())
+    else:
+        logger.info("%s | stdout vazio.", nome)
+
+    if resultado.stderr:
+        logger.info("%s | stderr:\n%s", nome, resultado.stderr.strip())
+    else:
+        logger.info("%s | stderr vazio.", nome)
+
+    if resultado.returncode != 0:
+        raise RuntimeError(
+            f"Falha ao executar {nome}. Código: {resultado.returncode}. Comando: {comando_legivel}. "
+            f"STDOUT: {resultado.stdout}. STDERR: {resultado.stderr}"
+        )
+
+    return resultado
+
+
+def descrever_permissao_arquivo(caminho: Path) -> dict[str, Any]:
+    """Retorna informações de permissão sem quebrar a DAG caso o path esteja inacessível."""
+    info: dict[str, Any] = {
+        "caminho": str(caminho),
+        "existe": caminho.exists(),
+        "legivel_usuario_atual": os.access(caminho, os.R_OK),
+        "gravavel_usuario_atual": os.access(caminho, os.W_OK),
+    }
+
+    try:
+        stat_arquivo = caminho.stat()
+        info.update(
+            {
+                "uid": stat_arquivo.st_uid,
+                "gid": stat_arquivo.st_gid,
+                "modo_octal": oct(stat_arquivo.st_mode & 0o777),
+                "tamanho_bytes": int(stat_arquivo.st_size),
+            }
+        )
+    except Exception as erro:
+        info["erro_stat"] = repr(erro)
+
+    return info
+
+
+def obter_contexto_usuario_execucao() -> dict[str, Any]:
+    """Mostra quem está executando a task dentro do container."""
+    contexto: dict[str, Any] = {}
+
+    for nome, funcao in [
+        ("uid", getattr(os, "getuid", None)),
+        ("euid", getattr(os, "geteuid", None)),
+        ("gid", getattr(os, "getgid", None)),
+        ("egid", getattr(os, "getegid", None)),
+    ]:
+        try:
+            contexto[nome] = funcao() if funcao else None
+        except Exception as erro:
+            contexto[nome] = repr(erro)
+
+    try:
+        contexto["groups"] = list(os.getgroups())
+    except Exception as erro:
+        contexto["groups"] = repr(erro)
+
+    contexto["usuario_env"] = os.getenv("USER")
+    contexto["home_env"] = os.getenv("HOME")
+    return contexto
+
+
+def candidatos_rclone_config() -> list[Path]:
+    """Lista os caminhos possíveis do rclone.conf em ordem de preferência."""
+    candidatos: list[Path] = []
+
+    valor_env = os.getenv("RCLONE_CONFIG")
+    if valor_env:
+        candidatos.append(Path(valor_env))
+
+    candidatos.extend(
+        [
+            Path("/opt/airflow/config/rclone/rclone.conf"),
+            Path("/home/airflow/.config/rclone/rclone.conf"),
+            Path("/root/.config/rclone/rclone.conf"),
+        ]
+    )
+
+    unicos: list[Path] = []
+    for candidato in candidatos:
+        if candidato not in unicos:
+            unicos.append(candidato)
+
+    return unicos
+
+
+def resolver_rclone_config_legivel() -> Path:
+    """Resolve um rclone.conf legível.
+
+    Observação importante:
+    - Se o arquivo estiver montado como 600 root:root e a task rodar como uid 1000,
+      nenhum código Python consegue ler esse arquivo sem permissão do Linux.
+    - Esta função não mascara o erro: ela falha antes do rclone com mensagem objetiva,
+      para evitar o ETL seguir lendo arquivo antigo.
+    """
+    contexto_usuario = obter_contexto_usuario_execucao()
+    logger.info(
+        "Contexto do usuário que executa a task: %s",
+        json.dumps(contexto_usuario, ensure_ascii=False, default=str),
+    )
+
+    diagnostico: list[dict[str, Any]] = []
+
+    for candidato in candidatos_rclone_config():
+        info = descrever_permissao_arquivo(candidato)
+        diagnostico.append(info)
+        logger.info("Diagnóstico rclone.conf candidato: %s", json.dumps(info, ensure_ascii=False, default=str))
+
+        if info.get("existe") and info.get("legivel_usuario_atual"):
+            logger.info("rclone.conf legível selecionado: %s", candidato)
+            return candidato
+
+    raise PermissionError(
+        "Nenhum rclone.conf legível foi encontrado para o usuário que executa o Airflow. "
+        "Isso impede baixar o arquivo atualizado do SharePoint e a DAG foi bloqueada para não ler arquivo antigo. "
+        "Diagnóstico: "
+        + json.dumps(diagnostico, ensure_ascii=False, default=str)
+        + " | Correção no host: deixe o arquivo legível pelo grupo do processo do Airflow "
+          "(ex.: chmod 640 /root/.config/rclone/rclone.conf e chown root:0 /root/.config/rclone/rclone.conf) "
+          "ou monte um rclone.conf já legível em /opt/airflow/config/rclone/rclone.conf."
+    )
+
+
+def montar_ambiente_rclone() -> tuple[dict[str, str], Path]:
+    """Monta ambiente explícito para rclone, sempre apontando para um config legível."""
+    rclone_config = resolver_rclone_config_legivel()
+    ambiente = os.environ.copy()
+    ambiente["RCLONE_CONFIG"] = str(rclone_config)
+    return ambiente, rclone_config
+
+
+def montar_comando_rclone(argumentos: list[str], rclone_config: Path) -> list[str]:
+    """Monta comando rclone fixando o config para não depender de HOME ou usuário do container."""
+    return ["rclone", "--config", str(rclone_config), *argumentos]
+
+
+def obter_info_remote_rclone(env_rclone: dict[str, str], rclone_config: Path) -> dict[str, Any]:
+    """Consulta metadados do arquivo remoto antes do download para provar que a origem oficial foi checada."""
+    comando = montar_comando_rclone(
+        [
+            "lsjson",
+            RCLONE_ARQUIVO_ORIGEM,
+            "--stat",
+        ],
+        rclone_config,
+    )
+
+    resultado = executar_comando_sistema(
+        comando,
+        "rclone_lsjson_arquivo_origem_sharepoint",
+        env=env_rclone,
+    )
+
+    if not resultado.stdout.strip():
+        raise FileNotFoundError(
+            f"O rclone não retornou metadados para o arquivo de origem: {RCLONE_ARQUIVO_ORIGEM}"
+        )
+
+    try:
+        dados = json.loads(resultado.stdout)
+    except Exception as erro:
+        raise RuntimeError(
+            "O rclone lsjson retornou saída não parseável como JSON. "
+            f"Saída recebida: {resultado.stdout}"
+        ) from erro
+
+    if isinstance(dados, list):
+        if not dados:
+            raise FileNotFoundError(
+                f"O arquivo de origem não foi encontrado no SharePoint/rclone: {RCLONE_ARQUIVO_ORIGEM}"
+            )
+        dados = dados[0]
+
+    if not isinstance(dados, dict):
+        raise RuntimeError(f"Formato inesperado no retorno do rclone lsjson: {dados!r}")
+
+    return dados
+
+
+def calcular_sha256_arquivo(caminho: Path, bloco_bytes: int = 1024 * 1024) -> str:
+    """Calcula hash SHA256 do arquivo local para auditoria."""
+    sha = hashlib.sha256()
+    with open(caminho, "rb") as arquivo:
+        while True:
+            bloco = arquivo.read(bloco_bytes)
+            if not bloco:
+                break
+            sha.update(bloco)
+    return sha.hexdigest()
+
+
+def montar_amostra_arquivo_baixado(
+    caminho_destino: Path,
+    info_antes: dict[str, Any],
+    info_depois: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Monta amostra pequena para aparecer no painel/plugin de auditoria."""
+    return [
+        {
+            "arquivo": caminho_destino.name,
+            "origem_rclone": RCLONE_ARQUIVO_ORIGEM,
+            "destino_local": str(caminho_destino),
+            "existia_antes": info_antes.get("existe"),
+            "tamanho_antes_mb": info_antes.get("tamanho_mb"),
+            "tamanho_depois_mb": info_depois.get("tamanho_mb"),
+            "modificado_local_depois": info_depois.get("modificado_em_local"),
+        }
+    ]
+
+
+def separar_schema_tabela(nome_completo: str) -> tuple[str, str]:
+    """Compatibilidade com versões antigas.
+
+    Retorna apenas schema e tabela. Para carga da stage, use as funções 3-part acima.
+    """
+    _, schema, tabela = normalizar_partes_tabela_stage(nome_completo)
+    return schema, tabela
+
 
 
 MERGE_CONTRATOS_SQL = r"""
@@ -1667,6 +2531,123 @@ VALUES (
 """
 
 
+def normalizar_valor_json(valor: Any) -> Any:
+    """Converte valores comuns do Airflow para JSON/log sem quebrar a task."""
+    if valor is None:
+        return None
+
+    if isinstance(valor, (datetime, date)):
+        return valor.isoformat()
+
+    try:
+        if hasattr(valor, "isoformat"):
+            return valor.isoformat()
+    except Exception:
+        pass
+
+    if isinstance(valor, dict):
+        return {str(chave): normalizar_valor_json(valor_item) for chave, valor_item in valor.items()}
+
+    if isinstance(valor, (list, tuple, set)):
+        return [normalizar_valor_json(item) for item in valor]
+
+    try:
+        json.dumps(valor)
+        return valor
+    except Exception:
+        return str(valor)
+
+
+def obter_contexto_disparo_dag() -> dict[str, Any]:
+    """Lê o contexto do DagRun, incluindo disparos manuais pela API REST do Airflow.
+
+    O DAG continua funcionando normalmente pelo agendamento. Quando for disparado via API,
+    o payload enviado no campo conf ficará disponível aqui para logs e auditoria.
+    """
+    try:
+        contexto = get_current_context()
+    except Exception as erro:
+        return {
+            "contexto_disponivel": False,
+            "erro_contexto": repr(erro),
+        }
+
+    dag_run = contexto.get("dag_run")
+    task_instance = contexto.get("ti") or contexto.get("task_instance")
+
+    conf = {}
+    if dag_run is not None:
+        conf_original = getattr(dag_run, "conf", None)
+        if isinstance(conf_original, dict):
+            conf = normalizar_valor_json(conf_original)
+
+    run_id = getattr(dag_run, "run_id", None) if dag_run is not None else None
+    run_type = getattr(dag_run, "run_type", None) if dag_run is not None else None
+    logical_date = getattr(dag_run, "logical_date", None) if dag_run is not None else None
+    data_interval_start = contexto.get("data_interval_start")
+    data_interval_end = contexto.get("data_interval_end")
+
+    origem_conf = str(conf.get("origem_disparo") or conf.get("origem") or "").strip().lower()
+    disparado_por_endpoint = origem_conf in {
+        "endpoint",
+        "endpoint_flask",
+        "flask",
+        "api",
+        "api_airflow",
+        "sistema_flask",
+    }
+
+    run_type_texto = str(run_type) if run_type is not None else None
+    disparo_manual_ou_api = bool(
+        disparado_por_endpoint
+        or (run_id and str(run_id).startswith("manual__"))
+        or (run_type_texto and "manual" in run_type_texto.lower())
+    )
+
+    return {
+        "contexto_disponivel": True,
+        "dag_id": DAG_ID,
+        "run_id": run_id,
+        "run_type": run_type_texto,
+        "logical_date": normalizar_valor_json(logical_date),
+        "data_interval_start": normalizar_valor_json(data_interval_start),
+        "data_interval_end": normalizar_valor_json(data_interval_end),
+        "task_id_atual": getattr(task_instance, "task_id", None) if task_instance is not None else None,
+        "try_number_atual": getattr(task_instance, "try_number", None) if task_instance is not None else None,
+        "disparo_manual_ou_api": disparo_manual_ou_api,
+        "disparado_por_endpoint": disparado_por_endpoint,
+        "origem_disparo_conf": origem_conf or None,
+        "conf": conf,
+    }
+
+
+def registrar_log_contexto_disparo(nome_etapa: str) -> dict[str, Any]:
+    """Registra no log a origem da execução atual do DAG."""
+    contexto_disparo = obter_contexto_disparo_dag()
+    logger.info(
+        "%s | CONTEXTO DISPARO DAG: %s",
+        nome_etapa,
+        json.dumps(contexto_disparo, ensure_ascii=False, default=str),
+    )
+    return contexto_disparo
+
+
+def obter_config_api_airflow_sem_segredos() -> dict[str, Any]:
+    """Retorna apenas configurações não sensíveis relacionadas ao disparo via API.
+
+    Não registra usuário nem senha da API nos logs. Essas credenciais devem ser usadas
+    somente pelo sistema externo que chama o Airflow, por exemplo o Flask.
+    """
+    return {
+        "dag_id_ativo": DAG_ID,
+        "dag_id_padrao": DAG_ID_PADRAO,
+        "airflow_dag_controle_contratos_env": os.getenv("AIRFLOW_DAG_CONTROLE_CONTRATOS"),
+        "trigger_controle_contratos_habilitado_env": AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO,
+        "airflow_api_base_url_configurada": bool(AIRFLOW_API_BASE_URL_CONFIGURADA),
+        "airflow_api_timeout_segundos_configurado": AIRFLOW_API_TIMEOUT_SEGUNDOS_CONFIGURADO or None,
+    }
+
+
 def executar_sql_auditado(
     nome_amigavel: str,
     descricao_etapa: str,
@@ -1674,6 +2655,7 @@ def executar_sql_auditado(
     sql_amostra: str | None = None,
     destino_dados: str | None = None,
     origem_dados: str | None = None,
+    ignorar_erro_permissao_execute: bool = False,
 ) -> dict[str, Any]:
     """Executa SQL com auditoria estruturada e amostra opcional."""
     resumo = criar_resumo_auditoria(
@@ -1688,10 +2670,19 @@ def executar_sql_auditado(
     try:
         resumo.status = "RUNNING"
         resumo.metricas_extras["conn_id_sql_server"] = CONN_ID_SQL_SERVER
+        resumo.metricas_extras["possui_sql_amostra"] = bool(sql_amostra)
         publicar_resumo_auditoria(resumo)
+
+        logger.info("=" * 100)
+        logger.info("INÍCIO ETAPA SQL | %s", nome_amigavel)
+        logger.info("Descrição: %s", descricao_etapa)
+        logger.info("Origem: %s | Destino: %s", origem_dados, destino_dados)
+        logger.info("SQL execução - prévia normalizada: %s", " ".join(sql_execucao.split())[:1500])
 
         with engine.begin() as conn:
             conn.exec_driver_sql(sql_execucao)
+
+        logger.info("SQL principal executado com sucesso | etapa=%s", nome_amigavel)
 
         resumo.status = "SUCCESS"
         adicionar_validacao(
@@ -1703,10 +2694,21 @@ def executar_sql_auditado(
 
         amostra = []
         if sql_amostra:
+            logger.info("SQL amostra - prévia normalizada | etapa=%s | sql=%s", nome_amigavel, " ".join(sql_amostra.split())[:1500])
             amostra = consultar_amostra_sql(engine=engine, sql=sql_amostra, limite=5)
             if amostra:
                 definir_amostra(resumo, amostra, limite=10)
+                logger.info(
+                    "Amostra SQL | etapa=%s | linhas=%s:\n%s",
+                    nome_amigavel,
+                    len(amostra),
+                    pd.DataFrame(amostra).to_string(index=False),
+                )
+            else:
+                logger.warning("Amostra SQL vazia | etapa=%s", nome_amigavel)
 
+        logger.info("FIM ETAPA SQL | %s | status=%s", nome_amigavel, resumo.status)
+        logger.info("=" * 100)
         publicar_resumo_auditoria(resumo)
 
         return {
@@ -1714,6 +2716,44 @@ def executar_sql_auditado(
             "amostra": amostra,
         }
     except Exception as erro:
+        mensagem_erro = str(erro)
+
+        erro_permissao_execute = (
+            "EXECUTE permission was denied" in mensagem_erro
+            or "A permissão EXECUTE foi negada" in mensagem_erro
+            or "permissão EXECUTE foi negada" in mensagem_erro
+        )
+
+        if ignorar_erro_permissao_execute and erro_permissao_execute:
+            resumo.status = "SKIPPED"
+            registrar_erro_no_resumo(resumo, erro)
+            adicionar_validacao(
+                resumo,
+                nome="sql_nao_executado_por_permissao",
+                status="warning",
+                detalhe=(
+                    "A etapa SQL foi ignorada porque o usuário da conexão do Airflow não possui "
+                    "permissão EXECUTE no objeto SQL chamado. O pipeline seguirá para as próximas "
+                    "etapas para não bloquear a carga principal."
+                ),
+            )
+            adicionar_observacao(
+                resumo,
+                "Permissão EXECUTE ausente. Corrija no SQL Server com GRANT EXECUTE no objeto "
+                "necessário ou mantenha esta etapa como opcional no DAG.",
+            )
+            logger.warning(
+                "ETAPA SQL IGNORADA POR FALTA DE PERMISSÃO EXECUTE | etapa=%s | erro=%r",
+                nome_amigavel,
+                erro,
+            )
+            publicar_resumo_auditoria(resumo)
+            return {
+                "etapa": nome_amigavel,
+                "status": "SKIPPED_SEM_PERMISSAO_EXECUTE",
+                "erro": mensagem_erro,
+            }
+
         resumo.status = "FAILED"
         registrar_erro_no_resumo(resumo, erro)
         publicar_resumo_auditoria(resumo)
@@ -1728,10 +2768,10 @@ def executar_sql_auditado(
     start_date=pendulum.datetime(2026, 3, 19, 0, 0, tz=FUSO_HORARIO),
     catchup=False,
     max_active_runs=1,
-    tags=["Euromidia", "ETL", "Contratos", "Sharepoint", "SQLServer"],
+    tags=["Euromidia", "ETL", "Controle de Contratos"],
     description=(
-        "Pipeline ETL do controle de contratos da Euromídia. Lê a aba CTR de um arquivo Excel montado "
-        "no container, padroniza datas, números, percentuais, CNPJ e campos textuais, gera identificadores "
+        "Pipeline ETL do controle de contratos da Euromídia. Baixa via rclone a versão mais recente do "
+        "arquivo oficial no SharePoint, lê a aba CTR no container, padroniza datas, números, percentuais, CNPJ e textos, gera identificadores "
         "hash para contratos e prévias ausentes, produz um CSV técnico, recarrega a stage SQL Server via "
         "insert em lote e executa a cadeia de consolidação nas tabelas Silver e ocupação."
     ),
@@ -1747,12 +2787,14 @@ a fragilidade de cargas baseadas em filesystem externo e permissões inconsisten
 
 Por isso, o fluxo foi estruturado para:
 
-1. ler o Excel diretamente no container;
-2. tratar e normalizar os dados com Polars;
-3. gerar um CSV técnico em uma pasta estável do container;
-4. recarregar a tabela stage por insert em lote via SQLAlchemy;
-5. consolidar os fatos e relacionamentos nas tabelas Silver;
-6. atualizar ocupação, dimensões auxiliares e chaves de relacionamento.
+1. baixar do SharePoint, via rclone, a versão oficial mais recente do arquivo Excel;
+2. substituir a cópia local dentro do container no caminho estável do Airflow;
+3. ler o Excel diretamente no container;
+4. tratar e normalizar os dados com pandas/openpyxl;
+5. gerar um CSV técnico em uma pasta estável do container;
+6. recarregar a tabela stage por insert em lote via SQLAlchemy;
+7. consolidar os fatos e relacionamentos nas tabelas Silver;
+8. atualizar ocupação, dimensões auxiliares e chaves de relacionamento.
 
 ---
 
@@ -1772,7 +2814,7 @@ O pipeline existe para transformar uma planilha operacional de contratos em uma 
 
 Arquivo Excel montado no container:
 
-`/opt/airflow/sharepoint_teste/Copia-Controle de Contratos Euromidia.xlsm`
+`/root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm`
 
 Aba lida:
 
@@ -1804,13 +2846,15 @@ Aba lida:
 
 O DAG executa:
 
-- de segunda a sábado
-- às 09:00
-- e às 18:00
+- todos os dias
+- às 08:00
+- às 11:00
+- às 15:00
+- às 18:00
 
 Cron:
 
-`0 9,18 * * 1-6`
+`0 8,11,15,18 * * *`
 
 ---
 
@@ -1845,7 +2889,7 @@ Essa abordagem é mais robusta, mais portátil e mais compatível com execução
 ## Etapas detalhadas do processo
 
 ### 1. Leitura da planilha CTR
-A aba `CTR` é lida com `polars.read_excel`, usando `calamine`, com inferência mínima e schema textual base para garantir maior tolerância a planilhas “sujas”.
+A aba `CTR` é lida com `pandas.read_excel`, usando `openpyxl`, evitando o uso de engine nativa `calamine`/`polars` no parse do DAG.
 
 ### 2. Padronização dos dados
 São tratados:
@@ -1898,6 +2942,17 @@ Por fim:
 
 ---
 
+## Atualização obrigatória do SharePoint
+
+Antes de qualquer carga, a task `baixar_arquivo_sharepoint` executa `rclone copyto` com `--ignore-times` para forçar a cópia da fonte oficial do SharePoint para o caminho local do container.
+
+Destino local padrão:
+`/root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm`
+
+Isso garante que a versão local usada pela DAG seja substituída pela versão oficial mais recente do SharePoint em toda execução.
+
+---
+
 ## Observabilidade e auditoria
 
 Cada task publica auditoria estruturada contendo:
@@ -1921,7 +2976,9 @@ Isso foi feito para que a execução fique legível no painel e não dependa só
 
 ## Premissas operacionais
 
-- O arquivo Excel deve existir no caminho esperado antes da execução.
+- O `rclone` precisa estar instalado dentro do container que executa a task.
+- O remote `sharepoint_basedados:` precisa estar configurado e acessível no container.
+- A DAG baixa o arquivo oficial do SharePoint antes de ler a aba `CTR`.
 - A aba `CTR` precisa existir.
 - A stage deve existir previamente no banco.
 - As tabelas Silver e dimensões relacionadas devem existir.
@@ -1942,8 +2999,249 @@ Isso foi feito para que a execução fique legível no painel e não dependa só
 """,
 )
 def pipeline_controle_contratos_euromidia():
+    @task(task_id="registrar_contexto_disparo")
+    def registrar_contexto_disparo() -> dict[str, Any]:
+        """Registra se a execução veio do agendamento, UI ou API REST do Airflow."""
+        contexto_disparo = registrar_log_contexto_disparo("registrar_contexto_disparo")
+
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Registrar contexto de disparo do DAG",
+            descricao_etapa=(
+                "Registra metadados do DagRun para diferenciar execuções agendadas, manuais, "
+                "via UI e via API REST do Airflow."
+            ),
+            origem_dados="Airflow DagRun context",
+            destino_dados="Logs/Auditoria do pipeline",
+        )
+        resumo.status = "SUCCESS"
+        resumo.metricas_extras["dag_id"] = DAG_ID
+        resumo.metricas_extras["config_api_airflow_sem_segredos"] = obter_config_api_airflow_sem_segredos()
+        resumo.metricas_extras["run_id"] = contexto_disparo.get("run_id")
+        resumo.metricas_extras["run_type"] = contexto_disparo.get("run_type")
+        resumo.metricas_extras["disparo_manual_ou_api"] = contexto_disparo.get("disparo_manual_ou_api")
+        resumo.metricas_extras["disparado_por_endpoint"] = contexto_disparo.get("disparado_por_endpoint")
+        resumo.metricas_extras["origem_disparo_conf"] = contexto_disparo.get("origem_disparo_conf")
+        resumo.metricas_extras["conf"] = contexto_disparo.get("conf")
+        adicionar_validacao(
+            resumo,
+            nome="contexto_disparo_registrado",
+            status="ok",
+            detalhe="Contexto do DagRun registrado com sucesso.",
+        )
+        publicar_resumo_auditoria(resumo)
+
+        return contexto_disparo
+
+    @task(task_id="baixar_arquivo_sharepoint")
+    def baixar_arquivo_sharepoint() -> dict[str, Any]:
+        """Baixa sempre a versão oficial do SharePoint e substitui a cópia local antes do ETL."""
+        pasta_destino = resolver_pasta_gravavel(
+            CAMINHO_ARQUIVO_EXCEL.parent,
+            PASTAS_FALLBACK_SHAREPOINT,
+            "download_sharepoint_controle_contratos",
+        )
+        caminho_destino = pasta_destino / NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS
+        caminho_temporario = caminho_destino.with_name(caminho_destino.name + ".download.tmp")
+
+        resumo = criar_resumo_auditoria(
+            nome_amigavel="Baixar arquivo atualizado do SharePoint",
+            descricao_etapa=(
+                "Valida o rclone.conf, consulta o arquivo oficial no SharePoint, baixa sempre a versão "
+                "mais recente via rclone copyto --ignore-times, valida o arquivo temporário e substitui "
+                "a cópia local usada pelo ETL."
+            ),
+            origem_dados=RCLONE_ARQUIVO_ORIGEM,
+            destino_dados=str(caminho_destino),
+        )
+
+        try:
+            resumo.status = "RUNNING"
+            resumo.metricas_extras["remote_rclone"] = RCLONE_REMOTE_CONTROLE_CONTRATOS
+            resumo.metricas_extras["pasta_rclone"] = RCLONE_PASTA_CONTROLE_CONTRATOS
+            resumo.metricas_extras["arquivo_rclone_origem"] = RCLONE_ARQUIVO_ORIGEM
+            resumo.metricas_extras["pasta_destino_container"] = str(pasta_destino)
+            resumo.metricas_extras["arquivo_destino_container"] = str(caminho_destino)
+            resumo.metricas_extras["usuario_execucao_container"] = obter_contexto_usuario_execucao()
+            resumo.metricas_extras["contexto_disparo_dag"] = registrar_log_contexto_disparo("baixar_arquivo_sharepoint")
+            publicar_resumo_auditoria(resumo)
+
+            logger.info("=" * 100)
+            logger.info("INÍCIO DOWNLOAD SHAREPOINT VIA RCLONE")
+            logger.info("Origem oficial SharePoint/rclone: %s", RCLONE_ARQUIVO_ORIGEM)
+            logger.info("Destino local no container: %s", caminho_destino)
+            logger.info("Pasta destino local no container: %s", pasta_destino)
+            logger.info("Usuário/container: %s", json.dumps(obter_contexto_usuario_execucao(), ensure_ascii=False, default=str))
+
+            info_antes = obter_info_arquivo_local(caminho_destino)
+            logger.info("Estado local antes do download: %s", json.dumps(info_antes, ensure_ascii=False, default=str))
+
+            if caminho_temporario.exists():
+                logger.warning("Arquivo temporário antigo encontrado e removido: %s", caminho_temporario)
+                caminho_temporario.unlink()
+
+            executar_comando_sistema(["rclone", "version"], "rclone_version")
+
+            env_rclone, caminho_rclone_config = montar_ambiente_rclone()
+            resumo.metricas_extras["rclone_config_utilizado"] = str(caminho_rclone_config)
+            logger.info("RCLONE_CONFIG efetivo usado pela DAG: %s", caminho_rclone_config)
+
+            info_remote = obter_info_remote_rclone(env_rclone, caminho_rclone_config)
+            resumo.metricas_extras["arquivo_remote_sharepoint"] = info_remote
+            logger.info(
+                "Metadados do arquivo remoto SharePoint/rclone: %s",
+                json.dumps(info_remote, ensure_ascii=False, default=str),
+            )
+
+            comando_download = montar_comando_rclone(
+                [
+                    "copyto",
+                    RCLONE_ARQUIVO_ORIGEM,
+                    str(caminho_temporario),
+                    "--ignore-times",
+                    "--log-level",
+                    "INFO",
+                    "--stats",
+                    "10s",
+                    "--retries",
+                    "3",
+                    "--low-level-retries",
+                    "10",
+                ],
+                caminho_rclone_config,
+            )
+            executar_comando_sistema(
+                comando_download,
+                "rclone_copyto_sharepoint_para_tmp",
+                env=env_rclone,
+            )
+
+            info_temporario = obter_info_arquivo_local(caminho_temporario)
+            logger.info("Arquivo temporário baixado: %s", json.dumps(info_temporario, ensure_ascii=False, default=str))
+
+            if not caminho_temporario.exists():
+                raise FileNotFoundError(f"O rclone terminou sem erro, mas o arquivo temporário não foi encontrado: {caminho_temporario}")
+
+            if caminho_temporario.stat().st_size <= 0:
+                raise ValueError(f"O arquivo temporário baixado está vazio: {caminho_temporario}")
+
+            tamanho_remote = info_remote.get("Size")
+            if tamanho_remote is not None:
+                try:
+                    tamanho_remote_int = int(tamanho_remote)
+                    tamanho_tmp_int = int(caminho_temporario.stat().st_size)
+                    if tamanho_remote_int > 0 and tamanho_tmp_int != tamanho_remote_int:
+                        raise ValueError(
+                            "O tamanho do arquivo baixado não bate com o tamanho informado pelo SharePoint/rclone. "
+                            f"remote={tamanho_remote_int} bytes | tmp={tamanho_tmp_int} bytes"
+                        )
+                except ValueError:
+                    raise
+                except Exception as erro:
+                    logger.warning("Não foi possível comparar tamanho remoto/local: %r", erro)
+
+            sha256_tmp = calcular_sha256_arquivo(caminho_temporario)
+
+            # Substituição atômica/local: a cópia oficial baixada vira a versão consumida pela DAG.
+            caminho_temporario.replace(caminho_destino)
+            info_depois = obter_info_arquivo_local(caminho_destino)
+
+            if not caminho_destino.exists() or caminho_destino.stat().st_size <= 0:
+                raise ValueError(f"Arquivo final inválido após substituição: {caminho_destino}")
+
+            sha256_final = calcular_sha256_arquivo(caminho_destino)
+
+            if sha256_final != sha256_tmp:
+                raise ValueError(
+                    "Hash divergente após substituição do arquivo local. "
+                    f"tmp={sha256_tmp} | final={sha256_final}"
+                )
+
+            amostra = montar_amostra_arquivo_baixado(caminho_destino, info_antes, info_depois)
+
+            resumo.status = "SUCCESS"
+            resumo.linhas_lidas = 1
+            resumo.linhas_inseridas = 1
+            resumo.metricas_extras["arquivo_local_antes"] = info_antes
+            resumo.metricas_extras["arquivo_local_depois"] = info_depois
+            resumo.metricas_extras["sha256_arquivo_final"] = sha256_final
+            resumo.metricas_extras["substituiu_arquivo_existente"] = bool(info_antes.get("existe"))
+            definir_amostra(resumo, amostra, limite=10)
+
+            adicionar_validacao(
+                resumo,
+                nome="rclone_config_legivel",
+                status="ok",
+                detalhe=f"O rclone.conf legível usado foi: {caminho_rclone_config}.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="remote_sharepoint_consultado",
+                status="ok",
+                detalhe=(
+                    "A DAG consultou os metadados do arquivo remoto antes de baixar. "
+                    f"Metadados: {json.dumps(info_remote, ensure_ascii=False, default=str)}"
+                ),
+            )
+            adicionar_validacao(
+                resumo,
+                nome="download_rclone_executado",
+                status="ok",
+                detalhe="O rclone copyto foi executado com --ignore-times, forçando baixar a fonte oficial do SharePoint.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="arquivo_local_substituido",
+                status="ok",
+                detalhe=f"O arquivo local usado pela DAG foi substituído em: {caminho_destino}.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="arquivo_final_valido",
+                status="ok",
+                detalhe=f"Arquivo final validado com {info_depois.get('tamanho_mb')} MB e SHA256 {sha256_final}.",
+            )
+            adicionar_observacao(
+                resumo,
+                "Esta etapa roda antes de qualquer leitura do Excel; se o download falhar, as etapas seguintes não leem arquivo antigo.",
+            )
+
+            logger.info("Estado local depois do download: %s", json.dumps(info_depois, ensure_ascii=False, default=str))
+            logger.info("SHA256 arquivo final: %s", sha256_final)
+            logger.info("Amostra do arquivo baixado:\n%s", pd.DataFrame(amostra).to_string(index=False))
+            logger.info("FIM DOWNLOAD SHAREPOINT VIA RCLONE")
+            logger.info("=" * 100)
+            publicar_resumo_auditoria(resumo)
+
+            return {
+                "download_sharepoint_sucesso": True,
+                "arquivo_origem_rclone": RCLONE_ARQUIVO_ORIGEM,
+                "arquivo_remote_sharepoint": info_remote,
+                "rclone_config_utilizado": str(caminho_rclone_config),
+                "caminho_arquivo_local": str(caminho_destino),
+                "pasta_destino_local": str(pasta_destino),
+                "tamanho_mb": info_depois.get("tamanho_mb"),
+                "modificado_em_local": info_depois.get("modificado_em_local"),
+                "sha256_arquivo_final": sha256_final,
+                "substituiu_arquivo_existente": bool(info_antes.get("existe")),
+            }
+        except Exception as erro:
+            resumo.status = "FAILED"
+            registrar_erro_no_resumo(resumo, erro)
+            publicar_resumo_auditoria(resumo)
+            logger.exception(
+                "Falha ao baixar/substituir arquivo do SharePoint via rclone. "
+                "A DAG vai falhar de propósito para não carregar arquivo local desatualizado."
+            )
+            raise
+        finally:
+            if caminho_temporario.exists():
+                try:
+                    caminho_temporario.unlink()
+                except Exception:
+                    logger.warning("Não foi possível remover arquivo temporário: %s", caminho_temporario, exc_info=True)
+
     @task(task_id="gerar_csv_ctr")
-    def gerar_csv_ctr() -> dict[str, Any]:
+    def gerar_csv_ctr(info_download: dict[str, Any]) -> dict[str, Any]:
         resumo = criar_resumo_auditoria(
             nome_amigavel="Gerar CSV técnico do CTR",
             descricao_etapa=(
@@ -1959,168 +3257,103 @@ def pipeline_controle_contratos_euromidia():
             resumo.status = "RUNNING"
             resumo.metricas_extras["nome_aba_excel"] = NOME_ABA_EXCEL
             resumo.metricas_extras["conn_id_sql_server"] = CONN_ID_SQL_SERVER
+            resumo.metricas_extras["info_download_sharepoint"] = info_download
             publicar_resumo_auditoria(resumo)
 
+            if not info_download or not info_download.get("download_sharepoint_sucesso"):
+                raise RuntimeError(
+                    "A geração do CSV foi bloqueada porque a etapa de download do SharePoint "
+                    "não confirmou sucesso. Isso evita ler arquivo local antigo/desatualizado."
+                )
+
+            pasta_carga_efetiva = resolver_pasta_gravavel(
+                PASTA_CARGA_CONTAINER,
+                PASTAS_FALLBACK_CARGA,
+                "gerar_csv_controle_contratos",
+            )
+
+            caminho_excel_encontrado = Path(
+                info_download.get("caminho_arquivo_local") or localizar_caminho_excel_controle_contratos()
+            )
+
+            if not caminho_excel_encontrado.exists():
+                raise FileNotFoundError(f"Arquivo informado pela etapa de download não existe: {caminho_excel_encontrado}")
+
             logger.info("PASTA_SHAREPOINT_CONTAINER: %s", PASTA_SHAREPOINT_CONTAINER)
-            logger.info("CAMINHO_ARQUIVO_EXCEL: %s", CAMINHO_ARQUIVO_EXCEL)
-            logger.info("PASTA_SHAREPOINT_CONTAINER.exists(): %s", PASTA_SHAREPOINT_CONTAINER.exists())
-            logger.info("CAMINHO_ARQUIVO_EXCEL.exists(): %s", CAMINHO_ARQUIVO_EXCEL.exists())
-            logger.info("PASTA_CARGA_CONTAINER: %s", PASTA_CARGA_CONTAINER)
-            logger.info("PASTA_CARGA_CONTAINER.exists(): %s", PASTA_CARGA_CONTAINER.exists())
+            logger.info("CAMINHO_ARQUIVO_EXCEL_CONFIGURADO: %s", CAMINHO_ARQUIVO_EXCEL)
+            logger.info("CAMINHO_EXCEL_ENCONTRADO: %s", caminho_excel_encontrado)
+            logger.info("PASTA_CARGA_CONTAINER_CONFIGURADA: %s", PASTA_CARGA_CONTAINER)
+            logger.info("PASTA_CARGA_EFETIVA: %s", pasta_carga_efetiva)
+            logger.info("PASTA_CARGA_EFETIVA.exists(): %s", pasta_carga_efetiva.exists())
+            logger.info("INFO_ARQUIVO_EXCEL_LOCAL: %s", json.dumps(obter_info_arquivo_local(caminho_excel_encontrado), ensure_ascii=False, default=str))
 
-            garantir_pasta_escrita(PASTA_CARGA_CONTAINER)
+            df_original = ler_aba_ctr_xlsm_pandas(caminho_excel_encontrado)
+            linhas_original = len(df_original)
+            colunas_original = len(df_original.columns)
 
-            lazy = ler_aba_ctr_xlsm_lazy(str(CAMINHO_ARQUIVO_EXCEL))
-            colunas_existentes = set(lazy.collect_schema().names())
-
-            cols_datas = _somente_existentes(
-                [
-                    "DATA DO LANÇAMENTO",
-                    "DATA DE ASSINATURA/RENOVAÇÃO (EMISSÃO)",
-                    "DATA DE INÍCIO PREVISTO",
-                    "DATA DE TÉRMINO PREVISTO",
-                    "DATA DO 1º VENCIMENTO",
-                    "DATA DE CANCELAMENTO",
-                ],
-                colunas_existentes,
+            logger.info(
+                "Excel lido com sucesso. Arquivo: %s | Aba: %s | Linhas: %s | Colunas: %s",
+                caminho_excel_encontrado,
+                NOME_ABA_EXCEL,
+                linhas_original,
+                colunas_original,
             )
+            logger.info("Colunas originais da aba CTR: %s", list(df_original.columns))
+            logger.info("Amostra original da aba CTR antes do tratamento:\n%s", df_original.head(5).to_string(index=False))
 
-            cols_int = _somente_existentes(
-                [
-                    "PONTO",
-                    "TEMPO DE EXPOSIÇÃO [DIAS]",
-                    "Nº DE PARCELAS",
-                ],
-                colunas_existentes,
-            )
-
-            cols_idtri = _somente_existentes(["ID. TRIMESTRE"], colunas_existentes)
-
-            cols_float = _somente_existentes(
-                [
-                    "COTA (Exato)",
-                    "% PERMUTA",
-                    "COTA DE OPORTUNIDADE?",
-                    "% AGÊNCIA",
-                    "% BUREAU",
-                    "% CARTA ACORDO",
-                    "% COMISSÃO VENDEDOR",
-                    "%COMISSÃO COORDENAÇÃO",
-                    "% COMISSÃO GERÊNCIA",
-                ],
-                colunas_existentes,
-            )
-
-            cols_money = _somente_existentes(
-                [
-                    "FATURAMENTO BRUTO MENSAL",
-                    "VALOR PERMUTA",
-                    "FATURAMENTO LÍQ. (- PERMUTA)",
-                    "TOTAL BRUTO DO CONTRATO",
-                    "TOTAL LÍQUIDO DO CONTRATO (-AG, -BR, -CT ACORDO)",
-                    "TOTAL LÍQUIDO DO CONTRATO (- AG, - BR, -VEND, - GER ,-COOR)",
-                    "VALOR DA AGÊNCIA (MENSAL)",
-                    "VALOR BUREAU (MENSAL)",
-                    "VALOR CARTA ACORDO (MENSAL)",
-                    "VALOR OUTRAS COMISSÕES",
-                    "FATURAMENTO LÍQUIDO MENSAL",
-                    "VALOR VENDEDOR",
-                    "VALOR VENDEDOR TOTAL",
-                    "VALOR COORDENADOR",
-                    "VALOR COORDENADOR TOTAL",
-                    "VALOR GERÊNCIA",
-                    "VALOR GERÊNCIA TOTAL",
-                    "FATURAMENTO LÍQUIDO FINAL MENSAL",
-                    "COMISSÃO GERÊNCIA NORDESTE",
-                    "FATURAMENTO",
-                ],
-                colunas_existentes,
-            )
-
-            cols_cnpj = _somente_existentes(
-                [
-                    "CNPJ",
-                    "CNPJ AGÊNCIA",
-                    "CNPJ BUREAU",
-                    "CNPJ INTERMEDIÁRIO",
-                    "CNPJ DA EXIBIDORA (EUROMIDIA)",
-                ],
-                colunas_existentes,
-            )
-
-            exprs = []
-
-            for c in cols_datas:
-                exprs.append(parse_data_br(pl.col(c)).alias(c))
-
-            for c in cols_int:
-                exprs.append(parse_int(pl.col(c)).alias(c))
-
-            for c in cols_idtri:
-                exprs.append(parse_id_trimestre(pl.col(c)).alias(c))
-
-            for c in cols_float:
-                exprs.append(parse_float_br(pl.col(c)).alias(c))
-
-            for c in cols_money:
-                exprs.append(parse_br_money(pl.col(c)).alias(c))
-
-            for c in cols_cnpj:
-                exprs.append(parse_cnpj(pl.col(c)).alias(c))
-
-            if "OBS" in colunas_existentes:
-                exprs.append(_limpar_texto(pl.col("OBS")).alias("OBS"))
-
-            rename_map = {
-                orig: dest
-                for orig, dest in mapeamento_colunas.items()
-                if orig in colunas_existentes
-            }
-
-            lazy_tratado = lazy.with_columns(exprs).rename(rename_map)
-
-            try:
-                df = lazy_tratado.collect(engine="streaming")
-            except Exception:
-                df = lazy_tratado.collect()
-
-            df = aplicar_hash_contrato_e_previa(df)
-            df = garantir_colunas_saida(df)
+            df = tratar_dataframe_ctr_pandas(df_original)
 
             agora = datetime.now()
             data_hora = agora.strftime("%Y%m%d_%H%M%S")
             nome_arquivo_csv = f"df_fatocontrolecontratos_{data_hora}.csv"
 
-            caminho_saida_linux = PASTA_CARGA_CONTAINER / nome_arquivo_csv
+            caminho_saida_linux = pasta_carga_efetiva / nome_arquivo_csv
             caminho_saida_linux.parent.mkdir(parents=True, exist_ok=True)
 
-            csv_texto = df.write_csv(
-                separator=";",
-                decimal_comma=True,
+            df.to_csv(
+                caminho_saida_linux,
+                sep=";",
+                index=False,
+                encoding="utf-8-sig",
+                decimal=",",
                 date_format="%Y-%m-%d",
+                lineterminator="\n",
             )
 
-            with open(caminho_saida_linux, "w", encoding="utf-8-sig", newline="") as arquivo_saida:
-                arquivo_saida.write(csv_texto)
+            ultimo_csv = obter_ultimo_csv_carga(pasta_carga_efetiva)
 
             resumo.status = "SUCCESS"
-            resumo.linhas_lidas = int(df.height)
-            resumo.linhas_inseridas = int(df.height)
+            resumo.linhas_lidas = int(len(df))
+            resumo.linhas_inseridas = int(len(df))
+            resumo.metricas_extras["arquivo_excel_encontrado"] = str(caminho_excel_encontrado)
             resumo.metricas_extras["nome_arquivo_csv"] = nome_arquivo_csv
             resumo.metricas_extras["caminho_csv_linux"] = str(caminho_saida_linux)
-            resumo.metricas_extras["colunas_exportadas"] = int(df.width)
+            resumo.metricas_extras["ultimo_csv_detectado"] = str(ultimo_csv)
+            resumo.metricas_extras["colunas_exportadas"] = int(len(df.columns))
 
+            adicionar_validacao(
+                resumo,
+                nome="arquivo_excel_baixado_do_sharepoint",
+                status="ok",
+                detalhe=f"A etapa anterior baixou/substituiu o arquivo oficial do SharePoint em {caminho_excel_encontrado}.",
+            )
             adicionar_validacao(
                 resumo,
                 nome="arquivo_excel_disponivel",
                 status="ok",
-                detalhe=f"O arquivo Excel foi encontrado em {CAMINHO_ARQUIVO_EXCEL}.",
+                detalhe=f"O arquivo Excel foi encontrado em {caminho_excel_encontrado}.",
             )
             adicionar_validacao(
                 resumo,
                 nome="csv_tecnico_gerado",
                 status="ok",
-                detalhe=f"O CSV técnico foi gerado com {df.height:,} linhas e {df.width:,} colunas.",
+                detalhe=f"O CSV técnico foi gerado com {len(df):,} linhas e {len(df.columns):,} colunas.",
+            )
+            adicionar_validacao(
+                resumo,
+                nome="ultimo_csv_identificado",
+                status="ok",
+                detalhe=f"O último CSV disponível para carga é {ultimo_csv}.",
             )
             adicionar_observacao(
                 resumo,
@@ -2129,7 +3362,7 @@ def pipeline_controle_contratos_euromidia():
 
             definir_amostra(
                 resumo,
-                df_polars_para_amostra(
+                df_para_amostra(
                     df,
                     limite=5,
                     colunas=[
@@ -2150,17 +3383,22 @@ def pipeline_controle_contratos_euromidia():
             )
             publicar_resumo_auditoria(resumo)
 
-            logger.info("Arquivo Excel lido com sucesso: %s", CAMINHO_ARQUIVO_EXCEL)
-            logger.info("Linhas tratadas: %s", df.height)
-            logger.info("Colunas exportadas: %s", df.width)
+            logger.info("Arquivo Excel lido com sucesso: %s", caminho_excel_encontrado)
+            logger.info("Linhas tratadas: %s", len(df))
+            logger.info("Colunas exportadas: %s", len(df.columns))
             logger.info("CSV técnico gerado em: %s", caminho_saida_linux)
-            logger.info("Amostra:\n%s", df.head(5))
+            logger.info("Último CSV detectado para carga: %s", ultimo_csv)
+            logger.info("Amostra:\n%s", df.head(5).to_string(index=False))
 
             return {
                 "nome_arquivo_csv": nome_arquivo_csv,
                 "caminho_csv_linux": str(caminho_saida_linux),
-                "linhas": int(df.height),
-                "colunas": int(df.width),
+                "ultimo_csv_linux": str(ultimo_csv),
+                "pasta_carga": str(pasta_carga_efetiva),
+                "pasta_carga_configurada": str(PASTA_CARGA_CONTAINER),
+                "linhas": int(len(df)),
+                "colunas": int(len(df.columns)),
+                "info_download_sharepoint": info_download,
             }
         except Exception as erro:
             resumo.status = "FAILED"
@@ -2186,44 +3424,58 @@ def pipeline_controle_contratos_euromidia():
             resumo.status = "RUNNING"
             publicar_resumo_auditoria(resumo)
 
+            pasta_carga_efetiva = Path(info_csv.get("pasta_carga") or PASTA_CARGA_CONTAINER)
+            caminho_csv_linux = obter_ultimo_csv_carga(pasta_carga_efetiva)
+            logger.info("PASTA_CARGA_CONFIGURADA: %s", PASTA_CARGA_CONTAINER)
+            logger.info("PASTA_CARGA_EFETIVA_STAGE: %s", pasta_carga_efetiva)
+
             if not caminho_csv_linux.exists():
                 raise FileNotFoundError(f"CSV não encontrado para carga da stage: {caminho_csv_linux}")
 
-            schema_csv = {col: pl.Utf8 for col in ORDEM_COLUNAS_SAIDA}
-
-            df_stage = pl.read_csv(
-                str(caminho_csv_linux),
-                separator=";",
-                encoding="utf8-lossy",
-                infer_schema_length=0,
-                schema_overrides=schema_csv,
-                null_values=["", "null", "None"],
+            df_stage = pd.read_csv(
+                caminho_csv_linux,
+                sep=";",
+                encoding="utf-8-sig",
+                dtype=str,
+                keep_default_na=False,
             )
+
+            df_stage = garantir_colunas_saida(df_stage)
+            df_stage = df_stage.where(df_stage.ne(""), None)
 
             logger.info(
                 "CSV carregado para stage. Arquivo: %s | Linhas: %s | Colunas: %s",
                 caminho_csv_linux,
-                df_stage.height,
-                df_stage.width,
+                len(df_stage),
+                len(df_stage.columns),
             )
+            logger.info("Amostra do CSV relido antes de carregar a stage:\n%s", df_stage.head(5).to_string(index=False))
 
             carregar_dataframe_stage_sql_server(df_stage, TABELA_STAGE)
 
             resumo.status = "SUCCESS"
-            resumo.linhas_lidas = int(df_stage.height)
-            resumo.linhas_inseridas = int(df_stage.height)
+            resumo.linhas_lidas = int(len(df_stage))
+            resumo.linhas_inseridas = int(len(df_stage))
+            resumo.metricas_extras["csv_recebido_da_task_anterior"] = info_csv.get("caminho_csv_linux")
+            resumo.metricas_extras["ultimo_csv_usado_na_stage"] = str(caminho_csv_linux)
 
+            adicionar_validacao(
+                resumo,
+                nome="ultimo_csv_identificado",
+                status="ok",
+                detalhe=f"A stage usou o último CSV gerado na pasta: {caminho_csv_linux}.",
+            )
             adicionar_validacao(
                 resumo,
                 nome="csv_relido_com_sucesso",
                 status="ok",
-                detalhe=f"O CSV técnico foi relido com {df_stage.height:,} linhas.",
+                detalhe=f"O CSV técnico foi relido com {len(df_stage):,} linhas.",
             )
             adicionar_validacao(
                 resumo,
                 nome="stage_recarregada",
                 status="ok",
-                detalhe=f"A tabela {TABELA_STAGE} foi truncada e recarregada com sucesso.",
+                detalhe=f"A tabela {TABELA_STAGE} foi criada/validada, limpa e recarregada com sucesso.",
             )
             adicionar_observacao(
                 resumo,
@@ -2232,7 +3484,7 @@ def pipeline_controle_contratos_euromidia():
 
             definir_amostra(
                 resumo,
-                df_polars_para_amostra(
+                df_para_amostra(
                     df_stage,
                     limite=5,
                     colunas=[
@@ -2253,7 +3505,8 @@ def pipeline_controle_contratos_euromidia():
 
             return {
                 "tabela_stage": TABELA_STAGE,
-                "linhas_stage": int(df_stage.height),
+                "linhas_stage": int(len(df_stage)),
+                "csv_usado": str(caminho_csv_linux),
             }
         except Exception as erro:
             resumo.status = "FAILED"
@@ -2460,6 +3713,7 @@ def pipeline_controle_contratos_euromidia():
             """,
             origem_dados="Procedimento Silver.sp_UpsertDimCalendario",
             destino_dados="[Silver].[DimCalendario]",
+            ignorar_erro_permissao_execute=True,
         )
 
     @task(task_id="upsert_ocupacao")
@@ -2493,7 +3747,9 @@ def pipeline_controle_contratos_euromidia():
             destino_dados="[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
         )
 
-    info_csv = gerar_csv_ctr()
+    contexto_disparo = registrar_contexto_disparo()
+    info_download = baixar_arquivo_sharepoint()
+    info_csv = gerar_csv_ctr(info_download)
     stage = carregar_stage(info_csv)
     contratos = merge_contratos()
     itens = merge_itens()
@@ -2505,7 +3761,10 @@ def pipeline_controle_contratos_euromidia():
     calendario = upsert_dim_calendario()
     ocupacao = upsert_ocupacao()
 
-    info_csv >> stage >> contratos >> itens >> fk >> vendedor >> empresa >> painel >> face >> calendario >> ocupacao
+    contexto_disparo >> info_download >> info_csv >> stage >> contratos >> itens >> fk >> vendedor >> empresa >> painel >> face >> calendario >> ocupacao
 
 
 dag = pipeline_controle_contratos_euromidia()
+
+
+

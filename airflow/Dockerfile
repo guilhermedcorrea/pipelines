@@ -1,7 +1,5 @@
 FROM apache/airflow:3.1.8-python3.12
 
-
-
 USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unixodbc \
     unixodbc-dev \
     build-essential \
+    rclone \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
        | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
@@ -26,6 +25,10 @@ COPY --chown=airflow:root requirements.txt /requirements.txt
 
 USER airflow
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir apache-airflow-providers-fab \
-    && pip install --no-cache-dir -r /requirements.txt
+ENV AIRFLOW_VERSION=3.1.8
+ENV PYTHON_VERSION=3.12
+ENV CONSTRAINT_URL=https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir "apache-airflow-providers-fab" --constraint "${CONSTRAINT_URL}" \
+    && python -m pip install --no-cache-dir -r /requirements.txt --constraint "${CONSTRAINT_URL}"

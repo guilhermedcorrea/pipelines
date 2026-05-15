@@ -442,6 +442,21 @@
           </div>
         </form>
 
+        {% if pode_executar_controle_contratos %}
+        <div class="sec"></div>
+
+        <div class="actions-line">
+          <form method="POST" action="{{ url_for('Autenticacao.executar_pipeline_controle_contratos') }}">
+            {% if csrf_token is defined %}
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% endif %}
+            <button type="submit" class="btn btn-primary">
+              Executar Controle de Contratos
+            </button>
+          </form>
+        </div>
+        {% endif %}
+
         <div class="sec"></div>
 
         <div class="table-wrap">

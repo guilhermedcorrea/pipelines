@@ -41,7 +41,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__FAB__NAVBAR_TEXT_HOVER_COLOR: "#ffffff"
 
     TZ: America/Sao_Paulo
-    PYTHONPATH: /opt/airflow:/opt/airflow/src
+    PYTHONPATH: /opt/airflow:/opt/airflow/src:/opt/airflow/plugins:/opt/airflow/dags
     CAMINHO_STATIC_FLASK: /opt/airflow/FlaskApp/app/static
     CAMINHO_BASE_FLASK_APP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp
 
@@ -57,11 +57,17 @@ x-airflow-common: &airflow-common
     SHAREPOINT_BASEDADOS_DIR: "sharepoint_basedados:01- Controle de Contratos"
     SHAREPOINT_BASEDADOS_ARQUIVO_DISPONIBILIDADE: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
     CAMINHO_LOCAL_SHAREPOINT_BASEDADOS: /opt/airflow/Dados/SharePoint/BaseDados
+    PASTA_BASE_DADOS_CONTRATOS_CONTAINER: "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos"
+    CAMINHO_CONTROLE_CONTRATOS_XLSM: "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/queries:/opt/airflow/queries
-    - ./airflow/Dados:/opt/airflow/Dados
+    - /root/PythonJobs/pipelines/airflow/Dados:/opt/airflow/Dados:rw
+    # IMPORTANTE:
+    # Não monte uma pasta específica por cima de /opt/airflow/Dados/SharePoint/...
+    # O DAG grava o arquivo atualizado do SharePoint dentro do volume raiz /opt/airflow/Dados,
+    # que no host aparece em /root/PythonJobs/pipelines/airflow/Dados.
     - ./airflow/Artefatos:/opt/airflow/Artefatos
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
@@ -69,12 +75,14 @@ x-airflow-common: &airflow-common
     # Monta o rclone.conf já configurado no host dentro dos containers do Airflow.
     # No host, o arquivo esperado é: /root/.config/rclone/rclone.conf
     # Como o Airflow roda com grupo 0, deixe o arquivo legível pelo grupo: chmod 640 /root/.config/rclone/rclone.conf
-    - /root/.config/rclone:/opt/airflow/config/rclone:ro
+    - /root/.config/rclone/rclone.conf:/opt/airflow/config/rclone/rclone.conf:ro
     - ./airflow/simple_auth:/opt/airflow/simple_auth
     - ./airflow/src:/opt/airflow/src
     - ./airflow/sharepoint_teste:/opt/airflow/sharepoint_teste
     - ./FlaskApp/app/static:/opt/airflow/FlaskApp/app/static:ro
-    - "/run/desktop/mnt/host/c/CargaSQL/Euromidia/Contratos:/opt/airflow/Dados/Euromidia/Comercial/CargasSQL"
+    # IMPORTANTE:
+    # Não monte /opt/airflow/Dados/Euromidia/Comercial/CargasSQL em outro caminho.
+    # Isso desviaria os CSVs para fora de /root/PythonJobs/pipelines/airflow/Dados.
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin:rw
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis:rw
 
