@@ -36,7 +36,7 @@ def create_app() -> Flask:
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True,
         "pool_recycle": 1800,
-        "pool_size": 40,
+        "pool_size": 10,
         "max_overflow": 20,
         "pool_timeout": 30,
         "connect_args": {
@@ -127,7 +127,7 @@ def create_app() -> Flask:
     from .autenticacao.autenticacao_views import autenticacao_bp
     from .admin.admin_views import admin
     from .kanban.kanban_views import kanban_bp
-    from .admin.estoque_views import estoques_bp
+    #from .admin.estoque_views import estoques_bp
 
     app.register_blueprint(paineis_bp, url_prefix="/paineis")
     app.register_blueprint(autenticacao_bp, url_prefix="/autenticacao")

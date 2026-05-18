@@ -122,18 +122,18 @@ x-flask-common: &flask-common
   command: >
     gunicorn
     --bind 0.0.0.0:8000
-    --workers 1
+    --workers 4
     --worker-class gthread
-    --threads 60
-    --timeout 120
+    --threads 20
+    --timeout 180
     --graceful-timeout 30
-    --keep-alive 10
+    --keep-alive 5
     --access-logfile -
     --error-logfile -
     --log-level info
     --capture-output
     --worker-tmp-dir /dev/shm
-    --max-requests 2000
+    --max-requests 1500
     --max-requests-jitter 200
     wsgi:app
   shm_size: "512mb"
@@ -264,12 +264,12 @@ services:
     restart: unless-stopped
 
   # Instância Flask 1.
-  # Mantém 1 worker para não quebrar Socket.IO, mas usa threads para concorrência.
+  # Usa 4 workers gthread por container. Socket.IO permanece compatível com async_mode=threading e Redis message_queue.
   flask-app-1:
     <<: *flask-common
 
   # Instância Flask 2.
-  # Segunda instância para ganhar capacidade sem usar gunicorn --workers 2 no mesmo container.
+  # Segunda instância Flask com a mesma configuração: 4 workers gthread por container.
   flask-app-2:
     <<: *flask-common
 
