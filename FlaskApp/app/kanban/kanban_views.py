@@ -11796,8 +11796,27 @@ def _validar_reserva_ocupacao_para_card_kanban(
     id_usuario_int = int(id_usuario or _id_usuario() or 0)
     if _usuario_eh_perfil_vendedor_kanban():
         criado_por = int(reserva.get("CriadoPorIDUsuario") or 0)
-        if not id_usuario_int or criado_por != id_usuario_int:
-            raise ValueError("Perfil Vendedor só pode usar reserva criada pelo próprio usuário logado.")
+        id_vendedor_reserva = int(reserva.get("IDVendedor") or 0)
+
+        vendedor_logado = _obter_vendedor_logado_kanban(id_empresa_proprietaria) or {}
+        id_vendedor_logado = int(vendedor_logado.get("IDVendedor") or 0)
+
+        reserva_criada_pelo_usuario_logado = bool(
+            id_usuario_int
+            and criado_por
+            and criado_por == id_usuario_int
+        )
+
+        reserva_do_vendedor_logado = bool(
+            id_vendedor_logado
+            and id_vendedor_reserva
+            and id_vendedor_reserva == id_vendedor_logado
+        )
+
+        if not reserva_criada_pelo_usuario_logado and not reserva_do_vendedor_logado:
+            raise ValueError(
+                "Perfil Vendedor só pode usar reserva vinculada ao próprio vendedor logado."
+            )
 
     if cod_face_esperada not in (None, ""):
         cod_face_reserva = str(reserva.get("CodFace") or "").strip().upper()
@@ -12231,8 +12250,10 @@ def _sincronizar_reservas_painel_faces_kanban(
             item["cod_face"] = str(item.get("cod_face") or reserva.get("CodFace") or "").strip().upper()
             item["cod_ponto"] = item.get("cod_ponto") or reserva.get("CodPonto")
             item["id_painel"] = item.get("id_painel") or reserva.get("IDPainelEuromidia")
-            item["data_inicio"] = item.get("data_inicio") or _normalizar_data_reserva_kanban(reserva.get("DataInicio"))
-            item["data_fim"] = item.get("data_fim") or _normalizar_data_reserva_kanban(reserva.get("DataFim"))
+            # Quando o usuário informa uma reserva existente, a reserva passa a ser a fonte oficial
+            # do período. Isso evita erro quando o bloco do card ainda carrega uma data antiga.
+            item["data_inicio"] = _normalizar_data_reserva_kanban(reserva.get("DataInicio"))
+            item["data_fim"] = _normalizar_data_reserva_kanban(reserva.get("DataFim"))
             item["exibicoes_dia"] = item.get("exibicoes_dia") or reserva.get("Cota")
             ids_reservas_informadas.add(int(id_reserva))
 
@@ -12807,10 +12828,11 @@ def _preparar_vinculos_painel_faces(
             or item.get("DataFimReserva")
         )
 
-        if data_inicio_item is None and reserva_item:
+        if reserva_item:
+            # Se o item veio vinculado a uma reserva existente, o período correto é o da reserva.
+            # O payload do card pode carregar datas antigas do bloco visual; não deixo essas datas
+            # sobrescreverem a reserva que foi digitada/selecionada pelo usuário.
             data_inicio_item = _normalizar_data_reserva_kanban(reserva_item.get("DataInicio"))
-
-        if data_fim_item is None and reserva_item:
             data_fim_item = _normalizar_data_reserva_kanban(reserva_item.get("DataFim"))
 
         if (data_inicio_item is None) ^ (data_fim_item is None):

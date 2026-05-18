@@ -3166,6 +3166,28 @@ def _int_ou_none(valor):
     except Exception:
         return None
 
+def _normalizar_ativo_cancelamento_aprovacao(valor):
+    """
+    Eu garanto que item aprovado entre como ocupação ativa na grade.
+
+    A grade de ocupação filtra FatoControleContratosItensEuromidia.AtivoCancelamento = 'A'.
+    Quando a solicitação vem do Kanban, esse campo pode chegar nulo; se ficar nulo,
+    o item aprovado não aparece na grade depois que a reserva sai de RESERVADO.
+    """
+    texto = str(valor or "").strip().upper()
+
+    if texto in {"C", "CANCELADO", "CANCELADA", "CANCELAMENTO", "I", "INATIVO", "INATIVA", "0", "FALSE", "N", "NAO", "NÃO"}:
+        return "C"
+
+    return "A"
+
+
+def _normalizar_status_item_aprovacao(valor):
+    """Eu preencho Status do item aprovado sem deixar nulo quando veio do Kanban."""
+    texto = str(valor or "").strip()
+    return texto if texto else "ATIVO"
+
+
 
 def _gerar_hash_sha256_hex(*partes) -> str:
     texto_base = '|'.join(_texto_ou_vazio(parte) for parte in partes)
@@ -3792,7 +3814,7 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         "PercentualComissaoGerencia": item_solicitacao.get("PercentualComissaoGerencia"),
         "ValorGerencia": item_solicitacao.get("ValorGerencia"),
         "ValorGerenciaTotal": item_solicitacao.get("ValorGerenciaTotal"),
-        "AtivoCancelamento": item_solicitacao.get("AtivoCancelamento"),
+        "AtivoCancelamento": _normalizar_ativo_cancelamento_aprovacao(item_solicitacao.get("AtivoCancelamento")),
         "FaturamentoLiquidoFinalMensal": item_solicitacao.get("FaturamentoLiquidoFinalMensal"),
         "ComissaoGerenciaNordeste": item_solicitacao.get("ComissaoGerenciaNordeste"),
         "Faturamento": item_solicitacao.get("Faturamento"),
@@ -3802,7 +3824,7 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         "IDPainelEuromidia": item_solicitacao.get("IDPainelEuromidia"),
         "IDDimFacesPaineis": item_solicitacao.get("IDDimFacesPaineis"),
         "DataFimEfetiva": item_solicitacao.get("DataFimEfetiva"),
-        "Status": item_solicitacao.get("Status"),
+        "Status": _normalizar_status_item_aprovacao(item_solicitacao.get("Status")),
         "IDDimCheckinHistorico": item_solicitacao.get("IDDimCheckingHistorico"),
         "IDFatoKanbanCard": item_solicitacao.get("IDFatoKanbanCard"),
         "BitAtivo": item_solicitacao.get("BitAtivo") if item_solicitacao.get("BitAtivo") is not None else 1,
@@ -5413,11 +5435,12 @@ def _efetivar_reservas_card_kanban_admin(
 ) -> int:
     """Efetiva reservas vinculadas ao card quando a solicitação é aprovada.
 
-    Regras aplicadas:
-    - só mexe em reservas não canceladas;
-    - aceita tanto reservas criadas automaticamente pelo Kanban quanto reservas informadas manualmente;
-    - muda Status para ATIVO;
-    - registra Observacao com o texto exigido e o IDFatoKanbanCard.
+    Regra segura:
+    - NÃO usa LIKE com colchetes, porque no SQL Server [] é padrão de busca.
+    - Localiza a reserva pelo IDReserva do card ou pelo texto literal usando CHARINDEX.
+    - Atualiza Status/Origem/Contrato da reserva alvo.
+    - Só altera Observacao quando a observação é técnica da reserva ou está vazia.
+    - Não tenta concatenar em observação comercial grande, evitando erro 2628.
     """
     id_card_int = _int_ou_none(id_card)
     if not id_card_int:
@@ -5426,38 +5449,72 @@ def _efetivar_reservas_card_kanban_admin(
     id_contrato_int = _int_ou_none(id_contrato_controle)
     id_usuario_int = _int_ou_none(id_usuario_logado)
 
+    marcador_reserva = f"[RESERVA_CARD_ATIVO={int(id_card_int)}]"
+    observacao_reserva = f"[RESERVA_CARD_ATIVO={int(id_card_int)}] Reserva informada no Card {int(id_card_int)}."
     observacao_efetivacao = f"Reserva Efetivada pelo Card IDFatoKanbanCard={int(id_card_int)}"
+    marcador_efetivado = f"Reserva Efetivada pelo Card IDFatoKanbanCard={int(id_card_int)}"
 
     resultado = db.session.execute(
         text("""
-            UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
-               SET Status = 'ATIVO',
-                   IDFatoControleContratos = COALESCE(IDFatoControleContratos, :id_contrato_controle),
-                   DataAtualizacao = SYSDATETIME(),
-                   Observacao = CASE
-                       WHEN COALESCE(Observacao, '') LIKE :like_observacao_efetivada THEN Observacao
-                       ELSE CONCAT(
-                           COALESCE(Observacao, ''),
-                           CASE WHEN COALESCE(Observacao, '') = '' THEN '' ELSE ' | ' END,
-                           :observacao_efetivacao
-                       )
+            ;WITH ReservaCard AS (
+                SELECT TOP (1)
+                    TRY_CONVERT(int, c.IDReserva) AS IDReserva
+                FROM [Kanban].[Silver].[FatoKanbanCard] AS c
+                WHERE c.IDFatoKanbanCard = :id_card
+            ),
+            ReservasAlvo AS (
+                SELECT
+                    fo.IDFatoOcupacaoPaineisEuromidia
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS fo
+                WHERE fo.CanceladoEm IS NULL
+                  AND UPPER(LTRIM(RTRIM(COALESCE(fo.Status, '')))) <> 'CANCELADO'
+                  AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM ReservaCard rc
+                            WHERE rc.IDReserva IS NOT NULL
+                              AND rc.IDReserva = fo.IDFatoOcupacaoPaineisEuromidia
+                        )
+                        OR CHARINDEX(:marcador_reserva, COALESCE(fo.Observacao, '')) > 0
+                  )
+            )
+            UPDATE fo
+               SET fo.Status = 'ATIVO',
+                   fo.Origem = CASE
+                       WHEN UPPER(LTRIM(RTRIM(COALESCE(fo.Origem, '')))) = 'RESERVA' THEN 'OCUPACAO'
+                       ELSE fo.Origem
+                   END,
+                   fo.IDFatoControleContratos = COALESCE(fo.IDFatoControleContratos, :id_contrato_controle),
+                   fo.NumeroContrato = COALESCE(NULLIF(LTRIM(RTRIM(fo.NumeroContrato)), ''), ctr.NumeroContrato),
+                   fo.NumeroPrevia = COALESCE(NULLIF(LTRIM(RTRIM(fo.NumeroPrevia)), ''), ctr.NumeroPrevia),
+                   fo.ExpiraEm = NULL,
+                   fo.DataAtualizacao = SYSDATETIME(),
+                   fo.Observacao = CASE
+                       WHEN CHARINDEX(:marcador_efetivado, COALESCE(fo.Observacao, '')) > 0
+                           THEN fo.Observacao
+
+                       WHEN CHARINDEX(:marcador_reserva, COALESCE(fo.Observacao, '')) > 0
+                           THEN CONCAT(fo.Observacao, ' | ', :observacao_efetivacao)
+
+                       WHEN NULLIF(LTRIM(RTRIM(COALESCE(fo.Observacao, ''))), '') IS NULL
+                           THEN CONCAT(:observacao_reserva, ' | ', :observacao_efetivacao)
+
+                       ELSE fo.Observacao
                    END
-             WHERE CanceladoEm IS NULL
-               AND UPPER(LTRIM(RTRIM(COALESCE(Status, '')))) <> 'CANCELADO'
-               AND (
-                    COALESCE(Observacao, '') LIKE :like_reserva_informada
-                    OR COALESCE(Observacao, '') LIKE :like_card_id
-                    OR COALESCE(Observacao, '') LIKE :like_kanban_card
-               );
+              FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS fo
+              INNER JOIN ReservasAlvo AS alvo
+                ON alvo.IDFatoOcupacaoPaineisEuromidia = fo.IDFatoOcupacaoPaineisEuromidia
+              LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+                ON ctr.IDFatoControleContratosEuromidia = :id_contrato_controle;
         """),
         {
+            "id_card": int(id_card_int),
             "id_contrato_controle": id_contrato_int,
             "id_usuario_logado": id_usuario_int,
+            "marcador_reserva": marcador_reserva,
+            "observacao_reserva": observacao_reserva,
             "observacao_efetivacao": observacao_efetivacao,
-            "like_observacao_efetivada": f"%Reserva Efetivada pelo Card%IDFatoKanbanCard={int(id_card_int)}%",
-            "like_reserva_informada": f"%[RESERVA_CARD_ATIVO={int(id_card_int)}]%",
-            "like_card_id": f"%[CARD_ID={int(id_card_int)}]%",
-            "like_kanban_card": f"%[KANBAN_CARD={int(id_card_int)}]%",
+            "marcador_efetivado": marcador_efetivado,
         },
     )
 
@@ -5788,7 +5845,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "PercentualComissaoGerencia": item.get("PercentualComissaoGerencia"),
             "ValorGerencia": item.get("ValorGerencia"),
             "ValorGerenciaTotal": item.get("ValorGerenciaTotal"),
-            "AtivoCancelamento": item.get("AtivoCancelamento"),
+            "AtivoCancelamento": _normalizar_ativo_cancelamento_aprovacao(item.get("AtivoCancelamento")),
             "FaturamentoLiquidoFinalMensal": item.get("FaturamentoLiquidoFinalMensal"),
             "ComissaoGerenciaNordeste": item.get("ComissaoGerenciaNordeste"),
             "Faturamento": item.get("Faturamento"),
@@ -5798,7 +5855,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "IDPainelEuromidia": item.get("IDPainelEuromidia"),
             "IDDimFacesPaineis": item.get("IDDimFacesPaineis"),
             "DataFimEfetiva": item.get("DataFimEfetiva"),
-            "Status": item.get("Status"),
+            "Status": _normalizar_status_item_aprovacao(item.get("Status")),
             "IDDimCheckinHistorico": item.get("IDDimCheckingHistorico"),
             "IDFatoKanbanCard": item.get("IDFatoKanbanCard"),
             "IDDimTipoDocumento": id_dim_tipo_documento_item,

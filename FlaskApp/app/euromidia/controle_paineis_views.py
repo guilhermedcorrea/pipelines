@@ -17700,7 +17700,7 @@ def api_ocupacao_reserva_criar():
             # AGORA: entra em FILA
             sem_capacidade = True
 
-    criado_por = int(getattr(current_user, "id", 0) or 0)
+    criado_por = _id_usuario_logado_carteira()
 
 
 
@@ -18366,7 +18366,7 @@ def ocupacao_cancelar(id_ocupacao: int):
         SELECT @@ROWCOUNT AS LinhasAfetadas;
     """)
 
-    id_usuario = int(getattr(current_user, "id", 0) or 0)
+    id_usuario = _id_usuario_logado_carteira()
 
     try:
         db.session.execute(sql_cancel, {
