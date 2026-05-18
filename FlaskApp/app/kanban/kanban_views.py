@@ -11441,7 +11441,6 @@ def _id_reserva_payload_kanban(item: Mapping[str, Any] | dict[str, Any] | None) 
 
     for chave in (
         "id_reserva",
-        "IDFatoOcupacaoPaineisEuromidia",
         "IDReserva",
         "Reserva",
         "reserva",
@@ -12039,6 +12038,14 @@ def _obter_chave_reserva_card_kanban(cod_face: Any, data_inicio: Any, data_fim: 
 
 
 def _listar_reservas_ativas_do_card_kanban(id_card: int) -> list[dict[str, Any]]:
+    """Lista somente reservas realmente vinculadas a este card.
+
+    Regra crítica:
+    - NUNCA uso apenas Origem = 'KANBAN', porque isso pega reservas de outros cards;
+    - reserva explícita digitada pelo usuário usa [RESERVA_CARD_ATIVO=<id_card>];
+    - reservas antigas criadas pelo bug anterior podem usar [CARD_ID=<id_card>][COD_FACE=...]
+      ou [KANBAN_CARD=<id_card>][COD_FACE=...].
+    """
     sql = text("""
         SELECT
             fo.IDFatoOcupacaoPaineisEuromidia,
@@ -12053,7 +12060,7 @@ def _listar_reservas_ativas_do_card_kanban(id_card: int) -> list[dict[str, Any]]
         WHERE fo.CanceladoEm IS NULL
           AND fo.Status IN ('ATIVO', 'RESERVADO')
           AND (
-                COALESCE(fo.Origem, '') = :origem_card
+                COALESCE(fo.Observacao, '') LIKE :marcador_reserva_informada
                 OR COALESCE(fo.Observacao, '') LIKE :marcador_novo
                 OR COALESCE(fo.Observacao, '') LIKE :marcador_antigo
           )
@@ -12063,7 +12070,7 @@ def _listar_reservas_ativas_do_card_kanban(id_card: int) -> list[dict[str, Any]]
     rows = db.session.execute(
         sql,
         {
-            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
+            "marcador_reserva_informada": f"%{_marcador_reserva_informada_card_kanban(int(id_card))}%",
             "marcador_novo": f"[CARD_ID={int(id_card)}][COD_FACE=%",
             "marcador_antigo": f"[KANBAN_CARD={int(id_card)}][COD_FACE=%",
         },
@@ -12073,13 +12080,14 @@ def _listar_reservas_ativas_do_card_kanban(id_card: int) -> list[dict[str, Any]]
 
 
 def _card_tem_reservas_ativas_kanban(id_card: int) -> bool:
+    """Verifica reserva ativa somente deste card, nunca qualquer Origem='KANBAN'."""
     sql = text("""
         SELECT TOP 1 1
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
         WHERE fo.CanceladoEm IS NULL
           AND fo.Status IN ('ATIVO', 'RESERVADO')
           AND (
-                COALESCE(fo.Origem, '') = :origem_card
+                COALESCE(fo.Observacao, '') LIKE :marcador_reserva_informada
                 OR COALESCE(fo.Observacao, '') LIKE :marcador_novo
                 OR COALESCE(fo.Observacao, '') LIKE :marcador_antigo
           );
@@ -12088,7 +12096,7 @@ def _card_tem_reservas_ativas_kanban(id_card: int) -> bool:
     valor = db.session.execute(
         sql,
         {
-            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
+            "marcador_reserva_informada": f"%{_marcador_reserva_informada_card_kanban(int(id_card))}%",
             "marcador_novo": f"[CARD_ID={int(id_card)}][COD_FACE=%",
             "marcador_antigo": f"[KANBAN_CARD={int(id_card)}][COD_FACE=%",
         },
@@ -12203,6 +12211,14 @@ def _sincronizar_reservas_painel_faces_kanban(
     vinculos_preparados: list[dict[str, Any]] | None = None,
     cancelar_todas: bool = False,
 ) -> dict[str, int]:
+    """Sincroniza somente reservas informadas explicitamente pelo usuário.
+
+    Regra corrigida:
+    - o Kanban NÃO cria reserva automaticamente só porque o card tem painel, face e período;
+    - o backend só busca/valida/vincula reserva quando veio um ID no campo Reserva do formulário;
+    - ID de ocupação encontrado por CodFace/Card não é tratado como reserva digitada;
+    - se o usuário limpar o campo Reserva, o IDReserva do card é limpo.
+    """
     if cancelar_todas:
         canceladas = _cancelar_reservas_card_kanban(
             id_card=int(id_card),
@@ -12217,7 +12233,9 @@ def _sincronizar_reservas_painel_faces_kanban(
         )
         return {
             "criadas": 0,
+            "vinculadas": 0,
             "canceladas": int(canceladas),
+            "desvinculadas": 0,
             "mantidas": 0,
             "id_reserva_card": None,
             "sincronizacao_id_reserva_card": sincronizacao_id_reserva_card,
@@ -12229,51 +12247,51 @@ def _sincronizar_reservas_painel_faces_kanban(
     itens_para_sincronizar = _normalizar_payload_reservas_card_kanban(
         painel_faces_payload if isinstance(painel_faces_payload, list) else vinculos_preparados
     )
-    if not itens_para_sincronizar:
-        itens_para_sincronizar = _normalizar_payload_reservas_card_kanban(_listar_paineis_vinculados_card(int(id_card)))
 
     chaves_desejadas: set[tuple[str, date | None, date | None]] = set()
     ids_reservas_informadas: set[int] = set()
-    itens_validos: list[dict[str, Any]] = []
+
     for item in itens_para_sincronizar:
         id_reserva = _id_reserva_payload_kanban(item)
-
-        if id_reserva:
-            reserva = _validar_reserva_ocupacao_para_card_kanban(
-                id_reserva=int(id_reserva),
-                id_card=int(id_card),
-                id_usuario=int(id_usuario),
-                id_empresa_proprietaria=int(id_empresa_proprietaria),
-                bloquear=False,
-            )
-            item["id_reserva"] = int(id_reserva)
-            item["cod_face"] = str(item.get("cod_face") or reserva.get("CodFace") or "").strip().upper()
-            item["cod_ponto"] = item.get("cod_ponto") or reserva.get("CodPonto")
-            item["id_painel"] = item.get("id_painel") or reserva.get("IDPainelEuromidia")
-            # Quando o usuário informa uma reserva existente, a reserva passa a ser a fonte oficial
-            # do período. Isso evita erro quando o bloco do card ainda carrega uma data antiga.
-            item["data_inicio"] = _normalizar_data_reserva_kanban(reserva.get("DataInicio"))
-            item["data_fim"] = _normalizar_data_reserva_kanban(reserva.get("DataFim"))
-            item["exibicoes_dia"] = item.get("exibicoes_dia") or reserva.get("Cota")
-            ids_reservas_informadas.add(int(id_reserva))
-
-        data_inicio = item.get("data_inicio")
-        data_fim = item.get("data_fim")
-        cod_face = str(item.get("cod_face") or "").strip().upper()
-
-        if not cod_face:
-            continue
-        if data_inicio is None and data_fim is None:
-            continue
-        if data_inicio is None or data_fim is None:
-            raise ValueError("Preencha Data de e Data até para reservar o painel/face.")
-        if data_fim < data_inicio:
-            raise ValueError("A Data até não pode ser menor que a Data de.")
-
-        chave = _obter_chave_reserva_card_kanban(cod_face, data_inicio, data_fim)
         if not id_reserva:
-            chaves_desejadas.add(chave)
-        itens_validos.append(item)
+            # Sem ID informado no input Reserva, não cria e não busca reserva.
+            continue
+
+        reserva = _validar_reserva_ocupacao_para_card_kanban(
+            id_reserva=int(id_reserva),
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            bloquear=False,
+        )
+
+        cod_face_reserva = str(reserva.get("CodFace") or item.get("cod_face") or "").strip().upper()
+        cod_ponto_reserva = item.get("cod_ponto") or reserva.get("CodPonto")
+        data_inicio_reserva = _normalizar_data_reserva_kanban(reserva.get("DataInicio"))
+        data_fim_reserva = _normalizar_data_reserva_kanban(reserva.get("DataFim"))
+
+        _vincular_reserva_existente_kanban(
+            id_card=int(id_card),
+            id_reserva=int(id_reserva),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+            id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+            titulo_card=titulo_card,
+            cod_ponto_esperado=cod_ponto_reserva,
+            cod_face_esperada=cod_face_reserva,
+            data_inicio_esperada=data_inicio_reserva,
+            data_fim_esperada=data_fim_reserva,
+        )
+
+        ids_reservas_informadas.add(int(id_reserva))
+        if cod_face_reserva and data_inicio_reserva and data_fim_reserva:
+            chaves_desejadas.add(
+                _obter_chave_reserva_card_kanban(
+                    cod_face_reserva,
+                    data_inicio_reserva,
+                    data_fim_reserva,
+                )
+            )
 
     reservas_informadas_desvinculadas = _desvincular_reservas_informadas_card_kanban(
         id_card=int(id_card),
@@ -12287,23 +12305,8 @@ def _sincronizar_reservas_painel_faces_kanban(
         motivo=f"[CARD_ID={int(id_card)}] Reserva cancelada por atualização do card.",
     )
 
-    criadas = _criar_reservas_painel_faces_kanban(
-        id_card=int(id_card),
-        titulo_card=titulo_card,
-        id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
-        painel_faces_payload=itens_validos,
-        vinculos_preparados=vinculos_preparados if isinstance(vinculos_preparados, list) and vinculos_preparados else itens_validos,
-        id_usuario=int(id_usuario),
-        id_empresa_proprietaria=int(id_empresa_proprietaria),
-    )
-
     vinculadas = len(ids_reservas_informadas)
     id_reserva_payload_final = min(ids_reservas_informadas) if ids_reservas_informadas else None
-
-    # Fonte oficial do campo Reserva do card:
-    # - se o front enviou painel_faces explicitamente, gravamos o ID informado no input;
-    # - se não enviou payload explícito, preservamos o IDReserva já salvo no card.
-    # Isso evita que uma reserva antiga inferida por CodFace/Observacao sobrescreva o campo IDReserva.
     id_reserva_card_final = id_reserva_payload_final if payload_reservas_explicito else id_reserva_card_atual
     sincronizacao_id_reserva_card = None
 
@@ -12315,15 +12318,14 @@ def _sincronizar_reservas_painel_faces_kanban(
         )
 
     return {
-        "criadas": int(criadas or 0),
+        "criadas": 0,
         "vinculadas": int(vinculadas or 0),
         "canceladas": int(canceladas or 0),
         "desvinculadas": int(reservas_informadas_desvinculadas or 0),
-        "mantidas": int(max(len(chaves_desejadas) - int(criadas or 0), 0)),
+        "mantidas": int(len(chaves_desejadas)),
         "id_reserva_card": int(id_reserva_card_final) if id_reserva_card_final else None,
         "sincronizacao_id_reserva_card": sincronizacao_id_reserva_card,
     }
-
 
 def _obter_capacidade_face_reserva_kanban(cod_face: str) -> dict[str, Any]:
     sql = text("""
@@ -12379,8 +12381,7 @@ def _reserva_kanban_ja_existe(
           AND TRY_CONVERT(date, DataInicio) = :data_inicio
           AND TRY_CONVERT(date, DataFim) = :data_fim
           AND (
-                COALESCE(Origem, '') = :origem_card
-                OR COALESCE(Observacao, '') LIKE :marcador_novo
+                COALESCE(Observacao, '') LIKE :marcador_novo
                 OR COALESCE(Observacao, '') LIKE :marcador_antigo
           )
     """)
@@ -12391,7 +12392,6 @@ def _reserva_kanban_ja_existe(
             "cod_face": str(cod_face or "").strip(),
             "data_inicio": data_inicio,
             "data_fim": data_fim,
-            "origem_card": ORIGEM_RESERVA_CARD_KANBAN,
             "marcador_novo": f"{marcador_novo}%",
             "marcador_antigo": f"{marcador_antigo}%",
         },
@@ -13381,7 +13381,7 @@ def _buscar_ultima_negociacao_preco_card(
             PeriodoInicio,
             PeriodoTermino,
             ObservacoesProposta
-        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco]
+        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] WITH (UPDLOCK, HOLDLOCK)
         WHERE IDFatoKanbanCard = :id_card
           AND IDDimPaineisEuromidia = :id_painel
           AND IDDimFacesPaineis = :id_face
@@ -14607,45 +14607,21 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
                 CONVERT(varchar(10), fo.DataInicio, 23) AS DataInicioReserva,
                 CONVERT(varchar(10), fo.DataFim, 23) AS DataFimReserva
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = UPPER(
-                LTRIM(RTRIM(COALESCE(
-                    NULLIF(r.CodFace, ''),
-                    NULLIF(f_resolvida.CodFace, ''),
-                    ''
-                )))
-            )
+            WHERE TRY_CONVERT(int, fo.IDFatoOcupacaoPaineisEuromidia) = TRY_CONVERT(int, :id_reserva_card)
+              AND UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = UPPER(
+                    LTRIM(RTRIM(COALESCE(
+                        NULLIF(r.CodFace, ''),
+                        NULLIF(f_resolvida.CodFace, ''),
+                        ''
+                    )))
+                  )
               AND fo.CanceladoEm IS NULL
               AND fo.Status IN ('ATIVO', 'RESERVADO')
               AND (fo.ExpiraEm IS NULL OR fo.ExpiraEm > SYSDATETIME())
-              AND (
-                    COALESCE(fo.Origem, '') = :origem_card
-                    OR COALESCE(fo.Observacao, '') LIKE (
-                        '[CARD_ID=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' +
-                        UPPER(LTRIM(RTRIM(COALESCE(NULLIF(r.CodFace, ''), NULLIF(f_resolvida.CodFace, ''), '')))) + ']%'
-                    )
-                    OR COALESCE(fo.Observacao, '') LIKE (
-                        '[KANBAN_CARD=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' +
-                        UPPER(LTRIM(RTRIM(COALESCE(NULLIF(r.CodFace, ''), NULLIF(f_resolvida.CodFace, ''), '')))) + ']%'
-                    )
-                    OR COALESCE(fo.Observacao, '') LIKE (
-                        '%[RESERVA_CARD_ATIVO=' + CONVERT(varchar(20), :id_card) + ']%'
-                    )
-              )
+              AND COALESCE(fo.Observacao, '') LIKE (
+                    '%[RESERVA_CARD_ATIVO=' + CONVERT(varchar(20), :id_card) + ']%'
+                  )
             ORDER BY
-                CASE
-                    WHEN COALESCE(fo.Observacao, '') LIKE (
-                        '%[RESERVA_CARD_ATIVO=' + CONVERT(varchar(20), :id_card) + ']%'
-                    ) THEN 0
-                    WHEN COALESCE(fo.Observacao, '') LIKE (
-                        '[CARD_ID=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' +
-                        UPPER(LTRIM(RTRIM(COALESCE(NULLIF(r.CodFace, ''), NULLIF(f_resolvida.CodFace, ''), '')))) + ']%'
-                    ) THEN 1
-                    WHEN COALESCE(fo.Observacao, '') LIKE (
-                        '[KANBAN_CARD=' + CONVERT(varchar(20), :id_card) + '][COD_FACE=' +
-                        UPPER(LTRIM(RTRIM(COALESCE(NULLIF(r.CodFace, ''), NULLIF(f_resolvida.CodFace, ''), '')))) + ']%'
-                    ) THEN 2
-                    ELSE 3
-                END,
                 fo.DataAtualizacao DESC,
                 fo.CriadoEm DESC,
                 fo.IDFatoOcupacaoPaineisEuromidia DESC
@@ -14732,26 +14708,37 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
             r.IDFatoKanbanCardPainelFace;
     """)
 
+    id_reserva_card = _obter_id_reserva_card_kanban(int(id_card))
+
     rows = db.session.execute(
         sql,
         {
             "id_card": int(id_card),
-            "origem_card": "KANBAN",
+            "id_reserva_card": int(id_reserva_card) if id_reserva_card else None,
         },
     ).mappings().all()
 
     itens = _rows_para_dicts(rows)
 
-    id_reserva_card = _obter_id_reserva_card_kanban(int(id_card))
-    if id_reserva_card:
-        for item in itens:
+    # Regra crítica: não propagar IDReserva do card para os itens de painel/face.
+    # O campo Reserva do front só pode ser preenchido quando o usuário digitar uma reserva
+    # ou quando o próprio item trouxer IDReserva explícito.
+    # IDFatoOcupacaoPaineisEuromidia encontrado por ocupação/calendário não é reserva digitada.
+
+    for item in itens:
+        id_reserva_item = int(item.get("IDFatoOcupacaoPaineisEuromidia") or 0) or None
+        if id_reserva_card and id_reserva_item == int(id_reserva_card):
             item["IDReserva"] = int(id_reserva_card)
             item["id_reserva"] = int(id_reserva_card)
             item["Reserva"] = int(id_reserva_card)
-            item["IDFatoOcupacaoPaineisEuromidia"] = int(id_reserva_card)
-            item["IDReservaOrigemCard"] = int(id_reserva_card)
+            item["ReservaInformadaPeloUsuario"] = True
+        else:
+            item["IDFatoOcupacaoPaineisEuromidia"] = None
+            item["IDReserva"] = None
+            item["id_reserva"] = None
+            item["Reserva"] = None
+            item["ReservaInformadaPeloUsuario"] = False
 
-    for item in itens:
         token_publico = str(item.get("TokenPublicoCheckin") or "").strip()
         if token_publico:
             item["UrlCheckinPublico"] = f"/paineis/checkin/publico/{token_publico}"
@@ -17741,13 +17728,20 @@ def _negociacao_preco_foi_alterada(
     """
     Decide se houve mudança real na negociação de preço.
 
-    Fundamento:
-    - histórico não deve crescer por reenvio do mesmo payload
-    - comparação decimal precisa ser normalizada para evitar falso positivo por formato
-    - o período também faz parte da assinatura, porque agora ele é requisito de negócio
-    - porém os campos de período ficam opcionais aqui para manter compatibilidade
-      com chamadas antigas que ainda não foram atualizadas
+    Correção importante:
+    - o SQL Server/coluna pode gravar margem arredondada, exemplo: 22.53;
+    - o Python pode recalcular a mesma margem como 22.527356...;
+    - se eu comparar com 4 casas decimais, o sistema acha que mudou e insere histórico duplicado;
+    - por isso eu comparo preço/custo/margem/desconto com tolerância operacional.
+
+    Resultado prático:
+    - reenviar o mesmo payload não cria nova linha;
+    - pequena diferença de arredondamento não cria histórico falso;
+    - mudança real de preço, custo, desconto ou período continua criando histórico.
     """
+
+    if not ultima:
+        return True
 
     def normalizar_int(valor: Any) -> int | None:
         if valor in (None, ""):
@@ -17757,76 +17751,69 @@ def _negociacao_preco_foi_alterada(
         except Exception:
             return None
 
-    def normalizar_dec(valor: Any, casas: str = "0.0001") -> Decimal | None:
+    def normalizar_dec(valor: Any) -> Decimal | None:
         dec = _valor_decimal(valor)
         if dec is None:
             return None
-        try:
-            return dec.quantize(Decimal(casas))
-        except Exception:
-            return dec
+        return dec
 
     def normalizar_data(valor: Any) -> date | None:
         return _normalizar_data_reserva_kanban(valor)
 
-    def assinatura_fonte(
+    def mudou_inteiro(valor_atual: Any, valor_anterior: Any) -> bool:
+        return normalizar_int(valor_atual) != normalizar_int(valor_anterior)
+
+    def mudou_data(valor_atual: Any, valor_anterior: Any) -> bool:
+        return normalizar_data(valor_atual) != normalizar_data(valor_anterior)
+
+    def mudou_decimal(
+        valor_atual: Any,
+        valor_anterior: Any,
         *,
-        id_tabela: Any,
-        custo_atual_fonte: Any,
-        preco_atual_fonte: Any,
-        margem_atual_fonte: Any,
-        custo_proposto_fonte: Any,
-        preco_proposto_fonte: Any,
-        margem_proposta_fonte: Any,
-        desconto_proposto_fonte: Any,
-        periodo_inicio_fonte: Any,
-        periodo_termino_fonte: Any,
-    ) -> tuple:
-        return (
-            normalizar_int(id_tabela),
-            normalizar_dec(custo_atual_fonte),
-            normalizar_dec(preco_atual_fonte),
-            normalizar_dec(margem_atual_fonte),
-            normalizar_dec(custo_proposto_fonte),
-            normalizar_dec(preco_proposto_fonte),
-            normalizar_dec(margem_proposta_fonte),
-            normalizar_dec(desconto_proposto_fonte),
-            normalizar_data(periodo_inicio_fonte),
-            normalizar_data(periodo_termino_fonte),
-        )
+        tolerancia: Decimal = Decimal("0.01"),
+    ) -> bool:
+        atual = normalizar_dec(valor_atual)
+        anterior = normalizar_dec(valor_anterior)
 
-    assinatura_atual = assinatura_fonte(
-        id_tabela=id_tabela_preco,
-        custo_atual_fonte=custo_atual,
-        preco_atual_fonte=preco_atual,
-        margem_atual_fonte=margem_atual_percentual,
-        custo_proposto_fonte=custo_proposto,
-        preco_proposto_fonte=preco_proposto,
-        margem_proposta_fonte=margem_proposta_percentual,
-        desconto_proposto_fonte=desconto_proposto,
-        periodo_inicio_fonte=periodo_inicio,
-        periodo_termino_fonte=periodo_termino,
-    )
+        if atual is None and anterior is None:
+            return False
 
-    if not ultima:
+        if atual is None or anterior is None:
+            return True
+
+        return abs(atual - anterior) > tolerancia
+
+    if mudou_inteiro(id_tabela_preco, ultima.get("IDDimTabelaPrecosEuromidia")):
         return True
 
-    assinatura_ultima = assinatura_fonte(
-        id_tabela=ultima.get("IDDimTabelaPrecosEuromidia"),
-        custo_atual_fonte=ultima.get("CustoAtual"),
-        preco_atual_fonte=ultima.get("PrecoAtual"),
-        margem_atual_fonte=ultima.get("MargemAtual"),
-        custo_proposto_fonte=ultima.get("CustoProposto"),
-        preco_proposto_fonte=ultima.get("PrecoProposto"),
-        margem_proposta_fonte=ultima.get("MargemProposta"),
-        desconto_proposto_fonte=ultima.get("DescontoProposto"),
-        periodo_inicio_fonte=ultima.get("PeriodoInicio"),
-        periodo_termino_fonte=ultima.get("PeriodoTermino"),
-    )
+    if mudou_decimal(custo_atual, ultima.get("CustoAtual"), tolerancia=Decimal("0.01")):
+        return True
 
-    return assinatura_atual != assinatura_ultima
+    if mudou_decimal(preco_atual, ultima.get("PrecoAtual"), tolerancia=Decimal("0.01")):
+        return True
 
+    if mudou_decimal(margem_atual_percentual, ultima.get("MargemAtual"), tolerancia=Decimal("0.01")):
+        return True
 
+    if mudou_decimal(custo_proposto, ultima.get("CustoProposto"), tolerancia=Decimal("0.01")):
+        return True
+
+    if mudou_decimal(preco_proposto, ultima.get("PrecoProposto"), tolerancia=Decimal("0.01")):
+        return True
+
+    if mudou_decimal(margem_proposta_percentual, ultima.get("MargemProposta"), tolerancia=Decimal("0.01")):
+        return True
+
+    if mudou_decimal(desconto_proposto, ultima.get("DescontoProposto"), tolerancia=Decimal("0.01")):
+        return True
+
+    if mudou_data(periodo_inicio, ultima.get("PeriodoInicio")):
+        return True
+
+    if mudou_data(periodo_termino, ultima.get("PeriodoTermino")):
+        return True
+
+    return False
 
 
 
@@ -17835,6 +17822,7 @@ def _negociacao_preco_foi_alterada(
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/mover", methods=["POST"])
+
 @login_required
 @limiter.limit("180/minute")
 def api_card_mover(id_card: int):

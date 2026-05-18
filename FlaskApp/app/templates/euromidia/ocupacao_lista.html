@@ -421,30 +421,40 @@
                     {% endif %}
                   </td>
 
-                  <!-- ✅ AÇÕES (dropdown) -->
+                  <!-- ✅ AÇÕES (dropdown)
+                       Regra:
+                       - Admin/Coordenador: aparecem para todas as ocupações.
+                       - Vendedor: aparecem somente quando a ocupação pertence ao IDVendedor dele.
+                  -->
                   <td style="text-align:right;">
-                    <div class="acoes-wrap">
-                      <button type="button"
-                              class="btn-acoes"
-                              data-menu-btn="1"
-                              data-ocupacao-id="{{ it.IDFatoOcupacaoPaineisEuromidia }}">
-                        Ações <span class="caret"></span>
-                      </button>
+                    {% if it.PodeGerenciarOcupacao %}
+                      <div class="acoes-wrap">
+                        <button type="button"
+                                class="btn-acoes"
+                                data-menu-btn="1"
+                                data-ocupacao-id="{{ it.IDFatoOcupacaoPaineisEuromidia }}">
+                          Ações <span class="caret"></span>
+                        </button>
 
-                      <div class="acoes-menu" data-menu="1">
-                        <a class="acoes-item"
-                           href="{{ url_for('Paineis.ocupacao_detalhe', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
-                          <span class="ico">✏️</span>
-                          Alterar Dados
-                        </a>
+                        <div class="acoes-menu" data-menu="1">
+                          <a class="acoes-item"
+                             href="{{ url_for('Paineis.ocupacao_detalhe', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
+                            <span class="ico">✏️</span>
+                            Alterar Dados
+                          </a>
 
-                        <a class="acoes-item danger"
-                           href="{{ url_for('Paineis.ocupacao_cancelar', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
-                          <span class="ico">🗑️</span>
-                          Cancelar Ocupação
-                        </a>
+                          <a class="acoes-item danger"
+                             href="{{ url_for('Paineis.ocupacao_cancelar', id_ocupacao=it.IDFatoOcupacaoPaineisEuromidia) }}">
+                            <span class="ico">🗑️</span>
+                            Cancelar Ocupação
+                          </a>
+                        </div>
                       </div>
-                    </div>
+                    {% else %}
+                      <span class="muted" title="Seu usuário pode visualizar, mas não pode alterar/cancelar ocupação de outro vendedor.">
+                        Somente leitura
+                      </span>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}

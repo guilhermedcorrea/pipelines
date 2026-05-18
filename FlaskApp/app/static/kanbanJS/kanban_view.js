@@ -4189,7 +4189,6 @@ function normalizarCardServidor(card){
 
   const idReservaBruto =
     c.IDReserva ??
-    c.IDFatoOcupacaoPaineisEuromidia ??
     c.id_reserva ??
     c.Reserva ??
     c.reserva ??
@@ -10958,11 +10957,32 @@ function obterIdReservaDeObjeto(valor){
   return idNum(
     valor?.IDReserva ??
     valor?.id_reserva ??
-    valor?.IDFatoOcupacaoPaineisEuromidia ??
     valor?.Reserva ??
     valor?.reserva ??
     0
   ) || null;
+}
+
+function itemTemReservaInformadaPeloUsuarioKanban(item){
+  if (!item || typeof item !== 'object') return false;
+  return item.ReservaInformadaPeloUsuario === true
+    || item.reserva_informada_pelo_usuario === true
+    || item.reservaInformadaPeloUsuario === true;
+}
+
+function limparReservaNaoInformadaPeloUsuarioKanban(item){
+  if (!item || typeof item !== 'object') return item;
+  if (itemTemReservaInformadaPeloUsuarioKanban(item)) return item;
+
+  const limpo = Object.assign({}, item);
+  limpo.IDReserva = null;
+  limpo.id_reserva = null;
+  limpo.Reserva = null;
+  limpo.reserva = null;
+  limpo.IDFatoOcupacaoPaineisEuromidia = null;
+  limpo.ReservaInformadaPeloUsuario = false;
+  limpo.reserva_informada_pelo_usuario = false;
+  return limpo;
 }
 
 function formatarResumoReservaKanban(reserva){
@@ -12404,22 +12424,15 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
     if (!painelFaceLista) return;
     painelFaceLista.innerHTML = '';
 
-    const idReservaCard = idNum(
-      opcoes?.idReservaCard ??
-      opcoes?.IDReserva ??
-      opcoes?.id_reserva ??
-      0
-    ) || null;
-
-    const arrBase = Array.isArray(lista) && lista.length ? lista : [null];
-    const arr = idReservaCard
-      ? arrBase.map((item) => Object.assign({}, item || {}, {
-          IDReserva: idReservaCard,
-          id_reserva: idReservaCard,
-          IDFatoOcupacaoPaineisEuromidia: idReservaCard,
-          Reserva: idReservaCard
-        }))
-      : arrBase;
+    /*
+     * Regra crítica: não injeto IDReserva do card nos blocos de painel/face.
+     * O campo Reserva só pode aparecer preenchido quando vier no próprio item,
+     * ou seja, quando o usuário realmente digitou/selecionou uma reserva.
+     * Isso evita o bug de abrir/mover para a fase 4 e o sistema inventar uma reserva.
+     */
+    const arr = Array.isArray(lista) && lista.length
+      ? lista.map((item) => limparReservaNaoInformadaPeloUsuarioKanban(item))
+      : [null];
 
     arr.forEach(item => painelFaceLista.appendChild(criarPainelFaceItem(item)));
     atualizarTitulosPainelFace();
@@ -15506,7 +15519,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         (Array.isArray(j.painel_faces) && j.painel_faces) ||
         (Array.isArray(j.painelFaces) && j.painelFaces) ||
         [];
-      preencherPainelFacesDoCard(painelFaces, { idReservaCard: cardNormalizado.IDReserva });
+      preencherPainelFacesDoCard(painelFaces);
     }
 
     preencherFormularioSolicitacaoContrato(j?.solicitacao_snapshot_editavel || null, cardNormalizado, j?.vendedor_logado_solicitacao || null);
@@ -15792,7 +15805,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         ordem: idNum(item?.Ordem ?? item?.ordem ?? (indice + 1)),
         id_painel: idNum(item?.IDDimPaineisEuromidia ?? item?.id_painel ?? 0) || null,
         id_face: idNum(item?.IDDimFacesPaineis ?? item?.id_face ?? 0) || null,
-        id_reserva: idNum(item?.IDFatoOcupacaoPaineisEuromidia ?? item?.id_reserva ?? item?.IDReserva ?? item?.Reserva ?? 0) || null,
+        id_reserva: idNum(item?.id_reserva ?? item?.IDReserva ?? item?.Reserva ?? 0) || null,
         cod_ponto: safeStr(item?.CodPonto ?? item?.cod_ponto ?? "").trim(),
         cod_face: safeStr(item?.CodFace ?? item?.cod_face ?? "").trim().toUpperCase(),
         tipo_painel: safeStr(item?.TipoPainel ?? item?.tipo_painel ?? "").trim(),

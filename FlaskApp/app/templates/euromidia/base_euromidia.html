@@ -1080,10 +1080,12 @@ input:disabled, select:disabled, textarea:disabled{
         {% endif %}
         {% if usuario_eh_vendedor_menu %}
           {#
-            Vendedor deve acessar Vencimento Campanhas.
-            O filtro de dados fica no backend: vendedor vê somente contratos/campanhas vinculados a ele.
+            Vendedor pode visualizar a Lista Ocupação.
+            As ações sensíveis de alterar/cancelar devem continuar protegidas no backend,
+            permitindo somente reservas vinculadas ao próprio vendedor.
             Não liberamos Health Check Comercial para perfil VENDEDOR.
           #}
+          {% set menu_paineis_lista_ocupacao = True %}
           {% set menu_paineis_vencimentos_campanhas = True %}
           {% set menu_paineis_preferencia_reservas = True %}
           {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}

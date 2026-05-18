@@ -1523,6 +1523,52 @@ def _resolver_id_vendedor_logado_carteira() -> int:
 
 
 
+
+
+def _converter_id_inteiro_seguro(valor, padrao: int = 0) -> int:
+    """Eu converto IDs vindos do banco para inteiro sem quebrar a request."""
+    try:
+        if valor is None:
+            return padrao
+        return int(valor)
+    except Exception:
+        return padrao
+
+
+def _usuario_logado_pode_gerenciar_ocupacao_por_id_vendedor(id_vendedor_ocupacao) -> bool:
+    """Eu valido se o usuário logado pode alterar/cancelar a ocupação.
+
+    Regra:
+    - Admin pode gerenciar qualquer ocupação.
+    - Coordenador pode gerenciar qualquer ocupação.
+    - Vendedor só pode gerenciar quando a ocupação pertence ao próprio IDVendedor.
+    - Outros perfis não recebem permissão operacional por esta regra.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    if _usuario_logado_tem_acesso_operacional_total_paineis():
+        return True
+
+    if not _usuario_logado_eh_perfil_vendedor():
+        return False
+
+    id_vendedor_logado = _resolver_id_vendedor_logado_carteira()
+    id_vendedor_ocupacao_int = _converter_id_inteiro_seguro(id_vendedor_ocupacao)
+
+    return (
+        id_vendedor_logado > 0
+        and id_vendedor_ocupacao_int > 0
+        and id_vendedor_logado == id_vendedor_ocupacao_int
+    )
+
+
+def _abortar_se_usuario_nao_pode_gerenciar_ocupacao(id_vendedor_ocupacao) -> None:
+    """Eu bloqueio alteração/cancelamento de ocupação de outro vendedor."""
+    if not _usuario_logado_pode_gerenciar_ocupacao_por_id_vendedor(id_vendedor_ocupacao):
+        abort(403)
+
+
 def _resolver_id_fato_carteira_vendedor_logado() -> int:
     """Eu encontro o IDFatoCarteiraVendedor da carteira própria do usuário logado.
 
@@ -17852,6 +17898,7 @@ def api_ocupacao_reserva_criar():
 
 @paineis_bp.route("/ocupacao", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("lista_ocupacao")
 @limiter.limit("80 per minute", methods=["GET"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def lista_ocupacao():
@@ -17883,6 +17930,16 @@ def lista_ocupacao():
 
     filtros_sql = []
     params = {}
+
+    usuario_eh_vendedor_restrito = bool(
+        _usuario_logado_eh_perfil_vendedor()
+        and not _usuario_logado_tem_acesso_operacional_total_paineis()
+    )
+    id_vendedor_logado_ocupacao = (
+        _resolver_id_vendedor_logado_carteira()
+        if usuario_eh_vendedor_restrito
+        else 0
+    )
 
     filtros_sql.append("ftcp.CodFace <> '0' AND ftcp.CodFace IS NOT NULL")
 
@@ -17917,6 +17974,7 @@ def lista_ocupacao():
                 ftcp.DataFim,
                 ftcp.MarcaExibida,
                 ftcp.Cota,
+                ftcp.IDVendedor,
                 ftcp.CriadoEm,
                 ftcp.DataAtualizacao,
                 emp.RazaoSocial,
@@ -17930,6 +17988,7 @@ def lista_ocupacao():
                         ISNULL(CAST(ftcp.DataFim AS date),'1900-01-01'),
                         ISNULL(ftcp.MarcaExibida,''),
                         ISNULL(CAST(ftcp.Cota AS varchar(50)),''),
+                        ISNULL(CAST(ftcp.IDVendedor AS varchar(50)),''),
                         ISNULL(CAST(ftcp.CriadoEm AS datetime2),'1900-01-01')
                     ORDER BY
                         ISNULL(ftcp.DataAtualizacao, ftcp.CriadoEm) DESC,
@@ -17972,6 +18031,7 @@ def lista_ocupacao():
                 ftcp.DataFim,
                 ftcp.MarcaExibida,
                 ftcp.Cota,
+                ftcp.IDVendedor,
                 ftcp.CriadoEm,
                 ftcp.DataAtualizacao,
                 emp.RazaoSocial,
@@ -17985,6 +18045,7 @@ def lista_ocupacao():
                         ISNULL(CAST(ftcp.DataFim AS date),'1900-01-01'),
                         ISNULL(ftcp.MarcaExibida,''),
                         ISNULL(CAST(ftcp.Cota AS varchar(50)),''),
+                        ISNULL(CAST(ftcp.IDVendedor AS varchar(50)),''),
                         ISNULL(CAST(ftcp.CriadoEm AS datetime2),'1900-01-01')
                     ORDER BY
                         ISNULL(ftcp.DataAtualizacao, ftcp.CriadoEm) DESC,
@@ -18019,6 +18080,7 @@ def lista_ocupacao():
             DataFim,
             MarcaExibida,
             Cota,
+            IDVendedor,
             CriadoEm,
             RazaoSocial
         FROM ranked
@@ -18039,8 +18101,10 @@ def lista_ocupacao():
             "DataFim": r[5],
             "MarcaExibida": (r[6] or "").strip(),
             "Cota": r[7],
-            "CriadoEm": r[8],
-            "RazaoSocial": (r[9] or "").strip(),
+            "IDVendedor": _converter_id_inteiro_seguro(r[8]),
+            "CriadoEm": r[9],
+            "RazaoSocial": (r[10] or "").strip(),
+            "PodeGerenciarOcupacao": _usuario_logado_pode_gerenciar_ocupacao_por_id_vendedor(r[8]),
         })
 
     sql_status = text("""
@@ -18064,6 +18128,8 @@ def lista_ocupacao():
         itens=itens,
         status_opcoes=status_opcoes,
         origem_opcoes=origem_opcoes,
+        usuario_eh_vendedor_restrito=usuario_eh_vendedor_restrito,
+        id_vendedor_logado_ocupacao=id_vendedor_logado_ocupacao,
         filtros={
             "q": q,
             "status": status,
@@ -18167,7 +18233,8 @@ def ocupacao_detalhe(id_ocupacao: int):
 
     return render_template(
         "euromidia/ocupacao_detalhe.html",
-        detalhe=detalhe
+        detalhe=detalhe,
+        pode_gerenciar_ocupacao=_usuario_logado_pode_gerenciar_ocupacao_por_id_vendedor(detalhe.get("IDVendedor")),
     )
 
 
@@ -18199,6 +18266,7 @@ def ocupacao_editar(id_ocupacao: int):
             ftcp.Observacao,
             ftcp.ExpiraEm,
             ftcp.CanceladoEm,
+            ftcp.IDVendedor,
             emp.RazaoSocial
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ftcp
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
@@ -18228,9 +18296,11 @@ def ocupacao_editar(id_ocupacao: int):
         "Observacao": (r[14] or ""),
         "ExpiraEm": r[15],
         "CanceladoEm": r[16],
-        "RazaoSocial": (r[17] or "").strip(),
+        "IDVendedor": _converter_id_inteiro_seguro(r[17]),
+        "RazaoSocial": (r[18] or "").strip(),
     }
 
+    _abortar_se_usuario_nao_pode_gerenciar_ocupacao(detalhe.get("IDVendedor"))
 
     ja_cancelado = detalhe["CanceladoEm"] is not None
 
@@ -18238,7 +18308,8 @@ def ocupacao_editar(id_ocupacao: int):
         return render_template(
             "euromidia/ocupacao_editar.html",
             detalhe=detalhe,
-            ja_cancelado=ja_cancelado
+            ja_cancelado=ja_cancelado,
+            pode_gerenciar_ocupacao=True
         )
 
    
@@ -18298,7 +18369,8 @@ def ocupacao_cancelar(id_ocupacao: int):
             CodPonto,
             CodFace,
             DataInicio,
-            DataFim
+            DataFim,
+            IDVendedor
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
         WHERE IDFatoOcupacaoPaineisEuromidia = :id
     """)
@@ -18306,16 +18378,19 @@ def ocupacao_cancelar(id_ocupacao: int):
     if not r:
         abort(404)
 
-    ja_cancelado = r[1] is not None
-    if ja_cancelado:
-        flash("Esta ocupação já estava cancelada.", "warning")
-        return redirect(url_for("Paineis.ocupacao_detalhe", id_ocupacao=id_ocupacao))
-
     referencia = r[2]
     cod_ponto = r[3]
     cod_face = r[4]
     data_inicio = r[5]
     data_fim = r[6]
+    id_vendedor_ocupacao = r[7]
+
+    _abortar_se_usuario_nao_pode_gerenciar_ocupacao(id_vendedor_ocupacao)
+
+    ja_cancelado = r[1] is not None
+    if ja_cancelado:
+        flash("Esta ocupação já estava cancelada.", "warning")
+        return redirect(url_for("Paineis.ocupacao_detalhe", id_ocupacao=id_ocupacao))
 
     motivo = (request.form.get("motivo_cancelamento") or "").strip()
 
@@ -18452,6 +18527,8 @@ def ocupacao_alterar_status(id_ocupacao: int):
     marca_exibida = (r[9] or "").strip() if r[9] else None
     vendedor = (r[10] or "").strip() if r[10] else None
     id_vendedor = r[11]
+    _abortar_se_usuario_nao_pode_gerenciar_ocupacao(id_vendedor)
+
     numero_contrato = (r[12] or "").strip() if r[12] else None
     numero_previa = (r[13] or "").strip() if r[13] else None
     cota = r[14]

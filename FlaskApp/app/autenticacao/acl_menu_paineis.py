@@ -377,7 +377,7 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
             or _usuario_tem_permissao("ADMIN_TUDO")
         )
 
-    if usuario_eh_perfil_vendedor() and chave in {"carteiras", "carteira_propria"}:
+    if usuario_eh_perfil_vendedor() and chave in {"carteiras", "carteira_propria", "lista_ocupacao"}:
         return True
 
     if usuario_eh_perfil_vendedor() and chave in ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR:
