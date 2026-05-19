@@ -1185,8 +1185,12 @@ def cadastrar_ocupacao():
        
             info_face = (
                 db.session.query(
-                    DimFacesPaineis.TipoPainel.label("TipoPainel"),
+                    func.coalesce(DimFacesPaineis.Tipo, DimPaineisEuromidia.Tipo).label("TipoPainel"),
                     DimFacesPaineis.IDDimPaineisEuromidia.label("IDDimPaineisEuromidia"),
+                )
+                .outerjoin(
+                    DimPaineisEuromidia,
+                    DimPaineisEuromidia.IDDimPaineisEuromidia == DimFacesPaineis.IDDimPaineisEuromidia,
                 )
                 .filter(
                     DimFacesPaineis.CodPonto == cod_ponto,
@@ -15259,13 +15263,25 @@ def cliente_detalhe(id_empresa: int):
 
 
 
+
 @paineis_bp.route("/exportar_excel", methods=["GET"])
 @limiter.limit("3 per minute", methods=["GET"])
 @login_required
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def exportar_excel_ano():
+    """
+    Eu gero a grade anual em Excel usando a mesma regra visual da tela /paineis/<codponto>/grade.
+
+    Correção importante:
+    - Painel digital NÃO deve ser exportado como uma única linha "988AD".
+    - Painel digital deve ser exportado como slots/linhas virtuais Face01, Face02, ..., FaceNN.
+    - A ocupação deve vir primeiro de FatoControleContratosItensEuromidia.
+    - As reservas devem vir de FatoOcupacaoPaineisEuromidia apenas quando Origem='RESERVA' e Status='RESERVADO'.
+    """
     if _usuario_logado_eh_perfil_vendedor():
         abort(403, description="Perfil Vendedor não tem permissão para exportar Excel.")
+
+    from sqlalchemy import bindparam
 
     try:
         ano = int((request.args.get("ano") or "").strip())
@@ -15277,15 +15293,301 @@ def exportar_excel_ano():
 
     dt_ini_ano = date(ano, 1, 1)
     dt_fim_ano = date(ano, 12, 31)
+    dt_fim_exclusivo = date(ano + 1, 1, 1)
 
-    codpontos = (
-        db.session.query(DimFacesPaineis.CodPonto)
-        .filter(DimFacesPaineis.CodPonto != None)
-        .distinct()
-        .order_by(func.cast(DimFacesPaineis.CodPonto, db.Integer).asc())
-        .all()
-    )
-    codpontos = [r[0] for r in codpontos if r and r[0] is not None]
+    def _texto_excel_seguro(valor) -> str:
+        try:
+            return str(valor or "").strip()
+        except Exception:
+            return ""
+
+    def _inteiro_seguro(valor, padrao: int = 0) -> int:
+        try:
+            if valor in (None, ""):
+                return padrao
+            return int(valor)
+        except Exception:
+            return padrao
+
+    def _data_excel_segura(valor):
+        try:
+            if valor is None:
+                return None
+            if isinstance(valor, datetime):
+                return valor.date()
+            if isinstance(valor, date):
+                return valor
+
+            s = str(valor).strip()
+            if not s:
+                return None
+
+            try:
+                return datetime.strptime(s[:10], "%Y-%m-%d").date()
+            except Exception:
+                pass
+
+            try:
+                return datetime.strptime(s[:10], "%d/%m/%Y").date()
+            except Exception:
+                return None
+        except Exception:
+            return None
+
+    def _span_por_cota_excel(cota_val, span_qtd_val=None, usar_span_qtd_fallback: bool = False) -> int:
+        """
+        Eu traduzo Cota em quantidade de linhas/slots da grade digital.
+
+        Regra usada na tela:
+        - Cota 1080 ocupa 2 slots.
+        - Cota 540 ocupa 1 slot.
+        - Valores antigos 1/2 são mantidos por compatibilidade.
+
+        Correção importante:
+        - SQL Server pode devolver a cota como Decimal, float, "1080.00" ou "1080,00".
+        - Se eu fizer int(str(valor)), "1080.00" quebra e a cota cai errado para 1 slot.
+        """
+        if usar_span_qtd_fallback:
+            try:
+                span_tmp = int(float(str(span_qtd_val or "").strip().replace(",", ".")))
+                if span_tmp > 0:
+                    return span_tmp
+            except Exception:
+                pass
+
+        def _cota_para_int(valor) -> int:
+            if valor in (None, ""):
+                return 0
+
+            if isinstance(valor, Decimal):
+                try:
+                    return int(valor)
+                except Exception:
+                    return int(float(valor))
+
+            if isinstance(valor, (int, float)):
+                try:
+                    return int(round(float(valor)))
+                except Exception:
+                    return 0
+
+            s = str(valor or "").strip()
+            if not s:
+                return 0
+
+            s = s.replace("R$", "").replace(" ", "")
+
+            if "," in s and "." in s:
+                s = s.replace(".", "").replace(",", ".")
+            elif "," in s:
+                s = s.replace(",", ".")
+            elif "." in s:
+                partes = s.split(".")
+                if len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) <= 3:
+                    s = s.replace(".", "")
+
+            try:
+                return int(Decimal(s))
+            except Exception:
+                try:
+                    return int(round(float(s)))
+                except Exception:
+                    return 0
+
+        c = _cota_para_int(cota_val)
+
+        if c == 1080:
+            return 2
+        if c == 540:
+            return 1
+
+        # Compatibilidade com cadastros antigos que gravavam 1/2 no lugar de 1080/540.
+        if c == 1:
+            return 2
+        if c == 2:
+            return 1
+
+        return 1
+
+    def _texto_barra_excel(cota, marca, vendedor, id_reserva=None, eh_reserva=False) -> str:
+        cota_txt = f"Cota {cota}" if cota not in (None, "") else "Cota"
+        marca_txt = _texto_excel_seguro(marca)
+        vend_txt = _texto_excel_seguro(vendedor)
+
+        if eh_reserva and id_reserva not in (None, ""):
+            id_txt = str(id_reserva).strip()
+            if id_txt and not marca_txt.startswith(f"{id_txt} "):
+                marca_txt = f"{id_txt} {marca_txt}".strip()
+
+        if marca_txt and vend_txt:
+            return f"{cota_txt} {marca_txt} - {vend_txt}".strip()
+        if marca_txt:
+            return f"{cota_txt} {marca_txt}".strip()
+        if vend_txt:
+            return f"{cota_txt} - {vend_txt}".strip()
+
+        return cota_txt
+
+    def _intervalos_sobrepoem(di_a, df_a, di_b, df_b) -> bool:
+        if di_a is None or df_a is None or di_b is None or df_b is None:
+            return False
+        return di_a <= df_b and di_b <= df_a
+
+    def _alocar_ocupacoes_digitais_em_slots(
+        itens_base: list[dict],
+        labels_slots: list[str],
+    ) -> dict:
+        """
+        Eu reproduzo o empilhamento visual da grade digital.
+
+        A tela não mostra a face física 988AD como linha.
+        Ela usa a capacidade do painel digital para criar slots virtuais:
+        Face01, Face02, ..., Face16.
+        """
+        ocupacoes_por_slot = {slot: [] for slot in labels_slots}
+
+        if not labels_slots:
+            return ocupacoes_por_slot
+
+        itens_ordenados = sorted(
+            list(itens_base or []),
+            key=lambda x: (
+                x.get("DataInicio") or date(1900, 1, 1),
+                x.get("DataFim") or date(1900, 1, 1),
+                int(x.get("ID") or 0),
+            ),
+        )
+
+        fim_por_slot = {slot: None for slot in labels_slots}
+
+        for item in itens_ordenados:
+            ini = item.get("DataInicio")
+            fim = item.get("DataFim")
+            if ini is None or fim is None:
+                continue
+
+            span = int(item.get("Spans") or 1)
+            if span <= 0:
+                span = 1
+            if span > len(labels_slots):
+                span = len(labels_slots)
+
+            idx_escolhido = None
+
+            for idx in range(0, len(labels_slots) - span + 1):
+                ok = True
+                for off in range(span):
+                    slot = labels_slots[idx + off]
+                    fim_atual = fim_por_slot.get(slot)
+                    if fim_atual is not None and ini <= fim_atual:
+                        ok = False
+                        break
+
+                if ok:
+                    idx_escolhido = idx
+                    break
+
+            conflito_forcado = False
+
+            if idx_escolhido is None:
+                conflito_forcado = True
+
+                melhor_idx = 0
+                melhor_val = None
+
+                for idx in range(0, len(labels_slots) - span + 1):
+                    val = max(
+                        [
+                            (fim_por_slot.get(labels_slots[idx + off]) or date(1900, 1, 1))
+                            for off in range(span)
+                        ]
+                    )
+
+                    if melhor_val is None or val < melhor_val:
+                        melhor_val = val
+                        melhor_idx = idx
+
+                idx_escolhido = melhor_idx
+
+            for off in range(span):
+                slot = labels_slots[idx_escolhido + off]
+
+                fim_atual = fim_por_slot.get(slot)
+                if fim_atual is None or fim > fim_atual:
+                    fim_por_slot[slot] = fim
+
+                item_slot = dict(item)
+                item_slot["SpanAltura"] = span
+                item_slot["SpanOffset"] = off
+                item_slot["SpanInicio"] = (off == 0)
+                item_slot["BitConflito"] = bool(conflito_forcado)
+
+                ocupacoes_por_slot.setdefault(slot, []).append(item_slot)
+
+        # Segunda passada: se dois itens se cruzarem no mesmo slot, marca conflito.
+        for slot, itens_slot in (ocupacoes_por_slot or {}).items():
+            if not itens_slot or len(itens_slot) <= 1:
+                continue
+
+            itens_slot_ordenados = sorted(
+                itens_slot,
+                key=lambda x: (
+                    x.get("DataInicio") or date(1900, 1, 1),
+                    x.get("DataFim") or date(1900, 1, 1),
+                    int(x.get("ID") or 0),
+                    int(x.get("SpanOffset") or 0),
+                ),
+            )
+
+            for i in range(0, len(itens_slot_ordenados)):
+                atual = itens_slot_ordenados[i]
+                for j in range(i + 1, len(itens_slot_ordenados)):
+                    outro = itens_slot_ordenados[j]
+                    if _intervalos_sobrepoem(
+                        atual.get("DataInicio"),
+                        atual.get("DataFim"),
+                        outro.get("DataInicio"),
+                        outro.get("DataFim"),
+                    ):
+                        atual["BitConflito"] = True
+                        outro["BitConflito"] = True
+
+        # No Excel, o texto fica somente no primeiro slot do span, igual à tela evita repetir rótulo.
+        saida = {slot: [] for slot in labels_slots}
+        for slot in labels_slots:
+            for item in ocupacoes_por_slot.get(slot, []):
+                if item.get("SpanInicio", True):
+                    saida[slot].append(item)
+                else:
+                    # Mesmo sem texto, eu preciso pintar a continuação da barra nos outros slots.
+                    cont = dict(item)
+                    cont["TextoSomentePintura"] = True
+                    saida[slot].append(cont)
+
+        return saida
+
+    codpontos_rows = db.session.execute(text("""
+        SELECT
+            p.CodPonto,
+            MIN(TRY_CONVERT(int, p.CodPonto)) AS CodPontoOrdenacao
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p
+        WHERE p.CodPonto IS NOT NULL
+          AND NULLIF(LTRIM(RTRIM(CAST(p.CodPonto AS varchar(50)))), '') IS NOT NULL
+          AND ISNULL(p.BitAtivo, 1) = 1
+          AND EXISTS (
+                SELECT 1
+                FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+                WHERE f.IDDimPaineisEuromidia = p.IDDimPaineisEuromidia
+                  AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+          )
+        GROUP BY p.CodPonto
+        ORDER BY
+            CASE WHEN MIN(TRY_CONVERT(int, p.CodPonto)) IS NULL THEN 1 ELSE 0 END,
+            MIN(TRY_CONVERT(int, p.CodPonto)) ASC,
+            p.CodPonto ASC;
+    """)).mappings().all()
+
+    codpontos = [row.get("CodPonto") for row in codpontos_rows if row.get("CodPonto") is not None]
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -15293,173 +15595,281 @@ def exportar_excel_ano():
     estilos = _excel_estilos_basicos()
 
     for codponto in codpontos:
-        ws = wb.create_sheet(title=_excel_nome_aba(codponto))
+        codponto_txt = _texto_excel_seguro(codponto)
+        if not codponto_txt:
+            continue
 
-       
-        faces_info_raw = (
-            db.session.query(
-                DimFacesPaineis.IDDimPaineisEuromidia,
-                DimFacesPaineis.CodFace,
-                DimFacesPaineis.TipoPainel,
-                DimFacesPaineis.Exibidora,
-                DimFacesPaineis.QuantidadeFaces,
-            )
-            .filter(
-                DimFacesPaineis.CodPonto == codponto,
-                DimFacesPaineis.CodFace != None,
-                DimFacesPaineis.CodFace != "",
-            )
-            .all()
-        )
+        ws = wb.create_sheet(title=_excel_nome_aba(codponto_txt))
+
+        faces_info_raw = db.session.execute(
+            text("""
+                SELECT
+                    f.IDDimFacesPaineis,
+                    f.IDDimPaineisEuromidia,
+                    f.CodFace,
+                    COALESCE(
+                        NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, ''))), ''),
+                        NULLIF(LTRIM(RTRIM(COALESCE(p.Tipo, ''))), '')
+                    ) AS TipoPainel,
+                    p.Exibidora,
+                    p.QuantidadeFaces
+                FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+                INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS p
+                    ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+                WHERE LTRIM(RTRIM(CAST(p.CodPonto AS varchar(50)))) = :codponto_txt
+                  AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+                  AND ISNULL(p.BitAtivo, 1) = 1
+                ORDER BY
+                    f.CodFace ASC,
+                    f.IDDimFacesPaineis ASC;
+            """),
+            {"codponto_txt": codponto_txt},
+        ).mappings().all()
+
+        if not faces_info_raw:
+            ws["A1"] = f"Grade Anual - CodPonto {codponto_txt} ({ano})"
+            ws["A2"] = "Sem faces cadastradas para este painel."
+            continue
 
         tipos_distintos = set()
-        for idpainel, cf, tp, ex, qf in faces_info_raw:
-            tp_up = (tp or "").strip().upper()
+        for row_face in faces_info_raw:
+            tp_up = _texto_excel_seguro(row_face.get("TipoPainel")).upper()
             if tp_up:
                 tipos_distintos.add(tp_up)
 
         tipo_filtro_up = ""
         if len(tipos_distintos) > 1:
+            # Mantém a mesma regra da tela: quando existe digital junto com outra face,
+            # a grade padrão abre o digital.
             if "PAINEL DIGITAL" in tipos_distintos:
                 tipo_filtro_up = "PAINEL DIGITAL"
             else:
                 tipo_filtro_up = sorted(list(tipos_distintos))[0]
         elif len(tipos_distintos) == 1:
             tipo_filtro_up = list(tipos_distintos)[0]
-        else:
-            tipo_filtro_up = ""
 
         faces_info = []
         if tipo_filtro_up:
-            for idpainel, cf, tp, ex, qf in faces_info_raw:
-                tp_up = (tp or "").strip().upper()
+            for row_face in faces_info_raw:
+                tp_up = _texto_excel_seguro(row_face.get("TipoPainel")).upper()
                 if tp_up == tipo_filtro_up:
-                    faces_info.append((idpainel, cf, tp, ex, qf))
+                    faces_info.append(row_face)
         else:
             faces_info = list(faces_info_raw)
 
-        faces = []
+        faces_reais = []
         exibidora = ""
-        idpainel_set = set()
-
-        capacidades_digitais = []
-        capacidades_nao_digitais = []
+        qtd_faces_painel_max = 0
         tipo_prod = ""
 
-        for idpainel, cf, tp, ex, qf in faces_info:
-            cf_norm = (str(cf) or "").strip()
+        for row_face in faces_info:
+            cf_norm = _texto_excel_seguro(row_face.get("CodFace"))
             if not cf_norm:
                 continue
-            faces.append(cf_norm)
+
+            faces_reais.append(cf_norm)
 
             if not exibidora:
-                exibidora = (ex or "")
+                exibidora = _texto_excel_seguro(row_face.get("Exibidora"))
 
-            if idpainel not in (None, ""):
-                try:
-                    idpainel_set.add(int(idpainel))
-                except:
-                    pass
-
-            tp_txt = (tp or "").strip()
-            tp_up = tp_txt.upper()
+            tp_txt = _texto_excel_seguro(row_face.get("TipoPainel"))
             if not tipo_prod and tp_txt:
                 tipo_prod = tp_txt
 
-            qf_int = int(qf) if qf not in (None, "") else 0
-            if tp_up == "PAINEL DIGITAL":
-                if qf_int > 0:
-                    capacidades_digitais.append(qf_int)
-            else:
-                if qf_int > 0:
-                    capacidades_nao_digitais.append(qf_int)
+            qf_int = _inteiro_seguro(row_face.get("QuantidadeFaces"), 0)
+            if qf_int > qtd_faces_painel_max:
+                qtd_faces_painel_max = qf_int
 
-        faces = [f for f in faces if f]
-        faces = sorted(list(dict.fromkeys(faces)))
+        faces_reais = sorted(list(dict.fromkeys([f for f in faces_reais if f])), key=lambda x: x.casefold())
 
         eh_digital = (tipo_filtro_up.strip().upper() == "PAINEL DIGITAL") if tipo_filtro_up else False
 
         if eh_digital:
-            num_faces = sum(capacidades_digitais) if len(capacidades_digitais) > 0 else 0
-            tipo_prod = "PAINEL DIGITAL"
+            num_faces = int(qtd_faces_painel_max or CAPACIDADE_DIGITAL_FIXA or 16)
             if num_faces <= 0:
-                num_faces = 0
+                num_faces = int(CAPACIDADE_DIGITAL_FIXA or 16)
+
+            linhas_grade = [f"Face{n:02d}" for n in range(1, num_faces + 1)]
+            tipo_prod = "PAINEL DIGITAL"
         else:
-            num_faces = max(capacidades_nao_digitais) if len(capacidades_nao_digitais) > 0 else 0
-           
+            num_faces = int(qtd_faces_painel_max or len(faces_reais) or 0)
+            linhas_grade = list(faces_reais)
             if not tipo_prod and tipo_filtro_up:
                 tipo_prod = tipo_filtro_up
 
-       
-        q_oc = (
-            db.session.query(
-                FatoOcupacaoPaineisEuromidia.CodFace,
-                FatoOcupacaoPaineisEuromidia.MarcaExibida,
-                FatoOcupacaoPaineisEuromidia.Loop,
-                FatoOcupacaoPaineisEuromidia.Vendedor,
-                FatoOcupacaoPaineisEuromidia.DataInicio,
-                FatoOcupacaoPaineisEuromidia.DataFim,
-                FatoOcupacaoPaineisEuromidia.TextoOriginal,
-                FatoOcupacaoPaineisEuromidia.IDDimPaineisEuromidia,
-            )
-            .filter(
-                FatoOcupacaoPaineisEuromidia.CodPonto == codponto,
-                FatoOcupacaoPaineisEuromidia.DataInicio <= dt_fim_ano,
-                FatoOcupacaoPaineisEuromidia.DataFim >= dt_ini_ano,
-            )
-            .order_by(
-                FatoOcupacaoPaineisEuromidia.CodFace.asc(),
-                FatoOcupacaoPaineisEuromidia.DataInicio.asc(),
-            )
-        )
+        params_base = {
+            "codponto_txt": codponto_txt,
+            "dt_ini_ano": dt_ini_ano,
+            "dt_fim_ano": dt_fim_ano,
+            "dt_fim_exclusivo": dt_fim_exclusivo,
+        }
 
-        if idpainel_set:
-            q_oc = q_oc.filter(
-                or_(
-                    FatoOcupacaoPaineisEuromidia.IDDimPaineisEuromidia.in_(list(idpainel_set)),
-                    and_(
-                        FatoOcupacaoPaineisEuromidia.IDDimPaineisEuromidia.is_(None),
-                        FatoOcupacaoPaineisEuromidia.CodFace.in_(faces) if faces else True,
-                    ),
-                )
+        binds = []
+        filtro_faces_sql = ""
+
+        if faces_reais:
+            params_base["faces_reais"] = faces_reais
+            binds.append(bindparam("faces_reais", expanding=True))
+            filtro_faces_sql = """
+              AND (
+                    NULLIF(LTRIM(RTRIM(COALESCE(CodFace, ''))), '') IN :faces_reais
+                    OR CodFace IS NULL
+                  )
+            """
+
+        sql_contratos = text(f"""
+            SELECT
+                TRY_CONVERT(int, IDFatoControleContratosItensEuromidia) AS ID,
+                TRY_CONVERT(int, IDFatoControleContratoEuromidia) AS IDFatoControleContratos,
+                LTRIM(RTRIM(COALESCE(CodFace, ''))) AS CodFace,
+                MarcaExibida,
+                Vendedor,
+                TRY_CONVERT(date, DataInicioPrevisto) AS DataInicio,
+                TRY_CONVERT(date, DataTerminoPrevisto) AS DataFim,
+                Cota,
+                NumeroContrato,
+                NumeroPrevia,
+                TRY_CONVERT(int, IDVendedor) AS IDVendedor,
+                CAST(NULL AS int) AS IDReservaOriginal,
+                CAST(NULL AS int) AS SpanQtd,
+                CAST('CONTRATO' AS varchar(20)) AS OrigemItem
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+            WHERE LTRIM(RTRIM(CAST(CodPonto AS varchar(50)))) = :codponto_txt
+              AND AtivoCancelamento = 'A'
+              AND TRY_CONVERT(date, DataInicioPrevisto) < :dt_fim_exclusivo
+              AND TRY_CONVERT(date, DataTerminoPrevisto) >= :dt_ini_ano
+              AND DataInicioPrevisto IS NOT NULL
+              AND DataTerminoPrevisto IS NOT NULL
+              {filtro_faces_sql}
+            ORDER BY
+                CodFace ASC,
+                TRY_CONVERT(date, DataInicioPrevisto) ASC,
+                TRY_CONVERT(date, DataTerminoPrevisto) ASC;
+        """)
+
+        if binds:
+            sql_contratos = sql_contratos.bindparams(*binds)
+
+        rows_contratos = db.session.execute(sql_contratos, params_base).mappings().all()
+
+        sql_reservas = text(f"""
+            SELECT
+                -ABS(TRY_CONVERT(int, IDFatoOcupacaoPaineisEuromidia)) AS ID,
+                TRY_CONVERT(int, IDFatoControleContratos) AS IDFatoControleContratos,
+                LTRIM(RTRIM(COALESCE(CodFace, ''))) AS CodFace,
+                MarcaExibida,
+                Vendedor,
+                TRY_CONVERT(date, DataInicio) AS DataInicio,
+                TRY_CONVERT(date, DataFim) AS DataFim,
+                Cota,
+                NumeroContrato,
+                NumeroPrevia,
+                TRY_CONVERT(int, IDVendedor) AS IDVendedor,
+                TRY_CONVERT(int, IDFatoOcupacaoPaineisEuromidia) AS IDReservaOriginal,
+                TRY_CONVERT(int, SpanQtd) AS SpanQtd,
+                CAST('RESERVA' AS varchar(20)) AS OrigemItem
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+            WHERE LTRIM(RTRIM(CAST(CodPonto AS varchar(50)))) = :codponto_txt
+              AND Origem = 'RESERVA'
+              AND Status = 'RESERVADO'
+              AND CanceladoEm IS NULL
+              AND DataInicio IS NOT NULL
+              AND DataFim IS NOT NULL
+              AND TRY_CONVERT(date, DataInicio) < :dt_fim_exclusivo
+              AND TRY_CONVERT(date, DataFim) >= :dt_ini_ano
+              {filtro_faces_sql}
+            ORDER BY
+                CodFace ASC,
+                TRY_CONVERT(date, DataInicio) ASC,
+                TRY_CONVERT(date, DataFim) ASC;
+        """)
+
+        if binds:
+            sql_reservas = sql_reservas.bindparams(*binds)
+
+        rows_reservas = db.session.execute(sql_reservas, params_base).mappings().all()
+
+        itens_base = []
+
+        for row_item in list(rows_contratos or []) + list(rows_reservas or []):
+            cf = _texto_excel_seguro(row_item.get("CodFace"))
+            if faces_reais and cf and cf not in faces_reais:
+                continue
+
+            di = _data_excel_segura(row_item.get("DataInicio"))
+            df = _data_excel_segura(row_item.get("DataFim"))
+
+            if di is None or df is None:
+                continue
+            if df < dt_ini_ano or di > dt_fim_ano:
+                continue
+            if df < di:
+                continue
+
+            origem_item = _texto_excel_seguro(row_item.get("OrigemItem")).upper() or "CONTRATO"
+            eh_reserva = origem_item == "RESERVA"
+
+            span_qtd = _inteiro_seguro(row_item.get("SpanQtd"), 0)
+            spans = _span_por_cota_excel(
+                row_item.get("Cota"),
+                span_qtd_val=span_qtd,
+                usar_span_qtd_fallback=bool(eh_reserva and span_qtd > 0),
+            )
+
+            texto_barra = _texto_barra_excel(
+                cota=row_item.get("Cota"),
+                marca=row_item.get("MarcaExibida"),
+                vendedor=row_item.get("Vendedor"),
+                id_reserva=row_item.get("IDReservaOriginal"),
+                eh_reserva=eh_reserva,
+            )
+
+            item = {
+                "ID": _inteiro_seguro(row_item.get("ID"), 0),
+                "IDFatoControleContratos": row_item.get("IDFatoControleContratos"),
+                "CodFace": cf,
+                "MarcaExibida": _texto_excel_seguro(row_item.get("MarcaExibida")),
+                "Vendedor": _texto_excel_seguro(row_item.get("Vendedor")),
+                "DataInicio": di,
+                "DataFim": df,
+                "Cota": row_item.get("Cota"),
+                "NumeroContrato": _texto_excel_seguro(row_item.get("NumeroContrato")),
+                "NumeroPrevia": _texto_excel_seguro(row_item.get("NumeroPrevia")),
+                "OrigemItem": origem_item,
+                "EhReserva": eh_reserva,
+                "IDReservaOriginal": row_item.get("IDReservaOriginal"),
+                "Spans": int(spans or 1),
+                "BarraTexto": texto_barra,
+                "BitConflito": False,
+            }
+
+            itens_base.append(item)
+
+        if eh_digital:
+            ocupacoes_por_face = _alocar_ocupacoes_digitais_em_slots(
+                itens_base=itens_base,
+                labels_slots=linhas_grade,
             )
         else:
-            if faces:
-                q_oc = q_oc.filter(FatoOcupacaoPaineisEuromidia.CodFace.in_(faces))
+            ocupacoes_por_face = {f: [] for f in linhas_grade}
 
-        rows_oc = q_oc.all()
+            for item in itens_base:
+                cf = _texto_excel_seguro(item.get("CodFace"))
+                if not cf:
+                    continue
+                ocupacoes_por_face.setdefault(cf, []).append(item)
 
-        ocupacoes_por_face = {f: [] for f in faces}
-        for r in rows_oc:
-            cf = (r.CodFace or "").strip()
-            if not cf:
-                continue
-            if cf not in ocupacoes_por_face:
-                ocupacoes_por_face[cf] = []
-
-            ocupacoes_por_face[cf].append(
-                {
-                    "CodFace": cf,
-                    "MarcaExibida": r.MarcaExibida or "",
-                    "Loop": r.Loop or "",
-                    "Vendedor": r.Vendedor or "",
-                    "DataInicio": r.DataInicio,
-                    "DataFim": r.DataFim,
-                    "TextoOriginal": r.TextoOriginal or "",
-                }
-            )
-
-        _marcar_conflitos_por_face(ocupacoes_por_face)
+            _marcar_conflitos_por_face(ocupacoes_por_face)
 
         _excel_montar_aba_grade_ano(
             ws=ws,
             estilos=estilos,
             ano=ano,
-            codponto=codponto,
+            codponto=codponto_txt,
             tipo_prod=tipo_prod,
             exibidora=exibidora,
             num_faces=num_faces,
-            faces=faces,
+            faces=linhas_grade,
             ocupacoes_por_face=ocupacoes_por_face,
         )
 
@@ -15476,12 +15886,11 @@ def exportar_excel_ano():
     )
 
 
-
 def _excel_nome_aba(codponto):
     r"""
-    Excel tem limite de 31 chars e não pode: : \ / ? * [ ]
+    Excel tem limite de 31 caracteres e não pode: : \ / ? * [ ]
     """
-    s = str(codponto)
+    s = str(codponto or "")
     for ch in [":", "\\", "/", "?", "*", "[", "]"]:
         s = s.replace(ch, "-")
     s = s.strip()
@@ -15494,15 +15903,27 @@ def _excel_nome_aba(codponto):
 
 def _excel_estilos_basicos():
     """
-    Mantém os imports AQUI dentro, para o helper não depender do endpoint.
+    Eu centralizo os estilos da exportação anual.
+
+    Ajuste importante:
+    - A barra da ocupação precisa ficar realmente mesclada e centralizada.
+    - O texto da barra usa quebra automática dentro do intervalo mesclado, em vez de
+      ficar espremido em uma única célula do dia inicial.
+    - A separação visual não depende só da cor: cada barra recebe borda externa forte
+      e cada face mantém uma linha fina de respiro.
     """
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
-    thin = Side(style="thin", color="D1D5DB")
+    thin = Side(style="thin", color="CBD5E1")
+    medium = Side(style="medium", color="1D4ED8")
+
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    border_barra = Border(left=medium, right=medium, top=medium, bottom=medium)
 
     return {
         "border": border,
+        "border_barra": border_barra,
+        "side_barra": medium,
         "font_titulo": Font(bold=True, size=13, color="002884"),
         "font_sub": Font(bold=True, size=10, color="64748B"),
         "font_face": Font(bold=True, size=10, color="002884"),
@@ -15510,23 +15931,24 @@ def _excel_estilos_basicos():
         "font_item": Font(bold=True, size=9, color="0F172A"),
         "al_center": Alignment(horizontal="center", vertical="center", wrap_text=True),
         "al_left": Alignment(horizontal="left", vertical="center", wrap_text=True),
+        "al_barra": Alignment(horizontal="center", vertical="center", wrap_text=True, shrink_to_fit=False),
         "fill_mes": PatternFill("solid", fgColor="FFF3C4"),
         "fill_cab": PatternFill("solid", fgColor="F8FAFC"),
         "fill_fds": PatternFill("solid", fgColor="EEF2F7"),
-        "fill_barra": PatternFill("solid", fgColor="FFB300"),
-        "fill_barra2": PatternFill("solid", fgColor="FFD766"),
+        "fill_vazio": PatternFill("solid", fgColor="FFFFFF"),
+        "fill_contrato": PatternFill("solid", fgColor="DBEAFE"),
+        "fill_contrato_alt_1": PatternFill("solid", fgColor="BFDBFE"),
+        "fill_contrato_alt_2": PatternFill("solid", fgColor="D1FAE5"),
+        "fill_contrato_alt_3": PatternFill("solid", fgColor="EDE9FE"),
+        "fill_contrato_alt_4": PatternFill("solid", fgColor="FEF3C7"),
+        "fill_reserva": PatternFill("solid", fgColor="FDBA74"),
         "fill_conflito": PatternFill("solid", fgColor="FCA5A5"),
     }
 
 
-def _intersecao_mes(di, df, dt_ini_mes, dt_fim_mes):
+def _intersecao_mes_excel(di, df, dt_ini_mes, dt_fim_mes):
     """
-    Recebe:
-      di, df: datas da ocupação
-      dt_ini_mes, dt_fim_mes: limite do mês
-    Retorna:
-      (dia_ini, dia_fim) dentro do mês (inteiros 1..ultimo_dia)
-      ou (None, None) se não intersecta.
+    Retorna a interseção de uma ocupação com o mês atual da grade.
     """
     if di is None or df is None:
         return (None, None)
@@ -15542,8 +15964,6 @@ def _intersecao_mes(di, df, dt_ini_mes, dt_fim_mes):
     return (ini.day, fim.day)
 
 
-
-
 def _excel_montar_aba_grade_ano(
     ws,
     estilos,
@@ -15556,44 +15976,153 @@ def _excel_montar_aba_grade_ano(
     ocupacoes_por_face: dict,
 ):
     """
-    Layout:
-    - Linha 1: Título
-    - Linha 2: Subtítulo (tipo/exibidora/numfaces)
-    - A partir da linha 4: blocos de meses na horizontal
-      Cada bloco: colunas [Face] + dias 1..ultimo_dia
-      Linhas: 1 por face (com "barras" pintadas)
+    Eu desenho a grade anual em Excel.
+
+    Correções visuais aplicadas:
+    - cada ocupação é mesclada no intervalo de datas dela;
+    - o texto fica centralizado na barra;
+    - há uma linha fina de respiro entre as faces para as barras não ficarem coladas;
+    - Cota 1080 ocupa duas faces/slots no painel digital;
+    - a borda da barra é externa, então uma ocupação não parece colada na outra.
     """
     import calendar
     from datetime import date
+    from openpyxl.styles import Border
     from openpyxl.utils import get_column_letter
 
+    def _int_local(valor, padrao: int = 0) -> int:
+        try:
+            if valor in (None, ""):
+                return padrao
+            return int(valor)
+        except Exception:
+            return padrao
+
+    def _ranges_colidem(ranges_usados, r1, c1, r2, c2) -> bool:
+        for ur1, uc1, ur2, uc2 in ranges_usados:
+            linhas_colidem = not (r2 < ur1 or r1 > ur2)
+            colunas_colidem = not (c2 < uc1 or c1 > uc2)
+            if linhas_colidem and colunas_colidem:
+                return True
+        return False
+
+    def _fill_barra_por_item(item):
+        if item.get("BitConflito"):
+            return estilos["fill_conflito"]
+
+        if str(item.get("OrigemItem") or "").upper() == "RESERVA":
+            return estilos["fill_reserva"]
+
+        try:
+            chave_id = abs(int(item.get("ID") or 0))
+        except Exception:
+            chave_id = 0
+
+        fills = [
+            estilos.get("fill_contrato", estilos["fill_contrato"]),
+            estilos.get("fill_contrato_alt_1", estilos["fill_contrato"]),
+            estilos.get("fill_contrato_alt_2", estilos["fill_contrato"]),
+            estilos.get("fill_contrato_alt_3", estilos["fill_contrato"]),
+            estilos.get("fill_contrato_alt_4", estilos["fill_contrato"]),
+        ]
+        return fills[chave_id % len(fills)]
+
+    def _border_barra_externa(rr, cc, r1, c1, r2, c2):
+        side = estilos.get("side_barra")
+        return Border(
+            left=side if cc == c1 else None,
+            right=side if cc == c2 else None,
+            top=side if rr == r1 else None,
+            bottom=side if rr == r2 else None,
+        )
+
+    def _endereco_intervalo_excel(r1, c1, r2, c2) -> str:
+        return f"{get_column_letter(c1)}{r1}:{get_column_letter(c2)}{r2}"
+
+    def _pintar_intervalo_barra(r1, c1, r2, c2, fill_barra):
+        """Eu pinto toda a área da faixa antes de mesclar para o Excel renderizar a barra inteira."""
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                celula = ws.cell(row=rr, column=cc)
+                celula.fill = fill_barra
+                celula.font = estilos["font_item"]
+                celula.alignment = estilos.get("al_barra", estilos["al_center"])
+                celula.border = _border_barra_externa(rr, cc, r1, c1, r2, c2)
+
+    def _aplicar_estilo_topo_barra(r1, c1, texto, fill_barra):
+        """Eu garanto que a célula principal da faixa fique com o mesmo efeito do botão Mesclar e Centralizar."""
+        celula = ws.cell(row=r1, column=c1)
+        celula.value = texto
+        celula.fill = fill_barra
+        celula.font = estilos["font_item"]
+        celula.alignment = estilos.get("al_barra", estilos["al_center"])
+        celula.border = estilos.get("border_barra", estilos["border"])
+
+    def _mesclar_barra(r1, c1, r2, c2, texto, fill_barra):
+        """
+        Eu crio a faixa visual da ocupação no Excel.
+
+        Ordem correta:
+        1) pinta a área inteira;
+        2) grava o texto na célula superior esquerda;
+        3) mescla o intervalo;
+        4) reaplica alinhamento central na célula principal.
+
+        Essa ordem evita o problema visual em que o texto fica quebrado no primeiro dia
+        da faixa, parecendo que não houve Mesclar e Centralizar.
+        """
+        if r2 < r1:
+            r2 = r1
+        if c2 < c1:
+            c2 = c1
+
+        _pintar_intervalo_barra(r1, c1, r2, c2, fill_barra)
+        _aplicar_estilo_topo_barra(r1, c1, texto, fill_barra)
+
+        precisa_mesclar = (r2 > r1) or (c2 > c1)
+        if precisa_mesclar:
+            try:
+                ws.merge_cells(start_row=r1, start_column=c1, end_row=r2, end_column=c2)
+            except Exception as exc:
+                try:
+                    current_app.logger.warning(
+                        "Falha ao mesclar barra da exportação Excel: %s | range=%s",
+                        exc,
+                        _endereco_intervalo_excel(r1, c1, r2, c2),
+                    )
+                except Exception:
+                    pass
+
+        _aplicar_estilo_topo_barra(r1, c1, texto, fill_barra)
 
     ws["A1"] = f"Grade Anual - CodPonto {codponto} ({ano})"
     ws["A1"].font = estilos["font_titulo"]
     ws["A1"].alignment = estilos["al_left"]
 
-    ws["A2"] = f"Tipo: {tipo_prod}   •   Exibidora: {exibidora}   •   Nº Faces: {num_faces}"
+    ws["A2"] = f"Tipo: {tipo_prod}   •   Exibidora: {exibidora}   •   Nº Faces/Slots: {num_faces}"
     ws["A2"].font = estilos["font_sub"]
     ws["A2"].alignment = estilos["al_left"]
 
     ws.freeze_panes = "A5"
-
+    ws.sheet_view.showGridLines = False
 
     linha_topo = 4
-    altura_face = 1
+    altura_face = 2
     col_inicio = 1
-    largura_col_face = 12
-    largura_col_dia = 3.2
+    largura_col_face = 13
+    largura_col_dia = 3.6
     gap_entre_meses = 2
-
 
     if not faces:
         faces = ["(sem faces)"]
         ocupacoes_por_face = {"(sem faces)": []}
 
-
     col = col_inicio
-    for mes in range(1, 13):
+    linha_primeira_face = linha_topo + 2
+    linha_ultima_face_real = linha_primeira_face + (len(faces) - 1) * altura_face
+    linha_ultima_grade = linha_primeira_face + (len(faces) * altura_face) - 1
+
+    for mes in range(1, 12 + 1):
         _, ultimo_dia = calendar.monthrange(ano, mes)
         dt_ini_mes = date(ano, mes, 1)
         dt_fim_mes = date(ano, mes, ultimo_dia)
@@ -15601,26 +16130,24 @@ def _excel_montar_aba_grade_ano(
         col_face = col
         col_d_last = col + ultimo_dia
 
-
         ws.merge_cells(
             start_row=linha_topo,
             start_column=col_face,
             end_row=linha_topo,
             end_column=col_d_last,
         )
+
         cel = ws.cell(row=linha_topo, column=col_face)
         cel.value = f"{calendar.month_abbr[mes].upper()}/{str(ano)[2:]}"
         cel.font = estilos["font_cab"]
         cel.alignment = estilos["al_center"]
         cel.fill = estilos["fill_mes"]
 
-
         cface = ws.cell(row=linha_topo + 1, column=col_face)
         cface.value = "Face"
         cface.font = estilos["font_cab"]
         cface.alignment = estilos["al_center"]
         cface.fill = estilos["fill_cab"]
-
 
         for d in range(1, ultimo_dia + 1):
             c = ws.cell(row=linha_topo + 1, column=col + d)
@@ -15631,84 +16158,146 @@ def _excel_montar_aba_grade_ano(
             dt = date(ano, mes, d)
             c.fill = estilos["fill_fds"] if dt.weekday() >= 5 else estilos["fill_cab"]
 
-
         ws.column_dimensions[get_column_letter(col_face)].width = largura_col_face
         for d in range(1, ultimo_dia + 1):
             ws.column_dimensions[get_column_letter(col + d)].width = largura_col_dia
 
-
         for idx, face in enumerate(faces):
-            linha = (linha_topo + 2) + idx * altura_face
+            linha = linha_primeira_face + idx * altura_face
+            linha_gap = linha + 1
 
+            if altura_face > 1:
+                try:
+                    ws.merge_cells(
+                        start_row=linha,
+                        start_column=col_face,
+                        end_row=linha_gap,
+                        end_column=col_face,
+                    )
+                except Exception:
+                    pass
 
             c = ws.cell(row=linha, column=col_face)
             c.value = face
             c.font = estilos["font_face"]
-            c.alignment = estilos["al_left"]
+            c.alignment = estilos["al_center"]
             c.fill = estilos["fill_cab"]
 
+            for rr in range(linha, linha_gap + 1):
+                ws.cell(row=rr, column=col_face).border = estilos["border"]
+                ws.cell(row=rr, column=col_face).fill = estilos["fill_cab"]
 
-            for d in range(1, ultimo_dia + 1):
-                cday = ws.cell(row=linha, column=col + d)
-                cday.alignment = estilos["al_center"]
-                dt = date(ano, mes, d)
-                if dt.weekday() >= 5:
-                    cday.fill = estilos["fill_fds"]
+                for d in range(1, ultimo_dia + 1):
+                    cday = ws.cell(row=rr, column=col + d)
+                    cday.alignment = estilos["al_center"]
+                    cday.border = estilos["border"]
+                    dt = date(ano, mes, d)
+                    cday.fill = estilos["fill_fds"] if dt.weekday() >= 5 else estilos.get("fill_vazio", estilos["fill_cab"])
 
-
-            itens = ocupacoes_por_face.get(face, [])
-            if itens:
-                cor_toggle = False
-
-                for it in itens:
-                    di = it.get("DataInicio")
-                    df = it.get("DataFim")
-
-                    dia_ini, dia_fim = _intersecao_mes(di, df, dt_ini_mes, dt_fim_mes)
-                    if dia_ini is None:
-                        continue
-
-                    fill_barra = estilos["fill_barra2"] if cor_toggle else estilos["fill_barra"]
-                    cor_toggle = not cor_toggle
-
-
-                    for dd in range(dia_ini, dia_fim + 1):
-                        cc = ws.cell(row=linha, column=col + dd)
-                        cc.fill = estilos["fill_conflito"] if it.get("BitConflito") else fill_barra
-
-
-                    texto = f"{it.get('MarcaExibida','')}".strip()
-                    loop = (it.get("Loop") or "").strip()
-                    vend = (it.get("Vendedor") or "").strip()
-                    if loop or vend:
-                        texto = f"{texto} • {loop} • {vend}".strip(" •")
-
-                    ctexto = ws.cell(row=linha, column=col + dia_ini)
-                    ctexto.value = texto[:120]
-                    ctexto.font = estilos["font_item"]
-                    ctexto.alignment = estilos["al_left"]
-
-
-        r1 = linha_topo
-        r2 = (linha_topo + 1) + 1 + (len(faces))
-        c1 = col_face
-        c2 = col_d_last
-        for rr in range(r1, r2 + 1):
-            for cc in range(c1, c2 + 1):
+        for rr in range(linha_topo, linha_ultima_grade + 1):
+            for cc in range(col_face, col_d_last + 1):
                 ws.cell(row=rr, column=cc).border = estilos["border"]
 
+        ranges_mesclados = []
+
+        for idx, face in enumerate(faces):
+            linha = linha_primeira_face + idx * altura_face
+
+            itens = ocupacoes_por_face.get(face, [])
+            if not itens:
+                continue
+
+            itens = sorted(
+                itens,
+                key=lambda x: (
+                    x.get("DataInicio") or date(1900, 1, 1),
+                    x.get("DataFim") or date(1900, 1, 1),
+                    int(x.get("ID") or 0),
+                ),
+            )
+
+            for it in itens:
+                if it.get("TextoSomentePintura"):
+                    continue
+
+                di = it.get("DataInicio")
+                df = it.get("DataFim")
+
+                dia_ini, dia_fim = _intersecao_mes_excel(di, df, dt_ini_mes, dt_fim_mes)
+                if dia_ini is None:
+                    continue
+
+                span_altura = _int_local(it.get("SpanAltura") or it.get("Spans"), 1)
+                if span_altura <= 0:
+                    span_altura = 1
+
+                linha_ini_barra = linha
+                linha_fim_barra = linha + (span_altura - 1) * altura_face
+                linha_fim_barra = min(linha_fim_barra, linha_ultima_face_real)
+
+                col_ini_barra = col + dia_ini
+                col_fim_barra = col + dia_fim
+
+                if _ranges_colidem(
+                    ranges_mesclados,
+                    linha_ini_barra,
+                    col_ini_barra,
+                    linha_fim_barra,
+                    col_fim_barra,
+                ):
+                    # Se houver sobreposição real, eu mantenho a pintura sem mesclar para não quebrar o arquivo.
+                    # O conflito já vem marcado em vermelho pela alocação.
+                    continue
+
+                ranges_mesclados.append((linha_ini_barra, col_ini_barra, linha_fim_barra, col_fim_barra))
+
+                fill_barra = _fill_barra_por_item(it)
+                texto = _texto_excel_item(it)[:160]
+                _mesclar_barra(
+                    linha_ini_barra,
+                    col_ini_barra,
+                    linha_fim_barra,
+                    col_fim_barra,
+                    texto,
+                    fill_barra,
+                )
 
         col = col_d_last + gap_entre_meses
-
 
     ws.row_dimensions[1].height = 22
     ws.row_dimensions[2].height = 18
     ws.row_dimensions[linha_topo].height = 18
     ws.row_dimensions[linha_topo + 1].height = 18
-    for i in range(len(faces)):
-        ws.row_dimensions[(linha_topo + 2) + i].height = 18
+
+    for idx in range(len(faces)):
+        linha = linha_primeira_face + idx * altura_face
+        ws.row_dimensions[linha].height = 26
+        if altura_face > 1:
+            ws.row_dimensions[linha + 1].height = 8
 
 
+def _texto_excel_item(item: dict) -> str:
+    """
+    Eu centralizo o texto da barra para evitar repetição de regra dentro do desenho da planilha.
+    """
+    try:
+        texto_barra = str(item.get("BarraTexto") or "").strip()
+        if texto_barra:
+            return texto_barra
+
+        marca = str(item.get("MarcaExibida") or "").strip()
+        vendedor = str(item.get("Vendedor") or "").strip()
+
+        if marca and vendedor:
+            return f"{marca} • {vendedor}"
+        if marca:
+            return marca
+        if vendedor:
+            return vendedor
+
+        return ""
+    except Exception:
+        return ""
 
 
 
@@ -19568,7 +20157,13 @@ def _processar_upload_checkin_por_caminho(
 
         try:
             row_face = (
-                db.session.query(DimFacesPaineis.TipoPainel)
+                db.session.query(
+                    func.coalesce(DimFacesPaineis.Tipo, DimPaineisEuromidia.Tipo).label("TipoPainel")
+                )
+                .outerjoin(
+                    DimPaineisEuromidia,
+                    DimPaineisEuromidia.IDDimPaineisEuromidia == DimFacesPaineis.IDDimPaineisEuromidia,
+                )
                 .filter(
                     DimFacesPaineis.CodPonto == cod_ponto_int,
                     DimFacesPaineis.CodFace == cod_face_txt,

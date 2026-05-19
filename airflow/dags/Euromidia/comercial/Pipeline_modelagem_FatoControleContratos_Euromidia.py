@@ -154,7 +154,7 @@ CAMINHO_ARQUIVO_EXCEL = Path(
     )
 )
 
-NOME_ABA_EXCEL = "CTR"
+NOME_ABA_EXCEL = os.getenv("NOME_ABA_EXCEL_CONTROLE_CONTRATOS", "CTR").strip() or "CTR"
 
 BANCO_STAGE_CONTROLE_CONTRATOS = os.getenv(
     "BANCO_STAGE_CONTROLE_CONTRATOS",
@@ -229,9 +229,33 @@ mapeamento_colunas = {
     "COMISSÃO GERÊNCIA NORDESTE": "ComissaoGerenciaNordeste",
     "FATURAMENTO": "Faturamento",
     "DATA DE CANCELAMENTO": "DataCancelamento",
+    "OBS": "OBS",
+    "OBS:": "OBS",
+    "OBSERVAÇÃO": "OBS",
+    "OBSERVACOES": "OBS",
+    "OBSERVAÇÕES": "OBS",
 }
 
-ORDEM_COLUNAS_SAIDA = list(mapeamento_colunas.values()) + ["OBS"]
+def lista_unica_preservando_ordem(valores: list[str]) -> list[str]:
+    """Remove nomes duplicados preservando a primeira ocorrência.
+
+    Isso evita criar a stage SQL com colunas repetidas quando várias variações
+    do Excel apontam para o mesmo destino, por exemplo: OBS, OBS:, OBSERVAÇÃO.
+    """
+    vistos: set[str] = set()
+    saida: list[str] = []
+
+    for valor in valores:
+        nome = str(valor or "").strip()
+        if not nome or nome in vistos:
+            continue
+        vistos.add(nome)
+        saida.append(nome)
+
+    return saida
+
+
+ORDEM_COLUNAS_SAIDA = lista_unica_preservando_ordem(list(mapeamento_colunas.values()) + ["OBS"])
 
 schema_overrides: dict[str, Any] = {}  
 
@@ -439,6 +463,68 @@ def limpar_texto_valor(valor: Any) -> str | None:
     return texto
 
 
+
+
+def valor_pandas_vazio(valor: Any) -> bool:
+    """Retorna True quando um valor do pandas deve ser tratado como vazio."""
+    if valor is None:
+        return True
+
+    try:
+        if pd.isna(valor):
+            return True
+    except Exception:
+        pass
+
+    if isinstance(valor, str) and valor.strip() == "":
+        return True
+
+    return False
+
+
+def consolidar_colunas_duplicadas_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Consolida colunas duplicadas preservando a primeira informação preenchida.
+
+    A aba CTR pode trazer variações como OBS, OBS:, OBSERVAÇÃO e OBSERVAÇÕES.
+    Todas são mapeadas para a coluna técnica OBS. Sem consolidar, o DataFrame
+    fica com várias colunas chamadas OBS e o CREATE TABLE da stage falha no
+    SQL Server porque uma tabela não pode ter nomes de coluna repetidos.
+
+    Regra aplicada:
+    - mantém a primeira coluna com aquele nome;
+    - quando a primeira está vazia, preenche com o primeiro valor não vazio das
+      colunas duplicadas seguintes;
+    - devolve um DataFrame com nomes de colunas únicos.
+    """
+    if df is None or df.empty:
+        return df
+
+    nomes_colunas = [str(coluna) for coluna in df.columns]
+
+    if len(nomes_colunas) == len(set(nomes_colunas)):
+        return df
+
+    series_por_nome: dict[str, pd.Series] = {}
+    ordem_colunas: list[str] = []
+
+    for indice, nome_coluna in enumerate(nomes_colunas):
+        serie_atual = df.iloc[:, indice]
+
+        if nome_coluna not in series_por_nome:
+            series_por_nome[nome_coluna] = serie_atual.copy()
+            ordem_colunas.append(nome_coluna)
+            continue
+
+        serie_base = series_por_nome[nome_coluna]
+        mascara_base_vazia = serie_base.map(valor_pandas_vazio)
+        series_por_nome[nome_coluna] = serie_base.where(~mascara_base_vazia, serie_atual)
+
+    return pd.DataFrame(
+        {nome_coluna: series_por_nome[nome_coluna] for nome_coluna in ordem_colunas},
+        index=df.index,
+    )
+
+
 def parse_data_br_pandas(valor: Any) -> str | None:
     """Converte datas brasileiras, ISO, datetime e serial Excel para YYYY-MM-DD."""
     valor_limpo = limpar_texto_valor(valor)
@@ -576,11 +662,6 @@ def localizar_caminho_excel_controle_contratos() -> Path:
         [
             CAMINHO_ARQUIVO_EXCEL,
             PASTA_SHAREPOINT_CONTAINER / nome_arquivo_excel,
-            Path("/root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
-            Path("/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
-            Path("/root/SHEMPO/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
-            Path("/opt/airflow/SHEMPO/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
-            Path("/root/PythonJobs/pipelines/SHEMPO/Base Dados - 01- Controle de Contratos") / nome_arquivo_excel,
         ]
     )
 
@@ -659,6 +740,7 @@ def tratar_dataframe_ctr_pandas(df_original: pd.DataFrame) -> pd.DataFrame:
             renomear[coluna] = destino
 
     df = df.rename(columns=renomear)
+    df = consolidar_colunas_duplicadas_dataframe(df)
 
     colunas_datas = [
         "DataLancamento",
@@ -813,13 +895,17 @@ def aplicar_hash_contrato_e_previa(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def garantir_colunas_saida(df: pd.DataFrame) -> pd.DataFrame:
-    df_out = df.copy()
+    df_out = consolidar_colunas_duplicadas_dataframe(df.copy())
 
-    for coluna in ORDEM_COLUNAS_SAIDA:
+    colunas_saida = lista_unica_preservando_ordem(ORDEM_COLUNAS_SAIDA)
+
+    for coluna in colunas_saida:
         if coluna not in df_out.columns:
             df_out[coluna] = None
 
-    return df_out.loc[:, ORDEM_COLUNAS_SAIDA]
+    df_out = df_out.loc[:, colunas_saida]
+    return consolidar_colunas_duplicadas_dataframe(df_out)
+
 
 
 def obter_ultimo_csv_carga(pasta: Path) -> Path:
@@ -894,9 +980,9 @@ def gerar_sql_create_stage(df: pd.DataFrame, tabela_stage: str) -> str:
     tipadas acontecem nos MERGEs posteriores com TRY_CONVERT. Isso evita erro de tipo na carga bruta.
     """
     if df is None or df.empty:
-        colunas = ORDEM_COLUNAS_SAIDA
+        colunas = lista_unica_preservando_ordem(ORDEM_COLUNAS_SAIDA)
     else:
-        colunas = list(df.columns)
+        colunas = lista_unica_preservando_ordem([str(coluna) for coluna in df.columns])
 
     if not colunas:
         raise ValueError("Não existem colunas para criar a stage.")
@@ -985,11 +1071,14 @@ def inserir_dataframe_stage_sql_server(
     Não usa pandas.to_sql porque to_sql depende do banco default da conexão.
     Aqui o INSERT aponta explicitamente para [Integracao].[dbo].[df_fatocontrolecontratos].
     """
+    df_stage = consolidar_colunas_duplicadas_dataframe(df_stage)
+
     if df_stage.empty:
         return 0
 
     nome_sql = nome_tabela_stage_sql(tabela_stage)
-    colunas = list(df_stage.columns)
+    colunas = lista_unica_preservando_ordem([str(coluna) for coluna in df_stage.columns])
+    df_stage = df_stage.loc[:, colunas]
 
     colunas_sql = ", ".join(f"[{coluna}]" for coluna in colunas)
     parametros_sql = ", ".join(f":{coluna}" for coluna in colunas)
@@ -1018,6 +1107,58 @@ def inserir_dataframe_stage_sql_server(
     return total_inserido
 
 
+
+def normalizar_valor_stage_sql_server(valor: Any) -> str | None:
+    """Normaliza valores antes de inserir na stage SQL Server.
+
+    O caso crítico desta DAG é o CodPonto vindo do Excel como número, mas chegando
+    ao pandas como float por causa de linhas vazias na mesma coluna. Sem esta
+    normalização, um ponto 635 pode virar "635.0" na stage. Depois o SQL Server
+    recebe TRY_CONVERT(int, '635.0') e devolve NULL.
+
+    A regra aqui é simples:
+    - vazio/NaN vira NULL;
+    - número inteiro representado como float vira texto inteiro, exemplo: 635.0 -> "635";
+    - texto numérico decimal inteiro também vira inteiro, exemplo: "635.0" -> "635";
+    - textos comuns continuam como texto limpo.
+    """
+    if valor is None:
+        return None
+
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(valor, bool):
+        return "1" if valor else "0"
+
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        try:
+            numero = float(valor)
+            if numero.is_integer():
+                return str(int(numero))
+            return str(valor).strip()
+        except Exception:
+            return str(valor).strip()
+
+    texto_valor = str(valor).strip()
+
+    if not texto_valor:
+        return None
+
+    texto_decimal = texto_valor.replace(",", ".")
+
+    try:
+        numero = float(texto_decimal)
+        if numero.is_integer() and texto_decimal.endswith(".0"):
+            return str(int(numero))
+    except Exception:
+        pass
+
+    return texto_valor
+
 def carregar_dataframe_stage_sql_server(df: pd.DataFrame, tabela_stage: str) -> None:
     """Cria/limpa/recarrega a stage técnica no SQL Server.
 
@@ -1025,12 +1166,12 @@ def carregar_dataframe_stage_sql_server(df: pd.DataFrame, tabela_stage: str) -> 
     1. A stage pode não existir ainda.
     2. A conexão pode estar apontando para outro banco; por isso usamos nome 3-part explícito.
     """
-    df_stage = df.copy()
+    df_stage = consolidar_colunas_duplicadas_dataframe(df.copy())
 
     for coluna in df_stage.columns:
-        df_stage[coluna] = df_stage[coluna].map(
-            lambda valor: None if pd.isna(valor) or str(valor) == "" else str(valor)
-        )
+        df_stage[coluna] = df_stage[coluna].map(normalizar_valor_stage_sql_server)
+
+    df_stage = consolidar_colunas_duplicadas_dataframe(df_stage)
 
     banco, schema, nome_tabela = normalizar_partes_tabela_stage(tabela_stage)
     tabela_qualificada = nome_tabela_stage_sql(tabela_stage)
@@ -1087,9 +1228,7 @@ def garantir_pasta_escrita(pasta: Path) -> None:
 
 CAMINHO_DADOS_CONTAINER_RAIZ = Path("/opt/airflow/Dados")
 
-PASTA_SHAREPOINT_OBRIGATORIA_CONTAINER = Path(
-    "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos"
-)
+PASTA_SHAREPOINT_OBRIGATORIA_CONTAINER = PASTA_SHAREPOINT_CONTAINER
 
 PASTA_CARGA_OBRIGATORIA_CONTAINER = Path(
     "/opt/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia"
@@ -1115,7 +1254,7 @@ def detectar_mount_sobreposto_em_dados(caminho: Path) -> Path | None:
     Portanto, o único mount esperado é a raiz /opt/airflow/Dados. Se existir outro
     mount mais específico, como:
       /opt/airflow/Dados/Euromidia/Comercial/CargasSQL
-      /opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos
+      /opt/airflow/Dados/SharePoint/BaseDados/<pasta configurada em PASTA_BASE_DADOS_CONTRATOS_CONTAINER>
 
     então o arquivo vai aparecer em outro lugar do host e o Guilherme não conseguirá
     acompanhar no caminho combinado.
@@ -1176,7 +1315,7 @@ def resolver_pasta_gravavel(
 
     Regra operacional deste DAG:
     - Arquivo baixado do SharePoint deve aparecer no host em:
-      /root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos
+      /root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/<pasta configurada>
 
     - CSVs técnicos gerados/importados devem aparecer no host em:
       /root/PythonJobs/pipelines/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia
@@ -1487,7 +1626,7 @@ MERGE_CONTRATOS_SQL = r"""
     SELECT
           TRY_CONVERT(date, [DataLancamento]) AS [DataLancamento]
         , [Cota] AS [Cota]
-        , TRY_CONVERT(int, [CodPonto]) AS [CodPonto]
+        , TRY_CONVERT(int, TRY_CONVERT(decimal(18,4), REPLACE(LTRIM(RTRIM(CONVERT(varchar(100), [CodPonto]))), ',', '.'))) AS [CodPonto]
         , LEFT(TRY_CONVERT(varchar(200), [CodFace]), 20) AS [CodFace]
         , LEFT(TRY_CONVERT(nvarchar(200), [CidadeExibicao]), 100) AS [CidadeExibicao]
         , LEFT(TRY_CONVERT(nvarchar(200), [Tipo]), 70) AS [Tipo]
@@ -1845,7 +1984,7 @@ MERGE_ITENS_SQL = r"""
           TRY_CONVERT(date, [DataLancamento]) AS [DataLancamento]
         , TRY_CONVERT(int, TRY_CONVERT(decimal(18,2), REPLACE([Cota], ',', '.'))) AS [Cota]
 
-        , TRY_CONVERT(int, [CodPonto]) AS [CodPonto]
+        , TRY_CONVERT(int, TRY_CONVERT(decimal(18,4), REPLACE(LTRIM(RTRIM(CONVERT(varchar(100), [CodPonto]))), ',', '.'))) AS [CodPonto]
         , LEFT(TRY_CONVERT(varchar(200), [CodFace]), 20) AS [CodFace]
         , LEFT(TRY_CONVERT(nvarchar(200), [CidadeExibicao]), 100) AS [CidadeExibicao]
         , LEFT(TRY_CONVERT(nvarchar(200), [Tipo]), 70) AS [Tipo]
@@ -1872,7 +2011,7 @@ MERGE_ITENS_SQL = r"""
 
         , TRY_CONVERT(date, [DataAssinaturaRenovacao]) AS [DataAssinaturaRenovacao]
         , LEFT(TRY_CONVERT(varchar(200), [IDTrimestre]), 20) AS [IDTrimestre]
-        , TRY_CONVERT(int, [TexmpoExposicao]) AS [TexmpoExposicao]
+        , TRY_CONVERT(int, TRY_CONVERT(decimal(18,4), REPLACE(LTRIM(RTRIM(CONVERT(varchar(100), [TexmpoExposicao]))), ',', '.'))) AS [TexmpoExposicao]
         , TRY_CONVERT(date, [DataInicioPrevisto]) AS [DataInicioPrevisto]
         , TRY_CONVERT(date, [DataTerminoPrevisto]) AS [DataTerminoPrevisto]
         , LEFT(TRY_CONVERT(char(10), [InicioRenovacao]), 2) AS [InicioRenovacao]
@@ -1883,7 +2022,7 @@ MERGE_ITENS_SQL = r"""
         , TRY_CONVERT(decimal(19,2), REPLACE(REPLACE([ValorPermuta],'.',''),',','.')) AS [ValorPermuta]
         , TRY_CONVERT(decimal(19,2), REPLACE(REPLACE([FaturamentoLiquidoPermuta],'.',''),',','.')) AS [FaturamentoLiquidoPermuta]
 
-        , TRY_CONVERT(int, [NumeroParcelas]) AS [NumeroParcelas]
+        , TRY_CONVERT(int, TRY_CONVERT(decimal(18,4), REPLACE(LTRIM(RTRIM(CONVERT(varchar(100), [NumeroParcelas]))), ',', '.'))) AS [NumeroParcelas]
         , TRY_CONVERT(date, [DataInicioVencimento]) AS [DataInicioVencimento]
 
         , TRY_CONVERT(decimal(19,2), REPLACE(REPLACE([TotalBrutoContrato],'.',''),',','.')) AS [TotalBrutoContrato]
@@ -2320,24 +2459,39 @@ INNER JOIN [Integracao].[Silver].[DimEmpresas] AS emp
 
 UPDATE_PONTOS_SQL = r"""
 UPDATE fcti
-SET fcti.IDPainelEuromidia = dpie.IDDimPaineisEuromidia
+SET
+      fcti.IDPainelEuromidia = dpie.IDDimPaineisEuromidia
+    , fcti.DataAtualizacao = GETDATE()
 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS fcti
 INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS dpie
-    ON dpie.CodPonto = fcti.CodPonto
+    ON TRY_CONVERT(int, dpie.CodPonto) = TRY_CONVERT(int, fcti.CodPonto)
 WHERE
-    fcti.IDPainelEuromidia IS NULL
-    OR fcti.IDPainelEuromidia <> dpie.IDDimPaineisEuromidia;
+    fcti.CodPonto IS NOT NULL
+    AND (
+        fcti.IDPainelEuromidia IS NULL
+        OR fcti.IDPainelEuromidia <> dpie.IDDimPaineisEuromidia
+    );
 """
 
 UPDATE_FACES_SQL = r"""
 UPDATE fcti
-SET fcti.IDDimFacesPaineis = dpe.IDDimFacesPaineis
+SET
+      fcti.IDDimFacesPaineis = dpe.IDDimFacesPaineis
+    , fcti.IDPainelEuromidia = dpe.IDDimPaineisEuromidia
+    , fcti.DataAtualizacao = GETDATE()
 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS fcti
 INNER JOIN [Integracao].[Silver].[DimFacesPaineis] AS dpe
-    ON dpe.CodFace = fcti.CodFace
+    ON TRY_CONVERT(int, dpe.CodPonto) = TRY_CONVERT(int, fcti.CodPonto)
+   AND UPPER(LTRIM(RTRIM(dpe.CodFace))) = UPPER(LTRIM(RTRIM(fcti.CodFace)))
 WHERE
-    fcti.IDDimFacesPaineis IS NULL
-    OR fcti.IDDimFacesPaineis <> dpe.IDDimFacesPaineis;
+    fcti.CodPonto IS NOT NULL
+    AND NULLIF(LTRIM(RTRIM(fcti.CodFace)), '') IS NOT NULL
+    AND (
+        fcti.IDDimFacesPaineis IS NULL
+        OR fcti.IDDimFacesPaineis <> dpe.IDDimFacesPaineis
+        OR fcti.IDPainelEuromidia IS NULL
+        OR fcti.IDPainelEuromidia <> dpe.IDDimPaineisEuromidia
+    );
 """
 
 CALL_PROCEDURE_SQL = r"""
@@ -2347,41 +2501,62 @@ EXEC Silver.sp_UpsertDimCalendario;
 UPDATE_OCUPACAO_SQL = r"""
 SET NOCOUNT ON;
 
-;WITH Fonte AS (
+;WITH FaceResolvida AS (
     SELECT
-        i.DataAtualizacao,
-        i.Referencia,
+          CodPonto = TRY_CONVERT(int, CodPonto)
+        , CodFaceNormalizado = UPPER(LTRIM(RTRIM(CodFace)))
+        , IDDimFacesPaineis = MAX(IDDimFacesPaineis)
+        , IDDimPaineisEuromidia = MAX(IDDimPaineisEuromidia)
+    FROM [Integracao].[Silver].[DimFacesPaineis]
+    WHERE
+        TRY_CONVERT(int, CodPonto) IS NOT NULL
+        AND NULLIF(LTRIM(RTRIM(CodFace)), '') IS NOT NULL
+    GROUP BY
+          TRY_CONVERT(int, CodPonto)
+        , UPPER(LTRIM(RTRIM(CodFace)))
+),
+FonteBase AS (
+    SELECT
+        DataAtualizacao = CAST(GETDATE() AS datetime2(0)),
+        Referencia = i.Referencia,
         CodPonto = i.CodPonto,
-        CodFace  = LTRIM(RTRIM(i.CodFace)),
-        IDPainelEuromidia = i.IDPainelEuromidia,
+        CodFace = LEFT(LTRIM(RTRIM(i.CodFace)), 100),
+        IDPainelEuromidia = COALESCE(i.IDPainelEuromidia, fr.IDDimPaineisEuromidia),
         Origem = CAST('CONTRATO' AS varchar(20)),
-        Status = CAST(CASE WHEN i.DataCancelamento IS NULL THEN 'ATIVO' ELSE 'CANCELADO' END AS varchar(20)),
+        Status = CAST(
+            CASE
+                WHEN i.DataCancelamento IS NULL THEN 'ATIVO'
+                ELSE 'CANCELADO'
+            END AS varchar(20)
+        ),
         DataInicio = i.DataInicioPrevisto,
-        DataFim    = COALESCE(i.DataCancelamento, i.DataTerminoPrevisto),
+        DataFim = COALESCE(i.DataCancelamento, i.DataTerminoPrevisto),
         LoopInicio = CAST(NULL AS int),
-        LoopFim    = CAST(NULL AS int),
-        SpanQtd    = CAST(NULL AS int),
-        Cota       = i.Cota,
-        MarcaExibida = i.MarcaExibida,
-        Vendedor     = i.Vendedor,
-        IDVendedor   = i.IDVendedor,
-        IDCliente    = c.IDEmpresa,
+        LoopFim = CAST(NULL AS int),
+        SpanQtd = CAST(NULL AS int),
+        Cota = TRY_CONVERT(int, i.Cota),
+        MarcaExibida = LEFT(i.MarcaExibida, 200),
+        Vendedor = LEFT(i.Vendedor, 200),
+        IDVendedor = i.IDVendedor,
+        IDCliente = c.IDEmpresa,
         IDFatoControleContratos = i.IDFatoControleContratoEuromidia,
-        NumeroContrato = i.NumeroContrato,
-        NumeroPrevia   = i.NumeroPrevia,
+        NumeroContrato = LEFT(i.NumeroContrato, 150),
+        NumeroPrevia = LEFT(i.NumeroPrevia, 150),
         TextoOriginal = CONCAT(
             'CONTRATO:', COALESCE(i.NumeroContrato,''),
-            ' | PRÉVIA:', COALESCE(i.NumeroPrevia,'')
+            ' | PRÉVIA:', COALESCE(i.NumeroPrevia,''),
+            ' | PONTO:', COALESCE(CONVERT(varchar(30), i.CodPonto), ''),
+            ' | FACE:', COALESCE(i.CodFace, '')
         ),
-        CriadoEm = CAST(COALESCE(i.DataLancamento, CAST(i.DataAtualizacao AS date)) AS datetime2(0)),
+        CriadoEm = CAST(COALESCE(i.DataLancamento, CAST(i.DataAtualizacao AS date), GETDATE()) AS datetime2(0)),
         CriadoPorIDUsuario = ISNULL(i.IDVendedor, 0),
         ExpiraEm = CAST(NULL AS datetime2(0)),
         CanceladoEm = CASE
                         WHEN i.DataCancelamento IS NULL THEN NULL
-                        ELSE CAST(i.DataAtualizacao AS datetime2(0))
+                        ELSE CAST(GETDATE() AS datetime2(0))
                       END,
         CanceladoPorIDUsuario = CAST(NULL AS int),
-        Observacao = i.OBS,
+        Observacao = LEFT(i.OBS, 500),
         Dias = CASE
                  WHEN i.DataInicioPrevisto IS NULL THEN NULL
                  WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) IS NULL THEN NULL
@@ -2392,137 +2567,163 @@ SET NOCOUNT ON;
                 PARTITION BY i.Referencia
                 ORDER BY i.DataAtualizacao DESC, i.IDFatoControleContratosItensEuromidia DESC
              )
-    FROM Integracao.Silver.FatoControleContratosItensEuromidia i
-    LEFT JOIN Integracao.Silver.FatoControleContratosEuromidia c
-        ON  c.NumeroContrato = i.NumeroContrato
-        AND c.NumeroPrevia   = i.NumeroPrevia
-        AND ISNULL(c.CNPJ,'') = ISNULL(i.CNPJ,'')
-
+    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+    LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
+        ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+    LEFT JOIN FaceResolvida AS fr
+        ON fr.CodPonto = TRY_CONVERT(int, i.CodPonto)
+       AND fr.CodFaceNormalizado = UPPER(LTRIM(RTRIM(i.CodFace)))
     WHERE
         i.Referencia IS NOT NULL
-        AND i.Referencia <> ''
+        AND LTRIM(RTRIM(i.Referencia)) <> ''
         AND i.CodPonto IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(i.CodFace)), '') IS NOT NULL
         AND i.DataInicioPrevisto IS NOT NULL
         AND COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) IS NOT NULL
 ),
 FonteFinal AS (
-    SELECT *
-    FROM Fonte
+    SELECT
+        DataAtualizacao,
+        Referencia,
+        CodPonto,
+        CodFace,
+        IDPainelEuromidia,
+        Origem,
+        Status,
+        DataInicio,
+        DataFim,
+        LoopInicio,
+        LoopFim,
+        SpanQtd,
+        Cota,
+        MarcaExibida,
+        Vendedor,
+        IDVendedor,
+        IDCliente,
+        IDFatoControleContratos,
+        NumeroContrato,
+        NumeroPrevia,
+        TextoOriginal,
+        CriadoEm,
+        CriadoPorIDUsuario,
+        ExpiraEm,
+        CanceladoEm,
+        CanceladoPorIDUsuario,
+        Observacao,
+        Dias
+    FROM FonteBase
     WHERE rn = 1
 )
 
-MERGE Integracao.Silver.FatoOcupacaoPaineisEuromidia AS T
+MERGE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T
 USING FonteFinal AS S
     ON  T.Referencia = S.Referencia
-    AND T.Origem = 'CONTRATO'
+    AND T.Origem = S.Origem
 
-WHEN MATCHED AND (
-       ISNULL(T.DataAtualizacao, '19000101') < ISNULL(S.DataAtualizacao, '19000101')
-    OR ISNULL(T.CodPonto, -1) <> ISNULL(S.CodPonto, -1)
-    OR ISNULL(T.CodFace, '') <> ISNULL(S.CodFace, '')
-    OR ISNULL(T.DataInicio, '19000101') <> ISNULL(S.DataInicio, '19000101')
-    OR ISNULL(T.DataFim, '19000101') <> ISNULL(S.DataFim, '19000101')
-    OR ISNULL(T.Cota, -1) <> ISNULL(S.Cota, -1)
-    OR ISNULL(T.MarcaExibida, '') <> ISNULL(S.MarcaExibida, '')
-    OR ISNULL(T.Vendedor, '') <> ISNULL(S.Vendedor, '')
-    OR ISNULL(T.IDVendedor, -1) <> ISNULL(S.IDVendedor, -1)
-    OR ISNULL(T.IDCliente, -1) <> ISNULL(S.IDCliente, -1)
-    OR ISNULL(T.IDFatoControleContratos, -1) <> ISNULL(S.IDFatoControleContratos, -1)
-    OR ISNULL(T.NumeroContrato, '') <> ISNULL(S.NumeroContrato, '')
-    OR ISNULL(T.NumeroPrevia, '') <> ISNULL(S.NumeroPrevia, '')
-    OR ISNULL(T.Status, '') <> ISNULL(S.Status, '')
-    OR ISNULL(T.Observacao, '') <> ISNULL(S.Observacao, '')
-)
+WHEN MATCHED THEN
+    UPDATE SET
+        T.DataAtualizacao = S.DataAtualizacao,
+        T.CodPonto = S.CodPonto,
+        T.CodFace = S.CodFace,
+        T.IDPainelEuromidia = S.IDPainelEuromidia,
+        T.Status = S.Status,
+        T.DataInicio = S.DataInicio,
+        T.DataFim = S.DataFim,
+        T.LoopInicio = S.LoopInicio,
+        T.LoopFim = S.LoopFim,
+        T.SpanQtd = S.SpanQtd,
+        T.Cota = S.Cota,
+        T.MarcaExibida = S.MarcaExibida,
+        T.Vendedor = S.Vendedor,
+        T.IDVendedor = S.IDVendedor,
+        T.IDCliente = S.IDCliente,
+        T.IDFatoControleContratos = S.IDFatoControleContratos,
+        T.NumeroContrato = S.NumeroContrato,
+        T.NumeroPrevia = S.NumeroPrevia,
+        T.TextoOriginal = S.TextoOriginal,
+        T.ExpiraEm = S.ExpiraEm,
+        T.CanceladoEm = S.CanceladoEm,
+        T.CanceladoPorIDUsuario = S.CanceladoPorIDUsuario,
+        T.Observacao = S.Observacao,
+        T.Dias = S.Dias
+
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (
+        DataAtualizacao,
+        Referencia,
+        CodPonto,
+        CodFace,
+        IDPainelEuromidia,
+        Origem,
+        Status,
+        DataInicio,
+        DataFim,
+        LoopInicio,
+        LoopFim,
+        SpanQtd,
+        Cota,
+        MarcaExibida,
+        Vendedor,
+        IDVendedor,
+        IDCliente,
+        IDFatoControleContratos,
+        NumeroContrato,
+        NumeroPrevia,
+        TextoOriginal,
+        CriadoEm,
+        CriadoPorIDUsuario,
+        ExpiraEm,
+        CanceladoEm,
+        CanceladoPorIDUsuario,
+        Observacao,
+        Dias
+    )
+    VALUES (
+        S.DataAtualizacao,
+        S.Referencia,
+        S.CodPonto,
+        S.CodFace,
+        S.IDPainelEuromidia,
+        S.Origem,
+        S.Status,
+        S.DataInicio,
+        S.DataFim,
+        S.LoopInicio,
+        S.LoopFim,
+        S.SpanQtd,
+        S.Cota,
+        S.MarcaExibida,
+        S.Vendedor,
+        S.IDVendedor,
+        S.IDCliente,
+        S.IDFatoControleContratos,
+        S.NumeroContrato,
+        S.NumeroPrevia,
+        S.TextoOriginal,
+        S.CriadoEm,
+        S.CriadoPorIDUsuario,
+        S.ExpiraEm,
+        S.CanceladoEm,
+        S.CanceladoPorIDUsuario,
+        S.Observacao,
+        S.Dias
+    )
+
+WHEN NOT MATCHED BY SOURCE
+     AND T.Origem = 'CONTRATO'
+     AND ISNULL(T.Status, '') <> 'CANCELADO'
 THEN UPDATE SET
-    T.DataAtualizacao = S.DataAtualizacao,
-    T.CodPonto = S.CodPonto,
-    T.CodFace = S.CodFace,
-    T.IDPainelEuromidia = S.IDPainelEuromidia,
-    T.Status = S.Status,
-    T.DataInicio = S.DataInicio,
-    T.DataFim = S.DataFim,
-    T.LoopInicio = S.LoopInicio,
-    T.LoopFim = S.LoopFim,
-    T.SpanQtd = S.SpanQtd,
-    T.Cota = S.Cota,
-    T.MarcaExibida = S.MarcaExibida,
-    T.Vendedor = S.Vendedor,
-    T.IDVendedor = S.IDVendedor,
-    T.IDCliente = S.IDCliente,
-    T.IDFatoControleContratos = S.IDFatoControleContratos,
-    T.NumeroContrato = S.NumeroContrato,
-    T.NumeroPrevia = S.NumeroPrevia,
-    T.TextoOriginal = S.TextoOriginal,
-    T.CriadoEm = S.CriadoEm,
-    T.CriadoPorIDUsuario = S.CriadoPorIDUsuario,
-    T.ExpiraEm = S.ExpiraEm,
-    T.CanceladoEm = S.CanceladoEm,
-    T.CanceladoPorIDUsuario = S.CanceladoPorIDUsuario,
-    T.Observacao = S.Observacao,
-    T.Dias = S.Dias
-
-WHEN NOT MATCHED BY TARGET
-THEN INSERT (
-    DataAtualizacao,
-    Referencia,
-    CodPonto,
-    CodFace,
-    IDPainelEuromidia,
-    Origem,
-    Status,
-    DataInicio,
-    DataFim,
-    LoopInicio,
-    LoopFim,
-    SpanQtd,
-    Cota,
-    MarcaExibida,
-    Vendedor,
-    IDVendedor,
-    IDCliente,
-    IDFatoControleContratos,
-    NumeroContrato,
-    NumeroPrevia,
-    TextoOriginal,
-    CriadoEm,
-    CriadoPorIDUsuario,
-    ExpiraEm,
-    CanceladoEm,
-    CanceladoPorIDUsuario,
-    Observacao,
-    Dias
-)
-VALUES (
-    S.DataAtualizacao,
-    S.Referencia,
-    S.CodPonto,
-    S.CodFace,
-    S.IDPainelEuromidia,
-    S.Origem,
-    S.Status,
-    S.DataInicio,
-    S.DataFim,
-    S.LoopInicio,
-    S.LoopFim,
-    S.SpanQtd,
-    S.Cota,
-    S.MarcaExibida,
-    S.Vendedor,
-    S.IDVendedor,
-    S.IDCliente,
-    S.IDFatoControleContratos,
-    S.NumeroContrato,
-    S.NumeroPrevia,
-    S.TextoOriginal,
-    S.CriadoEm,
-    S.CriadoPorIDUsuario,
-    S.ExpiraEm,
-    S.CanceladoEm,
-    S.CanceladoPorIDUsuario,
-    S.Observacao,
-    S.Dias
-);
+    T.DataAtualizacao = CAST(GETDATE() AS datetime2(0)),
+    T.Status = 'CANCELADO',
+    T.CanceladoEm = COALESCE(T.CanceladoEm, CAST(GETDATE() AS datetime2(0))),
+    T.Observacao = LEFT(
+        CONCAT(
+            COALESCE(T.Observacao, ''),
+            CASE WHEN NULLIF(COALESCE(T.Observacao, ''), '') IS NULL THEN '' ELSE ' | ' END,
+            'Cancelado automaticamente pelo pipeline: item não encontrado na fonte atual do controle de contratos.'
+        ),
+        500
+    );
 """
 
 
