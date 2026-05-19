@@ -15945,6 +15945,497 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int):
     return bio, nome
 
 
+
+
+def _gerar_excel_ocupacao_clientes_bytes(ano: int):
+    """
+    Eu gero o relatório "Ocupação Clientes" em uma única aba.
+
+    Esta exportação NÃO substitui a grade anual existente. Ela é outro relatório,
+    com outra rota, outra task Celery e outro endpoint de download.
+
+    Regra de cálculo aplicada:
+    - Painel digital: ocupação % = slot-dia ocupado / slot-dia disponível.
+      Exemplo: QuantidadeFaces 16 x 365 dias = 5.840 slot-dias disponíveis.
+      Cada contrato/reserva soma dias sobrepostos ao ano x span da cota.
+    - Painel não digital: ocupação % = dias ocupados da face / dias do ano.
+      Os intervalos são unidos para evitar passar de 100% quando há sobreposição.
+    """
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    ano = _normalizar_ano_exportacao_ocupacao(ano)
+    dt_ini_ano = date(ano, 1, 1)
+    dt_fim_ano = date(ano, 12, 31)
+    dt_fim_exclusivo = date(ano + 1, 1, 1)
+    hoje_ref = date.today()
+    total_dias_ano = (dt_fim_ano - dt_ini_ano).days + 1
+
+    def _texto(valor) -> str:
+        try:
+            return str(valor or "").strip()
+        except Exception:
+            return ""
+
+    def _inteiro(valor, padrao: int = 0) -> int:
+        try:
+            if valor in (None, ""):
+                return padrao
+            return int(float(str(valor).strip().replace(",", ".")))
+        except Exception:
+            return padrao
+
+    def _data(valor):
+        try:
+            if valor is None:
+                return None
+            if isinstance(valor, datetime):
+                return valor.date()
+            if isinstance(valor, date):
+                return valor
+            s = str(valor).strip()
+            if not s:
+                return None
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(s[:10], fmt).date()
+                except Exception:
+                    pass
+            return None
+        except Exception:
+            return None
+
+    def _cota_para_span(cota_val, span_qtd_val=None, usar_span_qtd_fallback: bool = False) -> int:
+        if usar_span_qtd_fallback:
+            span_tmp = _inteiro(span_qtd_val, 0)
+            if span_tmp > 0:
+                return span_tmp
+
+        txt = _texto(cota_val).replace("R$", "").replace(" ", "")
+        if not txt:
+            return 1
+
+        if "," in txt and "." in txt:
+            txt = txt.replace(".", "").replace(",", ".")
+        elif "," in txt:
+            txt = txt.replace(",", ".")
+
+        try:
+            cota_int = int(Decimal(txt))
+        except Exception:
+            try:
+                cota_int = int(round(float(txt)))
+            except Exception:
+                cota_int = 0
+
+        if cota_int == 1080:
+            return 2
+        if cota_int == 540:
+            return 1
+        if cota_int == 1:
+            return 2
+        if cota_int == 2:
+            return 1
+        return 1
+
+    def _dias_sobrepostos(di, df) -> int:
+        di = _data(di)
+        df = _data(df)
+        if di is None or df is None or df < di:
+            return 0
+        ini = max(di, dt_ini_ano)
+        fim = min(df, dt_fim_ano)
+        if fim < ini:
+            return 0
+        return (fim - ini).days + 1
+
+    def _unir_intervalos_e_contar_dias(intervalos: list[tuple[date, date]]) -> int:
+        normalizados = []
+        for di, df in intervalos or []:
+            di = _data(di)
+            df = _data(df)
+            if di is None or df is None or df < di:
+                continue
+            ini = max(di, dt_ini_ano)
+            fim = min(df, dt_fim_ano)
+            if fim < ini:
+                continue
+            normalizados.append((ini, fim))
+
+        if not normalizados:
+            return 0
+
+        normalizados.sort(key=lambda x: (x[0], x[1]))
+        unidos = []
+
+        for ini, fim in normalizados:
+            if not unidos or ini > (unidos[-1][1] + timedelta(days=1)):
+                unidos.append([ini, fim])
+            else:
+                if fim > unidos[-1][1]:
+                    unidos[-1][1] = fim
+
+        return sum((fim - ini).days + 1 for ini, fim in unidos)
+
+    def _localizacao(row) -> str:
+        partes = []
+        for campo in ("Logradouro", "Numero", "Sentido"):
+            valor = _texto(row.get(campo))
+            if valor:
+                partes.append(valor)
+        return " - ".join(partes)
+
+    def _selecionar_item_exibicao(itens: list[dict]):
+        if not itens:
+            return None
+
+        vigentes = [
+            item for item in itens
+            if item.get("DataInicio") and item.get("DataFim")
+            and item["DataInicio"] <= hoje_ref <= item["DataFim"]
+        ]
+
+        if vigentes:
+            vigentes.sort(key=lambda x: (x.get("DataInicio") or date(1900, 1, 1), x.get("ID") or 0), reverse=True)
+            return vigentes[0]
+
+        ordenados = sorted(
+            itens,
+            key=lambda x: (
+                x.get("DataInicio") or date(1900, 1, 1),
+                x.get("DataFim") or date(1900, 1, 1),
+                x.get("ID") or 0,
+            ),
+            reverse=True,
+        )
+        return ordenados[0] if ordenados else None
+
+    sql_faces = text("""
+        SELECT
+             p.IDDimPaineisEuromidia
+            ,p.CodPonto
+            ,p.QuantidadeFaces
+            ,TipoPainel = NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, p.Tipo, ''))), '')
+            ,p.Cidade
+            ,p.UF
+            ,p.Logradouro
+            ,p.Sentido
+            ,p.Bairro
+            ,p.Referencia
+            ,p.Numero
+            ,p.FormatoLxA
+            ,p.FormatoLonaAcabadaLxAm
+            ,f.IDDimFacesPaineis
+            ,f.CodFace
+            ,f.Face
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] p WITH (NOLOCK)
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] f WITH (NOLOCK)
+            ON f.IDDimPaineisEuromidia = p.IDDimPaineisEuromidia
+        WHERE ISNULL(p.BitAtivo, 1) = 1
+          AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+        ORDER BY
+             TRY_CONVERT(int, p.CodPonto)
+            ,p.CodPonto
+            ,f.CodFace;
+    """)
+
+    sql_ocupacoes = text("""
+        SELECT
+             TipoOrigem = CAST('CONTRATO' AS varchar(20))
+            ,ID = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+            ,IDPainelEuromidia = TRY_CONVERT(int, i.IDPainelEuromidia)
+            ,IDDimFacesPaineis = TRY_CONVERT(int, i.IDDimFacesPaineis)
+            ,CodPonto = TRY_CONVERT(int, i.CodPonto)
+            ,CodFace = LTRIM(RTRIM(COALESCE(i.CodFace, '')))
+            ,MarcaExibida = COALESCE(NULLIF(LTRIM(RTRIM(i.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(c.MarcaExibida)), ''))
+            ,Vendedor = COALESCE(NULLIF(LTRIM(RTRIM(i.Vendedor)), ''), NULLIF(LTRIM(RTRIM(c.Vendedor)), ''))
+            ,DataInicio = TRY_CONVERT(date, i.DataInicioPrevisto)
+            ,DataFim = TRY_CONVERT(date, COALESCE(i.DataFimEfetiva, i.DataCancelamento, i.DataTerminoPrevisto))
+            ,Cota = i.Cota
+            ,SpanQtd = CAST(NULL AS int)
+            ,NumeroContrato = i.NumeroContrato
+            ,NumeroPrevia = i.NumeroPrevia
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] c WITH (NOLOCK)
+            ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+        WHERE ISNULL(i.BitAtivo, 1) = 1
+          AND ISNULL(i.AtivoCancelamento, 'A') = 'A'
+          AND i.DataInicioPrevisto IS NOT NULL
+          AND COALESCE(i.DataFimEfetiva, i.DataCancelamento, i.DataTerminoPrevisto) IS NOT NULL
+          AND TRY_CONVERT(date, i.DataInicioPrevisto) < :dt_fim_exclusivo
+          AND TRY_CONVERT(date, COALESCE(i.DataFimEfetiva, i.DataCancelamento, i.DataTerminoPrevisto)) >= :dt_ini_ano
+
+        UNION ALL
+
+        SELECT
+             TipoOrigem = CAST('RESERVA' AS varchar(20))
+            ,ID = -ABS(TRY_CONVERT(int, r.IDFatoOcupacaoPaineisEuromidia))
+            ,IDPainelEuromidia = TRY_CONVERT(int, r.IDPainelEuromidia)
+            ,IDDimFacesPaineis = CAST(NULL AS int)
+            ,CodPonto = TRY_CONVERT(int, r.CodPonto)
+            ,CodFace = LTRIM(RTRIM(COALESCE(r.CodFace, '')))
+            ,MarcaExibida = r.MarcaExibida
+            ,Vendedor = r.Vendedor
+            ,DataInicio = TRY_CONVERT(date, r.DataInicio)
+            ,DataFim = TRY_CONVERT(date, r.DataFim)
+            ,Cota = r.Cota
+            ,SpanQtd = TRY_CONVERT(int, r.SpanQtd)
+            ,NumeroContrato = r.NumeroContrato
+            ,NumeroPrevia = r.NumeroPrevia
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r WITH (NOLOCK)
+        WHERE r.Origem = 'RESERVA'
+          AND r.Status = 'RESERVADO'
+          AND r.CanceladoEm IS NULL
+          AND r.DataInicio IS NOT NULL
+          AND r.DataFim IS NOT NULL
+          AND TRY_CONVERT(date, r.DataInicio) < :dt_fim_exclusivo
+          AND TRY_CONVERT(date, r.DataFim) >= :dt_ini_ano;
+    """)
+
+    sql_preferencias = text("""
+        SELECT
+             pr.IDFatoPreferenciaReserva
+            ,pr.MarcaExibida
+            ,pri.IDPainelEuromidia
+            ,pri.IDDimFacesPaineis
+            ,DataInicio = TRY_CONVERT(date, pri.DataInicioPrevisto)
+            ,DataFim = TRY_CONVERT(date, pri.DataTerminoPrevisto)
+        FROM [Integracao].[Silver].[FatoPreferenciaReserva] pr WITH (NOLOCK)
+        INNER JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] pri WITH (NOLOCK)
+            ON pri.IDFatoPreferenciaReserva = pr.IDFatoPreferenciaReserva
+        WHERE ISNULL(pr.BitAtivo, 1) = 1
+          AND ISNULL(pri.BitAtivo, 1) = 1
+          AND pri.DataInicioPrevisto IS NOT NULL
+          AND pri.DataTerminoPrevisto IS NOT NULL
+          AND TRY_CONVERT(date, pri.DataInicioPrevisto) < :dt_fim_exclusivo
+          AND TRY_CONVERT(date, pri.DataTerminoPrevisto) >= :dt_ini_ano;
+    """)
+
+    params = {
+        "dt_ini_ano": dt_ini_ano,
+        "dt_fim_exclusivo": dt_fim_exclusivo,
+    }
+
+    rows_faces = [dict(r) for r in db.session.execute(sql_faces).mappings().all()]
+    rows_ocupacoes = [dict(r) for r in db.session.execute(sql_ocupacoes, params).mappings().all()]
+    rows_preferencias = [dict(r) for r in db.session.execute(sql_preferencias, params).mappings().all()]
+
+    ocupacoes_por_painel_digital: dict[int, list[dict]] = {}
+    ocupacoes_por_face: dict[tuple, list[dict]] = {}
+
+    for row in rows_ocupacoes:
+        di = _data(row.get("DataInicio"))
+        df = _data(row.get("DataFim"))
+        if di is None or df is None or df < di:
+            continue
+
+        item = {
+            "ID": _inteiro(row.get("ID"), 0),
+            "TipoOrigem": _texto(row.get("TipoOrigem")),
+            "IDPainelEuromidia": _inteiro(row.get("IDPainelEuromidia"), 0),
+            "IDDimFacesPaineis": _inteiro(row.get("IDDimFacesPaineis"), 0),
+            "CodPonto": _inteiro(row.get("CodPonto"), 0),
+            "CodFace": _texto(row.get("CodFace")),
+            "MarcaExibida": _texto(row.get("MarcaExibida")),
+            "Vendedor": _texto(row.get("Vendedor")),
+            "DataInicio": di,
+            "DataFim": df,
+            "Cota": row.get("Cota"),
+            "SpanQtd": row.get("SpanQtd"),
+            "Spans": _cota_para_span(row.get("Cota"), row.get("SpanQtd"), _texto(row.get("TipoOrigem")).upper() == "RESERVA"),
+        }
+
+        id_painel = item["IDPainelEuromidia"]
+        if id_painel > 0:
+            ocupacoes_por_painel_digital.setdefault(id_painel, []).append(item)
+
+        chave_face_id = (id_painel, item["IDDimFacesPaineis"])
+        if item["IDDimFacesPaineis"] > 0:
+            ocupacoes_por_face.setdefault(chave_face_id, []).append(item)
+
+        chave_face_codigo = (item["CodPonto"], item["CodFace"])
+        if item["CodPonto"] > 0 and item["CodFace"]:
+            ocupacoes_por_face.setdefault(chave_face_codigo, []).append(item)
+
+    preferencias_por_painel: dict[int, list[dict]] = {}
+    preferencias_por_face: dict[tuple, list[dict]] = {}
+
+    for row in rows_preferencias:
+        pref = {
+            "ID": _inteiro(row.get("IDFatoPreferenciaReserva"), 0),
+            "MarcaExibida": _texto(row.get("MarcaExibida")),
+            "IDPainelEuromidia": _inteiro(row.get("IDPainelEuromidia"), 0),
+            "IDDimFacesPaineis": _inteiro(row.get("IDDimFacesPaineis"), 0),
+            "DataInicio": _data(row.get("DataInicio")),
+            "DataFim": _data(row.get("DataFim")),
+        }
+        if pref["IDPainelEuromidia"] > 0:
+            preferencias_por_painel.setdefault(pref["IDPainelEuromidia"], []).append(pref)
+        if pref["IDPainelEuromidia"] > 0 and pref["IDDimFacesPaineis"] > 0:
+            preferencias_por_face.setdefault((pref["IDPainelEuromidia"], pref["IDDimFacesPaineis"]), []).append(pref)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Ocupação Clientes"
+
+    headers = [
+        "CodFace",
+        "Tipo",
+        "Cidade",
+        "UF",
+        "Localização",
+        "Bairro",
+        "Ponto de Referência",
+        "Formato",
+        "Ocupação",
+        "Ocupação (%)",
+        "Marca Exibida",
+        "Vendedor",
+        "Data Início",
+        "Data Término",
+        "Fim da Campanha Vigente",
+        "Preferência de Renovação",
+    ]
+
+    ws.append(headers)
+
+    fill_header = PatternFill("solid", fgColor="002884")
+    font_header = Font(color="FFFFFF", bold=True)
+    font_body = Font(color="0F172A")
+    border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    fill_ocupado = PatternFill("solid", fgColor="DCFCE7")
+    fill_desocupado = PatternFill("solid", fgColor="FEE2E2")
+    fill_pref = PatternFill("solid", fgColor="FEF3C7")
+
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = fill_header
+        cell.font = font_header
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+
+    linhas = []
+
+    for face in rows_faces:
+        id_painel = _inteiro(face.get("IDDimPaineisEuromidia"), 0)
+        id_face = _inteiro(face.get("IDDimFacesPaineis"), 0)
+        codponto = _inteiro(face.get("CodPonto"), 0)
+        codface = _texto(face.get("CodFace"))
+        tipo = _texto(face.get("TipoPainel")) or "SEM TIPO"
+        eh_digital = tipo.upper() == "PAINEL DIGITAL"
+        qtd_faces = _inteiro(face.get("QuantidadeFaces"), 0) or CAPACIDADE_DIGITAL_FIXA
+
+        if eh_digital:
+            itens_ocupacao = ocupacoes_por_painel_digital.get(id_painel, [])
+            slot_dias_ocupados = 0
+            for item in itens_ocupacao:
+                slot_dias_ocupados += _dias_sobrepostos(item.get("DataInicio"), item.get("DataFim")) * int(item.get("Spans") or 1)
+            denominador = max(1, qtd_faces * total_dias_ano)
+            pct = min(1.0, max(0.0, slot_dias_ocupados / denominador))
+            ocupacao_txt = "Ocupado" if slot_dias_ocupados > 0 else "Desocupado"
+            item_exibicao = None
+            pref_lista = preferencias_por_painel.get(id_painel, [])
+        else:
+            itens_ocupacao = []
+            if id_painel > 0 and id_face > 0:
+                itens_ocupacao.extend(ocupacoes_por_face.get((id_painel, id_face), []))
+            if codponto > 0 and codface:
+                itens_ocupacao.extend(ocupacoes_por_face.get((codponto, codface), []))
+
+            # remove duplicidade quando o mesmo contrato entrou pela chave de ID e pela chave CodFace
+            itens_unicos = {}
+            for item in itens_ocupacao:
+                chave = (item.get("TipoOrigem"), item.get("ID"), item.get("DataInicio"), item.get("DataFim"))
+                itens_unicos[chave] = item
+            itens_ocupacao = list(itens_unicos.values())
+
+            dias_ocupados = _unir_intervalos_e_contar_dias([(i.get("DataInicio"), i.get("DataFim")) for i in itens_ocupacao])
+            pct = min(1.0, max(0.0, dias_ocupados / max(1, total_dias_ano)))
+            ocupacao_txt = "Ocupado" if dias_ocupados > 0 else "Desocupado"
+            item_exibicao = _selecionar_item_exibicao(itens_ocupacao)
+            pref_lista = preferencias_por_face.get((id_painel, id_face), [])
+
+        preferencia_txt = "Sim" if pref_lista else "Não"
+
+        marca = ""
+        vendedor = ""
+        data_inicio = None
+        data_fim = None
+        fim_vigente = None
+
+        if not eh_digital and item_exibicao:
+            marca = _texto(item_exibicao.get("MarcaExibida"))
+            vendedor = _texto(item_exibicao.get("Vendedor"))
+            data_inicio = item_exibicao.get("DataInicio")
+            data_fim = item_exibicao.get("DataFim")
+            if data_inicio and data_fim and data_inicio <= hoje_ref <= data_fim:
+                fim_vigente = data_fim
+
+        linhas.append([
+            codface,
+            tipo,
+            _texto(face.get("Cidade")),
+            _texto(face.get("UF")),
+            _localizacao(face),
+            _texto(face.get("Bairro")),
+            _texto(face.get("Referencia")),
+            _texto(face.get("FormatoLxA")) or _texto(face.get("FormatoLonaAcabadaLxAm")),
+            ocupacao_txt,
+            pct,
+            marca,
+            vendedor,
+            data_inicio,
+            data_fim,
+            fim_vigente,
+            preferencia_txt,
+        ])
+
+    for row_values in linhas:
+        ws.append(row_values)
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+        ocupacao = row[8].value
+        preferencia = row[15].value
+        for cell in row:
+            cell.font = font_body
+            cell.border = border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+        row[9].number_format = "0.00%"
+        for idx in (12, 13, 14):
+            row[idx].number_format = "dd/mm/yyyy"
+        if ocupacao == "Ocupado":
+            row[8].fill = fill_ocupado
+        else:
+            row[8].fill = fill_desocupado
+        if preferencia == "Sim":
+            row[15].fill = fill_pref
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
+
+    larguras = {
+        "A": 16, "B": 20, "C": 18, "D": 8, "E": 36, "F": 20, "G": 32, "H": 18,
+        "I": 14, "J": 14, "K": 28, "L": 24, "M": 14, "N": 14, "O": 18, "P": 22,
+    }
+    for col, width in larguras.items():
+        ws.column_dimensions[col].width = width
+
+    ws.row_dimensions[1].height = 32
+
+    for row_idx in range(2, ws.max_row + 1):
+        ws.row_dimensions[row_idx].height = 28
+
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    nome_download = f"Ocupação Clientes {ano}.xlsx"
+    return bio, nome_download
 @paineis_bp.route("/exportar_excel", methods=["GET"])
 @limiter.limit("20 per minute", methods=["GET"])
 @login_required
@@ -16104,6 +16595,168 @@ def exportar_excel_download(task_id: str):
         max_age=0,
     )
 
+
+
+@paineis_bp.route("/exportar_ocupacao_clientes", methods=["GET"])
+@limiter.limit("20 per minute", methods=["GET"])
+@login_required
+def exportar_ocupacao_clientes_excel():
+    """
+    Eu inicio a geração do relatório Ocupação Clientes em segundo plano.
+
+    Importante:
+    - Este endpoint é NOVO.
+    - Ele NÃO substitui /paineis/exportar_excel.
+    - Ele gera uma única aba com layout analítico por CodFace.
+    """
+    ano = _normalizar_ano_exportacao_ocupacao(request.args.get("ano"))
+
+    from ..tasks.paineis_relatorios_tasks import gerar_relatorio_ocupacao_clientes_excel_async
+
+    tarefa = gerar_relatorio_ocupacao_clientes_excel_async.apply_async(
+        args=[ano],
+        queue="paineis_ocupacao",
+    )
+
+    acompanhamento_url = url_for(
+        "Paineis.relatorios_paineis",
+        ano_clientes=ano,
+        task_id_clientes=tarefa.id,
+    )
+
+    payload = {
+        "ok": True,
+        "task_id": tarefa.id,
+        "ano": ano,
+        "tipo_relatorio": "ocupacao_clientes",
+        "state": "PENDING",
+        "status": "Relatório Ocupação Clientes enviado para geração em segundo plano.",
+        "status_url": url_for("Paineis.exportar_ocupacao_clientes_status", task_id=tarefa.id),
+        "download_url": url_for("Paineis.exportar_ocupacao_clientes_download", task_id=tarefa.id),
+        "acompanhamento_url": acompanhamento_url,
+    }
+
+    aceita_json = "application/json" in str(request.headers.get("Accept") or "").lower()
+    ajax = str(request.args.get("ajax") or "").strip() == "1"
+
+    if aceita_json or ajax:
+        return jsonify(payload), 202
+
+    return redirect(acompanhamento_url)
+
+
+@paineis_bp.route("/exportar_ocupacao_clientes/status/<task_id>", methods=["GET"])
+@limiter.limit("120 per minute", methods=["GET"])
+@login_required
+def exportar_ocupacao_clientes_status(task_id: str):
+    """Eu retorno o andamento da geração assíncrona do Excel Ocupação Clientes."""
+    task_id = str(task_id or "").strip()
+
+    if not task_id:
+        abort(404)
+
+    resultado = AsyncResult(task_id, app=celery_app)
+    estado = resultado.state
+
+    resposta = {
+        "ok": True,
+        "task_id": task_id,
+        "tipo_relatorio": "ocupacao_clientes",
+        "state": estado,
+        "pronto": False,
+        "erro": None,
+        "download_url": None,
+        "status": "Aguardando início da geração do relatório Ocupação Clientes.",
+    }
+
+    if estado == "PENDING":
+        return jsonify(resposta)
+
+    if estado == "STARTED":
+        resposta["status"] = "Gerando Ocupação Clientes em segundo plano..."
+        return jsonify(resposta)
+
+    if estado == "PROGRESS":
+        meta = resultado.info if isinstance(resultado.info, dict) else {}
+        resposta["status"] = meta.get("status") or "Gerando Ocupação Clientes em segundo plano..."
+        resposta["progresso"] = meta.get("progresso")
+        return jsonify(resposta)
+
+    if estado == "SUCCESS":
+        dados = resultado.result if isinstance(resultado.result, dict) else {}
+
+        if not dados.get("ok"):
+            resposta["ok"] = False
+            resposta["erro"] = dados.get("erro") or "A tarefa terminou, mas não retornou arquivo."
+            resposta["status"] = resposta["erro"]
+            return jsonify(resposta), 500
+
+        resposta["pronto"] = True
+        resposta["status"] = "Arquivo Ocupação Clientes pronto para download."
+        resposta["download_url"] = url_for("Paineis.exportar_ocupacao_clientes_download", task_id=task_id)
+        resposta["filename"] = dados.get("filename") or f"Ocupação Clientes {dados.get('ano') or ''}.xlsx"
+        return jsonify(resposta)
+
+    if estado == "FAILURE":
+        resposta["ok"] = False
+        resposta["erro"] = str(resultado.info or "Falha ao gerar relatório Ocupação Clientes.")
+        resposta["status"] = resposta["erro"]
+        return jsonify(resposta), 500
+
+    resposta["status"] = f"Estado atual da tarefa: {estado}"
+    return jsonify(resposta)
+
+
+@paineis_bp.route("/exportar_ocupacao_clientes/download/<task_id>", methods=["GET"])
+@limiter.limit("60 per minute", methods=["GET"])
+@login_required
+def exportar_ocupacao_clientes_download(task_id: str):
+    """Eu faço o download do Excel Ocupação Clientes quando a task Celery termina."""
+    task_id = str(task_id or "").strip()
+
+    if not task_id:
+        abort(404)
+
+    resultado = AsyncResult(task_id, app=celery_app)
+
+    if not resultado.ready():
+        return jsonify({
+            "ok": False,
+            "state": resultado.state,
+            "erro": "O relatório Ocupação Clientes ainda não terminou de gerar.",
+        }), 409
+
+    if not resultado.successful():
+        return jsonify({
+            "ok": False,
+            "state": resultado.state,
+            "erro": str(resultado.info or "Falha ao gerar relatório Ocupação Clientes."),
+        }), 500
+
+    dados = resultado.result if isinstance(resultado.result, dict) else {}
+
+    if not dados.get("ok"):
+        return jsonify({
+            "ok": False,
+            "erro": dados.get("erro") or "A tarefa não retornou arquivo válido.",
+        }), 500
+
+    caminho = _caminho_relatorio_ocupacao_seguro(dados.get("arquivo"))
+    if not caminho.exists() or not caminho.is_file():
+        return jsonify({
+            "ok": False,
+            "erro": "O arquivo gerado não foi encontrado no servidor. Gere o relatório novamente.",
+        }), 404
+
+    nome_download = str(dados.get("filename") or "Ocupação Clientes.xlsx").strip() or "Ocupação Clientes.xlsx"
+
+    return send_file(
+        caminho,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=nome_download,
+        max_age=0,
+    )
 
 def _excel_nome_aba(codponto):
     r"""

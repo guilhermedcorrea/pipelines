@@ -39,8 +39,9 @@
 
   .relatorios-grid{
     display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 14px;
+    align-items: stretch;
   }
 
   .relatorio-card{
@@ -103,6 +104,21 @@
     background: var(--euro-blue-2);
   }
 
+  .relatorio-actions{
+    display:flex;
+    align-items:flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .relatorio-actions .campo-ano{
+    width: 140px;
+  }
+
+  .relatorio-actions label{
+    margin-bottom: 6px;
+  }
+
   .relatorio-info{
     border-radius: 12px;
     border: 1px solid rgba(0,40,132,.12);
@@ -146,7 +162,6 @@
     color: inherit;
     font-weight: 950;
   }
-
 </style>
 
 <div class="relatorios-page">
@@ -195,39 +210,61 @@
 
       <div id="statusExportacaoOcupacao" class="relatorio-status" aria-live="polite"></div>
     </section>
+
+    <section class="relatorio-card">
+      <div class="relatorio-card-top">
+        <div>
+          <h2 class="relatorio-card-title">Ocupação Clientes</h2>
+          <p class="relatorio-card-desc">
+            Gera uma única aba em Excel com CodFace, dados do painel, ocupação, cliente, vendedor, vigência e preferência de renovação.
+          </p>
+        </div>
+
+        <div class="relatorio-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M14 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M8 13h8M8 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+        </div>
+      </div>
+
+      <div class="relatorio-actions">
+        <div class="campo-ano">
+          <label for="anoOcupacaoClientes">Ano</label>
+          <select id="anoOcupacaoClientes">
+            <option value="2024">2024</option>
+            <option value="2025">2025</option>
+            <option value="2026" selected>2026</option>
+            <option value="2027">2027</option>
+          </select>
+        </div>
+
+        <button type="button" class="icon-btn" id="btnExportarOcupacaoClientes" title="Gerar Excel Ocupação Clientes">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+            <path d="M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+          Download
+        </button>
+      </div>
+
+      <div class="relatorio-info">
+        Este é outro relatório: não substitui a grade anual. Ele gera o arquivo <b>Ocupação Clientes</b> em segundo plano usando Celery/Redis e baixa quando terminar.
+      </div>
+
+      <div id="statusExportacaoOcupacaoClientes" class="relatorio-status" aria-live="polite"></div>
+    </section>
   </div>
 </div>
 
 <script>
 (function(){
-  const statusBox = document.getElementById("statusExportacaoOcupacao");
   const params = new URLSearchParams(window.location.search);
-  const taskId = (params.get("task_id") || "").trim();
 
-  if (!statusBox || !taskId){
-    return;
-  }
-
-  const statusUrlBase = "{{ url_for('Paineis.exportar_excel_status', task_id='__TASK_ID__') }}";
-  const statusUrl = statusUrlBase.replace("__TASK_ID__", encodeURIComponent(taskId));
-
-  try{
-    if (window.PaineisExportacaoOcupacao){
-      window.PaineisExportacaoOcupacao.registrar({
-        task_id: taskId,
-        ano: params.get("ano") || "",
-        status_url: statusUrl
-      });
-      window.PaineisExportacaoOcupacao.iniciarMonitor();
-    }
-  } catch(_){
-    // A própria tela continua acompanhando mesmo se o armazenamento local falhar.
-  }
-
-  let tentativas = 0;
-  let baixou = false;
-
-  function mostrarStatus(texto, classe){
+  function mostrarStatus(statusBox, texto, classe){
+    if (!statusBox) return;
     statusBox.classList.add("is-visible");
     statusBox.classList.remove("is-error", "is-success");
 
@@ -238,7 +275,8 @@
     statusBox.textContent = texto || "Acompanhando geração do relatório...";
   }
 
-  function mostrarSucessoComLink(texto, downloadUrl){
+  function mostrarSucessoComLink(statusBox, texto, downloadUrl){
+    if (!statusBox) return;
     statusBox.classList.add("is-visible", "is-success");
     statusBox.classList.remove("is-error");
     statusBox.innerHTML = "";
@@ -257,68 +295,140 @@
     statusBox.appendChild(link);
   }
 
-  async function consultarStatus(){
-    tentativas += 1;
-
+  function baixar(downloadUrl){
+    if (!downloadUrl) return;
     try{
-      const resp = await fetch(statusUrl, {
-        method: "GET",
-        headers: {
-          "Accept": "application/json"
-        },
-        credentials: "same-origin"
-      });
-
-      const data = await resp.json();
-
-      if (!resp.ok || data.ok === false){
-        mostrarStatus(data.erro || data.status || "Falha ao gerar o relatório.", "is-error");
-        return;
-      }
-
-      if (data.pronto && data.download_url){
-        mostrarSucessoComLink("Arquivo pronto. O download vai começar automaticamente.", data.download_url);
-
-        if (!baixou){
-          baixou = true;
-
-          try{
-            if (window.PaineisExportacaoOcupacao){
-              window.PaineisExportacaoOcupacao.remover(taskId);
-            }
-          } catch(_){
-            // Não bloqueia o download.
-          }
-
-          /*
-            Eu forço o navegador a acessar a rota de download.
-            Isso faz o arquivo aparecer no Downloads do computador do usuário,
-            igual acontecia na exportação antiga, mas sem travar a request.
-          */
-          try{
-            window.location.assign(data.download_url);
-          } catch(_){
-            window.location.href = data.download_url;
-          }
-        }
-
-        return;
-      }
-
-      mostrarStatus(data.status || "Gerando arquivo em segundo plano...");
-
-      const espera = tentativas < 10 ? 1800 : 3500;
-      window.setTimeout(consultarStatus, espera);
-
-    } catch(err){
-      mostrarStatus("Não consegui consultar o andamento agora. Vou tentar novamente em alguns segundos.");
-      window.setTimeout(consultarStatus, 4000);
+      window.location.assign(downloadUrl);
+    }catch(_){
+      window.location.href = downloadUrl;
     }
   }
 
-  mostrarStatus("Relatório enviado para geração em segundo plano. Pode aguardar nesta tela.");
-  consultarStatus();
+  function acompanharRelatorio(config){
+    const statusBox = config.statusBox;
+    const taskId = String(config.taskId || "").trim();
+    if (!statusBox || !taskId) return;
+
+    const statusUrl = config.statusUrlBase.replace("__TASK_ID__", encodeURIComponent(taskId));
+    let baixou = false;
+
+    async function consultar(){
+      try{
+        const resp = await fetch(statusUrl, {
+          method: "GET",
+          headers: {"Accept": "application/json"},
+          credentials: "same-origin"
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || data.ok === false){
+          mostrarStatus(statusBox, data.erro || data.status || "Falha ao gerar relatório.", "is-error");
+          return;
+        }
+
+        if (data.pronto && data.download_url){
+          mostrarSucessoComLink(statusBox, data.status || "Arquivo pronto.", data.download_url);
+
+          if (!baixou){
+            baixou = true;
+            baixar(data.download_url);
+          }
+          return;
+        }
+
+        mostrarStatus(statusBox, data.status || "Gerando relatório em segundo plano...");
+        window.setTimeout(consultar, 4000);
+      }catch(err){
+        mostrarStatus(statusBox, "Não consegui consultar o status agora. Tentando novamente...", "is-error");
+        window.setTimeout(consultar, 6000);
+      }
+    }
+
+    consultar();
+  }
+
+  const statusOcupacao = document.getElementById("statusExportacaoOcupacao");
+  const taskIdGrade = (params.get("task_id") || "").trim();
+
+  if (statusOcupacao && taskIdGrade){
+    const statusUrlGradeBase = "{{ url_for('Paineis.exportar_excel_status', task_id='__TASK_ID__') }}";
+
+    try{
+      if (window.PaineisExportacaoOcupacao){
+        window.PaineisExportacaoOcupacao.registrar({
+          task_id: taskIdGrade,
+          ano: params.get("ano") || "",
+          status_url: statusUrlGradeBase.replace("__TASK_ID__", encodeURIComponent(taskIdGrade))
+        });
+        window.PaineisExportacaoOcupacao.iniciarMonitor();
+      }
+    }catch(_){
+      // A própria tela continua acompanhando.
+    }
+
+    acompanharRelatorio({
+      statusBox: statusOcupacao,
+      taskId: taskIdGrade,
+      statusUrlBase: statusUrlGradeBase
+    });
+  }
+
+  const btnClientes = document.getElementById("btnExportarOcupacaoClientes");
+  const anoClientes = document.getElementById("anoOcupacaoClientes");
+  const statusClientes = document.getElementById("statusExportacaoOcupacaoClientes");
+  const taskIdClientes = (params.get("task_id_clientes") || "").trim();
+
+  if (statusClientes && taskIdClientes){
+    acompanharRelatorio({
+      statusBox: statusClientes,
+      taskId: taskIdClientes,
+      statusUrlBase: "{{ url_for('Paineis.exportar_ocupacao_clientes_status', task_id='__TASK_ID__') }}"
+    });
+  }
+
+  if (btnClientes){
+    btnClientes.addEventListener("click", async function(ev){
+      ev.preventDefault();
+
+      const ano = String((anoClientes && anoClientes.value) || "").replace(/[^\d]/g, "").slice(0, 4);
+      const url = "{{ url_for('Paineis.exportar_ocupacao_clientes_excel') }}" + "?ano=" + encodeURIComponent(ano || "") + "&ajax=1";
+
+      btnClientes.disabled = true;
+      const textoOriginal = btnClientes.textContent;
+      btnClientes.textContent = "Gerando...";
+      mostrarStatus(statusClientes, "Enviando relatório Ocupação Clientes para geração em segundo plano...");
+
+      try{
+        const resp = await fetch(url, {
+          method: "GET",
+          headers: {"Accept": "application/json"},
+          credentials: "same-origin"
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || data.ok === false){
+          throw new Error(data.erro || data.status || "Não foi possível iniciar o relatório Ocupação Clientes.");
+        }
+
+        if (data.acompanhamento_url){
+          window.location.href = data.acompanhamento_url;
+        } else {
+          acompanharRelatorio({
+            statusBox: statusClientes,
+            taskId: data.task_id,
+            statusUrlBase: "{{ url_for('Paineis.exportar_ocupacao_clientes_status', task_id='__TASK_ID__') }}"
+          });
+        }
+      }catch(err){
+        mostrarStatus(statusClientes, err.message || "Não foi possível iniciar o relatório Ocupação Clientes.", "is-error");
+      }finally{
+        btnClientes.disabled = false;
+        btnClientes.textContent = textoOriginal || "Download";
+      }
+    });
+  }
 })();
 </script>
-
 {% endblock %}
