@@ -15264,11 +15264,84 @@ def cliente_detalhe(id_empresa: int):
 
 
 
-@paineis_bp.route("/exportar_excel", methods=["GET"])
-@limiter.limit("3 per minute", methods=["GET"])
+
+
+@paineis_bp.route("/relatorios", methods=["GET"])
 @login_required
-@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
-def exportar_excel_ano():
+@limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
+@retry_get_view(db, attempts=3, base_delay=0.2, max_delay=0.8)
+def relatorios_paineis():
+    """
+    Eu renderizo a central de relatórios dos painéis.
+
+    Regra de acesso:
+    - todo usuário autenticado pode visualizar esta tela;
+    - a tela começa apenas com o relatório/exportação de ocupação anual.
+    """
+    return render_template(
+        "euromidia/relatorios.html",
+        ano_atual=date.today().year,
+    )
+
+def _normalizar_ano_exportacao_ocupacao(valor=None) -> int:
+    """Eu normalizo o ano da exportação para evitar ano inválido quebrando a tarefa."""
+    try:
+        if valor is None:
+            ano = date.today().year
+        else:
+            ano = int(str(valor or "").strip())
+    except Exception:
+        ano = date.today().year
+
+    if ano < 2000 or ano > 2100:
+        ano = date.today().year
+
+    return ano
+
+
+def _obter_pasta_relatorios_ocupacao() -> Path:
+    """
+    Eu resolvo uma pasta compartilhada entre Flask e Celery.
+
+    Importante:
+    - O worker Celery gera o arquivo em segundo plano.
+    - O Flask precisa enxergar a mesma pasta para fazer o download.
+    - Por isso o docker-compose monta ./FlaskApp/relatorios neste caminho.
+    """
+    candidatos = [
+        current_app.config.get("PASTA_RELATORIOS_OCUPACAO"),
+        os.getenv("PASTA_RELATORIOS_OCUPACAO"),
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios/ocupacao",
+    ]
+
+    for candidato in candidatos:
+        texto = str(candidato or "").strip()
+        if not texto:
+            continue
+
+        pasta = Path(texto)
+        pasta.mkdir(parents=True, exist_ok=True)
+        return pasta
+
+    raise RuntimeError("Não foi possível resolver a pasta de relatórios de ocupação.")
+
+
+def _caminho_relatorio_ocupacao_seguro(caminho_arquivo: str) -> Path:
+    """
+    Eu valido se o arquivo retornado pelo Celery está dentro da pasta esperada.
+
+    Isso evita que um task_id adulterado tente baixar arquivo fora da área de relatórios.
+    """
+    pasta_base = _obter_pasta_relatorios_ocupacao().resolve()
+    caminho = Path(str(caminho_arquivo or "")).resolve()
+
+    if not str(caminho).startswith(str(pasta_base)):
+        abort(403)
+
+    return caminho
+
+
+def _gerar_excel_ocupacao_ano_bytes(ano: int):
     """
     Eu gero a grade anual em Excel usando a mesma regra visual da tela /paineis/<codponto>/grade.
 
@@ -15278,18 +15351,9 @@ def exportar_excel_ano():
     - A ocupação deve vir primeiro de FatoControleContratosItensEuromidia.
     - As reservas devem vir de FatoOcupacaoPaineisEuromidia apenas quando Origem='RESERVA' e Status='RESERVADO'.
     """
-    if _usuario_logado_eh_perfil_vendedor():
-        abort(403, description="Perfil Vendedor não tem permissão para exportar Excel.")
-
     from sqlalchemy import bindparam
 
-    try:
-        ano = int((request.args.get("ano") or "").strip())
-    except Exception:
-        ano = date.today().year
-
-    if ano < 2000 or ano > 2100:
-        ano = date.today().year
+    ano = _normalizar_ano_exportacao_ocupacao(ano)
 
     dt_ini_ano = date(ano, 1, 1)
     dt_fim_ano = date(ano, 12, 31)
@@ -15878,11 +15942,166 @@ def exportar_excel_ano():
     bio.seek(0)
 
     nome = f"grade_paineis_{ano}.xlsx"
+    return bio, nome
+
+
+@paineis_bp.route("/exportar_excel", methods=["GET"])
+@limiter.limit("20 per minute", methods=["GET"])
+@login_required
+def exportar_excel_ano():
+    """
+    Eu inicio a geração da grade anual em segundo plano.
+
+    Motivo:
+    - gerar todas as abas de todos os painéis pode demorar mais que o timeout do Nginx/Gunicorn;
+    - por isso a request HTTP agora só cria a tarefa Celery e responde rápido;
+    - o arquivo pronto é baixado depois pelo endpoint de download.
+    """
+    ano = _normalizar_ano_exportacao_ocupacao(request.args.get("ano"))
+
+    from ..tasks.paineis_relatorios_tasks import gerar_relatorio_ocupacao_excel_async
+
+    tarefa = gerar_relatorio_ocupacao_excel_async.apply_async(
+        args=[ano],
+        queue="paineis_ocupacao",
+    )
+
+    acompanhamento_url = url_for(
+        "Paineis.relatorios_paineis",
+        ano=ano,
+        task_id=tarefa.id,
+    )
+
+    payload = {
+        "ok": True,
+        "task_id": tarefa.id,
+        "ano": ano,
+        "state": "PENDING",
+        "status": "Relatório enviado para geração em segundo plano.",
+        "status_url": url_for("Paineis.exportar_excel_status", task_id=tarefa.id),
+        "download_url": url_for("Paineis.exportar_excel_download", task_id=tarefa.id),
+        "acompanhamento_url": acompanhamento_url,
+    }
+
+    aceita_json = "application/json" in str(request.headers.get("Accept") or "").lower()
+    ajax = str(request.args.get("ajax") or "").strip() == "1"
+
+    if aceita_json or ajax:
+        return jsonify(payload), 202
+
+    return redirect(acompanhamento_url)
+
+
+@paineis_bp.route("/exportar_excel/status/<task_id>", methods=["GET"])
+@limiter.limit("120 per minute", methods=["GET"])
+@login_required
+def exportar_excel_status(task_id: str):
+    """Eu retorno o andamento da geração assíncrona do Excel."""
+    task_id = str(task_id or "").strip()
+
+    if not task_id:
+        abort(404)
+
+    resultado = AsyncResult(task_id, app=celery_app)
+    estado = resultado.state
+
+    resposta = {
+        "ok": True,
+        "task_id": task_id,
+        "state": estado,
+        "pronto": False,
+        "erro": None,
+        "download_url": None,
+        "status": "Aguardando início da geração.",
+    }
+
+    if estado == "PENDING":
+        return jsonify(resposta)
+
+    if estado == "STARTED":
+        resposta["status"] = "Gerando arquivo Excel em segundo plano..."
+        return jsonify(resposta)
+
+    if estado == "PROGRESS":
+        meta = resultado.info if isinstance(resultado.info, dict) else {}
+        resposta["status"] = meta.get("status") or "Gerando arquivo Excel em segundo plano..."
+        resposta["progresso"] = meta.get("progresso")
+        return jsonify(resposta)
+
+    if estado == "SUCCESS":
+        dados = resultado.result if isinstance(resultado.result, dict) else {}
+
+        if not dados.get("ok"):
+            resposta["ok"] = False
+            resposta["erro"] = dados.get("erro") or "A tarefa terminou, mas não retornou arquivo."
+            resposta["status"] = resposta["erro"]
+            return jsonify(resposta), 500
+
+        resposta["pronto"] = True
+        resposta["status"] = "Arquivo pronto para download."
+        resposta["download_url"] = url_for("Paineis.exportar_excel_download", task_id=task_id)
+        resposta["filename"] = dados.get("filename") or f"grade_paineis_{dados.get('ano') or ''}.xlsx"
+        return jsonify(resposta)
+
+    if estado == "FAILURE":
+        resposta["ok"] = False
+        resposta["erro"] = str(resultado.info or "Falha ao gerar relatório.")
+        resposta["status"] = resposta["erro"]
+        return jsonify(resposta), 500
+
+    resposta["status"] = f"Estado atual da tarefa: {estado}"
+    return jsonify(resposta)
+
+
+@paineis_bp.route("/exportar_excel/download/<task_id>", methods=["GET"])
+@limiter.limit("60 per minute", methods=["GET"])
+@login_required
+def exportar_excel_download(task_id: str):
+    """Eu faço o download do Excel quando a tarefa Celery terminou com sucesso."""
+    task_id = str(task_id or "").strip()
+
+    if not task_id:
+        abort(404)
+
+    resultado = AsyncResult(task_id, app=celery_app)
+
+    if not resultado.ready():
+        return jsonify({
+            "ok": False,
+            "state": resultado.state,
+            "erro": "O relatório ainda não terminou de gerar.",
+        }), 409
+
+    if not resultado.successful():
+        return jsonify({
+            "ok": False,
+            "state": resultado.state,
+            "erro": str(resultado.info or "Falha ao gerar relatório."),
+        }), 500
+
+    dados = resultado.result if isinstance(resultado.result, dict) else {}
+
+    if not dados.get("ok"):
+        return jsonify({
+            "ok": False,
+            "erro": dados.get("erro") or "A tarefa não retornou arquivo válido.",
+        }), 500
+
+    caminho = _caminho_relatorio_ocupacao_seguro(dados.get("arquivo"))
+    if not caminho.exists() or not caminho.is_file():
+        return jsonify({
+            "ok": False,
+            "erro": "O arquivo gerado não foi encontrado no servidor. Gere o relatório novamente.",
+        }), 404
+
+    nome_download = str(dados.get("filename") or caminho.name).strip() or caminho.name
+
     return send_file(
-        bio,
+        caminho,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
-        download_name=nome,
+        download_name=nome_download,
+        max_age=0,
     )
 
 
@@ -15907,15 +16126,14 @@ def _excel_estilos_basicos():
 
     Ajuste importante:
     - A barra da ocupação precisa ficar realmente mesclada e centralizada.
-    - O texto da barra usa quebra automática dentro do intervalo mesclado, em vez de
-      ficar espremido em uma única célula do dia inicial.
-    - A separação visual não depende só da cor: cada barra recebe borda externa forte
+    - O texto da barra fica no topo da faixa, em linha única, para não quebrar como "Cot/a".
+    - A separação visual não depende só da cor: cada barra recebe contorno externo preto
       e cada face mantém uma linha fina de respiro.
     """
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
     thin = Side(style="thin", color="CBD5E1")
-    medium = Side(style="medium", color="1D4ED8")
+    medium = Side(style="medium", color="000000")
 
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     border_barra = Border(left=medium, right=medium, top=medium, bottom=medium)
@@ -15928,10 +16146,10 @@ def _excel_estilos_basicos():
         "font_sub": Font(bold=True, size=10, color="64748B"),
         "font_face": Font(bold=True, size=10, color="002884"),
         "font_cab": Font(bold=True, size=10, color="0F172A"),
-        "font_item": Font(bold=True, size=9, color="0F172A"),
+        "font_item": Font(bold=True, size=8, color="111827"),
         "al_center": Alignment(horizontal="center", vertical="center", wrap_text=True),
         "al_left": Alignment(horizontal="left", vertical="center", wrap_text=True),
-        "al_barra": Alignment(horizontal="center", vertical="center", wrap_text=True, shrink_to_fit=False),
+        "al_barra": Alignment(horizontal="center", vertical="top", wrap_text=False, shrink_to_fit=False),
         "fill_mes": PatternFill("solid", fgColor="FFF3C4"),
         "fill_cab": PatternFill("solid", fgColor="F8FAFC"),
         "fill_fds": PatternFill("solid", fgColor="EEF2F7"),
@@ -15988,6 +16206,7 @@ def _excel_montar_aba_grade_ano(
     import calendar
     from datetime import date
     from openpyxl.styles import Border
+    from openpyxl.comments import Comment
     from openpyxl.utils import get_column_letter
 
     def _int_local(valor, padrao: int = 0) -> int:
@@ -16050,13 +16269,38 @@ def _excel_montar_aba_grade_ano(
                 celula.border = _border_barra_externa(rr, cc, r1, c1, r2, c2)
 
     def _aplicar_estilo_topo_barra(r1, c1, texto, fill_barra):
-        """Eu garanto que a célula principal da faixa fique com o mesmo efeito do botão Mesclar e Centralizar."""
+        """Eu deixo o texto principal na célula mesclada, no topo e centralizado."""
         celula = ws.cell(row=r1, column=c1)
         celula.value = texto
         celula.fill = fill_barra
         celula.font = estilos["font_item"]
         celula.alignment = estilos.get("al_barra", estilos["al_center"])
         celula.border = estilos.get("border_barra", estilos["border"])
+
+        if texto:
+            try:
+                celula.comment = Comment(str(texto), "Euromidia")
+            except Exception:
+                pass
+
+    def _reaplicar_contorno_barra(r1, c1, r2, c2, fill_barra):
+        """
+        Eu reaplico o contorno depois do merge.
+
+        O openpyxl pode perder parte da borda visual quando o intervalo é mesclado.
+        Por isso eu percorro todo o retângulo pintado e deixo apenas o perímetro
+        com linha escura, igual ao modelo antigo da planilha.
+        """
+        for rr in range(r1, r2 + 1):
+            for cc in range(c1, c2 + 1):
+                celula = ws.cell(row=rr, column=cc)
+                try:
+                    celula.fill = fill_barra
+                    celula.font = estilos["font_item"]
+                    celula.alignment = estilos.get("al_barra", estilos["al_center"])
+                    celula.border = _border_barra_externa(rr, cc, r1, c1, r2, c2)
+                except Exception:
+                    pass
 
     def _mesclar_barra(r1, c1, r2, c2, texto, fill_barra):
         """
@@ -16093,6 +16337,7 @@ def _excel_montar_aba_grade_ano(
                 except Exception:
                     pass
 
+        _reaplicar_contorno_barra(r1, c1, r2, c2, fill_barra)
         _aplicar_estilo_topo_barra(r1, c1, texto, fill_barra)
 
     ws["A1"] = f"Grade Anual - CodPonto {codponto} ({ano})"
@@ -16110,7 +16355,7 @@ def _excel_montar_aba_grade_ano(
     altura_face = 2
     col_inicio = 1
     largura_col_face = 13
-    largura_col_dia = 3.6
+    largura_col_dia = 4.2
     gap_entre_meses = 2
 
     if not faces:
@@ -16271,9 +16516,9 @@ def _excel_montar_aba_grade_ano(
 
     for idx in range(len(faces)):
         linha = linha_primeira_face + idx * altura_face
-        ws.row_dimensions[linha].height = 26
+        ws.row_dimensions[linha].height = 34
         if altura_face > 1:
-            ws.row_dimensions[linha + 1].height = 8
+            ws.row_dimensions[linha + 1].height = 7
 
 
 def _texto_excel_item(item: dict) -> str:

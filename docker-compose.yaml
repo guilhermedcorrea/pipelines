@@ -121,6 +121,7 @@ x-flask-common: &flask-common
     CELERY_BROKER_URL: redis://redis:6379/1
     CELERY_RESULT_BACKEND: redis://redis:6379/1
     CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+    PASTA_RELATORIOS_OCUPACAO: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios/ocupacao
     PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
 
     MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
@@ -152,6 +153,7 @@ x-flask-common: &flask-common
   volumes:
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
+    - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
     - ./FlaskApp/app/static:/app/app/static
   restart: unless-stopped
 
@@ -405,6 +407,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
+      PASTA_RELATORIOS_OCUPACAO: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios/ocupacao
       MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
     command: python -m celery -A app.celery_app.celery_app worker -Q paineis_ocupacao -l info --concurrency=3 --prefetch-multiplier=1
     extra_hosts:
@@ -419,6 +422,7 @@ services:
     volumes:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
       - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
+      - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 

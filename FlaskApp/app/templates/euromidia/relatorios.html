@@ -1,0 +1,324 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Relatórios | Euromídia{% endblock %}
+
+{% block content %}
+<style>
+  .relatorios-page{
+    display: grid;
+    gap: 16px;
+  }
+
+  .relatorios-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .relatorios-title-wrap{
+    display:grid;
+    gap: 4px;
+  }
+
+  .relatorios-title{
+    margin: 0;
+    color: var(--euro-blue);
+    font-size: 24px;
+    font-weight: 950;
+    line-height: 1.15;
+  }
+
+  .relatorios-subtitle{
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 750;
+  }
+
+  .relatorios-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+  }
+
+  .relatorio-card{
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 1px 8px rgba(0,0,0,.06);
+    padding: 18px;
+    display:grid;
+    gap: 12px;
+  }
+
+  .relatorio-card-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 12px;
+  }
+
+  .relatorio-card-title{
+    margin: 0;
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 950;
+  }
+
+  .relatorio-card-desc{
+    margin: 6px 0 0 0;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .relatorio-icon{
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    background: rgba(0,40,132,.08);
+    color: var(--euro-blue);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex: 0 0 auto;
+  }
+
+  .relatorio-icon svg{
+    width: 22px;
+    height: 22px;
+  }
+
+  .relatorios-page .icon-btn{
+    width: fit-content;
+    background: var(--euro-blue);
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(0,40,132,.18);
+  }
+
+  .relatorios-page .icon-btn:hover{
+    background: var(--euro-blue-2);
+  }
+
+  .relatorio-info{
+    border-radius: 12px;
+    border: 1px solid rgba(0,40,132,.12);
+    background: rgba(0,40,132,.04);
+    padding: 10px 12px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 750;
+    line-height: 1.45;
+  }
+
+  .relatorio-status{
+    display:none;
+    border-radius: 14px;
+    border: 1px solid rgba(0,40,132,.16);
+    background: rgba(0,40,132,.04);
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.45;
+  }
+
+  .relatorio-status.is-visible{
+    display:block;
+  }
+
+  .relatorio-status.is-error{
+    border-color: rgba(220,38,38,.35);
+    background: rgba(220,38,38,.06);
+    color: #991B1B;
+  }
+
+  .relatorio-status.is-success{
+    border-color: rgba(22,163,74,.35);
+    background: rgba(22,163,74,.07);
+    color: #166534;
+  }
+
+  .relatorio-status a{
+    color: inherit;
+    font-weight: 950;
+  }
+
+</style>
+
+<div class="relatorios-page">
+  <div class="relatorios-header">
+    <div class="relatorios-title-wrap">
+      <h1 class="relatorios-title">Relatórios</h1>
+      <p class="relatorios-subtitle">
+        Central inicial para exportações e relatórios operacionais dos painéis.
+      </p>
+    </div>
+  </div>
+
+  <div class="relatorios-grid">
+    <section class="relatorio-card">
+      <div class="relatorio-card-top">
+        <div>
+          <h2 class="relatorio-card-title">Exportar Ocupação</h2>
+          <p class="relatorio-card-desc">
+            Gera a grade anual de ocupação em Excel, com uma aba por painel.
+          </p>
+        </div>
+
+        <div class="relatorio-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2"></path>
+            <path d="M14 3v6h6" stroke="currentColor" stroke-width="2"></path>
+            <path d="M8 17l3-4-3-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M13 9l3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+        </div>
+      </div>
+
+      <button type="button" class="icon-btn" id="btnExportarExcel" data-exportar-excel="1" title="Exportar Excel (grade anual)">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2"></path>
+          <path d="M14 3v6h6" stroke="currentColor" stroke-width="2"></path>
+          <path d="M8 17l3-4-3-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M13 9l3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
+        Exportar
+      </button>
+
+      <div class="relatorio-info">
+        Ao clicar em Exportar, o sistema abre a seleção do ano e gera o arquivo em segundo plano. A página acompanha o andamento e inicia o download quando terminar.
+      </div>
+
+      <div id="statusExportacaoOcupacao" class="relatorio-status" aria-live="polite"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  const statusBox = document.getElementById("statusExportacaoOcupacao");
+  const params = new URLSearchParams(window.location.search);
+  const taskId = (params.get("task_id") || "").trim();
+
+  if (!statusBox || !taskId){
+    return;
+  }
+
+  const statusUrlBase = "{{ url_for('Paineis.exportar_excel_status', task_id='__TASK_ID__') }}";
+  const statusUrl = statusUrlBase.replace("__TASK_ID__", encodeURIComponent(taskId));
+
+  try{
+    if (window.PaineisExportacaoOcupacao){
+      window.PaineisExportacaoOcupacao.registrar({
+        task_id: taskId,
+        ano: params.get("ano") || "",
+        status_url: statusUrl
+      });
+      window.PaineisExportacaoOcupacao.iniciarMonitor();
+    }
+  } catch(_){
+    // A própria tela continua acompanhando mesmo se o armazenamento local falhar.
+  }
+
+  let tentativas = 0;
+  let baixou = false;
+
+  function mostrarStatus(texto, classe){
+    statusBox.classList.add("is-visible");
+    statusBox.classList.remove("is-error", "is-success");
+
+    if (classe){
+      statusBox.classList.add(classe);
+    }
+
+    statusBox.textContent = texto || "Acompanhando geração do relatório...";
+  }
+
+  function mostrarSucessoComLink(texto, downloadUrl){
+    statusBox.classList.add("is-visible", "is-success");
+    statusBox.classList.remove("is-error");
+    statusBox.innerHTML = "";
+
+    const span = document.createElement("span");
+    span.textContent = texto || "Arquivo pronto. ";
+
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.textContent = "Clique aqui para baixar novamente.";
+    link.target = "_blank";
+    link.rel = "noopener";
+
+    statusBox.appendChild(span);
+    statusBox.appendChild(document.createTextNode(" "));
+    statusBox.appendChild(link);
+  }
+
+  async function consultarStatus(){
+    tentativas += 1;
+
+    try{
+      const resp = await fetch(statusUrl, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
+        },
+        credentials: "same-origin"
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok || data.ok === false){
+        mostrarStatus(data.erro || data.status || "Falha ao gerar o relatório.", "is-error");
+        return;
+      }
+
+      if (data.pronto && data.download_url){
+        mostrarSucessoComLink("Arquivo pronto. O download vai começar automaticamente.", data.download_url);
+
+        if (!baixou){
+          baixou = true;
+
+          try{
+            if (window.PaineisExportacaoOcupacao){
+              window.PaineisExportacaoOcupacao.remover(taskId);
+            }
+          } catch(_){
+            // Não bloqueia o download.
+          }
+
+          /*
+            Eu forço o navegador a acessar a rota de download.
+            Isso faz o arquivo aparecer no Downloads do computador do usuário,
+            igual acontecia na exportação antiga, mas sem travar a request.
+          */
+          try{
+            window.location.assign(data.download_url);
+          } catch(_){
+            window.location.href = data.download_url;
+          }
+        }
+
+        return;
+      }
+
+      mostrarStatus(data.status || "Gerando arquivo em segundo plano...");
+
+      const espera = tentativas < 10 ? 1800 : 3500;
+      window.setTimeout(consultarStatus, espera);
+
+    } catch(err){
+      mostrarStatus("Não consegui consultar o andamento agora. Vou tentar novamente em alguns segundos.");
+      window.setTimeout(consultarStatus, 4000);
+    }
+  }
+
+  mostrarStatus("Relatório enviado para geração em segundo plano. Pode aguardar nesta tela.");
+  consultarStatus();
+})();
+</script>
+
+{% endblock %}

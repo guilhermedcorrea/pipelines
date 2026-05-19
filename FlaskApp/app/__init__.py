@@ -13,6 +13,7 @@ from config import (
     RATELIMIT_STORAGE_URI,
     CACHE_REDIS_URL,
     MENSAGERIA_SOCKET_TOKEN,
+    PASTA_RELATORIOS_OCUPACAO,
     EXTENSOES_PERMITIDAS_CHECKING,
     TAMANHO_MAXIMO_UPLOAD_MB,
     LARGURA_MAXIMA_IMAGEM,
@@ -53,6 +54,11 @@ def create_app() -> Flask:
     app.config["CHECKING_PASTA_TEMP"] = os.getenv(
         "CHECKING_PASTA_TEMP",
         "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp",
+    )
+
+    app.config["PASTA_RELATORIOS_OCUPACAO"] = os.getenv(
+        "PASTA_RELATORIOS_OCUPACAO",
+        PASTA_RELATORIOS_OCUPACAO,
     )
 
     app.config["SESSION_COOKIE_HTTPONLY"] = True

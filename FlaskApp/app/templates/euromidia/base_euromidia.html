@@ -1505,6 +1505,15 @@ input:disabled, select:disabled, textarea:disabled{
                 <span id="userDropdownMessageCount" class="user-dropdown-badge hidden">0</span>
               </a>
 
+              <a href="{{ url_for('Paineis.relatorios_paineis') }}">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 19V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M14 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M8 14h8M8 17h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Relatórios
+              </a>
+
               {% if usuario_logado_eh_vendedor_paineis|default(False) and minha_carteira_url %}
                 <a href="{{ minha_carteira_url }}">
                   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1599,7 +1608,7 @@ input:disabled, select:disabled, textarea:disabled{
     </div>
   </footer>
 
-  {% if current_user.is_authenticated and not usuario_eh_vendedor %}
+  {% if current_user.is_authenticated %}
   <!-- MODAL EXPORTAR EXCEL -->
   <div class="modal-backdrop" id="modalExportarExcel" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tituloExportarExcel">
@@ -1761,12 +1770,152 @@ input:disabled, select:disabled, textarea:disabled{
       }
     });
 
-    const btnAbrir = document.getElementById("btnExportarExcel");
+    const botoesAbrirExcel = Array.from(
+      document.querySelectorAll("#btnExportarExcel, [data-exportar-excel]")
+    );
     const modal = document.getElementById("modalExportarExcel");
     const btnFechar = document.getElementById("btnFecharModalExcel");
     const btnCancelar = document.getElementById("btnCancelarExcel");
     const btnConfirmar = document.getElementById("btnConfirmarExcel");
     const selAno = document.getElementById("anoExportar");
+
+
+
+    const CHAVE_EXPORTACOES_OCUPACAO_PENDENTES = "euromidia:exportacoes_ocupacao_pendentes:v1";
+    const STATUS_EXPORTACAO_OCUPACAO_TEMPLATE = "{{ url_for('Paineis.exportar_excel_status', task_id='__TASK_ID__') }}";
+
+    function _carregarExportacoesOcupacaoPendentes(){
+      try{
+        const bruto = window.localStorage.getItem(CHAVE_EXPORTACOES_OCUPACAO_PENDENTES);
+        const dados = JSON.parse(bruto || "[]");
+        return Array.isArray(dados) ? dados : [];
+      } catch(_){
+        return [];
+      }
+    }
+
+    function _salvarExportacoesOcupacaoPendentes(lista){
+      try{
+        const dados = Array.isArray(lista) ? lista.slice(0, 20) : [];
+        window.localStorage.setItem(CHAVE_EXPORTACOES_OCUPACAO_PENDENTES, JSON.stringify(dados));
+      } catch(_){
+        // Sem localStorage disponível; nesse caso a tela de Relatórios ainda acompanha pelo task_id.
+      }
+    }
+
+    function _removerExportacaoOcupacaoPendente(taskId){
+      const id = String(taskId || "").trim();
+      if (!id) return;
+
+      const lista = _carregarExportacoesOcupacaoPendentes()
+        .filter(function(item){
+          return String(item && item.task_id || "") !== id;
+        });
+
+      _salvarExportacoesOcupacaoPendentes(lista);
+    }
+
+    function _registrarExportacaoOcupacaoPendente(payload){
+      try{
+        const taskId = String(payload && payload.task_id || "").trim();
+        if (!taskId) return;
+
+        const lista = _carregarExportacoesOcupacaoPendentes();
+        const existe = lista.some(function(item){
+          return String(item && item.task_id || "") === taskId;
+        });
+
+        if (!existe){
+          lista.unshift({
+            task_id: taskId,
+            ano: payload.ano || "",
+            status_url: payload.status_url || STATUS_EXPORTACAO_OCUPACAO_TEMPLATE.replace("__TASK_ID__", encodeURIComponent(taskId)),
+            download_url: payload.download_url || "",
+            criado_em: new Date().toISOString(),
+            tipo: "ocupacao_excel"
+          });
+          _salvarExportacoesOcupacaoPendentes(lista);
+        }
+      } catch(_){
+        // Não bloqueia a geração se o navegador negar localStorage.
+      }
+    }
+
+    function _baixarArquivoExportacaoOcupacao(downloadUrl, filename){
+      if (!downloadUrl) return;
+
+      /*
+        Eu uso navegação direta para o endpoint de download porque é mais confiável
+        do que clicar em link invisível depois de uma consulta assíncrona.
+
+        Na prática:
+        - o Celery gera o arquivo no servidor;
+        - quando o status fica SUCCESS, o navegador acessa a rota de download;
+        - como o Flask responde com send_file(as_attachment=True), o arquivo cai
+          na pasta Downloads do computador que solicitou.
+      */
+      try{
+        window.location.assign(downloadUrl);
+      } catch(_){
+        window.location.href = downloadUrl;
+      }
+    }
+
+    async function _consultarExportacaoOcupacaoPendente(item){
+      const taskId = String(item && item.task_id || "").trim();
+      if (!taskId) return;
+
+      const statusUrl = item.status_url || STATUS_EXPORTACAO_OCUPACAO_TEMPLATE.replace("__TASK_ID__", encodeURIComponent(taskId));
+
+      try{
+        const resp = await fetch(statusUrl, {
+          method: "GET",
+          headers: {"Accept": "application/json"},
+          credentials: "same-origin"
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || data.ok === false){
+          return;
+        }
+
+        if (data.pronto && data.download_url){
+          _removerExportacaoOcupacaoPendente(taskId);
+          _baixarArquivoExportacaoOcupacao(data.download_url, data.filename || "grade_paineis.xlsx");
+        }
+      } catch(_){
+        // Mantém pendente para tentar novamente no próximo ciclo/página.
+      }
+    }
+
+    function _iniciarMonitorExportacoesOcupacao(){
+      if (window.__monitorExportacoesOcupacaoAtivo === true){
+        return;
+      }
+
+      window.__monitorExportacoesOcupacaoAtivo = true;
+
+      async function ciclo(){
+        const pendentes = _carregarExportacoesOcupacaoPendentes();
+
+        for (const item of pendentes){
+          await _consultarExportacaoOcupacaoPendente(item);
+        }
+
+        window.setTimeout(ciclo, 5000);
+      }
+
+      ciclo();
+    }
+
+    window.PaineisExportacaoOcupacao = {
+      registrar: _registrarExportacaoOcupacaoPendente,
+      remover: _removerExportacaoOcupacaoPendente,
+      iniciarMonitor: _iniciarMonitorExportacoesOcupacao,
+    };
+
+    _iniciarMonitorExportacoesOcupacao();
 
     function abrirModalExcel(){
       if (!modal) return;
@@ -1783,24 +1932,64 @@ input:disabled, select:disabled, textarea:disabled{
       modal.setAttribute("aria-hidden", "true");
     }
 
-    function exportarExcel(){
+    async function exportarExcel(){
       const ano = (selAno && selAno.value) ? selAno.value : "";
       const anoSafe = String(ano).replace(/[^\d]/g, "").slice(0, 4);
 
       const baseUrl = "{{ url_for('Paineis.exportar_excel_ano') }}";
-      const url = baseUrl + "?ano=" + encodeURIComponent(anoSafe);
+      const url = baseUrl + "?ano=" + encodeURIComponent(anoSafe || "") + "&ajax=1";
 
-      window.location.href = url;
-      fecharModalExcel();
+      if (btnConfirmar){
+        btnConfirmar.disabled = true;
+        btnConfirmar.dataset.textoOriginal = btnConfirmar.textContent || "Gerar Excel";
+        btnConfirmar.textContent = "Enviando...";
+      }
+
+      try{
+        const resp = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Accept": "application/json"
+          },
+          credentials: "same-origin"
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok || data.ok === false){
+          throw new Error(data.erro || data.status || "Não foi possível iniciar a exportação.");
+        }
+
+        if (window.PaineisExportacaoOcupacao){
+          window.PaineisExportacaoOcupacao.registrar(data);
+          window.PaineisExportacaoOcupacao.iniciarMonitor();
+        }
+
+        fecharModalExcel();
+
+        if (data.acompanhamento_url){
+          window.location.href = data.acompanhamento_url;
+        } else {
+          window.location.href = "{{ url_for('Paineis.relatorios_paineis') }}";
+        }
+
+      } catch(err){
+        alert(err.message || "Não foi possível iniciar a geração do Excel.");
+      } finally {
+        if (btnConfirmar){
+          btnConfirmar.disabled = false;
+          btnConfirmar.textContent = btnConfirmar.dataset.textoOriginal || "Gerar Excel";
+        }
+      }
     }
 
-    if (btnAbrir){
+    botoesAbrirExcel.forEach(function(btnAbrir){
       btnAbrir.addEventListener("click", function(ev){
         ev.preventDefault();
         ev.stopPropagation();
         abrirModalExcel();
       });
-    }
+    });
 
     if (btnFechar){
       btnFechar.addEventListener("click", function(){

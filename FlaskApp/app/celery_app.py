@@ -40,6 +40,7 @@ celery_app.conf.update(
         "app.tasks.checkin_tasks",
         "app.tasks.clientes_cache_tasks",
         "app.tasks.paineis_tempo_real_tasks",
+        "app.tasks.paineis_relatorios_tasks",
     ),
     task_routes={
         "clientes_cache.*": {"queue": "clientes_cache"},
