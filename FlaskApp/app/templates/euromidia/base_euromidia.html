@@ -1537,26 +1537,6 @@ input:disabled, select:disabled, textarea:disabled{
           </div>
         {% endif %}
 
-        {#
-          Regra de segurança visual:
-          Perfil Vendedor = IDDimPerfilUsuario 3.
-          Vendedor não deve ver o botão de exportação de Excel.
-          A rota também é bloqueada no Python para impedir acesso direto pela URL.
-        #}
-        {% set usuario_eh_vendedor = current_user.is_authenticated and ((current_user.IDDimPerfilUsuario | default(0) | int) == 3) %}
-
-        {% if current_user.is_authenticated and not usuario_eh_vendedor %}
-          <!-- BOTÃO EXPORTAR EXCEL (ABRE MODAL) -->
-          <button type="button" class="icon-btn" id="btnExportarExcel" title="Exportar Excel (grade anual)">
-            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-              <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2" />
-              <path d="M14 3v6h6" stroke="currentColor" stroke-width="2" />
-              <path d="M8 17l3-4-3-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M13 9l3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Exportar
-          </button>
-        {% endif %}
 
         {% if current_user.is_authenticated %}
           <a class="icon-btn icon-only" href="{{ url_for('Autenticacao.logout') }}" title="Sair" aria-label="Sair">
