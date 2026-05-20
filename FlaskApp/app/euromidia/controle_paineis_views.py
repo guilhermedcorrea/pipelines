@@ -19084,6 +19084,7 @@ def api_ocupacao_calendario():
                 DataAtualizacao= fo.DataAtualizacao
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
             WHERE fo.CodFace = @CodFace
+              AND (@CodPonto IS NULL OR fo.CodPonto = @CodPonto)
               AND fo.DataInicio IS NOT NULL
               AND fo.DataFim    IS NOT NULL
               AND fo.CanceladoEm IS NULL
@@ -19247,11 +19248,12 @@ def api_ocupacao_reserva_dados_modal():
             Vendedor
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
         WHERE CodFace = :cod_face
+          AND (:cod_ponto IS NULL OR :cod_ponto = '' OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
           AND CanceladoEm IS NULL
           AND Status IN ('ATIVO','RESERVADO')
         ORDER BY DataInicio
     """
-    ocupacoes = [dict(r._mapping) for r in db.session.execute(text(sql_ocupacoes), {"cod_face": cod_face})]
+    ocupacoes = [dict(r._mapping) for r in db.session.execute(text(sql_ocupacoes), {"cod_face": cod_face, "cod_ponto": cod_ponto})]
 
     sqls_empresas = [
         """
@@ -19278,12 +19280,13 @@ def api_ocupacao_reserva_dados_modal():
                 NomeVendedor = NULLIF(LTRIM(RTRIM(CAST(Vendedor AS varchar(200)))), '')
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
             WHERE CodFace = :cod_face
+              AND (:cod_ponto IS NULL OR :cod_ponto = '' OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
               AND CanceladoEm IS NULL
               AND Status IN ('ATIVO','RESERVADO')
               AND NULLIF(LTRIM(RTRIM(CAST(Vendedor AS varchar(200)))), '') IS NOT NULL
             ORDER BY NomeVendedor
         """
-        vendedores = [dict(r._mapping) for r in db.session.execute(text(sql_vendedores_fallback), {"cod_face": cod_face})]
+        vendedores = [dict(r._mapping) for r in db.session.execute(text(sql_vendedores_fallback), {"cod_face": cod_face, "cod_ponto": cod_ponto})]
 
         for v in vendedores:
             if not (v.get("IDVendedor") or "").strip():
@@ -19389,13 +19392,14 @@ def api_ocupacao_reserva_dados_modal():
                 IDEmpresa = TRY_CONVERT(int, IDCliente)
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
             WHERE CodFace = :cod_face
+              AND (:cod_ponto IS NULL OR :cod_ponto = '' OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
               AND CanceladoEm IS NULL
               AND Status IN ('ATIVO','RESERVADO')
               AND (NumeroContrato IS NOT NULL OR NumeroPrevia IS NOT NULL OR IDFatoControleContratos IS NOT NULL)
             GROUP BY IDFatoControleContratos, NumeroContrato, NumeroPrevia, IDCliente
             ORDER BY NumeroContrato, NumeroPrevia
         """
-        contratos = [dict(r._mapping) for r in db.session.execute(text(sql_contratos_fallback), {"cod_face": cod_face})]
+        contratos = [dict(r._mapping) for r in db.session.execute(text(sql_contratos_fallback), {"cod_face": cod_face, "cod_ponto": cod_ponto})]
 
         for c in contratos:
             if not (str(c.get("IDContrato") or "").strip()):
@@ -19730,6 +19734,7 @@ def api_ocupacao_reserva_criar():
             SELECT TOP 1 1
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
             WHERE CodFace = :cod_face
+              AND CodPonto = :cod_ponto
               AND CanceladoEm IS NULL
               AND Status IN ('ATIVO','RESERVADO')
               AND NOT (
@@ -19739,6 +19744,7 @@ def api_ocupacao_reserva_criar():
         """)
         existe = db.session.execute(sql_conflito, {
             "cod_face": cod_face,
+            "cod_ponto": cod_ponto_int,
             "data_inicio": data_inicio,
             "data_fim": data_fim
         }).scalar()
@@ -19801,6 +19807,7 @@ def api_ocupacao_reserva_criar():
                     DataAtualizacao= fo.DataAtualizacao
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
                 WHERE fo.CodFace = @CodFace
+                  AND (@CodPonto IS NULL OR fo.CodPonto = @CodPonto)
                   AND fo.DataInicio IS NOT NULL
                   AND fo.DataFim    IS NOT NULL
                   AND fo.CanceladoEm IS NULL
@@ -19890,6 +19897,7 @@ def api_ocupacao_reserva_criar():
                 ProximaPrioridade = ISNULL(MAX(COALESCE(ReservaOrdemPrioridade, 0)), 0) + 1
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] WITH (UPDLOCK, HOLDLOCK)
             WHERE CodFace = :cod_face
+              AND CodPonto = :cod_ponto
               AND CanceladoEm IS NULL
               AND Status IN ('ATIVO','RESERVADO')
               AND DataInicio = @Ini
@@ -19900,6 +19908,7 @@ def api_ocupacao_reserva_criar():
 
         prox = db.session.execute(sql_prioridade, {
             "cod_face": cod_face,
+            "cod_ponto": cod_ponto_int,
             "data_inicio": data_inicio,
             "data_fim": data_fim,
             "cota": cota_int,

@@ -303,6 +303,102 @@
     opacity:1;
     cursor:not-allowed;
   }
+
+  /* =========================================================
+     Calendário de disponibilidade da reserva
+     - mostra badge 0/1, 6/16 etc.
+     - mantém número do dia visível
+     - dias sem capacidade ficam desabilitados pelo JS
+     ========================================================= */
+  .flatpickr-day{
+    position:relative;
+    line-height:1 !important;
+    padding-top:6px !important;
+  }
+
+  .flatpickr-day.has-badge{
+    display:flex !important;
+    flex-direction:column !important;
+    justify-content:flex-start !important;
+    align-items:center !important;
+    min-height:52px !important;
+    height:auto !important;
+    padding-bottom:6px !important;
+  }
+
+  .flatpickr-day .day-badge{
+    position:static !important;
+    margin-top:4px !important;
+    font-size:12px;
+    font-weight:900;
+    line-height:1;
+    padding:4px 6px;
+    border-radius:8px;
+    color:#fff;
+    white-space:nowrap;
+    pointer-events:none;
+    box-shadow:0 4px 10px rgba(0,0,0,.12);
+  }
+
+  .flatpickr-day.badge-green .day-badge{background:#178a3a;}
+  .flatpickr-day.badge-yellow .day-badge{background:#d39a00;}
+  .flatpickr-day.badge-red .day-badge{background:#b00020;}
+  .flatpickr-day.badge-gray .day-badge{background:#6b7280;}
+
+  .flatpickr-day.ocupado{position:relative;}
+  .flatpickr-day.ocupado::after{
+    content:"";
+    position:absolute;
+    top:2px;
+    left:50%;
+    transform:translateX(-50%);
+    width:6px;
+    height:6px;
+    border-radius:999px;
+    background:#b00020;
+    z-index:3;
+  }
+
+  .flatpickr-day.flatpickr-disabled.ocupado,
+  .flatpickr-day.flatpickr-disabled.badge-red,
+  .flatpickr-day.flatpickr-disabled.badge-gray{
+    opacity:1;
+    color:#b00020;
+    text-decoration:line-through;
+  }
+
+  .fp-tooltip{
+    position:fixed;
+    z-index:2147483647;
+    background:#fff;
+    border:1px solid rgba(0,0,0,.10);
+    border-radius:12px;
+    box-shadow:0 12px 30px rgba(0,0,0,.18);
+    padding:10px 12px;
+    font-weight:900;
+    font-size:13px;
+    color:#111;
+    pointer-events:none;
+    display:none;
+    min-width:240px;
+  }
+
+  .fp-tooltip .tag{
+    display:inline-block;
+    padding:4px 8px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:1000;
+    margin-right:8px;
+    vertical-align:middle;
+  }
+
+  .fp-tooltip .tag.parcial{background:rgba(211,154,0,.12);color:#d39a00;}
+  .fp-tooltip .tag.livre{background:rgba(23,138,58,.12);color:#178a3a;}
+  .fp-tooltip .tag.cheio{background:rgba(176,0,32,.12);color:#b00020;}
+  .fp-tooltip .tag.indisp{background:rgba(107,114,128,.12);color:#6b7280;}
+  .fp-tooltip .muted{font-weight:800;opacity:.75;}
+
 </style>
 
 <div class="reserva-ocupacao-page">
@@ -310,7 +406,7 @@
     <div>
       <h1 style="margin:0;">Reserva Ocupação</h1>
       <div style="opacity:.75;font-weight:700;margin-top:6px;">
-        Tela nova separada da reserva antiga • cada face selecionada abre um <b>card próprio</b> com os campos da reserva • prazo fixo: <b>48 horas úteis</b>
+        Faça a Reserva
       </div>
     </div>
     <a class="btn btn-secondary" style="text-decoration:none;" href="{{ request.referrer or url_for('Paineis.lista_paineis') }}">Voltar</a>
@@ -364,6 +460,8 @@
   </form>
 </div>
 
+<div id="tooltipCalendarioReserva" class="fp-tooltip"></div>
+
 <script>
 (function(){
   "use strict";
@@ -373,6 +471,7 @@
   const URL_CRIAR = "{{ url_for('Paineis.api_ocupacao_reserva_criar') }}";
   const URL_CALENDARIO = "{{ url_for('Paineis.api_ocupacao_calendario') }}";
 
+  const MES_REF = "{{ (mes_ref or '')|e }}";
   const DATA_MINIMA = "{{ data_minima_reserva or dt_ini or '' }}";
   const COD_FACE_INICIAL = "{{ (codface_sel or '')|e }}";
   const COD_FACES_INICIAIS = {{ (codfaces_sel if codfaces_sel is defined else [])|tojson }};
@@ -392,6 +491,7 @@
   const elMsg = document.getElementById("msg");
   const elBtnSalvar = document.getElementById("btnSalvar");
   const elProgressoSalvamento = document.getElementById("progressoSalvamento");
+  const elTooltipCalendario = document.getElementById("tooltipCalendarioReserva");
 
   function texto(valor){ return (valor === null || valor === undefined) ? "" : String(valor).trim(); }
   function normalizar(valor){ return texto(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
@@ -401,8 +501,52 @@
   function ehDigital(face){ return Number(face.EhDigital || face.eh_digital || 0) === 1 || normalizar(face.TipoPainel || face.Tipo || face.tipo).includes("digital"); }
   function chaveFace(face){ return (codPonto(face) + "|" + codFace(face)).toUpperCase(); }
   function cotaFace(face){ return texto(face.__cota || (ehDigital(face) ? "540" : "")); }
-  function hojeYmd(){ return DATA_MINIMA || new Date().toISOString().slice(0, 10); }
-  function dataPassada(valor){ return texto(valor) && texto(valor) < hojeYmd(); }
+
+  function hojeLocalYmd(){
+    const agora = new Date();
+    const y = agora.getFullYear();
+    const m = String(agora.getMonth() + 1).padStart(2, "0");
+    const d = String(agora.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  function hojeYmd(){ return texto(DATA_MINIMA) || hojeLocalYmd(); }
+
+  function yyyy_mm_dd_para_date(valor){
+    const s = texto(valor);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return null;
+    const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if(Number.isNaN(dt.getTime())) return null;
+    return dt;
+  }
+
+  function date_para_yyyy_mm_dd(dt){
+    if(!dt) return "";
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  function compararDatasYmd(a, b){
+    const aa = texto(a);
+    const bb = texto(b);
+    if(!aa || !bb) return 0;
+    if(aa < bb) return -1;
+    if(aa > bb) return 1;
+    return 0;
+  }
+
+  function maiorDataYmd(a, b){
+    const aa = texto(a);
+    const bb = texto(b);
+    if(!aa) return bb;
+    if(!bb) return aa;
+    return compararDatasYmd(aa, bb) >= 0 ? aa : bb;
+  }
+
+  function dataPassada(valor){ return texto(valor) && compararDatasYmd(texto(valor), hojeYmd()) < 0; }
   function numeroInteiroOuVazio(valor){ return /^\d+$/.test(texto(valor)) ? texto(valor) : ""; }
 
   function labelFace(face){
@@ -451,6 +595,315 @@
     msgEl.textContent = estado.card_msg;
     msgEl.classList.remove("ok", "err");
     if(estado.card_msg) msgEl.classList.add(estado.card_msg_ok ? "ok" : "err");
+  }
+
+
+  function normalizarStatusBadge(status){
+    const s = texto(status).toUpperCase();
+    if(!s) return "PARCIAL";
+    if(s === "LOTADO" || s === "OCUPADO" || s === "CHEIO") return "CHEIO";
+    if(s === "DISPONIVEL" || s === "DISPONÍVEL" || s === "LIVRE") return "LIVRE";
+    if(s === "PARCIAL") return "PARCIAL";
+    if(s.includes("INDISP") || s.includes("BLOQ")) return "INDISPONIVEL";
+    return s;
+  }
+
+  function escolherCorBadgePorStatus(statusNorm, disponiveis, total){
+    const s = normalizarStatusBadge(statusNorm);
+    if(s === "INDISPONIVEL") return "gray";
+    if(s === "CHEIO") return "red";
+    if(s === "LIVRE") return "green";
+    if(s === "PARCIAL") return "yellow";
+    if(total <= 0) return "green";
+    if(disponiveis <= 0) return "red";
+    if(disponiveis >= total) return "green";
+    return "yellow";
+  }
+
+  function montarTooltipText(status, disponiveis, total){
+    const st = normalizarStatusBadge(status || "PARCIAL");
+    return st + " — " + disponiveis + "/" + total + " disponíveis";
+  }
+
+  function tooltipShow(textoTooltip, status, x, y){
+    if(!elTooltipCalendario) return;
+    const stNorm = normalizarStatusBadge(status);
+    const cls = stNorm === "CHEIO" ? "cheio" : (stNorm === "LIVRE" ? "livre" : (stNorm === "INDISPONIVEL" ? "indisp" : "parcial"));
+    elTooltipCalendario.innerHTML =
+      "<span class='tag " + cls + "'>" + escapeHtml(stNorm || "PARCIAL") + "</span>" +
+      "<span class='muted'>" + escapeHtml(String(textoTooltip || "").replace(/^.*—\s*/, "")) + "</span>";
+    elTooltipCalendario.style.display = "block";
+
+    const pad = 12;
+    const w = elTooltipCalendario.offsetWidth || 260;
+    const h = elTooltipCalendario.offsetHeight || 44;
+    let left = x + pad;
+    let top = y + pad;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if(left + w + 10 > vw) left = x - w - pad;
+    if(top + h + 10 > vh) top = y - h - pad;
+    elTooltipCalendario.style.left = left + "px";
+    elTooltipCalendario.style.top = top + "px";
+  }
+
+  function tooltipHide(){
+    if(elTooltipCalendario) elTooltipCalendario.style.display = "none";
+  }
+
+  function limparBadgeClasses(dayElem){
+    dayElem.classList.remove("has-badge", "badge-green", "badge-yellow", "badge-red", "badge-gray", "ocupado");
+    const old = dayElem.querySelector(".day-badge");
+    if(old) old.remove();
+  }
+
+  function slotsNecessariosEstado(estado){
+    return ehDigital(estado.face) && cotaFace(estado.face) === "1080" ? 2 : 1;
+  }
+
+  function getDayInfoEstado(estado, dateObj){
+    const key = date_para_yyyy_mm_dd(dateObj);
+    return (estado.dayBadgeMap || new Map()).get(key) || null;
+  }
+
+  function diaEstaOcupadoEstado(estado, dateObj){
+    const key = date_para_yyyy_mm_dd(dateObj);
+    if(!key) return false;
+    for(const r of (estado.ocupacoesRanges || [])){
+      if(key >= r.ini && key <= r.fim) return true;
+    }
+    return false;
+  }
+
+  function diaBloqueadoPorCapacidadeEstado(estado, dateObj){
+    const key = date_para_yyyy_mm_dd(dateObj);
+    if(!key || dataPassada(key)) return true;
+
+    const info = getDayInfoEstado(estado, dateObj);
+    if(info){
+      const disponiveis = Number(info.disponiveis);
+      const total = Number(info.total);
+      const status = normalizarStatusBadge(info.status);
+      if(status === "INDISPONIVEL" || status === "CHEIO") return true;
+      if(Number.isFinite(disponiveis)){
+        if(disponiveis <= 0) return true;
+        if(disponiveis < slotsNecessariosEstado(estado)) return true;
+      }
+      if(Number.isFinite(total) && total <= 0) return true;
+      return false;
+    }
+
+    return diaEstaOcupadoEstado(estado, dateObj);
+  }
+
+  function rangesTemConflitoEstado(estado, inicioStr, fimStr){
+    if(dataPassada(inicioStr) || dataPassada(fimStr)) return true;
+    if(!texto(inicioStr) || !texto(fimStr)) return false;
+    if(compararDatasYmd(fimStr, inicioStr) < 0) return true;
+
+    const ini = yyyy_mm_dd_para_date(inicioStr);
+    const fim = yyyy_mm_dd_para_date(fimStr);
+    if(!ini || !fim) return false;
+
+    const cursor = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate());
+    const limite = new Date(fim.getFullYear(), fim.getMonth(), fim.getDate());
+    while(cursor <= limite){
+      if(diaBloqueadoPorCapacidadeEstado(estado, cursor)) return true;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return false;
+  }
+
+  function montarRangesDeOcupacaoEstado(estado, ocupacoes){
+    estado.ocupacoesRanges = [];
+    (ocupacoes || []).forEach(function(o){
+      const di = texto(o.DataInicio || o.data_inicio || o.dataInicio);
+      const df = texto(o.DataFim || o.data_fim || o.dataFim);
+      if(!di || !df) return;
+      estado.ocupacoesRanges.push({ini: di <= df ? di : df, fim: di <= df ? df : di});
+    });
+  }
+
+  function montarDayBadgeMapGenerico(estado, payload){
+    const mapa = new Map();
+    if(!payload) return mapa;
+
+    const cap = Number(payload.capacidade_total ?? payload.cap_total ?? payload.k_fisico ?? payload.CapacidadeTotal ?? estado.cap_total_default ?? 16);
+    const capTotal = Number.isFinite(cap) && cap > 0 ? cap : (estado.cap_total_default || 16);
+
+    const calObj = payload.cal || payload.calendar || payload.dias_calendario || payload.day_status || payload.calendario || null;
+
+    if(Array.isArray(calObj)){
+      calObj.forEach(function(it){
+        const dt = texto(it.data || it.Data || it.dia || it.Dia || it.date || it.Date);
+        if(!dt) return;
+        const total = Number(it.total ?? it.Total ?? it.capacidade ?? it.Capacidade ?? it.cap ?? it.Cap ?? capTotal);
+        let disp = it.disponiveis ?? it.Disponiveis ?? it.available ?? it.Available ?? it.disp ?? it.Disp ?? null;
+        if(disp == null){
+          const ocupados = it.ocupados ?? it.Ocupados ?? it.usados ?? it.Usados ?? it.used ?? it.Used ?? it.ocup ?? it.Ocup ?? null;
+          if(ocupados != null) disp = Number(total) - Number(ocupados);
+        }
+        const disponiveis = Number(disp);
+        if(!Number.isFinite(disponiveis) || !Number.isFinite(total)) return;
+        const status = normalizarStatusBadge(texto(it.status || it.Status || it.StatusDia) || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
+        mapa.set(dt, {disponiveis: disponiveis, total: total, status: status});
+      });
+      return mapa;
+    }
+
+    if(calObj && typeof calObj === "object"){
+      Object.keys(calObj).forEach(function(dt){
+        const it = calObj[dt] || {};
+        const total = Number(it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? capTotal);
+        const disponiveis = Number(it.disp ?? it.disponiveis ?? it.SlotsDisponiveis ?? it.Disponiveis ?? NaN);
+        if(!Number.isFinite(total) || !Number.isFinite(disponiveis)) return;
+        const status = normalizarStatusBadge(texto(it.status || it.Status || it.StatusDia) || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
+        mapa.set(dt, {disponiveis: disponiveis, total: total, status: status});
+        if(total > 0) estado.cap_total_default = total;
+      });
+    }
+
+    return mapa;
+  }
+
+  function aplicarCalendarioNoEstado(estado, payload){
+    estado.dayBadgeMap = montarDayBadgeMapGenerico(estado, payload);
+    atualizarRestricoesCalendariosEstado(estado);
+  }
+
+  function aplicarBadgeDia(estado, dayElem){
+    limparBadgeClasses(dayElem);
+    const info = getDayInfoEstado(estado, dayElem.dateObj);
+    if(info){
+      const disponiveis = Number(info.disponiveis);
+      const total = Number(info.total);
+      if(Number.isFinite(disponiveis) && Number.isFinite(total)){
+        const status = normalizarStatusBadge(info.status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
+        const cor = escolherCorBadgePorStatus(status, disponiveis, total);
+        dayElem.classList.add("has-badge");
+        dayElem.classList.add(cor === "red" ? "badge-red" : (cor === "yellow" ? "badge-yellow" : (cor === "gray" ? "badge-gray" : "badge-green")));
+        const badge = document.createElement("span");
+        badge.className = "day-badge";
+        badge.textContent = disponiveis + "/" + total;
+        dayElem.appendChild(badge);
+        const tooltipText = montarTooltipText(status, disponiveis, total);
+        dayElem.addEventListener("mouseenter", function(ev){ tooltipShow(tooltipText, status, ev.clientX, ev.clientY); });
+        dayElem.addEventListener("mousemove", function(ev){ tooltipShow(tooltipText, status, ev.clientX, ev.clientY); });
+        dayElem.addEventListener("mouseleave", tooltipHide);
+      }
+    }
+    if(diaEstaOcupadoEstado(estado, dayElem.dateObj)) dayElem.classList.add("ocupado");
+  }
+
+  function garantirFimNaoAntesDoInicioEstado(estado){
+    if(!estado.fp_fim) return;
+    const minFim = maiorDataYmd(hojeYmd(), estado.data_inicio);
+    estado.fp_fim.set("minDate", minFim);
+    if(texto(estado.data_fim) && compararDatasYmd(estado.data_fim, minFim) < 0){
+      estado.data_fim = minFim;
+      estado.fp_fim.setDate(minFim, false);
+    }
+  }
+
+  function atualizarRestricoesCalendariosEstado(estado){
+    if(!estado || !estado.fp_inicio || !estado.fp_fim) return;
+    const fn = function(date){ return diaBloqueadoPorCapacidadeEstado(estado, date); };
+    estado.fp_inicio.set("disable", [fn]);
+    estado.fp_fim.set("disable", [fn]);
+    garantirFimNaoAntesDoInicioEstado(estado);
+    estado.fp_inicio.redraw();
+    estado.fp_fim.redraw();
+  }
+
+  function validarDatasEstadoNoClient(estado){
+    if(!estado) return true;
+    if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)){
+      setCardMsg(estado, "Não é permitido reservar datas anteriores a " + hojeYmd() + ".", false);
+      return false;
+    }
+    if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0){
+      setCardMsg(estado, "Data fim não pode ser menor que data início.", false);
+      return false;
+    }
+    if(rangesTemConflitoEstado(estado, estado.data_inicio, estado.data_fim)){
+      setCardMsg(estado, "Período conflita com dia CHEIO/INDISPONÍVEL ou não tem slots suficientes para esta cota.", false);
+      return false;
+    }
+    return true;
+  }
+
+  function inicializarFlatpickrCard(estado, dataInicio, dataFim){
+    if(!window.flatpickr || !dataInicio || !dataFim) return;
+
+    try{ if(estado.fp_inicio) estado.fp_inicio.destroy(); }catch(e){}
+    try{ if(estado.fp_fim) estado.fp_fim.destroy(); }catch(e){}
+
+    const onDia = function(dObj, dStr, fp, dayElem){ aplicarBadgeDia(estado, dayElem); };
+
+    function normalizarDataDigitada(valor, fallback){
+      const v = texto(valor);
+      if(!v) return fallback;
+      return dataPassada(v) ? fallback : v;
+    }
+
+    function aplicarInicio(dateStr, acionarCarga){
+      const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
+      const valorDigitado = texto(dateStr || dataInicio.value);
+      estado.data_inicio = normalizarDataDigitada(valorDigitado, hojeYmd());
+      if(!estado.data_inicio) estado.data_inicio = hojeYmd();
+      if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) estado.data_fim = estado.data_inicio;
+      if(estado.fp_fim) estado.fp_fim.setDate(estado.data_fim, false);
+      garantirFimNaoAntesDoInicioEstado(estado);
+      validarDatasEstadoNoClient(estado);
+      const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes) carregarDadosCard(estado.chave);
+    }
+
+    function aplicarFim(dateStr, acionarCarga){
+      const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
+      const minFim = maiorDataYmd(hojeYmd(), estado.data_inicio);
+      const valorDigitado = texto(dateStr || dataFim.value);
+      estado.data_fim = normalizarDataDigitada(valorDigitado, minFim);
+      if(!estado.data_fim) estado.data_fim = minFim;
+      if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) estado.data_fim = estado.data_inicio;
+      validarDatasEstadoNoClient(estado);
+      const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes) carregarDadosCard(estado.chave);
+    }
+
+    estado.fp_inicio = flatpickr(dataInicio, {
+      dateFormat:"Y-m-d",
+      minDate: hojeYmd(),
+      allowInput:true,
+      disableMobile:true,
+      prevArrow:"‹",
+      nextArrow:"›",
+      disable:[function(date){ return diaBloqueadoPorCapacidadeEstado(estado, date); }],
+      onDayCreate:onDia,
+      onReady:function(selectedDates, dateStr, fp){ if(MES_REF) fp.jumpToDate(MES_REF + "-01", false); },
+      onOpen:function(){ if(estado.fp_inicio) estado.fp_inicio.redraw(); },
+      onChange:function(_, dateStr){ aplicarInicio(dateStr, true); },
+      onClose:function(_, dateStr){ aplicarInicio(dateStr, true); }
+    });
+
+    estado.fp_fim = flatpickr(dataFim, {
+      dateFormat:"Y-m-d",
+      minDate: maiorDataYmd(hojeYmd(), estado.data_inicio),
+      allowInput:true,
+      disableMobile:true,
+      prevArrow:"‹",
+      nextArrow:"›",
+      disable:[function(date){ return diaBloqueadoPorCapacidadeEstado(estado, date); }],
+      onDayCreate:onDia,
+      onReady:function(selectedDates, dateStr, fp){ if(MES_REF) fp.jumpToDate(MES_REF + "-01", false); },
+      onOpen:function(){ garantirFimNaoAntesDoInicioEstado(estado); if(estado.fp_fim) estado.fp_fim.redraw(); },
+      onChange:function(_, dateStr){ aplicarFim(dateStr, true); },
+      onClose:function(_, dateStr){ aplicarFim(dateStr, true); }
+    });
+
+    estado.fp_inicio.setDate(estado.data_inicio, false);
+    estado.fp_fim.setDate(estado.data_fim, false);
+    atualizarRestricoesCalendariosEstado(estado);
   }
 
   function htmlFace(face){
@@ -537,6 +990,11 @@
       vendedores: [],
       contratos: [],
       contratosMap: new Map(),
+      dayBadgeMap: new Map(),
+      ocupacoesRanges: [],
+      fp_inicio: null,
+      fp_fim: null,
+      cap_total_default: ehDigital(copia) ? 16 : 1,
       card_msg: "",
       card_msg_ok: true
     };
@@ -560,7 +1018,7 @@
     renderListaFaces(faces);
     atualizarSelectCodFace();
     carregarDadosCard(chave);
-    carregarCalendario(estado.face);
+    carregarCalendario(estado);
   }
 
   function atualizarSelectCodFace(){
@@ -750,6 +1208,7 @@
       selectCota.addEventListener("change", function(){
         estado.face.__cota = texto(selectCota.value);
         carregarDadosCard(estado.chave);
+        carregarCalendario(estado);
       });
     }
 
@@ -758,46 +1217,29 @@
     const marca = card.querySelector("[data-role='marca-exibida']");
     const observacao = card.querySelector("[data-role='observacao']");
 
-    function aplicarDatas(){
-      estado.data_inicio = texto(dataInicio.value);
-      estado.data_fim = texto(dataFim.value);
+    function aplicarDatas(acionarCarga){
+      if(dataInicio) estado.data_inicio = texto(dataInicio.value) || hojeYmd();
+      if(dataFim) estado.data_fim = texto(dataFim.value) || maiorDataYmd(hojeYmd(), estado.data_inicio);
       corrigirDatasEstado(estado);
-      dataInicio.value = estado.data_inicio;
-      dataFim.value = estado.data_fim;
-      carregarDadosCard(estado.chave);
+      if(dataInicio) dataInicio.value = estado.data_inicio;
+      if(dataFim) dataFim.value = estado.data_fim;
+      garantirFimNaoAntesDoInicioEstado(estado);
+      validarDatasEstadoNoClient(estado);
+      if(acionarCarga) carregarDadosCard(estado.chave);
     }
 
-    if(dataInicio){
-      dataInicio.addEventListener("blur", aplicarDatas);
-      if(window.flatpickr){
-        flatpickr(dataInicio, {
-          dateFormat:"Y-m-d",
-          minDate: hojeYmd(),
-          allowInput:true,
-          onChange:function(_, dateStr){
-            estado.data_inicio = dataPassada(dateStr) ? hojeYmd() : dateStr;
-            if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
-            carregarDadosCard(estado.chave);
-          }
-        });
-      }
+    function aplicarDatasAoSairDoCampo(input){
+      window.setTimeout(function(){
+        const fp = input && input._flatpickr;
+        if(fp && fp.isOpen) return;
+        aplicarDatas(true);
+      }, 0);
     }
 
-    if(dataFim){
-      dataFim.addEventListener("blur", aplicarDatas);
-      if(window.flatpickr){
-        flatpickr(dataFim, {
-          dateFormat:"Y-m-d",
-          minDate: hojeYmd(),
-          allowInput:true,
-          onChange:function(_, dateStr){
-            estado.data_fim = dataPassada(dateStr) ? hojeYmd() : dateStr;
-            if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
-            carregarDadosCard(estado.chave);
-          }
-        });
-      }
-    }
+    if(dataInicio){ dataInicio.addEventListener("blur", function(){ aplicarDatasAoSairDoCampo(dataInicio); }); }
+    if(dataFim){ dataFim.addEventListener("blur", function(){ aplicarDatasAoSairDoCampo(dataFim); }); }
+
+    inicializarFlatpickrCard(estado, dataInicio, dataFim);
 
     if(marca){ marca.addEventListener("input", function(){ estado.marca_exibida = texto(marca.value); }); }
     if(observacao){ observacao.addEventListener("input", function(){ estado.observacao = texto(observacao.value); }); }
@@ -897,6 +1339,12 @@
       estado.clientes = data.clientes || data.empresas || [];
       estado.vendedores = data.vendedores || [];
       estado.contratos = data.contratos || [];
+      montarRangesDeOcupacaoEstado(estado, data.ocupacoes || data.Ocupacoes || []);
+      if(data.cal || data.calendario || data.calendar || data.dias_calendario || data.day_status){
+        aplicarCalendarioNoEstado(estado, data);
+      }else{
+        atualizarRestricoesCalendariosEstado(estado);
+      }
       estado.contratosMap = new Map();
       estado.contratos.forEach(function(item){
         const id = getContratoId(item);
@@ -915,13 +1363,30 @@
     }
   }
 
-  async function carregarCalendario(face){
-    if(!face) return;
+  async function carregarCalendario(estado){
+    if(!estado || !estado.face) return;
+    const face = estado.face;
     const qs = new URLSearchParams();
     qs.set("cod_face", codFace(face));
     qs.set("cod_ponto", codPonto(face));
     qs.set("meses", "24");
-    fetch(URL_CALENDARIO + "?" + qs.toString(), {credentials:"same-origin"}).catch(function(){});
+    if(MES_REF) qs.set("mes_ref", MES_REF);
+    if(cotaFace(face)) qs.set("cota", cotaFace(face));
+
+    try{
+      const resp = await fetch(URL_CALENDARIO + "?" + qs.toString(), {credentials:"same-origin"});
+      const payload = await resp.json().catch(function(){ return null; });
+      if(!resp.ok || !payload || !payload.ok){
+        estado.dayBadgeMap = new Map();
+        atualizarRestricoesCalendariosEstado(estado);
+        return;
+      }
+      aplicarCalendarioNoEstado(estado, payload);
+      validarDatasEstadoNoClient(estado);
+    }catch(e){
+      estado.dayBadgeMap = new Map();
+      atualizarRestricoesCalendariosEstado(estado);
+    }
   }
 
   function montarPayload(estado){
@@ -952,7 +1417,9 @@
     if(!codFace(estado.face) || !codPonto(estado.face)) return "Face sem CodFace ou CodPonto válido.";
     if(ehDigital(estado.face) && !["540", "1080"].includes(cotaFace(estado.face))) return "Para painel digital, selecione cota 540 ou 1080.";
     if(!texto(estado.data_inicio) || !texto(estado.data_fim)) return "Informe data início e data fim.";
-    if(estado.data_fim < estado.data_inicio) return "Data fim não pode ser menor que data início.";
+    if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)) return "Não é permitido reservar datas anteriores a " + hojeYmd() + ".";
+    if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) return "Data fim não pode ser menor que data início.";
+    if(rangesTemConflitoEstado(estado, estado.data_inicio, estado.data_fim)) return "Período conflita com dia CHEIO/INDISPONÍVEL ou não tem slots suficientes para esta cota.";
     if(!texto(estado.id_cliente)) return "Selecione uma empresa/cliente.";
     if(!texto(estado.id_vendedor)) return "Selecione um vendedor.";
     if(!texto(estado.marca_exibida)) return "Informe a Marca Exibida.";
@@ -1044,17 +1511,51 @@
     });
   });
 
-  /*
-    A tela abre com o primeiro card de reserva visível, mas sem face definida.
-    A primeira face selecionada preenche esse primeiro card.
-    Da segunda face em diante, cada face selecionada vira um novo card abaixo.
-  */
-  estadosCards.clear();
-  elCodFace.value = "";
-  elInputFace.value = "";
+  function adicionarFaceInicial(face){
+    const chave = chaveFace(face);
+    if(!chave || estadosCards.has(chave)) return;
+    const estado = criarEstadoFace(face);
+    estadosCards.set(chave, estado);
+  }
 
-  renderCardsReservas();
-  renderListaFaces(faces);
+  function selecionarFacesIniciais(){
+    estadosCards.clear();
+
+    const codigos = [];
+    if(Array.isArray(COD_FACES_INICIAIS)){
+      COD_FACES_INICIAIS.forEach(function(cod){ if(texto(cod)) codigos.push(texto(cod)); });
+    }
+    if(texto(COD_FACE_INICIAL)) codigos.push(texto(COD_FACE_INICIAL));
+    if(elCodFace && texto(elCodFace.value)) codigos.push(texto(elCodFace.value));
+
+    const vistos = new Set();
+    codigos.forEach(function(cod){
+      const codNorm = texto(cod).toUpperCase();
+      if(!codNorm || vistos.has(codNorm)) return;
+      vistos.add(codNorm);
+      const face = faces.find(function(item){ return codFace(item).toUpperCase() === codNorm; });
+      if(face) adicionarFaceInicial(face);
+    });
+
+    renderCardsReservas();
+    renderListaFaces(faces);
+    atualizarSelectCodFace();
+
+    const primeiro = Array.from(estadosCards.values())[0];
+    if(primeiro) elInputFace.value = labelFace(primeiro.face);
+
+    Array.from(estadosCards.keys()).forEach(function(chave){
+      carregarDadosCard(chave);
+      carregarCalendario(estadosCards.get(chave));
+    });
+  }
+
+  /*
+    A tela agora respeita a face recebida na URL.
+    Exemplo: /paineis/ocupacao/reserva/nova?codponto=30&codface=30A
+    já abre o card completo da face 30A.
+  */
+  selecionarFacesIniciais();
 })();
 </script>
 {% endblock %}
