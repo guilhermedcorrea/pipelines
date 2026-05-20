@@ -15276,11 +15276,17 @@ def relatorios_paineis():
 
     Regra de acesso:
     - todo usuário autenticado pode visualizar esta tela;
-    - a tela começa apenas com o relatório/exportação de ocupação anual.
+    - a tela possui exportações de ocupação com filtro de período.
     """
+    hoje = date.today()
+    inicio_mes = date(hoje.year, hoje.month, 1)
+
     return render_template(
         "euromidia/relatorios.html",
-        ano_atual=date.today().year,
+        ano_atual=hoje.year,
+        data_hoje=hoje.isoformat(),
+        dt_ini_padrao=inicio_mes.isoformat(),
+        dt_fim_padrao=hoje.isoformat(),
     )
 
 def _normalizar_ano_exportacao_ocupacao(valor=None) -> int:
@@ -15297,6 +15303,75 @@ def _normalizar_ano_exportacao_ocupacao(valor=None) -> int:
         ano = date.today().year
 
     return ano
+
+
+def _normalizar_data_exportacao_ocupacao(valor=None, padrao=None):
+    """
+    Eu normalizo datas vindas da tela de relatórios.
+
+    Aceito:
+    - objeto date/datetime;
+    - texto no formato YYYY-MM-DD;
+    - texto no formato DD/MM/YYYY.
+
+    Quando a data vier vazia ou inválida, retorno o padrão informado.
+    """
+    if isinstance(valor, datetime):
+        return valor.date()
+
+    if isinstance(valor, date):
+        return valor
+
+    texto = str(valor or "").strip()
+    if not texto:
+        return padrao
+
+    texto = texto[:10]
+
+    for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto, formato).date()
+        except Exception:
+            pass
+
+    return padrao
+
+
+def _normalizar_periodo_exportacao_ocupacao(ano=None, dt_ini=None, dt_fim=None):
+    """
+    Eu normalizo ano + período da exportação.
+
+    Regra:
+    - se o usuário não informar período, uso o ano inteiro;
+    - se informar período invertido, eu corrijo trocando início e fim;
+    - se o período sair do ano informado, eu limito ao ano do relatório,
+      porque a grade de ocupação continua sendo montada por ano.
+    """
+    ano_int = _normalizar_ano_exportacao_ocupacao(ano)
+
+    inicio_ano = date(ano_int, 1, 1)
+    fim_ano = date(ano_int, 12, 31)
+
+    data_inicio = _normalizar_data_exportacao_ocupacao(dt_ini, inicio_ano)
+    data_fim = _normalizar_data_exportacao_ocupacao(dt_fim, fim_ano)
+
+    if data_inicio is None:
+        data_inicio = inicio_ano
+
+    if data_fim is None:
+        data_fim = fim_ano
+
+    if data_inicio > data_fim:
+        data_inicio, data_fim = data_fim, data_inicio
+
+    data_inicio = max(data_inicio, inicio_ano)
+    data_fim = min(data_fim, fim_ano)
+
+    if data_inicio > data_fim:
+        data_inicio = inicio_ano
+        data_fim = fim_ano
+
+    return ano_int, data_inicio, data_fim
 
 
 def _obter_pasta_relatorios_ocupacao() -> Path:
@@ -15341,7 +15416,7 @@ def _caminho_relatorio_ocupacao_seguro(caminho_arquivo: str) -> Path:
     return caminho
 
 
-def _gerar_excel_ocupacao_ano_bytes(ano: int):
+def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
     """
     Eu gero a grade anual em Excel usando a mesma regra visual da tela /paineis/<codponto>/grade.
 
@@ -15353,11 +15428,8 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int):
     """
     from sqlalchemy import bindparam
 
-    ano = _normalizar_ano_exportacao_ocupacao(ano)
-
-    dt_ini_ano = date(ano, 1, 1)
-    dt_fim_ano = date(ano, 12, 31)
-    dt_fim_exclusivo = date(ano + 1, 1, 1)
+    ano, dt_ini_ano, dt_fim_ano = _normalizar_periodo_exportacao_ocupacao(ano, dt_ini, dt_fim)
+    dt_fim_exclusivo = dt_fim_ano + timedelta(days=1)
 
     def _texto_excel_seguro(valor) -> str:
         try:
@@ -15870,6 +15942,12 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int):
             if df < di:
                 continue
 
+            # Eu corto visualmente a barra no período escolhido pelo usuário.
+            # Assim, um contrato que vai de janeiro a dezembro não pinta o ano inteiro
+            # quando o usuário exportou apenas maio, por exemplo.
+            di = max(di, dt_ini_ano)
+            df = min(df, dt_fim_ano)
+
             origem_item = _texto_excel_seguro(row_item.get("OrigemItem")).upper() or "CONTRATO"
             eh_reserva = origem_item == "RESERVA"
 
@@ -15935,19 +16013,21 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int):
             num_faces=num_faces,
             faces=linhas_grade,
             ocupacoes_por_face=ocupacoes_por_face,
+            dt_ini_periodo=dt_ini_ano,
+            dt_fim_periodo=dt_fim_ano,
         )
 
     bio = BytesIO()
     wb.save(bio)
     bio.seek(0)
 
-    nome = f"grade_paineis_{ano}.xlsx"
+    nome = f"grade_paineis_{ano}_{dt_ini_ano:%Y%m%d}_{dt_fim_ano:%Y%m%d}.xlsx"
     return bio, nome
 
 
 
 
-def _gerar_excel_ocupacao_clientes_bytes(ano: int):
+def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
     """
     Eu gero o relatório "Ocupação Clientes" em uma única aba.
 
@@ -15964,10 +16044,8 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
 
-    ano = _normalizar_ano_exportacao_ocupacao(ano)
-    dt_ini_ano = date(ano, 1, 1)
-    dt_fim_ano = date(ano, 12, 31)
-    dt_fim_exclusivo = date(ano + 1, 1, 1)
+    ano, dt_ini_ano, dt_fim_ano = _normalizar_periodo_exportacao_ocupacao(ano, dt_ini, dt_fim)
+    dt_fim_exclusivo = dt_fim_ano + timedelta(days=1)
     hoje_ref = date.today()
     total_dias_ano = (dt_fim_ano - dt_ini_ano).days + 1
 
@@ -16085,30 +16163,103 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
                 partes.append(valor)
         return " - ".join(partes)
 
-    def _selecionar_item_exibicao(itens: list[dict]):
-        if not itens:
-            return None
+    def _itens_sobrepostos_ao_periodo(itens: list[dict]) -> list[dict]:
+        """
+        Eu filtro os itens para o período escolhido na tela.
 
-        vigentes = [
-            item for item in itens
-            if item.get("DataInicio") and item.get("DataFim")
-            and item["DataInicio"] <= hoje_ref <= item["DataFim"]
-        ]
+        Antes a seleção do item principal olhava a data de hoje. Isso fazia o
+        relatório parecer igual quando o usuário exportava outro período.
+        """
+        filtrados = []
+        for item in itens or []:
+            di = _data(item.get("DataInicio"))
+            df = _data(item.get("DataFim"))
+            if di is None or df is None or df < di:
+                continue
+            if df < dt_ini_ano or di > dt_fim_ano:
+                continue
+            filtrados.append(item)
 
-        if vigentes:
-            vigentes.sort(key=lambda x: (x.get("DataInicio") or date(1900, 1, 1), x.get("ID") or 0), reverse=True)
-            return vigentes[0]
-
-        ordenados = sorted(
-            itens,
+        filtrados.sort(
             key=lambda x: (
-                x.get("DataInicio") or date(1900, 1, 1),
-                x.get("DataFim") or date(1900, 1, 1),
-                x.get("ID") or 0,
+                _data(x.get("DataInicio")) or date(1900, 1, 1),
+                _data(x.get("DataFim")) or date(1900, 1, 1),
+                _inteiro(x.get("ID"), 0),
             ),
             reverse=True,
         )
-        return ordenados[0] if ordenados else None
+        return filtrados
+
+    def _selecionar_item_exibicao(itens: list[dict]):
+        itens_periodo = _itens_sobrepostos_ao_periodo(itens)
+        if not itens_periodo:
+            return None
+
+        # Primeiro eu priorizo a ocupação que cobre o início do período exportado.
+        vigentes_no_inicio = [
+            item for item in itens_periodo
+            if item.get("DataInicio") and item.get("DataFim")
+            and item["DataInicio"] <= dt_ini_ano <= item["DataFim"]
+        ]
+        if vigentes_no_inicio:
+            vigentes_no_inicio.sort(
+                key=lambda x: (x.get("DataInicio") or date(1900, 1, 1), x.get("ID") or 0),
+                reverse=True,
+            )
+            return vigentes_no_inicio[0]
+
+        return itens_periodo[0]
+
+    def _juntar_textos_unicos(valores, limite: int = 6) -> str:
+        vistos = set()
+        saida = []
+        for valor in valores or []:
+            texto = _texto(valor)
+            chave = texto.casefold()
+            if not texto or chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(texto)
+            if len(saida) >= limite:
+                break
+
+        if not saida:
+            return ""
+        return " / ".join(saida)
+
+    def _resumo_itens_periodo(itens: list[dict]) -> dict:
+        itens_periodo = _itens_sobrepostos_ao_periodo(itens)
+
+        if not itens_periodo:
+            return {
+                "item_principal": None,
+                "marcas": "",
+                "vendedores": "",
+                "data_inicio": None,
+                "data_fim": None,
+                "fim_vigente": None,
+            }
+
+        item_principal = _selecionar_item_exibicao(itens_periodo)
+
+        datas_inicio = [_data(item.get("DataInicio")) for item in itens_periodo if _data(item.get("DataInicio"))]
+        datas_fim = [_data(item.get("DataFim")) for item in itens_periodo if _data(item.get("DataFim"))]
+
+        fim_vigente = None
+        if item_principal:
+            di_principal = _data(item_principal.get("DataInicio"))
+            df_principal = _data(item_principal.get("DataFim"))
+            if di_principal and df_principal and df_principal >= dt_ini_ano and di_principal <= dt_fim_ano:
+                fim_vigente = df_principal
+
+        return {
+            "item_principal": item_principal,
+            "marcas": _juntar_textos_unicos([item.get("MarcaExibida") for item in itens_periodo]),
+            "vendedores": _juntar_textos_unicos([item.get("Vendedor") for item in itens_periodo]),
+            "data_inicio": min(datas_inicio) if datas_inicio else None,
+            "data_fim": max(datas_fim) if datas_fim else None,
+            "fim_vigente": fim_vigente,
+        }
 
     sql_faces = text("""
         SELECT
@@ -16134,8 +16285,9 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
         WHERE ISNULL(p.BitAtivo, 1) = 1
           AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
         ORDER BY
-             TRY_CONVERT(int, p.CodPonto)
-            ,p.CodPonto
+             CASE WHEN TRY_CONVERT(int, p.CodPonto) IS NULL THEN 1 ELSE 0 END
+            ,TRY_CONVERT(int, p.CodPonto)
+            ,CAST(p.CodPonto AS varchar(50))
             ,f.CodFace;
     """)
 
@@ -16289,6 +16441,7 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
         "Formato",
         "Ocupação",
         "Ocupação (%)",
+        "Dias Ocupados no Período",
         "Marca Exibida",
         "Vendedor",
         "Data Início",
@@ -16332,13 +16485,17 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
 
         if eh_digital:
             itens_ocupacao = ocupacoes_por_painel_digital.get(id_painel, [])
+            itens_ocupacao = _itens_sobrepostos_ao_periodo(itens_ocupacao)
+
             slot_dias_ocupados = 0
             for item in itens_ocupacao:
                 slot_dias_ocupados += _dias_sobrepostos(item.get("DataInicio"), item.get("DataFim")) * int(item.get("Spans") or 1)
+
             denominador = max(1, qtd_faces * total_dias_ano)
             pct = min(1.0, max(0.0, slot_dias_ocupados / denominador))
+            dias_ocupados = slot_dias_ocupados
             ocupacao_txt = "Ocupado" if slot_dias_ocupados > 0 else "Desocupado"
-            item_exibicao = None
+            resumo_periodo = _resumo_itens_periodo(itens_ocupacao)
             pref_lista = preferencias_por_painel.get(id_painel, [])
         else:
             itens_ocupacao = []
@@ -16352,29 +16509,21 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
             for item in itens_ocupacao:
                 chave = (item.get("TipoOrigem"), item.get("ID"), item.get("DataInicio"), item.get("DataFim"))
                 itens_unicos[chave] = item
-            itens_ocupacao = list(itens_unicos.values())
+            itens_ocupacao = _itens_sobrepostos_ao_periodo(list(itens_unicos.values()))
 
             dias_ocupados = _unir_intervalos_e_contar_dias([(i.get("DataInicio"), i.get("DataFim")) for i in itens_ocupacao])
             pct = min(1.0, max(0.0, dias_ocupados / max(1, total_dias_ano)))
             ocupacao_txt = "Ocupado" if dias_ocupados > 0 else "Desocupado"
-            item_exibicao = _selecionar_item_exibicao(itens_ocupacao)
+            resumo_periodo = _resumo_itens_periodo(itens_ocupacao)
             pref_lista = preferencias_por_face.get((id_painel, id_face), [])
 
         preferencia_txt = "Sim" if pref_lista else "Não"
 
-        marca = ""
-        vendedor = ""
-        data_inicio = None
-        data_fim = None
-        fim_vigente = None
-
-        if not eh_digital and item_exibicao:
-            marca = _texto(item_exibicao.get("MarcaExibida"))
-            vendedor = _texto(item_exibicao.get("Vendedor"))
-            data_inicio = item_exibicao.get("DataInicio")
-            data_fim = item_exibicao.get("DataFim")
-            if data_inicio and data_fim and data_inicio <= hoje_ref <= data_fim:
-                fim_vigente = data_fim
+        marca = resumo_periodo.get("marcas") or ""
+        vendedor = resumo_periodo.get("vendedores") or ""
+        data_inicio = resumo_periodo.get("data_inicio")
+        data_fim = resumo_periodo.get("data_fim")
+        fim_vigente = resumo_periodo.get("fim_vigente")
 
         linhas.append([
             codface,
@@ -16387,6 +16536,7 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
             _texto(face.get("FormatoLxA")) or _texto(face.get("FormatoLonaAcabadaLxAm")),
             ocupacao_txt,
             pct,
+            dias_ocupados,
             marca,
             vendedor,
             data_inicio,
@@ -16400,27 +16550,28 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
 
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(headers)):
         ocupacao = row[8].value
-        preferencia = row[15].value
+        preferencia = row[16].value
         for cell in row:
             cell.font = font_body
             cell.border = border
             cell.alignment = Alignment(vertical="center", wrap_text=True)
         row[9].number_format = "0.00%"
-        for idx in (12, 13, 14):
+        row[10].number_format = "0"
+        for idx in (13, 14, 15):
             row[idx].number_format = "dd/mm/yyyy"
         if ocupacao == "Ocupado":
             row[8].fill = fill_ocupado
         else:
             row[8].fill = fill_desocupado
         if preferencia == "Sim":
-            row[15].fill = fill_pref
+            row[16].fill = fill_pref
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
 
     larguras = {
         "A": 16, "B": 20, "C": 18, "D": 8, "E": 36, "F": 20, "G": 32, "H": 18,
-        "I": 14, "J": 14, "K": 28, "L": 24, "M": 14, "N": 14, "O": 18, "P": 22,
+        "I": 14, "J": 14, "K": 20, "L": 28, "M": 24, "N": 14, "O": 14, "P": 18, "Q": 22,
     }
     for col, width in larguras.items():
         ws.column_dimensions[col].width = width
@@ -16434,7 +16585,7 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int):
     wb.save(bio)
     bio.seek(0)
 
-    nome_download = f"Ocupação Clientes {ano}.xlsx"
+    nome_download = f"Ocupação Clientes {ano} {dt_ini_ano:%Y%m%d} a {dt_fim_ano:%Y%m%d}.xlsx"
     return bio, nome_download
 @paineis_bp.route("/exportar_excel", methods=["GET"])
 @limiter.limit("20 per minute", methods=["GET"])
@@ -16448,18 +16599,24 @@ def exportar_excel_ano():
     - por isso a request HTTP agora só cria a tarefa Celery e responde rápido;
     - o arquivo pronto é baixado depois pelo endpoint de download.
     """
-    ano = _normalizar_ano_exportacao_ocupacao(request.args.get("ano"))
+    ano, dt_ini_periodo, dt_fim_periodo = _normalizar_periodo_exportacao_ocupacao(
+        request.args.get("ano"),
+        request.args.get("dt_ini"),
+        request.args.get("dt_fim"),
+    )
 
     from ..tasks.paineis_relatorios_tasks import gerar_relatorio_ocupacao_excel_async
 
     tarefa = gerar_relatorio_ocupacao_excel_async.apply_async(
-        args=[ano],
+        args=[ano, dt_ini_periodo.isoformat(), dt_fim_periodo.isoformat()],
         queue="paineis_ocupacao",
     )
 
     acompanhamento_url = url_for(
         "Paineis.relatorios_paineis",
         ano=ano,
+        dt_ini=dt_ini_periodo.isoformat(),
+        dt_fim=dt_fim_periodo.isoformat(),
         task_id=tarefa.id,
     )
 
@@ -16467,6 +16624,8 @@ def exportar_excel_ano():
         "ok": True,
         "task_id": tarefa.id,
         "ano": ano,
+        "dt_ini": dt_ini_periodo.isoformat(),
+        "dt_fim": dt_fim_periodo.isoformat(),
         "state": "PENDING",
         "status": "Relatório enviado para geração em segundo plano.",
         "status_url": url_for("Paineis.exportar_excel_status", task_id=tarefa.id),
@@ -16609,18 +16768,24 @@ def exportar_ocupacao_clientes_excel():
     - Ele NÃO substitui /paineis/exportar_excel.
     - Ele gera uma única aba com layout analítico por CodFace.
     """
-    ano = _normalizar_ano_exportacao_ocupacao(request.args.get("ano"))
+    ano, dt_ini_periodo, dt_fim_periodo = _normalizar_periodo_exportacao_ocupacao(
+        request.args.get("ano"),
+        request.args.get("dt_ini"),
+        request.args.get("dt_fim"),
+    )
 
     from ..tasks.paineis_relatorios_tasks import gerar_relatorio_ocupacao_clientes_excel_async
 
     tarefa = gerar_relatorio_ocupacao_clientes_excel_async.apply_async(
-        args=[ano],
+        args=[ano, dt_ini_periodo.isoformat(), dt_fim_periodo.isoformat()],
         queue="paineis_ocupacao",
     )
 
     acompanhamento_url = url_for(
         "Paineis.relatorios_paineis",
         ano_clientes=ano,
+        dt_ini_clientes=dt_ini_periodo.isoformat(),
+        dt_fim_clientes=dt_fim_periodo.isoformat(),
         task_id_clientes=tarefa.id,
     )
 
@@ -16628,6 +16793,8 @@ def exportar_ocupacao_clientes_excel():
         "ok": True,
         "task_id": tarefa.id,
         "ano": ano,
+        "dt_ini": dt_ini_periodo.isoformat(),
+        "dt_fim": dt_fim_periodo.isoformat(),
         "tipo_relatorio": "ocupacao_clientes",
         "state": "PENDING",
         "status": "Relatório Ocupação Clientes enviado para geração em segundo plano.",
@@ -16845,6 +17012,8 @@ def _excel_montar_aba_grade_ano(
     num_faces: int,
     faces: list[str],
     ocupacoes_por_face: dict,
+    dt_ini_periodo=None,
+    dt_fim_periodo=None,
 ):
     """
     Eu desenho a grade anual em Excel.
@@ -16993,7 +17162,11 @@ def _excel_montar_aba_grade_ano(
         _reaplicar_contorno_barra(r1, c1, r2, c2, fill_barra)
         _aplicar_estilo_topo_barra(r1, c1, texto, fill_barra)
 
-    ws["A1"] = f"Grade Anual - CodPonto {codponto} ({ano})"
+    dt_ini_periodo = _normalizar_data_exportacao_ocupacao(dt_ini_periodo, date(ano, 1, 1))
+    dt_fim_periodo = _normalizar_data_exportacao_ocupacao(dt_fim_periodo, date(ano, 12, 31))
+    periodo_txt = f"{dt_ini_periodo:%d/%m/%Y} até {dt_fim_periodo:%d/%m/%Y}"
+
+    ws["A1"] = f"Grade de Ocupação - CodPonto {codponto} ({periodo_txt})"
     ws["A1"].font = estilos["font_titulo"]
     ws["A1"].alignment = estilos["al_left"]
 
@@ -17020,13 +17193,27 @@ def _excel_montar_aba_grade_ano(
     linha_ultima_face_real = linha_primeira_face + (len(faces) - 1) * altura_face
     linha_ultima_grade = linha_primeira_face + (len(faces) * altura_face) - 1
 
-    for mes in range(1, 12 + 1):
-        _, ultimo_dia = calendar.monthrange(ano, mes)
-        dt_ini_mes = date(ano, mes, 1)
-        dt_fim_mes = date(ano, mes, ultimo_dia)
+    # Eu desenho somente os meses/dias que intersectam o período escolhido.
+    # Antes a planilha sempre renderizava janeiro a dezembro; por isso o usuário
+    # enxergava "o mesmo Excel" mesmo quando escolhia outro intervalo na tela.
+    mes_inicio_periodo = dt_ini_periodo.month
+    mes_fim_periodo = dt_fim_periodo.month
+
+    for mes in range(mes_inicio_periodo, mes_fim_periodo + 1):
+        _, ultimo_dia_mes_real = calendar.monthrange(ano, mes)
+
+        primeiro_dia_visivel = dt_ini_periodo.day if mes == mes_inicio_periodo else 1
+        ultimo_dia_visivel = dt_fim_periodo.day if mes == mes_fim_periodo else ultimo_dia_mes_real
+
+        if ultimo_dia_visivel < primeiro_dia_visivel:
+            continue
+
+        dt_ini_mes = date(ano, mes, primeiro_dia_visivel)
+        dt_fim_mes = date(ano, mes, ultimo_dia_visivel)
+        qtd_dias_visiveis = (dt_fim_mes - dt_ini_mes).days + 1
 
         col_face = col
-        col_d_last = col + ultimo_dia
+        col_d_last = col + qtd_dias_visiveis
 
         ws.merge_cells(
             start_row=linha_topo,
@@ -17036,7 +17223,10 @@ def _excel_montar_aba_grade_ano(
         )
 
         cel = ws.cell(row=linha_topo, column=col_face)
-        cel.value = f"{calendar.month_abbr[mes].upper()}/{str(ano)[2:]}"
+        if primeiro_dia_visivel == 1 and ultimo_dia_visivel == ultimo_dia_mes_real:
+            cel.value = f"{calendar.month_abbr[mes].upper()}/{str(ano)[2:]}"
+        else:
+            cel.value = f"{calendar.month_abbr[mes].upper()}/{str(ano)[2:]} ({primeiro_dia_visivel:02d}-{ultimo_dia_visivel:02d})"
         cel.font = estilos["font_cab"]
         cel.alignment = estilos["al_center"]
         cel.fill = estilos["fill_mes"]
@@ -17047,18 +17237,18 @@ def _excel_montar_aba_grade_ano(
         cface.alignment = estilos["al_center"]
         cface.fill = estilos["fill_cab"]
 
-        for d in range(1, ultimo_dia + 1):
-            c = ws.cell(row=linha_topo + 1, column=col + d)
-            c.value = d
+        for offset, dia in enumerate(range(primeiro_dia_visivel, ultimo_dia_visivel + 1), start=1):
+            c = ws.cell(row=linha_topo + 1, column=col + offset)
+            c.value = dia
             c.font = estilos["font_cab"]
             c.alignment = estilos["al_center"]
 
-            dt = date(ano, mes, d)
+            dt = date(ano, mes, dia)
             c.fill = estilos["fill_fds"] if dt.weekday() >= 5 else estilos["fill_cab"]
 
         ws.column_dimensions[get_column_letter(col_face)].width = largura_col_face
-        for d in range(1, ultimo_dia + 1):
-            ws.column_dimensions[get_column_letter(col + d)].width = largura_col_dia
+        for offset in range(1, qtd_dias_visiveis + 1):
+            ws.column_dimensions[get_column_letter(col + offset)].width = largura_col_dia
 
         for idx, face in enumerate(faces):
             linha = linha_primeira_face + idx * altura_face
@@ -17085,11 +17275,11 @@ def _excel_montar_aba_grade_ano(
                 ws.cell(row=rr, column=col_face).border = estilos["border"]
                 ws.cell(row=rr, column=col_face).fill = estilos["fill_cab"]
 
-                for d in range(1, ultimo_dia + 1):
-                    cday = ws.cell(row=rr, column=col + d)
+                for offset, dia in enumerate(range(primeiro_dia_visivel, ultimo_dia_visivel + 1), start=1):
+                    cday = ws.cell(row=rr, column=col + offset)
                     cday.alignment = estilos["al_center"]
                     cday.border = estilos["border"]
-                    dt = date(ano, mes, d)
+                    dt = date(ano, mes, dia)
                     cday.fill = estilos["fill_fds"] if dt.weekday() >= 5 else estilos.get("fill_vazio", estilos["fill_cab"])
 
         for rr in range(linha_topo, linha_ultima_grade + 1):
@@ -17133,8 +17323,10 @@ def _excel_montar_aba_grade_ano(
                 linha_fim_barra = linha + (span_altura - 1) * altura_face
                 linha_fim_barra = min(linha_fim_barra, linha_ultima_face_real)
 
-                col_ini_barra = col + dia_ini
-                col_fim_barra = col + dia_fim
+                # Como agora o mês pode começar no dia 10, 18 etc., a coluna precisa
+                # ser calculada pelo deslocamento dentro do período visível.
+                col_ini_barra = col + (dia_ini - primeiro_dia_visivel + 1)
+                col_fim_barra = col + (dia_fim - primeiro_dia_visivel + 1)
 
                 if _ranges_colidem(
                     ranges_mesclados,

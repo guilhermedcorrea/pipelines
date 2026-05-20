@@ -5,11 +5,17 @@
 {% block content %}
 <style>
   .relatorios-page{
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0 0 28px 0;
     display: grid;
-    gap: 16px;
+    gap: clamp(14px, 1.2vw, 20px);
+    box-sizing: border-box;
   }
 
   .relatorios-header{
+    width: 100%;
     display:flex;
     align-items:flex-start;
     justify-content:space-between;
@@ -20,66 +26,83 @@
   .relatorios-title-wrap{
     display:grid;
     gap: 4px;
+    min-width: 0;
   }
 
   .relatorios-title{
     margin: 0;
     color: var(--euro-blue);
-    font-size: 24px;
+    font-size: clamp(22px, 1.8vw, 30px);
     font-weight: 950;
-    line-height: 1.15;
+    line-height: 1.12;
   }
 
   .relatorios-subtitle{
     margin: 0;
     color: var(--muted);
-    font-size: 13px;
+    font-size: clamp(13px, .95vw, 15px);
     font-weight: 750;
+    line-height: 1.45;
   }
 
   .relatorios-grid{
+    width: 100%;
+    max-width: none;
     display:grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 14px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(14px, 1.2vw, 20px);
     align-items: stretch;
+    box-sizing: border-box;
   }
 
   .relatorio-card{
+    width: 100%;
+    min-width: 0;
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 18px;
     background: #fff;
     box-shadow: 0 1px 8px rgba(0,0,0,.06);
-    padding: 18px;
+    padding: clamp(16px, 1.35vw, 24px);
     display:grid;
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: clamp(12px, 1vw, 16px);
+    box-sizing: border-box;
   }
 
   .relatorio-card-top{
+    width: 100%;
+    min-width: 0;
     display:flex;
     align-items:flex-start;
     justify-content:space-between;
-    gap: 12px;
+    gap: 16px;
+  }
+
+  .relatorio-card-top > div:first-child{
+    min-width: 0;
   }
 
   .relatorio-card-title{
     margin: 0;
     color: var(--text);
-    font-size: 17px;
+    font-size: clamp(18px, 1.35vw, 22px);
     font-weight: 950;
+    line-height: 1.2;
   }
 
   .relatorio-card-desc{
     margin: 6px 0 0 0;
     color: var(--muted);
-    font-size: 13px;
+    font-size: clamp(13px, .95vw, 15px);
     font-weight: 700;
     line-height: 1.45;
+    max-width: 100%;
   }
 
   .relatorio-icon{
-    width: 42px;
-    height: 42px;
-    border-radius: 14px;
+    width: 46px;
+    height: 46px;
+    border-radius: 15px;
     background: rgba(0,40,132,.08);
     color: var(--euro-blue);
     display:flex;
@@ -89,19 +112,39 @@
   }
 
   .relatorio-icon svg{
-    width: 22px;
-    height: 22px;
+    width: 23px;
+    height: 23px;
   }
 
   .relatorios-page .icon-btn{
     width: fit-content;
+    min-height: 46px;
+    padding: 0 18px;
     background: var(--euro-blue);
     color: #fff;
     box-shadow: 0 10px 24px rgba(0,40,132,.18);
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap: 9px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 950;
+  }
+
+  .relatorios-page .icon-btn svg{
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
   }
 
   .relatorios-page .icon-btn:hover{
     background: var(--euro-blue-2);
+  }
+
+  .relatorios-page .icon-btn:disabled{
+    opacity: .72;
+    cursor: wait;
   }
 
   .relatorio-actions{
@@ -111,27 +154,23 @@
     flex-wrap: wrap;
   }
 
-  .relatorio-actions .campo-ano{
-    width: 140px;
-  }
-
-  .relatorio-actions label{
-    margin-bottom: 6px;
-  }
-
   .relatorio-info{
-    border-radius: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 13px;
     border: 1px solid rgba(0,40,132,.12);
     background: rgba(0,40,132,.04);
-    padding: 10px 12px;
+    padding: 12px 14px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: clamp(12px, .9vw, 14px);
     font-weight: 750;
     line-height: 1.45;
   }
 
   .relatorio-status{
     display:none;
+    width: 100%;
+    box-sizing: border-box;
     border-radius: 14px;
     border: 1px solid rgba(0,40,132,.16);
     background: rgba(0,40,132,.04);
@@ -140,6 +179,7 @@
     font-size: 13px;
     font-weight: 800;
     line-height: 1.45;
+    overflow-wrap: anywhere;
   }
 
   .relatorio-status.is-visible{
@@ -162,7 +202,313 @@
     color: inherit;
     font-weight: 950;
   }
+
+  .periodo-shell{
+    width: 100%;
+    min-width: 0;
+    position: relative;
+    border: 1px solid rgba(0,40,132,.14);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(0,40,132,.045), rgba(255,255,255,.96));
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  .periodo-topbar{
+    width: 100%;
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .periodo-chip{
+    border: 1px solid rgba(0,40,132,.18);
+    border-radius: 999px;
+    padding: 8px 12px;
+    background:#fff;
+    color: var(--euro-blue);
+    font-size: 12px;
+    font-weight: 950;
+    line-height: 1;
+    cursor:pointer;
+    user-select:none;
+    white-space: nowrap;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+
+  .periodo-chip.ativo{
+    background: var(--euro-blue);
+    color:#fff;
+    border-color: var(--euro-blue);
+  }
+
+  .periodo-open{
+    margin-left:auto;
+    width: min(380px, 100%);
+    min-width: 260px;
+    max-width: 100%;
+    border: 1px solid rgba(0,40,132,.18);
+    border-radius: 999px;
+    padding: 10px 14px;
+    background:#fff;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 900;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    cursor:pointer;
+    user-select:none;
+    box-sizing: border-box;
+  }
+
+  .periodo-panel{
+    display:none;
+    position:absolute;
+    z-index: 25;
+    top: calc(100% + 8px);
+    left: 12px;
+    width: min(640px, calc(100vw - 64px));
+    max-width: calc(100vw - 64px);
+    border: 1px solid rgba(15,23,42,.14);
+    border-radius: 16px;
+    background:#fff;
+    box-shadow: 0 18px 40px rgba(15,23,42,.18);
+    padding: 14px;
+    box-sizing: border-box;
+  }
+
+  .periodo-panel.is-open{
+    display:block;
+  }
+
+  .periodo-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .periodo-nav{
+    width: 38px;
+    height: 36px;
+    border: 1px solid rgba(0,40,132,.18);
+    border-radius: 10px;
+    background:#fff;
+    color: var(--euro-blue);
+    font-size: 24px;
+    font-weight: 950;
+    cursor:pointer;
+  }
+
+  .periodo-ano{
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 950;
+  }
+
+  .periodo-meses{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .periodo-mes{
+    min-width: 0;
+    border: 1px solid rgba(0,40,132,.14);
+    border-radius: 10px;
+    background: rgba(0,40,132,.04);
+    color: var(--text);
+    padding: 10px 8px;
+    font-size: 11px;
+    font-weight: 950;
+    cursor:pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .periodo-mes:hover{
+    background: rgba(0,40,132,.08);
+  }
+
+  .periodo-range,
+  .periodo-bisemana-solo{
+    display:grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .periodo-range label,
+  .periodo-bisemana-solo label{
+    display:block;
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .periodo-range input,
+  .periodo-bisemana-solo select{
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(15,23,42,.16);
+    border-radius: 10px;
+    padding: 10px 11px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 800;
+    background:#fff;
+    box-sizing: border-box;
+  }
+
+  .periodo-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .periodo-btn{
+    border: 1px solid rgba(0,40,132,.18);
+    border-radius: 10px;
+    padding: 10px 13px;
+    background:#fff;
+    color: var(--euro-blue);
+    font-size: 12px;
+    font-weight: 950;
+    cursor:pointer;
+  }
+
+  .periodo-btn.primary{
+    background: var(--euro-blue);
+    color:#fff;
+    border-color: var(--euro-blue);
+  }
+
+  .periodo-inputs-reais{
+    display:none;
+  }
+
+  @media (min-width: 1200px){
+    .relatorios-page{
+      padding-right: clamp(8px, 1.2vw, 20px);
+    }
+
+    .relatorio-card{
+      padding: clamp(20px, 1.4vw, 28px);
+    }
+  }
+
+  @media (max-width: 900px){
+    .relatorio-card-top{
+      align-items:flex-start;
+    }
+
+    .periodo-open{
+      width: 100%;
+      min-width: 0;
+      margin-left: 0;
+    }
+
+    .periodo-chip{
+      flex: 1 1 auto;
+      text-align: center;
+    }
+  }
+
+  @media (max-width: 680px){
+    .relatorios-page{
+      gap: 12px;
+    }
+
+    .relatorios-title{
+      font-size: 22px;
+    }
+
+    .relatorio-card{
+      padding: 14px;
+      border-radius: 15px;
+    }
+
+    .relatorio-card-top{
+      gap: 10px;
+    }
+
+    .relatorio-icon{
+      width: 40px;
+      height: 40px;
+      border-radius: 13px;
+    }
+
+    .relatorios-page .icon-btn{
+      width: 100%;
+    }
+
+    .periodo-shell{
+      padding: 10px;
+    }
+
+    .periodo-topbar{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .periodo-open{
+      grid-column: 1 / -1;
+      width:100%;
+      min-width:0;
+      margin-left:0;
+      border-radius: 14px;
+    }
+
+    .periodo-panel{
+      left: 0;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .periodo-meses{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .periodo-range,
+    .periodo-bisemana-solo{
+      grid-template-columns: 1fr;
+    }
+
+    .periodo-actions{
+      justify-content:stretch;
+    }
+
+    .periodo-btn{
+      flex: 1 1 0;
+    }
+  }
+
+  @media (max-width: 420px){
+    .periodo-topbar{
+      grid-template-columns: 1fr;
+    }
+
+    .relatorio-card-top{
+      flex-direction: column;
+    }
+
+    .relatorio-icon{
+      align-self:flex-start;
+    }
+  }
 </style>
+
+{% set dt_ini_base = request.args.get('dt_ini') or dt_ini_padrao %}
+{% set dt_fim_base = request.args.get('dt_fim') or dt_fim_padrao %}
+{% set dt_ini_clientes_base = request.args.get('dt_ini_clientes') or dt_ini_base %}
+{% set dt_fim_clientes_base = request.args.get('dt_fim_clientes') or dt_fim_base %}
 
 <div class="relatorios-page">
   <div class="relatorios-header">
@@ -180,7 +526,7 @@
         <div>
           <h2 class="relatorio-card-title">Exportar Ocupação</h2>
           <p class="relatorio-card-desc">
-            Gera a grade anual de ocupação em Excel, com uma aba por painel.
+            Gera a grade de ocupação em Excel, com uma aba por painel, respeitando o período escolhido.
           </p>
         </div>
 
@@ -194,18 +540,86 @@
         </div>
       </div>
 
-      <button type="button" class="icon-btn" id="btnExportarExcel" data-exportar-excel="1" title="Exportar Excel (grade anual)">
+      <div class="periodo-shell" id="periodoShellOcupacao" data-periodo-shell title="Período usado para calcular ocupação (DataInicioPrevisto/DataTerminoPrevisto)">
+        <div class="periodo-topbar">
+          <span class="periodo-chip ativo" data-periodo-modo="dia">Dia</span>
+          <span class="periodo-chip" data-periodo-modo="semana">Semana</span>
+          <span class="periodo-chip" data-periodo-modo="mes">Mês</span>
+          <span class="periodo-chip" data-periodo-modo="ano">Ano</span>
+          <span class="periodo-chip" data-periodo-hoje>Hoje</span>
+
+          <span class="periodo-open" data-periodo-open title="Abrir seletor de período">
+            <span data-periodo-label>{{ dt_ini_base }} até {{ dt_fim_base }}</span>
+            <span style="font-weight:950;opacity:.85;">▾</span>
+          </span>
+        </div>
+
+        <div class="periodo-panel" data-periodo-panel>
+          <div class="periodo-header">
+            <button type="button" class="periodo-nav" data-periodo-ano-prev>‹</button>
+            <div class="periodo-ano"><span data-periodo-ano-label>{{ ano_atual }}</span></div>
+            <button type="button" class="periodo-nav" data-periodo-ano-next>›</button>
+          </div>
+
+          <div class="periodo-meses" data-periodo-grid-meses>
+            <button type="button" class="periodo-mes" data-periodo-mes="01">JANEIRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="02">FEVEREIRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="03">MARÇO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="04">ABRIL</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="05">MAIO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="06">JUNHO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="07">JULHO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="08">AGOSTO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="09">SETEMBRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="10">OUTUBRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="11">NOVEMBRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="12">DEZEMBRO</button>
+          </div>
+
+          <div class="periodo-range">
+            <div>
+              <label>De</label>
+              <input type="date" data-periodo-de value="{{ dt_ini_base }}">
+            </div>
+            <div>
+              <label>Até</label>
+              <input type="date" data-periodo-ate value="{{ dt_fim_base }}">
+            </div>
+          </div>
+
+          <div class="periodo-bisemana-solo">
+            <div style="grid-column: 1 / -1;">
+              <label>Bi-Semana</label>
+              <select data-periodo-bisemana aria-label="Selecionar bi-semana">
+                <option value="">Selecione...</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="periodo-actions">
+            <button type="button" class="periodo-btn" data-periodo-close>Fechar</button>
+            <button type="button" class="periodo-btn primary" data-periodo-aplicar>Filtrar</button>
+          </div>
+        </div>
+
+        <div class="periodo-inputs-reais">
+          <input type="date" data-periodo-dt-ini-real name="dt_ini" value="{{ dt_ini_base }}">
+          <input type="date" data-periodo-dt-fim-real name="dt_fim" value="{{ dt_fim_base }}">
+        </div>
+      </div>
+
+      <button type="button" class="icon-btn" id="btnExportarExcel" title="Exportar Excel (grade de ocupação)">
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
           <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2"></path>
           <path d="M14 3v6h6" stroke="currentColor" stroke-width="2"></path>
           <path d="M8 17l3-4-3-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
           <path d="M13 9l3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
         </svg>
-        Exportar
+        <span class="btn-label">Exportar</span>
       </button>
 
       <div class="relatorio-info">
-        Ao clicar em Exportar, o sistema abre a seleção do ano e gera o arquivo em segundo plano. A página acompanha o andamento e inicia o download quando terminar.
+        Ao clicar em Exportar, o sistema gera o arquivo em segundo plano usando o período selecionado acima.
       </div>
 
       <div id="statusExportacaoOcupacao" class="relatorio-status" aria-live="polite"></div>
@@ -222,36 +636,94 @@
 
         <div class="relatorio-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
-            <path d="M4 5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-            <path d="M14 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-            <path d="M8 13h8M8 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2"></path>
+            <path d="M14 3v6h6" stroke="currentColor" stroke-width="2"></path>
+            <path d="M8 17l3-4-3-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+            <path d="M13 9l3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
           </svg>
         </div>
       </div>
 
-      <div class="relatorio-actions">
-        <div class="campo-ano">
-          <label for="anoOcupacaoClientes">Ano</label>
-          <select id="anoOcupacaoClientes">
-            <option value="2024">2024</option>
-            <option value="2025">2025</option>
-            <option value="2026" selected>2026</option>
-            <option value="2027">2027</option>
-          </select>
+      <div class="periodo-shell" id="periodoShellOcupacaoClientes" data-periodo-shell title="Período usado para calcular ocupação (DataInicioPrevisto/DataTerminoPrevisto)">
+        <div class="periodo-topbar">
+          <span class="periodo-chip ativo" data-periodo-modo="dia">Dia</span>
+          <span class="periodo-chip" data-periodo-modo="semana">Semana</span>
+          <span class="periodo-chip" data-periodo-modo="mes">Mês</span>
+          <span class="periodo-chip" data-periodo-modo="ano">Ano</span>
+          <span class="periodo-chip" data-periodo-hoje>Hoje</span>
+
+          <span class="periodo-open" data-periodo-open title="Abrir seletor de período">
+            <span data-periodo-label>{{ dt_ini_clientes_base }} até {{ dt_fim_clientes_base }}</span>
+            <span style="font-weight:950;opacity:.85;">▾</span>
+          </span>
         </div>
 
-        <button type="button" class="icon-btn" id="btnExportarOcupacaoClientes" title="Gerar Excel Ocupação Clientes">
-          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-            <path d="M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-            <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-            <path d="M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-          </svg>
-          Download
-        </button>
+        <div class="periodo-panel" data-periodo-panel>
+          <div class="periodo-header">
+            <button type="button" class="periodo-nav" data-periodo-ano-prev>‹</button>
+            <div class="periodo-ano"><span data-periodo-ano-label>{{ ano_atual }}</span></div>
+            <button type="button" class="periodo-nav" data-periodo-ano-next>›</button>
+          </div>
+
+          <div class="periodo-meses" data-periodo-grid-meses>
+            <button type="button" class="periodo-mes" data-periodo-mes="01">JANEIRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="02">FEVEREIRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="03">MARÇO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="04">ABRIL</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="05">MAIO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="06">JUNHO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="07">JULHO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="08">AGOSTO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="09">SETEMBRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="10">OUTUBRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="11">NOVEMBRO</button>
+            <button type="button" class="periodo-mes" data-periodo-mes="12">DEZEMBRO</button>
+          </div>
+
+          <div class="periodo-range">
+            <div>
+              <label>De</label>
+              <input type="date" data-periodo-de value="{{ dt_ini_clientes_base }}">
+            </div>
+            <div>
+              <label>Até</label>
+              <input type="date" data-periodo-ate value="{{ dt_fim_clientes_base }}">
+            </div>
+          </div>
+
+          <div class="periodo-bisemana-solo">
+            <div style="grid-column: 1 / -1;">
+              <label>Bi-Semana</label>
+              <select data-periodo-bisemana aria-label="Selecionar bi-semana">
+                <option value="">Selecione...</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="periodo-actions">
+            <button type="button" class="periodo-btn" data-periodo-close>Fechar</button>
+            <button type="button" class="periodo-btn primary" data-periodo-aplicar>Filtrar</button>
+          </div>
+        </div>
+
+        <div class="periodo-inputs-reais">
+          <input type="date" data-periodo-dt-ini-real name="dt_ini_clientes" value="{{ dt_ini_clientes_base }}">
+          <input type="date" data-periodo-dt-fim-real name="dt_fim_clientes" value="{{ dt_fim_clientes_base }}">
+        </div>
       </div>
+
+      <button type="button" class="icon-btn" id="btnExportarOcupacaoClientes" title="Exportar Excel Ocupação Clientes">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+          <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="2"></path>
+          <path d="M14 3v6h6" stroke="currentColor" stroke-width="2"></path>
+          <path d="M8 17l3-4-3-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M13 9l3 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
+        <span class="btn-label">Exportar</span>
+      </button>
 
       <div class="relatorio-info">
-        Este é outro relatório: não substitui a grade anual. Ele gera o arquivo <b>Ocupação Clientes</b> em segundo plano usando Celery/Redis e baixa quando terminar.
+        Informações de ocupação por cliente, vendedor, vigência e preferência de renovação, calculadas conforme o período selecionado acima.
       </div>
 
       <div id="statusExportacaoOcupacaoClientes" class="relatorio-status" aria-live="polite"></div>
@@ -262,6 +734,262 @@
 <script>
 (function(){
   const params = new URLSearchParams(window.location.search);
+  const DATA_HOJE = "{{ data_hoje }}";
+
+  function parseDateISO(valor){
+    const texto = String(valor || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) return null;
+
+    const partes = texto.split("-").map(Number);
+    const data = new Date(partes[0], partes[1] - 1, partes[2]);
+    if (Number.isNaN(data.getTime())) return null;
+
+    return data;
+  }
+
+  function iso(data){
+    const ano = data.getFullYear();
+    const mes = String(data.getMonth() + 1).padStart(2, "0");
+    const dia = String(data.getDate()).padStart(2, "0");
+    return `${ano}-${mes}-${dia}`;
+  }
+
+  function formatarDataBR(valor){
+    const data = parseDateISO(valor);
+    if (!data) return String(valor || "");
+    return `${String(data.getDate()).padStart(2, "0")}/${String(data.getMonth() + 1).padStart(2, "0")}/${data.getFullYear()}`;
+  }
+
+  function ultimoDiaMes(ano, mesNumero){
+    return new Date(ano, mesNumero, 0).getDate();
+  }
+
+  function inicioDaSemana(data){
+    const d = new Date(data.getTime());
+    const dia = d.getDay();
+    const diff = dia === 0 ? -6 : 1 - dia;
+    d.setDate(d.getDate() + diff);
+    return d;
+  }
+
+  function fimDaSemana(data){
+    const ini = inicioDaSemana(data);
+    const fim = new Date(ini.getTime());
+    fim.setDate(ini.getDate() + 6);
+    return fim;
+  }
+
+  function gerarBisemanas(ano){
+    const itens = [];
+    let inicio = new Date(ano, 0, 1);
+    let contador = 1;
+
+    while (inicio.getFullYear() <= ano){
+      const fim = new Date(inicio.getTime());
+      fim.setDate(fim.getDate() + 13);
+
+      const inicioClip = new Date(Math.max(inicio.getTime(), new Date(ano, 0, 1).getTime()));
+      const fimClip = new Date(Math.min(fim.getTime(), new Date(ano, 11, 31).getTime()));
+
+      itens.push({
+        codigo: String(contador).padStart(2, "0"),
+        inicio: iso(inicioClip),
+        fim: iso(fimClip),
+      });
+
+      inicio.setDate(inicio.getDate() + 14);
+      contador += 1;
+
+      if (inicio.getFullYear() > ano && inicio.getMonth() > 0) break;
+    }
+
+    return itens;
+  }
+
+  function configurarPeriodo(shell){
+    if (!shell) return null;
+
+    const panel = shell.querySelector("[data-periodo-panel]");
+    const label = shell.querySelector("[data-periodo-label]");
+    const btnOpen = shell.querySelector("[data-periodo-open]");
+    const btnClose = shell.querySelector("[data-periodo-close]");
+    const btnAplicar = shell.querySelector("[data-periodo-aplicar]");
+    const inputDe = shell.querySelector("[data-periodo-de]");
+    const inputAte = shell.querySelector("[data-periodo-ate]");
+    const realDe = shell.querySelector("[data-periodo-dt-ini-real]");
+    const realAte = shell.querySelector("[data-periodo-dt-fim-real]");
+    const anoLabel = shell.querySelector("[data-periodo-ano-label]");
+    const selBisemana = shell.querySelector("[data-periodo-bisemana]");
+    const chips = Array.from(shell.querySelectorAll("[data-periodo-modo]"));
+    const hojeChip = shell.querySelector("[data-periodo-hoje]");
+
+    let anoAtual = Number((parseDateISO(inputDe && inputDe.value) || parseDateISO(DATA_HOJE) || new Date()).getFullYear());
+
+    function setAno(ano){
+      anoAtual = Number(ano || new Date().getFullYear());
+      if (anoLabel) anoLabel.textContent = String(anoAtual);
+      carregarBisemanas();
+    }
+
+    function setAtivo(modo){
+      chips.forEach(chip => {
+        chip.classList.toggle("ativo", String(chip.dataset.periodoModo || "") === modo);
+      });
+    }
+
+    function setPeriodo(inicio, fim, modo){
+      const iniISO = typeof inicio === "string" ? inicio : iso(inicio);
+      const fimISO = typeof fim === "string" ? fim : iso(fim);
+
+      if (inputDe) inputDe.value = iniISO;
+      if (inputAte) inputAte.value = fimISO;
+      if (realDe) realDe.value = iniISO;
+      if (realAte) realAte.value = fimISO;
+      if (label) label.textContent = `${formatarDataBR(iniISO)} até ${formatarDataBR(fimISO)}`;
+
+      const iniData = parseDateISO(iniISO);
+      if (iniData) setAno(iniData.getFullYear());
+      if (modo) setAtivo(modo);
+    }
+
+    function carregarBisemanas(){
+      if (!selBisemana) return;
+
+      const selecionado = selBisemana.value;
+      selBisemana.innerHTML = '<option value="">Selecione...</option>';
+
+      gerarBisemanas(anoAtual).forEach(item => {
+        const opt = document.createElement("option");
+        opt.value = item.codigo;
+        opt.dataset.inicio = item.inicio;
+        opt.dataset.fim = item.fim;
+        opt.textContent = `${item.codigo} — ${formatarDataBR(item.inicio).slice(0, 5)} a ${formatarDataBR(item.fim).slice(0, 5)}`;
+        selBisemana.appendChild(opt);
+      });
+
+      if (selecionado) selBisemana.value = selecionado;
+    }
+
+    function aplicarDatasDigitadas(){
+      let ini = parseDateISO(inputDe && inputDe.value);
+      let fim = parseDateISO(inputAte && inputAte.value);
+
+      if (!ini || !fim){
+        const hoje = parseDateISO(DATA_HOJE) || new Date();
+        ini = hoje;
+        fim = hoje;
+      }
+
+      if (ini.getTime() > fim.getTime()){
+        const tmp = ini;
+        ini = fim;
+        fim = tmp;
+      }
+
+      setPeriodo(ini, fim, "");
+    }
+
+    if (btnOpen){
+      btnOpen.addEventListener("click", function(){
+        if (panel) panel.classList.toggle("is-open");
+      });
+    }
+
+    if (btnClose){
+      btnClose.addEventListener("click", function(){
+        if (panel) panel.classList.remove("is-open");
+      });
+    }
+
+    if (btnAplicar){
+      btnAplicar.addEventListener("click", function(){
+        aplicarDatasDigitadas();
+        if (panel) panel.classList.remove("is-open");
+      });
+    }
+
+    shell.querySelectorAll("[data-periodo-mes]").forEach(btn => {
+      btn.addEventListener("click", function(){
+        const mes = Number(btn.dataset.periodoMes || "1");
+        const ini = new Date(anoAtual, mes - 1, 1);
+        const fim = new Date(anoAtual, mes - 1, ultimoDiaMes(anoAtual, mes));
+        setPeriodo(ini, fim, "mes");
+      });
+    });
+
+    const anoPrev = shell.querySelector("[data-periodo-ano-prev]");
+    const anoNext = shell.querySelector("[data-periodo-ano-next]");
+
+    if (anoPrev){
+      anoPrev.addEventListener("click", function(){
+        setAno(anoAtual - 1);
+      });
+    }
+
+    if (anoNext){
+      anoNext.addEventListener("click", function(){
+        setAno(anoAtual + 1);
+      });
+    }
+
+    chips.forEach(chip => {
+      chip.addEventListener("click", function(){
+        const modo = String(chip.dataset.periodoModo || "");
+        const hoje = parseDateISO(DATA_HOJE) || new Date();
+
+        if (modo === "dia"){
+          setPeriodo(hoje, hoje, "dia");
+        } else if (modo === "semana"){
+          setPeriodo(inicioDaSemana(hoje), fimDaSemana(hoje), "semana");
+        } else if (modo === "mes"){
+          setPeriodo(new Date(hoje.getFullYear(), hoje.getMonth(), 1), new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0), "mes");
+        } else if (modo === "ano"){
+          setPeriodo(new Date(hoje.getFullYear(), 0, 1), new Date(hoje.getFullYear(), 11, 31), "ano");
+        }
+      });
+    });
+
+    if (hojeChip){
+      hojeChip.addEventListener("click", function(){
+        const hoje = parseDateISO(DATA_HOJE) || new Date();
+        setPeriodo(hoje, hoje, "dia");
+      });
+    }
+
+    if (selBisemana){
+      selBisemana.addEventListener("change", function(){
+        const opt = selBisemana.options[selBisemana.selectedIndex];
+        const ini = opt && opt.dataset ? opt.dataset.inicio : "";
+        const fim = opt && opt.dataset ? opt.dataset.fim : "";
+        if (ini && fim){
+          setPeriodo(ini, fim, "");
+        }
+      });
+    }
+
+    document.addEventListener("click", function(ev){
+      if (!shell.contains(ev.target) && panel){
+        panel.classList.remove("is-open");
+      }
+    });
+
+    setAno(anoAtual);
+    aplicarDatasDigitadas();
+
+    return {
+      getPeriodo: function(){
+        aplicarDatasDigitadas();
+        return {
+          dt_ini: realDe ? realDe.value : "",
+          dt_fim: realAte ? realAte.value : "",
+          ano: (parseDateISO(realDe && realDe.value) || parseDateISO(DATA_HOJE) || new Date()).getFullYear(),
+        };
+      }
+    };
+  }
+
+  const periodoOcupacao = configurarPeriodo(document.getElementById("periodoShellOcupacao"));
+  const periodoClientes = configurarPeriodo(document.getElementById("periodoShellOcupacaoClientes"));
 
   function mostrarStatus(statusBox, texto, classe){
     if (!statusBox) return;
@@ -348,6 +1076,61 @@
     consultar();
   }
 
+  async function iniciarExportacao(config){
+    const btn = config.btn;
+    const statusBox = config.statusBox;
+    const periodo = config.periodo && config.periodo.getPeriodo ? config.periodo.getPeriodo() : {};
+
+    if (!btn) return;
+
+    const label = btn.querySelector(".btn-label");
+    const textoOriginal = label ? label.textContent : btn.textContent;
+
+    const query = new URLSearchParams();
+    query.set("ano", String(periodo.ano || "{{ ano_atual }}"));
+    query.set("dt_ini", String(periodo.dt_ini || ""));
+    query.set("dt_fim", String(periodo.dt_fim || ""));
+    query.set("ajax", "1");
+
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    if (label) label.textContent = "Gerando...";
+    else btn.textContent = "Gerando...";
+
+    mostrarStatus(statusBox, config.mensagemInicio || "Enviando relatório para geração em segundo plano...");
+
+    try{
+      const resp = await fetch(config.exportUrl + "?" + query.toString(), {
+        method: "GET",
+        headers: {"Accept": "application/json"},
+        credentials: "same-origin"
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok || data.ok === false){
+        throw new Error(data.erro || data.status || "Não foi possível iniciar o relatório.");
+      }
+
+      if (data.acompanhamento_url){
+        window.location.href = data.acompanhamento_url;
+      } else {
+        acompanharRelatorio({
+          statusBox: statusBox,
+          taskId: data.task_id,
+          statusUrlBase: config.statusUrlBase
+        });
+      }
+    }catch(err){
+      mostrarStatus(statusBox, err.message || "Não foi possível iniciar o relatório.", "is-error");
+    }finally{
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      if (label) label.textContent = textoOriginal || "Exportar";
+      else btn.textContent = textoOriginal || "Exportar";
+    }
+  }
+
   const statusOcupacao = document.getElementById("statusExportacaoOcupacao");
   const taskIdGrade = (params.get("task_id") || "").trim();
 
@@ -374,8 +1157,6 @@
     });
   }
 
-  const btnClientes = document.getElementById("btnExportarOcupacaoClientes");
-  const anoClientes = document.getElementById("anoOcupacaoClientes");
   const statusClientes = document.getElementById("statusExportacaoOcupacaoClientes");
   const taskIdClientes = (params.get("task_id_clientes") || "").trim();
 
@@ -387,46 +1168,37 @@
     });
   }
 
-  if (btnClientes){
-    btnClientes.addEventListener("click", async function(ev){
+  const btnGrade = document.getElementById("btnExportarExcel");
+  if (btnGrade){
+    btnGrade.addEventListener("click", function(ev){
       ev.preventDefault();
+      ev.stopImmediatePropagation();
 
-      const ano = String((anoClientes && anoClientes.value) || "").replace(/[^\d]/g, "").slice(0, 4);
-      const url = "{{ url_for('Paineis.exportar_ocupacao_clientes_excel') }}" + "?ano=" + encodeURIComponent(ano || "") + "&ajax=1";
+      iniciarExportacao({
+        btn: btnGrade,
+        statusBox: statusOcupacao,
+        periodo: periodoOcupacao,
+        exportUrl: "{{ url_for('Paineis.exportar_excel_ano') }}",
+        statusUrlBase: "{{ url_for('Paineis.exportar_excel_status', task_id='__TASK_ID__') }}",
+        mensagemInicio: "Enviando Exportar Ocupação para geração em segundo plano..."
+      });
+    });
+  }
 
-      btnClientes.disabled = true;
-      const textoOriginal = btnClientes.textContent;
-      btnClientes.textContent = "Gerando...";
-      mostrarStatus(statusClientes, "Enviando relatório Ocupação Clientes para geração em segundo plano...");
+  const btnClientes = document.getElementById("btnExportarOcupacaoClientes");
+  if (btnClientes){
+    btnClientes.addEventListener("click", function(ev){
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
 
-      try{
-        const resp = await fetch(url, {
-          method: "GET",
-          headers: {"Accept": "application/json"},
-          credentials: "same-origin"
-        });
-
-        const data = await resp.json();
-
-        if (!resp.ok || data.ok === false){
-          throw new Error(data.erro || data.status || "Não foi possível iniciar o relatório Ocupação Clientes.");
-        }
-
-        if (data.acompanhamento_url){
-          window.location.href = data.acompanhamento_url;
-        } else {
-          acompanharRelatorio({
-            statusBox: statusClientes,
-            taskId: data.task_id,
-            statusUrlBase: "{{ url_for('Paineis.exportar_ocupacao_clientes_status', task_id='__TASK_ID__') }}"
-          });
-        }
-      }catch(err){
-        mostrarStatus(statusClientes, err.message || "Não foi possível iniciar o relatório Ocupação Clientes.", "is-error");
-      }finally{
-        btnClientes.disabled = false;
-        btnClientes.textContent = textoOriginal || "Download";
-      }
+      iniciarExportacao({
+        btn: btnClientes,
+        statusBox: statusClientes,
+        periodo: periodoClientes,
+        exportUrl: "{{ url_for('Paineis.exportar_ocupacao_clientes_excel') }}",
+        statusUrlBase: "{{ url_for('Paineis.exportar_ocupacao_clientes_status', task_id='__TASK_ID__') }}",
+        mensagemInicio: "Enviando relatório Ocupação Clientes para geração em segundo plano..."
+      });
     });
   }
 })();
