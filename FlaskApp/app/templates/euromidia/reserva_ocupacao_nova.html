@@ -1,0 +1,1060 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Reserva Ocupação{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+
+<style>
+  .reserva-ocupacao-page{
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding:18px 22px;
+  }
+
+  .reserva-ocupacao-stack{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+
+  .reserva-ocupacao-card{
+    width:100%;
+    border:1px solid var(--border);
+    border-radius:16px;
+    background:#fff;
+    padding:16px;
+    box-shadow:0 8px 24px rgba(15,23,42,.06);
+  }
+
+  .reserva-ocupacao-card.is-face-card{
+    border-left:5px solid #166534;
+  }
+
+  .reserva-ocupacao-card.is-face-pendente{
+    border-left-color:#94a3b8;
+  }
+
+  .reserva-grid-2{
+    display:grid;
+    grid-template-columns:1.4fr .6fr;
+    gap:12px;
+    align-items:end;
+  }
+
+  .reserva-grid-3{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:12px;
+    align-items:end;
+  }
+
+  .reserva-grid-4{
+    display:grid;
+    grid-template-columns:.7fr .7fr .7fr 1.9fr;
+    gap:12px;
+    align-items:end;
+  }
+
+  @media (max-width:1100px){
+    .reserva-grid-4{grid-template-columns:1fr 1fr;}
+  }
+
+  @media (max-width:900px){
+    .reserva-ocupacao-page{padding:14px;}
+    .reserva-grid-2,
+    .reserva-grid-3,
+    .reserva-grid-4{grid-template-columns:1fr;}
+  }
+
+  .campo-label{
+    font-weight:900;
+    display:block;
+    margin-bottom:6px;
+  }
+
+  .hint{
+    margin-top:6px;
+    opacity:.75;
+    font-weight:700;
+    font-size:12px;
+  }
+
+  .msg{
+    font-weight:900;
+    min-height:22px;
+  }
+
+  .msg.ok{color:#166534;}
+  .msg.err{color:#b00020;}
+
+  .kb-combobox{
+    position:relative;
+    display:block;
+    width:100%;
+  }
+
+  .kb-input,
+  .kb-combobox-input{
+    width:100%;
+    min-height:40px;
+    padding:9px 52px 9px 11px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    font-weight:800;
+    outline:none;
+  }
+
+  .kb-input:focus,
+  .kb-combobox-input:focus{
+    box-shadow:0 0 0 3px rgba(37,99,235,.10);
+  }
+
+  .kb-combobox-toggle{
+    position:absolute;
+    top:0;
+    right:0;
+    width:42px;
+    min-width:42px;
+    height:40px;
+    border:1px solid var(--border);
+    border-radius:0 12px 12px 0;
+    background:#f8fafc;
+    font-weight:900;
+    cursor:pointer;
+  }
+
+  .kb-combobox-lista{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(100% + 6px);
+    z-index:10000;
+    max-height:340px;
+    overflow:auto;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 16px 35px rgba(15,23,42,.16);
+  }
+
+  .kb-combobox-item{
+    position:relative;
+    padding:11px 52px 11px 13px;
+    border-bottom:1px solid rgba(0,0,0,.06);
+    cursor:pointer;
+  }
+
+  .kb-combobox-item:hover{background:#f8fafc;}
+  .kb-combobox-item:last-child{border-bottom:none;}
+  .kb-combobox-item.is-selected{background:rgba(22,101,52,.08);}
+
+  .kb-combobox-item .top{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:14px;
+    font-weight:1000;
+    color:#0f172a;
+    min-width:0;
+    flex-wrap:wrap;
+  }
+
+  .kb-combobox-item .sub{
+    display:block;
+    margin-top:4px;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    line-height:1.35;
+  }
+
+  .kb-face-check{
+    position:absolute;
+    right:12px;
+    top:11px;
+    width:28px;
+    height:28px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    border:1px solid rgba(22,101,52,.25);
+    background:#f8fafc;
+    color:#166534;
+    font-weight:1000;
+    line-height:1;
+  }
+
+  .kb-combobox-item.is-selected .kb-face-check{
+    background:rgba(22,101,52,.12);
+    border-color:rgba(22,101,52,.40);
+  }
+
+  .tag-digital,
+  .tag-analogico,
+  .tag-selecionado,
+  .tag-pendente{
+    display:inline-flex;
+    align-items:center;
+    border-radius:999px;
+    padding:3px 7px;
+    font-size:10px;
+    font-weight:1000;
+  }
+
+  .tag-digital{background:rgba(22,101,52,.10);color:#166534;}
+  .tag-analogico{background:rgba(71,85,105,.12);color:#475569;}
+  .tag-selecionado{background:rgba(37,99,235,.10);color:#1d4ed8;}
+  .tag-pendente{background:rgba(148,163,184,.18);color:#475569;}
+
+  .kb-select-hidden{
+    position:absolute;
+    left:-99999px;
+    width:1px;
+    height:1px;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  .reserva-face-contador{
+    min-height:40px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#f8fafc;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:9px 12px;
+    font-weight:1000;
+    color:#0f172a;
+  }
+
+  .reserva-face-vazio{
+    border:1px dashed var(--border);
+    border-radius:14px;
+    padding:16px;
+    background:#f8fafc;
+    font-weight:900;
+    color:#475569;
+  }
+
+  .reserva-card-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+
+  .reserva-card-titulo{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    font-weight:1000;
+    color:#0f172a;
+    font-size:17px;
+  }
+
+  .reserva-card-resumo{
+    margin-top:5px;
+    font-size:12px;
+    line-height:1.35;
+    font-weight:800;
+    color:#475569;
+  }
+
+  .reserva-face-remover{
+    border:1px solid rgba(185,28,28,.25);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+    border-radius:10px;
+    padding:7px 10px;
+    font-weight:1000;
+    cursor:pointer;
+  }
+
+  .reserva-progresso-salvamento{
+    margin-top:8px;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+  }
+
+  .card-msg{
+    margin-top:10px;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .card-msg.ok{color:#166534;}
+  .card-msg.err{color:#b00020;}
+
+  .reserva-ocupacao-card.is-face-pendente input:disabled,
+  .reserva-ocupacao-card.is-face-pendente textarea:disabled,
+  .reserva-ocupacao-card.is-face-pendente button:disabled{
+    background:#f8fafc;
+    color:#64748b;
+    opacity:1;
+    cursor:not-allowed;
+  }
+</style>
+
+<div class="reserva-ocupacao-page">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+    <div>
+      <h1 style="margin:0;">Reserva Ocupação</h1>
+      <div style="opacity:.75;font-weight:700;margin-top:6px;">
+        Tela nova separada da reserva antiga • cada face selecionada abre um <b>card próprio</b> com os campos da reserva • prazo fixo: <b>48 horas úteis</b>
+      </div>
+    </div>
+    <a class="btn btn-secondary" style="text-decoration:none;" href="{{ request.referrer or url_for('Paineis.lista_paineis') }}">Voltar</a>
+  </div>
+
+  <form id="formReservaOcupacao" autocomplete="off" method="post">
+    {% if form is defined %}
+      {{ form.hidden_tag() }}
+    {% endif %}
+
+    <div class="reserva-ocupacao-stack">
+      <div class="reserva-ocupacao-card">
+        <div class="reserva-grid-2">
+          <div>
+            <label class="campo-label">Face / Ponto</label>
+            <div class="kb-combobox" data-role="combo-painel" id="comboFace">
+              <input class="kb-input kb-combobox-input" id="inputFaceBusca" type="text" autocomplete="off" spellcheck="false" placeholder="Digite CodFace, CodPonto, logradouro, número, cidade, bairro ou tipo..." data-role="input-painel-busca">
+              <button class="kb-combobox-toggle" id="btnToggleFace" type="button" data-role="btn-toggle-painel" aria-label="Abrir lista de painéis e faces">▾</button>
+              <div class="kb-combobox-lista" hidden data-role="lista-painel-busca" id="listaFaceBusca"></div>
+              <select class="kb-select-hidden" tabindex="-1" aria-hidden="true" id="codFace" data-role="select-face" data-placeholder="— Face (CodFace) —">
+                <option value="">— Face (CodFace) —</option>
+                {% for f in faces %}
+                  {% set cod = (f.CodFace|string) %}
+                  <option value="{{ cod }}" {% if codface_sel and cod == (codface_sel|string) %}selected{% endif %}>{{ f.LabelExibicao or cod }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="hint">Clique em uma face para adicionar um card de reserva. Clique novamente na lista ou use “Remover” no card para retirar a face.</div>
+          </div>
+
+          <div>
+            <label class="campo-label">Faces selecionadas</label>
+            <div class="reserva-face-contador" id="contadorFacesSelecionadas">0 selecionadas</div>
+            <div class="hint">Cada face selecionada terá campos próprios de data, cliente, vendedor, contrato, marca e observação.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="cardsReservasFaces" class="reserva-ocupacao-stack">
+        <div class="reserva-face-vazio">Nenhuma face selecionada ainda.</div>
+      </div>
+
+      <div class="reserva-ocupacao-card">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Reservas</button>
+          <div id="msg" class="msg"></div>
+        </div>
+        <div id="progressoSalvamento" class="reserva-progresso-salvamento"></div>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const URL_FACES = "{{ url_for('Paineis.api_ocupacao_reserva_faces') }}";
+  const URL_DADOS_MODAL = "{{ url_for('Paineis.api_ocupacao_reserva_dados_modal') }}";
+  const URL_CRIAR = "{{ url_for('Paineis.api_ocupacao_reserva_criar') }}";
+  const URL_CALENDARIO = "{{ url_for('Paineis.api_ocupacao_calendario') }}";
+
+  const DATA_MINIMA = "{{ data_minima_reserva or dt_ini or '' }}";
+  const COD_FACE_INICIAL = "{{ (codface_sel or '')|e }}";
+  const COD_FACES_INICIAIS = {{ (codfaces_sel if codfaces_sel is defined else [])|tojson }};
+  const FACES_INICIAIS = {{ faces_json|tojson }};
+
+  let faces = Array.isArray(FACES_INICIAIS) ? FACES_INICIAIS : [];
+  let estadosCards = new Map();
+  let timerBuscaFace = null;
+
+  const elForm = document.getElementById("formReservaOcupacao");
+  const elCodFace = document.getElementById("codFace");
+  const elInputFace = document.getElementById("inputFaceBusca");
+  const elListaFace = document.getElementById("listaFaceBusca");
+  const elBtnToggleFace = document.getElementById("btnToggleFace");
+  const elCardsReservasFaces = document.getElementById("cardsReservasFaces");
+  const elContadorFaces = document.getElementById("contadorFacesSelecionadas");
+  const elMsg = document.getElementById("msg");
+  const elBtnSalvar = document.getElementById("btnSalvar");
+  const elProgressoSalvamento = document.getElementById("progressoSalvamento");
+
+  function texto(valor){ return (valor === null || valor === undefined) ? "" : String(valor).trim(); }
+  function normalizar(valor){ return texto(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+  function escapeHtml(valor){ return texto(valor).replace(/[&<>'"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[c]; }); }
+  function codFace(face){ return texto(face.CodFace || face.cod_face || face.codFace); }
+  function codPonto(face){ return texto(face.CodPonto || face.cod_ponto || face.codPonto); }
+  function ehDigital(face){ return Number(face.EhDigital || face.eh_digital || 0) === 1 || normalizar(face.TipoPainel || face.Tipo || face.tipo).includes("digital"); }
+  function chaveFace(face){ return (codPonto(face) + "|" + codFace(face)).toUpperCase(); }
+  function cotaFace(face){ return texto(face.__cota || (ehDigital(face) ? "540" : "")); }
+  function hojeYmd(){ return DATA_MINIMA || new Date().toISOString().slice(0, 10); }
+  function dataPassada(valor){ return texto(valor) && texto(valor) < hojeYmd(); }
+  function numeroInteiroOuVazio(valor){ return /^\d+$/.test(texto(valor)) ? texto(valor) : ""; }
+
+  function labelFace(face){
+    return [
+      codFace(face),
+      codPonto(face) ? "CodPonto " + codPonto(face) : "",
+      texto(face.EnderecoExibicao),
+      texto(face.Logradouro),
+      texto(face.Numero),
+      texto(face.Bairro),
+      texto(face.Cidade),
+      texto(face.TipoPainel || face.Tipo)
+    ].filter(Boolean).join(" • ");
+  }
+
+  function resumoFace(face){
+    const endereco = texto(face.EnderecoExibicao) || [texto(face.Logradouro), texto(face.Numero) ? "Nº " + texto(face.Numero) : ""].filter(Boolean).join(", ");
+    return [codPonto(face) ? "CodPonto " + codPonto(face) : "", endereco, texto(face.Bairro), texto(face.Cidade), texto(face.TipoPainel || face.Tipo)].filter(Boolean).join(" • ");
+  }
+
+  function getCsrfToken(){
+    const el = elForm.querySelector("input[name='csrf_token']");
+    return el ? el.value : "";
+  }
+
+  function abrirLista(lista){ if(lista) lista.hidden = false; }
+  function fecharLista(lista){ if(lista) lista.hidden = true; }
+
+  function setMsg(msg, ok){
+    elMsg.textContent = msg || "";
+    elMsg.classList.remove("ok", "err");
+    if(msg) elMsg.classList.add(ok ? "ok" : "err");
+  }
+
+  function setProgresso(msg){
+    if(elProgressoSalvamento) elProgressoSalvamento.textContent = msg || "";
+  }
+
+  function setCardMsg(estado, msg, ok){
+    estado.card_msg = msg || "";
+    estado.card_msg_ok = !!ok;
+    const card = document.querySelector("[data-chave-face='" + CSS.escape(estado.chave) + "']");
+    if(!card) return;
+    const msgEl = card.querySelector("[data-role='card-msg']");
+    if(!msgEl) return;
+    msgEl.textContent = estado.card_msg;
+    msgEl.classList.remove("ok", "err");
+    if(estado.card_msg) msgEl.classList.add(estado.card_msg_ok ? "ok" : "err");
+  }
+
+  function htmlFace(face){
+    const chave = chaveFace(face);
+    const selecionado = estadosCards.has(chave);
+    const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
+    const tagSelecionado = selecionado ? "<span class='tag-selecionado'>SELECIONADO</span>" : "";
+    const icone = selecionado ? "✓" : "+";
+    return "<div class='kb-face-text'><span class='top'>" + escapeHtml(codFace(face) || "—") + tagTipo + tagSelecionado + "</span>" +
+      (resumoFace(face) ? "<span class='sub'>" + escapeHtml(resumoFace(face)) + "</span>" : "") +
+      "</div><span class='kb-face-check'>" + icone + "</span>";
+  }
+
+  function renderListaFaces(lista){
+    elListaFace.innerHTML = "";
+    if(!lista || !lista.length){
+      const vazio = document.createElement("div");
+      vazio.className = "kb-combobox-item";
+      vazio.innerHTML = "<span class='top'>Nenhuma face encontrada</span>";
+      elListaFace.appendChild(vazio);
+      return;
+    }
+
+    lista.slice(0, 200).forEach(function(face){
+      const chave = chaveFace(face);
+      const item = document.createElement("div");
+      item.className = "kb-combobox-item" + (estadosCards.has(chave) ? " is-selected" : "");
+      item.innerHTML = htmlFace(face);
+      item.addEventListener("mousedown", function(ev){
+        ev.preventDefault();
+        alternarFace(face);
+      });
+      elListaFace.appendChild(item);
+    });
+  }
+
+  function filtrarFacesLocal(){
+    const termo = normalizar(elInputFace.value);
+    const lista = faces.filter(function(face){ return !termo || normalizar(labelFace(face)).includes(termo); });
+    renderListaFaces(lista);
+    abrirLista(elListaFace);
+  }
+
+  async function buscarFacesRemoto(){
+    const qs = new URLSearchParams();
+    const termo = texto(elInputFace.value);
+    if(termo) qs.set("q", termo);
+
+    const resp = await fetch(URL_FACES + "?" + qs.toString(), {credentials:"same-origin"});
+    if(!resp.ok) return;
+
+    const data = await resp.json().catch(function(){ return null; });
+    if(!data || !data.ok) return;
+
+    const novasFaces = data.items || [];
+    const jaExiste = new Set(faces.map(function(face){ return chaveFace(face); }));
+    novasFaces.forEach(function(face){
+      const chave = chaveFace(face);
+      if(chave && !jaExiste.has(chave)){
+        faces.push(face);
+        jaExiste.add(chave);
+      }
+    });
+
+    filtrarFacesLocal();
+  }
+
+  function criarEstadoFace(face){
+    const copia = Object.assign({}, face);
+    copia.__cota = ehDigital(copia) ? "540" : "";
+    return {
+      chave: chaveFace(copia),
+      face: copia,
+      data_inicio: hojeYmd(),
+      data_fim: hojeYmd(),
+      id_cliente: "",
+      id_vendedor: "",
+      id_contrato: "",
+      numero_contrato: "",
+      numero_previa: "",
+      marca_exibida: "",
+      observacao: "",
+      clientes: [],
+      vendedores: [],
+      contratos: [],
+      contratosMap: new Map(),
+      card_msg: "",
+      card_msg_ok: true
+    };
+  }
+
+  function alternarFace(face){
+    const chave = chaveFace(face);
+    if(!chave) return;
+
+    if(estadosCards.has(chave)){
+      estadosCards.delete(chave);
+      renderCardsReservas();
+      renderListaFaces(faces);
+      atualizarSelectCodFace();
+      return;
+    }
+
+    const estado = criarEstadoFace(face);
+    estadosCards.set(chave, estado);
+    renderCardsReservas();
+    renderListaFaces(faces);
+    atualizarSelectCodFace();
+    carregarDadosCard(chave);
+    carregarCalendario(estado.face);
+  }
+
+  function atualizarSelectCodFace(){
+    const primeiro = Array.from(estadosCards.values())[0];
+    elCodFace.value = primeiro ? codFace(primeiro.face) : "";
+    elContadorFaces.textContent = estadosCards.size + (estadosCards.size === 1 ? " selecionada" : " selecionadas");
+  }
+
+  function getEmpresaId(item){ return texto(item.IDEmpresa || item.id_empresa || item.IDCliente || item.id_cliente); }
+  function labelEmpresa(item){ return [texto(item.Nome || item.RazaoSocial || item.NomeFantasia), texto(item.CNPJ)].filter(Boolean).join(" — ") || "—"; }
+  function getVendedorId(item){ return texto(item.IDVendedor || item.id_vendedor); }
+  function labelVendedor(item){ return texto(item.NomeVendedor || item.nome_vendedor || item.Nome) || "—"; }
+  function getContratoId(item){ return texto(item.IDFatoControleContratosEuromidia || item.IDContrato || item.id_contrato); }
+  function labelContrato(item){
+    const contrato = texto(item.NumeroContrato);
+    const previa = texto(item.NumeroPrevia);
+    const empresa = texto(item.RazaoSocial || item.MarcaExibida || item.NomeFantasia);
+    return ["Contrato " + (contrato || "-") + " / Prévia " + (previa || "-"), empresa].filter(Boolean).join(" — ");
+  }
+
+  function aplicarContratoNoEstado(estado, contrato){
+    if(!contrato) return;
+
+    const idEmpresa = getEmpresaId(contrato);
+    const idVendedor = getVendedorId(contrato);
+
+    if(idEmpresa){
+      estado.id_cliente = idEmpresa;
+    }
+
+    if(idVendedor){
+      estado.id_vendedor = idVendedor;
+    }
+
+    if(!texto(estado.marca_exibida)){
+      estado.marca_exibida = texto(contrato.MarcaExibida || contrato.RazaoSocial || "");
+    }
+
+    estado.numero_contrato = texto(contrato.NumeroContrato);
+    estado.numero_previa = texto(contrato.NumeroPrevia);
+  }
+
+  function preencherInputComboPorValor(estado, card){
+    const inputCliente = card.querySelector("[data-role='input-cliente']");
+    const inputVendedor = card.querySelector("[data-role='input-vendedor']");
+    const inputContrato = card.querySelector("[data-role='input-contrato']");
+
+    const empresa = estado.clientes.find(function(item){ return getEmpresaId(item) === texto(estado.id_cliente); });
+    const vendedor = estado.vendedores.find(function(item){ return getVendedorId(item) === texto(estado.id_vendedor); });
+    const contrato = estado.contratosMap.get(texto(estado.id_contrato));
+
+    if(inputCliente && empresa) inputCliente.value = labelEmpresa(empresa);
+    if(inputVendedor && vendedor) inputVendedor.value = labelVendedor(vendedor);
+    if(inputContrato && contrato) inputContrato.value = labelContrato(contrato);
+  }
+
+  function montarComboCard(estado, card, cfg){
+    const input = card.querySelector(cfg.inputSelector);
+    const lista = card.querySelector(cfg.listaSelector);
+    const botao = card.querySelector(cfg.botaoSelector);
+    if(!input || !lista || !botao) return;
+
+    function render(){
+      const termo = normalizar(input.value);
+      const itens = (cfg.getLista(estado) || []).filter(function(item){ return !termo || normalizar(cfg.getLabel(item)).includes(termo); });
+      lista.innerHTML = "";
+
+      if(!itens.length){
+        const vazio = document.createElement("div");
+        vazio.className = "kb-combobox-item";
+        vazio.innerHTML = "<span class='top'>Nenhum registro encontrado</span>";
+        lista.appendChild(vazio);
+      }else{
+        itens.slice(0, 200).forEach(function(item){
+          const div = document.createElement("div");
+          div.className = "kb-combobox-item";
+          div.innerHTML = "<span class='top'>" + escapeHtml(cfg.getLabel(item)) + "</span>";
+          div.addEventListener("mousedown", function(ev){
+            ev.preventDefault();
+            cfg.onSelect(estado, item, input, card);
+            fecharLista(lista);
+          });
+          lista.appendChild(div);
+        });
+      }
+
+      abrirLista(lista);
+    }
+
+    input.addEventListener("input", function(){
+      cfg.onInputLivre(estado, input.value);
+      render();
+    });
+    input.addEventListener("focus", render);
+    botao.addEventListener("click", render);
+  }
+
+  function corrigirDatasEstado(estado){
+    if(!texto(estado.data_inicio) || dataPassada(estado.data_inicio)) estado.data_inicio = hojeYmd();
+    if(!texto(estado.data_fim) || dataPassada(estado.data_fim)) estado.data_fim = hojeYmd();
+    if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
+  }
+
+  function htmlCardReservaVazio(){
+    return "<div class='reserva-card-top'>" +
+      "<div><div class='reserva-card-titulo'>Reserva da primeira face <span class='tag-pendente'>SELECIONE UMA FACE</span></div>" +
+      "<div class='reserva-card-resumo'>Escolha uma face no campo Face / Ponto acima. Este primeiro card já fica aberto; a segunda face em diante cria novos cards embaixo.</div></div>" +
+      "</div>" +
+
+      "<div class='reserva-grid-4'>" +
+        "<div><label class='campo-label'>Cota desta face</label><input class='form-control' value='Selecione uma face' readonly tabindex='-1'><div class='hint'>Após selecionar a face, o sistema identifica se é digital ou analógica.</div></div>" +
+        "<div><label class='campo-label'>Data início</label><input type='text' class='form-control' placeholder='AAAA-MM-DD' value='" + escapeHtml(hojeYmd()) + "' disabled></div>" +
+        "<div><label class='campo-label'>Data fim</label><input type='text' class='form-control' placeholder='AAAA-MM-DD' value='" + escapeHtml(hojeYmd()) + "' disabled></div>" +
+        "<div><label class='campo-label'>Prazo da reserva</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>No backend isso vira 2 dias úteis, pulando sábado e domingo.</div></div>" +
+      "</div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div class='reserva-grid-3'>" +
+        "<div><label class='campo-label'>Empresa (Cliente)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite nome ou CNPJ...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
+        "<div><label class='campo-label'>Vendedor</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite nome do vendedor...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
+        "<div><label class='campo-label'>Contrato (Número / Prévia)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite contrato, prévia ou empresa...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
+      "</div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input type='text' class='form-control' maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' disabled><div class='hint'>Este campo será liberado depois de selecionar a face.</div></div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div><label class='campo-label'>Observação</label><textarea class='form-control' rows='3' placeholder='Anotações da reserva...' disabled></textarea></div>" +
+      "<div class='card-msg ok'>Selecione a primeira face acima para carregar os dados deste card.</div>";
+  }
+
+  function htmlCardReserva(estado){
+    const face = estado.face;
+    const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
+    const cotaHtml = ehDigital(face)
+      ? "<div><label class='campo-label'>Cota desta face</label><select class='form-control' data-role='cota-face'><option value='540'>540</option><option value='1080'>1080</option></select><div class='hint'>Painel digital: 540 consome 1 slot; 1080 consome 2 slots.</div></div>"
+      : "<div><label class='campo-label'>Cota desta face</label><input class='form-control' value='Não se aplica' readonly tabindex='-1'><div class='hint'>Painel não digital: a cota será gravada vazia.</div></div>";
+
+    return "<div class='reserva-card-top'>" +
+      "<div><div class='reserva-card-titulo'>Reserva da face " + escapeHtml(codFace(face) || "—") + tagTipo + "</div>" +
+      "<div class='reserva-card-resumo'>" + escapeHtml(resumoFace(face) || "—") + "</div></div>" +
+      "<button type='button' class='reserva-face-remover' data-role='remover-face'>Remover</button>" +
+      "</div>" +
+
+      "<div class='reserva-grid-4'>" +
+        cotaHtml +
+        "<div><label class='campo-label'>Data início</label><input data-role='data-inicio' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_inicio) + "'></div>" +
+        "<div><label class='campo-label'>Data fim</label><input data-role='data-fim' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_fim) + "'></div>" +
+        "<div><label class='campo-label'>Prazo da reserva</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>No backend isso vira 2 dias úteis, pulando sábado e domingo.</div></div>" +
+      "</div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div class='reserva-grid-3'>" +
+        "<div><label class='campo-label'>Empresa (Cliente)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-cliente' type='text' autocomplete='off' placeholder='Digite nome ou CNPJ...'><button class='kb-combobox-toggle' data-role='btn-cliente' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-cliente'></div></div></div>" +
+        "<div><label class='campo-label'>Vendedor</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-vendedor' type='text' autocomplete='off' placeholder='Digite nome do vendedor...'><button class='kb-combobox-toggle' data-role='btn-vendedor' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-vendedor'></div></div></div>" +
+        "<div><label class='campo-label'>Contrato (Número / Prévia)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-contrato' type='text' autocomplete='off' placeholder='Digite contrato, prévia ou empresa...'><button class='kb-combobox-toggle' data-role='btn-contrato' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-contrato'></div></div></div>" +
+      "</div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input data-role='marca-exibida' type='text' class='form-control' required maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' value='" + escapeHtml(estado.marca_exibida) + "'><div class='hint'>Obrigatório • até 200 caracteres.</div></div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div><label class='campo-label'>Observação</label><textarea data-role='observacao' class='form-control' rows='3' placeholder='Anotações da reserva...'>" + escapeHtml(estado.observacao) + "</textarea></div>" +
+      "<div class='card-msg " + (estado.card_msg ? (estado.card_msg_ok ? "ok" : "err") : "") + "' data-role='card-msg'>" + escapeHtml(estado.card_msg) + "</div>";
+  }
+
+  function bindCard(estado, card){
+    const btnRemover = card.querySelector("[data-role='remover-face']");
+    if(btnRemover){
+      btnRemover.addEventListener("click", function(){
+        estadosCards.delete(estado.chave);
+        renderCardsReservas();
+        renderListaFaces(faces);
+        atualizarSelectCodFace();
+      });
+    }
+
+    const selectCota = card.querySelector("[data-role='cota-face']");
+    if(selectCota){
+      selectCota.value = cotaFace(estado.face) || "540";
+      selectCota.addEventListener("change", function(){
+        estado.face.__cota = texto(selectCota.value);
+        carregarDadosCard(estado.chave);
+      });
+    }
+
+    const dataInicio = card.querySelector("[data-role='data-inicio']");
+    const dataFim = card.querySelector("[data-role='data-fim']");
+    const marca = card.querySelector("[data-role='marca-exibida']");
+    const observacao = card.querySelector("[data-role='observacao']");
+
+    function aplicarDatas(){
+      estado.data_inicio = texto(dataInicio.value);
+      estado.data_fim = texto(dataFim.value);
+      corrigirDatasEstado(estado);
+      dataInicio.value = estado.data_inicio;
+      dataFim.value = estado.data_fim;
+      carregarDadosCard(estado.chave);
+    }
+
+    if(dataInicio){
+      dataInicio.addEventListener("blur", aplicarDatas);
+      if(window.flatpickr){
+        flatpickr(dataInicio, {
+          dateFormat:"Y-m-d",
+          minDate: hojeYmd(),
+          allowInput:true,
+          onChange:function(_, dateStr){
+            estado.data_inicio = dataPassada(dateStr) ? hojeYmd() : dateStr;
+            if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
+            carregarDadosCard(estado.chave);
+          }
+        });
+      }
+    }
+
+    if(dataFim){
+      dataFim.addEventListener("blur", aplicarDatas);
+      if(window.flatpickr){
+        flatpickr(dataFim, {
+          dateFormat:"Y-m-d",
+          minDate: hojeYmd(),
+          allowInput:true,
+          onChange:function(_, dateStr){
+            estado.data_fim = dataPassada(dateStr) ? hojeYmd() : dateStr;
+            if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
+            carregarDadosCard(estado.chave);
+          }
+        });
+      }
+    }
+
+    if(marca){ marca.addEventListener("input", function(){ estado.marca_exibida = texto(marca.value); }); }
+    if(observacao){ observacao.addEventListener("input", function(){ estado.observacao = texto(observacao.value); }); }
+
+    montarComboCard(estado, card, {
+      inputSelector:"[data-role='input-cliente']",
+      listaSelector:"[data-role='lista-cliente']",
+      botaoSelector:"[data-role='btn-cliente']",
+      getLista:function(e){ return e.clientes; },
+      getLabel:labelEmpresa,
+      onInputLivre:function(e){ e.id_cliente = ""; },
+      onSelect:function(e, item, input){
+        e.id_cliente = getEmpresaId(item);
+        input.value = labelEmpresa(item);
+      }
+    });
+
+    montarComboCard(estado, card, {
+      inputSelector:"[data-role='input-vendedor']",
+      listaSelector:"[data-role='lista-vendedor']",
+      botaoSelector:"[data-role='btn-vendedor']",
+      getLista:function(e){ return e.vendedores; },
+      getLabel:labelVendedor,
+      onInputLivre:function(e){ e.id_vendedor = ""; },
+      onSelect:function(e, item, input){
+        e.id_vendedor = getVendedorId(item);
+        input.value = labelVendedor(item);
+      }
+    });
+
+    montarComboCard(estado, card, {
+      inputSelector:"[data-role='input-contrato']",
+      listaSelector:"[data-role='lista-contrato']",
+      botaoSelector:"[data-role='btn-contrato']",
+      getLista:function(e){ return e.contratos; },
+      getLabel:labelContrato,
+      onInputLivre:function(e){ e.id_contrato = ""; e.numero_contrato = ""; e.numero_previa = ""; },
+      onSelect:function(e, item, input, cardAtual){
+        e.id_contrato = getContratoId(item);
+        input.value = labelContrato(item);
+        aplicarContratoNoEstado(e, item);
+        renderCardsReservas();
+      }
+    });
+
+    preencherInputComboPorValor(estado, card);
+  }
+
+  function renderCardsReservas(){
+    atualizarSelectCodFace();
+    elCardsReservasFaces.innerHTML = "";
+
+    const estados = Array.from(estadosCards.values());
+    if(!estados.length){
+      const cardInicial = document.createElement("div");
+      cardInicial.className = "reserva-ocupacao-card is-face-card is-face-pendente";
+      cardInicial.innerHTML = htmlCardReservaVazio();
+      elCardsReservasFaces.appendChild(cardInicial);
+      return;
+    }
+
+    estados.forEach(function(estado){
+      corrigirDatasEstado(estado);
+      const card = document.createElement("div");
+      card.className = "reserva-ocupacao-card is-face-card";
+      card.setAttribute("data-chave-face", estado.chave);
+      card.innerHTML = htmlCardReserva(estado);
+      elCardsReservasFaces.appendChild(card);
+      bindCard(estado, card);
+    });
+  }
+
+  async function carregarDadosCard(chave){
+    const estado = estadosCards.get(chave);
+    if(!estado) return;
+
+    corrigirDatasEstado(estado);
+    setCardMsg(estado, "Carregando clientes, vendedores e contratos desta face...", true);
+
+    const face = estado.face;
+    const qs = new URLSearchParams();
+    qs.set("cod_face", codFace(face));
+    qs.set("cod_ponto", codPonto(face));
+    if(cotaFace(face)) qs.set("cota", cotaFace(face));
+    qs.set("dt_ini", estado.data_inicio);
+    qs.set("dt_fim", estado.data_fim);
+
+    try{
+      const resp = await fetch(URL_DADOS_MODAL + "?" + qs.toString(), {credentials:"same-origin"});
+      const data = await resp.json().catch(function(){ return null; });
+
+      if(!resp.ok || !data || !data.ok){
+        setCardMsg(estado, (data && data.erro) || "Não consegui carregar dados desta face.", false);
+        return;
+      }
+
+      estado.clientes = data.clientes || data.empresas || [];
+      estado.vendedores = data.vendedores || [];
+      estado.contratos = data.contratos || [];
+      estado.contratosMap = new Map();
+      estado.contratos.forEach(function(item){
+        const id = getContratoId(item);
+        if(id) estado.contratosMap.set(id, item);
+      });
+
+      if(estado.id_cliente && !estado.clientes.some(function(item){ return getEmpresaId(item) === estado.id_cliente; })) estado.id_cliente = "";
+      if(estado.id_vendedor && !estado.vendedores.some(function(item){ return getVendedorId(item) === estado.id_vendedor; })) estado.id_vendedor = "";
+      if(estado.id_contrato && !estado.contratosMap.has(estado.id_contrato)) estado.id_contrato = "";
+
+      estado.card_msg = "Dados carregados para esta face.";
+      estado.card_msg_ok = true;
+      renderCardsReservas();
+    }catch(e){
+      setCardMsg(estado, "Erro de comunicação ao carregar os dados desta face.", false);
+    }
+  }
+
+  async function carregarCalendario(face){
+    if(!face) return;
+    const qs = new URLSearchParams();
+    qs.set("cod_face", codFace(face));
+    qs.set("cod_ponto", codPonto(face));
+    qs.set("meses", "24");
+    fetch(URL_CALENDARIO + "?" + qs.toString(), {credentials:"same-origin"}).catch(function(){});
+  }
+
+  function montarPayload(estado){
+    const contrato = estado.contratosMap.get(texto(estado.id_contrato));
+    const idFatoControle = contrato ? numeroInteiroOuVazio(contrato.IDFatoControleContratosEuromidia) : "";
+
+    return {
+      csrf_token: getCsrfToken(),
+      cod_ponto: codPonto(estado.face),
+      cod_face: codFace(estado.face),
+      cota: ehDigital(estado.face) ? cotaFace(estado.face) : "",
+      data_inicio: estado.data_inicio,
+      data_fim: estado.data_fim,
+      dias: "2",
+      id_cliente: texto(estado.id_cliente),
+      id_vendedor: texto(estado.id_vendedor),
+      id_fato_controle_contratos: idFatoControle,
+      numero_contrato: contrato ? texto(contrato.NumeroContrato) : texto(estado.numero_contrato),
+      numero_previa: contrato ? texto(contrato.NumeroPrevia) : texto(estado.numero_previa),
+      marca_exibida: texto(estado.marca_exibida),
+      observacao: texto(estado.observacao)
+    };
+  }
+
+  function validarEstado(estado){
+    corrigirDatasEstado(estado);
+
+    if(!codFace(estado.face) || !codPonto(estado.face)) return "Face sem CodFace ou CodPonto válido.";
+    if(ehDigital(estado.face) && !["540", "1080"].includes(cotaFace(estado.face))) return "Para painel digital, selecione cota 540 ou 1080.";
+    if(!texto(estado.data_inicio) || !texto(estado.data_fim)) return "Informe data início e data fim.";
+    if(estado.data_fim < estado.data_inicio) return "Data fim não pode ser menor que data início.";
+    if(!texto(estado.id_cliente)) return "Selecione uma empresa/cliente.";
+    if(!texto(estado.id_vendedor)) return "Selecione um vendedor.";
+    if(!texto(estado.marca_exibida)) return "Informe a Marca Exibida.";
+    if(texto(estado.marca_exibida).length > 200) return "Marca Exibida excede 200 caracteres.";
+    return "";
+  }
+
+  async function salvarReserva(ev){
+    ev.preventDefault();
+
+    const estados = Array.from(estadosCards.values());
+    if(!estados.length){
+      setMsg("Selecione pelo menos uma face válida.", false);
+      return;
+    }
+
+    for(const estado of estados){
+      const erro = validarEstado(estado);
+      if(erro){
+        setCardMsg(estado, erro, false);
+        setMsg("Corrija o card da face " + codFace(estado.face) + ".", false);
+        renderCardsReservas();
+        return;
+      }
+    }
+
+    elBtnSalvar.disabled = true;
+    setMsg("Salvando reservas...", true);
+    setProgresso("0 de " + estados.length + " reservas enviadas.");
+
+    const salvas = [];
+    try{
+      for(let i = 0; i < estados.length; i++){
+        const estado = estados[i];
+        const payload = montarPayload(estado);
+
+        setProgresso("Salvando " + (i + 1) + " de " + estados.length + ": " + codFace(estado.face) + "...");
+        setCardMsg(estado, "Enviando reserva desta face...", true);
+
+        const resp = await fetch(URL_CRIAR, {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json",
+            "X-CSRFToken": getCsrfToken()
+          },
+          credentials:"same-origin",
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json().catch(function(){ return null; });
+        if(!resp.ok || !data || !data.ok){
+          const erro = (data && data.erro) || "Erro ao salvar reserva.";
+          setCardMsg(estado, erro, false);
+          setMsg("Falha na face " + codFace(estado.face) + ": " + erro, false);
+          setProgresso(salvas.length + " reserva(s) foram salva(s) antes da falha.");
+          return;
+        }
+        salvas.push(codFace(estado.face));
+        setCardMsg(estado, "Reserva salva com sucesso.", true);
+      }
+
+      setMsg(salvas.length + (salvas.length === 1 ? " reserva salva com sucesso." : " reservas salvas com sucesso."), true);
+      setProgresso("Faces salvas: " + salvas.join(", "));
+    }catch(e){
+      setMsg("Erro de comunicação ao salvar reservas.", false);
+      setProgresso(salvas.length + " reserva(s) foram salva(s) antes do erro de comunicação.");
+    }finally{
+      elBtnSalvar.disabled = false;
+    }
+  }
+
+  elInputFace.addEventListener("focus", filtrarFacesLocal);
+  elInputFace.addEventListener("input", function(){
+    filtrarFacesLocal();
+    clearTimeout(timerBuscaFace);
+    timerBuscaFace = setTimeout(buscarFacesRemoto, 250);
+  });
+  elBtnToggleFace.addEventListener("click", function(){ filtrarFacesLocal(); });
+  elForm.addEventListener("submit", salvarReserva);
+
+  document.addEventListener("click", function(ev){
+    const comboFace = document.getElementById("comboFace");
+    if(comboFace && !comboFace.contains(ev.target)) fecharLista(elListaFace);
+
+    document.querySelectorAll(".kb-combobox").forEach(function(combo){
+      if(!combo.contains(ev.target)){
+        const lista = combo.querySelector(".kb-combobox-lista");
+        fecharLista(lista);
+      }
+    });
+  });
+
+  /*
+    A tela abre com o primeiro card de reserva visível, mas sem face definida.
+    A primeira face selecionada preenche esse primeiro card.
+    Da segunda face em diante, cada face selecionada vira um novo card abaixo.
+  */
+  estadosCards.clear();
+  elCodFace.value = "";
+  elInputFace.value = "";
+
+  renderCardsReservas();
+  renderListaFaces(faces);
+})();
+</script>
+{% endblock %}

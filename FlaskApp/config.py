@@ -60,7 +60,7 @@ parametros_odbc = urllib.parse.quote_plus(
 SQLALCHEMY_DATABASE_URI = f"mssql+pyodbc:///?odbc_connect={parametros_odbc}"
 
 
-CHECKING_BASE_URL_PUBLICA = "http://192.168.40.177:5000"
+CHECKING_BASE_URL_PUBLICA = "http://189.45.251.100/:5000"
 PASTA_RELATORIOS_OCUPACAO = os.getenv(
     "PASTA_RELATORIOS_OCUPACAO",
     "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios/ocupacao",

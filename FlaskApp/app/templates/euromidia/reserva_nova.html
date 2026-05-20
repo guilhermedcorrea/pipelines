@@ -269,6 +269,60 @@
   top: 2px !important;
 }
 
+
+  /* =========================================================
+     ✅ CodFace pesquisável: mostra ponto, endereço, número,
+     cidade, bairro e tipo de painel no mesmo padrão do Kanban.
+     ========================================================= */
+  .select-search.codface-search .ss-input{
+    height: 42px;
+    padding-right: 44px;
+  }
+
+  .select-search.codface-search .ss-toggle{
+    position:absolute;
+    right:6px;
+    top:6px;
+    width:30px;
+    height:30px;
+    border:1px solid var(--border);
+    border-radius:9px;
+    background:#fff;
+    cursor:pointer;
+    font-weight:900;
+  }
+
+  .select-search.codface-search .ss-item .top{
+    display:block;
+    font-weight:1000;
+  }
+
+  .select-search.codface-search .ss-item .tag-digital,
+  .select-search.codface-search .ss-item .tag-analogico{
+    display:inline-block;
+    margin-left:6px;
+    padding:2px 6px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:1000;
+  }
+
+  .select-search.codface-search .ss-item .tag-digital{
+    background:rgba(23,138,58,.12);
+    color:#178a3a;
+  }
+
+  .select-search.codface-search .ss-item .tag-analogico{
+    background:rgba(107,114,128,.14);
+    color:#374151;
+  }
+
+  #cota:disabled{
+    background:#f3f4f6;
+    color:#6b7280;
+    cursor:not-allowed;
+  }
+
 </style>
 
 
@@ -324,15 +378,40 @@
       <div class="reserva-grid-2">
         <div>
           <label style="font-weight:900;display:block;margin-bottom:6px;">Face (CodFace)</label>
-          <select id="codFace" class="form-control" required>
-            <option value="">Selecione...</option>
-            {% for f in faces %}
-              {% set cod = (f.CodFace|string) %}
-              <option value="{{ cod }}" {% if codface_sel and (cod == (codface_sel|string)) %}selected{% endif %}>
-                {{ cod }}{% if f.Face %} — Face {{ f.Face }}{% endif %}
-              </option>
-            {% endfor %}
-          </select>
+
+          <div class="select-search codface-search" id="ssFace">
+            <input
+              id="codFace_search"
+              type="text"
+              class="ss-input"
+              placeholder="Digite CodFace, endereço, número, cidade, bairro ou tipo..."
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <button class="ss-toggle" type="button" id="codFace_toggle" aria-label="Abrir lista de faces">▾</button>
+            <select id="codFace" class="form-control ss-select" required>
+              <option value="">Selecione...</option>
+              {% for f in faces %}
+                {% set cod = (f.CodFace|string) %}
+                <option
+                  value="{{ cod }}"
+                  data-codponto="{{ f.CodPonto or '' }}"
+                  data-logradouro="{{ f.Logradouro or '' }}"
+                  data-numero="{{ f.Numero or '' }}"
+                  data-cidade="{{ f.Cidade or '' }}"
+                  data-bairro="{{ f.Bairro or '' }}"
+                  data-tipo-painel="{{ f.TipoPainel or '' }}"
+                  data-eh-digital="{{ f.EhDigital or 0 }}"
+                  {% if codface_sel and (cod == (codface_sel|string)) %}selected{% endif %}
+                >
+                  {{ cod }}{% if f.Logradouro %} • {{ f.Logradouro }}{% endif %}{% if f.Numero %}, {{ f.Numero }}{% endif %}{% if f.Cidade %} • {{ f.Cidade }}{% endif %}{% if f.Bairro %} • {{ f.Bairro }}{% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="ss-dropdown" id="codFace_dropdown"></div>
+            <div class="hint">Pesquisa por CodFace, endereço, número, cidade, bairro ou tipo do painel.</div>
+          </div>
+
           {% if not faces %}
             <div style="margin-top:8px;opacity:.75;font-weight:700;">
               Não encontrei faces para esse CodPonto. Verifique Integracao.Silver.DimFacesPaineis.
@@ -342,10 +421,10 @@
 
         <div>
           <label style="font-weight:900;display:block;margin-bottom:6px;">Cota</label>
-          <select id="cota" class="form-control" required>
-            <option value="540">540</option>
-            <option value="1080">1080</option>
+          <select id="cota" class="form-control">
+            <option value=""></option>
           </select>
+          <div class="hint" id="cotaHint">Cota 540/1080 aparece somente quando a face selecionada for painel digital.</div>
         </div>
       </div>
 
@@ -363,9 +442,9 @@
         </div>
 
         <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Prazo (dias)</label>
-          <input id="prazoDias" type="number" class="form-control" value="2" min="2" max="2" step="1" readonly aria-readonly="true" tabindex="-1">
-         
+          <label style="font-weight:900;display:block;margin-bottom:6px;">Prazo da reserva</label>
+          <input id="prazoDias" type="text" class="form-control" value="48 horas úteis" readonly aria-readonly="true" tabindex="-1">
+          <div class="hint">A reserva expira automaticamente após 2 dias úteis.</div>
         </div>
       </div>
 
@@ -468,10 +547,13 @@
   const MES_REF   = "{{ mes_ref|e }}";
 
   const COD_FACE_INICIAL = "{{ (codface_sel or '')|e }}";
+  const FACES_ATUAIS_INICIAIS = {{ faces_json|default([], true)|tojson }};
   const DT_INI_INICIAL   = "{{ (dt_ini or '')|e }}";
   const DT_FIM_INICIAL   = "{{ (dt_fim or '')|e }}";
 
   const PRAZO_RESERVA_FIXO_DIAS = 2;
+  const PRAZO_RESERVA_ROTULO = "48 horas úteis";
+  const DATA_MINIMA_RESERVA = "{{ data_minima_reserva|default('', true)|e }}";
 
   const elCodFace    = document.getElementById("codFace");
   const elCota       = document.getElementById("cota");
@@ -504,17 +586,22 @@
 
   const elCsrf = elForm ? elForm.querySelector("input[name='csrf_token']") : null;
 
+  const ssFaceWrap     = document.getElementById("ssFace");
   const ssClienteWrap  = document.getElementById("ssCliente");
   const ssVendedorWrap = document.getElementById("ssVendedor");
   const ssContratoWrap = document.getElementById("ssContrato");
 
+  const elCodFaceSearch = document.getElementById("codFace_search");
+  const elCodFaceToggle = document.getElementById("codFace_toggle");
   const elClienteSearch  = document.getElementById("idCliente_search");
   const elVendedorSearch = document.getElementById("idVendedor_search");
   const elContratoSearch = document.getElementById("idContrato_search");
 
+  const elCodFaceDrop  = document.getElementById("codFace_dropdown");
   const elClienteDrop  = document.getElementById("idCliente_dropdown");
   const elVendedorDrop = document.getElementById("idVendedor_dropdown");
   const elContratoDrop = document.getElementById("idContrato_dropdown");
+  const elCotaHint     = document.getElementById("cotaHint");
 
   const elTooltip = document.getElementById("fpTooltip");
 
@@ -532,6 +619,9 @@
   let fpInicio = null;
   let fpFim = null;
 
+  let facesAtuais = Array.isArray(FACES_ATUAIS_INICIAIS) ? FACES_ATUAIS_INICIAIS : [];
+  let faceSelecionadaEhDigital = false;
+
   let empresasAtuais = [];
   let vendedoresAtuais = [];
 
@@ -547,10 +637,7 @@
 
   function travarPrazoReserva(){
     if(elPrazoDias){
-      elPrazoDias.value = String(PRAZO_RESERVA_FIXO_DIAS);
-      elPrazoDias.min = String(PRAZO_RESERVA_FIXO_DIAS);
-      elPrazoDias.max = String(PRAZO_RESERVA_FIXO_DIAS);
-      elPrazoDias.step = "1";
+      elPrazoDias.value = PRAZO_RESERVA_ROTULO;
       elPrazoDias.readOnly = true;
       elPrazoDias.setAttribute("aria-readonly", "true");
     }
@@ -612,6 +699,74 @@
     const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
     const d = String(dt.getUTCDate()).padStart(2, "0");
     return y + "-" + m + "-" + d;
+  }
+
+  function hojeLocalYmd(){
+    const agora = new Date();
+    const y = agora.getFullYear();
+    const m = String(agora.getMonth() + 1).padStart(2, "0");
+    const d = String(agora.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  function dataMinimaReservaYmd(){
+    return (DATA_MINIMA_RESERVA || hojeLocalYmd()).trim();
+  }
+
+  function compararDatasYmd(a, b){
+    const da = yyyy_mm_dd_para_date(a);
+    const db = yyyy_mm_dd_para_date(b);
+    if(!da || !db) return 0;
+
+    const ta = normalizarParaMeiaNoiteTs(da);
+    const tb = normalizarParaMeiaNoiteTs(db);
+    if(ta == null || tb == null) return 0;
+
+    if(ta < tb) return -1;
+    if(ta > tb) return 1;
+    return 0;
+  }
+
+  function dataStrEhPassada(dataStr){
+    const s = (dataStr || "").trim();
+    if(!s) return false;
+    return compararDatasYmd(s, dataMinimaReservaYmd()) < 0;
+  }
+
+  function dateObjEhAntesDaDataMinima(dateObj){
+    const dataStr = date_para_yyyy_mm_dd(dateObj);
+    return dataStrEhPassada(dataStr);
+  }
+
+  function maiorDataYmd(a, b){
+    const aa = (a || "").trim();
+    const bb = (b || "").trim();
+    if(!aa) return bb;
+    if(!bb) return aa;
+    return compararDatasYmd(aa, bb) >= 0 ? aa : bb;
+  }
+
+  function corrigirDatasPassadasNoClient(){
+    const dataMinima = dataMinimaReservaYmd();
+    const diStr = (elDataInicio.value || "").trim();
+    const dfStr = (elDataFim.value || "").trim();
+
+    if(diStr && dataStrEhPassada(diStr)){
+      if(fpInicio) fpInicio.setDate(dataMinima, false);
+      else elDataInicio.value = dataMinima;
+    }
+
+    const diAtual = (elDataInicio.value || "").trim() || dataMinima;
+    const minFim = maiorDataYmd(dataMinima, diAtual);
+
+    if(dfStr && compararDatasYmd(dfStr, minFim) < 0){
+      if(fpFim) fpFim.setDate(minFim, false);
+      else elDataFim.value = minFim;
+    }
+  }
+
+  function datasSelecionadasTemPassado(){
+    return dataStrEhPassada((elDataInicio.value || "").trim()) || dataStrEhPassada((elDataFim.value || "").trim());
   }
 
   function montarRangesDeOcupacao(){
@@ -733,6 +888,8 @@
   }
 
   function diaBloqueadoPorCapacidade(dateObj){
+    if(dateObjEhAntesDaDataMinima(dateObj)) return true;
+
     const info = getDayInfo(dateObj);
 
     if(info){
@@ -753,6 +910,8 @@
   }
 
   function ranges_tem_conflito(inicioStr, fimStr){
+    if(dataStrEhPassada(inicioStr) || dataStrEhPassada(fimStr)) return true;
+
     const di = yyyy_mm_dd_para_date(inicioStr);
     const df = yyyy_mm_dd_para_date(fimStr);
     if(!di || !df) return false;
@@ -777,7 +936,7 @@
     const diStr = (elDataInicio.value || "").trim();
     if(!diStr) return;
 
-    fpFim.set("minDate", diStr);
+    fpFim.set("minDate", maiorDataYmd(dataMinimaReservaYmd(), diStr));
 
     const dfStr = (elDataFim.value || "").trim();
     if(!dfStr){
@@ -806,10 +965,10 @@
 
     const diStr = (elDataInicio.value || "").trim();
     if(diStr){
-      fpFim.set("minDate", diStr);
+      fpFim.set("minDate", maiorDataYmd(dataMinimaReservaYmd(), diStr));
       garantirFimNaoAntesDoInicio();
     }else{
-      fpFim.set("minDate", null);
+      fpFim.set("minDate", dataMinimaReservaYmd());
     }
 
     fpInicio.redraw();
@@ -817,9 +976,17 @@
   }
 
   function validarDatasNoClient(){
+    corrigirDatasPassadasNoClient();
+
     const di = (elDataInicio.value || "").trim();
     const df = (elDataFim.value || "").trim();
     if(!di || !df) return;
+
+    if(datasSelecionadasTemPassado()){
+      setMsg("Não é permitido reservar datas anteriores a " + dataMinimaReservaYmd() + ".", false);
+      elBtnSalvar.disabled = true;
+      return;
+    }
 
     if(ranges_tem_conflito(di, df)){
       setMsg("Período conflita (dia CHEIO/INDISPONÍVEL). Escolha outro intervalo.", false);
@@ -837,6 +1004,7 @@
   function initFlatpickr(){
     fpInicio = flatpickr(elDataInicio, {
       dateFormat: "Y-m-d",
+      minDate: dataMinimaReservaYmd(),
       allowInput: true,
       disableMobile: true,
       prevArrow: "‹",
@@ -895,6 +1063,7 @@
 
     fpFim = flatpickr(elDataFim, {
       dateFormat: "Y-m-d",
+      minDate: dataMinimaReservaYmd(),
       allowInput: true,
       disableMobile: true,
       prevArrow: "‹",
@@ -952,9 +1121,10 @@
       }
     });
 
-    if(DT_INI_INICIAL) fpInicio.setDate(DT_INI_INICIAL, false);
-    if(DT_FIM_INICIAL) fpFim.setDate(DT_FIM_INICIAL, false);
+    if(DT_INI_INICIAL) fpInicio.setDate(dataStrEhPassada(DT_INI_INICIAL) ? dataMinimaReservaYmd() : DT_INI_INICIAL, false);
+    if(DT_FIM_INICIAL) fpFim.setDate(dataStrEhPassada(DT_FIM_INICIAL) ? dataMinimaReservaYmd() : DT_FIM_INICIAL, false);
 
+    corrigirDatasPassadasNoClient();
     atualizarRestricoesCalendarios();
     garantirFimNaoAntesDoInicio();
   }
@@ -988,6 +1158,79 @@
     const cab = ("Contrato " + (nc || "-") + " / Prévia " + (np || "-"));
     const emp = (rz || cj) ? (" — " + (rz || "") + (cj ? (" — " + cj) : "")) : "";
     return cab + emp;
+  }
+
+  function getFaceCod(f){
+    return String(f.CodFace ?? f.cod_face ?? f.codFace ?? "").trim();
+  }
+
+  function faceEhDigital(f){
+    const flag = String(f.EhDigital ?? f.eh_digital ?? "").trim();
+    if(flag === "1" || flag.toLowerCase() === "true") return true;
+    const tipo = String(f.TipoPainel ?? f.tipo_painel ?? f.Tipo ?? f.tipo ?? "").toUpperCase();
+    return tipo.includes("DIGITAL");
+  }
+
+  function labelFace(f){
+    const cod = getFaceCod(f);
+    const codPonto = String(f.CodPonto ?? f.cod_ponto ?? COD_PONTO ?? "").trim();
+    const logradouro = String(f.Logradouro ?? f.logradouro ?? "").trim();
+    const numero = String(f.Numero ?? f.numero ?? "").trim();
+    const cidade = String(f.Cidade ?? f.cidade ?? "").trim();
+    const bairro = String(f.Bairro ?? f.bairro ?? "").trim();
+    const tipo = String(f.TipoPainel ?? f.tipo_painel ?? f.Tipo ?? f.tipo ?? "").trim();
+
+    const endereco = logradouro ? (logradouro + (numero ? ", " + numero : "")) : (numero ? "Nº " + numero : "");
+    return [cod, codPonto ? "Ponto " + codPonto : "", endereco, cidade, bairro, tipo]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  function renderFace(f){
+    const cod = getFaceCod(f) || "—";
+    const tipo = String(f.TipoPainel ?? f.tipo_painel ?? f.Tipo ?? f.tipo ?? "").trim();
+    const logradouro = String(f.Logradouro ?? f.logradouro ?? "").trim();
+    const numero = String(f.Numero ?? f.numero ?? "").trim();
+    const cidade = String(f.Cidade ?? f.cidade ?? "").trim();
+    const bairro = String(f.Bairro ?? f.bairro ?? "").trim();
+    const codPonto = String(f.CodPonto ?? f.cod_ponto ?? COD_PONTO ?? "").trim();
+    const digital = faceEhDigital(f);
+    const tag = digital
+      ? "<span class='tag-digital'>DIGITAL</span>"
+      : "<span class='tag-analogico'>ANALÓGICO</span>";
+    const endereco = logradouro ? (logradouro + (numero ? ", " + numero : "")) : "";
+    const sub = [codPonto ? "CodPonto " + codPonto : "", endereco, bairro, cidade, tipo]
+      .filter(Boolean)
+      .join(" • ");
+    return "<span class='top'>" + cod + tag + "</span>" + (sub ? "<span class='sub'>" + sub + "</span>" : "");
+  }
+
+  function faceSelecionadaAtual(){
+    const cod = (elCodFace.value || "").trim();
+    if(!cod) return null;
+    return (facesAtuais || []).find(f => getFaceCod(f) === cod) || null;
+  }
+
+  function atualizarCampoCotaPorFace(){
+    const face = faceSelecionadaAtual();
+    faceSelecionadaEhDigital = face ? faceEhDigital(face) : false;
+
+    if(faceSelecionadaEhDigital){
+      const valorAtual = (elCota.value || "").trim();
+      elCota.disabled = false;
+      elCota.required = true;
+      elCota.innerHTML = "<option value='540'>540</option><option value='1080'>1080</option>";
+      elCota.value = (valorAtual === "1080" || valorAtual === "540") ? valorAtual : "540";
+      if(elCotaHint) elCotaHint.textContent = "Painel digital: selecione a cota 540 ou 1080.";
+    }else{
+      elCota.required = false;
+      elCota.disabled = true;
+      elCota.innerHTML = "<option value=''></option>";
+      elCota.value = "";
+      if(elCotaHint) elCotaHint.textContent = "Este painel não é digital; por isso a cota fica vazia.";
+    }
+
+    if(fCota) fCota.value = (elCota.value || "").trim();
   }
 
   function abrirDropdown(wrap){ if(wrap) wrap.classList.add("open"); }
@@ -1074,6 +1317,24 @@
     });
 
     return { setItems };
+  }
+
+  const ssFace = buildSearchableSelect({
+    wrap: ssFaceWrap,
+    input: elCodFaceSearch,
+    select: elCodFace,
+    dropdown: elCodFaceDrop,
+    getValue: (f) => getFaceCod(f),
+    getLabel: (f) => labelFace(f),
+    renderItem: (f) => renderFace(f)
+  });
+
+  if(elCodFaceToggle){
+    elCodFaceToggle.addEventListener("mousedown", function(ev){
+      ev.preventDefault();
+      abrirDropdown(ssFaceWrap);
+      if(elCodFaceSearch) elCodFaceSearch.focus();
+    });
   }
 
   const ssCliente = buildSearchableSelect({
@@ -1260,6 +1521,7 @@
     }
 
     const qs = new URLSearchParams();
+    qs.set("cod_ponto", COD_PONTO || "");
     qs.set("cod_face", codFace);
     qs.set("cota", cota);
     qs.set("mes_ref", MES_REF || "");
@@ -1363,8 +1625,10 @@
   // ✅ sync hidden fields
   // =========================================================
   function syncHiddenFields(){
+    atualizarCampoCotaPorFace();
+
     const codFace = (elCodFace.value || "").trim();
-    const cota = (elCota.value || "").trim();
+    const cota = faceSelecionadaEhDigital ? (elCota.value || "").trim() : "";
 
     fCodPonto.value = (COD_PONTO || "").trim();
     fCodFace.value  = codFace;
@@ -1410,8 +1674,19 @@
     const di = (fDtIni.value || "").trim();
     const df = (fDtFim.value || "").trim();
 
-    if(!COD_PONTO || !codFace || !cota || !di || !df){
-      setMsg("Preencha Face, Cota e Datas.", false);
+    if(!COD_PONTO || !codFace || !di || !df){
+      setMsg("Preencha Face e Datas.", false);
+      return;
+    }
+
+    if(faceSelecionadaEhDigital && !cota){
+      setMsg("Para painel digital, selecione a cota 540 ou 1080.", false);
+      return;
+    }
+
+    if(dataStrEhPassada(di) || dataStrEhPassada(df)){
+      setMsg("Não é permitido salvar reserva com data anterior a " + dataMinimaReservaYmd() + ".", false);
+      elBtnSalvar.disabled = false;
       return;
     }
 
@@ -1510,6 +1785,7 @@
 
   elCodFace.addEventListener("change", async function(){
     fCodFace.value = (elCodFace.value || "").trim();
+    atualizarCampoCotaPorFace();
     await carregarDadosModal();
     await carregarCalendario();
     validarDatasNoClient();
@@ -1546,11 +1822,15 @@
       elCodFace.value = COD_FACE_INICIAL;
     }
 
+    ssFace.setItems(facesAtuais);
+    atualizarCampoCotaPorFace();
+
     initFlatpickr();
 
     await carregarDadosModal();
     await carregarCalendario();
 
+    corrigirDatasPassadasNoClient();
     syncHiddenFields();
     validarDatasNoClient();
   }

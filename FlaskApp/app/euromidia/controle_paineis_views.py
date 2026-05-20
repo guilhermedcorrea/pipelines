@@ -18217,6 +18217,7 @@ def reserva_nova():
 
     dt_ini = parse_ymd(dt_ini_str)
     dt_fim = parse_ymd(dt_fim_str)
+    data_minima_reserva = date.today()
 
     if dt_ini is None or dt_fim is None:
 
@@ -18238,13 +18239,71 @@ def reserva_nova():
         else:
             dt_fim = date(dt_base.year, dt_base.month + 1, 1) - timedelta(days=1)
 
+    # Regra de negócio da tela de reserva:
+    # a seleção não pode abrir nem manter datas anteriores ao dia atual.
+    if dt_ini < data_minima_reserva:
+        dt_ini = data_minima_reserva
+
+    if dt_fim < data_minima_reserva:
+        dt_fim = data_minima_reserva
+
+    if dt_fim < dt_ini:
+        dt_fim = dt_ini
+
     faces = []
     if codponto_int is not None:
         sql_faces = text("""
-            SELECT CodFace, CodPonto, Face
-            FROM [Silver].[DimFacesPaineis]
-            WHERE CodPonto = :codponto
-            ORDER BY TRY_CONVERT(int, Face), Face, CodFace
+            ;WITH FacesBase AS (
+                SELECT
+                    f.IDDimFacesPaineis,
+                    f.IDDimPaineisEuromidia,
+                    f.CodFace,
+                    f.CodPonto,
+                    f.Face,
+                    TipoFace = NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, ''))), ''),
+                    rn = ROW_NUMBER() OVER (
+                        PARTITION BY NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '')
+                        ORDER BY f.IDDimFacesPaineis DESC
+                    )
+                FROM [Integracao].[Silver].[DimFacesPaineis] f
+                WHERE f.CodPonto = :codponto
+                  AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+            )
+            SELECT
+                fb.CodFace,
+                fb.CodPonto,
+                fb.Face,
+                IDDimFacesPaineis = fb.IDDimFacesPaineis,
+                IDDimPaineisEuromidia = COALESCE(fb.IDDimPaineisEuromidia, p.IDDimPaineisEuromidia),
+                TipoPainel = COALESCE(fb.TipoFace, NULLIF(LTRIM(RTRIM(COALESCE(p.Tipo, ''))), '')),
+                Logradouro = NULLIF(LTRIM(RTRIM(COALESCE(p.Logradouro, ''))), ''),
+                Numero = NULLIF(LTRIM(RTRIM(COALESCE(CAST(p.Numero AS varchar(50)), ''))), ''),
+                Cidade = NULLIF(LTRIM(RTRIM(COALESCE(p.Cidade, ''))), ''),
+                Bairro = NULLIF(LTRIM(RTRIM(COALESCE(p.Bairro, ''))), ''),
+                EhDigital = CASE
+                    WHEN UPPER(COALESCE(fb.TipoFace, p.Tipo, '')) LIKE '%DIGITAL%' THEN 1
+                    ELSE 0
+                END
+            FROM FacesBase fb
+            OUTER APPLY (
+                SELECT TOP (1)
+                    p.IDDimPaineisEuromidia,
+                    p.Tipo,
+                    p.Logradouro,
+                    p.Numero,
+                    p.Cidade,
+                    p.Bairro,
+                    p.DataAtualizacao
+                FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+                WHERE p.IDDimPaineisEuromidia = fb.IDDimPaineisEuromidia
+                   OR p.CodPonto = fb.CodPonto
+                ORDER BY
+                    CASE WHEN p.IDDimPaineisEuromidia = fb.IDDimPaineisEuromidia THEN 0 ELSE 1 END,
+                    p.DataAtualizacao DESC,
+                    p.IDDimPaineisEuromidia DESC
+            ) p
+            WHERE fb.rn = 1
+            ORDER BY TRY_CONVERT(int, fb.Face), fb.Face, fb.CodFace
         """)
         faces = [dict(r._mapping) for r in db.session.execute(sql_faces, {"codponto": codponto_int})]
 
@@ -18267,9 +18326,11 @@ def reserva_nova():
         cliente=cliente,
         vendedor=vendedor,
         faces=faces,
+        faces_json=faces,
         codface_sel=codface_sel,
         dt_ini=dt_ini.strftime("%Y-%m-%d"),
         dt_fim=dt_fim.strftime("%Y-%m-%d"),
+        data_minima_reserva=data_minima_reserva.strftime("%Y-%m-%d"),
     )
 
 
@@ -18278,6 +18339,293 @@ def reserva_nova():
 
 
 
+
+
+
+
+
+
+
+def _buscar_faces_para_reserva_ocupacao(q: str = "", codponto: int | None = None, limite: int = 800) -> list[dict]:
+    """
+    Eu busco faces para a nova tela independente de reserva.
+
+    A tela precisa pesquisar CodFace mostrando contexto do ponto:
+    CodFace, CodPonto, endereço, número, cidade, bairro e tipo.
+    """
+    termo = str(q or "").strip()
+
+    try:
+        limite_int = int(limite or 800)
+    except Exception:
+        limite_int = 800
+
+    limite_int = max(50, min(limite_int, 2000))
+
+    params = {
+        "q": termo,
+        "q_like": f"%{termo}%" if termo else "",
+        "limite": limite_int,
+        "codponto": int(codponto) if codponto else None,
+    }
+
+    filtros = [
+        "NULLIF(LTRIM(RTRIM(COALESCE(fb.CodFace, ''))), '') IS NOT NULL",
+    ]
+
+    if codponto:
+        filtros.append("fb.CodPonto = :codponto")
+
+    if termo:
+        filtros.append("""
+        (
+               CAST(fb.CodPonto AS varchar(30)) LIKE :q_like
+            OR LTRIM(RTRIM(COALESCE(fb.CodFace, ''))) LIKE :q_like
+            OR LTRIM(RTRIM(COALESCE(p.Logradouro, ''))) LIKE :q_like
+            OR LTRIM(RTRIM(COALESCE(CAST(p.Numero AS varchar(50)), ''))) LIKE :q_like
+            OR LTRIM(RTRIM(COALESCE(p.Cidade, ''))) LIKE :q_like
+            OR LTRIM(RTRIM(COALESCE(p.Bairro, ''))) LIKE :q_like
+            OR LTRIM(RTRIM(COALESCE(fb.TipoFace, p.Tipo, ''))) LIKE :q_like
+        )
+        """)
+
+    where_sql = " AND ".join(f"({filtro})" for filtro in filtros)
+
+    sql = text(f"""
+        ;WITH FacesBase AS (
+            SELECT
+                 f.IDDimFacesPaineis
+                ,f.IDDimPaineisEuromidia
+                ,f.CodFace
+                ,f.CodPonto
+                ,f.Face
+                ,TipoFace = NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, ''))), '')
+                ,rn = ROW_NUMBER() OVER (
+                    PARTITION BY
+                         f.CodPonto
+                        ,NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '')
+                    ORDER BY f.IDDimFacesPaineis DESC
+                )
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+            WHERE NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+        )
+        SELECT TOP (:limite)
+             fb.CodFace
+            ,fb.CodPonto
+            ,fb.Face
+            ,IDDimFacesPaineis = fb.IDDimFacesPaineis
+            ,IDDimPaineisEuromidia = COALESCE(fb.IDDimPaineisEuromidia, p.IDDimPaineisEuromidia)
+            ,TipoPainel = COALESCE(fb.TipoFace, NULLIF(LTRIM(RTRIM(COALESCE(p.Tipo, ''))), ''))
+            ,Logradouro = NULLIF(LTRIM(RTRIM(COALESCE(p.Logradouro, ''))), '')
+            ,Numero = NULLIF(LTRIM(RTRIM(COALESCE(CAST(p.Numero AS varchar(50)), ''))), '')
+            ,Cidade = NULLIF(LTRIM(RTRIM(COALESCE(p.Cidade, ''))), '')
+            ,Bairro = NULLIF(LTRIM(RTRIM(COALESCE(p.Bairro, ''))), '')
+            ,EhDigital = CASE
+                WHEN UPPER(COALESCE(fb.TipoFace, p.Tipo, '')) LIKE '%DIGITAL%' THEN 1
+                ELSE 0
+             END
+        FROM FacesBase AS fb
+        OUTER APPLY (
+            SELECT TOP (1)
+                 p.IDDimPaineisEuromidia
+                ,p.Tipo
+                ,p.Logradouro
+                ,p.Numero
+                ,p.Cidade
+                ,p.Bairro
+                ,p.DataAtualizacao
+            FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p
+            WHERE p.IDDimPaineisEuromidia = fb.IDDimPaineisEuromidia
+               OR p.CodPonto = fb.CodPonto
+            ORDER BY
+                 CASE WHEN p.IDDimPaineisEuromidia = fb.IDDimPaineisEuromidia THEN 0 ELSE 1 END
+                ,p.DataAtualizacao DESC
+                ,p.IDDimPaineisEuromidia DESC
+        ) AS p
+        WHERE fb.rn = 1
+          AND {where_sql}
+        ORDER BY
+             fb.CodPonto ASC
+            ,TRY_CONVERT(int, fb.Face) ASC
+            ,fb.Face ASC
+            ,fb.CodFace ASC;
+    """)
+
+    rows = db.session.execute(sql, params).mappings().all()
+
+    faces = []
+    for row in rows:
+        item = dict(row)
+        for chave in ("CodFace", "Face", "TipoPainel", "Logradouro", "Numero", "Cidade", "Bairro"):
+            item[chave] = str(item.get(chave) or "").strip()
+
+        try:
+            item["CodPonto"] = int(item.get("CodPonto") or 0)
+        except Exception:
+            item["CodPonto"] = None
+
+        try:
+            item["EhDigital"] = int(item.get("EhDigital") or 0)
+        except Exception:
+            item["EhDigital"] = 0
+
+        partes_endereco = []
+        if item.get("Logradouro"):
+            endereco = item["Logradouro"]
+            if item.get("Numero"):
+                endereco = f"{endereco}, {item['Numero']}"
+            partes_endereco.append(endereco)
+        elif item.get("Numero"):
+            partes_endereco.append(f"Nº {item['Numero']}")
+
+        if item.get("Bairro"):
+            partes_endereco.append(item["Bairro"])
+        if item.get("Cidade"):
+            partes_endereco.append(item["Cidade"])
+
+        item["EnderecoExibicao"] = " • ".join(partes_endereco)
+        item["LabelExibicao"] = " • ".join(
+            str(parte).strip()
+            for parte in [
+                item.get("CodFace"),
+                f"CodPonto {item.get('CodPonto')}" if item.get("CodPonto") else "",
+                item.get("EnderecoExibicao"),
+                item.get("TipoPainel"),
+            ]
+            if str(parte or "").strip()
+        )
+        faces.append(item)
+
+    return faces
+
+
+@paineis_bp.route("/reserva-ocupacao", methods=["GET"])
+@login_required
+@limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def reserva_ocupacao():
+    """
+    Eu retorno a NOVA tela de reserva de ocupação.
+
+    Importante:
+    - Esta tela é separada da euromidia/reserva_nova.html.
+    - Ela usa o layout do base correto: euromidia/base_euromidia.html.
+    - O CodFace é selecionado por combobox pesquisável com dados do ponto.
+    """
+    try:
+        if int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0) != 3:
+            abort(403)
+    except Exception:
+        abort(403)
+
+    q = (request.args.get("q") or "").strip()
+    codponto_raw = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
+    codface_sel = (request.args.get("codface") or request.args.get("cod_face") or "").strip()
+    mes_ref = (request.args.get("mes_ref") or "").strip()
+
+    def _normalizar_codfaces_requisitadas():
+        """Eu aceito uma ou várias CodFaces na URL para abrir a tela já pré-selecionada."""
+        codfaces = []
+        for nome_parametro in ("codfaces", "cod_faces", "codface", "cod_face"):
+            for valor_bruto in request.args.getlist(nome_parametro):
+                for parte in str(valor_bruto or "").replace(";", ",").split(","):
+                    cod = parte.strip()
+                    if cod and cod.upper() not in {x.upper() for x in codfaces}:
+                        codfaces.append(cod)
+        return codfaces
+
+    codfaces_sel = _normalizar_codfaces_requisitadas()
+    if codface_sel and codface_sel.upper() not in {x.upper() for x in codfaces_sel}:
+        codfaces_sel.insert(0, codface_sel)
+
+    try:
+        codponto_int = int(codponto_raw) if codponto_raw else None
+    except Exception:
+        codponto_int = None
+
+    data_minima_reserva = date.today()
+    dt_ini = data_minima_reserva
+    dt_fim = data_minima_reserva
+
+    faces = _buscar_faces_para_reserva_ocupacao(
+        q=q,
+        codponto=codponto_int,
+        limite=1000,
+    )
+
+    # Quando a tela vem de uma grade/card com CodFace na URL, garanto que essa face
+    # entre na lista inicial mesmo se ela não aparecer nos primeiros registros do catálogo.
+    if codfaces_sel:
+        codfaces_atuais_upper = {str(f.get("CodFace") or "").strip().upper() for f in faces}
+        for cod_requisitado in codfaces_sel:
+            if cod_requisitado.upper() in codfaces_atuais_upper:
+                continue
+            faces_extra = _buscar_faces_para_reserva_ocupacao(
+                q=cod_requisitado,
+                codponto=codponto_int,
+                limite=50,
+            )
+            for face_extra in faces_extra:
+                cod_extra = str(face_extra.get("CodFace") or "").strip().upper()
+                if cod_extra and cod_extra not in codfaces_atuais_upper:
+                    faces.append(face_extra)
+                    codfaces_atuais_upper.add(cod_extra)
+
+    faces_por_cod = {str(f.get("CodFace") or "").strip().upper(): f for f in faces}
+    codfaces_sel = [cod for cod in codfaces_sel if cod.upper() in faces_por_cod]
+
+    if codfaces_sel:
+        codface_sel = codfaces_sel[0]
+        face_encontrada = faces_por_cod.get(codface_sel.upper())
+        if face_encontrada and not codponto_int:
+            codponto_int = face_encontrada.get("CodPonto")
+    elif codponto_int and faces:
+        # Mantém o mesmo comportamento da tela antiga: ao abrir por CodPonto,
+        # a primeira face do ponto já aparece setada para o usuário.
+        codface_sel = str(faces[0].get("CodFace") or "").strip()
+        codfaces_sel = [codface_sel] if codface_sel else []
+    else:
+        codface_sel = ""
+
+    form = ReservaOcupacaoForm()
+    form.cod_ponto.data = str(codponto_int or "")
+
+    return render_template(
+        "euromidia/reserva_ocupacao_nova.html",
+        form=form,
+        faces=faces,
+        faces_json=faces,
+        codponto=codponto_int or "",
+        codface_sel=codface_sel,
+        codfaces_sel=codfaces_sel,
+        mes_ref=mes_ref,
+        dt_ini=dt_ini.strftime("%Y-%m-%d"),
+        dt_fim=dt_fim.strftime("%Y-%m-%d"),
+        data_minima_reserva=data_minima_reserva.strftime("%Y-%m-%d"),
+    )
+
+
+@paineis_bp.route("/api/ocupacao/reserva/faces", methods=["GET"])
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+@retry_get_view(db, attempts=3, base_delay=0.2, max_delay=0.8)
+def api_ocupacao_reserva_faces():
+    """Eu retorno faces para o combobox pesquisável da nova tela de reserva."""
+    q = (request.args.get("q") or "").strip()
+    codponto_raw = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
+
+    try:
+        codponto_int = int(codponto_raw) if codponto_raw else None
+    except Exception:
+        codponto_int = None
+
+    faces = _buscar_faces_para_reserva_ocupacao(
+        q=q,
+        codponto=codponto_int,
+        limite=200,
+    )
+
+    return jsonify({"ok": True, "items": faces})
 
 
 
@@ -18647,6 +18995,7 @@ def preferencia_reservas_lista():
 def api_ocupacao_calendario():
 
     cod_face = (request.args.get("cod_face") or request.args.get("codface") or "").strip()
+    cod_ponto = (request.args.get("cod_ponto") or request.args.get("codponto") or "").strip()
     mes_ref  = (request.args.get("mes_ref") or "").strip()
     meses = request.args.get("meses", 24)
 
@@ -18660,6 +19009,27 @@ def api_ocupacao_calendario():
 
     sql = text("""
         DECLARE @CodFace varchar(20) = :cod_face;
+        DECLARE @CodPonto int = TRY_CONVERT(int, NULLIF(:cod_ponto, ''));
+
+        IF @CodPonto IS NULL
+        BEGIN
+            SELECT TOP (1)
+                @CodPonto = f.CodPonto
+            FROM [Integracao].[Silver].[DimFacesPaineis] f
+            WHERE f.CodFace = @CodFace
+              AND f.CodPonto IS NOT NULL
+            ORDER BY f.IDDimFacesPaineis DESC;
+        END;
+
+        IF @CodPonto IS NULL
+        BEGIN
+            SELECT TOP (1)
+                @CodPonto = fo.CodPonto
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
+            WHERE fo.CodFace = @CodFace
+              AND fo.CodPonto IS NOT NULL
+            ORDER BY fo.DataAtualizacao DESC;
+        END;
 
         DECLARE @Inicio date =
         CASE
@@ -18672,15 +19042,6 @@ def api_ocupacao_calendario():
             SET @Inicio = DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1);
 
         DECLARE @Fim date = DATEADD(MONTH, :meses, @Inicio);
-
-        DECLARE @CodPonto int =
-        (
-            SELECT TOP (1) fo.CodPonto
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE fo.CodFace = @CodFace
-              AND fo.CodPonto IS NOT NULL
-            ORDER BY fo.DataAtualizacao DESC
-        );
 
         ;WITH
         Painel AS (
@@ -18821,6 +19182,7 @@ def api_ocupacao_calendario():
 
     rows = db.session.execute(sql, {
         "cod_face": cod_face,
+        "cod_ponto": cod_ponto,
         "mes_ref": mes_ref,
         "meses": meses
     }).all()
@@ -19053,6 +19415,46 @@ def api_ocupacao_reserva_dados_modal():
 
 
 
+def _parse_data_reserva_yyyy_mm_dd(valor: str):
+    """Eu converto data YYYY-MM-DD de reserva em date com validação simples."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return None
+
+    try:
+        return datetime.strptime(texto, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _somar_dias_uteis_reserva(data_base: datetime, qtd_dias_uteis: int = 2) -> datetime:
+    """
+    Eu calculo a expiração da reserva em dias úteis.
+
+    Regra usada aqui:
+    - 48 horas úteis = 2 dias úteis corridos;
+    - sábado e domingo não contam;
+    - o horário atual é preservado.
+    """
+    try:
+        dias_alvo = int(qtd_dias_uteis or 0)
+    except Exception:
+        dias_alvo = 0
+
+    if dias_alvo <= 0:
+        return data_base
+
+    atual = data_base
+    dias_somados = 0
+
+    while dias_somados < dias_alvo:
+        atual = atual + timedelta(days=1)
+        if atual.weekday() < 5:
+            dias_somados += 1
+
+    return atual
+
+
 @paineis_bp.route("/api/ocupacao/reserva/criar", methods=["POST"])
 @login_required
 def api_ocupacao_reserva_criar():
@@ -19117,6 +19519,19 @@ def api_ocupacao_reserva_criar():
     if not data_inicio or not data_fim:
         return jsonify({"ok": False, "erro": "data_inicio e data_fim obrigatórios"}), 400
 
+    data_inicio_obj = _parse_data_reserva_yyyy_mm_dd(data_inicio)
+    data_fim_obj = _parse_data_reserva_yyyy_mm_dd(data_fim)
+    data_minima_reserva = date.today()
+
+    if data_inicio_obj is None or data_fim_obj is None:
+        return jsonify({"ok": False, "erro": "Datas inválidas. Use o formato AAAA-MM-DD."}), 400
+
+    if data_inicio_obj < data_minima_reserva or data_fim_obj < data_minima_reserva:
+        return jsonify({"ok": False, "erro": f"Não é permitido criar reserva com data anterior a {data_minima_reserva.strftime('%Y-%m-%d')}."}), 400
+
+    if data_fim_obj < data_inicio_obj:
+        return jsonify({"ok": False, "erro": "Data fim não pode ser menor que data início."}), 400
+
   
     if not marca_exibida:
         return jsonify({"ok": False, "erro": "marca_exibida obrigatória"}), 400
@@ -19129,11 +19544,13 @@ def api_ocupacao_reserva_criar():
         return jsonify({"ok": False, "erro": "cod_ponto inválido"}), 400
 
     cota_int = None
+    cota_invalida = False
     try:
         if cota_raw not in ("", None, "null", "None"):
             cota_int = int(cota_raw)
     except Exception:
-        return jsonify({"ok": False, "erro": "cota inválida"}), 400
+        cota_int = None
+        cota_invalida = True
 
     id_cliente_int = None
     try:
@@ -19156,23 +19573,59 @@ def api_ocupacao_reserva_criar():
     except Exception:
         return jsonify({"ok": False, "erro": "id_fato_controle_contratos inválido"}), 400
 
-    # Regra de negócio: reserva sempre expira em 2 dias.
+    # Regra de negócio: reserva sempre expira em 48 horas úteis.
     # Mesmo que o front-end ou uma requisição manual envie outro valor,
-    # o backend força 2 para não gravar prazo maior ou menor.
+    # o backend força 2 dias úteis para não gravar prazo maior ou menor.
     dias_int = 2
+    expira_em_reserva = _somar_dias_uteis_reserva(datetime.now(), dias_int)
 
     sql_painel = text("""
         SELECT TOP 1
-            IDPainelEuromidia =  IDDimPaineisEuromidia
-        FROM [Integracao].[Silver].[DimFacesPaineis]
-        WHERE CodFace = :cod_face
-        ORDER BY IDDimFacesPaineis DESC
+            IDPainelEuromidia = COALESCE(f.IDDimPaineisEuromidia, p.IDDimPaineisEuromidia),
+            TipoPainel = UPPER(LTRIM(RTRIM(COALESCE(NULLIF(f.Tipo, ''), p.Tipo, '')))),
+            EhDigital = CASE
+                WHEN UPPER(LTRIM(RTRIM(COALESCE(NULLIF(f.Tipo, ''), p.Tipo, '')))) LIKE '%DIGITAL%' THEN 1
+                ELSE 0
+            END
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        OUTER APPLY (
+            SELECT TOP (1)
+                p.IDDimPaineisEuromidia,
+                p.Tipo,
+                p.DataAtualizacao
+            FROM [Integracao].[Silver].[DimPaineisEuromidia] p
+            WHERE p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+               OR p.CodPonto = f.CodPonto
+            ORDER BY
+                CASE WHEN p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia THEN 0 ELSE 1 END,
+                p.DataAtualizacao DESC,
+                p.IDDimPaineisEuromidia DESC
+        ) p
+        WHERE f.CodFace = :cod_face
+          AND f.CodPonto = :cod_ponto
+        ORDER BY f.IDDimFacesPaineis DESC
     """)
-    id_painel = db.session.execute(sql_painel, {"cod_face": cod_face}).scalar()
+    painel_row = db.session.execute(
+        sql_painel,
+        {"cod_face": cod_face, "cod_ponto": cod_ponto_int},
+    ).mappings().first()
+
+    if not painel_row:
+        return jsonify({"ok": False, "erro": "CodFace não pertence ao CodPonto informado."}), 400
+
     try:
+        id_painel = painel_row.get("IDPainelEuromidia")
         id_painel_int = int(id_painel) if id_painel is not None else None
     except Exception:
         id_painel_int = None
+
+    eh_digital_face = int(painel_row.get("EhDigital") or 0) == 1
+
+    if eh_digital_face:
+        if cota_invalida or cota_int not in (540, 1080):
+            return jsonify({"ok": False, "erro": "Para painel digital, informe uma cota válida: 540 ou 1080."}), 400
+    else:
+        cota_int = None
 
 
     vendedor_nome = vendedor_nome_raw or None
@@ -19217,15 +19670,7 @@ def api_ocupacao_reserva_criar():
 
     sql_cap = text("""
         DECLARE @CodFace varchar(20) = :cod_face;
-
-        DECLARE @CodPonto int =
-        (
-            SELECT TOP (1) fo.CodPonto
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE fo.CodFace = @CodFace
-              AND fo.CodPonto IS NOT NULL
-            ORDER BY fo.DataAtualizacao DESC
-        );
+        DECLARE @CodPonto int = TRY_CONVERT(int, :cod_ponto);
 
         ;WITH Painel AS (
             SELECT TOP (1)
@@ -19252,7 +19697,10 @@ def api_ocupacao_reserva_criar():
                     ELSE 1
                 END;
     """)
-    cap_row = db.session.execute(sql_cap, {"cod_face": cod_face}).mappings().first()
+    cap_row = db.session.execute(
+        sql_cap,
+        {"cod_face": cod_face, "cod_ponto": cod_ponto_int},
+    ).mappings().first()
 
     if not cap_row:
         return jsonify({"ok": False, "erro": "Não consegui resolver capacidade do painel para essa CodFace"}), 400
@@ -19268,8 +19716,11 @@ def api_ocupacao_reserva_criar():
         return jsonify({"ok": False, "erro": "Capacidade inválida (<=0)"}), 400
 
 
-    slots_novo = 1
-    spanqtd_novo = 1 if eh_digital == 1 else None
+    # Regra comercial da ocupação digital:
+    # cota 1080 consome 2 slots/faces na grade; cota 540 consome 1 slot/face.
+    # Em painel não digital, não gravamos SpanQtd nem Cota.
+    slots_novo = 2 if eh_digital == 1 and cota_int == 1080 else 1
+    spanqtd_novo = slots_novo if eh_digital == 1 else None
 
 
     sem_capacidade = False
@@ -19301,6 +19752,7 @@ def api_ocupacao_reserva_criar():
 
         sql_conflito_digital = text("""
             DECLARE @CodFace varchar(20) = :cod_face;
+            DECLARE @CodPonto int = TRY_CONVERT(int, :cod_ponto);
             DECLARE @Ini date = TRY_CONVERT(date, :data_inicio);
             DECLARE @Fim date = TRY_CONVERT(date, :data_fim);
 
@@ -19314,15 +19766,6 @@ def api_ocupacao_reserva_criar():
                     SlotsDisponiveis = CAST(NULL AS int);
                 RETURN;
             END
-
-            DECLARE @CodPonto int =
-            (
-                SELECT TOP (1) fo.CodPonto
-                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-                WHERE fo.CodFace = @CodFace
-                  AND fo.CodPonto IS NOT NULL
-                ORDER BY fo.DataAtualizacao DESC
-            );
 
             ;WITH Painel AS (
                 SELECT TOP (1)
@@ -19415,6 +19858,7 @@ def api_ocupacao_reserva_criar():
 
         conflito = db.session.execute(sql_conflito_digital, {
             "cod_face": cod_face,
+            "cod_ponto": cod_ponto_int,
             "data_inicio": data_inicio,
             "data_fim": data_fim,
             "slots_novo": slots_novo
@@ -19532,7 +19976,7 @@ def api_ocupacao_reserva_criar():
             NULLIF(LTRIM(RTRIM(:numero_previa)), ''),
             NULLIF(LTRIM(RTRIM(:observacao)), ''),
             :dias,
-            DATEADD(day, :dias, SYSDATETIME()),
+            :expira_em,
             SYSDATETIME(),
             :criado_por,
             :reserva_ordem_prioridade
@@ -19557,6 +20001,7 @@ def api_ocupacao_reserva_criar():
             "numero_previa": numero_previa,
             "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
             "dias": dias_int,
+            "expira_em": expira_em_reserva,
             "criado_por": criado_por,
             "reserva_ordem_prioridade": reserva_ordem_prioridade_int
         })
@@ -27893,10 +28338,7 @@ def _bloquear_filtros_clientes_sem_permissao(filtros: dict) -> dict:
 
 
 def _normalizar_filtros_clientes_para_backend(filtros):
-    """_normalizar_filtros_clientes_para_backend
-    - Eu normalizo os filtros e aplico o bloqueio final de ACL.
-    - Esta definição fica no fim do arquivo para prevalecer sobre cópias antigas.
-    """
+    
     saida = {}
 
     for nome, meta in DEFINICOES_FILTROS_CLIENTES.items():

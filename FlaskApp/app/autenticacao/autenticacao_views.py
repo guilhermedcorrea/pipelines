@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, session, abort
+from flask import Blueprint, current_app, render_template, render_template_string, request, redirect, url_for, flash, session, abort
 from flask_login import login_user, logout_user, login_required, current_user
 
 from werkzeug.security import check_password_hash
@@ -759,7 +759,20 @@ def perfil():
 
 
 
+@autenticacao_bp.route("/reserva-ocupacao", methods=["GET"])
+@login_required
+def reserva_ocupacao():
+    """Redireciona a rota antiga para a nova tela de reserva em Painéis.
 
+    A tela real não pertence ao blueprint de autenticação. Ela fica em:
+    /paineis/reserva-ocupacao
+
+    Mantive esta rota antiga apenas para não quebrar links salvos/favoritos.
+    """
+    if _usuario_logado_empresa_proprietaria() != ID_EMPRESA_PROPRIETARIA_EUROMIDIA:
+        abort(403)
+
+    return redirect(url_for("Paineis.reserva_ocupacao"))
 
 @autenticacao_bp.route("/perfil/controle-contratos/executar", methods=["POST"])
 @login_required
