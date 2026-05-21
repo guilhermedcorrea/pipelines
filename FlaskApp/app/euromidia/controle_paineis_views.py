@@ -13,7 +13,7 @@ from ..models.autenticacao import (DimUsuarios,DimPerfilUsuario, DimPermissoes, 
 from ..forms.euromidia_forms import (FormCadastroCliente,CadastroContratoManualForm,FormUsuarioNovo,
 FormUsuarioEditar, FormTrocarSenha, FormPermissaoExtraUpsert, FormPermissaoExtraRemover,ReservaOcupacaoForm)
 from ..models.admin_models import DimCalendario,DimEmpresaProprietaria,DimRecorrencia,DimPublicoAlvo
-from sqlalchemy import case, String,cast, or_, and_,func,text,  select, desc
+from sqlalchemy import case, String, cast, or_, and_, func, text, select, desc, bindparam
 from datetime import date, datetime, timedelta
 from sqlalchemy.exc import OperationalError
 from functools import wraps
@@ -8813,6 +8813,15 @@ def grade_painel_multi():
 @login_required
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def contrato_detalhe(id_fato_controle_contratos: int):
+    """
+    Eu mantenho este endpoint legado apenas como ponte para a tela atual.
+
+    Havia duas rotas iguais para /paineis/contratos/<id>. Como o Flask registra
+    a primeira rota encontrada, a tela antiga podia ser renderizada e ignorar
+    os campos novos de Preferência de Reserva. Delegando para contratos_detalhe,
+    o mesmo endereço sempre usa o template euromidia/contratos_detalhe.html.
+    """
+    return contratos_detalhe(id_fato_controle_contratos)
 
     timeline_page = request.args.get("timeline_page", default=1, type=int) or 1
     if timeline_page < 1:
@@ -12352,6 +12361,37 @@ def contratos_lista():
             .all()
         )
 
+        mapa_preferencia_reserva: dict[int, int] = {}
+
+        sql_preferencia_reserva = text("""
+            SELECT
+                ci.[IDFatoControleContratoEuromidia] AS IDFatoControleContratosEuromidia,
+                MAX(
+                    CASE
+                        WHEN TRY_CONVERT(int, ci.[BitPreferencia]) = 1 THEN 1
+                        ELSE 0
+                    END
+                ) AS BitPreferenciaReserva
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci
+            WHERE
+                ci.[IDFatoControleContratoEuromidia] IN :ids_pagina
+                AND ISNULL(ci.[BitAtivo], 1) = 1
+                AND TRY_CONVERT(int, ci.[BitPreferencia]) IN (0, 1)
+            GROUP BY
+                ci.[IDFatoControleContratoEuromidia]
+        """).bindparams(bindparam("ids_pagina", expanding=True))
+
+        rows_preferencia_reserva = db.session.execute(
+            sql_preferencia_reserva,
+            {"ids_pagina": ids_pagina},
+        ).mappings().all()
+
+        mapa_preferencia_reserva = {
+            int(row["IDFatoControleContratosEuromidia"]): int(row["BitPreferenciaReserva"] or 0)
+            for row in rows_preferencia_reserva
+            if row.get("IDFatoControleContratosEuromidia") is not None
+        }
+
         tempo_detalhes = time.perf_counter() - t_detalhes0
 
         mapa_contratos: dict[int, SimpleNamespace] = {}
@@ -12361,6 +12401,21 @@ def contratos_lista():
             dados["LogoEmpresaProprietaria"] = logo_empresa_raw
             dados["LogoEmpresaProprietariaUrl"] = logo_empresa_url
             dados["SegmentoHex"] = _normalizar_hex_css(dados.get("SegmentoHex"))
+
+            id_contrato_pref = int(dados["IDFatoControleContratosEuromidia"] or 0)
+
+            try:
+                id_status_contrato = int(dados.get("IDDimStatusContratos") or 0)
+            except Exception:
+                id_status_contrato = 0
+
+            if id_status_contrato in (8, 9, 10):
+                bit_preferencia_reserva = 0
+            else:
+                bit_preferencia_reserva = int(mapa_preferencia_reserva.get(id_contrato_pref, 0) or 0)
+
+            dados["BitPreferenciaReserva"] = bit_preferencia_reserva
+            dados["PreferenciaReservaTexto"] = "Sim" if bit_preferencia_reserva == 1 else "Não"
 
             mapa_contratos[
                 dados["IDFatoControleContratosEuromidia"]
@@ -25881,7 +25936,7 @@ def contratos_detalhe(id_contrato: int):
             "terminal_atual": terminal_atual,
         }
 
-    itens_base = list(contrato.Itens or [])
+    itens_base = list(contrato.itens or [])
 
     print("=" * 120, flush=True)
     print(f"ITENS_BASE ORM | id_contrato={id_contrato} | qtd={len(itens_base)}", flush=True)
@@ -25918,6 +25973,19 @@ def contratos_detalhe(id_contrato: int):
         id_painel = _valor_attr(it, "IDPainelEuromidia", "IDDimPaineisEuromidia")
         id_card_item = _valor_attr(it, "IDFatoKanbanCard")
 
+        try:
+            bit_preferencia_item_orm = 1 if int(
+                _valor_attr(
+                    it,
+                    "BitPreferencia",
+                    "BitPreferenciaReserva",
+                    "PreferenciaReserva",
+                    padrao=0,
+                ) or 0
+            ) == 1 else 0
+        except Exception:
+            bit_preferencia_item_orm = 0
+
         item_dict = {
             "IDFatoControleContratosItensEuromidia": id_item,
             "IDFatoControleContratosItens": id_item,
@@ -25937,6 +26005,9 @@ def contratos_detalhe(id_contrato: int):
             "CustoMensalAlocado_Soma": _valor_attr(it, "CustoMensalAlocado_Soma", "CustoPainel", "CustoMensalAlocado"),
             "MargemR_Face_Soma": _valor_attr(it, "MargemR_Face_Soma", "MargemR", "MargemReais"),
             "MargemPct_Face": _valor_attr(it, "MargemPct_Face", "MargemPct", "MargemPercentual"),
+            "BitPreferenciaReservaOriginal": bit_preferencia_item_orm,
+            "BitPreferenciaReserva": bit_preferencia_item_orm,
+            "PreferenciaReservaTexto": "Sim" if bit_preferencia_item_orm == 1 else "Não",
             "QtdeAtendimentos": 0,
             "UltimoAtendimentoEm": None,
             "QtdeCheckins": 0,
@@ -25964,6 +26035,57 @@ def contratos_detalhe(id_contrato: int):
 
         if id_painel is not None:
             itens_por_dim_painel.setdefault(str(id_painel).strip(), []).append(item_dict)
+
+    sql_preferencia_reserva_itens = text("""
+        SELECT
+            ci.[IDFatoControleContratosItensEuromidia] AS IDItemContrato,
+            ci.[CodPonto],
+            ci.[CodFace],
+            CASE
+                WHEN TRY_CONVERT(int, ci.[BitPreferencia]) = 1 THEN 1
+                ELSE 0
+            END AS BitPreferenciaReserva
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci
+        WHERE
+            ci.[IDFatoControleContratoEuromidia] = :id_contrato
+    """)
+
+    try:
+        rows_preferencia_reserva_itens = db.session.execute(
+            sql_preferencia_reserva_itens,
+            {"id_contrato": int(id_contrato)},
+        ).mappings().all()
+
+        for row_pref in rows_preferencia_reserva_itens:
+            try:
+                id_item_pref = int(row_pref.get("IDItemContrato") or 0)
+            except Exception:
+                id_item_pref = 0
+
+            cod_ponto_pref = str(row_pref.get("CodPonto") or "").strip()
+            cod_face_pref = str(row_pref.get("CodFace") or "").strip().upper()
+
+            item_pref = itens_por_id.get(id_item_pref)
+            if not item_pref and (cod_ponto_pref or cod_face_pref):
+                item_pref = itens_por_face.get((cod_ponto_pref, cod_face_pref))
+
+            if not item_pref:
+                continue
+
+            try:
+                bit_pref = 1 if int(row_pref.get("BitPreferenciaReserva") or 0) == 1 else 0
+            except Exception:
+                bit_pref = 0
+
+            item_pref["BitPreferenciaReservaOriginal"] = bit_pref
+            item_pref["BitPreferenciaReserva"] = bit_pref
+            item_pref["PreferenciaReservaTexto"] = "Sim" if bit_pref == 1 else "Não"
+
+    except Exception:
+        current_app.logger.exception(
+            "CONTRATO_DETALHE | falha ao carregar BitPreferencia dos itens | id_contrato=%s",
+            id_contrato,
+        )
 
     sql_relacionamentos = text("""
         SELECT
@@ -26738,8 +26860,11 @@ def contratos_detalhe(id_contrato: int):
             f"IDItem={item_ref.get('IDFatoControleContratosItensEuromidia')} | "
             f"CodPonto={item_ref.get('CodPonto')} | "
             f"CodFace={item_ref.get('CodFace')} | "
+            f"PreferenciaReserva={item_ref.get('PreferenciaReservaTexto')} | "
+            f"BitPreferenciaReserva={item_ref.get('BitPreferenciaReserva')} | "
             f"QtdHistoricoNegociacao={len(item_ref.get('HistoricoNegociacao') or [])} | "
-            f"QtdPrecosPraticados={len(item_ref.get('PrecosPraticados') or [])}",
+            f"QtdPrecosPraticados={len(item_ref.get('PrecosPraticados') or [])} | "
+            f"PreferenciaReserva={item_ref.get('PreferenciaReservaTexto')}",
             flush=True,
         )
 
@@ -27088,6 +27213,47 @@ def contratos_detalhe(id_contrato: int):
             "NomeStatusContrato",
         )
 
+    try:
+        id_status_atual_int = int(id_status_atual or 0)
+    except Exception:
+        id_status_atual_int = 0
+
+    contrato_status_terminal_sem_preferencia = id_status_atual_int in (8, 9, 10)
+
+    qtd_faces_com_preferencia = 0
+    for item_pref in itens:
+        try:
+            bit_pref_original = 1 if int(item_pref.get("BitPreferenciaReservaOriginal") or 0) == 1 else 0
+        except Exception:
+            bit_pref_original = 0
+
+        if contrato_status_terminal_sem_preferencia:
+            bit_pref_final = 0
+        else:
+            bit_pref_final = bit_pref_original
+
+        item_pref["BitPreferenciaReserva"] = bit_pref_final
+        item_pref["PreferenciaReservaTexto"] = "Sim" if bit_pref_final == 1 else "Não"
+
+        if bit_pref_final == 1:
+            qtd_faces_com_preferencia += 1
+
+    bit_preferencia_reserva_contrato = 1 if qtd_faces_com_preferencia > 0 else 0
+    preferencia_reserva_contrato = {
+        "BitPreferenciaReserva": bit_preferencia_reserva_contrato,
+        "PreferenciaReservaTexto": "Sim" if bit_preferencia_reserva_contrato == 1 else "Não",
+        "QtdeFacesComPreferencia": qtd_faces_com_preferencia,
+        "StatusTerminalSemPreferencia": contrato_status_terminal_sem_preferencia,
+        "Fonte": "Integracao.Silver.FatoControleContratosItensEuromidia.BitPreferencia",
+    }
+
+    try:
+        setattr(contrato, "BitPreferenciaReserva", bit_preferencia_reserva_contrato)
+        setattr(contrato, "PreferenciaReservaTexto", preferencia_reserva_contrato["PreferenciaReservaTexto"])
+        setattr(contrato, "QtdeFacesComPreferencia", qtd_faces_com_preferencia)
+    except Exception:
+        pass
+
     diagrama_status = _montar_diagrama_status_contrato_local(
         id_empresa_proprietaria=id_empresa_proprietaria_status,
         id_status_atual=id_status_atual,
@@ -27120,6 +27286,7 @@ def contratos_detalhe(id_contrato: int):
         timeline_paginacao=timeline_paginacao,
         resumo_atendimentos=resumo_atendimentos,
         diagrama_status=diagrama_status,
+        preferencia_reserva_contrato=preferencia_reserva_contrato,
         return_to=return_to,
     )
 

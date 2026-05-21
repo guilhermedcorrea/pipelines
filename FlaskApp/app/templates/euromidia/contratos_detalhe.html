@@ -10,6 +10,27 @@
         Nº Contrato: <b>{{ contrato.NumeroContrato or "—" }}</b> |
         Prévia: <b>{{ contrato.NumeroPrevia or "—" }}</b>
       </div>
+
+      {% set pref_contrato = preferencia_reserva_contrato if preferencia_reserva_contrato is defined else none %}
+      {% set contrato_tem_preferencia = pref_contrato and (pref_contrato.BitPreferenciaReserva|default(0)|int) == 1 %}
+      <div class="contrato-preferencia-wrap">
+        <span class="contrato-preferencia-badge {% if contrato_tem_preferencia %}is-sim{% else %}is-nao{% endif %}"
+              title="Preferência de Reserva consolidada a partir dos itens ativos do contrato.">
+          <span class="contrato-preferencia-icone" aria-hidden="true">★</span>
+          <span>Preferência de Reserva:</span>
+          <b>{{ "Sim" if contrato_tem_preferencia else "Não" }}</b>
+          <span class="contrato-preferencia-texto">
+            {% if contrato_tem_preferencia %}
+              Este contrato tem preferência de reserva
+            {% else %}
+              Este contrato não tem preferência de reserva
+            {% endif %}
+          </span>
+          {% if pref_contrato and pref_contrato.QtdeFacesComPreferencia and pref_contrato.QtdeFacesComPreferencia > 0 %}
+            <small>{{ pref_contrato.QtdeFacesComPreferencia }} face(s)</small>
+          {% endif %}
+        </span>
+      </div>
     </div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -95,6 +116,91 @@
     .badge.ok{ background:#ECFDF3; color:#166534; border-color:#BBF7D0; }
     .badge.warn{ background:#FFF7ED; color:#C2410C; border-color:#FED7AA; }
     .badge.danger{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+    .badge.preferencia{ background:#FEF3C7; color:#92400E; border-color:#FCD34D; }
+    .contrato-preferencia-wrap{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .contrato-preferencia-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:30px;
+      padding:6px 12px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:900;
+      border:1px solid transparent;
+      box-shadow:0 6px 14px rgba(15,23,42,.06);
+      line-height:1.2;
+    }
+    .contrato-preferencia-badge small{
+      font-size:10px;
+      font-weight:900;
+      opacity:.82;
+      border-left:1px solid currentColor;
+      padding-left:7px;
+      margin-left:2px;
+    }
+    .contrato-preferencia-texto{
+      font-size:11px;
+      font-weight:800;
+      opacity:.88;
+    }
+    .contrato-preferencia-badge.is-sim{
+      background:#FEF3C7;
+      color:#92400E;
+      border-color:#FCD34D;
+    }
+    .contrato-preferencia-badge.is-nao{
+      background:#F8FAFC;
+      color:#64748B;
+      border-color:#E2E8F0;
+      box-shadow:none;
+    }
+    .contrato-preferencia-icone,
+    .preferencia-face-icone{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:20px;
+      height:20px;
+      border-radius:999px;
+      background:#F59E0B;
+      color:#fff;
+      font-size:12px;
+      line-height:1;
+      flex:none;
+      box-shadow:0 0 0 3px rgba(245,158,11,.16);
+    }
+    .contrato-preferencia-badge.is-nao .contrato-preferencia-icone{
+      background:#94A3B8;
+      box-shadow:none;
+    }
+    .detail-title-line{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .preferencia-face-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:24px;
+      padding:4px 9px;
+      border-radius:999px;
+      background:#FFFBEB;
+      color:#92400E;
+      border:1px solid #FCD34D;
+      font-size:11px;
+      font-weight:900;
+      line-height:1;
+      white-space:nowrap;
+    }
     .badge.timeline-MOVIMENTO{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
     .badge.timeline-OBSERVACAO{ background:#F5F3FF; color:#6D28D9; border-color:#DDD6FE; }
     .badge.timeline-LOG{ background:#F8FAFC; color:#334155; border-color:#CBD5E1; }
@@ -914,11 +1020,22 @@
           <div class="detail-card">
             <div class="detail-head">
               <div>
-                <div class="detail-title">{{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                <div class="detail-title-line">
+                  <div class="detail-title">{{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                  {% if (it.BitPreferenciaReserva|default(0)|int) == 1 %}
+                    <span class="preferencia-face-chip" title="Este CodFace tem Preferência de Reserva.">
+                      <span class="preferencia-face-icone" aria-hidden="true">★</span>
+                      Preferência Reserva
+                    </span>
+                  {% endif %}
+                </div>
                 <div class="detail-sub">Item #{{ it.IDFatoControleContratosItensEuromidia or it.IDFatoControleContratosItens or "—" }} | Status: {{ it.Status or "—" }}</div>
               </div>
               <div class="mini-badges">
                 <span class="badge tipo">Cota: {{ it.Cota or 0 }}</span>
+                {% if (it.BitPreferenciaReserva|default(0)|int) == 1 %}
+                  <span class="badge preferencia">★ Preferência Reserva</span>
+                {% endif %}
                 <span class="badge ok">Atendimentos: {{ it.QtdeAtendimentos or 0 }}</span>
                 <span class="badge warn">Check-ins: {{ it.QtdeCheckins or 0 }}</span>
                 <span class="badge danger">Margem %: {{ it.MargemPct_Face if it.MargemPct_Face is not none else "—" }}</span>
