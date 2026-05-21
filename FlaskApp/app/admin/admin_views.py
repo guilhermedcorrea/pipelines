@@ -277,6 +277,133 @@ def _airflow_disparar_dag_mensageria_campanhas(
 
 
 
+
+def _airflow_disparar_dag_prioridade_reservas(
+    *,
+    id_contrato: int | None,
+    id_solicitacao: int | None = None,
+    id_card: int | None = None,
+    id_usuario_logado: int | None = None,
+) -> dict:
+    """
+    Disparo a DAG de prioridade/reservas logo após a aprovação do contrato.
+
+    A aprovação precisa gravar antes a ocupação contratual em
+    Integracao.Silver.FatoOcupacaoPaineisEuromidia. Depois disso, a DAG usa essa
+    ocupação como origem para criar reserva futura de preferência, quando a regra
+    de 6 meses ou mais for atendida.
+    """
+
+    if not _env_bool("AIRFLOW_TRIGGER_PRIORIDADE_RESERVAS_HABILITADO", "1"):
+        return {
+            "ok": False,
+            "status": "desabilitado",
+            "mensagem": "Disparo automático da DAG de prioridade/reservas está desabilitado por env.",
+        }
+
+    if id_contrato in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_id_contrato",
+            "mensagem": "Não disparei a DAG de prioridade/reservas porque id_contrato veio vazio.",
+        }
+
+    if requests is None:
+        raise RuntimeError(
+            "A biblioteca 'requests' não está instalada no container Flask. "
+            "Adicione requests no requirements.txt ou instale a dependência na imagem."
+        )
+
+    base_url = _airflow_base_url()
+    token = _airflow_obter_token_api()
+
+    dag_id = (
+        os.getenv("AIRFLOW_DAG_PRIORIDADE_RESERVAS")
+        or "pipeline_prioridade_reservas"
+    ).strip()
+
+    id_contrato_int = int(id_contrato)
+    id_solicitacao_int = int(id_solicitacao) if id_solicitacao not in (None, "", 0) else 0
+    id_card_int = int(id_card) if id_card not in (None, "", 0) else None
+    id_usuario_int = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
+
+    agora = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")
+    dag_run_id = f"prioridade_reservas__contrato_aprovado__{id_contrato_int}__solicitacao__{id_solicitacao_int}__{agora}"
+
+    payload = {
+        "dag_run_id": dag_run_id,
+        "logical_date": None,
+        "conf": {
+            "origem": "flask_admin_aprovacao_contrato",
+            "modo_processamento": "contrato_aprovado",
+            "id_contrato": id_contrato_int,
+            "id_solicitacao": id_solicitacao_int or None,
+            "id_card": id_card_int,
+            "id_usuario_logado": id_usuario_int,
+        },
+        "note": f"Disparo automático de prioridade/reservas após aprovação do contrato {id_contrato_int}",
+    }
+
+    timeout = _airflow_timeout_segundos()
+    url_trigger = f"{base_url}/api/v2/dags/{dag_id}/dagRuns"
+
+    resposta = requests.post(
+        url_trigger,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        timeout=timeout,
+    )
+
+    if resposta.status_code == 409:
+        current_app.logger.warning(
+            "AIRFLOW_PRIORIDADE_RESERVAS | DAG run já existia | dag_id=%s | dag_run_id=%s | id_contrato=%s",
+            dag_id,
+            dag_run_id,
+            id_contrato_int,
+        )
+
+        return {
+            "ok": True,
+            "status": "ja_existia",
+            "dag_id": dag_id,
+            "dag_run_id": dag_run_id,
+            "id_contrato": id_contrato_int,
+        }
+
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        corpo = (resposta.text or "")[:1500]
+        raise RuntimeError(
+            f"Falha ao disparar DAG de prioridade/reservas no Airflow. "
+            f"Status={resposta.status_code}. Resposta={corpo}"
+        ) from exc
+
+    try:
+        dados_resposta = resposta.json() or {}
+    except Exception:
+        dados_resposta = {"texto": (resposta.text or "")[:1500]}
+
+    current_app.logger.info(
+        "AIRFLOW_PRIORIDADE_RESERVAS | DAG disparada com sucesso | dag_id=%s | dag_run_id=%s | id_contrato=%s",
+        dag_id,
+        dag_run_id,
+        id_contrato_int,
+    )
+
+    return {
+        "ok": True,
+        "status": "disparado",
+        "dag_id": dag_id,
+        "dag_run_id": dag_run_id,
+        "id_contrato": id_contrato_int,
+        "resposta": dados_resposta,
+    }
+
+
 def _parse_date_br(s: str) -> date | None:
     if not s:
         return None
@@ -5427,6 +5554,388 @@ def _upsert_vencimento_campanha_aprovada_admin(
 
 
 
+
+def _upsert_ocupacao_contrato_aprovado_admin(
+    *,
+    id_contrato_controle: int | None,
+    id_item_controle: int | None,
+    id_usuario_logado: int | None = None,
+) -> dict:
+    """
+    Registro obrigatório da ocupação quando um contrato é aprovado.
+
+    Regra de negócio:
+    - aprovou contrato;
+    - o item tem painel/face;
+    - o item tem DataInicioPrevisto e DataTerminoPrevisto/DataCancelamento;
+    então o item precisa existir em Integracao.Silver.FatoOcupacaoPaineisEuromidia.
+
+    Observação:
+    - uso Origem = 'CONTRATO' porque a linha representa ocupação contratual aprovada;
+    - não dependo da DAG de prioridade/reservas para gravar esta ocupação;
+    - a DAG pode usar esta linha depois para regras futuras, mas a ocupação nasce aqui.
+    """
+
+    id_contrato = _int_ou_none(id_contrato_controle)
+    id_item = _int_ou_none(id_item_controle)
+    id_usuario = _int_ou_none(id_usuario_logado)
+
+    retorno_ignorado = {
+        "ok": True,
+        "acao": "ignorado",
+        "id_contrato": id_contrato,
+        "id_item": id_item,
+    }
+
+    if id_contrato in (None, "", 0) or id_item in (None, "", 0):
+        retorno_ignorado["motivo"] = "contrato_ou_item_nao_resolvido"
+        return retorno_ignorado
+
+    sql = text("""
+        SET NOCOUNT ON;
+
+        IF OBJECT_ID('tempdb..#FonteOcupacaoContratoAprovado') IS NOT NULL
+            DROP TABLE #FonteOcupacaoContratoAprovado;
+
+        SELECT TOP (1)
+            DataAtualizacao = CAST(GETDATE() AS datetime2(0)),
+            Referencia = COALESCE(
+                NULLIF(LTRIM(RTRIM(i.Referencia)), ''),
+                CONVERT(varchar(64), HASHBYTES(
+                    'SHA2_256',
+                    CONCAT(
+                        'OCUPACAO_CONTRATO_APROVADO|',
+                        COALESCE(CONVERT(varchar(30), i.IDFatoControleContratoEuromidia), ''), '|',
+                        COALESCE(CONVERT(varchar(30), i.IDFatoControleContratosItensEuromidia), ''), '|',
+                        COALESCE(CONVERT(varchar(30), COALESCE(TRY_CONVERT(int, i.CodPonto), TRY_CONVERT(int, face.CodPonto))), ''), '|',
+                        COALESCE(NULLIF(LTRIM(RTRIM(i.CodFace)), ''), NULLIF(LTRIM(RTRIM(face.CodFace)), ''), ''), '|',
+                        COALESCE(CONVERT(varchar(10), i.DataInicioPrevisto, 120), ''), '|',
+                        COALESCE(CONVERT(varchar(10), COALESCE(i.DataCancelamento, i.DataTerminoPrevisto), 120), '')
+                    )
+                ), 2)
+            ),
+            CodPonto = COALESCE(TRY_CONVERT(int, i.CodPonto), TRY_CONVERT(int, face.CodPonto)),
+            CodFace = LEFT(COALESCE(NULLIF(LTRIM(RTRIM(i.CodFace)), ''), NULLIF(LTRIM(RTRIM(face.CodFace)), '')), 100),
+            IDPainelEuromidia = COALESCE(i.IDPainelEuromidia, face.IDDimPaineisEuromidia),
+            Origem = CAST('CONTRATO' AS varchar(20)),
+            Status = CAST(
+                CASE
+                    WHEN i.DataCancelamento IS NULL THEN 'ATIVO'
+                    ELSE 'CANCELADO'
+                END AS varchar(20)
+            ),
+            DataInicio = CONVERT(date, i.DataInicioPrevisto),
+            DataFim = CONVERT(date, COALESCE(i.DataCancelamento, i.DataTerminoPrevisto)),
+            LoopInicio = CAST(NULL AS int),
+            LoopFim = CAST(NULL AS int),
+            SpanQtd = CAST(NULL AS int),
+            Cota = TRY_CONVERT(int, i.Cota),
+            MarcaExibida = LEFT(COALESCE(NULLIF(LTRIM(RTRIM(i.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(c.MarcaExibida)), '')), 200),
+            Vendedor = LEFT(NULLIF(LTRIM(RTRIM(i.Vendedor)), ''), 200),
+            IDVendedor = i.IDVendedor,
+            IDCliente = c.IDEmpresa,
+            IDFatoControleContratos = i.IDFatoControleContratoEuromidia,
+            NumeroContrato = LEFT(NULLIF(LTRIM(RTRIM(i.NumeroContrato)), ''), 150),
+            NumeroPrevia = LEFT(NULLIF(LTRIM(RTRIM(i.NumeroPrevia)), ''), 150),
+            TextoOriginal = LEFT(CONCAT(
+                'CONTRATO:', COALESCE(i.NumeroContrato,''),
+                ' | PREVIA:', COALESCE(i.NumeroPrevia,''),
+                ' | PONTO:', COALESCE(CONVERT(varchar(30), COALESCE(TRY_CONVERT(int, i.CodPonto), TRY_CONVERT(int, face.CodPonto))), ''),
+                ' | FACE:', COALESCE(NULLIF(LTRIM(RTRIM(i.CodFace)), ''), NULLIF(LTRIM(RTRIM(face.CodFace)), ''), ''),
+                ' | ITEM:', COALESCE(CONVERT(varchar(30), i.IDFatoControleContratosItensEuromidia), '')
+            ), 1000),
+            CriadoEm = CAST(COALESCE(i.DataLancamento, CAST(i.DataAtualizacao AS date), GETDATE()) AS datetime2(0)),
+            CriadoPorIDUsuario = COALESCE(:id_usuario_logado, i.IDVendedor, 0),
+            ExpiraEm = CAST(NULL AS datetime2(0)),
+            CanceladoEm = CASE
+                            WHEN i.DataCancelamento IS NULL THEN NULL
+                            ELSE CAST(GETDATE() AS datetime2(0))
+                          END,
+            CanceladoPorIDUsuario = CAST(NULL AS int),
+            Observacao = LEFT(COALESCE(NULLIF(LTRIM(RTRIM(i.OBS)), ''), 'Ocupação gerada automaticamente na aprovação do contrato.'), 500),
+            Dias = CASE
+                     WHEN i.DataInicioPrevisto IS NULL THEN NULL
+                     WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) IS NULL THEN NULL
+                     WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) < i.DataInicioPrevisto THEN NULL
+                     ELSE DATEDIFF(day, i.DataInicioPrevisto, COALESCE(i.DataCancelamento, i.DataTerminoPrevisto)) + 1
+                   END,
+            ReservaOrdemPrioridade = CAST(1 AS int),
+            IDFatoOcupacaoOrigem = CAST(NULL AS int),
+            IDFatoControleContratosItemOrigem = i.IDFatoControleContratosItensEuromidia,
+            TipoVinculoOrigem = CAST('CONTRATO_APROVADO' AS nvarchar(80))
+        INTO #FonteOcupacaoContratoAprovado
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
+            ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+        OUTER APPLY
+        (
+            SELECT TOP (1)
+                f.IDDimFacesPaineis,
+                f.IDDimPaineisEuromidia,
+                f.CodPonto,
+                f.CodFace
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+            WHERE
+                (
+                    i.IDDimFacesPaineis IS NOT NULL
+                    AND f.IDDimFacesPaineis = i.IDDimFacesPaineis
+                )
+                OR
+                (
+                    i.IDPainelEuromidia IS NOT NULL
+                    AND f.IDDimPaineisEuromidia = i.IDPainelEuromidia
+                    AND (
+                        NULLIF(LTRIM(RTRIM(i.CodFace)), '') IS NULL
+                        OR UPPER(LTRIM(RTRIM(f.CodFace))) = UPPER(LTRIM(RTRIM(i.CodFace)))
+                    )
+                )
+                OR
+                (
+                    TRY_CONVERT(int, i.CodPonto) IS NOT NULL
+                    AND NULLIF(LTRIM(RTRIM(i.CodFace)), '') IS NOT NULL
+                    AND TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+                    AND UPPER(LTRIM(RTRIM(f.CodFace))) = UPPER(LTRIM(RTRIM(i.CodFace)))
+                )
+            ORDER BY
+                CASE WHEN i.IDDimFacesPaineis IS NOT NULL AND f.IDDimFacesPaineis = i.IDDimFacesPaineis THEN 0 ELSE 1 END,
+                CASE WHEN i.IDPainelEuromidia IS NOT NULL AND f.IDDimPaineisEuromidia = i.IDPainelEuromidia THEN 0 ELSE 1 END,
+                f.IDDimFacesPaineis DESC
+        ) AS face
+        WHERE
+            i.IDFatoControleContratosItensEuromidia = :id_item
+            AND i.IDFatoControleContratoEuromidia = :id_contrato
+            AND i.DataInicioPrevisto IS NOT NULL
+            AND COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) IS NOT NULL
+            AND COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) >= i.DataInicioPrevisto
+            AND COALESCE(i.IDPainelEuromidia, face.IDDimPaineisEuromidia) IS NOT NULL
+            AND COALESCE(TRY_CONVERT(int, i.CodPonto), TRY_CONVERT(int, face.CodPonto)) IS NOT NULL
+            AND COALESCE(NULLIF(LTRIM(RTRIM(i.CodFace)), ''), NULLIF(LTRIM(RTRIM(face.CodFace)), '')) IS NOT NULL
+        ORDER BY
+            i.IDFatoControleContratosItensEuromidia DESC;
+
+        UPDATE T
+           SET T.DataAtualizacao = S.DataAtualizacao,
+               T.Referencia = S.Referencia,
+               T.CodPonto = S.CodPonto,
+               T.CodFace = S.CodFace,
+               T.IDPainelEuromidia = S.IDPainelEuromidia,
+               T.Origem = S.Origem,
+               T.Status = S.Status,
+               T.DataInicio = S.DataInicio,
+               T.DataFim = S.DataFim,
+               T.LoopInicio = S.LoopInicio,
+               T.LoopFim = S.LoopFim,
+               T.SpanQtd = S.SpanQtd,
+               T.Cota = S.Cota,
+               T.MarcaExibida = S.MarcaExibida,
+               T.Vendedor = S.Vendedor,
+               T.IDVendedor = S.IDVendedor,
+               T.IDCliente = S.IDCliente,
+               T.IDFatoControleContratos = S.IDFatoControleContratos,
+               T.NumeroContrato = S.NumeroContrato,
+               T.NumeroPrevia = S.NumeroPrevia,
+               T.TextoOriginal = S.TextoOriginal,
+               T.ExpiraEm = S.ExpiraEm,
+               T.CanceladoEm = S.CanceladoEm,
+               T.CanceladoPorIDUsuario = S.CanceladoPorIDUsuario,
+               T.Observacao = S.Observacao,
+               T.Dias = S.Dias,
+               T.ReservaOrdemPrioridade = COALESCE(T.ReservaOrdemPrioridade, S.ReservaOrdemPrioridade),
+               T.IDFatoOcupacaoOrigem = S.IDFatoOcupacaoOrigem,
+               T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem,
+               T.TipoVinculoOrigem = S.TipoVinculoOrigem
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T WITH (UPDLOCK, HOLDLOCK)
+        INNER JOIN #FonteOcupacaoContratoAprovado AS S
+            ON T.Origem = S.Origem
+           AND (
+                    (
+                        T.IDFatoControleContratosItemOrigem IS NOT NULL
+                        AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
+                    )
+                    OR T.Referencia = S.Referencia
+               );
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            INSERT INTO [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+            (
+                DataAtualizacao,
+                Referencia,
+                CodPonto,
+                CodFace,
+                IDPainelEuromidia,
+                Origem,
+                Status,
+                DataInicio,
+                DataFim,
+                LoopInicio,
+                LoopFim,
+                SpanQtd,
+                Cota,
+                MarcaExibida,
+                Vendedor,
+                IDVendedor,
+                IDCliente,
+                IDFatoControleContratos,
+                NumeroContrato,
+                NumeroPrevia,
+                TextoOriginal,
+                CriadoEm,
+                CriadoPorIDUsuario,
+                ExpiraEm,
+                CanceladoEm,
+                CanceladoPorIDUsuario,
+                Observacao,
+                Dias,
+                ReservaOrdemPrioridade,
+                IDFatoOcupacaoOrigem,
+                IDFatoControleContratosItemOrigem,
+                TipoVinculoOrigem
+            )
+            SELECT
+                S.DataAtualizacao,
+                S.Referencia,
+                S.CodPonto,
+                S.CodFace,
+                S.IDPainelEuromidia,
+                S.Origem,
+                S.Status,
+                S.DataInicio,
+                S.DataFim,
+                S.LoopInicio,
+                S.LoopFim,
+                S.SpanQtd,
+                S.Cota,
+                S.MarcaExibida,
+                S.Vendedor,
+                S.IDVendedor,
+                S.IDCliente,
+                S.IDFatoControleContratos,
+                S.NumeroContrato,
+                S.NumeroPrevia,
+                S.TextoOriginal,
+                S.CriadoEm,
+                S.CriadoPorIDUsuario,
+                S.ExpiraEm,
+                S.CanceladoEm,
+                S.CanceladoPorIDUsuario,
+                S.Observacao,
+                S.Dias,
+                S.ReservaOrdemPrioridade,
+                S.IDFatoOcupacaoOrigem,
+                S.IDFatoControleContratosItemOrigem,
+                S.TipoVinculoOrigem
+            FROM #FonteOcupacaoContratoAprovado AS S
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T WITH (UPDLOCK, HOLDLOCK)
+                WHERE T.Origem = S.Origem
+                  AND (
+                        (
+                            T.IDFatoControleContratosItemOrigem IS NOT NULL
+                            AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
+                        )
+                        OR T.Referencia = S.Referencia
+                  )
+            );
+        END;
+
+        SELECT TOP (1)
+            T.IDFatoOcupacaoPaineisEuromidia,
+            T.Referencia,
+            T.Origem,
+            T.Status,
+            T.CodPonto,
+            T.CodFace,
+            T.DataInicio,
+            T.DataFim,
+            T.IDFatoControleContratosItemOrigem
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T
+        INNER JOIN #FonteOcupacaoContratoAprovado AS S
+            ON T.Origem = S.Origem
+           AND (
+                    T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
+                    OR T.Referencia = S.Referencia
+               )
+        ORDER BY T.IDFatoOcupacaoPaineisEuromidia DESC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_contrato": int(id_contrato),
+            "id_item": int(id_item),
+            "id_usuario_logado": int(id_usuario) if id_usuario not in (None, "", 0) else None,
+        },
+    ).mappings().first()
+
+    if not row:
+        diagnostico = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    i.IDFatoControleContratoEuromidia,
+                    i.IDFatoControleContratosItensEuromidia,
+                    i.CodPonto,
+                    i.CodFace,
+                    i.IDPainelEuromidia,
+                    i.IDDimFacesPaineis,
+                    i.DataInicioPrevisto,
+                    i.DataTerminoPrevisto,
+                    i.DataCancelamento
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+                WHERE i.IDFatoControleContratosItensEuromidia = :id_item
+                  AND i.IDFatoControleContratoEuromidia = :id_contrato
+            """),
+            {"id_contrato": int(id_contrato), "id_item": int(id_item)},
+        ).mappings().first()
+
+        current_app.logger.warning(
+            "APROVACAO_CONTRATO | ocupação não sincronizada | id_contrato=%s | id_item=%s | diagnostico=%s",
+            id_contrato,
+            id_item,
+            dict(diagnostico or {}),
+        )
+
+        return {
+            "ok": True,
+            "acao": "ignorado",
+            "motivo": "item_sem_dados_minimos_para_ocupacao",
+            "id_contrato": int(id_contrato),
+            "id_item": int(id_item),
+            "diagnostico": dict(diagnostico or {}),
+        }
+
+    id_ocupacao = _int_ou_none(row.get("IDFatoOcupacaoPaineisEuromidia"))
+    status_ocupacao = str(row.get("Status") or "").strip()
+
+    current_app.logger.info(
+        "APROVACAO_CONTRATO | ocupação contratual registrada | id_contrato=%s | id_item=%s | id_ocupacao=%s | status=%s | cod_ponto=%s | cod_face=%s | data_inicio=%s | data_fim=%s",
+        id_contrato,
+        id_item,
+        id_ocupacao,
+        status_ocupacao,
+        row.get("CodPonto"),
+        row.get("CodFace"),
+        row.get("DataInicio"),
+        row.get("DataFim"),
+    )
+
+    return {
+        "ok": True,
+        "acao": "upsert",
+        "id_contrato": int(id_contrato),
+        "id_item": int(id_item),
+        "id_ocupacao": id_ocupacao,
+        "referencia": str(row.get("Referencia") or "").strip() or None,
+        "origem": str(row.get("Origem") or "").strip() or None,
+        "status": status_ocupacao or None,
+        "cod_ponto": row.get("CodPonto"),
+        "cod_face": row.get("CodFace"),
+        "data_inicio": row.get("DataInicio"),
+        "data_fim": row.get("DataFim"),
+    }
+
 def _efetivar_reservas_card_kanban_admin(
     *,
     id_card: int | None,
@@ -5532,6 +6041,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     ids_itens_controle: list[int] = []
     precos_praticados: list[dict] = []
     vencimentos_campanha: list[dict] = []
+    ocupacoes_sincronizadas: list[dict] = []
 
     referencia_resolvida = referencia_informada
     if not referencia_resolvida:
@@ -6122,6 +6632,13 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
 
         ids_itens_controle.append(int(id_item_controle))
 
+        resultado_ocupacao_contrato = _upsert_ocupacao_contrato_aprovado_admin(
+            id_contrato_controle=int(id_contrato_controle),
+            id_item_controle=int(id_item_controle),
+            id_usuario_logado=id_usuario_logado,
+        )
+        ocupacoes_sincronizadas.append(resultado_ocupacao_contrato)
+
         id_card_vinculo = _int_ou_none(item.get("IDFatoKanbanCard")) or _int_ou_none(cab.get("IDFatoKanbanCard"))
         _upsert_vinculo_contrato_card_euromidia(
             id_fato_controle_contratos=int(id_contrato_controle),
@@ -6199,6 +6716,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "ids_itens_controle": ids_itens_controle,
         "precos_praticados": precos_praticados,
         "vencimentos_campanha": vencimentos_campanha,
+        "ocupacoes_sincronizadas": ocupacoes_sincronizadas,
         "reservas_efetivadas": int(reservas_efetivadas or 0),
         "id_card": _int_ou_none(cab.get("IDFatoKanbanCard")),
         "id_empresa": _int_ou_none(cab.get("IDEmpresa")),
@@ -7223,6 +7741,191 @@ def lista_aprovacao_contratos():
 
 
 
+
+
+def _processar_aprovacao_contrato_admin(
+    *,
+    id_solicitacao: int,
+    id_usuario_logado: int | None,
+    form=None,
+    enfileirar_airflow: bool = True,
+) -> dict:
+    """
+    Eu executo a aprovação completa do contrato fora da requisição HTTP.
+
+    Motivo:
+    - a aprovação cria/atualiza contrato, itens, ocupação, preço praticado,
+      vencimento de campanha, vínculos, contatos, destinatários, card e histórico;
+    - rodar tudo isso dentro do POST da tela pode estourar timeout no Nginx/Gunicorn;
+    - esta função foi separada para ser chamada pelo Celery.
+    """
+
+    id_solicitacao_int = int(id_solicitacao)
+    id_usuario_int = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
+
+    cab_inicial = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int)
+    if not cab_inicial:
+        raise ValueError("Não encontrei a solicitação para aprovação.")
+
+    status_atual = _texto_ou_vazio(cab_inicial.get("StatusSolicitacao")).upper().strip()
+    if status_atual == "APROVADO":
+        return {
+            "ok": True,
+            "status": "ja_aprovado",
+            "id_solicitacao": id_solicitacao_int,
+            "id_contrato": _int_ou_none(cab_inicial.get("IDFatoControleContratosEuromidia")),
+            "id_card": _int_ou_none(cab_inicial.get("IDFatoKanbanCard")),
+        }
+
+    id_card = _int_ou_none(cab_inicial.get("IDFatoKanbanCard"))
+    id_empresa = _int_ou_none(cab_inicial.get("IDEmpresa"))
+    id_empresa_proprietaria = _int_ou_none(cab_inicial.get("IDEmpresaProprietaria"))
+    tipo_solicitacao = _tipo_solicitacao_normalizado(cab_inicial.get("TipoSolicitacao"))
+
+    current_app.logger.info(
+        "APROVACAO_CONTRATO | inicio processamento assíncrono | id_solicitacao=%s | id_card=%s | usuario=%s",
+        id_solicitacao_int,
+        id_card,
+        id_usuario_int,
+    )
+
+    resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
+        id_solicitacao=id_solicitacao_int,
+        id_usuario_logado=id_usuario_int,
+    )
+
+    id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle"))
+    ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or []
+    id_card = _int_ou_none(resultado_aprovacao.get("id_card")) or id_card
+    id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa")) or id_empresa
+    id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria")) or id_empresa_proprietaria
+    tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
+
+    cab_aprovada = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int) or {}
+    id_fato_controle = _int_ou_none(id_fato_controle) or _int_ou_none(cab_aprovada.get("IDFatoControleContratosEuromidia"))
+    id_card = _int_ou_none(id_card) or _int_ou_none(cab_aprovada.get("IDFatoKanbanCard"))
+    id_empresa = _int_ou_none(id_empresa) or _int_ou_none(cab_aprovada.get("IDEmpresa"))
+    id_empresa_proprietaria = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(cab_aprovada.get("IDEmpresaProprietaria"))
+    tipo_solicitacao = _tipo_solicitacao_normalizado(cab_aprovada.get("TipoSolicitacao")) or tipo_solicitacao
+
+    _sincronizar_contato_contrato_se_fase_4(
+        id_fato_kanban_card=id_card,
+        id_empresa=id_empresa,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        id_fato_controle_contratos=id_fato_controle,
+    )
+
+    _upsert_contato_cliente_direto_euromidia(
+        id_fato_controle_contratos=id_fato_controle,
+        id_fato_kanban_card=id_card,
+        form=form,
+        cabecalho_solicitacao=cab_aprovada,
+    )
+
+    _upsert_destinatarios_externos_contrato(
+        id_fato_controle_contratos=id_fato_controle,
+        id_empresa_destinatario=id_empresa,
+        id_empresa=id_empresa,
+        ids_itens_controle=ids_itens_controle,
+    )
+
+    _aplicar_resultado_aprovacao_no_card(
+        id_fato_kanban_card=id_card,
+        id_usuario_logado=id_usuario_int,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        aprovar=True,
+    )
+
+    id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
+        id_solicitacao=id_solicitacao_int,
+        cabecalho_solicitacao=cab_aprovada,
+    )
+
+    _atualizar_id_tipo_documento_card_admin(
+        id_fato_kanban_card=id_card,
+        id_dim_tipo_documento=id_dim_tipo_documento,
+    )
+
+    if _card_admin_esta_na_fase_formulario_contrato(id_card):
+        _registrar_ocorrencia_card_tipo_documento_admin(
+            id_fato_kanban_card=id_card,
+            id_dim_tipo_documento=id_dim_tipo_documento,
+            id_usuario_logado=id_usuario_int,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            id_fato_solicitacao=id_solicitacao_int,
+            id_fato_controle_contratos=id_fato_controle,
+            tipo_ocorrencia="APROVADO",
+            observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos.",
+        )
+
+    _registrar_historico_contrato_euromidia(
+        id_fato_controle_contratos=id_fato_controle,
+        id_fato_solicitacao=id_solicitacao_int,
+        id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVADO", fallback=1),
+        id_empresa=id_empresa,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        id_fato_kanban_card=id_card,
+        tipo_evento="APROVADO",
+        tipo_solicitacao=tipo_solicitacao,
+        descricao_evento="Solicitação aprovada e movida para Controle de Contratos Euromídia.",
+        id_dim_usuario_acao=id_usuario_int,
+    )
+
+    db.session.commit()
+
+    task_airflow_id = None
+    if enfileirar_airflow:
+        try:
+            from app.tasks.airflow_admin_tasks import tarefa_disparar_airflow_aprovacao_contrato
+
+            tarefa = tarefa_disparar_airflow_aprovacao_contrato.apply_async(
+                kwargs={
+                    "id_contrato": int(id_fato_controle) if id_fato_controle else None,
+                    "id_solicitacao": int(id_solicitacao_int),
+                    "id_card": int(id_card) if id_card else None,
+                    "id_usuario_logado": int(id_usuario_int) if id_usuario_int else None,
+                },
+                queue=os.getenv("CELERY_QUEUE_AIRFLOW_ADMIN", "airflow_admin"),
+            )
+            task_airflow_id = getattr(tarefa, "id", None)
+
+            current_app.logger.info(
+                "APROVACAO_CONTRATO | task Celery enfileirada para disparar Airflow | "
+                "task_id=%s | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                task_airflow_id,
+                id_fato_controle,
+                id_solicitacao_int,
+                id_card,
+            )
+
+        except Exception:
+            current_app.logger.exception(
+                "APROVACAO_CONTRATO | contrato aprovado, mas falhou ao enfileirar task Celery do Airflow | "
+                "id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                id_fato_controle,
+                id_solicitacao_int,
+                id_card,
+            )
+
+    current_app.logger.info(
+        "APROVACAO_CONTRATO | processamento assíncrono concluído | id_solicitacao=%s | id_contrato=%s | id_card=%s",
+        id_solicitacao_int,
+        id_fato_controle,
+        id_card,
+    )
+
+    return {
+        "ok": True,
+        "status": "aprovado",
+        "id_solicitacao": id_solicitacao_int,
+        "id_contrato": int(id_fato_controle) if id_fato_controle else None,
+        "id_card": int(id_card) if id_card else None,
+        "ids_itens_controle": ids_itens_controle,
+        "task_airflow_id": task_airflow_id,
+        "resultado_aprovacao": resultado_aprovacao,
+    }
+
+
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
 @login_required
 @requer_permissao("ADMIN_TUDO")
@@ -7275,114 +7978,77 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                 return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
             if acao == "aprovar":
-                resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
-                    id_solicitacao=int(id_solicitacao),
-                    id_usuario_logado=id_usuario_logado,
+                status_atual = _texto_ou_vazio(cab_atualizada.get("StatusSolicitacao")).upper().strip()
+                if status_atual == "APROVADO":
+                    db.session.rollback()
+                    flash("Essa solicitação já está aprovada. Nenhuma nova aprovação foi iniciada.", "info")
+                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+
+                if status_atual == "PROCESSANDO_APROVACAO":
+                    db.session.rollback()
+                    flash("Essa solicitação já está em processamento. Aguarde o worker concluir a aprovação.", "info")
+                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+
+                status_anterior = cab_atualizada.get("StatusSolicitacao") or "PENDENTE_APROVACAO"
+                form_data_aprovacao = {
+                    chave: request.form.getlist(chave)
+                    for chave in request.form.keys()
+                }
+
+                db.session.execute(
+                    text("""
+                        UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+                           SET StatusSolicitacao = 'PROCESSANDO_APROVACAO',
+                               DataAtualizacao = GETDATE()
+                         WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                    """),
+                    {"id_solicitacao": int(id_solicitacao)},
                 )
-
-                id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle"))
-                ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or []
-                id_card = _int_ou_none(resultado_aprovacao.get("id_card"))
-                id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa"))
-                id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria"))
-                tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
-
-                cab_aprovada = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao)) or {}
-                id_fato_controle = _int_ou_none(id_fato_controle) or _int_ou_none(cab_aprovada.get("IDFatoControleContratosEuromidia"))
-                id_card = _int_ou_none(id_card) or _int_ou_none(cab_aprovada.get("IDFatoKanbanCard"))
-                id_empresa = _int_ou_none(id_empresa) or _int_ou_none(cab_aprovada.get("IDEmpresa"))
-                id_empresa_proprietaria = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(cab_aprovada.get("IDEmpresaProprietaria"))
-                tipo_solicitacao = _tipo_solicitacao_normalizado(cab_aprovada.get("TipoSolicitacao")) or tipo_solicitacao
-
-                _sincronizar_contato_contrato_se_fase_4(
-                    id_fato_kanban_card=id_card,
-                    id_empresa=id_empresa,
-                    id_empresa_proprietaria=id_empresa_proprietaria,
-                    id_fato_controle_contratos=id_fato_controle,
-                )
-
-
-                _upsert_contato_cliente_direto_euromidia(
-                    id_fato_controle_contratos=id_fato_controle,
-                    id_fato_kanban_card=id_card,
-                    form=request.form,
-                    cabecalho_solicitacao=cab_aprovada,
-                )
-                _upsert_destinatarios_externos_contrato(
-                    id_fato_controle_contratos=id_fato_controle,
-                    id_empresa_destinatario=id_empresa,
-                    id_empresa=id_empresa,
-                    ids_itens_controle=ids_itens_controle,
-                )
-
-                _aplicar_resultado_aprovacao_no_card(
-                    id_fato_kanban_card=id_card,
-                    id_usuario_logado=id_usuario_logado,
-                    id_empresa_proprietaria=id_empresa_proprietaria,
-                    aprovar=True,
-                )
-
-                id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
-                    id_solicitacao=int(id_solicitacao),
-                    cabecalho_solicitacao=cab_aprovada,
-                )
-
-                _atualizar_id_tipo_documento_card_admin(
-                    id_fato_kanban_card=id_card,
-                    id_dim_tipo_documento=id_dim_tipo_documento,
-                )
-
-                if _card_admin_esta_na_fase_formulario_contrato(id_card):
-                    _registrar_ocorrencia_card_tipo_documento_admin(
-                        id_fato_kanban_card=id_card,
-                        id_dim_tipo_documento=id_dim_tipo_documento,
-                        id_usuario_logado=id_usuario_logado,
-                        id_empresa_proprietaria=id_empresa_proprietaria,
-                        id_fato_solicitacao=int(id_solicitacao),
-                        id_fato_controle_contratos=id_fato_controle,
-                        tipo_ocorrencia="APROVADO",
-                        observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos.",
-                    )
-
-                _registrar_historico_contrato_euromidia(
-                    id_fato_controle_contratos=id_fato_controle,
-                    id_fato_solicitacao=int(id_solicitacao),
-                    id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVADO", fallback=1),
-                    id_empresa=id_empresa,
-                    id_empresa_proprietaria=id_empresa_proprietaria,
-                    id_fato_kanban_card=id_card,
-                    tipo_evento="APROVADO",
-                    tipo_solicitacao=tipo_solicitacao,
-                    descricao_evento="Solicitação aprovada e movida para Controle de Contratos Euromídia.",
-                    id_dim_usuario_acao=id_usuario_logado,
-                )
-
                 db.session.commit()
 
                 try:
-                    resultado_airflow = _airflow_disparar_dag_mensageria_campanhas(
-                        id_contrato=id_fato_controle,
-                        id_solicitacao=int(id_solicitacao),
-                        id_card=id_card,
-                        id_usuario_logado=id_usuario_logado,
+                    from app.tasks.airflow_admin_tasks import tarefa_processar_aprovacao_contrato
+
+                    tarefa = tarefa_processar_aprovacao_contrato.apply_async(
+                        kwargs={
+                            "id_solicitacao": int(id_solicitacao),
+                            "id_usuario_logado": int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None,
+                            "form_data": form_data_aprovacao,
+                        },
+                        queue=os.getenv("CELERY_QUEUE_AIRFLOW_ADMIN", "airflow_admin"),
                     )
 
                     current_app.logger.info(
-                        "APROVACAO_CONTRATO | disparo Airflow mensageria | resultado=%s",
-                        resultado_airflow,
-                    )
-
-                except Exception:
-                    current_app.logger.exception(
-                        "APROVACAO_CONTRATO | contrato aprovado, mas falhou ao disparar DAG de mensageria | "
-                        "id_contrato=%s | id_solicitacao=%s | id_card=%s",
-                        id_fato_controle,
+                        "APROVACAO_CONTRATO | aprovação enviada para Celery | task_id=%s | id_solicitacao=%s | id_card=%s",
+                        getattr(tarefa, "id", None),
                         id_solicitacao,
                         id_card,
                     )
 
-                flash("Solicitação aprovada com sucesso.", "success")
-                return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+                    flash("Contrato aprovado.", "success")
+                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+
+                except Exception as exc:
+                    current_app.logger.exception(
+                        "APROVACAO_CONTRATO | falha ao enfileirar aprovação no Celery | id_solicitacao=%s",
+                        id_solicitacao,
+                    )
+                    db.session.rollback()
+                    db.session.execute(
+                        text("""
+                            UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+                               SET StatusSolicitacao = :status_anterior,
+                                   DataAtualizacao = GETDATE()
+                             WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                        """),
+                        {
+                            "status_anterior": status_anterior,
+                            "id_solicitacao": int(id_solicitacao),
+                        },
+                    )
+                    db.session.commit()
+                    flash(f"Erro ao enviar aprovação para o Celery: {exc}", "danger")
+                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
             if acao == "reprovar":
                 db.session.execute(
@@ -7440,6 +8106,10 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
         itens=dados["itens"],
         diagrama_status=dados["diagrama_status"],
     )
+
+
+
+
 
 
 

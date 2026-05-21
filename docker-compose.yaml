@@ -426,6 +426,51 @@ services:
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 
+  celery-airflow-worker:
+    build:
+      context: ./FlaskApp
+      dockerfile: Dockerfile
+    image: flaskapp-guilherme:latest
+    env_file:
+      - ./.env
+    environment:
+      TZ: America/Sao_Paulo
+      PYTHONUNBUFFERED: "1"
+
+      CACHE_REDIS_URL: redis://redis:6379/2
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
+      SOCKETIO_CHANNEL: flaskapp_socketio
+      RATELIMIT_STORAGE_URI: redis://redis:6379/4
+
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_QUEUE_AIRFLOW_ADMIN: airflow_admin
+
+      AIRFLOW_API_BASE_URL: ${AIRFLOW_API_BASE_URL:-http://airflow-apiserver:8080}
+      AIRFLOW_DAG_MENSAGERIA_CAMPANHAS: ${AIRFLOW_DAG_MENSAGERIA_CAMPANHAS:-euromidia_mensageria_campanhas}
+      AIRFLOW_DAG_PRIORIDADE_RESERVAS: ${AIRFLOW_DAG_PRIORIDADE_RESERVAS:-pipeline_prioridade_reservas}
+      AIRFLOW_TRIGGER_MENSAGERIA_HABILITADO: ${AIRFLOW_TRIGGER_MENSAGERIA_HABILITADO:-1}
+      AIRFLOW_TRIGGER_PRIORIDADE_RESERVAS_HABILITADO: ${AIRFLOW_TRIGGER_PRIORIDADE_RESERVAS_HABILITADO:-1}
+      MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
+    command: python -m celery -A app.celery_app.celery_app worker -Q airflow_admin -l info --concurrency=1 --prefetch-multiplier=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      flask-app-1:
+        condition: service_started
+      flask-app-2:
+        condition: service_started
+      airflow-apiserver:
+        condition: service_healthy
+    volumes:
+      - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
+      - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
+      - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
+      - ./FlaskApp/app/static:/app/app/static
+    restart: unless-stopped
+
   nginx-flask:
     image: nginx:1.27-alpine
     depends_on:

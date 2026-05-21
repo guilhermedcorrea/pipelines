@@ -18,6 +18,11 @@ try:
 except ImportError:
     from airflow.decorators import dag, task
     from airflow.operators.python import get_current_context
+
+try:
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+except ImportError:
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -108,6 +113,12 @@ FUSO_HORARIO = "America/Sao_Paulo"
 CRON_AGENDAMENTO = "0 8,11,15,18 * * *"
 
 CONN_ID_SQL_SERVER = "mssql_integracao"
+
+DAG_ID_PRIORIDADE_RESERVAS_PADRAO = "pipeline_prioridade_reservas"
+DAG_ID_PRIORIDADE_RESERVAS = (
+    os.getenv("AIRFLOW_DAG_PRIORIDADE_RESERVAS", DAG_ID_PRIORIDADE_RESERVAS_PADRAO).strip()
+    or DAG_ID_PRIORIDADE_RESERVAS_PADRAO
+)
 
 
 AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO = os.getenv("AIRFLOW_TRIGGER_CONTROLE_CONTRATOS_HABILITADO", "1").strip()
@@ -2969,7 +2980,8 @@ def executar_sql_auditado(
         "Pipeline ETL do controle de contratos da Euromídia. Baixa via rclone a versão mais recente do "
         "arquivo oficial no SharePoint, lê a aba CTR no container, padroniza datas, números, percentuais, CNPJ e textos, gera identificadores "
         "hash para contratos e prévias ausentes, produz um CSV técnico, recarrega a stage SQL Server via "
-        "insert em lote e executa a cadeia de consolidação nas tabelas Silver e ocupação."
+        "insert em lote, executa a cadeia de consolidação nas tabelas Silver e ocupação, e ao final dispara "
+        "a DAG de prioridade de reservas para criar reservas elegíveis sem duplicidade."
     ),
     doc_md=r"""
 # ETL CTR - Controle de Contratos Euromídia
@@ -3131,10 +3143,26 @@ São atualizadas:
 - ID do painel
 - ID da face
 
-### 10. Calendário e ocupação
+### 10. Calendário, ocupação e prioridade de reservas
 Por fim:
-- atualiza dimensão calendário
-- executa MERGE de ocupação em `FatoOcupacaoPaineisEuromidia`
+- atualiza dimensão calendário;
+- executa MERGE de ocupação em `FatoOcupacaoPaineisEuromidia`;
+- dispara a DAG `pipeline_prioridade_reservas` em modo pós-upsert.
+
+Esse disparo é necessário porque o MERGE de ocupação apenas atualiza/cria ocupações contratuais.
+Quem cria a reserva automática de preferência de renovação e recalcula `ReservaOrdemPrioridade`
+é a DAG de prioridade de reservas.
+
+O disparo envia o `conf`:
+
+```json
+{
+  "origem": "pipeline_controle_contratos_euromidia",
+  "modo_execucao": "VARREDURA_POS_UPSERT_OCUPACAO",
+  "processar_todos_elegiveis": true,
+  "tabela_origem": "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]"
+}
+```
 
 ---
 
@@ -3957,7 +3985,38 @@ def pipeline_controle_contratos_euromidia():
     calendario = upsert_dim_calendario()
     ocupacao = upsert_ocupacao()
 
-    contexto_disparo >> info_download >> info_csv >> stage >> contratos >> itens >> fk >> vendedor >> empresa >> painel >> face >> calendario >> ocupacao
+    prioridade_reservas = TriggerDagRunOperator(
+        task_id="acionar_prioridade_reservas_pos_upsert_ocupacao",
+        trigger_dag_id=DAG_ID_PRIORIDADE_RESERVAS,
+        trigger_run_id="pos_upsert_ocupacao__{{ ts_nodash }}__{{ ti.try_number }}",
+        conf={
+            "origem": "pipeline_controle_contratos_euromidia",
+            "modo_execucao": "VARREDURA_POS_UPSERT_OCUPACAO",
+            "processar_todos_elegiveis": True,
+            "tabela_origem": "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
+            "dag_origem": DAG_ID,
+            "run_id_origem": "{{ dag_run.run_id }}",
+            "logical_date_origem": "{{ ds }}",
+        },
+        wait_for_completion=False,
+    )
+
+    (
+        contexto_disparo
+        >> info_download
+        >> info_csv
+        >> stage
+        >> contratos
+        >> itens
+        >> fk
+        >> vendedor
+        >> empresa
+        >> painel
+        >> face
+        >> calendario
+        >> ocupacao
+        >> prioridade_reservas
+    )
 
 
 dag = pipeline_controle_contratos_euromidia()

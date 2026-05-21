@@ -4,6 +4,7 @@ from flask import Flask, redirect, url_for
 from sqlalchemy import event
 
 from .extensions import db, login_manager, csrf, limiter, cache, socketio
+from .celery_app import celery_app
 
 from config import (
     SQLALCHEMY_DATABASE_URI,
@@ -91,6 +92,19 @@ def create_app() -> Flask:
         "MENSAGERIA_SOCKET_TOKEN",
         MENSAGERIA_SOCKET_TOKEN,
     )
+
+    app.config["KANBAN_DEADLOCK_TASK_NAME"] = os.getenv(
+        "KANBAN_DEADLOCK_TASK_NAME",
+        "app.kanban.tarefa_retry_movimento_card",
+    )
+    app.config["KANBAN_DEADLOCK_QUEUE_NAME"] = os.getenv(
+        "KANBAN_DEADLOCK_QUEUE_NAME",
+        "kanban_retry_rapido",
+    )
+    app.config["KANBAN_DEADLOCK_COUNTDOWN"] = int(os.getenv("KANBAN_DEADLOCK_COUNTDOWN", "2") or "2")
+    app.config["KANBAN_DEADLOCK_EXPIRES"] = int(os.getenv("KANBAN_DEADLOCK_EXPIRES", "30") or "30")
+
+    app.extensions["celery"] = celery_app
 
     db.init_app(app)
     login_manager.init_app(app)
