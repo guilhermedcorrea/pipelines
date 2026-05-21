@@ -201,6 +201,69 @@
       line-height:1;
       white-space:nowrap;
     }
+    .preferencia-operacional-card{
+      grid-column:1 / -1;
+      border-color:#FCD34D;
+      background:linear-gradient(180deg,#FFFBEB 0%,#ffffff 72%);
+    }
+    .preferencia-operacional-card .surface-head{
+      margin-bottom:10px;
+    }
+    .preferencia-operacional-duo{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+      margin-top:10px;
+    }
+    .preferencia-operacional-link{
+      display:block;
+      text-decoration:none;
+      color:inherit;
+      border:1px solid rgba(245,158,11,.28);
+      border-radius:12px;
+      background:#fff;
+      padding:12px;
+      transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+    }
+    .preferencia-operacional-link:hover{
+      transform:translateY(-1px);
+      box-shadow:0 10px 20px rgba(15,23,42,.08);
+      border-color:#F59E0B;
+    }
+    .preferencia-operacional-link.is-disabled{
+      pointer-events:none;
+      opacity:.72;
+      background:#F8FAFC;
+      border-style:dashed;
+      border-color:#CBD5E1;
+    }
+    .preferencia-operacional-linha-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+    .preferencia-operacional-titulo{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      font-weight:900;
+      color:var(--euro-blue);
+    }
+    .preferencia-operacional-hint{
+      margin-top:8px;
+      font-size:11px;
+      font-weight:800;
+      color:#92400E;
+    }
+    @media (min-width: 980px){
+      .preferencia-operacional-duo{
+        grid-template-columns:1fr 1fr;
+      }
+    }
     .badge.timeline-MOVIMENTO{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
     .badge.timeline-OBSERVACAO{ background:#F5F3FF; color:#6D28D9; border-color:#DDD6FE; }
     .badge.timeline-LOG{ background:#F8FAFC; color:#334155; border-color:#CBD5E1; }
@@ -1017,6 +1080,9 @@
           {% set ultimo_checkin = it.CheckinsDetalhe[0] if it.CheckinsDetalhe and it.CheckinsDetalhe|length > 0 else none %}
           {% set ultima_negociacao = it.HistoricoNegociacao[0] if it.HistoricoNegociacao and it.HistoricoNegociacao|length > 0 else none %}
           {% set ultimo_preco = it.PrecosPraticados[0] if it.PrecosPraticados and it.PrecosPraticados|length > 0 else none %}
+          {% set pref_operacional = it.PreferenciaReservaOperacional if it.PreferenciaReservaOperacional is defined else none %}
+          {% set pref_ocupacao = pref_operacional.Ocupacao if pref_operacional and pref_operacional.Ocupacao else none %}
+          {% set pref_reserva = pref_operacional.Reserva if pref_operacional and pref_operacional.Reserva else none %}
           <div class="detail-card">
             <div class="detail-head">
               <div>
@@ -1057,6 +1123,75 @@
               </div>
             </div>
 
+
+            {% if (it.BitPreferenciaReserva|default(0)|int) == 1 %}
+              <div class="surface-grid preferencia-operacional-grid">
+                <div class="surface-card preferencia-operacional-card">
+                  <div class="surface-head">
+                    <div class="surface-title">Preferência de Reserva vinculada à ocupação</div>
+                    <span class="badge preferencia">★ CodFace preferencial</span>
+                  </div>
+
+                  <div class="preferencia-operacional-duo">
+                    <a class="preferencia-operacional-link {% if not pref_ocupacao %}is-disabled{% endif %}"
+                       href="{{ pref_ocupacao.HrefGrade if pref_ocupacao and pref_ocupacao.HrefGrade else '#' }}"
+                       title="Abrir a grade no período da ocupação origem deste CodFace.">
+                      <div class="preferencia-operacional-linha-head">
+                        <div class="preferencia-operacional-titulo">
+                          <span class="preferencia-face-icone" aria-hidden="true">O</span>
+                          Ocupação origem da preferência
+                        </div>
+                        <span class="badge {% if pref_ocupacao and pref_ocupacao.AtivoTexto == 'Sim' %}ok{% elif pref_ocupacao %}warn{% else %}danger{% endif %}">
+                          {% if pref_ocupacao %}Ativo: {{ pref_ocupacao.AtivoTexto }}{% else %}Não encontrada{% endif %}
+                        </span>
+                      </div>
+                      <div class="surface-value sm">
+                        {% if pref_ocupacao %}
+                          {{ pref_ocupacao.MarcaExibida or pref_ocupacao.TextoOriginal or pref_ocupacao.NumeroContrato or "Ocupação origem encontrada" }}
+                        {% else %}
+                          Sem ocupação origem vinculada
+                        {% endif %}
+                      </div>
+                      <div class="surface-meta">
+                        <div><strong>Status:</strong> {{ pref_ocupacao.Status if pref_ocupacao else "—" }}</div>
+                        <div><strong>Período:</strong> {% if pref_ocupacao %}{{ pref_ocupacao.DataInicio.strftime("%d/%m/%Y") if pref_ocupacao.DataInicio else "—" }} até {{ pref_ocupacao.DataFim.strftime("%d/%m/%Y") if pref_ocupacao.DataFim else "—" }}{% else %}—{% endif %}</div>
+                        <div><strong>Cota:</strong> {{ pref_ocupacao.Cota if pref_ocupacao and pref_ocupacao.Cota is not none else "—" }}</div>
+                        <div><strong>ID ocupação:</strong> {{ pref_ocupacao.IDFatoOcupacaoPaineisEuromidia if pref_ocupacao else "—" }}</div>
+                      </div>
+                      {% if pref_ocupacao %}<div class="preferencia-operacional-hint">Clique aqui para abrir a grade no período da ocupação origem.</div>{% endif %}
+                    </a>
+
+                    <a class="preferencia-operacional-link {% if not pref_reserva %}is-disabled{% endif %}"
+                       href="{{ pref_reserva.HrefGrade if pref_reserva and pref_reserva.HrefGrade else '#' }}"
+                       title="Abrir a grade no período da reserva filha deste CodFace.">
+                      <div class="preferencia-operacional-linha-head">
+                        <div class="preferencia-operacional-titulo">
+                          <span class="preferencia-face-icone" aria-hidden="true">R</span>
+                          Reserva filha gerada pela preferência
+                        </div>
+                        <span class="badge {% if pref_reserva and pref_reserva.AtivoTexto == 'Sim' %}ok{% elif pref_reserva %}warn{% else %}danger{% endif %}">
+                          {% if pref_reserva %}Ativo: {{ pref_reserva.AtivoTexto }}{% else %}Não encontrada{% endif %}
+                        </span>
+                      </div>
+                      <div class="surface-value sm">
+                        {% if pref_reserva %}
+                          {{ pref_reserva.MarcaExibida or pref_reserva.TextoOriginal or pref_reserva.NumeroPrevia or "Reserva preferencial encontrada" }}
+                        {% else %}
+                          Sem reserva filha vinculada
+                        {% endif %}
+                      </div>
+                      <div class="surface-meta">
+                        <div><strong>Status:</strong> {{ pref_reserva.Status if pref_reserva else "—" }}</div>
+                        <div><strong>Período:</strong> {% if pref_reserva %}{{ pref_reserva.DataInicio.strftime("%d/%m/%Y") if pref_reserva.DataInicio else "—" }} até {{ pref_reserva.DataFim.strftime("%d/%m/%Y") if pref_reserva.DataFim else "—" }}{% else %}—{% endif %}</div>
+                        <div><strong>Cota:</strong> {{ pref_reserva.Cota if pref_reserva and pref_reserva.Cota is not none else "—" }}</div>
+                        <div><strong>ID reserva:</strong> {{ pref_reserva.IDFatoOcupacaoPaineisEuromidia if pref_reserva else "—" }}{% if pref_reserva and pref_reserva.ReservaOrdemPrioridade %} • Ordem: {{ pref_reserva.ReservaOrdemPrioridade }}{% endif %}</div>
+                      </div>
+                      {% if pref_reserva %}<div class="preferencia-operacional-hint">Clique aqui para abrir a grade no período da reserva preferencial.</div>{% endif %}
+                    </a>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
             <div class="surface-grid">
               <div class="surface-card">
                 <div class="surface-head">

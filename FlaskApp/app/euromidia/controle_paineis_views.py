@@ -25757,6 +25757,79 @@ def contratos_detalhe(id_contrato: int):
 
         return unicos, placeholders, params
 
+    def _coagir_data_preferencia(valor):
+        """Eu normalizo datas vindas do banco para montar filtros da grade."""
+        if valor is None:
+            return None
+
+        if isinstance(valor, datetime):
+            return valor.date()
+
+        if isinstance(valor, date):
+            return valor
+
+        texto = str(valor or "").strip()
+        if not texto:
+            return None
+
+        for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(texto[:10], formato).date()
+            except Exception:
+                continue
+
+        return None
+
+    def _mes_yyyy_mm_preferencia(valor_data):
+        data_ref = _coagir_data_preferencia(valor_data)
+        if not data_ref:
+            return ""
+        return f"{data_ref.year:04d}-{data_ref.month:02d}"
+
+    def _iso_data_preferencia(valor_data):
+        data_ref = _coagir_data_preferencia(valor_data)
+        if not data_ref:
+            return ""
+        return data_ref.strftime("%Y-%m-%d")
+
+    def _montar_href_grade_preferencia(cod_ponto, cod_face, data_inicio, data_fim):
+        """Eu monto o link da grade já filtrado na face e no período do registro."""
+        try:
+            cod_ponto_int = int(cod_ponto)
+        except Exception:
+            return "#"
+
+        cod_face_txt = str(cod_face or "").strip()
+        if not cod_face_txt:
+            return "#"
+
+        data_inicio_ref = _coagir_data_preferencia(data_inicio)
+        data_fim_ref = _coagir_data_preferencia(data_fim) or data_inicio_ref
+
+        parametros_grade = {
+            "codponto": cod_ponto_int,
+            "codface": cod_face_txt,
+            "face_principal": cod_face_txt,
+        }
+
+        if data_inicio_ref:
+            parametros_grade["mes_ref"] = _mes_yyyy_mm_preferencia(data_inicio_ref)
+            parametros_grade["mes_de"] = _mes_yyyy_mm_preferencia(data_inicio_ref)
+            parametros_grade["data_ref"] = _iso_data_preferencia(data_inicio_ref)
+
+        if data_fim_ref:
+            parametros_grade["mes_ate"] = _iso_data_preferencia(data_fim_ref)
+
+        try:
+            return url_for("Paineis.grade_painel", **parametros_grade) + "#gradeWrap"
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao montar href da grade | CodPonto=%s | CodFace=%s",
+                cod_ponto,
+                cod_face,
+            )
+            return "#"
+
     def _classificar_tipo_card(row):
         if bool(row.get("BitAditivo")):
             return "Aditivo"
@@ -25936,7 +26009,11 @@ def contratos_detalhe(id_contrato: int):
             "terminal_atual": terminal_atual,
         }
 
-    itens_base = list(contrato.itens or [])
+    itens_base = list(
+        getattr(contrato, "itens", None)
+        or getattr(contrato, "Itens", None)
+        or []
+    )
 
     print("=" * 120, flush=True)
     print(f"ITENS_BASE ORM | id_contrato={id_contrato} | qtd={len(itens_base)}", flush=True)
@@ -26015,6 +26092,11 @@ def contratos_detalhe(id_contrato: int):
             "CheckinsDetalhe": [],
             "HistoricoNegociacao": [],
             "PrecosPraticados": [],
+            "PreferenciaReservaOperacional": {
+                "Ocupacao": None,
+                "Reserva": None,
+                "QtdRegistros": 0,
+            },
         }
 
         itens.append(item_dict)
@@ -27253,6 +27335,331 @@ def contratos_detalhe(id_contrato: int):
         setattr(contrato, "QtdeFacesComPreferencia", qtd_faces_com_preferencia)
     except Exception:
         pass
+
+    itens_preferencia_operacional = []
+    ids_itens_preferencia_operacional = []
+
+    for item_pref_oper in itens:
+        try:
+            bit_pref_oper = 1 if int(item_pref_oper.get("BitPreferenciaReserva") or 0) == 1 else 0
+        except Exception:
+            bit_pref_oper = 0
+
+        if bit_pref_oper != 1:
+            continue
+
+        item_pref_oper["PreferenciaReservaOperacional"] = {
+            "Ocupacao": None,
+            "Reserva": None,
+            "QtdRegistros": 0,
+        }
+
+        id_item_oper = item_pref_oper.get("IDFatoControleContratosItensEuromidia")
+        try:
+            id_item_oper_int = int(id_item_oper or 0)
+        except Exception:
+            id_item_oper_int = 0
+
+        if id_item_oper_int > 0:
+            itens_preferencia_operacional.append(item_pref_oper)
+            ids_itens_preferencia_operacional.append(id_item_oper_int)
+
+    if ids_itens_preferencia_operacional:
+        sql_preferencia_operacional = text("""
+            WITH ItensPreferencia AS (
+                SELECT
+                     ci.[IDFatoControleContratosItensEuromidia] AS IDItemContrato
+                    ,ci.[CodPonto]
+                    ,ci.[CodFace]
+                    ,ci.[DataInicioPrevisto]
+                    ,ci.[DataTerminoPrevisto]
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                WHERE
+                    ci.[IDFatoControleContratoEuromidia] = :id_contrato
+                    AND ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens
+            ), OcupacaoOrigem AS (
+                SELECT
+                     ip.IDItemContrato
+                    ,TipoOperacional = 'OCUPACAO'
+                    ,OrdemOperacional = 1
+                    ,oc.[IDFatoOcupacaoPaineisEuromidia]
+                    ,oc.[DataAtualizacao]
+                    ,oc.[Referencia]
+                    ,oc.[CodPonto]
+                    ,oc.[CodFace]
+                    ,oc.[IDPainelEuromidia]
+                    ,oc.[Origem]
+                    ,oc.[Status]
+                    ,oc.[DataInicio]
+                    ,oc.[DataFim]
+                    ,oc.[LoopInicio]
+                    ,oc.[LoopFim]
+                    ,oc.[SpanQtd]
+                    ,oc.[Cota]
+                    ,oc.[MarcaExibida]
+                    ,oc.[Vendedor]
+                    ,oc.[IDVendedor]
+                    ,oc.[IDCliente]
+                    ,oc.[IDFatoControleContratos]
+                    ,oc.[NumeroContrato]
+                    ,oc.[NumeroPrevia]
+                    ,oc.[TextoOriginal]
+                    ,oc.[CriadoEm]
+                    ,oc.[ExpiraEm]
+                    ,oc.[CanceladoEm]
+                    ,oc.[Observacao]
+                    ,oc.[Dias]
+                    ,oc.[ReservaOrdemPrioridade]
+                    ,oc.[IDFatoOcupacaoOrigem]
+                    ,oc.[IDFatoControleContratosItemOrigem]
+                    ,oc.[TipoVinculoOrigem]
+                    ,rn = ROW_NUMBER() OVER (
+                        PARTITION BY ip.IDItemContrato
+                        ORDER BY
+                            CASE
+                                WHEN TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ip.IDItemContrato THEN 0
+                                ELSE 1
+                            END,
+                            CASE
+                                WHEN UPPER(LTRIM(RTRIM(ISNULL(oc.[TipoVinculoOrigem], '')))) = 'CONTRATO_APROVADO' THEN 0
+                                ELSE 1
+                            END,
+                            CASE
+                                WHEN UPPER(LTRIM(RTRIM(ISNULL(oc.[Status], '')))) = 'ATIVO' THEN 0
+                                ELSE 1
+                            END,
+                            oc.[DataInicio] DESC,
+                            oc.[DataAtualizacao] DESC,
+                            oc.[IDFatoOcupacaoPaineisEuromidia] DESC
+                    )
+                FROM ItensPreferencia AS ip
+                INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+                    ON TRY_CONVERT(int, oc.[CodPonto]) = TRY_CONVERT(int, ip.[CodPonto])
+                   AND UPPER(LTRIM(RTRIM(ISNULL(oc.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(ip.[CodFace], ''))))
+                   AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Origem], '')))) = 'CONTRATO'
+                   AND (
+                        TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ip.IDItemContrato
+                        OR (
+                            TRY_CONVERT(int, oc.[IDFatoControleContratos]) = :id_contrato
+                            AND oc.[DataInicio] <= ISNULL(ip.[DataTerminoPrevisto], CONVERT(date, '9999-12-31'))
+                            AND oc.[DataFim] >= ISNULL(ip.[DataInicioPrevisto], CONVERT(date, '1900-01-01'))
+                        )
+                   )
+                WHERE
+                    UPPER(LTRIM(RTRIM(ISNULL(oc.[Status], '')))) NOT IN ('CANCELADO', 'CANCELADA')
+            ), OcupacaoEscolhida AS (
+                SELECT *
+                FROM OcupacaoOrigem
+                WHERE rn = 1
+            ), ReservaFilha AS (
+                SELECT
+                     oe.IDItemContrato
+                    ,TipoOperacional = 'RESERVA'
+                    ,OrdemOperacional = 2
+                    ,rv.[IDFatoOcupacaoPaineisEuromidia]
+                    ,rv.[DataAtualizacao]
+                    ,rv.[Referencia]
+                    ,rv.[CodPonto]
+                    ,rv.[CodFace]
+                    ,rv.[IDPainelEuromidia]
+                    ,rv.[Origem]
+                    ,rv.[Status]
+                    ,rv.[DataInicio]
+                    ,rv.[DataFim]
+                    ,rv.[LoopInicio]
+                    ,rv.[LoopFim]
+                    ,rv.[SpanQtd]
+                    ,rv.[Cota]
+                    ,rv.[MarcaExibida]
+                    ,rv.[Vendedor]
+                    ,rv.[IDVendedor]
+                    ,rv.[IDCliente]
+                    ,rv.[IDFatoControleContratos]
+                    ,rv.[NumeroContrato]
+                    ,rv.[NumeroPrevia]
+                    ,rv.[TextoOriginal]
+                    ,rv.[CriadoEm]
+                    ,rv.[ExpiraEm]
+                    ,rv.[CanceladoEm]
+                    ,rv.[Observacao]
+                    ,rv.[Dias]
+                    ,rv.[ReservaOrdemPrioridade]
+                    ,rv.[IDFatoOcupacaoOrigem]
+                    ,rv.[IDFatoControleContratosItemOrigem]
+                    ,rv.[TipoVinculoOrigem]
+                    ,rn = ROW_NUMBER() OVER (
+                        PARTITION BY oe.IDItemContrato
+                        ORDER BY
+                            CASE
+                                WHEN TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia]) THEN 0
+                                ELSE 1
+                            END,
+                            CASE
+                                WHEN UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERENCIA%' THEN 0
+                                WHEN UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERÊNCIA%' THEN 0
+                                ELSE 1
+                            END,
+                            CASE
+                                WHEN UPPER(LTRIM(RTRIM(ISNULL(rv.[Status], '')))) = 'RESERVADO' THEN 0
+                                ELSE 1
+                            END,
+                            rv.[DataInicio] ASC,
+                            rv.[DataAtualizacao] DESC,
+                            rv.[IDFatoOcupacaoPaineisEuromidia] DESC
+                    )
+                FROM OcupacaoEscolhida AS oe
+                INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS rv WITH (NOLOCK)
+                    ON TRY_CONVERT(int, rv.[CodPonto]) = TRY_CONVERT(int, oe.[CodPonto])
+                   AND UPPER(LTRIM(RTRIM(ISNULL(rv.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(oe.[CodFace], ''))))
+                   AND UPPER(LTRIM(RTRIM(ISNULL(rv.[Origem], '')))) = 'RESERVA'
+                   AND (
+                        TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
+                        OR (
+                            TRY_CONVERT(int, rv.[IDFatoControleContratosItemOrigem]) = oe.IDItemContrato
+                            AND TRY_CONVERT(int, rv.[IDFatoControleContratos]) = :id_contrato
+                            AND (
+                                UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERENCIA%'
+                                OR UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERÊNCIA%'
+                            )
+                        )
+                   )
+                WHERE
+                    UPPER(LTRIM(RTRIM(ISNULL(rv.[Status], '')))) NOT IN ('CANCELADO', 'CANCELADA')
+            )
+            SELECT
+                 IDItemContrato
+                ,TipoOperacional
+                ,OrdemOperacional
+                ,IDFatoOcupacaoPaineisEuromidia
+                ,DataAtualizacao
+                ,Referencia
+                ,CodPonto
+                ,CodFace
+                ,IDPainelEuromidia
+                ,Origem
+                ,Status
+                ,DataInicio
+                ,DataFim
+                ,LoopInicio
+                ,LoopFim
+                ,SpanQtd
+                ,Cota
+                ,MarcaExibida
+                ,Vendedor
+                ,IDVendedor
+                ,IDCliente
+                ,IDFatoControleContratos
+                ,NumeroContrato
+                ,NumeroPrevia
+                ,TextoOriginal
+                ,CriadoEm
+                ,ExpiraEm
+                ,CanceladoEm
+                ,Observacao
+                ,Dias
+                ,ReservaOrdemPrioridade
+                ,IDFatoOcupacaoOrigem
+                ,IDFatoControleContratosItemOrigem
+                ,TipoVinculoOrigem
+            FROM OcupacaoEscolhida
+
+            UNION ALL
+
+            SELECT
+                 IDItemContrato
+                ,TipoOperacional
+                ,OrdemOperacional
+                ,IDFatoOcupacaoPaineisEuromidia
+                ,DataAtualizacao
+                ,Referencia
+                ,CodPonto
+                ,CodFace
+                ,IDPainelEuromidia
+                ,Origem
+                ,Status
+                ,DataInicio
+                ,DataFim
+                ,LoopInicio
+                ,LoopFim
+                ,SpanQtd
+                ,Cota
+                ,MarcaExibida
+                ,Vendedor
+                ,IDVendedor
+                ,IDCliente
+                ,IDFatoControleContratos
+                ,NumeroContrato
+                ,NumeroPrevia
+                ,TextoOriginal
+                ,CriadoEm
+                ,ExpiraEm
+                ,CanceladoEm
+                ,Observacao
+                ,Dias
+                ,ReservaOrdemPrioridade
+                ,IDFatoOcupacaoOrigem
+                ,IDFatoControleContratosItemOrigem
+                ,TipoVinculoOrigem
+            FROM ReservaFilha
+            WHERE rn = 1
+
+            ORDER BY IDItemContrato, OrdemOperacional;
+        """).bindparams(bindparam("ids_itens", expanding=True))
+
+        try:
+            rows_preferencia_operacional = db.session.execute(
+                sql_preferencia_operacional,
+                {
+                    "id_contrato": int(id_contrato),
+                    "ids_itens": ids_itens_preferencia_operacional,
+                },
+            ).mappings().all()
+
+            for row_oper in rows_preferencia_operacional:
+                try:
+                    id_item_oper = int(row_oper.get("IDItemContrato") or 0)
+                except Exception:
+                    id_item_oper = 0
+
+                item_oper = itens_por_id.get(id_item_oper)
+                if not item_oper:
+                    continue
+
+                tipo_oper = str(row_oper.get("TipoOperacional") or "").strip().upper()
+                if tipo_oper not in {"OCUPACAO", "RESERVA"}:
+                    continue
+
+                status_oper = str(row_oper.get("Status") or "").strip().upper()
+                row_dict = dict(row_oper)
+                row_dict["AtivoTexto"] = "Sim" if status_oper in {"ATIVO", "RESERVADO"} else "Não"
+                row_dict["HrefGrade"] = _montar_href_grade_preferencia(
+                    row_oper.get("CodPonto") or item_oper.get("CodPonto"),
+                    row_oper.get("CodFace") or item_oper.get("CodFace"),
+                    row_oper.get("DataInicio") or item_oper.get("DataInicioPrevisto"),
+                    row_oper.get("DataFim") or item_oper.get("DataTerminoPrevisto"),
+                )
+
+                preferencia_operacional = item_oper.setdefault(
+                    "PreferenciaReservaOperacional",
+                    {
+                        "Ocupacao": None,
+                        "Reserva": None,
+                        "QtdRegistros": 0,
+                    },
+                )
+
+                if tipo_oper == "RESERVA":
+                    preferencia_operacional["Reserva"] = row_dict
+                else:
+                    preferencia_operacional["Ocupacao"] = row_dict
+
+                preferencia_operacional["QtdRegistros"] = int(preferencia_operacional.get("QtdRegistros") or 0) + 1
+
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar ocupação/reserva operacional dos itens com preferência | id_contrato=%s",
+                id_contrato,
+            )
 
     diagrama_status = _montar_diagrama_status_contrato_local(
         id_empresa_proprietaria=id_empresa_proprietaria_status,
