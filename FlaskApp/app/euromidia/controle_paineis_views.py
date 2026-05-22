@@ -5328,6 +5328,54 @@ def grade_painel(codponto: int):
         rows = list(rows or [])
         rows.extend(rows_reservas)
 
+    mapa_bit_preferencia_por_item = {}
+    try:
+        ids_itens_grade = []
+        for r_pref in (rows or []):
+            try:
+                id_item_pref = int(r_pref[0]) if r_pref[0] is not None else 0
+            except Exception:
+                id_item_pref = 0
+
+            """Reservas usam ID negativo na grade e não recebem medalha de preferência."""
+            if id_item_pref > 0:
+                ids_itens_grade.append(id_item_pref)
+
+        ids_itens_grade = sorted(list(dict.fromkeys(ids_itens_grade)))
+
+        if ids_itens_grade:
+            sql_bit_preferencia_grade = sql_text("""
+                SELECT
+                    ci.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia,
+                    CASE
+                        WHEN TRY_CONVERT(int, ci.[BitPreferencia]) = 1 THEN 1
+                        ELSE 0
+                    END AS BitPreferencia
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
+            """).bindparams(bindparam("ids_itens_grade", expanding=True))
+
+            rows_bit_preferencia = db.session.execute(
+                sql_bit_preferencia_grade,
+                {"ids_itens_grade": ids_itens_grade},
+            ).mappings().all()
+
+            mapa_bit_preferencia_por_item = {
+                int(row_pref["IDFatoControleContratosItensEuromidia"]): int(row_pref["BitPreferencia"] or 0)
+                for row_pref in (rows_bit_preferencia or [])
+                if row_pref.get("IDFatoControleContratosItensEuromidia") is not None
+            }
+    except Exception as exc:
+        mapa_bit_preferencia_por_item = {}
+        try:
+            current_app.logger.warning(
+                "GRADE_PAINEL | falha ao carregar BitPreferencia dos itens | codponto=%s | erro=%s",
+                codponto,
+                exc,
+            )
+        except Exception:
+            pass
+
     def _limpa_str(x):
         x = (x or "")
         try:
@@ -5596,6 +5644,11 @@ def grade_painel(codponto: int):
             except Exception:
                 id_vendedor_item = None
 
+            try:
+                bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
+            except Exception:
+                bit_preferencia_item = 0
+
             if di is None:
                 continue
 
@@ -5653,6 +5706,7 @@ def grade_painel(codponto: int):
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
                     "IDVendedor": id_vendedor_item,
+                    "BitPreferencia": bit_preferencia_item,
                     "DataInicio": di,
                     "DataFim": df,
                     "DiaInicio": dia_ini,
@@ -5801,6 +5855,11 @@ def grade_painel(codponto: int):
             except Exception:
                 id_vendedor_item = None
 
+            try:
+                bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
+            except Exception:
+                bit_preferencia_item = 0
+
             if di is None:
                 continue
 
@@ -5832,6 +5891,7 @@ def grade_painel(codponto: int):
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
                     "IDVendedor": id_vendedor_item,
+                    "BitPreferencia": bit_preferencia_item,
                     "DataInicio": di,
                     "DataFim": df,
                     "DiaInicio": dia_ini,

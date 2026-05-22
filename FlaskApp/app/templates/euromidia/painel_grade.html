@@ -4,6 +4,7 @@
 
 {% block content %}
 
+  {% set url_icone_preferencia = url_for('static', filename='imagens/MEDALHA PREFERENCIA.png') %}
   {% set return_to_paineis_safe = (return_to_paineis if return_to_paineis is defined and return_to_paineis else url_for('Paineis.lista_paineis')) %}
 
   {% set eh_digital = (tipo_prod or "")|trim|upper == "PAINEL DIGITAL" %}
@@ -2022,6 +2023,19 @@
     white-space: nowrap;
   }
 
+  .barra .icone-preferencia{
+    flex: 0 0 auto;
+    display: inline-block;
+    height: calc(100% - 4px);
+    max-height: 100%;
+    width: auto;
+    aspect-ratio: 1 / 1;
+    object-fit: contain;
+    align-self: center;
+    pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(15,23,42,.22));
+  }
+
   .barra.conflito{ border: 2px solid rgba(220,38,38,.85); }
 
   .barra.multi-span{
@@ -2335,6 +2349,9 @@
                     {% set novo_eh_reserva = (atual.EhReserva if atual.EhReserva is defined else False) %}
                     {% if eh_reserva_item %}{% set novo_eh_reserva = True %}{% endif %}
 
+                    {% set novo_bit_preferencia = ((atual.BitPreferencia if atual.BitPreferencia is defined else 0) | int) %}
+                    {% if it.BitPreferencia is defined and ((it.BitPreferencia | int) == 1) %}{% set novo_bit_preferencia = 1 %}{% endif %}
+
                     {% set nova_cota = (atual.Cota if atual.Cota is defined and atual.Cota is not none and atual.Cota != '' else (it.Cota if it.Cota is defined else '')) %}
 
                     {% set _ = ns.agrupados.update({
@@ -2345,6 +2362,7 @@
                         'BitConflito': novo_conflito,
                         'EhReserva': novo_eh_reserva,
                         'Cota': nova_cota,
+                        'BitPreferencia': novo_bit_preferencia,
 
                         'ID': (atual.ID if atual.ID is defined and atual.ID not in (none, '') else (it.ID if it.ID is defined else '')),
                         'IDFatoControleContratos': (atual.IDFatoControleContratos if atual.IDFatoControleContratos is not none else (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '')),
@@ -2373,6 +2391,7 @@
                         'BitConflito': (True if it.BitConflito else False),
                         'EhReserva': eh_reserva_item,
                         'Cota': (it.Cota if it.Cota is defined else ''),
+                        'BitPreferencia': (it.BitPreferencia if it.BitPreferencia is defined else 0),
 
                         'ID': (it.ID if it.ID is defined else ''),
                         'IDFatoControleContratos': (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else ''),
@@ -2471,6 +2490,8 @@
                   {% endif %}
                 {% endif %}
 
+                {% set mostra_icone_preferencia = ((not eh_reserva) and it.BitPreferencia is defined and ((it.BitPreferencia | int) == 1)) %}
+
                 {% set classes_barra = 'barra' %}
                 {% if eh_reserva %}{% set classes_barra = classes_barra ~ ' reservado' %}{% endif %}
                 {% if it.BitConflito %}{% set classes_barra = classes_barra ~ ' conflito' %}{% endif %}
@@ -2488,6 +2509,7 @@
                      data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                      data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                      data-eh-reserva="{{ 1 if eh_reserva else 0 }}"
+                     data-bit-preferencia="{{ 1 if mostra_icone_preferencia else 0 }}"
                      data-reserva-id="{{ reserva_id_visivel }}"
                      data-item-id="{{ it.ID if it.ID is defined else '' }}"
                      title="{{ ('Reserva #' ~ reserva_id_visivel) if reserva_id_visivel else 'Duplo clique para abrir o contrato' }}"
@@ -2506,6 +2528,10 @@
 
                   {% if (not eh_reserva) and it.Vendedor %}
                     <span class="vend">{{ it.Vendedor }}</span>
+                  {% endif %}
+
+                  {% if mostra_icone_preferencia %}
+                    <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva">
                   {% endif %}
                 </div>
 
@@ -2595,6 +2621,8 @@
                 {% set barra_txt = (it.BarraTexto or (it.MarcaExibida ~ ' - ' ~ it.Vendedor)) %}
               {% endif %}
 
+              {% set mostra_icone_preferencia2 = ((not eh_reserva2) and it.BitPreferencia is defined and ((it.BitPreferencia | int) == 1)) %}
+
               {% set classes_barra2 = 'barra' %}
               {% if it.BitConflito %}{% set classes_barra2 = classes_barra2 ~ ' conflito' %}{% endif %}
               {% if eh_reserva2 %}{% set classes_barra2 = classes_barra2 ~ ' reservado' %}{% endif %}
@@ -2608,6 +2636,7 @@
                    data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                    data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                    data-eh-reserva="{{ 1 if eh_reserva2 else 0 }}"
+                   data-bit-preferencia="{{ 1 if mostra_icone_preferencia2 else 0 }}"
                    data-reserva-id="{{ reserva_id_visivel2 }}"
                    data-item-id="{{ it.ID if it.ID is defined else '' }}"
                    title="{{ ('Reserva #' ~ reserva_id_visivel2) if reserva_id_visivel2 else 'Duplo clique para abrir o contrato' }}"
@@ -2618,6 +2647,9 @@
                    data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
                    data-tooltip-txt="{{ it.TextoOriginal|e }}">
                 <span class="txt">{{ txt2 if eh_reserva2 else barra_txt }}</span>
+                {% if mostra_icone_preferencia2 %}
+                  <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva">
+                {% endif %}
               </div>
             {% endfor %}
           </div>
