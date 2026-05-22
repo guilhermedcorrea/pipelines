@@ -638,6 +638,274 @@
       align-items:center;
     }
 
+    .item-agendamento-toggle{
+      position:relative;
+      min-height:38px;
+      padding:6px 14px 6px 8px;
+      border-radius:999px;
+      border:1px solid rgba(100,116,139,.28);
+      background:#ffffff;
+      color:#475569;
+      font-weight:900;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      box-shadow:0 6px 14px rgba(2,6,23,.05);
+      transition:background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+      user-select:none;
+      white-space:nowrap;
+    }
+
+    .item-agendamento-toggle::before{
+      content:"";
+      width:46px;
+      height:24px;
+      border-radius:999px;
+      flex:0 0 46px;
+      background:#cbd5e1;
+      box-shadow:inset 0 1px 3px rgba(15,23,42,.18);
+      transition:background .18s ease;
+    }
+
+    .item-agendamento-toggle::after{
+      content:"";
+      position:absolute;
+      width:18px;
+      height:18px;
+      border-radius:999px;
+      background:#ffffff;
+      transform:translateX(3px);
+      box-shadow:0 2px 6px rgba(15,23,42,.24);
+      transition:transform .18s ease;
+      pointer-events:none;
+    }
+
+    .item-agendamento-toggle.is-active{
+      border-color:#60a5fa;
+      background:#eff6ff;
+      color:#0b3294;
+      box-shadow:0 8px 18px rgba(37,99,235,.10);
+    }
+
+    .item-agendamento-toggle.is-active::before{
+      background:#2563eb;
+    }
+
+    .item-agendamento-toggle.is-active::after{
+      transform:translateX(25px);
+    }
+
+    .item-agendamento-toggle-text{
+      display:inline-flex;
+      flex-direction:column;
+      align-items:flex-start;
+      gap:1px;
+      line-height:1.05;
+    }
+
+    .item-agendamento-toggle-text strong{
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .item-agendamento-toggle-text small{
+      font-size:10px;
+      font-weight:900;
+      color:#64748b;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+    }
+
+    .item-agendamento-toggle.is-active .item-agendamento-toggle-text small{
+      color:#2563eb;
+    }
+
+    .agendamento-face-card{
+      display:none;
+      border:1px solid #cfe1ff;
+      border-radius:16px;
+      background:linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+      overflow:hidden;
+      box-shadow:0 10px 22px rgba(2,6,23,.05);
+    }
+
+    .agendamento-face-card.is-visible{
+      display:block;
+    }
+
+    .agendamento-face-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      padding:14px 16px;
+      border-bottom:1px solid #dbeafe;
+      background:#eff6ff;
+    }
+
+    .agendamento-face-title{
+      color:var(--euro-blue);
+      font-weight:900;
+      font-size:15px;
+    }
+
+    .agendamento-face-subtitle{
+      color:#475569;
+      font-weight:700;
+      font-size:12px;
+      margin-top:3px;
+    }
+
+    .agendamento-face-body{
+      padding:14px 16px 16px 16px;
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+
+    .agendamento-controles{
+      display:grid;
+      grid-template-columns:220px 220px minmax(160px, 1fr);
+      gap:12px;
+      align-items:end;
+    }
+
+    .agendamento-tipo-fixo{
+      width:100%;
+      min-height:42px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#f8fafc;
+      padding:10px 12px;
+      color:#0f172a;
+      font-weight:900;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+    }
+
+    .agendamento-tipo-fixo::after{
+      content:"Fixo";
+      font-size:11px;
+      font-weight:900;
+      color:#2563eb;
+      border:1px solid #bfdbfe;
+      background:#eff6ff;
+      border-radius:999px;
+      padding:3px 8px;
+    }
+
+    .agendamento-tabela-wrap{
+      border:1px solid #e2e8f0;
+      border-radius:14px;
+      overflow:auto;
+      background:#ffffff;
+    }
+
+    .agendamento-tabela{
+      width:100%;
+      border-collapse:collapse;
+      min-width:860px;
+    }
+
+    .agendamento-tabela th,
+    .agendamento-tabela td{
+      padding:10px 12px;
+      border-bottom:1px solid #e2e8f0;
+      text-align:left;
+      vertical-align:middle;
+      font-size:12px;
+    }
+
+    .agendamento-tabela th{
+      background:#f8fafc;
+      color:#475569;
+      font-weight:900;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      white-space:nowrap;
+    }
+
+    .agendamento-tabela td{
+      color:#0f172a;
+      font-weight:800;
+    }
+
+    .agendamento-tabela tr:last-child td{
+      border-bottom:none;
+    }
+
+    .agendamento-tabela input,
+    .agendamento-tabela select{
+      width:100%;
+      min-height:34px;
+      border:1px solid #dbe3ef;
+      border-radius:10px;
+      background:#fff;
+      padding:7px 9px;
+      color:#0f172a;
+      font-weight:800;
+      outline:none;
+    }
+
+    .agendamento-tabela input[readonly]{
+      background:#f8fafc;
+      color:#475569;
+    }
+
+
+    .agendamento-tabela tr.agendamento-linha-restante td{
+      background:#fff7ed;
+      border-top:1px solid #fed7aa;
+      border-bottom:1px solid #fed7aa;
+    }
+
+    .agendamento-restante-tag{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      margin-left:8px;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid #fdba74;
+      background:#ffedd5;
+      color:#9a3412;
+      font-size:10px;
+      font-weight:900;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      white-space:nowrap;
+    }
+
+    .agendamento-ajuda-restante{
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid #fed7aa;
+      background:#fff7ed;
+      color:#9a3412;
+      font-size:12px;
+      font-weight:800;
+      line-height:1.45;
+      display:none;
+    }
+
+    .agendamento-ajuda-restante.is-visible{
+      display:block;
+    }
+
+    .agendamento-vazio{
+      padding:12px 14px;
+      border:1px dashed #cbd5e1;
+      border-radius:14px;
+      background:#f8fafc;
+      color:#64748b;
+      font-size:13px;
+      font-weight:800;
+    }
+
     .item-body{
       padding:16px;
       display:flex;
@@ -1107,8 +1375,15 @@
         {% if itens and itens|length > 0 %}
           {% for item in itens %}
             <input type="hidden" name="item_id" value="{{ item.IDFatoSolicitacaoContratoItemEuromidia }}">
+            <input type="hidden"
+                   name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__IDFatoControleContratosItensEuromidia"
+                   value="{{ item.IDFatoControleContratosItensEuromidia or '' }}">
 
-            <div class="item-card">
+            <div class="item-card"
+                 data-item-card
+                 data-item-id="{{ item.IDFatoSolicitacaoContratoItemEuromidia }}"
+                 data-data-inicio="{{ item.DataInicioPrevistoInput or '' }}"
+                 data-data-termino="{{ item.DataTerminoPrevistoInput or '' }}">
               <div class="item-head">
                 <div>
                   <h3 class="item-title">
@@ -1120,6 +1395,16 @@
                 </div>
 
                 <div class="item-meta">
+                  <button
+                    type="button"
+                    class="item-agendamento-toggle {% if item.TemAgendamentoFaceContrato %}is-active{% endif %}"
+                    data-role="toggle-agendamento-face"
+                    aria-expanded="{{ 'true' if item.TemAgendamentoFaceContrato else 'false' }}">
+                    <span class="item-agendamento-toggle-text">
+                      <strong>Dividir Ocupação em Períodos</strong>
+                      <small data-role="toggle-agendamento-status">{{ 'Ativado' if item.TemAgendamentoFaceContrato else 'Desativado' }}</small>
+                    </span>
+                  </button>
                   <span class="badge neutral">CodPonto {{ item.CodPonto or "—" }}</span>
                   <span class="badge neutral">CodFace {{ item.CodFace or "—" }}</span>
                   <span class="badge">{{ item.Status or "SEM STATUS" }}</span>
@@ -1149,6 +1434,123 @@
                   <div class="painel-box">
                     <div class="k">Local referência</div>
                     <div class="v">{{ item.LogradouroPainelCadastro or item.BairroPainelCadastro or item.ReferenciaPainelCadastro or "—" }}</div>
+                  </div>
+                </div>
+
+                <div class="agendamento-face-card {% if item.TemAgendamentoFaceContrato %}is-visible{% endif %}" data-role="agendamento-face-card">
+                  <div class="agendamento-face-head">
+                    <div>
+                      <div class="agendamento-face-title">Divisão da ocupação em períodos</div>
+                      <div class="agendamento-face-subtitle">
+                        Configure apenas quando esta face precisar ser dividida em ordens/períodos.
+                      </div>
+                    </div>
+                    <span class="badge neutral" data-role="agendamento-resumo">{% if item.TemAgendamentoFaceContrato %}{{ item.QuantidadeAgendamentosFaceContrato }} período(s) configurado(s){% else %}Sem períodos gerados{% endif %}</span>
+                  </div>
+
+                  <div class="agendamento-face-body">
+                    <input
+                      type="hidden"
+                      data-role="agendamento-ativo"
+                      name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DividirOcupacaoPeriodos"
+                      value="{{ '1' if item.TemAgendamentoFaceContrato else '0' }}">
+
+                    <input
+                      type="hidden"
+                      name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__QuantidadePeriodosOcupacao"
+                      value="{{ item.QuantidadeAgendamentosFaceContrato if item.TemAgendamentoFaceContrato else 0 }}"
+                      data-role="agendamento-quantidade-total">
+
+                    <div class="agendamento-controles">
+                      <div class="field">
+                        <label>Tipo de divisão</label>
+                        <input
+                          type="hidden"
+                          name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__TipoDivisaoOcupacao"
+                          value="MENSAL"
+                          data-role="agendamento-tipo-divisao">
+                        <div class="agendamento-tipo-fixo">Mensal</div>
+                      </div>
+
+                      <div class="field">
+                        <label>Quantidade</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="120"
+                          step="1"
+                          placeholder="Ex: 12"
+                          name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__QuantidadePeriodosOcupacaoBase"
+                          value="{{ item.QuantidadeAgendamentosFaceContrato if item.TemAgendamentoFaceContrato else '' }}"
+                          data-role="agendamento-quantidade">
+                      </div>
+
+                      <div class="field">
+                        <label>Ação</label>
+                        <button type="button" class="btn-x primary" data-role="gerar-periodos-ocupacao">
+                          Gerar períodos
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="agendamento-vazio" data-role="agendamento-vazio" style="display:{{ 'none' if item.TemAgendamentoFaceContrato else 'block' }};">
+                      Informe a quantidade de períodos para gerar a grade.
+                    </div>
+
+                    <div class="agendamento-tabela-wrap" data-role="agendamento-tabela-wrap" style="display:{{ 'block' if item.TemAgendamentoFaceContrato else 'none' }};">
+                      <table class="agendamento-tabela">
+                        <thead>
+                          <tr>
+                            <th style="width:80px;">Ordem</th>
+                            <th style="width:150px;">Data Início</th>
+                            <th style="width:150px;">Data Término</th>
+                            <th style="width:130px;">Qtd. Dias</th>
+                            <th style="width:150px;">Situação</th>
+                            <th>Referência</th>
+                          </tr>
+                        </thead>
+                        <tbody data-role="agendamento-tbody">
+                          {% for ag in item.AgendamentosFaceContrato %}
+                            {% set ordem_ag = ag.Sequencia or loop.index %}
+                            {% set nome_ag = 'item_' ~ item.IDFatoSolicitacaoContratoItemEuromidia ~ '__Agendamento_' ~ ordem_ag %}
+                            <tr class="{% if ag.EhPeriodoRestante %}agendamento-linha-restante{% endif %}">
+                              <td>
+                                {{ ordem_ag }}
+                                {% if ag.EhPeriodoRestante %}<span class="agendamento-restante-tag">Restante</span>{% endif %}
+                                <input type="hidden" name="{{ nome_ag }}__Ordem" value="{{ ordem_ag }}">
+                                <input type="hidden" name="{{ nome_ag }}__QuantidadeTotal" value="{{ item.QuantidadeAgendamentosFaceContrato }}">
+                              </td>
+                              <td>
+                                <input type="date" name="{{ nome_ag }}__DataInicio" value="{{ ag.DataInicioInput or '' }}" readonly>
+                              </td>
+                              <td>
+                                <input type="date" name="{{ nome_ag }}__DataTermino" value="{{ ag.DataTerminoInput or '' }}" readonly>
+                              </td>
+                              <td>
+                                <input type="text" name="{{ nome_ag }}__QuantidadeDias" value="{{ ag.QuantidadeDias or '' }}" readonly>
+                              </td>
+                              <td>
+                                <select name="{{ nome_ag }}__Situacao">
+                                  <option value="PROGRAMADO" {{ 'selected' if ag.Situacao == 'PROGRAMADO' else '' }}>PROGRAMADO</option>
+                                  <option value="ATIVO" {{ 'selected' if ag.Situacao == 'ATIVO' else '' }}>ATIVO</option>
+                                  <option value="CONCLUIDO" {{ 'selected' if ag.Situacao == 'CONCLUIDO' else '' }}>CONCLUÍDO</option>
+                                  <option value="CANCELADO" {{ 'selected' if ag.Situacao == 'CANCELADO' else '' }}>CANCELADO</option>
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  type="text"
+                                  name="{{ nome_ag }}__Referencia"
+                                  data-role="agendamento-referencia"
+                                  data-ordem="{{ ordem_ag }}"
+                                  value="{{ ag.Referencia or '' }}"
+                                  placeholder="Digite uma referência opcional">
+                              </td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
 
@@ -1266,5 +1668,323 @@
       </div>
     </div>
   </form>
+  <script>
+    (function(){
+      function parseIsoDate(valor){
+        if(!valor){ return null; }
+        const partes = String(valor).split("-");
+        if(partes.length !== 3){ return null; }
+
+        const ano = Number(partes[0]);
+        const mes = Number(partes[1]);
+        const dia = Number(partes[2]);
+
+        if(!ano || !mes || !dia){ return null; }
+
+        const data = new Date(ano, mes - 1, dia);
+        if(Number.isNaN(data.getTime())){ return null; }
+
+        return data;
+      }
+
+      function formatarIsoDate(data){
+        const ano = data.getFullYear();
+        const mes = String(data.getMonth() + 1).padStart(2, "0");
+        const dia = String(data.getDate()).padStart(2, "0");
+        return `${ano}-${mes}-${dia}`;
+      }
+
+      function formatarDataBR(data){
+        const dia = String(data.getDate()).padStart(2, "0");
+        const mes = String(data.getMonth() + 1).padStart(2, "0");
+        const ano = data.getFullYear();
+        return `${dia}/${mes}/${ano}`;
+      }
+
+      function adicionarMeses(data, quantidadeMeses){
+        const novaData = new Date(data.getTime());
+        const diaOriginal = novaData.getDate();
+
+        novaData.setDate(1);
+        novaData.setMonth(novaData.getMonth() + quantidadeMeses);
+
+        const ultimoDiaMes = new Date(novaData.getFullYear(), novaData.getMonth() + 1, 0).getDate();
+        novaData.setDate(Math.min(diaOriginal, ultimoDiaMes));
+
+        return novaData;
+      }
+
+      function adicionarDias(data, quantidadeDias){
+        const novaData = new Date(data.getTime());
+        novaData.setDate(novaData.getDate() + quantidadeDias);
+        return novaData;
+      }
+
+      function diferencaDiasInclusiva(dataInicio, dataTermino){
+        const msPorDia = 24 * 60 * 60 * 1000;
+        const inicioUtc = Date.UTC(dataInicio.getFullYear(), dataInicio.getMonth(), dataInicio.getDate());
+        const terminoUtc = Date.UTC(dataTermino.getFullYear(), dataTermino.getMonth(), dataTermino.getDate());
+        return Math.floor((terminoUtc - inicioUtc) / msPorDia) + 1;
+      }
+
+      function obterValorCampoData(itemCard, sufixoCampo, fallbackDataset){
+        const itemId = itemCard.dataset.itemId;
+        const seletor = `[name="item_${itemId}__${sufixoCampo}"]`;
+        const campo = itemCard.querySelector(seletor);
+
+        if(campo && campo.value){
+          return campo.value;
+        }
+
+        return itemCard.dataset[fallbackDataset] || "";
+      }
+
+      function criarInputOculto(nome, valor){
+        const input = document.createElement("input");
+        input.type = "hidden";
+        input.name = nome;
+        input.value = valor;
+        return input;
+      }
+
+      function montarLinhaPeriodo(itemId, ordem, inicio, termino, referenciaValor, restante, quantidadeTotal){
+        const qtdDias = diferencaDiasInclusiva(inicio, termino);
+        const linha = document.createElement("tr");
+        if(restante){
+          linha.classList.add("agendamento-linha-restante");
+        }
+
+        const nomeBase = `item_${itemId}__Agendamento_${ordem}`;
+        const badgeRestante = restante ? '<span class="agendamento-restante-tag">Restante</span>' : '';
+
+        linha.innerHTML = `
+          <td>
+            ${ordem} ${badgeRestante}
+            <input type="hidden" name="${nomeBase}__Ordem" value="${ordem}">
+            <input type="hidden" name="${nomeBase}__QuantidadeTotal" value="${quantidadeTotal}">
+            <input type="hidden" name="${nomeBase}__TipoPeriodo" value="${restante ? "RESTANTE" : "MENSAL"}">
+          </td>
+          <td>
+            <input type="date" name="${nomeBase}__DataInicio" value="${formatarIsoDate(inicio)}" readonly>
+          </td>
+          <td>
+            <input type="date" name="${nomeBase}__DataTermino" value="${formatarIsoDate(termino)}" readonly>
+          </td>
+          <td>
+            <input type="text" name="${nomeBase}__QuantidadeDias" value="${qtdDias}" readonly>
+          </td>
+          <td>
+            <select name="${nomeBase}__Situacao">
+              <option value="PROGRAMADO" selected>PROGRAMADO</option>
+              <option value="ATIVO">ATIVO</option>
+              <option value="CONCLUIDO">CONCLUÍDO</option>
+              <option value="CANCELADO">CANCELADO</option>
+            </select>
+          </td>
+          <td>
+            <input
+              type="text"
+              name="${nomeBase}__Referencia"
+              data-role="agendamento-referencia"
+              data-ordem="${ordem}"
+              value="${referenciaValor || ""}"
+              placeholder="Digite uma referência opcional">
+          </td>
+        `;
+
+        return linha;
+      }
+
+      function gerarPeriodos(itemCard){
+        const itemId = itemCard.dataset.itemId;
+        const campoQuantidade = itemCard.querySelector('[data-role="agendamento-quantidade"]');
+        const campoQuantidadeTotal = itemCard.querySelector('[data-role="agendamento-quantidade-total"]');
+        const tbody = itemCard.querySelector('[data-role="agendamento-tbody"]');
+        const tabelaWrap = itemCard.querySelector('[data-role="agendamento-tabela-wrap"]');
+        const vazio = itemCard.querySelector('[data-role="agendamento-vazio"]');
+        const resumo = itemCard.querySelector('[data-role="agendamento-resumo"]');
+        const ajudaRestante = itemCard.querySelector('[data-role="agendamento-ajuda-restante"]');
+
+        if(!campoQuantidade || !tbody || !tabelaWrap || !vazio){ return; }
+
+        const quantidadeSolicitada = Number(campoQuantidade.value || 0);
+        const dataInicioValor = obterValorCampoData(itemCard, "DataInicioPrevisto", "dataInicio");
+        const dataTerminoValor = obterValorCampoData(itemCard, "DataTerminoPrevisto", "dataTermino");
+
+        const dataInicioOriginal = parseIsoDate(dataInicioValor);
+        const dataTerminoOriginal = parseIsoDate(dataTerminoValor);
+
+        tbody.innerHTML = "";
+        if(campoQuantidadeTotal){ campoQuantidadeTotal.value = "0"; }
+        if(ajudaRestante){ ajudaRestante.classList.remove("is-visible"); }
+
+        if(!quantidadeSolicitada || quantidadeSolicitada < 1){
+          tabelaWrap.style.display = "none";
+          vazio.style.display = "block";
+          vazio.textContent = "Informe a quantidade de períodos para gerar a grade.";
+          if(resumo){ resumo.textContent = "Sem períodos gerados"; }
+          return;
+        }
+
+        if(!dataInicioOriginal || !dataTerminoOriginal){
+          tabelaWrap.style.display = "none";
+          vazio.style.display = "block";
+          vazio.textContent = "Preencha Data Início Previsto e Data Término Previsto do item antes de gerar os períodos.";
+          if(resumo){ resumo.textContent = "Datas do item não preenchidas"; }
+          return;
+        }
+
+        if(dataTerminoOriginal < dataInicioOriginal){
+          tabelaWrap.style.display = "none";
+          vazio.style.display = "block";
+          vazio.textContent = "A Data Término Previsto precisa ser maior ou igual à Data Início Previsto.";
+          if(resumo){ resumo.textContent = "Período inválido"; }
+          return;
+        }
+
+        const referenciasAtuais = {};
+        itemCard.querySelectorAll('[data-role="agendamento-referencia"]').forEach(function(inputReferencia){
+          referenciasAtuais[inputReferencia.dataset.ordem] = inputReferencia.value || "";
+        });
+
+        const periodos = [];
+        let ultimoTerminoGerado = null;
+
+        for(let indice = 0; indice < quantidadeSolicitada; indice++){
+          const ordem = indice + 1;
+          const inicio = adicionarMeses(dataInicioOriginal, indice);
+
+          if(inicio > dataTerminoOriginal){
+            break;
+          }
+
+          let termino = adicionarDias(adicionarMeses(dataInicioOriginal, indice + 1), -1);
+          if(termino > dataTerminoOriginal){
+            termino = new Date(dataTerminoOriginal.getTime());
+          }
+
+          periodos.push({
+            ordem: ordem,
+            inicio: inicio,
+            termino: termino,
+            restante: false
+          });
+
+          ultimoTerminoGerado = termino;
+
+          if(termino >= dataTerminoOriginal){
+            break;
+          }
+        }
+
+        let gerouRestante = false;
+        if(ultimoTerminoGerado && ultimoTerminoGerado < dataTerminoOriginal){
+          const inicioRestante = adicionarDias(ultimoTerminoGerado, 1);
+          if(inicioRestante <= dataTerminoOriginal){
+            periodos.push({
+              ordem: periodos.length + 1,
+              inicio: inicioRestante,
+              termino: new Date(dataTerminoOriginal.getTime()),
+              restante: true
+            });
+            gerouRestante = true;
+          }
+        }
+
+        const quantidadeTotalGerada = periodos.length;
+
+        periodos.forEach(function(periodo){
+          const linha = montarLinhaPeriodo(
+            itemId,
+            periodo.ordem,
+            periodo.inicio,
+            periodo.termino,
+            referenciasAtuais[String(periodo.ordem)] || "",
+            periodo.restante,
+            quantidadeTotalGerada
+          );
+          tbody.appendChild(linha);
+        });
+
+        if(campoQuantidadeTotal){
+          campoQuantidadeTotal.value = String(quantidadeTotalGerada);
+        }
+
+        if(quantidadeTotalGerada > 0){
+          tabelaWrap.style.display = "block";
+          vazio.style.display = "none";
+
+          if(resumo){
+            resumo.textContent = gerouRestante
+              ? `${quantidadeTotalGerada} período(s) gerado(s): ${quantidadeSolicitada} mensal(is) + restante`
+              : `${quantidadeTotalGerada} período(s) gerado(s)`;
+          }
+
+          if(ajudaRestante){
+            ajudaRestante.classList.toggle("is-visible", gerouRestante);
+          }
+        }else{
+          tabelaWrap.style.display = "none";
+          vazio.style.display = "block";
+          vazio.textContent = "Nenhum período foi gerado. Verifique as datas do item.";
+          if(resumo){ resumo.textContent = "Nenhum período gerado"; }
+        }
+      }
+
+      document.querySelectorAll("[data-item-card]").forEach(function(itemCard){
+        const botaoToggle = itemCard.querySelector('[data-role="toggle-agendamento-face"]');
+        const cardAgendamento = itemCard.querySelector('[data-role="agendamento-face-card"]');
+        const campoAtivo = itemCard.querySelector('[data-role="agendamento-ativo"]');
+        const campoQuantidade = itemCard.querySelector('[data-role="agendamento-quantidade"]');
+        const botaoGerar = itemCard.querySelector('[data-role="gerar-periodos-ocupacao"]');
+        const textoStatusToggle = itemCard.querySelector('[data-role="toggle-agendamento-status"]');
+
+        if(!botaoToggle || !cardAgendamento){ return; }
+
+        botaoToggle.addEventListener("click", function(){
+          const ativo = !cardAgendamento.classList.contains("is-visible");
+
+          cardAgendamento.classList.toggle("is-visible", ativo);
+          botaoToggle.classList.toggle("is-active", ativo);
+          botaoToggle.setAttribute("aria-expanded", ativo ? "true" : "false");
+
+          if(campoAtivo){
+            campoAtivo.value = ativo ? "1" : "0";
+          }
+
+          if(textoStatusToggle){
+            textoStatusToggle.textContent = ativo ? "Ativado" : "Desativado";
+          }
+
+          if(ativo && campoQuantidade && campoQuantidade.value){
+            gerarPeriodos(itemCard);
+          }
+        });
+
+        if(botaoGerar){
+          botaoGerar.addEventListener("click", function(){
+            gerarPeriodos(itemCard);
+          });
+        }
+
+        if(campoQuantidade){
+          campoQuantidade.addEventListener("input", function(){
+            if(cardAgendamento.classList.contains("is-visible")){
+              gerarPeriodos(itemCard);
+            }
+          });
+        }
+
+        itemCard.querySelectorAll('[name$="__DataInicioPrevisto"], [name$="__DataTerminoPrevisto"]').forEach(function(campoData){
+          campoData.addEventListener("change", function(){
+            if(cardAgendamento.classList.contains("is-visible") && campoQuantidade && campoQuantidade.value){
+              gerarPeriodos(itemCard);
+            }
+          });
+        });
+      });
+    })();
+  </script>
+
 </div>
 {% endblock %}

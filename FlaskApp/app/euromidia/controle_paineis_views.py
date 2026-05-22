@@ -19571,6 +19571,10 @@ def api_ocupacao_reserva_criar():
   
     marca_exibida = (payload.get("marca_exibida") or request.form.get("marca_exibida") or "").strip()
 
+    empresas_relacionadas_raw = payload.get("empresas_relacionadas")
+    if empresas_relacionadas_raw is None:
+        empresas_relacionadas_raw = request.form.get("empresas_relacionadas")
+
     if not cod_ponto:
         return jsonify({"ok": False, "erro": "cod_ponto obrigatório"}), 400
     if not cod_face:
@@ -19725,6 +19729,135 @@ def api_ocupacao_reserva_criar():
 
     if id_cliente_int is None:
         return jsonify({"ok": False, "erro": "Não foi possível resolver IDEmpresa (IDCliente). Envie id_cliente (IDEmpresa) ou cnpj_cliente válido."}), 400
+
+    def _normalizar_empresas_relacionadas_reserva(valor_bruto, marca_padrao: str):
+        # Eu valido e normalizo as empresas relacionadas opcionais da reserva.
+        if valor_bruto in (None, "", [], (), {}):
+            return []
+
+        if isinstance(valor_bruto, str):
+            texto_bruto = valor_bruto.strip()
+            if not texto_bruto:
+                return []
+            try:
+                valor_bruto = json.loads(texto_bruto)
+            except Exception:
+                raise ValueError("empresas_relacionadas inválido. Envie uma lista JSON.")
+
+        if not isinstance(valor_bruto, list):
+            raise ValueError("empresas_relacionadas deve ser uma lista.")
+
+        itens_normalizados = []
+        ids_vistos = set()
+
+        for idx, item in enumerate(valor_bruto, start=1):
+            if not isinstance(item, dict):
+                continue
+
+            id_raw = item.get("id_empresa") or item.get("IDEmpresa") or item.get("id_cliente") or item.get("IDCliente")
+            if id_raw in (None, "", "null", "None"):
+                continue
+
+            try:
+                id_empresa = int(id_raw)
+            except Exception:
+                raise ValueError(f"Empresa relacionada #{idx}: id_empresa inválido.")
+
+            if id_empresa <= 0:
+                continue
+
+            if id_empresa in ids_vistos:
+                continue
+
+            marca_relacionada = str(item.get("marca") or item.get("Marca") or "").strip()
+            if not marca_relacionada:
+                marca_relacionada = marca_padrao
+
+            if len(marca_relacionada) > 200:
+                raise ValueError(f"Empresa relacionada #{idx}: marca excede 200 caracteres.")
+
+            ids_vistos.add(id_empresa)
+            itens_normalizados.append({
+                "id_empresa": id_empresa,
+                "marca": marca_relacionada,
+            })
+
+        if not itens_normalizados:
+            return []
+
+        ids_sql = ",".join(str(int(item["id_empresa"])) for item in itens_normalizados)
+        sql_empresas_relacionadas = text(f"""
+            SELECT
+                 IDEmpresa
+                ,RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(RazaoSocial, ''))), '')
+                ,NomeFantasia = NULLIF(LTRIM(RTRIM(COALESCE(NomeFantasia, ''))), '')
+                ,CNPJ = NULLIF(LTRIM(RTRIM(COALESCE(CAST(CNPJ AS varchar(30)), ''))), '')
+            FROM [Integracao].[Silver].[DimEmpresas]
+            WHERE IDEmpresa IN ({ids_sql})
+        """)
+
+        rows = db.session.execute(sql_empresas_relacionadas).mappings().all()
+        empresas_por_id = {int(row.get("IDEmpresa") or 0): row for row in rows}
+
+        retorno = []
+        for item in itens_normalizados:
+            id_empresa = int(item["id_empresa"])
+            empresa = empresas_por_id.get(id_empresa)
+            if not empresa:
+                raise ValueError(f"Empresa relacionada IDEmpresa={id_empresa} não encontrada.")
+
+            retorno.append({
+                "id_empresa": id_empresa,
+                "razao_social": (empresa.get("RazaoSocial") or empresa.get("NomeFantasia") or "").strip(),
+                "nome_fantasia": (empresa.get("NomeFantasia") or "").strip(),
+                "cnpj": (empresa.get("CNPJ") or "").strip(),
+                "marca": item["marca"],
+            })
+
+        return retorno
+
+    try:
+        empresas_relacionadas = _normalizar_empresas_relacionadas_reserva(empresas_relacionadas_raw, marca_exibida)
+    except ValueError as exc:
+        return jsonify({"ok": False, "erro": str(exc)}), 400
+
+    criado_por = _id_usuario_logado_carteira()
+
+    def _montar_texto_original_reserva(id_usuario: int, empresas_relacionadas_normalizadas: list[dict]) -> str:
+        """Eu monto um TextoOriginal legível, sem gravar dict/JSON."""
+        id_usuario_txt = str(id_usuario) if id_usuario else "não identificado"
+        partes = [
+            "Reserva Criada",
+            f"ID Usuário: {id_usuario_txt}",
+        ]
+
+        if not empresas_relacionadas_normalizadas:
+            partes.append("Empresas Relacionadas: Não informado")
+            return " - ".join(partes)[:1000]
+
+        itens_empresas = []
+        for empresa in empresas_relacionadas_normalizadas:
+            id_empresa = int(empresa.get("id_empresa") or 0)
+            nome_empresa = (
+                str(empresa.get("razao_social") or "").strip()
+                or str(empresa.get("nome_fantasia") or "").strip()
+                or f"IDEmpresa {id_empresa}"
+            )
+            cnpj_empresa = str(empresa.get("cnpj") or "").strip()
+            marca_relacionada = str(empresa.get("marca") or marca_exibida or "").strip()
+
+            texto_empresa = f"Empresa relacionada: {nome_empresa}"
+            if cnpj_empresa:
+                texto_empresa += f" - CNPJ: {cnpj_empresa}"
+            if marca_relacionada:
+                texto_empresa += f" - Marca relacionada: {marca_relacionada}"
+
+            itens_empresas.append(texto_empresa)
+
+        partes.append("Empresas Relacionadas: " + "; ".join(itens_empresas))
+        return " - ".join(partes)[:1000]
+
+    texto_original_reserva = _montar_texto_original_reserva(criado_por, empresas_relacionadas)
 
 
     sql_cap = text("""
@@ -19931,10 +20064,6 @@ def api_ocupacao_reserva_criar():
             # AGORA: entra em FILA
             sem_capacidade = True
 
-    criado_por = _id_usuario_logado_carteira()
-
-
-
     reserva_ordem_prioridade_int = 1
 
     if sem_capacidade:
@@ -19977,6 +20106,12 @@ def api_ocupacao_reserva_criar():
 
 
     sql_insert = text("""
+        SET NOCOUNT ON;
+
+        DECLARE @ReservasInseridas TABLE (
+            IDFatoOcupacaoPaineisEuromidia int NOT NULL
+        );
+
         INSERT INTO [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] (
             DataAtualizacao,
             Referencia,
@@ -19996,13 +20131,18 @@ def api_ocupacao_reserva_criar():
             IDFatoControleContratos,
             NumeroContrato,
             NumeroPrevia,
+            TextoOriginal,
             Observacao,
             Dias,
             ExpiraEm,
             CriadoEm,
             CriadoPorIDUsuario,
-            ReservaOrdemPrioridade
+            ReservaOrdemPrioridade,
+            TipoVinculoOrigem,
+            BitEmpresasRelacionadas
         )
+        OUTPUT INSERTED.IDFatoOcupacaoPaineisEuromidia
+        INTO @ReservasInseridas (IDFatoOcupacaoPaineisEuromidia)
         VALUES (
             SYSDATETIME(),
             CONVERT(varchar(64),
@@ -20038,17 +20178,24 @@ def api_ocupacao_reserva_criar():
             :id_fato_controle,
             NULLIF(LTRIM(RTRIM(:numero_contrato)), ''),
             NULLIF(LTRIM(RTRIM(:numero_previa)), ''),
+            :texto_original,
             NULLIF(LTRIM(RTRIM(:observacao)), ''),
             :dias,
             :expira_em,
             SYSDATETIME(),
             :criado_por,
-            :reserva_ordem_prioridade
-        )
+            :reserva_ordem_prioridade,
+            :tipo_vinculo_origem,
+            :bit_empresas_relacionadas
+        );
+
+        SELECT TOP (1)
+            IDFatoOcupacaoPaineisEuromidia
+        FROM @ReservasInseridas;
     """)
 
     try:
-        db.session.execute(sql_insert, {
+        id_fato_ocupacao = db.session.execute(sql_insert, {
             "cod_ponto": cod_ponto_int,
             "cod_face": cod_face,
             "id_painel": id_painel_int,
@@ -20063,18 +20210,61 @@ def api_ocupacao_reserva_criar():
             "id_fato_controle": id_fato_controle_int,
             "numero_contrato": numero_contrato,
             "numero_previa": numero_previa,
+            "texto_original": texto_original_reserva,
             "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
             "dias": dias_int,
             "expira_em": expira_em_reserva,
             "criado_por": criado_por,
-            "reserva_ordem_prioridade": reserva_ordem_prioridade_int
-        })
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        return jsonify({"ok": False, "erro": "Erro ao inserir reserva na tabela"}), 500
+            "reserva_ordem_prioridade": reserva_ordem_prioridade_int,
+            "tipo_vinculo_origem": "Reserva",
+            "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0
+        }).scalar_one()
 
-    return jsonify({"ok": True})
+        id_fato_ocupacao_int = int(id_fato_ocupacao)
+
+        if empresas_relacionadas:
+            sql_insert_empresas_relacionadas = text("""
+                INSERT INTO [Integracao].[Silver].[DimEmpresasRelacionadasContrato] (
+                    IDFatoControleContratosEuromidia,
+                    IDempresa,
+                    IDFatoOcupacaoPaineisEuromidia,
+                    Marca
+                )
+                VALUES (
+                    :id_fato_controle_contratos,
+                    :id_empresa,
+                    :id_fato_ocupacao,
+                    :marca
+                )
+            """)
+
+            linhas_empresas_relacionadas = [
+                {
+                    "id_fato_controle_contratos": id_fato_controle_int,
+                    "id_empresa": int(item["id_empresa"]),
+                    "id_fato_ocupacao": id_fato_ocupacao_int,
+                    "marca": str(item.get("marca") or marca_exibida).strip()[:200],
+                }
+                for item in empresas_relacionadas
+            ]
+
+            db.session.execute(
+                sql_insert_empresas_relacionadas,
+                linhas_empresas_relacionadas,
+            )
+
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Erro ao inserir reserva de ocupação e empresas relacionadas.")
+        return jsonify({"ok": False, "erro": f"Erro ao inserir reserva na tabela: {exc}"}), 500
+
+    return jsonify({
+        "ok": True,
+        "id_fato_ocupacao_paineis_euromidia": id_fato_ocupacao_int,
+        "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0,
+        "qtd_empresas_relacionadas": len(empresas_relacionadas),
+    })
 
 
 

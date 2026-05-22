@@ -323,6 +323,129 @@
     cursor:not-allowed;
   }
 
+
+  /* =========================================================
+     Empresa Relacionada da reserva
+     ========================================================= */
+  .campo-label{
+    font-weight:900;
+    display:block;
+    margin-bottom:6px;
+    line-height:1.25;
+  }
+
+  .reserva-empresas-relacionadas{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    background:#f8fafc;
+    padding:12px;
+  }
+
+  .reserva-empresas-relacionadas-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:10px;
+  }
+
+  .reserva-empresas-relacionadas-title{
+    font-weight:1000;
+    color:#0f172a;
+  }
+
+  .reserva-empresas-relacionadas-lista{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .reserva-empresa-relacionada-item{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:13px;
+    background:#fff;
+    padding:10px;
+  }
+
+  .reserva-empresa-relacionada-linha{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) 50px 50px;
+    gap:10px;
+    align-items:start;
+  }
+
+  .reserva-empresa-relacionada-linha > div{
+    min-width:0;
+  }
+
+  .reserva-empresa-relacionada-marca{
+    margin-top:10px;
+  }
+
+  .reserva-empresa-relacionada-btn{
+    width:50px;
+    height:50px;
+    min-width:50px;
+    min-height:50px;
+    margin-top:30px;
+    border-radius:14px;
+    border:1px solid var(--border);
+    background:#fff;
+    font-weight:1000;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    line-height:1;
+  }
+
+  .reserva-empresa-relacionada-btn.is-add{
+    border-color:rgba(22,101,52,.25);
+    background:rgba(22,101,52,.08);
+    color:#166534;
+  }
+
+  .reserva-empresa-relacionada-btn.is-remove{
+    border-color:rgba(185,28,28,.25);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+  }
+
+  .select-search.empresa-relacionada-combo .ss-input{
+    height:50px !important;
+    min-height:50px;
+    box-sizing:border-box;
+    padding:10px 44px 10px 13px;
+  }
+
+  .select-search.empresa-relacionada-combo .ss-toggle{
+    position:absolute;
+    right:8px;
+    top:10px;
+    width:30px;
+    height:30px;
+    border:1px solid var(--border);
+    border-radius:9px;
+    background:#fff;
+    cursor:pointer;
+    font-weight:900;
+  }
+
+  .select-search.empresa-relacionada-combo .ss-item.is-selected{
+    background:rgba(22,101,52,.08);
+  }
+
+  .select-search.empresa-relacionada-combo .ss-check{
+    float:right;
+    font-weight:1000;
+    color:#166534;
+  }
+
+  @media (max-width:900px){
+    .reserva-empresa-relacionada-linha{grid-template-columns:minmax(0, 1fr) 50px 50px;}
+  }
+
 </style>
 
 
@@ -374,6 +497,7 @@
 
       <input type="hidden" id="f_observacao" name="observacao" value="">
       <input type="hidden" id="f_marca_exibida" name="marca_exibida" value="">
+      <input type="hidden" id="f_empresas_relacionadas" name="empresas_relacionadas" value="[]">
 
       <div class="reserva-grid-2">
         <div>
@@ -512,6 +636,18 @@
 
       <div style="height:12px;"></div>
 
+
+      <div class="reserva-empresas-relacionadas" id="boxEmpresasRelacionadas">
+        <div class="reserva-empresas-relacionadas-top">
+          <div>
+            <div class="reserva-empresas-relacionadas-title">Empresa Relacionada</div>
+            <div class="hint">Opcional. Use este campo quando a reserva tiver uma ou mais empresas extras vinculadas além da empresa principal.</div>
+          </div>
+        </div>
+        <div class="reserva-empresas-relacionadas-lista" id="empresasRelacionadasLista"></div>
+      </div>
+
+      <div style="height:12px;"></div>
       <div>
         <label style="font-weight:900;display:block;margin-bottom:6px;">Observação (opcional)</label>
         <textarea id="observacao" class="form-control" rows="3" placeholder="Anotações..."></textarea>
@@ -583,6 +719,7 @@
   const fNumPrevia   = document.getElementById("f_numero_previa");
   const fObs         = document.getElementById("f_observacao");
   const fMarcaExibida  = document.getElementById("f_marca_exibida");
+  const fEmpresasRelacionadas = document.getElementById("f_empresas_relacionadas");
 
   const elCsrf = elForm ? elForm.querySelector("input[name='csrf_token']") : null;
 
@@ -604,6 +741,7 @@
   const elCotaHint     = document.getElementById("cotaHint");
 
   const elTooltip = document.getElementById("fpTooltip");
+  const elEmpresasRelacionadasLista = document.getElementById("empresasRelacionadasLista");
 
   if(!elForm || !elCodFace || !elCota || !elDataInicio || !elDataFim || !elPrazoDias || !elBtnSalvar){
     console.error("[reserva] Elementos do DOM não encontrados. Verifique IDs no template.");
@@ -624,6 +762,7 @@
 
   let empresasAtuais = [];
   let vendedoresAtuais = [];
+  let empresasRelacionadasEstado = [];
 
   // chave "YYYY-MM-DD" -> { disponiveis, total, status }
   let dayBadgeMap = new Map();
@@ -1146,6 +1285,263 @@
     return (nome && cnpj) ? (nome + " — " + cnpj) : (nome || cnpj || "—");
   }
 
+
+
+  // =========================================================
+  // ✅ Empresa Relacionada
+  // =========================================================
+  function escapeHtml(valor){
+    return String(valor ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function criarUidEmpresaRelacionada(){
+    return "emp_rel_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function novaEmpresaRelacionada(){
+    return {
+      uid: criarUidEmpresaRelacionada(),
+      id_empresa: "",
+      razao_social: "",
+      cnpj: "",
+      marca: ""
+    };
+  }
+
+  function garantirEmpresasRelacionadasEstado(){
+    if(!Array.isArray(empresasRelacionadasEstado)) empresasRelacionadasEstado = [];
+
+    empresasRelacionadasEstado = empresasRelacionadasEstado.filter(function(item){
+      return item && typeof item === "object";
+    });
+
+    if(!empresasRelacionadasEstado.length){
+      empresasRelacionadasEstado.push(novaEmpresaRelacionada());
+    }
+
+    empresasRelacionadasEstado.forEach(function(item){
+      if(!item.uid) item.uid = criarUidEmpresaRelacionada();
+      item.id_empresa = String(item.id_empresa || "").trim();
+      item.razao_social = String(item.razao_social || "").trim();
+      item.cnpj = String(item.cnpj || "").trim();
+      item.marca = String(item.marca || "").trim();
+    });
+  }
+
+  function obterEmpresaRelacionadaPorUid(uid){
+    garantirEmpresasRelacionadasEstado();
+    return empresasRelacionadasEstado.find(function(item){
+      return String(item.uid || "") === String(uid || "");
+    }) || null;
+  }
+
+  function obterEmpresaPorId(idEmpresa){
+    const id = String(idEmpresa || "").trim();
+    if(!id) return null;
+    return (empresasAtuais || []).find(function(item){
+      return getEmpresaId(item) === id;
+    }) || null;
+  }
+
+  function fecharDropdownsEmpresasRelacionadas(){
+    if(!elEmpresasRelacionadasLista) return;
+    elEmpresasRelacionadasLista.querySelectorAll(".select-search.open").forEach(function(el){
+      el.classList.remove("open");
+    });
+  }
+
+  function renderOpcoesEmpresaRelacionada(item, input, dropdown, wrap){
+    if(!dropdown || !input || !item) return;
+
+    const termo = normalizarTexto(input.value || "");
+    const idSelecionado = String(item.id_empresa || "").trim();
+
+    const idsJaSelecionados = new Set(
+      empresasRelacionadasEstado
+        .filter(function(rel){ return rel && String(rel.uid || "") !== String(item.uid || ""); })
+        .map(function(rel){ return String(rel.id_empresa || "").trim(); })
+        .filter(Boolean)
+    );
+
+    const itens = (empresasAtuais || [])
+      .filter(function(empresa){
+        const id = getEmpresaId(empresa);
+        if(id && idsJaSelecionados.has(id)) return false;
+        return !termo || normalizarTexto(labelEmpresa(empresa)).includes(termo);
+      })
+      .slice(0, 200);
+
+    dropdown.innerHTML = "";
+
+    if(!itens.length){
+      const vazio = document.createElement("div");
+      vazio.className = "ss-empty";
+      vazio.textContent = "Nenhuma empresa encontrada";
+      dropdown.appendChild(vazio);
+      return;
+    }
+
+    itens.forEach(function(empresa){
+      const id = getEmpresaId(empresa);
+      const div = document.createElement("div");
+      div.className = "ss-item" + (id && id === idSelecionado ? " is-selected" : "");
+      div.innerHTML = "<span>" + escapeHtml(labelEmpresa(empresa)) + "</span>" + (id && id === idSelecionado ? "<span class='ss-check'>✓</span>" : "");
+      div.addEventListener("mousedown", function(ev){
+        ev.preventDefault();
+        item.id_empresa = id;
+        item.razao_social = String(empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia || "").trim();
+        item.cnpj = String(empresa.CNPJ || "").trim();
+        input.value = labelEmpresa(empresa);
+        if(wrap) wrap.classList.remove("open");
+        renderizarEmpresasRelacionadas();
+        syncHiddenFields();
+      });
+      dropdown.appendChild(div);
+    });
+  }
+
+  function htmlLinhaEmpresaRelacionada(item, idx){
+    const empresa = obterEmpresaPorId(item.id_empresa);
+    const valorInput = empresa ? labelEmpresa(empresa) : [item.razao_social, item.cnpj].filter(Boolean).join(" — ");
+    const mostrarMarca = !!String(item.id_empresa || "").trim();
+
+    return "<div class='reserva-empresa-relacionada-item' data-uid='" + escapeHtml(item.uid) + "'>" +
+      "<div class='reserva-empresa-relacionada-linha'>" +
+        "<div>" +
+          "<label class='campo-label'>Empresa Relacionada</label>" +
+          "<div class='select-search empresa-relacionada-combo' data-role='combo-empresa-relacionada'>" +
+            "<input class='ss-input' data-role='input-empresa-relacionada' type='text' autocomplete='off' placeholder='Digite razão social ou CNPJ...' value='" + escapeHtml(valorInput) + "'>" +
+            "<button class='ss-toggle' data-role='btn-empresa-relacionada' type='button' aria-label='Abrir lista de empresas'>▾</button>" +
+            "<div class='ss-dropdown' data-role='lista-empresa-relacionada'></div>" +
+          "</div>" +
+          "<div class='hint'>Opcional. Use + para adicionar outra empresa relacionada.</div>" +
+        "</div>" +
+        "<button type='button' class='reserva-empresa-relacionada-btn is-add' data-role='add-empresa-relacionada' title='Adicionar empresa relacionada'>+</button>" +
+        "<button type='button' class='reserva-empresa-relacionada-btn is-remove' data-role='remover-empresa-relacionada' title='Remover empresa relacionada'>−</button>" +
+      "</div>" +
+      (mostrarMarca
+        ? "<div class='reserva-empresa-relacionada-marca'><label class='campo-label'>Marca da empresa relacionada</label><input class='form-control' data-role='marca-empresa-relacionada' type='text' maxlength='200' placeholder='Se ficar vazio, usa a Marca Exibida principal' value='" + escapeHtml(item.marca) + "'><div class='hint'>Opcional. Se não preencher, o sistema salva a mesma Marca Exibida principal.</div></div>"
+        : "") +
+    "</div>";
+  }
+
+  function renderizarEmpresasRelacionadas(){
+    if(!elEmpresasRelacionadasLista) return;
+
+    garantirEmpresasRelacionadasEstado();
+    elEmpresasRelacionadasLista.innerHTML = empresasRelacionadasEstado.map(htmlLinhaEmpresaRelacionada).join("");
+
+    elEmpresasRelacionadasLista.querySelectorAll(".reserva-empresa-relacionada-item").forEach(function(container){
+      const uid = container.getAttribute("data-uid") || "";
+      const item = obterEmpresaRelacionadaPorUid(uid);
+      if(!item) return;
+
+      const wrap = container.querySelector("[data-role='combo-empresa-relacionada']");
+      const input = container.querySelector("[data-role='input-empresa-relacionada']");
+      const dropdown = container.querySelector("[data-role='lista-empresa-relacionada']");
+      const botao = container.querySelector("[data-role='btn-empresa-relacionada']");
+      const btnAdd = container.querySelector("[data-role='add-empresa-relacionada']");
+      const btnRemover = container.querySelector("[data-role='remover-empresa-relacionada']");
+      const marca = container.querySelector("[data-role='marca-empresa-relacionada']");
+
+      const abrir = function(){
+        if(wrap) wrap.classList.add("open");
+        renderOpcoesEmpresaRelacionada(item, input, dropdown, wrap);
+      };
+
+      if(input){
+        input.addEventListener("focus", abrir);
+        input.addEventListener("input", function(){
+          item.id_empresa = "";
+          item.razao_social = "";
+          item.cnpj = "";
+          abrir();
+          syncHiddenFields();
+        });
+        input.addEventListener("keydown", function(ev){
+          if(ev.key === "Escape" && wrap) wrap.classList.remove("open");
+        });
+      }
+
+      if(botao){
+        botao.addEventListener("mousedown", function(ev){
+          ev.preventDefault();
+          abrir();
+          if(input) input.focus();
+        });
+      }
+
+      if(btnAdd){
+        btnAdd.addEventListener("click", function(){
+          garantirEmpresasRelacionadasEstado();
+          empresasRelacionadasEstado.push(novaEmpresaRelacionada());
+          renderizarEmpresasRelacionadas();
+          syncHiddenFields();
+        });
+      }
+
+      if(btnRemover){
+        btnRemover.addEventListener("click", function(){
+          garantirEmpresasRelacionadasEstado();
+          if(empresasRelacionadasEstado.length <= 1){
+            empresasRelacionadasEstado = [novaEmpresaRelacionada()];
+          }else{
+            empresasRelacionadasEstado = empresasRelacionadasEstado.filter(function(rel){
+              return String(rel.uid || "") !== uid;
+            });
+          }
+          renderizarEmpresasRelacionadas();
+          syncHiddenFields();
+        });
+      }
+
+      if(marca){
+        marca.addEventListener("input", function(){
+          item.marca = String(marca.value || "").trim();
+          syncHiddenFields();
+        });
+      }
+    });
+
+    sincronizarEmpresasRelacionadasHidden();
+  }
+
+  function coletarEmpresasRelacionadasValidas(){
+    garantirEmpresasRelacionadasEstado();
+
+    return empresasRelacionadasEstado
+      .filter(function(item){ return String(item.id_empresa || "").trim(); })
+      .map(function(item){
+        const empresa = obterEmpresaPorId(item.id_empresa);
+        return {
+          id_empresa: String(item.id_empresa || "").trim(),
+          razao_social: String(item.razao_social || (empresa ? (empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia || "") : "")).trim(),
+          cnpj: String(item.cnpj || (empresa ? (empresa.CNPJ || "") : "")).trim(),
+          marca: String(item.marca || "").trim()
+        };
+      });
+  }
+
+  function sincronizarEmpresasRelacionadasHidden(){
+    if(!fEmpresasRelacionadas) return;
+    fEmpresasRelacionadas.value = JSON.stringify(coletarEmpresasRelacionadasValidas());
+  }
+
+  function validarEmpresasRelacionadas(){
+    garantirEmpresasRelacionadasEstado();
+    for(const item of empresasRelacionadasEstado){
+      if(String(item.marca || "").trim().length > 200){
+        return "Marca da empresa relacionada excede 200 caracteres.";
+      }
+    }
+    return "";
+  }
+
   function labelVendedor(v){
     return (v.NomeVendedor || "").trim() || "—";
   }
@@ -1577,6 +1973,7 @@
     ssCliente.setItems(empresasAtuais);
     ssVendedor.setItems(vendedoresAtuais);
     ssContrato.setItems(contratosAtuais);
+    renderizarEmpresasRelacionadas();
 
     atualizarRestricoesCalendarios();
     if(fpInicio) fpInicio.redraw();
@@ -1659,6 +2056,7 @@
 
     fObs.value = (elObservacao.value || "").trim();
     fMarcaExibida.value = (elMarcaExibida && elMarcaExibida.value ? elMarcaExibida.value : "").trim();
+    sincronizarEmpresasRelacionadasHidden();
   }
 
   // =========================================================
@@ -1695,6 +2093,14 @@
       return;
     }
 
+    const erroEmpresasRelacionadas = validarEmpresasRelacionadas();
+    if(erroEmpresasRelacionadas){
+      setMsg(erroEmpresasRelacionadas, false);
+      return;
+    }
+
+    sincronizarEmpresasRelacionadasHidden();
+
     elBtnSalvar.disabled = true;
     setMsg("Salvando...", true);
 
@@ -1715,6 +2121,7 @@
     formData.set("numero_previa", fNumPrevia.value);
     formData.set("observacao", fObs.value);
     formData.set("marca_exibida", fMarcaExibida.value);
+    formData.set("empresas_relacionadas", fEmpresasRelacionadas ? (fEmpresasRelacionadas.value || "[]") : "[]");
 
     if(elCsrf && elCsrf.value){
       formData.set("csrf_token", elCsrf.value);
@@ -1810,6 +2217,12 @@
     elMarcaExibida.addEventListener("input", syncHiddenFields);
   }
 
+  document.addEventListener("mousedown", function(ev){
+    if(elEmpresasRelacionadasLista && !elEmpresasRelacionadasLista.contains(ev.target)){
+      fecharDropdownsEmpresasRelacionadas();
+    }
+  });
+
   elForm.addEventListener("submit", enviarReserva);
 
   // =========================================================
@@ -1824,6 +2237,7 @@
 
     ssFace.setItems(facesAtuais);
     atualizarCampoCotaPorFace();
+    renderizarEmpresasRelacionadas();
 
     initFlatpickr();
 

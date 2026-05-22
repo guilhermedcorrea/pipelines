@@ -6993,6 +6993,543 @@ def _aplicar_resultado_aprovacao_no_card(*, id_fato_kanban_card: int | None, id_
     _aplicar_tag_no_card_admin(id_card=id_fato_kanban_card, id_tag=id_tag_reprovado, id_usuario=id_usuario_logado, id_empresa_proprietaria=id_empresa_proprietaria)
 
 
+
+
+def _form_valor_unico(form, chave: str, padrao=None):
+    """Leio um campo vindo do request.form ou do dict serializado enviado ao Celery."""
+    if form is None:
+        return padrao
+
+    try:
+        valor = form.get(chave, padrao)
+    except Exception:
+        valor = padrao
+
+    if isinstance(valor, (list, tuple)):
+        if not valor:
+            return padrao
+        return valor[0]
+
+    return valor
+
+
+def _form_lista_valores(form, chave: str) -> list:
+    """Leio uma lista de valores tanto do MultiDict do Flask quanto do dict do Celery."""
+    if form is None:
+        return []
+
+    try:
+        if hasattr(form, "getlist"):
+            return list(form.getlist(chave))
+    except Exception:
+        pass
+
+    try:
+        valor = form.get(chave, [])
+    except Exception:
+        return []
+
+    if isinstance(valor, (list, tuple)):
+        return list(valor)
+
+    if valor in (None, ""):
+        return []
+
+    return [valor]
+
+
+def _gerar_referencia_agendamento_face_contrato(
+    *,
+    id_contrato: int,
+    id_item_contrato: int,
+    sequencia: int,
+    data_inicio,
+    data_termino,
+    referencia_informada: str | None = None,
+) -> str | None:
+    """Retorno somente a referência informada pelo usuário.
+
+    Regra de negócio: o campo Referencia da tabela
+    Integracao.Silver.FatoAgendamentoFaceContrato é um campo livre do usuário.
+    Ele não é obrigatório e não deve receber chave técnica inventada pelo sistema.
+    """
+    ref = _texto_ou_none(referencia_informada)
+    return ref[:80] if ref else None
+
+
+
+def _referencia_agendamento_pendente_eh_tecnica(valor: str | None) -> bool:
+    """Identifico referências técnicas antigas apenas para não exibir ao usuário."""
+    v = str(valor or "").strip()
+    return v.startswith("SOL_AG_FACE|") or v.startswith("AG_FACE|")
+
+
+def _desativar_agendamentos_face_pendentes_solicitacao_item(
+    *,
+    id_solicitacao: int,
+    id_item_solicitacao: int,
+) -> int:
+    """Não uso mais Referencia como chave técnica temporária."""
+    return 0
+
+
+def _sincronizar_agendamentos_face_pendentes_solicitacao_item(
+    *,
+    id_solicitacao: int,
+    id_item_solicitacao: int,
+    config: dict,
+) -> dict:
+    """Não gravo pendência usando o campo Referencia.
+
+    A tabela FatoAgendamentoFaceContrato não tem coluna própria para amarrar
+    solicitação/item antes de existir IDFatoControleContratosItensEuromidia.
+    Por isso, para respeitar a regra de negócio, eu não uso Referencia como
+    chave técnica. A gravação definitiva acontece na aprovação, usando o
+    formulário enviado ao Celery depois que o item real do contrato é criado.
+    """
+    return {
+        "inseridos": 0,
+        "atualizados": 0,
+        "desativados": 0,
+        "pendente_sem_gravacao": 1 if config.get("ativo") else 0,
+    }
+
+
+def _migrar_agendamentos_face_pendentes_solicitacao_para_contrato(
+    *,
+    id_solicitacao: int,
+    id_contrato_controle: int | None,
+) -> dict:
+    """Não migro pendência técnica porque Referencia não é chave de sistema.
+
+    A gravação correta ocorre durante a aprovação usando o form_data enviado ao
+    Celery, depois que o item real do contrato já existe.
+    """
+    return {"migrados": 0, "desativados_pendentes": 0, "itens_processados": 0}
+
+
+def _extrair_periodos_agendamento_face_contrato_form(form, item_id: int) -> dict:
+    """Extraio do formulário os períodos gerados na tela de aprovação do contrato.
+
+    Eu não dependo apenas do campo QuantidadePeriodosOcupacao, porque a tela
+    pode gerar períodos mensais + um período restante. Exemplo: usuário pede 3
+    períodos mensais em um range de 5 meses; a tela manda 4 linhas: 3 mensais
+    + 1 restante. Então eu varro as chaves Agendamento_N__ para não perder a
+    linha restante.
+    """
+    prefixo = f"item_{int(item_id)}__"
+    ativo = _texto_ou_vazio(_form_valor_unico(form, f"{prefixo}DividirOcupacaoPeriodos", "0")).strip() == "1"
+    quantidade_informada = _int_ou_none(_form_valor_unico(form, f"{prefixo}QuantidadePeriodosOcupacao")) or 0
+
+    if quantidade_informada < 0:
+        quantidade_informada = 0
+
+    if quantidade_informada > 120:
+        raise ValueError(f"Quantidade de períodos inválida no item {item_id}. O limite é 120.")
+
+    periodos = []
+
+    if not ativo:
+        return {
+            "ativo": False,
+            "quantidade": 0,
+            "periodos": periodos,
+        }
+
+    sequencias_encontradas: set[int] = set()
+    try:
+        chaves_form = list(form.keys())
+    except Exception:
+        chaves_form = []
+
+    padrao_chave = re.compile(rf"^{re.escape(prefixo)}Agendamento_(\d+)__")
+    for chave in chaves_form:
+        m = padrao_chave.match(str(chave))
+        if not m:
+            continue
+        seq = _int_ou_none(m.group(1))
+        if seq not in (None, "", 0):
+            sequencias_encontradas.add(int(seq))
+
+    limite = max([quantidade_informada] + list(sequencias_encontradas or [0]))
+    if limite > 120:
+        raise ValueError(f"Quantidade de períodos inválida no item {item_id}. O limite é 120.")
+
+    for sequencia in range(1, limite + 1):
+        base = f"{prefixo}Agendamento_{sequencia}__"
+        ordem = _int_ou_none(_form_valor_unico(form, f"{base}Ordem")) or sequencia
+        data_inicio = _data_ou_none(_form_valor_unico(form, f"{base}DataInicio"))
+        data_termino = _data_ou_none(_form_valor_unico(form, f"{base}DataTermino"))
+
+        if not data_inicio and not data_termino:
+            continue
+
+        if not data_inicio or not data_termino:
+            raise ValueError(f"Agendamento incompleto no item {item_id}, sequência {sequencia}.")
+
+        if data_termino < data_inicio:
+            raise ValueError(f"Data final menor que a inicial no item {item_id}, sequência {sequencia}.")
+
+        situacao = (_texto_ou_none(_form_valor_unico(form, f"{base}Situacao")) or "PROGRAMADO").upper().strip()
+        if situacao == "CONCLUÍDO":
+            situacao = "CONCLUIDO"
+
+        if situacao not in ("PROGRAMADO", "ATIVO", "CONCLUIDO", "CANCELADO"):
+            situacao = "PROGRAMADO"
+
+        periodos.append(
+            {
+                "sequencia": int(ordem),
+                "data_inicio": data_inicio,
+                "data_termino": data_termino,
+                "situacao": situacao,
+                "referencia": _texto_ou_none(_form_valor_unico(form, f"{base}Referencia")),
+            }
+        )
+
+    return {
+        "ativo": True,
+        "quantidade": len(periodos),
+        "periodos": periodos,
+    }
+
+
+def _sincronizar_agendamentos_face_contrato_por_formulario(
+    *,
+    id_solicitacao: int,
+    form,
+    id_usuario_logado: int | None = None,
+    id_contrato_controle_resolvido: int | None = None,
+) -> dict:
+    """Gravo/atualizo a divisão da ocupação em períodos na tabela FatoAgendamentoFaceContrato.
+
+    Regra importante:
+    - se ainda não existir IDFatoControleContratosItensEuromidia, eu não tenho relação segura
+      com o item final do contrato; nesse caso o item fica pendente e será gravado após a aprovação,
+      quando a aprovação resolver o item de controle.
+    """
+    item_ids = [_int_ou_none(x) for x in _form_lista_valores(form, "item_id")]
+    item_ids = [int(x) for x in item_ids if x not in (None, "", 0)]
+
+    if not item_ids:
+        return {
+            "inseridos": 0,
+            "atualizados": 0,
+            "desativados": 0,
+            "ignorados_sem_item_controle": 0,
+            "itens_processados": 0,
+        }
+
+    cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao)) or {}
+    itens_solicitacao = _obter_itens_solicitacao_brutos(int(id_solicitacao))
+    mapa_itens = {
+        int(item.get("IDFatoSolicitacaoContratoItemEuromidia")): item
+        for item in itens_solicitacao
+        if _int_ou_none(item.get("IDFatoSolicitacaoContratoItemEuromidia")) not in (None, "", 0)
+    }
+
+    sql_desativar_item = text("""
+        UPDATE [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+           SET BitAtivo = 0,
+               DataAtualizado = GETDATE()
+         WHERE IDFatoControleContratosEuromidia = :id_contrato
+           AND IDFatoControleContratosItensEuromidia = :id_item_contrato
+           AND ISNULL(BitAtivo, 1) = 1
+    """)
+
+    sql_desativar_fora_form = text("""
+        UPDATE [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+           SET BitAtivo = 0,
+               DataAtualizado = GETDATE()
+         WHERE IDFatoControleContratosEuromidia = :id_contrato
+           AND IDFatoControleContratosItensEuromidia = :id_item_contrato
+           AND ISNULL(BitAtivo, 1) = 1
+           AND Sequencia NOT IN :sequencias
+    """)
+
+    sql_buscar_existente = text("""
+        SELECT TOP 1 IDFatoAgendamentoFaceContrato
+        FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+        WHERE IDFatoControleContratosEuromidia = :id_contrato
+          AND IDFatoControleContratosItensEuromidia = :id_item_contrato
+          AND Sequencia = :sequencia
+        ORDER BY IDFatoAgendamentoFaceContrato DESC
+    """)
+
+    sql_update = text("""
+        UPDATE [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+           SET DataInicio = :data_inicio,
+               DataTermino = :data_termino,
+               Situacao = :situacao,
+               Referencia = :referencia,
+               BitAtivo = 1,
+               DataAtualizado = GETDATE()
+         WHERE IDFatoAgendamentoFaceContrato = :id_agendamento
+    """)
+
+    sql_insert = text("""
+        INSERT INTO [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+        (
+            IDFatoControleContratosEuromidia,
+            IDFatoControleContratosItensEuromidia,
+            Sequencia,
+            DataInicio,
+            DataTermino,
+            Situacao,
+            Referencia,
+            BitAtivo,
+            DataAtualizado
+        )
+        VALUES
+        (
+            :id_contrato,
+            :id_item_contrato,
+            :sequencia,
+            :data_inicio,
+            :data_termino,
+            :situacao,
+            :referencia,
+            1,
+            GETDATE()
+        )
+    """)
+
+    total_inseridos = 0
+    total_atualizados = 0
+    total_desativados = 0
+    total_ignorados_sem_item_controle = 0
+    total_itens_processados = 0
+
+    for item_id in item_ids:
+        item = mapa_itens.get(int(item_id)) or {}
+        config = _extrair_periodos_agendamento_face_contrato_form(form, int(item_id))
+
+        id_contrato = (
+            _int_ou_none(id_contrato_controle_resolvido)
+            or _int_ou_none(item.get("IDFatoControleContratosEuromidia"))
+            or _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+        )
+        id_item_contrato = _int_ou_none(item.get("IDFatoControleContratosItensEuromidia"))
+
+        if id_contrato in (None, "", 0) or id_item_contrato in (None, "", 0):
+            # Não gravo na FatoAgendamentoFaceContrato sem o item real do contrato.
+            # Motivo: o campo Referencia é livre do usuário e não pode ser usado
+            # como chave técnica temporária. Na aprovação, o form completo é enviado
+            # ao Celery e a gravação definitiva ocorre depois que o ContratoItem existe.
+            if config.get("ativo"):
+                total_ignorados_sem_item_controle += 1
+            continue
+
+        total_itens_processados += 1
+        total_desativados += _desativar_agendamentos_face_pendentes_solicitacao_item(
+            id_solicitacao=int(id_solicitacao),
+            id_item_solicitacao=int(item_id),
+        )
+
+        if not config.get("ativo"):
+            resultado = db.session.execute(
+                sql_desativar_item,
+                {
+                    "id_contrato": int(id_contrato),
+                    "id_item_contrato": int(id_item_contrato),
+                },
+            )
+            total_desativados += int(getattr(resultado, "rowcount", 0) or 0)
+            continue
+
+        periodos = config.get("periodos") or []
+
+        if not periodos:
+            resultado = db.session.execute(
+                sql_desativar_item,
+                {
+                    "id_contrato": int(id_contrato),
+                    "id_item_contrato": int(id_item_contrato),
+                },
+            )
+            total_desativados += int(getattr(resultado, "rowcount", 0) or 0)
+            continue
+
+        sequencias = []
+
+        for periodo in periodos:
+            sequencia = int(periodo["sequencia"])
+            sequencias.append(sequencia)
+            referencia = _gerar_referencia_agendamento_face_contrato(
+                id_contrato=int(id_contrato),
+                id_item_contrato=int(id_item_contrato),
+                sequencia=sequencia,
+                data_inicio=periodo["data_inicio"],
+                data_termino=periodo["data_termino"],
+                referencia_informada=periodo.get("referencia"),
+            )
+
+            existente = db.session.execute(
+                sql_buscar_existente,
+                {
+                    "id_contrato": int(id_contrato),
+                    "id_item_contrato": int(id_item_contrato),
+                    "sequencia": sequencia,
+                },
+            ).mappings().first()
+
+            params_agendamento = {
+                "id_contrato": int(id_contrato),
+                "id_item_contrato": int(id_item_contrato),
+                "sequencia": sequencia,
+                "data_inicio": periodo["data_inicio"],
+                "data_termino": periodo["data_termino"],
+                "situacao": periodo["situacao"],
+                "referencia": referencia,
+            }
+
+            if existente and existente.get("IDFatoAgendamentoFaceContrato") is not None:
+                db.session.execute(
+                    sql_update,
+                    {
+                        **params_agendamento,
+                        "id_agendamento": int(existente["IDFatoAgendamentoFaceContrato"]),
+                    },
+                )
+                total_atualizados += 1
+            else:
+                db.session.execute(sql_insert, params_agendamento)
+                total_inseridos += 1
+
+        if sequencias:
+            placeholders = ",".join(f":seq_{idx}" for idx, _ in enumerate(sequencias))
+            params_desativar = {
+                "id_contrato": int(id_contrato),
+                "id_item_contrato": int(id_item_contrato),
+            }
+            for idx, seq in enumerate(sequencias):
+                params_desativar[f"seq_{idx}"] = int(seq)
+
+            sql_desativar_fora = text(f"""
+                UPDATE [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+                   SET BitAtivo = 0,
+                       DataAtualizado = GETDATE()
+                 WHERE IDFatoControleContratosEuromidia = :id_contrato
+                   AND IDFatoControleContratosItensEuromidia = :id_item_contrato
+                   AND ISNULL(BitAtivo, 1) = 1
+                   AND Sequencia NOT IN ({placeholders})
+            """)
+            resultado = db.session.execute(sql_desativar_fora, params_desativar)
+            total_desativados += int(getattr(resultado, "rowcount", 0) or 0)
+
+    return {
+        "inseridos": total_inseridos,
+        "atualizados": total_atualizados,
+        "desativados": total_desativados,
+        "ignorados_sem_item_controle": total_ignorados_sem_item_controle,
+        "itens_processados": total_itens_processados,
+    }
+
+
+def _adicionar_um_mes_data(dt: date) -> date:
+    """Somar um mês sem depender de bibliotecas externas."""
+    if not isinstance(dt, date):
+        return dt
+
+    ano = dt.year
+    mes = dt.month + 1
+    if mes > 12:
+        mes = 1
+        ano += 1
+
+    ultimo_dia_mes_destino = (date(ano + (1 if mes == 12 else 0), 1 if mes == 12 else mes + 1, 1) - timedelta(days=1)).day
+    return date(ano, mes, min(dt.day, ultimo_dia_mes_destino))
+
+
+def _marcar_periodo_restante_visual(item: dict) -> None:
+    """Marco visualmente o último período quando ele representa sobra do range.
+
+    Essa marcação é apenas para o layout. A tabela física não tem coluna para
+    guardar o tipo do período, então a persistência continua sendo por datas,
+    situação e referência do usuário.
+    """
+    ags = item.get("AgendamentosFaceContrato") or []
+    if len(ags) <= 1:
+        return
+
+    ultimo = ags[-1]
+    data_inicio = ultimo.get("DataInicio")
+    data_termino = ultimo.get("DataTermino")
+    data_termino_item = item.get("DataTerminoPrevisto")
+
+    if not isinstance(data_inicio, date) or not isinstance(data_termino, date):
+        return
+    if not isinstance(data_termino_item, date) or data_termino != data_termino_item:
+        return
+
+    termino_mensal_teorico = _adicionar_um_mes_data(data_inicio) - timedelta(days=1)
+    if data_termino != termino_mensal_teorico:
+        ultimo["EhPeriodoRestante"] = True
+        ultimo["RotuloPeriodo"] = "RESTANTE"
+
+
+def _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
+    *,
+    id_contrato_controle: int | None,
+) -> dict:
+    """Sincronizo a flag BitFracionado dos itens do contrato com a tabela de divisão por períodos.
+
+    Regra aplicada:
+    - item com pelo menos um agendamento ativo em FatoAgendamentoFaceContrato => BitFracionado = 1;
+    - item sem agendamento ativo em FatoAgendamentoFaceContrato => BitFracionado = 0.
+
+    Essa rotina roda depois da aprovação resolver os IDs definitivos do contrato e dos itens,
+    porque antes disso não existe relação segura com FatoControleContratosItensEuromidia.
+    """
+    id_contrato = _int_ou_none(id_contrato_controle)
+    if id_contrato in (None, "", 0):
+        return {
+            "itens_atualizados": 0,
+            "fracionados": 0,
+            "nao_fracionados": 0,
+        }
+
+    resultado_update = db.session.execute(
+        text("""
+            UPDATE item
+               SET BitFracionado =
+                   CASE
+                       WHEN EXISTS
+                       (
+                           SELECT 1
+                           FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] ag
+                           WHERE ag.IDFatoControleContratosEuromidia = item.IDFatoControleContratoEuromidia
+                             AND ag.IDFatoControleContratosItensEuromidia = item.IDFatoControleContratosItensEuromidia
+                             AND ISNULL(ag.BitAtivo, 1) = 1
+                       )
+                       THEN 1
+                       ELSE 0
+                   END,
+                   DataAtualizacao = GETDATE()
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] item
+            WHERE item.IDFatoControleContratoEuromidia = :id_contrato
+        """),
+        {"id_contrato": int(id_contrato)},
+    )
+
+    resumo = db.session.execute(
+        text("""
+            SELECT
+                SUM(CASE WHEN ISNULL(BitFracionado, 0) = 1 THEN 1 ELSE 0 END) AS fracionados,
+                SUM(CASE WHEN ISNULL(BitFracionado, 0) = 0 THEN 1 ELSE 0 END) AS nao_fracionados
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+            WHERE IDFatoControleContratoEuromidia = :id_contrato
+        """),
+        {"id_contrato": int(id_contrato)},
+    ).mappings().first()
+
+    return {
+        "itens_atualizados": int(getattr(resultado_update, "rowcount", 0) or 0),
+        "fracionados": int((resumo or {}).get("fracionados") or 0),
+        "nao_fracionados": int((resumo or {}).get("nao_fracionados") or 0),
+    }
+
+
 def _atualizar_solicitacao_contrato_por_formulario(*, id_solicitacao: int, form, id_usuario_logado: int | None) -> None:
     tipo_solicitacao = _tipo_solicitacao_normalizado(form.get("TipoSolicitacao"))
     params_cab = {
@@ -7032,9 +7569,17 @@ def _atualizar_solicitacao_contrato_por_formulario(*, id_solicitacao: int, form,
     """), params_cab)
 
     item_ids = form.getlist("item_id")
+    itens_atuais_por_id = {
+        int(x.get("IDFatoSolicitacaoContratoItemEuromidia")): x
+        for x in _obter_itens_solicitacao_brutos(int(id_solicitacao))
+        if _int_ou_none(x.get("IDFatoSolicitacaoContratoItemEuromidia")) not in (None, "", 0)
+    }
+
     sql_update_item = text("""
         UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
-           SET [IDPainelEuromidia] = :IDPainelEuromidia, [IDDimFacesPaineis] = :IDDimFacesPaineis, [CodPonto] = :CodPonto, [CodFace] = :CodFace, [CidadeExibicao] = :CidadeExibicao,
+           SET [IDFatoControleContratosEuromidia] = COALESCE([IDFatoControleContratosEuromidia], :IDFatoControleContratosEuromidia),
+               [IDFatoControleContratosItensEuromidia] = COALESCE([IDFatoControleContratosItensEuromidia], :IDFatoControleContratosItensEuromidia),
+               [IDPainelEuromidia] = :IDPainelEuromidia, [IDDimFacesPaineis] = :IDDimFacesPaineis, [CodPonto] = :CodPonto, [CodFace] = :CodFace, [CidadeExibicao] = :CidadeExibicao,
                [Tipo] = :Tipo, [Cota] = :Cota, [DataInicioPrevisto] = :DataInicioPrevisto, [DataTerminoPrevisto] = :DataTerminoPrevisto, [NumeroParcelas] = :NumeroParcelas,
                [DataInicioVencimento] = :DataInicioVencimento, [FaturamentoBrutoMensal] = :FaturamentoBrutoMensal, [PercentualPermuta] = :PercentualPermuta, [ValorPermuta] = :ValorPermuta,
                [FaturamentoLiquidoPermuta] = :FaturamentoLiquidoPermuta, [FaturamentoLiquidoMensal] = :FaturamentoLiquidoMensal, [FaturamentoLiquidoFinalMensal] = :FaturamentoLiquidoFinalMensal,
@@ -7049,25 +7594,68 @@ def _atualizar_solicitacao_contrato_por_formulario(*, id_solicitacao: int, form,
         if item_id is None:
             continue
         prefixo = f"item_{item_id}__"
-        cod_ponto = _texto_ou_none(form.get(f"{prefixo}CodPonto"))
-        cod_face = _texto_ou_none(form.get(f"{prefixo}CodFace"))
+        item_atual = itens_atuais_por_id.get(int(item_id)) or {}
+        fallback_item = _buscar_item_controle_fallback_layout(
+            {
+                **item_atual,
+                "CodPonto": form.get(f"{prefixo}CodPonto") or item_atual.get("CodPonto"),
+                "CodFace": form.get(f"{prefixo}CodFace") or item_atual.get("CodFace"),
+            },
+            {"IDFatoControleContratosEuromidia": _int_ou_none(form.get("IDFatoControleContratosEuromidia"))},
+        )
+
+        def vf(campo_form: str, parser, campo_banco: str):
+            return _valor_form_ou_fallback(
+                form,
+                f"{prefixo}{campo_form}",
+                parser,
+                item_atual,
+                fallback_item,
+                campo_banco,
+            )
+
+        cod_ponto = vf("CodPonto", _texto_ou_none, "CodPonto")
+        cod_face = vf("CodFace", _texto_ou_none, "CodFace")
         info_face = None
         if cod_ponto and cod_face:
             info_face = _resolver_face_e_painel_por_codigos(cod_ponto, cod_face)
             if not info_face:
                 raise ValueError(f"Não encontrei CodPonto/CodFace válidos para o item {item_id}: {cod_ponto} / {cod_face}.")
 
+        id_painel_resolvido = (
+            (info_face.get("IDDimPaineisEuromidia") if info_face else None)
+            or item_atual.get("IDPainelEuromidia")
+            or fallback_item.get("IDPainelEuromidia")
+            or fallback_item.get("IDDimPaineisEuromidia")
+        )
+        id_face_resolvida = (
+            (info_face.get("IDDimFacesPaineis") if info_face else None)
+            or item_atual.get("IDDimFacesPaineis")
+            or fallback_item.get("IDDimFacesPaineis")
+        )
+
+        id_contrato_item_resolvido = (
+            _int_ou_none(item_atual.get("IDFatoControleContratosEuromidia"))
+            or _int_ou_none(fallback_item.get("IDFatoControleContratosEuromidia"))
+        )
+        id_item_controle_resolvido = (
+            _int_ou_none(item_atual.get("IDFatoControleContratosItensEuromidia"))
+            or _int_ou_none(fallback_item.get("IDFatoControleContratosItensEuromidia"))
+        )
+
         params_item = {
             "IDFatoSolicitacaoContratoItemEuromidia": item_id, "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
-            "IDPainelEuromidia": info_face.get("IDDimPaineisEuromidia") if info_face else None, "IDDimFacesPaineis": info_face.get("IDDimFacesPaineis") if info_face else None,
-            "CodPonto": cod_ponto, "CodFace": cod_face, "CidadeExibicao": _texto_ou_none(form.get(f"{prefixo}CidadeExibicao")), "Tipo": _texto_ou_none(form.get(f"{prefixo}Tipo")),
-            "Cota": _decimal_ou_none(form.get(f"{prefixo}Cota")), "DataInicioPrevisto": _data_ou_none(form.get(f"{prefixo}DataInicioPrevisto")), "DataTerminoPrevisto": _data_ou_none(form.get(f"{prefixo}DataTerminoPrevisto")),
-            "NumeroParcelas": _int_ou_none(form.get(f"{prefixo}NumeroParcelas")), "DataInicioVencimento": _data_ou_none(form.get(f"{prefixo}DataInicioVencimento")),
-            "FaturamentoBrutoMensal": _decimal_ou_none(form.get(f"{prefixo}FaturamentoBrutoMensal")), "PercentualPermuta": _decimal_ou_none(form.get(f"{prefixo}PercentualPermuta")),
-            "ValorPermuta": _decimal_ou_none(form.get(f"{prefixo}ValorPermuta")), "FaturamentoLiquidoPermuta": _decimal_ou_none(form.get(f"{prefixo}FaturamentoLiquidoPermuta")),
-            "FaturamentoLiquidoMensal": _decimal_ou_none(form.get(f"{prefixo}FaturamentoLiquidoMensal")), "FaturamentoLiquidoFinalMensal": _decimal_ou_none(form.get(f"{prefixo}FaturamentoLiquidoFinalMensal")),
-            "PercentualComissaoVendedor": _decimal_ou_none(form.get(f"{prefixo}PercentualComissaoVendedor")), "ValorVendedor": _decimal_ou_none(form.get(f"{prefixo}ValorVendedor")),
-            "ValorVendedorTotal": _decimal_ou_none(form.get(f"{prefixo}ValorVendedorTotal")), "Status": _texto_ou_none(form.get(f"{prefixo}Status")), "OBS": _texto_ou_none(form.get(f"{prefixo}OBS")),
+            "IDFatoControleContratosEuromidia": id_contrato_item_resolvido,
+            "IDFatoControleContratosItensEuromidia": id_item_controle_resolvido,
+            "IDPainelEuromidia": id_painel_resolvido, "IDDimFacesPaineis": id_face_resolvida,
+            "CodPonto": cod_ponto, "CodFace": cod_face, "CidadeExibicao": vf("CidadeExibicao", _texto_ou_none, "CidadeExibicao"), "Tipo": vf("Tipo", _texto_ou_none, "Tipo"),
+            "Cota": vf("Cota", _decimal_ou_none, "Cota"), "DataInicioPrevisto": vf("DataInicioPrevisto", _data_ou_none, "DataInicioPrevisto"), "DataTerminoPrevisto": vf("DataTerminoPrevisto", _data_ou_none, "DataTerminoPrevisto"),
+            "NumeroParcelas": vf("NumeroParcelas", _int_ou_none, "NumeroParcelas"), "DataInicioVencimento": vf("DataInicioVencimento", _data_ou_none, "DataInicioVencimento"),
+            "FaturamentoBrutoMensal": vf("FaturamentoBrutoMensal", _decimal_ou_none, "FaturamentoBrutoMensal"), "PercentualPermuta": vf("PercentualPermuta", _decimal_ou_none, "PercentualPermuta"),
+            "ValorPermuta": vf("ValorPermuta", _decimal_ou_none, "ValorPermuta"), "FaturamentoLiquidoPermuta": vf("FaturamentoLiquidoPermuta", _decimal_ou_none, "FaturamentoLiquidoPermuta"),
+            "FaturamentoLiquidoMensal": vf("FaturamentoLiquidoMensal", _decimal_ou_none, "FaturamentoLiquidoMensal"), "FaturamentoLiquidoFinalMensal": vf("FaturamentoLiquidoFinalMensal", _decimal_ou_none, "FaturamentoLiquidoFinalMensal"),
+            "PercentualComissaoVendedor": vf("PercentualComissaoVendedor", _decimal_ou_none, "PercentualComissaoVendedor"), "ValorVendedor": vf("ValorVendedor", _decimal_ou_none, "ValorVendedor"),
+            "ValorVendedorTotal": vf("ValorVendedorTotal", _decimal_ou_none, "ValorVendedorTotal"), "Status": vf("Status", _texto_ou_none, "Status"), "OBS": vf("OBS", _texto_ou_none, "OBS"),
             "BitAtivo": 1 if form.get(f"{prefixo}BitAtivo") == "1" else 0, "IDDimUsuariosAtualizacao": id_usuario_logado,
         }
         db.session.execute(sql_update_item, params_item)
@@ -7216,6 +7804,212 @@ def _montar_diagrama_status_contrato(
 
 
 
+
+
+
+def _valor_esta_vazio_para_fallback(valor) -> bool:
+    if valor is None:
+        return True
+    if isinstance(valor, str) and valor.strip() == "":
+        return True
+    return False
+
+
+def _buscar_item_controle_fallback_layout(item: dict, cab: dict | None = None) -> dict:
+    """Busco o item atual do contrato para preencher o layout da tela de aprovação.
+
+    Na alteração/aditivo, a solicitação pode trazer apenas CodPonto/CodFace e datas,
+    deixando cota, parcelas e valores vazios. Se eu renderizar só a solicitação, a tela
+    parece que perdeu as informações. Por isso eu uso o item atual do contrato como
+    fallback visual e também como fallback de salvamento.
+    """
+    cab = cab or {}
+    id_item_controle = _int_ou_none(item.get("IDFatoControleContratosItensEuromidia"))
+    id_contrato = (
+        _int_ou_none(item.get("IDFatoControleContratosEuromidia"))
+        or _int_ou_none(item.get("IDFatoControleContratoEuromidia"))
+        or _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+    )
+    cod_ponto = _texto_ou_none(item.get("CodPonto") or item.get("CodPontoOriginal"))
+    cod_face = _texto_ou_none(item.get("CodFace") or item.get("CodFaceOriginal"))
+
+    if id_contrato in (None, "", 0) and id_item_controle in (None, "", 0):
+        return {}
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP 1
+                 i.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia
+                ,i.IDFatoControleContratosItensEuromidia
+                ,i.Referencia
+                ,i.NumeroContrato
+                ,i.NumeroPrevia
+                ,i.CNPJ
+                ,i.CodPonto
+                ,i.CodFace
+                ,i.DataLancamento
+                ,i.Cota
+                ,i.CidadeExibicao
+                ,i.Tipo
+                ,i.Origem
+                ,i.EmpresaEuro
+                ,i.CnpjExibibora
+                ,i.TipoDocumento
+                ,i.RazaoSocial
+                ,i.CPF
+                ,i.MarcaExibida
+                ,i.Vendedor
+                ,i.SDR
+                ,i.Agencia
+                ,i.CnpjAgencia
+                ,i.Bureau
+                ,i.CnpjBureau
+                ,i.Intermediario
+                ,i.CnpjIntermediario
+                ,i.DataAssinaturaRenovacao
+                ,i.IDTrimestre
+                ,i.TexmpoExposicao
+                ,i.DataInicioPrevisto
+                ,i.DataTerminoPrevisto
+                ,i.InicioRenovacao
+                ,i.FaturamentoBrutoMensal
+                ,i.PercentualPermuta
+                ,i.CotaOportunidade
+                ,i.ValorPermuta
+                ,i.FaturamentoLiquidoPermuta
+                ,i.NumeroParcelas
+                ,i.DataInicioVencimento
+                ,i.TotalBrutoContrato
+                ,i.TotalLiquidoContratoAGBRCTACORDO
+                ,i.TotalLiquidoContratoAGBRVENDGERCOOR
+                ,i.PercentualAgencia
+                ,i.ValorMensalAgencia
+                ,i.PercentualBureau
+                ,i.ValorBureauMensal
+                ,i.PercentualCartaAcordo
+                ,i.ValorCartaAcordoMensal
+                ,i.ValorOutrasComissoes
+                ,i.FaturamentoLiquidoMensal
+                ,i.PercentualComissaoVendedor
+                ,i.ValorVendedor
+                ,i.ValorVendedorTotal
+                ,i.PercentualComissaoCoordenacao
+                ,i.ValorCoordenador
+                ,i.ValorCoordenadorTotal
+                ,i.PercentualComissaoGerencia
+                ,i.ValorGerencia
+                ,i.ValorGerenciaTotal
+                ,i.AtivoCancelamento
+                ,i.FaturamentoLiquidoFinalMensal
+                ,i.ComissaoGerenciaNordeste
+                ,i.Faturamento
+                ,i.DataCancelamento
+                ,i.OBS
+                ,i.IDVendedor
+                ,i.IDPainelEuromidia
+                ,i.IDDimFacesPaineis
+                ,i.DataFimEfetiva
+                ,i.Status
+                ,i.IDDimCheckinHistorico
+                ,i.IDFatoKanbanCard
+                ,i.BitAtivo
+                ,i.IDEmpresaAgencia
+                ,i.IDDimTipoDocumento
+                ,i.BitPreferencia
+                ,i.BitFracionado
+                ,df.Face AS FaceDescricaoCadastro
+                ,df.CodFace AS CodFaceCadastro
+                ,df.Tipo AS TipoFaceCadastro
+                ,dp.Cidade AS CidadePainelCadastro
+                ,dp.UF AS UFPainelCadastro
+                ,dp.Tipo AS TipoPainelCadastro
+                ,dp.Logradouro AS LogradouroPainelCadastro
+                ,dp.Bairro AS BairroPainelCadastro
+                ,dp.Referencia AS ReferenciaPainelCadastro
+                ,COALESCE(i.IDPainelEuromidia, df.IDDimPaineisEuromidia) AS IDDimPaineisEuromidia
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+            LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] df
+                   ON df.IDDimFacesPaineis = i.IDDimFacesPaineis
+            LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
+                   ON dp.IDDimPaineisEuromidia = COALESCE(i.IDPainelEuromidia, df.IDDimPaineisEuromidia)
+            WHERE
+                (
+                    :id_item_controle IS NOT NULL
+                    AND i.IDFatoControleContratosItensEuromidia = :id_item_controle
+                )
+                OR
+                (
+                    :id_contrato IS NOT NULL
+                    AND i.IDFatoControleContratoEuromidia = :id_contrato
+                    AND ISNULL(LTRIM(RTRIM(CAST(i.CodPonto AS varchar(60)))), '') = ISNULL(LTRIM(RTRIM(CAST(:cod_ponto AS varchar(60)))), '')
+                    AND ISNULL(UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(60))))), '') = ISNULL(UPPER(LTRIM(RTRIM(CAST(:cod_face AS varchar(60))))), '')
+                )
+            ORDER BY
+                CASE
+                    WHEN :id_item_controle IS NOT NULL
+                     AND i.IDFatoControleContratosItensEuromidia = :id_item_controle THEN 0
+                    ELSE 1
+                END,
+                i.IDFatoControleContratosItensEuromidia DESC
+        """),
+        {
+            "id_item_controle": int(id_item_controle) if id_item_controle not in (None, "", 0) else None,
+            "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "cod_ponto": cod_ponto,
+            "cod_face": cod_face,
+        },
+    ).mappings().first()
+
+    return dict(row) if row else {}
+
+
+def _aplicar_fallback_layout_item_solicitacao(item: dict, cab: dict | None = None) -> dict:
+    fallback = _buscar_item_controle_fallback_layout(item, cab)
+    if not fallback:
+        return item
+
+    campos = [
+        "IDFatoControleContratosEuromidia", "IDFatoControleContratosItensEuromidia",
+        "Referencia", "NumeroContrato", "NumeroPrevia", "CNPJ", "CodPonto", "CodFace",
+        "DataLancamento", "Cota", "CidadeExibicao", "Tipo", "Origem", "EmpresaEuro",
+        "CnpjExibibora", "TipoDocumento", "RazaoSocial", "CPF", "MarcaExibida", "Vendedor",
+        "SDR", "Agencia", "CnpjAgencia", "Bureau", "CnpjBureau", "Intermediario",
+        "CnpjIntermediario", "DataAssinaturaRenovacao", "IDTrimestre", "TexmpoExposicao",
+        "DataInicioPrevisto", "DataTerminoPrevisto", "InicioRenovacao", "FaturamentoBrutoMensal",
+        "PercentualPermuta", "CotaOportunidade", "ValorPermuta", "FaturamentoLiquidoPermuta",
+        "NumeroParcelas", "DataInicioVencimento", "TotalBrutoContrato",
+        "TotalLiquidoContratoAGBRCTACORDO", "TotalLiquidoContratoAGBRVENDGERCOOR",
+        "PercentualAgencia", "ValorMensalAgencia", "PercentualBureau", "ValorBureauMensal",
+        "PercentualCartaAcordo", "ValorCartaAcordoMensal", "ValorOutrasComissoes",
+        "FaturamentoLiquidoMensal", "PercentualComissaoVendedor", "ValorVendedor",
+        "ValorVendedorTotal", "PercentualComissaoCoordenacao", "ValorCoordenador",
+        "ValorCoordenadorTotal", "PercentualComissaoGerencia", "ValorGerencia",
+        "ValorGerenciaTotal", "AtivoCancelamento", "FaturamentoLiquidoFinalMensal",
+        "ComissaoGerenciaNordeste", "Faturamento", "DataCancelamento", "OBS", "IDVendedor",
+        "IDPainelEuromidia", "IDDimFacesPaineis", "DataFimEfetiva", "Status",
+        "IDDimCheckinHistorico", "IDFatoKanbanCard", "BitAtivo", "IDEmpresaAgencia",
+        "IDDimTipoDocumento", "BitPreferencia", "BitFracionado",
+        "FaceDescricaoCadastro", "CodFaceCadastro", "TipoFaceCadastro", "CidadePainelCadastro",
+        "UFPainelCadastro", "TipoPainelCadastro", "LogradouroPainelCadastro",
+        "BairroPainelCadastro", "ReferenciaPainelCadastro", "IDDimPaineisEuromidia",
+    ]
+
+    for campo in campos:
+        if _valor_esta_vazio_para_fallback(item.get(campo)) and not _valor_esta_vazio_para_fallback(fallback.get(campo)):
+            item[campo] = fallback.get(campo)
+
+    return item
+
+
+def _valor_form_ou_fallback(form, nome_campo: str, parser, item_atual: dict, fallback: dict, campo_banco: str):
+    valor_bruto = form.get(nome_campo)
+    if valor_bruto is not None and str(valor_bruto).strip() != "":
+        return parser(valor_bruto)
+
+    if not _valor_esta_vazio_para_fallback(item_atual.get(campo_banco)):
+        return item_atual.get(campo_banco)
+
+    return fallback.get(campo_banco)
 
 def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     sql_cabecalho = text("""
@@ -7510,6 +8304,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     itens = []
     for row in itens_rows:
         item = dict(row)
+        item = _aplicar_fallback_layout_item_solicitacao(item, cab)
         item["DataLancamentoInput"] = _data_para_input_date(item.get("DataLancamento"))
         item["DataAssinaturaRenovacaoInput"] = _data_para_input_date(item.get("DataAssinaturaRenovacao"))
         item["DataInicioPrevistoInput"] = _data_para_input_date(item.get("DataInicioPrevisto"))
@@ -7517,7 +8312,72 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
         item["DataInicioVencimentoInput"] = _data_para_input_date(item.get("DataInicioVencimento"))
         item["DataCancelamentoInput"] = _data_para_input_date(item.get("DataCancelamento"))
         item["DataFimEfetivaInput"] = _data_para_input_date(item.get("DataFimEfetiva"))
+        item["AgendamentosFaceContrato"] = []
+        item["TemAgendamentoFaceContrato"] = False
+        item["QuantidadeAgendamentosFaceContrato"] = 0
         itens.append(item)
+
+    ag_rows_final = db.session.execute(
+        text("""
+            SELECT
+                 fsci.IDFatoSolicitacaoContratoItemEuromidia
+                ,ag.IDFatoAgendamentoFaceContrato
+                ,ag.IDFatoControleContratosEuromidia
+                ,ag.IDFatoControleContratosItensEuromidia
+                ,ag.Sequencia
+                ,ag.DataInicio
+                ,ag.DataTermino
+                ,DATEDIFF(DAY, ag.DataInicio, ag.DataTermino) + 1 AS QuantidadeDias
+                ,ag.Situacao
+                ,ag.Referencia
+                ,ag.BitAtivo
+                ,ag.DataAtualizado
+            FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] fsci
+            INNER JOIN [Integracao].[Silver].[FatoAgendamentoFaceContrato] ag
+                    ON ag.IDFatoControleContratosItensEuromidia = fsci.IDFatoControleContratosItensEuromidia
+                   AND ag.IDFatoControleContratosEuromidia = COALESCE(fsci.IDFatoControleContratosEuromidia, :id_contrato_controle)
+            WHERE fsci.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+              AND ISNULL(ag.BitAtivo, 1) = 1
+            ORDER BY
+                fsci.IDFatoSolicitacaoContratoItemEuromidia ASC,
+                ag.Sequencia ASC,
+                ag.DataInicio ASC
+        """),
+        {
+            "id_solicitacao": int(id_solicitacao),
+            "id_contrato_controle": _int_ou_none(cab.get("IDFatoControleContratosEuromidia")),
+        },
+    ).mappings().all()
+
+    ag_rows = list(ag_rows_final)
+
+    mapa_item_por_id = {
+        int(item["IDFatoSolicitacaoContratoItemEuromidia"]): item
+        for item in itens
+        if _int_ou_none(item.get("IDFatoSolicitacaoContratoItemEuromidia")) not in (None, "", 0)
+    }
+
+    for row in ag_rows:
+        id_item_solic = _int_ou_none(row.get("IDFatoSolicitacaoContratoItemEuromidia"))
+        item = mapa_item_por_id.get(int(id_item_solic)) if id_item_solic not in (None, "", 0) else None
+        if not item:
+            continue
+
+        ag = dict(row)
+        ag["DataInicioInput"] = _data_para_input_date(ag.get("DataInicio"))
+        ag["DataTerminoInput"] = _data_para_input_date(ag.get("DataTermino"))
+        ag["QuantidadeDias"] = int(ag.get("QuantidadeDias") or 0)
+        ag["Situacao"] = (ag.get("Situacao") or "PROGRAMADO").strip().upper()
+        ag["Referencia"] = (ag.get("Referencia") or "").strip()
+        if _referencia_agendamento_pendente_eh_tecnica(ag.get("Referencia")):
+            ag["Referencia"] = ""
+        item["AgendamentosFaceContrato"].append(ag)
+
+    for item in itens:
+        _marcar_periodo_restante_visual(item)
+        qtd_ag = len(item.get("AgendamentosFaceContrato") or [])
+        item["TemAgendamentoFaceContrato"] = qtd_ag > 0
+        item["QuantidadeAgendamentosFaceContrato"] = qtd_ag
 
     return {
         "solicitacao": cab,
@@ -7871,6 +8731,24 @@ def _processar_aprovacao_contrato_admin(
         id_dim_usuario_acao=id_usuario_int,
     )
 
+    resultado_agendamentos_face = {}
+    if form is not None:
+        resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
+            id_solicitacao=int(id_solicitacao_int),
+            form=form,
+            id_usuario_logado=id_usuario_int,
+            id_contrato_controle_resolvido=id_fato_controle,
+        )
+
+    resultado_agendamentos_pendentes = _migrar_agendamentos_face_pendentes_solicitacao_para_contrato(
+        id_solicitacao=int(id_solicitacao_int),
+        id_contrato_controle=id_fato_controle,
+    )
+
+    resultado_bit_fracionado = _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
+        id_contrato_controle=id_fato_controle,
+    )
+
     db.session.commit()
 
     task_airflow_id = None
@@ -7923,6 +8801,9 @@ def _processar_aprovacao_contrato_admin(
         "ids_itens_controle": ids_itens_controle,
         "task_airflow_id": task_airflow_id,
         "resultado_aprovacao": resultado_aprovacao,
+        "resultado_agendamentos_face": resultado_agendamentos_face,
+        "resultado_agendamentos_pendentes": resultado_agendamentos_pendentes,
+        "resultado_bit_fracionado": resultado_bit_fracionado,
     }
 
 
@@ -7952,6 +8833,13 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
             tipo_solicitacao = _tipo_solicitacao_normalizado(cab_atualizada.get("TipoSolicitacao"))
             id_fato_controle = _int_ou_none(cab_atualizada.get("IDFatoControleContratosEuromidia"))
 
+            resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
+                id_solicitacao=int(id_solicitacao),
+                form=request.form,
+                id_usuario_logado=id_usuario_logado,
+                id_contrato_controle_resolvido=id_fato_controle,
+            )
+
             if acao == "salvar":
                 _sincronizar_contato_contrato_se_fase_4(
                     id_fato_kanban_card=id_card,
@@ -7973,8 +8861,19 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     id_dim_usuario_acao=id_usuario_logado,
                 )
 
+                resultado_bit_fracionado_salvar = {}
+                if id_fato_controle not in (None, "", 0):
+                    resultado_bit_fracionado_salvar = _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
+                        id_contrato_controle=id_fato_controle,
+                    )
+
                 db.session.commit()
-                flash("Alterações salvas com sucesso.", "success")
+                if int(resultado_agendamentos_face.get("inseridos") or 0) > 0 or int(resultado_agendamentos_face.get("atualizados") or 0) > 0:
+                    flash("Alterações salvas com sucesso. A divisão em períodos ficou preservada para a aprovação.", "success")
+                elif resultado_agendamentos_face.get("ignorados_sem_item_controle"):
+                    flash("Alterações salvas, mas a divisão em períodos ainda não foi gravada porque o item não possui ContratoItem definitivo. Ela será gravada quando você aprovar com a grade preenchida.", "info")
+                else:
+                    flash("Alterações salvas com sucesso.", "success")
                 return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
             if acao == "aprovar":

@@ -41,21 +41,28 @@
     display:grid;
     grid-template-columns:1.4fr .6fr;
     gap:12px;
-    align-items:end;
+    align-items:start;
   }
 
   .reserva-grid-3{
     display:grid;
     grid-template-columns:1fr 1fr 1fr;
     gap:12px;
-    align-items:end;
+    align-items:start;
   }
 
   .reserva-grid-4{
     display:grid;
     grid-template-columns:.7fr .7fr .7fr 1.9fr;
     gap:12px;
-    align-items:end;
+    align-items:start;
+  }
+
+  .reserva-grid-2 > div,
+  .reserva-grid-3 > div,
+  .reserva-grid-4 > div{
+    min-width:0;
+    align-self:start;
   }
 
   @media (max-width:1100px){
@@ -73,6 +80,29 @@
     font-weight:900;
     display:block;
     margin-bottom:6px;
+    line-height:1.25;
+    min-height:18px;
+  }
+
+  .reserva-grid-2 .form-control,
+  .reserva-grid-3 .form-control,
+  .reserva-grid-4 .form-control,
+  .reserva-grid-2 .kb-input,
+  .reserva-grid-3 .kb-input,
+  .reserva-grid-4 .kb-input,
+  .reserva-face-contador{
+    min-height:48px;
+    display:flex;
+    align-items:center;
+  }
+
+  .reserva-grid-2 input.form-control,
+  .reserva-grid-3 input.form-control,
+  .reserva-grid-4 input.form-control,
+  .reserva-grid-2 select.form-control,
+  .reserva-grid-3 select.form-control,
+  .reserva-grid-4 select.form-control{
+    width:100%;
   }
 
   .hint{
@@ -399,6 +429,79 @@
   .fp-tooltip .tag.indisp{background:rgba(107,114,128,.12);color:#6b7280;}
   .fp-tooltip .muted{font-weight:800;opacity:.75;}
 
+  .reserva-empresas-relacionadas{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    background:#f8fafc;
+    padding:12px;
+  }
+
+  .reserva-empresas-relacionadas-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:10px;
+  }
+
+  .reserva-empresas-relacionadas-title{
+    font-weight:1000;
+    color:#0f172a;
+  }
+
+  .reserva-empresas-relacionadas-lista{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+
+  .reserva-empresa-relacionada-item{
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:13px;
+    background:#fff;
+    padding:10px;
+  }
+
+  .reserva-empresa-relacionada-linha{
+    display:grid;
+    grid-template-columns:1fr auto auto;
+    gap:8px;
+    align-items:end;
+  }
+
+  .reserva-empresa-relacionada-marca{
+    margin-top:10px;
+  }
+
+  .reserva-empresa-relacionada-btn{
+    width:40px;
+    height:40px;
+    border-radius:12px;
+    border:1px solid var(--border);
+    background:#fff;
+    font-weight:1000;
+    font-size:18px;
+    line-height:1;
+    cursor:pointer;
+  }
+
+  .reserva-empresa-relacionada-btn.is-add{
+    color:#166534;
+    border-color:rgba(22,101,52,.30);
+    background:rgba(22,101,52,.06);
+  }
+
+  .reserva-empresa-relacionada-btn.is-remove{
+    color:#991b1b;
+    border-color:rgba(185,28,28,.25);
+    background:rgba(185,28,28,.06);
+  }
+
+  @media (max-width:900px){
+    .reserva-empresa-relacionada-linha{grid-template-columns:1fr 40px 40px;}
+  }
+
 </style>
 
 <div class="reserva-ocupacao-page">
@@ -440,7 +543,7 @@
           <div>
             <label class="campo-label">Faces selecionadas</label>
             <div class="reserva-face-contador" id="contadorFacesSelecionadas">0 selecionadas</div>
-            <div class="hint">Cada face selecionada terá campos próprios de data, cliente, vendedor, contrato, marca e observação.</div>
+            <div class="hint"></div>
           </div>
         </div>
       </div>
@@ -986,6 +1089,7 @@
       numero_previa: "",
       marca_exibida: "",
       observacao: "",
+      empresas_relacionadas: [],
       clientes: [],
       vendedores: [],
       contratos: [],
@@ -1075,6 +1179,86 @@
     if(inputContrato && contrato) inputContrato.value = labelContrato(contrato);
   }
 
+  function criarUidEmpresaRelacionada(){
+    return "er_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function novaEmpresaRelacionada(){
+    return {
+      uid: criarUidEmpresaRelacionada(),
+      id_empresa: "",
+      razao_social: "",
+      cnpj: "",
+      marca: ""
+    };
+  }
+
+  function garantirEmpresasRelacionadasEstado(estado){
+    if(!Array.isArray(estado.empresas_relacionadas)){
+      estado.empresas_relacionadas = [];
+    }
+
+    estado.empresas_relacionadas = estado.empresas_relacionadas.filter(function(item){
+      return item && typeof item === "object";
+    });
+
+    if(!estado.empresas_relacionadas.length){
+      estado.empresas_relacionadas.push(novaEmpresaRelacionada());
+    }
+
+    estado.empresas_relacionadas.forEach(function(item){
+      if(!texto(item.uid)) item.uid = criarUidEmpresaRelacionada();
+      item.id_empresa = texto(item.id_empresa);
+      item.razao_social = texto(item.razao_social);
+      item.cnpj = texto(item.cnpj);
+      item.marca = texto(item.marca);
+    });
+  }
+
+  function obterEmpresaRelacionadaPorUid(estado, uid){
+    garantirEmpresasRelacionadasEstado(estado);
+    return estado.empresas_relacionadas.find(function(item){ return texto(item.uid) === texto(uid); });
+  }
+
+  function renderOpcoesComboEmpresaRelacionada(estado, item, input, lista){
+    if(!input || !lista) return;
+
+    const termo = normalizar(input.value);
+    const idSelecionado = texto(item.id_empresa);
+    const clientes = Array.isArray(estado.clientes) ? estado.clientes : [];
+    const itens = clientes.filter(function(empresa){
+      return !termo || normalizar(labelEmpresa(empresa)).includes(termo);
+    });
+
+    lista.innerHTML = "";
+
+    if(!itens.length){
+      const vazio = document.createElement("div");
+      vazio.className = "kb-combobox-item";
+      vazio.innerHTML = "<span class='top'>Nenhuma empresa encontrada</span>";
+      lista.appendChild(vazio);
+    }else{
+      itens.slice(0, 200).forEach(function(empresa){
+        const id = getEmpresaId(empresa);
+        const div = document.createElement("div");
+        div.className = "kb-combobox-item" + (id && id === idSelecionado ? " is-selected" : "");
+        div.innerHTML = "<span class='top'>" + escapeHtml(labelEmpresa(empresa)) + "</span>" + (id && id === idSelecionado ? "<span class='kb-face-check'>✓</span>" : "");
+        div.addEventListener("mousedown", function(ev){
+          ev.preventDefault();
+          item.id_empresa = id;
+          item.razao_social = texto(empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia);
+          item.cnpj = texto(empresa.CNPJ);
+          input.value = labelEmpresa(empresa);
+          fecharLista(lista);
+          renderCardsReservas();
+        });
+        lista.appendChild(div);
+      });
+    }
+
+    abrirLista(lista);
+  }
+
   function montarComboCard(estado, card, cfg){
     const input = card.querySelector(cfg.inputSelector);
     const lista = card.querySelector(cfg.listaSelector);
@@ -1122,17 +1306,45 @@
     if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
   }
 
+  function htmlEmpresasRelacionadas(estado){
+    garantirEmpresasRelacionadasEstado(estado);
+
+    const linhas = estado.empresas_relacionadas.map(function(item, idx){
+      const empresa = estado.clientes.find(function(cli){ return getEmpresaId(cli) === texto(item.id_empresa); });
+      const valorInput = empresa ? labelEmpresa(empresa) : texto(item.razao_social || item.cnpj || "");
+      const mostrarMarca = !!texto(item.id_empresa);
+
+      return "<div class='reserva-empresa-relacionada-item' data-role='empresa-relacionada-item' data-uid='" + escapeHtml(item.uid) + "'>" +
+        "<div class='reserva-empresa-relacionada-linha'>" +
+          "<div><label class='campo-label'>Empresa Relacionada</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-empresa-relacionada' type='text' autocomplete='off' placeholder='Digite razão social ou CNPJ...' value='" + escapeHtml(valorInput) + "'><button class='kb-combobox-toggle' data-role='btn-empresa-relacionada' type='button' aria-label='Abrir lista de empresas'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-empresa-relacionada'></div></div><div class='hint'>Opcional. Use + para adicionar outra empresa relacionada.</div></div>" +
+          "<button type='button' class='reserva-empresa-relacionada-btn is-add' data-role='add-empresa-relacionada' title='Adicionar empresa relacionada'>+</button>" +
+          "<button type='button' class='reserva-empresa-relacionada-btn is-remove' data-role='remover-empresa-relacionada' title='Remover empresa relacionada'>−</button>" +
+        "</div>" +
+        (mostrarMarca
+          ? "<div class='reserva-empresa-relacionada-marca'><label class='campo-label'>Marca da empresa relacionada</label><input class='form-control' data-role='marca-empresa-relacionada' type='text' maxlength='200' placeholder='Se ficar vazio, usa a Marca Exibida principal' value='" + escapeHtml(item.marca) + "'><div class='hint'>Opcional. Se não preencher, o sistema salva a mesma Marca Exibida principal deste card.</div></div>"
+          : "") +
+      "</div>";
+    }).join("");
+
+    return "<div class='reserva-empresas-relacionadas'>" +
+      "<div class='reserva-empresas-relacionadas-top'>" +
+        "<div><div class='reserva-empresas-relacionadas-title'>Empresa Relacionada</div><div class='hint'>Campo opcional para vincular uma ou mais empresas extras à reserva.</div></div>" +
+      "</div>" +
+      "<div class='reserva-empresas-relacionadas-lista' data-role='empresas-relacionadas-lista'>" + linhas + "</div>" +
+    "</div>";
+  }
+
   function htmlCardReservaVazio(){
     return "<div class='reserva-card-top'>" +
       "<div><div class='reserva-card-titulo'>Reserva da primeira face <span class='tag-pendente'>SELECIONE UMA FACE</span></div>" +
-      "<div class='reserva-card-resumo'>Escolha uma face no campo Face / Ponto acima. Este primeiro card já fica aberto; a segunda face em diante cria novos cards embaixo.</div></div>" +
+      "<div class='reserva-card-resumo'></div></div>" +
       "</div>" +
 
       "<div class='reserva-grid-4'>" +
-        "<div><label class='campo-label'>Cota desta face</label><input class='form-control' value='Selecione uma face' readonly tabindex='-1'><div class='hint'>Após selecionar a face, o sistema identifica se é digital ou analógica.</div></div>" +
+        "<div><label class='campo-label'>Cota desta face</label><input class='form-control' value='Selecione uma face' readonly tabindex='-1'><div class='hint'></div></div>" +
         "<div><label class='campo-label'>Data início</label><input type='text' class='form-control' placeholder='AAAA-MM-DD' value='" + escapeHtml(hojeYmd()) + "' disabled></div>" +
         "<div><label class='campo-label'>Data fim</label><input type='text' class='form-control' placeholder='AAAA-MM-DD' value='" + escapeHtml(hojeYmd()) + "' disabled></div>" +
-        "<div><label class='campo-label'>Prazo da reserva</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>No backend isso vira 2 dias úteis, pulando sábado e domingo.</div></div>" +
+        "<div><label class='campo-label'>Prazo da reserva</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'></div></div>" +
       "</div>" +
 
       "<div style='height:12px;'></div>" +
@@ -1146,6 +1358,10 @@
       "<div style='height:12px;'></div>" +
 
       "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input type='text' class='form-control' maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' disabled><div class='hint'>Este campo será liberado depois de selecionar a face.</div></div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      "<div class='reserva-empresas-relacionadas'><div class='reserva-empresas-relacionadas-title'>Empresa Relacionada</div><div class='hint'>Selecione empresas que estejam relacionadas a Reserva</div><div style='height:10px;'></div><div class='reserva-empresa-relacionada-linha'><div><label class='campo-label'>Empresa Relacionada</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite razão social ou CNPJ...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div><button type='button' class='reserva-empresa-relacionada-btn is-add' disabled>+</button><button type='button' class='reserva-empresa-relacionada-btn is-remove' disabled>−</button></div></div>" +
 
       "<div style='height:12px;'></div>" +
 
@@ -1184,6 +1400,10 @@
       "<div style='height:12px;'></div>" +
 
       "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input data-role='marca-exibida' type='text' class='form-control' required maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' value='" + escapeHtml(estado.marca_exibida) + "'><div class='hint'>Obrigatório • até 200 caracteres.</div></div>" +
+
+      "<div style='height:12px;'></div>" +
+
+      htmlEmpresasRelacionadas(estado) +
 
       "<div style='height:12px;'></div>" +
 
@@ -1285,6 +1505,57 @@
       }
     });
 
+    garantirEmpresasRelacionadasEstado(estado);
+    card.querySelectorAll("[data-role='empresa-relacionada-item']").forEach(function(container){
+      const uid = texto(container.getAttribute("data-uid"));
+      const item = obterEmpresaRelacionadaPorUid(estado, uid);
+      if(!item) return;
+
+      const input = container.querySelector("[data-role='input-empresa-relacionada']");
+      const lista = container.querySelector("[data-role='lista-empresa-relacionada']");
+      const botao = container.querySelector("[data-role='btn-empresa-relacionada']");
+      const marcaRelacionada = container.querySelector("[data-role='marca-empresa-relacionada']");
+      const btnAdd = container.querySelector("[data-role='add-empresa-relacionada']");
+      const btnRemoverRelacionado = container.querySelector("[data-role='remover-empresa-relacionada']");
+
+      if(input && lista && botao){
+        const renderRelacionado = function(){ renderOpcoesComboEmpresaRelacionada(estado, item, input, lista); };
+        input.addEventListener("input", function(){
+          item.id_empresa = "";
+          item.razao_social = texto(input.value);
+          item.cnpj = "";
+          renderRelacionado();
+        });
+        input.addEventListener("focus", renderRelacionado);
+        botao.addEventListener("click", renderRelacionado);
+      }
+
+      if(marcaRelacionada){
+        marcaRelacionada.addEventListener("input", function(){
+          item.marca = texto(marcaRelacionada.value);
+        });
+      }
+
+      if(btnAdd){
+        btnAdd.addEventListener("click", function(){
+          garantirEmpresasRelacionadasEstado(estado);
+          estado.empresas_relacionadas.push(novaEmpresaRelacionada());
+          renderCardsReservas();
+        });
+      }
+
+      if(btnRemoverRelacionado){
+        btnRemoverRelacionado.addEventListener("click", function(){
+          garantirEmpresasRelacionadasEstado(estado);
+          estado.empresas_relacionadas = estado.empresas_relacionadas.filter(function(emp){ return texto(emp.uid) !== uid; });
+          if(!estado.empresas_relacionadas.length){
+            estado.empresas_relacionadas.push(novaEmpresaRelacionada());
+          }
+          renderCardsReservas();
+        });
+      }
+    });
+
     preencherInputComboPorValor(estado, card);
   }
 
@@ -1355,6 +1626,13 @@
       if(estado.id_vendedor && !estado.vendedores.some(function(item){ return getVendedorId(item) === estado.id_vendedor; })) estado.id_vendedor = "";
       if(estado.id_contrato && !estado.contratosMap.has(estado.id_contrato)) estado.id_contrato = "";
 
+      garantirEmpresasRelacionadasEstado(estado);
+      estado.empresas_relacionadas.forEach(function(rel){
+        if(rel.id_empresa && !estado.clientes.some(function(item){ return getEmpresaId(item) === rel.id_empresa; })){
+          rel.id_empresa = "";
+        }
+      });
+
       estado.card_msg = "Dados carregados para esta face.";
       estado.card_msg_ok = true;
       renderCardsReservas();
@@ -1393,6 +1671,19 @@
     const contrato = estado.contratosMap.get(texto(estado.id_contrato));
     const idFatoControle = contrato ? numeroInteiroOuVazio(contrato.IDFatoControleContratosEuromidia) : "";
 
+    garantirEmpresasRelacionadasEstado(estado);
+    const empresasRelacionadas = estado.empresas_relacionadas
+      .filter(function(item){ return texto(item.id_empresa); })
+      .map(function(item){
+        const empresa = estado.clientes.find(function(cli){ return getEmpresaId(cli) === texto(item.id_empresa); });
+        return {
+          id_empresa: texto(item.id_empresa),
+          razao_social: texto(item.razao_social || (empresa ? (empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia) : "")),
+          cnpj: texto(item.cnpj || (empresa ? empresa.CNPJ : "")),
+          marca: texto(item.marca) || texto(estado.marca_exibida)
+        };
+      });
+
     return {
       csrf_token: getCsrfToken(),
       cod_ponto: codPonto(estado.face),
@@ -1407,6 +1698,7 @@
       numero_contrato: contrato ? texto(contrato.NumeroContrato) : texto(estado.numero_contrato),
       numero_previa: contrato ? texto(contrato.NumeroPrevia) : texto(estado.numero_previa),
       marca_exibida: texto(estado.marca_exibida),
+      empresas_relacionadas: empresasRelacionadas,
       observacao: texto(estado.observacao)
     };
   }
@@ -1424,6 +1716,14 @@
     if(!texto(estado.id_vendedor)) return "Selecione um vendedor.";
     if(!texto(estado.marca_exibida)) return "Informe a Marca Exibida.";
     if(texto(estado.marca_exibida).length > 200) return "Marca Exibida excede 200 caracteres.";
+
+    garantirEmpresasRelacionadasEstado(estado);
+    for(const rel of estado.empresas_relacionadas){
+      if(texto(rel.id_empresa) && texto(rel.marca).length > 200){
+        return "Marca da empresa relacionada excede 200 caracteres.";
+      }
+    }
+
     return "";
   }
 
