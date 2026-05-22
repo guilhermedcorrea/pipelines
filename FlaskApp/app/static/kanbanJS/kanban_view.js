@@ -4187,6 +4187,17 @@ function normalizarCardServidor(card){
       ? null
       : idNum(idEmpRelacionadaBruto);
 
+  c.IDEmpresa =
+    c.IDEmpresa === null ||
+    c.IDEmpresa === undefined ||
+    c.IDEmpresa === ""
+      ? c.IDEmpresaRelacionadaCard
+      : idNum(c.IDEmpresa);
+
+  if (!c.IDEmpresa && c.IDEmpresaRelacionadaCard) {
+    c.IDEmpresa = c.IDEmpresaRelacionadaCard;
+  }
+
   const idReservaBruto =
     c.IDReserva ??
     c.id_reserva ??
@@ -6858,6 +6869,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const idSegmento = idNum(
       origem.IDDimCnaes ??
       origem.id_dim_cnaes ??
+      origem.EmpresaIDDimCnaes ??
       origem.IDDimCnae ??
       origem.id_dim_cnae ??
       0
@@ -6887,8 +6899,8 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       origem.SegmentoDescricao ??
       origem.DescricaoCnae ??
       origem.EmpresaDescricaoCnae ??
-      origem.Descricao ??
-      origem.descricao ??
+      origem.descricao_cnae ??
+      origem.CnaeDescricao ??
       classe ??
       ""
     ).trim();
@@ -6956,7 +6968,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     }
 
     const classeFallback = safeStr(card?.SegmentoClasse ?? card?.EmpresaClasse ?? card?.Classe ?? "").trim();
-    const descricaoFallback = safeStr(card?.SegmentoDescricao ?? card?.DescricaoCnae ?? card?.Descricao ?? "").trim();
+    const descricaoFallback = safeStr(card?.SegmentoDescricao ?? card?.DescricaoCnae ?? card?.EmpresaDescricaoCnae ?? card?.descricao_cnae ?? "").trim();
 
     if (inputSegmentoCardBusca && (classeFallback || descricaoFallback)) {
       inputSegmentoCardBusca.value = classeFallback && descricaoFallback

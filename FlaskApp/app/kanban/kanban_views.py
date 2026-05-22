@@ -6147,7 +6147,8 @@ def _sql_join_empresa_relacionada_card(alias_card: str = "c", alias_empresa: str
         LEFT JOIN {TABELA_EMPRESAS} {alias_empresa}
           ON {alias_empresa}.IDEmpresa = {alias_card}.{nome_coluna}
         LEFT JOIN {TABELA_CNAES} {alias_cnae}
-          ON {alias_cnae}.cnaepadrao = {alias_empresa}.CNAE
+          ON LTRIM(RTRIM(CONVERT(varchar(30), {alias_empresa}.CNAE))) COLLATE Latin1_General_CI_AI
+           = LTRIM(RTRIM(CONVERT(varchar(30), {alias_cnae}.cnaepadrao))) COLLATE Latin1_General_CI_AI
         """.strip()
 
     return f"""
@@ -9710,7 +9711,7 @@ def _obter_card_autorizado(id_card: int, *, incluir_inativo: bool = False) -> di
     )
 
     select_id_dim_cnaes = (
-        "c.IDDimCnaes AS IDDimCnaes,"
+        "TRY_CONVERT(int, c.IDDimCnaes) AS IDDimCnaes,"
         if _coluna_existe(TABELA_CARD, "IDDimCnaes")
         else "CAST(NULL AS int) AS IDDimCnaes,"
     )
@@ -14471,6 +14472,290 @@ def _registrar_historico_negociacao_preco_operacional(
 
 
 
+
+def _listar_paineis_vinculados_card_minimo(id_card: int) -> list[dict[str, Any]]:
+    """Fallback seguro para não derrubar /kanban/api/cards quando uma consulta completa falhar.
+
+    Este fallback usa somente colunas testadas em tempo de execução em
+    Kanban.Silver.FatoKanbanCardPainelFace. A tela continua abrindo e, se existir
+    CodFace/CodPonto gravado no vínculo, o bloco Painel / Face ainda aparece.
+    """
+
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    if id_card_int <= 0:
+        return []
+
+    def select_coluna(nome_coluna: str, alias: str, cast_sql: str = "") -> str:
+        if _coluna_existe(TABELA_CARD_PAINEL_FACE, nome_coluna):
+            if cast_sql:
+                return f"{cast_sql}(r.{nome_coluna}) AS {alias}"
+            return f"r.{nome_coluna} AS {alias}"
+        return f"CAST(NULL AS varchar(500)) AS {alias}"
+
+    def select_int(nome_coluna: str, alias: str) -> str:
+        if _coluna_existe(TABELA_CARD_PAINEL_FACE, nome_coluna):
+            return f"TRY_CONVERT(int, r.{nome_coluna}) AS {alias}"
+        return f"CAST(NULL AS int) AS {alias}"
+
+    def select_decimal(nome_coluna: str, alias: str) -> str:
+        if _coluna_existe(TABELA_CARD_PAINEL_FACE, nome_coluna):
+            return f"TRY_CONVERT(decimal(18,4), r.{nome_coluna}) AS {alias}"
+        return f"CAST(NULL AS decimal(18,4)) AS {alias}"
+
+    colunas_select = [
+        select_int("IDFatoKanbanCardPainelFace", "IDFatoKanbanCardPainelFace"),
+        select_int("Ordem", "Ordem"),
+        select_int("IDDimPaineisEuromidia", "IDDimPaineisEuromidia"),
+        select_int("IDDimFacesPaineis", "IDDimFacesPaineis"),
+        select_int("CodPonto", "CodPonto"),
+        select_coluna("CodFace", "CodFace"),
+        "CAST(NULL AS varchar(80)) AS Face",
+        "CAST(NULL AS varchar(80)) AS TipoFace",
+        select_coluna("TipoPainel", "TipoPainel"),
+        select_int("AnoCusto", "AnoCusto"),
+        select_decimal("CustoTabela", "CustoTabela"),
+        select_int("IDDimTabelaPrecosEuromidia", "IDDimTabelaPrecosEuromidia"),
+        select_coluna("PeriodoExibicao", "PeriodoExibicao"),
+        select_int("ExibicoesDia", "ExibicoesDia"),
+        select_decimal("ValorTabela", "ValorTabela"),
+        select_coluna("Tabela", "Tabela"),
+        select_coluna("PoliticaTrocas", "PoliticaTrocas"),
+        select_decimal("ValorTroca", "ValorTroca"),
+        select_decimal("NovoValor", "NovoValor"),
+        select_decimal("PercentualDesconto", "PercentualDesconto"),
+        select_decimal("ValorVendaFinal", "ValorVendaFinal"),
+        select_decimal("MargemValor", "MargemValor"),
+        select_decimal("MargemPercentual", "MargemPercentual"),
+        ("CONVERT(varchar(10), r.DataInicio, 23) AS DataInicio" if _coluna_existe(TABELA_CARD_PAINEL_FACE, "DataInicio") else "CAST(NULL AS varchar(10)) AS DataInicio"),
+        ("CONVERT(varchar(10), r.DataFim, 23) AS DataFim" if _coluna_existe(TABELA_CARD_PAINEL_FACE, "DataFim") else "CAST(NULL AS varchar(10)) AS DataFim"),
+        "CAST(NULL AS varchar(200)) AS Logradouro",
+        "CAST(NULL AS varchar(120)) AS Cidade",
+        "CAST(NULL AS varchar(2)) AS UF",
+        "CAST(NULL AS varchar(120)) AS Bairro",
+        "CAST(NULL AS varchar(50)) AS Numero",
+        "CAST(NULL AS int) AS QuantidadeFaces",
+        "CAST(NULL AS int) AS IDFatoOcupacaoPaineisEuromidia",
+        "CAST(NULL AS int) AS CotaReserva",
+        "CAST(NULL AS varchar(30)) AS StatusReserva",
+        "CAST(NULL AS varchar(19)) AS CriadoEmReserva",
+        "CAST(NULL AS varchar(19)) AS ExpiraEmReserva",
+        "CAST(NULL AS varchar(10)) AS DataInicioReserva",
+        "CAST(NULL AS varchar(10)) AS DataFimReserva",
+        "CAST(NULL AS int) AS IDDimCheckinHistorico",
+        "CAST(NULL AS int) AS IDFatoCheckinCompartilhamentoPublico",
+        "CAST(NULL AS varchar(500)) AS TokenPublicoCheckin",
+        "CAST(NULL AS int) AS TemSenhaCheckinPublico",
+        "CAST(NULL AS varchar(19)) AS DataChekinCheckinPublico",
+        "CAST(NULL AS varchar(19)) AS DataConfirmacaoCheckinPublico",
+        "CAST(NULL AS varchar(19)) AS DataCriacaoCheckinPublico",
+        "CAST(NULL AS varchar(19)) AS DataAtualizacaoCheckinPublico",
+        "CAST(NULL AS varchar(19)) AS DataExpiracaoCheckinPublico",
+        "CAST(NULL AS varchar(19)) AS DataUltimoAcessoCheckinPublico",
+        "CAST(NULL AS int) AS QuantidadeAcessosCheckinPublico",
+    ]
+
+    filtro_ativo = ""
+    if _coluna_existe(TABELA_CARD_PAINEL_FACE, "Ativo"):
+        filtro_ativo = "AND ISNULL(r.Ativo, 1) = 1"
+
+    order_by = ""
+    if _coluna_existe(TABELA_CARD_PAINEL_FACE, "Ordem"):
+        order_by = "ORDER BY ISNULL(r.Ordem, 0), r.IDFatoKanbanCardPainelFace"
+    else:
+        order_by = "ORDER BY r.IDFatoKanbanCardPainelFace"
+
+    sql = text(f"""
+        SELECT
+            {', '.join(colunas_select)}
+        FROM {TABELA_CARD_PAINEL_FACE} r
+        WHERE r.IDFatoKanbanCard = :id_card
+          {filtro_ativo}
+        {order_by};
+    """)
+
+    try:
+        rows = db.session.execute(sql, {"id_card": id_card_int}).mappings().all()
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN: fallback mínimo também falhou ao listar painel/face. id_card=%s",
+            id_card_int,
+        )
+        return []
+
+    itens = _rows_para_dicts(rows)
+    for item in itens:
+        item["IDFatoOcupacaoPaineisEuromidia"] = None
+        item["IDReserva"] = None
+        item["id_reserva"] = None
+        item["Reserva"] = None
+        item["ReservaInformadaPeloUsuario"] = False
+        item["UrlCheckinPublico"] = None
+        item["SenhaCheckinPublico"] = None
+        item["SenhaCheckinStatus"] = None
+
+    return itens
+
+
+def _listar_painel_face_fallback_card_por_contrato(id_card: int) -> list[dict[str, Any]]:
+    """
+    Fallback para cards antigos de renovação/aditivo que têm CodPontoContrato/CodFaceContrato
+    no cabeçalho do card, mas ainda não possuem linha em FatoKanbanCardPainelFace.
+
+    Isso permite que o modal do Kanban abra o bloco Painel / Face preenchido mesmo
+    quando o vínculo operacional ainda não foi materializado na tabela de painel/face.
+    """
+
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return []
+
+    if not _coluna_existe(TABELA_CARD, "CodPontoContrato"):
+        return []
+
+    if not _coluna_existe(TABELA_CARD, "CodFaceContrato"):
+        return []
+
+    sql = text(f"""
+        SELECT TOP (1)
+            CAST(NULL AS int) AS IDFatoKanbanCardPainelFace,
+            CAST(1 AS int) AS Ordem,
+
+            IDDimPaineisEuromidia = COALESCE(
+                TRY_CONVERT(int, face_resolvida.IDDimPaineisEuromidia),
+                TRY_CONVERT(int, painel_resolvido.IDDimPaineisEuromidia)
+            ),
+
+            IDDimFacesPaineis = TRY_CONVERT(int, face_resolvida.IDDimFacesPaineis),
+
+            CodPonto = COALESCE(
+                TRY_CONVERT(int, face_resolvida.CodPonto),
+                TRY_CONVERT(int, painel_resolvido.CodPonto),
+                TRY_CONVERT(int, c.CodPontoContrato)
+            ),
+
+            CodFace = COALESCE(
+                NULLIF(LTRIM(RTRIM(face_resolvida.CodFace)), ''),
+                NULLIF(LTRIM(RTRIM(c.CodFaceContrato)), '')
+            ),
+
+            Face = NULLIF(LTRIM(RTRIM(face_resolvida.Face)), ''),
+            TipoFace = NULLIF(LTRIM(RTRIM(face_resolvida.Tipo)), ''),
+            TipoPainel = COALESCE(
+                NULLIF(LTRIM(RTRIM(painel_resolvido.Tipo)), ''),
+                NULLIF(LTRIM(RTRIM(face_resolvida.Tipo)), '')
+            ),
+
+            CAST(NULL AS int) AS AnoCusto,
+            CAST(NULL AS decimal(18, 4)) AS CustoTabela,
+            CAST(NULL AS int) AS IDDimTabelaPrecosEuromidia,
+            CAST(NULL AS varchar(120)) AS PeriodoExibicao,
+            CAST(NULL AS int) AS ExibicoesDia,
+            CAST(NULL AS decimal(18, 4)) AS ValorTabela,
+            CAST(NULL AS varchar(120)) AS Tabela,
+            CAST(NULL AS varchar(120)) AS PoliticaTrocas,
+            CAST(NULL AS decimal(18, 4)) AS ValorTroca,
+            CAST(NULL AS decimal(18, 4)) AS NovoValor,
+            CAST(NULL AS decimal(18, 4)) AS PercentualDesconto,
+            CAST(NULL AS decimal(18, 4)) AS ValorVendaFinal,
+            CAST(NULL AS decimal(18, 4)) AS MargemValor,
+            CAST(NULL AS decimal(18, 4)) AS MargemPercentual,
+            CAST(NULL AS varchar(10)) AS DataInicio,
+            CAST(NULL AS varchar(10)) AS DataFim,
+
+            painel_resolvido.Logradouro,
+            painel_resolvido.Cidade,
+            painel_resolvido.UF,
+            painel_resolvido.Bairro,
+            painel_resolvido.Numero,
+            painel_resolvido.QuantidadeFaces,
+
+            CAST(NULL AS int) AS IDFatoOcupacaoPaineisEuromidia,
+            CAST(NULL AS int) AS CotaReserva,
+            CAST(NULL AS varchar(30)) AS StatusReserva,
+            CAST(NULL AS varchar(19)) AS CriadoEmReserva,
+            CAST(NULL AS varchar(19)) AS ExpiraEmReserva,
+            CAST(NULL AS varchar(10)) AS DataInicioReserva,
+            CAST(NULL AS varchar(10)) AS DataFimReserva,
+
+            CAST(NULL AS int) AS IDDimCheckinHistorico,
+            CAST(NULL AS int) AS IDFatoCheckinCompartilhamentoPublico,
+            CAST(NULL AS varchar(500)) AS TokenPublicoCheckin,
+            CAST(NULL AS int) AS TemSenhaCheckinPublico,
+            CAST(NULL AS varchar(19)) AS DataChekinCheckinPublico,
+            CAST(NULL AS varchar(19)) AS DataConfirmacaoCheckinPublico,
+            CAST(NULL AS varchar(19)) AS DataCriacaoCheckinPublico,
+            CAST(NULL AS varchar(19)) AS DataAtualizacaoCheckinPublico,
+            CAST(NULL AS varchar(19)) AS DataExpiracaoCheckinPublico,
+            CAST(NULL AS varchar(19)) AS DataUltimoAcessoCheckinPublico,
+            CAST(NULL AS int) AS QuantidadeAcessosCheckinPublico
+        FROM {TABELA_CARD} c
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                f.IDDimFacesPaineis,
+                f.CodPonto,
+                f.Face,
+                f.CodFace,
+                f.Tipo,
+                f.IDDimPaineisEuromidia
+            FROM {TABELA_DIM_FACES_PAINEIS} f
+            WHERE UPPER(LTRIM(RTRIM(ISNULL(f.CodFace, '')))) = UPPER(LTRIM(RTRIM(ISNULL(c.CodFaceContrato, ''))))
+              AND (
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), c.CodPontoContrato))), '') IS NULL
+                    OR LTRIM(RTRIM(CONVERT(varchar(80), f.CodPonto))) = LTRIM(RTRIM(CONVERT(varchar(80), c.CodPontoContrato)))
+                  )
+            ORDER BY f.IDDimFacesPaineis DESC
+        ) AS face_resolvida
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                p.IDDimPaineisEuromidia,
+                p.CodPonto,
+                p.Tipo,
+                p.Logradouro,
+                p.Cidade,
+                p.UF,
+                p.Bairro,
+                p.Numero,
+                p.QuantidadeFaces
+            FROM {TABELA_DIM_PAINEIS_EUROMIDIA} p
+            WHERE (
+                    face_resolvida.IDDimPaineisEuromidia IS NOT NULL
+                    AND TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, face_resolvida.IDDimPaineisEuromidia)
+                  )
+               OR (
+                    face_resolvida.IDDimPaineisEuromidia IS NULL
+                    AND NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), c.CodPontoContrato))), '') IS NOT NULL
+                    AND LTRIM(RTRIM(CONVERT(varchar(80), p.CodPonto))) = LTRIM(RTRIM(CONVERT(varchar(80), c.CodPontoContrato)))
+                  )
+            ORDER BY
+                CASE
+                    WHEN face_resolvida.IDDimPaineisEuromidia IS NOT NULL
+                     AND TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, face_resolvida.IDDimPaineisEuromidia)
+                    THEN 0 ELSE 1
+                END,
+                p.IDDimPaineisEuromidia DESC
+        ) AS painel_resolvido
+
+        WHERE c.IDFatoKanbanCard = :id_card
+          AND ISNULL(c.Ativo, 1) = 1
+          AND NULLIF(LTRIM(RTRIM(ISNULL(c.CodFaceContrato, ''))), '') IS NOT NULL;
+    """)
+
+    rows = db.session.execute(sql, {"id_card": id_card_int}).mappings().all()
+    itens = _rows_para_dicts(rows)
+
+    return [
+        item for item in itens
+        if str(item.get("CodFace") or "").strip()
+    ]
+
+
+
 def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     sql = text(f"""
         SELECT
@@ -14719,6 +15004,9 @@ def _listar_paineis_vinculados_card(id_card: int) -> list[dict[str, Any]]:
     ).mappings().all()
 
     itens = _rows_para_dicts(rows)
+
+    if not itens:
+        itens = _listar_painel_face_fallback_card_por_contrato(int(id_card))
 
     # Regra crítica: não propagar IDReserva do card para os itens de painel/face.
     # O campo Reserva do front só pode ser preenchido quando o usuário digitar uma reserva
@@ -15239,9 +15527,9 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     )
 
     select_id_dim_cnaes = (
-        "c.IDDimCnaes AS IDDimCnaes,"
+        "COALESCE(TRY_CONVERT(int, c.IDDimCnaes), TRY_CONVERT(int, cn.IDDimCnaes)) AS IDDimCnaes,"
         if _coluna_existe(TABELA_CARD, "IDDimCnaes")
-        else "CAST(NULL AS int) AS IDDimCnaes,"
+        else "TRY_CONVERT(int, cn.IDDimCnaes) AS IDDimCnaes,"
     )
 
     select_nome_empresa = (
@@ -15301,8 +15589,12 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             e.RazaoSocial AS EmpresaRazaoSocial,
             e.CNPJ AS EmpresaCNPJ,
             e.CNAE AS EmpresaCNAE,
+            cn.IDDimCnaes AS EmpresaIDDimCnaes,
+            cn.Descricao AS EmpresaDescricaoCnae,
             cn.Classe AS EmpresaClasse,
             cn.Setor AS EmpresaSetor,
+            cn.MacroSetor AS EmpresaMacroSetor,
+            cn.SubClasse AS EmpresaSubClasse,
             rp.QuantidadePaineisVinculados,
             rp.QuantidadePaineisUnicos,
             rp.ValorTotalPaineis
@@ -15331,15 +15623,27 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     if not str(card_dict.get("NomeEmpresa") or "").strip():
         card_dict["NomeEmpresa"] = str(card_dict.get("EmpresaRazaoSocial") or "").strip() or None
 
-    cnae_card = _obter_cnae_por_id(card_dict.get("IDDimCnaes"))
+    if not _int_ou_none(card_dict.get("IDDimCnaes")) and _int_ou_none(card_dict.get("EmpresaIDDimCnaes")):
+        card_dict["IDDimCnaes"] = _int_ou_none(card_dict.get("EmpresaIDDimCnaes"))
+
+    try:
+        cnae_card = _obter_cnae_por_id(card_dict.get("IDDimCnaes"))
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN: falha ao buscar CNAE do card. id_card=%s id_dim_cnaes=%r",
+            id_card,
+            card_dict.get("IDDimCnaes"),
+        )
+        cnae_card = None
+
     if cnae_card:
         card_dict["SegmentoClasse"] = cnae_card.get("Classe")
         card_dict["SegmentoDescricao"] = cnae_card.get("Descricao")
         card_dict["SegmentoSetor"] = cnae_card.get("Setor")
     else:
-        card_dict["SegmentoClasse"] = None
-        card_dict["SegmentoDescricao"] = None
-        card_dict["SegmentoSetor"] = None
+        card_dict["SegmentoClasse"] = card_dict.get("EmpresaClasse")
+        card_dict["SegmentoDescricao"] = card_dict.get("EmpresaDescricaoCnae")
+        card_dict["SegmentoSetor"] = card_dict.get("EmpresaSetor")
 
     card_dict = _aplicar_tipo_cliente_desconto_no_card_dict(card_dict)
     card_dict = _aplicar_origem_atendimento_no_card_dict(card_dict)
@@ -15465,7 +15769,14 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     else:
         notas = []
 
-    paineis_vinculados = _listar_paineis_vinculados_card(id_card)
+    try:
+        paineis_vinculados = _listar_paineis_vinculados_card(id_card)
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN: falha ao listar painéis/face do card no detalhe. id_card=%s",
+            id_card,
+        )
+        paineis_vinculados = _listar_paineis_vinculados_card_minimo(id_card)
 
     snapshot_solicitacao_editavel = _obter_snapshot_solicitacao_editavel_por_card(int(id_card))
     vendedor_logado_solicitacao = _obter_vendedor_logado_reserva_kanban(int(_id_empresa_usuario_or_403()))

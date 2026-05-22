@@ -1,10 +1,11 @@
 from flask_sqlalchemy import SQLAlchemy
-from ..extensions import db, limiter, csrf
+from ..extensions import db, limiter, csrf, cache
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app,abort
 from ..models.admin_models import FatoMovimentoFinanceiroEmpresas, DimEmpresaProprietaria,DimProdutoAuvo
 from datetime import datetime, date, timedelta
 from sqlalchemy import func, case,text
 from flask_login import login_required, current_user
+from werkzeug.exceptions import HTTPException
 from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
 import hashlib
@@ -28,6 +29,17 @@ ID_STATUS_CONTRATO_APROVADO = 2
 ID_FASE_FORMULARIO_CONTRATO = 4
 TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
 TABELA_VENCIMENTO_CAMPANHA = "[Integracao].[Silver].[FatoVencimentoCampanhaEuromidia]"
+TABELA_KANBAN_CARD_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCard]"
+TABELA_KANBAN_CARD_TAG_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardTag]"
+TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
+TABELA_KANBAN_FASE_RENOVACAO = "[Kanban].[Silver].[DimKanbanFase]"
+TABELA_KANBAN_TAG_RENOVACAO = "[Kanban].[Silver].[DimKanbanTag]"
+TABELA_KANBAN_STATUS_CARD_RENOVACAO = "[Kanban].[Silver].[DimKanbanStatusCard]"
+
+ID_KANBAN_RENOVACAO_CAMPANHA = 1
+ID_TAG_RENOVACAO_CAMPANHA = 17
+ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO = 3
+STATUS_CARD_RENOVACAO_PADRAO = "ATIVO"
 
 ID_STATUS_CAMPANHA_FUTURA = 1
 ID_STATUS_CAMPANHA_ATIVA = 2
@@ -10901,6 +10913,1046 @@ def _campanhas_vencimentos_bisemanas_select(
 
 
 
+
+
+def _campanhas_vencimentos_partes_objeto_sql(tabela: str) -> tuple[str, str, str]:
+    """Converte [Banco].[Schema].[Tabela] em partes seguras para consultar catálogo do SQL Server."""
+
+    nome = str(tabela or "").replace("[", "").replace("]", "").strip()
+    partes = [p.strip() for p in nome.split(".") if p.strip()]
+
+    if len(partes) == 3:
+        return partes[0], partes[1], partes[2]
+
+    if len(partes) == 2:
+        return "", partes[0], partes[1]
+
+    if len(partes) == 1:
+        return "", "dbo", partes[0]
+
+    return "", "", ""
+
+
+def _campanhas_vencimentos_coluna_existe(tabela: str, coluna: str) -> bool:
+    """Verifica coluna em tabelas cross-database sem depender do blueprint do Kanban."""
+
+    banco, schema, nome_tabela = _campanhas_vencimentos_partes_objeto_sql(tabela)
+    if banco not in {"Kanban", "Integracao"}:
+        return False
+
+    sql = text(f"""
+        SELECT TOP (1) 1
+        FROM [{banco}].sys.columns AS c
+        INNER JOIN [{banco}].sys.objects AS o
+            ON o.object_id = c.object_id
+        INNER JOIN [{banco}].sys.schemas AS s
+            ON s.schema_id = o.schema_id
+        WHERE s.name = :schema
+          AND o.name = :nome_tabela
+          AND c.name = :nome_coluna;
+    """)
+
+    try:
+        return bool(db.session.execute(
+            sql,
+            {
+                "schema": schema,
+                "nome_tabela": nome_tabela,
+                "nome_coluna": str(coluna or "").strip(),
+            },
+        ).scalar())
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao verificar coluna. tabela=%s coluna=%s",
+            tabela,
+            coluna,
+        )
+        return False
+
+
+def _campanhas_vencimentos_primeira_fase_kanban_renovacao() -> int:
+    """Busca a primeira fase ativa do Kanban 1 para receber o card de renovação."""
+
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                IDDimKanbanFase
+            FROM {TABELA_KANBAN_FASE_RENOVACAO}
+            WHERE IDDimKanban = :id_kanban
+              AND ISNULL(Ativo, 1) = 1
+            ORDER BY
+                ISNULL(OrdemFase, 999999) ASC,
+                IDDimKanbanFase ASC;
+        """),
+        {"id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA)},
+    ).mappings().first()
+
+    id_fase = int((row or {}).get("IDDimKanbanFase") or 0)
+    if id_fase <= 0:
+        raise RuntimeError("Não encontrei fase ativa no Kanban 1 para criar o card de renovação.")
+
+    return id_fase
+
+
+def _campanhas_vencimentos_id_status_card_ativo_ou_none() -> int | None:
+    """Resolve o IDDimKanbanStatusCard para o código ATIVO quando a coluna existir."""
+
+    if not _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDDimKanbanStatusCard"):
+        return None
+
+    try:
+        row = db.session.execute(
+            text(f"""
+                SELECT TOP (1)
+                    IDDimKanbanStatusCard
+                FROM {TABELA_KANBAN_STATUS_CARD_RENOVACAO}
+                WHERE UPPER(LTRIM(RTRIM(ISNULL(CodigoStatus, '')))) = 'ATIVO'
+                  AND ISNULL(Ativo, 1) = 1
+                ORDER BY IDDimKanbanStatusCard ASC;
+            """),
+        ).mappings().first()
+    except Exception:
+        current_app.logger.exception("Falha ao buscar IDDimKanbanStatusCard ATIVO para renovação de campanha.")
+        return None
+
+    id_status = int((row or {}).get("IDDimKanbanStatusCard") or 0)
+    return id_status or None
+
+
+def _campanhas_vencimentos_coluna_empresa_card_ou_none() -> str | None:
+    """Mantém a mesma regra do Kanban: IDEmpresa é a coluna oficial do cliente no card."""
+
+    for nome_coluna in ("IDEmpresa", "IDCliente", "IDEmpresaRelacionada"):
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, nome_coluna):
+            return nome_coluna
+    return None
+
+
+
+def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | None:
+    """
+    Busca a base oficial da renovação seguindo a cadeia correta:
+
+    1) FatoVencimentoCampanhaEuromidia
+    2) FatoControleContratosEuromidia pelo IDFatoControleContratosEuromidia
+    3) FatoControleContratosItensEuromidia pelo IDFatoControleContratosItensEuromidia
+    4) DimEmpresas pelo IDEmpresa
+    5) DimCnaes pelo CNAE = cnaepadrao
+
+    Observação:
+    - O CodPonto/CodFace vêm do item oficial do contrato.
+    - Inserções/dia vem primeiro da Cota do item.
+    - Período de campanha vem primeiro do TexmpoExposicao do item.
+    - A tabela de preço é usada apenas como complemento, sem substituir a origem oficial.
+    """
+
+    sql = text("""
+        SELECT TOP (1)
+            venc.IDFatoVencimentoCampanhaEuromidia,
+            venc.IDFatoControleContratosEuromidia,
+            venc.IDFatoControleContratosItensEuromidia,
+            venc.IDDimStatusCampanha,
+            venc.IDVendedor,
+            vend.NomeVendedor,
+            vend.IDDimUsuarios AS IDDimUsuariosVendedor,
+
+            IDEmpresa = COALESCE(venc.IDEmpresa, ctr.IDEmpresa),
+            MarcaExibida = COALESCE(
+                NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), ''),
+                NULLIF(LTRIM(RTRIM(item.MarcaExibida)), ''),
+                NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''),
+                NULLIF(LTRIM(RTRIM(emp.NomeFantasia)), ''),
+                NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), '')
+            ),
+
+            DataInicioCampanha = COALESCE(
+                CAST(venc.DataInicioCampanha AS date),
+                CAST(item.DataInicioPrevisto AS date)
+            ),
+            DataTerminoPrevisto = COALESCE(
+                CAST(venc.DataTerminoPrevisto AS date),
+                CAST(item.DataTerminoPrevisto AS date),
+                CAST(item.DataFimEfetiva AS date)
+            ),
+            venc.DiasParaVencer,
+            venc.BitAtivo,
+
+            ctr.NumeroContrato,
+            ctr.NumeroPrevia,
+            RazaoSocial = COALESCE(NULLIF(LTRIM(RTRIM(ctr.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), '')),
+            ctr.IDEmpresaAgencia,
+            ctr.IDEmpresaBureau,
+            ctr.IDEmpresaIntermediario,
+
+            emp.NomeFantasia,
+            emp.CNPJ,
+            emp.Email,
+            Telefone = COALESCE(NULLIF(LTRIM(RTRIM(emp.TelefoneContato1)), ''), NULLIF(LTRIM(RTRIM(emp.TelefoneContato2)), '')),
+            emp.CNAE,
+            emp.IDDimOrigemAtendimento AS IDDimOrigemAtendimentoEmpresa,
+
+            cnae.IDDimCnaes,
+            cnae.Classe AS ClasseCnae,
+            cnae.Setor AS SetorCnae,
+            cnae.MacroSetor AS MacroSetorCnae,
+            cnae.SubClasse AS SubClasseCnae,
+
+            CodPonto = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodPonto))), ''),
+            CodFace = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), ''),
+            item.IDPainelEuromidia,
+            item.IDDimFacesPaineis,
+            item.Tipo AS TipoPainelItem,
+            item.Cota,
+            item.TexmpoExposicao,
+            item.CidadeExibicao,
+            item.IDFatoKanbanCard AS IDFatoKanbanCardOrigem,
+            item.IDDimOrigemAtendimento AS IDDimOrigemAtendimentoItem,
+            item.IDDimTipoDocumento,
+            item.FaturamentoBrutoMensal,
+            item.FaturamentoLiquidoMensal,
+            item.FaturamentoLiquidoFinalMensal,
+            item.TotalBrutoContrato,
+            item.TotalLiquidoContratoAGBRCTACORDO,
+            item.TotalLiquidoContratoAGBRVENDGERCOOR,
+            item.NumeroParcelas,
+            item.DataInicioVencimento,
+
+            painel.Tipo AS TipoPainelCadastro,
+            face.Tipo AS TipoFaceCadastro,
+
+            tp.IDDimTabelaPrecosEuromidia AS IDDimTabelaPrecosEuromidiaTabela,
+            tp.PeriodoExibicao AS PeriodoExibicaoTabela,
+            tp.ExibicoesDia AS ExibicoesDiaTabela,
+            tp.Valor AS ValorTabelaPreco,
+            tp.Tabela AS TabelaPreco,
+            tp.PoliticaTrocas AS PoliticaTrocasTabela,
+            tp.ValorTroca AS ValorTrocaTabela,
+
+            PeriodoExibicaoContrato = NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), item.TexmpoExposicao))), ''),
+            ExibicoesDiaContrato = TRY_CONVERT(int, item.Cota)
+
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
+
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
+            ON emp.IDEmpresa = COALESCE(venc.IDEmpresa, ctr.IDEmpresa)
+
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] AS cnae
+            ON LTRIM(RTRIM(CONVERT(varchar(30), emp.CNAE))) COLLATE Latin1_General_CI_AI
+             = LTRIM(RTRIM(CONVERT(varchar(30), cnae.cnaepadrao))) COLLATE Latin1_General_CI_AI
+
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+            ON vend.IDVendedor = venc.IDVendedor
+
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS painel
+            ON painel.IDDimPaineisEuromidia = item.IDPainelEuromidia
+
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS face
+            ON face.IDDimFacesPaineis = item.IDDimFacesPaineis
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                tabela_preco.IDDimTabelaPrecosEuromidia,
+                tabela_preco.PeriodoExibicao,
+                tabela_preco.ExibicoesDia,
+                tabela_preco.Valor,
+                tabela_preco.Tabela,
+                tabela_preco.PoliticaTrocas,
+                tabela_preco.ValorTroca
+            FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tabela_preco
+            WHERE ISNULL(tabela_preco.BitAtivo, 1) = 1
+              AND (
+                    item.IDPainelEuromidia IS NULL
+                    OR tabela_preco.IDDimPaineisEuromidia = item.IDPainelEuromidia
+                  )
+              AND (
+                    item.IDDimFacesPaineis IS NULL
+                    OR tabela_preco.IDDimFacesPaineis = item.IDDimFacesPaineis
+                  )
+            ORDER BY
+                CASE
+                    WHEN item.Cota IS NOT NULL
+                     AND TRY_CONVERT(varchar(80), tabela_preco.ExibicoesDia) = TRY_CONVERT(varchar(80), item.Cota)
+                    THEN 0 ELSE 1
+                END,
+                CASE
+                    WHEN NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), item.TexmpoExposicao))), '') IS NOT NULL
+                     AND LTRIM(RTRIM(CONVERT(varchar(120), tabela_preco.PeriodoExibicao))) COLLATE Latin1_General_CI_AI
+                       = LTRIM(RTRIM(CONVERT(varchar(120), item.TexmpoExposicao))) COLLATE Latin1_General_CI_AI
+                    THEN 0 ELSE 1
+                END,
+                ISNULL(tabela_preco.DataPublicacao, tabela_preco.DataAtualizacao) DESC,
+                tabela_preco.IDDimTabelaPrecosEuromidia DESC
+        ) AS tp
+
+        WHERE venc.IDFatoVencimentoCampanhaEuromidia = :id_vencimento;
+    """)
+
+    row = db.session.execute(sql, {"id_vencimento": int(id_vencimento)}).mappings().first()
+    return dict(row) if row else None
+
+def _campanhas_vencimentos_formatar_data_pt(valor) -> str:
+    if not valor:
+        return "—"
+    try:
+        return valor.strftime("%d/%m/%Y")
+    except Exception:
+        return str(valor)
+
+
+def _campanhas_vencimentos_primeiro_valor_preenchido(*valores):
+    """Devolve o primeiro valor realmente preenchido, preservando zero quando ele for válido."""
+
+    for valor in valores:
+        if valor is None:
+            continue
+
+        if isinstance(valor, str):
+            texto = valor.strip()
+            if texto == "":
+                continue
+            return texto
+
+        return valor
+
+    return None
+
+
+def _campanhas_vencimentos_titulo_card_renovacao(campanha: dict) -> str:
+    id_contrato = int(campanha.get("IDFatoControleContratosEuromidia") or 0)
+    nome_campanha = (
+        str(campanha.get("MarcaExibida") or "").strip()
+        or str(campanha.get("NomeFantasia") or "").strip()
+        or str(campanha.get("RazaoSocial") or "").strip()
+        or f"Contrato {id_contrato}"
+    )
+
+    titulo = f"Renovação Campanha {nome_campanha} - {id_contrato}"
+    return titulo[:200]
+
+
+
+def _campanhas_vencimentos_descricao_card_renovacao(
+    *,
+    campanha: dict,
+    data_inicio_renovacao: date,
+    data_fim_renovacao: date,
+    prazo_dias: int,
+) -> str:
+    id_vencimento = int(campanha.get("IDFatoVencimentoCampanhaEuromidia") or 0)
+    id_contrato = int(campanha.get("IDFatoControleContratosEuromidia") or 0)
+    id_item = int(campanha.get("IDFatoControleContratosItensEuromidia") or 0)
+    cod_ponto = str(campanha.get("CodPonto") or "").strip()
+    cod_face = str(campanha.get("CodFace") or "").strip().upper()
+    periodo_exibicao = _campanhas_vencimentos_primeiro_valor_preenchido(
+        campanha.get("PeriodoExibicaoContrato"),
+        campanha.get("PeriodoExibicaoTabela"),
+    )
+    exibicoes_dia = _campanhas_vencimentos_primeiro_valor_preenchido(
+        campanha.get("ExibicoesDiaContrato"),
+        campanha.get("ExibicoesDiaTabela"),
+        campanha.get("Cota"),
+    )
+
+    linhas = [
+        "RENOVAÇÃO DE CAMPANHA GERADA PELA TELA DE VENCIMENTOS",
+        f"Origem técnica: RENOVACAO_CAMPANHA_ID_VENCIMENTO={id_vencimento}",
+        "",
+        f"Cliente: {str(campanha.get('RazaoSocial') or campanha.get('NomeFantasia') or '—').strip()}",
+        f"CNPJ: {str(campanha.get('CNPJ') or '—').strip()}",
+        f"Segmento: {str(campanha.get('ClasseCnae') or campanha.get('SetorCnae') or '—').strip()}",
+        f"IDDimCnaes: {campanha.get('IDDimCnaes') or '—'}",
+        f"Marca/Campanha: {str(campanha.get('MarcaExibida') or '—').strip()}",
+        f"Contrato origem: {id_contrato}",
+        f"Item origem: {id_item or '—'}",
+        f"Número contrato: {str(campanha.get('NumeroContrato') or '—').strip()}",
+        f"Número prévia: {str(campanha.get('NumeroPrevia') or '—').strip()}",
+        f"CodPonto: {cod_ponto or '—'}",
+        f"CodFace: {cod_face or '—'}",
+        f"Inserções/dia: {exibicoes_dia or '—'}",
+        f"Período de campanha: {periodo_exibicao or '—'}",
+        f"Vendedor: {str(campanha.get('NomeVendedor') or '—').strip()}",
+        "",
+        "Período original:",
+        f"- Início: {_campanhas_vencimentos_formatar_data_pt(campanha.get('DataInicioCampanha'))}",
+        f"- Término: {_campanhas_vencimentos_formatar_data_pt(campanha.get('DataTerminoPrevisto'))}",
+        f"- Prazo: {int(prazo_dias)} dia(s)",
+        "",
+        "Período sugerido para renovação:",
+        f"- Data de início: {_campanhas_vencimentos_formatar_data_pt(data_inicio_renovacao)}",
+        f"- Data até: {_campanhas_vencimentos_formatar_data_pt(data_fim_renovacao)}",
+        f"- Regra aplicada: começa no primeiro dia após o término e mantém exatamente {int(prazo_dias)} dia(s).",
+    ]
+
+    return "\n".join(linhas)
+
+def _campanhas_vencimentos_card_renovacao_existente(campanha: dict) -> int | None:
+    """Evita criar duplicidade se o usuário clicar em Renovar mais de uma vez."""
+
+    id_vencimento = int(campanha.get("IDFatoVencimentoCampanhaEuromidia") or 0)
+    if id_vencimento <= 0:
+        return None
+
+    marcador = f"%RENOVACAO_CAMPANHA_ID_VENCIMENTO={id_vencimento}%"
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                c.IDFatoKanbanCard
+            FROM {TABELA_KANBAN_CARD_RENOVACAO} AS c
+            INNER JOIN {TABELA_KANBAN_CARD_TAG_RENOVACAO} AS ct
+                ON ct.IDFatoKanbanCard = c.IDFatoKanbanCard
+               AND ct.IDDimKanbanTag = :id_tag
+               AND ct.RemovidoEm IS NULL
+            WHERE c.IDDimKanban = :id_kanban
+              AND ISNULL(c.Ativo, 1) = 1
+              AND ISNULL(c.Descricao, '') LIKE :marcador
+            ORDER BY c.IDFatoKanbanCard DESC;
+        """),
+        {
+            "id_tag": int(ID_TAG_RENOVACAO_CAMPANHA),
+            "id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA),
+            "marcador": marcador,
+        },
+    ).mappings().first()
+
+    id_card = int((row or {}).get("IDFatoKanbanCard") or 0)
+    return id_card or None
+
+
+def _campanhas_vencimentos_invalidar_cache_kanban_renovacao(*, id_kanban: int, id_empresa_proprietaria: int, id_card: int) -> None:
+    """Bumpa as mesmas chaves de versão usadas pelo Kanban para não carregar cache antigo."""
+
+    def _inc(chave: str) -> None:
+        try:
+            valor_atual = cache.get(chave)
+            try:
+                valor_atual = int(valor_atual)
+            except Exception:
+                valor_atual = 1
+            cache.set(chave, valor_atual + 1, timeout=30000)
+        except Exception:
+            current_app.logger.exception("Falha ao invalidar cache do Kanban. chave=%s", chave)
+
+    _inc(f"kanban:versao:empresa:{int(id_empresa_proprietaria)}")
+    _inc(f"kanban:versao:kanban:{int(id_kanban)}")
+    _inc(f"kanban:versao:card:{int(id_card)}")
+
+
+
+def _campanhas_vencimentos_criar_card_renovacao(
+    *,
+    campanha: dict,
+    data_inicio_renovacao: date,
+    data_fim_renovacao: date,
+    prazo_dias: int,
+) -> int:
+    """Cria o card de renovação no Kanban 1 e aplica a tag 17 Renovação."""
+
+    id_usuario = int(_campanhas_vencimentos_usuario_logado_id() or 0)
+    if id_usuario <= 0:
+        raise RuntimeError("Não consegui identificar o usuário logado para criar o card de renovação.")
+
+    id_usuario_responsavel = _parse_int(campanha.get("IDDimUsuariosVendedor")) or id_usuario
+
+    tag_renovacao = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                IDDimKanbanTag,
+                NomeTag
+            FROM {TABELA_KANBAN_TAG_RENOVACAO}
+            WHERE IDDimKanbanTag = :id_tag
+              AND IDDimKanban = :id_kanban
+              AND ISNULL(Ativo, 1) = 1;
+        """),
+        {
+            "id_tag": int(ID_TAG_RENOVACAO_CAMPANHA),
+            "id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA),
+        },
+    ).mappings().first()
+
+    if not tag_renovacao:
+        raise RuntimeError("Tag 17 Renovação não encontrada ou inativa no Kanban 1.")
+
+    id_fase_inicial = _campanhas_vencimentos_primeira_fase_kanban_renovacao()
+    id_status_card = _campanhas_vencimentos_id_status_card_ativo_ou_none()
+    id_empresa_proprietaria = int(ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO)
+
+    id_empresa = _parse_int(campanha.get("IDEmpresa"))
+    id_vendedor = _parse_int(campanha.get("IDVendedor"))
+    id_contrato = _parse_int(campanha.get("IDFatoControleContratosEuromidia"))
+    id_dim_cnaes = _parse_int(campanha.get("IDDimCnaes"))
+    id_origem_atendimento = _parse_int(
+        _campanhas_vencimentos_primeiro_valor_preenchido(
+            campanha.get("IDDimOrigemAtendimentoItem"),
+            campanha.get("IDDimOrigemAtendimentoEmpresa"),
+        )
+    )
+    id_tipo_documento = _parse_int(campanha.get("IDDimTipoDocumento"))
+
+    cod_ponto = str(campanha.get("CodPonto") or "").strip()
+    cod_face = str(campanha.get("CodFace") or "").strip().upper()
+    marca = str(campanha.get("MarcaExibida") or "").strip() or None
+    nome_empresa = str(campanha.get("RazaoSocial") or campanha.get("NomeFantasia") or "").strip() or None
+    telefone = str(campanha.get("Telefone") or "").strip() or None
+    email = str(campanha.get("Email") or "").strip() or None
+
+    titulo = _campanhas_vencimentos_titulo_card_renovacao(campanha)
+    descricao = _campanhas_vencimentos_descricao_card_renovacao(
+        campanha=campanha,
+        data_inicio_renovacao=data_inicio_renovacao,
+        data_fim_renovacao=data_fim_renovacao,
+        prazo_dias=int(prazo_dias),
+    )
+
+    colunas = [
+        "IDDimKanban",
+        "IDDimKanbanFaseAtual",
+        "Titulo",
+        "Descricao",
+        "StatusCard",
+        "CriadoEm",
+        "Ativo",
+        "IDEmpresaProprietaria",
+    ]
+    valores = [
+        ":id_kanban",
+        ":id_fase",
+        ":titulo",
+        ":descricao",
+        ":status_card",
+        "GETDATE()",
+        "1",
+        ":id_empresa_proprietaria",
+    ]
+    params = {
+        "id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA),
+        "id_fase": int(id_fase_inicial),
+        "titulo": titulo,
+        "descricao": descricao,
+        "status_card": STATUS_CARD_RENOVACAO_PADRAO,
+        "id_empresa_proprietaria": id_empresa_proprietaria,
+    }
+
+    def adicionar_coluna_se_existir(nome_coluna: str, nome_parametro: str, valor) -> None:
+        if not _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, nome_coluna):
+            return
+        colunas.append(nome_coluna)
+        valores.append(f":{nome_parametro}")
+        params[nome_parametro] = valor
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "AtualizadoEm"):
+        colunas.append("AtualizadoEm")
+        valores.append("GETDATE()")
+
+    adicionar_coluna_se_existir("IDVendedorUsuario", "id_usuario_responsavel", id_usuario_responsavel)
+    adicionar_coluna_se_existir("IDDimUsuarios", "id_usuario_responsavel", id_usuario_responsavel)
+    adicionar_coluna_se_existir("IDUsuarioCriacao", "id_usuario", id_usuario)
+    adicionar_coluna_se_existir("IDVendedor", "id_vendedor", id_vendedor)
+
+    coluna_empresa = _campanhas_vencimentos_coluna_empresa_card_ou_none()
+    if coluna_empresa:
+        colunas.append(coluna_empresa)
+        valores.append(":id_empresa")
+        params["id_empresa"] = id_empresa
+
+    adicionar_coluna_se_existir("IDDimCnaes", "id_dim_cnaes", id_dim_cnaes)
+    adicionar_coluna_se_existir("IDDimOrigemAtendimento", "id_origem_atendimento", id_origem_atendimento)
+    adicionar_coluna_se_existir("IDDimTipoDocumento", "id_tipo_documento", id_tipo_documento)
+
+    adicionar_coluna_se_existir("IDEmpresaAgencia", "id_empresa_agencia", _parse_int(campanha.get("IDEmpresaAgencia")))
+    adicionar_coluna_se_existir("IDEmpresaBureau", "id_empresa_bureau", _parse_int(campanha.get("IDEmpresaBureau")))
+    adicionar_coluna_se_existir("IDEmpresaIntermediario", "id_empresa_intermediario", _parse_int(campanha.get("IDEmpresaIntermediario")))
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitAditivo"):
+        colunas.append("BitAditivo")
+        valores.append("1")
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitContratoNovo"):
+        colunas.append("BitContratoNovo")
+        valores.append("0")
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDFatoControleContratosEuromidia"):
+        adicionar_coluna_se_existir("IDFatoControleContratosEuromidia", "id_contrato", id_contrato)
+    elif _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDFatoControleContratoEuromidia"):
+        adicionar_coluna_se_existir("IDFatoControleContratoEuromidia", "id_contrato", id_contrato)
+
+    adicionar_coluna_se_existir("CodPontoContrato", "cod_ponto", cod_ponto or None)
+    adicionar_coluna_se_existir("CodFaceContrato", "cod_face", cod_face or None)
+    adicionar_coluna_se_existir("Marca", "marca", marca)
+    adicionar_coluna_se_existir("NomeEmpresa", "nome_empresa", nome_empresa)
+    adicionar_coluna_se_existir("Telefone", "telefone", telefone)
+    adicionar_coluna_se_existir("Email", "email", email)
+
+    if id_status_card is not None:
+        adicionar_coluna_se_existir("IDDimKanbanStatusCard", "id_status_card", int(id_status_card))
+
+    sql_insert = text(f"""
+        INSERT INTO {TABELA_KANBAN_CARD_RENOVACAO}
+            ({', '.join(colunas)})
+        OUTPUT INSERTED.IDFatoKanbanCard
+        VALUES
+            ({', '.join(valores)});
+    """)
+
+    id_card = int(db.session.execute(sql_insert, params).scalar() or 0)
+    if id_card <= 0:
+        raise RuntimeError("O INSERT do card de renovação não retornou IDFatoKanbanCard.")
+
+    db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_KANBAN_CARD_TAG_RENOVACAO}
+                (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
+            VALUES
+                (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa_proprietaria);
+        """),
+        {
+            "id_card": int(id_card),
+            "id_tag": int(ID_TAG_RENOVACAO_CAMPANHA),
+            "id_usuario": int(id_usuario),
+            "id_empresa_proprietaria": int(id_empresa_proprietaria),
+        },
+    )
+
+    if cod_face:
+        _campanhas_vencimentos_inserir_painel_face_card_renovacao(
+            id_card=id_card,
+            campanha=campanha,
+            data_inicio_renovacao=data_inicio_renovacao,
+            data_fim_renovacao=data_fim_renovacao,
+        )
+
+    _campanhas_vencimentos_invalidar_cache_kanban_renovacao(
+        id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+        id_card=int(id_card),
+    )
+
+    return id_card
+
+
+
+def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
+    *,
+    id_card: int,
+    campanha: dict,
+) -> dict:
+    """Atualiza o cadastro principal do card de renovação já existente.
+
+    Essa função corrige cards antigos criados sem IDEmpresa e sem IDDimCnaes.
+    A origem oficial é a cadeia informada pelo Guilherme:
+    FatoVencimentoCampanhaEuromidia -> contrato -> item -> DimEmpresas -> DimCnaes.
+    """
+
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {"ok": False, "motivo": "id_card_invalido"}
+
+    id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
+    id_usuario_responsavel = _parse_int(campanha.get("IDDimUsuariosVendedor")) or id_usuario_logado or None
+    id_empresa = _parse_int(campanha.get("IDEmpresa"))
+    id_vendedor = _parse_int(campanha.get("IDVendedor"))
+    id_dim_cnaes = _parse_int(campanha.get("IDDimCnaes"))
+    id_contrato = _parse_int(campanha.get("IDFatoControleContratosEuromidia"))
+    id_origem_atendimento = _parse_int(
+        _campanhas_vencimentos_primeiro_valor_preenchido(
+            campanha.get("IDDimOrigemAtendimentoItem"),
+            campanha.get("IDDimOrigemAtendimentoEmpresa"),
+        )
+    )
+    id_tipo_documento = _parse_int(campanha.get("IDDimTipoDocumento"))
+
+    marca = str(campanha.get("MarcaExibida") or "").strip() or None
+    nome_empresa = str(campanha.get("RazaoSocial") or campanha.get("NomeFantasia") or "").strip() or None
+    telefone = str(campanha.get("Telefone") or "").strip() or None
+    email = str(campanha.get("Email") or "").strip() or None
+
+    sets: list[str] = []
+    params: dict = {"id_card": id_card_int}
+
+    def adicionar_set_se_existir(nome_coluna: str, nome_parametro: str, valor) -> None:
+        if not _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, nome_coluna):
+            return
+        sets.append(f"{nome_coluna} = :{nome_parametro}")
+        params[nome_parametro] = valor
+
+    coluna_empresa = _campanhas_vencimentos_coluna_empresa_card_ou_none()
+    if coluna_empresa:
+        sets.append(f"{coluna_empresa} = :id_empresa")
+        params["id_empresa"] = id_empresa
+
+    adicionar_set_se_existir("IDDimCnaes", "id_dim_cnaes", id_dim_cnaes)
+    adicionar_set_se_existir("NomeEmpresa", "nome_empresa", nome_empresa)
+    adicionar_set_se_existir("Marca", "marca", marca)
+    adicionar_set_se_existir("Telefone", "telefone", telefone)
+    adicionar_set_se_existir("Email", "email", email)
+    adicionar_set_se_existir("IDVendedor", "id_vendedor", id_vendedor)
+    adicionar_set_se_existir("IDVendedorUsuario", "id_usuario_responsavel", id_usuario_responsavel)
+    adicionar_set_se_existir("IDDimUsuarios", "id_usuario_responsavel", id_usuario_responsavel)
+    adicionar_set_se_existir("IDDimOrigemAtendimento", "id_origem_atendimento", id_origem_atendimento)
+    adicionar_set_se_existir("IDDimTipoDocumento", "id_tipo_documento", id_tipo_documento)
+    adicionar_set_se_existir("IDEmpresaAgencia", "id_empresa_agencia", _parse_int(campanha.get("IDEmpresaAgencia")))
+    adicionar_set_se_existir("IDEmpresaBureau", "id_empresa_bureau", _parse_int(campanha.get("IDEmpresaBureau")))
+    adicionar_set_se_existir("IDEmpresaIntermediario", "id_empresa_intermediario", _parse_int(campanha.get("IDEmpresaIntermediario")))
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDFatoControleContratosEuromidia"):
+        adicionar_set_se_existir("IDFatoControleContratosEuromidia", "id_contrato", id_contrato)
+    elif _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDFatoControleContratoEuromidia"):
+        adicionar_set_se_existir("IDFatoControleContratoEuromidia", "id_contrato", id_contrato)
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitAditivo"):
+        sets.append("BitAditivo = 1")
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitContratoNovo"):
+        sets.append("BitContratoNovo = 0")
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "AtualizadoEm"):
+        sets.append("AtualizadoEm = GETDATE()")
+
+    if not sets:
+        return {"ok": False, "motivo": "sem_colunas_para_atualizar", "id_card": id_card_int}
+
+    db.session.execute(
+        text(f"""
+            UPDATE {TABELA_KANBAN_CARD_RENOVACAO}
+               SET {', '.join(sets)}
+             WHERE IDFatoKanbanCard = :id_card;
+        """),
+        params,
+    )
+
+    return {
+        "ok": True,
+        "id_card": id_card_int,
+        "id_empresa": id_empresa,
+        "id_dim_cnaes": id_dim_cnaes,
+    }
+
+
+def _campanhas_vencimentos_inserir_painel_face_card_renovacao(
+    *,
+    id_card: int,
+    campanha: dict,
+    data_inicio_renovacao: date,
+    data_fim_renovacao: date,
+) -> dict:
+    """
+    Garante o vínculo operacional de painel/face do card de renovação.
+
+    Fonte correta da renovação:
+    - FatoVencimentoCampanhaEuromidia identifica o vencimento;
+    - FatoControleContratosEuromidia identifica o contrato;
+    - FatoControleContratosItensEuromidia identifica o item, CodPonto e CodFace;
+    - FatoKanbanCardPainelFace precisa receber essa face para o modal do Kanban
+      abrir com Painel / Face já preenchido.
+
+    A função faz UPSERT, não INSERT cego:
+    - se a face já existir no card, atualiza os campos;
+    - se não existir, insere;
+    - isso corrige também cards antigos de renovação criados antes do vínculo de face.
+    """
+
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        raise RuntimeError("IDFatoKanbanCard inválido ao vincular painel/face da renovação.")
+
+    cod_ponto = str(campanha.get("CodPonto") or "").strip() or None
+    cod_face = str(campanha.get("CodFace") or "").strip().upper() or None
+
+    if not cod_face:
+        return {
+            "ok": False,
+            "acao": "ignorado",
+            "motivo": "campanha_sem_cod_face",
+            "id_card": id_card_int,
+        }
+
+    id_painel = _parse_int(campanha.get("IDPainelEuromidia"))
+    id_face = _parse_int(campanha.get("IDDimFacesPaineis"))
+    id_contrato = _parse_int(campanha.get("IDFatoControleContratosEuromidia"))
+    id_item_contrato = _parse_int(campanha.get("IDFatoControleContratosItensEuromidia"))
+    id_tabela_preco = _parse_int(campanha.get("IDDimTabelaPrecosEuromidiaTabela"))
+
+    periodo_exibicao = _campanhas_vencimentos_primeiro_valor_preenchido(
+        campanha.get("PeriodoExibicaoContrato"),
+        campanha.get("PeriodoExibicaoTabela"),
+    )
+
+    exibicoes_dia = _parse_int(_campanhas_vencimentos_primeiro_valor_preenchido(
+        campanha.get("ExibicoesDiaContrato"),
+        campanha.get("ExibicoesDiaTabela"),
+        campanha.get("Cota"),
+    ))
+
+    valor_tabela = _decimal_ou_none(campanha.get("ValorTabelaPreco"))
+    tabela = _campanhas_vencimentos_primeiro_valor_preenchido(campanha.get("TabelaPreco"))
+    politica_trocas = _campanhas_vencimentos_primeiro_valor_preenchido(campanha.get("PoliticaTrocasTabela"))
+    valor_troca = _decimal_ou_none(campanha.get("ValorTrocaTabela"))
+    tipo_painel = str(
+        campanha.get("TipoPainelItem")
+        or campanha.get("TipoPainelCadastro")
+        or campanha.get("TipoFaceCadastro")
+        or ""
+    ).strip() or None
+
+    campos: list[tuple[str, str, object]] = [
+        ("Ordem", "ordem", 1),
+        ("CodPonto", "cod_ponto", cod_ponto),
+        ("CodFace", "cod_face", cod_face),
+        ("DataInicio", "data_inicio", data_inicio_renovacao),
+        ("DataFim", "data_fim", data_fim_renovacao),
+    ]
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, "Ativo"):
+        campos.append(("Ativo", "ativo", 1))
+
+    campos_opcionais = [
+        ("IDDimPaineisEuromidia", "id_painel", id_painel),
+        ("IDDimFacesPaineis", "id_face", id_face),
+        ("IDFatoControleContratosEuromidia", "id_contrato", id_contrato),
+        ("IDFatoControleContratoEuromidia", "id_contrato", id_contrato),
+        ("IDFatoControleContratosItensEuromidia", "id_item_contrato", id_item_contrato),
+        ("IDFatoControleContratoItemEuromidia", "id_item_contrato", id_item_contrato),
+        ("TipoPainel", "tipo_painel", tipo_painel),
+        ("IDDimTabelaPrecosEuromidia", "id_tabela_preco", id_tabela_preco),
+        ("PeriodoExibicao", "periodo_exibicao", periodo_exibicao),
+        ("ExibicoesDia", "exibicoes_dia", exibicoes_dia),
+        ("ValorTabela", "valor_tabela", valor_tabela),
+        ("Tabela", "tabela", tabela),
+        ("PoliticaTrocas", "politica_trocas", politica_trocas),
+        ("ValorTroca", "valor_troca", valor_troca),
+        ("Cota", "cota", campanha.get("Cota")),
+        ("IDUsuario", "id_usuario", _campanhas_vencimentos_usuario_logado_id()),
+        ("IDEmpresaProprietaria", "id_empresa_proprietaria", ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO),
+    ]
+
+    for nome_coluna, nome_parametro, valor in campos_opcionais:
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, nome_coluna):
+            campos.append((nome_coluna, nome_parametro, valor))
+
+    params_busca = {
+        "id_card": id_card_int,
+        "cod_ponto": cod_ponto,
+        "cod_face": cod_face,
+        "id_face": id_face,
+    }
+
+    filtros_match = [
+        "UPPER(LTRIM(RTRIM(ISNULL(CodFace, '')))) = UPPER(LTRIM(RTRIM(ISNULL(:cod_face, ''))))"
+    ]
+
+    if id_face and _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, "IDDimFacesPaineis"):
+        filtros_match.append("TRY_CONVERT(int, IDDimFacesPaineis) = TRY_CONVERT(int, :id_face)")
+
+    filtros_base = ["IDFatoKanbanCard = :id_card"]
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, "Ativo"):
+        filtros_base.append("ISNULL(Ativo, 1) = 1")
+
+    if cod_ponto:
+        filtros_match.append("""
+            (
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), CodPonto))), '') IS NOT NULL
+                AND LTRIM(RTRIM(CONVERT(varchar(80), CodPonto))) = LTRIM(RTRIM(CONVERT(varchar(80), :cod_ponto)))
+                AND UPPER(LTRIM(RTRIM(ISNULL(CodFace, '')))) = UPPER(LTRIM(RTRIM(ISNULL(:cod_face, ''))))
+            )
+        """)
+
+    row_existente = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                IDFatoKanbanCardPainelFace
+            FROM {TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO}
+            WHERE {' AND '.join(f'({filtro})' for filtro in filtros_base)}
+              AND ({' OR '.join(f'({filtro})' for filtro in filtros_match)})
+            ORDER BY
+                CASE
+                    WHEN UPPER(LTRIM(RTRIM(ISNULL(CodFace, '')))) = UPPER(LTRIM(RTRIM(ISNULL(:cod_face, ''))))
+                    THEN 0 ELSE 1
+                END,
+                ISNULL(Ordem, 999999),
+                IDFatoKanbanCardPainelFace DESC;
+        """),
+        params_busca,
+    ).mappings().first()
+
+    id_linha_existente = int((row_existente or {}).get("IDFatoKanbanCardPainelFace") or 0)
+
+    if id_linha_existente > 0:
+        params_update = {"id_linha": id_linha_existente}
+        sets = []
+        for nome_coluna, nome_parametro, valor in campos:
+            sets.append(f"{nome_coluna} = :{nome_parametro}")
+            params_update[nome_parametro] = valor
+
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, "DataAtualizacao"):
+            sets.append("DataAtualizacao = GETDATE()")
+
+        db.session.execute(
+            text(f"""
+                UPDATE {TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO}
+                   SET {', '.join(sets)}
+                 WHERE IDFatoKanbanCardPainelFace = :id_linha;
+            """),
+            params_update,
+        )
+
+        return {
+            "ok": True,
+            "acao": "atualizado",
+            "id_card": id_card_int,
+            "id_linha": id_linha_existente,
+            "cod_ponto": cod_ponto,
+            "cod_face": cod_face,
+        }
+
+    colunas_insert = ["IDFatoKanbanCard"]
+    valores_insert = [":id_card"]
+    params_insert = {"id_card": id_card_int}
+
+    for nome_coluna, nome_parametro, valor in campos:
+        colunas_insert.append(nome_coluna)
+        valores_insert.append(f":{nome_parametro}")
+        params_insert[nome_parametro] = valor
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, "CriadoEm"):
+        colunas_insert.append("CriadoEm")
+        valores_insert.append("GETDATE()")
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO, "DataAtualizacao"):
+        colunas_insert.append("DataAtualizacao")
+        valores_insert.append("GETDATE()")
+
+    db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO}
+                ({', '.join(colunas_insert)})
+            VALUES
+                ({', '.join(valores_insert)});
+        """),
+        params_insert,
+    )
+
+    return {
+        "ok": True,
+        "acao": "inserido",
+        "id_card": id_card_int,
+        "cod_ponto": cod_ponto,
+        "cod_face": cod_face,
+    }
+
+@admin.route("/vencimentos-campanhas/<int:id_vencimento>/renovar", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute", methods=["POST"])
+def vencimentos_campanhas_renovar(id_vencimento: int):
+    """Cria o card de renovação no Kanban 1 a partir da linha de vencimento da campanha."""
+
+    url_falha = request.referrer or url_for("admin.vencimentos_campanhas_euromidia")
+
+    try:
+        campanha = _campanhas_vencimentos_buscar_base_renovacao(int(id_vencimento))
+        if not campanha:
+            flash("Não encontrei a campanha selecionada para renovação.", "warning")
+            return redirect(url_falha)
+
+        usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+        id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
+        id_usuario_vendedor = int(campanha.get("IDDimUsuariosVendedor") or 0)
+
+        if usuario_logado_eh_vendedor and id_usuario_vendedor and id_usuario_vendedor != id_usuario_logado:
+            abort(403, description="Você só pode renovar campanhas vinculadas ao seu vendedor.")
+
+        data_inicio_original = campanha.get("DataInicioCampanha")
+        data_termino_original = campanha.get("DataTerminoPrevisto")
+        cod_face = str(campanha.get("CodFace") or "").strip().upper()
+
+        if not data_inicio_original or not data_termino_original:
+            flash("Não consegui criar a renovação porque a campanha não possui início e término válidos.", "warning")
+            return redirect(url_falha)
+
+        if data_termino_original < data_inicio_original:
+            flash("Não consegui criar a renovação porque o término da campanha é menor que a data de início.", "warning")
+            return redirect(url_falha)
+
+        if not cod_face:
+            flash("Não consegui criar a renovação porque o item da campanha não possui CodFace.", "warning")
+            return redirect(url_falha)
+
+        prazo_dias = (data_termino_original - data_inicio_original).days + 1
+        if prazo_dias <= 0:
+            flash("Não consegui criar a renovação porque o prazo calculado da campanha ficou inválido.", "warning")
+            return redirect(url_falha)
+
+        data_inicio_renovacao = data_termino_original + timedelta(days=1)
+        data_fim_renovacao = data_inicio_renovacao + timedelta(days=prazo_dias - 1)
+
+        id_card_existente = _campanhas_vencimentos_card_renovacao_existente(campanha)
+        if id_card_existente:
+            # Quando o card já existe, eu NÃO posso só redirecionar.
+            # Cards antigos de renovação podem ter sido criados sem a linha operacional
+            # em Kanban.Silver.FatoKanbanCardPainelFace e também sem IDEmpresa/IDDimCnaes
+            # no cadastro principal do card. Por isso eu atualizo o cabeçalho e a face.
+            _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
+                id_card=int(id_card_existente),
+                campanha=campanha,
+            )
+
+            if cod_face:
+                _campanhas_vencimentos_inserir_painel_face_card_renovacao(
+                    id_card=int(id_card_existente),
+                    campanha=campanha,
+                    data_inicio_renovacao=data_inicio_renovacao,
+                    data_fim_renovacao=data_fim_renovacao,
+                )
+
+            _campanhas_vencimentos_invalidar_cache_kanban_renovacao(
+                id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO),
+                id_card=int(id_card_existente),
+            )
+
+            db.session.commit()
+            flash(
+                f"Já existia um card de renovação para essa campanha: #{id_card_existente}. "
+                "Garanti novamente o vínculo de painel/face no card.",
+                "info",
+            )
+            return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+
+        id_card = _campanhas_vencimentos_criar_card_renovacao(
+            campanha=campanha,
+            data_inicio_renovacao=data_inicio_renovacao,
+            data_fim_renovacao=data_fim_renovacao,
+            prazo_dias=int(prazo_dias),
+        )
+
+        db.session.commit()
+        flash(
+            "Card de renovação criado no Kanban 1: "
+            f"#{id_card} • {cod_face} • "
+            f"{_campanhas_vencimentos_formatar_data_pt(data_inicio_renovacao)} até "
+            f"{_campanhas_vencimentos_formatar_data_pt(data_fim_renovacao)}.",
+            "success",
+        )
+        return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+
+    except HTTPException:
+        db.session.rollback()
+        raise
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Erro ao criar card de renovação de campanha. id_vencimento=%s",
+            id_vencimento,
+        )
+        flash(f"Erro ao criar card de renovação: {exc}", "danger")
+        return redirect(url_falha)
+
 @admin.route("/campanhas/vencimentos", methods=["GET"])
 @admin.route("/vencimentos-campanhas", methods=["GET"])
 @login_required
@@ -11069,6 +12121,8 @@ def vencimentos_campanhas_euromidia():
             "paginas_visiveis": paginas_visiveis,
         },
     )
+
+
 
 
 @admin.route("/vencimentos-campanhas/sugestoes", methods=["GET"])

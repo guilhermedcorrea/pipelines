@@ -636,6 +636,43 @@
     font-weight:950;
   }
 
+  .vc-renovar-form{
+    margin:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+
+  .vc-renovar-btn{
+    min-height:34px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    padding:8px 11px;
+    border:1px solid rgba(22,101,52,.24);
+    border-radius:11px;
+    background:#DCFCE7;
+    color:#166534;
+    font-size:12px;
+    font-weight:950;
+    line-height:1;
+    cursor:pointer;
+    white-space:nowrap;
+    transition:transform .08s ease, box-shadow .12s ease, background .12s ease;
+  }
+
+  .vc-renovar-btn:hover{
+    transform:translateY(-1px);
+    box-shadow:0 8px 18px rgba(22,101,52,.14);
+    background:#BBF7D0;
+  }
+
+  .vc-renovar-btn:active{
+    transform:translateY(0);
+    box-shadow:none;
+  }
+
   .vc-table-wrap{
     width:100%;
     flex:1 1 auto;
@@ -645,7 +682,7 @@
 
   .vc-table{
     width:100%;
-    min-width:1280px;
+    min-width:1400px;
     border-collapse:separate;
     border-spacing:0;
   }
@@ -1220,6 +1257,7 @@
             <th>Ativo</th>
             <th>Total Líquido Contrato</th>
             <th>Atualização</th>
+            <th>Renovar</th>
           </tr>
         </thead>
         <tbody>
@@ -1279,11 +1317,30 @@
                 <td class="vc-data" data-label="Atualização">
                   {{ row.DataAtualizacao.strftime('%d/%m/%Y %H:%M') if row.DataAtualizacao else '—' }}
                 </td>
+
+                <td data-label="Renovar">
+                  <form
+                    class="vc-renovar-form"
+                    method="post"
+                    action="{{ url_for('admin.vencimentos_campanhas_renovar', id_vencimento=row.IDFatoVencimentoCampanhaEuromidia) }}"
+                  >
+                    {% if csrf_token is defined %}
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% endif %}
+                    <button
+                      type="submit"
+                      class="vc-renovar-btn"
+                      title="Criar card de renovação no Kanban 1 com a tag Renovação"
+                    >
+                      Renovar
+                    </button>
+                  </form>
+                </td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="10" class="vc-empty">Nenhuma campanha encontrada.</td>
+              <td colspan="11" class="vc-empty">Nenhuma campanha encontrada.</td>
             </tr>
           {% endif %}
         </tbody>
