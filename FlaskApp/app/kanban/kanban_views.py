@@ -19209,7 +19209,16 @@ def _registrar_ocorrencia_card_tipo_documento_kanban(
 @limiter.limit("120/minute")
 def api_card_inativar(id_card: int):
     id_usuario = _assert_login()
-    card_escopo = _obter_card_autorizado(id_card)
+
+    """
+    Eu autorizo incluindo card inativo para deixar a remoção idempotente.
+
+    Motivo:
+    - em tela com Socket.IO, outro cliente/aba pode inativar o card antes desta requisição terminar;
+    - nesse caso a tela local pode ainda estar com o card visível por alguns milissegundos;
+    - o endpoint não deve devolver 500/403 para uma ação que já foi aplicada.
+    """
+    card_escopo = _obter_card_autorizado(id_card, incluir_inativo=True)
     id_emp = _id_empresa_usuario_or_403()
     id_kanban = int(card_escopo.get("IDDimKanban") or 0)
 
@@ -19235,21 +19244,54 @@ def api_card_inativar(id_card: int):
             c.IDDimKanbanFaseAtual,
             c.IDEmpresaProprietaria,
             c.IDDimKanbanMotivoEncerramento,
+            c.Ativo,
             {_sql_select_empresa_relacionada_card('c')}
-        FROM {TABELA_CARD} c
-        WHERE c.IDFatoKanbanCard = :id_card
-          AND c.Ativo = 1;
+        FROM {TABELA_CARD} c WITH (UPDLOCK, ROWLOCK)
+        WHERE c.IDFatoKanbanCard = :id_card;
     """)
 
     row = db.session.execute(sql_card, {"id_card": id_card}).mappings().first()
 
     if not row:
-        return jsonify({"ok": False, "msg": "Card não encontrado ou já inativo"}), 404
+        return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
 
-    if int(row["IDDimKanban"]) != id_kanban:
+    if int(row["IDDimKanban"] or 0) != id_kanban:
         return jsonify({"ok": False, "msg": "Card fora do escopo do usuário"}), 403
 
     id_fase_atual = int(row["IDDimKanbanFaseAtual"] or 0)
+
+    if int(row.get("Ativo") or 0) != 1:
+        """
+        Idempotência para tempo real:
+        se outra aba/usuário já inativou o card, eu respondo sucesso e mando o evento
+        para a tela remover o card sem exigir F5.
+        """
+        db.session.rollback()
+        _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+        _emitir_evento_kanban(
+            id_kanban,
+            "card_inativado",
+            {
+                "id_card": id_card,
+                "id_fase_de": id_fase_atual,
+                "id_fase_para": 9,
+                "motivo": motivo_normalizado.get("Descricao"),
+                "motivo_codigo": motivo_normalizado.get("Codigo"),
+                "id_motivo_encerramento": int(motivo_normalizado.get("IDDimKanbanMotivoEncerramento") or 0),
+                "descricao": descricao or None,
+                "ja_inativo": True,
+            },
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "ja_inativo": True,
+                "id_card": int(id_card),
+                "id_fase_de": int(id_fase_atual or 0),
+                "id_fase_para": 9,
+                "msg": "Card já estava inativo. A tela foi sincronizada.",
+            }
+        )
     id_fase_para_movimento = 9
     id_empresa_card = row.get("IDEmpresaProprietaria")
     id_motivo_encerramento = int(motivo_normalizado.get("IDDimKanbanMotivoEncerramento") or 0)
@@ -19318,8 +19360,40 @@ def api_card_inativar(id_card: int):
 
         resultado_upd = db.session.execute(sql_upd, params_update)
 
-        if int(getattr(resultado_upd, "rowcount", 0) or 0) <= 0:
-            raise RuntimeError("Nenhuma linha foi atualizada ao inativar o card.")
+        """
+        Importante para SQL Server + pyodbc/SQLAlchemy:
+        em alguns cenários o driver retorna rowcount = -1 mesmo quando o UPDATE foi executado.
+        O erro antigo acontecia porque tratava qualquer valor <= 0 como falha.
+        Aqui só considero falha real quando o retorno é exatamente 0.
+        """
+        linhas_atualizadas = int(getattr(resultado_upd, "rowcount", -1) or -1)
+        if linhas_atualizadas == 0:
+            db.session.rollback()
+            _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+            _emitir_evento_kanban(
+                id_kanban,
+                "card_inativado",
+                {
+                    "id_card": id_card,
+                    "id_fase_de": id_fase_atual,
+                    "id_fase_para": id_fase_para_movimento,
+                    "motivo": motivo_texto,
+                    "motivo_codigo": motivo_normalizado.get("Codigo"),
+                    "id_motivo_encerramento": id_motivo_encerramento,
+                    "descricao": descricao or None,
+                    "ja_inativo": True,
+                },
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "ja_inativo": True,
+                    "id_card": int(id_card),
+                    "id_fase_de": int(id_fase_atual or 0),
+                    "id_fase_para": int(id_fase_para_movimento),
+                    "msg": "Card já estava inativo ou foi inativado por outra sessão. A tela foi sincronizada.",
+                }
+            )
 
         id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(
             id_kanban=id_kanban,

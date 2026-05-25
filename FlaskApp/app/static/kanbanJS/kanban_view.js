@@ -5225,7 +5225,7 @@ function normalizarCardServidor(card){
   }
 
   async function apiPost(url, payload){
-    const r = await fetch(url, {
+    const r = await fetch(montarUrlKanban(url), {
       method:"POST",
       credentials:"same-origin",
       headers: headersJSON,
@@ -5360,7 +5360,53 @@ function normalizarCardServidor(card){
     const id = idNum(idCard);
     cards = cards.filter(c => idNum(c.IDFatoKanbanCard) !== id);
     mapaTagsPorCard.delete(id);
+    mapaNotasPorCard.delete(id);
     reconstruirIndicesCards();
+  }
+
+  function ajustarQuantidadeFaseLocal(idFase, delta){
+    const idF = idNum(idFase);
+    const variacao = Number(delta || 0);
+    if (!idF || !Number.isFinite(variacao) || variacao === 0) return;
+
+    const fase = fasePorId(idF);
+    const st = estadoFase.get(idF);
+    const totalAtual = Math.max(
+      idNum(fase?.QuantidadeCardsTotal || 0),
+      idNum(st?.totalServidor || 0),
+      contarCardsNaFaseCarregados(idF)
+    );
+    const totalNovo = Math.max(0, totalAtual + variacao);
+
+    if (fase) fase.QuantidadeCardsTotal = totalNovo;
+    if (st) {
+      st.totalServidor = totalNovo;
+      st.offsetServidor = Math.min(idNum(st.offsetServidor || 0), totalNovo);
+      st.cargaCompleta = contarCardsNaFaseCarregados(idF) >= totalNovo;
+    }
+  }
+
+  function removerCardInativadoLocal(idCard, idFaseFallback = 0){
+    const id = idNum(idCard);
+    if (!id) return;
+
+    const cardAntes = obterCardPorId(id);
+    const idFase = idNum(cardAntes?.IDDimKanbanFaseAtual || idFaseFallback || 0);
+    const existiaLocalmente = !!cardAntes;
+
+    removerCardLocal(id);
+
+    if (existiaLocalmente && idFase) {
+      ajustarQuantidadeFaseLocal(idFase, -1);
+    }
+
+    if (idFase) {
+      redesenharFasesLocalmente([idFase], null, true);
+    } else {
+      renderBoardCompleto();
+    }
+
+    agendarRecarregarResumoComercial();
   }
 
 
@@ -13689,10 +13735,13 @@ async function moverCard(idCard, idFasePara, posicao) {
   btnConfirmarRemoverCard.addEventListener("click", async () => {
     msgRemoverCard.style.display = "none";
 
+    if (btnConfirmarRemoverCard.dataset.enviando === "1") return;
+
+    const idCardRemover = idNum(cardParaRemover);
     const motivo = (motivoRemocao.value || "").trim();
     const desc = (descricaoRemocao.value || "").trim();
 
-    if (!cardParaRemover){
+    if (!idCardRemover){
       msgRemoverCard.textContent = "Card inválido.";
       msgRemoverCard.style.display = "block";
       return;
@@ -13710,17 +13759,35 @@ async function moverCard(idCard, idFasePara, posicao) {
       return;
     }
 
-    const res = await apiPost(`/kanban/api/cards/${cardParaRemover}/inativar`, { motivo, descricao: desc });
+    const cardAntes = obterCardPorId(idCardRemover);
+    const idFaseAntesLocal = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
+    const textoOriginalBotao = btnConfirmarRemoverCard.textContent;
 
-    if (!res.ok){
-      msgRemoverCard.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao remover (HTTP ${res.http}).`;
+    btnConfirmarRemoverCard.dataset.enviando = "1";
+    btnConfirmarRemoverCard.disabled = true;
+    btnConfirmarRemoverCard.textContent = "Removendo...";
+
+    try {
+      const res = await apiPost(`/kanban/api/cards/${idCardRemover}/inativar`, { motivo, descricao: desc });
+
+      if (!res.ok){
+        msgRemoverCard.textContent = (res.body && (res.body.msg || res.body.erro)) || `Erro ao remover (HTTP ${res.http}).`;
+        msgRemoverCard.style.display = "block";
+        return;
+      }
+
+      const idFaseAntesResposta = idNum(res.body?.id_fase_de || res.body?.id_fase_atual || 0);
+      removerCardInativadoLocal(idCardRemover, idFaseAntesLocal || idFaseAntesResposta);
+      fecharModalRemoverCard();
+    } catch (erro) {
+      console.error("Falha ao inativar card", erro);
+      msgRemoverCard.textContent = "Erro de comunicação ao remover o card. Tente novamente.";
       msgRemoverCard.style.display = "block";
-      return;
+    } finally {
+      btnConfirmarRemoverCard.dataset.enviando = "0";
+      btnConfirmarRemoverCard.disabled = false;
+      btnConfirmarRemoverCard.textContent = textoOriginalBotao || "Remover";
     }
-
-    removerCardLocal(cardParaRemover);
-    fecharModalRemoverCard();
-    await carregar();
   });
 
   function abrirModalInativarFase(idFase){
@@ -16551,13 +16618,9 @@ async function moverCard(idCard, idFasePara, posicao) {
     socketKanban.on("card_inativado", async (payload = {}) => {
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
-      const idFaseAntes = idNum(obterCardPorId(idCard)?.IDDimKanbanFaseAtual || 0);
-      removerCardLocal(idCard);
+      const idFaseAntes = idNum(payload.id_fase_de || obterCardPorId(idCard)?.IDDimKanbanFaseAtual || 0);
+      removerCardInativadoLocal(idCard, idFaseAntes);
       tratarAtualizacaoExternaNoCardAberto(idCard, "Este card foi inativado por outro usuário.");
-      if (idFaseAntes) {
-        redesenharFasesLocalmente([idFaseAntes], null, true);
-      }
-      agendarRecarregarResumoComercial();
     });
 
     socketKanban.on("tag_criada", (payload = {}) => {

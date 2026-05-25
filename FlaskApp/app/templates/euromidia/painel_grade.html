@@ -2531,7 +2531,7 @@
                   {% endif %}
 
                   {% if mostra_icone_preferencia %}
-                    <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva">
+                    <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva - período de 6 meses ou mais">
                   {% endif %}
                 </div>
 
@@ -2648,7 +2648,7 @@
                    data-tooltip-txt="{{ it.TextoOriginal|e }}">
                 <span class="txt">{{ txt2 if eh_reserva2 else barra_txt }}</span>
                 {% if mostra_icone_preferencia2 %}
-                  <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva">
+                  <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva - período de 6 meses ou mais">
                 {% endif %}
               </div>
             {% endfor %}

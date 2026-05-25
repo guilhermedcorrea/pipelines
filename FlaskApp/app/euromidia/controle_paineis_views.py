@@ -5337,7 +5337,17 @@ def grade_painel(codponto: int):
             except Exception:
                 id_item_pref = 0
 
-            """Reservas usam ID negativo na grade e não recebem medalha de preferência."""
+            """
+            Reservas usam ID negativo na grade e não recebem medalha.
+
+            A medalha vem das tabelas oficiais de preferência:
+            - Integracao.Silver.FatoPreferenciaReserva
+            - Integracao.Silver.FatoPreferenciaReservaItens
+
+            Regra: só considero preferência ativa quando o item da preferência
+            possui DataInicioPrevisto e DataTerminoPrevisto com 6 meses completos
+            ou mais. Exemplo: 01/05 até 31/10 conta como 6 meses.
+            """
             if id_item_pref > 0:
                 ids_itens_grade.append(id_item_pref)
 
@@ -5345,14 +5355,62 @@ def grade_painel(codponto: int):
 
         if ids_itens_grade:
             sql_bit_preferencia_grade = sql_text("""
+                WITH ItensGrade AS (
+                    SELECT
+                         ci.[IDFatoControleContratosItensEuromidia]
+                        ,ci.[IDFatoControleContratoEuromidia]
+                        ,TRY_CONVERT(date, ci.[DataInicioPrevisto]) AS DataInicioItem
+                        ,TRY_CONVERT(date, ci.[DataTerminoPrevisto]) AS DataTerminoItem
+                        ,COALESCE(
+                            TRY_CONVERT(int, ci.[IDPainelEuromidia]),
+                            TRY_CONVERT(int, f.[IDDimPaineisEuromidia])
+                         ) AS IDPainelEuromidia
+                        ,COALESCE(
+                            TRY_CONVERT(int, ci.[IDDimFacesPaineis]),
+                            TRY_CONVERT(int, f.[IDDimFacesPaineis])
+                         ) AS IDDimFacesPaineis
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                    LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+                        ON LTRIM(RTRIM(CAST(f.[CodPonto] AS varchar(50)))) = LTRIM(RTRIM(CAST(ci.[CodPonto] AS varchar(50))))
+                       AND LTRIM(RTRIM(COALESCE(f.[CodFace], ''))) = LTRIM(RTRIM(COALESCE(ci.[CodFace], '')))
+                    WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
+                )
                 SELECT
-                    ci.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia,
-                    CASE
-                        WHEN TRY_CONVERT(int, ci.[BitPreferencia]) = 1 THEN 1
+                     ig.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia
+                    ,CASE
+                        WHEN COUNT_BIG(pri.[IDFatoPreferenciaReservaItens]) > 0 THEN 1
                         ELSE 0
-                    END AS BitPreferencia
-                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
-                WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
+                     END AS BitPreferencia
+                FROM ItensGrade AS ig
+                LEFT JOIN [Integracao].[Silver].[FatoPreferenciaReserva] AS pr WITH (NOLOCK)
+                    ON pr.[IDFatoControleContratosEuromidia] = ig.[IDFatoControleContratoEuromidia]
+                   AND ISNULL(pr.[BitAtivo], 1) = 1
+                LEFT JOIN [Integracao].[Silver].[FatoPreferenciaReservaItens] AS pri WITH (NOLOCK)
+                    ON pri.[IDFatoPreferenciaReserva] = pr.[IDFatoPreferenciaReserva]
+                   AND ISNULL(pri.[BitAtivo], 1) = 1
+                   AND TRY_CONVERT(date, pri.[DataInicioPrevisto]) IS NOT NULL
+                   AND TRY_CONVERT(date, pri.[DataTerminoPrevisto]) IS NOT NULL
+                   AND TRY_CONVERT(date, pri.[DataTerminoPrevisto]) >= DATEADD(DAY, -1, DATEADD(MONTH, 6, TRY_CONVERT(date, pri.[DataInicioPrevisto])))
+                   AND TRY_CONVERT(date, pri.[DataInicioPrevisto]) <= ig.[DataTerminoItem]
+                   AND TRY_CONVERT(date, pri.[DataTerminoPrevisto]) >= ig.[DataInicioItem]
+                   AND (
+                        (
+                            TRY_CONVERT(int, pri.[IDDimFacesPaineis]) IS NOT NULL
+                            AND TRY_CONVERT(int, pri.[IDDimFacesPaineis]) > 0
+                            AND TRY_CONVERT(int, pri.[IDDimFacesPaineis]) = ig.[IDDimFacesPaineis]
+                        )
+                        OR
+                        (
+                            (
+                                TRY_CONVERT(int, pri.[IDDimFacesPaineis]) IS NULL
+                                OR TRY_CONVERT(int, pri.[IDDimFacesPaineis]) = 0
+                            )
+                            AND TRY_CONVERT(int, pri.[IDPainelEuromidia]) IS NOT NULL
+                            AND TRY_CONVERT(int, pri.[IDPainelEuromidia]) > 0
+                            AND TRY_CONVERT(int, pri.[IDPainelEuromidia]) = ig.[IDPainelEuromidia]
+                        )
+                   )
+                GROUP BY ig.[IDFatoControleContratosItensEuromidia]
             """).bindparams(bindparam("ids_itens_grade", expanding=True))
 
             rows_bit_preferencia = db.session.execute(
@@ -5369,7 +5427,7 @@ def grade_painel(codponto: int):
         mapa_bit_preferencia_por_item = {}
         try:
             current_app.logger.warning(
-                "GRADE_PAINEL | falha ao carregar BitPreferencia dos itens | codponto=%s | erro=%s",
+                "GRADE_PAINEL | falha ao carregar preferência pelas tabelas FatoPreferenciaReserva/FatoPreferenciaReservaItens | codponto=%s | erro=%s",
                 codponto,
                 exc,
             )

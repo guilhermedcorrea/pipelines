@@ -40,13 +40,17 @@ O DAG não usa BitAtivo para essa regra.
 
 Um item entra em preferência/reserva quando:
 
-1. O contrato não está cancelado ou com erro:
-   - 9 = Cancelado
-   - 10 = Erro
-2. DataInicioPrevisto está preenchida.
-3. DataTerminoPrevisto está preenchida.
-4. DataTerminoPrevisto >= DataInicioPrevisto.
-5. DataTerminoPrevisto >= data atual.
+1. O contrato está com `IDDimStatusContratos = 7`.
+2. O contrato está ativo (`BitAtivo = 1`).
+3. O item do contrato está ativo (`BitAtivo = 1`).
+4. DataInicioPrevisto está preenchida.
+5. DataTerminoPrevisto está preenchida.
+6. DataTerminoPrevisto >= DataInicioPrevisto.
+7. O item está vigente na data atual:
+   - DataInicioPrevisto <= hoje
+   - DataTerminoPrevisto >= hoje
+8. O período comercial do item é de 6 meses ou mais:
+   - DataTerminoPrevisto >= DATEADD(DAY, -1, DATEADD(MONTH, 6, DataInicioPrevisto))
 
 ## O que o DAG faz
 
@@ -90,6 +94,7 @@ class ConfiguracaoPreferenciaReserva:
     status_contrato_concluido: int = 8
     status_terminal_cancelado: int = 9
     status_terminal_erro: int = 10
+    meses_minimos_preferencia: int = 6
 
 
 def criar_engine_sql(conn_id: str):
@@ -156,6 +161,7 @@ def validar_estrutura_tabelas() -> dict[str, Any]:
                 (N'FatoControleContratosEuromidia', N'DataAtualizacao'),
                 (N'FatoControleContratosEuromidia', N'IDEmpresa'),
                 (N'FatoControleContratosEuromidia', N'IDDimStatusContratos'),
+                (N'FatoControleContratosEuromidia', N'BitAtivo'),
                 (N'FatoControleContratosEuromidia', N'TotalLiquidoContratoAGBRVENDGERCOOR'),
                 (N'FatoControleContratosEuromidia', N'MarcaExibida'),
 
@@ -166,6 +172,7 @@ def validar_estrutura_tabelas() -> dict[str, Any]:
                 (N'FatoControleContratosItensEuromidia', N'IDPainelEuromidia'),
                 (N'FatoControleContratosItensEuromidia', N'IDDimFacesPaineis'),
                 (N'FatoControleContratosItensEuromidia', N'IDVendedor'),
+                (N'FatoControleContratosItensEuromidia', N'BitAtivo'),
                 (N'FatoControleContratosItensEuromidia', N'BitPreferencia'),
 
                 (N'Vendedores', N'IDVendedor'),
@@ -309,6 +316,11 @@ def sincronizar_status_contratos_por_periodo(conexao, config: ConfiguracaoPrefer
         ON status_contrato.IDFatoControleContratoEuromidia = contrato.IDFatoControleContratosEuromidia
     WHERE
         status_contrato.NovoStatus IS NOT NULL
+        AND ISNULL(contrato.IDDimStatusContratos, -1) NOT IN
+        (
+            {config.status_terminal_cancelado},
+            {config.status_terminal_erro}
+        )
         AND ISNULL(contrato.IDDimStatusContratos, -1) <> status_contrato.NovoStatus;
     """
 
@@ -400,15 +412,20 @@ def criar_tabelas_temporarias_preferencia(conexao, config: ConfiguracaoPreferenc
     LEFT JOIN {config.tabela_vendedores} AS vendedor
         ON vendedor.IDVendedor = item.IDVendedor
     WHERE
-        ISNULL(contrato.IDDimStatusContratos, -1) NOT IN
-        (
-            {config.status_terminal_cancelado},
-            {config.status_terminal_erro}
-        )
+        ISNULL(contrato.IDDimStatusContratos, -1) = {config.status_contrato_ativo}
+        AND ISNULL(contrato.BitAtivo, 0) = 1
+        AND ISNULL(item.BitAtivo, 0) = 1
         AND item.DataInicioPrevisto IS NOT NULL
         AND item.DataTerminoPrevisto IS NOT NULL
         AND CAST(item.DataTerminoPrevisto AS DATE) >= CAST(item.DataInicioPrevisto AS DATE)
-        AND CAST(item.DataTerminoPrevisto AS DATE) >= @DataHoje;
+        AND CAST(item.DataInicioPrevisto AS DATE) <= @DataHoje
+        AND CAST(item.DataTerminoPrevisto AS DATE) >= @DataHoje
+        AND CAST(item.DataTerminoPrevisto AS DATE) >= DATEADD
+        (
+            DAY,
+            -1,
+            DATEADD(MONTH, {config.meses_minimos_preferencia}, CAST(item.DataInicioPrevisto AS DATE))
+        );
 
     CREATE CLUSTERED INDEX IX_TMP_ItensPreferenciaReserva_Item
     ON #ItensPreferenciaReserva (IDFatoControleContratosItensEuromidia);
