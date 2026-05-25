@@ -682,7 +682,7 @@
 
   .vc-table{
     width:100%;
-    min-width:1400px;
+    min-width:1500px;
     border-collapse:separate;
     border-spacing:0;
   }
@@ -723,6 +723,21 @@
     color:#64748B;
     cursor:default;
     text-decoration:none;
+  }
+
+  .vc-painel{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:72px;
+    padding:6px 10px;
+    border-radius:999px;
+    background:#F1F5F9;
+    color:#0F172A;
+    border:1px solid rgba(71,85,105,.18);
+    font-size:12px;
+    font-weight:950;
+    white-space:nowrap;
   }
 
   .vc-razao{
@@ -1080,7 +1095,7 @@
               type="search"
               name="q"
               value="{{ q or '' }}"
-              placeholder="Pesquisar por razão social, número do contrato, marca ou status..."
+              placeholder="Pesquisar por razão social, contrato, marca, painel/CodFace ou status..."
               autocomplete="off"
               spellcheck="false"
               aria-autocomplete="list"
@@ -1248,6 +1263,7 @@
         <thead>
           <tr>
             <th>Contrato</th>
+            <th>Painel</th>
             <th>Razão Social</th>
             <th>Marca</th>
             <th>Status</th>
@@ -1277,6 +1293,10 @@
                   {% if row.IDFatoControleContratosEuromidia %}
                     <div class="muted" style="font-size:11px;font-weight:800;margin-top:3px;">ID: {{ row.IDFatoControleContratosEuromidia }}</div>
                   {% endif %}
+                </td>
+
+                <td data-label="Painel">
+                  <span class="vc-painel">{{ row.Painel or '—' }}</span>
                 </td>
 
                 <td data-label="Razão Social">
@@ -1954,6 +1974,7 @@
       const desc = criarElemento('div', 'vc-search-sugestao-desc');
       const partes = [];
       if(item.marca){ partes.push(`Marca: ${item.marca}`); }
+      if(item.painel){ partes.push(`Painel: ${item.painel}`); }
       if(item.data_termino){ partes.push(`Término: ${item.data_termino}`); }
       if(item.vendedor){ partes.push(`Vendedor: ${item.vendedor}`); }
       desc.textContent = partes.length ? partes.join(' • ') : 'Sem detalhes adicionais.';

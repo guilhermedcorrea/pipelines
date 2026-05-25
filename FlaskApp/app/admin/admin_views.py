@@ -32,12 +32,15 @@ TABELA_VENCIMENTO_CAMPANHA = "[Integracao].[Silver].[FatoVencimentoCampanhaEurom
 TABELA_KANBAN_CARD_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCard]"
 TABELA_KANBAN_CARD_TAG_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardTag]"
 TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
+TABELA_CONTRATO_EMPRESA_RELACIONADA = "[Integracao].[Silver].[FatoContratoEmpresaRelacionada]"
 TABELA_KANBAN_FASE_RENOVACAO = "[Kanban].[Silver].[DimKanbanFase]"
 TABELA_KANBAN_TAG_RENOVACAO = "[Kanban].[Silver].[DimKanbanTag]"
 TABELA_KANBAN_STATUS_CARD_RENOVACAO = "[Kanban].[Silver].[DimKanbanStatusCard]"
 
 ID_KANBAN_RENOVACAO_CAMPANHA = 1
 ID_TAG_RENOVACAO_CAMPANHA = 17
+ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN = 8
+ID_TAG_TIPO_CONTRATO_NOVO_ADMIN = 9
 ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO = 3
 STATUS_CARD_RENOVACAO_PADRAO = "ATIVO"
 
@@ -3742,15 +3745,54 @@ def _card_possui_tag_ativa_admin(id_card: int | None, id_tag: int | None) -> boo
     if id_card in (None, '', 0) or id_tag in (None, '', 0):
         return False
 
+    filtros = [
+        "IDFatoKanbanCard = :id_card",
+        "IDDimKanbanTag = :id_tag",
+        "RemovidoEm IS NULL",
+    ]
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_TAG_RENOVACAO, "Ativo"):
+        filtros.append("ISNULL(Ativo, 1) = 1")
+
     existe = db.session.execute(
-        text("""
+        text(f"""
             SELECT TOP 1 1
-            FROM [Kanban].[Silver].[FatoKanbanCardTag]
-            WHERE IDFatoKanbanCard = :id_card
-              AND IDDimKanbanTag = :id_tag
-              AND RemovidoEm IS NULL
+            FROM {TABELA_KANBAN_CARD_TAG_RENOVACAO}
+            WHERE {' AND '.join(filtros)}
         """),
         {"id_card": int(id_card), "id_tag": int(id_tag)},
+    ).scalar()
+
+    return bool(existe)
+
+
+def _card_eh_renovacao_admin(id_card: int | None) -> bool:
+    """Regra forte no admin: card com tag 17 Renovação nunca pode ser aprovado como Novo Contrato."""
+    id_card_int = _int_ou_none(id_card)
+    if id_card_int in (None, "", 0):
+        return False
+
+    filtros = [
+        "ct.IDFatoKanbanCard = :id_card",
+        "ct.RemovidoEm IS NULL",
+        "(ct.IDDimKanbanTag = :id_tag_renovacao OR UPPER(LTRIM(RTRIM(ISNULL(tg.NomeTag, '')))) COLLATE Latin1_General_CI_AI LIKE '%RENOVA%')",
+    ]
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_TAG_RENOVACAO, "Ativo"):
+        filtros.append("ISNULL(ct.Ativo, 1) = 1")
+
+    existe = db.session.execute(
+        text(f"""
+            SELECT TOP 1 1
+            FROM {TABELA_KANBAN_CARD_TAG_RENOVACAO} ct
+            LEFT JOIN {TABELA_KANBAN_TAG_RENOVACAO} tg
+                   ON tg.IDDimKanbanTag = ct.IDDimKanbanTag
+            WHERE {' AND '.join(filtros)}
+        """),
+        {
+            "id_card": int(id_card_int),
+            "id_tag_renovacao": int(ID_TAG_RENOVACAO_CAMPANHA),
+        },
     ).scalar()
 
     return bool(existe)
@@ -3760,7 +3802,34 @@ def _aplicar_tag_no_card_admin(*, id_card: int | None, id_tag: int | None, id_us
     if id_card in (None, '', 0) or id_tag in (None, '', 0):
         return False
 
-    if _card_possui_tag_ativa_admin(id_card, id_tag):
+    id_card_int = int(id_card)
+    id_tag_int = int(id_tag)
+
+    # Regra de segurança: card com tag 17 Renovação nunca deve receber tag 9 Novo Contrato.
+    # Renovação é continuação/substituição de item existente, não abertura de contrato novo.
+    if id_tag_int == int(ID_TAG_TIPO_CONTRATO_NOVO_ADMIN) and _card_eh_renovacao_admin(id_card_int):
+        current_app.logger.warning(
+            "KANBAN_TAG | bloqueada aplicação da tag Novo Contrato em card de Renovação | id_card=%s | id_usuario=%s",
+            id_card_int,
+            id_usuario,
+        )
+        return False
+
+    # Se a tag 17 for aplicada depois, removo a tag 9 imediatamente para não contaminar o card.
+    if id_tag_int == int(ID_TAG_RENOVACAO_CAMPANHA):
+        try:
+            _remover_tag_do_card_admin(
+                id_card=id_card_int,
+                id_tag=int(ID_TAG_TIPO_CONTRATO_NOVO_ADMIN),
+                id_usuario=id_usuario,
+            )
+        except Exception:
+            current_app.logger.exception(
+                "KANBAN_TAG | falha ao remover tag Novo Contrato ao aplicar Renovação no admin | id_card=%s",
+                id_card_int,
+            )
+
+    if _card_possui_tag_ativa_admin(id_card_int, id_tag_int):
         return False
 
     db.session.execute(
@@ -3798,6 +3867,216 @@ def _remover_tag_do_card_admin(*, id_card: int | None, id_tag: int | None, id_us
     return bool(getattr(resultado, 'rowcount', 0) or 0)
 
 
+def _normalizar_card_renovacao_admin(
+    *,
+    id_card: int | None,
+    id_usuario: int | None,
+    tipo_solicitacao: str | None = None,
+    id_solicitacao: int | None = None,
+) -> dict:
+    """Normaliza a regra operacional: ADITIVO + tag 17 = RENOVAÇÃO.
+
+    Renovação continua sendo gravada como TipoSolicitacao = ADITIVO, mas o fluxo
+    operacional passa a ser RENOVAÇÃO quando a tag 17 está ativa. Nessa condição:
+    - garanto tag 8 Aditivo;
+    - removo tag 9 Novo Contrato, se existir;
+    - deixo BitAditivo=1 e BitContratoNovo=0 no card;
+    - devolvo inicio_renovacao='R' para a aprovação inserir nova linha e inativar a antiga.
+    """
+
+    id_card_int = _int_ou_none(id_card)
+    id_usuario_int = _int_ou_none(id_usuario)
+    id_solicitacao_int = _int_ou_none(id_solicitacao)
+    tipo_norm = _tipo_solicitacao_normalizado(tipo_solicitacao) if tipo_solicitacao not in (None, "") else None
+
+    retorno = {
+        "id_card": id_card_int,
+        "tipo_solicitacao": tipo_norm,
+        "tipo_operacional": tipo_norm,
+        "tem_tag_renovacao": False,
+        "tem_tag_aditivo": False,
+        "tem_tag_novo_contrato": False,
+        "tag_aditivo_adicionada": False,
+        "tag_novo_removida": False,
+        "solicitacao_normalizada": False,
+        "inicio_renovacao": None,
+    }
+
+    if id_card_int in (None, "", 0):
+        return retorno
+
+    tem_tag_renovacao = _card_eh_renovacao_admin(id_card_int)
+    tem_tag_aditivo = _card_possui_tag_ativa_admin(id_card_int, ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN)
+    tem_tag_novo_contrato = _card_possui_tag_ativa_admin(id_card_int, ID_TAG_TIPO_CONTRATO_NOVO_ADMIN)
+
+    retorno["tem_tag_renovacao"] = bool(tem_tag_renovacao)
+    retorno["tem_tag_aditivo"] = bool(tem_tag_aditivo)
+    retorno["tem_tag_novo_contrato"] = bool(tem_tag_novo_contrato)
+
+    if tem_tag_renovacao:
+        retorno["tipo_solicitacao"] = "ADITIVO"
+        retorno["tipo_operacional"] = "RENOVACAO"
+        retorno["inicio_renovacao"] = "R"
+
+        if not tem_tag_aditivo:
+            retorno["tag_aditivo_adicionada"] = _aplicar_tag_no_card_admin(
+                id_card=id_card_int,
+                id_tag=ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN,
+                id_usuario=id_usuario_int,
+                id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
+            )
+            retorno["tem_tag_aditivo"] = True
+
+        if tem_tag_novo_contrato:
+            retorno["tag_novo_removida"] = _remover_tag_do_card_admin(
+                id_card=id_card_int,
+                id_tag=ID_TAG_TIPO_CONTRATO_NOVO_ADMIN,
+                id_usuario=id_usuario_int,
+            )
+
+        sets = []
+        params = {"id_card": int(id_card_int)}
+
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitAditivo"):
+            sets.append("BitAditivo = 1")
+
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitContratoNovo"):
+            sets.append("BitContratoNovo = 0")
+
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "AtualizadoEm"):
+            sets.append("AtualizadoEm = GETDATE()")
+
+        if sets:
+            db.session.execute(
+                text(f"""
+                    UPDATE [Kanban].[Silver].[FatoKanbanCard]
+                       SET {', '.join(sets)}
+                     WHERE IDFatoKanbanCard = :id_card
+                """),
+                params,
+            )
+
+        if id_solicitacao_int not in (None, "", 0):
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+                       SET TipoSolicitacao = 'ADITIVO',
+                           DataAtualizacao = GETDATE()
+                     WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                """),
+                {"id_solicitacao": int(id_solicitacao_int)},
+            )
+            retorno["solicitacao_normalizada"] = True
+
+        return retorno
+
+    if tem_tag_novo_contrato:
+        retorno["inicio_renovacao"] = "I"
+
+    return retorno
+
+
+def _obter_data_aprovacao_sql_server_admin():
+    """Uso a data do SQL Server para gravar DataInicioPrevisto da renovação aprovada."""
+
+    return db.session.execute(text("SELECT CAST(GETDATE() AS date) AS DataAprovacao")).scalar()
+
+
+def _resolver_id_card_aprovacao_solicitacao_admin(cabecalho_solicitacao: dict | None, itens_solicitacao: list[dict] | None = None) -> int | None:
+    """Resolvo o card real da aprovação olhando cabeçalho e itens.
+
+    Motivo:
+    - em alguns fluxos o IDFatoKanbanCard fica no item da solicitação, não no cabeçalho;
+    - a regra da renovação depende da tag 17 no card;
+    - se eu olhar apenas o cabeçalho e ele vier vazio, o sistema trata renovação como contrato comum,
+      não inativa o item antigo e não cria uma nova linha.
+    """
+
+    candidatos: list[int] = []
+
+    def adicionar(valor):
+        id_card = _int_ou_none(valor)
+        if id_card not in (None, "", 0) and int(id_card) not in candidatos:
+            candidatos.append(int(id_card))
+
+    cab = cabecalho_solicitacao or {}
+    adicionar(cab.get("IDFatoKanbanCard"))
+
+    for item in itens_solicitacao or []:
+        adicionar((item or {}).get("IDFatoKanbanCard"))
+
+    if not candidatos:
+        return None
+
+    for id_card in candidatos:
+        if _card_possui_tag_ativa_admin(id_card, ID_TAG_RENOVACAO_CAMPANHA):
+            return int(id_card)
+
+    return int(candidatos[0])
+
+
+def _buscar_item_controle_existente_aprovacao_admin(
+    *,
+    id_contrato_controle: int,
+    id_item_controle_origem: int | None,
+    cod_ponto,
+    cod_face,
+    somente_ativos: bool = False,
+) -> dict | None:
+    """Busca o item oficial existente do contrato para atualizar ou substituir.
+
+    Para renovação, primeiro procuro item ativo. Assim eu inativo a linha atualmente válida
+    e depois insiro a nova linha aprovada, sem reaproveitar item antigo inativo por engano.
+    """
+
+    sql = text("""
+        SELECT TOP 1
+               i.IDFatoControleContratosItensEuromidia,
+               i.Referencia AS ReferenciaAtual,
+               ISNULL(i.BitAtivo, 1) AS BitAtivoAtual
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (UPDLOCK, HOLDLOCK)
+        WHERE i.IDFatoControleContratoEuromidia = :id_contrato_controle
+          AND (:somente_ativos = 0 OR ISNULL(i.BitAtivo, 1) = 1)
+          AND (
+                (:id_item_controle_origem IS NOT NULL AND i.IDFatoControleContratosItensEuromidia = :id_item_controle_origem)
+                OR
+                (
+                    ISNULL(LTRIM(RTRIM(CAST(i.CodPonto AS varchar(60)))), '') = ISNULL(LTRIM(RTRIM(CAST(:cod_ponto AS varchar(60)))), '')
+                    AND ISNULL(UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(60))))), '') = ISNULL(UPPER(LTRIM(RTRIM(CAST(:cod_face AS varchar(60))))), '')
+                )
+              )
+        ORDER BY
+            CASE WHEN :id_item_controle_origem IS NOT NULL AND i.IDFatoControleContratosItensEuromidia = :id_item_controle_origem THEN 0 ELSE 1 END,
+            CASE WHEN ISNULL(i.BitAtivo, 1) = 1 THEN 0 ELSE 1 END,
+            i.IDFatoControleContratosItensEuromidia DESC;
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_contrato_controle": int(id_contrato_controle),
+            "id_item_controle_origem": int(id_item_controle_origem) if id_item_controle_origem not in (None, "", 0) else None,
+            "cod_ponto": cod_ponto,
+            "cod_face": cod_face,
+            "somente_ativos": 1 if somente_ativos else 0,
+        },
+    ).mappings().first()
+
+    if row:
+        return dict(row)
+
+    if somente_ativos:
+        return _buscar_item_controle_existente_aprovacao_admin(
+            id_contrato_controle=id_contrato_controle,
+            id_item_controle_origem=id_item_controle_origem,
+            cod_ponto=cod_ponto,
+            cod_face=cod_face,
+            somente_ativos=False,
+        )
+
+    return None
+
+
 def _obter_cabecalho_solicitacao_bruta(id_solicitacao: int) -> dict | None:
     row = db.session.execute(
         text("""
@@ -3823,7 +4102,21 @@ def _obter_itens_solicitacao_brutos(id_solicitacao: int) -> list[dict]:
         """),
         {"id_solicitacao": int(id_solicitacao)},
     ).mappings().all()
-    return [dict(row) for row in rows]
+
+    cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao)) or {}
+    itens: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        item = _aplicar_fallback_layout_item_solicitacao(item, cab)
+        item["CodPonto"] = _texto_ou_none(item.get("CodPonto") or item.get("CodPontoOriginal"))
+        item["CodFace"] = _texto_ou_none(item.get("CodFace") or item.get("CodFaceOriginal"))
+        if item.get("CodFace"):
+            item["CodFace"] = str(item["CodFace"]).strip().upper()
+        if _valor_esta_vazio_para_fallback(item.get("Status")):
+            item["Status"] = "ATIVO"
+        itens.append(item)
+
+    return itens
 
 
 
@@ -5210,6 +5503,356 @@ def _upsert_preco_praticado_item_contrato_euromidia(
         "preco_praticado": preco_praticado,
     }
 
+
+def _tabela_silver_existe_admin(*, banco: str, nome_tabela: str) -> bool:
+    """Confiro se uma tabela Silver existe antes de tentar gravar eventos auxiliares."""
+    banco_limpo = _texto_ou_vazio(banco)
+    nome_tabela_limpo = _texto_ou_vazio(nome_tabela)
+
+    if banco_limpo not in {"Integracao", "Kanban"} or not nome_tabela_limpo:
+        return False
+
+    sql = text(f"""
+        SELECT CASE WHEN EXISTS (
+            SELECT 1
+            FROM [{banco_limpo}].sys.tables t
+            INNER JOIN [{banco_limpo}].sys.schemas s
+                    ON s.schema_id = t.schema_id
+            WHERE s.name = 'Silver'
+              AND t.name = :nome_tabela
+        ) THEN 1 ELSE 0 END AS Existe;
+    """)
+
+    return bool(db.session.execute(sql, {"nome_tabela": nome_tabela_limpo}).scalar() or 0)
+
+
+def _coluna_silver_existe_admin(*, banco: str, nome_tabela: str, nome_coluna: str) -> bool:
+    """Confiro se uma coluna existe antes de montar SQL que depende dela."""
+    banco_limpo = _texto_ou_vazio(banco)
+    nome_tabela_limpo = _texto_ou_vazio(nome_tabela)
+    nome_coluna_limpo = _texto_ou_vazio(nome_coluna)
+
+    if banco_limpo not in {"Integracao", "Kanban"} or not nome_tabela_limpo or not nome_coluna_limpo:
+        return False
+
+    sql = text(f"""
+        SELECT CASE WHEN EXISTS (
+            SELECT 1
+            FROM [{banco_limpo}].sys.columns c
+            INNER JOIN [{banco_limpo}].sys.tables t
+                    ON t.object_id = c.object_id
+            INNER JOIN [{banco_limpo}].sys.schemas s
+                    ON s.schema_id = t.schema_id
+            WHERE s.name = 'Silver'
+              AND t.name = :nome_tabela
+              AND c.name = :nome_coluna
+        ) THEN 1 ELSE 0 END AS Existe;
+    """)
+
+    return bool(db.session.execute(sql, {"nome_tabela": nome_tabela_limpo, "nome_coluna": nome_coluna_limpo}).scalar() or 0)
+
+
+def _obter_metadados_card_empresa_relacionada_admin(id_fato_kanban_card: int | None) -> dict:
+    """Busco dados do card que ajudam a preencher FatoContratoEmpresaRelacionada."""
+    id_card = _int_ou_none(id_fato_kanban_card)
+    if id_card in (None, "", 0):
+        return {}
+
+    campos = []
+    for nome_coluna in (
+        "IDEmpresa",
+        "IDEmpresaAgencia",
+        "IDEmpresaBureau",
+        "IDEmpresaIntermediario",
+        "IDDimTipoCliente",
+        "IDDimCnaes",
+        "MarcaExibida",
+    ):
+        if _coluna_silver_existe_admin(banco="Kanban", nome_tabela="FatoKanbanCard", nome_coluna=nome_coluna):
+            campos.append(f"c.[{nome_coluna}] AS [{nome_coluna}]")
+        else:
+            campos.append(f"CAST(NULL AS nvarchar(255)) AS [{nome_coluna}]")
+
+    sql = text(f"""
+        SELECT TOP (1)
+               {', '.join(campos)}
+        FROM [Kanban].[Silver].[FatoKanbanCard] c
+        WHERE c.IDFatoKanbanCard = :id_card;
+    """)
+
+    row = db.session.execute(sql, {"id_card": int(id_card)}).mappings().first()
+    return dict(row) if row else {}
+
+
+def _upsert_linha_empresa_relacionada_contrato_euromidia(
+    *,
+    id_fato_contrato_empresa_relacionada: int | None,
+    id_contrato_controle: int,
+    id_empresa: int | None,
+    id_dim_tipo_cliente: int | None,
+    id_dim_cnaes: int | None,
+    marca_exibida: str | None,
+    bit_principal: int,
+) -> int | None:
+    """Faço upsert de uma linha em FatoContratoEmpresaRelacionada e devolvo o ID."""
+    id_contrato = _int_ou_none(id_contrato_controle)
+    id_empresa_int = _int_ou_none(id_empresa)
+    id_rel = _int_ou_none(id_fato_contrato_empresa_relacionada)
+
+    if id_contrato in (None, "", 0) or id_empresa_int in (None, "", 0):
+        return None
+
+    if not _tabela_silver_existe_admin(banco="Integracao", nome_tabela="FatoContratoEmpresaRelacionada"):
+        current_app.logger.warning(
+            "APROVACAO_CONTRATO | tabela FatoContratoEmpresaRelacionada não existe; sincronização ignorada | contrato=%s | empresa=%s",
+            id_contrato,
+            id_empresa_int,
+        )
+        return None
+
+    params = {
+        "id_rel": int(id_rel) if id_rel not in (None, "", 0) else None,
+        "id_contrato": int(id_contrato),
+        "id_empresa": int(id_empresa_int),
+        "id_dim_tipo_cliente": int(id_dim_tipo_cliente) if id_dim_tipo_cliente not in (None, "", 0) else None,
+        "id_dim_cnaes": int(id_dim_cnaes) if id_dim_cnaes not in (None, "", 0) else None,
+        "marca_exibida": _texto_ou_none(marca_exibida),
+        "bit_principal": 1 if int(bit_principal or 0) == 1 else 0,
+    }
+
+    row_existente = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                   IDFatoContratoEmpresaRelacionada
+            FROM [Integracao].[Silver].[FatoContratoEmpresaRelacionada] WITH (UPDLOCK, HOLDLOCK)
+            WHERE
+                (:id_rel IS NOT NULL AND IDFatoContratoEmpresaRelacionada = :id_rel)
+                OR
+                (
+                    IDFatoControleContratosEuromidia = :id_contrato
+                    AND IDEmpresa = :id_empresa
+                    AND ISNULL(BitPrincipal, 0) = :bit_principal
+                )
+            ORDER BY
+                CASE WHEN :id_rel IS NOT NULL AND IDFatoContratoEmpresaRelacionada = :id_rel THEN 0 ELSE 1 END,
+                IDFatoContratoEmpresaRelacionada DESC;
+        """),
+        params,
+    ).mappings().first()
+
+    if row_existente and row_existente.get("IDFatoContratoEmpresaRelacionada") not in (None, "", 0):
+        id_rel_final = int(row_existente["IDFatoContratoEmpresaRelacionada"])
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoContratoEmpresaRelacionada]
+                   SET IDFatoControleContratosEuromidia = :id_contrato,
+                       IDEmpresa = :id_empresa,
+                       IDDimTipoCliente = COALESCE(:id_dim_tipo_cliente, IDDimTipoCliente),
+                       IDDimCnaes = COALESCE(:id_dim_cnaes, IDDimCnaes),
+                       MarcaExibida = COALESCE(:marca_exibida, MarcaExibida),
+                       BitPrincipal = :bit_principal,
+                       BitAtivo = 1,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoContratoEmpresaRelacionada = :id_rel_final;
+            """),
+            {**params, "id_rel_final": id_rel_final},
+        )
+        return id_rel_final
+
+    row_insert = db.session.execute(
+        text("""
+            INSERT INTO [Integracao].[Silver].[FatoContratoEmpresaRelacionada]
+            (
+                IDFatoControleContratosEuromidia,
+                IDEmpresa,
+                IDDimTipoCliente,
+                IDDimCnaes,
+                MarcaExibida,
+                BitPrincipal,
+                BitAtivo,
+                DataAtualizacao
+            )
+            OUTPUT INSERTED.IDFatoContratoEmpresaRelacionada AS id_rel
+            VALUES
+            (
+                :id_contrato,
+                :id_empresa,
+                :id_dim_tipo_cliente,
+                :id_dim_cnaes,
+                :marca_exibida,
+                :bit_principal,
+                1,
+                GETDATE()
+            );
+        """),
+        params,
+    ).mappings().first()
+
+    return int(row_insert.get("id_rel") or 0) if row_insert and row_insert.get("id_rel") not in (None, "", 0) else None
+
+
+def _sincronizar_empresa_relacionada_item_contrato_euromidia(
+    *,
+    cabecalho_solicitacao: dict,
+    item_solicitacao: dict,
+    id_contrato_controle: int,
+    id_item_controle: int,
+    id_usuario_logado: int | None = None,
+) -> dict:
+    """Restaura a gravação de empresas relacionadas no momento da aprovação.
+
+    A tabela FatoContratoEmpresaRelacionada é parte do rastro do contrato:
+    - grava a empresa principal do contrato;
+    - grava agência/bureau/intermediário quando houver ID disponível;
+    - amarra o item aprovado ao IDFatoContratoEmpresaRelacionada principal.
+    """
+    cab = cabecalho_solicitacao or {}
+    item = item_solicitacao or {}
+    id_contrato = _int_ou_none(id_contrato_controle)
+    id_item = _int_ou_none(id_item_controle)
+    id_card = _int_ou_none(item.get("IDFatoKanbanCard")) or _int_ou_none(cab.get("IDFatoKanbanCard"))
+
+    if id_contrato in (None, "", 0) or id_item in (None, "", 0):
+        return {"ok": False, "motivo": "contrato_ou_item_invalido", "id_contrato": id_contrato, "id_item": id_item}
+
+    metadados_card = _obter_metadados_card_empresa_relacionada_admin(id_card)
+
+    id_tipo_cliente_principal = (
+        _int_ou_none(item.get("IDDimTipoCliente"))
+        or _int_ou_none(cab.get("IDDimTipoCliente"))
+        or _int_ou_none(metadados_card.get("IDDimTipoCliente"))
+    )
+    id_dim_cnaes = (
+        _int_ou_none(item.get("IDDimCnaes"))
+        or _int_ou_none(cab.get("IDDimCnaes"))
+        or _int_ou_none(metadados_card.get("IDDimCnaes"))
+    )
+    marca_exibida = _primeiro_valor_nao_vazio(
+        item.get("MarcaExibida"),
+        cab.get("MarcaExibida"),
+        metadados_card.get("MarcaExibida"),
+    )
+
+    empresas_para_sincronizar: list[dict] = []
+    id_empresa_principal = (
+        _int_ou_none(item.get("IDEmpresa"))
+        or _int_ou_none(cab.get("IDEmpresa"))
+        or _int_ou_none(metadados_card.get("IDEmpresa"))
+    )
+
+    if id_empresa_principal not in (None, "", 0):
+        empresas_para_sincronizar.append({
+            "papel": "PRINCIPAL",
+            "id_rel_existente": _int_ou_none(item.get("IDFatoContratoEmpresaRelacionada")),
+            "id_empresa": int(id_empresa_principal),
+            "id_dim_tipo_cliente": id_tipo_cliente_principal,
+            "id_dim_cnaes": id_dim_cnaes,
+            "marca_exibida": marca_exibida,
+            "bit_principal": 1,
+        })
+
+    # IDs conhecidos pelo cadastro atual: Cliente direto=2, Agência=3, Bureau=4.
+    # Intermediário pode variar por cadastro; por isso só gravo a empresa e deixo o tipo nulo quando não houver ID explícito.
+    relacionados = [
+        ("AGENCIA", _int_ou_none(item.get("IDEmpresaAgencia")) or _int_ou_none(cab.get("IDEmpresaAgencia")) or _int_ou_none(metadados_card.get("IDEmpresaAgencia")), 3),
+        ("BUREAU", _int_ou_none(item.get("IDEmpresaBureau")) or _int_ou_none(cab.get("IDEmpresaBureau")) or _int_ou_none(metadados_card.get("IDEmpresaBureau")), 4),
+        ("INTERMEDIARIO", _int_ou_none(item.get("IDEmpresaIntermediario")) or _int_ou_none(cab.get("IDEmpresaIntermediario")) or _int_ou_none(metadados_card.get("IDEmpresaIntermediario")), _int_ou_none(item.get("IDDimTipoClienteIntermediario")) or _int_ou_none(cab.get("IDDimTipoClienteIntermediario"))),
+    ]
+
+    empresas_vistas: set[tuple[int, int]] = set()
+    for empresa in list(empresas_para_sincronizar):
+        chave = (int(empresa["id_empresa"]), int(empresa["bit_principal"]))
+        empresas_vistas.add(chave)
+
+    for papel, id_empresa_relacionada, id_tipo_relacionada in relacionados:
+        if id_empresa_relacionada in (None, "", 0):
+            continue
+        chave = (int(id_empresa_relacionada), 0)
+        if chave in empresas_vistas:
+            continue
+        empresas_vistas.add(chave)
+        empresas_para_sincronizar.append({
+            "papel": papel,
+            "id_rel_existente": None,
+            "id_empresa": int(id_empresa_relacionada),
+            "id_dim_tipo_cliente": id_tipo_relacionada,
+            "id_dim_cnaes": id_dim_cnaes,
+            "marca_exibida": marca_exibida,
+            "bit_principal": 0,
+        })
+
+    registros: list[dict] = []
+    id_rel_principal = None
+
+    for empresa in empresas_para_sincronizar:
+        id_rel = _upsert_linha_empresa_relacionada_contrato_euromidia(
+            id_fato_contrato_empresa_relacionada=empresa.get("id_rel_existente"),
+            id_contrato_controle=int(id_contrato),
+            id_empresa=empresa.get("id_empresa"),
+            id_dim_tipo_cliente=empresa.get("id_dim_tipo_cliente"),
+            id_dim_cnaes=empresa.get("id_dim_cnaes"),
+            marca_exibida=empresa.get("marca_exibida"),
+            bit_principal=int(empresa.get("bit_principal") or 0),
+        )
+        registros.append({
+            "papel": empresa.get("papel"),
+            "id_empresa": empresa.get("id_empresa"),
+            "id_fato_contrato_empresa_relacionada": id_rel,
+            "bit_principal": int(empresa.get("bit_principal") or 0),
+        })
+        if int(empresa.get("bit_principal") or 0) == 1 and id_rel not in (None, "", 0):
+            id_rel_principal = int(id_rel)
+
+    if id_rel_principal not in (None, "", 0) and _coluna_silver_existe_admin(
+        banco="Integracao",
+        nome_tabela="FatoControleContratosItensEuromidia",
+        nome_coluna="IDFatoContratoEmpresaRelacionada",
+    ):
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+                   SET IDFatoContratoEmpresaRelacionada = :id_rel_principal,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoControleContratosItensEuromidia = :id_item;
+            """),
+            {"id_rel_principal": int(id_rel_principal), "id_item": int(id_item)},
+        )
+
+    if id_rel_principal not in (None, "", 0) and _coluna_silver_existe_admin(
+        banco="Integracao",
+        nome_tabela="FatoSolicitacaoContratoItemEuromidia",
+        nome_coluna="IDFatoContratoEmpresaRelacionada",
+    ) and item.get("IDFatoSolicitacaoContratoItemEuromidia") not in (None, "", 0):
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
+                   SET IDFatoContratoEmpresaRelacionada = :id_rel_principal,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoSolicitacaoContratoItemEuromidia = :id_item_solicitacao;
+            """),
+            {
+                "id_rel_principal": int(id_rel_principal),
+                "id_item_solicitacao": int(item.get("IDFatoSolicitacaoContratoItemEuromidia")),
+            },
+        )
+
+    print(
+        "APROVACAO_CONTRATO | empresas relacionadas sincronizadas | "
+        f"contrato={id_contrato} | item={id_item} | card={id_card} | "
+        f"principal={id_rel_principal} | registros={registros}",
+        flush=True,
+    )
+
+    return {
+        "ok": True,
+        "id_contrato": int(id_contrato),
+        "id_item": int(id_item),
+        "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+        "id_fato_contrato_empresa_relacionada_principal": id_rel_principal,
+        "registros": registros,
+    }
+
+
 def _upsert_vinculo_contrato_card_euromidia(
     *,
     id_fato_controle_contratos: int | None,
@@ -6052,8 +6695,27 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     referencia_informada = _texto_ou_none(cab.get("Referencia"))
     ids_itens_controle: list[int] = []
     precos_praticados: list[dict] = []
+    empresas_relacionadas_sincronizadas: list[dict] = []
     vencimentos_campanha: list[dict] = []
     ocupacoes_sincronizadas: list[dict] = []
+
+    id_card_cabecalho = _resolver_id_card_aprovacao_solicitacao_admin(cab, itens_solicitacao)
+    if id_card_cabecalho not in (None, "", 0) and _int_ou_none(cab.get("IDFatoKanbanCard")) in (None, "", 0):
+        cab["IDFatoKanbanCard"] = int(id_card_cabecalho)
+
+    contexto_tipo_card = _normalizar_card_renovacao_admin(
+        id_card=id_card_cabecalho,
+        id_usuario=id_usuario_logado,
+        tipo_solicitacao=cab.get("TipoSolicitacao"),
+        id_solicitacao=int(id_solicitacao),
+    )
+    card_tem_tag_renovacao = bool(contexto_tipo_card.get("tem_tag_renovacao"))
+    card_tem_tag_novo_contrato = bool(contexto_tipo_card.get("tem_tag_novo_contrato")) and not card_tem_tag_renovacao
+    inicio_renovacao_padrao = contexto_tipo_card.get("inicio_renovacao")
+    tipo_operacional_card = contexto_tipo_card.get("tipo_operacional")
+    if card_tem_tag_renovacao:
+        cab["TipoSolicitacao"] = "ADITIVO"
+    data_aprovacao_sql_server = _obter_data_aprovacao_sql_server_admin()
 
     referencia_resolvida = referencia_informada
     if not referencia_resolvida:
@@ -6238,36 +6900,32 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     )
 
     for item in itens_solicitacao:
+        item = _aplicar_fallback_layout_item_solicitacao(dict(item), cab)
+        if _valor_esta_vazio_para_fallback(item.get("CodPonto")):
+            item["CodPonto"] = _texto_ou_none(item.get("CodPontoOriginal"))
+        if _valor_esta_vazio_para_fallback(item.get("CodFace")):
+            item["CodFace"] = _texto_ou_none(item.get("CodFaceOriginal"))
+        if item.get("CodFace"):
+            item["CodFace"] = str(item.get("CodFace")).strip().upper()
+
         id_item_solicitacao = _int_ou_none(item.get("IDFatoSolicitacaoContratoItemEuromidia"))
         id_item_controle_origem = _int_ou_none(item.get("IDFatoControleContratosItensEuromidia"))
 
-        row_item_existente = db.session.execute(
-            text("""
-                SELECT TOP 1
-                       i.IDFatoControleContratosItensEuromidia,
-                       i.Referencia AS ReferenciaAtual
-                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
-                WHERE
-                    i.IDFatoControleContratoEuromidia = :id_contrato_controle
-                    AND
-                    (
-                        i.IDFatoControleContratosItensEuromidia = :id_item_controle_origem
-                        OR
-                        (
-                            ISNULL(LTRIM(RTRIM(CAST(i.CodPonto AS varchar(60)))), '') = ISNULL(LTRIM(RTRIM(CAST(:cod_ponto AS varchar(60)))), '')
-                            AND
-                            ISNULL(UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(60))))), '') = ISNULL(UPPER(LTRIM(RTRIM(CAST(:cod_face AS varchar(60))))), '')
-                        )
-                    )
-                ORDER BY i.IDFatoControleContratosItensEuromidia DESC
-            """),
-            {
-                "id_contrato_controle": int(id_contrato_controle),
-                "id_item_controle_origem": int(id_item_controle_origem) if id_item_controle_origem not in (None, "", 0) else None,
-                "cod_ponto": item.get("CodPonto"),
-                "cod_face": item.get("CodFace"),
-            },
-        ).mappings().first()
+        if _valor_esta_vazio_para_fallback(item.get("CodPonto")) or _valor_esta_vazio_para_fallback(item.get("CodFace")):
+            raise RuntimeError(
+                "Não foi possível aprovar a solicitação porque um item está sem CodPonto/CodFace. "
+                f"IDSolicitacao={id_solicitacao}; IDItemSolicitacao={id_item_solicitacao}; "
+                f"IDCard={item.get('IDFatoKanbanCard') or cab.get('IDFatoKanbanCard')}. "
+                "Reabra o card, confirme o painel/face e salve novamente."
+            )
+
+        row_item_existente = _buscar_item_controle_existente_aprovacao_admin(
+            id_contrato_controle=int(id_contrato_controle),
+            id_item_controle_origem=id_item_controle_origem,
+            cod_ponto=item.get("CodPonto"),
+            cod_face=item.get("CodFace"),
+            somente_ativos=bool(card_tem_tag_renovacao),
+        )
 
         id_item_controle_existente = (
             int(row_item_existente["IDFatoControleContratosItensEuromidia"])
@@ -6275,13 +6933,16 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             else None
         )
 
+        id_item_referencia_atual = None if card_tem_tag_renovacao else id_item_controle_existente
+        referencia_atual_item = None if card_tem_tag_renovacao else (row_item_existente or {}).get("ReferenciaAtual")
+
         referencia_item_resolvida = _resolver_referencia_item_controle(
             id_fato_controle_contratos=int(id_contrato_controle),
-            id_item_controle_atual=id_item_controle_existente,
+            id_item_controle_atual=id_item_referencia_atual,
             id_item_solicitacao=id_item_solicitacao,
             referencia_informada=item.get("Referencia"),
             referencia_contrato=referencia_final,
-            referencia_atual=(row_item_existente or {}).get("ReferenciaAtual"),
+            referencia_atual=referencia_atual_item,
             cod_ponto=item.get("CodPonto"),
             cod_face=item.get("CodFace"),
             id_painel=item.get("IDPainelEuromidia"),
@@ -6337,9 +6998,9 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "DataAssinaturaRenovacao": item.get("DataAssinaturaRenovacao") or cab.get("DataAssinaturaRenovacao"),
             "IDTrimestre": item.get("IDTrimestre") or cab.get("IDTrimestre"),
             "TexmpoExposicao": item.get("TexmpoExposicao"),
-            "DataInicioPrevisto": item.get("DataInicioPrevisto"),
+            "DataInicioPrevisto": (item.get("DataInicioPrevisto") or data_aprovacao_sql_server) if card_tem_tag_renovacao else item.get("DataInicioPrevisto"),
             "DataTerminoPrevisto": item.get("DataTerminoPrevisto"),
-            "InicioRenovacao": item.get("InicioRenovacao"),
+            "InicioRenovacao": inicio_renovacao_padrao or item.get("InicioRenovacao"),
             "FaturamentoBrutoMensal": item.get("FaturamentoBrutoMensal"),
             "PercentualPermuta": item.get("PercentualPermuta"),
             "CotaOportunidade": item.get("CotaOportunidade"),
@@ -6379,13 +7040,31 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "DataFimEfetiva": item.get("DataFimEfetiva"),
             "Status": _normalizar_status_item_aprovacao(item.get("Status")),
             "IDDimCheckinHistorico": item.get("IDDimCheckingHistorico"),
-            "IDFatoKanbanCard": item.get("IDFatoKanbanCard"),
+            "IDFatoKanbanCard": item.get("IDFatoKanbanCard") or cab.get("IDFatoKanbanCard"),
             "IDDimTipoDocumento": id_dim_tipo_documento_item,
-            "BitAtivo": item.get("BitAtivo") if item.get("BitAtivo") is not None else 1,
+            "BitAtivo": 1 if card_tem_tag_renovacao else (item.get("BitAtivo") if item.get("BitAtivo") is not None else 1),
             "IDEmpresaAgencia": item.get("IDEmpresaAgencia") or cab.get("IDEmpresaAgencia"),
         }
 
-        if row_item_existente and row_item_existente.get("IDFatoControleContratosItensEuromidia") is not None:
+        if card_tem_tag_renovacao and id_item_controle_existente not in (None, "", 0):
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+                       SET BitAtivo = 0,
+                           DataAtualizacao = GETDATE()
+                     WHERE IDFatoControleContratosItensEuromidia = :id_item_controle_existente
+                """),
+                {"id_item_controle_existente": int(id_item_controle_existente)},
+            )
+
+            print(
+                "APROVACAO_CONTRATO | renovacao: item antigo inativado antes de inserir nova linha | "
+                f"contrato={id_contrato_controle} | item_antigo={id_item_controle_existente} | "
+                f"cod_ponto={item.get('CodPonto')} | cod_face={item.get('CodFace')}",
+                flush=True,
+            )
+
+        if (not card_tem_tag_renovacao) and row_item_existente and row_item_existente.get("IDFatoControleContratosItensEuromidia") is not None:
             id_item_controle = int(row_item_existente["IDFatoControleContratosItensEuromidia"])
 
             db.session.execute(
@@ -6644,6 +7323,15 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
 
         ids_itens_controle.append(int(id_item_controle))
 
+        resultado_empresa_relacionada = _sincronizar_empresa_relacionada_item_contrato_euromidia(
+            cabecalho_solicitacao=cab,
+            item_solicitacao=item,
+            id_contrato_controle=int(id_contrato_controle),
+            id_item_controle=int(id_item_controle),
+            id_usuario_logado=id_usuario_logado,
+        )
+        empresas_relacionadas_sincronizadas.append(resultado_empresa_relacionada)
+
         resultado_ocupacao_contrato = _upsert_ocupacao_contrato_aprovado_admin(
             id_contrato_controle=int(id_contrato_controle),
             id_item_controle=int(id_item_controle),
@@ -6702,7 +7390,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             )
 
     reservas_efetivadas = _efetivar_reservas_card_kanban_admin(
-        id_card=_int_ou_none(cab.get("IDFatoKanbanCard")),
+        id_card=_int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho),
         id_contrato_controle=int(id_contrato_controle),
         id_usuario_logado=id_usuario_logado,
     )
@@ -6727,13 +7415,15 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "id_contrato_controle": int(id_contrato_controle),
         "ids_itens_controle": ids_itens_controle,
         "precos_praticados": precos_praticados,
+        "empresas_relacionadas_sincronizadas": empresas_relacionadas_sincronizadas,
         "vencimentos_campanha": vencimentos_campanha,
         "ocupacoes_sincronizadas": ocupacoes_sincronizadas,
         "reservas_efetivadas": int(reservas_efetivadas or 0),
-        "id_card": _int_ou_none(cab.get("IDFatoKanbanCard")),
+        "id_card": _int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho),
         "id_empresa": _int_ou_none(cab.get("IDEmpresa")),
         "id_empresa_proprietaria": _int_ou_none(cab.get("IDEmpresaProprietaria")),
-        "tipo_solicitacao": _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao")),
+        "tipo_solicitacao": "ADITIVO" if card_tem_tag_renovacao else _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao")),
+        "tipo_operacional": "RENOVACAO" if card_tem_tag_renovacao else _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao")),
     }
 
 
@@ -7580,6 +8270,8 @@ def _atualizar_solicitacao_contrato_por_formulario(*, id_solicitacao: int, form,
          WHERE [IDFatoSolicitacaoContratoEuromidia] = :id_solicitacao
     """), params_cab)
 
+    cab_atual_para_fallback = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao)) or {}
+
     item_ids = form.getlist("item_id")
     itens_atuais_por_id = {
         int(x.get("IDFatoSolicitacaoContratoItemEuromidia")): x
@@ -7610,10 +8302,12 @@ def _atualizar_solicitacao_contrato_por_formulario(*, id_solicitacao: int, form,
         fallback_item = _buscar_item_controle_fallback_layout(
             {
                 **item_atual,
-                "CodPonto": form.get(f"{prefixo}CodPonto") or item_atual.get("CodPonto"),
-                "CodFace": form.get(f"{prefixo}CodFace") or item_atual.get("CodFace"),
+                "IDFatoKanbanCard": item_atual.get("IDFatoKanbanCard") or cab_atual_para_fallback.get("IDFatoKanbanCard"),
+                "IDFatoControleContratosEuromidia": item_atual.get("IDFatoControleContratosEuromidia") or cab_atual_para_fallback.get("IDFatoControleContratosEuromidia"),
+                "CodPonto": form.get(f"{prefixo}CodPonto") or item_atual.get("CodPonto") or item_atual.get("CodPontoOriginal"),
+                "CodFace": form.get(f"{prefixo}CodFace") or item_atual.get("CodFace") or item_atual.get("CodFaceOriginal"),
             },
-            {"IDFatoControleContratosEuromidia": _int_ou_none(form.get("IDFatoControleContratosEuromidia"))},
+            cab_atual_para_fallback,
         )
 
         def vf(campo_form: str, parser, campo_banco: str):
@@ -7972,7 +8666,253 @@ def _buscar_item_controle_fallback_layout(item: dict, cab: dict | None = None) -
         },
     ).mappings().first()
 
-    return dict(row) if row else {}
+    if row:
+        return dict(row)
+
+    return _buscar_fallback_item_solicitacao_por_card_e_contrato(item, cab)
+
+
+def _buscar_fallback_item_solicitacao_por_card_e_contrato(item: dict, cab: dict | None = None) -> dict:
+    """Resolve CodPonto/CodFace/IDs do item quando a solicitação veio incompleta.
+
+    Situação que esta função corrige:
+    - renovação/aditivo criado a partir do Kanban com tag 17;
+    - item da solicitação sem CodPonto/CodFace;
+    - item da solicitação sem IDDimFacesPaineis/IDPainelEuromidia;
+    - tela de aprovação mostrando CodPonto —, CodFace — e SEM STATUS;
+    - aprovação falhando porque o backend não consegue localizar a face do contrato.
+
+    Ordem de fallback:
+    1. item oficial do contrato, quando há ID do item;
+    2. item oficial do contrato por contrato + CodPonto/CodFace;
+    3. item oficial do contrato vinculado ao card;
+    4. FatoKanbanCardPainelFace do card;
+    5. CodPontoContrato/CodFaceContrato do próprio card;
+    6. DimFacesPaineis/DimPaineisEuromidia.
+    """
+    item = item or {}
+    cab = cab or {}
+
+    id_item_solicitacao = _int_ou_none(item.get("IDFatoSolicitacaoContratoItemEuromidia"))
+    id_item_controle = _int_ou_none(item.get("IDFatoControleContratosItensEuromidia"))
+    id_contrato = (
+        _int_ou_none(item.get("IDFatoControleContratosEuromidia"))
+        or _int_ou_none(item.get("IDFatoControleContratoEuromidia"))
+        or _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+        or _int_ou_none(cab.get("IDFatoControleContratoEuromidia"))
+    )
+    id_card = _int_ou_none(item.get("IDFatoKanbanCard")) or _int_ou_none(cab.get("IDFatoKanbanCard"))
+    id_painel = _int_ou_none(item.get("IDPainelEuromidia")) or _int_ou_none(item.get("IDDimPaineisEuromidia"))
+    id_face = _int_ou_none(item.get("IDDimFacesPaineis"))
+    cod_ponto = _texto_ou_none(item.get("CodPonto") or item.get("CodPontoOriginal"))
+    cod_face = _texto_ou_none(item.get("CodFace") or item.get("CodFaceOriginal"))
+
+    if all(valor in (None, "", 0) for valor in (id_item_controle, id_contrato, id_card, id_painel, id_face, cod_ponto, cod_face)):
+        return {}
+
+    try:
+        row = db.session.execute(
+            text("""
+                ;WITH base AS (
+                    SELECT
+                        :id_item_solicitacao AS IDFatoSolicitacaoContratoItemEuromidia,
+                        :id_item_controle AS IDItemControleParametro,
+                        :id_contrato AS IDContratoParametro,
+                        :id_card AS IDCardParametro,
+                        :id_painel AS IDPainelParametro,
+                        :id_face AS IDFaceParametro,
+                        NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), :cod_ponto))), '') AS CodPontoParametro,
+                        NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), :cod_face)))), '') AS CodFaceParametro
+                )
+                SELECT TOP (1)
+                     COALESCE(i.IDFatoControleContratoEuromidia, base.IDContratoParametro) AS IDFatoControleContratosEuromidia
+                    ,i.IDFatoControleContratosItensEuromidia
+                    ,i.Referencia AS Referencia
+                    ,COALESCE(NULLIF(i.NumeroContrato, ''), NULLIF(ctr.NumeroContrato, '')) AS NumeroContrato
+                    ,COALESCE(NULLIF(i.NumeroPrevia, ''), NULLIF(ctr.NumeroPrevia, '')) AS NumeroPrevia
+                    ,COALESCE(NULLIF(i.CNPJ, ''), NULLIF(ctr.CNPJ, ''), NULLIF(emp.CNPJ, '')) AS CNPJ
+                    ,COALESCE(
+                        NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), i.CodPonto))), ''),
+                        NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodPonto))), ''),
+                        NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), card.CodPontoContrato))), ''),
+                        NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), df.CodPonto))), ''),
+                        NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), dp.CodPonto))), ''),
+                        base.CodPontoParametro
+                     ) AS CodPonto
+                    ,COALESCE(
+                        NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), i.CodFace)))), ''),
+                        NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodFace)))), ''),
+                        NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), card.CodFaceContrato)))), ''),
+                        NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), df.CodFace)))), ''),
+                        base.CodFaceParametro
+                     ) AS CodFace
+                    ,COALESCE(i.DataLancamento, ctr.DataLancamento) AS DataLancamento
+                    ,i.Cota AS Cota
+                    ,COALESCE(NULLIF(i.CidadeExibicao, ''), NULLIF(dp.Cidade, '')) AS CidadeExibicao
+                    ,COALESCE(NULLIF(i.Tipo, ''), NULLIF(pf.TipoPainel, ''), NULLIF(df.Tipo, ''), NULLIF(dp.Tipo, '')) AS Tipo
+                    ,COALESCE(NULLIF(i.Origem, ''), NULLIF(ctr.Origem, '')) AS Origem
+                    ,i.EmpresaEuro
+                    ,i.CnpjExibibora
+                    ,COALESCE(NULLIF(i.TipoDocumento, ''), NULLIF(ctr.TipoDocumento, '')) AS TipoDocumento
+                    ,COALESCE(NULLIF(i.RazaoSocial, ''), NULLIF(ctr.RazaoSocial, ''), NULLIF(emp.RazaoSocial, '')) AS RazaoSocial
+                    ,COALESCE(NULLIF(i.CPF, ''), NULLIF(ctr.CPF, '')) AS CPF
+                    ,COALESCE(NULLIF(i.MarcaExibida, ''), NULLIF(ctr.MarcaExibida, '')) AS MarcaExibida
+                    ,COALESCE(NULLIF(i.Vendedor, ''), NULLIF(ctr.Vendedor, '')) AS Vendedor
+                    ,COALESCE(NULLIF(i.SDR, ''), NULLIF(ctr.SDR, '')) AS SDR
+                    ,COALESCE(NULLIF(i.Agencia, ''), NULLIF(ctr.Agencia, '')) AS Agencia
+                    ,COALESCE(NULLIF(i.CnpjAgencia, ''), NULLIF(ctr.CnpjAgencia, '')) AS CnpjAgencia
+                    ,COALESCE(NULLIF(i.Bureau, ''), NULLIF(ctr.Bureau, '')) AS Bureau
+                    ,COALESCE(NULLIF(i.CnpjBureau, ''), NULLIF(ctr.CnpjBureau, '')) AS CnpjBureau
+                    ,COALESCE(NULLIF(i.Intermediario, ''), NULLIF(ctr.Intermediario, '')) AS Intermediario
+                    ,COALESCE(NULLIF(i.CnpjIntermediario, ''), NULLIF(ctr.CnpjIntermediario, '')) AS CnpjIntermediario
+                    ,COALESCE(i.DataAssinaturaRenovacao, ctr.DataAssinaturaRenovacao) AS DataAssinaturaRenovacao
+                    ,COALESCE(i.IDTrimestre, ctr.IDTrimestre) AS IDTrimestre
+                    ,i.TexmpoExposicao
+                    ,COALESCE(i.DataInicioPrevisto, TRY_CONVERT(date, pf.DataInicio)) AS DataInicioPrevisto
+                    ,COALESCE(i.DataTerminoPrevisto, TRY_CONVERT(date, pf.DataFim)) AS DataTerminoPrevisto
+                    ,i.InicioRenovacao
+                    ,i.FaturamentoBrutoMensal
+                    ,i.PercentualPermuta
+                    ,i.CotaOportunidade
+                    ,i.ValorPermuta
+                    ,i.FaturamentoLiquidoPermuta
+                    ,i.NumeroParcelas
+                    ,i.DataInicioVencimento
+                    ,i.TotalBrutoContrato
+                    ,i.TotalLiquidoContratoAGBRCTACORDO
+                    ,i.TotalLiquidoContratoAGBRVENDGERCOOR
+                    ,i.PercentualAgencia
+                    ,i.ValorMensalAgencia
+                    ,i.PercentualBureau
+                    ,i.ValorBureauMensal
+                    ,i.PercentualCartaAcordo
+                    ,i.ValorCartaAcordoMensal
+                    ,i.ValorOutrasComissoes
+                    ,i.FaturamentoLiquidoMensal
+                    ,i.PercentualComissaoVendedor
+                    ,i.ValorVendedor
+                    ,i.ValorVendedorTotal
+                    ,i.PercentualComissaoCoordenacao
+                    ,i.ValorCoordenador
+                    ,i.ValorCoordenadorTotal
+                    ,i.PercentualComissaoGerencia
+                    ,i.ValorGerencia
+                    ,i.ValorGerenciaTotal
+                    ,i.AtivoCancelamento
+                    ,i.FaturamentoLiquidoFinalMensal
+                    ,i.ComissaoGerenciaNordeste
+                    ,i.Faturamento
+                    ,i.DataCancelamento
+                    ,i.OBS AS OBS
+                    ,i.IDVendedor
+                    ,COALESCE(i.IDPainelEuromidia, pf.IDDimPaineisEuromidia, df.IDDimPaineisEuromidia, dp.IDDimPaineisEuromidia, base.IDPainelParametro) AS IDPainelEuromidia
+                    ,COALESCE(i.IDDimFacesPaineis, pf.IDDimFacesPaineis, df.IDDimFacesPaineis, base.IDFaceParametro) AS IDDimFacesPaineis
+                    ,COALESCE(i.DataFimEfetiva, TRY_CONVERT(date, pf.DataFim)) AS DataFimEfetiva
+                    ,COALESCE(NULLIF(i.Status, ''), 'ATIVO') AS Status
+                    ,i.IDDimCheckinHistorico
+                    ,COALESCE(i.IDFatoKanbanCard, base.IDCardParametro) AS IDFatoKanbanCard
+                    ,COALESCE(i.BitAtivo, CAST(1 AS bit)) AS BitAtivo
+                    ,i.IDEmpresaAgencia
+                    ,i.IDDimTipoDocumento
+                    ,i.BitPreferencia
+                    ,i.BitFracionado
+                    ,df.Face AS FaceDescricaoCadastro
+                    ,df.CodFace AS CodFaceCadastro
+                    ,df.Tipo AS TipoFaceCadastro
+                    ,dp.Cidade AS CidadePainelCadastro
+                    ,dp.UF AS UFPainelCadastro
+                    ,dp.Tipo AS TipoPainelCadastro
+                    ,dp.Logradouro AS LogradouroPainelCadastro
+                    ,dp.Bairro AS BairroPainelCadastro
+                    ,dp.Referencia AS ReferenciaPainelCadastro
+                    ,COALESCE(i.IDPainelEuromidia, pf.IDDimPaineisEuromidia, df.IDDimPaineisEuromidia, dp.IDDimPaineisEuromidia, base.IDPainelParametro) AS IDDimPaineisEuromidia
+                FROM base
+                LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] card
+                       ON card.IDFatoKanbanCard = base.IDCardParametro
+                LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] ctr
+                       ON ctr.IDFatoControleContratosEuromidia = base.IDContratoParametro
+                LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
+                       ON emp.IDEmpresa = ctr.IDEmpresa
+                OUTER APPLY (
+                    SELECT TOP (1)
+                        pf.*
+                    FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
+                    WHERE base.IDCardParametro IS NOT NULL
+                      AND pf.IDFatoKanbanCard = base.IDCardParametro
+                      AND (
+                            base.IDFaceParametro IS NULL
+                            OR pf.IDDimFacesPaineis = base.IDFaceParametro
+                          )
+                    ORDER BY
+                        CASE WHEN base.IDFaceParametro IS NOT NULL AND pf.IDDimFacesPaineis = base.IDFaceParametro THEN 0 ELSE 1 END,
+                        CASE
+                            WHEN base.CodPontoParametro IS NOT NULL
+                             AND LTRIM(RTRIM(CONVERT(varchar(80), pf.CodPonto))) = base.CodPontoParametro
+                             AND (
+                                  base.CodFaceParametro IS NULL
+                                  OR UPPER(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodFace)))) = base.CodFaceParametro
+                             )
+                            THEN 0 ELSE 1
+                        END,
+                        pf.Ordem ASC,
+                        pf.IDFatoKanbanCardPainelFace DESC
+                ) pf
+                OUTER APPLY (
+                    SELECT TOP (1)
+                        i.*
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+                    WHERE
+                        (
+                            base.IDItemControleParametro IS NOT NULL
+                            AND i.IDFatoControleContratosItensEuromidia = base.IDItemControleParametro
+                        )
+                        OR
+                        (
+                            base.IDContratoParametro IS NOT NULL
+                            AND i.IDFatoControleContratoEuromidia = base.IDContratoParametro
+                            AND COALESCE(base.CodPontoParametro, NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), card.CodPontoContrato))), ''), NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodPonto))), '')) IS NOT NULL
+                            AND LTRIM(RTRIM(CONVERT(varchar(80), i.CodPonto))) = COALESCE(base.CodPontoParametro, NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), card.CodPontoContrato))), ''), NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodPonto))), ''))
+                            AND (
+                                COALESCE(base.CodFaceParametro, NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), card.CodFaceContrato)))), ''), NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodFace)))), '')) IS NULL
+                                OR UPPER(LTRIM(RTRIM(CONVERT(varchar(80), i.CodFace)))) = COALESCE(base.CodFaceParametro, NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), card.CodFaceContrato)))), ''), NULLIF(UPPER(LTRIM(RTRIM(CONVERT(varchar(80), pf.CodFace)))), ''))
+                            )
+                        )
+                        OR
+                        (
+                            base.IDCardParametro IS NOT NULL
+                            AND i.IDFatoKanbanCard = base.IDCardParametro
+                        )
+                    ORDER BY
+                        CASE WHEN base.IDItemControleParametro IS NOT NULL AND i.IDFatoControleContratosItensEuromidia = base.IDItemControleParametro THEN 0 ELSE 1 END,
+                        CASE WHEN ISNULL(i.BitAtivo, 1) = 1 THEN 0 ELSE 1 END,
+                        i.IDFatoControleContratosItensEuromidia DESC
+                ) i
+                LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] df
+                       ON df.IDDimFacesPaineis = COALESCE(base.IDFaceParametro, i.IDDimFacesPaineis, pf.IDDimFacesPaineis)
+                LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] dp
+                       ON dp.IDDimPaineisEuromidia = COALESCE(base.IDPainelParametro, i.IDPainelEuromidia, pf.IDDimPaineisEuromidia, df.IDDimPaineisEuromidia)
+            """),
+            {
+                "id_item_solicitacao": int(id_item_solicitacao) if id_item_solicitacao not in (None, "", 0) else None,
+                "id_item_controle": int(id_item_controle) if id_item_controle not in (None, "", 0) else None,
+                "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+                "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+                "id_painel": int(id_painel) if id_painel not in (None, "", 0) else None,
+                "id_face": int(id_face) if id_face not in (None, "", 0) else None,
+                "cod_ponto": cod_ponto,
+                "cod_face": cod_face,
+            },
+        ).mappings().first()
+
+        return dict(row) if row else {}
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_CONTRATO | falha ao resolver fallback de item por card/contrato | id_solicitacao=%s | id_card=%s | id_contrato=%s",
+            id_item_solicitacao,
+            id_card,
+            id_contrato,
+        )
+        return {}
 
 
 def _aplicar_fallback_layout_item_solicitacao(item: dict, cab: dict | None = None) -> dict:
@@ -8317,6 +9257,13 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     for row in itens_rows:
         item = dict(row)
         item = _aplicar_fallback_layout_item_solicitacao(item, cab)
+        item["CodPonto"] = _texto_ou_none(item.get("CodPonto") or item.get("CodPontoOriginal"))
+        item["CodFace"] = _texto_ou_none(item.get("CodFace") or item.get("CodFaceOriginal"))
+        if item.get("CodFace"):
+            item["CodFace"] = str(item["CodFace"]).strip().upper()
+        status_item = _texto_ou_none(item.get("Status"))
+        status_cabecalho = _texto_ou_none(cab.get("StatusContrato"))
+        item["StatusExibicao"] = status_item or status_cabecalho or "EM AVALIAÇÃO"
         item["DataLancamentoInput"] = _data_para_input_date(item.get("DataLancamento"))
         item["DataAssinaturaRenovacaoInput"] = _data_para_input_date(item.get("DataAssinaturaRenovacao"))
         item["DataInicioPrevistoInput"] = _data_para_input_date(item.get("DataInicioPrevisto"))
@@ -8813,6 +9760,8 @@ def _processar_aprovacao_contrato_admin(
         "ids_itens_controle": ids_itens_controle,
         "task_airflow_id": task_airflow_id,
         "resultado_aprovacao": resultado_aprovacao,
+        "precos_praticados": resultado_aprovacao.get("precos_praticados") or [],
+        "empresas_relacionadas_sincronizadas": resultado_aprovacao.get("empresas_relacionadas_sincronizadas") or [],
         "resultado_agendamentos_face": resultado_agendamentos_face,
         "resultado_agendamentos_pendentes": resultado_agendamentos_pendentes,
         "resultado_bit_fracionado": resultado_bit_fracionado,
@@ -8910,10 +9859,24 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     text("""
                         UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
                            SET StatusSolicitacao = 'PROCESSANDO_APROVACAO',
+                               IDDimStatusContratos = 2,
                                DataAtualizacao = GETDATE()
                          WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
                     """),
                     {"id_solicitacao": int(id_solicitacao)},
+                )
+
+                _registrar_historico_contrato_euromidia(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_solicitacao=int(id_solicitacao),
+                    id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVAÇÃO SOLICITADA", fallback=4),
+                    id_empresa=id_empresa,
+                    id_empresa_proprietaria=id_empresa_proprietaria,
+                    id_fato_kanban_card=id_card,
+                    tipo_evento="APROVAÇÃO SOLICITADA",
+                    tipo_solicitacao=tipo_solicitacao,
+                    descricao_evento="Usuário clicou em Aprovar Contrato; processamento enviado para a fila assíncrona.",
+                    id_dim_usuario_acao=id_usuario_logado,
                 )
                 db.session.commit()
 
@@ -10465,6 +11428,25 @@ def _campanhas_vencimentos_marca_sql() -> str:
     return "COALESCE(NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), ''))"
 
 
+def _campanhas_vencimentos_razao_social_sql() -> str:
+    """Expressão SQL da razão social exibida, ignorando vazios e valores placeholder como 0."""
+
+    return """COALESCE(
+        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_venc.RazaoSocial))), ''), '0'),
+        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.RazaoSocial))), ''), '0'),
+        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), ''), '0'),
+        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_venc.NomeFantasia))), ''), '0'),
+        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.NomeFantasia))), ''), '0'),
+        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0')
+    )"""
+
+
+def _campanhas_vencimentos_painel_sql() -> str:
+    """Expressão SQL do painel exibido na tela: CodFace resolvido pelo item do contrato."""
+
+    return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), '')"
+
+
 def _campanhas_vencimentos_adicionar_filtro_in(
     filtros_sql: list[str],
     params: dict,
@@ -10502,6 +11484,8 @@ def _campanhas_vencimentos_montar_filtros_sql(
     """Centraliza os filtros usados pela lista e pela busca de sugestões."""
 
     marca_sql = _campanhas_vencimentos_marca_sql()
+    razao_social_sql = _campanhas_vencimentos_razao_social_sql()
+    painel_sql = _campanhas_vencimentos_painel_sql()
 
     filtros_sql: list[str] = []
     params = {
@@ -10518,9 +11502,10 @@ def _campanhas_vencimentos_montar_filtros_sql(
                 CAST(venc.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
                 OR COALESCE(CONVERT(varchar(80), ctr.NumeroContrato), '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR COALESCE(CONVERT(varchar(80), ctr.NumeroPrevia), '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(ctr.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL({razao_social_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL(ctr.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL(venc.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL({painel_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL(st.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
             )
         """)
@@ -10562,24 +11547,73 @@ def _campanhas_vencimentos_montar_filtros_sql(
     where_sql = " AND ".join(f"({item})" for item in filtros_sql) if filtros_sql else "1=1"
     return where_sql, params
 
-
 def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
-    """FROM/JOIN padrão para a tela de vencimentos de campanhas."""
+    """FROM/JOIN padrão para a tela de vencimentos de campanhas.
+
+    Regra oficial da tela:
+    - a origem da linha é Integracao.Silver.FatoVencimentoCampanhaEuromidia;
+    - IDFatoControleContratosEuromidia aponta para o cabeçalho do contrato;
+    - IDFatoControleContratosItensEuromidia aponta para o item do contrato;
+    - CodFace vem diretamente do item do contrato;
+    - somente campanhas com BitAtivo = 1 aparecem;
+    - se houver mais de uma linha ativa para o mesmo item, fica somente a mais recente.
+
+    Observação importante:
+    Eu não faço fallback por contrato + marca + período aqui. Esse fallback conseguia
+    preencher CodFace em alguns dados quebrados, mas também podia escolher outro item
+    do mesmo contrato e gerar duplicidade/associação errada.
+    """
 
     return f"""
-        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        FROM
+        (
+            SELECT *
+            FROM
+            (
+                SELECT
+                    venc_base.*,
+                    ROW_NUMBER() OVER
+                    (
+                        PARTITION BY
+                            venc_base.IDFatoControleContratosItensEuromidia
+                        ORDER BY
+                            ISNULL(venc_base.DataAtualizacao, '19000101') DESC,
+                            ISNULL(venc_base.DataCriacao, '19000101') DESC,
+                            venc_base.IDFatoVencimentoCampanhaEuromidia DESC
+                    ) AS LinhaMaisRecente
+                FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc_base
+                WHERE ISNULL(venc_base.BitAtivo, 1) = 1
+                  AND ISNULL(venc_base.IDFatoControleContratosEuromidia, 0) > 0
+                  AND ISNULL(venc_base.IDFatoControleContratosItensEuromidia, 0) > 0
+            ) AS venc_filtrado
+            WHERE venc_filtrado.LinhaMaisRecente = 1
+        ) AS venc
         INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
             ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
         INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
             ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
             ON vend.IDVendedor = venc.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_venc
+            ON emp_venc.IDEmpresa = venc.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_ctr
+            ON emp_ctr.IDEmpresa = ctr.IDEmpresa
         WHERE {where_sql}
     """
 
-
 def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     """Adiciona classes CSS e textos auxiliares usados na tabela e nas sugestões."""
+
+    razao_social = str(d.get("RazaoSocial") or "").strip()
+    if not razao_social or razao_social == "0":
+        d["RazaoSocial"] = "—"
+
+    painel = str(d.get("Painel") or "").strip()
+    if not painel or painel == "0":
+        d["Painel"] = "—"
 
     d["ClasseStatus"] = _campanhas_vencimentos_classe_status(d.get("NomeStatus"))
 
@@ -10632,7 +11666,10 @@ def _campanhas_vencimentos_opcoes_marca(
     """Busca as marcas disponíveis respeitando a restrição do perfil VENDEDOR."""
 
     marca_sql = _campanhas_vencimentos_marca_sql()
-    filtros_sql: list[str] = [f"NULLIF(LTRIM(RTRIM({marca_sql})), '') IS NOT NULL"]
+    filtros_sql: list[str] = [
+        f"NULLIF(LTRIM(RTRIM({marca_sql})), '') IS NOT NULL",
+        "ISNULL(venc.BitAtivo, 1) = 1",
+    ]
     params = {"id_usuario_logado": int(id_usuario_logado or 0)}
 
     if usuario_logado_eh_vendedor:
@@ -10677,6 +11714,7 @@ def _campanhas_vencimentos_opcoes_vendedor(
             ON vend.IDVendedor = venc.IDVendedor
         WHERE vend.IDVendedor IS NOT NULL
           AND NULLIF(LTRIM(RTRIM(vend.NomeVendedor)), '') IS NOT NULL
+          AND ISNULL(venc.BitAtivo, 1) = 1
         ORDER BY vend.NomeVendedor ASC
     """)
 
@@ -11079,7 +12117,12 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
 
             ctr.NumeroContrato,
             ctr.NumeroPrevia,
-            RazaoSocial = COALESCE(NULLIF(LTRIM(RTRIM(ctr.RazaoSocial)), ''), NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), '')),
+            RazaoSocial = COALESCE(
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp.RazaoSocial))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp.NomeFantasia))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0')
+            ),
             ctr.IDEmpresaAgencia,
             ctr.IDEmpresaBureau,
             ctr.IDEmpresaIntermediario,
@@ -11504,19 +12547,17 @@ def _campanhas_vencimentos_criar_card_renovacao(
     if id_card <= 0:
         raise RuntimeError("O INSERT do card de renovação não retornou IDFatoKanbanCard.")
 
-    db.session.execute(
-        text(f"""
-            INSERT INTO {TABELA_KANBAN_CARD_TAG_RENOVACAO}
-                (IDFatoKanbanCard, IDDimKanbanTag, AplicadoEm, AplicadoPor, IDEmpresaProprietaria)
-            VALUES
-                (:id_card, :id_tag, GETDATE(), :id_usuario, :id_empresa_proprietaria);
-        """),
-        {
-            "id_card": int(id_card),
-            "id_tag": int(ID_TAG_RENOVACAO_CAMPANHA),
-            "id_usuario": int(id_usuario),
-            "id_empresa_proprietaria": int(id_empresa_proprietaria),
-        },
+    _aplicar_tag_no_card_admin(
+        id_card=int(id_card),
+        id_tag=int(ID_TAG_RENOVACAO_CAMPANHA),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
+    )
+    _aplicar_tag_no_card_admin(
+        id_card=int(id_card),
+        id_tag=int(ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN),
+        id_usuario=int(id_usuario),
+        id_empresa_proprietaria=int(id_empresa_proprietaria),
     )
 
     if cod_face:
@@ -11624,6 +12665,24 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
              WHERE IDFatoKanbanCard = :id_card;
         """),
         params,
+    )
+
+    _aplicar_tag_no_card_admin(
+        id_card=id_card_int,
+        id_tag=ID_TAG_RENOVACAO_CAMPANHA,
+        id_usuario=id_usuario_logado,
+        id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
+    )
+    _aplicar_tag_no_card_admin(
+        id_card=id_card_int,
+        id_tag=ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN,
+        id_usuario=id_usuario_logado,
+        id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
+    )
+    _remover_tag_do_card_admin(
+        id_card=id_card_int,
+        id_tag=ID_TAG_TIPO_CONTRATO_NOVO_ADMIN,
+        id_usuario=id_usuario_logado,
     )
 
     return {
@@ -12017,6 +13076,8 @@ def vencimentos_campanhas_euromidia():
 
     sql_from_where = _campanhas_vencimentos_sql_from_where(where_sql)
     marca_sql = _campanhas_vencimentos_marca_sql()
+    razao_social_sql = _campanhas_vencimentos_razao_social_sql()
+    painel_sql = _campanhas_vencimentos_painel_sql()
 
     sql_total = text(f"""
         SELECT COUNT(1) AS Total
@@ -12043,8 +13104,9 @@ def vencimentos_campanhas_euromidia():
             vend.IDDimUsuarios AS IDDimUsuariosVendedor,
             ctr.NumeroContrato,
             ctr.NumeroPrevia,
-            ctr.RazaoSocial,
+            RazaoSocial = {razao_social_sql},
             ctr.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
+            Painel = {painel_sql},
             MarcaExibida = {marca_sql},
             venc.DataInicioCampanha,
             DataTermino = venc.DataTerminoPrevisto,
@@ -12068,11 +13130,14 @@ def vencimentos_campanhas_euromidia():
     itens = [_campanhas_vencimentos_enriquecer_item(dict(r)) for r in rows]
 
     status_opcoes = db.session.execute(text("""
-        SELECT
-            IDDimStatusCampanha,
-            NomeStatus
-        FROM [Integracao].[Silver].[DimStatusCampanha]
-        ORDER BY IDDimStatusCampanha ASC
+        SELECT DISTINCT
+            st.IDDimStatusCampanha,
+            st.NomeStatus
+        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
+            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
+        WHERE ISNULL(venc.BitAtivo, 1) = 1
+        ORDER BY st.IDDimStatusCampanha ASC
     """)).mappings().all()
 
     marca_opcoes = _campanhas_vencimentos_opcoes_marca(
@@ -12169,6 +13234,8 @@ def vencimentos_campanhas_sugestoes():
 
     sql_from_where = _campanhas_vencimentos_sql_from_where(where_sql)
     marca_sql = _campanhas_vencimentos_marca_sql()
+    razao_social_sql = _campanhas_vencimentos_razao_social_sql()
+    painel_sql = _campanhas_vencimentos_painel_sql()
 
     sql = text(f"""
         SELECT
@@ -12180,7 +13247,8 @@ def vencimentos_campanhas_sugestoes():
             vend.NomeVendedor,
             ctr.NumeroContrato,
             ctr.NumeroPrevia,
-            ctr.RazaoSocial,
+            RazaoSocial = {razao_social_sql},
+            Painel = {painel_sql},
             MarcaExibida = {marca_sql},
             venc.DataInicioCampanha,
             DataTermino = venc.DataTerminoPrevisto,
@@ -12211,6 +13279,7 @@ def vencimentos_campanhas_sugestoes():
             "numero_contrato_original": str(d.get("NumeroContrato") or ""),
             "razao_social": str(d.get("RazaoSocial") or "—"),
             "marca": str(d.get("MarcaExibida") or "—"),
+            "painel": str(d.get("Painel") or "—"),
             "status": str(d.get("NomeStatus") or "Sem status"),
             "classe_status": d.get("ClasseStatus") or "neutro",
             "dias": d.get("DiasTexto") or "—",

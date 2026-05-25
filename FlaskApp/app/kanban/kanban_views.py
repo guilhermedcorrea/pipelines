@@ -121,6 +121,7 @@ ID_TAG_CONTRATO_APROVADO = 13
 
 ID_TAG_TIPO_CONTRATO_ADITIVO = 8
 ID_TAG_TIPO_CONTRATO_NOVO = 9
+ID_TAG_RENOVACAO = 17
 
 TIPO_SOLICITACAO_ADITIVO = "ADITIVO"
 TIPO_SOLICITACAO_NOVO = "NOVO CONTRATO"
@@ -3116,6 +3117,11 @@ def _sincronizar_tipo_contrato_card(
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
         raise ValueError("Tipo de contrato inválido.")
 
+    # Se o card já é de Renovação, ele não pode ser persistido como Novo Contrato.
+    # Forço ADITIVO para manter BitAditivo/BitContratoNovo e as tags coerentes com a regra do admin.
+    if tipo_norm == TIPO_SOLICITACAO_NOVO and _card_possui_tag_ativa(int(id_card), ID_TAG_RENOVACAO):
+        tipo_norm = TIPO_SOLICITACAO_ADITIVO
+
     tag_desejada = _obter_tag_tipo_contrato(id_kanban, tipo_norm)
     tag_oposta = _obter_tag_tipo_contrato(
         id_kanban,
@@ -3715,6 +3721,16 @@ def _sincronizar_tipo_contrato_card(
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
         raise ValueError("Tipo de contrato inválido.")
 
+    id_card_int = int(id_card)
+    card_eh_renovacao = _card_eh_renovacao_kanban(id_card_int)
+
+    # Regra crítica:
+    # ADITIVO + TAG 17 = RENOVAÇÃO.
+    # Renovação nunca pode virar NOVO_CONTRATO, mesmo que o front mande tipo_contrato_card
+    # vazio, NOVO_CONTRATO ou perca o contrato no payload ao chegar na fase 4.
+    if card_eh_renovacao:
+        tipo_norm = TIPO_SOLICITACAO_ADITIVO
+
     tag_novo = _obter_tag_tipo_contrato(id_kanban, TIPO_SOLICITACAO_NOVO)
     tag_aditivo = _obter_tag_tipo_contrato(id_kanban, TIPO_SOLICITACAO_ADITIVO)
     tag_desejada = tag_aditivo if tipo_norm == TIPO_SOLICITACAO_ADITIVO else tag_novo
@@ -3762,9 +3778,21 @@ def _sincronizar_tipo_contrato_card(
 
     tag_oposta = tag_novo if tipo_norm == TIPO_SOLICITACAO_ADITIVO else tag_aditivo
     id_tag_oposta = int(tag_oposta.get("IDDimKanbanTag") or 0) if tag_oposta else 0
-    if id_tag_oposta > 0:
+
+    # Se for Renovação, a tag oposta obrigatoriamente é Novo Contrato.
+    # Removo sempre para corrigir cards que já ficaram contaminados antes.
+    if card_eh_renovacao and tag_novo and int(tag_novo.get("IDDimKanbanTag") or 0) > 0:
+        id_tag_novo = int(tag_novo.get("IDDimKanbanTag") or 0)
         if _remover_tag_do_card(
-            id_card=int(id_card),
+            id_card=id_card_int,
+            id_tag=id_tag_novo,
+            id_usuario=int(id_usuario),
+        ):
+            tags_removidas.append(id_tag_novo)
+
+    elif id_tag_oposta > 0:
+        if _remover_tag_do_card(
+            id_card=id_card_int,
             id_tag=id_tag_oposta,
             id_usuario=int(id_usuario),
         ):
@@ -3772,13 +3800,17 @@ def _sincronizar_tipo_contrato_card(
 
     if deve_exibir_tag_tipo and tag_desejada and int(tag_desejada.get("IDDimKanbanTag") or 0) > 0:
         id_tag_desejada = int(tag_desejada.get("IDDimKanbanTag") or 0)
-        if _aplicar_tag_no_card(
-            id_card=int(id_card),
-            id_tag=id_tag_desejada,
-            id_usuario=int(id_usuario),
-            id_empresa_proprietaria=int(id_empresa_proprietaria),
-        ):
-            tags_adicionadas.append(id_tag_desejada)
+
+        # Última trava: mesmo se algum cálculo anterior tentar apontar para tag 9,
+        # a Renovação não deixa aplicar Novo Contrato.
+        if not (card_eh_renovacao and id_tag_desejada == int(ID_TAG_TIPO_CONTRATO_NOVO)):
+            if _aplicar_tag_no_card(
+                id_card=id_card_int,
+                id_tag=id_tag_desejada,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_empresa_proprietaria),
+            ):
+                tags_adicionadas.append(id_tag_desejada)
 
     return {
         "tipo_contrato": tipo_norm,
@@ -4179,6 +4211,42 @@ def _card_possui_tag_ativa(id_card: int, id_tag: int) -> bool:
     return bool(existe)
 
 
+def _card_eh_renovacao_kanban(id_card: int | None) -> bool:
+    """Regra forte: card com tag 17 Renovação nunca pode ser tratado como Novo Contrato.
+
+    Eu verifico de duas formas:
+    - pelo ID fixo da tag 17;
+    - pelo nome da tag contendo "RENOVA", para proteger caso a tag tenha sido recriada
+      ou cadastrada com outro identificador em algum ambiente.
+    """
+    id_card_int = _int_ou_none(id_card)
+    if id_card_int in (None, "", 0):
+        return False
+
+    sql = text("""
+        SELECT TOP (1) 1
+        FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
+        LEFT JOIN [Kanban].[Silver].[DimKanbanTag] tg
+               ON tg.IDDimKanbanTag = ct.IDDimKanbanTag
+        WHERE ct.IDFatoKanbanCard = :id_card
+          AND ct.RemovidoEm IS NULL
+          AND (
+                ct.IDDimKanbanTag = :id_tag_renovacao
+                OR UPPER(LTRIM(RTRIM(ISNULL(tg.NomeTag, '')))) COLLATE Latin1_General_CI_AI LIKE '%RENOVA%'
+              );
+    """)
+
+    existe = db.session.execute(
+        sql,
+        {
+            "id_card": int(id_card_int),
+            "id_tag_renovacao": int(ID_TAG_RENOVACAO),
+        },
+    ).scalar()
+
+    return bool(existe)
+
+
 def _aplicar_tag_no_card(
     *,
     id_card: int,
@@ -4189,7 +4257,36 @@ def _aplicar_tag_no_card(
     if not id_card or not id_tag:
         return False
 
-    if _card_possui_tag_ativa(id_card, id_tag):
+    id_card_int = int(id_card)
+    id_tag_int = int(id_tag)
+
+    # Regra crítica:
+    # Renovação = tag 17. Renovação é um tipo operacional de ADITIVO.
+    # Logo, se o card é Renovação, ele NUNCA pode receber tag 9 Novo Contrato.
+    if id_tag_int == int(ID_TAG_TIPO_CONTRATO_NOVO) and _card_eh_renovacao_kanban(id_card_int):
+        current_app.logger.warning(
+            "KANBAN_TAG | bloqueada aplicação da tag Novo Contrato em card de Renovação | id_card=%s | id_usuario=%s",
+            id_card_int,
+            id_usuario,
+        )
+        return False
+
+    # Se alguém aplicar a tag 17 depois de a tag 9 já existir, eu limpo a tag 9 na hora.
+    # Isso evita card contaminado como Novo Contrato + Renovação.
+    if id_tag_int == int(ID_TAG_RENOVACAO):
+        try:
+            _remover_tag_do_card(
+                id_card=id_card_int,
+                id_tag=int(ID_TAG_TIPO_CONTRATO_NOVO),
+                id_usuario=int(id_usuario) if id_usuario not in (None, "", 0) else 0,
+            )
+        except Exception:
+            current_app.logger.exception(
+                "KANBAN_TAG | falha ao remover tag Novo Contrato ao aplicar Renovação | id_card=%s",
+                id_card_int,
+            )
+
+    if _card_possui_tag_ativa(id_card_int, id_tag_int):
         return False
 
     sql_insert = text("""
@@ -7428,6 +7525,7 @@ def _montar_itens_snapshot_solicitacao_do_card(
 
     descricao_limpa = (descricao_card or "").strip() or None
     id_tipo_cliente_int = _int_positivo_ou_none_local(id_tipo_cliente)
+    eh_renovacao_tag_17 = _card_possui_tag_ativa(int(id_card), ID_TAG_RENOVACAO)
     itens_resultado: list[dict[str, Any]] = []
     dados_item_formulario = dict(dados_item_formulario or {}) if isinstance(dados_item_formulario, dict) else {}
     dados_itens_formulario = [
@@ -7723,6 +7821,44 @@ def _montar_itens_snapshot_solicitacao_do_card(
         str(cod_face_contrato).strip().upper() if cod_face_contrato not in (None, "") else None
     )
 
+    painel_card_aditivo: dict[str, Any] = {}
+    if not cod_ponto_resolvido or not cod_face_resolvido or not isinstance(item_contrato, dict):
+        paineis_card_aditivo = _listar_paineis_vinculados_card(int(id_card))
+        for painel_candidato in paineis_card_aditivo or []:
+            if not isinstance(painel_candidato, dict):
+                continue
+            cod_ponto_candidato = str(painel_candidato.get("CodPonto") or "").strip()
+            cod_face_candidato = str(painel_candidato.get("CodFace") or "").strip().upper()
+            if cod_ponto_candidato or cod_face_candidato:
+                painel_card_aditivo = painel_candidato
+                break
+
+    if not cod_ponto_resolvido:
+        cod_ponto_resolvido = str(painel_card_aditivo.get("CodPonto") or "").strip() or None
+
+    if not cod_face_resolvido:
+        cod_face_resolvido = str(painel_card_aditivo.get("CodFace") or "").strip().upper() or None
+
+    if (not isinstance(item_contrato, dict)) and id_contrato_existente not in (None, "", 0) and cod_ponto_resolvido and cod_face_resolvido:
+        item_contrato_resolvido = _obter_item_contrato_euromidia(
+            id_contrato=int(id_contrato_existente),
+            cod_ponto=cod_ponto_resolvido,
+            cod_face=cod_face_resolvido,
+        )
+        if isinstance(item_contrato_resolvido, dict):
+            item_contrato = item_contrato_resolvido
+
+    id_painel_aditivo = (
+        _int_positivo_ou_none_local((item_contrato or {}).get("IDPainelEuromidia"))
+        or _int_positivo_ou_none_local(painel_card_aditivo.get("IDDimPaineisEuromidia"))
+    )
+    id_face_aditivo = (
+        _int_positivo_ou_none_local((item_contrato or {}).get("IDDimFacesPaineis"))
+        or _int_positivo_ou_none_local(painel_card_aditivo.get("IDDimFacesPaineis"))
+    )
+    data_inicio_aditivo = _para_data_sql_ou_none(painel_card_aditivo.get("DataInicio"))
+    data_fim_aditivo = _para_data_sql_ou_none(painel_card_aditivo.get("DataFim"))
+
     valores_item = {
         "IDFatoSolicitacaoContratoEuromidia": int(id_solicitacao),
         "IDFatoControleContratosEuromidia": _int_positivo_ou_none_local(id_contrato_existente),
@@ -7733,8 +7869,8 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "IDDimUsuariosCriacao": _int_positivo_ou_none_local(id_usuario),
         "IDDimUsuariosAtualizacao": _int_positivo_ou_none_local(id_usuario),
         "IDVendedor": _int_positivo_ou_none_local((item_contrato or {}).get("IDVendedor")),
-        "IDPainelEuromidia": _int_positivo_ou_none_local((item_contrato or {}).get("IDPainelEuromidia")),
-        "IDDimFacesPaineis": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimFacesPaineis")),
+        "IDPainelEuromidia": id_painel_aditivo,
+        "IDDimFacesPaineis": id_face_aditivo,
         "IDDimCheckingHistorico": _int_positivo_ou_none_local((item_contrato or {}).get("IDDimCheckingHistorico")),
         "IDEmpresaProprietaria": _int_positivo_ou_none_local(id_empresa_proprietaria),
         "Referencia": (item_contrato or {}).get("Referencia"),
@@ -7766,9 +7902,9 @@ def _montar_itens_snapshot_solicitacao_do_card(
         "DataAssinaturaRenovacao": _para_data_sql_ou_none((item_contrato or {}).get("DataAssinaturaRenovacao")),
         "IDTrimestre": (item_contrato or {}).get("IDTrimestre"),
         "TexmpoExposicao": (item_contrato or {}).get("TexmpoExposicao"),
-        "DataInicioPrevisto": None,
-        "DataTerminoPrevisto": None,
-        "InicioRenovacao": _para_data_sql_ou_none((item_contrato or {}).get("InicioRenovacao")),
+        "DataInicioPrevisto": data_inicio_aditivo or _para_data_sql_ou_none((item_contrato or {}).get("DataInicioPrevisto")),
+        "DataTerminoPrevisto": data_fim_aditivo or _para_data_sql_ou_none((item_contrato or {}).get("DataTerminoPrevisto")),
+        "InicioRenovacao": "R" if eh_renovacao_tag_17 else ((item_contrato or {}).get("InicioRenovacao") or "I"),
         "FaturamentoBrutoMensal": (item_contrato or {}).get("FaturamentoBrutoMensal"),
         "PercentualPermuta": (item_contrato or {}).get("PercentualPermuta"),
         "CotaOportunidade": (item_contrato or {}).get("CotaOportunidade"),
@@ -7840,6 +7976,8 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     dados_formulario_solicitacao: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tipo_norm = _normalizar_tipo_contrato_card(tipo_contrato)
+    if _card_possui_tag_ativa(int(id_card), ID_TAG_RENOVACAO):
+        tipo_norm = TIPO_SOLICITACAO_ADITIVO
     if tipo_norm not in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
         return {"sincronizado": False, "motivo": "tipo_contrato_ausente"}
 
@@ -8657,14 +8795,29 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
 
 
 def _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas: list[dict[str, Any]]) -> str:
+    ids_tags = {
+        int(item.get("IDDimKanbanTag") or 0)
+        for item in (tags_ativas or [])
+        if isinstance(item, dict)
+    }
     nomes_tags = {
         _normalizar_texto_comparacao(item.get("NomeTag"))
         for item in (tags_ativas or [])
         if isinstance(item, dict)
     }
 
-    tem_novo_contrato = _normalizar_texto_comparacao(NOME_TAG_TIPO_CONTRATO_NOVO) in nomes_tags
-    tem_aditivo = _normalizar_texto_comparacao(NOME_TAG_TIPO_CONTRATO_ADITIVO) in nomes_tags
+    tem_renovacao = int(ID_TAG_RENOVACAO) in ids_tags or "renovacao" in nomes_tags
+    tem_novo_contrato = (
+        int(ID_TAG_TIPO_CONTRATO_NOVO) in ids_tags
+        or _normalizar_texto_comparacao(NOME_TAG_TIPO_CONTRATO_NOVO) in nomes_tags
+    )
+    tem_aditivo = (
+        int(ID_TAG_TIPO_CONTRATO_ADITIVO) in ids_tags
+        or _normalizar_texto_comparacao(NOME_TAG_TIPO_CONTRATO_ADITIVO) in nomes_tags
+    )
+
+    if tem_renovacao:
+        return "ADITIVO"
 
     if tem_novo_contrato and tem_aditivo:
         raise ValueError(
@@ -8685,7 +8838,7 @@ def _resolver_tipo_solicitacao_por_tags_ativas(tags_ativas: list[dict[str, Any]]
 def _obter_id_status_contrato_em_avaliacao() -> int:
     """
     Quando a tag 'Contrato em Avaliação' entra no card,
-    a solicitação de contrato deve nascer com IDDimStatusContratos = 1.
+    a solicitação de contrato deve nascer com IDDimStatusContratos = 2.
 
     Importante:
     - aqui eu NÃO procuro status pelo texto da DimStatusContratos;
@@ -8702,7 +8855,7 @@ def _obter_id_status_contrato_em_avaliacao() -> int:
             f"A coluna IDDimStatusContratos não existe em {TABELA_STATUS_CONTRATOS}."
         )
 
-    id_status_contrato = 1
+    id_status_contrato = 2
 
     sql = text(
         f"""
@@ -8744,9 +8897,9 @@ def _sincronizar_status_contrato_e_solicitacao_por_fase_do_card(
 ) -> dict[str, Any]:
     """
     Regra de negócio da fase 4:
-    - se houver contrato existente selecionado no card, eu gravo IDDimStatusContratos = 1
+    - se houver contrato existente selecionado no card, eu gravo IDDimStatusContratos = 2
       tanto em FatoControleContratosEuromidia quanto em FatoSolicitacaoContratoEuromidia;
-    - se for fluxo de novo contrato, eu gravo IDDimStatusContratos = 1 apenas na solicitação,
+    - se for fluxo de novo contrato, eu gravo IDDimStatusContratos = 2 apenas na solicitação,
       porque ainda não existe cabeçalho oficial em FatoControleContratosEuromidia.
     """
     if int(id_fase_atual or 0) != 4:
@@ -8967,6 +9120,13 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     """
     detalhe = _obter_card_detalhe_payload(int(id_card))
     card = detalhe.get("card") if isinstance(detalhe.get("card"), dict) else {}
+    tags_card = detalhe.get("tags") if isinstance(detalhe.get("tags"), list) else []
+    card_tem_tag_renovacao = any(
+        int((tag or {}).get("IDDimKanbanTag") or 0) == int(ID_TAG_RENOVACAO)
+        or _normalizar_texto_comparacao((tag or {}).get("NomeTag")) == "renovacao"
+        for tag in tags_card
+        if isinstance(tag, dict)
+    )
 
     id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
     id_tipo_cliente_card = _int_ou_none(
@@ -9037,6 +9197,10 @@ def _sincronizar_ativacao_solicitacao_por_fase_do_card(
     )
 
     tipo_solicitacao = _normalizar_tipo_contrato_card(tipo_solicitacao_bruto)
+    if card_tem_tag_renovacao:
+        tipo_solicitacao = TIPO_SOLICITACAO_ADITIVO
+        card["BitAditivo"] = 1
+        card["BitContratoNovo"] = 0
 
     id_contrato_existente = (
         card.get("IDFatoControleContratosEuromidia")
@@ -17116,6 +17280,12 @@ def api_card_detalhe(id_card: int):
         card_payload["IDFatoKanbanCard"] = int(id_card)
 
     tags_payload_tipo = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+    tem_tag_renovacao_payload = any(
+        int((tag or {}).get("IDDimKanbanTag") or 0) == ID_TAG_RENOVACAO
+        or _normalizar_texto_comparacao((tag or {}).get("NomeTag")) == "renovacao"
+        for tag in tags_payload_tipo
+        if isinstance(tag, dict)
+    )
     tem_tag_aditivo_payload = any(
         int((tag or {}).get("IDDimKanbanTag") or 0) == ID_TAG_TIPO_CONTRATO_ADITIVO
         or _normalizar_texto_comparacao((tag or {}).get("NomeTag")) == "aditivo"
@@ -17134,9 +17304,10 @@ def api_card_detalhe(id_card: int):
         or card_payload.get("IDFatoControleContratoEuromidia")
     )
 
-    if tem_tag_aditivo_payload:
+    if tem_tag_renovacao_payload or tem_tag_aditivo_payload:
         card_payload["tipo_contrato"] = TIPO_SOLICITACAO_ADITIVO
         card_payload["tipo_contrato_card"] = TIPO_SOLICITACAO_ADITIVO
+        card_payload["tipo_operacional_contrato"] = "RENOVACAO" if tem_tag_renovacao_payload else TIPO_SOLICITACAO_ADITIVO
         card_payload["BitAditivo"] = 1
         card_payload["BitContratoNovo"] = 0
     elif id_contrato_payload_tipo and not tem_tag_novo_payload:
@@ -30204,11 +30375,18 @@ def api_card_atualizar(id_card: int):
         payload_veio_sem_contrato = id_contrato_existente_payload in (None, "", 0)
         id_contrato_atual_card = _int_ou_none(card_atual.get("IDFatoControleContratosEuromidia"))
         bit_aditivo_atual_card = bool(_int_ou_none(card_atual.get("BitAditivo")) or 0)
+        card_eh_renovacao_atual = _card_eh_renovacao_kanban(id_card)
 
         if payload_veio_sem_contrato and id_contrato_atual_card:
             id_contrato_existente_payload = id_contrato_atual_card
 
-        if id_contrato_atual_card and bit_aditivo_atual_card and payload_veio_sem_contrato:
+        if card_eh_renovacao_atual:
+            # Renovação é ADITIVO operacional. Não importa se o front mandou NOVO_CONTRATO
+            # ao chegar na fase 4: o backend força ADITIVO e impede tag 9.
+            tipo_contrato_card_payload = TIPO_SOLICITACAO_ADITIVO
+            if id_contrato_existente_payload in (None, "", 0) and id_contrato_atual_card:
+                id_contrato_existente_payload = id_contrato_atual_card
+        elif id_contrato_atual_card and bit_aditivo_atual_card and payload_veio_sem_contrato:
             tipo_contrato_card_payload = TIPO_SOLICITACAO_ADITIVO
         elif not str(tipo_contrato_card_payload or "").strip() and id_contrato_atual_card:
             tipo_contrato_card_payload = TIPO_SOLICITACAO_ADITIVO if bit_aditivo_atual_card else tipo_contrato_card_payload
