@@ -238,6 +238,12 @@ docker compose exec airflow-apiserver airflow users create \
 #docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
 
 
+
+#Log
+#docker logs --since=30m pipelines-celery-airflow-worker-1 2>&1 | grep -iE "APROVACAO_CONTRATO|tarefa_processar_aprovacao_contrato|Traceback|Exception|ERROR|erro|410"
+
+
+
 #docker compose down --remove-orphans
 
 #docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker
@@ -252,6 +258,5 @@ docker compose exec airflow-apiserver airflow users create \
 
 #docker compose logs -f nginx-flask flask-app-1 flask-app-2
 #docker compose logs -f nginx-flask flask-app-1 flask-app-2 celery-paineis-worker
-
 
 
