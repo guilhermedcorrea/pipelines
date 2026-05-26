@@ -5328,9 +5328,10 @@ def grade_painel(codponto: int):
         rows = list(rows or [])
         rows.extend(rows_reservas)
 
+    ids_itens_grade = []
     mapa_bit_preferencia_por_item = {}
+
     try:
-        ids_itens_grade = []
         for r_pref in (rows or []):
             try:
                 id_item_pref = int(r_pref[0]) if r_pref[0] is not None else 0
@@ -5340,19 +5341,24 @@ def grade_painel(codponto: int):
             """
             Reservas usam ID negativo na grade e não recebem medalha.
 
-            A medalha vem das tabelas oficiais de preferência:
-            - Integracao.Silver.FatoPreferenciaReserva
-            - Integracao.Silver.FatoPreferenciaReservaItens
+            A grade renderiza a medalha quando BitPreferencia = 1.
+            Eu alimento esse campo por duas fontes:
+            1) regra antiga/oficial de FatoPreferenciaReserva/FatoPreferenciaReservaItens;
+            2) regra nova de agendamento de face por contrato + item.
 
-            Regra: só considero preferência ativa quando o item da preferência
-            possui DataInicioPrevisto e DataTerminoPrevisto com 6 meses completos
-            ou mais. Exemplo: 01/05 até 31/10 conta como 6 meses.
+            Regra nova pedida:
+            - agrupar por IDFatoControleContratosEuromidia + IDFatoControleContratosItensEuromidia;
+            - somar todos os períodos de DataInicio/DataTermino ativos;
+            - se a soma for equivalente a 6 meses completos ou mais, marca BitPreferencia = 1.
             """
             if id_item_pref > 0:
                 ids_itens_grade.append(id_item_pref)
 
         ids_itens_grade = sorted(list(dict.fromkeys(ids_itens_grade)))
+    except Exception:
+        ids_itens_grade = []
 
+    try:
         if ids_itens_grade:
             sql_bit_preferencia_grade = sql_text("""
                 WITH ItensGrade AS (
@@ -5428,6 +5434,87 @@ def grade_painel(codponto: int):
         try:
             current_app.logger.warning(
                 "GRADE_PAINEL | falha ao carregar preferência pelas tabelas FatoPreferenciaReserva/FatoPreferenciaReservaItens | codponto=%s | erro=%s",
+                codponto,
+                exc,
+            )
+        except Exception:
+            pass
+
+    try:
+        if ids_itens_grade:
+            sql_bit_preferencia_agendamento_grade = sql_text("""
+                WITH ItensGrade AS (
+                    SELECT
+                         TRY_CONVERT(int, ci.[IDFatoControleContratosItensEuromidia]) AS IDFatoControleContratosItensEuromidia
+                        ,TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia]) AS IDFatoControleContratosEuromidia
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                    WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
+                ),
+                AgendamentosValidos AS (
+                    SELECT
+                         ig.[IDFatoControleContratosItensEuromidia]
+                        ,ig.[IDFatoControleContratosEuromidia]
+                        ,TRY_CONVERT(date, ag.[DataInicio]) AS DataInicioAgendamento
+                        ,TRY_CONVERT(date, ag.[DataTermino]) AS DataTerminoAgendamento
+                    FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS ag WITH (NOLOCK)
+                    INNER JOIN ItensGrade AS ig
+                        ON TRY_CONVERT(int, ag.[IDFatoControleContratosEuromidia]) = ig.[IDFatoControleContratosEuromidia]
+                       AND TRY_CONVERT(int, ag.[IDFatoControleContratosItensEuromidia]) = ig.[IDFatoControleContratosItensEuromidia]
+                    WHERE ISNULL(TRY_CONVERT(int, ag.[BitAtivo]), 1) = 1
+                      AND UPPER(LTRIM(RTRIM(COALESCE(ag.[Situacao], '')))) NOT IN ('CANCELADO', 'CANCELADA', 'INATIVO', 'INATIVA')
+                      AND TRY_CONVERT(date, ag.[DataInicio]) IS NOT NULL
+                      AND TRY_CONVERT(date, ag.[DataTermino]) IS NOT NULL
+                      AND TRY_CONVERT(date, ag.[DataTermino]) >= TRY_CONVERT(date, ag.[DataInicio])
+                ),
+                AgendamentosConsolidados AS (
+                    SELECT
+                         av.[IDFatoControleContratosItensEuromidia]
+                        ,av.[IDFatoControleContratosEuromidia]
+                        ,MIN(av.[DataInicioAgendamento]) AS DataInicioMinima
+                        ,MAX(av.[DataTerminoAgendamento]) AS DataTerminoMaxima
+                        ,SUM(DATEDIFF(DAY, av.[DataInicioAgendamento], av.[DataTerminoAgendamento]) + 1) AS DiasAgendados
+                    FROM AgendamentosValidos AS av
+                    GROUP BY
+                         av.[IDFatoControleContratosItensEuromidia]
+                        ,av.[IDFatoControleContratosEuromidia]
+                )
+                SELECT
+                     ac.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia
+                    ,CASE
+                        WHEN ac.[DataInicioMinima] IS NOT NULL
+                         AND ac.[DiasAgendados] >= DATEDIFF(DAY, ac.[DataInicioMinima], DATEADD(MONTH, 6, ac.[DataInicioMinima]))
+                        THEN 1
+                        ELSE 0
+                     END AS BitPreferenciaAgendamento
+                    ,ac.[DataInicioMinima]
+                    ,ac.[DataTerminoMaxima]
+                    ,ac.[DiasAgendados]
+                FROM AgendamentosConsolidados AS ac
+            """).bindparams(bindparam("ids_itens_grade", expanding=True))
+
+            rows_bit_preferencia_agendamento = db.session.execute(
+                sql_bit_preferencia_agendamento_grade,
+                {"ids_itens_grade": ids_itens_grade},
+            ).mappings().all()
+
+            for row_ag in (rows_bit_preferencia_agendamento or []):
+                try:
+                    id_item_ag = int(row_ag["IDFatoControleContratosItensEuromidia"] or 0)
+                    bit_ag = int(row_ag["BitPreferenciaAgendamento"] or 0)
+                except Exception:
+                    continue
+
+                if id_item_ag <= 0:
+                    continue
+
+                if bit_ag == 1:
+                    mapa_bit_preferencia_por_item[id_item_ag] = 1
+                else:
+                    mapa_bit_preferencia_por_item.setdefault(id_item_ag, 0)
+    except Exception as exc:
+        try:
+            current_app.logger.warning(
+                "GRADE_PAINEL | falha ao carregar preferência pela FatoAgendamentoFaceContrato | codponto=%s | erro=%s",
                 codponto,
                 exc,
             )

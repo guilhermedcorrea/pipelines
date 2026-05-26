@@ -4194,6 +4194,10 @@ def _buscar_origem_renovacao_por_card_painel_face_admin(id_card: int | None, cod
             )
         """
 
+    ordem_prioridade_item = ""
+    if not expr_id_item.upper().startswith("CAST(NULL"):
+        ordem_prioridade_item = f"CASE WHEN {expr_id_item} IS NOT NULL THEN 0 ELSE 1 END,"
+
     row = db.session.execute(
         text(f"""
             SELECT TOP (1)
@@ -4207,7 +4211,7 @@ def _buscar_origem_renovacao_por_card_painel_face_admin(id_card: int | None, cod
             WHERE {' AND '.join(filtros)}
             {filtro_face}
             ORDER BY
-                CASE WHEN {expr_id_item} IS NOT NULL THEN 0 ELSE 1 END,
+                {ordem_prioridade_item}
                 pf.IDFatoKanbanCardPainelFace DESC;
         """),
         params,
@@ -4430,7 +4434,12 @@ def _buscar_item_controle_existente_aprovacao_admin(
     e depois insiro a nova linha aprovada, sem reaproveitar item antigo inativo por engano.
     """
 
-    sql = text("""
+    id_item_controle_origem_int = _int_ou_none(id_item_controle_origem)
+    ordem_prioridade_item = ""
+    if id_item_controle_origem_int not in (None, "", 0):
+        ordem_prioridade_item = "CASE WHEN i.IDFatoControleContratosItensEuromidia = :id_item_controle_origem THEN 0 ELSE 1 END,"
+
+    sql = text(f"""
         SELECT TOP 1
                i.IDFatoControleContratosItensEuromidia,
                i.Referencia AS ReferenciaAtual,
@@ -4447,7 +4456,7 @@ def _buscar_item_controle_existente_aprovacao_admin(
                 )
               )
         ORDER BY
-            CASE WHEN :id_item_controle_origem IS NOT NULL AND i.IDFatoControleContratosItensEuromidia = :id_item_controle_origem THEN 0 ELSE 1 END,
+            {ordem_prioridade_item}
             CASE WHEN ISNULL(i.BitAtivo, 1) = 1 THEN 0 ELSE 1 END,
             i.IDFatoControleContratosItensEuromidia DESC;
     """)
@@ -4456,7 +4465,7 @@ def _buscar_item_controle_existente_aprovacao_admin(
         sql,
         {
             "id_contrato_controle": int(id_contrato_controle),
-            "id_item_controle_origem": int(id_item_controle_origem) if id_item_controle_origem not in (None, "", 0) else None,
+            "id_item_controle_origem": int(id_item_controle_origem_int) if id_item_controle_origem_int not in (None, "", 0) else None,
             "cod_ponto": cod_ponto,
             "cod_face": cod_face,
             "somente_ativos": 1 if somente_ativos else 0,
@@ -5234,15 +5243,19 @@ def _upsert_contato_cliente_direto_euromidia(
         "telefone_financeiro": _campo_form_ou_none(form, "TelefoneFinanceiro"),
     }
 
+    ordem_prioridade_card = ""
+    if params.get("id_card") not in (None, "", 0):
+        ordem_prioridade_card = "CASE WHEN f.IDFatoKanbanCard = :id_card THEN 0 ELSE 1 END,"
+
     row_existente = db.session.execute(
-        text("""
+        text(f"""
             SELECT TOP 1
                    f.IDFatoContatoClienteDiretoEuromidia
             FROM [Integracao].[Silver].[FatoContatoClienteDiretoEuromidia] f
             WHERE f.IDFatoControleContratosEuromidia = :id_contrato
                OR (:id_card IS NOT NULL AND f.IDFatoKanbanCard = :id_card)
             ORDER BY
-                CASE WHEN :id_card IS NOT NULL AND f.IDFatoKanbanCard = :id_card THEN 0 ELSE 1 END,
+                {ordem_prioridade_card}
                 f.IDFatoContatoClienteDiretoEuromidia DESC
         """),
         params,
@@ -6033,8 +6046,12 @@ def _upsert_linha_empresa_relacionada_contrato_euromidia(
         "bit_principal": 1 if int(bit_principal or 0) == 1 else 0,
     }
 
+    ordem_prioridade_relacao = ""
+    if params.get("id_rel") not in (None, "", 0):
+        ordem_prioridade_relacao = "CASE WHEN IDFatoContratoEmpresaRelacionada = :id_rel THEN 0 ELSE 1 END,"
+
     row_existente = db.session.execute(
-        text("""
+        text(f"""
             SELECT TOP (1)
                    IDFatoContratoEmpresaRelacionada
             FROM [Integracao].[Silver].[FatoContratoEmpresaRelacionada] WITH (UPDLOCK, HOLDLOCK)
@@ -6047,7 +6064,7 @@ def _upsert_linha_empresa_relacionada_contrato_euromidia(
                     AND ISNULL(BitPrincipal, 0) = :bit_principal
                 )
             ORDER BY
-                CASE WHEN :id_rel IS NOT NULL AND IDFatoContratoEmpresaRelacionada = :id_rel THEN 0 ELSE 1 END,
+                {ordem_prioridade_relacao}
                 IDFatoContratoEmpresaRelacionada DESC;
         """),
         params,
@@ -8116,8 +8133,13 @@ def _resolver_id_dim_tipo_documento_admin(nome_tipo_documento: str | None, id_em
     if not nome:
         return None
 
+    id_empresa_proprietaria_int = _int_ou_none(id_empresa_proprietaria)
+    ordem_prioridade_empresa = ""
+    if id_empresa_proprietaria_int not in (None, "", 0):
+        ordem_prioridade_empresa = "CASE WHEN td.IDEmpresaProprietaria = :id_empresa_proprietaria THEN 0 ELSE 1 END,"
+
     row = db.session.execute(
-        text("""
+        text(f"""
             SELECT TOP (1)
                    td.IDDimTipoDocumento
             FROM [Integracao].[Silver].[DimTipoDocumento] td
@@ -8130,12 +8152,12 @@ def _resolver_id_dim_tipo_documento_admin(nome_tipo_documento: str | None, id_em
                     OR td.IDEmpresaProprietaria IS NULL
                   )
             ORDER BY
-                CASE WHEN td.IDEmpresaProprietaria = :id_empresa_proprietaria THEN 0 ELSE 1 END,
+                {ordem_prioridade_empresa}
                 td.IDDimTipoDocumento ASC;
         """),
         {
             "nome_tipo_documento": nome,
-            "id_empresa_proprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+            "id_empresa_proprietaria": int(id_empresa_proprietaria_int) if id_empresa_proprietaria_int not in (None, "", 0) else None,
         },
     ).mappings().first()
 
@@ -8162,8 +8184,13 @@ def _resolver_id_dim_tipo_documento_por_fragmento_admin(
     if not fragmento:
         return None
 
+    id_empresa_proprietaria_int = _int_ou_none(id_empresa_proprietaria)
+    ordem_prioridade_empresa = ""
+    if id_empresa_proprietaria_int not in (None, "", 0):
+        ordem_prioridade_empresa = "CASE WHEN td.IDEmpresaProprietaria = :id_empresa_proprietaria THEN 0 ELSE 1 END,"
+
     row = db.session.execute(
-        text("""
+        text(f"""
             SELECT TOP (1)
                    td.IDDimTipoDocumento
             FROM [Integracao].[Silver].[DimTipoDocumento] td
@@ -8176,13 +8203,13 @@ def _resolver_id_dim_tipo_documento_por_fragmento_admin(
                     OR td.IDEmpresaProprietaria IS NULL
                   )
             ORDER BY
-                CASE WHEN td.IDEmpresaProprietaria = :id_empresa_proprietaria THEN 0 ELSE 1 END,
+                {ordem_prioridade_empresa}
                 LEN(CONVERT(nvarchar(200), td.NomeTipoDocumento)) ASC,
                 td.IDDimTipoDocumento ASC;
         """),
         {
             "fragmento": fragmento,
-            "id_empresa_proprietaria": int(id_empresa_proprietaria) if id_empresa_proprietaria not in (None, "", 0) else None,
+            "id_empresa_proprietaria": int(id_empresa_proprietaria_int) if id_empresa_proprietaria_int not in (None, "", 0) else None,
         },
     ).mappings().first()
 
@@ -9480,8 +9507,13 @@ def _buscar_item_controle_fallback_layout(item: dict, cab: dict | None = None) -
     if id_contrato in (None, "", 0) and id_item_controle in (None, "", 0):
         return {}
 
+    id_item_controle_int = _int_ou_none(id_item_controle)
+    ordem_prioridade_item = ""
+    if id_item_controle_int not in (None, "", 0):
+        ordem_prioridade_item = "CASE WHEN i.IDFatoControleContratosItensEuromidia = :id_item_controle THEN 0 ELSE 1 END,"
+
     row = db.session.execute(
-        text("""
+        text(f"""
             SELECT TOP 1
                  i.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia
                 ,i.IDFatoControleContratosItensEuromidia
@@ -9589,11 +9621,7 @@ def _buscar_item_controle_fallback_layout(item: dict, cab: dict | None = None) -
                     AND ISNULL(UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(60))))), '') = ISNULL(UPPER(LTRIM(RTRIM(CAST(:cod_face AS varchar(60))))), '')
                 )
             ORDER BY
-                CASE
-                    WHEN :id_item_controle IS NOT NULL
-                     AND i.IDFatoControleContratosItensEuromidia = :id_item_controle THEN 0
-                    ELSE 1
-                END,
+                {ordem_prioridade_item}
                 i.IDFatoControleContratosItensEuromidia DESC
         """),
         {
