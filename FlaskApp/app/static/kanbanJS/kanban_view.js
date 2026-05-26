@@ -3163,6 +3163,54 @@
     return `${ano}-${mes}-${dia}`;
   }
 
+  function obterDataAtualIsoLocal(){
+    return formatarDataIso(new Date());
+  }
+
+  function dataIsoEhAnteriorAoDiaAtual(valor){
+    const dataIso = safeStr(valor || '').trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(dataIso) && dataIso < obterDataAtualIsoLocal();
+  }
+
+  function manterSomenteDataAtualOuFutura(valor){
+    const dataIso = normalizarDataParaInput(valor);
+    if (!dataIso) return '';
+    if (dataIsoEhAnteriorAoDiaAtual(dataIso)) return '';
+    return dataIso;
+  }
+
+  function limparInputDataReserva(input){
+    if (!input) return;
+    if (input._flatpickr) {
+      input._flatpickr.clear();
+    } else {
+      input.value = '';
+    }
+  }
+
+  function marcarDiaPassadoFlatpickr(dayElem, data){
+    if (!dayElem) return;
+
+    const dataIso = formatarDataIso(data);
+    if (!dataIso) return;
+
+    dayElem.dataset.dateIso = dataIso;
+
+    if (dataIsoEhAnteriorAoDiaAtual(dataIso)) {
+      dayElem.classList.add('flatpickr-disabled', 'kb-dia-passado-bloqueado');
+      dayElem.setAttribute('aria-disabled', 'true');
+      dayElem.title = `Data bloqueada: anterior a ${formatarDataIsoParaBr(obterDataAtualIsoLocal())}.`;
+    }
+  }
+
+  function obterMaiorDataIso(...datas){
+    return datas
+      .map((valor) => safeStr(valor || '').trim())
+      .filter(Boolean)
+      .sort()
+      .pop() || '';
+  }
+
   function parseDataIso(texto){
     const valor = safeStr(texto).trim();
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(valor);
@@ -3221,25 +3269,44 @@
     const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
     if (!inputDataInicio || !inputDataFim) return;
 
-    const dataInicio = safeStr(inputDataInicio.value || '').trim();
-    const dataFim = safeStr(inputDataFim.value || '').trim();
+    const dataHojeIso = obterDataAtualIsoLocal();
+    let dataInicio = safeStr(inputDataInicio.value || '').trim();
+    let dataFim = safeStr(inputDataFim.value || '').trim();
 
-    inputDataFim.min = dataInicio || '';
+    if (dataInicio && dataInicio < dataHojeIso) {
+      limparInputDataReserva(inputDataInicio);
+      dataInicio = '';
+    }
+
+    if (dataFim && dataFim < dataHojeIso) {
+      limparInputDataReserva(inputDataFim);
+      dataFim = '';
+    }
+
+    const dataMinimaFim = obterMaiorDataIso(dataHojeIso, dataInicio);
+
+    inputDataInicio.min = dataHojeIso;
+    inputDataFim.min = dataMinimaFim || dataHojeIso;
+
+    if (inputDataInicio._flatpickr) {
+      inputDataInicio._flatpickr.set('minDate', dataHojeIso);
+      inputDataInicio._flatpickr.redraw();
+    }
 
     if (inputDataFim._flatpickr) {
-      inputDataFim._flatpickr.set('minDate', dataInicio || null);
+      inputDataFim._flatpickr.set('minDate', dataMinimaFim || dataHojeIso);
 
-      if (dataInicio) {
+      if (dataInicio && dataInicio >= dataHojeIso) {
         inputDataFim._flatpickr.jumpToDate(dataInicio, false);
+      } else {
+        inputDataFim._flatpickr.jumpToDate(dataHojeIso, false);
       }
+
+      inputDataFim._flatpickr.redraw();
     }
 
     if (dataInicio && dataFim && dataFim < dataInicio) {
-      if (inputDataFim._flatpickr) {
-        inputDataFim._flatpickr.clear();
-      } else {
-        inputDataFim.value = '';
-      }
+      limparInputDataReserva(inputDataFim);
     }
   }
 
@@ -3307,6 +3374,25 @@
 
     const dataInicio = safeStr(inputDataInicio?.value || '').trim();
     const dataFim = safeStr(inputDataFim?.value || '').trim();
+    const dataHojeIso = obterDataAtualIsoLocal();
+
+    if (dataInicio && dataInicio < dataHojeIso) {
+      atualizarMensagemReservaDoBloco(
+        bloco,
+        `A Data de início não pode ser anterior a ${formatarDataIsoParaBr(dataHojeIso)}.`,
+        'erro'
+      );
+      return;
+    }
+
+    if (dataFim && dataFim < dataHojeIso) {
+      atualizarMensagemReservaDoBloco(
+        bloco,
+        `A Data até não pode ser anterior a ${formatarDataIsoParaBr(dataHojeIso)}.`,
+        'erro'
+      );
+      return;
+    }
 
     if (!calendario) {
       if (safeStr(bloco?.__calendarioOcupacaoErro || '').trim()) {
@@ -3424,6 +3510,7 @@
     input.type = 'date';
     input.inputMode = 'numeric';
     input.placeholder = '';
+    input.min = obterDataAtualIsoLocal();
   }
 
   function decorarDiaFlatpickr(instance, dayElem, date){
@@ -3476,15 +3563,35 @@
     prepararInputReservaParaFallback(inputDataInicio);
     prepararInputReservaParaFallback(inputDataFim);
 
-    inputDataInicio.value = safeStr(datasPadrao.dataInicio || '').trim();
-    inputDataFim.value = safeStr(datasPadrao.dataFim || '').trim();
+    const dataInicioPadrao = manterSomenteDataAtualOuFutura(datasPadrao.dataInicio || '');
+    const dataFimPadraoBruta = manterSomenteDataAtualOuFutura(datasPadrao.dataFim || '');
+    const dataFimPadrao = dataInicioPadrao && dataFimPadraoBruta && dataFimPadraoBruta >= dataInicioPadrao
+      ? dataFimPadraoBruta
+      : '';
+
+    inputDataInicio.value = dataInicioPadrao;
+    inputDataFim.value = dataFimPadrao;
     inputDataInicio.disabled = false;
     inputDataFim.disabled = false;
     sincronizarRestricoesDataFimDoBloco(bloco);
 
     const aoAlterarDataInicio = () => {
+      const dataHojeIso = obterDataAtualIsoLocal();
       const dataInicio = safeStr(inputDataInicio.value || '').trim();
       const dataFim = safeStr(inputDataFim.value || '').trim();
+
+      if (dataInicio && dataInicio < dataHojeIso) {
+        inputDataInicio.value = '';
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          `A Data de início não pode ser anterior a ${formatarDataIsoParaBr(dataHojeIso)}.`,
+          'erro'
+        );
+        sincronizarRestricoesDataFimDoBloco(bloco);
+        atualizarResumoDisponibilidadeDoBloco(bloco);
+        agendarSincronizacaoFormularioSolicitacao();
+        return;
+      }
 
       sincronizarRestricoesDataFimDoBloco(bloco);
 
@@ -3518,8 +3625,22 @@
     };
 
     const aoAlterarDataFim = () => {
+      const dataHojeIso = obterDataAtualIsoLocal();
       const dataInicio = safeStr(inputDataInicio.value || '').trim();
       const dataFim = safeStr(inputDataFim.value || '').trim();
+
+      if (dataFim && dataFim < dataHojeIso) {
+        inputDataFim.value = '';
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          `A Data até não pode ser anterior a ${formatarDataIsoParaBr(dataHojeIso)}.`,
+          'erro'
+        );
+        sincronizarRestricoesDataFimDoBloco(bloco);
+        atualizarResumoDisponibilidadeDoBloco(bloco);
+        agendarSincronizacaoFormularioSolicitacao();
+        return;
+      }
 
       if (dataInicio && dataFim && dataFim < dataInicio){
         inputDataFim.value = '';
@@ -3558,8 +3679,21 @@
 
     try {
       const flatpickr = await carregarFlatpickrBiblioteca();
-      const dataInicioPadrao = safeStr(datasPadrao.dataInicio || '').trim();
-      const dataFimPadrao = safeStr(datasPadrao.dataFim || '').trim();
+      const dataHojeIso = obterDataAtualIsoLocal();
+
+      const dataInicioPadraoOriginal = normalizarDataParaInput(datasPadrao.dataInicio || '');
+      const dataFimPadraoOriginal = normalizarDataParaInput(datasPadrao.dataFim || '');
+
+      const dataInicioPadrao = manterSomenteDataAtualOuFutura(dataInicioPadraoOriginal);
+      const dataFimPadraoBase = manterSomenteDataAtualOuFutura(dataFimPadraoOriginal);
+      const dataFimPadrao = dataInicioPadrao && dataFimPadraoBase && dataFimPadraoBase >= dataInicioPadrao
+        ? dataFimPadraoBase
+        : '';
+
+      const tinhaDataPadraoPassada = (
+        (dataInicioPadraoOriginal && dataInicioPadraoOriginal < dataHojeIso) ||
+        (dataFimPadraoOriginal && dataFimPadraoOriginal < dataHojeIso)
+      );
 
       inputDataInicio.type = 'text';
       inputDataInicio.inputMode = 'none';
@@ -3569,6 +3703,8 @@
       inputDataFim.placeholder = 'dd/mm/aaaa';
       inputDataInicio.disabled = false;
       inputDataFim.disabled = false;
+      inputDataInicio.min = dataHojeIso;
+      inputDataFim.min = obterMaiorDataIso(dataHojeIso, dataInicioPadrao) || dataHojeIso;
 
       const opcoesBase = {
         locale: localeFlatpickrPtBr,
@@ -3577,9 +3713,12 @@
         dateFormat: 'Y-m-d',
         allowInput: false,
         disableMobile: true,
+        minDate: dataHojeIso,
         monthSelectorType: 'static',
         onDayCreate: function(_dObj, _dStr, instance, dayElem){
+          marcarDiaPassadoFlatpickr(dayElem, dayElem.dateObj);
           decorarDiaFlatpickr(instance, dayElem, dayElem.dateObj);
+          marcarDiaPassadoFlatpickr(dayElem, dayElem.dateObj);
         }
       };
 
@@ -3589,26 +3728,53 @@
         disable: [
           function(data){
             const dataIso = formatarDataIso(data);
+            const hojeAtualIso = obterDataAtualIsoLocal();
+
+            if (dataIso && dataIso < hojeAtualIso) {
+              return true;
+            }
+
             return !diaEstaDisponivelNoBloco(bloco, dataIso);
           }
         ],
         onReady: function(_selectedDates, _dataStr, instance){
-          if (dataInicioPadrao) {
+          const hojeAtualIso = obterDataAtualIsoLocal();
+          instance.set('minDate', hojeAtualIso);
+          if (dataInicioPadrao && dataInicioPadrao >= hojeAtualIso) {
             instance.jumpToDate(dataInicioPadrao, false);
+          } else {
+            instance.jumpToDate(hojeAtualIso, false);
           }
+          instance.redraw();
+        },
+        onOpen: function(_selectedDates, _dataStr, instance){
+          const hojeAtualIso = obterDataAtualIsoLocal();
+          instance.set('minDate', hojeAtualIso);
+          instance.jumpToDate(hojeAtualIso, false);
+          instance.redraw();
         },
         onChange: function(_selectedDates, dataStr){
+          const hojeAtualIso = obterDataAtualIsoLocal();
           const dataInicio = safeStr(dataStr || '').trim();
+
+          if (dataInicio && dataInicio < hojeAtualIso) {
+            limparInputDataReserva(inputDataInicio);
+            atualizarMensagemReservaDoBloco(
+              bloco,
+              `A Data de início não pode ser anterior a ${formatarDataIsoParaBr(hojeAtualIso)}.`,
+              'erro'
+            );
+            sincronizarRestricoesDataFimDoBloco(bloco);
+            atualizarResumoDisponibilidadeDoBloco(bloco);
+            agendarSincronizacaoFormularioSolicitacao();
+            return;
+          }
 
           sincronizarRestricoesDataFimDoBloco(bloco);
 
           const dataFimAtual = safeStr(inputDataFim.value || '').trim();
           if (dataInicio && dataFimAtual && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFimAtual)) {
-            if (inputDataFim._flatpickr) {
-              inputDataFim._flatpickr.clear();
-            } else {
-              inputDataFim.value = '';
-            }
+            limparInputDataReserva(inputDataFim);
           }
 
           atualizarResumoDisponibilidadeDoBloco(bloco);
@@ -3619,17 +3785,23 @@
       flatpickr(inputDataFim, {
         ...opcoesBase,
         defaultDate: dataFimPadrao || null,
-        minDate: dataInicioPadrao || null,
+        minDate: obterMaiorDataIso(dataHojeIso, dataInicioPadrao) || dataHojeIso,
         disable: [
           function(data){
             const dataIso = formatarDataIso(data);
+            const hojeAtualIso = obterDataAtualIsoLocal();
             const dataInicio = safeStr(inputDataInicio.value || '').trim();
+            const dataMinimaFim = obterMaiorDataIso(hojeAtualIso, dataInicio);
+
+            if (dataIso && dataIso < hojeAtualIso) {
+              return true;
+            }
 
             if (!dataInicio) {
               return true;
             }
 
-            if (dataIso < dataInicio) {
+            if (dataIso < dataMinimaFim) {
               return true;
             }
 
@@ -3637,34 +3809,71 @@
           }
         ],
         onReady: function(_selectedDates, _dataStr, instance){
+          const hojeAtualIso = obterDataAtualIsoLocal();
           const dataInicioAtual = safeStr(inputDataInicio.value || '').trim() || dataInicioPadrao;
-          instance.set('minDate', dataInicioAtual || null);
-          if (dataFimPadrao) {
+          const dataMinimaFim = obterMaiorDataIso(hojeAtualIso, dataInicioAtual);
+          instance.set('minDate', dataMinimaFim || hojeAtualIso);
+          if (dataFimPadrao && dataFimPadrao >= dataMinimaFim) {
             instance.jumpToDate(dataFimPadrao, false);
-          } else if (dataInicioAtual) {
-            instance.jumpToDate(dataInicioAtual, false);
+          } else if (dataMinimaFim) {
+            instance.jumpToDate(dataMinimaFim, false);
+          } else {
+            instance.jumpToDate(hojeAtualIso, false);
           }
+          instance.redraw();
         },
-        onChange: function(){
+        onChange: function(_selectedDates, dataStr){
+          const hojeAtualIso = obterDataAtualIsoLocal();
+          const dataFim = safeStr(dataStr || '').trim();
+
+          if (dataFim && dataFim < hojeAtualIso) {
+            limparInputDataReserva(inputDataFim);
+            atualizarMensagemReservaDoBloco(
+              bloco,
+              `A Data até não pode ser anterior a ${formatarDataIsoParaBr(hojeAtualIso)}.`,
+              'erro'
+            );
+            sincronizarRestricoesDataFimDoBloco(bloco);
+            atualizarResumoDisponibilidadeDoBloco(bloco);
+            agendarSincronizacaoFormularioSolicitacao();
+            return;
+          }
+
           atualizarResumoDisponibilidadeDoBloco(bloco);
           agendarSincronizacaoFormularioSolicitacao();
         },
         onOpen: function(_selectedDates, _dataStr, instance){
+          const hojeAtualIso = obterDataAtualIsoLocal();
           const dataInicio = safeStr(inputDataInicio.value || '').trim();
-          instance.set('minDate', dataInicio || null);
-          if (dataInicio) {
-            instance.jumpToDate(dataInicio, false);
+          const dataMinimaFim = obterMaiorDataIso(hojeAtualIso, dataInicio);
+          instance.set('minDate', dataMinimaFim || hojeAtualIso);
+          if (dataMinimaFim) {
+            instance.jumpToDate(dataMinimaFim, false);
+          } else {
+            instance.jumpToDate(hojeAtualIso, false);
           }
           instance.redraw();
         }
       });
 
-      if (dataInicioPadrao) {
+      if (dataInicioPadrao && dataInicioPadrao >= obterDataAtualIsoLocal()) {
         inputDataInicio._flatpickr?.setDate(dataInicioPadrao, false, 'Y-m-d');
+      } else {
+        limparInputDataReserva(inputDataInicio);
       }
 
-      if (dataFimPadrao) {
+      if (dataFimPadrao && dataFimPadrao >= obterDataAtualIsoLocal()) {
         inputDataFim._flatpickr?.setDate(dataFimPadrao, false, 'Y-m-d');
+      } else {
+        limparInputDataReserva(inputDataFim);
+      }
+
+      if (tinhaDataPadraoPassada) {
+        atualizarMensagemReservaDoBloco(
+          bloco,
+          `Datas anteriores a ${formatarDataIsoParaBr(obterDataAtualIsoLocal())} foram bloqueadas. Selecione um novo período.`,
+          'erro'
+        );
       }
 
       sincronizarRestricoesDataFimDoBloco(bloco);
@@ -3675,6 +3884,19 @@
       configurarFallbackNativoReservaDoBloco(bloco, datasPadrao);
     }
   }
+
+  document.addEventListener('mousedown', (evento) => {
+    const dia = evento.target?.closest?.('.flatpickr-day[data-date-iso]');
+    if (!dia) return;
+
+    const dataIso = safeStr(dia.dataset.dateIso || '').trim();
+    if (dataIso && dataIso < obterDataAtualIsoLocal()) {
+      evento.preventDefault();
+      evento.stopPropagation();
+      return false;
+    }
+  }, true);
+
 
   async function inicializarCalendarioReservaDoBloco(bloco, valoresSalvos = null){
     const selectFace = bloco?.querySelector('[data-role="select-face"]');
@@ -11280,8 +11502,25 @@ async function aplicarReservaNoBloco(bloco, reserva, opcoes = {}){
   const codPontoReserva = safeStr(reserva.CodPonto ?? reserva.cod_ponto ?? '').trim();
   const idPainelReserva = idNum(reserva.IDPainelEuromidia ?? reserva.id_painel ?? reserva.IDDimPaineisEuromidia ?? 0) || null;
   const cotaReserva = safeStr(reserva.Cota ?? reserva.cota ?? reserva.ExibicoesDia ?? reserva.exibicoes_dia ?? '').trim();
-  const dataInicioReserva = normalizarDataParaInput(reserva.DataInicio ?? reserva.data_inicio ?? '');
-  const dataFimReserva = normalizarDataParaInput(reserva.DataFim ?? reserva.data_fim ?? '');
+  const dataHojeIso = obterDataAtualIsoLocal();
+  const dataInicioReservaOriginal = normalizarDataParaInput(reserva.DataInicio ?? reserva.data_inicio ?? '');
+  const dataFimReservaOriginal = normalizarDataParaInput(reserva.DataFim ?? reserva.data_fim ?? '');
+  const dataInicioReserva = manterSomenteDataAtualOuFutura(dataInicioReservaOriginal);
+  const dataFimReservaBase = manterSomenteDataAtualOuFutura(dataFimReservaOriginal);
+  const dataFimReserva = dataInicioReserva && dataFimReservaBase && dataFimReservaBase >= dataInicioReserva
+    ? dataFimReservaBase
+    : '';
+
+  if (
+    (dataInicioReservaOriginal && dataInicioReservaOriginal < dataHojeIso) ||
+    (dataFimReservaOriginal && dataFimReservaOriginal < dataHojeIso)
+  ) {
+    mostrarInfoReservaNoBloco(
+      bloco,
+      `A reserva possui data anterior a ${formatarDataIsoParaBr(dataHojeIso)}. Selecione um novo período válido.`,
+      'erro'
+    );
+  }
 
   await aplicarDadosClienteMarcaDaReservaKanban(reserva);
 
@@ -11322,7 +11561,7 @@ async function aplicarReservaNoBloco(bloco, reserva, opcoes = {}){
   if (inputDataInicio && dataInicioReserva) inputDataInicio.value = dataInicioReserva;
   if (inputDataFim && dataFimReserva) {
     inputDataFim.value = dataFimReserva;
-    inputDataFim.min = dataInicioReserva || '';
+    inputDataFim.min = obterMaiorDataIso(obterDataAtualIsoLocal(), dataInicioReserva) || obterDataAtualIsoLocal();
   }
 
   const selectExibicoesDia = bloco.querySelector('[data-role="select-exibicoes-dia"]');
@@ -12329,7 +12568,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
         type:'text',
         inputmode:'none',
         autocomplete:'off',
-        placeholder:'dd/mm/aaaa'
+        placeholder:'dd/mm/aaaa',
+        min: obterDataAtualIsoLocal()
       })
     ]),
     el('div', { class:'kb-campo grow' }, [
@@ -12340,7 +12580,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
         type:'text',
         inputmode:'none',
         autocomplete:'off',
-        placeholder:'dd/mm/aaaa'
+        placeholder:'dd/mm/aaaa',
+        min: obterDataAtualIsoLocal()
       })
     ])
   ]));
@@ -12493,7 +12734,7 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
 
     if (inputDataFim) {
       inputDataFim.value = dataFimSalva || '';
-      inputDataFim.min = dataInicioSalva || '';
+      inputDataFim.min = obterMaiorDataIso(obterDataAtualIsoLocal(), dataInicioSalva) || obterDataAtualIsoLocal();
     }
 
     if (
@@ -15966,6 +16207,16 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       if ((dataInicio && !dataFim) || (!dataInicio && dataFim)){
         return { ok: false, msg: `${titulo}: preencha Data de início e Data até.` };
+      }
+
+      const dataHojeIso = obterDataAtualIsoLocal();
+
+      if (dataInicio && dataInicio < dataHojeIso){
+        return { ok: false, msg: `${titulo}: a Data de início não pode ser anterior a ${formatarDataIsoParaBr(dataHojeIso)}.` };
+      }
+
+      if (dataFim && dataFim < dataHojeIso){
+        return { ok: false, msg: `${titulo}: a Data até não pode ser anterior a ${formatarDataIsoParaBr(dataHojeIso)}.` };
       }
 
       if (dataInicio && dataFim && dataFim < dataInicio){

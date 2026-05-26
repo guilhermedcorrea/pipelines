@@ -4569,14 +4569,26 @@ def _salvar_vinculos_painel_face_card(
             linha["Ordem"] = ordem_padrao
 
         if (linha["DataInicio"] is None) ^ (linha["DataFim"] is None):
-            raise ValueError("Preencha Data de e Data até para o mesmo painel/face.")
+            raise ValueError("Preencha Data de início e Data até para o mesmo painel/face.")
+
+        hoje = date.today()
+
+        if linha["DataInicio"] is not None and linha["DataInicio"] < hoje:
+            raise ValueError(
+                f"A Data de início não pode ser anterior ao dia atual ({hoje.strftime('%d/%m/%Y')})."
+            )
+
+        if linha["DataFim"] is not None and linha["DataFim"] < hoje:
+            raise ValueError(
+                f"A Data até não pode ser anterior ao dia atual ({hoje.strftime('%d/%m/%Y')})."
+            )
 
         if (
             linha["DataInicio"] is not None
             and linha["DataFim"] is not None
             and linha["DataFim"] < linha["DataInicio"]
         ):
-            raise ValueError("A Data até não pode ser menor que a Data de.")
+            raise ValueError("A Data até não pode ser menor que a Data de início.")
 
         return linha
 
