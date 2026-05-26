@@ -12282,6 +12282,26 @@ def _cancelar_reservas_card_kanban(
         return 0
 
     sql_cancel = text("""
+        DECLARE @motivo_limpo nvarchar(max) = LTRIM(RTRIM(COALESCE(:motivo, N'')));
+        DECLARE @limite_observacao int;
+
+        SELECT @limite_observacao =
+            CASE
+                WHEN col.max_length = -1 THEN 4000
+                WHEN typ.name IN ('nvarchar', 'nchar') THEN col.max_length / 2
+                ELSE col.max_length
+            END
+        FROM sys.columns col
+        INNER JOIN sys.types typ
+            ON typ.user_type_id = col.user_type_id
+        WHERE col.object_id = OBJECT_ID(N'Integracao.Silver.FatoOcupacaoPaineisEuromidia')
+          AND col.name = N'Observacao';
+
+        SET @limite_observacao = ISNULL(NULLIF(@limite_observacao, 0), 500);
+
+        DECLARE @motivo_recortado nvarchar(max) = LEFT(@motivo_limpo, @limite_observacao);
+        DECLARE @espaco_observacao_antiga int = @limite_observacao - LEN(@motivo_recortado) - 1;
+
         UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
         SET
             Status = 'CANCELADO',
@@ -12289,9 +12309,14 @@ def _cancelar_reservas_card_kanban(
             CanceladoPorIDUsuario = :id_usuario,
             DataAtualizacao = SYSDATETIME(),
             Observacao = CASE
-                WHEN :motivo IS NULL OR LTRIM(RTRIM(:motivo)) = '' THEN Observacao
-                WHEN Observacao IS NULL OR LTRIM(RTRIM(Observacao)) = '' THEN :motivo
-                ELSE CONCAT(Observacao, CHAR(10), :motivo)
+                WHEN @motivo_limpo = N'' THEN Observacao
+                WHEN Observacao IS NULL OR LTRIM(RTRIM(Observacao)) = '' THEN @motivo_recortado
+                WHEN @espaco_observacao_antiga <= 0 THEN @motivo_recortado
+                ELSE CONCAT(
+                    LEFT(CAST(Observacao AS nvarchar(max)), @espaco_observacao_antiga),
+                    CHAR(10),
+                    @motivo_recortado
+                )
             END
         WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
           AND CanceladoEm IS NULL;
@@ -15714,6 +15739,17 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         else "CAST(NULL AS int) AS IDReserva,"
     )
 
+    expr_nome_empresa_card = (
+        "NULLIF(LTRIM(RTRIM(c.NomeEmpresa)), '')"
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa")
+        else "CAST(NULL AS nvarchar(200))"
+    )
+    expr_marca_card = (
+        "NULLIF(LTRIM(RTRIM(c.Marca)), '')"
+        if _coluna_existe(TABELA_CARD, "Marca")
+        else "CAST(NULL AS nvarchar(200))"
+    )
+
     sql = text(f"""
         SELECT
             c.IDFatoKanbanCard,
@@ -15750,7 +15786,18 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
             {_sql_select_empresa_relacionada_card('c')},
             {_sql_select_usuario_relacionado_card('c')},
             {_sql_select_nome_usuario_relacionado_card('usuario')},
-            e.RazaoSocial AS EmpresaRazaoSocial,
+            COALESCE(
+                NULLIF(LTRIM(RTRIM(e.RazaoSocial)), ''),
+                {expr_nome_empresa_card},
+                NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''),
+                {expr_marca_card},
+                NULLIF(LTRIM(RTRIM(c.Titulo)), '')
+            ) AS EmpresaRazaoSocial,
+            COALESCE(
+                NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''),
+                {expr_nome_empresa_card},
+                {expr_marca_card}
+            ) AS EmpresaNomeFantasia,
             e.CNPJ AS EmpresaCNPJ,
             e.CNAE AS EmpresaCNAE,
             cn.IDDimCnaes AS EmpresaIDDimCnaes,
@@ -15783,6 +15830,15 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
     card_dict["IDReserva"] = int(card_dict.get("IDReserva") or 0) or None
     card_dict["id_reserva"] = card_dict["IDReserva"]
+
+    if not str(card_dict.get("EmpresaRazaoSocial") or "").strip():
+        card_dict["EmpresaRazaoSocial"] = (
+            str(card_dict.get("NomeEmpresa") or "").strip()
+            or str(card_dict.get("EmpresaNomeFantasia") or "").strip()
+            or str(card_dict.get("Marca") or "").strip()
+            or str(card_dict.get("Titulo") or "").strip()
+            or None
+        )
 
     if not str(card_dict.get("NomeEmpresa") or "").strip():
         card_dict["NomeEmpresa"] = str(card_dict.get("EmpresaRazaoSocial") or "").strip() or None
@@ -18655,8 +18711,72 @@ def api_card_tag_adicionar(id_card: int):
     alterou = False
     retorno_solicitacao: dict[str, Any] | None = None
     snapshot_preco_praticado: dict[str, Any] | None = None
+    normalizacao_renovacao: dict[str, object] | None = None
 
     try:
+        # Regra crítica de negócio:
+        # Renovação de campanha/contrato = tag 17. Renovação é operacionalmente ADITIVO.
+        # Portanto, o endpoint público de tags também precisa bloquear a tag 9.
+        # Antes desta proteção, este endpoint fazia INSERT direto em FatoKanbanCardTag e pulava
+        # a função _aplicar_tag_no_card(), que já tinha a trava de renovação.
+        if int(id_tag) == int(ID_TAG_TIPO_CONTRATO_NOVO) and _card_eh_renovacao_kanban(int(id_card)):
+            current_app.logger.warning(
+                "KANBAN_TAG_API | bloqueada tag Novo Contrato em card de Renovação | id_card=%s | id_usuario=%s",
+                id_card,
+                id_usuario,
+            )
+
+            _remover_tag_do_card(
+                id_card=int(id_card),
+                id_tag=int(ID_TAG_TIPO_CONTRATO_NOVO),
+                id_usuario=int(id_usuario),
+            )
+
+            normalizacao_renovacao = _sincronizar_tipo_contrato_card(
+                id_card=int(id_card),
+                id_kanban=int(id_kanban),
+                id_fase_atual=int(id_fase_atual) if id_fase_atual else None,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+                tipo_contrato=TIPO_SOLICITACAO_ADITIVO,
+                aplicar_tags=True,
+            )
+
+            db.session.commit()
+            alterou = True
+
+            _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+            detalhe = _obter_card_detalhe_payload(id_card)
+
+            _emitir_evento_kanban(
+                id_kanban,
+                "card_tag_adicionada",
+                {
+                    "id_card": id_card,
+                    "id_tag": int(ID_TAG_TIPO_CONTRATO_ADITIVO),
+                    "id_tag_bloqueada": int(ID_TAG_TIPO_CONTRATO_NOVO),
+                    "id_usuario_acao": id_usuario,
+                    "card": detalhe.get("card"),
+                    "tags": detalhe.get("tags", []),
+                    "normalizacao_renovacao": normalizacao_renovacao,
+                },
+            )
+
+            return jsonify(
+                {
+                    "ok": True,
+                    "msg": "Card de renovação mantido como Aditivo. A tag Novo Contrato foi bloqueada/removida.",
+                    "id_card": id_card,
+                    "id_tag": int(ID_TAG_TIPO_CONTRATO_ADITIVO),
+                    "id_tag_bloqueada": int(ID_TAG_TIPO_CONTRATO_NOVO),
+                    "card": detalhe.get("card"),
+                    "tags": detalhe.get("tags", []),
+                    "normalizacao_renovacao": normalizacao_renovacao,
+                    "solicitacao_contrato": retorno_solicitacao,
+                    "snapshot_preco_praticado": snapshot_preco_praticado,
+                }
+            )
+
         if not existe:
             snapshot_antes = _obter_snapshot_card_log(id_card, incluir_inativo=True)
 
@@ -18766,6 +18886,28 @@ def api_card_tag_adicionar(id_card: int):
             db.session.commit()
             alterou = True
 
+        # Se a própria tag aplicada for Renovação (17), normalizo o card mesmo se a tag já existia.
+        # Isso limpa contaminações antigas: tag 9 ativa, BitContratoNovo=1 ou BitAditivo=0.
+        if int(id_tag) == int(ID_TAG_RENOVACAO):
+            _remover_tag_do_card(
+                id_card=int(id_card),
+                id_tag=int(ID_TAG_TIPO_CONTRATO_NOVO),
+                id_usuario=int(id_usuario),
+            )
+
+            normalizacao_renovacao = _sincronizar_tipo_contrato_card(
+                id_card=int(id_card),
+                id_kanban=int(id_kanban),
+                id_fase_atual=int(id_fase_atual) if id_fase_atual else None,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_emp),
+                tipo_contrato=TIPO_SOLICITACAO_ADITIVO,
+                aplicar_tags=True,
+            )
+
+            db.session.commit()
+            alterou = True
+
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
         detalhe = _obter_card_detalhe_payload(id_card)
 
@@ -18782,6 +18924,8 @@ def api_card_tag_adicionar(id_card: int):
                 payload_socket["solicitacao_contrato"] = retorno_solicitacao
             if snapshot_preco_praticado is not None:
                 payload_socket["snapshot_preco_praticado"] = snapshot_preco_praticado
+            if normalizacao_renovacao is not None:
+                payload_socket["normalizacao_renovacao"] = normalizacao_renovacao
 
             _emitir_evento_kanban(
                 id_kanban,
@@ -18813,6 +18957,7 @@ def api_card_tag_adicionar(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "solicitacao_contrato": retorno_solicitacao,
                 "snapshot_preco_praticado": snapshot_preco_praticado,
+                "normalizacao_renovacao": normalizacao_renovacao,
             }
         )
 

@@ -147,6 +147,7 @@
   let empresasProprietariasCatalogo = [];
   const ID_TAG_TIPO_CONTRATO_ADITIVO = 8;
   const ID_TAG_TIPO_CONTRATO_NOVO = 9;
+  const ID_TAG_RENOVACAO = 17;
   const VALOR_OPCAO_NOVO_CONTRATO = "__NOVO_CONTRATO__";
   const VALOR_OPCAO_NOVO_PAINEL = "__NOVO_PAINEL__";
   const VALOR_MODO_CONTRATO_ADITIVO = "ADITIVO";
@@ -3939,6 +3940,50 @@
     };
   }
 
+  function montarEmpresaPrincipalDoCardParaCatalogo(card){
+    const c = card || {};
+    const idEmpresa = idNum(
+      c.IDEmpresa ??
+      c.IDEmpresaRelacionadaCard ??
+      c.IDCliente ??
+      c.IDEmpresaRelacionada ??
+      0
+    );
+
+    if (!idEmpresa) return null;
+
+    return {
+      IDEmpresa: idEmpresa,
+      ID: idEmpresa,
+      RazaoSocial: safeStr(
+        c.EmpresaRazaoSocial ||
+        c.RazaoSocial ||
+        c.NomeEmpresa ||
+        c.EmpresaNomeFantasia ||
+        c.NomeFantasia ||
+        c.MarcaExibida ||
+        c.Marca ||
+        c.Titulo ||
+        ""
+      ).trim() || null,
+      NomeFantasia: safeStr(c.EmpresaNomeFantasia || c.NomeFantasia || c.MarcaExibida || c.Marca || "").trim() || null,
+      CNPJ: safeStr(c.EmpresaCNPJ || c.CNPJ || c.cnpj || "").trim() || null,
+      CNAE: safeStr(c.EmpresaCNAE || c.CNAE || "").trim() || null,
+      Classe: safeStr(c.EmpresaClasse || c.SegmentoClasse || c.Classe || "").trim() || null,
+      Setor: safeStr(c.EmpresaSetor || c.SegmentoSetor || c.Setor || "").trim() || null,
+      IDDimOrigemAtendimento: idNum(c.IDDimOrigemAtendimento || 0) || null
+    };
+  }
+
+  function registrarEmpresaPrincipalDoCardNoCatalogo(card){
+    const empresa = montarEmpresaPrincipalDoCardParaCatalogo(card);
+    if (!empresa) return null;
+
+    registrarEmpresasNoCatalogo([empresa]);
+    garantirOpcaoEmpresaNoSelect(empresa.IDEmpresa);
+    return obterEmpresaCatalogoPorId(empresa.IDEmpresa) || empresa;
+  }
+
   function obterEmpresasRelacionadasDoCard(card){
     const c = card || {};
     const idTipo = derivarIdTipoClienteDescontoDoCard(c);
@@ -5602,10 +5647,31 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     renderizarListaEmpresasCombobox(inputEmpresaCardBusca?.value || "");
   }
 
+  function nomeExibicaoEmpresa(item){
+    const emp = item || {};
+    return safeStr(
+      emp.RazaoSocial ||
+      emp.EmpresaRazaoSocial ||
+      emp.NomeFantasia ||
+      emp.EmpresaNomeFantasia ||
+      emp.NomeEmpresa ||
+      emp.NomeEmpresaCarteira ||
+      emp.MarcaExibida ||
+      emp.Marca ||
+      emp.Titulo ||
+      ""
+    ).trim();
+  }
+
+  function empresaTemNomeExibicaoValido(item){
+    const nome = nomeExibicaoEmpresa(item);
+    return !!nome && nome !== "—" && nome !== "-";
+  }
+
   function textoOpcaoEmpresa(item){
     const emp = item || {};
-    const razao = safeStr(emp.RazaoSocial || emp.EmpresaRazaoSocial || "—").trim() || "—";
-    const cnpj = mascaraCnpj(emp.CNPJ || emp.EmpresaCNPJ || "");
+    const razao = nomeExibicaoEmpresa(emp) || "—";
+    const cnpj = mascaraCnpj(emp.CNPJ || emp.EmpresaCNPJ || emp.cnpj || "");
     return cnpj ? `${razao} • ${cnpj}` : razao;
   }
 
@@ -5842,11 +5908,18 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const valor = safeStr(idEmp || "").trim();
     if (!valor) return;
 
-    const jaExiste = Array.from(selectEmpresaCard.options || []).some((opt) => safeStr(opt.value || "").trim() === valor);
-    if (jaExiste) return;
-
     const empresa = obterEmpresaCatalogoPorId(valor);
     const texto = empresa ? textoOpcaoEmpresa(empresa) : `Empresa #${valor}`;
+    const opcaoExistente = Array.from(selectEmpresaCard.options || [])
+      .find((opt) => safeStr(opt.value || "").trim() === valor);
+
+    if (opcaoExistente) {
+      if (safeStr(opcaoExistente.textContent || "").trim() !== texto) {
+        opcaoExistente.textContent = texto;
+      }
+      return;
+    }
+
     selectEmpresaCard.appendChild(el("option", { value: valor }, [texto]));
   }
 
@@ -5855,7 +5928,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     if (!idEmpresa) return null;
 
     const existente = obterEmpresaCatalogoPorId(idEmpresa);
-    if (existente) {
+    if (existente && empresaTemNomeExibicaoValido(existente)) {
       garantirOpcaoEmpresaNoSelect(idEmpresa);
       return existente;
     }
@@ -5866,10 +5939,15 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       if (empresa) {
         atualizarCatalogoEmpresa(empresa);
         garantirOpcaoEmpresaNoSelect(idEmpresa);
-        return empresa;
+        return obterEmpresaCatalogoPorId(idEmpresa) || empresa;
       }
     } catch (erro) {
       console.warn("garantirEmpresaNoCatalogoPorId: falhou", { idEmpresa, erro });
+    }
+
+    if (existente) {
+      garantirOpcaoEmpresaNoSelect(idEmpresa);
+      return existente;
     }
 
     return null;
@@ -6575,11 +6653,19 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     const adicionadas = [];
 
     for (const item of lista) {
-      const id = idNum(item?.IDEmpresa ?? item?.IDEmpresaProprietaria ?? item?.ID ?? 0);
+      const id = idNum(item?.IDEmpresa ?? item?.IDEmpresaProprietaria ?? item?.ID ?? item?.id_empresa ?? 0);
       if (!id) continue;
 
       const atual = empresasPorId.get(id) || null;
-      const registro = Object.assign({}, atual || {}, item || {});
+      const registro = Object.assign({}, atual || {}, item || {}, {
+        IDEmpresa: id,
+        ID: id
+      });
+
+      if (!empresaTemNomeExibicaoValido(registro) && empresaTemNomeExibicaoValido(atual)) {
+        registro.RazaoSocial = nomeExibicaoEmpresa(atual);
+      }
+
       empresasPorId.set(id, registro);
 
       const idx = empresasCatalogo.findIndex((empresa) => idNum(empresa?.IDEmpresa ?? empresa?.IDEmpresaProprietaria ?? empresa?.ID ?? 0) === id);
@@ -6590,8 +6676,8 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
     }
 
     empresasCatalogo.sort((a, b) => {
-      const nomeA = safeStr(a?.RazaoSocial || a?.EmpresaRazaoSocial || "");
-      const nomeB = safeStr(b?.RazaoSocial || b?.EmpresaRazaoSocial || "");
+      const nomeA = nomeExibicaoEmpresa(a);
+      const nomeB = nomeExibicaoEmpresa(b);
       return nomeA.localeCompare(nomeB, "pt-BR");
     });
 
@@ -7288,8 +7374,8 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     const wrap = box?.closest(".kb-empresa-box");
 
     const tem = !!(emp && (
-      emp.RazaoSocial || emp.EmpresaRazaoSocial ||
-      emp.CNPJ || emp.EmpresaCNPJ ||
+      empresaTemNomeExibicaoValido(emp) ||
+      emp.CNPJ || emp.EmpresaCNPJ || emp.cnpj ||
       emp.CNAE || emp.EmpresaCNAE ||
       emp.Setor || emp.EmpresaSetor ||
       emp.Classe || emp.EmpresaClasse
@@ -7304,8 +7390,8 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
 
     if (box) box.style.display = "grid";
 
-    document.getElementById("empPrevRazao").textContent  = (emp.RazaoSocial || emp.EmpresaRazaoSocial || "");
-    document.getElementById("empPrevCnpj").textContent   = mascaraCnpj(emp.CNPJ || emp.EmpresaCNPJ || "");
+    document.getElementById("empPrevRazao").textContent  = nomeExibicaoEmpresa(emp) || "—";
+    document.getElementById("empPrevCnpj").textContent   = mascaraCnpj(emp.CNPJ || emp.EmpresaCNPJ || emp.cnpj || "");
     document.getElementById("empPrevCnae").textContent   = String(emp.CNAE || emp.EmpresaCNAE || "");
     document.getElementById("empPrevSetor").textContent  = (emp.Setor || emp.EmpresaSetor || "");
     document.getElementById("empPrevClasse").textContent = (emp.Classe || emp.EmpresaClasse || "");
@@ -7916,6 +8002,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     const idContratoAtual = idNum(fluxoAtual?.id_contrato || 0) || null;
     const idContratoPersistido = idNum(fluxoPersistido?.id_contrato_existente || 0) || null;
     const idContratoFinal = idContratoAtual || idContratoPersistido || null;
+    const ehRenovacaoPersistida = fluxoPersistido?.eh_renovacao === true;
 
     let modoFinal = normalizarModoContratoPersistido(
       fluxoAtual?.modo_contrato || fluxoPersistido?.tipo_contrato_card || "",
@@ -7932,7 +8019,11 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       modoFinal = VALOR_MODO_CONTRATO_ADITIVO;
     }
 
-    if (!idContratoFinal) {
+    if (ehRenovacaoPersistida) {
+      modoFinal = VALOR_MODO_CONTRATO_ADITIVO;
+    }
+
+    if (!idContratoFinal && !ehRenovacaoPersistida) {
       modoFinal = VALOR_MODO_CONTRATO_NOVO;
     }
 
@@ -7949,7 +8040,8 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       modo_contrato: modoFinal,
       cod_ponto_contrato: codPontoFinal,
       cod_face_contrato: codFaceFinal,
-      usar_novo_contrato: !idContratoFinal || modoFinal === VALOR_MODO_CONTRATO_NOVO,
+      eh_renovacao: ehRenovacaoPersistida,
+      usar_novo_contrato: (!idContratoFinal && !ehRenovacaoPersistida) || modoFinal === VALOR_MODO_CONTRATO_NOVO,
       usar_novo_painel: codPontoFinal === VALOR_OPCAO_NOVO_PAINEL
     };
   }
@@ -8042,6 +8134,12 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       return idTag === ID_TAG_TIPO_CONTRATO_NOVO || nomeTag === "NOVO CONTRATO";
     });
 
+    const temTagRenovacao = tagsContexto.some((tag) => {
+      const idTag = idNum(tag?.IDDimKanbanTag ?? tag?.id_dim_kanban_tag ?? tag?.id ?? 0);
+      const nomeTag = safeStr(tag?.NomeTag ?? tag?.nomeTag ?? tag?.nome ?? "").trim().toUpperCase();
+      return idTag === ID_TAG_RENOVACAO || nomeTag.includes("RENOVA");
+    });
+
     const idContrato = obterPrimeiroNumero(
       cardNormalizado.IDFatoControleContratosEuromidia,
       cardNormalizado.IDFatoControleContratoEuromidia,
@@ -8106,7 +8204,9 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       idContrato ? VALOR_MODO_CONTRATO_ADITIVO : VALOR_MODO_CONTRATO_NOVO
     );
 
-    if (temTagAditivo) {
+    if (temTagRenovacao) {
+      modoPersistido = VALOR_MODO_CONTRATO_ADITIVO;
+    } else if (temTagAditivo) {
       modoPersistido = VALOR_MODO_CONTRATO_ADITIVO;
     } else if (temTagNovoContrato && !idContrato) {
       modoPersistido = VALOR_MODO_CONTRATO_NOVO;
@@ -8114,7 +8214,7 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       modoPersistido = VALOR_MODO_CONTRATO_ADITIVO;
     }
 
-    if (!idContrato && modoPersistido === VALOR_MODO_CONTRATO_ADITIVO && !temTagAditivo) {
+    if (!idContrato && modoPersistido === VALOR_MODO_CONTRATO_ADITIVO && !temTagAditivo && !temTagRenovacao) {
       modoPersistido = VALOR_MODO_CONTRATO_NOVO;
     }
 
@@ -8122,12 +8222,18 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       id_contrato_existente: idContrato,
       tipo_contrato_card: modoPersistido,
       cod_ponto_contrato: codPontoContrato,
-      cod_face_contrato: codFaceContrato
+      cod_face_contrato: codFaceContrato,
+      eh_renovacao: temTagRenovacao
     };
   }
 
   function obterIdTagTipoContratoDesejada() {
     const fluxo = resolverFluxoContratoParaSalvamento();
+
+    if (fluxo?.eh_renovacao === true) {
+      return ID_TAG_TIPO_CONTRATO_ADITIVO;
+    }
+
     return fluxo.id_contrato && fluxo.modo_contrato === VALOR_MODO_CONTRATO_ADITIVO
       ? ID_TAG_TIPO_CONTRATO_ADITIVO
       : ID_TAG_TIPO_CONTRATO_NOVO;
@@ -9237,17 +9343,15 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
   function atualizarCatalogoEmpresa(empresa) {
     if (!empresa) return;
 
-    const idEmpresa = idNum(empresa.IDEmpresa || 0);
+    const idEmpresa = idNum(empresa.IDEmpresa ?? empresa.ID ?? empresa.id_empresa ?? 0);
     if (!idEmpresa) return;
 
-    const registro = Object.assign({}, empresasPorId.get(idEmpresa) || {}, empresa || {});
-    empresasPorId.set(idEmpresa, registro);
+    registrarEmpresasNoCatalogo([Object.assign({}, empresa || {}, {
+      IDEmpresa: idEmpresa,
+      ID: idEmpresa
+    })]);
 
-    const idx = empresasCatalogo.findIndex(item => idNum(item?.IDEmpresa || 0) === idEmpresa);
-    if (idx >= 0) empresasCatalogo[idx] = registro;
-    else empresasCatalogo.push(registro);
-
-    empresasCatalogo.sort((a, b) => safeStr(a?.RazaoSocial || "").localeCompare(safeStr(b?.RazaoSocial || ""), "pt-BR"));
+    garantirOpcaoEmpresaNoSelect(idEmpresa);
     montarSelectEmpresas();
   }
 
@@ -15451,6 +15555,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
 
     const cardNormalizado = normalizarCardServidor(j.card);
+    registrarEmpresaPrincipalDoCardNoCatalogo(cardNormalizado);
     if (modalCard) {
       modalCard.dataset.idFaseAtual = String(idNum(cardNormalizado.IDDimKanbanFaseAtual || 0) || "");
       modalCard.dataset.jaPassouFaseFormularioContrato = idNum(

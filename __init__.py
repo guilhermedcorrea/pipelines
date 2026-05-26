@@ -234,6 +234,9 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 
+#Exibe Containers em execão
+#docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+
 
 #docker compose down --remove-orphans
 

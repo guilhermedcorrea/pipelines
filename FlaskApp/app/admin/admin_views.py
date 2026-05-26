@@ -4015,6 +4015,327 @@ def _resolver_id_card_aprovacao_solicitacao_admin(cabecalho_solicitacao: dict | 
     return int(candidatos[0])
 
 
+
+
+def _limitar_texto_aprovacao_admin(valor, tamanho: int | None) -> str | None:
+    """Limita texto antes de gravar em colunas curtas do contrato.
+
+    Evita erro SQL Server 2628 (String or binary data would be truncated),
+    principalmente na coluna OBS de FatoControleContratosItensEuromidia.
+    """
+    if valor is None:
+        return None
+
+    texto = str(valor).replace("\x00", "").strip()
+    if not texto:
+        return None
+
+    if tamanho in (None, "", 0):
+        return texto
+
+    try:
+        tamanho_int = int(tamanho)
+    except Exception:
+        return texto
+
+    if tamanho_int <= 0:
+        return None
+
+    return texto[:tamanho_int]
+
+
+def _obs_item_controle_aprovacao_admin(valor) -> str | None:
+    """OBS segura para FatoControleContratosItensEuromidia.
+
+    No banco atual a coluna OBS é curta. Para renovação, preservo o identificador
+    técnico principal e removo texto narrativo longo que quebra a aprovação.
+    """
+    texto = str(valor or "").replace("\x00", "").strip()
+    if not texto:
+        return None
+
+    match_vencimento = re.search(r"RENOVACAO_CAMPANHA_ID_VENCIMENTO\s*=\s*(\d+)", texto, flags=re.IGNORECASE)
+    if match_vencimento:
+        id_vencimento = match_vencimento.group(1)
+        return _limitar_texto_aprovacao_admin(f"RENOVACAO_CAMPANHA_ID_VENCIMENTO={id_vencimento}", 100)
+
+    return _limitar_texto_aprovacao_admin(texto, 100)
+
+
+def _extrair_ids_renovacao_texto_admin(texto: str | None) -> dict:
+    """Extrai IDs técnicos do texto do card/OBS de renovação."""
+    conteudo = str(texto or "")
+    retorno = {
+        "id_vencimento": None,
+        "id_contrato_origem": None,
+        "id_item_origem": None,
+    }
+
+    match_vencimento = re.search(r"RENOVACAO_CAMPANHA_ID_VENCIMENTO\s*=\s*(\d+)", conteudo, flags=re.IGNORECASE)
+    if match_vencimento:
+        retorno["id_vencimento"] = int(match_vencimento.group(1))
+
+    match_contrato = re.search(r"Contrato\s+origem\s*:\s*(\d+)", conteudo, flags=re.IGNORECASE)
+    if match_contrato:
+        retorno["id_contrato_origem"] = int(match_contrato.group(1))
+
+    match_item = re.search(r"Item\s+origem\s*:\s*(\d+)", conteudo, flags=re.IGNORECASE)
+    if match_item:
+        retorno["id_item_origem"] = int(match_item.group(1))
+
+    return retorno
+
+
+def _buscar_origem_renovacao_por_vencimento_admin(id_vencimento: int | None) -> dict | None:
+    """Busca contrato/item original da renovação pela tabela oficial de vencimentos."""
+    id_vencimento_int = _int_ou_none(id_vencimento)
+    if id_vencimento_int in (None, "", 0):
+        return None
+
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                   venc.IDFatoVencimentoCampanhaEuromidia,
+                   venc.IDFatoControleContratosEuromidia,
+                   venc.IDFatoControleContratosItensEuromidia,
+                   item.CodPonto,
+                   item.CodFace,
+                   item.BitAtivo AS BitAtivoItemOrigem
+            FROM {TABELA_VENCIMENTO_CAMPANHA} AS venc
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+                ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+            WHERE venc.IDFatoVencimentoCampanhaEuromidia = :id_vencimento
+            ORDER BY venc.IDFatoVencimentoCampanhaEuromidia DESC;
+        """),
+        {"id_vencimento": int(id_vencimento_int)},
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _buscar_origem_renovacao_por_item_admin(id_item_controle: int | None) -> dict | None:
+    """Busca contrato/item original diretamente pelo ID do item de controle."""
+    id_item_int = _int_ou_none(id_item_controle)
+    if id_item_int in (None, "", 0):
+        return None
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                   CAST(NULL AS int) AS IDFatoVencimentoCampanhaEuromidia,
+                   item.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia,
+                   item.IDFatoControleContratosItensEuromidia,
+                   item.CodPonto,
+                   item.CodFace,
+                   item.BitAtivo AS BitAtivoItemOrigem
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item WITH (UPDLOCK, HOLDLOCK)
+            WHERE item.IDFatoControleContratosItensEuromidia = :id_item_controle
+            ORDER BY item.IDFatoControleContratosItensEuromidia DESC;
+        """),
+        {"id_item_controle": int(id_item_int)},
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _buscar_origem_renovacao_por_card_painel_face_admin(id_card: int | None, cod_ponto=None, cod_face=None) -> dict | None:
+    """Busca IDs originais gravados na linha operacional de painel/face do card."""
+    id_card_int = _int_ou_none(id_card)
+    if id_card_int in (None, "", 0):
+        return None
+
+    tabela_pf = TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO
+
+    expr_id_contrato = "CAST(NULL AS int)"
+    if _campanhas_vencimentos_coluna_existe(tabela_pf, "IDFatoControleContratosEuromidia"):
+        expr_id_contrato = "TRY_CONVERT(int, pf.IDFatoControleContratosEuromidia)"
+    elif _campanhas_vencimentos_coluna_existe(tabela_pf, "IDFatoControleContratoEuromidia"):
+        expr_id_contrato = "TRY_CONVERT(int, pf.IDFatoControleContratoEuromidia)"
+
+    expr_id_item = "CAST(NULL AS int)"
+    if _campanhas_vencimentos_coluna_existe(tabela_pf, "IDFatoControleContratosItensEuromidia"):
+        expr_id_item = "TRY_CONVERT(int, pf.IDFatoControleContratosItensEuromidia)"
+    elif _campanhas_vencimentos_coluna_existe(tabela_pf, "IDFatoControleContratoItemEuromidia"):
+        expr_id_item = "TRY_CONVERT(int, pf.IDFatoControleContratoItemEuromidia)"
+
+    expr_cod_ponto = "CAST(NULL AS varchar(80))"
+    if _campanhas_vencimentos_coluna_existe(tabela_pf, "CodPonto"):
+        expr_cod_ponto = "pf.CodPonto"
+
+    expr_cod_face = "CAST(NULL AS varchar(80))"
+    if _campanhas_vencimentos_coluna_existe(tabela_pf, "CodFace"):
+        expr_cod_face = "pf.CodFace"
+
+    filtros = ["pf.IDFatoKanbanCard = :id_card"]
+    params = {
+        "id_card": int(id_card_int),
+        "cod_ponto": _texto_ou_none(cod_ponto),
+        "cod_face": str(cod_face or "").strip().upper() if cod_face not in (None, "") else None,
+    }
+
+    if _campanhas_vencimentos_coluna_existe(tabela_pf, "Ativo"):
+        filtros.append("ISNULL(pf.Ativo, 1) = 1")
+
+    filtro_face = ""
+    if params["cod_face"]:
+        filtro_face = f"""
+            AND (
+                UPPER(LTRIM(RTRIM(ISNULL(CONVERT(varchar(80), {expr_cod_face}), '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
+                OR {expr_id_item} IS NOT NULL
+            )
+        """
+
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                   CAST(NULL AS int) AS IDFatoVencimentoCampanhaEuromidia,
+                   {expr_id_contrato} AS IDFatoControleContratosEuromidia,
+                   {expr_id_item} AS IDFatoControleContratosItensEuromidia,
+                   {expr_cod_ponto} AS CodPonto,
+                   {expr_cod_face} AS CodFace,
+                   CAST(NULL AS int) AS BitAtivoItemOrigem
+            FROM {tabela_pf} AS pf
+            WHERE {' AND '.join(filtros)}
+            {filtro_face}
+            ORDER BY
+                CASE WHEN {expr_id_item} IS NOT NULL THEN 0 ELSE 1 END,
+                pf.IDFatoKanbanCardPainelFace DESC;
+        """),
+        params,
+    ).mappings().first()
+
+    if not row:
+        return None
+
+    dados = dict(row)
+    if _int_ou_none(dados.get("IDFatoControleContratosItensEuromidia")):
+        return dados
+
+    return None
+
+
+def _buscar_origem_renovacao_por_contrato_face_admin(
+    *,
+    id_contrato_controle: int | None,
+    cod_ponto,
+    cod_face,
+) -> dict | None:
+    """Último fallback: acha item ativo do contrato pela face."""
+    id_contrato_int = _int_ou_none(id_contrato_controle)
+    cod_face_norm = str(cod_face or "").strip().upper()
+    if id_contrato_int in (None, "", 0) or not cod_face_norm:
+        return None
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                   CAST(NULL AS int) AS IDFatoVencimentoCampanhaEuromidia,
+                   item.IDFatoControleContratoEuromidia AS IDFatoControleContratosEuromidia,
+                   item.IDFatoControleContratosItensEuromidia,
+                   item.CodPonto,
+                   item.CodFace,
+                   item.BitAtivo AS BitAtivoItemOrigem
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item WITH (UPDLOCK, HOLDLOCK)
+            WHERE item.IDFatoControleContratoEuromidia = :id_contrato_controle
+              AND ISNULL(item.BitAtivo, 1) = 1
+              AND UPPER(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace)))) = UPPER(LTRIM(RTRIM(:cod_face)))
+              AND (
+                    :cod_ponto IS NULL
+                    OR LTRIM(RTRIM(CONVERT(varchar(80), item.CodPonto))) = LTRIM(RTRIM(CONVERT(varchar(80), :cod_ponto)))
+                  )
+            ORDER BY item.IDFatoControleContratosItensEuromidia DESC;
+        """),
+        {
+            "id_contrato_controle": int(id_contrato_int),
+            "cod_ponto": _texto_ou_none(cod_ponto),
+            "cod_face": cod_face_norm,
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _resolver_origem_renovacao_aprovacao_admin(
+    *,
+    id_card: int | None,
+    cabecalho_solicitacao: dict | None = None,
+    item_solicitacao: dict | None = None,
+    id_contrato_controle: int | None = None,
+    cod_ponto=None,
+    cod_face=None,
+) -> dict:
+    """Resolve a origem oficial da renovação antes de aprovar.
+
+    Prioridade:
+    1) marcador RENOVACAO_CAMPANHA_ID_VENCIMENTO no card/OBS;
+    2) IDFatoControleContratosItensEuromidia já gravado na solicitação;
+    3) vínculo KanbanCardPainelFace;
+    4) item ativo do contrato pela face.
+    """
+    cab = cabecalho_solicitacao or {}
+    item = item_solicitacao or {}
+
+    textos = [
+        cab.get("Descricao"),
+        cab.get("OBS"),
+        item.get("Descricao"),
+        item.get("OBS"),
+    ]
+
+    id_card_int = _int_ou_none(id_card)
+    if id_card_int not in (None, "", 0):
+        row_card = db.session.execute(
+            text(f"""
+                SELECT TOP (1)
+                       Descricao
+                FROM {TABELA_KANBAN_CARD_RENOVACAO}
+                WHERE IDFatoKanbanCard = :id_card
+            """),
+            {"id_card": int(id_card_int)},
+        ).mappings().first()
+        if row_card:
+            textos.append(row_card.get("Descricao"))
+
+    ids_texto = {"id_vencimento": None, "id_contrato_origem": None, "id_item_origem": None}
+    for texto_livre in textos:
+        ids_extraidos = _extrair_ids_renovacao_texto_admin(texto_livre)
+        for chave, valor in ids_extraidos.items():
+            if ids_texto.get(chave) in (None, "", 0) and valor not in (None, "", 0):
+                ids_texto[chave] = int(valor)
+
+    origem = _buscar_origem_renovacao_por_vencimento_admin(ids_texto.get("id_vencimento"))
+    if origem:
+        origem["fonte_origem_renovacao"] = "FatoVencimentoCampanhaEuromidia"
+        return origem
+
+    origem = _buscar_origem_renovacao_por_item_admin(
+        ids_texto.get("id_item_origem")
+        or item.get("IDFatoControleContratosItensEuromidia")
+    )
+    if origem:
+        origem["fonte_origem_renovacao"] = "ItemOrigem"
+        return origem
+
+    origem = _buscar_origem_renovacao_por_card_painel_face_admin(
+        id_card=id_card_int,
+        cod_ponto=cod_ponto or item.get("CodPonto"),
+        cod_face=cod_face or item.get("CodFace"),
+    )
+    if origem:
+        origem["fonte_origem_renovacao"] = "KanbanCardPainelFace"
+        return origem
+
+    origem = _buscar_origem_renovacao_por_contrato_face_admin(
+        id_contrato_controle=ids_texto.get("id_contrato_origem") or id_contrato_controle or cab.get("IDFatoControleContratosEuromidia"),
+        cod_ponto=cod_ponto or item.get("CodPonto"),
+        cod_face=cod_face or item.get("CodFace"),
+    )
+    if origem:
+        origem["fonte_origem_renovacao"] = "ContratoFace"
+        return origem
+
+    return {}
+
 def _buscar_item_controle_existente_aprovacao_admin(
     *,
     id_contrato_controle: int,
@@ -4251,13 +4572,13 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         "ComissaoGerenciaNordeste": item_solicitacao.get("ComissaoGerenciaNordeste"),
         "Faturamento": item_solicitacao.get("Faturamento"),
         "DataCancelamento": item_solicitacao.get("DataCancelamento"),
-        "OBS": item_solicitacao.get("OBS"),
+        "OBS": _obs_item_controle_aprovacao_admin(item_solicitacao.get("OBS")),
         "IDVendedor": item_solicitacao.get("IDVendedor"),
         "IDPainelEuromidia": item_solicitacao.get("IDPainelEuromidia"),
         "IDDimFacesPaineis": item_solicitacao.get("IDDimFacesPaineis"),
         "DataFimEfetiva": item_solicitacao.get("DataFimEfetiva"),
         "Status": _normalizar_status_item_aprovacao(item_solicitacao.get("Status")),
-        "IDDimCheckinHistorico": item_solicitacao.get("IDDimCheckingHistorico"),
+        "IDDimCheckinHistorico": item_solicitacao.get("IDDimCheckinHistorico"),
         "IDFatoKanbanCard": item_solicitacao.get("IDFatoKanbanCard"),
         "BitAtivo": item_solicitacao.get("BitAtivo") if item_solicitacao.get("BitAtivo") is not None else 1,
         "IDEmpresaAgencia": item_solicitacao.get("IDEmpresaAgencia"),
@@ -6710,11 +7031,39 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         id_solicitacao=int(id_solicitacao),
     )
     card_tem_tag_renovacao = bool(contexto_tipo_card.get("tem_tag_renovacao"))
+
+    origem_renovacao_cabecalho = _resolver_origem_renovacao_aprovacao_admin(
+        id_card=id_card_cabecalho,
+        cabecalho_solicitacao=cab,
+        item_solicitacao=(itens_solicitacao[0] if itens_solicitacao else None),
+        id_contrato_controle=id_contrato_controle,
+        cod_ponto=(itens_solicitacao[0].get("CodPonto") if itens_solicitacao else None),
+        cod_face=(itens_solicitacao[0].get("CodFace") if itens_solicitacao else None),
+    )
+
+    # Segurança extra: se a origem oficial de renovação foi encontrada por marcador/linha de
+    # vencimento, trato como RENOVAÇÃO mesmo que o IDFatoKanbanCard não tenha vindo na solicitação.
+    if origem_renovacao_cabecalho:
+        card_tem_tag_renovacao = True
+
     card_tem_tag_novo_contrato = bool(contexto_tipo_card.get("tem_tag_novo_contrato")) and not card_tem_tag_renovacao
     inicio_renovacao_padrao = contexto_tipo_card.get("inicio_renovacao")
     tipo_operacional_card = contexto_tipo_card.get("tipo_operacional")
+
     if card_tem_tag_renovacao:
+        inicio_renovacao_padrao = "R"
+        tipo_operacional_card = "RENOVACAO"
         cab["TipoSolicitacao"] = "ADITIVO"
+
+        id_contrato_origem_renovacao = _int_ou_none(
+            origem_renovacao_cabecalho.get("IDFatoControleContratosEuromidia")
+        )
+        if id_contrato_origem_renovacao not in (None, "", 0):
+            # Renovação não abre contrato novo. Ela reaproveita o contrato de origem e
+            # substitui o item antigo por uma nova linha ativa.
+            id_contrato_controle = int(id_contrato_origem_renovacao)
+            cab["IDFatoControleContratosEuromidia"] = int(id_contrato_origem_renovacao)
+
     data_aprovacao_sql_server = _obter_data_aprovacao_sql_server_admin()
 
     referencia_resolvida = referencia_informada
@@ -6919,6 +7268,43 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                 "Reabra o card, confirme o painel/face e salve novamente."
             )
 
+        origem_renovacao_item = {}
+        if card_tem_tag_renovacao:
+            origem_renovacao_item = _resolver_origem_renovacao_aprovacao_admin(
+                id_card=(item.get("IDFatoKanbanCard") or cab.get("IDFatoKanbanCard") or id_card_cabecalho),
+                cabecalho_solicitacao=cab,
+                item_solicitacao=item,
+                id_contrato_controle=id_contrato_controle,
+                cod_ponto=item.get("CodPonto"),
+                cod_face=item.get("CodFace"),
+            ) or origem_renovacao_cabecalho or {}
+
+            id_contrato_origem_item = _int_ou_none(origem_renovacao_item.get("IDFatoControleContratosEuromidia"))
+            id_item_origem_item = _int_ou_none(origem_renovacao_item.get("IDFatoControleContratosItensEuromidia"))
+
+            if id_contrato_origem_item not in (None, "", 0):
+                id_contrato_controle = int(id_contrato_origem_item)
+                item["IDFatoControleContratosEuromidia"] = int(id_contrato_origem_item)
+
+            if id_item_origem_item not in (None, "", 0):
+                id_item_controle_origem = int(id_item_origem_item)
+                item["IDFatoControleContratosItensEuromidia"] = int(id_item_origem_item)
+
+            item["InicioRenovacao"] = "R"
+            item["BitAtivo"] = 1
+
+            current_app.logger.warning(
+                "APROVACAO_CONTRATO | origem renovacao resolvida | solicitacao=%s | item_solicitacao=%s | "
+                "contrato_origem=%s | item_origem=%s | cod_ponto=%s | cod_face=%s | fonte=%s",
+                id_solicitacao,
+                id_item_solicitacao,
+                id_contrato_controle,
+                id_item_controle_origem,
+                item.get("CodPonto"),
+                item.get("CodFace"),
+                origem_renovacao_item.get("fonte_origem_renovacao"),
+            )
+
         row_item_existente = _buscar_item_controle_existente_aprovacao_admin(
             id_contrato_controle=int(id_contrato_controle),
             id_item_controle_origem=id_item_controle_origem,
@@ -7033,13 +7419,13 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "ComissaoGerenciaNordeste": item.get("ComissaoGerenciaNordeste"),
             "Faturamento": item.get("Faturamento"),
             "DataCancelamento": item.get("DataCancelamento"),
-            "OBS": item.get("OBS"),
+            "OBS": _obs_item_controle_aprovacao_admin(item.get("OBS")),
             "IDVendedor": item.get("IDVendedor"),
             "IDPainelEuromidia": item.get("IDPainelEuromidia"),
             "IDDimFacesPaineis": item.get("IDDimFacesPaineis"),
             "DataFimEfetiva": item.get("DataFimEfetiva"),
             "Status": _normalizar_status_item_aprovacao(item.get("Status")),
-            "IDDimCheckinHistorico": item.get("IDDimCheckingHistorico"),
+            "IDDimCheckinHistorico": item.get("IDDimCheckinHistorico"),
             "IDFatoKanbanCard": item.get("IDFatoKanbanCard") or cab.get("IDFatoKanbanCard"),
             "IDDimTipoDocumento": id_dim_tipo_documento_item,
             "BitAtivo": 1 if card_tem_tag_renovacao else (item.get("BitAtivo") if item.get("BitAtivo") is not None else 1),
@@ -9067,7 +9453,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
                   ,fsci.[IDVendedor]
                   ,fsci.[IDPainelEuromidia]
                   ,fsci.[IDDimFacesPaineis]
-                  ,fsci.[IDDimCheckingHistorico]
+                  ,fsci.[IDDimCheckingHistorico] AS [IDDimCheckinHistorico]
                   ,fsci.[IDEmpresaProprietaria]
                   ,fsci.[Referencia]
                   ,fsci.[NumeroContrato]
