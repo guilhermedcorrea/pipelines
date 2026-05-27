@@ -10,6 +10,27 @@
         Nº Contrato: <b>{{ contrato.NumeroContrato or "—" }}</b> |
         Prévia: <b>{{ contrato.NumeroPrevia or "—" }}</b>
       </div>
+
+      {% set pref_contrato = preferencia_reserva_contrato if preferencia_reserva_contrato is defined else none %}
+      {% set contrato_tem_preferencia = pref_contrato and (pref_contrato.BitPreferenciaReserva|default(0)|int) == 1 %}
+      <div class="contrato-preferencia-wrap">
+        <span class="contrato-preferencia-badge {% if contrato_tem_preferencia %}is-sim{% else %}is-nao{% endif %}"
+              title="Preferência de Reserva consolidada a partir dos itens ativos do contrato.">
+          <span class="contrato-preferencia-icone" aria-hidden="true">★</span>
+          <span>Preferência de Reserva:</span>
+          <b>{{ "Sim" if contrato_tem_preferencia else "Não" }}</b>
+          <span class="contrato-preferencia-texto">
+            {% if contrato_tem_preferencia %}
+              Este contrato tem preferência de reserva
+            {% else %}
+              Este contrato não tem preferência de reserva
+            {% endif %}
+          </span>
+          {% if pref_contrato and pref_contrato.QtdeFacesComPreferencia and pref_contrato.QtdeFacesComPreferencia > 0 %}
+            <small>{{ pref_contrato.QtdeFacesComPreferencia }} face(s)</small>
+          {% endif %}
+        </span>
+      </div>
     </div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -95,6 +116,154 @@
     .badge.ok{ background:#ECFDF3; color:#166534; border-color:#BBF7D0; }
     .badge.warn{ background:#FFF7ED; color:#C2410C; border-color:#FED7AA; }
     .badge.danger{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+    .badge.preferencia{ background:#FEF3C7; color:#92400E; border-color:#FCD34D; }
+    .contrato-preferencia-wrap{
+      margin-top:10px;
+      display:flex;
+      align-items:center;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .contrato-preferencia-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      min-height:30px;
+      padding:6px 12px;
+      border-radius:999px;
+      font-size:12px;
+      font-weight:900;
+      border:1px solid transparent;
+      box-shadow:0 6px 14px rgba(15,23,42,.06);
+      line-height:1.2;
+    }
+    .contrato-preferencia-badge small{
+      font-size:10px;
+      font-weight:900;
+      opacity:.82;
+      border-left:1px solid currentColor;
+      padding-left:7px;
+      margin-left:2px;
+    }
+    .contrato-preferencia-texto{
+      font-size:11px;
+      font-weight:800;
+      opacity:.88;
+    }
+    .contrato-preferencia-badge.is-sim{
+      background:#FEF3C7;
+      color:#92400E;
+      border-color:#FCD34D;
+    }
+    .contrato-preferencia-badge.is-nao{
+      background:#F8FAFC;
+      color:#64748B;
+      border-color:#E2E8F0;
+      box-shadow:none;
+    }
+    .contrato-preferencia-icone,
+    .preferencia-face-icone{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:20px;
+      height:20px;
+      border-radius:999px;
+      background:#F59E0B;
+      color:#fff;
+      font-size:12px;
+      line-height:1;
+      flex:none;
+      box-shadow:0 0 0 3px rgba(245,158,11,.16);
+    }
+    .contrato-preferencia-badge.is-nao .contrato-preferencia-icone{
+      background:#94A3B8;
+      box-shadow:none;
+    }
+    .detail-title-line{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .preferencia-face-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:24px;
+      padding:4px 9px;
+      border-radius:999px;
+      background:#FFFBEB;
+      color:#92400E;
+      border:1px solid #FCD34D;
+      font-size:11px;
+      font-weight:900;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .preferencia-operacional-card{
+      grid-column:1 / -1;
+      border-color:#FCD34D;
+      background:linear-gradient(180deg,#FFFBEB 0%,#ffffff 72%);
+    }
+    .preferencia-operacional-card .surface-head{
+      margin-bottom:10px;
+    }
+    .preferencia-operacional-duo{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+      margin-top:10px;
+    }
+    .preferencia-operacional-link{
+      display:block;
+      text-decoration:none;
+      color:inherit;
+      border:1px solid rgba(245,158,11,.28);
+      border-radius:12px;
+      background:#fff;
+      padding:12px;
+      transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+    }
+    .preferencia-operacional-link:hover{
+      transform:translateY(-1px);
+      box-shadow:0 10px 20px rgba(15,23,42,.08);
+      border-color:#F59E0B;
+    }
+    .preferencia-operacional-link.is-disabled{
+      pointer-events:none;
+      opacity:.72;
+      background:#F8FAFC;
+      border-style:dashed;
+      border-color:#CBD5E1;
+    }
+    .preferencia-operacional-linha-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+    .preferencia-operacional-titulo{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      font-weight:900;
+      color:var(--euro-blue);
+    }
+    .preferencia-operacional-hint{
+      margin-top:8px;
+      font-size:11px;
+      font-weight:800;
+      color:#92400E;
+    }
+    @media (min-width: 980px){
+      .preferencia-operacional-duo{
+        grid-template-columns:1fr 1fr;
+      }
+    }
     .badge.timeline-MOVIMENTO{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
     .badge.timeline-OBSERVACAO{ background:#F5F3FF; color:#6D28D9; border-color:#DDD6FE; }
     .badge.timeline-LOG{ background:#F8FAFC; color:#334155; border-color:#CBD5E1; }
@@ -171,6 +340,27 @@
       font-weight:900;
     }
     .timeline-pager .btn-page.is-active{ background:var(--euro-blue); border-color:var(--euro-blue); color:#fff; }
+    .modo-rapido-alerta{
+      margin-top:14px;
+      padding:12px 14px;
+      border:1px solid #BFDBFE;
+      border-radius:12px;
+      background:#EFF6FF;
+      color:#1E3A8A;
+      font-size:13px;
+      font-weight:850;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .modo-rapido-alerta .btn-action{
+      width:auto;
+      min-height:34px;
+      text-decoration:none;
+      background:#fff;
+    }
     .thumb-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:12px; }
     .thumb-media{ width:100%; max-height:220px; object-fit:cover; border-radius:10px; border:1px solid var(--border); background:#f8fafc; }
     .thumb-media[data-src]:not([src]){ min-height:180px; }
@@ -630,6 +820,17 @@
     }
   </style>
 
+  {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
+    <div class="modo-rapido-alerta">
+      <div>
+        
+      </div>
+      <a class="btn-action" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), return_to=return_to, nocache=1) }}">
+        Carregar histórico completo
+      </a>
+    </div>
+  {% endif %}
+
 
   {% set diagrama_status_existe = diagrama_status is defined and diagrama_status %}
   {% set mapa_status_nome = {
@@ -911,14 +1112,28 @@
           {% set ultimo_checkin = it.CheckinsDetalhe[0] if it.CheckinsDetalhe and it.CheckinsDetalhe|length > 0 else none %}
           {% set ultima_negociacao = it.HistoricoNegociacao[0] if it.HistoricoNegociacao and it.HistoricoNegociacao|length > 0 else none %}
           {% set ultimo_preco = it.PrecosPraticados[0] if it.PrecosPraticados and it.PrecosPraticados|length > 0 else none %}
+          {% set pref_operacional = it.PreferenciaReservaOperacional if it.PreferenciaReservaOperacional is defined else none %}
+          {% set pref_ocupacao = pref_operacional.Ocupacao if pref_operacional and pref_operacional.Ocupacao else none %}
+          {% set pref_reserva = pref_operacional.Reserva if pref_operacional and pref_operacional.Reserva else none %}
           <div class="detail-card">
             <div class="detail-head">
               <div>
-                <div class="detail-title">{{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                <div class="detail-title-line">
+                  <div class="detail-title">{{ it.CodPonto or "—" }}/{{ it.CodFace or "—" }}</div>
+                  {% if (it.BitPreferenciaReserva|default(0)|int) == 1 %}
+                    <span class="preferencia-face-chip" title="Este CodFace tem Preferência de Reserva.">
+                      <span class="preferencia-face-icone" aria-hidden="true">★</span>
+                      Preferência Reserva
+                    </span>
+                  {% endif %}
+                </div>
                 <div class="detail-sub">Item #{{ it.IDFatoControleContratosItensEuromidia or it.IDFatoControleContratosItens or "—" }} | Status: {{ it.Status or "—" }}</div>
               </div>
               <div class="mini-badges">
                 <span class="badge tipo">Cota: {{ it.Cota or 0 }}</span>
+                {% if (it.BitPreferenciaReserva|default(0)|int) == 1 %}
+                  <span class="badge preferencia">★ Preferência Reserva</span>
+                {% endif %}
                 <span class="badge ok">Atendimentos: {{ it.QtdeAtendimentos or 0 }}</span>
                 <span class="badge warn">Check-ins: {{ it.QtdeCheckins or 0 }}</span>
                 <span class="badge danger">Margem %: {{ it.MargemPct_Face if it.MargemPct_Face is not none else "—" }}</span>
@@ -940,6 +1155,75 @@
               </div>
             </div>
 
+
+            {% if (it.BitPreferenciaReserva|default(0)|int) == 1 %}
+              <div class="surface-grid preferencia-operacional-grid">
+                <div class="surface-card preferencia-operacional-card">
+                  <div class="surface-head">
+                    <div class="surface-title">Preferência de Reserva vinculada à ocupação</div>
+                    <span class="badge preferencia">★ CodFace preferencial</span>
+                  </div>
+
+                  <div class="preferencia-operacional-duo">
+                    <a class="preferencia-operacional-link {% if not pref_ocupacao %}is-disabled{% endif %}"
+                       href="{{ pref_ocupacao.HrefGrade if pref_ocupacao and pref_ocupacao.HrefGrade else '#' }}"
+                       title="Abrir a grade no período da ocupação origem deste CodFace.">
+                      <div class="preferencia-operacional-linha-head">
+                        <div class="preferencia-operacional-titulo">
+                          <span class="preferencia-face-icone" aria-hidden="true">O</span>
+                          Ocupação origem da preferência
+                        </div>
+                        <span class="badge {% if pref_ocupacao and pref_ocupacao.AtivoTexto == 'Sim' %}ok{% elif pref_ocupacao %}warn{% else %}danger{% endif %}">
+                          {% if pref_ocupacao %}Ativo: {{ pref_ocupacao.AtivoTexto }}{% else %}Não encontrada{% endif %}
+                        </span>
+                      </div>
+                      <div class="surface-value sm">
+                        {% if pref_ocupacao %}
+                          {{ pref_ocupacao.MarcaExibida or pref_ocupacao.TextoOriginal or pref_ocupacao.NumeroContrato or "Ocupação origem encontrada" }}
+                        {% else %}
+                          Sem ocupação origem vinculada
+                        {% endif %}
+                      </div>
+                      <div class="surface-meta">
+                        <div><strong>Status:</strong> {{ pref_ocupacao.Status if pref_ocupacao else "—" }}</div>
+                        <div><strong>Período:</strong> {% if pref_ocupacao %}{{ pref_ocupacao.DataInicio.strftime("%d/%m/%Y") if pref_ocupacao.DataInicio else "—" }} até {{ pref_ocupacao.DataFim.strftime("%d/%m/%Y") if pref_ocupacao.DataFim else "—" }}{% else %}—{% endif %}</div>
+                        <div><strong>Cota:</strong> {{ pref_ocupacao.Cota if pref_ocupacao and pref_ocupacao.Cota is not none else "—" }}</div>
+                        <div><strong>ID ocupação:</strong> {{ pref_ocupacao.IDFatoOcupacaoPaineisEuromidia if pref_ocupacao else "—" }}</div>
+                      </div>
+                      {% if pref_ocupacao %}<div class="preferencia-operacional-hint">Clique aqui para abrir a grade no período da ocupação origem.</div>{% endif %}
+                    </a>
+
+                    <a class="preferencia-operacional-link {% if not pref_reserva %}is-disabled{% endif %}"
+                       href="{{ pref_reserva.HrefGrade if pref_reserva and pref_reserva.HrefGrade else '#' }}"
+                       title="Abrir a grade no período da reserva filha deste CodFace.">
+                      <div class="preferencia-operacional-linha-head">
+                        <div class="preferencia-operacional-titulo">
+                          <span class="preferencia-face-icone" aria-hidden="true">R</span>
+                          Reserva filha gerada pela preferência
+                        </div>
+                        <span class="badge {% if pref_reserva and pref_reserva.AtivoTexto == 'Sim' %}ok{% elif pref_reserva %}warn{% else %}danger{% endif %}">
+                          {% if pref_reserva %}Ativo: {{ pref_reserva.AtivoTexto }}{% else %}Não encontrada{% endif %}
+                        </span>
+                      </div>
+                      <div class="surface-value sm">
+                        {% if pref_reserva %}
+                          {{ pref_reserva.MarcaExibida or pref_reserva.TextoOriginal or pref_reserva.NumeroPrevia or "Reserva preferencial encontrada" }}
+                        {% else %}
+                          Sem reserva filha vinculada
+                        {% endif %}
+                      </div>
+                      <div class="surface-meta">
+                        <div><strong>Status:</strong> {{ pref_reserva.Status if pref_reserva else "—" }}</div>
+                        <div><strong>Período:</strong> {% if pref_reserva %}{{ pref_reserva.DataInicio.strftime("%d/%m/%Y") if pref_reserva.DataInicio else "—" }} até {{ pref_reserva.DataFim.strftime("%d/%m/%Y") if pref_reserva.DataFim else "—" }}{% else %}—{% endif %}</div>
+                        <div><strong>Cota:</strong> {{ pref_reserva.Cota if pref_reserva and pref_reserva.Cota is not none else "—" }}</div>
+                        <div><strong>ID reserva:</strong> {{ pref_reserva.IDFatoOcupacaoPaineisEuromidia if pref_reserva else "—" }}{% if pref_reserva and pref_reserva.ReservaOrdemPrioridade %} • Ordem: {{ pref_reserva.ReservaOrdemPrioridade }}{% endif %}</div>
+                      </div>
+                      {% if pref_reserva %}<div class="preferencia-operacional-hint">Clique aqui para abrir a grade no período da reserva preferencial.</div>{% endif %}
+                    </a>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
             <div class="surface-grid">
               <div class="surface-card">
                 <div class="surface-head">
@@ -1371,7 +1655,11 @@
         {% endif %}
       </div>
     {% else %}
-      <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
+      {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
+        <div class="empty-box" style="margin-top:14px;">Timeline não carregada no modo rápido. Use “Carregar histórico completo” para buscar movimentos, observações, logs, check-ins e negociações.</div>
+      {% else %}
+        <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
+      {% endif %}
     {% endif %}
   </div>
 

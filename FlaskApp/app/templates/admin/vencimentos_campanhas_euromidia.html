@@ -1430,15 +1430,16 @@
                 <td data-label="Contrato">
                   {% if usuario_logado_eh_vendedor %}
                     <span class="vc-contrato vc-contrato-disabled" title="Perfil Vendedor não abre a página de contratos por esta tela.">
-                      {{ row.NumeroContratoExibicao }}
+                      {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao }}
                     </span>
                   {% else %}
-                    <a class="vc-contrato" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=url_for('Paineis.contratos_lista', id_contrato=row.IDFatoControleContratosEuromidia)) }}">
-                      {{ row.NumeroContratoExibicao }}
+                    {% set url_contrato_rapido = url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=request.full_path, modo_rapido=1) %}
+                    <a class="vc-contrato" href="{{ url_contrato_rapido }}" data-prefetch-contrato-url="{{ url_contrato_rapido }}" title="Abrir contrato #{{ row.IDFatoControleContratosEuromidia }} em modo rápido com cache Redis.">
+                      {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao }}
                     </a>
                   {% endif %}
-                  {% if row.IDFatoControleContratosEuromidia %}
-                    <div class="muted" style="font-size:11px;font-weight:800;margin-top:3px;">ID: {{ row.IDFatoControleContratosEuromidia }}</div>
+                  {% if row.NumeroContratoExibicao %}
+                    <div class="muted" style="font-size:11px;font-weight:800;margin-top:3px;">Nº contrato: {{ row.NumeroContratoExibicao }}</div>
                   {% endif %}
                 </td>
 
@@ -2131,7 +2132,7 @@
       botao.appendChild(desc);
 
       botao.addEventListener('click', function(){
-        inputBusca.value = item.numero_contrato_original || item.numero_contrato || String(item.id_contrato || '');
+        inputBusca.value = String(item.id_contrato || item.numero_contrato_original || item.numero_contrato || '');
         fecharSugestoes();
         form.submit();
       });
@@ -2186,6 +2187,49 @@
     inputBusca.addEventListener('focus', function(){
       if(inputBusca.value.trim()){ buscarSugestoes(); }
     });
+  }
+
+  const contratosPrefetchados = new Set();
+
+  function preaquecerContratoRedis(url){
+    if(!url || contratosPrefetchados.has(url)){ return; }
+    contratosPrefetchados.add(url);
+
+    fetch(url, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: {
+        'Accept': 'text/html',
+        'X-Prefetch-Contrato': '1'
+      },
+      cache: 'no-store'
+    }).catch(function(){
+      contratosPrefetchados.delete(url);
+    });
+  }
+
+  const linksContratoPrefetch = Array.from(document.querySelectorAll('[data-prefetch-contrato-url]'));
+
+  linksContratoPrefetch.forEach(function(link){
+    const url = link.getAttribute('data-prefetch-contrato-url');
+
+    link.addEventListener('mouseenter', function(){ preaquecerContratoRedis(url); }, {passive:true});
+    link.addEventListener('focus', function(){ preaquecerContratoRedis(url); });
+    link.addEventListener('touchstart', function(){ preaquecerContratoRedis(url); }, {passive:true});
+  });
+
+  if('requestIdleCallback' in window){
+    requestIdleCallback(function(){
+      linksContratoPrefetch.slice(0, 8).forEach(function(link){
+        preaquecerContratoRedis(link.getAttribute('data-prefetch-contrato-url'));
+      });
+    }, {timeout: 1500});
+  }else{
+    setTimeout(function(){
+      linksContratoPrefetch.slice(0, 8).forEach(function(link){
+        preaquecerContratoRedis(link.getAttribute('data-prefetch-contrato-url'));
+      });
+    }, 900);
   }
 
   document.addEventListener('click', function(event){

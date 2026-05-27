@@ -12696,9 +12696,12 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     d["BitAtivoTexto"] = "Ativo" if int(d.get("BitAtivo") or 0) == 1 else "Inativo"
     d["ClasseBitAtivo"] = "ativo" if int(d.get("BitAtivo") or 0) == 1 else "inativo"
 
+    id_contrato_texto = str(d.get("IDFatoControleContratosEuromidia") or "").strip()
+    d["IDFatoControleContratosExibicao"] = id_contrato_texto or "—"
+
     numero_contrato = str(d.get("NumeroContrato") or "").strip()
     if not numero_contrato:
-        numero_contrato = str(d.get("IDFatoControleContratosEuromidia") or "").strip()
+        numero_contrato = id_contrato_texto
 
     d["NumeroContratoExibicao"] = numero_contrato or "—"
 
@@ -12815,9 +12818,48 @@ def _campanhas_vencimentos_data_json(valor):
         return str(valor)
 
 
-def _campanhas_vencimentos_atualizar_status_e_dias() -> None:
+def _campanhas_vencimentos_status_dias_cache_key() -> str:
+    """Chave diária para não recalcular status/dias em todo carregamento da tela."""
+
+    return f"vencimentos_campanhas_status_dias_{date.today().isoformat()}"
+
+
+def _campanhas_vencimentos_cache_get_seguro(chave: str):
+    """Lê o cache sem derrubar a tela caso o backend de cache falhe."""
+
+    try:
+        return cache.get(chave)
+    except Exception:
+        current_app.logger.warning(
+            "VENCIMENTOS_CAMPANHAS | falha ao ler cache | chave=%s",
+            chave,
+            exc_info=True,
+        )
+        return None
+
+
+def _campanhas_vencimentos_cache_set_seguro(chave: str, valor, timeout_segundos: int) -> None:
+    """Grava o cache sem derrubar a tela caso o backend de cache falhe."""
+
+    try:
+        cache.set(chave, valor, timeout=timeout_segundos)
+    except Exception:
+        current_app.logger.warning(
+            "VENCIMENTOS_CAMPANHAS | falha ao gravar cache | chave=%s",
+            chave,
+            exc_info=True,
+        )
+
+
+def _campanhas_vencimentos_atualizar_status_e_dias(forcar: bool = False) -> None:
     """
-    Atualiza automaticamente os campos de acompanhamento da campanha antes de carregar a tela.
+    Atualiza automaticamente os campos de acompanhamento da campanha.
+
+    Importante para performance:
+    - antes esta atualização rodava em todo GET da tela;
+    - agora ela roda uma vez por dia por processo/cache, porque a própria tela informa
+      que os prazos são atualizados diariamente;
+    - se precisar recalcular manualmente, chame com forcar=True.
 
     Regras:
     - DiasParaVencer corre conforme a data atual.
@@ -12826,6 +12868,10 @@ def _campanhas_vencimentos_atualizar_status_e_dias() -> None:
     - Linhas canceladas manualmente, com BitAtivo = 0 antes do vencimento, ficam como CANCELADA.
     - DataAtualizacao só muda quando algum valor realmente precisar mudar.
     """
+
+    chave_cache = _campanhas_vencimentos_status_dias_cache_key()
+    if not forcar and _campanhas_vencimentos_cache_get_seguro(chave_cache):
+        return
 
     sql = text("""
         SET NOCOUNT ON;
@@ -12925,6 +12971,11 @@ def _campanhas_vencimentos_atualizar_status_e_dias() -> None:
     try:
         db.session.execute(sql)
         db.session.commit()
+        _campanhas_vencimentos_cache_set_seguro(
+            chave_cache,
+            True,
+            timeout_segundos=60 * 60 * 30,
+        )
     except Exception:
         db.session.rollback()
         current_app.logger.exception(
@@ -14501,9 +14552,12 @@ def vencimentos_campanhas_euromidia():
     pagina_fim = min(total_pages, page + 3)
     paginas_visiveis = list(range(pagina_inicio, pagina_fim + 1))
 
+    return_to_vencimentos = request.full_path if request.query_string else request.path
+
     return render_template(
         "admin/vencimentos_campanhas_euromidia.html",
         itens=itens,
+        return_to_vencimentos=return_to_vencimentos,
         status_opcoes=status_opcoes,
         marca_opcoes=marca_opcoes,
         vendedor_opcoes=vendedor_opcoes,
@@ -14618,8 +14672,10 @@ def vencimentos_campanhas_sugestoes():
         items.append({
             "id_vencimento": int(d.get("IDFatoVencimentoCampanhaEuromidia") or 0),
             "id_contrato": int(d.get("IDFatoControleContratosEuromidia") or 0),
+            "id_contrato_texto": d.get("IDFatoControleContratosExibicao") or "—",
             "numero_contrato": d.get("NumeroContratoExibicao") or "—",
             "numero_contrato_original": str(d.get("NumeroContrato") or ""),
+            "contrato_exibicao": d.get("IDFatoControleContratosExibicao") or d.get("NumeroContratoExibicao") or "—",
             "razao_social": str(d.get("RazaoSocial") or "—"),
             "marca": str(d.get("MarcaExibida") or "—"),
             "painel": str(d.get("Painel") or "—"),

@@ -260,3 +260,6 @@ docker compose exec airflow-apiserver airflow users create \
 #docker compose logs -f nginx-flask flask-app-1 flask-app-2 celery-paineis-worker
 
 
+#Reinicia o flask
+
+#docker compose restart flask-app-1 flask-app-2

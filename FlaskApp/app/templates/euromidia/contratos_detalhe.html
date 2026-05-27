@@ -340,6 +340,27 @@
       font-weight:900;
     }
     .timeline-pager .btn-page.is-active{ background:var(--euro-blue); border-color:var(--euro-blue); color:#fff; }
+    .modo-rapido-alerta{
+      margin-top:14px;
+      padding:12px 14px;
+      border:1px solid #BFDBFE;
+      border-radius:12px;
+      background:#EFF6FF;
+      color:#1E3A8A;
+      font-size:13px;
+      font-weight:850;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .modo-rapido-alerta .btn-action{
+      width:auto;
+      min-height:34px;
+      text-decoration:none;
+      background:#fff;
+    }
     .thumb-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:12px; }
     .thumb-media{ width:100%; max-height:220px; object-fit:cover; border-radius:10px; border:1px solid var(--border); background:#f8fafc; }
     .thumb-media[data-src]:not([src]){ min-height:180px; }
@@ -798,6 +819,17 @@
       .modal-dialog{ width:100%; max-height:92vh; }
     }
   </style>
+
+  {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
+    <div class="modo-rapido-alerta">
+      <div>
+        
+      </div>
+      <a class="btn-action" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), return_to=return_to, nocache=1) }}">
+        Carregar histórico completo
+      </a>
+    </div>
+  {% endif %}
 
 
   {% set diagrama_status_existe = diagrama_status is defined and diagrama_status %}
@@ -1623,7 +1655,11 @@
         {% endif %}
       </div>
     {% else %}
-      <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
+      {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
+        <div class="empty-box" style="margin-top:14px;">Timeline não carregada no modo rápido. Use “Carregar histórico completo” para buscar movimentos, observações, logs, check-ins e negociações.</div>
+      {% else %}
+        <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
+      {% endif %}
     {% endif %}
   </div>
 

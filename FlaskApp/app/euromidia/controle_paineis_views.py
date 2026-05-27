@@ -27,6 +27,7 @@ from flask_wtf.csrf import CSRFError,validate_csrf
 import json
 import math
 from flask_login import current_user
+from markupsafe import escape as html_escape
 import threading
 import os
 from urllib.parse import parse_qs, urlsplit
@@ -44,7 +45,7 @@ from ..celery_app import celery_app
 from ..tasks.checkin_tasks import processar_checkin_upload
 import secrets
 import hashlib
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, noload
 from ..extensions import cache
 
 
@@ -26304,22 +26305,96 @@ def carteira_mover_empresa(id_fato_carteira_vendedor: int):
 @paineis_bp.get("/contratos/<int:id_contrato>")
 @login_required
 def contratos_detalhe(id_contrato: int):
-    print("=" * 120, flush=True)
-    print(f"ENTROU NO ENDPOINT contratos_detalhe | id_contrato={id_contrato} | url={request.url}", flush=True)
-    print("=" * 120, flush=True)
+    def _debug_contrato_detalhe(*args, **kwargs):
+        return None
+
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"ENTROU NO ENDPOINT contratos_detalhe | id_contrato={id_contrato} | url={request.url}", flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
+
+    def _return_to_contrato_detalhe_eh_seguro_cache_inicial(url: str) -> bool:
+        texto = str(url or "").strip()
+        if not texto or texto.startswith("//"):
+            return False
+
+        try:
+            partes = urlsplit(texto)
+        except Exception:
+            return False
+
+        if partes.scheme or partes.netloc:
+            return False
+
+        caminho = (partes.path or "").rstrip("/")
+        return caminho in {"/paineis/contratos", "/admin/vencimentos-campanhas"}
+
+    def _resolver_return_to_contratos_cache_inicial():
+        for candidato in (request.args.get("return_to"), request.form.get("return_to"), session.get("contratos_lista_return_to")):
+            url = str(candidato or "").strip()
+            if not _return_to_contrato_detalhe_eh_seguro_cache_inicial(url):
+                continue
+            if url == "/paineis/contratos" or url.startswith("/paineis/contratos?"):
+                session["contratos_lista_return_to"] = url
+            return url
+        return url_for("Paineis.contratos_lista")
+
+    return_to_cache_inicial = _resolver_return_to_contratos_cache_inicial()
+    caminho_return_to_cache_inicial = (urlsplit(str(return_to_cache_inicial or "")).path or "").rstrip("/")
+    modo_rapido_cache_inicial = (
+        str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
+        in {"1", "true", "sim", "yes", "s"}
+    ) or caminho_return_to_cache_inicial == "/admin/vencimentos-campanhas"
+
+    try:
+        timeline_page_cache_inicial = int(request.args.get("timeline_page") or "1")
+    except Exception:
+        timeline_page_cache_inicial = 1
+    timeline_page_cache_inicial = max(1, timeline_page_cache_inicial)
+
+    try:
+        id_usuario_cache_inicial = (
+            getattr(current_user, "IDDimUsuarios", None)
+            or (current_user.get_id() if hasattr(current_user, "get_id") else None)
+            or "anonimo"
+        )
+    except Exception:
+        id_usuario_cache_inicial = "anonimo"
+
+    cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
+    cache_key_contrato_detalhe_inicial = (
+        f"contratos_detalhe_html:v20260527_redis_rapido_v3:"
+        f"usuario:{id_usuario_cache_inicial}:"
+        f"contrato:{int(id_contrato)}:"
+        f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
+        f"timeline:{timeline_page_cache_inicial}"
+    )
+    placeholder_return_to_contrato_inicial = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
+
+    if not cache_bypass_contrato_inicial:
+        try:
+            html_cache_contrato_inicial = cache.get(cache_key_contrato_detalhe_inicial)
+        except Exception:
+            html_cache_contrato_inicial = None
+
+        if html_cache_contrato_inicial:
+            return str(html_cache_contrato_inicial).replace(
+                placeholder_return_to_contrato_inicial,
+                str(html_escape(return_to_cache_inicial)),
+            )
 
     contrato = (
         db.session.query(FatoControleContratosEuromidia)
+        .options(noload("*"))
         .filter(FatoControleContratosEuromidia.IDFatoControleContratosEuromidia == id_contrato)
         .first()
     )
 
     if not contrato:
-        print(f"CONTRATO NAO ENCONTRADO | id_contrato={id_contrato}", flush=True)
+        _debug_contrato_detalhe(f"CONTRATO NAO ENCONTRADO | id_contrato={id_contrato}", flush=True)
         abort(404, description="Contrato não encontrado.")
 
-    print(f"CONTRATO ENCONTRADO | id_contrato={id_contrato}", flush=True)
-    print(
+    _debug_contrato_detalhe(f"CONTRATO ENCONTRADO | id_contrato={id_contrato}", flush=True)
+    _debug_contrato_detalhe(
         f"CONTRATO CAMPOS | "
         f"ID={getattr(contrato, 'IDFatoControleContratosEuromidia', None)} | "
         f"NumeroContrato={getattr(contrato, 'NumeroContrato', None)} | "
@@ -26358,6 +26433,28 @@ def contratos_detalhe(id_contrato: int):
             )
             abort(403, description="Você não pode acessar este contrato porque ele não pertence ao vendedor logado.")
 
+    def _return_to_contrato_detalhe_eh_seguro(url: str) -> bool:
+        """Eu aceito somente retorno interno para telas conhecidas e evito redirect aberto."""
+        texto = str(url or "").strip()
+        if not texto or texto.startswith("//"):
+            return False
+
+        try:
+            partes = urlsplit(texto)
+        except Exception:
+            return False
+
+        if partes.scheme or partes.netloc:
+            return False
+
+        caminho = (partes.path or "").rstrip("/")
+        caminhos_permitidos = {
+            "/paineis/contratos",
+            "/admin/vencimentos-campanhas",
+        }
+
+        return caminho in caminhos_permitidos
+
     def _resolver_return_to_contratos_local():
         candidatos = [
             request.args.get("return_to"),
@@ -26368,16 +26465,66 @@ def contratos_detalhe(id_contrato: int):
         for candidato in candidatos:
             url = str(candidato or "").strip()
 
-            if not url:
+            if not _return_to_contrato_detalhe_eh_seguro(url):
                 continue
 
             if url == "/paineis/contratos" or url.startswith("/paineis/contratos?"):
                 session["contratos_lista_return_to"] = url
-                return url
+
+            return url
 
         return url_for("Paineis.contratos_lista")
 
     return_to = _resolver_return_to_contratos_local()
+
+    partes_return_to_rapido = urlsplit(str(return_to or ""))
+    caminho_return_to_rapido = (partes_return_to_rapido.path or "").rstrip("/")
+    modo_rapido_contrato = (
+        str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
+        in {"1", "true", "sim", "yes", "s"}
+    ) or caminho_return_to_rapido == "/admin/vencimentos-campanhas"
+
+    try:
+        timeline_page_cache = int(request.args.get("timeline_page") or "1")
+    except Exception:
+        timeline_page_cache = 1
+    timeline_page_cache = max(1, timeline_page_cache)
+
+    try:
+        id_usuario_cache = (
+            getattr(current_user, "IDDimUsuarios", None)
+            or (current_user.get_id() if hasattr(current_user, "get_id") else None)
+            or "anonimo"
+        )
+    except Exception:
+        id_usuario_cache = "anonimo"
+
+    try:
+        timeout_cache_contrato_detalhe = max(15, int(os.getenv("CONTRATO_DETALHE_CACHE_TIMEOUT_SEGUNDOS", "120") or "120"))
+    except Exception:
+        timeout_cache_contrato_detalhe = 120
+
+    cache_bypass_contrato = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
+    cache_key_contrato_detalhe = (
+        f"contratos_detalhe_html:v20260527_redis_rapido_v3:"
+        f"usuario:{id_usuario_cache}:"
+        f"contrato:{int(id_contrato)}:"
+        f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
+        f"timeline:{timeline_page_cache}"
+    )
+    placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
+
+    if not cache_bypass_contrato:
+        try:
+            html_cache_contrato = cache.get(cache_key_contrato_detalhe)
+        except Exception:
+            html_cache_contrato = None
+
+        if html_cache_contrato:
+            return str(html_cache_contrato).replace(
+                placeholder_return_to_contrato,
+                str(html_escape(return_to)),
+            )
 
     def _valor_attr(obj, *nomes, padrao=None):
         for nome in nomes:
@@ -26534,6 +26681,15 @@ def contratos_detalhe(id_contrato: int):
                 for id_status, nome in mapa_padrao.items()
             ]
 
+        chave_cache_status = f"contrato_detalhe:status_empresa:v1:{id_empresa}"
+        try:
+            status_em_cache = cache.get(chave_cache_status)
+        except Exception:
+            status_em_cache = None
+
+        if status_em_cache:
+            return status_em_cache
+
         sql_status_empresa = text("""
             SELECT
                 ds.IDDimStatusContratos,
@@ -26597,6 +26753,12 @@ def contratos_detalhe(id_contrato: int):
                 )
 
         retorno.sort(key=lambda x: int(x.get("IDDimStatusContratos") or 0))
+
+        try:
+            cache.set(chave_cache_status, retorno, timeout=1800)
+        except Exception:
+            pass
+
         return retorno
 
     def _montar_diagrama_status_contrato_local(id_empresa_proprietaria, id_status_atual, nome_status_atual=None):
@@ -26665,17 +26827,59 @@ def contratos_detalhe(id_contrato: int):
             "terminal_atual": terminal_atual,
         }
 
-    itens_base = list(
-        getattr(contrato, "itens", None)
-        or getattr(contrato, "Itens", None)
-        or []
-    )
+    sql_itens_base = text("""
+        SELECT
+             ci.[IDFatoControleContratosItensEuromidia]
+            ,ci.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItens
+            ,ci.[IDFatoControleContratoEuromidia]
+            ,ci.[CodPonto]
+            ,ci.[CodFace]
+            ,ci.[IDDimFacesPaineis]
+            ,ci.[IDPainelEuromidia]
+            ,ci.[IDFatoKanbanCard]
+            ,ci.[BitPreferencia]
+            ,ci.[Cota]
+            ,ci.[AtivoCancelamento] AS Status
+            ,ci.[DataInicioPrevisto]
+            ,ci.[DataTerminoPrevisto]
+            ,ci.[CidadeExibicao]
+            ,ci.[MarcaExibida]
+            ,ci.[FaturamentoLiquidoFinalMensal]
+            ,ci.[FaturamentoLiquidoFinalMensal] AS FaturamentoLiquidoMensalFinal
+            ,ci.[FaturamentoLiquidoFinalMensal] AS FatLiquidoFinal_Soma
+            ,ci.[FaturamentoLiquidoMensal]
+            ,ci.[NumeroContrato]
+            ,ci.[NumeroPrevia]
+            ,ci.[Tipo]
+            ,ci.[Vendedor]
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+        WHERE ci.[IDFatoControleContratoEuromidia] = :id_contrato
+        ORDER BY
+            ci.[CodPonto] ASC,
+            ci.[CodFace] ASC,
+            ci.[IDFatoControleContratosItensEuromidia] ASC;
+    """)
 
-    print("=" * 120, flush=True)
-    print(f"ITENS_BASE ORM | id_contrato={id_contrato} | qtd={len(itens_base)}", flush=True)
+    try:
+        rows_itens_base = db.session.execute(
+            sql_itens_base,
+            {"id_contrato": int(id_contrato)},
+        ).mappings().all()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "CONTRATO_DETALHE | falha ao carregar itens por SQL enxuto | id_contrato=%s",
+            id_contrato,
+        )
+        rows_itens_base = []
+
+    itens_base = [SimpleNamespace(**dict(row)) for row in rows_itens_base]
+
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"ITENS_BASE ORM | id_contrato={id_contrato} | qtd={len(itens_base)}", flush=True)
 
     for idx_item_orm, it_dbg in enumerate(itens_base, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"ITEM ORM [{idx_item_orm}] | "
             f"IDItem={getattr(it_dbg, 'IDFatoControleContratosItensEuromidia', None)} | "
             f"IDContratoNoItem={getattr(it_dbg, 'IDFatoControleContratoEuromidia', None)} | "
@@ -26685,7 +26889,7 @@ def contratos_detalhe(id_contrato: int):
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
     itens = []
     itens_por_id = {}
@@ -26773,6 +26977,116 @@ def contratos_detalhe(id_contrato: int):
 
         if id_painel is not None:
             itens_por_dim_painel.setdefault(str(id_painel).strip(), []).append(item_dict)
+
+    if modo_rapido_contrato:
+        id_empresa_proprietaria_status = _valor_attr(contrato, "IDEmpresaProprietaria")
+        id_status_atual = _valor_attr(
+            contrato,
+            "IDDimStatusContratos",
+            "IDStatusContrato",
+            "IDStatus",
+        )
+        nome_status_atual = _valor_attr(
+            contrato,
+            "StatusContrato",
+            "Status",
+            "NomeStatusContrato",
+        )
+
+        try:
+            id_status_atual_int = int(id_status_atual or 0)
+        except Exception:
+            id_status_atual_int = 0
+
+        contrato_status_terminal_sem_preferencia = id_status_atual_int in (8, 9, 10)
+
+        qtd_faces_com_preferencia = 0
+        for item_pref in itens:
+            try:
+                bit_pref_original = 1 if int(item_pref.get("BitPreferenciaReservaOriginal") or 0) == 1 else 0
+            except Exception:
+                bit_pref_original = 0
+
+            bit_pref_final = 0 if contrato_status_terminal_sem_preferencia else bit_pref_original
+            item_pref["BitPreferenciaReserva"] = bit_pref_final
+            item_pref["PreferenciaReservaTexto"] = "Sim" if bit_pref_final == 1 else "Não"
+
+            if bit_pref_final == 1:
+                qtd_faces_com_preferencia += 1
+
+        preferencia_reserva_contrato = {
+            "BitPreferenciaReserva": 1 if qtd_faces_com_preferencia > 0 else 0,
+            "PreferenciaReservaTexto": "Sim" if qtd_faces_com_preferencia > 0 else "Não",
+            "QtdeFacesComPreferencia": qtd_faces_com_preferencia,
+            "StatusTerminalSemPreferencia": contrato_status_terminal_sem_preferencia,
+            "Fonte": "modo_rapido_contrato_cache_redis",
+        }
+
+        try:
+            setattr(contrato, "BitPreferenciaReserva", preferencia_reserva_contrato["BitPreferenciaReserva"])
+            setattr(contrato, "PreferenciaReservaTexto", preferencia_reserva_contrato["PreferenciaReservaTexto"])
+            setattr(contrato, "QtdeFacesComPreferencia", qtd_faces_com_preferencia)
+        except Exception:
+            pass
+
+        diagrama_status = _montar_diagrama_status_contrato_local(
+            id_empresa_proprietaria=id_empresa_proprietaria_status,
+            id_status_atual=id_status_atual,
+            nome_status_atual=nome_status_atual,
+        )
+
+        resumo_atendimentos = {
+            "Total": 0,
+            "Abertos": 0,
+            "Concluidos": 0,
+            "Encerrados": 0,
+            "UltimoAtendimento": None,
+            "UltimoCheckin": None,
+            "TotalCheckins": 0,
+            "TotalNegociacoes": 0,
+        }
+
+        timeline_paginacao = {
+            "page": 1,
+            "per_page": 20,
+            "total": 0,
+            "total_pages": 1,
+            "inicio": 0,
+            "fim": 0,
+            "has_prev": False,
+            "has_next": False,
+            "prev_page": 1,
+            "next_page": 1,
+        }
+
+        html_renderizado = render_template(
+            "euromidia/contratos_detalhe.html",
+            contrato=contrato,
+            itens=itens,
+            cards_relacionados=[],
+            timeline_atendimentos=[],
+            timeline_paginacao=timeline_paginacao,
+            resumo_atendimentos=resumo_atendimentos,
+            diagrama_status=diagrama_status,
+            preferencia_reserva_contrato=preferencia_reserva_contrato,
+            return_to=placeholder_return_to_contrato,
+            modo_rapido_contrato=True,
+        )
+
+        if not cache_bypass_contrato:
+            try:
+                cache.set(
+                    cache_key_contrato_detalhe,
+                    html_renderizado,
+                    timeout=timeout_cache_contrato_detalhe,
+                )
+            except Exception:
+                pass
+
+        return str(html_renderizado).replace(
+            placeholder_return_to_contrato,
+            str(html_escape(return_to)),
+        )
 
     sql_preferencia_reserva_itens = text("""
         SELECT
@@ -26872,11 +27186,11 @@ def contratos_detalhe(id_contrato: int):
         )
         rel_rows = []
 
-    print("=" * 120, flush=True)
-    print(f"RETORNO RELACIONAMENTOS CONTRATO -> ITEM -> FATO_CONTRATO_CARD | id_contrato={id_contrato} | qtd={len(rel_rows)}", flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"RETORNO RELACIONAMENTOS CONTRATO -> ITEM -> FATO_CONTRATO_CARD | id_contrato={id_contrato} | qtd={len(rel_rows)}", flush=True)
 
     for idx_rel, row in enumerate(rel_rows, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"REL [{idx_rel}] | "
             f"IDContratoCabecalho={row.get('IDContratoCabecalho')} | "
             f"IDItemContrato={row.get('IDItemContrato')} | "
@@ -26890,7 +27204,7 @@ def contratos_detalhe(id_contrato: int):
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
     vinculos_validos_rows = [
         row for row in rel_rows
@@ -26898,10 +27212,10 @@ def contratos_detalhe(id_contrato: int):
         and row.get("IDFatoKanbanCard") is not None
     ]
 
-    print(f"VINCULOS VALIDOS FATO_CONTRATO_CARD | id_contrato={id_contrato} | qtd={len(vinculos_validos_rows)}", flush=True)
+    _debug_contrato_detalhe(f"VINCULOS VALIDOS FATO_CONTRATO_CARD | id_contrato={id_contrato} | qtd={len(vinculos_validos_rows)}", flush=True)
 
     for idx_vinc, row in enumerate(vinculos_validos_rows, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"VINCULO VALIDO [{idx_vinc}] | "
             f"IDFatoContratoCardEuromidia={row.get('IDFatoContratoCardEuromidia')} | "
             f"IDContrato={row.get('IDFatoControleContratosEuromidia')} | "
@@ -26940,11 +27254,11 @@ def contratos_detalhe(id_contrato: int):
             )
             diagnostico_rel_rows = []
 
-        print("=" * 120, flush=True)
-        print(f"DIAGNOSTICO FATO_CONTRATO_CARD POR CONTRATO | id_contrato={id_contrato} | qtd={len(diagnostico_rel_rows)}", flush=True)
+        _debug_contrato_detalhe("=" * 120, flush=True)
+        _debug_contrato_detalhe(f"DIAGNOSTICO FATO_CONTRATO_CARD POR CONTRATO | id_contrato={id_contrato} | qtd={len(diagnostico_rel_rows)}", flush=True)
 
         for idx_diag_rel, row in enumerate(diagnostico_rel_rows, start=1):
-            print(
+            _debug_contrato_detalhe(
                 f"DIAG REL [{idx_diag_rel}] | "
                 f"IDFatoContratoCardEuromidia={row.get('IDFatoContratoCardEuromidia')} | "
                 f"IDContrato={row.get('IDFatoControleContratosEuromidia')} | "
@@ -26954,7 +27268,7 @@ def contratos_detalhe(id_contrato: int):
                 flush=True,
             )
 
-        print("=" * 120, flush=True)
+        _debug_contrato_detalhe("=" * 120, flush=True)
 
     cards_map = {}
 
@@ -26988,18 +27302,18 @@ def contratos_detalhe(id_contrato: int):
         if row.get("DataAtualizacao") is not None:
             info["datas_rel"].append(row.get("DataAtualizacao"))
 
-    print("=" * 120, flush=True)
-    print(f"CARDS_MAP MONTADO | id_contrato={id_contrato} | qtd_cards={len(cards_map)}", flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"CARDS_MAP MONTADO | id_contrato={id_contrato} | qtd_cards={len(cards_map)}", flush=True)
 
     for id_card_print, info_print in cards_map.items():
-        print(
+        _debug_contrato_detalhe(
             f"CARD_MAP | IDCard={id_card_print} | "
             f"Itens={sorted(list(info_print.get('item_ids') or []))} | "
             f"QtdDatasRel={len(info_print.get('datas_rel') or [])}",
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
     card_ids, card_placeholders, card_params = _coletar_ids_parametrizados(
         "card_id_",
@@ -27067,11 +27381,11 @@ def contratos_detalhe(id_contrato: int):
 
             cards_rows = db.session.execute(sql_cards_fallback, card_params).mappings().all()
 
-    print("=" * 120, flush=True)
-    print(f"CARDS CARREGADOS | id_contrato={id_contrato} | qtd={len(cards_rows)}", flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"CARDS CARREGADOS | id_contrato={id_contrato} | qtd={len(cards_rows)}", flush=True)
 
     for idx_card_print, row in enumerate(cards_rows, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"CARD [{idx_card_print}] | "
             f"IDCard={row.get('IDFatoKanbanCard')} | "
             f"Titulo={row.get('Titulo')} | "
@@ -27080,10 +27394,10 @@ def contratos_detalhe(id_contrato: int):
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
     sql_checkins = text("""
-        SELECT
+        SELECT TOP (200)
             ch.IDDimCheckinHistorico,
             ch.DataChekin,
             ch.DataConfirmacao,
@@ -27109,7 +27423,7 @@ def contratos_detalhe(id_contrato: int):
         {"id_contrato": id_contrato},
     ).mappings().all()
 
-    print(f"CHECKINS CARREGADOS | id_contrato={id_contrato} | qtd={len(checkin_rows)}", flush=True)
+    _debug_contrato_detalhe(f"CHECKINS CARREGADOS | id_contrato={id_contrato} | qtd={len(checkin_rows)}", flush=True)
 
     timeline_eventos = []
     user_ids = set()
@@ -27165,7 +27479,7 @@ def contratos_detalhe(id_contrato: int):
     if card_ids:
         sql_mov = text(
             f"""
-            SELECT
+            SELECT TOP (200)
                 m.IDFatoKanbanCard,
                 m.MovidoEm,
                 m.MovidoPor,
@@ -27174,6 +27488,7 @@ def contratos_detalhe(id_contrato: int):
                 m.IDFasePara
             FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m
             WHERE m.IDFatoKanbanCard IN ({', '.join(card_placeholders)})
+            ORDER BY m.MovidoEm DESC, m.IDFatoKanbanCard DESC
             """
         )
 
@@ -27196,7 +27511,7 @@ def contratos_detalhe(id_contrato: int):
 
         sql_obs = text(
             f"""
-            SELECT
+            SELECT TOP (200)
                 o.IDFatoKanbanCard,
                 o.CriadoEm,
                 o.IDDimUsuarios,
@@ -27205,6 +27520,7 @@ def contratos_detalhe(id_contrato: int):
                 o.IDDimKanbanStatusCard
             FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o
             WHERE o.IDFatoKanbanCard IN ({', '.join(card_placeholders)})
+            ORDER BY o.CriadoEm DESC, o.IDFatoKanbanCard DESC
             """
         )
 
@@ -27225,7 +27541,7 @@ def contratos_detalhe(id_contrato: int):
 
         sql_log = text(
             f"""
-            SELECT
+            SELECT TOP (200)
                 l.IDFatoKanbanCard,
                 l.OcorridoEm,
                 l.IDUsuarioAcao,
@@ -27236,6 +27552,7 @@ def contratos_detalhe(id_contrato: int):
                 l.IDFasePara
             FROM [Kanban].[Silver].[FatoKanbanCardLog] l
             WHERE l.IDFatoKanbanCard IN ({', '.join(card_placeholders)})
+            ORDER BY l.OcorridoEm DESC, l.IDFatoKanbanCard DESC
             """
         )
 
@@ -27265,7 +27582,7 @@ def contratos_detalhe(id_contrato: int):
 
         sql_enc = text(
             f"""
-            SELECT
+            SELECT TOP (200)
                 e.IDFatoKanbanCard,
                 e.DataAtualizacao,
                 e.IDDimUsuarios,
@@ -27274,6 +27591,7 @@ def contratos_detalhe(id_contrato: int):
                 e.IDDimKanbanFase
             FROM [Kanban].[Silver].[FatoDimHistoricoEncerramentoCard] e
             WHERE e.IDFatoKanbanCard IN ({', '.join(card_placeholders)})
+            ORDER BY e.DataAtualizacao DESC, e.IDFatoKanbanCard DESC
             """
         )
 
@@ -27299,7 +27617,7 @@ def contratos_detalhe(id_contrato: int):
     if card_ids:
         sql_negociacao_por_cards = text(
             f"""
-            SELECT
+            SELECT TOP (500)
                 fnp.IDFatoKanbanNegociacaoPreco,
                 fnp.IDDimUsuarios,
                 fnp.IDEmpresaProprietaria,
@@ -27367,10 +27685,10 @@ def contratos_detalhe(id_contrato: int):
                 ).mappings().all()
             ]
         except Exception as erro:
-            print("=" * 120, flush=True)
-            print(f"ERRO AO BUSCAR HISTORICO DE NEGOCIACAO POR IDFatoKanbanCard | id_contrato={id_contrato}", flush=True)
-            print(str(erro), flush=True)
-            print("=" * 120, flush=True)
+            _debug_contrato_detalhe("=" * 120, flush=True)
+            _debug_contrato_detalhe(f"ERRO AO BUSCAR HISTORICO DE NEGOCIACAO POR IDFatoKanbanCard | id_contrato={id_contrato}", flush=True)
+            _debug_contrato_detalhe(str(erro), flush=True)
+            _debug_contrato_detalhe("=" * 120, flush=True)
 
             current_app.logger.exception(
                 "CONTRATO_DETALHE | erro ao buscar histórico de negociação por IDFatoKanbanCard | id_contrato=%s",
@@ -27378,8 +27696,8 @@ def contratos_detalhe(id_contrato: int):
             )
             negociacao_rows = []
 
-    print("=" * 120, flush=True)
-    print(
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(
         f"QUERY NEGOCIACAO POR IDFatoKanbanCard | "
         f"id_contrato={id_contrato} | "
         f"qtd_cards={len(card_ids)} | "
@@ -27389,7 +27707,7 @@ def contratos_detalhe(id_contrato: int):
     )
 
     for idx_neg, row in enumerate(negociacao_rows, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"NEGOCIACAO CARD [{idx_neg}] | "
             f"IDCard={row.get('IDFatoKanbanCard')} | "
             f"IDNegociacao={row.get('IDFatoKanbanNegociacaoPreco')} | "
@@ -27405,7 +27723,7 @@ def contratos_detalhe(id_contrato: int):
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
     def _adicionar_negociacao_no_item(item_ref, row_neg):
         if not item_ref:
@@ -27518,7 +27836,7 @@ def contratos_detalhe(id_contrato: int):
     for row in negociacao_rows:
         item_destinos = _resolver_itens_destino_negociacao(row)
 
-        print(
+        _debug_contrato_detalhe(
             f"MAPEANDO NEGOCIACAO POR CARD NO ITEM | "
             f"id_contrato={id_contrato} | "
             f"id_card_negociacao={row.get('IDFatoKanbanCard')} | "
@@ -27589,11 +27907,11 @@ def contratos_detalhe(id_contrato: int):
                 },
             )
 
-    print("=" * 120, flush=True)
-    print(f"RESUMO FINAL HISTORICO NEGOCIACAO | id_contrato={id_contrato} | linhas_negociacao={len(negociacao_rows)}", flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"RESUMO FINAL HISTORICO NEGOCIACAO | id_contrato={id_contrato} | linhas_negociacao={len(negociacao_rows)}", flush=True)
 
     for idx_item_final_neg, item_ref in enumerate(itens, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"ITEM RESUMO NEG [{idx_item_final_neg}] | "
             f"IDItem={item_ref.get('IDFatoControleContratosItensEuromidia')} | "
             f"CodPonto={item_ref.get('CodPonto')} | "
@@ -27606,7 +27924,7 @@ def contratos_detalhe(id_contrato: int):
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
     current_app.logger.info(
         "CONTRATO_DETALHE | negociação carregada por IDFatoKanbanCard vindo da FatoContratoCardEuromidia | id_contrato=%s | qtd_cards=%s | linhas_validas=%s | itens_com_historico=%s | ids_itens=%s",
@@ -28323,12 +28641,12 @@ def contratos_detalhe(id_contrato: int):
         nome_status_atual=nome_status_atual,
     )
 
-    print("=" * 120, flush=True)
-    print(f"ANTES DO RENDER_TEMPLATE | id_contrato={id_contrato}", flush=True)
-    print(f"QTD ITENS={len(itens)} | QTD NEGOCIACOES={len(negociacao_rows)}", flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
+    _debug_contrato_detalhe(f"ANTES DO RENDER_TEMPLATE | id_contrato={id_contrato}", flush=True)
+    _debug_contrato_detalhe(f"QTD ITENS={len(itens)} | QTD NEGOCIACOES={len(negociacao_rows)}", flush=True)
 
     for idx_item_render, item_ref in enumerate(itens, start=1):
-        print(
+        _debug_contrato_detalhe(
             f"ITEM FINAL [{idx_item_render}] | "
             f"IDItem={item_ref.get('IDFatoControleContratosItensEuromidia')} | "
             f"CodPonto={item_ref.get('CodPonto')} | "
@@ -28338,9 +28656,9 @@ def contratos_detalhe(id_contrato: int):
             flush=True,
         )
 
-    print("=" * 120, flush=True)
+    _debug_contrato_detalhe("=" * 120, flush=True)
 
-    return render_template(
+    html_renderizado = render_template(
         "euromidia/contratos_detalhe.html",
         contrato=contrato,
         itens=itens,
@@ -28350,7 +28668,23 @@ def contratos_detalhe(id_contrato: int):
         resumo_atendimentos=resumo_atendimentos,
         diagrama_status=diagrama_status,
         preferencia_reserva_contrato=preferencia_reserva_contrato,
-        return_to=return_to,
+        return_to=placeholder_return_to_contrato,
+        modo_rapido_contrato=False,
+    )
+
+    if not cache_bypass_contrato:
+        try:
+            cache.set(
+                cache_key_contrato_detalhe,
+                html_renderizado,
+                timeout=timeout_cache_contrato_detalhe,
+            )
+        except Exception:
+            pass
+
+    return str(html_renderizado).replace(
+        placeholder_return_to_contrato,
+        str(html_escape(return_to)),
     )
 
 
@@ -29599,4 +29933,3 @@ def _normalizar_filtros_clientes_para_backend(filtros):
         saida["cliente"] = "todos"
 
     return _bloquear_filtros_clientes_sem_permissao(saida)
-
