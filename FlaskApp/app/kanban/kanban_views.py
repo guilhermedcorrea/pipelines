@@ -5974,8 +5974,166 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str, ignorar_cache: bool = Fal
             TIMEOUT_CACHE_LONGO,
         )
 
+
     return existe
 
+
+_CACHE_METADADOS_COLUNAS_SQL_SERVER: dict[tuple[str, str], dict[str, Any] | None] = {}
+
+
+def _obter_metadados_coluna_sql_server(nome_tabela: str, nome_coluna: str) -> dict[str, Any] | None:
+    """Busco tipo e tamanho real da coluna no catálogo do SQL Server.
+
+    Uso o nome completo da tabela, inclusive banco quando vier como
+    [Integracao].[Silver].[Tabela]. Isso é importante porque o Kanban roda em
+    um contexto e grava em tabelas de outro database.
+    """
+    nome_tabela_txt = str(nome_tabela or "").strip()
+    nome_coluna_txt = str(nome_coluna or "").strip().strip("[]").strip()
+
+    if not nome_tabela_txt or not nome_coluna_txt:
+        return None
+
+    banco_nome, schema_nome, tabela_nome = _quebrar_nome_banco_schema_tabela(nome_tabela_txt)
+    if not tabela_nome:
+        return None
+
+    chave = (
+        str(banco_nome or "").strip(),
+        str(schema_nome or "dbo").strip(),
+        str(tabela_nome or "").strip(),
+        nome_coluna_txt,
+    )
+
+    if chave in _CACHE_METADADOS_COLUNAS_SQL_SERVER:
+        return _CACHE_METADADOS_COLUNAS_SQL_SERVER[chave]
+
+    if banco_nome:
+        sql = text(f"""
+            SELECT TOP (1)
+                c.max_length AS max_length,
+                c.precision AS precision,
+                c.scale AS scale,
+                tp.name AS tipo_sql
+            FROM [{banco_nome}].sys.columns AS c
+            INNER JOIN [{banco_nome}].sys.objects AS o
+                ON o.object_id = c.object_id
+            INNER JOIN [{banco_nome}].sys.schemas AS s
+                ON s.schema_id = o.schema_id
+            INNER JOIN [{banco_nome}].sys.types AS tp
+                ON tp.user_type_id = c.user_type_id
+            WHERE s.name = :schema_nome
+              AND o.name = :tabela_nome
+              AND c.name = :nome_coluna;
+        """)
+    else:
+        sql = text("""
+            SELECT TOP (1)
+                c.max_length AS max_length,
+                c.precision AS precision,
+                c.scale AS scale,
+                tp.name AS tipo_sql
+            FROM sys.columns AS c
+            INNER JOIN sys.objects AS o
+                ON o.object_id = c.object_id
+            INNER JOIN sys.schemas AS s
+                ON s.schema_id = o.schema_id
+            INNER JOIN sys.types AS tp
+                ON tp.user_type_id = c.user_type_id
+            WHERE s.name = :schema_nome
+              AND o.name = :tabela_nome
+              AND c.name = :nome_coluna;
+        """)
+
+    try:
+        row = db.session.execute(
+            sql,
+            {
+                "schema_nome": schema_nome or "dbo",
+                "tabela_nome": tabela_nome,
+                "nome_coluna": nome_coluna_txt,
+            },
+        ).mappings().first()
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN_SCHEMA | falha ao consultar metadados da coluna | tabela=%s | coluna=%s",
+            nome_tabela_txt,
+            nome_coluna_txt,
+        )
+        _CACHE_METADADOS_COLUNAS_SQL_SERVER[chave] = None
+        return None
+
+    if not row:
+        _CACHE_METADADOS_COLUNAS_SQL_SERVER[chave] = None
+        return None
+
+    metadados = dict(row)
+    _CACHE_METADADOS_COLUNAS_SQL_SERVER[chave] = metadados
+    return metadados
+
+
+def _tamanho_maximo_texto_coluna_sql_server(nome_tabela: str, nome_coluna: str) -> int | None:
+    """Retorna o limite em caracteres para colunas texto curtas.
+
+    Para varchar/char o max_length já é em bytes/caracteres.
+    Para nvarchar/nchar o max_length vem em bytes, então divido por 2.
+    Para varchar(max), nvarchar(max), text/ntext/xml retorno None.
+    """
+    metadados = _obter_metadados_coluna_sql_server(nome_tabela, nome_coluna)
+    if not metadados:
+        return None
+
+    tipo_sql = str(metadados.get("tipo_sql") or "").strip().lower()
+    if tipo_sql not in {"varchar", "char", "nvarchar", "nchar"}:
+        return None
+
+    max_length = metadados.get("max_length")
+    if max_length in (None, -1):
+        return None
+
+    try:
+        max_length_int = int(max_length)
+    except Exception:
+        return None
+
+    if max_length_int <= 0:
+        return None
+
+    if tipo_sql in {"nvarchar", "nchar"}:
+        return max_length_int // 2
+
+    return max_length_int
+
+
+def _limitar_texto_para_coluna_sql_server(nome_tabela: str, nome_coluna: str, valor: Any) -> Any:
+    """Evita erro 2628 truncando texto antes de INSERT/UPDATE dinâmico.
+
+    A regra é genérica para proteger principalmente OBS de
+    FatoSolicitacaoContratoItemEuromidia, mas também cobre qualquer outra coluna
+    varchar/nvarchar curta usada pelos upserts dinâmicos do Kanban.
+    """
+    if valor is None:
+        return None
+
+    if not isinstance(valor, str):
+        return valor
+
+    texto = valor.replace("\x00", "").strip()
+    if not texto:
+        return None
+
+    tamanho_maximo = _tamanho_maximo_texto_coluna_sql_server(nome_tabela, nome_coluna)
+    if tamanho_maximo not in (None, 0) and len(texto) > int(tamanho_maximo):
+        current_app.logger.warning(
+            "KANBAN_TRUNCAMENTO_PREVENTIVO | tabela=%s | coluna=%s | tamanho_original=%s | tamanho_final=%s",
+            nome_tabela,
+            nome_coluna,
+            len(texto),
+            int(tamanho_maximo),
+        )
+        texto = texto[: int(tamanho_maximo)]
+
+    return texto or None
 
 
 
@@ -6798,7 +6956,7 @@ def _inserir_registro_dinamico(nome_tabela: str, valores: dict[str, Any], coluna
         if valor is None or not _coluna_existe(nome_tabela, coluna):
             continue
         colunas_params.append(coluna)
-        params[coluna] = valor
+        params[coluna] = _limitar_texto_para_coluna_sql_server(nome_tabela, coluna, valor)
 
     for coluna in colunas_getdate:
         if _coluna_existe(nome_tabela, coluna) and coluna not in colunas_params:
@@ -6850,7 +7008,7 @@ def _inserir_registro_dinamico_output_id(
             continue
 
         colunas_parametros.append(coluna)
-        parametros[coluna] = valor
+        parametros[coluna] = _limitar_texto_para_coluna_sql_server(nome_tabela, coluna, valor)
 
     for coluna in colunas_getdate:
         if _coluna_existe(nome_tabela, coluna) and coluna not in colunas_parametros:
@@ -6905,7 +7063,7 @@ def _atualizar_registro_dinamico_por_id(
         if not _coluna_existe(nome_tabela, coluna):
             continue
         sets.append(f"[{coluna}] = :{coluna}")
-        params[coluna] = valor
+        params[coluna] = _limitar_texto_para_coluna_sql_server(nome_tabela, coluna, valor)
 
     for coluna in colunas_getdate:
         if _coluna_existe(nome_tabela, coluna) and coluna not in valores:
@@ -7538,6 +7696,46 @@ def _montar_itens_snapshot_solicitacao_do_card(
     descricao_limpa = (descricao_card or "").strip() or None
     id_tipo_cliente_int = _int_positivo_ou_none_local(id_tipo_cliente)
     eh_renovacao_tag_17 = _card_possui_tag_ativa(int(id_card), ID_TAG_RENOVACAO)
+
+    if eh_renovacao_tag_17:
+        id_reserva_card = None
+        if _coluna_existe(TABELA_CARD, "IDReserva"):
+            try:
+                id_reserva_card = db.session.execute(
+                    text(f"""
+                        SELECT TOP (1) IDReserva
+                        FROM {TABELA_CARD}
+                        WHERE IDFatoKanbanCard = :id_card;
+                    """),
+                    {"id_card": int(id_card)},
+                ).scalar()
+            except Exception:
+                id_reserva_card = None
+
+        id_vencimento_match = re.search(
+            r"RENOVACAO_CAMPANHA_ID_VENCIMENTO\s*=\s*(\d+)",
+            descricao_limpa or "",
+            flags=re.IGNORECASE,
+        )
+
+        partes_obs_renovacao = ["RENOVACAO_CAMPANHA"]
+        if id_vencimento_match:
+            partes_obs_renovacao.append(f"ID_VENC={id_vencimento_match.group(1)}")
+        if id_contrato_existente not in (None, "", 0):
+            partes_obs_renovacao.append(f"CONTRATO={int(id_contrato_existente)}")
+        id_item_origem_obs = _int_positivo_ou_none_local(
+            (item_contrato or {}).get("IDFatoControleContratosItensEuromidia")
+        )
+        if id_item_origem_obs:
+            partes_obs_renovacao.append(f"ITEM_ORIGEM={id_item_origem_obs}")
+        if id_reserva_card not in (None, "", 0):
+            try:
+                partes_obs_renovacao.append(f"IDRESERVA={int(id_reserva_card)}")
+            except Exception:
+                pass
+
+        descricao_limpa = " | ".join(partes_obs_renovacao)
+
     itens_resultado: list[dict[str, Any]] = []
     dados_item_formulario = dict(dados_item_formulario or {}) if isinstance(dados_item_formulario, dict) else {}
     dados_itens_formulario = [

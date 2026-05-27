@@ -13296,7 +13296,237 @@ def _campanhas_vencimentos_descricao_card_renovacao(
         f"- Regra aplicada: começa no primeiro dia após o término e mantém exatamente {int(prazo_dias)} dia(s).",
     ]
 
+    id_reserva_preferencia = _parse_int(campanha.get("IDReservaPreferenciaRenovacao"))
+    reserva_preferencia = campanha.get("ReservaPreferenciaRenovacao") or {}
+    if id_reserva_preferencia:
+        linhas.extend([
+            "",
+            "Reserva de preferência vinculada:",
+            f"- IDReserva: {id_reserva_preferencia}",
+            f"- Período da reserva: {_campanhas_vencimentos_formatar_data_pt(reserva_preferencia.get('DataInicio'))} até {_campanhas_vencimentos_formatar_data_pt(reserva_preferencia.get('DataFim'))}",
+            "- Origem: PREFERENCIA RENOVAÇÃO CONTRATO",
+        ])
+
     return "\n".join(linhas)
+
+
+def _campanhas_vencimentos_buscar_reserva_preferencia_renovacao(campanha: dict) -> dict | None:
+    """Busca a reserva automática de preferência vinculada ao item original da campanha.
+
+    Regra oficial:
+    - a reserva precisa ser da mesma linha de item do contrato;
+    - Origem = RESERVA;
+    - Status = RESERVADO;
+    - CanceladoEm IS NULL;
+    - TipoVinculoOrigem = PREFERENCIA RENOVAÇÃO CONTRATO.
+
+    O campo chave é:
+    FatoOcupacaoPaineisEuromidia.IDFatoControleContratosItemOrigem
+    = FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia.
+    """
+
+    id_item_origem = _parse_int(campanha.get("IDFatoControleContratosItensEuromidia"))
+    if not id_item_origem:
+        return None
+
+    id_contrato = _parse_int(campanha.get("IDFatoControleContratosEuromidia"))
+    cod_ponto = str(campanha.get("CodPonto") or "").strip()
+    cod_face = str(campanha.get("CodFace") or "").strip().upper()
+    data_termino_original = campanha.get("DataTerminoPrevisto")
+
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                   reserva.IDFatoOcupacaoPaineisEuromidia,
+                   reserva.DataAtualizacao,
+                   reserva.Referencia,
+                   reserva.CodPonto,
+                   reserva.CodFace,
+                   reserva.IDPainelEuromidia,
+                   reserva.Origem,
+                   reserva.Status,
+                   CAST(reserva.DataInicio AS date) AS DataInicio,
+                   CAST(reserva.DataFim AS date) AS DataFim,
+                   reserva.LoopInicio,
+                   reserva.LoopFim,
+                   reserva.SpanQtd,
+                   reserva.Cota,
+                   reserva.MarcaExibida,
+                   reserva.Vendedor,
+                   reserva.IDVendedor,
+                   reserva.IDCliente,
+                   reserva.IDFatoControleContratos,
+                   reserva.NumeroContrato,
+                   reserva.NumeroPrevia,
+                   reserva.TextoOriginal,
+                   reserva.CriadoEm,
+                   reserva.CriadoPorIDUsuario,
+                   reserva.ExpiraEm,
+                   reserva.CanceladoEm,
+                   reserva.CanceladoPorIDUsuario,
+                   reserva.Observacao,
+                   reserva.Dias,
+                   reserva.ReservaOrdemPrioridade,
+                   reserva.IDFatoOcupacaoOrigem,
+                   reserva.IDFatoControleContratosItemOrigem,
+                   reserva.TipoVinculoOrigem,
+                   reserva.BitEmpresasRelacionadas
+            FROM {TABELA_OCUPACAO_PAINEIS_EUROMIDIA_ADMIN} AS reserva WITH (NOLOCK)
+            WHERE reserva.IDFatoControleContratosItemOrigem = :id_item_origem
+              AND reserva.CanceladoEm IS NULL
+              AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+              AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+              AND UPPER(LTRIM(RTRIM(ISNULL(reserva.TipoVinculoOrigem, '')))) COLLATE Latin1_General_CI_AI = 'PREFERENCIA RENOVAÇÃO CONTRATO'
+              AND (
+                    :id_contrato IS NULL
+                    OR reserva.IDFatoControleContratos = :id_contrato
+                    OR reserva.IDFatoControleContratos IS NULL
+                  )
+              AND (
+                    :cod_ponto = ''
+                    OR LTRIM(RTRIM(CONVERT(varchar(80), reserva.CodPonto))) = :cod_ponto
+                  )
+              AND (
+                    :cod_face = ''
+                    OR UPPER(LTRIM(RTRIM(ISNULL(reserva.CodFace, '')))) = :cod_face
+                  )
+            ORDER BY
+                CASE
+                    WHEN :data_termino_original IS NOT NULL
+                     AND CAST(reserva.DataInicio AS date) >= DATEADD(DAY, 1, CAST(:data_termino_original AS date))
+                    THEN 0 ELSE 1
+                END,
+                ISNULL(reserva.ReservaOrdemPrioridade, 999999),
+                CAST(reserva.DataInicio AS date) ASC,
+                reserva.IDFatoOcupacaoPaineisEuromidia DESC;
+        """),
+        {
+            "id_item_origem": int(id_item_origem),
+            "id_contrato": int(id_contrato) if id_contrato else None,
+            "cod_ponto": cod_ponto,
+            "cod_face": cod_face,
+            "data_termino_original": data_termino_original,
+        },
+    ).mappings().first()
+
+    return dict(row) if row else None
+
+
+def _campanhas_vencimentos_preparar_campanha_com_reserva_preferencia(campanha: dict) -> dict | None:
+    """Enriquece o dicionário da campanha com a reserva de preferência, quando existir."""
+
+    reserva = _campanhas_vencimentos_buscar_reserva_preferencia_renovacao(campanha)
+    if not reserva:
+        campanha["IDReservaPreferenciaRenovacao"] = None
+        campanha["ReservaPreferenciaRenovacao"] = None
+        return None
+
+    id_reserva = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia"))
+    campanha["IDReservaPreferenciaRenovacao"] = id_reserva
+    campanha["ReservaPreferenciaRenovacao"] = reserva
+    campanha["DataInicioReservaPreferenciaRenovacao"] = reserva.get("DataInicio")
+    campanha["DataFimReservaPreferenciaRenovacao"] = reserva.get("DataFim")
+
+    return reserva
+
+
+def _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
+    *,
+    id_card: int,
+    campanha: dict,
+    reserva: dict | None = None,
+) -> dict:
+    """Vincula a reserva de preferência ao card de renovação.
+
+    Efeitos:
+    1. grava FatoKanbanCard.IDReserva = IDFatoOcupacaoPaineisEuromidia da reserva;
+    2. marca a reserva com [RESERVA_CARD_ATIVO=<id_card>] na Observacao.
+
+    Essa marca é importante porque a API do Kanban usa o IDReserva do card + o marcador
+    na reserva para preencher o campo Reserva no bloco Painel / Face do modal.
+    """
+
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {"ok": False, "motivo": "id_card_invalido"}
+
+    reserva_final = reserva or campanha.get("ReservaPreferenciaRenovacao")
+    if not reserva_final:
+        reserva_final = _campanhas_vencimentos_buscar_reserva_preferencia_renovacao(campanha)
+
+    id_reserva = _parse_int(
+        (reserva_final or {}).get("IDFatoOcupacaoPaineisEuromidia")
+        or campanha.get("IDReservaPreferenciaRenovacao")
+    )
+
+    if not id_reserva:
+        return {"ok": True, "vinculada": False, "motivo": "sem_reserva_preferencia", "id_card": id_card_int}
+
+    atualizou_card = False
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDReserva"):
+        campos_set = ["IDReserva = :id_reserva"]
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "AtualizadoEm"):
+            campos_set.append("AtualizadoEm = GETDATE()")
+
+        db.session.execute(
+            text(f"""
+                UPDATE {TABELA_KANBAN_CARD_RENOVACAO}
+                   SET {', '.join(campos_set)}
+                 WHERE IDFatoKanbanCard = :id_card;
+            """),
+            {
+                "id_card": int(id_card_int),
+                "id_reserva": int(id_reserva),
+            },
+        )
+        atualizou_card = True
+
+    marcador_ativo = f"[RESERVA_CARD_ATIVO={int(id_card_int)}]"
+    texto_vinculo = (
+        f"{marcador_ativo} Reserva de preferência de renovação vinculada automaticamente "
+        f"ao Card {int(id_card_int)} pela tela de vencimentos de campanhas."
+    )
+
+    db.session.execute(
+        text(f"""
+            UPDATE {TABELA_OCUPACAO_PAINEIS_EUROMIDIA_ADMIN}
+               SET Observacao = CASE
+                    WHEN CHARINDEX(:marcador_ativo, COALESCE(CONVERT(varchar(max), Observacao), '')) > 0
+                        THEN Observacao
+                    WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(max), Observacao), ''))), '') IS NULL
+                        THEN :texto_vinculo
+                    ELSE CONCAT(CONVERT(varchar(max), Observacao), ' | ', :texto_vinculo)
+                   END,
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoOcupacaoPaineisEuromidia = :id_reserva
+               AND CanceladoEm IS NULL
+               AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+               AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+               AND UPPER(LTRIM(RTRIM(ISNULL(TipoVinculoOrigem, '')))) COLLATE Latin1_General_CI_AI = 'PREFERENCIA RENOVAÇÃO CONTRATO';
+        """),
+        {
+            "id_reserva": int(id_reserva),
+            "marcador_ativo": marcador_ativo,
+            "texto_vinculo": texto_vinculo,
+        },
+    )
+
+    current_app.logger.info(
+        "RENOVACAO_CAMPANHA_RESERVA | card=%s | reserva=%s | item_origem=%s | contrato=%s | atualizou_card=%s",
+        id_card_int,
+        id_reserva,
+        campanha.get("IDFatoControleContratosItensEuromidia"),
+        campanha.get("IDFatoControleContratosEuromidia"),
+        atualizou_card,
+    )
+
+    return {
+        "ok": True,
+        "vinculada": True,
+        "id_card": id_card_int,
+        "id_reserva": int(id_reserva),
+        "atualizou_card": atualizou_card,
+    }
 
 def _campanhas_vencimentos_card_renovacao_existente(campanha: dict) -> int | None:
     """Evita criar duplicidade se o usuário clicar em Renovar mais de uma vez."""
@@ -13400,6 +13630,7 @@ def _campanhas_vencimentos_criar_card_renovacao(
         )
     )
     id_tipo_documento = _parse_int(campanha.get("IDDimTipoDocumento"))
+    id_reserva_preferencia = _parse_int(campanha.get("IDReservaPreferenciaRenovacao"))
 
     cod_ponto = str(campanha.get("CodPonto") or "").strip()
     cod_face = str(campanha.get("CodFace") or "").strip().upper()
@@ -13490,6 +13721,7 @@ def _campanhas_vencimentos_criar_card_renovacao(
 
     adicionar_coluna_se_existir("CodPontoContrato", "cod_ponto", cod_ponto or None)
     adicionar_coluna_se_existir("CodFaceContrato", "cod_face", cod_face or None)
+    adicionar_coluna_se_existir("IDReserva", "id_reserva_preferencia", id_reserva_preferencia)
     adicionar_coluna_se_existir("Marca", "marca", marca)
     adicionar_coluna_se_existir("NomeEmpresa", "nome_empresa", nome_empresa)
     adicionar_coluna_se_existir("Telefone", "telefone", telefone)
@@ -13509,6 +13741,11 @@ def _campanhas_vencimentos_criar_card_renovacao(
     id_card = int(db.session.execute(sql_insert, params).scalar() or 0)
     if id_card <= 0:
         raise RuntimeError("O INSERT do card de renovação não retornou IDFatoKanbanCard.")
+
+    _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
+        id_card=int(id_card),
+        campanha=campanha,
+    )
 
     _aplicar_tag_no_card_admin(
         id_card=int(id_card),
@@ -13570,6 +13807,7 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
         )
     )
     id_tipo_documento = _parse_int(campanha.get("IDDimTipoDocumento"))
+    id_reserva_preferencia = _parse_int(campanha.get("IDReservaPreferenciaRenovacao"))
 
     marca = str(campanha.get("MarcaExibida") or "").strip() or None
     nome_empresa = str(campanha.get("RazaoSocial") or campanha.get("NomeFantasia") or "").strip() or None
@@ -13603,6 +13841,8 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
     adicionar_set_se_existir("IDEmpresaAgencia", "id_empresa_agencia", _parse_int(campanha.get("IDEmpresaAgencia")))
     adicionar_set_se_existir("IDEmpresaBureau", "id_empresa_bureau", _parse_int(campanha.get("IDEmpresaBureau")))
     adicionar_set_se_existir("IDEmpresaIntermediario", "id_empresa_intermediario", _parse_int(campanha.get("IDEmpresaIntermediario")))
+    if id_reserva_preferencia:
+        adicionar_set_se_existir("IDReserva", "id_reserva_preferencia", id_reserva_preferencia)
 
     if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDFatoControleContratosEuromidia"):
         adicionar_set_se_existir("IDFatoControleContratosEuromidia", "id_contrato", id_contrato)
@@ -13628,6 +13868,11 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
              WHERE IDFatoKanbanCard = :id_card;
         """),
         params,
+    )
+
+    _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
+        id_card=id_card_int,
+        campanha=campanha,
     )
 
     _aplicar_tag_no_card_admin(
@@ -13699,6 +13944,7 @@ def _campanhas_vencimentos_inserir_painel_face_card_renovacao(
     id_contrato = _parse_int(campanha.get("IDFatoControleContratosEuromidia"))
     id_item_contrato = _parse_int(campanha.get("IDFatoControleContratosItensEuromidia"))
     id_tabela_preco = _parse_int(campanha.get("IDDimTabelaPrecosEuromidiaTabela"))
+    id_reserva_preferencia = _parse_int(campanha.get("IDReservaPreferenciaRenovacao"))
 
     periodo_exibicao = _campanhas_vencimentos_primeiro_valor_preenchido(
         campanha.get("PeriodoExibicaoContrato"),
@@ -13740,6 +13986,8 @@ def _campanhas_vencimentos_inserir_painel_face_card_renovacao(
         ("IDFatoControleContratoEuromidia", "id_contrato", id_contrato),
         ("IDFatoControleContratosItensEuromidia", "id_item_contrato", id_item_contrato),
         ("IDFatoControleContratoItemEuromidia", "id_item_contrato", id_item_contrato),
+        ("IDFatoOcupacaoPaineisEuromidia", "id_reserva_preferencia", id_reserva_preferencia),
+        ("IDReserva", "id_reserva_preferencia", id_reserva_preferencia),
         ("TipoPainel", "tipo_painel", tipo_painel),
         ("IDDimTabelaPrecosEuromidia", "id_tabela_preco", id_tabela_preco),
         ("PeriodoExibicao", "periodo_exibicao", periodo_exibicao),
@@ -13916,12 +14164,23 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
         data_inicio_renovacao = data_termino_original + timedelta(days=1)
         data_fim_renovacao = data_inicio_renovacao + timedelta(days=prazo_dias - 1)
 
+        reserva_preferencia = _campanhas_vencimentos_preparar_campanha_com_reserva_preferencia(campanha)
+        id_reserva_preferencia = _parse_int(campanha.get("IDReservaPreferenciaRenovacao"))
+        if reserva_preferencia and reserva_preferencia.get("DataInicio") and reserva_preferencia.get("DataFim"):
+            data_inicio_renovacao = reserva_preferencia.get("DataInicio")
+            data_fim_renovacao = reserva_preferencia.get("DataFim")
+
         id_card_existente = _campanhas_vencimentos_card_renovacao_existente(campanha)
         if id_card_existente:
           
             _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
                 id_card=int(id_card_existente),
                 campanha=campanha,
+            )
+            _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
+                id_card=int(id_card_existente),
+                campanha=campanha,
+                reserva=reserva_preferencia,
             )
 
             if cod_face:
@@ -13939,9 +14198,10 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
             )
 
             db.session.commit()
+            msg_reserva = f" Reserva vinculada: #{id_reserva_preferencia}." if id_reserva_preferencia else ""
             flash(
                 f"Já existia um card de renovação para essa campanha: #{id_card_existente}. "
-                "Garanti novamente o vínculo de painel/face no card.",
+                f"Garanti novamente o vínculo de painel/face no card.{msg_reserva}",
                 "info",
             )
             return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
@@ -13954,11 +14214,13 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
         )
 
         db.session.commit()
+        msg_reserva = f" • Reserva vinculada #{id_reserva_preferencia}" if id_reserva_preferencia else ""
         flash(
             "Card de renovação criado no Kanban 1: "
             f"#{id_card} • {cod_face} • "
             f"{_campanhas_vencimentos_formatar_data_pt(data_inicio_renovacao)} até "
-            f"{_campanhas_vencimentos_formatar_data_pt(data_fim_renovacao)}.",
+            f"{_campanhas_vencimentos_formatar_data_pt(data_fim_renovacao)}"
+            f"{msg_reserva}.",
             "success",
         )
         return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))

@@ -5126,6 +5126,7 @@ def grade_painel(codponto: int):
         .filter(
             FatoControleContratosItensEuromidia.CodPonto == codponto,
             FatoControleContratosItensEuromidia.AtivoCancelamento == "A",
+            sql_text("ISNULL(TRY_CONVERT(INT, [BitAtivo]), 1) = 1"),
             FatoControleContratosItensEuromidia.DataInicioPrevisto != None,
             FatoControleContratosItensEuromidia.DataTerminoPrevisto != None,
             FatoControleContratosItensEuromidia.DataInicioPrevisto < dt_fim_exclusivo,
@@ -5191,6 +5192,85 @@ def grade_painel(codponto: int):
         .all()
     )
 
+    mapa_fim_reserva_preferencia_por_item = {}
+    ids_itens_com_reserva_preferencia_grade = set()
+
+    try:
+        ids_itens_contrato_grade = []
+        for row_item_grade in (rows or []):
+            try:
+                id_item_grade = int(row_item_grade[0] or 0)
+            except Exception:
+                id_item_grade = 0
+
+            if id_item_grade > 0:
+                ids_itens_contrato_grade.append(id_item_grade)
+
+        ids_itens_contrato_grade = sorted(list(dict.fromkeys(ids_itens_contrato_grade)))
+
+        if ids_itens_contrato_grade:
+            sql_fim_reserva_preferencia_grade = sql_text("""
+                SELECT
+                     TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) AS IDFatoControleContratosItensEuromidia
+                    ,MAX(TRY_CONVERT(date, oc.[DataFim])) AS DataFimReservaPreferencia
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+                INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                    ON TRY_CONVERT(int, ci.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem])
+                   AND TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia]) = TRY_CONVERT(int, oc.[IDFatoControleContratos])
+                WHERE TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) IN :ids_itens_contrato_grade
+                  AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Origem], '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+                  AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Status], '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                  AND oc.[CanceladoEm] IS NULL
+                  AND TRY_CONVERT(date, oc.[DataFim]) IS NOT NULL
+                  AND ci.[AtivoCancelamento] = 'A'
+                  AND ISNULL(TRY_CONVERT(int, ci.[BitAtivo]), 1) = 1
+                  AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(ci.[InicioRenovacao], '')))) COLLATE Latin1_General_CI_AI = 'R'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(ci.[TipoDocumento], '')))) COLLATE Latin1_General_CI_AI LIKE '%RENOVACAO%'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(ci.[TipoDocumento], '')))) COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO%'
+                     OR UPPER(ISNULL(ci.[OBS], '')) COLLATE Latin1_General_CI_AI LIKE '%RENOVACAO_CAMPANHA%'
+                     OR UPPER(ISNULL(ci.[OBS], '')) COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO_CAMPANHA%'
+                  )
+                  AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(oc.[TipoVinculoOrigem], '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA RENOVACAO CONTRATO%'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(oc.[TipoVinculoOrigem], '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA RENOVAÇÃO CONTRATO%'
+                     OR UPPER(ISNULL(oc.[Observacao], '')) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA RENOVACAO%'
+                     OR UPPER(ISNULL(oc.[Observacao], '')) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA RENOVAÇÃO%'
+                     OR UPPER(ISNULL(oc.[Observacao], '')) COLLATE Latin1_General_CI_AI LIKE '%RENOVACAO_CAMPANHA%'
+                     OR UPPER(ISNULL(oc.[Observacao], '')) COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO_CAMPANHA%'
+                  )
+                GROUP BY
+                    TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem])
+            """).bindparams(bindparam("ids_itens_contrato_grade", expanding=True))
+
+            rows_fim_reserva_preferencia = db.session.execute(
+                sql_fim_reserva_preferencia_grade,
+                {
+                    "ids_itens_contrato_grade": ids_itens_contrato_grade,
+                },
+            ).mappings().all()
+
+            mapa_fim_reserva_preferencia_por_item = {
+                int(row_pref["IDFatoControleContratosItensEuromidia"]): row_pref["DataFimReservaPreferencia"]
+                for row_pref in (rows_fim_reserva_preferencia or [])
+                if row_pref.get("IDFatoControleContratosItensEuromidia") is not None
+                  and row_pref.get("DataFimReservaPreferencia") is not None
+            }
+
+            ids_itens_com_reserva_preferencia_grade = set(mapa_fim_reserva_preferencia_por_item.keys())
+
+    except Exception as exc:
+        mapa_fim_reserva_preferencia_por_item = {}
+        ids_itens_com_reserva_preferencia_grade = set()
+        try:
+            current_app.logger.warning(
+                "GRADE_RENOVACAO | falha ao mapear reserva de preferência para alongar barra | codponto=%s | erro=%s",
+                codponto,
+                exc,
+            )
+        except Exception:
+            pass
+
     reserva_id_original_por_iditem = {}
     spanqtd_por_iditem_reserva = {}
 
@@ -5247,6 +5327,16 @@ def grade_painel(codponto: int):
             "dt_fim_exclusivo": dt_fim_exclusivo,
         },
     ).fetchall()
+
+    if ids_itens_com_reserva_preferencia_grade:
+        rows_reservas_raw = [
+            rr for rr in (rows_reservas_raw or [])
+            if not (
+                len(rr) > 16
+                and rr[16] is not None
+                and int(rr[16]) in ids_itens_com_reserva_preferencia_grade
+            )
+        ]
 
     if faces:
         faces_grade_ci = {str(f or "").strip().casefold() for f in faces if str(f or "").strip()}
@@ -5921,6 +6011,23 @@ def grade_painel(codponto: int):
                 continue
 
             df = _fim_efetivo_item(df_prev, dc)
+
+            try:
+                eh_reserva_tmp = int(_id_item) < 0
+            except Exception:
+                eh_reserva_tmp = False
+
+            if not eh_reserva_tmp:
+                try:
+                    df_reserva_preferencia = mapa_fim_reserva_preferencia_por_item.get(int(_id_item))
+                except Exception:
+                    df_reserva_preferencia = None
+
+                df_reserva_preferencia = _coerce_to_date(df_reserva_preferencia)
+
+                if df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
+                    df = df_reserva_preferencia
+
             if df is None:
                 continue
 
@@ -6136,6 +6243,23 @@ def grade_painel(codponto: int):
                 continue
 
             df = _fim_efetivo_item(df_prev, dc)
+
+            try:
+                eh_reserva_tmp = int(_id_item) < 0
+            except Exception:
+                eh_reserva_tmp = False
+
+            if not eh_reserva_tmp:
+                try:
+                    df_reserva_preferencia = mapa_fim_reserva_preferencia_por_item.get(int(_id_item))
+                except Exception:
+                    df_reserva_preferencia = None
+
+                df_reserva_preferencia = _coerce_to_date(df_reserva_preferencia)
+
+                if df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
+                    df = df_reserva_preferencia
+
             if df is None:
                 continue
 
@@ -6392,6 +6516,16 @@ def grade_painel(codponto: int):
 
             df = _fim_efetivo_item(df_prev, dc)
             df = _coerce_to_date(df)
+
+            try:
+                df_reserva_preferencia = mapa_fim_reserva_preferencia_por_item.get(int(id_item))
+            except Exception:
+                df_reserva_preferencia = None
+
+            df_reserva_preferencia = _coerce_to_date(df_reserva_preferencia)
+
+            if df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
+                df = df_reserva_preferencia
 
             if df is None:
                 continue
