@@ -13867,6 +13867,10 @@ def _campanhas_vencimentos_inserir_painel_face_card_renovacao(
         "cod_face": cod_face,
     }
 
+
+
+
+
 @admin.route("/vencimentos-campanhas/<int:id_vencimento>/renovar", methods=["POST"])
 @login_required
 @limiter.limit("60 per minute", methods=["POST"])
@@ -13914,10 +13918,7 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
 
         id_card_existente = _campanhas_vencimentos_card_renovacao_existente(campanha)
         if id_card_existente:
-            # Quando o card já existe, eu NÃO posso só redirecionar.
-            # Cards antigos de renovação podem ter sido criados sem a linha operacional
-            # em Kanban.Silver.FatoKanbanCardPainelFace e também sem IDEmpresa/IDDimCnaes
-            # no cadastro principal do card. Por isso eu atualizo o cabeçalho e a face.
+          
             _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
                 id_card=int(id_card_existente),
                 campanha=campanha,
@@ -13974,6 +13975,12 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
         )
         flash(f"Erro ao criar card de renovação: {exc}", "danger")
         return redirect(url_falha)
+
+
+
+
+
+
 
 @admin.route("/campanhas/vencimentos", methods=["GET"])
 @admin.route("/vencimentos-campanhas", methods=["GET"])

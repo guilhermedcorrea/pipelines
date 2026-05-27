@@ -43,6 +43,7 @@
 
   .vc-card{
     width:100%;
+    max-width:100%;
     min-height:calc(100vh - 170px);
     display:flex;
     flex-direction:column;
@@ -69,24 +70,30 @@
 
   .vc-form{
     width:100%;
-    display:grid;
-    grid-template-columns:minmax(300px, 1.2fr) minmax(380px, 520px) minmax(180px, 230px) minmax(180px, 240px) minmax(180px, 240px) auto auto;
-    align-items:start;
+    max-width:100%;
+    min-width:0;
+    display:flex;
+    align-items:flex-start;
+    justify-content:flex-start;
+    flex-wrap:wrap;
     gap:10px;
   }
 
-  .vc-form .btn{
+  .vc-form .btn,
+  .vc-form a.btn{
     min-height:40px;
     display:inline-flex;
     align-items:center;
     justify-content:center;
     white-space:nowrap;
+    flex:0 0 auto;
   }
 
   .vc-search-combobox{
     position:relative;
     width:100%;
-    min-width:0;
+    min-width:260px;
+    flex:2 1 340px;
   }
 
   .vc-search-box{
@@ -221,7 +228,8 @@
   .vc-dd{
     position:relative;
     width:100%;
-    min-width:0;
+    min-width:150px;
+    flex:1 1 180px;
   }
 
   .vc-dd-summary{
@@ -358,6 +366,7 @@
   .periodo-topbar{
     display:flex;
     align-items:center;
+    flex-wrap:wrap;
     gap:8px;
     padding:8px;
     border:1px solid rgba(15,23,42,.14);
@@ -398,8 +407,11 @@
 
   .periodo-open{
     margin-left:auto;
+    min-width:150px;
+    flex:1 1 150px;
     display:inline-flex;
     align-items:center;
+    justify-content:space-between;
     gap:8px;
     height: 32px;
     padding: 0 11px;
@@ -615,7 +627,8 @@
 
   .vc-form .periodo-shell{
     max-width:none;
-    min-width:0;
+    min-width:300px;
+    flex:2 1 430px;
   }
 
   .vc-form .periodo-topbar{
@@ -675,24 +688,28 @@
 
   .vc-table-wrap{
     width:100%;
+    max-width:100%;
     flex:1 1 auto;
-    overflow:auto;
+    overflow-x:auto;
+    overflow-y:visible;
     -webkit-overflow-scrolling:touch;
   }
 
   .vc-table{
     width:100%;
-    min-width:1500px;
+    min-width:1320px;
     border-collapse:separate;
     border-spacing:0;
+    table-layout:auto;
   }
 
   .vc-table th,
   .vc-table td{
-    padding:12px 10px;
+    padding:11px 9px;
     border-bottom:1px solid var(--border);
     vertical-align:middle;
     font-size:13px;
+    line-height:1.25;
   }
 
   .vc-table th{
@@ -743,8 +760,8 @@
   .vc-razao{
     font-weight:900;
     color:var(--text);
-    min-width:220px;
-    max-width:420px;
+    min-width:190px;
+    max-width:340px;
     white-space:normal;
     overflow-wrap:anywhere;
   }
@@ -752,8 +769,8 @@
   .vc-marca{
     color:#334155;
     font-weight:850;
-    min-width:130px;
-    max-width:260px;
+    min-width:110px;
+    max-width:220px;
     white-space:normal;
     overflow-wrap:anywhere;
   }
@@ -911,6 +928,24 @@
     font-weight:800;
   }
 
+  @media (max-width: 1400px){
+    .vc-search-combobox{
+      flex-basis:300px;
+    }
+
+    .vc-form .periodo-shell{
+      flex-basis:360px;
+    }
+
+    .vc-dd{
+      flex-basis:160px;
+    }
+
+    .vc-table{
+      min-width:1260px;
+    }
+  }
+
   @media (max-width: 1200px){
     .vc-page{
       padding-left:12px;
@@ -918,11 +953,28 @@
     }
 
     .vc-form{
-      grid-template-columns:minmax(320px, 1fr) minmax(360px, 1fr) minmax(200px, 240px);
+      align-items:stretch;
     }
 
-    .vc-form .btn{
-      width:100%;
+    .vc-search-combobox{
+      flex:1 1 100%;
+      min-width:0;
+    }
+
+    .vc-form .periodo-shell{
+      flex:1 1 420px;
+      min-width:260px;
+    }
+
+    .vc-dd{
+      flex:1 1 185px;
+      min-width:0;
+    }
+
+    .vc-form .btn,
+    .vc-form a.btn{
+      flex:1 1 120px;
+      width:auto;
     }
 
     .vc-table{
@@ -937,12 +989,22 @@
   }
 
   @media (max-width: 900px){
-    .vc-form{
-      grid-template-columns:1fr 1fr;
+    .vc-search-combobox,
+    .vc-form .periodo-shell{
+      flex:1 1 100%;
+      max-width:none;
+      min-width:0;
     }
 
-    .vc-search-combobox{
-      grid-column:1 / -1;
+    .vc-dd{
+      flex:1 1 calc(50% - 8px);
+      min-width:0;
+    }
+
+    .vc-form .btn,
+    .vc-form a.btn{
+      flex:1 1 calc(50% - 8px);
+      width:auto;
     }
 
     .vc-footer{
@@ -972,13 +1034,58 @@
     }
 
     .vc-form{
-      grid-template-columns:1fr;
+      display:flex;
+      flex-direction:column;
+      flex-wrap:nowrap;
+      align-items:stretch;
+      gap:9px;
     }
 
     .vc-form .btn,
+    .vc-form a.btn,
     .vc-search-combobox,
-    .vc-dd{
+    .vc-dd,
+    .vc-form .periodo-shell{
       width:100%;
+      max-width:none;
+      min-width:0;
+      flex:0 0 auto;
+    }
+
+    .periodo-topbar{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      align-items:stretch;
+      gap:7px;
+    }
+
+    .periodo-chip,
+    .periodo-open{
+      width:100%;
+      min-width:0;
+      margin-left:0;
+      justify-content:center;
+    }
+
+    .periodo-open{
+      grid-column:1 / -1;
+      justify-content:space-between;
+    }
+
+    .periodo-panel{
+      position:static;
+      width:100%;
+      max-width:100%;
+      margin-top:8px;
+      box-shadow:0 8px 24px rgba(15,23,42,.12);
+    }
+
+    .periodo-range{
+      grid-template-columns:1fr;
+    }
+
+    .periodo-meses{
+      grid-template-columns:repeat(2, 1fr);
     }
 
     .vc-dd-panel,
@@ -1007,7 +1114,7 @@
     }
 
     .vc-table tr{
-      margin:12px;
+      margin:10px 0;
       border:1px solid var(--border);
       border-radius:14px;
       overflow:hidden;
@@ -1023,7 +1130,7 @@
       display:flex;
       align-items:flex-start;
       justify-content:space-between;
-      gap:14px;
+      gap:12px;
       padding:10px 12px;
       border-bottom:1px solid var(--border);
       text-align:right;
@@ -1035,13 +1142,17 @@
 
     .vc-table td::before{
       content:attr(data-label);
-      flex:0 0 112px;
+      flex:0 0 104px;
       text-align:left;
       color:#64748B;
       font-size:11px;
       font-weight:950;
       text-transform:uppercase;
       letter-spacing:.03em;
+    }
+
+    .vc-table td > *{
+      min-width:0;
     }
 
     .vc-table td.vc-empty{
@@ -1060,10 +1171,46 @@
       text-align:right;
     }
 
-    .vc-data{
+    .vc-painel,
+    .vc-badge,
+    .vc-bit,
+    .vc-dias,
+    .vc-renovar-btn{
       white-space:normal;
     }
+
+    .vc-data,
+    .vc-valor{
+      white-space:normal;
+      overflow-wrap:anywhere;
+    }
   }
+
+  @media (max-width: 420px){
+    .periodo-topbar{
+      grid-template-columns:1fr;
+    }
+
+    .periodo-open{
+      grid-column:auto;
+    }
+
+    .vc-table td{
+      flex-direction:column;
+      align-items:stretch;
+      text-align:left;
+    }
+
+    .vc-table td::before{
+      flex:0 0 auto;
+    }
+
+    .vc-razao,
+    .vc-marca{
+      text-align:left;
+    }
+  }
+
 </style>
 
 <div class="container container-limit vc-page">
@@ -1360,7 +1507,7 @@
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="11" class="vc-empty">Nenhuma campanha encontrada.</td>
+              <td colspan="12" class="vc-empty">Nenhuma campanha encontrada.</td>
             </tr>
           {% endif %}
         </tbody>

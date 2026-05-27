@@ -4741,7 +4741,7 @@ def grade_painel(codponto: int):
         db.session.query(
             DimFacesPaineis.IDDimPaineisEuromidia,
             DimFacesPaineis.CodFace,
-            DimFacesPaineis.Tipo,
+            func.coalesce(DimFacesPaineis.Tipo, DimPaineisEuromidia.Tipo).label("TipoPainel"),
             DimPaineisEuromidia.Exibidora,
             DimPaineisEuromidia.QuantidadeFaces,
         )
@@ -4831,6 +4831,21 @@ def grade_painel(codponto: int):
 
     if tem_filtro_codface:
         faces = [f for f in faces if f.casefold() in filtros_codface_ci]
+
+    ids_paineis_grade = []
+    try:
+        ids_paineis_grade = sorted(
+            {
+                int(idpainel)
+                for (idpainel, _cf, _tp, _ex, _qf) in (faces_info or [])
+                if idpainel not in (None, "")
+            }
+        )
+    except Exception:
+        ids_paineis_grade = []
+
+    if not ids_paineis_grade:
+        ids_paineis_grade = [-1]
 
     eh_digital = any(((tp or "").strip().upper() == "PAINEL DIGITAL") for (_, _, tp, _, _) in (faces_info or []))
 
@@ -5179,45 +5194,72 @@ def grade_painel(codponto: int):
     reserva_id_original_por_iditem = {}
     spanqtd_por_iditem_reserva = {}
 
-    rows_reservas_raw = (
-        db.session.query(
-            FatoOcupacaoPaineisEuromidia.IDFatoOcupacaoPaineisEuromidia,
-            FatoOcupacaoPaineisEuromidia.IDFatoControleContratos,
-            FatoOcupacaoPaineisEuromidia.CodFace,
-            FatoOcupacaoPaineisEuromidia.MarcaExibida,
-            FatoOcupacaoPaineisEuromidia.Vendedor,
-            FatoOcupacaoPaineisEuromidia.DataInicio,
-            FatoOcupacaoPaineisEuromidia.DataFim,
-            FatoOcupacaoPaineisEuromidia.Cota,
-            FatoOcupacaoPaineisEuromidia.NumeroContrato,
-            FatoOcupacaoPaineisEuromidia.NumeroPrevia,
-            FatoOcupacaoPaineisEuromidia.Status,
-            FatoOcupacaoPaineisEuromidia.Origem,
-            FatoOcupacaoPaineisEuromidia.LoopInicio,
-            FatoOcupacaoPaineisEuromidia.LoopFim,
-            FatoOcupacaoPaineisEuromidia.SpanQtd,
-        )
-        .filter(
-            FatoOcupacaoPaineisEuromidia.CodPonto == codponto,
-            FatoOcupacaoPaineisEuromidia.Origem == "RESERVA",
-            FatoOcupacaoPaineisEuromidia.Status == "RESERVADO",
-            FatoOcupacaoPaineisEuromidia.DataInicio != None,
-            FatoOcupacaoPaineisEuromidia.DataInicio <= dt_fim,
-            FatoOcupacaoPaineisEuromidia.DataFim >= dt_ini,
-        )
-        .all()
-    )
+    # Reservas da grade
+    #
+    # Eu busco por SQL explícito para tratar Status/Origem com espaço,
+    # DataInicio/DataFim como datetime e reserva cancelada ainda com Status antigo.
+    # Regra pedida: CodPonto não usa TRY_CONVERT; compara direto com o valor da rota.
+    sql_reservas_grade = sql_text("""
+        SELECT
+             TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) AS IDFatoOcupacaoPaineisEuromidia
+            ,TRY_CONVERT(int, oc.[IDFatoControleContratos]) AS IDFatoControleContratos
+            ,LTRIM(RTRIM(ISNULL(oc.[CodFace], ''))) AS CodFace
+            ,oc.[MarcaExibida]
+            ,oc.[Vendedor]
+            ,TRY_CONVERT(date, oc.[DataInicio]) AS DataInicio
+            ,TRY_CONVERT(date, oc.[DataFim]) AS DataFim
+            ,oc.[Cota]
+            ,oc.[NumeroContrato]
+            ,oc.[NumeroPrevia]
+            ,LTRIM(RTRIM(ISNULL(oc.[Status], ''))) AS Status
+            ,LTRIM(RTRIM(ISNULL(oc.[Origem], ''))) AS Origem
+            ,oc.[LoopInicio]
+            ,oc.[LoopFim]
+            ,TRY_CONVERT(int, oc.[SpanQtd]) AS SpanQtd
+            ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
+            ,TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) AS IDFatoControleContratosItemOrigem
+            ,LTRIM(RTRIM(ISNULL(oc.[TipoVinculoOrigem], ''))) AS TipoVinculoOrigem
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+        WHERE (
+                oc.[CodPonto] = :codponto
+                OR TRY_CONVERT(int, oc.[IDPainelEuromidia]) IN :ids_paineis_grade
+              )
+          AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Origem], '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+          AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Status], '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+          AND oc.[CanceladoEm] IS NULL
+          AND TRY_CONVERT(date, oc.[DataInicio]) IS NOT NULL
+          AND TRY_CONVERT(date, oc.[DataFim]) IS NOT NULL
+          AND TRY_CONVERT(date, oc.[DataInicio]) < :dt_fim_exclusivo
+          AND TRY_CONVERT(date, oc.[DataFim]) >= :dt_ini
+        ORDER BY
+             LTRIM(RTRIM(ISNULL(oc.[CodFace], ''))) ASC
+            ,TRY_CONVERT(date, oc.[DataInicio]) ASC
+            ,TRY_CONVERT(date, oc.[DataFim]) ASC
+            ,TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) ASC;
+    """).bindparams(bindparam("ids_paineis_grade", expanding=True))
+
+    rows_reservas_raw = db.session.execute(
+        sql_reservas_grade,
+        {
+            "codponto": codponto,
+            "ids_paineis_grade": list(ids_paineis_grade or [-1]),
+            "dt_ini": dt_ini,
+            "dt_fim_exclusivo": dt_fim_exclusivo,
+        },
+    ).fetchall()
 
     if faces:
+        faces_grade_ci = {str(f or "").strip().casefold() for f in faces if str(f or "").strip()}
+
         if tem_filtro_codface:
             rows_reservas_raw = [
                 rr for rr in (rows_reservas_raw or [])
-                if (_normalizar_codface(rr[2]) in faces)
+                if (_normalizar_codface(rr[2]).casefold() in faces_grade_ci)
             ]
         else:
             rows_reservas_raw = [
                 rr for rr in (rows_reservas_raw or [])
-                if (_normalizar_codface(rr[2]) in faces) or (rr[2] is None)
+                if (_normalizar_codface(rr[2]).casefold() in faces_grade_ci) or (rr[2] is None)
             ]
 
     if filtro_cliente:
@@ -5274,6 +5316,27 @@ def grade_painel(codponto: int):
         else:
             rows_reservas_raw = []
 
+    try:
+        ids_reservas_debug = []
+        for rr_debug in (rows_reservas_raw or []):
+            try:
+                ids_reservas_debug.append(int(rr_debug[0]))
+            except Exception:
+                pass
+
+        current_app.logger.warning(
+            "GRADE_RESERVAS | codponto=%s | ids_paineis=%s | dt_ini=%s | dt_fim=%s | faces=%s | reservas_encontradas=%s | ids=%s",
+            codponto,
+            list(ids_paineis_grade or []),
+            dt_ini,
+            dt_fim,
+            list(faces or []),
+            len(rows_reservas_raw or []),
+            ids_reservas_debug[:30],
+        )
+    except Exception:
+        pass
+
     rows_reservas = []
     for rr in (rows_reservas_raw or []):
         _id_res = rr[0]
@@ -5287,6 +5350,7 @@ def grade_painel(codponto: int):
         _num_contrato = rr[8]
         _num_previa = rr[9]
         _span_qtd = rr[14]
+        _id_vendedor_res = rr[15] if len(rr) > 15 else None
 
         try:
             id_res_int = int(_id_res)
@@ -5320,7 +5384,7 @@ def grade_painel(codponto: int):
                 _num_previa,
                 None,
                 None,
-                None,
+                _id_vendedor_res,
             )
         )
 
@@ -5739,16 +5803,75 @@ def grade_painel(codponto: int):
         except:
             return None, None, None
 
-    def _span_por_cota(cota_val):
-        try:
-            c = int(str(cota_val).strip())
-        except:
-            return 1
+    def _span_por_cota(cota_val, span_qtd_val=None, usar_span_qtd_fallback: bool = False):
+        """
+        Eu traduzo a cota em quantidade de slots na grade digital.
+
+        Correção importante:
+        - no SQL Server a cota pode vir como Decimal, float, '1080.00' ou '1080,00';
+        - int(str(valor)) quebra nesses casos e derruba a reserva para 1 slot errado;
+        - quando for reserva automática, posso usar SpanQtd como fallback seguro.
+        """
+        if usar_span_qtd_fallback:
+            try:
+                span_tmp = int(float(str(span_qtd_val or "").strip().replace(",", ".")))
+                if span_tmp > 0:
+                    return span_tmp
+            except Exception:
+                pass
+
+        def _cota_para_int(valor):
+            if valor in (None, ""):
+                return 0
+
+            if isinstance(valor, Decimal):
+                try:
+                    return int(valor)
+                except Exception:
+                    return int(float(valor))
+
+            if isinstance(valor, (int, float)):
+                try:
+                    return int(round(float(valor)))
+                except Exception:
+                    return 0
+
+            texto = str(valor or "").strip()
+            if not texto:
+                return 0
+
+            texto = texto.replace("R$", "").replace(" ", "")
+
+            if "," in texto and "." in texto:
+                texto = texto.replace(".", "").replace(",", ".")
+            elif "," in texto:
+                texto = texto.replace(",", ".")
+            elif "." in texto:
+                partes = texto.split(".")
+                if len(partes) == 2 and len(partes[1]) == 3 and len(partes[0]) <= 3:
+                    texto = texto.replace(".", "")
+
+            try:
+                return int(Decimal(texto))
+            except Exception:
+                try:
+                    return int(round(float(texto)))
+                except Exception:
+                    return 0
+
+        c = _cota_para_int(cota_val)
 
         if c == 1080:
             return 2
 
         if c == 540:
+            return 1
+
+        # Compatibilidade com cadastros antigos que gravavam 1/2 no lugar de 1080/540.
+        if c == 1:
+            return 2
+
+        if c == 2:
             return 1
 
         return 1
@@ -5812,17 +5935,21 @@ def grade_painel(codponto: int):
             if cf not in itens_por_face:
                 continue
 
-            spans_grade = int(_span_por_cota(cota) or 1)
-            if spans_grade <= 0:
-                spans_grade = 1
-            if spans_grade > len(LOOPS_PERMITIDOS):
-                spans_grade = len(LOOPS_PERMITIDOS)
-
             eh_reserva = False
             try:
                 eh_reserva = int(_id_item) < 0
             except:
                 eh_reserva = False
+
+            spans_grade = int(_span_por_cota(
+                cota,
+                span_qtd_val=spanqtd_por_iditem_reserva.get(int(_id_item)) if eh_reserva else None,
+                usar_span_qtd_fallback=bool(eh_reserva),
+            ) or 1)
+            if spans_grade <= 0:
+                spans_grade = 1
+            if spans_grade > len(LOOPS_PERMITIDOS):
+                spans_grade = len(LOOPS_PERMITIDOS)
 
             id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
             marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
