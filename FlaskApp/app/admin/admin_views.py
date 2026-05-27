@@ -3979,9 +3979,84 @@ def _normalizar_card_renovacao_admin(
 
 
 def _obter_data_aprovacao_sql_server_admin():
-    """Uso a data do SQL Server para gravar DataInicioPrevisto da renovação aprovada."""
+    """Uso a data do SQL Server como data oficial da aprovação do contrato."""
 
     return db.session.execute(text("SELECT CAST(GETDATE() AS date) AS DataAprovacao")).scalar()
+
+
+def _normalizar_data_aprovacao_admin(valor) -> date | None:
+    """Converte date/datetime/string para date, sem inventar data quando o valor vem vazio."""
+
+    if valor in (None, ""):
+        return None
+
+    if isinstance(valor, datetime):
+        return valor.date()
+
+    if isinstance(valor, date):
+        return valor
+
+    valor_parseado = _data_ou_none(valor)
+    if isinstance(valor_parseado, datetime):
+        return valor_parseado.date()
+
+    if isinstance(valor_parseado, date):
+        return valor_parseado
+
+    return None
+
+
+def _resolver_periodo_item_aprovacao_admin(
+    *,
+    item_solicitacao: dict,
+    data_aprovacao_sql_server,
+    eh_renovacao: bool,
+    id_solicitacao: int | None = None,
+    id_item_solicitacao: int | None = None,
+) -> dict:
+    """Resolve as datas que vão para FatoControleContratosItensEuromidia na aprovação.
+
+    Regras:
+    - DataAssinaturaRenovacao sempre recebe a data real da aprovação.
+    - Contrato novo usa o período gravado na solicitação.
+    - Renovação começa na data da aprovação e termina na data informada pelo usuário.
+    - Renovação sem DataTerminoPrevisto informada não pode copiar a data do item antigo em silêncio.
+    """
+
+    data_aprovacao = _normalizar_data_aprovacao_admin(data_aprovacao_sql_server) or date.today()
+
+    if eh_renovacao:
+        data_termino_informada = item_solicitacao.get("_DataTerminoPrevistoInformadaUsuario")
+        data_termino = _normalizar_data_aprovacao_admin(data_termino_informada)
+
+        if data_termino is None:
+            data_termino = _normalizar_data_aprovacao_admin(item_solicitacao.get("DataTerminoPrevisto"))
+
+        if data_termino is None:
+            raise RuntimeError(
+                "Não foi possível aprovar a renovação porque DataTerminoPrevisto não foi informada no item da solicitação. "
+                f"IDSolicitacao={id_solicitacao}; IDItemSolicitacao={id_item_solicitacao}. "
+                "Informe a data de término da renovação antes de aprovar."
+            )
+
+        if data_termino < data_aprovacao:
+            raise RuntimeError(
+                "Não foi possível aprovar a renovação porque DataTerminoPrevisto ficou menor que a data da aprovação. "
+                f"IDSolicitacao={id_solicitacao}; IDItemSolicitacao={id_item_solicitacao}; "
+                f"DataAprovacao={data_aprovacao}; DataTerminoPrevisto={data_termino}."
+            )
+
+        return {
+            "DataAssinaturaRenovacao": data_aprovacao,
+            "DataInicioPrevisto": data_aprovacao,
+            "DataTerminoPrevisto": data_termino,
+        }
+
+    return {
+        "DataAssinaturaRenovacao": data_aprovacao,
+        "DataInicioPrevisto": item_solicitacao.get("DataInicioPrevisto"),
+        "DataTerminoPrevisto": item_solicitacao.get("DataTerminoPrevisto"),
+    }
 
 
 def _resolver_id_card_aprovacao_solicitacao_admin(cabecalho_solicitacao: dict | None, itens_solicitacao: list[dict] | None = None) -> int | None:
@@ -4517,6 +4592,9 @@ def _obter_itens_solicitacao_brutos(id_solicitacao: int) -> list[dict]:
     itens: list[dict] = []
     for row in rows:
         item = dict(row)
+        item["_DataAssinaturaRenovacaoInformadaUsuario"] = item.get("DataAssinaturaRenovacao")
+        item["_DataInicioPrevistoInformadaUsuario"] = item.get("DataInicioPrevisto")
+        item["_DataTerminoPrevistoInformadaUsuario"] = item.get("DataTerminoPrevisto")
         item = _aplicar_fallback_layout_item_solicitacao(item, cab)
         item["CodPonto"] = _texto_ou_none(item.get("CodPonto") or item.get("CodPontoOriginal"))
         item["CodFace"] = _texto_ou_none(item.get("CodFace") or item.get("CodFaceOriginal"))
@@ -4550,6 +4628,15 @@ def _upsert_item_controle_a_partir_item_solicitacao(
     id_item_controle_origem = _int_ou_none(item_solicitacao.get("IDFatoControleContratosItensEuromidia"))
     cod_ponto = item_solicitacao.get("CodPonto")
     cod_face = item_solicitacao.get("CodFace")
+    eh_renovacao_item = str(item_solicitacao.get("InicioRenovacao") or "").strip().upper() == "R"
+    data_aprovacao_sql_server = _obter_data_aprovacao_sql_server_admin()
+    periodo_item_aprovacao = _resolver_periodo_item_aprovacao_admin(
+        item_solicitacao=item_solicitacao,
+        data_aprovacao_sql_server=data_aprovacao_sql_server,
+        eh_renovacao=eh_renovacao_item,
+        id_solicitacao=item_solicitacao.get("IDFatoSolicitacaoContratoEuromidia"),
+        id_item_solicitacao=item_solicitacao.get("IDFatoSolicitacaoContratoItemEuromidia"),
+    )
 
     row_existente = db.session.execute(
         text("""
@@ -4623,11 +4710,11 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         "CnpjBureau": item_solicitacao.get("CnpjBureau"),
         "Intermediario": item_solicitacao.get("Intermediario"),
         "CnpjIntermediario": item_solicitacao.get("CnpjIntermediario"),
-        "DataAssinaturaRenovacao": item_solicitacao.get("DataAssinaturaRenovacao"),
+        "DataAssinaturaRenovacao": periodo_item_aprovacao["DataAssinaturaRenovacao"],
         "IDTrimestre": item_solicitacao.get("IDTrimestre"),
         "TexmpoExposicao": item_solicitacao.get("TexmpoExposicao"),
-        "DataInicioPrevisto": item_solicitacao.get("DataInicioPrevisto"),
-        "DataTerminoPrevisto": item_solicitacao.get("DataTerminoPrevisto"),
+        "DataInicioPrevisto": periodo_item_aprovacao["DataInicioPrevisto"],
+        "DataTerminoPrevisto": periodo_item_aprovacao["DataTerminoPrevisto"],
         "InicioRenovacao": item_solicitacao.get("InicioRenovacao"),
         "FaturamentoBrutoMensal": item_solicitacao.get("FaturamentoBrutoMensal"),
         "PercentualPermuta": item_solicitacao.get("PercentualPermuta"),
@@ -4669,7 +4756,7 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         "Status": _normalizar_status_item_aprovacao(item_solicitacao.get("Status")),
         "IDDimCheckinHistorico": item_solicitacao.get("IDDimCheckinHistorico"),
         "IDFatoKanbanCard": item_solicitacao.get("IDFatoKanbanCard"),
-        "BitAtivo": item_solicitacao.get("BitAtivo") if item_solicitacao.get("BitAtivo") is not None else 1,
+        "BitAtivo": 1,
         "IDEmpresaAgencia": item_solicitacao.get("IDEmpresaAgencia"),
     }
 
@@ -7374,7 +7461,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "NumeroContrato": cab.get("NumeroContrato"),
         "NumeroPrevia": cab.get("NumeroPrevia"),
         "CNPJ": cab.get("CNPJ"),
-        "DataAssinaturaRenovacao": cab.get("DataAssinaturaRenovacao"),
+        "DataAssinaturaRenovacao": data_aprovacao_sql_server,
         "IDTrimestre": cab.get("IDTrimestre"),
         "DataLancamento": cab.get("DataLancamento"),
         "RazaoSocial": cab.get("RazaoSocial"),
@@ -7578,6 +7665,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
 
             item["InicioRenovacao"] = "R"
             item["BitAtivo"] = 1
+            item["DataAssinaturaRenovacao"] = data_aprovacao_sql_server
             item["DataInicioPrevisto"] = data_aprovacao_sql_server
 
             current_app.logger.warning(
@@ -7648,6 +7736,14 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             id_card=(item.get("IDFatoKanbanCard") or cab.get("IDFatoKanbanCard") or id_card_cabecalho),
         )
 
+        periodo_item_aprovacao = _resolver_periodo_item_aprovacao_admin(
+            item_solicitacao=item,
+            data_aprovacao_sql_server=data_aprovacao_sql_server,
+            eh_renovacao=bool(card_tem_tag_renovacao),
+            id_solicitacao=int(id_solicitacao),
+            id_item_solicitacao=id_item_solicitacao,
+        )
+
         params_item = {
             "IDFatoControleContratoEuromidia": int(id_contrato_controle),
             "Referencia": referencia_item_resolvida,
@@ -7675,11 +7771,11 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "CnpjBureau": item.get("CnpjBureau") or cab.get("CnpjBureau"),
             "Intermediario": item.get("Intermediario") or cab.get("Intermediario"),
             "CnpjIntermediario": item.get("CnpjIntermediario") or cab.get("CnpjIntermediario"),
-            "DataAssinaturaRenovacao": item.get("DataAssinaturaRenovacao") or cab.get("DataAssinaturaRenovacao"),
+            "DataAssinaturaRenovacao": periodo_item_aprovacao["DataAssinaturaRenovacao"],
             "IDTrimestre": item.get("IDTrimestre") or cab.get("IDTrimestre"),
             "TexmpoExposicao": item.get("TexmpoExposicao"),
-            "DataInicioPrevisto": (item.get("DataInicioPrevisto") or data_aprovacao_sql_server) if card_tem_tag_renovacao else item.get("DataInicioPrevisto"),
-            "DataTerminoPrevisto": item.get("DataTerminoPrevisto"),
+            "DataInicioPrevisto": periodo_item_aprovacao["DataInicioPrevisto"],
+            "DataTerminoPrevisto": periodo_item_aprovacao["DataTerminoPrevisto"],
             "InicioRenovacao": inicio_renovacao_padrao or item.get("InicioRenovacao"),
             "FaturamentoBrutoMensal": item.get("FaturamentoBrutoMensal"),
             "PercentualPermuta": item.get("PercentualPermuta"),
@@ -7723,7 +7819,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "IDFatoKanbanCard": item.get("IDFatoKanbanCard") or cab.get("IDFatoKanbanCard"),
             "IDDimTipoDocumento": id_dim_tipo_documento_item,
             "IDDimOrigemAtendimento": id_dim_origem_atendimento_item,
-            "BitAtivo": 1 if card_tem_tag_renovacao else (item.get("BitAtivo") if item.get("BitAtivo") is not None else 1),
+            "BitAtivo": 1,
             "IDEmpresaAgencia": item.get("IDEmpresaAgencia") or cab.get("IDEmpresaAgencia"),
         }
 
@@ -12514,7 +12610,8 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
     - IDFatoControleContratosEuromidia aponta para o cabeçalho do contrato;
     - IDFatoControleContratosItensEuromidia aponta para o item do contrato;
     - CodFace vem diretamente do item do contrato;
-    - somente campanhas com BitAtivo = 1 aparecem;
+    - somente campanhas com venc.BitAtivo = 1 aparecem;
+    - somente campanhas cujo item oficial esteja com item.BitAtivo = 1 aparecem;
     - se houver mais de uma linha ativa para o mesmo item, fica somente a mais recente.
 
     Observação importante:
@@ -12552,6 +12649,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
         INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
             ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
            AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
+           AND ISNULL(item.BitAtivo, 0) = 1
         INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
             ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
@@ -12642,6 +12740,10 @@ def _campanhas_vencimentos_opcoes_marca(
         FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
         INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
             ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
+           AND ISNULL(item.BitAtivo, 0) = 1
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
             ON vend.IDVendedor = venc.IDVendedor
         WHERE {where_sql}
@@ -12669,6 +12771,10 @@ def _campanhas_vencimentos_opcoes_vendedor(
         FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
         INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
             ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
+           AND ISNULL(item.BitAtivo, 0) = 1
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
             ON vend.IDVendedor = venc.IDVendedor
         WHERE vend.IDVendedor IS NOT NULL
@@ -13197,7 +13303,8 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
                 tabela_preco.IDDimTabelaPrecosEuromidia DESC
         ) AS tp
 
-        WHERE venc.IDFatoVencimentoCampanhaEuromidia = :id_vencimento;
+        WHERE venc.IDFatoVencimentoCampanhaEuromidia = :id_vencimento
+          AND ISNULL(item.BitAtivo, 0) = 1;
     """)
 
     row = db.session.execute(sql, {"id_vencimento": int(id_vencimento)}).mappings().first()
@@ -14366,6 +14473,10 @@ def vencimentos_campanhas_euromidia():
             st.IDDimStatusCampanha,
             st.NomeStatus
         FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
+           AND ISNULL(item.BitAtivo, 0) = 1
         INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
             ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
         WHERE ISNULL(venc.BitAtivo, 1) = 1
