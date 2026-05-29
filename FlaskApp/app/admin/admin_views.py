@@ -11110,6 +11110,7 @@ def _d4sign_carregar_dados_contrato_admin(id_fato_controle_contratos: int) -> di
         [
             _d4sign_expr_coluna_ou_null_admin("emp", "RazaoSocialEmpresa", colunas_empresa, ("RazaoSocial",)),
             _d4sign_expr_coluna_ou_null_admin("emp", "NomeFantasiaEmpresa", colunas_empresa, ("NomeFantasia",)),
+            _d4sign_expr_coluna_ou_null_admin("emp", "CNPJEmpresa", colunas_empresa, ("CNPJ", "Cnpj", "Documento", "DocumentoFederal")),
             _d4sign_expr_coluna_ou_null_admin("emp", "EmailEmpresa", colunas_empresa, ("Email", "EmailEmpresa", "E-mail")),
             _d4sign_expr_coluna_ou_null_admin(
                 "emp",
@@ -11257,6 +11258,15 @@ def _d4sign_montar_tokens_padrao_admin(dados: dict, tipo_solicitacao: str | None
         or dados.get("FaturamentoLiquidoMensal")
     )
 
+    cnpj_empresa = (
+        dados.get("CNPJEmpresa")
+        or dados.get("CnpjEmpresa")
+        or dados.get("CNPJ")
+        or dados.get("Cnpj")
+        or ""
+    )
+    cnpj_empresa_limpo = re.sub(r"\D+", "", str(cnpj_empresa or ""))
+
     return {
         "ID_CONTRATO": _d4sign_formatar_valor_token_admin(dados.get("IDFatoControleContratosEuromidia")),
         "NUMERO_CONTRATO": _d4sign_formatar_valor_token_admin(dados.get("NumeroContrato")),
@@ -11266,8 +11276,8 @@ def _d4sign_montar_tokens_padrao_admin(dados: dict, tipo_solicitacao: str | None
         "TIPO_DOCUMENTO": _d4sign_formatar_valor_token_admin(dados.get("TipoDocumento")),
         "RAZAO_SOCIAL": _d4sign_formatar_valor_token_admin(dados.get("RazaoSocialEmpresa") or dados.get("RazaoSocial")),
         "NOME_FANTASIA": _d4sign_formatar_valor_token_admin(dados.get("NomeFantasiaEmpresa")),
-        "CNPJ": _d4sign_formatar_valor_token_admin(dados.get("CNPJ")),
-        "CNPJ_LIMPO": _d4sign_formatar_valor_token_admin(str(dados.get("CNPJ") or "").replace(".", "").replace("/", "").replace("-", "")),
+        "CNPJ": _d4sign_formatar_valor_token_admin(cnpj_empresa),
+        "CNPJ_LIMPO": _d4sign_formatar_valor_token_admin(cnpj_empresa_limpo),
         "CPF": _d4sign_formatar_valor_token_admin(dados.get("CPF")),
         "EMAIL_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("EmailEmpresa")),
         "TELEFONE_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("TelefoneEmpresa")),
@@ -11512,13 +11522,22 @@ def _d4sign_buscar_pasta_por_nome_admin(
     uuid_cofre: str,
     nome_pasta: str,
     uuid_pasta_pai: str | None = None,
+    permitir_candidata_sem_pai: bool = False,
 ) -> dict | None:
-    """_d4sign_buscar_pasta_por_nome_admin: eu busco pasta pelo nome e, se houver, pelo pai."""
+    """_d4sign_buscar_pasta_por_nome_admin: eu busco pasta pelo nome com cuidado de hierarquia.
+
+    Observação importante:
+    - o endpoint /folders/{UUID-SAFE}/find da D4Sign lista as pastas do cofre;
+    - a documentação/resposta desse endpoint normalmente não informa claramente o pai da pasta;
+    - por isso, quando uuid_pasta_pai vem preenchido, eu só reaproveito automaticamente se o pai bater;
+    - se a API não informar o pai e permitir_candidata_sem_pai=True, eu posso reaproveitar a candidata como fallback.
+    """
 
     pastas = _d4sign_listar_pastas_do_cofre_admin(uuid_cofre)
     nome_procurado = _d4sign_normalizar_texto_admin(nome_pasta)
+    uuid_pai_procurado = _d4sign_normalizar_texto_admin(uuid_pasta_pai) if uuid_pasta_pai else ""
 
-    candidatas = []
+    candidatas: list[dict] = []
     for pasta in pastas:
         nome_encontrado = _d4sign_obter_nome_pasta_admin(pasta)
         if _d4sign_normalizar_texto_admin(nome_encontrado) == nome_procurado:
@@ -11527,17 +11546,44 @@ def _d4sign_buscar_pasta_por_nome_admin(
     if not candidatas:
         return None
 
-    if uuid_pasta_pai:
-        uuid_pai_procurado = _d4sign_normalizar_texto_admin(uuid_pasta_pai)
-        candidatas_com_pai = []
+    if uuid_pai_procurado:
+        candidatas_sem_pai: list[dict] = []
 
         for pasta in candidatas:
-            uuid_pai_encontrado = _d4sign_obter_uuid_pasta_pai_admin(pasta)
-            if uuid_pai_encontrado and _d4sign_normalizar_texto_admin(uuid_pai_encontrado) == uuid_pai_procurado:
-                candidatas_com_pai.append(pasta)
+            uuid_pai_encontrado = _d4sign_normalizar_texto_admin(
+                _d4sign_obter_uuid_pasta_pai_admin(pasta)
+            )
 
-        if candidatas_com_pai:
-            return candidatas_com_pai[0]
+            if uuid_pai_encontrado and uuid_pai_encontrado == uuid_pai_procurado:
+                return pasta
+
+            if not uuid_pai_encontrado:
+                candidatas_sem_pai.append(pasta)
+
+        current_app.logger.warning(
+            "D4SIGN | pasta com mesmo nome encontrada, mas a API não confirmou o pai correto | "
+            "nome=%s | uuid_pasta_pai_esperado=%s | permitir_candidata_sem_pai=%s | candidatas=%s",
+            nome_pasta,
+            uuid_pasta_pai,
+            permitir_candidata_sem_pai,
+            [
+                {
+                    "uuid": _d4sign_obter_uuid_pasta_admin(p),
+                    "nome": _d4sign_obter_nome_pasta_admin(p),
+                    "uuid_pai": _d4sign_obter_uuid_pasta_pai_admin(p),
+                }
+                for p in candidatas[:10]
+            ],
+        )
+
+        if permitir_candidata_sem_pai and candidatas_sem_pai:
+            return candidatas_sem_pai[0]
+
+        return None
+
+    candidatas_raiz = [p for p in candidatas if not _d4sign_obter_uuid_pasta_pai_admin(p)]
+    if candidatas_raiz:
+        return candidatas_raiz[0]
 
     return candidatas[0]
 
@@ -11565,35 +11611,113 @@ def _d4sign_criar_pasta_admin(
     return resposta if isinstance(resposta, dict) else {"resposta": resposta}
 
 
+def _d4sign_erro_nome_pasta_ja_existe_admin(erro: Exception) -> bool:
+    """_d4sign_erro_nome_pasta_ja_existe_admin: eu identifico erro de nome de pasta duplicado."""
+
+    texto_erro = str(erro or "").casefold()
+    return (
+        "already taken" in texto_erro
+        or "name" in texto_erro and "taken" in texto_erro
+        or "nome" in texto_erro and "existe" in texto_erro
+        or "já existe" in texto_erro
+        or "ja existe" in texto_erro
+    )
+
+
 def _d4sign_obter_ou_criar_pasta_admin(
     *,
     uuid_cofre: str,
     nome_pasta: str,
     uuid_pasta_pai: str | None = None,
+    nome_pasta_alternativo_se_duplicar: str | None = None,
 ) -> dict:
-    """_d4sign_obter_ou_criar_pasta_admin: eu reaproveito pasta existente ou crio se não existir."""
+    """_d4sign_obter_ou_criar_pasta_admin: eu reaproveito ou crio pasta sem jogar documento no cliente errado.
+
+    O ponto crítico é a pasta mensal, por exemplo "05-2026".
+    A API da D4Sign aceita uuid_folder para criar subpasta, mas a listagem /find geralmente
+    não devolve o pai da pasta. Se a D4Sign recusar a criação dizendo que o nome já existe,
+    eu NÃO reaproveito cegamente uma pasta global de mesmo nome, porque isso pode jogar o
+    contrato dentro de outro cliente.
+
+    Quando houver nome_pasta_alternativo_se_duplicar, eu crio uma pasta alternativa e única
+    dentro do pai correto. Isso é mais seguro do que usar uma pasta mensal de outro cliente.
+    """
 
     pasta_existente = _d4sign_buscar_pasta_por_nome_admin(
         uuid_cofre=uuid_cofre,
         nome_pasta=nome_pasta,
         uuid_pasta_pai=uuid_pasta_pai,
+        permitir_candidata_sem_pai=False,
     )
 
     if pasta_existente:
         current_app.logger.info(
-            "D4SIGN | pasta reaproveitada | nome=%s | uuid=%s",
+            "D4SIGN | pasta reaproveitada | nome=%s | uuid=%s | uuid_pasta_pai=%s",
             nome_pasta,
             _d4sign_obter_uuid_pasta_admin(pasta_existente),
+            uuid_pasta_pai,
         )
         return pasta_existente
 
-    current_app.logger.info("D4SIGN | criando pasta | nome=%s", nome_pasta)
-
-    resposta_criacao = _d4sign_criar_pasta_admin(
-        uuid_cofre=uuid_cofre,
-        nome_pasta=nome_pasta,
-        uuid_pasta_pai=uuid_pasta_pai,
+    current_app.logger.info(
+        "D4SIGN | criando pasta | nome=%s | uuid_pasta_pai=%s",
+        nome_pasta,
+        uuid_pasta_pai,
     )
+
+    try:
+        resposta_criacao = _d4sign_criar_pasta_admin(
+            uuid_cofre=uuid_cofre,
+            nome_pasta=nome_pasta,
+            uuid_pasta_pai=uuid_pasta_pai,
+        )
+    except Exception as exc:
+        if not _d4sign_erro_nome_pasta_ja_existe_admin(exc):
+            raise
+
+        if not nome_pasta_alternativo_se_duplicar:
+            pasta_sem_pai = _d4sign_buscar_pasta_por_nome_admin(
+                uuid_cofre=uuid_cofre,
+                nome_pasta=nome_pasta,
+                uuid_pasta_pai=uuid_pasta_pai,
+                permitir_candidata_sem_pai=True,
+            )
+            if pasta_sem_pai:
+                current_app.logger.warning(
+                    "D4SIGN | reaproveitando pasta duplicada porque a API não informou o pai | "
+                    "nome=%s | uuid=%s | uuid_pasta_pai_esperado=%s",
+                    nome_pasta,
+                    _d4sign_obter_uuid_pasta_admin(pasta_sem_pai),
+                    uuid_pasta_pai,
+                )
+                return pasta_sem_pai
+            raise
+
+        nome_alternativo = _d4sign_limpar_nome_pasta_arquivo_admin(nome_pasta_alternativo_se_duplicar)
+
+        current_app.logger.warning(
+            "D4SIGN | nome de pasta já existe no cofre e a API não informou pai suficiente; "
+            "vou criar pasta alternativa dentro do pai correto | nome_original=%s | nome_alternativo=%s | uuid_pasta_pai=%s | erro=%s",
+            nome_pasta,
+            nome_alternativo,
+            uuid_pasta_pai,
+            exc,
+        )
+
+        pasta_alternativa_existente = _d4sign_buscar_pasta_por_nome_admin(
+            uuid_cofre=uuid_cofre,
+            nome_pasta=nome_alternativo,
+            uuid_pasta_pai=uuid_pasta_pai,
+            permitir_candidata_sem_pai=True,
+        )
+        if pasta_alternativa_existente:
+            return pasta_alternativa_existente
+
+        resposta_criacao = _d4sign_criar_pasta_admin(
+            uuid_cofre=uuid_cofre,
+            nome_pasta=nome_alternativo,
+            uuid_pasta_pai=uuid_pasta_pai,
+        )
 
     uuid_pasta_criada = _d4sign_obter_uuid_pasta_admin(resposta_criacao)
     if uuid_pasta_criada:
@@ -11603,6 +11727,7 @@ def _d4sign_obter_ou_criar_pasta_admin(
         uuid_cofre=uuid_cofre,
         nome_pasta=nome_pasta,
         uuid_pasta_pai=uuid_pasta_pai,
+        permitir_candidata_sem_pai=True,
     )
 
     if not pasta_criada:
@@ -11615,12 +11740,16 @@ def _d4sign_obter_ou_criar_pasta_admin(
 
 
 def _d4sign_obter_cnpj_ou_identificador_empresa_admin(dados_contrato: dict) -> str:
-    """_d4sign_obter_cnpj_ou_identificador_empresa_admin: eu defino a pasta da empresa."""
+    """_d4sign_obter_cnpj_ou_identificador_empresa_admin: eu defino a pasta da empresa.
+
+    Eu priorizo o CNPJ carregado da DimEmpresas como CNPJEmpresa, porque ele representa
+    a empresa do contrato. Só uso CNPJ genérico como fallback para não quebrar legado.
+    """
 
     cnpj = (
-        dados_contrato.get("CNPJ")
-        or dados_contrato.get("CNPJEmpresa")
+        dados_contrato.get("CNPJEmpresa")
         or dados_contrato.get("CnpjEmpresa")
+        or dados_contrato.get("CNPJ")
         or dados_contrato.get("Cnpj")
         or ""
     )
@@ -11675,22 +11804,30 @@ def _d4sign_resolver_pasta_destino_contrato_admin(
     if not uuid_pasta_empresa:
         raise RuntimeError(f"Não consegui obter UUID da pasta da empresa/CNPJ D4Sign: {pasta_empresa}")
 
+    nome_pasta_mes_ano_alternativo = _d4sign_limpar_nome_pasta_arquivo_admin(
+        f"{nome_pasta_mes_ano} - {nome_pasta_empresa}"
+    )
+
     pasta_mes_ano = _d4sign_obter_ou_criar_pasta_admin(
         uuid_cofre=uuid_cofre,
         nome_pasta=nome_pasta_mes_ano,
         uuid_pasta_pai=uuid_pasta_empresa,
+        nome_pasta_alternativo_se_duplicar=nome_pasta_mes_ano_alternativo,
     )
 
     uuid_pasta_mes_ano = _d4sign_obter_uuid_pasta_admin(pasta_mes_ano)
     if not uuid_pasta_mes_ano:
         raise RuntimeError(f"Não consegui obter UUID da pasta mês-ano D4Sign: {pasta_mes_ano}")
 
+    nome_pasta_mes_ano_real = _d4sign_obter_nome_pasta_admin(pasta_mes_ano) or nome_pasta_mes_ano
+
     return {
         "nome_pasta_raiz": nome_pasta_raiz,
         "uuid_pasta_raiz": uuid_pasta_raiz,
         "nome_pasta_empresa": nome_pasta_empresa,
         "uuid_pasta_empresa": uuid_pasta_empresa,
-        "nome_pasta_mes_ano": nome_pasta_mes_ano,
+        "nome_pasta_mes_ano": nome_pasta_mes_ano_real,
+        "nome_pasta_mes_ano_solicitada": nome_pasta_mes_ano,
         "uuid_pasta_mes_ano": uuid_pasta_mes_ano,
     }
 
