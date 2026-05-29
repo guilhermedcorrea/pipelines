@@ -9,6 +9,7 @@ from werkzeug.exceptions import HTTPException
 from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
 import hashlib
+import json
 
 import os
 
@@ -10613,6 +10614,1522 @@ def lista_aprovacao_contratos():
 
 
 
+
+
+
+# ======================================================================================
+# Integração D4Sign - criação de contrato na aprovação Admin
+# ======================================================================================
+
+URL_BASE_D4SIGN_ADMIN = "https://secure.d4sign.com.br/api/v1"
+NOME_COFRE_D4_CONTRATOS_ADMIN = "Contratos"
+NOME_PASTA_RAIZ_D4_CONTRATOS_ADMIN = (os.getenv("D4SIGN_NOME_PASTA_RAIZ_CONTRATOS") or "Euromidia").strip() or "Euromidia"
+
+MAPA_FASE_D4SIGN_ADMIN = {
+    "1": "Processando",
+    "2": "Aguardando Signatários",
+    "3": "Aguardando Assinaturas",
+    "4": "Finalizado",
+    "5": "Arquivado",
+    "6": "Cancelado",
+    "7": "Editando",
+}
+
+
+def _d4sign_timeout_segundos_admin() -> int:
+    """_d4sign_timeout_segundos_admin: eu defino timeout seguro para chamada externa na D4Sign."""
+
+    try:
+        return max(5, int(os.getenv("D4SIGN_TIMEOUT_SEGUNDOS", "30") or "30"))
+    except Exception:
+        return 30
+
+
+def _d4sign_obter_credenciais_admin() -> tuple[str, str]:
+    """_d4sign_obter_credenciais_admin: eu busco TOKEN_D4SIGN e CRYPTKEY_D4SIGN no .env do Flask."""
+
+    token_api = (os.getenv("TOKEN_D4SIGN") or "").strip()
+    crypt_key = (os.getenv("CRYPTKEY_D4SIGN") or "").strip()
+
+    if not token_api:
+        raise RuntimeError("TOKEN_D4SIGN não encontrado no .env do Flask.")
+
+    if not crypt_key:
+        raise RuntimeError("CRYPTKEY_D4SIGN não encontrado no .env do Flask.")
+
+    return token_api, crypt_key
+
+
+def _d4sign_montar_parametros_autenticacao_admin(parametros_extras: dict | None = None) -> dict:
+    """_d4sign_montar_parametros_autenticacao_admin: eu monto tokenAPI e cryptKey para a D4Sign."""
+
+    token_api, crypt_key = _d4sign_obter_credenciais_admin()
+
+    parametros = {
+        "tokenAPI": token_api,
+        "cryptKey": crypt_key,
+    }
+
+    if parametros_extras:
+        parametros.update(parametros_extras)
+
+    return parametros
+
+
+def _d4sign_executar_get_admin(caminho: str, parametros_extras: dict | None = None) -> dict:
+    """_d4sign_executar_get_admin: eu faço GET na API da D4Sign e trato erro de forma explícita."""
+
+    if requests is None:
+        raise RuntimeError(
+            "A biblioteca requests não está instalada no container Flask. "
+            "Adicione requests no requirements.txt ou instale a dependência na imagem."
+        )
+
+    url = f"{URL_BASE_D4SIGN_ADMIN}{caminho}"
+
+    resposta = requests.get(
+        url,
+        params=_d4sign_montar_parametros_autenticacao_admin(parametros_extras),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        timeout=_d4sign_timeout_segundos_admin(),
+    )
+
+    try:
+        dados = resposta.json()
+    except Exception:
+        dados = {"resposta_texto": resposta.text}
+
+    if not resposta.ok:
+        raise RuntimeError(
+            f"Erro GET D4Sign. Caminho={caminho}. "
+            f"Status={resposta.status_code}. Resposta={dados}"
+        )
+
+    return dados if isinstance(dados, dict) else {"resposta": dados}
+
+
+def _d4sign_executar_post_admin(caminho: str, payload: dict | None = None) -> dict:
+    """_d4sign_executar_post_admin: eu faço POST JSON na API da D4Sign e trato erro de forma explícita."""
+
+    if requests is None:
+        raise RuntimeError(
+            "A biblioteca requests não está instalada no container Flask. "
+            "Adicione requests no requirements.txt ou instale a dependência na imagem."
+        )
+
+    url = f"{URL_BASE_D4SIGN_ADMIN}{caminho}"
+
+    resposta = requests.post(
+        url,
+        params=_d4sign_montar_parametros_autenticacao_admin(),
+        json=payload or {},
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        timeout=_d4sign_timeout_segundos_admin(),
+    )
+
+    try:
+        dados = resposta.json()
+    except Exception:
+        dados = {"resposta_texto": resposta.text}
+
+    if not resposta.ok:
+        raise RuntimeError(
+            f"Erro POST D4Sign. Caminho={caminho}. "
+            f"Status={resposta.status_code}. Resposta={dados}"
+        )
+
+    return dados if isinstance(dados, dict) else {"resposta": dados}
+
+
+def _d4sign_primeiro_objeto_admin(resposta) -> dict:
+    """_d4sign_primeiro_objeto_admin: eu normalizo respostas variadas da D4Sign para um dicionário."""
+
+    if isinstance(resposta, dict):
+        for chave in (
+            "data",
+            "document",
+            "documents",
+            "doc",
+            "docs",
+            "result",
+            "results",
+            "resposta",
+            "message",
+        ):
+            valor = resposta.get(chave)
+
+            if isinstance(valor, list) and valor:
+                primeiro = valor[0]
+                return primeiro if isinstance(primeiro, dict) else {}
+
+            if isinstance(valor, dict):
+                return valor
+
+        return resposta
+
+    if isinstance(resposta, list) and resposta:
+        primeiro = resposta[0]
+        return primeiro if isinstance(primeiro, dict) else {}
+
+    return {}
+
+
+def _d4sign_buscar_valor_recursivo_admin(objeto, nomes_chaves: set[str]):
+    """_d4sign_buscar_valor_recursivo_admin: eu procuro uma chave em respostas aninhadas da D4Sign."""
+
+    if isinstance(objeto, dict):
+        for chave, valor in objeto.items():
+            if str(chave or "").strip() in nomes_chaves and valor not in (None, ""):
+                return valor
+
+        for valor in objeto.values():
+            encontrado = _d4sign_buscar_valor_recursivo_admin(valor, nomes_chaves)
+            if encontrado not in (None, ""):
+                return encontrado
+
+    if isinstance(objeto, list):
+        for item in objeto:
+            encontrado = _d4sign_buscar_valor_recursivo_admin(item, nomes_chaves)
+            if encontrado not in (None, ""):
+                return encontrado
+
+    return None
+
+
+def _d4sign_obter_uuid_documento_admin(dados: dict) -> str:
+    """_d4sign_obter_uuid_documento_admin: eu capturo o UUID do documento em respostas diferentes."""
+
+    valor = _d4sign_buscar_valor_recursivo_admin(
+        dados,
+        {
+            "uuidDoc",
+            "uuid_doc",
+            "uuid-document",
+            "uuid_document",
+            "uuidDocument",
+            "uuid_documento",
+            "UUIDDocumentoD4",
+        },
+    )
+
+    if valor not in (None, ""):
+        return str(valor).strip()
+
+    texto = str(dados or "")
+    try:
+        match = re.search(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            texto,
+        )
+        if match:
+            return match.group(0).strip()
+    except Exception:
+        pass
+
+    return ""
+
+
+def _d4sign_para_int_ou_none_admin(valor):
+    """_d4sign_para_int_ou_none_admin: eu converto valores da D4Sign para inteiro quando possível."""
+
+    try:
+        if valor in (None, ""):
+            return None
+
+        texto = str(valor).strip()
+        if not texto:
+            return None
+
+        return int(float(texto))
+    except Exception:
+        return None
+
+
+def _d4sign_formatar_data_br_admin(valor) -> str:
+    """_d4sign_formatar_data_br_admin: eu converto data para dd/mm/aaaa antes de enviar ao template."""
+
+    if valor in (None, ""):
+        return ""
+
+    try:
+        if hasattr(valor, "strftime"):
+            return valor.strftime("%d/%m/%Y")
+    except Exception:
+        pass
+
+    texto = str(valor).strip()
+    if not texto:
+        return ""
+
+    for formato in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(texto[:19], formato).strftime("%d/%m/%Y")
+        except Exception:
+            pass
+
+    return texto
+
+
+def _d4sign_formatar_moeda_br_admin(valor) -> str:
+    """_d4sign_formatar_moeda_br_admin: eu converto número para texto de moeda brasileira."""
+
+    if valor in (None, ""):
+        return ""
+
+    try:
+        numero = float(valor)
+        texto = f"{numero:,.2f}"
+        texto = texto.replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R$ {texto}"
+    except Exception:
+        return str(valor).strip()
+
+
+def _d4sign_formatar_valor_token_admin(valor, formato: str | None = None) -> str:
+    """_d4sign_formatar_valor_token_admin: eu aplica formatação simples nos tokens do template."""
+
+    formato_normalizado = _texto_ou_vazio(formato).strip().lower()
+
+    if formato_normalizado in ("data", "date", "data_br", "dd/mm/yyyy"):
+        return _d4sign_formatar_data_br_admin(valor)
+
+    if formato_normalizado in ("moeda", "moeda_br", "money", "currency", "brl"):
+        return _d4sign_formatar_moeda_br_admin(valor)
+
+    if valor in (None, ""):
+        return ""
+
+    return str(valor).strip()
+
+
+def _d4sign_obter_cofre_contratos_admin(id_dim_cofre_preferencial: int | None = None) -> dict:
+    """_d4sign_obter_cofre_contratos_admin: eu busco o cofre Contratos cadastrado localmente."""
+
+    id_cofre = _int_ou_none(id_dim_cofre_preferencial)
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP 1
+                IDDimCofreD4,
+                CAST(UUIDCofreD4 AS varchar(36)) AS UUIDCofreD4,
+                NomeCofreD4
+            FROM [Integracao].[Silver].[DimCofreD4]
+            WHERE BitAtivo = 1
+              AND (
+                    (:id_cofre IS NOT NULL AND IDDimCofreD4 = :id_cofre)
+                    OR (:id_cofre IS NULL AND NomeCofreD4 = :nome_cofre)
+                  )
+            ORDER BY
+                CASE WHEN :id_cofre IS NOT NULL AND IDDimCofreD4 = :id_cofre THEN 0 ELSE 1 END,
+                IDDimCofreD4 ASC
+        """),
+        {
+            "id_cofre": int(id_cofre) if id_cofre not in (None, "", 0) else None,
+            "nome_cofre": NOME_COFRE_D4_CONTRATOS_ADMIN,
+        },
+    ).mappings().first()
+
+    if not row:
+        raise RuntimeError(
+            "Nenhum cofre D4Sign ativo encontrado em [Integracao].[Silver].[DimCofreD4]. "
+            "Cadastre o cofre 'Contratos' antes de aprovar contratos com integração D4Sign."
+        )
+
+    return dict(row)
+
+
+def _d4sign_resolver_modelo_contrato_admin(
+    *,
+    id_dim_cofre_d4: int | None,
+    tipo_solicitacao: str | None,
+    tipo_documento: str | None,
+) -> dict:
+    """_d4sign_resolver_modelo_contrato_admin: eu escolho o modelo ativo da sua DimModeloContratoD4."""
+
+    tipo_solicitacao_norm = _texto_ou_vazio(tipo_solicitacao).upper().replace("_", " ").strip()
+    tipo_documento_norm = _texto_ou_vazio(tipo_documento).upper().replace("_", " ").strip()
+
+    sql = text("""
+        SELECT TOP 1
+            m.IDDimModeloContratoD4,
+            m.IDDimCofreD4,
+            LTRIM(RTRIM(CONVERT(varchar(100), m.IDTemplateD4))) AS IDTemplateD4,
+            m.NomeModeloContratoD4,
+            m.TipoModeloD4,
+            m.JsonVariaveis,
+            c.NomeCofreD4,
+            CAST(c.UUIDCofreD4 AS varchar(36)) AS UUIDCofreD4
+        FROM [Integracao].[Silver].[DimModeloContratoD4] AS m
+        INNER JOIN [Integracao].[Silver].[DimCofreD4] AS c
+            ON c.IDDimCofreD4 = m.IDDimCofreD4
+        WHERE ISNULL(m.BitAtivo, 1) = 1
+          AND ISNULL(c.BitAtivo, 1) = 1
+          AND (
+                (:id_cofre IS NULL AND UPPER(LTRIM(RTRIM(c.NomeCofreD4))) = UPPER(LTRIM(RTRIM(:nome_cofre))))
+                OR (:id_cofre IS NOT NULL AND m.IDDimCofreD4 = :id_cofre)
+              )
+        ORDER BY
+            CASE
+                WHEN UPPER(REPLACE(LTRIM(RTRIM(ISNULL(m.TipoModeloD4, ''))), '_', ' ')) COLLATE Latin1_General_CI_AI = :tipo_solicitacao THEN 0
+                WHEN UPPER(REPLACE(LTRIM(RTRIM(ISNULL(m.TipoModeloD4, ''))), '_', ' ')) COLLATE Latin1_General_CI_AI = :tipo_documento THEN 1
+                WHEN UPPER(REPLACE(LTRIM(RTRIM(ISNULL(m.TipoModeloD4, ''))), '_', ' ')) COLLATE Latin1_General_CI_AI IN ('CONTRATO', 'CONTRATOS', 'PADRAO', 'PADRÃO', 'PADRAO CONTRATO', 'PADRÃO CONTRATO') THEN 2
+                WHEN LTRIM(RTRIM(ISNULL(m.TipoModeloD4, ''))) = '' THEN 3
+                ELSE 4
+            END,
+            m.IDDimModeloContratoD4 DESC
+    """)
+
+    row = db.session.execute(
+        sql,
+        {
+            "id_cofre": int(id_dim_cofre_d4) if id_dim_cofre_d4 not in (None, "", 0) else None,
+            "nome_cofre": NOME_COFRE_D4_CONTRATOS_ADMIN,
+            "tipo_solicitacao": tipo_solicitacao_norm,
+            "tipo_documento": tipo_documento_norm,
+        },
+    ).mappings().first()
+
+    if not row:
+        raise RuntimeError(
+            "Nenhum modelo D4Sign ativo encontrado em [Integracao].[Silver].[DimModeloContratoD4] "
+            "para o cofre Contratos."
+        )
+
+    modelo = dict(row)
+    if not _texto_ou_vazio(modelo.get("IDTemplateD4")):
+        raise RuntimeError(
+            f"Modelo D4Sign {modelo.get('IDDimModeloContratoD4')} está sem IDTemplateD4."
+        )
+
+    return modelo
+
+
+
+_D4SIGN_CACHE_COLUNAS_TABELA_ADMIN: dict[tuple[str, str, str], set[str]] = {}
+
+
+def _d4sign_obter_colunas_tabela_admin(
+    banco: str,
+    esquema: str,
+    tabela: str,
+) -> set[str]:
+    """_d4sign_obter_colunas_tabela_admin: eu leio o schema real da tabela para evitar SELECT em coluna inexistente."""
+
+    banco_limpo = str(banco or "").strip()
+    esquema_limpo = str(esquema or "").strip()
+    tabela_limpa = str(tabela or "").strip()
+
+    if not banco_limpo or not esquema_limpo or not tabela_limpa:
+        return set()
+
+    if not re.match(r"^[A-Za-z0-9_]+$", banco_limpo):
+        raise RuntimeError(f"Nome de banco inválido para leitura de colunas: {banco_limpo}")
+
+    chave_cache = (banco_limpo.lower(), esquema_limpo.lower(), tabela_limpa.lower())
+    if chave_cache in _D4SIGN_CACHE_COLUNAS_TABELA_ADMIN:
+        return _D4SIGN_CACHE_COLUNAS_TABELA_ADMIN[chave_cache]
+
+    try:
+        rows = db.session.execute(
+            text(f"""
+                SELECT c.name AS NomeColuna
+                FROM [{banco_limpo}].sys.columns AS c
+                INNER JOIN [{banco_limpo}].sys.tables AS t
+                    ON t.object_id = c.object_id
+                INNER JOIN [{banco_limpo}].sys.schemas AS s
+                    ON s.schema_id = t.schema_id
+                WHERE s.name = :esquema
+                  AND t.name = :tabela
+            """),
+            {
+                "esquema": esquema_limpo,
+                "tabela": tabela_limpa,
+            },
+        ).mappings().all()
+
+        colunas = {str(r.get("NomeColuna") or "").strip().lower() for r in rows if r.get("NomeColuna")}
+        _D4SIGN_CACHE_COLUNAS_TABELA_ADMIN[chave_cache] = colunas
+        return colunas
+
+    except Exception as exc:
+        current_app.logger.warning(
+            "D4SIGN | não consegui ler colunas de %s.%s.%s; usando fallback seguro | erro=%s",
+            banco_limpo,
+            esquema_limpo,
+            tabela_limpa,
+            exc,
+        )
+        _D4SIGN_CACHE_COLUNAS_TABELA_ADMIN[chave_cache] = set()
+        return set()
+
+
+def _d4sign_tem_coluna_admin(colunas: set[str], nome_coluna: str) -> bool:
+    """_d4sign_tem_coluna_admin: eu comparo coluna de forma case-insensitive."""
+
+    return str(nome_coluna or "").strip().lower() in (colunas or set())
+
+
+def _d4sign_coluna_existente_admin(colunas: set[str], candidatos: list[str] | tuple[str, ...]) -> str | None:
+    """_d4sign_coluna_existente_admin: eu escolho a primeira coluna existente entre vários nomes possíveis."""
+
+    colunas_normalizadas = colunas or set()
+    for candidato in candidatos or []:
+        nome = str(candidato or "").strip()
+        if nome and nome.lower() in colunas_normalizadas:
+            return nome
+    return None
+
+
+def _d4sign_expr_coluna_ou_null_admin(
+    alias_tabela: str,
+    alias_saida: str,
+    colunas: set[str],
+    candidatos: list[str] | tuple[str, ...],
+    tipo_null: str = "nvarchar(4000)",
+) -> str:
+    """_d4sign_expr_coluna_ou_null_admin: eu monto SELECT seguro; se a coluna não existir, retorno NULL com o mesmo alias."""
+
+    coluna = _d4sign_coluna_existente_admin(colunas, candidatos)
+    if coluna:
+        return f"{alias_tabela}.[{coluna}] AS [{alias_saida}]"
+    return f"CAST(NULL AS {tipo_null}) AS [{alias_saida}]"
+
+
+def _d4sign_carregar_dados_contrato_admin(id_fato_controle_contratos: int) -> dict:
+    """_d4sign_carregar_dados_contrato_admin: eu busco contrato, empresa e itens ativos para preencher o template."""
+
+    colunas_empresa = _d4sign_obter_colunas_tabela_admin("Integracao", "Silver", "DimEmpresas")
+
+    campos_empresa_sql = ",\n                ".join(
+        [
+            _d4sign_expr_coluna_ou_null_admin("emp", "RazaoSocialEmpresa", colunas_empresa, ("RazaoSocial",)),
+            _d4sign_expr_coluna_ou_null_admin("emp", "NomeFantasiaEmpresa", colunas_empresa, ("NomeFantasia",)),
+            _d4sign_expr_coluna_ou_null_admin("emp", "EmailEmpresa", colunas_empresa, ("Email", "EmailEmpresa", "E-mail")),
+            _d4sign_expr_coluna_ou_null_admin(
+                "emp",
+                "TelefoneEmpresa",
+                colunas_empresa,
+                ("Telefones", "Telefone", "TelefoneEmpresa", "Telefone1", "Fone", "Celular", "Whatsapp", "WhatsApp"),
+            ),
+            _d4sign_expr_coluna_ou_null_admin("emp", "MunicipioEmpresa", colunas_empresa, ("Municipio", "Município", "Cidade", "CidadeEmpresa")),
+            _d4sign_expr_coluna_ou_null_admin("emp", "UFEmpresa", colunas_empresa, ("UF", "Uf", "Estado")),
+            _d4sign_expr_coluna_ou_null_admin("emp", "CEPEmpresa", colunas_empresa, ("CEP", "Cep", "CodigoPostal")),
+            _d4sign_expr_coluna_ou_null_admin("emp", "LogradouroEmpresa", colunas_empresa, ("Logradouro", "Endereco", "Endereço")),
+            _d4sign_expr_coluna_ou_null_admin("emp", "NumeroEmpresa", colunas_empresa, ("Numero", "Número", "NumeroEndereco", "NumeroLogradouro")),
+            _d4sign_expr_coluna_ou_null_admin("emp", "BairroEmpresa", colunas_empresa, ("Bairro",)),
+            _d4sign_expr_coluna_ou_null_admin("emp", "ComplementoEmpresa", colunas_empresa, ("Complemento",)),
+        ]
+    )
+
+    cab = db.session.execute(
+        text(f"""
+            SELECT TOP 1
+                ctr.*,
+                {campos_empresa_sql}
+            FROM [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
+                ON emp.IDEmpresa = ctr.IDEmpresa
+            WHERE ctr.IDFatoControleContratosEuromidia = :id_contrato
+        """),
+        {"id_contrato": int(id_fato_controle_contratos)},
+    ).mappings().first()
+
+    if not cab:
+        raise RuntimeError(
+            f"Contrato {id_fato_controle_contratos} não encontrado em "
+            "[Integracao].[Silver].[FatoControleContratosEuromidia]."
+        )
+
+    itens = db.session.execute(
+        text("""
+            SELECT *
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+            WHERE IDFatoControleContratoEuromidia = :id_contrato
+              AND ISNULL(BitAtivo, 1) = 1
+            ORDER BY IDFatoControleContratosItensEuromidia ASC
+        """),
+        {"id_contrato": int(id_fato_controle_contratos)},
+    ).mappings().all()
+
+    dados = dict(cab)
+    itens_dict = [dict(item) for item in itens]
+    primeiro_item = itens_dict[0] if itens_dict else {}
+
+    def _soma(campo: str):
+        total = 0.0
+        encontrou = False
+        for item in itens_dict:
+            valor = item.get(campo)
+            if valor in (None, ""):
+                continue
+            try:
+                total += float(valor)
+                encontrou = True
+            except Exception:
+                pass
+        return total if encontrou else None
+
+    def _min_data(campo: str):
+        valores = [item.get(campo) for item in itens_dict if item.get(campo) not in (None, "")]
+        return min(valores) if valores else None
+
+    def _max_data(campo: str):
+        valores = [item.get(campo) for item in itens_dict if item.get(campo) not in (None, "")]
+        return max(valores) if valores else None
+
+    dados.update(
+        {
+            "Resumo_QuantidadeItens": len(itens_dict),
+            "Resumo_DataInicioContrato": _min_data("DataInicioPrevisto"),
+            "Resumo_DataTerminoContrato": _max_data("DataTerminoPrevisto"),
+            "Resumo_SomaFaturamentoBrutoMensal": _soma("FaturamentoBrutoMensal"),
+            "Resumo_SomaFaturamentoLiquidoMensal": _soma("FaturamentoLiquidoMensal"),
+            "Resumo_SomaTotalBrutoContrato": _soma("TotalBrutoContrato"),
+            "PrimeiroItem_CodPonto": primeiro_item.get("CodPonto"),
+            "PrimeiroItem_CodFace": primeiro_item.get("CodFace"),
+            "PrimeiroItem_CidadeExibicao": primeiro_item.get("CidadeExibicao"),
+            "PrimeiroItem_Tipo": primeiro_item.get("Tipo"),
+            "PrimeiroItem_DataInicioPrevisto": primeiro_item.get("DataInicioPrevisto"),
+            "PrimeiroItem_DataTerminoPrevisto": primeiro_item.get("DataTerminoPrevisto"),
+            "PrimeiroItem_FaturamentoBrutoMensal": primeiro_item.get("FaturamentoBrutoMensal"),
+            "PrimeiroItem_FaturamentoLiquidoMensal": primeiro_item.get("FaturamentoLiquidoMensal"),
+        }
+    )
+
+    return dados
+
+
+def _d4sign_montar_endereco_empresa_admin(dados: dict) -> str:
+    """_d4sign_montar_endereco_empresa_admin: eu junto os campos de endereço da empresa."""
+
+    partes = [
+        dados.get("LogradouroEmpresa"),
+        dados.get("NumeroEmpresa"),
+        dados.get("ComplementoEmpresa"),
+        dados.get("BairroEmpresa"),
+        dados.get("MunicipioEmpresa"),
+        dados.get("UFEmpresa"),
+        dados.get("CEPEmpresa"),
+    ]
+
+    return " ".join(str(p).strip() for p in partes if str(p or "").strip())
+
+
+def _d4sign_montar_nome_documento_admin(dados_contrato: dict) -> str:
+    """_d4sign_montar_nome_documento_admin: eu gero nome rastreável e menos sujeito a duplicidade."""
+
+    id_contrato = dados_contrato.get("IDFatoControleContratosEuromidia")
+    numero = _texto_ou_vazio(dados_contrato.get("NumeroContrato"))
+    empresa = (
+        _texto_ou_vazio(dados_contrato.get("NomeFantasiaEmpresa"))
+        or _texto_ou_vazio(dados_contrato.get("RazaoSocialEmpresa"))
+        or _texto_ou_vazio(dados_contrato.get("RazaoSocial"))
+        or "Empresa"
+    )
+
+    empresa = " ".join(empresa.split())[:90]
+    competencia = datetime.now().strftime("%m-%Y")
+
+    if numero:
+        return f"Contrato {numero} - {empresa} - {competencia}"
+
+    return f"Contrato #{id_contrato} - {empresa} - {competencia}"
+
+
+def _d4sign_montar_tokens_padrao_admin(dados: dict, tipo_solicitacao: str | None = None) -> dict:
+    """_d4sign_montar_tokens_padrao_admin: eu monto os tokens padrão enviados ao template Word."""
+
+    total_bruto = (
+        dados.get("TotalBrutoContrato")
+        or dados.get("Resumo_SomaTotalBrutoContrato")
+        or dados.get("TotalContrato")
+    )
+
+    total_liquido_mensal = (
+        dados.get("TotalFaturamentoLiquidoMensal")
+        or dados.get("Resumo_SomaFaturamentoLiquidoMensal")
+        or dados.get("FaturamentoLiquidoMensal")
+    )
+
+    return {
+        "ID_CONTRATO": _d4sign_formatar_valor_token_admin(dados.get("IDFatoControleContratosEuromidia")),
+        "NUMERO_CONTRATO": _d4sign_formatar_valor_token_admin(dados.get("NumeroContrato")),
+        "NUMERO_PREVIA": _d4sign_formatar_valor_token_admin(dados.get("NumeroPrevia")),
+        "REFERENCIA": _d4sign_formatar_valor_token_admin(dados.get("Referencia")),
+        "TIPO_SOLICITACAO": _d4sign_formatar_valor_token_admin(tipo_solicitacao),
+        "TIPO_DOCUMENTO": _d4sign_formatar_valor_token_admin(dados.get("TipoDocumento")),
+        "RAZAO_SOCIAL": _d4sign_formatar_valor_token_admin(dados.get("RazaoSocialEmpresa") or dados.get("RazaoSocial")),
+        "NOME_FANTASIA": _d4sign_formatar_valor_token_admin(dados.get("NomeFantasiaEmpresa")),
+        "CNPJ": _d4sign_formatar_valor_token_admin(dados.get("CNPJ")),
+        "CNPJ_LIMPO": _d4sign_formatar_valor_token_admin(str(dados.get("CNPJ") or "").replace(".", "").replace("/", "").replace("-", "")),
+        "CPF": _d4sign_formatar_valor_token_admin(dados.get("CPF")),
+        "EMAIL_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("EmailEmpresa")),
+        "TELEFONE_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("TelefoneEmpresa")),
+        "ENDERECO_EMPRESA": _d4sign_montar_endereco_empresa_admin(dados),
+        "CIDADE_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("MunicipioEmpresa")),
+        "UF_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("UFEmpresa")),
+        "CEP_EMPRESA": _d4sign_formatar_valor_token_admin(dados.get("CEPEmpresa")),
+        "MARCA_EXIBIDA": _d4sign_formatar_valor_token_admin(dados.get("MarcaExibida")),
+        "VENDEDOR": _d4sign_formatar_valor_token_admin(dados.get("Vendedor")),
+        "ORIGEM": _d4sign_formatar_valor_token_admin(dados.get("Origem")),
+        "AGENCIA": _d4sign_formatar_valor_token_admin(dados.get("Agencia")),
+        "CNPJ_AGENCIA": _d4sign_formatar_valor_token_admin(dados.get("CnpjAgencia")),
+        "BUREAU": _d4sign_formatar_valor_token_admin(dados.get("Bureau")),
+        "CNPJ_BUREAU": _d4sign_formatar_valor_token_admin(dados.get("CnpjBureau")),
+        "INTERMEDIARIO": _d4sign_formatar_valor_token_admin(dados.get("Intermediario")),
+        "CNPJ_INTERMEDIARIO": _d4sign_formatar_valor_token_admin(dados.get("CnpjIntermediario")),
+        "DATA_LANCAMENTO": _d4sign_formatar_data_br_admin(dados.get("DataLancamento")),
+        "DATA_ASSINATURA": _d4sign_formatar_data_br_admin(dados.get("DataAssinaturaRenovacao")),
+        "DATA_INICIO": _d4sign_formatar_data_br_admin(dados.get("Resumo_DataInicioContrato")),
+        "DATA_TERMINO": _d4sign_formatar_data_br_admin(dados.get("Resumo_DataTerminoContrato")),
+        "QUANTIDADE_ITENS": _d4sign_formatar_valor_token_admin(dados.get("Resumo_QuantidadeItens")),
+        "QUANTIDADE_PONTOS": _d4sign_formatar_valor_token_admin(dados.get("QuantidadePontos")),
+        "QUANTIDADE_FACES": _d4sign_formatar_valor_token_admin(dados.get("QuantidadeFaces")),
+        "COD_PONTO": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_CodPonto")),
+        "COD_FACE": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_CodFace")),
+        "CIDADE_EXIBICAO": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_CidadeExibicao")),
+        "TIPO_FACE": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_Tipo")),
+        "TOTAL_BRUTO_CONTRATO": _d4sign_formatar_moeda_br_admin(total_bruto),
+        "TOTAL_FATURAMENTO_LIQUIDO_MENSAL": _d4sign_formatar_moeda_br_admin(total_liquido_mensal),
+        "TOTAL_LIQUIDO_AGENCIA_BUREAU_CARTA_ACORDO": _d4sign_formatar_moeda_br_admin(dados.get("TotalLiquidoContratoAGBRCTACORDO")),
+        "TOTAL_LIQUIDO_AGENCIA_BUREAU_VENDEDOR_GERENCIA": _d4sign_formatar_moeda_br_admin(dados.get("TotalLiquidoContratoAGBRVENDGERCOOR")),
+        "DATA_GERACAO_DOCUMENTO": datetime.now().strftime("%d/%m/%Y"),
+    }
+
+
+def _d4sign_parse_json_variaveis_admin(valor_json) -> dict | list | None:
+    """_d4sign_parse_json_variaveis_admin: eu leio o JsonVariaveis da DimModeloContratoD4."""
+
+    texto = _texto_ou_vazio(valor_json)
+    if not texto:
+        return None
+
+    try:
+        dados = json.loads(texto)
+    except Exception as exc:
+        raise RuntimeError(f"JsonVariaveis inválido na DimModeloContratoD4: {exc}") from exc
+
+    if isinstance(dados, dict):
+        for chave in ("variaveis", "variables", "tokens", "campos"):
+            if isinstance(dados.get(chave), (dict, list)):
+                return dados.get(chave)
+
+    return dados if isinstance(dados, (dict, list)) else None
+
+
+def _d4sign_resolver_valor_json_variavel_admin(nome_variavel: str, regra, dados: dict, tokens_padrao: dict) -> str:
+    """_d4sign_resolver_valor_json_variavel_admin: eu resolvo uma variável configurada no JsonVariaveis."""
+
+    if isinstance(regra, dict):
+        if "valor_fixo" in regra:
+            return _d4sign_formatar_valor_token_admin(regra.get("valor_fixo"), regra.get("formato"))
+
+        if "fixo" in regra:
+            return _d4sign_formatar_valor_token_admin(regra.get("fixo"), regra.get("formato"))
+
+        if "valor" in regra and not any(k in regra for k in ("campo", "coluna", "token", "origem")):
+            return _d4sign_formatar_valor_token_admin(regra.get("valor"), regra.get("formato"))
+
+        origem = (
+            regra.get("campo")
+            or regra.get("coluna")
+            or regra.get("token")
+            or regra.get("origem")
+            or regra.get("valor")
+            or nome_variavel
+        )
+
+        if origem in tokens_padrao:
+            return _d4sign_formatar_valor_token_admin(tokens_padrao.get(origem), regra.get("formato"))
+
+        return _d4sign_formatar_valor_token_admin(dados.get(str(origem)), regra.get("formato"))
+
+    if isinstance(regra, str):
+        origem = regra.strip()
+
+        if origem in tokens_padrao:
+            return _d4sign_formatar_valor_token_admin(tokens_padrao.get(origem))
+
+        if origem in dados:
+            return _d4sign_formatar_valor_token_admin(dados.get(origem))
+
+        return _d4sign_formatar_valor_token_admin(origem)
+
+    if regra in (None, ""):
+        return _d4sign_formatar_valor_token_admin(tokens_padrao.get(nome_variavel) or dados.get(nome_variavel))
+
+    return _d4sign_formatar_valor_token_admin(regra)
+
+
+def _d4sign_montar_tokens_template_admin(modelo: dict, dados_contrato: dict, tipo_solicitacao: str | None) -> dict:
+    """_d4sign_montar_tokens_template_admin: eu monto tokens padrão e aplico JsonVariaveis quando configurado."""
+
+    tokens_padrao = _d4sign_montar_tokens_padrao_admin(dados_contrato, tipo_solicitacao=tipo_solicitacao)
+    configuracao = _d4sign_parse_json_variaveis_admin(modelo.get("JsonVariaveis"))
+
+    if not configuracao:
+        return tokens_padrao
+
+    if isinstance(configuracao, list):
+        tokens = {}
+        for item in configuracao:
+            nome_variavel = str(item or "").strip()
+            if nome_variavel:
+                tokens[nome_variavel] = _d4sign_formatar_valor_token_admin(
+                    tokens_padrao.get(nome_variavel) or dados_contrato.get(nome_variavel)
+                )
+        return tokens or tokens_padrao
+
+    if isinstance(configuracao, dict):
+        tokens = {}
+        for nome_variavel, regra in configuracao.items():
+            nome = str(nome_variavel or "").strip()
+            if not nome:
+                continue
+            tokens[nome] = _d4sign_resolver_valor_json_variavel_admin(
+                nome,
+                regra,
+                dados_contrato,
+                tokens_padrao,
+            )
+        return tokens or tokens_padrao
+
+    return tokens_padrao
+
+
+
+
+def _d4sign_extrair_lista_objetos_admin(resposta) -> list[dict]:
+    """_d4sign_extrair_lista_objetos_admin: eu transformo respostas variadas da D4Sign em lista."""
+
+    if resposta is None:
+        return []
+
+    if isinstance(resposta, list):
+        return [item for item in resposta if isinstance(item, dict)]
+
+    if isinstance(resposta, dict):
+        for chave in (
+            "data",
+            "safes",
+            "folders",
+            "documents",
+            "docs",
+            "result",
+            "results",
+            "resposta",
+            "list",
+        ):
+            valor = resposta.get(chave)
+
+            if isinstance(valor, list):
+                return [item for item in valor if isinstance(item, dict)]
+
+        if resposta and all(isinstance(valor, dict) for valor in resposta.values()):
+            return [valor for valor in resposta.values() if isinstance(valor, dict)]
+
+        return [resposta]
+
+    return []
+
+
+def _d4sign_normalizar_texto_admin(valor) -> str:
+    """_d4sign_normalizar_texto_admin: eu padronizo texto para comparação segura."""
+
+    return str(valor or "").strip().casefold()
+
+
+def _d4sign_limpar_nome_pasta_arquivo_admin(valor) -> str:
+    """_d4sign_limpar_nome_pasta_arquivo_admin: eu limpo caracteres inválidos de pasta/documento."""
+
+    texto = str(valor or "").strip()
+    texto = re.sub(r'[\\/:*?"<>|]+', "-", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    if not texto:
+        return "sem_nome"
+
+    return texto[:180]
+
+
+def _d4sign_obter_nome_pasta_admin(pasta: dict) -> str:
+    """_d4sign_obter_nome_pasta_admin: eu capturo o nome da pasta em formatos diferentes da D4Sign."""
+
+    return str(
+        pasta.get("folder_name")
+        or pasta.get("name-folder")
+        or pasta.get("name_folder")
+        or pasta.get("folderName")
+        or pasta.get("name")
+        or pasta.get("nome")
+        or ""
+    ).strip()
+
+
+def _d4sign_obter_uuid_pasta_admin(pasta: dict) -> str:
+    """_d4sign_obter_uuid_pasta_admin: eu capturo o UUID da pasta em formatos diferentes da D4Sign."""
+
+    return str(
+        pasta.get("uuid_folder")
+        or pasta.get("uuid-folder")
+        or pasta.get("uuidFolder")
+        or pasta.get("uuid_folder_current")
+        or pasta.get("uuid")
+        or pasta.get("id")
+        or ""
+    ).strip()
+
+
+def _d4sign_obter_uuid_pasta_pai_admin(pasta: dict) -> str:
+    """_d4sign_obter_uuid_pasta_pai_admin: eu capturo o UUID da pasta pai em formatos diferentes."""
+
+    return str(
+        pasta.get("uuid_folder_parent")
+        or pasta.get("uuid-folder-parent")
+        or pasta.get("uuidParent")
+        or pasta.get("parent_uuid")
+        or pasta.get("uuid_parent")
+        or pasta.get("id_parent")
+        or ""
+    ).strip()
+
+
+def _d4sign_listar_pastas_do_cofre_admin(uuid_cofre: str) -> list[dict]:
+    """_d4sign_listar_pastas_do_cofre_admin: eu listo as pastas do cofre na D4Sign."""
+
+    resposta = _d4sign_executar_get_admin(f"/folders/{uuid_cofre}/find")
+    return _d4sign_extrair_lista_objetos_admin(resposta)
+
+
+def _d4sign_buscar_pasta_por_nome_admin(
+    *,
+    uuid_cofre: str,
+    nome_pasta: str,
+    uuid_pasta_pai: str | None = None,
+) -> dict | None:
+    """_d4sign_buscar_pasta_por_nome_admin: eu busco pasta pelo nome e, se houver, pelo pai."""
+
+    pastas = _d4sign_listar_pastas_do_cofre_admin(uuid_cofre)
+    nome_procurado = _d4sign_normalizar_texto_admin(nome_pasta)
+
+    candidatas = []
+    for pasta in pastas:
+        nome_encontrado = _d4sign_obter_nome_pasta_admin(pasta)
+        if _d4sign_normalizar_texto_admin(nome_encontrado) == nome_procurado:
+            candidatas.append(pasta)
+
+    if not candidatas:
+        return None
+
+    if uuid_pasta_pai:
+        uuid_pai_procurado = _d4sign_normalizar_texto_admin(uuid_pasta_pai)
+        candidatas_com_pai = []
+
+        for pasta in candidatas:
+            uuid_pai_encontrado = _d4sign_obter_uuid_pasta_pai_admin(pasta)
+            if uuid_pai_encontrado and _d4sign_normalizar_texto_admin(uuid_pai_encontrado) == uuid_pai_procurado:
+                candidatas_com_pai.append(pasta)
+
+        if candidatas_com_pai:
+            return candidatas_com_pai[0]
+
+    return candidatas[0]
+
+
+def _d4sign_criar_pasta_admin(
+    *,
+    uuid_cofre: str,
+    nome_pasta: str,
+    uuid_pasta_pai: str | None = None,
+) -> dict:
+    """_d4sign_criar_pasta_admin: eu crio pasta ou subpasta dentro do cofre."""
+
+    payload = {
+        "folder_name": nome_pasta,
+    }
+
+    if uuid_pasta_pai:
+        payload["uuid_folder"] = uuid_pasta_pai
+
+    resposta = _d4sign_executar_post_admin(
+        caminho=f"/folders/{uuid_cofre}/create",
+        payload=payload,
+    )
+
+    return resposta if isinstance(resposta, dict) else {"resposta": resposta}
+
+
+def _d4sign_obter_ou_criar_pasta_admin(
+    *,
+    uuid_cofre: str,
+    nome_pasta: str,
+    uuid_pasta_pai: str | None = None,
+) -> dict:
+    """_d4sign_obter_ou_criar_pasta_admin: eu reaproveito pasta existente ou crio se não existir."""
+
+    pasta_existente = _d4sign_buscar_pasta_por_nome_admin(
+        uuid_cofre=uuid_cofre,
+        nome_pasta=nome_pasta,
+        uuid_pasta_pai=uuid_pasta_pai,
+    )
+
+    if pasta_existente:
+        current_app.logger.info(
+            "D4SIGN | pasta reaproveitada | nome=%s | uuid=%s",
+            nome_pasta,
+            _d4sign_obter_uuid_pasta_admin(pasta_existente),
+        )
+        return pasta_existente
+
+    current_app.logger.info("D4SIGN | criando pasta | nome=%s", nome_pasta)
+
+    resposta_criacao = _d4sign_criar_pasta_admin(
+        uuid_cofre=uuid_cofre,
+        nome_pasta=nome_pasta,
+        uuid_pasta_pai=uuid_pasta_pai,
+    )
+
+    uuid_pasta_criada = _d4sign_obter_uuid_pasta_admin(resposta_criacao)
+    if uuid_pasta_criada:
+        return resposta_criacao
+
+    pasta_criada = _d4sign_buscar_pasta_por_nome_admin(
+        uuid_cofre=uuid_cofre,
+        nome_pasta=nome_pasta,
+        uuid_pasta_pai=uuid_pasta_pai,
+    )
+
+    if not pasta_criada:
+        raise RuntimeError(
+            f"Solicitei a criação da pasta D4Sign '{nome_pasta}', "
+            f"mas não consegui encontrá-la depois. Resposta={resposta_criacao}"
+        )
+
+    return pasta_criada
+
+
+def _d4sign_obter_cnpj_ou_identificador_empresa_admin(dados_contrato: dict) -> str:
+    """_d4sign_obter_cnpj_ou_identificador_empresa_admin: eu defino a pasta da empresa."""
+
+    cnpj = (
+        dados_contrato.get("CNPJ")
+        or dados_contrato.get("CNPJEmpresa")
+        or dados_contrato.get("CnpjEmpresa")
+        or dados_contrato.get("Cnpj")
+        or ""
+    )
+
+    cnpj_limpo = re.sub(r"\D+", "", str(cnpj or ""))
+    if cnpj_limpo:
+        return cnpj_limpo
+
+    id_empresa = dados_contrato.get("IDEmpresa")
+    if id_empresa not in (None, "", 0):
+        return f"empresa-{id_empresa}"
+
+    razao_social = (
+        dados_contrato.get("RazaoSocialEmpresa")
+        or dados_contrato.get("RazaoSocial")
+        or dados_contrato.get("NomeFantasiaEmpresa")
+        or "empresa-sem-cnpj"
+    )
+
+    return _d4sign_limpar_nome_pasta_arquivo_admin(razao_social)
+
+
+def _d4sign_resolver_pasta_destino_contrato_admin(
+    *,
+    uuid_cofre: str,
+    dados_contrato: dict,
+) -> dict:
+    """_d4sign_resolver_pasta_destino_contrato_admin: eu crio/reaproveito Euromidia > CNPJ > mês-ano."""
+
+    nome_pasta_raiz = _d4sign_limpar_nome_pasta_arquivo_admin(NOME_PASTA_RAIZ_D4_CONTRATOS_ADMIN)
+    nome_pasta_empresa = _d4sign_limpar_nome_pasta_arquivo_admin(
+        _d4sign_obter_cnpj_ou_identificador_empresa_admin(dados_contrato)
+    )
+    nome_pasta_mes_ano = _d4sign_limpar_nome_pasta_arquivo_admin(datetime.now().strftime("%m-%Y"))
+
+    pasta_raiz = _d4sign_obter_ou_criar_pasta_admin(
+        uuid_cofre=uuid_cofre,
+        nome_pasta=nome_pasta_raiz,
+    )
+
+    uuid_pasta_raiz = _d4sign_obter_uuid_pasta_admin(pasta_raiz)
+    if not uuid_pasta_raiz:
+        raise RuntimeError(f"Não consegui obter UUID da pasta raiz D4Sign: {pasta_raiz}")
+
+    pasta_empresa = _d4sign_obter_ou_criar_pasta_admin(
+        uuid_cofre=uuid_cofre,
+        nome_pasta=nome_pasta_empresa,
+        uuid_pasta_pai=uuid_pasta_raiz,
+    )
+
+    uuid_pasta_empresa = _d4sign_obter_uuid_pasta_admin(pasta_empresa)
+    if not uuid_pasta_empresa:
+        raise RuntimeError(f"Não consegui obter UUID da pasta da empresa/CNPJ D4Sign: {pasta_empresa}")
+
+    pasta_mes_ano = _d4sign_obter_ou_criar_pasta_admin(
+        uuid_cofre=uuid_cofre,
+        nome_pasta=nome_pasta_mes_ano,
+        uuid_pasta_pai=uuid_pasta_empresa,
+    )
+
+    uuid_pasta_mes_ano = _d4sign_obter_uuid_pasta_admin(pasta_mes_ano)
+    if not uuid_pasta_mes_ano:
+        raise RuntimeError(f"Não consegui obter UUID da pasta mês-ano D4Sign: {pasta_mes_ano}")
+
+    return {
+        "nome_pasta_raiz": nome_pasta_raiz,
+        "uuid_pasta_raiz": uuid_pasta_raiz,
+        "nome_pasta_empresa": nome_pasta_empresa,
+        "uuid_pasta_empresa": uuid_pasta_empresa,
+        "nome_pasta_mes_ano": nome_pasta_mes_ano,
+        "uuid_pasta_mes_ano": uuid_pasta_mes_ano,
+    }
+
+
+
+
+def _d4sign_documento_existente_ativo_admin(
+    *,
+    id_fato_controle_contratos: int,
+    id_fato_kanban_card: int | None,
+    id_dim_tipo_documento: int | None,
+) -> dict | None:
+    """_d4sign_documento_existente_ativo_admin: eu evito criar documento duplicado para o mesmo contrato/card."""
+
+    colunas = _d4sign_obter_colunas_tabela_admin("Integracao", "Silver", "FatoContratoD4")
+
+    if not _d4sign_tem_coluna_admin(colunas, "IDFatoContratoD4"):
+        return None
+
+    if not _d4sign_tem_coluna_admin(colunas, "IDFatoControleContratosEuromidia"):
+        return None
+
+    if not _d4sign_tem_coluna_admin(colunas, "UUIDDocumentoD4"):
+        return None
+
+    campos_select = [
+        "IDFatoContratoD4",
+        "CAST(UUIDDocumentoD4 AS varchar(36)) AS UUIDDocumentoD4",
+    ]
+
+    if _d4sign_tem_coluna_admin(colunas, "NomeDocumentoD4"):
+        campos_select.append("NomeDocumentoD4")
+    else:
+        campos_select.append("CAST(NULL AS nvarchar(255)) AS NomeDocumentoD4")
+
+    if _d4sign_tem_coluna_admin(colunas, "IDDimStatusD4"):
+        campos_select.append("IDDimStatusD4")
+    else:
+        campos_select.append("CAST(NULL AS int) AS IDDimStatusD4")
+
+    if _d4sign_tem_coluna_admin(colunas, "NomeFaseD4"):
+        campos_select.append("NomeFaseD4")
+    else:
+        campos_select.append("CAST(NULL AS nvarchar(90)) AS NomeFaseD4")
+
+    filtros = ["IDFatoControleContratosEuromidia = :id_contrato"]
+    params = {
+        "id_contrato": int(id_fato_controle_contratos),
+        "id_card": int(id_fato_kanban_card) if id_fato_kanban_card not in (None, "", 0) else None,
+        "id_tipo_documento": int(id_dim_tipo_documento) if id_dim_tipo_documento not in (None, "", 0) else None,
+    }
+
+    if _d4sign_tem_coluna_admin(colunas, "IDFatoKanbanCard"):
+        filtros.append("ISNULL(IDFatoKanbanCard, 0) = ISNULL(:id_card, 0)")
+
+    if _d4sign_tem_coluna_admin(colunas, "IDDimTipoDocumento"):
+        filtros.append("(:id_tipo_documento IS NULL OR IDDimTipoDocumento = :id_tipo_documento OR IDDimTipoDocumento IS NULL)")
+
+    if _d4sign_tem_coluna_admin(colunas, "BitAtivo"):
+        filtros.append("ISNULL(BitAtivo, 1) = 1")
+
+    if _d4sign_tem_coluna_admin(colunas, "IDDimStatusD4"):
+        filtros.append("ISNULL(IDDimStatusD4, 0) <> 6")
+
+    sql = f"""
+        SELECT TOP 1
+            {", ".join(campos_select)}
+        FROM [Integracao].[Silver].[FatoContratoD4]
+        WHERE {" AND ".join(filtros)}
+        ORDER BY IDFatoContratoD4 DESC
+    """
+
+    row = db.session.execute(text(sql), params).mappings().first()
+    return dict(row) if row else None
+
+
+def _d4sign_criar_documento_template_word_admin(
+    *,
+    uuid_cofre: str,
+    nome_documento: str,
+    id_template_d4: str,
+    tokens: dict,
+    uuid_pasta_destino: str | None = None,
+) -> dict:
+    """_d4sign_criar_documento_template_word_admin: eu crio documento no cofre usando template Word."""
+
+    id_template_limpo = str(id_template_d4 or "").strip()
+    if not id_template_limpo:
+        raise RuntimeError("IDTemplateD4 veio vazio. Confira o cadastro em DimModeloContratoD4.")
+
+    payload = {
+        "name_document": str(nome_documento or "Contrato").strip()[:255],
+        "templates": {
+            id_template_limpo: tokens or {}
+        },
+    }
+
+    if uuid_pasta_destino:
+        payload["uuid_folder"] = str(uuid_pasta_destino).strip()
+
+    current_app.logger.info(
+        "D4SIGN | criando documento por template Word | cofre=%s | pasta=%s | template=%s | nome=%s",
+        uuid_cofre,
+        uuid_pasta_destino,
+        id_template_limpo,
+        payload["name_document"],
+    )
+
+    return _d4sign_executar_post_admin(
+        caminho=f"/documents/{uuid_cofre}/makedocumentbytemplateword",
+        payload=payload,
+    )
+
+
+
+def _d4sign_buscar_detalhe_documento_admin(uuid_documento: str) -> dict:
+    """_d4sign_buscar_detalhe_documento_admin: eu busco detalhes/status do documento criado."""
+
+    resposta = _d4sign_executar_get_admin(f"/documents/{uuid_documento}")
+    return _d4sign_primeiro_objeto_admin(resposta)
+
+
+
+def _d4sign_inserir_fato_contrato_admin(
+    *,
+    id_dim_status_d4: int,
+    id_empresa: int | None,
+    id_dim_cofre_d4: int | None,
+    id_fato_controle_contratos: int,
+    id_fato_kanban_card: int | None,
+    id_dim_status_contratos: int | None,
+    id_dim_modelo_contrato_d4: int | None,
+    id_dim_tipo_documento: int | None,
+    uuid_documento_d4: str,
+    uuid_cofre_d4: str | None,
+    nome_documento_d4: str,
+    nome_cofre_d4: str | None,
+    id_fase_d4: int | None,
+    nome_fase_d4: str | None,
+    tipo_arquivo_d4: str | None,
+    quantidade_paginas: int | None,
+    tamanho_arquivo_d4: int | None,
+    status_comentario_d4: str | None,
+    cancelado_por_d4: str | None,
+) -> int:
+    """_d4sign_inserir_fato_contrato_admin: eu registro localmente o documento criado na D4Sign."""
+
+    colunas = _d4sign_obter_colunas_tabela_admin("Integracao", "Silver", "FatoContratoD4")
+
+    if not _d4sign_tem_coluna_admin(colunas, "IDFatoContratoD4"):
+        raise RuntimeError(
+            "A tabela [Integracao].[Silver].[FatoContratoD4] não possui IDFatoContratoD4. "
+            "Não consigo gravar o vínculo local do documento D4Sign."
+        )
+
+    valores_por_coluna = {
+        "IDDimStatusD4": (":id_dim_status_d4", int(id_dim_status_d4)),
+        "IDEmpresa": (":id_empresa", int(id_empresa) if id_empresa not in (None, "", 0) else None),
+        "IDDimCofreD4": (":id_dim_cofre_d4", int(id_dim_cofre_d4) if id_dim_cofre_d4 not in (None, "", 0) else None),
+        "IDFatoControleContratosEuromidia": (":id_contrato", int(id_fato_controle_contratos)),
+        "IDFatoKanbanCard": (":id_card", int(id_fato_kanban_card) if id_fato_kanban_card not in (None, "", 0) else None),
+        "IDDimStatusContratos": (":id_dim_status_contratos", int(id_dim_status_contratos) if id_dim_status_contratos not in (None, "", 0) else None),
+        "IDDimModeloContratoD4": (":id_dim_modelo", int(id_dim_modelo_contrato_d4) if id_dim_modelo_contrato_d4 not in (None, "", 0) else None),
+        "IDDimTipoDocumento": (":id_dim_tipo_documento", int(id_dim_tipo_documento) if id_dim_tipo_documento not in (None, "", 0) else None),
+        "UUIDDocumentoD4": (":uuid_documento", uuid_documento_d4),
+        "UUIDCofreD4": (":uuid_cofre", uuid_cofre_d4),
+        "NomeDocumentoD4": (":nome_documento", nome_documento_d4),
+        "NomeCofreD4": (":nome_cofre", nome_cofre_d4),
+        "IDFaseD4": (":id_fase", int(id_fase_d4) if id_fase_d4 not in (None, "", 0) else None),
+        "NomeFaseD4": (":nome_fase", nome_fase_d4),
+        "TipoArquivoD4": (":tipo_arquivo", tipo_arquivo_d4),
+        "QuantidadePaginas": (":paginas", int(quantidade_paginas) if quantidade_paginas not in (None, "", 0) else None),
+        "TamanhoArquivoD4": (":tamanho", int(tamanho_arquivo_d4) if tamanho_arquivo_d4 not in (None, "", 0) else None),
+        "StatusComentarioD4": (":status_comentario", status_comentario_d4),
+        "CanceladoPorD4": (":cancelado_por", cancelado_por_d4),
+        "DataCriacao": ("SYSDATETIME()", None),
+        "DataAtualizacao": ("SYSDATETIME()", None),
+        "BitAtivo": ("1", None),
+    }
+
+    nomes_colunas_insert = []
+    valores_insert = []
+    parametros = {}
+
+    for nome_coluna, (expressao_valor, valor_parametro) in valores_por_coluna.items():
+        if not _d4sign_tem_coluna_admin(colunas, nome_coluna):
+            continue
+
+        nomes_colunas_insert.append(f"[{nome_coluna}]")
+        valores_insert.append(expressao_valor)
+
+        if expressao_valor.startswith(":"):
+            parametros[expressao_valor[1:]] = valor_parametro
+
+    if not nomes_colunas_insert:
+        raise RuntimeError(
+            "A tabela [Integracao].[Silver].[FatoContratoD4] existe, mas nenhuma coluna esperada foi encontrada para INSERT."
+        )
+
+    sql = f"""
+        INSERT INTO [Integracao].[Silver].[FatoContratoD4]
+        (
+            {", ".join(nomes_colunas_insert)}
+        )
+        OUTPUT INSERTED.IDFatoContratoD4 AS IDFatoContratoD4
+        VALUES
+        (
+            {", ".join(valores_insert)}
+        )
+    """
+
+    row = db.session.execute(text(sql), parametros).mappings().first()
+
+    if not row or row.get("IDFatoContratoD4") is None:
+        raise RuntimeError("Documento criado na D4Sign, mas não consegui gravar em FatoContratoD4.")
+
+    return int(row["IDFatoContratoD4"])
+
+
+def _d4sign_criar_contrato_por_aprovacao_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+    id_empresa: int | None,
+    id_dim_status_contratos: int | None,
+    id_dim_tipo_documento: int | None,
+    tipo_solicitacao: str | None,
+) -> dict:
+    """_d4sign_criar_contrato_por_aprovacao_admin: eu crio o documento D4Sign depois da aprovação."""
+
+    if not _env_bool("D4SIGN_CRIAR_CONTRATO_NA_APROVACAO_HABILITADO", "1"):
+        return {
+            "ok": False,
+            "status": "desabilitado",
+            "mensagem": "Criação de contrato D4Sign na aprovação está desabilitada por env.",
+        }
+
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    if id_contrato in (None, "", 0):
+        raise RuntimeError("Não criei D4Sign porque IDFatoControleContratosEuromidia veio vazio.")
+
+    id_tipo_documento = _int_ou_none(id_dim_tipo_documento)
+
+    existente = _d4sign_documento_existente_ativo_admin(
+        id_fato_controle_contratos=int(id_contrato),
+        id_fato_kanban_card=id_fato_kanban_card,
+        id_dim_tipo_documento=id_tipo_documento,
+    )
+
+    if existente:
+        return {
+            "ok": True,
+            "status": "ja_existia",
+            "id_fato_contrato_d4": existente.get("IDFatoContratoD4"),
+            "uuid_documento_d4": existente.get("UUIDDocumentoD4"),
+            "nome_documento_d4": existente.get("NomeDocumentoD4"),
+            "nome_fase_d4": existente.get("NomeFaseD4"),
+        }
+
+    dados_contrato = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
+    tipo_documento = dados_contrato.get("TipoDocumento")
+
+    modelo = _d4sign_resolver_modelo_contrato_admin(
+        id_dim_cofre_d4=None,
+        tipo_solicitacao=tipo_solicitacao,
+        tipo_documento=tipo_documento,
+    )
+
+    cofre = _d4sign_obter_cofre_contratos_admin(modelo.get("IDDimCofreD4"))
+
+    nome_documento = _d4sign_montar_nome_documento_admin(dados_contrato)
+    tokens = _d4sign_montar_tokens_template_admin(
+        modelo=modelo,
+        dados_contrato=dados_contrato,
+        tipo_solicitacao=tipo_solicitacao,
+    )
+
+    pasta_destino = _d4sign_resolver_pasta_destino_contrato_admin(
+        uuid_cofre=str(cofre["UUIDCofreD4"]),
+        dados_contrato=dados_contrato,
+    )
+
+    resposta_criacao = _d4sign_criar_documento_template_word_admin(
+        uuid_cofre=str(cofre["UUIDCofreD4"]),
+        nome_documento=nome_documento,
+        id_template_d4=str(modelo["IDTemplateD4"]),
+        tokens=tokens,
+        uuid_pasta_destino=pasta_destino.get("uuid_pasta_mes_ano"),
+    )
+
+    uuid_documento = _d4sign_obter_uuid_documento_admin(resposta_criacao)
+    if not uuid_documento:
+        raise RuntimeError(f"D4Sign respondeu sem UUID do documento criado: {resposta_criacao}")
+
+    detalhe = _d4sign_primeiro_objeto_admin(resposta_criacao)
+    try:
+        detalhe_api = _d4sign_buscar_detalhe_documento_admin(uuid_documento)
+        if detalhe_api:
+            detalhe = detalhe_api
+    except Exception as exc:
+        current_app.logger.warning(
+            "D4SIGN | documento criado, mas detalhe não foi carregado | uuid=%s | erro=%s",
+            uuid_documento,
+            exc,
+        )
+
+    id_fase_texto = str(
+        detalhe.get("statusId")
+        or detalhe.get("status_id")
+        or detalhe.get("id_status")
+        or detalhe.get("idStatus")
+        or "1"
+    ).strip()
+
+    id_dim_status_d4 = _d4sign_para_int_ou_none_admin(id_fase_texto) or 1
+
+    nome_fase = _texto_ou_vazio(
+        detalhe.get("statusName")
+        or detalhe.get("status_name")
+        or detalhe.get("status")
+        or MAPA_FASE_D4SIGN_ADMIN.get(str(id_dim_status_d4), "Processando")
+    )
+
+    id_fato_contrato_d4 = _d4sign_inserir_fato_contrato_admin(
+        id_dim_status_d4=int(id_dim_status_d4),
+        id_empresa=id_empresa or dados_contrato.get("IDEmpresa"),
+        id_dim_cofre_d4=cofre.get("IDDimCofreD4"),
+        id_fato_controle_contratos=int(id_contrato),
+        id_fato_kanban_card=id_fato_kanban_card,
+        id_dim_status_contratos=id_dim_status_contratos or dados_contrato.get("IDDimStatusContratos"),
+        id_dim_modelo_contrato_d4=modelo.get("IDDimModeloContratoD4"),
+        id_dim_tipo_documento=id_tipo_documento,
+        uuid_documento_d4=uuid_documento,
+        uuid_cofre_d4=detalhe.get("uuidSafe") or cofre.get("UUIDCofreD4"),
+        nome_documento_d4=detalhe.get("nameDoc") or nome_documento,
+        nome_cofre_d4=detalhe.get("safeName") or cofre.get("NomeCofreD4"),
+        id_fase_d4=int(id_dim_status_d4),
+        nome_fase_d4=nome_fase,
+        tipo_arquivo_d4=detalhe.get("type"),
+        quantidade_paginas=_d4sign_para_int_ou_none_admin(detalhe.get("pages")),
+        tamanho_arquivo_d4=_d4sign_para_int_ou_none_admin(detalhe.get("size")),
+        status_comentario_d4=detalhe.get("statusComment"),
+        cancelado_por_d4=detalhe.get("whoCanceled"),
+    )
+
+    return {
+        "ok": True,
+        "status": "criado",
+        "id_fato_contrato_d4": id_fato_contrato_d4,
+        "uuid_documento_d4": uuid_documento,
+        "nome_documento_d4": detalhe.get("nameDoc") or nome_documento,
+        "id_fase_d4": int(id_dim_status_d4),
+        "nome_fase_d4": nome_fase,
+        "id_dim_modelo_contrato_d4": modelo.get("IDDimModeloContratoD4"),
+        "id_dim_cofre_d4": cofre.get("IDDimCofreD4"),
+        "pasta_d4sign": pasta_destino,
+    }
+
+def _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
+    *,
+    id_solicitacao: int,
+    id_usuario_logado: int | None = None,
+    cabecalho_solicitacao: dict | None = None,
+) -> dict:
+    """_d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin: eu crio D4 mesmo quando a solicitação já está aprovada.
+
+    Motivo prático:
+    - o POST da tela de aprovação usa Celery;
+    - se a solicitação já ficou APROVADO antes da correção da D4Sign, o fluxo antigo retornava antes de tentar criar o documento;
+    - esta função permite reaproveitar o contrato já aprovado e criar/identificar o documento na D4Sign sem reaprovar tudo.
+    """
+
+    id_solicitacao_int = int(id_solicitacao)
+    cab = cabecalho_solicitacao or _obter_cabecalho_solicitacao_bruta(id_solicitacao_int) or {}
+
+    id_fato_controle = _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+    id_card = _int_ou_none(cab.get("IDFatoKanbanCard"))
+    id_empresa = _int_ou_none(cab.get("IDEmpresa"))
+    tipo_solicitacao = _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao"))
+
+    if id_fato_controle in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_contrato_controle",
+            "erro": "A solicitação está aprovada, mas não possui IDFatoControleContratosEuromidia para criar o documento D4Sign.",
+            "id_solicitacao": id_solicitacao_int,
+        }
+
+    try:
+        id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
+            id_solicitacao=id_solicitacao_int,
+            cabecalho_solicitacao=cab,
+            id_fato_kanban_card=id_card,
+            id_fato_controle_contratos=id_fato_controle,
+            ids_itens_controle=None,
+            tipo_solicitacao=tipo_solicitacao,
+        )
+
+        resultado_d4sign = _d4sign_criar_contrato_por_aprovacao_admin(
+            id_fato_controle_contratos=id_fato_controle,
+            id_fato_kanban_card=id_card,
+            id_empresa=id_empresa,
+            id_dim_status_contratos=cab.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_APROVADO,
+            id_dim_tipo_documento=id_dim_tipo_documento,
+            tipo_solicitacao=tipo_solicitacao,
+        )
+
+        db.session.commit()
+
+        current_app.logger.info(
+            "D4SIGN | criação/identificação executada para solicitação já aprovada | "
+            "id_solicitacao=%s | id_contrato=%s | id_card=%s | usuario=%s | resultado=%s",
+            id_solicitacao_int,
+            id_fato_controle,
+            id_card,
+            id_usuario_logado,
+            resultado_d4sign,
+        )
+
+        return resultado_d4sign
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "D4SIGN | falha ao criar contrato D4Sign para solicitação já aprovada | "
+            "id_solicitacao=%s | id_contrato=%s | id_card=%s",
+            id_solicitacao_int,
+            id_fato_controle,
+            id_card,
+        )
+        return {
+            "ok": False,
+            "status": "erro",
+            "erro": str(exc),
+            "id_solicitacao": id_solicitacao_int,
+            "id_contrato": int(id_fato_controle) if id_fato_controle else None,
+            "id_card": int(id_card) if id_card else None,
+        }
+
 def _processar_aprovacao_contrato_admin(
     *,
     id_solicitacao: int,
@@ -10639,12 +12156,19 @@ def _processar_aprovacao_contrato_admin(
 
     status_atual = _texto_ou_vazio(cab_inicial.get("StatusSolicitacao")).upper().strip()
     if status_atual == "APROVADO":
+        resultado_d4sign = _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
+            id_solicitacao=id_solicitacao_int,
+            id_usuario_logado=id_usuario_int,
+            cabecalho_solicitacao=cab_inicial,
+        )
+
         return {
             "ok": True,
             "status": "ja_aprovado",
             "id_solicitacao": id_solicitacao_int,
             "id_contrato": _int_ou_none(cab_inicial.get("IDFatoControleContratosEuromidia")),
             "id_card": _int_ou_none(cab_inicial.get("IDFatoKanbanCard")),
+            "resultado_d4sign": resultado_d4sign,
         }
 
     id_card = _int_ou_none(cab_inicial.get("IDFatoKanbanCard"))
@@ -10765,6 +12289,44 @@ def _processar_aprovacao_contrato_admin(
 
     db.session.commit()
 
+    resultado_d4sign = {}
+
+    try:
+        resultado_d4sign = _d4sign_criar_contrato_por_aprovacao_admin(
+            id_fato_controle_contratos=id_fato_controle,
+            id_fato_kanban_card=id_card,
+            id_empresa=id_empresa,
+            id_dim_status_contratos=cab_aprovada.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_APROVADO,
+            id_dim_tipo_documento=id_dim_tipo_documento,
+            tipo_solicitacao=tipo_solicitacao,
+        )
+
+        db.session.commit()
+
+        current_app.logger.info(
+            "D4SIGN | contrato criado/identificado após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s | resultado=%s",
+            id_fato_controle,
+            id_solicitacao_int,
+            id_card,
+            resultado_d4sign,
+        )
+
+    except Exception as exc:
+        db.session.rollback()
+
+        resultado_d4sign = {
+            "ok": False,
+            "status": "erro",
+            "erro": str(exc),
+        }
+
+        current_app.logger.exception(
+            "D4SIGN | falha ao criar contrato D4Sign após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+            id_fato_controle,
+            id_solicitacao_int,
+            id_card,
+        )
+
     task_airflow_id = None
     if enfileirar_airflow:
         try:
@@ -10814,6 +12376,7 @@ def _processar_aprovacao_contrato_admin(
         "id_card": int(id_card) if id_card else None,
         "ids_itens_controle": ids_itens_controle,
         "task_airflow_id": task_airflow_id,
+        "resultado_d4sign": resultado_d4sign,
         "resultado_aprovacao": resultado_aprovacao,
         "precos_praticados": resultado_aprovacao.get("precos_praticados") or [],
         "empresas_relacionadas_sincronizadas": resultado_aprovacao.get("empresas_relacionadas_sincronizadas") or [],
@@ -10896,7 +12459,20 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                 status_atual = _texto_ou_vazio(cab_atualizada.get("StatusSolicitacao")).upper().strip()
                 if status_atual == "APROVADO":
                     db.session.rollback()
-                    flash("Essa solicitação já está aprovada. Nenhuma nova aprovação foi iniciada.", "info")
+
+                    resultado_d4sign = _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
+                        id_solicitacao=int(id_solicitacao),
+                        id_usuario_logado=id_usuario_logado,
+                        cabecalho_solicitacao=cab_atualizada,
+                    )
+
+                    if resultado_d4sign.get("ok"):
+                        status_d4 = resultado_d4sign.get("status") or "processado"
+                        flash(f"Essa solicitação já estava aprovada. D4Sign {status_d4} com sucesso.", "success")
+                    else:
+                        erro_d4 = resultado_d4sign.get("erro") or resultado_d4sign.get("mensagem") or "erro não informado"
+                        flash(f"Essa solicitação já está aprovada, mas não consegui criar o D4Sign: {erro_d4}", "warning")
+
                     return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
                 if status_atual == "PROCESSANDO_APROVACAO":

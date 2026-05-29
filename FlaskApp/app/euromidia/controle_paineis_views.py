@@ -5279,12 +5279,16 @@ def grade_painel(codponto: int):
     #
     # Eu busco por SQL explícito para tratar Status/Origem com espaço,
     # DataInicio/DataFim como datetime e reserva cancelada ainda com Status antigo.
-    # Regra pedida: CodPonto não usa TRY_CONVERT; compara direto com o valor da rota.
+    # Regra importante:
+    # - CodPonto é inteiro e continua sendo comparado como inteiro.
+    # - Campos de texto vindos da ocupação são convertidos explicitamente para varchar
+    #   antes de LTRIM/RTRIM/UPPER/COLLATE, evitando erro quando o SQL Server interpreta
+    #   algum campo com tipo não textual ou com tipo incompatível no ISNULL.
     sql_reservas_grade = sql_text("""
         SELECT
              TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) AS IDFatoOcupacaoPaineisEuromidia
             ,TRY_CONVERT(int, oc.[IDFatoControleContratos]) AS IDFatoControleContratos
-            ,LTRIM(RTRIM(ISNULL(oc.[CodFace], ''))) AS CodFace
+            ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) AS CodFace
             ,oc.[MarcaExibida]
             ,oc.[Vendedor]
             ,TRY_CONVERT(date, oc.[DataInicio]) AS DataInicio
@@ -5292,28 +5296,28 @@ def grade_painel(codponto: int):
             ,oc.[Cota]
             ,oc.[NumeroContrato]
             ,oc.[NumeroPrevia]
-            ,LTRIM(RTRIM(ISNULL(oc.[Status], ''))) AS Status
-            ,LTRIM(RTRIM(ISNULL(oc.[Origem], ''))) AS Origem
+            ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Status]), ''))) AS Status
+            ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Origem]), ''))) AS Origem
             ,oc.[LoopInicio]
             ,oc.[LoopFim]
             ,TRY_CONVERT(int, oc.[SpanQtd]) AS SpanQtd
             ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
             ,TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) AS IDFatoControleContratosItemOrigem
-            ,LTRIM(RTRIM(ISNULL(oc.[TipoVinculoOrigem], ''))) AS TipoVinculoOrigem
+            ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), oc.[TipoVinculoOrigem]), ''))) AS TipoVinculoOrigem
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
         WHERE (
                 oc.[CodPonto] = :codponto
                 OR TRY_CONVERT(int, oc.[IDPainelEuromidia]) IN :ids_paineis_grade
               )
-          AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Origem], '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
-          AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Status], '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Origem]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Status]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
           AND oc.[CanceladoEm] IS NULL
           AND TRY_CONVERT(date, oc.[DataInicio]) IS NOT NULL
           AND TRY_CONVERT(date, oc.[DataFim]) IS NOT NULL
           AND TRY_CONVERT(date, oc.[DataInicio]) < :dt_fim_exclusivo
           AND TRY_CONVERT(date, oc.[DataFim]) >= :dt_ini
         ORDER BY
-             LTRIM(RTRIM(ISNULL(oc.[CodFace], ''))) ASC
+             LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) ASC
             ,TRY_CONVERT(date, oc.[DataInicio]) ASC
             ,TRY_CONVERT(date, oc.[DataFim]) ASC
             ,TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) ASC;
@@ -5322,8 +5326,8 @@ def grade_painel(codponto: int):
     rows_reservas_raw = db.session.execute(
         sql_reservas_grade,
         {
-            "codponto": codponto,
-            "ids_paineis_grade": list(ids_paineis_grade or [-1]),
+            "codponto": int(codponto),
+            "ids_paineis_grade": [int(x) for x in list(ids_paineis_grade or [-1])],
             "dt_ini": dt_ini,
             "dt_fim_exclusivo": dt_fim_exclusivo,
         },
