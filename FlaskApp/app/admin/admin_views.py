@@ -11222,25 +11222,101 @@ def _d4sign_montar_endereco_empresa_admin(dados: dict) -> str:
     return " ".join(str(p).strip() for p in partes if str(p or "").strip())
 
 
-def _d4sign_montar_nome_documento_admin(dados_contrato: dict) -> str:
-    """_d4sign_montar_nome_documento_admin: eu gero nome rastreável e menos sujeito a duplicidade."""
+def _d4sign_montar_nome_documento_admin(
+    dados_contrato: dict,
+    *,
+    tipo_solicitacao: str | None = None,
+    id_fato_kanban_card: int | None = None,
+    id_dim_tipo_documento: int | None = None,
+) -> str:
+    """_d4sign_montar_nome_documento_admin: eu gero o nome oficial do contrato no D4Sign.
 
-    id_contrato = dados_contrato.get("IDFatoControleContratosEuromidia")
-    numero = _texto_ou_vazio(dados_contrato.get("NumeroContrato"))
-    empresa = (
-        _texto_ou_vazio(dados_contrato.get("NomeFantasiaEmpresa"))
-        or _texto_ou_vazio(dados_contrato.get("RazaoSocialEmpresa"))
+    Padrão operacional:
+    - Contrato-IDFatoControleContratosEuromidia-CNPJ-RazaoSocial-Dia-Mes-Ano
+    - Contrato-Renovacao-IDFatoControleContratosEuromidia-CNPJ-RazaoSocial-Dia-Mes-Ano
+    - Contrato-Aditivo-IDFatoControleContratosEuromidia-CNPJ-RazaoSocial-Dia-Mes-Ano
+    """
+
+    id_contrato = _int_ou_none(dados_contrato.get("IDFatoControleContratosEuromidia"))
+    if id_contrato in (None, "", 0):
+        id_contrato = _int_ou_none(dados_contrato.get("IDFatoControleContratoEuromidia"))
+
+    cnpj = _d4sign_obter_cnpj_ou_identificador_empresa_admin(dados_contrato)
+    cnpj_limpo = re.sub(r"\D+", "", str(cnpj or "")) or "sem-cnpj"
+
+    razao_social = (
+        _texto_ou_vazio(dados_contrato.get("RazaoSocialEmpresa"))
         or _texto_ou_vazio(dados_contrato.get("RazaoSocial"))
+        or _texto_ou_vazio(dados_contrato.get("NomeFantasiaEmpresa"))
         or "Empresa"
     )
+    razao_social = " ".join(razao_social.split())
+    razao_social = _d4sign_limpar_nome_pasta_arquivo_admin(razao_social)[:120] or "Empresa"
 
-    empresa = " ".join(empresa.split())[:90]
-    competencia = datetime.now().strftime("%m-%Y")
+    textos_tipo = [
+        tipo_solicitacao,
+        dados_contrato.get("TipoSolicitacao"),
+        dados_contrato.get("TipoOperacional"),
+        dados_contrato.get("TipoDocumento"),
+        dados_contrato.get("NomeTipoDocumento"),
+    ]
+    textos_tipo_normalizados = [
+        _texto_ou_vazio(valor).upper().replace("_", " ")
+        for valor in textos_tipo
+        if _texto_ou_vazio(valor)
+    ]
 
-    if numero:
-        return f"Contrato {numero} - {empresa} - {competencia}"
+    inicio_renovacao = _texto_ou_vazio(dados_contrato.get("InicioRenovacao")).upper().strip()
 
-    return f"Contrato #{id_contrato} - {empresa} - {competencia}"
+    eh_renovacao = False
+    if inicio_renovacao == "R":
+        eh_renovacao = True
+    elif any("RENOVA" in valor for valor in textos_tipo_normalizados):
+        eh_renovacao = True
+    elif id_fato_kanban_card not in (None, "", 0):
+        try:
+            eh_renovacao = _card_eh_renovacao_admin(int(id_fato_kanban_card))
+        except Exception as exc:
+            current_app.logger.warning(
+                "D4SIGN | não consegui validar tag de renovação para nome do documento | id_card=%s | erro=%s",
+                id_fato_kanban_card,
+                exc,
+            )
+
+    eh_aditivo = False
+    if not eh_renovacao:
+        if any("ADITIV" in valor for valor in textos_tipo_normalizados):
+            eh_aditivo = True
+        elif id_fato_kanban_card not in (None, "", 0):
+            try:
+                eh_aditivo = _card_possui_tag_ativa_admin(
+                    int(id_fato_kanban_card),
+                    int(ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN),
+                )
+            except Exception as exc:
+                current_app.logger.warning(
+                    "D4SIGN | não consegui validar tag de aditivo para nome do documento | id_card=%s | erro=%s",
+                    id_fato_kanban_card,
+                    exc,
+                )
+
+    partes_nome = ["Contrato"]
+    if eh_renovacao:
+        partes_nome.append("Renovacao")
+    elif eh_aditivo:
+        partes_nome.append("Aditivo")
+
+    partes_nome.extend(
+        [
+            str(id_contrato or "sem-id"),
+            cnpj_limpo,
+            razao_social,
+            datetime.now().strftime("%d-%m-%Y"),
+        ]
+    )
+
+    nome_documento = "-".join(partes_nome)
+    return _d4sign_limpar_nome_pasta_arquivo_admin(nome_documento)
 
 
 def _d4sign_montar_tokens_padrao_admin(dados: dict, tipo_solicitacao: str | None = None) -> dict:
@@ -11777,13 +11853,16 @@ def _d4sign_resolver_pasta_destino_contrato_admin(
     uuid_cofre: str,
     dados_contrato: dict,
 ) -> dict:
-    """_d4sign_resolver_pasta_destino_contrato_admin: eu crio/reaproveito Euromidia > CNPJ > mês-ano."""
+    """_d4sign_resolver_pasta_destino_contrato_admin: eu salvo direto na pasta Euromidia.
+
+    Regra nova:
+    - mantenho somente a pasta raiz configurada em D4SIGN_NOME_PASTA_RAIZ_CONTRATOS;
+    - por padrão essa pasta é "Euromidia";
+    - não crio mais subpasta por CNPJ;
+    - não crio mais subpasta por mês/ano.
+    """
 
     nome_pasta_raiz = _d4sign_limpar_nome_pasta_arquivo_admin(NOME_PASTA_RAIZ_D4_CONTRATOS_ADMIN)
-    nome_pasta_empresa = _d4sign_limpar_nome_pasta_arquivo_admin(
-        _d4sign_obter_cnpj_ou_identificador_empresa_admin(dados_contrato)
-    )
-    nome_pasta_mes_ano = _d4sign_limpar_nome_pasta_arquivo_admin(datetime.now().strftime("%m-%Y"))
 
     pasta_raiz = _d4sign_obter_ou_criar_pasta_admin(
         uuid_cofre=uuid_cofre,
@@ -11794,41 +11873,20 @@ def _d4sign_resolver_pasta_destino_contrato_admin(
     if not uuid_pasta_raiz:
         raise RuntimeError(f"Não consegui obter UUID da pasta raiz D4Sign: {pasta_raiz}")
 
-    pasta_empresa = _d4sign_obter_ou_criar_pasta_admin(
-        uuid_cofre=uuid_cofre,
-        nome_pasta=nome_pasta_empresa,
-        uuid_pasta_pai=uuid_pasta_raiz,
-    )
-
-    uuid_pasta_empresa = _d4sign_obter_uuid_pasta_admin(pasta_empresa)
-    if not uuid_pasta_empresa:
-        raise RuntimeError(f"Não consegui obter UUID da pasta da empresa/CNPJ D4Sign: {pasta_empresa}")
-
-    nome_pasta_mes_ano_alternativo = _d4sign_limpar_nome_pasta_arquivo_admin(
-        f"{nome_pasta_mes_ano} - {nome_pasta_empresa}"
-    )
-
-    pasta_mes_ano = _d4sign_obter_ou_criar_pasta_admin(
-        uuid_cofre=uuid_cofre,
-        nome_pasta=nome_pasta_mes_ano,
-        uuid_pasta_pai=uuid_pasta_empresa,
-        nome_pasta_alternativo_se_duplicar=nome_pasta_mes_ano_alternativo,
-    )
-
-    uuid_pasta_mes_ano = _d4sign_obter_uuid_pasta_admin(pasta_mes_ano)
-    if not uuid_pasta_mes_ano:
-        raise RuntimeError(f"Não consegui obter UUID da pasta mês-ano D4Sign: {pasta_mes_ano}")
-
-    nome_pasta_mes_ano_real = _d4sign_obter_nome_pasta_admin(pasta_mes_ano) or nome_pasta_mes_ano
+    nome_pasta_raiz_real = _d4sign_obter_nome_pasta_admin(pasta_raiz) or nome_pasta_raiz
 
     return {
-        "nome_pasta_raiz": nome_pasta_raiz,
+        "nome_pasta_raiz": nome_pasta_raiz_real,
         "uuid_pasta_raiz": uuid_pasta_raiz,
-        "nome_pasta_empresa": nome_pasta_empresa,
-        "uuid_pasta_empresa": uuid_pasta_empresa,
-        "nome_pasta_mes_ano": nome_pasta_mes_ano_real,
-        "nome_pasta_mes_ano_solicitada": nome_pasta_mes_ano,
-        "uuid_pasta_mes_ano": uuid_pasta_mes_ano,
+        "nome_pasta_destino": nome_pasta_raiz_real,
+        "uuid_pasta_destino": uuid_pasta_raiz,
+
+        # Compatibilidade com retornos/logs antigos: agora o destino final é a própria Euromidia.
+        "nome_pasta_empresa": None,
+        "uuid_pasta_empresa": None,
+        "nome_pasta_mes_ano": nome_pasta_raiz_real,
+        "nome_pasta_mes_ano_solicitada": None,
+        "uuid_pasta_mes_ano": uuid_pasta_raiz,
     }
 
 
@@ -11940,6 +11998,247 @@ def _d4sign_criar_documento_template_word_admin(
         caminho=f"/documents/{uuid_cofre}/makedocumentbytemplateword",
         payload=payload,
     )
+
+
+
+def _d4sign_limpar_tag_documento_admin(tag: str | None) -> str:
+    """_d4sign_limpar_tag_documento_admin: eu limpo espaços da TAG sem remover acentos nem palavras."""
+
+    return re.sub(r"\s+", " ", str(tag or "")).strip()
+
+
+def _d4sign_resolver_tags_documento_contrato_admin(
+    dados_contrato: dict,
+    *,
+    tipo_solicitacao: str | None = None,
+    id_fato_kanban_card: int | None = None,
+    id_dim_tipo_documento: int | None = None,
+) -> list[str]:
+    """_d4sign_resolver_tags_documento_contrato_admin
+    - Eu defino as TAGs oficiais do documento no D4Sign.
+    - Todo documento recebe a TAG base "Contratos".
+    - Novo contrato recebe "Novo Contrato".
+    - Renovação recebe "Renovação".
+    - Aditivo recebe "Aditivo de Contrato".
+    """
+
+    textos_tipo = [
+        tipo_solicitacao,
+        dados_contrato.get("TipoSolicitacao"),
+        dados_contrato.get("TipoOperacional"),
+        dados_contrato.get("TipoDocumento"),
+        dados_contrato.get("NomeTipoDocumento"),
+        id_dim_tipo_documento,
+    ]
+    textos_tipo_normalizados = [
+        _texto_ou_vazio(valor).upper().replace("_", " ")
+        for valor in textos_tipo
+        if _texto_ou_vazio(valor)
+    ]
+
+    inicio_renovacao = _texto_ou_vazio(dados_contrato.get("InicioRenovacao")).upper().strip()
+
+    eh_renovacao = False
+    if inicio_renovacao == "R":
+        eh_renovacao = True
+    elif any("RENOVA" in valor for valor in textos_tipo_normalizados):
+        eh_renovacao = True
+    elif id_fato_kanban_card not in (None, "", 0):
+        try:
+            eh_renovacao = _card_eh_renovacao_admin(int(id_fato_kanban_card))
+        except Exception as exc:
+            current_app.logger.warning(
+                "D4SIGN_TAG | não consegui validar tag de renovação do card | id_card=%s | erro=%s",
+                id_fato_kanban_card,
+                exc,
+            )
+
+    eh_aditivo = False
+    if not eh_renovacao:
+        if any("ADITIV" in valor for valor in textos_tipo_normalizados):
+            eh_aditivo = True
+        elif id_fato_kanban_card not in (None, "", 0):
+            try:
+                eh_aditivo = _card_possui_tag_ativa_admin(
+                    int(id_fato_kanban_card),
+                    int(ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN),
+                )
+            except Exception as exc:
+                current_app.logger.warning(
+                    "D4SIGN_TAG | não consegui validar tag de aditivo do card | id_card=%s | erro=%s",
+                    id_fato_kanban_card,
+                    exc,
+                )
+
+    tags = ["Contratos"]
+    if eh_renovacao:
+        tags.append("Renovação")
+    elif eh_aditivo:
+        tags.append("Aditivo de Contrato")
+    else:
+        tags.append("Novo Contrato")
+
+    tags_limpas = []
+    for tag in tags:
+        tag_limpa = _d4sign_limpar_tag_documento_admin(tag)
+        if tag_limpa and tag_limpa not in tags_limpas:
+            tags_limpas.append(tag_limpa)
+
+    return tags_limpas
+
+
+def _d4sign_normalizar_tag_para_comparacao_admin(tag: str | None) -> str:
+    """_d4sign_normalizar_tag_para_comparacao_admin: eu normalizo TAG para evitar cadastro duplicado por diferença de caixa/espaço."""
+
+    return _d4sign_limpar_tag_documento_admin(tag).casefold()
+
+
+def _d4sign_extrair_tags_resposta_admin(resposta) -> set[str]:
+    """_d4sign_extrair_tags_resposta_admin: eu tento extrair nomes de TAGs mesmo se a D4Sign mudar o formato da resposta."""
+
+    tags: set[str] = set()
+    chaves_possiveis = {"tag", "tags", "name", "nome", "label", "descricao", "description"}
+
+    def caminhar(objeto):
+        if isinstance(objeto, dict):
+            for chave, valor in objeto.items():
+                chave_normalizada = str(chave or "").strip().lower()
+
+                if chave_normalizada in chaves_possiveis:
+                    if isinstance(valor, str):
+                        tag_limpa = _d4sign_limpar_tag_documento_admin(valor)
+                        if tag_limpa:
+                            tags.add(tag_limpa)
+                    elif isinstance(valor, list):
+                        for item in valor:
+                            if isinstance(item, str):
+                                tag_limpa = _d4sign_limpar_tag_documento_admin(item)
+                                if tag_limpa:
+                                    tags.add(tag_limpa)
+                            else:
+                                caminhar(item)
+                    elif isinstance(valor, dict):
+                        caminhar(valor)
+                elif isinstance(valor, (dict, list)):
+                    caminhar(valor)
+
+        elif isinstance(objeto, list):
+            for item in objeto:
+                caminhar(item)
+
+    caminhar(resposta)
+    return tags
+
+
+def _d4sign_listar_tags_documento_admin(uuid_documento: str) -> set[str]:
+    """_d4sign_listar_tags_documento_admin: eu consulto as TAGs atuais do documento no D4Sign."""
+
+    uuid_documento_limpo = str(uuid_documento or "").strip()
+    if not uuid_documento_limpo:
+        return set()
+
+    resposta = _d4sign_executar_get_admin(f"/tags/{uuid_documento_limpo}")
+    return _d4sign_extrair_tags_resposta_admin(resposta)
+
+
+def _d4sign_adicionar_tag_documento_admin(*, uuid_documento: str, tag: str) -> dict:
+    """_d4sign_adicionar_tag_documento_admin: eu chamo POST /tags/{UUID-DOCUMENTO}/add com o campo obrigatório tag."""
+
+    uuid_documento_limpo = str(uuid_documento or "").strip()
+    tag_limpa = _d4sign_limpar_tag_documento_admin(tag)
+
+    if not uuid_documento_limpo:
+        raise RuntimeError("Não adicionei TAG D4Sign porque UUID do documento veio vazio.")
+
+    if not tag_limpa:
+        raise RuntimeError("Não adicionei TAG D4Sign porque o nome da TAG veio vazio.")
+
+    return _d4sign_executar_post_admin(
+        caminho=f"/tags/{uuid_documento_limpo}/add",
+        payload={"tag": tag_limpa},
+    )
+
+
+def _d4sign_adicionar_tags_documento_contrato_admin(
+    *,
+    uuid_documento: str,
+    dados_contrato: dict,
+    tipo_solicitacao: str | None = None,
+    id_fato_kanban_card: int | None = None,
+    id_dim_tipo_documento: int | None = None,
+) -> dict:
+    """_d4sign_adicionar_tags_documento_contrato_admin
+    - Eu aplico as TAGs oficiais do contrato no documento D4Sign.
+    - Eu tento listar as TAGs existentes antes para evitar duplicidade.
+    - Se a listagem falhar, eu sigo tentando adicionar as TAGs, porque o objetivo principal é classificar o documento.
+    """
+
+    tags_planejadas = _d4sign_resolver_tags_documento_contrato_admin(
+        dados_contrato,
+        tipo_solicitacao=tipo_solicitacao,
+        id_fato_kanban_card=id_fato_kanban_card,
+        id_dim_tipo_documento=id_dim_tipo_documento,
+    )
+
+    tags_existentes: set[str] = set()
+    try:
+        tags_existentes = _d4sign_listar_tags_documento_admin(uuid_documento)
+    except Exception as exc:
+        current_app.logger.warning(
+            "D4SIGN_TAG | não consegui listar TAGs atuais; vou tentar adicionar mesmo assim | uuid=%s | erro=%s",
+            uuid_documento,
+            exc,
+        )
+
+    tags_existentes_normalizadas = {
+        _d4sign_normalizar_tag_para_comparacao_admin(tag)
+        for tag in tags_existentes
+    }
+
+    resultados = []
+    ok_geral = True
+
+    for tag in tags_planejadas:
+        tag_normalizada = _d4sign_normalizar_tag_para_comparacao_admin(tag)
+
+        if tag_normalizada in tags_existentes_normalizadas:
+            resultados.append({
+                "tag": tag,
+                "status": "ja_existia",
+            })
+            continue
+
+        try:
+            resposta = _d4sign_adicionar_tag_documento_admin(
+                uuid_documento=uuid_documento,
+                tag=tag,
+            )
+            resultados.append({
+                "tag": tag,
+                "status": "adicionada",
+                "resposta": resposta,
+            })
+            tags_existentes_normalizadas.add(tag_normalizada)
+        except Exception as exc:
+            ok_geral = False
+            current_app.logger.exception(
+                "D4SIGN_TAG | falha ao adicionar TAG no documento | uuid=%s | tag=%s",
+                uuid_documento,
+                tag,
+            )
+            resultados.append({
+                "tag": tag,
+                "status": "erro",
+                "erro": str(exc),
+            })
+
+    return {
+        "ok": ok_geral,
+        "uuid_documento_d4": str(uuid_documento or "").strip(),
+        "tags_planejadas": tags_planejadas,
+        "tags_existentes": sorted(tags_existentes),
+        "resultados": resultados,
+    }
 
 
 
@@ -12078,6 +12377,31 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
     )
 
     if existente:
+        resultado_tags_d4sign = None
+        uuid_documento_existente = existente.get("UUIDDocumentoD4")
+
+        if uuid_documento_existente:
+            try:
+                dados_contrato_existente = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
+                resultado_tags_d4sign = _d4sign_adicionar_tags_documento_contrato_admin(
+                    uuid_documento=str(uuid_documento_existente),
+                    dados_contrato=dados_contrato_existente,
+                    tipo_solicitacao=tipo_solicitacao,
+                    id_fato_kanban_card=id_fato_kanban_card,
+                    id_dim_tipo_documento=id_tipo_documento,
+                )
+            except Exception as exc:
+                current_app.logger.exception(
+                    "D4SIGN_TAG | falha ao garantir TAGs em documento D4Sign já existente | uuid=%s | id_contrato=%s",
+                    uuid_documento_existente,
+                    id_contrato,
+                )
+                resultado_tags_d4sign = {
+                    "ok": False,
+                    "uuid_documento_d4": str(uuid_documento_existente),
+                    "erro": str(exc),
+                }
+
         return {
             "ok": True,
             "status": "ja_existia",
@@ -12085,6 +12409,7 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
             "uuid_documento_d4": existente.get("UUIDDocumentoD4"),
             "nome_documento_d4": existente.get("NomeDocumentoD4"),
             "nome_fase_d4": existente.get("NomeFaseD4"),
+            "tags_d4sign": resultado_tags_d4sign,
         }
 
     dados_contrato = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
@@ -12098,7 +12423,12 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
 
     cofre = _d4sign_obter_cofre_contratos_admin(modelo.get("IDDimCofreD4"))
 
-    nome_documento = _d4sign_montar_nome_documento_admin(dados_contrato)
+    nome_documento = _d4sign_montar_nome_documento_admin(
+        dados_contrato,
+        tipo_solicitacao=tipo_solicitacao,
+        id_fato_kanban_card=id_fato_kanban_card,
+        id_dim_tipo_documento=id_tipo_documento,
+    )
     tokens = _d4sign_montar_tokens_template_admin(
         modelo=modelo,
         dados_contrato=dados_contrato,
@@ -12115,12 +12445,20 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         nome_documento=nome_documento,
         id_template_d4=str(modelo["IDTemplateD4"]),
         tokens=tokens,
-        uuid_pasta_destino=pasta_destino.get("uuid_pasta_mes_ano"),
+        uuid_pasta_destino=pasta_destino.get("uuid_pasta_destino") or pasta_destino.get("uuid_pasta_raiz"),
     )
 
     uuid_documento = _d4sign_obter_uuid_documento_admin(resposta_criacao)
     if not uuid_documento:
         raise RuntimeError(f"D4Sign respondeu sem UUID do documento criado: {resposta_criacao}")
+
+    resultado_tags_d4sign = _d4sign_adicionar_tags_documento_contrato_admin(
+        uuid_documento=uuid_documento,
+        dados_contrato=dados_contrato,
+        tipo_solicitacao=tipo_solicitacao,
+        id_fato_kanban_card=id_fato_kanban_card,
+        id_dim_tipo_documento=id_tipo_documento,
+    )
 
     detalhe = _d4sign_primeiro_objeto_admin(resposta_criacao)
     try:
@@ -12184,6 +12522,7 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         "id_dim_modelo_contrato_d4": modelo.get("IDDimModeloContratoD4"),
         "id_dim_cofre_d4": cofre.get("IDDimCofreD4"),
         "pasta_d4sign": pasta_destino,
+        "tags_d4sign": resultado_tags_d4sign,
     }
 
 def _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
