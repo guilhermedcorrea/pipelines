@@ -818,7 +818,269 @@
       .modal-overlay{ padding:10px; }
       .modal-dialog{ width:100%; max-height:92vh; }
     }
-  </style>
+  
+
+    /* =========================================================
+       PAINEL D4SIGN / CICLOS DO CONTRATO
+       - Não altera o diagrama principal; apenas adiciona camada documental.
+       ========================================================= */
+    .contrato-d4-livebar{
+      margin-top:14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      border:1px solid #BFDBFE;
+      background:linear-gradient(180deg,#EFF6FF 0%,#FFFFFF 100%);
+      border-radius:14px;
+      padding:12px 14px;
+      color:#1E3A8A;
+      font-size:12px;
+      font-weight:850;
+    }
+    .contrato-d4-livebar strong{ color:var(--euro-blue); }
+    .contrato-d4-live-dot{
+      width:9px;
+      height:9px;
+      border-radius:999px;
+      background:#22C55E;
+      box-shadow:0 0 0 5px rgba(34,197,94,.14);
+      display:inline-block;
+      margin-right:8px;
+      vertical-align:middle;
+    }
+    .contrato-d4-grid{
+      display:grid;
+      grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);
+      gap:14px;
+      margin-top:14px;
+      align-items:stretch;
+    }
+    .contrato-d4-card{
+      border:1px solid var(--border);
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 1px 8px rgba(15,23,42,.05);
+      padding:14px;
+      min-width:0;
+    }
+    .contrato-d4-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      padding-bottom:10px;
+      border-bottom:1px solid #EEF2F7;
+      margin-bottom:12px;
+    }
+    .contrato-d4-title{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      color:var(--euro-blue);
+      font-size:15px;
+      font-weight:950;
+    }
+    .contrato-d4-title img{
+      height:18px;
+      width:auto;
+      display:block;
+    }
+    .contrato-d4-sub{
+      margin-top:4px;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:750;
+    }
+    .d4-badge{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      border-radius:999px;
+      padding:6px 10px;
+      border:1px solid #CBD5E1;
+      background:#F8FAFC;
+      color:#334155;
+      font-size:11px;
+      font-weight:950;
+      line-height:1.2;
+      white-space:nowrap;
+    }
+    .d4-badge::before{
+      content:"";
+      width:8px;
+      height:8px;
+      border-radius:999px;
+      background:currentColor;
+      opacity:.85;
+      flex:none;
+    }
+    .d4-badge.processando{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
+    .d4-badge.configuracao,
+    .d4-badge.editando{ background:#FFFBEB; color:#B45309; border-color:#FDE68A; }
+    .d4-badge.assinaturas{ background:#FFF7ED; color:#EA580C; border-color:#FDBA74; }
+    .d4-badge.finalizado{ background:#ECFDF5; color:#047857; border-color:#A7F3D0; }
+    .d4-badge.arquivado{ background:#F8FAFC; color:#475569; border-color:#CBD5E1; }
+    .d4-badge.cancelado{ background:#FEF2F2; color:#B91C1C; border-color:#FECACA; }
+    .d4-doc-layout{
+      display:grid;
+      grid-template-columns:minmax(190px,.55fr) minmax(0,1fr);
+      gap:12px;
+      align-items:stretch;
+    }
+    .d4-doc-file{
+      border:1px solid #E2E8F0;
+      border-radius:12px;
+      background:linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%);
+      padding:12px;
+      display:flex;
+      gap:10px;
+      align-items:center;
+      min-width:0;
+    }
+    .d4-pdf-icon{
+      width:42px;
+      height:48px;
+      border-radius:8px;
+      background:#EF4444;
+      color:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:11px;
+      font-weight:950;
+      box-shadow:0 10px 22px rgba(239,68,68,.18);
+      flex:none;
+    }
+    .d4-doc-name{
+      font-size:13px;
+      font-weight:950;
+      color:var(--text);
+      word-break:break-word;
+    }
+    .d4-doc-meta{
+      margin-top:4px;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:800;
+      line-height:1.35;
+      word-break:break-word;
+    }
+    .d4-status-box{
+      border:1px solid #E2E8F0;
+      border-radius:12px;
+      background:#fff;
+      padding:12px;
+      min-width:0;
+    }
+    .d4-status-label{
+      font-size:11px;
+      color:var(--muted);
+      font-weight:950;
+      margin-bottom:6px;
+    }
+    .d4-status-main{
+      font-size:18px;
+      color:#EA580C;
+      font-weight:950;
+      line-height:1.15;
+    }
+    .d4-status-text{
+      margin-top:8px;
+      color:#334155;
+      font-size:12px;
+      font-weight:750;
+      line-height:1.45;
+    }
+    .d4-metrics{
+      display:grid;
+      grid-template-columns:repeat(3,minmax(120px,1fr));
+      gap:8px;
+      margin-top:12px;
+    }
+    .d4-metric{
+      border:1px solid #E2E8F0;
+      border-radius:10px;
+      padding:9px;
+      background:#F8FAFC;
+    }
+    .d4-metric-k{ font-size:10px; color:var(--muted); font-weight:950; margin-bottom:3px; }
+    .d4-metric-v{ font-size:12px; color:var(--text); font-weight:950; }
+    .d4-empty{
+      border:1px dashed #CBD5E1;
+      border-radius:12px;
+      background:#F8FAFC;
+      padding:14px;
+      color:#64748B;
+      font-size:12px;
+      font-weight:850;
+      line-height:1.45;
+    }
+    .ciclos-lista{
+      display:flex;
+      flex-direction:column;
+      gap:9px;
+    }
+    .ciclo-item{
+      border:1px solid #E2E8F0;
+      border-radius:12px;
+      padding:10px 11px;
+      background:#fff;
+      display:grid;
+      grid-template-columns:26px minmax(0,1fr) auto;
+      gap:10px;
+      align-items:center;
+    }
+    .ciclo-item.is-atual{
+      border-color:#FDBA74;
+      background:linear-gradient(180deg,#FFF7ED 0%,#FFFFFF 100%);
+      box-shadow:0 8px 20px rgba(249,115,22,.10);
+    }
+    .ciclo-icon{
+      width:24px;
+      height:24px;
+      border-radius:999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:#E0F2FE;
+      color:#0369A1;
+      font-size:12px;
+      font-weight:950;
+    }
+    .ciclo-item.is-atual .ciclo-icon{ background:#FED7AA; color:#C2410C; }
+    .ciclo-title{ font-size:12px; font-weight:950; color:var(--text); word-break:break-word; }
+    .ciclo-sub{ margin-top:2px; font-size:11px; color:var(--muted); font-weight:800; }
+    .historico-status-mini{
+      margin-top:12px;
+      border-top:1px solid #EEF2F7;
+      padding-top:10px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .historico-status-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      font-size:11px;
+      color:#475569;
+      font-weight:800;
+    }
+    .historico-status-row strong{ color:var(--text); }
+    @media (max-width: 1100px){
+      .contrato-d4-grid{ grid-template-columns:1fr; }
+    }
+    @media (max-width: 760px){
+      .d4-doc-layout{ grid-template-columns:1fr; }
+      .d4-metrics{ grid-template-columns:1fr; }
+      .ciclo-item{ grid-template-columns:26px minmax(0,1fr); }
+      .ciclo-item .d4-badge{ grid-column:1 / -1; justify-self:flex-start; }
+    }
+</style>
 
   {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
     <div class="modo-rapido-alerta">
@@ -1022,6 +1284,116 @@
     </div>
   </div>
 
+  {% set painel_d4 = painel_d4_contrato if painel_d4_contrato is defined and painel_d4_contrato else none %}
+  {% set doc_d4 = painel_d4.DocumentoAtual if painel_d4 and painel_d4.DocumentoAtual else none %}
+  {% set status_d4 = painel_d4.StatusAtualD4 if painel_d4 and painel_d4.StatusAtualD4 else none %}
+  {% set contrato_id_socket = contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia %}
+<div class="contrato-d4-grid" data-contrato-d4-painel data-id-contrato="{{ contrato_id_socket }}">
+    <div class="contrato-d4-card">
+      <div class="contrato-d4-head">
+        <div>
+          <div class="contrato-d4-title">
+            Documento D4Sign do ciclo atual
+            <img src="{{ url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}" alt="D4Sign" loading="lazy" decoding="async" onerror="this.style.display='none';">
+          </div>
+        </div>
+        <span class="d4-badge {{ status_d4.ClasseStatusD4 if status_d4 and status_d4.ClasseStatusD4 else status_d4.classe if status_d4 and status_d4.classe else 'sem-status' }}" data-d4-field="badge_status">
+          {{ status_d4.NomeStatusD4 if status_d4 and status_d4.NomeStatusD4 else status_d4.nome if status_d4 and status_d4.nome else "Sem D4Sign" }}
+        </span>
+      </div>
+
+      {% if doc_d4 %}
+        <div class="d4-doc-layout">
+          <div class="d4-doc-file">
+            <div class="d4-pdf-icon">PDF</div>
+            <div>
+              <div class="d4-doc-name" data-d4-field="nome_documento">{{ doc_d4.NomeDocumentoD4 or "Documento D4Sign" }}</div>
+              <div class="d4-doc-meta">
+                Tipo: <strong data-d4-field="tipo_ciclo">{{ doc_d4.TipoCiclo or "Contrato" }}</strong><br>
+                UUID: <span data-d4-field="uuid_documento">{{ doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
+                Enviado em: {{ doc_d4.DataEnvioD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataEnvioD4 else "—" }}
+              </div>
+            </div>
+          </div>
+
+          <div class="d4-status-box">
+            <div class="d4-status-label">Status atual no D4Sign</div>
+            <div class="d4-status-main" data-d4-field="nome_status">{{ doc_d4.NomeStatusD4 or "Sem status D4Sign" }}</div>
+            <div class="d4-status-text" data-d4-field="interpretacao_status">{{ doc_d4.InterpretacaoStatusD4 or "Aguardando próxima sincronização com o D4Sign." }}</div>
+            {% if doc_d4.MensagemErro %}
+              <div class="d4-status-text" style="color:#B91C1C;"><strong>Erro:</strong> {{ doc_d4.MensagemErro }}</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="d4-metrics">
+          <div class="d4-metric">
+            <div class="d4-metric-k">Signatários</div>
+            <div class="d4-metric-v" data-d4-field="signatarios">{{ doc_d4.SignatariosAssinados or "—" }} de {{ doc_d4.SignatariosTotal or "—" }}</div>
+          </div>
+          <div class="d4-metric">
+            <div class="d4-metric-k">Finalização D4</div>
+            <div class="d4-metric-v" data-d4-field="data_finalizacao">{{ doc_d4.DataFinalizacaoD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataFinalizacaoD4 else "—" }}</div>
+          </div>
+          <div class="d4-metric">
+            <div class="d4-metric-k">Última consulta</div>
+            <div class="d4-metric-v" data-d4-field="data_consulta">{{ doc_d4.DataUltimaConsultaD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataUltimaConsultaD4 else (doc_d4.DataReferenciaTexto or "—") }}</div>
+          </div>
+        </div>
+      {% else %}
+        <div class="d4-empty">
+          Nenhum documento D4Sign vinculado foi encontrado para este contrato.
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="contrato-d4-card">
+      <div class="contrato-d4-head">
+        <div>
+          <div class="contrato-d4-title">Histórico de ciclos</div>
+          <div class="contrato-d4-sub">Contrato principal, renovações, aditivos e documentos vinculados.</div>
+        </div>
+        {% if painel_d4 and painel_d4.Resumo %}
+          <span class="d4-badge arquivado">{{ painel_d4.Resumo.QtdDocumentosD4 or 0 }} doc(s)</span>
+        {% endif %}
+      </div>
+
+      <div class="ciclos-lista" data-d4-field="ciclos">
+        {% if painel_d4 and painel_d4.Ciclos %}
+          {% for ciclo in painel_d4.Ciclos %}
+            <div class="ciclo-item {% if ciclo.Atual %}is-atual{% endif %}">
+              <div class="ciclo-icon">{{ loop.index }}</div>
+              <div>
+                <div class="ciclo-title">{{ ciclo.Titulo or ciclo.TipoCiclo or "Ciclo" }}</div>
+                <div class="ciclo-sub">
+                  {{ ciclo.TipoCiclo or "—" }} • {{ ciclo.StatusContrato or "—" }}{% if ciclo.DataReferenciaTexto %} • {{ ciclo.DataReferenciaTexto }}{% endif %}
+                </div>
+              </div>
+              {% if ciclo.StatusD4 %}
+                <span class="d4-badge {{ ciclo.ClasseStatusD4 or 'sem-status' }}">{{ ciclo.StatusD4 }}</span>
+              {% else %}
+                <span class="d4-badge arquivado">Sem D4</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="d4-empty">Nenhum ciclo vinculado encontrado ainda.</div>
+        {% endif %}
+      </div>
+
+      {% if painel_d4 and painel_d4.HistoricoStatus %}
+        <div class="historico-status-mini">
+          {% for hist in painel_d4.HistoricoStatus[:5] %}
+            <div class="historico-status-row">
+              <span><strong>{{ hist.DataStatusTexto or "—" }}</strong> • {{ hist.NomeStatusContrato or "—" }}</span>
+              <span class="d4-badge {{ hist.ClasseStatusD4 or 'sem-status' }}">{{ hist.NomeStatusD4 or "D4 —" }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="grid-quick">
     <div class="box"><div class="quick-k">Razão Social do Contrato</div><div class="quick-v">{{ contrato.RazaoSocial or "—" }}</div></div>
     <div class="box"><div class="quick-k">Empresa (DimEmpresas)</div><div class="quick-v">{{ contrato.RazaoSocialEmpresa or "—" }}</div></div>
@@ -1063,7 +1435,7 @@
         {% endfor %}
       </div>
     {% else %}
-      <div class="empty-box" style="margin-top:14px;">Nenhuma empresa principal encontrada na DimEmpresas para este contrato.</div>
+      <div class="empty-box" style="margin-top:14px;">Nenhuma empresa principal encontrada.</div>
     {% endif %}
   </div>
 
@@ -1773,5 +2145,73 @@
     });
   })();
 </script>
+
+<script>
+  (function(){
+    const painel = document.querySelector('[data-contrato-d4-painel]');
+    if(!painel) return;
+
+    const idContrato = painel.getAttribute('data-id-contrato');
+
+    function setText(selector, value){
+      const el = document.querySelector(selector);
+      if(el && value !== undefined && value !== null && String(value).trim() !== ''){
+        el.textContent = value;
+      }
+    }
+
+    function setBadge(classe, texto){
+      const badge = document.querySelector('[data-d4-field="badge_status"]');
+      if(!badge) return;
+      badge.className = 'd4-badge ' + (classe || 'sem-status');
+      if(texto) badge.textContent = texto;
+    }
+
+    function aplicarAtualizacaoD4(payload){
+      if(!payload) return;
+      const idPayload = payload.id_contrato || payload.IDFatoControleContratosEuromidia || payload.IDFatoControleContratos;
+      if(idPayload && idContrato && String(idPayload) !== String(idContrato)) return;
+
+      const statusNome = payload.nome_status_d4 || payload.NomeStatusD4 || payload.status_d4 || payload.StatusD4;
+      const statusClasse = payload.classe_status_d4 || payload.ClasseStatusD4 || payload.classe || 'sem-status';
+      const atualizadoEm = payload.data_atualizacao || payload.DataAtualizacao || payload.data_status || payload.DataStatus || 'agora';
+
+      setBadge(statusClasse, statusNome);
+      setText('[data-d4-field="nome_status"]', statusNome);
+      setText('[data-d4-field="ultima_atualizacao"]', atualizadoEm);
+      setText('[data-d4-field="data_consulta"]', atualizadoEm);
+      setText('[data-d4-field="interpretacao_status"]', payload.interpretacao || payload.InterpretacaoStatusD4);
+      setText('[data-d4-field="nome_documento"]', payload.nome_documento || payload.NomeDocumentoD4);
+      setText('[data-d4-field="uuid_documento"]', payload.uuid_documento || payload.UUIDDocumentoD4);
+      setText('[data-d4-field="tipo_ciclo"]', payload.tipo_ciclo || payload.TipoCiclo);
+
+      const livebar = document.querySelector('[data-contrato-d4-livebar]');
+      if(livebar){
+        livebar.classList.add('socket-updated');
+        setTimeout(function(){ livebar.classList.remove('socket-updated'); }, 1200);
+      }
+    }
+
+    function conectarSocketContrato(){
+      if(typeof window.io !== 'function') return;
+      try{
+        const socket = window.io();
+        socket.on('connect', function(){
+          socket.emit('join_contrato', {id_contrato: idContrato});
+          socket.emit('join', {room: 'contrato_' + idContrato});
+        });
+        socket.on('d4sign_status_atualizado', aplicarAtualizacaoD4);
+        socket.on('contrato_d4sign_status_atualizado', aplicarAtualizacaoD4);
+        socket.on('contrato:status_d4_atualizado', aplicarAtualizacaoD4);
+        socket.on('contrato_' + idContrato + ':status_d4_atualizado', aplicarAtualizacaoD4);
+      }catch(e){
+        console.warn('Socket.IO indisponível para atualização D4Sign do contrato.', e);
+      }
+    }
+
+    conectarSocketContrato();
+  })();
+</script>
+
 </div>
 {% endblock %}

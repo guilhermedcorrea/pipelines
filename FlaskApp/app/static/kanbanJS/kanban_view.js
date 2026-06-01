@@ -79,18 +79,175 @@
     if (!board || board.dataset.scrollKanbanAjustado === "1") return;
 
     let scrollTimer = null;
+    let ultimoScrollLeft = board.scrollLeft || 0;
 
     board.addEventListener("scroll", () => {
       if (board.classList.contains("is-dragging")) return;
+
+      const scrollLeftAtual = board.scrollLeft || 0;
+      const houveRolagemHorizontal = Math.abs(scrollLeftAtual - ultimoScrollLeft) > 0.5;
+      ultimoScrollLeft = scrollLeftAtual;
+
+      if (!houveRolagemHorizontal) return;
 
       board.classList.add("is-scrolling-x");
       window.clearTimeout(scrollTimer);
       scrollTimer = window.setTimeout(() => {
         board.classList.remove("is-scrolling-x");
-      }, 90);
+      }, 160);
     }, { passive: true });
 
     board.dataset.scrollKanbanAjustado = "1";
+  }
+
+  function configurarScrollbarFase(dropEl, bodyEl){
+    if (!dropEl || !bodyEl || bodyEl.dataset.scrollbarFaseConfigurada === "1") return;
+
+    const barra = document.createElement("div");
+    barra.className = "kb-drop-scrollbar";
+    barra.setAttribute("aria-hidden", "true");
+
+    const trilho = document.createElement("div");
+    trilho.className = "kb-drop-scrollbar-track";
+
+    const polegar = document.createElement("div");
+    polegar.className = "kb-drop-scrollbar-thumb";
+
+    barra.appendChild(trilho);
+    barra.appendChild(polegar);
+    bodyEl.appendChild(barra);
+
+    let rafAtualizacao = null;
+    let arrastando = false;
+    let dragStartY = 0;
+    let dragStartScrollTop = 0;
+
+    function calcularGeometriaScrollbar(){
+      const alturaVisivel = dropEl.clientHeight || 0;
+      const alturaConteudo = dropEl.scrollHeight || 0;
+      const alturaTrilho = barra.clientHeight || 0;
+      const maxScroll = Math.max(0, alturaConteudo - alturaVisivel);
+      const temOverflow = maxScroll > 2 && alturaTrilho > 0;
+
+      if (!temOverflow) {
+        return {
+          temOverflow: false,
+          alturaTrilho,
+          alturaPolegar: 0,
+          maxTopPolegar: 0,
+          maxScroll: 0
+        };
+      }
+
+      const proporcaoVisivel = alturaVisivel / Math.max(alturaConteudo, 1);
+      const alturaPolegar = Math.max(36, Math.min(alturaTrilho, Math.round(alturaTrilho * proporcaoVisivel)));
+      const maxTopPolegar = Math.max(0, alturaTrilho - alturaPolegar);
+
+      return {
+        temOverflow: true,
+        alturaTrilho,
+        alturaPolegar,
+        maxTopPolegar,
+        maxScroll
+      };
+    }
+
+    function atualizarScrollbarFaseAgora(){
+      rafAtualizacao = null;
+
+      const geo = calcularGeometriaScrollbar();
+      bodyEl.classList.toggle("has-scrollbar", geo.temOverflow);
+
+      if (!geo.temOverflow) {
+        polegar.style.height = "0px";
+        polegar.style.transform = "translateY(0px)";
+        return;
+      }
+
+      const topPolegar = geo.maxTopPolegar > 0
+        ? Math.round((dropEl.scrollTop / geo.maxScroll) * geo.maxTopPolegar)
+        : 0;
+
+      polegar.style.height = `${geo.alturaPolegar}px`;
+      polegar.style.transform = `translateY(${topPolegar}px)`;
+    }
+
+    function agendarAtualizacaoScrollbarFase(){
+      if (rafAtualizacao !== null) return;
+      rafAtualizacao = window.requestAnimationFrame(atualizarScrollbarFaseAgora);
+    }
+
+    function rolarPeloTrilho(clientY){
+      const geo = calcularGeometriaScrollbar();
+      if (!geo.temOverflow) return;
+
+      const rect = barra.getBoundingClientRect();
+      const yRelativo = Math.min(Math.max(clientY - rect.top - (geo.alturaPolegar / 2), 0), geo.maxTopPolegar);
+      const proporcao = geo.maxTopPolegar > 0 ? yRelativo / geo.maxTopPolegar : 0;
+      dropEl.scrollTop = Math.round(proporcao * geo.maxScroll);
+      agendarAtualizacaoScrollbarFase();
+    }
+
+    dropEl.addEventListener("scroll", agendarAtualizacaoScrollbarFase, { passive: true });
+
+    barra.addEventListener("pointerdown", (evento) => {
+      evento.preventDefault();
+      evento.stopPropagation();
+
+      if (evento.target !== polegar) {
+        rolarPeloTrilho(evento.clientY);
+        return;
+      }
+
+      arrastando = true;
+      dragStartY = evento.clientY;
+      dragStartScrollTop = dropEl.scrollTop;
+      bodyEl.classList.add("kb-scrollbar-dragging");
+      polegar.setPointerCapture?.(evento.pointerId);
+    });
+
+    polegar.addEventListener("pointermove", (evento) => {
+      if (!arrastando) return;
+      evento.preventDefault();
+      evento.stopPropagation();
+
+      const geo = calcularGeometriaScrollbar();
+      if (!geo.temOverflow || geo.maxTopPolegar <= 0) return;
+
+      const deltaY = evento.clientY - dragStartY;
+      const deltaScroll = (deltaY / geo.maxTopPolegar) * geo.maxScroll;
+      dropEl.scrollTop = Math.round(dragStartScrollTop + deltaScroll);
+      agendarAtualizacaoScrollbarFase();
+    });
+
+    function encerrarDragScrollbar(evento){
+      if (!arrastando) return;
+      if (evento) {
+        evento.preventDefault();
+        evento.stopPropagation();
+      }
+      arrastando = false;
+      bodyEl.classList.remove("kb-scrollbar-dragging");
+    }
+
+    polegar.addEventListener("pointerup", encerrarDragScrollbar);
+    polegar.addEventListener("pointercancel", encerrarDragScrollbar);
+    window.addEventListener("resize", agendarAtualizacaoScrollbarFase, { passive: true });
+
+    if ("ResizeObserver" in window) {
+      const resizeObserver = new ResizeObserver(agendarAtualizacaoScrollbarFase);
+      resizeObserver.observe(dropEl);
+      resizeObserver.observe(bodyEl);
+    }
+
+    if ("MutationObserver" in window) {
+      const mutationObserver = new MutationObserver(agendarAtualizacaoScrollbarFase);
+      mutationObserver.observe(dropEl, { childList: true, subtree: true, attributes: true });
+    }
+
+    dropEl._kbAtualizarScrollbarFase = agendarAtualizacaoScrollbarFase;
+    bodyEl.dataset.scrollbarFaseConfigurada = "1";
+    agendarAtualizacaoScrollbarFase();
   }
 
 
@@ -13166,6 +13323,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
       drop.appendChild(sentinel);
       body.appendChild(drop);
+      configurarScrollbarFase(drop, body);
       col.appendChild(head);
       col.appendChild(body);
       board.appendChild(col);

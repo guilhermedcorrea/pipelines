@@ -26366,7 +26366,7 @@ def contratos_detalhe(id_contrato: int):
 
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260527_redis_rapido_v3:"
+        f"contratos_detalhe_html:v20260601_d4_ciclos_v1:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
@@ -26510,7 +26510,7 @@ def contratos_detalhe(id_contrato: int):
 
     cache_bypass_contrato = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260527_redis_rapido_v3:"
+        f"contratos_detalhe_html:v20260601_d4_ciclos_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
@@ -26831,6 +26831,249 @@ def contratos_detalhe(id_contrato: int):
             "terminal_atual": terminal_atual,
         }
 
+    def _contratos_d4_fmt_data(valor):
+        if not valor:
+            return None
+        try:
+            return valor.strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            return str(valor)
+
+    def _contratos_d4_int(valor, padrao=0):
+        try:
+            if valor is None:
+                return padrao
+            return int(valor)
+        except Exception:
+            return padrao
+
+    def _contratos_d4_status_info(id_status_d4=None, nome_status_d4=None):
+        mapa = {
+            1: {"nome": "Processando", "classe": "processando", "interpretacao": "Documento enviado ao D4Sign e em processamento."},
+            2: {"nome": "Aguardando Signatários", "classe": "configuracao", "interpretacao": "Documento existe no D4Sign e ainda depende de configuração/signatários."},
+            3: {"nome": "Aguardando Assinaturas", "classe": "assinaturas", "interpretacao": "Documento enviado aos signatários e aguardando assinatura."},
+            4: {"nome": "Finalizado", "classe": "finalizado", "interpretacao": "Todas as assinaturas necessárias foram concluídas."},
+            5: {"nome": "Arquivado", "classe": "arquivado", "interpretacao": "Documento arquivado no D4Sign. Não altera sozinho o contrato principal."},
+            6: {"nome": "Cancelado", "classe": "cancelado", "interpretacao": "Documento cancelado no D4Sign. Validar impacto no contrato principal."},
+            7: {"nome": "Editando", "classe": "editando", "interpretacao": "Documento ainda em edição/configuração antes do envio final."},
+        }
+        try:
+            id_int = int(id_status_d4 or 0)
+        except Exception:
+            id_int = 0
+        info = dict(mapa.get(id_int) or {})
+        nome_final = (nome_status_d4 or info.get("nome") or "Sem status D4Sign").strip()
+        info["id"] = id_int if id_int > 0 else None
+        info["nome"] = nome_final
+        info["classe"] = info.get("classe") or "sem-status"
+        info["interpretacao"] = info.get("interpretacao") or "Ainda não existe status do D4Sign vinculado a este contrato/ciclo."
+        return info
+
+    def _contratos_d4_tipo_ciclo(texto=None, bit_aditivo=None, bit_contrato_novo=None):
+        base = str(texto or "").upper()
+        if "RENOVA" in base or "RENOVACAO" in base or "RENOVAÇÃO" in base:
+            return "Renovação"
+        try:
+            if int(bit_aditivo or 0) == 1:
+                return "Aditivo"
+        except Exception:
+            pass
+        if "ADITIVO" in base:
+            return "Aditivo"
+        try:
+            if int(bit_contrato_novo or 0) == 1:
+                return "Contrato Novo"
+        except Exception:
+            pass
+        if "NOVO" in base:
+            return "Contrato Novo"
+        return "Contrato Principal"
+
+    def _carregar_d4_documentos_contrato(id_contrato_param):
+        """Carrega documentos D4 vinculados ao contrato sem quebrar a tela caso a tabela ainda não exista."""
+        sql_d4_docs = text("""
+            SELECT TOP (50)
+                d4.*,
+                NomeStatusD4Resolvido = sd.NomeStatus
+            FROM [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
+            LEFT JOIN [Integracao].[Silver].[DimStatusD4] AS sd WITH (NOLOCK)
+                ON TRY_CONVERT(int, sd.IDDimStatusD4) = TRY_CONVERT(int, d4.IDDimStatusD4)
+            WHERE TRY_CONVERT(int, d4.IDFatoControleContratosEuromidia) = :id_contrato
+            ORDER BY
+                COALESCE(d4.DataAtualizacao, d4.DataUltimaConsultaD4, d4.DataEnvioD4, d4.DataCriacao) DESC,
+                TRY_CONVERT(int, d4.IDFatoContratoD4) DESC
+        """)
+        try:
+            rows = db.session.execute(sql_d4_docs, {"id_contrato": int(id_contrato_param)}).mappings().all()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.warning(
+                "CONTRATO_DETALHE | FatoContratoD4 indisponível ou com schema diferente | id_contrato=%s",
+                id_contrato_param,
+                exc_info=True,
+            )
+            rows = []
+
+        docs = []
+        for row in rows:
+            d = dict(row)
+            id_status_d4 = _contratos_d4_int(d.get("IDDimStatusD4"), 0)
+            nome_status_d4 = d.get("NomeStatusD4Resolvido") or d.get("NomeStatusD4") or d.get("StatusD4") or d.get("NomeFaseD4")
+            info_status = _contratos_d4_status_info(id_status_d4, nome_status_d4)
+            tipo_ciclo = _contratos_d4_tipo_ciclo(
+                " ".join(str(d.get(k) or "") for k in ("TipoCiclo", "TipoDocumento", "NomeDocumentoD4", "NomeModeloContratoD4", "NomeFaseD4")),
+                d.get("BitAditivo"),
+                d.get("BitContratoNovo"),
+            )
+            data_ref = d.get("DataAtualizacao") or d.get("DataUltimaConsultaD4") or d.get("DataEnvioD4") or d.get("DataCriacao")
+            docs.append({
+                "IDFatoContratoD4": d.get("IDFatoContratoD4"),
+                "IDFatoKanbanCard": d.get("IDFatoKanbanCard"),
+                "IDDimStatusD4": info_status.get("id"),
+                "NomeStatusD4": info_status.get("nome"),
+                "ClasseStatusD4": info_status.get("classe"),
+                "InterpretacaoStatusD4": info_status.get("interpretacao"),
+                "TipoCiclo": tipo_ciclo,
+                "UUIDDocumentoD4": d.get("UUIDDocumentoD4") or d.get("UUIDDocument") or d.get("UUID") or d.get("DocumentoUUID"),
+                "NomeDocumentoD4": d.get("NomeDocumentoD4") or d.get("NomeDocumento") or d.get("ArquivoNome") or "Documento D4Sign",
+                "NomeCofreD4": d.get("NomeCofreD4") or d.get("NomeCofre"),
+                "DataEnvioD4": d.get("DataEnvioD4") or d.get("DataEnvio"),
+                "DataUltimaConsultaD4": d.get("DataUltimaConsultaD4") or d.get("DataAtualizacao") or d.get("DataCriacao"),
+                "DataFinalizacaoD4": d.get("DataFinalizacaoD4") or d.get("DataFinalizacao"),
+                "DataReferencia": data_ref,
+                "DataReferenciaTexto": _contratos_d4_fmt_data(data_ref),
+                "SignatariosTotal": d.get("SignatariosTotal") or d.get("QtdSignatarios") or d.get("TotalSignatarios"),
+                "SignatariosAssinados": d.get("SignatariosAssinados") or d.get("QtdSignatariosAssinados") or d.get("TotalAssinados"),
+                "MensagemErro": d.get("MensagemErro") or d.get("Erro") or d.get("DescricaoErro"),
+            })
+        return docs
+
+    def _carregar_historico_status_contrato(id_contrato_param):
+        sql_hist = text("""
+            SELECT TOP (100)
+                 h.IDDimHistoricoContratos
+                ,h.IDEmpresaProprietaria
+                ,h.IDFatoControleContratosEuromidia
+                ,h.IDDimStatusContratos
+                ,sc.Status AS NomeStatusContrato
+                ,h.IDDimStatusD4
+                ,sd.NomeStatus AS NomeStatusD4
+                ,h.DataStatus
+            FROM [Integracao].[Silver].[DimHistoricoContratos] AS h WITH (NOLOCK)
+            LEFT JOIN [Integracao].[Silver].[DimStatusContratos] AS sc WITH (NOLOCK)
+                ON TRY_CONVERT(int, sc.IDDimStatusContratos) = TRY_CONVERT(int, h.IDDimStatusContratos)
+               AND (sc.IDEmpresaProprietaria = h.IDEmpresaProprietaria OR h.IDEmpresaProprietaria IS NULL)
+            LEFT JOIN [Integracao].[Silver].[DimStatusD4] AS sd WITH (NOLOCK)
+                ON TRY_CONVERT(int, sd.IDDimStatusD4) = TRY_CONVERT(int, h.IDDimStatusD4)
+            WHERE TRY_CONVERT(int, h.IDFatoControleContratosEuromidia) = :id_contrato
+            ORDER BY h.DataStatus DESC, h.IDDimHistoricoContratos DESC
+        """)
+        try:
+            rows = db.session.execute(sql_hist, {"id_contrato": int(id_contrato_param)}).mappings().all()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.warning(
+                "CONTRATO_DETALHE | DimHistoricoContratos indisponível ou com schema diferente | id_contrato=%s",
+                id_contrato_param,
+                exc_info=True,
+            )
+            rows = []
+
+        historico = []
+        for row in rows:
+            r = dict(row)
+            info_d4 = _contratos_d4_status_info(r.get("IDDimStatusD4"), r.get("NomeStatusD4"))
+            historico.append({
+                "IDDimHistoricoContratos": r.get("IDDimHistoricoContratos"),
+                "IDDimStatusContratos": r.get("IDDimStatusContratos"),
+                "NomeStatusContrato": r.get("NomeStatusContrato") or "—",
+                "IDDimStatusD4": info_d4.get("id"),
+                "NomeStatusD4": info_d4.get("nome"),
+                "ClasseStatusD4": info_d4.get("classe"),
+                "DataStatus": r.get("DataStatus"),
+                "DataStatusTexto": _contratos_d4_fmt_data(r.get("DataStatus")),
+            })
+        return historico
+
+    def _montar_painel_d4_contrato(d4_documentos, historico_status, cards_relacionados_lista=None):
+        docs = list(d4_documentos or [])
+        historico = list(historico_status or [])
+        cards_lista = list(cards_relacionados_lista or [])
+
+        doc_atual = docs[0] if docs else None
+        status_d4 = _contratos_d4_status_info(
+            doc_atual.get("IDDimStatusD4") if doc_atual else None,
+            doc_atual.get("NomeStatusD4") if doc_atual else None,
+        )
+
+        tipos_abertos = []
+        for card in cards_lista:
+            tipo = card.get("TipoCard") if isinstance(card, dict) else getattr(card, "TipoCard", None)
+            situacao = card.get("Situacao") if isinstance(card, dict) else getattr(card, "Situacao", None)
+            if tipo and tipo not in tipos_abertos and str(situacao or "").lower() == "aberto":
+                tipos_abertos.append(tipo)
+
+        tipo_ciclo_atual = (doc_atual or {}).get("TipoCiclo") or (tipos_abertos[0] if tipos_abertos else "Contrato Principal")
+
+        ciclos = []
+        ciclos.append({
+            "TipoCiclo": "Contrato Principal",
+            "Titulo": "Contrato Principal",
+            "StatusContrato": (nome_status_atual or "Status atual"),
+            "StatusD4": None,
+            "Classe": "principal",
+            "DataReferenciaTexto": None,
+            "Atual": tipo_ciclo_atual == "Contrato Principal",
+        })
+
+        for card in cards_lista:
+            tipo = card.get("TipoCard") if isinstance(card, dict) else getattr(card, "TipoCard", None)
+            if not tipo or tipo == "Contrato Principal":
+                continue
+            id_card = card.get("IDFatoKanbanCard") if isinstance(card, dict) else getattr(card, "IDFatoKanbanCard", None)
+            doc_card = next((d for d in docs if str(d.get("IDFatoKanbanCard") or "") == str(id_card or "")), None)
+            ciclos.append({
+                "TipoCiclo": tipo,
+                "Titulo": f"{tipo} #{id_card}" if id_card else tipo,
+                "StatusContrato": (card.get("NomeFase") if isinstance(card, dict) else getattr(card, "NomeFase", None)) or "—",
+                "StatusD4": (doc_card or {}).get("NomeStatusD4"),
+                "ClasseStatusD4": (doc_card or {}).get("ClasseStatusD4"),
+                "Classe": str((card.get("Situacao") if isinstance(card, dict) else getattr(card, "Situacao", None)) or "aberto"),
+                "DataReferenciaTexto": _contratos_d4_fmt_data(card.get("DataReferencia") if isinstance(card, dict) else getattr(card, "DataReferencia", None)),
+                "Atual": doc_card is not None and doc_card == doc_atual,
+            })
+
+        # Documentos D4 sem card relacionado também aparecem no histórico de ciclos.
+        for doc in docs:
+            if any(str(c.get("StatusD4") or "") == str(doc.get("NomeStatusD4") or "") and str(c.get("TipoCiclo") or "") == str(doc.get("TipoCiclo") or "") for c in ciclos):
+                continue
+            ciclos.append({
+                "TipoCiclo": doc.get("TipoCiclo") or "Documento D4Sign",
+                "Titulo": doc.get("TipoCiclo") or doc.get("NomeDocumentoD4") or "Documento D4Sign",
+                "StatusContrato": "Documento vinculado",
+                "StatusD4": doc.get("NomeStatusD4"),
+                "ClasseStatusD4": doc.get("ClasseStatusD4"),
+                "Classe": "documento",
+                "DataReferenciaTexto": doc.get("DataReferenciaTexto"),
+                "Atual": doc == doc_atual,
+            })
+
+        return {
+            "DocumentoAtual": doc_atual,
+            "StatusAtualD4": status_d4,
+            "TemDocumentoD4": bool(doc_atual),
+            "TipoCicloAtual": tipo_ciclo_atual,
+            "HistoricoStatus": historico,
+            "Ciclos": ciclos[:12],
+            "Resumo": {
+                "QtdDocumentosD4": len(docs),
+                "QtdEventosHistorico": len(historico),
+            },
+        }
+
+    d4_documentos_contrato = _carregar_d4_documentos_contrato(id_contrato)
+    historico_status_contrato = _carregar_historico_status_contrato(id_contrato)
+
     sql_itens_base = text("""
         SELECT
              ci.[IDFatoControleContratosItensEuromidia]
@@ -27063,6 +27306,12 @@ def contratos_detalhe(id_contrato: int):
             "next_page": 1,
         }
 
+        painel_d4_contrato = _montar_painel_d4_contrato(
+            d4_documentos=d4_documentos_contrato,
+            historico_status=historico_status_contrato,
+            cards_relacionados_lista=[],
+        )
+
         html_renderizado = render_template(
             "euromidia/contratos_detalhe.html",
             contrato=contrato,
@@ -27072,6 +27321,9 @@ def contratos_detalhe(id_contrato: int):
             timeline_paginacao=timeline_paginacao,
             resumo_atendimentos=resumo_atendimentos,
             diagrama_status=diagrama_status,
+            painel_d4_contrato=painel_d4_contrato,
+            d4_documentos_contrato=d4_documentos_contrato,
+            historico_status_contrato=historico_status_contrato,
             preferencia_reserva_contrato=preferencia_reserva_contrato,
             return_to=placeholder_return_to_contrato,
             modo_rapido_contrato=True,
@@ -28645,6 +28897,12 @@ def contratos_detalhe(id_contrato: int):
         nome_status_atual=nome_status_atual,
     )
 
+    painel_d4_contrato = _montar_painel_d4_contrato(
+        d4_documentos=d4_documentos_contrato,
+        historico_status=historico_status_contrato,
+        cards_relacionados_lista=cards_relacionados,
+    )
+
     _debug_contrato_detalhe("=" * 120, flush=True)
     _debug_contrato_detalhe(f"ANTES DO RENDER_TEMPLATE | id_contrato={id_contrato}", flush=True)
     _debug_contrato_detalhe(f"QTD ITENS={len(itens)} | QTD NEGOCIACOES={len(negociacao_rows)}", flush=True)
@@ -28671,6 +28929,9 @@ def contratos_detalhe(id_contrato: int):
         timeline_paginacao=timeline_paginacao,
         resumo_atendimentos=resumo_atendimentos,
         diagrama_status=diagrama_status,
+        painel_d4_contrato=painel_d4_contrato,
+        d4_documentos_contrato=d4_documentos_contrato,
+        historico_status_contrato=historico_status_contrato,
         preferencia_reserva_contrato=preferencia_reserva_contrato,
         return_to=placeholder_return_to_contrato,
         modo_rapido_contrato=False,
@@ -29837,9 +30098,7 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
 
     return query
 
-# ============================================================
-# ACL dos filtros avançados da lista de empresas
-# ============================================================
+
 FILTROS_CLIENTES_SEMPRE_VISIVEIS = {"municipio", "porte", "cliente"}
 
 MAPA_PERMISSAO_FILTRO_CLIENTES_VENDEDOR = {
