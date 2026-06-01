@@ -5017,10 +5017,6 @@ def _garantir_versao_concorrencia_card(id_card: int, id_kanban: int) -> str | No
                 _bump_kanban(int(id_kanban))
 
                 versao_seed_hex = _rowversion_para_hex(valor_seed)
-                print(
-                    "[KANBAN][_garantir_versao_concorrencia_card] "
-                    f"seed executado com sucesso -> versao_seed_hex={versao_seed_hex!r}"
-                )
                 if versao_seed_hex:
                     return versao_seed_hex
 
@@ -5501,6 +5497,16 @@ def _executar_movimento_card_core(
             sincronizacao_solicitacao_fase["tipo_documento_card"] = resultado_tipo_documento_movimento
             sincronizacao_solicitacao_fase["tag_14_aplicada_na_fase_4"] = bool(tag_contrato_em_avaliacao_aplicada)
 
+        sincronizacao_contato_contrato = _sincronizar_contatos_card_pos_salvar(
+            id_card=int(id_card),
+            id_empresa=_resolver_id_empresa_principal_por_tipo_cliente(row),
+            id_empresa_proprietaria=int(id_emp),
+            id_fato_controle_contratos=_int_ou_none(row.get("IDFatoControleContratosEuromidia")),
+            id_tipo_cliente=_resolver_id_tipo_cliente_desconto_por_bits(row),
+            dados_formulario_solicitacao=dados_formulario_solicitacao_movimento,
+            payload_card=payload,
+        )
+
         if int(id_fase_para) == 4:
             sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
                 id_card=int(id_card),
@@ -5509,12 +5515,6 @@ def _executar_movimento_card_core(
                 id_usuario=int(id_usuario),
                 id_empresa_proprietaria=int(id_emp),
                 painel_faces_payload=painel_faces_payload_movimento,
-            )
-            sincronizacao_contato_contrato = _upsert_dim_contatos_contrato_por_card(
-                id_card=int(id_card),
-                id_empresa=_resolver_id_empresa_principal_por_tipo_cliente(row),
-                id_empresa_proprietaria=int(id_emp),
-                id_fato_controle_contratos=_int_ou_none(row.get("IDFatoControleContratosEuromidia")),
             )
             try:
                 snapshot_preco_praticado = _sincronizar_snapshot_preco_praticado_fase_4(
@@ -5622,6 +5622,10 @@ def _finalizar_pos_movimento_card(
             "id_fase_de": id_fase_de,
             "id_fase_para": id_fase_para,
             "ordem_na_fase": ordem_na_fase,
+            "card": detalhe.get("card"),
+            "tags": detalhe.get("tags", []),
+            "notas": detalhe.get("notas", []),
+            "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
             "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             "snapshot_preco_praticado": snapshot_preco_praticado,
             "sincronizacao_reservas": sincronizacao_reservas,
@@ -5675,7 +5679,6 @@ def _enfileirar_evento_assincrono(nome_evento: str, payload: dict[str, Any]) -> 
 
 def _emitir_evento_kanban(id_kanban: int, nome_evento: str, payload: dict[str, Any]) -> None:
     payload_final = _serializar_para_socket({**payload, "id_kanban": int(id_kanban)})
-    print(payload_final)
 
     try:
         socketio.emit(
@@ -16242,17 +16245,6 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
     valor_versao_bruta = card_dict.pop("VersaoConcorrencia", None)
     valor_versao_hex_sql = card_dict.pop("VersaoConcorrenciaHexSql", None)
 
-    print(
-        "[KANBAN][_obter_card_detalhe_payload] valor_versao_bruta=",
-        repr(valor_versao_bruta),
-        " tipo=",
-        type(valor_versao_bruta).__name__ if valor_versao_bruta is not None else None
-    )
-    print(
-        "[KANBAN][_obter_card_detalhe_payload] valor_versao_hex_sql=",
-        repr(valor_versao_hex_sql)
-    )
-
     current_app.logger.info(
         "KANBAN: detalhe card id=%s | versao_bruta=%r | tipo=%s | versao_hex_sql=%r",
         id_card,
@@ -19411,15 +19403,27 @@ def api_card_tag_remover(id_card: int, id_tag: int):
     db.session.commit()
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
+    detalhe = _obter_card_detalhe_payload(id_card)
 
     if alterou:
         _emitir_evento_kanban(
             id_kanban,
             "card_tag_removida",
-            {"id_card": id_card, "id_tag": id_tag},
+            {
+                "id_card": id_card,
+                "id_tag": id_tag,
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+            },
         )
 
-    return jsonify({"ok": True})
+    return jsonify({
+        "ok": True,
+        "id_card": id_card,
+        "id_tag": id_tag,
+        "card": detalhe.get("card"),
+        "tags": detalhe.get("tags", []),
+    })
 
 
 
@@ -20122,6 +20126,10 @@ def api_card_inativar(id_card: int):
             id_usuario=int(id_usuario),
             id_empresa_proprietaria=int(id_emp),
             cancelar_todas=True,
+        )
+
+        sincronizacao_contato_contrato = _apagar_contatos_card_antes_aprovacao(
+            id_card=int(id_card),
         )
 
         _registrar_ocorrencia_card_tipo_documento_kanban(
@@ -27573,10 +27581,22 @@ def api_aprovacao_preco_aprovar(id_card: int):
         id_card=int(id_card),
     )
 
+    detalhe = _obter_card_detalhe_payload(int(id_card))
+    card_socket = detalhe.get("card") or {}
+
     _emitir_evento_kanban(
         int(id_kanban),
         "card_atualizado",
-        {"id_card": int(id_card)},
+        {
+            "id_card": int(id_card),
+            "id_fase_de": int(card_socket.get("IDDimKanbanFaseAtual") or 0) or None,
+            "id_fase_para": int(card_socket.get("IDDimKanbanFaseAtual") or 0) or None,
+            "card": card_socket,
+            "tags": detalhe.get("tags", []),
+            "notas": detalhe.get("notas", []),
+            "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+            "snapshot_preco_praticado": snapshot_preco_praticado,
+        },
     )
 
     return jsonify(
@@ -27650,22 +27670,148 @@ CAMPOS_CONTATO_CLIENTE_DIRETO = (
 )
 
 
+def _valor_primeira_chave(dados: dict[str, Any] | None, *chaves: str) -> Any:
+    """Eu pego o primeiro valor preenchido aceitando variações do payload do formulário."""
+    if not isinstance(dados, dict):
+        return None
+
+    for chave in chaves:
+        if chave in dados and dados.get(chave) not in (None, ""):
+            return dados.get(chave)
+
+    chaves_normalizadas = {
+        _normalizar_texto(chave).replace("_", "").lower(): chave
+        for chave in dados.keys()
+    }
+
+    for chave in chaves:
+        chave_normalizada = _normalizar_texto(chave).replace("_", "").lower()
+        chave_real = chaves_normalizadas.get(chave_normalizada)
+        if chave_real is not None and dados.get(chave_real) not in (None, ""):
+            return dados.get(chave_real)
+
+    return None
+
+
 def _normalizar_contato_cliente_direto_payload(dados_contato: dict[str, Any] | None) -> dict[str, Any]:
     """Eu normalizo os campos específicos do cliente direto antes de gravar."""
     dados = dados_contato if isinstance(dados_contato, dict) else {}
 
     return {
         "NomeResponsavelLegalProcuradorEmpresa": _texto_ou_none(
-            dados.get("NomeResponsavelLegalProcuradorEmpresa"), 200
+            _valor_primeira_chave(
+                dados,
+                "NomeResponsavelLegalProcuradorEmpresa",
+                "nome_responsavel_legal_procurador_empresa",
+                "nomeResponsavelLegalProcuradorEmpresa",
+                "solicitacaoContatoClienteDiretoNomeResponsavelLegalProcuradorEmpresa",
+            ),
+            200,
         ),
-        "WhatsappEmpresa": _normalizar_telefone_card(dados.get("WhatsappEmpresa"), 25),
-        "NomeTestemunha": _texto_ou_none(dados.get("NomeTestemunha"), 200),
-        "Email": _texto_ou_none(dados.get("Email"), 200),
-        "Telefone": _normalizar_telefone_card(dados.get("Telefone"), 25),
-        "NomeFinanceiro": _texto_ou_none(dados.get("NomeFinanceiro"), 200),
-        "EmailFinanceiro": _texto_ou_none(dados.get("EmailFinanceiro"), 200),
-        "TelefoneFinanceiro": _normalizar_telefone_card(dados.get("TelefoneFinanceiro"), 25),
+        "WhatsappEmpresa": _normalizar_telefone_card(
+            _valor_primeira_chave(
+                dados,
+                "WhatsappEmpresa",
+                "whatsapp_empresa",
+                "whatsappEmpresa",
+                "solicitacaoContatoClienteDiretoWhatsappEmpresa",
+            ),
+            25,
+        ),
+        "NomeTestemunha": _texto_ou_none(
+            _valor_primeira_chave(
+                dados,
+                "NomeTestemunha",
+                "nome_testemunha",
+                "nomeTestemunha",
+                "solicitacaoContatoClienteDiretoNomeTestemunha",
+            ),
+            200,
+        ),
+        "Email": _texto_ou_none(
+            _valor_primeira_chave(
+                dados,
+                "Email",
+                "email",
+                "solicitacaoContatoClienteDiretoEmail",
+            ),
+            200,
+        ),
+        "Telefone": _normalizar_telefone_card(
+            _valor_primeira_chave(
+                dados,
+                "Telefone",
+                "telefone",
+                "solicitacaoContatoClienteDiretoTelefone",
+            ),
+            25,
+        ),
+        "NomeFinanceiro": _texto_ou_none(
+            _valor_primeira_chave(
+                dados,
+                "NomeFinanceiro",
+                "nome_financeiro",
+                "nomeFinanceiro",
+                "solicitacaoContatoClienteDiretoNomeFinanceiro",
+            ),
+            200,
+        ),
+        "EmailFinanceiro": _texto_ou_none(
+            _valor_primeira_chave(
+                dados,
+                "EmailFinanceiro",
+                "email_financeiro",
+                "emailFinanceiro",
+                "solicitacaoContatoClienteDiretoEmailFinanceiro",
+            ),
+            200,
+        ),
+        "TelefoneFinanceiro": _normalizar_telefone_card(
+            _valor_primeira_chave(
+                dados,
+                "TelefoneFinanceiro",
+                "telefone_financeiro",
+                "telefoneFinanceiro",
+                "solicitacaoContatoClienteDiretoTelefoneFinanceiro",
+            ),
+            25,
+        ),
     }
+
+
+def _extrair_contato_cliente_direto_payload(
+    dados_formulario_solicitacao: Mapping[str, Any] | dict[str, Any] | None = None,
+    payload_card: Mapping[str, Any] | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Eu extraio contato de Cliente Direto aceitando payload aninhado ou campos soltos."""
+    candidatos: list[Mapping[str, Any] | dict[str, Any]] = []
+
+    for origem in (dados_formulario_solicitacao, payload_card):
+        if not isinstance(origem, Mapping):
+            continue
+
+        for chave in (
+            "contato_cliente_direto",
+            "contatoClienteDireto",
+            "ContatoClienteDireto",
+            "ContatoClienteDiretoEuromidia",
+            "cliente_direto",
+            "clienteDireto",
+        ):
+            valor = origem.get(chave)
+            if isinstance(valor, Mapping):
+                candidatos.append(valor)
+
+        candidatos.append(origem)
+
+    combinado: dict[str, Any] = {}
+    for candidato in candidatos:
+        normalizado = _normalizar_contato_cliente_direto_payload(dict(candidato))
+        for campo, valor in normalizado.items():
+            if valor not in (None, "") and combinado.get(campo) in (None, ""):
+                combinado[campo] = valor
+
+    return combinado
 
 
 def _contato_cliente_direto_tem_algum_valor(dados_contato: dict[str, Any] | None) -> bool:
@@ -27948,6 +28094,99 @@ def _upsert_dim_contatos_contrato_por_card(
         'IDEmpresa': id_empresa_final,
     }
 
+
+def _sincronizar_contatos_card_pos_salvar(
+    *,
+    id_card: int,
+    id_empresa: int | None = None,
+    id_empresa_proprietaria: int | None = None,
+    id_fato_controle_contratos: int | None = None,
+    id_tipo_cliente: int | None = None,
+    dados_formulario_solicitacao: Mapping[str, Any] | dict[str, Any] | None = None,
+    payload_card: Mapping[str, Any] | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Eu mantenho as tabelas de contato sincronizadas com o card salvo."""
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {"ok": False, "motivo": "card_invalido"}
+
+    contato_contrato = _upsert_dim_contatos_contrato_por_card(
+        id_card=id_card_int,
+        id_empresa=id_empresa,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        id_fato_controle_contratos=id_fato_controle_contratos,
+    )
+
+    contato_cliente_direto = None
+    if _int_ou_none(id_tipo_cliente) == ID_TIPO_CLIENTE_DIRETO:
+        dados_contato_cliente_direto = _extrair_contato_cliente_direto_payload(
+            dados_formulario_solicitacao,
+            payload_card,
+        )
+
+        contato_cliente_direto = _upsert_contato_cliente_direto_euromidia(
+            id_card=id_card_int,
+            id_fato_controle_contratos=_int_ou_none(id_fato_controle_contratos),
+            id_tipo_cliente=_int_ou_none(id_tipo_cliente),
+            dados_contato=dados_contato_cliente_direto,
+        )
+
+    return {
+        "ok": bool(contato_contrato and contato_contrato.get("ok")),
+        "motivo": "contatos_sincronizados_pos_salvar_card",
+        "contato_contrato": contato_contrato,
+        "contato_cliente_direto": contato_cliente_direto,
+    }
+
+
+def _apagar_contatos_card_antes_aprovacao(id_card: int) -> dict[str, Any]:
+    """Eu removo contatos temporários quando o card é excluído/inativado antes da aprovação."""
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {
+            "ok": False,
+            "motivo": "card_invalido",
+            "linhas_dim_contatos": 0,
+            "linhas_cliente_direto": 0,
+        }
+
+    if _card_possui_tag_ativa(id_card_int, ID_TAG_CONTRATO_APROVADO):
+        return {
+            "ok": True,
+            "motivo": "card_ja_aprovado_contatos_preservados",
+            "linhas_dim_contatos": 0,
+            "linhas_cliente_direto": 0,
+        }
+
+    linhas_dim = 0
+    linhas_cliente_direto = 0
+
+    if _objeto_existe(TABELA_CONTATOS_CONTRATO):
+        resultado_dim = db.session.execute(
+            text(f"""
+                DELETE FROM {TABELA_CONTATOS_CONTRATO}
+                WHERE IDFatoKanbanCard = :id_card;
+            """),
+            {"id_card": id_card_int},
+        )
+        linhas_dim = int(getattr(resultado_dim, "rowcount", 0) or 0)
+
+    if _objeto_existe(TABELA_CONTATO_CLIENTE_DIRETO):
+        resultado_cliente = db.session.execute(
+            text(f"""
+                DELETE FROM {TABELA_CONTATO_CLIENTE_DIRETO}
+                WHERE IDFatoKanbanCard = :id_card;
+            """),
+            {"id_card": id_card_int},
+        )
+        linhas_cliente_direto = int(getattr(resultado_cliente, "rowcount", 0) or 0)
+
+    return {
+        "ok": True,
+        "motivo": "contatos_temporarios_removidos_card_nao_aprovado",
+        "linhas_dim_contatos": linhas_dim,
+        "linhas_cliente_direto": linhas_cliente_direto,
+    }
 
 
 def _empresa_existe_por_id(id_empresa: int | None) -> bool:
@@ -30414,6 +30653,17 @@ def api_card_criar(id_kanban: int):
             dados_formulario_solicitacao=solicitacao_contrato_payload,
         )
 
+        etapa = "sincronizar_contatos_card"
+        sincronizacao_contato_contrato = _sincronizar_contatos_card_pos_salvar(
+            id_card=int(novo_id),
+            id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_relacionada_int,
+            id_empresa_proprietaria=int(id_emp),
+            id_fato_controle_contratos=contexto_tipo_contrato.get("id_contrato_existente"),
+            id_tipo_cliente=id_tipo_cliente_relacionamento_final or id_tipo_cliente_desconto_int,
+            dados_formulario_solicitacao=solicitacao_contrato_payload,
+            payload_card=payload,
+        )
+
         etapa = "sincronizar_item_contrato"
         sincronizacao_item_contrato = {
             "sincronizado": False,
@@ -30546,6 +30796,12 @@ def api_card_criar(id_kanban: int):
             {
                 "id_card": int(novo_id),
                 "id_fase": int(id_fase),
+                "id_fase_de": None,
+                "id_fase_para": int(id_fase),
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_reservas": sincronizacao_reservas,
             },
@@ -31255,14 +31511,15 @@ def api_card_atualizar(id_card: int):
             id_empresa_relacionada_fallback=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
         )
 
-        sincronizacao_contato_contrato = None
-        if int(id_fase_atual or 0) == 4:
-            sincronizacao_contato_contrato = _upsert_dim_contatos_contrato_por_card(
-                id_card=int(id_card),
-                id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
-                id_empresa_proprietaria=int(id_emp),
-                id_fato_controle_contratos=contexto_tipo_contrato.get("id_contrato_existente"),
-            )
+        sincronizacao_contato_contrato = _sincronizar_contatos_card_pos_salvar(
+            id_card=int(id_card),
+            id_empresa=empresas_relacionadas_card.get("id_empresa_card") or id_empresa_principal_final,
+            id_empresa_proprietaria=int(id_emp),
+            id_fato_controle_contratos=contexto_tipo_contrato.get("id_contrato_existente"),
+            id_tipo_cliente=id_tipo_cliente_final_card,
+            dados_formulario_solicitacao=solicitacao_contrato_payload,
+            payload_card=payload,
+        )
 
         if contexto_tipo_contrato["tipo_contrato"] in {TIPO_SOLICITACAO_ADITIVO, TIPO_SOLICITACAO_NOVO}:
             motivo_snapshot = snapshot_solicitacao.get("motivo") or "sincronizacao_solicitacao_nao_realizada"
@@ -31422,6 +31679,12 @@ def api_card_atualizar(id_card: int):
             "card_atualizado",
             {
                 "id_card": int(id_card),
+                "id_fase_de": int(id_fase_atual) if id_fase_atual else None,
+                "id_fase_para": int((detalhe.get("card") or {}).get("IDDimKanbanFaseAtual") or row_upd.get("IDDimKanbanFaseAtual") or id_fase_atual or 0) or None,
+                "card": detalhe.get("card"),
+                "tags": detalhe.get("tags", []),
+                "notas": detalhe.get("notas", []),
+                "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
