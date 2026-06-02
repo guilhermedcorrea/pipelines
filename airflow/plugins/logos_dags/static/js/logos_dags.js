@@ -3,10 +3,10 @@
 
     const SELETOR_CARDS = "[data-testid='card-list'] > *";
     const CLASSE_BLOCO = "bloco-logos-dag";
+    const URL_API_DAG_TAGS = "/logos-dags-static/api/dag-tags";
 
     let mapaTagsLote = null;
     let promessaMapaTagsLote = null;
-    const cacheTagsPorDag = new Map();
 
     const normalizar = (texto) =>
         (texto || "")
@@ -67,16 +67,6 @@
         return null;
     };
 
-    const obterTagsVisiveis = (card) => {
-        const links = Array.from(
-            card.querySelectorAll("[data-testid='limited-items-list'] a")
-        );
-
-        return links
-            .map((el) => normalizar(el.textContent || ""))
-            .filter(Boolean);
-    };
-
     const temTagsDeLogo = (tags) => {
         const conjunto = new Set(tags.map(normalizar));
         return (
@@ -84,7 +74,13 @@
             conjunto.has("shempo") ||
             conjunto.has("sinamovel") ||
             conjunto.has("omie") ||
-            conjunto.has("granatum")
+            conjunto.has("granatum") ||
+            conjunto.has("d4sign") ||
+            conjunto.has("sqlserver") ||
+            conjunto.has("sql server") ||
+            conjunto.has("sap") ||
+            conjunto.has("sapb1") ||
+            conjunto.has("auvo")
         );
     };
 
@@ -97,7 +93,7 @@
             return promessaMapaTagsLote;
         }
 
-        promessaMapaTagsLote = fetch("/api/v1/dags?limit=1000", {
+        promessaMapaTagsLote = fetch(URL_API_DAG_TAGS, {
             method: "GET",
             credentials: "same-origin",
             headers: {
@@ -106,25 +102,21 @@
         })
             .then(async (resposta) => {
                 if (!resposta.ok) {
-                    throw new Error(`Falha ao buscar dags em lote: ${resposta.status}`);
+                    throw new Error(`Falha ao buscar tags dos DAGs: ${resposta.status}`);
                 }
 
                 const dados = await resposta.json();
-                const dags = Array.isArray(dados.dags) ? dados.dags : [];
+                const itens = Array.isArray(dados.items) ? dados.items : [];
                 const mapa = new Map();
 
-                dags.forEach((dag) => {
+                itens.forEach((dag) => {
                     const dagId = (dag.dag_id || "").trim();
                     if (!dagId) {
                         return;
                     }
 
                     const tags = Array.isArray(dag.tags)
-                        ? dag.tags
-                              .map((tag) =>
-                                  normalizar(typeof tag === "string" ? tag : tag?.name || "")
-                              )
-                              .filter(Boolean)
+                        ? dag.tags.map((tag) => normalizar(tag)).filter(Boolean)
                         : [];
 
                     mapa.set(dagId, tags);
@@ -134,7 +126,7 @@
                 return mapa;
             })
             .catch((erro) => {
-                console.error("Erro ao buscar DAGs em lote:", erro);
+                console.error("Erro ao buscar tags dos DAGs no metadatabase:", erro);
                 mapaTagsLote = new Map();
                 return mapaTagsLote;
             })
@@ -143,60 +135,6 @@
             });
 
         return promessaMapaTagsLote;
-    };
-
-    const buscarTagsDaDagEspecifica = async (dagId) => {
-        if (!dagId) {
-            return [];
-        }
-
-        if (cacheTagsPorDag.has(dagId)) {
-            return cacheTagsPorDag.get(dagId);
-        }
-
-        try {
-            const resposta = await fetch(`/api/v1/dags/${encodeURIComponent(dagId)}`, {
-                method: "GET",
-                credentials: "same-origin",
-                headers: {
-                    Accept: "application/json",
-                },
-            });
-
-            if (!resposta.ok) {
-                throw new Error(`Falha ao buscar DAG ${dagId}: ${resposta.status}`);
-            }
-
-            const dados = await resposta.json();
-
-            const tags = Array.isArray(dados.tags)
-                ? dados.tags
-                      .map((tag) =>
-                          normalizar(typeof tag === "string" ? tag : tag?.name || "")
-                      )
-                      .filter(Boolean)
-                : [];
-
-            cacheTagsPorDag.set(dagId, tags);
-            return tags;
-        } catch (erro) {
-            console.error("Erro ao buscar DAG específica:", dagId, erro);
-            cacheTagsPorDag.set(dagId, []);
-            return [];
-        }
-    };
-
-    const unirTags = (...listas) => {
-        const conjunto = new Set();
-
-        listas.flat().forEach((tag) => {
-            const valor = normalizar(tag);
-            if (valor) {
-                conjunto.add(valor);
-            }
-        });
-
-        return Array.from(conjunto);
     };
 
     const montarBlocoLogos = (tags) => {
@@ -208,6 +146,10 @@
         const temSinamovel = tags.includes("sinamovel");
         const temOmie = tags.includes("omie");
         const temGranatum = tags.includes("granatum");
+        const temD4Sign = tags.includes("d4sign");
+        const temSQLServer = tags.includes("sqlserver") || tags.includes("sql server");
+        const temSAPB1 = tags.includes("sap") || tags.includes("sapb1");
+        const temAuvo = tags.includes("auvo");
 
         let quantidade = 0;
         let temEmpresa = false;
@@ -248,7 +190,7 @@
             temEmpresa = true;
         }
 
-        if (temEmpresa && (temOmie || temGranatum)) {
+        if (temEmpresa && (temOmie || temGranatum || temD4Sign || temSQLServer || temSAPB1 || temAuvo)) {
             bloco.appendChild(criarSeparador());
         }
 
@@ -274,21 +216,51 @@
             quantidade += 1;
         }
 
-        return quantidade > 0 ? bloco : null;
-    };
-
-    const resolverTagsDoCard = async (card, dagId, mapaLote) => {
-        const tagsVisiveis = obterTagsVisiveis(card);
-        const tagsLote = mapaLote.get(dagId) || [];
-
-        let tags = unirTags(tagsVisiveis, tagsLote);
-
-        if (!temTagsDeLogo(tags)) {
-            const tagsDag = await buscarTagsDaDagEspecifica(dagId);
-            tags = unirTags(tags, tagsDag);
+        if (temD4Sign) {
+            bloco.appendChild(
+                criarLogo(
+                    "/logos-dags-static/imagens/LogoSistemas/d4sign.jpg",
+                    "D4Sign",
+                    "logo-sistema"
+                )
+            );
+            quantidade += 1;
         }
 
-        return tags;
+        if (temSQLServer) {
+            bloco.appendChild(
+                criarLogo(
+                    "/logos-dags-static/imagens/LogoSistemas/SQLServer.png",
+                    "SQL Server",
+                    "logo-sistema"
+                )
+            );
+            quantidade += 1;
+        }
+
+        if (temSAPB1) {
+            bloco.appendChild(
+                criarLogo(
+                    "/logos-dags-static/imagens/LogoSistemas/SAPB1.png",
+                    "SAP Business One",
+                    "logo-sistema"
+                )
+            );
+            quantidade += 1;
+        }
+
+        if (temAuvo) {
+            bloco.appendChild(
+                criarLogo(
+                    "/logos-dags-static/imagens/LogoSistemas/auvo.png",
+                    "Auvo",
+                    "logo-sistema"
+                )
+            );
+            quantidade += 1;
+        }
+
+        return quantidade > 0 ? bloco : null;
     };
 
     const aplicarNoCard = async (card, mapaLote) => {
@@ -302,7 +274,7 @@
             return;
         }
 
-        const tags = await resolverTagsDoCard(card, dagId, mapaLote);
+        const tags = mapaLote.get(dagId) || [];
         const assinatura = serializarTags(tags);
 
         const blocoExistente = estrutura.grupoEsquerdo.querySelector(`.${CLASSE_BLOCO}`);
@@ -313,6 +285,10 @@
 
         if (blocoExistente) {
             blocoExistente.remove();
+        }
+
+        if (!temTagsDeLogo(tags)) {
+            return;
         }
 
         const blocoNovo = montarBlocoLogos(tags);
