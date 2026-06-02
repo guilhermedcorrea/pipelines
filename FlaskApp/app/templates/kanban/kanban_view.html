@@ -297,20 +297,24 @@
   }
 
   .kb-search-main{
-    display:flex;
-    align-items:center;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+    grid-template-areas:
+      "filtros filtros"
+      "busca acoes";
+    align-items:end;
     gap:10px;
-    flex-wrap:wrap;
     width:100%;
   }
 
   .kb-toolbar-right{
+    grid-area:acoes;
     display:flex;
     align-items:center;
     justify-content:flex-start;
     gap:10px;
     flex-wrap:wrap;
-    flex: 0 0 auto;
+    min-width:max-content;
   }
 
   .kb-search-label{
@@ -364,9 +368,10 @@
 
 
   .kb-search-combobox{
+    grid-area:busca;
     position: relative;
-    flex: 1 1 420px;
-    min-width: min(320px, 100%);
+    width:100%;
+    min-width: 0;
     z-index: 45;
   }
 
@@ -479,6 +484,29 @@
     line-height:1;
   }
 
+  .kb-search-sugestao-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    max-width:100%;
+    border:1px solid rgba(15,23,42,.10);
+    background:#e2e8f0;
+    color:#0f172a;
+    border-radius:999px;
+    padding:4px 8px;
+    font-size:11px;
+    font-weight:950;
+    line-height:1;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 1px 2px rgba(15,23,42,.08);
+  }
+
+  .kb-search-sugestao-tag-text{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
   .kb-search-sugestoes-status{
     padding:12px;
     font-size:12px;
@@ -508,17 +536,21 @@
   }
 
   .kb-filtros{
+    grid-area:filtros;
+    position:relative;
+    z-index:70;
     display:flex;
     align-items:stretch;
     gap:10px;
     flex-wrap:wrap;
-    flex: 1 1 520px;
+    width:100%;
+    max-width:760px;
   }
 
   .kb-filtro-multi{
     position:relative;
-    flex: 1 1 240px;
-    min-width: 220px;
+    flex: 1 1 280px;
+    min-width: 260px;
   }
 
   .kb-filtro-multi-btn{
@@ -577,7 +609,7 @@
     top: calc(100% + 8px);
     left:0;
     right:0;
-    z-index: 40;
+    z-index: 90;
     background:#fff;
     border:1px solid var(--kb-line);
     border-radius:16px;
@@ -2228,15 +2260,21 @@
     }
 
     .kb-search-main{
+      grid-template-columns:1fr;
+      grid-template-areas:
+        "filtros"
+        "busca"
+        "acoes";
       align-items:stretch;
     }
 
     .kb-filtros{
-      flex: 1 1 100%;
+      max-width:none;
     }
 
     .kb-toolbar-right{
       width:100%;
+      min-width:0;
       justify-content:flex-start;
     }
 
@@ -2281,7 +2319,11 @@
     }
 
     .kb-search-main{
-      flex-direction: column;
+      grid-template-columns:1fr;
+      grid-template-areas:
+        "filtros"
+        "busca"
+        "acoes";
       align-items: stretch;
     }
 
@@ -3415,24 +3457,6 @@
     <div class="kb-search">
       <label class="kb-search-label" for="buscaKanban">Pesquisar cards</label>
       <div class="kb-search-main">
-        <div id="comboBuscaKanban" class="kb-search-combobox">
-          <div class="kb-search-box">
-            <span class="kb-search-icon">🔎</span>
-            <input
-              id="buscaKanban"
-              class="kb-search-input"
-              type="search"
-              placeholder="Pesquisar por nome do card, ID, fase, descrição, empresa, vendedor ou face..."
-              autocomplete="off"
-              spellcheck="false"
-              aria-autocomplete="list"
-              aria-expanded="false"
-              aria-controls="listaBuscaKanban"
-            />
-          </div>
-          <div id="listaBuscaKanban" class="kb-search-sugestoes" hidden></div>
-        </div>
-
         <div class="kb-filtros">
           <div class="kb-filtro-multi" id="filtroVendedor">
             <button type="button" class="kb-filtro-multi-btn" id="btnFiltroVendedor">
@@ -3471,6 +3495,24 @@
               <div class="kb-filtro-multi-lista" id="listaFiltroTag"></div>
             </div>
           </div>
+        </div>
+
+        <div id="comboBuscaKanban" class="kb-search-combobox">
+          <div class="kb-search-box">
+            <span class="kb-search-icon">🔎</span>
+            <input
+              id="buscaKanban"
+              class="kb-search-input"
+              type="search"
+              placeholder="Pesquisar por nome do card, ID, fase, descrição, empresa, vendedor, face ou tag..."
+              autocomplete="off"
+              spellcheck="false"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="listaBuscaKanban"
+            />
+          </div>
+          <div id="listaBuscaKanban" class="kb-search-sugestoes" hidden></div>
         </div>
 
         <div class="kb-toolbar-right">

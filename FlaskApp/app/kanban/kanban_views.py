@@ -17629,6 +17629,19 @@ def api_cards_sugestoes_busca(id_kanban: int):
                          OR ISNULL(face_busca.Tipo, '') LIKE :q_like
                       )
                 )
+             OR EXISTS (
+                    SELECT 1
+                    FROM [Kanban].[Silver].[FatoKanbanCardTag] ct_busca
+                    INNER JOIN [Kanban].[Silver].[DimKanbanTag] tag_busca
+                        ON tag_busca.IDDimKanbanTag = ct_busca.IDDimKanbanTag
+                    WHERE ct_busca.IDFatoKanbanCard = c.IDFatoKanbanCard
+                      AND ct_busca.RemovidoEm IS NULL
+                      AND ISNULL(tag_busca.Ativo, 1) = 1
+                      AND (
+                            ISNULL(tag_busca.NomeTag, '') LIKE :q_like
+                         OR ISNULL(tag_busca.TipoTag, '') LIKE :q_like
+                      )
+                )
           )
         ORDER BY
             CASE
@@ -17657,11 +17670,85 @@ def api_cards_sugestoes_busca(id_kanban: int):
     ).mappings().all()
 
     sugestoes = []
+    ids_cards_sugestoes: list[int] = []
     for linha in linhas:
         item = dict(linha)
         item["QuantidadePaineisVinculados"] = int(item.get("QuantidadePaineisVinculados") or 0)
         item["QuantidadeCodFaces"] = int(item.get("QuantidadeCodFaces") or 0)
+        item["Tags"] = []
+        id_card_item = int(item.get("IDFatoKanbanCard") or 0)
+        if id_card_item > 0:
+            ids_cards_sugestoes.append(id_card_item)
         sugestoes.append(item)
+
+    if ids_cards_sugestoes:
+        ids_cards_sugestoes = list(dict.fromkeys(ids_cards_sugestoes))
+        placeholders_ids_cards, parametros_ids_cards = _montar_placeholders_sql(
+            "id_card_sugestao",
+            ids_cards_sugestoes,
+        )
+
+        tem_afeta_cor_card = _coluna_existe("[Kanban].[Silver].[DimKanbanTag]", "AfetaCorCard")
+        tem_ordem_exibicao = _coluna_existe("[Kanban].[Silver].[DimKanbanTag]", "OrdemExibicao")
+
+        select_afeta_cor_card = (
+            "tag.AfetaCorCard AS AfetaCorCard,"
+            if tem_afeta_cor_card
+            else "CAST(0 AS bit) AS AfetaCorCard,"
+        )
+        select_ordem_exibicao = (
+            "tag.OrdemExibicao AS OrdemExibicao"
+            if tem_ordem_exibicao
+            else "CAST(NULL AS int) AS OrdemExibicao"
+        )
+        order_by_ordem_exibicao = (
+            "ISNULL(tag.OrdemExibicao, 999999) ASC,"
+            if tem_ordem_exibicao
+            else ""
+        )
+
+        sql_tags_sugestoes = text(f"""
+            SELECT
+                ct.IDFatoKanbanCard,
+                tag.IDDimKanbanTag,
+                tag.NomeTag,
+                tag.TipoTag,
+                tag.CorHex,
+                tag.Icone,
+                {select_afeta_cor_card}
+                {select_ordem_exibicao}
+            FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
+            INNER JOIN [Kanban].[Silver].[DimKanbanTag] tag
+                ON tag.IDDimKanbanTag = ct.IDDimKanbanTag
+            WHERE ct.IDFatoKanbanCard IN ({placeholders_ids_cards})
+              AND ct.RemovidoEm IS NULL
+              AND ISNULL(tag.Ativo, 1) = 1
+            ORDER BY
+                ct.IDFatoKanbanCard ASC,
+                {order_by_ordem_exibicao}
+                tag.NomeTag ASC,
+                tag.IDDimKanbanTag ASC;
+        """)
+
+        try:
+            linhas_tags = db.session.execute(sql_tags_sugestoes, parametros_ids_cards).mappings().all()
+            tags_por_card: dict[int, list[dict[str, Any]]] = {}
+            for linha_tag in linhas_tags:
+                tag_item = dict(linha_tag)
+                id_card_tag = int(tag_item.get("IDFatoKanbanCard") or 0)
+                if id_card_tag <= 0:
+                    continue
+                tags_por_card.setdefault(id_card_tag, []).append(tag_item)
+
+            for item in sugestoes:
+                id_card_item = int(item.get("IDFatoKanbanCard") or 0)
+                item["Tags"] = tags_por_card.get(id_card_item, [])
+        except Exception:
+            current_app.logger.exception(
+                "Erro ao carregar tags das sugestões de busca do kanban | id_kanban=%s | ids_cards=%s",
+                id_kanban,
+                ids_cards_sugestoes,
+            )
 
     resposta = jsonify({"ok": True, "sugestoes": sugestoes})
     resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

@@ -5385,6 +5385,20 @@ function normalizarCardServidor(card){
     c.EmpresaCNPJ = mascaraCnpj(c.EmpresaCNPJ || c.empresa_cnpj || "");
     c.QuantidadeCodFaces = idNum(c.QuantidadeCodFaces || c.quantidade_codfaces || 0);
     c.QuantidadePaineisVinculados = idNum(c.QuantidadePaineisVinculados || c.quantidade_paineis_vinculados || 0);
+
+    const tagsBrutas = Array.isArray(c.Tags)
+      ? c.Tags
+      : (Array.isArray(c.tags) ? c.tags : tagsDoCard(c.IDFatoKanbanCard));
+
+    c.Tags = (Array.isArray(tagsBrutas) ? tagsBrutas : [])
+      .map(tag => ({
+        IDDimKanbanTag: idNum(tag?.IDDimKanbanTag || tag?.id_dim_kanban_tag || tag?.id_tag || 0),
+        NomeTag: safeStr(tag?.NomeTag || tag?.nome_tag || tag?.nome || "").trim(),
+        CorHex: normalizarCorHex(tag?.CorHex || tag?.cor_hex || tag?.cor || ""),
+        Icone: safeStr(tag?.Icone || tag?.icone || "").trim()
+      }))
+      .filter(tag => tag.IDDimKanbanTag > 0 || tag.NomeTag);
+
     return c;
   }
 
@@ -5407,7 +5421,8 @@ function normalizarCardServidor(card){
           EmpresaRazaoSocial: card?.EmpresaRazaoSocial,
           EmpresaCNPJ: card?.EmpresaCNPJ,
           QuantidadeCodFaces: card?.QuantidadeCodFaces || card?.QuantidadePaineisVinculados,
-          QuantidadePaineisVinculados: card?.QuantidadePaineisVinculados
+          QuantidadePaineisVinculados: card?.QuantidadePaineisVinculados,
+          Tags: tagsDoCard(card?.IDFatoKanbanCard)
         });
       });
   }
@@ -5471,6 +5486,23 @@ function normalizarCardServidor(card){
         badges.push(`${item.QuantidadePaineisVinculados} painel/face${item.QuantidadePaineisVinculados === 1 ? "" : "s"}`);
       }
 
+      const tagsSugestao = Array.isArray(item.Tags) ? item.Tags : [];
+      const badgesTags = tagsSugestao
+        .filter(tag => safeStr(tag?.NomeTag || "").trim())
+        .map(tag => {
+          const nomeTag = safeStr(tag?.NomeTag || "").trim();
+          const iconeTag = safeStr(tag?.Icone || "").trim();
+          const filhos = [];
+          if (iconeTag) filhos.push(el("span", { class: "kb-search-sugestao-tag-icone" }, [iconeTag]));
+          filhos.push(el("span", { class: "kb-search-sugestao-tag-text" }, [nomeTag]));
+          return el("span", {
+            class: "kb-search-sugestao-tag",
+            style: estiloTag(tag?.CorHex || "")
+          }, filhos);
+        });
+
+      const badgesInfo = badges.map(txt => el("span", { class: "kb-search-sugestao-badge" }, [txt]));
+
       const botao = el("button", {
         type: "button",
         class: "kb-search-sugestao-card",
@@ -5484,7 +5516,7 @@ function normalizarCardServidor(card){
         item.Descricao
           ? el("div", { class: "kb-search-sugestao-desc" }, [textoCurtoBuscaKanban(item.Descricao, 220)])
           : el("div", { class: "kb-search-sugestao-desc" }, ["Sem descrição informada."]),
-        el("div", { class: "kb-search-sugestao-badges" }, badges.map(txt => el("span", { class: "kb-search-sugestao-badge" }, [txt])))
+        el("div", { class: "kb-search-sugestao-badges" }, [...badgesTags, ...badgesInfo])
       ]);
 
       botao.addEventListener("mouseenter", () => definirItemAtivoSugestaoBuscaKanban(indice));
