@@ -179,6 +179,18 @@
       color:#475569;
     }
 
+    .badge.status-dinamico{
+      border-color:color-mix(in srgb, var(--status-color, #002884) 30%, white);
+      background:color-mix(in srgb, var(--status-color, #002884) 10%, white);
+      color:var(--status-color, #002884);
+    }
+
+    .solicitacao-topbar .badge.status-dinamico{
+      border-color:color-mix(in srgb, var(--status-color, #ffffff) 55%, white);
+      background:color-mix(in srgb, var(--status-color, #ffffff) 28%, transparent);
+      color:#ffffff;
+    }
+
     .actions{
       display:flex;
       align-items:center;
@@ -327,6 +339,12 @@
       color:#be123c;
     }
 
+    .status-flow-current.status-dinamico{
+      background:color-mix(in srgb, var(--status-color, #002884) 10%, white);
+      border-color:color-mix(in srgb, var(--status-color, #002884) 35%, white);
+      color:var(--status-color, #002884);
+    }
+
     .status-flow-track-wrap{
       padding:16px 18px 18px 18px;
     }
@@ -392,6 +410,32 @@
       box-shadow:0 16px 30px rgba(244,63,94,.10);
     }
 
+    .status-node.status-colorido{
+      border-top:4px solid var(--status-color, #94a3b8);
+    }
+
+    .status-node.status-colorido.pendente{
+      border-color:color-mix(in srgb, var(--status-color, #94a3b8) 24%, white);
+    }
+
+    .status-node.status-colorido.concluido,
+    .status-node.status-colorido.atual,
+    .status-node.status-colorido.terminal-sucesso,
+    .status-node.status-colorido.terminal-erro{
+      background:linear-gradient(180deg, color-mix(in srgb, var(--status-color, #94a3b8) 9%, white) 0%, color-mix(in srgb, var(--status-color, #94a3b8) 15%, white) 100%);
+      border-color:color-mix(in srgb, var(--status-color, #94a3b8) 42%, white);
+    }
+
+    .status-node.status-colorido.atual,
+    .status-node.status-colorido.terminal-sucesso,
+    .status-node.status-colorido.terminal-erro{
+      box-shadow:0 0 0 1px color-mix(in srgb, var(--status-color, #94a3b8) 16%, transparent), 0 16px 30px rgba(2,6,23,.08);
+    }
+
+    .status-node.status-colorido .status-node-id{
+      color:var(--status-color, #64748b);
+    }
+
     .status-node-icon{
       width:36px;
       height:36px;
@@ -427,12 +471,27 @@
       color:#e11d48;
     }
 
+    .status-node.status-colorido .status-node-icon{
+      border-color:color-mix(in srgb, var(--status-color, #64748b) 42%, white);
+      background:color-mix(in srgb, var(--status-color, #64748b) 9%, white);
+      color:var(--status-color, #64748b);
+    }
+
+    .status-node.status-colorido.atual .status-node-icon,
+    .status-node.status-colorido.concluido .status-node-icon,
+    .status-node.status-colorido.terminal-sucesso .status-node-icon,
+    .status-node.status-colorido.terminal-erro .status-node-icon{
+      border-color:var(--status-color, #64748b);
+      background:color-mix(in srgb, var(--status-color, #64748b) 13%, white);
+      color:var(--status-color, #64748b);
+    }
+
     .status-node-icon.pulsando::after{
       content:"";
       position:absolute;
       inset:-6px;
       border-radius:999px;
-      border:2px solid rgba(34,197,94,.18);
+      border:2px solid color-mix(in srgb, var(--status-color, #22c55e) 22%, transparent);
       animation:statusPulse 1.8s ease-out infinite;
     }
 
@@ -1292,7 +1351,7 @@
             <span class="badge neutral">Card #{{ solicitacao.IDFatoKanbanCard }}</span>
             <span class="badge neutral">Contrato #{{ solicitacao.IDFatoControleContratosEuromidia or "—" }}</span>
             <span class="badge warn">Criado por {{ solicitacao.NomeUsuarioCriacao or "—" }}</span>
-            <span class="badge neutral">Status Atual: {{ solicitacao.StatusContrato or "—" }}</span>
+            <span class="badge status-dinamico" style="{% if solicitacao.CorHexStatusContrato %}--status-color: {{ solicitacao.CorHexStatusContrato }};{% endif %}">Status Atual: {{ solicitacao.StatusContrato or "—" }}</span>
           </div>
         </div>
       </div>
@@ -1314,7 +1373,7 @@
           </div>
         </div>
 
-        <div class="status-flow-current {% if diagrama_status.terminal_atual %}{{ 'sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'erro' }}{% elif diagrama_status.status_atual_id in [1,2,3,4,5,6,7] %}sucesso{% endif %}">
+        <div class="status-flow-current status-dinamico {% if diagrama_status.terminal_atual %}{{ 'sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'erro' }}{% elif diagrama_status.status_atual_id in [1,2,3,4,5,6,7] %}sucesso{% endif %}" style="{% if diagrama_status.status_atual_cor %}--status-color: {{ diagrama_status.status_atual_cor }};{% endif %}">
           {{ diagrama_status.status_atual_nome or 'Sem status definido' }}
         </div>
       </div>
@@ -1322,7 +1381,7 @@
       <div class="status-flow-track-wrap">
         <div class="status-flow-track">
           {% for etapa in diagrama_status.etapas %}
-            <div class="status-node {{ 'atual' if etapa.atual else 'concluido' if etapa.concluido else 'pendente' }}">
+            <div class="status-node status-colorido {{ 'atual' if etapa.atual else 'concluido' if etapa.concluido else 'pendente' }}" style="{% if etapa.cor_hex %}--status-color: {{ etapa.cor_hex }};{% endif %}">
               <div class="status-node-icon {{ 'pulsando' if etapa.atual else '' }}">
                 {% if etapa.concluido %}
                   ✓
@@ -1364,7 +1423,7 @@
 
           {% if diagrama_status.terminal_atual %}
             <div class="status-arrow {{ 'final-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'final-erro' }}">→</div>
-            <div class="status-node {{ 'terminal-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'terminal-erro' }}">
+            <div class="status-node status-colorido {{ 'terminal-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'terminal-erro' }}" style="{% if diagrama_status.terminal_atual.cor_hex %}--status-color: {{ diagrama_status.terminal_atual.cor_hex }};{% endif %}">
               <div class="status-node-icon {{ 'pulsando' if diagrama_status.terminal_atual.classe == 'sucesso' else '' }}">
                 {{ diagrama_status.terminal_atual.icone }}
               </div>
@@ -1375,8 +1434,12 @@
                   Fluxo concluído e contrato já está ativo/concluído.
                 {% elif diagrama_status.terminal_atual.id == 9 %}
                   Fluxo interrompido por cancelamento.
+                {% elif diagrama_status.terminal_atual.id == 31 %}
+                  Solicitação reprovada na análise do contrato.
+                {% elif diagrama_status.terminal_atual.id == 10 %}
+                  Fluxo com erro e exige revisão técnica.
                 {% else %}
-                  Fluxo interrompido por erro e exige revisão.
+                  Fluxo interrompido e exige revisão.
                 {% endif %}
               </div>
             </div>
@@ -1387,6 +1450,7 @@
           <span class="status-flow-legend-item"><span class="status-flow-legend-dot verde"></span> Etapa atual</span>
           <span class="status-flow-legend-item"><span class="status-flow-legend-dot azul"></span> Etapa já concluída</span>
           <span class="status-flow-legend-item"><span class="status-flow-legend-dot cinza"></span> Etapa pendente</span>
+          
         </div>
       </div>
     </div>

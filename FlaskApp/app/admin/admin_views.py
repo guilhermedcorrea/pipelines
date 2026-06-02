@@ -30,7 +30,10 @@ admin = Blueprint("admin", __name__)
 
 
 
-ID_STATUS_CONTRATO_APROVADO = 2
+ID_STATUS_CONTRATO_PENDENTE_GERACAO = 2
+ID_STATUS_CONTRATO_ERRO = 10
+ID_STATUS_CONTRATO_REPROVADO = 31
+ID_STATUS_CONTRATO_APROVADO = ID_STATUS_CONTRATO_PENDENTE_GERACAO
 ID_FASE_FORMULARIO_CONTRATO = 4
 TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
 TABELA_VENCIMENTO_CAMPANHA = "[Integracao].[Silver].[FatoVencimentoCampanhaEuromidia]"
@@ -63,6 +66,70 @@ ID_STATUS_CAMPANHA_SEM_DATA_TERMINO = 6
 ID_STATUS_CAMPANHA_RENOVADA = 8
 
 ID_TIPOS_DOCUMENTO_GERAM_CAMPANHA = {1, 3}
+
+
+CORES_PADRAO_STATUS_CONTRATO_ADMIN = {
+    1: "#6B7280",  # Em Digitação
+    2: "#F59E0B",  # Pendente Geração
+    3: "#2563EB",  # Documento Gerado
+    4: "#9333EA",  # Pendente Envio
+    5: "#0EA5E9",  # Enviado Assinatura
+    6: "#06B6D4",  # Em Assinatura
+    7: "#15803D",  # Ativo
+    8: "#166534",  # Concluido
+    9: "#7F1D1D",  # Cancelado
+    10: "#DC2626", # ERRO
+    31: "#B91C1C", # Reprovado
+}
+
+
+def _normalizar_cor_hex_admin(valor: str | None) -> str | None:
+    """Normalizo CorHex antes de mandar para o HTML, evitando CSS inválido/injetado."""
+    cor = str(valor or "").strip()
+    if not cor:
+        return None
+
+    if re.fullmatch(r"#[0-9A-Fa-f]{6}", cor):
+        return cor.upper()
+
+    if re.fullmatch(r"[0-9A-Fa-f]{6}", cor):
+        return f"#{cor.upper()}"
+
+    if re.fullmatch(r"#[0-9A-Fa-f]{3}", cor):
+        r, g, b = cor[1], cor[2], cor[3]
+        return f"#{r}{r}{g}{g}{b}{b}".upper()
+
+    if re.fullmatch(r"[0-9A-Fa-f]{3}", cor):
+        r, g, b = cor[0], cor[1], cor[2]
+        return f"#{r}{r}{g}{g}{b}{b}".upper()
+
+    return None
+
+
+def _cor_hex_status_contrato_padrao_admin(id_status: int | None) -> str | None:
+    try:
+        return CORES_PADRAO_STATUS_CONTRATO_ADMIN.get(int(id_status or 0))
+    except Exception:
+        return None
+
+
+def _cor_texto_contraste_admin(cor_hex: str | None) -> str:
+    """Retorna preto/cinza escuro ou branco conforme contraste com a cor de fundo."""
+    cor = _normalizar_cor_hex_admin(cor_hex)
+    if not cor:
+        return "#111827"
+
+    try:
+        r = int(cor[1:3], 16)
+        g = int(cor[3:5], 16)
+        b = int(cor[5:7], 16)
+    except Exception:
+        return "#111827"
+
+    # Fórmula simples de luminância perceptiva.
+    # Cores claras, como amarelo/âmbar, precisam de texto escuro.
+    luminancia = (0.299 * r) + (0.587 * g) + (0.114 * b)
+    return "#111827" if luminancia >= 150 else "#FFFFFF"
 
 
 def _env_bool(nome_variavel: str, padrao: str = "0") -> bool:
@@ -9481,7 +9548,15 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
         8: "Concluido",
         9: "Cancelado",
         10: "ERRO",
+        31: "Reprovado",
     }
+
+    def _status_padrao(id_status: int, nome: str):
+        return {
+            "IDDimStatusContratos": id_status,
+            "Status": nome,
+            "CorHex": _cor_hex_status_contrato_padrao_admin(id_status),
+        }
 
     try:
         id_empresa = int(id_empresa_proprietaria or 0)
@@ -9489,37 +9564,32 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
         id_empresa = 0
 
     if id_empresa <= 0:
-        return [
-            {
-                "IDDimStatusContratos": id_status,
-                "Status": nome,
-            }
-            for id_status, nome in mapa_padrao.items()
-        ]
+        return [_status_padrao(id_status, nome) for id_status, nome in mapa_padrao.items()]
 
     sql = text("""
         SELECT
              [IDDimStatusContratos]
             ,[Status]
+            ,[CorHex]
         FROM [Integracao].[Silver].[DimStatusContratos]
         WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
-          AND [IDDimStatusContratos] BETWEEN 1 AND 10
+          AND (
+                [IDDimStatusContratos] BETWEEN 1 AND 10
+                OR [IDDimStatusContratos] = :id_status_reprovado
+              )
         ORDER BY [IDDimStatusContratos] ASC
     """)
 
     rows = db.session.execute(
         sql,
-        {"id_empresa_proprietaria": id_empresa},
+        {
+            "id_empresa_proprietaria": id_empresa,
+            "id_status_reprovado": ID_STATUS_CONTRATO_REPROVADO,
+        },
     ).mappings().all()
 
     if not rows:
-        return [
-            {
-                "IDDimStatusContratos": id_status,
-                "Status": nome,
-            }
-            for id_status, nome in mapa_padrao.items()
-        ]
+        return [_status_padrao(id_status, nome) for id_status, nome in mapa_padrao.items()]
 
     retorno = []
     ids_existentes = set()
@@ -9532,21 +9602,156 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+                "CorHex": _normalizar_cor_hex_admin(row.get("CorHex")) or _cor_hex_status_contrato_padrao_admin(id_status),
             }
         )
 
     for id_status, nome in mapa_padrao.items():
         if id_status not in ids_existentes:
-            retorno.append(
-                {
-                    "IDDimStatusContratos": id_status,
-                    "Status": nome,
-                }
-            )
+            retorno.append(_status_padrao(id_status, nome))
 
     retorno.sort(key=lambda x: int(x.get("IDDimStatusContratos") or 0))
     return retorno
 
+
+def _resolver_id_status_contrato_admin(
+    nome_status: str | None,
+    id_empresa_proprietaria: int | None,
+    fallback_id: int | None = None,
+) -> int | None:
+    """Resolvo o ID do status pela dimensão para evitar status fixo errado na tela."""
+    nome = _texto_ou_none(nome_status)
+    fallback = _int_ou_none(fallback_id)
+    if not nome:
+        return fallback
+
+    id_empresa = _int_ou_none(id_empresa_proprietaria)
+
+    try:
+        row = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                       [IDDimStatusContratos]
+                FROM [Integracao].[Silver].[DimStatusContratos]
+                WHERE UPPER(LTRIM(RTRIM(CONVERT(nvarchar(200), [Status])))) COLLATE Latin1_General_CI_AI
+                    = UPPER(LTRIM(RTRIM(CONVERT(nvarchar(200), :nome_status)))) COLLATE Latin1_General_CI_AI
+                  AND (
+                        :id_empresa_proprietaria IS NULL
+                        OR [IDEmpresaProprietaria] = :id_empresa_proprietaria
+                      )
+                ORDER BY
+                    CASE
+                        WHEN :id_empresa_proprietaria IS NOT NULL
+                         AND [IDEmpresaProprietaria] = :id_empresa_proprietaria THEN 0
+                        ELSE 1
+                    END,
+                    [IDDimStatusContratos] ASC
+            """),
+            {
+                "nome_status": nome,
+                "id_empresa_proprietaria": int(id_empresa) if id_empresa not in (None, "", 0) else None,
+            },
+        ).mappings().first()
+
+        id_status = _int_ou_none(row.get("IDDimStatusContratos") if row else None)
+        return id_status if id_status not in (None, "", 0) else fallback
+    except Exception:
+        current_app.logger.exception(
+            "STATUS_CONTRATO | falha ao resolver status '%s'; usando fallback=%s",
+            nome,
+            fallback,
+        )
+        return fallback
+
+
+def _marcar_status_solicitacao_contrato_admin(
+    *,
+    id_solicitacao: int,
+    nome_status: str,
+    fallback_id_status: int,
+    status_solicitacao: str | None = None,
+    id_usuario_logado: int | None = None,
+    coluna_usuario: str | None = None,
+    coluna_data: str | None = None,
+    atualizar_contrato_controle: bool = False,
+    commit: bool = False,
+) -> int | None:
+    """Atualizo o IDDimStatusContratos da solicitação para a tela exibir o status real."""
+    id_solic = _int_ou_none(id_solicitacao)
+    if id_solic in (None, "", 0):
+        return None
+
+    cab = _obter_cabecalho_solicitacao_bruta(int(id_solic)) or {}
+    id_empresa_proprietaria = _int_ou_none(cab.get("IDEmpresaProprietaria"))
+    id_status = _resolver_id_status_contrato_admin(
+        nome_status=nome_status,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        fallback_id=fallback_id_status,
+    )
+
+    if id_status in (None, "", 0):
+        return None
+
+    colunas_usuario_permitidas = {
+        "IDDimUsuariosAprovacao",
+        "IDDimUsuariosRejeicao",
+        "IDDimUsuariosCancelamento",
+    }
+    colunas_data_permitidas = {
+        "DataAprovacao",
+        "DataRejeicao",
+        "DataCancelamento",
+    }
+
+    sets = [
+        "IDDimStatusContratos = :id_status",
+        "DataAtualizacao = GETDATE()",
+    ]
+    params = {
+        "id_solicitacao": int(id_solic),
+        "id_status": int(id_status),
+    }
+
+    if status_solicitacao is not None:
+        sets.append("StatusSolicitacao = :status_solicitacao")
+        params["status_solicitacao"] = status_solicitacao
+
+    if coluna_usuario in colunas_usuario_permitidas:
+        sets.append(f"{coluna_usuario} = :id_usuario_logado")
+        params["id_usuario_logado"] = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
+
+    if coluna_data in colunas_data_permitidas:
+        sets.append(f"{coluna_data} = GETDATE()")
+
+    db.session.execute(
+        text(f"""
+            UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+               SET {', '.join(sets)}
+             WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+        """),
+        params,
+    )
+
+    if atualizar_contrato_controle:
+        id_contrato_controle = _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+        if id_contrato_controle not in (None, "", 0):
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[FatoControleContratosEuromidia]
+                       SET IDDimStatusContratos = :id_status,
+                           DataAtualizacao = GETDATE()
+                     WHERE IDFatoControleContratosEuromidia = :id_contrato_controle
+                """),
+                {
+                    "id_status": int(id_status),
+                    "id_contrato_controle": int(id_contrato_controle),
+                },
+            )
+
+    if commit:
+        db.session.commit()
+
+    return int(id_status)
 
 
 def _montar_diagrama_status_contrato(
@@ -9555,11 +9760,15 @@ def _montar_diagrama_status_contrato(
     nome_status_atual: str | None = None,
 ):
     status_rows = _obter_status_contratos_empresa(id_empresa_proprietaria)
-    mapa_status = {
-        int(row.get("IDDimStatusContratos") or 0): (row.get("Status") or "").strip()
-        for row in status_rows
-        if int(row.get("IDDimStatusContratos") or 0) > 0
-    }
+    mapa_status = {}
+    mapa_cor = {}
+
+    for row in status_rows:
+        id_status = int(row.get("IDDimStatusContratos") or 0)
+        if id_status <= 0:
+            continue
+        mapa_status[id_status] = (row.get("Status") or "").strip()
+        mapa_cor[id_status] = _normalizar_cor_hex_admin(row.get("CorHex")) or _cor_hex_status_contrato_padrao_admin(id_status)
 
     try:
         id_status_corrente = int(id_status_atual or 0)
@@ -9567,10 +9776,12 @@ def _montar_diagrama_status_contrato(
         id_status_corrente = 0
 
     nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+    cor_status_corrente = mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_admin(id_status_corrente)
 
     etapas_principais = []
     for id_status in range(1, 8):
         nome = mapa_status.get(id_status) or f"Status {id_status}"
+        cor_hex = mapa_cor.get(id_status) or _cor_hex_status_contrato_padrao_admin(id_status)
         concluido = False
         atual = False
 
@@ -9587,6 +9798,7 @@ def _montar_diagrama_status_contrato(
             {
                 "id": id_status,
                 "nome": nome,
+                "cor_hex": cor_hex,
                 "concluido": concluido,
                 "atual": atual,
                 "pendente": (not concluido) and (not atual),
@@ -9595,17 +9807,19 @@ def _montar_diagrama_status_contrato(
         )
 
     terminal_atual = None
-    if id_status_corrente in (8, 9, 10):
+    if id_status_corrente in (8, 9, 10, ID_STATUS_CONTRATO_REPROVADO):
         terminal_atual = {
             "id": id_status_corrente,
             "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+            "cor_hex": mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_admin(id_status_corrente),
             "classe": "sucesso" if id_status_corrente == 8 else "erro",
-            "icone": "✓" if id_status_corrente == 8 else "!",
+            "icone": "✓" if id_status_corrente == 8 else "✖" if id_status_corrente in (9, ID_STATUS_CONTRATO_REPROVADO) else "!",
         }
 
     return {
         "status_atual_id": id_status_corrente,
         "status_atual_nome": nome_status_corrente or "Sem status definido",
+        "status_atual_cor": cor_status_corrente,
         "etapas": etapas_principais,
         "terminal_atual": terminal_atual,
     }
@@ -10960,6 +11174,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
               ,ep.[Logo] AS [LogoEmpresaProprietaria]
               ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
               ,dsc.[Status] AS [StatusContrato]
+              ,dsc.[CorHex] AS [CorHexStatusContrato]
         FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
         INNER JOIN [Integracao].[Silver].[DimUsuarios] du
                 ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
@@ -11162,6 +11377,10 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     cab["LogoEmpresaProprietariaUrl"] = _resolver_url_logo_empresa_proprietaria(cab.get("LogoEmpresaProprietaria"))
     cab["TipoSolicitacaoExibicao"] = _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao"))
     cab["StatusContrato"] = (cab.get("StatusContrato") or "").strip()
+    cab["CorHexStatusContrato"] = (
+        _normalizar_cor_hex_admin(cab.get("CorHexStatusContrato"))
+        or _cor_hex_status_contrato_padrao_admin(cab.get("IDDimStatusContratos"))
+    )
     cab["DataAssinaturaRenovacaoInput"] = _data_para_input_date(cab.get("DataAssinaturaRenovacao"))
     cab["DataLancamentoInput"] = _data_para_input_date(cab.get("DataLancamento"))
     cab["DataCriacaoInput"] = _data_para_input_date(cab.get("DataCriacao"))
@@ -11289,6 +11508,7 @@ def lista_aprovacao_contratos():
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 10, type=int)
     q = (request.args.get("q") or "").strip()
+    modo_periodo = (request.args.get("modo_periodo") or "").strip().lower()
 
     if per_page not in (10, 20, 30, 50, 100):
         per_page = 10
@@ -11296,7 +11516,116 @@ def lista_aprovacao_contratos():
     if page < 1:
         page = 1
 
-    sql_total = text("""
+    def _parse_data_filtro(nome_arg: str) -> date | None:
+        valor = (request.args.get(nome_arg) or "").strip()
+        if not valor:
+            return None
+        try:
+            return datetime.strptime(valor[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    def _datas_para_label_periodo(data_ini: date | None, data_fim: date | None) -> str:
+        if data_ini and data_fim:
+            return f"{data_ini.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}"
+        if data_ini:
+            return f"A partir de {data_ini.strftime('%d/%m/%Y')}"
+        if data_fim:
+            return f"Até {data_fim.strftime('%d/%m/%Y')}"
+        return "Todos os períodos"
+
+    def _normalizar_lista_status() -> list[int]:
+        valores = request.args.getlist("status")
+        ids = []
+        for valor in valores:
+            valor = (valor or "").strip()
+            if not valor:
+                continue
+            try:
+                id_status = int(valor)
+            except Exception:
+                continue
+            if id_status not in ids:
+                ids.append(id_status)
+        return ids
+
+    def _normalizar_lista_tipo_solicitacao() -> list[str]:
+        valores = request.args.getlist("tipo_solicitacao")
+        tipos = []
+        for valor in valores:
+            valor = (valor or "").strip().upper().replace("_", " ")
+            valor = " ".join(valor.split())
+            if not valor:
+                continue
+            if valor not in tipos:
+                tipos.append(valor)
+        return tipos
+
+    def _label_tipo_solicitacao_lista(valor) -> str:
+        tipo = (str(valor or "").strip().upper().replace("_", " "))
+        tipo = " ".join(tipo.split())
+        return tipo or "—"
+
+    data_inicio = _parse_data_filtro("data_inicio")
+    data_fim = _parse_data_filtro("data_fim")
+
+    # Segurança: se o usuário inverter as datas no seletor manual, corrijo a ordem antes de consultar.
+    if data_inicio and data_fim and data_inicio > data_fim:
+        data_inicio, data_fim = data_fim, data_inicio
+
+    status_selecionados = _normalizar_lista_status()
+    tipos_selecionados = _normalizar_lista_tipo_solicitacao()
+
+    where_parts = ["ISNULL(fsce.[BitAtivo], 1) = 1"]
+    params = {}
+
+    if q:
+        where_parts.append("""
+            (
+                CAST(fsce.[IDFatoSolicitacaoContratoEuromidia] AS varchar(50)) LIKE '%' + :q + '%'
+                OR CAST(fsce.[IDFatoKanbanCard] AS varchar(50)) LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[CNPJ], '') LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[RazaoSocial], '') LIKE '%' + :q + '%'
+                OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
+                OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
+                OR ISNULL(dsc.[Status], '') LIKE '%' + :q + '%'
+            )
+        """)
+        params["q"] = q
+
+    if status_selecionados:
+        status_placeholders = []
+        for idx, id_status in enumerate(status_selecionados):
+            chave = f"status_{idx}"
+            status_placeholders.append(f":{chave}")
+            params[chave] = id_status
+        where_parts.append(f"fsce.[IDDimStatusContratos] IN ({', '.join(status_placeholders)})")
+
+    if tipos_selecionados:
+        tipo_placeholders = []
+        for idx, tipo in enumerate(tipos_selecionados):
+            chave = f"tipo_solicitacao_{idx}"
+            tipo_placeholders.append(f":{chave}")
+            params[chave] = tipo
+        where_parts.append(
+            "UPPER(REPLACE(LTRIM(RTRIM(ISNULL(fsce.[TipoSolicitacao], ''))), '_', ' ')) "
+            f"IN ({', '.join(tipo_placeholders)})"
+        )
+
+    # O período é aplicado sobre a data mais útil para a fila: envio para avaliação;
+    # se ela não existir, uso a data de criação para não sumir com solicitações ainda sem envio.
+    campo_data_periodo = "CONVERT(date, COALESCE(fsce.[DataEnvioAvaliacao], fsce.[DataCriacao]))"
+    if data_inicio:
+        where_parts.append(f"{campo_data_periodo} >= :data_inicio")
+        params["data_inicio"] = data_inicio
+    if data_fim:
+        where_parts.append(f"{campo_data_periodo} <= :data_fim")
+        params["data_fim"] = data_fim
+
+    where_sql = "\n          AND ".join(where_parts)
+
+    sql_total = text(f"""
         SELECT COUNT(1)
         FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
         INNER JOIN [Integracao].[Silver].[DimUsuarios] du
@@ -11308,20 +11637,10 @@ def lista_aprovacao_contratos():
         LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
             ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
            AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
-        WHERE ISNULL(fsce.[BitAtivo], 1) = 1
-          AND (
-                :q = ''
-                OR CAST(fsce.[IDFatoSolicitacaoContratoEuromidia] AS varchar(50)) LIKE '%' + :q + '%'
-                OR CAST(fsce.[IDFatoKanbanCard] AS varchar(50)) LIKE '%' + :q + '%'
-                OR ISNULL(fsce.[CNPJ], '') LIKE '%' + :q + '%'
-                OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
-                OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
-                OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
-                OR ISNULL(dsc.[Status], '') LIKE '%' + :q + '%'
-            )
+        WHERE {where_sql}
     """)
 
-    total = int(db.session.execute(sql_total, {"q": q}).scalar() or 0)
+    total = int(db.session.execute(sql_total, params).scalar() or 0)
 
     total_pages = max(1, (total + per_page - 1) // per_page)
     if page > total_pages:
@@ -11329,7 +11648,7 @@ def lista_aprovacao_contratos():
 
     offset = (page - 1) * per_page
 
-    sql_itens = text("""
+    sql_base_select = f"""
         SELECT
              fsce.[IDFatoSolicitacaoContratoEuromidia]
             ,fsce.[IDFatoKanbanCard]
@@ -11401,6 +11720,7 @@ def lista_aprovacao_contratos():
             ,ep.[Logo] AS [LogoEmpresaProprietaria]
             ,ep.[RazaoSocial] AS [RazaoSocialEmpresaProprietaria]
             ,dsc.[Status] AS [StatusContrato]
+            ,dsc.[CorHex] AS [CorHexStatusContrato]
         FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
         INNER JOIN [Integracao].[Silver].[DimUsuarios] du
             ON du.[IDDimUsuarios] = fsce.[IDDimUsuariosCriacao]
@@ -11411,38 +11731,32 @@ def lista_aprovacao_contratos():
         LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
             ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
            AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
-        WHERE ISNULL(fsce.[BitAtivo], 1) = 1
-          AND (
-                :q = ''
-                OR CAST(fsce.[IDFatoSolicitacaoContratoEuromidia] AS varchar(50)) LIKE '%' + :q + '%'
-                OR CAST(fsce.[IDFatoKanbanCard] AS varchar(50)) LIKE '%' + :q + '%'
-                OR ISNULL(fsce.[CNPJ], '') LIKE '%' + :q + '%'
-                OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
-                OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
-                OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
-                OR ISNULL(dsc.[Status], '') LIKE '%' + :q + '%'
-            )
+        WHERE {where_sql}
         ORDER BY
             CASE WHEN fsce.[DataEnvioAvaliacao] IS NULL THEN 1 ELSE 0 END ASC,
             fsce.[DataEnvioAvaliacao] DESC,
             fsce.[IDFatoSolicitacaoContratoEuromidia] DESC
+    """
+
+    sql_itens = text(f"""
+        {sql_base_select}
         OFFSET :offset ROWS
         FETCH NEXT :per_page ROWS ONLY
     """)
 
-    rows = db.session.execute(
-        sql_itens,
-        {
-            "q": q,
-            "offset": offset,
-            "per_page": per_page,
-        }
-    ).mappings().all()
+    params_itens = dict(params)
+    params_itens.update({"offset": offset, "per_page": per_page})
+
+    rows = db.session.execute(sql_itens, params_itens).mappings().all()
 
     itens = []
     for r in rows:
         logo_url = _resolver_url_logo_empresa_proprietaria(r.get("LogoEmpresaProprietaria"))
         id_solic = int(r.get("IDFatoSolicitacaoContratoEuromidia"))
+        cor_status_contrato = (
+            _normalizar_cor_hex_admin(r.get("CorHexStatusContrato"))
+            or _cor_hex_status_contrato_padrao_admin(r.get("IDDimStatusContratos"))
+        )
 
         itens.append(
             {
@@ -11455,10 +11769,91 @@ def lista_aprovacao_contratos():
                 "RazaoSocialEmpresa": r.get("RazaoSocialEmpresa") or "—",
                 "LogoEmpresaProprietaria": logo_url,
                 "StatusContrato": r.get("StatusContrato") or "—",
-                "TipoSolicitacao": _tipo_solicitacao_normalizado(r.get("TipoSolicitacao") or "—"),
+                "CorHexStatusContrato": cor_status_contrato,
+                "CorTextoStatusContrato": _cor_texto_contraste_admin(cor_status_contrato),
+                "TipoSolicitacao": _label_tipo_solicitacao_lista(r.get("TipoSolicitacao")),
                 "url_detalhe": url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solic),
             }
         )
+
+    sql_opcoes_status = text("""
+        SELECT
+             dsc.[IDDimStatusContratos]
+            ,dsc.[Status]
+            ,dsc.[CorHex]
+        FROM [Integracao].[Silver].[DimStatusContratos] dsc
+        WHERE dsc.[IDEmpresaProprietaria] = :id_empresa_proprietaria
+        ORDER BY dsc.[IDDimStatusContratos]
+    """)
+    rows_status = db.session.execute(
+        sql_opcoes_status,
+        {"id_empresa_proprietaria": ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO},
+    ).mappings().all()
+
+    opcoes_status = []
+    for r in rows_status:
+        id_status = r.get("IDDimStatusContratos")
+        cor_status = (
+            _normalizar_cor_hex_admin(r.get("CorHex"))
+            or _cor_hex_status_contrato_padrao_admin(id_status)
+        )
+        opcoes_status.append({
+            "id": int(id_status),
+            "label": r.get("Status") or f"Status {id_status}",
+            "cor": cor_status,
+            "cor_texto": _cor_texto_contraste_admin(cor_status),
+        })
+
+    sql_opcoes_tipo = text("""
+        SELECT DISTINCT
+            UPPER(REPLACE(LTRIM(RTRIM(ISNULL(fsce.[TipoSolicitacao], ''))), '_', ' ')) AS [TipoSolicitacao]
+        FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
+        WHERE ISNULL(fsce.[BitAtivo], 1) = 1
+          AND LTRIM(RTRIM(ISNULL(fsce.[TipoSolicitacao], ''))) <> ''
+        ORDER BY [TipoSolicitacao]
+    """)
+    rows_tipo = db.session.execute(sql_opcoes_tipo).mappings().all()
+    opcoes_tipo_solicitacao = []
+    for r in rows_tipo:
+        tipo = " ".join((r.get("TipoSolicitacao") or "").strip().upper().split())
+        if tipo:
+            opcoes_tipo_solicitacao.append({"valor": tipo, "label": tipo})
+
+    sql_sugestoes = text(f"""
+        {sql_base_select}
+        OFFSET 0 ROWS
+        FETCH NEXT 80 ROWS ONLY
+    """)
+    rows_sugestoes = db.session.execute(sql_sugestoes, params).mappings().all()
+    sugestoes_busca = []
+    for r in rows_sugestoes:
+        id_solic = int(r.get("IDFatoSolicitacaoContratoEuromidia"))
+        cor_status = (
+            _normalizar_cor_hex_admin(r.get("CorHexStatusContrato"))
+            or _cor_hex_status_contrato_padrao_admin(r.get("IDDimStatusContratos"))
+        )
+        tipo_label = _label_tipo_solicitacao_lista(r.get("TipoSolicitacao"))
+        sugestoes_busca.append({
+            "id": id_solic,
+            "url": url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solic),
+            "criado_por": r.get("NomeUsuarioCriacao") or "—",
+            "razao_social": r.get("RazaoSocialEmpresa") or r.get("RazaoSocialSolicitacao") or "—",
+            "cnpj": r.get("CNPJ") or "—",
+            "status": r.get("StatusContrato") or "—",
+            "status_cor": cor_status,
+            "status_cor_texto": _cor_texto_contraste_admin(cor_status),
+            "tipo_solicitacao": tipo_label,
+            "texto_busca": " ".join(str(x or "") for x in (
+                id_solic,
+                r.get("IDFatoKanbanCard"),
+                r.get("NomeUsuarioCriacao"),
+                r.get("RazaoSocialEmpresa"),
+                r.get("RazaoSocialSolicitacao"),
+                r.get("CNPJ"),
+                r.get("StatusContrato"),
+                tipo_label,
+            )).lower(),
+        })
 
     inicio = 0 if total == 0 else (offset + 1)
     fim = min(offset + per_page, total)
@@ -11475,6 +11870,12 @@ def lista_aprovacao_contratos():
     filtros = {
         "q": q,
         "per_page": per_page,
+        "status": status_selecionados,
+        "tipo_solicitacao": tipos_selecionados,
+        "data_inicio": data_inicio.strftime("%Y-%m-%d") if data_inicio else "",
+        "data_fim": data_fim.strftime("%Y-%m-%d") if data_fim else "",
+        "modo_periodo": modo_periodo,
+        "label_periodo": _datas_para_label_periodo(data_inicio, data_fim),
     }
 
     return render_template(
@@ -11482,10 +11883,10 @@ def lista_aprovacao_contratos():
         itens=itens,
         filtros=filtros,
         paginacao=paginacao,
+        opcoes_status=opcoes_status,
+        opcoes_tipo_solicitacao=opcoes_tipo_solicitacao,
+        sugestoes_busca=sugestoes_busca,
     )
-
-
-
 
 
 
@@ -13748,314 +14149,358 @@ def _processar_aprovacao_contrato_admin(
     - esta função foi separada para ser chamada pelo Celery.
     """
 
-    id_solicitacao_int = int(id_solicitacao)
-    id_usuario_int = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
+    try:
 
-    cab_inicial = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int)
-    if not cab_inicial:
-        raise ValueError("Não encontrei a solicitação para aprovação.")
+        id_solicitacao_int = int(id_solicitacao)
+        id_usuario_int = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
 
-    status_atual = _texto_ou_vazio(cab_inicial.get("StatusSolicitacao")).upper().strip()
-    if status_atual == "APROVADO":
-        resultado_d4sign = _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
+        cab_inicial = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int)
+        if not cab_inicial:
+            raise ValueError("Não encontrei a solicitação para aprovação.")
+
+        status_atual = _texto_ou_vazio(cab_inicial.get("StatusSolicitacao")).upper().strip()
+        if status_atual == "APROVADO":
+            resultado_d4sign = _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
+                id_solicitacao=id_solicitacao_int,
+                id_usuario_logado=id_usuario_int,
+                cabecalho_solicitacao=cab_inicial,
+            )
+
+            return {
+                "ok": True,
+                "status": "ja_aprovado",
+                "id_solicitacao": id_solicitacao_int,
+                "id_contrato": _int_ou_none(cab_inicial.get("IDFatoControleContratosEuromidia")),
+                "id_card": _int_ou_none(cab_inicial.get("IDFatoKanbanCard")),
+                "resultado_d4sign": resultado_d4sign,
+            }
+
+        id_card = _int_ou_none(cab_inicial.get("IDFatoKanbanCard"))
+        id_empresa = _int_ou_none(cab_inicial.get("IDEmpresa"))
+        id_empresa_proprietaria = _int_ou_none(cab_inicial.get("IDEmpresaProprietaria"))
+        tipo_solicitacao = _tipo_solicitacao_normalizado(cab_inicial.get("TipoSolicitacao"))
+
+        current_app.logger.info(
+            "APROVACAO_CONTRATO | inicio processamento assíncrono | id_solicitacao=%s | id_card=%s | usuario=%s",
+            id_solicitacao_int,
+            id_card,
+            id_usuario_int,
+        )
+
+        resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
             id_solicitacao=id_solicitacao_int,
             id_usuario_logado=id_usuario_int,
-            cabecalho_solicitacao=cab_inicial,
         )
 
-        return {
-            "ok": True,
-            "status": "ja_aprovado",
-            "id_solicitacao": id_solicitacao_int,
-            "id_contrato": _int_ou_none(cab_inicial.get("IDFatoControleContratosEuromidia")),
-            "id_card": _int_ou_none(cab_inicial.get("IDFatoKanbanCard")),
-            "resultado_d4sign": resultado_d4sign,
-        }
+        id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle"))
+        ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or []
+        id_card = _int_ou_none(resultado_aprovacao.get("id_card")) or id_card
+        id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa")) or id_empresa
+        id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria")) or id_empresa_proprietaria
+        tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
 
-    id_card = _int_ou_none(cab_inicial.get("IDFatoKanbanCard"))
-    id_empresa = _int_ou_none(cab_inicial.get("IDEmpresa"))
-    id_empresa_proprietaria = _int_ou_none(cab_inicial.get("IDEmpresaProprietaria"))
-    tipo_solicitacao = _tipo_solicitacao_normalizado(cab_inicial.get("TipoSolicitacao"))
+        cab_aprovada = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int) or {}
+        id_fato_controle = _int_ou_none(id_fato_controle) or _int_ou_none(cab_aprovada.get("IDFatoControleContratosEuromidia"))
+        id_card = _int_ou_none(id_card) or _int_ou_none(cab_aprovada.get("IDFatoKanbanCard"))
+        id_empresa = _int_ou_none(id_empresa) or _int_ou_none(cab_aprovada.get("IDEmpresa"))
+        id_empresa_proprietaria = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(cab_aprovada.get("IDEmpresaProprietaria"))
+        tipo_solicitacao = _tipo_solicitacao_normalizado(cab_aprovada.get("TipoSolicitacao")) or tipo_solicitacao
 
-    current_app.logger.info(
-        "APROVACAO_CONTRATO | inicio processamento assíncrono | id_solicitacao=%s | id_card=%s | usuario=%s",
-        id_solicitacao_int,
-        id_card,
-        id_usuario_int,
-    )
-
-    resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
-        id_solicitacao=id_solicitacao_int,
-        id_usuario_logado=id_usuario_int,
-    )
-
-    id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle"))
-    ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or []
-    id_card = _int_ou_none(resultado_aprovacao.get("id_card")) or id_card
-    id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa")) or id_empresa
-    id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria")) or id_empresa_proprietaria
-    tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
-
-    cab_aprovada = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int) or {}
-    id_fato_controle = _int_ou_none(id_fato_controle) or _int_ou_none(cab_aprovada.get("IDFatoControleContratosEuromidia"))
-    id_card = _int_ou_none(id_card) or _int_ou_none(cab_aprovada.get("IDFatoKanbanCard"))
-    id_empresa = _int_ou_none(id_empresa) or _int_ou_none(cab_aprovada.get("IDEmpresa"))
-    id_empresa_proprietaria = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(cab_aprovada.get("IDEmpresaProprietaria"))
-    tipo_solicitacao = _tipo_solicitacao_normalizado(cab_aprovada.get("TipoSolicitacao")) or tipo_solicitacao
-
-    _sincronizar_contato_contrato_se_fase_4(
-        id_fato_kanban_card=id_card,
-        id_empresa=id_empresa,
-        id_empresa_proprietaria=id_empresa_proprietaria,
-        id_fato_controle_contratos=id_fato_controle,
-    )
-
-    _upsert_contato_cliente_direto_euromidia(
-        id_fato_controle_contratos=id_fato_controle,
-        id_fato_kanban_card=id_card,
-        form=form,
-        cabecalho_solicitacao=cab_aprovada,
-    )
-
-    resultado_emails_contrato = _sincronizar_dim_email_contrato_por_formulario_admin(
-        id_fato_controle_contratos=id_fato_controle,
-        id_fato_kanban_card=id_card,
-        form=form,
-    )
-
-    _upsert_destinatarios_externos_contrato(
-        id_fato_controle_contratos=id_fato_controle,
-        id_empresa_destinatario=id_empresa,
-        id_empresa=id_empresa,
-        ids_itens_controle=ids_itens_controle,
-    )
-
-    _aplicar_resultado_aprovacao_no_card(
-        id_fato_kanban_card=id_card,
-        id_usuario_logado=id_usuario_int,
-        id_empresa_proprietaria=id_empresa_proprietaria,
-        aprovar=True,
-    )
-
-    id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
-        id_solicitacao=id_solicitacao_int,
-        cabecalho_solicitacao=cab_aprovada,
-        id_fato_kanban_card=id_card,
-        id_fato_controle_contratos=id_fato_controle,
-        ids_itens_controle=ids_itens_controle,
-        tipo_solicitacao=tipo_solicitacao,
-    )
-
-    _atualizar_id_tipo_documento_card_admin(
-        id_fato_kanban_card=id_card,
-        id_dim_tipo_documento=id_dim_tipo_documento,
-    )
-
-    if _card_admin_esta_na_fase_formulario_contrato(id_card):
-        _registrar_ocorrencia_card_tipo_documento_admin(
-            id_fato_kanban_card=id_card,
-            id_dim_tipo_documento=id_dim_tipo_documento,
-            id_usuario_logado=id_usuario_int,
-            id_empresa_proprietaria=id_empresa_proprietaria,
-            id_fato_solicitacao=id_solicitacao_int,
-            id_fato_controle_contratos=id_fato_controle,
-            tipo_ocorrencia="APROVADO",
-            observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos.",
-        )
-
-    _registrar_historico_contrato_euromidia(
-        id_fato_controle_contratos=id_fato_controle,
-        id_fato_solicitacao=id_solicitacao_int,
-        id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVADO", fallback=1),
-        id_empresa=id_empresa,
-        id_empresa_proprietaria=id_empresa_proprietaria,
-        id_fato_kanban_card=id_card,
-        tipo_evento="APROVADO",
-        tipo_solicitacao=tipo_solicitacao,
-        descricao_evento="Solicitação aprovada e movida para Controle de Contratos Euromídia.",
-        id_dim_usuario_acao=id_usuario_int,
-    )
-
-    resultado_agendamentos_face = {}
-    if form is not None:
-        resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
-            id_solicitacao=int(id_solicitacao_int),
-            form=form,
-            id_usuario_logado=id_usuario_int,
-            id_contrato_controle_resolvido=id_fato_controle,
-        )
-
-    resultado_agendamentos_pendentes = _migrar_agendamentos_face_pendentes_solicitacao_para_contrato(
-        id_solicitacao=int(id_solicitacao_int),
-        id_contrato_controle=id_fato_controle,
-    )
-
-    resultado_bit_fracionado = _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
-        id_contrato_controle=id_fato_controle,
-    )
-
-    db.session.commit()
-
-    resultado_d4sign = {}
-
-    try:
-        resultado_d4sign = _d4sign_criar_contrato_por_aprovacao_admin(
-            id_fato_controle_contratos=id_fato_controle,
+        _sincronizar_contato_contrato_se_fase_4(
             id_fato_kanban_card=id_card,
             id_empresa=id_empresa,
-            id_dim_status_contratos=cab_aprovada.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_APROVADO,
-            id_dim_tipo_documento=id_dim_tipo_documento,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            id_fato_controle_contratos=id_fato_controle,
+        )
+
+        _upsert_contato_cliente_direto_euromidia(
+            id_fato_controle_contratos=id_fato_controle,
+            id_fato_kanban_card=id_card,
+            form=form,
+            cabecalho_solicitacao=cab_aprovada,
+        )
+
+        resultado_emails_contrato = _sincronizar_dim_email_contrato_por_formulario_admin(
+            id_fato_controle_contratos=id_fato_controle,
+            id_fato_kanban_card=id_card,
+            form=form,
+        )
+
+        _upsert_destinatarios_externos_contrato(
+            id_fato_controle_contratos=id_fato_controle,
+            id_empresa_destinatario=id_empresa,
+            id_empresa=id_empresa,
+            ids_itens_controle=ids_itens_controle,
+        )
+
+        _aplicar_resultado_aprovacao_no_card(
+            id_fato_kanban_card=id_card,
+            id_usuario_logado=id_usuario_int,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            aprovar=True,
+        )
+
+        id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
+            id_solicitacao=id_solicitacao_int,
+            cabecalho_solicitacao=cab_aprovada,
+            id_fato_kanban_card=id_card,
+            id_fato_controle_contratos=id_fato_controle,
+            ids_itens_controle=ids_itens_controle,
             tipo_solicitacao=tipo_solicitacao,
+        )
+
+        _atualizar_id_tipo_documento_card_admin(
+            id_fato_kanban_card=id_card,
+            id_dim_tipo_documento=id_dim_tipo_documento,
+        )
+
+        if _card_admin_esta_na_fase_formulario_contrato(id_card):
+            _registrar_ocorrencia_card_tipo_documento_admin(
+                id_fato_kanban_card=id_card,
+                id_dim_tipo_documento=id_dim_tipo_documento,
+                id_usuario_logado=id_usuario_int,
+                id_empresa_proprietaria=id_empresa_proprietaria,
+                id_fato_solicitacao=id_solicitacao_int,
+                id_fato_controle_contratos=id_fato_controle,
+                tipo_ocorrencia="APROVADO",
+                observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos.",
+            )
+
+        _registrar_historico_contrato_euromidia(
+            id_fato_controle_contratos=id_fato_controle,
+            id_fato_solicitacao=id_solicitacao_int,
+            id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVADO", fallback=1),
+            id_empresa=id_empresa,
+            id_empresa_proprietaria=id_empresa_proprietaria,
+            id_fato_kanban_card=id_card,
+            tipo_evento="APROVADO",
+            tipo_solicitacao=tipo_solicitacao,
+            descricao_evento="Solicitação aprovada e movida para Controle de Contratos Euromídia.",
+            id_dim_usuario_acao=id_usuario_int,
+        )
+
+        resultado_agendamentos_face = {}
+        if form is not None:
+            resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
+                id_solicitacao=int(id_solicitacao_int),
+                form=form,
+                id_usuario_logado=id_usuario_int,
+                id_contrato_controle_resolvido=id_fato_controle,
+            )
+
+        resultado_agendamentos_pendentes = _migrar_agendamentos_face_pendentes_solicitacao_para_contrato(
+            id_solicitacao=int(id_solicitacao_int),
+            id_contrato_controle=id_fato_controle,
+        )
+
+        resultado_bit_fracionado = _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
+            id_contrato_controle=id_fato_controle,
         )
 
         db.session.commit()
 
-        current_app.logger.info(
-            "D4SIGN | contrato criado/identificado após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s | resultado=%s",
-            id_fato_controle,
-            id_solicitacao_int,
-            id_card,
-            resultado_d4sign,
-        )
+        resultado_d4sign = {}
 
-    except Exception as exc:
-        db.session.rollback()
-
-        resultado_d4sign = {
-            "ok": False,
-            "status": "erro",
-            "erro": str(exc),
-        }
-
-        current_app.logger.exception(
-            "D4SIGN | falha ao criar contrato D4Sign após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s",
-            id_fato_controle,
-            id_solicitacao_int,
-            id_card,
-        )
-
-    resultado_historico_d4 = {}
-    if resultado_d4sign.get("ok"):
         try:
-            resultado_historico_d4 = _d4sign_registrar_historico_status_contrato_d4_admin(
+            resultado_d4sign = _d4sign_criar_contrato_por_aprovacao_admin(
                 id_fato_controle_contratos=id_fato_controle,
+                id_fato_kanban_card=id_card,
+                id_empresa=id_empresa,
                 id_dim_status_contratos=cab_aprovada.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_APROVADO,
-                resultado_d4sign=resultado_d4sign,
+                id_dim_tipo_documento=id_dim_tipo_documento,
+                tipo_solicitacao=tipo_solicitacao,
             )
+
             db.session.commit()
 
             current_app.logger.info(
-                "D4SIGN_HISTORICO | histórico registrado após aprovação | id_contrato=%s | id_solicitacao=%s | resultado=%s",
+                "D4SIGN | contrato criado/identificado após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s | resultado=%s",
                 id_fato_controle,
                 id_solicitacao_int,
-                resultado_historico_d4,
+                id_card,
+                resultado_d4sign,
             )
 
         except Exception as exc:
             db.session.rollback()
+
+            resultado_d4sign = {
+                "ok": False,
+                "status": "erro",
+                "erro": str(exc),
+            }
+
+            try:
+                _marcar_status_solicitacao_contrato_admin(
+                    id_solicitacao=id_solicitacao_int,
+                    nome_status="ERRO",
+                    fallback_id_status=ID_STATUS_CONTRATO_ERRO,
+                    status_solicitacao="ERRO_D4SIGN",
+                    atualizar_contrato_controle=True,
+                    commit=True,
+                )
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception(
+                    "D4SIGN | falha ao marcar status ERRO após falha D4Sign | id_contrato=%s | id_solicitacao=%s",
+                    id_fato_controle,
+                    id_solicitacao_int,
+                )
+
+            current_app.logger.exception(
+                "D4SIGN | falha ao criar contrato D4Sign após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                id_fato_controle,
+                id_solicitacao_int,
+                id_card,
+            )
+
+        resultado_historico_d4 = {}
+        if resultado_d4sign.get("ok"):
+            try:
+                resultado_historico_d4 = _d4sign_registrar_historico_status_contrato_d4_admin(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_dim_status_contratos=cab_aprovada.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_APROVADO,
+                    resultado_d4sign=resultado_d4sign,
+                )
+                db.session.commit()
+
+                current_app.logger.info(
+                    "D4SIGN_HISTORICO | histórico registrado após aprovação | id_contrato=%s | id_solicitacao=%s | resultado=%s",
+                    id_fato_controle,
+                    id_solicitacao_int,
+                    resultado_historico_d4,
+                )
+
+            except Exception as exc:
+                db.session.rollback()
+                resultado_historico_d4 = {
+                    "ok": False,
+                    "status": "erro",
+                    "erro": str(exc),
+                }
+                current_app.logger.exception(
+                    "D4SIGN_HISTORICO | contrato aprovado/D4 criado, mas falhou ao registrar histórico | id_contrato=%s | id_solicitacao=%s",
+                    id_fato_controle,
+                    id_solicitacao_int,
+                )
+        else:
             resultado_historico_d4 = {
+                "ok": False,
+                "status": "d4sign_nao_criado",
+                "mensagem": "Histórico D4 não inserido porque o documento D4Sign não foi criado/localizado.",
+            }
+
+        resultado_anexos_contrato = {}
+        try:
+            resultado_anexos_contrato = _sincronizar_anexos_contrato_apos_aprovacao_admin(
+                id_solicitacao=id_solicitacao_int,
+                id_fato_controle_contratos=id_fato_controle,
+                id_fato_kanban_card=id_card,
+                tipo_solicitacao=tipo_solicitacao,
+                id_fato_contrato_d4=resultado_d4sign.get("id_fato_contrato_d4") or resultado_d4sign.get("id_fato_contrato_d4sign") or resultado_d4sign.get("id_fato_contrato"),
+            )
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            resultado_anexos_contrato = {
                 "ok": False,
                 "status": "erro",
                 "erro": str(exc),
             }
             current_app.logger.exception(
-                "D4SIGN_HISTORICO | contrato aprovado/D4 criado, mas falhou ao registrar histórico | id_contrato=%s | id_solicitacao=%s",
+                "ANEXOS_CONTRATO | contrato aprovado, mas falhou ao sincronizar anexos | id_contrato=%s | id_solicitacao=%s | id_card=%s",
                 id_fato_controle,
                 id_solicitacao_int,
+                id_card,
             )
-    else:
-        resultado_historico_d4 = {
-            "ok": False,
-            "status": "d4sign_nao_criado",
-            "mensagem": "Histórico D4 não inserido porque o documento D4Sign não foi criado/localizado.",
-        }
 
-    resultado_anexos_contrato = {}
-    try:
-        resultado_anexos_contrato = _sincronizar_anexos_contrato_apos_aprovacao_admin(
-            id_solicitacao=id_solicitacao_int,
-            id_fato_controle_contratos=id_fato_controle,
-            id_fato_kanban_card=id_card,
-            tipo_solicitacao=tipo_solicitacao,
-            id_fato_contrato_d4=resultado_d4sign.get("id_fato_contrato_d4") or resultado_d4sign.get("id_fato_contrato_d4sign") or resultado_d4sign.get("id_fato_contrato"),
-        )
-        db.session.commit()
-    except Exception as exc:
-        db.session.rollback()
-        resultado_anexos_contrato = {
-            "ok": False,
-            "status": "erro",
-            "erro": str(exc),
-        }
-        current_app.logger.exception(
-            "ANEXOS_CONTRATO | contrato aprovado, mas falhou ao sincronizar anexos | id_contrato=%s | id_solicitacao=%s | id_card=%s",
-            id_fato_controle,
+        task_airflow_id = None
+        if enfileirar_airflow:
+            try:
+                from app.tasks.airflow_admin_tasks import tarefa_disparar_airflow_aprovacao_contrato
+
+                tarefa = tarefa_disparar_airflow_aprovacao_contrato.apply_async(
+                    kwargs={
+                        "id_contrato": int(id_fato_controle) if id_fato_controle else None,
+                        "id_solicitacao": int(id_solicitacao_int),
+                        "id_card": int(id_card) if id_card else None,
+                        "id_usuario_logado": int(id_usuario_int) if id_usuario_int else None,
+                    },
+                    queue=os.getenv("CELERY_QUEUE_AIRFLOW_ADMIN", "airflow_admin"),
+                )
+                task_airflow_id = getattr(tarefa, "id", None)
+
+                current_app.logger.info(
+                    "APROVACAO_CONTRATO | task Celery enfileirada para disparar Airflow | "
+                    "task_id=%s | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                    task_airflow_id,
+                    id_fato_controle,
+                    id_solicitacao_int,
+                    id_card,
+                )
+
+            except Exception:
+                current_app.logger.exception(
+                    "APROVACAO_CONTRATO | contrato aprovado, mas falhou ao enfileirar task Celery do Airflow | "
+                    "id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                    id_fato_controle,
+                    id_solicitacao_int,
+                    id_card,
+                )
+
+        current_app.logger.info(
+            "APROVACAO_CONTRATO | processamento assíncrono concluído | id_solicitacao=%s | id_contrato=%s | id_card=%s",
             id_solicitacao_int,
+            id_fato_controle,
             id_card,
         )
 
-    task_airflow_id = None
-    if enfileirar_airflow:
-        try:
-            from app.tasks.airflow_admin_tasks import tarefa_disparar_airflow_aprovacao_contrato
-
-            tarefa = tarefa_disparar_airflow_aprovacao_contrato.apply_async(
-                kwargs={
-                    "id_contrato": int(id_fato_controle) if id_fato_controle else None,
-                    "id_solicitacao": int(id_solicitacao_int),
-                    "id_card": int(id_card) if id_card else None,
-                    "id_usuario_logado": int(id_usuario_int) if id_usuario_int else None,
-                },
-                queue=os.getenv("CELERY_QUEUE_AIRFLOW_ADMIN", "airflow_admin"),
-            )
-            task_airflow_id = getattr(tarefa, "id", None)
-
-            current_app.logger.info(
-                "APROVACAO_CONTRATO | task Celery enfileirada para disparar Airflow | "
-                "task_id=%s | id_contrato=%s | id_solicitacao=%s | id_card=%s",
-                task_airflow_id,
-                id_fato_controle,
-                id_solicitacao_int,
-                id_card,
-            )
-
-        except Exception:
-            current_app.logger.exception(
-                "APROVACAO_CONTRATO | contrato aprovado, mas falhou ao enfileirar task Celery do Airflow | "
-                "id_contrato=%s | id_solicitacao=%s | id_card=%s",
-                id_fato_controle,
-                id_solicitacao_int,
-                id_card,
-            )
-
-    current_app.logger.info(
-        "APROVACAO_CONTRATO | processamento assíncrono concluído | id_solicitacao=%s | id_contrato=%s | id_card=%s",
-        id_solicitacao_int,
-        id_fato_controle,
-        id_card,
-    )
-
-    return {
-        "ok": True,
-        "status": "aprovado",
-        "id_solicitacao": id_solicitacao_int,
-        "id_contrato": int(id_fato_controle) if id_fato_controle else None,
-        "id_card": int(id_card) if id_card else None,
-        "ids_itens_controle": ids_itens_controle,
-        "task_airflow_id": task_airflow_id,
-        "resultado_d4sign": resultado_d4sign,
-        "resultado_historico_d4": resultado_historico_d4,
-        "resultado_aprovacao": resultado_aprovacao,
-        "precos_praticados": resultado_aprovacao.get("precos_praticados") or [],
-        "empresas_relacionadas_sincronizadas": resultado_aprovacao.get("empresas_relacionadas_sincronizadas") or [],
-        "resultado_agendamentos_face": resultado_agendamentos_face,
-        "resultado_agendamentos_pendentes": resultado_agendamentos_pendentes,
-        "resultado_bit_fracionado": resultado_bit_fracionado,
-        "resultado_emails_contrato": resultado_emails_contrato,
-        "resultado_anexos_contrato": resultado_anexos_contrato,
-    }
+        return {
+            "ok": True,
+            "status": "aprovado",
+            "id_solicitacao": id_solicitacao_int,
+            "id_contrato": int(id_fato_controle) if id_fato_controle else None,
+            "id_card": int(id_card) if id_card else None,
+            "ids_itens_controle": ids_itens_controle,
+            "task_airflow_id": task_airflow_id,
+            "resultado_d4sign": resultado_d4sign,
+            "resultado_historico_d4": resultado_historico_d4,
+            "resultado_aprovacao": resultado_aprovacao,
+            "precos_praticados": resultado_aprovacao.get("precos_praticados") or [],
+            "empresas_relacionadas_sincronizadas": resultado_aprovacao.get("empresas_relacionadas_sincronizadas") or [],
+            "resultado_agendamentos_face": resultado_agendamentos_face,
+            "resultado_agendamentos_pendentes": resultado_agendamentos_pendentes,
+            "resultado_bit_fracionado": resultado_bit_fracionado,
+            "resultado_emails_contrato": resultado_emails_contrato,
+            "resultado_anexos_contrato": resultado_anexos_contrato,
+        }
 
 
+
+
+    except Exception as exc:
+        db.session.rollback()
+        id_solicitacao_erro = _int_ou_none(locals().get("id_solicitacao_int")) or _int_ou_none(id_solicitacao)
+        if id_solicitacao_erro not in (None, "", 0):
+            try:
+                _marcar_status_solicitacao_contrato_admin(
+                    id_solicitacao=int(id_solicitacao_erro),
+                    nome_status="ERRO",
+                    fallback_id_status=ID_STATUS_CONTRATO_ERRO,
+                    status_solicitacao="ERRO_APROVACAO",
+                    commit=True,
+                )
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception(
+                    "APROVACAO_CONTRATO | falha ao marcar status ERRO após exceção assíncrona | id_solicitacao=%s",
+                    id_solicitacao_erro,
+                )
+        current_app.logger.exception(
+            "APROVACAO_CONTRATO | processamento assíncrono falhou | id_solicitacao=%s",
+            id_solicitacao_erro,
+        )
+        raise
 
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>/anexos", methods=["GET"])
 @login_required
@@ -14412,34 +14857,36 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                         id_solicitacao,
                     )
                     db.session.rollback()
-                    db.session.execute(
-                        text("""
-                            UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
-                               SET StatusSolicitacao = :status_anterior,
-                                   DataAtualizacao = GETDATE()
-                             WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
-                        """),
-                        {
-                            "status_anterior": status_anterior,
-                            "id_solicitacao": int(id_solicitacao),
-                        },
+                    _marcar_status_solicitacao_contrato_admin(
+                        id_solicitacao=int(id_solicitacao),
+                        nome_status="ERRO",
+                        fallback_id_status=ID_STATUS_CONTRATO_ERRO,
+                        status_solicitacao="ERRO_APROVACAO",
+                        commit=True,
                     )
-                    db.session.commit()
                     flash(f"Erro ao enviar aprovação para o Celery: {exc}", "danger")
                     return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
             if acao == "reprovar":
+                id_status_reprovado = _resolver_id_status_contrato_admin(
+                    nome_status="Reprovado",
+                    id_empresa_proprietaria=id_empresa_proprietaria,
+                    fallback_id=ID_STATUS_CONTRATO_REPROVADO,
+                ) or ID_STATUS_CONTRATO_REPROVADO
+
                 db.session.execute(
                     text("""
                         UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
                            SET IDDimUsuariosRejeicao = :id_usuario_logado,
                                DataRejeicao = GETDATE(),
                                StatusSolicitacao = 'REPROVADO',
+                               IDDimStatusContratos = :id_status_reprovado,
                                DataAtualizacao = GETDATE()
                          WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
                     """),
                     {
                         "id_usuario_logado": int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None,
+                        "id_status_reprovado": int(id_status_reprovado),
                         "id_solicitacao": int(id_solicitacao),
                     },
                 )
@@ -14472,6 +14919,23 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
 
         except Exception as e:
             db.session.rollback()
+            acao_erro = _texto_ou_vazio(locals().get("acao")).lower().strip()
+            if acao_erro in ("aprovar", "reprovar"):
+                try:
+                    _marcar_status_solicitacao_contrato_admin(
+                        id_solicitacao=int(id_solicitacao),
+                        nome_status="ERRO",
+                        fallback_id_status=ID_STATUS_CONTRATO_ERRO,
+                        status_solicitacao=f"ERRO_{acao_erro.upper()}",
+                        commit=True,
+                    )
+                except Exception:
+                    db.session.rollback()
+                    current_app.logger.exception(
+                        "APROVACAO_CONTRATO | falha ao marcar ERRO no POST | id_solicitacao=%s | acao=%s",
+                        id_solicitacao,
+                        acao_erro,
+                    )
             flash(f"Erro ao processar a solicitação: {e}", "danger")
 
     dados = _obter_solicitacao_contrato_detalhe(int(id_solicitacao))

@@ -37,15 +37,30 @@
 
       .filters{
         margin-top:14px;
-        display:flex;
-        gap:10px;
-        align-items:flex-end;
-        flex-wrap:wrap;
+        display:grid;
+        grid-template-columns:minmax(640px, 2fr) minmax(280px, .8fr) minmax(320px, .9fr) max-content max-content;
+        gap:12px;
+        align-items:end;
       }
 
       .filters .field{
-        min-width:280px;
-        flex:1;
+        min-width:0;
+        flex:initial;
+      }
+
+      .field-busca{
+        grid-column:1 / 2;
+        grid-row:2;
+        min-width:560px;
+      }
+
+      .filters label,
+      .periodo-label{
+        display:block;
+        font-weight:900;
+        color:var(--text);
+        font-size:12px;
+        margin-bottom:6px;
       }
 
       .btn-pill{
@@ -74,6 +89,376 @@
         border-color:rgba(239,68,68,.35);
         background:rgba(239,68,68,.08);
         color:#991b1b;
+      }
+
+      .periodo-field{
+        grid-column:1 / -1;
+        grid-row:1;
+        width:100%;
+        max-width:820px;
+        min-width:0;
+        flex:initial;
+        position:relative;
+      }
+
+      .periodo-topbar{
+        width:100%;
+        height:50px;
+        min-height:50px;
+        padding:7px 8px;
+        border:1px solid var(--border);
+        border-radius:14px;
+        background:#fff;
+        display:flex;
+        align-items:center;
+        gap:7px;
+        flex-wrap:nowrap;
+        overflow:hidden;
+        box-shadow:0 8px 18px rgba(2,6,23,.05);
+      }
+
+      .periodo-chip{
+        appearance:none;
+        border:0;
+        height:34px;
+        min-height:34px;
+        padding:0 12px;
+        border-radius:999px;
+        background:rgba(15,23,42,.05);
+        color:#334155;
+        font-weight:950;
+        font-size:12px;
+        cursor:pointer;
+        user-select:none;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        flex:0 0 auto;
+        white-space:nowrap;
+      }
+
+      .periodo-chip.ativo,
+      .periodo-chip:hover{
+        background:rgba(0,40,132,.10);
+        color:var(--euro-blue);
+      }
+
+      .periodo-open{
+        appearance:none;
+        margin-left:4px;
+        height:34px;
+        min-height:34px;
+        min-width:190px;
+        max-width:300px;
+        padding:0 10px;
+        border-radius:999px;
+        border:1px solid rgba(0,40,132,.14);
+        background:rgba(0,40,132,.05);
+        color:var(--euro-blue);
+        display:inline-flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:8px;
+        font-weight:950;
+        font-size:12px;
+        cursor:pointer;
+        user-select:none;
+        flex:1 1 auto;
+        min-width:0;
+        overflow:hidden;
+        white-space:nowrap;
+      }
+
+      #lblPeriodoTopo{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        display:block;
+      }
+
+      .periodo-panel{
+        position:absolute;
+        z-index:40;
+        right:0;
+        top:calc(100% + 8px);
+        width:min(420px, 92vw);
+        border:1px solid var(--border);
+        border-radius:14px;
+        background:#fff;
+        box-shadow:0 18px 46px rgba(2,6,23,.16);
+        padding:12px;
+      }
+
+      .periodo-panel-grid{
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:10px;
+      }
+
+      .periodo-panel input[type="date"]{
+        width:100%;
+        height:38px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        padding:0 10px;
+        font-weight:850;
+        color:var(--text);
+      }
+
+      .periodo-panel-actions{
+        display:flex;
+        align-items:center;
+        justify-content:flex-end;
+        gap:8px;
+        margin-top:12px;
+      }
+
+      .dd{
+        position:relative;
+        min-width:0;
+        flex:initial;
+      }
+
+      .dd[data-dd="status"]{
+        grid-column:2 / 3;
+        grid-row:2;
+      }
+
+      .dd[data-dd="tipo_solicitacao"]{
+        grid-column:3 / 4;
+        grid-row:2;
+      }
+
+      .dd-summary{
+        height:50px;
+        border:1px solid var(--border);
+        background:#fff;
+        border-radius:14px;
+        padding:0 14px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        cursor:pointer;
+        box-shadow:0 8px 18px rgba(2,6,23,.05);
+        list-style:none;
+      }
+
+      .dd-summary::-webkit-details-marker{
+        display:none;
+      }
+
+      .dd-label{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-weight:900;
+        color:#0f172a;
+      }
+
+      .dd-caret{
+        font-weight:950;
+        color:var(--euro-blue);
+      }
+
+      .dd-panel{
+        position:absolute;
+        z-index:50;
+        top:calc(100% + 8px);
+        left:0;
+        width:100%;
+        min-width:360px;
+        max-width:440px;
+        max-height:380px;
+        overflow:auto;
+        border:1px solid var(--border);
+        border-radius:14px;
+        background:#fff;
+        box-shadow:0 18px 46px rgba(2,6,23,.16);
+        padding:10px;
+      }
+
+      .dd-search{
+        width:100%;
+        height:36px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        padding:0 10px;
+        font-weight:850;
+        outline:none;
+      }
+
+      .dd-hint{
+        font-size:11px;
+        font-weight:800;
+        color:var(--muted);
+        margin:6px 2px 8px;
+      }
+
+      .dd-item{
+        min-height:40px;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        gap:10px;
+        padding:8px 10px;
+        border-radius:10px;
+        cursor:pointer;
+        color:#0f172a;
+        font-weight:850;
+        line-height:1.2;
+      }
+
+      .dd-item:hover{
+        background:rgba(0,40,132,.06);
+      }
+
+      .dd-item input{
+        accent-color:#002884;
+      }
+
+      .dd-item input[type="checkbox"]{
+        width:16px !important;
+        height:16px !important;
+        min-width:16px !important;
+        flex:0 0 16px !important;
+        margin:0 !important;
+        position:static !important;
+      }
+
+      .dd-item span:not(.dd-color-dot){
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .dd-color-dot{
+        width:10px;
+        height:10px;
+        border-radius:999px;
+        border:1px solid rgba(15,23,42,.16);
+        flex:0 0 auto;
+      }
+
+      .kb-search-combobox{
+        position:relative;
+      }
+
+      .kb-search-box{
+        height:50px;
+        display:flex;
+        align-items:center;
+        gap:8px;
+        border:1px solid var(--border);
+        background:#fff;
+        border-radius:14px;
+        padding:0 12px;
+        box-shadow:0 8px 18px rgba(2,6,23,.05);
+      }
+
+      .kb-search-icon{
+        opacity:.78;
+        user-select:none;
+      }
+
+      .kb-search-input{
+        width:100%;
+        height:44px;
+        border:0;
+        outline:none;
+        background:transparent;
+        font-weight:850;
+        color:var(--text);
+      }
+
+      .filters > .btn,
+      .filters > .btn-pill{
+        height:50px !important;
+        border-radius:14px !important;
+        white-space:nowrap;
+        align-self:end;
+      }
+
+      .filters > .btn.btn-primary{
+        grid-column:4 / 5;
+        grid-row:2;
+      }
+
+      .filters > .btn-pill.danger{
+        grid-column:5 / 6;
+        grid-row:2;
+      }
+
+      .kb-search-sugestoes{
+        position:absolute;
+        z-index:60;
+        left:0;
+        right:0;
+        top:calc(100% + 8px);
+        border:1px solid var(--border);
+        border-radius:16px;
+        background:#fff;
+        box-shadow:0 20px 54px rgba(2,6,23,.18);
+        padding:8px;
+        max-height:410px;
+        overflow:auto;
+      }
+
+      .kb-search-sugestao-card{
+        width:100%;
+        border:0;
+        background:#fff;
+        text-align:left;
+        padding:10px;
+        border-radius:12px;
+        cursor:pointer;
+        display:block;
+      }
+
+      .kb-search-sugestao-card:hover,
+      .kb-search-sugestao-card.ativo{
+        background:rgba(0,40,132,.06);
+      }
+
+      .kb-search-sugestao-topo{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+      }
+
+      .kb-search-sugestao-titulo{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-weight:950;
+        color:#0f172a;
+      }
+
+      .kb-search-sugestao-id{
+        font-weight:950;
+        color:var(--euro-blue);
+        white-space:nowrap;
+      }
+
+      .kb-search-sugestao-meta,
+      .kb-search-sugestao-desc{
+        margin-top:4px;
+        color:#475569;
+        font-size:12px;
+        font-weight:800;
+      }
+
+      .kb-search-sugestao-badges{
+        margin-top:8px;
+        display:flex;
+        align-items:center;
+        gap:6px;
+        flex-wrap:wrap;
       }
 
       .list-wrap{
@@ -154,7 +539,7 @@
       .id-pill{
         display:inline-flex;
         align-items:center;
-        gap:10px;
+        justify-content:center;
         padding:8px 12px;
         border-radius:999px;
         border:1px solid var(--border);
@@ -164,14 +549,6 @@
         line-height:1;
         white-space:nowrap;
         user-select:none;
-      }
-
-      .id-pill .dot{
-        width:9px;
-        height:9px;
-        border-radius:999px;
-        background:rgba(0,40,132,.45);
-        box-shadow:0 0 0 2px rgba(255,255,255,.9);
       }
 
       .ellipsis{
@@ -230,6 +607,18 @@
         color:#475569;
       }
 
+      .tipo-badge.tipo-novo-contrato{
+        border-color:rgba(21,128,61,.22);
+        background:rgba(21,128,61,.09);
+        color:#166534;
+      }
+
+      .tipo-badge.tipo-aditivo{
+        border-color:rgba(0,40,132,.18);
+        background:rgba(0,40,132,.07);
+        color:var(--euro-blue);
+      }
+
       .status-badge{
         display:inline-flex;
         align-items:center;
@@ -245,6 +634,7 @@
         max-width:100%;
         overflow:hidden;
         text-overflow:ellipsis;
+        box-shadow:0 6px 14px rgba(2,6,23,.08);
       }
 
       .status-badge.status-vazio{
@@ -262,7 +652,43 @@
         flex-wrap:wrap;
       }
 
+      @media (max-width: 1500px){
+        .filters{
+          grid-template-columns:minmax(560px, 1.7fr) minmax(260px, .8fr) minmax(290px, .9fr) max-content max-content;
+        }
+
+        .periodo-field{
+          max-width:820px;
+        }
+      }
+
       @media (max-width: 1240px){
+        .filters{
+          grid-template-columns:1fr 1fr;
+        }
+
+        .periodo-field,
+        .field-busca{
+          grid-column:1 / -1;
+          grid-row:auto;
+          max-width:none;
+          min-width:0;
+        }
+
+        .dd[data-dd="status"],
+        .dd[data-dd="tipo_solicitacao"],
+        .filters > .btn.btn-primary,
+        .filters > .btn-pill.danger{
+          grid-column:auto;
+          grid-row:auto;
+        }
+
+        .filters > .btn,
+        .filters > .btn-pill{
+          width:100%;
+          justify-content:center;
+        }
+
         .list-head,
         .row{
           grid-template-columns:86px 150px 170px 1fr 170px 170px;
@@ -285,8 +711,43 @@
       }
 
       @media (max-width: 760px){
-        .filters .field{
+        .filters{
+          grid-template-columns:1fr;
+        }
+
+        .filters .field,
+        .field-busca,
+        .periodo-field,
+        .dd{
           min-width:100%;
+          grid-column:1 / -1;
+          grid-row:auto;
+        }
+
+        .periodo-topbar{
+          height:auto;
+          min-height:50px;
+          flex-wrap:wrap;
+        }
+
+        .periodo-open{
+          width:100%;
+          max-width:none;
+          margin-left:0;
+        }
+
+        .dd-panel{
+          min-width:100%;
+          max-width:none;
+        }
+
+        .periodo-panel{
+          left:0;
+          right:auto;
+        }
+
+        .periodo-panel-grid{
+          grid-template-columns:1fr;
         }
 
         .list-head,
@@ -313,22 +774,114 @@
       </div>
     </div>
 
-    <form method="GET" action="{{ url_for('admin.lista_aprovacao_contratos') }}">
+    <form id="formFiltrosAprovacao" method="GET" action="{{ url_for('admin.lista_aprovacao_contratos') }}">
       <div class="filters">
-        <div class="field">
+        <div class="field field-busca">
           <label>Buscar</label>
-          <input
-            name="q"
-            type="text"
-            value="{{ filtros.q }}"
-            placeholder="ID, CNPJ, razão social, usuário criador, tipo de solicitação..."
-            autocomplete="off"
-          >
+          <div id="comboBuscaAprovacao" class="kb-search-combobox">
+            <div class="kb-search-box">
+              <span class="kb-search-icon">🔎</span>
+              <input
+                id="buscaAprovacao"
+                class="kb-search-input"
+                name="q"
+                type="search"
+                value="{{ filtros.q }}"
+                placeholder="Pesquisar por IDSolicitação, CNPJ, razão social, criado por, status ou tipo..."
+                autocomplete="off"
+                spellcheck="false"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="listaBuscaAprovacao"
+              >
+            </div>
+            <div id="listaBuscaAprovacao" class="kb-search-sugestoes" hidden></div>
+          </div>
         </div>
+
+        <div class="periodo-field">
+          <span class="periodo-label">Período</span>
+          <div class="periodo-topbar">
+            <button type="button" class="periodo-chip {{ 'ativo' if filtros.modo_periodo == 'dia' else '' }}" data-modo="dia">Dia</button>
+            <button type="button" class="periodo-chip {{ 'ativo' if filtros.modo_periodo == 'semana' else '' }}" data-modo="semana">Semana</button>
+            <button type="button" class="periodo-chip {{ 'ativo' if filtros.modo_periodo == 'mes' else '' }}" data-modo="mes">Mês</button>
+            <button type="button" class="periodo-chip {{ 'ativo' if filtros.modo_periodo == 'ano' else '' }}" data-modo="ano">Ano</button>
+            <button type="button" class="periodo-chip {{ 'ativo' if filtros.modo_periodo == 'hoje' else '' }}" id="btnHoje">Hoje</button>
+
+            <button type="button" class="periodo-open" id="btnAbrirPeriodo" title="Abrir seletor de período" aria-expanded="false">
+              <span id="lblPeriodoTopo">{{ filtros.label_periodo }}</span>
+              <span style="font-weight:950;opacity:.85;">▾</span>
+            </button>
+          </div>
+
+          <div class="periodo-panel" id="painelPeriodo" hidden>
+            <div class="periodo-panel-grid">
+              <div>
+                <label>Data início</label>
+                <input type="date" id="dataInicioPeriodoVisual" value="{{ filtros.data_inicio }}">
+              </div>
+              <div>
+                <label>Data fim</label>
+                <input type="date" id="dataFimPeriodoVisual" value="{{ filtros.data_fim }}">
+              </div>
+            </div>
+            <div class="periodo-panel-actions">
+              <button type="button" class="btn btn-secondary" id="btnLimparPeriodo" style="height:36px;padding:0 10px;">Limpar período</button>
+              <button type="button" class="btn btn-primary" id="btnAplicarPeriodo" style="height:36px;padding:0 12px;">Aplicar</button>
+            </div>
+          </div>
+
+          <input type="hidden" name="data_inicio" id="dataInicioPeriodo" value="{{ filtros.data_inicio }}">
+          <input type="hidden" name="data_fim" id="dataFimPeriodo" value="{{ filtros.data_fim }}">
+          <input type="hidden" name="modo_periodo" id="modoPeriodo" value="{{ filtros.modo_periodo }}">
+        </div>
+
+        <details class="dd" data-dd="status">
+          <summary class="dd-summary">
+            <span class="dd-label" data-dd-label>Status</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input type="text" class="dd-search" placeholder="Pesquisar..." autocomplete="off">
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <label class="dd-item">
+              <input type="checkbox" name="status" value="" data-dd-all="1" {% if not filtros.status %}checked{% endif %}>
+              <span>(Todos)</span>
+            </label>
+            {% for status in opcoes_status %}
+              <label class="dd-item">
+                <input type="checkbox" name="status" value="{{ status.id }}" {% if status.id in filtros.status %}checked{% endif %}>
+                <span class="dd-color-dot" style="background:{{ status.cor or '#E5E7EB' }};"></span>
+                <span>{{ status.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </details>
+
+        <details class="dd" data-dd="tipo_solicitacao">
+          <summary class="dd-summary">
+            <span class="dd-label" data-dd-label>Tipo Solicitação</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input type="text" class="dd-search" placeholder="Pesquisar..." autocomplete="off">
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <label class="dd-item">
+              <input type="checkbox" name="tipo_solicitacao" value="" data-dd-all="1" {% if not filtros.tipo_solicitacao %}checked{% endif %}>
+              <span>(Todos)</span>
+            </label>
+            {% for tipo in opcoes_tipo_solicitacao %}
+              <label class="dd-item">
+                <input type="checkbox" name="tipo_solicitacao" value="{{ tipo.valor }}" {% if tipo.valor in filtros.tipo_solicitacao %}checked{% endif %}>
+                <span>{{ tipo.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </details>
 
         <input type="hidden" name="per_page" value="{{ filtros.per_page }}">
 
-        <button class="btn btn-primary" type="submit" style="height:40px;display:inline-flex;align-items:center;gap:8px;">
+        <button class="btn btn-primary" type="submit" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;">
           ⛭ Filtrar
         </button>
 
@@ -355,6 +908,7 @@
       {% if itens and itens|length > 0 %}
         {% for item in itens %}
           {% set logo_url = item.LogoEmpresaProprietaria %}
+          {% set classe_tipo = 'tipo-vazio' if not item.TipoSolicitacao or item.TipoSolicitacao == '—' else ('tipo-novo-contrato' if item.TipoSolicitacao == 'NOVO CONTRATO' else 'tipo-aditivo') %}
           <div class="row"
                onclick="window.location.href='{{ item.url_detalhe }}'"
                title="Clique para abrir a solicitação">
@@ -374,10 +928,7 @@
             </div>
 
             <div>
-              <span class="id-pill">
-                <span class="dot"></span>
-                #{{ item.IDFatoSolicitacaoContratoEuromidia }}
-              </span>
+              <span class="id-pill">{{ item.IDFatoSolicitacaoContratoEuromidia }}</span>
             </div>
 
             <div class="data-col hide-md">
@@ -402,13 +953,20 @@
             </div>
 
             <div class="ellipsis hide-xl">
-              <span class="status-badge {{ 'status-vazio' if not item.StatusContrato or item.StatusContrato == '—' else '' }}">
+              {% set tem_status = item.StatusContrato and item.StatusContrato != '—' %}
+              {% set cor_status = item.CorHexStatusContrato if tem_status else none %}
+              <span
+                class="status-badge {{ 'status-vazio' if not tem_status else '' }}"
+                {% if cor_status %}
+                  style="background-color: {{ cor_status }}; border-color: {{ cor_status }}; color: {{ item.CorTextoStatusContrato or '#FFFFFF' }};"
+                {% endif %}
+              >
                 {{ item.StatusContrato or "—" }}
               </span>
             </div>
 
             <div class="ellipsis hide-xl">
-              <span class="tipo-badge {{ 'tipo-vazio' if not item.TipoSolicitacao or item.TipoSolicitacao == '—' else '' }}">
+              <span class="tipo-badge {{ classe_tipo }}">
                 {{ item.TipoSolicitacao or "—" }}
               </span>
             </div>
@@ -434,7 +992,12 @@
              href="{{ url_for('admin.lista_aprovacao_contratos',
                               page=1,
                               per_page=filtros.per_page,
-                              q=filtros.q) }}">
+                              q=filtros.q,
+                              status=filtros.status,
+                              tipo_solicitacao=filtros.tipo_solicitacao,
+                              data_inicio=filtros.data_inicio,
+                              data_fim=filtros.data_fim,
+                              modo_periodo=filtros.modo_periodo) }}">
             «
           </a>
 
@@ -443,7 +1006,12 @@
              href="{{ url_for('admin.lista_aprovacao_contratos',
                               page=(p-1 if p>1 else 1),
                               per_page=filtros.per_page,
-                              q=filtros.q) }}">
+                              q=filtros.q,
+                              status=filtros.status,
+                              tipo_solicitacao=filtros.tipo_solicitacao,
+                              data_inicio=filtros.data_inicio,
+                              data_fim=filtros.data_fim,
+                              modo_periodo=filtros.modo_periodo) }}">
             ‹
           </a>
 
@@ -456,7 +1024,12 @@
              href="{{ url_for('admin.lista_aprovacao_contratos',
                               page=(p+1 if p<tp else tp),
                               per_page=filtros.per_page,
-                              q=filtros.q) }}">
+                              q=filtros.q,
+                              status=filtros.status,
+                              tipo_solicitacao=filtros.tipo_solicitacao,
+                              data_inicio=filtros.data_inicio,
+                              data_fim=filtros.data_fim,
+                              modo_periodo=filtros.modo_periodo) }}">
             ›
           </a>
 
@@ -465,7 +1038,12 @@
              href="{{ url_for('admin.lista_aprovacao_contratos',
                               page=tp,
                               per_page=filtros.per_page,
-                              q=filtros.q) }}">
+                              q=filtros.q,
+                              status=filtros.status,
+                              tipo_solicitacao=filtros.tipo_solicitacao,
+                              data_inicio=filtros.data_inicio,
+                              data_fim=filtros.data_fim,
+                              modo_periodo=filtros.modo_periodo) }}">
             »
           </a>
         </div>
@@ -475,5 +1053,252 @@
         </div>
       </div>
     </div>
+
+    <script>
+      (function(){
+        const form = document.getElementById('formFiltrosAprovacao');
+        const sugestoes = {{ sugestoes_busca|tojson }};
+
+        function submitFiltros(){
+          if(!form) return;
+          if(typeof form.requestSubmit === 'function') form.requestSubmit();
+          else form.submit();
+        }
+
+        function atualizarLabelDropdown(dd){
+          const label = dd.querySelector('[data-dd-label]');
+          const all = dd.querySelector('input[type="checkbox"][data-dd-all="1"]');
+          const marcados = Array.from(dd.querySelectorAll('input[type="checkbox"]:checked')).filter(x => !x.dataset.ddAll);
+          const nomeBase = dd.dataset.dd === 'status' ? 'Status' : 'Tipo Solicitação';
+
+          if(!label) return;
+          if(all && all.checked){
+            label.textContent = nomeBase + ': Todos';
+          }else if(marcados.length === 1){
+            const item = marcados[0].closest('.dd-item');
+            label.textContent = item ? item.textContent.trim() : nomeBase;
+          }else if(marcados.length > 1){
+            label.textContent = nomeBase + ': ' + marcados.length + ' selecionados';
+          }else{
+            if(all) all.checked = true;
+            label.textContent = nomeBase + ': Todos';
+          }
+        }
+
+        document.querySelectorAll('.dd').forEach(dd => {
+          atualizarLabelDropdown(dd);
+
+          dd.querySelectorAll('input[type="checkbox"]').forEach(chk => {
+            chk.addEventListener('change', () => {
+              const all = dd.querySelector('input[type="checkbox"][data-dd-all="1"]');
+              const outros = Array.from(dd.querySelectorAll('input[type="checkbox"]')).filter(x => x !== all);
+
+              if(chk.dataset.ddAll && chk.checked){
+                outros.forEach(x => x.checked = false);
+              }else if(!chk.dataset.ddAll && chk.checked && all){
+                all.checked = false;
+              }
+
+              if(!dd.querySelector('input[type="checkbox"]:checked') && all){
+                all.checked = true;
+              }
+
+              atualizarLabelDropdown(dd);
+            });
+          });
+
+          const search = dd.querySelector('.dd-search');
+          if(search){
+            search.addEventListener('input', () => {
+              const termo = search.value.trim().toLowerCase();
+              dd.querySelectorAll('.dd-item').forEach(item => {
+                item.hidden = termo && !item.textContent.toLowerCase().includes(termo);
+              });
+            });
+          }
+        });
+
+        document.addEventListener('click', (ev) => {
+          document.querySelectorAll('.dd[open]').forEach(dd => {
+            if(!dd.contains(ev.target)) dd.removeAttribute('open');
+          });
+        });
+
+        const dataInicio = document.getElementById('dataInicioPeriodo');
+        const dataFim = document.getElementById('dataFimPeriodo');
+        const modoPeriodo = document.getElementById('modoPeriodo');
+        const dataInicioVisual = document.getElementById('dataInicioPeriodoVisual');
+        const dataFimVisual = document.getElementById('dataFimPeriodoVisual');
+        const lblPeriodo = document.getElementById('lblPeriodoTopo');
+        const painelPeriodo = document.getElementById('painelPeriodo');
+        const btnAbrirPeriodo = document.getElementById('btnAbrirPeriodo');
+
+        function pad2(n){ return String(n).padStart(2, '0'); }
+        function fmtData(d){ return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+        function fmtLabel(iso){
+          if(!iso) return '';
+          const p = iso.split('-');
+          if(p.length !== 3) return iso;
+          return p[2] + '/' + p[1] + '/' + p[0];
+        }
+        function atualizarLabelPeriodo(){
+          const ini = dataInicio ? dataInicio.value : '';
+          const fim = dataFim ? dataFim.value : '';
+          if(!lblPeriodo) return;
+          if(ini && fim) lblPeriodo.textContent = fmtLabel(ini) + ' até ' + fmtLabel(fim);
+          else if(ini) lblPeriodo.textContent = 'A partir de ' + fmtLabel(ini);
+          else if(fim) lblPeriodo.textContent = 'Até ' + fmtLabel(fim);
+          else lblPeriodo.textContent = 'Todos os períodos';
+        }
+        function aplicarPeriodo(ini, fim, modo){
+          if(dataInicio) dataInicio.value = ini || '';
+          if(dataFim) dataFim.value = fim || '';
+          if(dataInicioVisual) dataInicioVisual.value = ini || '';
+          if(dataFimVisual) dataFimVisual.value = fim || '';
+          if(modoPeriodo) modoPeriodo.value = modo || '';
+          atualizarLabelPeriodo();
+          submitFiltros();
+        }
+        function intervaloPorModo(modo){
+          const hoje = new Date();
+          const ini = new Date(hoje);
+          const fim = new Date(hoje);
+
+          if(modo === 'semana'){
+            const deslocamento = (hoje.getDay() + 6) % 7;
+            ini.setDate(hoje.getDate() - deslocamento);
+            fim.setDate(ini.getDate() + 6);
+          }else if(modo === 'mes'){
+            ini.setDate(1);
+            fim.setMonth(hoje.getMonth() + 1, 0);
+          }else if(modo === 'ano'){
+            ini.setMonth(0, 1);
+            fim.setMonth(11, 31);
+          }
+
+          return {ini: fmtData(ini), fim: fmtData(fim)};
+        }
+
+        document.querySelectorAll('.periodo-chip[data-modo]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const modo = btn.dataset.modo;
+            const faixa = intervaloPorModo(modo);
+            aplicarPeriodo(faixa.ini, faixa.fim, modo);
+          });
+        });
+
+        const btnHoje = document.getElementById('btnHoje');
+        if(btnHoje){
+          btnHoje.addEventListener('click', () => {
+            const hoje = fmtData(new Date());
+            aplicarPeriodo(hoje, hoje, 'hoje');
+          });
+        }
+
+        if(btnAbrirPeriodo && painelPeriodo){
+          btnAbrirPeriodo.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const abrir = painelPeriodo.hidden;
+            painelPeriodo.hidden = !abrir;
+            btnAbrirPeriodo.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+          });
+
+          painelPeriodo.addEventListener('click', ev => ev.stopPropagation());
+          document.addEventListener('click', () => {
+            painelPeriodo.hidden = true;
+            btnAbrirPeriodo.setAttribute('aria-expanded', 'false');
+          });
+        }
+
+        const btnAplicarPeriodo = document.getElementById('btnAplicarPeriodo');
+        if(btnAplicarPeriodo){
+          btnAplicarPeriodo.addEventListener('click', () => {
+            aplicarPeriodo(dataInicioVisual ? dataInicioVisual.value : '', dataFimVisual ? dataFimVisual.value : '', 'manual');
+          });
+        }
+
+        const btnLimparPeriodo = document.getElementById('btnLimparPeriodo');
+        if(btnLimparPeriodo){
+          btnLimparPeriodo.addEventListener('click', () => aplicarPeriodo('', '', ''));
+        }
+
+        atualizarLabelPeriodo();
+
+        const inputBusca = document.getElementById('buscaAprovacao');
+        const listaBusca = document.getElementById('listaBuscaAprovacao');
+
+        function classeTipo(tipo){
+          if(!tipo || tipo === '—') return 'tipo-vazio';
+          return tipo === 'NOVO CONTRATO' ? 'tipo-novo-contrato' : 'tipo-aditivo';
+        }
+
+        function escaparHtml(valor){
+          return String(valor ?? '').replace(/[&<>"]/g, function(c){
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+          });
+        }
+
+        function renderSugestoes(){
+          if(!inputBusca || !listaBusca) return;
+          const termo = inputBusca.value.trim().toLowerCase();
+          if(termo.length < 1){
+            listaBusca.hidden = true;
+            inputBusca.setAttribute('aria-expanded', 'false');
+            return;
+          }
+
+          const achados = sugestoes
+            .filter(item => (item.texto_busca || '').includes(termo))
+            .slice(0, 8);
+
+          if(!achados.length){
+            listaBusca.innerHTML = '<div class="muted" style="padding:10px;font-weight:800;">Nenhuma sugestão encontrada.</div>';
+            listaBusca.hidden = false;
+            inputBusca.setAttribute('aria-expanded', 'true');
+            return;
+          }
+
+          listaBusca.innerHTML = achados.map(item => {
+            const corStatus = item.status_cor || '#E5E7EB';
+            const corTexto = item.status_cor_texto || '#111827';
+            return `
+              <button type="button" class="kb-search-sugestao-card" data-url="${escaparHtml(item.url)}">
+                <div class="kb-search-sugestao-topo">
+                  <div class="kb-search-sugestao-titulo" title="${escaparHtml(item.razao_social)}">${escaparHtml(item.razao_social)}</div>
+                  <span class="kb-search-sugestao-id">${escaparHtml(item.id)}</span>
+                </div>
+                <div class="kb-search-sugestao-meta">Criado por: ${escaparHtml(item.criado_por)} • CNPJ: ${escaparHtml(item.cnpj)}</div>
+                <div class="kb-search-sugestao-desc">Status e tipo da solicitação</div>
+                <div class="kb-search-sugestao-badges">
+                  <span class="status-badge" style="min-height:26px;padding:4px 9px;background-color:${escaparHtml(corStatus)};border-color:${escaparHtml(corStatus)};color:${escaparHtml(corTexto)};box-shadow:none;">${escaparHtml(item.status)}</span>
+                  <span class="tipo-badge ${classeTipo(item.tipo_solicitacao)}" style="min-height:26px;padding:4px 9px;">${escaparHtml(item.tipo_solicitacao)}</span>
+                </div>
+              </button>
+            `;
+          }).join('');
+
+          listaBusca.hidden = false;
+          inputBusca.setAttribute('aria-expanded', 'true');
+        }
+
+        if(inputBusca && listaBusca){
+          inputBusca.addEventListener('input', renderSugestoes);
+          inputBusca.addEventListener('focus', renderSugestoes);
+          listaBusca.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('.kb-search-sugestao-card');
+            if(btn && btn.dataset.url){
+              window.location.href = btn.dataset.url;
+            }
+          });
+          document.addEventListener('click', (ev) => {
+            const combo = document.getElementById('comboBuscaAprovacao');
+            if(combo && !combo.contains(ev.target)){
+              listaBusca.hidden = true;
+              inputBusca.setAttribute('aria-expanded', 'false');
+            }
+          });
+        }
+      })();
+    </script>
   </div>
 {% endblock %}
