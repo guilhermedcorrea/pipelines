@@ -4693,7 +4693,7 @@ def _upsert_item_controle_a_partir_item_solicitacao(
         "CodPonto": item_solicitacao.get("CodPonto"),
         "CodFace": item_solicitacao.get("CodFace"),
         "DataLancamento": item_solicitacao.get("DataLancamento"),
-        "Cota": item_solicitacao.get("Cota"),
+        "Cota": item_solicitacao.get("Cota") or item_solicitacao.get("ExibicoesDia") or item_solicitacao.get("exibicoes_dia"),
         "CidadeExibicao": item_solicitacao.get("CidadeExibicao"),
         "Tipo": item_solicitacao.get("Tipo"),
         "Origem": item_solicitacao.get("Origem"),
@@ -7398,6 +7398,37 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     if id_card_cabecalho not in (None, "", 0) and _int_ou_none(cab.get("IDFatoKanbanCard")) in (None, "", 0):
         cab["IDFatoKanbanCard"] = int(id_card_cabecalho)
 
+    # Correção defensiva: solicitações antigas ou criadas antes da correção podem estar
+    # sem MarcaExibida. Antes de aprovar, busco a marca salva no card e uso como fallback
+    # para cabeçalho e itens. Assim a marca chega em Controle de Contratos e Ocupação.
+    marca_card_aprovacao = None
+    if id_card_cabecalho not in (None, "", 0):
+        try:
+            marca_card_aprovacao = db.session.execute(
+                text("""
+                    SELECT TOP (1)
+                        NULLIF(LTRIM(RTRIM(Marca)), '') AS Marca
+                    FROM [Kanban].[Silver].[FatoKanbanCard]
+                    WHERE IDFatoKanbanCard = :id_card;
+                """),
+                {"id_card": int(id_card_cabecalho)},
+            ).scalar()
+        except Exception:
+            marca_card_aprovacao = None
+
+    marca_fallback_aprovacao = _texto_ou_none(
+        _primeiro_valor_nao_vazio(cab.get("MarcaExibida"), marca_card_aprovacao)
+    )
+    if marca_fallback_aprovacao:
+        marca_fallback_aprovacao = marca_fallback_aprovacao[:200]
+
+    if marca_fallback_aprovacao and not _texto_ou_none(cab.get("MarcaExibida")):
+        cab["MarcaExibida"] = marca_fallback_aprovacao
+
+    for item_solicitacao in itens_solicitacao:
+        if marca_fallback_aprovacao and not _texto_ou_none(item_solicitacao.get("MarcaExibida")):
+            item_solicitacao["MarcaExibida"] = marca_fallback_aprovacao
+
     contexto_tipo_card = _normalizar_card_renovacao_admin(
         id_card=id_card_cabecalho,
         id_usuario=id_usuario_logado,
@@ -7754,7 +7785,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "CodPonto": item.get("CodPonto"),
             "CodFace": item.get("CodFace"),
             "DataLancamento": item.get("DataLancamento") or cab.get("DataLancamento"),
-            "Cota": item.get("Cota"),
+            "Cota": item.get("Cota") or item.get("ExibicoesDia") or item.get("exibicoes_dia"),
             "CidadeExibicao": item.get("CidadeExibicao"),
             "Tipo": item.get("Tipo"),
             "Origem": item.get("Origem") or cab.get("Origem"),
@@ -9810,7 +9841,7 @@ def _buscar_fallback_item_solicitacao_por_card_e_contrato(item: dict, cab: dict 
                         base.CodFaceParametro
                      ) AS CodFace
                     ,COALESCE(i.DataLancamento, ctr.DataLancamento) AS DataLancamento
-                    ,i.Cota AS Cota
+                    ,COALESCE(i.Cota, TRY_CONVERT(decimal(18,2), pf.ExibicoesDia)) AS Cota
                     ,COALESCE(NULLIF(i.CidadeExibicao, ''), NULLIF(dp.Cidade, '')) AS CidadeExibicao
                     ,COALESCE(NULLIF(i.Tipo, ''), NULLIF(pf.TipoPainel, ''), NULLIF(df.Tipo, ''), NULLIF(dp.Tipo, '')) AS Tipo
                     ,COALESCE(NULLIF(i.Origem, ''), NULLIF(ctr.Origem, '')) AS Origem

@@ -5328,6 +5328,44 @@ def _executar_movimento_card_core(
     if not row_upd:
         raise RuntimeError("Este card foi alterado ou movido por outro usuário. Recarregue antes de tentar novamente.")
 
+    # Correção: quando o usuário digita Marca/Telefone/Email no modal e arrasta o card
+    # direto para a fase de formulário, o movimento também precisa persistir esses dados
+    # no FatoKanbanCard antes da criação/atualização da solicitação. Sem isso, a
+    # solicitação pode nascer sem MarcaExibida.
+    campos_complementares_movimento: list[str] = []
+    params_complementares_movimento: dict[str, Any] = {"id_card": int(id_card)}
+
+    if "marca" in payload and _coluna_existe(TABELA_CARD, "Marca"):
+        marca_movimento = _texto_ou_none(payload.get("marca"), 100)
+        if marca_movimento:
+            campos_complementares_movimento.append("Marca = :marca_movimento")
+            params_complementares_movimento["marca_movimento"] = marca_movimento
+
+    if "telefone" in payload and _coluna_existe(TABELA_CARD, "Telefone"):
+        telefone_movimento = _normalizar_telefone_card(payload.get("telefone"), 30)
+        if telefone_movimento:
+            campos_complementares_movimento.append("Telefone = :telefone_movimento")
+            params_complementares_movimento["telefone_movimento"] = telefone_movimento
+
+    if "email" in payload and _coluna_existe(TABELA_CARD, "Email"):
+        email_movimento = _texto_ou_none(payload.get("email"), 200)
+        if email_movimento:
+            campos_complementares_movimento.append("Email = :email_movimento")
+            params_complementares_movimento["email_movimento"] = email_movimento
+
+    if campos_complementares_movimento:
+        if _coluna_existe(TABELA_CARD, "AtualizadoEm"):
+            campos_complementares_movimento.append("AtualizadoEm = GETDATE()")
+
+        db.session.execute(
+            text(f"""
+                UPDATE {TABELA_CARD}
+                   SET {', '.join(campos_complementares_movimento)}
+                 WHERE IDFatoKanbanCard = :id_card;
+            """),
+            params_complementares_movimento,
+        )
+
     sincronizacao_id_reserva_card_movimento = None
     if isinstance(painel_faces_payload_movimento, list):
         sincronizacao_id_reserva_card_movimento = _atualizar_id_reserva_card_kanban(
@@ -7954,7 +7992,12 @@ def _montar_itens_snapshot_solicitacao_do_card(
                 "CodPonto": cod_ponto_resolvido,
                 "CodFace": cod_face_resolvido,
                 "DataLancamento": _para_data_sql_ou_none((contrato_row or {}).get("DataLancamento")),
-                "Cota": None,
+                "Cota": _int_positivo_ou_none_local(
+                    painel_card.get("Cota")
+                    or painel_card.get("cota")
+                    or painel_card.get("ExibicoesDia")
+                    or painel_card.get("exibicoes_dia")
+                ),
                 "CidadeExibicao": cidade_exibicao_resolvida,
                 "Tipo": tipo_resolvido,
                 "Origem": (contrato_row or {}).get("Origem"),
@@ -8208,7 +8251,12 @@ def _montar_itens_snapshot_solicitacao_do_card(
             "CodPonto": cod_ponto_resolvido,
             "CodFace": cod_face_resolvido,
             "DataLancamento": _para_data_sql_ou_none((item_contrato_atual or {}).get("DataLancamento") or (contrato_row or {}).get("DataLancamento")),
-            "Cota": (item_contrato_atual or {}).get("Cota") or painel_card_aditivo.get("ExibicoesDia"),
+            "Cota": _int_positivo_ou_none_local(
+                painel_card_aditivo.get("Cota")
+                or painel_card_aditivo.get("cota")
+                or painel_card_aditivo.get("ExibicoesDia")
+                or painel_card_aditivo.get("exibicoes_dia")
+            ) or (item_contrato_atual or {}).get("Cota"),
             "CidadeExibicao": cidade_exibicao_resolvida,
             "Tipo": tipo_resolvido,
             "Origem": (item_contrato_atual or {}).get("Origem") or (contrato_row or {}).get("Origem"),
@@ -8776,6 +8824,33 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
     empresa_principal_snapshot = _buscar_empresa_por_id(id_empresa_principal_snapshot)
     empresa_agencia_snapshot = _buscar_empresa_por_id(id_empresa_agencia_snapshot)
     empresa_bureau_snapshot = _buscar_empresa_por_id(id_empresa_bureau_snapshot)
+
+    # Correção: a Marca digitada no topo do card fica em FatoKanbanCard.Marca.
+    # Quando o formulário de solicitação ainda não tinha sido renderizado ou quando
+    # é contrato novo, contrato_row.MarcaExibida pode vir vazio. Então eu propago a
+    # marca do card para o header e para todos os itens antes do upsert da solicitação.
+    marca_exibida_card_snapshot = _texto_formulario_ou_none(
+        dados_header_formulario.get("MarcaExibida")
+        or dados_formulario_solicitacao.get("MarcaExibida")
+        or dados_formulario_solicitacao.get("marca_exibida")
+        or dados_formulario_solicitacao.get("marca")
+        or card_snapshot.get("MarcaExibida")
+        or card_snapshot.get("Marca")
+        or card_snapshot.get("marca"),
+        nome_coluna="MarcaExibida",
+        nome_tabela_sql=TABELA_SOLICITACAO_CONTRATO,
+    )
+
+    if marca_exibida_card_snapshot:
+        if not _texto_formulario_ou_none(dados_header_formulario.get("MarcaExibida")):
+            dados_header_formulario["MarcaExibida"] = marca_exibida_card_snapshot
+
+        if not _texto_formulario_ou_none(dados_item_formulario.get("MarcaExibida")):
+            dados_item_formulario["MarcaExibida"] = marca_exibida_card_snapshot
+
+        for dados_item_atual in dados_itens_formulario:
+            if not _texto_formulario_ou_none(dados_item_atual.get("MarcaExibida")):
+                dados_item_atual["MarcaExibida"] = marca_exibida_card_snapshot
 
     contrato_row = dict(contrato_existente) if isinstance(contrato_existente, dict) else None
     if contrato_row is None and id_contrato_existente not in (None, "", 0):
@@ -12647,7 +12722,21 @@ def _cancelar_reservas_card_kanban(
                 )
             END
         WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
-          AND CanceladoEm IS NULL;
+          AND CanceladoEm IS NULL
+          AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) IN ('KANBAN', 'RESERVA')
+          AND ISNULL(UPPER(LTRIM(RTRIM(ISNULL(TipoVinculoOrigem, '')))), '') NOT IN (
+                'CONTRATO_APROVADO',
+                'PREFERENCIA RENOVAÇÃO CONTRATO'
+          )
+          AND NOT EXISTS (
+                SELECT 1
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_pref
+                WHERE item_pref.IDFatoControleContratosItensEuromidia = [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia].IDFatoControleContratosItemOrigem
+                  AND ISNULL(item_pref.BitPreferencia, 0) = 1
+                  AND ISNULL(item_pref.BitAtivo, 1) = 1
+                  AND item_pref.DataTerminoPrevisto IS NOT NULL
+                  AND CAST(item_pref.DataTerminoPrevisto AS date) >= CAST(SYSDATETIME() AS date)
+          );
     """)
 
     canceladas = 0
@@ -12816,12 +12905,14 @@ def _sincronizar_reservas_painel_faces_kanban(
         ids_manter=ids_reservas_informadas,
     )
 
-    canceladas = _cancelar_reservas_card_kanban(
-        id_card=int(id_card),
-        id_usuario=int(id_usuario),
-        chaves_manter=chaves_desejadas,
-        motivo=f"[CARD_ID={int(id_card)}] Reserva cancelada por atualização do card.",
-    )
+    # Regra de segurança:
+    # salvar ou mover card NÃO pode cancelar ocupação/reserva em
+    # Integracao.Silver.FatoOcupacaoPaineisEuromidia.
+    # Antes esta rotina cancelava tudo que não vinha novamente no payload,
+    # o que fazia uma simples movimentação para fases como Refazer cancelar
+    # ocupação CONTRATO e reserva de preferência. Agora a sincronização normal
+    # apenas vincula/desvincula marcador de reserva informada, sem alterar Status.
+    canceladas = 0
 
     vinculadas = len(ids_reservas_informadas)
     id_reserva_payload_final = min(ids_reservas_informadas) if ids_reservas_informadas else None
@@ -13506,6 +13597,31 @@ def _preparar_vinculos_painel_faces(
             except Exception:
                 cota_reserva_item = None
 
+        cota_payload_item = None
+        valor_cota_payload_item = _primeiro_valor_preenchido_local(
+            item.get("Cota"),
+            item.get("cota"),
+            item.get("ExibicoesDia"),
+            item.get("exibicoes_dia"),
+        )
+        if valor_cota_payload_item not in (None, "", 0):
+            try:
+                cota_payload_item = int(valor_cota_payload_item)
+            except Exception:
+                cota_payload_item = _normalizar_texto(valor_cota_payload_item) or None
+
+        exibicoes_dia_final = (
+            cota_reserva_item
+            if cota_reserva_item is not None
+            else cota_payload_item
+            if cota_payload_item is not None
+            else (
+                int(preco_item.get("ExibicoesDia") or 0)
+                if preco_item and preco_item.get("ExibicoesDia") is not None
+                else None
+            )
+        )
+
         vinculos_preparados.append(
             {
                 "ordem": ordem_rel,
@@ -13523,13 +13639,10 @@ def _preparar_vinculos_painel_faces(
                 "custo_tabela": metricas.get("Custo"),
                 "id_preco": int(preco_item.get("IDDimTabelaPrecosEuromidia") or 0) if preco_item else None,
                 "periodo_exibicao": preco_item.get("PeriodoExibicao") if preco_item else None,
-                "exibicoes_dia": cota_reserva_item
-                if cota_reserva_item is not None
-                else (
-                    int(preco_item.get("ExibicoesDia") or 0)
-                    if preco_item and preco_item.get("ExibicoesDia") is not None
-                    else None
-                ),
+                "ExibicoesDia": exibicoes_dia_final,
+                "exibicoes_dia": exibicoes_dia_final,
+                "Cota": exibicoes_dia_final,
+                "cota": exibicoes_dia_final,
                 "valor_tabela": metricas.get("ValorTabela"),
                 "tabela": preco_item.get("Tabela") if preco_item else None,
                 "politica_trocas": preco_item.get("PoliticaTrocas") if preco_item else None,
@@ -31488,7 +31601,7 @@ def api_card_atualizar(id_card: int):
             id_contrato_existente=id_contrato_existente_final,
         )
 
-        if int(id_fase_atual or 0) == 4 or _card_tem_reservas_ativas_kanban(int(id_card)):
+        if int(id_fase_atual or 0) == 4:
             sincronizacao_reservas = _sincronizar_reservas_painel_faces_kanban(
                 id_card=int(id_card),
                 titulo_card=titulo,

@@ -2259,10 +2259,15 @@
       valorFinal = calcularNovoValorPorPercentual(valorTabela, percentualInformado);
     }
 
+    const cotaExibicoesDia = exibicoesTexto || null;
+
     return {
       id_preco: idNum(precoSelecionado?.IDDimTabelaPrecosEuromidia || 0) || null,
       periodo_exibicao: safeStr(precoSelecionado?.PeriodoExibicao || periodoAtual || "").trim() || null,
-      exibicoes_dia: exibicoesTexto || null,
+      ExibicoesDia: cotaExibicoesDia,
+      exibicoes_dia: cotaExibicoesDia,
+      Cota: cotaExibicoesDia,
+      cota: cotaExibicoesDia,
       valor_tabela: valorTabela,
       valor_venda_final: valorFinal,
       novo_valor: novoValorInformado,
@@ -2287,6 +2292,8 @@
           }) || null
         : null);
 
+    const exibicoesResumo = obterValoresSelecionadosSelect(selectExibicoesDia).join(', ') || safeStr(bloco.__dadosComerciais?.preco?.ExibicoesDia || "").trim() || null;
+
     return {
       id_painel: idPainel,
       id_face: idNum(painelFace?.IDDimFacesPaineis ?? 0) || null,
@@ -2294,7 +2301,10 @@
       cod_face: safeStr(selectFace?.value || painelFace?.CodFace || "").trim().toUpperCase() || null,
       tipo_painel: safeStr(painelFace?.Tipo || painel?.Tipo || "").trim() || null,
       cidade: safeStr(painel?.Cidade || painelFace?.Cidade || "").trim() || null,
-      exibicoes_dia: obterValoresSelecionadosSelect(selectExibicoesDia).join(', ') || safeStr(bloco.__dadosComerciais?.preco?.ExibicoesDia || "").trim() || null,
+      ExibicoesDia: exibicoesResumo,
+      exibicoes_dia: exibicoesResumo,
+      Cota: exibicoesResumo,
+      cota: exibicoesResumo,
       valor_venda_final: obterValorResumoPainelFace(bloco, '[data-role="kpi-valor-final"]'),
       data_inicio: normalizarDataParaInput(bloco.querySelector('[data-role="input-data-inicio"]')?.value || "") || null,
       data_fim: normalizarDataParaInput(bloco.querySelector('[data-role="input-data-fim"]')?.value || "") || null,
@@ -11850,8 +11860,10 @@ async function aplicarReservaDigitadaNoBloco(bloco){
       id_preco: idPrecoFinal,
       PeriodoExibicao: periodoFinal,
       periodo_exibicao: periodoFinal,
-      ExibicoesDia: /^\d+$/.test(exibicoesTexto) ? Number(exibicoesTexto) : exibicoesTexto,
+      ExibicoesDia: exibicoesTexto || null,
       exibicoes_dia: exibicoesTexto || null,
+      Cota: exibicoesTexto || null,
+      cota: exibicoesTexto || null,
       NovoValor: novoValor,
       novo_valor: novoValor,
       ValorTabela: valorTabela,
@@ -13003,6 +13015,8 @@ function renderizarComercialBloco(bloco, comercial, valoresSalvos = null){
           periodo_exibicao: dadosComerciais.periodo_exibicao || periodoSelecionado || null,
           ExibicoesDia: dadosComerciais.exibicoes_dia || null,
           exibicoes_dia: dadosComerciais.exibicoes_dia || null,
+          Cota: dadosComerciais.Cota || dadosComerciais.cota || dadosComerciais.exibicoes_dia || null,
+          cota: dadosComerciais.Cota || dadosComerciais.cota || dadosComerciais.exibicoes_dia || null,
           ValorTabela: dadosComerciais.valor_tabela,
           valor_tabela: dadosComerciais.valor_tabela,
           ValorVendaFinal: dadosComerciais.valor_venda_final,
@@ -14140,6 +14154,16 @@ async function moverCard(idCard, idFasePara, posicao) {
       versao_concorrencia: safeStr(cardAtual.VersaoConcorrenciaHex),
       observacao: textoNotaMovimento
     };
+
+    if (idNum(cardAbertoId) === idC) {
+      const marcaMovimento = safeStr(inputMarcaCard?.value || "").trim();
+      const telefoneMovimento = normalizarTelefoneContato(inputTelefoneCard?.value || "") || null;
+      const emailMovimento = safeStr(inputEmailCard?.value || "").trim();
+
+      if (marcaMovimento) payload.marca = marcaMovimento;
+      if (telefoneMovimento) payload.telefone = telefoneMovimento;
+      if (emailMovimento) payload.email = emailMovimento;
+    }
 
     if (solicitacaoContratoMovimento) {
       payload.solicitacao_contrato = solicitacaoContratoMovimento;
@@ -16483,7 +16507,8 @@ async function moverCard(idCard, idFasePara, posicao) {
         custo_tabela: safeStr(item?.CustoTabela ?? item?.custo_tabela ?? "").trim(),
         id_tabela_preco: idNum(item?.IDDimTabelaPrecosEuromidia ?? item?.id_tabela_preco ?? item?.id_preco ?? 0) || null,
         periodo_exibicao: safeStr(item?.PeriodoExibicao ?? item?.periodo_exibicao ?? "").trim(),
-        exibicoes_dia: safeStr(item?.ExibicoesDia ?? item?.exibicoes_dia ?? "").trim(),
+        exibicoes_dia: safeStr(item?.ExibicoesDia ?? item?.exibicoes_dia ?? item?.Cota ?? item?.cota ?? "").trim(),
+        cota: safeStr(item?.Cota ?? item?.cota ?? item?.ExibicoesDia ?? item?.exibicoes_dia ?? "").trim(),
         valor_tabela: safeStr(item?.ValorTabela ?? item?.valor_tabela ?? "").trim(),
         tabela: safeStr(item?.Tabela ?? item?.tabela ?? "").trim(),
         politica_trocas: safeStr(item?.PoliticaTrocas ?? item?.politica_trocas ?? "").trim(),
@@ -16504,7 +16529,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         return !!(
           item.id_painel || item.id_face || item.id_reserva || item.cod_ponto || item.cod_face || item.tipo_painel ||
           item.ano_custo || item.custo_tabela || item.id_tabela_preco || item.periodo_exibicao ||
-          item.exibicoes_dia || item.valor_tabela || item.tabela || item.politica_trocas ||
+          item.exibicoes_dia || item.cota || item.valor_tabela || item.tabela || item.politica_trocas ||
           item.valor_troca || item.novo_valor || item.percentual_desconto || item.valor_venda_final ||
           item.margem_valor || item.margem_percentual || item.data_inicio || item.data_fim ||
           item.origem_aditivo || item.id_item_contrato_aditivo || item.cod_ponto_contrato_aditivo || item.cod_face_contrato_aditivo

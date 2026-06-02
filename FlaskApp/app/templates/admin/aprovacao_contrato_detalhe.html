@@ -1574,7 +1574,7 @@
 
                   <div class="field">
                     <label>Cota</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Cota" value="{{ item.Cota or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Cota" value="{{ item.Cota|int if item.Cota is not none and item.Cota != '' else '' }}">
                   </div>
                   <div class="field">
                     <label>Data Início Previsto</label>

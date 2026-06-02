@@ -9297,7 +9297,7 @@ def contrato_detalhe(id_fato_controle_contratos: int):
     timeline_page = request.args.get("timeline_page", default=1, type=int) or 1
     if timeline_page < 1:
         timeline_page = 1
-    timeline_per_page = 10
+    timeline_per_page = 8
 
     def _fmt_valor(v):
         if v is None:
@@ -13351,7 +13351,7 @@ def api_contrato_detalhe_cache_status(id_contrato: int):
         id_usuario_cache = "anonimo"
 
     cache_key_html = (
-        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
+        f"contratos_detalhe_html:v20260602_timeline8_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -26433,7 +26433,7 @@ def contratos_detalhe(id_contrato: int):
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     contrato_preload_cache_inicial = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
+        f"contratos_detalhe_html:v20260602_timeline8_v1:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
@@ -26596,7 +26596,7 @@ def contratos_detalhe(id_contrato: int):
     contrato_detalhe_async_pendente = False
     contrato_detalhe_async_payload = None
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
+        f"contratos_detalhe_html:v20260602_timeline8_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
@@ -26604,7 +26604,7 @@ def contratos_detalhe(id_contrato: int):
     )
     placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
     cache_key_contrato_detalhe_completo = (
-        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
+        f"contratos_detalhe_html:v20260602_timeline8_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -29306,7 +29306,7 @@ def contratos_detalhe(id_contrato: int):
     if timeline_page <= 0:
         timeline_page = 1
 
-    timeline_per_page = 20
+    timeline_per_page = 8
     timeline_total = len(timeline_eventos)
     timeline_total_pages = max(1, (timeline_total + timeline_per_page - 1) // timeline_per_page)
 
