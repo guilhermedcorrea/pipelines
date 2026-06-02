@@ -265,6 +265,7 @@
   let totalCardsVisiveisCache = 0;
   let tagsCatalogo = [];
   let vendedoresCatalogo = [];
+  let filtrosCardsKanban = [];
   let tiposClienteDescontoCatalogo = [];
   let tiposClienteDescontoPorId = new Map();
   let origensAtendimentoCatalogo = [];
@@ -276,6 +277,7 @@
   let mapaTagsPorCard = new Map();
   let mapaNotasPorCard = new Map();
   let resumoComercial = null;
+  let sequenciaResumoComercial = 0;
   let cardAbertoId = null;
   let cardOrcamentoAbertoId = null;
   let termoBusca = "";
@@ -4827,6 +4829,8 @@ function normalizarCardServidor(card){
       Array.isArray(tags) ? tags.map(t => Object.assign({}, t || {})) : []
     );
 
+    atualizarTagsFiltroCardPorId(id, tags);
+
     if (opcoes.reconstruir !== false) {
       reconstruirIndicesCards();
     }
@@ -4837,6 +4841,7 @@ function normalizarCardServidor(card){
     if (!id) return;
 
     mapaTagsPorCard.delete(id);
+    atualizarTagsFiltroCardPorId(id, []);
 
     if (opcoes.reconstruir !== false) {
       reconstruirIndicesCards();
@@ -5136,20 +5141,143 @@ function normalizarCardServidor(card){
     return `${quantidade} ${plural}`;
   }
 
+  function normalizarTagFiltroKanban(tag){
+    const t = Object.assign({}, tag || {});
+    return {
+      IDDimKanbanTag: idNum(t.IDDimKanbanTag || t.id_dim_kanban_tag || t.id_tag || 0) || null,
+      NomeTag: safeStr(t.NomeTag || t.nome_tag || t.nome || "").trim(),
+      CorHex: normalizarCorHex(t.CorHex || t.cor_hex || t.cor || ""),
+      Icone: safeStr(t.Icone || t.icone || "").trim(),
+      AfetaCorCard: idNum(t.AfetaCorCard || t.afeta_cor_card || 0) === 1 || t.AfetaCorCard === true
+    };
+  }
+
+  function normalizarFiltroCardKanban(item){
+    const base = Object.assign({}, item || {});
+    const idCard = idNum(base.IDFatoKanbanCard || base.id_card || 0);
+    const tagsBase = Array.isArray(base.Tags)
+      ? base.Tags
+      : (Array.isArray(base.tags) ? base.tags : tagsDoCard(idCard));
+
+    return {
+      IDFatoKanbanCard: idCard,
+      IDVendedor: idNum(base.IDVendedor || base.id_vendedor || 0) || null,
+      IDUsuarioRelacionadoCard: idNum(base.IDUsuarioRelacionadoCard || base.IDDimUsuarios || base.id_usuario_relacionado || 0) || null,
+      NomeUsuarioResponsavel: safeStr(
+        base.NomeUsuarioResponsavel ||
+        base.NomeUsuario ||
+        base.NomeVendedor ||
+        base.nome_usuario_responsavel ||
+        ""
+      ).trim(),
+      Tags: (Array.isArray(tagsBase) ? tagsBase : [])
+        .map(normalizarTagFiltroKanban)
+        .filter(tag => tag.IDDimKanbanTag || tag.NomeTag)
+    };
+  }
+
+  function atualizarFiltroCardLocal(card, tagsForcadas = null){
+    const cardNorm = normalizarCardServidor(card || {});
+    const idCard = idNum(cardNorm.IDFatoKanbanCard || 0);
+    if (!idCard) return;
+
+    const atual = filtrosCardsKanban.find(item => idNum(item.IDFatoKanbanCard) === idCard) || {};
+    const tagsBase = Array.isArray(tagsForcadas)
+      ? tagsForcadas
+      : (Array.isArray(atual.Tags) ? atual.Tags : tagsDoCard(idCard));
+
+    const atualizado = normalizarFiltroCardKanban(Object.assign({}, atual, cardNorm, { Tags: tagsBase }));
+    const idx = filtrosCardsKanban.findIndex(item => idNum(item.IDFatoKanbanCard) === idCard);
+
+    if (idx >= 0) {
+      filtrosCardsKanban[idx] = atualizado;
+    } else {
+      filtrosCardsKanban.push(atualizado);
+    }
+  }
+
+  function atualizarTagsFiltroCardPorId(cardId, tags){
+    const idCard = idNum(cardId);
+    if (!idCard) return;
+
+    const idx = filtrosCardsKanban.findIndex(item => idNum(item.IDFatoKanbanCard) === idCard);
+    const tagsNormalizadas = (Array.isArray(tags) ? tags : [])
+      .map(normalizarTagFiltroKanban)
+      .filter(tag => tag.IDDimKanbanTag || tag.NomeTag);
+
+    if (idx >= 0) {
+      filtrosCardsKanban[idx] = Object.assign({}, filtrosCardsKanban[idx], { Tags: tagsNormalizadas });
+      return;
+    }
+
+    const card = obterCardPorId(idCard);
+    if (card) {
+      atualizarFiltroCardLocal(card, tagsNormalizadas);
+    }
+  }
+
+  function removerFiltroCardLocal(cardId){
+    const idCard = idNum(cardId);
+    if (!idCard) return;
+    filtrosCardsKanban = filtrosCardsKanban.filter(item => idNum(item.IDFatoKanbanCard) !== idCard);
+  }
+
+  function obterBaseFiltrosCards(){
+    if (Array.isArray(filtrosCardsKanban) && filtrosCardsKanban.length) {
+      return filtrosCardsKanban;
+    }
+
+    return (Array.isArray(cards) ? cards : [])
+      .map(card => normalizarFiltroCardKanban(Object.assign({}, card || {}, {
+        Tags: tagsDoCard(card?.IDFatoKanbanCard)
+      })))
+      .filter(item => idNum(item.IDFatoKanbanCard));
+  }
+
+  function filtroCardPassaSelecaoVendedores(item, selecionados = vendedoresSelecionados){
+    if (!selecionados || !selecionados.size) return true;
+    const nome = safeStr(item?.NomeUsuarioResponsavel || "").trim();
+    const chave = normalizarTexto(nome);
+    return !!chave && selecionados.has(chave);
+  }
+
+  function filtroCardPassaSelecaoTags(item, selecionados = tagsSelecionadasFiltro){
+    if (!selecionados || !selecionados.size) return true;
+    const tags = Array.isArray(item?.Tags) ? item.Tags : [];
+    return tags.some(tag => {
+      const chave = normalizarTexto(tag?.NomeTag || tag?.nome_tag || "");
+      return !!chave && selecionados.has(chave);
+    });
+  }
+
+  function montarQueryResumoComercialFiltrado(){
+    const params = new URLSearchParams();
+    params.set("fresh", "1");
+    vendedoresSelecionados.forEach(valor => {
+      if (valor) params.append("vendedor", valor);
+    });
+    tagsSelecionadasFiltro.forEach(valor => {
+      if (valor) params.append("tag", valor);
+    });
+    return params.toString();
+  }
+
   function obterCatalogoVendedoresFiltro(){
     const mapa = new Map();
+    const baseCompleta = obterBaseFiltrosCards();
+    const base = baseCompleta.filter(item => filtroCardPassaSelecaoTags(item));
 
-    vendedoresCatalogo.forEach(item => {
-      const nome = safeStr(item?.NomeUsuario || item?.NomeVendedor || item?.nome_usuario || item?.nome_vendedor || "").trim();
+    base.forEach(item => {
+      const nome = safeStr(item?.NomeUsuarioResponsavel || "").trim();
       const chave = normalizarTexto(nome);
       if (nome && chave && !mapa.has(chave)) {
         mapa.set(chave, nome);
       }
     });
 
-    if (!USUARIO_EH_VENDEDOR) {
-      cards.forEach(card => {
-        const nome = nomeVendedorDoCard(card);
+    if (!mapa.size && !baseCompleta.length) {
+      vendedoresCatalogo.forEach(item => {
+        const nome = safeStr(item?.NomeUsuario || item?.NomeVendedor || item?.nome_usuario || item?.nome_vendedor || "").trim();
         const chave = normalizarTexto(nome);
         if (nome && chave && !mapa.has(chave)) {
           mapa.set(chave, nome);
@@ -5164,28 +5292,27 @@ function normalizarCardServidor(card){
 
   function obterCatalogoTagsFiltro(){
     const mapa = new Map();
+    const base = obterBaseFiltrosCards().filter(item => filtroCardPassaSelecaoVendedores(item));
 
-    tagsCatalogo.forEach(item => {
-      const nome = safeStr(item?.NomeTag || item?.nome_tag || "").trim();
-      const chave = normalizarTexto(nome);
-      if (nome && chave && !mapa.has(chave)) {
-        mapa.set(chave, nome);
-      }
-    });
-
-    mapaTagsPorCard.forEach(tagsLista => {
-      (Array.isArray(tagsLista) ? tagsLista : []).forEach(item => {
-        const nome = safeStr(item?.NomeTag || item?.nome_tag || "").trim();
+    base.forEach(item => {
+      const tags = Array.isArray(item?.Tags) ? item.Tags : [];
+      tags.forEach(tag => {
+        const tagNorm = normalizarTagFiltroKanban(tag);
+        const nome = safeStr(tagNorm.NomeTag || "").trim();
         const chave = normalizarTexto(nome);
         if (nome && chave && !mapa.has(chave)) {
-          mapa.set(chave, nome);
+          mapa.set(chave, {
+            valor: chave,
+            label: nome,
+            corHex: tagNorm.CorHex,
+            icone: tagNorm.Icone
+          });
         }
       });
     });
 
-    return [...mapa.entries()]
-      .sort((a, b) => a[1].localeCompare(b[1], "pt-BR", { sensitivity: "base" }))
-      .map(([valor, label]) => ({ valor, label }));
+    return [...mapa.values()]
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base" }));
   }
 
   function fecharMenusFiltros(excecao = null){
@@ -5251,10 +5378,24 @@ function normalizarCardServidor(card){
         onChange();
       });
 
-      const label = el("label", { class:"kb-filtro-multi-item", for: inputId }, [
-        checkbox,
-        el("span", {}, [item.label])
-      ]);
+      const textoItem = safeStr(item.label || "").trim();
+      const conteudoItem = item.corHex
+        ? [
+            checkbox,
+            el("span", {
+              class: "kb-tag kb-filtro-tag-pill",
+              style: `${estiloTag(item.corHex)} flex:0 1 auto; max-width:100%;`
+            }, [
+              ...(item.icone ? [el("span", { class:"kb-tag-icone" }, [item.icone])] : []),
+              el("span", { class:"kb-tag-text" }, [textoItem])
+            ])
+          ]
+        : [
+            checkbox,
+            el("span", {}, [textoItem])
+          ];
+
+      const label = el("label", { class:"kb-filtro-multi-item", for: inputId }, conteudoItem);
 
       listaEl.appendChild(label);
     });
@@ -5291,6 +5432,7 @@ function normalizarCardServidor(card){
         atualizarResumoFiltros();
         aplicarBusca();
         renderizarFiltrosMultiselect();
+        agendarRecarregarResumoComercial(150);
       }
     });
 
@@ -5299,11 +5441,12 @@ function normalizarCardServidor(card){
       inputEl: inputFiltroTag,
       selecionados: tagsSelecionadasFiltro,
       itens: obterCatalogoTagsFiltro(),
-      textoVazio: "Nenhuma tag encontrada.",
+      textoVazio: "Nenhuma tag encontrada para os cards filtrados.",
       onChange: () => {
         atualizarResumoFiltros();
         aplicarBusca();
         renderizarFiltrosMultiselect();
+        agendarRecarregarResumoComercial(150);
       }
     });
 
@@ -5832,6 +5975,8 @@ function normalizarCardServidor(card){
       cards.unshift(cardAtualizado);
     }
 
+    atualizarFiltroCardLocal(cardAtualizado);
+
     if (reconstruir) {
       reconstruirIndicesCards();
     }
@@ -5844,6 +5989,7 @@ function normalizarCardServidor(card){
     cards = cards.filter(c => idNum(c.IDFatoKanbanCard) !== id);
     mapaTagsPorCard.delete(id);
     mapaNotasPorCard.delete(id);
+    removerFiltroCardLocal(id);
 
     if (opcoes.reconstruir !== false) {
       reconstruirIndicesCards();
@@ -10113,19 +10259,24 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
   let resumoComercialEmAndamento = false;
 
   async function recarregarResumoComercial(){
-    if (resumoComercialEmAndamento) return false;
+    const sequenciaAtual = ++sequenciaResumoComercial;
     resumoComercialEmAndamento = true;
 
     try {
-      const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/resumo-comercial`, { credentials: "same-origin" });
+      const queryFiltros = montarQueryResumoComercialFiltrado();
+      const separador = queryFiltros ? `?${queryFiltros}` : "";
+      const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/resumo-comercial${separador}`, { credentials: "same-origin" });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) return false;
+      if (sequenciaAtual !== sequenciaResumoComercial) return false;
       renderizarResumoComercial(j.resumo_comercial || null);
       return true;
     } catch (_erro) {
       return false;
     } finally {
-      resumoComercialEmAndamento = false;
+      if (sequenciaAtual === sequenciaResumoComercial) {
+        resumoComercialEmAndamento = false;
+      }
     }
   }
 
@@ -13317,6 +13468,16 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       mapaTagsPorCard.set(idCard, arr);
     });
 
+    filtrosCardsKanban = Array.isArray(j.filtros_cards)
+      ? j.filtros_cards.map(normalizarFiltroCardKanban).filter(item => idNum(item.IDFatoKanbanCard))
+      : [];
+
+    if (!filtrosCardsKanban.length) {
+      filtrosCardsKanban = cards.map(card => normalizarFiltroCardKanban(Object.assign({}, card, {
+        Tags: tagsDoCard(card.IDFatoKanbanCard)
+      })));
+    }
+
     reconstruirIndicesCards();
     renderizarFiltrosMultiselect();
     renderBoardCompleto();
@@ -16358,6 +16519,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     const tagsAtualizadas = Array.isArray(detalhe.tags) ? detalhe.tags : [];
     setTagsDoCard(idC, tagsAtualizadas);
+    renderizarFiltrosMultiselect();
 
     if (idNum(cardAbertoId) === idC && modalCard.style.display === "block") {
       renderTagsNoCard(tagsAtualizadas);

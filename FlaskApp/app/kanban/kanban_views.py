@@ -16611,7 +16611,167 @@ def api_kanbans_listar():
 
 
 
-def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
+
+
+def _normalizar_chave_filtro_kanban(valor: Any) -> str:
+    """Eu normalizo valores vindos do filtro do front para comparar sem acento e sem caixa."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(ch for ch in texto if unicodedata.category(ch) != "Mn")
+    return " ".join(texto.lower().split())
+
+
+
+def _lista_filtro_request_kanban(*nomes: str, limite: int = 100) -> list[str]:
+    """Eu leio filtros multiselect em formato repetido ou CSV na query string."""
+    valores: list[str] = []
+
+    for nome in nomes:
+        for bruto in request.args.getlist(nome):
+            for parte in str(bruto or "").split(","):
+                chave = _normalizar_chave_filtro_kanban(parte)
+                if chave and chave not in valores:
+                    valores.append(chave)
+                    if len(valores) >= limite:
+                        return valores
+
+    return valores
+
+
+
+def _montar_condicao_in_sql(prefixo: str, valores: list[str]) -> tuple[str, dict[str, Any]]:
+    """Eu monto placeholders nomeados para filtros IN do SQL Server."""
+    valores_limpos = [v for v in (_normalizar_chave_filtro_kanban(v) for v in (valores or [])) if v]
+    if not valores_limpos:
+        return "", {}
+
+    placeholders: list[str] = []
+    params: dict[str, Any] = {}
+    for idx, valor in enumerate(dict.fromkeys(valores_limpos)):
+        nome = f"{prefixo}_{idx}"
+        placeholders.append(f":{nome}")
+        params[nome] = valor
+
+    return ", ".join(placeholders), params
+
+
+
+def _obter_filtros_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
+    """
+    Eu retorno uma base leve para os filtros dependentes do Kanban.
+
+    Essa base é separada do catálogo de tags, porque o catálogo completo continua sendo
+    necessário para o usuário conseguir adicionar uma tag que ainda não está em nenhum card.
+    """
+    id_emp = _id_empresa_usuario_or_403()
+    escopo_vendedor = _resolver_escopo_vendedor_kanban(id_emp)
+    filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
+    params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
+
+    tem_afeta_cor_card = _coluna_existe("[Kanban].[Silver].[DimKanbanTag]", "AfetaCorCard")
+    select_afeta_cor_card = (
+        "t.AfetaCorCard AS AfetaCorCard,"
+        if tem_afeta_cor_card
+        else "CAST(0 AS bit) AS AfetaCorCard,"
+    )
+
+    sql = text(f"""
+        ;WITH CardsBase AS (
+            SELECT
+                c.IDFatoKanbanCard,
+                {_sql_select_id_vendedor_card('c')},
+                {_sql_select_usuario_relacionado_card('c')},
+                {_sql_select_nome_usuario_relacionado_card('usuario')}
+            FROM {TABELA_CARD} c
+            {_sql_join_usuario_relacionado_card('c', 'usuario')}
+            WHERE c.IDDimKanban = :id_kanban
+              AND c.Ativo = 1
+              {_sql_filtro_status_card_visiveis('c')}
+              {filtro_escopo_vendedor}
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM {TABELA_KANBAN_FASE} f_final
+                    WHERE f_final.IDDimKanbanFase = c.IDDimKanbanFaseAtual
+                      AND f_final.IDDimKanban = c.IDDimKanban
+                      AND ISNULL(f_final.Ativo, 1) = 1
+                      AND (
+                            f_final.NomeFase = 'concluido'
+                         OR f_final.TipoFase = 'SUCESSO'
+                      )
+                )
+        )
+        SELECT
+            cb.IDFatoKanbanCard,
+            cb.IDVendedor,
+            cb.IDUsuarioRelacionadoCard,
+            cb.NomeUsuarioResponsavel,
+            t.IDDimKanbanTag,
+            t.NomeTag,
+            t.CorHex,
+            t.Icone,
+            {select_afeta_cor_card}
+            CAST(0 AS int) AS OrdemAuxiliar
+        FROM CardsBase cb
+        LEFT JOIN [Kanban].[Silver].[FatoKanbanCardTag] ct
+          ON ct.IDFatoKanbanCard = cb.IDFatoKanbanCard
+         AND ct.RemovidoEm IS NULL
+        LEFT JOIN [Kanban].[Silver].[DimKanbanTag] t
+          ON t.IDDimKanbanTag = ct.IDDimKanbanTag
+         AND t.IDDimKanban = :id_kanban
+         AND ISNULL(t.Ativo, 1) = 1
+        ORDER BY
+            cb.NomeUsuarioResponsavel ASC,
+            cb.IDFatoKanbanCard ASC,
+            t.NomeTag ASC;
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "id_kanban": int(id_kanban),
+            **params_escopo_vendedor,
+        },
+    ).mappings().all()
+
+    mapa_cards: dict[int, dict[str, Any]] = {}
+
+    for row in rows:
+        id_card = int(row.get("IDFatoKanbanCard") or 0)
+        if not id_card:
+            continue
+
+        card = mapa_cards.setdefault(
+            id_card,
+            {
+                "IDFatoKanbanCard": id_card,
+                "IDVendedor": int(row.get("IDVendedor") or 0) or None,
+                "IDUsuarioRelacionadoCard": int(row.get("IDUsuarioRelacionadoCard") or 0) or None,
+                "NomeUsuarioResponsavel": str(row.get("NomeUsuarioResponsavel") or "").strip(),
+                "Tags": [],
+            },
+        )
+
+        id_tag = int(row.get("IDDimKanbanTag") or 0)
+        nome_tag = str(row.get("NomeTag") or "").strip()
+        if not id_tag and not nome_tag:
+            continue
+
+        card["Tags"].append(
+            {
+                "IDDimKanbanTag": id_tag or None,
+                "NomeTag": nome_tag,
+                "CorHex": str(row.get("CorHex") or "").strip(),
+                "Icone": str(row.get("Icone") or "").strip(),
+                "AfetaCorCard": bool(row.get("AfetaCorCard") or False),
+            }
+        )
+
+    return list(mapa_cards.values())
+
+def _obter_resumo_comercial_kanban(id_kanban: int, filtros: dict[str, list[str]] | None = None) -> dict[str, Any]:
     """
     Retorna o resumo comercial do quadro inteiro.
 
@@ -16630,15 +16790,53 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
     filtro_escopo_vendedor = _sql_filtro_escopo_vendedor_kanban("c", escopo_vendedor)
     params_escopo_vendedor = _params_escopo_vendedor_kanban(escopo_vendedor)
 
+    filtros = filtros or {}
+    filtros_vendedores = filtros.get("vendedores") or []
+    filtros_tags = filtros.get("tags") or []
+
+    placeholders_vendedores, params_vendedores = _montar_condicao_in_sql("filtro_vendedor", filtros_vendedores)
+    placeholders_tags, params_tags = _montar_condicao_in_sql("filtro_tag", filtros_tags)
+
+    condicao_vendedores = ""
+    if placeholders_vendedores:
+        condicao_vendedores = f"""
+              AND LOWER(LTRIM(RTRIM(ISNULL(cb.NomeUsuarioResponsavel, ''))) COLLATE Latin1_General_CI_AI) IN ({placeholders_vendedores})
+        """
+
+    condicao_tags = ""
+    if placeholders_tags:
+        condicao_tags = f"""
+              AND EXISTS (
+                    SELECT 1
+                    FROM [Kanban].[Silver].[FatoKanbanCardTag] ct_filtro
+                    INNER JOIN [Kanban].[Silver].[DimKanbanTag] t_filtro
+                        ON t_filtro.IDDimKanbanTag = ct_filtro.IDDimKanbanTag
+                    WHERE ct_filtro.IDFatoKanbanCard = cb.IDFatoKanbanCard
+                      AND ct_filtro.RemovidoEm IS NULL
+                      AND ISNULL(t_filtro.Ativo, 1) = 1
+                      AND LOWER(LTRIM(RTRIM(ISNULL(t_filtro.NomeTag, ''))) COLLATE Latin1_General_CI_AI) IN ({placeholders_tags})
+              )
+        """
+
     sql = text(f"""
         ;WITH CardsBase AS (
-            SELECT c.IDFatoKanbanCard
+            SELECT
+                c.IDFatoKanbanCard,
+                {_sql_select_nome_usuario_relacionado_card('usuario')}
             FROM {TABELA_CARD} c
+            {_sql_join_usuario_relacionado_card('c', 'usuario')}
             WHERE c.IDDimKanban = :id_kanban
               AND c.Ativo = 1
               AND c.IDDimKanbanFaseAtual IN (1, 2, 3, 4, 5, 6)
               {_sql_filtro_status_card_visiveis('c')}
               {filtro_escopo_vendedor}
+        ),
+        CardsFiltrados AS (
+            SELECT cb.IDFatoKanbanCard
+            FROM CardsBase cb
+            WHERE 1 = 1
+              {condicao_vendedores}
+              {condicao_tags}
         ),
         TagsAtivas AS (
             SELECT DISTINCT
@@ -16647,7 +16845,7 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
             FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
             INNER JOIN [Kanban].[Silver].[DimKanbanTag] t
                 ON t.IDDimKanbanTag = ct.IDDimKanbanTag
-            INNER JOIN CardsBase cb
+            INNER JOIN CardsFiltrados cb
                 ON cb.IDFatoKanbanCard = ct.IDFatoKanbanCard
             WHERE ct.RemovidoEm IS NULL
               AND ISNULL(t.Ativo, 1) = 1
@@ -16664,7 +16862,7 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
                     AS DECIMAL(18, 4)
                 ) AS ValorVendaLinha
             FROM [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
-            INNER JOIN CardsBase cb
+            INNER JOIN CardsFiltrados cb
                 ON cb.IDFatoKanbanCard = pf.IDFatoKanbanCard
             WHERE ISNULL(pf.Ativo, 1) = 1
         ),
@@ -16707,6 +16905,8 @@ def _obter_resumo_comercial_kanban(id_kanban: int) -> dict[str, Any]:
         {
             "id_kanban": int(id_kanban),
             **params_escopo_vendedor,
+            **params_vendedores,
+            **params_tags,
         },
     ).mappings().first() or {}
 
@@ -16735,11 +16935,18 @@ def api_kanban_resumo_comercial(id_kanban: int):
 
     pode_ver_custo_margem = _usuario_pode_ver_custo_margem_kanban()
 
+    filtros_resumo = {
+        "vendedores": _lista_filtro_request_kanban("vendedor", "vendedores"),
+        "tags": _lista_filtro_request_kanban("tag", "tags"),
+    }
+
     chave = _chave_cache_json(
         "kanban:api:resumo-comercial",
         id_emp,
         id_kanban,
         *_chave_cache_escopo_vendedor_kanban(escopo_vendedor),
+        tuple(filtros_resumo.get("vendedores") or []),
+        tuple(filtros_resumo.get("tags") or []),
         _versao_empresa(id_emp),
         _versao_kanban(id_kanban),
         "custo_margem",
@@ -16751,7 +16958,7 @@ def api_kanban_resumo_comercial(id_kanban: int):
         if em_cache is not None:
             return jsonify(em_cache)
 
-    resumo_comercial = _obter_resumo_comercial_kanban(id_kanban)
+    resumo_comercial = _obter_resumo_comercial_kanban(id_kanban, filtros=filtros_resumo)
 
     if not pode_ver_custo_margem:
         resumo_comercial = _ocultar_custo_margem_payload(resumo_comercial)
@@ -17150,6 +17357,7 @@ def api_kanban_dados(id_kanban: int):
         "cards": cards_iniciais,
         "tags": tags_catalogo,
         "vendedores": vendedores_catalogo,
+        "filtros_cards": _obter_filtros_cards_kanban(id_kanban),
         "tipos_cliente_desconto": tipos_cliente_desconto_catalogo,
         "origens_atendimento": origens_atendimento_catalogo,
         "tipos_documento": tipos_documento_catalogo,
