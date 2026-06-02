@@ -62,6 +62,21 @@ def create_app() -> Flask:
         PASTA_RELATORIOS_OCUPACAO,
     )
 
+    app.config["PASTA_ANEXOS_CONTRATOS_EUROMIDIA"] = os.getenv(
+        "PASTA_ANEXOS_CONTRATOS_EUROMIDIA",
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato",
+    )
+
+    app.config["PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA"] = os.getenv(
+        "PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA",
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp",
+    )
+
+    app.config["EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS"] = os.getenv(
+        "EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS",
+        "xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg",
+    )
+
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = False

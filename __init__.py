@@ -272,7 +272,7 @@ docker compose exec airflow-apiserver airflow users create \
 #docker compose down --remove-orphans
 
 
-#docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker celery-airflow-worker celery-contratos-worker
+#docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker celery-airflow-worker celery-contratos-worker celery-anexos-contratos-worker
 
 
 #docker compose up -d

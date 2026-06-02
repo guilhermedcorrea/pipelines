@@ -120,9 +120,13 @@ x-flask-common: &flask-common
 
     CELERY_BROKER_URL: redis://redis:6379/1
     CELERY_RESULT_BACKEND: redis://redis:6379/1
+    CELERY_QUEUE_CONTRATOS_ANEXOS: contratos_anexos
     CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
     PASTA_RELATORIOS_OCUPACAO: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios/ocupacao
     PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
+    PASTA_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
+    PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp
+    EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS: xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg
 
     MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
   command: >
@@ -154,6 +158,7 @@ x-flask-common: &flask-common
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
     - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
+    - ./FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos
     - ./FlaskApp/app/static:/app/app/static
   restart: unless-stopped
 
@@ -465,6 +470,45 @@ services:
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 
+
+  celery-anexos-contratos-worker:
+    build:
+      context: ./FlaskApp
+      dockerfile: Dockerfile
+    image: flaskapp-guilherme:latest
+    env_file:
+      - ./.env
+    environment:
+      TZ: America/Sao_Paulo
+      PYTHONUNBUFFERED: "1"
+
+      CACHE_REDIS_URL: redis://redis:6379/2
+      SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
+      SOCKETIO_CHANNEL: flaskapp_socketio
+      RATELIMIT_STORAGE_URI: redis://redis:6379/4
+
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_QUEUE_CONTRATOS_ANEXOS: contratos_anexos
+      PASTA_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
+      PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp
+      EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS: xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg
+      MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
+    command: python -m celery -A app.celery_app.celery_app worker -Q contratos_anexos -l info --concurrency=2 --prefetch-multiplier=1 --max-tasks-per-child=200
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      flask-app-1:
+        condition: service_started
+      flask-app-2:
+        condition: service_started
+    volumes:
+      - ./FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos
+      - ./FlaskApp/app/static:/app/app/static
+    restart: unless-stopped
+
   celery-airflow-worker:
     build:
       context: ./FlaskApp
@@ -484,6 +528,10 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CELERY_QUEUE_AIRFLOW_ADMIN: airflow_admin
+      CELERY_QUEUE_CONTRATOS_ANEXOS: contratos_anexos
+      PASTA_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
+      PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp
+      EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS: xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg
 
       AIRFLOW_API_BASE_URL: ${AIRFLOW_API_BASE_URL:-http://airflow-apiserver:8080}
       AIRFLOW_DAG_MENSAGERIA_CAMPANHAS: ${AIRFLOW_DAG_MENSAGERIA_CAMPANHAS:-euromidia_mensageria_campanhas}
@@ -507,6 +555,7 @@ services:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
       - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
       - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
+      - ./FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 

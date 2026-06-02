@@ -1,17 +1,21 @@
 from flask_sqlalchemy import SQLAlchemy
 from ..extensions import db, limiter, csrf, cache
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app,abort
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app,abort, send_file
 from ..models.admin_models import FatoMovimentoFinanceiroEmpresas, DimEmpresaProprietaria,DimProdutoAuvo
 from datetime import datetime, date, timedelta
 from sqlalchemy import func, case,text
 from flask_login import login_required, current_user
 from werkzeug.exceptions import HTTPException
+from werkzeug.utils import secure_filename
 from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
 import hashlib
 import json
+import re
 
 import os
+import shutil
+import uuid
 
 try:
     import requests
@@ -37,6 +41,7 @@ TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardPai
 TABELA_CONTRATO_EMPRESA_RELACIONADA = "[Integracao].[Silver].[FatoContratoEmpresaRelacionada]"
 TABELA_EMAIL_CONTRATO_ADMIN = "[Integracao].[Silver].[DimEmailContrato]"
 TABELA_HISTORICO_CONTRATOS_D4_ADMIN = "[Integracao].[Silver].[DimHistoricoContratosD4]"
+TABELA_ANEXOS_CONTRATOS_ADMIN = "[Integracao].[Silver].[FatoAnexosContratosEuromidia]"
 TABELA_KANBAN_FASE_RENOVACAO = "[Kanban].[Silver].[DimKanbanFase]"
 TABELA_KANBAN_TAG_RENOVACAO = "[Kanban].[Silver].[DimKanbanTag]"
 TABELA_KANBAN_STATUS_CARD_RENOVACAO = "[Kanban].[Silver].[DimKanbanStatusCard]"
@@ -10281,6 +10286,602 @@ def _sincronizar_dim_email_contrato_por_formulario_admin(
         "quantidade": len(contatos),
     }
 
+
+# ==========================================================
+# ANEXOS DO CONTRATO - UPLOAD ASSÍNCRONO COM CELERY
+# ==========================================================
+
+ANEXOS_CONTRATOS_PASTA_PADRAO_ADMIN = "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato"
+EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS_ADMIN = {
+    "xlsm", "csv", "xlsx", "pdf",
+    "jpg", "jpeg", "png", "img", "gif", "bmp", "webp", "tif", "tiff", "heic", "heif", "svg",
+}
+
+
+def _anexos_contrato_extensoes_permitidas_admin() -> set[str]:
+    configuradas = None
+    try:
+        configuradas = current_app.config.get("EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS")
+    except Exception:
+        configuradas = None
+
+    configuradas = _texto_ou_vazio(configuradas or os.getenv("EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS"))
+    if configuradas:
+        valores = {
+            str(ext).strip().lower().lstrip(".")
+            for ext in configuradas.replace(";", ",").split(",")
+            if str(ext).strip()
+        }
+        if valores:
+            return valores
+
+    return set(EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS_ADMIN)
+
+
+def _anexos_contrato_pasta_base_admin() -> Path:
+    valor = None
+    try:
+        valor = current_app.config.get("PASTA_ANEXOS_CONTRATOS_EUROMIDIA")
+    except Exception:
+        valor = None
+
+    valor = _texto_ou_vazio(valor or os.getenv("PASTA_ANEXOS_CONTRATOS_EUROMIDIA") or ANEXOS_CONTRATOS_PASTA_PADRAO_ADMIN)
+    return Path(valor).expanduser()
+
+
+def _anexos_contrato_pasta_temp_admin() -> Path:
+    valor = None
+    try:
+        valor = current_app.config.get("PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA")
+    except Exception:
+        valor = None
+
+    if valor:
+        return Path(str(valor)).expanduser()
+
+    return _anexos_contrato_pasta_base_admin().parent / "_temp"
+
+
+def _anexos_contrato_url_relativa_admin(nome_arquivo: str) -> str:
+    return f"Contrato/{Path(str(nome_arquivo or '')).name}"
+
+
+def _anexos_contrato_resolver_caminho_admin(url_anexo: str | None) -> Path | None:
+    valor = _texto_ou_vazio(url_anexo).replace("\\", "/").lstrip("/")
+    if not valor:
+        return None
+
+    pasta_base = _anexos_contrato_pasta_base_admin().resolve()
+    pasta_raiz_anexos = pasta_base.parent.resolve()
+
+    if valor.startswith("/home/") or valor.startswith("/mnt/") or valor.startswith("/app/"):
+        caminho = Path(valor).expanduser().resolve()
+    elif valor.lower().startswith("contratos/euromidia/anexos/"):
+        rel = valor.split("Anexos/", 1)[1] if "Anexos/" in valor else Path(valor).name
+        caminho = (pasta_raiz_anexos / rel).resolve()
+    elif valor.lower().startswith("contrato/"):
+        caminho = (pasta_raiz_anexos / valor).resolve()
+    else:
+        caminho = (pasta_base / Path(valor).name).resolve()
+
+    if caminho != pasta_base and pasta_base not in caminho.parents:
+        if caminho != pasta_raiz_anexos and pasta_raiz_anexos not in caminho.parents:
+            raise RuntimeError("Caminho de anexo fora da pasta permitida.")
+
+    return caminho
+
+
+def _anexos_contrato_extensao_admin(nome_arquivo: str | None) -> str:
+    extensao = Path(_texto_ou_vazio(nome_arquivo)).suffix.lower().lstrip(".")
+    return extensao
+
+
+def _anexos_contrato_validar_extensao_admin(nome_arquivo: str | None) -> str:
+    extensao = _anexos_contrato_extensao_admin(nome_arquivo)
+    if not extensao:
+        raise ValueError("Arquivo sem extensão.")
+
+    permitidas = _anexos_contrato_extensoes_permitidas_admin()
+    if extensao not in permitidas:
+        permitidas_txt = ", ".join(sorted(permitidas))
+        raise ValueError(f"Extensão .{extensao} não permitida. Permitidas: {permitidas_txt}.")
+
+    return extensao
+
+
+def _anexos_contrato_limpar_nome_base_admin(nome_arquivo: str | None) -> str:
+    nome_seguro = secure_filename(_texto_ou_vazio(nome_arquivo))
+    base = Path(nome_seguro).stem if nome_seguro else "arquivo"
+    base = re.sub(r"[^A-Za-z0-9_-]+", "_", base).strip("_")
+    return (base or "arquivo")[:180]
+
+
+def _anexos_contrato_montar_prefixo_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+    id_solicitacao: int | None = None,
+) -> str:
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_solic = _int_ou_none(id_solicitacao)
+
+    if id_contrato not in (None, "", 0):
+        return str(int(id_contrato))
+    if id_card not in (None, "", 0):
+        return f"CARD{int(id_card)}"
+    if id_solic not in (None, "", 0):
+        return f"SOLICITACAO{int(id_solic)}"
+    return "SEM_REFERENCIA"
+
+
+def _anexos_contrato_nome_unico_admin(pasta: Path, nome_arquivo: str) -> str:
+    pasta.mkdir(parents=True, exist_ok=True)
+    candidato = Path(nome_arquivo).name
+    destino = pasta / candidato
+    if not destino.exists():
+        return candidato
+
+    stem = Path(candidato).stem
+    suffix = Path(candidato).suffix
+    for indice in range(2, 10000):
+        novo_nome = f"{stem}_{indice}{suffix}"
+        if not (pasta / novo_nome).exists():
+            return novo_nome
+
+    return f"{stem}_{uuid.uuid4().hex[:10]}{suffix}"
+
+
+def _anexos_contrato_montar_nome_final_admin(
+    *,
+    nome_original: str,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+    id_solicitacao: int | None = None,
+    data_referencia: datetime | None = None,
+) -> str:
+    extensao = _anexos_contrato_validar_extensao_admin(nome_original)
+    base_limpa = _anexos_contrato_limpar_nome_base_admin(nome_original)
+    prefixo = _anexos_contrato_montar_prefixo_admin(
+        id_fato_controle_contratos=id_fato_controle_contratos,
+        id_fato_kanban_card=id_fato_kanban_card,
+        id_solicitacao=id_solicitacao,
+    )
+    data_ref = data_referencia or datetime.now()
+    carimbo = data_ref.strftime("%Y%m%d%H%M%S")
+    nome = f"{prefixo}_{base_limpa}_{carimbo}.{extensao}"
+    return _anexos_contrato_nome_unico_admin(_anexos_contrato_pasta_base_admin(), nome)
+
+
+def _anexos_contrato_flags_tipo_admin(
+    *,
+    tipo_solicitacao: str | None,
+    id_fato_kanban_card: int | None = None,
+) -> dict:
+    tipo_normalizado = _texto_ou_vazio(tipo_solicitacao).upper().replace("_", " ")
+    id_card = _int_ou_none(id_fato_kanban_card)
+
+    eh_renovacao = "RENOVA" in tipo_normalizado
+    if not eh_renovacao and id_card not in (None, "", 0):
+        try:
+            eh_renovacao = bool(_card_eh_renovacao_admin(int(id_card)))
+        except Exception:
+            eh_renovacao = False
+
+    eh_novo = (not eh_renovacao) and tipo_normalizado == "NOVO CONTRATO"
+    eh_aditivo = (not eh_renovacao) and ("ADITIV" in tipo_normalizado or not eh_novo)
+
+    return {
+        "BitNovoContrato": 1 if eh_novo else 0,
+        "BitRenovacao": 1 if eh_renovacao else 0,
+        "BitAditivo": 1 if eh_aditivo else 0,
+    }
+
+
+def _anexos_contrato_mes_ano_admin(data_referencia: datetime | None = None) -> str:
+    data_ref = data_referencia or datetime.now()
+    return data_ref.strftime("%m-%Y")
+
+
+def _anexos_contrato_proximo_numero_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+) -> int:
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+
+    row = db.session.execute(
+        text(f"""
+            SELECT ISNULL(MAX(NumeroAnexo), 0) AS MaiorNumero
+            FROM {TABELA_ANEXOS_CONTRATOS_ADMIN}
+            WHERE
+                (
+                    :id_contrato IS NOT NULL
+                    AND IDFatoControleContratosEuromidia = :id_contrato
+                )
+                OR
+                (
+                    :id_card IS NOT NULL
+                    AND IDFatoKanbanCard = :id_card
+                )
+        """),
+        {
+            "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+        },
+    ).mappings().first()
+
+    return int((row or {}).get("MaiorNumero") or 0) + 1
+
+
+def _buscar_anexos_contrato_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+) -> list[dict]:
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+
+    if id_contrato in (None, "", 0) and id_card in (None, "", 0):
+        return []
+
+    rows = db.session.execute(
+        text(f"""
+            SELECT
+                 IDFatoAnexosContratosEuromidia
+                ,IDFatoControleContratosEuromidia
+                ,IDFatoContratoD4
+                ,IDFatoKanbanCard
+                ,NomeArquivo
+                ,UrlAnexo
+                ,Extensao
+                ,TamanhoArquivo
+                ,NumeroAnexo
+                ,MesAno
+                ,BitNovoContrato
+                ,BitRenovacao
+                ,BitAditivo
+                ,DataAtualizado
+            FROM {TABELA_ANEXOS_CONTRATOS_ADMIN}
+            WHERE
+                (
+                    :id_contrato IS NOT NULL
+                    AND IDFatoControleContratosEuromidia = :id_contrato
+                )
+                OR
+                (
+                    :id_card IS NOT NULL
+                    AND IDFatoKanbanCard = :id_card
+                )
+            ORDER BY
+                ISNULL(NumeroAnexo, 999999) ASC,
+                DataAtualizado ASC,
+                IDFatoAnexosContratosEuromidia ASC
+        """),
+        {
+            "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+        },
+    ).mappings().all()
+
+    anexos = []
+    for row in rows:
+        anexo = dict(row)
+        tamanho = anexo.get("TamanhoArquivo") or 0
+        try:
+            tamanho_bytes = float(tamanho)
+        except Exception:
+            tamanho_bytes = 0.0
+
+        if tamanho_bytes >= 1024 * 1024:
+            anexo["TamanhoArquivoFormatado"] = f"{tamanho_bytes / (1024 * 1024):.2f} MB"
+        elif tamanho_bytes >= 1024:
+            anexo["TamanhoArquivoFormatado"] = f"{tamanho_bytes / 1024:.2f} KB"
+        else:
+            anexo["TamanhoArquivoFormatado"] = f"{tamanho_bytes:.0f} bytes"
+
+        anexos.append(anexo)
+
+    return anexos
+
+
+def _anexos_contrato_linha_para_json_admin(row: dict) -> dict:
+    id_anexo = _int_ou_none(row.get("IDFatoAnexosContratosEuromidia"))
+    return {
+        "id": id_anexo,
+        "numero": row.get("NumeroAnexo"),
+        "nome_arquivo": row.get("NomeArquivo") or "",
+        "extensao": row.get("Extensao") or "",
+        "tamanho": row.get("TamanhoArquivoFormatado") or "",
+        "mes_ano": row.get("MesAno") or "",
+        "data_atualizado": row.get("DataAtualizado").strftime("%d/%m/%Y %H:%M") if hasattr(row.get("DataAtualizado"), "strftime") else _texto_ou_vazio(row.get("DataAtualizado")),
+        "download_url": url_for("admin.download_anexo_contrato", id_anexo=id_anexo) if id_anexo else "",
+        "remover_url": url_for("admin.remover_anexo_contrato", id_anexo=id_anexo) if id_anexo else "",
+    }
+
+
+def _processar_upload_anexos_contrato_admin(
+    *,
+    arquivos: list[dict],
+    id_solicitacao: int | None,
+    id_fato_controle_contratos: int | None,
+    id_fato_contrato_d4: int | None,
+    id_fato_kanban_card: int | None,
+    tipo_solicitacao: str | None,
+) -> dict:
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_d4 = _int_ou_none(id_fato_contrato_d4)
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_solic = _int_ou_none(id_solicitacao)
+
+    # O upload pode ter sido enfileirado antes da aprovação e processado depois.
+    # Por isso releio a solicitação aqui no worker e aproveito o ID do contrato se ele já existir.
+    if id_solic not in (None, "", 0):
+        try:
+            cab_atual = _obter_cabecalho_solicitacao_bruta(int(id_solic)) or {}
+            id_contrato = _int_ou_none(id_contrato) or _int_ou_none(cab_atual.get("IDFatoControleContratosEuromidia"))
+            id_card = _int_ou_none(id_card) or _int_ou_none(cab_atual.get("IDFatoKanbanCard"))
+            tipo_solicitacao = tipo_solicitacao or cab_atual.get("TipoSolicitacao")
+        except Exception:
+            current_app.logger.exception(
+                "ANEXOS_CONTRATO | não consegui reler solicitação no worker | id_solicitacao=%s",
+                id_solic,
+            )
+
+    if id_contrato in (None, "", 0) and id_card in (None, "", 0):
+        raise RuntimeError("Não é possível anexar arquivo sem IDFatoControleContratosEuromidia nem IDFatoKanbanCard.")
+
+    pasta_base = _anexos_contrato_pasta_base_admin()
+    pasta_temp = _anexos_contrato_pasta_temp_admin().resolve()
+    pasta_base.mkdir(parents=True, exist_ok=True)
+
+    flags = _anexos_contrato_flags_tipo_admin(
+        tipo_solicitacao=tipo_solicitacao,
+        id_fato_kanban_card=id_card,
+    )
+
+    numero_anexo = _anexos_contrato_proximo_numero_admin(
+        id_fato_controle_contratos=id_contrato,
+        id_fato_kanban_card=id_card,
+    )
+
+    inseridos = []
+    erros = []
+    data_referencia = datetime.now()
+    mes_ano = _anexos_contrato_mes_ano_admin(data_referencia)
+
+    for arquivo in arquivos or []:
+        nome_original = _texto_ou_vazio(arquivo.get("nome_original"))
+        caminho_temp_txt = _texto_ou_vazio(arquivo.get("caminho_temp"))
+        tamanho_bytes = float(arquivo.get("tamanho_bytes") or 0)
+
+        try:
+            _anexos_contrato_validar_extensao_admin(nome_original)
+            caminho_temp = Path(caminho_temp_txt).expanduser().resolve()
+
+            if not caminho_temp.exists() or not caminho_temp.is_file():
+                raise RuntimeError("Arquivo temporário não encontrado pelo worker.")
+
+            if pasta_temp != caminho_temp.parent and pasta_temp not in caminho_temp.parents:
+                raise RuntimeError("Arquivo temporário fora da pasta permitida.")
+
+            nome_final = _anexos_contrato_montar_nome_final_admin(
+                nome_original=nome_original,
+                id_fato_controle_contratos=id_contrato,
+                id_fato_kanban_card=id_card,
+                id_solicitacao=id_solic,
+                data_referencia=data_referencia,
+            )
+            extensao = _anexos_contrato_extensao_admin(nome_final)
+            destino = pasta_base / nome_final
+            shutil.move(str(caminho_temp), str(destino))
+
+            url_relativa = _anexos_contrato_url_relativa_admin(nome_final)
+
+            db.session.execute(
+                text(f"""
+                    INSERT INTO {TABELA_ANEXOS_CONTRATOS_ADMIN} (
+                         IDFatoControleContratosEuromidia
+                        ,IDFatoContratoD4
+                        ,IDFatoKanbanCard
+                        ,NomeArquivo
+                        ,UrlAnexo
+                        ,Extensao
+                        ,TamanhoArquivo
+                        ,NumeroAnexo
+                        ,MesAno
+                        ,BitNovoContrato
+                        ,BitRenovacao
+                        ,BitAditivo
+                        ,DataAtualizado
+                    )
+                    VALUES (
+                         :id_contrato
+                        ,:id_d4
+                        ,:id_card
+                        ,:nome_arquivo
+                        ,:url_anexo
+                        ,:extensao
+                        ,:tamanho
+                        ,:numero_anexo
+                        ,:mes_ano
+                        ,:bit_novo
+                        ,:bit_renovacao
+                        ,:bit_aditivo
+                        ,GETDATE()
+                    )
+                """),
+                {
+                    "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+                    "id_d4": int(id_d4) if id_d4 not in (None, "", 0) else None,
+                    "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+                    "nome_arquivo": nome_final,
+                    "url_anexo": url_relativa,
+                    "extensao": extensao,
+                    "tamanho": tamanho_bytes,
+                    "numero_anexo": int(numero_anexo),
+                    "mes_ano": mes_ano,
+                    "bit_novo": int(flags["BitNovoContrato"]),
+                    "bit_renovacao": int(flags["BitRenovacao"]),
+                    "bit_aditivo": int(flags["BitAditivo"]),
+                },
+            )
+
+            inseridos.append({
+                "numero_anexo": int(numero_anexo),
+                "nome_arquivo": nome_final,
+                "url_anexo": url_relativa,
+            })
+            numero_anexo += 1
+
+        except Exception as exc:
+            erros.append({
+                "nome_original": nome_original,
+                "erro": str(exc),
+            })
+            current_app.logger.exception(
+                "ANEXOS_CONTRATO | falha ao processar arquivo | nome=%s | id_solicitacao=%s | id_contrato=%s | id_card=%s",
+                nome_original,
+                id_solic,
+                id_contrato,
+                id_card,
+            )
+
+    db.session.commit()
+
+    return {
+        "ok": len(inseridos) > 0 and not erros,
+        "status": "processado_com_erros" if erros else "processado",
+        "id_solicitacao": int(id_solic) if id_solic else None,
+        "id_contrato": int(id_contrato) if id_contrato else None,
+        "id_card": int(id_card) if id_card else None,
+        "inseridos": inseridos,
+        "erros": erros,
+    }
+
+
+def _sincronizar_anexos_contrato_apos_aprovacao_admin(
+    *,
+    id_solicitacao: int | None,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+    tipo_solicitacao: str | None,
+    id_fato_contrato_d4: int | None = None,
+) -> dict:
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_solic = _int_ou_none(id_solicitacao)
+    id_d4 = _int_ou_none(id_fato_contrato_d4)
+
+    if id_contrato in (None, "", 0):
+        return {"ok": False, "status": "sem_id_contrato", "atualizados": 0}
+
+    if id_card in (None, "", 0):
+        return {"ok": False, "status": "sem_id_card", "atualizados": 0}
+
+    flags = _anexos_contrato_flags_tipo_admin(
+        tipo_solicitacao=tipo_solicitacao,
+        id_fato_kanban_card=id_card,
+    )
+
+    rows = db.session.execute(
+        text(f"""
+            SELECT
+                 IDFatoAnexosContratosEuromidia
+                ,NomeArquivo
+                ,UrlAnexo
+            FROM {TABELA_ANEXOS_CONTRATOS_ADMIN}
+            WHERE IDFatoKanbanCard = :id_card
+              AND (
+                    IDFatoControleContratosEuromidia IS NULL
+                    OR IDFatoControleContratosEuromidia = :id_contrato
+                  )
+            ORDER BY NumeroAnexo ASC, IDFatoAnexosContratosEuromidia ASC
+        """),
+        {
+            "id_card": int(id_card),
+            "id_contrato": int(id_contrato),
+        },
+    ).mappings().all()
+
+    atualizados = 0
+    renomeados = 0
+    erros_rename = []
+
+    pasta_base = _anexos_contrato_pasta_base_admin()
+    pasta_base.mkdir(parents=True, exist_ok=True)
+
+    for row in rows:
+        anexo = dict(row)
+        id_anexo = int(anexo["IDFatoAnexosContratosEuromidia"])
+        nome_atual = _texto_ou_vazio(anexo.get("NomeArquivo"))
+        url_atual = _texto_ou_vazio(anexo.get("UrlAnexo"))
+        nome_novo = nome_atual
+        url_nova = url_atual
+
+        try:
+            if nome_atual and not nome_atual.startswith(f"{int(id_contrato)}_"):
+                resto_nome = nome_atual.split("_", 1)[1] if "_" in nome_atual else nome_atual
+                candidato = f"{int(id_contrato)}_{resto_nome}"
+                caminho_atual = _anexos_contrato_resolver_caminho_admin(url_atual)
+                nome_unico = _anexos_contrato_nome_unico_admin(pasta_base, candidato)
+                caminho_novo = pasta_base / nome_unico
+
+                if caminho_atual and caminho_atual.exists() and caminho_atual.resolve() != caminho_novo.resolve():
+                    caminho_atual.rename(caminho_novo)
+                    renomeados += 1
+
+                nome_novo = nome_unico
+                url_nova = _anexos_contrato_url_relativa_admin(nome_unico)
+
+        except Exception as exc:
+            erros_rename.append({"id_anexo": id_anexo, "erro": str(exc)})
+            current_app.logger.exception(
+                "ANEXOS_CONTRATO | falha ao renomear anexo após aprovação | id_anexo=%s | id_contrato=%s | id_card=%s",
+                id_anexo,
+                id_contrato,
+                id_card,
+            )
+
+        db.session.execute(
+            text(f"""
+                UPDATE {TABELA_ANEXOS_CONTRATOS_ADMIN}
+                   SET IDFatoControleContratosEuromidia = :id_contrato,
+                       IDFatoContratoD4 = COALESCE(:id_d4, IDFatoContratoD4),
+                       IDFatoKanbanCard = COALESCE(IDFatoKanbanCard, :id_card),
+                       NomeArquivo = :nome_arquivo,
+                       UrlAnexo = :url_anexo,
+                       BitNovoContrato = :bit_novo,
+                       BitRenovacao = :bit_renovacao,
+                       BitAditivo = :bit_aditivo
+                 WHERE IDFatoAnexosContratosEuromidia = :id_anexo
+            """),
+            {
+                "id_contrato": int(id_contrato),
+                "id_d4": int(id_d4) if id_d4 not in (None, "", 0) else None,
+                "id_card": int(id_card),
+                "nome_arquivo": nome_novo,
+                "url_anexo": url_nova,
+                "bit_novo": int(flags["BitNovoContrato"]),
+                "bit_renovacao": int(flags["BitRenovacao"]),
+                "bit_aditivo": int(flags["BitAditivo"]),
+                "id_anexo": id_anexo,
+            },
+        )
+        atualizados += 1
+
+    return {
+        "ok": True,
+        "status": "sincronizado",
+        "id_solicitacao": int(id_solic) if id_solic else None,
+        "id_contrato": int(id_contrato),
+        "id_card": int(id_card),
+        "atualizados": atualizados,
+        "renomeados": renomeados,
+        "erros_rename": erros_rename,
+    }
+
 def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     sql_cabecalho = text("""
         SELECT TOP 1
@@ -10661,10 +11262,16 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
         id_fato_kanban_card=cab.get("IDFatoKanbanCard"),
     )
 
+    anexos_contrato = _buscar_anexos_contrato_admin(
+        id_fato_controle_contratos=cab.get("IDFatoControleContratosEuromidia"),
+        id_fato_kanban_card=cab.get("IDFatoKanbanCard"),
+    )
+
     return {
         "solicitacao": cab,
         "itens": itens,
         "contatos_contrato": contatos_contrato,
+        "anexos_contrato": anexos_contrato,
         "diagrama_status": _montar_diagrama_status_contrato(
             id_empresa_proprietaria=cab.get("IDEmpresaProprietaria"),
             id_status_atual=cab.get("IDDimStatusContratos"),
@@ -13363,6 +13970,30 @@ def _processar_aprovacao_contrato_admin(
             "mensagem": "Histórico D4 não inserido porque o documento D4Sign não foi criado/localizado.",
         }
 
+    resultado_anexos_contrato = {}
+    try:
+        resultado_anexos_contrato = _sincronizar_anexos_contrato_apos_aprovacao_admin(
+            id_solicitacao=id_solicitacao_int,
+            id_fato_controle_contratos=id_fato_controle,
+            id_fato_kanban_card=id_card,
+            tipo_solicitacao=tipo_solicitacao,
+            id_fato_contrato_d4=resultado_d4sign.get("id_fato_contrato_d4") or resultado_d4sign.get("id_fato_contrato_d4sign") or resultado_d4sign.get("id_fato_contrato"),
+        )
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        resultado_anexos_contrato = {
+            "ok": False,
+            "status": "erro",
+            "erro": str(exc),
+        }
+        current_app.logger.exception(
+            "ANEXOS_CONTRATO | contrato aprovado, mas falhou ao sincronizar anexos | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+            id_fato_controle,
+            id_solicitacao_int,
+            id_card,
+        )
+
     task_airflow_id = None
     if enfileirar_airflow:
         try:
@@ -13421,7 +14052,199 @@ def _processar_aprovacao_contrato_admin(
         "resultado_agendamentos_pendentes": resultado_agendamentos_pendentes,
         "resultado_bit_fracionado": resultado_bit_fracionado,
         "resultado_emails_contrato": resultado_emails_contrato,
+        "resultado_anexos_contrato": resultado_anexos_contrato,
     }
+
+
+
+@admin.route("/aprovacao/contratos/<int:id_solicitacao>/anexos", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("120 per minute", methods=["GET"])
+def listar_anexos_contrato(id_solicitacao: int):
+    cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao))
+    if not cab:
+        return jsonify({"ok": False, "mensagem": "Solicitação não encontrada."}), 404
+
+    anexos = _buscar_anexos_contrato_admin(
+        id_fato_controle_contratos=cab.get("IDFatoControleContratosEuromidia"),
+        id_fato_kanban_card=cab.get("IDFatoKanbanCard"),
+    )
+
+    return jsonify({
+        "ok": True,
+        "anexos": [_anexos_contrato_linha_para_json_admin(anexo) for anexo in anexos],
+    })
+
+
+@admin.route("/aprovacao/contratos/<int:id_solicitacao>/anexos/upload", methods=["POST"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("30 per minute", methods=["POST"])
+def upload_anexos_contrato(id_solicitacao: int):
+    cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao))
+    if not cab:
+        return jsonify({"ok": False, "mensagem": "Solicitação não encontrada."}), 404
+
+    arquivos_recebidos = request.files.getlist("arquivos")
+    if not arquivos_recebidos:
+        return jsonify({"ok": False, "mensagem": "Nenhum arquivo foi enviado."}), 400
+
+    id_contrato = _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+    id_card = _int_ou_none(cab.get("IDFatoKanbanCard"))
+    tipo_solicitacao = _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao"))
+
+    if id_contrato in (None, "", 0) and id_card in (None, "", 0):
+        return jsonify({"ok": False, "mensagem": "Não existe contrato nem card para vincular o anexo."}), 400
+
+    pasta_temp = _anexos_contrato_pasta_temp_admin()
+    pasta_temp.mkdir(parents=True, exist_ok=True)
+
+    arquivos_para_processar = []
+    avisos = []
+
+    for arquivo in arquivos_recebidos:
+        nome_original = _texto_ou_vazio(getattr(arquivo, "filename", ""))
+        if not nome_original:
+            continue
+
+        try:
+            extensao = _anexos_contrato_validar_extensao_admin(nome_original)
+        except Exception as exc:
+            avisos.append(f"{nome_original}: {exc}")
+            continue
+
+        nome_temp = f"{uuid.uuid4().hex}.{extensao}"
+        caminho_temp = pasta_temp / nome_temp
+        arquivo.save(str(caminho_temp))
+
+        try:
+            tamanho_bytes = float(caminho_temp.stat().st_size)
+        except Exception:
+            tamanho_bytes = 0.0
+
+        arquivos_para_processar.append({
+            "nome_original": nome_original,
+            "caminho_temp": str(caminho_temp),
+            "tamanho_bytes": tamanho_bytes,
+        })
+
+    if not arquivos_para_processar:
+        return jsonify({
+            "ok": False,
+            "mensagem": "Nenhum arquivo válido para anexar.",
+            "avisos": avisos,
+        }), 400
+
+    try:
+        from app.tasks.contratos_anexos_tasks import tarefa_processar_upload_anexos_contrato
+
+        tarefa = tarefa_processar_upload_anexos_contrato.apply_async(
+            kwargs={
+                "arquivos": arquivos_para_processar,
+                "id_solicitacao": int(id_solicitacao),
+                "id_fato_controle_contratos": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+                "id_fato_contrato_d4": None,
+                "id_fato_kanban_card": int(id_card) if id_card not in (None, "", 0) else None,
+                "tipo_solicitacao": tipo_solicitacao,
+            },
+            queue=os.getenv("CELERY_QUEUE_CONTRATOS_ANEXOS", "contratos_anexos"),
+        )
+
+        return jsonify({
+            "ok": True,
+            "mensagem": "Arquivos anexados.",
+            "task_id": getattr(tarefa, "id", None),
+            "avisos": avisos,
+        })
+
+    except Exception as exc:
+        current_app.logger.exception(
+            "ANEXOS_CONTRATO | falha ao enfileirar upload | id_solicitacao=%s",
+            id_solicitacao,
+        )
+        return jsonify({"ok": False, "mensagem": f"Erro ao enviar anexos para processamento: {exc}"}), 500
+
+
+@admin.route("/aprovacao/contratos/anexos/<int:id_anexo>/download", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("120 per minute", methods=["GET"])
+def download_anexo_contrato(id_anexo: int):
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP 1
+                 IDFatoAnexosContratosEuromidia
+                ,NomeArquivo
+                ,UrlAnexo
+            FROM {TABELA_ANEXOS_CONTRATOS_ADMIN}
+            WHERE IDFatoAnexosContratosEuromidia = :id_anexo
+        """),
+        {"id_anexo": int(id_anexo)},
+    ).mappings().first()
+
+    if not row:
+        abort(404)
+
+    anexo = dict(row)
+    caminho = _anexos_contrato_resolver_caminho_admin(anexo.get("UrlAnexo"))
+    if not caminho or not caminho.exists() or not caminho.is_file():
+        abort(404)
+
+    return send_file(
+        str(caminho),
+        as_attachment=True,
+        download_name=anexo.get("NomeArquivo") or caminho.name,
+    )
+
+
+@admin.route("/aprovacao/contratos/anexos/<int:id_anexo>/remover", methods=["POST", "DELETE"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("60 per minute", methods=["POST", "DELETE"])
+def remover_anexo_contrato(id_anexo: int):
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP 1
+                 IDFatoAnexosContratosEuromidia
+                ,NomeArquivo
+                ,UrlAnexo
+            FROM {TABELA_ANEXOS_CONTRATOS_ADMIN}
+            WHERE IDFatoAnexosContratosEuromidia = :id_anexo
+        """),
+        {"id_anexo": int(id_anexo)},
+    ).mappings().first()
+
+    if not row:
+        return jsonify({"ok": False, "mensagem": "Anexo não encontrado."}), 404
+
+    anexo = dict(row)
+    caminho = None
+    try:
+        caminho = _anexos_contrato_resolver_caminho_admin(anexo.get("UrlAnexo"))
+    except Exception:
+        caminho = None
+
+    db.session.execute(
+        text(f"""
+            DELETE FROM {TABELA_ANEXOS_CONTRATOS_ADMIN}
+            WHERE IDFatoAnexosContratosEuromidia = :id_anexo
+        """),
+        {"id_anexo": int(id_anexo)},
+    )
+    db.session.commit()
+
+    if caminho and caminho.exists() and caminho.is_file():
+        try:
+            caminho.unlink()
+        except Exception:
+            current_app.logger.exception(
+                "ANEXOS_CONTRATO | removi registro mas falhei ao apagar arquivo físico | id_anexo=%s | caminho=%s",
+                id_anexo,
+                caminho,
+            )
+
+    return jsonify({"ok": True, "mensagem": "Anexo removido."})
 
 
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
@@ -13660,6 +14483,7 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
         solicitacao=dados["solicitacao"],
         itens=dados["itens"],
         contatos_contrato=dados.get("contatos_contrato") or [],
+        anexos_contrato=dados.get("anexos_contrato") or [],
         diagrama_status=dados["diagrama_status"],
     )
 

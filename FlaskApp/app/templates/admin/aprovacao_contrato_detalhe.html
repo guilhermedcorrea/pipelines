@@ -1044,6 +1044,166 @@
       line-height:1.5;
     }
 
+
+    .anexos-contrato-wrap{
+      display:grid;
+      gap:14px;
+    }
+
+    .anexos-dropzone{
+      border:2px dashed #cbd5e1;
+      border-radius:18px;
+      background:#f8fafc;
+      padding:22px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:18px;
+      flex-wrap:wrap;
+      cursor:pointer;
+      transition:background .18s ease, border-color .18s ease, transform .18s ease;
+    }
+
+    .anexos-dropzone.is-dragover{
+      background:#eff6ff;
+      border-color:#2563eb;
+      transform:translateY(-1px);
+    }
+
+    .anexos-dropzone-title{
+      font-size:15px;
+      font-weight:950;
+      color:#0f172a;
+      margin-bottom:4px;
+    }
+
+    .anexos-dropzone-sub{
+      font-size:12px;
+      font-weight:800;
+      color:#64748b;
+      line-height:1.5;
+    }
+
+    .anexos-dropzone input[type="file"]{
+      display:none;
+    }
+
+    .anexos-dropzone-button{
+      border:0;
+      border-radius:14px;
+      padding:10px 14px;
+      background:#2563eb;
+      color:#fff;
+      font-weight:950;
+      cursor:pointer;
+      box-shadow:0 10px 22px rgba(37,99,235,.18);
+    }
+
+    .anexos-status{
+      display:none;
+      border-radius:14px;
+      padding:10px 12px;
+      font-size:13px;
+      font-weight:900;
+      border:1px solid #bfdbfe;
+      background:#eff6ff;
+      color:#1d4ed8;
+    }
+
+    .anexos-status.is-visible{
+      display:block;
+    }
+
+    .anexos-status.is-error{
+      border-color:#fecaca;
+      background:#fef2f2;
+      color:#b91c1c;
+    }
+
+    .anexos-lista{
+      display:grid;
+      gap:10px;
+    }
+
+    .anexo-row{
+      display:grid;
+      grid-template-columns:80px minmax(0, 1fr) 120px 120px auto;
+      gap:10px;
+      align-items:center;
+      padding:12px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:#fff;
+    }
+
+    .anexo-numero{
+      font-weight:950;
+      color:#1e293b;
+    }
+
+    .anexo-nome{
+      min-width:0;
+      font-weight:900;
+      color:#0f172a;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .anexo-meta{
+      font-size:12px;
+      font-weight:850;
+      color:#64748b;
+    }
+
+    .anexo-actions{
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .anexo-btn{
+      border:0;
+      border-radius:12px;
+      padding:8px 10px;
+      font-size:12px;
+      font-weight:950;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+    }
+
+    .anexo-btn.download{
+      background:#0f766e;
+    }
+
+    .anexo-btn.remove{
+      background:#dc2626;
+    }
+
+    .anexos-empty{
+      padding:14px;
+      border:1px dashed #cbd5e1;
+      border-radius:14px;
+      background:#f8fafc;
+      color:#64748b;
+      font-size:13px;
+      font-weight:850;
+    }
+
+    @media (max-width: 900px){
+      .anexo-row{
+        grid-template-columns:1fr;
+      }
+      .anexo-actions{
+        justify-content:flex-start;
+      }
+    }
+
     .sticky-actions{
       position:sticky;
       bottom:12px;
@@ -1851,6 +2011,53 @@
       </div>
     </div>
 
+
+    <div class="section">
+      <div class="section-head">
+        <div>Anexos do Contrato</div>
+        <div class="contatos-contrato-help">Arraste múltiplos arquivos ou selecione arquivos para anexar ao contrato/card.</div>
+      </div>
+      <div class="section-body">
+        <div
+          class="anexos-contrato-wrap"
+          data-role="anexos-contrato"
+          data-upload-url="{{ url_for('admin.upload_anexos_contrato', id_solicitacao=solicitacao.IDFatoSolicitacaoContratoEuromidia) }}"
+          data-list-url="{{ url_for('admin.listar_anexos_contrato', id_solicitacao=solicitacao.IDFatoSolicitacaoContratoEuromidia) }}"
+          data-csrf-token="{{ csrf_token() }}"
+        >
+          <label class="anexos-dropzone" data-role="anexos-dropzone">
+            <input type="file" multiple data-role="anexos-file-input" accept=".xlsm,.csv,.xlsx,.pdf,.jpg,.jpeg,.png,.img,.gif,.bmp,.webp,.tif,.tiff,.heic,.heif,.svg">
+            <div>
+              <div class="anexos-dropzone-title">Solte os arquivos aqui ou clique para selecionar</div>
+              <div class="anexos-dropzone-sub">Permitidos: xlsm, csv, xlsx, pdf, jpg, png, img e outros formatos de imagem.</div>
+            </div>
+            <span class="anexos-dropzone-button">Adicionar anexos</span>
+          </label>
+
+          <div class="anexos-status" data-role="anexos-status"></div>
+
+          <div class="anexos-lista" data-role="anexos-lista">
+            {% if anexos_contrato %}
+              {% for anexo in anexos_contrato %}
+                <div class="anexo-row" data-anexo-id="{{ anexo.IDFatoAnexosContratosEuromidia }}">
+                  <div class="anexo-numero">Anexo {{ anexo.NumeroAnexo or loop.index }}</div>
+                  <div class="anexo-nome" title="{{ anexo.NomeArquivo or '' }}">{{ anexo.NomeArquivo or 'Arquivo sem nome' }}</div>
+                  <div class="anexo-meta">{{ anexo.Extensao or '—' }}</div>
+                  <div class="anexo-meta">{{ anexo.TamanhoArquivoFormatado or '—' }}</div>
+                  <div class="anexo-actions">
+                    <a class="anexo-btn download" href="{{ url_for('admin.download_anexo_contrato', id_anexo=anexo.IDFatoAnexosContratosEuromidia) }}">Baixar</a>
+                    <button type="button" class="anexo-btn remove" data-role="anexo-remover" data-url="{{ url_for('admin.remover_anexo_contrato', id_anexo=anexo.IDFatoAnexosContratosEuromidia) }}">Remover</button>
+                  </div>
+                </div>
+              {% endfor %}
+            {% else %}
+              <div class="anexos-empty" data-role="anexos-empty">Nenhum anexo vinculado até agora.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="sticky-actions">
       <div class="bar">
         <a class="btn-x" href="{{ url_for('admin.lista_aprovacao_contratos') }}">← Voltar</a>
@@ -2227,6 +2434,196 @@
             }
           }
         });
+      }
+
+
+      const anexosContrato = document.querySelector('[data-role="anexos-contrato"]');
+
+      if(anexosContrato){
+        const dropzone = anexosContrato.querySelector('[data-role="anexos-dropzone"]');
+        const inputArquivos = anexosContrato.querySelector('[data-role="anexos-file-input"]');
+        const listaAnexos = anexosContrato.querySelector('[data-role="anexos-lista"]');
+        const statusAnexos = anexosContrato.querySelector('[data-role="anexos-status"]');
+        const uploadUrl = anexosContrato.dataset.uploadUrl;
+        const listUrl = anexosContrato.dataset.listUrl;
+        const csrfToken = anexosContrato.dataset.csrfToken;
+
+        function mostrarStatusAnexos(texto, erro){
+          if(!statusAnexos){ return; }
+          statusAnexos.textContent = texto || "";
+          statusAnexos.classList.toggle("is-visible", Boolean(texto));
+          statusAnexos.classList.toggle("is-error", Boolean(erro));
+        }
+
+        function escapeHtmlAnexos(valor){
+          return String(valor || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+        }
+
+        function montarHtmlAnexo(anexo){
+          const numero = anexo.numero || "";
+          const nome = escapeHtmlAnexos(anexo.nome_arquivo || "Arquivo sem nome");
+          const extensao = escapeHtmlAnexos(anexo.extensao || "—");
+          const tamanho = escapeHtmlAnexos(anexo.tamanho || "—");
+          const downloadUrl = escapeHtmlAnexos(anexo.download_url || "#");
+          const removerUrl = escapeHtmlAnexos(anexo.remover_url || "");
+
+          return `
+            <div class="anexo-row" data-anexo-id="${escapeHtmlAnexos(anexo.id || "")}">
+              <div class="anexo-numero">Anexo ${escapeHtmlAnexos(numero)}</div>
+              <div class="anexo-nome" title="${nome}">${nome}</div>
+              <div class="anexo-meta">${extensao}</div>
+              <div class="anexo-meta">${tamanho}</div>
+              <div class="anexo-actions">
+                <a class="anexo-btn download" href="${downloadUrl}">Baixar</a>
+                <button type="button" class="anexo-btn remove" data-role="anexo-remover" data-url="${removerUrl}">Remover</button>
+              </div>
+            </div>`;
+        }
+
+        async function carregarAnexosContrato(){
+          if(!listUrl || !listaAnexos){ return; }
+
+          try{
+            const resposta = await fetch(listUrl, {
+              method: "GET",
+              credentials: "same-origin",
+              headers: {"Accept": "application/json"}
+            });
+            const dados = await resposta.json();
+
+            if(!dados.ok){
+              return;
+            }
+
+            const anexos = Array.isArray(dados.anexos) ? dados.anexos : [];
+            if(anexos.length === 0){
+              listaAnexos.innerHTML = '<div class="anexos-empty" data-role="anexos-empty">Nenhum anexo vinculado até agora.</div>';
+              return;
+            }
+
+            listaAnexos.innerHTML = anexos.map(montarHtmlAnexo).join("");
+          }catch(e){
+            console.error("Falha ao carregar anexos", e);
+          }
+        }
+
+        async function enviarAnexosContrato(arquivos){
+          const listaArquivos = Array.from(arquivos || []).filter(Boolean);
+          if(listaArquivos.length === 0){ return; }
+
+          const formData = new FormData();
+          listaArquivos.forEach(function(arquivo){
+            formData.append("arquivos", arquivo);
+          });
+          formData.append("csrf_token", csrfToken || "");
+
+          mostrarStatusAnexos("Enviando anexos...", false);
+
+          try{
+            const resposta = await fetch(uploadUrl, {
+              method: "POST",
+              body: formData,
+              credentials: "same-origin",
+              headers: {
+                "X-CSRFToken": csrfToken || "",
+                "Accept": "application/json"
+              }
+            });
+            const dados = await resposta.json();
+
+            if(!resposta.ok || !dados.ok){
+              mostrarStatusAnexos(dados.mensagem || "Erro ao anexar arquivos.", true);
+              return;
+            }
+
+            mostrarStatusAnexos(dados.mensagem || "Arquivos anexados.", false);
+            if(inputArquivos){ inputArquivos.value = ""; }
+
+            carregarAnexosContrato();
+            window.setTimeout(carregarAnexosContrato, 1200);
+            window.setTimeout(carregarAnexosContrato, 3000);
+          }catch(e){
+            mostrarStatusAnexos("Erro ao anexar arquivos.", true);
+            console.error("Falha no upload de anexos", e);
+          }
+        }
+
+        if(inputArquivos){
+          inputArquivos.addEventListener("change", function(){
+            enviarAnexosContrato(inputArquivos.files);
+          });
+        }
+
+        if(dropzone){
+          ["dragenter", "dragover"].forEach(function(nomeEvento){
+            dropzone.addEventListener(nomeEvento, function(evento){
+              evento.preventDefault();
+              evento.stopPropagation();
+              dropzone.classList.add("is-dragover");
+            });
+          });
+
+          ["dragleave", "drop"].forEach(function(nomeEvento){
+            dropzone.addEventListener(nomeEvento, function(evento){
+              evento.preventDefault();
+              evento.stopPropagation();
+              dropzone.classList.remove("is-dragover");
+            });
+          });
+
+          dropzone.addEventListener("drop", function(evento){
+            const arquivos = evento.dataTransfer ? evento.dataTransfer.files : null;
+            enviarAnexosContrato(arquivos);
+          });
+        }
+
+        if(listaAnexos){
+          listaAnexos.addEventListener("click", async function(evento){
+            const botaoRemover = evento.target.closest('[data-role="anexo-remover"]');
+            if(!botaoRemover){ return; }
+
+            const removerUrl = botaoRemover.dataset.url;
+            if(!removerUrl){ return; }
+
+            if(!confirm("Remover este anexo?")){
+              return;
+            }
+
+            try{
+              const formData = new FormData();
+              formData.append("csrf_token", csrfToken || "");
+
+              const resposta = await fetch(removerUrl, {
+                method: "POST",
+                body: formData,
+                credentials: "same-origin",
+                headers: {
+                  "X-CSRFToken": csrfToken || "",
+                  "Accept": "application/json"
+                }
+              });
+              const dados = await resposta.json();
+
+              if(!resposta.ok || !dados.ok){
+                mostrarStatusAnexos(dados.mensagem || "Erro ao remover anexo.", true);
+                return;
+              }
+
+              mostrarStatusAnexos(dados.mensagem || "Anexo removido.", false);
+              carregarAnexosContrato();
+            }catch(e){
+              mostrarStatusAnexos("Erro ao remover anexo.", true);
+              console.error("Falha ao remover anexo", e);
+            }
+          });
+        }
+
+        carregarAnexosContrato();
       }
 
       document.querySelectorAll("[data-item-card]").forEach(function(itemCard){
