@@ -13329,6 +13329,56 @@ def _debug_dump_linhas(etapa: str, rows, limite: int = 100):
 
 
 
+
+@paineis_bp.get("/api/contratos/<int:id_contrato>/detalhe-completo-status")
+@login_required
+@limiter.limit("180 per minute", methods=["GET"])
+def api_contrato_detalhe_cache_status(id_contrato: int):
+    """Eu informo para o front-end se o HTML completo do contrato já está pronto no Redis."""
+    try:
+        timeline_page = int(request.args.get("timeline_page") or "1")
+    except Exception:
+        timeline_page = 1
+    timeline_page = max(1, timeline_page)
+
+    try:
+        id_usuario_cache = (
+            getattr(current_user, "IDDimUsuarios", None)
+            or (current_user.get_id() if hasattr(current_user, "get_id") else None)
+            or "anonimo"
+        )
+    except Exception:
+        id_usuario_cache = "anonimo"
+
+    cache_key_html = (
+        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
+        f"usuario:{id_usuario_cache}:"
+        f"contrato:{int(id_contrato)}:"
+        f"modo:completo:"
+        f"timeline:{timeline_page}"
+    )
+
+    try:
+        html_cache = cache.get(cache_key_html)
+    except Exception:
+        html_cache = None
+
+    return_to = request.args.get("return_to") or url_for("Paineis.contratos_lista")
+
+    return jsonify({
+        "ready": bool(html_cache),
+        "id_contrato": int(id_contrato),
+        "timeline_page": timeline_page,
+        "url_completa": url_for(
+            "Paineis.contratos_detalhe",
+            id_contrato=int(id_contrato),
+            return_to=return_to,
+            modo_completo=1,
+            timeline_page=timeline_page,
+        ),
+    })
+
+
 def _so_digitos(v: str) -> str:
     if not v:
         return ""
@@ -26344,10 +26394,26 @@ def contratos_detalhe(id_contrato: int):
 
     return_to_cache_inicial = _resolver_return_to_contratos_cache_inicial()
     caminho_return_to_cache_inicial = (urlsplit(str(return_to_cache_inicial or "")).path or "").rstrip("/")
-    modo_rapido_cache_inicial = (
+    modo_completo_cache_inicial = (
+        str(
+            request.args.get("modo_completo")
+            or request.args.get("historico_completo")
+            or request.args.get("completo")
+            or ""
+        ).strip().lower()
+        in {"1", "true", "sim", "yes", "s"}
+    )
+    modo_rapido_param_cache_inicial = (
         str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
         in {"1", "true", "sim", "yes", "s"}
-    ) or caminho_return_to_cache_inicial == "/admin/vencimentos-campanhas"
+    )
+    modo_rapido_cache_inicial = (
+        not modo_completo_cache_inicial
+        and (
+            modo_rapido_param_cache_inicial
+            or caminho_return_to_cache_inicial == "/admin/vencimentos-campanhas"
+        )
+    )
 
     try:
         timeline_page_cache_inicial = int(request.args.get("timeline_page") or "1")
@@ -26365,8 +26431,9 @@ def contratos_detalhe(id_contrato: int):
         id_usuario_cache_inicial = "anonimo"
 
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
+    contrato_preload_cache_inicial = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260601_d4_ciclos_v1:"
+        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
@@ -26483,10 +26550,26 @@ def contratos_detalhe(id_contrato: int):
 
     partes_return_to_rapido = urlsplit(str(return_to or ""))
     caminho_return_to_rapido = (partes_return_to_rapido.path or "").rstrip("/")
-    modo_rapido_contrato = (
+    modo_completo_contrato = (
+        str(
+            request.args.get("modo_completo")
+            or request.args.get("historico_completo")
+            or request.args.get("completo")
+            or ""
+        ).strip().lower()
+        in {"1", "true", "sim", "yes", "s"}
+    )
+    modo_rapido_param_contrato = (
         str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
         in {"1", "true", "sim", "yes", "s"}
-    ) or caminho_return_to_rapido == "/admin/vencimentos-campanhas"
+    )
+    modo_rapido_contrato = (
+        not modo_completo_contrato
+        and (
+            modo_rapido_param_contrato
+            or caminho_return_to_rapido == "/admin/vencimentos-campanhas"
+        )
+    )
 
     try:
         timeline_page_cache = int(request.args.get("timeline_page") or "1")
@@ -26509,14 +26592,24 @@ def contratos_detalhe(id_contrato: int):
         timeout_cache_contrato_detalhe = 120
 
     cache_bypass_contrato = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
+    contrato_preload_cache = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
+    contrato_detalhe_async_pendente = False
+    contrato_detalhe_async_payload = None
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260601_d4_ciclos_v1:"
+        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
         f"timeline:{timeline_page_cache}"
     )
     placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
+    cache_key_contrato_detalhe_completo = (
+        f"contratos_detalhe_html:v20260602_pref_ocupacao_vermais_v1:"
+        f"usuario:{id_usuario_cache}:"
+        f"contrato:{int(id_contrato)}:"
+        f"modo:completo:"
+        f"timeline:{timeline_page_cache}"
+    )
 
     if not cache_bypass_contrato:
         try:
@@ -26528,6 +26621,82 @@ def contratos_detalhe(id_contrato: int):
             return str(html_cache_contrato).replace(
                 placeholder_return_to_contrato,
                 str(html_escape(return_to)),
+            )
+
+    async_contrato_habilitado = (
+        str(os.getenv("CONTRATO_DETALHE_ASYNC_CELERY_PADRAO", "1") or "1").strip().lower()
+        not in {"0", "false", "nao", "não", "no", "n"}
+    )
+    usuario_pediu_modo_completo_explicitamente = (
+        str(
+            request.args.get("modo_completo")
+            or request.args.get("historico_completo")
+            or request.args.get("completo")
+            or ""
+        ).strip().lower() in {"1", "true", "sim", "yes", "s"}
+    )
+
+    if (
+        async_contrato_habilitado
+        and modo_rapido_contrato
+        and not contrato_preload_cache
+        and not cache_bypass_contrato
+        and not usuario_pediu_modo_completo_explicitamente
+        and not modo_rapido_param_contrato
+    ):
+        try:
+            from ..tasks.contratos_detalhe_tasks import aquecer_cache_html_contrato_detalhe
+
+            args_full = dict(request.args.items())
+            args_full["modo_completo"] = "1"
+            args_full["contrato_preload_cache"] = "1"
+            args_full.pop("modo_rapido", None)
+            args_full.pop("rapido", None)
+            args_full.pop("nocache", None)
+
+            url_full = request.host_url.rstrip("/") + url_for(
+                "Paineis.contratos_detalhe",
+                id_contrato=int(id_contrato),
+                **args_full,
+            )
+
+            cookies_request = {chave: valor for chave, valor in request.cookies.items()}
+            task_async = aquecer_cache_html_contrato_detalhe.apply_async(
+                kwargs={
+                    "url_full": url_full,
+                    "cookies": cookies_request,
+                    "id_contrato": int(id_contrato),
+                    "cache_key_html": cache_key_contrato_detalhe_completo,
+                    "timeout_segundos": int(os.getenv("CONTRATO_DETALHE_ASYNC_TIMEOUT_SEGUNDOS", "120") or "120"),
+                },
+                queue=os.getenv("CELERY_QUEUE_CONTRATOS_DETALHE", "contratos_detalhe"),
+                expires=int(os.getenv("CONTRATO_DETALHE_ASYNC_EXPIRES_SEGUNDOS", "180") or "180"),
+            )
+
+            contrato_detalhe_async_pendente = True
+            contrato_detalhe_async_payload = {
+                "task_id": task_async.id,
+                "status_url": url_for(
+                    "Paineis.api_contrato_detalhe_cache_status",
+                    id_contrato=int(id_contrato),
+                    timeline_page=timeline_page_cache,
+                    return_to=return_to,
+                ),
+                "url_completa": url_for(
+                    "Paineis.contratos_detalhe",
+                    id_contrato=int(id_contrato),
+                    return_to=return_to,
+                    modo_completo=1,
+                    timeline_page=timeline_page_cache,
+                ),
+                "mensagem": "Carregando detalhes completos em cache Redis/Celery.",
+            }
+
+            modo_rapido_contrato = True
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao enfileirar aquecimento Celery/Redis | id_contrato=%s",
+                id_contrato,
             )
 
     def _valor_attr(obj, *nomes, padrao=None):
@@ -26564,6 +26733,489 @@ def contratos_detalhe(id_contrato: int):
 
         return unicos, placeholders, params
 
+    def _fmt_valor_contrato_template(valor):
+        """
+        Eu formato valores para os grids do template sem forçar consultas pesadas.
+        """
+        if valor is None:
+            return "—"
+
+        if isinstance(valor, datetime):
+            return valor.strftime("%d/%m/%Y %H:%M")
+
+        if isinstance(valor, date):
+            return valor.strftime("%d/%m/%Y")
+
+        if isinstance(valor, bool):
+            return "Sim" if valor else "Não"
+
+        if isinstance(valor, Decimal):
+            try:
+                return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            except Exception:
+                return str(valor)
+
+        if isinstance(valor, float):
+            try:
+                return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            except Exception:
+                return str(valor)
+
+        texto = str(valor).strip()
+        return texto if texto else "—"
+
+    def _rotulo_campo_contrato_template(chave: str) -> str:
+        """
+        Eu traduzo os nomes técnicos das colunas mais importantes para rótulos melhores.
+        """
+        mapa = {
+            "IDFatoControleContratosEuromidia": "ID Contrato Controle",
+            "IDFatoControleContratos": "ID Contrato Controle",
+            "IDFatoControleContratoEuromidia": "ID Contrato Controle",
+            "IDFatoControleContratosItensEuromidia": "ID Item Contrato",
+            "IDFatoControleContratosItens": "ID Item Contrato",
+            "IDEmpresa": "ID Empresa",
+            "IDEmpresaAgencia": "ID Empresa Agência",
+            "IDEmpresaBureau": "ID Empresa Bureau",
+            "IDEmpresaIntermediario": "ID Empresa Intermediário",
+            "IDEmpresaProprietaria": "ID Empresa Proprietária",
+            "IDDimStatusContratos": "ID Status do Contrato",
+            "NumeroContrato": "Número do Contrato",
+            "NumeroPrevia": "Número da Prévia",
+            "DataLancamento": "Data de Lançamento",
+            "DataAtualizacao": "Data de Atualização",
+            "DataInicioPrevisto": "Data Início Previsto",
+            "DataTerminoPrevisto": "Data Término Previsto",
+            "RazaoSocial": "Razão Social",
+            "RazaoSocialEmpresa": "Razão Social da Empresa",
+            "NomeFantasiaEmpresa": "Nome Fantasia da Empresa",
+            "MarcaExibida": "Marca Exibida",
+            "CidadeExibicao": "Cidade de Exibição",
+            "TipoDocumento": "Tipo de Documento",
+            "Origem": "Origem",
+            "CNPJ": "CNPJ",
+            "CPF": "CPF",
+            "QuantidadePontos": "Quantidade de Pontos",
+            "QuantidadeFaces": "Quantidade de Faces",
+            "QtdeCodPonto": "Quantidade de Pontos",
+            "QtdeCodFace": "Quantidade de Faces",
+            "TotalBrutoContrato": "Total Bruto do Contrato",
+            "TotalFaturamentoLiquidoMensal": "Total Líquido Mensal",
+            "TotalFaturamentoLiquidoMensalFinal": "Total Líquido Mensal Final",
+            "TotalLiquidoContratoAGBRCTACORDO": "Total Líquido Carta Acordo",
+            "TotalLiquidoContratoAGBRVENDGERCOOR": "Total Líquido Vendedor/Gerência/Coordenação",
+            "TotalValorMensalAgencia": "Total Mensal Agência",
+            "TotalValorBureauMensal": "Total Mensal Bureau",
+            "TotalValorAcordoMensal": "Total Mensal Acordo",
+            "TotalOutrasComissoes": "Total Outras Comissões",
+            "TotalValorVendedor": "Total Valor Vendedor",
+            "ValorVendedorTotal": "Valor Vendedor Total",
+            "TotalValorCoordenador": "Total Valor Coordenador",
+            "ValorCoordenadorTotal": "Valor Coordenador Total",
+            "ValorGerenciaTotal": "Valor Gerência Total",
+            "DimVendedor": "Vendedor",
+        }
+
+        if chave in mapa:
+            return mapa[chave]
+
+        texto = re.sub(r"(?<!^)([A-Z])", r" \1", str(chave or "")).strip()
+        return texto or str(chave or "")
+
+    def _campos_de_mapping_contrato_template(mapping):
+        """
+        Eu monto a lista de campos esperada pelo template:
+        [{'chave': ..., 'rotulo': ..., 'valor': ...}].
+        """
+        campos = []
+
+        try:
+            itens_mapping = list((mapping or {}).items())
+        except Exception:
+            itens_mapping = []
+
+        ignorar = {
+            "_sa_instance_state",
+            "_campos",
+        }
+
+        for chave, valor in itens_mapping:
+            if chave in ignorar:
+                continue
+
+            campos.append(
+                {
+                    "chave": chave,
+                    "rotulo": _rotulo_campo_contrato_template(chave),
+                    "valor": _fmt_valor_contrato_template(valor),
+                }
+            )
+
+        return campos
+
+    def _campos_de_objeto_contrato_template(objeto):
+        """
+        Eu extraio os campos do contrato SQLAlchemy sem depender de relacionamento lazy.
+        """
+        dados = {}
+
+        try:
+            colunas = list(getattr(getattr(objeto, "__table__", None), "columns", []) or [])
+            for coluna in colunas:
+                nome_coluna = getattr(coluna, "name", None)
+                if not nome_coluna:
+                    continue
+                dados[nome_coluna] = getattr(objeto, nome_coluna, None)
+        except Exception:
+            dados = {}
+
+        if not dados:
+            try:
+                dados = {
+                    chave: valor
+                    for chave, valor in vars(objeto).items()
+                    if not str(chave).startswith("_")
+                }
+            except Exception:
+                dados = {}
+
+        return _campos_de_mapping_contrato_template(dados)
+
+    def _somente_digitos_contrato_template(valor) -> str:
+        return re.sub(r"\D+", "", str(valor or ""))
+
+    def _carregar_contexto_empresas_contrato_template(contrato_obj, itens_lista):
+        """
+        Eu carrego apenas as empresas necessárias para o cabeçalho/modal.
+        Isso corrige as áreas vazias do template sem acionar o histórico pesado.
+        """
+        ids_empresas = []
+        vistos = set()
+
+        def _adicionar_id_empresa(valor):
+            try:
+                valor_int = int(valor or 0)
+            except Exception:
+                valor_int = 0
+
+            if valor_int <= 0 or valor_int in vistos:
+                return
+
+            vistos.add(valor_int)
+            ids_empresas.append(valor_int)
+
+        for nome_campo in (
+            "IDEmpresa",
+            "IDEmpresaAgencia",
+            "IDEmpresaBureau",
+            "IDEmpresaIntermediario",
+        ):
+            _adicionar_id_empresa(_valor_attr(contrato_obj, nome_campo))
+
+        for item_emp in itens_lista or []:
+            for nome_campo in (
+                "IDEmpresa",
+                "IDEmpresaAgencia",
+                "IDEmpresaBureau",
+                "IDEmpresaIntermediario",
+            ):
+                valor_item = (
+                    item_emp.get(nome_campo)
+                    if isinstance(item_emp, dict)
+                    else _valor_attr(item_emp, nome_campo)
+                )
+                _adicionar_id_empresa(valor_item)
+
+        empresa_principal_obj = None
+        empresa_principal_campos_lista = []
+        empresas_relacionadas_lista = []
+
+        cnpj_contrato = _somente_digitos_contrato_template(_valor_attr(contrato_obj, "CNPJ"))
+        id_empresa_principal = 0
+        try:
+            id_empresa_principal = int(_valor_attr(contrato_obj, "IDEmpresa", padrao=0) or 0)
+        except Exception:
+            id_empresa_principal = 0
+
+        if ids_empresas:
+            ids_unicos, placeholders, params = _coletar_ids_parametrizados("empresa_id_", ids_empresas)
+
+            if placeholders:
+                params["id_empresa_principal"] = id_empresa_principal if id_empresa_principal > 0 else ids_unicos[0]
+
+                sql_empresas = text(
+                    f"""
+                    SELECT TOP (50)
+                        *
+                    FROM [Integracao].[Silver].[DimEmpresas] WITH (NOLOCK)
+                    WHERE [IDEmpresa] IN ({", ".join(placeholders)})
+                    ORDER BY
+                        CASE WHEN [IDEmpresa] = :id_empresa_principal THEN 0 ELSE 1 END,
+                        [IDEmpresa] ASC;
+                    """
+                )
+
+                rows_empresas = db.session.execute(sql_empresas, params).mappings().all()
+
+                for row_empresa in rows_empresas:
+                    empresa_dict = dict(row_empresa)
+                    empresa_dict["_campos"] = _campos_de_mapping_contrato_template(empresa_dict)
+                    empresa_obj = SimpleNamespace(**empresa_dict)
+                    empresas_relacionadas_lista.append(empresa_obj)
+
+                    try:
+                        id_empresa_row = int(empresa_dict.get("IDEmpresa") or 0)
+                    except Exception:
+                        id_empresa_row = 0
+
+                    if (
+                        empresa_principal_obj is None
+                        or (
+                            id_empresa_principal > 0
+                            and id_empresa_row == id_empresa_principal
+                        )
+                    ):
+                        empresa_principal_obj = empresa_obj
+                        empresa_principal_campos_lista = empresa_dict["_campos"]
+
+        if empresa_principal_obj is None and cnpj_contrato:
+            sql_empresa_cnpj = text("""
+                SELECT TOP (1)
+                    *
+                FROM [Integracao].[Silver].[DimEmpresas] WITH (NOLOCK)
+                WHERE REPLACE(REPLACE(REPLACE(COALESCE([CNPJ], ''), '.', ''), '/', ''), '-', '') = :cnpj
+                ORDER BY [IDEmpresa] ASC;
+            """)
+
+            row_empresa = db.session.execute(
+                sql_empresa_cnpj,
+                {"cnpj": cnpj_contrato},
+            ).mappings().first()
+
+            if row_empresa:
+                empresa_dict = dict(row_empresa)
+                empresa_dict["_campos"] = _campos_de_mapping_contrato_template(empresa_dict)
+                empresa_principal_obj = SimpleNamespace(**empresa_dict)
+                empresa_principal_campos_lista = empresa_dict["_campos"]
+
+                if not empresas_relacionadas_lista:
+                    empresas_relacionadas_lista.append(empresa_principal_obj)
+
+        return empresa_principal_obj, empresa_principal_campos_lista, empresas_relacionadas_lista
+
+    def _carregar_cards_resumo_rapido_contrato(id_contrato_param, itens_por_id_param):
+        """
+        Eu carrego um resumo leve dos atendimentos para o modo rápido.
+
+        A ideia é corrigir a tela mostrando zero quando existem cards/check-ins,
+        sem puxar toda a linha do tempo pesada.
+        """
+        cards_rapidos = []
+        resumo = {
+            "Total": 0,
+            "Abertos": 0,
+            "Concluidos": 0,
+            "Encerrados": 0,
+            "UltimoAtendimento": None,
+            "UltimoCheckin": None,
+            "TotalCheckins": 0,
+            "TotalNegociacoes": 0,
+        }
+
+        try:
+            sql_rel_rapido = text("""
+                SELECT TOP (120)
+                    rel.IDFatoKanbanCard,
+                    rel.IDFatoControleContratosItensEuromidia,
+                    rel.DataAtualizacao
+                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] rel WITH (NOLOCK)
+                WHERE rel.IDFatoControleContratosEuromidia = :id_contrato
+                  AND rel.IDFatoKanbanCard IS NOT NULL
+                ORDER BY
+                    rel.DataAtualizacao DESC,
+                    rel.IDFatoContratoCardEuromidia DESC;
+            """)
+
+            rel_rows_rapidos = db.session.execute(
+                sql_rel_rapido,
+                {"id_contrato": int(id_contrato_param)},
+            ).mappings().all()
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar vínculos rápidos de cards | id_contrato=%s",
+                id_contrato_param,
+            )
+            rel_rows_rapidos = []
+
+        cards_info = {}
+        for row_rel in rel_rows_rapidos:
+            try:
+                id_card = int(row_rel.get("IDFatoKanbanCard") or 0)
+            except Exception:
+                id_card = 0
+
+            if id_card <= 0:
+                continue
+
+            info = cards_info.setdefault(
+                id_card,
+                {
+                    "item_ids": set(),
+                    "datas_rel": [],
+                },
+            )
+
+            try:
+                id_item_rel = int(row_rel.get("IDFatoControleContratosItensEuromidia") or 0)
+            except Exception:
+                id_item_rel = 0
+
+            if id_item_rel > 0:
+                info["item_ids"].add(id_item_rel)
+
+            if row_rel.get("DataAtualizacao") is not None:
+                info["datas_rel"].append(row_rel.get("DataAtualizacao"))
+
+        card_ids_rapidos = list(cards_info.keys())[:30]
+
+        if card_ids_rapidos:
+            try:
+                card_ids, card_placeholders, card_params = _coletar_ids_parametrizados(
+                    "card_rapido_id_",
+                    card_ids_rapidos,
+                )
+
+                sql_cards_rapidos = text(
+                    f"""
+                    SELECT
+                        k.IDFatoKanbanCard,
+                        k.Titulo,
+                        k.Descricao,
+                        k.CriadoEm,
+                        k.AtualizadoEm,
+                        k.EncerradoEm,
+                        k.IDDimUsuarios,
+                        k.IDDimKanbanStatusCard,
+                        k.IDDimKanbanFaseAtual,
+                        k.BitAditivo,
+                        k.BitContratoNovo,
+                        k.BitDemanda,
+                        NomeFase = COALESCE(df.NomeFase, CONCAT('Fase #', CONVERT(varchar(20), k.IDDimKanbanFaseAtual))),
+                        NomeStatus = COALESCE(ds.NomeExibicao, CONCAT('Status #', CONVERT(varchar(20), k.IDDimKanbanStatusCard)))
+                    FROM [Kanban].[Silver].[FatoKanbanCard] k WITH (NOLOCK)
+                    LEFT JOIN [Kanban].[Silver].[DimKanbanFase] df WITH (NOLOCK)
+                        ON df.IDDimKanbanFase = k.IDDimKanbanFaseAtual
+                    LEFT JOIN [Kanban].[Silver].[DimKanbanStatusCard] ds WITH (NOLOCK)
+                        ON ds.IDDimKanbanStatusCard = k.IDDimKanbanStatusCard
+                    WHERE k.IDFatoKanbanCard IN ({", ".join(card_placeholders)});
+                    """
+                )
+
+                rows_cards = db.session.execute(sql_cards_rapidos, card_params).mappings().all()
+            except Exception:
+                current_app.logger.exception(
+                    "CONTRATO_DETALHE | falha ao carregar cards rápidos | id_contrato=%s",
+                    id_contrato_param,
+                )
+                rows_cards = []
+
+            for row_card in rows_cards:
+                try:
+                    id_card = int(row_card.get("IDFatoKanbanCard") or 0)
+                except Exception:
+                    id_card = 0
+
+                rel_info = cards_info.get(id_card, {"item_ids": set(), "datas_rel": []})
+                data_referencia = row_card.get("AtualizadoEm") or row_card.get("CriadoEm")
+                if data_referencia is None and rel_info.get("datas_rel"):
+                    data_referencia = max(rel_info["datas_rel"])
+
+                itens_afetados = []
+                for id_item in sorted(rel_info.get("item_ids") or []):
+                    item_ref = itens_por_id_param.get(id_item) if isinstance(itens_por_id_param, dict) else None
+
+                    if item_ref:
+                        label_item = f"{item_ref.get('CodPonto') or '—'}/{item_ref.get('CodFace') or '—'}"
+                        itens_afetados.append(label_item)
+                        item_ref["QtdeAtendimentos"] = int(item_ref.get("QtdeAtendimentos") or 0) + 1
+                        if data_referencia and (
+                            item_ref.get("UltimoAtendimentoEm") is None
+                            or data_referencia > item_ref.get("UltimoAtendimentoEm")
+                        ):
+                            item_ref["UltimoAtendimentoEm"] = data_referencia
+                    else:
+                        itens_afetados.append(f"Item #{id_item}")
+
+                situacao = _classificar_situacao_card(row_card)
+
+                cards_rapidos.append(
+                    {
+                        "IDFatoKanbanCard": id_card,
+                        "Titulo": row_card.get("Titulo"),
+                        "Descricao": row_card.get("Descricao"),
+                        "CriadoEm": row_card.get("CriadoEm"),
+                        "AtualizadoEm": row_card.get("AtualizadoEm"),
+                        "EncerradoEm": row_card.get("EncerradoEm"),
+                        "NomeFase": row_card.get("NomeFase") or "—",
+                        "NomeStatus": row_card.get("NomeStatus") or "—",
+                        "TipoCard": _classificar_tipo_card(row_card),
+                        "Situacao": situacao,
+                        "Usuario": "—",
+                        "ItensAfetados": itens_afetados,
+                        "QtdeItensAfetados": len(itens_afetados),
+                        "DataReferencia": data_referencia,
+                        "HrefHistorico": f"/kanban/historico-card/{id_card}",
+                    }
+                )
+
+            cards_rapidos.sort(
+                key=lambda card: card.get("DataReferencia") or card.get("AtualizadoEm") or card.get("CriadoEm") or datetime.min,
+                reverse=True,
+            )
+
+        try:
+            sql_checkin_resumo = text("""
+                SELECT
+                    TotalCheckins = COUNT_BIG(1),
+                    UltimoCheckin = MAX(COALESCE(ch.DataConfirmacao, ch.DataChekin, ch.DataAtualizacao))
+                FROM [Integracao].[Silver].[DimCheckinHistorico] ch WITH (NOLOCK)
+                WHERE ch.IDFatoControleContratosEuromidia = :id_contrato;
+            """)
+
+            row_checkin = db.session.execute(
+                sql_checkin_resumo,
+                {"id_contrato": int(id_contrato_param)},
+            ).mappings().first()
+
+            if row_checkin:
+                resumo["TotalCheckins"] = int(row_checkin.get("TotalCheckins") or 0)
+                resumo["UltimoCheckin"] = row_checkin.get("UltimoCheckin")
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar resumo rápido de checkins | id_contrato=%s",
+                id_contrato_param,
+            )
+
+        total_cards = len(cards_rapidos)
+        qtd_encerrados = sum(1 for card in cards_rapidos if card.get("Situacao") == "encerrado")
+        qtd_concluidos = sum(1 for card in cards_rapidos if card.get("Situacao") == "concluido")
+        qtd_abertos = max(0, total_cards - qtd_encerrados - qtd_concluidos)
+
+        resumo["Total"] = total_cards
+        resumo["Abertos"] = qtd_abertos
+        resumo["Concluidos"] = qtd_concluidos
+        resumo["Encerrados"] = qtd_encerrados
+        resumo["UltimoAtendimento"] = max(
+            [
+                card.get("DataReferencia") or card.get("AtualizadoEm") or card.get("CriadoEm")
+                for card in cards_rapidos
+                if card.get("DataReferencia") or card.get("AtualizadoEm") or card.get("CriadoEm")
+            ],
+            default=None,
+        )
+
+        return resumo, cards_rapidos
+
     def _coagir_data_preferencia(valor):
         """Eu normalizo datas vindas do banco para montar filtros da grade."""
         if valor is None:
@@ -26599,8 +27251,8 @@ def contratos_detalhe(id_contrato: int):
             return ""
         return data_ref.strftime("%Y-%m-%d")
 
-    def _montar_href_grade_preferencia(cod_ponto, cod_face, data_inicio, data_fim):
-        """Eu monto o link da grade já filtrado na face e no período do registro."""
+    def _montar_href_grade_preferencia(cod_ponto, cod_face, data_inicio, data_fim, tipo_painel=None):
+        """Eu monto o link da grade exatamente na face/período da ocupação ou reserva."""
         try:
             cod_ponto_int = int(cod_ponto)
         except Exception:
@@ -26612,12 +27264,18 @@ def contratos_detalhe(id_contrato: int):
 
         data_inicio_ref = _coagir_data_preferencia(data_inicio)
         data_fim_ref = _coagir_data_preferencia(data_fim) or data_inicio_ref
+        tipo_painel_txt = str(tipo_painel or "").strip()
 
         parametros_grade = {
             "codponto": cod_ponto_int,
             "codface": cod_face_txt,
             "face_principal": cod_face_txt,
+            "tudo": 0,
+            "return_to": url_for("Paineis.lista_paineis"),
         }
+
+        if tipo_painel_txt:
+            parametros_grade["tipo"] = tipo_painel_txt
 
         if data_inicio_ref:
             parametros_grade["mes_ref"] = _mes_yyyy_mm_preferencia(data_inicio_ref)
@@ -26636,6 +27294,187 @@ def contratos_detalhe(id_contrato: int):
                 cod_face,
             )
             return "#"
+
+    def _montar_campos_face_painel_contrato(item_dict):
+        """
+        Eu monto somente os campos que o usuário precisa ver no <summary>Ver +</summary>.
+
+        Fonte oficial:
+        - CodPonto/CodFace vêm do item do contrato.
+        - Dados cadastrais vêm da Integracao.Silver.DimPaineisEuromidia.
+        """
+        campos_detalhe = [
+            ("CodPonto", "CodPonto"),
+            ("CodFace", "CodFace"),
+            ("QuantidadeFaces", "Quantidade de Faces"),
+            ("TipoPainelGrade", "Tipo"),
+            ("Logradouro", "Logradouro"),
+            ("Sentido", "Sentido"),
+            ("Bairro", "Bairro"),
+            ("ReferenciaPainel", "Referência"),
+            ("NumeroPainel", "Número"),
+            ("CEPPainel", "CEP"),
+            ("LatitudePainel", "Latitude"),
+            ("LongitudePainel", "Longitude"),
+            ("CidadePainel", "Cidade"),
+            ("FormatoLxA", "Formato L x A"),
+        ]
+
+        return [
+            {
+                "chave": chave,
+                "rotulo": rotulo,
+                "valor": _fmt_valor_contrato_template((item_dict or {}).get(chave)),
+            }
+            for chave, rotulo in campos_detalhe
+        ]
+
+    def _carregar_campos_face_painel_contrato(itens_lista):
+        """
+        Eu preencho it._campos para o bloco Ver + com dados da face/painel.
+
+        A busca é feita pelo item do contrato, porque é ele que define qual
+        CodPonto/CodFace está vinculado ao contrato.
+        """
+        ids_itens_local = []
+        for item_local in itens_lista or []:
+            try:
+                id_item_local = int(item_local.get("IDFatoControleContratosItensEuromidia") or 0)
+            except Exception:
+                id_item_local = 0
+
+            if id_item_local > 0:
+                ids_itens_local.append(id_item_local)
+
+        ids_itens_local = sorted(list(dict.fromkeys(ids_itens_local)))
+
+        if not ids_itens_local:
+            for item_local in itens_lista or []:
+                item_local["_campos"] = _montar_campos_face_painel_contrato(item_local)
+            return
+
+        sql_campos_painel = text("""
+            SELECT
+                 ci.[IDFatoControleContratosItensEuromidia] AS IDItemContrato
+                ,TRY_CONVERT(int, ci.[CodPonto]) AS CodPonto
+                ,ci.[CodFace]
+                ,TRY_CONVERT(int, pn.[QuantidadeFaces]) AS QuantidadeFaces
+                ,COALESCE(NULLIF(LTRIM(RTRIM(df.[Tipo])), ''), NULLIF(LTRIM(RTRIM(pn.[Tipo])), ''), NULLIF(LTRIM(RTRIM(ci.[Tipo])), '')) AS TipoPainelGrade
+                ,pn.[Logradouro]
+                ,pn.[Sentido]
+                ,pn.[Bairro]
+                ,pn.[Referencia] AS ReferenciaPainel
+                ,pn.[Numero] AS NumeroPainel
+                ,pn.[CEP] AS CEPPainel
+                ,pn.[Latitude] AS LatitudePainel
+                ,pn.[Longitude] AS LongitudePainel
+                ,pn.[Cidade] AS CidadePainel
+                ,pn.[FormatoLxA]
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+            OUTER APPLY (
+                SELECT TOP (1)
+                     f.[IDDimFacesPaineis]
+                    ,f.[IDDimPaineisEuromidia]
+                    ,f.[Tipo]
+                    ,f.[CodPonto]
+                    ,f.[CodFace]
+                FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+                WHERE
+                    (
+                        ci.[IDDimFacesPaineis] IS NOT NULL
+                        AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis])
+                    )
+                    OR (
+                        TRY_CONVERT(int, f.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                        AND UPPER(LTRIM(RTRIM(ISNULL(f.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(ci.[CodFace], ''))))
+                    )
+                ORDER BY
+                    CASE
+                        WHEN ci.[IDDimFacesPaineis] IS NOT NULL
+                         AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis]) THEN 0
+                        ELSE 1
+                    END,
+                    TRY_CONVERT(int, f.[IDDimFacesPaineis]) DESC
+            ) AS df
+            OUTER APPLY (
+                SELECT TOP (1)
+                     p.[IDDimPaineisEuromidia]
+                    ,p.[CodPonto]
+                    ,p.[QuantidadeFaces]
+                    ,p.[Tipo]
+                    ,p.[Cidade]
+                    ,p.[UF]
+                    ,p.[Logradouro]
+                    ,p.[Sentido]
+                    ,p.[Bairro]
+                    ,p.[Referencia]
+                    ,p.[Numero]
+                    ,p.[CEP]
+                    ,p.[Latitude]
+                    ,p.[Longitude]
+                    ,p.[FormatoLxA]
+                    ,p.[DataAtualizacao]
+                FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
+                WHERE
+                    (
+                        ci.[IDPainelEuromidia] IS NOT NULL
+                        AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia])
+                    )
+                    OR (
+                        df.[IDDimPaineisEuromidia] IS NOT NULL
+                        AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia])
+                    )
+                    OR TRY_CONVERT(int, p.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                ORDER BY
+                    CASE
+                        WHEN ci.[IDPainelEuromidia] IS NOT NULL
+                         AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia]) THEN 0
+                        WHEN df.[IDDimPaineisEuromidia] IS NOT NULL
+                         AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia]) THEN 1
+                        ELSE 2
+                    END,
+                    p.[DataAtualizacao] DESC,
+                    TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) DESC
+            ) AS pn
+            WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens
+        """).bindparams(bindparam("ids_itens", expanding=True))
+
+        try:
+            rows_campos_painel = db.session.execute(
+                sql_campos_painel,
+                {"ids_itens": ids_itens_local},
+            ).mappings().all()
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar campos do painel/face para Ver + | id_contrato=%s",
+                id_contrato,
+            )
+            rows_campos_painel = []
+
+        mapa_campos_painel = {}
+        for row_painel in rows_campos_painel or []:
+            try:
+                id_item_painel = int(row_painel.get("IDItemContrato") or 0)
+            except Exception:
+                id_item_painel = 0
+
+            if id_item_painel > 0:
+                mapa_campos_painel[id_item_painel] = dict(row_painel)
+
+        for item_local in itens_lista or []:
+            try:
+                id_item_local = int(item_local.get("IDFatoControleContratosItensEuromidia") or 0)
+            except Exception:
+                id_item_local = 0
+
+            dados_painel = mapa_campos_painel.get(id_item_local) or {}
+            for chave, valor in dados_painel.items():
+                if chave == "IDItemContrato":
+                    continue
+                if valor is not None and str(valor).strip() != "":
+                    item_local[chave] = valor
+
+            item_local["_campos"] = _montar_campos_face_painel_contrato(item_local)
 
     def _classificar_tipo_card(row):
         if bool(row.get("BitAditivo")):
@@ -27225,6 +28064,28 @@ def contratos_detalhe(id_contrato: int):
         if id_painel is not None:
             itens_por_dim_painel.setdefault(str(id_painel).strip(), []).append(item_dict)
 
+    _carregar_campos_face_painel_contrato(itens)
+
+    contrato_campos = _campos_de_objeto_contrato_template(contrato)
+    empresa_principal = None
+    empresa_principal_campos = []
+    empresas_relacionadas = []
+
+    try:
+        (
+            empresa_principal,
+            empresa_principal_campos,
+            empresas_relacionadas,
+        ) = _carregar_contexto_empresas_contrato_template(contrato, itens)
+    except Exception:
+        current_app.logger.exception(
+            "CONTRATO_DETALHE | falha ao carregar contexto básico de empresas | id_contrato=%s",
+            id_contrato,
+        )
+        empresa_principal = None
+        empresa_principal_campos = []
+        empresas_relacionadas = []
+
     if modo_rapido_contrato:
         id_empresa_proprietaria_status = _valor_attr(contrato, "IDEmpresaProprietaria")
         id_status_atual = _valor_attr(
@@ -27282,16 +28143,10 @@ def contratos_detalhe(id_contrato: int):
             nome_status_atual=nome_status_atual,
         )
 
-        resumo_atendimentos = {
-            "Total": 0,
-            "Abertos": 0,
-            "Concluidos": 0,
-            "Encerrados": 0,
-            "UltimoAtendimento": None,
-            "UltimoCheckin": None,
-            "TotalCheckins": 0,
-            "TotalNegociacoes": 0,
-        }
+        resumo_atendimentos, cards_relacionados_rapidos = _carregar_cards_resumo_rapido_contrato(
+            id_contrato,
+            itens_por_id,
+        )
 
         timeline_paginacao = {
             "page": 1,
@@ -27315,8 +28170,9 @@ def contratos_detalhe(id_contrato: int):
         html_renderizado = render_template(
             "euromidia/contratos_detalhe.html",
             contrato=contrato,
+            contrato_campos=contrato_campos,
             itens=itens,
-            cards_relacionados=[],
+            cards_relacionados=cards_relacionados_rapidos,
             timeline_atendimentos=[],
             timeline_paginacao=timeline_paginacao,
             resumo_atendimentos=resumo_atendimentos,
@@ -27325,11 +28181,15 @@ def contratos_detalhe(id_contrato: int):
             d4_documentos_contrato=d4_documentos_contrato,
             historico_status_contrato=historico_status_contrato,
             preferencia_reserva_contrato=preferencia_reserva_contrato,
+            empresa_principal=empresa_principal,
+            empresa_principal_campos=empresa_principal_campos,
+            empresas_relacionadas=empresas_relacionadas,
             return_to=placeholder_return_to_contrato,
             modo_rapido_contrato=True,
+            contrato_detalhe_async=contrato_detalhe_async_payload,
         )
 
-        if not cache_bypass_contrato:
+        if (not cache_bypass_contrato) and (not contrato_detalhe_async_pendente):
             try:
                 cache.set(
                     cache_key_contrato_detalhe,
@@ -28596,14 +29456,64 @@ def contratos_detalhe(id_contrato: int):
 
     if ids_itens_preferencia_operacional:
         sql_preferencia_operacional = text("""
-            WITH ItensPreferencia AS (
+            ;WITH ItensPreferencia AS (
                 SELECT
                      ci.[IDFatoControleContratosItensEuromidia] AS IDItemContrato
                     ,ci.[CodPonto]
                     ,ci.[CodFace]
                     ,ci.[DataInicioPrevisto]
                     ,ci.[DataTerminoPrevisto]
+                    ,COALESCE(NULLIF(LTRIM(RTRIM(df.[Tipo])), ''), NULLIF(LTRIM(RTRIM(pn.[Tipo])), ''), NULLIF(LTRIM(RTRIM(ci.[Tipo])), '')) AS TipoPainelGrade
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                OUTER APPLY (
+                    SELECT TOP (1)
+                         f.[IDDimPaineisEuromidia]
+                        ,f.[Tipo]
+                    FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+                    WHERE
+                        (
+                            ci.[IDDimFacesPaineis] IS NOT NULL
+                            AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis])
+                        )
+                        OR (
+                            TRY_CONVERT(int, f.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                            AND UPPER(LTRIM(RTRIM(ISNULL(f.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(ci.[CodFace], ''))))
+                        )
+                    ORDER BY
+                        CASE
+                            WHEN ci.[IDDimFacesPaineis] IS NOT NULL
+                             AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis]) THEN 0
+                            ELSE 1
+                        END,
+                        TRY_CONVERT(int, f.[IDDimFacesPaineis]) DESC
+                ) AS df
+                OUTER APPLY (
+                    SELECT TOP (1)
+                         p.[IDDimPaineisEuromidia]
+                        ,p.[Tipo]
+                        ,p.[DataAtualizacao]
+                    FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
+                    WHERE
+                        (
+                            ci.[IDPainelEuromidia] IS NOT NULL
+                            AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia])
+                        )
+                        OR (
+                            df.[IDDimPaineisEuromidia] IS NOT NULL
+                            AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia])
+                        )
+                        OR TRY_CONVERT(int, p.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                    ORDER BY
+                        CASE
+                            WHEN ci.[IDPainelEuromidia] IS NOT NULL
+                             AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia]) THEN 0
+                            WHEN df.[IDDimPaineisEuromidia] IS NOT NULL
+                             AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia]) THEN 1
+                            ELSE 2
+                        END,
+                        p.[DataAtualizacao] DESC,
+                        TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) DESC
+                ) AS pn
                 WHERE
                     ci.[IDFatoControleContratoEuromidia] = :id_contrato
                     AND ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens
@@ -28617,6 +29527,7 @@ def contratos_detalhe(id_contrato: int):
                     ,oc.[Referencia]
                     ,oc.[CodPonto]
                     ,oc.[CodFace]
+                    ,ip.[TipoPainelGrade]
                     ,oc.[IDPainelEuromidia]
                     ,oc.[Origem]
                     ,oc.[Status]
@@ -28691,6 +29602,7 @@ def contratos_detalhe(id_contrato: int):
                     ,rv.[Referencia]
                     ,rv.[CodPonto]
                     ,rv.[CodFace]
+                    ,oe.[TipoPainelGrade]
                     ,rv.[IDPainelEuromidia]
                     ,rv.[Origem]
                     ,rv.[Status]
@@ -28746,10 +29658,15 @@ def contratos_detalhe(id_contrato: int):
                         TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
                         OR (
                             TRY_CONVERT(int, rv.[IDFatoControleContratosItemOrigem]) = oe.IDItemContrato
-                            AND TRY_CONVERT(int, rv.[IDFatoControleContratos]) = :id_contrato
+                            AND (
+                                TRY_CONVERT(int, rv.[IDFatoControleContratos]) = :id_contrato
+                                OR rv.[IDFatoControleContratos] IS NULL
+                                OR TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
+                            )
                             AND (
                                 UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERENCIA%'
                                 OR UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERÊNCIA%'
+                                OR TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
                             )
                         )
                    )
@@ -28765,6 +29682,7 @@ def contratos_detalhe(id_contrato: int):
                 ,Referencia
                 ,CodPonto
                 ,CodFace
+                ,TipoPainelGrade
                 ,IDPainelEuromidia
                 ,Origem
                 ,Status
@@ -28804,6 +29722,7 @@ def contratos_detalhe(id_contrato: int):
                 ,Referencia
                 ,CodPonto
                 ,CodFace
+                ,TipoPainelGrade
                 ,IDPainelEuromidia
                 ,Origem
                 ,Status
@@ -28867,6 +29786,7 @@ def contratos_detalhe(id_contrato: int):
                     row_oper.get("CodFace") or item_oper.get("CodFace"),
                     row_oper.get("DataInicio") or item_oper.get("DataInicioPrevisto"),
                     row_oper.get("DataFim") or item_oper.get("DataTerminoPrevisto"),
+                    row_oper.get("TipoPainelGrade") or item_oper.get("TipoPainelGrade"),
                 )
 
                 preferencia_operacional = item_oper.setdefault(
@@ -28923,6 +29843,7 @@ def contratos_detalhe(id_contrato: int):
     html_renderizado = render_template(
         "euromidia/contratos_detalhe.html",
         contrato=contrato,
+        contrato_campos=contrato_campos,
         itens=itens,
         cards_relacionados=cards_relacionados,
         timeline_atendimentos=timeline_atendimentos,
@@ -28933,8 +29854,12 @@ def contratos_detalhe(id_contrato: int):
         d4_documentos_contrato=d4_documentos_contrato,
         historico_status_contrato=historico_status_contrato,
         preferencia_reserva_contrato=preferencia_reserva_contrato,
+        empresa_principal=empresa_principal,
+        empresa_principal_campos=empresa_principal_campos,
+        empresas_relacionadas=empresas_relacionadas,
         return_to=placeholder_return_to_contrato,
         modo_rapido_contrato=False,
+        contrato_detalhe_async=None,
     )
 
     if not cache_bypass_contrato:

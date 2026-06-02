@@ -340,27 +340,6 @@
       font-weight:900;
     }
     .timeline-pager .btn-page.is-active{ background:var(--euro-blue); border-color:var(--euro-blue); color:#fff; }
-    .modo-rapido-alerta{
-      margin-top:14px;
-      padding:12px 14px;
-      border:1px solid #BFDBFE;
-      border-radius:12px;
-      background:#EFF6FF;
-      color:#1E3A8A;
-      font-size:13px;
-      font-weight:850;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      flex-wrap:wrap;
-    }
-    .modo-rapido-alerta .btn-action{
-      width:auto;
-      min-height:34px;
-      text-decoration:none;
-      background:#fff;
-    }
     .thumb-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-top:12px; }
     .thumb-media{ width:100%; max-height:220px; object-fit:cover; border-radius:10px; border:1px solid var(--border); background:#f8fafc; }
     .thumb-media[data-src]:not([src]){ min-height:180px; }
@@ -1080,16 +1059,71 @@
       .ciclo-item{ grid-template-columns:26px minmax(0,1fr); }
       .ciclo-item .d4-badge{ grid-column:1 / -1; justify-self:flex-start; }
     }
+    .contrato-async-cache-bar{
+      margin-top:14px;
+      border:1px solid #E2E8F0;
+      border-radius:12px;
+      background:linear-gradient(180deg,#FFFFFF 0%,#F8FAFC 100%);
+      padding:12px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      color:#334155;
+      font-size:12px;
+      font-weight:850;
+    }
+    .contrato-async-cache-left{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+    .contrato-async-cache-spinner{
+      width:16px;
+      height:16px;
+      border-radius:999px;
+      border:3px solid #CBD5E1;
+      border-top-color:var(--euro-blue);
+      animation:contratoAsyncSpin .9s linear infinite;
+      flex:none;
+    }
+    .contrato-async-cache-title{
+      font-size:12px;
+      color:var(--text);
+      font-weight:950;
+    }
+    .contrato-async-cache-sub{
+      margin-top:2px;
+      font-size:11px;
+      color:var(--muted);
+      font-weight:750;
+    }
+    .contrato-async-cache-status{
+      color:#475569;
+      font-size:11px;
+      font-weight:900;
+    }
+    @keyframes contratoAsyncSpin{
+      to{ transform:rotate(360deg); }
+    }
+
 </style>
 
-  {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
-    <div class="modo-rapido-alerta">
-      <div>
-        
+  {% if contrato_detalhe_async is defined and contrato_detalhe_async %}
+    <div class="contrato-async-cache-bar"
+         data-contrato-async-cache
+         data-status-url="{{ contrato_detalhe_async.status_url }}"
+         data-url-completa="{{ contrato_detalhe_async.url_completa }}">
+      <div class="contrato-async-cache-left">
+        <span class="contrato-async-cache-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="contrato-async-cache-title">Preparando detalhe completo do contrato</div>
+          <div class="contrato-async-cache-sub">A tela já abriu com os dados principais. Negociação, preço praticado, check-ins, cards e timeline completa estão sendo montados em cache Redis via Celery.</div>
+        </div>
       </div>
-      <a class="btn-action" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), return_to=return_to, nocache=1) }}">
-        Carregar histórico completo
-      </a>
+      <div class="contrato-async-cache-status" data-contrato-async-cache-status>Carregando...</div>
     </div>
   {% endif %}
 
@@ -1543,7 +1577,7 @@
                       <div class="preferencia-operacional-linha-head">
                         <div class="preferencia-operacional-titulo">
                           <span class="preferencia-face-icone" aria-hidden="true">O</span>
-                          Ocupação origem da preferência
+                          Ocupação Origem da Preferência
                         </div>
                         <span class="badge {% if pref_ocupacao and pref_ocupacao.AtivoTexto == 'Sim' %}ok{% elif pref_ocupacao %}warn{% else %}danger{% endif %}">
                           {% if pref_ocupacao %}Ativo: {{ pref_ocupacao.AtivoTexto }}{% else %}Não encontrada{% endif %}
@@ -1571,7 +1605,7 @@
                       <div class="preferencia-operacional-linha-head">
                         <div class="preferencia-operacional-titulo">
                           <span class="preferencia-face-icone" aria-hidden="true">R</span>
-                          Reserva filha gerada pela preferência
+                          Reserva Filha Gerada pela Preferência
                         </div>
                         <span class="badge {% if pref_reserva and pref_reserva.AtivoTexto == 'Sim' %}ok{% elif pref_reserva %}warn{% else %}danger{% endif %}">
                           {% if pref_reserva %}Ativo: {{ pref_reserva.AtivoTexto }}{% else %}Não encontrada{% endif %}
@@ -1650,12 +1684,18 @@
               <summary>Ver +</summary>
               <div class="details-panel">
                 <div class="field-grid" style="margin-top:14px;">
-                  {% for campo in it._campos %}
-                    <div class="field-item">
-                      <div class="field-k">{{ campo.rotulo }}</div>
-                      <div class="field-v">{{ campo.valor }}</div>
+                  {% if it._campos and it._campos|length > 0 %}
+                    {% for campo in it._campos %}
+                      <div class="field-item">
+                        <div class="field-k">{{ campo.rotulo }}</div>
+                        <div class="field-v">{{ campo.valor }}</div>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <div class="empty-box" style="grid-column:1 / -1; margin:0;">
+                      Nenhuma informação cadastral da face/painel encontrada para este item.
                     </div>
-                  {% endfor %}
+                  {% endif %}
                 </div>
               </div>
             </details>
@@ -2010,13 +2050,13 @@
             <div class="timeline-page-info">Exibindo {{ timeline_paginacao.inicio }}–{{ timeline_paginacao.fim }} de {{ timeline_paginacao.total }} evento(s)</div>
             <div class="timeline-pager">
               {% if timeline_paginacao.has_prev %}
-                <a class="btn-page" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.prev_page) }}">Anterior</a>
+                <a class="btn-page" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), return_to=return_to, modo_completo=1, timeline_page=timeline_paginacao.prev_page) }}">Anterior</a>
               {% endif %}
               {% for p in range(1, timeline_paginacao.total_pages + 1) %}
-                <a class="btn-page {% if p == timeline_paginacao.page %}is-active{% endif %}" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=p) }}">{{ p }}</a>
+                <a class="btn-page {% if p == timeline_paginacao.page %}is-active{% endif %}" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), return_to=return_to, modo_completo=1, timeline_page=p) }}">{{ p }}</a>
               {% endfor %}
               {% if timeline_paginacao.has_next %}
-                <a class="btn-page" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), timeline_page=timeline_paginacao.next_page) }}">Próxima</a>
+                <a class="btn-page" href="{{ url_for('Paineis.contratos_detalhe', id_contrato=(contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia), return_to=return_to, modo_completo=1, timeline_page=timeline_paginacao.next_page) }}">Próxima</a>
               {% endif %}
             </div>
           </div>
@@ -2028,7 +2068,7 @@
       </div>
     {% else %}
       {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
-        <div class="empty-box" style="margin-top:14px;">Timeline não carregada no modo rápido. Use “Carregar histórico completo” para buscar movimentos, observações, logs, check-ins e negociações.</div>
+        <div class="empty-box" style="margin-top:14px;">Linha do tempo completa está sendo preparada em cache. A página será atualizada automaticamente.</div>
       {% else %}
         <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
       {% endif %}
@@ -2143,6 +2183,66 @@
         fecharModal(modal.id);
       });
     });
+  })();
+</script>
+
+
+<script>
+  (function(){
+    const barra = document.querySelector('[data-contrato-async-cache]');
+    if(!barra) return;
+
+    const statusUrl = barra.getAttribute('data-status-url');
+    const urlCompletaPadrao = barra.getAttribute('data-url-completa');
+    const statusEl = document.querySelector('[data-contrato-async-cache-status]');
+    let tentativas = 0;
+    const limiteTentativas = 90;
+
+    function atualizarStatus(texto){
+      if(statusEl){
+        statusEl.textContent = texto;
+      }
+    }
+
+    function consultar(){
+      if(!statusUrl){
+        atualizarStatus('Status indisponível');
+        return;
+      }
+
+      tentativas += 1;
+      fetch(statusUrl, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {'Accept': 'application/json'}
+      })
+      .then(function(resp){ return resp.json(); })
+      .then(function(payload){
+        if(payload && payload.ready){
+          atualizarStatus('Pronto. Atualizando tela...');
+          window.location.href = payload.url_completa || urlCompletaPadrao || window.location.href;
+          return;
+        }
+
+        if(tentativas >= limiteTentativas){
+          atualizarStatus('Ainda processando. Clique em atualizar em alguns segundos.');
+          return;
+        }
+
+        atualizarStatus('Preparando cache... ' + tentativas + '/' + limiteTentativas);
+        window.setTimeout(consultar, 1200);
+      })
+      .catch(function(){
+        if(tentativas >= limiteTentativas){
+          atualizarStatus('Não foi possível consultar o cache agora.');
+          return;
+        }
+        atualizarStatus('Tentando consultar novamente...');
+        window.setTimeout(consultar, 1800);
+      });
+    }
+
+    window.setTimeout(consultar, 700);
   })();
 </script>
 

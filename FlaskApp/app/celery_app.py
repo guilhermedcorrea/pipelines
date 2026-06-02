@@ -43,6 +43,7 @@ celery_app.conf.update(
         "app.tasks.paineis_relatorios_tasks",
         "app.tasks.kanban_tasks",
         "app.tasks.airflow_admin_tasks",
+        "app.tasks.contratos_detalhe_tasks",
     ),
     task_routes={
         "checkin.*": {"queue": "checkin_upload"},
@@ -50,6 +51,7 @@ celery_app.conf.update(
         "paineis_ocupacao.*": {"queue": "paineis_ocupacao"},
         "app.kanban.*": {"queue": os.getenv("CELERY_QUEUE_KANBAN_RETRY", "kanban_retry_rapido")},
         "airflow_admin.*": {"queue": os.getenv("CELERY_QUEUE_AIRFLOW_ADMIN", "airflow_admin")},
+        "contratos_detalhe.*": {"queue": os.getenv("CELERY_QUEUE_CONTRATOS_DETALHE", "contratos_detalhe")},
     },
     broker_transport_options={
         "visibility_timeout": 3600,
