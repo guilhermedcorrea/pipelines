@@ -945,6 +945,105 @@
       text-overflow:ellipsis;
     }
 
+    .contatos-contrato-wrap{
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .contato-contrato-row{
+      display:grid;
+      grid-template-columns:minmax(220px, 1.4fr) minmax(150px, .8fr) minmax(150px, .8fr) minmax(140px, .55fr) auto;
+      gap:12px;
+      align-items:end;
+      padding:12px;
+      border:1px solid #dbe7f6;
+      border-radius:16px;
+      background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow:0 8px 18px rgba(2,6,23,.04);
+    }
+
+    .contato-principal-check{
+      width:100%;
+      height:42px;
+      min-height:42px;
+      box-sizing:border-box;
+      display:flex;
+      align-items:center;
+      justify-content:flex-start;
+      gap:8px;
+      margin:0;
+      padding:0 12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      font-size:14px;
+      font-weight:900;
+      line-height:1;
+      color:#0f172a;
+      text-transform:none;
+      letter-spacing:0;
+      cursor:pointer;
+      user-select:none;
+    }
+
+    .field label.contato-principal-check{
+      font-size:14px;
+      color:#0f172a;
+      text-transform:none;
+      letter-spacing:0;
+    }
+
+    .contato-principal-check input{
+      width:18px;
+      height:18px;
+      flex:0 0 18px;
+      accent-color:#0b3294;
+    }
+
+    .contato-contrato-actions{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:8px;
+      min-height:42px;
+    }
+
+    .btn-contato-mini{
+      width:42px;
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:#fff;
+      color:#0b1a3a;
+      font-weight:900;
+      font-size:18px;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow:0 6px 14px rgba(2,6,23,.05);
+    }
+
+    .btn-contato-mini.add{
+      background:#e9f9ef;
+      border-color:#b7e4c7;
+      color:#166534;
+    }
+
+    .btn-contato-mini.remove{
+      background:#fff1f2;
+      border-color:#fecdd3;
+      color:#be123c;
+    }
+
+    .contatos-contrato-help{
+      color:#64748b;
+      font-size:12px;
+      font-weight:800;
+      line-height:1.5;
+    }
+
     .sticky-actions{
       position:sticky;
       bottom:12px;
@@ -969,6 +1068,21 @@
     @media (max-width: 1200px){
       .grid-4{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
       .painel-resumo{ grid-template-columns:repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 1100px){
+      .contato-contrato-row{
+        grid-template-columns:1fr 1fr;
+      }
+      .contato-contrato-actions{
+        justify-content:flex-start;
+      }
+    }
+
+    @media (max-width: 700px){
+      .contato-contrato-row{
+        grid-template-columns:1fr;
+      }
     }
 
     @media (max-width: 900px){
@@ -1659,6 +1773,84 @@
       </div>
     </div>
 
+    <div class="section">
+      <div class="section-head">
+        <div>Adicionar Contatos Contrato</div>
+        <div class="contatos-contrato-help">Os contatos serão salvos e Relacionados ao Contrato.</div>
+      </div>
+      <div class="section-body">
+        <div class="contatos-contrato-wrap" data-role="contatos-contrato-lista">
+          {% if contatos_contrato %}
+            {% for contato in contatos_contrato %}
+              <div class="contato-contrato-row" data-role="contato-contrato-row">
+                <input type="hidden" name="contato_contrato_idx" value="{{ loop.index0 }}" data-role="contato-contrato-idx">
+
+                <div class="field">
+                  <label>Email</label>
+                  <input type="email" maxlength="200" name="contato_contrato_{{ loop.index0 }}__EmailContrato" value="{{ contato.EmailContrato or '' }}" placeholder="email@empresa.com.br">
+                </div>
+
+                <div class="field">
+                  <label>Telefone</label>
+                  <input type="text" maxlength="20" name="contato_contrato_{{ loop.index0 }}__TelefoneContrato" value="{{ contato.TelefoneContrato or '' }}" placeholder="(00) 00000-0000">
+                </div>
+
+                <div class="field">
+                  <label>Cpf</label>
+                  <input type="text" maxlength="20" name="contato_contrato_{{ loop.index0 }}__CpfContrato" value="{{ contato.CpfContrato or '' }}" placeholder="000.000.000-00">
+                </div>
+
+                <div class="field">
+                  <label>ContatoPrincipal</label>
+                  <label class="contato-principal-check">
+                    <input type="checkbox" name="contato_contrato_{{ loop.index0 }}__ContatoPrincipal" value="1" {% if contato.BitResponsavelContrato %}checked{% endif %}>
+                    <span>Sim</span>
+                  </label>
+                </div>
+
+                <div class="contato-contrato-actions">
+                  <button type="button" class="btn-contato-mini add" data-role="contato-contrato-add" title="Adicionar linha">+</button>
+                  <button type="button" class="btn-contato-mini remove" data-role="contato-contrato-remove" title="Remover linha">−</button>
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="contato-contrato-row" data-role="contato-contrato-row">
+              <input type="hidden" name="contato_contrato_idx" value="0" data-role="contato-contrato-idx">
+
+              <div class="field">
+                <label>Email</label>
+                <input type="email" maxlength="200" name="contato_contrato_0__EmailContrato" value="" placeholder="email@empresa.com.br">
+              </div>
+
+              <div class="field">
+                <label>Telefone</label>
+                <input type="text" maxlength="20" name="contato_contrato_0__TelefoneContrato" value="" placeholder="(00) 00000-0000">
+              </div>
+
+              <div class="field">
+                <label>Cpf</label>
+                <input type="text" maxlength="20" name="contato_contrato_0__CpfContrato" value="" placeholder="000.000.000-00">
+              </div>
+
+              <div class="field">
+                <label>ContatoPrincipal</label>
+                <label class="contato-principal-check">
+                  <input type="checkbox" name="contato_contrato_0__ContatoPrincipal" value="1">
+                  <span>Sim</span>
+                </label>
+              </div>
+
+              <div class="contato-contrato-actions">
+                <button type="button" class="btn-contato-mini add" data-role="contato-contrato-add" title="Adicionar linha">+</button>
+                <button type="button" class="btn-contato-mini remove" data-role="contato-contrato-remove" title="Remover linha">−</button>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
     <div class="sticky-actions">
       <div class="bar">
         <a class="btn-x" href="{{ url_for('admin.lista_aprovacao_contratos') }}">← Voltar</a>
@@ -1929,6 +2121,112 @@
           vazio.textContent = "Nenhum período foi gerado. Verifique as datas do item.";
           if(resumo){ resumo.textContent = "Nenhum período gerado"; }
         }
+      }
+
+      const contatosContratoLista = document.querySelector('[data-role="contatos-contrato-lista"]');
+      let proximoIndiceContatoContrato = 1;
+
+      function atualizarProximoIndiceContatoContrato(){
+        if(!contatosContratoLista){ return; }
+
+        let maiorIndice = -1;
+        contatosContratoLista.querySelectorAll('[data-role="contato-contrato-idx"]').forEach(function(campoIdx){
+          const idx = Number(campoIdx.value);
+          if(Number.isFinite(idx) && idx > maiorIndice){
+            maiorIndice = idx;
+          }
+        });
+
+        proximoIndiceContatoContrato = maiorIndice + 1;
+      }
+
+      function atualizarVisibilidadeRemoverContatoContrato(){
+        if(!contatosContratoLista){ return; }
+
+        const linhas = contatosContratoLista.querySelectorAll('[data-role="contato-contrato-row"]');
+        linhas.forEach(function(linha){
+          const botaoRemover = linha.querySelector('[data-role="contato-contrato-remove"]');
+          if(botaoRemover){
+            botaoRemover.disabled = linhas.length <= 1;
+            botaoRemover.style.opacity = linhas.length <= 1 ? "0.45" : "1";
+            botaoRemover.style.cursor = linhas.length <= 1 ? "not-allowed" : "pointer";
+          }
+        });
+      }
+
+      function renomearCamposContatoContrato(linha, novoIndice){
+        const campoIdx = linha.querySelector('[data-role="contato-contrato-idx"]');
+        if(campoIdx){
+          campoIdx.value = String(novoIndice);
+        }
+
+        linha.querySelectorAll('input[name]').forEach(function(campo){
+          const nome = campo.getAttribute('name') || "";
+          if(nome === "contato_contrato_idx"){
+            return;
+          }
+
+          campo.setAttribute('name', nome.replace(/contato_contrato_\d+__/, `contato_contrato_${novoIndice}__`));
+        });
+      }
+
+      function limparCamposContatoContrato(linha){
+        linha.querySelectorAll('input').forEach(function(campo){
+          if(campo.type === "hidden"){
+            return;
+          }
+
+          if(campo.type === "checkbox"){
+            campo.checked = false;
+            return;
+          }
+
+          campo.value = "";
+        });
+      }
+
+      function adicionarLinhaContatoContrato(linhaReferencia){
+        if(!contatosContratoLista){ return; }
+
+        atualizarProximoIndiceContatoContrato();
+        const origem = linhaReferencia || contatosContratoLista.querySelector('[data-role="contato-contrato-row"]');
+        if(!origem){ return; }
+
+        const novaLinha = origem.cloneNode(true);
+        const novoIndice = proximoIndiceContatoContrato++;
+        renomearCamposContatoContrato(novaLinha, novoIndice);
+        limparCamposContatoContrato(novaLinha);
+
+        origem.insertAdjacentElement("afterend", novaLinha);
+        atualizarVisibilidadeRemoverContatoContrato();
+      }
+
+      if(contatosContratoLista){
+        atualizarProximoIndiceContatoContrato();
+        atualizarVisibilidadeRemoverContatoContrato();
+
+        contatosContratoLista.addEventListener("click", function(evento){
+          const botaoAdicionar = evento.target.closest('[data-role="contato-contrato-add"]');
+          const botaoRemover = evento.target.closest('[data-role="contato-contrato-remove"]');
+
+          if(botaoAdicionar){
+            adicionarLinhaContatoContrato(botaoAdicionar.closest('[data-role="contato-contrato-row"]'));
+            return;
+          }
+
+          if(botaoRemover){
+            const linhas = contatosContratoLista.querySelectorAll('[data-role="contato-contrato-row"]');
+            if(linhas.length <= 1){
+              return;
+            }
+
+            const linha = botaoRemover.closest('[data-role="contato-contrato-row"]');
+            if(linha){
+              linha.remove();
+              atualizarVisibilidadeRemoverContatoContrato();
+            }
+          }
+        });
       }
 
       document.querySelectorAll("[data-item-card]").forEach(function(itemCard){

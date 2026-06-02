@@ -35,6 +35,8 @@ TABELA_KANBAN_CARD_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCard]"
 TABELA_KANBAN_CARD_TAG_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardTag]"
 TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
 TABELA_CONTRATO_EMPRESA_RELACIONADA = "[Integracao].[Silver].[FatoContratoEmpresaRelacionada]"
+TABELA_EMAIL_CONTRATO_ADMIN = "[Integracao].[Silver].[DimEmailContrato]"
+TABELA_HISTORICO_CONTRATOS_D4_ADMIN = "[Integracao].[Silver].[DimHistoricoContratosD4]"
 TABELA_KANBAN_FASE_RENOVACAO = "[Kanban].[Silver].[DimKanbanFase]"
 TABELA_KANBAN_TAG_RENOVACAO = "[Kanban].[Silver].[DimKanbanTag]"
 TABELA_KANBAN_STATUS_CARD_RENOVACAO = "[Kanban].[Silver].[DimKanbanStatusCard]"
@@ -44,6 +46,8 @@ ID_TAG_RENOVACAO_CAMPANHA = 17
 ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN = 8
 ID_TAG_TIPO_CONTRATO_NOVO_ADMIN = 9
 ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO = 3
+ID_EMPRESA_PROPRIETARIA_HISTORICO_D4_ADMIN = 3
+ID_STATUS_D4_PROCESSANDO_ADMIN = 1
 STATUS_CARD_RENOVACAO_PADRAO = "ATIVO"
 
 ID_STATUS_CAMPANHA_FUTURA = 1
@@ -10046,6 +10050,237 @@ def _valor_form_ou_fallback(form, nome_campo: str, parser, item_atual: dict, fal
 
     return fallback.get(campo_banco)
 
+
+def _form_getlist_admin(form, nome_campo: str) -> list:
+    """Lê campos múltiplos tanto do request.form quanto do dicionário vindo do Celery."""
+    if form is None:
+        return []
+
+    try:
+        if hasattr(form, "getlist"):
+            return list(form.getlist(nome_campo) or [])
+    except Exception:
+        pass
+
+    try:
+        valor = form.get(nome_campo)
+    except Exception:
+        valor = None
+
+    if valor is None:
+        return []
+
+    if isinstance(valor, (list, tuple, set)):
+        return list(valor)
+
+    return [valor]
+
+
+def _form_get_first_admin(form, nome_campo: str, padrao: str = ""):
+    valores = _form_getlist_admin(form, nome_campo)
+    if not valores:
+        return padrao
+    return valores[0]
+
+
+def _bit_form_admin(valor) -> int:
+    texto = str(valor or "").strip().lower()
+    return 1 if texto in ("1", "true", "t", "sim", "s", "yes", "y", "on") else 0
+
+
+def _buscar_dim_email_contrato_admin(
+    *,
+    id_fato_controle_contratos: int | None = None,
+    id_fato_kanban_card: int | None = None,
+) -> list[dict]:
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+
+    if id_contrato in (None, "", 0) and id_card in (None, "", 0):
+        return []
+
+    rows = db.session.execute(
+        text(f"""
+            SELECT
+                 IDDimEmailContratoEmailContrato
+                ,IDFatoControleContratosEuromidia
+                ,IDFatoKanbanCard
+                ,EmailContrato
+                ,TelefoneContrato
+                ,CpfContrato
+                ,BitResponsavelContrato
+            FROM {TABELA_EMAIL_CONTRATO_ADMIN}
+            WHERE
+                (
+                    :id_contrato IS NOT NULL
+                    AND IDFatoControleContratosEuromidia = :id_contrato
+                )
+                OR
+                (
+                    :id_card IS NOT NULL
+                    AND IDFatoKanbanCard = :id_card
+                )
+            ORDER BY
+                CASE WHEN ISNULL(BitResponsavelContrato, 0) = 1 THEN 0 ELSE 1 END,
+                IDDimEmailContratoEmailContrato ASC
+        """),
+        {
+            "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+        },
+    ).mappings().all()
+
+    return [dict(row) for row in rows]
+
+
+def _extrair_contatos_contrato_formulario_admin(form) -> tuple[bool, list[dict]]:
+    """Extrai as linhas dinâmicas do bloco Adicionar Contatos Contrato."""
+    indices = [str(x or "").strip() for x in _form_getlist_admin(form, "contato_contrato_idx")]
+    indices = [idx for idx in indices if idx != ""]
+
+    if not indices:
+        return False, []
+
+    contatos = []
+    for idx in indices:
+        email = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__EmailContrato"))[:200]
+        telefone = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__TelefoneContrato"))[:20]
+        cpf = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__CpfContrato"))[:20]
+        principal = _bit_form_admin(_form_get_first_admin(form, f"contato_contrato_{idx}__ContatoPrincipal"))
+
+        if not email and not telefone and not cpf:
+            continue
+
+        contatos.append(
+            {
+                "EmailContrato": email or None,
+                "TelefoneContrato": telefone or None,
+                "CpfContrato": cpf or None,
+                "BitResponsavelContrato": principal,
+            }
+        )
+
+    return True, contatos
+
+
+def _sincronizar_dim_email_contrato_por_formulario_admin(
+    *,
+    id_fato_controle_contratos: int | None = None,
+    id_fato_kanban_card: int | None = None,
+    form=None,
+) -> dict:
+    """
+    Sincroniza o bloco Adicionar Contatos Contrato com Silver.DimEmailContrato.
+
+    Regra aplicada:
+    - salvar antes da aprovação grava pelo IDFatoKanbanCard;
+    - aprovar depois da criação do contrato grava/atualiza com IDFatoKanbanCard e IDFatoControleContratosEuromidia;
+    - quando não houver form, apenas completa o ID do contrato em registros já salvos pelo card.
+    """
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+
+    if id_contrato in (None, "", 0) and id_card in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_referencia",
+            "mensagem": "Não sincronizei contatos porque não veio IDFatoKanbanCard nem IDFatoControleContratosEuromidia.",
+        }
+
+    if form is None:
+        if id_contrato not in (None, "", 0) and id_card not in (None, "", 0):
+            db.session.execute(
+                text(f"""
+                    UPDATE {TABELA_EMAIL_CONTRATO_ADMIN}
+                       SET IDFatoControleContratosEuromidia = :id_contrato,
+                           IDFatoKanbanCard = COALESCE(IDFatoKanbanCard, :id_card)
+                     WHERE IDFatoKanbanCard = :id_card
+                       AND (
+                            IDFatoControleContratosEuromidia IS NULL
+                            OR IDFatoControleContratosEuromidia = :id_contrato
+                       )
+                """),
+                {
+                    "id_contrato": int(id_contrato),
+                    "id_card": int(id_card),
+                },
+            )
+
+        return {
+            "ok": True,
+            "status": "referencia_atualizada_sem_formulario",
+            "id_contrato": int(id_contrato) if id_contrato else None,
+            "id_card": int(id_card) if id_card else None,
+        }
+
+    campos_presentes, contatos = _extrair_contatos_contrato_formulario_admin(form)
+
+    if not campos_presentes:
+        return {
+            "ok": True,
+            "status": "sem_campos_no_formulario",
+            "id_contrato": int(id_contrato) if id_contrato else None,
+            "id_card": int(id_card) if id_card else None,
+        }
+
+    db.session.execute(
+        text(f"""
+            DELETE FROM {TABELA_EMAIL_CONTRATO_ADMIN}
+            WHERE
+                (
+                    :id_contrato IS NOT NULL
+                    AND IDFatoControleContratosEuromidia = :id_contrato
+                )
+                OR
+                (
+                    :id_card IS NOT NULL
+                    AND IDFatoKanbanCard = :id_card
+                )
+        """),
+        {
+            "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+        },
+    )
+
+    for contato in contatos:
+        db.session.execute(
+            text(f"""
+                INSERT INTO {TABELA_EMAIL_CONTRATO_ADMIN} (
+                     IDFatoControleContratosEuromidia
+                    ,IDFatoKanbanCard
+                    ,EmailContrato
+                    ,TelefoneContrato
+                    ,CpfContrato
+                    ,BitResponsavelContrato
+                )
+                VALUES (
+                     :id_contrato
+                    ,:id_card
+                    ,:email
+                    ,:telefone
+                    ,:cpf
+                    ,:principal
+                )
+            """),
+            {
+                "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+                "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+                "email": contato.get("EmailContrato"),
+                "telefone": contato.get("TelefoneContrato"),
+                "cpf": contato.get("CpfContrato"),
+                "principal": int(contato.get("BitResponsavelContrato") or 0),
+            },
+        )
+
+    return {
+        "ok": True,
+        "status": "sincronizado",
+        "id_contrato": int(id_contrato) if id_contrato else None,
+        "id_card": int(id_card) if id_card else None,
+        "quantidade": len(contatos),
+    }
+
 def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     sql_cabecalho = text("""
         SELECT TOP 1
@@ -10421,9 +10656,15 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
         item["TemAgendamentoFaceContrato"] = qtd_ag > 0
         item["QuantidadeAgendamentosFaceContrato"] = qtd_ag
 
+    contatos_contrato = _buscar_dim_email_contrato_admin(
+        id_fato_controle_contratos=cab.get("IDFatoControleContratosEuromidia"),
+        id_fato_kanban_card=cab.get("IDFatoKanbanCard"),
+    )
+
     return {
         "solicitacao": cab,
         "itens": itens,
+        "contatos_contrato": contatos_contrato,
         "diagrama_status": _montar_diagrama_status_contrato(
             id_empresa_proprietaria=cab.get("IDEmpresaProprietaria"),
             id_status_atual=cab.get("IDDimStatusContratos"),
@@ -12280,6 +12521,252 @@ def _d4sign_buscar_detalhe_documento_admin(uuid_documento: str) -> dict:
     return _d4sign_primeiro_objeto_admin(resposta)
 
 
+def _d4sign_normalizar_nome_status_admin(valor: str | None) -> str:
+    """Normaliza o nome do status D4 para comparar com DimStatusD4."""
+
+    texto = _texto_ou_vazio(valor).upper().strip()
+    if not texto:
+        return ""
+
+    substituicoes = {
+        "Á": "A", "À": "A", "Â": "A", "Ã": "A", "Ä": "A",
+        "É": "E", "È": "E", "Ê": "E", "Ë": "E",
+        "Í": "I", "Ì": "I", "Î": "I", "Ï": "I",
+        "Ó": "O", "Ò": "O", "Ô": "O", "Õ": "O", "Ö": "O",
+        "Ú": "U", "Ù": "U", "Û": "U", "Ü": "U",
+        "Ç": "C",
+    }
+    for origem, destino in substituicoes.items():
+        texto = texto.replace(origem, destino)
+
+    texto = re.sub(r"\s+", " ", texto)
+    return texto.strip()
+
+
+def _d4sign_id_status_por_nome_admin(nome_status: str | None) -> int | None:
+    """Converte NomeStatus do D4 para o IDDimStatusD4 cadastrado localmente."""
+
+    nome = _d4sign_normalizar_nome_status_admin(nome_status)
+    if not nome:
+        return None
+
+    mapa = {
+        "PROCESSANDO": 1,
+        "AGUARDANDO SIGNATARIOS": 2,
+        "AGUARDANDO SIGNATARIO": 2,
+        "AGUARDANDO ASSINATURAS": 3,
+        "AGUARDANDO ASSINATURA": 3,
+        "FINALIZADO": 4,
+        "ARQUIVADO": 5,
+        "CANCELADO": 6,
+        "EDITANDO": 7,
+    }
+
+    if nome in mapa:
+        return mapa[nome]
+
+    for chave, id_status in mapa.items():
+        if chave in nome:
+            return id_status
+
+    return None
+
+
+def _d4sign_extrair_id_status_d4_admin(detalhe: dict | None, fallback: int = ID_STATUS_D4_PROCESSANDO_ADMIN) -> int:
+    """Extrai o IDDimStatusD4 de respostas variadas da API D4Sign."""
+
+    if not isinstance(detalhe, dict):
+        return int(fallback or ID_STATUS_D4_PROCESSANDO_ADMIN)
+
+    valor_id = (
+        detalhe.get("IDDimStatusD4")
+        or detalhe.get("id_dim_status_d4")
+        or detalhe.get("id_fase_d4")
+        or detalhe.get("IDFaseD4")
+        or detalhe.get("statusId")
+        or detalhe.get("status_id")
+        or detalhe.get("id_status")
+        or detalhe.get("idStatus")
+    )
+
+    id_status = _d4sign_para_int_ou_none_admin(valor_id)
+    if id_status in (1, 2, 3, 4, 5, 6, 7):
+        return int(id_status)
+
+    nome_status = (
+        detalhe.get("NomeStatus")
+        or detalhe.get("nome_status")
+        or detalhe.get("nome_fase_d4")
+        or detalhe.get("NomeFaseD4")
+        or detalhe.get("statusName")
+        or detalhe.get("status_name")
+        or detalhe.get("status")
+        or detalhe.get("phase")
+        or detalhe.get("fase")
+    )
+
+    id_por_nome = _d4sign_id_status_por_nome_admin(nome_status)
+    if id_por_nome in (1, 2, 3, 4, 5, 6, 7):
+        return int(id_por_nome)
+
+    return int(fallback or ID_STATUS_D4_PROCESSANDO_ADMIN)
+
+
+def _d4sign_inserir_historico_contratos_d4_admin(
+    *,
+    id_fato_controle_contratos: int,
+    id_dim_status_contratos: int | None,
+    id_dim_status_d4: int | None = None,
+) -> int:
+    """Insere a linha inicial do histórico D4 do contrato aprovado."""
+
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    if id_contrato in (None, "", 0):
+        raise RuntimeError("Não inseri histórico D4 porque IDFatoControleContratosEuromidia veio vazio.")
+
+    id_status_contrato = _int_ou_none(id_dim_status_contratos) or ID_STATUS_CONTRATO_APROVADO
+    id_status_d4 = _int_ou_none(id_dim_status_d4) or ID_STATUS_D4_PROCESSANDO_ADMIN
+
+    row = db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_HISTORICO_CONTRATOS_D4_ADMIN}
+            (
+                 IDEmpresaProprietaria
+                ,IDFatoControleContratosEuromidia
+                ,IDDimStatusContratos
+                ,IDDimStatusD4
+                ,DataStatus
+            )
+            OUTPUT INSERTED.IDDimHistoricoContratos AS IDDimHistoricoContratos
+            VALUES
+            (
+                 :id_empresa_proprietaria
+                ,:id_contrato
+                ,:id_status_contrato
+                ,:id_status_d4
+                ,GETDATE()
+            )
+        """),
+        {
+            "id_empresa_proprietaria": int(ID_EMPRESA_PROPRIETARIA_HISTORICO_D4_ADMIN),
+            "id_contrato": int(id_contrato),
+            "id_status_contrato": int(id_status_contrato) if id_status_contrato not in (None, "", 0) else None,
+            "id_status_d4": int(id_status_d4) if id_status_d4 not in (None, "", 0) else None,
+        },
+    ).mappings().first()
+
+    if not row or row.get("IDDimHistoricoContratos") is None:
+        raise RuntimeError("Histórico D4 inserido, mas não consegui recuperar IDDimHistoricoContratos.")
+
+    return int(row["IDDimHistoricoContratos"])
+
+
+def _d4sign_atualizar_status_historico_contratos_d4_admin(
+    *,
+    id_dim_historico_contratos: int,
+    id_dim_status_d4: int,
+) -> None:
+    """Atualiza a linha recém-inserida com o status atual consultado na D4Sign."""
+
+    id_historico = _int_ou_none(id_dim_historico_contratos)
+    id_status = _int_ou_none(id_dim_status_d4)
+
+    if id_historico in (None, "", 0) or id_status in (None, "", 0):
+        return
+
+    db.session.execute(
+        text(f"""
+            UPDATE {TABELA_HISTORICO_CONTRATOS_D4_ADMIN}
+               SET IDDimStatusD4 = :id_status_d4,
+                   DataStatus = GETDATE()
+             WHERE IDDimHistoricoContratos = :id_historico
+        """),
+        {
+            "id_status_d4": int(id_status),
+            "id_historico": int(id_historico),
+        },
+    )
+
+
+def _d4sign_registrar_historico_status_contrato_d4_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_dim_status_contratos: int | None,
+    resultado_d4sign: dict | None,
+) -> dict:
+    """Registra o histórico D4 depois que o documento foi enviado/criado na D4Sign."""
+
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    if id_contrato in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_contrato",
+            "mensagem": "Histórico D4 não inserido porque o contrato veio vazio.",
+        }
+
+    resultado = resultado_d4sign if isinstance(resultado_d4sign, dict) else {}
+    uuid_documento = _texto_ou_vazio(resultado.get("uuid_documento_d4")).strip()
+
+    if not resultado.get("ok") or not uuid_documento:
+        return {
+            "ok": False,
+            "status": "sem_documento_d4",
+            "mensagem": "Histórico D4 não inserido porque o documento D4Sign ainda não foi criado/localizado.",
+            "id_contrato": int(id_contrato),
+        }
+
+    id_status_inicial = _d4sign_extrair_id_status_d4_admin(
+        resultado,
+        fallback=ID_STATUS_D4_PROCESSANDO_ADMIN,
+    )
+
+    id_historico = _d4sign_inserir_historico_contratos_d4_admin(
+        id_fato_controle_contratos=int(id_contrato),
+        id_dim_status_contratos=id_dim_status_contratos or ID_STATUS_CONTRATO_APROVADO,
+        id_dim_status_d4=id_status_inicial,
+    )
+
+    detalhe_d4 = None
+    id_status_final = id_status_inicial
+
+    try:
+        detalhe_d4 = _d4sign_buscar_detalhe_documento_admin(uuid_documento)
+        id_status_final = _d4sign_extrair_id_status_d4_admin(
+            detalhe_d4,
+            fallback=id_status_inicial,
+        )
+
+        _d4sign_atualizar_status_historico_contratos_d4_admin(
+            id_dim_historico_contratos=int(id_historico),
+            id_dim_status_d4=int(id_status_final),
+        )
+
+    except Exception as exc:
+        current_app.logger.exception(
+            "D4SIGN_HISTORICO | histórico inserido, mas falhou consulta/atualização do status D4 | id_contrato=%s | uuid=%s",
+            id_contrato,
+            uuid_documento,
+        )
+        return {
+            "ok": False,
+            "status": "historico_inserido_sem_atualizacao_d4",
+            "id_historico_d4": int(id_historico),
+            "id_contrato": int(id_contrato),
+            "uuid_documento_d4": uuid_documento,
+            "id_dim_status_d4": int(id_status_inicial),
+            "erro": str(exc),
+        }
+
+    return {
+        "ok": True,
+        "status": "registrado",
+        "id_historico_d4": int(id_historico),
+        "id_contrato": int(id_contrato),
+        "uuid_documento_d4": uuid_documento,
+        "id_dim_status_d4": int(id_status_final),
+        "detalhe_d4": detalhe_d4,
+    }
+
 
 def _d4sign_inserir_fato_contrato_admin(
     *,
@@ -12723,6 +13210,12 @@ def _processar_aprovacao_contrato_admin(
         cabecalho_solicitacao=cab_aprovada,
     )
 
+    resultado_emails_contrato = _sincronizar_dim_email_contrato_por_formulario_admin(
+        id_fato_controle_contratos=id_fato_controle,
+        id_fato_kanban_card=id_card,
+        form=form,
+    )
+
     _upsert_destinatarios_externos_contrato(
         id_fato_controle_contratos=id_fato_controle,
         id_empresa_destinatario=id_empresa,
@@ -12834,6 +13327,42 @@ def _processar_aprovacao_contrato_admin(
             id_card,
         )
 
+    resultado_historico_d4 = {}
+    if resultado_d4sign.get("ok"):
+        try:
+            resultado_historico_d4 = _d4sign_registrar_historico_status_contrato_d4_admin(
+                id_fato_controle_contratos=id_fato_controle,
+                id_dim_status_contratos=cab_aprovada.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_APROVADO,
+                resultado_d4sign=resultado_d4sign,
+            )
+            db.session.commit()
+
+            current_app.logger.info(
+                "D4SIGN_HISTORICO | histórico registrado após aprovação | id_contrato=%s | id_solicitacao=%s | resultado=%s",
+                id_fato_controle,
+                id_solicitacao_int,
+                resultado_historico_d4,
+            )
+
+        except Exception as exc:
+            db.session.rollback()
+            resultado_historico_d4 = {
+                "ok": False,
+                "status": "erro",
+                "erro": str(exc),
+            }
+            current_app.logger.exception(
+                "D4SIGN_HISTORICO | contrato aprovado/D4 criado, mas falhou ao registrar histórico | id_contrato=%s | id_solicitacao=%s",
+                id_fato_controle,
+                id_solicitacao_int,
+            )
+    else:
+        resultado_historico_d4 = {
+            "ok": False,
+            "status": "d4sign_nao_criado",
+            "mensagem": "Histórico D4 não inserido porque o documento D4Sign não foi criado/localizado.",
+        }
+
     task_airflow_id = None
     if enfileirar_airflow:
         try:
@@ -12884,12 +13413,14 @@ def _processar_aprovacao_contrato_admin(
         "ids_itens_controle": ids_itens_controle,
         "task_airflow_id": task_airflow_id,
         "resultado_d4sign": resultado_d4sign,
+        "resultado_historico_d4": resultado_historico_d4,
         "resultado_aprovacao": resultado_aprovacao,
         "precos_praticados": resultado_aprovacao.get("precos_praticados") or [],
         "empresas_relacionadas_sincronizadas": resultado_aprovacao.get("empresas_relacionadas_sincronizadas") or [],
         "resultado_agendamentos_face": resultado_agendamentos_face,
         "resultado_agendamentos_pendentes": resultado_agendamentos_pendentes,
         "resultado_bit_fracionado": resultado_bit_fracionado,
+        "resultado_emails_contrato": resultado_emails_contrato,
     }
 
 
@@ -12932,6 +13463,12 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     id_empresa=id_empresa,
                     id_empresa_proprietaria=id_empresa_proprietaria,
                     id_fato_controle_contratos=id_fato_controle,
+                )
+
+                _sincronizar_dim_email_contrato_por_formulario_admin(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_kanban_card=id_card,
+                    form=request.form,
                 )
 
                 _registrar_historico_contrato_euromidia(
@@ -12992,6 +13529,12 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     chave: request.form.getlist(chave)
                     for chave in request.form.keys()
                 }
+
+                _sincronizar_dim_email_contrato_por_formulario_admin(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_kanban_card=id_card,
+                    form=request.form,
+                )
 
                 db.session.execute(
                     text("""
@@ -13116,6 +13659,7 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
         "admin/aprovacao_contrato_detalhe.html",
         solicitacao=dados["solicitacao"],
         itens=dados["itens"],
+        contatos_contrato=dados.get("contatos_contrato") or [],
         diagrama_status=dados["diagrama_status"],
     )
 
