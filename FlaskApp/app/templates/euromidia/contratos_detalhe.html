@@ -1205,22 +1205,6 @@
 
 </style>
 
-  {% if contrato_detalhe_async is defined and contrato_detalhe_async %}
-    <div class="contrato-async-cache-bar"
-         data-contrato-async-cache
-         data-status-url="{{ contrato_detalhe_async.status_url }}"
-         data-url-completa="{{ contrato_detalhe_async.url_completa }}">
-      <div class="contrato-async-cache-left">
-        <span class="contrato-async-cache-spinner" aria-hidden="true"></span>
-        <div>
-          <div class="contrato-async-cache-title">Preparando detalhe completo do contrato</div>
-          <div class="contrato-async-cache-sub">A tela já abriu com os dados principais. Negociação, preço praticado, check-ins, cards e timeline completa estão sendo montados em cache Redis via Celery.</div>
-        </div>
-      </div>
-      <div class="contrato-async-cache-status" data-contrato-async-cache-status>Carregando...</div>
-    </div>
-  {% endif %}
-
 
   {% set diagrama_status_existe = diagrama_status is defined and diagrama_status %}
   {% set mapa_status_nome = {
@@ -2188,11 +2172,7 @@
         {% endif %}
       </div>
     {% else %}
-      {% if modo_rapido_contrato is defined and modo_rapido_contrato %}
-        <div class="empty-box" style="margin-top:14px;">Linha do tempo completa está sendo preparada em cache. A página será atualizada automaticamente.</div>
-      {% else %}
-        <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
-      {% endif %}
+      <div class="empty-box" style="margin-top:14px;">Ainda não há eventos para montar a timeline deste contrato.</div>
     {% endif %}
   </div>
 
@@ -2308,64 +2288,7 @@
 </script>
 
 
-<script>
-  (function(){
-    const barra = document.querySelector('[data-contrato-async-cache]');
-    if(!barra) return;
 
-    const statusUrl = barra.getAttribute('data-status-url');
-    const urlCompletaPadrao = barra.getAttribute('data-url-completa');
-    const statusEl = document.querySelector('[data-contrato-async-cache-status]');
-    let tentativas = 0;
-    const limiteTentativas = 90;
-
-    function atualizarStatus(texto){
-      if(statusEl){
-        statusEl.textContent = texto;
-      }
-    }
-
-    function consultar(){
-      if(!statusUrl){
-        atualizarStatus('Status indisponível');
-        return;
-      }
-
-      tentativas += 1;
-      fetch(statusUrl, {
-        method: 'GET',
-        credentials: 'same-origin',
-        headers: {'Accept': 'application/json'}
-      })
-      .then(function(resp){ return resp.json(); })
-      .then(function(payload){
-        if(payload && payload.ready){
-          atualizarStatus('Pronto. Atualizando tela...');
-          window.location.href = payload.url_completa || urlCompletaPadrao || window.location.href;
-          return;
-        }
-
-        if(tentativas >= limiteTentativas){
-          atualizarStatus('Ainda processando. Clique em atualizar em alguns segundos.');
-          return;
-        }
-
-        atualizarStatus('Preparando cache... ' + tentativas + '/' + limiteTentativas);
-        window.setTimeout(consultar, 1200);
-      })
-      .catch(function(){
-        if(tentativas >= limiteTentativas){
-          atualizarStatus('Não foi possível consultar o cache agora.');
-          return;
-        }
-        atualizarStatus('Tentando consultar novamente...');
-        window.setTimeout(consultar, 1800);
-      });
-    }
-
-    window.setTimeout(consultar, 700);
-  })();
-</script>
 
 <script>
   (function(){

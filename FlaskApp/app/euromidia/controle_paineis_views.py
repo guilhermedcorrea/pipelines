@@ -9336,1046 +9336,6 @@ def contrato_detalhe(id_fato_controle_contratos: int):
     """
     return contratos_detalhe(id_fato_controle_contratos)
 
-    timeline_page = request.args.get("timeline_page", default=1, type=int) or 1
-    if timeline_page < 1:
-        timeline_page = 1
-    timeline_per_page = 8
-
-    def _fmt_valor(v):
-        if v is None:
-            return "—"
-        if isinstance(v, datetime):
-            return v.strftime("%d/%m/%Y %H:%M")
-        if isinstance(v, date):
-            return v.strftime("%d/%m/%Y")
-        if isinstance(v, bool):
-            return "Sim" if v else "Não"
-        if isinstance(v, Decimal):
-            try:
-                return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            except Exception:
-                return str(v)
-        if isinstance(v, float):
-            try:
-                return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            except Exception:
-                return str(v)
-        txt = str(v).strip()
-        return txt if txt else "—"
-
-    def _rotulo_campo(chave: str) -> str:
-        mapa = {
-            "IDFatoControleContratosEuromidia": "ID Contrato Controle",
-            "IDFatoControleContratos": "ID Contrato Controle",
-            "IDFatoSolicitacaoContratoEuromidia": "ID Solicitação Contrato",
-            "IDFatoSolicitacaoContratoItemEuromidia": "ID Solicitação Item",
-            "IDFatoControleContratosItensEuromidia": "ID Item Contrato",
-            "IDEmpresa": "ID Empresa",
-            "IDEmpresaAgencia": "ID Empresa Agência",
-            "IDDimFacesPaineis": "ID Face",
-            "IDPainelEuromidia": "ID Painel",
-            "IDDimCheckinHistorico": "ID Check-in",
-            "IDFatoKanbanCard": "ID Card Kanban",
-            "CNPJ": "CNPJ",
-            "CPF": "CPF",
-            "OBS": "Observação",
-        }
-        if chave in mapa:
-            return mapa[chave]
-        txt = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(chave or "")).replace("_", " ").strip()
-        return txt or str(chave)
-
-    def _campos_de_mapping(row, ignorar=None):
-        ignorar = set(ignorar or [])
-        if not row:
-            return []
-        campos = []
-        for chave, valor in row.items():
-            if chave in ignorar:
-                continue
-            campos.append(SimpleNamespace(
-                chave=chave,
-                rotulo=_rotulo_campo(chave),
-                valor=_fmt_valor(valor),
-                bruto=valor,
-            ))
-        return campos
-
-    sql_contrato = text(r"""
-        SELECT
-            c.*,
-            c.IDFatoControleContratosEuromidia AS IDFatoControleContratos,
-            c.QuantidadePontos AS QtdeCodPonto,
-            c.QuantidadeFaces  AS QtdeCodFace,
-            cidade.CidadeExibicao,
-            emp.RazaoSocial AS RazaoSocialEmpresa,
-            emp.NomeFantasia AS NomeFantasiaEmpresa
-        FROM [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
-        LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
-            ON emp.IDEmpresa = c.IDEmpresa
-        OUTER APPLY (
-            SELECT TOP (1)
-                i.CidadeExibicao
-            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
-            WHERE i.IDFatoControleContratoEuromidia = c.IDFatoControleContratosEuromidia
-              AND NULLIF(LTRIM(RTRIM(COALESCE(i.CidadeExibicao, ''))), '') IS NOT NULL
-            ORDER BY i.IDFatoControleContratosItensEuromidia ASC
-        ) cidade
-        WHERE c.IDFatoControleContratosEuromidia = :id
-    """)
-
-    contrato = db.session.execute(
-        sql_contrato,
-        {"id": id_fato_controle_contratos}
-    ).mappings().first()
-
-    if not contrato:
-        abort(404)
-
-    contrato = dict(contrato)
-
-    if _usuario_logado_eh_perfil_vendedor():
-        vendedor_logado_info = _resolver_vendedor_logado_info()
-        id_vendedor_logado = int(vendedor_logado_info.get("IDVendedor") or 0)
-        nome_vendedor_logado = str(vendedor_logado_info.get("NomeVendedor") or "").strip()
-
-        if not _contrato_pertence_ao_vendedor_logado(
-            id_fato_controle_contratos,
-            id_vendedor_logado=id_vendedor_logado,
-            nome_vendedor_logado=nome_vendedor_logado,
-        ):
-            abort(403, description="Perfil Vendedor só pode abrir contratos vinculados ao próprio vendedor.")
-
-    sql_itens = text(r"""
-    ;WITH ItensContrato AS (
-        SELECT
-            i.*,
-            i.IDFatoControleContratosItensEuromidia AS IDFatoControleContratosItens,
-            i.DataInicioPrevisto  AS DataInicioPrevisto_dt,
-            i.DataTerminoPrevisto AS DataTerminoPrevisto_dt,
-            i.DataCancelamento    AS DataCancelamento_dt
-        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
-        WHERE i.IDFatoControleContratoEuromidia = :id
-    ),
-    MargemFace AS (
-        SELECT
-            m.IDFatoControleContratosEuromidia AS IDFatoControleContratos,
-            m.CodFace AS CodFace,
-            SUM(TRY_CONVERT(decimal(19,4), m.FaturamentoLiquidoMensalFinal)) AS FatLiquidoFinal_Soma,
-            SUM(TRY_CONVERT(decimal(19,4), m.CustoMensalAlocado))            AS CustoMensalAlocado_Soma,
-            CAST(
-                SUM(TRY_CONVERT(decimal(19,4), m.FaturamentoLiquidoMensalFinal)) -
-                SUM(TRY_CONVERT(decimal(19,4), m.CustoMensalAlocado))
-                AS decimal(19,4)
-            ) AS MargemR_Face_Soma,
-            CAST(
-                CASE
-                    WHEN NULLIF(SUM(TRY_CONVERT(decimal(19,4), m.FaturamentoLiquidoMensalFinal)), 0) IS NULL THEN NULL
-                    ELSE
-                        100.0 *
-                        (
-                            SUM(TRY_CONVERT(decimal(19,4), m.FaturamentoLiquidoMensalFinal)) -
-                            SUM(TRY_CONVERT(decimal(19,4), m.CustoMensalAlocado))
-                        )
-                        / NULLIF(SUM(TRY_CONVERT(decimal(19,4), m.FaturamentoLiquidoMensalFinal)), 0)
-                END
-                AS decimal(10,2)
-            ) AS MargemPct_Face
-        FROM [Integracao].[Silver].[DimMargemPaineisEuromidia] m
-        WHERE m.IDFatoControleContratosEuromidia = :id
-        GROUP BY m.IDFatoControleContratosEuromidia, m.CodFace
-    ),
-    AtendimentoItem AS (
-        SELECT
-            fcc.IDFatoControleContratosItensEuromidia,
-            COUNT(DISTINCT fcc.IDFatoKanbanCard) AS QtdeAtendimentos,
-            MAX(fcc.DataAtualizacao) AS UltimoAtendimentoEm
-        FROM [Integracao].[Silver].[FatoContratoCardEuromidia] fcc
-        WHERE fcc.IDFatoControleContratosEuromidia = :id
-          AND fcc.IDFatoControleContratosItensEuromidia IS NOT NULL
-        GROUP BY fcc.IDFatoControleContratosItensEuromidia
-    ),
-    CheckinItem AS (
-        SELECT
-            ch.CodPonto,
-            ch.CodFace,
-            COUNT(1) AS QtdeCheckins,
-            MAX(ch.DataChekin) AS UltimoCheckinEm
-        FROM [Integracao].[Silver].[DimCheckinHistorico] ch
-        WHERE ch.IDFatoControleContratosEuromidia = :id
-        GROUP BY ch.CodPonto, ch.CodFace
-    )
-    SELECT
-        i.*,
-        i.IDFatoControleContratosItensEuromidia AS IDFatoControleContratosItens,
-        i.DataInicioPrevisto_dt  AS DataInicioPrevisto,
-        i.DataTerminoPrevisto_dt AS DataTerminoPrevisto,
-        i.DataCancelamento_dt    AS DataCancelamento,
-        ISNULL(ai.QtdeAtendimentos, 0) AS QtdeAtendimentos,
-        ai.UltimoAtendimentoEm,
-        ISNULL(ci.QtdeCheckins, 0) AS QtdeCheckins,
-        ci.UltimoCheckinEm,
-        mf.FatLiquidoFinal_Soma,
-        mf.CustoMensalAlocado_Soma,
-        mf.MargemR_Face_Soma,
-        mf.MargemPct_Face
-    FROM ItensContrato i
-    LEFT JOIN MargemFace mf
-        ON mf.IDFatoControleContratos = i.IDFatoControleContratoEuromidia
-       AND mf.CodFace = i.CodFace
-    LEFT JOIN AtendimentoItem ai
-        ON ai.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
-    LEFT JOIN CheckinItem ci
-        ON ci.CodPonto = i.CodPonto
-       AND ci.CodFace = i.CodFace
-    ORDER BY
-        i.CodPonto ASC,
-        i.CodFace ASC,
-        i.DataInicioPrevisto_dt ASC,
-        i.IDFatoControleContratosItensEuromidia ASC
-    """)
-
-    itens_rows = db.session.execute(sql_itens, {"id": id_fato_controle_contratos}).mappings().all()
-    itens = [dict(r) for r in itens_rows]
-    itens_por_id = {}
-    for it in itens:
-        it["HistoricoNegociacao"] = []
-        it["PrecosPraticados"] = []
-        it["CheckinsDetalhe"] = []
-        it["SolicitacoesItem"] = []
-        it["_campos"] = []
-        itens_por_id[it.get("IDFatoControleContratosItensEuromidia")] = it
-
-    solicitacao_contrato = None
-    solicitacao_contrato_campos = []
-    solicitacao_itens = []
-    empresa_principal = None
-    empresa_principal_campos = []
-    empresas_relacionadas = []
-
-    try:
-        sql_solicitacao = text(r"""
-            SELECT TOP (1) *
-            FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
-            WHERE IDFatoControleContratosEuromidia = :id
-            ORDER BY COALESCE(DataAtualizacao, DataCriacao, DataLancamento) DESC,
-                     IDFatoSolicitacaoContratoEuromidia DESC
-        """)
-        row = db.session.execute(sql_solicitacao, {"id": id_fato_controle_contratos}).mappings().first()
-        if row:
-            solicitacao_contrato = dict(row)
-            solicitacao_contrato_campos = _campos_de_mapping(solicitacao_contrato)
-
-        sql_solicitacao_itens = text(r"""
-            SELECT *
-            FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
-            WHERE IDFatoControleContratosEuromidia = :id
-            ORDER BY CodPonto ASC, CodFace ASC, IDFatoSolicitacaoContratoItemEuromidia ASC
-        """)
-        rows = db.session.execute(sql_solicitacao_itens, {"id": id_fato_controle_contratos}).mappings().all()
-        for row in rows:
-            item = dict(row)
-            item["_campos"] = _campos_de_mapping(item)
-            solicitacao_itens.append(SimpleNamespace(**item))
-    except Exception:
-        solicitacao_contrato = None
-        solicitacao_contrato_campos = []
-        solicitacao_itens = []
-
-    try:
-        id_empresa_principal = contrato.get("IDEmpresa") or (solicitacao_contrato or {}).get("IDEmpresa")
-        if id_empresa_principal:
-            sql_empresa = text(r"""
-                SELECT TOP (1) *
-                FROM [Integracao].[Silver].[DimEmpresas]
-                WHERE IDEmpresa = :id_empresa
-            """)
-            row = db.session.execute(sql_empresa, {"id_empresa": int(id_empresa_principal)}).mappings().first()
-            if row:
-                empresa_principal = dict(row)
-                empresa_principal_campos = _campos_de_mapping(empresa_principal)
-
-        ids_empresas = set()
-        for v in [contrato.get("IDEmpresa"), (solicitacao_contrato or {}).get("IDEmpresa")]:
-            if v not in (None, "", 0):
-                try:
-                    ids_empresas.add(int(v))
-                except Exception:
-                    pass
-        for it in itens:
-            v = it.get("IDEmpresaAgencia")
-            if v not in (None, "", 0):
-                try:
-                    ids_empresas.add(int(v))
-                except Exception:
-                    pass
-        if ids_empresas:
-            ids_sql = ",".join(str(int(v)) for v in sorted(ids_empresas))
-            sql_empresas = text(f"""
-                SELECT *
-                FROM [Integracao].[Silver].[DimEmpresas]
-                WHERE IDEmpresa IN ({ids_sql})
-                ORDER BY IDEmpresa ASC
-            """)
-            rows = db.session.execute(sql_empresas).mappings().all()
-            for row in rows:
-                emp = dict(row)
-                emp["_campos"] = _campos_de_mapping(emp)
-                empresas_relacionadas.append(SimpleNamespace(**emp))
-    except Exception:
-        empresa_principal = None
-        empresa_principal_campos = []
-        empresas_relacionadas = []
-
-    try:
-        sql_negociacoes = text(r"""
-            ;WITH CardsContrato AS (
-                SELECT DISTINCT
-                    rel.IDFatoKanbanCard
-                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS rel
-                WHERE rel.IDFatoControleContratosEuromidia = :id
-                  AND rel.IDFatoKanbanCard IS NOT NULL
-            )
-            SELECT
-                n.*,
-
-                rel.IDFatoContratoCardEuromidia,
-                rel.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidiaVinculo,
-                rel.IDFatoControleContratosItensEuromidia AS IDFatoControleContratosItensEuromidiaVinculo,
-                rel.IDDimUsuarios AS IDDimUsuariosContratoCard,
-                rel.DataAtualizacao AS DataAtualizacaoContratoCard,
-
-                rel.IDItemContrato,
-                rel.CodPontoContrato,
-                rel.CodFaceContrato,
-                rel.IDDimFacesPaineisContrato,
-                rel.IDPainelEuromidiaContrato,
-
-                fp.CodPonto AS CodPontoFace,
-                fp.CodFace AS CodFaceFace,
-
-                pf.CodPonto AS CodPontoCardPainelFace,
-                pf.CodFace AS CodFaceCardPainelFace
-            FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
-            INNER JOIN CardsContrato AS cc
-                ON cc.IDFatoKanbanCard = n.IDFatoKanbanCard
-            LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS fp
-                ON fp.IDDimFacesPaineis = n.IDDimFacesPaineis
-            LEFT JOIN [Kanban].[Silver].[FatoKanbanCardPainelFace] AS pf
-                ON pf.IDFatoKanbanCard = n.IDFatoKanbanCard
-               AND n.IDDimFacesPaineis IS NOT NULL
-               AND pf.IDDimFacesPaineis = n.IDDimFacesPaineis
-            OUTER APPLY (
-                SELECT TOP (1)
-                    rel0.IDFatoContratoCardEuromidia,
-                    rel0.IDFatoControleContratosEuromidia,
-                    rel0.IDFatoControleContratosItensEuromidia,
-                    rel0.IDDimUsuarios,
-                    rel0.DataAtualizacao,
-
-                    it0.IDFatoControleContratosItensEuromidia AS IDItemContrato,
-                    it0.CodPonto AS CodPontoContrato,
-                    it0.CodFace AS CodFaceContrato,
-                    it0.IDDimFacesPaineis AS IDDimFacesPaineisContrato,
-                    it0.IDPainelEuromidia AS IDPainelEuromidiaContrato
-                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS rel0
-                LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS it0
-                    ON it0.IDFatoControleContratosItensEuromidia = rel0.IDFatoControleContratosItensEuromidia
-                WHERE rel0.IDFatoControleContratosEuromidia = :id
-                  AND rel0.IDFatoKanbanCard = n.IDFatoKanbanCard
-                ORDER BY
-                    CASE
-                        WHEN n.IDDimFacesPaineis IS NOT NULL
-                             AND it0.IDDimFacesPaineis = n.IDDimFacesPaineis
-                        THEN 0
-                        ELSE 1
-                    END,
-                    rel0.DataAtualizacao DESC,
-                    rel0.IDFatoContratoCardEuromidia DESC
-            ) AS rel
-            ORDER BY
-                COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto) DESC,
-                n.IDFatoKanbanNegociacaoPreco DESC
-        """)
-
-        neg_rows = db.session.execute(
-            sql_negociacoes,
-            {"id": id_fato_controle_contratos},
-        ).mappings().all()
-
-        print("=" * 120, flush=True)
-        print(
-            f"NEGOCIACAO CONTRATO DETALHE ATIVO | "
-            f"id_contrato={id_fato_controle_contratos} | "
-            f"qtd_linhas={len(neg_rows)}",
-            flush=True,
-        )
-
-        def _id_int_seguro(valor):
-            if valor in (None, ""):
-                return None
-            try:
-                return int(valor)
-            except Exception:
-                try:
-                    return int(str(valor).strip())
-                except Exception:
-                    return None
-
-        def _texto_chave(valor):
-            if valor is None:
-                return ""
-            texto = str(valor).strip()
-            if not texto:
-                return ""
-            if re.fullmatch(r"\d+\.0+", texto):
-                texto = texto.split(".", 1)[0]
-            return texto.upper()
-
-        def _chave_face(cod_ponto, cod_face):
-            ponto = _texto_chave(cod_ponto)
-            face = _texto_chave(cod_face)
-            if not ponto or not face:
-                return None
-            return (ponto, face)
-
-        itens_por_id_normalizado = {}
-        itens_por_face_id = {}
-        itens_por_face_codigo = {}
-        itens_por_painel = {}
-
-        for it in itens:
-            id_item = _id_int_seguro(it.get("IDFatoControleContratosItensEuromidia"))
-            if id_item is not None:
-                itens_por_id_normalizado[id_item] = it
-
-            id_face = _id_int_seguro(it.get("IDDimFacesPaineis"))
-            if id_face is not None:
-                itens_por_face_id.setdefault(id_face, it)
-
-            id_painel = _id_int_seguro(it.get("IDPainelEuromidia") or it.get("IDDimPaineisEuromidia"))
-            if id_painel is not None:
-                itens_por_painel.setdefault(id_painel, []).append(it)
-
-            chave = _chave_face(it.get("CodPonto"), it.get("CodFace"))
-            if chave is not None:
-                itens_por_face_codigo.setdefault(chave, it)
-
-        for idx_neg, row in enumerate(neg_rows, start=1):
-            neg = dict(row)
-            alvo = None
-            fonte_mapeamento = None
-
-            """Primeiro eu mapeio pela face da negociação.
-            O card pode ter mais de um CodPonto/CodFace, então o IDFatoKanbanCard sozinho não identifica o item correto.
-            A negociação de preço, quando tem IDDimFacesPaineis, pertence àquela face específica.
-            Só uso o vínculo contrato-card como fallback, nunca como primeira regra.
-            """
-
-            id_face_negociacao = _id_int_seguro(neg.get("IDDimFacesPaineis"))
-            if id_face_negociacao is not None:
-                alvo = itens_por_face_id.get(id_face_negociacao)
-                if alvo is not None:
-                    fonte_mapeamento = "IDDimFacesPaineis da negociação"
-
-            if alvo is None:
-                chave_face_negociacao = _chave_face(
-                    neg.get("CodPontoFace"),
-                    neg.get("CodFaceFace"),
-                )
-                if chave_face_negociacao is not None:
-                    alvo = itens_por_face_codigo.get(chave_face_negociacao)
-                    if alvo is not None:
-                        fonte_mapeamento = "CodPonto/CodFace da DimFacesPaineis"
-
-            if alvo is None:
-                chave_card_painel_face = _chave_face(
-                    neg.get("CodPontoCardPainelFace"),
-                    neg.get("CodFaceCardPainelFace"),
-                )
-                if chave_card_painel_face is not None:
-                    alvo = itens_por_face_codigo.get(chave_card_painel_face)
-                    if alvo is not None:
-                        fonte_mapeamento = "CodPonto/CodFace do FatoKanbanCardPainelFace"
-
-            if alvo is None:
-                chave_contrato = _chave_face(
-                    neg.get("CodPontoContrato"),
-                    neg.get("CodFaceContrato"),
-                )
-                if chave_contrato is not None:
-                    alvo = itens_por_face_codigo.get(chave_contrato)
-                    if alvo is not None:
-                        fonte_mapeamento = "CodPonto/CodFace do item vinculado ao card"
-
-            id_item_vinculo = _id_int_seguro(
-                neg.get("IDFatoControleContratosItensEuromidiaVinculo")
-                or neg.get("IDItemContrato")
-            )
-
-            if alvo is None and id_item_vinculo is not None:
-                alvo = itens_por_id_normalizado.get(id_item_vinculo)
-                if alvo is not None:
-                    fonte_mapeamento = "ID item vinculado ao card"
-
-            if alvo is None:
-                id_painel_negociacao = _id_int_seguro(neg.get("IDDimPaineisEuromidia"))
-                if id_painel_negociacao is None:
-                    id_painel_negociacao = _id_int_seguro(neg.get("IDPainelEuromidiaContrato"))
-                if id_painel_negociacao is not None:
-                    lista_painel = itens_por_painel.get(id_painel_negociacao) or []
-                    if len(lista_painel) == 1:
-                        alvo = lista_painel[0]
-                        fonte_mapeamento = "painel único no contrato"
-
-            print(
-                f"NEGOCIACAO MAPEADA [{idx_neg}] | "
-                f"IDNegociacao={neg.get('IDFatoKanbanNegociacaoPreco')} | "
-                f"IDCard={neg.get('IDFatoKanbanCard')} | "
-                f"IDFaceNegociacao={neg.get('IDDimFacesPaineis')} | "
-                f"IDItemVinculo={id_item_vinculo} | "
-                f"CodPontoFace={neg.get('CodPontoFace')} | "
-                f"CodFaceFace={neg.get('CodFaceFace')} | "
-                f"CodPontoContrato={neg.get('CodPontoContrato')} | "
-                f"CodFaceContrato={neg.get('CodFaceContrato')} | "
-                f"FonteMapeamento={fonte_mapeamento or 'NAO_MAPEADO'} | "
-                f"AlvoIDItem={(alvo or {}).get('IDFatoControleContratosItensEuromidia') if isinstance(alvo, dict) else None} | "
-                f"AlvoCodPonto={(alvo or {}).get('CodPonto') if isinstance(alvo, dict) else None} | "
-                f"AlvoCodFace={(alvo or {}).get('CodFace') if isinstance(alvo, dict) else None}",
-                flush=True,
-            )
-
-            neg["FonteMapeamentoHistoricoNegociacao"] = fonte_mapeamento or "Não mapeado"
-            neg["_campos"] = _campos_de_mapping(neg)
-
-            if alvo is not None:
-                ja_existe = any(
-                    getattr(h, "IDFatoKanbanNegociacaoPreco", None) == neg.get("IDFatoKanbanNegociacaoPreco")
-                    for h in alvo.get("HistoricoNegociacao", [])
-                )
-                if not ja_existe:
-                    alvo["HistoricoNegociacao"].append(SimpleNamespace(**neg))
-
-        for it in itens:
-            print(
-                f"RESUMO HISTORICO NEGOCIACAO POR ITEM | "
-                f"IDItem={it.get('IDFatoControleContratosItensEuromidia')} | "
-                f"CodPonto={it.get('CodPonto')} | "
-                f"CodFace={it.get('CodFace')} | "
-                f"QtdHistorico={len(it.get('HistoricoNegociacao') or [])}",
-                flush=True,
-            )
-
-        print("=" * 120, flush=True)
-
-    except Exception as erro:
-        print("=" * 120, flush=True)
-        print(
-            f"ERRO AO BUSCAR HISTORICO NEGOCIACAO CONTRATO DETALHE ATIVO | "
-            f"id_contrato={id_fato_controle_contratos}",
-            flush=True,
-        )
-        print(str(erro), flush=True)
-        print("=" * 120, flush=True)
-        current_app.logger.exception(
-            "Erro ao carregar histórico de negociação no contrato_detalhe ativo. id_contrato=%s",
-            id_fato_controle_contratos,
-        )
-
-    try:
-        sql_precos = text(r"""
-            SELECT *
-            FROM [Integracao].[Silver].[FatoContratoItemPrecoPraticadoEuromidia]
-            WHERE IDFatoControleContratosEuromidia = :id
-            ORDER BY COALESCE(DataAprovacaoContrato, DataCadastro, DataInicio) DESC,
-                     IDFatoContratoItemPrecoPraticadoEuromidia DESC
-        """)
-        preco_rows = db.session.execute(sql_precos, {"id": id_fato_controle_contratos}).mappings().all()
-        for row in preco_rows:
-            preco = dict(row)
-            alvo = None
-            item_id = preco.get("IDFatoControleContratosItensEuromidia")
-            if item_id in itens_por_id:
-                alvo = itens_por_id[item_id]
-            elif preco.get("IDDimFacesPaineis") not in (None, ""):
-                for it in itens:
-                    if it.get("IDDimFacesPaineis") == preco.get("IDDimFacesPaineis"):
-                        alvo = it
-                        break
-            preco["_campos"] = _campos_de_mapping(preco)
-            if alvo is not None:
-                alvo["PrecosPraticados"].append(SimpleNamespace(**preco))
-    except Exception:
-        pass
-
-    try:
-        sql_checkins = text(r"""
-            SELECT *
-            FROM [Integracao].[Silver].[DimCheckinHistorico]
-            WHERE IDFatoControleContratosEuromidia = :id
-            ORDER BY COALESCE(DataChekin, DataAtualizacao) DESC,
-                     IDDimCheckinHistorico DESC
-        """)
-        ck_rows = db.session.execute(sql_checkins, {"id": id_fato_controle_contratos}).mappings().all()
-        itens_por_face_codigo = {}
-        for it in itens:
-            chave = (str(it.get("CodPonto") or "").strip(), str(it.get("CodFace") or "").strip().upper())
-            itens_por_face_codigo[chave] = it
-        for row in ck_rows:
-            ck = dict(row)
-            chave = (str(ck.get("CodPonto") or "").strip(), str(ck.get("CodFace") or "").strip().upper())
-            alvo = itens_por_face_codigo.get(chave)
-            ck["TemMidiaUpload"] = bool(ck.get("UrlImagemUpload"))
-            ck["TemMidiaGerada"] = bool(ck.get("UrlImagemGerada"))
-            ck["_campos"] = _campos_de_mapping(ck)
-            if alvo is not None:
-                alvo["CheckinsDetalhe"].append(SimpleNamespace(**ck))
-    except Exception:
-        pass
-
-    try:
-        solicitacao_por_face = {}
-        for sit in solicitacao_itens:
-            chave = (str(getattr(sit, "CodPonto", "") or "").strip(), str(getattr(sit, "CodFace", "") or "").strip().upper())
-            solicitacao_por_face.setdefault(chave, []).append(sit)
-        for it in itens:
-            chave = (str(it.get("CodPonto") or "").strip(), str(it.get("CodFace") or "").strip().upper())
-            it["SolicitacoesItem"] = list(solicitacao_por_face.get(chave, []))
-            it["_campos"] = _campos_de_mapping(it, ignorar={"HistoricoNegociacao", "PrecosPraticados", "CheckinsDetalhe", "SolicitacoesItem", "_campos"})
-    except Exception:
-        for it in itens:
-            it["_campos"] = _campos_de_mapping(it, ignorar={"HistoricoNegociacao", "PrecosPraticados", "CheckinsDetalhe", "SolicitacoesItem", "_campos"})
-
-    resumo_atendimentos = {
-        "Total": 0,
-        "Abertos": 0,
-        "Concluidos": 0,
-        "Encerrados": 0,
-        "UltimoAtendimento": None,
-        "TotalCheckins": 0,
-        "UltimoCheckin": None,
-    }
-    cards_relacionados = []
-    timeline_atendimentos = []
-
-    try:
-        sql_resumo_checkins = text(r"""
-            SELECT
-                COUNT(1) AS TotalCheckins,
-                MAX(ch.DataChekin) AS UltimoCheckin
-            FROM [Integracao].[Silver].[DimCheckinHistorico] ch
-            WHERE ch.IDFatoControleContratosEuromidia = :id
-        """)
-        resumo_checkins = db.session.execute(
-            sql_resumo_checkins,
-            {"id": id_fato_controle_contratos}
-        ).mappings().first()
-        if resumo_checkins:
-            resumo_atendimentos["TotalCheckins"] = int(resumo_checkins.get("TotalCheckins") or 0)
-            resumo_atendimentos["UltimoCheckin"] = resumo_checkins.get("UltimoCheckin")
-
-        sql_cards = text(r"""
-            SELECT
-                fcc.IDFatoKanbanCard,
-                MAX(fcc.DataAtualizacao) AS DataReferencia,
-                kc.Titulo,
-                kc.Descricao,
-                kc.CriadoEm,
-                kc.AtualizadoEm,
-                kc.EncerradoEm,
-                fase.NomeFase,
-                status.NomeExibicao AS NomeStatus,
-                CAST(NULL AS nvarchar(200)) AS Usuario,
-                CASE
-                    WHEN ISNULL(kc.BitAditivo, 0) = 1 THEN 'Aditivo'
-                    WHEN ISNULL(kc.BitContratoNovo, 0) = 1 THEN 'Contrato Novo'
-                    WHEN ISNULL(kc.BitDemanda, 0) = 1 THEN 'Demanda'
-                    ELSE 'Atendimento'
-                END AS TipoCard,
-                CASE
-                    WHEN kc.EncerradoEm IS NOT NULL
-                         OR UPPER(COALESCE(status.NomeExibicao, '')) LIKE '%ENCERR%'
-                         OR UPPER(COALESCE(fase.NomeFase, '')) LIKE '%ENCERR%'
-                    THEN 'encerrado'
-                    WHEN UPPER(COALESCE(status.NomeExibicao, '')) LIKE '%CONCLU%'
-                         OR UPPER(COALESCE(status.NomeExibicao, '')) LIKE '%FINALIZ%'
-                         OR UPPER(COALESCE(fase.NomeFase, '')) LIKE '%CONCLU%'
-                         OR UPPER(COALESCE(fase.NomeFase, '')) LIKE '%FINALIZ%'
-                    THEN 'concluido'
-                    ELSE 'aberto'
-                END AS Situacao
-            FROM [Integracao].[Silver].[FatoContratoCardEuromidia] fcc
-            LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] kc
-                ON kc.IDFatoKanbanCard = fcc.IDFatoKanbanCard
-            LEFT JOIN [Kanban].[Silver].[DimKanbanFase] fase
-                ON fase.IDDimKanbanFase = kc.IDDimKanbanFaseAtual
-            LEFT JOIN [Kanban].[Silver].[DimKanbanStatusCard] status
-                ON status.IDDimKanbanStatusCard = kc.IDDimKanbanStatusCard
-            WHERE fcc.IDFatoControleContratosEuromidia = :id
-            GROUP BY
-                fcc.IDFatoKanbanCard,
-                kc.Titulo,
-                kc.Descricao,
-                kc.CriadoEm,
-                kc.AtualizadoEm,
-                kc.EncerradoEm,
-                fase.NomeFase,
-                status.NomeExibicao,
-                kc.BitAditivo,
-                kc.BitContratoNovo,
-                kc.BitDemanda
-            ORDER BY MAX(fcc.DataAtualizacao) DESC, fcc.IDFatoKanbanCard DESC
-        """)
-        card_rows = db.session.execute(sql_cards, {"id": id_fato_controle_contratos}).mappings().all()
-
-        sql_card_itens = text(r"""
-            SELECT DISTINCT
-                fcc.IDFatoKanbanCard,
-                it.CodPonto,
-                it.CodFace
-            FROM [Integracao].[Silver].[FatoContratoCardEuromidia] fcc
-            LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] it
-                ON it.IDFatoControleContratosItensEuromidia = fcc.IDFatoControleContratosItensEuromidia
-            WHERE fcc.IDFatoControleContratosEuromidia = :id
-              AND fcc.IDFatoKanbanCard IS NOT NULL
-            ORDER BY fcc.IDFatoKanbanCard, it.CodPonto, it.CodFace
-        """)
-        card_item_rows = db.session.execute(sql_card_itens, {"id": id_fato_controle_contratos}).mappings().all()
-        itens_por_card = {}
-        for row in card_item_rows:
-            card_id = row.get("IDFatoKanbanCard")
-            if card_id is None:
-                continue
-            label = f"{row.get('CodPonto') or '—'}/{row.get('CodFace') or '—'}"
-            itens_por_card.setdefault(int(card_id), [])
-            if label not in itens_por_card[int(card_id)]:
-                itens_por_card[int(card_id)].append(label)
-
-        for row in card_rows:
-            cid = row.get("IDFatoKanbanCard")
-            if cid is None:
-                continue
-            card = dict(row)
-            card["ItensAfetados"] = itens_por_card.get(int(cid), [])
-            card["HrefHistorico"] = f"/kanban/historico-card/{int(cid)}"
-            cards_relacionados.append(SimpleNamespace(**card))
-
-        resumo_atendimentos["Total"] = len(cards_relacionados)
-        resumo_atendimentos["Abertos"] = sum(1 for c in cards_relacionados if getattr(c, "Situacao", "") == "aberto")
-        resumo_atendimentos["Concluidos"] = sum(1 for c in cards_relacionados if getattr(c, "Situacao", "") == "concluido")
-        resumo_atendimentos["Encerrados"] = sum(1 for c in cards_relacionados if getattr(c, "Situacao", "") == "encerrado")
-        datas_cards = [getattr(c, "DataReferencia", None) or getattr(c, "AtualizadoEm", None) or getattr(c, "CriadoEm", None) for c in cards_relacionados]
-        datas_cards = [d for d in datas_cards if d is not None]
-        resumo_atendimentos["UltimoAtendimento"] = max(datas_cards) if datas_cards else None
-
-        card_ids = [int(getattr(c, "IDFatoKanbanCard")) for c in cards_relacionados if getattr(c, "IDFatoKanbanCard", None) is not None]
-        if card_ids:
-            ids_sql = ",".join(str(i) for i in sorted(set(card_ids)))
-            sql_timeline = text(f"""
-                SELECT
-                    tl.TipoEvento,
-                    tl.DataEvento,
-                    tl.IDFatoKanbanCard,
-                    tl.Texto,
-                    tl.CodPonto,
-                    tl.CodFace,
-                    CAST(NULL AS nvarchar(200)) AS NomeUsuario
-                FROM (
-                    SELECT
-                        'MOVIMENTO' AS TipoEvento,
-                        m.MovidoEm AS DataEvento,
-                        m.IDFatoKanbanCard,
-                        COALESCE(m.Observacao, 'Movimentação de fase') AS Texto,
-                        CAST(NULL AS varchar(50)) AS CodPonto,
-                        CAST(NULL AS varchar(50)) AS CodFace
-                    FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m
-                    WHERE m.IDFatoKanbanCard IN ({ids_sql})
-
-                    UNION ALL
-
-                    SELECT
-                        'OBSERVACAO' AS TipoEvento,
-                        o.CriadoEm AS DataEvento,
-                        o.IDFatoKanbanCard,
-                        o.Observacao AS Texto,
-                        CAST(NULL AS varchar(50)) AS CodPonto,
-                        CAST(NULL AS varchar(50)) AS CodFace
-                    FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o
-                    WHERE o.IDFatoKanbanCard IN ({ids_sql})
-
-                    UNION ALL
-
-                    SELECT
-                        'LOG' AS TipoEvento,
-                        l.OcorridoEm AS DataEvento,
-                        l.IDFatoKanbanCard,
-                        COALESCE(l.TextoLivre, l.SubtipoEvento, l.TipoEvento, 'Log do atendimento') AS Texto,
-                        CAST(NULL AS varchar(50)) AS CodPonto,
-                        CAST(NULL AS varchar(50)) AS CodFace
-                    FROM [Kanban].[Silver].[FatoKanbanCardLog] l
-                    WHERE l.IDFatoKanbanCard IN ({ids_sql})
-
-                    UNION ALL
-
-                    SELECT
-                        'NEGOCIACAO' AS TipoEvento,
-                        n.DataPrecoProposto AS DataEvento,
-                        n.IDFatoKanbanCard,
-                        COALESCE(n.ObservacoesProposta, 'Negociação de preço') AS Texto,
-                        CAST(pf.CodPonto AS varchar(50)) AS CodPonto,
-                        CAST(pf.CodFace AS varchar(50)) AS CodFace
-                    FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] n
-                    LEFT JOIN [Kanban].[Silver].[FatoKanbanCardPainelFace] pf
-                        ON pf.IDFatoKanbanCard = n.IDFatoKanbanCard
-                       AND pf.IDDimFacesPaineis = n.IDDimFacesPaineis
-                    WHERE n.IDFatoKanbanCard IN ({ids_sql})
-
-                    UNION ALL
-
-                    SELECT
-                        'ENCERRAMENTO' AS TipoEvento,
-                        e.DataAtualizacao AS DataEvento,
-                        e.IDFatoKanbanCard,
-                        COALESCE(e.Observacoes, e.NomeMotivo, 'Encerramento do atendimento') AS Texto,
-                        CAST(NULL AS varchar(50)) AS CodPonto,
-                        CAST(NULL AS varchar(50)) AS CodFace
-                    FROM [Kanban].[Silver].[FatoDimHistoricoEncerramentoCard] e
-                    WHERE e.IDFatoKanbanCard IN ({ids_sql})
-
-                    UNION ALL
-
-                    SELECT
-                        'CHECKIN' AS TipoEvento,
-                        ch.DataChekin AS DataEvento,
-                        CAST(NULL AS int) AS IDFatoKanbanCard,
-                        COALESCE(ch.Observacao, 'Check-in realizado') AS Texto,
-                        CAST(ch.CodPonto AS varchar(50)) AS CodPonto,
-                        CAST(ch.CodFace AS varchar(50)) AS CodFace
-                    FROM [Integracao].[Silver].[DimCheckinHistorico] ch
-                    WHERE ch.IDFatoControleContratosEuromidia = :id_contrato
-                ) tl
-                WHERE tl.DataEvento IS NOT NULL
-                ORDER BY tl.DataEvento DESC
-            """)
-            tl_rows = db.session.execute(sql_timeline, {"id_contrato": id_fato_controle_contratos}).mappings().all()
-            for row in tl_rows[:500]:
-                extra = None
-                if row.get("CodPonto") or row.get("CodFace"):
-                    extra = SimpleNamespace(CodPonto=row.get("CodPonto"), CodFace=row.get("CodFace"))
-                evento = dict(row)
-                evento["Extra"] = extra
-                timeline_atendimentos.append(SimpleNamespace(**evento))
-        else:
-            sql_timeline_checkin = text(r"""
-                SELECT TOP (500)
-                    'CHECKIN' AS TipoEvento,
-                    ch.DataChekin AS DataEvento,
-                    CAST(NULL AS int) AS IDFatoKanbanCard,
-                    COALESCE(ch.Observacao, 'Check-in realizado') AS Texto,
-                    CAST(ch.CodPonto AS varchar(50)) AS CodPonto,
-                    CAST(ch.CodFace AS varchar(50)) AS CodFace,
-                    CAST(NULL AS nvarchar(200)) AS NomeUsuario
-                FROM [Integracao].[Silver].[DimCheckinHistorico] ch
-                WHERE ch.IDFatoControleContratosEuromidia = :id
-                  AND ch.DataChekin IS NOT NULL
-                ORDER BY ch.DataChekin DESC
-            """)
-            tl_rows = db.session.execute(sql_timeline_checkin, {"id": id_fato_controle_contratos}).mappings().all()
-            for row in tl_rows:
-                extra = SimpleNamespace(CodPonto=row.get("CodPonto"), CodFace=row.get("CodFace"))
-                evento = dict(row)
-                evento["Extra"] = extra
-                timeline_atendimentos.append(SimpleNamespace(**evento))
-
-    except Exception:
-        cards_relacionados = []
-        timeline_atendimentos = []
-
-    timeline_total = len(timeline_atendimentos)
-    timeline_total_pages = max((timeline_total + timeline_per_page - 1) // timeline_per_page, 1)
-    if timeline_page > timeline_total_pages:
-        timeline_page = timeline_total_pages
-
-    timeline_inicio_idx = (timeline_page - 1) * timeline_per_page
-    timeline_fim_idx = timeline_inicio_idx + timeline_per_page
-    timeline_atendimentos = timeline_atendimentos[timeline_inicio_idx:timeline_fim_idx]
-
-    timeline_paginacao = SimpleNamespace(
-        page=timeline_page,
-        per_page=timeline_per_page,
-        total=timeline_total,
-        total_pages=timeline_total_pages,
-        has_prev=timeline_page > 1,
-        has_next=timeline_page < timeline_total_pages,
-        prev_page=(timeline_page - 1 if timeline_page > 1 else 1),
-        next_page=(timeline_page + 1 if timeline_page < timeline_total_pages else timeline_total_pages),
-        inicio=(timeline_inicio_idx + 1 if timeline_total > 0 else 0),
-        fim=(min(timeline_fim_idx, timeline_total) if timeline_total > 0 else 0),
-    )
-
-    contrato_campos = _campos_de_mapping(contrato)
-    contrato_ns = SimpleNamespace(**contrato)
-    itens_ns = [SimpleNamespace(**it) for it in itens]
-    solicitacao_ns = SimpleNamespace(**solicitacao_contrato) if solicitacao_contrato else None
-    empresa_principal_ns = SimpleNamespace(**empresa_principal) if empresa_principal else None
-
-    return render_template(
-        "euromidia/contrato_detalhe.html",
-        contrato=contrato_ns,
-        contrato_campos=contrato_campos,
-        itens=itens_ns,
-        resumo_atendimentos=SimpleNamespace(**resumo_atendimentos),
-        cards_relacionados=cards_relacionados,
-        timeline_atendimentos=timeline_atendimentos,
-        timeline_paginacao=timeline_paginacao,
-        solicitacao_contrato=solicitacao_ns,
-        solicitacao_contrato_campos=solicitacao_contrato_campos,
-        solicitacao_itens=solicitacao_itens,
-        empresa_principal=empresa_principal_ns,
-        empresa_principal_campos=empresa_principal_campos,
-        empresas_relacionadas=empresas_relacionadas,
-    )
-
-
-
-
-def _sql_bool(v):
-  
-    if v is None:
-        return None
-    if v is True or v is False:
-        return v
-    try:
-        iv = int(v)
-    except (TypeError, ValueError):
-        return None
-    if iv == 1:
-        return True
-    if iv == 0:
-        return False
-    return None
-
-
-def _somente_digitos(valor) -> str:
-   
-    if valor is None:
-        return ""
-    return re.sub(r"\D+", "", str(valor))
-
-
-def _normalizar_cnpj(cnpj: str) -> str:
-    return _somente_digitos(cnpj)
-
-def _s(v) -> str:
-
-    if v is None:
-        return ""
-    return str(v).strip()
-
-
-def _to_bool(v) -> bool:
-    return bool(v) is True
-
-def _to_decimal_19_2(v):
- 
-    if v is None:
-        return None
-    txt = str(v).strip()
-    if txt == "":
-        return None
-
-   
-    txt = txt.replace(".", "").replace(",", ".") if (txt.count(",") == 1 and txt.count(".") >= 1) else txt.replace(",", ".")
-    try:
-        d = Decimal(txt)
-    except (InvalidOperation, ValueError):
-        return None
-
-    
-    return d.quantize(Decimal("0.01"))
-
-def _bool_from_situacao_receita(descricao_situacao: str):
-    
-    ds = _s(descricao_situacao).upper()
-    if ds == "ATIVA":
-        return True
-    if ds in ("BAIXADA", "SUSPENSA", "INAPTA", "NULA"):
-        return False
-    return None
-
-
-
-
-@paineis_bp.get("/api/receita/<cnpj>")
-@login_required
-@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
-def paineis_api_buscar_receita(cnpj: str):
-    cnpj_limpo = _somente_digitos(cnpj)
-
-    if len(cnpj_limpo) != 14:
-        return jsonify({"ok": False, "error": "CNPJ inválido (precisa ter 14 dígitos)."}), 400
-
-    url = f"https://minhareceita.org/{cnpj_limpo}"
-
-    try:
-        resp = requests.get(url, timeout=12)
-    except requests.RequestException:
-        return jsonify({"ok": False, "error": "Falha ao consultar a Receita."}), 502
-
-    if resp.status_code == 404:
-        return jsonify({"ok": False, "error": "CNPJ não encontrado."}), 404
-
-    if resp.status_code == 429:
-        return jsonify({"ok": False, "error": "Limite de consultas atingido. Aguarde e tente novamente."}), 429
-
-    if not (200 <= resp.status_code < 300):
-        return jsonify({"ok": False, "error": f"Erro na Receita (HTTP {resp.status_code})."}), 502
-
-    try:
-        data = resp.json()
-    except ValueError:
-        return jsonify({"ok": False, "error": "Resposta inválida da Receita."}), 502
-
-   
-    descricao_situacao = _s(data.get("descricao_situacao_cadastral"))
-
-    payload = {
-        "id_cliente": None,
-
-        "razao_social": _s(data.get("razao_social")),
-        "nome_fantasia": _s(data.get("nome_fantasia")),
-        "porte": _s(data.get("porte")),
-
-        "email": _s(data.get("email")),
-        "telefone": _somente_digitos(data.get("ddd_telefone_1") or ""),
-
-        "cnpj": _somente_digitos(data.get("cnpj", "")),
-        "cnae": _somente_digitos(data.get("cnae_fiscal") or data.get("cnae") or ""),
-        "descricao_cnae": _s(data.get("cnae_fiscal_descricao") or data.get("descricao_cnae") or ""),
-
-        "logradouro": _s(((data.get("descricao_tipo_de_logradouro") or "") + " " + (data.get("logradouro") or ""))),
-        "numero": _s(data.get("numero")),
-        "complemento": _s(data.get("complemento")),
-
-        "cidade": _s(data.get("municipio")),
-        "estado": "",  
-        "uf": _s(data.get("uf")),
-
-        "capital_social": data.get("capital_social") or "",
-
-        "bit_situacao_cadastral": _bool_from_situacao_receita(descricao_situacao),
-        "descricao_matriz_filial": _s(data.get("descricao_matriz_filial") or data.get("matriz_filial") or ""),
-        "identificador_matriz_filial": _s(data.get("identificador_matriz_filial") or ""),
-
-        "bit_ativo": _bool_from_situacao_receita(descricao_situacao),
-
-        "id_empresa_proprietaria": None
-    }
-
-    return jsonify({"ok": True, "data": payload}), 200
-
-
-
 
 
 @paineis_bp.get("/api/clientes/buscar/<cnpj>")
@@ -13733,7 +12693,7 @@ def api_contrato_detalhe_cache_status(id_contrato: int):
         id_usuario_cache = "anonimo"
 
     cache_key_html = (
-        f"contratos_detalhe_html:v20260603_clickfast_v1:"
+        f"contratos_detalhe_html:v20260602_timeline8_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -26789,19 +25749,7 @@ def contratos_detalhe(id_contrato: int):
         str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
         in {"1", "true", "sim", "yes", "s"}
     )
-    abrir_rapido_padrao_cache_inicial = (
-        str(os.getenv("CONTRATO_DETALHE_ABRIR_RAPIDO_PADRAO", "1") or "1").strip().lower()
-        not in {"0", "false", "nao", "não", "no", "n"}
-        and caminho_return_to_cache_inicial in {"/paineis/contratos", "/admin/vencimentos-campanhas"}
-    )
-
-    modo_rapido_cache_inicial = (
-        not modo_completo_cache_inicial
-        and (
-            modo_rapido_param_cache_inicial
-            or abrir_rapido_padrao_cache_inicial
-        )
-    )
+    modo_rapido_cache_inicial = not modo_completo_cache_inicial
 
     try:
         timeline_page_cache_inicial = int(request.args.get("timeline_page") or "1")
@@ -26821,38 +25769,15 @@ def contratos_detalhe(id_contrato: int):
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     contrato_preload_cache_inicial = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260603_clickfast_v1:"
+        f"contratos_detalhe_html:v20260603_abas_rapidas_v3:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
         f"timeline:{timeline_page_cache_inicial}"
     )
-    cache_key_contrato_detalhe_completo_inicial = (
-        f"contratos_detalhe_html:v20260603_clickfast_v1:"
-        f"usuario:{id_usuario_cache_inicial}:"
-        f"contrato:{int(id_contrato)}:"
-        f"modo:completo:"
-        f"timeline:{timeline_page_cache_inicial}"
-    )
     placeholder_return_to_contrato_inicial = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
 
     if not cache_bypass_contrato_inicial:
-        html_cache_contrato_inicial = None
-
-        # Quando o usuário vem da lista de contratos, eu abro rápido por padrão.
-        # Mas, se o HTML completo já estiver quente no Redis, devolvo o completo imediatamente.
-        if modo_rapido_cache_inicial and not modo_rapido_param_cache_inicial and not modo_completo_cache_inicial:
-            try:
-                html_cache_contrato_inicial = cache.get(cache_key_contrato_detalhe_completo_inicial)
-            except Exception:
-                html_cache_contrato_inicial = None
-
-            if html_cache_contrato_inicial:
-                return str(html_cache_contrato_inicial).replace(
-                    placeholder_return_to_contrato_inicial,
-                    str(html_escape(return_to_cache_inicial)),
-                )
-
         try:
             html_cache_contrato_inicial = cache.get(cache_key_contrato_detalhe_inicial)
         except Exception:
@@ -26974,19 +25899,7 @@ def contratos_detalhe(id_contrato: int):
         str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
         in {"1", "true", "sim", "yes", "s"}
     )
-    abrir_rapido_padrao_contrato = (
-        str(os.getenv("CONTRATO_DETALHE_ABRIR_RAPIDO_PADRAO", "1") or "1").strip().lower()
-        not in {"0", "false", "nao", "não", "no", "n"}
-        and caminho_return_to_rapido in {"/paineis/contratos", "/admin/vencimentos-campanhas"}
-    )
-
-    modo_rapido_contrato = (
-        not modo_completo_contrato
-        and (
-            modo_rapido_param_contrato
-            or abrir_rapido_padrao_contrato
-        )
-    )
+    modo_rapido_contrato = not modo_completo_contrato
 
     try:
         timeline_page_cache = int(request.args.get("timeline_page") or "1")
@@ -27013,7 +25926,7 @@ def contratos_detalhe(id_contrato: int):
     contrato_detalhe_async_pendente = False
     contrato_detalhe_async_payload = None
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260603_clickfast_v1:"
+        f"contratos_detalhe_html:v20260603_abas_rapidas_v3:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
@@ -27021,7 +25934,7 @@ def contratos_detalhe(id_contrato: int):
     )
     placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
     cache_key_contrato_detalhe_completo = (
-        f"contratos_detalhe_html:v20260603_clickfast_v1:"
+        f"contratos_detalhe_html:v20260603_abas_rapidas_v3:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -27029,21 +25942,6 @@ def contratos_detalhe(id_contrato: int):
     )
 
     if not cache_bypass_contrato:
-        html_cache_contrato = None
-
-        # Se o completo já foi aquecido antes, não devolvo o rápido: devolvo o completo na hora.
-        if modo_rapido_contrato and not modo_rapido_param_contrato and not modo_completo_contrato:
-            try:
-                html_cache_contrato = cache.get(cache_key_contrato_detalhe_completo)
-            except Exception:
-                html_cache_contrato = None
-
-            if html_cache_contrato:
-                return str(html_cache_contrato).replace(
-                    placeholder_return_to_contrato,
-                    str(html_escape(return_to)),
-                )
-
         try:
             html_cache_contrato = cache.get(cache_key_contrato_detalhe)
         except Exception:
@@ -27121,7 +26019,7 @@ def contratos_detalhe(id_contrato: int):
                     modo_completo=1,
                     timeline_page=timeline_page_cache,
                 ),
-                "mensagem": "Carregando detalhes completos em cache Redis/Celery.",
+                "mensagem": "",
             }
 
             modo_rapido_contrato = True
@@ -27362,7 +26260,6 @@ def contratos_detalhe(id_contrato: int):
         empresa_principal_campos_lista = []
         empresas_relacionadas_lista = []
 
-        cnpj_contrato = _somente_digitos_contrato_template(_valor_attr(contrato_obj, "CNPJ"))
         id_empresa_principal = 0
         try:
             id_empresa_principal = int(_valor_attr(contrato_obj, "IDEmpresa", padrao=0) or 0)
@@ -27410,29 +26307,6 @@ def contratos_detalhe(id_contrato: int):
                         empresa_principal_obj = empresa_obj
                         empresa_principal_campos_lista = empresa_dict["_campos"]
 
-        if empresa_principal_obj is None and cnpj_contrato:
-            sql_empresa_cnpj = text("""
-                SELECT TOP (1)
-                    *
-                FROM [Integracao].[Silver].[DimEmpresas] WITH (NOLOCK)
-                WHERE REPLACE(REPLACE(REPLACE(COALESCE([CNPJ], ''), '.', ''), '/', ''), '-', '') = :cnpj
-                ORDER BY [IDEmpresa] ASC;
-            """)
-
-            row_empresa = db.session.execute(
-                sql_empresa_cnpj,
-                {"cnpj": cnpj_contrato},
-            ).mappings().first()
-
-            if row_empresa:
-                empresa_dict = dict(row_empresa)
-                empresa_dict["_campos"] = _campos_de_mapping_contrato_template(empresa_dict)
-                empresa_principal_obj = SimpleNamespace(**empresa_dict)
-                empresa_principal_campos_lista = empresa_dict["_campos"]
-
-                if not empresas_relacionadas_lista:
-                    empresas_relacionadas_lista.append(empresa_principal_obj)
-
         return empresa_principal_obj, empresa_principal_campos_lista, empresas_relacionadas_lista
 
     def _carregar_cards_resumo_rapido_contrato(id_contrato_param, itens_por_id_param):
@@ -27456,7 +26330,7 @@ def contratos_detalhe(id_contrato: int):
 
         try:
             sql_rel_rapido = text("""
-                SELECT TOP (120)
+                SELECT TOP (60)
                     rel.IDFatoKanbanCard,
                     rel.IDFatoControleContratosItensEuromidia,
                     rel.DataAtualizacao
@@ -27508,7 +26382,7 @@ def contratos_detalhe(id_contrato: int):
             if row_rel.get("DataAtualizacao") is not None:
                 info["datas_rel"].append(row_rel.get("DataAtualizacao"))
 
-        card_ids_rapidos = list(cards_info.keys())[:30]
+        card_ids_rapidos = list(cards_info.keys())[:20]
 
         if card_ids_rapidos:
             try:
@@ -27647,6 +26521,358 @@ def contratos_detalhe(id_contrato: int):
         )
 
         return resumo, cards_rapidos
+
+    def _carregar_abas_detalhe_rapido_contrato(
+        id_contrato_param,
+        itens_lista_param,
+        itens_por_id_param,
+        itens_por_face_param,
+        itens_por_dim_face_param,
+        itens_por_dim_painel_param,
+    ):
+        """
+        Eu carrego somente os dados necessários para as abas clicáveis do item:
+        - Histórico de negociação;
+        - Preço praticado;
+        - Check-in.
+
+        Essa função não monta timeline completa, não busca movimentos/logs/observações
+        do Kanban e não chama D4Sign. Assim a tela abre rápido sem perder os dados
+        que o usuário vê quando expande essas abas no layout.
+        """
+        resumo_abas = {
+            "TotalCheckins": 0,
+            "UltimoCheckin": None,
+            "TotalNegociacoes": 0,
+        }
+
+        cards_map_local = {}
+
+        try:
+            sql_rel_abas = text("""
+                SELECT TOP (200)
+                     rel.IDFatoKanbanCard
+                    ,rel.IDFatoControleContratosItensEuromidia
+                    ,rel.DataAtualizacao
+                FROM [Integracao].[Silver].[FatoContratoCardEuromidia] rel WITH (NOLOCK)
+                WHERE rel.IDFatoControleContratosEuromidia = :id_contrato
+                  AND rel.IDFatoKanbanCard IS NOT NULL
+                ORDER BY
+                    rel.DataAtualizacao DESC,
+                    rel.IDFatoContratoCardEuromidia DESC;
+            """)
+
+            rel_abas_rows = db.session.execute(
+                sql_rel_abas,
+                {"id_contrato": int(id_contrato_param)},
+            ).mappings().all()
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar vínculos rápidos das abas | id_contrato=%s",
+                id_contrato_param,
+            )
+            rel_abas_rows = []
+
+        for row_rel in rel_abas_rows:
+            try:
+                id_card_rel = int(row_rel.get("IDFatoKanbanCard") or 0)
+            except Exception:
+                id_card_rel = 0
+
+            if id_card_rel <= 0:
+                continue
+
+            info_card = cards_map_local.setdefault(id_card_rel, {"item_ids": set()})
+
+            try:
+                id_item_rel = int(row_rel.get("IDFatoControleContratosItensEuromidia") or 0)
+            except Exception:
+                id_item_rel = 0
+
+            if id_item_rel > 0:
+                info_card["item_ids"].add(id_item_rel)
+
+        card_ids_abas = list(cards_map_local.keys())[:80]
+        negociacao_rows_rapidas = []
+
+        if card_ids_abas:
+            try:
+                card_ids_param, card_placeholders, card_params = _coletar_ids_parametrizados(
+                    "card_abas_id_",
+                    card_ids_abas,
+                )
+
+                if card_placeholders:
+                    sql_negociacao_abas = text(
+                        f"""
+                        SELECT TOP (250)
+                            fnp.IDFatoKanbanNegociacaoPreco,
+                            fnp.IDDimUsuarios,
+                            fnp.IDEmpresaProprietaria,
+                            fnp.IDDimTabelaPrecosEuromidia,
+                            fnp.IDEmpresa,
+                            fnp.IDFatoKanbanCard,
+                            fnp.IDDimKanbanFase,
+                            fnp.IDDimKanbanStatusCard,
+                            fnp.IDFatoControleContratosEuromidia AS IDFatoControleContratosEuromidiaNegociacao,
+                            fnp.BitAditivoContrato,
+                            fnp.ObservacoesProposta,
+                            fnp.IDDimPaineisEuromidia,
+                            fnp.IDDimFacesPaineis,
+
+                            fnp.CustoAtual,
+                            fnp.PrecoAtual,
+                            fnp.MargemAtual,
+                            fnp.CustoAtualRateado,
+                            fnp.PrecoAtualRateado,
+                            fnp.MargemAtualRateado,
+
+                            fnp.DataPrecoProposto,
+                            fnp.CustoProposto,
+                            fnp.PrecoProposto,
+                            fnp.MargemProposta,
+                            fnp.CustoPropostoRateado,
+                            fnp.PrecoPropostoRateado,
+                            fnp.DescontoProposto,
+
+                            fnp.PeriodoInicio,
+                            fnp.PeriodoTermino,
+
+                            fnp.IDDimUsuariosAprovacaoPreco,
+                            fnp.DataAprovacaoPreco,
+                            fnp.PrecoAprovado,
+                            fnp.DescontoAprovado,
+                            fnp.ObservacoesAprovacao,
+                            fnp.BitAutorizacaoDiretoria,
+                            fnp.BitAutorizacaoCoordenador,
+
+                            DataEvento = COALESCE(fnp.DataAprovacaoPreco, fnp.DataPrecoProposto),
+                            IDUsuarioEvento = COALESCE(fnp.IDDimUsuariosAprovacaoPreco, fnp.IDDimUsuarios)
+                        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] fnp WITH (NOLOCK)
+                        WHERE fnp.IDFatoKanbanCard IN ({", ".join(card_placeholders)})
+                        ORDER BY
+                            COALESCE(fnp.DataAprovacaoPreco, fnp.DataPrecoProposto) DESC,
+                            fnp.IDFatoKanbanNegociacaoPreco DESC;
+                        """
+                    )
+
+                    negociacao_rows_rapidas = [
+                        dict(row)
+                        for row in db.session.execute(sql_negociacao_abas, card_params).mappings().all()
+                    ]
+            except Exception:
+                current_app.logger.exception(
+                    "CONTRATO_DETALHE | falha ao carregar negociação rápida das abas | id_contrato=%s",
+                    id_contrato_param,
+                )
+                negociacao_rows_rapidas = []
+
+        def _deduplicar_destinos_rapidos(lista_itens):
+            saida = []
+            vistos = set()
+
+            for item_ref in lista_itens or []:
+                if not item_ref:
+                    continue
+
+                chave_item = item_ref.get("IDFatoControleContratosItensEuromidia") or id(item_ref)
+                if chave_item in vistos:
+                    continue
+
+                vistos.add(chave_item)
+                saida.append(item_ref)
+
+            return saida
+
+        def _resolver_destinos_negociacao_rapida(row_neg):
+            destinos = []
+
+            id_dim_face_neg = row_neg.get("IDDimFacesPaineis")
+            if id_dim_face_neg is not None:
+                item_por_dim_face = itens_por_dim_face_param.get(str(id_dim_face_neg).strip())
+                if item_por_dim_face:
+                    destinos.append(item_por_dim_face)
+
+            if not destinos:
+                id_painel_neg = row_neg.get("IDDimPaineisEuromidia")
+                if id_painel_neg is not None:
+                    destinos.extend(itens_por_dim_painel_param.get(str(id_painel_neg).strip(), []))
+
+            if not destinos:
+                try:
+                    id_card_neg = int(row_neg.get("IDFatoKanbanCard") or 0)
+                except Exception:
+                    id_card_neg = 0
+
+                if id_card_neg > 0:
+                    rel_info = cards_map_local.get(id_card_neg, {})
+                    for id_item_rel in rel_info.get("item_ids") or []:
+                        item_ref = itens_por_id_param.get(int(id_item_rel))
+                        if item_ref:
+                            destinos.append(item_ref)
+
+            return _deduplicar_destinos_rapidos(destinos)
+
+        def _adicionar_negociacao_rapida_no_item(item_ref, row_neg):
+            if not item_ref:
+                return
+
+            id_neg = row_neg.get("IDFatoKanbanNegociacaoPreco")
+            if id_neg is None:
+                return
+
+            if not any(h.get("IDFatoKanbanNegociacaoPreco") == id_neg for h in item_ref.get("HistoricoNegociacao", [])):
+                item_ref["HistoricoNegociacao"].append(dict(row_neg))
+
+            preco_praticado = (
+                row_neg.get("PrecoAprovado")
+                if row_neg.get("PrecoAprovado") is not None
+                else row_neg.get("PrecoProposto")
+            )
+            desconto_praticado = (
+                row_neg.get("DescontoAprovado")
+                if row_neg.get("DescontoAprovado") is not None
+                else row_neg.get("DescontoProposto")
+            )
+            margem_ref = (
+                row_neg.get("MargemProposta")
+                if row_neg.get("MargemProposta") is not None
+                else row_neg.get("MargemAtual")
+            )
+
+            preco_dict = {
+                "IDFatoKanbanNegociacaoPreco": id_neg,
+                "IDFatoKanbanCard": row_neg.get("IDFatoKanbanCard"),
+                "DataCadastro": row_neg.get("DataPrecoProposto"),
+                "DataAprovacaoContrato": row_neg.get("DataAprovacaoPreco"),
+                "Exibicoes": None,
+                "CustoPainel": (
+                    row_neg.get("CustoProposto")
+                    if row_neg.get("CustoProposto") is not None
+                    else row_neg.get("CustoAtual")
+                ),
+                "CustoMedioPainel": (
+                    row_neg.get("CustoPropostoRateado")
+                    if row_neg.get("CustoPropostoRateado") is not None
+                    else row_neg.get("CustoAtualRateado")
+                ),
+                "PrecoProposto": row_neg.get("PrecoProposto"),
+                "PrecoPraticado": preco_praticado,
+                "Desconto": desconto_praticado,
+                "MargemPct": margem_ref,
+                "MargemPercentual": margem_ref,
+                "PeriodoInicio": row_neg.get("PeriodoInicio"),
+                "PeriodoTermino": row_neg.get("PeriodoTermino"),
+                "DataInicio": row_neg.get("PeriodoInicio"),
+                "DataTermino": row_neg.get("PeriodoTermino"),
+            }
+
+            if not any(p.get("IDFatoKanbanNegociacaoPreco") == id_neg for p in item_ref.get("PrecosPraticados", [])):
+                item_ref["PrecosPraticados"].append(preco_dict)
+
+        for row_neg in negociacao_rows_rapidas:
+            destinos_neg = _resolver_destinos_negociacao_rapida(row_neg)
+            for item_destino in destinos_neg:
+                _adicionar_negociacao_rapida_no_item(item_destino, row_neg)
+
+        resumo_abas["TotalNegociacoes"] = len(negociacao_rows_rapidas)
+
+        try:
+            sql_checkins_abas = text("""
+                SELECT TOP (120)
+                     ch.IDDimCheckinHistorico
+                    ,ch.DataChekin
+                    ,ch.DataConfirmacao
+                    ,ch.DataAtualizacao
+                    ,ch.IDUsuarioCriacao
+                    ,ch.IDUsuarioConfirmacao
+                    ,ch.Observacao
+                    ,ch.CodPonto
+                    ,ch.CodFace
+                    ,ch.TipoPainel
+                    ,ch.TipoFace
+                    ,ch.BitChekin
+                    ,ch.UrlImagemGerada
+                    ,ch.UrlImagemUpload
+                FROM [Integracao].[Silver].[DimCheckinHistorico] ch WITH (NOLOCK)
+                WHERE ch.IDFatoControleContratosEuromidia = :id_contrato
+                ORDER BY
+                    COALESCE(ch.DataConfirmacao, ch.DataChekin, ch.DataAtualizacao) DESC,
+                    ch.IDDimCheckinHistorico DESC;
+            """)
+
+            checkin_rows_rapidas = [
+                dict(row)
+                for row in db.session.execute(
+                    sql_checkins_abas,
+                    {"id_contrato": int(id_contrato_param)},
+                ).mappings().all()
+            ]
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar check-ins rápidos das abas | id_contrato=%s",
+                id_contrato_param,
+            )
+            checkin_rows_rapidas = []
+
+        for row_ck in checkin_rows_rapidas:
+            data_evento = row_ck.get("DataConfirmacao") or row_ck.get("DataChekin") or row_ck.get("DataAtualizacao")
+            row_ck["DataEvento"] = data_evento
+
+            chave_face = (
+                str(row_ck.get("CodPonto") or "").strip(),
+                str(row_ck.get("CodFace") or "").strip().upper(),
+            )
+
+            item_check = itens_por_face_param.get(chave_face)
+            if item_check is None:
+                continue
+
+            item_check["CheckinsDetalhe"].append(row_ck)
+            item_check["QtdeCheckins"] = int(item_check.get("QtdeCheckins") or 0) + 1
+
+            if data_evento is not None and (
+                item_check.get("UltimoCheckinEm") is None
+                or data_evento > item_check.get("UltimoCheckinEm")
+            ):
+                item_check["UltimoCheckinEm"] = data_evento
+
+        resumo_abas["TotalCheckins"] = len(checkin_rows_rapidas)
+        resumo_abas["UltimoCheckin"] = max(
+            [row.get("DataEvento") for row in checkin_rows_rapidas if row.get("DataEvento") is not None],
+            default=None,
+        )
+
+        for item_ref in itens_lista_param or []:
+            item_ref["CheckinsDetalhe"].sort(
+                key=lambda x: (
+                    x.get("DataEvento")
+                    or x.get("DataConfirmacao")
+                    or x.get("DataChekin")
+                    or x.get("DataAtualizacao")
+                    or datetime.min
+                ),
+                reverse=True,
+            )
+            item_ref["HistoricoNegociacao"].sort(
+                key=lambda x: (
+                    x.get("DataEvento")
+                    or x.get("DataAprovacaoPreco")
+                    or x.get("DataPrecoProposto")
+                    or datetime.min
+                ),
+                reverse=True,
+            )
+            item_ref["PrecosPraticados"].sort(
+                key=lambda x: (
+                    x.get("DataAprovacaoContrato")
+                    or x.get("DataCadastro")
+                    or datetime.min
+                ),
+                reverse=True,
+            )
+
+        return resumo_abas
 
     def _coagir_data_preferencia(valor):
         """Eu normalizo datas vindas do banco para montar filtros da grade."""
@@ -27788,9 +27014,9 @@ def contratos_detalhe(id_contrato: int):
         sql_campos_painel = text("""
             SELECT
                  ci.[IDFatoControleContratosItensEuromidia] AS IDItemContrato
-                ,TRY_CONVERT(int, ci.[CodPonto]) AS CodPonto
+                ,ci.[CodPonto] AS CodPonto
                 ,ci.[CodFace]
-                ,TRY_CONVERT(int, pn.[QuantidadeFaces]) AS QuantidadeFaces
+                ,pn.[QuantidadeFaces] AS QuantidadeFaces
                 ,COALESCE(NULLIF(LTRIM(RTRIM(df.[Tipo])), ''), NULLIF(LTRIM(RTRIM(pn.[Tipo])), ''), NULLIF(LTRIM(RTRIM(ci.[Tipo])), '')) AS TipoPainelGrade
                 ,pn.[Logradouro]
                 ,pn.[Sentido]
@@ -27814,19 +27040,19 @@ def contratos_detalhe(id_contrato: int):
                 WHERE
                     (
                         ci.[IDDimFacesPaineis] IS NOT NULL
-                        AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis])
+                        AND f.[IDDimFacesPaineis] = ci.[IDDimFacesPaineis]
                     )
                     OR (
-                        TRY_CONVERT(int, f.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                        f.[CodPonto] = ci.[CodPonto]
                         AND UPPER(LTRIM(RTRIM(ISNULL(f.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(ci.[CodFace], ''))))
                     )
                 ORDER BY
                     CASE
                         WHEN ci.[IDDimFacesPaineis] IS NOT NULL
-                         AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis]) THEN 0
+                         AND f.[IDDimFacesPaineis] = ci.[IDDimFacesPaineis] THEN 0
                         ELSE 1
                     END,
-                    TRY_CONVERT(int, f.[IDDimFacesPaineis]) DESC
+                    f.[IDDimFacesPaineis] DESC
             ) AS df
             OUTER APPLY (
                 SELECT TOP (1)
@@ -27850,23 +27076,23 @@ def contratos_detalhe(id_contrato: int):
                 WHERE
                     (
                         ci.[IDPainelEuromidia] IS NOT NULL
-                        AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia])
+                        AND p.[IDDimPaineisEuromidia] = ci.[IDPainelEuromidia]
                     )
                     OR (
                         df.[IDDimPaineisEuromidia] IS NOT NULL
-                        AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia])
+                        AND p.[IDDimPaineisEuromidia] = df.[IDDimPaineisEuromidia]
                     )
-                    OR TRY_CONVERT(int, p.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                    OR p.[CodPonto] = ci.[CodPonto]
                 ORDER BY
                     CASE
                         WHEN ci.[IDPainelEuromidia] IS NOT NULL
-                         AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia]) THEN 0
+                         AND p.[IDDimPaineisEuromidia] = ci.[IDPainelEuromidia] THEN 0
                         WHEN df.[IDDimPaineisEuromidia] IS NOT NULL
-                         AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia]) THEN 1
+                         AND p.[IDDimPaineisEuromidia] = df.[IDDimPaineisEuromidia] THEN 1
                         ELSE 2
                     END,
                     p.[DataAtualizacao] DESC,
-                    TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) DESC
+                    p.[IDDimPaineisEuromidia] DESC
             ) AS pn
             WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens
         """).bindparams(bindparam("ids_itens", expanding=True))
@@ -28189,11 +27415,11 @@ def contratos_detalhe(id_contrato: int):
                 NomeStatusD4Resolvido = sd.NomeStatus
             FROM [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
             LEFT JOIN [Integracao].[Silver].[DimStatusD4] AS sd WITH (NOLOCK)
-                ON TRY_CONVERT(int, sd.IDDimStatusD4) = TRY_CONVERT(int, d4.IDDimStatusD4)
-            WHERE TRY_CONVERT(int, d4.IDFatoControleContratosEuromidia) = :id_contrato
+                ON sd.IDDimStatusD4 = d4.IDDimStatusD4
+            WHERE d4.IDFatoControleContratosEuromidia = :id_contrato
             ORDER BY
                 COALESCE(d4.DataAtualizacao, d4.DataUltimaConsultaD4, d4.DataEnvioD4, d4.DataCriacao) DESC,
-                TRY_CONVERT(int, d4.IDFatoContratoD4) DESC
+                d4.IDFatoContratoD4 DESC
         """)
         try:
             rows = db.session.execute(sql_d4_docs, {"id_contrato": int(id_contrato_param)}).mappings().all()
@@ -28253,11 +27479,11 @@ def contratos_detalhe(id_contrato: int):
                 ,h.DataStatus
             FROM [Integracao].[Silver].[DimHistoricoContratos] AS h WITH (NOLOCK)
             LEFT JOIN [Integracao].[Silver].[DimStatusContratos] AS sc WITH (NOLOCK)
-                ON TRY_CONVERT(int, sc.IDDimStatusContratos) = TRY_CONVERT(int, h.IDDimStatusContratos)
+                ON sc.IDDimStatusContratos = h.IDDimStatusContratos
                AND (sc.IDEmpresaProprietaria = h.IDEmpresaProprietaria OR h.IDEmpresaProprietaria IS NULL)
             LEFT JOIN [Integracao].[Silver].[DimStatusD4] AS sd WITH (NOLOCK)
-                ON TRY_CONVERT(int, sd.IDDimStatusD4) = TRY_CONVERT(int, h.IDDimStatusD4)
-            WHERE TRY_CONVERT(int, h.IDFatoControleContratosEuromidia) = :id_contrato
+                ON sd.IDDimStatusD4 = h.IDDimStatusD4
+            WHERE h.IDFatoControleContratosEuromidia = :id_contrato
             ORDER BY h.DataStatus DESC, h.IDDimHistoricoContratos DESC
         """)
         try:
@@ -28363,8 +27589,12 @@ def contratos_detalhe(id_contrato: int):
             },
         }
 
-    d4_documentos_contrato = _carregar_d4_documentos_contrato(id_contrato)
-    historico_status_contrato = _carregar_historico_status_contrato(id_contrato)
+    if modo_rapido_contrato:
+        d4_documentos_contrato = []
+        historico_status_contrato = []
+    else:
+        d4_documentos_contrato = _carregar_d4_documentos_contrato(id_contrato)
+        historico_status_contrato = _carregar_historico_status_contrato(id_contrato)
 
     sql_itens_base = text("""
         SELECT
@@ -28580,7 +27810,7 @@ def contratos_detalhe(id_contrato: int):
             "PreferenciaReservaTexto": "Sim" if qtd_faces_com_preferencia > 0 else "Não",
             "QtdeFacesComPreferencia": qtd_faces_com_preferencia,
             "StatusTerminalSemPreferencia": contrato_status_terminal_sem_preferencia,
-            "Fonte": "modo_rapido_contrato_cache_redis",
+            "Fonte": "modo_rapido_contrato",
         }
 
         try:
@@ -28600,6 +27830,20 @@ def contratos_detalhe(id_contrato: int):
             id_contrato,
             itens_por_id,
         )
+
+        resumo_abas_rapidas = _carregar_abas_detalhe_rapido_contrato(
+            id_contrato,
+            itens,
+            itens_por_id,
+            itens_por_face,
+            itens_por_dim_face,
+            itens_por_dim_painel,
+        )
+
+        if resumo_abas_rapidas:
+            resumo_atendimentos["TotalCheckins"] = int(resumo_abas_rapidas.get("TotalCheckins") or 0)
+            resumo_atendimentos["UltimoCheckin"] = resumo_abas_rapidas.get("UltimoCheckin")
+            resumo_atendimentos["TotalNegociacoes"] = int(resumo_abas_rapidas.get("TotalNegociacoes") or 0)
 
         timeline_paginacao = {
             "page": 1,
@@ -28639,10 +27883,10 @@ def contratos_detalhe(id_contrato: int):
             empresas_relacionadas=empresas_relacionadas,
             return_to=placeholder_return_to_contrato,
             modo_rapido_contrato=True,
-            contrato_detalhe_async=contrato_detalhe_async_payload,
+            contrato_detalhe_async=None,
         )
 
-        if (not cache_bypass_contrato) and (not contrato_detalhe_async_pendente):
+        if not cache_bypass_contrato:
             try:
                 cache.set(
                     cache_key_contrato_detalhe,
@@ -28663,7 +27907,7 @@ def contratos_detalhe(id_contrato: int):
             ci.[CodPonto],
             ci.[CodFace],
             CASE
-                WHEN TRY_CONVERT(int, ci.[BitPreferencia]) = 1 THEN 1
+                WHEN ci.[BitPreferencia] = 1 THEN 1
                 ELSE 0
             END AS BitPreferenciaReserva
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci
@@ -29926,19 +29170,19 @@ def contratos_detalhe(id_contrato: int):
                     WHERE
                         (
                             ci.[IDDimFacesPaineis] IS NOT NULL
-                            AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis])
+                            AND f.[IDDimFacesPaineis] = ci.[IDDimFacesPaineis]
                         )
                         OR (
-                            TRY_CONVERT(int, f.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                            f.[CodPonto] = ci.[CodPonto]
                             AND UPPER(LTRIM(RTRIM(ISNULL(f.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(ci.[CodFace], ''))))
                         )
                     ORDER BY
                         CASE
                             WHEN ci.[IDDimFacesPaineis] IS NOT NULL
-                             AND TRY_CONVERT(int, f.[IDDimFacesPaineis]) = TRY_CONVERT(int, ci.[IDDimFacesPaineis]) THEN 0
+                             AND f.[IDDimFacesPaineis] = ci.[IDDimFacesPaineis] THEN 0
                             ELSE 1
                         END,
-                        TRY_CONVERT(int, f.[IDDimFacesPaineis]) DESC
+                        f.[IDDimFacesPaineis] DESC
                 ) AS df
                 OUTER APPLY (
                     SELECT TOP (1)
@@ -29949,23 +29193,23 @@ def contratos_detalhe(id_contrato: int):
                     WHERE
                         (
                             ci.[IDPainelEuromidia] IS NOT NULL
-                            AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia])
+                            AND p.[IDDimPaineisEuromidia] = ci.[IDPainelEuromidia]
                         )
                         OR (
                             df.[IDDimPaineisEuromidia] IS NOT NULL
-                            AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia])
+                            AND p.[IDDimPaineisEuromidia] = df.[IDDimPaineisEuromidia]
                         )
-                        OR TRY_CONVERT(int, p.[CodPonto]) = TRY_CONVERT(int, ci.[CodPonto])
+                        OR p.[CodPonto] = ci.[CodPonto]
                     ORDER BY
                         CASE
                             WHEN ci.[IDPainelEuromidia] IS NOT NULL
-                             AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, ci.[IDPainelEuromidia]) THEN 0
+                             AND p.[IDDimPaineisEuromidia] = ci.[IDPainelEuromidia] THEN 0
                             WHEN df.[IDDimPaineisEuromidia] IS NOT NULL
-                             AND TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) = TRY_CONVERT(int, df.[IDDimPaineisEuromidia]) THEN 1
+                             AND p.[IDDimPaineisEuromidia] = df.[IDDimPaineisEuromidia] THEN 1
                             ELSE 2
                         END,
                         p.[DataAtualizacao] DESC,
-                        TRY_CONVERT(int, p.[IDDimPaineisEuromidia]) DESC
+                        p.[IDDimPaineisEuromidia] DESC
                 ) AS pn
                 WHERE
                     ci.[IDFatoControleContratoEuromidia] = :id_contrato
@@ -30011,7 +29255,7 @@ def contratos_detalhe(id_contrato: int):
                         PARTITION BY ip.IDItemContrato
                         ORDER BY
                             CASE
-                                WHEN TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ip.IDItemContrato THEN 0
+                                WHEN oc.[IDFatoControleContratosItemOrigem] = ip.IDItemContrato THEN 0
                                 ELSE 1
                             END,
                             CASE
@@ -30028,13 +29272,13 @@ def contratos_detalhe(id_contrato: int):
                     )
                 FROM ItensPreferencia AS ip
                 INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
-                    ON TRY_CONVERT(int, oc.[CodPonto]) = TRY_CONVERT(int, ip.[CodPonto])
+                    ON oc.[CodPonto] = ip.[CodPonto]
                    AND UPPER(LTRIM(RTRIM(ISNULL(oc.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(ip.[CodFace], ''))))
                    AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Origem], '')))) = 'CONTRATO'
                    AND (
-                        TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ip.IDItemContrato
+                        oc.[IDFatoControleContratosItemOrigem] = ip.IDItemContrato
                         OR (
-                            TRY_CONVERT(int, oc.[IDFatoControleContratos]) = :id_contrato
+                            oc.[IDFatoControleContratos] = :id_contrato
                             AND oc.[DataInicio] <= ISNULL(ip.[DataTerminoPrevisto], CONVERT(date, '9999-12-31'))
                             AND oc.[DataFim] >= ISNULL(ip.[DataInicioPrevisto], CONVERT(date, '1900-01-01'))
                         )
@@ -30086,7 +29330,7 @@ def contratos_detalhe(id_contrato: int):
                         PARTITION BY oe.IDItemContrato
                         ORDER BY
                             CASE
-                                WHEN TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia]) THEN 0
+                                WHEN rv.[IDFatoOcupacaoOrigem] = oe.[IDFatoOcupacaoPaineisEuromidia] THEN 0
                                 ELSE 1
                             END,
                             CASE
@@ -30104,22 +29348,22 @@ def contratos_detalhe(id_contrato: int):
                     )
                 FROM OcupacaoEscolhida AS oe
                 INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS rv WITH (NOLOCK)
-                    ON TRY_CONVERT(int, rv.[CodPonto]) = TRY_CONVERT(int, oe.[CodPonto])
+                    ON rv.[CodPonto] = oe.[CodPonto]
                    AND UPPER(LTRIM(RTRIM(ISNULL(rv.[CodFace], '')))) = UPPER(LTRIM(RTRIM(ISNULL(oe.[CodFace], ''))))
                    AND UPPER(LTRIM(RTRIM(ISNULL(rv.[Origem], '')))) = 'RESERVA'
                    AND (
-                        TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
+                        rv.[IDFatoOcupacaoOrigem] = oe.[IDFatoOcupacaoPaineisEuromidia]
                         OR (
-                            TRY_CONVERT(int, rv.[IDFatoControleContratosItemOrigem]) = oe.IDItemContrato
+                            rv.[IDFatoControleContratosItemOrigem] = oe.IDItemContrato
                             AND (
-                                TRY_CONVERT(int, rv.[IDFatoControleContratos]) = :id_contrato
+                                rv.[IDFatoControleContratos] = :id_contrato
                                 OR rv.[IDFatoControleContratos] IS NULL
-                                OR TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
+                                OR rv.[IDFatoOcupacaoOrigem] = oe.[IDFatoOcupacaoPaineisEuromidia]
                             )
                             AND (
                                 UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERENCIA%'
                                 OR UPPER(LTRIM(RTRIM(ISNULL(rv.[TipoVinculoOrigem], '')))) LIKE '%PREFERÊNCIA%'
-                                OR TRY_CONVERT(int, rv.[IDFatoOcupacaoOrigem]) = TRY_CONVERT(int, oe.[IDFatoOcupacaoPaineisEuromidia])
+                                OR rv.[IDFatoOcupacaoOrigem] = oe.[IDFatoOcupacaoPaineisEuromidia]
                             )
                         )
                    )
