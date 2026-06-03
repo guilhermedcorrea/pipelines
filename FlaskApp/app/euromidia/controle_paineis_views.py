@@ -13733,7 +13733,7 @@ def api_contrato_detalhe_cache_status(id_contrato: int):
         id_usuario_cache = "anonimo"
 
     cache_key_html = (
-        f"contratos_detalhe_html:v20260602_timeline8_v1:"
+        f"contratos_detalhe_html:v20260603_clickfast_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -26789,11 +26789,17 @@ def contratos_detalhe(id_contrato: int):
         str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
         in {"1", "true", "sim", "yes", "s"}
     )
+    abrir_rapido_padrao_cache_inicial = (
+        str(os.getenv("CONTRATO_DETALHE_ABRIR_RAPIDO_PADRAO", "1") or "1").strip().lower()
+        not in {"0", "false", "nao", "não", "no", "n"}
+        and caminho_return_to_cache_inicial in {"/paineis/contratos", "/admin/vencimentos-campanhas"}
+    )
+
     modo_rapido_cache_inicial = (
         not modo_completo_cache_inicial
         and (
             modo_rapido_param_cache_inicial
-            or caminho_return_to_cache_inicial == "/admin/vencimentos-campanhas"
+            or abrir_rapido_padrao_cache_inicial
         )
     )
 
@@ -26815,15 +26821,38 @@ def contratos_detalhe(id_contrato: int):
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     contrato_preload_cache_inicial = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260602_timeline8_v1:"
+        f"contratos_detalhe_html:v20260603_clickfast_v1:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
         f"timeline:{timeline_page_cache_inicial}"
     )
+    cache_key_contrato_detalhe_completo_inicial = (
+        f"contratos_detalhe_html:v20260603_clickfast_v1:"
+        f"usuario:{id_usuario_cache_inicial}:"
+        f"contrato:{int(id_contrato)}:"
+        f"modo:completo:"
+        f"timeline:{timeline_page_cache_inicial}"
+    )
     placeholder_return_to_contrato_inicial = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
 
     if not cache_bypass_contrato_inicial:
+        html_cache_contrato_inicial = None
+
+        # Quando o usuário vem da lista de contratos, eu abro rápido por padrão.
+        # Mas, se o HTML completo já estiver quente no Redis, devolvo o completo imediatamente.
+        if modo_rapido_cache_inicial and not modo_rapido_param_cache_inicial and not modo_completo_cache_inicial:
+            try:
+                html_cache_contrato_inicial = cache.get(cache_key_contrato_detalhe_completo_inicial)
+            except Exception:
+                html_cache_contrato_inicial = None
+
+            if html_cache_contrato_inicial:
+                return str(html_cache_contrato_inicial).replace(
+                    placeholder_return_to_contrato_inicial,
+                    str(html_escape(return_to_cache_inicial)),
+                )
+
         try:
             html_cache_contrato_inicial = cache.get(cache_key_contrato_detalhe_inicial)
         except Exception:
@@ -26945,11 +26974,17 @@ def contratos_detalhe(id_contrato: int):
         str(request.args.get("modo_rapido") or request.args.get("rapido") or "").strip().lower()
         in {"1", "true", "sim", "yes", "s"}
     )
+    abrir_rapido_padrao_contrato = (
+        str(os.getenv("CONTRATO_DETALHE_ABRIR_RAPIDO_PADRAO", "1") or "1").strip().lower()
+        not in {"0", "false", "nao", "não", "no", "n"}
+        and caminho_return_to_rapido in {"/paineis/contratos", "/admin/vencimentos-campanhas"}
+    )
+
     modo_rapido_contrato = (
         not modo_completo_contrato
         and (
             modo_rapido_param_contrato
-            or caminho_return_to_rapido == "/admin/vencimentos-campanhas"
+            or abrir_rapido_padrao_contrato
         )
     )
 
@@ -26978,7 +27013,7 @@ def contratos_detalhe(id_contrato: int):
     contrato_detalhe_async_pendente = False
     contrato_detalhe_async_payload = None
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260602_timeline8_v1:"
+        f"contratos_detalhe_html:v20260603_clickfast_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
@@ -26986,7 +27021,7 @@ def contratos_detalhe(id_contrato: int):
     )
     placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
     cache_key_contrato_detalhe_completo = (
-        f"contratos_detalhe_html:v20260602_timeline8_v1:"
+        f"contratos_detalhe_html:v20260603_clickfast_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -26994,6 +27029,21 @@ def contratos_detalhe(id_contrato: int):
     )
 
     if not cache_bypass_contrato:
+        html_cache_contrato = None
+
+        # Se o completo já foi aquecido antes, não devolvo o rápido: devolvo o completo na hora.
+        if modo_rapido_contrato and not modo_rapido_param_contrato and not modo_completo_contrato:
+            try:
+                html_cache_contrato = cache.get(cache_key_contrato_detalhe_completo)
+            except Exception:
+                html_cache_contrato = None
+
+            if html_cache_contrato:
+                return str(html_cache_contrato).replace(
+                    placeholder_return_to_contrato,
+                    str(html_escape(return_to)),
+                )
+
         try:
             html_cache_contrato = cache.get(cache_key_contrato_detalhe)
         except Exception:
