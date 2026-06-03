@@ -26466,6 +26466,7 @@ def contratos_detalhe(id_contrato: int):
                         "NomeStatus": row_card.get("NomeStatus") or "—",
                         "TipoCard": _classificar_tipo_card(row_card),
                         "Situacao": situacao,
+                        "IDDimUsuarios": row_card.get("IDDimUsuarios"),
                         "Usuario": "—",
                         "ItensAfetados": itens_afetados,
                         "QtdeItensAfetados": len(itens_afetados),
@@ -26873,6 +26874,408 @@ def contratos_detalhe(id_contrato: int):
             )
 
         return resumo_abas
+
+    def _montar_timeline_rapida_contrato(id_contrato_param, cards_relacionados_rapidos_param):
+        """
+        Eu monto a Linha do Tempo dos Atendimentos no modo rápido sem deixar
+        a primeira abertura do contrato depender do carregamento completo.
+
+        O objetivo é manter o mesmo conteúdo funcional da timeline:
+        - cards relacionados;
+        - movimentações;
+        - observações;
+        - logs;
+        - negociações;
+        - encerramentos via card;
+        - check-ins.
+
+        Para preservar desempenho, eu busco apenas eventos recentes com TOP,
+        usando IDs dos cards já relacionados ao contrato.
+        """
+        timeline_eventos_rapidos = []
+        user_ids_rapidos = set()
+
+        def _adicionar_evento_rapido(id_card, tipo_evento, data_evento, texto, id_usuario=None, extra=None):
+            if data_evento is None:
+                return
+
+            evento = {
+                "IDFatoKanbanCard": id_card,
+                "TipoEvento": tipo_evento,
+                "DataEvento": data_evento,
+                "Texto": (texto or "").strip() or "—",
+                "IDUsuario": id_usuario,
+                "NomeUsuario": None,
+                "Extra": extra or {},
+            }
+            timeline_eventos_rapidos.append(evento)
+
+            if id_usuario is not None:
+                try:
+                    user_ids_rapidos.add(int(id_usuario))
+                except Exception:
+                    pass
+
+        cards_lista = list(cards_relacionados_rapidos_param or [])
+        card_ids_timeline = []
+
+        for card in cards_lista:
+            try:
+                id_card = int(card.get("IDFatoKanbanCard") or 0)
+            except Exception:
+                id_card = 0
+
+            if id_card <= 0:
+                continue
+
+            if id_card not in card_ids_timeline:
+                card_ids_timeline.append(id_card)
+
+            data_card = card.get("DataReferencia") or card.get("AtualizadoEm") or card.get("CriadoEm")
+            titulo_card = card.get("Titulo") or f"Card #{id_card}"
+            id_usuario_card = card.get("IDDimUsuarios")
+
+            _adicionar_evento_rapido(
+                id_card,
+                "CARD",
+                data_card,
+                f"Card relacionado ao contrato: {titulo_card}",
+                id_usuario_card,
+                {
+                    "NomeFase": card.get("NomeFase"),
+                    "NomeStatus": card.get("NomeStatus"),
+                },
+            )
+
+            encerrado_em = card.get("EncerradoEm")
+            if encerrado_em is not None:
+                _adicionar_evento_rapido(
+                    id_card,
+                    "ENCERRAMENTO",
+                    encerrado_em,
+                    f"Atendimento encerrado: {titulo_card}",
+                    id_usuario_card,
+                    {
+                        "NomeFase": card.get("NomeFase"),
+                        "NomeStatus": card.get("NomeStatus"),
+                    },
+                )
+
+        card_ids_timeline = card_ids_timeline[:80]
+
+        if card_ids_timeline:
+            try:
+                _, card_placeholders_tl, card_params_tl = _coletar_ids_parametrizados(
+                    "card_timeline_rapida_id_",
+                    card_ids_timeline,
+                )
+            except Exception:
+                card_placeholders_tl = []
+                card_params_tl = {}
+
+            if card_placeholders_tl:
+                try:
+                    sql_mov_tl = text(
+                        f"""
+                        SELECT TOP (80)
+                            m.IDFatoKanbanCard,
+                            m.MovidoEm,
+                            m.MovidoPor,
+                            m.Observacao,
+                            m.IDFaseDe,
+                            m.IDFasePara
+                        FROM [Kanban].[Silver].[FatoKanbanCardMovimento] m WITH (NOLOCK)
+                        WHERE m.IDFatoKanbanCard IN ({", ".join(card_placeholders_tl)})
+                        ORDER BY m.MovidoEm DESC, m.IDFatoKanbanCard DESC;
+                        """
+                    )
+
+                    for row in db.session.execute(sql_mov_tl, card_params_tl).mappings().all():
+                        _adicionar_evento_rapido(
+                            row.get("IDFatoKanbanCard"),
+                            "MOVIMENTO",
+                            row.get("MovidoEm"),
+                            row.get("Observacao") or "Movimentação de fase no atendimento.",
+                            row.get("MovidoPor"),
+                            {
+                                "IDFaseDe": row.get("IDFaseDe"),
+                                "IDFasePara": row.get("IDFasePara"),
+                            },
+                        )
+                except Exception:
+                    current_app.logger.exception(
+                        "CONTRATO_DETALHE | falha ao carregar movimentos rápidos da timeline | id_contrato=%s",
+                        id_contrato_param,
+                    )
+
+                try:
+                    sql_obs_tl = text(
+                        f"""
+                        SELECT TOP (80)
+                            o.IDFatoKanbanCard,
+                            o.CriadoEm,
+                            o.IDDimUsuarios,
+                            o.Observacao,
+                            o.IDDimKanbanFase,
+                            o.IDDimKanbanStatusCard
+                        FROM [Kanban].[Silver].[FatoKanbanCardObservacoes] o WITH (NOLOCK)
+                        WHERE o.IDFatoKanbanCard IN ({", ".join(card_placeholders_tl)})
+                        ORDER BY o.CriadoEm DESC, o.IDFatoKanbanCard DESC;
+                        """
+                    )
+
+                    for row in db.session.execute(sql_obs_tl, card_params_tl).mappings().all():
+                        _adicionar_evento_rapido(
+                            row.get("IDFatoKanbanCard"),
+                            "OBSERVACAO",
+                            row.get("CriadoEm"),
+                            row.get("Observacao"),
+                            row.get("IDDimUsuarios"),
+                            {
+                                "IDDimKanbanFase": row.get("IDDimKanbanFase"),
+                                "IDDimKanbanStatusCard": row.get("IDDimKanbanStatusCard"),
+                            },
+                        )
+                except Exception:
+                    current_app.logger.exception(
+                        "CONTRATO_DETALHE | falha ao carregar observações rápidas da timeline | id_contrato=%s",
+                        id_contrato_param,
+                    )
+
+                try:
+                    sql_log_tl = text(
+                        f"""
+                        SELECT TOP (80)
+                            l.IDFatoKanbanCard,
+                            l.OcorridoEm,
+                            l.IDUsuarioAcao,
+                            l.TipoEvento,
+                            l.SubtipoEvento,
+                            l.TextoLivre,
+                            l.IDFaseDe,
+                            l.IDFasePara
+                        FROM [Kanban].[Silver].[FatoKanbanCardLog] l WITH (NOLOCK)
+                        WHERE l.IDFatoKanbanCard IN ({", ".join(card_placeholders_tl)})
+                        ORDER BY l.OcorridoEm DESC, l.IDFatoKanbanCard DESC;
+                        """
+                    )
+
+                    for row in db.session.execute(sql_log_tl, card_params_tl).mappings().all():
+                        texto_log = row.get("TextoLivre")
+                        if not texto_log:
+                            tipo_log = (row.get("TipoEvento") or "Evento").strip()
+                            subtipo_log = (row.get("SubtipoEvento") or "").strip()
+                            texto_log = f"{tipo_log} - {subtipo_log}" if subtipo_log else tipo_log
+
+                        _adicionar_evento_rapido(
+                            row.get("IDFatoKanbanCard"),
+                            "LOG",
+                            row.get("OcorridoEm"),
+                            texto_log,
+                            row.get("IDUsuarioAcao"),
+                            {
+                                "TipoEvento": row.get("TipoEvento"),
+                                "SubtipoEvento": row.get("SubtipoEvento"),
+                                "IDFaseDe": row.get("IDFaseDe"),
+                                "IDFasePara": row.get("IDFasePara"),
+                            },
+                        )
+                except Exception:
+                    current_app.logger.exception(
+                        "CONTRATO_DETALHE | falha ao carregar logs rápidos da timeline | id_contrato=%s",
+                        id_contrato_param,
+                    )
+
+                try:
+                    sql_neg_tl = text(
+                        f"""
+                        SELECT TOP (80)
+                            fnp.IDFatoKanbanNegociacaoPreco,
+                            fnp.IDFatoKanbanCard,
+                            fnp.ObservacoesProposta,
+                            fnp.ObservacoesAprovacao,
+                            fnp.PrecoProposto,
+                            fnp.PrecoAprovado,
+                            fnp.DescontoProposto,
+                            fnp.DescontoAprovado,
+                            fnp.PeriodoInicio,
+                            fnp.PeriodoTermino,
+                            DataEvento = COALESCE(fnp.DataAprovacaoPreco, fnp.DataPrecoProposto),
+                            IDUsuarioEvento = COALESCE(fnp.IDDimUsuariosAprovacaoPreco, fnp.IDDimUsuarios)
+                        FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] fnp WITH (NOLOCK)
+                        WHERE fnp.IDFatoKanbanCard IN ({", ".join(card_placeholders_tl)})
+                        ORDER BY
+                            COALESCE(fnp.DataAprovacaoPreco, fnp.DataPrecoProposto) DESC,
+                            fnp.IDFatoKanbanNegociacaoPreco DESC;
+                        """
+                    )
+
+                    for row in db.session.execute(sql_neg_tl, card_params_tl).mappings().all():
+                        texto_neg = row.get("ObservacoesAprovacao") or row.get("ObservacoesProposta")
+                        if not texto_neg:
+                            preco_ref = row.get("PrecoAprovado") if row.get("PrecoAprovado") is not None else row.get("PrecoProposto")
+                            desconto_ref = row.get("DescontoAprovado") if row.get("DescontoAprovado") is not None else row.get("DescontoProposto")
+                            partes = []
+                            if preco_ref is not None:
+                                partes.append(f"Preço: {preco_ref}")
+                            if desconto_ref is not None:
+                                partes.append(f"Desconto: {desconto_ref}%")
+                            texto_neg = " | ".join(partes) if partes else "Negociação de preço registrada."
+
+                        _adicionar_evento_rapido(
+                            row.get("IDFatoKanbanCard"),
+                            "NEGOCIACAO",
+                            row.get("DataEvento"),
+                            texto_neg,
+                            row.get("IDUsuarioEvento"),
+                            {
+                                "IDFatoControleContratosEuromidia": id_contrato_param,
+                                "IDFatoKanbanCard": row.get("IDFatoKanbanCard"),
+                                "IDFatoKanbanNegociacaoPreco": row.get("IDFatoKanbanNegociacaoPreco"),
+                                "PeriodoInicio": row.get("PeriodoInicio"),
+                                "PeriodoTermino": row.get("PeriodoTermino"),
+                            },
+                        )
+                except Exception:
+                    current_app.logger.exception(
+                        "CONTRATO_DETALHE | falha ao carregar negociações rápidas da timeline | id_contrato=%s",
+                        id_contrato_param,
+                    )
+
+        try:
+            sql_checkin_tl = text("""
+                SELECT TOP (80)
+                     ch.IDDimCheckinHistorico
+                    ,ch.DataChekin
+                    ,ch.DataConfirmacao
+                    ,ch.DataAtualizacao
+                    ,ch.IDUsuarioCriacao
+                    ,ch.IDUsuarioConfirmacao
+                    ,ch.Observacao
+                    ,ch.CodPonto
+                    ,ch.CodFace
+                    ,ch.BitChekin
+                    ,ch.UrlImagemGerada
+                    ,ch.UrlImagemUpload
+                FROM [Integracao].[Silver].[DimCheckinHistorico] ch WITH (NOLOCK)
+                WHERE ch.IDFatoControleContratosEuromidia = :id_contrato
+                ORDER BY
+                    COALESCE(ch.DataConfirmacao, ch.DataChekin, ch.DataAtualizacao) DESC,
+                    ch.IDDimCheckinHistorico DESC;
+            """)
+
+            for row in db.session.execute(sql_checkin_tl, {"id_contrato": int(id_contrato_param)}).mappings().all():
+                data_evento = row.get("DataConfirmacao") or row.get("DataChekin") or row.get("DataAtualizacao")
+                texto_checkin = row.get("Observacao") or f"Check-in {row.get('CodPonto') or '—'}/{row.get('CodFace') or '—'}"
+
+                _adicionar_evento_rapido(
+                    None,
+                    "CHECKIN",
+                    data_evento,
+                    texto_checkin,
+                    row.get("IDUsuarioConfirmacao") or row.get("IDUsuarioCriacao"),
+                    {
+                        "CodPonto": row.get("CodPonto"),
+                        "CodFace": row.get("CodFace"),
+                        "BitChekin": row.get("BitChekin"),
+                        "UrlImagemGerada": row.get("UrlImagemGerada"),
+                        "UrlImagemUpload": row.get("UrlImagemUpload"),
+                        "IDDimCheckinHistorico": row.get("IDDimCheckinHistorico"),
+                    },
+                )
+        except Exception:
+            current_app.logger.exception(
+                "CONTRATO_DETALHE | falha ao carregar check-ins rápidos da timeline | id_contrato=%s",
+                id_contrato_param,
+            )
+
+        if user_ids_rapidos:
+            try:
+                rows_usuarios = (
+                    db.session.query(DimUsuarios.IDDimUsuarios, DimUsuarios.NomeUsuario)
+                    .filter(DimUsuarios.IDDimUsuarios.in_(list(user_ids_rapidos)))
+                    .all()
+                )
+
+                usuarios_por_id_rapido = {
+                    int(id_usuario): (nome_usuario or f"Usuário #{id_usuario}")
+                    for id_usuario, nome_usuario in rows_usuarios
+                }
+            except Exception:
+                current_app.logger.exception(
+                    "CONTRATO_DETALHE | falha ao resolver usuários rápidos da timeline | id_contrato=%s",
+                    id_contrato_param,
+                )
+                usuarios_por_id_rapido = {}
+
+            for evento in timeline_eventos_rapidos:
+                id_usuario = evento.get("IDUsuario")
+                if id_usuario is None:
+                    continue
+
+                try:
+                    evento["NomeUsuario"] = usuarios_por_id_rapido.get(int(id_usuario)) or f"Usuário #{id_usuario}"
+                except Exception:
+                    evento["NomeUsuario"] = None
+
+        vistos_eventos = set()
+        eventos_deduplicados = []
+
+        for evento in timeline_eventos_rapidos:
+            chave = (
+                evento.get("TipoEvento"),
+                evento.get("IDFatoKanbanCard"),
+                evento.get("DataEvento"),
+                evento.get("Texto"),
+                str(evento.get("Extra") or {}),
+            )
+
+            if chave in vistos_eventos:
+                continue
+
+            vistos_eventos.add(chave)
+            eventos_deduplicados.append(evento)
+
+        eventos_deduplicados.sort(
+            key=lambda x: (
+                x.get("DataEvento") or datetime.min,
+                x.get("IDFatoKanbanCard") or 0,
+            ),
+            reverse=True,
+        )
+
+        try:
+            timeline_page_local = int(request.args.get("timeline_page") or 1)
+        except Exception:
+            timeline_page_local = 1
+
+        if timeline_page_local <= 0:
+            timeline_page_local = 1
+
+        timeline_per_page_local = 8
+        timeline_total_local = len(eventos_deduplicados)
+        timeline_total_pages_local = max(1, (timeline_total_local + timeline_per_page_local - 1) // timeline_per_page_local)
+
+        if timeline_page_local > timeline_total_pages_local:
+            timeline_page_local = timeline_total_pages_local
+
+        inicio_idx = (timeline_page_local - 1) * timeline_per_page_local
+        fim_idx = min(inicio_idx + timeline_per_page_local, timeline_total_local)
+
+        timeline_paginacao_local = {
+            "page": timeline_page_local,
+            "per_page": timeline_per_page_local,
+            "total": timeline_total_local,
+            "total_pages": timeline_total_pages_local,
+            "inicio": inicio_idx + 1 if timeline_total_local else 0,
+            "fim": fim_idx,
+            "has_prev": timeline_page_local > 1,
+            "has_next": timeline_page_local < timeline_total_pages_local,
+            "prev_page": max(1, timeline_page_local - 1),
+            "next_page": min(timeline_total_pages_local, timeline_page_local + 1),
+        }
+
+        return eventos_deduplicados[inicio_idx:fim_idx], timeline_paginacao_local
 
     def _coagir_data_preferencia(valor):
         """Eu normalizo datas vindas do banco para montar filtros da grade."""
@@ -27845,18 +28248,10 @@ def contratos_detalhe(id_contrato: int):
             resumo_atendimentos["UltimoCheckin"] = resumo_abas_rapidas.get("UltimoCheckin")
             resumo_atendimentos["TotalNegociacoes"] = int(resumo_abas_rapidas.get("TotalNegociacoes") or 0)
 
-        timeline_paginacao = {
-            "page": 1,
-            "per_page": 20,
-            "total": 0,
-            "total_pages": 1,
-            "inicio": 0,
-            "fim": 0,
-            "has_prev": False,
-            "has_next": False,
-            "prev_page": 1,
-            "next_page": 1,
-        }
+        timeline_atendimentos_rapida, timeline_paginacao = _montar_timeline_rapida_contrato(
+            id_contrato,
+            cards_relacionados_rapidos,
+        )
 
         painel_d4_contrato = _montar_painel_d4_contrato(
             d4_documentos=d4_documentos_contrato,
@@ -27870,7 +28265,7 @@ def contratos_detalhe(id_contrato: int):
             contrato_campos=contrato_campos,
             itens=itens,
             cards_relacionados=cards_relacionados_rapidos,
-            timeline_atendimentos=[],
+            timeline_atendimentos=timeline_atendimentos_rapida,
             timeline_paginacao=timeline_paginacao,
             resumo_atendimentos=resumo_atendimentos,
             diagrama_status=diagrama_status,
