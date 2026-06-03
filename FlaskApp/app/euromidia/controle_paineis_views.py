@@ -558,6 +558,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
         8: "Concluido",
         9: "Cancelado",
         10: "ERRO",
+        31: "Reprovado",
     }
 
     try:
@@ -570,6 +571,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": nome,
+                "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
             }
             for id_status, nome in mapa_padrao.items()
         ]
@@ -578,9 +580,13 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
         SELECT
              [IDDimStatusContratos]
             ,[Status]
+            ,[CorHex]
         FROM [Integracao].[Silver].[DimStatusContratos]
         WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
-          AND [IDDimStatusContratos] BETWEEN 1 AND 10
+          AND (
+                [IDDimStatusContratos] BETWEEN 1 AND 10
+                OR [IDDimStatusContratos] = 31
+              )
         ORDER BY [IDDimStatusContratos] ASC
     """)
 
@@ -594,6 +600,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": nome,
+                "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
             }
             for id_status, nome in mapa_padrao.items()
         ]
@@ -611,6 +618,10 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+                "CorHex": _normalizar_hex_css(
+                    row.get("CorHex"),
+                    _cor_hex_status_contrato_padrao_paineis(id_status) or "#94A3B8",
+                ),
             }
         )
 
@@ -620,6 +631,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
                 {
                     "IDDimStatusContratos": id_status,
                     "Status": nome,
+                    "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
                 }
             )
 
@@ -638,6 +650,14 @@ def _montar_diagrama_status_contrato(
         for row in status_rows
         if int(row.get("IDDimStatusContratos") or 0) > 0
     }
+    mapa_cor = {
+        int(row.get("IDDimStatusContratos") or 0): (
+            _normalizar_hex_css(row.get("CorHex"), "")
+            or _cor_hex_status_contrato_padrao_paineis(row.get("IDDimStatusContratos"))
+        )
+        for row in status_rows
+        if int(row.get("IDDimStatusContratos") or 0) > 0
+    }
 
     try:
         id_status_corrente = int(id_status_atual or 0)
@@ -645,6 +665,7 @@ def _montar_diagrama_status_contrato(
         id_status_corrente = 0
 
     nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+    cor_status_corrente = mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_paineis(id_status_corrente)
 
     etapas_principais = []
     for id_status in range(1, 8):
@@ -662,6 +683,7 @@ def _montar_diagrama_status_contrato(
             {
                 "id": id_status,
                 "nome": nome,
+                "cor_hex": mapa_cor.get(id_status) or _cor_hex_status_contrato_padrao_paineis(id_status),
                 "concluido": concluido,
                 "atual": atual,
                 "pendente": (not concluido) and (not atual),
@@ -671,17 +693,19 @@ def _montar_diagrama_status_contrato(
         )
 
     terminal_atual = None
-    if id_status_corrente in (8, 9, 10):
+    if id_status_corrente in (8, 9, 10, 31):
         terminal_atual = {
             "id": id_status_corrente,
             "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+            "cor_hex": mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_paineis(id_status_corrente),
             "classe": "sucesso" if id_status_corrente == 8 else "erro",
-            "icone": "✓" if id_status_corrente == 8 else "!",
+            "icone": "✓" if id_status_corrente == 8 else "✖" if id_status_corrente in (9, 31) else "!",
         }
 
     return {
         "status_atual_id": id_status_corrente if id_status_corrente > 0 else None,
         "status_atual_nome": nome_status_corrente or (mapa_status.get(id_status_corrente) if id_status_corrente > 0 else None),
+        "status_atual_cor": cor_status_corrente,
         "etapas": etapas_principais,
         "terminal_atual": terminal_atual,
     }
@@ -12350,6 +12374,27 @@ def _cor_texto_contraste_css(cor_fundo, padrao="#FFFFFF"):
     return "#FFFFFF"
 
 
+def _cor_hex_status_contrato_padrao_paineis(id_status: int | None) -> str | None:
+    """Retorna a cor padrão do status do contrato quando o banco não tiver CorHex."""
+    mapa = {
+        1: "#6B7280",  # Em Digitação
+        2: "#F59E0B",  # Pendente Geração
+        3: "#2563EB",  # Documento Gerado
+        4: "#9333EA",  # Pendente Envio
+        5: "#0EA5E9",  # Enviado Assinatura
+        6: "#06B6D4",  # Em Assinatura
+        7: "#15803D",  # Ativo
+        8: "#166534",  # Concluído
+        9: "#7F1D1D",  # Cancelado
+        10: "#DC2626", # ERRO
+        31: "#B91C1C", # Reprovado
+    }
+    try:
+        return mapa.get(int(id_status or 0))
+    except Exception:
+        return None
+
+
 def _obter_mapa_status_contratos_com_cores(id_empresa_proprietaria=3):
     """
     Eu busco o cadastro oficial de status direto na tabela Silver.DimStatusContratos.
@@ -13334,6 +13379,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
         8: "Concluido",
         9: "Cancelado",
         10: "ERRO",
+        31: "Reprovado",
     }
 
     try:
@@ -13346,6 +13392,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": nome,
+                "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
             }
             for id_status, nome in mapa_padrao.items()
         ]
@@ -13354,9 +13401,13 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
         SELECT
              [IDDimStatusContratos]
             ,[Status]
+            ,[CorHex]
         FROM [Integracao].[Silver].[DimStatusContratos]
         WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
-          AND [IDDimStatusContratos] BETWEEN 1 AND 10
+          AND (
+                [IDDimStatusContratos] BETWEEN 1 AND 10
+                OR [IDDimStatusContratos] = 31
+              )
         ORDER BY [IDDimStatusContratos] ASC
     """)
 
@@ -13370,6 +13421,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": nome,
+                "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
             }
             for id_status, nome in mapa_padrao.items()
         ]
@@ -13387,6 +13439,10 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
             {
                 "IDDimStatusContratos": id_status,
                 "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+                "CorHex": _normalizar_hex_css(
+                    row.get("CorHex"),
+                    _cor_hex_status_contrato_padrao_paineis(id_status) or "#94A3B8",
+                ),
             }
         )
 
@@ -13396,6 +13452,7 @@ def _obter_status_contratos_empresa(id_empresa_proprietaria: int | None):
                 {
                     "IDDimStatusContratos": id_status,
                     "Status": nome,
+                    "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
                 }
             )
 
@@ -13415,6 +13472,14 @@ def _montar_diagrama_status_contrato(
         for row in status_rows
         if int(row.get("IDDimStatusContratos") or 0) > 0
     }
+    mapa_cor = {
+        int(row.get("IDDimStatusContratos") or 0): (
+            _normalizar_hex_css(row.get("CorHex"), "")
+            or _cor_hex_status_contrato_padrao_paineis(row.get("IDDimStatusContratos"))
+        )
+        for row in status_rows
+        if int(row.get("IDDimStatusContratos") or 0) > 0
+    }
 
     try:
         id_status_corrente = int(id_status_atual or 0)
@@ -13422,6 +13487,7 @@ def _montar_diagrama_status_contrato(
         id_status_corrente = 0
 
     nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+    cor_status_corrente = mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_paineis(id_status_corrente)
 
     etapas_principais = []
     for id_status in range(1, 8):
@@ -13441,6 +13507,7 @@ def _montar_diagrama_status_contrato(
             {
                 "id": id_status,
                 "nome": nome,
+                "cor_hex": mapa_cor.get(id_status) or _cor_hex_status_contrato_padrao_paineis(id_status),
                 "concluido": concluido,
                 "atual": atual,
                 "pendente": (not concluido) and (not atual),
@@ -13450,17 +13517,19 @@ def _montar_diagrama_status_contrato(
         )
 
     terminal_atual = None
-    if id_status_corrente in (8, 9, 10):
+    if id_status_corrente in (8, 9, 10, 31):
         terminal_atual = {
             "id": id_status_corrente,
             "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+            "cor_hex": mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_paineis(id_status_corrente),
             "classe": "sucesso" if id_status_corrente == 8 else "erro",
-            "icone": "✓" if id_status_corrente == 8 else "!",
+            "icone": "✓" if id_status_corrente == 8 else "✖" if id_status_corrente in (9, 31) else "!",
         }
 
     return {
         "status_atual_id": id_status_corrente,
         "status_atual_nome": nome_status_corrente or "Sem status definido",
+        "status_atual_cor": cor_status_corrente,
         "etapas": etapas_principais,
         "terminal_atual": terminal_atual,
     }
@@ -27714,6 +27783,7 @@ def contratos_detalhe(id_contrato: int):
             8: "Concluido",
             9: "Cancelado",
             10: "ERRO",
+            31: "Reprovado",
         }
 
         try:
@@ -27726,11 +27796,12 @@ def contratos_detalhe(id_contrato: int):
                 {
                     "IDDimStatusContratos": id_status,
                     "Status": nome,
+                    "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
                 }
                 for id_status, nome in mapa_padrao.items()
             ]
 
-        chave_cache_status = f"contrato_detalhe:status_empresa:v1:{id_empresa}"
+        chave_cache_status = f"contrato_detalhe:status_empresa:v2:{id_empresa}"
         try:
             status_em_cache = cache.get(chave_cache_status)
         except Exception:
@@ -27742,10 +27813,14 @@ def contratos_detalhe(id_contrato: int):
         sql_status_empresa = text("""
             SELECT
                 ds.IDDimStatusContratos,
-                ds.Status
+                ds.Status,
+                ds.CorHex
             FROM [Integracao].[Silver].[DimStatusContratos] ds
             WHERE ds.IDEmpresaProprietaria = :id_empresa_proprietaria
-              AND ds.IDDimStatusContratos BETWEEN 1 AND 10
+              AND (
+                    ds.IDDimStatusContratos BETWEEN 1 AND 10
+                    OR ds.IDDimStatusContratos = 31
+                  )
             ORDER BY ds.IDDimStatusContratos ASC
         """)
 
@@ -27767,6 +27842,7 @@ def contratos_detalhe(id_contrato: int):
                 {
                     "IDDimStatusContratos": id_status,
                     "Status": nome,
+                    "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
                 }
                 for id_status, nome in mapa_padrao.items()
             ]
@@ -27789,6 +27865,10 @@ def contratos_detalhe(id_contrato: int):
                 {
                     "IDDimStatusContratos": id_status,
                     "Status": (row.get("Status") or mapa_padrao.get(id_status) or f"Status {id_status}").strip(),
+                    "CorHex": _normalizar_hex_css(
+                        row.get("CorHex"),
+                        _cor_hex_status_contrato_padrao_paineis(id_status) or "#94A3B8",
+                    ),
                 }
             )
 
@@ -27798,6 +27878,7 @@ def contratos_detalhe(id_contrato: int):
                     {
                         "IDDimStatusContratos": id_status,
                         "Status": nome,
+                        "CorHex": _cor_hex_status_contrato_padrao_paineis(id_status),
                     }
                 )
 
@@ -27814,6 +27895,7 @@ def contratos_detalhe(id_contrato: int):
         status_rows = _obter_status_contratos_empresa_local(id_empresa_proprietaria)
 
         mapa_status = {}
+        mapa_cor = {}
 
         for row in status_rows:
             try:
@@ -27825,6 +27907,10 @@ def contratos_detalhe(id_contrato: int):
                 continue
 
             mapa_status[id_status] = (row.get("Status") or f"Status {id_status}").strip()
+            mapa_cor[id_status] = (
+                _normalizar_hex_css(row.get("CorHex"), "")
+                or _cor_hex_status_contrato_padrao_paineis(id_status)
+            )
 
         try:
             id_status_corrente = int(id_status_atual or 0)
@@ -27832,6 +27918,7 @@ def contratos_detalhe(id_contrato: int):
             id_status_corrente = 0
 
         nome_status_corrente = (nome_status_atual or mapa_status.get(id_status_corrente) or "").strip()
+        cor_status_corrente = mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_paineis(id_status_corrente)
 
         etapas_principais = []
 
@@ -27852,6 +27939,7 @@ def contratos_detalhe(id_contrato: int):
                 {
                     "id": id_status,
                     "nome": nome,
+                    "cor_hex": mapa_cor.get(id_status) or _cor_hex_status_contrato_padrao_paineis(id_status),
                     "concluido": concluido,
                     "atual": atual,
                     "pendente": (not concluido) and (not atual),
@@ -27861,17 +27949,19 @@ def contratos_detalhe(id_contrato: int):
 
         terminal_atual = None
 
-        if id_status_corrente in (8, 9, 10):
+        if id_status_corrente in (8, 9, 10, 31):
             terminal_atual = {
                 "id": id_status_corrente,
                 "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
+                "cor_hex": mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_paineis(id_status_corrente),
                 "classe": "sucesso" if id_status_corrente == 8 else "erro",
-                "icone": "✓" if id_status_corrente == 8 else "!",
+                "icone": "✓" if id_status_corrente == 8 else "✖" if id_status_corrente in (9, 31) else "!",
             }
 
         return {
             "status_atual_id": id_status_corrente,
             "status_atual_nome": nome_status_corrente or "Sem status definido",
+            "status_atual_cor": cor_status_corrente,
             "etapas": etapas_principais,
             "terminal_atual": terminal_atual,
         }

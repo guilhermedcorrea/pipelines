@@ -533,12 +533,15 @@
 
     .status-flow-card{
       margin-top:14px;
+      position:relative;
+      z-index:auto !important;
       border:1px solid var(--border);
       border-radius:18px;
       background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
       box-shadow:0 16px 30px rgba(2,6,23,.06);
       overflow:hidden;
     }
+
     .status-flow-head{
       display:flex;
       align-items:flex-start;
@@ -547,12 +550,14 @@
       padding:16px 18px 0 18px;
       flex-wrap:wrap;
     }
+
     .status-flow-title{
       color:var(--euro-blue);
       font-size:18px;
       font-weight:900;
       margin:0;
     }
+
     .status-flow-subtitle{
       color:#64748b;
       font-size:13px;
@@ -560,6 +565,7 @@
       margin-top:4px;
       line-height:1.45;
     }
+
     .status-flow-current{
       display:inline-flex;
       align-items:center;
@@ -573,6 +579,7 @@
       background:rgba(0,40,132,.06);
       color:var(--euro-blue);
     }
+
     .status-flow-current::before{
       content:"";
       width:10px;
@@ -582,19 +589,29 @@
       box-shadow:0 0 0 4px rgba(255,255,255,.95);
       opacity:.9;
     }
+
     .status-flow-current.sucesso{
       background:#ecfdf3;
       border-color:#bbf7d0;
       color:#15803d;
     }
+
     .status-flow-current.erro{
       background:#fff1f2;
       border-color:#fecdd3;
       color:#be123c;
     }
+
+    .status-flow-current.status-dinamico{
+      background:color-mix(in srgb, var(--status-color, #002884) 10%, white);
+      border-color:color-mix(in srgb, var(--status-color, #002884) 35%, white);
+      color:var(--status-color, #002884);
+    }
+
     .status-flow-track-wrap{
       padding:16px 18px 18px 18px;
     }
+
     .status-flow-track{
       display:flex;
       align-items:stretch;
@@ -602,13 +619,16 @@
       overflow-x:auto;
       padding-bottom:4px;
     }
+
     .status-flow-track::-webkit-scrollbar{
       height:8px;
     }
+
     .status-flow-track::-webkit-scrollbar-thumb{
       background:#cbd5e1;
       border-radius:999px;
     }
+
     .status-node{
       position:relative;
       flex:0 0 180px;
@@ -624,158 +644,232 @@
       gap:10px;
       box-shadow:0 10px 24px rgba(2,6,23,.05);
     }
+
     .status-node.pendente{
       background:linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
       border-color:#e2e8f0;
     }
+
     .status-node.concluido{
-      background:linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
-      border-color:#93c5fd;
+      background:linear-gradient(180deg, #f4f9ff 0%, #eef6ff 100%);
+      border-color:#bfdbfe;
     }
+
     .status-node.atual{
-      background:linear-gradient(180deg, #ecfdf3 0%, #dcfce7 100%);
+      background:linear-gradient(180deg, #effdf5 0%, #e8fff1 100%);
       border-color:#86efac;
-      box-shadow:0 14px 28px rgba(34,197,94,.14);
+      box-shadow:0 0 0 1px rgba(34,197,94,.08), 0 16px 30px rgba(34,197,94,.12);
     }
+
     .status-node.terminal-sucesso{
-      background:linear-gradient(180deg, #ecfdf3 0%, #dcfce7 100%);
+      background:linear-gradient(180deg, #effdf5 0%, #e8fff1 100%);
       border-color:#86efac;
-      box-shadow:0 14px 28px rgba(34,197,94,.14);
+      box-shadow:0 16px 30px rgba(34,197,94,.12);
     }
+
     .status-node.terminal-erro{
-      background:linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+      background:linear-gradient(180deg, #fff5f5 0%, #fff1f2 100%);
       border-color:#fda4af;
-      box-shadow:0 14px 28px rgba(244,63,94,.12);
+      box-shadow:0 16px 30px rgba(244,63,94,.10);
     }
+
+    .status-node.status-colorido{
+      border-top:4px solid var(--status-color, #94a3b8);
+    }
+
+    .status-node.status-colorido.pendente{
+      border-color:color-mix(in srgb, var(--status-color, #94a3b8) 24%, white);
+    }
+
+    .status-node.status-colorido.concluido,
+    .status-node.status-colorido.atual,
+    .status-node.status-colorido.terminal-sucesso,
+    .status-node.status-colorido.terminal-erro{
+      background:linear-gradient(180deg, color-mix(in srgb, var(--status-color, #94a3b8) 9%, white) 0%, color-mix(in srgb, var(--status-color, #94a3b8) 15%, white) 100%);
+      border-color:color-mix(in srgb, var(--status-color, #94a3b8) 42%, white);
+    }
+
+    .status-node.status-colorido.atual,
+    .status-node.status-colorido.terminal-sucesso,
+    .status-node.status-colorido.terminal-erro{
+      box-shadow:0 0 0 1px color-mix(in srgb, var(--status-color, #94a3b8) 16%, transparent), 0 16px 30px rgba(2,6,23,.08);
+    }
+
+    .status-node.status-colorido .status-node-id{
+      color:var(--status-color, #64748b);
+    }
+
     .status-node-icon{
-      position:relative;
-      width:42px;
-      height:42px;
+      width:36px;
+      height:36px;
       border-radius:999px;
-      border:2px solid #cbd5e1;
       display:flex;
       align-items:center;
       justify-content:center;
-      font-weight:900;
       font-size:18px;
-      color:#475569;
+      font-weight:900;
+      border:1px solid #cbd5e1;
       background:#fff;
-      flex:none;
+      color:#64748b;
+      position:relative;
+      z-index:1;
     }
+
     .status-node.concluido .status-node-icon{
-      border-color:#3b82f6;
-      background:#dbeafe;
-      color:#1d4ed8;
+      border-color:#60a5fa;
+      background:#eff6ff;
+      color:#2563eb;
     }
+
     .status-node.atual .status-node-icon,
     .status-node.terminal-sucesso .status-node-icon{
       border-color:#22c55e;
-      background:#f0fdf4;
+      background:#ecfdf3;
       color:#16a34a;
     }
+
     .status-node.terminal-erro .status-node-icon{
       border-color:#f43f5e;
       background:#fff1f2;
       color:#e11d48;
     }
+
+    .status-node.status-colorido .status-node-icon{
+      border-color:color-mix(in srgb, var(--status-color, #64748b) 42%, white);
+      background:color-mix(in srgb, var(--status-color, #64748b) 9%, white);
+      color:var(--status-color, #64748b);
+    }
+
+    .status-node.status-colorido.atual .status-node-icon,
+    .status-node.status-colorido.concluido .status-node-icon,
+    .status-node.status-colorido.terminal-sucesso .status-node-icon,
+    .status-node.status-colorido.terminal-erro .status-node-icon{
+      border-color:var(--status-color, #64748b);
+      background:color-mix(in srgb, var(--status-color, #64748b) 13%, white);
+      color:var(--status-color, #64748b);
+    }
+
     .status-node-icon.pulsando::after{
       content:"";
       position:absolute;
       inset:-6px;
       border-radius:999px;
-      border:2px solid rgba(34,197,94,.18);
+      border:2px solid color-mix(in srgb, var(--status-color, #22c55e) 22%, transparent);
       animation:statusPulse 1.8s ease-out infinite;
     }
+
     @keyframes statusPulse{
       0%{ transform:scale(.85); opacity:.85; }
       100%{ transform:scale(1.25); opacity:0; }
     }
+
     .status-node-logo{
       position:absolute;
-      top:12px;
-      right:12px;
-      width:38px;
-      height:38px;
+      top:10px;
+      right:10px;
+      width:52px;
+      height:52px;
       border-radius:12px;
-      overflow:hidden;
-      border:1px solid #dbe7f6;
-      background:#fff;
+      border:1px solid rgba(2,6,23,.10);
+      background:#ffffff;
       display:flex;
       align-items:center;
       justify-content:center;
+      overflow:hidden;
+      box-shadow:0 8px 18px rgba(2,6,23,.10);
+      z-index:3;
     }
+
     .status-node-logo img{
       width:100%;
       height:100%;
-      object-fit:cover;
+      object-fit:contain;
+      background:#fff;
+      padding:1px;
     }
+
     .status-node-logo.fallback-texto{
-      background:#eff6ff;
-      color:#1d4ed8;
-      font-weight:900;
-      font-size:12px;
-    }
-    .status-node-id{
+      color:#0f172a;
       font-size:11px;
       font-weight:900;
-      color:#64748b;
-      text-transform:uppercase;
       letter-spacing:.04em;
     }
+
     .status-node-title{
-      font-size:16px;
+      font-size:15px;
       font-weight:900;
       color:#0f172a;
-      line-height:1.2;
-      word-break:break-word;
+      line-height:1.3;
+      min-height:40px;
+      display:flex;
+      align-items:center;
     }
+
+    .status-node-id{
+      font-size:11px;
+      letter-spacing:.05em;
+      text-transform:uppercase;
+      font-weight:900;
+      color:#64748b;
+    }
+
     .status-node-desc{
       font-size:12px;
-      color:#475569;
+      font-weight:700;
+      color:#64748b;
       line-height:1.45;
-      word-break:break-word;
     }
+
     .status-arrow{
-      align-self:center;
-      flex:none;
+      flex:0 0 28px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       color:#94a3b8;
       font-size:24px;
       font-weight:900;
-      margin:0 2px;
+      user-select:none;
     }
+
     .status-arrow.done{
       color:#2563eb;
     }
+
     .status-arrow.final-sucesso{
       color:#16a34a;
     }
+
     .status-arrow.final-erro{
       color:#e11d48;
     }
+
     .status-flow-legend{
+      margin-top:12px;
       display:flex;
       align-items:center;
-      gap:16px;
+      gap:12px;
       flex-wrap:wrap;
-      padding:0 18px 18px 18px;
+      color:#64748b;
+      font-size:12px;
+      font-weight:800;
     }
+
     .status-flow-legend-item{
       display:inline-flex;
       align-items:center;
       gap:8px;
-      color:#475569;
-      font-size:12px;
-      font-weight:800;
     }
+
     .status-flow-legend-dot{
-      width:10px;
-      height:10px;
+      width:12px;
+      height:12px;
       border-radius:999px;
       display:inline-block;
     }
+
     .status-flow-legend-dot.verde{ background:#22c55e; }
-    .status-flow-legend-dot.azul{ background:#3b82f6; }
-    .status-flow-legend-dot.cinza{ background:#cbd5e1; }
+    .status-flow-legend-dot.azul{ background:#2563eb; }
+    .status-flow-legend-dot.cinza{ background:#94a3b8; }
 
 
     @media (max-width:1280px){
@@ -1139,7 +1233,21 @@
     7: 'Ativo',
     8: 'Concluído',
     9: 'Cancelado',
-    10: 'Reprovado'
+    10: 'ERRO',
+    31: 'Reprovado'
+  } %}
+  {% set mapa_status_cor = {
+    1: '#6B7280',
+    2: '#F59E0B',
+    3: '#2563EB',
+    4: '#9333EA',
+    5: '#0EA5E9',
+    6: '#06B6D4',
+    7: '#15803D',
+    8: '#166534',
+    9: '#7F1D1D',
+    10: '#DC2626',
+    31: '#B91C1C'
   } %}
   {% set status_atual_id_bruto = (
     diagrama_status.status_atual_id
@@ -1164,6 +1272,11 @@
     if diagrama_status_existe and diagrama_status.status_atual_nome
     else mapa_status_nome.get(status_atual_id, 'Sem status definido')
   ) %}
+  {% set status_atual_cor = (
+    diagrama_status.status_atual_cor
+    if diagrama_status_existe and diagrama_status.status_atual_cor
+    else mapa_status_cor.get(status_atual_id, '#64748B')
+  ) %}
 
   <div class="status-flow-card">
     <div class="status-flow-head">
@@ -1174,7 +1287,7 @@
         </div>
       </div>
 
-      <div class="status-flow-current {% if diagrama_status_existe and diagrama_status.terminal_atual %}{{ 'sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'erro' }}{% elif status_atual_id in [1,2,3,4,5,6,7,8] %}sucesso{% elif status_atual_id in [9,10] %}erro{% endif %}">
+      <div class="status-flow-current status-dinamico {% if diagrama_status_existe and diagrama_status.terminal_atual %}{{ 'sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'erro' }}{% elif status_atual_id in [1,2,3,4,5,6,7,8] %}sucesso{% elif status_atual_id in [9,10,31] %}erro{% endif %}" style="{% if status_atual_cor %}--status-color: {{ status_atual_cor }};{% endif %}">
         {{ status_atual_nome }}
       </div>
     </div>
@@ -1183,7 +1296,7 @@
       <div class="status-flow-track">
         {% if diagrama_status_existe and diagrama_status.etapas %}
           {% for etapa in diagrama_status.etapas %}
-            <div class="status-node {{ 'atual' if etapa.atual else 'concluido' if etapa.concluido else 'pendente' }}">
+            <div class="status-node status-colorido {{ 'atual' if etapa.atual else 'concluido' if etapa.concluido else 'pendente' }}" style="{% if etapa.cor_hex %}--status-color: {{ etapa.cor_hex }};{% endif %}">
               <div class="status-node-icon {{ 'pulsando' if etapa.atual else '' }}">
                 {% if etapa.concluido %}
                   ✓
@@ -1197,7 +1310,7 @@
               {% if etapa.id in [2, 3, 4, 5, 6] %}
                 <div class="status-node-logo" title="Fluxo integrado ao D4Sign">
                   <img
-                    src="{{ url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}"
+                    src="{{ etapa.logo_d4sign_url or url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}"
                     alt="Logo D4Sign"
                     loading="lazy"
                     decoding="async"
@@ -1226,7 +1339,7 @@
 
           {% if diagrama_status.terminal_atual %}
             <div class="status-arrow {{ 'final-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'final-erro' }}">→</div>
-            <div class="status-node {{ 'terminal-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'terminal-erro' }}">
+            <div class="status-node status-colorido {{ 'terminal-sucesso' if diagrama_status.terminal_atual.classe == 'sucesso' else 'terminal-erro' }}" style="{% if diagrama_status.terminal_atual.cor_hex %}--status-color: {{ diagrama_status.terminal_atual.cor_hex }};{% endif %}">
               <div class="status-node-icon {{ 'pulsando' if diagrama_status.terminal_atual.classe == 'sucesso' else '' }}">
                 {{ diagrama_status.terminal_atual.icone }}
               </div>
@@ -1237,8 +1350,12 @@
                   Fluxo concluído e contrato já está ativo/concluído.
                 {% elif diagrama_status.terminal_atual.id == 9 %}
                   Fluxo interrompido por cancelamento.
+                {% elif diagrama_status.terminal_atual.id == 31 %}
+                  Solicitação reprovada na análise do contrato.
+                {% elif diagrama_status.terminal_atual.id == 10 %}
+                  Fluxo com erro e exige revisão técnica.
                 {% else %}
-                  Fluxo interrompido por erro e exige revisão.
+                  Fluxo interrompido e exige revisão.
                 {% endif %}
               </div>
             </div>
@@ -1247,8 +1364,9 @@
           {% for etapa_id in range(1, 8) %}
             {% set etapa_nome = mapa_status_nome.get(etapa_id, 'Status ' ~ etapa_id) %}
             {% set etapa_atual = status_atual_id == etapa_id %}
-            {% set etapa_concluida = status_atual_id > etapa_id %}
-            <div class="status-node {{ 'atual' if etapa_atual else 'concluido' if etapa_concluida else 'pendente' }}">
+            {% set etapa_concluida = (status_atual_id in [1,2,3,4,5,6,7] and status_atual_id > etapa_id) or status_atual_id == 8 %}
+            {% set etapa_cor = mapa_status_cor.get(etapa_id, '#94A3B8') %}
+            <div class="status-node status-colorido {{ 'atual' if etapa_atual else 'concluido' if etapa_concluida else 'pendente' }}" style="--status-color: {{ etapa_cor }};">
               <div class="status-node-icon {{ 'pulsando' if etapa_atual else '' }}">
                 {% if etapa_concluida %}
                   ✓
@@ -1284,15 +1402,16 @@
               </div>
             </div>
 
-            {% if not loop.last or status_atual_id in [8, 9, 10] %}
-              <div class="status-arrow {{ 'done' if etapa_concluida else '' }} {{ 'final-sucesso' if loop.last and status_atual_id == 8 else 'final-erro' if loop.last and status_atual_id in [9,10] else '' }}">→</div>
+            {% if not loop.last or status_atual_id in [8, 9, 10, 31] %}
+              <div class="status-arrow {{ 'done' if etapa_concluida else '' }} {{ 'final-sucesso' if loop.last and status_atual_id == 8 else 'final-erro' if loop.last and status_atual_id in [9,10,31] else '' }}">→</div>
             {% endif %}
           {% endfor %}
 
-          {% if status_atual_id in [8, 9, 10] %}
-            <div class="status-node {{ 'terminal-sucesso' if status_atual_id == 8 else 'terminal-erro' }}">
+          {% if status_atual_id in [8, 9, 10, 31] %}
+            {% set terminal_cor = mapa_status_cor.get(status_atual_id, '#DC2626') %}
+            <div class="status-node status-colorido {{ 'terminal-sucesso' if status_atual_id == 8 else 'terminal-erro' }}" style="--status-color: {{ terminal_cor }};">
               <div class="status-node-icon {{ 'pulsando' if status_atual_id == 8 else '' }}">
-                {{ '✓' if status_atual_id == 8 else '✕' if status_atual_id == 9 else '!' }}
+                {{ '✓' if status_atual_id == 8 else '✕' if status_atual_id in [9,31] else '!' }}
               </div>
               <div class="status-node-id">Status {{ status_atual_id }}</div>
               <div class="status-node-title">{{ mapa_status_nome.get(status_atual_id, 'Status final') }}</div>
@@ -1301,8 +1420,10 @@
                   Fluxo concluído e contrato já está ativo/concluído.
                 {% elif status_atual_id == 9 %}
                   Fluxo interrompido por cancelamento.
+                {% elif status_atual_id == 31 %}
+                  Solicitação reprovada na análise do contrato.
                 {% else %}
-                  Fluxo interrompido por reprovação ou erro e exige revisão.
+                  Fluxo interrompido por erro e exige revisão.
                 {% endif %}
               </div>
             </div>
