@@ -681,43 +681,566 @@
   /* ====== TABELA ====== */
   .tbl-wrap{ width:100%; overflow:auto; }
   .tbl-min{ min-width:1100px; }
+
+  .busca-form{
+    display:flex;
+    align-items:stretch;
+    gap:10px;
+    width:100%;
+  }
+  .busca-form-campo{
+    position:relative;
+    flex:1 1 auto;
+    min-width:220px;
+  }
+  .btn-filtrar-lista{
+    flex:0 0 auto;
+    padding:0 16px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#0f172a;
+    color:#fff;
+    border-radius:12px;
+    cursor:pointer;
+    font-weight:900;
+    white-space:nowrap;
+  }
+  .lista-ativos-card{
+    margin:0 0 16px 0;
+    border:1px solid rgba(15,23,42,.10);
+    border-radius:14px;
+    background:#fff;
+    overflow:hidden;
+  }
+  .lista-ativos-topo{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:12px;
+    flex-wrap:wrap;
+    padding:12px 14px;
+    border-bottom:1px solid rgba(15,23,42,.08);
+    background:rgba(15,23,42,.02);
+  }
+  .lista-ativos-titulo{ font-weight:900; font-size:16px; color:rgba(15,23,42,.92); }
+  .lista-ativos-sub{ margin-top:3px; font-size:12px; color:rgba(15,23,42,.65); }
+  .lista-ativos-total{ font-size:12px; color:rgba(15,23,42,.65); font-weight:800; }
+  .linha-ativo-lista{ cursor:pointer; }
+  .linha-ativo-lista:hover{ background:rgba(59,130,246,.06); }
+  .ativo-lista-nome{ font-weight:900; color:rgba(15,23,42,.92); }
+  .ativo-lista-sub{ margin-top:3px; font-size:12px; color:rgba(15,23,42,.62); }
+  .badge-status-ativo{
+    display:inline-flex;
+    align-items:center;
+    padding:4px 8px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:900;
+    border:1px solid rgba(15,23,42,.10);
+    background:rgba(15,23,42,.04);
+    white-space:nowrap;
+  }
+  .badge-status-ativo.ok{
+    color:#166534;
+    background:rgba(34,197,94,.12);
+    border-color:rgba(34,197,94,.24);
+  }
+  .badge-status-ativo.off{
+    color:#7f1d1d;
+    background:rgba(239,68,68,.10);
+    border-color:rgba(239,68,68,.22);
+  }
+  .btn-abrir-ativo{
+    padding:7px 10px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:900;
+    white-space:nowrap;
+  }
+  .paginacao-ativos{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:6px;
+    flex-wrap:wrap;
+    padding:12px 14px;
+    border-top:1px solid rgba(15,23,42,.08);
+  }
+  .pg-link{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:36px;
+    height:34px;
+    padding:0 10px;
+    border:1px solid rgba(15,23,42,.14);
+    background:#fff;
+    color:#0f172a;
+    border-radius:10px;
+    font-weight:900;
+    text-decoration:none;
+  }
+  .pg-link.ativo{
+    background:#0f172a;
+    color:#fff;
+    border-color:#0f172a;
+  }
+  .pg-link.disabled{
+    pointer-events:none;
+    opacity:.45;
+  }
+  .sem-ativos-lista{
+    padding:18px 14px;
+    color:rgba(15,23,42,.68);
+    font-size:14px;
+  }
+  @media (max-width: 720px){
+    .busca-form{ flex-direction:column; }
+    .btn-filtrar-lista{ height:44px; }
+  }
+
+
+  /* ====== LISTA DE ATIVOS NO PADRÃO APROVAÇÃO ====== */
+  .hdr{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    justify-content:space-between;
+    flex-wrap:wrap;
+  }
+  .hdr-left{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .count-pill{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:6px 10px;
+    border:1px solid var(--border, rgba(15,23,42,.12));
+    border-radius:10px;
+    background:#fff;
+    font-weight:900;
+    color:var(--euro-blue, #002884);
+    user-select:none;
+    white-space:nowrap;
+  }
+  .busca-input{
+    height:50px;
+    padding:0 14px;
+    border:1px solid var(--border, rgba(15,23,42,.14));
+    border-radius:14px;
+    box-shadow:0 8px 18px rgba(2,6,23,.05);
+    font-weight:850;
+  }
+  .btn-filtrar-lista{
+    height:50px;
+    border-radius:14px;
+    background:var(--euro-blue, #002884);
+    color:#fff;
+    box-shadow:0 8px 18px rgba(2,6,23,.06);
+  }
+  .list-wrap{
+    margin-top:14px;
+    border:1px solid var(--border, rgba(15,23,42,.12));
+    border-radius:14px;
+    overflow:hidden;
+    background:#fff;
+  }
+  .list-head,
+  .row.ativo-row{
+    display:grid;
+    grid-template-columns:76px 96px minmax(280px, 1.5fr) 180px 140px minmax(190px, .9fr) 140px;
+    gap:0;
+    align-items:center;
+  }
+  .list-head{
+    padding:12px 14px;
+    border-bottom:1px solid var(--border, rgba(15,23,42,.12));
+    background:rgba(0,40,132,.03);
+    font-weight:900;
+    color:var(--euro-blue, #002884);
+  }
+  .row.ativo-row{
+    padding:14px;
+    border-bottom:1px solid var(--border, rgba(15,23,42,.12));
+    background:#fff;
+    cursor:pointer;
+    color:inherit;
+    text-decoration:none;
+    transition:.12s ease;
+  }
+  .row.ativo-row:hover{
+    background:rgba(0,40,132,.04);
+    transform:translateY(-1px);
+  }
+  .row.ativo-row:last-child{ border-bottom:0; }
+  .logo-box{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .logo-empresa{
+    width:44px;
+    height:44px;
+    object-fit:contain;
+    border-radius:10px;
+    border:1px solid var(--border, rgba(15,23,42,.12));
+    background:#fff;
+    padding:4px;
+    box-shadow:0 6px 14px rgba(2,6,23,.05);
+  }
+  .logo-fallback{
+    width:44px;
+    height:44px;
+    border-radius:10px;
+    border:1px solid var(--border, rgba(15,23,42,.12));
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,40,132,.04);
+    color:var(--euro-blue, #002884);
+    font-weight:950;
+    font-size:11px;
+    user-select:none;
+  }
+  .logo-fallback.hidden{ display:none; }
+  .id-pill{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:8px 12px;
+    border-radius:999px;
+    border:1px solid var(--border, rgba(15,23,42,.12));
+    background:#fff;
+    font-weight:900;
+    font-size:13px;
+    line-height:1;
+    white-space:nowrap;
+    user-select:none;
+  }
+  .ellipsis{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .ativo-lista-wrap{ min-width:0; }
+  .ativo-lista-nome{
+    font-weight:950;
+    color:var(--text, #0f172a);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .ativo-lista-sub{
+    margin-top:4px;
+    color:var(--muted, #64748b);
+    font-size:12px;
+    font-weight:800;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .tipo-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:34px;
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px solid rgba(0,40,132,.15);
+    background:rgba(0,40,132,.06);
+    color:var(--euro-blue, #002884);
+    font-weight:900;
+    white-space:nowrap;
+    max-width:100%;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .tipo-badge.tipo-vazio{
+    border-color:rgba(100,116,139,.18);
+    background:rgba(100,116,139,.08);
+    color:#475569;
+  }
+  .status-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:34px;
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px solid rgba(15,23,42,.10);
+    background:rgba(15,23,42,.04);
+    color:var(--text, #0f172a);
+    font-weight:900;
+    white-space:nowrap;
+    max-width:100%;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    box-shadow:0 6px 14px rgba(2,6,23,.08);
+  }
+  .status-badge.ok{
+    border-color:rgba(21,128,61,.22);
+    background:rgba(21,128,61,.09);
+    color:#166534;
+  }
+  .status-badge.off{
+    border-color:rgba(185,28,28,.22);
+    background:rgba(185,28,28,.08);
+    color:#991b1b;
+  }
+  .pager{
+    padding:12px 14px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    border-top:1px solid var(--border, rgba(15,23,42,.12));
+  }
+  .pager-nav{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .pg-link{
+    min-width:38px;
+    height:36px;
+    border-radius:11px;
+  }
+  .pg-link.ativo{
+    background:var(--euro-blue, #002884);
+    border-color:var(--euro-blue, #002884);
+  }
+  .tela-detalhe-aviso{
+    margin-top:12px;
+    padding:10px 12px;
+    border:1px solid rgba(0,40,132,.12);
+    border-radius:14px;
+    background:rgba(0,40,132,.04);
+    color:#0f172a;
+    font-size:13px;
+    font-weight:800;
+  }
+  @media (max-width: 1240px){
+    .list-head,
+    .row.ativo-row{
+      grid-template-columns:76px 96px minmax(260px, 1fr) 160px minmax(180px, .8fr) 130px;
+    }
+    .hide-xl{ display:none; }
+  }
+  @media (max-width: 980px){
+    .list-head,
+    .row.ativo-row{
+      grid-template-columns:76px 86px minmax(220px, 1fr) 140px 130px;
+    }
+    .hide-lg{ display:none; }
+  }
+  @media (max-width: 760px){
+    .list-head,
+    .row.ativo-row{
+      grid-template-columns:64px 1fr 112px;
+    }
+    .hide-md{ display:none; }
+    .logo-empresa,
+    .logo-fallback{
+      width:38px;
+      height:38px;
+    }
+  }
+
 </style>
 
 
 
+{% set modo_detalhe = modo_detalhe|default(false) %}
+{% set ativo_id_inicial = ativo_id_inicial|default(none) %}
+
 <div class="ativos-wrap">
   <div class="linha-topo">
-    <div style="flex:1 1 auto; min-width:280px;">
-      <h2 style="margin:0 0 6px 0;">Ativos</h2>
-      <div class="texto-ajuda">
-        Pesquise por Nome, Referência Externa, Nº Série, Bairro, Logradouro, Cidade, CEP e UF.
+    <div class="hdr" style="width:100%;">
+      <div class="hdr-left">
+        <h1 class="page-title" style="margin:0;">{{ 'Detalhe do Ativo' if modo_detalhe else 'Ativos' }}</h1>
+        {% if not modo_detalhe %}
+          <span class="count-pill">☰ {{ paginacao.total_registros if paginacao else 0 }}</span>
+        {% endif %}
       </div>
+
+      {% if modo_detalhe %}
+        <a class="btn-pill" href="{{ url_for('admin.ativos') }}" style="text-decoration:none;">← Voltar para lista de ativos</a>
+      {% endif %}
+    </div>
+
+    <div class="texto-ajuda" style="width:100%; margin-top:6px;">
+      {% if modo_detalhe %}
+        Esta é uma tela própria do ativo. A lista completa não fica carregada embaixo para não travar quando houver muitos registros.
+      {% else %}
+        Pesquise por Nome, Referência Externa, Nº Série, Bairro, Logradouro, Cidade, CEP e UF.
+      {% endif %}
     </div>
   </div>
 
   <div id="topoBusca" class="busca-box">
-    <div style="display:block; width:100%; position:relative;">
-      <input
-        id="q"
-        value="{{ q or '' }}"
-        placeholder="Digite para buscar... (ex: 118, Campinas, Centro, SP, 130xx-xxx, NS123...)"
-        class="busca-input"
-        autocomplete="off"
-      />
+    <form id="formBuscaAtivos" class="busca-form" method="get" action="{{ url_for('admin.ativos') }}">
+      <div class="busca-form-campo">
+        <input
+          id="q"
+          name="q"
+          value="{{ q or '' }}"
+          placeholder="Digite para buscar... (ex: 118, Campinas, Centro, SP, 130xx-xxx, NS123...)"
+          class="busca-input"
+          autocomplete="off"
+        />
 
-      <div id="sugestoes" class="sugestoes">
-        <div id="sugestoesLista"></div>
+        <div id="sugestoes" class="sugestoes">
+          <div id="sugestoesLista"></div>
+        </div>
       </div>
-    </div>
+
+      <button id="btnFiltrarLista" type="submit" class="btn-filtrar-lista">Filtrar lista</button>
+    </form>
 
     <div class="linha-status">
       <div id="statusBusca" style="color:rgba(15,23,42,.70); font-size:13px;">
-        Digite 2 ou mais caracteres para buscar.
+        {{ 'Carregando ativo...' if modo_detalhe else 'Digite 2 ou mais caracteres para buscar ou use a lista abaixo.' }}
       </div>
 
       <button id="btnLimpar" type="button" class="btn-clean">Limpar</button>
     </div>
   </div>
+
+  {% if not modo_detalhe %}
+    <hr class="hr-soft" />
+
+    <div id="listaAtivosCard" class="list-wrap">
+      <div class="list-head">
+        <div>Logo</div>
+        <div>ID</div>
+        <div>Ativo</div>
+        <div class="hide-md">Tipo</div>
+        <div class="hide-lg">CodPonto</div>
+        <div class="hide-xl">Local</div>
+        <div>Status</div>
+      </div>
+
+      {% if ativos_lista %}
+        {% for ativo in ativos_lista %}
+          {% set logo_url = ativo.LogoEmpresaProprietaria %}
+          {% set tipo_texto = (ativo.Tipo or '') ~ ((' / ' ~ ativo.SubTipo) if ativo.SubTipo else '') %}
+          <a class="row ativo-row"
+             href="{{ ativo.url_detalhe }}"
+             data-lista-ativo-id="{{ ativo.IDDimAtivos }}"
+             title="Clique para abrir o ativo em uma tela própria">
+
+            <div class="logo-box">
+              {% if logo_url %}
+                <img
+                  src="{{ logo_url }}"
+                  alt="Logo da empresa proprietária"
+                  class="logo-empresa"
+                  loading="lazy"
+                  onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                >
+                <div class="logo-fallback hidden">LOGO</div>
+              {% else %}
+                <div class="logo-fallback">LOGO</div>
+              {% endif %}
+            </div>
+
+            <div>
+              <span class="id-pill">{{ ativo.IDDimAtivos }}</span>
+            </div>
+
+            <div class="ativo-lista-wrap">
+              <div class="ativo-lista-nome">
+                {{ ativo.NomeAtivo or ('Ativo ' ~ ativo.IDDimAtivos) }}
+              </div>
+              <div class="ativo-lista-sub">
+                {% if ativo.NumeroSerie %}NS: {{ ativo.NumeroSerie }}{% endif %}
+                {% if ativo.ReferenciaExterna is not none %}{% if ativo.NumeroSerie %} • {% endif %}RefExt: {{ ativo.ReferenciaExterna }}{% endif %}
+                {% if ativo.EmpresaProprietaria %} • {{ ativo.EmpresaProprietaria }}{% endif %}
+              </div>
+            </div>
+
+            <div class="ellipsis hide-md">
+              <span class="tipo-badge {{ 'tipo-vazio' if not tipo_texto.strip() else '' }}">
+                {{ tipo_texto.strip() or '—' }}
+              </span>
+            </div>
+
+            <div class="ellipsis hide-lg">
+              {{ ativo.CodPonto if ativo.CodPonto is not none else '—' }}
+            </div>
+
+            <div class="ellipsis hide-xl">
+              {{ ativo.Cidade or '—' }}{% if ativo.UF %}/{{ ativo.UF }}{% endif %}
+              {% if ativo.Bairro %}<div class="ativo-lista-sub">{{ ativo.Bairro }}</div>{% endif %}
+            </div>
+
+            <div class="ellipsis">
+              {% if ativo.BitAtivo is none or ativo.BitAtivo %}
+                <span class="status-badge ok">Ativo</span>
+              {% else %}
+                <span class="status-badge off">Inativo</span>
+              {% endif %}
+            </div>
+          </a>
+        {% endfor %}
+      {% else %}
+        <div class="sem-ativos-lista">Nenhum ativo encontrado para o filtro atual.</div>
+      {% endif %}
+
+      <div class="pager">
+        <div class="muted" style="font-weight:800;">
+          {% if paginacao %}
+            Mostrando {{ ((paginacao.pagina - 1) * paginacao.itens_por_pagina) + 1 if paginacao.total_registros else 0 }}
+            até {{ [paginacao.pagina * paginacao.itens_por_pagina, paginacao.total_registros]|min }}
+            de {{ paginacao.total_registros }} • 10 por página
+          {% endif %}
+        </div>
+
+        {% if paginacao and paginacao.total_paginas > 1 %}
+          <div class="pager-nav">
+            <a class="pg-link {% if not paginacao.tem_anterior %}disabled{% endif %}"
+               href="{{ url_for('admin.ativos', q=q, page=1) if paginacao.tem_anterior else '#' }}">«</a>
+
+            <a class="pg-link {% if not paginacao.tem_anterior %}disabled{% endif %}"
+               href="{{ url_for('admin.ativos', q=q, page=paginacao.pagina - 1) if paginacao.tem_anterior else '#' }}">‹</a>
+
+            {% if paginacao.paginas and paginacao.paginas[0] > 1 %}
+              <a class="pg-link" href="{{ url_for('admin.ativos', q=q, page=1) }}">1</a>
+              {% if paginacao.paginas[0] > 2 %}<span class="pg-link disabled">…</span>{% endif %}
+            {% endif %}
+
+            {% for p in paginacao.paginas %}
+              <a class="pg-link {% if p == paginacao.pagina %}ativo{% endif %}"
+                 href="{{ url_for('admin.ativos', q=q, page=p) }}">{{ p }}</a>
+            {% endfor %}
+
+            {% if paginacao.paginas and paginacao.paginas[-1] < paginacao.total_paginas %}
+              {% if paginacao.paginas[-1] < paginacao.total_paginas - 1 %}<span class="pg-link disabled">…</span>{% endif %}
+              <a class="pg-link" href="{{ url_for('admin.ativos', q=q, page=paginacao.total_paginas) }}">{{ paginacao.total_paginas }}</a>
+            {% endif %}
+
+            <a class="pg-link {% if not paginacao.tem_proxima %}disabled{% endif %}"
+               href="{{ url_for('admin.ativos', q=q, page=paginacao.pagina + 1) if paginacao.tem_proxima else '#' }}">›</a>
+
+            <a class="pg-link {% if not paginacao.tem_proxima %}disabled{% endif %}"
+               href="{{ url_for('admin.ativos', q=q, page=paginacao.total_paginas) if paginacao.tem_proxima else '#' }}">»</a>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <div class="tela-detalhe-aviso">
+    Para consultar outro ativo, use a busca acima ou volte para a lista.
+    </div>
+  {% endif %}
 
   <hr class="hr-soft" />
 
@@ -1126,6 +1649,19 @@
   const canvasRoscaComposicao = document.getElementById("canvasRoscaComposicao");
   const mcRoscaLegenda = document.getElementById("mcRoscaLegenda");
   let chartRosca = null;
+
+  const MODO_PAGINA_DETALHE = {{ modo_detalhe|default(false)|tojson }};
+  const ATIVO_ID_INICIAL = {{ ativo_id_inicial|default(none)|tojson }};
+  const URL_TELA_ATIVO_TEMPLATE = "{{ url_for('admin.ativos_visualizar', id_ativo=0) }}";
+
+  function montarUrlTelaAtivo(id) {
+    return URL_TELA_ATIVO_TEMPLATE.replace(/\/0$/, "/" + encodeURIComponent(id));
+  }
+
+  function abrirAtivoEmTelaPropria(id) {
+    if (!id) return;
+    window.location.href = montarUrlTelaAtivo(id);
+  }
 
   /* ===============================
      ✅ GARANTIA: elementos essenciais
@@ -1571,6 +2107,12 @@
   }
 
   function mostrarDetalhe() { blocoDetalhe.style.display = "block"; }
+
+  function scrollDetalheAtivo() {
+    setTimeout(() => {
+      blocoDetalhe.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+  }
 
   function esconderDetalhe() {
     blocoDetalhe.style.display = "none";
@@ -2807,6 +3349,7 @@
       renderTabelaPorTipo(ativoBase);
       renderKpis12m(kpis);
       mostrarDetalhe();
+      scrollDetalheAtivo();
 
       blocoComparacao.style.display = "block";
       atualizarComparacaoUI();
@@ -2848,6 +3391,7 @@
       renderTabelaPorTipo(ativoBase);
       renderKpis12m(kpis);
       mostrarDetalhe();
+      scrollDetalheAtivo();
 
       atualizarComparacaoUI();
 
@@ -2928,7 +3472,8 @@
       if (selecionado >= 0 && itens[selecionado]) {
         e.preventDefault();
         const it = itens[selecionado];
-        selecionarAtivoPorId(it.id);
+        if (modoAdicionar) selecionarAtivoPorId(it.id);
+        else abrirAtivoEmTelaPropria(it.id);
       }
     }
 
@@ -2943,8 +3488,30 @@
     const it = itens[idx];
     if (!it) return;
 
-    selecionarAtivoPorId(it.id);
+    if (modoAdicionar) selecionarAtivoPorId(it.id);
+    else abrirAtivoEmTelaPropria(it.id);
   });
+
+  const listaAtivosCard = document.getElementById("listaAtivosCard");
+  if (listaAtivosCard) {
+    listaAtivosCard.addEventListener("click", (e) => {
+      if (e.target.closest(".pg-link")) return;
+
+      const alvo = e.target.closest("[data-lista-ativo-id]");
+      if (!alvo) return;
+
+      const id = alvo.getAttribute("data-lista-ativo-id");
+      if (!id) return;
+
+      const href = alvo.getAttribute("href");
+      if (href) window.location.href = href;
+      else abrirAtivoEmTelaPropria(id);
+    });
+  }
+
+  if (ATIVO_ID_INICIAL) {
+    selecionarAtivoPorId(ATIVO_ID_INICIAL);
+  }
 
   btnLimpar.addEventListener("click", () => {
     input.value = "";
@@ -2953,7 +3520,13 @@
 
     esconderDetalhe();
 
-    setStatus("Digite 2 ou mais caracteres para buscar.");
+    const urlAtual = new URL(window.location.href);
+    if (MODO_PAGINA_DETALHE || urlAtual.searchParams.has("q") || urlAtual.searchParams.has("page")) {
+      window.location.href = "{{ url_for('admin.ativos') }}";
+      return;
+    }
+
+    setStatus("Digite 2 ou mais caracteres para buscar ou use a lista abaixo.");
     input.focus();
     history.replaceState(null, "", "{{ url_for('admin.ativos') }}");
   });
@@ -3019,7 +3592,7 @@
     setLimparVisivel(true);
     setStatus(`Digite para ver sugestões (atual: "${qInicial}")`);
   } else {
-    setStatus("Digite 2 ou mais caracteres para buscar.");
+    setStatus("Digite 2 ou mais caracteres para buscar ou use a lista abaixo.");
   }
 
   if (!chkOcupacao.checked && !chkReceita.checked && !chkRentabilidade.checked) {

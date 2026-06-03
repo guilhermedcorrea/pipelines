@@ -2195,8 +2195,146 @@ def ticket_auvo_detalhes(id_ticket: int):
 def ativos():
     termo = (request.args.get("q") or "").strip()
     termo_limpo = termo[:120]
-    # A página carrega “vazia”; KPIs e séries vêm via AJAX quando selecionar o ativo.
-    return render_template("admin/ativos.html", q=termo_limpo)
+
+    try:
+        pagina_atual = int(request.args.get("page") or 1)
+    except (TypeError, ValueError):
+        pagina_atual = 1
+
+    pagina_atual = max(1, pagina_atual)
+    itens_por_pagina = 10
+    offset = (pagina_atual - 1) * itens_por_pagina
+
+    sql_where = """
+        WHERE
+            (
+                :q = N'' OR
+                a.NomeAtivo COLLATE Latin1_General_CI_AI LIKE :q_like OR
+                CAST(a.ReferenciaExterna AS NVARCHAR(50)) LIKE :q_like OR
+                a.NumeroSerie COLLATE Latin1_General_CI_AI LIKE :q_like OR
+                a.Bairro COLLATE Latin1_General_CI_AI LIKE :q_like OR
+                a.Logradouro COLLATE Latin1_General_CI_AI LIKE :q_like OR
+                a.Cidade COLLATE Latin1_General_CI_AI LIKE :q_like OR
+                a.CEP LIKE :q_like OR
+                a.UF COLLATE Latin1_General_CI_AI LIKE :q_like OR
+                CAST(a.CodPonto AS NVARCHAR(50)) LIKE :q_like
+            )
+    """
+
+    sql_total = f"""
+    SET NOCOUNT ON;
+
+    SELECT COUNT_BIG(1) AS TotalRegistros
+    FROM Integracao.Silver.DimAtivos AS a WITH (NOLOCK)
+    LEFT JOIN Integracao.dbo.EmpresaProprietaria AS ep WITH (NOLOCK)
+        ON ep.IDEmpresaProprietaria = a.IDEmpresaProprietaria
+    {sql_where};
+    """
+
+    sql_lista = f"""
+    SET NOCOUNT ON;
+
+    DECLARE @offset INT = :offset;
+    DECLARE @limite INT = :limite;
+
+    SELECT
+        a.IDDimAtivos,
+        a.ReferenciaExterna,
+        a.CodPonto,
+        a.IDEmpresaProprietaria,
+        ep.RazaoSocial AS EmpresaProprietaria,
+        ep.Logo AS LogoEmpresaProprietaria,
+        a.Tipo,
+        a.SubTipo,
+        a.NomeAtivo,
+        a.Descricao,
+        a.NumeroSerie,
+        a.CEP,
+        a.Cidade,
+        a.UF,
+        a.Logradouro,
+        a.Bairro,
+        a.BitAtivo,
+        a.DataAtualizacao
+    FROM Integracao.Silver.DimAtivos AS a WITH (NOLOCK)
+    LEFT JOIN Integracao.dbo.EmpresaProprietaria AS ep WITH (NOLOCK)
+        ON ep.IDEmpresaProprietaria = a.IDEmpresaProprietaria
+    {sql_where}
+    ORDER BY
+        CASE WHEN ISNULL(a.BitAtivo, 1) = 1 THEN 0 ELSE 1 END,
+        ISNULL(a.NomeAtivo, N'') ASC,
+        a.IDDimAtivos DESC
+    OFFSET @offset ROWS FETCH NEXT @limite ROWS ONLY;
+    """
+
+    params = {
+        "q": termo_limpo,
+        "q_like": f"%{termo_limpo}%",
+        "offset": offset,
+        "limite": itens_por_pagina,
+    }
+
+    ativos_lista = []
+    total_registros = 0
+
+    with db.engine.connect() as conn:
+        total_registros = int(conn.execute(text(sql_total), params).scalar() or 0)
+        rs = conn.execute(text(sql_lista), params)
+        colunas = list(rs.keys())
+        ativos_lista = []
+        for row in (rs.fetchall() or []):
+            ativo = dict(zip(colunas, row))
+            ativo["LogoEmpresaProprietaria"] = _resolver_url_logo_empresa_proprietaria(
+                ativo.get("LogoEmpresaProprietaria")
+            )
+            ativo["url_detalhe"] = url_for(
+                "admin.ativos_visualizar",
+                id_ativo=ativo.get("IDDimAtivos"),
+            )
+            ativos_lista.append(ativo)
+
+    total_paginas = max(1, (total_registros + itens_por_pagina - 1) // itens_por_pagina)
+
+    if pagina_atual > total_paginas and total_registros > 0:
+        return redirect(url_for("admin.ativos", q=termo_limpo, page=total_paginas))
+
+    janela_inicio = max(1, pagina_atual - 2)
+    janela_fim = min(total_paginas, pagina_atual + 2)
+
+    paginacao = {
+        "pagina": pagina_atual,
+        "itens_por_pagina": itens_por_pagina,
+        "total_registros": total_registros,
+        "total_paginas": total_paginas,
+        "tem_anterior": pagina_atual > 1,
+        "tem_proxima": pagina_atual < total_paginas,
+        "paginas": list(range(janela_inicio, janela_fim + 1)),
+    }
+
+    return render_template(
+        "admin/ativos.html",
+        q=termo_limpo,
+        ativos_lista=ativos_lista,
+        paginacao=paginacao,
+        modo_detalhe=False,
+        ativo_id_inicial=None,
+    )
+
+
+@admin.route("/ativos/<int:id_ativo>", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("80 per minute", methods=["GET"])
+def ativos_visualizar(id_ativo: int):
+    """Abre o detalhe do ativo em uma página própria, sem manter a lista grande acima."""
+    return render_template(
+        "admin/ativos.html",
+        q="",
+        ativos_lista=[],
+        paginacao=None,
+        modo_detalhe=True,
+        ativo_id_inicial=int(id_ativo),
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -2243,7 +2381,8 @@ def ativos_sugestoes():
                 Logradouro   COLLATE Latin1_General_CI_AI LIKE @q_like OR
                 Cidade  COLLATE Latin1_General_CI_AI LIKE @q_like OR
                 CEP                                LIKE @q_like OR
-                UF   COLLATE Latin1_General_CI_AI LIKE @q_like
+                UF   COLLATE Latin1_General_CI_AI LIKE @q_like OR
+                CAST(CodPonto AS NVARCHAR(50)) LIKE @q_like
             )
     )
     SELECT *
@@ -2315,6 +2454,7 @@ def ativos_sugestoes():
                     "valor": label,
                     "tipo": tipo,
                     "subtipo": subtipo,
+                    "url": url_for("admin.ativos_visualizar", id_ativo=d.get("IDDimAtivos")),
                 }
             )
 

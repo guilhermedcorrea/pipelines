@@ -4,15 +4,17 @@
 <style>
   .page-wrap{
     width:100%;
-    max-width:none;
+    max-width:none !important;
     margin:0;
-    padding: 18px 22px;
+    padding: clamp(10px, 1.25vw, 18px) clamp(10px, 1.5vw, 22px);
+    box-sizing:border-box;
   }
   @media (max-width: 900px){
-    .page-wrap{ padding: 14px 14px; }
+    .page-wrap{ padding: 12px; }
   }
 
   .card{
+    width:100%;
     background:#fff;
     border:1px solid var(--border);
     border-radius: 16px;
@@ -22,15 +24,36 @@
 
   .filters{
     display:grid;
-    grid-template-columns: 1.2fr 240px 240px 160px;
+    grid-template-columns: minmax(260px, 2fr) minmax(135px, .75fr) minmax(135px, .75fr) minmax(110px, .45fr) auto;
     gap:10px;
     padding: 12px 14px 14px 14px;
+    align-items:end;
   }
-  @media (max-width: 1100px){
+  .filter-actions{
+    display:flex;
+    gap:10px;
+    align-items:end;
+    justify-content:flex-end;
+    min-width:180px;
+  }
+  .filter-actions .btn{
+    height:38px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    white-space:nowrap;
+  }
+  @media (max-width: 1250px){
+    .filters{ grid-template-columns: minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(140px, .7fr); }
+    .filter-actions{ justify-content:flex-start; min-width:0; }
+  }
+  @media (max-width: 850px){
     .filters{ grid-template-columns: 1fr 1fr; }
   }
-  @media (max-width: 700px){
+  @media (max-width: 620px){
     .filters{ grid-template-columns: 1fr; }
+    .filter-actions{ width:100%; }
+    .filter-actions .btn{ flex:1; }
   }
 
   .field label{
@@ -54,8 +77,16 @@
     box-shadow: 0 0 0 3px rgba(0,0,0,.06);
   }
 
+  .table-scroller{
+    width:100%;
+    overflow-x:auto;
+    overflow-y:visible;
+    -webkit-overflow-scrolling:touch;
+  }
+
   table{
     width:100%;
+    min-width:1040px;
     border-collapse: collapse;
   }
   thead th{
@@ -71,10 +102,23 @@
     white-space:nowrap;
   }
   tbody td{
-    padding: 12px 14px;
+    padding: 10px 12px;
     border-bottom: 1px solid rgba(0,0,0,.06);
     font-weight:800;
-    vertical-align:top;
+    font-size:13px;
+    vertical-align:middle;
+  }
+  tbody td:nth-child(2),
+  tbody td:nth-child(3){
+    min-width:170px;
+  }
+  tbody td:nth-child(4){
+    min-width:160px;
+  }
+  tbody td:nth-child(6),
+  tbody td:nth-child(7),
+  tbody td:nth-child(9){
+    white-space:nowrap;
   }
   tbody tr:hover{
     background: rgba(0,0,0,.02);
@@ -184,6 +228,138 @@
     opacity:.9;
     flex: 0 0 18px;
   }
+
+  /* =========================================================
+     ✅ STATUS COMPACTO + RESPONSIVO
+     ========================================================= */
+  .status-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    max-width:100%;
+    padding:5px 8px;
+    border-radius:999px;
+    font-weight:900;
+    font-size:12px;
+    line-height:1.1;
+    white-space:nowrap;
+    box-shadow: 0 1px 5px rgba(15,23,42,.05);
+  }
+  .status-badge--ativo{
+    border:1px solid var(--border);
+    background:#fff;
+    color:var(--text);
+  }
+  .status-badge--reservado{
+    background: rgba(245,158,11,.10);
+    border:1px solid rgba(245,158,11,.22);
+    color:#92400e;
+  }
+  .status-icone{
+    width:14px;
+    height:14px;
+    object-fit:contain;
+    flex:0 0 14px;
+    filter: drop-shadow(0 1px 0 rgba(0,0,0,.06));
+  }
+  .status-marcador{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    margin-left:2px;
+    padding:2px 6px;
+    border-radius:999px;
+    font-weight:1000;
+    font-size:10px;
+    line-height:1;
+    white-space:nowrap;
+  }
+  .status-marcador--ativo{
+    background: rgba(37,99,235,.10);
+    border:1px solid rgba(37,99,235,.20);
+    color: rgba(37,99,235,1);
+  }
+  .status-marcador--reserva{
+    background: rgba(245,158,11,.18);
+    border:1px solid rgba(245,158,11,.28);
+    color:#92400e;
+  }
+  .status-texto-curto{
+    display:none;
+  }
+  .tag-mini{
+    display:inline-flex;
+    align-items:center;
+    max-width:100%;
+    padding:4px 8px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,.10);
+    background: rgba(107,114,128,.10);
+    color:#6b7280;
+    font-weight:1000;
+    font-size:11px;
+    line-height:1;
+    white-space:nowrap;
+  }
+
+  .paginacao-wrap{
+    padding: 12px 14px;
+    width:100%;
+    min-height:56px;
+    display:grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items:center;
+    gap:12px;
+  }
+  .paginacao-info{
+    font-weight:800;
+    justify-self:start;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    min-width:0;
+  }
+  .paginacao-pages{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    justify-content:center;
+    white-space:nowrap;
+  }
+  .paginacao-qtd{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-weight:900;
+    justify-self:end;
+    white-space:nowrap;
+  }
+
+  @media (max-width: 920px){
+    table{ min-width:980px; }
+    thead th{ padding:10px 10px; }
+    tbody td{ padding:9px 10px; }
+    .status-badge{ gap:5px; padding:4px 7px; font-size:11px; }
+    .status-icone{ width:13px; height:13px; flex-basis:13px; }
+    .status-marcador{ padding:2px 5px; font-size:9px; }
+    .status-texto-longo{ display:none; }
+    .status-texto-curto{ display:inline; }
+  }
+
+  @media (max-width: 760px){
+    .paginacao-wrap{
+      grid-template-columns: 1fr;
+      justify-items:center;
+      text-align:center;
+    }
+    .paginacao-info,
+    .paginacao-qtd{
+      justify-self:center;
+      white-space:normal;
+    }
+  }
+
 </style>
 
 <div class="page-wrap">
@@ -226,10 +402,10 @@
           </select>
         </div>
 
-        <div style="display:flex;gap:10px;align-items:end;">
-          <button class="btn btn-primary" type="submit" style="height:38px;">Filtrar</button>
+        <div class="filter-actions">
+          <button class="btn btn-primary" type="submit">Filtrar</button>
 
-          <a class="btn btn-secondary" style="height:38px;display:inline-flex;align-items:center;text-decoration:none;"
+          <a class="btn btn-secondary" style="text-decoration:none;"
              href="{{ url_for('Paineis.lista_ocupacao', page=1, per_page=filtros.per_page) }}">
             Limpar
           </a>
@@ -238,7 +414,7 @@
 
       <div style="height:6px;"></div>
 
-      <div style="overflow:auto;">
+      <div class="table-scroller">
         <table>
           <thead>
             <tr>
@@ -270,129 +446,27 @@
                     {% set st = st_raw|trim|upper %}
 
                     {% if st == "ATIVO" %}
-                      <span style="
-                          display:inline-flex;
-                          align-items:center;
-                          gap:10px;
-
-                          padding:8px 12px;
-                          border-radius:999px;
-                          border:1px solid var(--border);
-                          background:#fff;
-
-                          font-weight:800;
-                          color:var(--text);
-
-                          box-shadow: 0 2px 8px rgba(15,23,42,.06);
-                        ">
-                        <img src="/static/imagens/contrato.png" alt="Contrato" style="
-                          width:18px;height:18px;object-fit:contain;
-                          filter: drop-shadow(0 1px 0 rgba(0,0,0,.06));
-                        ">
-                        Contrato / Locação
-
-                        <span style="
-                          margin-left:6px;
-                          display:inline-flex;
-                          align-items:center;
-                          gap:6px;
-
-                          padding:4px 10px;
-                          border-radius:999px;
-
-                          background: rgba(37,99,235,.10);
-                          border:1px solid rgba(37,99,235,.20);
-
-                          color: rgba(37,99,235,1);
-                          font-weight:900;
-                          font-size:12px;
-                          line-height:1;
-                          white-space:nowrap;
-                        ">
-                          ATIVO
-                        </span>
+                      <span class="status-badge status-badge--ativo">
+                        <img class="status-icone" src="/static/imagens/contrato.png" alt="Contrato">
+                        <span class="status-texto-longo">Contrato / Locação</span>
+                        <span class="status-texto-curto">Contrato</span>
+                        <span class="status-marcador status-marcador--ativo">ATIVO</span>
                       </span>
 
                     {% elif st == "RESERVADO" %}
-                      <span style="
-                          display:inline-flex;
-                          align-items:center;
-                          gap:10px;
-
-                          padding:8px 12px;
-                          border-radius:999px;
-
-                          background: rgba(245,158,11,.10);
-                          border:1px solid rgba(245,158,11,.22);
-
-                          font-weight:800;
-                          color:#92400e;
-
-                          box-shadow: 0 2px 8px rgba(15,23,42,.06);
-                        ">
-                        <img src="/static/imagens/reservado.png" alt="Reservado" style="
-                          width:18px;height:18px;object-fit:contain;
-                          filter: drop-shadow(0 1px 0 rgba(0,0,0,.06));
-                        ">
-                        Reservado
-
-                        <span style="
-                          margin-left:6px;
-                          display:inline-flex;
-                          align-items:center;
-                          gap:6px;
-
-                          padding:4px 10px;
-                          border-radius:999px;
-
-                          background: rgba(245,158,11,.18);
-                          border:1px solid rgba(245,158,11,.28);
-
-                          color:#92400e;
-                          font-weight:900;
-                          font-size:12px;
-                          line-height:1;
-                          white-space:nowrap;
-                        ">
-                          RESERVA
-                        </span>
+                      <span class="status-badge status-badge--reservado">
+                        <img class="status-icone" src="/static/imagens/reservado.png" alt="Reservado">
+                        <span>Reservado</span>
+                        <span class="status-marcador status-marcador--reserva">RESERVA</span>
                       </span>
 
                     {% else %}
-                      <span style="
-                          display:inline-flex;
-                          align-items:center;
-                          padding:6px 10px;
-                          border-radius:999px;
-                          border:1px solid rgba(0,0,0,.10);
-                          background: rgba(107,114,128,.10);
-                          color:#6b7280;
-                          font-weight:1000;
-                          font-size:12px;
-                          line-height:1;
-                          white-space:nowrap;
-                        ">
-                        {{ it.Status or "-" }}
-                      </span>
+                      <span class="tag-mini">{{ it.Status or "-" }}</span>
                     {% endif %}
                   </td>
 
                   <td>
-                    <span style="
-                      display:inline-flex;
-                      align-items:center;
-                      padding:6px 10px;
-                      border-radius:999px;
-                      border:1px solid rgba(0,0,0,.10);
-                      background: rgba(107,114,128,.10);
-                      color:#6b7280;
-                      font-weight:1000;
-                      font-size:12px;
-                      line-height:1;
-                      white-space:nowrap;
-                    ">
-                      {{ it.Origem or "-" }}
-                    </span>
+                    <span class="tag-mini">{{ it.Origem or "-" }}</span>
                   </td>
 
                   <td>
@@ -474,52 +548,13 @@
       <!-- =========================================================
            ✅ PAGINAÇÃO (IGUAL SEU EXEMPLO) ✅ DENTRO DO FORM/CARD
            ========================================================= -->
-      <div style="
-          position:relative;
-          padding: 12px 14px;
-          width:100%;
-          min-height:56px;
-          display:grid;
-          grid-template-columns: 1fr 1fr;
-          align-items:center;
-          gap:12px;
-        ">
+      <div class="paginacao-wrap">
 
-        <div class="muted" style="
-            font-weight:800;
-            justify-self:start;
-            white-space:nowrap;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            max-width: 45%;
-          ">
+        <div class="muted paginacao-info">
           Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} ocupações
         </div>
 
-        <div class="muted" style="
-            display:flex;
-            align-items:center;
-            gap:10px;
-            font-weight:900;
-            justify-self:end;
-            white-space:nowrap;
-          ">
-          <span>{{ filtros.per_page }} por página</span>
-        </div>
-
-        <div style="
-            position:absolute;
-            left:50%;
-            top:50%;
-            transform: translate(-50%, -50%);
-            display:flex;
-            align-items:center;
-            gap:8px;
-            flex-wrap:wrap;
-            justify-content:center;
-            justify-self:center;
-            white-space:nowrap;
-          ">
+        <div class="paginacao-pages">
           {% set p = paginacao.page %}
           {% set tp = paginacao.total_pages %}
 
@@ -566,6 +601,10 @@
                               origem=filtros.origem) }}">
             »
           </a>
+        </div>
+
+        <div class="muted paginacao-qtd">
+          <span>{{ filtros.per_page }} por página</span>
         </div>
 
       </div>
