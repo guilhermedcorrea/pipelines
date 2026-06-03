@@ -47,54 +47,65 @@ SQL_CONDICAO_RESERVA_ABERTA = """
 """
 
 
-SQL_CONDICAO_ITEM_CORRESPONDENTE = """
-        (
-            item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
-            OR (
-                reserva.IDFatoControleContratosItemOrigem IS NULL
-                AND reserva.IDFatoControleContratos IS NOT NULL
-                AND item_pref.IDFatoControleContratoEuromidia = reserva.IDFatoControleContratos
-                AND UPPER(LTRIM(RTRIM(ISNULL(item_pref.CodPonto, N'')))) COLLATE Latin1_General_CI_AI =
-                    UPPER(LTRIM(RTRIM(ISNULL(reserva.CodPonto, N'')))) COLLATE Latin1_General_CI_AI
-                AND UPPER(LTRIM(RTRIM(ISNULL(item_pref.CodFace, N'')))) COLLATE Latin1_General_CI_AI =
-                    UPPER(LTRIM(RTRIM(ISNULL(reserva.CodFace, N'')))) COLLATE Latin1_General_CI_AI
-                AND (
-                    reserva.DataInicio IS NULL
-                    OR reserva.DataFim IS NULL
-                    OR (
-                        item_pref.DataInicioPrevisto <= reserva.DataFim
-                        AND item_pref.DataTerminoPrevisto >= reserva.DataInicio
-                    )
-                )
-            )
-        )
+SQL_CONDICAO_TIPO_VINCULO_PREFERENCIA_RENOVACAO = """
+    UPPER(LTRIM(RTRIM(ISNULL(reserva.TipoVinculoOrigem, N'')))) COLLATE Latin1_General_CI_AI
+        LIKE N'%PREFERENCIA%RENOVACAO%CONTRATO%'
 """
 
 
-SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO = f"""
+SQL_EXISTE_ITEM_VINCULADO_BITPREFERENCIA_ATIVO = """
 EXISTS (
     SELECT 1
     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_pref WITH (NOLOCK)
     WHERE
-        {SQL_CONDICAO_ITEM_CORRESPONDENTE}
+        item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
         AND ISNULL(item_pref.BitPreferencia, 0) = 1
         AND ISNULL(item_pref.BitAtivo, 1) = 1
-        AND item_pref.DataTerminoPrevisto IS NOT NULL
-        AND CAST(item_pref.DataTerminoPrevisto AS date) >= CAST(SYSDATETIME() AS date)
 )
 """
 
 
-SQL_EXISTE_ITEM_PREFERENCIA_VENCIDO = f"""
-EXISTS (
-    SELECT 1
-    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_pref WITH (NOLOCK)
-    WHERE
-        {SQL_CONDICAO_ITEM_CORRESPONDENTE}
-        AND ISNULL(item_pref.BitPreferencia, 0) = 1
-        AND ISNULL(item_pref.BitAtivo, 1) = 1
-        AND item_pref.DataTerminoPrevisto IS NOT NULL
-        AND CAST(item_pref.DataTerminoPrevisto AS date) < CAST(SYSDATETIME() AS date)
+SQL_CONDICAO_RESERVA_PREFERENCIA = f"""
+(
+    {SQL_CONDICAO_TIPO_VINCULO_PREFERENCIA_RENOVACAO}
+    OR {SQL_EXISTE_ITEM_VINCULADO_BITPREFERENCIA_ATIVO}
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND (
+        reserva.DataFim IS NULL
+        OR CAST(reserva.DataFim AS date) >= CAST(SYSDATETIME() AS date)
+    )
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.DataFim IS NOT NULL
+    AND CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date)
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.DataFim IS NULL
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H = f"""
+(
+    NOT {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.CriadoEm IS NOT NULL
+    AND reserva.CriadoEm <= DATEADD(HOUR, -{HORAS_MINIMAS_RESERVA_ABERTA}, SYSDATETIME())
 )
 """
 
@@ -102,23 +113,15 @@ EXISTS (
 SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO = f"""
 {SQL_CONDICAO_RESERVA_ABERTA}
 AND (
-    (
-        reserva.CriadoEm IS NOT NULL
-        AND reserva.CriadoEm <= DATEADD(HOUR, -{HORAS_MINIMAS_RESERVA_ABERTA}, SYSDATETIME())
-        AND NOT {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO}
-    )
-    OR (
-        {SQL_EXISTE_ITEM_PREFERENCIA_VENCIDO}
-        AND NOT {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO}
-    )
+    {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+    OR {SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H}
 )
 """
 
 
 SQL_MOTIVO_CANCELAMENTO = f"""
 CASE
-    WHEN {SQL_EXISTE_ITEM_PREFERENCIA_VENCIDO}
-         AND NOT {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO}
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
         THEN N'PREFERENCIA_RENOVACAO_VENCIDA'
     ELSE N'RESERVA_COMUM_MAIS_DE_48H'
 END
@@ -127,10 +130,9 @@ END
 
 SQL_OBSERVACAO_CANCELAMENTO = f"""
 CASE
-    WHEN {SQL_EXISTE_ITEM_PREFERENCIA_VENCIDO}
-         AND NOT {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO}
-        THEN N'Reserva de preferência de renovação cancelada automaticamente após vencimento do item de contrato vinculado.'
-    ELSE N'Reserva cancelada automaticamente após mais de 48 horas aberta.'
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+        THEN N'Reserva de preferência de renovação cancelada automaticamente no primeiro dia após o fim da DataFim da reserva.'
+    ELSE N'Reserva comum cancelada automaticamente após mais de 48 horas aberta.'
 END
 """
 
@@ -144,13 +146,23 @@ WHERE
 """
 
 
+SQL_CONTAR_RESERVAS_COMUNS_ELEGIVEIS = f"""
+SELECT
+    COUNT(1) AS TotalReservaComumElegivel
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H};
+"""
+
+
 SQL_CONTAR_RESERVAS_PREFERENCIA_PROTEGIDAS = f"""
 SELECT
     COUNT(1) AS TotalProtegido
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
 WHERE
 {SQL_CONDICAO_RESERVA_ABERTA}
-AND {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO};
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA};
 """
 
 
@@ -160,8 +172,17 @@ SELECT
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
 WHERE
 {SQL_CONDICAO_RESERVA_ABERTA}
-AND {SQL_EXISTE_ITEM_PREFERENCIA_VENCIDO}
-AND NOT {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO};
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA};
+"""
+
+
+SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM = f"""
+SELECT
+    COUNT(1) AS TotalPreferenciaSemDataFim
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM};
 """
 
 
@@ -174,17 +195,21 @@ SELECT TOP (30)
        reserva.MarcaExibida,
        reserva.Status,
        reserva.Origem,
+       reserva.TipoVinculoOrigem,
        reserva.CriadoEm,
        reserva.ExpiraEm,
        reserva.DataInicio,
        reserva.DataFim,
        reserva.IDFatoControleContratos,
        reserva.IDFatoControleContratosItemOrigem,
-       item_amostra.IDFatoControleContratosItensEuromidia AS IDItemContratoPreferencia,
+       reserva.IDFatoOcupacaoOrigem,
+       item_amostra.IDFatoControleContratosItensEuromidia AS IDItemContratoVinculado,
        item_amostra.BitPreferencia,
        item_amostra.BitAtivo AS BitAtivoItemContrato,
        item_amostra.DataInicioPrevisto AS DataInicioPrevistoItemContrato,
        item_amostra.DataTerminoPrevisto AS DataTerminoPrevistoItemContrato,
+       item_amostra.DataFimEfetiva AS DataFimEfetivaItemContrato,
+       reserva.DataFim AS DataFimRegraCancelamento,
        {SQL_MOTIVO_CANCELAMENTO} AS MotivoCancelamento,
        CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
@@ -194,25 +219,17 @@ OUTER APPLY (
            item_pref.BitPreferencia,
            item_pref.BitAtivo,
            item_pref.DataInicioPrevisto,
-           item_pref.DataTerminoPrevisto
+           item_pref.DataTerminoPrevisto,
+           item_pref.DataFimEfetiva
     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_pref WITH (NOLOCK)
     WHERE
-        {SQL_CONDICAO_ITEM_CORRESPONDENTE}
-        AND ISNULL(item_pref.BitPreferencia, 0) = 1
-    ORDER BY
-        CASE
-            WHEN item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem THEN 0
-            ELSE 1
-        END,
-        item_pref.DataTerminoPrevisto DESC,
-        item_pref.IDFatoControleContratosItensEuromidia DESC
+        item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
 ) AS item_amostra
 WHERE
 {SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO}
 ORDER BY
     CASE
-        WHEN {SQL_EXISTE_ITEM_PREFERENCIA_VENCIDO}
-             AND NOT {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO}
+        WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
             THEN 0
         ELSE 1
     END,
@@ -230,41 +247,65 @@ SELECT TOP (30)
        reserva.MarcaExibida,
        reserva.Status,
        reserva.Origem,
+       reserva.TipoVinculoOrigem,
        reserva.CriadoEm,
        reserva.DataInicio,
        reserva.DataFim,
        reserva.IDFatoControleContratos,
        reserva.IDFatoControleContratosItemOrigem,
-       item_amostra.IDFatoControleContratosItensEuromidia AS IDItemContratoPreferencia,
+       reserva.IDFatoOcupacaoOrigem,
+       item_amostra.IDFatoControleContratosItensEuromidia AS IDItemContratoVinculado,
+       item_amostra.BitPreferencia,
+       item_amostra.BitAtivo AS BitAtivoItemContrato,
        item_amostra.DataInicioPrevisto AS DataInicioPrevistoItemContrato,
        item_amostra.DataTerminoPrevisto AS DataTerminoPrevistoItemContrato,
+       item_amostra.DataFimEfetiva AS DataFimEfetivaItemContrato,
+       reserva.DataFim AS DataFimRegraCancelamento,
        CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
 OUTER APPLY (
     SELECT TOP (1)
            item_pref.IDFatoControleContratosItensEuromidia,
+           item_pref.BitPreferencia,
+           item_pref.BitAtivo,
            item_pref.DataInicioPrevisto,
-           item_pref.DataTerminoPrevisto
+           item_pref.DataTerminoPrevisto,
+           item_pref.DataFimEfetiva
     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_pref WITH (NOLOCK)
     WHERE
-        {SQL_CONDICAO_ITEM_CORRESPONDENTE}
-        AND ISNULL(item_pref.BitPreferencia, 0) = 1
-        AND ISNULL(item_pref.BitAtivo, 1) = 1
-        AND item_pref.DataTerminoPrevisto IS NOT NULL
-        AND CAST(item_pref.DataTerminoPrevisto AS date) >= CAST(SYSDATETIME() AS date)
-    ORDER BY
-        CASE
-            WHEN item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem THEN 0
-            ELSE 1
-        END,
-        item_pref.DataTerminoPrevisto DESC,
-        item_pref.IDFatoControleContratosItensEuromidia DESC
+        item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
 ) AS item_amostra
 WHERE
 {SQL_CONDICAO_RESERVA_ABERTA}
-AND {SQL_EXISTE_ITEM_PREFERENCIA_NAO_VENCIDO}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA}
 ORDER BY
-    item_amostra.DataTerminoPrevisto ASC,
+    reserva.DataFim ASC,
+    reserva.CriadoEm ASC,
+    reserva.IDFatoOcupacaoPaineisEuromidia ASC;
+"""
+
+
+SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_SEM_DATA_FIM = f"""
+SELECT TOP (30)
+       reserva.IDFatoOcupacaoPaineisEuromidia,
+       reserva.Referencia,
+       reserva.CodPonto,
+       reserva.CodFace,
+       reserva.MarcaExibida,
+       reserva.Status,
+       reserva.Origem,
+       reserva.TipoVinculoOrigem,
+       reserva.CriadoEm,
+       reserva.DataInicio,
+       reserva.DataFim,
+       reserva.IDFatoControleContratos,
+       reserva.IDFatoControleContratosItemOrigem,
+       reserva.IDFatoOcupacaoOrigem
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM}
+ORDER BY
     reserva.CriadoEm ASC,
     reserva.IDFatoOcupacaoPaineisEuromidia ASC;
 """
@@ -288,7 +329,7 @@ SQL_OBTER_DATA_HORA_SQL_SERVER = f"""
 SELECT
     SYSDATETIME() AS DataExecucaoSqlServer,
     DATEADD(HOUR, -{HORAS_MINIMAS_RESERVA_ABERTA}, SYSDATETIME()) AS LimiteCriacaoReservaComum,
-    CAST(SYSDATETIME() AS date) AS DataReferenciaVencimentoPreferencia;
+    CAST(SYSDATETIME() AS date) AS DataReferenciaCancelamentoPreferencia;
 """
 
 
@@ -303,7 +344,7 @@ Cancelar automaticamente reservas antigas da tabela:
 
 ## Regra correta de cancelamento
 
-O DAG trabalha com duas regras:
+O DAG trabalha com duas regras.
 
 ### 1. Reserva comum
 
@@ -314,39 +355,31 @@ Cancela quando:
 - `CriadoEm <= DATEADD(HOUR, -48, SYSDATETIME())`
 - `CanceladoEm IS NULL`
 - `Status` diferente de `CANCELADO`
-- não existe item de contrato vinculado com `BitPreferencia = 1` ainda não vencido.
+- não é reserva de preferência de renovação.
 
 ### 2. Reserva de preferência de renovação
 
-A reserva de preferência de renovação é identificada pelo item correspondente em:
+A preferência é identificada principalmente pela própria ocupação/reserva:
 
-`Integracao.Silver.FatoControleContratosItensEuromidia`
+- `Origem = 'RESERVA'`
+- `TipoVinculoOrigem` contendo `PREFERENCIA RENOVACAO CONTRATO`
 
-com:
+Como fallback de compatibilidade, também entra na exceção se o item vinculado diretamente por
+`IDFatoControleContratosItemOrigem` tiver `BitPreferencia = 1` e `BitAtivo = 1`.
 
-- `BitPreferencia = 1`
-- `BitAtivo = 1`
-- `DataTerminoPrevisto IS NOT NULL`
-- item correspondente pelo `IDFatoControleContratosItemOrigem`.
+Essa reserva não é cancelada pela regra de 48 horas.
 
-Se o vínculo direto não estiver preenchido, o DAG tenta localizar o item correspondente pelo contrato,
-`CodPonto`, `CodFace` e sobreposição de datas.
+Ela só é cancelada quando a data final da própria reserva já passou:
 
-Essa reserva não é cancelada após 48 horas.
+`CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date)`
 
-Ela só é cancelada quando:
+Exemplo:
 
-- continuar como `Origem = 'RESERVA'`
-- ainda não tiver `CanceladoEm`
-- `Status` ainda não for `CANCELADO`
-- o `DataTerminoPrevisto` do item de contrato vinculado já tiver vencido.
+- `reserva.DataFim = 2026-06-02`
+- em `2026-06-02`, não cancela
+- em `2026-06-03`, cancela
 
-A comparação de vencimento usa data, não hora:
-
-`CAST(DataTerminoPrevisto AS date) < CAST(SYSDATETIME() AS date)`
-
-Assim, se o item vence hoje, a reserva não é cancelada no começo do dia.
-Ela só fica elegível no dia seguinte ao vencimento.
+Se `reserva.DataFim` estiver nula em uma preferência, o DAG protege a reserva e não cancela automaticamente.
 
 ## Segurança / idempotência
 
@@ -384,7 +417,7 @@ def _normalizar_linhas_para_log(linhas: list[dict[str, Any]]) -> list[dict[str, 
 
 @dag(
     dag_id=NOME_DAG,
-    description="Cancela reservas comuns em 48h e preserva reservas de preferência até o vencimento do item.",
+    description="Cancela reservas comuns em 48h e preserva preferências de renovação até o dia seguinte ao fim da reserva.",
     schedule="*/8 * * * *",
     start_date=pendulum.datetime(2026, 5, 13, 0, 0, tz=TIMEZONE_SAO_PAULO),
     catchup=False,
@@ -413,9 +446,9 @@ def pipeline_cancela_reserva():
 
         Regra final:
         - reserva comum: cancela após 48 horas de criação;
-        - reserva vinculada a item BitPreferencia = 1 ainda não vencido: não cancela por 48 horas;
-        - reserva vinculada a item BitPreferencia = 1 vencido: cancela após o vencimento do DataTerminoPrevisto;
-        - item que vence hoje ainda não é considerado vencido, porque a comparação é feita por data.
+        - reserva com TipoVinculoOrigem = PREFERENCIA RENOVAÇÃO CONTRATO: não cancela por 48 horas;
+        - reserva de preferência: só cancela no primeiro dia após reserva.DataFim;
+        - se vence hoje, ainda não cancela hoje, porque a comparação é feita por data.
         """
         hook_sql_server = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
         engine = hook_sql_server.obter_engine()
@@ -442,13 +475,20 @@ def pipeline_cancela_reserva():
 
             data_execucao_sql_server = datas_execucao["DataExecucaoSqlServer"]
             limite_criacao_reserva_comum = datas_execucao["LimiteCriacaoReservaComum"]
-            data_referencia_vencimento_preferencia = datas_execucao[
-                "DataReferenciaVencimentoPreferencia"
+            data_referencia_cancelamento_preferencia = datas_execucao[
+                "DataReferenciaCancelamentoPreferencia"
             ]
 
             total_elegivel_antes = int(
                 conexao.execute(
                     text(SQL_CONTAR_RESERVAS_ELEGIVEIS_CANCELAMENTO)
+                ).scalar_one()
+                or 0
+            )
+
+            total_reserva_comum_elegivel = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_COMUNS_ELEGIVEIS)
                 ).scalar_one()
                 or 0
             )
@@ -467,6 +507,13 @@ def pipeline_cancela_reserva():
                 or 0
             )
 
+            total_preferencia_sem_data_fim = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM)
+                ).scalar_one()
+                or 0
+            )
+
             amostra_elegiveis = [
                 dict(linha)
                 for linha in conexao.execute(
@@ -481,15 +528,27 @@ def pipeline_cancela_reserva():
                 ).mappings().all()
             ]
 
+            amostra_preferencia_sem_data_fim = [
+                dict(linha)
+                for linha in conexao.execute(
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_SEM_DATA_FIM)
+                ).mappings().all()
+            ]
+
             logger.info(
                 "Reservas elegíveis para cancelamento: total=%s | "
-                "preferencia_vencida_elegivel=%s | preferencia_protegida_nao_vencida=%s | "
-                "amostra_elegiveis=%s | amostra_preferencia_protegida=%s",
+                "reserva_comum_48h=%s | preferencia_vencida_elegivel=%s | "
+                "preferencia_protegida=%s | preferencia_sem_data_fim=%s | "
+                "amostra_elegiveis=%s | amostra_preferencia_protegida=%s | "
+                "amostra_preferencia_sem_data_fim=%s",
                 total_elegivel_antes,
+                total_reserva_comum_elegivel,
                 total_preferencia_vencida_elegivel,
                 total_preferencia_protegida,
+                total_preferencia_sem_data_fim,
                 _normalizar_linhas_para_log(amostra_elegiveis),
                 _normalizar_linhas_para_log(amostra_preferencia_protegida),
+                _normalizar_linhas_para_log(amostra_preferencia_sem_data_fim),
             )
 
             resultado_update = conexao.execute(
@@ -506,15 +565,17 @@ def pipeline_cancela_reserva():
             "dag": NOME_DAG,
             "regra": (
                 "Reserva comum cancela após 48h. "
-                "Reserva com BitPreferencia=1 não vencida fica protegida. "
-                "Reserva com BitPreferencia=1 só cancela após o DataTerminoPrevisto do item vencer."
+                "Reserva com TipoVinculoOrigem=PREFERENCIA RENOVAÇÃO CONTRATO não cancela por 48h. "
+                "Reserva de preferência só cancela no primeiro dia após reserva.DataFim."
             ),
             "usuario_integracao": nome_usuario_encontrado,
             "id_usuario_integracao": id_usuario_integracao,
             "horas_minimas_reserva_aberta": HORAS_MINIMAS_RESERVA_ABERTA,
             "total_elegivel_antes": total_elegivel_antes,
-            "total_preferencia_protegida_nao_vencida": total_preferencia_protegida,
+            "total_reserva_comum_elegivel": total_reserva_comum_elegivel,
+            "total_preferencia_protegida": total_preferencia_protegida,
             "total_preferencia_vencida_elegivel": total_preferencia_vencida_elegivel,
+            "total_preferencia_sem_data_fim": total_preferencia_sem_data_fim,
             "total_cancelado": int(total_cancelado or 0),
             "data_execucao_sql_server": (
                 data_execucao_sql_server.isoformat()
@@ -526,14 +587,17 @@ def pipeline_cancela_reserva():
                 if hasattr(limite_criacao_reserva_comum, "isoformat")
                 else str(limite_criacao_reserva_comum)
             ),
-            "data_referencia_vencimento_preferencia": (
-                data_referencia_vencimento_preferencia.isoformat()
-                if hasattr(data_referencia_vencimento_preferencia, "isoformat")
-                else str(data_referencia_vencimento_preferencia)
+            "data_referencia_cancelamento_preferencia": (
+                data_referencia_cancelamento_preferencia.isoformat()
+                if hasattr(data_referencia_cancelamento_preferencia, "isoformat")
+                else str(data_referencia_cancelamento_preferencia)
             ),
             "amostra_elegiveis": _normalizar_linhas_para_log(amostra_elegiveis),
             "amostra_preferencia_protegida": _normalizar_linhas_para_log(
                 amostra_preferencia_protegida
+            ),
+            "amostra_preferencia_sem_data_fim": _normalizar_linhas_para_log(
+                amostra_preferencia_sem_data_fim
             ),
         }
 

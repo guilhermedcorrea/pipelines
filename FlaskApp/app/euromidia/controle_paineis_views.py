@@ -12318,6 +12318,85 @@ def _normalizar_hex_css(valor, padrao="#64748B"):
     return padrao
 
 
+def _cor_texto_contraste_css(cor_fundo, padrao="#FFFFFF"):
+    """
+    Eu escolho automaticamente a cor do texto do badge com base na cor de fundo.
+
+    A lógica evita status com fundo claro e texto branco ilegível, especialmente
+    em cores como amarelo/laranja.
+    """
+    cor = _normalizar_hex_css(cor_fundo, "")
+
+    if not cor:
+        return padrao
+
+    hex_limpo = cor.lstrip("#")
+
+    if len(hex_limpo) == 3:
+        hex_limpo = "".join(ch * 2 for ch in hex_limpo)
+
+    try:
+        r = int(hex_limpo[0:2], 16)
+        g = int(hex_limpo[2:4], 16)
+        b = int(hex_limpo[4:6], 16)
+    except Exception:
+        return padrao
+
+    luminancia = ((r * 299) + (g * 587) + (b * 114)) / 1000
+
+    if luminancia >= 150:
+        return "#111827"
+
+    return "#FFFFFF"
+
+
+def _obter_mapa_status_contratos_com_cores(id_empresa_proprietaria=3):
+    """
+    Eu busco o cadastro oficial de status direto na tabela Silver.DimStatusContratos.
+
+    Fiz assim para não depender de o model SQLAlchemy estar atualizado com a
+    coluna CorHex; se a tabela já tem a coluna, a lista consegue pintar os badges.
+    """
+    try:
+        id_empresa = int(id_empresa_proprietaria or 3)
+    except Exception:
+        id_empresa = 3
+
+    rows = db.session.execute(
+        text("""
+            SELECT
+                 [IDDimStatusContratos]
+                ,[Status]
+                ,[CorHex]
+            FROM [Integracao].[Silver].[DimStatusContratos]
+            WHERE [IDEmpresaProprietaria] = :id_empresa_proprietaria
+        """),
+        {"id_empresa_proprietaria": id_empresa},
+    ).mappings().all()
+
+    mapa = {}
+
+    for row in rows:
+        try:
+            id_status = int(row.get("IDDimStatusContratos") or 0)
+        except Exception:
+            id_status = 0
+
+        if id_status <= 0:
+            continue
+
+        cor = _normalizar_hex_css(row.get("CorHex"), "")
+
+        mapa[id_status] = {
+            "IDDimStatusContratos": id_status,
+            "Status": (row.get("Status") or f"Status {id_status}").strip(),
+            "CorHex": cor,
+            "CorTexto": _cor_texto_contraste_css(cor, "#FFFFFF"),
+        }
+
+    return mapa
+
+
 
 
 
@@ -12410,27 +12489,30 @@ def contratos_lista():
 
     calcular_total = request.args.get("calcular_total") == "1"
 
-    status_opcoes = (
-        db.session.query(
-            DimStatusContratos.IDDimStatusContratos.label("IDDimStatusContratos"),
-            DimStatusContratos.Status.label("Status"),
-        )
-        .join(
-            FatoControleContratosEuromidia,
-            FatoControleContratosEuromidia.IDDimStatusContratos
-            == DimStatusContratos.IDDimStatusContratos,
-        )
-        .group_by(
-            DimStatusContratos.IDDimStatusContratos,
-            DimStatusContratos.Status,
-        )
-        .order_by(
-            func.lower(
-                func.coalesce(DimStatusContratos.Status, "")
-            )
-        )
-        .all()
-    )
+    mapa_status_config = _obter_mapa_status_contratos_com_cores(3)
+
+    rows_status_usados = db.session.execute(
+        text("""
+            SELECT DISTINCT
+                [IDDimStatusContratos]
+            FROM [Integracao].[Silver].[FatoControleContratosEuromidia]
+            WHERE [IDDimStatusContratos] IS NOT NULL
+        """),
+    ).mappings().all()
+
+    ids_status_usados = {
+        int(row.get("IDDimStatusContratos") or 0)
+        for row in rows_status_usados
+        if row.get("IDDimStatusContratos") is not None
+    }
+
+    status_opcoes = [
+        SimpleNamespace(**dados_status)
+        for id_status, dados_status in mapa_status_config.items()
+        if id_status in ids_status_usados
+    ]
+
+    status_opcoes.sort(key=lambda item: (item.Status or "").lower())
 
     cidade_opcoes = (
         db.session.query(
@@ -12804,7 +12886,6 @@ def contratos_lista():
                 FatoControleContratosEuromidia.MarcaExibida.label("MarcaExibida"),
                 FatoControleContratosEuromidia.IDDimStatusContratos.label("IDDimStatusContratos"),
                 FatoControleContratosEuromidia.BitAtivo.label("BitAtivo"),
-                DimStatusContratos.Status.label("StatusContrato"),
                 subquery_cidades.c.CidadeExibicao.label("CidadeExibicao"),
                 subquery_segmentos.c.SegmentoContrato.label("SegmentoContrato"),
                 subquery_segmentos.c.SegmentoHex.label("SegmentoHex"),
@@ -12818,11 +12899,6 @@ def contratos_lista():
                 subquery_segmentos,
                 subquery_segmentos.c.id_empresa
                 == FatoControleContratosEuromidia.IDEmpresa,
-            )
-            .outerjoin(
-                DimStatusContratos,
-                DimStatusContratos.IDDimStatusContratos
-                == FatoControleContratosEuromidia.IDDimStatusContratos,
             )
             .filter(
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.in_(
@@ -12873,12 +12949,17 @@ def contratos_lista():
             dados["LogoEmpresaProprietariaUrl"] = logo_empresa_url
             dados["SegmentoHex"] = _normalizar_hex_css(dados.get("SegmentoHex"))
 
-            id_contrato_pref = int(dados["IDFatoControleContratosEuromidia"] or 0)
-
             try:
                 id_status_contrato = int(dados.get("IDDimStatusContratos") or 0)
             except Exception:
                 id_status_contrato = 0
+
+            dados_status = mapa_status_config.get(id_status_contrato, {})
+            dados["StatusContrato"] = (dados_status.get("Status") or "").strip()
+            dados["CorHexStatusContrato"] = dados_status.get("CorHex") or ""
+            dados["CorTextoStatusContrato"] = dados_status.get("CorTexto") or "#FFFFFF"
+
+            id_contrato_pref = int(dados["IDFatoControleContratosEuromidia"] or 0)
 
             if id_status_contrato in (8, 9, 10):
                 bit_preferencia_reserva = 0
@@ -12990,6 +13071,7 @@ def contratos_lista():
 @login_required
 def contratos_busca_sugestoes():
     termo = (request.args.get("q") or "").strip()
+    mapa_status_config = _obter_mapa_status_contratos_com_cores(3)
 
     cidade_exibicao_subquery = (
         db.session.query(
@@ -12999,6 +13081,24 @@ def contratos_busca_sugestoes():
             FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia
             == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia
         )
+        .correlate(FatoControleContratosEuromidia)
+        .scalar_subquery()
+    )
+
+    segmento_contrato_subquery = (
+        db.session.query(func.min(DimCnaes.Classe))
+        .select_from(DimEmpresas)
+        .outerjoin(DimCnaes, DimCnaes.cnaepadrao == DimEmpresas.CNAE)
+        .filter(DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa)
+        .correlate(FatoControleContratosEuromidia)
+        .scalar_subquery()
+    )
+
+    segmento_hex_subquery = (
+        db.session.query(func.max(DimCnaes.Hex))
+        .select_from(DimEmpresas)
+        .outerjoin(DimCnaes, DimCnaes.cnaepadrao == DimEmpresas.CNAE)
+        .filter(DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa)
         .correlate(FatoControleContratosEuromidia)
         .scalar_subquery()
     )
@@ -13013,13 +13113,11 @@ def contratos_busca_sugestoes():
             FatoControleContratosEuromidia.CNPJ.label("CNPJ"),
             FatoControleContratosEuromidia.CPF.label("CPF"),
             FatoControleContratosEuromidia.DataLancamento.label("DataLancamento"),
-            DimStatusContratos.Status.label("StatusContrato"),
+            FatoControleContratosEuromidia.IDDimStatusContratos.label("IDDimStatusContratos"),
+            FatoControleContratosEuromidia.BitAtivo.label("BitAtivo"),
             cidade_exibicao_subquery.label("CidadeExibicao"),
-        )
-        .outerjoin(
-            DimStatusContratos,
-            DimStatusContratos.IDDimStatusContratos
-            == FatoControleContratosEuromidia.IDDimStatusContratos,
+            segmento_contrato_subquery.label("SegmentoContrato"),
+            segmento_hex_subquery.label("SegmentoHex"),
         )
     )
 
@@ -13044,24 +13142,59 @@ def contratos_busca_sugestoes():
                 )
             )
         else:
-            consulta = consulta.filter(
-                or_(
-                    FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
-                    FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
-                    FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
-                    FatoControleContratosEuromidia.CPF.like(like_prefixo),
-                    FatoControleContratosEuromidia.RazaoSocial.like(like_contendo),
-                    FatoControleContratosEuromidia.MarcaExibida.like(like_contendo),
-                    FatoControleContratosEuromidia.Vendedor.like(like_contendo),
-                    FatoControleContratosEuromidia.Agencia.like(like_contendo),
-                    FatoControleContratosEuromidia.Bureau.like(like_contendo),
-                    FatoControleContratosEuromidia.Intermediario.like(like_contendo),
-                    FatoControleContratosEuromidia.TipoDocumento.like(like_contendo),
-                    FatoControleContratosEuromidia.Origem.like(like_contendo),
-                    FatoControleContratosEuromidia.SDR.like(like_contendo),
-                    _filtro_exists_cidade_exibicao_like(like_contendo),
+            texto_busca_normalizado = unicodedata.normalize("NFKD", termo).encode("ascii", "ignore").decode("ascii").lower().strip()
+
+            ids_status_busca = [
+                id_status
+                for id_status, dados_status in mapa_status_config.items()
+                if texto_busca_normalizado
+                and texto_busca_normalizado in unicodedata.normalize("NFKD", (dados_status.get("Status") or "")).encode("ascii", "ignore").decode("ascii").lower()
+            ]
+
+            filtro_segmento_busca = (
+                db.session.query(DimEmpresas.IDEmpresa)
+                .join(
+                    DimCnaes,
+                    DimCnaes.cnaepadrao == DimEmpresas.CNAE,
                 )
+                .filter(
+                    DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa,
+                    DimCnaes.Classe.like(like_contendo),
+                )
+                .exists()
             )
+
+            filtros_busca = [
+                FatoControleContratosEuromidia.NumeroContrato.like(like_prefixo),
+                FatoControleContratosEuromidia.NumeroPrevia.like(like_prefixo),
+                FatoControleContratosEuromidia.CNPJ.like(like_prefixo),
+                FatoControleContratosEuromidia.CPF.like(like_prefixo),
+                FatoControleContratosEuromidia.RazaoSocial.like(like_contendo),
+                FatoControleContratosEuromidia.MarcaExibida.like(like_contendo),
+                FatoControleContratosEuromidia.Vendedor.like(like_contendo),
+                FatoControleContratosEuromidia.Agencia.like(like_contendo),
+                FatoControleContratosEuromidia.Bureau.like(like_contendo),
+                FatoControleContratosEuromidia.Intermediario.like(like_contendo),
+                FatoControleContratosEuromidia.TipoDocumento.like(like_contendo),
+                FatoControleContratosEuromidia.Origem.like(like_contendo),
+                FatoControleContratosEuromidia.SDR.like(like_contendo),
+                _filtro_exists_cidade_exibicao_like(like_contendo),
+                filtro_segmento_busca,
+            ]
+
+            if ids_status_busca:
+                filtros_busca.append(
+                    FatoControleContratosEuromidia.IDDimStatusContratos.in_(ids_status_busca)
+                )
+
+            if texto_busca_normalizado in {"ativo", "ativos", "ativa", "ativas"}:
+                filtros_busca.append(FatoControleContratosEuromidia.BitAtivo == 1)
+
+            if texto_busca_normalizado in {"inativo", "inativos", "inativa", "inativas"}:
+                filtros_busca.append(FatoControleContratosEuromidia.BitAtivo == 0)
+
+
+            consulta = consulta.filter(or_(*filtros_busca))
 
     linhas = (
         consulta
@@ -13073,18 +13206,77 @@ def contratos_busca_sugestoes():
         .all()
     )
 
+    ids_linhas = [int(linha.IDContrato) for linha in linhas if linha.IDContrato is not None]
+    mapa_preferencia_reserva: dict[int, int] = {}
+
+    if ids_linhas:
+        sql_preferencia_reserva = text("""
+            SELECT
+                ci.[IDFatoControleContratoEuromidia] AS IDFatoControleContratosEuromidia,
+                MAX(
+                    CASE
+                        WHEN TRY_CONVERT(int, ci.[BitPreferencia]) = 1 THEN 1
+                        ELSE 0
+                    END
+                ) AS BitPreferenciaReserva
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci
+            WHERE
+                ci.[IDFatoControleContratoEuromidia] IN :ids_linhas
+                AND ISNULL(ci.[BitAtivo], 1) = 1
+                AND TRY_CONVERT(int, ci.[BitPreferencia]) IN (0, 1)
+            GROUP BY
+                ci.[IDFatoControleContratoEuromidia]
+        """).bindparams(bindparam("ids_linhas", expanding=True))
+
+        rows_preferencia_reserva = db.session.execute(
+            sql_preferencia_reserva,
+            {"ids_linhas": ids_linhas},
+        ).mappings().all()
+
+        mapa_preferencia_reserva = {
+            int(row["IDFatoControleContratosEuromidia"]): int(row["BitPreferenciaReserva"] or 0)
+            for row in rows_preferencia_reserva
+            if row.get("IDFatoControleContratosEuromidia") is not None
+        }
+
     itens: list[dict] = []
 
     for linha in linhas:
         id_contrato = int(linha.IDContrato)
+        razao_social = (linha.RazaoSocial or "").strip()
+        marca_exibida = (linha.MarcaExibida or "").strip()
         nome_principal = (
-            (linha.RazaoSocial or "").strip()
-            or (linha.MarcaExibida or "").strip()
+            razao_social
+            or marca_exibida
             or (linha.NumeroContrato or "").strip()
             or f"Contrato {id_contrato}"
         )
 
         rotulo = f"#{id_contrato} • {nome_principal}"
+
+        try:
+            id_status_contrato = int(linha.IDDimStatusContratos or 0)
+        except Exception:
+            id_status_contrato = 0
+
+        dados_status = mapa_status_config.get(id_status_contrato, {})
+        status_nome = (dados_status.get("Status") or "—").strip() or "—"
+
+        try:
+            bit_ativo = int(linha.BitAtivo or 0)
+        except Exception:
+            bit_ativo = 0
+
+        if id_status_contrato in (8, 9, 10):
+            bit_preferencia_reserva = 0
+        else:
+            bit_preferencia_reserva = int(mapa_preferencia_reserva.get(id_contrato, 0) or 0)
+
+        cidade = (linha.CidadeExibicao or "").strip() or "—"
+        segmento = (linha.SegmentoContrato or "").strip() or "—"
+        segmento_cor = _normalizar_hex_css(getattr(linha, "SegmentoHex", None)) or "#64748B"
+        ativo_texto = "Ativo" if bit_ativo == 1 else "Inativo"
+        preferencia_texto = "Sim" if bit_preferencia_reserva == 1 else "Não"
 
         subtitulos: list[str] = []
         if linha.NumeroContrato:
@@ -13095,17 +13287,31 @@ def contratos_busca_sugestoes():
             subtitulos.append(f"CNPJ: {linha.CNPJ}")
         elif linha.CPF:
             subtitulos.append(f"CPF: {linha.CPF}")
-        if linha.CidadeExibicao:
-            subtitulos.append(f"Cidade: {linha.CidadeExibicao}")
-        if linha.StatusContrato:
-            subtitulos.append(f"Status: {linha.StatusContrato}")
+        subtitulos.append(f"Ativo: {ativo_texto}")
+        subtitulos.append(f"Status: {status_nome}")
+        subtitulos.append(f"Cidade: {cidade}")
+        subtitulos.append(f"Segmento: {segmento}")
+        subtitulos.append(f"Preferência reserva: {preferencia_texto}")
 
         itens.append(
             {
                 "id": id_contrato,
+                "id_contrato": id_contrato,
                 "rotulo": rotulo,
                 "valor_busca": str(id_contrato),
                 "subtitulo": " • ".join(subtitulos),
+                "ativo": ativo_texto,
+                "ativo_valor": bit_ativo,
+                "status": status_nome,
+                "status_cor": dados_status.get("CorHex") or "#E5E7EB",
+                "status_cor_texto": dados_status.get("CorTexto") or "#111827",
+                "cidade": cidade,
+                "razao_social": razao_social or "—",
+                "marca": marca_exibida or "—",
+                "segmento": segmento,
+                "segmento_cor": segmento_cor,
+                "preferencia_reserva": preferencia_texto,
+                "preferencia_reserva_valor": bit_preferencia_reserva,
             }
         )
 

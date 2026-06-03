@@ -53,7 +53,8 @@ Esta DAG controla a criação automática de reservas de preferência de renova�
 Ela possui duas funções principais:
 
 1. Criar automaticamente uma reserva de preferência de renovação quando uma ocupação contratual tiver duração comercial de 6 meses ou mais.
-2. Recalcular continuamente o campo `ReservaOrdemPrioridade` das reservas ativas, respeitando a ordem de criação dentro do mesmo `CodPonto`, `CodFace` e período cruzado.
+2. Marcar `FatoControleContratosItensEuromidia.BitPreferencia = 1` no item de contrato que gerou a reserva.
+3. Recalcular continuamente o campo `ReservaOrdemPrioridade` das reservas ativas, respeitando a ordem de criação dentro do mesmo `CodPonto`, `CodFace` e período cruzado.
 
 ---
 
@@ -142,6 +143,8 @@ Além disso, ela grava:
 - TipoVinculoOrigem
 
 Isso permite saber exatamente qual ocupação vigente originou a reserva de preferência.
+
+Quando a ocupação é elegível, a DAG também marca o item original em `FatoControleContratosItensEuromidia.BitPreferencia = 1`, para não depender de outro DAG rodar depois.
 
 ---
 
@@ -788,6 +791,106 @@ def pipeline_prioridade_reservas():
         );
         """
 
+        sql_marcar_bit_preferencia_itens_elegiveis = """
+        SET NOCOUNT ON;
+
+        ;WITH OcupacoesOrigem AS
+        (
+            SELECT
+                O.IDFatoOcupacaoPaineisEuromidia AS IDFatoOcupacaoOrigem,
+                COALESCE(O.IDFatoControleContratos, I.IDFatoControleContratoEuromidia) AS IDFatoControleContratos,
+                CAST(O.DataInicio AS DATE) AS DataInicio,
+                CAST(O.DataFim AS DATE) AS DataFim,
+                COALESCE(
+                    O.IDFatoControleContratosItemOrigem,
+                    I.IDFatoControleContratosItensEuromidia
+                ) AS IDFatoControleContratosItemOrigem,
+                DATEDIFF(
+                    MONTH,
+                    CAST(O.DataInicio AS DATE),
+                    DATEADD(DAY, 1, CAST(O.DataFim AS DATE))
+                ) AS QuantidadeMesesContrato
+            FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS O WITH (NOLOCK)
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    I2.IDFatoControleContratosItensEuromidia,
+                    I2.IDFatoControleContratoEuromidia
+                FROM Integracao.Silver.FatoControleContratosItensEuromidia AS I2 WITH (NOLOCK)
+                WHERE
+                    I2.CodPonto = O.CodPonto
+                    AND I2.CodFace = O.CodFace
+                    AND (:id_contrato IS NULL OR I2.IDFatoControleContratoEuromidia = :id_contrato)
+                    AND (
+                        O.IDFatoControleContratos IS NULL
+                        OR I2.IDFatoControleContratoEuromidia = O.IDFatoControleContratos
+                    )
+                    AND CAST(I2.DataInicioPrevisto AS DATE) = CAST(O.DataInicio AS DATE)
+                    AND CAST(COALESCE(I2.DataCancelamento, I2.DataTerminoPrevisto) AS DATE) = CAST(O.DataFim AS DATE)
+                ORDER BY
+                    I2.IDFatoControleContratosItensEuromidia DESC
+            ) AS I
+            WHERE
+                (:id_contrato IS NULL OR COALESCE(O.IDFatoControleContratos, I.IDFatoControleContratoEuromidia) = :id_contrato)
+                AND COALESCE(O.IDFatoControleContratos, I.IDFatoControleContratoEuromidia) IS NOT NULL
+                AND COALESCE(O.IDFatoControleContratosItemOrigem, I.IDFatoControleContratosItensEuromidia) IS NOT NULL
+                AND O.CodPonto IS NOT NULL
+                AND O.CodFace IS NOT NULL
+                AND O.DataInicio IS NOT NULL
+                AND O.DataFim IS NOT NULL
+                AND O.CanceladoEm IS NULL
+                AND UPPER(LTRIM(RTRIM(ISNULL(O.Status, '')))) <> UPPER(LTRIM(RTRIM(:status_cancelado)))
+                AND UPPER(LTRIM(RTRIM(ISNULL(O.Origem, '')))) <> UPPER(LTRIM(RTRIM(:origem_reserva)))
+                AND CAST(O.DataFim AS DATE) >= DATEADD(
+                    DAY,
+                    -1,
+                    DATEADD(MONTH, :meses_minimos, CAST(O.DataInicio AS DATE))
+                )
+        ),
+        ItensElegiveis AS
+        (
+            SELECT DISTINCT
+                O.IDFatoControleContratosItemOrigem
+            FROM OcupacoesOrigem AS O
+            WHERE
+                O.QuantidadeMesesContrato >= :meses_minimos
+        )
+        UPDATE item
+           SET item.BitPreferencia = 1,
+               item.DataAtualizacao = SYSDATETIME()
+        FROM Integracao.Silver.FatoControleContratosItensEuromidia AS item
+        INNER JOIN ItensElegiveis AS elegivel
+            ON elegivel.IDFatoControleContratosItemOrigem = item.IDFatoControleContratosItensEuromidia
+        WHERE
+            ISNULL(item.BitAtivo, 1) = 1
+            AND ISNULL(item.BitPreferencia, 0) <> 1;
+        """
+
+        sql_contar_itens_bit_preferencia_1 = """
+        SET NOCOUNT ON;
+
+        ;WITH ItensComReservaPreferencia AS
+        (
+            SELECT DISTINCT
+                R.IDFatoControleContratosItemOrigem
+            FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS R WITH (NOLOCK)
+            WHERE
+                R.IDFatoControleContratosItemOrigem IS NOT NULL
+                AND R.Origem = :origem_reserva
+                AND R.Status = :status_reservado
+                AND R.TipoVinculoOrigem = :tipo_vinculo
+                AND R.CanceladoEm IS NULL
+                AND (:id_contrato IS NULL OR R.IDFatoControleContratos = :id_contrato)
+        )
+        SELECT
+            COUNT(1) AS itens_preferencia_marcados
+        FROM Integracao.Silver.FatoControleContratosItensEuromidia AS item WITH (NOLOCK)
+        INNER JOIN ItensComReservaPreferencia AS reserva
+            ON reserva.IDFatoControleContratosItemOrigem = item.IDFatoControleContratosItensEuromidia
+        WHERE
+            ISNULL(item.BitPreferencia, 0) = 1;
+        """
+
         sql_contar_criadas_execucao = """
         SET NOCOUNT ON;
 
@@ -823,16 +926,30 @@ def pipeline_prioridade_reservas():
             )
 
         _executar_comando_parametrizado(hook, sql_insert, parametros)
+        _executar_comando_parametrizado(
+            hook,
+            sql_marcar_bit_preferencia_itens_elegiveis,
+            parametros,
+        )
 
         criadas_rows = hook.executar_select(sql_contar_criadas_execucao, parametros) or []
         reservas_criadas = int((criadas_rows[0] or {}).get("reservas_criadas") or 0) if criadas_rows else 0
 
+        itens_rows = hook.executar_select(sql_contar_itens_bit_preferencia_1, parametros) or []
+        itens_preferencia_marcados = (
+            int((itens_rows[0] or {}).get("itens_preferencia_marcados") or 0)
+            if itens_rows
+            else 0
+        )
+
         logging.info(
             "Criação de reserva de preferência finalizada. "
-            "escopo=%s | id_contrato=%s | reservas_criadas=%s | diagnostico_antes=%s | tipo_vinculo=%s",
+            "escopo=%s | id_contrato=%s | reservas_criadas=%s | "
+            "itens_preferencia_marcados=%s | diagnostico_antes=%s | tipo_vinculo=%s",
             escopo,
             id_contrato,
             reservas_criadas,
+            itens_preferencia_marcados,
             diagnostico_antes,
             TIPO_VINCULO_PREFERENCIA_RENOVACAO,
         )
@@ -843,6 +960,7 @@ def pipeline_prioridade_reservas():
             "id_contrato": id_contrato,
             "tipo_vinculo": TIPO_VINCULO_PREFERENCIA_RENOVACAO,
             "reservas_criadas": reservas_criadas,
+            "itens_preferencia_marcados": itens_preferencia_marcados,
             "diagnostico_antes": diagnostico_antes,
         }
 
