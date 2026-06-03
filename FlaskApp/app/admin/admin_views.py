@@ -16,6 +16,7 @@ import re
 import os
 import shutil
 import uuid
+import time
 
 try:
     import requests
@@ -8274,7 +8275,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                     UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
                        SET IDFatoControleContratosEuromidia = :id_contrato_controle,
                            IDFatoControleContratosItensEuromidia = :id_item_controle,
-                           BitSolicitacaoAtiva = 0,
+                           BitSolicitacaoAtiva = 1,
                            DataAtualizacao = GETDATE()
                      WHERE IDFatoSolicitacaoContratoItemEuromidia = :id_item_solicitacao
                 """),
@@ -8297,8 +8298,8 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                IDDimUsuariosAprovacao = :id_usuario_logado,
                IDDimStatusContratos = 2,
                DataAprovacao = GETDATE(),
-               StatusSolicitacao = 'APROVADO',
-               BitAtivo = 0,
+               StatusSolicitacao = 'PENDENTE_D4SIGN',
+               BitAtivo = 1,
                DataAtualizacao = GETDATE()
          WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
     """), {
@@ -9674,6 +9675,7 @@ def _marcar_status_solicitacao_contrato_admin(
     coluna_usuario: str | None = None,
     coluna_data: str | None = None,
     atualizar_contrato_controle: bool = False,
+    bit_ativo: int | bool | None = None,
     commit: bool = False,
 ) -> int | None:
     """Atualizo o IDDimStatusContratos da solicitação para a tela exibir o status real."""
@@ -9716,6 +9718,10 @@ def _marcar_status_solicitacao_contrato_admin(
         sets.append("StatusSolicitacao = :status_solicitacao")
         params["status_solicitacao"] = status_solicitacao
 
+    if bit_ativo is not None:
+        sets.append("BitAtivo = :bit_ativo")
+        params["bit_ativo"] = 1 if bool(bit_ativo) else 0
+
     if coluna_usuario in colunas_usuario_permitidas:
         sets.append(f"{coluna_usuario} = :id_usuario_logado")
         params["id_usuario_logado"] = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
@@ -9752,6 +9758,213 @@ def _marcar_status_solicitacao_contrato_admin(
         db.session.commit()
 
     return int(id_status)
+
+
+
+def _obter_contrato_materializado_solicitacao_admin(id_solicitacao: int) -> dict:
+    """Localizo contrato já materializado para impedir duplicação por reprocessamento.
+
+    Regra de segurança:
+    - se a solicitação já possui IDFatoControleContratosEuromidia, a aprovação interna já ocorreu;
+    - se algum item da solicitação já possui IDFatoControleContratosItensEuromidia, também considero materializado;
+    - novo clique em Aprovar deve reenviar D4Sign, nunca recriar contrato/itens/ocupação.
+    """
+    id_solic = _int_ou_none(id_solicitacao)
+    if id_solic in (None, "", 0):
+        return {"materializado": False}
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                s.IDFatoSolicitacaoContratoEuromidia,
+                s.IDFatoControleContratosEuromidia AS IDContratoCabecalho,
+                s.IDFatoKanbanCard,
+                s.IDEmpresa,
+                s.IDEmpresaProprietaria,
+                s.StatusSolicitacao,
+                s.IDDimStatusContratos,
+                i.IDFatoControleContratosEuromidia AS IDContratoItem,
+                i.IDFatoControleContratosItensEuromidia AS IDContratoItemControle
+            FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] AS s WITH (UPDLOCK, HOLDLOCK)
+            LEFT JOIN [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] AS i WITH (UPDLOCK, HOLDLOCK)
+              ON i.IDFatoSolicitacaoContratoEuromidia = s.IDFatoSolicitacaoContratoEuromidia
+             AND (
+                    i.IDFatoControleContratosEuromidia IS NOT NULL
+                 OR i.IDFatoControleContratosItensEuromidia IS NOT NULL
+             )
+            WHERE s.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+              AND (
+                    s.IDFatoControleContratosEuromidia IS NOT NULL
+                 OR i.IDFatoControleContratosEuromidia IS NOT NULL
+                 OR i.IDFatoControleContratosItensEuromidia IS NOT NULL
+              )
+            ORDER BY
+                CASE WHEN s.IDFatoControleContratosEuromidia IS NOT NULL THEN 0 ELSE 1 END,
+                i.IDFatoSolicitacaoContratoItemEuromidia ASC;
+        """),
+        {"id_solicitacao": int(id_solic)},
+    ).mappings().first()
+
+    if not row:
+        return {"materializado": False}
+
+    id_contrato = _int_ou_none(row.get("IDContratoCabecalho")) or _int_ou_none(row.get("IDContratoItem"))
+    return {
+        "materializado": bool(id_contrato not in (None, "", 0) or _int_ou_none(row.get("IDContratoItemControle")) not in (None, "", 0)),
+        "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+        "id_card": _int_ou_none(row.get("IDFatoKanbanCard")),
+        "id_empresa": _int_ou_none(row.get("IDEmpresa")),
+        "id_empresa_proprietaria": _int_ou_none(row.get("IDEmpresaProprietaria")),
+        "status_solicitacao": _texto_ou_vazio(row.get("StatusSolicitacao")).upper().strip(),
+        "id_dim_status_contratos": _int_ou_none(row.get("IDDimStatusContratos")),
+        "id_item_controle": _int_ou_none(row.get("IDContratoItemControle")),
+    }
+
+
+def _adquirir_bloqueio_aprovacao_solicitacao_admin(id_solicitacao: int, timeout_ms: int = 60000) -> bool:
+    """Uso sp_getapplock para impedir dois workers aprovando a mesma solicitação ao mesmo tempo."""
+    id_solic = _int_ou_none(id_solicitacao)
+    if id_solic in (None, "", 0):
+        return False
+
+    row = db.session.execute(
+        text("""
+            DECLARE @resultado int;
+            EXEC @resultado = sys.sp_getapplock
+                @Resource = :recurso,
+                @LockMode = 'Exclusive',
+                @LockOwner = 'Session',
+                @LockTimeout = :timeout_ms;
+            SELECT @resultado AS ResultadoBloqueio;
+        """),
+        {
+            "recurso": f"APROVACAO_CONTRATO_SOLICITACAO_{int(id_solic)}",
+            "timeout_ms": int(timeout_ms),
+        },
+    ).mappings().first()
+
+    resultado = int((row or {}).get("ResultadoBloqueio") or -999)
+    return resultado >= 0
+
+
+def _liberar_bloqueio_aprovacao_solicitacao_admin(id_solicitacao: int) -> None:
+    """Libero o sp_getapplock da aprovação quando o worker termina."""
+    id_solic = _int_ou_none(id_solicitacao)
+    if id_solic in (None, "", 0):
+        return
+
+    try:
+        db.session.execute(
+            text("""
+                DECLARE @resultado int;
+                EXEC @resultado = sys.sp_releaseapplock
+                    @Resource = :recurso,
+                    @LockOwner = 'Session';
+                SELECT @resultado AS ResultadoLiberacao;
+            """),
+            {"recurso": f"APROVACAO_CONTRATO_SOLICITACAO_{int(id_solic)}"},
+        )
+    except Exception:
+        current_app.logger.exception(
+            "APROVACAO_CONTRATO | falha ao liberar applock | id_solicitacao=%s",
+            id_solic,
+        )
+
+
+def _finalizar_solicitacao_contrato_apos_d4sign_admin(
+    *,
+    id_solicitacao: int,
+    id_contrato_controle: int | None = None,
+    id_usuario_logado: int | None = None,
+    commit: bool = False,
+) -> None:
+    """Inativo a solicitação somente depois que o D4Sign foi criado/localizado com sucesso."""
+    id_solic = _int_ou_none(id_solicitacao)
+    if id_solic in (None, "", 0):
+        return
+
+    id_contrato = _int_ou_none(id_contrato_controle)
+
+    db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+               SET IDFatoControleContratosEuromidia = COALESCE(:id_contrato_controle, IDFatoControleContratosEuromidia),
+                   IDDimUsuariosAprovacao = COALESCE(:id_usuario_logado, IDDimUsuariosAprovacao),
+                   StatusSolicitacao = 'APROVADO',
+                   BitAtivo = 0,
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao;
+        """),
+        {
+            "id_solicitacao": int(id_solic),
+            "id_contrato_controle": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "id_usuario_logado": int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None,
+        },
+    )
+
+    db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
+               SET BitSolicitacaoAtiva = 0,
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao;
+        """),
+        {"id_solicitacao": int(id_solic)},
+    )
+
+    if commit:
+        db.session.commit()
+
+
+def _manter_solicitacao_ativa_erro_d4sign_admin(
+    *,
+    id_solicitacao: int,
+    id_contrato_controle: int | None = None,
+    id_usuario_logado: int | None = None,
+    commit: bool = False,
+) -> None:
+    """Mantém a solicitação visível para reenvio quando a falha foi só no D4Sign."""
+    id_solic = _int_ou_none(id_solicitacao)
+    if id_solic in (None, "", 0):
+        return
+
+    _marcar_status_solicitacao_contrato_admin(
+        id_solicitacao=int(id_solic),
+        nome_status="ERRO",
+        fallback_id_status=ID_STATUS_CONTRATO_ERRO,
+        status_solicitacao="ERRO_D4SIGN",
+        atualizar_contrato_controle=True,
+        bit_ativo=1,
+        commit=False,
+    )
+
+    id_contrato = _int_ou_none(id_contrato_controle)
+    if id_contrato not in (None, "", 0):
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+                   SET IDFatoControleContratosEuromidia = :id_contrato_controle,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao;
+            """),
+            {
+                "id_solicitacao": int(id_solic),
+                "id_contrato_controle": int(id_contrato),
+            },
+        )
+
+    db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
+               SET BitSolicitacaoAtiva = 1,
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao;
+        """),
+        {"id_solicitacao": int(id_solic)},
+    )
+
+    if commit:
+        db.session.commit()
 
 
 def _montar_diagrama_status_contrato(
@@ -11956,8 +12169,28 @@ def _d4sign_montar_parametros_autenticacao_admin(parametros_extras: dict | None 
     return parametros
 
 
+def _d4sign_quantidade_tentativas_admin() -> int:
+    """Quantidade de tentativas para falhas transitórias de conexão/API D4Sign."""
+    try:
+        return max(1, min(10, int(os.getenv("D4SIGN_TENTATIVAS_API", "5") or "5")))
+    except Exception:
+        return 5
+
+
+def _d4sign_deve_tentar_novamente_admin(status_code: int | None = None) -> bool:
+    """Retento somente falhas que costumam ser transitórias."""
+    if status_code is None:
+        return True
+    return int(status_code) in (408, 425, 429, 500, 502, 503, 504)
+
+
+def _d4sign_aguardar_antes_retry_admin(tentativa: int) -> None:
+    """Backoff pequeno para não martelar a API quando a falha é temporária."""
+    time.sleep(min(2 * int(tentativa), 10))
+
+
 def _d4sign_executar_get_admin(caminho: str, parametros_extras: dict | None = None) -> dict:
-    """_d4sign_executar_get_admin: eu faço GET na API da D4Sign e trato erro de forma explícita."""
+    """_d4sign_executar_get_admin: faço GET na API D4Sign com retry para falhas transitórias."""
 
     if requests is None:
         raise RuntimeError(
@@ -11966,33 +12199,69 @@ def _d4sign_executar_get_admin(caminho: str, parametros_extras: dict | None = No
         )
 
     url = f"{URL_BASE_D4SIGN_ADMIN}{caminho}"
+    tentativas = _d4sign_quantidade_tentativas_admin()
+    ultimo_erro = None
 
-    resposta = requests.get(
-        url,
-        params=_d4sign_montar_parametros_autenticacao_admin(parametros_extras),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        timeout=_d4sign_timeout_segundos_admin(),
-    )
+    for tentativa in range(1, tentativas + 1):
+        try:
+            resposta = requests.get(
+                url,
+                params=_d4sign_montar_parametros_autenticacao_admin(parametros_extras),
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                timeout=_d4sign_timeout_segundos_admin(),
+            )
 
-    try:
-        dados = resposta.json()
-    except Exception:
-        dados = {"resposta_texto": resposta.text}
+            try:
+                dados = resposta.json()
+            except Exception:
+                dados = {"resposta_texto": resposta.text}
 
-    if not resposta.ok:
-        raise RuntimeError(
-            f"Erro GET D4Sign. Caminho={caminho}. "
-            f"Status={resposta.status_code}. Resposta={dados}"
-        )
+            if resposta.ok:
+                return dados if isinstance(dados, dict) else {"resposta": dados}
 
-    return dados if isinstance(dados, dict) else {"resposta": dados}
+            ultimo_erro = RuntimeError(
+                f"Erro GET D4Sign. Caminho={caminho}. "
+                f"Status={resposta.status_code}. Resposta={dados}"
+            )
+
+            if tentativa < tentativas and _d4sign_deve_tentar_novamente_admin(resposta.status_code):
+                current_app.logger.warning(
+                    "D4SIGN | GET falhou e será retentado | caminho=%s | tentativa=%s/%s | status=%s | resposta=%s",
+                    caminho,
+                    tentativa,
+                    tentativas,
+                    resposta.status_code,
+                    dados,
+                )
+                _d4sign_aguardar_antes_retry_admin(tentativa)
+                continue
+
+            raise ultimo_erro
+
+        except Exception as exc:
+            ultimo_erro = exc
+            if tentativa < tentativas:
+                current_app.logger.warning(
+                    "D4SIGN | GET com erro de conexão/API; vou tentar novamente | caminho=%s | tentativa=%s/%s | erro=%s",
+                    caminho,
+                    tentativa,
+                    tentativas,
+                    exc,
+                )
+                _d4sign_aguardar_antes_retry_admin(tentativa)
+                continue
+            raise RuntimeError(
+                f"Erro GET D4Sign após {tentativas} tentativa(s). Caminho={caminho}. Erro={ultimo_erro}"
+            ) from ultimo_erro
+
+    raise RuntimeError(f"Erro GET D4Sign. Caminho={caminho}. Erro={ultimo_erro}")
 
 
 def _d4sign_executar_post_admin(caminho: str, payload: dict | None = None) -> dict:
-    """_d4sign_executar_post_admin: eu faço POST JSON na API da D4Sign e trato erro de forma explícita."""
+    """_d4sign_executar_post_admin: faço POST JSON na API D4Sign com retry para falhas transitórias."""
 
     if requests is None:
         raise RuntimeError(
@@ -12001,30 +12270,66 @@ def _d4sign_executar_post_admin(caminho: str, payload: dict | None = None) -> di
         )
 
     url = f"{URL_BASE_D4SIGN_ADMIN}{caminho}"
+    tentativas = _d4sign_quantidade_tentativas_admin()
+    ultimo_erro = None
 
-    resposta = requests.post(
-        url,
-        params=_d4sign_montar_parametros_autenticacao_admin(),
-        json=payload or {},
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-        timeout=_d4sign_timeout_segundos_admin(),
-    )
+    for tentativa in range(1, tentativas + 1):
+        try:
+            resposta = requests.post(
+                url,
+                params=_d4sign_montar_parametros_autenticacao_admin(),
+                json=payload or {},
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                timeout=_d4sign_timeout_segundos_admin(),
+            )
 
-    try:
-        dados = resposta.json()
-    except Exception:
-        dados = {"resposta_texto": resposta.text}
+            try:
+                dados = resposta.json()
+            except Exception:
+                dados = {"resposta_texto": resposta.text}
 
-    if not resposta.ok:
-        raise RuntimeError(
-            f"Erro POST D4Sign. Caminho={caminho}. "
-            f"Status={resposta.status_code}. Resposta={dados}"
-        )
+            if resposta.ok:
+                return dados if isinstance(dados, dict) else {"resposta": dados}
 
-    return dados if isinstance(dados, dict) else {"resposta": dados}
+            ultimo_erro = RuntimeError(
+                f"Erro POST D4Sign. Caminho={caminho}. "
+                f"Status={resposta.status_code}. Resposta={dados}"
+            )
+
+            if tentativa < tentativas and _d4sign_deve_tentar_novamente_admin(resposta.status_code):
+                current_app.logger.warning(
+                    "D4SIGN | POST falhou e será retentado | caminho=%s | tentativa=%s/%s | status=%s | resposta=%s",
+                    caminho,
+                    tentativa,
+                    tentativas,
+                    resposta.status_code,
+                    dados,
+                )
+                _d4sign_aguardar_antes_retry_admin(tentativa)
+                continue
+
+            raise ultimo_erro
+
+        except Exception as exc:
+            ultimo_erro = exc
+            if tentativa < tentativas:
+                current_app.logger.warning(
+                    "D4SIGN | POST com erro de conexão/API; vou tentar novamente | caminho=%s | tentativa=%s/%s | erro=%s",
+                    caminho,
+                    tentativa,
+                    tentativas,
+                    exc,
+                )
+                _d4sign_aguardar_antes_retry_admin(tentativa)
+                continue
+            raise RuntimeError(
+                f"Erro POST D4Sign após {tentativas} tentativa(s). Caminho={caminho}. Erro={ultimo_erro}"
+            ) from ultimo_erro
+
+    raise RuntimeError(f"Erro POST D4Sign. Caminho={caminho}. Erro={ultimo_erro}")
 
 
 def _d4sign_primeiro_objeto_admin(resposta) -> dict:
@@ -14100,6 +14405,14 @@ def _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
             tipo_solicitacao=tipo_solicitacao,
         )
 
+        if resultado_d4sign.get("ok"):
+            _finalizar_solicitacao_contrato_apos_d4sign_admin(
+                id_solicitacao=id_solicitacao_int,
+                id_contrato_controle=id_fato_controle,
+                id_usuario_logado=id_usuario_logado,
+                commit=False,
+            )
+
         db.session.commit()
 
         current_app.logger.info(
@@ -14116,6 +14429,21 @@ def _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
 
     except Exception as exc:
         db.session.rollback()
+        try:
+            _manter_solicitacao_ativa_erro_d4sign_admin(
+                id_solicitacao=id_solicitacao_int,
+                id_contrato_controle=id_fato_controle,
+                id_usuario_logado=id_usuario_logado,
+                commit=True,
+            )
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception(
+                "D4SIGN | falha ao manter solicitação ativa após erro D4Sign | id_solicitacao=%s | id_contrato=%s",
+                id_solicitacao_int,
+                id_fato_controle,
+            )
+
         current_app.logger.exception(
             "D4SIGN | falha ao criar contrato D4Sign para solicitação já aprovada | "
             "id_solicitacao=%s | id_contrato=%s | id_card=%s",
@@ -14149,29 +14477,52 @@ def _processar_aprovacao_contrato_admin(
     - esta função foi separada para ser chamada pelo Celery.
     """
 
+    bloqueio_aprovacao_obtido = False
+
     try:
 
         id_solicitacao_int = int(id_solicitacao)
         id_usuario_int = int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None
+
+        bloqueio_aprovacao_obtido = _adquirir_bloqueio_aprovacao_solicitacao_admin(
+            id_solicitacao=id_solicitacao_int,
+            timeout_ms=60000,
+        )
+        if not bloqueio_aprovacao_obtido:
+            return {
+                "ok": False,
+                "status": "ja_em_processamento",
+                "id_solicitacao": id_solicitacao_int,
+                "mensagem": "Já existe outro processamento desta solicitação em andamento.",
+            }
 
         cab_inicial = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int)
         if not cab_inicial:
             raise ValueError("Não encontrei a solicitação para aprovação.")
 
         status_atual = _texto_ou_vazio(cab_inicial.get("StatusSolicitacao")).upper().strip()
-        if status_atual == "APROVADO":
+        contrato_materializado = _obter_contrato_materializado_solicitacao_admin(id_solicitacao_int)
+
+        if contrato_materializado.get("materializado"):
+            cab_d4sign = dict(cab_inicial)
+            if contrato_materializado.get("id_contrato") not in (None, "", 0):
+                cab_d4sign["IDFatoControleContratosEuromidia"] = int(contrato_materializado["id_contrato"])
+            if contrato_materializado.get("id_card") not in (None, "", 0):
+                cab_d4sign["IDFatoKanbanCard"] = int(contrato_materializado["id_card"])
+
             resultado_d4sign = _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
                 id_solicitacao=id_solicitacao_int,
                 id_usuario_logado=id_usuario_int,
-                cabecalho_solicitacao=cab_inicial,
+                cabecalho_solicitacao=cab_d4sign,
             )
 
             return {
-                "ok": True,
-                "status": "ja_aprovado",
+                "ok": bool(resultado_d4sign.get("ok")),
+                "status": "contrato_ja_materializado_reenvio_d4sign",
                 "id_solicitacao": id_solicitacao_int,
-                "id_contrato": _int_ou_none(cab_inicial.get("IDFatoControleContratosEuromidia")),
-                "id_card": _int_ou_none(cab_inicial.get("IDFatoKanbanCard")),
+                "id_contrato": contrato_materializado.get("id_contrato"),
+                "id_card": contrato_materializado.get("id_card"),
+                "status_solicitacao_anterior": status_atual,
                 "resultado_d4sign": resultado_d4sign,
             }
 
@@ -14311,6 +14662,14 @@ def _processar_aprovacao_contrato_admin(
                 tipo_solicitacao=tipo_solicitacao,
             )
 
+            if resultado_d4sign.get("ok"):
+                _finalizar_solicitacao_contrato_apos_d4sign_admin(
+                    id_solicitacao=id_solicitacao_int,
+                    id_contrato_controle=id_fato_controle,
+                    id_usuario_logado=id_usuario_int,
+                    commit=False,
+                )
+
             db.session.commit()
 
             current_app.logger.info(
@@ -14331,18 +14690,16 @@ def _processar_aprovacao_contrato_admin(
             }
 
             try:
-                _marcar_status_solicitacao_contrato_admin(
+                _manter_solicitacao_ativa_erro_d4sign_admin(
                     id_solicitacao=id_solicitacao_int,
-                    nome_status="ERRO",
-                    fallback_id_status=ID_STATUS_CONTRATO_ERRO,
-                    status_solicitacao="ERRO_D4SIGN",
-                    atualizar_contrato_controle=True,
+                    id_contrato_controle=id_fato_controle,
+                    id_usuario_logado=id_usuario_int,
                     commit=True,
                 )
             except Exception:
                 db.session.rollback()
                 current_app.logger.exception(
-                    "D4SIGN | falha ao marcar status ERRO após falha D4Sign | id_contrato=%s | id_solicitacao=%s",
+                    "D4SIGN | falha ao manter solicitação ativa após falha D4Sign | id_contrato=%s | id_solicitacao=%s",
                     id_fato_controle,
                     id_solicitacao_int,
                 )
@@ -14501,6 +14858,10 @@ def _processar_aprovacao_contrato_admin(
             id_solicitacao_erro,
         )
         raise
+
+    finally:
+        if bloqueio_aprovacao_obtido:
+            _liberar_bloqueio_aprovacao_solicitacao_admin(id_solicitacao)
 
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>/anexos", methods=["GET"])
 @login_required
@@ -14692,6 +15053,55 @@ def remover_anexo_contrato(id_anexo: int):
     return jsonify({"ok": True, "mensagem": "Anexo removido."})
 
 
+
+
+def _enfileirar_processamento_aprovacao_contrato_admin(
+    *,
+    id_solicitacao: int,
+    id_usuario_logado: int | None = None,
+    form_data: dict | None = None,
+    origem: str = "aprovacao_contrato",
+) -> dict:
+    """Enfileira aprovação/reenvio D4Sign no Celery sem travar a tela Flask."""
+    try:
+        from app.tasks.airflow_admin_tasks import tarefa_processar_aprovacao_contrato
+
+        tarefa = tarefa_processar_aprovacao_contrato.apply_async(
+            kwargs={
+                "id_solicitacao": int(id_solicitacao),
+                "id_usuario_logado": int(id_usuario_logado) if id_usuario_logado not in (None, "", 0) else None,
+                "form_data": form_data or {},
+            },
+            queue=os.getenv("CELERY_QUEUE_AIRFLOW_ADMIN", "airflow_admin"),
+        )
+
+        current_app.logger.info(
+            "APROVACAO_CONTRATO | processamento enfileirado | origem=%s | task_id=%s | id_solicitacao=%s",
+            origem,
+            getattr(tarefa, "id", None),
+            id_solicitacao,
+        )
+
+        return {
+            "ok": True,
+            "task_id": getattr(tarefa, "id", None),
+            "id_solicitacao": int(id_solicitacao),
+            "origem": origem,
+        }
+
+    except Exception as exc:
+        current_app.logger.exception(
+            "APROVACAO_CONTRATO | falha ao enfileirar processamento | origem=%s | id_solicitacao=%s",
+            origem,
+            id_solicitacao,
+        )
+        return {
+            "ok": False,
+            "erro": str(exc),
+            "id_solicitacao": int(id_solicitacao),
+            "origem": origem,
+        }
+
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
 @login_required
 @requer_permissao("ADMIN_TUDO")
@@ -14769,27 +15179,40 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
 
             if acao == "aprovar":
                 status_atual = _texto_ou_vazio(cab_atualizada.get("StatusSolicitacao")).upper().strip()
-                if status_atual == "APROVADO":
-                    db.session.rollback()
-
-                    resultado_d4sign = _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
-                        id_solicitacao=int(id_solicitacao),
-                        id_usuario_logado=id_usuario_logado,
-                        cabecalho_solicitacao=cab_atualizada,
-                    )
-
-                    if resultado_d4sign.get("ok"):
-                        status_d4 = resultado_d4sign.get("status") or "processado"
-                        flash(f"Essa solicitação já estava aprovada. D4Sign {status_d4} com sucesso.", "success")
-                    else:
-                        erro_d4 = resultado_d4sign.get("erro") or resultado_d4sign.get("mensagem") or "erro não informado"
-                        flash(f"Essa solicitação já está aprovada, mas não consegui criar o D4Sign: {erro_d4}", "warning")
-
-                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
                 if status_atual == "PROCESSANDO_APROVACAO":
                     db.session.rollback()
-                    flash("Essa solicitação já está em processamento. Aguarde o worker concluir a aprovação.", "info")
+                    flash("Essa solicitação já está sendo processada. Aguarde um instante e atualize a tela.", "info")
+                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+
+                contrato_materializado = _obter_contrato_materializado_solicitacao_admin(int(id_solicitacao))
+                status_reenvia_d4sign = {
+                    "APROVADO",
+                    "ERRO_D4SIGN",
+                    "PENDENTE_D4SIGN",
+                    "APROVADO_PENDENTE_D4SIGN",
+                }
+
+                if status_atual in status_reenvia_d4sign or contrato_materializado.get("materializado"):
+                    form_data_reenvio_d4sign = {
+                        chave: request.form.getlist(chave)
+                        for chave in request.form.keys()
+                    }
+
+                    db.session.rollback()
+
+                    resultado_fila = _enfileirar_processamento_aprovacao_contrato_admin(
+                        id_solicitacao=int(id_solicitacao),
+                        id_usuario_logado=id_usuario_logado,
+                        form_data=form_data_reenvio_d4sign,
+                        origem="reenvio_d4sign_contrato_materializado",
+                    )
+
+                    if resultado_fila.get("ok"):
+                        flash("Erro ao enviar o contrato para o D4, aguarde um instante e clique novamente em Aprovar para tentar enviar novamente.", "success")
+                    else:
+                        flash("Erro ao enviar o contrato para o D4, aguarde um instante e clique novamente em Aprovar para tentar enviar novamente.", "success")
+
                     return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
                 status_anterior = cab_atualizada.get("StatusSolicitacao") or "PENDENTE_APROVACAO"
@@ -14804,16 +15227,59 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                     form=request.form,
                 )
 
-                db.session.execute(
+                resultado_processando = db.session.execute(
                     text("""
-                        UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
+                        UPDATE s
                            SET StatusSolicitacao = 'PROCESSANDO_APROVACAO',
                                IDDimStatusContratos = 2,
                                DataAtualizacao = GETDATE()
-                         WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                          FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] AS s WITH (UPDLOCK, HOLDLOCK)
+                         WHERE s.IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                           AND UPPER(LTRIM(RTRIM(COALESCE(s.StatusSolicitacao, '')))) <> 'PROCESSANDO_APROVACAO'
+                           AND s.IDFatoControleContratosEuromidia IS NULL
+                           AND NOT EXISTS (
+                                SELECT 1
+                                FROM [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia] AS i WITH (UPDLOCK, HOLDLOCK)
+                                WHERE i.IDFatoSolicitacaoContratoEuromidia = s.IDFatoSolicitacaoContratoEuromidia
+                                  AND (
+                                        i.IDFatoControleContratosEuromidia IS NOT NULL
+                                     OR i.IDFatoControleContratosItensEuromidia IS NOT NULL
+                                  )
+                           );
                     """),
                     {"id_solicitacao": int(id_solicitacao)},
                 )
+
+                if int(resultado_processando.rowcount or 0) <= 0:
+                    db.session.rollback()
+                    cab_rechecagem = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao)) or {}
+                    status_rechecagem = _texto_ou_vazio(cab_rechecagem.get("StatusSolicitacao")).upper().strip()
+                    contrato_rechecagem = _obter_contrato_materializado_solicitacao_admin(int(id_solicitacao))
+
+                    if contrato_rechecagem.get("materializado"):
+                        form_data_reenvio_d4sign = {
+                            chave: request.form.getlist(chave)
+                            for chave in request.form.keys()
+                        }
+
+                        resultado_fila = _enfileirar_processamento_aprovacao_contrato_admin(
+                            id_solicitacao=int(id_solicitacao),
+                            id_usuario_logado=id_usuario_logado,
+                            form_data=form_data_reenvio_d4sign,
+                            origem="reenvio_d4sign_rechecagem_contrato_materializado",
+                        )
+
+                        if resultado_fila.get("ok"):
+                            flash("Erro ao enviar o contrato para o D4, aguarde um instante e clique novamente em Aprovar para tentar enviar novamente.", "success")
+                        else:
+                            flash("Erro ao enviar o contrato para o D4, aguarde um instante e clique novamente em Aprovar para tentar enviar novamente.", "success")
+                        return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
+
+                    if status_rechecagem == "PROCESSANDO_APROVACAO":
+                        flash("Essa solicitação já está sendo processada. Aguarde um instante e atualize a tela.", "info")
+                    else:
+                        flash("Não enviei nova aprovação porque a solicitação mudou de estado. Atualize a tela e confira o status.", "warning")
+                    return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
                 _registrar_historico_contrato_euromidia(
                     id_fato_controle_contratos=id_fato_controle,
@@ -14864,7 +15330,7 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
                         status_solicitacao="ERRO_APROVACAO",
                         commit=True,
                     )
-                    flash(f"Erro ao enviar aprovação para o Celery: {exc}", "danger")
+                    flash("Erro ao iniciar a aprovação. Aguarde um instante e clique novamente em Aprovar.", "warning")
                     return redirect(url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solicitacao))
 
             if acao == "reprovar":

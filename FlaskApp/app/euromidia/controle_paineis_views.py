@@ -391,6 +391,24 @@ def _resolver_return_to_contratos():
 
 
 
+def _cache_get_seguro_paineis(chave, padrao=None):
+    """Eu leio cache sem deixar falha de backend derrubar a tela."""
+    try:
+        valor = cache.get(chave)
+        return padrao if valor is None else valor
+    except Exception:
+        return padrao
+
+
+def _cache_set_seguro_paineis(chave, valor, timeout_segundos: int = 300):
+    """Eu salvo cache de forma tolerante; se o cache falhar, a tela continua normal."""
+    try:
+        cache.set(chave, valor, timeout=int(timeout_segundos or 300))
+    except Exception:
+        pass
+
+
+
 
 
 
@@ -12536,87 +12554,137 @@ def contratos_lista():
 
     mapa_status_config = _obter_mapa_status_contratos_com_cores(3)
 
-    rows_status_usados = db.session.execute(
-        text("""
-            SELECT DISTINCT
-                [IDDimStatusContratos]
-            FROM [Integracao].[Silver].[FatoControleContratosEuromidia]
-            WHERE [IDDimStatusContratos] IS NOT NULL
-        """),
-    ).mappings().all()
+    """
+    Eu coloco as opções dos filtros em cache porque elas são iguais para todos
+    os acessos da lista e não precisam ser recalculadas em toda abertura da tela.
 
-    ids_status_usados = {
-        int(row.get("IDDimStatusContratos") or 0)
-        for row in rows_status_usados
-        if row.get("IDDimStatusContratos") is not None
-    }
+    O ponto mais pesado aqui era a opção de segmento, porque ela encosta na
+    DimEmpresas, que tem milhões de linhas. Com cache, essa consulta deixa de
+    rodar a cada GET de /paineis/contratos.
+    """
+    cache_timeout_filtros_contratos = 1800
+
+    status_opcoes_cache = _cache_get_seguro_paineis(
+        "paineis:contratos_lista:status_opcoes:v3"
+    )
+
+    if status_opcoes_cache is None:
+        rows_status_usados = db.session.execute(
+            text("""
+                SELECT DISTINCT
+                    [IDDimStatusContratos]
+                FROM [Integracao].[Silver].[FatoControleContratosEuromidia] WITH (NOLOCK)
+                WHERE [IDDimStatusContratos] IS NOT NULL
+            """),
+        ).mappings().all()
+
+        ids_status_usados = {
+            int(row.get("IDDimStatusContratos") or 0)
+            for row in rows_status_usados
+            if row.get("IDDimStatusContratos") is not None
+        }
+
+        status_opcoes_cache = [
+            dict(dados_status)
+            for id_status, dados_status in mapa_status_config.items()
+            if id_status in ids_status_usados
+        ]
+
+        status_opcoes_cache.sort(key=lambda item: (item.get("Status") or "").lower())
+        _cache_set_seguro_paineis(
+            "paineis:contratos_lista:status_opcoes:v3",
+            status_opcoes_cache,
+            cache_timeout_filtros_contratos,
+        )
 
     status_opcoes = [
         SimpleNamespace(**dados_status)
-        for id_status, dados_status in mapa_status_config.items()
-        if id_status in ids_status_usados
+        for dados_status in (status_opcoes_cache or [])
     ]
 
-    status_opcoes.sort(key=lambda item: (item.Status or "").lower())
-
-    cidade_opcoes = (
-        db.session.query(
-            FatoControleContratosItensEuromidia.CidadeExibicao.label("CidadeExibicao")
-        )
-        .filter(
-            FatoControleContratosItensEuromidia.CidadeExibicao.isnot(None),
-            FatoControleContratosItensEuromidia.CidadeExibicao != "",
-        )
-        .group_by(
-            FatoControleContratosItensEuromidia.CidadeExibicao
-        )
-        .order_by(
-            func.lower(
-                func.coalesce(
-                    FatoControleContratosItensEuromidia.CidadeExibicao,
-                    "",
-                )
-            )
-        )
-        .all()
+    cidade_opcoes_cache = _cache_get_seguro_paineis(
+        "paineis:contratos_lista:cidade_opcoes:v3"
     )
 
-    segmento_opcoes = (
-        db.session.query(
-            DimCnaes.Classe.label("Classe"),
-            func.max(DimCnaes.Hex).label("Hex"),
+    if cidade_opcoes_cache is None:
+        rows_cidades = db.session.execute(
+            text("""
+                SELECT
+                    CidadeExibicao = LTRIM(RTRIM([CidadeExibicao]))
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] WITH (NOLOCK)
+                WHERE NULLIF(LTRIM(RTRIM([CidadeExibicao])), '') IS NOT NULL
+                GROUP BY LTRIM(RTRIM([CidadeExibicao]))
+                ORDER BY LOWER(LTRIM(RTRIM([CidadeExibicao])))
+            """),
+        ).mappings().all()
+
+        cidade_opcoes_cache = [
+            {"CidadeExibicao": (row.get("CidadeExibicao") or "").strip()}
+            for row in rows_cidades
+            if (row.get("CidadeExibicao") or "").strip()
+        ]
+
+        _cache_set_seguro_paineis(
+            "paineis:contratos_lista:cidade_opcoes:v3",
+            cidade_opcoes_cache,
+            cache_timeout_filtros_contratos,
         )
-        .select_from(FatoControleContratosEuromidia)
-        .join(
-            DimEmpresas,
-            DimEmpresas.IDEmpresa == FatoControleContratosEuromidia.IDEmpresa,
-        )
-        .join(
-            DimCnaes,
-            DimCnaes.cnaepadrao == DimEmpresas.CNAE,
-        )
-        .filter(
-            DimCnaes.Classe.isnot(None),
-            DimCnaes.Classe != "",
-        )
-        .group_by(
-            DimCnaes.Classe
-        )
-        .order_by(
-            func.lower(
-                func.coalesce(DimCnaes.Classe, "")
-            )
-        )
-        .all()
+
+    cidade_opcoes = [
+        SimpleNamespace(**linha)
+        for linha in (cidade_opcoes_cache or [])
+    ]
+
+    segmento_opcoes_cache = _cache_get_seguro_paineis(
+        "paineis:contratos_lista:segmento_opcoes:v4"
     )
+
+    if segmento_opcoes_cache is None:
+        rows_segmentos = db.session.execute(
+            text("""
+                SELECT
+                    cn.[Classe] AS Classe,
+                    MAX(cn.[Hex]) AS Hex
+                FROM (
+                    SELECT DISTINCT
+                        ctr.[IDEmpresa]
+                    FROM [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr WITH (NOLOCK)
+                    WHERE ctr.[IDEmpresa] IS NOT NULL
+                ) AS empresas_contratos
+                INNER JOIN [Integracao].[Silver].[DimEmpresas] AS emp WITH (NOLOCK)
+                    ON emp.[IDEmpresa] = empresas_contratos.[IDEmpresa]
+                INNER JOIN [Integracao].[Silver].[DimCnaes] AS cn WITH (NOLOCK)
+                    ON cn.[cnaepadrao] = emp.[CNAE]
+                WHERE NULLIF(LTRIM(RTRIM(cn.[Classe])), '') IS NOT NULL
+                GROUP BY
+                    cn.[Classe]
+                ORDER BY
+                    LOWER(cn.[Classe])
+            """),
+        ).mappings().all()
+
+        segmento_opcoes_cache = [
+            {
+                "Classe": (row.get("Classe") or "").strip(),
+                "Hex": _normalizar_hex_css(row.get("Hex")),
+            }
+            for row in rows_segmentos
+            if (row.get("Classe") or "").strip()
+        ]
+
+        _cache_set_seguro_paineis(
+            "paineis:contratos_lista:segmento_opcoes:v4",
+            segmento_opcoes_cache,
+            cache_timeout_filtros_contratos,
+        )
 
     segmento_opcoes = [
         SimpleNamespace(
-            Classe=(linha.Classe or "").strip(),
-            Hex=_normalizar_hex_css(getattr(linha, "Hex", None)),
+            Classe=(linha.get("Classe") or "").strip(),
+            Hex=_normalizar_hex_css(linha.get("Hex")),
         )
-        for linha in segmento_opcoes
-        if (linha.Classe or "").strip()
+        for linha in (segmento_opcoes_cache or [])
+        if (linha.get("Classe") or "").strip()
     ]
 
     mapa_status = {
@@ -12906,44 +12974,35 @@ def contratos_lista():
             .subquery()
         )
 
-        subquery_segmentos = (
-            db.session.query(
-                DimEmpresas.IDEmpresa.label("id_empresa"),
-                func.min(DimCnaes.Classe).label("SegmentoContrato"),
-                func.max(DimCnaes.Hex).label("SegmentoHex"),
-            )
-            .outerjoin(
-                DimCnaes,
-                DimCnaes.cnaepadrao == DimEmpresas.CNAE,
-            )
-            .group_by(
-                DimEmpresas.IDEmpresa
-            )
-            .subquery()
-        )
+        """
+        Correção de performance:
+        Antes a lista montava uma subquery de segmento agrupando a DimEmpresas
+        inteira, mesmo quando a página exibia só 25 contratos. Como a DimEmpresas
+        tem milhões de linhas, isso deixava /paineis/contratos lento.
 
+        Agora a rota faz em duas etapas:
+        1) busca somente os contratos da página;
+        2) pega os segmentos apenas dos IDEmpresa presentes nessa página.
+
+        Assim todas as informações continuam sendo exibidas, mas o backend para
+        de fazer uma agregação desnecessária em milhões de empresas por request.
+        """
         linhas_contratos = (
             db.session.query(
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.label("IDContrato"),
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.label("IDFatoControleContratosEuromidia"),
+                FatoControleContratosEuromidia.IDEmpresa.label("IDEmpresa"),
                 FatoControleContratosEuromidia.DataLancamento.label("DataLancamento"),
                 FatoControleContratosEuromidia.RazaoSocial.label("RazaoSocial"),
                 FatoControleContratosEuromidia.MarcaExibida.label("MarcaExibida"),
                 FatoControleContratosEuromidia.IDDimStatusContratos.label("IDDimStatusContratos"),
                 FatoControleContratosEuromidia.BitAtivo.label("BitAtivo"),
                 subquery_cidades.c.CidadeExibicao.label("CidadeExibicao"),
-                subquery_segmentos.c.SegmentoContrato.label("SegmentoContrato"),
-                subquery_segmentos.c.SegmentoHex.label("SegmentoHex"),
             )
             .outerjoin(
                 subquery_cidades,
                 subquery_cidades.c.id_contrato
                 == FatoControleContratosEuromidia.IDFatoControleContratosEuromidia,
-            )
-            .outerjoin(
-                subquery_segmentos,
-                subquery_segmentos.c.id_empresa
-                == FatoControleContratosEuromidia.IDEmpresa,
             )
             .filter(
                 FatoControleContratosEuromidia.IDFatoControleContratosEuromidia.in_(
@@ -12952,6 +13011,46 @@ def contratos_lista():
             )
             .all()
         )
+
+        ids_empresas_pagina = sorted(
+            {
+                int(getattr(linha, "IDEmpresa", 0) or 0)
+                for linha in linhas_contratos
+                if getattr(linha, "IDEmpresa", None) is not None
+                and int(getattr(linha, "IDEmpresa", 0) or 0) > 0
+            }
+        )
+
+        mapa_segmentos_pagina: dict[int, dict] = {}
+
+        if ids_empresas_pagina:
+            sql_segmentos_pagina = text("""
+                SELECT
+                    emp.[IDEmpresa] AS IDEmpresa,
+                    MIN(cn.[Classe]) AS SegmentoContrato,
+                    MAX(cn.[Hex]) AS SegmentoHex
+                FROM [Integracao].[Silver].[DimEmpresas] AS emp WITH (NOLOCK)
+                LEFT JOIN [Integracao].[Silver].[DimCnaes] AS cn WITH (NOLOCK)
+                    ON cn.[cnaepadrao] = emp.[CNAE]
+                WHERE
+                    emp.[IDEmpresa] IN :ids_empresas_pagina
+                GROUP BY
+                    emp.[IDEmpresa]
+            """).bindparams(bindparam("ids_empresas_pagina", expanding=True))
+
+            rows_segmentos_pagina = db.session.execute(
+                sql_segmentos_pagina,
+                {"ids_empresas_pagina": ids_empresas_pagina},
+            ).mappings().all()
+
+            mapa_segmentos_pagina = {
+                int(row.get("IDEmpresa") or 0): {
+                    "SegmentoContrato": (row.get("SegmentoContrato") or "").strip(),
+                    "SegmentoHex": _normalizar_hex_css(row.get("SegmentoHex")),
+                }
+                for row in rows_segmentos_pagina
+                if int(row.get("IDEmpresa") or 0) > 0
+            }
 
         mapa_preferencia_reserva: dict[int, int] = {}
 
@@ -12992,7 +13091,15 @@ def contratos_lista():
             dados = dict(linha._mapping)
             dados["LogoEmpresaProprietaria"] = logo_empresa_raw
             dados["LogoEmpresaProprietariaUrl"] = logo_empresa_url
-            dados["SegmentoHex"] = _normalizar_hex_css(dados.get("SegmentoHex"))
+
+            try:
+                id_empresa_contrato = int(dados.get("IDEmpresa") or 0)
+            except Exception:
+                id_empresa_contrato = 0
+
+            dados_segmento = mapa_segmentos_pagina.get(id_empresa_contrato, {})
+            dados["SegmentoContrato"] = (dados_segmento.get("SegmentoContrato") or "").strip()
+            dados["SegmentoHex"] = _normalizar_hex_css(dados_segmento.get("SegmentoHex"))
 
             try:
                 id_status_contrato = int(dados.get("IDDimStatusContratos") or 0)
