@@ -1397,6 +1397,188 @@ def api_faces_do_ponto(codponto: int):
     })
 
 
+@paineis_bp.route("/api/lista-paineis/sugestoes", methods=["GET"])
+@login_required
+@limiter.limit("180 per minute", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def api_sugestoes_lista_paineis():
+    """
+    Eu alimento o combobox da lista de painéis.
+
+    A sugestão mostra CodFace, endereço, bairro, cidade, tipo e formato.
+    Ao selecionar uma opção no frontend, o campo q mantém os CodFaces já digitados
+    e substitui apenas o trecho atual da busca pelo CodFace escolhido.
+    """
+    q_original = (request.args.get("q") or "").strip()
+    ponto_ativo = (request.args.get("ponto_ativo") or "1").strip().lower()
+
+    """Eu trato busca múltipla separada por vírgula e pesquiso o último trecho digitado no combobox."""
+    partes_busca = [parte.strip() for parte in re.split(r"[,;\n]+", q_original) if parte.strip()]
+    q = partes_busca[-1] if partes_busca else q_original
+
+    if len(q) < 1:
+        return jsonify({"items": []})
+
+    q_limpo = q[:80]
+    q_like = f"%{q_limpo.upper()}%"
+    q_prefix = f"{q_limpo.upper()}%"
+
+    somente_digitos = "".join([c for c in q_limpo if c.isdigit()])
+    tem_busca_cnpj = 1 if len(somente_digitos) >= 8 else 0
+    cnpj_like = f"%{somente_digitos}%" if tem_busca_cnpj else ""
+
+    filtrar_ativo = 1 if ponto_ativo in ("0", "1") else 0
+    ativo_int = 1 if ponto_ativo == "1" else 0
+
+    sql = text("""
+        WITH ultimo_painel AS (
+            SELECT
+                base.CodPonto,
+                base.TipoNorm,
+                base.Tipo,
+                base.Logradouro,
+                base.Bairro,
+                base.Cidade,
+                base.UF,
+                base.FormatoLxA,
+                base.BitAtivo
+            FROM (
+                SELECT
+                    p.CodPonto,
+                    TipoNorm = UPPER(LTRIM(RTRIM(COALESCE(p.Tipo, '')))),
+                    p.Tipo,
+                    p.Logradouro,
+                    p.Bairro,
+                    p.Cidade,
+                    p.UF,
+                    p.FormatoLxA,
+                    p.BitAtivo,
+                    rn = ROW_NUMBER() OVER (
+                        PARTITION BY p.CodPonto, UPPER(LTRIM(RTRIM(COALESCE(p.Tipo, ''))))
+                        ORDER BY p.DataAtualizacao DESC, p.IDDimPaineisEuromidia DESC
+                    )
+                FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p
+                WHERE p.CodPonto IS NOT NULL
+            ) AS base
+            WHERE base.rn = 1
+        )
+        SELECT TOP (30)
+            CodFace = LTRIM(RTRIM(COALESCE(f.CodFace, ''))),
+            CodPonto = f.CodPonto,
+            Tipo = NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, up.Tipo, ''))), ''),
+            Endereco = NULLIF(LTRIM(RTRIM(COALESCE(up.Logradouro, ''))), ''),
+            Bairro = NULLIF(LTRIM(RTRIM(COALESCE(up.Bairro, ''))), ''),
+            Cidade = NULLIF(LTRIM(RTRIM(COALESCE(up.Cidade, ''))), ''),
+            UF = NULLIF(LTRIM(RTRIM(COALESCE(up.UF, ''))), ''),
+            Formato = NULLIF(LTRIM(RTRIM(COALESCE(up.FormatoLxA, ''))), '')
+        FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+        INNER JOIN ultimo_painel AS up
+            ON up.CodPonto = f.CodPonto
+           AND up.TipoNorm = UPPER(LTRIM(RTRIM(COALESCE(f.Tipo, ''))))
+        WHERE
+            NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+            AND (:filtrar_ativo = 0 OR CONVERT(int, COALESCE(up.BitAtivo, 0)) = :ativo_int)
+            AND (
+                UPPER(LTRIM(RTRIM(COALESCE(f.CodFace, '')))) LIKE :q_like
+                OR CAST(f.CodPonto AS varchar(30)) LIKE :q_like
+                OR UPPER(LTRIM(RTRIM(COALESCE(up.Logradouro, '')))) LIKE :q_like
+                OR UPPER(LTRIM(RTRIM(COALESCE(up.Bairro, '')))) LIKE :q_like
+                OR UPPER(LTRIM(RTRIM(COALESCE(up.Cidade, '')))) LIKE :q_like
+                OR UPPER(LTRIM(RTRIM(COALESCE(f.Tipo, up.Tipo, '')))) LIKE :q_like
+                OR UPPER(LTRIM(RTRIM(COALESCE(up.FormatoLxA, '')))) LIKE :q_like
+                OR (
+                    :tem_busca_cnpj = 1
+                    AND EXISTS (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS it
+                        WHERE
+                            it.CodFace = f.CodFace
+                            AND (it.CodPonto = f.CodPonto OR it.CodPonto IS NULL)
+                            AND REPLACE(REPLACE(REPLACE(COALESCE(it.CNPJ, ''), '.', ''), '/', ''), '-', '') LIKE :cnpj_like
+                    )
+                )
+            )
+        ORDER BY
+            CASE
+                WHEN UPPER(LTRIM(RTRIM(COALESCE(f.CodFace, '')))) LIKE :q_prefix THEN 0
+                WHEN CAST(f.CodPonto AS varchar(30)) LIKE :q_prefix THEN 1
+                WHEN UPPER(LTRIM(RTRIM(COALESCE(up.Cidade, '')))) LIKE :q_prefix THEN 2
+                WHEN UPPER(LTRIM(RTRIM(COALESCE(up.Bairro, '')))) LIKE :q_prefix THEN 3
+                ELSE 9
+            END,
+            up.Cidade ASC,
+            f.CodFace ASC
+    """)
+
+    rows = db.session.execute(
+        sql,
+        {
+            "q_like": q_like,
+            "q_prefix": q_prefix,
+            "tem_busca_cnpj": tem_busca_cnpj,
+            "cnpj_like": cnpj_like,
+            "filtrar_ativo": filtrar_ativo,
+            "ativo_int": ativo_int,
+        },
+    ).mappings().all()
+
+    itens = []
+    vistos = set()
+
+    for row in rows:
+        cod_face = (row.get("CodFace") or "").strip()
+        if not cod_face:
+            continue
+
+        cod_ponto = row.get("CodPonto")
+        chave = (str(cod_ponto or "").strip(), cod_face.upper())
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+
+        tipo = (row.get("Tipo") or "").strip()
+        endereco = (row.get("Endereco") or "").strip()
+        bairro = (row.get("Bairro") or "").strip()
+        cidade = (row.get("Cidade") or "").strip()
+        uf = (row.get("UF") or "").strip()
+        formato = (row.get("Formato") or "").strip()
+
+        cidade_uf = cidade
+        if cidade and uf:
+            cidade_uf = f"{cidade}/{uf}"
+        elif uf:
+            cidade_uf = uf
+
+        partes_texto = [cod_face]
+        if endereco:
+            partes_texto.append(endereco)
+        if bairro:
+            partes_texto.append(bairro)
+        if cidade_uf:
+            partes_texto.append(cidade_uf)
+        if tipo:
+            partes_texto.append(tipo)
+        if formato:
+            partes_texto.append(formato)
+
+        itens.append(
+            {
+                "cod_face": cod_face,
+                "cod_ponto": cod_ponto,
+                "tipo": tipo or "Sem tipo",
+                "endereco": endereco,
+                "bairro": bairro,
+                "cidade": cidade,
+                "uf": uf,
+                "cidade_uf": cidade_uf,
+                "formato": formato,
+                "texto": " | ".join(partes_texto),
+            }
+        )
+
+    return jsonify({"items": itens})
+
+
 
 
 CAPACIDADE_DIGITAL_FIXA = 16

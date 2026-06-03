@@ -243,6 +243,170 @@
     box-shadow: 0 8px 18px rgba(2,6,23,.06);
   }
 
+
+
+  /* =========================================================
+     ✅ COMBOBOX DE BUSCA DA LISTA DE PAINÉIS
+     ========================================================= */
+  .paineis-search-combobox{
+    position:relative;
+    flex:1 1 420px;
+    min-width:220px;
+    z-index:2300;
+  }
+
+  .paineis-search-box{
+    height:42px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    box-shadow: 0 8px 18px rgba(2,6,23,.06);
+    padding:0 12px;
+  }
+
+  .paineis-search-icon{
+    flex:0 0 auto;
+    font-size:14px;
+    opacity:.72;
+    transform: translateY(1px);
+  }
+
+  .paineis-search-input.search-big{
+    height:40px !important;
+    min-height:40px !important;
+    padding:0 !important;
+    border:0 !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+    background:transparent !important;
+    flex:1;
+    min-width:0;
+  }
+
+  .paineis-search-input.search-big:focus{
+    box-shadow:none !important;
+  }
+
+  .paineis-search-combobox:focus-within .paineis-search-box{
+    border-color: rgba(37,99,235,.55);
+    box-shadow: 0 0 0 3px rgba(37,99,235,.12), 0 10px 20px rgba(2,6,23,.08);
+  }
+
+  .paineis-search-sugestoes{
+    position:absolute;
+    top:calc(100% + 8px);
+    left:0;
+    right:0;
+    z-index:2400;
+    max-height:390px;
+    overflow:auto;
+    padding:8px;
+    border:1px solid rgba(148,163,184,.45);
+    border-radius:16px;
+    background:#fff;
+    box-shadow: 0 22px 60px rgba(15,23,42,.18);
+  }
+
+  .paineis-search-sugestoes[hidden]{
+    display:none !important;
+  }
+
+  .paineis-search-opcao{
+    width:100%;
+    border:0;
+    background:transparent;
+    border-radius:12px;
+    padding:10px;
+    display:grid;
+    grid-template-columns: minmax(86px, 128px) minmax(0, 1fr) auto;
+    gap:10px;
+    align-items:center;
+    cursor:pointer;
+    text-align:left;
+  }
+
+  .paineis-search-opcao:hover,
+  .paineis-search-opcao.is-active{
+    background:#F8FAFC;
+  }
+
+  .paineis-search-codface{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    min-width:0;
+  }
+
+  .paineis-search-codface strong{
+    color:#0F172A;
+    font-size:13.6px;
+    font-weight:950;
+    line-height:1.05;
+  }
+
+  .paineis-search-codface small{
+    color:#64748B;
+    font-size:10.6px;
+    font-weight:900;
+    line-height:1.05;
+  }
+
+  .paineis-search-info{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+
+  .paineis-search-endereco{
+    color:#0F172A;
+    font-weight:900;
+    font-size:12.2px;
+    line-height:1.18;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .paineis-search-meta{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    flex-wrap:wrap;
+    color:#64748B;
+    font-size:11px;
+    font-weight:850;
+    line-height:1.1;
+  }
+
+  .paineis-search-formato{
+    color:#334155;
+    font-weight:950;
+    font-size:11.2px;
+    white-space:nowrap;
+  }
+
+  .paineis-search-vazio{
+    padding:12px;
+    color:#64748B;
+    font-weight:850;
+    font-size:12px;
+  }
+
+  @media (max-width: 720px){
+    .paineis-search-opcao{
+      grid-template-columns:1fr;
+      gap:8px;
+    }
+
+    .paineis-search-formato{
+      white-space:normal;
+    }
+  }
+
   .btn-pill{
     height:42px;
     padding:0 15px;
@@ -1797,9 +1961,23 @@
 
             <div class="filters-row-2">
               <div class="search-periodo-wrap">
-                <input class="search-big" name="q" type="text" value="{{ filtros.q }}"
-                       placeholder="Buscar CodFace (ou lista: 118AD, 119AD...) ou CNPJ (14 dígitos)..."
-                       autocomplete="off" style="flex:1;min-width:220px;">
+                <div id="comboBuscaPaineis" class="paineis-search-combobox">
+                  <div class="paineis-search-box">
+                    <span class="paineis-search-icon">🔎</span>
+                    <input id="buscaPaineis"
+                           class="search-big paineis-search-input"
+                           name="q"
+                           type="search"
+                           value="{{ filtros.q }}"
+                           placeholder="Buscar CodFace, endereço, bairro, cidade, tipo, formato ou CNPJ..."
+                           autocomplete="off"
+                           spellcheck="false"
+                           aria-autocomplete="list"
+                           aria-expanded="false"
+                           aria-controls="listaBuscaPaineis">
+                  </div>
+                  <div id="listaBuscaPaineis" class="paineis-search-sugestoes" hidden></div>
+                </div>
 
                 <details class="dd" data-dd="formato" style="flex:0 1 300px;min-width:240px;max-width:340px;">
                   <summary class="dd-summary">
@@ -2857,6 +3035,341 @@
     }
 
     setTopoLabelPorDatas();
+  })();
+</script>
+
+
+<script>
+  (function(){
+    const combo = document.getElementById("comboBuscaPaineis");
+    const input = document.getElementById("buscaPaineis");
+    const lista = document.getElementById("listaBuscaPaineis");
+    const form = document.getElementById("formListaPaineis");
+
+    if (!combo || !input || !lista || !form) return;
+
+    const urlSugestoes = {{ url_for('Paineis.api_sugestoes_lista_paineis')|tojson }};
+    let timer = null;
+    let controller = null;
+    let itensAtuais = [];
+    let indiceAtivo = -1;
+
+    function textoLimpo(valor){
+      return String(valor == null ? "" : valor).trim();
+    }
+
+    function removerAcentos(valor){
+      try{
+        return textoLimpo(valor).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      }catch(e){
+        return textoLimpo(valor);
+      }
+    }
+
+    function classeTipo(tipo){
+      const base = removerAcentos(tipo).toUpperCase();
+      const mapa = {
+        "EMPENA": "tp-EMPENA",
+        "FRONT LIGHT": "tp-FRONT_LIGHT",
+        "FRONT LIGHT HIBRIDO": "tp-FRONT_LIGHT_HIBRIDO",
+        "MUPI": "tp-MUPI",
+        "PAINEL DIGITAL": "tp-PAINEL_DIGITAL",
+        "RELOGIO MULTIMENSAGEM COM BACKLIGHT": "tp-RELOGIO_MULTIMENSAGEM_COM_BACKLIGHT",
+        "RELOGIO TEMPERATURA COM BACKLIGHT": "tp-RELOGIO_TEMPERATURA_COM_BACKLIGHT",
+        "TOPO": "tp-TOPO",
+        "TRIEDRO": "tp-TRIEDRO",
+        "TRIEDRO COM RELOGIO TEMPERATURA": "tp-TRIEDRO_COM_RELOGIO_TEMPERATURA"
+      };
+
+      if (mapa[base]) return mapa[base];
+
+      const sufixo = base
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+      return sufixo ? ("tp-" + sufixo) : "";
+    }
+
+    function esconderLista(){
+      lista.hidden = true;
+      lista.innerHTML = "";
+      input.setAttribute("aria-expanded", "false");
+      itensAtuais = [];
+      indiceAtivo = -1;
+    }
+
+    function montarTextoEndereco(item){
+      const endereco = textoLimpo(item.endereco) || "Endereço não informado";
+      const bairro = textoLimpo(item.bairro);
+      const cidadeUf = textoLimpo(item.cidade_uf) || textoLimpo(item.cidade);
+      const partes = [];
+
+      if (bairro) partes.push(bairro);
+      if (cidadeUf) partes.push(cidadeUf);
+
+      return {
+        endereco: endereco,
+        meta: partes.join(" • ")
+      };
+    }
+
+    function criarOpcao(item, indice){
+      const botao = document.createElement("button");
+      botao.type = "button";
+      botao.className = "paineis-search-opcao";
+      botao.setAttribute("role", "option");
+      botao.setAttribute("data-indice", String(indice));
+
+      const colCod = document.createElement("div");
+      colCod.className = "paineis-search-codface";
+
+      const cod = document.createElement("strong");
+      cod.textContent = textoLimpo(item.cod_face) || "—";
+      colCod.appendChild(cod);
+
+      const ponto = document.createElement("small");
+      ponto.textContent = textoLimpo(item.cod_ponto) ? ("CodPonto " + textoLimpo(item.cod_ponto)) : "CodPonto —";
+      colCod.appendChild(ponto);
+
+      const info = document.createElement("div");
+      info.className = "paineis-search-info";
+
+      const enderecoObj = montarTextoEndereco(item);
+      const endereco = document.createElement("div");
+      endereco.className = "paineis-search-endereco";
+      endereco.textContent = enderecoObj.endereco;
+      info.appendChild(endereco);
+
+      const meta = document.createElement("div");
+      meta.className = "paineis-search-meta";
+
+      const tipoBadge = document.createElement("span");
+      tipoBadge.className = "tp-badge " + classeTipo(item.tipo);
+
+      const dot = document.createElement("span");
+      dot.className = "tp-dot";
+      tipoBadge.appendChild(dot);
+      tipoBadge.appendChild(document.createTextNode(textoLimpo(item.tipo) || "Sem tipo"));
+      meta.appendChild(tipoBadge);
+
+      if (enderecoObj.meta){
+        const local = document.createElement("span");
+        local.textContent = enderecoObj.meta;
+        meta.appendChild(local);
+      }
+
+      info.appendChild(meta);
+
+      const formato = document.createElement("div");
+      formato.className = "paineis-search-formato";
+      formato.textContent = textoLimpo(item.formato) || "Formato —";
+
+      botao.appendChild(colCod);
+      botao.appendChild(info);
+      botao.appendChild(formato);
+
+      botao.addEventListener("mousedown", function(ev){
+        ev.preventDefault();
+      });
+
+      botao.addEventListener("click", function(){
+        selecionarItem(item);
+      });
+
+      return botao;
+    }
+
+    function atualizarItemAtivo(){
+      Array.from(lista.querySelectorAll(".paineis-search-opcao")).forEach(function(el, idx){
+        el.classList.toggle("is-active", idx === indiceAtivo);
+        if (idx === indiceAtivo){
+          try{ el.scrollIntoView({ block: "nearest" }); }catch(e){}
+        }
+      });
+    }
+
+    function renderizar(items){
+      lista.innerHTML = "";
+      itensAtuais = Array.isArray(items) ? items : [];
+      indiceAtivo = -1;
+
+      if (!itensAtuais.length){
+        const vazio = document.createElement("div");
+        vazio.className = "paineis-search-vazio";
+        vazio.textContent = "Nenhum painel encontrado para essa busca.";
+        lista.appendChild(vazio);
+        lista.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+        return;
+      }
+
+      itensAtuais.forEach(function(item, indice){
+        lista.appendChild(criarOpcao(item, indice));
+      });
+
+      lista.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    }
+
+    function obterContextoBusca(){
+      const valorCompleto = String(input.value || "");
+      const posicaoCursor = typeof input.selectionStart === "number" ? input.selectionStart : valorCompleto.length;
+      const inicioToken = valorCompleto.lastIndexOf(",", Math.max(posicaoCursor - 1, 0)) + 1;
+      const proximaVirgula = valorCompleto.indexOf(",", posicaoCursor);
+      const fimToken = proximaVirgula >= 0 ? proximaVirgula : valorCompleto.length;
+      const tokenAtual = valorCompleto.slice(inicioToken, fimToken);
+
+      return {
+        valorCompleto: valorCompleto,
+        inicioToken: inicioToken,
+        fimToken: fimToken,
+        tokenAtual: textoLimpo(tokenAtual)
+      };
+    }
+
+    function tokensAntesDoAtual(contexto){
+      return contexto.valorCompleto
+        .slice(0, contexto.inicioToken)
+        .split(",")
+        .map(textoLimpo)
+        .filter(Boolean);
+    }
+
+    function tokensDepoisDoAtual(contexto){
+      return contexto.valorCompleto
+        .slice(contexto.fimToken)
+        .split(",")
+        .map(textoLimpo)
+        .filter(Boolean);
+    }
+
+    function parametrosAtuais(){
+      const params = new URLSearchParams();
+      const contexto = obterContextoBusca();
+
+      // Para buscar sugestão, envio apenas o trecho atual depois da última vírgula.
+      // Exemplo: "759A, 245" envia só "245" para o endpoint.
+      params.set("q", contexto.tokenAtual);
+
+      try{
+        const pontoAtivo = document.getElementById("pontoAtivoReal");
+        if (pontoAtivo){
+          params.set("ponto_ativo", textoLimpo(pontoAtivo.value));
+        }
+      }catch(e){}
+
+      return params;
+    }
+
+    async function buscarSugestoes(){
+      const contexto = obterContextoBusca();
+      const q = contexto.tokenAtual;
+      if (q.length < 1){
+        esconderLista();
+        return;
+      }
+
+      if (controller){
+        try{ controller.abort(); }catch(e){}
+      }
+
+      controller = new AbortController();
+
+      try{
+        const resp = await fetch(urlSugestoes + "?" + parametrosAtuais().toString(), {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          signal: controller.signal
+        });
+
+        if (!resp.ok) return;
+
+        const payload = await resp.json();
+        renderizar(payload.items || []);
+      }catch(e){
+        if (e && e.name === "AbortError") return;
+      }
+    }
+
+    function agendarBusca(){
+      if (timer){
+        clearTimeout(timer);
+      }
+      timer = setTimeout(buscarSugestoes, 180);
+    }
+
+    function selecionarItem(item){
+      const codFace = textoLimpo(item && item.cod_face);
+      if (!codFace) return;
+
+      const contexto = obterContextoBusca();
+      const tokensAntes = tokensAntesDoAtual(contexto);
+      const tokensDepois = tokensDepoisDoAtual(contexto);
+      const tokensCompletos = tokensAntes.concat([codFace], tokensDepois);
+      const novoValor = tokensCompletos.join(", ");
+
+      input.value = novoValor;
+      esconderLista();
+
+      try{
+        const posicaoFinalCodFace = tokensAntes.concat([codFace]).join(", ").length;
+        input.setSelectionRange(posicaoFinalCodFace, posicaoFinalCodFace);
+      }catch(e){}
+
+      if (typeof form.requestSubmit === "function"){
+        form.requestSubmit();
+        return;
+      }
+
+      const evSubmit = new Event("submit", { bubbles: true, cancelable: true });
+      const podeEnviar = form.dispatchEvent(evSubmit);
+      if (podeEnviar){
+        form.submit();
+      }
+    }
+
+    input.addEventListener("input", agendarBusca);
+
+    input.addEventListener("focus", function(){
+      if (textoLimpo(input.value)){
+        agendarBusca();
+      }
+    });
+
+    input.addEventListener("keydown", function(ev){
+      if (lista.hidden) return;
+
+      if (ev.key === "ArrowDown"){
+        ev.preventDefault();
+        if (!itensAtuais.length) return;
+        indiceAtivo = Math.min(indiceAtivo + 1, itensAtuais.length - 1);
+        atualizarItemAtivo();
+        return;
+      }
+
+      if (ev.key === "ArrowUp"){
+        ev.preventDefault();
+        if (!itensAtuais.length) return;
+        indiceAtivo = Math.max(indiceAtivo - 1, 0);
+        atualizarItemAtivo();
+        return;
+      }
+
+      if (ev.key === "Enter" && indiceAtivo >= 0 && itensAtuais[indiceAtivo]){
+        ev.preventDefault();
+        selecionarItem(itensAtuais[indiceAtivo]);
+        return;
+      }
+
+      if (ev.key === "Escape"){
+        esconderLista();
+      }
+    });
+
+    document.addEventListener("click", function(ev){
+      if (ev.target && ev.target.closest && ev.target.closest("#comboBuscaPaineis")) return;
+      esconderLista();
+    });
   })();
 </script>
 
