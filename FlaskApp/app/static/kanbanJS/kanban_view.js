@@ -5223,14 +5223,20 @@ function normalizarCardServidor(card){
   }
 
   function obterBaseFiltrosCards(){
-    if (Array.isArray(filtrosCardsKanban) && filtrosCardsKanban.length) {
-      return filtrosCardsKanban;
+    const cardsCarregados = Array.isArray(cards) ? cards : [];
+
+    if (cardsCarregados.length) {
+      return cardsCarregados
+        .filter(card => cardPertenceAoVendedorLogado(card))
+        .filter(card => cardPassaBusca(card))
+        .map(card => normalizarFiltroCardKanban(Object.assign({}, card || {}, {
+          Tags: tagsDoCard(card?.IDFatoKanbanCard)
+        })))
+        .filter(item => idNum(item.IDFatoKanbanCard));
     }
 
-    return (Array.isArray(cards) ? cards : [])
-      .map(card => normalizarFiltroCardKanban(Object.assign({}, card || {}, {
-        Tags: tagsDoCard(card?.IDFatoKanbanCard)
-      })))
+    return (Array.isArray(filtrosCardsKanban) ? filtrosCardsKanban : [])
+      .map(normalizarFiltroCardKanban)
       .filter(item => idNum(item.IDFatoKanbanCard));
   }
 
@@ -5250,6 +5256,38 @@ function normalizarCardServidor(card){
     });
   }
 
+  function obterCardsVisiveisAtuais(){
+    const lista = [];
+
+    if (indiceCardsVisiveisPorFase instanceof Map) {
+      indiceCardsVisiveisPorFase.forEach(cardsFase => {
+        (Array.isArray(cardsFase) ? cardsFase : []).forEach(card => {
+          if (card && idNum(card.IDFatoKanbanCard)) lista.push(card);
+        });
+      });
+    }
+
+    return lista;
+  }
+
+  function obterIdsCardsVisiveisAtuais(){
+    return [...new Set(
+      obterCardsVisiveisAtuais()
+        .map(card => idNum(card?.IDFatoKanbanCard || 0))
+        .filter(Boolean)
+    )];
+  }
+
+  function resumoComercialZerado(){
+    return {
+      QuantidadeAtendimentosAtivos: 0,
+      QuantidadeAprovacaoPreco: 0,
+      ValorCustoTotal: 0,
+      ValorVendaTotal: 0,
+      MargemPercentualTotal: 0
+    };
+  }
+
   function montarQueryResumoComercialFiltrado(){
     const params = new URLSearchParams();
     params.set("fresh", "1");
@@ -5259,6 +5297,14 @@ function normalizarCardServidor(card){
     tagsSelecionadasFiltro.forEach(valor => {
       if (valor) params.append("tag", valor);
     });
+
+    if (haFiltroAtivo()) {
+      params.set("escopo_visivel", "1");
+      obterIdsCardsVisiveisAtuais().forEach(idCard => {
+        params.append("card_id", String(idCard));
+      });
+    }
+
     return params.toString();
   }
 
@@ -5493,6 +5539,8 @@ function normalizarCardServidor(card){
     idsFases.forEach(idFase => preencherCabecalhoFase(idFase));
     redesenharFasesLocalmente(idsFases, null, true);
     atualizarResumoBusca();
+    renderizarFiltrosMultiselect();
+    agendarRecarregarResumoComercial(150);
   }
 
 
@@ -10263,6 +10311,11 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     resumoComercialEmAndamento = true;
 
     try {
+      if (haFiltroAtivo() && obterIdsCardsVisiveisAtuais().length === 0) {
+        renderizarResumoComercial(resumoComercialZerado());
+        return true;
+      }
+
       const queryFiltros = montarQueryResumoComercialFiltrado();
       const separador = queryFiltros ? `?${queryFiltros}` : "";
       const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/resumo-comercial${separador}`, { credentials: "same-origin" });
@@ -13806,6 +13859,10 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
   } finally {
     st.loading = false;
     preencherCabecalhoFase(idF);
+    if (haFiltroAtivo()) {
+      renderizarFiltrosMultiselect();
+      agendarRecarregarResumoComercial(150);
+    }
   }
 
   if (!opcoes.ignorarAutoPreenchimento) {

@@ -16658,6 +16658,69 @@ def _montar_condicao_in_sql(prefixo: str, valores: list[str]) -> tuple[str, dict
     return ", ".join(placeholders), params
 
 
+def _lista_ids_request_kanban(*nomes: str, limite: int = 1000) -> list[int]:
+    """Eu leio IDs repetidos/CSV da query string preservando ordem e removendo inválidos."""
+    ids: list[int] = []
+    vistos: set[int] = set()
+
+    for nome in nomes:
+        for bruto in request.args.getlist(nome):
+            for parte in str(bruto or "").split(","):
+                try:
+                    id_item = int(str(parte or "").strip())
+                except (TypeError, ValueError):
+                    continue
+
+                if id_item <= 0 or id_item in vistos:
+                    continue
+
+                vistos.add(id_item)
+                ids.append(id_item)
+                if len(ids) >= limite:
+                    return ids
+
+    return ids
+
+
+def _montar_condicao_in_int_sql(prefixo: str, valores: list[int]) -> tuple[str, dict[str, Any]]:
+    """Eu monto placeholders nomeados para filtros IN numéricos do SQL Server."""
+    valores_limpos: list[int] = []
+    vistos: set[int] = set()
+
+    for valor in valores or []:
+        try:
+            item = int(valor)
+        except (TypeError, ValueError):
+            continue
+
+        if item <= 0 or item in vistos:
+            continue
+
+        vistos.add(item)
+        valores_limpos.append(item)
+
+    if not valores_limpos:
+        return "", {}
+
+    placeholders: list[str] = []
+    params: dict[str, Any] = {}
+    for idx, valor in enumerate(valores_limpos):
+        nome = f"{prefixo}_{idx}"
+        placeholders.append(f":{nome}")
+        params[nome] = valor
+
+    return ", ".join(placeholders), params
+
+
+def _resumo_comercial_zerado() -> dict[str, Any]:
+    return {
+        "QuantidadeAtendimentosAtivos": 0,
+        "QuantidadeAprovacaoPreco": 0,
+        "ValorCustoTotal": 0.0,
+        "ValorVendaTotal": 0.0,
+        "MargemPercentualTotal": 0.0,
+    }
+
 
 def _obter_filtros_cards_kanban(id_kanban: int) -> list[dict[str, Any]]:
     """
@@ -16793,9 +16856,11 @@ def _obter_resumo_comercial_kanban(id_kanban: int, filtros: dict[str, list[str]]
     filtros = filtros or {}
     filtros_vendedores = filtros.get("vendedores") or []
     filtros_tags = filtros.get("tags") or []
+    filtros_ids_cards = filtros.get("ids_cards") or []
 
     placeholders_vendedores, params_vendedores = _montar_condicao_in_sql("filtro_vendedor", filtros_vendedores)
     placeholders_tags, params_tags = _montar_condicao_in_sql("filtro_tag", filtros_tags)
+    placeholders_ids_cards, params_ids_cards = _montar_condicao_in_int_sql("filtro_card_id", filtros_ids_cards)
 
     condicao_vendedores = ""
     if placeholders_vendedores:
@@ -16818,6 +16883,12 @@ def _obter_resumo_comercial_kanban(id_kanban: int, filtros: dict[str, list[str]]
               )
         """
 
+    condicao_ids_cards = ""
+    if placeholders_ids_cards:
+        condicao_ids_cards = f"""
+              AND c.IDFatoKanbanCard IN ({placeholders_ids_cards})
+        """
+
     sql = text(f"""
         ;WITH CardsBase AS (
             SELECT
@@ -16830,6 +16901,7 @@ def _obter_resumo_comercial_kanban(id_kanban: int, filtros: dict[str, list[str]]
               AND c.IDDimKanbanFaseAtual IN (1, 2, 3, 4, 5, 6)
               {_sql_filtro_status_card_visiveis('c')}
               {filtro_escopo_vendedor}
+              {condicao_ids_cards}
         ),
         CardsFiltrados AS (
             SELECT cb.IDFatoKanbanCard
@@ -16907,6 +16979,7 @@ def _obter_resumo_comercial_kanban(id_kanban: int, filtros: dict[str, list[str]]
             **params_escopo_vendedor,
             **params_vendedores,
             **params_tags,
+            **params_ids_cards,
         },
     ).mappings().first() or {}
 
@@ -16935,10 +17008,18 @@ def api_kanban_resumo_comercial(id_kanban: int):
 
     pode_ver_custo_margem = _usuario_pode_ver_custo_margem_kanban()
 
+    escopo_visivel = _valor_booleano_verdadeiro(request.args.get("escopo_visivel"))
     filtros_resumo = {
         "vendedores": _lista_filtro_request_kanban("vendedor", "vendedores"),
         "tags": _lista_filtro_request_kanban("tag", "tags"),
+        "ids_cards": _lista_ids_request_kanban("card_id", "card_ids", "cards") if escopo_visivel else [],
     }
+
+    if escopo_visivel and not filtros_resumo["ids_cards"]:
+        resumo_comercial = _resumo_comercial_zerado()
+        if not pode_ver_custo_margem:
+            resumo_comercial = _ocultar_custo_margem_payload(resumo_comercial)
+        return jsonify({"ok": True, "resumo_comercial": resumo_comercial})
 
     chave = _chave_cache_json(
         "kanban:api:resumo-comercial",
@@ -16947,6 +17028,8 @@ def api_kanban_resumo_comercial(id_kanban: int):
         *_chave_cache_escopo_vendedor_kanban(escopo_vendedor),
         tuple(filtros_resumo.get("vendedores") or []),
         tuple(filtros_resumo.get("tags") or []),
+        tuple(filtros_resumo.get("ids_cards") or []),
+        int(escopo_visivel),
         _versao_empresa(id_emp),
         _versao_kanban(id_kanban),
         "custo_margem",
