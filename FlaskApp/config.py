@@ -1,7 +1,11 @@
 import os
 import urllib.parse
+import pyodbc
 from pathlib import Path
 from dotenv import load_dotenv
+
+
+pyodbc.pooling = False
 
 
 CAMINHO_DOTENV = Path(__file__).resolve().parent.parent / ".env"

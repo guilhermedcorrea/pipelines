@@ -1,5 +1,6 @@
 import os
 from celery import Celery
+from celery.signals import task_postrun, worker_process_init
 
 from config import CACHE_REDIS_URL
 
@@ -86,3 +87,32 @@ class TarefaComContexto(celery_app.Task):
 
 
 celery_app.Task = TarefaComContexto
+
+@worker_process_init.connect
+def _limpar_pool_sqlalchemy_apos_fork(*args, **kwargs):
+    """Evita reaproveitar conexão SQL criada antes do fork do worker Celery."""
+    try:
+        app = _obter_app_flask()
+
+        with app.app_context():
+            from .extensions import db
+
+            try:
+                db.engine.dispose(close=False)
+            except TypeError:
+                db.engine.dispose()
+
+    except Exception:
+        pass
+
+
+@task_postrun.connect
+def _fechar_sessao_sqlalchemy_apos_task(*args, **kwargs):
+    """Devolve a conexão ao pool e limpa transação/sessão depois de cada task."""
+    try:
+        from .extensions import db
+
+        db.session.remove()
+
+    except Exception:
+        pass
