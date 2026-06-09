@@ -240,11 +240,12 @@
       resizeObserver.observe(bodyEl);
     }
 
-    if ("MutationObserver" in window) {
-      const mutationObserver = new MutationObserver(agendarAtualizacaoScrollbarFase);
-      mutationObserver.observe(dropEl, { childList: true, subtree: true, attributes: true });
-    }
-
+    /*
+     * Eu não uso MutationObserver aqui. Com muitos cards, observar childList/subtree/attributes
+     * força o navegador a recalcular a barra customizada em massa durante renderizações,
+     * drag/drop e atualizações ao vivo. As rotinas de renderização já chamam
+     * _kbAtualizarScrollbarFase explicitamente quando o conteúdo da fase muda.
+     */
     dropEl._kbAtualizarScrollbarFase = agendarAtualizacaoScrollbarFase;
     bodyEl.dataset.scrollbarFaseConfigurada = "1";
     agendarAtualizacaoScrollbarFase();
@@ -321,7 +322,13 @@
   let empresaCadastroConsultaController = null;
   let empresaCadastroUltimoCnpjConsultado = "";
 
-  const TAM_LOTE_POR_FASE = 3;
+  const TAM_LOTE_POR_FASE = 12;
+  const LIMITE_CARDS_DOM_MODO_DESEMPENHO = 80;
+  const LIMITE_CARDS_CARREGADOS_MODO_DESEMPENHO = 180;
+  const LIMITE_CARDS_PARA_VIRTUALIZAR_FASE = 36;
+  const LIMITE_CARDS_DOM_POR_FASE_VIRTUAL = 28;
+  const OVERSCAN_CARDS_VIRTUAIS = 8;
+  const ALTURA_ESTIMADA_CARD_VIRTUAL = 208;
   const estadoFase = new Map();
   let socketKanban = null;
   let socketConectado = false;
@@ -5135,6 +5142,27 @@ function normalizarCardServidor(card){
     return fases.reduce((acc, f) => acc + idNum(f.QuantidadeCardsTotal || 0), 0);
   }
 
+  function contarCardsRenderizadosNoEstado(){
+    let total = 0;
+    estadoFase.forEach(st => {
+      total += idNum(st?.cardsNoDom || st?.rendered || 0);
+    });
+    return total;
+  }
+
+  function atualizarModoDesempenhoKanban(){
+    if (!board) return;
+
+    const totalDom = contarCardsRenderizadosNoEstado();
+    const totalCarregado = Array.isArray(cards) ? cards.length : 0;
+    const ativar = totalDom >= LIMITE_CARDS_DOM_MODO_DESEMPENHO
+      || totalCarregado >= LIMITE_CARDS_CARREGADOS_MODO_DESEMPENHO;
+
+    board.classList.toggle("kb-performance-mode", ativar);
+    board.dataset.cardsDom = String(totalDom);
+    board.dataset.cardsCarregados = String(totalCarregado);
+  }
+
   function resumoTextoSelecao(quantidade, singular, plural, padrao){
     if (!quantidade) return padrao;
     if (quantidade === 1) return `1 ${singular}`;
@@ -6207,6 +6235,53 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
   atualizarResumoBusca();
 }
 
+let rafRedesenhoTempoReal = null;
+const idsFasesRedesenhoTempoReal = new Set();
+const mapaQuantidadesRedesenhoTempoReal = new Map();
+let manterScrollRedesenhoTempoReal = true;
+
+function agendarRedesenhoFasesTempoReal(idsFase, mapaQuantidades = null, manterScroll = true){
+  const ids = [...new Set((Array.isArray(idsFase) ? idsFase : [idsFase]).map(idNum).filter(Boolean))];
+  if (!ids.length) return;
+
+  ids.forEach(idFase => idsFasesRedesenhoTempoReal.add(idFase));
+  manterScrollRedesenhoTempoReal = manterScrollRedesenhoTempoReal && manterScroll !== false;
+
+  if (mapaQuantidades instanceof Map) {
+    mapaQuantidades.forEach((valor, idFaseBruto) => {
+      const idFase = idNum(idFaseBruto);
+      if (!idFase) return;
+
+      const qtdAtual = idNum(mapaQuantidadesRedesenhoTempoReal.get(idFase) || 0);
+      const qtdNova = idNum(valor || 0);
+      mapaQuantidadesRedesenhoTempoReal.set(idFase, Math.max(qtdAtual, qtdNova));
+      idsFasesRedesenhoTempoReal.add(idFase);
+    });
+  }
+
+  if (rafRedesenhoTempoReal !== null) return;
+
+  rafRedesenhoTempoReal = window.requestAnimationFrame(() => {
+    rafRedesenhoTempoReal = null;
+
+    const idsPendentes = [...idsFasesRedesenhoTempoReal];
+    const mapaPendentes = mapaQuantidadesRedesenhoTempoReal.size
+      ? new Map(mapaQuantidadesRedesenhoTempoReal)
+      : null;
+    const deveManterScroll = manterScrollRedesenhoTempoReal;
+
+    idsFasesRedesenhoTempoReal.clear();
+    mapaQuantidadesRedesenhoTempoReal.clear();
+    manterScrollRedesenhoTempoReal = true;
+
+    if (idsPendentes.length) {
+      redesenharFasesLocalmente(idsPendentes, mapaPendentes, deveManterScroll);
+    }
+  });
+}
+
+
+
 function montarMapaQuantidadesAtualizacaoAoVivo(idsFase, idFaseDestino = 0, acrescimoDestino = 0){
   const mapa = new Map();
   const ids = [...new Set((Array.isArray(idsFase) ? idsFase : [idsFase]).map(idNum).filter(Boolean))];
@@ -6238,13 +6313,31 @@ function montarMapaQuantidadesAtualizacaoAoVivo(idsFase, idFaseDestino = 0, acre
 
 
 
-  function destacarCardNaFase(idCard, idFase){
+  function destacarCardNaFase(idCard, idFase, tentativa = 0){
     requestAnimationFrame(() => {
-      const st = estadoFase.get(idNum(idFase));
-      if (!st || !st.dropEl) return;
+      const idC = idNum(idCard);
+      const idF = idNum(idFase);
+      const st = estadoFase.get(idF);
+      if (!st || !st.dropEl || !idC) return;
 
-      const cardEl = st.dropEl.querySelector(`.kb-card[data-card="${idNum(idCard)}"]`);
-      if (!cardEl) return;
+      let cardEl = st.dropEl.querySelector(`.kb-card[data-card="${idC}"]`);
+
+      if (!cardEl && st.virtualizado) {
+        const lista = listaCardsDaFase(idF);
+        const indiceCard = lista.findIndex(card => idNum(card?.IDFatoKanbanCard || 0) === idC);
+        if (indiceCard >= 0) {
+          const altura = obterAlturaEstimadaVirtual(st);
+          st.visiveis = Math.max(st.visiveis || TAM_LOTE_POR_FASE, indiceCard + 1, TAM_LOTE_POR_FASE);
+          st.dropEl.scrollTop = Math.max(0, (indiceCard * altura) - altura);
+          sincronizarCardsRenderizadosDaFase(idF, st.visiveis, { atualizarJanelaVirtual: true });
+          cardEl = st.dropEl.querySelector(`.kb-card[data-card="${idC}"]`);
+        }
+      }
+
+      if (!cardEl) {
+        if (tentativa < 8) destacarCardNaFase(idC, idF, tentativa + 1);
+        return;
+      }
 
       cardEl.classList.add("drop-commit");
       setTimeout(() => {
@@ -6252,6 +6345,7 @@ function montarMapaQuantidadesAtualizacaoAoVivo(idsFase, idFaseDestino = 0, acre
       }, 220);
     });
   }
+
 
 
 
@@ -13579,8 +13673,12 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
       const body = el("div", {class:"kb-col-body"}, []);
       const drop = el("div", {class:"kb-drop", "data-drop":"1", "data-fase": idFase}, []);
+      const spacerTopo = el("div", {class:"kb-virtual-spacer kb-virtual-spacer-top", "aria-hidden":"true", style:"height:0px;display:none;"}, []);
+      const spacerBase = el("div", {class:"kb-virtual-spacer kb-virtual-spacer-bottom", "aria-hidden":"true", style:"height:0px;display:none;"}, []);
       const sentinel = el("div", {class:"kb-loadmore", style:"display:none;", role:"button", tabindex:"0"}, ["Carregando..."]);
 
+      drop.appendChild(spacerTopo);
+      drop.appendChild(spacerBase);
       drop.appendChild(sentinel);
       body.appendChild(drop);
       configurarScrollbarFase(drop, body);
@@ -13593,6 +13691,8 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
         rendered: 0,
         dropEl: drop,
         sentinelEl: sentinel,
+        spacerTopoEl: spacerTopo,
+        spacerBaseEl: spacerBase,
         loading: false,
         carregandoServidor: false,
         colAccent,
@@ -13662,7 +13762,11 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
       drop.addEventListener("scroll", () => {
         const st = estadoFase.get(idFase);
-        if (!st || st.loading) return;
+        if (!st) return;
+
+        agendarAtualizacaoJanelaVirtualFase(idFase);
+
+        if (st.loading) return;
 
         const temOverflow = (drop.scrollHeight - drop.clientHeight) > 20;
         if (!temOverflow) return;
@@ -13692,6 +13796,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     });
 
     removerControlesGestaoFasesParaVendedor();
+    atualizarModoDesempenhoKanban();
   }
 
   function preencherCabecalhoFase(idFase){
@@ -13931,17 +14036,135 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
     st.sentinelEl.textContent = "";
   }
 
-  function sincronizarCardsRenderizadosDaFase(idFase, quantidadeDesejada = null){
+  function faseDeveUsarVirtualizacao(qtdRenderizarLogico){
+    return idNum(qtdRenderizarLogico || 0) > LIMITE_CARDS_PARA_VIRTUALIZAR_FASE;
+  }
+
+  function garantirEstruturaVirtualFase(st){
+    if (!st || !st.dropEl) return;
+
+    if (st.spacerTopoEl && st.spacerTopoEl.parentNode !== st.dropEl) {
+      st.dropEl.insertBefore(st.spacerTopoEl, st.dropEl.firstChild || null);
+    }
+
+    if (st.sentinelEl && st.sentinelEl.parentNode !== st.dropEl) {
+      st.dropEl.appendChild(st.sentinelEl);
+    }
+
+    if (st.spacerBaseEl && st.spacerBaseEl.parentNode !== st.dropEl) {
+      st.dropEl.insertBefore(st.spacerBaseEl, st.sentinelEl || null);
+    }
+
+    if (st.spacerTopoEl && st.dropEl.firstElementChild !== st.spacerTopoEl) {
+      st.dropEl.insertBefore(st.spacerTopoEl, st.dropEl.firstChild || null);
+    }
+
+    if (st.spacerBaseEl && st.sentinelEl && st.spacerBaseEl.nextSibling !== st.sentinelEl) {
+      st.dropEl.insertBefore(st.spacerBaseEl, st.sentinelEl);
+    }
+  }
+
+  function obterAlturaEstimadaVirtual(st){
+    const alturaAtual = Number(st?.alturaEstimadaCardVirtual || 0);
+    if (Number.isFinite(alturaAtual) && alturaAtual >= 120) return alturaAtual;
+    return ALTURA_ESTIMADA_CARD_VIRTUAL;
+  }
+
+  function atualizarAlturaEstimadaVirtual(st){
+    if (!st || !st.dropEl) return;
+
+    const cardsDom = Array.from(st.dropEl.querySelectorAll('.kb-card[data-card]')).slice(0, 8);
+    if (!cardsDom.length) return;
+
+    const somaAlturas = cardsDom.reduce((acc, no) => acc + Math.max(80, no.offsetHeight || ALTURA_ESTIMADA_CARD_VIRTUAL), 0);
+    const mediaAlturaCard = somaAlturas / cardsDom.length;
+    const gap = 10;
+    const estimada = Math.round(mediaAlturaCard + gap);
+
+    if (Number.isFinite(estimada) && estimada >= 120) {
+      const anterior = obterAlturaEstimadaVirtual(st);
+      st.alturaEstimadaCardVirtual = Math.round((anterior * 0.70) + (estimada * 0.30));
+    }
+  }
+
+  function calcularJanelaVirtualFase(st, qtdRenderizarLogico){
+    const totalLogico = Math.max(0, idNum(qtdRenderizarLogico || 0));
+    const altura = obterAlturaEstimadaVirtual(st);
+    const alturaViewport = Math.max(420, st?.dropEl?.clientHeight || 0);
+    const scrollTop = Math.max(0, st?.dropEl?.scrollTop || 0);
+    const quantidadeTela = Math.max(
+      LIMITE_CARDS_DOM_POR_FASE_VIRTUAL,
+      Math.ceil(alturaViewport / altura) + (OVERSCAN_CARDS_VIRTUAIS * 2)
+    );
+
+    let inicio = Math.max(0, Math.floor(scrollTop / altura) - OVERSCAN_CARDS_VIRTUAIS);
+    let fim = Math.min(totalLogico, inicio + quantidadeTela);
+
+    if ((fim - inicio) < quantidadeTela && fim === totalLogico) {
+      inicio = Math.max(0, fim - quantidadeTela);
+    }
+
+    return { inicio, fim, altura };
+  }
+
+  function agendarAtualizacaoJanelaVirtualFase(idFase){
+    const idF = idNum(idFase);
+    const st = estadoFase.get(idF);
+    if (!st || !st.virtualizado) return;
+    if (st.rafVirtual !== null && st.rafVirtual !== undefined) return;
+
+    st.rafVirtual = window.requestAnimationFrame(() => {
+      st.rafVirtual = null;
+      sincronizarCardsRenderizadosDaFase(idF, st.visiveis || st.rendered || TAM_LOTE_POR_FASE, { atualizarJanelaVirtual: true });
+    });
+  }
+
+  function sincronizarCardsRenderizadosDaFase(idFase, quantidadeDesejada = null, opcoes = {}){
     const idF = idNum(idFase);
     const st = estadoFase.get(idF);
     if (!st) return;
+
+    garantirEstruturaVirtualFase(st);
 
     const lista = listaCardsDaFase(idF);
     const qtdDesejadaNormalizada = Math.max(
       TAM_LOTE_POR_FASE,
       idNum(quantidadeDesejada) || st.visiveis || st.rendered || TAM_LOTE_POR_FASE
     );
-    const qtdRenderizar = Math.min(qtdDesejadaNormalizada, lista.length);
+    const qtdRenderizarLogico = Math.min(qtdDesejadaNormalizada, lista.length);
+    const usarVirtualizacao = faseDeveUsarVirtualizacao(qtdRenderizarLogico);
+
+    st.virtualizado = usarVirtualizacao;
+    st.dropEl.classList.toggle("kb-drop-virtualizado", usarVirtualizacao);
+
+    let indiceInicio = 0;
+    let indiceFim = qtdRenderizarLogico;
+    let alturaVirtual = obterAlturaEstimadaVirtual(st);
+
+    if (usarVirtualizacao) {
+      const janela = calcularJanelaVirtualFase(st, qtdRenderizarLogico);
+      indiceInicio = janela.inicio;
+      indiceFim = janela.fim;
+      alturaVirtual = janela.altura;
+
+      if (st.spacerTopoEl) {
+        st.spacerTopoEl.style.display = "block";
+        st.spacerTopoEl.style.height = `${Math.max(0, indiceInicio * alturaVirtual)}px`;
+      }
+      if (st.spacerBaseEl) {
+        st.spacerBaseEl.style.display = "block";
+        st.spacerBaseEl.style.height = `${Math.max(0, (qtdRenderizarLogico - indiceFim) * alturaVirtual)}px`;
+      }
+    } else {
+      if (st.spacerTopoEl) {
+        st.spacerTopoEl.style.height = "0px";
+        st.spacerTopoEl.style.display = "none";
+      }
+      if (st.spacerBaseEl) {
+        st.spacerBaseEl.style.height = "0px";
+        st.spacerBaseEl.style.display = "none";
+      }
+    }
 
     const nosAtuais = new Map();
     const duplicadosParaRemover = [];
@@ -13963,7 +14186,7 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     const fragmento = document.createDocumentFragment();
 
-    for (let i = 0; i < qtdRenderizar; i += 1) {
+    for (let i = indiceInicio; i < indiceFim; i += 1) {
       const card = lista[i];
       const idCard = idNum(card?.IDFatoKanbanCard || 0);
       if (!idCard) continue;
@@ -13981,23 +14204,33 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
       }
 
       noCard.dataset.renderSignature = assinatura;
+      noCard.dataset.virtualIndex = String(i);
       fragmento.appendChild(noCard);
       nosAtuais.delete(idCard);
     }
 
     nosAtuais.forEach(no => no.remove());
 
-    if (st.sentinelEl.parentNode !== st.dropEl) {
-      st.dropEl.appendChild(st.sentinelEl);
-    }
+    garantirEstruturaVirtualFase(st);
+    const referenciaInsercao = usarVirtualizacao && st.spacerBaseEl ? st.spacerBaseEl : st.sentinelEl;
+    st.dropEl.insertBefore(fragmento, referenciaInsercao || null);
 
-    st.dropEl.insertBefore(fragmento, st.sentinelEl);
-    st.rendered = qtdRenderizar;
+    st.rendered = qtdRenderizarLogico;
+    st.cardsNoDom = Math.max(0, indiceFim - indiceInicio);
     st.visiveis = qtdDesejadaNormalizada;
+    st.virtualInicio = indiceInicio;
+    st.virtualFim = indiceFim;
 
+    atualizarAlturaEstimadaVirtual(st);
     atualizarSentinelaFase(idF);
     preencherCabecalhoFase(idF);
+
+    if (typeof st.dropEl._kbAtualizarScrollbarFase === "function") {
+      st.dropEl._kbAtualizarScrollbarFase();
+    }
+    atualizarModoDesempenhoKanban();
   }
+
 
 
   function renderCard(c, idFase, colAccent){
@@ -14079,10 +14312,9 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
     const btnDel = el("button", {
       class:"kb-card-del",
       title:"Remover card",
-      onclick: (e) => {
-        e.stopPropagation();
-        abrirModalRemoverCard(c.IDFatoKanbanCard);
-      }
+      type:"button",
+      "data-acao-card":"remover",
+      "data-card": c.IDFatoKanbanCard
     }, ["−"]);
 
     const topInfo = el("div", {class:"kb-card-top-left"}, [
@@ -14178,6 +14410,7 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
       class:`kb-card${corEspecialCard ? " is-tag-alerta" : ""}`,
       draggable:"true",
       "data-card": c.IDFatoKanbanCard,
+      "data-fase": idF,
       "data-render-signature": obterAssinaturaVisualCard(c)
     };
 
@@ -14187,18 +14420,51 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     const card = el("div", atributosCard, cardChildren);
 
-    card.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/plain", String(c.IDFatoKanbanCard));
-      iniciarModoDrag(c.IDFatoKanbanCard, idF, card, e);
+    return card;
+  }
+
+  function configurarEventosDelegadosCardsKanban(){
+    if (!board || board.dataset.eventosCardsDelegados === "1") return;
+
+    board.addEventListener("click", (evento) => {
+      const botaoRemover = evento.target.closest?.(".kb-card-del[data-acao-card='remover']");
+      if (!botaoRemover || !board.contains(botaoRemover)) return;
+
+      evento.preventDefault();
+      evento.stopPropagation();
+
+      const cardEl = botaoRemover.closest(".kb-card[data-card]");
+      abrirModalRemoverCard(idNum(botaoRemover.dataset.card || cardEl?.dataset.card || 0));
     });
 
-    card.addEventListener("dragend", () => {
+    board.addEventListener("dblclick", (evento) => {
+      if (evento.target.closest?.("button, a, input, select, textarea, label")) return;
+
+      const cardEl = evento.target.closest?.(".kb-card[data-card]");
+      if (!cardEl || !board.contains(cardEl)) return;
+
+      abrirCard(idNum(cardEl.dataset.card || 0));
+    });
+
+    board.addEventListener("dragstart", (evento) => {
+      const cardEl = evento.target.closest?.(".kb-card[data-card]");
+      if (!cardEl || !board.contains(cardEl)) return;
+
+      const idCard = idNum(cardEl.dataset.card || 0);
+      const idFase = idNum(cardEl.dataset.fase || cardEl.closest(".kb-drop[data-fase]")?.dataset.fase || 0);
+      if (!idCard || !idFase) return;
+
+      evento.dataTransfer?.setData("text/plain", String(idCard));
+      iniciarModoDrag(idCard, idFase, cardEl, evento);
+    });
+
+    board.addEventListener("dragend", (evento) => {
+      const cardEl = evento.target.closest?.(".kb-card[data-card]");
+      if (!cardEl || !board.contains(cardEl)) return;
       encerrarModoDrag();
     });
 
-    card.addEventListener("dblclick", () => abrirCard(c.IDFatoKanbanCard));
-
-    return card;
+    board.dataset.eventosCardsDelegados = "1";
   }
 
   function redesenharFases(idsFase, manterScroll = true){
@@ -17302,9 +17568,9 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     socketKanban = window.io(SOCKET_IO_NAMESPACE, {
       path: SOCKET_IO_PATH,
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       upgrade: true,
-      rememberUpgrade: false,
+      rememberUpgrade: true,
       tryAllTransports: true,
       withCredentials: true,
       reconnection: true,
@@ -17393,7 +17659,7 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(cardPayload)) {
         removerCardLocal(idCard);
-        if (idFaseAntes) redesenharFasesLocalmente([idFaseAntes], null, true);
+        if (idFaseAntes) agendarRedesenhoFasesTempoReal([idFaseAntes], null, true);
         agendarRecarregarResumoComercial();
         return;
       }
@@ -17449,7 +17715,7 @@ async function moverCard(idCard, idFasePara, posicao) {
           faseIdDepois,
           (!cardAntes && !cardSaiDoQuadro) ? 1 : 0
         );
-        redesenharFasesLocalmente(idsFases, mapaQuantidadesAoVivo, true);
+        agendarRedesenhoFasesTempoReal(idsFases, mapaQuantidadesAoVivo, true);
         if (!cardSaiDoQuadro && faseIdDepois) {
           destacarCardNaFase(idCard, faseIdDepois);
         }
@@ -17476,7 +17742,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(cardPayload)) {
         removerCardLocal(idCard);
         const idsFasesRemocao = [idFaseDe, idFasePara].filter(Boolean);
-        if (idsFasesRemocao.length) redesenharFasesLocalmente(idsFasesRemocao, null, true);
+        if (idsFasesRemocao.length) agendarRedesenhoFasesTempoReal(idsFasesRemocao, null, true);
         agendarRecarregarResumoComercial();
         return;
       }
@@ -17534,7 +17800,7 @@ async function moverCard(idCard, idFasePara, posicao) {
           idFasePara,
           cardSaiDoQuadro ? 0 : 1
         );
-        redesenharFasesLocalmente(idsFases, mapaQuantidadesAoVivo, true);
+        agendarRedesenhoFasesTempoReal(idsFases, mapaQuantidadesAoVivo, true);
         if (!cardSaiDoQuadro && idFasePara) {
           destacarCardNaFase(idCard, idFasePara);
         }
@@ -17567,7 +17833,7 @@ async function moverCard(idCard, idFasePara, posicao) {
       if (USUARIO_EH_VENDEDOR && !cardPertenceAoVendedorLogado(cardPayload)) {
         removerCardLocal(idCard);
         const idsFasesRemocao = [idFaseAntes, idFaseDepois].filter(Boolean);
-        if (idsFasesRemocao.length) redesenharFasesLocalmente(idsFasesRemocao, null, true);
+        if (idsFasesRemocao.length) agendarRedesenhoFasesTempoReal(idsFasesRemocao, null, true);
         agendarRecarregarResumoComercial();
         return;
       }
@@ -17606,7 +17872,7 @@ async function moverCard(idCard, idFasePara, posicao) {
           idFaseDepois,
           (!cardAntes && !cardSaiDoQuadro) ? 1 : 0
         );
-        redesenharFasesLocalmente(idsFases, mapaQuantidadesAoVivo, true);
+        agendarRedesenhoFasesTempoReal(idsFases, mapaQuantidadesAoVivo, true);
         if (!cardSaiDoQuadro && idFaseDepois) {
           destacarCardNaFase(idCard, idFaseDepois);
         }
@@ -17645,7 +17911,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         }
 
         const idFaseDepois = idNum(cardServidor?.IDDimKanbanFaseAtual || idFaseAntes || 0);
-        if (idFaseDepois) redesenharFasesLocalmente([idFaseAntes, idFaseDepois].filter(Boolean), null, true);
+        if (idFaseDepois) agendarRedesenhoFasesTempoReal([idFaseAntes, idFaseDepois].filter(Boolean), null, true);
         agendarRecarregarResumoComercial();
         return;
       }
@@ -17669,7 +17935,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         }
 
         const idFaseDepois = idNum(cardServidor?.IDDimKanbanFaseAtual || idFaseAntes || 0);
-        if (idFaseDepois) redesenharFasesLocalmente([idFaseAntes, idFaseDepois].filter(Boolean), null, true);
+        if (idFaseDepois) agendarRedesenhoFasesTempoReal([idFaseAntes, idFaseDepois].filter(Boolean), null, true);
         agendarRecarregarResumoComercial();
         return;
       }
@@ -17704,7 +17970,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         if (cardServidor) inserirOuAtualizarCardLocal(cardServidor);
         if (Array.isArray(payload.tags)) setTagsDoCard(idCard, payload.tags);
         const idFase = idNum(cardServidor?.IDDimKanbanFaseAtual || obterCardPorId(idCard)?.IDDimKanbanFaseAtual || 0);
-        if (idFase) redesenharFasesLocalmente([idFase], null, true);
+        if (idFase) agendarRedesenhoFasesTempoReal([idFase], null, true);
         agendarRecarregarResumoComercial();
         return;
       }
@@ -17758,6 +18024,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     if (kanbanInicializado) return;
     kanbanInicializado = true;
 
+    configurarEventosDelegadosCardsKanban();
     await carregar();
     window.setInterval(() => {
       agendarRecarregarResumoComercial();

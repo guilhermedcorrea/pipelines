@@ -15,6 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-transport-https \
     unixodbc \
     unixodbc-dev \
+    libreoffice-writer \
+    fontconfig \
+    fonts-dejavu \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /usr/share/keyrings && \
