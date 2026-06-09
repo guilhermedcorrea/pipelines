@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -27,6 +28,38 @@ MAPA_STATUS_D4_PADRAO: dict[int, str] = {
     7: "Editando",
 }
 
+
+TABELA_CONTRATO_D4 = "[Integracao].[Silver].[FatoContratoD4]"
+TABELA_SIGNATARIO_D4 = "[Integracao].[Silver].[FatoContratoD4Signatario]"
+TABELA_HISTORICO_D4 = "[Integracao].[Silver].[DimHistoricoContratosD4]"
+TABELA_CONTROLE_CONTRATOS = "[Integracao].[Silver].[FatoControleContratosEuromidia]"
+TABELA_CONTROLE_CONTRATOS_ITENS = "[Integracao].[Silver].[FatoControleContratosItensEuromidia]"
+TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
+TABELA_SOLICITACAO_CONTRATO = "[Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]"
+
+ID_EMPRESA_PROPRIETARIA_EUROMIDIA = 3
+
+ID_STATUS_CONTRATO_DOCUMENTO_GERADO = 3
+ID_STATUS_CONTRATO_PENDENTE_ENVIO = 4
+ID_STATUS_CONTRATO_ENVIADO_ASSINATURA = 5
+ID_STATUS_CONTRATO_EM_ASSINATURA = 6
+ID_STATUS_CONTRATO_ATIVO = 7
+ID_STATUS_CONTRATO_CANCELADO = 9
+
+
+def obter_int_env(nome_variavel: str, padrao: int) -> int:
+    """Leio inteiro do ambiente sem quebrar o parse da DAG se vier vazio ou inválido."""
+    try:
+        return int(str(os.getenv(nome_variavel, str(padrao)) or str(padrao)).strip())
+    except Exception:
+        return int(padrao)
+
+
+ID_STATUS_ASSINATURA_D4_PENDENTE = obter_int_env("D4SIGN_ID_STATUS_ASSINATURA_PENDENTE", 1)
+ID_STATUS_ASSINATURA_D4_VISUALIZOU = obter_int_env("D4SIGN_ID_STATUS_ASSINATURA_VISUALIZOU", 2)
+ID_STATUS_ASSINATURA_D4_ASSINADO = obter_int_env("D4SIGN_ID_STATUS_ASSINATURA_ASSINADO", 3)
+ID_STATUS_ASSINATURA_D4_EMAIL_ERRO = obter_int_env("D4SIGN_ID_STATUS_ASSINATURA_EMAIL_ERRO", 4)
+
 TAGS_DAG = ["Euromidia", "Contratos", "D4Sign", "SQLServer", "API"]
 
 DOCUMENTACAO_DAG = """
@@ -47,6 +80,8 @@ ativos que ainda não estão em status final: Finalizado, Arquivado ou Cancelado
 5. Consulta cada documento na D4Sign pelo UUID.
 6. Converte o status retornado pela API para o `IDDimStatusD4` da dimensão.
 7. Atualiza a tabela fato somente quando houver mudança de status ou metadados relevantes.
+8. Propaga o status para `[Integracao].[Silver].[FatoControleContratosEuromidia]`.
+9. Sincroniza o texto de status em `[Integracao].[Silver].[FatoControleContratosItensEuromidia]`.
 
 ## Status esperados
 
@@ -66,8 +101,9 @@ ativos que ainda não estão em status final: Finalizado, Arquivado ou Cancelado
 
 ## Variáveis opcionais desta DAG
 
-- `D4SIGN_LIMITE_CONTRATOS_POR_EXECUCAO`: limite de contratos consultados por execução. Padrão: 10.
+- `D4SIGN_LIMITE_CONTRATOS_POR_EXECUCAO`: limite de contratos consultados por execução. Padrão: 100.
 - `D4SIGN_INTERVALO_SEGUNDOS_ENTRE_CONSULTAS`: pausa entre consultas na API. Padrão: 0.2.
+- `D4SIGN_LIMITE_SINCRONIZACAO_LOCAL_POR_EXECUCAO`: limite da sincronização local sem API. Padrão: 1000.
 - `D4SIGN_CONSULTAR_STATUS_FINAIS`: se for `1`, também consulta contratos já finalizados, arquivados ou cancelados. Padrão: `0`.
 - `D4SIGN_VALIDAR_CONEXAO_A_CADA_EXECUCAO`: se for `1`, chama `listar_cofres()` antes de consultar contratos. Padrão: `0`, para evitar chamada extra na API a cada minuto.
 
@@ -393,6 +429,7 @@ def metadados_mudaram(contrato_banco: dict[str, Any], metadados_api: dict[str, A
     """Verifico se algum campo retornado pela API está diferente do banco."""
     campos_comparacao = [
         "IDDimStatusD4",
+        "IDDimStatusContratos",
         "IDFaseD4",
         "NomeFaseD4",
         "UUIDCofreD4",
@@ -410,6 +447,675 @@ def metadados_mudaram(contrato_banco: dict[str, Any], metadados_api: dict[str, A
             return True
 
     return False
+
+
+
+def buscar_valor_recursivo_d4(dados: Any, nomes_chaves: list[str]) -> Any:
+    """Procuro valor em qualquer nível do retorno da API da D4Sign."""
+    nomes = {normalizar_texto(nome) for nome in nomes_chaves}
+
+    if isinstance(dados, dict):
+        for chave, valor in dados.items():
+            if normalizar_texto(chave) in nomes and valor not in (None, ""):
+                return valor
+
+            encontrado = buscar_valor_recursivo_d4(valor, nomes_chaves)
+            if encontrado not in (None, ""):
+                return encontrado
+
+    if isinstance(dados, list):
+        for item in dados:
+            encontrado = buscar_valor_recursivo_d4(item, nomes_chaves)
+            if encontrado not in (None, ""):
+                return encontrado
+
+    return None
+
+
+def coletar_dicionarios_com_email_d4(dados: Any) -> list[dict[str, Any]]:
+    """Coleto objetos da API que pareçam representar signatários."""
+    encontrados: list[dict[str, Any]] = []
+
+    if isinstance(dados, dict):
+        email = buscar_valor_recursivo_d4(dados, ["email", "EmailSignatario"])
+        if email:
+            encontrados.append(dados)
+
+        for valor in dados.values():
+            encontrados.extend(coletar_dicionarios_com_email_d4(valor))
+
+    elif isinstance(dados, list):
+        for item in dados:
+            encontrados.extend(coletar_dicionarios_com_email_d4(item))
+
+    return encontrados
+
+
+def valor_bool_para_bit_d4(valor: Any) -> int:
+    """Converto booleanos/textos para 0 ou 1."""
+    if isinstance(valor, bool):
+        return 1 if valor else 0
+
+    if isinstance(valor, int):
+        return 1 if valor == 1 else 0
+
+    texto = normalizar_texto(valor)
+    if texto in {"1", "true", "sim", "yes", "y", "on", "s", "ok", "enviado", "sent", "assinado", "signed", "visualizado", "viewed"}:
+        return 1
+
+    return 0
+
+
+def resolver_status_contrato_por_status_d4(id_status_d4: int | None, status_atual: Any = None) -> int | None:
+    """Transformo o status atual da D4Sign no status do contrato interno."""
+    id_status = converter_int(id_status_d4)
+
+    if id_status == 4 or id_status == 5:
+        return ID_STATUS_CONTRATO_ATIVO
+
+    if id_status == 6:
+        return ID_STATUS_CONTRATO_CANCELADO
+
+    if id_status == 3:
+        return ID_STATUS_CONTRATO_EM_ASSINATURA
+
+    if id_status == 2:
+        return ID_STATUS_CONTRATO_ENVIADO_ASSINATURA
+
+    if id_status == 1:
+        return ID_STATUS_CONTRATO_PENDENTE_ENVIO
+
+    return converter_int(status_atual)
+
+
+def extrair_signatarios_api_d4(documento: dict[str, Any], id_status_d4: int | None) -> list[dict[str, Any]]:
+    """Extraio o máximo possível de signatários do retorno da API D4Sign."""
+    candidatos = coletar_dicionarios_com_email_d4(documento)
+    resultado: list[dict[str, Any]] = []
+    emails_vistos: set[str] = set()
+
+    for item in candidatos:
+        email = limitar_texto(
+            buscar_valor_recursivo_d4(item, ["email", "EmailSignatario", "email_signatario", "signer_email"]),
+            255,
+        )
+
+        if not email:
+            continue
+
+        chave_email = email.strip().lower()
+        if chave_email in emails_vistos:
+            continue
+        emails_vistos.add(chave_email)
+
+        data_envio = limitar_texto(
+            buscar_valor_recursivo_d4(item, ["sent_at", "send_at", "email_sent_at", "DataEnvioD4", "created_at", "createdAt"]),
+            100,
+        )
+        data_primeira_visualizacao = limitar_texto(
+            buscar_valor_recursivo_d4(item, ["first_viewed_at", "first_opened_at", "viewed_at", "opened_at", "DataPrimeiraVisualizacaoD4"]),
+            100,
+        )
+        data_ultima_visualizacao = limitar_texto(
+            buscar_valor_recursivo_d4(item, ["last_viewed_at", "last_opened_at", "viewed_at", "opened_at", "DataUltimaVisualizacaoD4"]),
+            100,
+        )
+        data_assinatura = limitar_texto(
+            buscar_valor_recursivo_d4(item, ["signed_at", "signedAt", "signature_date", "DataAssinaturaD4"]),
+            100,
+        )
+
+        texto_status = normalizar_texto(
+            buscar_valor_recursivo_d4(item, ["status", "status_assinatura", "signature_status", "message"])
+        )
+
+        bit_assinado = 1 if data_assinatura or id_status_d4 in (4, 5) or "signed" in texto_status or "assinado" in texto_status else 0
+        bit_visualizou = 1 if data_primeira_visualizacao or data_ultima_visualizacao or "view" in texto_status or "visualiz" in texto_status or "opened" in texto_status else 0
+        bit_email_enviado = 1 if data_envio or valor_bool_para_bit_d4(buscar_valor_recursivo_d4(item, ["email_sent", "BitEmailEnviado", "sent"])) else 0
+
+        if bit_assinado:
+            id_status_assinatura = ID_STATUS_ASSINATURA_D4_ASSINADO
+        elif bit_visualizou:
+            id_status_assinatura = ID_STATUS_ASSINATURA_D4_VISUALIZOU
+        elif "erro" in texto_status or "error" in texto_status or "failed" in texto_status:
+            id_status_assinatura = ID_STATUS_ASSINATURA_D4_EMAIL_ERRO
+        else:
+            id_status_assinatura = ID_STATUS_ASSINATURA_D4_PENDENTE
+
+        geolocalizacao = buscar_valor_recursivo_d4(item, ["geolocation", "geo_location", "location", "GeolocalizacaoAssinaturaD4"])
+        if isinstance(geolocalizacao, (dict, list)):
+            geolocalizacao = json.dumps(geolocalizacao, ensure_ascii=False, default=str)
+
+        resultado.append(
+            {
+                "KeySignerD4": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["uuid", "key_signer", "keySigner", "signer_key", "id", "KeySignerD4"]),
+                    100,
+                ),
+                "EmailSignatario": email,
+                "NomeSignatario": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["name", "nome", "full_name", "fullName", "signer_name", "NomeSignatario"]),
+                    255,
+                ),
+                "DocumentoSignatario": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["identification_number", "document", "documento", "cpf", "cnpj", "DocumentoSignatario"]),
+                    100,
+                ),
+                "TelefoneSignatario": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["phone", "telephone", "telefone", "celular", "mobile", "whatsapp", "TelefoneSignatario"]),
+                    50,
+                ),
+                "BitContatoPrincipal": valor_bool_para_bit_d4(
+                    buscar_valor_recursivo_d4(item, ["main", "principal", "is_main", "main_contact", "BitContatoPrincipal"])
+                ),
+                "IDDimStatusAssinaturaD4": id_status_assinatura,
+                "BitEmailEnviado": bit_email_enviado,
+                "StatusEnvioEmailD4": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["email_status", "status_email", "StatusEnvioEmailD4", "send_status"]),
+                    100,
+                ),
+                "MensagemEnvioEmailD4": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["email_message", "message_email", "MensagemEnvioEmailD4", "send_message", "error_message"]),
+                    1000,
+                ),
+                "BitVisualizouDocumento": bit_visualizou,
+                "DataPrimeiraVisualizacaoD4": data_primeira_visualizacao,
+                "DataUltimaVisualizacaoD4": data_ultima_visualizacao,
+                "BitAssinado": bit_assinado,
+                "DataEnvioD4": data_envio,
+                "DataAssinaturaD4": data_assinatura,
+                "IpAssinaturaD4": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["ip", "ip_address", "ipAddress", "signature_ip", "IpAssinaturaD4"]),
+                    100,
+                ),
+                "GeolocalizacaoAssinaturaD4": limitar_texto(geolocalizacao, 500),
+                "UserAgentAssinaturaD4": limitar_texto(
+                    buscar_valor_recursivo_d4(item, ["user_agent", "userAgent", "signature_user_agent", "UserAgentAssinaturaD4"]),
+                    500,
+                ),
+                "SegundosAtePrimeiraVisualizacao": converter_int(
+                    buscar_valor_recursivo_d4(item, ["seconds_to_first_view", "SegundosAtePrimeiraVisualizacao"])
+                ),
+                "SegundosAteAssinatura": converter_int(
+                    buscar_valor_recursivo_d4(item, ["seconds_to_signature", "SegundosAteAssinatura"])
+                ),
+            }
+        )
+
+    return resultado
+
+
+def resolver_status_final_euromidia(status_atual: Any, status_novo: Any) -> int | None:
+    """Resolvo o status final sem deixar consulta atrasada voltar a esteira."""
+    id_status_atual = converter_int(status_atual)
+    id_status_novo = converter_int(status_novo)
+
+    if id_status_novo is None:
+        return id_status_atual
+
+    if id_status_novo == ID_STATUS_CONTRATO_CANCELADO:
+        return ID_STATUS_CONTRATO_CANCELADO
+
+    if id_status_novo == ID_STATUS_CONTRATO_ATIVO:
+        return ID_STATUS_CONTRATO_ATIVO
+
+    if id_status_atual is None:
+        return id_status_novo
+
+    if id_status_atual == ID_STATUS_CONTRATO_CANCELADO:
+        return ID_STATUS_CONTRATO_CANCELADO
+
+    if id_status_atual == ID_STATUS_CONTRATO_ATIVO:
+        return ID_STATUS_CONTRATO_ATIVO
+
+    if id_status_novo > id_status_atual:
+        return id_status_novo
+
+    return id_status_atual
+
+
+def buscar_status_atual_controle_euromidia(conexao, id_fato_controle_contrato: int) -> int | None:
+    """Leio o status atual da tabela principal da esteira do contrato."""
+    sql = text(f"""
+        SELECT TOP (1)
+            IDDimStatusContratos
+        FROM {TABELA_CONTROLE_CONTRATOS} WITH (UPDLOCK, ROWLOCK)
+        WHERE IDFatoControleContratosEuromidia = :IDFatoControleContratosEuromidia
+          AND ISNULL(BitAtivo, 1) = 1;
+    """)
+    linha = conexao.execute(
+        sql,
+        {"IDFatoControleContratosEuromidia": id_fato_controle_contrato},
+    ).mappings().first()
+
+    if not linha:
+        return None
+
+    return converter_int(linha.get("IDDimStatusContratos"))
+
+
+
+def inserir_historico_d4(conexao, parametros: dict[str, Any]) -> dict[str, Any]:
+    """Insiro histórico somente quando o último status gravado for diferente."""
+    id_controle = converter_int(parametros.get("IDFatoControleContratosEuromidia"))
+    id_status_contrato = converter_int(parametros.get("IDDimStatusContratos"))
+    id_status_d4 = converter_int(parametros.get("IDDimStatusD4"))
+
+    if not id_controle or (id_status_contrato is None and id_status_d4 is None):
+        return {
+            "historico_inserido": False,
+            "motivo": "sem_contrato_ou_sem_status",
+            "id_controle": id_controle,
+            "id_status_contrato": id_status_contrato,
+            "id_status_d4": id_status_d4,
+        }
+
+    sql = text(f"""
+        ;WITH UltimoHistorico AS (
+            SELECT TOP (1)
+                IDDimStatusContratos,
+                IDDimStatusD4
+            FROM {TABELA_HISTORICO_D4} WITH (READPAST)
+            WHERE IDEmpresaProprietaria = :IDEmpresaProprietaria
+              AND IDFatoControleContratosEuromidia = :IDFatoControleContratosEuromidia
+            ORDER BY DataStatus DESC, IDDimHistoricoContratos DESC
+        )
+        INSERT INTO {TABELA_HISTORICO_D4}
+        (
+            IDEmpresaProprietaria,
+            IDFatoControleContratosEuromidia,
+            IDDimStatusContratos,
+            IDDimStatusD4,
+            DataStatus
+        )
+        OUTPUT INSERTED.IDDimHistoricoContratos AS IDDimHistoricoContratos
+        SELECT
+            :IDEmpresaProprietaria,
+            :IDFatoControleContratosEuromidia,
+            :IDDimStatusContratos,
+            :IDDimStatusD4,
+            COALESCE(TRY_CONVERT(datetime2(3), :DataStatus, 126), SYSDATETIME())
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM UltimoHistorico
+            WHERE ISNULL(IDDimStatusContratos, -1) = ISNULL(:IDDimStatusContratos, -1)
+              AND ISNULL(IDDimStatusD4, -1) = ISNULL(:IDDimStatusD4, -1)
+        );
+    """)
+
+    linha = conexao.execute(
+        sql,
+        {
+            "IDEmpresaProprietaria": ID_EMPRESA_PROPRIETARIA_EUROMIDIA,
+            "IDFatoControleContratosEuromidia": id_controle,
+            "IDDimStatusContratos": id_status_contrato,
+            "IDDimStatusD4": id_status_d4,
+            "DataStatus": parametros.get("DataStatus"),
+        },
+    ).mappings().first()
+
+    return {
+        "historico_inserido": bool(linha),
+        "id_historico": int(linha["IDDimHistoricoContratos"]) if linha and linha.get("IDDimHistoricoContratos") is not None else None,
+        "id_controle": id_controle,
+        "id_status_contrato": id_status_contrato,
+        "id_status_d4": id_status_d4,
+    }
+
+
+def propagar_status_contrato_euromidia(
+    conexao,
+    *,
+    id_fato_controle_contrato: int | None,
+    id_status_contrato: int | None,
+    id_fato_kanban_card: int | None = None,
+    id_status_d4: int | None = None,
+    registrar_historico: bool = True,
+) -> dict[str, Any]:
+    """Sincronizo a esteira inteira com o status atual do documento D4.
+
+    Esta função é a garantia do fluxo. Ela não depende do webhook.
+    Sempre que a DAG manual roda, ela pega o estado conhecido em FatoContratoD4/API
+    e força a mesma verdade em:
+    - FatoControleContratosEuromidia
+    - FatoControleContratosItensEuromidia
+    - FatoSolicitacaoContratoEuromidia
+    - DimHistoricoContratosD4
+    """
+    id_controle = converter_int(id_fato_controle_contrato)
+    id_card = converter_int(id_fato_kanban_card)
+    id_status_novo = converter_int(id_status_contrato)
+    id_d4 = converter_int(id_status_d4)
+
+    if not id_controle or id_status_novo is None:
+        return {
+            "propagou": False,
+            "motivo": "sem_id_controle_ou_sem_status",
+            "id_controle": id_controle,
+            "id_status_novo": id_status_novo,
+            "id_status_d4": id_d4,
+        }
+
+    status_atual = buscar_status_atual_controle_euromidia(conexao, id_controle)
+    status_final = resolver_status_final_euromidia(status_atual, id_status_novo)
+
+    if status_final is None:
+        return {
+            "propagou": False,
+            "motivo": "status_final_nulo",
+            "id_controle": id_controle,
+            "status_atual": status_atual,
+            "id_status_novo": id_status_novo,
+            "id_status_d4": id_d4,
+        }
+
+    sql_cabecalho = text(f"""
+        UPDATE {TABELA_CONTROLE_CONTRATOS}
+        SET
+            IDDimStatusContratos = :IDDimStatusContratos,
+            DataAtualizacao = SYSDATETIME()
+        WHERE IDFatoControleContratosEuromidia = :IDFatoControleContratosEuromidia
+          AND ISNULL(BitAtivo, 1) = 1
+          AND (
+                IDDimStatusContratos IS NULL
+                OR IDDimStatusContratos <> :IDDimStatusContratos
+          );
+    """)
+    resultado_cabecalho = conexao.execute(
+        sql_cabecalho,
+        {
+            "IDFatoControleContratosEuromidia": id_controle,
+            "IDDimStatusContratos": status_final,
+        },
+    )
+
+    sql_itens = text(f"""
+        UPDATE itens
+        SET
+            itens.Status = status_contrato.Status,
+            itens.DataAtualizacao = SYSDATETIME()
+        FROM {TABELA_CONTROLE_CONTRATOS_ITENS} itens
+        INNER JOIN {TABELA_STATUS_CONTRATOS} status_contrato
+            ON status_contrato.IDDimStatusContratos = :IDDimStatusContratos
+           AND status_contrato.IDEmpresaProprietaria = :IDEmpresaProprietaria
+        WHERE itens.IDFatoControleContratoEuromidia = :IDFatoControleContratosEuromidia
+          AND ISNULL(itens.BitAtivo, 1) = 1
+          AND (
+                itens.Status IS NULL
+                OR LTRIM(RTRIM(itens.Status)) <> LTRIM(RTRIM(status_contrato.Status))
+          );
+    """)
+    resultado_itens = conexao.execute(
+        sql_itens,
+        {
+            "IDFatoControleContratosEuromidia": id_controle,
+            "IDDimStatusContratos": status_final,
+            "IDEmpresaProprietaria": ID_EMPRESA_PROPRIETARIA_EUROMIDIA,
+        },
+    )
+
+    sql_solicitacao = text(f"""
+        UPDATE solicitacao
+        SET
+            solicitacao.IDDimStatusContratos = :IDDimStatusContratos,
+            solicitacao.DataAtualizacao = SYSDATETIME()
+        FROM {TABELA_SOLICITACAO_CONTRATO} solicitacao
+        WHERE ISNULL(solicitacao.BitAtivo, 1) = 1
+          AND (
+                solicitacao.IDFatoControleContratosEuromidia = :IDFatoControleContratosEuromidia
+                OR (
+                    :IDFatoKanbanCard IS NOT NULL
+                    AND solicitacao.IDFatoKanbanCard = :IDFatoKanbanCard
+                )
+          )
+          AND (
+                solicitacao.IDDimStatusContratos IS NULL
+                OR solicitacao.IDDimStatusContratos <> :IDDimStatusContratos
+          );
+    """)
+    resultado_solicitacao = conexao.execute(
+        sql_solicitacao,
+        {
+            "IDFatoControleContratosEuromidia": id_controle,
+            "IDFatoKanbanCard": id_card,
+            "IDDimStatusContratos": status_final,
+        },
+    )
+
+    historico = None
+    if registrar_historico:
+        historico = inserir_historico_d4(
+            conexao,
+            {
+                "IDFatoControleContratosEuromidia": id_controle,
+                "IDDimStatusContratos": status_final,
+                "IDDimStatusD4": id_d4,
+            },
+        )
+
+    return {
+        "propagou": True,
+        "id_controle": id_controle,
+        "id_card": id_card,
+        "status_atual_controle": status_atual,
+        "status_evento": id_status_novo,
+        "status_final": status_final,
+        "id_status_d4": id_d4,
+        "cabecalho_atualizado": int(resultado_cabecalho.rowcount or 0),
+        "itens_atualizados": int(resultado_itens.rowcount or 0),
+        "solicitacoes_atualizadas": int(resultado_solicitacao.rowcount or 0),
+        "historico": historico,
+    }
+
+
+def sincronizar_estado_local_d4_com_esteira(hook_sql: HookSqlServer) -> dict[str, Any]:
+    """Sincronizo a esteira usando o que já está gravado na FatoContratoD4.
+
+    Esta etapa não chama a API e não depende de webhook. Ela existe para garantir
+    que, ao executar a DAG manualmente, contratos como o 5875 saiam de Pendente
+    Geração quando a FatoContratoD4 já sabe que o documento foi enviado.
+    """
+    limite = obter_int_env("D4SIGN_LIMITE_SINCRONIZACAO_LOCAL_POR_EXECUCAO", 1000)
+    if limite <= 0:
+        limite = 1000
+
+    contratos = hook_sql.executar_select(
+        f"""
+        SELECT TOP ({limite})
+            IDFatoContratoD4,
+            IDFatoControleContratosEuromidia,
+            IDFatoKanbanCard,
+            IDDimStatusContratos,
+            IDDimStatusD4,
+            UUIDDocumentoD4,
+            NomeDocumentoD4,
+            DataAtualizacao,
+            DataCriacao
+        FROM {TABELA_CONTRATO_D4}
+        WHERE ISNULL(BitAtivo, 1) = 1
+          AND IDFatoControleContratosEuromidia IS NOT NULL
+          AND IDDimStatusContratos IS NOT NULL
+        ORDER BY
+            ISNULL(DataAtualizacao, DataCriacao) DESC,
+            IDFatoContratoD4 DESC
+        """
+    )
+
+    resultados: list[dict[str, Any]] = []
+    engine = hook_sql.obter_engine()
+    with engine.begin() as conexao:
+        for contrato in contratos:
+            resultados.append(
+                propagar_status_contrato_euromidia(
+                    conexao,
+                    id_fato_controle_contrato=contrato.get("IDFatoControleContratosEuromidia"),
+                    id_fato_kanban_card=contrato.get("IDFatoKanbanCard"),
+                    id_status_contrato=contrato.get("IDDimStatusContratos"),
+                    id_status_d4=contrato.get("IDDimStatusD4"),
+                    registrar_historico=True,
+                )
+            )
+
+    return {
+        "contratos_sincronizados_localmente": len(resultados),
+        "resultados_sincronizacao_local": resultados[:100],
+    }
+
+
+def upsert_signatario_d4_api(
+    conexao,
+    *,
+    contrato: dict[str, Any],
+    signatario: dict[str, Any],
+    payload_json: str,
+) -> str:
+    """Atualizo/crio signatário com os campos disponíveis na consulta da API."""
+    email = signatario.get("EmailSignatario")
+    if not email:
+        return "ignorado_sem_email"
+
+    params = {
+        "IDFatoContratoD4": contrato.get("IDFatoContratoD4"),
+        "IDFatoControleContratosEuromidia": contrato.get("IDFatoControleContratosEuromidia"),
+        "IDFatoKanbanCard": contrato.get("IDFatoKanbanCard"),
+        "IDEmpresa": contrato.get("IDEmpresa"),
+        "KeySignerD4": signatario.get("KeySignerD4"),
+        "EmailSignatario": email,
+        "NomeSignatario": signatario.get("NomeSignatario"),
+        "DocumentoSignatario": signatario.get("DocumentoSignatario"),
+        "TelefoneSignatario": signatario.get("TelefoneSignatario"),
+        "BitContatoPrincipal": int(signatario.get("BitContatoPrincipal") or 0),
+        "IDDimStatusAssinaturaD4": signatario.get("IDDimStatusAssinaturaD4"),
+        "BitEmailEnviado": int(signatario.get("BitEmailEnviado") or 0),
+        "StatusEnvioEmailD4": signatario.get("StatusEnvioEmailD4"),
+        "MensagemEnvioEmailD4": signatario.get("MensagemEnvioEmailD4"),
+        "BitVisualizouDocumento": int(signatario.get("BitVisualizouDocumento") or 0),
+        "DataPrimeiraVisualizacaoD4": signatario.get("DataPrimeiraVisualizacaoD4"),
+        "DataUltimaVisualizacaoD4": signatario.get("DataUltimaVisualizacaoD4"),
+        "BitAssinado": int(signatario.get("BitAssinado") or 0),
+        "DataEnvioD4": signatario.get("DataEnvioD4"),
+        "DataAssinaturaD4": signatario.get("DataAssinaturaD4"),
+        "IpAssinaturaD4": signatario.get("IpAssinaturaD4"),
+        "GeolocalizacaoAssinaturaD4": signatario.get("GeolocalizacaoAssinaturaD4"),
+        "UserAgentAssinaturaD4": signatario.get("UserAgentAssinaturaD4"),
+        "SegundosAtePrimeiraVisualizacao": signatario.get("SegundosAtePrimeiraVisualizacao"),
+        "SegundosAteAssinatura": signatario.get("SegundosAteAssinatura"),
+        "PayloadJson": payload_json,
+    }
+
+    sql_update = text(f"""
+        UPDATE {TABELA_SIGNATARIO_D4}
+        SET
+            KeySignerD4 = COALESCE(:KeySignerD4, KeySignerD4),
+            NomeSignatario = COALESCE(:NomeSignatario, NomeSignatario),
+            DocumentoSignatario = COALESCE(:DocumentoSignatario, DocumentoSignatario),
+            TelefoneSignatario = COALESCE(:TelefoneSignatario, TelefoneSignatario),
+            BitContatoPrincipal = CASE WHEN :BitContatoPrincipal = 1 THEN 1 ELSE BitContatoPrincipal END,
+            IDDimStatusAssinaturaD4 = COALESCE(:IDDimStatusAssinaturaD4, IDDimStatusAssinaturaD4),
+            BitEmailEnviado = CASE WHEN :BitEmailEnviado = 1 THEN 1 ELSE BitEmailEnviado END,
+            StatusEnvioEmailD4 = COALESCE(:StatusEnvioEmailD4, StatusEnvioEmailD4),
+            MensagemEnvioEmailD4 = COALESCE(:MensagemEnvioEmailD4, MensagemEnvioEmailD4),
+            BitVisualizouDocumento = CASE WHEN :BitVisualizouDocumento = 1 THEN 1 ELSE BitVisualizouDocumento END,
+            DataPrimeiraVisualizacaoD4 = COALESCE(DataPrimeiraVisualizacaoD4, TRY_CONVERT(datetime2(7), :DataPrimeiraVisualizacaoD4, 126)),
+            DataUltimaVisualizacaoD4 = COALESCE(TRY_CONVERT(datetime2(7), :DataUltimaVisualizacaoD4, 126), DataUltimaVisualizacaoD4),
+            BitAssinado = CASE WHEN :BitAssinado = 1 THEN 1 ELSE BitAssinado END,
+            DataEnvioD4 = COALESCE(DataEnvioD4, TRY_CONVERT(datetime2(7), :DataEnvioD4, 126)),
+            DataAssinaturaD4 = CASE
+                WHEN :BitAssinado = 1
+                    THEN COALESCE(TRY_CONVERT(datetime2(7), :DataAssinaturaD4, 126), DataAssinaturaD4, SYSDATETIME())
+                ELSE DataAssinaturaD4
+            END,
+            IpAssinaturaD4 = COALESCE(:IpAssinaturaD4, IpAssinaturaD4),
+            GeolocalizacaoAssinaturaD4 = COALESCE(:GeolocalizacaoAssinaturaD4, GeolocalizacaoAssinaturaD4),
+            UserAgentAssinaturaD4 = COALESCE(:UserAgentAssinaturaD4, UserAgentAssinaturaD4),
+            SegundosAtePrimeiraVisualizacao = COALESCE(:SegundosAtePrimeiraVisualizacao, SegundosAtePrimeiraVisualizacao),
+            SegundosAteAssinatura = COALESCE(:SegundosAteAssinatura, SegundosAteAssinatura),
+            PayloadUltimaConsultaD4 = :PayloadJson,
+            DataUltimaConsultaD4 = SYSDATETIME(),
+            DataAtualizacao = SYSDATETIME(),
+            BitAtivo = 1
+        WHERE IDFatoContratoD4 = :IDFatoContratoD4
+          AND LOWER(LTRIM(RTRIM(EmailSignatario))) = LOWER(LTRIM(RTRIM(:EmailSignatario)));
+    """)
+    resultado = conexao.execute(sql_update, params)
+
+    if resultado.rowcount and resultado.rowcount > 0:
+        return "update"
+
+    sql_insert = text(f"""
+        INSERT INTO {TABELA_SIGNATARIO_D4}
+        (
+            IDFatoContratoD4,
+            IDFatoControleContratosEuromidia,
+            IDFatoKanbanCard,
+            IDEmpresa,
+            KeySignerD4,
+            EmailSignatario,
+            NomeSignatario,
+            DocumentoSignatario,
+            TelefoneSignatario,
+            BitContatoPrincipal,
+            IDDimStatusAssinaturaD4,
+            BitEmailEnviado,
+            StatusEnvioEmailD4,
+            MensagemEnvioEmailD4,
+            BitVisualizouDocumento,
+            DataPrimeiraVisualizacaoD4,
+            DataUltimaVisualizacaoD4,
+            BitAssinado,
+            DataEnvioD4,
+            DataAssinaturaD4,
+            IpAssinaturaD4,
+            GeolocalizacaoAssinaturaD4,
+            UserAgentAssinaturaD4,
+            SegundosAtePrimeiraVisualizacao,
+            SegundosAteAssinatura,
+            PayloadUltimaConsultaD4,
+            DataUltimaConsultaD4,
+            DataCriacao,
+            DataAtualizacao,
+            BitAtivo
+        )
+        VALUES
+        (
+            :IDFatoContratoD4,
+            :IDFatoControleContratosEuromidia,
+            :IDFatoKanbanCard,
+            :IDEmpresa,
+            :KeySignerD4,
+            :EmailSignatario,
+            :NomeSignatario,
+            :DocumentoSignatario,
+            :TelefoneSignatario,
+            :BitContatoPrincipal,
+            :IDDimStatusAssinaturaD4,
+            :BitEmailEnviado,
+            :StatusEnvioEmailD4,
+            :MensagemEnvioEmailD4,
+            :BitVisualizouDocumento,
+            TRY_CONVERT(datetime2(7), :DataPrimeiraVisualizacaoD4, 126),
+            TRY_CONVERT(datetime2(7), :DataUltimaVisualizacaoD4, 126),
+            :BitAssinado,
+            TRY_CONVERT(datetime2(7), :DataEnvioD4, 126),
+            CASE
+                WHEN :BitAssinado = 1
+                    THEN COALESCE(TRY_CONVERT(datetime2(7), :DataAssinaturaD4, 126), SYSDATETIME())
+                ELSE TRY_CONVERT(datetime2(7), :DataAssinaturaD4, 126)
+            END,
+            :IpAssinaturaD4,
+            :GeolocalizacaoAssinaturaD4,
+            :UserAgentAssinaturaD4,
+            :SegundosAtePrimeiraVisualizacao,
+            :SegundosAteAssinatura,
+            :PayloadJson,
+            SYSDATETIME(),
+            SYSDATETIME(),
+            SYSDATETIME(),
+            1
+        );
+    """)
+    conexao.execute(sql_insert, params)
+    return "insert"
 
 
 @dag(
@@ -457,9 +1163,9 @@ def pipeline_update_contrato_D4():
         hook_sql = HookSqlServer()
         hook_d4 = HookD4Sign()
 
-        limite_contratos = int(os.getenv("D4SIGN_LIMITE_CONTRATOS_POR_EXECUCAO", "10"))
+        limite_contratos = int(os.getenv("D4SIGN_LIMITE_CONTRATOS_POR_EXECUCAO", "100"))
         if limite_contratos <= 0:
-            limite_contratos = 10
+            limite_contratos = 100
 
         consultar_status_finais = os.getenv("D4SIGN_CONSULTAR_STATUS_FINAIS", "0").strip() == "1"
         filtro_status_finais = "" if consultar_status_finais else "AND ISNULL(IDDimStatusD4, 0) NOT IN (4, 5, 6)"
@@ -520,6 +1226,9 @@ def pipeline_update_contrato_D4():
         logging.info("Contratos D4 encontrados para verificação: %s", len(contratos))
 
         atualizacoes: list[dict[str, Any]] = []
+        propagacoes_para_controle: list[dict[str, Any]] = []
+        resultados_propagacao: list[dict[str, Any]] = []
+        signatarios_para_upsert: list[dict[str, Any]] = []
         erros: list[dict[str, Any]] = []
         ignorados_sem_status = 0
         sem_mudanca = 0
@@ -556,6 +1265,22 @@ def pipeline_update_contrato_D4():
                     nome_status=nome_status,
                 )
                 metadados_api["IDFatoContratoD4"] = id_fato_contrato_d4
+                metadados_api["IDDimStatusContratos"] = resolver_status_contrato_por_status_d4(
+                    id_status,
+                    contrato.get("IDDimStatusContratos"),
+                )
+                metadados_api["IDFatoControleContratosEuromidia"] = contrato.get("IDFatoControleContratosEuromidia")
+                metadados_api["IDFatoKanbanCard"] = contrato.get("IDFatoKanbanCard")
+                metadados_api["IDDimStatusD4Anterior"] = contrato.get("IDDimStatusD4")
+                metadados_api["IDDimStatusContratosAnterior"] = contrato.get("IDDimStatusContratos")
+                metadados_api["SignatariosD4"] = extrair_signatarios_api_d4(documento, id_status)
+                metadados_api["PayloadJsonD4"] = json.dumps(documento, ensure_ascii=False, default=str)
+                metadados_api["ContratoBanco"] = dict(contrato)
+
+                propagacoes_para_controle.append(metadados_api)
+
+                if metadados_api["SignatariosD4"]:
+                    signatarios_para_upsert.append(metadados_api)
 
                 if metadados_mudaram(contrato, metadados_api):
                     atualizacoes.append(metadados_api)
@@ -589,10 +1314,11 @@ def pipeline_update_contrato_D4():
 
         if atualizacoes:
             sql_update = text(
-                """
-                UPDATE [Integracao].[Silver].[FatoContratoD4]
+                f"""
+                UPDATE {TABELA_CONTRATO_D4}
                 SET
                     IDDimStatusD4 = :IDDimStatusD4,
+                    IDDimStatusContratos = COALESCE(:IDDimStatusContratos, IDDimStatusContratos),
                     IDFaseD4 = COALESCE(:IDFaseD4, IDFaseD4),
                     NomeFaseD4 = COALESCE(:NomeFaseD4, NomeFaseD4),
                     UUIDCofreD4 = COALESCE(:UUIDCofreD4, UUIDCofreD4),
@@ -612,7 +1338,46 @@ def pipeline_update_contrato_D4():
             engine = hook_sql.obter_engine()
             with engine.begin() as conexao:
                 for parametros in atualizacoes:
+                    houve_mudanca_status = (
+                        converter_int(parametros.get("IDDimStatusD4Anterior")) != converter_int(parametros.get("IDDimStatusD4"))
+                        or converter_int(parametros.get("IDDimStatusContratosAnterior")) != converter_int(parametros.get("IDDimStatusContratos"))
+                    )
+
                     conexao.execute(sql_update, parametros)
+
+                    if houve_mudanca_status:
+                        inserir_historico_d4(conexao, parametros)
+
+        if propagacoes_para_controle:
+            engine = hook_sql.obter_engine()
+            with engine.begin() as conexao:
+                for parametros in propagacoes_para_controle:
+                    propagacao_euromidia = propagar_status_contrato_euromidia(
+                        conexao,
+                        id_fato_controle_contrato=parametros.get("IDFatoControleContratosEuromidia"),
+                        id_fato_kanban_card=parametros.get("IDFatoKanbanCard"),
+                        id_status_contrato=parametros.get("IDDimStatusContratos"),
+                        id_status_d4=parametros.get("IDDimStatusD4"),
+                        registrar_historico=True,
+                    )
+                    resultados_propagacao.append(propagacao_euromidia)
+
+        if signatarios_para_upsert:
+            engine = hook_sql.obter_engine()
+            with engine.begin() as conexao:
+                for pacote in signatarios_para_upsert:
+                    contrato_banco = pacote.get("ContratoBanco") or {}
+                    payload_json = pacote.get("PayloadJsonD4") or "{}"
+
+                    for signatario in pacote.get("SignatariosD4") or []:
+                        upsert_signatario_d4_api(
+                            conexao,
+                            contrato=contrato_banco,
+                            signatario=signatario,
+                            payload_json=payload_json,
+                        )
+
+        sincronizacao_local = sincronizar_estado_local_d4_com_esteira(hook_sql)
 
         resumo = {
             "contratos_verificados": len(contratos),
@@ -620,6 +1385,10 @@ def pipeline_update_contrato_D4():
             "contratos_sem_mudanca": sem_mudanca,
             "contratos_ignorados_sem_status": ignorados_sem_status,
             "contratos_com_erro": len(erros),
+            "contratos_com_signatarios_extraidos": len(signatarios_para_upsert),
+            "propagacoes_euromidia": len(resultados_propagacao),
+            "resultados_propagacao_euromidia": resultados_propagacao[:50],
+            "sincronizacao_local": sincronizacao_local,
             "erros": erros[:20],
         }
 

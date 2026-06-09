@@ -276,3 +276,67 @@ docker compose exec airflow-apiserver airflow users create \
 
 
 #docker compose up -d
+
+
+
+
+
+
+"""
+cd ~/projetos/pipelines
+
+echo "==== AIRFLOW_UID usado no compose ===="
+grep AIRFLOW_UID .env || true
+
+echo "==== Corrigindo permissão das pastas do Airflow ===="
+AIRFLOW_UID_ATUAL=$(grep '^AIRFLOW_UID=' .env | cut -d '=' -f2)
+
+if [ -z "$AIRFLOW_UID_ATUAL" ]; then
+  AIRFLOW_UID_ATUAL=50000
+fi
+
+echo "Usando AIRFLOW_UID=$AIRFLOW_UID_ATUAL"
+
+sudo chown -R ${AIRFLOW_UID_ATUAL}:0 ./airflow/dags
+sudo chown -R ${AIRFLOW_UID_ATUAL}:0 ./airflow/logs
+sudo chown -R ${AIRFLOW_UID_ATUAL}:0 ./airflow/plugins
+sudo chown -R ${AIRFLOW_UID_ATUAL}:0 ./airflow/config
+sudo chown -R ${AIRFLOW_UID_ATUAL}:0 ./airflow/src
+
+sudo find ./airflow/dags -type d -exec chmod 775 {} \;
+sudo find ./airflow/dags -type f -name "*.py" -exec chmod 664 {} \;
+
+sudo find ./airflow/logs -type d -exec chmod 775 {} \;
+sudo find ./airflow/plugins -type d -exec chmod 775 {} \;
+sudo find ./airflow/config -type d -exec chmod 775 {} \;
+sudo find ./airflow/src -type d -exec chmod 775 {} \;
+
+echo "==== Desativando .airflowignore se existir ===="
+find ./airflow/dags -name ".airflowignore" -print -exec mv {} {}.bak \;
+
+echo "==== Forçando alteração dos arquivos DAG ===="
+find ./airflow/dags -type f -name "*.py" -exec touch {} \;
+
+echo "==== Reiniciando serviços do Airflow ===="
+docker compose restart airflow-dag-processor airflow-scheduler airflow-apiserver airflow-worker airflow-triggerer
+
+echo "==== Esperando containers subirem ===="
+sleep 20
+
+echo "==== Conferindo se o dag-processor consegue ler as permissões ===="
+docker compose exec -T airflow-dag-processor bash -lc "
+id
+echo ''
+ls -ld /opt/airflow/dags
+ls -ld /opt/airflow/dags/Euromidia
+ls -ld /opt/airflow/dags/Euromidia/comercial
+ls -l /opt/airflow/dags/Euromidia/comercial/pipeline_indice_ooh.py
+"
+
+echo "==== Forçando serialização das DAGs ===="
+docker compose exec -T airflow-dag-processor airflow dags reserialize -v
+
+echo "==== Listando DAGs ===="
+docker compose exec -T airflow-dag-processor airflow dags list
+
+"""

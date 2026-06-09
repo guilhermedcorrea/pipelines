@@ -1012,7 +1012,7 @@
 
     .contato-contrato-row{
       display:grid;
-      grid-template-columns:minmax(220px, 1.4fr) minmax(150px, .8fr) minmax(150px, .8fr) minmax(140px, .55fr) auto;
+      grid-template-columns:minmax(220px, 1.15fr) minmax(220px, 1.25fr) minmax(150px, .75fr) minmax(150px, .75fr) minmax(140px, .55fr) auto;
       gap:12px;
       align-items:end;
       padding:12px;
@@ -2010,6 +2010,11 @@
                 <input type="hidden" name="contato_contrato_idx" value="{{ loop.index0 }}" data-role="contato-contrato-idx">
 
                 <div class="field">
+                  <label>Nome Completo</label>
+                  <input type="text" maxlength="500" name="contato_contrato_{{ loop.index0 }}__NomeContato" value="{{ contato.NomeContato or '' }}" placeholder="Nome completo do contato">
+                </div>
+
+                <div class="field">
                   <label>Email</label>
                   <input type="email" maxlength="200" name="contato_contrato_{{ loop.index0 }}__EmailContrato" value="{{ contato.EmailContrato or '' }}" placeholder="email@empresa.com.br">
                 </div>
@@ -2041,6 +2046,11 @@
           {% else %}
             <div class="contato-contrato-row" data-role="contato-contrato-row">
               <input type="hidden" name="contato_contrato_idx" value="0" data-role="contato-contrato-idx">
+
+              <div class="field">
+                <label>Nome Completo</label>
+                <input type="text" maxlength="500" name="contato_contrato_0__NomeContato" value="" placeholder="Nome completo do contato">
+              </div>
 
               <div class="field">
                 <label>Email</label>

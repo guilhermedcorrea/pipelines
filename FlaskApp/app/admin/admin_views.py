@@ -9,7 +9,9 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 from ..autenticacao.autenticacao_views import requer_permissao
 from pathlib import Path
+from typing import Any
 import hashlib
+import hmac
 import json
 import re
 
@@ -32,6 +34,12 @@ admin = Blueprint("admin", __name__)
 
 
 ID_STATUS_CONTRATO_PENDENTE_GERACAO = 2
+ID_STATUS_CONTRATO_DOCUMENTO_GERADO_D4_ADMIN = 3
+ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN = 4
+ID_STATUS_CONTRATO_ENVIADO_ASSINATURA_D4_ADMIN = 5
+ID_STATUS_CONTRATO_EM_ASSINATURA_D4_ADMIN = 6
+ID_STATUS_CONTRATO_ATIVO_D4_ADMIN = 7
+ID_STATUS_CONTRATO_CANCELADO_D4_ADMIN = 9
 ID_STATUS_CONTRATO_ERRO = 10
 ID_STATUS_CONTRATO_REPROVADO = 31
 ID_STATUS_CONTRATO_APROVADO = ID_STATUS_CONTRATO_PENDENTE_GERACAO
@@ -138,6 +146,399 @@ def _env_bool(nome_variavel: str, padrao: str = "0") -> bool:
     return valor in ("1", "true", "sim", "yes", "y", "on")
 
 
+
+
+# ============================================================
+# Webhook D4Sign - recebimento seguro por token + HMAC
+# ============================================================
+TABELA_WEBHOOK_EVENTO_D4_ADMIN = "[Integracao].[Silver].[FatoContratoD4WebhookEvento]"
+
+
+def _d4sign_webhook_config(nome_variavel: str, padrao: str = "") -> str:
+    """Leio configuração do webhook primeiro no Flask config e depois no ambiente."""
+    valor = current_app.config.get(nome_variavel)
+    if valor is None:
+        valor = os.getenv(nome_variavel, padrao)
+    return str(valor or padrao).strip()
+
+
+def _d4sign_buscar_valor_recursivo(dados: Any, nomes_chaves: list[str]) -> Any:
+    """Busco um valor no payload mesmo quando a D4Sign muda o envelope do JSON."""
+    if dados is None:
+        return None
+
+    nomes_normalizados = {str(nome or "").strip().lower() for nome in nomes_chaves}
+
+    if isinstance(dados, dict):
+        for chave, valor in dados.items():
+            chave_normalizada = str(chave or "").strip().lower()
+
+            if chave_normalizada in nomes_normalizados:
+                if valor is not None and str(valor).strip() != "":
+                    return valor
+
+            encontrado = _d4sign_buscar_valor_recursivo(valor, nomes_chaves)
+            if encontrado is not None and str(encontrado).strip() != "":
+                return encontrado
+
+    if isinstance(dados, list):
+        for item in dados:
+            encontrado = _d4sign_buscar_valor_recursivo(item, nomes_chaves)
+            if encontrado is not None and str(encontrado).strip() != "":
+                return encontrado
+
+    return None
+
+
+def _d4sign_limitar_texto_webhook(valor: Any, limite: int) -> str | None:
+    """Converto valor para texto e limito tamanho para evitar truncamento no SQL Server."""
+    if valor is None:
+        return None
+
+    texto = str(valor).strip()
+    if not texto:
+        return None
+
+    return texto[:limite]
+
+
+def _d4sign_extrair_uuid_documento_webhook(dados: dict[str, Any]) -> str | None:
+    """Extraio o UUID do documento do payload do webhook D4Sign."""
+    valor = _d4sign_buscar_valor_recursivo(
+        dados,
+        [
+            "uuidDoc",
+            "uuid_document",
+            "uuid_documento",
+            "UUIDDocumentoD4",
+            "uuidDocument",
+            "document_uuid",
+            "uuid_documento_d4",
+            "uuid",
+        ],
+    )
+    return _d4sign_limitar_texto_webhook(valor, 100)
+
+
+def _d4sign_extrair_tipo_evento_webhook(dados: dict[str, Any]) -> str | None:
+    """Extraio o nome/tipo do evento para facilitar leitura e processamento pela DAG."""
+    valor = _d4sign_buscar_valor_recursivo(
+        dados,
+        [
+            "event",
+            "evento",
+            "eventName",
+            "event_name",
+            "tipoEvento",
+            "tipo_evento",
+            "nameEvent",
+            "status",
+            "message",
+        ],
+    )
+    return _d4sign_limitar_texto_webhook(valor, 150)
+
+
+def _d4sign_extrair_nome_documento_webhook(dados: dict[str, Any]) -> str | None:
+    """Extraio o nome do documento quando o Webhook 2.0 envia esse campo."""
+    valor = _d4sign_buscar_valor_recursivo(
+        dados,
+        [
+            "nameDoc",
+            "name_document",
+            "nome_documento",
+            "NomeDocumentoD4",
+            "documentName",
+            "document_name",
+            "name",
+        ],
+    )
+    return _d4sign_limitar_texto_webhook(valor, 255)
+
+
+def _d4sign_extrair_data_evento_webhook(dados: dict[str, Any]) -> str | None:
+    """Extraio a data/hora do evento como texto para preservar o formato original da D4Sign."""
+    valor = _d4sign_buscar_valor_recursivo(
+        dados,
+        [
+            "event_datetime",
+            "eventDatetime",
+            "event_date_time",
+            "date",
+            "data",
+            "dateEvent",
+            "eventDate",
+            "dataEvento",
+            "data_evento",
+            "created_at",
+            "createdAt",
+            "datetime",
+            "data_hora",
+        ],
+    )
+    return _d4sign_limitar_texto_webhook(valor, 100)
+
+
+def _d4sign_obter_payload_webhook() -> dict[str, Any]:
+    """Leio JSON ou form-data enviado pela D4Sign e devolvo sempre um dicionário."""
+    dados = request.get_json(silent=True)
+
+    if dados is None:
+        dados = request.form.to_dict(flat=False)
+
+    if isinstance(dados, dict):
+        return dados
+
+    return {"payload": dados}
+
+
+def _d4sign_validar_token_webhook(token_recebido: str | None) -> bool:
+    """Valido o token secreto que fica na URL pública do webhook."""
+    token_esperado = _d4sign_webhook_config("D4SIGN_WEBHOOK_TOKEN")
+    token_recebido = str(token_recebido or "").strip()
+
+    if not token_esperado:
+        current_app.logger.error("D4SIGN_WEBHOOK | D4SIGN_WEBHOOK_TOKEN não configurado.")
+        return False
+
+    return hmac.compare_digest(token_recebido, token_esperado)
+
+
+def _d4sign_obter_hmac_recebido() -> str:
+    """Leio o HMAC considerando variações de nome de cabeçalho."""
+    return str(
+        request.headers.get("Content-Hmac")
+        or request.headers.get("content-hmac")
+        or request.headers.get("X-D4Sign-Hmac")
+        or request.headers.get("X-D4SIGN-HMAC")
+        or ""
+    ).strip()
+
+
+def _d4sign_validar_hmac_webhook(uuid_documento: str | None, hmac_recebido: str | None) -> tuple[bool, str]:
+    """Valido o HMAC SHA256 informado pela D4Sign usando UUID do documento + secret key."""
+    validar_hmac = _d4sign_webhook_config("D4SIGN_WEBHOOK_VALIDAR_HMAC", "1").lower()
+
+    if validar_hmac not in {"1", "true", "sim", "yes", "y", "on"}:
+        return True, "hmac_desabilitado_por_configuracao"
+
+    secret_key = _d4sign_webhook_config("D4SIGN_WEBHOOK_HMAC_SECRET")
+
+    if not secret_key:
+        return False, "secret_hmac_nao_configurada"
+
+    if not uuid_documento:
+        return False, "uuid_documento_nao_encontrado"
+
+    hmac_recebido = str(hmac_recebido or "").strip()
+
+    if not hmac_recebido:
+        return False, "content_hmac_nao_recebido"
+
+    if hmac_recebido.lower().startswith("sha256="):
+        hmac_recebido = hmac_recebido.split("=", 1)[1].strip()
+
+    hmac_calculado = hmac.new(
+        key=secret_key.encode("utf-8"),
+        msg=str(uuid_documento).strip().encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(hmac_calculado, hmac_recebido):
+        return False, "hmac_invalido"
+
+    return True, "hmac_valido"
+
+
+def _d4sign_ip_origem_webhook() -> str | None:
+    """Capturo IP de origem considerando proxy reverso/Nginx."""
+    ip = request.headers.get("X-Forwarded-For") or request.remote_addr or ""
+    return _d4sign_limitar_texto_webhook(ip.split(",", 1)[0], 100)
+
+
+def _d4sign_gravar_evento_webhook(
+    *,
+    uuid_documento: str | None,
+    tipo_evento: str | None,
+    nome_documento: str | None,
+    data_evento: str | None,
+    payload_json: str,
+    content_hmac: str | None,
+    bit_processado: int = 0,
+    status_processamento: str = "PENDENTE",
+    mensagem_erro: str | None = None,
+    marcar_data_processamento: bool = False,
+) -> int | None:
+    """Gravo o evento bruto como fila/auditoria e devolvo o ID para disparar o Airflow."""
+    resultado = db.session.execute(
+        text(f"""
+            INSERT INTO {TABELA_WEBHOOK_EVENTO_D4_ADMIN}
+            (
+                UUIDDocumentoD4,
+                TipoEventoD4,
+                NomeDocumentoD4,
+                DataEventoD4Texto,
+                PayloadJson,
+                ContentHmac,
+                IpOrigem,
+                UserAgent,
+                DataRecebimento,
+                BitProcessado,
+                StatusProcessamento,
+                MensagemErro,
+                DataProcessamento
+            )
+            OUTPUT INSERTED.IDFatoContratoD4WebhookEvento
+            VALUES
+            (
+                :UUIDDocumentoD4,
+                :TipoEventoD4,
+                :NomeDocumentoD4,
+                :DataEventoD4Texto,
+                :PayloadJson,
+                :ContentHmac,
+                :IpOrigem,
+                :UserAgent,
+                SYSDATETIME(),
+                :BitProcessado,
+                :StatusProcessamento,
+                :MensagemErro,
+                CASE WHEN :MarcarDataProcessamento = 1 THEN SYSDATETIME() ELSE NULL END
+            )
+        """),
+        {
+            "UUIDDocumentoD4": uuid_documento,
+            "TipoEventoD4": tipo_evento,
+            "NomeDocumentoD4": nome_documento,
+            "DataEventoD4Texto": data_evento,
+            "PayloadJson": payload_json,
+            "ContentHmac": _d4sign_limitar_texto_webhook(content_hmac, 500),
+            "IpOrigem": _d4sign_ip_origem_webhook(),
+            "UserAgent": _d4sign_limitar_texto_webhook(request.headers.get("User-Agent"), 500),
+            "BitProcessado": int(bit_processado or 0),
+            "StatusProcessamento": _d4sign_limitar_texto_webhook(status_processamento or "PENDENTE", 50),
+            "MensagemErro": _d4sign_limitar_texto_webhook(mensagem_erro, 2000),
+            "MarcarDataProcessamento": 1 if marcar_data_processamento else 0,
+        },
+    )
+
+    valor_id = resultado.scalar()
+    return int(valor_id) if valor_id is not None else None
+
+@admin.route("/webhook/d4sign/<token_webhook>", methods=["POST"])
+@csrf.exempt
+@limiter.limit("60 per minute")
+def receber_webhook_d4sign(token_webhook):
+    """Recebo webhook da D4Sign, salvo a fila e disparo a DAG processadora sob demanda."""
+    if not _d4sign_validar_token_webhook(token_webhook):
+        current_app.logger.warning(
+            "D4SIGN_WEBHOOK | token inválido | ip=%s",
+            _d4sign_ip_origem_webhook(),
+        )
+        return jsonify({"ok": False, "erro": "token_invalido"}), 403
+
+    dados = _d4sign_obter_payload_webhook()
+    uuid_documento = _d4sign_extrair_uuid_documento_webhook(dados)
+    tipo_evento = _d4sign_extrair_tipo_evento_webhook(dados)
+    nome_documento = _d4sign_extrair_nome_documento_webhook(dados)
+    data_evento = _d4sign_extrair_data_evento_webhook(dados)
+    hmac_recebido = _d4sign_obter_hmac_recebido()
+    payload_json = json.dumps(dados, ensure_ascii=False, default=str)
+
+    hmac_ok, motivo_hmac = _d4sign_validar_hmac_webhook(
+        uuid_documento=uuid_documento,
+        hmac_recebido=hmac_recebido,
+    )
+
+    try:
+        if not hmac_ok:
+            id_evento_webhook = _d4sign_gravar_evento_webhook(
+                uuid_documento=uuid_documento,
+                tipo_evento=tipo_evento,
+                nome_documento=nome_documento,
+                data_evento=data_evento,
+                payload_json=payload_json,
+                content_hmac=hmac_recebido,
+                bit_processado=1,
+                status_processamento="REJEITADO_HMAC",
+                mensagem_erro=motivo_hmac,
+                marcar_data_processamento=True,
+            )
+            db.session.commit()
+
+            current_app.logger.warning(
+                "D4SIGN_WEBHOOK | evento recebido, mas rejeitado por HMAC | id_evento=%s | motivo=%s | uuid=%s | ip=%s",
+                id_evento_webhook,
+                motivo_hmac,
+                uuid_documento,
+                _d4sign_ip_origem_webhook(),
+            )
+
+            return jsonify({
+                "ok": False,
+                "erro": motivo_hmac,
+                "id_evento_webhook": id_evento_webhook,
+                "status": "registrado_como_rejeitado_hmac",
+            }), 200
+
+        id_evento_webhook = _d4sign_gravar_evento_webhook(
+            uuid_documento=uuid_documento,
+            tipo_evento=tipo_evento,
+            nome_documento=nome_documento,
+            data_evento=data_evento,
+            payload_json=payload_json,
+            content_hmac=hmac_recebido,
+            bit_processado=0,
+            status_processamento="PENDENTE",
+            mensagem_erro=None,
+            marcar_data_processamento=False,
+        )
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "D4SIGN_WEBHOOK | erro ao gravar evento | uuid=%s | tipo_evento=%s | motivo_hmac=%s",
+            uuid_documento,
+            tipo_evento,
+            motivo_hmac,
+        )
+        return jsonify({"ok": False, "erro": "falha_ao_gravar_evento"}), 500
+
+    resultado_airflow = None
+    try:
+        resultado_airflow = _airflow_disparar_dag_webhook_d4sign(
+            id_evento_webhook=id_evento_webhook,
+            uuid_documento=uuid_documento,
+            tipo_evento=tipo_evento,
+        )
+    except Exception as exc:
+        current_app.logger.exception(
+            "D4SIGN_WEBHOOK | gravei o evento, mas falhei ao disparar a DAG | id_evento=%s | uuid=%s",
+            id_evento_webhook,
+            uuid_documento,
+        )
+        resultado_airflow = {
+            "ok": False,
+            "status": "erro_ao_disparar_dag",
+            "erro": str(exc),
+        }
+
+    current_app.logger.info(
+        "D4SIGN_WEBHOOK | evento recebido | id_evento=%s | uuid=%s | tipo_evento=%s | nome_documento=%s | airflow=%s",
+        id_evento_webhook,
+        uuid_documento,
+        tipo_evento,
+        nome_documento,
+        resultado_airflow,
+    )
+
+    return jsonify({
+        "ok": True,
+        "id_evento_webhook": id_evento_webhook,
+        "airflow": resultado_airflow,
+    }), 200
+
 def _airflow_timeout_segundos() -> int:
     try:
         return max(1, int(os.getenv("AIRFLOW_API_TIMEOUT_SEGUNDOS", "5") or "5"))
@@ -235,6 +636,125 @@ def _airflow_obter_token_api() -> str:
         )
 
     return token
+
+
+def _airflow_disparar_dag_webhook_d4sign(
+    *,
+    id_evento_webhook: int | None,
+    uuid_documento: str | None = None,
+    tipo_evento: str | None = None,
+) -> dict:
+    """
+    Disparo a DAG que processa um evento de webhook D4Sign específico.
+
+    A rota do webhook só grava a fila e chama esta função.
+    A DAG faz o trabalho pesado de atualizar FatoContratoD4,
+    FatoContratoD4Signatario e DimHistoricoContratosD4.
+    """
+
+    if not _env_bool("AIRFLOW_TRIGGER_WEBHOOK_D4SIGN_HABILITADO", "1"):
+        return {
+            "ok": False,
+            "status": "desabilitado",
+            "mensagem": "Disparo automático da DAG de webhook D4Sign está desabilitado por env.",
+        }
+
+    if id_evento_webhook in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_id_evento_webhook",
+            "mensagem": "Não disparei a DAG porque o ID do evento veio vazio.",
+        }
+
+    if requests is None:
+        raise RuntimeError(
+            "A biblioteca 'requests' não está instalada no container Flask. "
+            "Adicione requests no requirements.txt ou instale a dependência na imagem."
+        )
+
+    base_url = _airflow_base_url()
+    token = _airflow_obter_token_api()
+
+    dag_id = (
+        os.getenv("AIRFLOW_DAG_WEBHOOK_D4SIGN")
+        or "pipeline_processar_webhook_d4sign"
+    ).strip()
+
+    id_evento_int = int(id_evento_webhook)
+    uuid_limpo = str(uuid_documento or "").strip() or None
+    tipo_limpo = str(tipo_evento or "").strip() or None
+
+    dag_run_id = f"d4sign_webhook__evento__{id_evento_int}"
+
+    payload = {
+        "dag_run_id": dag_run_id,
+        "logical_date": None,
+        "conf": {
+            "origem": "flask_webhook_d4sign",
+            "id_evento_webhook": id_evento_int,
+            "uuid_documento_d4": uuid_limpo,
+            "tipo_evento_d4": tipo_limpo,
+        },
+        "note": f"Processamento automático do webhook D4Sign evento {id_evento_int}",
+    }
+
+    timeout = _airflow_timeout_segundos()
+    url_trigger = f"{base_url}/api/v2/dags/{dag_id}/dagRuns"
+
+    resposta = requests.post(
+        url_trigger,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        timeout=timeout,
+    )
+
+    if resposta.status_code == 409:
+        current_app.logger.warning(
+            "AIRFLOW_WEBHOOK_D4SIGN | DAG run já existia | dag_id=%s | dag_run_id=%s | id_evento=%s",
+            dag_id,
+            dag_run_id,
+            id_evento_int,
+        )
+        return {
+            "ok": True,
+            "status": "ja_existia",
+            "dag_id": dag_id,
+            "dag_run_id": dag_run_id,
+            "id_evento_webhook": id_evento_int,
+        }
+
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        corpo = (resposta.text or "")[:1500]
+        raise RuntimeError(
+            f"Falha ao disparar DAG de webhook D4Sign no Airflow. "
+            f"Status={resposta.status_code}. Resposta={corpo}"
+        ) from exc
+
+    try:
+        dados_resposta = resposta.json() or {}
+    except Exception:
+        dados_resposta = {"texto": (resposta.text or "")[:1500]}
+
+    current_app.logger.info(
+        "AIRFLOW_WEBHOOK_D4SIGN | DAG disparada com sucesso | dag_id=%s | dag_run_id=%s | id_evento=%s",
+        dag_id,
+        dag_run_id,
+        id_evento_int,
+    )
+
+    return {
+        "ok": True,
+        "status": "disparado",
+        "dag_id": dag_id,
+        "dag_run_id": dag_run_id,
+        "id_evento_webhook": id_evento_int,
+        "resposta": dados_resposta,
+    }
 
 
 def _airflow_disparar_dag_mensageria_campanhas(
@@ -10807,6 +11327,7 @@ def _buscar_dim_email_contrato_admin(
                  IDDimEmailContratoEmailContrato
                 ,IDFatoControleContratosEuromidia
                 ,IDFatoKanbanCard
+                ,NomeContato
                 ,EmailContrato
                 ,TelefoneContrato
                 ,CpfContrato
@@ -10845,16 +11366,18 @@ def _extrair_contatos_contrato_formulario_admin(form) -> tuple[bool, list[dict]]
 
     contatos = []
     for idx in indices:
+        nome_contato = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__NomeContato"))[:500]
         email = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__EmailContrato"))[:200]
         telefone = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__TelefoneContrato"))[:20]
         cpf = _texto_ou_vazio(_form_get_first_admin(form, f"contato_contrato_{idx}__CpfContrato"))[:20]
         principal = _bit_form_admin(_form_get_first_admin(form, f"contato_contrato_{idx}__ContatoPrincipal"))
 
-        if not email and not telefone and not cpf:
+        if not nome_contato and not email and not telefone and not cpf:
             continue
 
         contatos.append(
             {
+                "NomeContato": nome_contato or None,
                 "EmailContrato": email or None,
                 "TelefoneContrato": telefone or None,
                 "CpfContrato": cpf or None,
@@ -10951,6 +11474,7 @@ def _sincronizar_dim_email_contrato_por_formulario_admin(
                 INSERT INTO {TABELA_EMAIL_CONTRATO_ADMIN} (
                      IDFatoControleContratosEuromidia
                     ,IDFatoKanbanCard
+                    ,NomeContato
                     ,EmailContrato
                     ,TelefoneContrato
                     ,CpfContrato
@@ -10959,6 +11483,7 @@ def _sincronizar_dim_email_contrato_por_formulario_admin(
                 VALUES (
                      :id_contrato
                     ,:id_card
+                    ,:nome_contato
                     ,:email
                     ,:telefone
                     ,:cpf
@@ -10968,6 +11493,7 @@ def _sincronizar_dim_email_contrato_por_formulario_admin(
             {
                 "id_contrato": int(id_contrato) if id_contrato not in (None, "", 0) else None,
                 "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+                "nome_contato": contato.get("NomeContato"),
                 "email": contato.get("EmailContrato"),
                 "telefone": contato.get("TelefoneContrato"),
                 "cpf": contato.get("CpfContrato"),
@@ -13890,6 +14416,11 @@ def _d4sign_documento_existente_ativo_admin(
     else:
         campos_select.append("CAST(NULL AS int) AS IDDimStatusD4")
 
+    if _d4sign_tem_coluna_admin(colunas, "IDDimStatusContratos"):
+        campos_select.append("IDDimStatusContratos")
+    else:
+        campos_select.append("CAST(NULL AS int) AS IDDimStatusContratos")
+
     if _d4sign_tem_coluna_admin(colunas, "NomeFaseD4"):
         campos_select.append("NomeFaseD4")
     else:
@@ -14566,6 +15097,264 @@ def _d4sign_registrar_historico_status_contrato_d4_admin(
     }
 
 
+
+def _d4sign_resolver_status_contrato_por_status_d4_admin(
+    id_dim_status_d4: int | None,
+    fallback_id_status_contrato: int | None = None,
+) -> int | None:
+    """Converto status da D4Sign para status da esteira Euromídia."""
+    id_status_d4 = _int_ou_none(id_dim_status_d4)
+
+    if id_status_d4 in (4, 5):
+        return ID_STATUS_CONTRATO_ATIVO_D4_ADMIN
+
+    if id_status_d4 == 6:
+        return ID_STATUS_CONTRATO_CANCELADO_D4_ADMIN
+
+    if id_status_d4 == 3:
+        return ID_STATUS_CONTRATO_ENVIADO_ASSINATURA_D4_ADMIN
+
+    if id_status_d4 == 2:
+        return ID_STATUS_CONTRATO_ENVIADO_ASSINATURA_D4_ADMIN
+
+    if id_status_d4 == 1:
+        return ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN
+
+    return _int_ou_none(fallback_id_status_contrato)
+
+
+def _d4sign_inserir_historico_status_se_mudou_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_dim_status_contratos: int | None,
+    id_dim_status_d4: int | None,
+) -> dict:
+    """Insiro histórico D4 somente quando o último status for diferente."""
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_status_contrato = _int_ou_none(id_dim_status_contratos)
+    id_status_d4 = _int_ou_none(id_dim_status_d4)
+
+    if id_contrato in (None, "", 0) or (id_status_contrato is None and id_status_d4 is None):
+        return {
+            "ok": False,
+            "status": "sem_contrato_ou_sem_status",
+            "id_contrato": id_contrato,
+            "id_status_contrato": id_status_contrato,
+            "id_status_d4": id_status_d4,
+        }
+
+    row = db.session.execute(
+        text(f"""
+            ;WITH UltimoHistorico AS (
+                SELECT TOP (1)
+                    IDDimStatusContratos,
+                    IDDimStatusD4
+                FROM {TABELA_HISTORICO_CONTRATOS_D4_ADMIN} WITH (READPAST)
+                WHERE IDEmpresaProprietaria = :id_empresa_proprietaria
+                  AND IDFatoControleContratosEuromidia = :id_contrato
+                ORDER BY DataStatus DESC, IDDimHistoricoContratos DESC
+            )
+            INSERT INTO {TABELA_HISTORICO_CONTRATOS_D4_ADMIN}
+            (
+                IDEmpresaProprietaria,
+                IDFatoControleContratosEuromidia,
+                IDDimStatusContratos,
+                IDDimStatusD4,
+                DataStatus
+            )
+            OUTPUT INSERTED.IDDimHistoricoContratos AS IDDimHistoricoContratos
+            SELECT
+                :id_empresa_proprietaria,
+                :id_contrato,
+                :id_status_contrato,
+                :id_status_d4,
+                SYSDATETIME()
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM UltimoHistorico
+                WHERE ISNULL(IDDimStatusContratos, -1) = ISNULL(:id_status_contrato, -1)
+                  AND ISNULL(IDDimStatusD4, -1) = ISNULL(:id_status_d4, -1)
+            );
+        """),
+        {
+            "id_empresa_proprietaria": int(ID_EMPRESA_PROPRIETARIA_HISTORICO_D4_ADMIN),
+            "id_contrato": int(id_contrato),
+            "id_status_contrato": int(id_status_contrato) if id_status_contrato not in (None, "", 0) else None,
+            "id_status_d4": int(id_status_d4) if id_status_d4 not in (None, "", 0) else None,
+        },
+    ).mappings().first()
+
+    return {
+        "ok": True,
+        "status": "inserido" if row else "ultimo_status_igual",
+        "id_historico_d4": int(row["IDDimHistoricoContratos"]) if row and row.get("IDDimHistoricoContratos") is not None else None,
+        "id_contrato": int(id_contrato),
+        "id_status_contrato": id_status_contrato,
+        "id_status_d4": id_status_d4,
+    }
+
+
+def _d4sign_sincronizar_esteira_contrato_admin(
+    *,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None = None,
+    id_dim_status_contratos: int | None,
+    id_dim_status_d4: int | None = None,
+) -> dict:
+    """Sincronizo D4Sign com controle, itens, solicitação e histórico no próprio Flask."""
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_status_contrato = _int_ou_none(id_dim_status_contratos)
+    id_status_d4 = _int_ou_none(id_dim_status_d4)
+
+    if id_contrato in (None, "", 0) or id_status_contrato in (None, "", 0):
+        return {
+            "ok": False,
+            "status": "sem_contrato_ou_sem_status",
+            "id_contrato": id_contrato,
+            "id_card": id_card,
+            "id_status_contrato": id_status_contrato,
+            "id_status_d4": id_status_d4,
+        }
+
+    resultado_controle = db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoControleContratosEuromidia]
+               SET IDDimStatusContratos = :id_status_contrato,
+                   DataAtualizacao = SYSDATETIME()
+             WHERE IDFatoControleContratosEuromidia = :id_contrato
+               AND ISNULL(BitAtivo, 1) = 1
+               AND (
+                    IDDimStatusContratos IS NULL
+                    OR IDDimStatusContratos <> :id_status_contrato
+               );
+        """),
+        {"id_contrato": int(id_contrato), "id_status_contrato": int(id_status_contrato)},
+    )
+
+    resultado_itens = db.session.execute(
+        text("""
+            UPDATE itens
+               SET itens.Status = status_contrato.Status,
+                   itens.DataAtualizacao = SYSDATETIME()
+              FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] itens
+              INNER JOIN [Integracao].[Silver].[DimStatusContratos] status_contrato
+                 ON status_contrato.IDDimStatusContratos = :id_status_contrato
+                AND status_contrato.IDEmpresaProprietaria = :id_empresa_proprietaria
+             WHERE itens.IDFatoControleContratoEuromidia = :id_contrato
+               AND ISNULL(itens.BitAtivo, 1) = 1
+               AND (
+                    itens.Status IS NULL
+                    OR LTRIM(RTRIM(itens.Status)) <> LTRIM(RTRIM(status_contrato.Status))
+               );
+        """),
+        {
+            "id_contrato": int(id_contrato),
+            "id_status_contrato": int(id_status_contrato),
+            "id_empresa_proprietaria": int(ID_EMPRESA_PROPRIETARIA_HISTORICO_D4_ADMIN),
+        },
+    )
+
+    resultado_solicitacao = db.session.execute(
+        text("""
+            UPDATE solicitacao
+               SET solicitacao.IDDimStatusContratos = :id_status_contrato,
+                   solicitacao.DataAtualizacao = SYSDATETIME()
+              FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] solicitacao
+             WHERE ISNULL(solicitacao.BitAtivo, 1) = 1
+               AND (
+                    solicitacao.IDFatoControleContratosEuromidia = :id_contrato
+                    OR (
+                        :id_card IS NOT NULL
+                        AND solicitacao.IDFatoKanbanCard = :id_card
+                    )
+               )
+               AND (
+                    solicitacao.IDDimStatusContratos IS NULL
+                    OR solicitacao.IDDimStatusContratos <> :id_status_contrato
+               );
+        """),
+        {
+            "id_contrato": int(id_contrato),
+            "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+            "id_status_contrato": int(id_status_contrato),
+        },
+    )
+
+    historico = _d4sign_inserir_historico_status_se_mudou_admin(
+        id_fato_controle_contratos=int(id_contrato),
+        id_dim_status_contratos=int(id_status_contrato),
+        id_dim_status_d4=id_status_d4,
+    )
+
+    return {
+        "ok": True,
+        "status": "sincronizado",
+        "id_contrato": int(id_contrato),
+        "id_card": int(id_card) if id_card not in (None, "", 0) else None,
+        "id_status_contrato": int(id_status_contrato),
+        "id_status_d4": int(id_status_d4) if id_status_d4 not in (None, "", 0) else None,
+        "controle_atualizado": int(resultado_controle.rowcount or 0),
+        "itens_atualizados": int(resultado_itens.rowcount or 0),
+        "solicitacoes_atualizadas": int(resultado_solicitacao.rowcount or 0),
+        "historico": historico,
+    }
+
+
+def _d4sign_atualizar_fato_d4_e_sincronizar_esteira_admin(
+    *,
+    uuid_documento: str,
+    id_fato_controle_contratos: int | None,
+    id_fato_kanban_card: int | None,
+    id_dim_status_contratos: int,
+    id_dim_status_d4: int | None,
+    nome_fase_d4: str | None = None,
+) -> dict:
+    """Atualizo a FatoContratoD4 e propago o mesmo status para a esteira."""
+    uuid_limpo = _texto_ou_vazio(uuid_documento)
+    id_contrato = _int_ou_none(id_fato_controle_contratos)
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_status_contrato = _int_ou_none(id_dim_status_contratos)
+    id_status_d4 = _int_ou_none(id_dim_status_d4)
+
+    if not uuid_limpo or id_contrato in (None, "", 0) or id_status_contrato in (None, "", 0):
+        return {"ok": False, "status": "parametros_invalidos"}
+
+    resultado_d4 = db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[FatoContratoD4]
+               SET IDDimStatusD4 = COALESCE(:id_status_d4, IDDimStatusD4),
+                   IDFaseD4 = COALESCE(:id_status_d4, IDFaseD4),
+                   NomeFaseD4 = COALESCE(:nome_fase_d4, NomeFaseD4),
+                   IDDimStatusContratos = :id_status_contrato,
+                   DataAtualizacao = SYSDATETIME()
+             WHERE UUIDDocumentoD4 = :uuid_documento
+               AND ISNULL(BitAtivo, 1) = 1;
+        """),
+        {
+            "uuid_documento": uuid_limpo,
+            "id_status_d4": int(id_status_d4) if id_status_d4 not in (None, "", 0) else None,
+            "nome_fase_d4": _texto_ou_vazio(nome_fase_d4) or None,
+            "id_status_contrato": int(id_status_contrato),
+        },
+    )
+
+    sincronizacao = _d4sign_sincronizar_esteira_contrato_admin(
+        id_fato_controle_contratos=int(id_contrato),
+        id_fato_kanban_card=id_card,
+        id_dim_status_contratos=int(id_status_contrato),
+        id_dim_status_d4=id_status_d4,
+    )
+
+    return {
+        "ok": True,
+        "status": "fato_d4_e_esteira_sincronizados",
+        "uuid_documento_d4": uuid_limpo,
+        "fato_d4_atualizado": int(resultado_d4.rowcount or 0),
+        "sincronizacao": sincronizacao,
+    }
+
+
 def _d4sign_inserir_fato_contrato_admin(
     *,
     id_dim_status_d4: int,
@@ -14793,6 +15582,53 @@ def _d4sign_montar_signatarios_card_admin(id_fato_kanban_card: int | None) -> di
     }
 
 
+def _d4sign_obter_url_webhook_publica_admin() -> str:
+    """Monto a URL pública que a D4Sign deve chamar quando o documento mudar."""
+
+    url_configurada = _texto_ou_vazio(os.getenv("D4SIGN_WEBHOOK_PUBLIC_URL"))
+    if url_configurada:
+        return url_configurada.rstrip()
+
+    token_webhook = _texto_ou_vazio(os.getenv("D4SIGN_WEBHOOK_TOKEN"))
+    if not token_webhook:
+        raise RuntimeError("D4SIGN_WEBHOOK_TOKEN não está configurado para montar a URL pública do webhook.")
+
+    base_publica = _texto_ou_vazio(
+        os.getenv("D4SIGN_WEBHOOK_BASE_PUBLIC_URL")
+        or "http://189.45.251.100:5000"
+    ).rstrip("/")
+
+    return f"{base_publica}/admin/webhook/d4sign/{token_webhook}"
+
+
+def _d4sign_cadastrar_webhook_documento_admin(uuid_documento: str) -> dict:
+    """Cadastro a URL do webhook diretamente no documento D4Sign recém-criado."""
+
+    if not _env_bool("D4SIGN_CADASTRAR_WEBHOOK_DOCUMENTO_HABILITADO", "1"):
+        return {
+            "ok": False,
+            "status": "desabilitado",
+            "mensagem": "Cadastro automático de webhook no documento está desabilitado por env.",
+        }
+
+    uuid_limpo = _texto_ou_vazio(uuid_documento)
+    if not uuid_limpo:
+        raise RuntimeError("UUID do documento D4Sign veio vazio para cadastrar webhook.")
+
+    url_webhook = _d4sign_obter_url_webhook_publica_admin()
+
+    current_app.logger.warning(
+        "D4SIGN_WEBHOOK_DOC | cadastrando webhook no documento | uuid=%s | url=%s",
+        uuid_limpo,
+        url_webhook,
+    )
+
+    return _d4sign_executar_post_admin(
+        caminho=f"/documents/{uuid_limpo}/webhooks",
+        payload={"url": url_webhook},
+    )
+
+
 def _d4sign_cadastrar_signatarios_documento_admin(
     *,
     uuid_documento: str,
@@ -14890,6 +15726,38 @@ def _d4sign_enviar_link_assinatura_contrato_admin(
 
         resposta_envio = _d4sign_enviar_documento_para_assinatura_admin(uuid_documento)
 
+        detalhe_pos_envio = None
+        id_status_d4_pos_envio = 3
+        nome_fase_d4_pos_envio = "Aguardando Assinaturas"
+        try:
+            detalhe_pos_envio = _d4sign_buscar_detalhe_documento_admin(uuid_documento)
+            if detalhe_pos_envio:
+                id_status_d4_pos_envio = _d4sign_extrair_id_status_d4_admin(
+                    detalhe_pos_envio,
+                    fallback=3,
+                )
+                nome_fase_d4_pos_envio = _texto_ou_vazio(
+                    detalhe_pos_envio.get("statusName")
+                    or detalhe_pos_envio.get("status_name")
+                    or detalhe_pos_envio.get("status")
+                    or MAPA_FASE_D4SIGN_ADMIN.get(str(id_status_d4_pos_envio), "Aguardando Assinaturas")
+                ) or "Aguardando Assinaturas"
+        except Exception as exc:
+            current_app.logger.warning(
+                "D4SIGN_ASSINATURA | enviei para assinatura, mas não consegui consultar detalhe pós-envio | uuid=%s | erro=%s",
+                uuid_documento,
+                exc,
+            )
+
+        sincronizacao_envio = _d4sign_atualizar_fato_d4_e_sincronizar_esteira_admin(
+            uuid_documento=uuid_documento,
+            id_fato_controle_contratos=id_fato_controle_contratos,
+            id_fato_kanban_card=id_fato_kanban_card,
+            id_dim_status_contratos=ID_STATUS_CONTRATO_ENVIADO_ASSINATURA_D4_ADMIN,
+            id_dim_status_d4=id_status_d4_pos_envio,
+            nome_fase_d4=nome_fase_d4_pos_envio,
+        )
+
         return {
             "ok": True,
             "status": "link_enviado",
@@ -14900,6 +15768,8 @@ def _d4sign_enviar_link_assinatura_contrato_admin(
             "emails": [s.get("email") for s in resultado_signatarios.get("signatarios") or []],
             "resposta_cadastro_signatarios": resposta_cadastro,
             "resposta_envio_assinatura": resposta_envio,
+            "detalhe_pos_envio": detalhe_pos_envio,
+            "sincronizacao_envio": sincronizacao_envio,
         }
 
     except Exception as exc:
@@ -14950,6 +15820,7 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
 
     if existente:
         resultado_tags_d4sign = None
+        resultado_webhook_d4sign = None
         uuid_documento_existente = existente.get("UUIDDocumentoD4")
 
         if uuid_documento_existente:
@@ -14974,6 +15845,32 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
                     "erro": str(exc),
                 }
 
+            try:
+                resultado_webhook_d4sign = _d4sign_cadastrar_webhook_documento_admin(str(uuid_documento_existente))
+            except Exception as exc:
+                current_app.logger.exception(
+                    "D4SIGN_WEBHOOK_DOC | falha ao garantir webhook em documento D4Sign já existente | uuid=%s | id_contrato=%s",
+                    uuid_documento_existente,
+                    id_contrato,
+                )
+                resultado_webhook_d4sign = {
+                    "ok": False,
+                    "uuid_documento_d4": str(uuid_documento_existente),
+                    "status": "erro_webhook_documento_existente",
+                    "erro": str(exc),
+                }
+
+        id_status_contrato_existente = _d4sign_resolver_status_contrato_por_status_d4_admin(
+            existente.get("IDDimStatusD4"),
+            fallback_id_status_contrato=existente.get("IDDimStatusContratos"),
+        )
+        resultado_sincronizacao_existente = _d4sign_sincronizar_esteira_contrato_admin(
+            id_fato_controle_contratos=int(id_contrato),
+            id_fato_kanban_card=id_fato_kanban_card,
+            id_dim_status_contratos=id_status_contrato_existente or existente.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN,
+            id_dim_status_d4=existente.get("IDDimStatusD4"),
+        )
+
         return {
             "ok": True,
             "status": "ja_existia",
@@ -14982,6 +15879,8 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
             "nome_documento_d4": existente.get("NomeDocumentoD4"),
             "nome_fase_d4": existente.get("NomeFaseD4"),
             "tags_d4sign": resultado_tags_d4sign,
+            "webhook_d4sign": resultado_webhook_d4sign,
+            "sincronizacao_existente": resultado_sincronizacao_existente,
         }
 
     dados_contrato = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
@@ -15045,6 +15944,21 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
             "erro": str(exc),
         }
 
+    try:
+        resultado_webhook_d4sign = _d4sign_cadastrar_webhook_documento_admin(uuid_documento)
+    except Exception as exc:
+        current_app.logger.exception(
+            "D4SIGN_WEBHOOK_DOC | documento criado, mas falhou ao cadastrar webhook; não vou marcar a aprovação como erro nem recriar documento | uuid=%s | id_contrato=%s",
+            uuid_documento,
+            id_contrato,
+        )
+        resultado_webhook_d4sign = {
+            "ok": False,
+            "uuid_documento_d4": str(uuid_documento),
+            "status": "erro_webhook_sem_rollback_documento",
+            "erro": str(exc),
+        }
+
     detalhe = _d4sign_primeiro_objeto_admin(resposta_criacao)
 
     # Importante:
@@ -15093,7 +16007,7 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         id_dim_cofre_d4=cofre.get("IDDimCofreD4"),
         id_fato_controle_contratos=int(id_contrato),
         id_fato_kanban_card=id_fato_kanban_card,
-        id_dim_status_contratos=id_dim_status_contratos or dados_contrato.get("IDDimStatusContratos"),
+        id_dim_status_contratos=ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN,
         id_dim_modelo_contrato_d4=modelo.get("IDDimModeloContratoD4"),
         id_dim_tipo_documento=id_tipo_documento,
         uuid_documento_d4=uuid_documento,
@@ -15108,6 +16022,21 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         status_comentario_d4=detalhe.get("statusComment"),
         cancelado_por_d4=detalhe.get("whoCanceled"),
     )
+
+    try:
+        resultado_sincronizacao_documento_criado = _d4sign_sincronizar_esteira_contrato_admin(
+            id_fato_controle_contratos=int(id_contrato),
+            id_fato_kanban_card=id_fato_kanban_card,
+            id_dim_status_contratos=ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN,
+            id_dim_status_d4=int(id_dim_status_d4),
+        )
+    except Exception as exc:
+        current_app.logger.exception(
+            "D4SIGN_STATUS | documento criado, mas falhei ao sincronizar status de pendente envio | uuid=%s | id_contrato=%s",
+            uuid_documento,
+            id_contrato,
+        )
+        resultado_sincronizacao_documento_criado = {"ok": False, "erro": str(exc)}
 
     try:
         resultado_envio_assinatura = _d4sign_enviar_link_assinatura_contrato_admin(
@@ -15142,6 +16071,8 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         "id_dim_cofre_d4": cofre.get("IDDimCofreD4"),
         "pasta_d4sign": pasta_destino,
         "tags_d4sign": resultado_tags_d4sign,
+        "webhook_d4sign": resultado_webhook_d4sign,
+        "sincronizacao_documento_criado": resultado_sincronizacao_documento_criado,
         "envio_assinatura": resultado_envio_assinatura,
     }
 
