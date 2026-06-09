@@ -8120,7 +8120,7 @@ def _efetivar_reservas_card_kanban_admin(
 
     return int(resultado.rowcount or 0)
 
-def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario_logado: int | None) -> dict:
+def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario_logado: int | None, executar_efeitos_operacionais: bool = True) -> dict:
     cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao))
     if not cab:
         raise ValueError("Solicitação não encontrada para aprovação.")
@@ -8894,13 +8894,6 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         )
         empresas_relacionadas_sincronizadas.append(resultado_empresa_relacionada)
 
-        resultado_ocupacao_contrato = _upsert_ocupacao_contrato_aprovado_admin(
-            id_contrato_controle=int(id_contrato_controle),
-            id_item_controle=int(id_item_controle),
-            id_usuario_logado=id_usuario_logado,
-        )
-        ocupacoes_sincronizadas.append(resultado_ocupacao_contrato)
-
         id_card_vinculo = _int_ou_none(item.get("IDFatoKanbanCard")) or _int_ou_none(cab.get("IDFatoKanbanCard"))
         _upsert_vinculo_contrato_card_euromidia(
             id_fato_controle_contratos=int(id_contrato_controle),
@@ -8909,30 +8902,60 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             id_usuario_logado=id_usuario_logado,
         )
 
-        resultado_preco_praticado = _upsert_preco_praticado_item_contrato_euromidia(
-            cabecalho_solicitacao=cab,
-            item_solicitacao=item,
-            id_contrato_controle=int(id_contrato_controle),
-            id_item_controle=int(id_item_controle),
-            id_usuario_logado=id_usuario_logado,
-        )
-        precos_praticados.append(resultado_preco_praticado)
+        if executar_efeitos_operacionais:
+            resultado_ocupacao_contrato = _upsert_ocupacao_contrato_aprovado_admin(
+                id_contrato_controle=int(id_contrato_controle),
+                id_item_controle=int(id_item_controle),
+                id_usuario_logado=id_usuario_logado,
+            )
+            ocupacoes_sincronizadas.append(resultado_ocupacao_contrato)
 
-        id_dim_tipo_documento_campanha = _resolver_id_dim_tipo_documento_solicitacao_admin(
-            id_solicitacao=int(id_solicitacao),
-            cabecalho_solicitacao=cab,
-            item_solicitacao=item,
-        )
+            resultado_preco_praticado = _upsert_preco_praticado_item_contrato_euromidia(
+                cabecalho_solicitacao=cab,
+                item_solicitacao=item,
+                id_contrato_controle=int(id_contrato_controle),
+                id_item_controle=int(id_item_controle),
+                id_usuario_logado=id_usuario_logado,
+            )
+            precos_praticados.append(resultado_preco_praticado)
 
-        resultado_vencimento_campanha = _upsert_vencimento_campanha_aprovada_admin(
-            cabecalho_solicitacao=cab,
-            item_solicitacao=item,
-            id_contrato_controle=int(id_contrato_controle),
-            id_item_controle=int(id_item_controle),
-            id_fato_kanban_card=id_card_vinculo,
-            id_dim_tipo_documento=id_dim_tipo_documento_campanha,
-        )
-        vencimentos_campanha.append(resultado_vencimento_campanha)
+            id_dim_tipo_documento_campanha = _resolver_id_dim_tipo_documento_solicitacao_admin(
+                id_solicitacao=int(id_solicitacao),
+                cabecalho_solicitacao=cab,
+                item_solicitacao=item,
+            )
+
+            resultado_vencimento_campanha = _upsert_vencimento_campanha_aprovada_admin(
+                cabecalho_solicitacao=cab,
+                item_solicitacao=item,
+                id_contrato_controle=int(id_contrato_controle),
+                id_item_controle=int(id_item_controle),
+                id_fato_kanban_card=id_card_vinculo,
+                id_dim_tipo_documento=id_dim_tipo_documento_campanha,
+            )
+            vencimentos_campanha.append(resultado_vencimento_campanha)
+        else:
+            ocupacoes_sincronizadas.append({
+                "ok": True,
+                "acao": "adiado_ate_d4sign_confirmado",
+                "id_contrato": int(id_contrato_controle),
+                "id_item": int(id_item_controle),
+                "mensagem": "Ocupação contratual não foi efetivada porque o documento D4Sign ainda não foi criado/confirmado.",
+            })
+            precos_praticados.append({
+                "ok": True,
+                "acao": "adiado_ate_d4sign_confirmado",
+                "id_contrato": int(id_contrato_controle),
+                "id_item": int(id_item_controle),
+                "mensagem": "Preço praticado não foi efetivado porque o documento D4Sign ainda não foi criado/confirmado.",
+            })
+            vencimentos_campanha.append({
+                "ok": True,
+                "acao": "adiado_ate_d4sign_confirmado",
+                "id_contrato": int(id_contrato_controle),
+                "id_item": int(id_item_controle),
+                "mensagem": "Vencimento de campanha não foi efetivado porque o documento D4Sign ainda não foi criado/confirmado.",
+            })
 
         if id_item_solicitacao not in (None, "", 0):
             db.session.execute(
@@ -8951,11 +8974,14 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                 },
             )
 
-    reservas_efetivadas = _efetivar_reservas_card_kanban_admin(
-        id_card=_int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho),
-        id_contrato_controle=int(id_contrato_controle),
-        id_usuario_logado=id_usuario_logado,
-    )
+    if executar_efeitos_operacionais:
+        reservas_efetivadas = _efetivar_reservas_card_kanban_admin(
+            id_card=_int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho),
+            id_contrato_controle=int(id_contrato_controle),
+            id_usuario_logado=id_usuario_logado,
+        )
+    else:
+        reservas_efetivadas = 0
 
     db.session.execute(text("""
         UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
@@ -8987,6 +9013,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "id_empresa_proprietaria": _int_ou_none(cab.get("IDEmpresaProprietaria")),
         "tipo_solicitacao": "ADITIVO" if card_tem_tag_renovacao else _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao")),
         "tipo_operacional": "RENOVACAO" if card_tem_tag_renovacao else _tipo_solicitacao_normalizado(cab.get("TipoSolicitacao")),
+        "efeitos_operacionais_executados": bool(executar_efeitos_operacionais),
     }
 
 
@@ -10531,13 +10558,19 @@ def _adquirir_bloqueio_aprovacao_solicitacao_admin(id_solicitacao: int, timeout_
 
 
 def _liberar_bloqueio_aprovacao_solicitacao_admin(id_solicitacao: int) -> None:
-    """Libero o sp_getapplock da aprovação quando o worker termina."""
+    """Libero o sp_getapplock da aprovação quando ainda estiver preso na transação atual.
+
+    Importante:
+    - o lock foi criado com LockOwner='Transaction';
+    - qualquer commit/rollback no meio do fluxo já libera esse lock automaticamente;
+    - por isso, erro 1223 aqui não é falha funcional, só significa que o SQL Server já liberou.
+    """
     id_solic = _int_ou_none(id_solicitacao)
     if id_solic in (None, "", 0):
         return
 
     try:
-        db.session.execute(
+        row = db.session.execute(
             text("""
                 SET NOCOUNT ON;
                 DECLARE @resultado int;
@@ -10547,10 +10580,27 @@ def _liberar_bloqueio_aprovacao_solicitacao_admin(id_solicitacao: int) -> None:
                 SELECT @resultado AS ResultadoLiberacao;
             """),
             {"recurso": f"APROVACAO_CONTRATO_SOLICITACAO_V2_{int(id_solic)}"},
-        )
-    except Exception:
+        ).mappings().first()
+
+        resultado = (row or {}).get("ResultadoLiberacao")
+        if resultado is not None and int(resultado) < 0:
+            current_app.logger.info(
+                "APROVACAO_CONTRATO | applock já estava liberado ou não estava mais na transação | id_solicitacao=%s | resultado=%s",
+                id_solic,
+                resultado,
+            )
+
+    except Exception as exc:
+        mensagem = str(exc)
+        if "Cannot release the application lock" in mensagem or "1223" in mensagem:
+            current_app.logger.info(
+                "APROVACAO_CONTRATO | applock já estava liberado pelo commit/rollback da transação | id_solicitacao=%s",
+                id_solic,
+            )
+            return
+
         current_app.logger.exception(
-            "APROVACAO_CONTRATO | falha ao liberar applock | id_solicitacao=%s",
+            "APROVACAO_CONTRATO | falha inesperada ao liberar applock | id_solicitacao=%s",
             id_solic,
         )
 
@@ -13037,11 +13087,11 @@ def _d4sign_executar_get_admin(caminho: str, parametros_extras: dict | None = No
 
             raise ultimo_erro
 
-        except Exception as exc:
+        except requests.RequestException as exc:
             ultimo_erro = exc
             if tentativa < tentativas:
                 current_app.logger.warning(
-                    "D4SIGN | GET com erro de conexão/API; vou tentar novamente | caminho=%s | tentativa=%s/%s | erro=%s",
+                    "D4SIGN | GET com erro de conexão; vou tentar novamente | caminho=%s | tentativa=%s/%s | erro=%s",
                     caminho,
                     tentativa,
                     tentativas,
@@ -13109,11 +13159,11 @@ def _d4sign_executar_post_admin(caminho: str, payload: dict | None = None) -> di
 
             raise ultimo_erro
 
-        except Exception as exc:
+        except requests.RequestException as exc:
             ultimo_erro = exc
             if tentativa < tentativas:
                 current_app.logger.warning(
-                    "D4SIGN | POST com erro de conexão/API; vou tentar novamente | caminho=%s | tentativa=%s/%s | erro=%s",
+                    "D4SIGN | POST com erro de conexão; vou tentar novamente | caminho=%s | tentativa=%s/%s | erro=%s",
                     caminho,
                     tentativa,
                     tentativas,
@@ -13183,35 +13233,73 @@ def _d4sign_buscar_valor_recursivo_admin(objeto, nomes_chaves: set[str]):
     return None
 
 
+_RE_UUID_D4SIGN_ADMIN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_RE_UUID_D4SIGN_TEXTO_ADMIN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _d4sign_normalizar_chave_resposta_admin(chave: Any) -> str:
+    """Normalizo nomes de chaves da D4Sign para comparar sem depender de maiúsculas, _ ou -."""
+
+    return re.sub(r"[^a-z0-9]+", "", str(chave or "").strip().lower())
+
+
+def _d4sign_uuid_valido_admin(valor: Any) -> str:
+    """Valido se o valor recebido tem formato real de UUID."""
+
+    texto = str(valor or "").strip()
+    return texto if _RE_UUID_D4SIGN_ADMIN.fullmatch(texto) else ""
+
+
+def _d4sign_buscar_valor_recursivo_chave_normalizada_admin(objeto, nomes_chaves_normalizadas: set[str]):
+    """Procuro valor em dicionários/listas comparando chaves normalizadas."""
+
+    if isinstance(objeto, dict):
+        for chave, valor in objeto.items():
+            if _d4sign_normalizar_chave_resposta_admin(chave) in nomes_chaves_normalizadas and valor not in (None, ""):
+                return valor
+
+        for valor in objeto.values():
+            encontrado = _d4sign_buscar_valor_recursivo_chave_normalizada_admin(valor, nomes_chaves_normalizadas)
+            if encontrado not in (None, ""):
+                return encontrado
+
+    if isinstance(objeto, list):
+        for item in objeto:
+            encontrado = _d4sign_buscar_valor_recursivo_chave_normalizada_admin(item, nomes_chaves_normalizadas)
+            if encontrado not in (None, ""):
+                return encontrado
+
+    return None
+
+
 def _d4sign_obter_uuid_documento_admin(dados: dict) -> str:
-    """_d4sign_obter_uuid_documento_admin: eu capturo o UUID do documento em respostas diferentes."""
+    """_d4sign_obter_uuid_documento_admin: eu capturo somente UUID explicitamente indicado como documento.
 
-    valor = _d4sign_buscar_valor_recursivo_admin(
-        dados,
-        {
-            "uuidDoc",
-            "uuid_doc",
-            "uuid-document",
-            "uuid_document",
-            "uuidDocument",
-            "uuid_documento",
-            "UUIDDocumentoD4",
-        },
-    )
+    Regra importante:
+    - não aceito mais o primeiro UUID solto no JSON;
+    - UUID de pasta/cofre/template não pode ser tratado como documento;
+    - se a D4Sign não devolver uma chave clara de documento, o fluxo falha com erro explícito.
+    """
 
-    if valor not in (None, ""):
-        return str(valor).strip()
+    chaves_documento = {
+        "uuiddoc",
+        "uuiddocument",
+        "uuiddocumento",
+        "uuiddocumentod4",
+        "documentuuid",
+        "documentouuid",
+        "uuidfile",
+        "fileuuid",
+    }
 
-    texto = str(dados or "")
-    try:
-        match = re.search(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-            texto,
-        )
-        if match:
-            return match.group(0).strip()
-    except Exception:
-        pass
+    valor = _d4sign_buscar_valor_recursivo_chave_normalizada_admin(dados, chaves_documento)
+    uuid_documento = _d4sign_uuid_valido_admin(valor)
+    if uuid_documento:
+        return uuid_documento
 
     return ""
 
@@ -13535,11 +13623,28 @@ def _d4sign_carregar_dados_contrato_admin(id_fato_controle_contratos: int) -> di
 
     itens = db.session.execute(
         text("""
-            SELECT *
-            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
-            WHERE IDFatoControleContratoEuromidia = :id_contrato
-              AND ISNULL(BitAtivo, 1) = 1
-            ORDER BY IDFatoControleContratosItensEuromidia ASC
+            SELECT
+                i.*,
+                COALESCE(NULLIF(LTRIM(RTRIM(CAST(i.CodPonto AS varchar(80)))), ''), NULLIF(LTRIM(RTRIM(CAST(dp.CodPonto AS varchar(80)))), '')) AS CodPontoContratoTabela,
+                COALESCE(NULLIF(LTRIM(RTRIM(CAST(i.CodFace AS varchar(80)))), ''), NULLIF(LTRIM(RTRIM(CAST(df.CodFace AS varchar(80)))), '')) AS CodFaceContratoTabela,
+                df.Face AS FaceDescricaoCadastro,
+                df.CodFace AS CodFaceCadastro,
+                df.Tipo AS TipoFaceCadastro,
+                dp.CodPonto AS CodPontoCadastro,
+                dp.Cidade AS CidadePainelCadastro,
+                dp.UF AS UFPainelCadastro,
+                dp.Tipo AS TipoPainelCadastro,
+                dp.Logradouro AS LogradouroPainelCadastro,
+                dp.Bairro AS BairroPainelCadastro,
+                dp.Referencia AS ReferenciaPainelCadastro
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+            LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS df
+                ON df.IDDimFacesPaineis = i.IDDimFacesPaineis
+            LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS dp
+                ON dp.IDDimPaineisEuromidia = COALESCE(i.IDPainelEuromidia, df.IDDimPaineisEuromidia)
+            WHERE i.IDFatoControleContratoEuromidia = :id_contrato
+              AND ISNULL(i.BitAtivo, 1) = 1
+            ORDER BY i.IDFatoControleContratosItensEuromidia ASC
         """),
         {"id_contrato": int(id_fato_controle_contratos)},
     ).mappings().all()
@@ -13586,6 +13691,9 @@ def _d4sign_carregar_dados_contrato_admin(id_fato_controle_contratos: int) -> di
             "PrimeiroItem_DataTerminoPrevisto": primeiro_item.get("DataTerminoPrevisto"),
             "PrimeiroItem_FaturamentoBrutoMensal": primeiro_item.get("FaturamentoBrutoMensal"),
             "PrimeiroItem_FaturamentoLiquidoMensal": primeiro_item.get("FaturamentoLiquidoMensal"),
+            "ItensContrato": itens_dict,
+            "TABELA_PAINEIS_CONTRATO": _d4sign_montar_tabela_paineis_contrato_admin(itens_dict),
+            "PAINEIS_CONTRATO": _d4sign_montar_tabela_paineis_contrato_admin(itens_dict),
         }
     )
 
@@ -13606,6 +13714,90 @@ def _d4sign_montar_endereco_empresa_admin(dados: dict) -> str:
     ]
 
     return " ".join(str(p).strip() for p in partes if str(p or "").strip())
+
+
+def _d4sign_montar_endereco_painel_contrato_admin(item: dict) -> str:
+    """Monto o endereço do painel/face para aparecer no contrato D4Sign."""
+
+    partes_principais = [
+        item.get("LogradouroPainelCadastro"),
+        item.get("BairroPainelCadastro"),
+        item.get("CidadePainelCadastro"),
+        item.get("UFPainelCadastro"),
+    ]
+    endereco = " - ".join(str(p).strip() for p in partes_principais if str(p or "").strip())
+
+    referencia = _texto_ou_vazio(item.get("ReferenciaPainelCadastro"))
+    if referencia:
+        if endereco:
+            endereco = f"{endereco} ({referencia})"
+        else:
+            endereco = referencia
+
+    if endereco:
+        return endereco
+
+    return (
+        _texto_ou_vazio(item.get("CidadeExibicao"))
+        or _texto_ou_vazio(item.get("Referencia"))
+        or "—"
+    )
+
+
+def _d4sign_montar_tabela_paineis_contrato_admin(itens: list[dict]) -> str:
+    """Monto o texto dos painéis contratados para substituir o token do template D4Sign.
+
+    Como o fluxo atual usa makedocumentbytemplateword da própria D4Sign, eu envio
+    uma tabela textual por token. Assim não preciso voltar para template Word local
+    nem criar documento duplicado fora do cofre/modelo cadastrado na D4Sign.
+    """
+
+    if not itens:
+        return "Nenhum painel/face ativo foi localizado para este contrato."
+
+    linhas = [
+        "CodFace | Endereço do CodFace | Data de início | Data de término | Valor do período",
+        "--------------------------------------------------------------------------------",
+    ]
+
+    for indice, item in enumerate(itens, start=1):
+        cod_face = (
+            _texto_ou_vazio(item.get("CodFaceContratoTabela"))
+            or _texto_ou_vazio(item.get("CodFace"))
+            or _texto_ou_vazio(item.get("CodFaceCadastro"))
+            or "—"
+        )
+        endereco = _d4sign_montar_endereco_painel_contrato_admin(item)
+        data_inicio = _d4sign_formatar_data_br_admin(item.get("DataInicioPrevisto")) or "—"
+        data_termino = (
+            _d4sign_formatar_data_br_admin(item.get("DataTerminoPrevisto"))
+            or _d4sign_formatar_data_br_admin(item.get("DataFimEfetiva"))
+            or "—"
+        )
+        valor_periodo = (
+            _d4sign_formatar_moeda_br_admin(item.get("TotalBrutoContrato"))
+            or _d4sign_formatar_moeda_br_admin(item.get("Faturamento"))
+            or _d4sign_formatar_moeda_br_admin(item.get("FaturamentoBrutoMensal"))
+            or "—"
+        )
+
+        linhas.extend([
+            f"{indice}. CodFace: {cod_face}",
+            f"   Endereço: {endereco}",
+            f"   Início: {data_inicio} | Término: {data_termino} | Valor do período: {valor_periodo}",
+        ])
+
+    return "\n".join(linhas)
+
+
+def _d4sign_garantir_tokens_essenciais_template_admin(tokens: dict, tokens_padrao: dict) -> dict:
+    """Garanto tokens novos mesmo quando JsonVariaveis filtra a lista enviada à D4Sign."""
+
+    resultado = dict(tokens or {})
+    for chave in ("TABELA_PAINEIS_CONTRATO", "PAINEIS_CONTRATO"):
+        if chave not in resultado and chave in (tokens_padrao or {}):
+            resultado[chave] = tokens_padrao.get(chave)
+    return resultado
 
 
 def _d4sign_montar_nome_documento_admin(
@@ -13768,6 +13960,8 @@ def _d4sign_montar_tokens_padrao_admin(dados: dict, tipo_solicitacao: str | None
         "COD_FACE": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_CodFace")),
         "CIDADE_EXIBICAO": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_CidadeExibicao")),
         "TIPO_FACE": _d4sign_formatar_valor_token_admin(dados.get("PrimeiroItem_Tipo")),
+        "TABELA_PAINEIS_CONTRATO": _d4sign_formatar_valor_token_admin(dados.get("TABELA_PAINEIS_CONTRATO") or dados.get("PAINEIS_CONTRATO")),
+        "PAINEIS_CONTRATO": _d4sign_formatar_valor_token_admin(dados.get("PAINEIS_CONTRATO") or dados.get("TABELA_PAINEIS_CONTRATO")),
         "TOTAL_BRUTO_CONTRATO": _d4sign_formatar_moeda_br_admin(total_bruto),
         "TOTAL_FATURAMENTO_LIQUIDO_MENSAL": _d4sign_formatar_moeda_br_admin(total_liquido_mensal),
         "TOTAL_LIQUIDO_AGENCIA_BUREAU_CARTA_ACORDO": _d4sign_formatar_moeda_br_admin(dados.get("TotalLiquidoContratoAGBRCTACORDO")),
@@ -13951,6 +14145,8 @@ def _d4sign_montar_tokens_template_admin(modelo: dict, dados_contrato: dict, tip
                 _d4sign_buscar_valor_token_por_nome_admin(nome_variavel, dados_contrato, tokens_padrao)
             )
 
+        tokens = _d4sign_garantir_tokens_essenciais_template_admin(tokens, tokens_padrao)
+
         current_app.logger.info(
             "D4SIGN | tokens do template montados | chaves=%s",
             sorted(tokens.keys()),
@@ -13969,6 +14165,8 @@ def _d4sign_montar_tokens_template_admin(modelo: dict, dados_contrato: dict, tip
                 dados_contrato,
                 tokens_padrao,
             )
+
+        tokens = _d4sign_garantir_tokens_essenciais_template_admin(tokens, tokens_padrao)
 
         current_app.logger.info(
             "D4SIGN | tokens do template montados por regra | chaves=%s",
@@ -14426,7 +14624,10 @@ def _d4sign_documento_existente_ativo_admin(
     else:
         campos_select.append("CAST(NULL AS nvarchar(90)) AS NomeFaseD4")
 
-    filtros = ["IDFatoControleContratosEuromidia = :id_contrato"]
+    filtros = [
+        "IDFatoControleContratosEuromidia = :id_contrato",
+        "NULLIF(LTRIM(RTRIM(CAST(UUIDDocumentoD4 AS varchar(36)))), '') IS NOT NULL",
+    ]
     params = {
         "id_contrato": int(id_fato_controle_contratos),
         "id_card": int(id_fato_kanban_card) if id_fato_kanban_card not in (None, "", 0) else None,
@@ -14850,6 +15051,343 @@ def _d4sign_buscar_detalhe_documento_admin(uuid_documento: str) -> dict:
     return _d4sign_primeiro_objeto_admin(resposta)
 
 
+def _d4sign_confirmar_documento_existe_admin(
+    uuid_documento: str,
+    *,
+    tentativas: int = 3,
+    intervalo_segundos: float = 2.0,
+) -> dict | None:
+    """Confirmo se o UUID realmente é de um documento acessível na D4Sign."""
+
+    uuid_limpo = _d4sign_uuid_valido_admin(uuid_documento)
+    if not uuid_limpo:
+        return None
+
+    total_tentativas = max(1, int(tentativas or 1))
+    ultimo_erro = None
+
+    for tentativa in range(1, total_tentativas + 1):
+        try:
+            detalhe = _d4sign_buscar_detalhe_documento_admin(uuid_limpo)
+            if isinstance(detalhe, dict) and detalhe:
+                return detalhe
+        except Exception as exc:
+            ultimo_erro = exc
+            mensagem = str(exc)
+            if "File not founded" in mensagem or "file not found" in mensagem.lower():
+                current_app.logger.warning(
+                    "D4SIGN | UUID não existe como documento na D4Sign | uuid=%s | erro=%s",
+                    uuid_limpo,
+                    exc,
+                )
+                return None
+
+            current_app.logger.warning(
+                "D4SIGN | ainda não confirmei documento na D4Sign | uuid=%s | tentativa=%s/%s | erro=%s",
+                uuid_limpo,
+                tentativa,
+                total_tentativas,
+                exc,
+            )
+
+        if tentativa < total_tentativas:
+            time.sleep(float(intervalo_segundos or 0))
+
+    current_app.logger.warning(
+        "D4SIGN | não consegui confirmar documento após tentativas | uuid=%s | erro=%s",
+        uuid_limpo,
+        ultimo_erro,
+    )
+    return None
+
+
+def _d4sign_confirmar_documento_existente_com_status_admin(
+    uuid_documento: str,
+    *,
+    tentativas: int = 2,
+    intervalo_segundos: float = 1.0,
+) -> tuple[dict | None, str, str | None]:
+    """Confirmo documento existente sem confundir limite da API com UUID inválido.
+
+    Retornos de status:
+    - confirmado: consegui consultar o documento na D4Sign;
+    - nao_encontrado: a D4Sign respondeu explicitamente que o arquivo não existe;
+    - inconclusivo: a consulta falhou por limite, timeout, 401, 429 ou erro transitório.
+    """
+    uuid_limpo = _d4sign_uuid_valido_admin(uuid_documento)
+    if not uuid_limpo:
+        return None, "uuid_invalido", "UUIDDocumentoD4 vazio ou inválido."
+
+    total_tentativas = max(1, int(tentativas or 1))
+    ultimo_erro = None
+
+    for tentativa in range(1, total_tentativas + 1):
+        try:
+            detalhe = _d4sign_buscar_detalhe_documento_admin(uuid_limpo)
+            if isinstance(detalhe, dict) and detalhe:
+                return detalhe, "confirmado", None
+        except Exception as exc:
+            ultimo_erro = exc
+            mensagem = str(exc)
+            mensagem_lower = mensagem.lower()
+
+            if "file not founded" in mensagem_lower or "file not found" in mensagem_lower:
+                current_app.logger.warning(
+                    "D4SIGN | UUID local não existe na D4Sign | uuid=%s | erro=%s",
+                    uuid_limpo,
+                    exc,
+                )
+                return None, "nao_encontrado", mensagem
+
+            current_app.logger.warning(
+                "D4SIGN | confirmação de documento existente ficou inconclusiva | uuid=%s | tentativa=%s/%s | erro=%s",
+                uuid_limpo,
+                tentativa,
+                total_tentativas,
+                exc,
+            )
+
+        if tentativa < total_tentativas:
+            time.sleep(float(intervalo_segundos or 0))
+
+    return None, "inconclusivo", str(ultimo_erro) if ultimo_erro is not None else None
+
+
+def _d4sign_resultado_tem_documento_local_admin(resultado_d4sign: dict | None) -> bool:
+    """Retorno True quando existe vínculo local suficiente com documento D4Sign.
+
+    Regra prática corrigida:
+    - POST de criação com sucesso + UUID + linha em FatoContratoD4 é suficiente para seguir o fluxo;
+    - GET /documents/{uuid} é confirmação complementar, não pode derrubar a aprovação quando a D4Sign limitar esse método;
+    - só bloqueio quando a D4Sign responder explicitamente que o UUID não existe, ou quando faltar ID/UUID local.
+    """
+    if not isinstance(resultado_d4sign, dict):
+        return False
+
+    if not resultado_d4sign.get("ok"):
+        return False
+
+    status_resultado = _texto_ou_vazio(resultado_d4sign.get("status")).lower()
+    confirmacao = resultado_d4sign.get("confirmacao_d4sign") or {}
+    status_confirmacao = _texto_ou_vazio(confirmacao.get("status")).lower() if isinstance(confirmacao, dict) else ""
+
+    if status_resultado in {
+        "contrato_controle_com_d4sign_local_nao_confirmado",
+        "d4sign_nao_criado",
+        "erro",
+    }:
+        return False
+
+    if status_confirmacao in {"nao_encontrado", "uuid_invalido", "sem_uuid"}:
+        return False
+
+    id_fato_d4 = _int_ou_none(
+        resultado_d4sign.get("id_fato_contrato_d4")
+        or resultado_d4sign.get("id_fato_contrato_d4sign")
+        or resultado_d4sign.get("id_fato_contrato")
+    )
+    uuid_documento = _texto_ou_vazio(resultado_d4sign.get("uuid_documento_d4"))
+
+    return bool(id_fato_d4 not in (None, "", 0) and uuid_documento)
+
+
+def _d4sign_coletar_uuids_resposta_admin(objeto) -> list[str]:
+    """Coleto UUIDs do retorno apenas para diagnóstico/fallback validado."""
+
+    texto = str(objeto or "")
+    encontrados = []
+    vistos = set()
+
+    for match in _RE_UUID_D4SIGN_TEXTO_ADMIN.finditer(texto):
+        uuid_encontrado = match.group(0).strip()
+        chave = uuid_encontrado.lower()
+        if chave not in vistos:
+            vistos.add(chave)
+            encontrados.append(uuid_encontrado)
+
+    return encontrados
+
+
+def _d4sign_resposta_criacao_documento_sucesso_admin(resposta_criacao: dict | None) -> bool:
+    """Identifico se o POST de criação da D4Sign informou sucesso de forma suficiente."""
+
+    if not isinstance(resposta_criacao, dict):
+        return False
+
+    valores_sucesso = [
+        resposta_criacao.get("status"),
+        resposta_criacao.get("message"),
+        resposta_criacao.get("mensagem"),
+        resposta_criacao.get("success"),
+        resposta_criacao.get("ok"),
+    ]
+
+    for valor in valores_sucesso:
+        texto = _texto_ou_vazio(valor).lower().strip()
+        if texto in {"success", "sucesso", "ok", "true", "1"}:
+            return True
+        if isinstance(valor, bool) and valor is True:
+            return True
+
+    return False
+
+
+def _d4sign_montar_detalhe_minimo_documento_criado_admin(
+    *,
+    uuid_documento: str,
+    resposta_criacao: dict,
+) -> dict:
+    """Monto detalhe mínimo quando a D4Sign criou, mas bloqueou GET /documents/{uuid}."""
+
+    detalhe_resposta = _d4sign_primeiro_objeto_admin(resposta_criacao)
+    if not isinstance(detalhe_resposta, dict):
+        detalhe_resposta = {}
+
+    detalhe = dict(detalhe_resposta)
+    detalhe.setdefault("uuidDoc", uuid_documento)
+    detalhe.setdefault("uuid", uuid_documento)
+    detalhe.setdefault("statusId", 1)
+    detalhe.setdefault("statusName", "Processando")
+    detalhe.setdefault("status", "Processando")
+    detalhe.setdefault("type", "word")
+    detalhe["confirmacao_api"] = "nao_consultado_por_limite_ou_processamento_d4sign"
+    detalhe["resposta_criacao"] = resposta_criacao
+    return detalhe
+
+
+def _d4sign_resolver_documento_criado_template_admin(resposta_criacao: dict) -> tuple[str, dict]:
+    """Resolvo o documento criado por template sem confundir limite da API com falha de criação.
+
+    Correção importante:
+    - a D4Sign pode retornar {'message': 'success', 'uuid': '...'} no POST;
+    - logo depois, o GET /documents/{uuid} pode responder limite/timeout/401 para esse método;
+    - isso não significa que o documento não foi criado. Nesse caso eu sigo com UUID + detalhe mínimo
+      e deixo a sincronização posterior/webhook atualizar os detalhes.
+    """
+
+    uuid_explicito = _d4sign_obter_uuid_documento_admin(resposta_criacao)
+    candidatos = []
+
+    if uuid_explicito:
+        candidatos.append(uuid_explicito)
+
+    for uuid_candidato in _d4sign_coletar_uuids_resposta_admin(resposta_criacao):
+        if uuid_candidato.lower() not in {u.lower() for u in candidatos}:
+            candidatos.append(uuid_candidato)
+
+    if not candidatos:
+        raise RuntimeError(f"D4Sign respondeu sem UUID explícito de documento criado: {resposta_criacao}")
+
+    criacao_informou_sucesso = _d4sign_resposta_criacao_documento_sucesso_admin(resposta_criacao)
+    erros_validacao = []
+    candidatos_inconclusivos = []
+
+    for uuid_candidato in candidatos:
+        detalhe, status_confirmacao, erro_confirmacao = _d4sign_confirmar_documento_existente_com_status_admin(
+            uuid_candidato,
+            tentativas=3,
+            intervalo_segundos=2.0,
+        )
+
+        if detalhe and status_confirmacao == "confirmado":
+            return uuid_candidato, detalhe
+
+        if status_confirmacao == "inconclusivo":
+            candidatos_inconclusivos.append({
+                "uuid": uuid_candidato,
+                "erro": erro_confirmacao,
+            })
+            continue
+
+        erros_validacao.append({
+            "uuid": uuid_candidato,
+            "status": status_confirmacao,
+            "erro": erro_confirmacao,
+        })
+
+    if criacao_informou_sucesso and candidatos:
+        uuid_fallback = candidatos[0]
+        current_app.logger.warning(
+            "D4SIGN | criação retornou sucesso e UUID, mas confirmação GET ficou inconclusiva; vou gravar vínculo local e seguir sem derrubar aprovação | uuid=%s | inconclusivos=%s | erros=%s | resposta=%s",
+            uuid_fallback,
+            candidatos_inconclusivos,
+            erros_validacao,
+            resposta_criacao,
+        )
+        return uuid_fallback, _d4sign_montar_detalhe_minimo_documento_criado_admin(
+            uuid_documento=uuid_fallback,
+            resposta_criacao=resposta_criacao,
+        )
+
+    raise RuntimeError(
+        "D4Sign retornou UUID(s), mas nenhum deles foi confirmado como documento acessível. "
+        f"Candidatos={candidatos}. Inconclusivos={candidatos_inconclusivos}. Erros={erros_validacao}. RespostaCriacao={resposta_criacao}"
+    )
+
+
+def _d4sign_desativar_fato_contrato_d4_invalido_admin(
+    *,
+    id_fato_contrato_d4: int | None,
+    uuid_documento_d4: str | None,
+    motivo: str,
+) -> int:
+    """Desativo vínculo local inválido para permitir recriar o documento correto."""
+
+    id_fato = _int_ou_none(id_fato_contrato_d4)
+    uuid_limpo = _texto_ou_vazio(uuid_documento_d4)
+
+    if id_fato in (None, "", 0) and not uuid_limpo:
+        return 0
+
+    colunas = _d4sign_obter_colunas_tabela_admin("Integracao", "Silver", "FatoContratoD4")
+    sets = []
+    parametros = {
+        "id_fato": int(id_fato) if id_fato not in (None, "", 0) else None,
+        "uuid_documento": uuid_limpo or None,
+        "motivo": _texto_ou_vazio(motivo)[:2000] or None,
+    }
+
+    if _d4sign_tem_coluna_admin(colunas, "BitAtivo"):
+        sets.append("BitAtivo = 0")
+    if _d4sign_tem_coluna_admin(colunas, "DataAtualizacao"):
+        sets.append("DataAtualizacao = SYSDATETIME()")
+    if _d4sign_tem_coluna_admin(colunas, "MensagemErroD4"):
+        sets.append("MensagemErroD4 = :motivo")
+    if _d4sign_tem_coluna_admin(colunas, "StatusDocumentoD4"):
+        sets.append("StatusDocumentoD4 = 'UUID_INVALIDO_D4SIGN'")
+
+    if not sets:
+        return 0
+
+    filtros = []
+    if id_fato not in (None, "", 0) and _d4sign_tem_coluna_admin(colunas, "IDFatoContratoD4"):
+        filtros.append("IDFatoContratoD4 = :id_fato")
+    if uuid_limpo and _d4sign_tem_coluna_admin(colunas, "UUIDDocumentoD4"):
+        filtros.append("UUIDDocumentoD4 = :uuid_documento")
+
+    if not filtros:
+        return 0
+
+    resultado = db.session.execute(
+        text(f"""
+            UPDATE [Integracao].[Silver].[FatoContratoD4]
+               SET {", ".join(sets)}
+             WHERE ({" OR ".join(filtros)})
+        """),
+        parametros,
+    )
+
+    current_app.logger.warning(
+        "D4SIGN | vínculo local D4Sign inválido desativado | id_fato=%s | uuid=%s | linhas=%s | motivo=%s",
+        id_fato,
+        uuid_limpo,
+        int(resultado.rowcount or 0),
+        motivo,
+    )
+
+    return int(resultado.rowcount or 0)
+
+
 def _d4sign_normalizar_nome_status_admin(valor: str | None) -> str:
     """Normaliza o nome do status D4 para comparar com DimStatusD4."""
 
@@ -15118,7 +15656,8 @@ def _d4sign_resolver_status_contrato_por_status_d4_admin(
         return ID_STATUS_CONTRATO_ENVIADO_ASSINATURA_D4_ADMIN
 
     if id_status_d4 == 1:
-        return ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN
+        # D4Sign status 1 = Processando. Documento pode existir, mas ainda não está pronto para tratar como "Pendente Envio".
+        return ID_STATUS_CONTRATO_DOCUMENTO_GERADO_D4_ADMIN
 
     return _int_ou_none(fallback_id_status_contrato)
 
@@ -15822,66 +16361,137 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         resultado_tags_d4sign = None
         resultado_webhook_d4sign = None
         uuid_documento_existente = existente.get("UUIDDocumentoD4")
+        detalhe_documento_existente = None
+        status_confirmacao_existente = "sem_uuid"
+        erro_confirmacao_existente = None
 
         if uuid_documento_existente:
-            try:
-                dados_contrato_existente = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
-                resultado_tags_d4sign = _d4sign_adicionar_tags_documento_contrato_admin(
-                    uuid_documento=str(uuid_documento_existente),
-                    dados_contrato=dados_contrato_existente,
-                    tipo_solicitacao=tipo_solicitacao,
-                    id_fato_kanban_card=id_fato_kanban_card,
-                    id_dim_tipo_documento=id_tipo_documento,
-                )
-            except Exception as exc:
-                current_app.logger.exception(
-                    "D4SIGN_TAG | falha ao garantir TAGs em documento D4Sign já existente | uuid=%s | id_contrato=%s",
+            (
+                detalhe_documento_existente,
+                status_confirmacao_existente,
+                erro_confirmacao_existente,
+            ) = _d4sign_confirmar_documento_existente_com_status_admin(
+                str(uuid_documento_existente),
+                tentativas=1,
+                intervalo_segundos=0,
+            )
+
+        if uuid_documento_existente and status_confirmacao_existente == "nao_encontrado":
+            _d4sign_desativar_fato_contrato_d4_invalido_admin(
+                id_fato_contrato_d4=existente.get("IDFatoContratoD4"),
+                uuid_documento_d4=str(uuid_documento_existente),
+                motivo="UUIDDocumentoD4 local não existe na D4Sign. Vou recriar documento na aprovação.",
+            )
+            existente = None
+        else:
+            if uuid_documento_existente and status_confirmacao_existente == "confirmado":
+                try:
+                    dados_contrato_existente = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
+                    resultado_tags_d4sign = _d4sign_adicionar_tags_documento_contrato_admin(
+                        uuid_documento=str(uuid_documento_existente),
+                        dados_contrato=dados_contrato_existente,
+                        tipo_solicitacao=tipo_solicitacao,
+                        id_fato_kanban_card=id_fato_kanban_card,
+                        id_dim_tipo_documento=id_tipo_documento,
+                    )
+                except Exception as exc:
+                    current_app.logger.exception(
+                        "D4SIGN_TAG | falha ao garantir TAGs em documento D4Sign já existente | uuid=%s | id_contrato=%s",
+                        uuid_documento_existente,
+                        id_contrato,
+                    )
+                    resultado_tags_d4sign = {
+                        "ok": False,
+                        "uuid_documento_d4": str(uuid_documento_existente),
+                        "erro": str(exc),
+                    }
+
+                try:
+                    resultado_webhook_d4sign = _d4sign_cadastrar_webhook_documento_admin(str(uuid_documento_existente))
+                except Exception as exc:
+                    current_app.logger.exception(
+                        "D4SIGN_WEBHOOK_DOC | falha ao garantir webhook em documento D4Sign já existente | uuid=%s | id_contrato=%s",
+                        uuid_documento_existente,
+                        id_contrato,
+                    )
+                    resultado_webhook_d4sign = {
+                        "ok": False,
+                        "uuid_documento_d4": str(uuid_documento_existente),
+                        "status": "erro_webhook_documento_existente",
+                        "erro": str(exc),
+                    }
+
+            elif uuid_documento_existente and status_confirmacao_existente == "inconclusivo":
+                current_app.logger.warning(
+                    "D4SIGN | existe vínculo local em FatoContratoD4, mas a consulta na API ficou inconclusiva; não vou desativar nem recriar para evitar duplicidade | id_fato_contrato_d4=%s | uuid=%s | erro=%s",
+                    existente.get("IDFatoContratoD4"),
                     uuid_documento_existente,
-                    id_contrato,
+                    erro_confirmacao_existente,
                 )
-                resultado_tags_d4sign = {
+
+            if status_confirmacao_existente in {"sem_uuid", "uuid_invalido"}:
+                return {
                     "ok": False,
-                    "uuid_documento_d4": str(uuid_documento_existente),
-                    "erro": str(exc),
+                    "status": "contrato_controle_com_d4sign_local_nao_confirmado",
+                    "id_fato_contrato_d4": existente.get("IDFatoContratoD4"),
+                    "uuid_documento_d4": existente.get("UUIDDocumentoD4"),
+                    "nome_documento_d4": existente.get("NomeDocumentoD4"),
+                    "nome_fase_d4": existente.get("NomeFaseD4"),
+                    "confirmacao_d4sign": {
+                        "status": status_confirmacao_existente,
+                        "erro": erro_confirmacao_existente,
+                    },
+                    "tags_d4sign": resultado_tags_d4sign,
+                    "webhook_d4sign": resultado_webhook_d4sign,
+                    "sincronizacao_existente": {
+                        "ok": False,
+                        "status": "nao_sincronizado_sem_uuid_local",
+                        "mensagem": "Existe linha local em FatoContratoD4, mas ela não tem UUID válido. Não avanço para evitar vínculo quebrado.",
+                    },
                 }
 
-            try:
-                resultado_webhook_d4sign = _d4sign_cadastrar_webhook_documento_admin(str(uuid_documento_existente))
-            except Exception as exc:
-                current_app.logger.exception(
-                    "D4SIGN_WEBHOOK_DOC | falha ao garantir webhook em documento D4Sign já existente | uuid=%s | id_contrato=%s",
-                    uuid_documento_existente,
-                    id_contrato,
-                )
-                resultado_webhook_d4sign = {
+            if status_confirmacao_existente == "inconclusivo":
+                resultado_tags_d4sign = resultado_tags_d4sign or {
                     "ok": False,
+                    "status": "adiado_confirmacao_api_inconclusiva",
                     "uuid_documento_d4": str(uuid_documento_existente),
-                    "status": "erro_webhook_documento_existente",
-                    "erro": str(exc),
+                    "mensagem": "Não tentei garantir TAGs agora porque GET/consulta da D4Sign ficou inconclusiva por limite/timeout. O vínculo local será mantido e a sincronização posterior ajustará.",
+                    "erro": erro_confirmacao_existente,
+                }
+                resultado_webhook_d4sign = resultado_webhook_d4sign or {
+                    "ok": False,
+                    "status": "adiado_confirmacao_api_inconclusiva",
+                    "uuid_documento_d4": str(uuid_documento_existente),
+                    "mensagem": "Não tentei garantir webhook agora porque GET/consulta da D4Sign ficou inconclusiva por limite/timeout. O vínculo local será mantido.",
+                    "erro": erro_confirmacao_existente,
                 }
 
-        id_status_contrato_existente = _d4sign_resolver_status_contrato_por_status_d4_admin(
-            existente.get("IDDimStatusD4"),
-            fallback_id_status_contrato=existente.get("IDDimStatusContratos"),
-        )
-        resultado_sincronizacao_existente = _d4sign_sincronizar_esteira_contrato_admin(
-            id_fato_controle_contratos=int(id_contrato),
-            id_fato_kanban_card=id_fato_kanban_card,
-            id_dim_status_contratos=id_status_contrato_existente or existente.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN,
-            id_dim_status_d4=existente.get("IDDimStatusD4"),
-        )
+            id_status_contrato_existente = _d4sign_resolver_status_contrato_por_status_d4_admin(
+                existente.get("IDDimStatusD4"),
+                fallback_id_status_contrato=existente.get("IDDimStatusContratos"),
+            )
+            resultado_sincronizacao_existente = _d4sign_sincronizar_esteira_contrato_admin(
+                id_fato_controle_contratos=int(id_contrato),
+                id_fato_kanban_card=id_fato_kanban_card,
+                id_dim_status_contratos=id_status_contrato_existente or existente.get("IDDimStatusContratos") or ID_STATUS_CONTRATO_DOCUMENTO_GERADO_D4_ADMIN,
+                id_dim_status_d4=existente.get("IDDimStatusD4"),
+            )
 
-        return {
-            "ok": True,
-            "status": "ja_existia",
-            "id_fato_contrato_d4": existente.get("IDFatoContratoD4"),
-            "uuid_documento_d4": existente.get("UUIDDocumentoD4"),
-            "nome_documento_d4": existente.get("NomeDocumentoD4"),
-            "nome_fase_d4": existente.get("NomeFaseD4"),
-            "tags_d4sign": resultado_tags_d4sign,
-            "webhook_d4sign": resultado_webhook_d4sign,
-            "sincronizacao_existente": resultado_sincronizacao_existente,
-        }
+            return {
+                "ok": True,
+                "status": "ja_existia",
+                "id_fato_contrato_d4": existente.get("IDFatoContratoD4"),
+                "uuid_documento_d4": existente.get("UUIDDocumentoD4"),
+                "nome_documento_d4": existente.get("NomeDocumentoD4"),
+                "nome_fase_d4": existente.get("NomeFaseD4"),
+                "confirmacao_d4sign": {
+                    "status": status_confirmacao_existente,
+                    "erro": erro_confirmacao_existente,
+                },
+                "tags_d4sign": resultado_tags_d4sign,
+                "webhook_d4sign": resultado_webhook_d4sign,
+                "sincronizacao_existente": resultado_sincronizacao_existente,
+            }
 
     dados_contrato = _d4sign_carregar_dados_contrato_admin(int(id_contrato))
     tipo_documento = dados_contrato.get("TipoDocumento")
@@ -15919,9 +16529,14 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         uuid_pasta_destino=pasta_destino.get("uuid_pasta_destino") or pasta_destino.get("uuid_pasta_raiz"),
     )
 
-    uuid_documento = _d4sign_obter_uuid_documento_admin(resposta_criacao)
-    if not uuid_documento:
-        raise RuntimeError(f"D4Sign respondeu sem UUID do documento criado: {resposta_criacao}")
+    current_app.logger.warning(
+        "D4SIGN | retorno criação documento por template Word | id_contrato=%s | nome=%s | resposta=%s",
+        id_contrato,
+        nome_documento,
+        resposta_criacao,
+    )
+
+    uuid_documento, detalhe_validado = _d4sign_resolver_documento_criado_template_admin(resposta_criacao)
 
     try:
         resultado_tags_d4sign = _d4sign_adicionar_tags_documento_contrato_admin(
@@ -15959,7 +16574,7 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
             "erro": str(exc),
         }
 
-    detalhe = _d4sign_primeiro_objeto_admin(resposta_criacao)
+    detalhe = detalhe_validado or _d4sign_primeiro_objeto_admin(resposta_criacao)
 
     # Importante:
     # Quando o documento nasce de um template Word da própria D4Sign,
@@ -16007,7 +16622,11 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         id_dim_cofre_d4=cofre.get("IDDimCofreD4"),
         id_fato_controle_contratos=int(id_contrato),
         id_fato_kanban_card=id_fato_kanban_card,
-        id_dim_status_contratos=ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN,
+        id_dim_status_contratos=(
+            ID_STATUS_CONTRATO_DOCUMENTO_GERADO_D4_ADMIN
+            if int(id_dim_status_d4) == 1
+            else ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN
+        ),
         id_dim_modelo_contrato_d4=modelo.get("IDDimModeloContratoD4"),
         id_dim_tipo_documento=id_tipo_documento,
         uuid_documento_d4=uuid_documento,
@@ -16027,7 +16646,11 @@ def _d4sign_criar_contrato_por_aprovacao_admin(
         resultado_sincronizacao_documento_criado = _d4sign_sincronizar_esteira_contrato_admin(
             id_fato_controle_contratos=int(id_contrato),
             id_fato_kanban_card=id_fato_kanban_card,
-            id_dim_status_contratos=ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN,
+            id_dim_status_contratos=(
+                ID_STATUS_CONTRATO_DOCUMENTO_GERADO_D4_ADMIN
+                if int(id_dim_status_d4) == 1
+                else ID_STATUS_CONTRATO_PENDENTE_ENVIO_D4_ADMIN
+            ),
             id_dim_status_d4=int(id_dim_status_d4),
         )
     except Exception as exc:
@@ -16125,12 +16748,34 @@ def _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
             tipo_solicitacao=tipo_solicitacao,
         )
 
-        if resultado_d4sign.get("ok"):
+        if _d4sign_resultado_tem_documento_local_admin(resultado_d4sign):
+            resultado_efetivacao_operacional = _mover_solicitacao_aprovada_para_controle(
+                id_solicitacao=id_solicitacao_int,
+                id_usuario_logado=id_usuario_logado,
+                executar_efeitos_operacionais=True,
+            )
+            resultado_d4sign = dict(resultado_d4sign or {})
+            resultado_d4sign["efetivacao_operacional"] = resultado_efetivacao_operacional
+
             _finalizar_solicitacao_contrato_apos_d4sign_admin(
                 id_solicitacao=id_solicitacao_int,
                 id_contrato_controle=id_fato_controle,
                 id_usuario_logado=id_usuario_logado,
                 commit=False,
+            )
+        else:
+            _manter_solicitacao_ativa_erro_d4sign_admin(
+                id_solicitacao=id_solicitacao_int,
+                id_contrato_controle=id_fato_controle,
+                id_usuario_logado=id_usuario_logado,
+                commit=False,
+            )
+            resultado_d4sign = dict(resultado_d4sign or {})
+            resultado_d4sign["ok"] = False
+            resultado_d4sign.setdefault("status", "d4sign_nao_criado")
+            resultado_d4sign.setdefault(
+                "mensagem",
+                "Solicitação mantida ativa: contrato existe no controle, mas ainda não existe vínculo local válido em FatoContratoD4.",
             )
 
         db.session.commit()
@@ -16259,9 +16904,11 @@ def _processar_aprovacao_contrato_admin(
                 cabecalho_solicitacao=cab_d4sign,
             )
 
+            documento_d4sign_ok = _d4sign_resultado_tem_documento_local_admin(resultado_d4sign)
+
             return {
-                "ok": bool(resultado_d4sign.get("ok")),
-                "status": "contrato_ja_materializado_reenvio_d4sign",
+                "ok": bool(documento_d4sign_ok),
+                "status": "contrato_controle_e_d4sign_ok" if documento_d4sign_ok else "contrato_controle_sem_d4sign_reenvio_falhou",
                 "id_solicitacao": id_solicitacao_int,
                 "id_contrato": contrato_materializado.get("id_contrato"),
                 "id_card": contrato_materializado.get("id_card"),
@@ -16281,9 +16928,13 @@ def _processar_aprovacao_contrato_admin(
             id_usuario_int,
         )
 
+        # FASE 1: preparar o contrato no controle, mas SEM efetivar operação comercial.
+        # Regra crítica: ocupação, preço praticado, vencimento, reservas, card aprovado e histórico
+        # só podem ser efetivados depois que a D4Sign criar/confirmar o documento.
         resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
             id_solicitacao=id_solicitacao_int,
             id_usuario_logado=id_usuario_int,
+            executar_efeitos_operacionais=False,
         )
 
         id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle"))
@@ -16300,40 +16951,6 @@ def _processar_aprovacao_contrato_admin(
         id_empresa_proprietaria = _int_ou_none(id_empresa_proprietaria) or _int_ou_none(cab_aprovada.get("IDEmpresaProprietaria"))
         tipo_solicitacao = _tipo_solicitacao_normalizado(cab_aprovada.get("TipoSolicitacao")) or tipo_solicitacao
 
-        _sincronizar_contato_contrato_se_fase_4(
-            id_fato_kanban_card=id_card,
-            id_empresa=id_empresa,
-            id_empresa_proprietaria=id_empresa_proprietaria,
-            id_fato_controle_contratos=id_fato_controle,
-        )
-
-        _upsert_contato_cliente_direto_euromidia(
-            id_fato_controle_contratos=id_fato_controle,
-            id_fato_kanban_card=id_card,
-            form=form,
-            cabecalho_solicitacao=cab_aprovada,
-        )
-
-        resultado_emails_contrato = _sincronizar_dim_email_contrato_por_formulario_admin(
-            id_fato_controle_contratos=id_fato_controle,
-            id_fato_kanban_card=id_card,
-            form=form,
-        )
-
-        _upsert_destinatarios_externos_contrato(
-            id_fato_controle_contratos=id_fato_controle,
-            id_empresa_destinatario=id_empresa,
-            id_empresa=id_empresa,
-            ids_itens_controle=ids_itens_controle,
-        )
-
-        _aplicar_resultado_aprovacao_no_card(
-            id_fato_kanban_card=id_card,
-            id_usuario_logado=id_usuario_int,
-            id_empresa_proprietaria=id_empresa_proprietaria,
-            aprovar=True,
-        )
-
         id_dim_tipo_documento = _resolver_id_dim_tipo_documento_solicitacao_admin(
             id_solicitacao=id_solicitacao_int,
             cabecalho_solicitacao=cab_aprovada,
@@ -16343,57 +16960,36 @@ def _processar_aprovacao_contrato_admin(
             tipo_solicitacao=tipo_solicitacao,
         )
 
-        _atualizar_id_tipo_documento_card_admin(
-            id_fato_kanban_card=id_card,
-            id_dim_tipo_documento=id_dim_tipo_documento,
-        )
-
-        if _card_admin_esta_na_fase_formulario_contrato(id_card):
-            _registrar_ocorrencia_card_tipo_documento_admin(
-                id_fato_kanban_card=id_card,
-                id_dim_tipo_documento=id_dim_tipo_documento,
-                id_usuario_logado=id_usuario_int,
-                id_empresa_proprietaria=id_empresa_proprietaria,
-                id_fato_solicitacao=id_solicitacao_int,
-                id_fato_controle_contratos=id_fato_controle,
-                tipo_ocorrencia="APROVADO",
-                observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos.",
-            )
-
-        _registrar_historico_contrato_euromidia(
-            id_fato_controle_contratos=id_fato_controle,
-            id_fato_solicitacao=id_solicitacao_int,
-            id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVADO", fallback=1),
-            id_empresa=id_empresa,
-            id_empresa_proprietaria=id_empresa_proprietaria,
-            id_fato_kanban_card=id_card,
-            tipo_evento="APROVADO",
-            tipo_solicitacao=tipo_solicitacao,
-            descricao_evento="Solicitação aprovada e movida para Controle de Contratos Euromídia.",
-            id_dim_usuario_acao=id_usuario_int,
-        )
-
-        resultado_agendamentos_face = {}
-        if form is not None:
-            resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
-                id_solicitacao=int(id_solicitacao_int),
-                form=form,
-                id_usuario_logado=id_usuario_int,
-                id_contrato_controle_resolvido=id_fato_controle,
-            )
-
-        resultado_agendamentos_pendentes = _migrar_agendamentos_face_pendentes_solicitacao_para_contrato(
-            id_solicitacao=int(id_solicitacao_int),
-            id_contrato_controle=id_fato_controle,
-        )
-
-        resultado_bit_fracionado = _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
-            id_contrato_controle=id_fato_controle,
-        )
-
         db.session.commit()
 
         resultado_d4sign = {}
+        resultado_historico_d4 = {}
+        resultado_anexos_contrato = {}
+        resultado_emails_contrato = {
+            "ok": False,
+            "status": "adiado_ate_d4sign_confirmado",
+            "mensagem": "E-mails/contatos do contrato só são sincronizados após documento D4Sign criado/confirmado.",
+        }
+        resultado_agendamentos_face = {
+            "inseridos": 0,
+            "atualizados": 0,
+            "desativados": 0,
+            "ignorados_sem_item_controle": 0,
+            "itens_processados": 0,
+            "status": "adiado_ate_d4sign_confirmado",
+        }
+        resultado_agendamentos_pendentes = {
+            "migrados": 0,
+            "desativados_pendentes": 0,
+            "itens_processados": 0,
+            "status": "adiado_ate_d4sign_confirmado",
+        }
+        resultado_bit_fracionado = {
+            "itens_atualizados": 0,
+            "fracionados": 0,
+            "nao_fracionados": 0,
+            "status": "adiado_ate_d4sign_confirmado",
+        }
 
         try:
             resultado_d4sign = _d4sign_criar_contrato_por_aprovacao_admin(
@@ -16405,12 +17001,123 @@ def _processar_aprovacao_contrato_admin(
                 tipo_solicitacao=tipo_solicitacao,
             )
 
-            if resultado_d4sign.get("ok"):
+            if _d4sign_resultado_tem_documento_local_admin(resultado_d4sign):
+                # FASE 2: agora sim efetivo os efeitos comerciais/operacionais.
+                resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
+                    id_solicitacao=id_solicitacao_int,
+                    id_usuario_logado=id_usuario_int,
+                    executar_efeitos_operacionais=True,
+                )
+
+                id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle")) or id_fato_controle
+                ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or ids_itens_controle
+                id_card = _int_ou_none(resultado_aprovacao.get("id_card")) or id_card
+                id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa")) or id_empresa
+                id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria")) or id_empresa_proprietaria
+                tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
+
+                cab_aprovada = _obter_cabecalho_solicitacao_bruta(id_solicitacao_int) or cab_aprovada or {}
+
+                _sincronizar_contato_contrato_se_fase_4(
+                    id_fato_kanban_card=id_card,
+                    id_empresa=id_empresa,
+                    id_empresa_proprietaria=id_empresa_proprietaria,
+                    id_fato_controle_contratos=id_fato_controle,
+                )
+
+                _upsert_contato_cliente_direto_euromidia(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_kanban_card=id_card,
+                    form=form,
+                    cabecalho_solicitacao=cab_aprovada,
+                )
+
+                resultado_emails_contrato = _sincronizar_dim_email_contrato_por_formulario_admin(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_kanban_card=id_card,
+                    form=form,
+                )
+
+                _upsert_destinatarios_externos_contrato(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_empresa_destinatario=id_empresa,
+                    id_empresa=id_empresa,
+                    ids_itens_controle=ids_itens_controle,
+                )
+
+                _aplicar_resultado_aprovacao_no_card(
+                    id_fato_kanban_card=id_card,
+                    id_usuario_logado=id_usuario_int,
+                    id_empresa_proprietaria=id_empresa_proprietaria,
+                    aprovar=True,
+                )
+
+                _atualizar_id_tipo_documento_card_admin(
+                    id_fato_kanban_card=id_card,
+                    id_dim_tipo_documento=id_dim_tipo_documento,
+                )
+
+                if _card_admin_esta_na_fase_formulario_contrato(id_card):
+                    _registrar_ocorrencia_card_tipo_documento_admin(
+                        id_fato_kanban_card=id_card,
+                        id_dim_tipo_documento=id_dim_tipo_documento,
+                        id_usuario_logado=id_usuario_int,
+                        id_empresa_proprietaria=id_empresa_proprietaria,
+                        id_fato_solicitacao=id_solicitacao_int,
+                        id_fato_controle_contratos=id_fato_controle,
+                        tipo_ocorrencia="APROVADO",
+                        observacao="Card aprovado na fase 4 pela tela admin/aprovacao/contratos após documento D4Sign criado/confirmado.",
+                    )
+
+                _registrar_historico_contrato_euromidia(
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_solicitacao=id_solicitacao_int,
+                    id_dim_acao=_obter_id_dim_acao_solicitacao_contrato("APROVADO", fallback=1),
+                    id_empresa=id_empresa,
+                    id_empresa_proprietaria=id_empresa_proprietaria,
+                    id_fato_kanban_card=id_card,
+                    tipo_evento="APROVADO",
+                    tipo_solicitacao=tipo_solicitacao,
+                    descricao_evento="Solicitação aprovada e documento D4Sign criado/confirmado. Efeitos operacionais efetivados.",
+                    id_dim_usuario_acao=id_usuario_int,
+                )
+
+                if form is not None:
+                    resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
+                        id_solicitacao=int(id_solicitacao_int),
+                        form=form,
+                        id_usuario_logado=id_usuario_int,
+                        id_contrato_controle_resolvido=id_fato_controle,
+                    )
+
+                resultado_agendamentos_pendentes = _migrar_agendamentos_face_pendentes_solicitacao_para_contrato(
+                    id_solicitacao=int(id_solicitacao_int),
+                    id_contrato_controle=id_fato_controle,
+                )
+
+                resultado_bit_fracionado = _atualizar_bit_fracionado_itens_contrato_por_agendamentos(
+                    id_contrato_controle=id_fato_controle,
+                )
+
                 _finalizar_solicitacao_contrato_apos_d4sign_admin(
                     id_solicitacao=id_solicitacao_int,
                     id_contrato_controle=id_fato_controle,
                     id_usuario_logado=id_usuario_int,
                     commit=False,
+                )
+            else:
+                _manter_solicitacao_ativa_erro_d4sign_admin(
+                    id_solicitacao=id_solicitacao_int,
+                    id_contrato_controle=id_fato_controle,
+                    id_usuario_logado=id_usuario_int,
+                    commit=False,
+                )
+                resultado_d4sign = dict(resultado_d4sign or {})
+                resultado_d4sign["ok"] = False
+                resultado_d4sign.setdefault("status", "d4sign_nao_criado")
+                resultado_d4sign.setdefault(
+                    "mensagem",
+                    "Solicitação mantida ativa: contrato foi preparado no controle, mas os efeitos operacionais ficaram adiados porque a D4Sign ainda não criou/confirmou o documento.",
                 )
 
             db.session.commit()
@@ -16447,14 +17154,14 @@ def _processar_aprovacao_contrato_admin(
                     id_solicitacao_int,
                 )
 
-            current_app.logger.exception(
-                "D4SIGN | falha ao criar contrato D4Sign após aprovação | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+            current_app.logger.warning(
+                "D4SIGN | falha ao criar contrato D4Sign após aprovação; mantive solicitação ativa e não efetivei ocupação/preço/vencimento/reservas | id_contrato=%s | id_solicitacao=%s | id_card=%s | erro=%s",
                 id_fato_controle,
                 id_solicitacao_int,
                 id_card,
+                exc,
             )
 
-        resultado_historico_d4 = {}
         if resultado_d4sign.get("ok"):
             try:
                 resultado_historico_d4 = _d4sign_registrar_historico_status_contrato_d4_admin(
@@ -16490,32 +17197,40 @@ def _processar_aprovacao_contrato_admin(
                 "mensagem": "Histórico D4 não inserido porque o documento D4Sign não foi criado/localizado.",
             }
 
-        resultado_anexos_contrato = {}
-        try:
-            resultado_anexos_contrato = _sincronizar_anexos_contrato_apos_aprovacao_admin(
-                id_solicitacao=id_solicitacao_int,
-                id_fato_controle_contratos=id_fato_controle,
-                id_fato_kanban_card=id_card,
-                tipo_solicitacao=tipo_solicitacao,
-                id_fato_contrato_d4=resultado_d4sign.get("id_fato_contrato_d4") or resultado_d4sign.get("id_fato_contrato_d4sign") or resultado_d4sign.get("id_fato_contrato"),
-            )
-            db.session.commit()
-        except Exception as exc:
-            db.session.rollback()
+        if resultado_d4sign.get("ok"):
+            try:
+                resultado_anexos_contrato = _sincronizar_anexos_contrato_apos_aprovacao_admin(
+                    id_solicitacao=id_solicitacao_int,
+                    id_fato_controle_contratos=id_fato_controle,
+                    id_fato_kanban_card=id_card,
+                    tipo_solicitacao=tipo_solicitacao,
+                    id_fato_contrato_d4=resultado_d4sign.get("id_fato_contrato_d4") or resultado_d4sign.get("id_fato_contrato_d4sign") or resultado_d4sign.get("id_fato_contrato"),
+                )
+                db.session.commit()
+            except Exception as exc:
+                db.session.rollback()
+                resultado_anexos_contrato = {
+                    "ok": False,
+                    "status": "erro",
+                    "erro": str(exc),
+                }
+                current_app.logger.exception(
+                    "ANEXOS_CONTRATO | contrato aprovado, mas falhou ao sincronizar anexos | id_contrato=%s | id_solicitacao=%s | id_card=%s",
+                    id_fato_controle,
+                    id_solicitacao_int,
+                    id_card,
+                )
+        else:
             resultado_anexos_contrato = {
                 "ok": False,
-                "status": "erro",
-                "erro": str(exc),
+                "status": "adiado_ate_d4sign_confirmado",
+                "mensagem": "Anexos não foram sincronizados para contrato/D4 porque o documento D4Sign ainda não foi criado/confirmado.",
             }
-            current_app.logger.exception(
-                "ANEXOS_CONTRATO | contrato aprovado, mas falhou ao sincronizar anexos | id_contrato=%s | id_solicitacao=%s | id_card=%s",
-                id_fato_controle,
-                id_solicitacao_int,
-                id_card,
-            )
+
+        documento_d4sign_ok = _d4sign_resultado_tem_documento_local_admin(resultado_d4sign)
 
         task_airflow_id = None
-        if enfileirar_airflow:
+        if enfileirar_airflow and documento_d4sign_ok:
             try:
                 from app.tasks.airflow_admin_tasks import tarefa_disparar_airflow_aprovacao_contrato
 
@@ -16555,9 +17270,11 @@ def _processar_aprovacao_contrato_admin(
             id_card,
         )
 
+        status_final_aprovacao = "aprovado_d4sign_criado" if documento_d4sign_ok else "contrato_controle_criado_d4sign_pendente"
+
         return {
-            "ok": True,
-            "status": "aprovado",
+            "ok": bool(documento_d4sign_ok),
+            "status": status_final_aprovacao,
             "id_solicitacao": id_solicitacao_int,
             "id_contrato": int(id_fato_controle) if id_fato_controle else None,
             "id_card": int(id_card) if id_card else None,

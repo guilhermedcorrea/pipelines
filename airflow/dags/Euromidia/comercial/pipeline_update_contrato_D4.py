@@ -523,7 +523,8 @@ def resolver_status_contrato_por_status_d4(id_status_d4: int | None, status_atua
         return ID_STATUS_CONTRATO_ENVIADO_ASSINATURA
 
     if id_status == 1:
-        return ID_STATUS_CONTRATO_PENDENTE_ENVIO
+        # D4 status 1 = Processando. Não forço "Pendente Envio" enquanto o documento ainda está processando.
+        return ID_STATUS_CONTRATO_DOCUMENTO_GERADO
 
     return converter_int(status_atual)
 
@@ -935,6 +936,7 @@ def sincronizar_estado_local_d4_com_esteira(hook_sql: HookSqlServer) -> dict[str
         WHERE ISNULL(BitAtivo, 1) = 1
           AND IDFatoControleContratosEuromidia IS NOT NULL
           AND IDDimStatusContratos IS NOT NULL
+          AND ISNULL(IDDimStatusD4, 0) <> 1
         ORDER BY
             ISNULL(DataAtualizacao, DataCriacao) DESC,
             IDFatoContratoD4 DESC
