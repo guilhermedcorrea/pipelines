@@ -61,14 +61,15 @@ x-airflow-common: &airflow-common
     RCLONE_ARQUIVO_ORIGEM_CONTROLE_CONTRATOS: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
     SHAREPOINT_BASEDADOS_DIR: "sharepoint_basedados:01- Controle de Contratos"
     SHAREPOINT_BASEDADOS_ARQUIVO_DISPONIBILIDADE: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
-    CAMINHO_LOCAL_SHAREPOINT_BASEDADOS: /opt/airflow/Dados/SharePoint/BaseDados
-    PASTA_BASE_DADOS_CONTRATOS_CONTAINER: "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos"
-    CAMINHO_CONTROLE_CONTRATOS_XLSM: "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
+    CAMINHO_LOCAL_SHAREPOINT_BASEDADOS: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos"
+    PASTA_BASE_DADOS_CONTRATOS_CONTAINER: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos"
+    CAMINHO_CONTROLE_CONTRATOS_XLSM: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
 
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/queries:/opt/airflow/queries
-    - /root/PythonJobs/pipelines/airflow/Dados:/opt/airflow/Dados:rw
+    - ./airflow/Dados:/opt/airflow/Dados:rw
+    - /home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos:/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos:rw
     # IMPORTANTE:
     # Não monte uma pasta específica por cima de /opt/airflow/Dados/SharePoint/...
     # O DAG grava o arquivo atualizado do SharePoint dentro do volume raiz /opt/airflow/Dados,

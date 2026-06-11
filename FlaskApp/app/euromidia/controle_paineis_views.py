@@ -3555,18 +3555,64 @@ def lista_paineis():
         )
         tipos_documento = [r[0] for r in tipos_documento if r and r[0]]
 
+        # O filtro de vendedor da tela NÃO pode nascer apenas do histórico dos contratos,
+        # porque a FatoControleContratosItensEuromidia guarda vendedores antigos/inativos.
+        # Exemplo do erro: MAIRO aparece em contratos do período, mas em
+        # [Integracao].[dbo].[Vendedores] está com BitAtivo = 0.
+        #
+        # Regra correta:
+        # - só listar vendedor no dropdown se ele existir como ATIVO na tabela oficial;
+        # - validar por IDVendedor quando o item tem ID;
+        # - manter fallback por NomeVendedor para itens antigos que não tenham IDVendedor preenchido;
+        # - preservar os demais filtros do período/faces já calculados em ids_itens_periodo_select.
+        nome_item_vendedor_limpo = func.ltrim(
+            func.rtrim(FatoControleContratosItensEuromidia.Vendedor)
+        )
+        nome_item_vendedor_norm = func.upper(
+            func.ltrim(
+                func.rtrim(
+                    func.coalesce(FatoControleContratosItensEuromidia.Vendedor, "")
+                )
+            )
+        )
+        nome_cadastro_vendedor_norm = func.upper(
+            func.ltrim(
+                func.rtrim(
+                    func.coalesce(Vendedores.NomeVendedor, "")
+                )
+            )
+        )
+
         vendedores_contrato = (
-            db.session.query(FatoControleContratosItensEuromidia.Vendedor)
+            db.session.query(nome_item_vendedor_limpo.label("Vendedor"))
+            .join(
+                Vendedores,
+                and_(
+                    func.coalesce(Vendedores.IDEmpresaProprietaria, 0) == 3,
+                    func.coalesce(Vendedores.BitAtivo, 0) == 1,
+                    or_(
+                        and_(
+                            FatoControleContratosItensEuromidia.IDVendedor != None,
+                            Vendedores.IDVendedor == FatoControleContratosItensEuromidia.IDVendedor,
+                        ),
+                        nome_cadastro_vendedor_norm == nome_item_vendedor_norm,
+                    ),
+                ),
+            )
             .filter(
                 FatoControleContratosItensEuromidia.Vendedor != None,
-                FatoControleContratosItensEuromidia.Vendedor != "",
+                nome_item_vendedor_limpo != "",
                 FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia.in_(ids_itens_periodo_select),
             )
             .distinct()
-            .order_by(FatoControleContratosItensEuromidia.Vendedor.asc())
+            .order_by(nome_item_vendedor_limpo.asc())
             .all()
         )
-        vendedores_contrato = [r[0] for r in vendedores_contrato if r and r[0]]
+        vendedores_contrato = [
+            str(r[0]).strip()
+            for r in vendedores_contrato
+            if r and str(r[0] or "").strip()
+        ]
 
         marca_escolhida_sql = func.nullif(FatoControleContratosItensEuromidia.MarcaExibida, "")
         marca_label = marca_escolhida_sql.label("Marca")
@@ -4639,6 +4685,13 @@ def grade_painel(codponto: int):
     vendedores_select = []
     nomes_vendedores_validos_ci = {}
 
+    # Mapa oficial de vendedores ATIVOS.
+    # Importante: o filtro do dropdown da lista/grade não pode usar apenas
+    # o nome gravado em contratos/ocupações antigas, porque esses históricos
+    # podem conter vendedores já inativos, como MAIRO.
+    ids_vendedores_ativos = set()
+    nomes_vendedores_ativos_ci = set()
+
     try:
         sql_vendedores = sql_text("""
             SELECT
@@ -4646,6 +4699,7 @@ def grade_painel(codponto: int):
                 NomeVendedor
             FROM [Integracao].[dbo].[Vendedores] WITH (NOLOCK)
             WHERE IDEmpresaProprietaria = 3
+              AND ISNULL(BitAtivo, 0) = 1
               AND NULLIF(LTRIM(RTRIM(NomeVendedor)), '') IS NOT NULL
             ORDER BY NomeVendedor
         """)
@@ -4673,6 +4727,10 @@ def grade_painel(codponto: int):
 
             vistos_vend.add(chave_ci)
 
+            if id_vendedor is not None:
+                ids_vendedores_ativos.add(int(id_vendedor))
+            nomes_vendedores_ativos_ci.add(chave_ci)
+
             vendedores_select.append({
                 "IDVendedor": id_vendedor,
                 "NomeVendedor": nome_vendedor,
@@ -4682,6 +4740,25 @@ def grade_painel(codponto: int):
     except:
         vendedores_select = []
         nomes_vendedores_validos_ci = {}
+        ids_vendedores_ativos = set()
+        nomes_vendedores_ativos_ci = set()
+
+    def _vendedor_esta_ativo_para_dropdown(id_vendedor, nome_vendedor) -> bool:
+        """Valida vendedor usando a tabela oficial Integracao.dbo.Vendedores."""
+        try:
+            id_vendedor_int = int(id_vendedor or 0)
+        except Exception:
+            id_vendedor_int = 0
+
+        nome_ci = str(nome_vendedor or "").strip().casefold()
+
+        if id_vendedor_int > 0 and id_vendedor_int in ids_vendedores_ativos:
+            return True
+
+        if nome_ci and nome_ci in nomes_vendedores_ativos_ci:
+            return True
+
+        return False
 
     vendedores_selecionados = []
     vendedores_termos_livres = []
@@ -5920,7 +5997,10 @@ def grade_painel(codponto: int):
     try:
         rows_vendedores_grade_contratos = (
             q_oc_opcoes_vendedores
-            .with_entities(FatoControleContratosItensEuromidia.Vendedor)
+            .with_entities(
+                FatoControleContratosItensEuromidia.Vendedor,
+                FatoControleContratosItensEuromidia.IDVendedor,
+            )
             .filter(FatoControleContratosItensEuromidia.Vendedor != None)
             .distinct()
             .order_by(FatoControleContratosItensEuromidia.Vendedor.asc())
@@ -5929,7 +6009,9 @@ def grade_painel(codponto: int):
 
         for rv_grade in (rows_vendedores_grade_contratos or []):
             nome_grade = _limpa_str(rv_grade[0])
-            if nome_grade:
+            id_vendedor_grade = _converter_id_inteiro_seguro(rv_grade[1]) if len(rv_grade) > 1 else 0
+
+            if nome_grade and _vendedor_esta_ativo_para_dropdown(id_vendedor_grade, nome_grade):
                 opcoes_vendedores_grade_set.add(nome_grade)
     except Exception:
         pass
@@ -5940,7 +6022,12 @@ def grade_painel(codponto: int):
         except Exception:
             nome_grade = None
 
-        if nome_grade:
+        try:
+            id_vendedor_grade = _converter_id_inteiro_seguro(rr_grade[15]) if len(rr_grade) > 15 else 0
+        except Exception:
+            id_vendedor_grade = 0
+
+        if nome_grade and _vendedor_esta_ativo_para_dropdown(id_vendedor_grade, nome_grade):
             opcoes_vendedores_grade_set.add(nome_grade)
 
     opcoes_vendedores_grade = sorted(opcoes_vendedores_grade_set)

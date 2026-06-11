@@ -435,6 +435,20 @@ input:disabled, select:disabled, textarea:disabled{
   background: rgba(0,40,132,.08);
 }
 
+.submenu-dropdown a.menu-link-with-icon{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
+
+.submenu-dropdown a.menu-link-with-icon svg{
+  width: 18px;
+  height: 18px;
+  display:block;
+  color: var(--euro-blue);
+  flex: 0 0 auto;
+}
+
 @media (max-width: 760px){
   .submenu-dropdown{
     position: static;
@@ -1021,6 +1035,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_empresas = (pode_acessar_menu_paineis('empresas') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_lista_ocupacao = (pode_acessar_menu_paineis('lista_ocupacao') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_preferencia_reservas = (pode_acessar_menu_paineis('preferencia_reservas_lista') if pode_acessar_menu_paineis is defined else True) %}
+        {% set menu_paineis_reserva_ocupacao = (current_user.is_authenticated and (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3) %}
         {% set menu_paineis_contratos = (pode_acessar_menu_paineis('contratos') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_mov_fin = (pode_acessar_menu_paineis('movimentacao_financeira') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_inadimplentes = (pode_acessar_menu_paineis('inadimplentes') if pode_acessar_menu_paineis is defined else True) %}
@@ -1130,6 +1145,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_vencimentos_campanhas
           or menu_paineis_lista_ocupacao
           or menu_paineis_preferencia_reservas
+          or menu_paineis_reserva_ocupacao
           or menu_paineis_contratos
           or menu_paineis_mov_fin
           or menu_paineis_inadimplentes
@@ -1149,7 +1165,7 @@ input:disabled, select:disabled, textarea:disabled{
           <div class="menu-dropdown">
             <div class="desc">Consulta e gestão do inventário</div>
 
-            {% if menu_paineis_disponibilidades or menu_paineis_lista_ocupacao or menu_paineis_preferencia_reservas %}
+            {% if menu_paineis_disponibilidades or menu_paineis_lista_ocupacao or menu_paineis_preferencia_reservas or menu_paineis_reserva_ocupacao %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Estoques</span>
@@ -1175,6 +1191,13 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('Paineis.preferencia_reservas_lista') }}"
                        class="{% if request.endpoint == 'Paineis.preferencia_reservas_lista' %}menu-link-current{% endif %}">
                       Preferência de Reservas
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_reserva_ocupacao %}
+                    <a href="{{ url_for('Paineis.reserva_ocupacao') }}"
+                       class="{% if request.endpoint == 'Paineis.reserva_ocupacao' %}menu-link-current{% endif %}">
+                      Reserva
                     </a>
                   {% endif %}
 
@@ -1514,17 +1537,6 @@ input:disabled, select:disabled, textarea:disabled{
                 Relatórios
               </a>
 
-
-              {% if (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3 %}
-                <a href="{{ url_for('Paineis.reserva_ocupacao') }}">
-                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M8 5V3h8v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M8 11h8M8 15h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                  Reserva Ocupação
-                </a>
-              {% endif %}
 
               {% if usuario_logado_eh_vendedor_paineis|default(False) and minha_carteira_url %}
                 <a href="{{ minha_carteira_url }}">

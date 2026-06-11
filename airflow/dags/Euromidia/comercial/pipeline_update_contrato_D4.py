@@ -646,30 +646,55 @@ def extrair_signatarios_api_d4(documento: dict[str, Any], id_status_d4: int | No
     return resultado
 
 
-def resolver_status_final_euromidia(status_atual: Any, status_novo: Any) -> int | None:
-    """Resolvo o status final sem deixar consulta atrasada voltar a esteira."""
+def resolver_status_final_euromidia(
+    status_atual: Any,
+    status_novo: Any,
+    id_status_d4: Any = None,
+) -> int | None:
+    """Resolvo o status interno usando a D4Sign como fonte de verdade.
+
+    Antes havia uma trava por número: se o contrato interno estivesse 7/Ativo,
+    a DAG não deixava voltar para 5/Enviado Assinatura mesmo quando a API D4Sign
+    dizia que o documento ainda estava em Aguardando Signatários. Isso mascarava
+    erro de tela/esteira.
+
+    Nesta DAG, a consulta vem da API D4Sign, então ela pode corrigir status local
+    adiantado. Só mantenho Cancelado como terminal por segurança operacional.
+    """
     id_status_atual = converter_int(status_atual)
     id_status_novo = converter_int(status_novo)
+    id_d4 = converter_int(id_status_d4)
 
     if id_status_novo is None:
         return id_status_atual
 
-    if id_status_novo == ID_STATUS_CONTRATO_CANCELADO:
+    # Cancelado é terminal na esteira local.
+    if id_status_atual == ID_STATUS_CONTRATO_CANCELADO or id_status_novo == ID_STATUS_CONTRATO_CANCELADO or id_d4 == 6:
         return ID_STATUS_CONTRATO_CANCELADO
 
-    if id_status_novo == ID_STATUS_CONTRATO_ATIVO:
-        return ID_STATUS_CONTRATO_ATIVO
+    # Quando a API D4Sign informa estado atual, ela corrige a tela local.
+    # 1 Processando -> Documento Gerado
+    # 2 Aguardando Signatários -> Enviado Assinatura
+    # 3 Aguardando Assinaturas -> Em Assinatura
+    # 4/5 Finalizado/Arquivado -> Ativo
+    # 7 Editando -> mantém o mapeamento calculado/fallback.
+    if id_d4 in {1, 2, 3, 4, 5, 7}:
+        return id_status_novo
 
     if id_status_atual is None:
         return id_status_novo
 
-    if id_status_atual == ID_STATUS_CONTRATO_CANCELADO:
-        return ID_STATUS_CONTRATO_CANCELADO
+    # Sem ID D4 confiável, não deixo um evento/estado antigo regredir a etapa.
+    ordem_fluxo = {
+        ID_STATUS_CONTRATO_DOCUMENTO_GERADO: 30,
+        ID_STATUS_CONTRATO_PENDENTE_ENVIO: 40,
+        ID_STATUS_CONTRATO_ENVIADO_ASSINATURA: 50,
+        ID_STATUS_CONTRATO_EM_ASSINATURA: 60,
+        ID_STATUS_CONTRATO_ATIVO: 70,
+        ID_STATUS_CONTRATO_CANCELADO: 90,
+    }
 
-    if id_status_atual == ID_STATUS_CONTRATO_ATIVO:
-        return ID_STATUS_CONTRATO_ATIVO
-
-    if id_status_novo > id_status_atual:
+    if ordem_fluxo.get(id_status_novo, 0) >= ordem_fluxo.get(id_status_atual, 0):
         return id_status_novo
 
     return id_status_atual
@@ -798,7 +823,7 @@ def propagar_status_contrato_euromidia(
         }
 
     status_atual = buscar_status_atual_controle_euromidia(conexao, id_controle)
-    status_final = resolver_status_final_euromidia(status_atual, id_status_novo)
+    status_final = resolver_status_final_euromidia(status_atual, id_status_novo, id_d4)
 
     if status_final is None:
         return {

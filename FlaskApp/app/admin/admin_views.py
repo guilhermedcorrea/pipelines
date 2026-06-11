@@ -4065,9 +4065,20 @@ def _normalizar_ativo_cancelamento_aprovacao(valor):
 
 
 def _normalizar_status_item_aprovacao(valor):
-    """Eu preencho Status do item aprovado sem deixar nulo quando veio do Kanban."""
+    """Status inicial do item recém-aprovado.
+
+    O item ainda NÃO pode nascer como ATIVO, porque a assinatura D4Sign pode
+    estar em Processando, Aguardando Signatários ou Aguardando Assinaturas.
+    A verdade do status passa a ser propagada pela FatoContratoD4/DAG.
+    """
     texto = str(valor or "").strip()
-    return texto if texto else "ATIVO"
+
+    # Fallback antigo do Kanban/tela vinha como ATIVO e fazia o contrato aparecer
+    # ativo antes da D4Sign finalizar. Na aprovação, isso deve virar Pendente Geração.
+    if not texto or texto.upper() == "ATIVO":
+        return "Pendente Geração"
+
+    return texto
 
 
 
@@ -11178,7 +11189,7 @@ def _buscar_fallback_item_solicitacao_por_card_e_contrato(item: dict, cab: dict 
                     ,COALESCE(i.IDPainelEuromidia, pf.IDDimPaineisEuromidia, df.IDDimPaineisEuromidia, dp.IDDimPaineisEuromidia, base.IDPainelParametro) AS IDPainelEuromidia
                     ,COALESCE(i.IDDimFacesPaineis, pf.IDDimFacesPaineis, df.IDDimFacesPaineis, base.IDFaceParametro) AS IDDimFacesPaineis
                     ,COALESCE(i.DataFimEfetiva, TRY_CONVERT(date, pf.DataFim)) AS DataFimEfetiva
-                    ,COALESCE(NULLIF(i.Status, ''), 'ATIVO') AS Status
+                    ,COALESCE(NULLIF(i.Status, ''), NULLIF(dsc.Status, ''), 'Pendente Geração') AS Status
                     ,i.IDDimCheckinHistorico
                     ,COALESCE(i.IDFatoKanbanCard, base.IDCardParametro) AS IDFatoKanbanCard
                     ,COALESCE(i.BitAtivo, CAST(1 AS bit)) AS BitAtivo
@@ -11203,6 +11214,9 @@ def _buscar_fallback_item_solicitacao_por_card_e_contrato(item: dict, cab: dict 
                        ON ctr.IDFatoControleContratosEuromidia = base.IDContratoParametro
                 LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp
                        ON emp.IDEmpresa = ctr.IDEmpresa
+                LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
+                       ON dsc.IDDimStatusContratos = ctr.IDDimStatusContratos
+                      AND dsc.IDEmpresaProprietaria = 3
                 OUTER APPLY (
                     SELECT TOP (1)
                         pf.*

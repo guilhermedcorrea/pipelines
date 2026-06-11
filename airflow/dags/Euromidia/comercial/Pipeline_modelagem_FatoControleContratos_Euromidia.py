@@ -147,7 +147,7 @@ RCLONE_ARQUIVO_ORIGEM = os.getenv(
 PASTA_SHAREPOINT_CONTAINER = Path(
     os.getenv(
         "PASTA_BASE_DADOS_CONTRATOS_CONTAINER",
-        "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos",
+        "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos",
     )
 )
 
@@ -681,6 +681,7 @@ def localizar_caminho_excel_controle_contratos() -> Path:
             return caminho
 
     raizes_busca = [
+        Path("/home/euromidia/projetos/pipelines/airflow"),
         Path("/opt/airflow"),
         Path("/root/PythonJobs/pipelines"),
         Path("/root/SHEMPO"),
@@ -1238,6 +1239,12 @@ def garantir_pasta_escrita(pasta: Path) -> None:
 
 
 CAMINHO_DADOS_CONTAINER_RAIZ = Path("/opt/airflow/Dados")
+CAMINHO_AIRFLOW_HOST_RAIZ = Path("/home/euromidia/projetos/pipelines/airflow")
+
+CAMINHOS_GRAVACAO_PERMITIDOS = [
+    CAMINHO_DADOS_CONTAINER_RAIZ,
+    CAMINHO_AIRFLOW_HOST_RAIZ,
+]
 
 PASTA_SHAREPOINT_OBRIGATORIA_CONTAINER = PASTA_SHAREPOINT_CONTAINER
 
@@ -1255,20 +1262,22 @@ def caminho_esta_dentro(caminho: Path, raiz: Path) -> bool:
         return False
 
 
+def caminho_esta_dentro_de_alguma_raiz_permitida(caminho: Path) -> bool:
+    """Valida se o caminho está dentro de uma raiz operacional aceita pelo DAG."""
+    return any(caminho_esta_dentro(caminho, raiz) for raiz in CAMINHOS_GRAVACAO_PERMITIDOS)
+
+
 def detectar_mount_sobreposto_em_dados(caminho: Path) -> Path | None:
     """Detecta bind mounts sobrepostos dentro de /opt/airflow/Dados.
 
-    Por regra deste DAG, queremos que tudo que a task gere em /opt/airflow/Dados
-    apareça no host em:
-      /root/PythonJobs/pipelines/airflow/Dados
+    Essa checagem continua valendo para os arquivos técnicos gerados dentro de
+    /opt/airflow/Dados. Para o Excel do SharePoint, também aceitamos a pasta
+    direta do projeto no host/container:
+      /home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos
 
-    Portanto, o único mount esperado é a raiz /opt/airflow/Dados. Se existir outro
-    mount mais específico, como:
-      /opt/airflow/Dados/Euromidia/Comercial/CargasSQL
-      /opt/airflow/Dados/SharePoint/BaseDados/<pasta configurada em PASTA_BASE_DADOS_CONTRATOS_CONTAINER>
-
-    então o arquivo vai aparecer em outro lugar do host e o Guilherme não conseguirá
-    acompanhar no caminho combinado.
+    Se o Airflow estiver em Docker, essa pasta precisa estar montada no container
+    com o mesmo caminho absoluto, ou a DAG gravará dentro do filesystem do
+    container em vez de aparecer no host.
     """
     raiz = CAMINHO_DADOS_CONTAINER_RAIZ.resolve()
     atual = caminho.resolve()
@@ -1297,23 +1306,22 @@ def detectar_mount_sobreposto_em_dados(caminho: Path) -> Path | None:
 
 
 def validar_caminho_visivel_no_host(caminho: Path, nome_contexto: str) -> None:
-    """Bloqueia caminhos que seriam gravados fora do histórico visível do host."""
-    if not caminho_esta_dentro(caminho, CAMINHO_DADOS_CONTAINER_RAIZ):
+    """Bloqueia caminhos que seriam gravados fora das raízes operacionais permitidas."""
+    if not caminho_esta_dentro_de_alguma_raiz_permitida(caminho):
+        raizes = ", ".join(str(raiz) for raiz in CAMINHOS_GRAVACAO_PERMITIDOS)
         raise PermissionError(
-            f"{nome_contexto} | caminho fora da raiz obrigatória {CAMINHO_DADOS_CONTAINER_RAIZ}: {caminho}. "
-            "Este DAG foi configurado para gravar apenas em /opt/airflow/Dados, que deve estar montado no host em "
-            "/root/PythonJobs/pipelines/airflow/Dados."
+            f"{nome_contexto} | caminho fora das raízes permitidas: {caminho}. "
+            f"Raízes permitidas: {raizes}. "
+            "Para o Excel do SharePoint, o destino combinado é "
+            "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos."
         )
 
     mount_sobreposto = detectar_mount_sobreposto_em_dados(caminho)
     if mount_sobreposto is not None:
         raise PermissionError(
             f"{nome_contexto} | foi detectado um volume/mount sobreposto dentro de /opt/airflow/Dados: {mount_sobreposto}. "
-            "Isso desvia os arquivos para outro caminho do host e impede acompanhar o histórico em "
-            "/root/PythonJobs/pipelines/airflow/Dados. Remova do docker-compose os volumes específicos que montam "
-            "/opt/airflow/Dados/Euromidia/Comercial/CargasSQL ou "
-            "/opt/airflow/Dados/SharePoint/BaseDados/Base Dados - 01- Controle de Contratos. "
-            "Deixe somente o volume raiz: /root/PythonJobs/pipelines/airflow/Dados:/opt/airflow/Dados:rw"
+            "Isso pode desviar os arquivos técnicos para outro caminho. Para o Excel do SharePoint, use diretamente "
+            "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos, que agora é uma raiz permitida."
         )
 
 
@@ -1325,14 +1333,15 @@ def resolver_pasta_gravavel(
     """Resolve uma pasta gravável SEM fallback invisível.
 
     Regra operacional deste DAG:
-    - Arquivo baixado do SharePoint deve aparecer no host em:
-      /root/PythonJobs/pipelines/airflow/Dados/SharePoint/BaseDados/<pasta configurada>
+    - Antes do ETL, o DAG baixa sempre o Excel oficial do SharePoint via rclone.
+    - O Excel deve ser copiado para:
+      /home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos
 
-    - CSVs técnicos gerados/importados devem aparecer no host em:
-      /root/PythonJobs/pipelines/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia
+    - CSVs técnicos gerados/importados continuam na raiz operacional do Airflow:
+      /opt/airflow/Dados/Euromidia/Comercial/CargasSQL/ControleContratosEuromidia
 
-    Por isso, este DAG não pode cair para /home/airflow nem /tmp. Se a pasta correta não
-    estiver montada ou gravável, a task falha com diagnóstico claro.
+    Se a pasta correta não estiver montada ou gravável, a task falha para não
+    seguir com arquivo antigo.
     """
     if nome_contexto == "download_sharepoint_controle_contratos":
         pasta_obrigatoria = PASTA_SHAREPOINT_OBRIGATORIA_CONTAINER
@@ -1347,7 +1356,7 @@ def resolver_pasta_gravavel(
         garantir_pasta_escrita(pasta_obrigatoria)
         validar_caminho_visivel_no_host(pasta_obrigatoria, nome_contexto)
         logger.info(
-            "%s | pasta gravável e visível via volume raiz validada: %s",
+            "%s | pasta gravável validada: %s",
             nome_contexto,
             pasta_obrigatoria,
         )
@@ -1355,7 +1364,8 @@ def resolver_pasta_gravavel(
     except Exception as erro:
         raise PermissionError(
             f"{nome_contexto} | a pasta obrigatória não está pronta para uso: {pasta_obrigatoria}. "
-            "Corrija o docker-compose/volumes/permissões. O DAG foi bloqueado para não gravar arquivo em pasta invisível. "
+            "Corrija o docker-compose/volumes/permissões. O DAG foi bloqueado para não gravar arquivo em pasta invisível "
+            "nem seguir com Excel antigo. "
             f"Erro original: {type(erro).__name__}: {erro}"
         ) from erro
 
@@ -3283,8 +3293,8 @@ def pipeline_controle_contratos_euromidia():
             resumo.metricas_extras["remote_rclone"] = RCLONE_REMOTE_CONTROLE_CONTRATOS
             resumo.metricas_extras["pasta_rclone"] = RCLONE_PASTA_CONTROLE_CONTRATOS
             resumo.metricas_extras["arquivo_rclone_origem"] = RCLONE_ARQUIVO_ORIGEM
-            resumo.metricas_extras["pasta_destino_container"] = str(pasta_destino)
-            resumo.metricas_extras["arquivo_destino_container"] = str(caminho_destino)
+            resumo.metricas_extras["pasta_destino_excel"] = str(pasta_destino)
+            resumo.metricas_extras["arquivo_destino_excel"] = str(caminho_destino)
             resumo.metricas_extras["usuario_execucao_container"] = obter_contexto_usuario_execucao()
             resumo.metricas_extras["contexto_disparo_dag"] = registrar_log_contexto_disparo("baixar_arquivo_sharepoint")
             publicar_resumo_auditoria(resumo)
@@ -3292,8 +3302,8 @@ def pipeline_controle_contratos_euromidia():
             logger.info("=" * 100)
             logger.info("INÍCIO DOWNLOAD SHAREPOINT VIA RCLONE")
             logger.info("Origem oficial SharePoint/rclone: %s", RCLONE_ARQUIVO_ORIGEM)
-            logger.info("Destino local no container: %s", caminho_destino)
-            logger.info("Pasta destino local no container: %s", pasta_destino)
+            logger.info("Destino local do Excel usado pelo DAG: %s", caminho_destino)
+            logger.info("Pasta destino local do Excel usada pelo DAG: %s", pasta_destino)
             logger.info("Usuário/container: %s", json.dumps(obter_contexto_usuario_execucao(), ensure_ascii=False, default=str))
 
             info_antes = obter_info_arquivo_local(caminho_destino)
