@@ -8061,8 +8061,6 @@ def _efetivar_reservas_card_kanban_admin(
     id_usuario_int = _int_ou_none(id_usuario_logado)
 
     marcador_reserva = f"[RESERVA_CARD_ATIVO={int(id_card_int)}]"
-    observacao_reserva = f"[RESERVA_CARD_ATIVO={int(id_card_int)}] Reserva informada no Card {int(id_card_int)}."
-    observacao_efetivacao = f"Reserva Efetivada pelo Card IDFatoKanbanCard={int(id_card_int)}"
     marcador_efetivado = f"Reserva Efetivada pelo Card IDFatoKanbanCard={int(id_card_int)}"
 
     resultado = db.session.execute(
@@ -8104,11 +8102,11 @@ def _efetivar_reservas_card_kanban_admin(
                        WHEN CHARINDEX(:marcador_efetivado, COALESCE(fo.Observacao, '')) > 0
                            THEN fo.Observacao
 
-                       WHEN CHARINDEX(:marcador_reserva, COALESCE(fo.Observacao, '')) > 0
-                           THEN CONCAT(fo.Observacao, ' | ', :observacao_efetivacao)
-
+                       -- Não concateno em Observacao existente: em alguns ambientes
+                       -- essa coluna é curta e a concatenação pode gerar erro 2628.
+                       -- O vínculo seguro da reserva já vem pelo FatoKanbanCard.IDReserva.
                        WHEN NULLIF(LTRIM(RTRIM(COALESCE(fo.Observacao, ''))), '') IS NULL
-                           THEN CONCAT(:observacao_reserva, ' | ', :observacao_efetivacao)
+                           THEN :marcador_efetivado
 
                        ELSE fo.Observacao
                    END
@@ -8123,8 +8121,6 @@ def _efetivar_reservas_card_kanban_admin(
             "id_contrato_controle": id_contrato_int,
             "id_usuario_logado": id_usuario_int,
             "marcador_reserva": marcador_reserva,
-            "observacao_reserva": observacao_reserva,
-            "observacao_efetivacao": observacao_efetivacao,
             "marcador_efetivado": marcador_efetivado,
         },
     )
@@ -19369,6 +19365,8 @@ def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
         return "sem-data"
     if nome == "CAMPANHA FUTURA":
         return "futura"
+    if nome == "RESERVADO":
+        return "reservado"
 
     return "neutro"
 
@@ -19413,38 +19411,27 @@ def _campanhas_vencimentos_normalizar_lista_texto(valores) -> list[str]:
 
 
 def _campanhas_vencimentos_marca_sql() -> str:
-    """Expressão SQL única para a marca exibida usada em SELECT, filtro e sugestões."""
+    """Expressão SQL da marca exibida na origem unificada de campanhas + reservas."""
 
-    return "COALESCE(NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), ''))"
+    return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), vc.MarcaExibida))), '')"
 
 
 def _campanhas_vencimentos_razao_social_sql() -> str:
-    """Expressão SQL da razão social exibida, ignorando vazios e valores placeholder como 0."""
+    """Expressão SQL da razão social exibida na origem unificada, ignorando vazios e placeholder 0."""
 
-    return """COALESCE(
-        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_venc.RazaoSocial))), ''), '0'),
-        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.RazaoSocial))), ''), '0'),
-        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), ''), '0'),
-        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_venc.NomeFantasia))), ''), '0'),
-        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.NomeFantasia))), ''), '0'),
-        NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0')
-    )"""
+    return "NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), vc.RazaoSocial))), ''), '0')"
 
 
 def _campanhas_vencimentos_painel_sql() -> str:
-    """Expressão SQL do painel exibido na tela: CodFace resolvido pelo item do contrato."""
+    """Expressão SQL do painel/CodFace exibido na origem unificada."""
 
-    return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), '')"
+    return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), vc.Painel))), '')"
 
 
 def _campanhas_vencimentos_nome_vendedor_sql() -> str:
-    """Expressão SQL do vendedor exibido, priorizando o cadastro oficial de Vendedores pelo item do contrato."""
+    """Expressão SQL do vendedor exibido na origem unificada."""
 
-    return """COALESCE(
-        NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend.NomeVendedor))), ''),
-        NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), item.Vendedor))), ''),
-        NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ctr.Vendedor))), '')
-    )"""
+    return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vc.NomeVendedor))), '')"
 
 
 def _campanhas_vencimentos_adicionar_filtro_in(
@@ -19481,7 +19468,12 @@ def _campanhas_vencimentos_montar_filtros_sql(
     data_inicio_filtro: date | None = None,
     data_fim_filtro: date | None = None,
 ) -> tuple[str, dict]:
-    """Centraliza os filtros usados pela lista e pela busca de sugestões."""
+    """Centraliza os filtros usados pela lista e pela busca de sugestões.
+
+    A partir deste ajuste, a tela trabalha com uma origem unificada chamada vc:
+    - CAMPANHA: registros da FatoVencimentoCampanhaEuromidia;
+    - RESERVA: registros ativos da FatoOcupacaoPaineisEuromidia com Origem = RESERVA.
+    """
 
     marca_sql = _campanhas_vencimentos_marca_sql()
     razao_social_sql = _campanhas_vencimentos_razao_social_sql()
@@ -19495,36 +19487,37 @@ def _campanhas_vencimentos_montar_filtros_sql(
     }
 
     if usuario_logado_eh_vendedor:
-        filtros_sql.append("ISNULL(vend.IDDimUsuarios, 0) = :id_usuario_logado")
+        filtros_sql.append("ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado")
 
     if q:
         filtros_sql.append(f"""
             (
-                CAST(venc.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
-                OR COALESCE(CONVERT(varchar(80), ctr.NumeroContrato), '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR COALESCE(CONVERT(varchar(80), ctr.NumeroPrevia), '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                CAST(vc.IDFatoControleContratosEuromidia AS varchar(50)) LIKE :q_like
+                OR CAST(vc.IDReservaOcupacao AS varchar(50)) LIKE :q_like
+                OR COALESCE(CONVERT(varchar(80), vc.NumeroContrato), '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR COALESCE(CONVERT(varchar(80), vc.NumeroPrevia), '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL({razao_social_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(ctr.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(venc.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL({marca_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL({painel_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL({nome_vendedor_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
-                OR ISNULL(st.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(vc.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL(vc.FonteLinha, '') COLLATE Latin1_General_CI_AI LIKE :q_like
             )
         """)
         params["q_like"] = f"%{q}%"
 
     if data_inicio_filtro is not None:
-        filtros_sql.append("venc.DataTerminoPrevisto IS NOT NULL AND CAST(venc.DataTerminoPrevisto AS date) >= :data_inicio_filtro")
+        filtros_sql.append("vc.DataTermino IS NOT NULL AND CAST(vc.DataTermino AS date) >= :data_inicio_filtro")
         params["data_inicio_filtro"] = data_inicio_filtro
 
     if data_fim_filtro is not None:
-        filtros_sql.append("venc.DataTerminoPrevisto IS NOT NULL AND CAST(venc.DataTerminoPrevisto AS date) <= :data_fim_filtro")
+        filtros_sql.append("vc.DataTermino IS NOT NULL AND CAST(vc.DataTermino AS date) <= :data_fim_filtro")
         params["data_fim_filtro"] = data_fim_filtro
 
     _campanhas_vencimentos_adicionar_filtro_in(
         filtros_sql,
         params,
-        "venc.IDDimStatusCampanha",
+        "vc.IDDimStatusCampanha",
         "status_id",
         status_ids_selecionados,
     )
@@ -19541,7 +19534,7 @@ def _campanhas_vencimentos_montar_filtros_sql(
         _campanhas_vencimentos_adicionar_filtro_in(
             filtros_sql,
             params,
-            "item.IDVendedor",
+            "vc.IDVendedor",
             "vendedor_id",
             vendedores_ids_selecionados,
         )
@@ -19550,66 +19543,201 @@ def _campanhas_vencimentos_montar_filtros_sql(
     return where_sql, params
 
 def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
-    """FROM/JOIN padrão para a tela de vencimentos de campanhas.
+    """FROM/JOIN padrão da tela de vencimentos com campanhas + reservas.
 
-    Regra oficial da tela:
-    - a origem da linha é Integracao.Silver.FatoVencimentoCampanhaEuromidia;
-    - IDFatoControleContratosEuromidia aponta para o cabeçalho do contrato;
-    - IDFatoControleContratosItensEuromidia aponta para o item do contrato;
-    - CodFace vem diretamente do item do contrato;
-    - somente campanhas com venc.BitAtivo = 1 aparecem;
-    - somente campanhas cujo item oficial esteja com item.BitAtivo = 1 aparecem;
-    - se houver mais de uma linha ativa para o mesmo item, fica somente a mais recente.
+    CAMPANHA:
+        - origem oficial FatoVencimentoCampanhaEuromidia;
+        - mantém a regra de linha mais recente por item de contrato;
+        - mantém somente vencimentos ativos e itens ativos.
 
-    Observação importante:
-    Eu não faço fallback por contrato + marca + período aqui. Esse fallback conseguia
-    preencher CodFace em alguns dados quebrados, mas também podia escolher outro item
-    do mesmo contrato e gerar duplicidade/associação errada.
+    RESERVA:
+        - origem FatoOcupacaoPaineisEuromidia, igual à tela /paineis/ocupacao;
+        - traz somente Origem = RESERVA, Status = RESERVADO, CanceladoEm IS NULL;
+        - mantém somente reservas ainda vigentes, seguindo o comportamento da tela de vencimentos
+          que não lista campanhas encerradas/inativas por padrão;
+        - deduplica reservas com a mesma chave operacional, usando a mesma ideia da lista de ocupação.
     """
 
     return f"""
         FROM
         (
-            SELECT *
+            SELECT
+                CAST(venc.IDFatoVencimentoCampanhaEuromidia AS int) AS IDFatoVencimentoCampanhaEuromidia,
+                CAST(NULL AS int) AS IDReservaOcupacao,
+                CAST('CAMPANHA' AS varchar(20)) AS FonteLinha,
+                CAST(1 AS bit) AS PodeRenovar,
+                venc.IDFatoControleContratosEuromidia,
+                venc.IDFatoControleContratosItensEuromidia,
+                venc.IDDimStatusCampanha,
+                st.NomeStatus,
+                item.IDVendedor AS IDVendedor,
+                NomeVendedor = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend.NomeVendedor))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), item.Vendedor))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ctr.Vendedor))), '')
+                ),
+                vend.IDDimUsuarios AS IDDimUsuariosVendedor,
+                CONVERT(varchar(80), ctr.NumeroContrato) AS NumeroContrato,
+                CONVERT(varchar(80), ctr.NumeroPrevia) AS NumeroPrevia,
+                RazaoSocial = COALESCE(
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_venc.RazaoSocial))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.RazaoSocial))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_venc.NomeFantasia))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.NomeFantasia))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0')
+                ),
+                ctr.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
+                Painel = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), ''),
+                MarcaExibida = COALESCE(
+                    NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''),
+                    NULLIF(LTRIM(RTRIM(venc.MarcaExibida)), '')
+                ),
+                venc.DataInicioCampanha,
+                DataTermino = venc.DataTerminoPrevisto,
+                venc.DiasParaVencer,
+                venc.BitAtivo,
+                venc.DataCriacao,
+                venc.DataAtualizacao
             FROM
             (
-                SELECT
-                    venc_base.*,
-                    ROW_NUMBER() OVER
-                    (
-                        PARTITION BY
-                            venc_base.IDFatoControleContratosItensEuromidia
-                        ORDER BY
-                            ISNULL(venc_base.DataAtualizacao, '19000101') DESC,
-                            ISNULL(venc_base.DataCriacao, '19000101') DESC,
-                            venc_base.IDFatoVencimentoCampanhaEuromidia DESC
-                    ) AS LinhaMaisRecente
-                FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc_base
-                WHERE ISNULL(venc_base.BitAtivo, 1) = 1
-                  AND ISNULL(venc_base.IDFatoControleContratosEuromidia, 0) > 0
-                  AND ISNULL(venc_base.IDFatoControleContratosItensEuromidia, 0) > 0
-            ) AS venc_filtrado
-            WHERE venc_filtrado.LinhaMaisRecente = 1
-        ) AS venc
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
-            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
-            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
-           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
-           AND ISNULL(item.BitAtivo, 0) = 1
-        INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
-            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
-        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = item.IDVendedor
-        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_venc
-            ON emp_venc.IDEmpresa = venc.IDEmpresa
-        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_ctr
-            ON emp_ctr.IDEmpresa = ctr.IDEmpresa
+                SELECT *
+                FROM
+                (
+                    SELECT
+                        venc_base.*,
+                        ROW_NUMBER() OVER
+                        (
+                            PARTITION BY
+                                venc_base.IDFatoControleContratosItensEuromidia
+                            ORDER BY
+                                ISNULL(venc_base.DataAtualizacao, '19000101') DESC,
+                                ISNULL(venc_base.DataCriacao, '19000101') DESC,
+                                venc_base.IDFatoVencimentoCampanhaEuromidia DESC
+                        ) AS LinhaMaisRecente
+                    FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc_base
+                    WHERE ISNULL(venc_base.BitAtivo, 1) = 1
+                      AND ISNULL(venc_base.IDFatoControleContratosEuromidia, 0) > 0
+                      AND ISNULL(venc_base.IDFatoControleContratosItensEuromidia, 0) > 0
+                ) AS venc_filtrado
+                WHERE venc_filtrado.LinhaMaisRecente = 1
+            ) AS venc
+            INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+                ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+            INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+                ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
+               AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
+               AND ISNULL(item.BitAtivo, 0) = 1
+            INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
+                ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
+            LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+                ON vend.IDVendedor = item.IDVendedor
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_venc
+                ON emp_venc.IDEmpresa = venc.IDEmpresa
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_ctr
+                ON emp_ctr.IDEmpresa = ctr.IDEmpresa
+
+            UNION ALL
+
+            SELECT
+                CAST(-1 * reserva.IDFatoOcupacaoPaineisEuromidia AS int) AS IDFatoVencimentoCampanhaEuromidia,
+                reserva.IDFatoOcupacaoPaineisEuromidia AS IDReservaOcupacao,
+                CAST('RESERVA' AS varchar(20)) AS FonteLinha,
+                CAST(1 AS bit) AS PodeRenovar,
+                reserva.IDFatoControleContratos AS IDFatoControleContratosEuromidia,
+                reserva.IDFatoControleContratosItemOrigem AS IDFatoControleContratosItensEuromidia,
+                CAST(-9001 AS int) AS IDDimStatusCampanha,
+                NomeStatus = COALESCE(NULLIF(LTRIM(RTRIM(reserva.Status)), ''), 'RESERVADO'),
+                reserva.IDVendedor AS IDVendedor,
+                NomeVendedor = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend_res.NomeVendedor))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), reserva.Vendedor))), '')
+                ),
+                vend_res.IDDimUsuarios AS IDDimUsuariosVendedor,
+                NumeroContrato = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.NumeroContrato))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), ctr_res.NumeroContrato))), '')
+                ),
+                NumeroPrevia = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.NumeroPrevia))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), ctr_res.NumeroPrevia))), '')
+                ),
+                RazaoSocial = COALESCE(
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_res.RazaoSocial))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_res.NomeFantasia))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr_res.RazaoSocial))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr_res.MarcaExibida))), ''), '0'),
+                    NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), reserva.MarcaExibida))), ''), '0')
+                ),
+                ctr_res.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
+                Painel = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.CodFace))), ''),
+                MarcaExibida = NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), reserva.MarcaExibida))), ''),
+                DataInicioCampanha = CAST(reserva.DataInicio AS date),
+                DataTermino = CAST(reserva.DataFim AS date),
+                DiasParaVencer = CASE
+                    WHEN reserva.DataFim IS NULL THEN NULL
+                    ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(reserva.DataFim AS date))
+                END,
+                BitAtivo = CAST(1 AS bit),
+                DataCriacao = reserva.CriadoEm,
+                DataAtualizacao = reserva.DataAtualizacao
+            FROM
+            (
+                SELECT *
+                FROM
+                (
+                    SELECT
+                        reserva_base.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY
+                                ISNULL(reserva_base.CodFace, ''),
+                                ISNULL(reserva_base.Origem, ''),
+                                ISNULL(reserva_base.Status, ''),
+                                ISNULL(CAST(reserva_base.DataInicio AS date), '19000101'),
+                                ISNULL(CAST(reserva_base.DataFim AS date), '19000101'),
+                                ISNULL(reserva_base.MarcaExibida, ''),
+                                ISNULL(CAST(reserva_base.Cota AS varchar(50)), ''),
+                                ISNULL(CAST(reserva_base.IDVendedor AS varchar(50)), ''),
+                                ISNULL(CAST(reserva_base.CriadoEm AS datetime2), '19000101')
+                            ORDER BY
+                                ISNULL(reserva_base.DataAtualizacao, reserva_base.CriadoEm) DESC,
+                                reserva_base.IDFatoOcupacaoPaineisEuromidia DESC
+                        ) AS rn_key
+                    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva_base
+                    WHERE reserva_base.CodFace <> '0'
+                      AND reserva_base.CodFace IS NOT NULL
+                      AND reserva_base.CanceladoEm IS NULL
+                      AND UPPER(LTRIM(RTRIM(ISNULL(reserva_base.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+                      AND UPPER(LTRIM(RTRIM(ISNULL(reserva_base.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                      AND (
+                            reserva_base.DataFim IS NULL
+                            OR CAST(reserva_base.DataFim AS date) >= CAST(SYSDATETIME() AS date)
+                          )
+                ) AS reserva_filtrada
+                WHERE reserva_filtrada.rn_key = 1
+            ) AS reserva
+            LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr_res
+                ON ctr_res.IDFatoControleContratosEuromidia = reserva.IDFatoControleContratos
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_res
+                ON emp_res.IDEmpresa = reserva.IDCliente
+            LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend_res
+                ON vend_res.IDVendedor = reserva.IDVendedor
+        ) AS vc
         WHERE {where_sql}
     """
 
 def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     """Adiciona classes CSS e textos auxiliares usados na tabela e nas sugestões."""
+
+    fonte_linha = str(d.get("FonteLinha") or "CAMPANHA").strip().upper()
+    if fonte_linha not in {"CAMPANHA", "RESERVA"}:
+        fonte_linha = "CAMPANHA"
+    d["FonteLinha"] = fonte_linha
+
+    try:
+        d["PodeRenovar"] = bool(int(d.get("PodeRenovar") or 0)) and fonte_linha in {"CAMPANHA", "RESERVA"}
+    except Exception:
+        d["PodeRenovar"] = bool(d.get("PodeRenovar")) and fonte_linha in {"CAMPANHA", "RESERVA"}
 
     razao_social = str(d.get("RazaoSocial") or "").strip()
     if not razao_social or razao_social == "0":
@@ -19674,33 +19802,24 @@ def _campanhas_vencimentos_opcoes_marca(
     usuario_logado_eh_vendedor: bool,
     id_usuario_logado: int | None,
 ) -> list[str]:
-    """Busca as marcas disponíveis respeitando a restrição do perfil VENDEDOR."""
+    """Busca as marcas disponíveis na origem unificada, respeitando a restrição do perfil VENDEDOR."""
 
     marca_sql = _campanhas_vencimentos_marca_sql()
     filtros_sql: list[str] = [
         f"NULLIF(LTRIM(RTRIM({marca_sql})), '') IS NOT NULL",
-        "ISNULL(venc.BitAtivo, 1) = 1",
     ]
     params = {"id_usuario_logado": int(id_usuario_logado or 0)}
 
     if usuario_logado_eh_vendedor:
-        filtros_sql.append("ISNULL(vend.IDDimUsuarios, 0) = :id_usuario_logado")
+        filtros_sql.append("ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado")
 
     where_sql = " AND ".join(f"({item})" for item in filtros_sql)
+    sql_from_where = _campanhas_vencimentos_sql_from_where(where_sql)
 
     sql = text(f"""
         SELECT DISTINCT
             MarcaExibida = {marca_sql}
-        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
-            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
-            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
-           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
-           AND ISNULL(item.BitAtivo, 0) = 1
-        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = item.IDVendedor
-        WHERE {where_sql}
+        {sql_from_where}
         ORDER BY MarcaExibida ASC
     """)
 
@@ -19708,33 +19827,22 @@ def _campanhas_vencimentos_opcoes_marca(
     return [str(row.get("MarcaExibida") or "").strip() for row in rows if str(row.get("MarcaExibida") or "").strip()]
 
 
-
-
 def _campanhas_vencimentos_opcoes_vendedor(
     usuario_logado_eh_admin: bool,
 ) -> list[dict]:
-    """Busca os vendedores disponíveis para o filtro visível somente para Admin."""
+    """Busca os vendedores disponíveis para o filtro visível somente para Admin na origem unificada."""
 
     if not usuario_logado_eh_admin:
         return []
 
-    sql = text("""
+    sql_from_where = _campanhas_vencimentos_sql_from_where("vc.IDVendedor IS NOT NULL AND NULLIF(LTRIM(RTRIM(vc.NomeVendedor)), '') IS NOT NULL")
+
+    sql = text(f"""
         SELECT DISTINCT
-            vend.IDVendedor,
-            vend.NomeVendedor
-        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
-            ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
-            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
-           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
-           AND ISNULL(item.BitAtivo, 0) = 1
-        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = item.IDVendedor
-        WHERE vend.IDVendedor IS NOT NULL
-          AND NULLIF(LTRIM(RTRIM(vend.NomeVendedor)), '') IS NOT NULL
-          AND ISNULL(venc.BitAtivo, 1) = 1
-        ORDER BY vend.NomeVendedor ASC
+            vc.IDVendedor,
+            vc.NomeVendedor
+        {sql_from_where}
+        ORDER BY vc.NomeVendedor ASC
     """)
 
     rows = db.session.execute(sql).mappings().all()
@@ -20595,20 +20703,23 @@ def _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
         atualizou_card = True
 
     marcador_ativo = f"[RESERVA_CARD_ATIVO={int(id_card_int)}]"
-    texto_vinculo = (
-        f"{marcador_ativo} Reserva de preferência de renovação vinculada automaticamente "
-        f"ao Card {int(id_card_int)} pela tela de vencimentos de campanhas."
-    )
 
-    db.session.execute(
+    # Importante:
+    # A coluna Observacao da FatoOcupacaoPaineisEuromidia pode ser curta no SQL Server.
+    # Antes este ponto concatenava uma frase longa e podia gerar o erro 2628
+    # (String or binary data would be truncated). Para a tela do Kanban preencher
+    # o campo Reserva, o vínculo correto fica no FatoKanbanCard.IDReserva.
+    # Portanto, aqui eu só marco a Observacao quando ela estiver vazia, usando
+    # um texto curto; se já existir observação comercial/técnica, preservo sem concatenar.
+    resultado_reserva = db.session.execute(
         text(f"""
             UPDATE {TABELA_OCUPACAO_PAINEIS_EUROMIDIA_ADMIN}
                SET Observacao = CASE
                     WHEN CHARINDEX(:marcador_ativo, COALESCE(CONVERT(varchar(max), Observacao), '')) > 0
                         THEN Observacao
                     WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(max), Observacao), ''))), '') IS NULL
-                        THEN :texto_vinculo
-                    ELSE CONCAT(CONVERT(varchar(max), Observacao), ' | ', :texto_vinculo)
+                        THEN :marcador_ativo
+                    ELSE Observacao
                    END,
                    DataAtualizacao = GETDATE()
              WHERE IDFatoOcupacaoPaineisEuromidia = :id_reserva
@@ -20620,7 +20731,6 @@ def _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
         {
             "id_reserva": int(id_reserva),
             "marcador_ativo": marcador_ativo,
-            "texto_vinculo": texto_vinculo,
         },
     )
 
@@ -20700,6 +20810,8 @@ def _campanhas_vencimentos_criar_card_renovacao(
     data_inicio_renovacao: date,
     data_fim_renovacao: date,
     prazo_dias: int,
+    titulo_override: str | None = None,
+    descricao_override: str | None = None,
 ) -> int:
     """Cria o card de renovação no Kanban 1 e aplica a tag 17 Renovação."""
 
@@ -20752,8 +20864,8 @@ def _campanhas_vencimentos_criar_card_renovacao(
     telefone = str(campanha.get("Telefone") or "").strip() or None
     email = str(campanha.get("Email") or "").strip() or None
 
-    titulo = _campanhas_vencimentos_titulo_card_renovacao(campanha)
-    descricao = _campanhas_vencimentos_descricao_card_renovacao(
+    titulo = (str(titulo_override or '').strip() or _campanhas_vencimentos_titulo_card_renovacao(campanha))[:200]
+    descricao = str(descricao_override) if descricao_override is not None else _campanhas_vencimentos_descricao_card_renovacao(
         campanha=campanha,
         data_inicio_renovacao=data_inicio_renovacao,
         data_fim_renovacao=data_fim_renovacao,
@@ -21228,6 +21340,598 @@ def _campanhas_vencimentos_inserir_painel_face_card_renovacao(
         "cod_face": cod_face,
     }
 
+def _campanhas_vencimentos_buscar_base_reserva(id_reserva: int) -> dict | None:
+    """Busca a base completa da RESERVA para criar card no Kanban pela tela de vencimentos.
+
+    A origem principal é Integracao.Silver.FatoOcupacaoPaineisEuromidia.
+    Quando a reserva tem contrato/item de origem, a função também aproveita os dados do
+    contrato, item, empresa, CNAE e tabela de preço para criar o card já preenchido como
+    acontece no fluxo de renovação de campanha.
+    """
+
+    id_reserva_int = int(id_reserva or 0)
+    if id_reserva_int <= 0:
+        return None
+
+    sql = text("""
+        SELECT TOP (1)
+            reserva.IDFatoOcupacaoPaineisEuromidia,
+            reserva.IDFatoOcupacaoPaineisEuromidia AS IDReservaOcupacao,
+            CAST('RESERVA' AS varchar(20)) AS FonteLinha,
+            CAST(-1 * reserva.IDFatoOcupacaoPaineisEuromidia AS int) AS IDFatoVencimentoCampanhaEuromidia,
+
+            IDFatoControleContratosEuromidia = COALESCE(reserva.IDFatoControleContratos, item.IDFatoControleContratoEuromidia),
+            IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem,
+            CAST(-9001 AS int) AS IDDimStatusCampanha,
+
+            reserva.IDVendedor AS IDVendedor,
+            NomeVendedor = COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend.NomeVendedor))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), reserva.Vendedor))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), item.Vendedor))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ctr.Vendedor))), '')
+            ),
+            vend.IDDimUsuarios AS IDDimUsuariosVendedor,
+
+            IDEmpresa = COALESCE(reserva.IDCliente, ctr.IDEmpresa),
+            MarcaExibida = COALESCE(
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), reserva.MarcaExibida))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), item.MarcaExibida))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp.NomeFantasia))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp.RazaoSocial))), ''), '0')
+            ),
+
+            DataInicioCampanha = CAST(reserva.DataInicio AS date),
+            DataTerminoPrevisto = CAST(reserva.DataFim AS date),
+            DiasParaVencer = CASE
+                WHEN reserva.DataFim IS NULL THEN NULL
+                ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(reserva.DataFim AS date))
+            END,
+            BitAtivo = CAST(1 AS bit),
+
+            NumeroContrato = COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.NumeroContrato))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), ctr.NumeroContrato))), '')
+            ),
+            NumeroPrevia = COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.NumeroPrevia))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), ctr.NumeroPrevia))), '')
+            ),
+            RazaoSocial = COALESCE(
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp.RazaoSocial))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp.NomeFantasia))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0'),
+                NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), reserva.MarcaExibida))), ''), '0')
+            ),
+            ctr.IDEmpresaAgencia,
+            ctr.IDEmpresaBureau,
+            ctr.IDEmpresaIntermediario,
+
+            emp.NomeFantasia,
+            emp.CNPJ,
+            emp.Email,
+            Telefone = COALESCE(NULLIF(LTRIM(RTRIM(emp.TelefoneContato1)), ''), NULLIF(LTRIM(RTRIM(emp.TelefoneContato2)), '')),
+            emp.CNAE,
+            emp.IDDimOrigemAtendimento AS IDDimOrigemAtendimentoEmpresa,
+
+            cnae.IDDimCnaes,
+            cnae.Classe AS ClasseCnae,
+            cnae.Setor AS SetorCnae,
+            cnae.MacroSetor AS MacroSetorCnae,
+            cnae.SubClasse AS SubClasseCnae,
+
+            CodPonto = COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.CodPonto))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodPonto))), '')
+            ),
+            CodFace = COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.CodFace))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), '')
+            ),
+            IDPainelEuromidia = COALESCE(reserva.IDPainelEuromidia, item.IDPainelEuromidia),
+            item.IDDimFacesPaineis,
+            item.Tipo AS TipoPainelItem,
+            Cota = COALESCE(reserva.Cota, item.Cota),
+            item.TexmpoExposicao,
+            item.CidadeExibicao,
+            item.IDFatoKanbanCard AS IDFatoKanbanCardOrigem,
+            item.IDDimOrigemAtendimento AS IDDimOrigemAtendimentoItem,
+            item.IDDimTipoDocumento,
+            item.FaturamentoBrutoMensal,
+            item.FaturamentoLiquidoMensal,
+            item.FaturamentoLiquidoFinalMensal,
+            item.TotalBrutoContrato,
+            item.TotalLiquidoContratoAGBRCTACORDO,
+            item.TotalLiquidoContratoAGBRVENDGERCOOR,
+            item.NumeroParcelas,
+            item.DataInicioVencimento,
+
+            painel.Tipo AS TipoPainelCadastro,
+            face.Tipo AS TipoFaceCadastro,
+
+            tp.IDDimTabelaPrecosEuromidia AS IDDimTabelaPrecosEuromidiaTabela,
+            tp.PeriodoExibicao AS PeriodoExibicaoTabela,
+            tp.ExibicoesDia AS ExibicoesDiaTabela,
+            tp.Valor AS ValorTabelaPreco,
+            tp.Tabela AS TabelaPreco,
+            tp.PoliticaTrocas AS PoliticaTrocasTabela,
+            tp.ValorTroca AS ValorTrocaTabela,
+
+            PeriodoExibicaoContrato = NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), item.TexmpoExposicao))), ''),
+            ExibicoesDiaContrato = TRY_CONVERT(int, COALESCE(reserva.Cota, item.Cota)),
+
+            reserva.Origem,
+            reserva.Status,
+            reserva.TextoOriginal,
+            reserva.Observacao,
+            reserva.CriadoEm,
+            reserva.ExpiraEm,
+            reserva.ReservaOrdemPrioridade,
+            reserva.TipoVinculoOrigem,
+            reserva.BitEmpresasRelacionadas
+
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
+
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+            ON item.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
+
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
+            ON ctr.IDFatoControleContratosEuromidia = COALESCE(reserva.IDFatoControleContratos, item.IDFatoControleContratoEuromidia)
+
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
+            ON emp.IDEmpresa = COALESCE(reserva.IDCliente, ctr.IDEmpresa)
+
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] AS cnae
+            ON LTRIM(RTRIM(CONVERT(varchar(30), emp.CNAE))) COLLATE Latin1_General_CI_AI
+             = LTRIM(RTRIM(CONVERT(varchar(30), cnae.cnaepadrao))) COLLATE Latin1_General_CI_AI
+
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+            ON vend.IDVendedor = reserva.IDVendedor
+
+        LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS painel
+            ON painel.IDDimPaineisEuromidia = COALESCE(reserva.IDPainelEuromidia, item.IDPainelEuromidia)
+
+        LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS face
+            ON face.IDDimFacesPaineis = item.IDDimFacesPaineis
+
+        OUTER APPLY (
+            SELECT TOP (1)
+                tabela_preco.IDDimTabelaPrecosEuromidia,
+                tabela_preco.PeriodoExibicao,
+                tabela_preco.ExibicoesDia,
+                tabela_preco.Valor,
+                tabela_preco.Tabela,
+                tabela_preco.PoliticaTrocas,
+                tabela_preco.ValorTroca
+            FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS tabela_preco
+            WHERE ISNULL(tabela_preco.BitAtivo, 1) = 1
+              AND (
+                    COALESCE(reserva.IDPainelEuromidia, item.IDPainelEuromidia) IS NULL
+                    OR tabela_preco.IDDimPaineisEuromidia = COALESCE(reserva.IDPainelEuromidia, item.IDPainelEuromidia)
+                  )
+              AND (
+                    item.IDDimFacesPaineis IS NULL
+                    OR tabela_preco.IDDimFacesPaineis = item.IDDimFacesPaineis
+                  )
+            ORDER BY
+                CASE
+                    WHEN COALESCE(reserva.Cota, item.Cota) IS NOT NULL
+                     AND TRY_CONVERT(varchar(80), tabela_preco.ExibicoesDia) = TRY_CONVERT(varchar(80), COALESCE(reserva.Cota, item.Cota))
+                    THEN 0 ELSE 1
+                END,
+                CASE
+                    WHEN NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), item.TexmpoExposicao))), '') IS NOT NULL
+                     AND LTRIM(RTRIM(CONVERT(varchar(120), tabela_preco.PeriodoExibicao))) COLLATE Latin1_General_CI_AI
+                       = LTRIM(RTRIM(CONVERT(varchar(120), item.TexmpoExposicao))) COLLATE Latin1_General_CI_AI
+                    THEN 0 ELSE 1
+                END,
+                ISNULL(tabela_preco.DataPublicacao, tabela_preco.DataAtualizacao) DESC,
+                tabela_preco.IDDimTabelaPrecosEuromidia DESC
+        ) AS tp
+
+        WHERE reserva.IDFatoOcupacaoPaineisEuromidia = :id_reserva
+          AND reserva.CanceladoEm IS NULL
+          AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+          AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO';
+    """)
+
+    row = db.session.execute(sql, {"id_reserva": int(id_reserva_int)}).mappings().first()
+    if not row:
+        return None
+
+    reserva = dict(row)
+    id_reserva_final = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia"))
+    reserva["IDReservaPreferenciaRenovacao"] = id_reserva_final
+    reserva["ReservaPreferenciaRenovacao"] = {
+        "IDFatoOcupacaoPaineisEuromidia": id_reserva_final,
+        "DataInicio": reserva.get("DataInicioCampanha"),
+        "DataFim": reserva.get("DataTerminoPrevisto"),
+        "CodPonto": reserva.get("CodPonto"),
+        "CodFace": reserva.get("CodFace"),
+        "Status": reserva.get("Status"),
+        "Origem": reserva.get("Origem"),
+    }
+    reserva["DataInicioReservaPreferenciaRenovacao"] = reserva.get("DataInicioCampanha")
+    reserva["DataFimReservaPreferenciaRenovacao"] = reserva.get("DataTerminoPrevisto")
+    return reserva
+
+
+def _campanhas_vencimentos_titulo_card_reserva(reserva: dict) -> str:
+    """Monta o título pedido para cards criados diretamente a partir de uma Reserva."""
+
+    id_reserva = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao")) or 0
+    nome_empresa = (
+        str(reserva.get("RazaoSocial") or "").strip()
+        or str(reserva.get("NomeFantasia") or "").strip()
+        or str(reserva.get("MarcaExibida") or "").strip()
+        or "Empresa sem nome"
+    )
+
+    titulo = f'Plano de Mídia {nome_empresa} - {id_reserva}'
+    return titulo[:200]
+
+
+def _campanhas_vencimentos_descricao_card_reserva(reserva: dict) -> str:
+    """Descrição do card criado pela linha de RESERVA da tela de vencimentos."""
+
+    id_reserva = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao")) or 0
+    id_contrato = _parse_int(reserva.get("IDFatoControleContratosEuromidia"))
+    id_item = _parse_int(reserva.get("IDFatoControleContratosItensEuromidia"))
+    cod_ponto = str(reserva.get("CodPonto") or "").strip()
+    cod_face = str(reserva.get("CodFace") or "").strip().upper()
+    periodo_exibicao = _campanhas_vencimentos_primeiro_valor_preenchido(
+        reserva.get("PeriodoExibicaoContrato"),
+        reserva.get("PeriodoExibicaoTabela"),
+    )
+    exibicoes_dia = _campanhas_vencimentos_primeiro_valor_preenchido(
+        reserva.get("ExibicoesDiaContrato"),
+        reserva.get("ExibicoesDiaTabela"),
+        reserva.get("Cota"),
+    )
+
+    linhas = [
+        "PLANO DE MÍDIA GERADO PELA TELA DE VENCIMENTOS",
+        f"Origem técnica: PLANO_MIDIA_RESERVA_ID={id_reserva}",
+        f"IDRESERVA={id_reserva}",
+        "",
+        f"Cliente: {str(reserva.get('RazaoSocial') or reserva.get('NomeFantasia') or '—').strip()}",
+        f"CNPJ: {str(reserva.get('CNPJ') or '—').strip()}",
+        f"Segmento: {str(reserva.get('ClasseCnae') or reserva.get('SetorCnae') or '—').strip()}",
+        f"IDDimCnaes: {reserva.get('IDDimCnaes') or '—'}",
+        f"Marca/Campanha: {str(reserva.get('MarcaExibida') or '—').strip()}",
+        f"IDReserva: {id_reserva}",
+        f"Contrato origem: {id_contrato or '—'}",
+        f"Item origem: {id_item or '—'}",
+        f"Número contrato: {str(reserva.get('NumeroContrato') or '—').strip()}",
+        f"Número prévia: {str(reserva.get('NumeroPrevia') or '—').strip()}",
+        f"CodPonto: {cod_ponto or '—'}",
+        f"CodFace: {cod_face or '—'}",
+        f"Inserções/dia: {exibicoes_dia or '—'}",
+        f"Período de campanha: {periodo_exibicao or '—'}",
+        f"Vendedor: {str(reserva.get('NomeVendedor') or '—').strip()}",
+        "",
+        "Período da reserva:",
+        f"- Início: {_campanhas_vencimentos_formatar_data_pt(reserva.get('DataInicioCampanha'))}",
+        f"- Término: {_campanhas_vencimentos_formatar_data_pt(reserva.get('DataTerminoPrevisto'))}",
+        f"- Origem ocupação: {str(reserva.get('Origem') or '—').strip()}",
+        f"- Status ocupação: {str(reserva.get('Status') or '—').strip()}",
+    ]
+
+    observacao = str(reserva.get("Observacao") or "").strip()
+    texto_original = str(reserva.get("TextoOriginal") or "").strip()
+    tipo_vinculo = str(reserva.get("TipoVinculoOrigem") or "").strip()
+
+    if tipo_vinculo:
+        linhas.extend(["", f"Tipo vínculo origem: {tipo_vinculo}"])
+    if observacao:
+        linhas.extend(["", "Observação da reserva:", observacao])
+    if texto_original and texto_original != observacao:
+        linhas.extend(["", "Texto original da reserva:", texto_original])
+
+    return "\n".join(linhas)
+
+
+def _campanhas_vencimentos_vincular_reserva_ocupacao_card(
+    *,
+    id_card: int,
+    id_reserva: int,
+    texto_origem: str = "tela de vencimentos de campanhas",
+) -> dict:
+    """Vincula qualquer reserva ativa ao card, sem exigir TipoVinculoOrigem específico."""
+
+    id_card_int = int(id_card or 0)
+    id_reserva_int = int(id_reserva or 0)
+    if id_card_int <= 0 or id_reserva_int <= 0:
+        return {
+            "ok": False,
+            "motivo": "id_card_ou_id_reserva_invalido",
+            "id_card": id_card_int or None,
+            "id_reserva": id_reserva_int or None,
+        }
+
+    atualizou_card = False
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDReserva"):
+        campos_set = ["IDReserva = :id_reserva"]
+        if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "AtualizadoEm"):
+            campos_set.append("AtualizadoEm = GETDATE()")
+
+        resultado_card = db.session.execute(
+            text(f"""
+                UPDATE {TABELA_KANBAN_CARD_RENOVACAO}
+                   SET {', '.join(campos_set)}
+                 WHERE IDFatoKanbanCard = :id_card;
+            """),
+            {
+                "id_card": int(id_card_int),
+                "id_reserva": int(id_reserva_int),
+            },
+        )
+        atualizou_card = int(resultado_card.rowcount or 0) > 0
+
+    marcador_ativo = f"[RESERVA_CARD_ATIVO={int(id_card_int)}]"
+
+    # Mesma proteção do fluxo de preferência de renovação:
+    # não concateno texto longo na Observacao da reserva para evitar erro 2628.
+    # O vínculo operacional principal fica no FatoKanbanCard.IDReserva.
+    resultado_reserva = db.session.execute(
+        text(f"""
+            UPDATE {TABELA_OCUPACAO_PAINEIS_EUROMIDIA_ADMIN}
+               SET Observacao = CASE
+                    WHEN CHARINDEX(:marcador_ativo, COALESCE(CONVERT(varchar(max), Observacao), '')) > 0
+                        THEN Observacao
+                    WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(max), Observacao), ''))), '') IS NULL
+                        THEN :marcador_ativo
+                    ELSE Observacao
+                   END,
+                   DataAtualizacao = GETDATE()
+             WHERE IDFatoOcupacaoPaineisEuromidia = :id_reserva
+               AND CanceladoEm IS NULL
+               AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+               AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO';
+        """),
+        {
+            "id_reserva": int(id_reserva_int),
+            "marcador_ativo": marcador_ativo,
+        },
+    )
+
+    return {
+        "ok": True,
+        "vinculada": True,
+        "id_card": int(id_card_int),
+        "id_reserva": int(id_reserva_int),
+        "atualizou_card": atualizou_card,
+        "linhas_reserva": int(resultado_reserva.rowcount or 0),
+    }
+
+
+def _campanhas_vencimentos_card_reserva_existente(reserva: dict) -> int | None:
+    """Evita duplicidade quando a mesma Reserva já gerou card."""
+
+    id_reserva = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao"))
+    if not id_reserva:
+        return None
+
+    filtros = [
+        "c.IDDimKanban = :id_kanban",
+        "ISNULL(c.Ativo, 1) = 1",
+        "(ISNULL(c.Descricao, '') LIKE :marcador_reserva OR ISNULL(c.Descricao, '') LIKE :marcador_idreserva)",
+    ]
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDReserva"):
+        filtros[-1] = "(" + filtros[-1] + " OR TRY_CONVERT(int, c.IDReserva) = :id_reserva)"
+
+    row = db.session.execute(
+        text(f"""
+            SELECT TOP (1)
+                c.IDFatoKanbanCard
+            FROM {TABELA_KANBAN_CARD_RENOVACAO} AS c
+            WHERE {' AND '.join(f'({filtro})' for filtro in filtros)}
+            ORDER BY c.IDFatoKanbanCard DESC;
+        """),
+        {
+            "id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA),
+            "id_reserva": int(id_reserva),
+            "marcador_reserva": f"%PLANO_MIDIA_RESERVA_ID={int(id_reserva)}%",
+            "marcador_idreserva": f"%IDRESERVA={int(id_reserva)}%",
+        },
+    ).mappings().first()
+
+    id_card = int((row or {}).get("IDFatoKanbanCard") or 0)
+    return id_card or None
+
+
+def _campanhas_vencimentos_atualizar_card_reserva_dados_cadastro(
+    *,
+    id_card: int,
+    reserva: dict,
+) -> dict:
+    """Atualiza card já existente criado a partir de reserva, mantendo cadastro e IDReserva corretos."""
+
+    id_card_int = int(id_card or 0)
+    id_reserva = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao"))
+    if id_card_int <= 0 or not id_reserva:
+        return {"ok": False, "motivo": "id_card_ou_id_reserva_invalido"}
+
+    reserva["IDReservaPreferenciaRenovacao"] = int(id_reserva)
+    reserva["ReservaPreferenciaRenovacao"] = {
+        "IDFatoOcupacaoPaineisEuromidia": int(id_reserva),
+        "DataInicio": reserva.get("DataInicioCampanha"),
+        "DataFim": reserva.get("DataTerminoPrevisto"),
+    }
+
+    _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
+        id_card=int(id_card_int),
+        campanha=reserva,
+    )
+
+    titulo = _campanhas_vencimentos_titulo_card_reserva(reserva)
+    descricao = _campanhas_vencimentos_descricao_card_reserva(reserva)
+
+    sets = ["Titulo = :titulo", "Descricao = :descricao"]
+    params = {
+        "id_card": int(id_card_int),
+        "titulo": titulo,
+        "descricao": descricao,
+    }
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "IDReserva"):
+        sets.append("IDReserva = :id_reserva")
+        params["id_reserva"] = int(id_reserva)
+
+    if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "AtualizadoEm"):
+        sets.append("AtualizadoEm = GETDATE()")
+
+    db.session.execute(
+        text(f"""
+            UPDATE {TABELA_KANBAN_CARD_RENOVACAO}
+               SET {', '.join(sets)}
+             WHERE IDFatoKanbanCard = :id_card;
+        """),
+        params,
+    )
+
+    _campanhas_vencimentos_vincular_reserva_ocupacao_card(
+        id_card=int(id_card_int),
+        id_reserva=int(id_reserva),
+        texto_origem="tela de vencimentos de campanhas",
+    )
+
+    return {
+        "ok": True,
+        "id_card": int(id_card_int),
+        "id_reserva": int(id_reserva),
+    }
+
+
+@admin.route("/vencimentos-campanhas/reserva/<int:id_reserva>/renovar", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute", methods=["POST"])
+def vencimentos_campanhas_renovar_reserva(id_reserva: int):
+    """Cria card no Kanban 1 a partir de uma RESERVA listada na tela de vencimentos."""
+
+    url_falha = request.referrer or url_for("admin.vencimentos_campanhas_euromidia")
+
+    try:
+        reserva = _campanhas_vencimentos_buscar_base_reserva(int(id_reserva))
+        if not reserva:
+            flash("Não encontrei a reserva selecionada ou ela não está mais ativa/reservada.", "warning")
+            return redirect(url_falha)
+
+        usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+        id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
+        id_usuario_vendedor = int(reserva.get("IDDimUsuariosVendedor") or 0)
+
+        if usuario_logado_eh_vendedor and id_usuario_vendedor and id_usuario_vendedor != id_usuario_logado:
+            abort(403, description="Você só pode criar card para reserva vinculada ao seu vendedor.")
+
+        id_reserva_final = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao"))
+        data_inicio_reserva = reserva.get("DataInicioCampanha")
+        data_fim_reserva = reserva.get("DataTerminoPrevisto")
+        cod_face = str(reserva.get("CodFace") or "").strip().upper()
+
+        if not id_reserva_final:
+            flash("Não consegui criar o card porque o ID da reserva está inválido.", "warning")
+            return redirect(url_falha)
+
+        if not data_inicio_reserva or not data_fim_reserva:
+            flash("Não consegui criar o card porque a reserva não possui início e término válidos.", "warning")
+            return redirect(url_falha)
+
+        if data_fim_reserva < data_inicio_reserva:
+            flash("Não consegui criar o card porque o término da reserva é menor que a data de início.", "warning")
+            return redirect(url_falha)
+
+        if not cod_face:
+            flash("Não consegui criar o card porque a reserva não possui CodFace.", "warning")
+            return redirect(url_falha)
+
+        prazo_dias = (data_fim_reserva - data_inicio_reserva).days + 1
+        if prazo_dias <= 0:
+            flash("Não consegui criar o card porque o prazo calculado da reserva ficou inválido.", "warning")
+            return redirect(url_falha)
+
+        reserva["IDReservaPreferenciaRenovacao"] = int(id_reserva_final)
+        reserva["ReservaPreferenciaRenovacao"] = {
+            "IDFatoOcupacaoPaineisEuromidia": int(id_reserva_final),
+            "DataInicio": data_inicio_reserva,
+            "DataFim": data_fim_reserva,
+            "CodPonto": reserva.get("CodPonto"),
+            "CodFace": reserva.get("CodFace"),
+            "Status": reserva.get("Status"),
+            "Origem": reserva.get("Origem"),
+        }
+
+        id_card_existente = _campanhas_vencimentos_card_reserva_existente(reserva)
+        if id_card_existente:
+            _campanhas_vencimentos_atualizar_card_reserva_dados_cadastro(
+                id_card=int(id_card_existente),
+                reserva=reserva,
+            )
+            _campanhas_vencimentos_inserir_painel_face_card_renovacao(
+                id_card=int(id_card_existente),
+                campanha=reserva,
+                data_inicio_renovacao=data_inicio_reserva,
+                data_fim_renovacao=data_fim_reserva,
+            )
+            _campanhas_vencimentos_invalidar_cache_kanban_renovacao(
+                id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA),
+                id_empresa_proprietaria=int(ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO),
+                id_card=int(id_card_existente),
+            )
+
+            db.session.commit()
+            flash(
+                f"Já existia um card para a reserva #{id_reserva_final}: #{id_card_existente}. "
+                "Atualizei o título, descrição, IDReserva e painel/face do card.",
+                "info",
+            )
+            return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+
+        titulo = _campanhas_vencimentos_titulo_card_reserva(reserva)
+        descricao = _campanhas_vencimentos_descricao_card_reserva(reserva)
+
+        id_card = _campanhas_vencimentos_criar_card_renovacao(
+            campanha=reserva,
+            data_inicio_renovacao=data_inicio_reserva,
+            data_fim_renovacao=data_fim_reserva,
+            prazo_dias=int(prazo_dias),
+            titulo_override=titulo,
+            descricao_override=descricao,
+        )
+
+        _campanhas_vencimentos_vincular_reserva_ocupacao_card(
+            id_card=int(id_card),
+            id_reserva=int(id_reserva_final),
+            texto_origem="tela de vencimentos de campanhas",
+        )
+
+        db.session.commit()
+        flash(
+            "Card criado no Kanban 1 a partir da reserva: "
+            f"#{id_card} • Reserva #{id_reserva_final} • {cod_face} • "
+            f"{_campanhas_vencimentos_formatar_data_pt(data_inicio_reserva)} até "
+            f"{_campanhas_vencimentos_formatar_data_pt(data_fim_reserva)}.",
+            "success",
+        )
+        return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+
+    except HTTPException:
+        db.session.rollback()
+        raise
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Erro ao criar card de reserva pela tela de vencimentos. id_reserva=%s",
+            id_reserva,
+        )
+        flash(f"Erro ao criar card da reserva: {exc}", "danger")
+        return redirect(url_falha)
+
+
+
 
 
 
@@ -21440,31 +22144,35 @@ def vencimentos_campanhas_euromidia():
 
     sql_rows = text(f"""
         SELECT
-            venc.IDFatoVencimentoCampanhaEuromidia,
-            venc.IDFatoControleContratosEuromidia,
-            venc.IDFatoControleContratosItensEuromidia,
-            venc.IDDimStatusCampanha,
-            st.NomeStatus,
-            item.IDVendedor AS IDVendedor,
-            NomeVendedor = {nome_vendedor_sql},
-            vend.IDDimUsuarios AS IDDimUsuariosVendedor,
-            ctr.NumeroContrato,
-            ctr.NumeroPrevia,
-            RazaoSocial = {razao_social_sql},
-            ctr.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
-            Painel = {painel_sql},
-            MarcaExibida = {marca_sql},
-            venc.DataInicioCampanha,
-            DataTermino = venc.DataTerminoPrevisto,
-            venc.DiasParaVencer,
-            venc.BitAtivo,
-            venc.DataCriacao,
-            venc.DataAtualizacao
+            vc.IDFatoVencimentoCampanhaEuromidia,
+            vc.IDReservaOcupacao,
+            vc.FonteLinha,
+            vc.PodeRenovar,
+            vc.IDFatoControleContratosEuromidia,
+            vc.IDFatoControleContratosItensEuromidia,
+            vc.IDDimStatusCampanha,
+            vc.NomeStatus,
+            vc.IDVendedor,
+            vc.NomeVendedor,
+            vc.IDDimUsuariosVendedor,
+            vc.NumeroContrato,
+            vc.NumeroPrevia,
+            vc.RazaoSocial,
+            vc.TotalLiquidoContrato,
+            vc.Painel,
+            vc.MarcaExibida,
+            vc.DataInicioCampanha,
+            vc.DataTermino,
+            vc.DiasParaVencer,
+            vc.BitAtivo,
+            vc.DataCriacao,
+            vc.DataAtualizacao
         {sql_from_where}
         ORDER BY
-            CASE WHEN venc.DataTerminoPrevisto IS NULL THEN 1 ELSE 0 END ASC,
-            venc.DataTerminoPrevisto ASC,
-            venc.IDFatoVencimentoCampanhaEuromidia DESC
+            CASE WHEN vc.DataTermino IS NULL THEN 1 ELSE 0 END ASC,
+            vc.DataTermino ASC,
+            CASE WHEN vc.FonteLinha = 'RESERVA' THEN 1 ELSE 0 END ASC,
+            vc.IDFatoVencimentoCampanhaEuromidia DESC
         OFFSET :offset ROWS
         FETCH NEXT :per_page ROWS ONLY
     """)
@@ -21475,20 +22183,25 @@ def vencimentos_campanhas_euromidia():
     rows = db.session.execute(sql_rows, params_rows).mappings().all()
     itens = [_campanhas_vencimentos_enriquecer_item(dict(r)) for r in rows]
 
-    status_opcoes = db.session.execute(text("""
-        SELECT DISTINCT
-            st.IDDimStatusCampanha,
-            st.NomeStatus
-        FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
-            ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
-           AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
-           AND ISNULL(item.BitAtivo, 0) = 1
-        INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
-            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
-        WHERE ISNULL(venc.BitAtivo, 1) = 1
-        ORDER BY st.IDDimStatusCampanha ASC
-    """)).mappings().all()
+    filtros_status_opcoes = []
+    params_status_opcoes = {"id_usuario_logado": int(id_usuario_logado or 0)}
+    if usuario_logado_eh_vendedor:
+        filtros_status_opcoes.append("ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado")
+
+    where_status_opcoes = " AND ".join(f"({item})" for item in filtros_status_opcoes) if filtros_status_opcoes else "1=1"
+    sql_status_opcoes = text(f"""
+        SELECT
+            vc.IDDimStatusCampanha,
+            vc.NomeStatus
+        {_campanhas_vencimentos_sql_from_where(where_status_opcoes)}
+        GROUP BY
+            vc.IDDimStatusCampanha,
+            vc.NomeStatus
+        ORDER BY
+            CASE WHEN vc.IDDimStatusCampanha < 0 THEN 999999 ELSE vc.IDDimStatusCampanha END ASC,
+            vc.NomeStatus ASC
+    """)
+    status_opcoes = db.session.execute(sql_status_opcoes, params_status_opcoes).mappings().all()
 
     marca_opcoes = _campanhas_vencimentos_opcoes_marca(
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
@@ -21593,28 +22306,32 @@ def vencimentos_campanhas_sugestoes():
 
     sql = text(f"""
         SELECT
-            venc.IDFatoVencimentoCampanhaEuromidia,
-            venc.IDFatoControleContratosEuromidia,
-            venc.IDFatoControleContratosItensEuromidia,
-            venc.IDDimStatusCampanha,
-            st.NomeStatus,
-            item.IDVendedor AS IDVendedor,
-            NomeVendedor = {nome_vendedor_sql},
-            ctr.NumeroContrato,
-            ctr.NumeroPrevia,
-            RazaoSocial = {razao_social_sql},
-            Painel = {painel_sql},
-            MarcaExibida = {marca_sql},
-            venc.DataInicioCampanha,
-            DataTermino = venc.DataTerminoPrevisto,
-            venc.DiasParaVencer,
-            venc.BitAtivo,
-            venc.DataAtualizacao
+            vc.IDFatoVencimentoCampanhaEuromidia,
+            vc.IDReservaOcupacao,
+            vc.FonteLinha,
+            vc.PodeRenovar,
+            vc.IDFatoControleContratosEuromidia,
+            vc.IDFatoControleContratosItensEuromidia,
+            vc.IDDimStatusCampanha,
+            vc.NomeStatus,
+            vc.IDVendedor,
+            vc.NomeVendedor,
+            vc.NumeroContrato,
+            vc.NumeroPrevia,
+            vc.RazaoSocial,
+            vc.Painel,
+            vc.MarcaExibida,
+            vc.DataInicioCampanha,
+            vc.DataTermino,
+            vc.DiasParaVencer,
+            vc.BitAtivo,
+            vc.DataAtualizacao
         {sql_from_where}
         ORDER BY
-            CASE WHEN venc.DataTerminoPrevisto IS NULL THEN 1 ELSE 0 END ASC,
-            venc.DataTerminoPrevisto ASC,
-            venc.IDFatoVencimentoCampanhaEuromidia DESC
+            CASE WHEN vc.DataTermino IS NULL THEN 1 ELSE 0 END ASC,
+            vc.DataTermino ASC,
+            CASE WHEN vc.FonteLinha = 'RESERVA' THEN 1 ELSE 0 END ASC,
+            vc.IDFatoVencimentoCampanhaEuromidia DESC
         OFFSET 0 ROWS
         FETCH NEXT :limite ROWS ONLY
     """)
@@ -21629,6 +22346,9 @@ def vencimentos_campanhas_sugestoes():
         d = _campanhas_vencimentos_enriquecer_item(dict(row))
         items.append({
             "id_vencimento": int(d.get("IDFatoVencimentoCampanhaEuromidia") or 0),
+            "id_reserva": int(d.get("IDReservaOcupacao") or 0),
+            "fonte_linha": str(d.get("FonteLinha") or "CAMPANHA"),
+            "pode_renovar": bool(d.get("PodeRenovar")),
             "id_contrato": int(d.get("IDFatoControleContratosEuromidia") or 0),
             "id_contrato_texto": d.get("IDFatoControleContratosExibicao") or "—",
             "numero_contrato": d.get("NumeroContratoExibicao") or "—",

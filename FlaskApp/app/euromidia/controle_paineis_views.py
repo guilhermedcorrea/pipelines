@@ -5802,14 +5802,16 @@ def grade_painel(codponto: int):
             Reservas usam ID negativo na grade e não recebem medalha.
 
             A grade renderiza a medalha quando BitPreferencia = 1.
-            Eu alimento esse campo por duas fontes:
-            1) regra antiga/oficial de FatoPreferenciaReserva/FatoPreferenciaReservaItens;
-            2) regra nova de agendamento de face por contrato + item.
+            Eu alimento esse campo sem remover as fontes antigas:
+            1) FatoPreferenciaReserva/FatoPreferenciaReservaItens;
+            2) FatoAgendamentoFaceContrato;
+            3) FatoControleContratosEuromidia + FatoControleContratosItensEuromidia + FatoOcupacaoPaineisEuromidia.
 
-            Regra nova pedida:
-            - agrupar por IDFatoControleContratosEuromidia + IDFatoControleContratosItensEuromidia;
-            - somar todos os períodos de DataInicio/DataTermino ativos;
-            - se a soma for equivalente a 6 meses completos ou mais, marca BitPreferencia = 1.
+            Regra aplicada:
+            - se o item já estiver com BitPreferencia = 1, exibe medalha;
+            - se o período do item tiver 6 meses completos ou mais, exibe medalha;
+            - se a ocupação vinculada ao item/contrato tiver 6 meses completos ou mais, exibe medalha;
+            - se a soma dos períodos distintos da ocupação equivaler a 6 meses ou mais, exibe medalha.
             """
             if id_item_pref > 0:
                 ids_itens_grade.append(id_item_pref)
@@ -5975,6 +5977,140 @@ def grade_painel(codponto: int):
         try:
             current_app.logger.warning(
                 "GRADE_PAINEL | falha ao carregar preferência pela FatoAgendamentoFaceContrato | codponto=%s | erro=%s",
+                codponto,
+                exc,
+            )
+        except Exception:
+            pass
+
+
+    try:
+        if ids_itens_grade:
+            sql_bit_preferencia_contrato_ocupacao_grade = sql_text("""
+                WITH ItensGrade AS (
+                    SELECT
+                         TRY_CONVERT(int, ci.[IDFatoControleContratosItensEuromidia]) AS IDFatoControleContratosItensEuromidia
+                        ,TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia]) AS IDFatoControleContratosEuromidia
+                        ,TRY_CONVERT(int, c.[IDFatoControleContratosEuromidia]) AS IDFatoControleContratosCabecalho
+                        ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(50), ci.[CodPonto]), ''))) AS CodPontoItem
+                        ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), ci.[CodFace]), ''))) AS CodFaceItem
+                        ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), ci.[NumeroContrato]), ''))) AS NumeroContratoItem
+                        ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), ci.[NumeroPrevia]), ''))) AS NumeroPreviaItem
+                        ,TRY_CONVERT(date, ci.[DataInicioPrevisto]) AS DataInicioItem
+                        ,COALESCE(
+                            TRY_CONVERT(date, ci.[DataFimEfetiva]),
+                            TRY_CONVERT(date, ci.[DataTerminoPrevisto])
+                         ) AS DataFimItem
+                        ,TRY_CONVERT(int, ci.[BitPreferencia]) AS BitPreferenciaItem
+                        ,ISNULL(TRY_CONVERT(int, ci.[BitAtivo]), 1) AS BitAtivoItem
+                        ,UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(20), ci.[AtivoCancelamento]), '')))) AS AtivoCancelamentoItem
+                        ,ISNULL(TRY_CONVERT(int, c.[BitAtivo]), 1) AS BitAtivoContrato
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+                    LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c WITH (NOLOCK)
+                        ON TRY_CONVERT(int, c.[IDFatoControleContratosEuromidia]) = TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia])
+                    WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
+                ),
+                OcupacoesPeriodos AS (
+                    SELECT DISTINCT
+                         ig.[IDFatoControleContratosItensEuromidia]
+                        ,TRY_CONVERT(date, oc.[DataInicio]) AS DataInicioOcupacao
+                        ,TRY_CONVERT(date, oc.[DataFim]) AS DataFimOcupacao
+                    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+                    INNER JOIN ItensGrade AS ig
+                        ON (
+                            TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ig.[IDFatoControleContratosItensEuromidia]
+                            OR
+                            (
+                                TRY_CONVERT(int, oc.[IDFatoControleContratos]) = ig.[IDFatoControleContratosEuromidia]
+                                AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(50), oc.[CodPonto]), ''))) = ig.[CodPontoItem]
+                                AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) = ig.[CodFaceItem]
+                                AND (
+                                    (
+                                        NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[NumeroContrato]), ''))), '') IS NOT NULL
+                                        AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[NumeroContrato]), ''))) = ig.[NumeroContratoItem]
+                                    )
+                                    OR
+                                    (
+                                        NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[NumeroPrevia]), ''))), '') IS NOT NULL
+                                        AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[NumeroPrevia]), ''))) = ig.[NumeroPreviaItem]
+                                    )
+                                    OR TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ig.[IDFatoControleContratosItensEuromidia]
+                                )
+                            )
+                        )
+                    WHERE oc.[CanceladoEm] IS NULL
+                      AND TRY_CONVERT(date, oc.[DataInicio]) IS NOT NULL
+                      AND TRY_CONVERT(date, oc.[DataFim]) IS NOT NULL
+                      AND TRY_CONVERT(date, oc.[DataFim]) >= TRY_CONVERT(date, oc.[DataInicio])
+                      AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Status]), '')))) COLLATE Latin1_General_CI_AI NOT IN (
+                            'CANCELADO', 'CANCELADA', 'CANCELADOS', 'CANCELADAS', 'INATIVO', 'INATIVA'
+                      )
+                ),
+                OcupacoesConsolidadas AS (
+                    SELECT
+                         op.[IDFatoControleContratosItensEuromidia]
+                        ,MIN(op.[DataInicioOcupacao]) AS DataInicioMinimaOcupacao
+                        ,MAX(op.[DataFimOcupacao]) AS DataFimMaximaOcupacao
+                        ,SUM(DATEDIFF(DAY, op.[DataInicioOcupacao], op.[DataFimOcupacao]) + 1) AS DiasOcupacaoDistintos
+                        ,MAX(
+                            CASE
+                                WHEN op.[DataFimOcupacao] >= DATEADD(DAY, -1, DATEADD(MONTH, 6, op.[DataInicioOcupacao]))
+                                THEN 1
+                                ELSE 0
+                            END
+                         ) AS TemPeriodoOcupacao6Meses
+                    FROM OcupacoesPeriodos AS op
+                    GROUP BY op.[IDFatoControleContratosItensEuromidia]
+                )
+                SELECT
+                     ig.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia
+                    ,CASE
+                        WHEN ISNULL(ig.[BitPreferenciaItem], 0) = 1 THEN 1
+                        WHEN ig.[DataInicioItem] IS NOT NULL
+                         AND ig.[DataFimItem] IS NOT NULL
+                         AND ig.[DataFimItem] >= DATEADD(DAY, -1, DATEADD(MONTH, 6, ig.[DataInicioItem]))
+                        THEN 1
+                        WHEN ISNULL(oc.[TemPeriodoOcupacao6Meses], 0) = 1 THEN 1
+                        WHEN oc.[DataInicioMinimaOcupacao] IS NOT NULL
+                         AND oc.[DiasOcupacaoDistintos] >= DATEDIFF(DAY, oc.[DataInicioMinimaOcupacao], DATEADD(MONTH, 6, oc.[DataInicioMinimaOcupacao]))
+                        THEN 1
+                        ELSE 0
+                     END AS BitPreferenciaContratoOcupacao
+                    ,ig.[BitPreferenciaItem]
+                    ,ig.[DataInicioItem]
+                    ,ig.[DataFimItem]
+                    ,oc.[DataInicioMinimaOcupacao]
+                    ,oc.[DataFimMaximaOcupacao]
+                    ,oc.[DiasOcupacaoDistintos]
+                    ,oc.[TemPeriodoOcupacao6Meses]
+                FROM ItensGrade AS ig
+                LEFT JOIN OcupacoesConsolidadas AS oc
+                    ON oc.[IDFatoControleContratosItensEuromidia] = ig.[IDFatoControleContratosItensEuromidia]
+            """).bindparams(bindparam("ids_itens_grade", expanding=True))
+
+            rows_bit_preferencia_contrato_ocupacao = db.session.execute(
+                sql_bit_preferencia_contrato_ocupacao_grade,
+                {"ids_itens_grade": ids_itens_grade},
+            ).mappings().all()
+
+            for row_dir in (rows_bit_preferencia_contrato_ocupacao or []):
+                try:
+                    id_item_dir = int(row_dir["IDFatoControleContratosItensEuromidia"] or 0)
+                    bit_dir = int(row_dir["BitPreferenciaContratoOcupacao"] or 0)
+                except Exception:
+                    continue
+
+                if id_item_dir <= 0:
+                    continue
+
+                if bit_dir == 1:
+                    mapa_bit_preferencia_por_item[id_item_dir] = 1
+                else:
+                    mapa_bit_preferencia_por_item.setdefault(id_item_dir, 0)
+    except Exception as exc:
+        try:
+            current_app.logger.warning(
+                "GRADE_PAINEL | falha ao carregar preferência por ControleContratos + Itens + Ocupacao | codponto=%s | erro=%s",
                 codponto,
                 exc,
             )
