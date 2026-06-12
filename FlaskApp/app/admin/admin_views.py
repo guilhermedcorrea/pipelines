@@ -19437,6 +19437,16 @@ def _campanhas_vencimentos_painel_sql() -> str:
     return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), '')"
 
 
+def _campanhas_vencimentos_nome_vendedor_sql() -> str:
+    """Expressão SQL do vendedor exibido, priorizando o cadastro oficial de Vendedores pelo item do contrato."""
+
+    return """COALESCE(
+        NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend.NomeVendedor))), ''),
+        NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), item.Vendedor))), ''),
+        NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ctr.Vendedor))), '')
+    )"""
+
+
 def _campanhas_vencimentos_adicionar_filtro_in(
     filtros_sql: list[str],
     params: dict,
@@ -19476,6 +19486,7 @@ def _campanhas_vencimentos_montar_filtros_sql(
     marca_sql = _campanhas_vencimentos_marca_sql()
     razao_social_sql = _campanhas_vencimentos_razao_social_sql()
     painel_sql = _campanhas_vencimentos_painel_sql()
+    nome_vendedor_sql = _campanhas_vencimentos_nome_vendedor_sql()
 
     filtros_sql: list[str] = []
     params = {
@@ -19496,6 +19507,7 @@ def _campanhas_vencimentos_montar_filtros_sql(
                 OR ISNULL(ctr.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL(venc.MarcaExibida, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL({painel_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
+                OR ISNULL({nome_vendedor_sql}, '') COLLATE Latin1_General_CI_AI LIKE :q_like
                 OR ISNULL(st.NomeStatus, '') COLLATE Latin1_General_CI_AI LIKE :q_like
             )
         """)
@@ -19529,7 +19541,7 @@ def _campanhas_vencimentos_montar_filtros_sql(
         _campanhas_vencimentos_adicionar_filtro_in(
             filtros_sql,
             params,
-            "venc.IDVendedor",
+            "item.IDVendedor",
             "vendedor_id",
             vendedores_ids_selecionados,
         )
@@ -19588,7 +19600,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
         INNER JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
             ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = venc.IDVendedor
+            ON vend.IDVendedor = item.IDVendedor
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_venc
             ON emp_venc.IDEmpresa = venc.IDEmpresa
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_ctr
@@ -19602,6 +19614,10 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     razao_social = str(d.get("RazaoSocial") or "").strip()
     if not razao_social or razao_social == "0":
         d["RazaoSocial"] = "—"
+
+    nome_vendedor = str(d.get("NomeVendedor") or "").strip()
+    if not nome_vendedor or nome_vendedor == "0":
+        d["NomeVendedor"] = "—"
 
     painel = str(d.get("Painel") or "").strip()
     if not painel or painel == "0":
@@ -19683,7 +19699,7 @@ def _campanhas_vencimentos_opcoes_marca(
            AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
            AND ISNULL(item.BitAtivo, 0) = 1
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = venc.IDVendedor
+            ON vend.IDVendedor = item.IDVendedor
         WHERE {where_sql}
         ORDER BY MarcaExibida ASC
     """)
@@ -19714,7 +19730,7 @@ def _campanhas_vencimentos_opcoes_vendedor(
            AND item.IDFatoControleContratoEuromidia = venc.IDFatoControleContratosEuromidia
            AND ISNULL(item.BitAtivo, 0) = 1
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = venc.IDVendedor
+            ON vend.IDVendedor = item.IDVendedor
         WHERE vend.IDVendedor IS NOT NULL
           AND NULLIF(LTRIM(RTRIM(vend.NomeVendedor)), '') IS NOT NULL
           AND ISNULL(venc.BitAtivo, 1) = 1
@@ -20145,8 +20161,12 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
             venc.IDFatoControleContratosEuromidia,
             venc.IDFatoControleContratosItensEuromidia,
             venc.IDDimStatusCampanha,
-            venc.IDVendedor,
-            vend.NomeVendedor,
+            item.IDVendedor AS IDVendedor,
+            NomeVendedor = COALESCE(
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend.NomeVendedor))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), item.Vendedor))), ''),
+                NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ctr.Vendedor))), '')
+            ),
             vend.IDDimUsuarios AS IDDimUsuariosVendedor,
 
             IDEmpresa = COALESCE(venc.IDEmpresa, ctr.IDEmpresa),
@@ -20246,7 +20266,7 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
              = LTRIM(RTRIM(CONVERT(varchar(30), cnae.cnaepadrao))) COLLATE Latin1_General_CI_AI
 
         LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
-            ON vend.IDVendedor = venc.IDVendedor
+            ON vend.IDVendedor = item.IDVendedor
 
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS painel
             ON painel.IDDimPaineisEuromidia = item.IDPainelEuromidia
@@ -21403,6 +21423,7 @@ def vencimentos_campanhas_euromidia():
     marca_sql = _campanhas_vencimentos_marca_sql()
     razao_social_sql = _campanhas_vencimentos_razao_social_sql()
     painel_sql = _campanhas_vencimentos_painel_sql()
+    nome_vendedor_sql = _campanhas_vencimentos_nome_vendedor_sql()
 
     sql_total = text(f"""
         SELECT COUNT(1) AS Total
@@ -21424,8 +21445,8 @@ def vencimentos_campanhas_euromidia():
             venc.IDFatoControleContratosItensEuromidia,
             venc.IDDimStatusCampanha,
             st.NomeStatus,
-            venc.IDVendedor,
-            vend.NomeVendedor,
+            item.IDVendedor AS IDVendedor,
+            NomeVendedor = {nome_vendedor_sql},
             vend.IDDimUsuarios AS IDDimUsuariosVendedor,
             ctr.NumeroContrato,
             ctr.NumeroPrevia,
@@ -21568,6 +21589,7 @@ def vencimentos_campanhas_sugestoes():
     marca_sql = _campanhas_vencimentos_marca_sql()
     razao_social_sql = _campanhas_vencimentos_razao_social_sql()
     painel_sql = _campanhas_vencimentos_painel_sql()
+    nome_vendedor_sql = _campanhas_vencimentos_nome_vendedor_sql()
 
     sql = text(f"""
         SELECT
@@ -21576,7 +21598,8 @@ def vencimentos_campanhas_sugestoes():
             venc.IDFatoControleContratosItensEuromidia,
             venc.IDDimStatusCampanha,
             st.NomeStatus,
-            vend.NomeVendedor,
+            item.IDVendedor AS IDVendedor,
+            NomeVendedor = {nome_vendedor_sql},
             ctr.NumeroContrato,
             ctr.NumeroPrevia,
             RazaoSocial = {razao_social_sql},

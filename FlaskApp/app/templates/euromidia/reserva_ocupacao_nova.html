@@ -7,25 +7,43 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
 <style>
+  .reserva-ocupacao-page,
+  .reserva-ocupacao-page *{
+    box-sizing:border-box;
+  }
+
   .reserva-ocupacao-page{
     width:100%;
     max-width:none;
+    min-width:0;
     margin:0;
-    padding:18px 22px;
+    padding:clamp(10px, 1.35vw, 24px);
+    overflow-x:hidden;
+  }
+
+  .reserva-ocupacao-page form,
+  .reserva-ocupacao-page > div,
+  .reserva-ocupacao-stack,
+  #cardsReservasFaces{
+    width:100%;
+    max-width:none;
+    min-width:0;
   }
 
   .reserva-ocupacao-stack{
     display:flex;
     flex-direction:column;
-    gap:14px;
+    gap:clamp(10px, 1vw, 16px);
   }
 
   .reserva-ocupacao-card{
     width:100%;
+    max-width:none;
+    min-width:0;
     border:1px solid var(--border);
     border-radius:16px;
     background:#fff;
-    padding:16px;
+    padding:clamp(12px, 1.1vw, 18px);
     box-shadow:0 8px 24px rgba(15,23,42,.06);
   }
 
@@ -39,23 +57,29 @@
 
   .reserva-grid-2{
     display:grid;
-    grid-template-columns:1.4fr .6fr;
-    gap:12px;
+    grid-template-columns:minmax(280px, 1fr) minmax(180px, 320px);
+    gap:clamp(10px, 1vw, 16px);
     align-items:start;
+    width:100%;
+    min-width:0;
   }
 
   .reserva-grid-3{
     display:grid;
-    grid-template-columns:1fr 1fr 1fr;
-    gap:12px;
+    grid-template-columns:repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap:clamp(10px, 1vw, 16px);
     align-items:start;
+    width:100%;
+    min-width:0;
   }
 
   .reserva-grid-4{
     display:grid;
-    grid-template-columns:.7fr .7fr .7fr 1.9fr;
-    gap:12px;
+    grid-template-columns:repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+    gap:clamp(10px, 1vw, 16px);
     align-items:start;
+    width:100%;
+    min-width:0;
   }
 
   .reserva-grid-2 > div,
@@ -65,15 +89,26 @@
     align-self:start;
   }
 
-  @media (max-width:1100px){
-    .reserva-grid-4{grid-template-columns:1fr 1fr;}
-  }
+  @media (max-width:720px){
+    .reserva-ocupacao-page{
+      padding:10px;
+    }
 
-  @media (max-width:900px){
-    .reserva-ocupacao-page{padding:14px;}
     .reserva-grid-2,
     .reserva-grid-3,
-    .reserva-grid-4{grid-template-columns:1fr;}
+    .reserva-grid-4{
+      grid-template-columns:1fr;
+    }
+  }
+
+  @media (min-width:1600px){
+    .reserva-grid-2{
+      grid-template-columns:minmax(520px, 1fr) minmax(220px, 360px);
+    }
+
+    .reserva-grid-4{
+      grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+    }
   }
 
   .campo-label{
@@ -101,8 +136,14 @@
   .reserva-grid-4 input.form-control,
   .reserva-grid-2 select.form-control,
   .reserva-grid-3 select.form-control,
-  .reserva-grid-4 select.form-control{
+  .reserva-grid-4 select.form-control,
+  .reserva-ocupacao-page textarea.form-control{
     width:100%;
+    max-width:100%;
+  }
+
+  .reserva-ocupacao-page textarea.form-control{
+    resize:vertical;
   }
 
   .hint{
@@ -465,9 +506,11 @@
 
   .reserva-empresa-relacionada-linha{
     display:grid;
-    grid-template-columns:1fr auto auto;
+    grid-template-columns:minmax(0, 1fr) 40px 40px;
     gap:8px;
     align-items:end;
+    width:100%;
+    min-width:0;
   }
 
   .reserva-empresa-relacionada-marca{
@@ -498,8 +541,10 @@
     background:rgba(185,28,28,.06);
   }
 
-  @media (max-width:900px){
-    .reserva-empresa-relacionada-linha{grid-template-columns:1fr 40px 40px;}
+  @media (max-width:520px){
+    .reserva-empresa-relacionada-linha{
+      grid-template-columns:1fr 40px 40px;
+    }
   }
 
 </style>
@@ -1168,15 +1213,10 @@
   function preencherInputComboPorValor(estado, card){
     const inputCliente = card.querySelector("[data-role='input-cliente']");
     const inputVendedor = card.querySelector("[data-role='input-vendedor']");
-    const inputContrato = card.querySelector("[data-role='input-contrato']");
-
     const empresa = estado.clientes.find(function(item){ return getEmpresaId(item) === texto(estado.id_cliente); });
     const vendedor = estado.vendedores.find(function(item){ return getVendedorId(item) === texto(estado.id_vendedor); });
-    const contrato = estado.contratosMap.get(texto(estado.id_contrato));
-
     if(inputCliente && empresa) inputCliente.value = labelEmpresa(empresa);
     if(inputVendedor && vendedor) inputVendedor.value = labelVendedor(vendedor);
-    if(inputContrato && contrato) inputContrato.value = labelContrato(contrato);
   }
 
   function criarUidEmpresaRelacionada(){
@@ -1352,16 +1392,11 @@
       "<div class='reserva-grid-3'>" +
         "<div><label class='campo-label'>Empresa (Cliente)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite nome ou CNPJ...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
         "<div><label class='campo-label'>Vendedor</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite nome do vendedor...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
-        "<div><label class='campo-label'>Contrato (Número / Prévia)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite contrato, prévia ou empresa...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
       "</div>" +
 
       "<div style='height:12px;'></div>" +
 
       "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input type='text' class='form-control' maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' disabled><div class='hint'>Este campo será liberado depois de selecionar a face.</div></div>" +
-
-      "<div style='height:12px;'></div>" +
-
-      "<div class='reserva-empresas-relacionadas'><div class='reserva-empresas-relacionadas-title'>Empresa Relacionada</div><div class='hint'>Selecione empresas que estejam relacionadas a Reserva</div><div style='height:10px;'></div><div class='reserva-empresa-relacionada-linha'><div><label class='campo-label'>Empresa Relacionada</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite razão social ou CNPJ...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div><button type='button' class='reserva-empresa-relacionada-btn is-add' disabled>+</button><button type='button' class='reserva-empresa-relacionada-btn is-remove' disabled>−</button></div></div>" +
 
       "<div style='height:12px;'></div>" +
 
@@ -1394,7 +1429,6 @@
       "<div class='reserva-grid-3'>" +
         "<div><label class='campo-label'>Empresa (Cliente)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-cliente' type='text' autocomplete='off' placeholder='Digite nome ou CNPJ...'><button class='kb-combobox-toggle' data-role='btn-cliente' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-cliente'></div></div></div>" +
         "<div><label class='campo-label'>Vendedor</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-vendedor' type='text' autocomplete='off' placeholder='Digite nome do vendedor...'><button class='kb-combobox-toggle' data-role='btn-vendedor' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-vendedor'></div></div></div>" +
-        "<div><label class='campo-label'>Contrato (Número / Prévia)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-contrato' type='text' autocomplete='off' placeholder='Digite contrato, prévia ou empresa...'><button class='kb-combobox-toggle' data-role='btn-contrato' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-contrato'></div></div></div>" +
       "</div>" +
 
       "<div style='height:12px;'></div>" +
@@ -1490,20 +1524,6 @@
       }
     });
 
-    montarComboCard(estado, card, {
-      inputSelector:"[data-role='input-contrato']",
-      listaSelector:"[data-role='lista-contrato']",
-      botaoSelector:"[data-role='btn-contrato']",
-      getLista:function(e){ return e.contratos; },
-      getLabel:labelContrato,
-      onInputLivre:function(e){ e.id_contrato = ""; e.numero_contrato = ""; e.numero_previa = ""; },
-      onSelect:function(e, item, input, cardAtual){
-        e.id_contrato = getContratoId(item);
-        input.value = labelContrato(item);
-        aplicarContratoNoEstado(e, item);
-        renderCardsReservas();
-      }
-    });
 
     garantirEmpresasRelacionadasEstado(estado);
     card.querySelectorAll("[data-role='empresa-relacionada-item']").forEach(function(container){
@@ -1588,7 +1608,7 @@
     if(!estado) return;
 
     corrigirDatasEstado(estado);
-    setCardMsg(estado, "Carregando clientes, vendedores e contratos desta face...", true);
+    setCardMsg(estado, "Carregando clientes e vendedores desta face...", true);
 
     const face = estado.face;
     const qs = new URLSearchParams();

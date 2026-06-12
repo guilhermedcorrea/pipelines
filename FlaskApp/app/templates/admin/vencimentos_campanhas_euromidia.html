@@ -697,7 +697,7 @@
 
   .vc-table{
     width:100%;
-    min-width:1320px;
+    min-width:1120px;
     border-collapse:separate;
     border-spacing:0;
     table-layout:auto;
@@ -762,6 +762,15 @@
     color:var(--text);
     min-width:190px;
     max-width:340px;
+    white-space:normal;
+    overflow-wrap:anywhere;
+  }
+
+  .vc-vendedor{
+    font-weight:900;
+    color:var(--text);
+    min-width:150px;
+    max-width:260px;
     white-space:normal;
     overflow-wrap:anywhere;
   }
@@ -942,7 +951,7 @@
     }
 
     .vc-table{
-      min-width:1260px;
+      min-width:1080px;
     }
   }
 
@@ -978,7 +987,7 @@
     }
 
     .vc-table{
-      min-width:1180px;
+      min-width:1000px;
     }
 
     .vc-table th,
@@ -1165,6 +1174,7 @@
     }
 
     .vc-razao,
+    .vc-vendedor,
     .vc-marca{
       min-width:0;
       max-width:none;
@@ -1206,6 +1216,7 @@
     }
 
     .vc-razao,
+    .vc-vendedor,
     .vc-marca{
       text-align:left;
     }
@@ -1242,7 +1253,7 @@
               type="search"
               name="q"
               value="{{ q or '' }}"
-              placeholder="Pesquisar por razão social, contrato, marca, painel/CodFace ou status..."
+              placeholder="Pesquisar por vendedor, contrato, marca, painel/CodFace, razão social ou status..."
               autocomplete="off"
               spellcheck="false"
               aria-autocomplete="list"
@@ -1411,15 +1422,13 @@
           <tr>
             <th>Contrato</th>
             <th>Painel</th>
-            <th>Razão Social</th>
+            <th>Vendedor</th>
             <th>Marca</th>
             <th>Status</th>
             <th>Início</th>
             <th>Término</th>
             <th>Dias</th>
             <th>Ativo</th>
-            <th>Total Líquido Contrato</th>
-            <th>Atualização</th>
             <th>Renovar</th>
           </tr>
         </thead>
@@ -1447,11 +1456,8 @@
                   <span class="vc-painel">{{ row.Painel or '—' }}</span>
                 </td>
 
-                <td data-label="Razão Social">
-                  <div class="vc-razao">{{ row.RazaoSocial or '—' }}</div>
-                  {% if row.NomeVendedor %}
-                    <div class="muted" style="font-size:12px;font-weight:800;margin-top:3px;">Vendedor: {{ row.NomeVendedor }}</div>
-                  {% endif %}
+                <td data-label="Vendedor">
+                  <div class="vc-vendedor">{{ row.NomeVendedor or '—' }}</div>
                 </td>
 
                 <td data-label="Marca">
@@ -1478,14 +1484,6 @@
                   <span class="vc-bit {{ row.ClasseBitAtivo }}">{{ row.BitAtivoTexto }}</span>
                 </td>
 
-                <td class="vc-valor" data-label="Total Líquido Contrato">
-                  {{ row.TotalLiquidoContratoTexto or '—' }}
-                </td>
-
-                <td class="vc-data" data-label="Atualização">
-                  {{ row.DataAtualizacao.strftime('%d/%m/%Y %H:%M') if row.DataAtualizacao else '—' }}
-                </td>
-
                 <td data-label="Renovar">
                   <form
                     class="vc-renovar-form"
@@ -1508,7 +1506,7 @@
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="12" class="vc-empty">Nenhuma campanha encontrada.</td>
+              <td colspan="10" class="vc-empty">Nenhuma campanha encontrada.</td>
             </tr>
           {% endif %}
         </tbody>

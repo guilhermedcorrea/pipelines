@@ -984,13 +984,15 @@ input:disabled, select:disabled, textarea:disabled{
 
 
 .menu-dropdown a.menu-link-current,
-.submenu-dropdown a.menu-link-current{
+.submenu-dropdown a.menu-link-current,
+.user-dropdown a.menu-link-current{
   background: rgba(0,40,132,.08);
   color: var(--text);
 }
 
 .menu-dropdown a.menu-link-current::after,
-.submenu-dropdown a.menu-link-current::after{
+.submenu-dropdown a.menu-link-current::after,
+.user-dropdown a.menu-link-current::after{
   content: none !important;
 }
 
@@ -1002,7 +1004,9 @@ input:disabled, select:disabled, textarea:disabled{
 
   <div class="topbar">
     <div class="brand">
-      <img src="https://euromidia.com.br/wp-content/uploads/2025/06/euro-195x45-1.webp" alt="Euromídia">
+      <a href="http://189.45.251.100:5000/paineis/?cidade_exibicao=&amp;tipo=PAINEL+DIGITAL&amp;exibidora=&amp;tipo_documento=&amp;vendedor=&amp;marca_exibida=&amp;status=todos&amp;q=&amp;formato=&amp;ponto_ativo_ui=1&amp;bi_semana=&amp;dt_ini=2026-06-01&amp;dt_fim=2026-06-12&amp;per_page=20&amp;altxlarg=&amp;iluminado=&amp;area_min=&amp;area_max=&amp;ponto_ativo=1" aria-label="Voltar para lista de painéis" title="Voltar para lista de painéis">
+        <img src="https://euromidia.com.br/wp-content/uploads/2025/06/euro-195x45-1.webp" alt="Euromídia">
+      </a>
       <div class="subtitle">
         Controle de Painéis<br>
         Ocupação / Faces
@@ -1142,7 +1146,6 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_lista_checkins
           or menu_paineis_health_check
           or menu_paineis_historico_atendimento
-          or menu_paineis_vencimentos_campanhas
           or menu_paineis_lista_ocupacao
           or menu_paineis_preferencia_reservas
           or menu_paineis_reserva_ocupacao
@@ -1158,7 +1161,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% if exibir_menu_paineis %}
         <div class="menu-item" data-menu="paineis">
           <button type="button"
-                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') or request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}active{% endif %}">
+                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') %}active{% endif %}">
             Painéis <span style="opacity:.9;">▾</span>
           </button>
 
@@ -1239,7 +1242,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_atendimento or menu_paineis_vencimentos_campanhas %}
+            {% if menu_paineis_atendimento or menu_paineis_health_check or menu_paineis_historico_atendimento %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Atendimento</span>
@@ -1265,13 +1268,6 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('kanban.historico_cards_lista') }}"
                        class="{% if request.path == url_for('kanban.historico_cards_lista') %}menu-link-current{% endif %}">
                       Historico Atendimento
-                    </a>
-                  {% endif %}
-
-                  {% if menu_paineis_vencimentos_campanhas %}
-                    <a href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}"
-                       class="{% if request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}menu-link-current{% endif %}">
-                      Vencimento Campanhas
                     </a>
                   {% endif %}
                 </div>
@@ -1537,6 +1533,18 @@ input:disabled, select:disabled, textarea:disabled{
                 Relatórios
               </a>
 
+              {% if menu_paineis_vencimentos_campanhas %}
+                <a href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}"
+                   class="{% if request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}menu-link-current{% endif %}">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M7 3v3M17 3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M4 8h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 12h4M8 16h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  Campanhas
+                </a>
+              {% endif %}
 
               {% if usuario_logado_eh_vendedor_paineis|default(False) and minha_carteira_url %}
                 <a href="{{ minha_carteira_url }}">

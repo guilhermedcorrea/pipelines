@@ -19453,31 +19453,16 @@ def api_ocupacao_reserva_dados_modal():
 
     sqls_vendedores = [
         """
-        SELECT DISTINCT IDVendedor, NomeVendedor
+        SELECT DISTINCT
+            IDVendedor,
+            NomeVendedor
         FROM [Integracao].[dbo].[Vendedores]
+        WHERE ISNULL(TRY_CONVERT(int, BitAtivo), 0) = 1
+          AND NULLIF(LTRIM(RTRIM(COALESCE(NomeVendedor, ''))), '') IS NOT NULL
         ORDER BY NomeVendedor
         """
     ]
     vendedores = executar_primeiro_sql_que_funciona(sqls_vendedores, {})
-
-    if not vendedores:
-        sql_vendedores_fallback = """
-            SELECT DISTINCT
-                IDVendedor = NULLIF(LTRIM(RTRIM(CAST(IDVendedor AS varchar(50)))), ''),
-                NomeVendedor = NULLIF(LTRIM(RTRIM(CAST(Vendedor AS varchar(200)))), '')
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
-            WHERE CodFace = :cod_face
-              AND (:cod_ponto IS NULL OR :cod_ponto = '' OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
-              AND CanceladoEm IS NULL
-              AND Status IN ('ATIVO','RESERVADO')
-              AND NULLIF(LTRIM(RTRIM(CAST(Vendedor AS varchar(200)))), '') IS NOT NULL
-            ORDER BY NomeVendedor
-        """
-        vendedores = [dict(r._mapping) for r in db.session.execute(text(sql_vendedores_fallback), {"cod_face": cod_face, "cod_ponto": cod_ponto})]
-
-        for v in vendedores:
-            if not (v.get("IDVendedor") or "").strip():
-                v["IDVendedor"] = v.get("NomeVendedor") or ""
 
     params_contratos = {
         "cod_ponto": cod_ponto,
@@ -19829,16 +19814,20 @@ def api_ocupacao_reserva_criar():
             SELECT TOP 1 NomeVendedor
             FROM [Integracao].[dbo].[Vendedores]
             WHERE IDVendedor = :idv
+              AND ISNULL(TRY_CONVERT(int, BitAtivo), 0) = 1
         """)
         nome_db = db.session.execute(sql_vend, {"idv": id_vendedor_int}).scalar()
         if nome_db:
             vendedor_nome = str(nome_db).strip() or vendedor_nome
+        else:
+            return jsonify({"ok": False, "erro": "Vendedor inválido ou inativo."}), 400
 
     if id_vendedor_int is None and vendedor_nome:
         sql_vend_id = text("""
             SELECT TOP 1 IDVendedor
             FROM [Integracao].[dbo].[Vendedores]
             WHERE NomeVendedor = :nome
+              AND ISNULL(TRY_CONVERT(int, BitAtivo), 0) = 1
         """)
         id_db = db.session.execute(sql_vend_id, {"nome": vendedor_nome}).scalar()
         try:
@@ -20421,9 +20410,142 @@ def lista_ocupacao():
         except:
             return ""
 
+    def _lista_parametros_texto(nome: str):
+        """Eu leio filtros multi-select vindos por query string repetida."""
+        valores = []
+        try:
+            valores.extend(request.args.getlist(nome) or [])
+        except Exception:
+            pass
+
+        # Compatibilidade com links antigos ou URLs montadas manualmente com vírgula.
+        if not valores:
+            bruto = (request.args.get(nome) or "").strip()
+            if bruto:
+                valores = bruto.split(",")
+
+        saida = []
+        vistos = set()
+        for valor in valores:
+            texto = str(valor or "").strip()
+            if not texto:
+                continue
+            chave = texto.upper()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(texto)
+        return saida
+
+    def _lista_parametros_inteiros(nome: str):
+        """Eu leio filtros multi-select de IDs, removendo vazio, duplicado e inválido."""
+        saida = []
+        vistos = set()
+        for valor in _lista_parametros_texto(nome):
+            try:
+                numero = int(valor)
+            except Exception:
+                numero = 0
+            if numero <= 0 or numero in vistos:
+                continue
+            vistos.add(numero)
+            saida.append(numero)
+        return saida
+
+    def _bind_expanding(sql_text):
+        """Eu ativo bindparam expansivo apenas para listas realmente usadas no SQL."""
+        binds = []
+        if ":status_lista" in sql_text:
+            binds.append(bindparam("status_lista", expanding=True))
+        if ":origem_lista" in sql_text:
+            binds.append(bindparam("origem_lista", expanding=True))
+        if ":vendedor_ids" in sql_text:
+            binds.append(bindparam("vendedor_ids", expanding=True))
+        consulta = text(sql_text)
+        if binds:
+            consulta = consulta.bindparams(*binds)
+        return consulta
+
+    def _montar_where_ocupacao(aplicar_status=True, aplicar_origem=True, aplicar_vendedor=True):
+        filtros_sql_local = []
+        params_local = {}
+
+        filtros_sql_local.append("ftcp.CodFace <> '0' AND ftcp.CodFace IS NOT NULL")
+
+        if aplicar_status and status_lista:
+            filtros_sql_local.append("ftcp.Status IN :status_lista")
+            params_local["status_lista"] = tuple(status_lista)
+
+        if aplicar_origem and origem_lista:
+            filtros_sql_local.append("ftcp.Origem IN :origem_lista")
+            params_local["origem_lista"] = tuple(origem_lista)
+
+        if aplicar_vendedor and vendedor_ids:
+            filtros_sql_local.append("ftcp.IDVendedor IN :vendedor_ids")
+            params_local["vendedor_ids"] = tuple(vendedor_ids)
+
+        if q:
+            filtros_sql_local.append("""
+                (
+                    ftcp.CodFace LIKE :q_like
+                    OR emp.RazaoSocial LIKE :q_like
+                    OR ftcp.MarcaExibida LIKE :q_like
+                    OR ftcp.Vendedor LIKE :q_like
+                    OR vend.NomeVendedor LIKE :q_like
+                )
+            """)
+            params_local["q_like"] = f"%{q}%"
+
+        where_sql_local = " AND ".join([f"({x})" for x in filtros_sql_local]) if filtros_sql_local else "1=1"
+        return where_sql_local, params_local
+
+    def _cte_dedupe_ocupacao(where_sql_local: str) -> str:
+        return f"""
+            ;WITH dedupe AS (
+                SELECT
+                    ftcp.IDFatoOcupacaoPaineisEuromidia,
+                    ftcp.CodFace,
+                    ftcp.Origem,
+                    ftcp.Status,
+                    ftcp.DataInicio,
+                    ftcp.DataFim,
+                    ftcp.MarcaExibida,
+                    ftcp.Cota,
+                    ftcp.IDVendedor,
+                    ftcp.Vendedor,
+                    vend.NomeVendedor,
+                    ftcp.CriadoEm,
+                    ftcp.DataAtualizacao,
+                    emp.RazaoSocial,
+
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            ISNULL(ftcp.CodFace,''),
+                            ISNULL(ftcp.Origem,''),
+                            ISNULL(ftcp.Status,''),
+                            ISNULL(CAST(ftcp.DataInicio AS date),'1900-01-01'),
+                            ISNULL(CAST(ftcp.DataFim AS date),'1900-01-01'),
+                            ISNULL(ftcp.MarcaExibida,''),
+                            ISNULL(CAST(ftcp.Cota AS varchar(50)),''),
+                            ISNULL(CAST(ftcp.IDVendedor AS varchar(50)),''),
+                            ISNULL(CAST(ftcp.CriadoEm AS datetime2),'1900-01-01')
+                        ORDER BY
+                            ISNULL(ftcp.DataAtualizacao, ftcp.CriadoEm) DESC,
+                            ftcp.IDFatoOcupacaoPaineisEuromidia DESC
+                    ) AS rn_key
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ftcp
+                LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
+                    ON emp.IDEmpresa = ftcp.[IDCliente]
+                LEFT JOIN [Integracao].[dbo].[Vendedores] AS vend
+                    ON vend.IDVendedor = ftcp.IDVendedor
+                WHERE {where_sql_local}
+            )
+        """
+
     q = (request.args.get("q") or "").strip()
-    status = (request.args.get("status") or "").strip()
-    origem = (request.args.get("origem") or "").strip()
+    status_lista = _lista_parametros_texto("status")
+    origem_lista = _lista_parametros_texto("origem")
+    vendedor_ids = _lista_parametros_inteiros("vendedor")
 
     try:
         page = int(request.args.get("page") or "1")
@@ -20438,9 +20560,6 @@ def lista_ocupacao():
     per_page = max(5, min(per_page, 100))
     page = max(1, page)
 
-    filtros_sql = []
-    params = {}
-
     usuario_eh_vendedor_restrito = bool(
         _usuario_logado_eh_perfil_vendedor()
         and not _usuario_logado_tem_acesso_operacional_total_paineis()
@@ -20451,64 +20570,14 @@ def lista_ocupacao():
         else 0
     )
 
-    filtros_sql.append("ftcp.CodFace <> '0' AND ftcp.CodFace IS NOT NULL")
+    where_sql, params = _montar_where_ocupacao(
+        aplicar_status=True,
+        aplicar_origem=True,
+        aplicar_vendedor=True,
+    )
 
-    if status:
-        filtros_sql.append("ftcp.Status = :status")
-        params["status"] = status
-
-    if origem:
-        filtros_sql.append("ftcp.Origem = :origem")
-        params["origem"] = origem
-
-    if q:
-        filtros_sql.append("""
-            (
-                ftcp.CodFace LIKE :q_like
-                OR emp.RazaoSocial LIKE :q_like
-                OR ftcp.MarcaExibida LIKE :q_like
-            )
-        """)
-        params["q_like"] = f"%{q}%"
-
-    where_sql = " AND ".join([f"({x})" for x in filtros_sql]) if filtros_sql else "1=1"
-
-    sql_total = text(f"""
-        ;WITH dedupe AS (
-            SELECT
-                ftcp.IDFatoOcupacaoPaineisEuromidia,
-                ftcp.CodFace,
-                ftcp.Origem,
-                ftcp.Status,
-                ftcp.DataInicio,
-                ftcp.DataFim,
-                ftcp.MarcaExibida,
-                ftcp.Cota,
-                ftcp.IDVendedor,
-                ftcp.CriadoEm,
-                ftcp.DataAtualizacao,
-                emp.RazaoSocial,
-
-                ROW_NUMBER() OVER (
-                    PARTITION BY
-                        ISNULL(ftcp.CodFace,''),
-                        ISNULL(ftcp.Origem,''),
-                        ISNULL(ftcp.Status,''),
-                        ISNULL(CAST(ftcp.DataInicio AS date),'1900-01-01'),
-                        ISNULL(CAST(ftcp.DataFim AS date),'1900-01-01'),
-                        ISNULL(ftcp.MarcaExibida,''),
-                        ISNULL(CAST(ftcp.Cota AS varchar(50)),''),
-                        ISNULL(CAST(ftcp.IDVendedor AS varchar(50)),''),
-                        ISNULL(CAST(ftcp.CriadoEm AS datetime2),'1900-01-01')
-                    ORDER BY
-                        ISNULL(ftcp.DataAtualizacao, ftcp.CriadoEm) DESC,
-                        ftcp.IDFatoOcupacaoPaineisEuromidia DESC
-                ) AS rn_key
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ftcp
-            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
-                ON emp.IDEmpresa = ftcp.[IDCliente]
-            WHERE {where_sql}
-        )
+    sql_total = _bind_expanding(f"""
+        {_cte_dedupe_ocupacao(where_sql)}
         SELECT COUNT(1) AS total
         FROM dedupe
         WHERE rn_key = 1
@@ -20530,42 +20599,8 @@ def lista_ocupacao():
     params_page = dict(params)
     params_page.update({"start_rn": start_rn, "end_rn": end_rn})
 
-    sql_rows = text(f"""
-        ;WITH dedupe AS (
-            SELECT
-                ftcp.IDFatoOcupacaoPaineisEuromidia,
-                ftcp.CodFace,
-                ftcp.Origem,
-                ftcp.Status,
-                ftcp.DataInicio,
-                ftcp.DataFim,
-                ftcp.MarcaExibida,
-                ftcp.Cota,
-                ftcp.IDVendedor,
-                ftcp.CriadoEm,
-                ftcp.DataAtualizacao,
-                emp.RazaoSocial,
-
-                ROW_NUMBER() OVER (
-                    PARTITION BY
-                        ISNULL(ftcp.CodFace,''),
-                        ISNULL(ftcp.Origem,''),
-                        ISNULL(ftcp.Status,''),
-                        ISNULL(CAST(ftcp.DataInicio AS date),'1900-01-01'),
-                        ISNULL(CAST(ftcp.DataFim AS date),'1900-01-01'),
-                        ISNULL(ftcp.MarcaExibida,''),
-                        ISNULL(CAST(ftcp.Cota AS varchar(50)),''),
-                        ISNULL(CAST(ftcp.IDVendedor AS varchar(50)),''),
-                        ISNULL(CAST(ftcp.CriadoEm AS datetime2),'1900-01-01')
-                    ORDER BY
-                        ISNULL(ftcp.DataAtualizacao, ftcp.CriadoEm) DESC,
-                        ftcp.IDFatoOcupacaoPaineisEuromidia DESC
-                ) AS rn_key
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ftcp
-            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp
-                ON emp.IDEmpresa = ftcp.[IDCliente]
-            WHERE {where_sql}
-        ),
+    sql_rows = _bind_expanding(f"""
+        {_cte_dedupe_ocupacao(where_sql)},
         filtrada AS (
             SELECT *
             FROM dedupe
@@ -20591,6 +20626,8 @@ def lista_ocupacao():
             MarcaExibida,
             Cota,
             IDVendedor,
+            Vendedor,
+            NomeVendedor,
             CriadoEm,
             RazaoSocial
         FROM ranked
@@ -20612,38 +20649,84 @@ def lista_ocupacao():
             "MarcaExibida": (r[6] or "").strip(),
             "Cota": r[7],
             "IDVendedor": _converter_id_inteiro_seguro(r[8]),
-            "CriadoEm": r[9],
-            "RazaoSocial": (r[10] or "").strip(),
+            "Vendedor": (r[9] or "").strip(),
+            "NomeVendedor": (r[10] or "").strip(),
+            "CriadoEm": r[11],
+            "RazaoSocial": (r[12] or "").strip(),
             "PodeGerenciarOcupacao": _usuario_logado_pode_gerenciar_ocupacao_por_id_vendedor(r[8]),
         })
 
-    sql_status = text("""
+    where_status, params_status = _montar_where_ocupacao(
+        aplicar_status=False,
+        aplicar_origem=True,
+        aplicar_vendedor=True,
+    )
+    sql_status = _bind_expanding(f"""
+        {_cte_dedupe_ocupacao(where_status)}
         SELECT DISTINCT Status
-        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
-        WHERE Status IS NOT NULL AND LTRIM(RTRIM(Status)) <> ''
+        FROM dedupe
+        WHERE rn_key = 1
+          AND Status IS NOT NULL
+          AND LTRIM(RTRIM(Status)) <> ''
         ORDER BY Status ASC
     """)
-    status_opcoes = [x[0] for x in db.session.execute(sql_status).fetchall()]
+    status_opcoes = [str(x[0]).strip() for x in db.session.execute(sql_status, params_status).fetchall() if str(x[0] or "").strip()]
 
-    sql_origem = text("""
+    where_origem, params_origem = _montar_where_ocupacao(
+        aplicar_status=True,
+        aplicar_origem=False,
+        aplicar_vendedor=True,
+    )
+    sql_origem = _bind_expanding(f"""
+        {_cte_dedupe_ocupacao(where_origem)}
         SELECT DISTINCT Origem
-        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
-        WHERE Origem IS NOT NULL AND LTRIM(RTRIM(Origem)) <> ''
+        FROM dedupe
+        WHERE rn_key = 1
+          AND Origem IS NOT NULL
+          AND LTRIM(RTRIM(Origem)) <> ''
         ORDER BY Origem ASC
     """)
-    origem_opcoes = [x[0] for x in db.session.execute(sql_origem).fetchall()]
+    origem_opcoes = [str(x[0]).strip() for x in db.session.execute(sql_origem, params_origem).fetchall() if str(x[0] or "").strip()]
+
+    where_vendedor, params_vendedor = _montar_where_ocupacao(
+        aplicar_status=True,
+        aplicar_origem=True,
+        aplicar_vendedor=False,
+    )
+    sql_vendedor = _bind_expanding(f"""
+        {_cte_dedupe_ocupacao(where_vendedor)}
+        SELECT DISTINCT
+            IDVendedor,
+            NomeVendedor = COALESCE(NULLIF(LTRIM(RTRIM(NomeVendedor)), ''), NULLIF(LTRIM(RTRIM(Vendedor)), ''))
+        FROM dedupe
+        WHERE rn_key = 1
+          AND IDVendedor IS NOT NULL
+          AND COALESCE(NULLIF(LTRIM(RTRIM(NomeVendedor)), ''), NULLIF(LTRIM(RTRIM(Vendedor)), '')) IS NOT NULL
+        ORDER BY NomeVendedor ASC
+    """)
+    vendedor_opcoes = []
+    for id_vendedor, nome_vendedor in db.session.execute(sql_vendedor, params_vendedor).fetchall():
+        id_vendedor_int = _converter_id_inteiro_seguro(id_vendedor)
+        nome_vendedor_txt = str(nome_vendedor or "").strip()
+        if id_vendedor_int > 0 and nome_vendedor_txt:
+            vendedor_opcoes.append({
+                "IDVendedor": id_vendedor_int,
+                "NomeVendedor": nome_vendedor_txt,
+            })
 
     return render_template(
         "euromidia/ocupacao_lista.html",
         itens=itens,
         status_opcoes=status_opcoes,
         origem_opcoes=origem_opcoes,
+        vendedor_opcoes=vendedor_opcoes,
         usuario_eh_vendedor_restrito=usuario_eh_vendedor_restrito,
         id_vendedor_logado_ocupacao=id_vendedor_logado_ocupacao,
         filtros={
             "q": q,
-            "status": status,
-            "origem": origem,
+            "status": status_lista,
+            "origem": origem_lista,
+            "vendedor": vendedor_ids,
             "per_page": per_page,
         },
         paginacao={
@@ -20655,6 +20738,7 @@ def lista_ocupacao():
             "fim": fim,
         },
     )
+
 
 
 

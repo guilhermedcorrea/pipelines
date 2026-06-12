@@ -19,15 +19,17 @@
     border:1px solid var(--border);
     border-radius: 16px;
     box-shadow: 0 10px 24px rgba(0,0,0,.06);
-    overflow:hidden;
+    overflow:visible;
   }
 
   .filters{
     display:grid;
-    grid-template-columns: minmax(260px, 2fr) minmax(135px, .75fr) minmax(135px, .75fr) minmax(110px, .45fr) auto;
+    grid-template-columns: minmax(260px, 1.8fr) minmax(210px, 1fr) minmax(170px, .85fr) minmax(170px, .85fr) minmax(110px, .45fr) auto;
     gap:10px;
     padding: 12px 14px 14px 14px;
     align-items:end;
+    position:relative;
+    z-index:30;
   }
   .filter-actions{
     display:flex;
@@ -44,7 +46,7 @@
     white-space:nowrap;
   }
   @media (max-width: 1250px){
-    .filters{ grid-template-columns: minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(140px, .7fr); }
+    .filters{ grid-template-columns: minmax(260px, 1.4fr) minmax(210px, 1fr) minmax(170px, .8fr); }
     .filter-actions{ justify-content:flex-start; min-width:0; }
   }
   @media (max-width: 850px){
@@ -77,6 +79,106 @@
     box-shadow: 0 0 0 3px rgba(0,0,0,.06);
   }
 
+  .dd{
+    position:relative;
+    width:100%;
+  }
+  .dd-summary{
+    width:100%;
+    height:38px;
+    padding: 8px 10px;
+    border:1px solid var(--border);
+    border-radius: 10px;
+    background:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    cursor:pointer;
+    user-select:none;
+    outline:none;
+  }
+  .dd-summary::-webkit-details-marker{
+    display:none;
+  }
+  .dd[open] .dd-summary,
+  .dd-summary:focus{
+    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
+  }
+  .dd-selected{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-weight:900;
+    color:var(--text);
+  }
+  .dd-caret{
+    flex:0 0 auto;
+    font-weight:1000;
+    opacity:.72;
+  }
+  .dd-panel{
+    position:absolute;
+    left:0;
+    top:calc(100% + 6px);
+    width:min(360px, 92vw);
+    max-height:330px;
+    overflow:auto;
+    background:#fff;
+    border:1px solid rgba(0,0,0,.12);
+    border-radius: 14px;
+    box-shadow: 0 18px 46px rgba(0,0,0,.16);
+    padding:10px;
+    z-index:80;
+  }
+  .dd-search{
+    width:100%;
+    height:34px;
+    margin-bottom:6px;
+    padding:7px 9px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    font-weight:800;
+    outline:none;
+  }
+  .dd-hint{
+    font-size:11px;
+    font-weight:800;
+    opacity:.62;
+    margin:2px 2px 8px 2px;
+  }
+  .dd-item{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    min-height:32px;
+    padding:7px 8px;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:900;
+    font-size:13px;
+  }
+  .dd-item:hover{
+    background:rgba(0,0,0,.04);
+  }
+  .dd-item input{
+    width:15px;
+    height:15px;
+    padding:0;
+    border-radius:3px;
+    flex:0 0 auto;
+    accent-color:#111827;
+  }
+  .dd-empty{
+    padding:8px;
+    border-radius:10px;
+    background:rgba(0,0,0,.03);
+    font-size:12px;
+    font-weight:900;
+    opacity:.72;
+  }
+
   .table-scroller{
     width:100%;
     overflow-x:auto;
@@ -86,7 +188,7 @@
 
   table{
     width:100%;
-    min-width:1040px;
+    min-width:1160px;
     border-collapse: collapse;
   }
   thead th{
@@ -365,32 +467,102 @@
 <div class="page-wrap">
   <div class="card">
 
-    <form method="GET" action="{{ url_for('Paineis.lista_ocupacao') }}">
+    <form method="GET" action="{{ url_for('Paineis.lista_ocupacao') }}" data-ocupacao-form="1">
 
       <div class="filters">
         <div class="field">
-          <label>Busca (CodFace / Cliente / Marca)</label>
-          <input type="text" name="q" value="{{ filtros.q }}" placeholder="Ex: 245AD ou Empresa..." />
+          <label>Busca (CodFace / Cliente / Marca / Vendedor)</label>
+          <input type="text" name="q" value="{{ filtros.q }}" placeholder="Ex: 245AD, empresa, marca ou vendedor..." />
+        </div>
+
+        <div class="field">
+          <label>Vendedor</label>
+          <details class="dd" data-dd="vendedor">
+            <summary class="dd-summary">
+              <span class="dd-selected" data-dd-selected>Todos</span>
+              <span class="dd-caret">▾</span>
+            </summary>
+            <div class="dd-panel">
+              <input type="text" class="dd-search" placeholder="Pesquisar vendedor..." autocomplete="off">
+              <div class="dd-hint">Digite para filtrar a lista</div>
+
+              <label class="dd-item" data-dd-item>
+                <input type="checkbox" name="vendedor" value="" data-dd-all="1" {% if not filtros.vendedor %}checked{% endif %}>
+                <span data-dd-text>(Todos)</span>
+              </label>
+
+              {% if vendedor_opcoes and vendedor_opcoes|length > 0 %}
+                {% for v in vendedor_opcoes %}
+                  <label class="dd-item" data-dd-item>
+                    <input type="checkbox" name="vendedor" value="{{ v.IDVendedor }}" {% if v.IDVendedor in filtros.vendedor %}checked{% endif %}>
+                    <span data-dd-text>{{ v.NomeVendedor }}</span>
+                  </label>
+                {% endfor %}
+              {% else %}
+                <div class="dd-empty">Nenhum vendedor disponível para os filtros atuais.</div>
+              {% endif %}
+            </div>
+          </details>
         </div>
 
         <div class="field">
           <label>Status</label>
-          <select name="status">
-            <option value="">(Todos)</option>
-            {% for s in status_opcoes %}
-              <option value="{{ s }}" {% if filtros.status == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-          </select>
+          <details class="dd" data-dd="status">
+            <summary class="dd-summary">
+              <span class="dd-selected" data-dd-selected>Todos</span>
+              <span class="dd-caret">▾</span>
+            </summary>
+            <div class="dd-panel">
+              <input type="text" class="dd-search" placeholder="Pesquisar status..." autocomplete="off">
+              <div class="dd-hint">Digite para filtrar a lista</div>
+
+              <label class="dd-item" data-dd-item>
+                <input type="checkbox" name="status" value="" data-dd-all="1" {% if not filtros.status %}checked{% endif %}>
+                <span data-dd-text>(Todos)</span>
+              </label>
+
+              {% if status_opcoes and status_opcoes|length > 0 %}
+                {% for s in status_opcoes %}
+                  <label class="dd-item" data-dd-item>
+                    <input type="checkbox" name="status" value="{{ s }}" {% if s in filtros.status %}checked{% endif %}>
+                    <span data-dd-text>{{ s }}</span>
+                  </label>
+                {% endfor %}
+              {% else %}
+                <div class="dd-empty">Nenhum status disponível para os filtros atuais.</div>
+              {% endif %}
+            </div>
+          </details>
         </div>
 
         <div class="field">
           <label>Origem</label>
-          <select name="origem">
-            <option value="">(Todas)</option>
-            {% for o in origem_opcoes %}
-              <option value="{{ o }}" {% if filtros.origem == o %}selected{% endif %}>{{ o }}</option>
-            {% endfor %}
-          </select>
+          <details class="dd" data-dd="origem">
+            <summary class="dd-summary">
+              <span class="dd-selected" data-dd-selected>Todas</span>
+              <span class="dd-caret">▾</span>
+            </summary>
+            <div class="dd-panel">
+              <input type="text" class="dd-search" placeholder="Pesquisar origem..." autocomplete="off">
+              <div class="dd-hint">Digite para filtrar a lista</div>
+
+              <label class="dd-item" data-dd-item>
+                <input type="checkbox" name="origem" value="" data-dd-all="1" {% if not filtros.origem %}checked{% endif %}>
+                <span data-dd-text>(Todas)</span>
+              </label>
+
+              {% if origem_opcoes and origem_opcoes|length > 0 %}
+                {% for o in origem_opcoes %}
+                  <label class="dd-item" data-dd-item>
+                    <input type="checkbox" name="origem" value="{{ o }}" {% if o in filtros.origem %}checked{% endif %}>
+                    <span data-dd-text>{{ o }}</span>
+                  </label>
+                {% endfor %}
+              {% else %}
+                <div class="dd-empty">Nenhuma origem disponível para os filtros atuais.</div>
+              {% endif %}
+            </div>
+          </details>
         </div>
 
         <div class="field">
@@ -421,6 +593,7 @@
               <th>CodFace</th>
               <th>Cliente</th>
               <th>Marca</th>
+              <th>Vendedor</th>
               <th>Status</th>
               <th>Origem</th>
               <th>Início</th>
@@ -439,6 +612,7 @@
                   <td style="font-weight:1000;">{{ it.CodFace }}</td>
                   <td>{{ it.RazaoSocial or "-" }}</td>
                   <td>{{ it.MarcaExibida or "-" }}</td>
+                  <td>{{ it.NomeVendedor or it.Vendedor or "-" }}</td>
 
                   <!-- ✅ STATUS com badges especiais -->
                   <td>
@@ -534,7 +708,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="10" class="muted" style="padding:16px 14px;">
+                <td colspan="11" class="muted" style="padding:16px 14px;">
                   Nenhum registro encontrado com os filtros atuais.
                 </td>
               </tr>
@@ -546,7 +720,7 @@
       <div style="height:10px;"></div>
 
       <!-- =========================================================
-           ✅ PAGINAÇÃO (IGUAL SEU EXEMPLO) ✅ DENTRO DO FORM/CARD
+           ✅ PAGINAÇÃO preservando filtros multi-seleção
            ========================================================= -->
       <div class="paginacao-wrap">
 
@@ -558,49 +732,15 @@
           {% set p = paginacao.page %}
           {% set tp = paginacao.total_pages %}
 
-          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
-             href="{{ url_for('Paineis.lista_ocupacao',
-                              page=1,
-                              per_page=filtros.per_page,
-                              q=filtros.q,
-                              status=filtros.status,
-                              origem=filtros.origem) }}">
-            «
-          </a>
-
-          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
-             href="{{ url_for('Paineis.lista_ocupacao',
-                              page=(p-1 if p>1 else 1),
-                              per_page=filtros.per_page,
-                              q=filtros.q,
-                              status=filtros.status,
-                              origem=filtros.origem) }}">
-            ‹
-          </a>
+          <button class="btn btn-secondary" style="padding:8px 10px;" type="submit" name="page" value="1">«</button>
+          <button class="btn btn-secondary" style="padding:8px 10px;" type="submit" name="page" value="{{ p-1 if p>1 else 1 }}">‹</button>
 
           <span style="font-weight:900;color:var(--text);padding:0 10px;">
             {{ p }} / {{ tp }}
           </span>
 
-          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
-             href="{{ url_for('Paineis.lista_ocupacao',
-                              page=(p+1 if p<tp else tp),
-                              per_page=filtros.per_page,
-                              q=filtros.q,
-                              status=filtros.status,
-                              origem=filtros.origem) }}">
-            ›
-          </a>
-
-          <a class="btn btn-secondary" style="text-decoration:none;padding:8px 10px;"
-             href="{{ url_for('Paineis.lista_ocupacao',
-                              page=tp,
-                              per_page=filtros.per_page,
-                              q=filtros.q,
-                              status=filtros.status,
-                              origem=filtros.origem) }}">
-            »
-          </a>
+          <button class="btn btn-secondary" style="padding:8px 10px;" type="submit" name="page" value="{{ p+1 if p<tp else tp }}">›</button>
+          <button class="btn btn-secondary" style="padding:8px 10px;" type="submit" name="page" value="{{ tp }}">»</button>
         </div>
 
         <div class="muted paginacao-qtd">
@@ -627,6 +767,100 @@
         if (url) window.location.href = url;
       });
     }
+
+    function atualizarResumoDropdown(dd) {
+      const resumo = dd.querySelector("[data-dd-selected]");
+      if (!resumo) return;
+
+      const todos = dd.querySelector("input[type=checkbox][data-dd-all='1']");
+      const marcados = Array.from(dd.querySelectorAll("input[type=checkbox]:not([data-dd-all='1']):checked"));
+
+      if (!marcados.length || (todos && todos.checked)) {
+        resumo.textContent = dd.getAttribute("data-dd") === "origem" ? "Todas" : "Todos";
+        return;
+      }
+
+      const nomes = marcados.map(function(input){
+        const item = input.closest("[data-dd-item]");
+        const texto = item ? item.querySelector("[data-dd-text]") : null;
+        return texto ? texto.textContent.trim() : input.value;
+      }).filter(Boolean);
+
+      if (nomes.length <= 2) {
+        resumo.textContent = nomes.join(", ");
+      } else {
+        resumo.textContent = nomes.slice(0, 2).join(", ") + " +" + (nomes.length - 2);
+      }
+    }
+
+    function inicializarDropdowns() {
+      document.querySelectorAll(".dd").forEach(function(dd){
+        const todos = dd.querySelector("input[type=checkbox][data-dd-all='1']");
+        const checks = Array.from(dd.querySelectorAll("input[type=checkbox]"));
+        const opcoes = checks.filter(function(input){ return !input.hasAttribute("data-dd-all"); });
+        const busca = dd.querySelector(".dd-search");
+
+        checks.forEach(function(input){
+          input.addEventListener("change", function(){
+            if (input.hasAttribute("data-dd-all")) {
+              if (input.checked) {
+                opcoes.forEach(function(opcao){ opcao.checked = false; });
+              }
+            } else {
+              if (input.checked && todos) {
+                todos.checked = false;
+              }
+              const algumMarcado = opcoes.some(function(opcao){ return opcao.checked; });
+              if (!algumMarcado && todos) {
+                todos.checked = true;
+              }
+            }
+            atualizarResumoDropdown(dd);
+          });
+        });
+
+        if (busca) {
+          busca.addEventListener("input", function(){
+            const termo = (busca.value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            dd.querySelectorAll("[data-dd-item]").forEach(function(item){
+              const textoEl = item.querySelector("[data-dd-text]");
+              const texto = ((textoEl ? textoEl.textContent : "") || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+              const ehTodos = !!item.querySelector("input[data-dd-all='1']");
+              item.style.display = (!termo || ehTodos || texto.includes(termo)) ? "flex" : "none";
+            });
+          });
+        }
+
+        atualizarResumoDropdown(dd);
+      });
+    }
+
+    inicializarDropdowns();
+
+    const form = document.querySelector("form[data-ocupacao-form='1']");
+    if (form) {
+      form.addEventListener("submit", function(){
+        document.querySelectorAll(".dd").forEach(function(dd){
+          const todos = dd.querySelector("input[type=checkbox][data-dd-all='1']");
+          const opcoes = Array.from(dd.querySelectorAll("input[type=checkbox]:not([data-dd-all='1'])"));
+          const algumMarcado = opcoes.some(function(opcao){ return opcao.checked; });
+          if (todos) {
+            todos.checked = !algumMarcado;
+            if (todos.checked) {
+              opcoes.forEach(function(opcao){ opcao.checked = false; });
+            }
+          }
+        });
+      });
+    }
+
+    document.addEventListener("click", function(e){
+      document.querySelectorAll(".dd[open]").forEach(function(dd){
+        if (!dd.contains(e.target)) {
+          dd.removeAttribute("open");
+        }
+      });
+    });
 
     /* ✅ dropdown: abre/fecha por linha + fecha ao clicar fora */
     function fecharTodos() {
@@ -660,9 +894,12 @@
       fecharTodos();
     });
 
-    /* ✅ ESC fecha menus */
+    /* ✅ ESC fecha menus e filtros */
     document.addEventListener("keydown", function(e){
-      if (e.key === "Escape") fecharTodos();
+      if (e.key === "Escape") {
+        fecharTodos();
+        document.querySelectorAll(".dd[open]").forEach(function(dd){ dd.removeAttribute("open"); });
+      }
     });
   })();
 </script>
