@@ -20812,8 +20812,17 @@ def _campanhas_vencimentos_criar_card_renovacao(
     prazo_dias: int,
     titulo_override: str | None = None,
     descricao_override: str | None = None,
+    aplicar_tags_renovacao_aditivo: bool = True,
 ) -> int:
-    """Cria o card de renovação no Kanban 1 e aplica a tag 17 Renovação."""
+    """Cria o card no Kanban 1.
+
+    Quando aplicar_tags_renovacao_aditivo=True, o card segue o fluxo de renovação
+    de campanha e recebe as tags 17 Renovação e 8 Aditivo.
+
+    Quando aplicar_tags_renovacao_aditivo=False, o card é usado para efetivação
+    de Reserva e NÃO recebe tags de Renovação/Aditivo, porque Reserva não é
+    aditivo nem renovação.
+    """
 
     id_usuario = int(_campanhas_vencimentos_usuario_logado_id() or 0)
     if id_usuario <= 0:
@@ -20821,24 +20830,25 @@ def _campanhas_vencimentos_criar_card_renovacao(
 
     id_usuario_responsavel = _parse_int(campanha.get("IDDimUsuariosVendedor")) or id_usuario
 
-    tag_renovacao = db.session.execute(
-        text(f"""
-            SELECT TOP (1)
-                IDDimKanbanTag,
-                NomeTag
-            FROM {TABELA_KANBAN_TAG_RENOVACAO}
-            WHERE IDDimKanbanTag = :id_tag
-              AND IDDimKanban = :id_kanban
-              AND ISNULL(Ativo, 1) = 1;
-        """),
-        {
-            "id_tag": int(ID_TAG_RENOVACAO_CAMPANHA),
-            "id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA),
-        },
-    ).mappings().first()
+    if aplicar_tags_renovacao_aditivo:
+        tag_renovacao = db.session.execute(
+            text(f"""
+                SELECT TOP (1)
+                    IDDimKanbanTag,
+                    NomeTag
+                FROM {TABELA_KANBAN_TAG_RENOVACAO}
+                WHERE IDDimKanbanTag = :id_tag
+                  AND IDDimKanban = :id_kanban
+                  AND ISNULL(Ativo, 1) = 1;
+            """),
+            {
+                "id_tag": int(ID_TAG_RENOVACAO_CAMPANHA),
+                "id_kanban": int(ID_KANBAN_RENOVACAO_CAMPANHA),
+            },
+        ).mappings().first()
 
-    if not tag_renovacao:
-        raise RuntimeError("Tag 17 Renovação não encontrada ou inativa no Kanban 1.")
+        if not tag_renovacao:
+            raise RuntimeError("Tag 17 Renovação não encontrada ou inativa no Kanban 1.")
 
     id_fase_inicial = _campanhas_vencimentos_primeira_fase_kanban_renovacao()
     id_status_card = _campanhas_vencimentos_id_status_card_ativo_ou_none()
@@ -20933,7 +20943,7 @@ def _campanhas_vencimentos_criar_card_renovacao(
 
     if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitAditivo"):
         colunas.append("BitAditivo")
-        valores.append("1")
+        valores.append("1" if aplicar_tags_renovacao_aditivo else "0")
 
     if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitContratoNovo"):
         colunas.append("BitContratoNovo")
@@ -20967,23 +20977,24 @@ def _campanhas_vencimentos_criar_card_renovacao(
     if id_card <= 0:
         raise RuntimeError("O INSERT do card de renovação não retornou IDFatoKanbanCard.")
 
-    _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
-        id_card=int(id_card),
-        campanha=campanha,
-    )
+    if aplicar_tags_renovacao_aditivo:
+        _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
+            id_card=int(id_card),
+            campanha=campanha,
+        )
 
-    _aplicar_tag_no_card_admin(
-        id_card=int(id_card),
-        id_tag=int(ID_TAG_RENOVACAO_CAMPANHA),
-        id_usuario=int(id_usuario),
-        id_empresa_proprietaria=int(id_empresa_proprietaria),
-    )
-    _aplicar_tag_no_card_admin(
-        id_card=int(id_card),
-        id_tag=int(ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN),
-        id_usuario=int(id_usuario),
-        id_empresa_proprietaria=int(id_empresa_proprietaria),
-    )
+        _aplicar_tag_no_card_admin(
+            id_card=int(id_card),
+            id_tag=int(ID_TAG_RENOVACAO_CAMPANHA),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+        )
+        _aplicar_tag_no_card_admin(
+            id_card=int(id_card),
+            id_tag=int(ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_empresa_proprietaria),
+        )
 
     if cod_face:
         _campanhas_vencimentos_inserir_painel_face_card_renovacao(
@@ -21007,8 +21018,9 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
     *,
     id_card: int,
     campanha: dict,
+    aplicar_tags_renovacao_aditivo: bool = True,
 ) -> dict:
-    """Atualiza o cadastro principal do card de renovação já existente.
+    """Atualiza o cadastro principal do card já existente.
 
     Essa função corrige cards antigos criados sem IDEmpresa e sem IDDimCnaes.
     A origem oficial é a cadeia informada pelo Guilherme:
@@ -21075,7 +21087,7 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
         adicionar_set_se_existir("IDFatoControleContratoEuromidia", "id_contrato", id_contrato)
 
     if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitAditivo"):
-        sets.append("BitAditivo = 1")
+        sets.append("BitAditivo = 1" if aplicar_tags_renovacao_aditivo else "BitAditivo = 0")
 
     if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_RENOVACAO, "BitContratoNovo"):
         sets.append("BitContratoNovo = 0")
@@ -21095,28 +21107,42 @@ def _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
         params,
     )
 
-    _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
-        id_card=id_card_int,
-        campanha=campanha,
-    )
+    if aplicar_tags_renovacao_aditivo:
+        _campanhas_vencimentos_vincular_reserva_preferencia_card_renovacao(
+            id_card=id_card_int,
+            campanha=campanha,
+        )
 
-    _aplicar_tag_no_card_admin(
-        id_card=id_card_int,
-        id_tag=ID_TAG_RENOVACAO_CAMPANHA,
-        id_usuario=id_usuario_logado,
-        id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
-    )
-    _aplicar_tag_no_card_admin(
-        id_card=id_card_int,
-        id_tag=ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN,
-        id_usuario=id_usuario_logado,
-        id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
-    )
-    _remover_tag_do_card_admin(
-        id_card=id_card_int,
-        id_tag=ID_TAG_TIPO_CONTRATO_NOVO_ADMIN,
-        id_usuario=id_usuario_logado,
-    )
+        _aplicar_tag_no_card_admin(
+            id_card=id_card_int,
+            id_tag=ID_TAG_RENOVACAO_CAMPANHA,
+            id_usuario=id_usuario_logado,
+            id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
+        )
+        _aplicar_tag_no_card_admin(
+            id_card=id_card_int,
+            id_tag=ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN,
+            id_usuario=id_usuario_logado,
+            id_empresa_proprietaria=ID_EMPRESA_PROPRIETARIA_EUROMIDIA_RENOVACAO,
+        )
+        _remover_tag_do_card_admin(
+            id_card=id_card_int,
+            id_tag=ID_TAG_TIPO_CONTRATO_NOVO_ADMIN,
+            id_usuario=id_usuario_logado,
+        )
+    else:
+        # Reserva não é Aditivo e não é Renovação.
+        # Além de não aplicar as tags, removo eventuais tags antigas criadas por versões anteriores.
+        _remover_tag_do_card_admin(
+            id_card=id_card_int,
+            id_tag=ID_TAG_RENOVACAO_CAMPANHA,
+            id_usuario=id_usuario_logado,
+        )
+        _remover_tag_do_card_admin(
+            id_card=id_card_int,
+            id_tag=ID_TAG_TIPO_CONTRATO_ADITIVO_ADMIN,
+            id_usuario=id_usuario_logado,
+        )
 
     return {
         "ok": True,
@@ -21764,6 +21790,7 @@ def _campanhas_vencimentos_atualizar_card_reserva_dados_cadastro(
     _campanhas_vencimentos_atualizar_card_renovacao_dados_cadastro(
         id_card=int(id_card_int),
         campanha=reserva,
+        aplicar_tags_renovacao_aditivo=False,
     )
 
     titulo = _campanhas_vencimentos_titulo_card_reserva(reserva)
@@ -21884,7 +21911,7 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
             db.session.commit()
             flash(
                 f"Já existia um card para a reserva #{id_reserva_final}: #{id_card_existente}. "
-                "Atualizei o título, descrição, IDReserva e painel/face do card.",
+                "Atualizei o título, descrição, IDReserva, painel/face e removi tags indevidas de Aditivo/Renovação.",
                 "info",
             )
             return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
@@ -21899,6 +21926,7 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
             prazo_dias=int(prazo_dias),
             titulo_override=titulo,
             descricao_override=descricao,
+            aplicar_tags_renovacao_aditivo=False,
         )
 
         _campanhas_vencimentos_vincular_reserva_ocupacao_card(
