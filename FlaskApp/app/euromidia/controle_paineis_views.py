@@ -16844,6 +16844,15 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
 
         marca = resumo_periodo.get("marcas") or ""
         vendedor = resumo_periodo.get("vendedores") or ""
+
+        # Regra do relatório Ocupação Clientes:
+        # para PAINEL DIGITAL, o Excel não deve exibir Marca Exibida nem Vendedor.
+        # Mantemos as colunas no layout, mas deixamos as células vazias apenas
+        # nas linhas digitais, preservando as informações dos demais tipos de painel.
+        if eh_digital:
+            marca = ""
+            vendedor = ""
+
         data_inicio = resumo_periodo.get("data_inicio")
         data_fim = resumo_periodo.get("data_fim")
         fim_vigente = resumo_periodo.get("fim_vigente")
