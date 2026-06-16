@@ -17236,7 +17236,12 @@ def api_kanban_dados(id_kanban: int):
     tipos_cliente_desconto_catalogo = _obter_tipos_cliente_desconto()
     origens_atendimento_catalogo = _obter_origens_atendimento()
     tipos_documento_catalogo = _obter_tipos_documento()
-    paineis_catalogo = _obter_paineis_catalogo() if kanban_cfg["MostrarPainelFaceNoCard"] else []
+    # Não carregue o catálogo completo de painéis dentro do payload inicial do Kanban.
+    # Esse catálogo pode deixar /dados muito grande; quando a conexão/proxy corta a
+    # resposta no meio o Chrome acusa net::ERR_CONTENT_LENGTH_MISMATCH e o board
+    # fica eternamente em "Carregando cards...". O front já busca as faces pelo
+    # endpoint /kanban/api/painel-faces/catalogo quando necessário.
+    paineis_catalogo: list[dict[str, Any]] = []
 
     sql_totais = text(f"""
         SELECT
@@ -17454,7 +17459,12 @@ def api_kanban_dados(id_kanban: int):
     if usar_cache:
         _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
-    return jsonify(payload)
+    resposta = jsonify(payload)
+    resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, no-transform" if not usar_cache else "private, max-age=15, no-transform"
+    resposta.headers["Pragma"] = "no-cache" if not usar_cache else ""
+    resposta.headers["X-Content-Type-Options"] = "nosniff"
+    resposta.headers["X-Accel-Buffering"] = "no"
+    return resposta
 
 
 

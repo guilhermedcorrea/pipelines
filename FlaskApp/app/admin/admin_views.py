@@ -7382,6 +7382,7 @@ def _upsert_vencimento_campanha_aprovada_admin(
                    vc.DataTerminoPrevisto = :data_termino,
                    vc.DiasParaVencer = CASE
                                            WHEN :data_termino IS NULL THEN NULL
+                                           WHEN DATEDIFF(DAY, CONVERT(date, GETDATE()), CONVERT(date, :data_termino)) < 0 THEN 0
                                            ELSE DATEDIFF(DAY, CONVERT(date, GETDATE()), CONVERT(date, :data_termino))
                                         END,
                    vc.BitAtivo = :bit_ativo,
@@ -7418,6 +7419,7 @@ def _upsert_vencimento_campanha_aprovada_admin(
                     :data_termino,
                     CASE
                         WHEN :data_termino IS NULL THEN NULL
+                        WHEN DATEDIFF(DAY, CONVERT(date, GETDATE()), CONVERT(date, :data_termino)) < 0 THEN 0
                         ELSE DATEDIFF(DAY, CONVERT(date, GETDATE()), CONVERT(date, :data_termino))
                     END,
                     :bit_ativo,
@@ -19587,7 +19589,8 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), emp_ctr.NomeFantasia))), ''), '0'),
                     NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.MarcaExibida))), ''), '0')
                 ),
-                ctr.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
+                ValorCampanha = item.TotalLiquidoContratoAGBRVENDGERCOOR,
+                TotalLiquidoContrato = item.TotalLiquidoContratoAGBRVENDGERCOOR,
                 Painel = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item.CodFace))), ''),
                 MarcaExibida = COALESCE(
                     NULLIF(LTRIM(RTRIM(ctr.MarcaExibida)), ''),
@@ -19595,7 +19598,11 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 ),
                 venc.DataInicioCampanha,
                 DataTermino = venc.DataTerminoPrevisto,
-                venc.DiasParaVencer,
+                DiasParaVencer = CASE
+                    WHEN venc.DataTerminoPrevisto IS NULL THEN NULL
+                    WHEN CAST(venc.DataTerminoPrevisto AS date) < CAST(SYSDATETIME() AS date) THEN 0
+                    ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(venc.DataTerminoPrevisto AS date))
+                END,
                 venc.BitAtivo,
                 venc.DataCriacao,
                 venc.DataAtualizacao
@@ -19669,13 +19676,15 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr_res.MarcaExibida))), ''), '0'),
                     NULLIF(NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), reserva.MarcaExibida))), ''), '0')
                 ),
-                ctr_res.TotalLiquidoContratoAGBRCTACORDO AS TotalLiquidoContrato,
+                ValorCampanha = item_res.ValorCampanha,
+                TotalLiquidoContrato = item_res.ValorCampanha,
                 Painel = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.CodFace))), ''),
                 MarcaExibida = NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), reserva.MarcaExibida))), ''),
                 DataInicioCampanha = CAST(reserva.DataInicio AS date),
                 DataTermino = CAST(reserva.DataFim AS date),
                 DiasParaVencer = CASE
                     WHEN reserva.DataFim IS NULL THEN NULL
+                    WHEN CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date) THEN 0
                     ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(reserva.DataFim AS date))
                 END,
                 BitAtivo = CAST(1 AS bit),
@@ -19716,6 +19725,34 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 ) AS reserva_filtrada
                 WHERE reserva_filtrada.rn_key = 1
             ) AS reserva
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    ValorCampanha = item_res_base.TotalLiquidoContratoAGBRVENDGERCOOR
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_res_base
+                WHERE ISNULL(item_res_base.BitAtivo, 0) = 1
+                  AND (
+                        (
+                            reserva.IDFatoControleContratosItemOrigem IS NOT NULL
+                            AND item_res_base.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
+                        )
+                        OR
+                        (
+                            ISNULL(reserva.IDFatoControleContratos, 0) > 0
+                            AND item_res_base.IDFatoControleContratoEuromidia = reserva.IDFatoControleContratos
+                            AND NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), item_res_base.CodFace))), '') COLLATE Latin1_General_CI_AI
+                                = NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.CodFace))), '') COLLATE Latin1_General_CI_AI
+                        )
+                      )
+                ORDER BY
+                    CASE
+                        WHEN reserva.IDFatoControleContratosItemOrigem IS NOT NULL
+                         AND item_res_base.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
+                        THEN 0 ELSE 1
+                    END,
+                    ISNULL(item_res_base.DataAtualizacao, '19000101') DESC,
+                    item_res_base.IDFatoControleContratosItensEuromidia DESC
+            ) AS item_res
             LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr_res
                 ON ctr_res.IDFatoControleContratosEuromidia = reserva.IDFatoControleContratos
             LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp_res
@@ -19759,12 +19796,17 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     except Exception:
         dias_int = None
 
+    status_nome = str(d.get("NomeStatus") or "").strip().upper()
+
     if dias_int is None:
         d["ClasseDias"] = "sem-data"
         d["DiasTexto"] = "—"
     elif dias_int < 0:
         d["ClasseDias"] = "vencido"
-        d["DiasTexto"] = str(dias_int)
+        d["DiasTexto"] = "0"
+    elif dias_int == 0 and "VENCIDA" in status_nome:
+        d["ClasseDias"] = "vencido"
+        d["DiasTexto"] = "0"
     elif dias_int <= 45:
         d["ClasseDias"] = "perto"
         d["DiasTexto"] = str(dias_int)
@@ -19784,16 +19826,21 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
 
     d["NumeroContratoExibicao"] = numero_contrato or "—"
 
-    valor_total_liquido = d.get("TotalLiquidoContrato")
-    if valor_total_liquido is None:
-        d["TotalLiquidoContratoTexto"] = "—"
+    valor_campanha = d.get("ValorCampanha")
+    if valor_campanha is None:
+        valor_campanha = d.get("TotalLiquidoContrato")
+
+    if valor_campanha is None:
+        d["ValorCampanhaTexto"] = "—"
     else:
         try:
-            valor_float = float(valor_total_liquido)
+            valor_float = float(valor_campanha)
             texto = f"R$ {valor_float:,.2f}"
-            d["TotalLiquidoContratoTexto"] = texto.replace(",", "X").replace(".", ",").replace("X", ".")
+            d["ValorCampanhaTexto"] = texto.replace(",", "X").replace(".", ",").replace("X", ".")
         except Exception:
-            d["TotalLiquidoContratoTexto"] = str(valor_total_liquido)
+            d["ValorCampanhaTexto"] = str(valor_campanha)
+
+    d["TotalLiquidoContratoTexto"] = d["ValorCampanhaTexto"]
 
     return d
 
@@ -19977,6 +20024,7 @@ def _campanhas_vencimentos_atualizar_status_e_dias(forcar: bool = False) -> None
                 DiasParaVencerCalculado =
                     CASE
                         WHEN f.DataTerminoPrevisto IS NULL THEN NULL
+                        WHEN CAST(f.DataTerminoPrevisto AS DATE) < @Hoje THEN 0
                         ELSE DATEDIFF(DAY, @Hoje, CAST(f.DataTerminoPrevisto AS DATE))
                     END,
 
@@ -20295,7 +20343,27 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
                 CAST(item.DataTerminoPrevisto AS date),
                 CAST(item.DataFimEfetiva AS date)
             ),
-            venc.DiasParaVencer,
+            DiasParaVencer = CASE
+                WHEN COALESCE(
+                        CAST(venc.DataTerminoPrevisto AS date),
+                        CAST(item.DataTerminoPrevisto AS date),
+                        CAST(item.DataFimEfetiva AS date)
+                     ) IS NULL THEN NULL
+                WHEN COALESCE(
+                        CAST(venc.DataTerminoPrevisto AS date),
+                        CAST(item.DataTerminoPrevisto AS date),
+                        CAST(item.DataFimEfetiva AS date)
+                     ) < CAST(SYSDATETIME() AS date) THEN 0
+                ELSE DATEDIFF(
+                        DAY,
+                        CAST(SYSDATETIME() AS date),
+                        COALESCE(
+                            CAST(venc.DataTerminoPrevisto AS date),
+                            CAST(item.DataTerminoPrevisto AS date),
+                            CAST(item.DataFimEfetiva AS date)
+                        )
+                     )
+            END,
             venc.BitAtivo,
 
             ctr.NumeroContrato,
@@ -21412,6 +21480,7 @@ def _campanhas_vencimentos_buscar_base_reserva(id_reserva: int) -> dict | None:
             DataTerminoPrevisto = CAST(reserva.DataFim AS date),
             DiasParaVencer = CASE
                 WHEN reserva.DataFim IS NULL THEN NULL
+                WHEN CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date) THEN 0
                 ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(reserva.DataFim AS date))
             END,
             BitAtivo = CAST(1 AS bit),
@@ -22186,6 +22255,7 @@ def vencimentos_campanhas_euromidia():
             vc.NumeroContrato,
             vc.NumeroPrevia,
             vc.RazaoSocial,
+            vc.ValorCampanha,
             vc.TotalLiquidoContrato,
             vc.Painel,
             vc.MarcaExibida,

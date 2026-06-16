@@ -698,15 +698,17 @@
     gap:14px;
     overflow-x:auto;
     overflow-y:hidden;
-    padding: 8px 10px 12px 10px;
+    padding: 8px 10px 16px 10px;
     scroll-snap-type: x proximity;
     scroll-padding-left: 10px;
     overscroll-behavior-x: contain;
     overscroll-behavior-y: auto;
     touch-action: auto;
-    flex: 1 1 auto;
-    min-height: 520px;
-    height: calc(100vh - 300px);
+    flex: 0 0 auto;
+    min-height: 560px;
+    height: calc(100vh - 245px);
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
   }
 
   .kb-board.is-dragging{
@@ -747,6 +749,7 @@
     flex-direction:column;
     min-height: 0;
     height: 100%;
+    box-sizing: border-box;
     overflow:hidden;
 
     --col-accent: rgba(11,78,162,1);
@@ -908,7 +911,7 @@
     display:flex;
     flex-direction:column;
     gap:10px;
-    padding: 0 16px 8px 0;
+    padding: 0 20px 44px 0;
     overflow-y: auto;
     overflow-x: hidden;
     min-height: 0;
@@ -919,12 +922,22 @@
     scrollbar-width: none;
     -ms-overflow-style: none;
     overscroll-behavior-y: contain;
-    touch-action: auto;
+    scroll-padding-bottom: 44px;
+    touch-action: pan-y;
     border-radius: 10px;
     position: relative;
-    contain: content;
+    contain: layout paint;
     isolation: isolate;
     transition: background .12s ease, box-shadow .12s ease;
+  }
+
+  .kb-drop::after{
+    content:"";
+    display:block;
+    flex: 0 0 20px;
+    min-height: 20px;
+    width:100%;
+    pointer-events:none;
   }
 
   .kb-drop::-webkit-scrollbar{
@@ -1022,8 +1035,7 @@
     transition: box-shadow .12s ease, border-color .12s ease, opacity .12s ease, background .12s ease;
     position: relative;
     contain: layout paint style;
-    content-visibility: auto;
-    contain-intrinsic-size: 190px;
+    content-visibility: visible;
   }
 
   .kb-card:hover{

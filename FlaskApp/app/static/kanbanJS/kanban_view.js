@@ -100,6 +100,19 @@
     board.dataset.scrollKanbanAjustado = "1";
   }
 
+  const limpadoresScrollbarFase = [];
+
+  function limparRecursosScrollbarFase(){
+    while (limpadoresScrollbarFase.length) {
+      const limpar = limpadoresScrollbarFase.pop();
+      try {
+        if (typeof limpar === "function") limpar();
+      } catch (erro) {
+        console.warn("Falha ao limpar recurso de scrollbar da fase.", erro);
+      }
+    }
+  }
+
   function configurarScrollbarFase(dropEl, bodyEl){
     if (!dropEl || !bodyEl || bodyEl.dataset.scrollbarFaseConfigurada === "1") return;
 
@@ -233,11 +246,13 @@
     polegar.addEventListener("pointerup", encerrarDragScrollbar);
     polegar.addEventListener("pointercancel", encerrarDragScrollbar);
     window.addEventListener("resize", agendarAtualizacaoScrollbarFase, { passive: true });
+    limpadoresScrollbarFase.push(() => window.removeEventListener("resize", agendarAtualizacaoScrollbarFase));
 
     if ("ResizeObserver" in window) {
       const resizeObserver = new ResizeObserver(agendarAtualizacaoScrollbarFase);
       resizeObserver.observe(dropEl);
       resizeObserver.observe(bodyEl);
+      limpadoresScrollbarFase.push(() => resizeObserver.disconnect());
     }
 
     /*
@@ -328,7 +343,8 @@
   const LIMITE_CARDS_PARA_VIRTUALIZAR_FASE = 36;
   const LIMITE_CARDS_DOM_POR_FASE_VIRTUAL = 28;
   const OVERSCAN_CARDS_VIRTUAIS = 8;
-  const ALTURA_ESTIMADA_CARD_VIRTUAL = 208;
+  const ALTURA_ESTIMADA_CARD_VIRTUAL = 240;
+  const ATRASO_REDRAW_TEMPO_REAL_MS = 80;
   const estadoFase = new Map();
   let socketKanban = null;
   let socketConectado = false;
@@ -5940,14 +5956,24 @@ function normalizarCardServidor(card){
     if (!cardEl) return null;
 
     const rect = cardEl.getBoundingClientRect();
-    const clone = cardEl.cloneNode(true);
-    clone.classList.add("kb-drag-image");
+    const titulo = safeStr(cardEl.querySelector?.(".kb-card-title")?.textContent || "Card").trim() || "Card";
+    const idTexto = safeStr(cardEl.querySelector?.(".kb-card-badge-id")?.textContent || "").trim();
+    const faseTexto = safeStr(cardEl.querySelector?.(".kb-phase-pill")?.textContent || "").trim();
+
+    const clone = document.createElement("div");
+    clone.className = "kb-drag-image";
+    clone.appendChild(document.createTextNode(titulo));
+
+    const meta = document.createElement("small");
+    meta.textContent = [idTexto, faseTexto].filter(Boolean).join(" • ");
+    if (meta.textContent) clone.appendChild(meta);
+
     clone.style.position = "fixed";
     clone.style.top = "-9999px";
     clone.style.left = "-9999px";
     clone.style.pointerEvents = "none";
-    clone.style.width = `${Math.ceil(rect.width)}px`;
-    clone.style.maxWidth = `${Math.ceil(rect.width)}px`;
+    clone.style.width = `${Math.min(Math.ceil(rect.width), 280)}px`;
+    clone.style.maxWidth = `${Math.min(Math.ceil(rect.width), 280)}px`;
     clone.style.zIndex = "999999";
     document.body.appendChild(clone);
     return clone;
@@ -6225,6 +6251,7 @@ function redesenharFasesLocalmente(idsFase, mapaQuantidades = null, manterScroll
       requestAnimationFrame(() => {
         const maxScroll = Math.max(0, st.dropEl.scrollHeight - st.dropEl.clientHeight);
         st.dropEl.scrollTop = Math.min(scrollTopAnterior, maxScroll);
+        if (typeof st.dropEl._kbAtualizarScrollbarFase === "function") st.dropEl._kbAtualizarScrollbarFase();
         void garantirPreenchimentoMinimoDaFase(idFase, { maxTentativas: 2 });
       });
     } else {
@@ -6261,7 +6288,7 @@ function agendarRedesenhoFasesTempoReal(idsFase, mapaQuantidades = null, manterS
 
   if (rafRedesenhoTempoReal !== null) return;
 
-  rafRedesenhoTempoReal = window.requestAnimationFrame(() => {
+  rafRedesenhoTempoReal = window.setTimeout(() => {
     rafRedesenhoTempoReal = null;
 
     const idsPendentes = [...idsFasesRedesenhoTempoReal];
@@ -6277,7 +6304,7 @@ function agendarRedesenhoFasesTempoReal(idsFase, mapaQuantidades = null, manterS
     if (idsPendentes.length) {
       redesenharFasesLocalmente(idsPendentes, mapaPendentes, deveManterScroll);
     }
-  });
+  }, ATRASO_REDRAW_TEMPO_REAL_MS);
 }
 
 
@@ -10567,9 +10594,35 @@ function formatarNumeroParaInput(valor){
     }
   }
 
+  function reconstruirPaineisCatalogoAPartirDasFaces(){
+    const mapa = new Map();
+
+    (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : []).forEach((face) => {
+      const idPainel = idNum(face?.IDDimPaineisEuromidia ?? 0);
+      if (!idPainel || mapa.has(idPainel)) return;
+
+      mapa.set(idPainel, {
+        IDDimPaineisEuromidia: idPainel,
+        CodPonto: safeStr(face?.CodPonto ?? '').trim() || null,
+        Tipo: safeStr(face?.Tipo ?? '').trim() || null,
+        Cidade: safeStr(face?.Cidade ?? '').trim() || null,
+        UF: safeStr(face?.UF ?? '').trim() || null,
+        Logradouro: safeStr(face?.Logradouro ?? '').trim() || null,
+        Bairro: safeStr(face?.Bairro ?? '').trim() || null,
+        Numero: safeStr(face?.Numero ?? '').trim() || null,
+        CEP: safeStr(face?.CEP ?? '').trim() || null,
+        QuantidadeFaces: idNum(face?.QuantidadeFaces ?? 0) || null,
+        BitAtivo: typeof face?.BitAtivo === 'undefined' ? 1 : idNum(face?.BitAtivo ?? 0),
+      });
+    });
+
+    paineisCatalogo = Array.from(mapa.values());
+  }
+
   async function carregarCatalogoPainelFaces(){
     if (!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard)) {
       painelFacesCatalogo = [];
+      paineisCatalogo = [];
       atualizarMapaPainelFacesCatalogo();
       return [];
     }
@@ -10590,11 +10643,13 @@ function formatarNumeroParaInput(valor){
       }
 
       painelFacesCatalogo = Array.isArray(j.painel_faces) ? j.painel_faces.map((item) => Object.assign({}, item || {})) : [];
+      reconstruirPaineisCatalogoAPartirDasFaces();
       atualizarMapaPainelFacesCatalogo();
       return painelFacesCatalogo;
     } catch (erro) {
       console.warn('carregarCatalogoPainelFaces: falhou', erro);
       painelFacesCatalogo = [];
+      paineisCatalogo = [];
       atualizarMapaPainelFacesCatalogo();
       return [];
     }
@@ -13557,10 +13612,24 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
   resetarFluxoContrato();
 
   async function carregar() {
-    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/dados?limit_inicial=${TAM_LOTE_POR_FASE}`, { credentials: "same-origin" });
-    const j = await r.json().catch(() => null);
+    const urlDados = `/kanban/api/kanbans/${ID_KANBAN}/dados?limit_inicial=${TAM_LOTE_POR_FASE}&fresh=1`;
+    let resultadoDados = null;
 
-    if (!j || !j.ok) return;
+    try {
+      resultadoDados = await fetchJsonKanban(urlDados);
+    } catch (erro) {
+      console.error("Falha de rede ao carregar dados iniciais do kanban", erro);
+      mostrarMensagemBoard("Não consegui carregar os cards. A resposta do servidor foi interrompida antes de terminar. Recarregue a página e veja o log do servidor para identificar se houve timeout, restart do gunicorn ou resposta grande demais.");
+      throw erro;
+    }
+
+    const j = resultadoDados.corpo;
+
+    if (!respostaJsonKanbanOk(resultadoDados)) {
+      console.warn("carregar dados iniciais do kanban falhou", detalhesFalhaJsonKanban(resultadoDados));
+      mostrarMensagemBoard(j?.msg || "Não consegui carregar os cards. A API inicial do kanban não retornou JSON válido.");
+      return;
+    }
 
     fases = Array.isArray(j.fases) ? j.fases.map(f => Object.assign({}, f || {})) : [];
     cards = Array.isArray(j.cards)
@@ -13633,6 +13702,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
   function renderBoardCompleto() {
     reconstruirIndicesCards();
+    limparRecursosScrollbarFase();
     board.innerHTML = "";
     estadoFase.clear();
 
@@ -13703,7 +13773,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       });
 
       drop.addEventListener("dragenter", (e) => {
-        const cardIdEvento = idNum(e.dataTransfer?.getData("text/plain") || cardArrastandoId);
+        const cardIdEvento = idNum(cardArrastandoId || e.dataTransfer?.getData("text/plain") || 0);
         if (!cardIdEvento) return;
 
         e.preventDefault();
@@ -13716,7 +13786,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       });
 
       drop.addEventListener("dragover", (e) => {
-        const cardIdEvento = idNum(e.dataTransfer?.getData("text/plain") || cardArrastandoId);
+        const cardIdEvento = idNum(cardArrastandoId || 0);
         if (!cardIdEvento) return;
 
         e.preventDefault();
@@ -13747,7 +13817,7 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
         if (st) st.dragDepth = 0;
         drop.classList.remove("is-over");
 
-        const cardId = idNum(e.dataTransfer?.getData("text/plain") || cardArrastandoId);
+        const cardId = idNum(cardArrastandoId || e.dataTransfer?.getData("text/plain") || 0);
         if (!cardId) {
           encerrarModoDrag();
           return;
@@ -13921,6 +13991,7 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
     requestAnimationFrame(() => {
       const maxScroll = Math.max(0, st.dropEl.scrollHeight - st.dropEl.clientHeight);
       st.dropEl.scrollTop = Math.min(scrollTopAnterior, maxScroll);
+      if (typeof st.dropEl._kbAtualizarScrollbarFase === "function") st.dropEl._kbAtualizarScrollbarFase();
     });
   }
 }
@@ -14615,7 +14686,11 @@ async function moverCard(idCard, idFasePara, posicao) {
   let movimentoLocal = null;
 
   try {
-    const cardAtual = await obterVersaoAtualDoCard(idC, { fresh: true });
+    let cardAtual = obterCardPorId(idC);
+
+    if (!cardAtual || !safeStr(cardAtual.VersaoConcorrenciaHex)) {
+      cardAtual = await obterVersaoAtualDoCard(idC, { fresh: true });
+    }
 
     if (!cardAtual || !safeStr(cardAtual.VersaoConcorrenciaHex)) {
       mostrarMensagemBoard("A versão mais recente do card não está carregada. Recarregando o quadro...");
@@ -18039,7 +18114,12 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   configurarScrollKanban();
-  void inicializarKanban();
+  inicializarKanban().catch((erro) => {
+    console.error("Falha ao inicializar kanban", erro);
+    if (typeof mostrarMensagemBoard === "function") {
+      mostrarMensagemBoard("Falha ao inicializar o Kanban. Confira no DevTools qual requisição ficou vermelha na aba Network.");
+    }
+  });
 })();
 
 
