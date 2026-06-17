@@ -304,6 +304,24 @@
     color:#0f172a;
   }
 
+
+  .kb-combobox.is-bloqueado .kb-input,
+  .kb-combobox.is-bloqueado .kb-combobox-toggle{
+    background:#f8fafc;
+    color:#64748b;
+    opacity:1;
+    cursor:not-allowed;
+  }
+
+  .kb-combobox.is-bloqueado{
+    opacity:.96;
+  }
+
+  .hint.is-bloqueio-face{
+    color:#b45309;
+    opacity:1;
+  }
+
   .reserva-face-vazio{
     border:1px dashed var(--border);
     border-radius:14px;
@@ -311,6 +329,115 @@
     background:#f8fafc;
     font-weight:900;
     color:#475569;
+  }
+
+  .reserva-face-lista-selecionadas{
+    margin-top:14px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-face-linha{
+    width:100%;
+    min-width:0;
+    border:1px solid var(--border);
+    border-left:5px solid #166534;
+    border-radius:14px;
+    background:#fff;
+    padding:12px;
+    box-shadow:0 4px 14px rgba(15,23,42,.05);
+  }
+
+  .reserva-face-linha-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:10px;
+  }
+
+  .reserva-face-linha-titulo{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    font-weight:1000;
+    color:#0f172a;
+    font-size:15px;
+  }
+
+  .reserva-face-linha-resumo{
+    margin-top:4px;
+    font-size:12px;
+    line-height:1.35;
+    font-weight:800;
+    color:#475569;
+  }
+
+  .reserva-face-controles{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    gap:10px;
+    align-items:start;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-face-controles > div{
+    min-width:0;
+  }
+
+  .reserva-face-remover-compacto{
+    border:1px solid rgba(185,28,28,.25);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+    border-radius:10px;
+    padding:7px 10px;
+    font-weight:1000;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .reserva-face-remover-compacto:hover{
+    background:rgba(185,28,28,.10);
+  }
+
+  .kb-face-actions{
+    position:absolute;
+    right:10px;
+    top:10px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+
+  .kb-face-action{
+    width:28px;
+    height:28px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    border:1px solid rgba(22,101,52,.25);
+    background:#f8fafc;
+    color:#166534;
+    font-weight:1000;
+    line-height:1;
+    cursor:pointer;
+  }
+
+  .kb-face-action.is-remove{
+    border-color:rgba(185,28,28,.28);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+  }
+
+  .kb-face-action:hover{
+    filter:brightness(.98);
   }
 
   .reserva-card-top{
@@ -470,83 +597,6 @@
   .fp-tooltip .tag.indisp{background:rgba(107,114,128,.12);color:#6b7280;}
   .fp-tooltip .muted{font-weight:800;opacity:.75;}
 
-  .reserva-empresas-relacionadas{
-    border:1px solid rgba(15,23,42,.10);
-    border-radius:14px;
-    background:#f8fafc;
-    padding:12px;
-  }
-
-  .reserva-empresas-relacionadas-top{
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-    margin-bottom:10px;
-  }
-
-  .reserva-empresas-relacionadas-title{
-    font-weight:1000;
-    color:#0f172a;
-  }
-
-  .reserva-empresas-relacionadas-lista{
-    display:flex;
-    flex-direction:column;
-    gap:10px;
-  }
-
-  .reserva-empresa-relacionada-item{
-    border:1px solid rgba(15,23,42,.10);
-    border-radius:13px;
-    background:#fff;
-    padding:10px;
-  }
-
-  .reserva-empresa-relacionada-linha{
-    display:grid;
-    grid-template-columns:minmax(0, 1fr) 40px 40px;
-    gap:8px;
-    align-items:end;
-    width:100%;
-    min-width:0;
-  }
-
-  .reserva-empresa-relacionada-marca{
-    margin-top:10px;
-  }
-
-  .reserva-empresa-relacionada-btn{
-    width:40px;
-    height:40px;
-    border-radius:12px;
-    border:1px solid var(--border);
-    background:#fff;
-    font-weight:1000;
-    font-size:18px;
-    line-height:1;
-    cursor:pointer;
-  }
-
-  .reserva-empresa-relacionada-btn.is-add{
-    color:#166534;
-    border-color:rgba(22,101,52,.30);
-    background:rgba(22,101,52,.06);
-  }
-
-  .reserva-empresa-relacionada-btn.is-remove{
-    color:#991b1b;
-    border-color:rgba(185,28,28,.25);
-    background:rgba(185,28,28,.06);
-  }
-
-  @media (max-width:520px){
-    .reserva-empresa-relacionada-linha{
-      grid-template-columns:1fr 40px 40px;
-    }
-  }
-
 </style>
 
 <div class="reserva-ocupacao-page">
@@ -566,7 +616,56 @@
     {% endif %}
 
     <div class="reserva-ocupacao-stack">
-      <div class="reserva-ocupacao-card">
+      <div class="reserva-ocupacao-card" id="cardDadosReservaGlobal">
+        <div class="reserva-card-top">
+          <div>
+            <div class="reserva-card-titulo">Dados da reserva</div>
+            <div class="reserva-card-resumo">Preencha estes dados uma única vez. Todas as faces selecionadas abaixo serão salvas para a mesma empresa, vendedor, marca e observação.</div>
+          </div>
+        </div>
+
+        <div class="reserva-grid-3">
+          <div>
+            <label class="campo-label">Empresa (Cliente) <span style="color:#b00020;">*</span></label>
+            <div class="kb-combobox" data-role="combo-cliente-global">
+              <input class="kb-input kb-combobox-input" id="inputClienteGlobal" data-role="input-cliente-global" type="text" autocomplete="off" placeholder="Digite nome ou CNPJ...">
+              <button class="kb-combobox-toggle" id="btnClienteGlobal" data-role="btn-cliente-global" type="button" aria-label="Abrir lista de empresas">▾</button>
+              <div class="kb-combobox-lista" hidden data-role="lista-cliente-global" id="listaClienteGlobal"></div>
+            </div>
+            <div class="hint">Obrigatório. Esta empresa será usada em todas as faces selecionadas.</div>
+          </div>
+
+          <div>
+            <label class="campo-label">Vendedor <span style="color:#b00020;">*</span></label>
+            <div class="kb-combobox" data-role="combo-vendedor-global">
+              <input class="kb-input kb-combobox-input" id="inputVendedorGlobal" data-role="input-vendedor-global" type="text" autocomplete="off" placeholder="Digite nome do vendedor...">
+              <button class="kb-combobox-toggle" id="btnVendedorGlobal" data-role="btn-vendedor-global" type="button" aria-label="Abrir lista de vendedores">▾</button>
+              <div class="kb-combobox-lista" hidden data-role="lista-vendedor-global" id="listaVendedorGlobal"></div>
+            </div>
+            <div class="hint">Obrigatório. Este vendedor será usado em todas as faces selecionadas.</div>
+          </div>
+        </div>
+
+        <div style="height:12px;"></div>
+
+        <div>
+          <label class="campo-label">Marca Exibida <span style="color:#b00020;">*</span></label>
+          <input id="inputMarcaExibidaGlobal" data-role="marca-exibida-global" type="text" class="form-control" required maxlength="200" placeholder="Ex: Coca-Cola / Banco do Brasil / etc.">
+          <div class="hint">Obrigatório • até 200 caracteres. Esta marca será usada em todas as faces selecionadas.</div>
+        </div>
+
+        <div style="height:12px;"></div>
+
+        <div>
+          <label class="campo-label">Observação</label>
+          <textarea id="inputObservacaoGlobal" data-role="observacao-global" class="form-control" rows="3" placeholder="Anotações da reserva..."></textarea>
+          <div class="hint">Opcional. A mesma observação será enviada para todas as faces selecionadas.</div>
+        </div>
+
+        <div class="card-msg" id="msgDadosReservaGlobal" data-role="msg-dados-global"></div>
+      </div>
+
+      <div class="reserva-ocupacao-card" id="cardSeletorFacesReserva" hidden>
         <div class="reserva-grid-2">
           <div>
             <label class="campo-label">Face / Ponto</label>
@@ -582,22 +681,22 @@
                 {% endfor %}
               </select>
             </div>
-            <div class="hint">Clique em uma face para adicionar um card de reserva. Clique novamente na lista ou use “Remover” no card para retirar a face.</div>
+            <div class="hint" id="hintBloqueioFace">Preencha os dados da reserva acima para liberar a seleção de Face/Ponto.</div>
           </div>
 
           <div>
             <label class="campo-label">Faces selecionadas</label>
             <div class="reserva-face-contador" id="contadorFacesSelecionadas">0 selecionadas</div>
-            <div class="hint"></div>
+            <div class="hint">Todas serão salvas com os dados fixos preenchidos acima.</div>
           </div>
+        </div>
+
+        <div id="cardsReservasFaces" class="reserva-face-lista-selecionadas" hidden>
+          <div class="reserva-face-vazio">Nenhuma face selecionada ainda.</div>
         </div>
       </div>
 
-      <div id="cardsReservasFaces" class="reserva-ocupacao-stack">
-        <div class="reserva-face-vazio">Nenhuma face selecionada ainda.</div>
-      </div>
-
-      <div class="reserva-ocupacao-card">
+      <div class="reserva-ocupacao-card" id="cardSalvarReservas" hidden>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
           <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Reservas</button>
           <div id="msg" class="msg"></div>
@@ -628,6 +727,15 @@
   let faces = Array.isArray(FACES_INICIAIS) ? FACES_INICIAIS : [];
   let estadosCards = new Map();
   let timerBuscaFace = null;
+  let dadosReservaGlobal = {
+    id_cliente: "",
+    id_vendedor: "",
+    marca_exibida: "",
+    observacao: "",
+    clientes: [],
+    vendedores: [],
+    dados_carregados: false
+  };
 
   const elForm = document.getElementById("formReservaOcupacao");
   const elCodFace = document.getElementById("codFace");
@@ -638,8 +746,21 @@
   const elContadorFaces = document.getElementById("contadorFacesSelecionadas");
   const elMsg = document.getElementById("msg");
   const elBtnSalvar = document.getElementById("btnSalvar");
+  const elHintBloqueioFace = document.getElementById("hintBloqueioFace");
   const elProgressoSalvamento = document.getElementById("progressoSalvamento");
   const elTooltipCalendario = document.getElementById("tooltipCalendarioReserva");
+  const elCardDadosReservaGlobal = document.getElementById("cardDadosReservaGlobal");
+  const elCardSeletorFacesReserva = document.getElementById("cardSeletorFacesReserva");
+  const elCardSalvarReservas = document.getElementById("cardSalvarReservas");
+  const elMsgDadosReservaGlobal = document.getElementById("msgDadosReservaGlobal");
+  const elInputClienteGlobal = document.getElementById("inputClienteGlobal");
+  const elListaClienteGlobal = document.getElementById("listaClienteGlobal");
+  const elBtnClienteGlobal = document.getElementById("btnClienteGlobal");
+  const elInputVendedorGlobal = document.getElementById("inputVendedorGlobal");
+  const elListaVendedorGlobal = document.getElementById("listaVendedorGlobal");
+  const elBtnVendedorGlobal = document.getElementById("btnVendedorGlobal");
+  const elInputMarcaExibidaGlobal = document.getElementById("inputMarcaExibidaGlobal");
+  const elInputObservacaoGlobal = document.getElementById("inputObservacaoGlobal");
 
   function texto(valor){ return (valor === null || valor === undefined) ? "" : String(valor).trim(); }
   function normalizar(valor){ return texto(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
@@ -1059,10 +1180,13 @@
     const selecionado = estadosCards.has(chave);
     const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
     const tagSelecionado = selecionado ? "<span class='tag-selecionado'>SELECIONADO</span>" : "";
-    const icone = selecionado ? "✓" : "+";
+    const acao = selecionado
+      ? "<button type='button' class='kb-face-action is-remove' data-acao-face='remover' title='Remover face selecionada' aria-label='Remover face selecionada'>−</button>"
+      : "<button type='button' class='kb-face-action is-add' data-acao-face='adicionar' title='Adicionar face' aria-label='Adicionar face'>+</button>";
+
     return "<div class='kb-face-text'><span class='top'>" + escapeHtml(codFace(face) || "—") + tagTipo + tagSelecionado + "</span>" +
       (resumoFace(face) ? "<span class='sub'>" + escapeHtml(resumoFace(face)) + "</span>" : "") +
-      "</div><span class='kb-face-check'>" + icone + "</span>";
+      "</div><span class='kb-face-actions'>" + acao + "</span>";
   }
 
   function renderListaFaces(lista){
@@ -1096,6 +1220,7 @@
   }
 
   async function buscarFacesRemoto(){
+    if(!seletorFacesLiberadoParaAdicionar()) return;
     const qs = new URLSearchParams();
     const termo = texto(elInputFace.value);
     if(termo) qs.set("q", termo);
@@ -1134,7 +1259,6 @@
       numero_previa: "",
       marca_exibida: "",
       observacao: "",
-      empresas_relacionadas: [],
       clientes: [],
       vendedores: [],
       contratos: [],
@@ -1158,6 +1282,23 @@
       renderCardsReservas();
       renderListaFaces(faces);
       atualizarSelectCodFace();
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
+
+    const erroGlobal = erroDadosReservaGlobal();
+    if(erroGlobal){
+      setMsg("Preencha os dados fixos da reserva antes de selecionar faces.", false);
+      setMsgDadosGlobal("Preencha os dados fixos da reserva para liberar a seleção das faces: " + erroGlobal + ".", false);
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
+
+    const pendente = primeiroEstadoPendenteParaLiberarNovaFace();
+    if(pendente && pendente.estado){
+      setMsg("Conclua primeiro os dados da face " + (codFace(pendente.estado.face) || "atual") + " para adicionar outra Face/Ponto.", false);
+      setCardMsg(pendente.estado, "Preencha os dados desta face para liberar a próxima Face/Ponto: " + pendente.erro + ".", false);
+      atualizarBloqueioSeletorFaces();
       return;
     }
 
@@ -1166,6 +1307,7 @@
     renderCardsReservas();
     renderListaFaces(faces);
     atualizarSelectCodFace();
+    atualizarBloqueioSeletorFaces();
     carregarDadosCard(chave);
     carregarCalendario(estado);
   }
@@ -1174,6 +1316,73 @@
     const primeiro = Array.from(estadosCards.values())[0];
     elCodFace.value = primeiro ? codFace(primeiro.face) : "";
     elContadorFaces.textContent = estadosCards.size + (estadosCards.size === 1 ? " selecionada" : " selecionadas");
+  }
+
+
+  function erroPreenchimentoParaLiberarNovaFace(estado){
+    if(!estado || !estado.face) return "Selecione uma face válida.";
+    corrigirDatasEstado(estado);
+
+    if(!codFace(estado.face) || !codPonto(estado.face)) return "selecione uma face válida";
+    if(ehDigital(estado.face) && !["540", "1080"].includes(cotaFace(estado.face))) return "selecione a cota da face";
+    if(!texto(estado.data_inicio) || !texto(estado.data_fim)) return "informe data início e data fim";
+    if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)) return "use datas a partir de " + hojeYmd();
+    if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) return "corrija a data fim";
+    return "";
+  }
+
+  function primeiroEstadoPendenteParaLiberarNovaFace(){
+    const estados = Array.from(estadosCards.values());
+    for(const estado of estados){
+      const erro = erroPreenchimentoParaLiberarNovaFace(estado);
+      if(erro) return {estado: estado, erro: erro};
+    }
+    return null;
+  }
+
+  function seletorFacesLiberadoParaAdicionar(){
+    return dadosReservaGlobalCompleto() && (estadosCards.size === 0 || !primeiroEstadoPendenteParaLiberarNovaFace());
+  }
+
+  function atualizarBloqueioSeletorFaces(){
+    atualizarVisibilidadeFluxoReserva();
+
+    const erroGlobal = erroDadosReservaGlobal();
+    const pendente = !erroGlobal ? primeiroEstadoPendenteParaLiberarNovaFace() : null;
+    const bloqueado = !!erroGlobal || !!pendente;
+
+    if(elInputFace){
+      elInputFace.disabled = bloqueado;
+      elInputFace.setAttribute("aria-disabled", bloqueado ? "true" : "false");
+      elInputFace.placeholder = bloqueado
+        ? (erroGlobal ? "Preencha os dados da reserva acima" : "Conclua os dados da face atual para adicionar outra face")
+        : "Digite CodFace, CodPonto, logradouro, número, cidade, bairro ou tipo...";
+    }
+
+    if(elBtnToggleFace){
+      elBtnToggleFace.disabled = bloqueado;
+      elBtnToggleFace.setAttribute("aria-disabled", bloqueado ? "true" : "false");
+    }
+
+    const comboFace = document.getElementById("comboFace");
+    if(comboFace) comboFace.classList.toggle("is-bloqueado", bloqueado);
+
+    if(bloqueado){
+      fecharLista(elListaFace);
+    }
+
+    if(elHintBloqueioFace){
+      elHintBloqueioFace.classList.toggle("is-bloqueio-face", bloqueado);
+      if(erroGlobal){
+        elHintBloqueioFace.textContent = "Preencha os dados fixos da reserva acima para liberar a seleção de Face/Ponto: " + erroGlobal + ".";
+      }else if(pendente && pendente.estado){
+        elHintBloqueioFace.textContent = "Para liberar a seleção de outra Face/Ponto, conclua os dados da face " + (codFace(pendente.estado.face) || "atual") + ": " + pendente.erro + ".";
+      }else if(estadosCards.size === 0){
+        elHintBloqueioFace.textContent = "Clique no sinal + para selecionar a primeira Face/Ponto.";
+      }else{
+        elHintBloqueioFace.textContent = "Face selecionada. Use o sinal + para adicionar outra Face/Ponto ou − para remover uma selecionada.";
+      }
+    }
   }
 
   function getEmpresaId(item){ return texto(item.IDEmpresa || item.id_empresa || item.IDCliente || item.id_cliente); }
@@ -1186,6 +1395,153 @@
     const previa = texto(item.NumeroPrevia);
     const empresa = texto(item.RazaoSocial || item.MarcaExibida || item.NomeFantasia);
     return ["Contrato " + (contrato || "-") + " / Prévia " + (previa || "-"), empresa].filter(Boolean).join(" — ");
+  }
+
+  function setMsgDadosGlobal(msg, ok){
+    if(!elMsgDadosReservaGlobal) return;
+    elMsgDadosReservaGlobal.textContent = texto(msg);
+    elMsgDadosReservaGlobal.classList.remove("ok", "err");
+    if(msg) elMsgDadosReservaGlobal.classList.add(ok ? "ok" : "err");
+  }
+
+  function erroDadosReservaGlobal(){
+    if(!texto(dadosReservaGlobal.id_cliente)) return "selecione a empresa/cliente";
+    if(!texto(dadosReservaGlobal.id_vendedor)) return "selecione o vendedor";
+    if(!texto(dadosReservaGlobal.marca_exibida)) return "informe a Marca Exibida";
+    if(texto(dadosReservaGlobal.marca_exibida).length > 200) return "reduza a Marca Exibida para até 200 caracteres";
+    return "";
+  }
+
+  function dadosReservaGlobalCompleto(){
+    return !erroDadosReservaGlobal();
+  }
+
+  function atualizarVisibilidadeFluxoReserva(){
+    const completo = dadosReservaGlobalCompleto();
+
+    if(elCardSeletorFacesReserva) elCardSeletorFacesReserva.hidden = !completo;
+    if(elCardsReservasFaces) elCardsReservasFaces.hidden = !completo;
+    if(elCardSalvarReservas) elCardSalvarReservas.hidden = !completo;
+
+    if(completo){
+      setMsgDadosGlobal("Dados fixos preenchidos. Agora selecione uma ou mais faces abaixo.", true);
+    }else{
+      const erro = erroDadosReservaGlobal();
+      setMsgDadosGlobal("Preencha os dados fixos da reserva para liberar a seleção das faces: " + erro + ".", false);
+    }
+  }
+
+  function preencherInputGlobalPorValor(){
+    const empresa = dadosReservaGlobal.clientes.find(function(item){ return getEmpresaId(item) === texto(dadosReservaGlobal.id_cliente); });
+    const vendedor = dadosReservaGlobal.vendedores.find(function(item){ return getVendedorId(item) === texto(dadosReservaGlobal.id_vendedor); });
+    if(elInputClienteGlobal && empresa) elInputClienteGlobal.value = labelEmpresa(empresa);
+    if(elInputVendedorGlobal && vendedor) elInputVendedorGlobal.value = labelVendedor(vendedor);
+  }
+
+  function montarComboGlobalReserva(cfg){
+    const input = cfg.input;
+    const lista = cfg.lista;
+    const botao = cfg.botao;
+    if(!input || !lista || !botao) return;
+
+    function render(){
+      const termo = normalizar(input.value);
+      const itens = (cfg.getLista() || []).filter(function(item){ return !termo || normalizar(cfg.getLabel(item)).includes(termo); });
+      lista.innerHTML = "";
+
+      if(!itens.length){
+        const vazio = document.createElement("div");
+        vazio.className = "kb-combobox-item";
+        vazio.innerHTML = "<span class='top'>Nenhum registro encontrado</span>";
+        lista.appendChild(vazio);
+      }else{
+        itens.slice(0, 200).forEach(function(item){
+          const div = document.createElement("div");
+          div.className = "kb-combobox-item";
+          div.innerHTML = "<span class='top'>" + escapeHtml(cfg.getLabel(item)) + "</span>";
+          div.addEventListener("mousedown", function(ev){
+            ev.preventDefault();
+            cfg.onSelect(item, input);
+            fecharLista(lista);
+            atualizarBloqueioSeletorFaces();
+          });
+          lista.appendChild(div);
+        });
+      }
+
+      abrirLista(lista);
+    }
+
+    input.addEventListener("input", function(){
+      cfg.onInputLivre(input.value);
+      atualizarBloqueioSeletorFaces();
+      render();
+    });
+    input.addEventListener("focus", render);
+    botao.addEventListener("click", render);
+  }
+
+  function bindDadosReservaGlobal(){
+    montarComboGlobalReserva({
+      input: elInputClienteGlobal,
+      lista: elListaClienteGlobal,
+      botao: elBtnClienteGlobal,
+      getLista:function(){ return dadosReservaGlobal.clientes; },
+      getLabel:labelEmpresa,
+      onInputLivre:function(){ dadosReservaGlobal.id_cliente = ""; },
+      onSelect:function(item, input){
+        dadosReservaGlobal.id_cliente = getEmpresaId(item);
+        input.value = labelEmpresa(item);
+      }
+    });
+
+    montarComboGlobalReserva({
+      input: elInputVendedorGlobal,
+      lista: elListaVendedorGlobal,
+      botao: elBtnVendedorGlobal,
+      getLista:function(){ return dadosReservaGlobal.vendedores; },
+      getLabel:labelVendedor,
+      onInputLivre:function(){ dadosReservaGlobal.id_vendedor = ""; },
+      onSelect:function(item, input){
+        dadosReservaGlobal.id_vendedor = getVendedorId(item);
+        input.value = labelVendedor(item);
+      }
+    });
+
+    if(elInputMarcaExibidaGlobal){
+      elInputMarcaExibidaGlobal.addEventListener("input", function(){
+        dadosReservaGlobal.marca_exibida = texto(elInputMarcaExibidaGlobal.value);
+        atualizarBloqueioSeletorFaces();
+      });
+    }
+
+    if(elInputObservacaoGlobal){
+      elInputObservacaoGlobal.addEventListener("input", function(){
+        dadosReservaGlobal.observacao = texto(elInputObservacaoGlobal.value);
+      });
+    }
+  }
+
+  async function carregarDadosGlobaisReserva(){
+    setMsgDadosGlobal("Carregando empresas e vendedores...", true);
+
+    try{
+      const resp = await fetch(URL_DADOS_MODAL, {credentials:"same-origin"});
+      const data = await resp.json().catch(function(){ return null; });
+
+      if(!resp.ok || !data || !data.ok){
+        setMsgDadosGlobal((data && data.erro) || "Não consegui carregar empresas e vendedores.", false);
+        return;
+      }
+
+      dadosReservaGlobal.clientes = data.clientes || data.empresas || [];
+      dadosReservaGlobal.vendedores = data.vendedores || [];
+      dadosReservaGlobal.dados_carregados = true;
+      preencherInputGlobalPorValor();
+      atualizarBloqueioSeletorFaces();
+    }catch(e){
+      setMsgDadosGlobal("Erro de comunicação ao carregar empresas e vendedores.", false);
+    }
   }
 
   function aplicarContratoNoEstado(estado, contrato){
@@ -1208,95 +1564,6 @@
 
     estado.numero_contrato = texto(contrato.NumeroContrato);
     estado.numero_previa = texto(contrato.NumeroPrevia);
-  }
-
-  function preencherInputComboPorValor(estado, card){
-    const inputCliente = card.querySelector("[data-role='input-cliente']");
-    const inputVendedor = card.querySelector("[data-role='input-vendedor']");
-    const empresa = estado.clientes.find(function(item){ return getEmpresaId(item) === texto(estado.id_cliente); });
-    const vendedor = estado.vendedores.find(function(item){ return getVendedorId(item) === texto(estado.id_vendedor); });
-    if(inputCliente && empresa) inputCliente.value = labelEmpresa(empresa);
-    if(inputVendedor && vendedor) inputVendedor.value = labelVendedor(vendedor);
-  }
-
-  function criarUidEmpresaRelacionada(){
-    return "er_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
-  }
-
-  function novaEmpresaRelacionada(){
-    return {
-      uid: criarUidEmpresaRelacionada(),
-      id_empresa: "",
-      razao_social: "",
-      cnpj: "",
-      marca: ""
-    };
-  }
-
-  function garantirEmpresasRelacionadasEstado(estado){
-    if(!Array.isArray(estado.empresas_relacionadas)){
-      estado.empresas_relacionadas = [];
-    }
-
-    estado.empresas_relacionadas = estado.empresas_relacionadas.filter(function(item){
-      return item && typeof item === "object";
-    });
-
-    if(!estado.empresas_relacionadas.length){
-      estado.empresas_relacionadas.push(novaEmpresaRelacionada());
-    }
-
-    estado.empresas_relacionadas.forEach(function(item){
-      if(!texto(item.uid)) item.uid = criarUidEmpresaRelacionada();
-      item.id_empresa = texto(item.id_empresa);
-      item.razao_social = texto(item.razao_social);
-      item.cnpj = texto(item.cnpj);
-      item.marca = texto(item.marca);
-    });
-  }
-
-  function obterEmpresaRelacionadaPorUid(estado, uid){
-    garantirEmpresasRelacionadasEstado(estado);
-    return estado.empresas_relacionadas.find(function(item){ return texto(item.uid) === texto(uid); });
-  }
-
-  function renderOpcoesComboEmpresaRelacionada(estado, item, input, lista){
-    if(!input || !lista) return;
-
-    const termo = normalizar(input.value);
-    const idSelecionado = texto(item.id_empresa);
-    const clientes = Array.isArray(estado.clientes) ? estado.clientes : [];
-    const itens = clientes.filter(function(empresa){
-      return !termo || normalizar(labelEmpresa(empresa)).includes(termo);
-    });
-
-    lista.innerHTML = "";
-
-    if(!itens.length){
-      const vazio = document.createElement("div");
-      vazio.className = "kb-combobox-item";
-      vazio.innerHTML = "<span class='top'>Nenhuma empresa encontrada</span>";
-      lista.appendChild(vazio);
-    }else{
-      itens.slice(0, 200).forEach(function(empresa){
-        const id = getEmpresaId(empresa);
-        const div = document.createElement("div");
-        div.className = "kb-combobox-item" + (id && id === idSelecionado ? " is-selected" : "");
-        div.innerHTML = "<span class='top'>" + escapeHtml(labelEmpresa(empresa)) + "</span>" + (id && id === idSelecionado ? "<span class='kb-face-check'>✓</span>" : "");
-        div.addEventListener("mousedown", function(ev){
-          ev.preventDefault();
-          item.id_empresa = id;
-          item.razao_social = texto(empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia);
-          item.cnpj = texto(empresa.CNPJ);
-          input.value = labelEmpresa(empresa);
-          fecharLista(lista);
-          renderCardsReservas();
-        });
-        lista.appendChild(div);
-      });
-    }
-
-    abrirLista(lista);
   }
 
   function montarComboCard(estado, card, cfg){
@@ -1324,6 +1591,7 @@
             ev.preventDefault();
             cfg.onSelect(estado, item, input, card);
             fecharLista(lista);
+            atualizarBloqueioSeletorFaces();
           });
           lista.appendChild(div);
         });
@@ -1334,6 +1602,7 @@
 
     input.addEventListener("input", function(){
       cfg.onInputLivre(estado, input.value);
+      atualizarBloqueioSeletorFaces();
       render();
     });
     input.addEventListener("focus", render);
@@ -1346,102 +1615,30 @@
     if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
   }
 
-  function htmlEmpresasRelacionadas(estado){
-    garantirEmpresasRelacionadasEstado(estado);
-
-    const linhas = estado.empresas_relacionadas.map(function(item, idx){
-      const empresa = estado.clientes.find(function(cli){ return getEmpresaId(cli) === texto(item.id_empresa); });
-      const valorInput = empresa ? labelEmpresa(empresa) : texto(item.razao_social || item.cnpj || "");
-      const mostrarMarca = !!texto(item.id_empresa);
-
-      return "<div class='reserva-empresa-relacionada-item' data-role='empresa-relacionada-item' data-uid='" + escapeHtml(item.uid) + "'>" +
-        "<div class='reserva-empresa-relacionada-linha'>" +
-          "<div><label class='campo-label'>Empresa Relacionada</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-empresa-relacionada' type='text' autocomplete='off' placeholder='Digite razão social ou CNPJ...' value='" + escapeHtml(valorInput) + "'><button class='kb-combobox-toggle' data-role='btn-empresa-relacionada' type='button' aria-label='Abrir lista de empresas'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-empresa-relacionada'></div></div><div class='hint'>Opcional. Use + para adicionar outra empresa relacionada.</div></div>" +
-          "<button type='button' class='reserva-empresa-relacionada-btn is-add' data-role='add-empresa-relacionada' title='Adicionar empresa relacionada'>+</button>" +
-          "<button type='button' class='reserva-empresa-relacionada-btn is-remove' data-role='remover-empresa-relacionada' title='Remover empresa relacionada'>−</button>" +
-        "</div>" +
-        (mostrarMarca
-          ? "<div class='reserva-empresa-relacionada-marca'><label class='campo-label'>Marca da empresa relacionada</label><input class='form-control' data-role='marca-empresa-relacionada' type='text' maxlength='200' placeholder='Se ficar vazio, usa a Marca Exibida principal' value='" + escapeHtml(item.marca) + "'><div class='hint'>Opcional. Se não preencher, o sistema salva a mesma Marca Exibida principal deste card.</div></div>"
-          : "") +
-      "</div>";
-    }).join("");
-
-    return "<div class='reserva-empresas-relacionadas'>" +
-      "<div class='reserva-empresas-relacionadas-top'>" +
-        "<div><div class='reserva-empresas-relacionadas-title'>Empresa Relacionada</div><div class='hint'>Campo opcional para vincular uma ou mais empresas extras à reserva.</div></div>" +
-      "</div>" +
-      "<div class='reserva-empresas-relacionadas-lista' data-role='empresas-relacionadas-lista'>" + linhas + "</div>" +
-    "</div>";
-  }
-
   function htmlCardReservaVazio(){
-    return "<div class='reserva-card-top'>" +
-      "<div><div class='reserva-card-titulo'>Reserva da primeira face <span class='tag-pendente'>SELECIONE UMA FACE</span></div>" +
-      "<div class='reserva-card-resumo'></div></div>" +
-      "</div>" +
-
-      "<div class='reserva-grid-4'>" +
-        "<div><label class='campo-label'>Cota desta face</label><input class='form-control' value='Selecione uma face' readonly tabindex='-1'><div class='hint'></div></div>" +
-        "<div><label class='campo-label'>Data início</label><input type='text' class='form-control' placeholder='AAAA-MM-DD' value='" + escapeHtml(hojeYmd()) + "' disabled></div>" +
-        "<div><label class='campo-label'>Data fim</label><input type='text' class='form-control' placeholder='AAAA-MM-DD' value='" + escapeHtml(hojeYmd()) + "' disabled></div>" +
-        "<div><label class='campo-label'>Prazo da reserva</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'></div></div>" +
-      "</div>" +
-
-      "<div style='height:12px;'></div>" +
-
-      "<div class='reserva-grid-3'>" +
-        "<div><label class='campo-label'>Empresa (Cliente)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite nome ou CNPJ...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
-        "<div><label class='campo-label'>Vendedor</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' type='text' autocomplete='off' placeholder='Digite nome do vendedor...' disabled><button class='kb-combobox-toggle' type='button' disabled>▾</button></div></div>" +
-      "</div>" +
-
-      "<div style='height:12px;'></div>" +
-
-      "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input type='text' class='form-control' maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' disabled><div class='hint'>Este campo será liberado depois de selecionar a face.</div></div>" +
-
-      "<div style='height:12px;'></div>" +
-
-      "<div><label class='campo-label'>Observação</label><textarea class='form-control' rows='3' placeholder='Anotações da reserva...' disabled></textarea></div>" +
-      "<div class='card-msg ok'>Selecione a primeira face acima para carregar os dados deste card.</div>";
+    return "<div class='reserva-face-vazio'>Nenhuma face selecionada ainda. Use o sinal <strong>+</strong> na lista de Face/Ponto para adicionar uma ou mais faces. Quando uma face estiver selecionada, use o sinal <strong>−</strong> para removê-la.</div>";
   }
 
   function htmlCardReserva(estado){
     const face = estado.face;
     const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
     const cotaHtml = ehDigital(face)
-      ? "<div><label class='campo-label'>Cota desta face</label><select class='form-control' data-role='cota-face'><option value='540'>540</option><option value='1080'>1080</option></select><div class='hint'>Painel digital: 540 consome 1 slot; 1080 consome 2 slots.</div></div>"
-      : "<div><label class='campo-label'>Cota desta face</label><input class='form-control' value='Não se aplica' readonly tabindex='-1'><div class='hint'>Painel não digital: a cota será gravada vazia.</div></div>";
+      ? "<div><label class='campo-label'>Cota</label><select class='form-control' data-role='cota-face'><option value='540'>540</option><option value='1080'>1080</option></select><div class='hint'>540 consome 1 slot; 1080 consome 2 slots.</div></div>"
+      : "<div><label class='campo-label'>Cota</label><input class='form-control' value='Não se aplica' readonly tabindex='-1'><div class='hint'>Painel não digital: cota vazia.</div></div>";
 
-    return "<div class='reserva-card-top'>" +
-      "<div><div class='reserva-card-titulo'>Reserva da face " + escapeHtml(codFace(face) || "—") + tagTipo + "</div>" +
-      "<div class='reserva-card-resumo'>" + escapeHtml(resumoFace(face) || "—") + "</div></div>" +
-      "<button type='button' class='reserva-face-remover' data-role='remover-face'>Remover</button>" +
+    return "<div class='reserva-face-linha-top'>" +
+      "<div><div class='reserva-face-linha-titulo'>Face " + escapeHtml(codFace(face) || "—") + tagTipo + "</div>" +
+      "<div class='reserva-face-linha-resumo'>" + escapeHtml(resumoFace(face) || "—") + "</div></div>" +
+      "<button type='button' class='reserva-face-remover-compacto' data-role='remover-face'>Remover</button>" +
       "</div>" +
 
-      "<div class='reserva-grid-4'>" +
+      "<div class='reserva-face-controles'>" +
         cotaHtml +
         "<div><label class='campo-label'>Data início</label><input data-role='data-inicio' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_inicio) + "'></div>" +
         "<div><label class='campo-label'>Data fim</label><input data-role='data-fim' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_fim) + "'></div>" +
-        "<div><label class='campo-label'>Prazo da reserva</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>No backend isso vira 2 dias úteis, pulando sábado e domingo.</div></div>" +
+        "<div><label class='campo-label'>Prazo</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>No backend isso vira 2 dias úteis.</div></div>" +
       "</div>" +
 
-      "<div style='height:12px;'></div>" +
-
-      "<div class='reserva-grid-3'>" +
-        "<div><label class='campo-label'>Empresa (Cliente)</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-cliente' type='text' autocomplete='off' placeholder='Digite nome ou CNPJ...'><button class='kb-combobox-toggle' data-role='btn-cliente' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-cliente'></div></div></div>" +
-        "<div><label class='campo-label'>Vendedor</label><div class='kb-combobox'><input class='kb-input kb-combobox-input' data-role='input-vendedor' type='text' autocomplete='off' placeholder='Digite nome do vendedor...'><button class='kb-combobox-toggle' data-role='btn-vendedor' type='button'>▾</button><div class='kb-combobox-lista' hidden data-role='lista-vendedor'></div></div></div>" +
-      "</div>" +
-
-      "<div style='height:12px;'></div>" +
-
-      "<div><label class='campo-label'>Marca Exibida <span style='color:#b00020;'>*</span></label><input data-role='marca-exibida' type='text' class='form-control' required maxlength='200' placeholder='Ex: Coca-Cola / Banco do Brasil / etc.' value='" + escapeHtml(estado.marca_exibida) + "'><div class='hint'>Obrigatório • até 200 caracteres.</div></div>" +
-
-      "<div style='height:12px;'></div>" +
-
-      htmlEmpresasRelacionadas(estado) +
-
-      "<div style='height:12px;'></div>" +
-
-      "<div><label class='campo-label'>Observação</label><textarea data-role='observacao' class='form-control' rows='3' placeholder='Anotações da reserva...'>" + escapeHtml(estado.observacao) + "</textarea></div>" +
       "<div class='card-msg " + (estado.card_msg ? (estado.card_msg_ok ? "ok" : "err") : "") + "' data-role='card-msg'>" + escapeHtml(estado.card_msg) + "</div>";
   }
 
@@ -1453,6 +1650,7 @@
         renderCardsReservas();
         renderListaFaces(faces);
         atualizarSelectCodFace();
+        atualizarBloqueioSeletorFaces();
       });
     }
 
@@ -1461,6 +1659,7 @@
       selectCota.value = cotaFace(estado.face) || "540";
       selectCota.addEventListener("change", function(){
         estado.face.__cota = texto(selectCota.value);
+        atualizarBloqueioSeletorFaces();
         carregarDadosCard(estado.chave);
         carregarCalendario(estado);
       });
@@ -1468,8 +1667,6 @@
 
     const dataInicio = card.querySelector("[data-role='data-inicio']");
     const dataFim = card.querySelector("[data-role='data-fim']");
-    const marca = card.querySelector("[data-role='marca-exibida']");
-    const observacao = card.querySelector("[data-role='observacao']");
 
     function aplicarDatas(acionarCarga){
       if(dataInicio) estado.data_inicio = texto(dataInicio.value) || hojeYmd();
@@ -1479,6 +1676,7 @@
       if(dataFim) dataFim.value = estado.data_fim;
       garantirFimNaoAntesDoInicioEstado(estado);
       validarDatasEstadoNoClient(estado);
+      atualizarBloqueioSeletorFaces();
       if(acionarCarga) carregarDadosCard(estado.chave);
     }
 
@@ -1494,89 +1692,6 @@
     if(dataFim){ dataFim.addEventListener("blur", function(){ aplicarDatasAoSairDoCampo(dataFim); }); }
 
     inicializarFlatpickrCard(estado, dataInicio, dataFim);
-
-    if(marca){ marca.addEventListener("input", function(){ estado.marca_exibida = texto(marca.value); }); }
-    if(observacao){ observacao.addEventListener("input", function(){ estado.observacao = texto(observacao.value); }); }
-
-    montarComboCard(estado, card, {
-      inputSelector:"[data-role='input-cliente']",
-      listaSelector:"[data-role='lista-cliente']",
-      botaoSelector:"[data-role='btn-cliente']",
-      getLista:function(e){ return e.clientes; },
-      getLabel:labelEmpresa,
-      onInputLivre:function(e){ e.id_cliente = ""; },
-      onSelect:function(e, item, input){
-        e.id_cliente = getEmpresaId(item);
-        input.value = labelEmpresa(item);
-      }
-    });
-
-    montarComboCard(estado, card, {
-      inputSelector:"[data-role='input-vendedor']",
-      listaSelector:"[data-role='lista-vendedor']",
-      botaoSelector:"[data-role='btn-vendedor']",
-      getLista:function(e){ return e.vendedores; },
-      getLabel:labelVendedor,
-      onInputLivre:function(e){ e.id_vendedor = ""; },
-      onSelect:function(e, item, input){
-        e.id_vendedor = getVendedorId(item);
-        input.value = labelVendedor(item);
-      }
-    });
-
-
-    garantirEmpresasRelacionadasEstado(estado);
-    card.querySelectorAll("[data-role='empresa-relacionada-item']").forEach(function(container){
-      const uid = texto(container.getAttribute("data-uid"));
-      const item = obterEmpresaRelacionadaPorUid(estado, uid);
-      if(!item) return;
-
-      const input = container.querySelector("[data-role='input-empresa-relacionada']");
-      const lista = container.querySelector("[data-role='lista-empresa-relacionada']");
-      const botao = container.querySelector("[data-role='btn-empresa-relacionada']");
-      const marcaRelacionada = container.querySelector("[data-role='marca-empresa-relacionada']");
-      const btnAdd = container.querySelector("[data-role='add-empresa-relacionada']");
-      const btnRemoverRelacionado = container.querySelector("[data-role='remover-empresa-relacionada']");
-
-      if(input && lista && botao){
-        const renderRelacionado = function(){ renderOpcoesComboEmpresaRelacionada(estado, item, input, lista); };
-        input.addEventListener("input", function(){
-          item.id_empresa = "";
-          item.razao_social = texto(input.value);
-          item.cnpj = "";
-          renderRelacionado();
-        });
-        input.addEventListener("focus", renderRelacionado);
-        botao.addEventListener("click", renderRelacionado);
-      }
-
-      if(marcaRelacionada){
-        marcaRelacionada.addEventListener("input", function(){
-          item.marca = texto(marcaRelacionada.value);
-        });
-      }
-
-      if(btnAdd){
-        btnAdd.addEventListener("click", function(){
-          garantirEmpresasRelacionadasEstado(estado);
-          estado.empresas_relacionadas.push(novaEmpresaRelacionada());
-          renderCardsReservas();
-        });
-      }
-
-      if(btnRemoverRelacionado){
-        btnRemoverRelacionado.addEventListener("click", function(){
-          garantirEmpresasRelacionadasEstado(estado);
-          estado.empresas_relacionadas = estado.empresas_relacionadas.filter(function(emp){ return texto(emp.uid) !== uid; });
-          if(!estado.empresas_relacionadas.length){
-            estado.empresas_relacionadas.push(novaEmpresaRelacionada());
-          }
-          renderCardsReservas();
-        });
-      }
-    });
-
-    preencherInputComboPorValor(estado, card);
   }
 
   function renderCardsReservas(){
@@ -1585,22 +1700,21 @@
 
     const estados = Array.from(estadosCards.values());
     if(!estados.length){
-      const cardInicial = document.createElement("div");
-      cardInicial.className = "reserva-ocupacao-card is-face-card is-face-pendente";
-      cardInicial.innerHTML = htmlCardReservaVazio();
-      elCardsReservasFaces.appendChild(cardInicial);
+      elCardsReservasFaces.innerHTML = htmlCardReservaVazio();
+      atualizarBloqueioSeletorFaces();
       return;
     }
 
     estados.forEach(function(estado){
       corrigirDatasEstado(estado);
-      const card = document.createElement("div");
-      card.className = "reserva-ocupacao-card is-face-card";
-      card.setAttribute("data-chave-face", estado.chave);
-      card.innerHTML = htmlCardReserva(estado);
-      elCardsReservasFaces.appendChild(card);
-      bindCard(estado, card);
+      const linha = document.createElement("div");
+      linha.className = "reserva-face-linha";
+      linha.setAttribute("data-chave-face", estado.chave);
+      linha.innerHTML = htmlCardReserva(estado);
+      elCardsReservasFaces.appendChild(linha);
+      bindCard(estado, linha);
     });
+    atualizarBloqueioSeletorFaces();
   }
 
   async function carregarDadosCard(chave){
@@ -1608,7 +1722,7 @@
     if(!estado) return;
 
     corrigirDatasEstado(estado);
-    setCardMsg(estado, "Carregando clientes e vendedores desta face...", true);
+    setCardMsg(estado, "Carregando disponibilidade desta face...", true);
 
     const face = estado.face;
     const qs = new URLSearchParams();
@@ -1627,8 +1741,6 @@
         return;
       }
 
-      estado.clientes = data.clientes || data.empresas || [];
-      estado.vendedores = data.vendedores || [];
       estado.contratos = data.contratos || [];
       montarRangesDeOcupacaoEstado(estado, data.ocupacoes || data.Ocupacoes || []);
       if(data.cal || data.calendario || data.calendar || data.dias_calendario || data.day_status){
@@ -1642,18 +1754,9 @@
         if(id) estado.contratosMap.set(id, item);
       });
 
-      if(estado.id_cliente && !estado.clientes.some(function(item){ return getEmpresaId(item) === estado.id_cliente; })) estado.id_cliente = "";
-      if(estado.id_vendedor && !estado.vendedores.some(function(item){ return getVendedorId(item) === estado.id_vendedor; })) estado.id_vendedor = "";
       if(estado.id_contrato && !estado.contratosMap.has(estado.id_contrato)) estado.id_contrato = "";
 
-      garantirEmpresasRelacionadasEstado(estado);
-      estado.empresas_relacionadas.forEach(function(rel){
-        if(rel.id_empresa && !estado.clientes.some(function(item){ return getEmpresaId(item) === rel.id_empresa; })){
-          rel.id_empresa = "";
-        }
-      });
-
-      estado.card_msg = "Dados carregados para esta face.";
+      estado.card_msg = "Disponibilidade carregada para esta face.";
       estado.card_msg_ok = true;
       renderCardsReservas();
     }catch(e){
@@ -1691,19 +1794,6 @@
     const contrato = estado.contratosMap.get(texto(estado.id_contrato));
     const idFatoControle = contrato ? numeroInteiroOuVazio(contrato.IDFatoControleContratosEuromidia) : "";
 
-    garantirEmpresasRelacionadasEstado(estado);
-    const empresasRelacionadas = estado.empresas_relacionadas
-      .filter(function(item){ return texto(item.id_empresa); })
-      .map(function(item){
-        const empresa = estado.clientes.find(function(cli){ return getEmpresaId(cli) === texto(item.id_empresa); });
-        return {
-          id_empresa: texto(item.id_empresa),
-          razao_social: texto(item.razao_social || (empresa ? (empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia) : "")),
-          cnpj: texto(item.cnpj || (empresa ? empresa.CNPJ : "")),
-          marca: texto(item.marca) || texto(estado.marca_exibida)
-        };
-      });
-
     return {
       csrf_token: getCsrfToken(),
       cod_ponto: codPonto(estado.face),
@@ -1712,14 +1802,13 @@
       data_inicio: estado.data_inicio,
       data_fim: estado.data_fim,
       dias: "2",
-      id_cliente: texto(estado.id_cliente),
-      id_vendedor: texto(estado.id_vendedor),
+      id_cliente: texto(dadosReservaGlobal.id_cliente),
+      id_vendedor: texto(dadosReservaGlobal.id_vendedor),
       id_fato_controle_contratos: idFatoControle,
       numero_contrato: contrato ? texto(contrato.NumeroContrato) : texto(estado.numero_contrato),
       numero_previa: contrato ? texto(contrato.NumeroPrevia) : texto(estado.numero_previa),
-      marca_exibida: texto(estado.marca_exibida),
-      empresas_relacionadas: empresasRelacionadas,
-      observacao: texto(estado.observacao)
+      marca_exibida: texto(dadosReservaGlobal.marca_exibida),
+      observacao: texto(dadosReservaGlobal.observacao)
     };
   }
 
@@ -1732,23 +1821,20 @@
     if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)) return "Não é permitido reservar datas anteriores a " + hojeYmd() + ".";
     if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) return "Data fim não pode ser menor que data início.";
     if(rangesTemConflitoEstado(estado, estado.data_inicio, estado.data_fim)) return "Período conflita com dia CHEIO/INDISPONÍVEL ou não tem slots suficientes para esta cota.";
-    if(!texto(estado.id_cliente)) return "Selecione uma empresa/cliente.";
-    if(!texto(estado.id_vendedor)) return "Selecione um vendedor.";
-    if(!texto(estado.marca_exibida)) return "Informe a Marca Exibida.";
-    if(texto(estado.marca_exibida).length > 200) return "Marca Exibida excede 200 caracteres.";
-
-    garantirEmpresasRelacionadasEstado(estado);
-    for(const rel of estado.empresas_relacionadas){
-      if(texto(rel.id_empresa) && texto(rel.marca).length > 200){
-        return "Marca da empresa relacionada excede 200 caracteres.";
-      }
-    }
 
     return "";
   }
 
   async function salvarReserva(ev){
     ev.preventDefault();
+
+    const erroGlobal = erroDadosReservaGlobal();
+    if(erroGlobal){
+      setMsgDadosGlobal("Preencha os dados fixos da reserva antes de salvar: " + erroGlobal + ".", false);
+      setMsg("Corrija os dados fixos da reserva.", false);
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
 
     const estados = Array.from(estadosCards.values());
     if(!estados.length){
@@ -1760,7 +1846,7 @@
       const erro = validarEstado(estado);
       if(erro){
         setCardMsg(estado, erro, false);
-        setMsg("Corrija o card da face " + codFace(estado.face) + ".", false);
+        setMsg("Corrija os dados da face " + codFace(estado.face) + ".", false);
         renderCardsReservas();
         return;
       }
@@ -1810,13 +1896,17 @@
     }
   }
 
-  elInputFace.addEventListener("focus", filtrarFacesLocal);
+  elInputFace.addEventListener("focus", function(){ if(seletorFacesLiberadoParaAdicionar()) filtrarFacesLocal(); });
   elInputFace.addEventListener("input", function(){
+    if(!seletorFacesLiberadoParaAdicionar()){
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
     filtrarFacesLocal();
     clearTimeout(timerBuscaFace);
     timerBuscaFace = setTimeout(buscarFacesRemoto, 250);
   });
-  elBtnToggleFace.addEventListener("click", function(){ filtrarFacesLocal(); });
+  elBtnToggleFace.addEventListener("click", function(){ if(seletorFacesLiberadoParaAdicionar()) filtrarFacesLocal(); });
   elForm.addEventListener("submit", salvarReserva);
 
   document.addEventListener("click", function(ev){
@@ -1861,8 +1951,9 @@
     renderListaFaces(faces);
     atualizarSelectCodFace();
 
-    const primeiro = Array.from(estadosCards.values())[0];
-    if(primeiro) elInputFace.value = labelFace(primeiro.face);
+    elInputFace.value = "";
+
+    atualizarBloqueioSeletorFaces();
 
     Array.from(estadosCards.keys()).forEach(function(chave){
       carregarDadosCard(chave);
@@ -1875,7 +1966,9 @@
     Exemplo: /paineis/ocupacao/reserva/nova?codponto=30&codface=30A
     já abre o card completo da face 30A.
   */
+  bindDadosReservaGlobal();
   selecionarFacesIniciais();
+  carregarDadosGlobaisReserva();
 })();
 </script>
 {% endblock %}

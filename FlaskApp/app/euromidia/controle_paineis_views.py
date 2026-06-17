@@ -18934,6 +18934,7 @@ def reserva_ocupacao():
         dt_ini=dt_ini.strftime("%Y-%m-%d"),
         dt_fim=dt_fim.strftime("%Y-%m-%d"),
         data_minima_reserva=data_minima_reserva.strftime("%Y-%m-%d"),
+        bloquear_selecao_face_ate_card_completo=True,
     )
 
 
@@ -19556,9 +19557,6 @@ def api_ocupacao_reserva_dados_modal():
     dt_ini = (request.args.get("dt_ini") or "").strip()
     dt_fim = (request.args.get("dt_fim") or "").strip()
 
-    if not cod_face:
-        return jsonify({"ok": False, "erro": "cod_face obrigatório"}), 400
-
     def executar_primeiro_sql_que_funciona(lista_sql, params):
         for sql_txt in lista_sql:
             try:
@@ -19608,6 +19606,16 @@ def api_ocupacao_reserva_dados_modal():
         """
     ]
     vendedores = executar_primeiro_sql_que_funciona(sqls_vendedores, {})
+
+    if not cod_face:
+        return jsonify({
+            "ok": True,
+            "empresas": empresas,
+            "clientes": empresas,
+            "vendedores": vendedores,
+            "contratos": [],
+            "ocupacoes": [],
+        })
 
     params_contratos = {
         "cod_ponto": cod_ponto,
