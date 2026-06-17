@@ -82,6 +82,19 @@
     min-width:0;
   }
 
+  .reserva-filtros-faces-grid{
+    display:grid;
+    grid-template-columns:minmax(180px, 260px) minmax(180px, 260px) minmax(320px, 1fr) minmax(160px, 220px);
+    gap:clamp(10px, 1vw, 16px);
+    align-items:start;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-filtros-faces-grid > div{
+    min-width:0;
+  }
+
   .reserva-grid-2 > div,
   .reserva-grid-3 > div,
   .reserva-grid-4 > div{
@@ -96,7 +109,8 @@
 
     .reserva-grid-2,
     .reserva-grid-3,
-    .reserva-grid-4{
+    .reserva-grid-4,
+    .reserva-filtros-faces-grid{
       grid-template-columns:1fr;
     }
   }
@@ -315,6 +329,121 @@
 
   .kb-combobox.is-bloqueado{
     opacity:.96;
+  }
+
+  .dd{
+    position:relative;
+    width:100%;
+    min-width:0;
+  }
+
+  .dd-summary{
+    min-height:48px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    padding:9px 12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    cursor:pointer;
+    font-weight:900;
+    list-style:none;
+    user-select:none;
+  }
+
+  .dd-summary::-webkit-details-marker{
+    display:none;
+  }
+
+  .dd-label{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .dd-caret{
+    font-weight:1000;
+    opacity:.75;
+  }
+
+  .dd[open] .dd-caret{
+    transform:rotate(180deg);
+  }
+
+  .dd-panel{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(100% + 6px);
+    z-index:10050;
+    max-height:360px;
+    overflow:auto;
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 16px 35px rgba(15,23,42,.16);
+    padding:10px;
+  }
+
+  .dd-search{
+    width:100%;
+    min-height:38px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:8px 10px;
+    outline:none;
+    font-weight:800;
+  }
+
+  .dd-search:focus{
+    box-shadow:0 0 0 3px rgba(37,99,235,.10);
+  }
+
+  .dd-hint{
+    margin:7px 0 8px;
+    font-size:12px;
+    font-weight:800;
+    color:#64748b;
+  }
+
+  .dd-item{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-height:34px;
+    padding:7px 8px;
+    border-radius:10px;
+    font-weight:850;
+    cursor:pointer;
+  }
+
+  .dd-item:hover{
+    background:#f8fafc;
+  }
+
+  .dd-item input{
+    width:16px;
+    height:16px;
+    flex:0 0 auto;
+  }
+
+  .dd-vazio{
+    padding:10px 8px;
+    color:#64748b;
+    font-weight:900;
+  }
+
+  .dd.is-bloqueado .dd-summary{
+    background:#f8fafc;
+    color:#64748b;
+    opacity:1;
+    cursor:not-allowed;
+  }
+
+  .dd.is-bloqueado .dd-panel{
+    display:none;
   }
 
   .hint.is-bloqueio-face{
@@ -666,7 +795,39 @@
       </div>
 
       <div class="reserva-ocupacao-card" id="cardSeletorFacesReserva" hidden>
-        <div class="reserva-grid-2">
+        <div class="reserva-filtros-faces-grid">
+          <div>
+            <label class="campo-label">Cidade</label>
+            <details class="dd" data-dd="cidade_reserva_ocupacao" id="ddFiltroCidadeFace">
+              <summary class="dd-summary">
+                <span class="dd-label" id="labelFiltroCidadeFace">Cidade</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+              <div class="dd-panel">
+                <input type="text" class="dd-search" id="inputFiltroCidadeFace" placeholder="Pesquisar..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+                <div class="dd-items" id="itensFiltroCidadeFace"></div>
+              </div>
+            </details>
+            <div class="hint">Filtra pelas cidades</div>
+          </div>
+
+          <div>
+            <label class="campo-label">Tipo Produto</label>
+            <details class="dd" data-dd="tipo_produto_reserva_ocupacao" id="ddFiltroTipoFace">
+              <summary class="dd-summary">
+                <span class="dd-label" id="labelFiltroTipoFace">Tipo Produto</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+              <div class="dd-panel">
+                <input type="text" class="dd-search" id="inputFiltroTipoFace" placeholder="Pesquisar..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+                <div class="dd-items" id="itensFiltroTipoFace"></div>
+              </div>
+            </details>
+            <div class="hint">Filtra pelo tipo da face/painel.</div>
+          </div>
+
           <div>
             <label class="campo-label">Face / Ponto</label>
             <div class="kb-combobox" data-role="combo-painel" id="comboFace">
@@ -714,6 +875,7 @@
   "use strict";
 
   const URL_FACES = "{{ url_for('Paineis.api_ocupacao_reserva_faces') }}";
+  const URL_FILTROS_FACES = "{{ url_for('Paineis.api_ocupacao_reserva_faces_filtros') }}";
   const URL_DADOS_MODAL = "{{ url_for('Paineis.api_ocupacao_reserva_dados_modal') }}";
   const URL_CRIAR = "{{ url_for('Paineis.api_ocupacao_reserva_criar') }}";
   const URL_CALENDARIO = "{{ url_for('Paineis.api_ocupacao_calendario') }}";
@@ -723,10 +885,13 @@
   const COD_FACE_INICIAL = "{{ (codface_sel or '')|e }}";
   const COD_FACES_INICIAIS = {{ (codfaces_sel if codfaces_sel is defined else [])|tojson }};
   const FACES_INICIAIS = {{ faces_json|tojson }};
+  const FILTROS_FACES_INICIAIS = {{ (filtros_faces_json if filtros_faces_json is defined else {'cidades': [], 'tipos': []})|tojson }};
+  const FILTROS_FACES_SELECIONADOS = {{ (filtros_faces_selecionados_json if filtros_faces_selecionados_json is defined else {'cidades': [], 'tipos': []})|tojson }};
 
   let faces = Array.isArray(FACES_INICIAIS) ? FACES_INICIAIS : [];
   let estadosCards = new Map();
   let timerBuscaFace = null;
+  let timerFiltrosFace = null;
   let dadosReservaGlobal = {
     id_cliente: "",
     id_vendedor: "",
@@ -761,6 +926,14 @@
   const elBtnVendedorGlobal = document.getElementById("btnVendedorGlobal");
   const elInputMarcaExibidaGlobal = document.getElementById("inputMarcaExibidaGlobal");
   const elInputObservacaoGlobal = document.getElementById("inputObservacaoGlobal");
+  const elDdFiltroCidadeFace = document.getElementById("ddFiltroCidadeFace");
+  const elDdFiltroTipoFace = document.getElementById("ddFiltroTipoFace");
+  const elLabelFiltroCidadeFace = document.getElementById("labelFiltroCidadeFace");
+  const elLabelFiltroTipoFace = document.getElementById("labelFiltroTipoFace");
+  const elInputFiltroCidadeFace = document.getElementById("inputFiltroCidadeFace");
+  const elInputFiltroTipoFace = document.getElementById("inputFiltroTipoFace");
+  const elItensFiltroCidadeFace = document.getElementById("itensFiltroCidadeFace");
+  const elItensFiltroTipoFace = document.getElementById("itensFiltroTipoFace");
 
   function texto(valor){ return (valor === null || valor === undefined) ? "" : String(valor).trim(); }
   function normalizar(valor){ return texto(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
@@ -770,6 +943,32 @@
   function ehDigital(face){ return Number(face.EhDigital || face.eh_digital || 0) === 1 || normalizar(face.TipoPainel || face.Tipo || face.tipo).includes("digital"); }
   function chaveFace(face){ return (codPonto(face) + "|" + codFace(face)).toUpperCase(); }
   function cotaFace(face){ return texto(face.__cota || (ehDigital(face) ? "540" : "")); }
+
+  function valorCidadeFace(face){ return texto(face.Cidade || face.cidade || face.Municipio || face.municipio); }
+  function valorTipoFace(face){ return texto(face.TipoPainel || face.Tipo || face.tipo || face.TipoProduto || face.tipo_produto); }
+
+  function listaTextoNormalizada(lista){
+    const saida = [];
+    const vistos = new Set();
+    (Array.isArray(lista) ? lista : []).forEach(function(valor){
+      const item = texto(valor);
+      if(!item) return;
+      const chave = item.toUpperCase();
+      if(vistos.has(chave)) return;
+      vistos.add(chave);
+      saida.push(item);
+    });
+    return saida;
+  }
+
+  let filtrosFaces = {
+    cidades: new Set(listaTextoNormalizada((FILTROS_FACES_SELECIONADOS || {}).cidades)),
+    tipos: new Set(listaTextoNormalizada((FILTROS_FACES_SELECIONADOS || {}).tipos)),
+    opcoes: {
+      cidades: listaTextoNormalizada((FILTROS_FACES_INICIAIS || {}).cidades),
+      tipos: listaTextoNormalizada((FILTROS_FACES_INICIAIS || {}).tipos)
+    }
+  };
 
   function hojeLocalYmd(){
     const agora = new Date();
@@ -834,6 +1033,205 @@
   function resumoFace(face){
     const endereco = texto(face.EnderecoExibicao) || [texto(face.Logradouro), texto(face.Numero) ? "Nº " + texto(face.Numero) : ""].filter(Boolean).join(", ");
     return [codPonto(face) ? "CodPonto " + codPonto(face) : "", endereco, texto(face.Bairro), texto(face.Cidade), texto(face.TipoPainel || face.Tipo)].filter(Boolean).join(" • ");
+  }
+
+  function facePassaFiltrosSelecionados(face){
+    const cidade = valorCidadeFace(face).toUpperCase();
+    const tipo = valorTipoFace(face).toUpperCase();
+    const cidadesSelecionadas = Array.from(filtrosFaces.cidades).map(function(v){ return texto(v).toUpperCase(); });
+    const tiposSelecionados = Array.from(filtrosFaces.tipos).map(function(v){ return texto(v).toUpperCase(); });
+
+    if(cidadesSelecionadas.length && !cidadesSelecionadas.includes(cidade)) return false;
+    if(tiposSelecionados.length && !tiposSelecionados.includes(tipo)) return false;
+    return true;
+  }
+
+  function resumoFiltroDropdown(rotulo, selecionados){
+    const lista = Array.from(selecionados || []).map(texto).filter(Boolean);
+    if(!lista.length) return rotulo;
+    if(lista.length === 1) return rotulo + ": " + lista[0];
+    return rotulo + ": " + lista.length + " selecionados";
+  }
+
+  function opcoesFiltroComSelecionados(chave){
+    const base = listaTextoNormalizada((filtrosFaces.opcoes || {})[chave]);
+    const selecionados = chave === "cidades" ? filtrosFaces.cidades : filtrosFaces.tipos;
+    selecionados.forEach(function(valor){
+      const item = texto(valor);
+      if(item && !base.some(function(v){ return v.toUpperCase() === item.toUpperCase(); })){
+        base.push(item);
+      }
+    });
+    base.sort(function(a, b){ return a.localeCompare(b, "pt-BR", {sensitivity:"base"}); });
+    return base;
+  }
+
+  function renderFiltroDropdown(cfg){
+    if(!cfg.itens || !cfg.label) return;
+
+    const busca = normalizar(cfg.input ? cfg.input.value : "");
+    const opcoes = opcoesFiltroComSelecionados(cfg.chave).filter(function(valor){
+      return !busca || normalizar(valor).includes(busca);
+    });
+    const selecionados = cfg.selecionados;
+
+    cfg.label.textContent = resumoFiltroDropdown(cfg.rotulo, selecionados);
+    cfg.itens.innerHTML = "";
+
+    const labelTodas = document.createElement("label");
+    labelTodas.className = "dd-item";
+    const inputTodas = document.createElement("input");
+    inputTodas.type = "checkbox";
+    inputTodas.name = cfg.nome;
+    inputTodas.value = "";
+    inputTodas.checked = selecionados.size === 0;
+    inputTodas.setAttribute("data-filtro-todas", "1");
+    inputTodas.setAttribute("data-filtro-chave", cfg.chave);
+    const spanTodas = document.createElement("span");
+    spanTodas.textContent = "(Todas)";
+    labelTodas.appendChild(inputTodas);
+    labelTodas.appendChild(spanTodas);
+    cfg.itens.appendChild(labelTodas);
+
+    if(!opcoes.length){
+      const vazio = document.createElement("div");
+      vazio.className = "dd-vazio";
+      vazio.textContent = "Nenhuma opção disponível";
+      cfg.itens.appendChild(vazio);
+      return;
+    }
+
+    opcoes.forEach(function(valor){
+      const item = document.createElement("label");
+      item.className = "dd-item";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = cfg.nome;
+      input.value = valor;
+      input.checked = Array.from(selecionados).some(function(v){ return texto(v).toUpperCase() === valor.toUpperCase(); });
+      input.setAttribute("data-filtro-chave", cfg.chave);
+      const span = document.createElement("span");
+      span.textContent = valor;
+      item.appendChild(input);
+      item.appendChild(span);
+      cfg.itens.appendChild(item);
+    });
+  }
+
+  function renderFiltrosFaces(){
+    renderFiltroDropdown({
+      chave:"cidades",
+      nome:"cidade_exibicao",
+      rotulo:"Cidade",
+      selecionados:filtrosFaces.cidades,
+      input:elInputFiltroCidadeFace,
+      itens:elItensFiltroCidadeFace,
+      label:elLabelFiltroCidadeFace
+    });
+
+    renderFiltroDropdown({
+      chave:"tipos",
+      nome:"tipo_produto",
+      rotulo:"Tipo Produto",
+      selecionados:filtrosFaces.tipos,
+      input:elInputFiltroTipoFace,
+      itens:elItensFiltroTipoFace,
+      label:elLabelFiltroTipoFace
+    });
+  }
+
+  function paramsFiltrosFaces(qs){
+    filtrosFaces.cidades.forEach(function(valor){ if(texto(valor)) qs.append("cidade", texto(valor)); });
+    filtrosFaces.tipos.forEach(function(valor){ if(texto(valor)) qs.append("tipo_produto", texto(valor)); });
+    return qs;
+  }
+
+  function aplicarMudancaFiltro(chave, valor, marcado, todas){
+    const destino = chave === "cidades" ? filtrosFaces.cidades : filtrosFaces.tipos;
+    if(!destino) return;
+
+    if(todas){
+      destino.clear();
+    }else{
+      const item = texto(valor);
+      if(!item) return;
+      if(marcado){
+        destino.add(item);
+      }else{
+        Array.from(destino).forEach(function(v){
+          if(texto(v).toUpperCase() === item.toUpperCase()) destino.delete(v);
+        });
+      }
+    }
+
+    renderFiltrosFaces();
+    filtrarFacesLocal({abrir:false});
+    fecharLista(elListaFace);
+    clearTimeout(timerFiltrosFace);
+    timerFiltrosFace = setTimeout(function(){
+      carregarFiltrosFacesRemoto({abrir:false});
+      buscarFacesRemoto({abrir:false});
+    }, 180);
+  }
+
+  async function carregarFiltrosFacesRemoto(opcoes){
+    const qs = paramsFiltrosFaces(new URLSearchParams());
+    try{
+      const resp = await fetch(URL_FILTROS_FACES + "?" + qs.toString(), {credentials:"same-origin"});
+      const data = await resp.json().catch(function(){ return null; });
+      if(!resp.ok || !data || !data.ok) return;
+      filtrosFaces.opcoes = {
+        cidades: listaTextoNormalizada(data.cidades || []),
+        tipos: listaTextoNormalizada(data.tipos || [])
+      };
+      renderFiltrosFaces();
+      filtrarFacesLocal(opcoes || {abrir:false});
+      if(opcoes && opcoes.abrir === false) fecharLista(elListaFace);
+    }catch(e){}
+  }
+
+  function bindFiltrosFaces(){
+    renderFiltrosFaces();
+
+    [elInputFiltroCidadeFace, elInputFiltroTipoFace].forEach(function(input){
+      if(!input) return;
+      input.addEventListener("input", renderFiltrosFaces);
+      input.addEventListener("keydown", function(ev){ ev.stopPropagation(); });
+      input.addEventListener("click", function(ev){ ev.stopPropagation(); });
+    });
+
+    [elItensFiltroCidadeFace, elItensFiltroTipoFace].forEach(function(container){
+      if(!container) return;
+      container.addEventListener("change", function(ev){
+        const input = ev.target;
+        if(!input || input.type !== "checkbox") return;
+        aplicarMudancaFiltro(
+          input.getAttribute("data-filtro-chave"),
+          input.value,
+          input.checked,
+          input.getAttribute("data-filtro-todas") === "1"
+        );
+      });
+      container.addEventListener("pointerdown", function(ev){ ev.stopPropagation(); });
+      container.addEventListener("mousedown", function(ev){ ev.stopPropagation(); });
+      container.addEventListener("click", function(ev){ ev.stopPropagation(); });
+    });
+
+    [elDdFiltroCidadeFace, elDdFiltroTipoFace].forEach(function(dd){
+      if(!dd) return;
+      const painel = dd.querySelector(".dd-panel");
+      if(painel){
+        painel.addEventListener("pointerdown", function(ev){ ev.stopPropagation(); });
+        painel.addEventListener("mousedown", function(ev){ ev.stopPropagation(); });
+        painel.addEventListener("click", function(ev){ ev.stopPropagation(); });
+      }
+      dd.addEventListener("toggle", function(){
+        if(!dd.open) return;
+        document.querySelectorAll("details.dd").forEach(function(outro){
+          if(outro !== dd) outro.open = false;
+        });
+      });
+    });
   }
 
   function getCsrfToken(){
@@ -1068,10 +1466,6 @@
     if(!estado.fp_fim) return;
     const minFim = maiorDataYmd(hojeYmd(), estado.data_inicio);
     estado.fp_fim.set("minDate", minFim);
-    if(texto(estado.data_fim) && compararDatasYmd(estado.data_fim, minFim) < 0){
-      estado.data_fim = minFim;
-      estado.fp_fim.setDate(minFim, false);
-    }
   }
 
   function atualizarRestricoesCalendariosEstado(estado){
@@ -1109,35 +1503,33 @@
 
     const onDia = function(dObj, dStr, fp, dayElem){ aplicarBadgeDia(estado, dayElem); };
 
-    function normalizarDataDigitada(valor, fallback){
-      const v = texto(valor);
-      if(!v) return fallback;
-      return dataPassada(v) ? fallback : v;
+    function normalizarDataDigitada(valor){
+      return texto(valor);
+    }
+
+    function deveCarregarDadosPeriodo(estado){
+      return !!(texto(estado.data_inicio) && texto(estado.data_fim));
     }
 
     function aplicarInicio(dateStr, acionarCarga){
       const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
       const valorDigitado = texto(dateStr || dataInicio.value);
-      estado.data_inicio = normalizarDataDigitada(valorDigitado, hojeYmd());
-      if(!estado.data_inicio) estado.data_inicio = hojeYmd();
-      if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) estado.data_fim = estado.data_inicio;
-      if(estado.fp_fim) estado.fp_fim.setDate(estado.data_fim, false);
+      estado.data_inicio = normalizarDataDigitada(valorDigitado);
       garantirFimNaoAntesDoInicioEstado(estado);
       validarDatasEstadoNoClient(estado);
+      atualizarBloqueioSeletorFaces();
       const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
-      if(acionarCarga && assinaturaDepois !== assinaturaAntes) carregarDadosCard(estado.chave);
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes && deveCarregarDadosPeriodo(estado)) carregarDadosCard(estado.chave);
     }
 
     function aplicarFim(dateStr, acionarCarga){
       const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
-      const minFim = maiorDataYmd(hojeYmd(), estado.data_inicio);
       const valorDigitado = texto(dateStr || dataFim.value);
-      estado.data_fim = normalizarDataDigitada(valorDigitado, minFim);
-      if(!estado.data_fim) estado.data_fim = minFim;
-      if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) estado.data_fim = estado.data_inicio;
+      estado.data_fim = normalizarDataDigitada(valorDigitado);
       validarDatasEstadoNoClient(estado);
+      atualizarBloqueioSeletorFaces();
       const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
-      if(acionarCarga && assinaturaDepois !== assinaturaAntes) carregarDadosCard(estado.chave);
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes && deveCarregarDadosPeriodo(estado)) carregarDadosCard(estado.chave);
     }
 
     estado.fp_inicio = flatpickr(dataInicio, {
@@ -1170,8 +1562,8 @@
       onClose:function(_, dateStr){ aplicarFim(dateStr, true); }
     });
 
-    estado.fp_inicio.setDate(estado.data_inicio, false);
-    estado.fp_fim.setDate(estado.data_fim, false);
+    if(texto(estado.data_inicio)) estado.fp_inicio.setDate(estado.data_inicio, false);
+    if(texto(estado.data_fim)) estado.fp_fim.setDate(estado.data_fim, false);
     atualizarRestricoesCalendariosEstado(estado);
   }
 
@@ -1212,16 +1604,21 @@
     });
   }
 
-  function filtrarFacesLocal(){
+  function filtrarFacesLocal(opcoes){
+    const cfg = opcoes || {};
+    const deveAbrirLista = cfg.abrir !== false;
     const termo = normalizar(elInputFace.value);
-    const lista = faces.filter(function(face){ return !termo || normalizar(labelFace(face)).includes(termo); });
+    const lista = faces.filter(function(face){
+      if(!facePassaFiltrosSelecionados(face)) return false;
+      return !termo || normalizar(labelFace(face)).includes(termo);
+    });
     renderListaFaces(lista);
-    abrirLista(elListaFace);
+    if(deveAbrirLista) abrirLista(elListaFace);
   }
 
-  async function buscarFacesRemoto(){
+  async function buscarFacesRemoto(opcoes){
     if(!seletorFacesLiberadoParaAdicionar()) return;
-    const qs = new URLSearchParams();
+    const qs = paramsFiltrosFaces(new URLSearchParams());
     const termo = texto(elInputFace.value);
     if(termo) qs.set("q", termo);
 
@@ -1241,7 +1638,8 @@
       }
     });
 
-    filtrarFacesLocal();
+    filtrarFacesLocal(opcoes);
+    if(opcoes && opcoes.abrir === false) fecharLista(elListaFace);
   }
 
   function criarEstadoFace(face){
@@ -1250,8 +1648,8 @@
     return {
       chave: chaveFace(copia),
       face: copia,
-      data_inicio: hojeYmd(),
-      data_fim: hojeYmd(),
+      data_inicio: "",
+      data_fim: "",
       id_cliente: "",
       id_vendedor: "",
       id_contrato: "",
@@ -1294,16 +1692,9 @@
       return;
     }
 
-    const pendente = primeiroEstadoPendenteParaLiberarNovaFace();
-    if(pendente && pendente.estado){
-      setMsg("Conclua primeiro os dados da face " + (codFace(pendente.estado.face) || "atual") + " para adicionar outra Face/Ponto.", false);
-      setCardMsg(pendente.estado, "Preencha os dados desta face para liberar a próxima Face/Ponto: " + pendente.erro + ".", false);
-      atualizarBloqueioSeletorFaces();
-      return;
-    }
-
     const estado = criarEstadoFace(face);
     estadosCards.set(chave, estado);
+    setMsg("Face " + (codFace(face) || "selecionada") + " adicionada. Você pode adicionar outras faces e preencher as datas em seguida.", true);
     renderCardsReservas();
     renderListaFaces(faces);
     atualizarSelectCodFace();
@@ -1341,7 +1732,7 @@
   }
 
   function seletorFacesLiberadoParaAdicionar(){
-    return dadosReservaGlobalCompleto() && (estadosCards.size === 0 || !primeiroEstadoPendenteParaLiberarNovaFace());
+    return dadosReservaGlobalCompleto();
   }
 
   function atualizarBloqueioSeletorFaces(){
@@ -1349,13 +1740,13 @@
 
     const erroGlobal = erroDadosReservaGlobal();
     const pendente = !erroGlobal ? primeiroEstadoPendenteParaLiberarNovaFace() : null;
-    const bloqueado = !!erroGlobal || !!pendente;
+    const bloqueado = !!erroGlobal;
 
     if(elInputFace){
       elInputFace.disabled = bloqueado;
       elInputFace.setAttribute("aria-disabled", bloqueado ? "true" : "false");
       elInputFace.placeholder = bloqueado
-        ? (erroGlobal ? "Preencha os dados da reserva acima" : "Conclua os dados da face atual para adicionar outra face")
+        ? "Preencha os dados da reserva acima"
         : "Digite CodFace, CodPonto, logradouro, número, cidade, bairro ou tipo...";
     }
 
@@ -1367,6 +1758,13 @@
     const comboFace = document.getElementById("comboFace");
     if(comboFace) comboFace.classList.toggle("is-bloqueado", bloqueado);
 
+    [elDdFiltroCidadeFace, elDdFiltroTipoFace].forEach(function(dd){
+      if(!dd) return;
+      dd.classList.toggle("is-bloqueado", bloqueado);
+      dd.setAttribute("aria-disabled", bloqueado ? "true" : "false");
+      if(bloqueado) dd.open = false;
+    });
+
     if(bloqueado){
       fecharLista(elListaFace);
     }
@@ -1375,12 +1773,12 @@
       elHintBloqueioFace.classList.toggle("is-bloqueio-face", bloqueado);
       if(erroGlobal){
         elHintBloqueioFace.textContent = "Preencha os dados fixos da reserva acima para liberar a seleção de Face/Ponto: " + erroGlobal + ".";
-      }else if(pendente && pendente.estado){
-        elHintBloqueioFace.textContent = "Para liberar a seleção de outra Face/Ponto, conclua os dados da face " + (codFace(pendente.estado.face) || "atual") + ": " + pendente.erro + ".";
       }else if(estadosCards.size === 0){
         elHintBloqueioFace.textContent = "Clique no sinal + para selecionar a primeira Face/Ponto.";
+      }else if(pendente && pendente.estado){
+        elHintBloqueioFace.textContent = "Você pode continuar adicionando outras faces. Antes de salvar, preencha os dados da face " + (codFace(pendente.estado.face) || "atual") + ": " + pendente.erro + ".";
       }else{
-        elHintBloqueioFace.textContent = "Face selecionada. Use o sinal + para adicionar outra Face/Ponto ou − para remover uma selecionada.";
+        elHintBloqueioFace.textContent = "Faces selecionadas. Use o sinal + para adicionar outra Face/Ponto ou − para remover uma selecionada.";
       }
     }
   }
@@ -1610,9 +2008,9 @@
   }
 
   function corrigirDatasEstado(estado){
-    if(!texto(estado.data_inicio) || dataPassada(estado.data_inicio)) estado.data_inicio = hojeYmd();
-    if(!texto(estado.data_fim) || dataPassada(estado.data_fim)) estado.data_fim = hojeYmd();
-    if(estado.data_fim < estado.data_inicio) estado.data_fim = estado.data_inicio;
+    if(!estado) return;
+    estado.data_inicio = texto(estado.data_inicio);
+    estado.data_fim = texto(estado.data_fim);
   }
 
   function htmlCardReservaVazio(){
@@ -1623,7 +2021,7 @@
     const face = estado.face;
     const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
     const cotaHtml = ehDigital(face)
-      ? "<div><label class='campo-label'>Cota</label><select class='form-control' data-role='cota-face'><option value='540'>540</option><option value='1080'>1080</option></select><div class='hint'>540 consome 1 slot; 1080 consome 2 slots.</div></div>"
+      ? "<div><label class='campo-label'>Cota</label><select class='form-control' data-role='cota-face'><option value='540'>540</option><option value='1080'>1080</option></select></div>"
       : "<div><label class='campo-label'>Cota</label><input class='form-control' value='Não se aplica' readonly tabindex='-1'><div class='hint'>Painel não digital: cota vazia.</div></div>";
 
     return "<div class='reserva-face-linha-top'>" +
@@ -1634,9 +2032,9 @@
 
       "<div class='reserva-face-controles'>" +
         cotaHtml +
-        "<div><label class='campo-label'>Data início</label><input data-role='data-inicio' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_inicio) + "'></div>" +
-        "<div><label class='campo-label'>Data fim</label><input data-role='data-fim' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_fim) + "'></div>" +
-        "<div><label class='campo-label'>Prazo</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>No backend isso vira 2 dias úteis.</div></div>" +
+        "<div><label class='campo-label'>Data Inicio Campanha</label><input data-role='data-inicio' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_inicio) + "'></div>" +
+        "<div><label class='campo-label'>Data Fim da Campanha</label><input data-role='data-fim' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_fim) + "'></div>" +
+        "<div><label class='campo-label'>Prazo</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>2 dias úteis.</div></div>" +
       "</div>" +
 
       "<div class='card-msg " + (estado.card_msg ? (estado.card_msg_ok ? "ok" : "err") : "") + "' data-role='card-msg'>" + escapeHtml(estado.card_msg) + "</div>";
@@ -1669,15 +2067,17 @@
     const dataFim = card.querySelector("[data-role='data-fim']");
 
     function aplicarDatas(acionarCarga){
-      if(dataInicio) estado.data_inicio = texto(dataInicio.value) || hojeYmd();
-      if(dataFim) estado.data_fim = texto(dataFim.value) || maiorDataYmd(hojeYmd(), estado.data_inicio);
+      const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
+      if(dataInicio) estado.data_inicio = texto(dataInicio.value);
+      if(dataFim) estado.data_fim = texto(dataFim.value);
       corrigirDatasEstado(estado);
       if(dataInicio) dataInicio.value = estado.data_inicio;
       if(dataFim) dataFim.value = estado.data_fim;
       garantirFimNaoAntesDoInicioEstado(estado);
       validarDatasEstadoNoClient(estado);
       atualizarBloqueioSeletorFaces();
-      if(acionarCarga) carregarDadosCard(estado.chave);
+      const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes && texto(estado.data_inicio) && texto(estado.data_fim)) carregarDadosCard(estado.chave);
     }
 
     function aplicarDatasAoSairDoCampo(input){
@@ -1722,6 +2122,10 @@
     if(!estado) return;
 
     corrigirDatasEstado(estado);
+    if(!texto(estado.data_inicio) || !texto(estado.data_fim)){
+      setCardMsg(estado, "Informe Data Inicio Campanha e Data Fim da Campanha para carregar a disponibilidade do período.", true);
+      return;
+    }
     setCardMsg(estado, "Carregando disponibilidade desta face...", true);
 
     const face = estado.face;
@@ -1913,6 +2317,10 @@
     const comboFace = document.getElementById("comboFace");
     if(comboFace && !comboFace.contains(ev.target)) fecharLista(elListaFace);
 
+    document.querySelectorAll("details.dd").forEach(function(dd){
+      if(!dd.contains(ev.target)) dd.open = false;
+    });
+
     document.querySelectorAll(".kb-combobox").forEach(function(combo){
       if(!combo.contains(ev.target)){
         const lista = combo.querySelector(".kb-combobox-lista");
@@ -1966,6 +2374,7 @@
     Exemplo: /paineis/ocupacao/reserva/nova?codponto=30&codface=30A
     já abre o card completo da face 30A.
   */
+  bindFiltrosFaces();
   bindDadosReservaGlobal();
   selecionarFacesIniciais();
   carregarDadosGlobaisReserva();

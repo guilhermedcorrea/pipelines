@@ -18678,14 +18678,75 @@ def reserva_nova():
 
 
 
-def _buscar_faces_para_reserva_ocupacao(q: str = "", codponto: int | None = None, limite: int = 800) -> list[dict]:
+def _normalizar_lista_texto_reserva_ocupacao(valores) -> list[str]:
+    """Eu normalizo listas vindas da URL/API para filtros de Cidade e Tipo Produto."""
+    saida: list[str] = []
+    vistos: set[str] = set()
+
+    if valores is None:
+        valores = []
+    elif isinstance(valores, str):
+        valores = [valores]
+
+    for valor in valores:
+        for parte in str(valor or "").replace(";", ",").split(","):
+            item = parte.strip()
+            if not item:
+                continue
+            chave = item.upper()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(item)
+
+    return saida
+
+
+def _parametros_lista_reserva_ocupacao(*nomes: str) -> list[str]:
+    """Eu aceito filtros repetidos ou separados por vírgula nos parâmetros da request."""
+    valores = []
+    for nome in nomes:
+        for valor in request.args.getlist(nome):
+            valores.append(valor)
+    return _normalizar_lista_texto_reserva_ocupacao(valores)
+
+
+def _normalizar_in_sql_reserva_ocupacao(valores) -> list[str]:
+    return [str(v or "").strip().upper() for v in _normalizar_lista_texto_reserva_ocupacao(valores) if str(v or "").strip()]
+
+
+def _aplicar_bindparams_expanding_reserva_ocupacao(sql, usar_cidades: bool = False, usar_tipos: bool = False):
+    binds = []
+    if usar_cidades:
+        binds.append(bindparam("cidades_norm", expanding=True))
+    if usar_tipos:
+        binds.append(bindparam("tipos_norm", expanding=True))
+    if binds:
+        sql = sql.bindparams(*binds)
+    return sql
+
+
+def _buscar_faces_para_reserva_ocupacao(
+    q: str = "",
+    codponto: int | None = None,
+    limite: int = 800,
+    cidades: list[str] | None = None,
+    tipos: list[str] | None = None,
+) -> list[dict]:
     """
     Eu busco faces para a nova tela independente de reserva.
 
     A tela precisa pesquisar CodFace mostrando contexto do ponto:
     CodFace, CodPonto, endereço, número, cidade, bairro e tipo.
+
+    Também aceito filtros de Cidade e Tipo Produto vindos de:
+    - [Integracao].[Silver].[DimPaineisEuromidia].Cidade
+    - [Integracao].[Silver].[DimPaineisEuromidia].Tipo
+    - [Integracao].[Silver].[DimFacesPaineis].Tipo
     """
     termo = str(q or "").strip()
+    cidades_norm = _normalizar_in_sql_reserva_ocupacao(cidades)
+    tipos_norm = _normalizar_in_sql_reserva_ocupacao(tipos)
 
     try:
         limite_int = int(limite or 800)
@@ -18720,6 +18781,14 @@ def _buscar_faces_para_reserva_ocupacao(q: str = "", codponto: int | None = None
             OR LTRIM(RTRIM(COALESCE(fb.TipoFace, p.Tipo, ''))) LIKE :q_like
         )
         """)
+
+    if cidades_norm:
+        filtros.append("UPPER(LTRIM(RTRIM(COALESCE(p.Cidade, '')))) IN :cidades_norm")
+        params["cidades_norm"] = cidades_norm
+
+    if tipos_norm:
+        filtros.append("UPPER(LTRIM(RTRIM(COALESCE(fb.TipoFace, p.Tipo, '')))) IN :tipos_norm")
+        params["tipos_norm"] = tipos_norm
 
     where_sql = " AND ".join(f"({filtro})" for filtro in filtros)
 
@@ -18783,6 +18852,12 @@ def _buscar_faces_para_reserva_ocupacao(q: str = "", codponto: int | None = None
             ,fb.CodFace ASC;
     """)
 
+    sql = _aplicar_bindparams_expanding_reserva_ocupacao(
+        sql,
+        usar_cidades=bool(cidades_norm),
+        usar_tipos=bool(tipos_norm),
+    )
+
     rows = db.session.execute(sql, params).mappings().all()
 
     faces = []
@@ -18831,6 +18906,127 @@ def _buscar_faces_para_reserva_ocupacao(q: str = "", codponto: int | None = None
     return faces
 
 
+def _buscar_distintos_filtro_faces_reserva_ocupacao(campo: str, cidades: list[str] | None = None, tipos: list[str] | None = None) -> list[str]:
+    """Eu busco valores distintos dos filtros da tela de reserva-ocupação."""
+    campo = str(campo or "").strip().lower()
+    if campo not in {"cidade", "tipo"}:
+        return []
+
+    cidades_norm = _normalizar_in_sql_reserva_ocupacao(cidades)
+    tipos_norm = _normalizar_in_sql_reserva_ocupacao(tipos)
+
+    if campo == "cidade":
+        expressao_valor = "NULLIF(LTRIM(RTRIM(COALESCE(p.Cidade, ''))), '')"
+    else:
+        expressao_valor = "NULLIF(LTRIM(RTRIM(COALESCE(fb.TipoFace, p.Tipo, ''))), '')"
+
+    filtros = [
+        "NULLIF(LTRIM(RTRIM(COALESCE(fb.CodFace, ''))), '') IS NOT NULL",
+        f"{expressao_valor} IS NOT NULL",
+    ]
+    params: dict = {}
+
+    if cidades_norm:
+        filtros.append("UPPER(LTRIM(RTRIM(COALESCE(p.Cidade, '')))) IN :cidades_norm")
+        params["cidades_norm"] = cidades_norm
+
+    if tipos_norm:
+        filtros.append("UPPER(LTRIM(RTRIM(COALESCE(fb.TipoFace, p.Tipo, '')))) IN :tipos_norm")
+        params["tipos_norm"] = tipos_norm
+
+    where_sql = " AND ".join(f"({filtro})" for filtro in filtros)
+
+    sql = text(f"""
+        ;WITH FacesBase AS (
+            SELECT
+                 f.IDDimFacesPaineis
+                ,f.IDDimPaineisEuromidia
+                ,f.CodFace
+                ,f.CodPonto
+                ,f.Face
+                ,TipoFace = NULLIF(LTRIM(RTRIM(COALESCE(f.Tipo, ''))), '')
+                ,rn = ROW_NUMBER() OVER (
+                    PARTITION BY
+                         f.CodPonto
+                        ,NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '')
+                    ORDER BY f.IDDimFacesPaineis DESC
+                )
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+            WHERE NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
+        )
+        SELECT TOP (1000)
+            Valor = {expressao_valor}
+        FROM FacesBase AS fb
+        OUTER APPLY (
+            SELECT TOP (1)
+                 p.IDDimPaineisEuromidia
+                ,p.Tipo
+                ,p.Cidade
+                ,p.DataAtualizacao
+            FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p
+            WHERE p.IDDimPaineisEuromidia = fb.IDDimPaineisEuromidia
+               OR p.CodPonto = fb.CodPonto
+            ORDER BY
+                 CASE WHEN p.IDDimPaineisEuromidia = fb.IDDimPaineisEuromidia THEN 0 ELSE 1 END
+                ,p.DataAtualizacao DESC
+                ,p.IDDimPaineisEuromidia DESC
+        ) AS p
+        WHERE fb.rn = 1
+          AND {where_sql}
+        GROUP BY {expressao_valor}
+        ORDER BY LOWER({expressao_valor}) ASC;
+    """)
+
+    sql = _aplicar_bindparams_expanding_reserva_ocupacao(
+        sql,
+        usar_cidades=bool(cidades_norm),
+        usar_tipos=bool(tipos_norm),
+    )
+
+    rows = db.session.execute(sql, params).mappings().all()
+    valores = []
+    vistos = set()
+    for row in rows:
+        valor = str(row.get("Valor") or "").strip()
+        if not valor:
+            continue
+        chave = valor.upper()
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        valores.append(valor)
+    return valores
+
+
+def _buscar_filtros_faces_para_reserva_ocupacao(cidades: list[str] | None = None, tipos: list[str] | None = None) -> dict:
+    """
+    Eu monto as opções dinâmicas dos filtros.
+
+    Regra de dinâmica:
+    - A lista de cidades respeita o Tipo Produto selecionado.
+    - A lista de tipos respeita a Cidade selecionada.
+    Assim, quando um filtro é marcado, o outro passa a mostrar apenas opções compatíveis.
+    """
+    cidades_sel = _normalizar_lista_texto_reserva_ocupacao(cidades)
+    tipos_sel = _normalizar_lista_texto_reserva_ocupacao(tipos)
+
+    cidades_opcoes = _buscar_distintos_filtro_faces_reserva_ocupacao(
+        "cidade",
+        cidades=None,
+        tipos=tipos_sel,
+    )
+    tipos_opcoes = _buscar_distintos_filtro_faces_reserva_ocupacao(
+        "tipo",
+        cidades=cidades_sel,
+        tipos=None,
+    )
+
+    return {
+        "cidades": cidades_opcoes,
+        "tipos": tipos_opcoes,
+    }
+
+
 @paineis_bp.route("/reserva-ocupacao", methods=["GET"])
 @login_required
 @limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
@@ -18854,6 +19050,8 @@ def reserva_ocupacao():
     codponto_raw = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
     codface_sel = (request.args.get("codface") or request.args.get("cod_face") or "").strip()
     mes_ref = (request.args.get("mes_ref") or "").strip()
+    cidades_sel = _parametros_lista_reserva_ocupacao("cidade", "cidades", "cidade_exibicao", "cidades_exibicao")
+    tipos_sel = _parametros_lista_reserva_ocupacao("tipo", "tipos", "tipo_produto", "tipos_produto")
 
     def _normalizar_codfaces_requisitadas():
         """Eu aceito uma ou várias CodFaces na URL para abrir a tela já pré-selecionada."""
@@ -18883,6 +19081,8 @@ def reserva_ocupacao():
         q=q,
         codponto=codponto_int,
         limite=1000,
+        cidades=cidades_sel,
+        tipos=tipos_sel,
     )
 
     # Quando a tela vem de uma grade/card com CodFace na URL, garanto que essa face
@@ -18922,6 +19122,11 @@ def reserva_ocupacao():
     form = ReservaOcupacaoForm()
     form.cod_ponto.data = str(codponto_int or "")
 
+    filtros_faces = _buscar_filtros_faces_para_reserva_ocupacao(
+        cidades=cidades_sel,
+        tipos=tipos_sel,
+    )
+
     return render_template(
         "euromidia/reserva_ocupacao_nova.html",
         form=form,
@@ -18934,6 +19139,8 @@ def reserva_ocupacao():
         dt_ini=dt_ini.strftime("%Y-%m-%d"),
         dt_fim=dt_fim.strftime("%Y-%m-%d"),
         data_minima_reserva=data_minima_reserva.strftime("%Y-%m-%d"),
+        filtros_faces_json=filtros_faces,
+        filtros_faces_selecionados_json={"cidades": cidades_sel, "tipos": tipos_sel},
         bloquear_selecao_face_ate_card_completo=True,
     )
 
@@ -18946,6 +19153,8 @@ def api_ocupacao_reserva_faces():
     """Eu retorno faces para o combobox pesquisável da nova tela de reserva."""
     q = (request.args.get("q") or "").strip()
     codponto_raw = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
+    cidades_sel = _parametros_lista_reserva_ocupacao("cidade", "cidades", "cidade_exibicao", "cidades_exibicao")
+    tipos_sel = _parametros_lista_reserva_ocupacao("tipo", "tipos", "tipo_produto", "tipos_produto")
 
     try:
         codponto_int = int(codponto_raw) if codponto_raw else None
@@ -18955,10 +19164,34 @@ def api_ocupacao_reserva_faces():
     faces = _buscar_faces_para_reserva_ocupacao(
         q=q,
         codponto=codponto_int,
-        limite=200,
+        limite=300,
+        cidades=cidades_sel,
+        tipos=tipos_sel,
     )
 
     return jsonify({"ok": True, "items": faces})
+
+
+@paineis_bp.route("/api/ocupacao/reserva/faces/filtros", methods=["GET"])
+@login_required
+@limiter.limit("120 per minute", methods=["GET"])
+@retry_get_view(db, attempts=3, base_delay=0.2, max_delay=0.8)
+def api_ocupacao_reserva_faces_filtros():
+    """Eu retorno as opções dinâmicas dos filtros Cidade e Tipo Produto."""
+    cidades_sel = _parametros_lista_reserva_ocupacao("cidade", "cidades", "cidade_exibicao", "cidades_exibicao")
+    tipos_sel = _parametros_lista_reserva_ocupacao("tipo", "tipos", "tipo_produto", "tipos_produto")
+
+    filtros_faces = _buscar_filtros_faces_para_reserva_ocupacao(
+        cidades=cidades_sel,
+        tipos=tipos_sel,
+    )
+
+    return jsonify({
+        "ok": True,
+        "cidades": filtros_faces.get("cidades") or [],
+        "tipos": filtros_faces.get("tipos") or [],
+        "selecionados": {"cidades": cidades_sel, "tipos": tipos_sel},
+    })
 
 
 
