@@ -6,12 +6,24 @@
   <div class="card">
 
     <style>
+      *,
+      *::before,
+      *::after{
+        box-sizing:border-box;
+      }
+
+      .card{
+        max-width:100%;
+        overflow-x:hidden;
+      }
+
       .hdr{
         display:flex;
         align-items:center;
         gap:12px;
         justify-content:space-between;
         flex-wrap:wrap;
+        max-width:100%;
       }
 
       .hdr-left{
@@ -19,6 +31,13 @@
         align-items:center;
         gap:12px;
         flex-wrap:wrap;
+        min-width:0;
+      }
+
+      .page-title{
+        max-width:100%;
+        overflow-wrap:anywhere;
+        line-height:1.15;
       }
 
       .count-pill{
@@ -30,7 +49,7 @@
         border-radius:10px;
         background:#fff;
         font-weight:800;
-        color: var(--euro-blue);
+        color:var(--euro-blue);
         user-select:none;
         white-space:nowrap;
       }
@@ -38,9 +57,10 @@
       .filters{
         margin-top:14px;
         display:grid;
-        grid-template-columns:minmax(640px, 2fr) minmax(280px, .8fr) minmax(320px, .9fr) max-content max-content;
+        grid-template-columns:minmax(260px, 1.4fr) minmax(220px, .75fr) minmax(240px, .85fr) max-content max-content;
         gap:12px;
         align-items:end;
+        max-width:100%;
       }
 
       .filters .field{
@@ -51,7 +71,7 @@
       .field-busca{
         grid-column:1 / 2;
         grid-row:2;
-        min-width:560px;
+        min-width:0;
       }
 
       .filters label,
@@ -64,6 +84,7 @@
       }
 
       .btn-pill{
+        min-height:40px;
         height:40px;
         padding:0 14px;
         border-radius:12px;
@@ -73,12 +94,14 @@
         color:#0b1a3a;
         display:inline-flex;
         align-items:center;
+        justify-content:center;
         gap:8px;
         text-decoration:none;
         cursor:pointer;
         user-select:none;
         box-shadow:0 8px 18px rgba(2,6,23,.06);
         transition:.12s ease;
+        white-space:nowrap;
       }
 
       .btn-pill:hover{
@@ -95,7 +118,7 @@
         grid-column:1 / -1;
         grid-row:1;
         width:100%;
-        max-width:820px;
+        max-width:100%;
         min-width:0;
         flex:initial;
         position:relative;
@@ -103,7 +126,6 @@
 
       .periodo-topbar{
         width:100%;
-        height:50px;
         min-height:50px;
         padding:7px 8px;
         border:1px solid var(--border);
@@ -113,7 +135,9 @@
         align-items:center;
         gap:7px;
         flex-wrap:nowrap;
-        overflow:hidden;
+        overflow-x:auto;
+        overflow-y:hidden;
+        scrollbar-width:thin;
         box-shadow:0 8px 18px rgba(2,6,23,.05);
       }
 
@@ -149,7 +173,7 @@
         height:34px;
         min-height:34px;
         min-width:190px;
-        max-width:300px;
+        max-width:100%;
         padding:0 10px;
         border-radius:999px;
         border:1px solid rgba(0,40,132,.14);
@@ -163,8 +187,7 @@
         font-size:12px;
         cursor:pointer;
         user-select:none;
-        flex:1 1 auto;
-        min-width:0;
+        flex:1 1 220px;
         overflow:hidden;
         white-space:nowrap;
       }
@@ -182,7 +205,7 @@
         z-index:40;
         right:0;
         top:calc(100% + 8px);
-        width:min(420px, 92vw);
+        width:min(420px, calc(100vw - 32px));
         border:1px solid var(--border);
         border-radius:14px;
         background:#fff;
@@ -212,6 +235,7 @@
         justify-content:flex-end;
         gap:8px;
         margin-top:12px;
+        flex-wrap:wrap;
       }
 
       .dd{
@@ -243,6 +267,7 @@
         cursor:pointer;
         box-shadow:0 8px 18px rgba(2,6,23,.05);
         list-style:none;
+        min-width:0;
       }
 
       .dd-summary::-webkit-details-marker{
@@ -261,6 +286,7 @@
       .dd-caret{
         font-weight:950;
         color:var(--euro-blue);
+        flex:0 0 auto;
       }
 
       .dd-panel{
@@ -268,9 +294,8 @@
         z-index:50;
         top:calc(100% + 8px);
         left:0;
-        width:100%;
-        min-width:360px;
-        max-width:440px;
+        width:min(440px, calc(100vw - 32px));
+        min-width:min(320px, 100%);
         max-height:380px;
         overflow:auto;
         border:1px solid var(--border);
@@ -309,6 +334,7 @@
         color:#0f172a;
         font-weight:850;
         line-height:1.2;
+        min-width:0;
       }
 
       .dd-item:hover{
@@ -345,6 +371,7 @@
 
       .kb-search-combobox{
         position:relative;
+        min-width:0;
       }
 
       .kb-search-box{
@@ -357,15 +384,18 @@
         border-radius:14px;
         padding:0 12px;
         box-shadow:0 8px 18px rgba(2,6,23,.05);
+        min-width:0;
       }
 
       .kb-search-icon{
         opacity:.78;
         user-select:none;
+        flex:0 0 auto;
       }
 
       .kb-search-input{
         width:100%;
+        min-width:0;
         height:44px;
         border:0;
         outline:none;
@@ -467,29 +497,33 @@
         border-radius:14px;
         overflow:hidden;
         background:#fff;
+        max-width:100%;
+      }
+
+      .list-head,
+      .row{
+        display:grid;
+        grid-template-columns:64px minmax(92px, .75fr) minmax(108px, .75fr) minmax(124px, .85fr) minmax(124px, .85fr) minmax(180px, 1.55fr) minmax(118px, .9fr) minmax(118px, .9fr);
+        column-gap:10px;
+        align-items:center;
+        max-width:100%;
       }
 
       .list-head{
-        display:grid;
-        grid-template-columns:86px 150px 170px 180px 1fr 170px 170px;
-        gap:0;
         padding:12px 14px;
         border-bottom:1px solid var(--border);
         background:rgba(0,40,132,.03);
         font-weight:900;
         color:var(--euro-blue);
-        align-items:center;
+        font-size:12px;
       }
 
       .row{
-        display:grid;
-        grid-template-columns:86px 150px 170px 180px 1fr 170px 170px;
-        gap:0;
-        padding:14px 14px;
+        padding:14px;
         border-bottom:1px solid var(--border);
-        align-items:center;
         background:#fff;
         cursor:pointer;
+        min-width:0;
       }
 
       .row:hover{
@@ -498,6 +532,10 @@
 
       .row:last-child{
         border-bottom:0;
+      }
+
+      .row > div{
+        min-width:0;
       }
 
       .logo-box{
@@ -515,6 +553,7 @@
         background:#fff;
         padding:4px;
         box-shadow:0 6px 14px rgba(2,6,23,.05);
+        max-width:100%;
       }
 
       .logo-fallback{
@@ -536,6 +575,15 @@
         display:none;
       }
 
+      .marca-col{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-weight:900;
+        color:#0f172a;
+      }
+
       .id-pill{
         display:inline-flex;
         align-items:center;
@@ -549,6 +597,7 @@
         line-height:1;
         white-space:nowrap;
         user-select:none;
+        max-width:100%;
       }
 
       .ellipsis{
@@ -652,17 +701,37 @@
         flex-wrap:wrap;
       }
 
-      @media (max-width: 1500px){
+      .pager > div{
+        min-width:0;
+      }
+
+      @media (max-width: 1280px){
         .filters{
-          grid-template-columns:minmax(560px, 1.7fr) minmax(260px, .8fr) minmax(290px, .9fr) max-content max-content;
+          grid-template-columns:minmax(240px, 1fr) minmax(220px, .8fr) minmax(230px, .85fr) max-content max-content;
         }
 
-        .periodo-field{
-          max-width:820px;
+        .list-head,
+        .row{
+          grid-template-columns:58px minmax(86px, .7fr) minmax(100px, .7fr) minmax(118px, .8fr) minmax(118px, .8fr) minmax(170px, 1.45fr) minmax(108px, .8fr) minmax(108px, .8fr);
+          column-gap:8px;
+        }
+
+        .list-head{
+          font-size:11px;
+        }
+
+        .row{
+          font-size:13px;
+        }
+
+        .status-badge,
+        .tipo-badge{
+          padding-left:9px;
+          padding-right:9px;
         }
       }
 
-      @media (max-width: 1240px){
+      @media (max-width: 1120px){
         .filters{
           grid-template-columns:1fr 1fr;
         }
@@ -691,26 +760,16 @@
 
         .list-head,
         .row{
-          grid-template-columns:86px 150px 170px 1fr 170px 170px;
-        }
-
-        .hide-xl{
-          display:none;
+          grid-template-columns:54px minmax(82px, .75fr) minmax(92px, .75fr) minmax(108px, .85fr) minmax(112px, .85fr) minmax(160px, 1.5fr) minmax(100px, .85fr) minmax(100px, .85fr);
+          column-gap:7px;
         }
       }
 
-      @media (max-width: 980px){
-        .list-head,
-        .row{
-          grid-template-columns:86px 150px 1fr 170px 170px;
+      @media (max-width: 900px){
+        .card{
+          overflow-x:hidden;
         }
 
-        .hide-lg{
-          display:none;
-        }
-      }
-
-      @media (max-width: 760px){
         .filters{
           grid-template-columns:1fr;
         }
@@ -718,8 +777,13 @@
         .filters .field,
         .field-busca,
         .periodo-field,
-        .dd{
-          min-width:100%;
+        .dd,
+        .dd[data-dd="status"],
+        .dd[data-dd="tipo_solicitacao"],
+        .filters > .btn.btn-primary,
+        .filters > .btn-pill.danger{
+          min-width:0;
+          width:100%;
           grid-column:1 / -1;
           grid-row:auto;
         }
@@ -728,41 +792,226 @@
           height:auto;
           min-height:50px;
           flex-wrap:wrap;
+          overflow:visible;
+        }
+
+        .periodo-chip{
+          flex:1 1 auto;
         }
 
         .periodo-open{
           width:100%;
           max-width:none;
           margin-left:0;
+          flex:1 1 100%;
         }
 
-        .dd-panel{
-          min-width:100%;
-          max-width:none;
-        }
-
+        .dd-panel,
         .periodo-panel{
+          position:static;
+          width:100%;
+          min-width:0;
+          max-width:100%;
+          margin-top:8px;
+          box-shadow:0 12px 28px rgba(2,6,23,.12);
+        }
+
+        .kb-search-sugestoes{
           left:0;
-          right:auto;
+          right:0;
+          max-height:360px;
         }
 
-        .periodo-panel-grid{
-          grid-template-columns:1fr;
+        .list-wrap{
+          border:0;
+          border-radius:0;
+          background:transparent;
+          overflow:visible;
         }
 
-        .list-head,
-        .row{
-          grid-template-columns:72px 1fr 140px;
-        }
-
-        .hide-md{
+        .list-head{
           display:none;
+        }
+
+        .row{
+          display:grid;
+          grid-template-columns:54px minmax(0, 1fr);
+          grid-template-areas:
+            "logo razao"
+            "marca marca"
+            "id id"
+            "data data"
+            "usuario usuario"
+            "status status"
+            "tipo tipo";
+          gap:10px 12px;
+          padding:14px;
+          margin:10px 0;
+          border:1px solid var(--border);
+          border-radius:16px;
+          background:#fff;
+          box-shadow:0 10px 24px rgba(2,6,23,.06);
+          cursor:pointer;
+        }
+
+        .row:last-child{
+          border-bottom:1px solid var(--border);
+        }
+
+        .row:hover{
+          background:#fff;
+          border-color:rgba(0,40,132,.22);
+        }
+
+        .logo-box{
+          grid-area:logo;
+          justify-content:flex-start;
+          align-self:start;
+        }
+
+        .razao-social-wrap{
+          grid-area:razao;
+          align-self:center;
+        }
+
+        .razao-social-nome,
+        .razao-social-cnpj{
+          white-space:normal;
+          overflow:visible;
+          text-overflow:clip;
+          overflow-wrap:anywhere;
+        }
+
+        .marca-col{ grid-area:marca; }
+        .id-col{ grid-area:id; }
+        .data-col{ grid-area:data; }
+        .usuario-col{ grid-area:usuario; }
+        .status-col{ grid-area:status; }
+        .tipo-col{ grid-area:tipo; }
+
+        .marca-col,
+        .id-col,
+        .data-col,
+        .usuario-col,
+        .status-col,
+        .tipo-col{
+          display:grid;
+          grid-template-columns:104px minmax(0, 1fr);
+          align-items:center;
+          gap:10px;
+          min-width:0;
+          width:100%;
+          white-space:normal;
+          overflow:visible;
+          text-overflow:clip;
+          overflow-wrap:anywhere;
+          font-size:13px;
+        }
+
+        .marca-col::before,
+        .id-col::before,
+        .data-col::before,
+        .usuario-col::before,
+        .status-col::before,
+        .tipo-col::before{
+          content:attr(data-label);
+          color:var(--muted);
+          font-size:11px;
+          font-weight:950;
+          text-transform:uppercase;
+          letter-spacing:.02em;
+        }
+
+        .hide-md,
+        .hide-lg,
+        .hide-xl{
+          display:grid !important;
         }
 
         .logo-empresa,
         .logo-fallback{
-          width:38px;
-          height:38px;
+          width:44px;
+          height:44px;
+        }
+
+        .status-badge,
+        .tipo-badge{
+          justify-self:start;
+          max-width:100%;
+          min-height:30px;
+          white-space:normal;
+          text-align:center;
+        }
+
+        .pager{
+          padding:12px 0;
+          flex-direction:column;
+          align-items:stretch;
+        }
+
+        .pager > div:nth-child(2){
+          justify-content:center;
+          flex-wrap:wrap;
+        }
+      }
+
+      @media (max-width: 520px){
+        .hdr-left{
+          width:100%;
+        }
+
+        .count-pill{
+          width:100%;
+          justify-content:center;
+        }
+
+        .page-title{
+          font-size:22px;
+        }
+
+        .periodo-chip{
+          flex:1 1 calc(50% - 8px);
+        }
+
+        .row{
+          grid-template-columns:46px minmax(0, 1fr);
+          gap:9px 10px;
+          padding:12px;
+        }
+
+        .marca-col,
+        .id-col,
+        .data-col,
+        .usuario-col,
+        .status-col,
+        .tipo-col{
+          grid-template-columns:1fr;
+          gap:4px;
+        }
+
+        .marca-col::before,
+        .id-col::before,
+        .data-col::before,
+        .usuario-col::before,
+        .status-col::before,
+        .tipo-col::before{
+          font-size:10px;
+        }
+
+        .logo-empresa,
+        .logo-fallback{
+          width:40px;
+          height:40px;
+        }
+
+        .id-pill{
+          justify-self:start;
+        }
+
+        .kb-search-sugestao-topo{
+          align-items:flex-start;
+          flex-direction:column;
+          gap:4px;
         }
       }
     </style>
@@ -787,7 +1036,7 @@
                 name="q"
                 type="search"
                 value="{{ filtros.q }}"
-                placeholder="Pesquisar por IDSolicitação, CNPJ, razão social, criado por, status ou tipo..."
+                placeholder="Pesquisar por IDSolicitação, marca, CNPJ, razão social, criado por, status ou tipo..."
                 autocomplete="off"
                 spellcheck="false"
                 aria-autocomplete="list"
@@ -897,8 +1146,9 @@
     <div class="list-wrap">
       <div class="list-head">
         <div>Logo</div>
+        <div>Marca</div>
         <div>IDSolicitação</div>
-        <div class="hide-md">Envio Avaliação</div>
+        <div class="hide-md">Envio Solicitação</div>
         <div class="hide-lg">Criado por</div>
         <div>Razão Social</div>
         <div class="hide-xl">Status</div>
@@ -927,11 +1177,15 @@
               {% endif %}
             </div>
 
-            <div>
+            <div class="marca-col" data-label="Marca" title="{{ item.MarcaExibida or '—' }}">
+              {{ item.MarcaExibida or "—" }}
+            </div>
+
+            <div class="id-col" data-label="IDSolicitação">
               <span class="id-pill">{{ item.IDFatoSolicitacaoContratoEuromidia }}</span>
             </div>
 
-            <div class="data-col hide-md">
+            <div class="data-col hide-md" data-label="Envio Solicitação">
               {% if item.DataEnvioAvaliacao %}
                 {{ item.DataEnvioAvaliacao.strftime("%d/%m/%Y %H:%M") if item.DataEnvioAvaliacao.strftime else item.DataEnvioAvaliacao }}
               {% else %}
@@ -939,7 +1193,7 @@
               {% endif %}
             </div>
 
-            <div class="ellipsis hide-lg">
+            <div class="ellipsis usuario-col hide-lg" data-label="Criado por">
               {{ item.NomeUsuarioCriacao or "—" }}
             </div>
 
@@ -952,7 +1206,7 @@
               </div>
             </div>
 
-            <div class="ellipsis hide-xl">
+            <div class="ellipsis status-col hide-xl" data-label="Status">
               {% set tem_status = item.StatusContrato and item.StatusContrato != '—' %}
               {% set cor_status = item.CorHexStatusContrato if tem_status else none %}
               <span
@@ -965,7 +1219,7 @@
               </span>
             </div>
 
-            <div class="ellipsis hide-xl">
+            <div class="ellipsis tipo-col hide-xl" data-label="Tipo Solicitação">
               <span class="tipo-badge {{ classe_tipo }}">
                 {{ item.TipoSolicitacao or "—" }}
               </span>
@@ -1267,7 +1521,7 @@
                   <div class="kb-search-sugestao-titulo" title="${escaparHtml(item.razao_social)}">${escaparHtml(item.razao_social)}</div>
                   <span class="kb-search-sugestao-id">${escaparHtml(item.id)}</span>
                 </div>
-                <div class="kb-search-sugestao-meta">Criado por: ${escaparHtml(item.criado_por)} • CNPJ: ${escaparHtml(item.cnpj)}</div>
+                <div class="kb-search-sugestao-meta">Marca: ${escaparHtml(item.marca_exibida || '—')} • Criado por: ${escaparHtml(item.criado_por)} • CNPJ: ${escaparHtml(item.cnpj)}</div>
                 <div class="kb-search-sugestao-desc">Status e tipo da solicitação</div>
                 <div class="kb-search-sugestao-badges">
                   <span class="status-badge" style="min-height:26px;padding:4px 9px;background-color:${escaparHtml(corStatus)};border-color:${escaparHtml(corStatus)};color:${escaparHtml(corTexto)};box-shadow:none;">${escaparHtml(item.status)}</span>

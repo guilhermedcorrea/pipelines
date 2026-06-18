@@ -12656,6 +12656,9 @@ def lista_aprovacao_contratos():
                 OR ISNULL(fsce.[RazaoSocial], '') LIKE '%' + :q + '%'
                 OR ISNULL(de.[RazaoSocial], '') LIKE '%' + :q + '%'
                 OR ISNULL(du.[NomeUsuario], '') LIKE '%' + :q + '%'
+                OR ISNULL(fsce.[MarcaExibida], '') LIKE '%' + :q + '%'
+                OR ISNULL(fcc_marca.[MarcaExibidaControle], '') LIKE '%' + :q + '%'
+                OR ISNULL(fcci_marca.[MarcaExibidaItem], '') LIKE '%' + :q + '%'
                 OR ISNULL(fsce.[TipoSolicitacao], '') LIKE '%' + :q + '%'
                 OR ISNULL(dsc.[Status], '') LIKE '%' + :q + '%'
             )
@@ -12693,6 +12696,91 @@ def lista_aprovacao_contratos():
 
     where_sql = "\n          AND ".join(where_parts)
 
+    joins_marca_sql = """
+        OUTER APPLY
+        (
+            SELECT TOP 1
+                 fcc.[IDFatoControleContratosEuromidia] AS [IDFatoControleContratosEuromidiaControle]
+                ,NULLIF(LTRIM(RTRIM(fcc.[MarcaExibida])), '') AS [MarcaExibidaControle]
+            FROM [Integracao].[Silver].[FatoControleContratosEuromidia] fcc
+            WHERE
+                (
+                    fsce.[IDFatoControleContratosEuromidia] IS NOT NULL
+                    AND fcc.[IDFatoControleContratosEuromidia] = fsce.[IDFatoControleContratosEuromidia]
+                )
+                OR
+                (
+                    NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroContrato]), ''))), '') IS NOT NULL
+                    AND CONVERT(varchar(100), fcc.[NumeroContrato]) = CONVERT(varchar(100), fsce.[NumeroContrato])
+                )
+                OR
+                (
+                    NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroPrevia]), ''))), '') IS NOT NULL
+                    AND CONVERT(varchar(100), fcc.[NumeroPrevia]) = CONVERT(varchar(100), fsce.[NumeroPrevia])
+                )
+            ORDER BY
+                CASE
+                    WHEN fsce.[IDFatoControleContratosEuromidia] IS NOT NULL
+                         AND fcc.[IDFatoControleContratosEuromidia] = fsce.[IDFatoControleContratosEuromidia]
+                        THEN 0
+                    WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroContrato]), ''))), '') IS NOT NULL
+                         AND CONVERT(varchar(100), fcc.[NumeroContrato]) = CONVERT(varchar(100), fsce.[NumeroContrato])
+                        THEN 1
+                    WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroPrevia]), ''))), '') IS NOT NULL
+                         AND CONVERT(varchar(100), fcc.[NumeroPrevia]) = CONVERT(varchar(100), fsce.[NumeroPrevia])
+                        THEN 2
+                    ELSE 9
+                END,
+                fcc.[IDFatoControleContratosEuromidia] DESC
+        ) fcc_marca
+        OUTER APPLY
+        (
+            SELECT TOP 1
+                NULLIF(LTRIM(RTRIM(fcci.[MarcaExibida])), '') AS [MarcaExibidaItem]
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] fcci
+            WHERE NULLIF(LTRIM(RTRIM(ISNULL(fcci.[MarcaExibida], ''))), '') IS NOT NULL
+              AND
+              (
+                    (
+                        fsce.[IDFatoControleContratosEuromidia] IS NOT NULL
+                        AND fcci.[IDFatoControleContratoEuromidia] = fsce.[IDFatoControleContratosEuromidia]
+                    )
+                    OR
+                    (
+                        fcc_marca.[IDFatoControleContratosEuromidiaControle] IS NOT NULL
+                        AND fcci.[IDFatoControleContratoEuromidia] = fcc_marca.[IDFatoControleContratosEuromidiaControle]
+                    )
+                    OR
+                    (
+                        NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroContrato]), ''))), '') IS NOT NULL
+                        AND CONVERT(varchar(100), fcci.[NumeroContrato]) = CONVERT(varchar(100), fsce.[NumeroContrato])
+                    )
+                    OR
+                    (
+                        NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroPrevia]), ''))), '') IS NOT NULL
+                        AND CONVERT(varchar(100), fcci.[NumeroPrevia]) = CONVERT(varchar(100), fsce.[NumeroPrevia])
+                    )
+              )
+            ORDER BY
+                CASE
+                    WHEN fsce.[IDFatoControleContratosEuromidia] IS NOT NULL
+                         AND fcci.[IDFatoControleContratoEuromidia] = fsce.[IDFatoControleContratosEuromidia]
+                        THEN 0
+                    WHEN fcc_marca.[IDFatoControleContratosEuromidiaControle] IS NOT NULL
+                         AND fcci.[IDFatoControleContratoEuromidia] = fcc_marca.[IDFatoControleContratosEuromidiaControle]
+                        THEN 1
+                    WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroContrato]), ''))), '') IS NOT NULL
+                         AND CONVERT(varchar(100), fcci.[NumeroContrato]) = CONVERT(varchar(100), fsce.[NumeroContrato])
+                        THEN 2
+                    WHEN NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), fsce.[NumeroPrevia]), ''))), '') IS NOT NULL
+                         AND CONVERT(varchar(100), fcci.[NumeroPrevia]) = CONVERT(varchar(100), fsce.[NumeroPrevia])
+                        THEN 3
+                    ELSE 9
+                END,
+                fcci.[IDFatoControleContratosItensEuromidia] ASC
+        ) fcci_marca
+    """
+
     sql_total = text(f"""
         SELECT COUNT(1)
         FROM [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia] fsce
@@ -12705,6 +12793,7 @@ def lista_aprovacao_contratos():
         LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
             ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
            AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        {joins_marca_sql}
         WHERE {where_sql}
     """)
 
@@ -12740,7 +12829,11 @@ def lista_aprovacao_contratos():
             ,fsce.[DataLancamento]
             ,fsce.[RazaoSocial] AS [RazaoSocialSolicitacao]
             ,fsce.[CPF]
-            ,fsce.[MarcaExibida]
+            ,COALESCE(
+                NULLIF(LTRIM(RTRIM(fsce.[MarcaExibida])), ''),
+                fcc_marca.[MarcaExibidaControle],
+                fcci_marca.[MarcaExibidaItem]
+             ) AS [MarcaExibida]
             ,fsce.[Vendedor]
             ,fsce.[TipoDocumento]
             ,fsce.[Origem]
@@ -12799,6 +12892,7 @@ def lista_aprovacao_contratos():
         LEFT JOIN [Integracao].[Silver].[DimStatusContratos] dsc
             ON dsc.[IDDimStatusContratos] = fsce.[IDDimStatusContratos]
            AND dsc.[IDEmpresaProprietaria] = fsce.[IDEmpresaProprietaria]
+        {joins_marca_sql}
         WHERE {where_sql}
         ORDER BY
             CASE WHEN fsce.[DataEnvioAvaliacao] IS NULL THEN 1 ELSE 0 END ASC,
@@ -12835,6 +12929,7 @@ def lista_aprovacao_contratos():
                 "NomeUsuarioCriacao": r.get("NomeUsuarioCriacao") or "—",
                 "CNPJ": r.get("CNPJ") or "—",
                 "RazaoSocialEmpresa": r.get("RazaoSocialEmpresa") or "—",
+                "MarcaExibida": r.get("MarcaExibida") or "—",
                 "LogoEmpresaProprietaria": logo_url,
                 "StatusContrato": r.get("StatusContrato") or "—",
                 "CorHexStatusContrato": cor_status_contrato,
@@ -12906,6 +13001,7 @@ def lista_aprovacao_contratos():
             "url": url_for("admin.detalhe_aprovacao_contrato", id_solicitacao=id_solic),
             "criado_por": r.get("NomeUsuarioCriacao") or "—",
             "razao_social": r.get("RazaoSocialEmpresa") or r.get("RazaoSocialSolicitacao") or "—",
+            "marca_exibida": r.get("MarcaExibida") or "—",
             "cnpj": r.get("CNPJ") or "—",
             "status": r.get("StatusContrato") or "—",
             "status_cor": cor_status,
@@ -12917,6 +13013,7 @@ def lista_aprovacao_contratos():
                 r.get("NomeUsuarioCriacao"),
                 r.get("RazaoSocialEmpresa"),
                 r.get("RazaoSocialSolicitacao"),
+                r.get("MarcaExibida"),
                 r.get("CNPJ"),
                 r.get("StatusContrato"),
                 tipo_label,
