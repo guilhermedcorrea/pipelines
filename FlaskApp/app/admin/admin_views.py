@@ -4518,26 +4518,24 @@ def _card_possui_tag_ativa_admin(id_card: int | None, id_tag: int | None) -> boo
 
 
 def _card_eh_renovacao_admin(id_card: int | None) -> bool:
-    """Regra forte no admin: card com tag 17 Renovação nunca pode ser aprovado como Novo Contrato."""
+    """Regra forte no admin: só é renovação quando o card tem a tag 17 ativa."""
     id_card_int = _int_ou_none(id_card)
     if id_card_int in (None, "", 0):
         return False
 
     filtros = [
-        "ct.IDFatoKanbanCard = :id_card",
-        "ct.RemovidoEm IS NULL",
-        "(ct.IDDimKanbanTag = :id_tag_renovacao OR UPPER(LTRIM(RTRIM(ISNULL(tg.NomeTag, '')))) COLLATE Latin1_General_CI_AI LIKE '%RENOVA%')",
+        "IDFatoKanbanCard = :id_card",
+        "IDDimKanbanTag = :id_tag_renovacao",
+        "RemovidoEm IS NULL",
     ]
 
     if _campanhas_vencimentos_coluna_existe(TABELA_KANBAN_CARD_TAG_RENOVACAO, "Ativo"):
-        filtros.append("ISNULL(ct.Ativo, 1) = 1")
+        filtros.append("ISNULL(Ativo, 1) = 1")
 
     existe = db.session.execute(
         text(f"""
             SELECT TOP 1 1
-            FROM {TABELA_KANBAN_CARD_TAG_RENOVACAO} ct
-            LEFT JOIN {TABELA_KANBAN_TAG_RENOVACAO} tg
-                   ON tg.IDDimKanbanTag = ct.IDDimKanbanTag
+            FROM {TABELA_KANBAN_CARD_TAG_RENOVACAO}
             WHERE {' AND '.join(filtros)}
         """),
         {
@@ -8188,19 +8186,18 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     )
     card_tem_tag_renovacao = bool(contexto_tipo_card.get("tem_tag_renovacao"))
 
-    origem_renovacao_cabecalho = _resolver_origem_renovacao_aprovacao_admin(
-        id_card=id_card_cabecalho,
-        cabecalho_solicitacao=cab,
-        item_solicitacao=(itens_solicitacao[0] if itens_solicitacao else None),
-        id_contrato_controle=id_contrato_controle,
-        cod_ponto=(itens_solicitacao[0].get("CodPonto") if itens_solicitacao else None),
-        cod_face=(itens_solicitacao[0].get("CodFace") if itens_solicitacao else None),
-    )
-
-    # Segurança extra: se a origem oficial de renovação foi encontrada por marcador/linha de
-    # vencimento, trato como RENOVAÇÃO mesmo que o IDFatoKanbanCard não tenha vindo na solicitação.
-    if origem_renovacao_cabecalho:
-        card_tem_tag_renovacao = True
+    # A aprovação só pode operar como renovação quando o card tiver a tag 17 ativa.
+    # Encontrar origem por face/contrato/vencimento/reserva não pode transformar contrato normal em renovação.
+    origem_renovacao_cabecalho = {}
+    if card_tem_tag_renovacao:
+        origem_renovacao_cabecalho = _resolver_origem_renovacao_aprovacao_admin(
+            id_card=id_card_cabecalho,
+            cabecalho_solicitacao=cab,
+            item_solicitacao=(itens_solicitacao[0] if itens_solicitacao else None),
+            id_contrato_controle=id_contrato_controle,
+            cod_ponto=(itens_solicitacao[0].get("CodPonto") if itens_solicitacao else None),
+            cod_face=(itens_solicitacao[0].get("CodFace") if itens_solicitacao else None),
+        )
 
     card_tem_tag_novo_contrato = bool(contexto_tipo_card.get("tem_tag_novo_contrato")) and not card_tem_tag_renovacao
     inicio_renovacao_padrao = contexto_tipo_card.get("inicio_renovacao")
@@ -8559,7 +8556,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
             "TexmpoExposicao": item.get("TexmpoExposicao"),
             "DataInicioPrevisto": periodo_item_aprovacao["DataInicioPrevisto"],
             "DataTerminoPrevisto": periodo_item_aprovacao["DataTerminoPrevisto"],
-            "InicioRenovacao": inicio_renovacao_padrao or item.get("InicioRenovacao"),
+            "InicioRenovacao": "R" if card_tem_tag_renovacao else "I",
             "FaturamentoBrutoMensal": item.get("FaturamentoBrutoMensal"),
             "PercentualPermuta": item.get("PercentualPermuta"),
             "CotaOportunidade": item.get("CotaOportunidade"),

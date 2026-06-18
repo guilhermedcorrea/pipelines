@@ -2519,6 +2519,26 @@ CALL_PROCEDURE_SQL = r"""
 EXEC Silver.sp_UpsertDimCalendario;
 """
 
+UPDATE_BIT_ATIVO_ITENS_SQL = r"""
+DECLARE @DataReferencia DATE = CAST(GETDATE() AS DATE);
+
+DECLARE @InicioDia  DATETIME2(0) = CAST(@DataReferencia AS DATETIME2(0));
+DECLARE @ProximoDia DATETIME2(0) = DATEADD(DAY, 1, @InicioDia);
+
+UPDATE item
+SET
+    item.BitAtivo =
+        CASE
+            WHEN UPPER(LTRIM(RTRIM(ISNULL(item.AtivoCancelamento, '')))) = 'A'
+                 AND item.DataInicioPrevisto < @ProximoDia
+                 AND item.DataTerminoPrevisto >= @InicioDia
+                THEN 1
+            ELSE 0
+        END,
+    item.DataAtualizacao = GETDATE()
+FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item;
+"""
+
 UPDATE_OCUPACAO_SQL = r"""
 SET NOCOUNT ON;
 
@@ -3981,6 +4001,35 @@ def pipeline_controle_contratos_euromidia():
             destino_dados="[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
         )
 
+    @task(task_id="update_bit_ativo_itens")
+    def update_bit_ativo_itens() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Atualizar BitAtivo dos itens",
+            descricao_etapa=(
+                "Atualiza o campo BitAtivo dos itens de contratos com base no dia atual, "
+                "marcando como ativo somente o item com AtivoCancelamento = 'A' e período vigente."
+            ),
+            sql_execucao=UPDATE_BIT_ATIVO_ITENS_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    CAST(GETDATE() AS date) AS DataReferenciaAtual,
+                    Referencia,
+                    NumeroContrato,
+                    NumeroPrevia,
+                    CodPonto,
+                    CodFace,
+                    AtivoCancelamento,
+                    DataInicioPrevisto,
+                    DataTerminoPrevisto,
+                    BitAtivo,
+                    DataAtualizacao
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+                ORDER BY DataAtualizacao DESC, Referencia DESC
+            """,
+            origem_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia]",
+            destino_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia]",
+        )
+
     contexto_disparo = registrar_contexto_disparo()
     info_download = baixar_arquivo_sharepoint()
     info_csv = gerar_csv_ctr(info_download)
@@ -3994,6 +4043,7 @@ def pipeline_controle_contratos_euromidia():
     face = update_id_face()
     calendario = upsert_dim_calendario()
     ocupacao = upsert_ocupacao()
+    bit_ativo_itens = update_bit_ativo_itens()
 
     prioridade_reservas = TriggerDagRunOperator(
         task_id="acionar_prioridade_reservas_pos_upsert_ocupacao",
@@ -4025,6 +4075,7 @@ def pipeline_controle_contratos_euromidia():
         >> face
         >> calendario
         >> ocupacao
+        >> bit_ativo_itens
         >> prioridade_reservas
     )
 

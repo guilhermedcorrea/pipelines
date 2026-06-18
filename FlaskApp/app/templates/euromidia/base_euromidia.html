@@ -1037,8 +1037,8 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_performance = (pode_acessar_menu_paineis('performance_paineis') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_carteiras = (pode_acessar_menu_paineis('carteiras') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_empresas = (pode_acessar_menu_paineis('empresas') if pode_acessar_menu_paineis is defined else True) %}
-        {% set menu_paineis_lista_ocupacao = (pode_acessar_menu_paineis('lista_ocupacao') if pode_acessar_menu_paineis is defined else True) %}
-        {% set menu_paineis_preferencia_reservas = (pode_acessar_menu_paineis('preferencia_reservas_lista') if pode_acessar_menu_paineis is defined else True) %}
+        {% set menu_paineis_lista_ocupacao = False %}
+        {% set menu_paineis_preferencia_reservas = False %}
         {% set menu_paineis_reserva_ocupacao = (current_user.is_authenticated and (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3) %}
         {% set menu_paineis_contratos = (pode_acessar_menu_paineis('contratos') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_mov_fin = (pode_acessar_menu_paineis('movimentacao_financeira') if pode_acessar_menu_paineis is defined else True) %}
@@ -1078,8 +1078,6 @@ input:disabled, select:disabled, textarea:disabled{
             Segurança nem o submenu administrativo de Permissões.
           #}
           {% set menu_paineis_disponibilidades = True %}
-          {% set menu_paineis_lista_ocupacao = True %}
-          {% set menu_paineis_preferencia_reservas = True %}
           {% set menu_paineis_atendimento = True %}
           {% set menu_paineis_health_check = True %}
           {% set menu_paineis_historico_atendimento = True %}
@@ -1099,14 +1097,10 @@ input:disabled, select:disabled, textarea:disabled{
         {% endif %}
         {% if usuario_eh_vendedor_menu %}
           {#
-            Vendedor pode visualizar a Lista Ocupação.
-            As ações sensíveis de alterar/cancelar devem continuar protegidas no backend,
-            permitindo somente reservas vinculadas ao próprio vendedor.
-            Não liberamos Health Check Comercial para perfil VENDEDOR.
+            Vendedor mantém acesso aos itens operacionais liberados para atendimento,
+            sem liberar Health Check Comercial para perfil VENDEDOR.
           #}
-          {% set menu_paineis_lista_ocupacao = True %}
           {% set menu_paineis_vencimentos_campanhas = True %}
-          {% set menu_paineis_preferencia_reservas = True %}
           {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}
           {% set menu_paineis_health_check = False %}
         {% endif %}
@@ -1146,8 +1140,6 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_lista_checkins
           or menu_paineis_health_check
           or menu_paineis_historico_atendimento
-          or menu_paineis_lista_ocupacao
-          or menu_paineis_preferencia_reservas
           or menu_paineis_reserva_ocupacao
           or menu_paineis_contratos
           or menu_paineis_mov_fin
@@ -1168,7 +1160,7 @@ input:disabled, select:disabled, textarea:disabled{
           <div class="menu-dropdown">
             <div class="desc">Consulta e gestão do inventário</div>
 
-            {% if menu_paineis_disponibilidades or menu_paineis_lista_ocupacao or menu_paineis_preferencia_reservas or menu_paineis_reserva_ocupacao %}
+            {% if menu_paineis_disponibilidades or menu_paineis_reserva_ocupacao %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Estoques</span>
@@ -1180,20 +1172,6 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('Paineis.lista_paineis') }}"
                        class="{% if request.path == url_for('Paineis.lista_paineis') %}menu-link-current{% endif %}">
                       Disponibilidades
-                    </a>
-                  {% endif %}
-
-                  {% if menu_paineis_lista_ocupacao %}
-                    <a href="{{ url_for('Paineis.lista_ocupacao') }}"
-                       class="{% if request.path == url_for('Paineis.lista_ocupacao') %}menu-link-current{% endif %}">
-                      Lista Ocupação
-                    </a>
-                  {% endif %}
-
-                  {% if menu_paineis_preferencia_reservas %}
-                    <a href="{{ url_for('Paineis.preferencia_reservas_lista') }}"
-                       class="{% if request.endpoint == 'Paineis.preferencia_reservas_lista' %}menu-link-current{% endif %}">
-                      Preferência de Reservas
                     </a>
                   {% endif %}
 

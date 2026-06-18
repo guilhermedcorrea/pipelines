@@ -24,6 +24,7 @@ TIMEZONE_SAO_PAULO = pendulum.timezone("America/Sao_Paulo")
 
 NOME_USUARIO_INTEGRACAO = "INTEGRACAO"
 HORAS_MINIMAS_RESERVA_ABERTA = 48
+DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM = 1
 
 
 SQL_BUSCAR_USUARIO_INTEGRACAO = """
@@ -73,22 +74,42 @@ SQL_CONDICAO_RESERVA_PREFERENCIA = f"""
 """
 
 
-SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA = f"""
-(
-    {SQL_CONDICAO_RESERVA_PREFERENCIA}
-    AND (
-        reserva.DataFim IS NULL
-        OR CAST(reserva.DataFim AS date) >= CAST(SYSDATETIME() AS date)
-    )
-)
-"""
-
-
 SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA = f"""
 (
     {SQL_CONDICAO_RESERVA_PREFERENCIA}
     AND reserva.DataFim IS NOT NULL
     AND CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date)
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.IDFatoOcupacaoOrigem IS NOT NULL
+    AND reserva.IDFatoControleContratosItemOrigem IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao_origem WITH (NOLOCK)
+        WHERE
+            ocupacao_origem.IDFatoOcupacaoPaineisEuromidia = reserva.IDFatoOcupacaoOrigem
+            AND ocupacao_origem.IDFatoControleContratosItemOrigem = reserva.IDFatoControleContratosItemOrigem
+            AND ocupacao_origem.DataFim IS NOT NULL
+            AND DATEADD(
+                    DAY,
+                    {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
+                    CAST(ocupacao_origem.DataFim AS date)
+                ) < CAST(SYSDATETIME() AS date)
+    )
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND NOT {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+    AND NOT {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
 )
 """
 
@@ -114,6 +135,7 @@ SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO = f"""
 {SQL_CONDICAO_RESERVA_ABERTA}
 AND (
     {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+    OR {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
     OR {SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H}
 )
 """
@@ -123,6 +145,8 @@ SQL_MOTIVO_CANCELAMENTO = f"""
 CASE
     WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
         THEN N'PREFERENCIA_RENOVACAO_VENCIDA'
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+        THEN N'PREFERENCIA_RENOVACAO_ORIGEM_NAO_RENOVADA'
     ELSE N'RESERVA_COMUM_MAIS_DE_48H'
 END
 """
@@ -131,7 +155,9 @@ END
 SQL_OBSERVACAO_CANCELAMENTO = f"""
 CASE
     WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
-        THEN N'Reserva de preferência de renovação cancelada automaticamente no primeiro dia após o fim da DataFim da reserva.'
+        THEN N'Reserva de preferência de renovação cancelada automaticamente no primeiro dia após o fim da DataFim da própria reserva.'
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+        THEN N'Reserva de preferência de renovação cancelada automaticamente porque a ocupação origem não foi renovada após o prazo de 1 dia do fim da ocupação origem.'
     ELSE N'Reserva comum cancelada automaticamente após mais de 48 horas aberta.'
 END
 """
@@ -176,6 +202,16 @@ AND {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA};
 """
 
 
+SQL_CONTAR_RESERVAS_PREFERENCIA_ORIGEM_NAO_RENOVADA = f"""
+SELECT
+    COUNT(1) AS TotalPreferenciaOrigemNaoRenovada
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA};
+"""
+
+
 SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM = f"""
 SELECT
     COUNT(1) AS TotalPreferenciaSemDataFim
@@ -209,6 +245,14 @@ SELECT TOP (30)
        item_amostra.DataInicioPrevisto AS DataInicioPrevistoItemContrato,
        item_amostra.DataTerminoPrevisto AS DataTerminoPrevistoItemContrato,
        item_amostra.DataFimEfetiva AS DataFimEfetivaItemContrato,
+       ocupacao_origem_amostra.IDFatoOcupacaoPaineisEuromidia AS IDOcupacaoOrigemRegraCancelamento,
+       ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
+       ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
+       DATEADD(
+           DAY,
+           {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
+           CAST(ocupacao_origem_amostra.DataFim AS date)
+       ) AS DataLimiteRenovacaoOcupacaoOrigem,
        reserva.DataFim AS DataFimRegraCancelamento,
        {SQL_MOTIVO_CANCELAMENTO} AS MotivoCancelamento,
        CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
@@ -225,6 +269,18 @@ OUTER APPLY (
     WHERE
         item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
 ) AS item_amostra
+OUTER APPLY (
+    SELECT TOP (1)
+           origem.IDFatoOcupacaoPaineisEuromidia,
+           origem.Origem,
+           origem.Status,
+           origem.DataInicio,
+           origem.DataFim,
+           origem.CanceladoEm
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS origem WITH (NOLOCK)
+    WHERE
+        origem.IDFatoOcupacaoPaineisEuromidia = reserva.IDFatoOcupacaoOrigem
+) AS ocupacao_origem_amostra
 WHERE
 {SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO}
 ORDER BY
@@ -260,6 +316,14 @@ SELECT TOP (30)
        item_amostra.DataInicioPrevisto AS DataInicioPrevistoItemContrato,
        item_amostra.DataTerminoPrevisto AS DataTerminoPrevistoItemContrato,
        item_amostra.DataFimEfetiva AS DataFimEfetivaItemContrato,
+       ocupacao_origem_amostra.IDFatoOcupacaoPaineisEuromidia AS IDOcupacaoOrigemRegraCancelamento,
+       ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
+       ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
+       DATEADD(
+           DAY,
+           {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
+           CAST(ocupacao_origem_amostra.DataFim AS date)
+       ) AS DataLimiteRenovacaoOcupacaoOrigem,
        reserva.DataFim AS DataFimRegraCancelamento,
        CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
@@ -275,6 +339,18 @@ OUTER APPLY (
     WHERE
         item_pref.IDFatoControleContratosItensEuromidia = reserva.IDFatoControleContratosItemOrigem
 ) AS item_amostra
+OUTER APPLY (
+    SELECT TOP (1)
+           origem.IDFatoOcupacaoPaineisEuromidia,
+           origem.Origem,
+           origem.Status,
+           origem.DataInicio,
+           origem.DataFim,
+           origem.CanceladoEm
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS origem WITH (NOLOCK)
+    WHERE
+        origem.IDFatoOcupacaoPaineisEuromidia = reserva.IDFatoOcupacaoOrigem
+) AS ocupacao_origem_amostra
 WHERE
 {SQL_CONDICAO_RESERVA_ABERTA}
 AND {SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA}
@@ -300,8 +376,24 @@ SELECT TOP (30)
        reserva.DataFim,
        reserva.IDFatoControleContratos,
        reserva.IDFatoControleContratosItemOrigem,
-       reserva.IDFatoOcupacaoOrigem
+       reserva.IDFatoOcupacaoOrigem,
+       ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
+       ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
+       DATEADD(
+           DAY,
+           {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
+           CAST(ocupacao_origem_amostra.DataFim AS date)
+       ) AS DataLimiteRenovacaoOcupacaoOrigem
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
+OUTER APPLY (
+    SELECT TOP (1)
+           origem.IDFatoOcupacaoPaineisEuromidia,
+           origem.DataInicio,
+           origem.DataFim
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS origem WITH (NOLOCK)
+    WHERE
+        origem.IDFatoOcupacaoPaineisEuromidia = reserva.IDFatoOcupacaoOrigem
+) AS ocupacao_origem_amostra
 WHERE
 {SQL_CONDICAO_RESERVA_ABERTA}
 AND {SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM}
@@ -329,7 +421,8 @@ SQL_OBTER_DATA_HORA_SQL_SERVER = f"""
 SELECT
     SYSDATETIME() AS DataExecucaoSqlServer,
     DATEADD(HOUR, -{HORAS_MINIMAS_RESERVA_ABERTA}, SYSDATETIME()) AS LimiteCriacaoReservaComum,
-    CAST(SYSDATETIME() AS date) AS DataReferenciaCancelamentoPreferencia;
+    CAST(SYSDATETIME() AS date) AS DataReferenciaCancelamentoPreferencia,
+    {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM} AS DiasToleranciaRenovacaoAposFimOcupacaoOrigem;
 """
 
 
@@ -344,7 +437,7 @@ Cancelar automaticamente reservas antigas da tabela:
 
 ## Regra correta de cancelamento
 
-O DAG trabalha com duas regras.
+O DAG trabalha com três regras.
 
 ### 1. Reserva comum
 
@@ -369,7 +462,9 @@ Como fallback de compatibilidade, também entra na exceção se o item vinculado
 
 Essa reserva não é cancelada pela regra de 48 horas.
 
-Ela só é cancelada quando a data final da própria reserva já passou:
+Ela é cancelada em duas situações:
+
+#### 2.1. Validade/período da própria reserva vencido
 
 `CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date)`
 
@@ -379,7 +474,21 @@ Exemplo:
 - em `2026-06-02`, não cancela
 - em `2026-06-03`, cancela
 
-Se `reserva.DataFim` estiver nula em uma preferência, o DAG protege a reserva e não cancela automaticamente.
+#### 2.2. Ocupação origem não renovada no prazo
+
+Quando a reserva foi criada por uma ocupação origem, o DAG usa:
+
+`reserva.IDFatoOcupacaoOrigem = ocupacao_origem.IDFatoOcupacaoPaineisEuromidia`
+
+A reserva é cancelada se passou 1 dia depois da `DataFim` da ocupação origem vinculada pelo mesmo `IDFatoControleContratosItemOrigem`.
+
+Exemplo:
+
+- `ocupacao_origem.DataFim = 2026-06-15`
+- prazo para renovar: `2026-06-16`
+- em `2026-06-17`, cancela a reserva de preferência vinculada ao mesmo item de contrato.
+
+Se `reserva.DataFim` estiver nula em uma preferência e a ocupação origem ainda não tiver vencido o prazo de renovação, o DAG protege a reserva e não cancela automaticamente.
 
 ## Segurança / idempotência
 
@@ -417,7 +526,7 @@ def _normalizar_linhas_para_log(linhas: list[dict[str, Any]]) -> list[dict[str, 
 
 @dag(
     dag_id=NOME_DAG,
-    description="Cancela reservas comuns em 48h e preserva preferências de renovação até o dia seguinte ao fim da reserva.",
+    description="Cancela reservas comuns em 48h e cancela preferências vencidas ou sem renovação da ocupação origem após 1 dia.",
     schedule="*/8 * * * *",
     start_date=pendulum.datetime(2026, 5, 13, 0, 0, tz=TIMEZONE_SAO_PAULO),
     catchup=False,
@@ -427,6 +536,7 @@ def _normalizar_linhas_para_log(linhas: list[dict[str, Any]]) -> list[dict[str, 
         "ocupacao",
         "reserva",
         "preferencia-renovacao",
+        "ocupacao-origem",
         "sql-server",
         "integracao",
         "cancelamento-automatico",
@@ -447,7 +557,8 @@ def pipeline_cancela_reserva():
         Regra final:
         - reserva comum: cancela após 48 horas de criação;
         - reserva com TipoVinculoOrigem = PREFERENCIA RENOVAÇÃO CONTRATO: não cancela por 48 horas;
-        - reserva de preferência: só cancela no primeiro dia após reserva.DataFim;
+        - reserva de preferência: cancela no primeiro dia após reserva.DataFim;
+        - reserva de preferência criada por ocupação origem: cancela se passar 1 dia após a DataFim da ocupação origem e não houver renovação;
         - se vence hoje, ainda não cancela hoje, porque a comparação é feita por data.
         """
         hook_sql_server = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
@@ -507,6 +618,13 @@ def pipeline_cancela_reserva():
                 or 0
             )
 
+            total_preferencia_origem_nao_renovada = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_ORIGEM_NAO_RENOVADA)
+                ).scalar_one()
+                or 0
+            )
+
             total_preferencia_sem_data_fim = int(
                 conexao.execute(
                     text(SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM)
@@ -538,12 +656,14 @@ def pipeline_cancela_reserva():
             logger.info(
                 "Reservas elegíveis para cancelamento: total=%s | "
                 "reserva_comum_48h=%s | preferencia_vencida_elegivel=%s | "
-                "preferencia_protegida=%s | preferencia_sem_data_fim=%s | "
+                "preferencia_origem_nao_renovada=%s | preferencia_protegida=%s | "
+                "preferencia_sem_data_fim=%s | "
                 "amostra_elegiveis=%s | amostra_preferencia_protegida=%s | "
                 "amostra_preferencia_sem_data_fim=%s",
                 total_elegivel_antes,
                 total_reserva_comum_elegivel,
                 total_preferencia_vencida_elegivel,
+                total_preferencia_origem_nao_renovada,
                 total_preferencia_protegida,
                 total_preferencia_sem_data_fim,
                 _normalizar_linhas_para_log(amostra_elegiveis),
@@ -566,15 +686,18 @@ def pipeline_cancela_reserva():
             "regra": (
                 "Reserva comum cancela após 48h. "
                 "Reserva com TipoVinculoOrigem=PREFERENCIA RENOVAÇÃO CONTRATO não cancela por 48h. "
-                "Reserva de preferência só cancela no primeiro dia após reserva.DataFim."
+                "Reserva de preferência cancela após reserva.DataFim ou quando a ocupação origem não for renovada "
+                "após 1 dia do fim da ocupação origem."
             ),
             "usuario_integracao": nome_usuario_encontrado,
             "id_usuario_integracao": id_usuario_integracao,
             "horas_minimas_reserva_aberta": HORAS_MINIMAS_RESERVA_ABERTA,
+            "dias_tolerancia_renovacao_apos_fim_ocupacao_origem": DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM,
             "total_elegivel_antes": total_elegivel_antes,
             "total_reserva_comum_elegivel": total_reserva_comum_elegivel,
             "total_preferencia_protegida": total_preferencia_protegida,
             "total_preferencia_vencida_elegivel": total_preferencia_vencida_elegivel,
+            "total_preferencia_origem_nao_renovada": total_preferencia_origem_nao_renovada,
             "total_preferencia_sem_data_fim": total_preferencia_sem_data_fim,
             "total_cancelado": int(total_cancelado or 0),
             "data_execucao_sql_server": (
