@@ -12971,6 +12971,37 @@ def _obter_capacidade_face_reserva_kanban(cod_face: str) -> dict[str, Any]:
     return item
 
 
+def _calcular_spanqtd_cota_reserva_kanban(cota: Any, eh_digital: int | bool = 1) -> int | None:
+    if int(eh_digital or 0) != 1:
+        return None
+
+    try:
+        cota_texto = str(cota if cota is not None else "").strip().replace(",", ".")
+        cota_num = int(float(cota_texto)) if cota_texto else 0
+    except Exception:
+        cota_num = 0
+
+    if cota_num <= 0:
+        return 1
+
+    # Regra oficial usada na grade/KPI: consumo de slot digital = 1080 / Cota.
+    # Portanto COTA 540 consome 2 slots e COTA 1080 consome 1 slot.
+    # Os valores 1 e 2 são mantidos como compatibilidade com registros legados.
+    if cota_num == 540:
+        return 2
+    if cota_num == 1080:
+        return 1
+    if cota_num == 1:
+        return 2
+    if cota_num == 2:
+        return 1
+
+    try:
+        return max(1, int(round(1080.0 / float(cota_num))))
+    except Exception:
+        return 1
+
+
 def _reserva_kanban_ja_existe(
     *,
     id_card: int,
@@ -13012,27 +13043,60 @@ def _reserva_kanban_ja_existe(
 def _validar_conflito_reserva_kanban(
     *,
     cod_face: str,
+    cod_ponto: int | None,
     data_inicio: date,
     data_fim: date,
     eh_digital: int,
     capacidade_slots: int,
+    slots_necessarios: int | float = 1,
 ) -> bool:
+    cod_face_limpo = str(cod_face or "").strip().upper()
+    capacidade_slots_int = int(capacidade_slots or 0)
+    slots_novos = float(slots_necessarios or 1)
+
+    if capacidade_slots_int <= 0:
+        return True
+
     if int(eh_digital or 0) != 1:
         sql = text("""
             SELECT TOP 1 1
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
-            WHERE UPPER(LTRIM(RTRIM(COALESCE(CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
-              AND CanceladoEm IS NULL
-              AND Status IN ('ATIVO', 'RESERVADO')
+            FROM (
+                SELECT
+                    DataInicio = TRY_CONVERT(date, c.DataInicioPrevisto),
+                    DataFim = COALESCE(
+                        TRY_CONVERT(date, c.DataCancelamento),
+                        TRY_CONVERT(date, c.DataTerminoPrevisto),
+                        CONVERT(date, '9999-12-31')
+                    )
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] c
+                WHERE c.AtivoCancelamento COLLATE Latin1_General_CI_AS = 'A' COLLATE Latin1_General_CI_AS
+                  AND (:cod_ponto IS NULL OR TRY_CONVERT(int, c.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+                  AND UPPER(LTRIM(RTRIM(COALESCE(c.CodFace COLLATE Latin1_General_CI_AS, '')))) = UPPER(LTRIM(RTRIM(:cod_face))) COLLATE Latin1_General_CI_AS
+
+                UNION ALL
+
+                SELECT
+                    DataInicio = TRY_CONVERT(date, r.DataInicio),
+                    DataFim = COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31'))
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r
+                WHERE r.CanceladoEm IS NULL
+                  AND UPPER(LTRIM(RTRIM(COALESCE(r.Origem COLLATE Latin1_General_CI_AS, '')))) IN ('RESERVA', 'KANBAN')
+                  AND r.Status COLLATE Latin1_General_CI_AS = 'RESERVADO' COLLATE Latin1_General_CI_AS
+                  AND (:cod_ponto IS NULL OR TRY_CONVERT(int, r.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+                  AND UPPER(LTRIM(RTRIM(COALESCE(r.CodFace COLLATE Latin1_General_CI_AS, '')))) = UPPER(LTRIM(RTRIM(:cod_face))) COLLATE Latin1_General_CI_AS
+            ) x
+            WHERE x.DataInicio IS NOT NULL
+              AND x.DataFim IS NOT NULL
               AND NOT (
-                    TRY_CONVERT(date, :data_fim) < TRY_CONVERT(date, DataInicio)
-                 OR TRY_CONVERT(date, :data_inicio) > TRY_CONVERT(date, DataFim)
+                    TRY_CONVERT(date, :data_fim) < x.DataInicio
+                 OR TRY_CONVERT(date, :data_inicio) > x.DataFim
               )
         """)
         existe = db.session.execute(
             sql,
             {
-                "cod_face": cod_face,
+                "cod_face": cod_face_limpo,
+                "cod_ponto": int(cod_ponto) if cod_ponto not in (None, "", 0) else None,
                 "data_inicio": data_inicio,
                 "data_fim": data_fim,
             },
@@ -13046,37 +13110,96 @@ def _validar_conflito_reserva_kanban(
             WHERE c.[Data] >= :data_inicio
               AND c.[Data] <= :data_fim
         ),
+        ItensContratos AS (
+            SELECT
+                DataInicio = TRY_CONVERT(date, c.DataInicioPrevisto),
+                DataFim = COALESCE(
+                    TRY_CONVERT(date, c.DataCancelamento),
+                    TRY_CONVERT(date, c.DataTerminoPrevisto),
+                    CONVERT(date, '9999-12-31')
+                ),
+                SlotsConsumidos =
+                    CASE
+                        WHEN TRY_CONVERT(int, c.Cota) = 540 THEN 2.0
+                        WHEN TRY_CONVERT(int, c.Cota) = 1080 THEN 1.0
+                        WHEN TRY_CONVERT(int, c.Cota) = 1 THEN 2.0
+                        WHEN TRY_CONVERT(int, c.Cota) = 2 THEN 1.0
+                        WHEN TRY_CONVERT(float, c.Cota) IS NOT NULL AND TRY_CONVERT(float, c.Cota) > 0
+                            THEN ROUND(1080.0 / TRY_CONVERT(float, c.Cota), 0)
+                        ELSE 1.0
+                    END
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] c
+            WHERE c.AtivoCancelamento COLLATE Latin1_General_CI_AS = 'A' COLLATE Latin1_General_CI_AS
+              AND (:cod_ponto IS NULL OR TRY_CONVERT(int, c.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+              AND UPPER(LTRIM(RTRIM(COALESCE(c.CodFace COLLATE Latin1_General_CI_AS, '')))) = UPPER(LTRIM(RTRIM(:cod_face))) COLLATE Latin1_General_CI_AS
+              AND c.DataInicioPrevisto IS NOT NULL
+              AND TRY_CONVERT(date, c.DataInicioPrevisto) <= :data_fim
+              AND COALESCE(
+                    TRY_CONVERT(date, c.DataCancelamento),
+                    TRY_CONVERT(date, c.DataTerminoPrevisto),
+                    CONVERT(date, '9999-12-31')
+                  ) >= :data_inicio
+        ),
+        ItensReservas AS (
+            SELECT
+                DataInicio = TRY_CONVERT(date, r.DataInicio),
+                DataFim = COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31')),
+                SlotsConsumidos =
+                    CASE
+                        WHEN TRY_CONVERT(int, r.SpanQtd) IS NOT NULL AND TRY_CONVERT(int, r.SpanQtd) > 0
+                            THEN TRY_CONVERT(float, r.SpanQtd)
+                        WHEN TRY_CONVERT(int, r.Cota) = 540 THEN 2.0
+                        WHEN TRY_CONVERT(int, r.Cota) = 1080 THEN 1.0
+                        WHEN TRY_CONVERT(int, r.Cota) = 1 THEN 2.0
+                        WHEN TRY_CONVERT(int, r.Cota) = 2 THEN 1.0
+                        WHEN TRY_CONVERT(float, r.Cota) IS NOT NULL AND TRY_CONVERT(float, r.Cota) > 0
+                            THEN ROUND(1080.0 / TRY_CONVERT(float, r.Cota), 0)
+                        ELSE 1.0
+                    END
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r
+            WHERE r.CanceladoEm IS NULL
+              AND UPPER(LTRIM(RTRIM(COALESCE(r.Origem COLLATE Latin1_General_CI_AS, '')))) IN ('RESERVA', 'KANBAN')
+              AND r.Status COLLATE Latin1_General_CI_AS = 'RESERVADO' COLLATE Latin1_General_CI_AS
+              AND (:cod_ponto IS NULL OR TRY_CONVERT(int, r.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+              AND UPPER(LTRIM(RTRIM(COALESCE(r.CodFace COLLATE Latin1_General_CI_AS, '')))) = UPPER(LTRIM(RTRIM(:cod_face))) COLLATE Latin1_General_CI_AS
+              AND r.DataInicio IS NOT NULL
+              AND TRY_CONVERT(date, r.DataInicio) <= :data_fim
+              AND COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31')) >= :data_inicio
+        ),
+        Itens AS (
+            SELECT DataInicio, DataFim, SlotsConsumidos FROM ItensContratos
+            UNION ALL
+            SELECT DataInicio, DataFim, SlotsConsumidos FROM ItensReservas
+        ),
         Uso AS (
             SELECT
                 d.[Data] AS Dia,
-                SlotsOcupados = COALESCE(SUM(COALESCE(NULLIF(fo.SpanQtd, 0), 1)), 0)
+                SlotsOcupados = COALESCE(SUM(CASE WHEN i.DataInicio <= d.[Data] AND i.DataFim >= d.[Data] THEN ISNULL(i.SlotsConsumidos, 0.0) ELSE 0.0 END), 0.0)
             FROM Dias d
-            LEFT JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-                ON d.[Data] >= CAST(fo.DataInicio AS date)
-               AND d.[Data] <= CAST(fo.DataFim AS date)
-               AND UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
-               AND fo.CanceladoEm IS NULL
-               AND fo.Status IN ('ATIVO', 'RESERVADO')
+            LEFT JOIN Itens i
+                ON i.DataInicio <= d.[Data]
+               AND i.DataFim >= d.[Data]
             GROUP BY d.[Data]
         )
         SELECT TOP 1 1
         FROM Uso
-        WHERE SlotsOcupados >= :capacidade_slots
+        WHERE (SlotsOcupados + :slots_necessarios) > :capacidade_slots
         ORDER BY Dia
     """)
 
     existe = db.session.execute(
         sql,
         {
-            "cod_face": cod_face,
+            "cod_face": cod_face_limpo,
+            "cod_ponto": int(cod_ponto) if cod_ponto not in (None, "", 0) else None,
             "data_inicio": data_inicio,
             "data_fim": data_fim,
-            "capacidade_slots": int(capacidade_slots or 0),
+            "capacidade_slots": capacidade_slots_int,
+            "slots_necessarios": slots_novos,
         },
     ).scalar()
 
     return bool(existe)
-
 
 def _obter_proxima_prioridade_reserva_kanban(
     *,
@@ -13211,33 +13334,34 @@ def _criar_reservas_painel_faces_kanban(
         ):
             continue
 
-        sem_capacidade = _validar_conflito_reserva_kanban(
-            cod_face=cod_face,
-            data_inicio=data_inicio,
-            data_fim=data_fim,
-            eh_digital=eh_digital,
-            capacidade_slots=capacidade_slots,
-        )
-
-        spanqtd_novo = 1 if eh_digital == 1 else None
-
         cota_valor = vinculo.get("exibicoes_dia")
         try:
             cota_int = int(cota_valor) if cota_valor not in (None, "", 0) else None
         except Exception:
             cota_int = None
 
-        reserva_ordem_prioridade = (
-            _obter_proxima_prioridade_reserva_kanban(
-                cod_face=cod_face,
-                data_inicio=data_inicio,
-                data_fim=data_fim,
-                cota=cota_int,
-                spanqtd=spanqtd_novo,
-            )
-            if sem_capacidade
-            else 1
+        spanqtd_novo = _calcular_spanqtd_cota_reserva_kanban(cota_int, eh_digital)
+        slots_necessarios = int(spanqtd_novo or 1) if eh_digital == 1 else 1
+
+        sem_capacidade = _validar_conflito_reserva_kanban(
+            cod_face=cod_face,
+            cod_ponto=cod_ponto,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            eh_digital=eh_digital,
+            capacidade_slots=capacidade_slots,
+            slots_necessarios=slots_necessarios,
         )
+
+        if sem_capacidade:
+            raise ValueError(
+                f"Não foi possível encaixar automaticamente a reserva na grade da face {cod_face} "
+                f"de {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')} "
+                f"com a cota {cota_int or 'informada'}. Verifique a grade para encaixe. "
+                f"A reserva não foi criada."
+            )
+
+        reserva_ordem_prioridade = 1
 
         dias_int = ((data_fim - data_inicio).days + 1)
 
@@ -29774,8 +29898,33 @@ def api_kanban_ocupacao_calendario():
     if not cod_face:
         return jsonify({"ok": False, "erro": "cod_face obrigatório"}), 400
 
+    try:
+        capacidade = _obter_capacidade_face_reserva_kanban(cod_face)
+    except Exception as erro:
+        current_app.logger.exception(
+            "KANBAN OCUPACAO: erro ao resolver capacidade da face %s.",
+            cod_face,
+        )
+        return jsonify(
+            {
+                "ok": False,
+                "erro": f"Não foi possível localizar a capacidade da face {cod_face}: {erro}",
+            }
+        ), 500
+
+    cod_ponto = int(capacidade.get("CodPonto") or 0) or None
+    eh_digital = int(capacidade.get("EhDigital") or 0)
+    capacidade_slots = int(capacidade.get("CapacidadeSlots") or 0)
+    tipo_painel = str(capacidade.get("TipoPainel") or "").strip()
+    bit_ativo = int(capacidade.get("BitAtivo") or 0)
+
     sql = text("""
-        DECLARE @CodFace varchar(20) = UPPER(LTRIM(RTRIM(:cod_face)));
+        DECLARE @CodFace varchar(50) = UPPER(LTRIM(RTRIM(:cod_face)));
+        DECLARE @CodPonto int = TRY_CONVERT(int, :cod_ponto);
+        DECLARE @EhDigital bit = TRY_CONVERT(bit, :eh_digital);
+        DECLARE @CapacidadeSlots decimal(18,4) = TRY_CONVERT(decimal(18,4), :capacidade_slots);
+        DECLARE @BitAtivo int = TRY_CONVERT(int, :bit_ativo);
+        DECLARE @TipoPainel varchar(200) = :tipo_painel;
 
         DECLARE @Inicio date =
         CASE
@@ -29789,153 +29938,148 @@ def api_kanban_ocupacao_calendario():
 
         DECLARE @Fim date = DATEADD(MONTH, :meses, @Inicio);
 
-        DECLARE @CodPonto int =
-        (
-            SELECT TOP (1) fo.CodPonto
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE fo.CodFace = @CodFace
-              AND fo.CodPonto IS NOT NULL
-            ORDER BY fo.DataAtualizacao DESC
-        );
-
         ;WITH
-        Painel AS (
-            SELECT TOP (1)
-                p.CodPonto,
-                TipoPainel = p.Tipo,
-                QuantidadeFaces = NULLIF(p.QuantidadeFaces, 0),
-                BitAtivo = COALESCE(p.BitAtivo, 1)
-            FROM [Integracao].[Silver].[DimPaineisEuromidia] p
-            WHERE p.CodPonto = @CodPonto
+        Calendario AS (
+            SELECT c.[Data]
+            FROM [Integracao].[Silver].[DimCalendario] c
+            WHERE c.[Data] >= @Inicio
+              AND c.[Data] < @Fim
         ),
-        Capacidade AS (
+        ItensContratos AS (
             SELECT
-                CodPonto = (SELECT CodPonto FROM Painel),
-                TipoPainel = COALESCE((SELECT TipoPainel FROM Painel), 'DESCONHECIDO'),
-                BitAtivo = COALESCE((SELECT BitAtivo FROM Painel), 0),
-
-                EhDigital =
-                    CASE
-                        WHEN COALESCE((SELECT TipoPainel FROM Painel), '') LIKE '%DIGITAL%' THEN 1
-                        ELSE 0
-                    END,
-
-                CapacidadeSlots =
-                    CASE
-                        WHEN COALESCE((SELECT TipoPainel FROM Painel), '') LIKE '%DIGITAL%'
-                        THEN COALESCE((SELECT QuantidadeFaces FROM Painel), 16)
-                        ELSE 1
-                    END
-        ),
-        OcupacoesBase AS (
-            SELECT
-                fo.CodFace,
-                DataInicio = fo.DataInicio,
-                DataFim = fo.DataFim,
-                SpanQtd = fo.SpanQtd,
-                Cota = fo.Cota,
-                NumeroContrato = fo.NumeroContrato,
-                NumeroPrevia = fo.NumeroPrevia,
-                DataAtualizacao = fo.DataAtualizacao
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE UPPER(LTRIM(RTRIM(COALESCE(fo.CodFace, '')))) = @CodFace
-              AND fo.DataInicio IS NOT NULL
-              AND fo.DataFim IS NOT NULL
-              AND fo.CanceladoEm IS NULL
-              AND fo.Status IN ('ATIVO', 'RESERVADO')
-        ),
-        OcupacoesDedup AS (
-            SELECT *
-            FROM (
-                SELECT
-                    b.*,
-                    rn = ROW_NUMBER() OVER (
-                        PARTITION BY
-                            b.CodFace,
-                            b.DataInicio,
-                            b.DataFim,
-                            ISNULL(b.NumeroContrato, ''),
-                            ISNULL(b.NumeroPrevia, '')
-                        ORDER BY b.DataAtualizacao DESC
-                    )
-                FROM OcupacoesBase b
-            ) x
-            WHERE x.rn = 1
-        ),
-        OcupacoesValidas AS (
-            SELECT
-                d.DataInicio,
-                d.DataFim,
+                DataInicio = TRY_CONVERT(date, c.DataInicioPrevisto),
+                DataFim = COALESCE(
+                    TRY_CONVERT(date, c.DataCancelamento),
+                    TRY_CONVERT(date, c.DataTerminoPrevisto),
+                    CONVERT(date, '9999-12-31')
+                ),
                 SlotsConsumidos =
                     CASE
-                        WHEN (SELECT EhDigital FROM Capacidade) = 1
-                        THEN COALESCE(NULLIF(d.SpanQtd, 0), 1)
-                        ELSE 1
+                        WHEN @EhDigital = 1 THEN
+                            CASE
+                                WHEN TRY_CONVERT(int, c.Cota) = 540 THEN 2.0
+                                WHEN TRY_CONVERT(int, c.Cota) = 1080 THEN 1.0
+                                WHEN TRY_CONVERT(int, c.Cota) = 1 THEN 2.0
+                                WHEN TRY_CONVERT(int, c.Cota) = 2 THEN 1.0
+                                WHEN TRY_CONVERT(float, c.Cota) IS NOT NULL AND TRY_CONVERT(float, c.Cota) > 0
+                                    THEN ROUND(1080.0 / TRY_CONVERT(float, c.Cota), 0)
+                                ELSE 1.0
+                            END
+                        ELSE 1.0
                     END
-            FROM OcupacoesDedup d
+            FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] c
+            WHERE c.AtivoCancelamento COLLATE Latin1_General_CI_AS = 'A' COLLATE Latin1_General_CI_AS
+              AND (@CodPonto IS NULL OR TRY_CONVERT(int, c.CodPonto) = @CodPonto)
+              AND UPPER(LTRIM(RTRIM(COALESCE(c.CodFace COLLATE Latin1_General_CI_AS, '')))) = @CodFace COLLATE Latin1_General_CI_AS
+              AND c.DataInicioPrevisto IS NOT NULL
+              AND TRY_CONVERT(date, c.DataInicioPrevisto) < @Fim
+              AND COALESCE(
+                    TRY_CONVERT(date, c.DataCancelamento),
+                    TRY_CONVERT(date, c.DataTerminoPrevisto),
+                    CONVERT(date, '9999-12-31')
+                  ) >= @Inicio
+        ),
+        ItensReservas AS (
+            SELECT
+                DataInicio = TRY_CONVERT(date, r.DataInicio),
+                DataFim = COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31')),
+                SlotsConsumidos =
+                    CASE
+                        WHEN @EhDigital = 1 THEN
+                            CASE
+                                WHEN TRY_CONVERT(int, r.SpanQtd) IS NOT NULL AND TRY_CONVERT(int, r.SpanQtd) > 0
+                                    THEN TRY_CONVERT(float, r.SpanQtd)
+                                WHEN TRY_CONVERT(int, r.Cota) = 540 THEN 2.0
+                                WHEN TRY_CONVERT(int, r.Cota) = 1080 THEN 1.0
+                                WHEN TRY_CONVERT(int, r.Cota) = 1 THEN 2.0
+                                WHEN TRY_CONVERT(int, r.Cota) = 2 THEN 1.0
+                                WHEN TRY_CONVERT(float, r.Cota) IS NOT NULL AND TRY_CONVERT(float, r.Cota) > 0
+                                    THEN ROUND(1080.0 / TRY_CONVERT(float, r.Cota), 0)
+                                ELSE 1.0
+                            END
+                        ELSE 1.0
+                    END
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r
+            WHERE (@CodPonto IS NULL OR TRY_CONVERT(int, r.CodPonto) = @CodPonto)
+              AND UPPER(LTRIM(RTRIM(COALESCE(r.CodFace COLLATE Latin1_General_CI_AS, '')))) = @CodFace COLLATE Latin1_General_CI_AS
+              AND UPPER(LTRIM(RTRIM(COALESCE(r.Origem COLLATE Latin1_General_CI_AS, '')))) IN ('RESERVA', 'KANBAN')
+              AND r.Status COLLATE Latin1_General_CI_AS = 'RESERVADO' COLLATE Latin1_General_CI_AS
+              AND r.CanceladoEm IS NULL
+              AND r.DataInicio IS NOT NULL
+              AND TRY_CONVERT(date, r.DataInicio) < @Fim
+              AND COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31')) >= @Inicio
+        ),
+        Itens AS (
+            SELECT DataInicio, DataFim, SlotsConsumidos FROM ItensContratos
+            UNION ALL
+            SELECT DataInicio, DataFim, SlotsConsumidos FROM ItensReservas
         ),
         UsoPorDia AS (
             SELECT
-                c.[Data],
+                cal.[Data],
+                SlotsOcupadosBruto = COALESCE(SUM(
+                    CASE
+                        WHEN i.DataInicio <= cal.[Data] AND i.DataFim >= cal.[Data]
+                            THEN ISNULL(i.SlotsConsumidos, 0.0)
+                        ELSE 0.0
+                    END
+                ), 0.0)
+            FROM Calendario cal
+            LEFT JOIN Itens i
+                   ON i.DataInicio <= cal.[Data]
+                  AND i.DataFim >= cal.[Data]
+            GROUP BY cal.[Data]
+        ),
+        UsoCapado AS (
+            SELECT
+                u.[Data],
                 SlotsOcupados =
                     CASE
-                        WHEN cap.EhDigital = 1
-                        THEN COALESCE(SUM(o.SlotsConsumidos), 0)
-                        ELSE CASE WHEN COUNT(o.SlotsConsumidos) > 0 THEN 1 ELSE 0 END
+                        WHEN @EhDigital = 1 THEN
+                            CASE
+                                WHEN u.SlotsOcupadosBruto > @CapacidadeSlots THEN @CapacidadeSlots
+                                WHEN u.SlotsOcupadosBruto < 0 THEN 0.0
+                                ELSE u.SlotsOcupadosBruto
+                            END
+                        ELSE CASE WHEN u.SlotsOcupadosBruto >= 1 THEN 1.0 ELSE 0.0 END
                     END
-            FROM [Integracao].[Silver].[DimCalendario] c
-            CROSS JOIN Capacidade cap
-            LEFT JOIN OcupacoesValidas o
-                   ON c.[Data] >= o.DataInicio
-                  AND c.[Data] <= o.DataFim
-            WHERE c.[Data] >= @Inicio
-              AND c.[Data] < @Fim
-            GROUP BY c.[Data], cap.EhDigital
+            FROM UsoPorDia u
         )
         SELECT
-            Data = CONVERT(varchar(10), c.[Data], 23),
-            CodPonto = cap.CodPonto,
-            TipoPainel = cap.TipoPainel,
-            EhDigital = cap.EhDigital,
-            CapacidadeSlots = cap.CapacidadeSlots,
+            Data = CONVERT(varchar(10), u.[Data], 23),
+            CodPonto = @CodPonto,
+            TipoPainel = @TipoPainel,
+            EhDigital = @EhDigital,
+            CapacidadeSlots = @CapacidadeSlots,
             SlotsOcupados = u.SlotsOcupados,
-
             SlotsDisponiveis =
                 CASE
-                    WHEN cap.CapacidadeSlots - u.SlotsOcupados < 0 THEN 0
-                    ELSE cap.CapacidadeSlots - u.SlotsOcupados
+                    WHEN @CapacidadeSlots - u.SlotsOcupados < 0 THEN 0.0
+                    ELSE @CapacidadeSlots - u.SlotsOcupados
                 END,
-
             OcupacaoPct =
                 CASE
-                    WHEN cap.CapacidadeSlots > 0
-                    THEN CAST(u.SlotsOcupados * 100.0 / cap.CapacidadeSlots AS decimal(9,2))
+                    WHEN @CapacidadeSlots > 0
+                    THEN CAST(u.SlotsOcupados * 100.0 / @CapacidadeSlots AS decimal(9,2))
                     ELSE NULL
                 END,
-
             DiaDisponivel =
                 CASE
-                    WHEN cap.BitAtivo = 0 THEN 0
-                    WHEN (cap.CapacidadeSlots - u.SlotsOcupados) > 0 THEN 1
+                    WHEN @BitAtivo = 0 THEN 0
+                    WHEN (@CapacidadeSlots - u.SlotsOcupados) > 0 THEN 1
                     ELSE 0
                 END,
-
             StatusDia =
                 CASE
-                    WHEN cap.BitAtivo = 0 THEN 'INDISPONIVEL'
-                    WHEN cap.EhDigital = 0 AND u.SlotsOcupados = 0 THEN 'DISPONIVEL'
-                    WHEN cap.EhDigital = 0 AND u.SlotsOcupados = 1 THEN 'OCUPADO'
-                    WHEN cap.EhDigital = 1 AND u.SlotsOcupados = 0 THEN 'LIVRE'
-                    WHEN cap.EhDigital = 1 AND u.SlotsOcupados < cap.CapacidadeSlots THEN 'PARCIAL'
+                    WHEN @BitAtivo = 0 THEN 'INDISPONIVEL'
+                    WHEN @EhDigital = 0 AND u.SlotsOcupados = 0 THEN 'DISPONIVEL'
+                    WHEN @EhDigital = 0 AND u.SlotsOcupados >= 1 THEN 'OCUPADO'
+                    WHEN @EhDigital = 1 AND u.SlotsOcupados = 0 THEN 'LIVRE'
+                    WHEN @EhDigital = 1 AND u.SlotsOcupados < @CapacidadeSlots THEN 'PARCIAL'
                     ELSE 'LOTADO'
                 END
-        FROM [Integracao].[Silver].[DimCalendario] c
-        JOIN UsoPorDia u
-          ON u.[Data] = c.[Data]
-        CROSS JOIN Capacidade cap
-        WHERE c.[Data] >= @Inicio
-          AND c.[Data] < @Fim
-        ORDER BY c.[Data];
+        FROM UsoCapado u
+        ORDER BY u.[Data];
     """)
 
     try:
@@ -29943,6 +30087,11 @@ def api_kanban_ocupacao_calendario():
             sql,
             {
                 "cod_face": cod_face,
+                "cod_ponto": cod_ponto,
+                "eh_digital": eh_digital,
+                "capacidade_slots": capacidade_slots,
+                "bit_ativo": bit_ativo,
+                "tipo_painel": tipo_painel,
                 "mes_ref": mes_ref,
                 "meses": meses,
             },
@@ -29959,6 +30108,15 @@ def api_kanban_ocupacao_calendario():
             }
         ), 500
 
+    def _numero_json(valor: Any) -> int | float:
+        try:
+            numero = float(valor or 0)
+        except Exception:
+            return 0
+        if abs(numero - round(numero)) < 0.000001:
+            return int(round(numero))
+        return round(numero, 4)
+
     calendario = {}
     for r in rows:
         chave = (r.Data or "").strip()
@@ -29967,9 +30125,9 @@ def api_kanban_ocupacao_calendario():
 
         calendario[chave] = {
             "status": (r.StatusDia or "").strip(),
-            "disp": int(r.SlotsDisponiveis or 0),
-            "cap": int(r.CapacidadeSlots or 0),
-            "ocup": int(r.SlotsOcupados or 0),
+            "disp": _numero_json(r.SlotsDisponiveis),
+            "cap": _numero_json(r.CapacidadeSlots),
+            "ocup": _numero_json(r.SlotsOcupados),
             "pct": float(r.OcupacaoPct) if r.OcupacaoPct is not None else None,
             "dia_disponivel": int(r.DiaDisponivel or 0),
             "eh_digital": int(r.EhDigital or 0),

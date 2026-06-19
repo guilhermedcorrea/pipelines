@@ -275,6 +275,11 @@ docker compose exec airflow-apiserver airflow users create \
 #docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker celery-airflow-worker celery-contratos-worker celery-anexos-contratos-worker
 
 
+#sem no cache
+#docker compose build flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker celery-airflow-worker celery-contratos-worker celery-anexos-contratos-worker
+
+#COMPOSE_PARALLEL_LIMIT=1 COMPOSE_BAKE=false BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose build --no-cache flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker celery-airflow-worker celery-contratos-worker celery-anexos-contratos-worker
+
 #docker compose up -d
 
 

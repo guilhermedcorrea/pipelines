@@ -3513,6 +3513,96 @@
     return !!(bloco && bloco.__datasReservaLiberadasManual instanceof Set && bloco.__datasReservaLiberadasManual.has(dataIso));
   }
 
+  function obterPrimeiroNumeroValido(...valores){
+    for (const valor of valores) {
+      if (valor === null || valor === undefined || valor === '') continue;
+      const numero = Number(valor);
+      if (Number.isFinite(numero)) return numero;
+    }
+    return null;
+  }
+
+  function obterCotaReservaDoBloco(bloco){
+    const selectExibicoesDia = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+
+    const valor = safeStr(
+      obterExibicaoDiaAtivaDoBloco(bloco) ||
+      obterValoresSelecionadosSelect(selectExibicoesDia)[0] ||
+      bloco?.dataset?.exibicoesDia ||
+      bloco?.dataset?.exibicaoDia ||
+      ''
+    ).trim();
+
+    return valor;
+  }
+
+  function obterSlotsNecessariosReservaDoBloco(bloco){
+    const usarInsercoesDigitais = painelFaceUsaInsercoesDigitais(bloco);
+    if (!usarInsercoesDigitais) return 1;
+
+    const cotaTexto = obterCotaReservaDoBloco(bloco);
+    const cotaNormalizada = safeStr(cotaTexto || '').replace(',', '.');
+    const matchCota = cotaNormalizada.match(/\d+(?:\.\d+)?/);
+    const cota = matchCota ? Number(matchCota[0]) : Number(cotaNormalizada);
+
+    if (!Number.isFinite(cota) || cota <= 0) return 1;
+
+    /*
+     * Regra oficial da grade/KPI: consumo de slot digital = 1080 / Cota.
+     * Portanto: COTA 540 consome 2 slots; COTA 1080 consome 1 slot.
+     * Os valores 1 e 2 abaixo são compatibilidade com registros legados.
+     */
+    if (cota === 540) return 2;
+    if (cota === 1080) return 1;
+    if (cota === 1) return 2;
+    if (cota === 2) return 1;
+
+    return Math.max(1, Math.round(1080 / cota));
+  }
+
+  function normalizarInfoDiaOcupacaoKanban(info){
+    if (!info || typeof info !== 'object') return null;
+
+    const cap = obterPrimeiroNumeroValido(
+      info.cap,
+      info.CapacidadeSlots,
+      info.capacidade,
+      info.Capacidade,
+      info.total,
+      info.Total
+    );
+
+    let disp = obterPrimeiroNumeroValido(
+      info.disp,
+      info.SlotsDisponiveis,
+      info.disponiveis,
+      info.Disponiveis,
+      info.available,
+      info.Available
+    );
+
+    const ocup = obterPrimeiroNumeroValido(
+      info.ocup,
+      info.SlotsOcupados,
+      info.ocupados,
+      info.Ocupados,
+      info.used,
+      info.Used
+    );
+
+    if (disp === null && cap !== null && ocup !== null) {
+      disp = cap - ocup;
+    }
+
+    return {
+      cap: cap === null ? null : cap,
+      disp: disp === null ? null : Math.max(0, disp),
+      ocup: ocup === null ? null : ocup,
+      status: safeStr(info.status || info.Status || info.StatusDia || '').trim().toUpperCase(),
+      diaDisponivel: Number(info.dia_disponivel ?? info.DiaDisponivel ?? 0) === 1
+    };
+  }
+
   function diaEstaDisponivelNoBloco(bloco, dataIso){
     if (!dataIso) return false;
 
@@ -3520,10 +3610,20 @@
       return true;
     }
 
-    const info = obterInfoDiaOcupacaoDoBloco(bloco, dataIso);
+    const info = normalizarInfoDiaOcupacaoKanban(obterInfoDiaOcupacaoDoBloco(bloco, dataIso));
     if (!info) return false;
 
-    return Number(info.dia_disponivel || 0) === 1;
+    const status = info.status;
+    if (status === 'INDISPONIVEL' || status === 'INATIVO' || status === 'OCUPADO' || status === 'LOTADO' || status === 'CHEIO') {
+      return false;
+    }
+
+    const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+
+    if (info.cap !== null && info.cap <= 0) return false;
+    if (info.disp !== null) return info.disp >= slotsNecessarios;
+
+    return info.diaDisponivel;
   }
 
   function intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim){
@@ -3541,6 +3641,62 @@
     }
 
     return guard > 0;
+  }
+
+  function obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim){
+    if (!dataInicio || !dataFim || dataFim < dataInicio) return '';
+
+    let cursor = dataInicio;
+    let guard = 0;
+
+    while (cursor && cursor <= dataFim && guard < 3700){
+      if (!diaEstaDisponivelNoBloco(bloco, cursor)) {
+        return cursor;
+      }
+      cursor = somarDiasDataIso(cursor, 1);
+      guard += 1;
+    }
+
+    return '';
+  }
+
+  function redesenharCalendariosReservaDoBloco(bloco){
+    const inputDataInicio = bloco?.querySelector('[data-role="input-data-inicio"]');
+    const inputDataFim = bloco?.querySelector('[data-role="input-data-fim"]');
+    if (!inputDataInicio || !inputDataFim) return;
+
+    const dataInicio = safeStr(inputDataInicio.value || '').trim();
+    const dataFim = safeStr(inputDataFim.value || '').trim();
+    const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+    let mensagemBloqueioDefinida = false;
+
+    if (dataInicio && !diaEstaDisponivelNoBloco(bloco, dataInicio)) {
+      limparInputDataReserva(inputDataInicio);
+      limparInputDataReserva(inputDataFim);
+      atualizarMensagemReservaDoBloco(
+        bloco,
+        `A data ${formatarDataIsoParaBr(dataInicio)} não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada.`,
+        'erro'
+      );
+      mensagemBloqueioDefinida = true;
+    } else if (dataInicio && dataFim && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)) {
+      const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
+      atualizarMensagemReservaDoBloco(
+        bloco,
+        primeiroDiaIndisponivel
+          ? `O período selecionado passa por ${formatarDataIsoParaBr(primeiroDiaIndisponivel)}, que não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada. Verifique a grade para encaixe antes de salvar.`
+          : `O período selecionado não tem ${slotsNecessarios} slot(s) livre(s) em todos os dias. Verifique a grade para encaixe antes de salvar.`,
+        'aviso'
+      );
+      mensagemBloqueioDefinida = true;
+    }
+
+    sincronizarRestricoesDataFimDoBloco(bloco);
+    inputDataInicio._flatpickr?.redraw();
+    inputDataFim._flatpickr?.redraw();
+    if (!mensagemBloqueioDefinida) {
+      atualizarResumoDisponibilidadeDoBloco(bloco);
+    }
   }
 
   function atualizarMensagemReservaDoBloco(bloco, mensagem = '', tipo = 'info'){
@@ -3609,7 +3765,7 @@
       if (!diaEstaDisponivelNoBloco(bloco, dataInicio)) {
         atualizarMensagemReservaDoBloco(
           bloco,
-          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade para esta face.`,
+          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade suficiente para a cota selecionada.`,
           'erro'
         );
         return;
@@ -3630,10 +3786,14 @@
     }
 
     if (!intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)) {
+      const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+      const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
       atualizarMensagemReservaDoBloco(
         bloco,
-        `Existe pelo menos um dia sem disponibilidade entre ${formatarDataIsoParaBr(dataInicio)} e ${formatarDataIsoParaBr(dataFim)}.`,
-        'erro'
+        primeiroDiaIndisponivel
+          ? `Não foi possível encaixar automaticamente o período inteiro. O dia ${formatarDataIsoParaBr(primeiroDiaIndisponivel)} não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada. Verifique a grade para encaixe.`
+          : `Não foi possível encaixar automaticamente o período inteiro. Verifique a grade para encaixe.`,
+        'aviso'
       );
       return;
     }
@@ -3698,6 +3858,31 @@
     return promessa;
   }
 
+  function limparCacheCalendarioOcupacao(codFaces = null){
+    if (!codFaces) {
+      cacheCalendarioOcupacaoPorFace.clear();
+      promessasCalendarioOcupacaoPorFace.clear();
+      return;
+    }
+
+    const lista = Array.isArray(codFaces) ? codFaces : [codFaces];
+    lista.forEach((codFace) => {
+      const chave = safeStr(codFace || '').trim().toUpperCase();
+      if (!chave) return;
+      cacheCalendarioOcupacaoPorFace.delete(chave);
+      promessasCalendarioOcupacaoPorFace.delete(chave);
+    });
+  }
+
+  function extrairCodFacesPainelFaces(lista){
+    if (!Array.isArray(lista)) return [];
+    return Array.from(new Set(
+      lista
+        .map((item) => safeStr(item?.cod_face || item?.CodFace || item?.codFace || item?.face || '').trim().toUpperCase())
+        .filter(Boolean)
+    ));
+  }
+
   function prepararInputReservaParaFallback(input){
     if (!input) return;
     input.type = 'date';
@@ -3706,46 +3891,84 @@
     input.min = obterDataAtualIsoLocal();
   }
 
+  function removerBadgeDiaCalendarioKanban(dayElem){
+    if (!dayElem) return;
+    dayElem.classList.remove('kb-dia-has-badge');
+    const antigo = dayElem.querySelector?.('.kb-dia-badge');
+    if (antigo) antigo.remove();
+  }
+
+  function adicionarBadgeDiaCalendarioKanban(dayElem, texto){
+    if (!dayElem || !texto) return;
+    removerBadgeDiaCalendarioKanban(dayElem);
+    dayElem.classList.add('kb-dia-has-badge');
+    const badge = document.createElement('span');
+    badge.className = 'kb-dia-badge';
+    badge.textContent = texto;
+    dayElem.appendChild(badge);
+  }
+
   function decorarDiaFlatpickr(instance, dayElem, date){
     const input = instance?.input;
     const bloco = input?.closest('.kb-painel-item');
     if (!bloco) return;
 
     const dataIso = formatarDataIso(date);
-    const info = obterInfoDiaOcupacaoDoBloco(bloco, dataIso);
+    const infoOriginal = obterInfoDiaOcupacaoDoBloco(bloco, dataIso);
+    const info = normalizarInfoDiaOcupacaoKanban(infoOriginal);
     const liberadoManual = diaEstaManualMenteLiberadoNoBloco(bloco, dataIso);
+    const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
 
     dayElem.classList.remove('kb-dia-livre', 'kb-dia-parcial', 'kb-dia-indisponivel', 'kb-dia-inativo');
+    removerBadgeDiaCalendarioKanban(dayElem);
     dayElem.title = '';
 
     if (!info && !liberadoManual) {
       dayElem.classList.add('kb-dia-indisponivel');
+      dayElem.classList.add('flatpickr-disabled');
+      dayElem.setAttribute('aria-disabled', 'true');
       dayElem.title = 'Dia sem informação de disponibilidade.';
       return;
     }
 
     const status = safeStr(info?.status || '').trim().toUpperCase();
-    const disponivel = liberadoManual || Number(info?.dia_disponivel || 0) === 1;
+    const disponivelParaCota = liberadoManual || diaEstaDisponivelNoBloco(bloco, dataIso);
+    const cap = info?.cap;
+    const disp = info?.disp;
+    const ocup = info?.ocup !== null && info?.ocup !== undefined
+      ? info?.ocup
+      : (cap !== null && cap !== undefined && disp !== null && disp !== undefined ? Math.max(0, cap - disp) : null);
 
-    if (!disponivel) {
-      dayElem.classList.add(status === 'INDISPONIVEL' ? 'kb-dia-inativo' : 'kb-dia-indisponivel');
-    } else if (status === 'PARCIAL') {
+    if (!disponivelParaCota) {
+      const classeBloqueio = status === 'INDISPONIVEL' || status === 'INATIVO' ? 'kb-dia-inativo' : 'kb-dia-indisponivel';
+      dayElem.classList.add(classeBloqueio);
+      dayElem.classList.add('flatpickr-disabled');
+      dayElem.setAttribute('aria-disabled', 'true');
+    } else if (status === 'PARCIAL' || (disp !== null && cap !== null && disp < cap)) {
       dayElem.classList.add('kb-dia-parcial');
     } else {
       dayElem.classList.add('kb-dia-livre');
     }
 
+    if (cap !== null && cap !== undefined && disp !== null && disp !== undefined) {
+      adicionarBadgeDiaCalendarioKanban(dayElem, `${Math.max(0, disp)}/${cap}`);
+    }
+
     const pedacosTitulo = [];
+    if (liberadoManual) pedacosTitulo.push('liberado para a reserva já vinculada ao card');
     if (status) pedacosTitulo.push(status);
-    if (info && info.cap !== undefined && info.ocup !== undefined) {
-      pedacosTitulo.push(`ocupação ${info.ocup}/${info.cap}`);
+    if (ocup !== null && ocup !== undefined && cap !== null && cap !== undefined) {
+      pedacosTitulo.push(`ocupação ${ocup}/${cap}`);
     }
-    if (info && info.disp !== undefined) {
-      pedacosTitulo.push(`vagas ${info.disp}`);
+    if (disp !== null && disp !== undefined) {
+      pedacosTitulo.push(`livres ${disp}`);
     }
-    if (pedacosTitulo.length) {
-      dayElem.title = pedacosTitulo.join(' • ');
+    pedacosTitulo.push(`necessário ${slotsNecessarios}`);
+    if (!disponivelParaCota && !liberadoManual) {
+      pedacosTitulo.push('bloqueado para a cota selecionada');
     }
+
+    dayElem.title = pedacosTitulo.join(' • ');
   }
 
   function configurarFallbackNativoReservaDoBloco(bloco, datasPadrao = {}){
@@ -3793,7 +4016,7 @@
         sincronizarRestricoesDataFimDoBloco(bloco);
         atualizarMensagemReservaDoBloco(
           bloco,
-          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade para esta face.`,
+          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade suficiente para a cota selecionada.`,
           'erro'
         );
         atualizarResumoDisponibilidadeDoBloco(bloco);
@@ -3804,15 +4027,9 @@
         inputDataFim.value = '';
       }
 
-      if (
-        obterCalendarioOcupacaoDoBloco(bloco) &&
-        dataInicio &&
-        safeStr(inputDataFim.value || '').trim() &&
-        !intervaloEstaDisponivelNoBloco(bloco, dataInicio, safeStr(inputDataFim.value || '').trim())
-      ) {
-        inputDataFim.value = '';
-      }
-
+      // Não limpar a Data até apenas porque há um dia sem capacidade no meio do período.
+      // A regra correta é permitir a visualização do intervalo escolhido e avisar o vendedor
+      // para verificar a grade para encaixe, bloqueando o salvamento se o período não couber.
       atualizarResumoDisponibilidadeDoBloco(bloco);
       agendarSincronizacaoFormularioSolicitacao();
     };
@@ -3845,11 +4062,14 @@
         safeStr(inputDataFim.value || '').trim() &&
         !intervaloEstaDisponivelNoBloco(bloco, dataInicio, safeStr(inputDataFim.value || '').trim())
       ) {
-        inputDataFim.value = '';
+        const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+        const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
         atualizarMensagemReservaDoBloco(
           bloco,
-          `Existe pelo menos um dia sem disponibilidade entre ${formatarDataIsoParaBr(dataInicio)} e ${formatarDataIsoParaBr(dataFim)}.`,
-          'erro'
+          primeiroDiaIndisponivel
+            ? `Não foi possível encaixar automaticamente o período inteiro. O dia ${formatarDataIsoParaBr(primeiroDiaIndisponivel)} não tem ${slotsNecessarios} slot(s) livre(s). Verifique a grade para encaixe.`
+            : `Não foi possível encaixar automaticamente o período inteiro. Verifique a grade para encaixe.`,
+          'aviso'
         );
       }
 
@@ -3965,11 +4185,8 @@
 
           sincronizarRestricoesDataFimDoBloco(bloco);
 
-          const dataFimAtual = safeStr(inputDataFim.value || '').trim();
-          if (dataInicio && dataFimAtual && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFimAtual)) {
-            limparInputDataReserva(inputDataFim);
-          }
-
+          // Se a Data até já estiver preenchida e existir algum dia sem capacidade no meio,
+          // mantemos o período visível e exibimos o aviso no resumo. O salvamento continua bloqueado.
           atualizarResumoDisponibilidadeDoBloco(bloco);
           agendarSincronizacaoFormularioSolicitacao();
         }
@@ -3998,7 +4215,10 @@
               return true;
             }
 
-            return !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataIso);
+            // Para a Data até, bloqueie apenas o próprio dia se ele não comportar a cota.
+            // Não bloqueie todos os dias após um buraco no meio do período: o vendedor precisa conseguir
+            // selecionar o intervalo e receber o aviso para verificar a grade para encaixe.
+            return !diaEstaDisponivelNoBloco(bloco, dataIso);
           }
         ],
         onReady: function(_selectedDates, _dataStr, instance){
@@ -4083,7 +4303,17 @@
     if (!dia) return;
 
     const dataIso = safeStr(dia.dataset.dateIso || '').trim();
-    if (dataIso && dataIso < obterDataAtualIsoLocal()) {
+    const calendario = dia.closest?.('.flatpickr-calendar');
+    const input = calendario?._flatpickr?.input || null;
+    const bloco = input?.closest?.('.kb-painel-item') || null;
+
+    if (
+      (dataIso && dataIso < obterDataAtualIsoLocal()) ||
+      dia.classList.contains('flatpickr-disabled') ||
+      dia.classList.contains('kb-dia-indisponivel') ||
+      dia.classList.contains('kb-dia-inativo') ||
+      (bloco && dataIso && !diaEstaDisponivelNoBloco(bloco, dataIso))
+    ) {
       evento.preventDefault();
       evento.stopPropagation();
       return false;
@@ -12759,6 +12989,7 @@ async function aplicarReservaDigitadaNoBloco(bloco){
       sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'exibicoes' });
       atualizarResumoDropdownExibicoesDia(selectExibicoesDia);
       atualizarResumoComercial(bloco, { formatarCampos: true });
+      redesenharCalendariosReservaDoBloco(bloco);
       atualizarTitulosPainelFace();
       agendarSincronizacaoFormularioSolicitacao();
     });
@@ -17075,9 +17306,13 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
 
       if (dataInicio && dataFim && bloco.__calendarioOcupacao && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)){
+        const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+        const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
         return {
           ok: false,
-          msg: `${titulo}: existe pelo menos um dia sem disponibilidade entre ${formatarDataIsoParaBr(dataInicio)} e ${formatarDataIsoParaBr(dataFim)}.`
+          msg: primeiroDiaIndisponivel
+            ? `${titulo}: não foi possível encaixar automaticamente o período inteiro. O dia ${formatarDataIsoParaBr(primeiroDiaIndisponivel)} não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada. Verifique a grade para encaixe.`
+            : `${titulo}: não foi possível encaixar automaticamente o período inteiro. Verifique a grade para encaixe.`
         };
       }
     }
@@ -17339,6 +17574,8 @@ async function moverCard(idCard, idFasePara, posicao) {
         mostrarMensagemCard(erroTag?.message || "O card foi salvo, mas houve erro ao sincronizar a tag de tipo de contrato.");
         return;
       }
+
+      limparCacheCalendarioOcupacao(extrairCodFacesPainelFaces(payload.painel_faces));
 
       const cardAtual = obterCardPorId(idCardSalvo);
       const idFaseAtual = idNum(cardAtual?.IDDimKanbanFaseAtual || j?.card?.IDDimKanbanFaseAtual || 0);
