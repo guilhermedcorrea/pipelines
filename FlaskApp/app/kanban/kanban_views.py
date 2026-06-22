@@ -5067,6 +5067,40 @@ def _garantir_versao_concorrencia_card(id_card: int, id_kanban: int) -> str | No
 
 
 
+def _montar_payload_conflito_concorrencia_card(
+    id_card: int,
+    *,
+    msg: str,
+    versao_recebida: Any | None = None,
+    motivo: str = "versao_concorrencia_desatualizada",
+) -> dict[str, Any]:
+    """Monta uma resposta 409 com a versão atual do card para o front sincronizar e tentar novamente com segurança."""
+    detalhe_atual: dict[str, Any] = {"card": None}
+
+    try:
+        detalhe_atual = _obter_card_detalhe_payload(int(id_card))
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN: falha ao carregar detalhe atual após conflito de VersaoConcorrencia. id_card=%s",
+            id_card,
+        )
+
+    card_atual = detalhe_atual.get("card") if isinstance(detalhe_atual, dict) else None
+    versao_atual = _extrair_versao_concorrencia_dict(card_atual) if isinstance(card_atual, dict) else None
+    versao_recebida_hex = _normalizar_hex_sql(versao_recebida)
+
+    return {
+        "ok": False,
+        "msg": msg,
+        "motivo": motivo,
+        "card_atual": card_atual,
+        "versao_concorrencia_atual": versao_atual,
+        "versao_concorrencia_recebida": versao_recebida_hex,
+    }
+
+
+
+
 def _sala_kanban(id_kanban: int) -> str:
     return f"kanban:{int(id_kanban)}"
 
@@ -20153,27 +20187,27 @@ def api_card_mover(id_card: int):
 
         msg = str(exc)
         if "Versão de concorrência inválida ou ausente" in msg:
-            detalhe_atual = _obter_card_detalhe_payload(id_card)
             return (
                 jsonify(
-                    {
-                        "ok": False,
-                        "msg": msg,
-                        "card_atual": detalhe_atual.get("card"),
-                    }
+                    _montar_payload_conflito_concorrencia_card(
+                        id_card,
+                        msg=msg,
+                        versao_recebida=payload.get("versao_concorrencia"),
+                        motivo="versao_concorrencia_invalida_ou_ausente",
+                    )
                 ),
                 409,
             )
 
         if "Este card foi alterado ou movido por outro usuário" in msg:
-            detalhe_atual = _obter_card_detalhe_payload(id_card)
             return (
                 jsonify(
-                    {
-                        "ok": False,
-                        "msg": msg,
-                        "card_atual": detalhe_atual.get("card"),
-                    }
+                    _montar_payload_conflito_concorrencia_card(
+                        id_card,
+                        msg=msg,
+                        versao_recebida=payload.get("versao_concorrencia"),
+                        motivo="versao_concorrencia_desatualizada",
+                    )
                 ),
                 409,
             )
@@ -32592,13 +32626,13 @@ def api_card_atualizar(id_card: int):
         if has_versao:
             versao_concorrencia_bytes = _rowversion_hex_para_bytes(versao_concorrencia)
             if not versao_concorrencia_bytes:
-                detalhe_atual = _obter_card_detalhe_payload(id_card)
                 return jsonify(
-                    {
-                        "ok": False,
-                        "msg": "Versão de concorrência inválida ou ausente.",
-                        "card_atual": detalhe_atual.get("card"),
-                    }
+                    _montar_payload_conflito_concorrencia_card(
+                        id_card,
+                        msg="Versão de concorrência inválida ou ausente.",
+                        versao_recebida=versao_concorrencia,
+                        motivo="versao_concorrencia_invalida_ou_ausente",
+                    )
                 ), 409
 
         select_id_tipo_documento_atual = (
@@ -32952,13 +32986,13 @@ def api_card_atualizar(id_card: int):
 
         row_upd = db.session.execute(sql_upd, parametros_update).mappings().first()
         if not row_upd:
-            detalhe_atual = _obter_card_detalhe_payload(id_card)
             return jsonify(
-                {
-                    "ok": False,
-                    "msg": "O card foi alterado por outra operação. Recarregue a tela e tente novamente.",
-                    "card_atual": detalhe_atual.get("card"),
-                }
+                _montar_payload_conflito_concorrencia_card(
+                    id_card,
+                    msg="O card foi alterado por outra operação. Recarregue a tela e tente novamente.",
+                    versao_recebida=versao_concorrencia,
+                    motivo="versao_concorrencia_desatualizada",
+                )
             ), 409
 
         sincronizacao_tipo = _sincronizar_tipo_contrato_card(

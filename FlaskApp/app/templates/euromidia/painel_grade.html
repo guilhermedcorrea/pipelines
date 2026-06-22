@@ -1624,6 +1624,17 @@
     --barra-h-2: calc((var(--trilho-h) * 2) - (var(--pad-y) * 2));
     --barra-top-2: var(--pad-y);
 
+    /*
+      Renderização robusta da cota 1080:
+      em vez de depender de uma única barra vazando para a linha de baixo,
+      a grade desenha um segmento no slot inicial e outro segmento no slot
+      ocupado abaixo. Assim a próxima linha não consegue cobrir/cortar a barra.
+    */
+    --barra-h-span-top: calc(var(--trilho-h) - var(--pad-y));
+    --barra-top-span-top: var(--pad-y);
+    --barra-h-span-bottom: calc(var(--trilho-h) - var(--pad-y));
+    --barra-top-span-bottom: 0px;
+
     --barra-font-1: 12px;
     --barra-font-2: 13px;
 
@@ -2056,15 +2067,28 @@
     border-radius: 12px;
   }
 
+  .barra.multi-span.span-top{
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-width: 0;
+  }
+
+  .barra.multi-span.span-continuacao{
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top-width: 0;
+  }
+
+  .barra.multi-span.span-continuacao .chip,
+  .barra.multi-span.span-continuacao .txt,
+  .barra.multi-span.span-continuacao .vend,
+  .barra.multi-span.span-continuacao .reserva-id,
+  .barra.multi-span.span-continuacao .icone-preferencia{
+    visibility: hidden;
+  }
+
   .barra.multi-span::after{
-    content:"";
-    position:absolute;
-    left: 0;
-    right: 0;
-    top: calc(50% - 0.5px);
-    height: 1px;
-    background: rgba(15, 23, 42, .18);
-    pointer-events: none;
+    display:none;
   }
 
   .linha-conflito .face-col{ border-left: 3px solid rgba(220,38,38,.85); }
@@ -2177,7 +2201,7 @@
   .linha .trilho{
     min-height: var(--linha-h);
     position: relative;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .linha.linha-span{
@@ -2237,7 +2261,14 @@
           {% for it_tmp in itens_raw %}
             {% set _alt_tmp = ((it_tmp.SpanAltura if it_tmp.SpanAltura is defined and it_tmp.SpanAltura is not none else 1) | int) %}
             {% set _off_tmp = ((it_tmp.SpanOffset if it_tmp.SpanOffset is defined and it_tmp.SpanOffset is not none else 0) | int) %}
-            {% if _alt_tmp > 1 and _off_tmp == 0 %}
+            {% set _cota_tmp = (it_tmp.Cota|string)|upper if it_tmp.Cota is defined and it_tmp.Cota is not none else '' %}
+            {#
+              A cota 1080 ocupa 2 slots verticais.
+              Mesmo quando o backend ainda não envia SpanAltura=2, a linha precisa
+              entrar como linha-span para permitir que a barra ultrapasse o trilho
+              do primeiro slot e apareça inteira sobre o segundo slot.
+            #}
+            {% if ((_alt_tmp > 1) or ('1080' in _cota_tmp)) and _off_tmp == 0 %}
               {% set ns_linha.tem_span_inicio = True %}
             {% endif %}
           {% endfor %}
@@ -2288,6 +2319,10 @@
 
                 {% set _off_item = ((it.SpanOffset if it.SpanOffset is defined and it.SpanOffset is not none else 0) | int) %}
                 {% set _alt_item = ((it.SpanAltura if it.SpanAltura is defined and it.SpanAltura is not none else 1) | int) %}
+                {% set _cota_item_tmp = (it.Cota|string)|upper if it.Cota is defined and it.Cota is not none else '' %}
+                {% if ('1080' in _cota_item_tmp) and _alt_item < 2 %}
+                  {% set _alt_item = 2 %}
+                {% endif %}
                 {% if not (_alt_item > 1 and _off_item > 0) %}
 
                   {% set eh_reserva_item = (it.EhReserva if it.EhReserva is defined else False) %}
@@ -2323,7 +2358,7 @@
                   {% if span_altura < 1 %}{% set span_altura = 1 %}{% endif %}
 
                   {% set _cota_str = (it.Cota|string)|upper if it.Cota is defined and it.Cota is not none else '' %}
-                  {% if _cota_str == '1080' and span_altura < 2 %}
+                  {% if ('1080' in _cota_str) and span_altura < 2 %}
                     {% set span_altura = 2 %}
                   {% endif %}
 
@@ -2439,8 +2474,8 @@
                 {% if span_altura < 1 %}{% set span_altura = 1 %}{% endif %}
 
                 {% if span_altura > 1 %}
-                  {% set barra_h = 'var(--barra-h-2)' %}
-                  {% set barra_top = 'var(--barra-top-2)' %}
+                  {% set barra_h = 'var(--barra-h-span-top)' %}
+                  {% set barra_top = 'var(--barra-top-span-top)' %}
                   {% set barra_font = 'var(--barra-font-2)' %}
                 {% else %}
                   {% set barra_h = 'var(--barra-h-1)' %}
@@ -2509,7 +2544,7 @@
                 {% set classes_barra = 'barra' %}
                 {% if eh_reserva %}{% set classes_barra = classes_barra ~ ' reservado' %}{% endif %}
                 {% if it.BitConflito %}{% set classes_barra = classes_barra ~ ' conflito' %}{% endif %}
-                {% if span_altura > 1 %}{% set classes_barra = classes_barra ~ ' multi-span' %}{% endif %}
+                {% if span_altura > 1 %}{% set classes_barra = classes_barra ~ ' multi-span span-top' %}{% endif %}
 
                 <div class="{{ classes_barra }}"
                      style="
@@ -2549,6 +2584,82 @@
                   {% endif %}
                 </div>
 
+              {% endfor %}
+
+              {#
+                Continuação visual da cota 1080 no segundo slot.
+                O backend já envia um item por slot ocupado com SpanOffset.
+                Antes o template pulava SpanOffset > 0 e desenhava uma barra alta vazando
+                para a linha de baixo; quando a linha seguinte era pintada depois, ela podia
+                cobrir/cortar parte da barra. Agora a continuação é desenhada dentro da
+                própria linha do segundo slot, sem alterar a regra de ocupação.
+              #}
+              {% for it_cont in itens_raw %}
+                {% set off_cont = ((it_cont.SpanOffset if it_cont.SpanOffset is defined and it_cont.SpanOffset is not none else 0) | int) %}
+                {% set alt_cont = ((it_cont.SpanAltura if it_cont.SpanAltura is defined and it_cont.SpanAltura is not none else 1) | int) %}
+                {% set cota_cont_str = (it_cont.Cota|string)|upper if it_cont.Cota is defined and it_cont.Cota is not none else '' %}
+                {% if ('1080' in cota_cont_str) and alt_cont < 2 %}
+                  {% set alt_cont = 2 %}
+                {% endif %}
+
+                {% if off_cont > 0 and alt_cont > 1 %}
+                  {% set dia_ini_cont = it_cont.DiaInicio if it_cont.DiaInicio is not none else 1 %}
+                  {% set dia_fim_cont = it_cont.DiaFim if it_cont.DiaFim is not none else dia_ini_cont %}
+                  {% set eh_reserva_cont = (it_cont.EhReserva if it_cont.EhReserva is defined else False) %}
+
+                  {% set reserva_id_visivel_cont = '' %}
+                  {% if eh_reserva_cont %}
+                    {% if it_cont.ReservaIDOriginal is defined and it_cont.ReservaIDOriginal %}
+                      {% set reserva_id_visivel_cont = it_cont.ReservaIDOriginal %}
+                    {% elif it_cont.IDFatoOcupacaoPaineisEuromidia is defined and it_cont.IDFatoOcupacaoPaineisEuromidia %}
+                      {% set reserva_id_visivel_cont = it_cont.IDFatoOcupacaoPaineisEuromidia %}
+                    {% elif it_cont.ID is defined and (it_cont.ID|int) < 0 %}
+                      {% set reserva_id_visivel_cont = ((it_cont.ID|int) * -1) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% set barra_txt_cont = (it_cont.MarcaExibida or it_cont.BarraTexto or '') %}
+                  {% if not barra_txt_cont %}
+                    {% set barra_txt_cont = it_cont.Loop if it_cont.Loop is defined else '' %}
+                  {% endif %}
+
+                  {% set mostra_icone_preferencia_cont = ((not eh_reserva_cont) and it_cont.BitPreferencia is defined and ((it_cont.BitPreferencia | int) == 1)) %}
+
+                  {% set classes_barra_cont = 'barra multi-span span-continuacao' %}
+                  {% if eh_reserva_cont %}{% set classes_barra_cont = classes_barra_cont ~ ' reservado' %}{% endif %}
+                  {% if it_cont.BitConflito %}{% set classes_barra_cont = classes_barra_cont ~ ' conflito' %}{% endif %}
+
+                  <div class="{{ classes_barra_cont }}"
+                       style="
+                         left: calc({{ dia_ini_cont - 1 }} * var(--dia-col-w));
+                         width: calc({{ dia_fim_cont - dia_ini_cont + 1 }} * var(--dia-col-w));
+                         --barra-h: var(--barra-h-span-bottom);
+                         --barra-top: var(--barra-top-span-bottom);
+                         --barra-font: var(--barra-font-2);
+                       "
+                       data-contrato-id="{{ it_cont.IDFatoControleContratos if it_cont.IDFatoControleContratos is not none else '' }}"
+                       data-vendedor-id="{{ it_cont.IDVendedor if it_cont.IDVendedor is defined and it_cont.IDVendedor is not none else '' }}"
+                       data-origem="{{ it_cont.OrigemItem if it_cont.OrigemItem is defined else '' }}"
+                       data-eh-reserva="{{ 1 if eh_reserva_cont else 0 }}"
+                       data-bit-preferencia="{{ 1 if mostra_icone_preferencia_cont else 0 }}"
+                       data-reserva-id="{{ reserva_id_visivel_cont }}"
+                       data-item-id="{{ it_cont.ID if it_cont.ID is defined else '' }}"
+                       title="{{ ('Reserva #' ~ reserva_id_visivel_cont) if reserva_id_visivel_cont else 'Duplo clique para abrir o contrato' }}"
+                       data-tooltip-title="{{ barra_txt_cont|e }}"
+                       data-tooltip-loop="{{ it_cont.Loop|e }}"
+                       data-tooltip-vendedor="{{ it_cont.Vendedor|e }}"
+                       data-tooltip-di="{{ it_cont.DataInicio.strftime('%d/%m/%Y') if it_cont.DataInicio else '' }}"
+                       data-tooltip-df="{{ it_cont.DataFim.strftime('%d/%m/%Y') if it_cont.DataFim else '' }}"
+                       data-tooltip-txt="{{ it_cont.TextoOriginal|e }}">
+                    <span class="txt">{{ barra_txt_cont }}</span>
+                    {% if (not eh_reserva_cont) and it_cont.Vendedor %}
+                      <span class="vend">{{ it_cont.Vendedor }}</span>
+                    {% endif %}
+                    {% if mostra_icone_preferencia_cont %}
+                      <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva - período de 6 meses ou mais">
+                    {% endif %}
+                  </div>
+                {% endif %}
               {% endfor %}
 
             </div>

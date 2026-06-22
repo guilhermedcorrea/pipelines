@@ -14179,6 +14179,133 @@ async function buscarDetalheCard(idCard, opcoes = {}) {
   }
 }
 
+
+function extrairVersaoConcorrenciaCard(card) {
+  if (!card || typeof card !== "object") return "";
+
+  return safeStr(
+    card.VersaoConcorrenciaHex ||
+    card.VersaoConcorrencia ||
+    card.versao_concorrencia ||
+    card.versaoConcorrencia ||
+    card.VersaoConcorrenciaHexSql ||
+    ""
+  ).trim();
+}
+
+function aplicarVersaoConcorrenciaCardAberto(card, origem = "") {
+  if (!card || typeof card !== "object") return false;
+
+  const idCardVersao = idNum(
+    card.IDFatoKanbanCard ??
+    card.id_card ??
+    card.idCard ??
+    card.IDCard ??
+    0
+  );
+
+  if (!idCardVersao || idNum(cardAbertoId) !== idCardVersao) return false;
+  if (!modalCard || modalCard.style.display !== "block") return false;
+
+  const versaoNova = extrairVersaoConcorrenciaCard(card);
+  if (!versaoNova) return false;
+
+  if (versaoNova !== safeStr(versaoConcorrenciaCardAberto)) {
+    console.debug("VersaoConcorrencia do card aberto sincronizada.", {
+      id_card: idCardVersao,
+      origem: origem || null,
+      versao_anterior: safeStr(versaoConcorrenciaCardAberto),
+      versao_nova: versaoNova
+    });
+  }
+
+  versaoConcorrenciaCardAberto = versaoNova;
+  return true;
+}
+
+function ehRespostaConcorrenciaCard(resposta, corpo) {
+  const status = idNum(resposta?.status || 0);
+  if (status !== 409) return false;
+
+  const msg = safeStr(corpo?.msg || corpo?.erro || "").toLowerCase();
+  return !!(
+    corpo?.card_atual ||
+    corpo?.motivo === "versao_concorrencia_desatualizada" ||
+    msg.includes("concorr") ||
+    msg.includes("alterado") ||
+    msg.includes("outra operação") ||
+    msg.includes("outra operacao")
+  );
+}
+
+async function atualizarVersaoConcorrenciaParaRetrySalvar(idCard, corpoConflito = null) {
+  const idC = idNum(idCard);
+  if (!idC) {
+    return { ok: false, msg: "Card inválido para atualizar a versão de concorrência." };
+  }
+
+  if (cardAbertoConflitoExterno) {
+    return { ok: false, msg: "Existe uma atualização externa marcada para este card. Reabra o card antes de salvar." };
+  }
+
+  let detalhe = null;
+
+  try {
+    detalhe = await buscarDetalheCard(idC, { fresh: true, timeoutMs: 60000 });
+  } catch (erro) {
+    console.warn("Falha ao buscar detalhe fresh para retry de concorrência.", erro);
+  }
+
+  if (!detalhe || !detalhe.card) {
+    const cardAtualConflito = corpoConflito?.card_atual ? normalizarCardServidor(corpoConflito.card_atual) : null;
+    if (cardAtualConflito) {
+      detalhe = { card: cardAtualConflito, tags: Array.isArray(corpoConflito?.tags) ? corpoConflito.tags : null };
+    }
+  }
+
+  if (!detalhe || !detalhe.card) {
+    return { ok: false, msg: "Não consegui recarregar a versão atual do card para salvar novamente." };
+  }
+
+  const cardServidor = normalizarCardServidor(detalhe.card);
+  const idCardServidor = idNum(cardServidor.IDFatoKanbanCard || 0);
+  if (idCardServidor !== idC) {
+    return { ok: false, msg: "O servidor devolveu outro card ao tentar sincronizar a versão." };
+  }
+
+  const faseServidor = idNum(cardServidor.IDDimKanbanFaseAtual || 0);
+  const faseModal = idNum(modalCard?.dataset?.idFaseAtual || obterCardPorId(idC)?.IDDimKanbanFaseAtual || 0);
+  if (faseModal && faseServidor && faseModal !== faseServidor) {
+    inserirOuAtualizarCardLocal(cardServidor);
+    cardAbertoConflitoExterno = true;
+    return {
+      ok: false,
+      msg: "O card mudou de fase enquanto estava aberto. Reabra o card antes de salvar para não gravar dados na fase errada."
+    };
+  }
+
+  inserirOuAtualizarCardLocal(cardServidor);
+
+  if (Array.isArray(detalhe.tags)) {
+    setTagsDoCard(idC, detalhe.tags);
+  }
+
+  if (Array.isArray(detalhe.notas)) {
+    mapaNotasPorCard.set(
+      idC,
+      detalhe.notas.map(n => Object.assign({}, n || {}))
+    );
+  }
+
+  const versaoNova = extrairVersaoConcorrenciaCard(cardServidor);
+  if (!versaoNova) {
+    return { ok: false, msg: "O backend ainda não devolveu VersaoConcorrencia para este card." };
+  }
+
+  aplicarVersaoConcorrenciaCardAberto(cardServidor, "retry_salvar_409");
+  return { ok: true, versao: versaoNova, card: cardServidor };
+}
+
   async function enriquecerCardsCarregados(cardsNovos, mapaTagsLote = null){
     const lista = Array.isArray(cardsNovos) ? cardsNovos : [];
     if (!lista.length) return;
@@ -17837,12 +17964,8 @@ async function moverCard(idCard, idFasePara, posicao) {
      * No kanban, a concorrência é tratada por VersaoConcorrenciaHex
      * (rowversion/hex do backend), não por um número simples inventado no front.
      */
-    versaoConcorrenciaCardAberto = safeStr(
-      cardNormalizado.VersaoConcorrenciaHex ||
-      cardNormalizado.VersaoConcorrencia ||
-      cardNormalizado.versao_concorrencia ||
-      ""
-    ).trim();
+    versaoConcorrenciaCardAberto = extrairVersaoConcorrenciaCard(cardNormalizado);
+    aplicarVersaoConcorrenciaCardAberto(cardNormalizado, "abrir_card");
 
     /*
      * Eu só preencho os campos que realmente existem neste template.
@@ -18096,11 +18219,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     const idC = idNum(idCard);
     if (!idC) return false;
 
-    const detalhe = await buscarDetalheCard(idC);
+    const detalhe = await buscarDetalheCard(idC, { fresh: true });
     if (!detalhe || !detalhe.card) return false;
 
     const cardServidor = normalizarCardServidor(detalhe.card);
     inserirOuAtualizarCardLocal(cardServidor);
+    aplicarVersaoConcorrenciaCardAberto(cardServidor, "sincronizar_tags");
 
     const tagsAtualizadas = Array.isArray(detalhe.tags) ? detalhe.tags : [];
     setTagsDoCard(idC, tagsAtualizadas);
@@ -18484,19 +18608,44 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     try {
-      const r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardSalvo}`, {
+      let r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardSalvo}`, {
         method:"PUT",
         credentials: "same-origin",
         headers: headersJSON,
         body: JSON.stringify(payload)
       }, TIMEOUT_FETCH_CRITICO_KANBAN_MS);
 
-      const j = await r.json().catch(() => null);
+      let j = await r.json().catch(() => null);
+
+      if ((!j || !j.ok) && ehRespostaConcorrenciaCard(r, j)) {
+        const retryVersao = await atualizarVersaoConcorrenciaParaRetrySalvar(idCardSalvo, j);
+
+        if (retryVersao.ok && retryVersao.versao) {
+          payload.versao_concorrencia = retryVersao.versao;
+          versaoConcorrenciaCardAberto = retryVersao.versao;
+          registrarEventoLocalPendente(clientRequestIdSalvar, 30000);
+
+          r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardSalvo}`, {
+            method:"PUT",
+            credentials: "same-origin",
+            headers: headersJSON,
+            body: JSON.stringify(payload)
+          }, TIMEOUT_FETCH_CRITICO_KANBAN_MS);
+
+          j = await r.json().catch(() => null);
+        } else if (retryVersao.msg) {
+          mostrarMensagemCard(retryVersao.msg);
+          atualizarEstadoSalvarCard();
+          return;
+        }
+      }
+
       if (!j || !j.ok) {
         if (r.status === 409) {
           if (j && j.card_atual) {
             const cardAtualConflito = normalizarCardServidor(j.card_atual);
             inserirOuAtualizarCardLocal(cardAtualConflito);
+            aplicarVersaoConcorrenciaCardAberto(cardAtualConflito, "conflito_409");
             redesenharFasesLocalmente([idNum(cardAtualConflito.IDDimKanbanFaseAtual)], null, true);
           }
           mostrarMensagemCard((j && j.msg) || "Este card foi alterado por outro usuário. Reabra o card antes de salvar novamente.");
@@ -18513,12 +18662,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         const cardAtualizado = normalizarCardServidor(j.card);
         atualizarCabecalhoModalCard(cardAtualizado);
         inserirOuAtualizarCardLocal(cardAtualizado);
-        versaoConcorrenciaCardAberto = safeStr(
-          cardAtualizado.VersaoConcorrenciaHex ||
-          cardAtualizado.VersaoConcorrencia ||
-          cardAtualizado.versao_concorrencia ||
-          versaoConcorrenciaCardAberto
-        ).trim();
+        aplicarVersaoConcorrenciaCardAberto(cardAtualizado, "salvar_sucesso");
       }
 
       if (Array.isArray(j.tags)) {
@@ -18833,6 +18977,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     if (!detalhe || !detalhe.card) return;
 
     const cardDepois = inserirOuAtualizarCardLocal(detalhe.card);
+    aplicarVersaoConcorrenciaCardAberto(cardDepois || detalhe.card, "sincronizar_detalhe");
     setTagsDoCard(idCard, detalhe.tags || []);
 
     if (Array.isArray(detalhe.notas)) {
