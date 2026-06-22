@@ -4278,8 +4278,10 @@
       }
 
       const socket = io(configTempoReal.namespace, {
-        transports: ["polling", "websocket"],
-        upgrade: true,
+        path: "/socket.io",
+        transports: ["websocket"],
+        upgrade: false,
+        rememberUpgrade: true,
         reconnection: true,
         reconnectionAttempts: 20,
         reconnectionDelay: 1500,
@@ -4300,7 +4302,9 @@
       socket.on("paineis:ocupacao:erro", function(payload){
         mostrarErro((payload && payload.erro) ? "erro" : "erro");
       });
-      socket.on("connect_error", function(){ mostrarErro("conexao_socket"); });
+      socket.on("connect_error", function(erro){
+        mostrarErro("conexao_socket" + (erro && erro.message ? ": " + erro.message : ""));
+      });
       socket.on("disconnect", function(){ mostrarErro("socket_desconectado"); });
 
       window.addEventListener("focus", function(){

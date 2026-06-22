@@ -300,6 +300,8 @@
   let versaoConcorrenciaCardAberto = "";
   let cardAbertoConflitoExterno = false;
   let salvandoCardAtual = false;
+  let carregandoCardAtual = false;
+  let sequenciaAberturaCard = 0;
   let estadoInicialCardAberto = null;
   let fluxoContratoPersistidoCardAberto = null;
   let faseEditandoId = null;
@@ -307,6 +309,8 @@
   let kanbanCfg = {};
   let paineisCatalogo = [];
   let painelFacesCatalogo = [];
+  let catalogoPainelFacesCarregado = false;
+  let promessaCatalogoPainelFaces = null;
   let paineisPorId = new Map();
   let painelFacesPorChave = new Map();
 
@@ -337,18 +341,25 @@
   let empresaCadastroConsultaController = null;
   let empresaCadastroUltimoCnpjConsultado = "";
 
-  const TAM_LOTE_POR_FASE = 12;
-  const LIMITE_CARDS_DOM_MODO_DESEMPENHO = 80;
-  const LIMITE_CARDS_CARREGADOS_MODO_DESEMPENHO = 180;
-  const LIMITE_CARDS_PARA_VIRTUALIZAR_FASE = 36;
-  const LIMITE_CARDS_DOM_POR_FASE_VIRTUAL = 28;
+  // Performance: lote inicial menor para pintar a tela primeiro.
+  // O restante é carregado sob demanda/ociosidade, mantendo o Kanban leve mesmo com muitos cards.
+  const TAM_LOTE_POR_FASE = 8;
+  const LIMITE_CARDS_DOM_MODO_DESEMPENHO = 40;
+  const LIMITE_CARDS_CARREGADOS_MODO_DESEMPENHO = 100;
+  const LIMITE_CARDS_PARA_VIRTUALIZAR_FASE = 28;
+  const LIMITE_CARDS_DOM_POR_FASE_VIRTUAL = 22;
   const OVERSCAN_CARDS_VIRTUAIS = 8;
   const ALTURA_ESTIMADA_CARD_VIRTUAL = 240;
-  const ATRASO_REDRAW_TEMPO_REAL_MS = 80;
+  const ATRASO_REDRAW_TEMPO_REAL_MS = 120;
   const estadoFase = new Map();
   let socketKanban = null;
   let socketConectado = false;
   let socketConectando = false;
+  let socketTentouFallbackPolling = false;
+  let sincronizacaoSemSocketEmAndamento = false;
+  let verificacaoVersaoKanbanEmAndamento = false;
+  let versaoKanbanAtual = 0;
+  let ultimaAtualizacaoAoVivoMs = 0;
   let kanbanInicializado = false;
 
   const modalCard = document.getElementById("modalCard");
@@ -3164,6 +3175,26 @@
   let elementoArrastando = null;
   let dragImageEl = null;
   const movimentosCardsPendentes = new Set();
+  const eventosLocaisPendentes = new Set();
+
+  function gerarClientRequestIdKanban(prefixo = "kb"){
+    const parteTempo = Date.now().toString(36);
+    const parteAleatoria = Math.random().toString(36).slice(2, 10);
+    return `${prefixo}_${ID_KANBAN}_${parteTempo}_${parteAleatoria}`;
+  }
+
+  function registrarEventoLocalPendente(clientRequestId, tempoVidaMs = 15000){
+    const id = safeStr(clientRequestId || "").trim();
+    if (!id) return;
+    eventosLocaisPendentes.add(id);
+    window.setTimeout(() => eventosLocaisPendentes.delete(id), Math.max(1000, Number(tempoVidaMs) || 15000));
+  }
+
+  function eventoSocketVeioDesteCliente(payload){
+    const id = safeStr(payload?.client_request_id || payload?.clientRequestId || "").trim();
+    return !!id && eventosLocaisPendentes.has(id);
+  }
+
 
   function el(tag, attrs = {}, children = []) {
     const d = document.createElement(tag);
@@ -3201,6 +3232,52 @@
     return texto.startsWith("/") ? `${raiz}${texto}` : `${raiz}/${texto}`;
   }
 
+  const TIMEOUT_FETCH_PADRAO_KANBAN_MS = 45000;
+  const TIMEOUT_FETCH_CRITICO_KANBAN_MS = 90000;
+  const TIMEOUT_FETCH_POS_SAVE_KANBAN_MS = 12000;
+
+  function erroTimeoutKanban(url, timeoutMs){
+    const erro = new Error(`Tempo limite excedido ao chamar ${safeStr(url || "API")} (${Math.round((Number(timeoutMs) || 0) / 1000)}s).`);
+    erro.name = "AbortError";
+    erro.timeoutKanban = true;
+    return erro;
+  }
+
+  async function fetchKanbanComTimeout(url, opcoes = {}, timeoutMs = TIMEOUT_FETCH_PADRAO_KANBAN_MS){
+    const urlFinal = montarUrlKanban(url);
+    const limite = Number(timeoutMs || 0);
+
+    if (!limite || typeof AbortController !== "function") {
+      return fetch(urlFinal, opcoes || {});
+    }
+
+    const controller = new AbortController();
+    const opcoesFetch = Object.assign({}, opcoes || {}, { signal: controller.signal });
+    let expirou = false;
+    const timer = window.setTimeout(() => {
+      expirou = true;
+      try { controller.abort(); } catch (_erro) {}
+    }, limite);
+
+    try {
+      return await fetch(urlFinal, opcoesFetch);
+    } catch (erro) {
+      if (expirou || erro?.name === "AbortError") {
+        throw erroTimeoutKanban(urlFinal, limite);
+      }
+      throw erro;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  function mensagemErroComunicacaoKanban(erro, fallback = "Falha de comunicação com o servidor."){
+    if (erro?.timeoutKanban || erro?.name === "AbortError") {
+      return "A requisição demorou demais e foi interrompida pelo navegador. A operação pode ter sido gravada no servidor; atualize o card se precisar confirmar.";
+    }
+    return fallback;
+  }
+
   function resumirTextoRespostaHttp(texto, limite = 300){
     const bruto = safeStr(texto || "").replace(/\s+/g, " ").trim();
     if (!bruto) return "";
@@ -3218,7 +3295,10 @@
       opcoesFetch.headers || {}
     );
 
-    const resposta = await fetch(urlFinal, opcoesFetch);
+    const timeoutMs = Number(opcoesFetch.timeoutMs || 0) || TIMEOUT_FETCH_PADRAO_KANBAN_MS;
+    delete opcoesFetch.timeoutMs;
+
+    const resposta = await fetchKanbanComTimeout(urlFinal, opcoesFetch, timeoutMs);
 
     const texto = await resposta.text().catch(() => "");
     let corpo = null;
@@ -3548,16 +3628,20 @@
     if (!Number.isFinite(cota) || cota <= 0) return 1;
 
     /*
-     * Regra oficial da grade/KPI: consumo de slot digital = 1080 / Cota.
-     * Portanto: COTA 540 consome 2 slots; COTA 1080 consome 1 slot.
-     * Os valores 1 e 2 abaixo são compatibilidade com registros legados.
+     * Regra oficial da grade de ocupação digital:
+     * - COTA 540 consome 1 slot;
+     * - COTA 1080 consome 2 slots.
+     *
+     * Motivo: 1080 inserções/dia ocupa o dobro de 540 inserções/dia.
+     * Os valores 1 e 2 abaixo são compatibilidade com registros legados
+     * que gravavam código de cota em vez de quantidade de inserções.
      */
-    if (cota === 540) return 2;
-    if (cota === 1080) return 1;
+    if (cota === 540) return 1;
+    if (cota === 1080) return 2;
     if (cota === 1) return 2;
     if (cota === 2) return 1;
 
-    return Math.max(1, Math.round(1080 / cota));
+    return Math.max(1, Math.ceil(cota / 540));
   }
 
   function normalizarInfoDiaOcupacaoKanban(info){
@@ -3594,70 +3678,131 @@
       disp = cap - ocup;
     }
 
+    const maxBlocoLivre = obterPrimeiroNumeroValido(
+      info.max_bloco_livre,
+      info.bloco_livre_max,
+      info.MaxBlocoLivre,
+      info.MaiorBlocoLivre,
+      info.maior_bloco_livre
+    );
+
     return {
       cap: cap === null ? null : cap,
       disp: disp === null ? null : Math.max(0, disp),
       ocup: ocup === null ? null : ocup,
+      maxBlocoLivre: maxBlocoLivre === null ? null : Math.max(0, maxBlocoLivre),
       status: safeStr(info.status || info.Status || info.StatusDia || '').trim().toUpperCase(),
       diaDisponivel: Number(info.dia_disponivel ?? info.DiaDisponivel ?? 0) === 1
     };
   }
 
-  function diaEstaDisponivelNoBloco(bloco, dataIso){
-    if (!dataIso) return false;
-
-    if (diaEstaManualMenteLiberadoNoBloco(bloco, dataIso)) {
-      return true;
-    }
-
-    const info = normalizarInfoDiaOcupacaoKanban(obterInfoDiaOcupacaoDoBloco(bloco, dataIso));
-    if (!info) return false;
-
-    const status = info.status;
-    if (status === 'INDISPONIVEL' || status === 'INATIVO' || status === 'OCUPADO' || status === 'LOTADO' || status === 'CHEIO') {
-      return false;
-    }
+  function obterSlotsLivresDiaParaEncaixeNoBloco(bloco, dataIso){
+    if (!dataIso) return 0;
 
     const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
 
-    if (info.cap !== null && info.cap <= 0) return false;
-    if (info.disp !== null) return info.disp >= slotsNecessarios;
+    if (diaEstaManualMenteLiberadoNoBloco(bloco, dataIso)) {
+      const infoManual = normalizarInfoDiaOcupacaoKanban(obterInfoDiaOcupacaoDoBloco(bloco, dataIso));
+      if (infoManual?.disp !== null && infoManual?.disp !== undefined) {
+        return Math.max(slotsNecessarios, Number(infoManual.disp) || 0);
+      }
+      return slotsNecessarios;
+    }
 
-    return info.diaDisponivel;
+    const info = normalizarInfoDiaOcupacaoKanban(obterInfoDiaOcupacaoDoBloco(bloco, dataIso));
+    if (!info) return 0;
+
+    const status = info.status;
+    if (status === 'INDISPONIVEL' || status === 'INATIVO' || status === 'OCUPADO' || status === 'LOTADO' || status === 'CHEIO') {
+      return 0;
+    }
+
+    if (info.cap !== null && info.cap <= 0) return 0;
+
+    if (info.maxBlocoLivre !== null && info.maxBlocoLivre !== undefined) {
+      const maxBloco = Math.max(0, Number(info.maxBlocoLivre) || 0);
+      if (info.disp !== null && info.disp !== undefined) {
+        return Math.min(Math.max(0, Number(info.disp) || 0), maxBloco);
+      }
+      return maxBloco;
+    }
+
+    if (info.disp !== null) return Math.max(0, Number(info.disp) || 0);
+
+    return info.diaDisponivel ? slotsNecessarios : 0;
+  }
+
+  function diaEstaDisponivelNoBloco(bloco, dataIso){
+    const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+    return obterSlotsLivresDiaParaEncaixeNoBloco(bloco, dataIso) >= slotsNecessarios;
+  }
+
+  function obterResumoEncaixeFragmentadoIntervaloNoBloco(bloco, dataInicio, dataFim){
+    const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
+    const resumo = {
+      ok: false,
+      dias: 0,
+      slotsNecessarios,
+      primeiroDiaSemEncaixe: '',
+      slotsLivresPrimeiroDiaSemEncaixe: null,
+      menorSaldoDia: null,
+      slotsLivresTotal: 0,
+      slotsNecessariosTotal: 0
+    };
+
+    if (!dataInicio || !dataFim || dataFim < dataInicio) return resumo;
+
+    let cursor = dataInicio;
+    let guard = 0;
+
+    while (cursor && cursor <= dataFim && guard < 3700){
+      const livresDia = obterSlotsLivresDiaParaEncaixeNoBloco(bloco, cursor);
+      resumo.dias += 1;
+      resumo.slotsLivresTotal += livresDia;
+      resumo.slotsNecessariosTotal += slotsNecessarios;
+
+      if (resumo.menorSaldoDia === null || livresDia < resumo.menorSaldoDia) {
+        resumo.menorSaldoDia = livresDia;
+      }
+
+      if (livresDia < slotsNecessarios && !resumo.primeiroDiaSemEncaixe) {
+        resumo.primeiroDiaSemEncaixe = cursor;
+        resumo.slotsLivresPrimeiroDiaSemEncaixe = livresDia;
+      }
+
+      cursor = somarDiasDataIso(cursor, 1);
+      guard += 1;
+    }
+
+    resumo.ok = resumo.dias > 0 && !resumo.primeiroDiaSemEncaixe;
+    return resumo;
   }
 
   function intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim){
-    if (!dataInicio || !dataFim || dataFim < dataInicio) return false;
-
-    let cursor = dataInicio;
-    let guard = 0;
-
-    while (cursor && cursor <= dataFim && guard < 3700){
-      if (!diaEstaDisponivelNoBloco(bloco, cursor)) {
-        return false;
-      }
-      cursor = somarDiasDataIso(cursor, 1);
-      guard += 1;
-    }
-
-    return guard > 0;
+    return obterResumoEncaixeFragmentadoIntervaloNoBloco(bloco, dataInicio, dataFim).ok;
   }
 
   function obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim){
-    if (!dataInicio || !dataFim || dataFim < dataInicio) return '';
+    return obterResumoEncaixeFragmentadoIntervaloNoBloco(bloco, dataInicio, dataFim).primeiroDiaSemEncaixe || '';
+  }
 
-    let cursor = dataInicio;
-    let guard = 0;
+  function montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataFim, prefixo = 'Não foi possível encaixar automaticamente o período inteiro.'){
+    const resumo = obterResumoEncaixeFragmentadoIntervaloNoBloco(bloco, dataInicio, dataFim);
+    const slotsNecessarios = resumo.slotsNecessarios || obterSlotsNecessariosReservaDoBloco(bloco);
+    const cota = safeStr(obterCotaReservaDoBloco(bloco) || '').trim();
+    const cotaTxt = cota ? `A cota ${cota}` : 'A cota selecionada';
+    const unidade = slotsNecessarios === 1 ? 'slot livre' : 'slots livres';
 
-    while (cursor && cursor <= dataFim && guard < 3700){
-      if (!diaEstaDisponivelNoBloco(bloco, cursor)) {
-        return cursor;
-      }
-      cursor = somarDiasDataIso(cursor, 1);
-      guard += 1;
+    if (resumo.primeiroDiaSemEncaixe) {
+      const livres = resumo.slotsLivresPrimeiroDiaSemEncaixe ?? 0;
+      return `${prefixo} ${cotaTxt} precisa manter ${slotsNecessarios} ${unidade} em cada dia do período. O sistema pode trocar de linha/slot ao longo da grade, mas o dia ${formatarDataIsoParaBr(resumo.primeiroDiaSemEncaixe)} tem apenas ${livres} slot(s) livre(s). Verifique a grade para encaixe.`;
     }
 
-    return '';
+    if (resumo.dias > 0) {
+      return `${prefixo} ${cotaTxt} precisa manter ${slotsNecessarios} ${unidade} em cada dia do período. O sistema pode trocar de linha/slot ao longo da grade, mas não pode pular dias dentro do range.`;
+    }
+
+    return `${prefixo} Verifique a grade para encaixe.`;
   }
 
   function redesenharCalendariosReservaDoBloco(bloco){
@@ -3675,17 +3820,14 @@
       limparInputDataReserva(inputDataFim);
       atualizarMensagemReservaDoBloco(
         bloco,
-        `A data ${formatarDataIsoParaBr(dataInicio)} não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada.`,
+        montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataInicio, 'A data inicial não comporta a cota selecionada.'),
         'erro'
       );
       mensagemBloqueioDefinida = true;
     } else if (dataInicio && dataFim && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)) {
-      const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
       atualizarMensagemReservaDoBloco(
         bloco,
-        primeiroDiaIndisponivel
-          ? `O período selecionado passa por ${formatarDataIsoParaBr(primeiroDiaIndisponivel)}, que não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada. Verifique a grade para encaixe antes de salvar.`
-          : `O período selecionado não tem ${slotsNecessarios} slot(s) livre(s) em todos os dias. Verifique a grade para encaixe antes de salvar.`,
+        montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataFim),
         'aviso'
       );
       mensagemBloqueioDefinida = true;
@@ -3765,7 +3907,7 @@
       if (!diaEstaDisponivelNoBloco(bloco, dataInicio)) {
         atualizarMensagemReservaDoBloco(
           bloco,
-          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade suficiente para a cota selecionada.`,
+          montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataInicio, 'A data selecionada não comporta a cota.'),
           'erro'
         );
         return;
@@ -3786,13 +3928,9 @@
     }
 
     if (!intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)) {
-      const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
-      const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
       atualizarMensagemReservaDoBloco(
         bloco,
-        primeiroDiaIndisponivel
-          ? `Não foi possível encaixar automaticamente o período inteiro. O dia ${formatarDataIsoParaBr(primeiroDiaIndisponivel)} não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada. Verifique a grade para encaixe.`
-          : `Não foi possível encaixar automaticamente o período inteiro. Verifique a grade para encaixe.`,
+        montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataFim),
         'aviso'
       );
       return;
@@ -3963,6 +4101,9 @@
     if (disp !== null && disp !== undefined) {
       pedacosTitulo.push(`livres ${disp}`);
     }
+    if (info?.maxBlocoLivre !== null && info?.maxBlocoLivre !== undefined) {
+      pedacosTitulo.push(`maior bloco livre ${info.maxBlocoLivre}`);
+    }
     pedacosTitulo.push(`necessário ${slotsNecessarios}`);
     if (!disponivelParaCota && !liberadoManual) {
       pedacosTitulo.push('bloqueado para a cota selecionada');
@@ -4016,7 +4157,7 @@
         sincronizarRestricoesDataFimDoBloco(bloco);
         atualizarMensagemReservaDoBloco(
           bloco,
-          `A data ${formatarDataIsoParaBr(dataInicio)} não possui disponibilidade suficiente para a cota selecionada.`,
+          montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataInicio, 'A data selecionada não comporta a cota.'),
           'erro'
         );
         atualizarResumoDisponibilidadeDoBloco(bloco);
@@ -4027,9 +4168,9 @@
         inputDataFim.value = '';
       }
 
-      // Não limpar a Data até apenas porque há um dia sem capacidade no meio do período.
-      // A regra correta é permitir a visualização do intervalo escolhido e avisar o vendedor
-      // para verificar a grade para encaixe, bloqueando o salvamento se o período não couber.
+      // Não exigir que a campanha fique na mesma linha/slot do começo ao fim.
+      // A regra correta é: cada dia do range precisa comportar a cota selecionada
+      // e o encaixe visual pode mudar de linha conforme os pedaços livres da grade.
       atualizarResumoDisponibilidadeDoBloco(bloco);
       agendarSincronizacaoFormularioSolicitacao();
     };
@@ -4062,13 +4203,9 @@
         safeStr(inputDataFim.value || '').trim() &&
         !intervaloEstaDisponivelNoBloco(bloco, dataInicio, safeStr(inputDataFim.value || '').trim())
       ) {
-        const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
-        const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
         atualizarMensagemReservaDoBloco(
           bloco,
-          primeiroDiaIndisponivel
-            ? `Não foi possível encaixar automaticamente o período inteiro. O dia ${formatarDataIsoParaBr(primeiroDiaIndisponivel)} não tem ${slotsNecessarios} slot(s) livre(s). Verifique a grade para encaixe.`
-            : `Não foi possível encaixar automaticamente o período inteiro. Verifique a grade para encaixe.`,
+          montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataFim),
           'aviso'
         );
       }
@@ -4185,8 +4322,8 @@
 
           sincronizarRestricoesDataFimDoBloco(bloco);
 
-          // Se a Data até já estiver preenchida e existir algum dia sem capacidade no meio,
-          // mantemos o período visível e exibimos o aviso no resumo. O salvamento continua bloqueado.
+          // A Data até pode atravessar mudança de linha/slot na grade.
+          // Não exigimos linha contínua; validamos se cada dia do range comporta a cota.
           atualizarResumoDisponibilidadeDoBloco(bloco);
           agendarSincronizacaoFormularioSolicitacao();
         }
@@ -4215,9 +4352,9 @@
               return true;
             }
 
-            // Para a Data até, bloqueie apenas o próprio dia se ele não comportar a cota.
-            // Não bloqueie todos os dias após um buraco no meio do período: o vendedor precisa conseguir
-            // selecionar o intervalo e receber o aviso para verificar a grade para encaixe.
+            // Para a Data até, bloqueie apenas se esse dia não comportar a cota.
+            // O período pode trocar de linha/slot entre os dias, desde que cada dia mantenha
+            // 1 slot para 540 ou 2 slots para 1080.
             return !diaEstaDisponivelNoBloco(bloco, dataIso);
           }
         ],
@@ -5564,7 +5701,6 @@ function normalizarCardServidor(card){
 
   function montarQueryResumoComercialFiltrado(){
     const params = new URLSearchParams();
-    params.set("fresh", "1");
     vendedoresSelecionados.forEach(valor => {
       if (valor) params.append("vendedor", valor);
     });
@@ -6157,12 +6293,12 @@ function normalizarCardServidor(card){
   }
 
   async function apiPost(url, payload){
-    const r = await fetch(montarUrlKanban(url), {
+    const r = await fetchKanbanComTimeout(url, {
       method:"POST",
       credentials:"same-origin",
       headers: headersJSON,
       body: JSON.stringify(payload || {})
-    });
+    }, TIMEOUT_FETCH_PADRAO_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
     return { ok: !!(j && j.ok), http: r.status, body: j };
@@ -6605,6 +6741,26 @@ function montarMapaQuantidadesAtualizacaoAoVivo(idsFase, idFaseDestino = 0, acre
 
 
 
+
+  let carregandoVendedoresKanban = false;
+
+  async function carregarVendedoresKanbanDeferido() {
+    if (carregandoVendedoresKanban) return;
+    if (Array.isArray(vendedoresCatalogo) && vendedoresCatalogo.length) return;
+
+    carregandoVendedoresKanban = true;
+    try {
+      const resultado = await fetchJsonKanban(`/kanban/api/kanbans/${ID_KANBAN}/vendedores`);
+      const j = resultado.corpo;
+      if (!respostaJsonKanbanOk(resultado)) return;
+      vendedoresCatalogo = Array.isArray(j.vendedores) ? j.vendedores.map(v => Object.assign({}, v || {})) : [];
+      renderizarFiltrosMultiselect();
+    } catch (erro) {
+      console.warn("carregarVendedoresKanbanDeferido: falhou", erro);
+    } finally {
+      carregandoVendedoresKanban = false;
+    }
+  }
 
   async function carregarEmpresas() {
     if (empresasCatalogo.length) return;
@@ -10145,11 +10301,11 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
       if (!idsTipoContrato.includes(idTagAtual)) continue;
       if (idTagAtual === idTag) continue;
 
-      const rDel = await fetch(`/kanban/api/cards/${idCardNum}/tags/${idTagAtual}`, {
+      const rDel = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardNum}/tags/${idTagAtual}`, {
         method: "DELETE",
         credentials: "same-origin",
         headers: { "X-CSRFToken": csrf }
-      });
+      }, TIMEOUT_FETCH_POS_SAVE_KANBAN_MS);
       const jDel = await rDel.json().catch(() => null);
       if (!rDel.ok || !jDel || !jDel.ok) {
         throw new Error((jDel && (jDel.msg || jDel.erro)) || `Erro ao remover a tag ${idTagAtual}.`);
@@ -10159,12 +10315,12 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
 
     const temDesejada = tagsDoCard(idCardNum).some((tagAtual) => idNum(tagAtual?.IDDimKanbanTag || 0) === idTag);
     if (!temDesejada) {
-      const rAdd = await fetch(`/kanban/api/cards/${idCardNum}/tags`, {
+      const rAdd = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardNum}/tags`, {
         method: "POST",
         credentials: "same-origin",
         headers: headersJSON,
         body: JSON.stringify({ id_tag: idTag })
-      });
+      }, TIMEOUT_FETCH_POS_SAVE_KANBAN_MS);
       const jAdd = await rAdd.json().catch(() => null);
       if (!rAdd.ok || !jAdd || !jAdd.ok) {
         throw new Error((jAdd && (jAdd.msg || jAdd.erro)) || `Erro ao aplicar a tag ${idTag}.`);
@@ -10654,12 +10810,19 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     }
   }
 
-  let temporizadorResumoComercial = null
+  let temporizadorResumoComercial = null;
   let resumoComercialEmAndamento = false;
+  let resumoComercialPendente = false;
 
   async function recarregarResumoComercial(){
+    if (resumoComercialEmAndamento) {
+      resumoComercialPendente = true;
+      return false;
+    }
+
     const sequenciaAtual = ++sequenciaResumoComercial;
     resumoComercialEmAndamento = true;
+    resumoComercialPendente = false;
 
     try {
       if (haFiltroAtivo() && obterIdsCardsVisiveisAtuais().length === 0) {
@@ -10680,6 +10843,10 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     } finally {
       if (sequenciaAtual === sequenciaResumoComercial) {
         resumoComercialEmAndamento = false;
+        if (resumoComercialPendente && !document.hidden) {
+          resumoComercialPendente = false;
+          agendarRecarregarResumoComercial(900);
+        }
       }
     }
   }
@@ -10849,40 +11016,63 @@ function formatarNumeroParaInput(valor){
     paineisCatalogo = Array.from(mapa.values());
   }
 
-  async function carregarCatalogoPainelFaces(){
+  async function carregarCatalogoPainelFaces(opcoes = {}){
+    const forcar = opcoes?.forcar === true || opcoes?.force === true;
+
     if (!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard)) {
       painelFacesCatalogo = [];
       paineisCatalogo = [];
+      catalogoPainelFacesCarregado = false;
+      promessaCatalogoPainelFaces = null;
       atualizarMapaPainelFacesCatalogo();
       return [];
     }
 
-    if (Array.isArray(painelFacesCatalogo) && painelFacesCatalogo.length) {
+    if (!forcar && catalogoPainelFacesCarregado) {
       return painelFacesCatalogo;
     }
 
-    try {
-      const resultado = await fetchJsonKanban('/kanban/api/painel-faces/catalogo');
-      const j = resultado.corpo;
+    if (!forcar && promessaCatalogoPainelFaces) {
+      return promessaCatalogoPainelFaces;
+    }
 
-      if (!respostaJsonKanbanOk(resultado)) {
-        console.warn('carregarCatalogoPainelFaces: resposta inválida', detalhesFalhaJsonKanban(resultado));
-        painelFacesCatalogo = [];
+    promessaCatalogoPainelFaces = (async () => {
+      try {
+        const resultado = await fetchJsonKanban('/kanban/api/painel-faces/catalogo');
+        const j = resultado.corpo;
+
+        if (!respostaJsonKanbanOk(resultado)) {
+          console.warn('carregarCatalogoPainelFaces: resposta inválida', detalhesFalhaJsonKanban(resultado));
+          if (!Array.isArray(painelFacesCatalogo) || !painelFacesCatalogo.length) {
+            painelFacesCatalogo = [];
+            paineisCatalogo = [];
+            atualizarMapaPainelFacesCatalogo();
+          }
+          return painelFacesCatalogo;
+        }
+
+        painelFacesCatalogo = Array.isArray(j.painel_faces)
+          ? j.painel_faces.map((item) => Object.assign({}, item || {}))
+          : [];
+        catalogoPainelFacesCarregado = true;
+        reconstruirPaineisCatalogoAPartirDasFaces();
         atualizarMapaPainelFacesCatalogo();
-        return [];
+        sincronizarPainelFacesVisiveisAposCatalogo();
+        return painelFacesCatalogo;
+      } catch (erro) {
+        console.warn('carregarCatalogoPainelFaces: falhou', erro);
+        if (!Array.isArray(painelFacesCatalogo) || !painelFacesCatalogo.length) {
+          painelFacesCatalogo = [];
+          paineisCatalogo = [];
+          atualizarMapaPainelFacesCatalogo();
+        }
+        return painelFacesCatalogo;
+      } finally {
+        promessaCatalogoPainelFaces = null;
       }
+    })();
 
-      painelFacesCatalogo = Array.isArray(j.painel_faces) ? j.painel_faces.map((item) => Object.assign({}, item || {})) : [];
-      reconstruirPaineisCatalogoAPartirDasFaces();
-      atualizarMapaPainelFacesCatalogo();
-      return painelFacesCatalogo;
-    } catch (erro) {
-      console.warn('carregarCatalogoPainelFaces: falhou', erro);
-      painelFacesCatalogo = [];
-      paineisCatalogo = [];
-      atualizarMapaPainelFacesCatalogo();
-      return [];
-    }
+    return promessaCatalogoPainelFaces;
   }
 
   function localizarPainelFaceCatalogo(criterios = {}){
@@ -10925,16 +11115,219 @@ function formatarNumeroParaInput(valor){
   function preencherSelectFiltroPainelFace(selectEl, valores, placeholder){
     if (!selectEl) return;
     const valorAtual = safeStr(selectEl.value || '').trim();
+    const valoresLista = Array.isArray(valores) ? valores : [];
+    const valoresValidos = new Set();
+
     selectEl.innerHTML = '';
     selectEl.appendChild(el('option', { value:'' }, [placeholder]));
-    (Array.isArray(valores) ? valores : []).forEach((valor) => {
+    valoresLista.forEach((valor) => {
       const texto = safeStr(valor || '').trim();
-      if (!texto) return;
+      if (!texto || valoresValidos.has(texto)) return;
+      valoresValidos.add(texto);
       selectEl.appendChild(el('option', { value:texto }, [texto]));
     });
-    if (valorAtual && (Array.isArray(valores) ? valores : []).includes(valorAtual)) {
+
+    // Não deixa o valor salvo sumir enquanto o catálogo ainda está carregando
+    // ou quando a lista dependente cidade/tipo ainda está sendo reconstruída.
+    if (valorAtual) {
+      if (!valoresValidos.has(valorAtual)) {
+        selectEl.appendChild(el('option', { value:valorAtual }, [valorAtual]));
+      }
       selectEl.value = valorAtual;
     }
+  }
+
+  function obterPrimeiroCampoPainelFace(dados, campos){
+    if (!dados || typeof dados !== 'object') return '';
+
+    for (const campo of (Array.isArray(campos) ? campos : [])) {
+      const valor = dados?.[campo];
+      if (valor !== null && valor !== undefined && safeStr(valor).trim() !== '') {
+        return valor;
+      }
+    }
+
+    return '';
+  }
+
+  function extrairCidadePainelFaceSalva(dados){
+    return safeStr(obterPrimeiroCampoPainelFace(dados, [
+      'Cidade', 'cidade', 'CidadePainel', 'cidade_painel', 'CidadeFace', 'cidade_face'
+    ])).trim();
+  }
+
+  function extrairTipoPainelFaceSalvo(dados){
+    return safeStr(obterPrimeiroCampoPainelFace(dados, [
+      'TipoPainel', 'tipo_painel', 'Tipo', 'tipo', 'Produto', 'produto', 'TipoProduto', 'tipo_produto'
+    ])).trim();
+  }
+
+  function extrairPeriodoExibicaoSalvo(dados){
+    return safeStr(obterPrimeiroCampoPainelFace(dados, [
+      'PeriodoExibicao', 'periodo_exibicao', 'PeriodoCampanha', 'periodo_campanha'
+    ])).trim();
+  }
+
+  function extrairExibicoesDiaSalvas(dados){
+    return safeStr(obterPrimeiroCampoPainelFace(dados, [
+      'ExibicoesDia', 'exibicoes_dia', 'InsercoesDia', 'insercoes_dia', 'Cota', 'cota'
+    ])).trim();
+  }
+
+  function extrairIdPrecoSalvoPainelFace(dados){
+    return idNum(obterPrimeiroCampoPainelFace(dados, [
+      'IDDimTabelaPrecosEuromidia', 'id_preco', 'IDTabelaPreco', 'id_tabela_preco'
+    ])) || null;
+  }
+
+  function garantirOpcaoSelectSemDuplicar(selectEl, valor, label = ''){
+    if (!selectEl) return false;
+    const valorTexto = safeStr(valor || '').trim();
+    if (!valorTexto) return false;
+
+    if (!possuiOpcaoNoSelect(selectEl, valorTexto)) {
+      selectEl.appendChild(el('option', { value:valorTexto }, [safeStr(label || valorTexto).trim() || valorTexto]));
+    }
+    return true;
+  }
+
+  function selecionarValorSelectPreservandoOpcoes(selectEl, valor, label = ''){
+    if (!selectEl) return false;
+    const valorTexto = safeStr(valor || '').trim();
+    if (!valorTexto) {
+      selectEl.value = '';
+      return false;
+    }
+
+    garantirOpcaoSelectSemDuplicar(selectEl, valorTexto, label || valorTexto);
+    selectEl.value = valorTexto;
+    return true;
+  }
+
+  function preencherSeletoresTabelaPrecoComDadosSalvos(bloco, dadosSalvos = null, opcoes = {}){
+    if (!bloco || !dadosSalvos) return;
+
+    const selectExibicoes = bloco.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodo = bloco.querySelector('[data-role="select-periodo-exibicao"]');
+    const selectPreco = bloco.querySelector('[data-role="select-preco"]');
+    const wrapExibicoes = bloco.querySelector('[data-role="wrap-exibicoes-dia"]');
+    const wrapPeriodo = bloco.querySelector('[data-role="wrap-periodo-exibicao"]');
+
+    const exibicoesDia = extrairExibicoesDiaSalvas(dadosSalvos);
+    const exibicoesLista = normalizarListaExibicoesDia(exibicoesDia);
+    const exibicaoPrincipal = exibicoesLista[0] || '';
+    const periodo = extrairPeriodoExibicaoSalvo(dadosSalvos);
+    const idPreco = extrairIdPrecoSalvoPainelFace(dadosSalvos);
+
+    if (exibicoesLista.length && selectExibicoes) {
+      if (wrapExibicoes) wrapExibicoes.hidden = false;
+      exibicoesLista.forEach((valorExibicao) => {
+        garantirOpcaoSelectSemDuplicar(selectExibicoes, valorExibicao, labelExibicoesDiaDoPreco(valorExibicao));
+      });
+      selecionarValoresNoSelect(selectExibicoes, exibicoesLista, { sincronizarDropdown: false });
+      aplicarGrupoVisualExibicoesDiaNoBloco(bloco, exibicoesLista, exibicaoPrincipal);
+      atualizarDropdownExibicoesDia(selectExibicoes);
+    }
+
+    if (periodo && selectPeriodo) {
+      if (wrapPeriodo) wrapPeriodo.hidden = false;
+      selecionarValorSelectPreservandoOpcoes(selectPeriodo, periodo, periodo);
+    }
+
+    if (idPreco && selectPreco) {
+      const labelPreco = [periodo, exibicaoPrincipal ? labelExibicoesDiaDoPreco(exibicaoPrincipal) : '']
+        .filter(Boolean)
+        .join(' | ') || String(idPreco);
+      definirValorSelectOculto(selectPreco, String(idPreco), labelPreco);
+    }
+
+    if (opcoes.atualizarResumo !== false && selectExibicoes) {
+      atualizarResumoDropdownExibicoesDia(selectExibicoes);
+    }
+  }
+
+  function aplicarDadosSalvosRapidosPainelFace(bloco, dadosSalvos = null){
+    if (!bloco || !dadosSalvos) return;
+
+    const cidadeSalva = extrairCidadePainelFaceSalva(dadosSalvos);
+    const tipoSalvo = extrairTipoPainelFaceSalvo(dadosSalvos);
+    const idPainelSalvo = idNum(dadosSalvos?.IDDimPaineisEuromidia ?? dadosSalvos?.id_painel ?? 0) || null;
+    const codPontoSalvo = safeStr(dadosSalvos?.CodPonto ?? dadosSalvos?.cod_ponto ?? '').trim();
+    const codFaceSalva = safeStr(dadosSalvos?.CodFace ?? dadosSalvos?.cod_face ?? '').trim().toUpperCase();
+
+    const selectCidade = bloco.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco.querySelector('[data-role="select-filtro-tipo"]');
+    const selectPainel = bloco.querySelector('[data-role="select-painel"]');
+    const selectFace = bloco.querySelector('[data-role="select-face"]');
+    const inputBusca = bloco.querySelector('[data-role="input-painel-busca"]');
+
+    if (cidadeSalva) selecionarValorSelectPreservandoOpcoes(selectCidade, cidadeSalva, cidadeSalva);
+    if (tipoSalvo) selecionarValorSelectPreservandoOpcoes(selectTipo, tipoSalvo, tipoSalvo);
+
+    if (idPainelSalvo) {
+      const labelPainel = codPontoSalvo
+        ? `${codPontoSalvo}${tipoSalvo ? ` • ${tipoSalvo}` : ''}${cidadeSalva ? ` • ${cidadeSalva}` : ''}`
+        : String(idPainelSalvo);
+      definirValorSelectOculto(selectPainel, String(idPainelSalvo), labelPainel);
+    }
+
+    if (codFaceSalva) {
+      definirValorSelectOculto(selectFace, codFaceSalva, codFaceSalva);
+      atualizarSelectFaceVisualDoBloco(bloco);
+    }
+
+    if (inputBusca && (codPontoSalvo || codFaceSalva || tipoSalvo || cidadeSalva)) {
+      inputBusca.value = [codPontoSalvo, codFaceSalva, tipoSalvo, cidadeSalva].filter(Boolean).join(' • ');
+    }
+
+    const painelPreview = localizarPainelFaceCatalogo({
+      id_painel: idPainelSalvo,
+      cod_ponto: codPontoSalvo,
+      cod_face: codFaceSalva,
+      tipo_painel: tipoSalvo,
+    }) || {
+      IDDimPaineisEuromidia: idPainelSalvo,
+      CodPonto: codPontoSalvo,
+      CodFace: codFaceSalva,
+      Tipo: tipoSalvo,
+      Cidade: cidadeSalva,
+      UF: safeStr(dadosSalvos?.UF ?? dadosSalvos?.uf ?? '').trim(),
+      Logradouro: safeStr(dadosSalvos?.Logradouro ?? dadosSalvos?.logradouro ?? '').trim(),
+      Bairro: safeStr(dadosSalvos?.Bairro ?? dadosSalvos?.bairro ?? '').trim(),
+      Numero: safeStr(dadosSalvos?.Numero ?? dadosSalvos?.numero ?? '').trim(),
+      QuantidadeFaces: idNum(dadosSalvos?.QuantidadeFaces ?? dadosSalvos?.quantidade_faces ?? 0) || null,
+    };
+
+    if (painelPreview && (painelPreview.CodPonto || painelPreview.CodFace || painelPreview.Tipo || painelPreview.Cidade)) {
+      preencherPreviewPainel(bloco, painelPreview);
+    }
+
+    preencherSeletoresTabelaPrecoComDadosSalvos(bloco, dadosSalvos);
+  }
+
+  function sincronizarPainelFacesVisiveisAposCatalogo(){
+    if (!painelFaceWrap?.classList.contains('is-on')) return;
+    const blocos = Array.from(painelFaceLista?.querySelectorAll('.kb-painel-item') || []);
+    if (!blocos.length) return;
+
+    blocos.forEach((bloco) => {
+      const dadosSalvos = bloco.__dadosPainelFaceOriginais || null;
+      try {
+        sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
+        const painelSelecionado = obterPainelFaceSelecionadoDoBloco(bloco);
+        if (!painelSelecionado && dadosSalvos) {
+          aplicarDadosSalvosRapidosPainelFace(bloco, dadosSalvos);
+          atualizarFacesDoBloco(bloco, dadosSalvos).catch((erro) => {
+            console.warn('sincronizarPainelFacesVisiveisAposCatalogo: falhou ao reconciliar bloco', erro);
+          });
+        } else {
+          sincronizarBuscaPainelComSelect(bloco);
+          preencherSeletoresTabelaPrecoComDadosSalvos(bloco, dadosSalvos, { atualizarResumo: true });
+        }
+      } catch (erro) {
+        console.warn('sincronizarPainelFacesVisiveisAposCatalogo: falhou', erro);
+      }
+    });
   }
 
   function definirValorSelectOculto(selectEl, valor, label = null){
@@ -12052,15 +12445,20 @@ function formatarNumeroParaInput(valor){
     setTxt('pn-faces', Number(painel.QuantidadeFaces || 0) ? String(painel.QuantidadeFaces) : '—');
   }
 
-  function limparComercialBloco(bloco, mensagem = 'Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.'){
+  function limparComercialBloco(bloco, mensagem = 'Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.', opcoes = {}){
     const wrap = bloco.querySelector('[data-role="comercial-wrap"]');
     const selectPreco = bloco.querySelector('[data-role="select-preco"]');
+    const preservarSeletoresTabelaPreco = opcoes?.preservarSeletoresTabelaPreco === true;
 
     destruirCalendariosReservaDoBloco(bloco);
 
     if (wrap) wrap.innerHTML = `<div class="kb-comercial-vazio">${mensagem}</div>`;
-    if (selectPreco) limparSelectPrecosNoElemento(selectPreco);
-    ocultarCamposTabelaPrecoDoBloco(bloco);
+    if (!preservarSeletoresTabelaPreco) {
+      if (selectPreco) limparSelectPrecosNoElemento(selectPreco);
+      ocultarCamposTabelaPrecoDoBloco(bloco);
+    } else {
+      preencherSeletoresTabelaPrecoComDadosSalvos(bloco, bloco.__dadosPainelFaceOriginais || null);
+    }
 
     bloco.__dadosComerciais = null;
     bloco.__calendarioOcupacao = null;
@@ -12121,11 +12519,16 @@ function formatarNumeroParaInput(valor){
     });
 
     if (!painelFace) {
+      if (dadosSalvos) {
+        aplicarDadosSalvosRapidosPainelFace(bloco, dadosSalvos);
+      }
       atualizarSelectFaceVisualDoBloco(bloco, { permitirSemPainel: true });
       const atual = obterPainelFaceSelecionadoDoBloco(bloco);
       preencherPreviewPainel(bloco, atual);
-      if (!atual) {
+      if (!atual && !dadosSalvos) {
         limparComercialBloco(bloco);
+      } else if (!atual && dadosSalvos) {
+        limparComercialBloco(bloco, 'Consultando catálogo de painéis e faces...', { preservarSeletoresTabelaPreco: true });
       }
       return;
     }
@@ -12138,22 +12541,39 @@ function formatarNumeroParaInput(valor){
     const selectPainel = bloco.querySelector('[data-role="select-painel"]');
     const selectFace = bloco.querySelector('[data-role="select-face"]');
 
+    if (dadosSalvos && typeof dadosSalvos === 'object') {
+      bloco.__dadosPainelFaceOriginais = Object.assign({}, bloco.__dadosPainelFaceOriginais || {}, dadosSalvos || {});
+    }
+
     const idPainel = idNum(selectPainel?.value || 0);
     const painel = obterPainelFaceSelecionadoDoBloco(bloco) || paineisPorId.get(idPainel) || null;
     const codFace = safeStr(selectFace?.value || '').trim();
+    const preservarSeletoresTabelaPreco = !!(dadosSalvos || bloco.__dadosPainelFaceOriginais);
+    const sequenciaComercial = (idNum(bloco.__sequenciaComercial || 0) || 0) + 1;
+    bloco.__sequenciaComercial = sequenciaComercial;
 
     preencherPreviewPainel(bloco, painel);
-    limparComercialBloco(bloco);
+    limparComercialBloco(
+      bloco,
+      preservarSeletoresTabelaPreco ? 'Consultando custos e preços deste CodFace...' : 'Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.',
+      { preservarSeletoresTabelaPreco }
+    );
 
     if (!idPainel || !painel || !codFace) return;
 
     const comercial = await carregarComercialPainelFace(idPainel, codFace);
+    if (sequenciaComercial !== bloco.__sequenciaComercial) return;
+
     if (!comercial){
-      limparComercialBloco(bloco, 'Não foi possível consultar custos e preços para o CodFace selecionado.');
+      limparComercialBloco(
+        bloco,
+        'Não foi possível consultar custos e preços para o CodFace selecionado.',
+        { preservarSeletoresTabelaPreco }
+      );
       return;
     }
 
-    renderizarComercialBloco(bloco, comercial, dadosSalvos);
+    renderizarComercialBloco(bloco, comercial, dadosSalvos || bloco.__dadosPainelFaceOriginais || null);
   }
 
 
@@ -12714,6 +13134,10 @@ async function aplicarReservaDigitadaNoBloco(bloco){
       ])
     ]);
 
+    bloco.__dadosPainelFaceOriginais = dados && typeof dados === 'object'
+      ? Object.assign({}, dados || {})
+      : null;
+
     const comboPainel = bloco.querySelector('[data-role="combo-painel"]');
     const inputPainelBusca = bloco.querySelector('[data-role="input-painel-busca"]');
     const btnTogglePainel = bloco.querySelector('[data-role="btn-toggle-painel"]');
@@ -12768,6 +13192,7 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
     preencherSelectFiltroPainelFace(selectFiltroCidade, listarCidadesPainelFaceDoBloco(bloco), '— Cidade —');
     preencherSelectFiltroPainelFace(selectFiltroTipo, listarTiposPainelFaceDoBloco(bloco), '— Tipo Produto —');
+    aplicarDadosSalvosRapidosPainelFace(bloco, dados);
 
     bloco.querySelector('[data-role="btn-orcamento-item"]')?.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -13715,7 +14140,15 @@ function montarUrlPorTemplate(template, marcador, valor, parametros = {}){
 function montarUrlApiCardDetalhe(idCard, opcoes = {}){
   const id = idNum(idCard);
   const template = URL_API_CARD_DETALHE_TEMPLATE || "/kanban/api/cards/__ID_CARD__";
-  return montarUrlPorTemplate(template, "__ID_CARD__", id, { fresh: opcoes.fresh ? 1 : "" });
+  const parametros = { fresh: opcoes.fresh ? 1 : "" };
+
+  // Quando peço fresh, também mando um cache-buster. Isso evita o navegador/proxy
+  // devolver detalhe antigo do card e causar falso conflito de VersaoConcorrencia.
+  if (opcoes.fresh) {
+    parametros._ts = Date.now();
+  }
+
+  return montarUrlPorTemplate(template, "__ID_CARD__", id, parametros);
 }
 
 async function buscarDetalheCard(idCard, opcoes = {}) {
@@ -13723,9 +14156,15 @@ async function buscarDetalheCard(idCard, opcoes = {}) {
   if (!id) return null;
 
   const url = montarUrlApiCardDetalhe(id, opcoes);
+  const headers = opcoes.fresh
+    ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+    : {};
 
   try {
-    const resultado = await fetchJsonKanban(url);
+    const resultado = await fetchJsonKanban(url, {
+      headers,
+      timeoutMs: Number(opcoes.timeoutMs || opcoes.timeout_ms || 0) || TIMEOUT_FETCH_PADRAO_KANBAN_MS
+    });
     const j = resultado.corpo;
 
     if (!respostaJsonKanbanOk(resultado)) {
@@ -13786,12 +14225,18 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     const offset = idNum(st.offsetServidor || 0);
     const limit = Math.max(1, Math.min(idNum(limite) || TAM_LOTE_POR_FASE, 100));
     const fresh = !!opcoes.fresh;
+    const rapido = !!opcoes.rapido;
 
-    const url = fresh
-      ? `/kanban/api/kanbans/${ID_KANBAN}/cards?id_fase=${idF}&offset=${offset}&limit=${limit}&fresh=1`
-      : `/kanban/api/kanbans/${ID_KANBAN}/cards?id_fase=${idF}&offset=${offset}&limit=${limit}`;
+    const params = new URLSearchParams();
+    params.set("id_fase", String(idF));
+    params.set("offset", String(offset));
+    params.set("limit", String(limit));
+    if (fresh) params.set("fresh", "1");
+    if (rapido) params.set("rapido", "1");
 
-    const r = await fetch(url, { credentials: "same-origin" });
+    const url = `/kanban/api/kanbans/${ID_KANBAN}/cards?${params.toString()}`;
+
+    const r = await fetchKanbanComTimeout(url, { credentials: "same-origin" }, TIMEOUT_FETCH_PADRAO_KANBAN_MS);
     const j = await r.json().catch(() => null);
 
     if (!r.ok || !j || !j.ok) {
@@ -13819,8 +14264,12 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     if (typeof j.total !== "undefined") {
       const fase = fasePorId(idF);
-      if (fase) fase.QuantidadeCardsTotal = idNum(j.total);
+      if (fase) {
+        fase.QuantidadeCardsTotal = idNum(j.total);
+        fase.CargaTotalDesconhecida = false;
+      }
       st.totalServidor = idNum(j.total);
+      st.cargaTotalDesconhecida = false;
     }
 
     st.offsetServidor = offset + cardsNovos.length;
@@ -13842,8 +14291,184 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
   resetarFluxoContrato();
 
-  async function carregar() {
-    const urlDados = `/kanban/api/kanbans/${ID_KANBAN}/dados?limit_inicial=${TAM_LOTE_POR_FASE}&fresh=1`;
+  async function processarComConcorrenciaKanban(itens, limite, worker){
+    const lista = Array.isArray(itens) ? itens.slice() : [];
+    const concorrencia = Math.max(1, Math.min(idNum(limite) || 2, 6));
+    let indice = 0;
+
+    const trabalhadores = Array.from({ length: Math.min(concorrencia, lista.length || 1) }, async () => {
+      while (indice < lista.length) {
+        const item = lista[indice++];
+        await worker(item);
+      }
+    });
+
+    await Promise.all(trabalhadores);
+  }
+
+  function aplicarCatalogosBasicosKanban(payload = {}){
+    const j = payload || {};
+
+    if (j.kanban_cfg) {
+      kanbanCfg = j.kanban_cfg || {};
+    }
+
+    if (Array.isArray(j.tags)) {
+      tagsCatalogo = j.tags.map(t => Object.assign({}, t || {}));
+    }
+
+    if (Array.isArray(j.vendedores)) {
+      vendedoresCatalogo = j.vendedores.map(v => Object.assign({}, v || {}));
+    }
+
+    if (Array.isArray(j.tipos_cliente_desconto)) {
+      tiposClienteDescontoCatalogo = j.tipos_cliente_desconto.map(t => Object.assign({}, t || {}));
+      tiposClienteDescontoPorId = new Map();
+      tiposClienteDescontoCatalogo.forEach(item => {
+        const idTipo = idNum(item?.IDDimKanbanTipoClienteDesconto || item?.IDDimTipoCliente || 0);
+        if (idTipo) tiposClienteDescontoPorId.set(idTipo, item);
+      });
+      montarSelectTipoClienteDesconto();
+    }
+
+    if (Array.isArray(j.origens_atendimento)) {
+      origensAtendimentoCatalogo = j.origens_atendimento.map(t => Object.assign({}, t || {}));
+      origensAtendimentoPorId = new Map();
+      origensAtendimentoCatalogo.forEach(item => {
+        const idOrigem = idNum(item?.IDDimOrigemAtendimento || 0);
+        if (idOrigem) origensAtendimentoPorId.set(idOrigem, item);
+      });
+      montarSelectOrigemAtendimento();
+    }
+
+    if (Array.isArray(j.tipos_documento)) {
+      tiposDocumentoCatalogo = j.tipos_documento.map(t => Object.assign({}, t || {}));
+      tiposDocumentoPorId = new Map();
+      tiposDocumentoCatalogo.forEach(item => {
+        const idTipoDocumento = idNum(item?.IDDimTipoDocumento || 0);
+        if (idTipoDocumento) tiposDocumentoPorId.set(idTipoDocumento, item);
+      });
+    }
+
+    if (Array.isArray(j.paineis)) {
+      paineisCatalogo = j.paineis;
+    }
+
+    if (idNum(j.versao_kanban || 0)) {
+      versaoKanbanAtual = idNum(j.versao_kanban || versaoKanbanAtual || 0);
+    }
+
+    ativarPainelFaceSeNecessario();
+    renderizarFiltrosMultiselect();
+
+    if (j.vendedores_deferido) {
+      window.setTimeout(() => {
+        if (!document.hidden) carregarVendedoresKanbanDeferido();
+      }, 1200);
+    }
+
+    const deveCarregarCatalogoPainelFaces = !!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard);
+    if (deveCarregarCatalogoPainelFaces) {
+      carregarCatalogoPainelFaces().catch((erro) => {
+        console.warn('catalogos painel_faces em segundo plano: falhou', erro);
+      });
+    }
+  }
+
+  async function carregarCatalogosBasicosKanban(){
+    const resultado = await fetchJsonKanban(`/kanban/api/kanbans/${ID_KANBAN}/catalogos`);
+    const j = resultado.corpo;
+
+    if (!respostaJsonKanbanOk(resultado)) {
+      console.warn("catalogos do kanban falharam", detalhesFalhaJsonKanban(resultado));
+      return false;
+    }
+
+    aplicarCatalogosBasicosKanban(j);
+    return true;
+  }
+
+  async function carregarPrimeirosCardsPorFaseRapido(){
+    const idsFases = fases
+      .map(f => idNum(f?.IDDimKanbanFase || 0))
+      .filter(Boolean);
+
+    if (!idsFases.length) return;
+
+    await processarComConcorrenciaKanban(idsFases, 3, async (idFase) => {
+      if (document.hidden) return;
+
+      await preencherCardsInicial(idFase, TAM_LOTE_POR_FASE, false, {
+        ignorarAutoPreenchimento: true,
+        rapido: true,
+      });
+
+      atualizarResumoBusca();
+    });
+
+    atualizarResumoBusca();
+    renderizarFiltrosMultiselect();
+    agendarPrecarregamentoFasesOciosas(900);
+    agendarRecarregarResumoComercial(1200);
+  }
+
+  async function carregarEstruturaRapidaKanban(){
+    try {
+      const resultadoFases = await fetchJsonKanban(`/kanban/api/kanbans/${ID_KANBAN}/fases`);
+      const jFases = resultadoFases.corpo;
+
+      if (!respostaJsonKanbanOk(resultadoFases) || !Array.isArray(jFases?.fases)) {
+        console.warn("estrutura rápida do kanban falhou", detalhesFalhaJsonKanban(resultadoFases));
+        return false;
+      }
+
+      fases = jFases.fases.map(f => Object.assign({}, f || {}, {
+        QuantidadeCardsTotal: 0,
+        QuantidadeCardsCarregadosInicialmente: 0,
+        QuantidadeCardsRestantes: 0,
+        CargaInicialCompleta: false,
+        CargaTotalDesconhecida: true,
+      }));
+
+      cards = [];
+      mapaTagsPorCard = new Map();
+      mapaNotasPorCard = new Map();
+      filtrosCardsKanban = [];
+
+      reconstruirIndicesCards();
+      renderizarFiltrosMultiselect();
+      renderBoardCompleto({ adiarCargaInicial: true });
+      atualizarResumoBusca();
+
+      ultimaAtualizacaoAoVivoMs = Date.now();
+
+      carregarCatalogosBasicosKanban().catch((erro) => {
+        console.warn("Catálogos básicos do Kanban falharam em segundo plano", erro);
+      });
+
+      carregarPrimeirosCardsPorFaseRapido().catch((erro) => {
+        console.warn("Carga rápida dos primeiros cards falhou; tentando carga completa", erro);
+        carregar({ fresh: true }).catch((erroCompleto) => {
+          console.error("Carga completa de fallback também falhou", erroCompleto);
+          mostrarMensagemBoard("Não consegui carregar os cards. Confira no DevTools qual requisição ficou vermelha na aba Network.");
+        });
+      });
+
+      return true;
+    } catch (erro) {
+      console.warn("Falha na abertura rápida do Kanban", erro);
+      return false;
+    }
+  }
+
+  async function carregar(opcoes = {}) {
+    const paramsDados = new URLSearchParams();
+    paramsDados.set("limit_inicial", String(TAM_LOTE_POR_FASE));
+    if (opcoes && opcoes.fresh === true) {
+      paramsDados.set("fresh", "1");
+    }
+
+    const urlDados = `/kanban/api/kanbans/${ID_KANBAN}/dados?${paramsDados.toString()}`;
     let resultadoDados = null;
 
     try {
@@ -13861,6 +14486,9 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
       mostrarMensagemBoard(j?.msg || "Não consegui carregar os cards. A API inicial do kanban não retornou JSON válido.");
       return;
     }
+
+    versaoKanbanAtual = idNum(j.versao_kanban || j.VersaoKanban || versaoKanbanAtual || 0);
+    ultimaAtualizacaoAoVivoMs = Date.now();
 
     fases = Array.isArray(j.fases) ? j.fases.map(f => Object.assign({}, f || {})) : [];
     cards = Array.isArray(j.cards)
@@ -13891,11 +14519,8 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     kanbanCfg = j.kanban_cfg || {};
     paineisCatalogo = Array.isArray(j.paineis) ? j.paineis : [];
-    if (kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard) {
-      await carregarCatalogoPainelFaces().catch((erro) => {
-        console.warn('init painel_faces: falhou', erro);
-      });
-    } else {
+    const deveCarregarCatalogoPainelFaces = !!(kanbanCfg && kanbanCfg.MostrarPainelFaceNoCard);
+    if (!deveCarregarCatalogoPainelFaces) {
       painelFacesCatalogo = [];
       atualizarMapaPainelFacesCatalogo();
     }
@@ -13904,7 +14529,6 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     ativarPainelFaceSeNecessario();
     montarSelectTipoClienteDesconto();
     montarSelectOrigemAtendimento();
-    buscarCnaesRemoto("").catch((erro) => console.warn("init cnaes: falhou", erro));
 
     mapaTagsPorCard = new Map();
     mapaNotasPorCard = new Map();
@@ -13929,9 +14553,27 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     renderizarFiltrosMultiselect();
     renderBoardCompleto();
     atualizarResumoBusca();
+
+    if (j.vendedores_deferido) {
+      window.setTimeout(() => {
+        if (!document.hidden) carregarVendedoresKanbanDeferido();
+      }, 1400);
+    }
+
+    // Performance: o resumo comercial não segura mais a abertura do quadro.
+    // A tela aparece primeiro; os KPIs vêm logo em seguida por endpoint próprio/cacheado.
+    agendarRecarregarResumoComercial(1200);
+
+    if (deveCarregarCatalogoPainelFaces) {
+      carregarCatalogoPainelFaces().catch((erro) => {
+        console.warn('init painel_faces em segundo plano: falhou', erro);
+      });
+    }
   }
 
-  function renderBoardCompleto() {
+  function renderBoardCompleto(opcoes = {}) {
+    const adiarCargaInicial = !!opcoes.adiarCargaInicial;
+
     reconstruirIndicesCards();
     limparRecursosScrollbarFase();
     board.innerHTML = "";
@@ -13939,7 +14581,10 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     fases.forEach((f, idx) => {
       const idFase = idNum(f.IDDimKanbanFase);
-      const qtdTotalServidor = idNum(f.QuantidadeCardsTotal || contarCardsNaFaseCarregados(idFase));
+      const cargaTotalDesconhecida = f.CargaTotalDesconhecida === true;
+      const qtdTotalServidor = cargaTotalDesconhecida
+        ? Math.max(0, contarCardsNaFaseCarregados(idFase))
+        : idNum(f.QuantidadeCardsTotal || contarCardsNaFaseCarregados(idFase));
       const qtdCarregadaInicial = idNum(f.QuantidadeCardsCarregadosInicialmente || contarCardsNaFaseCarregados(idFase));
       const colAccent = obterCorFase(f, idx);
       const colText = obterCorTextoFase(f, colAccent);
@@ -14000,7 +14645,8 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
         dragDepth: 0,
         offsetServidor: qtdCarregadaInicial,
         totalServidor: qtdTotalServidor,
-        cargaCompleta: !!f.CargaInicialCompleta || qtdCarregadaInicial >= qtdTotalServidor
+        cargaTotalDesconhecida: cargaTotalDesconhecida,
+        cargaCompleta: cargaTotalDesconhecida ? false : (!!f.CargaInicialCompleta || qtdCarregadaInicial >= qtdTotalServidor)
       });
 
       drop.addEventListener("dragenter", (e) => {
@@ -14093,11 +14739,69 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     fases.forEach(f => {
       const idFase = idNum(f.IDDimKanbanFase);
       preencherCabecalhoFase(idFase);
-      void preencherCardsInicial(idFase);
+      // Performance: não faço auto-preenchimento agressivo na primeira pintura.
+      // Antes, fases sem overflow podiam disparar várias chamadas /cards em paralelo logo na abertura.
+      if (!adiarCargaInicial) {
+        void preencherCardsInicial(idFase, TAM_LOTE_POR_FASE, false, { ignorarAutoPreenchimento: true });
+      } else {
+        atualizarSentinelaFase(idFase);
+      }
     });
+
+    // Depois que a primeira pintura acontece, faço um pré-carregamento leve, sequencial e cancelável
+    // para deixar a rolagem futura mais rápida sem travar a abertura do Kanban.
+    if (!adiarCargaInicial) {
+      agendarPrecarregamentoFasesOciosas();
+    }
 
     removerControlesGestaoFasesParaVendedor();
     atualizarModoDesempenhoKanban();
+  }
+
+  let temporizadorPrecarregamentoFases = null;
+
+  function agendarPrecarregamentoFasesOciosas(atrasoMs = 700){
+    if (temporizadorPrecarregamentoFases) {
+      window.clearTimeout(temporizadorPrecarregamentoFases);
+    }
+
+    temporizadorPrecarregamentoFases = window.setTimeout(() => {
+      temporizadorPrecarregamentoFases = null;
+      void precarregarFasesOciosasSequencialmente();
+    }, Math.max(250, Number(atrasoMs) || 700));
+  }
+
+  async function esperarJanelaOciosaKanban(timeout = 900){
+    if (typeof window.requestIdleCallback === "function") {
+      await new Promise(resolve => window.requestIdleCallback(resolve, { timeout }));
+      return;
+    }
+
+    await new Promise(resolve => window.setTimeout(resolve, Math.min(Math.max(timeout, 120), 900)));
+  }
+
+  async function precarregarFasesOciosasSequencialmente(){
+    if (document.hidden || haFiltroAtivo()) return;
+
+    const idsFases = fases
+      .map(f => idNum(f?.IDDimKanbanFase || 0))
+      .filter(Boolean);
+
+    for (const idFase of idsFases) {
+      if (document.hidden || haFiltroAtivo()) return;
+
+      const st = estadoFase.get(idFase);
+      if (!st || st.carregandoServidor || st.loading || st.cargaCompleta) continue;
+      if (!faseAindaTemMaisConteudo(idFase)) continue;
+
+      await esperarJanelaOciosaKanban(700);
+      if (document.hidden || haFiltroAtivo()) return;
+
+      await carregarLoteServidorDaFase(idFase, TAM_LOTE_POR_FASE, { ignorarAutoPreenchimento: true });
+      reconstruirIndicesCards();
+      preencherCabecalhoFase(idFase);
+      atualizarSentinelaFase(idFase);
+    }
   }
 
   function preencherCabecalhoFase(idFase){
@@ -14108,7 +14812,10 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
 
     const qtdVisivel = contarCardsNaFaseVisiveis(idF);
     const qtdCarregado = contarCardsNaFaseCarregados(idF);
-    const qtdTotalServidor = Math.max(idNum(f.QuantidadeCardsTotal || 0), qtdCarregado);
+    const cargaTotalDesconhecida = st.cargaTotalDesconhecida === true || f.CargaTotalDesconhecida === true;
+    const qtdTotalServidor = cargaTotalDesconhecida
+      ? Math.max(idNum(st.totalServidor || 0), qtdCarregado)
+      : Math.max(idNum(f.QuantidadeCardsTotal || 0), qtdCarregado);
     st.totalServidor = qtdTotalServidor;
 
     const col = board.querySelector(`.kb-col[data-fase="${idF}"]`);
@@ -14118,6 +14825,8 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     if (strong){
       if (haFiltroAtivo()) {
         strong.textContent = `${(f.NomeFase || "—")} (${qtdVisivel})`;
+      } else if (cargaTotalDesconhecida) {
+        strong.textContent = `${(f.NomeFase || "—")} (${qtdCarregado || "..."})`;
       } else {
         strong.textContent = `${(f.NomeFase || "—")} (${qtdTotalServidor})`;
       }
@@ -14127,6 +14836,8 @@ async function carregarLoteServidorDaFase(idFase, limite = TAM_LOTE_POR_FASE, op
     if (countEl){
       if (haFiltroAtivo()){
         countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdVisivel} visível${qtdVisivel === 1 ? "" : "eis"} entre ${qtdCarregado} carregado${qtdCarregado === 1 ? "" : "s"}`;
+      } else if (cargaTotalDesconhecida) {
+        countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • carregando cards...`;
       } else if (qtdCarregado !== qtdTotalServidor) {
         countEl.textContent = `${String(f.TipoFase || "").toLowerCase()} • ${qtdCarregado}/${qtdTotalServidor} carregados`;
       } else {
@@ -14300,20 +15011,28 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     const lista = listaCardsDaFase(idF);
     const totalCarregadoNaFase = contarCardsNaFaseCarregados(idF);
-    const totalServidorNaFase = Math.max(
-      idNum(st.totalServidor || 0),
-      idNum(fasePorId(idF)?.QuantidadeCardsTotal || 0),
-      totalCarregadoNaFase
-    );
+    const fase = fasePorId(idF);
+    const cargaTotalDesconhecida = st.cargaTotalDesconhecida === true || fase?.CargaTotalDesconhecida === true;
+    const totalServidorNaFase = cargaTotalDesconhecida
+      ? Math.max(idNum(st.totalServidor || 0), totalCarregadoNaFase)
+      : Math.max(
+          idNum(st.totalServidor || 0),
+          idNum(fase?.QuantidadeCardsTotal || 0),
+          totalCarregadoNaFase
+        );
 
     st.totalServidor = totalServidorNaFase;
-    st.cargaCompleta = st.cargaCompleta || totalCarregadoNaFase >= totalServidorNaFase;
+    if (!cargaTotalDesconhecida) {
+      st.cargaCompleta = st.cargaCompleta || totalCarregadoNaFase >= totalServidorNaFase;
+    }
 
     if (lista.length === 0) {
       st.sentinelEl.style.display = "block";
-      st.sentinelEl.textContent = haFiltroAtivo()
-        ? "Sem cards carregados para os filtros atuais nesta fase."
-        : "Sem cards nesta fase.";
+      st.sentinelEl.textContent = cargaTotalDesconhecida
+        ? "Carregando cards desta fase..."
+        : (haFiltroAtivo()
+            ? "Sem cards carregados para os filtros atuais nesta fase."
+            : "Sem cards nesta fase.");
       return;
     }
 
@@ -14330,7 +15049,9 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     if (!st.cargaCompleta) {
       st.sentinelEl.style.display = "block";
-      st.sentinelEl.textContent = `Mostrando ${lista.length} carregados de ${totalServidorNaFase}. Role dentro da fase ou clique aqui para buscar mais.`;
+      st.sentinelEl.textContent = cargaTotalDesconhecida
+        ? `Mostrando ${lista.length} carregados. Buscando total da fase...`
+        : `Mostrando ${lista.length} carregados de ${totalServidorNaFase}. Role dentro da fase ou clique aqui para buscar mais.`;
       return;
     }
 
@@ -14802,12 +15523,15 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
     const titulo = prompt("Nome do card:");
     if (!titulo || titulo.trim().length < 2) return;
 
-    const r = await fetch(`/kanban/api/kanbans/${ID_KANBAN}/cards`, {
+    const clientRequestId = gerarClientRequestIdKanban("card_create");
+    registrarEventoLocalPendente(clientRequestId);
+
+    const r = await fetchKanbanComTimeout(`/kanban/api/kanbans/${ID_KANBAN}/cards`, {
       method:"POST",
       credentials: "same-origin",
       headers: headersJSON,
-      body: JSON.stringify({titulo: titulo.trim(), id_fase: idFase})
-    });
+      body: JSON.stringify({titulo: titulo.trim(), id_fase: idFase, client_request_id: clientRequestId})
+    }, TIMEOUT_FETCH_CRITICO_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
     if (!r.ok || !j || !j.ok) {
@@ -14824,7 +15548,10 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     if (cardCriado && idCardCriado && idFaseCriada) {
       const jaExistiaLocalmente = !!obterCardPorId(idCardCriado);
-      inserirOuAtualizarCardLocal(cardCriado, { reposicionarNoTopoDaFase: true });
+      inserirOuAtualizarCardLocal(cardCriado, {
+        reposicionarNoTopoDaFase: !jaExistiaLocalmente,
+        reconstruir: !jaExistiaLocalmente
+      });
 
       if (Array.isArray(j.tags)) {
         setTagsDoCard(idCardCriado, j.tags);
@@ -14839,17 +15566,71 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
       if (!jaExistiaLocalmente) {
         ajustarQuantidadeFaseLocal(idFaseCriada, 1);
+        redesenharFasesLocalmente([idFaseCriada], null, true);
+        destacarCardNaFase(idCardCriado, idFaseCriada);
       }
 
-      redesenharFasesLocalmente([idFaseCriada], null, true);
-      destacarCardNaFase(idCardCriado, idFaseCriada);
-      agendarRecarregarResumoComercial();
+      agendarRecarregarResumoComercial(1200);
       return;
     }
 
     await carregar();
   }
 
+
+  function esperarKanban(ms){
+    return new Promise(resolve => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+  }
+
+  async function acompanharMovimentoAssincronoCard(idCard, idFaseOrigem, idFaseDestino, mapaQuantidades = null, opcoes = {}) {
+    const idC = idNum(idCard);
+    const idOrigem = idNum(idFaseOrigem);
+    const idDestino = idNum(idFaseDestino);
+    const maxTentativas = Math.max(3, idNum(opcoes.maxTentativas || 12));
+    const intervaloMs = Math.max(600, idNum(opcoes.intervaloMs || 1200));
+
+    if (!idC || !idDestino) return false;
+
+    for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
+      await esperarKanban(intervaloMs);
+
+      const detalhe = await buscarDetalheCard(idC, { fresh: true });
+      const cardServidor = detalhe?.card ? normalizarCardServidor(detalhe.card) : null;
+
+      if (!cardServidor) {
+        continue;
+      }
+
+      const idFaseServidor = idNum(cardServidor.IDDimKanbanFaseAtual || 0);
+      const saiuDoQuadro = cardDeveSairDoQuadro(cardServidor, idFaseServidor);
+
+      if (Array.isArray(detalhe.tags)) {
+        if (saiuDoQuadro) removerTagsDoCard(idC);
+        else setTagsDoCard(idC, detalhe.tags);
+      }
+
+      if (Array.isArray(detalhe.notas)) {
+        mapaNotasPorCard.set(idC, detalhe.notas.map(n => Object.assign({}, n || {})));
+      }
+
+      if (saiuDoQuadro) {
+        removerCardLocal(idC);
+      } else {
+        inserirOuAtualizarCardLocal(cardServidor, { reposicionarNoTopoDaFase: true });
+      }
+
+      if (idFaseServidor === idDestino || saiuDoQuadro) {
+        redesenharFasesLocalmente([idOrigem, idDestino, idFaseServidor].filter(Boolean), mapaQuantidades, true);
+        if (!saiuDoQuadro) destacarCardNaFase(idC, idFaseServidor);
+        limparMensagemBoard();
+        return true;
+      }
+    }
+
+    await redesenharFasesSincronizado([idOrigem, idDestino].filter(Boolean), mapaQuantidades, true, { fresh: true });
+    mostrarMensagemBoard("O movimento foi aceito pelo servidor, mas ainda não apareceu na fase final. A tela vai sincronizar pelo tempo real ou no próximo recarregamento.", "alerta", 7000);
+    return false;
+  }
 
   async function obterVersaoAtualDoCard(idCard, opcoes = {}) {
   const fresh = !!opcoes.fresh;
@@ -14962,6 +15743,8 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const textoNotaMovimento = ((inputNotaTexto && inputNotaTexto.value) || "").trim();
+    const clientRequestIdMovimento = gerarClientRequestIdKanban("card_move");
+    registrarEventoLocalPendente(clientRequestIdMovimento, 30000);
     const solicitacaoContratoMovimento = obterSolicitacaoContratoAtualParaMovimento(idC);
     const painelFacesMovimento = idNum(cardAbertoId) === idC
       ? coletarPainelFacesDoFormulario()
@@ -14974,7 +15757,8 @@ async function moverCard(idCard, idFasePara, posicao) {
       id_fase_para: idDestino,
       posicao: posicao || "LAST",
       versao_concorrencia: safeStr(cardAtual.VersaoConcorrenciaHex),
-      observacao: textoNotaMovimento
+      observacao: textoNotaMovimento,
+      client_request_id: clientRequestIdMovimento
     };
 
     if (idNum(cardAbertoId) === idC) {
@@ -14997,12 +15781,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       payload.id_reserva = idReservaMovimento || null;
     }
 
-    const r = await fetch(`/kanban/api/cards/${idC}/mover`, {
+    const r = await fetchKanbanComTimeout(`/kanban/api/cards/${idC}/mover`, {
       method: "POST",
       credentials: "same-origin",
       headers: headersJSON,
       body: JSON.stringify(payload)
-    });
+    }, TIMEOUT_FETCH_CRITICO_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
 
@@ -15033,6 +15817,12 @@ async function moverCard(idCard, idFasePara, posicao) {
 
       await redesenharFasesSincronizado(idsParaSincronizar, null, true, { fresh: true });
       return false;
+    }
+
+    if (j.processamento_assincrono) {
+      mostrarMensagemBoard(j.msg || "Movimento aceito e em processamento. Mantive o card visualmente na fase de destino e vou sincronizar automaticamente.", "alerta", 5000);
+      void acompanharMovimentoAssincronoCard(idC, idFaseOrigem, idDestino, mapaQuantidades, { maxTentativas: 15, intervaloMs: 1200 });
+      return true;
     }
 
     let detalheFinal = null;
@@ -15129,6 +15919,14 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     limparMensagemBoard();
     return true;
+  } catch (erroMovimento) {
+    console.warn("moverCard: falha de comunicação", erroMovimento);
+    if (movimentoLocal?.ok) {
+      restaurarMovimentoCardLocal(movimentoLocal);
+      redesenharFasesLocalmente([movimentoLocal.origem, movimentoLocal.destino].filter(Boolean), null, true);
+    }
+    mostrarMensagemBoard(mensagemErroComunicacaoKanban(erroMovimento, "Erro de comunicação ao mover o card. Tente novamente."), "alerta", 7000);
+    return false;
   } finally {
     movimentosCardsPendentes.delete(idC);
   }
@@ -16098,7 +16896,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     if (!btnSalvarCard) return;
 
     const temVersao = !!safeStr(versaoConcorrenciaCardAberto);
-    const podeSalvar = temVersao && !cardAbertoConflitoExterno && !salvandoCardAtual;
+    const podeSalvar = temVersao && !cardAbertoConflitoExterno && !salvandoCardAtual && !carregandoCardAtual;
 
     // Carteira bloqueada não desabilita o botão.
     // O vendedor precisa conseguir clicar para receber o popup; o salvamento é barrado no clique e no backend.
@@ -16107,9 +16905,11 @@ async function moverCard(idCard, idFasePara, posicao) {
       ? ""
       : (salvandoCardAtual
           ? "Salvando alterações do card..."
-          : (!temVersao
-              ? "Este card foi carregado sem versão de concorrência. O backend precisa devolver essa versão para permitir salvar."
-              : "Este card recebeu atualização externa. Reabra o card antes de salvar."));
+          : (carregandoCardAtual
+              ? "Aguarde o detalhe completo do card carregar antes de salvar."
+              : (!temVersao
+                  ? "Este card foi carregado sem versão de concorrência. O backend precisa devolver essa versão para permitir salvar."
+                  : "Este card recebeu atualização externa. Reabra o card antes de salvar.")));
   }
 
 
@@ -16820,6 +17620,104 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
   }
 
+  function preencherCardBasicoModal(card, opcoes = {}){
+    const cardNormalizado = normalizarCardServidor(card || {});
+    const idCardBasico = idNum(cardNormalizado.IDFatoKanbanCard || cardAbertoId || 0);
+
+    if (!idCardBasico) return;
+
+    if (modalCard) {
+      modalCard.dataset.idFaseAtual = String(idNum(cardNormalizado.IDDimKanbanFaseAtual || 0) || "");
+      modalCard.dataset.jaPassouFaseFormularioContrato = idNum(
+        cardNormalizado.BitJaPassouPelaFaseFormularioContrato ??
+        cardNormalizado.bit_ja_passou_pela_fase_formulario_contrato ??
+        0
+      ) === 1 ? "1" : "0";
+    }
+
+    atualizarCabecalhoModalCard(cardNormalizado);
+
+    if (inputIdCard) {
+      inputIdCard.value = String(idCardBasico || "");
+    }
+
+    if (inputTituloCard) {
+      inputTituloCard.value = cardNormalizado.Titulo ?? "";
+    }
+
+    if (inputDescricaoCard) {
+      inputDescricaoCard.value = cardNormalizado.Descricao ?? "";
+    }
+
+    if (inputMarcaCard) {
+      inputMarcaCard.value = cardNormalizado.Marca ?? "";
+      sincronizarMarcaExibidaHeaderComInputTopo();
+    }
+
+    if (inputTelefoneCard) {
+      inputTelefoneCard.value = normalizarTelefoneContato(cardNormalizado.Telefone ?? "");
+    }
+
+    if (inputEmailCard) {
+      inputEmailCard.value = cardNormalizado.Email ?? "";
+    }
+
+    if (selectResponsavelCard) {
+      const idResponsavel = cardNormalizado.IDVendedorUsuario ?? cardNormalizado.IDDimUsuarios ?? "";
+      selectResponsavelCard.value = idResponsavel !== null && idResponsavel !== undefined ? String(idResponsavel) : "";
+    }
+
+    if (selectOrigemCard) {
+      const idOrigem = cardNormalizado.IDDimKanbanOrigem ?? "";
+      selectOrigemCard.value = idOrigem !== null && idOrigem !== undefined ? String(idOrigem) : "";
+    }
+
+    if (selectMotivoEncerramentoCard) {
+      const idMotivo = cardNormalizado.IDDimKanbanMotivoEncerramento ?? "";
+      selectMotivoEncerramentoCard.value = idMotivo !== null && idMotivo !== undefined ? String(idMotivo) : "";
+    }
+
+    if (inputMotivoEncerramentoObsCard) {
+      inputMotivoEncerramentoObsCard.value = cardNormalizado.MotivoEncerramentoObs ?? "";
+    }
+
+    if (selectStatusCard) {
+      const statusAtual = cardNormalizado.StatusCard ?? "";
+      selectStatusCard.value = statusAtual !== null && statusAtual !== undefined ? String(statusAtual) : "";
+    }
+
+    if (selectTipoClienteDescontoCard) {
+      const idTipoCliente = cardNormalizado.IDDimKanbanTipoClienteDesconto ?? cardNormalizado.IDDimTipoCliente ?? "";
+      montarSelectTipoClienteDesconto(idTipoCliente);
+      selectTipoClienteDescontoCard.value = idTipoCliente !== null && idTipoCliente !== undefined ? String(idTipoCliente) : "";
+    }
+
+    if (selectOrigemAtendimentoCard) {
+      const idOrigemAtendimento = cardNormalizado.IDDimOrigemAtendimento ?? "";
+      montarSelectOrigemAtendimento(idOrigemAtendimento);
+      selectOrigemAtendimentoCard.value = idOrigemAtendimento !== null && idOrigemAtendimento !== undefined ? String(idOrigemAtendimento) : "";
+    }
+
+    if (selectTagCard && selectTagCard.options.length <= 0) {
+      selectTagCard.innerHTML = "";
+      tagsCatalogo.forEach(t => {
+        selectTagCard.appendChild(
+          el("option", { value: t.IDDimKanbanTag }, [t.NomeTag])
+        );
+      });
+    }
+
+    const tagsBasicas = Array.isArray(opcoes.tags) ? opcoes.tags : tagsDoCard(idCardBasico);
+    renderTagsNoCard(tagsBasicas);
+
+    const notasBasicas = Array.isArray(opcoes.notas) ? opcoes.notas : (mapaNotasPorCard.get(idCardBasico) || []);
+    renderNotas(notasBasicas);
+
+    atualizarVisibilidadeDadosNovoContrato();
+    atualizarVisibilidadeEmpresasRelacionadasCard();
+    atualizarVisibilidadeFormularioSolicitacaoContrato();
+  }
+
   async function abrirOrcamentoCard(idCard){
     const id = idNum(idCard);
     if (!id) {
@@ -16850,6 +17748,9 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   async function abrirCard(idCard) {
+    const sequenciaAtualAbertura = ++sequenciaAberturaCard;
+    carregandoCardAtual = true;
+
     try {
       cardAbertoId = idNum(idCard);
       formularioSolicitacaoLiberadoNestaAbertura = false;
@@ -16868,11 +17769,47 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
       atualizarEstadoSalvarCard();
 
-      await carregarEmpresas();
+      // UX/performance: abre o modal na hora e pinta o que já existe no board.
+      // O detalhe completo vem em seguida com fresh=1, sem depender do catálogo de empresas terminar.
+      if (modalCard) {
+        modalCard.style.display = "block";
+      }
 
-      const j = await buscarDetalheCard(idCard, { fresh: true });
+      const cardLocalInicial = obterCardPorId(cardAbertoId);
+      if (cardLocalInicial) {
+        preencherCardBasicoModal(cardLocalInicial, {
+          tags: tagsDoCard(cardAbertoId),
+          notas: mapaNotasPorCard.get(idNum(cardAbertoId)) || []
+        });
+        mostrarMensagemCard("Atualizando detalhes completos do card...");
+      } else {
+        mostrarMensagemCard("Carregando detalhes do card...");
+      }
+
+      const promessaEmpresas = carregarEmpresas().catch((erro) => {
+        console.warn("abrirCard: pré-carga de empresas falhou. O detalhe do card continuará carregando.", erro);
+        return false;
+      });
+
+      // Começa a carregar o catálogo de Cidade/Tipo/CodFace em paralelo com o detalhe do card.
+      // Assim os selects já chegam prontos quando os blocos de painel/face forem renderizados.
+      const promessaPainelFacesCard = painelFaceWrap?.classList.contains("is-on")
+        ? carregarCatalogoPainelFaces().catch((erro) => {
+            console.warn("abrirCard: pré-carga do catálogo de painel/face falhou.", erro);
+            return [];
+          })
+        : Promise.resolve([]);
+
+      const j = await buscarDetalheCard(idCard, { fresh: true, timeoutMs: 60000 });
+
+      if (sequenciaAtualAbertura !== sequenciaAberturaCard || idNum(cardAbertoId) !== idNum(idCard)) {
+        return;
+      }
+
       if (!j || !j.card) {
-        mostrarMensagemCard("Não foi possível carregar os detalhes do card. Veja no console se a API retornou HTML/vazio em vez de JSON.");
+        versaoConcorrenciaCardAberto = "";
+        cardAbertoConflitoExterno = true;
+        mostrarMensagemCard("Não foi possível atualizar os detalhes do card. Mantive o que já estava na tela, mas bloqueei o salvamento para evitar gravar dados antigos. Feche e abra o card novamente.");
         return;
       }
 
@@ -16926,6 +17863,11 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     if (selectEmpresaCard) {
+      await promessaEmpresas;
+      if (sequenciaAtualAbertura !== sequenciaAberturaCard || idNum(cardAbertoId) !== idNum(idCard)) {
+        return;
+      }
+
       const empresasRelacionadas = obterEmpresasRelacionadasDoCard(cardNormalizado);
       const idEmpresaPrincipal = empresasRelacionadas.principal ?? "";
       await selecionarEmpresaPorIdComGarantia(idEmpresaPrincipal !== null && idEmpresaPrincipal !== undefined ? String(idEmpresaPrincipal) : "", false);
@@ -16938,10 +17880,12 @@ async function moverCard(idCard, idFasePara, posicao) {
         cod_face_contrato: fluxoPersistido.cod_face_contrato
       });
 
-      await selecionarAgenciaPorIdComGarantia(empresasRelacionadas.agencia ? String(empresasRelacionadas.agencia) : "", false);
-      await selecionarClienteDiretoPorIdComGarantia(empresasRelacionadas.clienteDireto ? String(empresasRelacionadas.clienteDireto) : "", false);
-      await selecionarBureauPorIdComGarantia(empresasRelacionadas.bureau ? String(empresasRelacionadas.bureau) : "", false);
-      await selecionarIntermediarioPorIdComGarantia(empresasRelacionadas.intermediario ? String(empresasRelacionadas.intermediario) : "", false);
+      await Promise.all([
+        selecionarAgenciaPorIdComGarantia(empresasRelacionadas.agencia ? String(empresasRelacionadas.agencia) : "", false),
+        selecionarClienteDiretoPorIdComGarantia(empresasRelacionadas.clienteDireto ? String(empresasRelacionadas.clienteDireto) : "", false),
+        selecionarBureauPorIdComGarantia(empresasRelacionadas.bureau ? String(empresasRelacionadas.bureau) : "", false),
+        selecionarIntermediarioPorIdComGarantia(empresasRelacionadas.intermediario ? String(empresasRelacionadas.intermediario) : "", false)
+      ]);
     } else {
       setEmpresaPreviewByObj(null);
       resetarFluxoContrato();
@@ -17021,6 +17965,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     if (painelFaceWrap?.classList.contains("is-on")) {
+      await promessaPainelFacesCard;
       const painelFaces =
         (Array.isArray(j.painel_faces) && j.painel_faces) ||
         (Array.isArray(j.painelFaces) && j.painelFaces) ||
@@ -17046,10 +17991,21 @@ async function moverCard(idCard, idFasePara, posicao) {
       );
     }
 
+    if (msgCard) {
+      msgCard.style.display = "none";
+      msgCard.textContent = "";
+    }
     modalCard.style.display = "block";
     } catch (erro) {
       console.error("abrirCard: falha inesperada", erro);
-      mostrarMensagemCard("Erro inesperado ao abrir o card. Veja o console para o detalhe técnico.");
+      versaoConcorrenciaCardAberto = "";
+      cardAbertoConflitoExterno = true;
+      mostrarMensagemCard("Erro inesperado ao abrir o card. Mantive o salvamento bloqueado para evitar gravar dados incompletos. Veja o console para o detalhe técnico.");
+    } finally {
+      if (sequenciaAtualAbertura === sequenciaAberturaCard) {
+        carregandoCardAtual = false;
+        atualizarEstadoSalvarCard();
+      }
     }
   }
 
@@ -17195,11 +18151,11 @@ async function moverCard(idCard, idFasePara, posicao) {
     const idTagNum = idNum(idTag);
     if (!idCard || !idTagNum) return;
 
-    const r = await fetch(`/kanban/api/cards/${idCard}/tags/${idTagNum}`, {
+    const r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCard}/tags/${idTagNum}`, {
       method:"DELETE",
       credentials: "same-origin",
       headers: {"X-CSRFToken": csrf}
-    });
+    }, TIMEOUT_FETCH_POS_SAVE_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) {
@@ -17215,12 +18171,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     const idTag = parseInt(document.getElementById("selectTagCard").value || "0", 10);
     if (!idCard || !idTag) return;
 
-    const r = await fetch(`/kanban/api/cards/${idCard}/tags`, {
+    const r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCard}/tags`, {
       method:"POST",
       credentials: "same-origin",
       headers: headersJSON,
       body: JSON.stringify({id_tag: idTag})
-    });
+    }, TIMEOUT_FETCH_POS_SAVE_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) {
@@ -17234,24 +18190,36 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
   });
 
-  async function salvarNotaSeTiverTexto() {
+  async function salvarNotaSeTiverTexto(idCardOverride = null, textoOverride = null) {
     const inp = document.getElementById("notaTexto");
-    const texto = (inp.value || "").trim();
+    const texto = (textoOverride !== null && textoOverride !== undefined)
+      ? safeStr(textoOverride).trim()
+      : safeStr(inp?.value || "").trim();
     if (texto.length < 2) return { ok: true, fez: false };
 
-    const r = await fetch(`/kanban/api/cards/${cardAbertoId}/notas`, {
+    const idCardNota = idNum(idCardOverride || cardAbertoId);
+    if (!idCardNota) {
+      return { ok: false, msg: "Não foi possível identificar o card para salvar a nota." };
+    }
+
+    const clientRequestIdNota = gerarClientRequestIdKanban("card_note");
+    registrarEventoLocalPendente(clientRequestIdNota, 30000);
+
+    const r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardNota}/notas`, {
       method:"POST",
       credentials: "same-origin",
       headers: headersJSON,
-      body: JSON.stringify({texto, tipo:"OBS"})
-    });
+      body: JSON.stringify({texto, tipo:"OBS", client_request_id: clientRequestIdNota})
+    }, TIMEOUT_FETCH_POS_SAVE_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) {
       return { ok: false, msg: (j && (j.msg || j.erro)) || `Erro ao salvar nota (HTTP ${r.status})` };
     }
 
-    inp.value = "";
+    if (inp && (textoOverride === null || textoOverride === undefined)) {
+      inp.value = "";
+    }
     return { ok: true, fez: true };
   }
 
@@ -17306,13 +18274,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
 
       if (dataInicio && dataFim && bloco.__calendarioOcupacao && !intervaloEstaDisponivelNoBloco(bloco, dataInicio, dataFim)){
-        const slotsNecessarios = obterSlotsNecessariosReservaDoBloco(bloco);
-        const primeiroDiaIndisponivel = obterPrimeiroDiaIndisponivelIntervaloNoBloco(bloco, dataInicio, dataFim);
         return {
           ok: false,
-          msg: primeiroDiaIndisponivel
-            ? `${titulo}: não foi possível encaixar automaticamente o período inteiro. O dia ${formatarDataIsoParaBr(primeiroDiaIndisponivel)} não tem ${slotsNecessarios} slot(s) livre(s) para a cota selecionada. Verifique a grade para encaixe.`
-            : `${titulo}: não foi possível encaixar automaticamente o período inteiro. Verifique a grade para encaixe.`
+          msg: `${titulo}: ${montarMensagemFalhaEncaixeFragmentado(bloco, dataInicio, dataFim)}`
         };
       }
     }
@@ -17410,6 +18374,12 @@ async function moverCard(idCard, idFasePara, posicao) {
   btnSalvarCard.addEventListener("click", async () => {
     if (salvandoCardAtual) return;
 
+    if (carregandoCardAtual) {
+      mostrarMensagemCard("Aguarde o card terminar de carregar antes de salvar. Isso evita gravar dados vazios ou antigos.");
+      atualizarEstadoSalvarCard();
+      return;
+    }
+
     const titulo = (document.getElementById("cardTitulo").value || "").trim();
     const descricao = document.getElementById("cardDescricao").value || "";
     const idEmpresa = selectEmpresaCard.value ? Number(selectEmpresaCard.value) : null;
@@ -17486,9 +18456,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     const estadoAtualEdicao = montarEstadoEdicaoCardAtual();
+    const clientRequestIdSalvar = gerarClientRequestIdKanban("card_update");
+    registrarEventoLocalPendente(clientRequestIdSalvar);
+
     const payload = {
       ...estadoAtualEdicao,
-      versao_concorrencia: versaoConcorrenciaCardAberto
+      versao_concorrencia: versaoConcorrenciaCardAberto,
+      client_request_id: clientRequestIdSalvar
     };
 
     const notaPendente = safeStr(inputNotaTexto?.value || "").trim();
@@ -17510,12 +18484,12 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     try {
-      const r = await fetch(`/kanban/api/cards/${idCardSalvo}`, {
+      const r = await fetchKanbanComTimeout(`/kanban/api/cards/${idCardSalvo}`, {
         method:"PUT",
         credentials: "same-origin",
         headers: headersJSON,
         body: JSON.stringify(payload)
-      });
+      }, TIMEOUT_FETCH_CRITICO_KANBAN_MS);
 
       const j = await r.json().catch(() => null);
       if (!j || !j.ok) {
@@ -17554,41 +18528,63 @@ async function moverCard(idCard, idFasePara, posicao) {
         }
       }
 
-      if (Array.isArray(j.notas)) {
+      if (Array.isArray(j.notas) && !j.payload_minimo) {
         mapaNotasPorCard.set(
           idCardSalvo,
           j.notas.map(n => Object.assign({}, n || {}))
         );
       }
 
-      const resNota = await salvarNotaSeTiverTexto();
-      if (!resNota.ok) {
-        mostrarMensagemCard(resNota.msg || "Erro ao salvar nota");
-        return;
-      }
-
-      try {
-        const idTagTipoContratoDesejada = obterIdTagTipoContratoDesejada();
-        await sincronizarTagTipoContratoDoCard(idCardSalvo, idTagTipoContratoDesejada, { redesenhar: false });
-      } catch (erroTag) {
-        mostrarMensagemCard(erroTag?.message || "O card foi salvo, mas houve erro ao sincronizar a tag de tipo de contrato.");
-        return;
-      }
-
-      limparCacheCalendarioOcupacao(extrairCodFacesPainelFaces(payload.painel_faces));
-
+      // A sincronização principal do card terminou aqui. Fecho o modal imediatamente
+      // e deixo tarefas auxiliares (nota, redesenho e resumo) em segundo plano.
+      // Isso evita o botão ficar preso em "Salvando..." por causa de endpoints pós-save,
+      // renderizações pesadas ou Socket/Celery lento.
+      const notaParaSalvarAposFechar = notaPendente;
+      const codFacesParaLimparCache = extrairCodFacesPainelFaces(payload.painel_faces);
       const cardAtual = obterCardPorId(idCardSalvo);
       const idFaseAtual = idNum(cardAtual?.IDDimKanbanFaseAtual || j?.card?.IDDimKanbanFaseAtual || 0);
-
-      if (idFaseAtual) {
-        redesenharFasesLocalmente([idFaseAtual], null, true);
-      } else {
-        await carregar();
-      }
+      const mensagemSucessoSalvar = j?.msg || "Alterações salvas";
 
       fecharModalCard();
-      mostrarMensagemBoard(j?.msg || "Alterações salvas", "sucesso", 2500);
-      agendarRecarregarResumoComercial();
+      mostrarMensagemBoard(mensagemSucessoSalvar, "sucesso", 2500);
+
+      window.setTimeout(async () => {
+        const avisosPosSalvamento = [];
+
+        try {
+          const resNota = await salvarNotaSeTiverTexto(idCardSalvo, notaParaSalvarAposFechar);
+          if (!resNota.ok) {
+            avisosPosSalvamento.push(resNota.msg || "O card foi salvo, mas a nota não foi gravada.");
+          }
+        } catch (erroNota) {
+          avisosPosSalvamento.push(mensagemErroComunicacaoKanban(erroNota, "O card foi salvo, mas houve falha de comunicação ao gravar a nota."));
+        }
+
+        try {
+          // A sincronização de Aditivo/Novo Contrato já é feita no backend durante o PUT do card
+          // (_sincronizar_tipo_contrato_card com aplicar_tags=True).
+          // Aqui eu confio nas tags retornadas pelo próprio salvamento principal.
+          limparCacheCalendarioOcupacao(codFacesParaLimparCache);
+
+          if (idFaseAtual) {
+            redesenharFasesLocalmente([idFaseAtual], null, true);
+          } else {
+            await carregar();
+          }
+        } catch (erroPosSave) {
+          console.warn("Card salvo, mas houve falha ao atualizar o quadro após salvar.", erroPosSave);
+          avisosPosSalvamento.push("O card foi salvo, mas o quadro pode precisar ser atualizado.");
+        }
+
+        if (avisosPosSalvamento.length) {
+          mostrarMensagemBoard(`${mensagemSucessoSalvar} ${avisosPosSalvamento.join(" ")}`, "alerta", 7000);
+        }
+
+        agendarRecarregarResumoComercial();
+      }, 0);
+    } catch (erroSalvar) {
+      console.warn("Falha de comunicação ao salvar card", erroSalvar);
+      mostrarMensagemCard(mensagemErroComunicacaoKanban(erroSalvar, "Erro de comunicação ao salvar o card. Tente novamente."));
     } finally {
       salvandoCardAtual = false;
       if (btnSalvarCard) {
@@ -17770,12 +18766,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       : `/kanban/api/kanbans/${ID_KANBAN}/fases`;
     const method = faseEditandoId ? "PUT" : "POST";
 
-    const r = await fetch(url, {
+    const r = await fetchKanbanComTimeout(url, {
       method,
       credentials: "same-origin",
       headers: headersJSON,
       body: JSON.stringify(payload)
-    });
+    }, TIMEOUT_FETCH_PADRAO_KANBAN_MS);
 
     const j = await r.json().catch(() => null);
     if (!j || !j.ok) {
@@ -17820,6 +18816,11 @@ async function moverCard(idCard, idFasePara, posicao) {
 
   function tratarAtualizacaoExternaNoCardAberto(idCard, mensagem){
     if (!cardAbertoId || idNum(cardAbertoId) !== idNum(idCard) || modalCard.style.display !== "block") return;
+
+    // Durante abertura/salvamento, o próprio fluxo do usuário pode gerar eventos de socket
+    // enquanto o detalhe fresh ainda está chegando. Não trato isso como conflito externo.
+    if (carregandoCardAtual || salvandoCardAtual) return;
+
     cardAbertoConflitoExterno = true;
     mostrarMensagemCard(mensagem || "Este card foi atualizado por outro usuário enquanto estava aberto. Reabra o card antes de salvar.");
   }
@@ -17828,7 +18829,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     const cardAntes = obterCardPorId(idCard);
     const idFaseAntes = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
 
-    const detalhe = await buscarDetalheCard(idCard);
+    const detalhe = await buscarDetalheCard(idCard, { fresh: true });
     if (!detalhe || !detalhe.card) return;
 
     const cardDepois = inserirOuAtualizarCardLocal(detalhe.card);
@@ -17847,6 +18848,78 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     agendarRecarregarResumoComercial();
+  }
+
+  function transportesSocketKanban(){
+    return socketTentouFallbackPolling ? ["polling", "websocket"] : ["websocket"];
+  }
+
+  function reiniciarSocketKanbanComFallbackPolling(){
+    if (socketTentouFallbackPolling) return false;
+    socketTentouFallbackPolling = true;
+    socketConectando = false;
+    socketConectado = false;
+
+    try {
+      if (socketKanban) {
+        socketKanban.removeAllListeners();
+        socketKanban.disconnect();
+      }
+    } catch (_erro) {}
+
+    socketKanban = null;
+    window.setTimeout(() => conectarSocketKanban(), 500);
+    return true;
+  }
+
+  async function sincronizarQuadroEnquantoSocketIndisponivel(){
+    if (socketConectado || socketConectando || document.hidden || sincronizacaoSemSocketEmAndamento) return;
+    sincronizacaoSemSocketEmAndamento = true;
+
+    try {
+      await carregar({ fresh: true });
+    } catch (erro) {
+      console.warn("Falha ao sincronizar kanban sem Socket.IO", erro);
+    } finally {
+      sincronizacaoSemSocketEmAndamento = false;
+    }
+  }
+
+  async function verificarVersaoKanbanPeriodicamente(){
+    if (document.hidden || verificacaoVersaoKanbanEmAndamento || salvandoCardAtual || carregandoCardAtual) return;
+
+    verificacaoVersaoKanbanEmAndamento = true;
+
+    try {
+      const resultado = await fetchJsonKanban(`/kanban/api/kanbans/${ID_KANBAN}/versao?_ts=${Date.now()}`, {
+        headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" },
+        timeoutMs: 8000
+      });
+
+      if (!respostaJsonKanbanOk(resultado)) {
+        return;
+      }
+
+      const versaoServidor = idNum(resultado.corpo?.versao_kanban || 0);
+      if (!versaoServidor) return;
+
+      if (!versaoKanbanAtual) {
+        versaoKanbanAtual = versaoServidor;
+        return;
+      }
+
+      if (versaoServidor !== versaoKanbanAtual) {
+        versaoKanbanAtual = versaoServidor;
+        await carregar({ fresh: true });
+      } else if (!socketConectado && Date.now() - ultimaAtualizacaoAoVivoMs > 15000) {
+        // Socket fora: mantenho a tela viva sem obrigar o usuário a sair/entrar.
+        await sincronizarQuadroEnquantoSocketIndisponivel();
+      }
+    } catch (erro) {
+      console.warn("Falha ao verificar versão do kanban para sincronização ao vivo.", erro);
+    } finally {
+      verificacaoVersaoKanbanEmAndamento = false;
+    }
   }
 
   function conectarSocketKanban(){
@@ -17880,10 +18953,12 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     socketKanban = window.io(SOCKET_IO_NAMESPACE, {
       path: SOCKET_IO_PATH,
-      transports: ["websocket", "polling"],
-      upgrade: true,
+      // Performance/estabilidade: com Nginx + múltiplos workers/containers, polling pode cair em outro worker.
+      // WebSocket mantém uma conexão única e reduz round-trips do tempo real.
+      transports: transportesSocketKanban(),
+      upgrade: socketTentouFallbackPolling,
       rememberUpgrade: true,
-      tryAllTransports: true,
+      tryAllTransports: socketTentouFallbackPolling,
       withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -17897,6 +18972,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     socketKanban.on("connect", () => {
       socketConectando = false;
       socketConectado = true;
+      ultimaAtualizacaoAoVivoMs = Date.now();
       limparMensagemBoard();
       socketKanban.emit("entrar_kanban", { id_kanban: ID_KANBAN });
     });
@@ -17910,7 +18986,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         } catch (erro) {
           console.warn("Falha ao reentrar na sala do kanban após reconexão.", erro);
         }
-        carregar().catch((erro) => console.warn("Falha ao sincronizar kanban após reconexão do socket.", erro));
+        carregar({ fresh: true }).catch((erro) => console.warn("Falha ao sincronizar kanban após reconexão do socket.", erro));
       });
     }
 
@@ -17929,7 +19005,13 @@ async function moverCard(idCard, idFasePara, posicao) {
         type: erro?.type || null,
         context: erro?.context || null
       });
-      mostrarMensagemBoard("Não foi possível conectar o tempo real do kanban agora. As ações continuam funcionando e a tela pode ser atualizada manualmente.");
+
+      if (reiniciarSocketKanbanComFallbackPolling()) {
+        mostrarMensagemBoard("WebSocket não conectou. Tentando fallback do tempo real automaticamente...");
+        return;
+      }
+
+      mostrarMensagemBoard("Não foi possível conectar o tempo real do kanban agora. As ações continuam funcionando e a tela vai sincronizar automaticamente em intervalos curtos.");
     });
 
     socketKanban.on("socket_ack", (payload) => {
@@ -17943,6 +19025,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("card_edicao_descartada", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card || 0);
       if (!idCard) {
         await carregar();
@@ -17958,8 +19041,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("card_atualizado", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card);
+      const eventoLocal = eventoSocketVeioDesteCliente(payload);
       const cardAntes = obterCardPorId(idCard);
+      if (eventoLocal && idCard && cardAntes && !salvandoCardAtual) {
+        return;
+      }
       const idFaseAntes = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
       const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
 
@@ -18039,9 +19127,11 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("card_movido", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card);
       const idFaseDe = idNum(payload.id_fase_de);
       const idFasePara = idNum(payload.id_fase_para);
+      const eventoLocal = eventoSocketVeioDesteCliente(payload);
 
       const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
 
@@ -18094,6 +19184,11 @@ async function moverCard(idCard, idFasePara, posicao) {
         return;
       }
 
+      if (eventoLocal) {
+        agendarRecarregarResumoComercial(900);
+        return;
+      }
+
       tratarAtualizacaoExternaNoCardAberto(
         idCard,
         "Este card foi movido por outro usuário enquanto estava aberto. Reabra o card antes de salvar."
@@ -18120,12 +19215,17 @@ async function moverCard(idCard, idFasePara, posicao) {
         await carregar();
       }
 
-      agendarRecarregarResumoComercial();
+      agendarRecarregarResumoComercial(900);
     });
 
     socketKanban.on("card_criado", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card || payload.id || payload.card?.IDFatoKanbanCard || 0);
+      const eventoLocal = eventoSocketVeioDesteCliente(payload);
       const cardAntes = idCard ? obterCardPorId(idCard) : null;
+      if (eventoLocal && cardAntes) {
+        return;
+      }
       const idFaseAntes = idNum(cardAntes?.IDDimKanbanFaseAtual || 0);
       const cardPayload = payload.card ? normalizarCardServidor(payload.card) : null;
 
@@ -18192,10 +19292,11 @@ async function moverCard(idCard, idFasePara, posicao) {
         await carregar();
       }
 
-      agendarRecarregarResumoComercial();
+      agendarRecarregarResumoComercial(900);
     });
 
     socketKanban.on("card_inativado", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
       const idFaseAntes = idNum(payload.id_fase_de || obterCardPorId(idCard)?.IDDimKanbanFaseAtual || 0);
@@ -18208,6 +19309,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("card_tag_adicionada", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
 
@@ -18232,6 +19334,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("card_tag_removida", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card);
       if (!idCard) return;
 
@@ -18256,7 +19359,9 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("card_nota_criada", async (payload = {}) => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       const idCard = idNum(payload.id_card);
+      const eventoLocal = eventoSocketVeioDesteCliente(payload);
       if (!idCard) return;
 
       if (payload.nota) {
@@ -18269,11 +19374,11 @@ async function moverCard(idCard, idFasePara, posicao) {
       }
 
       if (idNum(cardAbertoId) === idCard && modalCard.style.display === "block") {
-        if (!salvandoCardAtual) {
+        renderNotas(mapaNotasPorCard.get(idCard) || []);
+
+        if (!eventoLocal && !salvandoCardAtual) {
           cardAbertoConflitoExterno = true;
           mostrarMensagemCard("Uma nota foi adicionada a este card em outra sessão. Reabra o card antes de salvar.");
-        } else {
-          renderNotas(mapaNotasPorCard.get(idCard) || []);
         }
       }
 
@@ -18293,18 +19398,22 @@ async function moverCard(idCard, idFasePara, posicao) {
     });
 
     socketKanban.on("fase_criada", async () => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       await carregar();
     });
 
     socketKanban.on("fase_atualizada", async () => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       await carregar();
     });
 
     socketKanban.on("fase_inativada", async () => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       await carregar();
     });
 
     socketKanban.on("fases_reordenadas", async () => {
+      ultimaAtualizacaoAoVivoMs = Date.now();
       await carregar();
     });
 
@@ -18337,12 +19446,37 @@ async function moverCard(idCard, idFasePara, posicao) {
     kanbanInicializado = true;
 
     configurarEventosDelegadosCardsKanban();
-    await carregar();
-    window.setInterval(() => {
-      agendarRecarregarResumoComercial();
-    }, 30000);
 
-    const clienteSocketOk = await garantirClienteSocketIo();
+    // Inicio o download do cliente Socket.IO em paralelo com a carga do quadro.
+    // Não bloqueia a primeira pintura e deixa o tempo real pronto mais cedo.
+    const promessaClienteSocket = garantirClienteSocketIo();
+
+    const carregouEstruturaRapida = await carregarEstruturaRapidaKanban();
+    if (!carregouEstruturaRapida) {
+      await carregar();
+    }
+
+    // Catálogo de empresas é carregado sob demanda no modal. Fazer isso na abertura
+    // concorria com /dados, resumo comercial e Socket.IO, causando pequenos travamentos.
+    window.setTimeout(async () => {
+      if (document.hidden) return;
+      await esperarJanelaOciosaKanban(1200);
+      carregarEmpresas().catch((erro) => console.warn("Pré-carga ociosa de empresas falhou", erro));
+    }, 3500);
+
+    window.setInterval(() => {
+      agendarRecarregarResumoComercial(1200);
+    }, 60000);
+
+    window.setInterval(() => {
+      void verificarVersaoKanbanPeriodicamente();
+    }, 5000);
+
+    window.addEventListener("focus", () => {
+      void verificarVersaoKanbanPeriodicamente();
+    });
+
+    const clienteSocketOk = await promessaClienteSocket;
     if (!clienteSocketOk) {
       mostrarMensagemBoard("Não foi possível carregar a biblioteca do tempo real. O kanban continua operando normalmente, mas sem atualização automática entre sessões.");
       return;

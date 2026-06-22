@@ -1,6 +1,6 @@
 bind = "0.0.0.0:8000"
 
-workers = 5
+workers = 6
 worker_class = "gthread"
 threads = 20
 

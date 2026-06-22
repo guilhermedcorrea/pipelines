@@ -345,3 +345,19 @@ echo "==== Listando DAGs ===="
 docker compose exec -T airflow-dag-processor airflow dags list
 
 """
+
+
+
+
+#docker compose down --remove-orphans
+
+
+#docker compose build --progress=plain flask-app-1 flask-app-2 celery-checking-worker celery-kanban-worker celery-clientes-worker celery-paineis-worker celery-airflow-worker
+
+#docker compose up -d
+
+
+
+
+#docker compose logs -f nginx-flask flask-app-1 flask-app-2
+#docker compose logs -f nginx-flask flask-app-1 flask-app-2 celery-paineis-worker

@@ -24,11 +24,7 @@ RUN set -eux; \
         ca-certificates \
         apt-transport-https \
         unixodbc \
-        unixodbc-dev \
-        libreoffice-writer \
-        fontconfig \
-        fonts-dejavu \
-        fonts-liberation; \
+        unixodbc-dev; \
     mkdir -p /usr/share/keyrings; \
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg; \

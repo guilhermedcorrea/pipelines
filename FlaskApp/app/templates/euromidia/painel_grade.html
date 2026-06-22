@@ -1592,13 +1592,14 @@
   :root{
     /*
       Responsividade da grade:
-      - antes cada dia tinha no mínimo 38px, o que estourava meses com 30/31 dias;
-      - agora a largura das colunas é compacta por padrão e o JS abaixo ajusta pelo espaço real disponível.
+      - a coluna do dia NÃO pode ficar estreita demais, senão Seg/01/06 invade o dia vizinho;
+      - quando o período é grande, a grade mantém o dia legível e usa rolagem horizontal.
+      Isso altera somente o desenho das colunas, não a regra de ocupação/encaixe.
     */
     --grade-face-col-w: clamp(150px, 11vw, 190px);
     --grade-loop-col-w: clamp(58px, 5vw, 76px);
-    --dia-col-w: clamp(26px, 2.35vw, 42px);
-    --dia-font: clamp(10px, .72vw, 12px);
+    --dia-col-w: 50px;
+    --dia-font: 11px;
     --dia-pad-y: 8px;
 
     --dias-bg-1: rgba(2, 132, 199, .08);
@@ -1733,6 +1734,8 @@
     flex-direction: column;
     align-items:center;
     justify-content:center;
+    min-width: 0;
+    box-sizing: border-box;
     font-weight:950;
     color: var(--dias-text);
 
@@ -1741,11 +1744,12 @@
     background:
       linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(2,132,199,.06) 100%);
 
-    padding: 6px 0;
+    padding: 6px 2px;
     font-size: var(--dia-font);
     white-space: nowrap;
-    letter-spacing: .2px;
+    letter-spacing: 0;
     gap: 2px;
+    overflow: hidden;
 
     box-shadow: inset 0 -1px 0 rgba(2,6,23,.06);
   }
@@ -1756,16 +1760,26 @@
   }
 
   .dia-head .dia-dow{
+    width: 100%;
+    display:block;
+    text-align:center;
     font-size: 11px;
     font-weight: 900;
     opacity: .85;
     line-height: 1;
+    overflow: hidden;
+    text-overflow: clip;
   }
 
   .dia-head .dia-date{
-    font-size: clamp(10px, .72vw, 12px);
+    width: 100%;
+    display:block;
+    text-align:center;
+    font-size: 11px;
     font-weight: 950;
     line-height: 1;
+    overflow: hidden;
+    text-overflow: clip;
   }
 
   .linha{
@@ -2907,22 +2921,24 @@ document.addEventListener("DOMContentLoaded", () => {
       const loopW = ehDigitalAtual ? numeroCssVar("--grade-loop-col-w", 64) : 0;
 
       /*
-        O objetivo é usar a largura real da área visível.
-        Assim, em vez de forçar zoom 75%, a grade compacta os dias até caber.
-        Em telas muito estreitas, mantemos um mínimo legível e deixamos rolagem horizontal.
+        Mantém os dias legíveis.
+        Antes o script compactava os dias para tentar caber todo o período no viewport;
+        em períodos longos isso fazia Seg/01/06 encostar ou invadir a coluna vizinha.
+        Agora a grade só aumenta a coluna quando houver espaço. Se não houver, mantém
+        largura mínima legível e deixa a rolagem horizontal trabalhar.
       */
       const larguraUtil = Math.max(0, wrap.clientWidth - faceW - loopW - 4);
       const larguraCalculadaDia = larguraUtil / totalDias;
 
-      let minDia = 26;
-      let maxDia = 42;
+      let minDia = 50;
+      let maxDia = 56;
 
       if (wrap.clientWidth >= 1600){
-        minDia = 30;
-        maxDia = 48;
+        minDia = 52;
+        maxDia = 60;
       } else if (wrap.clientWidth <= 1180){
-        minDia = 22;
-        maxDia = 34;
+        minDia = 46;
+        maxDia = 52;
       }
 
       const larguraDia = Math.max(minDia, Math.min(maxDia, larguraCalculadaDia));

@@ -23,6 +23,20 @@ from config import (
 
 from .handlers import registrar_handlers
 
+def _exemptar_rotas_socketio_do_csrf(app: Flask) -> None:
+    """Remove o endpoint /socket.io/ da validação CSRF do Flask-WTF.
+
+    O Socket.IO usa POST no transporte polling durante o handshake.
+    Esses POSTs não carregam o token CSRF do formulário e podem receber 400 BAD REQUEST.
+    Mesmo quando o front usa WebSocket direto, manter esta exceção evita queda se algum
+    navegador ou proxy tentar fallback para polling.
+    """
+    for rule in list(app.url_map.iter_rules()):
+        if str(rule.rule).startswith("/socket.io"):
+            view_func = app.view_functions.get(rule.endpoint)
+            if view_func is not None:
+                csrf.exempt(view_func)
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -137,7 +151,12 @@ def create_app() -> Flask:
         manage_session=False,
         logger=False,
         engineio_logger=False,
+        ping_interval=25,
+        ping_timeout=60,
+        transports=["websocket", "polling"],
     )
+
+    _exemptar_rotas_socketio_do_csrf(app)
 
     login_manager.login_view = "Autenticacao.login"
     login_manager.session_protection = "strong"

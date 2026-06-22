@@ -1065,6 +1065,25 @@
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--kb-card-alert-color, #DC2626) 20%, transparent);
   }
 
+
+  .kb-board.kb-performance-mode .kb-col{
+    box-shadow: none !important;
+  }
+
+  .kb-board.kb-performance-mode .kb-col-body,
+  .kb-board.kb-performance-mode .kb-drop{
+    transition: none !important;
+  }
+
+  .kb-board.kb-performance-mode .kb-drop-scrollbar{
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+
+  .kb-board.kb-performance-mode .kb-card.is-tag-alerta:hover{
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--kb-card-alert-color, #DC2626) 20%, transparent) !important;
+  }
+
   .kb-card.is-tag-alerta{
     border: 2px solid var(--kb-card-alert-color, #DC2626);
     box-shadow:
@@ -4150,5 +4169,5 @@
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260526_inativar_card_observacao_empresa_v2') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260619_perf_live_kanban_v2') }}"></script>
 {% endblock %}

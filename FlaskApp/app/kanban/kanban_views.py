@@ -1,10 +1,12 @@
 import json
+import math
 import re
 import unicodedata
 from collections.abc import Mapping
 from typing import Any
 from decimal import Decimal, InvalidOperation
 import requests
+import threading
 from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import text,bindparam
@@ -3992,7 +3994,7 @@ def _request_pede_dado_fresco() -> bool:
 
 
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 def _para_data_sql_ou_none(valor: Any):
     if valor is None:
@@ -5147,6 +5149,11 @@ def _executar_movimento_card_core(
     observacao = (payload.get("observacao") or "").strip()
     nota_movimento = (payload.get("nota_movimento") or "").strip()
     versao_concorrencia = payload.get("versao_concorrencia")
+    client_request_id = str(
+        payload.get("client_request_id")
+        or payload.get("clientRequestId")
+        or ""
+    ).strip()[:80] or None
     dados_formulario_solicitacao_movimento = (
         payload.get("solicitacao_contrato")
         if isinstance(payload.get("solicitacao_contrato"), dict)
@@ -5622,6 +5629,7 @@ def _executar_movimento_card_core(
         "sincronizacao_reservas": sincronizacao_reservas,
         "sincronizacao_id_reserva_card_movimento": sincronizacao_id_reserva_card_movimento,
         "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+        "client_request_id": client_request_id,
     }
 
 
@@ -5648,6 +5656,7 @@ def _finalizar_pos_movimento_card(
     snapshot_preco_praticado = resultado_core.get("snapshot_preco_praticado")
     sincronizacao_tag_plano_midia = resultado_core.get("sincronizacao_tag_plano_midia")
     sincronizacao_reservas = resultado_core.get("sincronizacao_reservas")
+    client_request_id = str(resultado_core.get("client_request_id") or "").strip() or None
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
     detalhe = _obter_card_detalhe_payload(id_card)
@@ -5667,6 +5676,7 @@ def _finalizar_pos_movimento_card(
             "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             "snapshot_preco_praticado": snapshot_preco_praticado,
             "sincronizacao_reservas": sincronizacao_reservas,
+            "client_request_id": client_request_id,
         },
     )
 
@@ -5683,6 +5693,7 @@ def _finalizar_pos_movimento_card(
         "snapshot_preco_praticado": snapshot_preco_praticado,
         "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
         "sincronizacao_reservas": sincronizacao_reservas,
+        "client_request_id": client_request_id,
     }
 
 
@@ -5696,8 +5707,11 @@ def _finalizar_pos_movimento_card(
 def _enfileirar_evento_assincrono(nome_evento: str, payload: dict[str, Any]) -> None:
     """
     Gancho opcional para Celery.
-    Não transformo operação síncrona do usuário em tarefa assíncrona.
-    Uso Celery apenas para pós-processamento: auditoria, integração, indexação etc.
+
+    Importante: isto não pode segurar a resposta HTTP do usuário. Se Redis/Celery
+    estiver lento ou indisponível, salvar/mover card não deve ficar preso em
+    "Salvando..." no navegador. Por isso o envio opcional é disparado em thread
+    daemon e com retry desativado.
     """
     celery_app = _obter_celery_app()
     nome_task = current_app.config.get("KANBAN_EVENT_TASK_NAME")
@@ -5705,29 +5719,61 @@ def _enfileirar_evento_assincrono(nome_evento: str, payload: dict[str, Any]) -> 
     if not celery_app or not nome_task:
         return
 
+    app_obj = current_app._get_current_object()
+    payload_final = dict(payload or {})
+
+    def _enviar() -> None:
+        try:
+            celery_app.send_task(
+                nome_task,
+                kwargs={"nome_evento": nome_evento, "payload": payload_final},
+                retry=False,
+                expires=60,
+            )
+        except Exception:
+            app_obj.logger.exception(
+                "Falha ao enviar evento do kanban para Celery. evento=%s payload=%s",
+                nome_evento,
+                payload_final,
+            )
+
     try:
-        celery_app.send_task(nome_task, kwargs={"nome_evento": nome_evento, "payload": payload})
+        threading.Thread(target=_enviar, name=f"kanban-event-{nome_evento}", daemon=True).start()
     except Exception:
         current_app.logger.exception(
-            "Falha ao enviar evento do kanban para Celery. evento=%s payload=%s",
+            "Falha ao iniciar thread de evento do kanban. evento=%s payload=%s",
             nome_evento,
-            payload,
+            payload_final,
         )
 
 
 def _emitir_evento_kanban(id_kanban: int, nome_evento: str, payload: dict[str, Any]) -> None:
+    """Emite evento do Kanban sem travar a resposta HTTP principal."""
     payload_final = _serializar_para_socket({**payload, "id_kanban": int(id_kanban)})
+    sala = _sala_kanban(id_kanban)
+    app_obj = current_app._get_current_object()
+
+    def _emitir_socket() -> None:
+        try:
+            with app_obj.app_context():
+                socketio.emit(
+                    nome_evento,
+                    payload_final,
+                    namespace=NAMESPACE_SOCKET_KANBAN,
+                    to=sala,
+                )
+        except Exception:
+            app_obj.logger.exception(
+                "Falha ao emitir evento Socket.IO. evento=%s payload=%s",
+                nome_evento,
+                payload_final,
+            )
 
     try:
-        socketio.emit(
-            nome_evento,
-            payload_final,
-            namespace=NAMESPACE_SOCKET_KANBAN,
-            to=_sala_kanban(id_kanban),
-        )
+        threading.Thread(target=_emitir_socket, name=f"kanban-socket-{nome_evento}", daemon=True).start()
     except Exception:
         current_app.logger.exception(
-            "Falha ao emitir evento Socket.IO. evento=%s payload=%s",
+            "Falha ao iniciar thread Socket.IO do kanban. evento=%s payload=%s",
             nome_evento,
             payload_final,
         )
@@ -5889,36 +5935,22 @@ def _quebrar_nome_banco_schema_tabela(nome_tabela: str) -> tuple[str | None, str
 
 
 def _coluna_existe(nome_tabela: str, nome_coluna: str, ignorar_cache: bool = False) -> bool:
-    ignorar_cache = bool(
-        ignorar_cache or str(nome_coluna).strip().lower() == "versaoconcorrencia"
-    )
+    """Verifica existência de coluna com cache, sem log/print no caminho quente.
 
+    Essa função é chamada muitas vezes na abertura do Kanban e nos fluxos de
+    criar/mover/salvar card. A versão anterior imprimia e logava cada consulta
+    e ainda ignorava cache para VersaoConcorrencia, o que deixava a tela pesada
+    em Docker/SQL Server. Mantive a regra dinâmica de compatibilidade, mas
+    evitando I/O de log e consultas repetidas ao catálogo.
+    """
     banco_nome, schema_nome, tabela_nome = _quebrar_nome_banco_schema_tabela(nome_tabela)
     coluna_nome = str(nome_coluna or "").strip().strip("[]").strip()
 
-    print(
-        f"[KANBAN][_coluna_existe] INICIO nome_tabela={nome_tabela!r} "
-        f"nome_coluna={nome_coluna!r} banco={banco_nome!r} schema={schema_nome!r} tabela={tabela_nome!r}"
-    )
-
-    current_app.logger.info(
-        "KANBAN: _coluna_existe iniciado. nome_tabela=%r nome_coluna=%r banco=%r schema=%r tabela=%r",
-        nome_tabela,
-        nome_coluna,
-        banco_nome,
-        schema_nome,
-        tabela_nome,
-    )
-
     if not tabela_nome or not coluna_nome:
-        print(
-            f"[KANBAN][_coluna_existe] nome inválido. "
-            f"tabela={tabela_nome!r} coluna={coluna_nome!r}"
-        )
         current_app.logger.warning(
-            "KANBAN: _coluna_existe recebeu nome inválido. tabela=%r coluna=%r",
-            tabela_nome,
-            coluna_nome,
+            "KANBAN_SCHEMA | coluna_existe recebeu nome inválido | tabela=%r | coluna=%r",
+            nome_tabela,
+            nome_coluna,
         )
         return False
 
@@ -5933,24 +5965,11 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str, ignorar_cache: bool = Fal
     if not ignorar_cache:
         em_cache = cache.get(chave)
         if em_cache is not None:
-            print(
-                f"[KANBAN][_coluna_existe] CACHE HIT banco={banco_nome!r} "
-                f"schema={schema_nome!r} tabela={tabela_nome!r} coluna={coluna_nome!r} valor={bool(em_cache)}"
-            )
-            current_app.logger.info(
-                "KANBAN: _coluna_existe cache hit. banco=%r schema=%r tabela=%r coluna=%r valor=%s",
-                banco_nome,
-                schema_nome,
-                tabela_nome,
-                coluna_nome,
-                bool(em_cache),
-            )
             return bool(em_cache)
 
     if banco_nome:
         sql = text(f"""
-            SELECT TOP (1)
-                1
+            SELECT TOP (1) 1
             FROM [{banco_nome}].sys.tables t
             INNER JOIN [{banco_nome}].sys.schemas s
                 ON s.schema_id = t.schema_id
@@ -5962,8 +5981,7 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str, ignorar_cache: bool = Fal
         """)
     else:
         sql = text("""
-            SELECT TOP (1)
-                1
+            SELECT TOP (1) 1
             FROM sys.tables t
             INNER JOIN sys.schemas s
                 ON s.schema_id = t.schema_id
@@ -5974,47 +5992,27 @@ def _coluna_existe(nome_tabela: str, nome_coluna: str, ignorar_cache: bool = Fal
               AND c.name = :coluna_nome;
         """)
 
-    resultado = db.session.execute(
-        sql,
-        {
-            "schema_nome": schema_nome or "dbo",
-            "tabela_nome": tabela_nome,
-            "coluna_nome": coluna_nome,
-        },
-    ).scalar()
-
-    existe = bool(resultado)
-
-    print(
-        f"[KANBAN][_coluna_existe] RESULTADO banco={banco_nome!r} schema={schema_nome!r} "
-        f"tabela={tabela_nome!r} coluna={coluna_nome!r} existe={existe}"
-    )
-
-    current_app.logger.info(
-        "KANBAN: _coluna_existe resultado. banco=%r schema=%r tabela=%r coluna=%r existe=%s",
-        banco_nome,
-        schema_nome,
-        tabela_nome,
-        coluna_nome,
-        existe,
-    )
+    try:
+        existe = bool(
+            db.session.execute(
+                sql,
+                {
+                    "schema_nome": schema_nome or "dbo",
+                    "tabela_nome": tabela_nome,
+                    "coluna_nome": coluna_nome,
+                },
+            ).scalar()
+        )
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN_SCHEMA | falha ao verificar coluna | tabela=%s | coluna=%s",
+            nome_tabela,
+            coluna_nome,
+        )
+        raise
 
     if not ignorar_cache:
-        cache.set(chave, existe, timeout=TIMEOUT_CACHE_LONGO)
-        print(
-            f"[KANBAN][_coluna_existe] CACHE SET banco={banco_nome!r} schema={schema_nome!r} "
-            f"tabela={tabela_nome!r} coluna={coluna_nome!r} valor={existe}"
-        )
-        current_app.logger.info(
-            "KANBAN: _coluna_existe cache set. banco=%r schema=%r tabela=%r coluna=%r valor=%s timeout=%s",
-            banco_nome,
-            schema_nome,
-            tabela_nome,
-            coluna_nome,
-            existe,
-            TIMEOUT_CACHE_LONGO,
-        )
-
+        cache.set(chave, existe, timeout=TIMEOUT_CACHE_LONGO * 100)
 
     return existe
 
@@ -6323,7 +6321,7 @@ def _nome_coluna_empresa_relacionada_card() -> str | None:
     - mantenho fallback apenas por compatibilidade com estruturas antigas
     """
     for nome_coluna in ("IDEmpresa", "IDCliente", "IDEmpresaRelacionada"):
-        if _coluna_existe(TABELA_CARD, nome_coluna, ignorar_cache=True):
+        if _coluna_existe(TABELA_CARD, nome_coluna):
             return nome_coluna
 
     return None
@@ -6347,38 +6345,14 @@ def _sql_select_empresa_relacionada_card(alias_card: str = "c") -> str:
 
 
 def _sql_select_versao_concorrencia_card(alias_card: str = "c") -> str:
-    print(
-        f"[KANBAN][_sql_select_versao_concorrencia_card] INICIO alias_card={alias_card!r} TABELA_CARD={TABELA_CARD!r}"
-    )
-    current_app.logger.info(
-        "KANBAN: _sql_select_versao_concorrencia_card iniciado. alias_card=%r TABELA_CARD=%r",
-        alias_card,
-        TABELA_CARD,
-    )
+    if _card_tem_versao_concorrencia():
+        return f"{alias_card}.VersaoConcorrencia AS VersaoConcorrencia"
+    return "CAST(NULL AS varbinary(8)) AS VersaoConcorrencia"
 
-    tem_versao = _card_tem_versao_concorrencia()
 
-    if tem_versao:
-        sql_select = f"{alias_card}.VersaoConcorrencia AS VersaoConcorrencia"
-        print(
-            f"[KANBAN][_sql_select_versao_concorrencia_card] usando coluna real -> {sql_select}"
-        )
-        current_app.logger.info(
-            "KANBAN: _sql_select_versao_concorrencia_card usando coluna real. sql_select=%r",
-            sql_select,
-        )
-        return sql_select
 
-    sql_fallback = "CAST(NULL AS varbinary(8)) AS VersaoConcorrencia"
-    print(
-        f"[KANBAN][_sql_select_versao_concorrencia_card] coluna não encontrada -> usando fallback {sql_fallback}"
-    )
-    current_app.logger.warning(
-        "KANBAN: _sql_select_versao_concorrencia_card não encontrou coluna VersaoConcorrencia em %r. Usando fallback.",
-        TABELA_CARD,
-    )
-    return sql_fallback
-
+def _card_tem_versao_concorrencia() -> bool:
+    return _coluna_existe(TABELA_CARD, "VersaoConcorrencia")
 
 
 
@@ -6387,66 +6361,6 @@ def _sql_select_usuario_relacionado_card(alias_card: str = "c") -> str:
     if nome_coluna:
         return f"{alias_card}.{nome_coluna} AS IDUsuarioRelacionadoCard"
     return "CAST(NULL AS int) AS IDUsuarioRelacionadoCard"
-
-def _card_tem_versao_concorrencia() -> bool:
-    print(
-        f"[KANBAN][_card_tem_versao_concorrencia] verificando coluna VersaoConcorrencia em TABELA_CARD={TABELA_CARD!r}"
-    )
-    current_app.logger.info(
-        "KANBAN: _card_tem_versao_concorrencia verificando coluna. TABELA_CARD=%r",
-        TABELA_CARD,
-    )
-
-    existe = _coluna_existe(TABELA_CARD, "VersaoConcorrencia")
-
-    print(
-        f"[KANBAN][_card_tem_versao_concorrencia] resultado existe={existe} para TABELA_CARD={TABELA_CARD!r}"
-    )
-    current_app.logger.info(
-        "KANBAN: _card_tem_versao_concorrencia resultado. TABELA_CARD=%r existe=%s",
-        TABELA_CARD,
-        existe,
-    )
-
-    return existe
-
-
-    def _sql_select_versao_concorrencia_card(alias_card: str = "c") -> str:
-
-        print(
-            f"[KANBAN][_sql_select_versao_concorrencia_card] INICIO alias_card={alias_card!r} TABELA_CARD={TABELA_CARD!r}"
-        )
-        current_app.logger.info(
-            "KANBAN: _sql_select_versao_concorrencia_card iniciado. alias_card=%r TABELA_CARD=%r",
-            alias_card,
-            TABELA_CARD,
-        )
-
-        tem_versao = _card_tem_versao_concorrencia()
-
-        if tem_versao:
-            sql_select = f"{alias_card}.VersaoConcorrencia AS VersaoConcorrencia"
-            print(
-                f"[KANBAN][_sql_select_versao_concorrencia_card] usando coluna real -> {sql_select}"
-            )
-            current_app.logger.info(
-                "KANBAN: _sql_select_versao_concorrencia_card usando coluna real. sql_select=%r",
-                sql_select,
-            )
-            return sql_select
-
-        sql_fallback = "CAST(NULL AS varbinary(8)) AS VersaoConcorrencia"
-        print(
-            f"[KANBAN][_sql_select_versao_concorrencia_card] coluna não encontrada -> usando fallback {sql_fallback}"
-        )
-        current_app.logger.warning(
-            "KANBAN: _sql_select_versao_concorrencia_card não encontrou coluna VersaoConcorrencia em %r. "
-            "Usando fallback.",
-            TABELA_CARD,
-        )
-        return sql_fallback
-
-
 
 def _sql_join_empresa_relacionada_card(alias_card: str = "c", alias_empresa: str = "e", alias_cnae: str = "cn") -> str:
     nome_coluna = _nome_coluna_empresa_relacionada_card()
@@ -6469,6 +6383,196 @@ def _sql_join_empresa_relacionada_card(alias_card: str = "c", alias_empresa: str
 
 
 
+
+
+
+
+def _sql_join_empresa_relacionada_card_leve(alias_card: str = "c", alias_empresa: str = "e") -> str:
+    """Join leve usado no quadro/listagem.
+
+    Evita o join com DimCnaes no carregamento inicial. O detalhe do card continua
+    carregando CNAE/Classe/Setor quando o usuário abre o modal.
+    """
+    nome_coluna = _nome_coluna_empresa_relacionada_card()
+    if nome_coluna:
+        return f"""
+        LEFT JOIN {TABELA_EMPRESAS} {alias_empresa}
+          ON {alias_empresa}.IDEmpresa = {alias_card}.{nome_coluna}
+        """.strip()
+
+    return f"""
+    LEFT JOIN {TABELA_EMPRESAS} {alias_empresa}
+      ON 1 = 0
+    """.strip()
+
+
+
+def _obter_card_quadro_payload_minimo(id_card: int) -> dict[str, Any]:
+    """Busca somente o necessário para desenhar o card no quadro.
+
+    O detalhe completo continua em _obter_card_detalhe_payload e é usado quando
+    o usuário abre o modal. Na criação/movimentação em tempo real, este payload
+    reduz SQL, JSON, serialização Socket.IO e redesenho no navegador.
+    """
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {"ok": False, "card": None, "tags": [], "notas": [], "painel_faces": []}
+
+    select_id_tipo_cliente_card = (
+        "c.IDDimTipoCliente AS IDDimTipoCliente,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoCliente")
+        else (
+            "c.IDDimKanbanTipoClienteDesconto AS IDDimTipoCliente,"
+            if _coluna_existe(TABELA_CARD, "IDDimKanbanTipoClienteDesconto")
+            else "CAST(NULL AS int) AS IDDimTipoCliente,"
+        )
+    )
+    select_id_tipo_documento = (
+        "c.IDDimTipoDocumento AS IDDimTipoDocumento,"
+        if _coluna_existe(TABELA_CARD, "IDDimTipoDocumento")
+        else "CAST(NULL AS int) AS IDDimTipoDocumento,"
+    )
+    select_id_reserva_card = (
+        "c.IDReserva AS IDReserva,"
+        if _coluna_existe(TABELA_CARD, "IDReserva")
+        else "CAST(NULL AS int) AS IDReserva,"
+    )
+    select_marca = (
+        "c.Marca AS Marca,"
+        if _coluna_existe(TABELA_CARD, "Marca")
+        else "CAST(NULL AS nvarchar(200)) AS Marca,"
+    )
+    select_nome_empresa = (
+        "c.NomeEmpresa AS NomeEmpresa,"
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa")
+        else "CAST(NULL AS nvarchar(300)) AS NomeEmpresa,"
+    )
+    select_id_dim_cnaes = (
+        "TRY_CONVERT(int, c.IDDimCnaes) AS IDDimCnaes,"
+        if _coluna_existe(TABELA_CARD, "IDDimCnaes")
+        else "CAST(NULL AS int) AS IDDimCnaes,"
+    )
+
+    expr_nome_empresa_card = (
+        "NULLIF(LTRIM(RTRIM(c.NomeEmpresa)), '')"
+        if _coluna_existe(TABELA_CARD, "NomeEmpresa")
+        else "CAST(NULL AS nvarchar(300))"
+    )
+    expr_marca_card = (
+        "NULLIF(LTRIM(RTRIM(c.Marca)), '')"
+        if _coluna_existe(TABELA_CARD, "Marca")
+        else "CAST(NULL AS nvarchar(200))"
+    )
+
+    sql = text(f"""
+        SELECT TOP (1)
+            c.IDFatoKanbanCard,
+            c.IDDimKanban,
+            c.IDDimKanbanFaseAtual,
+            c.Titulo,
+            CAST(NULL AS nvarchar(max)) AS Descricao,
+            c.StatusCard,
+            c.CriadoEm,
+            c.AtualizadoEm,
+            {_sql_select_versao_concorrencia_card('c')},
+            c.IDEmpresaProprietaria,
+            {_sql_select_id_vendedor_card('c')},
+            {_sql_select_id_origem_atendimento_card('c')}
+            {select_id_tipo_cliente_card}
+            {select_id_tipo_documento}
+            {select_id_reserva_card}
+            {select_marca}
+            {select_nome_empresa}
+            {select_id_dim_cnaes}
+            {_sql_select_empresa_relacionada_card('c')},
+            {_sql_select_usuario_relacionado_card('c')},
+            {_sql_select_nome_usuario_relacionado_card('usuario')},
+            COALESCE(
+                NULLIF(LTRIM(RTRIM(e.RazaoSocial)), ''),
+                {expr_nome_empresa_card},
+                NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''),
+                {expr_marca_card},
+                NULLIF(LTRIM(RTRIM(c.Titulo)), '')
+            ) AS EmpresaRazaoSocial,
+            COALESCE(
+                NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''),
+                {expr_nome_empresa_card},
+                {expr_marca_card}
+            ) AS EmpresaNomeFantasia,
+            e.CNPJ AS EmpresaCNPJ,
+            e.CNAE AS EmpresaCNAE,
+            CAST(NULL AS int) AS EmpresaIDDimCnaes,
+            CAST(NULL AS nvarchar(400)) AS EmpresaDescricaoCnae,
+            CAST(NULL AS nvarchar(200)) AS EmpresaClasse,
+            CAST(NULL AS nvarchar(200)) AS EmpresaSetor,
+            CAST(NULL AS nvarchar(200)) AS EmpresaMacroSetor,
+            CAST(NULL AS nvarchar(200)) AS EmpresaSubClasse,
+            rp.QuantidadePaineisVinculados,
+            rp.QuantidadePaineisUnicos,
+            rp.ValorTotalPaineis
+        FROM {TABELA_CARD} c
+        {_sql_join_empresa_relacionada_card_leve('c', 'e')}
+        {_sql_join_usuario_relacionado_card('c', 'usuario')}
+        {_sql_join_resumo_paineis_card('c', 'rp')}
+        WHERE c.IDFatoKanbanCard = :id_card
+          AND c.Ativo = 1;
+    """)
+
+    row = db.session.execute(sql, {"id_card": id_card_int}).mappings().first()
+    if not row:
+        return {"ok": False, "card": None, "tags": [], "notas": [], "painel_faces": []}
+
+    card_dict = dict(row)
+    valor_versao_bruta = card_dict.pop("VersaoConcorrencia", None)
+    _aplicar_versao_concorrencia_dict(card_dict, _rowversion_para_hex(valor_versao_bruta))
+
+    card_dict["QuantidadePaineisVinculados"] = int(card_dict.get("QuantidadePaineisVinculados") or 0)
+    card_dict["QuantidadePaineisUnicos"] = int(card_dict.get("QuantidadePaineisUnicos") or 0)
+    card_dict["ValorTotalPaineis"] = _decimal_para_float(card_dict.get("ValorTotalPaineis"))
+    card_dict["IDReserva"] = int(card_dict.get("IDReserva") or 0) or None
+    card_dict["id_reserva"] = card_dict["IDReserva"]
+
+    if not str(card_dict.get("EmpresaRazaoSocial") or "").strip():
+        card_dict["EmpresaRazaoSocial"] = (
+            str(card_dict.get("NomeEmpresa") or "").strip()
+            or str(card_dict.get("EmpresaNomeFantasia") or "").strip()
+            or str(card_dict.get("Marca") or "").strip()
+            or str(card_dict.get("Titulo") or "").strip()
+            or None
+        )
+
+    if not str(card_dict.get("NomeEmpresa") or "").strip():
+        card_dict["NomeEmpresa"] = str(card_dict.get("EmpresaRazaoSocial") or "").strip() or None
+
+    card_dict = _aplicar_tipo_cliente_desconto_no_card_dict(card_dict)
+    card_dict = _aplicar_origem_atendimento_no_card_dict(card_dict)
+
+    sql_tags = text("""
+        SELECT
+            ct.IDFatoKanbanCard,
+            ct.IDDimKanbanTag,
+            t.NomeTag,
+            t.CorHex,
+            t.Icone
+        FROM [Kanban].[Silver].[FatoKanbanCardTag] ct
+        JOIN [Kanban].[Silver].[DimKanbanTag] t
+          ON t.IDDimKanbanTag = ct.IDDimKanbanTag
+        WHERE ct.IDFatoKanbanCard = :id_card
+          AND ct.RemovidoEm IS NULL
+          AND t.Ativo = 1
+        ORDER BY t.NomeTag ASC;
+    """)
+    tags = _rows_para_dicts(db.session.execute(sql_tags, {"id_card": id_card_int}).mappings().all())
+
+    return {
+        "ok": True,
+        "card": card_dict,
+        "tags": tags,
+        "notas": [],
+        "painel_faces": [],
+        "paineis_vinculados": [],
+        "payload_minimo": True,
+    }
 
 
 def _obter_id_empresa_relacionada_card(card: Mapping[str, Any] | dict[str, Any] | None) -> int | None:
@@ -6809,8 +6913,8 @@ def _sql_filtro_status_card_visiveis(alias_card: str = "c") -> str:
           AND EXISTS (
                 SELECT 1
                 FROM {TABELA_STATUS_CARD} sc
-                WHERE ISNULL(sc.Ativo, 1) = 1
-                  AND UPPER(LTRIM(RTRIM(ISNULL(sc.CodigoStatus, '')))) = UPPER(LTRIM(RTRIM(ISNULL({alias_card}.StatusCard, ''))))
+                WHERE sc.IDDimKanbanStatusCard = {alias_card}.IDDimKanbanStatusCard
+                  AND sc.Ativo = 1
           )
         """.rstrip()
     return f"AND NULLIF(LTRIM(RTRIM(ISNULL({alias_card}.StatusCard, ''))), '') IS NOT NULL"
@@ -9853,9 +9957,25 @@ def _contar_cards_ativos_kanban(id_kanban: int) -> int:
 
 def _obter_kanban_autorizado(id_kanban: int, *, incluir_inativo: bool = False) -> dict[str, Any]:
     id_emp = _id_empresa_usuario_or_403()
+    usuario_admin_coord = _usuario_eh_admin_ou_coordenador_kanban()
+
+    chave = _chave_cache_json(
+        "kanban:autorizado",
+        int(id_kanban),
+        int(id_emp),
+        int(_id_usuario() or 0),
+        int(usuario_admin_coord),
+        int(bool(incluir_inativo)),
+        _versao_kanban(id_kanban),
+        _versao_empresa(id_emp),
+    )
+    em_cache = _cache_json_get(chave)
+    if isinstance(em_cache, dict):
+        return dict(em_cache)
+
     filtro_ativo = "" if incluir_inativo else "AND k.Ativo = 1"
 
-    if _usuario_eh_admin_ou_coordenador_kanban():
+    if usuario_admin_coord:
         sql = text(f"""
             SELECT
                 k.IDDimKanban,
@@ -9869,7 +9989,7 @@ def _obter_kanban_autorizado(id_kanban: int, *, incluir_inativo: bool = False) -
             WHERE k.IDDimKanban = :id_kanban
               {filtro_ativo};
         """)
-        row = db.session.execute(sql, {"id_kanban": id_kanban}).mappings().first()
+        row = db.session.execute(sql, {"id_kanban": int(id_kanban)}).mappings().first()
     else:
         sql = text(f"""
             SELECT
@@ -9885,11 +10005,14 @@ def _obter_kanban_autorizado(id_kanban: int, *, incluir_inativo: bool = False) -
               AND k.IDEmpresaProprietaria = :id_emp
               {filtro_ativo};
         """)
-        row = db.session.execute(sql, {"id_kanban": id_kanban, "id_emp": id_emp}).mappings().first()
+        row = db.session.execute(sql, {"id_kanban": int(id_kanban), "id_emp": int(id_emp)}).mappings().first()
 
     if not row:
         abort(403, "Você não tem permissão para acessar este kanban")
-    return dict(row)
+
+    resultado = dict(row)
+    _cache_json_set(chave, resultado, TIMEOUT_CACHE_CURTO)
+    return resultado
 
 
 
@@ -12905,6 +13028,41 @@ def _sincronizar_reservas_painel_faces_kanban(
         ids_manter=ids_reservas_informadas,
     )
 
+    criacao_reservas_auto = {"criadas": 0, "ids": [], "segmentos": 0}
+
+    # Regra Tetris para o Kanban:
+    # quando o usuário montou painel/face + período no card e não informou um ID de Reserva
+    # já existente, o sistema cria a ocupação na grade usando o mesmo encaixe da tela de
+    # Controle de Painéis. Isso evita gravar um range grande por cima de outro item.
+    if payload_reservas_explicito:
+        tem_item_para_criar = any(
+            isinstance(item, dict)
+            and not _id_reserva_payload_kanban(item)
+            and str(item.get("cod_face") or item.get("CodFace") or "").strip()
+            and (item.get("data_inicio") or item.get("DataInicio") or item.get("data_inicio_reserva") or item.get("DataInicioReserva"))
+            and (item.get("data_fim") or item.get("DataFim") or item.get("data_fim_reserva") or item.get("DataFimReserva"))
+            for item in (painel_faces_payload or [])
+        )
+
+        if tem_item_para_criar:
+            vinculos_para_criacao = vinculos_preparados
+            if not isinstance(vinculos_para_criacao, list):
+                vinculos_para_criacao = _preparar_vinculos_painel_faces(
+                    painel_faces_payload,
+                    int(id_empresa_proprietaria),
+                    id_card=int(id_card),
+                )
+
+            criacao_reservas_auto = _criar_reservas_painel_faces_kanban(
+                id_card=int(id_card),
+                titulo_card=titulo_card,
+                id_empresa_relacionada=int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+                painel_faces_payload=painel_faces_payload,
+                vinculos_preparados=vinculos_para_criacao,
+                id_usuario=int(id_usuario),
+                id_empresa_proprietaria=int(id_empresa_proprietaria),
+            )
+
     # Regra de segurança:
     # salvar ou mover card NÃO pode cancelar ocupação/reserva em
     # Integracao.Silver.FatoOcupacaoPaineisEuromidia.
@@ -12915,7 +13073,11 @@ def _sincronizar_reservas_painel_faces_kanban(
     canceladas = 0
 
     vinculadas = len(ids_reservas_informadas)
+    ids_criadas_auto = [int(x) for x in (criacao_reservas_auto.get("ids") or []) if int(x or 0) > 0]
     id_reserva_payload_final = min(ids_reservas_informadas) if ids_reservas_informadas else None
+    if id_reserva_payload_final is None and ids_criadas_auto:
+        id_reserva_payload_final = min(ids_criadas_auto)
+
     id_reserva_card_final = id_reserva_payload_final if payload_reservas_explicito else id_reserva_card_atual
     sincronizacao_id_reserva_card = None
 
@@ -12927,7 +13089,9 @@ def _sincronizar_reservas_painel_faces_kanban(
         )
 
     return {
-        "criadas": 0,
+        "criadas": int(criacao_reservas_auto.get("criadas") or 0),
+        "ids_criadas": ids_criadas_auto,
+        "segmentos_criados": int(criacao_reservas_auto.get("segmentos") or 0),
         "vinculadas": int(vinculadas or 0),
         "canceladas": int(canceladas or 0),
         "desvinculadas": int(reservas_informadas_desvinculadas or 0),
@@ -12984,23 +13148,410 @@ def _calcular_spanqtd_cota_reserva_kanban(cota: Any, eh_digital: int | bool = 1)
     if cota_num <= 0:
         return 1
 
-    # Regra oficial usada na grade/KPI: consumo de slot digital = 1080 / Cota.
-    # Portanto COTA 540 consome 2 slots e COTA 1080 consome 1 slot.
+    # Regra oficial usada na grade de ocupação digital:
+    # - COTA 540 consome 1 slot;
+    # - COTA 1080 consome 2 slots.
     # Os valores 1 e 2 são mantidos como compatibilidade com registros legados.
     if cota_num == 540:
-        return 2
-    if cota_num == 1080:
         return 1
+    if cota_num == 1080:
+        return 2
     if cota_num == 1:
         return 2
     if cota_num == 2:
         return 1
 
     try:
-        return max(1, int(round(1080.0 / float(cota_num))))
+        return max(1, int(math.ceil(float(cota_num) / 540.0)))
     except Exception:
         return 1
 
+
+
+
+def _datas_inclusivas_reserva_kanban(data_inicio: date, data_fim: date) -> list[date]:
+    dias: list[date] = []
+    if data_inicio is None or data_fim is None or data_fim < data_inicio:
+        return dias
+
+    atual = data_inicio
+    while atual <= data_fim:
+        dias.append(atual)
+        atual = atual + timedelta(days=1)
+    return dias
+
+
+def _slot_label_grade_reserva_kanban(indice_zero_based: int) -> str:
+    try:
+        indice = int(indice_zero_based)
+    except Exception:
+        indice = 0
+    return f"LOOP {indice + 1}"
+
+
+def _slot_indice_grade_reserva_kanban(valor: Any, capacidade: int) -> int | None:
+    texto = str(valor or "").strip().upper()
+    if not texto:
+        return None
+
+    m = re.search(r"(\d+)", texto)
+    if not m:
+        return None
+
+    try:
+        indice = int(m.group(1)) - 1
+    except Exception:
+        return None
+
+    if 0 <= indice < int(capacidade or 0):
+        return indice
+    return None
+
+
+def _span_por_cota_reserva_grade_kanban(cota: Any, span_qtd: Any = None) -> int:
+    try:
+        if span_qtd not in (None, "", "null", "None"):
+            span_tmp = int(float(str(span_qtd).strip().replace(",", ".")))
+            if span_tmp > 0:
+                return span_tmp
+    except Exception:
+        pass
+
+    try:
+        cota_txt = str(cota if cota is not None else "").strip().replace(",", ".")
+        cota_int = int(float(cota_txt)) if cota_txt else 0
+    except Exception:
+        cota_int = 0
+
+    if cota_int == 1080:
+        return 2
+    if cota_int == 540:
+        return 1
+    if cota_int == 1:
+        return 2
+    if cota_int == 2:
+        return 1
+    if cota_int > 0:
+        try:
+            return max(1, int(math.ceil(float(cota_int) / 540.0)))
+        except Exception:
+            return 1
+    return 1
+
+
+def _calcular_plano_encaixe_range_reserva_digital_kanban(
+    *,
+    cod_ponto: int,
+    cod_face: str,
+    data_inicio_obj: date,
+    data_fim_obj: date,
+    span_necessario: int,
+    capacidade_slots: int,
+) -> dict[str, Any]:
+    """
+    Simula a grade digital de uma face no modelo Tetris.
+
+    Esta é a mesma regra operacional da tela de Controle de Painéis:
+    - não sai do range selecionado;
+    - precisa caber em todos os dias do período;
+    - tenta primeiro uma linha reta;
+    - se não couber reto, fragmenta por dia/segmento;
+    - cota 1080 precisa de 2 slots adjacentes no mesmo dia.
+    """
+    try:
+        capacidade = int(capacidade_slots or 16)
+    except Exception:
+        capacidade = 16
+
+    capacidade = max(1, min(capacidade, 200))
+
+    try:
+        span_novo = int(span_necessario or 1)
+    except Exception:
+        span_novo = 1
+
+    span_novo = max(1, min(span_novo, capacidade))
+
+    if data_inicio_obj is None or data_fim_obj is None or data_fim_obj < data_inicio_obj:
+        return {
+            "ok": False,
+            "erro": "Range de datas inválido para simular encaixe.",
+            "dia_sem_espaco": None,
+            "segmentos": [],
+            "conflitos_existentes": 0,
+        }
+
+    dias_range = _datas_inclusivas_reserva_kanban(data_inicio_obj, data_fim_obj)
+    ocupado: dict[date, set[int]] = {dia: set() for dia in dias_range}
+
+    def _blocos_possiveis(span: int) -> list[int]:
+        return list(range(0, capacidade - int(span) + 1))
+
+    def _bloco_livre_no_dia(dia: date, indice: int, span: int) -> bool:
+        slots_ocupados = ocupado.setdefault(dia, set())
+        for off in range(int(span)):
+            if (int(indice) + off) in slots_ocupados:
+                return False
+        return True
+
+    def _bloco_livre_em_todos_os_dias(dias: list[date], indice: int, span: int) -> bool:
+        for dia in dias:
+            if not _bloco_livre_no_dia(dia, indice, span):
+                return False
+        return True
+
+    def _blocos_livres_do_dia(dia: date, span: int) -> list[int]:
+        return [idx for idx in _blocos_possiveis(span) if _bloco_livre_no_dia(dia, idx, span)]
+
+    def _escolher_bloco(blocos: list[int], preferido: int | None = None) -> int | None:
+        blocos = list(blocos or [])
+        if not blocos:
+            return None
+        if preferido is None:
+            return blocos[0]
+        try:
+            pref = int(preferido)
+        except Exception:
+            pref = None
+        if pref is None:
+            return blocos[0]
+        return sorted(blocos, key=lambda idx: (abs(int(idx) - pref), int(idx)))[0]
+
+    def _plano_para_segmentos(plano_por_dia: dict[date, int], span: int) -> list[dict[str, Any]]:
+        segmentos: list[dict[str, Any]] = []
+        if not plano_por_dia:
+            return segmentos
+
+        dias_ordenados = sorted(plano_por_dia.keys())
+        seg_ini = dias_ordenados[0]
+        seg_fim = dias_ordenados[0]
+        idx_atual = int(plano_por_dia[seg_ini])
+
+        for dia in dias_ordenados[1:]:
+            idx_dia = int(plano_por_dia[dia])
+            if idx_dia == idx_atual and dia == (seg_fim + timedelta(days=1)):
+                seg_fim = dia
+                continue
+
+            segmentos.append({
+                "data_inicio": seg_ini,
+                "data_fim": seg_fim,
+                "slot_inicio": _slot_label_grade_reserva_kanban(idx_atual),
+                "slot_fim": _slot_label_grade_reserva_kanban(idx_atual + int(span) - 1),
+                "slot_inicio_indice": idx_atual,
+                "span_qtd": int(span),
+            })
+            seg_ini = dia
+            seg_fim = dia
+            idx_atual = idx_dia
+
+        segmentos.append({
+            "data_inicio": seg_ini,
+            "data_fim": seg_fim,
+            "slot_inicio": _slot_label_grade_reserva_kanban(idx_atual),
+            "slot_fim": _slot_label_grade_reserva_kanban(idx_atual + int(span) - 1),
+            "slot_inicio_indice": idx_atual,
+            "span_qtd": int(span),
+        })
+        return segmentos
+
+    def _marcar_plano(plano_por_dia: dict[date, int], span: int) -> bool:
+        conflito = False
+        for dia, idx in (plano_por_dia or {}).items():
+            slots_ocupados = ocupado.setdefault(dia, set())
+            for off in range(int(span)):
+                slot_idx = int(idx) + off
+                if slot_idx in slots_ocupados:
+                    conflito = True
+                slots_ocupados.add(slot_idx)
+        return conflito
+
+    def _montar_plano_intervalo(
+        di: date,
+        df: date,
+        span: int,
+        loop_inicio: Any = None,
+        loop_fim: Any = None,
+        permitir_forcar: bool = False,
+    ) -> dict[str, Any]:
+        if di is None or df is None or df < di:
+            return {"ok": True, "plano": {}, "conflito": False, "dia_sem_espaco": None}
+
+        ini_clip = max(di, data_inicio_obj)
+        fim_clip = min(df, data_fim_obj)
+        if fim_clip < ini_clip:
+            return {"ok": True, "plano": {}, "conflito": False, "dia_sem_espaco": None}
+
+        dias = _datas_inclusivas_reserva_kanban(ini_clip, fim_clip)
+        span_int = max(1, min(int(span or 1), capacidade))
+
+        idx_exp = _slot_indice_grade_reserva_kanban(loop_inicio, capacidade)
+        idx_fim_exp = _slot_indice_grade_reserva_kanban(loop_fim, capacidade)
+        if idx_exp is not None:
+            if idx_fim_exp is not None:
+                largura_exp = (idx_fim_exp - idx_exp) + 1
+                if largura_exp != span_int:
+                    idx_exp = None
+            if idx_exp is not None and (idx_exp + span_int - 1) >= capacidade:
+                idx_exp = None
+
+        if idx_exp is not None:
+            plano_exp = {dia: idx_exp for dia in dias}
+            if _bloco_livre_em_todos_os_dias(dias, idx_exp, span_int):
+                return {"ok": True, "plano": plano_exp, "conflito": False, "dia_sem_espaco": None}
+            if permitir_forcar:
+                return {"ok": True, "plano": plano_exp, "conflito": True, "dia_sem_espaco": None}
+
+        for idx in _blocos_possiveis(span_int):
+            if _bloco_livre_em_todos_os_dias(dias, idx, span_int):
+                return {"ok": True, "plano": {dia: idx for dia in dias}, "conflito": False, "dia_sem_espaco": None}
+
+        plano: dict[date, int] = {}
+        preferido = None
+        conflito = False
+
+        for dia in dias:
+            livres = _blocos_livres_do_dia(dia, span_int)
+            escolhido = _escolher_bloco(livres, preferido)
+
+            if escolhido is None:
+                if not permitir_forcar:
+                    return {"ok": False, "plano": plano, "conflito": False, "dia_sem_espaco": dia}
+                escolhido = _escolher_bloco(_blocos_possiveis(span_int), preferido)
+                conflito = True
+
+            plano[dia] = int(escolhido)
+            preferido = int(escolhido)
+
+        return {"ok": True, "plano": plano, "conflito": conflito, "dia_sem_espaco": None}
+
+    sql_existentes = text("""
+        SELECT
+             Origem = CAST('CONTRATO' AS varchar(20))
+            ,IDItem = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+            ,DataInicio = TRY_CONVERT(date, i.DataInicioPrevisto)
+            ,DataFim = COALESCE(
+                TRY_CONVERT(date, i.DataCancelamento),
+                TRY_CONVERT(date, i.DataTerminoPrevisto)
+             )
+            ,Cota = i.Cota
+            ,SpanQtd = CAST(NULL AS int)
+            ,LoopInicio = CAST(NULL AS varchar(30))
+            ,LoopFim = CAST(NULL AS varchar(30))
+            ,OrdemData = COALESCE(TRY_CONVERT(datetime2, i.DataAtualizacao), SYSUTCDATETIME())
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (UPDLOCK, HOLDLOCK)
+        WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
+          AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), i.CodFace), ''))) = :cod_face
+          AND i.DataInicioPrevisto IS NOT NULL
+          AND i.DataTerminoPrevisto IS NOT NULL
+          AND i.AtivoCancelamento = 'A'
+          AND ISNULL(TRY_CONVERT(int, i.BitAtivo), 1) = 1
+          AND TRY_CONVERT(date, i.DataInicioPrevisto) <= :data_fim
+          AND COALESCE(TRY_CONVERT(date, i.DataCancelamento), TRY_CONVERT(date, i.DataTerminoPrevisto)) >= :data_inicio
+
+        UNION ALL
+
+        SELECT
+             Origem = CAST('RESERVA' AS varchar(20))
+            ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+            ,DataInicio = TRY_CONVERT(date, o.DataInicio)
+            ,DataFim = TRY_CONVERT(date, o.DataFim)
+            ,Cota = o.Cota
+            ,SpanQtd = TRY_CONVERT(int, o.SpanQtd)
+            ,LoopInicio = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopInicio), '')))
+            ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopFim), '')))
+            ,OrdemData = COALESCE(TRY_CONVERT(datetime2, o.CriadoEm), TRY_CONVERT(datetime2, o.DataAtualizacao), SYSUTCDATETIME())
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (UPDLOCK, HOLDLOCK)
+        WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+          AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
+          AND o.CanceladoEm IS NULL
+          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
+          AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
+          AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
+          AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
+          AND TRY_CONVERT(date, o.DataFim) >= :data_inicio
+        ORDER BY DataInicio ASC, DataFim ASC, OrdemData ASC, IDItem ASC;
+    """)
+
+    rows_existentes = db.session.execute(
+        sql_existentes,
+        {
+            "cod_ponto": int(cod_ponto),
+            "cod_face": str(cod_face or "").strip(),
+            "data_inicio": data_inicio_obj,
+            "data_fim": data_fim_obj,
+        },
+    ).mappings().all()
+
+    conflitos_existentes = 0
+
+    for row in rows_existentes or []:
+        di = row.get("DataInicio")
+        df = row.get("DataFim")
+        if isinstance(di, datetime):
+            di = di.date()
+        if isinstance(df, datetime):
+            df = df.date()
+        if di is None or df is None or df < di:
+            continue
+
+        span_existente = _span_por_cota_reserva_grade_kanban(row.get("Cota"), row.get("SpanQtd"))
+        span_existente = max(1, min(int(span_existente or 1), capacidade))
+
+        plano_existente = _montar_plano_intervalo(
+            di,
+            df,
+            span_existente,
+            row.get("LoopInicio"),
+            row.get("LoopFim"),
+            permitir_forcar=True,
+        )
+
+        if plano_existente.get("conflito"):
+            conflitos_existentes += 1
+
+        if _marcar_plano(plano_existente.get("plano") or {}, span_existente):
+            conflitos_existentes += 1
+
+    plano_novo = _montar_plano_intervalo(
+        data_inicio_obj,
+        data_fim_obj,
+        span_novo,
+        None,
+        None,
+        permitir_forcar=False,
+    )
+
+    if not plano_novo.get("ok"):
+        dia_sem_espaco = plano_novo.get("dia_sem_espaco")
+        return {
+            "ok": False,
+            "erro": (
+                "Não há espaço suficiente dentro do range selecionado. "
+                "A reserva não foi gravada porque pelo menos uma data do período "
+                "não possui bloco livre de slots adjacentes para essa cota."
+            ),
+            "dia_sem_espaco": dia_sem_espaco,
+            "segmentos": _plano_para_segmentos(plano_novo.get("plano") or {}, span_novo),
+            "conflitos_existentes": conflitos_existentes,
+        }
+
+    segmentos = _plano_para_segmentos(plano_novo.get("plano") or {}, span_novo)
+
+    return {
+        "ok": True,
+        "erro": None,
+        "dia_sem_espaco": None,
+        "segmentos": segmentos,
+        "modo": "reto" if len(segmentos) <= 1 else "fragmentado",
+        "conflitos_existentes": conflitos_existentes,
+    }
+
+
+def _marcador_range_reserva_card_kanban(data_inicio: date, data_fim: date) -> str:
+    ini = data_inicio.isoformat() if hasattr(data_inicio, "isoformat") else str(data_inicio or "")
+    fim = data_fim.isoformat() if hasattr(data_fim, "isoformat") else str(data_fim or "")
+    return f"[RANGE={ini}_{fim}]"
 
 def _reserva_kanban_ja_existe(
     *,
@@ -13011,6 +13562,7 @@ def _reserva_kanban_ja_existe(
 ) -> bool:
     marcador_novo = _marcador_reserva_card_kanban(int(id_card), cod_face)
     marcador_antigo = _marcador_reserva_card_kanban_legacy(int(id_card), cod_face)
+    marcador_range = _marcador_range_reserva_card_kanban(data_inicio, data_fim)
 
     sql = text("""
         SELECT TOP 1 1
@@ -13018,11 +13570,16 @@ def _reserva_kanban_ja_existe(
         WHERE UPPER(LTRIM(RTRIM(COALESCE(CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
           AND CanceladoEm IS NULL
           AND Status IN ('ATIVO', 'RESERVADO')
-          AND TRY_CONVERT(date, DataInicio) = :data_inicio
-          AND TRY_CONVERT(date, DataFim) = :data_fim
           AND (
-                COALESCE(Observacao, '') LIKE :marcador_novo
-                OR COALESCE(Observacao, '') LIKE :marcador_antigo
+                (
+                    COALESCE(Observacao, '') LIKE :marcador_novo
+                    AND COALESCE(Observacao, '') LIKE :marcador_range
+                )
+                OR (
+                    COALESCE(Observacao, '') LIKE :marcador_antigo
+                    AND TRY_CONVERT(date, DataInicio) = :data_inicio
+                    AND TRY_CONVERT(date, DataFim) = :data_fim
+                )
           )
     """)
 
@@ -13034,6 +13591,7 @@ def _reserva_kanban_ja_existe(
             "data_fim": data_fim,
             "marcador_novo": f"{marcador_novo}%",
             "marcador_antigo": f"{marcador_antigo}%",
+            "marcador_range": f"%{marcador_range}%",
         },
     ).scalar()
 
@@ -13050,6 +13608,12 @@ def _validar_conflito_reserva_kanban(
     capacidade_slots: int,
     slots_necessarios: int | float = 1,
 ) -> bool:
+    # Regra correta para painel digital:
+    # - 540 precisa manter 1 slot livre em cada dia do range;
+    # - 1080 precisa manter 2 slots livres em cada dia do range;
+    # - não exigimos que seja a mesma linha/slot do início ao fim, porque a grade pode encaixar
+    #   a campanha em pedaços diferentes ao longo do período.
+    # O que não pode acontecer é aceitar por saldo total do mês e deixar algum dia sem os slots da cota.
     cod_face_limpo = str(cod_face or "").strip().upper()
     capacidade_slots_int = int(capacidade_slots or 0)
     slots_novos = float(slots_necessarios or 1)
@@ -13120,12 +13684,12 @@ def _validar_conflito_reserva_kanban(
                 ),
                 SlotsConsumidos =
                     CASE
-                        WHEN TRY_CONVERT(int, c.Cota) = 540 THEN 2.0
-                        WHEN TRY_CONVERT(int, c.Cota) = 1080 THEN 1.0
+                        WHEN TRY_CONVERT(int, c.Cota) = 540 THEN 1.0
+                        WHEN TRY_CONVERT(int, c.Cota) = 1080 THEN 2.0
                         WHEN TRY_CONVERT(int, c.Cota) = 1 THEN 2.0
                         WHEN TRY_CONVERT(int, c.Cota) = 2 THEN 1.0
                         WHEN TRY_CONVERT(float, c.Cota) IS NOT NULL AND TRY_CONVERT(float, c.Cota) > 0
-                            THEN ROUND(1080.0 / TRY_CONVERT(float, c.Cota), 0)
+                            THEN CEILING(TRY_CONVERT(float, c.Cota) / 540.0)
                         ELSE 1.0
                     END
             FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] c
@@ -13148,12 +13712,12 @@ def _validar_conflito_reserva_kanban(
                     CASE
                         WHEN TRY_CONVERT(int, r.SpanQtd) IS NOT NULL AND TRY_CONVERT(int, r.SpanQtd) > 0
                             THEN TRY_CONVERT(float, r.SpanQtd)
-                        WHEN TRY_CONVERT(int, r.Cota) = 540 THEN 2.0
-                        WHEN TRY_CONVERT(int, r.Cota) = 1080 THEN 1.0
+                        WHEN TRY_CONVERT(int, r.Cota) = 540 THEN 1.0
+                        WHEN TRY_CONVERT(int, r.Cota) = 1080 THEN 2.0
                         WHEN TRY_CONVERT(int, r.Cota) = 1 THEN 2.0
                         WHEN TRY_CONVERT(int, r.Cota) = 2 THEN 1.0
                         WHEN TRY_CONVERT(float, r.Cota) IS NOT NULL AND TRY_CONVERT(float, r.Cota) > 0
-                            THEN ROUND(1080.0 / TRY_CONVERT(float, r.Cota), 0)
+                            THEN CEILING(TRY_CONVERT(float, r.Cota) / 540.0)
                         ELSE 1.0
                     END
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r
@@ -13248,9 +13812,9 @@ def _criar_reservas_painel_faces_kanban(
     vinculos_preparados: list[dict[str, Any]] | None,
     id_usuario: int,
     id_empresa_proprietaria: int,
-) -> int:
+) -> dict[str, Any]:
     if not isinstance(painel_faces_payload, list) or not painel_faces_payload:
-        return 0
+        return {"criadas": 0, "ids": [], "segmentos": 0}
 
     mapa_vinculos: dict[tuple[int | None, str], dict[str, Any]] = {}
     for vinculo in (vinculos_preparados or []):
@@ -13269,6 +13833,8 @@ def _criar_reservas_painel_faces_kanban(
     marca_exibida_padrao = razao_social or str(titulo_card or "").strip() or f"Card {int(id_card)}"
 
     reservas_criadas = 0
+    segmentos_criados = 0
+    ids_criados: list[int] = []
 
     for item in painel_faces_payload:
         if not isinstance(item, dict):
@@ -13310,6 +13876,12 @@ def _criar_reservas_painel_faces_kanban(
 
         vinculo = mapa_vinculos.get((id_painel, cod_face))
         if not vinculo:
+            for vinculo_candidato in (vinculos_preparados or []):
+                if str(vinculo_candidato.get("cod_face") or "").strip().upper() == cod_face:
+                    vinculo = vinculo_candidato
+                    break
+
+        if not vinculo:
             raise ValueError(f"Não foi possível preparar o vínculo comercial da face {cod_face} para reservar.")
 
         capacidade = _obter_capacidade_face_reserva_kanban(cod_face)
@@ -13325,6 +13897,7 @@ def _criar_reservas_painel_faces_kanban(
             raise ValueError(f"Não foi possível resolver o CodPonto da face {cod_face}.")
 
         marcador_observacao = _marcador_reserva_card_kanban(int(id_card), cod_face)
+        marcador_range = _marcador_range_reserva_card_kanban(data_inicio, data_fim)
 
         if _reserva_kanban_ja_existe(
             id_card=int(id_card),
@@ -13343,29 +13916,64 @@ def _criar_reservas_painel_faces_kanban(
         spanqtd_novo = _calcular_spanqtd_cota_reserva_kanban(cota_int, eh_digital)
         slots_necessarios = int(spanqtd_novo or 1) if eh_digital == 1 else 1
 
-        sem_capacidade = _validar_conflito_reserva_kanban(
-            cod_face=cod_face,
-            cod_ponto=cod_ponto,
-            data_inicio=data_inicio,
-            data_fim=data_fim,
-            eh_digital=eh_digital,
-            capacidade_slots=capacidade_slots,
-            slots_necessarios=slots_necessarios,
-        )
-
-        if sem_capacidade:
-            raise ValueError(
-                f"Não foi possível encaixar automaticamente a reserva na grade da face {cod_face} "
-                f"de {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')} "
-                f"com a cota {cota_int or 'informada'}. Verifique a grade para encaixe. "
-                f"A reserva não foi criada."
+        if eh_digital == 1:
+            plano_encaixe = _calcular_plano_encaixe_range_reserva_digital_kanban(
+                cod_ponto=int(cod_ponto),
+                cod_face=cod_face,
+                data_inicio_obj=data_inicio,
+                data_fim_obj=data_fim,
+                span_necessario=slots_necessarios,
+                capacidade_slots=capacidade_slots,
             )
 
+            if not plano_encaixe.get("ok"):
+                dia_sem_espaco = plano_encaixe.get("dia_sem_espaco")
+                dia_txt = dia_sem_espaco.strftime("%d/%m/%Y") if hasattr(dia_sem_espaco, "strftime") else None
+                complemento_dia = f" Dia sem encaixe: {dia_txt}." if dia_txt else ""
+                raise ValueError(
+                    f"Não foi possível encaixar automaticamente a reserva na grade da face {cod_face} "
+                    f"de {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')} "
+                    f"com a cota {cota_int or 'informada'}. {plano_encaixe.get('erro') or 'Verifique a grade para encaixe.'}"
+                    f"{complemento_dia} A reserva não foi criada."
+                )
+
+            segmentos_encaixe = plano_encaixe.get("segmentos") or []
+            if not segmentos_encaixe:
+                raise ValueError(
+                    f"O simulador de encaixe não retornou segmentos para a face {cod_face}. "
+                    "A reserva não foi criada."
+                )
+        else:
+            sem_capacidade = _validar_conflito_reserva_kanban(
+                cod_face=cod_face,
+                cod_ponto=cod_ponto,
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                eh_digital=eh_digital,
+                capacidade_slots=capacidade_slots,
+                slots_necessarios=slots_necessarios,
+            )
+
+            if sem_capacidade:
+                raise ValueError(
+                    f"Não foi possível encaixar automaticamente a reserva na grade da face {cod_face} "
+                    f"de {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}. "
+                    f"Verifique a grade para encaixe. A reserva não foi criada."
+                )
+
+            segmentos_encaixe = [{
+                "data_inicio": data_inicio,
+                "data_fim": data_fim,
+                "slot_inicio": None,
+                "slot_fim": None,
+                "span_qtd": None,
+            }]
+
         reserva_ordem_prioridade = 1
-
-        dias_int = ((data_fim - data_inicio).days + 1)
-
-        observacao_insert = f"{marcador_observacao} Reserva criada pelo salvamento do card no Kanban."
+        observacao_insert = (
+            f"{marcador_observacao}{marcador_range} "
+            "Reserva criada pelo salvamento do card no Kanban."
+        )
 
         sql_insert = text("""
             INSERT INTO [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] (
@@ -13378,6 +13986,8 @@ def _criar_reservas_painel_faces_kanban(
                 Status,
                 DataInicio,
                 DataFim,
+                LoopInicio,
+                LoopFim,
                 SpanQtd,
                 Cota,
                 MarcaExibida,
@@ -13394,6 +14004,7 @@ def _criar_reservas_painel_faces_kanban(
                 CriadoPorIDUsuario,
                 ReservaOrdemPrioridade
             )
+            OUTPUT INSERTED.IDFatoOcupacaoPaineisEuromidia
             VALUES (
                 SYSDATETIME(),
                 CONVERT(varchar(64),
@@ -13405,6 +14016,8 @@ def _criar_reservas_painel_faces_kanban(
                             UPPER(LTRIM(RTRIM(COALESCE(:cod_face, '')))), '|',
                             COALESCE(CONVERT(varchar(10), :data_inicio, 23), ''), '|',
                             COALESCE(CONVERT(varchar(10), :data_fim, 23), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :loop_inicio), ''), '|',
+                            COALESCE(CONVERT(varchar(30), :loop_fim), ''), '|',
                             COALESCE(CONVERT(varchar(30), :spanqtd), ''), '|',
                             COALESCE(CONVERT(varchar(30), :cota), ''), '|',
                             COALESCE(CONVERT(varchar(30), :id_cliente), ''), '|',
@@ -13421,6 +14034,8 @@ def _criar_reservas_painel_faces_kanban(
                 'RESERVADO',
                 :data_inicio,
                 :data_fim,
+                :loop_inicio,
+                :loop_fim,
                 :spanqtd,
                 :cota,
                 :marca_exibida,
@@ -13432,41 +14047,65 @@ def _criar_reservas_painel_faces_kanban(
                 NULL,
                 :observacao,
                 :dias,
-                DATEADD(day, :dias, SYSDATETIME()),
+                DATEADD(day, :dias_total_original, SYSDATETIME()),
                 SYSDATETIME(),
                 :criado_por,
                 :reserva_ordem_prioridade
             )
         """)
 
-        db.session.execute(
-            sql_insert,
-            {
-                "id_card": int(id_card),
-                "cod_ponto": int(cod_ponto),
-                "cod_face": cod_face,
-                "id_painel": id_painel_final,
-                "origem": ORIGEM_RESERVA_CARD_KANBAN,
-                "data_inicio": data_inicio,
-                "data_fim": data_fim,
-                "spanqtd": spanqtd_novo,
-                "cota": cota_int,
-                "marca_exibida": marca_exibida_padrao[:200],
-                "vendedor_nome": nome_vendedor[:200] if nome_vendedor else None,
-                "id_vendedor": id_vendedor,
-                "id_cliente": int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
-                "observacao": observacao_insert[:1000],
-                "dias": int(dias_int),
-                "criado_por": int(id_usuario),
-                "reserva_ordem_prioridade": int(reserva_ordem_prioridade),
-            },
-        )
+        dias_total_original = ((data_fim - data_inicio).days + 1)
+
+        for indice_segmento, segmento in enumerate(segmentos_encaixe, start=1):
+            seg_ini = segmento.get("data_inicio") or data_inicio
+            seg_fim = segmento.get("data_fim") or data_fim
+
+            if isinstance(seg_ini, datetime):
+                seg_ini = seg_ini.date()
+            if isinstance(seg_fim, datetime):
+                seg_fim = seg_fim.date()
+
+            if seg_ini is None or seg_fim is None or seg_fim < seg_ini:
+                raise ValueError(f"Segmento inválido ao gravar reserva da face {cod_face}.")
+
+            dias_segmento = ((seg_fim - seg_ini).days + 1)
+            loop_inicio_segmento = segmento.get("slot_inicio") if eh_digital == 1 else None
+            loop_fim_segmento = segmento.get("slot_fim") if eh_digital == 1 else None
+            span_segmento = int(segmento.get("span_qtd") or spanqtd_novo or 1) if eh_digital == 1 else None
+            obs_segmento = f"{observacao_insert} [SEGMENTO={indice_segmento}/{len(segmentos_encaixe)}]"
+
+            id_novo = db.session.execute(
+                sql_insert,
+                {
+                    "id_card": int(id_card),
+                    "cod_ponto": int(cod_ponto),
+                    "cod_face": cod_face,
+                    "id_painel": id_painel_final,
+                    "origem": ORIGEM_RESERVA_CARD_KANBAN,
+                    "data_inicio": seg_ini,
+                    "data_fim": seg_fim,
+                    "loop_inicio": loop_inicio_segmento,
+                    "loop_fim": loop_fim_segmento,
+                    "spanqtd": span_segmento,
+                    "cota": cota_int,
+                    "marca_exibida": marca_exibida_padrao[:200],
+                    "vendedor_nome": nome_vendedor[:200] if nome_vendedor else None,
+                    "id_vendedor": id_vendedor,
+                    "id_cliente": int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
+                    "observacao": obs_segmento[:1000],
+                    "dias": int(dias_segmento),
+                    "dias_total_original": int(dias_total_original),
+                    "criado_por": int(id_usuario),
+                    "reserva_ordem_prioridade": int(reserva_ordem_prioridade),
+                },
+            ).scalar_one()
+
+            ids_criados.append(int(id_novo))
+            segmentos_criados += 1
 
         reservas_criadas += 1
 
-    return reservas_criadas
-
-
+    return {"criadas": int(reservas_criadas), "ids": ids_criados, "segmentos": int(segmentos_criados)}
 
 
 
@@ -17176,7 +17815,7 @@ def api_kanban_resumo_comercial(id_kanban: int):
     }
 
     if usar_cache:
-        _cache_json_set(chave, payload, 5)
+        _cache_json_set(chave, payload, 45)
 
     return jsonify(payload)
 
@@ -17320,6 +17959,51 @@ def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
 
 
 
+@kanban_bp.route("/api/kanbans/<int:id_kanban>/catalogos", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_kanban_catalogos(id_kanban: int):
+    _assert_login()
+    _obter_kanban_autorizado(id_kanban)
+    id_emp = _id_empresa_usuario_or_403()
+
+    usar_cache = not _request_pede_dado_fresco()
+    chave = _chave_cache_json(
+        "kanban:api:catalogos",
+        id_emp,
+        id_kanban,
+        _versao_empresa(id_emp),
+        _versao_kanban(id_kanban),
+    )
+
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            return jsonify(em_cache)
+
+    payload = {
+        "ok": True,
+        "kanban_cfg": dict(_obter_cfg_kanban(id_kanban)),
+        "tags": _obter_tags_kanban(id_kanban),
+        "vendedores": [],
+        "vendedores_deferido": True,
+        "tipos_cliente_desconto": _obter_tipos_cliente_desconto(),
+        "origens_atendimento": _obter_origens_atendimento(),
+        "tipos_documento": _obter_tipos_documento(),
+        "paineis": [],
+        "versao_kanban": int(_versao_kanban(id_kanban)),
+    }
+
+    if usar_cache:
+        _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
+
+    resposta = jsonify(payload)
+    resposta.headers["Cache-Control"] = "private, max-age=15, no-transform" if usar_cache else "no-store, no-cache, must-revalidate, max-age=0, no-transform"
+    resposta.headers["X-Content-Type-Options"] = "nosniff"
+    return resposta
+
+
+
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/dados", methods=["GET"])
 @login_required
 @limiter.limit("120/minute")
@@ -17356,7 +18040,7 @@ def api_kanban_dados(id_kanban: int):
 
     fases_base = _obter_fases_kanban(id_kanban)
     tags_catalogo = _obter_tags_kanban(id_kanban)
-    vendedores_catalogo = _obter_vendedores_kanban(id_kanban)
+    vendedores_catalogo: list[dict[str, Any]] = []
     tipos_cliente_desconto_catalogo = _obter_tipos_cliente_desconto()
     origens_atendimento_catalogo = _obter_origens_atendimento()
     tipos_documento_catalogo = _obter_tipos_documento()
@@ -17422,8 +18106,8 @@ def api_kanban_dados(id_kanban: int):
                 e.RazaoSocial AS EmpresaRazaoSocial,
                 e.CNPJ AS EmpresaCNPJ,
                 e.CNAE AS EmpresaCNAE,
-                cn.Classe AS EmpresaClasse,
-                cn.Setor AS EmpresaSetor,
+                CAST(NULL AS nvarchar(200)) AS EmpresaClasse,
+                CAST(NULL AS nvarchar(200)) AS EmpresaSetor,
                 rp.QuantidadePaineisVinculados,
                 rp.QuantidadePaineisUnicos,
                 rp.ValorTotalPaineis,
@@ -17434,7 +18118,7 @@ def api_kanban_dados(id_kanban: int):
                         c.IDFatoKanbanCard DESC
                 ) AS RowNumFase
             FROM {TABELA_CARD} c
-            {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+            {_sql_join_empresa_relacionada_card_leve('c', 'e')}
             {_sql_join_usuario_relacionado_card('c', 'usuario')}
             {_sql_join_resumo_paineis_card('c', 'rp')}
             WHERE c.IDDimKanban = :id_kanban
@@ -17569,15 +18253,25 @@ def api_kanban_dados(id_kanban: int):
         "cards": cards_iniciais,
         "tags": tags_catalogo,
         "vendedores": vendedores_catalogo,
-        "filtros_cards": _obter_filtros_cards_kanban(id_kanban),
+        "vendedores_deferido": True,
+        # Performance: não envio mais a base completa de filtros no carregamento inicial.
+        # O front já monta os filtros com os cards carregados e mantém a base local
+        # atualizada por Socket.IO. Carregar todos os cards/tags aqui deixava /dados
+        # pesado e atrasava a abertura do Kanban.
+        "filtros_cards": [],
         "tipos_cliente_desconto": tipos_cliente_desconto_catalogo,
         "origens_atendimento": origens_atendimento_catalogo,
         "tipos_documento": tipos_documento_catalogo,
         "card_tags": card_tags_iniciais,
         "paineis": paineis_catalogo,
-        "resumo_comercial": _obter_resumo_comercial_kanban(id_kanban),
+        # Performance: não bloqueio a primeira pintura do Kanban esperando o resumo comercial.
+        # O front renderiza fases/cards primeiro e busca o resumo em chamada separada logo depois.
+        # Isso reduz a latência percebida da abertura sem perder atualização em tempo real.
+        "resumo_comercial": None,
+        "resumo_comercial_deferido": True,
         "limit_inicial_por_fase": limite_inicial_por_fase,
         "carga_parcial": True,
+        "versao_kanban": int(_versao_kanban(id_kanban)),
     }
 
     if usar_cache:
@@ -17592,6 +18286,39 @@ def api_kanban_dados(id_kanban: int):
 
 
 
+
+
+
+
+@kanban_bp.route("/api/kanbans/<int:id_kanban>/versao", methods=["GET"])
+@login_required
+@limiter.limit("240/minute")
+def api_kanban_versao(id_kanban: int):
+    _assert_login()
+    _obter_kanban_autorizado(id_kanban)
+
+    resposta = jsonify({
+        "ok": True,
+        "id_kanban": int(id_kanban),
+        "versao_kanban": int(_versao_kanban(id_kanban)),
+        "server_time": datetime.utcnow().isoformat() + "Z",
+    })
+    resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resposta.headers["Pragma"] = "no-cache"
+    resposta.headers["Expires"] = "0"
+    return resposta
+
+
+
+
+@kanban_bp.route("/api/kanbans/<int:id_kanban>/vendedores", methods=["GET"])
+@login_required
+@limiter.limit("120/minute")
+def api_kanban_vendedores(id_kanban: int):
+    _assert_login()
+    _obter_kanban_autorizado(id_kanban)
+    vendedores = _obter_vendedores_kanban(id_kanban)
+    return jsonify({"ok": True, "vendedores": vendedores})
 
 
 @kanban_bp.route("/api/kanbans/<int:id_kanban>/fases", methods=["GET"])
@@ -17650,6 +18377,7 @@ def api_cards_listar_por_fase(id_kanban: int):
         limit = max(1, min(limit, LIMITE_CARDS_POR_FASE))
         row_inicio = offset
         row_fim = offset + limit
+        modo_rapido = _valor_booleano_verdadeiro(request.args.get("rapido") or request.args.get("leve"))
 
         if not id_fase or not _validar_fase_do_kanban(id_kanban, id_fase):
             return jsonify({"ok": False, "msg": "Fase inválida para este kanban"}), 400
@@ -17671,6 +18399,7 @@ def api_cards_listar_por_fase(id_kanban: int):
             id_fase,
             offset,
             limit,
+            int(modo_rapido),
             *_chave_cache_escopo_vendedor_kanban(escopo_vendedor),
             _versao_kanban(id_kanban),
         )
@@ -17720,6 +18449,31 @@ def api_cards_listar_por_fase(id_kanban: int):
             else "CAST(NULL AS int) AS IDDimTipoDocumento,"
         )
 
+        if modo_rapido:
+            join_empresa_card = _sql_join_empresa_relacionada_card_leve('c', 'e')
+            select_empresa_classe_setor = """
+                    CAST(NULL AS nvarchar(200)) AS EmpresaClasse,
+                    CAST(NULL AS nvarchar(200)) AS EmpresaSetor,
+            """
+            select_resumo_paineis_card = """
+                    CAST(0 AS int) AS QuantidadePaineisVinculados,
+                    CAST(0 AS int) AS QuantidadePaineisUnicos,
+                    CAST(0 AS decimal(18, 2)) AS ValorTotalPaineis,
+            """
+            join_resumo_paineis_card = ""
+        else:
+            join_empresa_card = _sql_join_empresa_relacionada_card('c', 'e', 'cn')
+            select_empresa_classe_setor = """
+                    cn.Classe AS EmpresaClasse,
+                    cn.Setor AS EmpresaSetor,
+            """
+            select_resumo_paineis_card = """
+                    rp.QuantidadePaineisVinculados,
+                    rp.QuantidadePaineisUnicos,
+                    rp.ValorTotalPaineis,
+            """
+            join_resumo_paineis_card = _sql_join_resumo_paineis_card('c', 'rp')
+
         sql_cards = text(f"""
             ;WITH CardsPaginados AS (
                 SELECT
@@ -17741,11 +18495,8 @@ def api_cards_listar_por_fase(id_kanban: int):
                     e.RazaoSocial AS EmpresaRazaoSocial,
                     e.CNPJ AS EmpresaCNPJ,
                     e.CNAE AS EmpresaCNAE,
-                    cn.Classe AS EmpresaClasse,
-                    cn.Setor AS EmpresaSetor,
-                    rp.QuantidadePaineisVinculados,
-                    rp.QuantidadePaineisUnicos,
-                    rp.ValorTotalPaineis,
+                    {select_empresa_classe_setor}
+                    {select_resumo_paineis_card}
                     ROW_NUMBER() OVER (
                         ORDER BY
                             CASE
@@ -17755,9 +18506,9 @@ def api_cards_listar_por_fase(id_kanban: int):
                             c.IDFatoKanbanCard DESC
                     ) AS RowNumGlobal
                 FROM {TABELA_CARD} c
-                {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
+                {join_empresa_card}
                 {_sql_join_usuario_relacionado_card('c', 'usuario')}
-                {_sql_join_resumo_paineis_card('c', 'rp')}
+                {join_resumo_paineis_card}
                 WHERE c.IDDimKanban = :id_kanban
                   AND c.IDDimKanbanFaseAtual = :id_fase
                   AND c.Ativo = 1
@@ -18333,7 +19084,12 @@ def api_card_detalhe(id_card: int):
     if usar_cache:
         _cache_json_set(chave, payload, TIMEOUT_CACHE_CURTO)
 
-    return jsonify(payload)
+    resposta = jsonify(payload)
+    if not usar_cache:
+        resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resposta.headers["Pragma"] = "no-cache"
+        resposta.headers["Expires"] = "0"
+    return resposta
 
 
 
@@ -18665,7 +19421,11 @@ def api_paineis_lista():
 @limiter.limit("60/minute")
 def api_painel_faces_catalogo():
     _assert_login()
-    return jsonify({"ok": True, "painel_faces": _obter_painel_faces_catalogo()})
+    payload = {"ok": True, "painel_faces": _obter_painel_faces_catalogo()}
+    resposta = jsonify(payload)
+    resposta.headers["Cache-Control"] = "private, max-age=60, no-transform"
+    resposta.headers["X-Content-Type-Options"] = "nosniff"
+    return resposta
 
 
 
@@ -18807,11 +19567,25 @@ def api_faces_por_id_painel(id_painel: int):
 @limiter.limit("120/minute")
 def api_comercial_painel_face(id_painel: int, cod_face: str):
     _assert_login()
+    cod_face_norm = _normalizar_texto(cod_face).upper()
+    if not cod_face_norm:
+        return jsonify({"ok": False, "msg": "CodFace inválido"}), 400
+
+    usar_cache = not _request_pede_dado_fresco()
+    chave = _chave_cache_json("kanban:api:comercial_painel_face", int(id_painel), cod_face_norm)
+    if usar_cache:
+        em_cache = _cache_json_get(chave)
+        if em_cache is not None:
+            resposta_cache = jsonify(em_cache)
+            resposta_cache.headers["Cache-Control"] = "private, max-age=45, no-transform"
+            resposta_cache.headers["X-Content-Type-Options"] = "nosniff"
+            return resposta_cache
+
     painel = _obter_painel_por_id(id_painel)
     if not painel:
         return jsonify({"ok": False, "msg": "Painel não encontrado"}), 404
 
-    face = _resolver_face_do_painel(id_painel, cod_face)
+    face = _resolver_face_do_painel(id_painel, cod_face_norm)
     if not face:
         return jsonify({"ok": False, "msg": "Face não encontrada para o painel selecionado"}), 404
 
@@ -18857,7 +19631,14 @@ def api_comercial_painel_face(id_painel: int, cod_face: str):
         },
         "precos": precos_payload,
     }
-    return jsonify(payload)
+
+    if usar_cache:
+        _cache_json_set(chave, payload, 45)
+
+    resposta = jsonify(payload)
+    resposta.headers["Cache-Control"] = "private, max-age=45, no-transform" if usar_cache else "no-store, no-cache, must-revalidate, max-age=0, no-transform"
+    resposta.headers["X-Content-Type-Options"] = "nosniff"
+    return resposta
 
 
 @kanban_bp.route("/api/kanbans", methods=["POST"])
@@ -19338,6 +20119,11 @@ def api_card_mover(id_card: int):
         )
 
         if execucao["modo_execucao"] == "fila":
+            client_request_id = str(
+                payload.get("client_request_id")
+                or payload.get("clientRequestId")
+                or ""
+            ).strip()[:80] or None
             return jsonify(
                 {
                     "ok": True,
@@ -19345,6 +20131,8 @@ def api_card_mover(id_card: int):
                     "msg": "Deadlock persistente. O movimento entrou na fila rápida de retry.",
                     "task_id": execucao["task_id"],
                     "id_card": int(id_card),
+                    "id_fase_para": int(payload.get("id_fase_para") or 0) or None,
+                    "client_request_id": client_request_id,
                 }
             ), 202
 
@@ -20365,6 +21153,11 @@ def api_card_nota_criar(id_card: int):
 
     payload = request.get_json(silent=True) or {}
     texto = (payload.get("texto") or "").strip()
+    client_request_id = str(
+        payload.get("client_request_id")
+        or payload.get("clientRequestId")
+        or ""
+    ).strip()[:80] or None
 
     if len(texto) < 2:
         return jsonify({"ok": False, "msg": "Texto da nota inválido"}), 400
@@ -20412,10 +21205,10 @@ def api_card_nota_criar(id_card: int):
     _emitir_evento_kanban(
         id_kanban,
         "card_nota_criada",
-        {"id_card": id_card, "nota": nota_payload},
+        {"id_card": id_card, "nota": nota_payload, "client_request_id": client_request_id},
     )
 
-    return jsonify({"ok": True, "nota": nota_payload})
+    return jsonify({"ok": True, "nota": nota_payload, "client_request_id": client_request_id})
 
 
 
@@ -20801,6 +21594,7 @@ def api_card_inativar(id_card: int):
                 "descricao": descricao or None,
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "payload_minimo": True,
                 "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
                 "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
             },
@@ -20823,6 +21617,7 @@ def api_card_inativar(id_card: int):
                 "id_motivo_encerramento": id_motivo_encerramento,
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "payload_minimo": True,
                 "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
                 "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
             }
@@ -23554,6 +24349,18 @@ def _sql_select_nome_usuario_relacionado_card(alias_usuario: str = "usuario") ->
 
 
 def _obter_vendedores_kanban(id_kanban: int) -> list[dict[str, Any]]:
+    chave = _chave_cache_json(
+        "kanban:catalogo:vendedores",
+        int(id_kanban or 0),
+        int(_id_empresa_usuario() or 0),
+        int(_id_usuario() or 0),
+        int(_usuario_eh_perfil_vendedor_kanban()),
+        _versao_kanban(id_kanban),
+    )
+    em_cache = _cache_json_get(chave)
+    if isinstance(em_cache, list):
+        return list(em_cache)
+
     if _usuario_eh_perfil_vendedor_kanban():
         vendedor = _obter_vendedor_logado_kanban(_id_empresa_usuario()) or {}
         nome = (
@@ -23561,7 +24368,7 @@ def _obter_vendedores_kanban(id_kanban: int) -> list[dict[str, Any]]:
             or str(getattr(current_user, "NomeUsuario", "") or "").strip()
             or "Meu usuário"
         )
-        return [
+        resultado = [
             {
                 "IDDimUsuarios": int(_id_usuario() or 0) or None,
                 "IDVendedor": int(vendedor.get("IDVendedor") or 0) or None,
@@ -23570,6 +24377,8 @@ def _obter_vendedores_kanban(id_kanban: int) -> list[dict[str, Any]]:
                 "VendedorRestritoAoUsuarioLogado": True,
             }
         ]
+        _cache_json_set(chave, resultado, TIMEOUT_CACHE_MEDIO)
+        return resultado
 
     nome_coluna_usuario = _nome_coluna_usuario_relacionado_card()
     if not nome_coluna_usuario:
@@ -23589,8 +24398,9 @@ def _obter_vendedores_kanban(id_kanban: int) -> list[dict[str, Any]]:
           AND NULLIF(LTRIM(RTRIM(ISNULL(usuario.NomeUsuario, ''))), '') IS NOT NULL
         ORDER BY NomeUsuario ASC;
     """)
-    vendedores = db.session.execute(sql_vendedores, {"id_kanban": int(id_kanban)}).mappings().all()
-    return _rows_para_dicts(vendedores)
+    vendedores = _rows_para_dicts(db.session.execute(sql_vendedores, {"id_kanban": int(id_kanban)}).mappings().all())
+    _cache_json_set(chave, vendedores, TIMEOUT_CACHE_MEDIO)
+    return vendedores
 
 
 
@@ -29957,12 +30767,12 @@ def api_kanban_ocupacao_calendario():
                     CASE
                         WHEN @EhDigital = 1 THEN
                             CASE
-                                WHEN TRY_CONVERT(int, c.Cota) = 540 THEN 2.0
-                                WHEN TRY_CONVERT(int, c.Cota) = 1080 THEN 1.0
+                                WHEN TRY_CONVERT(int, c.Cota) = 540 THEN 1.0
+                                WHEN TRY_CONVERT(int, c.Cota) = 1080 THEN 2.0
                                 WHEN TRY_CONVERT(int, c.Cota) = 1 THEN 2.0
                                 WHEN TRY_CONVERT(int, c.Cota) = 2 THEN 1.0
                                 WHEN TRY_CONVERT(float, c.Cota) IS NOT NULL AND TRY_CONVERT(float, c.Cota) > 0
-                                    THEN ROUND(1080.0 / TRY_CONVERT(float, c.Cota), 0)
+                                    THEN CEILING(TRY_CONVERT(float, c.Cota) / 540.0)
                                 ELSE 1.0
                             END
                         ELSE 1.0
@@ -29989,12 +30799,12 @@ def api_kanban_ocupacao_calendario():
                             CASE
                                 WHEN TRY_CONVERT(int, r.SpanQtd) IS NOT NULL AND TRY_CONVERT(int, r.SpanQtd) > 0
                                     THEN TRY_CONVERT(float, r.SpanQtd)
-                                WHEN TRY_CONVERT(int, r.Cota) = 540 THEN 2.0
-                                WHEN TRY_CONVERT(int, r.Cota) = 1080 THEN 1.0
+                                WHEN TRY_CONVERT(int, r.Cota) = 540 THEN 1.0
+                                WHEN TRY_CONVERT(int, r.Cota) = 1080 THEN 2.0
                                 WHEN TRY_CONVERT(int, r.Cota) = 1 THEN 2.0
                                 WHEN TRY_CONVERT(int, r.Cota) = 2 THEN 1.0
                                 WHEN TRY_CONVERT(float, r.Cota) IS NOT NULL AND TRY_CONVERT(float, r.Cota) > 0
-                                    THEN ROUND(1080.0 / TRY_CONVERT(float, r.Cota), 0)
+                                    THEN CEILING(TRY_CONVERT(float, r.Cota) / 540.0)
                                 ELSE 1.0
                             END
                         ELSE 1.0
@@ -30108,6 +30918,193 @@ def api_kanban_ocupacao_calendario():
             }
         ), 500
 
+    max_bloco_livre_por_dia: dict[str, int] = {}
+
+    if int(eh_digital or 0) == 1 and rows:
+        try:
+            datas_calendario = []
+            for row_cal in rows:
+                data_txt = str(row_cal.Data or "").strip()
+                if not data_txt:
+                    continue
+                try:
+                    datas_calendario.append(datetime.strptime(data_txt[:10], "%Y-%m-%d").date())
+                except Exception:
+                    continue
+
+            if datas_calendario:
+                inicio_grade = min(datas_calendario)
+                fim_grade = max(datas_calendario)
+                ocupado_por_dia: dict[date, set[int]] = {dia: set() for dia in datas_calendario}
+
+                sql_itens_grade = text("""
+                    SELECT
+                         Origem = CAST('CONTRATO' AS varchar(20))
+                        ,IDItem = TRY_CONVERT(int, c.IDFatoControleContratosItensEuromidia)
+                        ,DataInicio = TRY_CONVERT(date, c.DataInicioPrevisto)
+                        ,DataFim = COALESCE(
+                            TRY_CONVERT(date, c.DataCancelamento),
+                            TRY_CONVERT(date, c.DataTerminoPrevisto),
+                            CONVERT(date, '9999-12-31')
+                         )
+                        ,Cota = c.Cota
+                        ,SpanQtd = CAST(NULL AS int)
+                        ,LoopInicio = CAST(NULL AS varchar(30))
+                        ,LoopFim = CAST(NULL AS varchar(30))
+                        ,OrdemData = COALESCE(TRY_CONVERT(datetime2, c.DataAtualizacao), SYSUTCDATETIME())
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] c WITH (NOLOCK)
+                    WHERE c.AtivoCancelamento COLLATE Latin1_General_CI_AS = 'A' COLLATE Latin1_General_CI_AS
+                      AND (:cod_ponto IS NULL OR TRY_CONVERT(int, c.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+                      AND UPPER(LTRIM(RTRIM(COALESCE(c.CodFace COLLATE Latin1_General_CI_AS, '')))) = UPPER(LTRIM(RTRIM(:cod_face))) COLLATE Latin1_General_CI_AS
+                      AND c.DataInicioPrevisto IS NOT NULL
+                      AND TRY_CONVERT(date, c.DataInicioPrevisto) <= :data_fim
+                      AND COALESCE(TRY_CONVERT(date, c.DataCancelamento), TRY_CONVERT(date, c.DataTerminoPrevisto), CONVERT(date, '9999-12-31')) >= :data_inicio
+
+                    UNION ALL
+
+                    SELECT
+                         Origem = CAST('RESERVA' AS varchar(20))
+                        ,IDItem = TRY_CONVERT(int, r.IDFatoOcupacaoPaineisEuromidia)
+                        ,DataInicio = TRY_CONVERT(date, r.DataInicio)
+                        ,DataFim = COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31'))
+                        ,Cota = r.Cota
+                        ,SpanQtd = TRY_CONVERT(int, r.SpanQtd)
+                        ,LoopInicio = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), r.LoopInicio), '')))
+                        ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), r.LoopFim), '')))
+                        ,OrdemData = COALESCE(TRY_CONVERT(datetime2, r.CriadoEm), TRY_CONVERT(datetime2, r.DataAtualizacao), SYSUTCDATETIME())
+                    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r WITH (NOLOCK)
+                    WHERE (:cod_ponto IS NULL OR TRY_CONVERT(int, r.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+                      AND UPPER(LTRIM(RTRIM(COALESCE(r.CodFace COLLATE Latin1_General_CI_AS, '')))) = UPPER(LTRIM(RTRIM(:cod_face))) COLLATE Latin1_General_CI_AS
+                      AND UPPER(LTRIM(RTRIM(COALESCE(r.Origem COLLATE Latin1_General_CI_AS, '')))) IN ('RESERVA', 'KANBAN')
+                      AND r.Status COLLATE Latin1_General_CI_AS = 'RESERVADO' COLLATE Latin1_General_CI_AS
+                      AND r.CanceladoEm IS NULL
+                      AND r.DataInicio IS NOT NULL
+                      AND TRY_CONVERT(date, r.DataInicio) <= :data_fim
+                      AND COALESCE(TRY_CONVERT(date, r.DataFim), CONVERT(date, '9999-12-31')) >= :data_inicio
+                    ORDER BY DataInicio ASC, DataFim ASC, OrdemData ASC, IDItem ASC;
+                """)
+
+                itens_grade = db.session.execute(
+                    sql_itens_grade,
+                    {
+                        "cod_face": cod_face,
+                        "cod_ponto": cod_ponto,
+                        "data_inicio": inicio_grade,
+                        "data_fim": fim_grade,
+                    },
+                ).mappings().all()
+
+                capacidade_int = max(1, int(capacidade_slots or 16))
+
+                def _dias_item_calendario(di_item: date, df_item: date) -> list[date]:
+                    if isinstance(di_item, datetime):
+                        di_item = di_item.date()
+                    if isinstance(df_item, datetime):
+                        df_item = df_item.date()
+                    if di_item is None or df_item is None:
+                        return []
+                    ini = max(di_item, inicio_grade)
+                    fim = min(df_item, fim_grade)
+                    if fim < ini:
+                        return []
+                    return _datas_inclusivas_reserva_kanban(ini, fim)
+
+                def _bloco_livre_cal(dia: date, idx: int, span: int) -> bool:
+                    ocupados = ocupado_por_dia.setdefault(dia, set())
+                    for off in range(int(span)):
+                        if int(idx) + off in ocupados:
+                            return False
+                    return True
+
+                def _bloco_livre_todos_cal(dias: list[date], idx: int, span: int) -> bool:
+                    return all(_bloco_livre_cal(dia, idx, span) for dia in dias)
+
+                def _blocos_possiveis_cal(span: int) -> list[int]:
+                    return list(range(0, capacidade_int - int(span) + 1))
+
+                def _blocos_livres_dia_cal(dia: date, span: int) -> list[int]:
+                    return [idx for idx in _blocos_possiveis_cal(span) if _bloco_livre_cal(dia, idx, span)]
+
+                def _escolher_bloco_cal(blocos: list[int], preferido: int | None = None) -> int | None:
+                    blocos = list(blocos or [])
+                    if not blocos:
+                        return None
+                    if preferido is None:
+                        return blocos[0]
+                    return sorted(blocos, key=lambda idx: (abs(int(idx) - int(preferido)), int(idx)))[0]
+
+                def _marcar_bloco_cal(dia: date, idx: int, span: int) -> None:
+                    ocupados = ocupado_por_dia.setdefault(dia, set())
+                    for off in range(int(span)):
+                        slot_idx = int(idx) + off
+                        if 0 <= slot_idx < capacidade_int:
+                            ocupados.add(slot_idx)
+
+                for item_grade in itens_grade or []:
+                    dias_item = _dias_item_calendario(item_grade.get("DataInicio"), item_grade.get("DataFim"))
+                    if not dias_item:
+                        continue
+
+                    span_item = max(1, min(
+                        _span_por_cota_reserva_grade_kanban(item_grade.get("Cota"), item_grade.get("SpanQtd")),
+                        capacidade_int,
+                    ))
+
+                    idx_exp = _slot_indice_grade_reserva_kanban(item_grade.get("LoopInicio"), capacidade_int)
+                    idx_fim_exp = _slot_indice_grade_reserva_kanban(item_grade.get("LoopFim"), capacidade_int)
+                    plano_item: dict[date, int] = {}
+
+                    if idx_exp is not None:
+                        largura_exp = (idx_fim_exp - idx_exp + 1) if idx_fim_exp is not None else span_item
+                        if largura_exp == span_item and (idx_exp + span_item - 1) < capacidade_int:
+                            plano_exp = {dia: idx_exp for dia in dias_item}
+                            if _bloco_livre_todos_cal(dias_item, idx_exp, span_item):
+                                plano_item = plano_exp
+                            else:
+                                plano_item = plano_exp
+
+                    if not plano_item:
+                        for idx in _blocos_possiveis_cal(span_item):
+                            if _bloco_livre_todos_cal(dias_item, idx, span_item):
+                                plano_item = {dia: idx for dia in dias_item}
+                                break
+
+                    if not plano_item:
+                        preferido = None
+                        for dia in dias_item:
+                            livres = _blocos_livres_dia_cal(dia, span_item)
+                            escolhido = _escolher_bloco_cal(livres, preferido)
+                            if escolhido is None:
+                                escolhido = _escolher_bloco_cal(_blocos_possiveis_cal(span_item), preferido)
+                            if escolhido is None:
+                                escolhido = 0
+                            plano_item[dia] = int(escolhido)
+                            preferido = int(escolhido)
+
+                    for dia, idx in plano_item.items():
+                        _marcar_bloco_cal(dia, idx, span_item)
+
+                for dia in datas_calendario:
+                    ocupados = ocupado_por_dia.get(dia, set()) or set()
+                    melhor = 0
+                    atual_livre = 0
+                    for idx in range(capacidade_int):
+                        if idx in ocupados:
+                            melhor = max(melhor, atual_livre)
+                            atual_livre = 0
+                        else:
+                            atual_livre += 1
+                    melhor = max(melhor, atual_livre)
+                    max_bloco_livre_por_dia[dia.isoformat()] = int(melhor)
+
+        except Exception:
+            current_app.logger.exception(
+                "KANBAN OCUPACAO: falha ao calcular maior bloco livre por dia da face %s.",
+                cod_face,
+            )
+            max_bloco_livre_por_dia = {}
+
+
     def _numero_json(valor: Any) -> int | float:
         try:
             numero = float(valor or 0)
@@ -30128,6 +31125,8 @@ def api_kanban_ocupacao_calendario():
             "disp": _numero_json(r.SlotsDisponiveis),
             "cap": _numero_json(r.CapacidadeSlots),
             "ocup": _numero_json(r.SlotsOcupados),
+            "max_bloco_livre": max_bloco_livre_por_dia.get(chave),
+            "bloco_livre_max": max_bloco_livre_por_dia.get(chave),
             "pct": float(r.OcupacaoPct) if r.OcupacaoPct is not None else None,
             "dia_disponivel": int(r.DiaDisponivel or 0),
             "eh_digital": int(r.EhDigital or 0),
@@ -30754,6 +31753,11 @@ def api_card_criar(id_kanban: int):
 
         etapa = "ler_payload"
         payload = request.get_json(silent=True) or {}
+        client_request_id = str(
+            payload.get("client_request_id")
+            or payload.get("clientRequestId")
+            or ""
+        ).strip()[:80] or None
 
         titulo = (payload.get("titulo") or "").strip()
         descricao = payload.get("descricao")
@@ -31447,7 +32451,7 @@ def api_card_criar(id_kanban: int):
         db.session.commit()
 
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=int(novo_id))
-        detalhe = _obter_card_detalhe_payload(int(novo_id))
+        detalhe = _obter_card_quadro_payload_minimo(int(novo_id))
 
         _emitir_evento_kanban(
             id_kanban,
@@ -31461,6 +32465,8 @@ def api_card_criar(id_kanban: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "payload_minimo": True,
+                "client_request_id": client_request_id,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_reservas": sincronizacao_reservas,
             },
@@ -31486,6 +32492,8 @@ def api_card_criar(id_kanban: int):
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "payload_minimo": True,
+                "client_request_id": client_request_id,
             }
         ), 201
 
@@ -31538,6 +32546,11 @@ def api_card_atualizar(id_card: int):
         id_fase_atual = int(card_atual.get("IDDimKanbanFaseAtual") or 0)
 
         payload = request.get_json(silent=True) or {}
+        client_request_id = str(
+            payload.get("client_request_id")
+            or payload.get("clientRequestId")
+            or ""
+        ).strip()[:80] or None
 
         titulo = (payload.get("titulo") or "").strip()
         descricao = payload.get("descricao")
@@ -32331,7 +33344,10 @@ def api_card_atualizar(id_card: int):
 
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
 
-        detalhe = _obter_card_detalhe_payload(id_card)
+        # Depois do commit, devolvo somente o payload mínimo necessário para o quadro.
+        # O detalhe completo continua disponível no GET do card. Isso reduz o tempo do PUT
+        # e evita o modal ficar preso em "Salvando..." esperando consultas pesadas de detalhe.
+        detalhe = _obter_card_quadro_payload_minimo(id_card)
 
         _emitir_evento_kanban(
             id_kanban,
@@ -32344,6 +33360,8 @@ def api_card_atualizar(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "payload_minimo": True,
+                "client_request_id": client_request_id,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
@@ -32364,6 +33382,7 @@ def api_card_atualizar(id_card: int):
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
                 "painel_faces": detalhe.get("painel_faces", detalhe.get("paineis_vinculados", [])),
+                "payload_minimo": True,
                 "tipo_contrato": sincronizacao_tipo,
                 "contrato_existente": contrato_existente,
                 "snapshot_solicitacao": snapshot_solicitacao,

@@ -5781,6 +5781,8 @@ def grade_painel(codponto: int):
                 None,
                 None,
                 _id_vendedor_res,
+                rr[12] if len(rr) > 12 else None,
+                rr[13] if len(rr) > 13 else None,
             )
         )
 
@@ -6454,6 +6456,9 @@ def grade_painel(codponto: int):
             except Exception:
                 id_vendedor_item = None
 
+            loop_inicio_db = r[14] if len(r) > 14 else None
+            loop_fim_db = r[15] if len(r) > 15 else None
+
             try:
                 bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
             except Exception:
@@ -6554,19 +6559,275 @@ def grade_painel(codponto: int):
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "LoopInicioDb": loop_inicio_db,
+                    "LoopFimDb": loop_fim_db,
                 }
             )
+
+        def _slot_indice_visual_grade(valor):
+            texto = str(valor or "").strip().upper()
+            if not texto:
+                return None
+            m = re.search(r"(\d+)", texto)
+            if not m:
+                return None
+            try:
+                indice = int(m.group(1)) - 1
+            except Exception:
+                return None
+            if 0 <= indice < len(LOOPS_PERMITIDOS):
+                return indice
+            return None
+
+        def _valor_visual_grade_eh_inteiro(valor) -> bool:
+            """Identifica DiaInicio/DiaFim da grade, que são offsets inteiros dentro do período."""
+            return isinstance(valor, int) and not isinstance(valor, bool)
+
+        def _coerce_data_visual_grade(valor):
+            """
+            Converte valores visuais da grade para date quando possível.
+
+            A grade usa dois tipos de valor ao mesmo tempo:
+            - DiaInicio/DiaFim: offset inteiro do dia dentro do range exibido;
+            - DataInicio/DataFim: data real do banco.
+
+            O erro corrigido aqui acontecia porque a rotina de fragmentação tratava
+            DiaInicio/DiaFim inteiro como date e tentava somar timedelta em int.
+            """
+            if valor is None:
+                return None
+
+            if isinstance(valor, datetime):
+                return valor.date()
+
+            if isinstance(valor, date):
+                return valor
+
+            if _valor_visual_grade_eh_inteiro(valor):
+                try:
+                    return dt_ini + timedelta(days=int(valor) - 1)
+                except Exception:
+                    return None
+
+            texto = str(valor or "").strip()
+            if not texto:
+                return None
+
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(texto[:10], fmt).date()
+                except Exception:
+                    pass
+
+            try:
+                return _coerce_to_date(texto)
+            except Exception:
+                return None
+
+        def _offset_visual_grade(valor):
+            """Retorna o offset 1..N usado pelo template para posicionar a barra no range."""
+            if valor is None:
+                return None
+
+            if _valor_visual_grade_eh_inteiro(valor):
+                try:
+                    return int(valor)
+                except Exception:
+                    return None
+
+            data_valor = _coerce_data_visual_grade(valor)
+            if data_valor is None:
+                return None
+
+            try:
+                return int((data_valor - dt_ini).days) + 1
+            except Exception:
+                return None
+
+        def _proximo_dia_visual_grade(valor):
+            if _valor_visual_grade_eh_inteiro(valor):
+                return int(valor) + 1
+
+            data_valor = _coerce_data_visual_grade(valor)
+            if data_valor is not None:
+                return data_valor + timedelta(days=1)
+
+            return None
+
+        def _dias_visuais_item_grade(inicio, fim):
+            dias = []
+
+            if inicio is None or fim is None:
+                return dias
+
+            # Quando vem de DiaInicio/DiaFim, são offsets inteiros do range da grade.
+            # Nesse caso a iteração tem que ser +1, não + timedelta.
+            if _valor_visual_grade_eh_inteiro(inicio) and _valor_visual_grade_eh_inteiro(fim):
+                try:
+                    ini_int = int(inicio)
+                    fim_int = int(fim)
+                except Exception:
+                    return dias
+
+                if fim_int < ini_int:
+                    return dias
+
+                return list(range(ini_int, fim_int + 1))
+
+            ini_dt = _coerce_data_visual_grade(inicio)
+            fim_dt = _coerce_data_visual_grade(fim)
+
+            if ini_dt is None or fim_dt is None or fim_dt < ini_dt:
+                return dias
+
+            atual = ini_dt
+            while atual <= fim_dt:
+                dias.append(atual)
+                atual = atual + timedelta(days=1)
+
+            return dias
+
+        def _dias_visuais_consecutivos_grade(dia_atual, dia_anterior):
+            if dia_atual is None or dia_anterior is None:
+                return False
+
+            if _valor_visual_grade_eh_inteiro(dia_atual) and _valor_visual_grade_eh_inteiro(dia_anterior):
+                return int(dia_atual) == int(dia_anterior) + 1
+
+            data_atual = _coerce_data_visual_grade(dia_atual)
+            data_anterior = _coerce_data_visual_grade(dia_anterior)
+
+            if data_atual is None or data_anterior is None:
+                return False
+
+            return data_atual == (data_anterior + timedelta(days=1))
+
+        def _agrupar_plano_visual_grade(plano_por_dia, spans):
+            grupos = []
+            if not plano_por_dia:
+                return grupos
+
+            dias_ord = sorted(plano_por_dia.keys(), key=lambda d: _offset_visual_grade(d) or 0)
+            seg_ini = dias_ord[0]
+            seg_fim = dias_ord[0]
+            idx_atual = int(plano_por_dia[seg_ini])
+
+            for dia in dias_ord[1:]:
+                idx_dia = int(plano_por_dia[dia])
+                if idx_dia == idx_atual and _dias_visuais_consecutivos_grade(dia, seg_fim):
+                    seg_fim = dia
+                    continue
+
+                grupos.append((seg_ini, seg_fim, idx_atual))
+                seg_ini = dia
+                seg_fim = dia
+                idx_atual = idx_dia
+
+            grupos.append((seg_ini, seg_fim, idx_atual))
+            return grupos
+
+        def _renderizar_item_fragmentado_grade(cf, it, plano_por_dia, spans, conflito_forcado=False):
+            grupos = _agrupar_plano_visual_grade(plano_por_dia, spans)
+            fragmentado = len(grupos) > 1
+
+            for seg_ini, seg_fim, idx_inicio in grupos:
+                for off in range(spans):
+                    idx_slot = idx_inicio + off
+                    if idx_slot < 0 or idx_slot >= len(LOOPS_PERMITIDOS):
+                        continue
+
+                    lp = LOOPS_PERMITIDOS[idx_slot]
+                    item_slot = dict(it)
+                    item_slot["DataInicioOriginal"] = it.get("DataInicio")
+                    item_slot["DataFimOriginal"] = it.get("DataFim")
+                    item_slot["DiaInicioOriginal"] = it.get("DiaInicio")
+                    item_slot["DiaFimOriginal"] = it.get("DiaFim")
+                    seg_ini_data = _coerce_data_visual_grade(seg_ini)
+                    seg_fim_data = _coerce_data_visual_grade(seg_fim)
+                    seg_ini_offset = _offset_visual_grade(seg_ini)
+                    seg_fim_offset = _offset_visual_grade(seg_fim)
+
+                    item_slot["DataInicio"] = seg_ini_data or it.get("DataInicio")
+                    item_slot["DataFim"] = seg_fim_data or it.get("DataFim")
+                    item_slot["DiaInicio"] = seg_ini_offset if seg_ini_offset is not None else seg_ini
+                    item_slot["DiaFim"] = seg_fim_offset if seg_fim_offset is not None else seg_fim
+                    item_slot["SpanAltura"] = spans
+                    item_slot["SpanOffset"] = off
+                    item_slot["SpanInicio"] = (off == 0)
+                    item_slot["LayoutFragmentado"] = bool(fragmentado)
+                    item_slot["SlotInicioLayout"] = LOOPS_PERMITIDOS[idx_inicio]
+                    item_slot["SlotFimLayout"] = LOOPS_PERMITIDOS[idx_inicio + spans - 1]
+                    item_slot["BitConflito"] = bool(conflito_forcado or item_slot.get("BitConflito"))
+
+                    ocupacoes_por_slot[(cf, lp)].append(item_slot)
+
+                    if item_slot["BitConflito"]:
+                        slots_conflito.add((cf, lp))
 
         for cf, itens_face in (itens_por_face or {}).items():
             if not itens_face:
                 continue
 
             itens_face = sorted(itens_face, key=lambda x: (x["DataInicio"], x["DataFim"], x["ID"]))
-            fim_por_slot = {lp: None for lp in LOOPS_PERMITIDOS}
+            ocupado_por_dia = {}
+
+            def _ocupado_no_dia(dia):
+                return ocupado_por_dia.setdefault(dia, set())
+
+            def _blocos_possiveis(spans):
+                return list(range(0, len(LOOPS_PERMITIDOS) - spans + 1))
+
+            def _bloco_livre_dia(dia, idx, spans):
+                ocupados = _ocupado_no_dia(dia)
+                for off in range(spans):
+                    if (idx + off) in ocupados:
+                        return False
+                return True
+
+            def _bloco_livre_todos_dias(dias, idx, spans):
+                for dia in dias:
+                    if not _bloco_livre_dia(dia, idx, spans):
+                        return False
+                return True
+
+            def _blocos_livres_dia(dia, spans):
+                return [idx for idx in _blocos_possiveis(spans) if _bloco_livre_dia(dia, idx, spans)]
+
+            def _escolher_bloco_visual(blocos, preferido=None):
+                blocos = list(blocos or [])
+                if not blocos:
+                    return None
+                if preferido is None:
+                    return blocos[0]
+                try:
+                    pref = int(preferido)
+                except Exception:
+                    pref = None
+                if pref is None:
+                    return blocos[0]
+                return sorted(blocos, key=lambda idx: (abs(int(idx) - pref), int(idx)))[0]
+
+            def _marcar_ocupacao_plano(plano_por_dia, spans):
+                conflito_local = False
+                for dia, idx in (plano_por_dia or {}).items():
+                    ocupados = _ocupado_no_dia(dia)
+                    for off in range(spans):
+                        slot_idx = int(idx) + off
+                        if slot_idx in ocupados:
+                            conflito_local = True
+                        ocupados.add(slot_idx)
+                return conflito_local
 
             for it in itens_face:
-                ini = it["DataInicio"]
-                fim = it["DataFim"]
+                ini = it.get("DiaInicio") or it.get("DataInicio")
+                fim = it.get("DiaFim") or it.get("DataFim")
+
+                if ini is None or fim is None:
+                    continue
+
+                dias_item = _dias_visuais_item_grade(ini, fim)
+                if not dias_item:
+                    continue
 
                 spans = int(it.get("Spans") or 1)
                 if spans <= 0:
@@ -6574,57 +6835,47 @@ def grade_painel(codponto: int):
                 if spans > len(LOOPS_PERMITIDOS):
                     spans = len(LOOPS_PERMITIDOS)
 
-                idx_escolhido = None
-
-                for idx in range(0, len(LOOPS_PERMITIDOS) - spans + 1):
-                    ok = True
-                    for off in range(spans):
-                        lp = LOOPS_PERMITIDOS[idx + off]
-                        fim_atual = fim_por_slot.get(lp)
-                        if fim_atual is not None and ini <= fim_atual:
-                            ok = False
-                            break
-                    if ok:
-                        idx_escolhido = idx
-                        break
-
+                plano_por_dia = {}
                 conflito_forcado = False
 
-                if idx_escolhido is None:
-                    conflito_forcado = True
+                idx_exp = _slot_indice_visual_grade(it.get("LoopInicioDb"))
+                idx_fim_exp = _slot_indice_visual_grade(it.get("LoopFimDb"))
+                if idx_exp is not None:
+                    if idx_fim_exp is not None and ((idx_fim_exp - idx_exp + 1) != spans):
+                        idx_exp = None
+                    if idx_exp is not None and (idx_exp + spans - 1) >= len(LOOPS_PERMITIDOS):
+                        idx_exp = None
 
-                    melhor_idx = 0
-                    melhor_val = None
-                    for idx in range(0, len(LOOPS_PERMITIDOS) - spans + 1):
-                        val = max(
-                            [
-                                (fim_por_slot.get(LOOPS_PERMITIDOS[idx + off]) or date(1900, 1, 1))
-                                for off in range(spans)
-                            ]
-                        )
-                        if melhor_val is None or val < melhor_val:
-                            melhor_val = val
-                            melhor_idx = idx
+                if idx_exp is not None:
+                    plano_exp = {dia: idx_exp for dia in dias_item}
+                    if _bloco_livre_todos_dias(dias_item, idx_exp, spans):
+                        plano_por_dia = plano_exp
+                    else:
+                        plano_por_dia = plano_exp
+                        conflito_forcado = True
 
-                    idx_escolhido = melhor_idx
+                if not plano_por_dia:
+                    for idx in _blocos_possiveis(spans):
+                        if _bloco_livre_todos_dias(dias_item, idx, spans):
+                            plano_por_dia = {dia: idx for dia in dias_item}
+                            break
 
-                for off in range(spans):
-                    lp = LOOPS_PERMITIDOS[idx_escolhido + off]
+                if not plano_por_dia:
+                    preferido = None
+                    for dia in dias_item:
+                        livres = _blocos_livres_dia(dia, spans)
+                        escolhido = _escolher_bloco_visual(livres, preferido)
 
-                    fim_atual = fim_por_slot.get(lp)
-                    if fim_atual is None or fim > fim_atual:
-                        fim_por_slot[lp] = fim
+                        if escolhido is None:
+                            escolhido = _escolher_bloco_visual(_blocos_possiveis(spans), preferido)
+                            conflito_forcado = True
 
-                    item_slot = dict(it)
-                    item_slot["SpanAltura"] = spans
-                    item_slot["SpanOffset"] = off
-                    item_slot["SpanInicio"] = (off == 0)
-                    item_slot["BitConflito"] = bool(conflito_forcado)
+                        plano_por_dia[dia] = int(escolhido)
+                        preferido = int(escolhido)
 
-                    ocupacoes_por_slot[(cf, lp)].append(item_slot)
-
-                    if conflito_forcado:
-                        slots_conflito.add((cf, lp))
+                conflito_marcacao = _marcar_ocupacao_plano(plano_por_dia, spans)
+                conflito_forcado = bool(conflito_forcado or conflito_marcacao)
+                _renderizar_item_fragmentado_grade(cf, it, plano_por_dia, spans, conflito_forcado)
 
         for (cf, lp), itens in (ocupacoes_por_slot or {}).items():
             if not itens or len(itens) <= 1:
@@ -6685,6 +6936,9 @@ def grade_painel(codponto: int):
                 id_vendedor_item = int(r[13]) if r[13] is not None else None
             except Exception:
                 id_vendedor_item = None
+
+            loop_inicio_db = r[14] if len(r) > 14 else None
+            loop_fim_db = r[15] if len(r) > 15 else None
 
             try:
                 bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
@@ -6753,6 +7007,8 @@ def grade_painel(codponto: int):
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "LoopInicioDb": loop_inicio_db,
+                    "LoopFimDb": loop_fim_db,
                 }
             )
 
@@ -20017,6 +20273,420 @@ def _somar_dias_uteis_reserva(data_base: datetime, qtd_dias_uteis: int = 2) -> d
     return atual
 
 
+
+
+def _slot_indice_grade_reserva(valor, capacidade_slots: int) -> int | None:
+    """Converte SPAN01/1/01 em índice 0-based da grade digital."""
+    try:
+        capacidade = int(capacidade_slots or 0)
+    except Exception:
+        capacidade = 0
+
+    if capacidade <= 0:
+        return None
+
+    texto = str(valor or "").strip().upper()
+    if not texto:
+        return None
+
+    m = re.search(r"(\d+)", texto)
+    if not m:
+        return None
+
+    try:
+        numero = int(m.group(1))
+    except Exception:
+        return None
+
+    indice = numero - 1
+    if 0 <= indice < capacidade:
+        return indice
+
+    return None
+
+
+def _slot_label_grade_reserva(indice: int) -> str:
+    """Retorna o nome visual do slot digital no padrão SPAN01."""
+    try:
+        return f"SPAN{int(indice) + 1:02d}"
+    except Exception:
+        return "SPAN01"
+
+
+def _datas_inclusivas_reserva(data_inicio: date, data_fim: date):
+    """Gera todas as datas de um range inclusivo sem deslocar nenhuma data."""
+    dias = []
+    atual = data_inicio
+    while atual <= data_fim:
+        dias.append(atual)
+        atual = atual + timedelta(days=1)
+    return dias
+
+
+def _span_por_cota_reserva_grade(cota, span_qtd=None) -> int:
+    """
+    Traduz cota em quantidade de slots adjacentes.
+
+    Regras usadas na grade digital:
+    - Cota 1080 ocupa 2 slots juntos.
+    - Cota 540 ocupa 1 slot.
+    - Compatibilidade antiga: cota 1 = 2 slots; cota 2 = 1 slot.
+    - SpanQtd do banco tem prioridade quando vier preenchido.
+    """
+    try:
+        if span_qtd not in (None, "", "null", "None"):
+            span_tmp = int(float(str(span_qtd).strip().replace(",", ".")))
+            if span_tmp > 0:
+                return span_tmp
+    except Exception:
+        pass
+
+    def _cota_para_int(valor):
+        if valor in (None, "", "null", "None"):
+            return 0
+        if isinstance(valor, Decimal):
+            try:
+                return int(valor)
+            except Exception:
+                return int(float(valor))
+        if isinstance(valor, (int, float)):
+            try:
+                return int(round(float(valor)))
+            except Exception:
+                return 0
+        texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
+        if not texto:
+            return 0
+        if "," in texto and "." in texto:
+            texto = texto.replace(".", "").replace(",", ".")
+        elif "," in texto:
+            texto = texto.replace(",", ".")
+        try:
+            return int(Decimal(texto))
+        except Exception:
+            try:
+                return int(round(float(texto)))
+            except Exception:
+                return 0
+
+    cota_int = _cota_para_int(cota)
+
+    if cota_int == 1080:
+        return 2
+    if cota_int == 540:
+        return 1
+    if cota_int == 1:
+        return 2
+    if cota_int == 2:
+        return 1
+
+    return 1
+
+
+def _calcular_plano_encaixe_range_reserva_digital(
+    cod_ponto: int,
+    cod_face: str,
+    data_inicio_obj: date,
+    data_fim_obj: date,
+    span_necessario: int,
+    capacidade_slots: int,
+):
+    """
+    Simula a grade digital dentro do range solicitado.
+
+    Regra crítica:
+    - A ocupação nunca sai do range de datas solicitado.
+    - Uma reserva de 100 dias precisa encontrar 100 dias de espaço dentro do próprio range.
+    - Primeiro tento um bloco contínuo/linha reta.
+    - Se não existir linha reta, encaixo dia a dia nos pedaços livres do próprio dia.
+    - Para SpanQtd=2, cada dia precisa ter 2 slots adjacentes; não aceito slots separados.
+    """
+    try:
+        capacidade = int(capacidade_slots or CAPACIDADE_DIGITAL_FIXA or 16)
+    except Exception:
+        capacidade = int(CAPACIDADE_DIGITAL_FIXA or 16)
+
+    capacidade = max(1, min(capacidade, 200))
+
+    try:
+        span_novo = int(span_necessario or 1)
+    except Exception:
+        span_novo = 1
+
+    span_novo = max(1, min(span_novo, capacidade))
+
+    if data_inicio_obj is None or data_fim_obj is None or data_fim_obj < data_inicio_obj:
+        return {
+            "ok": False,
+            "erro": "Range de datas inválido para simular encaixe.",
+            "dia_sem_espaco": None,
+            "segmentos": [],
+        }
+
+    dias_range = _datas_inclusivas_reserva(data_inicio_obj, data_fim_obj)
+    ocupado = {dia: set() for dia in dias_range}
+
+    def _blocos_possiveis(span):
+        return list(range(0, capacidade - int(span) + 1))
+
+    def _bloco_livre_no_dia(dia, indice, span):
+        slots_ocupados = ocupado.setdefault(dia, set())
+        for off in range(int(span)):
+            if (int(indice) + off) in slots_ocupados:
+                return False
+        return True
+
+    def _bloco_livre_em_todos_os_dias(dias, indice, span):
+        for dia in dias:
+            if not _bloco_livre_no_dia(dia, indice, span):
+                return False
+        return True
+
+    def _blocos_livres_do_dia(dia, span):
+        return [idx for idx in _blocos_possiveis(span) if _bloco_livre_no_dia(dia, idx, span)]
+
+    def _escolher_bloco(blocos, preferido=None):
+        blocos = list(blocos or [])
+        if not blocos:
+            return None
+        if preferido is None:
+            return blocos[0]
+        try:
+            pref = int(preferido)
+        except Exception:
+            pref = None
+        if pref is None:
+            return blocos[0]
+        return sorted(blocos, key=lambda idx: (abs(int(idx) - pref), int(idx)))[0]
+
+    def _plano_para_segmentos(plano_por_dia, span):
+        segmentos = []
+        if not plano_por_dia:
+            return segmentos
+
+        dias_ordenados = sorted(plano_por_dia.keys())
+        seg_ini = dias_ordenados[0]
+        seg_fim = dias_ordenados[0]
+        idx_atual = int(plano_por_dia[seg_ini])
+
+        for dia in dias_ordenados[1:]:
+            idx_dia = int(plano_por_dia[dia])
+            if idx_dia == idx_atual and dia == (seg_fim + timedelta(days=1)):
+                seg_fim = dia
+                continue
+
+            segmentos.append({
+                "data_inicio": seg_ini,
+                "data_fim": seg_fim,
+                "slot_inicio": _slot_label_grade_reserva(idx_atual),
+                "slot_fim": _slot_label_grade_reserva(idx_atual + int(span) - 1),
+                "slot_inicio_indice": idx_atual,
+                "span_qtd": int(span),
+            })
+            seg_ini = dia
+            seg_fim = dia
+            idx_atual = idx_dia
+
+        segmentos.append({
+            "data_inicio": seg_ini,
+            "data_fim": seg_fim,
+            "slot_inicio": _slot_label_grade_reserva(idx_atual),
+            "slot_fim": _slot_label_grade_reserva(idx_atual + int(span) - 1),
+            "slot_inicio_indice": idx_atual,
+            "span_qtd": int(span),
+        })
+        return segmentos
+
+    def _marcar_plano(plano_por_dia, span):
+        for dia, idx in (plano_por_dia or {}).items():
+            slots_ocupados = ocupado.setdefault(dia, set())
+            for off in range(int(span)):
+                slots_ocupados.add(int(idx) + off)
+
+    def _montar_plano_intervalo(di, df, span, loop_inicio=None, loop_fim=None, permitir_forcar=False):
+        if di is None or df is None or df < di:
+            return {"ok": True, "plano": {}, "conflito": False, "dia_sem_espaco": None}
+
+        ini_clip = max(di, data_inicio_obj)
+        fim_clip = min(df, data_fim_obj)
+        if fim_clip < ini_clip:
+            return {"ok": True, "plano": {}, "conflito": False, "dia_sem_espaco": None}
+
+        dias = _datas_inclusivas_reserva(ini_clip, fim_clip)
+        span_int = max(1, min(int(span or 1), capacidade))
+
+        idx_exp = _slot_indice_grade_reserva(loop_inicio, capacidade)
+        idx_fim_exp = _slot_indice_grade_reserva(loop_fim, capacidade)
+        if idx_exp is not None:
+            if idx_fim_exp is not None:
+                largura_exp = (idx_fim_exp - idx_exp) + 1
+                if largura_exp != span_int:
+                    idx_exp = None
+            if idx_exp is not None and (idx_exp + span_int - 1) >= capacidade:
+                idx_exp = None
+
+        if idx_exp is not None:
+            plano_exp = {dia: idx_exp for dia in dias}
+            if _bloco_livre_em_todos_os_dias(dias, idx_exp, span_int):
+                return {"ok": True, "plano": plano_exp, "conflito": False, "dia_sem_espaco": None}
+            if permitir_forcar:
+                return {"ok": True, "plano": plano_exp, "conflito": True, "dia_sem_espaco": None}
+
+        for idx in _blocos_possiveis(span_int):
+            if _bloco_livre_em_todos_os_dias(dias, idx, span_int):
+                return {
+                    "ok": True,
+                    "plano": {dia: idx for dia in dias},
+                    "conflito": False,
+                    "dia_sem_espaco": None,
+                }
+
+        plano = {}
+        preferido = None
+        conflito = False
+
+        for dia in dias:
+            livres = _blocos_livres_do_dia(dia, span_int)
+            escolhido = _escolher_bloco(livres, preferido)
+
+            if escolhido is None:
+                if not permitir_forcar:
+                    return {
+                        "ok": False,
+                        "plano": plano,
+                        "conflito": False,
+                        "dia_sem_espaco": dia,
+                    }
+                escolhido = _escolher_bloco(_blocos_possiveis(span_int), preferido)
+                conflito = True
+
+            plano[dia] = int(escolhido)
+            preferido = int(escolhido)
+
+        return {"ok": True, "plano": plano, "conflito": conflito, "dia_sem_espaco": None}
+
+    sql_existentes = text("""
+        SELECT
+             Origem = CAST('CONTRATO' AS varchar(20))
+            ,IDItem = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+            ,DataInicio = TRY_CONVERT(date, i.DataInicioPrevisto)
+            ,DataFim = COALESCE(
+                TRY_CONVERT(date, i.DataCancelamento),
+                TRY_CONVERT(date, i.DataTerminoPrevisto)
+             )
+            ,Cota = i.Cota
+            ,SpanQtd = CAST(NULL AS int)
+            ,LoopInicio = CAST(NULL AS varchar(30))
+            ,LoopFim = CAST(NULL AS varchar(30))
+            ,OrdemData = COALESCE(TRY_CONVERT(datetime2, i.DataAtualizacao), SYSUTCDATETIME())
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (UPDLOCK, HOLDLOCK)
+        WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
+          AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), i.CodFace), ''))) = :cod_face
+          AND i.DataInicioPrevisto IS NOT NULL
+          AND i.DataTerminoPrevisto IS NOT NULL
+          AND i.AtivoCancelamento = 'A'
+          AND ISNULL(TRY_CONVERT(int, i.BitAtivo), 1) = 1
+          AND TRY_CONVERT(date, i.DataInicioPrevisto) <= :data_fim
+          AND COALESCE(TRY_CONVERT(date, i.DataCancelamento), TRY_CONVERT(date, i.DataTerminoPrevisto)) >= :data_inicio
+
+        UNION ALL
+
+        SELECT
+             Origem = CAST('RESERVA' AS varchar(20))
+            ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+            ,DataInicio = TRY_CONVERT(date, o.DataInicio)
+            ,DataFim = TRY_CONVERT(date, o.DataFim)
+            ,Cota = o.Cota
+            ,SpanQtd = TRY_CONVERT(int, o.SpanQtd)
+            ,LoopInicio = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopInicio), '')))
+            ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopFim), '')))
+            ,OrdemData = COALESCE(TRY_CONVERT(datetime2, o.CriadoEm), TRY_CONVERT(datetime2, o.DataAtualizacao), SYSUTCDATETIME())
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (UPDLOCK, HOLDLOCK)
+        WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+          AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
+          AND o.CanceladoEm IS NULL
+          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
+          AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
+          AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
+          AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
+          AND TRY_CONVERT(date, o.DataFim) >= :data_inicio
+        ORDER BY DataInicio ASC, DataFim ASC, OrdemData ASC, IDItem ASC;
+    """)
+
+    rows_existentes = db.session.execute(
+        sql_existentes,
+        {
+            "cod_ponto": int(cod_ponto),
+            "cod_face": str(cod_face or "").strip(),
+            "data_inicio": data_inicio_obj,
+            "data_fim": data_fim_obj,
+        },
+    ).mappings().all()
+
+    conflitos_existentes = 0
+
+    for row in rows_existentes or []:
+        di = row.get("DataInicio")
+        df = row.get("DataFim")
+        if isinstance(di, datetime):
+            di = di.date()
+        if isinstance(df, datetime):
+            df = df.date()
+        if di is None or df is None or df < di:
+            continue
+
+        span_existente = _span_por_cota_reserva_grade(row.get("Cota"), row.get("SpanQtd"))
+        span_existente = max(1, min(int(span_existente or 1), capacidade))
+
+        plano_existente = _montar_plano_intervalo(
+            di,
+            df,
+            span_existente,
+            row.get("LoopInicio"),
+            row.get("LoopFim"),
+            permitir_forcar=True,
+        )
+
+        if plano_existente.get("conflito"):
+            conflitos_existentes += 1
+
+        _marcar_plano(plano_existente.get("plano") or {}, span_existente)
+
+    plano_novo = _montar_plano_intervalo(
+        data_inicio_obj,
+        data_fim_obj,
+        span_novo,
+        None,
+        None,
+        permitir_forcar=False,
+    )
+
+    if not plano_novo.get("ok"):
+        dia_sem_espaco = plano_novo.get("dia_sem_espaco")
+        return {
+            "ok": False,
+            "erro": (
+                "Não há espaço suficiente dentro do range selecionado. "
+                "A reserva não foi gravada porque pelo menos uma data do período "
+                "não possui bloco livre de slots adjacentes para essa cota."
+            ),
+            "dia_sem_espaco": dia_sem_espaco,
+            "segmentos": _plano_para_segmentos(plano_novo.get("plano") or {}, span_novo),
+            "conflitos_existentes": conflitos_existentes,
+        }
+
+    segmentos = _plano_para_segmentos(plano_novo.get("plano") or {}, span_novo)
+
+    return {
+        "ok": True,
+        "erro": None,
+        "dia_sem_espaco": None,
+        "segmentos": segmentos,
+        "modo": "reto" if len(segmentos) <= 1 else "fragmentado",
+        "conflitos_existentes": conflitos_existentes,
+    }
+
+
 @paineis_bp.route("/api/ocupacao/reserva/criar", methods=["POST"])
 @login_required
 def api_ocupacao_reserva_criar():
@@ -20422,12 +21092,17 @@ def api_ocupacao_reserva_criar():
     spanqtd_novo = slots_novo if eh_digital == 1 else None
 
 
-    sem_capacidade = False
+    plano_encaixe_reserva = {
+        "ok": True,
+        "modo": "nao_digital",
+        "segmentos": [],
+        "conflitos_existentes": 0,
+    }
 
     if eh_digital == 0:
         sql_conflito = text("""
             SELECT TOP 1 1
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] WITH (UPDLOCK, HOLDLOCK)
             WHERE CodFace = :cod_face
               AND CodPonto = :cod_ponto
               AND CanceladoEm IS NULL
@@ -20445,171 +21120,58 @@ def api_ocupacao_reserva_criar():
         }).scalar()
 
         if existe:
-            # ANTES: return 409
-            # AGORA: entra em FILA
-            sem_capacidade = True
+            return jsonify({
+                "ok": False,
+                "erro": "Não há espaço livre nesse período para painel não digital. A reserva não foi gravada."
+            }), 409
 
     else:
+        plano_encaixe_reserva = _calcular_plano_encaixe_range_reserva_digital(
+            cod_ponto=cod_ponto_int,
+            cod_face=cod_face,
+            data_inicio_obj=data_inicio_obj,
+            data_fim_obj=data_fim_obj,
+            span_necessario=slots_novo,
+            capacidade_slots=capacidade_slots,
+        )
 
-        sql_conflito_digital = text("""
-            DECLARE @CodFace varchar(20) = :cod_face;
-            DECLARE @CodPonto int = TRY_CONVERT(int, :cod_ponto);
-            DECLARE @Ini date = TRY_CONVERT(date, :data_inicio);
-            DECLARE @Fim date = TRY_CONVERT(date, :data_fim);
-
-            IF @Ini IS NULL OR @Fim IS NULL
-            BEGIN
-                SELECT TOP 1
-                    Conflito = 1,
-                    Dia = CAST(NULL AS date),
-                    SlotsOcupados = CAST(NULL AS int),
-                    CapacidadeSlots = CAST(NULL AS int),
-                    SlotsDisponiveis = CAST(NULL AS int);
-                RETURN;
-            END
-
-            ;WITH Painel AS (
-                SELECT TOP (1)
-                    p.CodPonto,
-                    TipoPainel      = UPPER(LTRIM(RTRIM(p.Tipo))),
-                    QuantidadeFaces = NULLIF(p.QuantidadeFaces, 0),
-                    BitAtivo        = COALESCE(p.BitAtivo, 1)
-                FROM [Integracao].[Silver].[DimPaineisEuromidia] p
-                WHERE p.CodPonto = @CodPonto
-            ),
-            Capacidade AS (
-                SELECT
-                    BitAtivo   = (SELECT BitAtivo FROM Painel),
-                    EhDigital =
-                        CASE
-                          WHEN COALESCE((SELECT TipoPainel FROM Painel),'') LIKE '%DIGITAL%' THEN 1
-                          ELSE 0
-                        END,
-                    CapacidadeSlots =
-                        CASE
-                          WHEN COALESCE((SELECT TipoPainel FROM Painel),'') LIKE '%DIGITAL%'
-                          THEN COALESCE((SELECT QuantidadeFaces FROM Painel), 16)
-                          ELSE 1
-                        END
-            ),
-            OcupacoesBase AS (
-                SELECT
-                    DataInicio = CAST(fo.DataInicio AS date),
-                    DataFim    = CAST(fo.DataFim    AS date),
-                    SpanQtd    = fo.SpanQtd,
-                    NumeroContrato = fo.NumeroContrato,
-                    NumeroPrevia   = fo.NumeroPrevia,
-                    DataAtualizacao= fo.DataAtualizacao
-                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-                WHERE fo.CodFace = @CodFace
-                  AND (@CodPonto IS NULL OR fo.CodPonto = @CodPonto)
-                  AND fo.DataInicio IS NOT NULL
-                  AND fo.DataFim    IS NOT NULL
-                  AND fo.CanceladoEm IS NULL
-                  AND fo.Status IN ('ATIVO','RESERVADO')
-            ),
-            OcupacoesDedup AS (
-                SELECT *
-                FROM (
-                    SELECT
-                        b.*,
-                        rn = ROW_NUMBER() OVER (
-                            PARTITION BY
-                                b.DataInicio, b.DataFim,
-                                ISNULL(b.NumeroContrato,''), ISNULL(b.NumeroPrevia,'')
-                            ORDER BY b.DataAtualizacao DESC
-                        )
-                    FROM OcupacoesBase b
-                ) x
-                WHERE x.rn = 1
-            ),
-            OcupacoesValidas AS (
-                SELECT
-                    DataInicio,
-                    DataFim,
-                    SlotsConsumidos = COALESCE(NULLIF(SpanQtd, 0), 1)
-                FROM OcupacoesDedup
-            ),
-            UsoPorDia AS (
-                SELECT
-                    c.[Data] AS Dia,
-                    SlotsOcupados = COALESCE(SUM(o.SlotsConsumidos), 0),
-                    CapacidadeSlots = (SELECT CapacidadeSlots FROM Capacidade)
-                FROM [Integracao].[Silver].[DimCalendario] c
-                LEFT JOIN OcupacoesValidas o
-                       ON c.[Data] >= o.DataInicio
-                      AND c.[Data] <= o.DataFim
-                WHERE c.[Data] >= @Ini
-                  AND c.[Data] <= @Fim
-                GROUP BY c.[Data]
-            )
-            SELECT TOP 1
-                Conflito = 1,
-                Dia,
-                SlotsOcupados,
-                CapacidadeSlots,
-                SlotsDisponiveis =
-                    CASE
-                      WHEN CapacidadeSlots - SlotsOcupados < 0 THEN 0
-                      ELSE CapacidadeSlots - SlotsOcupados
-                    END
-            FROM UsoPorDia
-            WHERE SlotsOcupados + :slots_novo > CapacidadeSlots
-            ORDER BY Dia;
-        """)
-
-        conflito = db.session.execute(sql_conflito_digital, {
-            "cod_face": cod_face,
-            "cod_ponto": cod_ponto_int,
-            "data_inicio": data_inicio,
-            "data_fim": data_fim,
-            "slots_novo": slots_novo
-        }).mappings().first()
-
-        if conflito and conflito.get("Conflito") == 1 and conflito.get("Dia") is not None:
-            # ANTES: return 409
-            # AGORA: entra em FILA
-            sem_capacidade = True
+        if not plano_encaixe_reserva.get("ok"):
+            dia_sem_espaco = plano_encaixe_reserva.get("dia_sem_espaco")
+            dia_txt = dia_sem_espaco.strftime("%Y-%m-%d") if hasattr(dia_sem_espaco, "strftime") else None
+            erro_msg = plano_encaixe_reserva.get("erro") or "Não há espaço suficiente na grade para esse range."
+            if dia_txt:
+                erro_msg = f"{erro_msg} Dia sem encaixe: {dia_txt}."
+            return jsonify({
+                "ok": False,
+                "erro": erro_msg,
+                "dia_sem_espaco": dia_txt,
+                "encaixe_modo": "sem_espaco",
+                "qtd_segmentos_simulados": len(plano_encaixe_reserva.get("segmentos") or []),
+            }), 409
 
     reserva_ordem_prioridade_int = 1
 
-    if sem_capacidade:
-        sql_prioridade = text("""
-            DECLARE @Ini date = TRY_CONVERT(date, :data_inicio);
-            DECLARE @Fim date = TRY_CONVERT(date, :data_fim);
+    segmentos_encaixe = plano_encaixe_reserva.get("segmentos") or []
 
-            IF @Ini IS NULL OR @Fim IS NULL
-            BEGIN
-                SELECT CAST(2 AS int) AS ProximaPrioridade;
-                RETURN;
-            END
-
-            SELECT
-                ProximaPrioridade = ISNULL(MAX(COALESCE(ReservaOrdemPrioridade, 0)), 0) + 1
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] WITH (UPDLOCK, HOLDLOCK)
-            WHERE CodFace = :cod_face
-              AND CodPonto = :cod_ponto
-              AND CanceladoEm IS NULL
-              AND Status IN ('ATIVO','RESERVADO')
-              AND DataInicio = @Ini
-              AND DataFim    = @Fim
-              AND ( ( :cota IS NULL AND Cota IS NULL ) OR ( Cota = :cota ) )
-              AND ( ( :spanqtd IS NULL AND SpanQtd IS NULL ) OR ( COALESCE(SpanQtd,0) = COALESCE(:spanqtd,0) ) );
-        """)
-
-        prox = db.session.execute(sql_prioridade, {
-            "cod_face": cod_face,
-            "cod_ponto": cod_ponto_int,
-            "data_inicio": data_inicio,
-            "data_fim": data_fim,
-            "cota": cota_int,
-            "spanqtd": spanqtd_novo
-        }).scalar()
-
-        try:
-            reserva_ordem_prioridade_int = int(prox) if prox is not None else 2
-        except Exception:
-            reserva_ordem_prioridade_int = 2
+    # Regra Tetris/fragmentada:
+    # - se a grade encontrou uma linha reta, grava 1 linha com LoopInicio/LoopFim;
+    # - se a grade precisou encaixar em pedaços, grava 1 linha por segmento.
+    # Isso evita o bug antigo de gravar um único range grande sem LoopInicio/LoopFim,
+    # que depois podia ser redesenhado em cima de outra ocupação quando a grade ficava cheia.
+    if eh_digital == 1:
+        if not segmentos_encaixe:
+            return jsonify({
+                "ok": False,
+                "erro": "O simulador de encaixe não retornou segmentos para gravar a reserva digital."
+            }), 409
+    else:
+        segmentos_encaixe = [{
+            "data_inicio": data_inicio_obj,
+            "data_fim": data_fim_obj,
+            "slot_inicio": None,
+            "slot_fim": None,
+            "span_qtd": None,
+        }]
 
 
     sql_insert = text("""
@@ -20629,6 +21191,8 @@ def api_ocupacao_reserva_criar():
             Status,
             DataInicio,
             DataFim,
+            LoopInicio,
+            LoopFim,
             SpanQtd,
             Cota,
             MarcaExibida,
@@ -20676,6 +21240,8 @@ def api_ocupacao_reserva_criar():
             'RESERVADO',
             TRY_CONVERT(date, :data_inicio),
             TRY_CONVERT(date, :data_fim),
+            :loop_inicio,
+            :loop_fim,
             :spanqtd,
             :cota,
             :marca_exibida,
@@ -20702,32 +21268,58 @@ def api_ocupacao_reserva_criar():
     """)
 
     try:
-        id_fato_ocupacao = db.session.execute(sql_insert, {
-            "cod_ponto": cod_ponto_int,
-            "cod_face": cod_face,
-            "id_painel": id_painel_int,
-            "data_inicio": data_inicio,
-            "data_fim": data_fim,
-            "spanqtd": spanqtd_novo,
-            "cota": cota_int,
-            "marca_exibida": marca_exibida,
-            "vendedor_nome": vendedor_nome,
-            "id_vendedor": id_vendedor_int,
-            "id_cliente": id_cliente_int,
-            "id_fato_controle": id_fato_controle_int,
-            "numero_contrato": numero_contrato,
-            "numero_previa": numero_previa,
-            "texto_original": texto_original_reserva,
-            "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
-            "dias": dias_int,
-            "expira_em": expira_em_reserva,
-            "criado_por": criado_por,
-            "reserva_ordem_prioridade": reserva_ordem_prioridade_int,
-            "tipo_vinculo_origem": "Reserva",
-            "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0
-        }).scalar_one()
+        ids_fato_ocupacao: list[int] = []
 
-        id_fato_ocupacao_int = int(id_fato_ocupacao)
+        for idx_segmento, segmento in enumerate(segmentos_encaixe, start=1):
+            seg_ini = segmento.get("data_inicio") or data_inicio_obj
+            seg_fim = segmento.get("data_fim") or data_fim_obj
+
+            if isinstance(seg_ini, datetime):
+                seg_ini = seg_ini.date()
+            if isinstance(seg_fim, datetime):
+                seg_fim = seg_fim.date()
+
+            if seg_ini is None or seg_fim is None or seg_fim < seg_ini:
+                raise ValueError(f"Segmento de encaixe inválido na posição {idx_segmento}.")
+
+            dias_segmento_int = int((seg_fim - seg_ini).days + 1)
+            loop_inicio_segmento = segmento.get("slot_inicio") if eh_digital == 1 else None
+            loop_fim_segmento = segmento.get("slot_fim") if eh_digital == 1 else None
+            spanqtd_segmento = int(segmento.get("span_qtd") or spanqtd_novo or 1) if eh_digital == 1 else None
+
+            id_fato_ocupacao = db.session.execute(sql_insert, {
+                "cod_ponto": cod_ponto_int,
+                "cod_face": cod_face,
+                "id_painel": id_painel_int,
+                "data_inicio": seg_ini,
+                "data_fim": seg_fim,
+                "loop_inicio": loop_inicio_segmento,
+                "loop_fim": loop_fim_segmento,
+                "spanqtd": spanqtd_segmento,
+                "cota": cota_int,
+                "marca_exibida": marca_exibida,
+                "vendedor_nome": vendedor_nome,
+                "id_vendedor": id_vendedor_int,
+                "id_cliente": id_cliente_int,
+                "id_fato_controle": id_fato_controle_int,
+                "numero_contrato": numero_contrato,
+                "numero_previa": numero_previa,
+                "texto_original": texto_original_reserva,
+                "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
+                "dias": dias_segmento_int,
+                "expira_em": expira_em_reserva,
+                "criado_por": criado_por,
+                "reserva_ordem_prioridade": reserva_ordem_prioridade_int,
+                "tipo_vinculo_origem": "Reserva",
+                "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0
+            }).scalar_one()
+
+            ids_fato_ocupacao.append(int(id_fato_ocupacao))
+
+        if not ids_fato_ocupacao:
+            raise RuntimeError("Nenhuma linha de reserva foi inserida.")
+
+        id_fato_ocupacao_int = int(ids_fato_ocupacao[0])
 
         if empresas_relacionadas:
             sql_insert_empresas_relacionadas = text("""
@@ -20745,20 +21337,21 @@ def api_ocupacao_reserva_criar():
                 )
             """)
 
-            linhas_empresas_relacionadas = [
-                {
-                    "id_fato_controle_contratos": id_fato_controle_int,
-                    "id_empresa": int(item["id_empresa"]),
-                    "id_fato_ocupacao": id_fato_ocupacao_int,
-                    "marca": str(item.get("marca") or marca_exibida).strip()[:200],
-                }
-                for item in empresas_relacionadas
-            ]
+            linhas_empresas_relacionadas = []
+            for id_ocupacao_relacionada in ids_fato_ocupacao:
+                for item in empresas_relacionadas:
+                    linhas_empresas_relacionadas.append({
+                        "id_fato_controle_contratos": id_fato_controle_int,
+                        "id_empresa": int(item["id_empresa"]),
+                        "id_fato_ocupacao": int(id_ocupacao_relacionada),
+                        "marca": str(item.get("marca") or marca_exibida).strip()[:200],
+                    })
 
-            db.session.execute(
-                sql_insert_empresas_relacionadas,
-                linhas_empresas_relacionadas,
-            )
+            if linhas_empresas_relacionadas:
+                db.session.execute(
+                    sql_insert_empresas_relacionadas,
+                    linhas_empresas_relacionadas,
+                )
 
         db.session.commit()
     except Exception as exc:
@@ -20769,8 +21362,11 @@ def api_ocupacao_reserva_criar():
     return jsonify({
         "ok": True,
         "id_fato_ocupacao_paineis_euromidia": id_fato_ocupacao_int,
+        "ids_fato_ocupacao_paineis_euromidia": ids_fato_ocupacao,
         "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0,
         "qtd_empresas_relacionadas": len(empresas_relacionadas),
+        "encaixe_modo": plano_encaixe_reserva.get("modo"),
+        "qtd_segmentos_encaixe": len(plano_encaixe_reserva.get("segmentos") or []),
     })
 
 
