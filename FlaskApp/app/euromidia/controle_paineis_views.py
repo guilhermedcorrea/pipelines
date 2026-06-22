@@ -19818,19 +19818,42 @@ def api_ocupacao_calendario():
 
     cod_face = (request.args.get("cod_face") or request.args.get("codface") or "").strip()
     cod_ponto = (request.args.get("cod_ponto") or request.args.get("codponto") or "").strip()
-    mes_ref  = (request.args.get("mes_ref") or "").strip()
+    mes_ref = (request.args.get("mes_ref") or "").strip()
+    cota_raw = (request.args.get("cota") or "").strip()
     meses = request.args.get("meses", 24)
 
     try:
         meses = int(meses)
     except Exception:
         meses = 24
+    meses = max(1, min(meses, 36))
 
     if not cod_face:
         return jsonify({"ok": False, "erro": "cod_face obrigatório"}), 400
 
-    sql = text("""
-        DECLARE @CodFace varchar(20) = :cod_face;
+    def _primeiro_dia_mes(valor_mes_ref: str) -> date:
+        valor = str(valor_mes_ref or "").strip()
+        if re.match(r"^\d{4}-\d{2}$", valor):
+            try:
+                ano, mes = valor.split("-", 1)
+                return date(int(ano), int(mes), 1)
+            except Exception:
+                pass
+        hoje = date.today()
+        return date(hoje.year, hoje.month, 1)
+
+    def _adicionar_meses(data_base: date, qtd_meses: int) -> date:
+        mes_total = (data_base.month - 1) + int(qtd_meses or 0)
+        ano = data_base.year + (mes_total // 12)
+        mes = (mes_total % 12) + 1
+        return date(ano, mes, 1)
+
+    data_inicio_cal = _primeiro_dia_mes(mes_ref)
+    data_fim_exclusivo = _adicionar_meses(data_inicio_cal, meses)
+    data_fim_cal = data_fim_exclusivo - timedelta(days=1)
+
+    sql_meta = text("""
+        DECLARE @CodFace varchar(100) = :cod_face;
         DECLARE @CodPonto int = TRY_CONVERT(int, NULLIF(:cod_ponto, ''));
 
         IF @CodPonto IS NULL
@@ -19838,198 +19861,346 @@ def api_ocupacao_calendario():
             SELECT TOP (1)
                 @CodPonto = f.CodPonto
             FROM [Integracao].[Silver].[DimFacesPaineis] f
-            WHERE f.CodFace = @CodFace
+            WHERE LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), f.CodFace), ''))) = @CodFace
               AND f.CodPonto IS NOT NULL
             ORDER BY f.IDDimFacesPaineis DESC;
         END;
 
-        IF @CodPonto IS NULL
-        BEGIN
-            SELECT TOP (1)
-                @CodPonto = fo.CodPonto
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE fo.CodFace = @CodFace
-              AND fo.CodPonto IS NOT NULL
-            ORDER BY fo.DataAtualizacao DESC;
-        END;
-
-        DECLARE @Inicio date =
-        CASE
-            WHEN :mes_ref IS NOT NULL AND LEN(:mes_ref) = 7
-            THEN TRY_CONVERT(date, CONCAT(:mes_ref, '-01'))
-            ELSE DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)
-        END;
-
-        IF @Inicio IS NULL
-            SET @Inicio = DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1);
-
-        DECLARE @Fim date = DATEADD(MONTH, :meses, @Inicio);
-
-        ;WITH
-        Painel AS (
+        SELECT TOP (1)
+            CodPonto = COALESCE(f.CodPonto, p.CodPonto, @CodPonto),
+            TipoPainel = UPPER(LTRIM(RTRIM(COALESCE(NULLIF(CONVERT(varchar(100), f.Tipo), ''), NULLIF(CONVERT(varchar(100), p.Tipo), ''), '')))),
+            BitAtivo = COALESCE(p.BitAtivo, 1),
+            EhDigital = CASE
+                WHEN UPPER(LTRIM(RTRIM(COALESCE(NULLIF(CONVERT(varchar(100), f.Tipo), ''), NULLIF(CONVERT(varchar(100), p.Tipo), ''), '')))) LIKE '%DIGITAL%' THEN 1
+                ELSE 0
+            END,
+            CapacidadeSlots = CASE
+                WHEN UPPER(LTRIM(RTRIM(COALESCE(NULLIF(CONVERT(varchar(100), f.Tipo), ''), NULLIF(CONVERT(varchar(100), p.Tipo), ''), '')))) LIKE '%DIGITAL%'
+                    THEN COALESCE(NULLIF(TRY_CONVERT(int, p.QuantidadeFaces), 0), :capacidade_padrao)
+                ELSE 1
+            END
+        FROM [Integracao].[Silver].[DimFacesPaineis] f
+        OUTER APPLY (
             SELECT TOP (1)
                 p.CodPonto,
-                TipoPainel = UPPER(LTRIM(RTRIM(p.Tipo))),
-                QuantidadeFaces = NULLIF(p.QuantidadeFaces, 0),
-                BitAtivo  = COALESCE(p.BitAtivo, 1)
+                p.Tipo,
+                p.QuantidadeFaces,
+                p.BitAtivo,
+                p.DataAtualizacao,
+                p.IDDimPaineisEuromidia
             FROM [Integracao].[Silver].[DimPaineisEuromidia] p
-            WHERE p.CodPonto = @CodPonto
-        ),
-        Capacidade AS (
-            SELECT
-                CodPonto = (SELECT CodPonto FROM Painel),
-                TipoPainel = COALESCE((SELECT TipoPainel FROM Painel), 'DESCONHECIDO'),
-                BitAtivo = (SELECT BitAtivo FROM Painel),
-
-                EhDigital =
-                    CASE
-                      WHEN COALESCE((SELECT TipoPainel FROM Painel),'') LIKE '%DIGITAL%' THEN 1
-                      ELSE 0
-                    END,
-
-                CapacidadeSlots =
-                    CASE
-                      WHEN COALESCE((SELECT TipoPainel FROM Painel),'') LIKE '%DIGITAL%'
-                      THEN COALESCE((SELECT QuantidadeFaces FROM Painel), 16)
-                      ELSE 1
-                    END
-        ),
-        OcupacoesBase AS (
-            SELECT
-                fo.CodFace,
-                DataInicio = CAST(fo.DataInicio AS date),
-                DataFim    = CAST(fo.DataFim    AS date),
-                SpanQtd  = fo.SpanQtd,
-                Cota = fo.Cota,
-                NumeroContrato = fo.NumeroContrato,
-                NumeroPrevia   = fo.NumeroPrevia,
-                DataAtualizacao= fo.DataAtualizacao
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] fo
-            WHERE fo.CodFace = @CodFace
-              AND (@CodPonto IS NULL OR fo.CodPonto = @CodPonto)
-              AND fo.DataInicio IS NOT NULL
-              AND fo.DataFim    IS NOT NULL
-              AND fo.CanceladoEm IS NULL
-              AND fo.Status IN ('ATIVO','RESERVADO')
-        ),
-        OcupacoesDedup AS (
-            SELECT *
-            FROM (
-                SELECT
-                    b.*,
-                    rn = ROW_NUMBER() OVER (
-                        PARTITION BY
-                            b.CodFace, b.DataInicio, b.DataFim,
-                            ISNULL(b.NumeroContrato,''), ISNULL(b.NumeroPrevia,'')
-                        ORDER BY b.DataAtualizacao DESC
-                    )
-                FROM OcupacoesBase b
-            ) x
-            WHERE x.rn = 1
-        ),
-        OcupacoesValidas AS (
-            SELECT
-                d.DataInicio,
-                d.DataFim,
-                SlotsConsumidos =
-                    CASE
-                      WHEN (SELECT EhDigital FROM Capacidade) = 1
-                      THEN COALESCE(NULLIF(d.SpanQtd, 0), 1)
-                      ELSE 1
-                    END
-            FROM OcupacoesDedup d
-        ),
-        UsoPorDia AS (
-            SELECT
-                c.[Data],
-                SlotsOcupados =
-                    CASE
-                      WHEN cap.EhDigital = 1
-                      THEN COALESCE(SUM(o.SlotsConsumidos), 0)
-                      ELSE CASE WHEN COUNT(o.SlotsConsumidos) > 0 THEN 1 ELSE 0 END
-                    END
-            FROM [Integracao].[Silver].[DimCalendario] c
-            CROSS JOIN Capacidade cap
-            LEFT JOIN OcupacoesValidas o
-                   ON c.[Data] >= o.DataInicio
-                  AND c.[Data] <= o.DataFim
-            WHERE c.[Data] >= @Inicio
-              AND c.[Data] <  @Fim
-            GROUP BY c.[Data], cap.EhDigital
-        )
-        SELECT
-            Data = CONVERT(varchar(10), c.[Data], 23),
-            CodPonto  = cap.CodPonto,
-            TipoPainel  = cap.TipoPainel,
-            EhDigital = cap.EhDigital,
-            CapacidadeSlots= cap.CapacidadeSlots,
-            SlotsOcupados  = u.SlotsOcupados,
-
-            SlotsDisponiveis =
-                CASE
-                  WHEN cap.CapacidadeSlots - u.SlotsOcupados < 0 THEN 0
-                  ELSE cap.CapacidadeSlots - u.SlotsOcupados
-                END,
-
-            OcupacaoPct =
-                CASE
-                  WHEN cap.CapacidadeSlots > 0
-                  THEN CAST(u.SlotsOcupados * 100.0 / cap.CapacidadeSlots AS decimal(9,2))
-                  ELSE NULL
-                END,
-
-            DiaDisponivel =
-                CASE
-                  WHEN cap.BitAtivo = 0 THEN 0
-                  WHEN (cap.CapacidadeSlots - u.SlotsOcupados) > 0 THEN 1
-                  ELSE 0
-                END,
-
-            StatusDia =
-                CASE
-                  WHEN cap.BitAtivo = 0 THEN 'INDISPONIVEL'
-                  WHEN cap.EhDigital = 0 AND u.SlotsOcupados = 0 THEN 'DISPONIVEL'
-                  WHEN cap.EhDigital = 0 AND u.SlotsOcupados = 1 THEN 'OCUPADO'
-                  WHEN cap.EhDigital = 1 AND u.SlotsOcupados = 0 THEN 'LIVRE'
-                  WHEN cap.EhDigital = 1 AND u.SlotsOcupados < cap.CapacidadeSlots THEN 'PARCIAL'
-                  ELSE 'LOTADO'
-                END
-        FROM [Integracao].[Silver].[DimCalendario] c
-        JOIN UsoPorDia u
-          ON u.[Data] = c.[Data]
-        CROSS JOIN Capacidade cap
-        WHERE c.[Data] >= @Inicio
-          AND c.[Data] <  @Fim
-        ORDER BY c.[Data];
+            WHERE p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+               OR p.CodPonto = f.CodPonto
+               OR p.CodPonto = @CodPonto
+            ORDER BY
+                CASE WHEN p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia THEN 0 ELSE 1 END,
+                p.DataAtualizacao DESC,
+                p.IDDimPaineisEuromidia DESC
+        ) p
+        WHERE LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), f.CodFace), ''))) = @CodFace
+          AND (@CodPonto IS NULL OR TRY_CONVERT(int, f.CodPonto) = @CodPonto)
+        ORDER BY f.IDDimFacesPaineis DESC;
     """)
 
-    rows = db.session.execute(sql, {
-        "cod_face": cod_face,
-        "cod_ponto": cod_ponto,
-        "mes_ref": mes_ref,
-        "meses": meses
-    }).all()
+    meta = db.session.execute(
+        sql_meta,
+        {
+            "cod_face": cod_face,
+            "cod_ponto": cod_ponto,
+            "capacidade_padrao": int(CAPACIDADE_DIGITAL_FIXA or 16),
+        },
+    ).mappings().first()
 
- 
+    if not meta:
+        return jsonify({"ok": False, "erro": "CodFace/CodPonto não encontrado para montar o calendário."}), 404
+
+    try:
+        cod_ponto_resolvido = int(meta.get("CodPonto")) if meta.get("CodPonto") is not None else None
+    except Exception:
+        cod_ponto_resolvido = None
+
+    tipo_painel = str(meta.get("TipoPainel") or "").strip()
+    bit_ativo = int(meta.get("BitAtivo") or 0)
+    eh_digital = int(meta.get("EhDigital") or 0)
+    try:
+        capacidade_slots = int(meta.get("CapacidadeSlots") or 0)
+    except Exception:
+        capacidade_slots = 0
+
+    if eh_digital == 1:
+        capacidade_slots = max(1, min(capacidade_slots or int(CAPACIDADE_DIGITAL_FIXA or 16), 200))
+    else:
+        capacidade_slots = 1
+
+    span_solicitado = _span_por_cota_reserva_grade(cota_raw, None) if eh_digital == 1 else 1
+    span_solicitado = max(1, min(int(span_solicitado or 1), capacidade_slots))
+
+    dias_calendario = _datas_inclusivas_reserva(data_inicio_cal, data_fim_cal)
+    ocupado: dict[date, set[int]] = {dia: set() for dia in dias_calendario}
+
+    def _blocos_possiveis(span: int):
+        return range(0, max(0, capacidade_slots - int(span) + 1))
+
+    def _bloco_livre_no_dia(dia: date, indice: int, span: int) -> bool:
+        slots_ocupados = ocupado.setdefault(dia, set())
+        for off in range(int(span)):
+            if (int(indice) + off) in slots_ocupados:
+                return False
+        return True
+
+    def _bloco_livre_em_todos_os_dias(dias, indice: int, span: int) -> bool:
+        for dia in dias:
+            if not _bloco_livre_no_dia(dia, indice, span):
+                return False
+        return True
+
+    def _blocos_livres_do_dia(dia: date, span: int):
+        return [idx for idx in _blocos_possiveis(span) if _bloco_livre_no_dia(dia, idx, span)]
+
+    def _escolher_bloco(blocos, preferido=None):
+        blocos = list(blocos or [])
+        if not blocos:
+            return None
+        if preferido is None:
+            return int(blocos[0])
+        try:
+            pref = int(preferido)
+        except Exception:
+            pref = None
+        if pref is None:
+            return int(blocos[0])
+        return int(sorted(blocos, key=lambda idx: (abs(int(idx) - pref), int(idx)))[0])
+
+    def _montar_plano_intervalo(di, df, span, loop_inicio=None, loop_fim=None, permitir_forcar=False):
+        if isinstance(di, datetime):
+            di = di.date()
+        if isinstance(df, datetime):
+            df = df.date()
+        if di is None or df is None or df < di:
+            return {"ok": True, "plano": {}, "conflito": False, "dia_sem_espaco": None}
+
+        ini_clip = max(di, data_inicio_cal)
+        fim_clip = min(df, data_fim_cal)
+        if fim_clip < ini_clip:
+            return {"ok": True, "plano": {}, "conflito": False, "dia_sem_espaco": None}
+
+        dias = _datas_inclusivas_reserva(ini_clip, fim_clip)
+        span_int = max(1, min(int(span or 1), capacidade_slots))
+
+        idx_exp = _slot_indice_grade_reserva(loop_inicio, capacidade_slots)
+        idx_fim_exp = _slot_indice_grade_reserva(loop_fim, capacidade_slots)
+        if idx_exp is not None:
+            if idx_fim_exp is not None:
+                largura_exp = (idx_fim_exp - idx_exp) + 1
+                if largura_exp != span_int:
+                    idx_exp = None
+            if idx_exp is not None and (idx_exp + span_int - 1) >= capacidade_slots:
+                idx_exp = None
+
+        if idx_exp is not None:
+            plano_exp = {dia: idx_exp for dia in dias}
+            if _bloco_livre_em_todos_os_dias(dias, idx_exp, span_int):
+                return {"ok": True, "plano": plano_exp, "conflito": False, "dia_sem_espaco": None}
+            if permitir_forcar:
+                return {"ok": True, "plano": plano_exp, "conflito": True, "dia_sem_espaco": None}
+
+        for idx in _blocos_possiveis(span_int):
+            if _bloco_livre_em_todos_os_dias(dias, idx, span_int):
+                return {"ok": True, "plano": {dia: idx for dia in dias}, "conflito": False, "dia_sem_espaco": None}
+
+        plano = {}
+        preferido = None
+        conflito = False
+        for dia in dias:
+            livres = _blocos_livres_do_dia(dia, span_int)
+            escolhido = _escolher_bloco(livres, preferido)
+            if escolhido is None:
+                if not permitir_forcar:
+                    return {"ok": False, "plano": plano, "conflito": False, "dia_sem_espaco": dia}
+                escolhido = _escolher_bloco(_blocos_possiveis(span_int), preferido)
+                conflito = True
+            plano[dia] = int(escolhido)
+            preferido = int(escolhido)
+
+        return {"ok": True, "plano": plano, "conflito": conflito, "dia_sem_espaco": None}
+
+    def _marcar_plano(plano_por_dia, span: int):
+        for dia, idx in (plano_por_dia or {}).items():
+            if dia not in ocupado:
+                continue
+            slots_ocupados = ocupado.setdefault(dia, set())
+            for off in range(int(span)):
+                pos = int(idx) + off
+                if 0 <= pos < capacidade_slots:
+                    slots_ocupados.add(pos)
+
+    if bit_ativo == 1:
+        if eh_digital == 1:
+            sql_existentes = text("""
+                SELECT
+                     Origem = CAST('CONTRATO' AS varchar(20))
+                    ,IDItem = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                    ,DataInicio = TRY_CONVERT(date, i.DataInicioPrevisto)
+                    ,DataFim = COALESCE(TRY_CONVERT(date, i.DataCancelamento), TRY_CONVERT(date, i.DataTerminoPrevisto))
+                    ,Cota = i.Cota
+                    ,SpanQtd = CAST(NULL AS int)
+                    ,LoopInicio = CAST(NULL AS varchar(30))
+                    ,LoopFim = CAST(NULL AS varchar(30))
+                    ,OrdemData = COALESCE(TRY_CONVERT(datetime2, i.DataAtualizacao), SYSUTCDATETIME())
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
+                WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
+                  AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), i.CodFace), ''))) = :cod_face
+                  AND i.DataInicioPrevisto IS NOT NULL
+                  AND i.DataTerminoPrevisto IS NOT NULL
+                  AND i.AtivoCancelamento = 'A'
+                  AND ISNULL(TRY_CONVERT(int, i.BitAtivo), 1) = 1
+                  AND TRY_CONVERT(date, i.DataInicioPrevisto) <= :data_fim
+                  AND COALESCE(TRY_CONVERT(date, i.DataCancelamento), TRY_CONVERT(date, i.DataTerminoPrevisto)) >= :data_inicio
+
+                UNION ALL
+
+                SELECT
+                     Origem = CAST('RESERVA' AS varchar(20))
+                    ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+                    ,DataInicio = TRY_CONVERT(date, o.DataInicio)
+                    ,DataFim = TRY_CONVERT(date, o.DataFim)
+                    ,Cota = o.Cota
+                    ,SpanQtd = TRY_CONVERT(int, o.SpanQtd)
+                    ,LoopInicio = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopInicio), '')))
+                    ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopFim), '')))
+                    ,OrdemData = COALESCE(TRY_CONVERT(datetime2, o.CriadoEm), TRY_CONVERT(datetime2, o.DataAtualizacao), SYSUTCDATETIME())
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (NOLOCK)
+                WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+                  AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
+                  AND o.CanceladoEm IS NULL
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
+                  AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
+                  AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
+                  AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
+                  AND TRY_CONVERT(date, o.DataFim) >= :data_inicio
+                ORDER BY DataInicio ASC, DataFim ASC, OrdemData ASC, IDItem ASC;
+            """)
+            rows_existentes = db.session.execute(
+                sql_existentes,
+                {
+                    "cod_ponto": int(cod_ponto_resolvido or 0),
+                    "cod_face": cod_face,
+                    "data_inicio": data_inicio_cal,
+                    "data_fim": data_fim_cal,
+                },
+            ).mappings().all()
+
+            for row in rows_existentes or []:
+                span_existente = _span_por_cota_reserva_grade(row.get("Cota"), row.get("SpanQtd"))
+                span_existente = max(1, min(int(span_existente or 1), capacidade_slots))
+                plano_existente = _montar_plano_intervalo(
+                    row.get("DataInicio"),
+                    row.get("DataFim"),
+                    span_existente,
+                    row.get("LoopInicio"),
+                    row.get("LoopFim"),
+                    permitir_forcar=True,
+                )
+                _marcar_plano(plano_existente.get("plano") or {}, span_existente)
+        else:
+            sql_existentes = text("""
+                SELECT
+                    DataInicio = TRY_CONVERT(date, o.DataInicio),
+                    DataFim = TRY_CONVERT(date, o.DataFim)
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (NOLOCK)
+                WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+                  AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
+                  AND o.CanceladoEm IS NULL
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
+                  AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
+                  AND TRY_CONVERT(date, o.DataFim) >= :data_inicio;
+            """)
+            rows_existentes = db.session.execute(
+                sql_existentes,
+                {
+                    "cod_ponto": int(cod_ponto_resolvido or 0),
+                    "cod_face": cod_face,
+                    "data_inicio": data_inicio_cal,
+                    "data_fim": data_fim_cal,
+                },
+            ).mappings().all()
+            for row in rows_existentes or []:
+                plano_existente = _montar_plano_intervalo(
+                    row.get("DataInicio"),
+                    row.get("DataFim"),
+                    1,
+                    None,
+                    None,
+                    permitir_forcar=True,
+                )
+                _marcar_plano(plano_existente.get("plano") or {}, 1)
+
+    def _max_bloco_livre(slots_ocupados: set[int]) -> int:
+        maior = 0
+        atual = 0
+        for idx in range(capacidade_slots):
+            if idx in slots_ocupados:
+                maior = max(maior, atual)
+                atual = 0
+            else:
+                atual += 1
+        return max(maior, atual)
+
     cal = {}
-    for r in rows:
-        k = (r.Data or "").strip()
-        if not k:
-            continue
-        cal[k] = {
-            "status": (r.StatusDia or "").strip(),
-            "disp": int(r.SlotsDisponiveis or 0),
-            "cap": int(r.CapacidadeSlots or 0),
-            "ocup": int(r.SlotsOcupados or 0),
-            "pct": float(r.OcupacaoPct) if r.OcupacaoPct is not None else None,
-            "dia_disponivel": int(r.DiaDisponivel or 0),
-            "eh_digital": int(r.EhDigital or 0),
-            "codponto": int(r.CodPonto) if r.CodPonto is not None else None,
-            "tipo": (r.TipoPainel or "").strip(),
+    for dia in dias_calendario:
+        slots_ocupados_set = ocupado.get(dia, set())
+        slots_ocupados = len(slots_ocupados_set)
+        slots_disponiveis = max(0, capacidade_slots - slots_ocupados)
+        max_bloco_livre = _max_bloco_livre(slots_ocupados_set)
+
+        if bit_ativo == 0:
+            dia_disponivel = 0
+            status = "INDISPONIVEL"
+            disp_cota = 0
+        elif eh_digital == 0:
+            dia_disponivel = 1 if slots_ocupados == 0 else 0
+            status = "DISPONIVEL" if dia_disponivel else "OCUPADO"
+            disp_cota = 1 if dia_disponivel else 0
+        else:
+            dia_disponivel = 1 if max_bloco_livre >= span_solicitado else 0
+            disp_cota = span_solicitado if dia_disponivel else 0
+            if slots_ocupados <= 0:
+                status = "LIVRE"
+            elif dia_disponivel:
+                status = "PARCIAL"
+            else:
+                status = "CHEIO"
+
+        pct = None
+        if capacidade_slots > 0:
+            pct = round(float(slots_ocupados) * 100.0 / float(capacidade_slots), 2)
+
+        chave = dia.strftime("%Y-%m-%d")
+        cal[chave] = {
+            "status": status,
+            "disp": int(slots_disponiveis),
+            "disponiveis": int(slots_disponiveis),
+            "disp_cota": int(disp_cota),
+            "disponiveis_cota": int(disp_cota),
+            "max_bloco_livre": int(max_bloco_livre),
+            "span_necessario": int(span_solicitado),
+            "cap": int(capacidade_slots),
+            "ocup": int(slots_ocupados),
+            "pct": pct,
+            "dia_disponivel": int(dia_disponivel),
+            "eh_digital": int(eh_digital),
+            "codponto": int(cod_ponto_resolvido) if cod_ponto_resolvido is not None else None,
+            "tipo": tipo_painel,
         }
 
-    return jsonify({"ok": True, "cal": cal})
-
+    return jsonify({
+        "ok": True,
+        "cal": cal,
+        "capacidade_total": int(capacidade_slots),
+        "span_necessario": int(span_solicitado),
+        "eh_digital": int(eh_digital),
+        "codponto": int(cod_ponto_resolvido) if cod_ponto_resolvido is not None else None,
+    })
 
 
 
@@ -20313,6 +20484,21 @@ def _slot_label_grade_reserva(indice: int) -> str:
         return "SPAN01"
 
 
+def _slot_numero_grade_reserva(valor, capacidade_slots: int) -> int | None:
+    """
+    Converte SPAN01/1/01 para o número inteiro gravável no banco.
+
+    Importante:
+    - A grade trabalha internamente com índice 0-based.
+    - As colunas LoopInicio/LoopFim da tabela de ocupação são inteiras no SQL Server.
+    - Portanto SPAN14 precisa ser gravado como 14, e não como texto 'SPAN14'.
+    """
+    idx = _slot_indice_grade_reserva(valor, capacidade_slots)
+    if idx is None:
+        return None
+    return int(idx) + 1
+
+
 def _datas_inclusivas_reserva(data_inicio: date, data_fim: date):
     """Gera todas as datas de um range inclusivo sem deslocar nenhuma data."""
     dias = []
@@ -20478,8 +20664,10 @@ def _calcular_plano_encaixe_range_reserva_digital(
             segmentos.append({
                 "data_inicio": seg_ini,
                 "data_fim": seg_fim,
-                "slot_inicio": _slot_label_grade_reserva(idx_atual),
-                "slot_fim": _slot_label_grade_reserva(idx_atual + int(span) - 1),
+                "slot_inicio": int(idx_atual) + 1,
+                "slot_fim": int(idx_atual) + int(span),
+                "slot_inicio_label": _slot_label_grade_reserva(idx_atual),
+                "slot_fim_label": _slot_label_grade_reserva(idx_atual + int(span) - 1),
                 "slot_inicio_indice": idx_atual,
                 "span_qtd": int(span),
             })
@@ -20490,8 +20678,10 @@ def _calcular_plano_encaixe_range_reserva_digital(
         segmentos.append({
             "data_inicio": seg_ini,
             "data_fim": seg_fim,
-            "slot_inicio": _slot_label_grade_reserva(idx_atual),
-            "slot_fim": _slot_label_grade_reserva(idx_atual + int(span) - 1),
+            "slot_inicio": int(idx_atual) + 1,
+            "slot_fim": int(idx_atual) + int(span),
+            "slot_inicio_label": _slot_label_grade_reserva(idx_atual),
+            "slot_fim_label": _slot_label_grade_reserva(idx_atual + int(span) - 1),
             "slot_inicio_indice": idx_atual,
             "span_qtd": int(span),
         })
@@ -21283,9 +21473,19 @@ def api_ocupacao_reserva_criar():
                 raise ValueError(f"Segmento de encaixe inválido na posição {idx_segmento}.")
 
             dias_segmento_int = int((seg_fim - seg_ini).days + 1)
-            loop_inicio_segmento = segmento.get("slot_inicio") if eh_digital == 1 else None
-            loop_fim_segmento = segmento.get("slot_fim") if eh_digital == 1 else None
+            loop_inicio_segmento = None
+            loop_fim_segmento = None
             spanqtd_segmento = int(segmento.get("span_qtd") or spanqtd_novo or 1) if eh_digital == 1 else None
+
+            if eh_digital == 1:
+                loop_inicio_segmento = _slot_numero_grade_reserva(segmento.get("slot_inicio"), capacidade_slots)
+                loop_fim_segmento = _slot_numero_grade_reserva(segmento.get("slot_fim"), capacidade_slots)
+
+                if loop_inicio_segmento is None or loop_fim_segmento is None:
+                    raise ValueError(f"Segmento de encaixe sem LoopInicio/LoopFim numérico na posição {idx_segmento}.")
+
+                if int(loop_fim_segmento) < int(loop_inicio_segmento):
+                    raise ValueError(f"Segmento de encaixe com LoopFim menor que LoopInicio na posição {idx_segmento}.")
 
             id_fato_ocupacao = db.session.execute(sql_insert, {
                 "cod_ponto": cod_ponto_int,

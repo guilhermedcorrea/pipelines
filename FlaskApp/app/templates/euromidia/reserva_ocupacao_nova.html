@@ -1349,9 +1349,19 @@
     const info = getDayInfoEstado(estado, dateObj);
     if(info){
       const disponiveis = Number(info.disponiveis);
+      const disponiveisCota = Number(info.disponiveis_cota);
+      const maxBlocoLivre = Number(info.max_bloco_livre);
       const total = Number(info.total);
       const status = normalizarStatusBadge(info.status);
       if(status === "INDISPONIVEL" || status === "CHEIO") return true;
+      if(Number.isFinite(disponiveisCota)){
+        if(disponiveisCota <= 0) return true;
+        return false;
+      }
+      if(Number.isFinite(maxBlocoLivre)){
+        if(maxBlocoLivre < slotsNecessariosEstado(estado)) return true;
+        return false;
+      }
       if(Number.isFinite(disponiveis)){
         if(disponiveis <= 0) return true;
         if(disponiveis < slotsNecessariosEstado(estado)) return true;
@@ -1411,9 +1421,19 @@
           if(ocupados != null) disp = Number(total) - Number(ocupados);
         }
         const disponiveis = Number(disp);
+        const dispCotaRaw = it.disp_cota ?? it.disponiveis_cota ?? it.SlotsDisponiveisCota ?? it.DisponiveisCota ?? null;
+        const maxBlocoRaw = it.max_bloco_livre ?? it.MaxBlocoLivre ?? it.maior_bloco_livre ?? null;
+        const disponiveisCota = Number(dispCotaRaw);
+        const maxBlocoLivre = Number(maxBlocoRaw);
         if(!Number.isFinite(disponiveis) || !Number.isFinite(total)) return;
         const status = normalizarStatusBadge(texto(it.status || it.Status || it.StatusDia) || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
-        mapa.set(dt, {disponiveis: disponiveis, total: total, status: status});
+        mapa.set(dt, {
+          disponiveis: disponiveis,
+          total: total,
+          status: status,
+          disponiveis_cota: Number.isFinite(disponiveisCota) ? disponiveisCota : null,
+          max_bloco_livre: Number.isFinite(maxBlocoLivre) ? maxBlocoLivre : null
+        });
       });
       return mapa;
     }
@@ -1423,9 +1443,19 @@
         const it = calObj[dt] || {};
         const total = Number(it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? capTotal);
         const disponiveis = Number(it.disp ?? it.disponiveis ?? it.SlotsDisponiveis ?? it.Disponiveis ?? NaN);
+        const dispCotaRaw = it.disp_cota ?? it.disponiveis_cota ?? it.SlotsDisponiveisCota ?? it.DisponiveisCota ?? null;
+        const maxBlocoRaw = it.max_bloco_livre ?? it.MaxBlocoLivre ?? it.maior_bloco_livre ?? null;
+        const disponiveisCota = Number(dispCotaRaw);
+        const maxBlocoLivre = Number(maxBlocoRaw);
         if(!Number.isFinite(total) || !Number.isFinite(disponiveis)) return;
         const status = normalizarStatusBadge(texto(it.status || it.Status || it.StatusDia) || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
-        mapa.set(dt, {disponiveis: disponiveis, total: total, status: status});
+        mapa.set(dt, {
+          disponiveis: disponiveis,
+          total: total,
+          status: status,
+          disponiveis_cota: Number.isFinite(disponiveisCota) ? disponiveisCota : null,
+          max_bloco_livre: Number.isFinite(maxBlocoLivre) ? maxBlocoLivre : null
+        });
         if(total > 0) estado.cap_total_default = total;
       });
     }
