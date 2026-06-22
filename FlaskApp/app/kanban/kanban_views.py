@@ -6535,17 +6535,17 @@ def _obter_card_quadro_payload_minimo(id_card: int) -> dict[str, Any]:
             ) AS EmpresaNomeFantasia,
             e.CNPJ AS EmpresaCNPJ,
             e.CNAE AS EmpresaCNAE,
-            CAST(NULL AS int) AS EmpresaIDDimCnaes,
-            CAST(NULL AS nvarchar(400)) AS EmpresaDescricaoCnae,
-            CAST(NULL AS nvarchar(200)) AS EmpresaClasse,
-            CAST(NULL AS nvarchar(200)) AS EmpresaSetor,
-            CAST(NULL AS nvarchar(200)) AS EmpresaMacroSetor,
-            CAST(NULL AS nvarchar(200)) AS EmpresaSubClasse,
+            cn.IDDimCnaes AS EmpresaIDDimCnaes,
+            cn.Descricao AS EmpresaDescricaoCnae,
+            cn.Classe AS EmpresaClasse,
+            cn.Setor AS EmpresaSetor,
+            cn.MacroSetor AS EmpresaMacroSetor,
+            cn.SubClasse AS EmpresaSubClasse,
             rp.QuantidadePaineisVinculados,
             rp.QuantidadePaineisUnicos,
             rp.ValorTotalPaineis
         FROM {TABELA_CARD} c
-        {_sql_join_empresa_relacionada_card_leve('c', 'e')}
+        {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
         {_sql_join_usuario_relacionado_card('c', 'usuario')}
         {_sql_join_resumo_paineis_card('c', 'rp')}
         WHERE c.IDFatoKanbanCard = :id_card
@@ -18140,8 +18140,8 @@ def api_kanban_dados(id_kanban: int):
                 e.RazaoSocial AS EmpresaRazaoSocial,
                 e.CNPJ AS EmpresaCNPJ,
                 e.CNAE AS EmpresaCNAE,
-                CAST(NULL AS nvarchar(200)) AS EmpresaClasse,
-                CAST(NULL AS nvarchar(200)) AS EmpresaSetor,
+                cn.Classe AS EmpresaClasse,
+                cn.Setor AS EmpresaSetor,
                 rp.QuantidadePaineisVinculados,
                 rp.QuantidadePaineisUnicos,
                 rp.ValorTotalPaineis,
@@ -18152,7 +18152,7 @@ def api_kanban_dados(id_kanban: int):
                         c.IDFatoKanbanCard DESC
                 ) AS RowNumFase
             FROM {TABELA_CARD} c
-            {_sql_join_empresa_relacionada_card_leve('c', 'e')}
+            {_sql_join_empresa_relacionada_card('c', 'e', 'cn')}
             {_sql_join_usuario_relacionado_card('c', 'usuario')}
             {_sql_join_resumo_paineis_card('c', 'rp')}
             WHERE c.IDDimKanban = :id_kanban
@@ -18484,10 +18484,10 @@ def api_cards_listar_por_fase(id_kanban: int):
         )
 
         if modo_rapido:
-            join_empresa_card = _sql_join_empresa_relacionada_card_leve('c', 'e')
+            join_empresa_card = _sql_join_empresa_relacionada_card('c', 'e', 'cn')
             select_empresa_classe_setor = """
-                    CAST(NULL AS nvarchar(200)) AS EmpresaClasse,
-                    CAST(NULL AS nvarchar(200)) AS EmpresaSetor,
+                    cn.Classe AS EmpresaClasse,
+                    cn.Setor AS EmpresaSetor,
             """
             select_resumo_paineis_card = """
                     CAST(0 AS int) AS QuantidadePaineisVinculados,

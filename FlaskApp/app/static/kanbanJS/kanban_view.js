@@ -8533,28 +8533,45 @@ function montarSelectOrigemAtendimento(valorSelecionado = null){
     const box = document.getElementById("empresaPreview");
     const wrap = box?.closest(".kb-empresa-box");
 
-    const tem = !!(emp && (
-      empresaTemNomeExibicaoValido(emp) ||
-      emp.CNPJ || emp.EmpresaCNPJ || emp.cnpj ||
-      emp.CNAE || emp.EmpresaCNAE ||
-      emp.Setor || emp.EmpresaSetor ||
-      emp.Classe || emp.EmpresaClasse
-    ));
+    const razao = nomeExibicaoEmpresa(emp) || "";
+    const cnpj = mascaraCnpj(emp?.CNPJ || emp?.EmpresaCNPJ || emp?.cnpj || "");
+    const cnae = safeStr(emp?.CNAE || emp?.EmpresaCNAE || emp?.cnae || "").trim();
+    const setor = safeStr(emp?.Setor || emp?.EmpresaSetor || emp?.CnaeSetor || emp?.setor_cnae || "").trim();
+    const classe = safeStr(emp?.Classe || emp?.EmpresaClasse || emp?.CnaeClasse || emp?.classe_cnae || "").trim();
+
+    const tem = !!(emp && (razao || cnpj || cnae || setor || classe));
 
     if (wrap) wrap.classList.toggle("has-empresa", tem);
 
     if (!tem) {
       if (box) box.style.display = "none";
+      ["empPrevRazao", "empPrevCnpj", "empPrevCnae", "empPrevSetor", "empPrevClasse"].forEach((idCampo) => {
+        const campo = document.getElementById(idCampo);
+        if (!campo) return;
+        campo.textContent = "";
+        const linha = campo.closest?.(".linha");
+        if (linha) linha.style.display = "none";
+      });
       return;
     }
 
     if (box) box.style.display = "grid";
 
-    document.getElementById("empPrevRazao").textContent  = nomeExibicaoEmpresa(emp) || "—";
-    document.getElementById("empPrevCnpj").textContent   = mascaraCnpj(emp.CNPJ || emp.EmpresaCNPJ || emp.cnpj || "");
-    document.getElementById("empPrevCnae").textContent   = String(emp.CNAE || emp.EmpresaCNAE || "");
-    document.getElementById("empPrevSetor").textContent  = (emp.Setor || emp.EmpresaSetor || "");
-    document.getElementById("empPrevClasse").textContent = (emp.Classe || emp.EmpresaClasse || "");
+    const aplicarValorPreview = (idCampo, valor) => {
+      const campo = document.getElementById(idCampo);
+      if (!campo) return;
+      const texto = safeStr(valor || "").trim();
+      campo.textContent = texto;
+      campo.title = texto;
+      const linha = campo.closest?.(".linha");
+      if (linha) linha.style.display = texto ? "" : "none";
+    };
+
+    aplicarValorPreview("empPrevRazao", razao);
+    aplicarValorPreview("empPrevCnpj", cnpj);
+    aplicarValorPreview("empPrevCnae", cnae);
+    aplicarValorPreview("empPrevSetor", setor);
+    aplicarValorPreview("empPrevClasse", classe);
   }
 
   function setEmpresaPreviewById(idEmp) {
@@ -15474,51 +15491,90 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
 
     const topRow = el("div", {class:"kb-card-phase"}, [topInfo, btnDel]);
 
-    const idEmp = c.IDEmpresaRelacionadaCard || c.IDCliente || c.IDEmpresaRelacionada || null;
-    const empRazao = safeStr(c.EmpresaRazaoSocial || c.RazaoSocial || "").trim();
-    const empCnpj = mascaraCnpj(c.EmpresaCNPJ || c.CNPJ || "");
-    const empSetor = safeStr(c.EmpresaSetor || c.Setor || "").trim();
-    const empClasse = safeStr(c.EmpresaClasse || c.Classe || "").trim();
+    const idEmp = c.IDEmpresaRelacionadaCard || c.IDCliente || c.IDEmpresaRelacionada || c.IDEmpresa || null;
+    const empresaCatalogoCard = idEmp ? obterEmpresaCatalogoPorId(idEmp) : null;
+    const empRazao = safeStr(
+      c.EmpresaRazaoSocial ||
+      c.RazaoSocial ||
+      c.NomeEmpresa ||
+      empresaCatalogoCard?.RazaoSocial ||
+      empresaCatalogoCard?.EmpresaRazaoSocial ||
+      empresaCatalogoCard?.NomeFantasia ||
+      ""
+    ).trim();
+    const empCnpj = mascaraCnpj(
+      c.EmpresaCNPJ ||
+      c.CNPJ ||
+      empresaCatalogoCard?.CNPJ ||
+      empresaCatalogoCard?.EmpresaCNPJ ||
+      ""
+    );
+    const empSetor = safeStr(
+      c.EmpresaSetor ||
+      c.SegmentoSetor ||
+      c.CnaeSetor ||
+      c.setor_cnae ||
+      c.Setor ||
+      empresaCatalogoCard?.Setor ||
+      empresaCatalogoCard?.EmpresaSetor ||
+      empresaCatalogoCard?.CnaeSetor ||
+      ""
+    ).trim();
+    const empClasse = safeStr(
+      c.EmpresaClasse ||
+      c.SegmentoClasse ||
+      c.CnaeClasse ||
+      c.classe_cnae ||
+      c.Classe ||
+      empresaCatalogoCard?.Classe ||
+      empresaCatalogoCard?.EmpresaClasse ||
+      empresaCatalogoCard?.CnaeClasse ||
+      ""
+    ).trim();
 
-    const temEmpresa = !!(idEmp || empRazao || empCnpj || empSetor || empClasse || tipoClienteDesconto || origemAtendimentoNome);
-
-    const blocoEmpresa = temEmpresa ? el("div", {class:"kb-empresa"}, [
-      el("div", {class:"kb-empresa-grid"}, [
+    const itensEmpresa = [];
+    const adicionarCampoEmpresa = (rotulo, valor) => {
+      const texto = safeStr(valor || "").trim();
+      if (!texto) return;
+      itensEmpresa.push(
         el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["Razão:"]),
-          el("span", {class:"kb-empresa-v", title: empRazao || ""}, [empRazao || "—"])
-        ]),
-        el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["CNPJ:"]),
-          el("span", {class:"kb-empresa-v", title: empCnpj || ""}, [empCnpj || "—"])
-        ]),
-        el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["Setor:"]),
-          el("span", {class:"kb-empresa-v", title: empSetor || ""}, [empSetor || "—"])
-        ]),
-        el("div", {class:"kb-empresa-item"}, [
-          el("span", {class:"kb-empresa-k"}, ["Classe:"]),
-          el("span", {class:"kb-empresa-v", title: empClasse || ""}, [empClasse || "—"])
-        ]),
-        el("div", {class:"kb-empresa-item kb-empresa-item-tipo"}, [
-          tipoClienteBadge
-            ? el("span", {
-                class:"kb-card-badge kb-card-badge-tipo kb-card-badge-tipo-empresa",
-                title: tipoClienteDesconto,
-                style:`--tipo-cliente-bg:${tipoClienteTema.bg}; --tipo-cliente-fg:${tipoClienteTema.fg}; --tipo-cliente-bd:${tipoClienteTema.bd};`
-              }, [tipoClienteDesconto])
-            : el("span", {class:"kb-empresa-v", title:""}, ["—"])
-        ]),
-        el("div", {class:"kb-empresa-item kb-empresa-item-tipo"}, [
-          origemAtendimentoBadge
-            ? el("span", {
-                class:"kb-card-badge kb-card-badge-tipo kb-card-badge-tipo-empresa",
-                title: origemAtendimentoNome,
-                style:`--tipo-cliente-bg:${origemAtendimentoTema.bg}; --tipo-cliente-fg:${origemAtendimentoTema.fg}; --tipo-cliente-bd:${origemAtendimentoTema.bd};`
-              }, [origemAtendimentoNome])
-            : el("span", {class:"kb-empresa-v", title:""}, ["—"])
+          el("span", {class:"kb-empresa-k"}, [rotulo]),
+          el("span", {class:"kb-empresa-v", title: texto}, [texto])
         ])
-      ])
+      );
+    };
+
+    adicionarCampoEmpresa("Razão:", empRazao);
+    adicionarCampoEmpresa("CNPJ:", empCnpj);
+    adicionarCampoEmpresa("Setor:", empSetor);
+    adicionarCampoEmpresa("Classe:", empClasse);
+
+    if (tipoClienteBadge) {
+      itensEmpresa.push(
+        el("div", {class:"kb-empresa-item kb-empresa-item-tipo"}, [
+          el("span", {
+            class:"kb-card-badge kb-card-badge-tipo kb-card-badge-tipo-empresa",
+            title: tipoClienteDesconto,
+            style:`--tipo-cliente-bg:${tipoClienteTema.bg}; --tipo-cliente-fg:${tipoClienteTema.fg}; --tipo-cliente-bd:${tipoClienteTema.bd};`
+          }, [tipoClienteDesconto])
+        ])
+      );
+    }
+
+    if (origemAtendimentoBadge) {
+      itensEmpresa.push(
+        el("div", {class:"kb-empresa-item kb-empresa-item-tipo"}, [
+          el("span", {
+            class:"kb-card-badge kb-card-badge-tipo kb-card-badge-tipo-empresa",
+            title: origemAtendimentoNome,
+            style:`--tipo-cliente-bg:${origemAtendimentoTema.bg}; --tipo-cliente-fg:${origemAtendimentoTema.fg}; --tipo-cliente-bd:${origemAtendimentoTema.bd};`
+          }, [origemAtendimentoNome])
+        ])
+      );
+    }
+
+    const blocoEmpresa = itensEmpresa.length ? el("div", {class:"kb-empresa"}, [
+      el("div", {class:"kb-empresa-grid"}, itensEmpresa)
     ]) : null;
 
     const quantidadePaineis = idNum(c.QuantidadePaineisUnicos || c.QuantidadePaineisVinculados || 0);
