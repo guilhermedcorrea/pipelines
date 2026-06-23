@@ -12744,6 +12744,205 @@ def _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada: Any) -> s
 
 
 ORIGEM_RESERVA_CARD_KANBAN = "KANBAN"
+ORIGEM_OCUPACAO_CONTRATO_KANBAN = "CONTRATO"
+
+
+def _card_kanban_tem_contrato_aprovado(id_card: int | None) -> bool:
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    if id_card_int <= 0:
+        return False
+
+    return _card_possui_tag_ativa(id_card_int, ID_TAG_CONTRATO_APROVADO)
+
+
+def _resolver_origem_ocupacao_card_kanban(id_card: int | None) -> str:
+    """Origem canônica da ocupação criada pelo Kanban.
+
+    Regra de negócio:
+    - card com tag Contrato Aprovado vira ocupação de CONTRATO;
+    - card ainda não aprovado continua como KANBAN.
+    """
+    if _card_kanban_tem_contrato_aprovado(id_card):
+        return ORIGEM_OCUPACAO_CONTRATO_KANBAN
+
+    return ORIGEM_RESERVA_CARD_KANBAN
+
+
+def _garantir_tipo_reserva_zero_ocupacoes_card_kanban(
+    *,
+    id_card: int,
+    id_usuario: int | None = None,
+) -> dict[str, Any]:
+    """Garante TipoReserva = 0 para ocupações normais vinculadas ao card.
+
+    Regra de negócio:
+    - ocupação normal do Kanban/Contrato aprovado é sempre TipoReserva = 0;
+    - reserva comum continua TipoReserva = 1;
+    - reserva de preferência continua TipoReserva = 2.
+
+    Esta rotina corrige também linhas antigas que foram gravadas com TipoReserva NULL.
+    """
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    if id_card_int <= 0:
+        return {"ok": False, "motivo": "id_card_invalido", "linhas": 0}
+
+    sql = text(f"""
+        UPDATE fo
+           SET fo.TipoReserva = 0,
+               fo.DataAtualizacao = SYSDATETIME()
+          FROM {TABELA_OCUPACAO_PAINEIS_EUROMIDIA} fo
+         WHERE fo.CanceladoEm IS NULL
+           AND (
+                fo.TipoReserva IS NULL
+                OR TRY_CONVERT(int, fo.TipoReserva) = 0
+           )
+           AND (
+                CHARINDEX(:marcador_card_id, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
+                OR CHARINDEX(:marcador_kanban_card, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
+                OR CHARINDEX(:marcador_reserva_ativa, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
+                OR EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+                    WHERE TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                        = TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem)
+                      AND TRY_CONVERT(int, i.IDFatoKanbanCard) = :id_card
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CONTRATO_CARD_EUROMIDIA} v
+                    WHERE TRY_CONVERT(int, v.IDFatoKanbanCard) = :id_card
+                      AND (
+                            TRY_CONVERT(int, v.IDFatoControleContratosItensEuromidia)
+                                = TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem)
+                         OR TRY_CONVERT(int, v.IDFatoControleContratosEuromidia)
+                                = TRY_CONVERT(int, fo.IDFatoControleContratos)
+                      )
+                )
+           );
+    """)
+
+    resultado = db.session.execute(
+        sql,
+        {
+            "id_card": id_card_int,
+            "marcador_card_id": f"[CARD_ID={id_card_int}]",
+            "marcador_kanban_card": f"[KANBAN_CARD={id_card_int}]",
+            "marcador_reserva_ativa": _marcador_reserva_informada_card_kanban(id_card_int),
+        },
+    )
+
+    linhas = int(getattr(resultado, "rowcount", 0) or 0)
+    current_app.logger.warning(
+        "KANBAN OCUPACAO TIPORESERVA ZERO | id_card=%s id_usuario=%s linhas=%s",
+        id_card_int,
+        int(id_usuario or 0) or None,
+        linhas,
+    )
+
+    return {"ok": True, "motivo": "tipo_reserva_zero_sincronizado", "linhas": linhas}
+
+
+def _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
+    *,
+    id_card: int,
+    id_usuario: int | None = None,
+) -> dict[str, Any]:
+    """Converte a origem das ocupações do card aprovado para CONTRATO.
+
+    Importante:
+    - toda ocupação normal vinculada ao card fica com TipoReserva = 0;
+    - não altera reserva comum TipoReserva = 1;
+    - não altera reserva de preferência TipoReserva = 2;
+    - usa marcadores, item oficial e vínculo contrato/card para alcançar linhas antigas.
+    """
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    if id_card_int <= 0:
+        return {"ok": False, "motivo": "id_card_invalido", "linhas": 0, "tipo_reserva": None}
+
+    sql = text(f"""
+        UPDATE fo
+           SET fo.Origem = :origem_contrato,
+               fo.TipoReserva = 0,
+               fo.DataAtualizacao = SYSDATETIME()
+          FROM {TABELA_OCUPACAO_PAINEIS_EUROMIDIA} fo
+         WHERE fo.CanceladoEm IS NULL
+           AND (
+                fo.TipoReserva IS NULL
+                OR TRY_CONVERT(int, fo.TipoReserva) = 0
+           )
+           AND (
+                fo.Origem IS NULL
+                OR UPPER(LTRIM(RTRIM(CONVERT(varchar(50), fo.Origem)))) <> :origem_contrato
+                OR fo.TipoReserva IS NULL
+           )
+           AND (
+                CHARINDEX(:marcador_card_id, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
+                OR CHARINDEX(:marcador_kanban_card, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
+                OR CHARINDEX(:marcador_reserva_ativa, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
+                OR EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i
+                    WHERE TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                        = TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem)
+                      AND TRY_CONVERT(int, i.IDFatoKanbanCard) = :id_card
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM {TABELA_CONTRATO_CARD_EUROMIDIA} v
+                    WHERE TRY_CONVERT(int, v.IDFatoKanbanCard) = :id_card
+                      AND (
+                            TRY_CONVERT(int, v.IDFatoControleContratosItensEuromidia)
+                                = TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem)
+                         OR TRY_CONVERT(int, v.IDFatoControleContratosEuromidia)
+                                = TRY_CONVERT(int, fo.IDFatoControleContratos)
+                      )
+                )
+           );
+    """)
+
+    resultado = db.session.execute(
+        sql,
+        {
+            "id_card": id_card_int,
+            "origem_contrato": ORIGEM_OCUPACAO_CONTRATO_KANBAN,
+            "marcador_card_id": f"[CARD_ID={id_card_int}]",
+            "marcador_kanban_card": f"[KANBAN_CARD={id_card_int}]",
+            "marcador_reserva_ativa": _marcador_reserva_informada_card_kanban(id_card_int),
+        },
+    )
+
+    linhas = int(getattr(resultado, "rowcount", 0) or 0)
+    sincronizacao_tipo_reserva = _garantir_tipo_reserva_zero_ocupacoes_card_kanban(
+        id_card=id_card_int,
+        id_usuario=id_usuario,
+    )
+
+    current_app.logger.warning(
+        "KANBAN OCUPACAO ORIGEM CONTRATO APROVADO | id_card=%s id_usuario=%s linhas=%s tipo_reserva=%s",
+        id_card_int,
+        int(id_usuario or 0) or None,
+        linhas,
+        sincronizacao_tipo_reserva,
+    )
+
+    return {
+        "ok": True,
+        "motivo": "origem_contrato_sincronizada",
+        "linhas": linhas,
+        "tipo_reserva": sincronizacao_tipo_reserva,
+    }
 
 
 def _marcador_reserva_card_kanban(id_card: int, cod_face: str) -> str:
@@ -13122,6 +13321,11 @@ def _sincronizar_reservas_painel_faces_kanban(
             atualizar_timestamp=True,
         )
 
+    sincronizacao_tipo_reserva_zero = _garantir_tipo_reserva_zero_ocupacoes_card_kanban(
+        id_card=int(id_card),
+        id_usuario=int(id_usuario),
+    )
+
     return {
         "criadas": int(criacao_reservas_auto.get("criadas") or 0),
         "ids_criadas": ids_criadas_auto,
@@ -13132,6 +13336,7 @@ def _sincronizar_reservas_painel_faces_kanban(
         "mantidas": int(len(chaves_desejadas)),
         "id_reserva_card": int(id_reserva_card_final) if id_reserva_card_final else None,
         "sincronizacao_id_reserva_card": sincronizacao_id_reserva_card,
+        "sincronizacao_tipo_reserva_zero": sincronizacao_tipo_reserva_zero,
     }
 
 def _obter_capacidade_face_reserva_kanban(cod_face: str, cod_ponto: Any = None) -> dict[str, Any]:
@@ -13997,6 +14202,7 @@ def _criar_reservas_painel_faces_kanban(
     reservas_criadas = 0
     segmentos_criados = 0
     ids_criados: list[int] = []
+    origem_ocupacao_card = _resolver_origem_ocupacao_card_kanban(int(id_card))
 
     for item in painel_faces_payload:
         if not isinstance(item, dict):
@@ -14172,7 +14378,8 @@ def _criar_reservas_painel_faces_kanban(
                 ExpiraEm,
                 CriadoEm,
                 CriadoPorIDUsuario,
-                ReservaOrdemPrioridade
+                ReservaOrdemPrioridade,
+                TipoReserva
             )
             OUTPUT INSERTED.IDFatoOcupacaoPaineisEuromidia
             VALUES (
@@ -14220,7 +14427,8 @@ def _criar_reservas_painel_faces_kanban(
                 DATEADD(day, :dias_total_original, SYSDATETIME()),
                 SYSDATETIME(),
                 :criado_por,
-                :reserva_ordem_prioridade
+                :reserva_ordem_prioridade,
+                0
             )
         """)
 
@@ -14277,7 +14485,7 @@ def _criar_reservas_painel_faces_kanban(
                     "cod_ponto": int(cod_ponto),
                     "cod_face": cod_face,
                     "id_painel": id_painel_final,
-                    "origem": ORIGEM_RESERVA_CARD_KANBAN,
+                    "origem": origem_ocupacao_card,
                     "data_inicio": seg_ini,
                     "data_fim": seg_fim,
                     "loop_inicio": loop_inicio_segmento,
@@ -14295,6 +14503,20 @@ def _criar_reservas_painel_faces_kanban(
                     "reserva_ordem_prioridade": int(reserva_ordem_prioridade),
                 },
             ).scalar_one()
+
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+                       SET TipoReserva = 0,
+                           DataAtualizacao = SYSDATETIME()
+                     WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
+                       AND (
+                            TipoReserva IS NULL
+                            OR TRY_CONVERT(int, TipoReserva) = 0
+                       );
+                """),
+                {"id_ocupacao": int(id_novo)},
+            )
 
             ids_criados.append(int(id_novo))
             segmentos_criados += 1
@@ -20768,6 +20990,16 @@ def api_card_tag_adicionar(id_card: int):
                     "KANBAN TIPO DOCUMENTO CONTRATO TAG 13: id_card=%s resultado=%s",
                     id_card,
                     sincronizacao_tipo_documento_contrato,
+                )
+
+                sincronizacao_origem_ocupacao_contrato = _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
+                    id_card=int(id_card),
+                    id_usuario=int(id_usuario),
+                )
+                current_app.logger.warning(
+                    "KANBAN OCUPACAO ORIGEM CONTRATO TAG 13: id_card=%s resultado=%s",
+                    id_card,
+                    sincronizacao_origem_ocupacao_contrato,
                 )
 
             id_empresa_movimento = _resolver_id_empresa_proprietaria_movimento(

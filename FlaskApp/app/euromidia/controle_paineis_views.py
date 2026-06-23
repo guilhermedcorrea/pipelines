@@ -21552,7 +21552,8 @@ def api_ocupacao_reserva_criar():
             CriadoPorIDUsuario,
             ReservaOrdemPrioridade,
             TipoVinculoOrigem,
-            BitEmpresasRelacionadas
+            BitEmpresasRelacionadas,
+            TipoReserva
         )
         OUTPUT INSERTED.IDFatoOcupacaoPaineisEuromidia
         INTO @ReservasInseridas (IDFatoOcupacaoPaineisEuromidia)
@@ -21601,7 +21602,8 @@ def api_ocupacao_reserva_criar():
             :criado_por,
             :reserva_ordem_prioridade,
             :tipo_vinculo_origem,
-            :bit_empresas_relacionadas
+            :bit_empresas_relacionadas,
+            1
         );
 
         SELECT TOP (1)
