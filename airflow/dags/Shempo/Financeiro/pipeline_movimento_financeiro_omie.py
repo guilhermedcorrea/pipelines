@@ -660,9 +660,9 @@ def upsert_pagina(conn, linhas: List[Dict[str, Any]]) -> None:
             (
                 IDEmpresaProprietaria INT NOT NULL,
 
-                TipoLancamento VARCHAR(10) NULL,
-                EventKey VARCHAR(200) NULL,
-                DocumentoKey VARCHAR(200) NULL,
+                TipoLancamento VARCHAR(10) COLLATE DATABASE_DEFAULT NULL,
+                EventKey VARCHAR(200) COLLATE DATABASE_DEFAULT NULL,
+                DocumentoKey VARCHAR(200) COLLATE DATABASE_DEFAULT NULL,
 
                 nPagina INT NULL,
                 nTotPaginas INT NULL,
@@ -670,8 +670,8 @@ def upsert_pagina(conn, linhas: List[Dict[str, Any]]) -> None:
                 nTotRegistros INT NULL,
 
                 nCodTitulo BIGINT NULL,
-                cCodIntTitulo VARCHAR(80) NULL,
-                cNumTitulo VARCHAR(40) NULL,
+                cCodIntTitulo VARCHAR(80) COLLATE DATABASE_DEFAULT NULL,
+                cNumTitulo VARCHAR(40) COLLATE DATABASE_DEFAULT NULL,
 
                 dDtEmissao DATE NULL,
                 dDtVenc DATE NULL,
@@ -679,65 +679,65 @@ def upsert_pagina(conn, linhas: List[Dict[str, Any]]) -> None:
                 dDtPagamento DATE NULL,
 
                 nCodCliente BIGINT NULL,
-                cCPFCNPJCliente VARCHAR(30) NULL,
+                cCPFCNPJCliente VARCHAR(30) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodCtr BIGINT NULL,
-                cNumCtr VARCHAR(30) NULL,
+                cNumCtr VARCHAR(30) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodOS BIGINT NULL,
-                cNumOS VARCHAR(20) NULL,
+                cNumOS VARCHAR(20) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodCC BIGINT NULL,
 
-                cStatus VARCHAR(120) NULL,
-                cNatureza CHAR(1) NULL,
-                cTipo VARCHAR(20) NULL,
-                cOperacao VARCHAR(10) NULL,
+                cStatus VARCHAR(120) COLLATE DATABASE_DEFAULT NULL,
+                cNatureza CHAR(1) COLLATE DATABASE_DEFAULT NULL,
+                cTipo VARCHAR(20) COLLATE DATABASE_DEFAULT NULL,
+                cOperacao VARCHAR(10) COLLATE DATABASE_DEFAULT NULL,
 
-                cNumDocFiscal VARCHAR(40) NULL,
-                cCodCateg VARCHAR(40) NULL,
+                cNumDocFiscal VARCHAR(40) COLLATE DATABASE_DEFAULT NULL,
+                cCodCateg VARCHAR(40) COLLATE DATABASE_DEFAULT NULL,
 
-                cNumParcela VARCHAR(15) NULL,
+                cNumParcela VARCHAR(15) COLLATE DATABASE_DEFAULT NULL,
 
                 nValorTitulo DECIMAL(18,4) NULL,
 
                 nValorPIS DECIMAL(18,4) NULL,
-                cRetPIS CHAR(1) NULL,
+                cRetPIS CHAR(1) COLLATE DATABASE_DEFAULT NULL,
 
                 nValorCOFINS DECIMAL(18,4) NULL,
-                cRetCOFINS CHAR(1) NULL,
+                cRetCOFINS CHAR(1) COLLATE DATABASE_DEFAULT NULL,
 
                 nValorCSLL DECIMAL(18,4) NULL,
-                cRetCSLL CHAR(1) NULL,
+                cRetCSLL CHAR(1) COLLATE DATABASE_DEFAULT NULL,
 
                 nValorIR DECIMAL(18,4) NULL,
-                cRetIR CHAR(1) NULL,
+                cRetIR CHAR(1) COLLATE DATABASE_DEFAULT NULL,
 
                 nValorISS DECIMAL(18,4) NULL,
-                cRetISS CHAR(1) NULL,
+                cRetISS CHAR(1) COLLATE DATABASE_DEFAULT NULL,
 
                 nValorINSS DECIMAL(18,4) NULL,
-                cRetINSS CHAR(1) NULL,
+                cRetINSS CHAR(1) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodProjeto BIGINT NULL,
-                observacao VARCHAR(MAX) NULL,
+                observacao VARCHAR(MAX) COLLATE DATABASE_DEFAULT NULL,
 
                 cCodVendedor BIGINT NULL,
                 nCodComprador BIGINT NULL,
 
-                cCodigoBarras VARCHAR(100) NULL,
-                cNSU VARCHAR(120) NULL,
+                cCodigoBarras VARCHAR(100) COLLATE DATABASE_DEFAULT NULL,
+                cNSU VARCHAR(120) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodNF BIGINT NULL,
                 dDtRegistro DATE NULL,
 
-                cNumBoleto VARCHAR(50) NULL,
-                cChaveNFe VARCHAR(60) NULL,
+                cNumBoleto VARCHAR(50) COLLATE DATABASE_DEFAULT NULL,
+                cChaveNFe VARCHAR(60) COLLATE DATABASE_DEFAULT NULL,
 
-                cOrigem VARCHAR(10) NULL,
+                cOrigem VARCHAR(10) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodTitRepet BIGINT NULL,
-                cGrupo VARCHAR(40) NULL,
+                cGrupo VARCHAR(40) COLLATE DATABASE_DEFAULT NULL,
 
                 nCodMovCC BIGINT NULL,
                 nValorMovCC DECIMAL(18,4) NULL,
@@ -749,17 +749,17 @@ def upsert_pagina(conn, linhas: List[Dict[str, Any]]) -> None:
 
                 dDtConcilia DATE NULL,
                 cHrConcilia TIME(0) NULL,
-                cUsConcilia VARCHAR(30) NULL,
+                cUsConcilia VARCHAR(30) COLLATE DATABASE_DEFAULT NULL,
 
                 dDtInc DATE NULL,
                 cHrInc TIME(0) NULL,
-                cUsInc VARCHAR(30) NULL,
+                cUsInc VARCHAR(30) COLLATE DATABASE_DEFAULT NULL,
 
                 dDtAlt DATE NULL,
                 cHrAlt TIME(0) NULL,
-                cUsAlt VARCHAR(30) NULL,
+                cUsAlt VARCHAR(30) COLLATE DATABASE_DEFAULT NULL,
 
-                cLiquidado CHAR(1) NULL,
+                cLiquidado CHAR(1) COLLATE DATABASE_DEFAULT NULL,
                 nValPago DECIMAL(18,4) NULL,
                 nValAberto DECIMAL(18,4) NULL,
                 nDesconto DECIMAL(18,4) NULL,
@@ -767,9 +767,9 @@ def upsert_pagina(conn, linhas: List[Dict[str, Any]]) -> None:
                 nMulta DECIMAL(18,4) NULL,
                 nValLiquido DECIMAL(18,4) NULL,
 
-                CategoriasJson NVARCHAR(MAX) NULL,
-                DepartamentosJson NVARCHAR(MAX) NULL,
-                MovimentoJson NVARCHAR(MAX) NULL
+                CategoriasJson NVARCHAR(MAX) COLLATE DATABASE_DEFAULT NULL,
+                DepartamentosJson NVARCHAR(MAX) COLLATE DATABASE_DEFAULT NULL,
+                MovimentoJson NVARCHAR(MAX) COLLATE DATABASE_DEFAULT NULL
             );
             """
         )

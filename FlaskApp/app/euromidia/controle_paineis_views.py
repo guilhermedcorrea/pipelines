@@ -5575,6 +5575,8 @@ def grade_painel(codponto: int):
 
     reserva_id_original_por_iditem = {}
     spanqtd_por_iditem_reserva = {}
+    reserva_preferencia_visual_por_iditem = {}
+    reserva_bloqueia_capacidade_por_iditem = {}
 
     # Reservas da grade
     #
@@ -5605,6 +5607,17 @@ def grade_painel(codponto: int):
             ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
             ,TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) AS IDFatoControleContratosItemOrigem
             ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), oc.[TipoVinculoOrigem]), ''))) AS TipoVinculoOrigem
+            ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), oc.[Observacao]), ''))) AS Observacao
+            ,CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_pref WITH (NOLOCK)
+                    WHERE TRY_CONVERT(int, ci_pref.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem])
+                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitPreferencia]), 0) = 1
+                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitAtivo]), 1) = 1
+                ) THEN 1
+                ELSE 0
+             END AS BitPreferenciaItemOrigem
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
         WHERE (
                 oc.[CodPonto] = :codponto
@@ -5633,16 +5646,6 @@ def grade_painel(codponto: int):
             "dt_fim_exclusivo": dt_fim_exclusivo,
         },
     ).fetchall()
-
-    if ids_itens_com_reserva_preferencia_grade:
-        rows_reservas_raw = [
-            rr for rr in (rows_reservas_raw or [])
-            if not (
-                len(rr) > 16
-                and rr[16] is not None
-                and int(rr[16]) in ids_itens_com_reserva_preferencia_grade
-            )
-        ]
 
     if faces:
         faces_grade_ci = {str(f or "").strip().casefold() for f in faces if str(f or "").strip()}
@@ -5733,6 +5736,39 @@ def grade_painel(codponto: int):
     except Exception:
         pass
 
+    def _texto_sem_acento_grade(valor) -> str:
+        texto = str(valor or "").strip().upper()
+        if not texto:
+            return ""
+        try:
+            texto = unicodedata.normalize("NFKD", texto)
+            texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+        except Exception:
+            pass
+        return texto
+
+    def _reserva_eh_preferencia_visual_grade(tipo_vinculo, observacao, id_item_origem, bit_preferencia_item_origem=0) -> bool:
+        texto = f"{_texto_sem_acento_grade(tipo_vinculo)} {_texto_sem_acento_grade(observacao)}"
+
+        if "PREFERENCIA" in texto or "RENOVACAO_CAMPANHA" in texto:
+            return True
+
+        try:
+            if int(bit_preferencia_item_origem or 0) == 1:
+                return True
+        except Exception:
+            pass
+
+        try:
+            id_item_origem_int = int(id_item_origem or 0)
+        except Exception:
+            id_item_origem_int = 0
+
+        if id_item_origem_int > 0 and id_item_origem_int in ids_itens_com_reserva_preferencia_grade:
+            return True
+
+        return False
+
     rows_reservas = []
     for rr in (rows_reservas_raw or []):
         _id_res = rr[0]
@@ -5747,6 +5783,17 @@ def grade_painel(codponto: int):
         _num_previa = rr[9]
         _span_qtd = rr[14]
         _id_vendedor_res = rr[15] if len(rr) > 15 else None
+        _id_item_origem_res = rr[16] if len(rr) > 16 else None
+        _tipo_vinculo_res = rr[17] if len(rr) > 17 else None
+        _observacao_res = rr[18] if len(rr) > 18 else None
+        _bit_preferencia_item_origem_res = rr[19] if len(rr) > 19 else 0
+
+        eh_preferencia_visual_reserva = _reserva_eh_preferencia_visual_grade(
+            _tipo_vinculo_res,
+            _observacao_res,
+            _id_item_origem_res,
+            _bit_preferencia_item_origem_res,
+        )
 
         try:
             id_res_int = int(_id_res)
@@ -5758,6 +5805,9 @@ def grade_painel(codponto: int):
             reserva_id_original_por_iditem[id_item_reserva] = int(_id_res)
         except:
             pass
+
+        reserva_preferencia_visual_por_iditem[id_item_reserva] = bool(eh_preferencia_visual_reserva)
+        reserva_bloqueia_capacidade_por_iditem[id_item_reserva] = not bool(eh_preferencia_visual_reserva)
 
         try:
             if _span_qtd is not None:
@@ -6553,6 +6603,8 @@ def grade_painel(codponto: int):
                     "SpansKpi": spans_kpi,
                     "BarraTexto": barra_texto_grade,
                     "EhReserva": bool(eh_reserva),
+                    "ReservaPreferenciaVisual": bool(reserva_preferencia_visual_por_iditem.get(int(_id_item), False)) if eh_reserva else False,
+                    "BloqueiaCapacidadeGrade": bool(reserva_bloqueia_capacidade_por_iditem.get(int(_id_item), True)) if eh_reserva else True,
                     "OrigemItem": ("RESERVA" if eh_reserva else "CONTRATO"),
                     "CorBarra": ("#92400e" if eh_reserva else None),
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
@@ -6768,19 +6820,33 @@ def grade_painel(codponto: int):
             if not itens_face:
                 continue
 
-            itens_face = sorted(itens_face, key=lambda x: (x["DataInicio"], x["DataFim"], x["ID"]))
+            itens_face = sorted(
+                itens_face,
+                key=lambda x: (
+                    0 if bool(x.get("BloqueiaCapacidadeGrade", True)) else 1,
+                    x["DataInicio"],
+                    x["DataFim"],
+                    x["ID"],
+                ),
+            )
             ocupado_por_dia = {}
+            visual_ocupado_por_dia = {}
 
             def _ocupado_no_dia(dia):
                 return ocupado_por_dia.setdefault(dia, set())
+
+            def _visual_ocupado_no_dia(dia):
+                return visual_ocupado_por_dia.setdefault(dia, set())
 
             def _blocos_possiveis(spans):
                 return list(range(0, len(LOOPS_PERMITIDOS) - spans + 1))
 
             def _bloco_livre_dia(dia, idx, spans):
-                ocupados = _ocupado_no_dia(dia)
+                # Para desenhar a grade sem conflito visual, eu verifico tudo que já foi desenhado.
+                # Para capacidade real, apenas itens com BloqueiaCapacidadeGrade=True alimentam ocupado_por_dia.
+                visual_ocupados = _visual_ocupado_no_dia(dia)
                 for off in range(spans):
-                    if (idx + off) in ocupados:
+                    if (idx + off) in visual_ocupados:
                         return False
                 return True
 
@@ -6807,15 +6873,31 @@ def grade_painel(codponto: int):
                     return blocos[0]
                 return sorted(blocos, key=lambda idx: (abs(int(idx) - pref), int(idx)))[0]
 
-            def _marcar_ocupacao_plano(plano_por_dia, spans):
+            def _marcar_ocupacao_plano(plano_por_dia, spans, bloquear_capacidade=True):
                 conflito_local = False
                 for dia, idx in (plano_por_dia or {}).items():
-                    ocupados = _ocupado_no_dia(dia)
+                    visual_ocupados = _visual_ocupado_no_dia(dia)
+                    ocupados_capacidade = _ocupado_no_dia(dia)
+
                     for off in range(spans):
                         slot_idx = int(idx) + off
-                        if slot_idx in ocupados:
+
+                        if slot_idx in visual_ocupados:
                             conflito_local = True
-                        ocupados.add(slot_idx)
+
+                        if bloquear_capacidade and slot_idx in ocupados_capacidade:
+                            conflito_local = True
+
+                        visual_ocupados.add(slot_idx)
+
+                        if bloquear_capacidade:
+                            ocupados_capacidade.add(slot_idx)
+
+                # Reserva/preferência visual não bloqueadora deve aparecer na grade,
+                # mas não pode transformar a barra em conflito operacional.
+                if not bloquear_capacidade:
+                    return False
+
                 return conflito_local
 
             for it in itens_face:
@@ -6837,6 +6919,7 @@ def grade_painel(codponto: int):
 
                 plano_por_dia = {}
                 conflito_forcado = False
+                bloqueia_capacidade_item = bool(it.get("BloqueiaCapacidadeGrade", True))
 
                 idx_exp = _slot_indice_visual_grade(it.get("LoopInicioDb"))
                 idx_fim_exp = _slot_indice_visual_grade(it.get("LoopFimDb"))
@@ -6851,8 +6934,9 @@ def grade_painel(codponto: int):
                     if _bloco_livre_todos_dias(dias_item, idx_exp, spans):
                         plano_por_dia = plano_exp
                     else:
-                        plano_por_dia = plano_exp
-                        conflito_forcado = True
+                        # Tetris visual: o LoopInicio salvo é preferência.
+                        # Se ele colidir, não desenho conflito de cara; tento outro bloco livre.
+                        plano_por_dia = {}
 
                 if not plano_por_dia:
                     for idx in _blocos_possiveis(spans):
@@ -6868,20 +6952,34 @@ def grade_painel(codponto: int):
 
                         if escolhido is None:
                             escolhido = _escolher_bloco_visual(_blocos_possiveis(spans), preferido)
-                            conflito_forcado = True
+                            if bloqueia_capacidade_item:
+                                conflito_forcado = True
 
                         plano_por_dia[dia] = int(escolhido)
                         preferido = int(escolhido)
 
-                conflito_marcacao = _marcar_ocupacao_plano(plano_por_dia, spans)
+                conflito_marcacao = _marcar_ocupacao_plano(
+                    plano_por_dia,
+                    spans,
+                    bloquear_capacidade=bloqueia_capacidade_item,
+                )
                 conflito_forcado = bool(conflito_forcado or conflito_marcacao)
+                if not bloqueia_capacidade_item:
+                    conflito_forcado = False
                 _renderizar_item_fragmentado_grade(cf, it, plano_por_dia, spans, conflito_forcado)
 
         for (cf, lp), itens in (ocupacoes_por_slot or {}).items():
             if not itens or len(itens) <= 1:
                 continue
 
-            itens_sorted = sorted(itens, key=lambda x: (x["DataInicio"], x["DataFim"], x["ID"], x.get("SpanOffset", 0)))
+            # Preferência/reserva visual não bloqueadora deve aparecer, mas não deve criar
+            # conflito operacional nem pintar a linha como conflito. O conflito real só é
+            # medido entre itens que bloqueiam capacidade.
+            itens_bloqueadores = [it for it in itens if bool(it.get("BloqueiaCapacidadeGrade", True))]
+            if not itens_bloqueadores or len(itens_bloqueadores) <= 1:
+                continue
+
+            itens_sorted = sorted(itens_bloqueadores, key=lambda x: (x["DataInicio"], x["DataFim"], x["ID"], x.get("SpanOffset", 0)))
             conflito = False
             fim_atual = itens_sorted[0]["DataFim"]
 
@@ -6896,7 +6994,7 @@ def grade_painel(codponto: int):
 
             if conflito:
                 slots_conflito.add((cf, lp))
-                for it in itens:
+                for it in itens_bloqueadores:
                     it["BitConflito"] = True
 
         faces_conflito = sorted(list({cf for (cf, lp) in slots_conflito}))
@@ -7001,6 +7099,8 @@ def grade_painel(codponto: int):
                     "TextoOriginal": f"CONTRATO:{num_contrato} | PRÉVIA:{num_previa}",
                     "BarraTexto": barra_texto_grade,
                     "EhReserva": bool(eh_reserva),
+                    "ReservaPreferenciaVisual": bool(reserva_preferencia_visual_por_iditem.get(int(_id_item), False)) if eh_reserva else False,
+                    "BloqueiaCapacidadeGrade": bool(reserva_bloqueia_capacidade_por_iditem.get(int(_id_item), True)) if eh_reserva else True,
                     "OrigemItem": ("RESERVA" if eh_reserva else "CONTRATO"),
                     "CorBarra": ("#92400e" if eh_reserva else None),
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
@@ -18781,13 +18881,13 @@ def painel_detalhes(codponto: int):
 @paineis_bp.route("/ocupacao/reserva/nova", methods=["GET"])
 @login_required
 def reserva_nova():
-    codponto = (request.args.get("codponto") or "").strip()
+    codponto = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
     mes_ref  = (request.args.get("mes_ref") or "").strip()
     tipo = (request.args.get("tipo") or "").strip()
     cliente  = (request.args.get("cliente") or "").strip()
     vendedor = (request.args.get("vendedor") or "").strip()
 
-    codface_sel = (request.args.get("codface") or request.args.get("cod_face") or "").strip()
+    codface_sel = (request.args.get("codface") or request.args.get("cod_face") or request.args.get("face_principal") or request.args.get("face") or "").strip()
 
     dt_ini_str = (request.args.get("dt_ini") or "").strip()
     dt_fim_str = (request.args.get("dt_fim") or "").strip()
@@ -19304,7 +19404,7 @@ def reserva_ocupacao():
 
     q = (request.args.get("q") or "").strip()
     codponto_raw = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
-    codface_sel = (request.args.get("codface") or request.args.get("cod_face") or "").strip()
+    codface_sel = (request.args.get("codface") or request.args.get("cod_face") or request.args.get("face_principal") or request.args.get("face") or "").strip()
     mes_ref = (request.args.get("mes_ref") or "").strip()
     cidades_sel = _parametros_lista_reserva_ocupacao("cidade", "cidades", "cidade_exibicao", "cidades_exibicao")
     tipos_sel = _parametros_lista_reserva_ocupacao("tipo", "tipos", "tipo_produto", "tipos_produto")
@@ -20001,8 +20101,10 @@ def api_ocupacao_calendario():
             plano_exp = {dia: idx_exp for dia in dias}
             if _bloco_livre_em_todos_os_dias(dias, idx_exp, span_int):
                 return {"ok": True, "plano": plano_exp, "conflito": False, "dia_sem_espaco": None}
-            if permitir_forcar:
-                return {"ok": True, "plano": plano_exp, "conflito": True, "dia_sem_espaco": None}
+            # Tetris: LoopInicio/LoopFim gravado no banco é só preferência visual.
+            # Se aquele bloco já estiver ocupado, tento encaixar em outro bloco livre
+            # antes de marcar conflito. Conflito só é permitido quando não existe
+            # nenhum encaixe real dentro do range.
 
         for idx in _blocos_possiveis(span_int):
             if _bloco_livre_em_todos_os_dias(dias, idx, span_int):
@@ -20073,7 +20175,25 @@ def api_ocupacao_calendario():
                 WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
                   AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
                   AND o.CanceladoEm IS NULL
-                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
+                  -- Não conto aqui ocupações de CONTRATO/LOCAÇÃO gravadas em FatoOcupacao,
+                  -- porque contratos já entram pelo FatoControleContratosItensEuromidia acima.
+                  -- Contar os dois duplicava a ocupação, gerava conflito falso e fazia a cota 1080
+                  -- parecer sem espaço mesmo com slots livres na grade.
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Origem), '')))) = 'RESERVA'
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) = 'RESERVADO'
+          AND NOT (
+                UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
+             OR EXISTS (
+                    SELECT 1
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_pref WITH (NOLOCK)
+                    WHERE TRY_CONVERT(int, ci_pref.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, o.[IDFatoControleContratosItemOrigem])
+                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitPreferencia]), 0) = 1
+                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitAtivo]), 1) = 1
+                )
+          )
                   AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
                   AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
                   AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
@@ -20540,7 +20660,8 @@ def _span_por_cota_reserva_grade(cota, span_qtd=None) -> int:
                 return int(round(float(valor)))
             except Exception:
                 return 0
-        texto = str(valor or "").strip().replace("R$", "").replace(" ", "")
+        texto_original = str(valor or "").strip()
+        texto = texto_original.replace("R$", "").replace(" ", "")
         if not texto:
             return 0
         if "," in texto and "." in texto:
@@ -20553,7 +20674,13 @@ def _span_por_cota_reserva_grade(cota, span_qtd=None) -> int:
             try:
                 return int(round(float(texto)))
             except Exception:
-                return 0
+                match = re.search(r"\d+(?:[\.,]\d+)?", texto_original)
+                if not match:
+                    return 0
+                try:
+                    return int(round(float(match.group(0).replace(",", "."))))
+                except Exception:
+                    return 0
 
     cota_int = _cota_para_int(cota)
 
@@ -20719,8 +20846,10 @@ def _calcular_plano_encaixe_range_reserva_digital(
             plano_exp = {dia: idx_exp for dia in dias}
             if _bloco_livre_em_todos_os_dias(dias, idx_exp, span_int):
                 return {"ok": True, "plano": plano_exp, "conflito": False, "dia_sem_espaco": None}
-            if permitir_forcar:
-                return {"ok": True, "plano": plano_exp, "conflito": True, "dia_sem_espaco": None}
+            # Tetris: LoopInicio/LoopFim gravado no banco é só preferência visual.
+            # Se aquele bloco já estiver ocupado, tento encaixar em outro bloco livre
+            # antes de marcar conflito. Conflito só é permitido quando não existe
+            # nenhum encaixe real dentro do range.
 
         for idx in _blocos_possiveis(span_int):
             if _bloco_livre_em_todos_os_dias(dias, idx, span_int):
@@ -20795,7 +20924,25 @@ def _calcular_plano_encaixe_range_reserva_digital(
         WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
           AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
           AND o.CanceladoEm IS NULL
-          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
+          -- Não conto aqui ocupações de CONTRATO/LOCAÇÃO gravadas em FatoOcupacao,
+          -- porque contratos já entram pelo FatoControleContratosItensEuromidia acima.
+          -- Contar os dois duplicava a ocupação, gerava conflito falso e fazia a cota 1080
+          -- parecer sem espaço mesmo com slots livres na grade.
+          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Origem), '')))) = 'RESERVA'
+          AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) = 'RESERVADO'
+          AND NOT (
+                UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
+             OR EXISTS (
+                    SELECT 1
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_pref WITH (NOLOCK)
+                    WHERE TRY_CONVERT(int, ci_pref.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, o.[IDFatoControleContratosItemOrigem])
+                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitPreferencia]), 0) = 1
+                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitAtivo]), 1) = 1
+                )
+          )
           AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
           AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
           AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
@@ -20973,7 +21120,12 @@ def api_ocupacao_reserva_criar():
     cota_invalida = False
     try:
         if cota_raw not in ("", None, "null", "None"):
-            cota_int = int(cota_raw)
+            cota_txt = str(cota_raw).strip()
+            match_cota = re.search(r"\d+(?:[\.,]\d+)?", cota_txt)
+            if match_cota:
+                cota_int = int(round(float(match_cota.group(0).replace(",", "."))))
+            else:
+                cota_invalida = True
     except Exception:
         cota_int = None
         cota_invalida = True

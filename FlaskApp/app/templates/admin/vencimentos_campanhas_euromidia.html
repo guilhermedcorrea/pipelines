@@ -938,7 +938,7 @@
     padding:14px 16px;
     display:flex;
     align-items:center;
-    justify-content:space-between;
+    justify-content:center;
     gap:10px;
     flex-wrap:wrap;
     background:#fff;
@@ -947,9 +947,10 @@
   }
 
   .vc-pages{
+    width:100%;
     display:flex;
     align-items:center;
-    justify-content:flex-end;
+    justify-content:center;
     gap:8px;
     flex-wrap:wrap;
   }
@@ -1058,7 +1059,6 @@
       align-items:stretch;
     }
 
-    .vc-footer > .muted,
     .vc-pages{
       width:100%;
       justify-content:center;
@@ -1473,17 +1473,19 @@
         <tbody>
           {% if itens and itens|length > 0 %}
             {% for row in itens %}
+              {% set usuario_pode_acessar_contrato = row.UsuarioPodeAcessarContrato if row.UsuarioPodeAcessarContrato is defined else (not usuario_logado_eh_vendedor and row.IDFatoControleContratosEuromidia) %}
+              {% set usuario_pode_renovar_linha = row.UsuarioPodeRenovarLinha if row.UsuarioPodeRenovarLinha is defined else (not usuario_logado_eh_vendedor and row.PodeRenovar) %}
               <tr>
                 <td data-label="Contrato">
-                  {% if usuario_logado_eh_vendedor or not row.IDFatoControleContratosEuromidia %}
-                    <span class="vc-contrato vc-contrato-disabled" title="{% if usuario_logado_eh_vendedor %}Perfil Vendedor não abre a página de contratos por esta tela.{% else %}Linha sem contrato vinculado.{% endif %}">
-                      {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao or '—' }}
-                    </span>
-                  {% else %}
+                  {% if usuario_pode_acessar_contrato %}
                     {% set url_contrato_rapido = url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=request.full_path, modo_rapido=1) %}
                     <a class="vc-contrato" href="{{ url_contrato_rapido }}" data-prefetch-contrato-url="{{ url_contrato_rapido }}" title="Abrir contrato #{{ row.IDFatoControleContratosEuromidia }} em modo rápido com cache Redis.">
                       {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao }}
                     </a>
+                  {% else %}
+                    <span class="vc-contrato vc-contrato-disabled" title="{% if row.IDFatoControleContratosEuromidia %}Contrato bloqueado para este usuário nesta tela.{% else %}Linha sem contrato vinculado.{% endif %}">
+                      {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao or '—' }}
+                    </span>
                   {% endif %}
                   {% if row.NumeroContratoExibicao and row.NumeroContratoExibicao != '—' %}
                     <div class="muted" style="font-size:11px;font-weight:800;margin-top:3px;">Nº contrato: {{ row.NumeroContratoExibicao }}</div>
@@ -1528,7 +1530,7 @@
                 </td>
 
                 <td data-label="Renovar">
-                  {% if row.PodeRenovar %}
+                  {% if usuario_pode_renovar_linha %}
                     {% if row.FonteLinha == 'RESERVA' and row.IDReservaOcupacao %}
                       {% set url_renovar_linha = url_for('admin.vencimentos_campanhas_renovar_reserva', id_reserva=row.IDReservaOcupacao) %}
                       {% set titulo_botao_renovar = 'Efetivar reserva criando card no Kanban 1 com o campo Reserva preenchido pelo IDReserva #' ~ row.IDReservaOcupacao %}
@@ -1555,7 +1557,7 @@
                       </button>
                     </form>
                   {% else %}
-                    <span class="vc-renovar-indisponivel" title="Esta linha não possui dados suficientes para criar card.">
+                    <span class="vc-renovar-indisponivel" title="{% if row.PodeRenovar %}Ação bloqueada para este usuário. Vendedor só pode renovar ou efetivar linhas vinculadas ao próprio vendedor.{% else %}Esta linha não possui dados suficientes para criar card.{% endif %}">
                       Indisponível
                     </span>
                   {% endif %}
@@ -1573,12 +1575,6 @@
 
     {% if paginacao %}
       <div class="vc-footer">
-        <div class="muted" style="font-weight:850;">
-          Exibindo {{ paginacao.inicio }}–{{ paginacao.fim }} de {{ paginacao.total }}
-          • Página {{ paginacao.page }} / {{ paginacao.total_pages }}
-          • 10 por página
-        </div>
-
         <div class="vc-pages">
           {% if paginacao.page > 1 %}
             <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=1) }}">« Primeiro</a>

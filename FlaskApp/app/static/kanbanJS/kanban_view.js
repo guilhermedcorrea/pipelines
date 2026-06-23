@@ -3713,7 +3713,7 @@
     if (!info) return 0;
 
     const status = info.status;
-    if (status === 'INDISPONIVEL' || status === 'INATIVO' || status === 'OCUPADO' || status === 'LOTADO' || status === 'CHEIO') {
+    if (status === 'INDISPONIVEL' || status === 'INATIVO') {
       return 0;
     }
 
@@ -3725,6 +3725,10 @@
         return Math.min(Math.max(0, Number(info.disp) || 0), maxBloco);
       }
       return maxBloco;
+    }
+
+    if (status === 'OCUPADO' || status === 'LOTADO' || status === 'CHEIO') {
+      return 0;
     }
 
     if (info.disp !== null) return Math.max(0, Number(info.disp) || 0);
@@ -3965,17 +3969,32 @@
 
     const fresh = !!opcoes.fresh;
     const meses = Number(opcoes.meses || 18) || 18;
+    const cota = safeStr(opcoes.cota || opcoes.exibicoesDia || '').trim();
+    const codPonto = safeStr(opcoes.cod_ponto || opcoes.codPonto || '').trim();
 
-    if (!fresh && cacheCalendarioOcupacaoPorFace.has(chave)) {
-      return cacheCalendarioOcupacaoPorFace.get(chave) || {};
+    // CodFace sozinho não é uma chave segura para cache: em algumas telas o mesmo CodFace
+    // pode ser reaplicado em fluxo de contrato/aditivo ou ficar com resposta antiga em memória.
+    // Incluo CodPonto + cota na chave e também envio CodPonto para o backend resolver exatamente
+    // a mesma grade que o usuário selecionou.
+    const chaveCache = [codPonto || 'SEM_CODPONTO', chave, cota || 'SEM_COTA'].join('|');
+
+    if (!fresh && cacheCalendarioOcupacaoPorFace.has(chaveCache)) {
+      return cacheCalendarioOcupacaoPorFace.get(chaveCache) || {};
     }
 
-    if (!fresh && promessasCalendarioOcupacaoPorFace.has(chave)) {
-      return promessasCalendarioOcupacaoPorFace.get(chave);
+    if (!fresh && promessasCalendarioOcupacaoPorFace.has(chaveCache)) {
+      return promessasCalendarioOcupacaoPorFace.get(chaveCache);
     }
+
+    const params = new URLSearchParams({
+      cod_face: chave,
+      meses: String(meses)
+    });
+    if (codPonto) params.set('cod_ponto', codPonto);
+    if (cota) params.set('cota', cota);
 
     const promessa = fetch(
-      `/kanban/api/ocupacao/calendario?cod_face=${encodeURIComponent(chave)}&meses=${encodeURIComponent(meses)}`,
+      `/kanban/api/ocupacao/calendario?${params.toString()}`,
       { credentials: 'same-origin' }
     )
       .then(async (resposta) => {
@@ -3985,14 +4004,14 @@
         }
 
         const calendario = json && typeof json.cal === 'object' && json.cal ? json.cal : {};
-        cacheCalendarioOcupacaoPorFace.set(chave, calendario);
+        cacheCalendarioOcupacaoPorFace.set(chaveCache, calendario);
         return calendario;
       })
       .finally(() => {
-        promessasCalendarioOcupacaoPorFace.delete(chave);
+        promessasCalendarioOcupacaoPorFace.delete(chaveCache);
       });
 
-    promessasCalendarioOcupacaoPorFace.set(chave, promessa);
+    promessasCalendarioOcupacaoPorFace.set(chaveCache, promessa);
     return promessa;
   }
 
@@ -4007,8 +4026,24 @@
     lista.forEach((codFace) => {
       const chave = safeStr(codFace || '').trim().toUpperCase();
       if (!chave) return;
-      cacheCalendarioOcupacaoPorFace.delete(chave);
-      promessasCalendarioOcupacaoPorFace.delete(chave);
+      for (const chaveCache of Array.from(cacheCalendarioOcupacaoPorFace.keys())) {
+        if (
+          chaveCache === chave ||
+          chaveCache.startsWith(`${chave}|`) ||
+          chaveCache.includes(`|${chave}|`)
+        ) {
+          cacheCalendarioOcupacaoPorFace.delete(chaveCache);
+        }
+      }
+      for (const chaveCache of Array.from(promessasCalendarioOcupacaoPorFace.keys())) {
+        if (
+          chaveCache === chave ||
+          chaveCache.startsWith(`${chave}|`) ||
+          chaveCache.includes(`|${chave}|`)
+        ) {
+          promessasCalendarioOcupacaoPorFace.delete(chaveCache);
+        }
+      }
     });
   }
 
@@ -4465,6 +4500,7 @@
     if (!selectFace || !inputDataInicio || !inputDataFim) return;
 
     const codFace = safeStr(selectFace.value || '').trim().toUpperCase();
+    const codPonto = safeStr(obterCodPontoManualDoBloco(bloco) || '').trim();
     const dataInicioSalva = safeStr(
       valoresSalvos?.DataInicioReserva ||
       valoresSalvos?.data_inicio_reserva ||
@@ -4484,6 +4520,7 @@
     bloco.__calendarioOcupacao = null;
     bloco.__calendarioOcupacaoErro = '';
     bloco.__codFaceCalendario = codFace;
+    bloco.__codPontoCalendario = codPonto;
 
     destruirCalendariosReservaDoBloco(bloco);
 
@@ -4502,7 +4539,11 @@
     atualizarMensagemReservaDoBloco(bloco, 'Carregando disponibilidade da face selecionada...', 'info');
 
     try {
-      const calendario = await carregarCalendarioOcupacaoDaFace(codFace, { meses: 18 });
+      const calendario = await carregarCalendarioOcupacaoDaFace(codFace, {
+        cod_ponto: codPonto,
+        meses: 18,
+        cota: obterCotaReservaDoBloco(bloco)
+      });
 
       if (safeStr(selectFace.value || '').trim().toUpperCase() != codFace) {
         return;
@@ -13415,6 +13456,14 @@ async function aplicarReservaDigitadaNoBloco(bloco){
       atualizarSelectFaceVisualDoBloco(bloco);
       await atualizarComercialDoBloco(bloco);
       await validarPainelFaceManualAditivoNoBloco(bloco);
+
+      const dataInicioAtual = safeStr(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '').trim();
+      const dataFimAtual = safeStr(bloco.querySelector('[data-role="input-data-fim"]')?.value || '').trim();
+      limparCacheCalendarioOcupacao(codFaceManual);
+      await inicializarCalendarioReservaDoBloco(bloco, {
+        dataInicio: dataInicioAtual,
+        dataFim: dataFimAtual,
+      });
     });
 
     selectExibicoesDia?.addEventListener('change', () => {

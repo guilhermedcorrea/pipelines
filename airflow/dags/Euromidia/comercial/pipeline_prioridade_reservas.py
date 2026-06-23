@@ -1012,6 +1012,13 @@ def pipeline_prioridade_reservas():
                 AND O.CodFace IS NOT NULL
                 AND O.DataInicio IS NOT NULL
                 AND O.DataFim IS NOT NULL
+                AND (
+                    O.TipoVinculoOrigem IS NULL
+                    OR (
+                        UPPER(LTRIM(RTRIM(O.TipoVinculoOrigem))) NOT LIKE '%PREFERENCIA%'
+                        AND UPPER(LTRIM(RTRIM(O.TipoVinculoOrigem))) NOT LIKE '%PREFERÊNCIA%'
+                    )
+                )
         ),
         PrioridadesCalculadas AS
         (

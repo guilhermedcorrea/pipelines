@@ -42,6 +42,9 @@ ID_STATUS_CONTRATO_ATIVO_D4_ADMIN = 7
 ID_STATUS_CONTRATO_CANCELADO_D4_ADMIN = 9
 ID_STATUS_CONTRATO_ERRO = 10
 ID_STATUS_CONTRATO_REPROVADO = 31
+ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN = 32
+NOME_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN = "APROVADO E CONTRATO NAO ENVIADO AO D4"
+STATUS_SOLICITACAO_APROVADO_PENDENTE_D4SIGN_ADMIN = "APROVADO_PENDENTE_D4SIGN"
 ID_STATUS_CONTRATO_APROVADO = ID_STATUS_CONTRATO_PENDENTE_GERACAO
 ID_FASE_FORMULARIO_CONTRATO = 4
 TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
@@ -10627,7 +10630,7 @@ def _destravar_processando_aprovacao_preso_admin(
     - a tela ficou bloqueada para sempre e não reenviava o contrato para D4Sign.
 
     A regra mantém segurança:
-    - se já existe contrato materializado, volto para PENDENTE_D4SIGN;
+    - se já existe contrato materializado, volto para APROVADO_PENDENTE_D4SIGN com status 32;
     - se ainda não existe contrato materializado, volto para PENDENTE_APROVACAO;
     - por padrão só destravo depois de alguns segundos, configurável por env.
     """
@@ -10675,7 +10678,12 @@ def _destravar_processando_aprovacao_preso_admin(
         }
 
     contrato_materializado = _obter_contrato_materializado_solicitacao_admin(int(id_solic))
-    novo_status = "PENDENTE_D4SIGN" if contrato_materializado.get("materializado") else "PENDENTE_APROVACAO"
+    if contrato_materializado.get("materializado"):
+        novo_status = STATUS_SOLICITACAO_APROVADO_PENDENTE_D4SIGN_ADMIN
+        id_status_destravado = ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN
+    else:
+        novo_status = "PENDENTE_APROVACAO"
+        id_status_destravado = ID_STATUS_CONTRATO_PENDENTE_GERACAO
 
     db.session.execute(
         text("""
@@ -10690,7 +10698,7 @@ def _destravar_processando_aprovacao_preso_admin(
         {
             "id_solicitacao": int(id_solic),
             "novo_status": novo_status,
-            "id_status": ID_STATUS_CONTRATO_PENDENTE_GERACAO,
+            "id_status": int(id_status_destravado),
         },
     )
 
@@ -10769,44 +10777,113 @@ def _manter_solicitacao_ativa_erro_d4sign_admin(
     id_usuario_logado: int | None = None,
     commit: bool = False,
 ) -> None:
-    """Mantém a solicitação visível para reenvio quando a falha foi só no D4Sign."""
+    """Mantém a solicitação aberta para reenvio quando a falha foi só no D4Sign.
+
+    Regra de negócio corrigida:
+    - falha na API D4Sign não desfaz a aprovação interna;
+    - o contrato fica materializado nas tabelas de controle;
+    - a solicitação e seus itens continuam ativos para o usuário clicar em Aprovar novamente;
+    - o status funcional passa a ser 32: APROVADO E CONTRATO NAO ENVIADO AO D4.
+    """
     id_solic = _int_ou_none(id_solicitacao)
     if id_solic in (None, "", 0):
         return
 
+    id_contrato = _int_ou_none(id_contrato_controle)
+    cab = _obter_cabecalho_solicitacao_bruta(int(id_solic)) or {}
+    id_empresa_proprietaria = _int_ou_none(cab.get("IDEmpresaProprietaria"))
+
+    id_status_aprovado_sem_d4 = _resolver_id_status_contrato_admin(
+        nome_status=NOME_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN,
+        id_empresa_proprietaria=id_empresa_proprietaria,
+        fallback_id=ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN,
+    ) or ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN
+
+    if id_contrato in (None, "", 0):
+        id_contrato = _int_ou_none(cab.get("IDFatoControleContratosEuromidia"))
+
     _marcar_status_solicitacao_contrato_admin(
         id_solicitacao=int(id_solic),
-        nome_status="ERRO",
-        fallback_id_status=ID_STATUS_CONTRATO_ERRO,
-        status_solicitacao="ERRO_D4SIGN",
+        nome_status=NOME_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN,
+        fallback_id_status=int(id_status_aprovado_sem_d4),
+        status_solicitacao=STATUS_SOLICITACAO_APROVADO_PENDENTE_D4SIGN_ADMIN,
+        id_usuario_logado=id_usuario_logado,
+        coluna_usuario="IDDimUsuariosAprovacao",
+        coluna_data="DataAprovacao",
         atualizar_contrato_controle=True,
         bit_ativo=1,
         commit=False,
     )
 
-    id_contrato = _int_ou_none(id_contrato_controle)
     if id_contrato not in (None, "", 0):
         db.session.execute(
             text("""
                 UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
                    SET IDFatoControleContratosEuromidia = :id_contrato_controle,
+                       IDDimStatusContratos = :id_status_aprovado_sem_d4,
+                       StatusSolicitacao = :status_solicitacao,
+                       BitAtivo = 1,
                        DataAtualizacao = GETDATE()
                  WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao;
             """),
             {
                 "id_solicitacao": int(id_solic),
                 "id_contrato_controle": int(id_contrato),
+                "id_status_aprovado_sem_d4": int(id_status_aprovado_sem_d4),
+                "status_solicitacao": STATUS_SOLICITACAO_APROVADO_PENDENTE_D4SIGN_ADMIN,
+            },
+        )
+
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoControleContratosEuromidia]
+                   SET IDDimStatusContratos = :id_status_aprovado_sem_d4,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoControleContratosEuromidia = :id_contrato_controle;
+            """),
+            {
+                "id_contrato_controle": int(id_contrato),
+                "id_status_aprovado_sem_d4": int(id_status_aprovado_sem_d4),
+            },
+        )
+
+        db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+                   SET Status = :nome_status_aprovado_sem_d4,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoControleContratoEuromidia = :id_contrato_controle
+                   AND ISNULL(BitAtivo, 1) = 1;
+            """),
+            {
+                "id_contrato_controle": int(id_contrato),
+                "nome_status_aprovado_sem_d4": NOME_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN,
             },
         )
 
     db.session.execute(
         text("""
             UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoItemEuromidia]
-               SET BitSolicitacaoAtiva = 1,
+               SET IDFatoControleContratosEuromidia = COALESCE(:id_contrato_controle, IDFatoControleContratosEuromidia),
+                   Status = :nome_status_aprovado_sem_d4,
+                   BitSolicitacaoAtiva = 1,
                    DataAtualizacao = GETDATE()
              WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao;
         """),
-        {"id_solicitacao": int(id_solic)},
+        {
+            "id_solicitacao": int(id_solic),
+            "id_contrato_controle": int(id_contrato) if id_contrato not in (None, "", 0) else None,
+            "nome_status_aprovado_sem_d4": NOME_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN,
+        },
+    )
+
+    current_app.logger.warning(
+        "D4SIGN | falha na API não desfez aprovação; solicitação mantida para reenvio | "
+        "id_solicitacao=%s | id_contrato=%s | id_status=%s | status=%s",
+        id_solic,
+        id_contrato,
+        id_status_aprovado_sem_d4,
+        STATUS_SOLICITACAO_APROVADO_PENDENTE_D4SIGN_ADMIN,
     )
 
     if commit:
@@ -10866,13 +10943,14 @@ def _montar_diagrama_status_contrato(
         )
 
     terminal_atual = None
-    if id_status_corrente in (8, 9, 10, ID_STATUS_CONTRATO_REPROVADO):
+    if id_status_corrente in (8, 9, 10, ID_STATUS_CONTRATO_REPROVADO, ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN):
         terminal_atual = {
             "id": id_status_corrente,
             "nome": mapa_status.get(id_status_corrente) or nome_status_corrente or f"Status {id_status_corrente}",
             "cor_hex": mapa_cor.get(id_status_corrente) or _cor_hex_status_contrato_padrao_admin(id_status_corrente),
-            "classe": "sucesso" if id_status_corrente == 8 else "erro",
-            "icone": "✓" if id_status_corrente == 8 else "✖" if id_status_corrente in (9, ID_STATUS_CONTRATO_REPROVADO) else "!",
+            "classe": "sucesso" if id_status_corrente == 8 else "aviso" if id_status_corrente == ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN else "erro",
+            "icone": "✓" if id_status_corrente == 8 else "↻" if id_status_corrente == ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN else "✖" if id_status_corrente in (9, ID_STATUS_CONTRATO_REPROVADO) else "!",
+            "mostra_d4sign": id_status_corrente == ID_STATUS_CONTRATO_APROVADO_SEM_D4_ADMIN,
         }
 
     return {
@@ -16855,13 +16933,14 @@ def _d4sign_criar_para_solicitacao_aprovada_ou_retorno_admin(
         )
 
         if _d4sign_resultado_tem_documento_local_admin(resultado_d4sign):
-            resultado_efetivacao_operacional = _mover_solicitacao_aprovada_para_controle(
-                id_solicitacao=id_solicitacao_int,
-                id_usuario_logado=id_usuario_logado,
-                executar_efeitos_operacionais=True,
-            )
+            # Reenvio de solicitação já materializada: não recrio contrato nem itens.
+            # Apenas finalizo a solicitação porque o documento D4Sign foi criado/localizado.
             resultado_d4sign = dict(resultado_d4sign or {})
-            resultado_d4sign["efetivacao_operacional"] = resultado_efetivacao_operacional
+            resultado_d4sign["efetivacao_operacional"] = {
+                "ok": True,
+                "acao": "nao_reexecutado_contrato_ja_materializado",
+                "mensagem": "Contrato já existia no controle; reenvio apenas criou/localizou D4Sign e finalizou a solicitação.",
+            }
 
             _finalizar_solicitacao_contrato_apos_d4sign_admin(
                 id_solicitacao=id_solicitacao_int,
@@ -17013,8 +17092,9 @@ def _processar_aprovacao_contrato_admin(
             documento_d4sign_ok = _d4sign_resultado_tem_documento_local_admin(resultado_d4sign)
 
             return {
-                "ok": bool(documento_d4sign_ok),
-                "status": "contrato_controle_e_d4sign_ok" if documento_d4sign_ok else "contrato_controle_sem_d4sign_reenvio_falhou",
+                "ok": True,
+                "d4sign_ok": bool(documento_d4sign_ok),
+                "status": "contrato_controle_e_d4sign_ok" if documento_d4sign_ok else "contrato_controle_aprovado_d4sign_pendente_reenvio",
                 "id_solicitacao": id_solicitacao_int,
                 "id_contrato": contrato_materializado.get("id_contrato"),
                 "id_card": contrato_materializado.get("id_card"),
@@ -17212,6 +17292,20 @@ def _processar_aprovacao_contrato_admin(
                     commit=False,
                 )
             else:
+                # A D4Sign falhou, mas a aprovação comercial não pode ser desfeita.
+                # Efetivo ocupação/preço/vencimento/reservas e mantenho a solicitação ativa no status 32 para reenvio D4.
+                resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
+                    id_solicitacao=id_solicitacao_int,
+                    id_usuario_logado=id_usuario_int,
+                    executar_efeitos_operacionais=True,
+                )
+                id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle")) or id_fato_controle
+                ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or ids_itens_controle
+                id_card = _int_ou_none(resultado_aprovacao.get("id_card")) or id_card
+                id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa")) or id_empresa
+                id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria")) or id_empresa_proprietaria
+                tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
+
                 _manter_solicitacao_ativa_erro_d4sign_admin(
                     id_solicitacao=id_solicitacao_int,
                     id_contrato_controle=id_fato_controle,
@@ -17223,7 +17317,7 @@ def _processar_aprovacao_contrato_admin(
                 resultado_d4sign.setdefault("status", "d4sign_nao_criado")
                 resultado_d4sign.setdefault(
                     "mensagem",
-                    "Solicitação mantida ativa: contrato foi preparado no controle, mas os efeitos operacionais ficaram adiados porque a D4Sign ainda não criou/confirmou o documento.",
+                    "Contrato aprovado e efeitos operacionais efetivados. A solicitação ficou ativa para reenvio porque a D4Sign ainda não criou/confirmou o documento.",
                 )
 
             db.session.commit()
@@ -17246,6 +17340,20 @@ def _processar_aprovacao_contrato_admin(
             }
 
             try:
+                # Mesmo com exceção na API D4Sign, o contrato já foi materializado no controle.
+                # Rodo os efeitos operacionais de forma idempotente para a ocupação não ficar bloqueada pelo D4.
+                resultado_aprovacao = _mover_solicitacao_aprovada_para_controle(
+                    id_solicitacao=id_solicitacao_int,
+                    id_usuario_logado=id_usuario_int,
+                    executar_efeitos_operacionais=True,
+                )
+                id_fato_controle = _int_ou_none(resultado_aprovacao.get("id_contrato_controle")) or id_fato_controle
+                ids_itens_controle = resultado_aprovacao.get("ids_itens_controle") or ids_itens_controle
+                id_card = _int_ou_none(resultado_aprovacao.get("id_card")) or id_card
+                id_empresa = _int_ou_none(resultado_aprovacao.get("id_empresa")) or id_empresa
+                id_empresa_proprietaria = _int_ou_none(resultado_aprovacao.get("id_empresa_proprietaria")) or id_empresa_proprietaria
+                tipo_solicitacao = resultado_aprovacao.get("tipo_solicitacao") or tipo_solicitacao
+
                 _manter_solicitacao_ativa_erro_d4sign_admin(
                     id_solicitacao=id_solicitacao_int,
                     id_contrato_controle=id_fato_controle,
@@ -17255,13 +17363,13 @@ def _processar_aprovacao_contrato_admin(
             except Exception:
                 db.session.rollback()
                 current_app.logger.exception(
-                    "D4SIGN | falha ao manter solicitação ativa após falha D4Sign | id_contrato=%s | id_solicitacao=%s",
+                    "D4SIGN | falha ao efetivar operação/manter solicitação ativa após falha D4Sign | id_contrato=%s | id_solicitacao=%s",
                     id_fato_controle,
                     id_solicitacao_int,
                 )
 
             current_app.logger.warning(
-                "D4SIGN | falha ao criar contrato D4Sign após aprovação; mantive solicitação ativa e não efetivei ocupação/preço/vencimento/reservas | id_contrato=%s | id_solicitacao=%s | id_card=%s | erro=%s",
+                "D4SIGN | falha ao criar contrato D4Sign após aprovação; contrato/ocupação ficaram aprovados e solicitação foi mantida para reenvio | id_contrato=%s | id_solicitacao=%s | id_card=%s | erro=%s",
                 id_fato_controle,
                 id_solicitacao_int,
                 id_card,
@@ -17376,10 +17484,12 @@ def _processar_aprovacao_contrato_admin(
             id_card,
         )
 
-        status_final_aprovacao = "aprovado_d4sign_criado" if documento_d4sign_ok else "contrato_controle_criado_d4sign_pendente"
+        contrato_interno_ok = id_fato_controle not in (None, "", 0)
+        status_final_aprovacao = "aprovado_d4sign_criado" if documento_d4sign_ok else "contrato_aprovado_d4sign_pendente_reenvio"
 
         return {
-            "ok": bool(documento_d4sign_ok),
+            "ok": bool(contrato_interno_ok),
+            "d4sign_ok": bool(documento_d4sign_ok),
             "status": status_final_aprovacao,
             "id_solicitacao": id_solicitacao_int,
             "id_contrato": int(id_fato_controle) if id_fato_controle else None,
@@ -22013,8 +22123,12 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
         id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
         id_usuario_vendedor = int(reserva.get("IDDimUsuariosVendedor") or 0)
 
-        if usuario_logado_eh_vendedor and id_usuario_vendedor and id_usuario_vendedor != id_usuario_logado:
-            abort(403, description="Você só pode criar card para reserva vinculada ao seu vendedor.")
+        if usuario_logado_eh_vendedor:
+            if id_usuario_logado <= 0:
+                abort(403, description="Não foi possível identificar o usuário logado para validar a reserva.")
+
+            if id_usuario_vendedor <= 0 or id_usuario_vendedor != id_usuario_logado:
+                abort(403, description="Você só pode criar card para reserva vinculada ao seu vendedor.")
 
         id_reserva_final = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao"))
         data_inicio_reserva = reserva.get("DataInicioCampanha")
@@ -22145,8 +22259,12 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
         id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
         id_usuario_vendedor = int(campanha.get("IDDimUsuariosVendedor") or 0)
 
-        if usuario_logado_eh_vendedor and id_usuario_vendedor and id_usuario_vendedor != id_usuario_logado:
-            abort(403, description="Você só pode renovar campanhas vinculadas ao seu vendedor.")
+        if usuario_logado_eh_vendedor:
+            if id_usuario_logado <= 0:
+                abort(403, description="Não foi possível identificar o usuário logado para validar a campanha.")
+
+            if id_usuario_vendedor <= 0 or id_usuario_vendedor != id_usuario_logado:
+                abort(403, description="Você só pode renovar campanhas vinculadas ao seu vendedor.")
 
         data_inicio_original = campanha.get("DataInicioCampanha")
         data_termino_original = campanha.get("DataTerminoPrevisto")
@@ -22375,6 +22493,29 @@ def vencimentos_campanhas_euromidia():
     rows = db.session.execute(sql_rows, params_rows).mappings().all()
     itens = [_campanhas_vencimentos_enriquecer_item(dict(r)) for r in rows]
 
+    id_usuario_logado_int = int(id_usuario_logado or 0)
+    for item in itens:
+        id_usuario_vendedor_linha = _parse_int(item.get("IDDimUsuariosVendedor")) or 0
+
+        if usuario_logado_eh_vendedor:
+            linha_pertence_ao_usuario_logado = (
+                id_usuario_logado_int > 0
+                and id_usuario_vendedor_linha > 0
+                and id_usuario_vendedor_linha == id_usuario_logado_int
+            )
+        else:
+            linha_pertence_ao_usuario_logado = True
+
+        item["LinhaPertenceAoUsuarioLogado"] = bool(linha_pertence_ao_usuario_logado)
+        item["UsuarioPodeAcessarContrato"] = bool(
+            linha_pertence_ao_usuario_logado
+            and (_parse_int(item.get("IDFatoControleContratosEuromidia")) or 0) > 0
+        )
+        item["UsuarioPodeRenovarLinha"] = bool(
+            linha_pertence_ao_usuario_logado
+            and bool(item.get("PodeRenovar"))
+        )
+
     filtros_status_opcoes = []
     params_status_opcoes = {"id_usuario_logado": int(id_usuario_logado or 0)}
     if usuario_logado_eh_vendedor:
@@ -22424,6 +22565,7 @@ def vencimentos_campanhas_euromidia():
         vendedor_opcoes=vendedor_opcoes,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
         usuario_logado_eh_admin=usuario_logado_eh_admin,
+        id_usuario_logado=id_usuario_logado_int,
         q=q,
         dt_ini=dt_ini,
         dt_fim=dt_fim,

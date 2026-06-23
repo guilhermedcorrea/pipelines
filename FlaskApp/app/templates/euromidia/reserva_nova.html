@@ -324,127 +324,6 @@
   }
 
 
-  /* =========================================================
-     Empresa Relacionada da reserva
-     ========================================================= */
-  .campo-label{
-    font-weight:900;
-    display:block;
-    margin-bottom:6px;
-    line-height:1.25;
-  }
-
-  .reserva-empresas-relacionadas{
-    border:1px solid rgba(15,23,42,.10);
-    border-radius:14px;
-    background:#f8fafc;
-    padding:12px;
-  }
-
-  .reserva-empresas-relacionadas-top{
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-    margin-bottom:10px;
-  }
-
-  .reserva-empresas-relacionadas-title{
-    font-weight:1000;
-    color:#0f172a;
-  }
-
-  .reserva-empresas-relacionadas-lista{
-    display:flex;
-    flex-direction:column;
-    gap:10px;
-  }
-
-  .reserva-empresa-relacionada-item{
-    border:1px solid rgba(15,23,42,.10);
-    border-radius:13px;
-    background:#fff;
-    padding:10px;
-  }
-
-  .reserva-empresa-relacionada-linha{
-    display:grid;
-    grid-template-columns:minmax(0, 1fr) 50px 50px;
-    gap:10px;
-    align-items:start;
-  }
-
-  .reserva-empresa-relacionada-linha > div{
-    min-width:0;
-  }
-
-  .reserva-empresa-relacionada-marca{
-    margin-top:10px;
-  }
-
-  .reserva-empresa-relacionada-btn{
-    width:50px;
-    height:50px;
-    min-width:50px;
-    min-height:50px;
-    margin-top:30px;
-    border-radius:14px;
-    border:1px solid var(--border);
-    background:#fff;
-    font-weight:1000;
-    cursor:pointer;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    line-height:1;
-  }
-
-  .reserva-empresa-relacionada-btn.is-add{
-    border-color:rgba(22,101,52,.25);
-    background:rgba(22,101,52,.08);
-    color:#166534;
-  }
-
-  .reserva-empresa-relacionada-btn.is-remove{
-    border-color:rgba(185,28,28,.25);
-    background:rgba(185,28,28,.06);
-    color:#991b1b;
-  }
-
-  .select-search.empresa-relacionada-combo .ss-input{
-    height:50px !important;
-    min-height:50px;
-    box-sizing:border-box;
-    padding:10px 44px 10px 13px;
-  }
-
-  .select-search.empresa-relacionada-combo .ss-toggle{
-    position:absolute;
-    right:8px;
-    top:10px;
-    width:30px;
-    height:30px;
-    border:1px solid var(--border);
-    border-radius:9px;
-    background:#fff;
-    cursor:pointer;
-    font-weight:900;
-  }
-
-  .select-search.empresa-relacionada-combo .ss-item.is-selected{
-    background:rgba(22,101,52,.08);
-  }
-
-  .select-search.empresa-relacionada-combo .ss-check{
-    float:right;
-    font-weight:1000;
-    color:#166534;
-  }
-
-  @media (max-width:900px){
-    .reserva-empresa-relacionada-linha{grid-template-columns:minmax(0, 1fr) 50px 50px;}
-  }
 
 </style>
 
@@ -574,7 +453,7 @@
 
       <div style="height:12px;"></div>
 
-      <div class="reserva-grid-3">
+      <div class="reserva-grid-2">
         <div>
           <label style="font-weight:900;display:block;margin-bottom:6px;">Empresa (Cliente)</label>
 
@@ -600,20 +479,11 @@
             <div class="hint">Digite nome do vendedor.</div>
           </div>
         </div>
-
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Contrato (Número / Prévia)</label>
-
-          <div class="select-search" id="ssContrato">
-            <input id="idContrato_search" type="text" class="ss-input" placeholder="Digite para pesquisar... (contrato, prévia, empresa)">
-            <select id="idContrato" class="form-control ss-select">
-              <option value="">Selecione...</option>
-            </select>
-            <div class="ss-dropdown" id="idContrato_dropdown"></div>
-            <div class="hint">Digite número do contrato, prévia</div>
-          </div>
-        </div>
       </div>
+
+      <select id="idContrato" class="form-control" style="display:none;" aria-hidden="true" tabindex="-1">
+        <option value="">Selecione...</option>
+      </select>
 
       <div style="height:12px;"></div>
 
@@ -632,19 +502,6 @@
           value=""
         >
         <div class="hint">Obrigatório • até 200 caracteres</div>
-      </div>
-
-      <div style="height:12px;"></div>
-
-
-      <div class="reserva-empresas-relacionadas" id="boxEmpresasRelacionadas">
-        <div class="reserva-empresas-relacionadas-top">
-          <div>
-            <div class="reserva-empresas-relacionadas-title">Empresa Relacionada</div>
-            <div class="hint">Opcional. Use este campo quando a reserva tiver uma ou mais empresas extras vinculadas além da empresa principal.</div>
-          </div>
-        </div>
-        <div class="reserva-empresas-relacionadas-lista" id="empresasRelacionadasLista"></div>
       </div>
 
       <div style="height:12px;"></div>
@@ -726,18 +583,18 @@
   const ssFaceWrap     = document.getElementById("ssFace");
   const ssClienteWrap  = document.getElementById("ssCliente");
   const ssVendedorWrap = document.getElementById("ssVendedor");
-  const ssContratoWrap = document.getElementById("ssContrato");
+  const ssContratoWrap = null;
 
   const elCodFaceSearch = document.getElementById("codFace_search");
   const elCodFaceToggle = document.getElementById("codFace_toggle");
   const elClienteSearch  = document.getElementById("idCliente_search");
   const elVendedorSearch = document.getElementById("idVendedor_search");
-  const elContratoSearch = document.getElementById("idContrato_search");
+  const elContratoSearch = null;
 
   const elCodFaceDrop  = document.getElementById("codFace_dropdown");
   const elClienteDrop  = document.getElementById("idCliente_dropdown");
   const elVendedorDrop = document.getElementById("idVendedor_dropdown");
-  const elContratoDrop = document.getElementById("idContrato_dropdown");
+  const elContratoDrop = null;
   const elCotaHint     = document.getElementById("cotaHint");
 
   const elTooltip = document.getElementById("fpTooltip");
@@ -1035,6 +892,18 @@
       const disp = Number(info.disponiveis);
       const total = Number(info.total);
       const st = normalizarStatusBadge(info.status);
+      const diaDisponivel = info.diaDisponivel ?? info.dia_disponivel ?? null;
+      const disponiveisCota = Number(info.disponiveisCota ?? info.disponiveis_cota ?? info.disp_cota ?? NaN);
+      const maxBlocoLivre = Number(info.maxBlocoLivre ?? info.max_bloco_livre ?? NaN);
+      const spanNecessario = Number(info.spanNecessario ?? info.span_necessario ?? NaN);
+
+      if(diaDisponivel !== null && diaDisponivel !== undefined && String(diaDisponivel) !== ""){
+        const flagDiaDisponivel = Number(diaDisponivel);
+        if(Number.isFinite(flagDiaDisponivel)) return flagDiaDisponivel !== 1;
+      }
+
+      if(Number.isFinite(disponiveisCota) && disponiveisCota <= 0) return true;
+      if(Number.isFinite(maxBlocoLivre) && Number.isFinite(spanNecessario) && spanNecessario > 0 && maxBlocoLivre < spanNecessario) return true;
 
       if(!Number.isFinite(disp) || !Number.isFinite(total)) return false;
       if(st === "INDISPONIVEL") return true;
@@ -1288,257 +1157,26 @@
 
 
   // =========================================================
-  // ✅ Empresa Relacionada
+  // Empresas relacionadas removidas desta tela.
+  // Mantém o hidden como [] para preservar compatibilidade com o backend.
   // =========================================================
-  function escapeHtml(valor){
-    return String(valor ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  function criarUidEmpresaRelacionada(){
-    return "emp_rel_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
-  }
-
-  function novaEmpresaRelacionada(){
-    return {
-      uid: criarUidEmpresaRelacionada(),
-      id_empresa: "",
-      razao_social: "",
-      cnpj: "",
-      marca: ""
-    };
-  }
-
-  function garantirEmpresasRelacionadasEstado(){
-    if(!Array.isArray(empresasRelacionadasEstado)) empresasRelacionadasEstado = [];
-
-    empresasRelacionadasEstado = empresasRelacionadasEstado.filter(function(item){
-      return item && typeof item === "object";
-    });
-
-    if(!empresasRelacionadasEstado.length){
-      empresasRelacionadasEstado.push(novaEmpresaRelacionada());
-    }
-
-    empresasRelacionadasEstado.forEach(function(item){
-      if(!item.uid) item.uid = criarUidEmpresaRelacionada();
-      item.id_empresa = String(item.id_empresa || "").trim();
-      item.razao_social = String(item.razao_social || "").trim();
-      item.cnpj = String(item.cnpj || "").trim();
-      item.marca = String(item.marca || "").trim();
-    });
-  }
-
-  function obterEmpresaRelacionadaPorUid(uid){
-    garantirEmpresasRelacionadasEstado();
-    return empresasRelacionadasEstado.find(function(item){
-      return String(item.uid || "") === String(uid || "");
-    }) || null;
-  }
-
-  function obterEmpresaPorId(idEmpresa){
-    const id = String(idEmpresa || "").trim();
-    if(!id) return null;
-    return (empresasAtuais || []).find(function(item){
-      return getEmpresaId(item) === id;
-    }) || null;
-  }
-
-  function fecharDropdownsEmpresasRelacionadas(){
-    if(!elEmpresasRelacionadasLista) return;
-    elEmpresasRelacionadasLista.querySelectorAll(".select-search.open").forEach(function(el){
-      el.classList.remove("open");
-    });
-  }
-
-  function renderOpcoesEmpresaRelacionada(item, input, dropdown, wrap){
-    if(!dropdown || !input || !item) return;
-
-    const termo = normalizarTexto(input.value || "");
-    const idSelecionado = String(item.id_empresa || "").trim();
-
-    const idsJaSelecionados = new Set(
-      empresasRelacionadasEstado
-        .filter(function(rel){ return rel && String(rel.uid || "") !== String(item.uid || ""); })
-        .map(function(rel){ return String(rel.id_empresa || "").trim(); })
-        .filter(Boolean)
-    );
-
-    const itens = (empresasAtuais || [])
-      .filter(function(empresa){
-        const id = getEmpresaId(empresa);
-        if(id && idsJaSelecionados.has(id)) return false;
-        return !termo || normalizarTexto(labelEmpresa(empresa)).includes(termo);
-      })
-      .slice(0, 200);
-
-    dropdown.innerHTML = "";
-
-    if(!itens.length){
-      const vazio = document.createElement("div");
-      vazio.className = "ss-empty";
-      vazio.textContent = "Nenhuma empresa encontrada";
-      dropdown.appendChild(vazio);
-      return;
-    }
-
-    itens.forEach(function(empresa){
-      const id = getEmpresaId(empresa);
-      const div = document.createElement("div");
-      div.className = "ss-item" + (id && id === idSelecionado ? " is-selected" : "");
-      div.innerHTML = "<span>" + escapeHtml(labelEmpresa(empresa)) + "</span>" + (id && id === idSelecionado ? "<span class='ss-check'>✓</span>" : "");
-      div.addEventListener("mousedown", function(ev){
-        ev.preventDefault();
-        item.id_empresa = id;
-        item.razao_social = String(empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia || "").trim();
-        item.cnpj = String(empresa.CNPJ || "").trim();
-        input.value = labelEmpresa(empresa);
-        if(wrap) wrap.classList.remove("open");
-        renderizarEmpresasRelacionadas();
-        syncHiddenFields();
-      });
-      dropdown.appendChild(div);
-    });
-  }
-
-  function htmlLinhaEmpresaRelacionada(item, idx){
-    const empresa = obterEmpresaPorId(item.id_empresa);
-    const valorInput = empresa ? labelEmpresa(empresa) : [item.razao_social, item.cnpj].filter(Boolean).join(" — ");
-    const mostrarMarca = !!String(item.id_empresa || "").trim();
-
-    return "<div class='reserva-empresa-relacionada-item' data-uid='" + escapeHtml(item.uid) + "'>" +
-      "<div class='reserva-empresa-relacionada-linha'>" +
-        "<div>" +
-          "<label class='campo-label'>Empresa Relacionada</label>" +
-          "<div class='select-search empresa-relacionada-combo' data-role='combo-empresa-relacionada'>" +
-            "<input class='ss-input' data-role='input-empresa-relacionada' type='text' autocomplete='off' placeholder='Digite razão social ou CNPJ...' value='" + escapeHtml(valorInput) + "'>" +
-            "<button class='ss-toggle' data-role='btn-empresa-relacionada' type='button' aria-label='Abrir lista de empresas'>▾</button>" +
-            "<div class='ss-dropdown' data-role='lista-empresa-relacionada'></div>" +
-          "</div>" +
-          "<div class='hint'>Opcional. Use + para adicionar outra empresa relacionada.</div>" +
-        "</div>" +
-        "<button type='button' class='reserva-empresa-relacionada-btn is-add' data-role='add-empresa-relacionada' title='Adicionar empresa relacionada'>+</button>" +
-        "<button type='button' class='reserva-empresa-relacionada-btn is-remove' data-role='remover-empresa-relacionada' title='Remover empresa relacionada'>−</button>" +
-      "</div>" +
-      (mostrarMarca
-        ? "<div class='reserva-empresa-relacionada-marca'><label class='campo-label'>Marca da empresa relacionada</label><input class='form-control' data-role='marca-empresa-relacionada' type='text' maxlength='200' placeholder='Se ficar vazio, usa a Marca Exibida principal' value='" + escapeHtml(item.marca) + "'><div class='hint'>Opcional. Se não preencher, o sistema salva a mesma Marca Exibida principal.</div></div>"
-        : "") +
-    "</div>";
-  }
+  function fecharDropdownsEmpresasRelacionadas(){}
 
   function renderizarEmpresasRelacionadas(){
-    if(!elEmpresasRelacionadasLista) return;
-
-    garantirEmpresasRelacionadasEstado();
-    elEmpresasRelacionadasLista.innerHTML = empresasRelacionadasEstado.map(htmlLinhaEmpresaRelacionada).join("");
-
-    elEmpresasRelacionadasLista.querySelectorAll(".reserva-empresa-relacionada-item").forEach(function(container){
-      const uid = container.getAttribute("data-uid") || "";
-      const item = obterEmpresaRelacionadaPorUid(uid);
-      if(!item) return;
-
-      const wrap = container.querySelector("[data-role='combo-empresa-relacionada']");
-      const input = container.querySelector("[data-role='input-empresa-relacionada']");
-      const dropdown = container.querySelector("[data-role='lista-empresa-relacionada']");
-      const botao = container.querySelector("[data-role='btn-empresa-relacionada']");
-      const btnAdd = container.querySelector("[data-role='add-empresa-relacionada']");
-      const btnRemover = container.querySelector("[data-role='remover-empresa-relacionada']");
-      const marca = container.querySelector("[data-role='marca-empresa-relacionada']");
-
-      const abrir = function(){
-        if(wrap) wrap.classList.add("open");
-        renderOpcoesEmpresaRelacionada(item, input, dropdown, wrap);
-      };
-
-      if(input){
-        input.addEventListener("focus", abrir);
-        input.addEventListener("input", function(){
-          item.id_empresa = "";
-          item.razao_social = "";
-          item.cnpj = "";
-          abrir();
-          syncHiddenFields();
-        });
-        input.addEventListener("keydown", function(ev){
-          if(ev.key === "Escape" && wrap) wrap.classList.remove("open");
-        });
-      }
-
-      if(botao){
-        botao.addEventListener("mousedown", function(ev){
-          ev.preventDefault();
-          abrir();
-          if(input) input.focus();
-        });
-      }
-
-      if(btnAdd){
-        btnAdd.addEventListener("click", function(){
-          garantirEmpresasRelacionadasEstado();
-          empresasRelacionadasEstado.push(novaEmpresaRelacionada());
-          renderizarEmpresasRelacionadas();
-          syncHiddenFields();
-        });
-      }
-
-      if(btnRemover){
-        btnRemover.addEventListener("click", function(){
-          garantirEmpresasRelacionadasEstado();
-          if(empresasRelacionadasEstado.length <= 1){
-            empresasRelacionadasEstado = [novaEmpresaRelacionada()];
-          }else{
-            empresasRelacionadasEstado = empresasRelacionadasEstado.filter(function(rel){
-              return String(rel.uid || "") !== uid;
-            });
-          }
-          renderizarEmpresasRelacionadas();
-          syncHiddenFields();
-        });
-      }
-
-      if(marca){
-        marca.addEventListener("input", function(){
-          item.marca = String(marca.value || "").trim();
-          syncHiddenFields();
-        });
-      }
-    });
-
     sincronizarEmpresasRelacionadasHidden();
   }
 
   function coletarEmpresasRelacionadasValidas(){
-    garantirEmpresasRelacionadasEstado();
-
-    return empresasRelacionadasEstado
-      .filter(function(item){ return String(item.id_empresa || "").trim(); })
-      .map(function(item){
-        const empresa = obterEmpresaPorId(item.id_empresa);
-        return {
-          id_empresa: String(item.id_empresa || "").trim(),
-          razao_social: String(item.razao_social || (empresa ? (empresa.RazaoSocial || empresa.Nome || empresa.NomeFantasia || "") : "")).trim(),
-          cnpj: String(item.cnpj || (empresa ? (empresa.CNPJ || "") : "")).trim(),
-          marca: String(item.marca || "").trim()
-        };
-      });
+    return [];
   }
 
   function sincronizarEmpresasRelacionadasHidden(){
-    if(!fEmpresasRelacionadas) return;
-    fEmpresasRelacionadas.value = JSON.stringify(coletarEmpresasRelacionadasValidas());
+    if(fEmpresasRelacionadas){
+      fEmpresasRelacionadas.value = "[]";
+    }
   }
 
   function validarEmpresasRelacionadas(){
-    garantirEmpresasRelacionadasEstado();
-    for(const item of empresasRelacionadasEstado){
-      if(String(item.marca || "").trim().length > 200){
-        return "Marca da empresa relacionada excede 200 caracteres.";
-      }
-    }
     return "";
   }
 
@@ -1758,23 +1396,31 @@
     renderItem: (v) => (v.NomeVendedor || "").trim() || "—"
   });
 
-  const ssContrato = buildSearchableSelect({
-    wrap: ssContratoWrap,
-    input: elContratoSearch,
-    select: elIdContrato,
-    dropdown: elContratoDrop,
-    getValue: (c) => getContratoId(c),
-    getLabel: (c) => labelContrato(c),
-    renderItem: (c) => {
-      const nc = (c.NumeroContrato || "").trim();
-      const np = (c.NumeroPrevia || "").trim();
-      const rz = (c.RazaoSocial || "").trim();
-      const cj = (c.CNPJ || "").trim();
-      const top = ("Contrato " + (nc || "-") + " / Prévia " + (np || "-"));
-      const sub = (rz || cj) ? ("<span class='sub'>" + (rz || "") + (cj ? (" — " + cj) : "") + "</span>") : "";
-      return top + sub;
+  // Campo visual de Contrato (Número / Prévia) removido desta tela.
+  // Mantém o select oculto apenas para compatibilidade com o backend e com os hidden fields.
+  const ssContrato = {
+    setItems: function(itens){
+      if(!elIdContrato) return;
+
+      const valorAtual = (elIdContrato.value || "").toString().trim();
+      elIdContrato.innerHTML = '<option value="">Selecione...</option>';
+
+      for(const c of (Array.isArray(itens) ? itens : [])){
+        const id = getContratoId(c);
+        if(!id) continue;
+
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = labelContrato(c);
+        elIdContrato.appendChild(opt);
+      }
+
+      if(valorAtual){
+        elIdContrato.value = valorAtual;
+      }
     }
-  });
+  };
+
 
   // =========================================================
   // ✅ fetch fallback
@@ -1834,7 +1480,20 @@
           || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
         );
 
-        dayBadgeMap.set(dt, { disponiveis, total, status });
+        const diaDisponivelRaw = it.dia_disponivel ?? it.DiaDisponivel ?? it.disponivel_cota ?? it.DisponivelCota ?? null;
+        const dispCotaRaw = it.disp_cota ?? it.disponiveis_cota ?? it.DisponiveisCota ?? it.available_cota ?? null;
+        const maxBlocoLivreRaw = it.max_bloco_livre ?? it.MaxBlocoLivre ?? null;
+        const spanNecessarioRaw = it.span_necessario ?? it.SpanNecessario ?? null;
+
+        dayBadgeMap.set(dt, {
+          disponiveis,
+          total,
+          status,
+          diaDisponivel: diaDisponivelRaw,
+          disponiveisCota: dispCotaRaw,
+          maxBlocoLivre: maxBlocoLivreRaw,
+          spanNecessario: spanNecessarioRaw
+        });
       }
     }
   }
@@ -1856,10 +1515,19 @@
       if(!Number.isFinite(total) || !Number.isFinite(disponiveis)) continue;
 
       const status = normalizarStatusBadge(it.status || it.Status || "");
+      const dispCota = Number(it.disp_cota ?? it.disponiveis_cota ?? it.DisponiveisCota ?? it.SlotsDisponiveisCota ?? NaN);
+      const diaDisponivel = it.dia_disponivel ?? it.DiaDisponivel ?? null;
+      const maxBlocoLivre = Number(it.max_bloco_livre ?? it.MaxBlocoLivre ?? NaN);
+      const spanNecessario = Number(it.span_necessario ?? it.SpanNecessario ?? NaN);
+
       dayBadgeMap.set(dt, {
         disponiveis,
         total,
-        status: status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
+        status: status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")),
+        diaDisponivel,
+        disponiveisCota: Number.isFinite(dispCota) ? dispCota : null,
+        maxBlocoLivre: Number.isFinite(maxBlocoLivre) ? maxBlocoLivre : null,
+        spanNecessario: Number.isFinite(spanNecessario) ? spanNecessario : null
       });
     }
 
