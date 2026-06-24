@@ -1,5 +1,7 @@
 import json
 import math
+import os
+import uuid
 import re
 import unicodedata
 from collections.abc import Mapping
@@ -192,6 +194,469 @@ ID_PERFIL_ADMIN_PADRAO = 1
 ID_PERFIL_VENDEDOR_PADRAO = 3
 ID_PERFIL_COORDENADOR_PADRAO = 5
 ID_EMPRESA_PROPRIETARIA_KANBAN_PADRAO = 3
+
+
+# ============================================================
+# Airflow - disparo da DAG de Prioridade Reservas pelo Kanban
+# ============================================================
+NOME_DAG_PRIORIDADE_RESERVAS_PADRAO_KANBAN = "pipeline_prioridade_reservas"
+
+
+def _env_bool_kanban(nome_variavel: str, padrao: str = "0") -> bool:
+    valor = (os.getenv(nome_variavel, padrao) or "").strip().lower()
+    return valor in ("1", "true", "sim", "s", "yes", "y", "on")
+
+
+def _airflow_timeout_segundos_kanban() -> int:
+    try:
+        return max(1, int(os.getenv("AIRFLOW_API_TIMEOUT_SEGUNDOS", "5") or "5"))
+    except Exception:
+        return 5
+
+
+def _airflow_base_url_kanban() -> str:
+    return (os.getenv("AIRFLOW_API_BASE_URL") or "").strip().rstrip("/")
+
+
+def _airflow_credenciais_api_kanban() -> tuple[str, str]:
+    usuario = (
+        os.getenv("AIRFLOW_API_USERNAME")
+        or os.getenv("AIRFLOW_ADMIN_USERNAME")
+        or ""
+    ).strip()
+    senha = (
+        os.getenv("AIRFLOW_API_PASSWORD")
+        or os.getenv("AIRFLOW_ADMIN_PASSWORD")
+        or ""
+    ).strip()
+    return usuario, senha
+
+
+def _airflow_obter_token_api_kanban() -> str:
+    if requests is None:
+        raise RuntimeError("Biblioteca requests indisponível no Flask para chamar o Airflow.")
+
+    base_url = _airflow_base_url_kanban()
+    if not base_url:
+        raise RuntimeError("AIRFLOW_API_BASE_URL não configurado no ambiente do Flask.")
+
+    usuario, senha = _airflow_credenciais_api_kanban()
+    if not usuario or not senha:
+        raise RuntimeError("AIRFLOW_API_USERNAME/AIRFLOW_API_PASSWORD não configurados no ambiente do Flask.")
+
+    timeout = _airflow_timeout_segundos_kanban()
+    url_token = f"{base_url}/auth/token"
+
+    resposta = requests.post(
+        url_token,
+        json={"username": usuario, "password": senha},
+        timeout=timeout,
+    )
+
+    if resposta.status_code in (400, 415, 422):
+        resposta = requests.post(
+            url_token,
+            data={"username": usuario, "password": senha},
+            timeout=timeout,
+        )
+
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        corpo = (resposta.text or "")[:1000]
+        raise RuntimeError(
+            f"Falha ao obter token do Airflow. Status={resposta.status_code}. Resposta={corpo}"
+        ) from exc
+
+    dados = resposta.json() or {}
+    token = dados.get("access_token") or dados.get("token")
+    if not token:
+        raise RuntimeError(f"Airflow respondeu sem access_token. Resposta={dados}")
+
+    return str(token)
+
+
+def _normalizar_lista_ids_int_kanban(valores: Any) -> list[int]:
+    if valores in (None, "", 0):
+        return []
+
+    if isinstance(valores, str):
+        candidatos = re.split(r"[,;\s]+", valores.strip())
+    elif isinstance(valores, (list, tuple, set)):
+        candidatos = list(valores)
+    else:
+        candidatos = [valores]
+
+    ids: list[int] = []
+    vistos: set[int] = set()
+    for valor in candidatos:
+        try:
+            valor_int = int(valor or 0)
+        except Exception:
+            continue
+        if valor_int <= 0 or valor_int in vistos:
+            continue
+        vistos.add(valor_int)
+        ids.append(valor_int)
+
+    return ids
+
+
+def _resolver_id_contrato_prioridade_reservas_card_kanban(id_card: int | None) -> int | None:
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    if id_card_int <= 0:
+        return None
+
+    sql = text(f"""
+        SELECT TOP (1)
+            IDFatoControleContratosEuromidia = COALESCE(
+                TRY_CONVERT(int, item.IDFatoControleContratoEuromidia),
+                TRY_CONVERT(int, vinc.IDFatoControleContratosEuromidia),
+                TRY_CONVERT(int, card.IDFatoControleContratosEuromidia)
+            )
+        FROM {TABELA_CARD} card WITH (NOLOCK)
+        OUTER APPLY (
+            SELECT TOP (1)
+                i.IDFatoControleContratoEuromidia
+            FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i WITH (NOLOCK)
+            WHERE TRY_CONVERT(int, i.IDFatoKanbanCard) = TRY_CONVERT(int, card.IDFatoKanbanCard)
+              AND TRY_CONVERT(int, i.IDFatoControleContratoEuromidia) IS NOT NULL
+            ORDER BY i.IDFatoControleContratosItensEuromidia DESC
+        ) item
+        OUTER APPLY (
+            SELECT TOP (1)
+                v.IDFatoControleContratosEuromidia
+            FROM {TABELA_CONTRATO_CARD_EUROMIDIA} v WITH (NOLOCK)
+            WHERE TRY_CONVERT(int, v.IDFatoKanbanCard) = TRY_CONVERT(int, card.IDFatoKanbanCard)
+              AND TRY_CONVERT(int, v.IDFatoControleContratosEuromidia) IS NOT NULL
+            ORDER BY v.IDFatoContratoCardEuromidia DESC
+        ) vinc
+        WHERE TRY_CONVERT(int, card.IDFatoKanbanCard) = :id_card;
+    """)
+
+    try:
+        valor = db.session.execute(sql, {"id_card": int(id_card_int)}).scalar()
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN PRIORIDADE RESERVAS | erro ao resolver id_contrato do card | id_card=%s",
+            id_card_int,
+        )
+        return None
+
+    try:
+        valor_int = int(valor or 0)
+    except Exception:
+        valor_int = 0
+
+    return valor_int if valor_int > 0 else None
+
+
+def _airflow_disparar_dag_prioridade_reservas_kanban(
+    *,
+    id_card: int | None,
+    id_usuario_logado: int | None,
+    origem_evento: str,
+    id_contrato: int | None = None,
+    ids_ocupacao_origem: Any = None,
+    processar_todos_elegiveis: bool | None = None,
+) -> dict[str, Any]:
+    """Dispara a DAG pipeline_prioridade_reservas depois do commit da ocupação.
+
+    A DAG continua sendo a dona da regra de preferência:
+    - só cria TipoReserva = 2 se a ocupação tiver 6 meses ou mais;
+    - valida CodFace via DimFacesPaineis.IDDimPaineisEuromidia;
+    - faz encaixe Tetris e trava duplicidade.
+
+    Este helper apenas aciona o Airflow quando o Kanban acabou de gravar ou efetivar ocupação.
+    """
+    if not _env_bool_kanban("AIRFLOW_TRIGGER_PRIORIDADE_RESERVAS_HABILITADO", "1"):
+        return {"ok": False, "status": "desabilitado"}
+
+    ids_ocupacao = _normalizar_lista_ids_int_kanban(ids_ocupacao_origem)
+
+    try:
+        id_card_int = int(id_card or 0)
+    except Exception:
+        id_card_int = 0
+
+    try:
+        id_contrato_int = int(id_contrato or 0)
+    except Exception:
+        id_contrato_int = 0
+
+    if id_contrato_int <= 0 and id_card_int > 0:
+        id_contrato_resolvido = _resolver_id_contrato_prioridade_reservas_card_kanban(id_card_int)
+        id_contrato_int = int(id_contrato_resolvido or 0)
+
+    if processar_todos_elegiveis is None:
+        # Com id_contrato, a DAG processa só aquele contrato.
+        # Sem id_contrato, ela precisa entrar no modo varredura pós-upsert para encontrar
+        # a ocupação recém-gravada no FatoOcupacaoPaineisEuromidia.
+        processar_todos_elegiveis = id_contrato_int <= 0
+
+    escopo_por_card_para_varredura = bool(id_card_int > 0 and bool(processar_todos_elegiveis))
+    if id_contrato_int <= 0 and not ids_ocupacao and not escopo_por_card_para_varredura:
+        current_app.logger.warning(
+            "KANBAN PRIORIDADE RESERVAS | não acionou DAG: sem escopo suficiente | "
+            "id_card=%s id_contrato=%s ids_ocupacao=%s origem_evento=%s processar_todos_elegiveis=%s",
+            id_card_int or None,
+            id_contrato_int or None,
+            ids_ocupacao,
+            origem_evento,
+            processar_todos_elegiveis,
+        )
+        return {
+            "ok": False,
+            "status": "sem_escopo",
+            "mensagem": "Sem id_contrato, sem IDs de ocupação e sem card válido para varredura de prioridade de reservas.",
+            "id_card": id_card_int or None,
+        }
+
+    if requests is None:
+        raise RuntimeError("Biblioteca requests indisponível no Flask para chamar o Airflow.")
+
+    base_url = _airflow_base_url_kanban()
+    if not base_url:
+        raise RuntimeError("AIRFLOW_API_BASE_URL não configurado no ambiente do Flask.")
+
+    token = _airflow_obter_token_api_kanban()
+    dag_id = (
+        os.getenv("AIRFLOW_DAG_PRIORIDADE_RESERVAS")
+        or os.getenv("AIRFLOW_DAG_PIPELINE_PRIORIDADE_RESERVAS")
+        or NOME_DAG_PRIORIDADE_RESERVAS_PADRAO_KANBAN
+    ).strip()
+
+    ids_csv = ",".join(str(x) for x in ids_ocupacao)
+
+    dag_run_id = (
+        f"kanban_prioridade_reservas__card_{id_card_int or 0}__"
+        f"contrato_{id_contrato_int or 0}__{uuid.uuid4().hex[:12]}"
+    )
+
+    conf = {
+        "origem": str(origem_evento or "kanban_pos_gravacao_ocupacao")[:120],
+        "modo_processamento": "varredura_pos_upsert_ocupacao",
+        "processar_todos_elegiveis": bool(processar_todos_elegiveis),
+        "id_card": id_card_int or None,
+        "id_usuario": int(id_usuario_logado or 0) or None,
+        "id_usuario_logado": int(id_usuario_logado or 0) or None,
+        "ids_ocupacao_origem": ids_ocupacao,
+        "ids_ocupacao_origem_csv": ids_csv or None,
+    }
+
+    if id_contrato_int > 0:
+        conf["id_contrato"] = int(id_contrato_int)
+
+    payload = {
+        "dag_run_id": dag_run_id,
+        "logical_date": None,
+        "conf": conf,
+        "note": f"Prioridade reservas acionada pelo Kanban card {id_card_int or 'sem_card'}",
+    }
+
+    timeout = _airflow_timeout_segundos_kanban()
+    url_trigger = f"{base_url}/api/v2/dags/{dag_id}/dagRuns"
+
+    resposta = requests.post(
+        url_trigger,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        timeout=timeout,
+    )
+
+    if resposta.status_code == 409:
+        return {
+            "ok": True,
+            "status": "ja_existia",
+            "dag_id": dag_id,
+            "dag_run_id": dag_run_id,
+            "id_card": id_card_int or None,
+            "id_contrato": id_contrato_int or None,
+            "ids_ocupacao_origem": ids_ocupacao,
+        }
+
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        corpo = (resposta.text or "")[:1500]
+        raise RuntimeError(
+            f"Falha ao disparar DAG de prioridade reservas no Airflow. "
+            f"Status={resposta.status_code}. Resposta={corpo}"
+        ) from exc
+
+    try:
+        dados_resposta = resposta.json() or {}
+    except Exception:
+        dados_resposta = {"texto": (resposta.text or "")[:1500]}
+
+    return {
+        "ok": True,
+        "status": "disparado",
+        "dag_id": dag_id,
+        "dag_run_id": dag_run_id,
+        "id_card": id_card_int or None,
+        "id_contrato": id_contrato_int or None,
+        "ids_ocupacao_origem": ids_ocupacao,
+        "resposta": dados_resposta,
+    }
+
+
+def _airflow_disparar_dag_prioridade_reservas_kanban_async(**kwargs: Any) -> dict[str, Any]:
+    """Dispara a DAG em thread daemon para não segurar o salvamento do card.
+
+    A chamada deve acontecer apenas depois do db.session.commit().
+    Se o Airflow falhar, o card/ocupação já salvo não é desfeito.
+    """
+    app_obj = current_app._get_current_object()
+    payload_log = dict(kwargs or {})
+
+    def _executar() -> None:
+        with app_obj.app_context():
+            try:
+                resultado = _airflow_disparar_dag_prioridade_reservas_kanban(**payload_log)
+                current_app.logger.warning(
+                    "KANBAN PRIORIDADE RESERVAS | DAG acionada | resultado=%s",
+                    resultado,
+                )
+            except Exception:
+                current_app.logger.exception(
+                    "KANBAN PRIORIDADE RESERVAS | falha ao acionar DAG | payload=%s",
+                    payload_log,
+                )
+
+    threading.Thread(target=_executar, daemon=True).start()
+
+    return {
+        "ok": True,
+        "status": "disparo_solicitado_pos_commit",
+        "id_card": payload_log.get("id_card"),
+        "id_contrato": payload_log.get("id_contrato"),
+        "ids_ocupacao_origem": _normalizar_lista_ids_int_kanban(payload_log.get("ids_ocupacao_origem")),
+    }
+
+
+def _acionar_prioridade_reservas_pos_ocupacao_kanban(
+    *,
+    id_card: int | None,
+    id_usuario: int | None,
+    sincronizacao_reservas: dict[str, Any] | None = None,
+    id_contrato: int | None = None,
+    origem_evento: str = "kanban_pos_gravacao_ocupacao",
+    forcar: bool = False,
+) -> dict[str, Any] | None:
+    """Aciona a DAG de preferência depois que o Kanban grava ocupação.
+
+    Correção importante:
+    - antes o helper só chamava o Airflow se viesse uma lista de IDs em
+      ids_criadas/ids/ids_ocupacao;
+    - quando o salvamento informava apenas o contador `criadas`/`segmentos`,
+      a função retornava None e a DAG não era chamada;
+    - agora qualquer criação real de ocupação dispara a DAG depois do commit.
+
+    A chamada continua pós-commit para a DAG enxergar a ocupação já persistida.
+    """
+
+    def _int_positivo_ou_zero(valor: Any) -> int:
+        try:
+            valor_int = int(valor or 0)
+        except Exception:
+            valor_int = 0
+        return valor_int if valor_int > 0 else 0
+
+    id_card_int = _int_positivo_ou_zero(id_card)
+    id_usuario_int = _int_positivo_ou_zero(id_usuario)
+    id_contrato_int = _int_positivo_ou_zero(id_contrato)
+
+    ids_ocupacao: list[int] = []
+    ocupacoes_criadas_qtd = 0
+
+    if isinstance(sincronizacao_reservas, dict):
+        candidatos_ids: list[int] = []
+        for chave in (
+            "ids_criadas",
+            "ids_ocupacao",
+            "ids",
+            "ocupacoes_criadas_ids",
+            "ids_ocupacoes_criadas",
+        ):
+            candidatos_ids.extend(
+                _normalizar_lista_ids_int_kanban(sincronizacao_reservas.get(chave))
+            )
+
+        for chave in (
+            "id_ocupacao",
+            "IDFatoOcupacaoPaineisEuromidia",
+            "id_fato_ocupacao_paineis_euromidia",
+        ):
+            valor_id = _int_positivo_ou_zero(sincronizacao_reservas.get(chave))
+            if valor_id > 0:
+                candidatos_ids.append(valor_id)
+
+        vistos: set[int] = set()
+        for valor_id in candidatos_ids:
+            valor_id = _int_positivo_ou_zero(valor_id)
+            if valor_id <= 0 or valor_id in vistos:
+                continue
+            vistos.add(valor_id)
+            ids_ocupacao.append(valor_id)
+
+        for chave in (
+            "criadas",
+            "ocupacoes_criadas",
+            "ocupacoesCriadas",
+            "segmentos_criados",
+            "segmentos",
+            "linhas",
+        ):
+            ocupacoes_criadas_qtd = max(
+                ocupacoes_criadas_qtd,
+                _int_positivo_ou_zero(sincronizacao_reservas.get(chave)),
+            )
+
+        if ids_ocupacao and ocupacoes_criadas_qtd <= 0:
+            ocupacoes_criadas_qtd = len(ids_ocupacao)
+
+        if id_contrato_int <= 0:
+            id_contrato_int = _int_positivo_ou_zero(sincronizacao_reservas.get("id_contrato"))
+
+    if not forcar and ocupacoes_criadas_qtd <= 0 and not ids_ocupacao:
+        current_app.logger.warning(
+            "KANBAN PRIORIDADE RESERVAS | ignorado: nenhuma ocupação nova detectada | "
+            "id_card=%s id_contrato=%s origem_evento=%s sincronizacao_reservas=%s",
+            id_card_int or None,
+            id_contrato_int or None,
+            origem_evento,
+            sincronizacao_reservas,
+        )
+        return None
+
+    current_app.logger.warning(
+        "KANBAN PRIORIDADE RESERVAS | solicitando disparo pós-commit | "
+        "id_card=%s id_contrato=%s ids_ocupacao=%s ocupacoes_criadas_qtd=%s origem_evento=%s forcar=%s",
+        id_card_int or None,
+        id_contrato_int or None,
+        ids_ocupacao,
+        ocupacoes_criadas_qtd,
+        origem_evento,
+        forcar,
+    )
+
+    return _airflow_disparar_dag_prioridade_reservas_kanban_async(
+        id_card=id_card_int or None,
+        id_usuario_logado=id_usuario_int or None,
+        id_contrato=id_contrato_int or None,
+        ids_ocupacao_origem=ids_ocupacao,
+        origem_evento=origem_evento,
+        processar_todos_elegiveis=None,
+    )
+
 
 
 def _id_empresa_usuario() -> int:
@@ -5690,6 +6155,7 @@ def _finalizar_pos_movimento_card(
     snapshot_preco_praticado = resultado_core.get("snapshot_preco_praticado")
     sincronizacao_tag_plano_midia = resultado_core.get("sincronizacao_tag_plano_midia")
     sincronizacao_reservas = resultado_core.get("sincronizacao_reservas")
+    prioridade_reservas = resultado_core.get("prioridade_reservas")
     client_request_id = str(resultado_core.get("client_request_id") or "").strip() or None
 
     _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
@@ -5710,6 +6176,7 @@ def _finalizar_pos_movimento_card(
             "snapshot_solicitacao": sincronizacao_solicitacao_fase,
             "snapshot_preco_praticado": snapshot_preco_praticado,
             "sincronizacao_reservas": sincronizacao_reservas,
+            "prioridade_reservas": prioridade_reservas,
             "client_request_id": client_request_id,
         },
     )
@@ -5727,6 +6194,7 @@ def _finalizar_pos_movimento_card(
         "snapshot_preco_praticado": snapshot_preco_praticado,
         "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
         "sincronizacao_reservas": sincronizacao_reservas,
+        "prioridade_reservas": prioridade_reservas,
         "client_request_id": client_request_id,
     }
 
@@ -12673,7 +13141,8 @@ def _vincular_reserva_existente_kanban(
         observacao_final_sql = "CONCAT(COALESCE(Observacao, ''), CASE WHEN COALESCE(Observacao, '') = '' THEN '' ELSE ' | ' END, :observacao_adicional)"
         params_extra = {"observacao_adicional": observacao_adicional}
 
-    marca_exibida = _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada) or str(titulo_card or "").strip() or None
+    # MarcaExibida é a marca comercial do card/campanha, não a RazaoSocial da empresa.
+    marca_exibida = str(titulo_card or "").strip() or None
 
     params = {
         "id_reserva": int(id_reserva),
@@ -12743,7 +13212,10 @@ def _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada: Any) -> s
     return str(valor or "").strip()
 
 
-ORIGEM_RESERVA_CARD_KANBAN = "KANBAN"
+# Ocupação criada/salva pelo Kanban antes da aprovação do contrato.
+# Reserva futura de preferência NÃO nasce aqui; ela é criada exclusivamente pela DAG.
+ORIGEM_OCUPACAO_CARD_KANBAN = "OCUPACAO"
+ORIGEM_RESERVA_CARD_KANBAN = ORIGEM_OCUPACAO_CARD_KANBAN  # compatibilidade com nomes antigos do código
 ORIGEM_OCUPACAO_CONTRATO_KANBAN = "CONTRATO"
 
 
@@ -12764,7 +13236,8 @@ def _resolver_origem_ocupacao_card_kanban(id_card: int | None) -> str:
 
     Regra de negócio:
     - card com tag Contrato Aprovado vira ocupação de CONTRATO;
-    - card ainda não aprovado continua como KANBAN.
+    - card ainda não aprovado fica como ocupação normal: Origem = OCUPACAO.
+    - reserva futura de preferência é criada somente pela DAG pipeline_prioridade_reservas.
     """
     if _card_kanban_tem_contrato_aprovado(id_card):
         return ORIGEM_OCUPACAO_CONTRATO_KANBAN
@@ -12797,12 +13270,31 @@ def _garantir_tipo_reserva_zero_ocupacoes_card_kanban(
     sql = text(f"""
         UPDATE fo
            SET fo.TipoReserva = 0,
+               fo.Status = CASE
+                    WHEN UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(50), fo.Status), '')))) = 'RESERVADO'
+                    THEN 'ATIVO'
+                    ELSE fo.Status
+               END,
+               fo.ExpiraEm = NULL,
+               fo.TipoVinculoOrigem = CASE
+                    WHEN UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) LIKE '%PREFERENCIA%'
+                      OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) LIKE '%PREFERÊNCIA%'
+                    THEN fo.TipoVinculoOrigem
+                    ELSE NULL
+               END,
                fo.DataAtualizacao = SYSDATETIME()
           FROM {TABELA_OCUPACAO_PAINEIS_EUROMIDIA} fo
          WHERE fo.CanceladoEm IS NULL
            AND (
                 fo.TipoReserva IS NULL
                 OR TRY_CONVERT(int, fo.TipoReserva) = 0
+                OR (
+                    TRY_CONVERT(int, fo.TipoReserva) = 2
+                    AND UPPER(COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) LIKE '%RESERVA CRIADA PELO SALVAMENTO DO CARD NO KANBAN%'
+                    AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) NOT LIKE '%PREFERENCIA%'
+                    AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) NOT LIKE '%PREFERÊNCIA%'
+                    AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(80), fo.Referencia), '')))) NOT LIKE 'PREFRENOV-%'
+                )
            )
            AND (
                 CHARINDEX(:marcador_card_id, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
@@ -12855,13 +13347,14 @@ def _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
     id_card: int,
     id_usuario: int | None = None,
 ) -> dict[str, Any]:
-    """Converte a origem das ocupações do card aprovado para CONTRATO.
+    """Efetiva as ocupações do card aprovado como CONTRATO, sem criar reserva.
 
-    Importante:
-    - toda ocupação normal vinculada ao card fica com TipoReserva = 0;
-    - não altera reserva comum TipoReserva = 1;
-    - não altera reserva de preferência TipoReserva = 2;
-    - usa marcadores, item oficial e vínculo contrato/card para alcançar linhas antigas.
+    Regra de negócio aplicada aqui:
+    - o Kanban cria/salva a ocupação da campanha;
+    - na aprovação, esta rotina apenas efetiva a própria ocupação como Origem = CONTRATO;
+    - a reserva futura de preferência é criada exclusivamente pela DAG pipeline_prioridade_reservas;
+    - MarcaExibida, prazo, cota, vendedor e vínculo do contrato vêm do item oficial
+      Integracao.Silver.FatoControleContratosItensEuromidia.
     """
     try:
         id_card_int = int(id_card or 0)
@@ -12869,23 +13362,167 @@ def _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
         id_card_int = 0
 
     if id_card_int <= 0:
-        return {"ok": False, "motivo": "id_card_invalido", "linhas": 0, "tipo_reserva": None}
+        return {
+            "ok": False,
+            "motivo": "id_card_invalido",
+            "linhas": 0,
+            "ids_ocupacao": [],
+            "ids": [],
+            "ids_criadas": [],
+            "id_contrato": None,
+            "tipo_reserva": None,
+        }
 
     sql = text(f"""
+        SET NOCOUNT ON;
+
+        DECLARE @OcupacoesEfetivadas TABLE
+        (
+            IDFatoOcupacaoPaineisEuromidia int NOT NULL,
+            IDFatoControleContratos int NULL,
+            IDFatoControleContratosItemOrigem int NULL
+        );
+
         UPDATE fo
            SET fo.Origem = :origem_contrato,
+               fo.Status = 'ATIVO',
                fo.TipoReserva = 0,
+               fo.ExpiraEm = NULL,
+               fo.IDFatoControleContratos = COALESCE(
+                    TRY_CONVERT(int, fo.IDFatoControleContratos),
+                    TRY_CONVERT(int, ItemContrato.IDFatoControleContratoEuromidia)
+               ),
+               fo.IDFatoControleContratosItemOrigem = COALESCE(
+                    TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem),
+                    TRY_CONVERT(int, ItemContrato.IDFatoControleContratosItensEuromidia)
+               ),
+               fo.NumeroContrato = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), ItemContrato.NumeroContrato))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), fo.NumeroContrato))), ''),
+                    fo.NumeroContrato
+               ),
+               fo.NumeroPrevia = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), ItemContrato.NumeroPrevia))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(120), fo.NumeroPrevia))), ''),
+                    fo.NumeroPrevia
+               ),
+               fo.MarcaExibida = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ItemContrato.MarcaExibida))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), fo.MarcaExibida))), ''),
+                    fo.MarcaExibida
+               ),
+               fo.Vendedor = COALESCE(
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ItemContrato.Vendedor))), ''),
+                    NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), fo.Vendedor))), ''),
+                    fo.Vendedor
+               ),
+               fo.IDVendedor = COALESCE(TRY_CONVERT(int, ItemContrato.IDVendedor), TRY_CONVERT(int, fo.IDVendedor)),
+               fo.Cota = COALESCE(TRY_CONVERT(int, ItemContrato.Cota), TRY_CONVERT(int, fo.Cota)),
+               fo.DataInicio = COALESCE(CAST(ItemContrato.DataInicioPrevisto AS date), CAST(fo.DataInicio AS date)),
+               fo.DataFim = COALESCE(CAST(ItemContrato.DataFimItem AS date), CAST(fo.DataFim AS date)),
+               fo.IDPainelEuromidia = COALESCE(TRY_CONVERT(int, ItemContrato.IDPainelEuromidia), TRY_CONVERT(int, fo.IDPainelEuromidia)),
+               fo.TipoVinculoOrigem = CASE
+                    WHEN UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) LIKE '%PREFERENCIA%'
+                      OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) LIKE '%PREFERÊNCIA%'
+                    THEN fo.TipoVinculoOrigem
+                    ELSE NULL
+               END,
                fo.DataAtualizacao = SYSDATETIME()
+        OUTPUT
+               inserted.IDFatoOcupacaoPaineisEuromidia,
+               inserted.IDFatoControleContratos,
+               inserted.IDFatoControleContratosItemOrigem
+          INTO @OcupacoesEfetivadas
+               (
+                   IDFatoOcupacaoPaineisEuromidia,
+                   IDFatoControleContratos,
+                   IDFatoControleContratosItemOrigem
+               )
           FROM {TABELA_OCUPACAO_PAINEIS_EUROMIDIA} fo
+          OUTER APPLY
+          (
+              SELECT TOP (1)
+                  i.IDFatoControleContratosItensEuromidia,
+                  i.IDFatoControleContratoEuromidia,
+                  i.NumeroContrato,
+                  i.NumeroPrevia,
+                  i.MarcaExibida,
+                  i.Vendedor,
+                  i.IDVendedor,
+                  i.Cota,
+                  i.DataInicioPrevisto,
+                  COALESCE(i.DataTerminoPrevisto, i.DataFimEfetiva, i.DataCancelamento) AS DataFimItem,
+                  i.IDPainelEuromidia
+              FROM {TABELA_CONTROLE_CONTRATOS_ITENS} i WITH (NOLOCK)
+              WHERE
+                  (
+                      TRY_CONVERT(int, i.IDFatoKanbanCard) = :id_card
+                      OR TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                            = TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem)
+                      OR (
+                          TRY_CONVERT(int, fo.IDFatoControleContratos) IS NOT NULL
+                          AND TRY_CONVERT(int, i.IDFatoControleContratoEuromidia)
+                                = TRY_CONVERT(int, fo.IDFatoControleContratos)
+                      )
+                      OR EXISTS (
+                          SELECT 1
+                          FROM {TABELA_CONTRATO_CARD_EUROMIDIA} v WITH (NOLOCK)
+                          WHERE TRY_CONVERT(int, v.IDFatoKanbanCard) = :id_card
+                            AND (
+                                  TRY_CONVERT(int, v.IDFatoControleContratosItensEuromidia)
+                                      = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                               OR TRY_CONVERT(int, v.IDFatoControleContratosEuromidia)
+                                      = TRY_CONVERT(int, i.IDFatoControleContratoEuromidia)
+                            )
+                      )
+                  )
+                  AND (
+                      fo.CodPonto IS NULL
+                      OR i.CodPonto IS NULL
+                      OR TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, fo.CodPonto)
+                  )
+                  AND (
+                      fo.CodFace IS NULL
+                      OR i.CodFace IS NULL
+                      OR UPPER(LTRIM(RTRIM(CONVERT(varchar(100), i.CodFace))))
+                            = UPPER(LTRIM(RTRIM(CONVERT(varchar(100), fo.CodFace))))
+                  )
+                  AND (
+                      i.DataInicioPrevisto IS NULL
+                      OR COALESCE(i.DataTerminoPrevisto, i.DataFimEfetiva, i.DataCancelamento) IS NULL
+                      OR fo.DataInicio IS NULL
+                      OR fo.DataFim IS NULL
+                      OR (
+                            CAST(i.DataInicioPrevisto AS date) <= CAST(fo.DataFim AS date)
+                            AND CAST(COALESCE(i.DataTerminoPrevisto, i.DataFimEfetiva, i.DataCancelamento) AS date) >= CAST(fo.DataInicio AS date)
+                         )
+                  )
+              ORDER BY
+                  CASE WHEN TRY_CONVERT(int, i.IDFatoKanbanCard) = :id_card THEN 0 ELSE 1 END,
+                  CASE
+                      WHEN TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                           = TRY_CONVERT(int, fo.IDFatoControleContratosItemOrigem)
+                      THEN 0 ELSE 1
+                  END,
+                  i.IDFatoControleContratosItensEuromidia DESC
+          ) ItemContrato
          WHERE fo.CanceladoEm IS NULL
            AND (
                 fo.TipoReserva IS NULL
                 OR TRY_CONVERT(int, fo.TipoReserva) = 0
+                OR (
+                    TRY_CONVERT(int, fo.TipoReserva) = 2
+                    AND UPPER(COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) LIKE '%RESERVA CRIADA PELO SALVAMENTO DO CARD NO KANBAN%'
+                    AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) NOT LIKE '%PREFERENCIA%'
+                    AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(120), fo.TipoVinculoOrigem), '')))) NOT LIKE '%PREFERÊNCIA%'
+                    AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(80), fo.Referencia), '')))) NOT LIKE 'PREFRENOV-%'
+                )
            )
            AND (
                 fo.Origem IS NULL
                 OR UPPER(LTRIM(RTRIM(CONVERT(varchar(50), fo.Origem)))) <> :origem_contrato
                 OR fo.TipoReserva IS NULL
+                OR ItemContrato.IDFatoControleContratosItensEuromidia IS NOT NULL
            )
            AND (
                 CHARINDEX(:marcador_card_id, COALESCE(CONVERT(nvarchar(max), fo.Observacao), N'')) > 0
@@ -12910,9 +13547,31 @@ def _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
                       )
                 )
            );
+
+        SELECT
+            o.IDFatoOcupacaoPaineisEuromidia,
+            COALESCE(
+                TRY_CONVERT(int, o.IDFatoControleContratos),
+                TRY_CONVERT(int, i.IDFatoControleContratoEuromidia),
+                TRY_CONVERT(int, v.IDFatoControleContratosEuromidia)
+            ) AS IDFatoControleContratos,
+            o.IDFatoControleContratosItemOrigem
+        FROM @OcupacoesEfetivadas o
+        LEFT JOIN {TABELA_CONTROLE_CONTRATOS_ITENS} i
+            ON TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+             = TRY_CONVERT(int, o.IDFatoControleContratosItemOrigem)
+        LEFT JOIN {TABELA_CONTRATO_CARD_EUROMIDIA} v
+            ON TRY_CONVERT(int, v.IDFatoKanbanCard) = :id_card
+           AND (
+                TRY_CONVERT(int, v.IDFatoControleContratosItensEuromidia)
+                    = TRY_CONVERT(int, o.IDFatoControleContratosItemOrigem)
+             OR TRY_CONVERT(int, v.IDFatoControleContratosEuromidia)
+                    = TRY_CONVERT(int, o.IDFatoControleContratos)
+           )
+        ORDER BY o.IDFatoOcupacaoPaineisEuromidia;
     """)
 
-    resultado = db.session.execute(
+    rows = db.session.execute(
         sql,
         {
             "id_card": id_card_int,
@@ -12921,29 +13580,54 @@ def _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
             "marcador_kanban_card": f"[KANBAN_CARD={id_card_int}]",
             "marcador_reserva_ativa": _marcador_reserva_informada_card_kanban(id_card_int),
         },
-    )
+    ).mappings().all()
 
-    linhas = int(getattr(resultado, "rowcount", 0) or 0)
+    ids_ocupacao: list[int] = []
+    ids_contrato: list[int] = []
+    for row in rows:
+        try:
+            id_ocupacao = int(row.get("IDFatoOcupacaoPaineisEuromidia") or 0)
+        except Exception:
+            id_ocupacao = 0
+        if id_ocupacao > 0 and id_ocupacao not in ids_ocupacao:
+            ids_ocupacao.append(id_ocupacao)
+
+        try:
+            id_contrato = int(row.get("IDFatoControleContratos") or 0)
+        except Exception:
+            id_contrato = 0
+        if id_contrato > 0 and id_contrato not in ids_contrato:
+            ids_contrato.append(id_contrato)
+
+    linhas = len(ids_ocupacao)
     sincronizacao_tipo_reserva = _garantir_tipo_reserva_zero_ocupacoes_card_kanban(
         id_card=id_card_int,
         id_usuario=id_usuario,
     )
 
+    id_contrato_resolvido = ids_contrato[0] if ids_contrato else _resolver_id_contrato_prioridade_reservas_card_kanban(id_card_int)
+
     current_app.logger.warning(
-        "KANBAN OCUPACAO ORIGEM CONTRATO APROVADO | id_card=%s id_usuario=%s linhas=%s tipo_reserva=%s",
+        "KANBAN OCUPACAO CONTRATO APROVADO SEM RESERVA | id_card=%s id_usuario=%s linhas=%s ids_ocupacao=%s id_contrato=%s tipo_reserva=%s",
         id_card_int,
         int(id_usuario or 0) or None,
         linhas,
+        ids_ocupacao,
+        id_contrato_resolvido,
         sincronizacao_tipo_reserva,
     )
 
     return {
         "ok": True,
-        "motivo": "origem_contrato_sincronizada",
+        "motivo": "ocupacao_contrato_sincronizada_sem_criar_reserva",
         "linhas": linhas,
+        "ids_ocupacao": ids_ocupacao,
+        "ids": ids_ocupacao,
+        "ids_criadas": ids_ocupacao,
+        "id_contrato": id_contrato_resolvido,
+        "ids_contrato": ids_contrato,
         "tipo_reserva": sincronizacao_tipo_reserva,
     }
-
 
 def _marcador_reserva_card_kanban(id_card: int, cod_face: str) -> str:
     return f"[CARD_ID={int(id_card)}][COD_FACE={str(cod_face or '').strip().upper()}]"
@@ -13079,7 +13763,7 @@ def _cancelar_reservas_card_kanban(
             END
         WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
           AND CanceladoEm IS NULL
-          AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) IN ('KANBAN', 'RESERVA')
+          AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) IN ('KANBAN', 'OCUPACAO', 'RESERVA')
           AND ISNULL(UPPER(LTRIM(RTRIM(ISNULL(TipoVinculoOrigem, '')))), '') NOT IN (
                 'CONTRATO_APROVADO',
                 'PREFERENCIA RENOVAÇÃO CONTRATO'
@@ -13307,9 +13991,10 @@ def _sincronizar_reservas_painel_faces_kanban(
 
     vinculadas = len(ids_reservas_informadas)
     ids_criadas_auto = [int(x) for x in (criacao_reservas_auto.get("ids") or []) if int(x or 0) > 0]
+    # Importante: IDs criados automaticamente aqui são OCUPAÇÕES normais do Kanban,
+    # não reservas. Portanto eles não podem popular o campo IDReserva do card.
+    # IDReserva só recebe valor quando o usuário informou uma reserva existente no input Reserva.
     id_reserva_payload_final = min(ids_reservas_informadas) if ids_reservas_informadas else None
-    if id_reserva_payload_final is None and ids_criadas_auto:
-        id_reserva_payload_final = min(ids_criadas_auto)
 
     id_reserva_card_final = id_reserva_payload_final if payload_reservas_explicito else id_reserva_card_atual
     sincronizacao_id_reserva_card = None
@@ -13329,6 +14014,8 @@ def _sincronizar_reservas_painel_faces_kanban(
     return {
         "criadas": int(criacao_reservas_auto.get("criadas") or 0),
         "ids_criadas": ids_criadas_auto,
+        "ids_ocupacao": ids_criadas_auto,
+        "ids": ids_criadas_auto,
         "segmentos_criados": int(criacao_reservas_auto.get("segmentos") or 0),
         "vinculadas": int(vinculadas or 0),
         "canceladas": int(canceladas or 0),
@@ -13340,6 +14027,14 @@ def _sincronizar_reservas_painel_faces_kanban(
     }
 
 def _obter_capacidade_face_reserva_kanban(cod_face: str, cod_ponto: Any = None) -> dict[str, Any]:
+    cod_face_limpo = str(cod_face or "").strip().upper()
+    cod_ponto_limpo = str(cod_ponto or "").strip()
+
+    if not cod_face_limpo:
+        raise ValueError("CodFace obrigatório para resolver a capacidade do painel.")
+    if not cod_ponto_limpo:
+        raise ValueError(f"CodPonto obrigatório para resolver a face {cod_face_limpo} pela chave exata.")
+
     sql = text("""
         DECLARE @CodPonto int = TRY_CONVERT(int, NULLIF(:cod_ponto, ''));
 
@@ -13351,39 +14046,37 @@ def _obter_capacidade_face_reserva_kanban(cod_face: str, cod_ponto: Any = None) 
             BitAtivo = COALESCE(p.BitAtivo, 1)
         FROM [Integracao].[Silver].[DimFacesPaineis] f
         INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
-            ON TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, f.CodPonto)
+            ON TRY_CONVERT(int, p.IDDimPaineisEuromidia) = TRY_CONVERT(int, f.IDDimPaineisEuromidia)
         WHERE UPPER(LTRIM(RTRIM(COALESCE(f.CodFace, '')))) = UPPER(LTRIM(RTRIM(:cod_face)))
-          AND (
-                @CodPonto IS NULL
-             OR TRY_CONVERT(int, f.CodPonto) = @CodPonto
-             OR TRY_CONVERT(int, p.CodPonto) = @CodPonto
-          )
+          AND @CodPonto IS NOT NULL
+          AND f.IDDimPaineisEuromidia IS NOT NULL
+          AND TRY_CONVERT(int, f.CodPonto) = @CodPonto
+          AND TRY_CONVERT(int, p.CodPonto) = @CodPonto
         ORDER BY
-            CASE
-                WHEN @CodPonto IS NOT NULL
-                 AND (TRY_CONVERT(int, f.CodPonto) = @CodPonto OR TRY_CONVERT(int, p.CodPonto) = @CodPonto)
-                THEN 0 ELSE 1
-            END ASC,
-            COALESCE(p.BitAtivo, 1) DESC,
             TRY_CONVERT(int, p.IDDimPaineisEuromidia) DESC
     """)
 
     row = db.session.execute(
         sql,
         {
-            "cod_face": str(cod_face or "").strip(),
-            "cod_ponto": str(cod_ponto or "").strip(),
+            "cod_face": cod_face_limpo,
+            "cod_ponto": cod_ponto_limpo,
         },
     ).mappings().first()
     if not row:
-        raise ValueError(f"Não foi possível localizar o painel da face {cod_face}.")
+        raise ValueError(
+            f"Não foi possível localizar a face {cod_face_limpo} no CodPonto {cod_ponto_limpo} "
+            "usando DimFacesPaineis.IDDimPaineisEuromidia."
+        )
 
     item = dict(row)
     tipo_painel = str(item.get("TipoPainel") or "").strip().upper()
     eh_digital = 1 if "DIGITAL" in tipo_painel else 0
     capacidade_slots = int(item.get("QuantidadeFaces") or 0) if eh_digital else 1
     if eh_digital and capacidade_slots <= 0:
-        capacidade_slots = 16
+        raise ValueError(
+            f"Painel digital da face {cod_face_limpo} no CodPonto {cod_ponto_limpo} está sem QuantidadeFaces válida."
+        )
 
     item["EhDigital"] = eh_digital
     item["CapacidadeSlots"] = capacidade_slots
@@ -14196,8 +14889,8 @@ def _criar_reservas_painel_faces_kanban(
     id_vendedor = int(vendedor_logado.get("IDVendedor") or 0) if vendedor_logado else None
     nome_vendedor = str(vendedor_logado.get("NomeVendedor") or "").strip() if vendedor_logado else ""
 
-    razao_social = _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada)
-    marca_exibida_padrao = razao_social or str(titulo_card or "").strip() or f"Card {int(id_card)}"
+    # MarcaExibida é a marca comercial do card/campanha; nunca RazaoSocial/CNPJ do cliente.
+    marca_exibida_padrao = str(titulo_card or "").strip() or f"Card {int(id_card)}"
 
     reservas_criadas = 0
     segmentos_criados = 0
@@ -14215,7 +14908,7 @@ def _criar_reservas_painel_faces_kanban(
             continue
 
         if data_inicio is None or data_fim is None:
-            raise ValueError("Preencha Data de e Data até para reservar o painel/face.")
+            raise ValueError("Preencha Data de e Data até para ocupar o painel/face.")
 
         if data_fim < data_inicio:
             raise ValueError("A Data até não pode ser menor que a Data de.")
@@ -14250,7 +14943,7 @@ def _criar_reservas_painel_faces_kanban(
                     break
 
         if not vinculo:
-            raise ValueError(f"Não foi possível preparar o vínculo comercial da face {cod_face} para reservar.")
+            raise ValueError(f"Não foi possível preparar o vínculo comercial da face {cod_face} para ocupar.")
 
         cod_ponto_raw = (
             item.get("cod_ponto")
@@ -14307,17 +15000,17 @@ def _criar_reservas_painel_faces_kanban(
                 dia_txt = dia_sem_espaco.strftime("%d/%m/%Y") if hasattr(dia_sem_espaco, "strftime") else None
                 complemento_dia = f" Dia sem encaixe: {dia_txt}." if dia_txt else ""
                 raise ValueError(
-                    f"Não foi possível encaixar automaticamente a reserva na grade da face {cod_face} "
+                    f"Não foi possível encaixar automaticamente a ocupação na grade da face {cod_face} "
                     f"de {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')} "
                     f"com a cota {cota_int or 'informada'}. {plano_encaixe.get('erro') or 'Verifique a grade para encaixe.'}"
-                    f"{complemento_dia} A reserva não foi criada."
+                    f"{complemento_dia} A ocupação não foi criada."
                 )
 
             segmentos_encaixe = plano_encaixe.get("segmentos") or []
             if not segmentos_encaixe:
                 raise ValueError(
                     f"O simulador de encaixe não retornou segmentos para a face {cod_face}. "
-                    "A reserva não foi criada."
+                    "A ocupação não foi criada."
                 )
         else:
             sem_capacidade = _validar_conflito_reserva_kanban(
@@ -14332,9 +15025,9 @@ def _criar_reservas_painel_faces_kanban(
 
             if sem_capacidade:
                 raise ValueError(
-                    f"Não foi possível encaixar automaticamente a reserva na grade da face {cod_face} "
+                    f"Não foi possível encaixar automaticamente a ocupação na grade da face {cod_face} "
                     f"de {data_inicio.strftime('%d/%m/%Y')} até {data_fim.strftime('%d/%m/%Y')}. "
-                    f"Verifique a grade para encaixe. A reserva não foi criada."
+                    f"Verifique a grade para encaixe. A ocupação não foi criada."
                 )
 
             segmentos_encaixe = [{
@@ -14345,10 +15038,10 @@ def _criar_reservas_painel_faces_kanban(
                 "span_qtd": None,
             }]
 
-        reserva_ordem_prioridade = 1
+        reserva_ordem_prioridade = None
         observacao_insert = (
             f"{marcador_observacao}{marcador_range} "
-            "Reserva criada pelo salvamento do card no Kanban."
+            "Ocupação criada pelo salvamento do card no Kanban."
         )
 
         sql_insert = text("""
@@ -14408,7 +15101,7 @@ def _criar_reservas_painel_faces_kanban(
                 :cod_face,
                 :id_painel,
                 :origem,
-                'RESERVADO',
+                'ATIVO',
                 :data_inicio,
                 :data_fim,
                 :loop_inicio,
@@ -14424,7 +15117,7 @@ def _criar_reservas_painel_faces_kanban(
                 NULL,
                 :observacao,
                 :dias,
-                DATEADD(day, :dias_total_original, SYSDATETIME()),
+                NULL,
                 SYSDATETIME(),
                 :criado_por,
                 :reserva_ordem_prioridade,
@@ -14444,7 +15137,7 @@ def _criar_reservas_painel_faces_kanban(
                 seg_fim = seg_fim.date()
 
             if seg_ini is None or seg_fim is None or seg_fim < seg_ini:
-                raise ValueError(f"Segmento inválido ao gravar reserva da face {cod_face}.")
+                raise ValueError(f"Segmento inválido ao gravar ocupação da face {cod_face}.")
 
             dias_segmento = ((seg_fim - seg_ini).days + 1)
             span_segmento = int(segmento.get("span_qtd") or spanqtd_novo or 1) if eh_digital == 1 else None
@@ -14459,19 +15152,10 @@ def _criar_reservas_painel_faces_kanban(
                     capacidade_slots,
                 )
 
-                # Fallback defensivo: o plano também guarda o índice zero-based.
-                # Para o banco, o loop precisa ser one-based: índice 4 = LOOP 5.
-                if loop_inicio_segmento is None and segmento.get("slot_inicio_indice") is not None:
-                    try:
-                        loop_inicio_segmento = int(segmento.get("slot_inicio_indice")) + 1
-                    except Exception:
-                        loop_inicio_segmento = None
-
-                if loop_fim_segmento is None and loop_inicio_segmento is not None:
-                    try:
-                        loop_fim_segmento = int(loop_inicio_segmento) + int(span_segmento or 1) - 1
-                    except Exception:
-                        loop_fim_segmento = None
+                if loop_inicio_segmento is None or loop_fim_segmento is None:
+                    raise ValueError(
+                        f"Segmento Tetris inválido para a face {cod_face}: LoopInicio/LoopFim não resolvidos exatamente."
+                    )
             else:
                 loop_inicio_segmento = None
                 loop_fim_segmento = None
@@ -14492,7 +15176,20 @@ def _criar_reservas_painel_faces_kanban(
                     "loop_fim": loop_fim_segmento,
                     "spanqtd": span_segmento,
                     "cota": cota_int,
-                    "marca_exibida": marca_exibida_padrao[:200],
+                    "marca_exibida": (
+                        str(
+                            _primeiro_valor_preenchido_local(
+                                item.get("MarcaExibida") if isinstance(item, dict) else None,
+                                item.get("marca_exibida") if isinstance(item, dict) else None,
+                                item.get("marca") if isinstance(item, dict) else None,
+                                vinculo.get("MarcaExibida") if isinstance(vinculo, dict) else None,
+                                vinculo.get("marca_exibida") if isinstance(vinculo, dict) else None,
+                                marca_exibida_padrao,
+                            )
+                            or marca_exibida_padrao
+                        ).strip()
+                        or marca_exibida_padrao
+                    )[:200],
                     "vendedor_nome": nome_vendedor[:200] if nome_vendedor else None,
                     "id_vendedor": id_vendedor,
                     "id_cliente": int(id_empresa_relacionada) if id_empresa_relacionada not in (None, "", 0) else None,
@@ -14500,22 +15197,25 @@ def _criar_reservas_painel_faces_kanban(
                     "dias": int(dias_segmento),
                     "dias_total_original": int(dias_total_original),
                     "criado_por": int(id_usuario),
-                    "reserva_ordem_prioridade": int(reserva_ordem_prioridade),
+                    "reserva_ordem_prioridade": int(reserva_ordem_prioridade) if reserva_ordem_prioridade is not None else None,
                 },
             ).scalar_one()
 
             db.session.execute(
                 text("""
                     UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
-                       SET TipoReserva = 0,
+                       SET Origem = :origem_ocupacao,
+                           Status = 'ATIVO',
+                           TipoReserva = 0,
+                           ExpiraEm = NULL,
+                           TipoVinculoOrigem = NULL,
                            DataAtualizacao = SYSDATETIME()
-                     WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
-                       AND (
-                            TipoReserva IS NULL
-                            OR TRY_CONVERT(int, TipoReserva) = 0
-                       );
+                     WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao;
                 """),
-                {"id_ocupacao": int(id_novo)},
+                {
+                    "id_ocupacao": int(id_novo),
+                    "origem_ocupacao": origem_ocupacao_card,
+                },
             )
 
             ids_criados.append(int(id_novo))
@@ -20555,6 +21255,16 @@ def api_card_mover(id_card: int):
             ), 202
 
         resultado_core = execucao["resultado"]
+        if int(resultado_core.get("id_fase_para") or 0) == int(ID_FASE_FORMULARIO_CONTRATO):
+            resultado_core["prioridade_reservas"] = _acionar_prioridade_reservas_pos_ocupacao_kanban(
+                id_card=int(id_card),
+                id_usuario=int(id_usuario),
+                sincronizacao_reservas=resultado_core.get("sincronizacao_reservas"),
+                id_contrato=None,
+                origem_evento="kanban_card_movido_fase_4_pos_ocupacao",
+                forcar=False,
+            )
+
         resposta = _finalizar_pos_movimento_card(
             id_card=int(id_card),
             id_emp=int(id_emp),
@@ -20860,6 +21570,8 @@ def api_card_tag_adicionar(id_card: int):
     retorno_solicitacao: dict[str, Any] | None = None
     snapshot_preco_praticado: dict[str, Any] | None = None
     normalizacao_renovacao: dict[str, object] | None = None
+    sincronizacao_origem_ocupacao_contrato: dict[str, Any] | None = None
+    prioridade_reservas: dict[str, Any] | None = None
 
     try:
         # Regra crítica de negócio:
@@ -21044,6 +21756,16 @@ def api_card_tag_adicionar(id_card: int):
             db.session.commit()
             alterou = True
 
+            if int(id_tag) == int(ID_TAG_CONTRATO_APROVADO):
+                prioridade_reservas = _acionar_prioridade_reservas_pos_ocupacao_kanban(
+                    id_card=int(id_card),
+                    id_usuario=int(id_usuario),
+                    sincronizacao_reservas=sincronizacao_origem_ocupacao_contrato,
+                    id_contrato=(sincronizacao_origem_ocupacao_contrato or {}).get("id_contrato"),
+                    origem_evento="kanban_tag_contrato_aprovado_pos_efetivacao_ocupacao",
+                    forcar=True,
+                )
+
         # Se a própria tag aplicada for Renovação (17), normalizo o card mesmo se a tag já existia.
         # Isso limpa contaminações antigas: tag 9 ativa, BitContratoNovo=1 ou BitAditivo=0.
         if int(id_tag) == int(ID_TAG_RENOVACAO):
@@ -21084,6 +21806,10 @@ def api_card_tag_adicionar(id_card: int):
                 payload_socket["snapshot_preco_praticado"] = snapshot_preco_praticado
             if normalizacao_renovacao is not None:
                 payload_socket["normalizacao_renovacao"] = normalizacao_renovacao
+            if sincronizacao_origem_ocupacao_contrato is not None:
+                payload_socket["sincronizacao_origem_ocupacao_contrato"] = sincronizacao_origem_ocupacao_contrato
+            if prioridade_reservas is not None:
+                payload_socket["prioridade_reservas"] = prioridade_reservas
 
             _emitir_evento_kanban(
                 id_kanban,
@@ -21116,6 +21842,8 @@ def api_card_tag_adicionar(id_card: int):
                 "solicitacao_contrato": retorno_solicitacao,
                 "snapshot_preco_praticado": snapshot_preco_praticado,
                 "normalizacao_renovacao": normalizacao_renovacao,
+                "sincronizacao_origem_ocupacao_contrato": sincronizacao_origem_ocupacao_contrato,
+                "prioridade_reservas": prioridade_reservas,
             }
         )
 
@@ -31139,7 +31867,7 @@ def api_kanban_ocupacao_calendario():
         return jsonify({"ok": False, "erro": "cod_face obrigatório"}), 400
 
     try:
-        capacidade = _obter_capacidade_face_reserva_kanban(cod_face)
+        capacidade = _obter_capacidade_face_reserva_kanban(cod_face, cod_ponto_raw)
     except Exception as erro:
         current_app.logger.exception(
             "KANBAN OCUPACAO: erro ao resolver capacidade da face %s.",
@@ -31213,7 +31941,8 @@ def api_kanban_ocupacao_calendario():
                     END
             FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] c
             WHERE c.AtivoCancelamento COLLATE Latin1_General_CI_AS = 'A' COLLATE Latin1_General_CI_AS
-              AND (@CodPonto IS NULL OR TRY_CONVERT(int, c.CodPonto) = @CodPonto)
+              AND @CodPonto IS NOT NULL
+              AND TRY_CONVERT(int, c.CodPonto) = @CodPonto
               AND UPPER(LTRIM(RTRIM(COALESCE(c.CodFace COLLATE Latin1_General_CI_AS, '')))) = @CodFace COLLATE Latin1_General_CI_AS
               AND ISNULL(TRY_CONVERT(int, c.BitAtivo), 1) = 1
               AND c.DataInicioPrevisto IS NOT NULL
@@ -31245,7 +31974,8 @@ def api_kanban_ocupacao_calendario():
                         ELSE 1.0
                     END
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] r
-            WHERE (@CodPonto IS NULL OR TRY_CONVERT(int, r.CodPonto) = @CodPonto)
+            WHERE @CodPonto IS NOT NULL
+              AND TRY_CONVERT(int, r.CodPonto) = @CodPonto
               AND UPPER(LTRIM(RTRIM(COALESCE(r.CodFace COLLATE Latin1_General_CI_AS, '')))) = @CodFace COLLATE Latin1_General_CI_AS
               AND UPPER(LTRIM(RTRIM(COALESCE(r.Origem COLLATE Latin1_General_CI_AS, '')))) = 'RESERVA'
               AND r.Status COLLATE Latin1_General_CI_AS = 'RESERVADO' COLLATE Latin1_General_CI_AS
@@ -32704,6 +33434,8 @@ def api_card_criar(id_kanban: int):
             vinculos_preparados = _preparar_vinculos_painel_faces(
                 painel_faces_payload,
                 int(id_emp),
+                id_card=int(novo_id),
+                id_contrato_existente=contexto_tipo_contrato.get("id_contrato_existente"),
             )
 
             for ordem_rel, vinculo in enumerate(vinculos_preparados, start=1):
@@ -32953,6 +33685,15 @@ def api_card_criar(id_kanban: int):
         etapa = "commit"
         db.session.commit()
 
+        prioridade_reservas = _acionar_prioridade_reservas_pos_ocupacao_kanban(
+            id_card=int(novo_id),
+            id_usuario=int(id_usuario),
+            sincronizacao_reservas=sincronizacao_reservas,
+            id_contrato=contexto_tipo_contrato.get("id_contrato_existente"),
+            origem_evento="kanban_card_criado_fase_4_pos_ocupacao",
+            forcar=False,
+        )
+
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=int(novo_id))
         detalhe = _obter_card_quadro_payload_minimo(int(novo_id))
 
@@ -32972,6 +33713,7 @@ def api_card_criar(id_kanban: int):
                 "client_request_id": client_request_id,
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "prioridade_reservas": prioridade_reservas,
             },
         )
 
@@ -32979,7 +33721,7 @@ def api_card_criar(id_kanban: int):
             {
                 "ok": True,
                 "msg": (
-                    f"Card criado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} reserva(s) criada(s)."
+                    f"Card criado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} ocupação(ões) criada(s)."
                     if int(sincronizacao_reservas.get('criadas') or 0) > 0
                     else "Card criado com sucesso."
                 ),
@@ -32993,8 +33735,8 @@ def api_card_criar(id_kanban: int):
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "sincronizacao_item_contrato": sincronizacao_item_contrato,
+                "prioridade_reservas": prioridade_reservas,
                 "sincronizacao_reservas": sincronizacao_reservas,
-                "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "payload_minimo": True,
                 "client_request_id": client_request_id,
             }
@@ -33845,6 +34587,18 @@ def api_card_atualizar(id_card: int):
 
         db.session.commit()
 
+        id_fase_final_card = int(row_upd.get("IDDimKanbanFaseAtual") or id_fase_atual or 0) or None
+        prioridade_reservas = None
+        if int(id_fase_final_card or 0) == int(ID_FASE_FORMULARIO_CONTRATO):
+            prioridade_reservas = _acionar_prioridade_reservas_pos_ocupacao_kanban(
+                id_card=int(id_card),
+                id_usuario=int(id_usuario),
+                sincronizacao_reservas=sincronizacao_reservas,
+                id_contrato=contexto_tipo_contrato.get("id_contrato_existente"),
+                origem_evento="kanban_card_atualizado_fase_4_pos_ocupacao",
+                forcar=False,
+            )
+
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
 
         # Depois do commit, devolvo somente o payload mínimo necessário para o quadro.
@@ -33868,6 +34622,7 @@ def api_card_atualizar(id_card: int):
                 "snapshot_solicitacao": snapshot_solicitacao,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "prioridade_reservas": prioridade_reservas,
                 "aprovacao_preco": resultado_aprovacao_preco,
             },
         )
@@ -33876,11 +34631,12 @@ def api_card_atualizar(id_card: int):
             {
                 "ok": True,
                 "msg": (
-                    f"Card atualizado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} reserva(s) criada(s)."
+                    f"Card atualizado com sucesso. {int(sincronizacao_reservas.get('criadas') or 0)} ocupação(ões) criada(s)."
                     if int(sincronizacao_reservas.get("criadas") or 0) > 0
                     else "Card atualizado com sucesso."
                 ),
-                "reservas_criadas": int(sincronizacao_reservas.get("criadas") or 0),
+                "reservas_criadas": 0,  # reserva de preferência é criada somente pela DAG
+                "ocupacoes_criadas": int(sincronizacao_reservas.get("criadas") or 0),
                 "card": detalhe.get("card"),
                 "tags": detalhe.get("tags", []),
                 "notas": detalhe.get("notas", []),
@@ -33894,6 +34650,7 @@ def api_card_atualizar(id_card: int):
                 "relacionamento_empresa_tipo_cliente": relacionamento_empresa_tipo_cliente,
                 "sincronizacao_tag_plano_midia": sincronizacao_tag_plano_midia,
                 "sincronizacao_reservas": sincronizacao_reservas,
+                "prioridade_reservas": prioridade_reservas,
                 "historico_negociacao_preco": resultado_historico_negociacao_preco,
                 "correcao_estado_preco_card": correcao_estado_preco_card,
                 "aprovacao_preco": resultado_aprovacao_preco,

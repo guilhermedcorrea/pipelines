@@ -7760,10 +7760,13 @@ def _upsert_ocupacao_contrato_aprovado_admin(
                      WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) < i.DataInicioPrevisto THEN NULL
                      ELSE DATEDIFF(day, i.DataInicioPrevisto, COALESCE(i.DataCancelamento, i.DataTerminoPrevisto)) + 1
                    END,
-            ReservaOrdemPrioridade = CAST(1 AS int),
+            -- Ocupação contratual não é reserva. Prioridade é somente para RESERVA.
+            ReservaOrdemPrioridade = CAST(NULL AS int),
             IDFatoOcupacaoOrigem = CAST(NULL AS int),
             IDFatoControleContratosItemOrigem = i.IDFatoControleContratosItensEuromidia,
-            TipoVinculoOrigem = CAST('CONTRATO_APROVADO' AS nvarchar(80))
+            TipoVinculoOrigem = CAST('CONTRATO_APROVADO' AS nvarchar(80)),
+            TipoReserva = CAST(0 AS int),
+            IDFatoKanbanCardFonte = TRY_CONVERT(int, i.IDFatoKanbanCard)
         INTO #FonteOcupacaoContratoAprovado
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
         LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
@@ -7814,6 +7817,86 @@ def _upsert_ocupacao_contrato_aprovado_admin(
         ORDER BY
             i.IDFatoControleContratosItensEuromidia DESC;
 
+        /*
+        Regra crítica contra duplicidade:
+        a aprovação NÃO pode inserir uma segunda ocupação quando o Kanban já criou
+        a linha física do card como Origem = OCUPACAO/KANBAN.
+
+        Antes de qualquer INSERT, eu procuro a ocupação existente por:
+        1) item de contrato já vinculado;
+        2) Referencia oficial;
+        3) marcador [CARD_ID=x] gravado pelo Kanban na Observacao;
+        4) mesma grade física: ponto, face, painel, período, cota e cliente.
+
+        Só se nada disso existir eu insiro uma nova ocupação contratual.
+        */
+        IF OBJECT_ID('tempdb..#AlvoOcupacaoContratoAprovado') IS NOT NULL
+            DROP TABLE #AlvoOcupacaoContratoAprovado;
+
+        SELECT TOP (1)
+            T.IDFatoOcupacaoPaineisEuromidia
+        INTO #AlvoOcupacaoContratoAprovado
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T WITH (UPDLOCK, HOLDLOCK)
+        CROSS JOIN #FonteOcupacaoContratoAprovado AS S
+        WHERE
+            UPPER(LTRIM(RTRIM(COALESCE(T.Origem, '')))) IN ('CONTRATO', 'OCUPACAO', 'KANBAN')
+            AND UPPER(LTRIM(RTRIM(COALESCE(T.Status, '')))) <> 'CANCELADO'
+            AND T.CanceladoEm IS NULL
+            AND (
+                    (
+                        T.IDFatoControleContratosItemOrigem IS NOT NULL
+                        AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
+                    )
+                    OR T.Referencia = S.Referencia
+                    OR (
+                        S.IDFatoKanbanCardFonte IS NOT NULL
+                        AND CHARINDEX(
+                            CONCAT('[CARD_ID=', CONVERT(varchar(30), S.IDFatoKanbanCardFonte), ']'),
+                            COALESCE(T.Observacao, '')
+                        ) > 0
+                    )
+                    OR (
+                        TRY_CONVERT(int, T.CodPonto) = S.CodPonto
+                        AND UPPER(LTRIM(RTRIM(COALESCE(T.CodFace, '')))) = UPPER(LTRIM(RTRIM(COALESCE(S.CodFace, ''))))
+                        AND (
+                            T.IDPainelEuromidia = S.IDPainelEuromidia
+                            OR T.IDPainelEuromidia IS NULL
+                            OR S.IDPainelEuromidia IS NULL
+                        )
+                        AND CONVERT(date, T.DataInicio) = S.DataInicio
+                        AND CONVERT(date, T.DataFim) = S.DataFim
+                        AND (
+                            TRY_CONVERT(int, T.Cota) = S.Cota
+                            OR T.Cota IS NULL
+                            OR S.Cota IS NULL
+                        )
+                        AND (
+                            T.IDCliente = S.IDCliente
+                            OR T.IDCliente IS NULL
+                            OR S.IDCliente IS NULL
+                        )
+                    )
+               )
+        ORDER BY
+            CASE
+                WHEN S.IDFatoKanbanCardFonte IS NOT NULL
+                 AND CHARINDEX(
+                        CONCAT('[CARD_ID=', CONVERT(varchar(30), S.IDFatoKanbanCardFonte), ']'),
+                        COALESCE(T.Observacao, '')
+                     ) > 0 THEN 0
+                WHEN T.IDFatoControleContratosItemOrigem IS NOT NULL
+                 AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem THEN 1
+                WHEN T.Referencia = S.Referencia THEN 2
+                ELSE 3
+            END,
+            CASE UPPER(LTRIM(RTRIM(COALESCE(T.Origem, ''))))
+                WHEN 'OCUPACAO' THEN 0
+                WHEN 'KANBAN' THEN 1
+                WHEN 'CONTRATO' THEN 2
+                ELSE 3
+            END,
+            T.IDFatoOcupacaoPaineisEuromidia ASC;
+
         UPDATE T
            SET T.DataAtualizacao = S.DataAtualizacao,
                T.Referencia = S.Referencia,
@@ -7824,9 +7907,10 @@ def _upsert_ocupacao_contrato_aprovado_admin(
                T.Status = S.Status,
                T.DataInicio = S.DataInicio,
                T.DataFim = S.DataFim,
-               T.LoopInicio = S.LoopInicio,
-               T.LoopFim = S.LoopFim,
-               T.SpanQtd = S.SpanQtd,
+               -- Preservo o encaixe Tetris que o Kanban calculou. O item de contrato não tem loop.
+               T.LoopInicio = COALESCE(T.LoopInicio, S.LoopInicio),
+               T.LoopFim = COALESCE(T.LoopFim, S.LoopFim),
+               T.SpanQtd = COALESCE(T.SpanQtd, S.SpanQtd),
                T.Cota = S.Cota,
                T.MarcaExibida = S.MarcaExibida,
                T.Vendedor = S.Vendedor,
@@ -7841,22 +7925,17 @@ def _upsert_ocupacao_contrato_aprovado_admin(
                T.CanceladoPorIDUsuario = S.CanceladoPorIDUsuario,
                T.Observacao = S.Observacao,
                T.Dias = S.Dias,
-               T.ReservaOrdemPrioridade = COALESCE(T.ReservaOrdemPrioridade, S.ReservaOrdemPrioridade),
+               T.ReservaOrdemPrioridade = S.ReservaOrdemPrioridade,
                T.IDFatoOcupacaoOrigem = S.IDFatoOcupacaoOrigem,
                T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem,
-               T.TipoVinculoOrigem = S.TipoVinculoOrigem
-        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T WITH (UPDLOCK, HOLDLOCK)
-        INNER JOIN #FonteOcupacaoContratoAprovado AS S
-            ON T.Origem = S.Origem
-           AND (
-                    (
-                        T.IDFatoControleContratosItemOrigem IS NOT NULL
-                        AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
-                    )
-                    OR T.Referencia = S.Referencia
-               );
+               T.TipoVinculoOrigem = S.TipoVinculoOrigem,
+               T.TipoReserva = S.TipoReserva
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T
+        INNER JOIN #AlvoOcupacaoContratoAprovado AS A
+            ON A.IDFatoOcupacaoPaineisEuromidia = T.IDFatoOcupacaoPaineisEuromidia
+        CROSS JOIN #FonteOcupacaoContratoAprovado AS S;
 
-        IF @@ROWCOUNT = 0
+        IF NOT EXISTS (SELECT 1 FROM #AlvoOcupacaoContratoAprovado)
         BEGIN
             INSERT INTO [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
             (
@@ -7891,7 +7970,8 @@ def _upsert_ocupacao_contrato_aprovado_admin(
                 ReservaOrdemPrioridade,
                 IDFatoOcupacaoOrigem,
                 IDFatoControleContratosItemOrigem,
-                TipoVinculoOrigem
+                TipoVinculoOrigem,
+                TipoReserva
             )
             SELECT
                 S.DataAtualizacao,
@@ -7925,20 +8005,52 @@ def _upsert_ocupacao_contrato_aprovado_admin(
                 S.ReservaOrdemPrioridade,
                 S.IDFatoOcupacaoOrigem,
                 S.IDFatoControleContratosItemOrigem,
-                S.TipoVinculoOrigem
+                S.TipoVinculoOrigem,
+                S.TipoReserva
             FROM #FonteOcupacaoContratoAprovado AS S
             WHERE NOT EXISTS
             (
                 SELECT 1
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T WITH (UPDLOCK, HOLDLOCK)
-                WHERE T.Origem = S.Origem
-                  AND (
-                        (
-                            T.IDFatoControleContratosItemOrigem IS NOT NULL
-                            AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
-                        )
-                        OR T.Referencia = S.Referencia
-                  )
+                WHERE
+                    UPPER(LTRIM(RTRIM(COALESCE(T.Origem, '')))) IN ('CONTRATO', 'OCUPACAO', 'KANBAN')
+                    AND UPPER(LTRIM(RTRIM(COALESCE(T.Status, '')))) <> 'CANCELADO'
+                    AND T.CanceladoEm IS NULL
+                    AND (
+                            (
+                                T.IDFatoControleContratosItemOrigem IS NOT NULL
+                                AND T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
+                            )
+                            OR T.Referencia = S.Referencia
+                            OR (
+                                S.IDFatoKanbanCardFonte IS NOT NULL
+                                AND CHARINDEX(
+                                    CONCAT('[CARD_ID=', CONVERT(varchar(30), S.IDFatoKanbanCardFonte), ']'),
+                                    COALESCE(T.Observacao, '')
+                                ) > 0
+                            )
+                            OR (
+                                TRY_CONVERT(int, T.CodPonto) = S.CodPonto
+                                AND UPPER(LTRIM(RTRIM(COALESCE(T.CodFace, '')))) = UPPER(LTRIM(RTRIM(COALESCE(S.CodFace, ''))))
+                                AND (
+                                    T.IDPainelEuromidia = S.IDPainelEuromidia
+                                    OR T.IDPainelEuromidia IS NULL
+                                    OR S.IDPainelEuromidia IS NULL
+                                )
+                                AND CONVERT(date, T.DataInicio) = S.DataInicio
+                                AND CONVERT(date, T.DataFim) = S.DataFim
+                                AND (
+                                    TRY_CONVERT(int, T.Cota) = S.Cota
+                                    OR T.Cota IS NULL
+                                    OR S.Cota IS NULL
+                                )
+                                AND (
+                                    T.IDCliente = S.IDCliente
+                                    OR T.IDCliente IS NULL
+                                    OR S.IDCliente IS NULL
+                                )
+                            )
+                       )
             );
         END;
 
@@ -7953,13 +8065,27 @@ def _upsert_ocupacao_contrato_aprovado_admin(
             T.DataFim,
             T.IDFatoControleContratosItemOrigem
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS T
-        INNER JOIN #FonteOcupacaoContratoAprovado AS S
-            ON T.Origem = S.Origem
-           AND (
-                    T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
-                    OR T.Referencia = S.Referencia
-               )
-        ORDER BY T.IDFatoOcupacaoPaineisEuromidia DESC;
+        CROSS JOIN #FonteOcupacaoContratoAprovado AS S
+        WHERE
+            EXISTS (
+                SELECT 1
+                FROM #AlvoOcupacaoContratoAprovado AS A
+                WHERE A.IDFatoOcupacaoPaineisEuromidia = T.IDFatoOcupacaoPaineisEuromidia
+            )
+            OR (
+                UPPER(LTRIM(RTRIM(COALESCE(T.Origem, '')))) = 'CONTRATO'
+                AND (
+                        T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem
+                        OR T.Referencia = S.Referencia
+                    )
+            )
+        ORDER BY
+            CASE WHEN EXISTS (
+                SELECT 1
+                FROM #AlvoOcupacaoContratoAprovado AS A
+                WHERE A.IDFatoOcupacaoPaineisEuromidia = T.IDFatoOcupacaoPaineisEuromidia
+            ) THEN 0 ELSE 1 END,
+            T.IDFatoOcupacaoPaineisEuromidia DESC;
     """)
 
     row = db.session.execute(
