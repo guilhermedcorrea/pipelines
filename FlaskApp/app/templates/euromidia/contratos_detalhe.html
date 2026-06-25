@@ -1526,8 +1526,7 @@
       {% if doc_d4 %}
         <div class="d4-doc-layout">
           {% if doc_d4.IDFatoContratoD4 and doc_d4.UUIDDocumentoD4 %}
-            {% set contrato_id_download = id_contrato if id_contrato is defined and id_contrato else (contrato.IDFatoControleContratosEuromidia or contrato.IDFatoControleContratos) %}
-            {% set url_download_d4 = url_for('Paineis.contrato_d4_download', id_contrato=contrato_id_download, id_fato_contrato_d4=doc_d4.IDFatoContratoD4, _d4_nocache=(doc_d4.DataReferenciaTexto or doc_d4.IDFatoContratoD4)) %}
+            {% set url_download_d4 = '/paineis/contratos/' ~ contrato_id_socket ~ '/d4/' ~ doc_d4.IDFatoContratoD4 ~ '/download' %}
             <a class="d4-doc-file d4-doc-file-link"
                href="{{ url_download_d4 }}"
                title="Baixar o PDF real do documento na D4Sign">

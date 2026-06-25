@@ -355,7 +355,7 @@
   let socketKanban = null;
   let socketConectado = false;
   let socketConectando = false;
-  let socketTentouFallbackPolling = false;
+  let socketDesativadoPorErroTransporte = false;
   let sincronizacaoSemSocketEmAndamento = false;
   let verificacaoVersaoKanbanEmAndamento = false;
   let versaoKanbanAtual = 0;
@@ -19101,12 +19101,16 @@ async function moverCard(idCard, idFasePara, posicao) {
   }
 
   function transportesSocketKanban(){
-    return socketTentouFallbackPolling ? ["polling", "websocket"] : ["websocket"];
+    // Importante: este kanban roda atrás de Gunicorn/Docker e o erro visto no console
+    // acontece no long-polling com sid. Então não abrimos polling aqui.
+    // A conexão é WebSocket direto; se o servidor não aceitar WebSocket, o kanban
+    // continua sincronizando pelo endpoint de versão, sem ficar martelando /socket.io.
+    return ["websocket"];
   }
 
-  function reiniciarSocketKanbanComFallbackPolling(){
-    if (socketTentouFallbackPolling) return false;
-    socketTentouFallbackPolling = true;
+  function desativarSocketKanbanAposErroTransporte(){
+    if (socketDesativadoPorErroTransporte) return false;
+    socketDesativadoPorErroTransporte = true;
     socketConectando = false;
     socketConectado = false;
 
@@ -19118,7 +19122,6 @@ async function moverCard(idCard, idFasePara, posicao) {
     } catch (_erro) {}
 
     socketKanban = null;
-    window.setTimeout(() => conectarSocketKanban(), 500);
     return true;
   }
 
@@ -19203,25 +19206,24 @@ async function moverCard(idCard, idFasePara, posicao) {
 
     socketKanban = window.io(SOCKET_IO_NAMESPACE, {
       path: SOCKET_IO_PATH,
-      // Performance/estabilidade: com Nginx + múltiplos workers/containers, polling pode cair em outro worker.
-      // WebSocket mantém uma conexão única e reduz round-trips do tempo real.
       transports: transportesSocketKanban(),
-      upgrade: socketTentouFallbackPolling,
-      rememberUpgrade: true,
-      tryAllTransports: socketTentouFallbackPolling,
+      upgrade: false,
+      rememberUpgrade: false,
+      tryAllTransports: false,
       withCredentials: true,
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 800,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 15000,
+      timeout: 15000,
       autoConnect: true,
-      forceNew: false
+      forceNew: true
     });
 
     socketKanban.on("connect", () => {
       socketConectando = false;
       socketConectado = true;
+      socketDesativadoPorErroTransporte = false;
       ultimaAtualizacaoAoVivoMs = Date.now();
       limparMensagemBoard();
       socketKanban.emit("entrar_kanban", { id_kanban: ID_KANBAN });
@@ -19256,12 +19258,9 @@ async function moverCard(idCard, idFasePara, posicao) {
         context: erro?.context || null
       });
 
-      if (reiniciarSocketKanbanComFallbackPolling()) {
-        mostrarMensagemBoard("WebSocket não conectou. Tentando fallback do tempo real automaticamente...");
-        return;
+      if (desativarSocketKanbanAposErroTransporte()) {
+        mostrarMensagemBoard("Tempo real do kanban indisponível no momento. As ações continuam funcionando e a tela vai sincronizar automaticamente em intervalos curtos.");
       }
-
-      mostrarMensagemBoard("Não foi possível conectar o tempo real do kanban agora. As ações continuam funcionando e a tela vai sincronizar automaticamente em intervalos curtos.");
     });
 
     socketKanban.on("socket_ack", (payload) => {

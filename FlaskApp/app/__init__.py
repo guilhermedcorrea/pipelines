@@ -23,6 +23,13 @@ from config import (
 
 from .handlers import registrar_handlers
 
+
+def _env_bool_app(nome_variavel: str, padrao: str = "0") -> bool:
+    """Converte variável de ambiente em booleano para flags simples da aplicação."""
+    valor = (os.getenv(nome_variavel, padrao) or "").strip().lower()
+    return valor in {"1", "true", "sim", "s", "yes", "y", "on"}
+
+
 def _exemptar_rotas_socketio_do_csrf(app: Flask) -> None:
     """Remove o endpoint /socket.io/ da validação CSRF do Flask-WTF.
 
@@ -142,24 +149,41 @@ def create_app() -> Flask:
     cache.init_app(app)
     csrf.init_app(app)
 
+    # Socket.IO
+    # ------------------------------------------------------------------
+    # Correção de estabilidade:
+    # 1) não fixa WebSocket puro no backend;
+    # 2) permite polling + websocket, para o front conseguir fallback quando
+    #    o servidor/proxy/Gunicorn não aceitar upgrade WebSocket;
+    # 3) mantém Redis como message_queue para múltiplos processos/containers.
+    socketio_async_mode = (os.getenv("SOCKETIO_ASYNC_MODE", "threading") or "threading").strip()
+    socketio_cors = (os.getenv("SOCKETIO_CORS_ALLOWED_ORIGINS", "*") or "*").strip()
+
     socketio.init_app(
         app,
-        async_mode="threading",
-        cors_allowed_origins="*",
+        async_mode=socketio_async_mode,
+        cors_allowed_origins=socketio_cors,
         message_queue=app.config["SOCKETIO_MESSAGE_QUEUE"],
         channel=app.config["SOCKETIO_CHANNEL"],
         manage_session=False,
-        logger=False,
-        engineio_logger=False,
+        logger=_env_bool_app("SOCKETIO_LOGGER", "0"),
+        engineio_logger=_env_bool_app("SOCKETIO_ENGINEIO_LOGGER", "0"),
         ping_interval=25,
         ping_timeout=60,
-        transports=["websocket", "polling"],
+        transports=["polling", "websocket"],
     )
 
     _exemptar_rotas_socketio_do_csrf(app)
 
     login_manager.login_view = "Autenticacao.login"
-    login_manager.session_protection = "strong"
+
+    # Com session_protection="strong", o Flask-Login pode invalidar a sessão
+    # quando o IP/identificador da requisição muda atrás de Docker/proxy/rede.
+    # Esse é o comportamento clássico de "logue e, ao recarregar, volta para login".
+    # Use "basic" por padrão; se quiser desligar totalmente, defina
+    # FLASK_LOGIN_SESSION_PROTECTION=none.
+    session_protection_env = (os.getenv("FLASK_LOGIN_SESSION_PROTECTION", "basic") or "basic").strip().lower()
+    login_manager.session_protection = None if session_protection_env in {"", "none", "0", "false", "off"} else session_protection_env
 
     with app.app_context():
         engine = db.engine
