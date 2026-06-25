@@ -1,4 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+import base64
 #from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,abort,send_file,session
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify, abort, send_file, session
 from ..extensions import db,limiter
@@ -27387,6 +27388,287 @@ def carteira_mover_empresa(id_fato_carteira_vendedor: int):
 
 
 
+
+
+def _obter_config_d4sign_para_download():
+    """Lê a configuração da D4Sign no Flask sem expor token/cryptKey no frontend."""
+    token_api = (
+        current_app.config.get("TOKEN_D4SIGN")
+        or current_app.config.get("D4SIGN_TOKEN")
+        or os.getenv("TOKEN_D4SIGN")
+        or os.getenv("D4SIGN_TOKEN")
+    )
+    crypt_key = (
+        current_app.config.get("CRYPTKEY_D4SIGN")
+        or current_app.config.get("D4SIGN_CRYPTKEY")
+        or current_app.config.get("CRYPT_KEY_D4SIGN")
+        or os.getenv("CRYPTKEY_D4SIGN")
+        or os.getenv("D4SIGN_CRYPTKEY")
+        or os.getenv("CRYPT_KEY_D4SIGN")
+    )
+    base_url = (
+        current_app.config.get("BASE_URL_D4SIGN")
+        or current_app.config.get("D4SIGN_BASE_URL")
+        or os.getenv("BASE_URL_D4SIGN")
+        or os.getenv("D4SIGN_BASE_URL")
+        or "https://secure.d4sign.com.br/api/v1"
+    )
+
+    return {
+        "token_api": str(token_api or "").strip(),
+        "crypt_key": str(crypt_key or "").strip(),
+        "base_url": str(base_url or "").strip().rstrip("/"),
+    }
+
+
+def _nome_download_pdf_d4_seguro(nome_documento, id_fato_contrato_d4):
+    nome_base = str(nome_documento or "").strip()
+    if not nome_base:
+        nome_base = f"documento_d4_{int(id_fato_contrato_d4 or 0)}"
+
+    if not nome_base.lower().endswith(".pdf"):
+        nome_base = f"{nome_base}.pdf"
+
+    nome_seguro = secure_filename(nome_base)
+    if not nome_seguro:
+        nome_seguro = f"documento_d4_{int(id_fato_contrato_d4 or 0)}.pdf"
+
+    if not nome_seguro.lower().endswith(".pdf"):
+        nome_seguro = f"{nome_seguro}.pdf"
+
+    return nome_seguro
+
+
+def _extrair_pdf_resposta_download_d4(resposta_d4):
+    """Extrai bytes de PDF da resposta da D4Sign sem inventar documento."""
+    content_type = str(resposta_d4.headers.get("Content-Type") or "").lower()
+    conteudo = resposta_d4.content or b""
+
+    if conteudo.startswith(b"%PDF") or "application/pdf" in content_type:
+        return conteudo
+
+    dados = None
+    try:
+        dados = resposta_d4.json()
+    except Exception:
+        texto = resposta_d4.text.strip() if getattr(resposta_d4, "text", None) else ""
+        if texto.startswith("http://") or texto.startswith("https://"):
+            resp_pdf = requests.get(texto, timeout=60)
+            resp_pdf.raise_for_status()
+            return resp_pdf.content
+        try:
+            return base64.b64decode(texto.split(",", 1)[-1], validate=True)
+        except Exception:
+            return None
+
+    if not isinstance(dados, dict):
+        return None
+
+    url_download = (
+        dados.get("url")
+        or dados.get("URL")
+        or dados.get("download_url")
+        or dados.get("downloadUrl")
+        or dados.get("link")
+    )
+    if url_download:
+        resp_pdf = requests.get(str(url_download), timeout=60)
+        resp_pdf.raise_for_status()
+        return resp_pdf.content
+
+    conteudo_base64 = (
+        dados.get("base64")
+        or dados.get("file")
+        or dados.get("content")
+        or dados.get("document")
+        or dados.get("documento")
+    )
+    if conteudo_base64:
+        texto_base64 = str(conteudo_base64).strip().split(",", 1)[-1]
+        try:
+            return base64.b64decode(texto_base64, validate=True)
+        except Exception:
+            return None
+
+    return None
+
+
+@paineis_bp.route("/contratos/<int:id_contrato>/d4/<int:id_fato_contrato_d4>/download", methods=["GET"], endpoint="contrato_d4_download")
+@login_required
+def contrato_d4_download(id_contrato: int, id_fato_contrato_d4: int):
+    """
+    Baixa o PDF real do documento na D4Sign usando vínculo exato.
+
+    Regra obrigatória:
+    - O IDFatoContratoD4 recebido na URL precisa existir.
+    - Esse mesmo IDFatoContratoD4 precisa pertencer ao contrato aberto.
+    - Esse mesmo IDFatoContratoD4 precisa apontar para um IDFatoKanbanCard vinculado
+      ao contrato e a um item ativo pela tabela FatoContratoCardEuromidia.
+    - Se qualquer vínculo não bater, retorna 404. Não troca por outro documento.
+    """
+    sql_doc = text("""
+        SELECT TOP (1)
+             d4.IDFatoContratoD4
+            ,d4.IDFatoControleContratosEuromidia
+            ,d4.IDFatoKanbanCard
+            ,d4.UUIDDocumentoD4
+            ,d4.NomeDocumentoD4
+            ,d4.TipoArquivoD4
+            ,d4.BitAtivo
+            ,d4.DataCriacao
+            ,d4.DataAtualizacao
+            ,cc.IDFatoControleContratosItensEuromidia
+            ,ci.CodPonto
+            ,ci.CodFace
+            ,ci.Cota
+            ,ci.DataInicioPrevisto
+            ,ci.DataTerminoPrevisto
+            ,ci.TotalBrutoContrato
+            ,ci.FaturamentoLiquidoMensal
+        FROM [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
+        INNER JOIN [Integracao].[Silver].[FatoContratoCardEuromidia] AS cc WITH (NOLOCK)
+            ON TRY_CONVERT(int, cc.IDFatoControleContratosEuromidia) = TRY_CONVERT(int, d4.IDFatoControleContratosEuromidia)
+           AND TRY_CONVERT(int, cc.IDFatoKanbanCard) = TRY_CONVERT(int, d4.IDFatoKanbanCard)
+        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
+            ON TRY_CONVERT(int, ci.IDFatoControleContratosItensEuromidia) = TRY_CONVERT(int, cc.IDFatoControleContratosItensEuromidia)
+           AND TRY_CONVERT(int, ci.IDFatoControleContratoEuromidia) = TRY_CONVERT(int, cc.IDFatoControleContratosEuromidia)
+           AND TRY_CONVERT(int, ci.IDFatoKanbanCard) = TRY_CONVERT(int, cc.IDFatoKanbanCard)
+        WHERE TRY_CONVERT(int, d4.IDFatoContratoD4) = :id_fato_contrato_d4
+          AND TRY_CONVERT(int, d4.IDFatoControleContratosEuromidia) = :id_contrato
+          AND TRY_CONVERT(int, cc.IDFatoControleContratosEuromidia) = :id_contrato
+          AND TRY_CONVERT(int, ci.IDFatoControleContratoEuromidia) = :id_contrato
+          AND ISNULL(d4.BitAtivo, 1) = 1
+          AND ISNULL(ci.BitAtivo, 1) = 1
+          AND TRY_CONVERT(int, d4.IDFatoKanbanCard) IS NOT NULL
+          AND NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), d4.UUIDDocumentoD4), ''))), '') IS NOT NULL;
+    """)
+
+    try:
+        doc = db.session.execute(
+            sql_doc,
+            {
+                "id_fato_contrato_d4": int(id_fato_contrato_d4),
+                "id_contrato": int(id_contrato),
+            },
+        ).mappings().first()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "D4_DOWNLOAD | erro ao localizar documento D4 exato | id_contrato=%s | id_fato_contrato_d4=%s",
+            id_contrato,
+            id_fato_contrato_d4,
+        )
+        abort(500, description="Erro ao localizar documento D4Sign no banco.")
+
+    if not doc:
+        current_app.logger.warning(
+            "D4_DOWNLOAD | documento D4 exato não encontrado ou vínculo inválido | id_contrato=%s | id_fato_contrato_d4=%s",
+            id_contrato,
+            id_fato_contrato_d4,
+        )
+        abort(
+            404,
+            description=(
+                "Documento D4Sign não encontrado para este contrato/card/item. "
+                "O IDFatoContratoD4 informado não possui vínculo exato com FatoContratoD4, "
+                "FatoContratoCardEuromidia e FatoControleContratosItensEuromidia ativo."
+            ),
+        )
+
+    uuid_documento = str(doc.get("UUIDDocumentoD4") or "").strip()
+    if not uuid_documento:
+        abort(404, description="Documento D4Sign sem UUID vinculado.")
+
+    id_doc_real = int(doc.get("IDFatoContratoD4"))
+    nome_download = _nome_download_pdf_d4_seguro(doc.get("NomeDocumentoD4"), id_doc_real)
+
+    current_app.logger.info(
+        "D4_DOWNLOAD | documento D4 exato selecionado | id_contrato=%s | id_doc=%s | card=%s | item=%s | codponto=%s | codface=%s | uuid=%s",
+        id_contrato,
+        id_doc_real,
+        doc.get("IDFatoKanbanCard"),
+        doc.get("IDFatoControleContratosItensEuromidia"),
+        doc.get("CodPonto"),
+        doc.get("CodFace"),
+        uuid_documento,
+    )
+
+    cfg = _obter_config_d4sign_para_download()
+    if not cfg["token_api"] or not cfg["crypt_key"] or not cfg["base_url"]:
+        current_app.logger.error(
+            "D4_DOWNLOAD | TOKEN_D4SIGN/CRYPTKEY_D4SIGN/BASE_URL_D4SIGN não configurados."
+        )
+        abort(500, description="Credenciais da D4Sign não configuradas no servidor.")
+
+    endpoint = f"{cfg['base_url']}/documents/{uuid_documento}/download"
+
+    try:
+        resposta_d4 = requests.post(
+            endpoint,
+            params={
+                "tokenAPI": cfg["token_api"],
+                "cryptKey": cfg["crypt_key"],
+            },
+            json={
+                "type": "pdf",
+                "language": "pt",
+                "encoding": False,
+            },
+            headers={
+                "Accept": "application/json, application/pdf",
+                "Content-Type": "application/json",
+            },
+            timeout=60,
+        )
+        resposta_d4.raise_for_status()
+
+        pdf_bytes = _extrair_pdf_resposta_download_d4(resposta_d4)
+        if not pdf_bytes:
+            current_app.logger.error(
+                "D4_DOWNLOAD | resposta da D4Sign não trouxe PDF/URL/Base64 | id_contrato=%s | id_doc=%s | uuid=%s | status=%s | body=%s",
+                id_contrato,
+                id_doc_real,
+                uuid_documento,
+                resposta_d4.status_code,
+                (resposta_d4.text or "")[:1000],
+            )
+            abort(502, description="A D4Sign não retornou um PDF para download.")
+
+        resposta_pdf = send_file(
+            BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=nome_download,
+            max_age=0,
+        )
+        resposta_pdf.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resposta_pdf.headers["Pragma"] = "no-cache"
+        resposta_pdf.headers["Expires"] = "0"
+        resposta_pdf.headers["X-D4-Contrato-ID"] = str(id_contrato)
+        resposta_pdf.headers["X-D4-Documento-ID"] = str(id_doc_real)
+        resposta_pdf.headers["X-D4-Card-ID"] = str(doc.get("IDFatoKanbanCard") or "")
+        resposta_pdf.headers["X-D4-CodFace"] = str(doc.get("CodFace") or "")
+        return resposta_pdf
+
+    except requests.HTTPError as exc:
+        status_code = getattr(exc.response, "status_code", None) or 502
+        current_app.logger.exception(
+            "D4_DOWNLOAD | HTTPError D4Sign | id_contrato=%s | id_doc=%s | uuid=%s | status=%s",
+            id_contrato,
+            id_doc_real,
+            uuid_documento,
+            status_code,
+        )
+        abort(502, description="Erro HTTP ao baixar documento na D4Sign.")
+    except Exception:
+        current_app.logger.exception(
+            "D4_DOWNLOAD | erro inesperado | id_contrato=%s | id_doc=%s | uuid=%s",
+            id_contrato,
+            id_doc_real,
+            uuid_documento,
+        )
+        abort(502, description="Erro ao baixar documento na D4Sign.")
+
 @paineis_bp.get("/contratos/<int:id_contrato>")
 @login_required
 def contratos_detalhe(id_contrato: int):
@@ -27458,7 +27740,7 @@ def contratos_detalhe(id_contrato: int):
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     contrato_preload_cache_inicial = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260603_abas_rapidas_v3:"
+        f"contratos_detalhe_html:v20260625_d4_download_only_v1:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
@@ -27615,7 +27897,7 @@ def contratos_detalhe(id_contrato: int):
     contrato_detalhe_async_pendente = False
     contrato_detalhe_async_payload = None
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260603_abas_rapidas_v3:"
+        f"contratos_detalhe_html:v20260625_d4_download_only_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
@@ -27623,7 +27905,7 @@ def contratos_detalhe(id_contrato: int):
     )
     placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
     cache_key_contrato_detalhe_completo = (
-        f"contratos_detalhe_html:v20260603_abas_rapidas_v3:"
+        f"contratos_detalhe_html:v20260625_d4_download_only_v1:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -29227,9 +29509,21 @@ def contratos_detalhe(id_contrato: int):
             item_local["_campos"] = _montar_campos_face_painel_contrato(item_local)
 
     def _classificar_tipo_card(row):
-        if bool(row.get("BitAditivo")):
+        """Classifica o atendimento para o histórico compacto de ciclos do contrato."""
+        texto = " ".join(
+            str(row.get(chave) or "")
+            for chave in ("Titulo", "Descricao", "NomeFase", "NomeStatus")
+        )
+        try:
+            texto_norm = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").upper()
+        except Exception:
+            texto_norm = texto.upper()
+
+        if "RENOV" in texto_norm:
+            return "Renovação"
+        if bool(row.get("BitAditivo")) or "ADITIVO" in texto_norm:
             return "Aditivo"
-        if bool(row.get("BitContratoNovo")):
+        if bool(row.get("BitContratoNovo")) or "CONTRATO NOVO" in texto_norm or "NOVO CONTRATO" in texto_norm:
             return "Contrato Novo"
         if bool(row.get("BitDemanda")):
             return "Demanda"
@@ -29479,39 +29773,220 @@ def contratos_detalhe(id_contrato: int):
         info["interpretacao"] = info.get("interpretacao") or "Ainda não existe status do D4Sign vinculado a este contrato/ciclo."
         return info
 
-    def _contratos_d4_tipo_ciclo(texto=None, bit_aditivo=None, bit_contrato_novo=None):
-        base = str(texto or "").upper()
-        if "RENOVA" in base or "RENOVACAO" in base or "RENOVAÇÃO" in base:
+    def _contratos_d4_normalizar(texto):
+        texto = str(texto or "").strip()
+        if not texto:
+            return ""
+        try:
+            return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii").upper()
+        except Exception:
+            return texto.upper()
+
+    def _contratos_d4_tipo_ciclo(nome_documento=None, tipo_tag_contrato=None):
+        """
+        Classifica o documento D4 sem criar ciclo artificial.
+
+        Regra crítica:
+        - O ciclo continua nascendo somente de [Integracao].[Silver].[FatoContratoD4].
+        - A tag do card só classifica um documento D4 real quando o próprio D4 aponta para
+          esse card em d4.IDFatoKanbanCard.
+        - [Integracao].[Silver].[FatoContratoCardEuromidia] é ponte de contexto contrato/card/item,
+          não fonte para inventar documento D4.
+        - "Novo Contrato" só entra como tipo quando existir tag real TIPO_CONTRATO no card.
+        """
+        tag_norm = _contratos_d4_normalizar(tipo_tag_contrato)
+        if "RENOV" in tag_norm:
             return "Renovação"
-        try:
-            if int(bit_aditivo or 0) == 1:
-                return "Aditivo"
-        except Exception:
-            pass
-        if "ADITIVO" in base:
+        if "ADITIVO" in tag_norm:
             return "Aditivo"
+        if "NOVO" in tag_norm and "CONTRATO" in tag_norm:
+            return "Novo Contrato"
+
+        doc_norm = _contratos_d4_normalizar(nome_documento)
+        if "RENOV" in doc_norm:
+            return "Renovação"
+        if "ADITIVO" in doc_norm:
+            return "Aditivo"
+
+        return None
+
+    def _contratos_d4_classe_tipo_ciclo(tipo_ciclo):
+        tipo_norm = _contratos_d4_normalizar(tipo_ciclo)
+        if "RENOV" in tipo_norm:
+            return "renovacao"
+        if "ADITIVO" in tipo_norm:
+            return "aditivo"
+        if "NOVO" in tipo_norm:
+            return "novo"
+        if "PRINCIPAL" in tipo_norm:
+            return "principal"
+        return "outro"
+
+    def _contratos_d4_acao_cliente(id_status_d4=None, signatarios_total=0, signatarios_assinados=0):
         try:
-            if int(bit_contrato_novo or 0) == 1:
-                return "Contrato Novo"
+            id_status = int(id_status_d4 or 0)
         except Exception:
-            pass
-        if "NOVO" in base:
-            return "Contrato Novo"
-        return "Contrato Principal"
+            id_status = 0
+        try:
+            total = int(signatarios_total or 0)
+        except Exception:
+            total = 0
+        try:
+            assinados = int(signatarios_assinados or 0)
+        except Exception:
+            assinados = 0
+        pendentes = max(0, total - assinados)
+
+        if id_status == 4:
+            return "Assinatura concluída"
+        if id_status == 6:
+            return "Documento cancelado"
+        if id_status == 5:
+            return "Documento arquivado"
+        if id_status == 3:
+            if total > 0:
+                return f"Aguardando {pendentes} assinatura(s)" if pendentes > 0 else "Assinaturas recebidas; aguardando finalização"
+            return "Aguardando assinatura no D4Sign"
+        if id_status == 2:
+            return "Aguardando cadastro/envio dos signatários"
+        if id_status == 1:
+            return "Processando documento"
+        if id_status == 7:
+            return "Documento em edição"
+        return "Sem ação D4Sign registrada"
 
     def _carregar_d4_documentos_contrato(id_contrato_param):
-        """Carrega documentos D4 vinculados ao contrato sem quebrar a tela caso a tabela ainda não exista."""
+        """Carrega documentos D4 vinculados ao contrato usando apenas colunas existentes nas tabelas informadas."""
         sql_d4_docs = text("""
             SELECT TOP (50)
-                d4.*,
-                NomeStatusD4Resolvido = sd.NomeStatus
+                 d4.IDFatoContratoD4
+                ,d4.IDDimStatusD4
+                ,d4.IDEmpresa
+                ,d4.IDDimCofreD4
+                ,d4.IDFatoControleContratosEuromidia
+                ,d4.IDFatoKanbanCard
+                ,d4.IDDimStatusContratos
+                ,d4.IDDimModeloContratoD4
+                ,d4.IDDimTipoDocumento
+                ,d4.UUIDDocumentoD4
+                ,d4.UUIDCofreD4
+                ,d4.NomeDocumentoD4
+                ,d4.NomeCofreD4
+                ,d4.IDFaseD4
+                ,d4.NomeFaseD4
+                ,d4.TipoArquivoD4
+                ,d4.QuantidadePaginas
+                ,d4.TamanhoArquivoD4
+                ,d4.StatusComentarioD4
+                ,d4.CanceladoPorD4
+                ,d4.DataCriacao
+                ,d4.DataAtualizacao
+                ,d4.BitAtivo
+                ,NomeStatusD4Resolvido = sd.NomeStatus
+                ,NomeStatusContratoD4 = sc.Status
+                ,SignatariosTotal = CONVERT(int, ISNULL(sig.SignatariosTotal, 0))
+                ,SignatariosAssinados = CONVERT(int, ISNULL(sig.SignatariosAssinados, 0))
+                ,SignatariosPendentes = CONVERT(int, ISNULL(sig.SignatariosPendentes, 0))
+                ,DataEnvioD4 = sig.DataEnvioD4
+                ,DataPrimeiraVisualizacaoD4 = sig.DataPrimeiraVisualizacaoD4
+                ,DataUltimaVisualizacaoD4 = sig.DataUltimaVisualizacaoD4
+                ,DataUltimaConsultaD4 = sig.DataUltimaConsultaD4
+                ,DataFinalizacaoD4 = CASE
+                    WHEN d4.IDDimStatusD4 = 4 THEN COALESCE(sig.DataUltimaAssinaturaD4, d4.DataAtualizacao)
+                    ELSE NULL
+                 END
+                ,QtdEventosWebhook = CONVERT(int, ISNULL(evt.QtdEventosWebhook, 0))
+                ,DataUltimoEventoWebhook = evt.DataUltimoEventoWebhook
+                ,TipoUltimoEventoWebhook = evt.TipoUltimoEventoWebhook
+                ,StatusUltimoWebhook = evt.StatusUltimoWebhook
+                ,MensagemErroWebhook = evt.MensagemErroWebhook
+                ,TipoContratoTag = taginfo.TipoContratoTag
+                ,ContratoAprovadoEmTag = taginfo.ContratoAprovadoEmTag
+                ,ContratoAprovadoPorTag = taginfo.ContratoAprovadoPorTag
             FROM [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
             LEFT JOIN [Integracao].[Silver].[DimStatusD4] AS sd WITH (NOLOCK)
                 ON sd.IDDimStatusD4 = d4.IDDimStatusD4
+            OUTER APPLY (
+                SELECT TOP (1)
+                    sc1.Status
+                FROM [Integracao].[Silver].[DimStatusContratos] AS sc1 WITH (NOLOCK)
+                WHERE sc1.IDDimStatusContratos = d4.IDDimStatusContratos
+                ORDER BY CASE WHEN sc1.IDEmpresaProprietaria = 3 THEN 0 ELSE 1 END
+            ) AS sc
+            OUTER APPLY (
+                SELECT
+                     SignatariosTotal = COUNT_BIG(1)
+                    ,SignatariosAssinados = SUM(CASE WHEN ISNULL(s.BitAssinado, 0) = 1 OR s.IDDimStatusAssinaturaD4 = 7 THEN 1 ELSE 0 END)
+                    ,SignatariosPendentes = SUM(CASE WHEN ISNULL(s.BitAssinado, 0) = 1 OR s.IDDimStatusAssinaturaD4 = 7 THEN 0 ELSE 1 END)
+                    ,DataEnvioD4 = MAX(s.DataEnvioD4)
+                    ,DataPrimeiraVisualizacaoD4 = MIN(s.DataPrimeiraVisualizacaoD4)
+                    ,DataUltimaVisualizacaoD4 = MAX(s.DataUltimaVisualizacaoD4)
+                    ,DataUltimaConsultaD4 = MAX(s.DataUltimaConsultaD4)
+                    ,DataUltimaAssinaturaD4 = MAX(CASE WHEN ISNULL(s.BitAssinado, 0) = 1 OR s.IDDimStatusAssinaturaD4 = 7 THEN s.DataAssinaturaD4 ELSE NULL END)
+                FROM [Integracao].[Silver].[FatoContratoD4Signatario] AS s WITH (NOLOCK)
+                WHERE s.IDFatoContratoD4 = d4.IDFatoContratoD4
+                  AND ISNULL(s.BitAtivo, 1) = 1
+            ) AS sig
+            OUTER APPLY (
+                SELECT
+                     QtdEventosWebhook = COUNT_BIG(1)
+                    ,DataUltimoEventoWebhook = MAX(COALESCE(e.DataProcessamento, e.DataRecebimento))
+                    ,TipoUltimoEventoWebhook = (
+                        SELECT TOP (1) e2.TipoEventoD4
+                        FROM [Integracao].[Silver].[FatoContratoD4WebhookEvento] AS e2 WITH (NOLOCK)
+                        WHERE e2.IDFatoContratoD4 = d4.IDFatoContratoD4
+                           OR (e2.UUIDDocumentoD4 IS NOT NULL AND e2.UUIDDocumentoD4 = d4.UUIDDocumentoD4)
+                        ORDER BY COALESCE(e2.DataProcessamento, e2.DataRecebimento) DESC, e2.IDFatoContratoD4WebhookEvento DESC
+                     )
+                    ,StatusUltimoWebhook = (
+                        SELECT TOP (1) e2.StatusProcessamento
+                        FROM [Integracao].[Silver].[FatoContratoD4WebhookEvento] AS e2 WITH (NOLOCK)
+                        WHERE e2.IDFatoContratoD4 = d4.IDFatoContratoD4
+                           OR (e2.UUIDDocumentoD4 IS NOT NULL AND e2.UUIDDocumentoD4 = d4.UUIDDocumentoD4)
+                        ORDER BY COALESCE(e2.DataProcessamento, e2.DataRecebimento) DESC, e2.IDFatoContratoD4WebhookEvento DESC
+                     )
+                    ,MensagemErroWebhook = (
+                        SELECT TOP (1) e2.MensagemErro
+                        FROM [Integracao].[Silver].[FatoContratoD4WebhookEvento] AS e2 WITH (NOLOCK)
+                        WHERE e2.IDFatoContratoD4 = d4.IDFatoContratoD4
+                           OR (e2.UUIDDocumentoD4 IS NOT NULL AND e2.UUIDDocumentoD4 = d4.UUIDDocumentoD4)
+                        ORDER BY COALESCE(e2.DataProcessamento, e2.DataRecebimento) DESC, e2.IDFatoContratoD4WebhookEvento DESC
+                     )
+                FROM [Integracao].[Silver].[FatoContratoD4WebhookEvento] AS e WITH (NOLOCK)
+                WHERE e.IDFatoContratoD4 = d4.IDFatoContratoD4
+                   OR (e.UUIDDocumentoD4 IS NOT NULL AND e.UUIDDocumentoD4 = d4.UUIDDocumentoD4)
+            ) AS evt
+            OUTER APPLY (
+                SELECT
+                    TipoContratoTag = (
+                        SELECT TOP (1) t2.NomeTag
+                        FROM [Kanban].[Silver].[FatoKanbanCardTag] AS ct2 WITH (NOLOCK)
+                        INNER JOIN [Kanban].[Silver].[DimKanbanTag] AS t2 WITH (NOLOCK)
+                            ON t2.IDDimKanbanTag = ct2.IDDimKanbanTag
+                        WHERE ct2.IDFatoKanbanCard = d4.IDFatoKanbanCard
+                          AND ISNULL(ct2.IDEmpresaProprietaria, 3) = 3
+                          AND ISNULL(t2.IDEmpresaProprietaria, 3) = 3
+                          AND ISNULL(t2.Ativo, 1) = 1
+                          AND ct2.RemovidoEm IS NULL
+                          AND t2.TipoTag = 'TIPO_CONTRATO'
+                          AND t2.NomeTag IN ('Aditivo', 'Novo Contrato', 'Renovação')
+                        ORDER BY ct2.AplicadoEm DESC, ct2.IDFatoKanbanCardTag DESC
+                    ),
+                    ContratoAprovadoEmTag = MAX(CASE WHEN t.NomeTag = 'Contrato Aprovado' AND ct.RemovidoEm IS NULL THEN ct.AplicadoEm ELSE NULL END),
+                    ContratoAprovadoPorTag = MAX(CASE WHEN t.NomeTag = 'Contrato Aprovado' AND ct.RemovidoEm IS NULL THEN ct.AplicadoPor ELSE NULL END)
+                FROM [Kanban].[Silver].[FatoKanbanCardTag] AS ct WITH (NOLOCK)
+                INNER JOIN [Kanban].[Silver].[DimKanbanTag] AS t WITH (NOLOCK)
+                    ON t.IDDimKanbanTag = ct.IDDimKanbanTag
+                WHERE ct.IDFatoKanbanCard = d4.IDFatoKanbanCard
+                  AND ISNULL(ct.IDEmpresaProprietaria, 3) = 3
+                  AND ISNULL(t.IDEmpresaProprietaria, 3) = 3
+                  AND ISNULL(t.Ativo, 1) = 1
+            ) AS taginfo
             WHERE d4.IDFatoControleContratosEuromidia = :id_contrato
+              AND ISNULL(d4.BitAtivo, 1) = 1
             ORDER BY
-                COALESCE(d4.DataAtualizacao, d4.DataUltimaConsultaD4, d4.DataEnvioD4, d4.DataCriacao) DESC,
-                d4.IDFatoContratoD4 DESC
+                COALESCE(d4.DataAtualizacao, evt.DataUltimoEventoWebhook, sig.DataUltimaConsultaD4, sig.DataEnvioD4, d4.DataCriacao) DESC,
+                d4.IDFatoContratoD4 DESC;
         """)
         try:
             rows = db.session.execute(sql_d4_docs, {"id_contrato": int(id_contrato_param)}).mappings().all()
@@ -29528,33 +30003,67 @@ def contratos_detalhe(id_contrato: int):
         for row in rows:
             d = dict(row)
             id_status_d4 = _contratos_d4_int(d.get("IDDimStatusD4"), 0)
-            nome_status_d4 = d.get("NomeStatusD4Resolvido") or d.get("NomeStatusD4") or d.get("StatusD4") or d.get("NomeFaseD4")
+            nome_status_d4 = d.get("NomeStatusD4Resolvido")
             info_status = _contratos_d4_status_info(id_status_d4, nome_status_d4)
             tipo_ciclo = _contratos_d4_tipo_ciclo(
-                " ".join(str(d.get(k) or "") for k in ("TipoCiclo", "TipoDocumento", "NomeDocumentoD4", "NomeModeloContratoD4", "NomeFaseD4")),
-                d.get("BitAditivo"),
-                d.get("BitContratoNovo"),
+                nome_documento=d.get("NomeDocumentoD4"),
+                tipo_tag_contrato=d.get("TipoContratoTag"),
             )
-            data_ref = d.get("DataAtualizacao") or d.get("DataUltimaConsultaD4") or d.get("DataEnvioD4") or d.get("DataCriacao")
+            data_ref = (
+                d.get("DataAtualizacao")
+                or d.get("DataUltimoEventoWebhook")
+                or d.get("DataUltimaConsultaD4")
+                or d.get("DataEnvioD4")
+                or d.get("DataCriacao")
+            )
+            try:
+                total_signatarios = int(d.get("SignatariosTotal") or 0)
+            except Exception:
+                total_signatarios = 0
+            try:
+                assinados = int(d.get("SignatariosAssinados") or 0)
+            except Exception:
+                assinados = 0
+
+            mensagem_erro = d.get("MensagemErroWebhook")
             docs.append({
                 "IDFatoContratoD4": d.get("IDFatoContratoD4"),
                 "IDFatoKanbanCard": d.get("IDFatoKanbanCard"),
+                "TipoContratoTag": d.get("TipoContratoTag"),
+                "ContratoAprovadoEmTag": d.get("ContratoAprovadoEmTag"),
+                "ContratoAprovadoEmTagTexto": _contratos_d4_fmt_data(d.get("ContratoAprovadoEmTag")),
+                "ContratoAprovadoPorTag": d.get("ContratoAprovadoPorTag"),
+                "IDDimStatusContratos": d.get("IDDimStatusContratos"),
+                "NomeStatusContratoD4": d.get("NomeStatusContratoD4"),
                 "IDDimStatusD4": info_status.get("id"),
                 "NomeStatusD4": info_status.get("nome"),
                 "ClasseStatusD4": info_status.get("classe"),
                 "InterpretacaoStatusD4": info_status.get("interpretacao"),
                 "TipoCiclo": tipo_ciclo,
-                "UUIDDocumentoD4": d.get("UUIDDocumentoD4") or d.get("UUIDDocument") or d.get("UUID") or d.get("DocumentoUUID"),
-                "NomeDocumentoD4": d.get("NomeDocumentoD4") or d.get("NomeDocumento") or d.get("ArquivoNome") or "Documento D4Sign",
-                "NomeCofreD4": d.get("NomeCofreD4") or d.get("NomeCofre"),
-                "DataEnvioD4": d.get("DataEnvioD4") or d.get("DataEnvio"),
-                "DataUltimaConsultaD4": d.get("DataUltimaConsultaD4") or d.get("DataAtualizacao") or d.get("DataCriacao"),
-                "DataFinalizacaoD4": d.get("DataFinalizacaoD4") or d.get("DataFinalizacao"),
+                "ClasseTipoCiclo": _contratos_d4_classe_tipo_ciclo(tipo_ciclo),
+                "UUIDDocumentoD4": d.get("UUIDDocumentoD4"),
+                "NomeDocumentoD4": d.get("NomeDocumentoD4"),
+                "NomeCofreD4": d.get("NomeCofreD4"),
+                "NomeFaseD4": d.get("NomeFaseD4"),
+                "TipoArquivoD4": d.get("TipoArquivoD4"),
+                "QuantidadePaginas": d.get("QuantidadePaginas"),
+                "TamanhoArquivoD4": d.get("TamanhoArquivoD4"),
+                "StatusComentarioD4": d.get("StatusComentarioD4"),
+                "CanceladoPorD4": d.get("CanceladoPorD4"),
+                "DataEnvioD4": d.get("DataEnvioD4"),
+                "DataUltimaConsultaD4": d.get("DataUltimaConsultaD4"),
+                "DataFinalizacaoD4": d.get("DataFinalizacaoD4"),
                 "DataReferencia": data_ref,
                 "DataReferenciaTexto": _contratos_d4_fmt_data(data_ref),
-                "SignatariosTotal": d.get("SignatariosTotal") or d.get("QtdSignatarios") or d.get("TotalSignatarios"),
-                "SignatariosAssinados": d.get("SignatariosAssinados") or d.get("QtdSignatariosAssinados") or d.get("TotalAssinados"),
-                "MensagemErro": d.get("MensagemErro") or d.get("Erro") or d.get("DescricaoErro"),
+                "SignatariosTotal": total_signatarios,
+                "SignatariosAssinados": assinados,
+                "SignatariosPendentes": max(0, total_signatarios - assinados),
+                "AcaoClienteTexto": _contratos_d4_acao_cliente(info_status.get("id"), total_signatarios, assinados),
+                "QtdEventosWebhook": d.get("QtdEventosWebhook") or 0,
+                "DataUltimoEventoWebhook": d.get("DataUltimoEventoWebhook"),
+                "TipoUltimoEventoWebhook": d.get("TipoUltimoEventoWebhook"),
+                "StatusUltimoWebhook": d.get("StatusUltimoWebhook"),
+                "MensagemErro": mensagem_erro,
             })
         return docs
 
@@ -29569,7 +30078,7 @@ def contratos_detalhe(id_contrato: int):
                 ,h.IDDimStatusD4
                 ,sd.NomeStatus AS NomeStatusD4
                 ,h.DataStatus
-            FROM [Integracao].[Silver].[DimHistoricoContratos] AS h WITH (NOLOCK)
+            FROM [Integracao].[Silver].[DimHistoricoContratosD4] AS h WITH (NOLOCK)
             LEFT JOIN [Integracao].[Silver].[DimStatusContratos] AS sc WITH (NOLOCK)
                 ON sc.IDDimStatusContratos = h.IDDimStatusContratos
                AND (sc.IDEmpresaProprietaria = h.IDEmpresaProprietaria OR h.IDEmpresaProprietaria IS NULL)
@@ -29583,7 +30092,7 @@ def contratos_detalhe(id_contrato: int):
         except Exception:
             db.session.rollback()
             current_app.logger.warning(
-                "CONTRATO_DETALHE | DimHistoricoContratos indisponível ou com schema diferente | id_contrato=%s",
+                "CONTRATO_DETALHE | DimHistoricoContratosD4 indisponível ou com schema diferente | id_contrato=%s",
                 id_contrato_param,
                 exc_info=True,
             )
@@ -29593,12 +30102,19 @@ def contratos_detalhe(id_contrato: int):
         for row in rows:
             r = dict(row)
             info_d4 = _contratos_d4_status_info(r.get("IDDimStatusD4"), r.get("NomeStatusD4"))
+            nome_status_d4_historico = info_d4.get("nome")
+            if _contratos_d4_int(info_d4.get("id"), 0) == 1:
+                # No histórico, IDDimStatusD4=1 representa uma etapa de processamento já gravada.
+                # O status atual do documento continua aparecendo como "Processando" quando ele ainda está nesse estado.
+                nome_status_d4_historico = "Processado"
+
             historico.append({
                 "IDDimHistoricoContratos": r.get("IDDimHistoricoContratos"),
                 "IDDimStatusContratos": r.get("IDDimStatusContratos"),
                 "NomeStatusContrato": r.get("NomeStatusContrato") or "—",
                 "IDDimStatusD4": info_d4.get("id"),
                 "NomeStatusD4": info_d4.get("nome"),
+                "NomeStatusD4Historico": nome_status_d4_historico,
                 "ClasseStatusD4": info_d4.get("classe"),
                 "DataStatus": r.get("DataStatus"),
                 "DataStatusTexto": _contratos_d4_fmt_data(r.get("DataStatus")),
@@ -29606,9 +30122,18 @@ def contratos_detalhe(id_contrato: int):
         return historico
 
     def _montar_painel_d4_contrato(d4_documentos, historico_status, cards_relacionados_lista=None):
+        """
+        Monta o painel D4 sem criar ciclos artificiais.
+
+        Fonte permitida para ciclo/documento:
+        - [Integracao].[Silver].[FatoContratoD4]
+
+        O IDFatoKanbanCard pode aparecer como atributo de um documento D4 real.
+        A tag de tipo do card classifica esse documento quando o vínculo vem do próprio D4.
+        Um card sem registro em FatoContratoD4 não vira ciclo.
+        """
         docs = list(d4_documentos or [])
         historico = list(historico_status or [])
-        cards_lista = list(cards_relacionados_lista or [])
 
         doc_atual = docs[0] if docs else None
         status_d4 = _contratos_d4_status_info(
@@ -29616,77 +30141,80 @@ def contratos_detalhe(id_contrato: int):
             doc_atual.get("NomeStatusD4") if doc_atual else None,
         )
 
-        tipos_abertos = []
-        for card in cards_lista:
-            tipo = card.get("TipoCard") if isinstance(card, dict) else getattr(card, "TipoCard", None)
-            situacao = card.get("Situacao") if isinstance(card, dict) else getattr(card, "Situacao", None)
-            if tipo and tipo not in tipos_abertos and str(situacao or "").lower() == "aberto":
-                tipos_abertos.append(tipo)
+        def _doc_id(doc):
+            try:
+                return int(doc.get("IDFatoContratoD4") or 0)
+            except Exception:
+                return 0
 
-        tipo_ciclo_atual = (doc_atual or {}).get("TipoCiclo") or (tipos_abertos[0] if tipos_abertos else "Contrato Principal")
-
-        ciclos = []
-        ciclos.append({
-            "TipoCiclo": "Contrato Principal",
-            "Titulo": "Contrato Principal",
-            "StatusContrato": (nome_status_atual or "Status atual"),
-            "StatusD4": None,
-            "Classe": "principal",
-            "DataReferenciaTexto": None,
-            "Atual": tipo_ciclo_atual == "Contrato Principal",
-        })
-
-        for card in cards_lista:
-            tipo = card.get("TipoCard") if isinstance(card, dict) else getattr(card, "TipoCard", None)
-            if not tipo or tipo == "Contrato Principal":
-                continue
-            id_card = card.get("IDFatoKanbanCard") if isinstance(card, dict) else getattr(card, "IDFatoKanbanCard", None)
-            doc_card = next((d for d in docs if str(d.get("IDFatoKanbanCard") or "") == str(id_card or "")), None)
-            ciclos.append({
-                "TipoCiclo": tipo,
-                "Titulo": f"{tipo} #{id_card}" if id_card else tipo,
-                "StatusContrato": (card.get("NomeFase") if isinstance(card, dict) else getattr(card, "NomeFase", None)) or "—",
-                "StatusD4": (doc_card or {}).get("NomeStatusD4"),
-                "ClasseStatusD4": (doc_card or {}).get("ClasseStatusD4"),
-                "Classe": str((card.get("Situacao") if isinstance(card, dict) else getattr(card, "Situacao", None)) or "aberto"),
-                "DataReferenciaTexto": _contratos_d4_fmt_data(card.get("DataReferencia") if isinstance(card, dict) else getattr(card, "DataReferencia", None)),
-                "Atual": doc_card is not None and doc_card == doc_atual,
-            })
-
-        # Documentos D4 sem card relacionado também aparecem no histórico de ciclos.
-        for doc in docs:
-            if any(str(c.get("StatusD4") or "") == str(doc.get("NomeStatusD4") or "") and str(c.get("TipoCiclo") or "") == str(doc.get("TipoCiclo") or "") for c in ciclos):
-                continue
-            ciclos.append({
-                "TipoCiclo": doc.get("TipoCiclo") or "Documento D4Sign",
-                "Titulo": doc.get("TipoCiclo") or doc.get("NomeDocumentoD4") or "Documento D4Sign",
-                "StatusContrato": "Documento vinculado",
+        def _campos_doc(doc):
+            return {
                 "StatusD4": doc.get("NomeStatusD4"),
                 "ClasseStatusD4": doc.get("ClasseStatusD4"),
+                "NomeDocumentoD4": doc.get("NomeDocumentoD4"),
+                "UUIDDocumentoD4": doc.get("UUIDDocumentoD4"),
+                "IDFatoKanbanCard": doc.get("IDFatoKanbanCard"),
+                "TipoContratoTag": doc.get("TipoContratoTag"),
+                "ContratoAprovadoEmTagTexto": doc.get("ContratoAprovadoEmTagTexto"),
+                "SignatariosTotal": doc.get("SignatariosTotal") or 0,
+                "SignatariosAssinados": doc.get("SignatariosAssinados") or 0,
+                "SignatariosPendentes": doc.get("SignatariosPendentes") or 0,
+                "AcaoClienteTexto": doc.get("AcaoClienteTexto"),
+                "DataReferenciaTexto": doc.get("DataReferenciaTexto"),
+                "IDFatoContratoD4": doc.get("IDFatoContratoD4"),
+            }
+
+        ciclos = []
+
+        for doc in docs:
+            id_doc = _doc_id(doc)
+            tipo_doc = doc.get("TipoCiclo")
+            classe_tipo = _contratos_d4_classe_tipo_ciclo(tipo_doc) if tipo_doc else "documento"
+            nome_doc = doc.get("NomeDocumentoD4")
+
+            titulo = nome_doc
+            if not titulo and id_doc > 0:
+                titulo = f"Documento D4 #{id_doc}"
+
+            ciclos.append({
+                "TipoCiclo": tipo_doc,
+                "ClasseTipoCiclo": classe_tipo,
+                "Titulo": titulo,
+                "StatusContrato": doc.get("NomeStatusContratoD4"),
                 "Classe": "documento",
                 "DataReferenciaTexto": doc.get("DataReferenciaTexto"),
-                "Atual": doc == doc_atual,
+                "Atual": bool(doc == doc_atual),
+                **_campos_doc(doc),
             })
+
+        qtd_renovacoes = sum(1 for c in ciclos if c.get("ClasseTipoCiclo") == "renovacao")
+        qtd_aditivos = sum(1 for c in ciclos if c.get("ClasseTipoCiclo") == "aditivo")
+        qtd_pendentes_assinatura = sum(
+            1 for d in docs
+            if _contratos_d4_int(d.get("IDDimStatusD4"), 0) in (2, 3, 7)
+        )
 
         return {
             "DocumentoAtual": doc_atual,
             "StatusAtualD4": status_d4,
             "TemDocumentoD4": bool(doc_atual),
-            "TipoCicloAtual": tipo_ciclo_atual,
+            "TipoCicloAtual": (doc_atual or {}).get("TipoCiclo"),
             "HistoricoStatus": historico,
-            "Ciclos": ciclos[:12],
+            "Ciclos": ciclos[:50],
             "Resumo": {
                 "QtdDocumentosD4": len(docs),
                 "QtdEventosHistorico": len(historico),
+                "QtdRenovacoes": qtd_renovacoes,
+                "QtdAditivos": qtd_aditivos,
+                "QtdPendentesAssinatura": qtd_pendentes_assinatura,
+                "QtdCiclos": len(ciclos),
             },
         }
 
-    if modo_rapido_contrato:
-        d4_documentos_contrato = []
-        historico_status_contrato = []
-    else:
-        d4_documentos_contrato = _carregar_d4_documentos_contrato(id_contrato)
-        historico_status_contrato = _carregar_historico_status_contrato(id_contrato)
+    # O painel D4 é leve e precisa aparecer também no modo rápido.
+    # Antes o modo rápido entregava [] e a tela mostrava "0 doc(s)" mesmo existindo documento/assinatura.
+    d4_documentos_contrato = _carregar_d4_documentos_contrato(id_contrato)
+    historico_status_contrato = _carregar_historico_status_contrato(id_contrato)
 
     sql_itens_base = text("""
         SELECT
@@ -29945,12 +30473,13 @@ def contratos_detalhe(id_contrato: int):
         painel_d4_contrato = _montar_painel_d4_contrato(
             d4_documentos=d4_documentos_contrato,
             historico_status=historico_status_contrato,
-            cards_relacionados_lista=[],
+            cards_relacionados_lista=cards_relacionados_rapidos,
         )
 
         html_renderizado = render_template(
             "euromidia/contratos_detalhe.html",
             contrato=contrato,
+            id_contrato=id_contrato,
             contrato_campos=contrato_campos,
             itens=itens,
             cards_relacionados=cards_relacionados_rapidos,
@@ -31624,6 +32153,7 @@ def contratos_detalhe(id_contrato: int):
     html_renderizado = render_template(
         "euromidia/contratos_detalhe.html",
         contrato=contrato,
+        id_contrato=id_contrato,
         contrato_campos=contrato_campos,
         itens=itens,
         cards_relacionados=cards_relacionados,

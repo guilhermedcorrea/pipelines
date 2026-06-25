@@ -1013,6 +1013,24 @@
       align-items:center;
       min-width:0;
     }
+    .d4-doc-file-link{
+      color:inherit;
+      text-decoration:none;
+      cursor:pointer;
+      transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+    }
+    .d4-doc-file-link:hover{
+      transform:translateY(-1px);
+      border-color:#94A3B8;
+      box-shadow:0 12px 24px rgba(15,23,42,.10);
+    }
+    .d4-download-hint{
+      display:inline-flex;
+      margin-top:6px;
+      font-size:11px;
+      font-weight:900;
+      color:var(--euro-blue);
+    }
     .d4-pdf-icon{
       width:42px;
       height:48px;
@@ -1069,7 +1087,7 @@
     }
     .d4-metrics{
       display:grid;
-      grid-template-columns:repeat(3,minmax(120px,1fr));
+      grid-template-columns:repeat(4,minmax(120px,1fr));
       gap:8px;
       margin-top:12px;
     }
@@ -1124,8 +1142,71 @@
       font-weight:950;
     }
     .ciclo-item.is-atual .ciclo-icon{ background:#FED7AA; color:#C2410C; }
+    .ciclo-item.is-renovacao{ border-color:#BFDBFE; background:linear-gradient(180deg,#EFF6FF 0%,#FFFFFF 100%); }
+    .ciclo-item.is-aditivo{ border-color:#DDD6FE; background:linear-gradient(180deg,#F5F3FF 0%,#FFFFFF 100%); }
+    .ciclo-item.is-hidden{ display:none; }
+    .ciclo-title-line{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; min-width:0; }
     .ciclo-title{ font-size:12px; font-weight:950; color:var(--text); word-break:break-word; }
-    .ciclo-sub{ margin-top:2px; font-size:11px; color:var(--muted); font-weight:800; }
+    .ciclo-tag{
+      display:inline-flex;
+      align-items:center;
+      border-radius:999px;
+      padding:3px 7px;
+      font-size:10px;
+      font-weight:950;
+      border:1px solid #CBD5E1;
+      background:#F8FAFC;
+      color:#475569;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .ciclo-tag.renovacao{ background:#EFF6FF; color:#1D4ED8; border-color:#BFDBFE; }
+    .ciclo-tag.aditivo{ background:#F5F3FF; color:#6D28D9; border-color:#DDD6FE; }
+    .ciclo-tag.novo{ background:#ECFDF5; color:#047857; border-color:#A7F3D0; }
+    .ciclo-tag.aprovado{ background:#ECFDF3; color:#166534; border-color:#BBF7D0; }
+    .ciclo-tag.card{ background:#F8FAFC; color:#334155; border-color:#CBD5E1; }
+    .ciclo-sub{ margin-top:2px; font-size:11px; color:var(--muted); font-weight:800; line-height:1.35; }
+    .ciclo-doc{
+      margin-top:5px;
+      font-size:11px;
+      color:#334155;
+      font-weight:800;
+      line-height:1.35;
+      word-break:break-word;
+    }
+    .ciclo-acao{
+      margin-top:5px;
+      font-size:11px;
+      color:#92400E;
+      font-weight:900;
+      line-height:1.35;
+    }
+    .ciclo-side{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+    .ciclos-head-badges{ display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap; }
+    .ciclos-footer{
+      margin-top:10px;
+      border-top:1px solid #EEF2F7;
+      padding-top:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      color:#64748B;
+      font-size:11px;
+      font-weight:850;
+    }
+    .ciclos-toggle{
+      border:1px solid #CBD5E1;
+      background:#fff;
+      color:var(--euro-blue);
+      border-radius:10px;
+      padding:7px 10px;
+      font-size:11px;
+      font-weight:950;
+      cursor:pointer;
+    }
+    .ciclos-toggle:hover{ background:#F8FAFC; }
     .historico-status-mini{
       margin-top:12px;
       border-top:1px solid #EEF2F7;
@@ -1151,7 +1232,8 @@
       .d4-doc-layout{ grid-template-columns:1fr; }
       .d4-metrics{ grid-template-columns:1fr; }
       .ciclo-item{ grid-template-columns:26px minmax(0,1fr); }
-      .ciclo-item .d4-badge{ grid-column:1 / -1; justify-self:flex-start; }
+      .ciclo-side{ grid-column:1 / -1; align-items:flex-start; }
+      .ciclo-item .d4-badge{ justify-self:flex-start; }
     }
     .contrato-async-cache-bar{
       margin-top:14px;
@@ -1443,17 +1525,42 @@
 
       {% if doc_d4 %}
         <div class="d4-doc-layout">
-          <div class="d4-doc-file">
-            <div class="d4-pdf-icon">PDF</div>
-            <div>
-              <div class="d4-doc-name" data-d4-field="nome_documento">{{ doc_d4.NomeDocumentoD4 or "Documento D4Sign" }}</div>
-              <div class="d4-doc-meta">
-                Tipo: <strong data-d4-field="tipo_ciclo">{{ doc_d4.TipoCiclo or "Contrato" }}</strong><br>
-                UUID: <span data-d4-field="uuid_documento">{{ doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
-                Enviado em: {{ doc_d4.DataEnvioD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataEnvioD4 else "—" }}
+          {% if doc_d4.IDFatoContratoD4 and doc_d4.UUIDDocumentoD4 %}
+            {% set contrato_id_download = id_contrato if id_contrato is defined and id_contrato else (contrato.IDFatoControleContratosEuromidia or contrato.IDFatoControleContratos) %}
+            {% set url_download_d4 = url_for('Paineis.contrato_d4_download', id_contrato=contrato_id_download, id_fato_contrato_d4=doc_d4.IDFatoContratoD4, _d4_nocache=(doc_d4.DataReferenciaTexto or doc_d4.IDFatoContratoD4)) %}
+            <a class="d4-doc-file d4-doc-file-link"
+               href="{{ url_download_d4 }}"
+               title="Baixar o PDF real do documento na D4Sign">
+              <div class="d4-pdf-icon">PDF</div>
+              <div>
+                <div class="d4-doc-name" data-d4-field="nome_documento">{{ doc_d4.NomeDocumentoD4 or "Documento D4Sign" }}</div>
+                <div class="d4-doc-meta">
+                  Tipo: <strong data-d4-field="tipo_ciclo">{{ doc_d4.TipoCiclo or "Tipo não informado" }}</strong><br>
+                  UUID: <span data-d4-field="uuid_documento">{{ doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
+                  {% if doc_d4.IDFatoKanbanCard %}
+                    Card vinculado: #{{ doc_d4.IDFatoKanbanCard }}<br>
+                  {% endif %}
+                  Enviado em: {{ doc_d4.DataEnvioD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataEnvioD4 else "—" }}
+                </div>
+                <span class="d4-download-hint">Clique para baixar o PDF real</span>
+              </div>
+            </a>
+          {% else %}
+            <div class="d4-doc-file">
+              <div class="d4-pdf-icon">PDF</div>
+              <div>
+                <div class="d4-doc-name" data-d4-field="nome_documento">{{ doc_d4.NomeDocumentoD4 or "Documento D4Sign" }}</div>
+                <div class="d4-doc-meta">
+                  Tipo: <strong data-d4-field="tipo_ciclo">{{ doc_d4.TipoCiclo or "Tipo não informado" }}</strong><br>
+                  UUID: <span data-d4-field="uuid_documento">{{ doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
+                  {% if doc_d4.IDFatoKanbanCard %}
+                    Card vinculado: #{{ doc_d4.IDFatoKanbanCard }}<br>
+                  {% endif %}
+                  Enviado em: {{ doc_d4.DataEnvioD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataEnvioD4 else "—" }}
+                </div>
               </div>
             </div>
-          </div>
+          {% endif %}
 
           <div class="d4-status-box">
             <div class="d4-status-label">Status atual no D4Sign</div>
@@ -1468,7 +1575,7 @@
         <div class="d4-metrics">
           <div class="d4-metric">
             <div class="d4-metric-k">Signatários</div>
-            <div class="d4-metric-v" data-d4-field="signatarios">{{ doc_d4.SignatariosAssinados or "—" }} de {{ doc_d4.SignatariosTotal or "—" }}</div>
+            <div class="d4-metric-v" data-d4-field="signatarios">{{ doc_d4.SignatariosAssinados if doc_d4.SignatariosAssinados is not none else 0 }} de {{ doc_d4.SignatariosTotal if doc_d4.SignatariosTotal is not none else 0 }}</div>
           </div>
           <div class="d4-metric">
             <div class="d4-metric-k">Finalização D4</div>
@@ -1477,6 +1584,10 @@
           <div class="d4-metric">
             <div class="d4-metric-k">Última consulta</div>
             <div class="d4-metric-v" data-d4-field="data_consulta">{{ doc_d4.DataUltimaConsultaD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataUltimaConsultaD4 else (doc_d4.DataReferenciaTexto or "—") }}</div>
+          </div>
+          <div class="d4-metric">
+            <div class="d4-metric-k">Situação cliente</div>
+            <div class="d4-metric-v" data-d4-field="acao_cliente">{{ doc_d4.AcaoClienteTexto or "—" }}</div>
           </div>
         </div>
       {% else %}
@@ -1493,26 +1604,68 @@
           <div class="contrato-d4-sub">Contrato principal, renovações, aditivos e documentos vinculados.</div>
         </div>
         {% if painel_d4 and painel_d4.Resumo %}
-          <span class="d4-badge arquivado">{{ painel_d4.Resumo.QtdDocumentosD4 or 0 }} doc(s)</span>
+          <div class="ciclos-head-badges">
+            <span class="d4-badge arquivado">{{ painel_d4.Resumo.QtdDocumentosD4 or 0 }} doc(s)</span>
+            {% if painel_d4.Resumo.QtdRenovacoes %}
+              <span class="d4-badge processando">{{ painel_d4.Resumo.QtdRenovacoes }} renovação(ões)</span>
+            {% endif %}
+            {% if painel_d4.Resumo.QtdAditivos %}
+              <span class="d4-badge editando">{{ painel_d4.Resumo.QtdAditivos }} aditivo(s)</span>
+            {% endif %}
+            {% if painel_d4.Resumo.QtdPendentesAssinatura %}
+              <span class="d4-badge assinaturas">{{ painel_d4.Resumo.QtdPendentesAssinatura }} pendente(s)</span>
+            {% endif %}
+          </div>
         {% endif %}
       </div>
 
       <div class="ciclos-lista" data-d4-field="ciclos">
-        {% if painel_d4 and painel_d4.Ciclos %}
-          {% for ciclo in painel_d4.Ciclos %}
-            <div class="ciclo-item {% if ciclo.Atual %}is-atual{% endif %}">
+        {% set ciclos_d4 = painel_d4.Ciclos if painel_d4 and painel_d4.Ciclos else [] %}
+        {% if ciclos_d4 %}
+          {% for ciclo in ciclos_d4 %}
+            {% set classe_tipo = ciclo.ClasseTipoCiclo or 'outro' %}
+            <div class="ciclo-item {% if ciclo.Atual %}is-atual{% endif %} is-{{ classe_tipo }} {% if loop.index > 6 %}is-hidden{% endif %}"
+                 {% if loop.index > 6 %}data-ciclo-extra="1"{% endif %}>
               <div class="ciclo-icon">{{ loop.index }}</div>
               <div>
-                <div class="ciclo-title">{{ ciclo.Titulo or ciclo.TipoCiclo or "Ciclo" }}</div>
+                <div class="ciclo-title-line">
+                  <div class="ciclo-title">{{ ciclo.Titulo or ciclo.TipoCiclo or "Documento D4 sem nome" }}</div>
+                  {% if classe_tipo in ['renovacao', 'aditivo', 'novo'] %}
+                    <span class="ciclo-tag {{ classe_tipo }}">{{ ciclo.TipoCiclo or "Tipo não informado" }}</span>
+                  {% endif %}
+                  {% if ciclo.Atual %}
+                    <span class="ciclo-tag">Atual</span>
+                  {% endif %}
+                  {% if ciclo.IDFatoKanbanCard %}
+                    <span class="ciclo-tag card">Card #{{ ciclo.IDFatoKanbanCard }}</span>
+                  {% endif %}
+                  {% if ciclo.ContratoAprovadoEmTagTexto %}
+                    <span class="ciclo-tag aprovado">Contrato aprovado</span>
+                  {% endif %}
+                </div>
                 <div class="ciclo-sub">
                   {{ ciclo.TipoCiclo or "—" }} • {{ ciclo.StatusContrato or "—" }}{% if ciclo.DataReferenciaTexto %} • {{ ciclo.DataReferenciaTexto }}{% endif %}
                 </div>
+                {% if ciclo.NomeDocumentoD4 %}
+                  <div class="ciclo-doc">{{ ciclo.NomeDocumentoD4 }}</div>
+                {% endif %}
+                {% if ciclo.ContratoAprovadoEmTagTexto %}
+                  <div class="ciclo-doc">Contrato aprovado no Kanban em {{ ciclo.ContratoAprovadoEmTagTexto }}</div>
+                {% endif %}
+                {% if ciclo.AcaoClienteTexto %}
+                  <div class="ciclo-acao">{{ ciclo.AcaoClienteTexto }}</div>
+                {% endif %}
               </div>
-              {% if ciclo.StatusD4 %}
-                <span class="d4-badge {{ ciclo.ClasseStatusD4 or 'sem-status' }}">{{ ciclo.StatusD4 }}</span>
-              {% else %}
-                <span class="d4-badge arquivado">Sem D4</span>
-              {% endif %}
+              <div class="ciclo-side">
+                {% if ciclo.StatusD4 %}
+                  <span class="d4-badge {{ ciclo.ClasseStatusD4 or 'sem-status' }}">{{ ciclo.StatusD4 }}</span>
+                {% else %}
+                  <span class="d4-badge arquivado">Sem D4</span>
+                {% endif %}
+                {% if ciclo.SignatariosTotal and ciclo.SignatariosTotal > 0 %}
+                  <span class="d4-badge assinaturas">{{ ciclo.SignatariosAssinados or 0 }}/{{ ciclo.SignatariosTotal }} ass.</span>
+                {% endif %}
+              </div>
             </div>
           {% endfor %}
         {% else %}
@@ -1520,12 +1673,19 @@
         {% endif %}
       </div>
 
+      {% if ciclos_d4|length > 6 %}
+        <div class="ciclos-footer" data-ciclos-footer>
+          <span>Mostrando 6 de {{ ciclos_d4|length }} ciclo(s). Use “ver todos” para abrir o histórico completo sem carregar outra página.</span>
+          <button type="button" class="ciclos-toggle" data-ciclos-toggle data-text-open="Ver todos" data-text-close="Mostrar menos">Ver todos</button>
+        </div>
+      {% endif %}
+
       {% if painel_d4 and painel_d4.HistoricoStatus %}
         <div class="historico-status-mini">
           {% for hist in painel_d4.HistoricoStatus[:5] %}
             <div class="historico-status-row">
               <span><strong>{{ hist.DataStatusTexto or "—" }}</strong> • {{ hist.NomeStatusContrato or "—" }}</span>
-              <span class="d4-badge {{ hist.ClasseStatusD4 or 'sem-status' }}">{{ hist.NomeStatusD4 or "D4 —" }}</span>
+              <span class="d4-badge {{ hist.ClasseStatusD4 or 'sem-status' }}">{{ hist.NomeStatusD4Historico or hist.NomeStatusD4 or "D4 —" }}</span>
             </div>
           {% endfor %}
         </div>
@@ -2328,6 +2488,7 @@
       setText('[data-d4-field="nome_documento"]', payload.nome_documento || payload.NomeDocumentoD4);
       setText('[data-d4-field="uuid_documento"]', payload.uuid_documento || payload.UUIDDocumentoD4);
       setText('[data-d4-field="tipo_ciclo"]', payload.tipo_ciclo || payload.TipoCiclo);
+      setText('[data-d4-field="acao_cliente"]', payload.acao_cliente || payload.AcaoClienteTexto);
 
       const livebar = document.querySelector('[data-contrato-d4-livebar]');
       if(livebar){
@@ -2352,6 +2513,25 @@
         console.warn('Socket.IO indisponível para atualização D4Sign do contrato.', e);
       }
     }
+
+    document.addEventListener('click', function(ev){
+      const btn = ev.target.closest('[data-ciclos-toggle]');
+      if(!btn) return;
+
+      const painelCiclos = btn.closest('.contrato-d4-card');
+      if(!painelCiclos) return;
+
+      const extras = painelCiclos.querySelectorAll('[data-ciclo-extra="1"]');
+      const abrir = Array.prototype.some.call(extras, function(el){ return el.classList.contains('is-hidden'); });
+
+      extras.forEach(function(el){
+        el.classList.toggle('is-hidden', !abrir);
+      });
+
+      btn.textContent = abrir
+        ? (btn.getAttribute('data-text-close') || 'Mostrar menos')
+        : (btn.getAttribute('data-text-open') || 'Ver todos');
+    });
 
     conectarSocketContrato();
   })();

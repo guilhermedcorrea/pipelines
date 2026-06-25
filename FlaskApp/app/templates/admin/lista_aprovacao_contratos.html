@@ -503,7 +503,7 @@
       .list-head,
       .row{
         display:grid;
-        grid-template-columns:64px minmax(92px, .75fr) minmax(108px, .75fr) minmax(124px, .85fr) minmax(124px, .85fr) minmax(180px, 1.55fr) minmax(118px, .9fr) minmax(118px, .9fr);
+        grid-template-columns:64px minmax(92px, .70fr) minmax(108px, .70fr) minmax(124px, .80fr) minmax(124px, .80fr) minmax(180px, 1.45fr) minmax(146px, .95fr) minmax(144px, .95fr);
         column-gap:10px;
         align-items:center;
         max-width:100%;
@@ -536,6 +536,10 @@
 
       .row > div{
         min-width:0;
+      }
+
+      .row .razao-social-wrap{
+        align-self:center;
       }
 
       .logo-box{
@@ -609,23 +613,43 @@
 
       .razao-social-wrap{
         min-width:0;
+        max-width:100%;
+        display:flex;
+        flex-direction:column;
+        align-items:flex-start;
+        justify-content:center;
+        gap:3px;
+        overflow:visible;
+        white-space:normal;
       }
 
       .razao-social-nome{
+        display:block;
+        width:100%;
+        max-width:100%;
         font-weight:900;
         color:var(--text);
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
+        overflow:visible;
+        text-overflow:clip;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.16;
       }
 
       .razao-social-cnpj{
+        display:block;
+        width:100%;
+        max-width:100%;
         font-size:12px;
         color:var(--muted);
         font-weight:800;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
+        overflow:visible;
+        text-overflow:clip;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.14;
       }
 
       .data-col{
@@ -692,6 +716,48 @@
         color:#475569;
       }
 
+
+      .status-col,
+      .tipo-col{
+        min-width:0;
+        overflow:visible;
+        text-overflow:clip;
+        white-space:normal;
+        display:flex;
+        align-items:flex-start;
+        justify-content:flex-start;
+      }
+
+      .status-badge,
+      .tipo-badge{
+        width:auto;
+        max-width:100%;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        text-align:center;
+        line-height:1.12;
+        overflow-wrap:anywhere;
+        word-break:normal;
+        hyphens:auto;
+        flex-wrap:wrap;
+        align-content:center;
+        font-size:clamp(10.5px, .78vw, 12px);
+      }
+
+      .status-badge-texto,
+      .tipo-badge-texto{
+        display:block;
+        min-width:0;
+        max-width:100%;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        overflow-wrap:anywhere;
+        word-break:normal;
+        line-height:1.12;
+      }
+
       .pager{
         padding:12px 14px;
         display:flex;
@@ -712,7 +778,7 @@
 
         .list-head,
         .row{
-          grid-template-columns:58px minmax(86px, .7fr) minmax(100px, .7fr) minmax(118px, .8fr) minmax(118px, .8fr) minmax(170px, 1.45fr) minmax(108px, .8fr) minmax(108px, .8fr);
+          grid-template-columns:58px minmax(86px, .65fr) minmax(100px, .65fr) minmax(116px, .75fr) minmax(116px, .75fr) minmax(164px, 1.35fr) minmax(136px, .9fr) minmax(132px, .9fr);
           column-gap:8px;
         }
 
@@ -724,10 +790,22 @@
           font-size:13px;
         }
 
+        .razao-social-nome{
+          font-size:13px;
+          line-height:1.15;
+        }
+
+        .razao-social-cnpj{
+          font-size:11px;
+          line-height:1.12;
+        }
+
         .status-badge,
         .tipo-badge{
-          padding-left:9px;
-          padding-right:9px;
+          padding-left:8px;
+          padding-right:8px;
+          font-size:11px;
+          line-height:1.10;
         }
       }
 
@@ -760,8 +838,16 @@
 
         .list-head,
         .row{
-          grid-template-columns:54px minmax(82px, .75fr) minmax(92px, .75fr) minmax(108px, .85fr) minmax(112px, .85fr) minmax(160px, 1.5fr) minmax(100px, .85fr) minmax(100px, .85fr);
+          grid-template-columns:54px minmax(82px, .65fr) minmax(92px, .65fr) minmax(104px, .75fr) minmax(108px, .75fr) minmax(154px, 1.25fr) minmax(124px, .9fr) minmax(120px, .9fr);
           column-gap:7px;
+        }
+
+        .razao-social-nome{
+          font-size:12.5px;
+        }
+
+        .razao-social-cnpj{
+          font-size:11px;
         }
       }
 
@@ -1197,16 +1283,16 @@
               {{ item.NomeUsuarioCriacao or "—" }}
             </div>
 
-            <div class="razao-social-wrap">
+            <div class="razao-social-wrap" data-label="Razão Social" title="{{ item.RazaoSocialEmpresa or '—' }}">
               <div class="razao-social-nome">
                 {{ item.RazaoSocialEmpresa or "—" }}
               </div>
-              <div class="razao-social-cnpj">
+              <div class="razao-social-cnpj" title="{{ item.CNPJ or '—' }}">
                 {{ item.CNPJ or "—" }}
               </div>
             </div>
 
-            <div class="ellipsis status-col hide-xl" data-label="Status">
+            <div class="status-col hide-xl" data-label="Status">
               {% set tem_status = item.StatusContrato and item.StatusContrato != '—' %}
               {% set cor_status = item.CorHexStatusContrato if tem_status else none %}
               <span
@@ -1215,13 +1301,13 @@
                   style="background-color: {{ cor_status }}; border-color: {{ cor_status }}; color: {{ item.CorTextoStatusContrato or '#FFFFFF' }};"
                 {% endif %}
               >
-                {{ item.StatusContrato or "—" }}
+                <span class="status-badge-texto">{{ item.StatusContrato or "—" }}</span>
               </span>
             </div>
 
-            <div class="ellipsis tipo-col hide-xl" data-label="Tipo Solicitação">
+            <div class="tipo-col hide-xl" data-label="Tipo Solicitação">
               <span class="tipo-badge {{ classe_tipo }}">
-                {{ item.TipoSolicitacao or "—" }}
+                <span class="tipo-badge-texto">{{ item.TipoSolicitacao or "—" }}</span>
               </span>
             </div>
           </div>
@@ -1524,8 +1610,8 @@
                 <div class="kb-search-sugestao-meta">Marca: ${escaparHtml(item.marca_exibida || '—')} • Criado por: ${escaparHtml(item.criado_por)} • CNPJ: ${escaparHtml(item.cnpj)}</div>
                 <div class="kb-search-sugestao-desc">Status e tipo da solicitação</div>
                 <div class="kb-search-sugestao-badges">
-                  <span class="status-badge" style="min-height:26px;padding:4px 9px;background-color:${escaparHtml(corStatus)};border-color:${escaparHtml(corStatus)};color:${escaparHtml(corTexto)};box-shadow:none;">${escaparHtml(item.status)}</span>
-                  <span class="tipo-badge ${classeTipo(item.tipo_solicitacao)}" style="min-height:26px;padding:4px 9px;">${escaparHtml(item.tipo_solicitacao)}</span>
+                  <span class="status-badge" style="min-height:26px;padding:4px 9px;background-color:${escaparHtml(corStatus)};border-color:${escaparHtml(corStatus)};color:${escaparHtml(corTexto)};box-shadow:none;"><span class="status-badge-texto">${escaparHtml(item.status)}</span></span>
+                  <span class="tipo-badge ${classeTipo(item.tipo_solicitacao)}" style="min-height:26px;padding:4px 9px;"><span class="tipo-badge-texto">${escaparHtml(item.tipo_solicitacao)}</span></span>
                 </div>
               </button>
             `;
