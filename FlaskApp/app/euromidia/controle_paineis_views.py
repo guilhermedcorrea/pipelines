@@ -4789,6 +4789,30 @@ def grade_painel(codponto: int):
 
 
     if tem_filtro_codface:
+        codpontos_resolvidos_pelas_faces = []
+        codfaces_nao_resolvidas_para_multi = []
+
+        for cf_multi_tmp in (filtros_codface or []):
+            cp_multi_tmp = _resolver_codponto_por_codface_global(cf_multi_tmp)
+            if cp_multi_tmp is None:
+                codfaces_nao_resolvidas_para_multi.append(cf_multi_tmp)
+                continue
+
+            try:
+                codpontos_resolvidos_pelas_faces.append(int(cp_multi_tmp))
+            except:
+                pass
+
+        codpontos_unicos_resolvidos = sorted(list(set(codpontos_resolvidos_pelas_faces)))
+
+        # Quando a seleção do dropdown contém faces de painéis diferentes,
+        # a grade única não consegue mostrar todas. Nesse caso, eu redireciono
+        # para a rota multi-grade, que renderiza um bloco de grade por painel
+        # e preserva todos os filtros atuais da tela.
+        if len(codpontos_unicos_resolvidos) > 1:
+            args_multi_grade = request.args.to_dict(flat=False)
+            return redirect(url_for("Paineis.grade_painel_multi", **args_multi_grade))
+
         codponto_resolvido_pelas_faces = _resolver_codponto_unico_por_codfaces_globais(filtros_codface)
 
         if (
@@ -5014,30 +5038,60 @@ def grade_painel(codponto: int):
 
 
     rows_codfaces_select = (
-        db.session.query(DimFacesPaineis.CodFace)
+        db.session.query(
+            DimFacesPaineis.CodPonto,
+            DimFacesPaineis.CodFace,
+        )
         .filter(
             DimFacesPaineis.CodFace != None,
             DimFacesPaineis.CodFace != "",
         )
-        .group_by(DimFacesPaineis.CodFace)
-        .order_by(DimFacesPaineis.CodFace.asc())
+        .order_by(
+            DimFacesPaineis.CodFace.asc(),
+            DimFacesPaineis.CodPonto.asc(),
+        )
         .all()
     )
 
     codfaces_select = []
-    vistos_codfaces_select = set()
+    codfaces_select_options = []
+    indice_codfaces_select_ci = {}
 
-    for (cf_select,) in (rows_codfaces_select or []):
+    for cp_select, cf_select in (rows_codfaces_select or []):
         cf_norm_tmp = _normalizar_codface(cf_select)
         if not cf_norm_tmp:
             continue
 
+        try:
+            cp_select_int = int(cp_select) if cp_select is not None else None
+        except:
+            cp_select_int = None
+
         chave_tmp = cf_norm_tmp.casefold()
-        if chave_tmp in vistos_codfaces_select:
+        opcao_tmp = {
+            "CodFace": cf_norm_tmp,
+            "CodPonto": cp_select_int,
+        }
+
+        if chave_tmp not in indice_codfaces_select_ci:
+            indice_codfaces_select_ci[chave_tmp] = len(codfaces_select_options)
+            codfaces_select_options.append(opcao_tmp)
+            codfaces_select.append(cf_norm_tmp)
             continue
 
-        vistos_codfaces_select.add(chave_tmp)
-        codfaces_select.append(cf_norm_tmp)
+        # Se a mesma CodFace existir em mais de um CodPonto, eu priorizo
+        # o painel atual para a tela de origem. Isso evita abrir a grade errada
+        # quando a seleção for encaminhada para a rota multi-grade.
+        idx_opcao_tmp = indice_codfaces_select_ci.get(chave_tmp)
+        if idx_opcao_tmp is not None and cp_select_int is not None:
+            try:
+                cp_atual_int = int(codponto)
+            except:
+                cp_atual_int = None
+
+            cp_existente = codfaces_select_options[idx_opcao_tmp].get("CodPonto")
+            if cp_atual_int is not None and int(cp_select_int) == cp_atual_int and cp_existente != cp_atual_int:
+                codfaces_select_options[idx_opcao_tmp] = opcao_tmp
 
 
     faces_info_raw = (
@@ -5575,6 +5629,8 @@ def grade_painel(codponto: int):
             pass
 
     reserva_id_original_por_iditem = {}
+    tipo_reserva_por_iditem_reserva = {}
+    tipo_reserva_por_id_ocupacao_reserva = {}
     spanqtd_por_iditem_reserva = {}
     reserva_preferencia_visual_por_iditem = {}
     reserva_bloqueia_capacidade_por_iditem = {}
@@ -5619,6 +5675,7 @@ def grade_painel(codponto: int):
                 ) THEN 1
                 ELSE 0
              END AS BitPreferenciaItemOrigem
+            ,TRY_CONVERT(int, oc.[TipoReserva]) AS TipoReserva
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
         WHERE (
                 oc.[CodPonto] = :codponto
@@ -5788,6 +5845,12 @@ def grade_painel(codponto: int):
         _tipo_vinculo_res = rr[17] if len(rr) > 17 else None
         _observacao_res = rr[18] if len(rr) > 18 else None
         _bit_preferencia_item_origem_res = rr[19] if len(rr) > 19 else 0
+        _tipo_reserva_res = rr[20] if len(rr) > 20 else None
+
+        try:
+            tipo_reserva_int = int(_tipo_reserva_res) if _tipo_reserva_res is not None else None
+        except Exception:
+            tipo_reserva_int = None
 
         eh_preferencia_visual_reserva = _reserva_eh_preferencia_visual_grade(
             _tipo_vinculo_res,
@@ -5809,6 +5872,13 @@ def grade_painel(codponto: int):
 
         reserva_preferencia_visual_por_iditem[id_item_reserva] = bool(eh_preferencia_visual_reserva)
         reserva_bloqueia_capacidade_por_iditem[id_item_reserva] = not bool(eh_preferencia_visual_reserva)
+        tipo_reserva_por_iditem_reserva[id_item_reserva] = tipo_reserva_int
+
+        try:
+            if _id_res is not None:
+                tipo_reserva_por_id_ocupacao_reserva[int(_id_res)] = tipo_reserva_int
+        except Exception:
+            pass
 
         try:
             if _span_qtd is not None:
@@ -5834,6 +5904,7 @@ def grade_painel(codponto: int):
                 _id_vendedor_res,
                 rr[12] if len(rr) > 12 else None,
                 rr[13] if len(rr) > 13 else None,
+                tipo_reserva_int,
             )
         )
 
@@ -6284,6 +6355,34 @@ def grade_painel(codponto: int):
 
         return None
 
+    def _resolver_tipo_reserva_grade(id_item, eh_reserva, row=None):
+        """Resolve TipoReserva da reserva exibida na grade, preservando a regra exata TipoReserva = 1."""
+        if not eh_reserva:
+            return None
+
+        try:
+            tipo = tipo_reserva_por_iditem_reserva.get(int(id_item))
+            if tipo is not None:
+                return int(tipo)
+        except Exception:
+            pass
+
+        try:
+            if row is not None and len(row) > 16 and row[16] is not None:
+                return int(row[16])
+        except Exception:
+            pass
+
+        try:
+            id_real_reserva = _resolver_id_real_reserva_grade(id_item, eh_reserva)
+            tipo = tipo_reserva_por_id_ocupacao_reserva.get(int(id_real_reserva))
+            if tipo is not None:
+                return int(tipo)
+        except Exception:
+            pass
+
+        return None
+
     def _prefixar_id_reserva_no_texto(texto, id_reserva, eh_reserva):
         """Eu adiciono o IDFatoOcupacaoPaineisEuromidia só no texto visual da reserva."""
         texto_limpo = str(texto or "").strip()
@@ -6567,6 +6666,8 @@ def grade_painel(codponto: int):
                 spans_grade = len(LOOPS_PERMITIDOS)
 
             id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+            tipo_reserva_item = _resolver_tipo_reserva_grade(_id_item, eh_reserva, r)
+            eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
             marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
             barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
 
@@ -6612,6 +6713,8 @@ def grade_painel(codponto: int):
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "TipoReserva": tipo_reserva_item,
+                    "EhReservaManual": eh_reserva_manual,
                     "LoopInicioDb": loop_inicio_db,
                     "LoopFimDb": loop_fim_db,
                 }
@@ -7079,6 +7182,8 @@ def grade_painel(codponto: int):
                 eh_reserva = False
 
             id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+            tipo_reserva_item = _resolver_tipo_reserva_grade(_id_item, eh_reserva, r)
+            eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
             marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
             barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
 
@@ -7108,6 +7213,8 @@ def grade_painel(codponto: int):
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "TipoReserva": tipo_reserva_item,
+                    "EhReservaManual": eh_reserva_manual,
                     "LoopInicioDb": loop_inicio_db,
                     "LoopFimDb": loop_fim_db,
                 }
@@ -7807,6 +7914,7 @@ def grade_painel(codponto: int):
         total_dias=total_dias,
         faces=faces,
         codfaces_select=codfaces_select,
+        codfaces_select_options=codfaces_select_options,
         codface_selecionado=codface_selecionado,
         codfaces_selecionadas=filtros_codface,
         ocupacoes_por_slot=ocupacoes_por_slot,
@@ -9348,6 +9456,178 @@ def grade_painel_multi():
 
         rows = _deduplicar_rows_grade(rows)
 
+        tipo_reserva_por_iditem_reserva_multi = {}
+        loop_inicio_por_iditem_reserva_multi = {}
+        loop_fim_por_iditem_reserva_multi = {}
+        spanqtd_por_iditem_reserva_multi = {}
+
+        try:
+            ids_paineis_grade_multi = []
+            for idcad_tmp in (tipo_por_idcadastro or {}).keys():
+                try:
+                    idcad_int = int(idcad_tmp)
+                except Exception:
+                    continue
+
+                if idcad_int > 0 and idcad_int not in ids_paineis_grade_multi:
+                    ids_paineis_grade_multi.append(idcad_int)
+
+            if not ids_paineis_grade_multi:
+                ids_paineis_grade_multi = [-1]
+
+            sql_reservas_multi = text("""
+                SELECT
+                     TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) AS IDFatoOcupacaoPaineisEuromidia
+                    ,TRY_CONVERT(int, oc.[IDFatoControleContratos]) AS IDFatoControleContratos
+                    ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) AS CodFace
+                    ,oc.[MarcaExibida]
+                    ,oc.[Vendedor]
+                    ,TRY_CONVERT(date, oc.[DataInicio]) AS DataInicio
+                    ,TRY_CONVERT(date, oc.[DataFim]) AS DataFim
+                    ,oc.[Cota]
+                    ,oc.[NumeroContrato]
+                    ,oc.[NumeroPrevia]
+                    ,oc.[LoopInicio]
+                    ,oc.[LoopFim]
+                    ,TRY_CONVERT(int, oc.[SpanQtd]) AS SpanQtd
+                    ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
+                    ,TRY_CONVERT(int, oc.[TipoReserva]) AS TipoReserva
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+                WHERE (
+                        TRY_CONVERT(int, oc.[CodPonto]) = :codponto
+                        OR TRY_CONVERT(int, oc.[IDPainelEuromidia]) IN :ids_paineis_grade_multi
+                      )
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Origem]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Status]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                  AND oc.[CanceladoEm] IS NULL
+                  AND TRY_CONVERT(date, oc.[DataInicio]) IS NOT NULL
+                  AND TRY_CONVERT(date, oc.[DataFim]) IS NOT NULL
+                  AND TRY_CONVERT(date, oc.[DataInicio]) <= :dt_fim
+                  AND TRY_CONVERT(date, oc.[DataFim]) >= :dt_ini
+                ORDER BY
+                     LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) ASC
+                    ,TRY_CONVERT(date, oc.[DataInicio]) ASC
+                    ,TRY_CONVERT(date, oc.[DataFim]) ASC
+                    ,TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) ASC
+            """).bindparams(bindparam("ids_paineis_grade_multi", expanding=True))
+
+            rows_reservas_multi_raw = db.session.execute(
+                sql_reservas_multi,
+                {
+                    "codponto": int(codponto_local),
+                    "ids_paineis_grade_multi": [int(x) for x in ids_paineis_grade_multi],
+                    "dt_ini": dt_ini,
+                    "dt_fim": dt_fim,
+                },
+            ).fetchall()
+
+            faces_ci_para_canonica = {
+                str(face or "").strip().casefold(): str(face or "").strip()
+                for face in (faces or [])
+                if str(face or "").strip()
+            }
+            tem_faces_filtradas_multi = bool(faces_ci_para_canonica)
+
+            rows_reservas_multi = []
+            for rr_res in (rows_reservas_multi_raw or []):
+                try:
+                    id_reserva_real = int(rr_res[0]) if rr_res[0] is not None else 0
+                except Exception:
+                    id_reserva_real = 0
+
+                if id_reserva_real <= 0:
+                    continue
+
+                cf_res = _normalizar_codface(rr_res[2] if len(rr_res) > 2 else "")
+                if not cf_res:
+                    continue
+
+                chave_cf_res = cf_res.casefold()
+                if tem_faces_filtradas_multi:
+                    if chave_cf_res not in faces_ci_para_canonica:
+                        continue
+                    cf_res = faces_ci_para_canonica.get(chave_cf_res) or cf_res
+
+                marca_res = rr_res[3] if len(rr_res) > 3 else ""
+                vendedor_res = rr_res[4] if len(rr_res) > 4 else ""
+
+                if filtro_cliente:
+                    texto_cliente_res = _normalizar_texto(marca_res).upper()
+                    if filtro_cliente.upper() not in texto_cliente_res:
+                        continue
+
+                if vendedores_selecionados:
+                    texto_vendedor_res = _normalizar_texto(vendedor_res).upper()
+                    achou_vendedor_res = False
+                    for nome_vend_res in (vendedores_selecionados or []):
+                        nome_vend_res_up = _normalizar_texto(nome_vend_res).upper()
+                        if nome_vend_res_up and nome_vend_res_up in texto_vendedor_res:
+                            achou_vendedor_res = True
+                            break
+                    if not achou_vendedor_res:
+                        continue
+
+                try:
+                    id_item_reserva = -abs(int(id_reserva_real))
+                except Exception:
+                    id_item_reserva = -abs(hash(str(id_reserva_real)))
+
+                loop_inicio_res = rr_res[10] if len(rr_res) > 10 else None
+                loop_fim_res = rr_res[11] if len(rr_res) > 11 else None
+                span_qtd_res = rr_res[12] if len(rr_res) > 12 else None
+                id_vendedor_res = rr_res[13] if len(rr_res) > 13 else None
+                tipo_reserva_res = rr_res[14] if len(rr_res) > 14 else None
+
+                try:
+                    tipo_reserva_por_iditem_reserva_multi[id_item_reserva] = int(tipo_reserva_res) if tipo_reserva_res is not None else None
+                except Exception:
+                    tipo_reserva_por_iditem_reserva_multi[id_item_reserva] = None
+
+                loop_inicio_por_iditem_reserva_multi[id_item_reserva] = loop_inicio_res
+                loop_fim_por_iditem_reserva_multi[id_item_reserva] = loop_fim_res
+
+                try:
+                    spanqtd_por_iditem_reserva_multi[id_item_reserva] = int(span_qtd_res) if span_qtd_res is not None else None
+                except Exception:
+                    spanqtd_por_iditem_reserva_multi[id_item_reserva] = None
+
+                rows_reservas_multi.append(
+                    (
+                        id_item_reserva,
+                        rr_res[1] if len(rr_res) > 1 else None,
+                        cf_res,
+                        marca_res,
+                        vendedor_res,
+                        rr_res[5] if len(rr_res) > 5 else None,
+                        rr_res[6] if len(rr_res) > 6 else None,
+                        None,
+                        rr_res[7] if len(rr_res) > 7 else None,
+                        rr_res[8] if len(rr_res) > 8 else None,
+                        rr_res[9] if len(rr_res) > 9 else None,
+                        int(codponto_local),
+                        id_vendedor_res,
+                        loop_inicio_res,
+                        loop_fim_res,
+                        span_qtd_res,
+                        tipo_reserva_res,
+                    )
+                )
+
+            if rows_reservas_multi:
+                rows = list(rows or [])
+                rows.extend(rows_reservas_multi)
+
+        except Exception as exc_res_multi:
+            try:
+                current_app.logger.exception(
+                    "GRADE_MULTI_RESERVAS | falha ao buscar reservas | codponto=%s | faces=%s | erro=%s",
+                    codponto_local,
+                    faces,
+                    exc_res_multi,
+                )
+            except Exception:
+                pass
+
         itens_agregados_kpi = []
         possui_itens = False
 
@@ -9367,9 +9647,19 @@ def grade_painel_multi():
                 num_contrato = r[9] or ""
                 num_previa = r[10] or ""
                 try:
-                    id_vendedor_item = int(r[12]) if r[12] is not None else None
+                    id_vendedor_item = int(r[12]) if len(r) > 12 and r[12] is not None else None
                 except Exception:
                     id_vendedor_item = None
+
+                loop_inicio_db = r[13] if len(r) > 13 else None
+                loop_fim_db = r[14] if len(r) > 14 else None
+                span_qtd_db = r[15] if len(r) > 15 else None
+                tipo_reserva_db = r[16] if len(r) > 16 else None
+
+                try:
+                    eh_reserva = int(_id_item) < 0
+                except Exception:
+                    eh_reserva = False
 
                 if di is None:
                     continue
@@ -9394,16 +9684,44 @@ def grade_painel_multi():
                 possui_itens = True
 
                 spans_grade = int(_span_por_cota(cota) or 1)
+                if eh_reserva:
+                    try:
+                        span_qtd_reserva = spanqtd_por_iditem_reserva_multi.get(int(_id_item))
+                        if span_qtd_reserva is None and span_qtd_db is not None:
+                            span_qtd_reserva = int(span_qtd_db)
+                        if span_qtd_reserva is not None and int(span_qtd_reserva) > 0:
+                            spans_grade = int(span_qtd_reserva)
+                    except Exception:
+                        pass
+
                 if spans_grade <= 0:
                     spans_grade = 1
                 if spans_grade > len(loops_permitidos_multi):
                     spans_grade = len(loops_permitidos_multi)
 
+                id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+                tipo_reserva_item = None
+                if eh_reserva:
+                    try:
+                        tipo_reserva_item = tipo_reserva_por_iditem_reserva_multi.get(int(_id_item))
+                    except Exception:
+                        tipo_reserva_item = None
+                    if tipo_reserva_item is None and tipo_reserva_db is not None:
+                        try:
+                            tipo_reserva_item = int(tipo_reserva_db)
+                        except Exception:
+                            tipo_reserva_item = None
+
+                eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
+                marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
+                barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
+
                 item_base = {
                     "ID": _id_item,
                     "IDFatoControleContratos": _id_contrato,
                     "CodFace": cf,
-                    "MarcaExibida": marca,
+                    "MarcaExibida": marca_exibida_grade,
+                    "MarcaExibidaOriginal": marca,
                     "Loop": f"COTA {cota}",
                     "Vendedor": vend,
                     "IDVendedor": id_vendedor_item,
@@ -9412,13 +9730,18 @@ def grade_painel_multi():
                     "DiaInicio": dia_ini,
                     "DiaFim": dia_fim,
                     "TextoOriginal": f"CONTRATO:{num_contrato} | PRÉVIA:{num_previa}",
-                    "BarraTexto": _texto_barra(cota, marca, vend),
-                    "EhReserva": False,
-                    "OrigemItem": "CONTRATO",
-                    "CorBarra": None,
-                    "StatusDb": None,
-                    "OrigemDb": None,
-                    "ReservaIDOriginal": None,
+                    "BarraTexto": barra_texto_grade,
+                    "EhReserva": bool(eh_reserva),
+                    "OrigemItem": ("RESERVA" if eh_reserva else "CONTRATO"),
+                    "CorBarra": ("#92400e" if eh_reserva else None),
+                    "StatusDb": ("RESERVADO" if eh_reserva else None),
+                    "OrigemDb": ("RESERVA" if eh_reserva else None),
+                    "ReservaIDOriginal": id_reserva_original,
+                    "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "TipoReserva": tipo_reserva_item,
+                    "EhReservaManual": eh_reserva_manual,
+                    "LoopInicioDb": loop_inicio_por_iditem_reserva_multi.get(int(_id_item), loop_inicio_db) if eh_reserva else loop_inicio_db,
+                    "LoopFimDb": loop_fim_por_iditem_reserva_multi.get(int(_id_item), loop_fim_db) if eh_reserva else loop_fim_db,
                     "NumeroContrato": num_contrato,
                     "NumeroPrevia": num_previa,
                     "SpanAltura": spans_grade,
@@ -9428,6 +9751,25 @@ def grade_painel_multi():
                 itens_agregados_kpi.append((di, df, float(_slots_por_cota(cota) or 1.0)))
 
             slots_conflito_set = set()
+
+            def _slot_indice_visual_multi(valor):
+                texto = _normalizar_texto(valor).upper()
+                if not texto:
+                    return None
+
+                m = re.search(r"(\d+)", texto)
+                if not m:
+                    return None
+
+                try:
+                    idx = int(m.group(1)) - 1
+                except Exception:
+                    return None
+
+                if 0 <= idx < len(loops_permitidos_multi):
+                    return idx
+
+                return None
 
             for cf, itens_face in (itens_por_face or {}).items():
                 if cf not in ocupacoes_por_face:
@@ -9455,19 +9797,34 @@ def grade_painel_multi():
                     idx_escolhido = None
                     conflito_forcado = False
 
-                    for idx_loop in range(0, len(loops_permitidos_multi) - spans + 1):
-                        bloco = loops_permitidos_multi[idx_loop: idx_loop + spans]
-                        cabe = True
+                    idx_preferido = _slot_indice_visual_multi(it.get("LoopInicioDb"))
+                    if idx_preferido is not None and (idx_preferido + spans - 1) < len(loops_permitidos_multi):
+                        bloco_preferido = loops_permitidos_multi[idx_preferido: idx_preferido + spans]
+                        cabe_preferido = True
 
-                        for lp in bloco:
+                        for lp in bloco_preferido:
                             fim_atual = fim_por_slot.get(lp) or date(1900, 1, 1)
                             if _coerce_to_date(it.get("DataInicio")) <= fim_atual:
-                                cabe = False
+                                cabe_preferido = False
                                 break
 
-                        if cabe:
-                            idx_escolhido = idx_loop
-                            break
+                        if cabe_preferido:
+                            idx_escolhido = idx_preferido
+
+                    if idx_escolhido is None:
+                        for idx_loop in range(0, len(loops_permitidos_multi) - spans + 1):
+                            bloco = loops_permitidos_multi[idx_loop: idx_loop + spans]
+                            cabe = True
+
+                            for lp in bloco:
+                                fim_atual = fim_por_slot.get(lp) or date(1900, 1, 1)
+                                if _coerce_to_date(it.get("DataInicio")) <= fim_atual:
+                                    cabe = False
+                                    break
+
+                            if cabe:
+                                idx_escolhido = idx_loop
+                                break
 
                     if idx_escolhido is None:
                         conflito_forcado = True
@@ -9567,9 +9924,11 @@ def grade_painel_multi():
                 num_contrato = r[9] or ""
                 num_previa = r[10] or ""
                 try:
-                    id_vendedor_item = int(r[12]) if r[12] is not None else None
+                    id_vendedor_item = int(r[12]) if len(r) > 12 and r[12] is not None else None
                 except Exception:
                     id_vendedor_item = None
+
+                tipo_reserva_db = r[16] if len(r) > 16 else None
 
                 if di is None:
                     continue
@@ -9598,6 +9957,19 @@ def grade_painel_multi():
                     eh_reserva = False
 
                 id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
+                tipo_reserva_item = None
+                if eh_reserva:
+                    try:
+                        tipo_reserva_item = tipo_reserva_por_iditem_reserva_multi.get(int(_id_item))
+                    except Exception:
+                        tipo_reserva_item = None
+                    if tipo_reserva_item is None and tipo_reserva_db is not None:
+                        try:
+                            tipo_reserva_item = int(tipo_reserva_db)
+                        except Exception:
+                            tipo_reserva_item = None
+
+                eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
                 marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
                 barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
 
@@ -9624,6 +9996,8 @@ def grade_painel_multi():
                         "OrigemDb": ("RESERVA" if eh_reserva else None),
                         "ReservaIDOriginal": id_reserva_original,
                         "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                        "TipoReserva": tipo_reserva_item,
+                        "EhReservaManual": eh_reserva_manual,
                         "NumeroContrato": num_contrato,
                         "NumeroPrevia": num_previa,
                     }

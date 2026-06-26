@@ -5,6 +5,7 @@
 {% block content %}
 
   {% set url_icone_preferencia = url_for('static', filename='imagens/MEDALHA PREFERENCIA.png') %}
+  {% set url_icone_reserva = url_for('static', filename='imagens/ICONE_RESERVA.png') %}
   {% set return_to_paineis_safe = (return_to_paineis if return_to_paineis is defined and return_to_paineis else url_for('Paineis.lista_paineis')) %}
 
   {% set eh_digital = (tipo_prod or "")|trim|upper == "PAINEL DIGITAL" %}
@@ -496,6 +497,9 @@
         <form id="formFiltroGrade"
               method="GET"
               action="{{ url_for('Paineis.grade_painel', codponto=codponto, tipo=tipo_prod) }}"
+              data-url-grade-unica="{{ url_for('Paineis.grade_painel', codponto=codponto, tipo=tipo_prod) }}"
+              data-url-grade-multi="{{ url_for('Paineis.grade_painel_multi') }}"
+              data-codponto-atual="{{ codponto }}"
               class="grade-filtros">
 
           <input type="hidden" name="tipo" value="{{ tipo_prod }}">
@@ -975,13 +979,37 @@
                       type="checkbox"
                       name="codface"
                       value="{{ face_principal_ref }}"
+                      data-codponto="{{ codponto }}"
                       {% if face_principal_ref in codfaces_request %}checked{% endif %}>
                     <span>Face Principal - {{ face_principal_ref }}</span>
                   </label>
                   {% set _ = ns_codface.mostradas.append(face_principal_ref) %}
                 {% endif %}
 
-                {% if codfaces_select is defined and codfaces_select %}
+                {% if codfaces_select_options is defined and codfaces_select_options %}
+                  {% for op_codface in codfaces_select_options %}
+                    {% if op_codface is mapping %}
+                      {% set codface_txt = (op_codface.CodFace or op_codface.codface or '')|trim %}
+                      {% set codponto_op = (op_codface.CodPonto or op_codface.codponto or codponto) %}
+                    {% else %}
+                      {% set codface_txt = (op_codface or '')|trim %}
+                      {% set codponto_op = codponto %}
+                    {% endif %}
+
+                    {% if codface_txt and codface_txt not in ns_codface.mostradas %}
+                      <label class="dd-item">
+                        <input
+                          type="checkbox"
+                          name="codface"
+                          value="{{ codface_txt }}"
+                          data-codponto="{{ codponto_op }}"
+                          {% if codface_txt in codfaces_request %}checked{% endif %}>
+                        <span>{{ codface_txt }}</span>
+                      </label>
+                      {% set _ = ns_codface.mostradas.append(codface_txt) %}
+                    {% endif %}
+                  {% endfor %}
+                {% elif codfaces_select is defined and codfaces_select %}
                   {% for codface in codfaces_select %}
                     {% set codface_txt = (codface or '')|trim %}
                     {% if codface_txt and codface_txt not in ns_codface.mostradas %}
@@ -990,6 +1018,7 @@
                           type="checkbox"
                           name="codface"
                           value="{{ codface_txt }}"
+                          data-codponto="{{ codponto }}"
                           {% if codface_txt in codfaces_request %}checked{% endif %}>
                         <span>{{ codface_txt }}</span>
                       </label>
@@ -1005,6 +1034,7 @@
                           type="checkbox"
                           name="codface"
                           value="{{ codface_txt }}"
+                          data-codponto="{{ codponto }}"
                           {% if codface_txt in codfaces_request %}checked{% endif %}>
                         <span>{{ codface_txt }}</span>
                       </label>
@@ -2061,6 +2091,22 @@
     filter: drop-shadow(0 1px 2px rgba(15,23,42,.22));
   }
 
+  .barra .icone-reserva{
+    flex: 0 0 auto;
+    display: inline-block;
+    height: calc(100% - 1px);
+    max-height: 100%;
+    min-height: 20px;
+    width: auto;
+    min-width: 20px;
+    aspect-ratio: 1 / 1;
+    object-fit: contain;
+    align-self: center;
+    pointer-events: none;
+    margin: 0 2px;
+    filter: drop-shadow(0 1px 2px rgba(15,23,42,.24));
+  }
+
   .barra.conflito{ border: 2px solid rgba(220,38,38,.85); }
 
   .barra.multi-span{
@@ -2083,7 +2129,8 @@
   .barra.multi-span.span-continuacao .txt,
   .barra.multi-span.span-continuacao .vend,
   .barra.multi-span.span-continuacao .reserva-id,
-  .barra.multi-span.span-continuacao .icone-preferencia{
+  .barra.multi-span.span-continuacao .icone-preferencia,
+  .barra.multi-span.span-continuacao .icone-reserva{
     visibility: hidden;
   }
 
@@ -2426,6 +2473,8 @@
                         'DataInicio': (atual.DataInicio if atual.DataInicio else (it.DataInicio if it.DataInicio is defined else None)),
                         'DataFim': (atual.DataFim if atual.DataFim else (it.DataFim if it.DataFim is defined else None)),
                         'TextoOriginal': (atual.TextoOriginal if atual.TextoOriginal else (it.TextoOriginal if it.TextoOriginal is defined else '')),
+                        'TipoReserva': (atual.TipoReserva if atual.TipoReserva is defined and atual.TipoReserva not in (none, '') else (it.TipoReserva if it.TipoReserva is defined else '')),
+                        'EhReservaManual': ((atual.EhReservaManual if atual.EhReservaManual is defined else False) or (it.EhReservaManual if it.EhReservaManual is defined else False) or (atual.TipoReserva is defined and ((atual.TipoReserva | int) == 1)) or (it.TipoReserva is defined and ((it.TipoReserva | int) == 1))),
                         'Status': (atual.Status if atual.Status is defined else ''),
                         'Origem': (atual.Origem if atual.Origem is defined else '')
                       }
@@ -2455,6 +2504,8 @@
                         'DataInicio': (it.DataInicio if it.DataInicio is defined else None),
                         'DataFim': (it.DataFim if it.DataFim is defined else None),
                         'TextoOriginal': (it.TextoOriginal if it.TextoOriginal is defined else ''),
+                        'TipoReserva': (it.TipoReserva if it.TipoReserva is defined else ''),
+                        'EhReservaManual': ((it.EhReservaManual if it.EhReservaManual is defined else False) or (it.TipoReserva is defined and ((it.TipoReserva | int) == 1))),
                         'Status': (it.Status if it.Status is defined else ''),
                         'Origem': (it.Origem if it.Origem is defined else '')
                       }
@@ -2539,7 +2590,9 @@
                   {% endif %}
                 {% endif %}
 
+                {% set tipo_reserva = (it.TipoReserva if it.TipoReserva is defined and it.TipoReserva is not none else '') %}
                 {% set mostra_icone_preferencia = ((not eh_reserva) and it.BitPreferencia is defined and ((it.BitPreferencia | int) == 1)) %}
+                {% set mostra_icone_reserva = (eh_reserva and ((it.EhReservaManual is defined and it.EhReservaManual) or ((tipo_reserva | int) == 1))) %}
 
                 {% set classes_barra = 'barra' %}
                 {% if eh_reserva %}{% set classes_barra = classes_barra ~ ' reservado' %}{% endif %}
@@ -2558,6 +2611,8 @@
                      data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                      data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                      data-eh-reserva="{{ 1 if eh_reserva else 0 }}"
+                     data-tipo-reserva="{{ tipo_reserva }}"
+                     data-reserva-manual="{{ 1 if mostra_icone_reserva else 0 }}"
                      data-bit-preferencia="{{ 1 if mostra_icone_preferencia else 0 }}"
                      data-reserva-id="{{ reserva_id_visivel }}"
                      data-item-id="{{ it.ID if it.ID is defined else '' }}"
@@ -2571,6 +2626,10 @@
 
                   {% if chip_txt %}
                     <span class="chip">{{ chip_txt }}</span>
+                  {% endif %}
+
+                  {% if mostra_icone_reserva %}
+                    <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
                   {% endif %}
 
                   <span class="txt">{{ resto_txt if resto_txt else barra_txt }}</span>
@@ -2623,7 +2682,9 @@
                     {% set barra_txt_cont = it_cont.Loop if it_cont.Loop is defined else '' %}
                   {% endif %}
 
+                  {% set tipo_reserva_cont = (it_cont.TipoReserva if it_cont.TipoReserva is defined and it_cont.TipoReserva is not none else '') %}
                   {% set mostra_icone_preferencia_cont = ((not eh_reserva_cont) and it_cont.BitPreferencia is defined and ((it_cont.BitPreferencia | int) == 1)) %}
+                  {% set mostra_icone_reserva_cont = (eh_reserva_cont and ((it_cont.EhReservaManual is defined and it_cont.EhReservaManual) or ((tipo_reserva_cont | int) == 1))) %}
 
                   {% set classes_barra_cont = 'barra multi-span span-continuacao' %}
                   {% if eh_reserva_cont %}{% set classes_barra_cont = classes_barra_cont ~ ' reservado' %}{% endif %}
@@ -2641,6 +2702,8 @@
                        data-vendedor-id="{{ it_cont.IDVendedor if it_cont.IDVendedor is defined and it_cont.IDVendedor is not none else '' }}"
                        data-origem="{{ it_cont.OrigemItem if it_cont.OrigemItem is defined else '' }}"
                        data-eh-reserva="{{ 1 if eh_reserva_cont else 0 }}"
+                       data-tipo-reserva="{{ tipo_reserva_cont }}"
+                       data-reserva-manual="{{ 1 if mostra_icone_reserva_cont else 0 }}"
                        data-bit-preferencia="{{ 1 if mostra_icone_preferencia_cont else 0 }}"
                        data-reserva-id="{{ reserva_id_visivel_cont }}"
                        data-item-id="{{ it_cont.ID if it_cont.ID is defined else '' }}"
@@ -2651,6 +2714,9 @@
                        data-tooltip-di="{{ it_cont.DataInicio.strftime('%d/%m/%Y') if it_cont.DataInicio else '' }}"
                        data-tooltip-df="{{ it_cont.DataFim.strftime('%d/%m/%Y') if it_cont.DataFim else '' }}"
                        data-tooltip-txt="{{ it_cont.TextoOriginal|e }}">
+                    {% if mostra_icone_reserva_cont %}
+                      <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
+                    {% endif %}
                     <span class="txt">{{ barra_txt_cont }}</span>
                     {% if (not eh_reserva_cont) and it_cont.Vendedor %}
                       <span class="vend">{{ it_cont.Vendedor }}</span>
@@ -2746,7 +2812,9 @@
                 {% set barra_txt = (it.BarraTexto or (it.MarcaExibida ~ ' - ' ~ it.Vendedor)) %}
               {% endif %}
 
+              {% set tipo_reserva2 = (it.TipoReserva if it.TipoReserva is defined and it.TipoReserva is not none else '') %}
               {% set mostra_icone_preferencia2 = ((not eh_reserva2) and it.BitPreferencia is defined and ((it.BitPreferencia | int) == 1)) %}
+              {% set mostra_icone_reserva2 = (eh_reserva2 and ((it.EhReservaManual is defined and it.EhReservaManual) or ((tipo_reserva2 | int) == 1))) %}
 
               {% set classes_barra2 = 'barra' %}
               {% if it.BitConflito %}{% set classes_barra2 = classes_barra2 ~ ' conflito' %}{% endif %}
@@ -2761,6 +2829,8 @@
                    data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
                    data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
                    data-eh-reserva="{{ 1 if eh_reserva2 else 0 }}"
+                   data-tipo-reserva="{{ tipo_reserva2 }}"
+                   data-reserva-manual="{{ 1 if mostra_icone_reserva2 else 0 }}"
                    data-bit-preferencia="{{ 1 if mostra_icone_preferencia2 else 0 }}"
                    data-reserva-id="{{ reserva_id_visivel2 }}"
                    data-item-id="{{ it.ID if it.ID is defined else '' }}"
@@ -2771,6 +2841,9 @@
                    data-tooltip-di="{{ it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '' }}"
                    data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
                    data-tooltip-txt="{{ it.TextoOriginal|e }}">
+                {% if mostra_icone_reserva2 %}
+                  <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
+                {% endif %}
                 <span class="txt">{{ txt2 if eh_reserva2 else barra_txt }}</span>
                 {% if mostra_icone_preferencia2 %}
                   <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva - período de 6 meses ou mais">
@@ -2841,6 +2914,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const USUARIO_LOGADO_EH_PERFIL_VENDEDOR = {{ 'true' if usuario_logado_eh_perfil_vendedor else 'false' }};
   const ID_VENDEDOR_LOGADO = String({{ (id_vendedor_logado if id_vendedor_logado is not none else '')|tojson }}).trim();
   const NOME_VENDEDOR_LOGADO = String({{ (nome_vendedor_logado or '')|tojson }}).trim();
+
+  function submeterFormFiltroGrade(form){
+    if(!form) return;
+
+    if(typeof form.requestSubmit === "function"){
+      form.requestSubmit();
+      return;
+    }
+
+    const ev = new Event("submit", { bubbles: true, cancelable: true });
+    const podeSubmeter = form.dispatchEvent(ev);
+    if(podeSubmeter){
+      HTMLFormElement.prototype.submit.call(form);
+    }
+  }
 
   function montarUrlContratoPorId(idContrato){
     const id = String(idContrato || "").trim();
@@ -3276,7 +3364,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (inpModo) inpModo.value = "mes";
       if (inpDataRef) inpDataRef.value = hojeYMD();
 
-      form.submit();
+      submeterFormFiltroGrade(form);
     });
 
     shell.querySelectorAll(".periodo-chip[data-modo]").forEach(ch=>{
@@ -3292,7 +3380,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (inpModo) inpModo.value = modo;
         if (inpDataRef) inpDataRef.value = dataRefAtual();
 
-        form.submit();
+        submeterFormFiltroGrade(form);
       });
     });
 
@@ -3425,7 +3513,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (selBiSemana) selBiSemana.value = "";
 
-        form.submit();
+        submeterFormFiltroGrade(form);
       }, 350);
     }
 
@@ -3479,13 +3567,62 @@ document.addEventListener("DOMContentLoaded", () => {
       if (inpModo) inpModo.value = "";
       if (inpDataRef) inpDataRef.value = "";
 
-      form.submit();
+      submeterFormFiltroGrade(form);
     });
 
     initDeInputsAtuais();
   })();
 
   (function(){
+    function inicializarSubmitMultiGrade(){
+      const form = document.getElementById("formFiltroGrade");
+      if(!form) return;
+
+      const urlGradeUnica = String(form.getAttribute("data-url-grade-unica") || form.getAttribute("action") || "").trim();
+      const urlGradeMulti = String(form.getAttribute("data-url-grade-multi") || "").trim();
+      const codpontoAtual = String(form.getAttribute("data-codponto-atual") || {{ codponto|tojson }} || "").trim();
+
+      function limparCodpontosGerados(){
+        Array.from(form.querySelectorAll("input[data-codponto-multi='1']")).forEach((el)=>{
+          el.remove();
+        });
+      }
+
+      function checksCodfaceSelecionados(){
+        return Array.from(form.querySelectorAll("input[type='checkbox'][name='codface']:checked"))
+          .filter((ck)=>String(ck.value || "").trim());
+      }
+
+      function aplicarDestinoDoSubmit(){
+        limparCodpontosGerados();
+
+        const selecionados = checksCodfaceSelecionados();
+
+        if(selecionados.length > 1 && urlGradeMulti){
+          form.setAttribute("action", urlGradeMulti);
+
+          selecionados.forEach((ck)=>{
+            const hidden = document.createElement("input");
+            hidden.type = "hidden";
+            hidden.name = "codponto";
+            hidden.value = String(ck.getAttribute("data-codponto") || codpontoAtual || "").trim();
+            hidden.setAttribute("data-codponto-multi", "1");
+            form.appendChild(hidden);
+          });
+
+          return;
+        }
+
+        if(urlGradeUnica){
+          form.setAttribute("action", urlGradeUnica);
+        }
+      }
+
+      form.addEventListener("submit", ()=>{
+        aplicarDestinoDoSubmit();
+      }, true);
+    }
+
     function inicializarDropdownMultiplo(nomeDd, nomeCampo, textoPadraoTodos, textoPadraoSelecao){
       const detalhes = document.querySelectorAll(`.dd[data-dd='${nomeDd}']`);
       if(!detalhes || !detalhes.length) return;
@@ -3613,6 +3750,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if(!checks.length) return;
 
+      let timerSubmitCodface = null;
+      function agendarSubmitCodface(){
+        if(timerSubmitCodface){
+          clearTimeout(timerSubmitCodface);
+        }
+
+        timerSubmitCodface = setTimeout(()=>{
+          submeterFormFiltroGrade(form);
+        }, 450);
+      }
+
       function marcados(){
         return checks
           .filter(x => x.checked)
@@ -3673,6 +3821,7 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           atualizarLabel();
           atualizarLinksComFiltros();
+          agendarSubmitCodface();
         });
       }
 
@@ -3689,6 +3838,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           atualizarLabel();
           atualizarLinksComFiltros();
+          agendarSubmitCodface();
         });
       });
 
@@ -3786,6 +3936,7 @@ document.addEventListener("DOMContentLoaded", () => {
     inicializarDropdownMultiplo("vendedor", "vendedor", "Todos os vendedores", "vendedores selecionados");
     inicializarDropdownMultiplo("segmento", "segmento", "Todos os segmentos", "segmentos selecionados");
     inicializarDropdownCodfaceMultiplo();
+    inicializarSubmitMultiGrade();
 
     document.addEventListener("click", (e)=>{
       document.querySelectorAll(".dd[data-dd]").forEach((dd)=>{
