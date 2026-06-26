@@ -18538,6 +18538,127 @@ def painel_detalhes(codponto: int):
         except Exception:
             return None
 
+    def _data_iso_br(valor):
+        if not valor:
+            return (None, None)
+
+        try:
+            if hasattr(valor, "date"):
+                valor_data = valor.date()
+            else:
+                valor_data = valor
+
+            iso = valor_data.isoformat()
+            br = valor_data.strftime("%d/%m/%Y")
+            return (iso, br)
+        except Exception:
+            return (None, None)
+
+    def _classificacao_vazia_painel() -> dict:
+        return {
+            "tem_classificacao": False,
+            "id_fato_classificacao_faces_paineis": None,
+            "id_face_painel": None,
+            "fluxo_passantes_semanal": None,
+            "indice_impacto_populacao": None,
+            "renda_media": None,
+            "pea_dia_faixa": None,
+            "cpm": None,
+            "bit_presenca_5_principais_avenidas": None,
+            "bit_cruzamento": None,
+            "bit_semaforo": None,
+            "bit_proximidade_shopping": None,
+            "bit_presenca_concorrente_200_metros": None,
+            "latitude": None,
+            "longitude": None,
+            "data_atualizacao": None,
+            "data_atualizacao_br": None,
+        }
+
+    def _carregar_classificacao_painel(cod_ponto: int) -> dict:
+        """
+        Eu busco a classificação mais recente ligada às faces do CodPonto.
+        A tabela FatoClassificacaoFacesPaineis é por IDDimFacesPaineis; por isso faço o vínculo pela DimFacesPaineis.
+        """
+        sql_classificacao = text("""
+            ;WITH FacesPainel AS (
+                SELECT
+                    TRY_CONVERT(int, IDDimFacesPaineis) AS IDDimFacesPaineis
+                FROM [Integracao].[Silver].[DimFacesPaineis]
+                WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
+                  AND TRY_CONVERT(int, IDDimFacesPaineis) IS NOT NULL
+            ), ClassificacaoOrdenada AS (
+                SELECT
+                    TRY_CONVERT(int, c.IDFatoClassificacaoFacesPaineis) AS IDFatoClassificacaoFacesPaineis,
+                    TRY_CONVERT(int, c.IDDimFacesPaineis) AS IDDimFacesPaineis,
+                    TRY_CONVERT(float, REPLACE(CAST(c.FluxoPassantesSemanal AS varchar(64)), ',', '.')) AS FluxoPassantesSemanal,
+                    TRY_CONVERT(float, REPLACE(CAST(c.IndiceImpactoPopulacao AS varchar(64)), ',', '.')) AS IndiceImpactoPopulacao,
+                    TRY_CONVERT(float, REPLACE(CAST(c.RendaMedia AS varchar(64)), ',', '.')) AS RendaMedia,
+                    TRY_CONVERT(float, REPLACE(CAST(c.PeaDiaFaixa AS varchar(64)), ',', '.')) AS PeaDiaFaixa,
+                    TRY_CONVERT(float, REPLACE(CAST(c.CPM AS varchar(64)), ',', '.')) AS CPM,
+                    CAST(ISNULL(c.BitPresenca5PrincipaisAvenidas, 0) AS bit) AS BitPresenca5PrincipaisAvenidas,
+                    CAST(ISNULL(c.BitCruzamento, 0) AS bit) AS BitCruzamento,
+                    CAST(ISNULL(c.BitSemaforo, 0) AS bit) AS BitSemaforo,
+                    CAST(ISNULL(c.BitProximidadeShopping, 0) AS bit) AS BitProximidadeShopping,
+                    CAST(ISNULL(c.BitPresencaConcorrente200Metros, 0) AS bit) AS BitPresencaConcorrente200Metros,
+                    TRY_CONVERT(float, REPLACE(CAST(c.Latitude AS varchar(64)), ',', '.')) AS Latitude,
+                    TRY_CONVERT(float, REPLACE(CAST(c.Longitude AS varchar(64)), ',', '.')) AS Longitude,
+                    c.DataAtualizacao,
+                    rn = ROW_NUMBER() OVER (
+                        ORDER BY
+                            c.DataAtualizacao DESC,
+                            TRY_CONVERT(int, c.IDFatoClassificacaoFacesPaineis) DESC
+                    )
+                FROM [Integracao].[Silver].[FatoClassificacaoFacesPaineis] c
+                INNER JOIN FacesPainel fp
+                    ON fp.IDDimFacesPaineis = TRY_CONVERT(int, c.IDDimFacesPaineis)
+            )
+            SELECT TOP 1
+                IDFatoClassificacaoFacesPaineis,
+                IDDimFacesPaineis,
+                FluxoPassantesSemanal,
+                IndiceImpactoPopulacao,
+                RendaMedia,
+                PeaDiaFaixa,
+                CPM,
+                BitPresenca5PrincipaisAvenidas,
+                BitCruzamento,
+                BitSemaforo,
+                BitProximidadeShopping,
+                BitPresencaConcorrente200Metros,
+                Latitude,
+                Longitude,
+                DataAtualizacao
+            FROM ClassificacaoOrdenada
+            WHERE rn = 1;
+        """)
+
+        row_cls = db.session.execute(sql_classificacao, {"cod_ponto": int(cod_ponto)}).mappings().first()
+        if not row_cls:
+            return _classificacao_vazia_painel()
+
+        data_iso, data_br = _data_iso_br(row_cls.get("DataAtualizacao"))
+
+        return {
+            "tem_classificacao": True,
+            "id_fato_classificacao_faces_paineis": row_cls.get("IDFatoClassificacaoFacesPaineis"),
+            "id_face_painel": row_cls.get("IDDimFacesPaineis"),
+            "fluxo_passantes_semanal": _to_float_br(row_cls.get("FluxoPassantesSemanal")),
+            "indice_impacto_populacao": _to_float_br(row_cls.get("IndiceImpactoPopulacao")),
+            "renda_media": _to_float_br(row_cls.get("RendaMedia")),
+            "pea_dia_faixa": _to_float_br(row_cls.get("PeaDiaFaixa")),
+            "cpm": _to_float_br(row_cls.get("CPM")),
+            "bit_presenca_5_principais_avenidas": _to_bool_sql(row_cls.get("BitPresenca5PrincipaisAvenidas"), None),
+            "bit_cruzamento": _to_bool_sql(row_cls.get("BitCruzamento"), None),
+            "bit_semaforo": _to_bool_sql(row_cls.get("BitSemaforo"), None),
+            "bit_proximidade_shopping": _to_bool_sql(row_cls.get("BitProximidadeShopping"), None),
+            "bit_presenca_concorrente_200_metros": _to_bool_sql(row_cls.get("BitPresencaConcorrente200Metros"), None),
+            "latitude": _to_float_br(row_cls.get("Latitude")),
+            "longitude": _to_float_br(row_cls.get("Longitude")),
+            "data_atualizacao": data_iso,
+            "data_atualizacao_br": data_br,
+        }
+
     def _carregar_imagens_painel(cod_ponto: int) -> list[dict]:
         """
         Eu busco as imagens do painel e devolvo já ordenadas para a galeria.
@@ -18738,6 +18859,7 @@ def painel_detalhes(codponto: int):
 
     painel["produto"] = painel.get("tipo") or ""
     painel["faces"] = painel.get("quantidade_faces")
+    painel["classificacao"] = _carregar_classificacao_painel(int(painel["id_painel"]))
 
     try:
         dt_ini_str = request.args.get("dt_ini") or request.args.get("dtIni") or request.args.get("data_ini") or ""
@@ -19061,7 +19183,34 @@ def painel_detalhes(codponto: int):
 
     raio_m = max(0, _to_int_seguro(request.args.get("raio_m", "1000"), 1000))
     status = (request.args.get("status", "todos") or "todos").strip()
-    segmento = (request.args.get("segmento", "todos") or "todos").strip()
+
+    def _segmentos_mapa_mercado_request():
+        """Aceita segmento único, segmento repetido e legado separado por |."""
+        valores = []
+        vistos = set()
+
+        for valor in request.args.getlist("segmento"):
+            texto = (valor or "").strip()
+            if not texto:
+                continue
+
+            for parte in re.split(r"[|]", texto):
+                seg = (parte or "").strip()
+                if not seg or seg.casefold() == "todos":
+                    continue
+
+                chave = seg.casefold()
+                if chave in vistos:
+                    continue
+
+                vistos.add(chave)
+                valores.append(seg)
+
+        return valores
+
+    segmentos = _segmentos_mapa_mercado_request()
+    segmentos_norm = {s.casefold() for s in segmentos}
+    segmento = " | ".join(segmentos) if segmentos else "todos"
 
     def _distancia_haversine_m(lat1, lng1, lat2, lng2):
         if lat1 is None or lng1 is None or lat2 is None or lng2 is None:
@@ -19116,7 +19265,7 @@ def painel_detalhes(codponto: int):
     def _passa_filtro(emp: dict) -> bool:
         if emp.get("camada") == "fora_escopo":
             return False
-        if segmento != "todos" and (emp.get("segmento") or "") != segmento:
+        if segmentos_norm and (emp.get("segmento") or "").strip().casefold() not in segmentos_norm:
             return False
         if status == "todos":
             return True
@@ -19235,9 +19384,9 @@ def painel_detalhes(codponto: int):
     return render_template(
         "euromidia/mapa_mercado.html",
         painel_json=painel,
-        empresas_json=empresas_filtradas,
+        empresas_json=empresas_enriquecidas,
         cep_points_json=cep_points,
-        filtro_inicial={"raio_m": raio_m, "status": status, "segmento": segmento},
+        filtro_inicial={"raio_m": raio_m, "status": status, "segmento": segmento, "segmentos": segmentos},
         camadas=camadas,
         kpis=kpis,
         fin_json=fin_json,

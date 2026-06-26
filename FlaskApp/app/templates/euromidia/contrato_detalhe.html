@@ -633,7 +633,7 @@
       position:relative;
       flex:0 0 180px;
       min-height:132px;
-      padding:14px 64px 12px 12px;
+      padding:14px 96px 12px 12px;
       border-radius:18px;
       border:1px solid #dbe7f6;
       background:#ffffff;
@@ -767,8 +767,8 @@
       position:absolute;
       top:10px;
       right:10px;
-      width:52px;
-      height:52px;
+      width:82px;
+      height:44px;
       border-radius:12px;
       border:1px solid rgba(2,6,23,.10);
       background:#ffffff;
@@ -785,7 +785,7 @@
       height:100%;
       object-fit:contain;
       background:#fff;
-      padding:1px;
+      padding:2px 4px;
     }
 
     .status-node-logo.fallback-texto{
@@ -883,7 +883,7 @@
       .field-grid{ grid-template-columns:repeat(2,minmax(180px,1fr)); }
       .surface-grid{ grid-template-columns:1fr; }
       .timeline-item{ grid-template-columns:1fr; gap:8px; }
-      .status-node{ flex-basis:164px; min-height:128px; }
+      .status-node{ flex-basis:184px; min-height:128px; padding-right:92px; }
     }
     @media (max-width:760px){
       .grid-quick,.summary-grid,.field-grid,.kv-lite{ grid-template-columns:1fr; }
@@ -951,15 +951,24 @@
     .contrato-d4-title{
       display:flex;
       align-items:center;
-      gap:8px;
+      gap:12px;
       color:var(--euro-blue);
       font-size:15px;
       font-weight:950;
+      flex-wrap:wrap;
+      line-height:1.2;
     }
     .contrato-d4-title img{
-      height:18px;
+      height:38px;
       width:auto;
+      max-width:132px;
       display:block;
+      object-fit:contain;
+      border:1px solid #E2E8F0;
+      border-radius:9px;
+      background:#fff;
+      padding:3px 6px;
+      box-shadow:0 6px 14px rgba(15,23,42,.08);
     }
     .contrato-d4-sub{
       margin-top:4px;
@@ -1286,6 +1295,8 @@
     @media (max-width: 760px){
       .d4-doc-layout{ grid-template-columns:1fr; }
       .d4-metrics{ grid-template-columns:1fr; }
+      .contrato-d4-title img{ height:32px; max-width:118px; }
+      .status-node-logo{ width:74px; height:40px; }
       .ciclo-item{ grid-template-columns:26px minmax(0,1fr); }
       .ciclo-side{ grid-column:1 / -1; align-items:flex-start; }
       .ciclo-item .d4-badge{ justify-self:flex-start; }

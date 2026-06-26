@@ -85,16 +85,16 @@
 
   /* LEFT - painel */
   .painel-box{
-    padding: 14px 16px;
+    padding: 14px 16px 12px 16px;
     display:grid;
-    grid-template-columns: 110px 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     align-items:start;
   }
 
   .painel-foto{
-    width:110px;
-    height:86px;
+    width:100%;
+    height:220px;
     border-radius: 14px;
     border:1px solid var(--border);
     background: linear-gradient(180deg, rgba(0,40,132,.08), rgba(255,179,0,.12));
@@ -105,8 +105,8 @@
     overflow:hidden;
   }
   .painel-foto img{
-    width: 58px;
-    height: 58px;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     display:block;
     filter: drop-shadow(0 8px 14px rgba(15,23,42,.14));
@@ -115,8 +115,8 @@
   .painel-foto.painel-foto-galeria{
     position: relative;
     display:block;
-    width:110px;
-    height:86px;
+    width:100%;
+    height:220px;
     border-radius: 14px;
     overflow:hidden;
     background: linear-gradient(180deg, rgba(0,40,132,.08), rgba(255,179,0,.12));
@@ -140,13 +140,13 @@
     top:50%;
     transform:translateY(-50%);
     z-index:3;
-    width:24px;
-    height:24px;
+    width:34px;
+    height:34px;
     border:none;
     border-radius:999px;
     background:rgba(15,23,42,.58);
     color:#fff;
-    font-size:18px;
+    font-size:24px;
     font-weight:1000;
     line-height:1;
     display:flex;
@@ -162,8 +162,8 @@
     background:rgba(15,23,42,.78);
   }
 
-  .painel-foto-nav.prev{ left:6px; }
-  .painel-foto-nav.next{ right:6px; }
+  .painel-foto-nav.prev{ left:10px; }
+  .painel-foto-nav.next{ right:10px; }
 
   .painel-foto-nav[hidden]{
     display:none !important;
@@ -200,7 +200,7 @@
     position:absolute;
     left:0;
     right:0;
-    bottom:8px;
+    bottom:10px;
     z-index:3;
     display:flex;
     align-items:center;
@@ -236,12 +236,13 @@
   .painel-info{
     min-width: 0;
     overflow: visible;
+    width: 100%;
   }
 
   .painel-info .nome{
     margin:0;
     font-weight:1000;
-    font-size: 16px;
+    font-size: 18px;
     line-height:1.15;
     color: var(--text);
 
@@ -266,7 +267,7 @@
 
   .kv{
     display:grid;
-    grid-template-columns: 86px 1fr;
+    grid-template-columns: 82px minmax(0, 1fr);
     gap: 8px;
     font-size: 12.5px;
     margin: 6px 0;
@@ -348,6 +349,137 @@
   .btn-full:hover{ filter: brightness(.97); }
   .btn-full:active{ transform: translateY(1px); }
 
+
+  .painel-classificacao{
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(148,163,184,.34);
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    min-width: 0;
+  }
+
+  .painel-classificacao-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom: 10px;
+    min-width: 0;
+  }
+
+  .painel-classificacao-title{
+    font-size: 12px;
+    font-weight: 1000;
+    color: var(--euro-blue);
+    letter-spacing: .22px;
+    text-transform: uppercase;
+    line-height: 1.15;
+  }
+
+  .painel-classificacao-sub{
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #64748b;
+    line-height: 1.25;
+  }
+
+  .painel-classificacao-status{
+    flex: 0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(0,40,132,.08);
+    border: 1px solid rgba(0,40,132,.16);
+    color: var(--euro-blue);
+    font-size: 10px;
+    font-weight: 1000;
+    white-space: nowrap;
+  }
+
+  .painel-classificacao-grid{
+    display:grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .painel-metrica{
+    min-width:0;
+    border:1px solid rgba(226,232,240,.95);
+    background:#fff;
+    border-radius: 12px;
+    padding: 9px 10px;
+  }
+
+  .painel-metrica span{
+    display:block;
+    color:#64748b;
+    font-size: 10.5px;
+    font-weight: 900;
+    line-height: 1.15;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .painel-metrica strong{
+    display:block;
+    margin-top: 5px;
+    color:#0f172a;
+    font-size: 14px;
+    font-weight: 1100;
+    line-height: 1.15;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .painel-flags{
+    margin-top: 10px;
+    display:grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .painel-flag{
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 11px;
+    border:1px solid rgba(226,232,240,.95);
+    background:#fff;
+  }
+
+  .painel-flag span{
+    min-width:0;
+    color:#334155;
+    font-size: 11.5px;
+    font-weight: 900;
+    line-height: 1.2;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .painel-flag strong{
+    flex: 0 0 auto;
+    min-width: 42px;
+    text-align:center;
+    color:#0f172a;
+    font-size: 11px;
+    font-weight: 1000;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background:#F1F5F9;
+    border:1px solid rgba(203,213,225,.95);
+  }
+
   .hint{
     margin: 0 16px 16px 16px;
     padding: 10px 12px;
@@ -393,7 +525,7 @@
     align-items:center;
     gap: 8px;
   }
-  .filters label{
+  .filters > .fbox > label{
     margin:0;
     font-size: 12px;
     font-weight: 900;
@@ -410,6 +542,240 @@
     outline:none;
     width: auto;
     min-width: 140px;
+  }
+
+  .fbox-segmento{
+    position:relative;
+    align-items:stretch;
+  }
+
+  .mm-multidd{
+    position:relative;
+    min-width: 260px;
+    max-width: min(420px, calc(100vw - 44px));
+    font-weight: 900;
+  }
+
+  .mm-multidd .dd-summary{
+    list-style:none;
+    height:34px;
+    min-width: 260px;
+    max-width: 420px;
+    border-radius: 10px;
+    border:1px solid var(--border);
+    background:#fff;
+    padding:0 10px;
+    outline:none;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    color:#0f172a;
+    user-select:none;
+  }
+
+  .mm-multidd .dd-summary::-webkit-details-marker{
+    display:none;
+  }
+
+  .mm-multidd[open] .dd-summary{
+    border-color: rgba(0,40,132,.42);
+    box-shadow: 0 0 0 3px rgba(0,40,132,.10);
+  }
+
+  .mm-multidd .dd-label{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size: 12.5px;
+    font-weight: 1000;
+    color:#0f172a;
+  }
+
+  .mm-multidd .dd-caret{
+    flex:0 0 auto;
+    color:#475569;
+    font-size:13px;
+    transition: transform .16s ease;
+  }
+
+  .mm-multidd[open] .dd-caret{
+    transform: rotate(180deg);
+  }
+
+  .mm-multidd .dd-menu{
+    position:absolute;
+    top: calc(100% + 8px);
+    left:0;
+    z-index: 1400;
+    width: min(420px, calc(100vw - 44px));
+    max-height: 360px;
+    overflow:auto;
+    border:1px solid var(--border);
+    border-radius: 14px;
+    background:#fff;
+    box-shadow:0 18px 34px rgba(15,23,42,.20);
+    padding:10px;
+  }
+
+  .mm-multidd .dd-search{
+    width:100%;
+    height:36px;
+    border-radius: 10px;
+    border:1px solid var(--border);
+    background:#F8FAFC;
+    color:#0f172a;
+    font-weight:900;
+    padding:0 10px;
+    outline:none;
+    margin-bottom:8px;
+  }
+
+  .mm-multidd .dd-search:focus{
+    border-color: rgba(0,40,132,.42);
+    box-shadow:0 0 0 3px rgba(0,40,132,.08);
+    background:#fff;
+  }
+
+  .mm-multidd .dd-options{
+    display:grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap:4px;
+  }
+
+  .mm-multidd .dd-option{
+    display:flex;
+    align-items:flex-start;
+    gap:8px;
+    min-width:0;
+    padding:8px 9px;
+    border-radius:10px;
+    cursor:pointer;
+    color:#0f172a;
+    font-size:12px;
+    font-weight:900;
+    line-height:1.25;
+  }
+
+  .mm-multidd .dd-option:hover{
+    background:#F1F5F9;
+  }
+
+  .mm-multidd .dd-option input{
+    margin-top:1px;
+    flex:0 0 auto;
+    accent-color: var(--euro-blue);
+  }
+
+  .mm-multidd .dd-option span{
+    min-width:0;
+    white-space:normal;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+  }
+
+  .mm-multidd .dd-option-todos{
+    margin-bottom:6px;
+    background: rgba(0,40,132,.06);
+    border:1px solid rgba(0,40,132,.10);
+  }
+
+  .mm-multidd .dd-empty{
+    padding:10px 8px 4px 8px;
+    color:#64748b;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  @media (max-width: 860px){
+    .mm-multidd,
+    .mm-multidd .dd-summary{
+      min-width: 220px;
+    }
+  }
+
+
+
+  /* =========================================================
+     ✅ CORREÇÃO DO DROPDOWN MULTISELECT DE SEGMENTO
+     - evita o CSS do filtro principal afetar as opções internas
+     - remove barra horizontal
+     - força checkbox + texto em duas colunas estáveis
+     ========================================================= */
+  .fbox-segmento{
+    align-items:center;
+  }
+
+  .mm-multidd,
+  .mm-multidd *{
+    box-sizing:border-box;
+  }
+
+  .mm-multidd .dd-menu{
+    overflow:hidden;
+    width:min(360px, calc(100vw - 44px));
+    max-width:min(360px, calc(100vw - 44px));
+    max-height:none;
+  }
+
+  .mm-multidd .dd-search{
+    display:block;
+    width:100%;
+    min-width:0;
+  }
+
+  .mm-multidd .dd-options{
+    display:block;
+    width:100%;
+    max-height:245px;
+    overflow-y:auto;
+    overflow-x:hidden;
+    padding-right:2px;
+  }
+
+  .mm-multidd .dd-option,
+  .mm-multidd .dd-option-todos{
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    min-height:34px;
+    height:auto;
+    margin:0 0 6px 0;
+    padding:8px 9px;
+    display:grid !important;
+    grid-template-columns:18px minmax(0, 1fr);
+    align-items:start;
+    gap:8px;
+    white-space:normal !important;
+    overflow:hidden;
+    text-align:left;
+  }
+
+  .mm-multidd .dd-option input{
+    width:14px;
+    height:14px;
+    margin:1px 0 0 0;
+    justify-self:start;
+    align-self:start;
+  }
+
+  .mm-multidd .dd-option span{
+    display:block;
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    white-space:normal !important;
+    word-break:normal;
+    overflow-wrap:anywhere;
+    text-align:left;
+    line-height:1.25;
+    overflow:visible;
+  }
+
+  .mm-multidd .dd-option[hidden]{
+    display:none !important;
   }
 
   .bottom-kpis{
@@ -1178,6 +1544,47 @@
         <div class="kv"><b>Produto:</b> <span id="painelProduto" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</span></div>
         <div class="kv"><b>Sentido:</b> <span id="painelSentido" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</span></div>
         <div class="kv"><b>Faces:</b> <span id="painelFaces">—</span></div>
+
+        <div class="painel-classificacao" id="painelClassificacaoBox">
+          <div class="painel-classificacao-head">
+            <div>
+              <div class="painel-classificacao-title">Classificação do Painel</div>
+              <div class="painel-classificacao-sub" id="painelClassificacaoSub">Dados da FatoClassificacaoFacesPaineis</div>
+            </div>
+            <span class="painel-classificacao-status" id="painelClassificacaoStatus">—</span>
+          </div>
+
+          <div class="painel-classificacao-grid">
+            <div class="painel-metrica">
+              <span>Fluxo Passantes Semanal</span>
+              <strong id="painelFluxoPassantesSemanal">—</strong>
+            </div>
+            <div class="painel-metrica">
+              <span>Índice Impacto População</span>
+              <strong id="painelIndiceImpactoPopulacao">—</strong>
+            </div>
+            <div class="painel-metrica">
+              <span>Renda Média</span>
+              <strong id="painelRendaMedia">—</strong>
+            </div>
+            <div class="painel-metrica">
+              <span>PEA Dia/Faixa</span>
+              <strong id="painelPeaDiaFaixa">—</strong>
+            </div>
+            <div class="painel-metrica">
+              <span>CPM</span>
+              <strong id="painelCPM">—</strong>
+            </div>
+          </div>
+
+          <div class="painel-flags">
+            <div class="painel-flag"><span>5 principais avenidas</span><strong id="painelBit5PrincipaisAvenidas">—</strong></div>
+            <div class="painel-flag"><span>Cruzamento</span><strong id="painelBitCruzamento">—</strong></div>
+            <div class="painel-flag"><span>Semáforo</span><strong id="painelBitSemaforo">—</strong></div>
+            <div class="painel-flag"><span>Proximidade Shopping</span><strong id="painelBitShopping">—</strong></div>
+            <div class="painel-flag"><span>Concorrente até 200m</span><strong id="painelBitConcorrente200m">—</strong></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1197,10 +1604,30 @@
 
     <!-- filtros -->
     <div class="filters">
-      <div class="fbox">
-        <label for="selSegmento">Segmento:</label>
-        <select id="selSegmento">
-          <option value="todos">Todos</option>
+      <div class="fbox fbox-segmento">
+        <label for="ddSegmento">Segmento:</label>
+
+        <details class="mm-multidd" id="ddSegmento">
+          <summary class="dd-summary">
+            <span class="dd-label" id="lblSegmentoSelecionado">Todos</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+
+          <div class="dd-menu">
+            <input type="search" id="txtBuscaSegmento" class="dd-search" placeholder="Digite para filtrar..." autocomplete="off">
+
+            <label class="dd-option dd-option-todos">
+              <input type="checkbox" id="chkSegmentoTodos" value="todos" checked>
+              <span>Todos</span>
+            </label>
+
+            <div class="dd-options" id="listaSegmentos"></div>
+            <div class="dd-empty" id="msgSegmentoVazio" hidden>Nenhum segmento encontrado</div>
+          </div>
+        </details>
+
+        <select id="selSegmento" multiple hidden aria-hidden="true">
+          <option value="todos" selected>Todos</option>
         </select>
       </div>
 
@@ -1335,169 +1762,8 @@
 
   <div class="fin-shell">
 
-  <div class="fin-card">
+  {# Bloco financeiro removido conforme solicitado. #}
 
-    <!-- Tabs (mantido, mas comentado: você queria remover depois) -->
-    <!--
-    <div class="fin-tabs">
-      <button type="button" class="fin-tab active" id="tabRent">Rentabilidade</button>
-      <button type="button" class="fin-tab" id="tabJan">Janelas Móveis</button>
-    </div>
-    -->
-
-    <!-- Top header + controles -->
-    <div class="fin-topbar">
-      <div class="fin-title">
-        <h3>Gráfico de Rentabilidade</h3>
-        <p class="sub">Faturamento {{ (painel_json.nome if painel_json and painel_json.nome else "Painel") }}</p>
-      </div>
-
-      <div class="fin-controls">
-
-        <!-- Indicadores (mantido, mas comentado: você queria remover depois) -->
-        <!--
-        <div class="fin-pill">
-          <label for="selIndicadores">Indicadores</label>
-          <select id="selIndicadores">
-            <option value="faturamento" selected>Faturamento (R$)</option>
-            <option value="margem">Margem (%)</option>
-            <option value="ocupa">Ocupação (%)</option>
-          </select>
-        </div>
-        -->
-
-        <div class="fin-range" aria-label="Atalhos de período">
-          <button type="button" class="fin-rng active" data-rng="otimo">Ótimo</button>
-          <button type="button" class="fin-rng" data-rng="6m">6M</button>
-          <button type="button" class="fin-rng" data-rng="1a">1A</button>
-          <button type="button" class="fin-rng" data-rng="2a">2A</button>
-          <button type="button" class="fin-rng" data-rng="3a">3A</button>
-          <button type="button" class="fin-rng" data-rng="5a">5A</button>
-          <div class="sep"></div>
-
-          {# ✅ já preenche com dt_ini/dt_fim do backend #}
-          <input
-            type="date"
-            class="cal"
-            id="dtIniGraf"
-            title="Data inicial"
-            value="{{ (fin_json.dt_ini if fin_json and fin_json.dt_ini else '2024-01-01') }}"
-          >
-          <input
-            type="date"
-            class="cal"
-            id="dtFimGraf"
-            title="Data final"
-            value="{{ (fin_json.dt_fim if fin_json and fin_json.dt_fim else '2026-12-01') }}"
-          >
-        </div>
-
-        <!-- Switch (mantido, mas comentado: você queria remover depois) -->
-        <!--
-        <div class="fin-toggle" title="Simula incluir histórico (mais antigo) no gráfico">
-          <div class="fin-switch on" id="switchHist" role="switch" aria-checked="true"></div>
-          <span>Incluir histórico do painel</span>
-        </div>
-        -->
-
-      </div>
-    </div>
-
-    <!-- Chart -->
-    <div class="fin-chart-wrap">
-      <div class="fin-chart">
-        <canvas id="grafFaturamento"></canvas>
-      </div>
-    </div>
-
-    <!-- Matriz -->
-    <div class="fin-table-wrap">
-      <table class="fin-matriz" id="tblMatriz">
-        <thead>
-          <tr>
-            <th>ANO</th>
-            <th>PAINEL</th>
-            <th>Jan</th><th>Fev</th><th>Mar</th><th>Abr</th><th>Mai</th><th>Jun</th>
-            <th>Jul</th><th>Ago</th><th>Set</th><th>Out</th><th>Nov</th><th>Dez</th>
-            <th>No ano</th>
-            <th>Acumulado</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {# =========================================================
-             ✅ AGORA VEM DO BACKEND: fin_json["matriz"]
-             linha = { ano, painel, meses{1..12:{receita,margem_pct}}, total_ano, margem_media_ano, acumulado }
-             ========================================================= #}
-
-          {% if fin_json and fin_json.matriz and (fin_json.matriz|length > 0) %}
-
-            {% for linha in fin_json.matriz %}
-              <tr>
-                <td>{{ linha.ano }}</td>
-                <td>{{ linha.painel }}</td>
-
-                {# 12 meses #}
-                {% for mes in range(1, 13) %}
-                  {% set cel = linha.meses[mes] %}
-                  <td>
-                    <div class="fin-cell">
-                      {% if cel and cel.receita is not none %}
-                        <span>
-                          R$ {{ "{:,.0f}".format(cel.receita|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
-                        </span>
-                      {% else %}
-                        <span>—</span>
-                      {% endif %}
-
-                      {% if cel and cel.margem_pct is not none %}
-                        <small>{{ "{:.1f}".format(cel.margem_pct|float).replace(".", ",") }}%</small>
-                      {% else %}
-                        <small>—</small>
-                      {% endif %}
-                    </div>
-                  </td>
-                {% endfor %}
-
-                {# Total do ano + margem média ponderada #}
-                <td>
-                  <div class="fin-cell">
-                    <span>
-                      R$ {{ "{:,.0f}".format((linha.total_ano or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
-                    </span>
-                    {% if linha.margem_media_ano is not none %}
-                      <small>margem média {{ "{:.1f}".format(linha.margem_media_ano|float).replace(".", ",") }}%</small>
-                    {% else %}
-                      <small>margem média —</small>
-                    {% endif %}
-                  </div>
-                </td>
-
-                {# Acumulado geral #}
-                <td>
-                  <div class="fin-cell">
-                    <span>
-                      R$ {{ "{:,.0f}".format((linha.acumulado or 0)|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
-                    </span>
-                  </div>
-                </td>
-              </tr>
-            {% endfor %}
-
-          {% else %}
-
-            <tr>
-              <td colspan="16" style="text-align:center; padding:14px 10px; opacity:.75;">
-                Sem dados financeiros para o período selecionado.
-              </td>
-            </tr>
-
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
-
-  </div>
 </div>
 
 
@@ -1637,6 +1903,41 @@
     return `${v.toFixed(1).replace(".", ",")}%`;
   }
 
+  function _brNumero(n, casas = 0){
+    const v = Number(n);
+    if(!Number.isFinite(v)) return "—";
+    return v.toLocaleString("pt-BR", {
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas
+    });
+  }
+
+  function _brMoedaCasas(n, casas = 2){
+    const v = Number(n);
+    if(!Number.isFinite(v)) return "—";
+    return v.toLocaleString("pt-BR", {
+      style:"currency",
+      currency:"BRL",
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas
+    });
+  }
+
+  function _simNao(valor){
+    if(valor === true || valor === 1) return "Sim";
+    if(valor === false || valor === 0) return "Não";
+
+    const txt = String(valor ?? "").trim().toLowerCase();
+    if(["1", "true", "t", "sim", "s", "yes", "y"].includes(txt)) return "Sim";
+    if(["0", "false", "f", "nao", "não", "n", "no"].includes(txt)) return "Não";
+
+    return "—";
+  }
+
+  function _setTxt(el, valor){
+    if(el) el.textContent = (valor === null || valor === undefined || valor === "") ? "—" : String(valor);
+  }
+
   function _normStr(s){
     if(s == null) return "";
     return String(s)
@@ -1693,6 +1994,18 @@
   const painelProduto = document.getElementById("painelProduto");
   const painelSentido = document.getElementById("painelSentido");
   const painelFaces = document.getElementById("painelFaces");
+  const painelClassificacaoSub = document.getElementById("painelClassificacaoSub");
+  const painelClassificacaoStatus = document.getElementById("painelClassificacaoStatus");
+  const painelFluxoPassantesSemanal = document.getElementById("painelFluxoPassantesSemanal");
+  const painelIndiceImpactoPopulacao = document.getElementById("painelIndiceImpactoPopulacao");
+  const painelRendaMedia = document.getElementById("painelRendaMedia");
+  const painelPeaDiaFaixa = document.getElementById("painelPeaDiaFaixa");
+  const painelCPM = document.getElementById("painelCPM");
+  const painelBit5PrincipaisAvenidas = document.getElementById("painelBit5PrincipaisAvenidas");
+  const painelBitCruzamento = document.getElementById("painelBitCruzamento");
+  const painelBitSemaforo = document.getElementById("painelBitSemaforo");
+  const painelBitShopping = document.getElementById("painelBitShopping");
+  const painelBitConcorrente200m = document.getElementById("painelBitConcorrente200m");
   const btnVerFichaPainel = document.getElementById("btnVerFichaPainel");
 
   const painelFotoGaleria = document.getElementById("painelFotoGaleria");
@@ -1836,6 +2149,29 @@
   if(painelSentido) painelSentido.textContent = (P && P.sentido) ? P.sentido : "—";
   if(painelFaces) painelFaces.textContent = (P && (P.faces != null || P.quantidade_faces != null)) ? String(P.faces ?? P.quantidade_faces) : "—";
 
+  const classificacaoPainel = (P && P.classificacao && typeof P.classificacao === "object") ? P.classificacao : {};
+  const temClassificacao = Boolean(classificacaoPainel.tem_classificacao === true);
+
+  _setTxt(painelClassificacaoStatus, temClassificacao ? "Classificado" : "Sem dados");
+
+  if(temClassificacao && classificacaoPainel.data_atualizacao_br){
+    _setTxt(painelClassificacaoSub, `Atualizado em ${classificacaoPainel.data_atualizacao_br}`);
+  }else{
+    _setTxt(painelClassificacaoSub, "Dados da FatoClassificacaoFacesPaineis");
+  }
+
+  _setTxt(painelFluxoPassantesSemanal, _brNumero(classificacaoPainel.fluxo_passantes_semanal, 0));
+  _setTxt(painelIndiceImpactoPopulacao, _brNumero(classificacaoPainel.indice_impacto_populacao, 2));
+  _setTxt(painelRendaMedia, _brMoedaCasas(classificacaoPainel.renda_media, 2));
+  _setTxt(painelPeaDiaFaixa, _brNumero(classificacaoPainel.pea_dia_faixa, 0));
+  _setTxt(painelCPM, _brMoedaCasas(classificacaoPainel.cpm, 2));
+
+  _setTxt(painelBit5PrincipaisAvenidas, _simNao(classificacaoPainel.bit_presenca_5_principais_avenidas));
+  _setTxt(painelBitCruzamento, _simNao(classificacaoPainel.bit_cruzamento));
+  _setTxt(painelBitSemaforo, _simNao(classificacaoPainel.bit_semaforo));
+  _setTxt(painelBitShopping, _simNao(classificacaoPainel.bit_proximidade_shopping));
+  _setTxt(painelBitConcorrente200m, _simNao(classificacaoPainel.bit_presenca_concorrente_200_metros));
+
   _renderizarGaleriaPainel();
 
   if(btnVerFichaPainel){
@@ -1848,6 +2184,13 @@
   // DOM refs (Filtros e KPIs do mapa)
   // =========================================================
   const selSegmento = document.getElementById("selSegmento");
+  const ddSegmento = document.getElementById("ddSegmento");
+  const lblSegmentoSelecionado = document.getElementById("lblSegmentoSelecionado");
+  const txtBuscaSegmento = document.getElementById("txtBuscaSegmento");
+  const chkSegmentoTodos = document.getElementById("chkSegmentoTodos");
+  const listaSegmentos = document.getElementById("listaSegmentos");
+  const msgSegmentoVazio = document.getElementById("msgSegmentoVazio");
+
   const selStatus = document.getElementById("selStatus");
   const selRaio = document.getElementById("selRaio");
 
@@ -1862,8 +2205,114 @@
   const btnAnalisarArea = document.getElementById("btnAnalisarArea");
 
   // =========================================================
-  // Build segmentos no select
+  // Build segmentos no filtro customizado
+  // - visual no padrão dd-summary
+  // - permite digitar e selecionar múltiplos segmentos
+  // - mantém #selSegmento oculto para compatibilidade com o restante do JS
   // =========================================================
+  function _segmentosSelecionados(){
+    if(!selSegmento) return [];
+
+    return Array.from(selSegmento.options)
+      .filter(opt => opt.selected && opt.value && opt.value !== "todos")
+      .map(opt => opt.value);
+  }
+
+  function _normalizarSegmentosEntrada(valor){
+    const saida = [];
+    const vistos = new Set();
+
+    function add(v){
+      const txt = String(v || "").trim();
+      if(!txt || _normStr(txt) === "todos") return;
+      const chave = _normStr(txt);
+      if(vistos.has(chave)) return;
+      vistos.add(chave);
+      saida.push(txt);
+    }
+
+    if(Array.isArray(valor)){
+      valor.forEach(add);
+      return saida;
+    }
+
+    if(valor != null){
+      String(valor)
+        .split(/\|/)
+        .map(v => v.trim())
+        .filter(Boolean)
+        .forEach(add);
+    }
+
+    return saida;
+  }
+
+  function _atualizarLabelSegmento(){
+    const selecionados = _segmentosSelecionados();
+
+    if(lblSegmentoSelecionado){
+      if(!selecionados.length){
+        lblSegmentoSelecionado.textContent = "Todos";
+        lblSegmentoSelecionado.title = "Todos";
+      }else if(selecionados.length === 1){
+        lblSegmentoSelecionado.textContent = selecionados[0];
+        lblSegmentoSelecionado.title = selecionados[0];
+      }else{
+        lblSegmentoSelecionado.textContent = `${selecionados.length} segmentos`;
+        lblSegmentoSelecionado.title = selecionados.join(" | ");
+      }
+    }
+
+    if(chkSegmentoTodos){
+      chkSegmentoTodos.checked = selecionados.length === 0;
+    }
+
+    if(listaSegmentos){
+      const checks = listaSegmentos.querySelectorAll('input[type="checkbox"][data-segmento="1"]');
+      checks.forEach(chk => {
+        const valor = chk.value;
+        const opt = selSegmento ? Array.from(selSegmento.options).find(o => o.value === valor) : null;
+        chk.checked = Boolean(opt && opt.selected);
+      });
+    }
+  }
+
+  function _setSegmentosSelecionados(valores, dispararChange){
+    if(!selSegmento) return;
+
+    const desejados = new Set(_normalizarSegmentosEntrada(valores).map(_normStr));
+
+    Array.from(selSegmento.options).forEach(opt => {
+      if(opt.value === "todos"){
+        opt.selected = desejados.size === 0;
+      }else{
+        opt.selected = desejados.has(_normStr(opt.value));
+      }
+    });
+
+    _atualizarLabelSegmento();
+
+    if(dispararChange){
+      selSegmento.dispatchEvent(new Event("change", { bubbles:true }));
+    }
+  }
+
+  function _filtrarOpcoesSegmento(){
+    if(!listaSegmentos) return;
+
+    const termo = _normStr(txtBuscaSegmento ? txtBuscaSegmento.value : "");
+    let visiveis = 0;
+
+    listaSegmentos.querySelectorAll(".dd-option").forEach(row => {
+      const texto = _normStr(row.getAttribute("data-texto") || row.textContent || "");
+      const mostrar = !termo || texto.includes(termo);
+      row.hidden = !mostrar;
+      if(mostrar) visiveis += 1;
+    });
+
+    if(msgSegmentoVazio) msgSegmentoVazio.hidden = visiveis > 0;
+  }
+
   if(selSegmento){
     const segmentos = Array.from(new Set(empresasArr.map(e => e && e.segmento).filter(Boolean)))
       .sort((a,b)=> String(a).localeCompare(String(b), "pt-BR", { sensitivity:"base" }));
@@ -1873,16 +2322,91 @@
       opt.value = s;
       opt.textContent = s;
       selSegmento.appendChild(opt);
+
+      if(listaSegmentos){
+        const row = document.createElement("label");
+        row.className = "dd-option";
+        row.setAttribute("data-texto", s);
+
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.value = s;
+        chk.setAttribute("data-segmento", "1");
+
+        const span = document.createElement("span");
+        span.textContent = s;
+
+        row.appendChild(chk);
+        row.appendChild(span);
+        listaSegmentos.appendChild(row);
+
+        chk.addEventListener("change", () => {
+          const atuais = new Set(_segmentosSelecionados().map(_normStr));
+          const chave = _normStr(s);
+
+          if(chk.checked) atuais.add(chave);
+          else atuais.delete(chave);
+
+          const novos = segmentos.filter(seg => atuais.has(_normStr(seg)));
+          _setSegmentosSelecionados(novos, true);
+        });
+      }
     }
   }
 
-  // Filtro inicial (robusto)
-  if(selSegmento && filtroIni && filtroIni.segmento){
-    const alvo = _normStr(filtroIni.segmento);
-    const opts = Array.from(selSegmento.options);
-    const achou = opts.find(o => _normStr(o.value) === alvo);
-    if(achou) selSegmento.value = achou.value;
+  if(chkSegmentoTodos){
+    chkSegmentoTodos.addEventListener("change", () => {
+      if(chkSegmentoTodos.checked){
+        _setSegmentosSelecionados([], true);
+      }else{
+        _atualizarLabelSegmento();
+      }
+    });
   }
+
+  if(txtBuscaSegmento){
+    txtBuscaSegmento.addEventListener("input", _filtrarOpcoesSegmento);
+  }
+
+  if(ddSegmento){
+    ddSegmento.addEventListener("toggle", () => {
+      const summary = ddSegmento.querySelector(".dd-summary");
+      if(summary) summary.setAttribute("aria-expanded", ddSegmento.open ? "true" : "false");
+
+      if(ddSegmento.open && txtBuscaSegmento){
+        setTimeout(() => txtBuscaSegmento.focus(), 0);
+      }
+    });
+
+    document.addEventListener("click", (ev) => {
+      if(ddSegmento.open && !ddSegmento.contains(ev.target)){
+        ddSegmento.open = false;
+      }
+    });
+  }
+
+  // Filtro inicial (robusto)
+  if(selSegmento && filtroIni){
+    const segmentosIniciais = [];
+    segmentosIniciais.push(..._normalizarSegmentosEntrada(filtroIni.segmentos));
+    segmentosIniciais.push(..._normalizarSegmentosEntrada(filtroIni.segmento));
+
+    const opcoes = Array.from(selSegmento.options);
+    const resolvidos = [];
+
+    for(const seg of segmentosIniciais){
+      const achou = opcoes.find(o => _normStr(o.value) === _normStr(seg));
+      if(achou && achou.value !== "todos" && !resolvidos.some(x => _normStr(x) === _normStr(achou.value))){
+        resolvidos.push(achou.value);
+      }
+    }
+
+    _setSegmentosSelecionados(resolvidos, false);
+  }else{
+    _atualizarLabelSegmento();
+  }
+
+  _filtrarOpcoesSegmento();
 
   if(selStatus && filtroIni && filtroIni.status){
     selStatus.value = String(filtroIni.status);
@@ -2420,9 +2944,10 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
       if(dist > r) return false;
     }
 
-    const segSel = selSegmento ? selSegmento.value : "todos";
-    if(segSel && segSel !== "todos"){
-      if(_normStr(e.segmento) !== _normStr(segSel)) return false;
+    const segsSel = _segmentosSelecionados();
+    if(segsSel.length){
+      const mapaSegs = new Set(segsSel.map(_normStr));
+      if(!mapaSegs.has(_normStr(e.segmento))) return false;
     }
 
     const stSel = selStatus ? selStatus.value : "todos";
@@ -3067,11 +3592,15 @@ function _renderMapa(){
   function _atualizarQuerystring(){
     const params = new URLSearchParams(window.location.search);
 
-    const seg = selSegmento ? selSegmento.value : "todos";
+    const segs = _segmentosSelecionados();
     const st  = selStatus ? selStatus.value : "todos";
     const r   = selRaio ? selRaio.value : "";
 
-    if(seg && seg !== "todos") params.set("segmento", seg); else params.delete("segmento");
+    params.delete("segmento");
+    for(const seg of segs){
+      params.append("segmento", seg);
+    }
+
     if(st  && st  !== "todos") params.set("status", st);   else params.delete("status");
     if(r) params.set("raio_m", r); else params.delete("raio_m");
 
@@ -3662,12 +4191,5 @@ document.addEventListener("DOMContentLoaded", function(){
 
 })();
 </script>
-
-
-
-
-
-
-
 {% endblock %}
 
