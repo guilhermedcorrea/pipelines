@@ -18,7 +18,7 @@ from sqlalchemy import case, String, cast, or_, and_, func, text, select, desc, 
 from datetime import date, datetime, timedelta
 from sqlalchemy.exc import OperationalError
 from functools import wraps
-import time,random,calendar,re,requests,unicodedata
+import time,random,calendar,re,requests,unicodedata,mimetypes
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from openpyxl import Workbook
@@ -27390,284 +27390,544 @@ def carteira_mover_empresa(id_fato_carteira_vendedor: int):
 
 
 
-def _obter_config_d4sign_para_download():
-    """Lê a configuração da D4Sign no Flask sem expor token/cryptKey no frontend."""
-    token_api = (
-        current_app.config.get("TOKEN_D4SIGN")
-        or current_app.config.get("D4SIGN_TOKEN")
-        or os.getenv("TOKEN_D4SIGN")
-        or os.getenv("D4SIGN_TOKEN")
-    )
-    crypt_key = (
-        current_app.config.get("CRYPTKEY_D4SIGN")
-        or current_app.config.get("D4SIGN_CRYPTKEY")
-        or current_app.config.get("CRYPT_KEY_D4SIGN")
-        or os.getenv("CRYPTKEY_D4SIGN")
-        or os.getenv("D4SIGN_CRYPTKEY")
-        or os.getenv("CRYPT_KEY_D4SIGN")
-    )
-    base_url = (
-        current_app.config.get("BASE_URL_D4SIGN")
-        or current_app.config.get("D4SIGN_BASE_URL")
-        or os.getenv("BASE_URL_D4SIGN")
-        or os.getenv("D4SIGN_BASE_URL")
-        or "https://secure.d4sign.com.br/api/v1"
-    )
-
-    return {
-        "token_api": str(token_api or "").strip(),
-        "crypt_key": str(crypt_key or "").strip(),
-        "base_url": str(base_url or "").strip().rstrip("/"),
-    }
+CONTRATOS_EUROMIDIA_ANEXOS_CONTRATO_DIR_PADRAO = Path(
+    "/home/euromidia/projetos/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato"
+)
 
 
-def _nome_download_pdf_d4_seguro(nome_documento, id_fato_contrato_d4):
-    nome_base = str(nome_documento or "").strip()
+def _diretorios_fisicos_anexos_contrato_euromidia() -> list[Path]:
+    """Diretórios físicos possíveis onde os PDFs de contrato ficam gravados.
+
+    A tela roda dentro do Flask/container. Por isso eu valido também caminhos
+    comuns de volume Docker além do caminho absoluto do host. O primeiro
+    diretório existente é usado como principal, mas a busca do arquivo tenta
+    todos os diretórios candidatos.
+    """
+    valores = [
+        # Chaves antigas/novas em config Flask.
+        current_app.config.get("CONTRATOS_EUROMIDIA_ANEXOS_CONTRATO_DIR"),
+        current_app.config.get("EUROMIDIA_CONTRATOS_ANEXOS_CONTRATO_DIR"),
+        current_app.config.get("CONTRATOS_ANEXOS_CONTRATO_DIR"),
+        current_app.config.get("PASTA_ANEXOS_CONTRATOS_EUROMIDIA"),
+        current_app.config.get("D4SIGN_PDF_LOCAL_PASTA_CONTRATO"),
+
+        # Chaves reais usadas no docker-compose/.env.
+        os.getenv("CONTRATOS_EUROMIDIA_ANEXOS_CONTRATO_DIR"),
+        os.getenv("EUROMIDIA_CONTRATOS_ANEXOS_CONTRATO_DIR"),
+        os.getenv("CONTRATOS_ANEXOS_CONTRATO_DIR"),
+        os.getenv("PASTA_ANEXOS_CONTRATOS_EUROMIDIA"),
+        os.getenv("D4SIGN_PDF_LOCAL_PASTA_CONTRATO"),
+
+        # Caminho real no host/Airflow.
+        CONTRATOS_EUROMIDIA_ANEXOS_CONTRATO_DIR_PADRAO,
+
+        # Caminho legado/montado no container Flask pelo docker-compose atual.
+        Path("/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato"),
+
+        # Caminhos derivados da aplicação/container.
+        Path(current_app.root_path) / "Contratos" / "Euromidia" / "Anexos" / "Contrato",
+        Path(current_app.root_path).parent / "Contratos" / "Euromidia" / "Anexos" / "Contrato",
+        Path.cwd() / "Contratos" / "Euromidia" / "Anexos" / "Contrato",
+        Path("/app") / "Contratos" / "Euromidia" / "Anexos" / "Contrato",
+    ]
+
+    candidatos: list[Path] = []
+    vistos: set[str] = set()
+    for valor in valores:
+        texto = str(valor or "").strip()
+        if not texto:
+            continue
+        try:
+            caminho = Path(texto).expanduser().resolve()
+        except Exception:
+            continue
+        chave = str(caminho)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        candidatos.append(caminho)
+
+    existentes = [c for c in candidatos if c.is_dir()]
+    return existentes or candidatos[:1] or [CONTRATOS_EUROMIDIA_ANEXOS_CONTRATO_DIR_PADRAO]
+
+
+def _diretorio_fisico_anexos_contrato_euromidia() -> Path:
+    """Diretório físico principal onde os PDFs de contrato ficam gravados no servidor Flask."""
+    return _diretorios_fisicos_anexos_contrato_euromidia()[0]
+
+
+def _normalizar_extensao_anexo_contrato(valor) -> str:
+    texto = str(valor or "").strip().lower()
+    if not texto:
+        return ""
+    if not texto.startswith("."):
+        texto = f".{texto}"
+    return texto
+
+
+def _nome_download_anexo_contrato_seguro(nome_arquivo, id_arquivo, extensao=None) -> str:
+    nome_base = str(nome_arquivo or "").strip()
+    ext = _normalizar_extensao_anexo_contrato(extensao)
+
     if not nome_base:
-        nome_base = f"documento_d4_{int(id_fato_contrato_d4 or 0)}"
+        nome_base = f"contrato_anexo_{int(id_arquivo or 0)}{ext or '.pdf'}"
 
-    if not nome_base.lower().endswith(".pdf"):
-        nome_base = f"{nome_base}.pdf"
+    if ext and not nome_base.lower().endswith(ext):
+        nome_base = f"{nome_base}{ext}"
 
     nome_seguro = secure_filename(nome_base)
     if not nome_seguro:
-        nome_seguro = f"documento_d4_{int(id_fato_contrato_d4 or 0)}.pdf"
+        nome_seguro = f"contrato_anexo_{int(id_arquivo or 0)}{ext or '.pdf'}"
 
-    if not nome_seguro.lower().endswith(".pdf"):
-        nome_seguro = f"{nome_seguro}.pdf"
+    if ext and not nome_seguro.lower().endswith(ext):
+        nome_seguro = f"{nome_seguro}{ext}"
 
     return nome_seguro
 
 
-def _extrair_pdf_resposta_download_d4(resposta_d4):
-    """Extrai bytes de PDF da resposta da D4Sign sem inventar documento."""
-    content_type = str(resposta_d4.headers.get("Content-Type") or "").lower()
-    conteudo = resposta_d4.content or b""
+def _montar_candidatos_caminho_anexo_contrato(row_arquivo) -> list[Path]:
+    """
+    Monta caminhos físicos possíveis a partir de regras determinísticas da tabela.
 
-    if conteudo.startswith(b"%PDF") or "application/pdf" in content_type:
-        return conteudo
+    Importante:
+    - Não procura arquivo parecido aleatoriamente.
+    - Não troca documento/contrato.
+    - Primeiro tenta o caminho/nome gravado em FatoArquivosContratosEuromidia.
+    - Depois tenta o padrão físico usado pelos PDFs D4 salvos localmente:
+      {prefixo}_D4_{IDFatoContratoD4}_{UUIDDocumentoD4}_{NomeDocumento/NomeArquivo}.pdf
+    """
+    base_dir = _diretorio_fisico_anexos_contrato_euromidia()
+    row_arquivo = dict(row_arquivo or {})
+    candidatos: list[Path] = []
+    vistos: set[str] = set()
 
-    dados = None
-    try:
-        dados = resposta_d4.json()
-    except Exception:
-        texto = resposta_d4.text.strip() if getattr(resposta_d4, "text", None) else ""
+    def _adicionar(caminho: Path):
+        try:
+            resolvido = caminho.expanduser().resolve()
+        except Exception:
+            return
+
+        try:
+            resolvido.relative_to(base_dir)
+        except Exception:
+            return
+
+        chave = str(resolvido)
+        if chave in vistos:
+            return
+
+        vistos.add(chave)
+        candidatos.append(resolvido)
+
+    def _nome_final_de_texto(valor) -> str:
+        texto = str(valor or "").strip()
+        if not texto:
+            return ""
+
+        texto = texto.replace("\\", "/")
         if texto.startswith("http://") or texto.startswith("https://"):
-            resp_pdf = requests.get(texto, timeout=60)
-            resp_pdf.raise_for_status()
-            return resp_pdf.content
+            try:
+                texto = urlsplit(texto).path or ""
+            except Exception:
+                texto = ""
+
+        if not texto:
+            return ""
+
+        nome = Path(texto).name
+        if not nome or nome in {".", ".."}:
+            return ""
+        return nome
+
+    def _adicionar_variacoes_nome_base(nomes: list[str], nome: str):
+        nome = str(nome or "").strip()
+        if not nome:
+            return
+
+        ext = _normalizar_extensao_anexo_contrato(row_arquivo.get("Extensao"))
+        candidatos_nome = [nome]
+        if ext and not nome.lower().endswith(ext):
+            candidatos_nome.append(f"{nome}{ext}")
+        elif not Path(nome).suffix:
+            candidatos_nome.append(f"{nome}.pdf")
+
+        nome_seguro = secure_filename(nome)
+        if nome_seguro:
+            candidatos_nome.append(nome_seguro)
+            if ext and not nome_seguro.lower().endswith(ext):
+                candidatos_nome.append(f"{nome_seguro}{ext}")
+            elif not Path(nome_seguro).suffix:
+                candidatos_nome.append(f"{nome_seguro}.pdf")
+
+        for candidato_nome in candidatos_nome:
+            candidato_nome = str(candidato_nome or "").strip()
+            if candidato_nome and candidato_nome not in nomes:
+                nomes.append(candidato_nome)
+
+    # 1) Caminhos/nome exatamente gravados na tabela de arquivos.
+    nomes_base: list[str] = []
+    for campo in ("UrlAnexo", "NomeArquivo", "NomeDocumentoD4"):
+        texto_original = str(row_arquivo.get(campo) or "").strip()
+        if not texto_original:
+            continue
+
+        texto = texto_original.replace("\\", "/")
+
+        if texto.startswith("http://") or texto.startswith("https://"):
+            try:
+                texto = urlsplit(texto).path or ""
+            except Exception:
+                texto = ""
+
+        if not texto:
+            continue
+
+        caminho_informado = Path(texto)
+
+        if campo in ("UrlAnexo", "NomeArquivo"):
+            if caminho_informado.is_absolute():
+                _adicionar(caminho_informado)
+            else:
+                texto_limpo = texto.lstrip("/")
+                if texto_limpo and ".." not in Path(texto_limpo).parts:
+                    _adicionar(base_dir / texto_limpo)
+
+        nome_final = _nome_final_de_texto(texto)
+        _adicionar_variacoes_nome_base(nomes_base, nome_final)
+        if nome_final:
+            _adicionar(base_dir / nome_final)
+
+    # 2) Padrão determinístico dos arquivos D4 baixados/salvos localmente.
+    # Exemplo real: 1_D4_1_FE8CC084-8AF2-4DE2-ABCE-F8C8F3C323E7_Contrato-1-....pdf
+    try:
+        id_d4 = int(row_arquivo.get("IDFatoContratoD4") or 0)
+    except Exception:
+        id_d4 = 0
+
+    if id_d4 > 0 and nomes_base:
+        uuid_original = str(row_arquivo.get("UUIDDocumentoD4") or "").strip()
+        uuids = []
+        for uuid_candidato in (uuid_original, uuid_original.upper(), uuid_original.lower()):
+            uuid_candidato = str(uuid_candidato or "").strip()
+            if uuid_candidato and uuid_candidato not in uuids:
+                uuids.append(uuid_candidato)
+
+        prefixos_numericos = []
+        for campo in (
+            "IDFatoContratoD4",
+            "IDFatoArquivosContratos",
+            "IDFatoControleContratosEuromidia",
+            "IDEmpresaD4",
+        ):
+            try:
+                valor_int = int(row_arquivo.get(campo) or 0)
+            except Exception:
+                valor_int = 0
+            if valor_int > 0 and valor_int not in prefixos_numericos:
+                prefixos_numericos.append(valor_int)
+
+        for uuid_candidato in uuids:
+            for prefixo_num in prefixos_numericos:
+                prefixo = f"{prefixo_num}_D4_{id_d4}_{uuid_candidato}_"
+                for nome_base in nomes_base:
+                    _adicionar(base_dir / f"{prefixo}{nome_base}")
+
+    return candidatos
+
+def _resolver_caminho_fisico_anexo_contrato(row_arquivo) -> Path | None:
+    """Resolve o PDF físico de um anexo de contrato.
+
+    Primeiro tenta os caminhos determinísticos montados pelo registro. Se isso
+    falhar, faz uma busca restrita dentro das pastas de anexos por padrões
+    exatos do D4: IDFatoContratoD4 + UUID do documento. Isso não pega arquivo
+    aleatório; só aceita PDF dentro da pasta oficial de contratos.
+    """
+    row_arquivo = dict(row_arquivo or {})
+
+    for candidato in _montar_candidatos_caminho_anexo_contrato(row_arquivo):
         try:
-            return base64.b64decode(texto.split(",", 1)[-1], validate=True)
+            if candidato.is_file():
+                return candidato
         except Exception:
-            return None
+            continue
 
-    if not isinstance(dados, dict):
-        return None
+    nomes_base: list[str] = []
+    for campo in ("UrlAnexo", "NomeArquivo", "NomeDocumentoD4"):
+        texto = str(row_arquivo.get(campo) or "").strip().replace("\\", "/")
+        if not texto:
+            continue
+        if texto.startswith(("http://", "https://")):
+            try:
+                texto = urlsplit(texto).path or ""
+            except Exception:
+                texto = ""
+        nome = Path(texto).name if texto else ""
+        if nome and nome not in nomes_base:
+            nomes_base.append(nome)
+        nome_seguro = secure_filename(nome) if nome else ""
+        if nome_seguro and nome_seguro not in nomes_base:
+            nomes_base.append(nome_seguro)
 
-    url_download = (
-        dados.get("url")
-        or dados.get("URL")
-        or dados.get("download_url")
-        or dados.get("downloadUrl")
-        or dados.get("link")
-    )
-    if url_download:
-        resp_pdf = requests.get(str(url_download), timeout=60)
-        resp_pdf.raise_for_status()
-        return resp_pdf.content
+    uuids: list[str] = []
+    uuid_original = str(row_arquivo.get("UUIDDocumentoD4") or "").strip()
+    textos_uuid = [uuid_original] + [str(row_arquivo.get(c) or "") for c in ("NomeArquivo", "UrlAnexo", "NomeDocumentoD4")]
+    for texto in textos_uuid:
+        for achado in re.findall(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", str(texto or "")):
+            for candidato_uuid in (achado, achado.upper(), achado.lower()):
+                if candidato_uuid and candidato_uuid not in uuids:
+                    uuids.append(candidato_uuid)
 
-    conteudo_base64 = (
-        dados.get("base64")
-        or dados.get("file")
-        or dados.get("content")
-        or dados.get("document")
-        or dados.get("documento")
-    )
-    if conteudo_base64:
-        texto_base64 = str(conteudo_base64).strip().split(",", 1)[-1]
-        try:
-            return base64.b64decode(texto_base64, validate=True)
-        except Exception:
-            return None
+    try:
+        id_d4 = int(row_arquivo.get("IDFatoContratoD4") or 0)
+    except Exception:
+        id_d4 = 0
+
+    for base_dir in _diretorios_fisicos_anexos_contrato_euromidia():
+        if not base_dir.is_dir():
+            continue
+
+        # Primeiro tenta o nome do arquivo exatamente na pasta atual do container.
+        for nome in nomes_base:
+            try:
+                candidato = (base_dir / nome).resolve()
+                candidato.relative_to(base_dir)
+                if candidato.is_file():
+                    return candidato
+            except Exception:
+                continue
+
+        # Depois tenta o padrão D4 exato: *_D4_{IDFatoContratoD4}_{UUID}_*.pdf
+        if id_d4 > 0:
+            for uuid_candidato in uuids:
+                padrao = f"*_D4_{id_d4}_{uuid_candidato}_*.pdf"
+                try:
+                    encontrados = sorted(
+                        [p for p in base_dir.glob(padrao) if p.is_file()],
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                except Exception:
+                    encontrados = []
+                if encontrados:
+                    return encontrados[0]
 
     return None
 
 
-@paineis_bp.route("/contratos/<int:id_contrato>/d4/<int:id_fato_contrato_d4>/download", methods=["GET"], endpoint="contrato_d4_download")
-@login_required
-def contrato_d4_download(id_contrato: int, id_fato_contrato_d4: int):
-    """
-    Baixa o PDF real do documento na D4Sign usando vínculo exato.
-
-    Regra obrigatória:
-    - O IDFatoContratoD4 recebido na URL precisa existir.
-    - Esse mesmo IDFatoContratoD4 precisa pertencer ao contrato aberto.
-    - Esse mesmo IDFatoContratoD4 precisa apontar para um IDFatoKanbanCard vinculado
-      ao contrato e a um item ativo pela tabela FatoContratoCardEuromidia.
-    - Se qualquer vínculo não bater, retorna 404. Não troca por outro documento.
-    """
-    sql_doc = text("""
+def _buscar_registro_anexo_contrato_euromidia(id_contrato: int, id_arquivo: int):
+    sql_arquivo = text("""
         SELECT TOP (1)
-             d4.IDFatoContratoD4
-            ,d4.IDFatoControleContratosEuromidia
-            ,d4.IDFatoKanbanCard
+             a.IDFatoArquivosContratos
+            ,a.IDFatoControleContratosEuromidia
+            ,a.IDFatoKanbanCard
+            ,a.IDFatoContratoD4
+            ,a.NomeArquivo
+            ,a.UrlAnexo
+            ,a.Extensao
+            ,a.TamanhoArquivo
+            ,a.MesAno
+            ,a.DataAtualizado
             ,d4.UUIDDocumentoD4
             ,d4.NomeDocumentoD4
-            ,d4.TipoArquivoD4
-            ,d4.BitAtivo
-            ,d4.DataCriacao
-            ,d4.DataAtualizacao
-            ,cc.IDFatoControleContratosItensEuromidia
-            ,ci.CodPonto
-            ,ci.CodFace
-            ,ci.Cota
-            ,ci.DataInicioPrevisto
-            ,ci.DataTerminoPrevisto
-            ,ci.TotalBrutoContrato
-            ,ci.FaturamentoLiquidoMensal
-        FROM [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
-        INNER JOIN [Integracao].[Silver].[FatoContratoCardEuromidia] AS cc WITH (NOLOCK)
-            ON TRY_CONVERT(int, cc.IDFatoControleContratosEuromidia) = TRY_CONVERT(int, d4.IDFatoControleContratosEuromidia)
-           AND TRY_CONVERT(int, cc.IDFatoKanbanCard) = TRY_CONVERT(int, d4.IDFatoKanbanCard)
-        INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
-            ON TRY_CONVERT(int, ci.IDFatoControleContratosItensEuromidia) = TRY_CONVERT(int, cc.IDFatoControleContratosItensEuromidia)
-           AND TRY_CONVERT(int, ci.IDFatoControleContratoEuromidia) = TRY_CONVERT(int, cc.IDFatoControleContratosEuromidia)
-           AND TRY_CONVERT(int, ci.IDFatoKanbanCard) = TRY_CONVERT(int, cc.IDFatoKanbanCard)
-        WHERE TRY_CONVERT(int, d4.IDFatoContratoD4) = :id_fato_contrato_d4
-          AND TRY_CONVERT(int, d4.IDFatoControleContratosEuromidia) = :id_contrato
-          AND TRY_CONVERT(int, cc.IDFatoControleContratosEuromidia) = :id_contrato
-          AND TRY_CONVERT(int, ci.IDFatoControleContratoEuromidia) = :id_contrato
-          AND ISNULL(d4.BitAtivo, 1) = 1
-          AND ISNULL(ci.BitAtivo, 1) = 1
-          AND TRY_CONVERT(int, d4.IDFatoKanbanCard) IS NOT NULL
-          AND NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), d4.UUIDDocumentoD4), ''))), '') IS NOT NULL;
+            ,d4.IDEmpresa AS IDEmpresaD4
+        FROM [Integracao].[Silver].[FatoArquivosContratosEuromidia] AS a WITH (NOLOCK)
+        LEFT JOIN [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
+            ON d4.IDFatoContratoD4 = a.IDFatoContratoD4
+           AND ISNULL(d4.BitAtivo, 1) = 1
+        WHERE TRY_CONVERT(int, a.IDFatoArquivosContratos) = :id_arquivo
+          AND TRY_CONVERT(int, a.IDFatoControleContratosEuromidia) = :id_contrato;
     """)
 
     try:
-        doc = db.session.execute(
-            sql_doc,
+        row = db.session.execute(
+            sql_arquivo,
             {
-                "id_fato_contrato_d4": int(id_fato_contrato_d4),
                 "id_contrato": int(id_contrato),
+                "id_arquivo": int(id_arquivo),
             },
         ).mappings().first()
     except Exception:
         db.session.rollback()
         current_app.logger.exception(
-            "D4_DOWNLOAD | erro ao localizar documento D4 exato | id_contrato=%s | id_fato_contrato_d4=%s",
+            "CONTRATO_ARQUIVO_LOCAL | erro ao buscar anexo | id_contrato=%s | id_arquivo=%s",
             id_contrato,
-            id_fato_contrato_d4,
+            id_arquivo,
         )
-        abort(500, description="Erro ao localizar documento D4Sign no banco.")
+        abort(500, description="Erro ao localizar anexo do contrato no banco.")
 
-    if not doc:
-        current_app.logger.warning(
-            "D4_DOWNLOAD | documento D4 exato não encontrado ou vínculo inválido | id_contrato=%s | id_fato_contrato_d4=%s",
-            id_contrato,
-            id_fato_contrato_d4,
-        )
-        abort(
-            404,
-            description=(
-                "Documento D4Sign não encontrado para este contrato/card/item. "
-                "O IDFatoContratoD4 informado não possui vínculo exato com FatoContratoD4, "
-                "FatoContratoCardEuromidia e FatoControleContratosItensEuromidia ativo."
-            ),
-        )
+    return dict(row) if row else None
 
-    uuid_documento = str(doc.get("UUIDDocumentoD4") or "").strip()
-    if not uuid_documento:
-        abort(404, description="Documento D4Sign sem UUID vinculado.")
 
-    id_doc_real = int(doc.get("IDFatoContratoD4"))
-    nome_download = _nome_download_pdf_d4_seguro(doc.get("NomeDocumentoD4"), id_doc_real)
-
-    current_app.logger.info(
-        "D4_DOWNLOAD | documento D4 exato selecionado | id_contrato=%s | id_doc=%s | card=%s | item=%s | codponto=%s | codface=%s | uuid=%s",
-        id_contrato,
-        id_doc_real,
-        doc.get("IDFatoKanbanCard"),
-        doc.get("IDFatoControleContratosItensEuromidia"),
-        doc.get("CodPonto"),
-        doc.get("CodFace"),
-        uuid_documento,
-    )
-
-    cfg = _obter_config_d4sign_para_download()
-    if not cfg["token_api"] or not cfg["crypt_key"] or not cfg["base_url"]:
-        current_app.logger.error(
-            "D4_DOWNLOAD | TOKEN_D4SIGN/CRYPTKEY_D4SIGN/BASE_URL_D4SIGN não configurados."
-        )
-        abort(500, description="Credenciais da D4Sign não configuradas no servidor.")
-
-    endpoint = f"{cfg['base_url']}/documents/{uuid_documento}/download"
+def _buscar_registros_anexos_pdf_contrato_euromidia(id_contrato: int) -> list[dict]:
+    """Busca todos os registros PDF do contrato para fallback de download local."""
+    sql_arquivos = text("""
+        SELECT TOP (100)
+             a.IDFatoArquivosContratos
+            ,a.IDFatoControleContratosEuromidia
+            ,a.IDFatoKanbanCard
+            ,a.IDFatoContratoD4
+            ,a.NomeArquivo
+            ,a.UrlAnexo
+            ,a.Extensao
+            ,a.TamanhoArquivo
+            ,a.MesAno
+            ,a.DataAtualizado
+            ,d4.UUIDDocumentoD4
+            ,d4.NomeDocumentoD4
+            ,d4.IDEmpresa AS IDEmpresaD4
+        FROM [Integracao].[Silver].[FatoArquivosContratosEuromidia] AS a WITH (NOLOCK)
+        LEFT JOIN [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
+            ON d4.IDFatoContratoD4 = a.IDFatoContratoD4
+           AND ISNULL(d4.BitAtivo, 1) = 1
+        WHERE TRY_CONVERT(int, a.IDFatoControleContratosEuromidia) = :id_contrato
+          AND (
+                LOWER(REPLACE(LTRIM(RTRIM(COALESCE(a.Extensao, ''))), '.', '')) = 'pdf'
+             OR LOWER(LTRIM(RTRIM(COALESCE(a.NomeArquivo, '')))) LIKE '%.pdf'
+             OR LOWER(LTRIM(RTRIM(COALESCE(a.UrlAnexo, '')))) LIKE '%.pdf'
+          )
+        ORDER BY
+            COALESCE(a.DataAtualizado, TRY_CONVERT(datetime, a.MesAno)) DESC,
+            a.IDFatoArquivosContratos DESC;
+    """)
 
     try:
-        resposta_d4 = requests.post(
-            endpoint,
-            params={
-                "tokenAPI": cfg["token_api"],
-                "cryptKey": cfg["crypt_key"],
-            },
-            json={
-                "type": "pdf",
-                "language": "pt",
-                "encoding": False,
-            },
-            headers={
-                "Accept": "application/json, application/pdf",
-                "Content-Type": "application/json",
-            },
-            timeout=60,
-        )
-        resposta_d4.raise_for_status()
-
-        pdf_bytes = _extrair_pdf_resposta_download_d4(resposta_d4)
-        if not pdf_bytes:
-            current_app.logger.error(
-                "D4_DOWNLOAD | resposta da D4Sign não trouxe PDF/URL/Base64 | id_contrato=%s | id_doc=%s | uuid=%s | status=%s | body=%s",
-                id_contrato,
-                id_doc_real,
-                uuid_documento,
-                resposta_d4.status_code,
-                (resposta_d4.text or "")[:1000],
-            )
-            abort(502, description="A D4Sign não retornou um PDF para download.")
-
-        resposta_pdf = send_file(
-            BytesIO(pdf_bytes),
-            mimetype="application/pdf",
-            as_attachment=True,
-            download_name=nome_download,
-            max_age=0,
-        )
-        resposta_pdf.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        resposta_pdf.headers["Pragma"] = "no-cache"
-        resposta_pdf.headers["Expires"] = "0"
-        resposta_pdf.headers["X-D4-Contrato-ID"] = str(id_contrato)
-        resposta_pdf.headers["X-D4-Documento-ID"] = str(id_doc_real)
-        resposta_pdf.headers["X-D4-Card-ID"] = str(doc.get("IDFatoKanbanCard") or "")
-        resposta_pdf.headers["X-D4-CodFace"] = str(doc.get("CodFace") or "")
-        return resposta_pdf
-
-    except requests.HTTPError as exc:
-        status_code = getattr(exc.response, "status_code", None) or 502
-        current_app.logger.exception(
-            "D4_DOWNLOAD | HTTPError D4Sign | id_contrato=%s | id_doc=%s | uuid=%s | status=%s",
-            id_contrato,
-            id_doc_real,
-            uuid_documento,
-            status_code,
-        )
-        abort(502, description="Erro HTTP ao baixar documento na D4Sign.")
+        rows = db.session.execute(sql_arquivos, {"id_contrato": int(id_contrato)}).mappings().all()
     except Exception:
+        db.session.rollback()
         current_app.logger.exception(
-            "D4_DOWNLOAD | erro inesperado | id_contrato=%s | id_doc=%s | uuid=%s",
+            "CONTRATO_ARQUIVO_LOCAL | erro ao buscar anexos PDF do contrato | id_contrato=%s",
             id_contrato,
-            id_doc_real,
-            uuid_documento,
         )
-        abort(502, description="Erro ao baixar documento na D4Sign.")
+        return []
+
+    return [dict(row) for row in rows]
+
+
+def _buscar_primeiro_anexo_pdf_fisico_contrato_euromidia(id_contrato: int, id_arquivo_preferencial: int | None = None):
+    """Retorna o primeiro PDF físico disponível do mesmo contrato.
+
+    Usado quando o usuário clica num registro mais novo do D4 cujo arquivo físico
+    ainda não foi baixado, mas já existe outro PDF físico do contrato na pasta.
+    """
+    registros = _buscar_registros_anexos_pdf_contrato_euromidia(int(id_contrato))
+
+    def _id(row):
+        try:
+            return int(row.get("IDFatoArquivosContratos") or 0)
+        except Exception:
+            return 0
+
+    ordenados = []
+    id_pref = int(id_arquivo_preferencial or 0)
+    if id_pref > 0:
+        ordenados.extend([r for r in registros if _id(r) == id_pref])
+    ordenados.extend([r for r in registros if _id(r) != id_pref])
+
+    for registro in ordenados:
+        caminho = _resolver_caminho_fisico_anexo_contrato(registro)
+        if caminho and caminho.is_file():
+            return registro, caminho
+
+    return None, None
+
+
+def _validar_acesso_usuario_contrato_euromidia(id_contrato: int) -> None:
+    """Replica a proteção da tela de detalhe para baixar anexo local do contrato."""
+    usuario_eh_vendedor_restrito = False
+    try:
+        usuario_eh_vendedor_restrito = bool(_usuario_logado_eh_perfil_vendedor())
+    except Exception:
+        usuario_eh_vendedor_restrito = False
+
+    usuario_tem_admin_tudo = False
+    try:
+        metodo_permissao = getattr(current_user, "has_permission", None)
+        usuario_tem_admin_tudo = bool(metodo_permissao and metodo_permissao("ADMIN_TUDO"))
+    except Exception:
+        usuario_tem_admin_tudo = False
+
+    if not usuario_eh_vendedor_restrito or usuario_tem_admin_tudo:
+        return
+
+    vendedor_logado_info = _resolver_vendedor_logado_info()
+    contrato_liberado = _contrato_pertence_ao_vendedor_logado(
+        id_fato_controle_contratos=int(id_contrato),
+        id_vendedor_logado=vendedor_logado_info.get("IDVendedor"),
+        nome_vendedor_logado=vendedor_logado_info.get("NomeVendedor"),
+    )
+
+    if not contrato_liberado:
+        current_app.logger.warning(
+            "CONTRATO_ARQUIVO_LOCAL | acesso bloqueado para vendedor | id_contrato=%s | id_usuario=%s | id_vendedor=%s",
+            id_contrato,
+            getattr(current_user, "IDDimUsuarios", None),
+            vendedor_logado_info.get("IDVendedor"),
+        )
+        abort(403, description="Você não pode baixar anexo de um contrato que não pertence ao vendedor logado.")
+
+
+@paineis_bp.route("/contratos/<int:id_contrato>/arquivos/<int:id_arquivo>/baixar", methods=["GET"], endpoint="contrato_arquivo_anexo_baixar")
+@login_required
+def contrato_arquivo_anexo_baixar(id_contrato: int, id_arquivo: int):
+    """Baixa o arquivo físico já salvo como anexo do contrato, validando a tabela Silver."""
+    _validar_acesso_usuario_contrato_euromidia(int(id_contrato))
+
+    arquivo = _buscar_registro_anexo_contrato_euromidia(int(id_contrato), int(id_arquivo))
+    if not arquivo:
+        abort(404, description="Arquivo anexado não encontrado para este contrato.")
+
+    arquivo_download = arquivo
+    caminho_fisico = _resolver_caminho_fisico_anexo_contrato(arquivo_download)
+
+    if not caminho_fisico:
+        # O anexo clicado pode ser o registro mais novo do D4, mas o PDF físico
+        # disponível na pasta pode estar em outro anexo do mesmo contrato. Nesse
+        # caso, entrega o PDF físico do contrato em vez de quebrar o clique.
+        arquivo_fallback, caminho_fallback = _buscar_primeiro_anexo_pdf_fisico_contrato_euromidia(
+            int(id_contrato),
+            int(id_arquivo),
+        )
+        if caminho_fallback and caminho_fallback.is_file():
+            arquivo_download = arquivo_fallback
+            caminho_fisico = caminho_fallback
+
+    if not caminho_fisico:
+        diretorios_tentados = ", ".join(str(p) for p in _diretorios_fisicos_anexos_contrato_euromidia())
+        current_app.logger.warning(
+            "CONTRATO_ARQUIVO_LOCAL | registro existe, mas nenhum PDF físico do contrato foi localizado | id_contrato=%s | id_arquivo=%s | nome=%s | url=%s | diretorios=%s",
+            id_contrato,
+            id_arquivo,
+            arquivo.get("NomeArquivo"),
+            arquivo.get("UrlAnexo"),
+            diretorios_tentados,
+        )
+        abort(404, description="Arquivo físico do anexo não foi encontrado no servidor.")
+
+    extensao = _normalizar_extensao_anexo_contrato(arquivo_download.get("Extensao")) or caminho_fisico.suffix.lower()
+    nome_download = _nome_download_anexo_contrato_seguro(
+        arquivo_download.get("NomeArquivo") or caminho_fisico.name,
+        arquivo_download.get("IDFatoArquivosContratos"),
+        extensao or caminho_fisico.suffix,
+    )
+
+    mimetype = "application/pdf" if caminho_fisico.suffix.lower() == ".pdf" else (mimetypes.guess_type(str(caminho_fisico))[0] or "application/octet-stream")
+
+    resposta = send_file(
+        str(caminho_fisico),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=nome_download,
+        max_age=0,
+    )
+    resposta.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resposta.headers["Pragma"] = "no-cache"
+    resposta.headers["Expires"] = "0"
+    resposta.headers["X-Contrato-ID"] = str(id_contrato)
+    resposta.headers["X-Contrato-Arquivo-ID"] = str(id_arquivo)
+    resposta.headers["X-Contrato-Arquivo-Fisico-ID"] = str(arquivo_download.get("IDFatoArquivosContratos") or "")
+    resposta.headers["X-Contrato-D4-ID"] = str(arquivo_download.get("IDFatoContratoD4") or "")
+    return resposta
+
 
 @paineis_bp.get("/contratos/<int:id_contrato>")
 @login_required
@@ -27740,7 +28000,7 @@ def contratos_detalhe(id_contrato: int):
     cache_bypass_contrato_inicial = str(request.args.get("nocache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     contrato_preload_cache_inicial = str(request.args.get("contrato_preload_cache") or "").strip().lower() in {"1", "true", "sim", "yes"}
     cache_key_contrato_detalhe_inicial = (
-        f"contratos_detalhe_html:v20260625_d4_download_only_v1:"
+        f"contratos_detalhe_html:v20260626_download_fallback_status_v2:"
         f"usuario:{id_usuario_cache_inicial}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_cache_inicial else 'completo'}:"
@@ -27897,7 +28157,7 @@ def contratos_detalhe(id_contrato: int):
     contrato_detalhe_async_pendente = False
     contrato_detalhe_async_payload = None
     cache_key_contrato_detalhe = (
-        f"contratos_detalhe_html:v20260625_d4_download_only_v1:"
+        f"contratos_detalhe_html:v20260626_download_fallback_status_v2:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:{'rapido' if modo_rapido_contrato else 'completo'}:"
@@ -27905,7 +28165,7 @@ def contratos_detalhe(id_contrato: int):
     )
     placeholder_return_to_contrato = "__RETURN_TO_CONTRATO_DETALHE_SEGURO__"
     cache_key_contrato_detalhe_completo = (
-        f"contratos_detalhe_html:v20260625_d4_download_only_v1:"
+        f"contratos_detalhe_html:v20260626_download_fallback_status_v2:"
         f"usuario:{id_usuario_cache}:"
         f"contrato:{int(id_contrato)}:"
         f"modo:completo:"
@@ -30067,7 +30327,143 @@ def contratos_detalhe(id_contrato: int):
             })
         return docs
 
-    def _carregar_historico_status_contrato(id_contrato_param):
+    def _contratos_arquivo_fmt_tamanho(valor):
+        try:
+            bytes_int = int(valor or 0)
+        except Exception:
+            bytes_int = 0
+
+        if bytes_int <= 0:
+            return "—"
+
+        unidades = ["B", "KB", "MB", "GB"]
+        tamanho = float(bytes_int)
+        idx = 0
+        while tamanho >= 1024 and idx < len(unidades) - 1:
+            tamanho = tamanho / 1024
+            idx += 1
+
+        if idx == 0:
+            return f"{int(tamanho)} {unidades[idx]}"
+        return f"{tamanho:.2f} {unidades[idx]}".replace(".", ",")
+
+    def _contratos_arquivo_nome_exibicao(nome_arquivo=None, url_anexo=None, id_arquivo=None):
+        for candidato in (nome_arquivo, url_anexo):
+            texto = str(candidato or "").strip()
+            if not texto:
+                continue
+            texto = texto.replace("\\", "/")
+            if texto.startswith("http://") or texto.startswith("https://"):
+                try:
+                    texto = urlsplit(texto).path or ""
+                except Exception:
+                    texto = ""
+            nome = Path(texto).name
+            if nome and nome not in {".", ".."}:
+                return nome
+        return f"Contrato anexado #{int(id_arquivo or 0)}"
+
+    def _carregar_arquivos_contrato_anexados(id_contrato_param):
+        """Carrega os PDFs anexados exatamente ao contrato pela tabela FatoArquivosContratosEuromidia."""
+        sql_arquivos = text("""
+            SELECT TOP (50)
+                 a.IDFatoArquivosContratos
+                ,a.IDFatoControleContratosEuromidia
+                ,a.IDFatoKanbanCard
+                ,a.IDFatoContratoD4
+                ,a.NomeArquivo
+                ,a.UrlAnexo
+                ,a.Extensao
+                ,a.TamanhoArquivo
+                ,a.MesAno
+                ,a.DataAtualizado
+                ,d4.UUIDDocumentoD4
+                ,d4.NomeDocumentoD4
+                ,d4.IDEmpresa AS IDEmpresaD4
+            FROM [Integracao].[Silver].[FatoArquivosContratosEuromidia] AS a WITH (NOLOCK)
+            LEFT JOIN [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
+                ON d4.IDFatoContratoD4 = a.IDFatoContratoD4
+               AND ISNULL(d4.BitAtivo, 1) = 1
+            WHERE TRY_CONVERT(int, a.IDFatoControleContratosEuromidia) = :id_contrato
+              AND (
+                    LOWER(REPLACE(LTRIM(RTRIM(COALESCE(a.Extensao, ''))), '.', '')) = 'pdf'
+                 OR LOWER(LTRIM(RTRIM(COALESCE(a.NomeArquivo, '')))) LIKE '%.pdf'
+                 OR LOWER(LTRIM(RTRIM(COALESCE(a.UrlAnexo, '')))) LIKE '%.pdf'
+              )
+            ORDER BY
+                COALESCE(a.DataAtualizado, TRY_CONVERT(datetime, a.MesAno)) DESC,
+                a.IDFatoArquivosContratos DESC;
+        """)
+
+        try:
+            rows = db.session.execute(sql_arquivos, {"id_contrato": int(id_contrato_param)}).mappings().all()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.warning(
+                "CONTRATO_DETALHE | FatoArquivosContratosEuromidia indisponível ou com schema diferente | id_contrato=%s",
+                id_contrato_param,
+                exc_info=True,
+            )
+            rows = []
+
+        arquivos = []
+        for row in rows:
+            a = dict(row)
+            id_arquivo = a.get("IDFatoArquivosContratos")
+            caminho_fisico = None
+            arquivo_existe = False
+            try:
+                caminho_fisico = _resolver_caminho_fisico_anexo_contrato(a)
+                arquivo_existe = bool(caminho_fisico and caminho_fisico.is_file())
+            except Exception:
+                caminho_fisico = None
+                arquivo_existe = False
+
+            nome_exibicao = _contratos_arquivo_nome_exibicao(
+                nome_arquivo=a.get("NomeArquivo"),
+                url_anexo=a.get("UrlAnexo"),
+                id_arquivo=id_arquivo,
+            )
+
+            ext = _normalizar_extensao_anexo_contrato(a.get("Extensao"))
+            if not ext and nome_exibicao.lower().endswith(".pdf"):
+                ext = ".pdf"
+
+            arquivo_dict = {
+                "IDFatoArquivosContratos": id_arquivo,
+                "IDFatoControleContratosEuromidia": a.get("IDFatoControleContratosEuromidia"),
+                "IDFatoKanbanCard": a.get("IDFatoKanbanCard"),
+                "IDFatoContratoD4": a.get("IDFatoContratoD4"),
+                "NomeArquivo": a.get("NomeArquivo"),
+                "NomeExibicao": nome_exibicao,
+                "UrlAnexo": a.get("UrlAnexo"),
+                "Extensao": ext or ".pdf",
+                "TamanhoArquivo": a.get("TamanhoArquivo"),
+                "TamanhoArquivoTexto": _contratos_arquivo_fmt_tamanho(a.get("TamanhoArquivo")),
+                "MesAno": a.get("MesAno"),
+                "DataAtualizado": a.get("DataAtualizado"),
+                "DataAtualizadoTexto": _contratos_d4_fmt_data(a.get("DataAtualizado")),
+                "UUIDDocumentoD4": a.get("UUIDDocumentoD4"),
+                "NomeDocumentoD4": a.get("NomeDocumentoD4"),
+                "IDEmpresaD4": a.get("IDEmpresaD4"),
+                "ArquivoFisicoExiste": arquivo_existe,
+                "DownloadUrl": url_for(
+                    "Paineis.contrato_arquivo_anexo_baixar",
+                    id_contrato=int(id_contrato_param),
+                    id_arquivo=int(id_arquivo or 0),
+                ) if id_arquivo else None,
+            }
+
+            arquivos.append(arquivo_dict)
+
+        return arquivos
+
+    def _carregar_historico_status_contrato(id_contrato_param, id_status_contrato_atual_param=None):
+        try:
+            id_status_contrato_atual_int = int(id_status_contrato_atual_param or 0)
+        except Exception:
+            id_status_contrato_atual_int = 0
+
         sql_hist = text("""
             SELECT TOP (100)
                  h.IDDimHistoricoContratos
@@ -30103,10 +30499,27 @@ def contratos_detalhe(id_contrato: int):
             r = dict(row)
             info_d4 = _contratos_d4_status_info(r.get("IDDimStatusD4"), r.get("NomeStatusD4"))
             nome_status_d4_historico = info_d4.get("nome")
-            if _contratos_d4_int(info_d4.get("id"), 0) == 1:
+            classe_status_d4_historico = info_d4.get("classe")
+
+            try:
+                id_status_contrato_hist = int(r.get("IDDimStatusContratos") or 0)
+            except Exception:
+                id_status_contrato_hist = 0
+
+            if (
+                id_status_contrato_atual_int > 0
+                and id_status_contrato_hist > 0
+                and id_status_contrato_hist < id_status_contrato_atual_int
+            ):
+                # Se o contrato já avançou no fluxo, a etapa anterior não pode
+                # continuar aparecendo como pendente/aguardando. Ela já foi processada.
+                nome_status_d4_historico = "Processado"
+                classe_status_d4_historico = "processando"
+            elif _contratos_d4_int(info_d4.get("id"), 0) == 1:
                 # No histórico, IDDimStatusD4=1 representa uma etapa de processamento já gravada.
                 # O status atual do documento continua aparecendo como "Processando" quando ele ainda está nesse estado.
                 nome_status_d4_historico = "Processado"
+                classe_status_d4_historico = "processando"
 
             historico.append({
                 "IDDimHistoricoContratos": r.get("IDDimHistoricoContratos"),
@@ -30115,13 +30528,13 @@ def contratos_detalhe(id_contrato: int):
                 "IDDimStatusD4": info_d4.get("id"),
                 "NomeStatusD4": info_d4.get("nome"),
                 "NomeStatusD4Historico": nome_status_d4_historico,
-                "ClasseStatusD4": info_d4.get("classe"),
+                "ClasseStatusD4": classe_status_d4_historico,
                 "DataStatus": r.get("DataStatus"),
                 "DataStatusTexto": _contratos_d4_fmt_data(r.get("DataStatus")),
             })
         return historico
 
-    def _montar_painel_d4_contrato(d4_documentos, historico_status, cards_relacionados_lista=None):
+    def _montar_painel_d4_contrato(d4_documentos, historico_status, cards_relacionados_lista=None, arquivos_contrato_lista=None):
         """
         Monta o painel D4 sem criar ciclos artificiais.
 
@@ -30134,6 +30547,33 @@ def contratos_detalhe(id_contrato: int):
         """
         docs = list(d4_documentos or [])
         historico = list(historico_status or [])
+        arquivos_contrato = list(arquivos_contrato_lista or [])
+
+        arquivos_por_d4 = {}
+        for arquivo in arquivos_contrato:
+            try:
+                id_d4_arquivo = int(arquivo.get("IDFatoContratoD4") or 0)
+            except Exception:
+                id_d4_arquivo = 0
+            if id_d4_arquivo > 0:
+                arquivos_por_d4.setdefault(id_d4_arquivo, []).append(arquivo)
+
+        def _arquivo_pdf_local_disponivel(arquivo):
+            return bool(
+                arquivo
+                and arquivo.get("ArquivoFisicoExiste")
+                and arquivo.get("DownloadUrl")
+            )
+
+        for doc in docs:
+            try:
+                id_doc_vinculo = int(doc.get("IDFatoContratoD4") or 0)
+            except Exception:
+                id_doc_vinculo = 0
+            arquivos_doc = list(arquivos_por_d4.get(id_doc_vinculo) or [])
+            arquivo_doc_disponivel = next((a for a in arquivos_doc if _arquivo_pdf_local_disponivel(a)), None)
+            doc["ArquivosContratoAnexados"] = arquivos_doc
+            doc["ArquivoContratoAnexadoAtual"] = arquivo_doc_disponivel or (arquivos_doc[0] if arquivos_doc else None)
 
         doc_atual = docs[0] if docs else None
         status_d4 = _contratos_d4_status_info(
@@ -30162,6 +30602,8 @@ def contratos_detalhe(id_contrato: int):
                 "AcaoClienteTexto": doc.get("AcaoClienteTexto"),
                 "DataReferenciaTexto": doc.get("DataReferenciaTexto"),
                 "IDFatoContratoD4": doc.get("IDFatoContratoD4"),
+                "ArquivoContratoAnexadoAtual": doc.get("ArquivoContratoAnexadoAtual"),
+                "ArquivosContratoAnexados": doc.get("ArquivosContratoAnexados") or [],
             }
 
         ciclos = []
@@ -30194,15 +30636,47 @@ def contratos_detalhe(id_contrato: int):
             if _contratos_d4_int(d.get("IDDimStatusD4"), 0) in (2, 3, 7)
         )
 
+        arquivo_atual = None
+        arquivos_doc_atual = []
+        if doc_atual:
+            arquivos_doc_atual = list(doc_atual.get("ArquivosContratoAnexados") or [])
+
+        # Para o card principal da tela, prioriza o primeiro PDF que realmente existe no servidor.
+        # Isso evita mostrar no topo um registro mais novo da tabela que ainda não tem arquivo físico,
+        # enquanto outro anexo do mesmo contrato já está disponível para download.
+        arquivo_atual = next((a for a in arquivos_doc_atual if _arquivo_pdf_local_disponivel(a)), None)
+        if not arquivo_atual:
+            arquivo_atual = next((a for a in arquivos_contrato if _arquivo_pdf_local_disponivel(a)), None)
+        if not arquivo_atual and doc_atual and doc_atual.get("ArquivoContratoAnexadoAtual"):
+            arquivo_atual = doc_atual.get("ArquivoContratoAnexadoAtual")
+        elif not arquivo_atual and arquivos_contrato:
+            arquivo_atual = arquivos_contrato[0]
+
+        id_arquivo_atual = None
+        try:
+            id_arquivo_atual = int((arquivo_atual or {}).get("IDFatoArquivosContratos") or 0)
+        except Exception:
+            id_arquivo_atual = None
+
+        for arquivo in arquivos_contrato:
+            try:
+                arquivo["EhArquivoContratoAtual"] = bool(id_arquivo_atual and int(arquivo.get("IDFatoArquivosContratos") or 0) == id_arquivo_atual)
+            except Exception:
+                arquivo["EhArquivoContratoAtual"] = False
+
         return {
             "DocumentoAtual": doc_atual,
             "StatusAtualD4": status_d4,
+            "ArquivosContrato": arquivos_contrato,
+            "TemArquivosContrato": bool(arquivos_contrato),
+            "ArquivoContratoAtual": arquivo_atual,
             "TemDocumentoD4": bool(doc_atual),
             "TipoCicloAtual": (doc_atual or {}).get("TipoCiclo"),
             "HistoricoStatus": historico,
             "Ciclos": ciclos[:50],
             "Resumo": {
                 "QtdDocumentosD4": len(docs),
+                "QtdArquivosContrato": len(arquivos_contrato),
                 "QtdEventosHistorico": len(historico),
                 "QtdRenovacoes": qtd_renovacoes,
                 "QtdAditivos": qtd_aditivos,
@@ -30214,7 +30688,23 @@ def contratos_detalhe(id_contrato: int):
     # O painel D4 é leve e precisa aparecer também no modo rápido.
     # Antes o modo rápido entregava [] e a tela mostrava "0 doc(s)" mesmo existindo documento/assinatura.
     d4_documentos_contrato = _carregar_d4_documentos_contrato(id_contrato)
-    historico_status_contrato = _carregar_historico_status_contrato(id_contrato)
+    arquivos_contrato_anexados = _carregar_arquivos_contrato_anexados(id_contrato)
+
+    id_status_contrato_atual_historico = None
+    if d4_documentos_contrato:
+        id_status_contrato_atual_historico = d4_documentos_contrato[0].get("IDDimStatusContratos")
+    if not id_status_contrato_atual_historico:
+        id_status_contrato_atual_historico = _valor_attr(
+            contrato,
+            "IDDimStatusContratos",
+            "IDStatusContrato",
+            "IDStatus",
+        )
+
+    historico_status_contrato = _carregar_historico_status_contrato(
+        id_contrato,
+        id_status_contrato_atual_historico,
+    )
 
     sql_itens_base = text("""
         SELECT
@@ -30474,6 +30964,7 @@ def contratos_detalhe(id_contrato: int):
             d4_documentos=d4_documentos_contrato,
             historico_status=historico_status_contrato,
             cards_relacionados_lista=cards_relacionados_rapidos,
+            arquivos_contrato_lista=arquivos_contrato_anexados,
         )
 
         html_renderizado = render_template(
@@ -30489,6 +30980,7 @@ def contratos_detalhe(id_contrato: int):
             diagrama_status=diagrama_status,
             painel_d4_contrato=painel_d4_contrato,
             d4_documentos_contrato=d4_documentos_contrato,
+            arquivos_contrato_anexados=arquivos_contrato_anexados,
             historico_status_contrato=historico_status_contrato,
             preferencia_reserva_contrato=preferencia_reserva_contrato,
             empresa_principal=empresa_principal,
@@ -32131,6 +32623,7 @@ def contratos_detalhe(id_contrato: int):
         d4_documentos=d4_documentos_contrato,
         historico_status=historico_status_contrato,
         cards_relacionados_lista=cards_relacionados,
+        arquivos_contrato_lista=arquivos_contrato_anexados,
     )
 
     _debug_contrato_detalhe("=" * 120, flush=True)
@@ -32163,6 +32656,7 @@ def contratos_detalhe(id_contrato: int):
         diagrama_status=diagrama_status,
         painel_d4_contrato=painel_d4_contrato,
         d4_documentos_contrato=d4_documentos_contrato,
+        arquivos_contrato_anexados=arquivos_contrato_anexados,
         historico_status_contrato=historico_status_contrato,
         preferencia_reserva_contrato=preferencia_reserva_contrato,
         empresa_principal=empresa_principal,

@@ -1,12 +1,20 @@
+import base64
 import json
 import logging
 import os
 import unicodedata
+import uuid
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pendulum
 from sqlalchemy import text
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 try:
     from airflow.decorators import dag, task
@@ -25,19 +33,677 @@ TABELA_CONTROLE_CONTRATOS = "[Integracao].[Silver].[FatoControleContratosEuromid
 TABELA_CONTROLE_CONTRATOS_ITENS = "[Integracao].[Silver].[FatoControleContratosItensEuromidia]"
 TABELA_STATUS_CONTRATOS = "[Integracao].[Silver].[DimStatusContratos]"
 TABELA_SOLICITACAO_CONTRATO = "[Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]"
+TABELA_CONTRATO_CARD = "[Integracao].[Silver].[FatoContratoCardEuromidia]"
 
 ID_EMPRESA_PROPRIETARIA_EUROMIDIA = 3
 
+ID_STATUS_D4_PROCESSANDO = 1
+ID_STATUS_D4_AGUARDANDO_SIGNATARIOS = 2
 ID_STATUS_D4_AGUARDANDO_ASSINATURAS = 3
 ID_STATUS_D4_FINALIZADO = 4
+ID_STATUS_D4_ARQUIVADO = 5
 ID_STATUS_D4_CANCELADO = 6
+ID_STATUS_D4_EDITANDO = 7
 
 ID_STATUS_CONTRATO_DOCUMENTO_GERADO = 3
 ID_STATUS_CONTRATO_PENDENTE_ENVIO = 4
 ID_STATUS_CONTRATO_ENVIADO_ASSINATURA = 5
 ID_STATUS_CONTRATO_EM_ASSINATURA = 6
 ID_STATUS_CONTRATO_ATIVO = 7
+ID_STATUS_CONTRATO_CONCLUIDO = 8
 ID_STATUS_CONTRATO_CANCELADO = 9
+
+
+TABELA_ARQUIVOS_CONTRATOS = "[Integracao].[Silver].[FatoArquivosContratosEuromidia]"
+
+
+def env_bool(nome_variavel: str, padrao: str = "1") -> bool:
+    valor = str(os.getenv(nome_variavel, padrao) or padrao).strip().lower()
+    return valor in {"1", "true", "sim", "yes", "y", "on"}
+
+
+def pasta_pdf_local_contrato_d4() -> Path:
+    """Pasta física compartilhada onde os PDFs de contratos D4Sign ficam salvos."""
+    pasta = str(
+        os.getenv("D4SIGN_PDF_LOCAL_PASTA_CONTRATO")
+        or "/home/euromidia/projetos/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato"
+    ).strip()
+    return Path(pasta)
+
+
+def url_anexo_contrato_pdf(nome_arquivo: str) -> str:
+    return f"Contrato/{Path(str(nome_arquivo or '')).name}"
+
+
+def limpar_nome_base_arquivo(valor: Any) -> str:
+    texto = str(valor or "").strip()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.replace("/", "_").replace("\\", "_")
+    texto = "".join(c if c.isalnum() or c in {"_", "-", "."} else "_" for c in texto)
+    texto = "_".join(parte for parte in texto.split("_") if parte)
+    if not texto:
+        texto = "contrato_d4sign"
+    return texto[:120]
+
+
+def uuid_d4_valido(valor: Any) -> str | None:
+    texto = str(valor or "").strip()
+    if not texto:
+        return None
+    # UUID D4Sign costuma vir com hífen, mas aceito texto seguro para não perder documento antigo.
+    texto = texto.replace(" ", "")
+    return texto[:100]
+
+
+def montar_nome_pdf_local_contrato_d4(contrato: dict[str, Any], nome_documento_d4: str | None = None) -> str | None:
+    id_controle = converter_int(contrato.get("IDFatoControleContratosEuromidia"))
+    id_d4 = converter_int(contrato.get("IDFatoContratoD4"))
+    uuid_doc = uuid_d4_valido(contrato.get("UUIDDocumentoD4"))
+    if not id_controle or not id_d4 or not uuid_doc:
+        return None
+    nome_base = limpar_nome_base_arquivo(nome_documento_d4 or contrato.get("NomeDocumentoD4") or "contrato_d4sign")
+    return f"{id_controle}_D4_{id_d4}_{uuid_doc}_{nome_base}.pdf"
+
+
+def validar_bytes_pdf(dados_pdf: bytes) -> None:
+    if not dados_pdf:
+        raise RuntimeError("Download D4Sign retornou arquivo vazio.")
+    if not bytes(dados_pdf[:5]).startswith(b"%PDF-"):
+        raise RuntimeError(f"Download D4Sign não retornou PDF válido. Início={bytes(dados_pdf[:80])!r}")
+
+
+def caminho_pdf_valido(caminho: Path | None) -> bool:
+    try:
+        if caminho is None:
+            return False
+        caminho = Path(caminho)
+        if not caminho.exists() or not caminho.is_file() or caminho.stat().st_size <= 0:
+            return False
+        with open(caminho, "rb") as arquivo:
+            return arquivo.read(5).startswith(b"%PDF-")
+    except Exception:
+        return False
+
+
+def obter_credenciais_d4sign_pdf() -> tuple[str, str]:
+    token_api = str(os.getenv("TOKEN_D4SIGN") or "").strip()
+    crypt_key = str(os.getenv("CRYPTKEY_D4SIGN") or "").strip()
+    if not token_api:
+        raise RuntimeError("TOKEN_D4SIGN não encontrado no ambiente do Airflow.")
+    if not crypt_key:
+        raise RuntimeError("CRYPTKEY_D4SIGN não encontrado no ambiente do Airflow.")
+    return token_api, crypt_key
+
+
+def base_url_d4sign_pdf() -> str:
+    return str(os.getenv("BASE_URL_D4SIGN") or "https://secure.d4sign.com.br/api/v1").strip().rstrip("/")
+
+
+def timeout_d4sign_pdf() -> int:
+    try:
+        return max(5, int(str(os.getenv("D4SIGN_TIMEOUT_SEGUNDOS", "30") or "30").strip()))
+    except Exception:
+        return 30
+
+
+def post_d4sign_pdf(caminho: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    if requests is None:
+        raise RuntimeError("A biblioteca requests não está instalada no ambiente do Airflow.")
+
+    token_api, crypt_key = obter_credenciais_d4sign_pdf()
+    url = f"{base_url_d4sign_pdf()}{caminho}"
+    resposta = requests.post(
+        url,
+        params={"tokenAPI": token_api, "cryptKey": crypt_key},
+        json=payload or {},
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        timeout=timeout_d4sign_pdf(),
+    )
+
+    try:
+        dados = resposta.json()
+    except Exception:
+        dados = {"resposta_texto": resposta.text}
+
+    if not resposta.ok:
+        raise RuntimeError(f"Erro POST D4Sign. Caminho={caminho}. Status={resposta.status_code}. Resposta={dados}")
+
+    return dados if isinstance(dados, dict) else {"resposta": dados}
+
+
+def extrair_url_download_pdf_d4sign(objeto: Any) -> str | None:
+    chaves_url = {"url", "download", "downloadurl", "download_url", "urldownload", "url_download", "link", "linkdownload", "link_download"}
+    if isinstance(objeto, dict):
+        for chave, valor in objeto.items():
+            chave_norm = normalizar_texto(chave).replace("_", "").replace("-", "")
+            if chave_norm in chaves_url and isinstance(valor, str) and valor.strip().lower().startswith(("http://", "https://")):
+                return valor.strip()
+        for valor in objeto.values():
+            achou = extrair_url_download_pdf_d4sign(valor)
+            if achou:
+                return achou
+    if isinstance(objeto, list):
+        for item in objeto:
+            achou = extrair_url_download_pdf_d4sign(item)
+            if achou:
+                return achou
+    if isinstance(objeto, str) and objeto.strip().lower().startswith(("http://", "https://")):
+        return objeto.strip()
+    return None
+
+
+def extrair_base64_pdf_d4sign(objeto: Any) -> str | None:
+    chaves_base64 = {"base64", "filebase64", "file_base64", "base64file", "base64_file", "base64binaryfile", "base64_binary_file", "arquivo", "documento"}
+    if isinstance(objeto, dict):
+        for chave, valor in objeto.items():
+            chave_norm = normalizar_texto(chave).replace("_", "").replace("-", "")
+            if chave_norm in chaves_base64 and isinstance(valor, str):
+                texto = valor.strip()
+                if texto.startswith("data:application/pdf;base64,"):
+                    texto = texto.split(",", 1)[1].strip()
+                if len(texto) > 100:
+                    return texto
+        for valor in objeto.values():
+            achou = extrair_base64_pdf_d4sign(valor)
+            if achou:
+                return achou
+    if isinstance(objeto, list):
+        for item in objeto:
+            achou = extrair_base64_pdf_d4sign(item)
+            if achou:
+                return achou
+    return None
+
+
+def baixar_pdf_url_temporaria(url_download: str) -> bytes:
+    if requests is None:
+        raise RuntimeError("A biblioteca requests não está instalada no ambiente do Airflow.")
+    resposta = requests.get(
+        str(url_download).strip(),
+        headers={"Accept": "application/pdf,application/octet-stream,*/*"},
+        timeout=timeout_d4sign_pdf(),
+    )
+    try:
+        resposta.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao baixar PDF pela URL temporária D4Sign. Status={resposta.status_code}. Resposta={(resposta.text or '')[:1000]}") from exc
+    dados_pdf = resposta.content or b""
+    validar_bytes_pdf(dados_pdf)
+    return dados_pdf
+
+
+def executar_download_pdf_d4sign(uuid_documento_d4: str) -> bytes:
+    uuid_limpo = uuid_d4_valido(uuid_documento_d4)
+    if not uuid_limpo:
+        raise RuntimeError("UUIDDocumentoD4 vazio para download do PDF D4Sign.")
+    if requests is None:
+        raise RuntimeError("A biblioteca requests não está instalada no ambiente do Airflow.")
+
+    token_api, crypt_key = obter_credenciais_d4sign_pdf()
+    url = f"{base_url_d4sign_pdf()}/documents/{uuid_limpo}/download"
+    resposta = requests.post(
+        url,
+        params={"tokenAPI": token_api, "cryptKey": crypt_key},
+        json={"type": "pdf", "language": "pt", "encoding": False},
+        headers={
+            "Accept": "application/pdf,application/octet-stream,application/json,*/*",
+            "Content-Type": "application/json",
+        },
+        timeout=timeout_d4sign_pdf(),
+    )
+
+    conteudo = resposta.content or b""
+    if resposta.ok and conteudo[:5].startswith(b"%PDF-"):
+        validar_bytes_pdf(conteudo)
+        return conteudo
+
+    try:
+        resposta_download = resposta.json()
+    except Exception:
+        resposta_download = {"resposta_texto": (resposta.text or "")[:2000]}
+
+    if not resposta.ok:
+        raise RuntimeError(
+            f"Erro POST D4Sign. Caminho=/documents/{uuid_limpo}/download. "
+            f"Status={resposta.status_code}. Resposta={resposta_download}"
+        )
+
+    url_download = extrair_url_download_pdf_d4sign(resposta_download)
+    if url_download:
+        return baixar_pdf_url_temporaria(url_download)
+
+    conteudo_base64 = extrair_base64_pdf_d4sign(resposta_download)
+    if conteudo_base64:
+        dados_pdf = base64.b64decode(conteudo_base64, validate=False)
+        validar_bytes_pdf(dados_pdf)
+        return dados_pdf
+
+    raise RuntimeError(f"D4Sign não retornou PDF direto, URL nem base64 para download do PDF. Resposta={resposta_download}")
+
+def gravar_pdf_local_atomicamente(dados_pdf: bytes, nome_arquivo: str) -> Path:
+    validar_bytes_pdf(dados_pdf)
+    pasta = pasta_pdf_local_contrato_d4()
+    pasta.mkdir(parents=True, exist_ok=True)
+    destino = (pasta / Path(nome_arquivo).name).resolve()
+    pasta_resolvida = pasta.resolve()
+    if destino != pasta_resolvida and pasta_resolvida not in destino.parents:
+        raise RuntimeError("Caminho de destino do PDF ficou fora da pasta permitida.")
+    temporario = destino.with_name(f".{destino.name}.{uuid.uuid4().hex}.tmp")
+    with open(temporario, "wb") as arquivo:
+        arquivo.write(dados_pdf)
+        arquivo.flush()
+        os.fsync(arquivo.fileno())
+    os.replace(str(temporario), str(destino))
+    return destino
+
+
+def buscar_registro_pdf_arquivo(
+    conexao,
+    *,
+    id_controle: int,
+    nome_arquivo: str,
+    id_contrato_d4: int | None = None,
+) -> dict[str, Any] | None:
+    url_anexo = url_anexo_contrato_pdf(nome_arquivo)
+    id_d4 = converter_int(id_contrato_d4)
+    linha = conexao.execute(
+        text(f"""
+            SELECT TOP (1)
+                   IDFatoArquivosContratos,
+                   IDFatoControleContratosEuromidia,
+                   IDFatoKanbanCard,
+                   IDFatoContratoD4,
+                   NomeArquivo,
+                   UrlAnexo,
+                   Extensao,
+                   TamanhoArquivo,
+                   MesAno,
+                   DataAtualizado
+              FROM {TABELA_ARQUIVOS_CONTRATOS} WITH (UPDLOCK, HOLDLOCK)
+             WHERE IDFatoControleContratosEuromidia = :id_controle
+               AND (
+                    LOWER(LTRIM(RTRIM(ISNULL(NomeArquivo, '')))) = LOWER(:nome_arquivo)
+                 OR LOWER(LTRIM(RTRIM(ISNULL(UrlAnexo, '')))) = LOWER(:url_anexo)
+                 OR (
+                        :id_contrato_d4 IS NOT NULL
+                    AND IDFatoContratoD4 = :id_contrato_d4
+                    )
+               )
+             ORDER BY
+                    CASE
+                        WHEN :id_contrato_d4 IS NOT NULL AND IDFatoContratoD4 = :id_contrato_d4 THEN 0
+                        ELSE 1
+                    END,
+                    IDFatoArquivosContratos DESC;
+        """),
+        {
+            "id_controle": int(id_controle),
+            "nome_arquivo": Path(nome_arquivo).name,
+            "url_anexo": url_anexo,
+            "id_contrato_d4": int(id_d4) if id_d4 else None,
+        },
+    ).mappings().first()
+    return dict(linha) if linha else None
+
+def registrar_pdf_tabela_arquivos(conexao, *, contrato: dict[str, Any], nome_arquivo: str, tamanho_arquivo: int) -> dict[str, Any]:
+    id_controle = converter_int(contrato.get("IDFatoControleContratosEuromidia"))
+    id_card = converter_int(contrato.get("IDFatoKanbanCard"))
+    id_d4 = converter_int(contrato.get("IDFatoContratoD4"))
+    if not id_controle:
+        raise RuntimeError("Sem IDFatoControleContratosEuromidia para gravar FatoArquivosContratosEuromidia.")
+    if not id_d4:
+        raise RuntimeError("Sem IDFatoContratoD4 para gravar FatoArquivosContratosEuromidia.")
+
+    nome_final = Path(nome_arquivo).name
+    url_anexo = url_anexo_contrato_pdf(nome_final)
+    mes_ano = pendulum.now("America/Sao_Paulo").strftime("%Y-%m")
+    tamanho = float(tamanho_arquivo or 0)
+    row_existente = buscar_registro_pdf_arquivo(conexao, id_controle=int(id_controle), nome_arquivo=nome_final, id_contrato_d4=int(id_d4))
+
+    if row_existente:
+        id_arquivo = int(row_existente["IDFatoArquivosContratos"])
+        conexao.execute(
+            text(f"""
+                UPDATE {TABELA_ARQUIVOS_CONTRATOS}
+                   SET IDFatoControleContratosEuromidia = :id_controle,
+                       IDFatoKanbanCard = :id_card,
+                       IDFatoContratoD4 = :id_d4,
+                       NomeArquivo = :nome_arquivo,
+                       UrlAnexo = :url_anexo,
+                       Extensao = 'pdf',
+                       TamanhoArquivo = :tamanho,
+                       MesAno = :mes_ano,
+                       DataAtualizado = SYSDATETIME()
+                 WHERE IDFatoArquivosContratos = :id_arquivo;
+            """),
+            {
+                "id_arquivo": id_arquivo,
+                "id_controle": int(id_controle),
+                "id_card": int(id_card) if id_card else None,
+                "id_d4": int(id_d4),
+                "nome_arquivo": nome_final,
+                "url_anexo": url_anexo,
+                "tamanho": tamanho,
+                "mes_ano": mes_ano,
+            },
+        )
+        acao = "atualizado"
+    else:
+        linha = conexao.execute(
+            text(f"""
+                INSERT INTO {TABELA_ARQUIVOS_CONTRATOS}
+                (
+                    IDFatoControleContratosEuromidia,
+                    IDFatoKanbanCard,
+                    IDFatoContratoD4,
+                    NomeArquivo,
+                    UrlAnexo,
+                    Extensao,
+                    TamanhoArquivo,
+                    MesAno,
+                    DataAtualizado
+                )
+                OUTPUT INSERTED.IDFatoArquivosContratos AS IDFatoArquivosContratos
+                VALUES
+                (
+                    :id_controle,
+                    :id_card,
+                    :id_d4,
+                    :nome_arquivo,
+                    :url_anexo,
+                    'pdf',
+                    :tamanho,
+                    :mes_ano,
+                    SYSDATETIME()
+                );
+            """),
+            {
+                "id_controle": int(id_controle),
+                "id_card": int(id_card) if id_card else None,
+                "id_d4": int(id_d4),
+                "nome_arquivo": nome_final,
+                "url_anexo": url_anexo,
+                "tamanho": tamanho,
+                "mes_ano": mes_ano,
+            },
+        ).mappings().first()
+        if not linha or linha.get("IDFatoArquivosContratos") is None:
+            raise RuntimeError("PDF salvo, mas não recuperei IDFatoArquivosContratos inserido.")
+        id_arquivo = int(linha["IDFatoArquivosContratos"])
+        acao = "inserido"
+
+    return {
+        "ok": True,
+        "status": acao,
+        "id_fato_arquivos_contratos": int(id_arquivo),
+        "id_fato_controle_contratos": int(id_controle),
+        "id_fato_kanban_card": int(id_card) if id_card else None,
+        "id_fato_contrato_d4": int(id_d4),
+        "nome_arquivo": nome_final,
+        "url_anexo": url_anexo,
+        "extensao": "pdf",
+        "tamanho_arquivo": tamanho,
+        "mes_ano": mes_ano,
+    }
+
+
+def garantir_pdf_local_contrato_d4(conexao, contrato: dict[str, Any], nome_documento_d4: str | None = None) -> dict[str, Any]:
+    """Garante exatamente o que a tela precisa: PDF físico + linha na FatoArquivosContratosEuromidia."""
+    if not env_bool("D4SIGN_GARANTIR_PDF_LOCAL_DAGS_HABILITADO", "1"):
+        return {"ok": False, "status": "desabilitado"}
+
+    id_controle = converter_int(contrato.get("IDFatoControleContratosEuromidia"))
+    id_d4 = converter_int(contrato.get("IDFatoContratoD4"))
+    uuid_doc = uuid_d4_valido(contrato.get("UUIDDocumentoD4"))
+    if not id_controle or not id_d4 or not uuid_doc:
+        return {
+            "ok": False,
+            "status": "sem_chaves_para_pdf",
+            "id_controle": id_controle,
+            "id_fato_contrato_d4": id_d4,
+            "uuid_documento_d4": uuid_doc,
+        }
+
+    nome_arquivo = montar_nome_pdf_local_contrato_d4(contrato, nome_documento_d4)
+    if not nome_arquivo:
+        return {"ok": False, "status": "sem_nome_arquivo_pdf", "id_controle": id_controle, "id_fato_contrato_d4": id_d4}
+
+    caminho = (pasta_pdf_local_contrato_d4() / Path(nome_arquivo).name).resolve()
+    row_existente = buscar_registro_pdf_arquivo(conexao, id_controle=int(id_controle), nome_arquivo=nome_arquivo, id_contrato_d4=int(id_d4))
+
+    if row_existente and caminho_pdf_valido(caminho):
+        return {
+            "ok": True,
+            "status": "ja_existia_sem_download",
+            "download_d4sign_executado": False,
+            "id_fato_arquivos_contratos": int(row_existente["IDFatoArquivosContratos"]),
+            "id_fato_controle_contratos": int(id_controle),
+            "id_fato_contrato_d4": int(id_d4),
+            "uuid_documento_d4": uuid_doc,
+            "nome_arquivo": Path(nome_arquivo).name,
+            "url_anexo": url_anexo_contrato_pdf(nome_arquivo),
+            "caminho_arquivo": str(caminho),
+        }
+
+    if caminho_pdf_valido(caminho):
+        registro = registrar_pdf_tabela_arquivos(conexao, contrato=contrato, nome_arquivo=nome_arquivo, tamanho_arquivo=int(caminho.stat().st_size))
+        return {**registro, "status": "arquivo_existente_registrado_sem_download", "download_d4sign_executado": False, "uuid_documento_d4": uuid_doc, "caminho_arquivo": str(caminho)}
+
+    dados_pdf = executar_download_pdf_d4sign(uuid_doc)
+    caminho_salvo = gravar_pdf_local_atomicamente(dados_pdf, nome_arquivo)
+    registro = registrar_pdf_tabela_arquivos(conexao, contrato=contrato, nome_arquivo=nome_arquivo, tamanho_arquivo=int(caminho_salvo.stat().st_size))
+    return {**registro, "status": "baixado_salvo_registrado", "download_d4sign_executado": True, "uuid_documento_d4": uuid_doc, "caminho_arquivo": str(caminho_salvo)}
+
+
+def evento_deve_atualizar_pdf_assinado_d4(
+    *,
+    tipo_evento: str | None,
+    payload: dict[str, Any],
+    status_evento: dict[str, Any],
+) -> bool:
+    """Decido se o webhook deve forçar substituição do PDF local pela versão atual/assinada.
+
+    A garantia comum do PDF não baixa de novo quando já existe arquivo físico válido.
+    Para eventos de assinatura/finalização, isso não serve, porque o arquivo existente pode ser
+    a versão enviada para assinatura. Nesses eventos, a DAG baixa novamente da D4Sign e sobrescreve
+    o mesmo arquivo usado pela tela.
+    """
+    if not env_bool("D4SIGN_ATUALIZAR_PDF_ASSINADO_WEBHOOK_HABILITADO", "1"):
+        return False
+
+    tipo_normalizado = normalizar_texto(tipo_evento)
+    evento_historico = normalizar_texto(status_evento.get("EventoHistorico"))
+    nome_fase = normalizar_texto(status_evento.get("NomeFaseD4"))
+    type_post = converter_int(payload.get("type_post"))
+
+    if converter_int(status_evento.get("IDDimStatusD4")) == ID_STATUS_D4_FINALIZADO:
+        return True
+
+    if converter_int(status_evento.get("IDDimStatusContratos")) == ID_STATUS_CONTRATO_ATIVO:
+        return True
+
+    if type_post in {1, 4}:
+        return True
+
+    texto = f"{tipo_normalizado} {evento_historico} {nome_fase}"
+    gatilhos = [
+        "finished document",
+        "finalizado",
+        "assinado",
+        "signed",
+        "completed",
+        "complete",
+        "concluded",
+        "concluido",
+    ]
+    return any(gatilho in texto for gatilho in gatilhos)
+
+
+def atualizar_pdf_local_assinado_contrato_d4(
+    conexao,
+    contrato: dict[str, Any],
+    nome_documento_d4: str | None = None,
+) -> dict[str, Any]:
+    """Baixa novamente o PDF da D4Sign e sobrescreve o arquivo local com a versão atual/assinada.
+
+    Esta função é intencionalmente diferente de garantir_pdf_local_contrato_d4:
+    - garantir_pdf_local_contrato_d4 não baixa se o arquivo já existe;
+    - esta função força o download quando o webhook indica assinatura/finalização.
+
+    O nome do arquivo é preservado quando já existe linha em FatoArquivosContratosEuromidia, para
+    o botão de download continuar apontando para a mesma UrlAnexo.
+    """
+    if not env_bool("D4SIGN_GARANTIR_PDF_LOCAL_DAGS_HABILITADO", "1"):
+        return {"ok": False, "status": "desabilitado"}
+
+    id_controle = converter_int(contrato.get("IDFatoControleContratosEuromidia"))
+    id_d4 = converter_int(contrato.get("IDFatoContratoD4"))
+    uuid_doc = uuid_d4_valido(contrato.get("UUIDDocumentoD4"))
+
+    if not id_controle or not id_d4 or not uuid_doc:
+        return {
+            "ok": False,
+            "status": "sem_chaves_para_atualizar_pdf_assinado",
+            "id_controle": id_controle,
+            "id_fato_contrato_d4": id_d4,
+            "uuid_documento_d4": uuid_doc,
+        }
+
+    nome_arquivo_padrao = montar_nome_pdf_local_contrato_d4(contrato, nome_documento_d4)
+    if not nome_arquivo_padrao:
+        return {
+            "ok": False,
+            "status": "sem_nome_arquivo_pdf_assinado",
+            "id_controle": id_controle,
+            "id_fato_contrato_d4": id_d4,
+            "uuid_documento_d4": uuid_doc,
+        }
+
+    row_existente = buscar_registro_pdf_arquivo(
+        conexao,
+        id_controle=int(id_controle),
+        nome_arquivo=nome_arquivo_padrao,
+        id_contrato_d4=int(id_d4),
+    )
+
+    nome_final = Path(nome_arquivo_padrao).name
+    if row_existente and str(row_existente.get("NomeArquivo") or "").strip():
+        nome_existente = Path(str(row_existente.get("NomeArquivo") or "")).name
+        if nome_existente.lower().endswith(".pdf"):
+            nome_final = nome_existente
+
+    caminho_antes = pasta_pdf_local_contrato_d4() / nome_final
+    tamanho_anterior = None
+    if caminho_antes.exists() and caminho_antes.is_file():
+        try:
+            tamanho_anterior = int(caminho_antes.stat().st_size)
+        except Exception:
+            tamanho_anterior = None
+
+    dados_pdf = executar_download_pdf_d4sign(uuid_doc)
+    caminho_salvo = gravar_pdf_local_atomicamente(dados_pdf, nome_final)
+    tamanho_novo = int(caminho_salvo.stat().st_size)
+
+    registro = registrar_pdf_tabela_arquivos(
+        conexao,
+        contrato=contrato,
+        nome_arquivo=nome_final,
+        tamanho_arquivo=tamanho_novo,
+    )
+
+    return {
+        **registro,
+        "status": "pdf_assinado_atualizado",
+        "download_d4sign_executado": True,
+        "sobrescreveu_arquivo_existente": tamanho_anterior is not None,
+        "tamanho_arquivo_anterior": tamanho_anterior,
+        "tamanho_arquivo_novo": tamanho_novo,
+        "uuid_documento_d4": uuid_doc,
+        "caminho_arquivo": str(caminho_salvo),
+    }
+
+
+def garantir_pdfs_locais_contratos_d4(hook_sql: HookSqlServer) -> dict[str, Any]:
+    """Varre contratos D4 ativos e preenche PDF/tabela quando estiver faltando."""
+    if not env_bool("D4SIGN_GARANTIR_PDF_LOCAL_DAGS_HABILITADO", "1"):
+        return {"habilitado": False, "status": "desabilitado"}
+
+    limite = obter_int_env("D4SIGN_GARANTIR_PDF_LOCAL_LIMITE_POR_EXECUCAO", 50)
+    limite = max(1, min(limite, 500))
+
+    contratos = hook_sql.executar_select(
+        f"""
+        SELECT TOP ({limite})
+            d.IDFatoContratoD4,
+            d.IDDimStatusD4,
+            d.IDEmpresa AS IDEmpresa,
+            d.IDDimCofreD4,
+            d.IDFatoControleContratosEuromidia,
+            d.IDFatoKanbanCard,
+            d.IDDimStatusContratos,
+            d.IDDimModeloContratoD4,
+            d.IDDimTipoDocumento,
+            d.UUIDDocumentoD4,
+            d.UUIDCofreD4,
+            d.NomeDocumentoD4,
+            d.NomeCofreD4,
+            d.IDFaseD4,
+            d.NomeFaseD4,
+            d.TipoArquivoD4,
+            d.QuantidadePaginas,
+            d.TamanhoArquivoD4,
+            d.StatusComentarioD4,
+            d.CanceladoPorD4,
+            d.DataCriacao,
+            d.DataAtualizacao,
+            d.BitAtivo
+        FROM {TABELA_CONTRATO_D4} d
+        WHERE ISNULL(d.BitAtivo, 1) = 1
+          AND d.IDFatoControleContratosEuromidia IS NOT NULL
+          AND NULLIF(LTRIM(RTRIM(d.UUIDDocumentoD4)), '') IS NOT NULL
+        ORDER BY
+            CASE WHEN EXISTS (
+                SELECT 1
+                  FROM {TABELA_ARQUIVOS_CONTRATOS} a
+                 WHERE a.IDFatoControleContratosEuromidia = d.IDFatoControleContratosEuromidia
+                   AND a.IDFatoContratoD4 = d.IDFatoContratoD4
+            ) THEN 1 ELSE 0 END,
+            ISNULL(d.DataAtualizacao, d.DataCriacao) DESC,
+            d.IDFatoContratoD4 DESC;
+        """
+    )
+
+    resultados: list[dict[str, Any]] = []
+    erros: list[dict[str, Any]] = []
+    engine = hook_sql.obter_engine()
+    for contrato in contratos:
+        try:
+            with engine.begin() as conexao:
+                resultado = garantir_pdf_local_contrato_d4(conexao, dict(contrato), contrato.get("NomeDocumentoD4"))
+            resultados.append(resultado)
+        except Exception as exc:
+            logging.exception(
+                "D4SIGN_PDF_LOCAL_DAG | falha ao garantir PDF local | IDFatoContratoD4=%s | IDFatoControle=%s | UUID=%s",
+                contrato.get("IDFatoContratoD4"),
+                contrato.get("IDFatoControleContratosEuromidia"),
+                contrato.get("UUIDDocumentoD4"),
+            )
+            erros.append({
+                "IDFatoContratoD4": contrato.get("IDFatoContratoD4"),
+                "IDFatoControleContratosEuromidia": contrato.get("IDFatoControleContratosEuromidia"),
+                "UUIDDocumentoD4": contrato.get("UUIDDocumentoD4"),
+                "erro": str(exc),
+            })
+
+    return {
+        "habilitado": True,
+        "contratos_candidatos_pdf": len(contratos),
+        "pdfs_ok": len([r for r in resultados if r.get("ok")]),
+        "pdfs_com_erro": len(erros),
+        "resultados_pdf_local": resultados[:100],
+        "erros_pdf_local": erros[:50],
+    }
 
 def obter_int_env(nome_variavel: str, padrao: int) -> int:
     """Leio inteiro do ambiente sem quebrar o parse da DAG se vier vazio ou inválido."""
@@ -71,10 +737,11 @@ Fluxo:
    - `[Integracao].[Silver].[FatoContratoD4Signatario]`
    - `[Integracao].[Silver].[DimHistoricoContratosD4]`
 5. A DAG marca o evento como `PROCESSADO`.
+6. Se o webhook indicar assinatura/finalização, a DAG baixa novamente o PDF da D4Sign e sobrescreve o arquivo local com a versão atual/assinada.
 
 Regra importante:
-- `Finished document` da D4Sign vira contrato `Ativo` na Euromídia.
-- `Signed` da D4Sign vira contrato `Em Assinatura` na Euromídia.
+- `Finished document` da D4Sign vira contrato `Concluido` na Euromídia.
+- `Signed` da D4Sign não ativa o contrato sozinho; mantém `Em Assinatura` e a conclusão segue o status oficial da D4Sign/API.
 - `Canceled` da D4Sign vira contrato `Cancelado` na Euromídia.
 
 Esta DAG roda a cada 1 minuto e também pode ser acionada sob demanda pelo Flask.
@@ -673,11 +1340,16 @@ def resolver_status_por_evento(tipo_evento: str | None, payload: dict[str, Any])
             "IDDimStatusD4": ID_STATUS_D4_FINALIZADO,
             "IDFaseD4": ID_STATUS_D4_FINALIZADO,
             "NomeFaseD4": "Finalizado",
-            "IDDimStatusContratos": ID_STATUS_CONTRATO_ATIVO,
+            "IDDimStatusContratos": ID_STATUS_CONTRATO_CONCLUIDO,
             "EventoHistorico": "Finished document",
         }
 
     if type_post == 4 or "signed" in tipo_normalizado or "assinado" in tipo_normalizado:
+        # IMPORTANTE:
+        # O webhook "Signed" pode ser evento de assinatura de signatário, não garantia
+        # de que o contrato inteiro já deve virar Ativo.
+        # Enquanto a D4Sign estiver em Aguardando Assinaturas, o contrato interno fica
+        # como Em Assinatura. A ativação/conclusão deve seguir o status oficial D4/API.
         return {
             "IDDimStatusD4": ID_STATUS_D4_AGUARDANDO_ASSINATURAS,
             "IDFaseD4": ID_STATUS_D4_AGUARDANDO_ASSINATURAS,
@@ -774,40 +1446,53 @@ def reservar_eventos(conexao, id_evento_webhook: int | None, limite_eventos: int
 
 
 def buscar_contrato_por_uuid(conexao, uuid_documento: str) -> dict[str, Any] | None:
-    """Encontro o contrato D4 interno pelo UUID enviado no webhook."""
+    """Encontro o contrato D4 interno pelo UUID enviado no webhook.
+
+    Também resolvo o IDFatoKanbanCard pelo vínculo em FatoContratoCardEuromidia quando
+    FatoContratoD4.IDFatoKanbanCard estiver nulo. Isso mantém o PDF registrado com o card certo.
+    """
     sql = text(f"""
         SELECT TOP (1)
-            IDFatoContratoD4,
-            IDDimStatusD4,
-            IDEmpresa,
-            IDDimCofreD4,
-            IDFatoControleContratosEuromidia,
-            IDFatoKanbanCard,
-            IDDimStatusContratos,
-            IDDimModeloContratoD4,
-            IDDimTipoDocumento,
-            UUIDDocumentoD4,
-            UUIDCofreD4,
-            NomeDocumentoD4,
-            NomeCofreD4,
-            IDFaseD4,
-            NomeFaseD4,
-            TipoArquivoD4,
-            QuantidadePaginas,
-            TamanhoArquivoD4,
-            StatusComentarioD4,
-            CanceladoPorD4,
-            DataCriacao,
-            DataAtualizacao,
-            BitAtivo
-        FROM {TABELA_CONTRATO_D4}
-        WHERE UUIDDocumentoD4 = :UUIDDocumentoD4
-          AND ISNULL(BitAtivo, 1) = 1
-        ORDER BY IDFatoContratoD4 DESC;
+            d.IDFatoContratoD4,
+            d.IDDimStatusD4,
+            d.IDEmpresa,
+            d.IDDimCofreD4,
+            d.IDFatoControleContratosEuromidia,
+            COALESCE(d.IDFatoKanbanCard, card.IDFatoKanbanCard) AS IDFatoKanbanCard,
+            d.IDDimStatusContratos,
+            d.IDDimModeloContratoD4,
+            d.IDDimTipoDocumento,
+            d.UUIDDocumentoD4,
+            d.UUIDCofreD4,
+            d.NomeDocumentoD4,
+            d.NomeCofreD4,
+            d.IDFaseD4,
+            d.NomeFaseD4,
+            d.TipoArquivoD4,
+            d.QuantidadePaginas,
+            d.TamanhoArquivoD4,
+            d.StatusComentarioD4,
+            d.CanceladoPorD4,
+            d.DataCriacao,
+            d.DataAtualizacao,
+            d.BitAtivo
+        FROM {TABELA_CONTRATO_D4} d
+        OUTER APPLY (
+            SELECT TOP (1)
+                cc.IDFatoKanbanCard
+            FROM {TABELA_CONTRATO_CARD} cc WITH (READPAST)
+            WHERE cc.IDFatoControleContratosEuromidia = d.IDFatoControleContratosEuromidia
+              AND cc.IDFatoKanbanCard IS NOT NULL
+            ORDER BY
+                cc.DataAtualizacao DESC,
+                cc.IDFatoContratoCardEuromidia DESC
+        ) card
+        WHERE d.UUIDDocumentoD4 = :UUIDDocumentoD4
+          AND ISNULL(d.BitAtivo, 1) = 1
+        ORDER BY d.IDFatoContratoD4 DESC;
     """)
     linha = conexao.execute(sql, {"UUIDDocumentoD4": uuid_documento}).mappings().first()
     return dict(linha) if linha else None
-
 
 def atualizar_contrato_d4(
     conexao,
@@ -849,21 +1534,18 @@ def resolver_status_final_euromidia(status_atual: Any, status_novo: Any) -> int 
     if id_status_novo is None:
         return id_status_atual
 
-    if id_status_novo == ID_STATUS_CONTRATO_CANCELADO:
+    # Cancelado é terminal.
+    if id_status_atual == ID_STATUS_CONTRATO_CANCELADO or id_status_novo == ID_STATUS_CONTRATO_CANCELADO:
         return ID_STATUS_CONTRATO_CANCELADO
 
-    if id_status_novo == ID_STATUS_CONTRATO_ATIVO:
-        return ID_STATUS_CONTRATO_ATIVO
+    # Concluido também não deve regredir por evento atrasado.
+    if id_status_atual == ID_STATUS_CONTRATO_CONCLUIDO:
+        return ID_STATUS_CONTRATO_CONCLUIDO
 
     if id_status_atual is None:
         return id_status_novo
 
-    if id_status_atual == ID_STATUS_CONTRATO_CANCELADO:
-        return ID_STATUS_CONTRATO_CANCELADO
-
-    if id_status_atual == ID_STATUS_CONTRATO_ATIVO:
-        return ID_STATUS_CONTRATO_ATIVO
-
+    # Permite a progressão Signed -> Ativo e Finished document -> Concluido.
     if id_status_novo > id_status_atual:
         return id_status_novo
 
@@ -1350,10 +2032,14 @@ def processar_evento(conexao, evento: dict[str, Any]) -> dict[str, Any]:
         id_status_contrato=status_evento.get("IDDimStatusContratos"),
     )
 
+    status_evento_historico = dict(status_evento)
+    if propagacao_euromidia.get("propagou") and propagacao_euromidia.get("status_final") is not None:
+        status_evento_historico["IDDimStatusContratos"] = propagacao_euromidia.get("status_final")
+
     inserir_historico_d4(
         conexao,
         contrato=contrato,
-        status_evento=status_evento,
+        status_evento=status_evento_historico,
         data_evento=data_evento,
     )
 
@@ -1366,6 +2052,36 @@ def processar_evento(conexao, evento: dict[str, Any]) -> dict[str, Any]:
             payload_json=payload_json,
         )
         acoes_signatarios.append(acao)
+
+    try:
+        contrato_pdf = dict(contrato)
+        contrato_pdf["NomeDocumentoD4"] = nome_documento or contrato.get("NomeDocumentoD4")
+
+        if evento_deve_atualizar_pdf_assinado_d4(
+            tipo_evento=tipo_evento,
+            payload=payload,
+            status_evento=status_evento,
+        ):
+            pdf_local = atualizar_pdf_local_assinado_contrato_d4(
+                conexao,
+                contrato_pdf,
+                nome_documento or contrato.get("NomeDocumentoD4"),
+            )
+        else:
+            pdf_local = garantir_pdf_local_contrato_d4(
+                conexao,
+                contrato_pdf,
+                nome_documento or contrato.get("NomeDocumentoD4"),
+            )
+    except Exception as exc:
+        logging.exception(
+            "D4SIGN_PDF_LOCAL_WEBHOOK | webhook processado, mas falhei ao garantir/atualizar PDF local | id_evento=%s | uuid=%s | id_contrato=%s | tipo_evento=%s",
+            id_evento,
+            uuid_documento,
+            contrato.get("IDFatoControleContratosEuromidia"),
+            tipo_evento,
+        )
+        pdf_local = {"ok": False, "status": "erro_pdf_local_webhook", "erro": str(exc)}
 
     marcar_evento_processado(
         conexao,
@@ -1384,6 +2100,7 @@ def processar_evento(conexao, evento: dict[str, Any]) -> dict[str, Any]:
         "propagacao_euromidia": propagacao_euromidia,
         "signatarios": len(signatarios),
         "acoes_signatarios": acoes_signatarios,
+        "pdf_local": pdf_local,
     }
 
 

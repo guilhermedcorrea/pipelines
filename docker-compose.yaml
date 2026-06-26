@@ -65,6 +65,14 @@ x-airflow-common: &airflow-common
     PASTA_BASE_DADOS_CONTRATOS_CONTAINER: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos"
     CAMINHO_CONTROLE_CONTRATOS_XLSM: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
 
+    # PDFs de contratos D4Sign.
+    # O DAG grava/atualiza a tabela FatoArquivosContratosEuromidia e salva o PDF físico nesta pasta.
+    # Esta pasta precisa ser o MESMO bind mount usado/servido pelo Flask para o botão de download encontrar o arquivo.
+    D4SIGN_PDF_LOCAL_PASTA_CONTRATO: /home/euromidia/projetos/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
+    D4SIGN_GARANTIR_PDF_LOCAL_DAGS_HABILITADO: "1"
+    D4SIGN_GARANTIR_PDF_LOCAL_LIMITE_POR_EXECUCAO: "5000"
+    D4SIGN_GARANTIR_PDF_LOCAL_VERIFICAR_FISICO_TODOS: "1"
+
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/queries:/opt/airflow/queries
@@ -91,6 +99,11 @@ x-airflow-common: &airflow-common
     # Isso desviaria os CSVs para fora de /root/PythonJobs/pipelines/airflow/Dados.
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin:rw
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis:rw
+    # PDFs/anexos de contratos D4Sign.
+    # Montagem no caminho real do servidor para o Airflow gravar exatamente onde você verifica no host.
+    - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/euromidia/projetos/pipelines/FlaskApp/Contratos:rw
+    # Montagem também no caminho legado usado por partes antigas do projeto, sem remover compatibilidade.
+    - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
 
   user: "${AIRFLOW_UID}:0"
 
@@ -159,7 +172,7 @@ x-flask-common: &flask-common
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
     - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
-    - ./FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos
+    - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
     - ./FlaskApp/app/static:/app/app/static
   restart: unless-stopped
 
@@ -498,7 +511,7 @@ services:
       flask-app-2:
         condition: service_started
     volumes:
-      - ./FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos
+      - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 
@@ -548,7 +561,7 @@ services:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
       - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
       - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
-      - ./FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos
+      - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 

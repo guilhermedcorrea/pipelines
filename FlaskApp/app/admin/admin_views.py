@@ -14284,34 +14284,36 @@ def _d4sign_buscar_pdf_local_existente_admin(
             caminho_registrado = (_d4sign_pdf_pasta_local_contrato_admin() / Path(nome_registrado).name).resolve()
 
         pdf_valido = _d4sign_pdf_local_caminho_esta_valido_admin(caminho_registrado)
-        status = "ja_existia_sem_download" if pdf_valido else "ja_registrado_sem_download"
-        mensagem = (
-            "PDF local já existia; não chamei novamente o download da D4Sign."
-            if pdf_valido
-            else "Registro do PDF já existia na tabela; não chamei novamente o download da D4Sign pela tela de aprovação."
-        )
+        if pdf_valido:
+            current_app.logger.info(
+                "D4SIGN_PDF_LOCAL | registro e PDF físico já existiam; não vou baixar de novo | uuid=%s | id_contrato=%s | id_d4=%s | id_arquivo=%s | caminho=%s",
+                uuid_documento_d4,
+                id_fato_controle_contratos,
+                id_d4,
+                row_existente.get("IDFatoArquivosContratos"),
+                str(caminho_registrado) if caminho_registrado is not None else None,
+            )
 
-        current_app.logger.info(
-            "D4SIGN_PDF_LOCAL | já existia/registrado; não vou baixar de novo | uuid=%s | id_contrato=%s | id_d4=%s | id_arquivo=%s | caminho=%s | pdf_valido=%s",
+            return _d4sign_montar_retorno_pdf_local_existente_admin(
+                status="ja_existia_sem_download",
+                mensagem="Registro e PDF local já existiam; não chamei novamente o download da D4Sign.",
+                id_fato_controle_contratos=int(id_fato_controle_contratos),
+                id_fato_kanban_card=id_fato_kanban_card,
+                id_fato_contrato_d4=id_d4,
+                uuid_documento_d4=uuid_documento_d4,
+                nome_arquivo=nome_registrado,
+                url_anexo=url_registrada or _anexos_contrato_url_relativa_admin(nome_registrado),
+                caminho_arquivo=caminho_registrado,
+                id_fato_arquivos_contratos=row_existente.get("IDFatoArquivosContratos"),
+            )
+
+        current_app.logger.warning(
+            "D4SIGN_PDF_LOCAL | registro existia na tabela, mas o PDF físico não estava válido; vou baixar novamente e atualizar o mesmo registro | uuid=%s | id_contrato=%s | id_d4=%s | id_arquivo=%s | caminho=%s",
             uuid_documento_d4,
             id_fato_controle_contratos,
             id_d4,
             row_existente.get("IDFatoArquivosContratos"),
             str(caminho_registrado) if caminho_registrado is not None else None,
-            pdf_valido,
-        )
-
-        return _d4sign_montar_retorno_pdf_local_existente_admin(
-            status=status,
-            mensagem=mensagem,
-            id_fato_controle_contratos=int(id_fato_controle_contratos),
-            id_fato_kanban_card=id_fato_kanban_card,
-            id_fato_contrato_d4=id_d4,
-            uuid_documento_d4=uuid_documento_d4,
-            nome_arquivo=nome_registrado,
-            url_anexo=url_registrada or _anexos_contrato_url_relativa_admin(nome_registrado),
-            caminho_arquivo=caminho_registrado,
-            id_fato_arquivos_contratos=row_existente.get("IDFatoArquivosContratos"),
         )
 
     caminho_previsto = (_d4sign_pdf_pasta_local_contrato_admin() / Path(nome_arquivo_previsto).name).resolve()

@@ -1031,6 +1031,61 @@
       font-weight:900;
       color:var(--euro-blue);
     }
+    .d4-doc-file.is-missing{
+      background:#FFFBEB;
+      border-color:#FDE68A;
+    }
+    .d4-anexos-lista{
+      margin-top:12px;
+      display:grid;
+      gap:8px;
+    }
+    .d4-anexo-item{
+      border:1px solid #E2E8F0;
+      border-radius:12px;
+      background:#FFFFFF;
+      padding:10px 12px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+      color:inherit;
+      text-decoration:none;
+    }
+    .d4-anexo-item:hover{
+      border-color:#94A3B8;
+      box-shadow:0 10px 20px rgba(15,23,42,.08);
+    }
+    .d4-anexo-item.is-missing{
+      background:#FFFBEB;
+      border-color:#FDE68A;
+    }
+    .d4-anexo-mini-icon{
+      width:34px;
+      height:38px;
+      border-radius:8px;
+      background:#EF4444;
+      color:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:10px;
+      font-weight:950;
+      flex:none;
+    }
+    .d4-anexo-list-title{
+      font-size:12px;
+      font-weight:950;
+      color:var(--text);
+      word-break:break-word;
+    }
+    .d4-anexo-list-meta{
+      margin-top:3px;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:800;
+      line-height:1.35;
+    }
     .d4-pdf-icon{
       width:42px;
       height:48px;
@@ -1508,13 +1563,15 @@
   {% set painel_d4 = painel_d4_contrato if painel_d4_contrato is defined and painel_d4_contrato else none %}
   {% set doc_d4 = painel_d4.DocumentoAtual if painel_d4 and painel_d4.DocumentoAtual else none %}
   {% set status_d4 = painel_d4.StatusAtualD4 if painel_d4 and painel_d4.StatusAtualD4 else none %}
+  {% set arquivos_contrato_d4 = painel_d4.ArquivosContrato if painel_d4 and painel_d4.ArquivosContrato else [] %}
+  {% set arquivo_contrato_atual = painel_d4.ArquivoContratoAtual if painel_d4 and painel_d4.ArquivoContratoAtual else none %}
   {% set contrato_id_socket = contrato.IDFatoControleContratos or contrato.IDFatoControleContratosEuromidia %}
 <div class="contrato-d4-grid" data-contrato-d4-painel data-id-contrato="{{ contrato_id_socket }}">
     <div class="contrato-d4-card">
       <div class="contrato-d4-head">
         <div>
           <div class="contrato-d4-title">
-            Documento D4Sign do ciclo atual
+            Documento D4Sign / anexo do contrato
             <img src="{{ url_for('static', filename='imagens/LogoSistemas/d4sign.jpg') }}" alt="D4Sign" loading="lazy" decoding="async" onerror="this.style.display='none';">
           </div>
         </div>
@@ -1525,31 +1582,54 @@
 
       {% if doc_d4 %}
         <div class="d4-doc-layout">
-          {% if doc_d4.IDFatoContratoD4 and doc_d4.UUIDDocumentoD4 %}
-            {% set url_download_d4 = '/paineis/contratos/' ~ contrato_id_socket ~ '/d4/' ~ doc_d4.IDFatoContratoD4 ~ '/download' %}
+          {% if arquivo_contrato_atual and arquivo_contrato_atual.DownloadUrl %}
             <a class="d4-doc-file d4-doc-file-link"
-               href="{{ url_download_d4 }}"
-               title="Baixar o PDF real do documento na D4Sign">
+               href="{{ arquivo_contrato_atual.DownloadUrl }}"
+               title="Baixar PDF do contrato">
               <div class="d4-pdf-icon">PDF</div>
               <div>
-                <div class="d4-doc-name" data-d4-field="nome_documento">{{ doc_d4.NomeDocumentoD4 or "Documento D4Sign" }}</div>
+                <div class="d4-doc-name" data-d4-field="nome_documento">{{ arquivo_contrato_atual.NomeExibicao or doc_d4.NomeDocumentoD4 or "Contrato em PDF" }}</div>
                 <div class="d4-doc-meta">
+                  Anexo: <strong>#{{ arquivo_contrato_atual.IDFatoArquivosContratos }}</strong><br>
                   Tipo: <strong data-d4-field="tipo_ciclo">{{ doc_d4.TipoCiclo or "Tipo não informado" }}</strong><br>
-                  UUID: <span data-d4-field="uuid_documento">{{ doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
-                  {% if doc_d4.IDFatoKanbanCard %}
-                    Card vinculado: #{{ doc_d4.IDFatoKanbanCard }}<br>
+                  UUID D4 do arquivo: <span data-d4-field="uuid_documento">{{ arquivo_contrato_atual.UUIDDocumentoD4 or doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
+                  {% if arquivo_contrato_atual.IDFatoContratoD4 %}
+                    Documento D4: #{{ arquivo_contrato_atual.IDFatoContratoD4 }}<br>
                   {% endif %}
-                  Enviado em: {{ doc_d4.DataEnvioD4.strftime("%d/%m/%Y %H:%M") if doc_d4.DataEnvioD4 else "—" }}
+                  {% if arquivo_contrato_atual.IDFatoKanbanCard or doc_d4.IDFatoKanbanCard %}
+                    Card vinculado: #{{ arquivo_contrato_atual.IDFatoKanbanCard or doc_d4.IDFatoKanbanCard }}<br>
+                  {% endif %}
+                  {% if arquivo_contrato_atual.TamanhoArquivoTexto and arquivo_contrato_atual.TamanhoArquivoTexto != "—" %}
+                    Tamanho: {{ arquivo_contrato_atual.TamanhoArquivoTexto }}<br>
+                  {% endif %}
+                  {% if arquivo_contrato_atual.ArquivoFisicoExiste %}
+                    Arquivo físico localizado na pasta de contratos.<br>
+                  {% else %}
+                    O clique baixa o PDF físico disponível deste contrato.<br>
+                  {% endif %}
+                  Atualizado em: {{ arquivo_contrato_atual.DataAtualizadoTexto or "—" }}
                 </div>
-                <span class="d4-download-hint">Clique para baixar o PDF real</span>
+                <span class="d4-download-hint">Clique para baixar o PDF do contrato</span>
               </div>
             </a>
+          {% elif arquivo_contrato_atual %}
+            <div class="d4-doc-file is-missing">
+              <div class="d4-pdf-icon">PDF</div>
+              <div>
+                <div class="d4-doc-name" data-d4-field="nome_documento">{{ arquivo_contrato_atual.NomeExibicao or doc_d4.NomeDocumentoD4 or "Contrato em PDF" }}</div>
+                <div class="d4-doc-meta">
+                  Registro encontrado na tabela como anexo #{{ arquivo_contrato_atual.IDFatoArquivosContratos }}, mas ainda não há rota de download para este registro.<br>
+                  UUID D4 do arquivo: <span data-d4-field="uuid_documento">{{ arquivo_contrato_atual.UUIDDocumentoD4 or doc_d4.UUIDDocumentoD4 or "—" }}</span>
+                </div>
+              </div>
+            </div>
           {% else %}
-            <div class="d4-doc-file">
+            <div class="d4-doc-file is-missing">
               <div class="d4-pdf-icon">PDF</div>
               <div>
                 <div class="d4-doc-name" data-d4-field="nome_documento">{{ doc_d4.NomeDocumentoD4 or "Documento D4Sign" }}</div>
                 <div class="d4-doc-meta">
+                  Documento D4 localizado, mas ainda não existe PDF anexado para este contrato na tabela de arquivos.<br>
                   Tipo: <strong data-d4-field="tipo_ciclo">{{ doc_d4.TipoCiclo or "Tipo não informado" }}</strong><br>
                   UUID: <span data-d4-field="uuid_documento">{{ doc_d4.UUIDDocumentoD4 or "—" }}</span><br>
                   {% if doc_d4.IDFatoKanbanCard %}
@@ -1589,9 +1669,44 @@
             <div class="d4-metric-v" data-d4-field="acao_cliente">{{ doc_d4.AcaoClienteTexto or "—" }}</div>
           </div>
         </div>
+      {% elif arquivos_contrato_d4 %}
+        <div class="d4-doc-layout">
+          {% set arquivo_sem_d4 = arquivos_contrato_d4[0] %}
+          {% if arquivo_sem_d4.ArquivoFisicoExiste and arquivo_sem_d4.DownloadUrl %}
+            <a class="d4-doc-file d4-doc-file-link"
+               href="{{ arquivo_sem_d4.DownloadUrl }}"
+               title="Baixar PDF anexado ao contrato">
+              <div class="d4-pdf-icon">PDF</div>
+              <div>
+                <div class="d4-doc-name" data-d4-field="nome_documento">{{ arquivo_sem_d4.NomeExibicao or "Contrato em PDF" }}</div>
+                <div class="d4-doc-meta">
+                  Anexo local: <strong>#{{ arquivo_sem_d4.IDFatoArquivosContratos }}</strong><br>
+                  {% if arquivo_sem_d4.IDFatoKanbanCard %}Card vinculado: #{{ arquivo_sem_d4.IDFatoKanbanCard }}<br>{% endif %}
+                  {% if arquivo_sem_d4.TamanhoArquivoTexto and arquivo_sem_d4.TamanhoArquivoTexto != "—" %}Tamanho: {{ arquivo_sem_d4.TamanhoArquivoTexto }}<br>{% endif %}
+                  Atualizado em: {{ arquivo_sem_d4.DataAtualizadoTexto or "—" }}
+                </div>
+                <span class="d4-download-hint">Clique para baixar o PDF anexado</span>
+              </div>
+            </a>
+          {% else %}
+            <div class="d4-doc-file is-missing">
+              <div class="d4-pdf-icon">PDF</div>
+              <div>
+                <div class="d4-doc-name" data-d4-field="nome_documento">{{ arquivo_sem_d4.NomeExibicao or "Contrato em PDF" }}</div>
+                <div class="d4-doc-meta">Registro encontrado na tabela como anexo #{{ arquivo_sem_d4.IDFatoArquivosContratos }}, mas o arquivo físico não foi localizado na pasta de contratos.</div>
+              </div>
+            </div>
+          {% endif %}
+
+          <div class="d4-status-box">
+            <div class="d4-status-label">Anexo do contrato</div>
+            <div class="d4-status-main" data-d4-field="nome_status">PDF anexado localmente</div>
+            <div class="d4-status-text" data-d4-field="interpretacao_status">Arquivo identificado pela tabela FatoArquivosContratosEuromidia para este contrato.</div>
+          </div>
+        </div>
       {% else %}
         <div class="d4-empty">
-          Nenhum documento D4Sign vinculado foi encontrado para este contrato.
+          Nenhum documento D4Sign ou PDF anexado foi encontrado para este contrato.
         </div>
       {% endif %}
     </div>
@@ -1605,6 +1720,9 @@
         {% if painel_d4 and painel_d4.Resumo %}
           <div class="ciclos-head-badges">
             <span class="d4-badge arquivado">{{ painel_d4.Resumo.QtdDocumentosD4 or 0 }} doc(s)</span>
+            {% if painel_d4.Resumo.QtdArquivosContrato %}
+              <span class="d4-badge finalizado">{{ painel_d4.Resumo.QtdArquivosContrato }} anexo(s)</span>
+            {% endif %}
             {% if painel_d4.Resumo.QtdRenovacoes %}
               <span class="d4-badge processando">{{ painel_d4.Resumo.QtdRenovacoes }} renovação(ões)</span>
             {% endif %}
