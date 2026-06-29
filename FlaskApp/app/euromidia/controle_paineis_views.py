@@ -9494,7 +9494,7 @@ def grade_painel_multi():
                     ,TRY_CONVERT(int, oc.[TipoReserva]) AS TipoReserva
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
                 WHERE (
-                        TRY_CONVERT(int, oc.[CodPonto]) = :codponto
+                        oc.[CodPonto] = :codponto
                         OR TRY_CONVERT(int, oc.[IDPainelEuromidia]) IN :ids_paineis_grade_multi
                       )
                   AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Origem]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
@@ -16759,7 +16759,7 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
     codpontos_rows = db.session.execute(text("""
         SELECT
             p.CodPonto,
-            MIN(TRY_CONVERT(int, p.CodPonto)) AS CodPontoOrdenacao
+            MIN(p.CodPonto) AS CodPontoOrdenacao
         FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p
         WHERE p.CodPonto IS NOT NULL
           AND NULLIF(LTRIM(RTRIM(CAST(p.CodPonto AS varchar(50)))), '') IS NOT NULL
@@ -16772,8 +16772,8 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
           )
         GROUP BY p.CodPonto
         ORDER BY
-            CASE WHEN MIN(TRY_CONVERT(int, p.CodPonto)) IS NULL THEN 1 ELSE 0 END,
-            MIN(TRY_CONVERT(int, p.CodPonto)) ASC,
+            CASE WHEN MIN(p.CodPonto) IS NULL THEN 1 ELSE 0 END,
+            MIN(p.CodPonto) ASC,
             p.CodPonto ASC;
     """)).mappings().all()
 
@@ -17339,8 +17339,8 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
         WHERE ISNULL(p.BitAtivo, 1) = 1
           AND NULLIF(LTRIM(RTRIM(COALESCE(f.CodFace, ''))), '') IS NOT NULL
         ORDER BY
-             CASE WHEN TRY_CONVERT(int, p.CodPonto) IS NULL THEN 1 ELSE 0 END
-            ,TRY_CONVERT(int, p.CodPonto)
+             CASE WHEN p.CodPonto IS NULL THEN 1 ELSE 0 END
+            ,p.CodPonto
             ,CAST(p.CodPonto AS varchar(50))
             ,f.CodFace;
     """)
@@ -17351,7 +17351,7 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
             ,ID = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
             ,IDPainelEuromidia = TRY_CONVERT(int, i.IDPainelEuromidia)
             ,IDDimFacesPaineis = TRY_CONVERT(int, i.IDDimFacesPaineis)
-            ,CodPonto = TRY_CONVERT(int, i.CodPonto)
+            ,CodPonto = i.CodPonto
             ,CodFace = LTRIM(RTRIM(COALESCE(i.CodFace, '')))
             ,MarcaExibida = COALESCE(NULLIF(LTRIM(RTRIM(i.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(c.MarcaExibida)), ''))
             ,Vendedor = COALESCE(NULLIF(LTRIM(RTRIM(i.Vendedor)), ''), NULLIF(LTRIM(RTRIM(c.Vendedor)), ''))
@@ -17378,7 +17378,7 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
             ,ID = -ABS(TRY_CONVERT(int, r.IDFatoOcupacaoPaineisEuromidia))
             ,IDPainelEuromidia = TRY_CONVERT(int, r.IDPainelEuromidia)
             ,IDDimFacesPaineis = CAST(NULL AS int)
-            ,CodPonto = TRY_CONVERT(int, r.CodPonto)
+            ,CodPonto = r.CodPonto
             ,CodFace = LTRIM(RTRIM(COALESCE(r.CodFace, '')))
             ,MarcaExibida = r.MarcaExibida
             ,Vendedor = r.Vendedor
@@ -18457,9 +18457,6 @@ def _texto_excel_item(item: dict) -> str:
 @paineis_bp.route("/painel-detalhes/<int:codponto>", methods=["GET"])
 @login_required
 def painel_detalhes(codponto: int):
-    if _usuario_logado_eh_perfil_vendedor():
-        abort(403)
-
     def _texto_limpo(valor):
         try:
             return str(valor or "").strip()
@@ -18583,35 +18580,35 @@ def painel_detalhes(codponto: int):
         sql_classificacao = text("""
             ;WITH FacesPainel AS (
                 SELECT
-                    TRY_CONVERT(int, IDDimFacesPaineis) AS IDDimFacesPaineis
+                    IDDimFacesPaineis AS IDDimFacesPaineis
                 FROM [Integracao].[Silver].[DimFacesPaineis]
-                WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
-                  AND TRY_CONVERT(int, IDDimFacesPaineis) IS NOT NULL
+                WHERE CodPonto = :cod_ponto
+                  AND IDDimFacesPaineis IS NOT NULL
             ), ClassificacaoOrdenada AS (
                 SELECT
-                    TRY_CONVERT(int, c.IDFatoClassificacaoFacesPaineis) AS IDFatoClassificacaoFacesPaineis,
-                    TRY_CONVERT(int, c.IDDimFacesPaineis) AS IDDimFacesPaineis,
-                    TRY_CONVERT(float, REPLACE(CAST(c.FluxoPassantesSemanal AS varchar(64)), ',', '.')) AS FluxoPassantesSemanal,
-                    TRY_CONVERT(float, REPLACE(CAST(c.IndiceImpactoPopulacao AS varchar(64)), ',', '.')) AS IndiceImpactoPopulacao,
-                    TRY_CONVERT(float, REPLACE(CAST(c.RendaMedia AS varchar(64)), ',', '.')) AS RendaMedia,
-                    TRY_CONVERT(float, REPLACE(CAST(c.PeaDiaFaixa AS varchar(64)), ',', '.')) AS PeaDiaFaixa,
-                    TRY_CONVERT(float, REPLACE(CAST(c.CPM AS varchar(64)), ',', '.')) AS CPM,
+                    c.IDFatoClassificacaoFacesPaineis AS IDFatoClassificacaoFacesPaineis,
+                    c.IDDimFacesPaineis AS IDDimFacesPaineis,
+                    c.FluxoPassantesSemanal AS FluxoPassantesSemanal,
+                    c.IndiceImpactoPopulacao AS IndiceImpactoPopulacao,
+                    c.RendaMedia AS RendaMedia,
+                    c.PeaDiaFaixa AS PeaDiaFaixa,
+                    c.CPM AS CPM,
                     CAST(ISNULL(c.BitPresenca5PrincipaisAvenidas, 0) AS bit) AS BitPresenca5PrincipaisAvenidas,
                     CAST(ISNULL(c.BitCruzamento, 0) AS bit) AS BitCruzamento,
                     CAST(ISNULL(c.BitSemaforo, 0) AS bit) AS BitSemaforo,
                     CAST(ISNULL(c.BitProximidadeShopping, 0) AS bit) AS BitProximidadeShopping,
                     CAST(ISNULL(c.BitPresencaConcorrente200Metros, 0) AS bit) AS BitPresencaConcorrente200Metros,
-                    TRY_CONVERT(float, REPLACE(CAST(c.Latitude AS varchar(64)), ',', '.')) AS Latitude,
-                    TRY_CONVERT(float, REPLACE(CAST(c.Longitude AS varchar(64)), ',', '.')) AS Longitude,
+                    c.Latitude AS Latitude,
+                    c.Longitude AS Longitude,
                     c.DataAtualizacao,
                     rn = ROW_NUMBER() OVER (
                         ORDER BY
                             c.DataAtualizacao DESC,
-                            TRY_CONVERT(int, c.IDFatoClassificacaoFacesPaineis) DESC
+                            c.IDFatoClassificacaoFacesPaineis DESC
                     )
                 FROM [Integracao].[Silver].[FatoClassificacaoFacesPaineis] c
                 INNER JOIN FacesPainel fp
-                    ON fp.IDDimFacesPaineis = TRY_CONVERT(int, c.IDDimFacesPaineis)
+                    ON fp.IDDimFacesPaineis = c.IDDimFacesPaineis
             )
             SELECT TOP 1
                 IDFatoClassificacaoFacesPaineis,
@@ -18669,21 +18666,21 @@ def painel_detalhes(codponto: int):
         """
         sql_imagens = text("""
             SELECT
-                TRY_CONVERT(int, IDDimImagemPainel) AS IDDimImagemPainel,
-                TRY_CONVERT(int, IDDimFacesPaineis) AS IDDimFacesPaineis,
+                IDDimImagemPainel AS IDDimImagemPainel,
+                IDDimFacesPaineis AS IDDimFacesPaineis,
                 CAST(ISNULL(UrlImagem, '') AS varchar(600)) AS UrlImagem,
-                TRY_CONVERT(int, NumeroImagem) AS NumeroImagem,
+                NumeroImagem AS NumeroImagem,
                 CAST(ISNULL(CodFace, '') AS varchar(60)) AS CodFace,
                 CAST(ISNULL(CodPonto, '') AS varchar(60)) AS CodPonto,
                 CAST(ISNULL(BitAtivo, 1) AS bit) AS BitAtivo
             FROM [Integracao].[Silver].[DimImagemPainel]
-            WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
+            WHERE CodPonto = :cod_ponto
               AND ISNULL(BitAtivo, 1) = 1
               AND NULLIF(LTRIM(RTRIM(ISNULL(UrlImagem, ''))), '') IS NOT NULL
             ORDER BY
-                CASE WHEN TRY_CONVERT(int, NumeroImagem) IS NULL THEN 1 ELSE 0 END,
-                TRY_CONVERT(int, NumeroImagem) ASC,
-                TRY_CONVERT(int, IDDimImagemPainel) ASC
+                CASE WHEN NumeroImagem IS NULL THEN 1 ELSE 0 END,
+                NumeroImagem ASC,
+                IDDimImagemPainel ASC
         """)
 
         linhas_imagens = db.session.execute(
@@ -18740,8 +18737,8 @@ def painel_detalhes(codponto: int):
 
     sql_painel_dim = text("""
         SELECT TOP 1
-            TRY_CONVERT(int, CodPonto) AS CodPonto,
-            TRY_CONVERT(int, QuantidadeFaces) AS QuantidadeFaces,
+            CodPonto AS CodPonto,
+            QuantidadeFaces AS QuantidadeFaces,
             CAST(ISNULL(Tipo,'') AS varchar(120)) AS Tipo,
             CAST(ISNULL(Cidade,'') AS varchar(150)) AS Municipio,
             CAST(ISNULL(UF,'') AS varchar(10)) AS UF,
@@ -18750,22 +18747,22 @@ def painel_detalhes(codponto: int):
             CAST(ISNULL(Bairro,'') AS varchar(150)) AS Bairro,
             CAST(ISNULL(CEP,'') AS varchar(20)) AS CEP,
             CAST(ISNULL(Sentido,'') AS varchar(200)) AS Sentido,
-            TRY_CONVERT(float, REPLACE(CAST(Latitude AS varchar(64)), ',', '.')) AS lat,
-            TRY_CONVERT(float, REPLACE(CAST(Longitude AS varchar(64)), ',', '.')) AS lng,
+            Latitude AS lat,
+            Longitude AS lng,
             CAST(ISNULL(FormatoLxA,'') AS varchar(80)) AS FormatoLxA,
             CAST(ISNULL(Exibidora,'') AS varchar(150)) AS Exibidora,
             CAST(ISNULL(BitIluminado, 0) AS bit) AS BitIluminado,
             CAST(ISNULL(BitAtivo, 1) AS bit) AS BitAtivo,
             CAST(ISNULL(BitAluguel, 0) AS bit) AS BitAluguel
         FROM [Integracao].[Silver].[DimPaineisEuromidia]
-        WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
+        WHERE CodPonto = :cod_ponto
     """)
     row_painel = db.session.execute(sql_painel_dim, {"cod_ponto": codponto}).mappings().first()
 
     if (not row_painel) or (row_painel.get("lat") is None) or (row_painel.get("lng") is None):
         sql_painel_fallback = text("""
             SELECT TOP 1
-                TRY_CONVERT(int, CodPonto) AS CodPonto,
+                CodPonto AS CodPonto,
                 CAST(ISNULL(Logr_Pr,'') AS varchar(200)) AS Logradouro,
                 CAST(ISNULL(Tipo_Logr_Pr,'') AS varchar(80)) AS Tipo_Logradouro,
                 CAST(ISNULL(BAIRRO,'') AS varchar(150)) AS Bairro,
@@ -18776,10 +18773,10 @@ def painel_detalhes(codponto: int):
                 CAST(ISNULL(TipoProd,'') AS varchar(120)) AS Tipo,
                 CAST(ISNULL(CodFace,'') AS varchar(50)) AS CodFace,
                 CAST(ISNULL(Iluminado,'') AS varchar(50)) AS Iluminado,
-                TRY_CONVERT(float, REPLACE(CAST(LatD AS varchar(64)), ',', '.')) AS lat,
-                TRY_CONVERT(float, REPLACE(CAST(LonD AS varchar(64)), ',', '.')) AS lng
+                LatD AS lat,
+                LonD AS lng
             FROM [DataMining].[dbo].[CadastroPaineisEuromidia]
-            WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
+            WHERE CodPonto = :cod_ponto
         """)
         row_fb = db.session.execute(sql_painel_fallback, {"cod_ponto": codponto}).mappings().first()
 
@@ -18876,16 +18873,16 @@ def painel_detalhes(codponto: int):
         sql_financeiro = text("""
             ;WITH BaseItens AS (
                 SELECT
-                    TRY_CONVERT(int, i.CodPonto) AS CodPonto,
+                    i.CodPonto AS CodPonto,
                     DATEFROMPARTS(
-                        YEAR(COALESCE(TRY_CONVERT(date, i.Referencia), TRY_CONVERT(date, i.DataLancamento))),
-                        MONTH(COALESCE(TRY_CONVERT(date, i.Referencia), TRY_CONVERT(date, i.DataLancamento))),
+                        YEAR(COALESCE(i.Referencia, i.DataLancamento)),
+                        MONTH(COALESCE(i.Referencia, i.DataLancamento)),
                         1
                     ) AS DataRef,
-                    TRY_CONVERT(float, i.FaturamentoLiquidoFinalMensal) AS ReceitaLiquidaMensal
+                    i.FaturamentoLiquidoFinalMensal AS ReceitaLiquidaMensal
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
-                WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
-                  AND COALESCE(TRY_CONVERT(date, i.Referencia), TRY_CONVERT(date, i.DataLancamento)) IS NOT NULL
+                WHERE i.CodPonto = :cod_ponto
+                  AND COALESCE(i.Referencia, i.DataLancamento) IS NOT NULL
             ),
             ReceitaMes_Full AS (
                 SELECT
@@ -18921,17 +18918,13 @@ def painel_detalhes(codponto: int):
                AND rp.DataRef  = r.DataRef
             OUTER APPLY (
                 SELECT TOP 1
-                    TRY_CONVERT(int, c.Ano) AS Ano,
-                    TRY_CONVERT(int, c.Mes) AS Mes,
-                    TRY_CONVERT(float, REPLACE(CAST(c.ValorMensal AS varchar(64)), ',', '.')) AS ValorMensal
+                    c.Ano AS Ano,
+                    c.Mes AS Mes,
+                    c.ValorMensal AS ValorMensal
                 FROM [Integracao].[Silver].[DimCustoMensalPainel] c
-                WHERE TRY_CONVERT(int, c.CodPonto) = r.CodPonto
-                  AND (
-                        (TRY_CONVERT(int, c.Ano) * 100 + TRY_CONVERT(int, c.Mes))
-                        <=
-                        (YEAR(r.DataRef) * 100 + MONTH(r.DataRef))
-                  )
-                ORDER BY (TRY_CONVERT(int, c.Ano) * 100 + TRY_CONVERT(int, c.Mes)) DESC
+                WHERE c.CodPonto = r.CodPonto
+                  AND ((c.Ano * 100 + c.Mes) <= (YEAR(r.DataRef) * 100 + MONTH(r.DataRef)))
+                ORDER BY (c.Ano * 100 + c.Mes) DESC
             ) ca
             ORDER BY r.DataRef ASC;
         """)
@@ -18991,16 +18984,16 @@ def painel_detalhes(codponto: int):
         sql_custo_categoria = text("""
             ;WITH BaseCat AS (
                 SELECT
-                    TRY_CONVERT(int, CodPonto) AS CodPonto,
-                    TRY_CONVERT(int, Ano) AS Ano,
-                    TRY_CONVERT(int, Mes) AS Mes,
-                    DATEFROMPARTS(TRY_CONVERT(int, Ano), TRY_CONVERT(int, Mes), 1) AS DataRef,
+                    CodPonto AS CodPonto,
+                    Ano AS Ano,
+                    Mes AS Mes,
+                    DATEFROMPARTS(Ano, Mes, 1) AS DataRef,
                     CAST(ISNULL(Categoria,'') AS varchar(160)) AS Categoria,
-                    TRY_CONVERT(float, ValorMensal) AS ValorMensal
+                    ValorMensal AS ValorMensal
                 FROM [Integracao].[Silver].[DimCustoCategoriaMensalPainel]
-                WHERE TRY_CONVERT(int, CodPonto) = :cod_ponto
-                  AND TRY_CONVERT(int, Ano) IS NOT NULL
-                  AND TRY_CONVERT(int, Mes) IS NOT NULL
+                WHERE CodPonto = :cod_ponto
+                  AND Ano IS NOT NULL
+                  AND Mes IS NOT NULL
             ),
             DentroPeriodo AS (
                 SELECT *
@@ -19129,6 +19122,11 @@ def painel_detalhes(codponto: int):
         },
     ]
 
+    # Performance: o detalhe do painel não pode varrer a base ReceitaFederal na abertura.
+    # A consulta anterior fazia OUTER APPLY por empresa e normalizava CNPJ/Latitude/Longitude
+    # com conversões dentro do SQL, o que gera scan pesado e pode derrubar a rota.
+    # Aqui carregamos só os clientes que já contrataram este painel. As empresas do segmento
+    # com coordenadas são carregadas depois, sob demanda, pela API /empresas-segmento.
     sql_clientes_euromidia = text("""
         ;WITH ContratouEstePainel AS (
             SELECT DISTINCT
@@ -19136,22 +19134,38 @@ def painel_detalhes(codponto: int):
             FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
             INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
                 ON i.IDFatoControleContratoEuromidia = c.IDFatoControleContratosEuromidia
-            WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
+            WHERE i.CodPonto = :cod_ponto
+              AND c.IDEmpresa IS NOT NULL
+              AND ISNULL(c.BitAtivo, 1) = 1
+              AND ISNULL(i.BitAtivo, 1) = 1
         )
         SELECT
             e.IDEmpresa,
             CAST(COALESCE(e.NomeFantasia, e.RazaoSocial, '') AS nvarchar(200)) AS Nome,
-            CAST(ISNULL(e.DescricaoCnae, '') AS nvarchar(250)) AS Segmento,
+            CAST(
+                COALESCE(
+                    NULLIF(LTRIM(RTRIM(cn.Classe COLLATE Latin1_General_CI_AI)), ''),
+                    NULLIF(LTRIM(RTRIM(e.DescricaoCnae COLLATE Latin1_General_CI_AI)), ''),
+                    ''
+                ) AS nvarchar(250)
+            ) AS Segmento,
+            CAST(ISNULL(cn.Classe COLLATE Latin1_General_CI_AI, '') AS nvarchar(250)) AS ClasseCnae,
+            CAST(ISNULL(e.DescricaoCnae COLLATE Latin1_General_CI_AI, '') AS nvarchar(250)) AS DescricaoCnae,
             e.CNPJ,
             CAST(ISNULL(e.UF,'') AS varchar(10)) AS UF,
             CAST(ISNULL(e.Municipio,'') AS nvarchar(150)) AS Municipio,
             CAST(ISNULL(e.Bairro,'') AS nvarchar(150)) AS Bairro,
             CAST(ISNULL(e.CEP,'') AS varchar(20)) AS CEP,
-            CASE WHEN p.IDEmpresa IS NOT NULL THEN 1 ELSE 0 END AS ContratouEstePainel
-        FROM [Integracao].[Silver].[DimEmpresas] e
-        LEFT JOIN ContratouEstePainel p
-            ON p.IDEmpresa = e.IDEmpresa
+            CAST(NULL AS float) AS LatitudeReceita,
+            CAST(NULL AS float) AS LongitudeReceita,
+            CAST(1 AS int) AS ContratouEstePainel
+        FROM ContratouEstePainel p
+        INNER JOIN [Integracao].[Silver].[DimEmpresas] e
+            ON e.IDEmpresa = p.IDEmpresa
+        LEFT JOIN [Integracao].[Silver].[DimCnaes] cn
+            ON CAST(cn.cnaepadrao AS varchar(30)) COLLATE Latin1_General_CI_AS = CAST(e.CNAE AS varchar(30)) COLLATE Latin1_General_CI_AS
         WHERE e.IDEmpresaProprietaria = 3
+        ORDER BY e.RazaoSocial ASC, e.NomeFantasia ASC;
     """)
 
     linhas_clientes = db.session.execute(
@@ -19165,8 +19179,10 @@ def painel_detalhes(codponto: int):
             "id_empresa": int(r["IDEmpresa"]),
             "nome": r.get("Nome") or "",
             "segmento": r.get("Segmento") or "",
-            "lat": None,
-            "lng": None,
+            "classe_cnae": r.get("ClasseCnae") or "",
+            "descricao_cnae": r.get("DescricaoCnae") or "",
+            "lat": _to_float_br(r.get("LatitudeReceita")),
+            "lng": _to_float_br(r.get("LongitudeReceita")),
             "score": None,
             "ultimo_contato": None,
             "url_ficha": f"/admin/empresas/{int(r['IDEmpresa'])}",
@@ -19314,25 +19330,149 @@ def painel_detalhes(codponto: int):
         "painel_aluguel": painel.get("bit_aluguel"),
     }
 
+    # Distribuições comerciais do painel.
+    # Categoria vem do cabeçalho do contrato (IDCategoriaMarca) e Porte vem da empresa vinculada ao contrato.
+    # A ligação com FatoControleContratosItensEuromidia garante que a distribuição seja do CodPonto aberto no mapa.
+    distribuicoes_contratos = {
+        "categoria": [],
+        "porte": [],
+        "totais": {
+            "categoria": 0,
+            "porte": 0,
+        },
+    }
+
+    try:
+        sql_distribuicoes_contratos = text("""
+            ;WITH ContratosPainel AS (
+                SELECT
+                    c.IDFatoControleContratosEuromidia,
+                    c.IDCategoriaMarca,
+                    c.IDEmpresa,
+                    CAST(ISNULL(e.Porte, '') AS nvarchar(120)) AS PorteEmpresa,
+                    MAX(
+                        COALESCE(
+                            c.TotalFaturamentoLiquidoMensal,
+                            c.TotalLiquidoContratoAGBRCTACORDO,
+                            c.TotalLiquidoContratoAGBRVENDGERCOOR,
+                            c.TotalFaturamentoBrutoMensal,
+                            0
+                        )
+                    ) AS ValorMensal
+                FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
+                INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+                    ON i.IDFatoControleContratoEuromidia = c.IDFatoControleContratosEuromidia
+                LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
+                    ON e.IDEmpresa = c.IDEmpresa
+                WHERE i.CodPonto = :cod_ponto
+                  AND ISNULL(c.BitAtivo, 1) = 1
+                  AND ISNULL(i.BitAtivo, 1) = 1
+                GROUP BY
+                    c.IDFatoControleContratosEuromidia,
+                    c.IDCategoriaMarca,
+                    c.IDEmpresa,
+                    CAST(ISNULL(e.Porte, '') AS nvarchar(120))
+            ), Base AS (
+                SELECT
+                    Categoria = CASE
+                        WHEN IDCategoriaMarca IS NULL THEN 'Sem categoria'
+                        ELSE CONCAT('Categoria ', CAST(IDCategoriaMarca AS varchar(30)))
+                    END,
+                    Porte = COALESCE(NULLIF(LTRIM(RTRIM(PorteEmpresa)), ''), 'Sem porte'),
+                    ValorMensal = COALESCE(ValorMensal, 0.0)
+                FROM ContratosPainel
+            )
+            SELECT
+                TipoDistribuicao = 'categoria',
+                Label = Categoria,
+                Quantidade = COUNT(1),
+                Valor = SUM(ValorMensal)
+            FROM Base
+            GROUP BY Categoria
+
+            UNION ALL
+
+            SELECT
+                TipoDistribuicao = 'porte',
+                Label = Porte,
+                Quantidade = COUNT(1),
+                Valor = SUM(ValorMensal)
+            FROM Base
+            GROUP BY Porte
+
+            ORDER BY TipoDistribuicao ASC, Quantidade DESC, Label ASC;
+        """)
+
+        linhas_distribuicoes = db.session.execute(
+            sql_distribuicoes_contratos,
+            {"cod_ponto": int(painel["id_painel"])},
+        ).mappings().all()
+
+        agrupadas_distribuicoes = {
+            "categoria": [],
+            "porte": [],
+        }
+
+        for row_dist in linhas_distribuicoes:
+            tipo_dist = (row_dist.get("TipoDistribuicao") or "").strip().lower()
+            if tipo_dist not in agrupadas_distribuicoes:
+                continue
+
+            try:
+                qtd_dist = int(row_dist.get("Quantidade") or 0)
+            except Exception:
+                qtd_dist = 0
+
+            try:
+                valor_dist = float(row_dist.get("Valor") or 0.0)
+            except Exception:
+                valor_dist = 0.0
+
+            agrupadas_distribuicoes[tipo_dist].append({
+                "label": (row_dist.get("Label") or "Sem informação").strip(),
+                "quantidade": qtd_dist,
+                "valor": valor_dist,
+            })
+
+        for tipo_dist, itens_dist in agrupadas_distribuicoes.items():
+            total_qtd = sum(int(item.get("quantidade") or 0) for item in itens_dist)
+            distribuicoes_contratos["totais"][tipo_dist] = total_qtd
+
+            for item in itens_dist:
+                qtd_item = int(item.get("quantidade") or 0)
+                item["percentual"] = round((qtd_item / total_qtd) * 100.0, 2) if total_qtd > 0 else 0.0
+
+            distribuicoes_contratos[tipo_dist] = itens_dist
+
+    except Exception as exc:
+        try:
+            current_app.logger.warning(
+                "Falha ao carregar distribuições de categoria/porte do painel %s: %s",
+                painel.get("id_painel"),
+                exc,
+            )
+        except Exception:
+            pass
+
     sql_bairros = text("""
         SELECT
             CAST(ISNULL(Bairro,'') AS varchar(160)) AS bairro_final,
-            TRY_CONVERT(float, LatitudeBairro) AS lat,
-            TRY_CONVERT(float, LongitudeBairro) AS lng,
+            LatitudeBairro AS lat,
+            LongitudeBairro AS lng,
 
-            TRY_CONVERT(float, TotalEnderecos) AS total_enderecos,
-            TRY_CONVERT(float, QuantidadeResidencial) AS qtd_residencial,
-            TRY_CONVERT(float, QuantidadeNaoResidencial) AS qtd_nao_residencial,
-            TRY_CONVERT(float, QuantidadeIndefinido) AS qtd_indefinido,
+            TotalEnderecos AS total_enderecos,
+            QuantidadeResidencial AS qtd_residencial,
+            QuantidadeNaoResidencial AS qtd_nao_residencial,
+            QuantidadeIndefinido AS qtd_indefinido,
 
-            TRY_CONVERT(float, PercentualResidencial) AS pct_residencial,
-            TRY_CONVERT(float, PercentualNaoResidencial) AS pct_nao_residencial,
-            TRY_CONVERT(float, PercentualIndefinido) AS pct_indefinido,
+            PercentualResidencial AS pct_residencial,
+            PercentualNaoResidencial AS pct_nao_residencial,
+            PercentualIndefinido AS pct_indefinido,
 
-            TRY_CONVERT(float, PesoHeat) AS peso_heat,
+            PesoHeat AS peso_heat,
             CAST(ISNULL(PerfilDominante,'') AS varchar(60)) AS perfil_dominante,
 
-            TRY_CONVERT(float, QuantidadePaineis) AS qtd_paineis,
+            QuantidadePaineis AS qtd_paineis,
             CAST(ISNULL(ListaCodPonto,'') AS varchar(max)) AS lista_cod_ponto,
             CAST(ISNULL(BitPainelEuromidia, 0) AS bit) AS tem_painel_euromidia
         FROM [Integracao].[Silver].[DimPerfilRegiaoFull]
@@ -19381,17 +19521,447 @@ def painel_detalhes(codponto: int):
             }
         })
 
+    # Lista oficial do filtro Segmento.
+    # A tela deve exibir os valores distintos de [Integracao].[Silver].[DimCnaes].[Classe].
+    # Fica separado do dataset das empresas para não depender do que existe no mapa naquele momento.
+    try:
+        sql_segmentos_cnae = text("""
+            SELECT DISTINCT
+                Classe = LTRIM(RTRIM(CAST([Classe] AS nvarchar(250))))
+            FROM [Integracao].[Silver].[DimCnaes]
+            WHERE NULLIF(LTRIM(RTRIM(CAST([Classe] AS nvarchar(250)))), '') IS NOT NULL
+            ORDER BY Classe ASC
+        """)
+
+        segmentos_cnae = [
+            (row.get("Classe") or "").strip()
+            for row in db.session.execute(sql_segmentos_cnae).mappings().all()
+            if (row.get("Classe") or "").strip()
+        ]
+    except Exception:
+        # Fallback seguro: se a consulta falhar, o HTML usa os segmentos já presentes nas empresas.
+        segmentos_cnae = []
+
     return render_template(
         "euromidia/mapa_mercado.html",
         painel_json=painel,
         empresas_json=empresas_enriquecidas,
         cep_points_json=cep_points,
+        segmentos_cnae_json=segmentos_cnae,
+        distribuicoes_contratos_json=distribuicoes_contratos,
         filtro_inicial={"raio_m": raio_m, "status": status, "segmento": segmento, "segmentos": segmentos},
         camadas=camadas,
         kpis=kpis,
         fin_json=fin_json,
     )
 
+
+
+
+@paineis_bp.route("/api/painel-detalhes/<int:codponto>/empresas-segmento", methods=["GET"])
+@login_required
+@limiter.limit("90 per minute", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def api_empresas_receita_segmento_painel(codponto: int):
+    """
+    Retorna empresas da Receita Federal para o mapa do detalhe do painel.
+
+    Regra:
+    - Só consulta quando o usuário seleciona um ou mais segmentos.
+    - Segmento vem da Classe da [Integracao].[Silver].[DimCnaes].
+    - Empresas vêm de [ReceitaFederal].[Silver].[DimEmpresasReceita].
+    - Usa Latitude/Longitude da Receita e limita pelo raio do painel para não carregar a base inteira.
+    """
+    if _usuario_logado_eh_perfil_vendedor():
+        abort(403)
+
+    def _texto_limpo_api(valor):
+        try:
+            return str(valor or "").strip()
+        except Exception:
+            return ""
+
+    def _to_int_api(valor, padrao):
+        try:
+            return int(str(valor or "").strip())
+        except Exception:
+            return padrao
+
+    def _to_float_api(valor):
+        if valor is None:
+            return None
+
+        if isinstance(valor, (int, float)):
+            try:
+                v = float(valor)
+                return v if math.isfinite(v) else None
+            except Exception:
+                return None
+
+        txt = str(valor or "").strip()
+        if not txt:
+            return None
+
+        if "," in txt and "." in txt:
+            txt = txt.replace(".", "").replace(",", ".")
+        elif "," in txt and "." not in txt:
+            txt = txt.replace(",", ".")
+
+        try:
+            v = float(txt)
+            return v if math.isfinite(v) else None
+        except Exception:
+            return None
+
+    def _segmentos_request_api() -> list[str]:
+        valores = []
+        vistos = set()
+
+        for valor in request.args.getlist("segmento"):
+            texto = _texto_limpo_api(valor)
+            if not texto:
+                continue
+
+            # Mantém compatibilidade com legado "Segmento A|Segmento B".
+            for parte in re.split(r"[|]", texto):
+                seg = _texto_limpo_api(parte)
+                if not seg or seg.casefold() == "todos":
+                    continue
+
+                chave = seg.casefold()
+                if chave in vistos:
+                    continue
+
+                vistos.add(chave)
+                valores.append(seg)
+
+        return valores
+
+    def _distancia_haversine_api(lat1, lng1, lat2, lng2):
+        if lat1 is None or lng1 is None or lat2 is None or lng2 is None:
+            return None
+
+        try:
+            lat1 = float(lat1)
+            lng1 = float(lng1)
+            lat2 = float(lat2)
+            lng2 = float(lng2)
+        except Exception:
+            return None
+
+        R = 6371000.0
+        lat1r = math.radians(lat1)
+        lng1r = math.radians(lng1)
+        lat2r = math.radians(lat2)
+        lng2r = math.radians(lng2)
+        dlat = lat2r - lat1r
+        dlng = lng2r - lng1r
+        a = (math.sin(dlat / 2) ** 2) + (math.cos(lat1r) * math.cos(lat2r) * (math.sin(dlng / 2) ** 2))
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return int(round(R * c))
+
+    segmentos = _segmentos_request_api()
+    if not segmentos:
+        return jsonify({
+            "items": [],
+            "total": 0,
+            "segmentos": [],
+            "raio_m": _to_int_api(request.args.get("raio_m"), 1000),
+        })
+
+    raio_m = max(100, min(_to_int_api(request.args.get("raio_m"), 1000), 20000))
+    limite = max(50, min(_to_int_api(request.args.get("limite"), 800), 1500))
+    limite_busca = max(limite * 4, 1000)
+    limite_busca = min(limite_busca, 6000)
+
+    # Resolve a coordenada atual do painel aberto.
+    sql_painel_coord = text("""
+        SELECT TOP 1
+            Latitude AS lat,
+            Longitude AS lng
+        FROM [Integracao].[Silver].[DimPaineisEuromidia]
+        WHERE CodPonto = :cod_ponto
+          AND Latitude IS NOT NULL
+          AND Longitude IS NOT NULL
+    """)
+
+    row_coord = db.session.execute(sql_painel_coord, {"cod_ponto": int(codponto)}).mappings().first()
+
+    if not row_coord:
+        sql_painel_coord_fb = text("""
+            SELECT TOP 1
+                LatD AS lat,
+                LonD AS lng
+            FROM [DataMining].[dbo].[CadastroPaineisEuromidia]
+            WHERE CodPonto = :cod_ponto
+              AND LatD IS NOT NULL
+              AND LonD IS NOT NULL
+        """)
+        row_coord = db.session.execute(sql_painel_coord_fb, {"cod_ponto": int(codponto)}).mappings().first()
+
+    lat_painel = _to_float_api(row_coord.get("lat") if row_coord else None)
+    lng_painel = _to_float_api(row_coord.get("lng") if row_coord else None)
+
+    if lat_painel is None or lng_painel is None:
+        return jsonify({
+            "items": [],
+            "total": 0,
+            "segmentos": segmentos,
+            "raio_m": raio_m,
+            "erro": "Painel sem latitude/longitude válidos.",
+        }), 404
+
+    # Bounding box para reduzir leitura antes do cálculo exato de distância.
+    lat_delta = raio_m / 111320.0
+    cos_lat = max(0.15, abs(math.cos(math.radians(lat_painel))))
+    lng_delta = raio_m / (111320.0 * cos_lat)
+
+    segmentos_norm = [s.upper() for s in segmentos if _texto_limpo_api(s)]
+
+    # Primeiro resolve os CNAEs do segmento na DimCnaes, que é pequena.
+    # Assim a consulta grande na ReceitaFederal não precisa fazer JOIN cross-database nem TRY_CONVERT.
+    sql_cnaes_segmentos = text("""
+        SELECT
+            cnaepadrao AS CNAE,
+            CAST(ISNULL(Classe COLLATE Latin1_General_CI_AI, '') AS nvarchar(250)) AS Classe,
+            CAST(ISNULL(Setor COLLATE Latin1_General_CI_AI, '') AS nvarchar(160)) AS Setor,
+            ScoreSetor,
+            CAST(ISNULL(ClassificacaoMacro COLLATE Latin1_General_CI_AI, '') AS nvarchar(120)) AS ClassificacaoMacro,
+            CAST(ISNULL(Descricao COLLATE Latin1_General_CI_AI, '') AS nvarchar(300)) AS Descricao
+        FROM [Integracao].[Silver].[DimCnaes]
+        WHERE UPPER(LTRIM(RTRIM(CAST(Classe AS nvarchar(250))))) COLLATE Latin1_General_CI_AI IN :segmentos_norm
+          AND cnaepadrao IS NOT NULL
+    """).bindparams(bindparam("segmentos_norm", expanding=True))
+
+    rows_cnaes = db.session.execute(sql_cnaes_segmentos, {"segmentos_norm": segmentos_norm}).mappings().all()
+
+    cnaes = []
+    cnae_meta = {}
+    for row_cnae in rows_cnaes:
+        cnae_txt = _texto_limpo_api(row_cnae.get("CNAE"))
+        cnae_key = re.sub(r"\D+", "", cnae_txt)
+        if not cnae_txt or not cnae_key:
+            continue
+        if cnae_txt not in cnaes:
+            cnaes.append(cnae_txt)
+        cnae_meta[cnae_key] = {
+            "Classe": _texto_limpo_api(row_cnae.get("Classe")),
+            "Setor": _texto_limpo_api(row_cnae.get("Setor")),
+            "ScoreSetor": row_cnae.get("ScoreSetor"),
+            "ClassificacaoMacro": _texto_limpo_api(row_cnae.get("ClassificacaoMacro")),
+            "Descricao": _texto_limpo_api(row_cnae.get("Descricao")),
+        }
+
+    if not cnaes:
+        return jsonify({
+            "items": [],
+            "total": 0,
+            "segmentos": segmentos,
+            "raio_m": raio_m,
+            "limite": limite,
+        })
+
+    def _normaliza_cnpj_api(valor):
+        return re.sub(r"\D+", "", _texto_limpo_api(valor))
+
+    # CNPJs de clientes ficam em consultas separadas e pequenas.
+    # A comparação/normalização é feita no Python para evitar collation conflict e scan no SQL.
+    sql_cnpjs_clientes = text("""
+        SELECT DISTINCT CAST(CNPJ AS varchar(32)) COLLATE Latin1_General_CI_AS AS CNPJ
+        FROM [Integracao].[Silver].[FatoControleContratosEuromidia]
+        WHERE CNPJ IS NOT NULL
+          AND ISNULL(BitAtivo, 1) = 1
+
+        UNION
+
+        SELECT DISTINCT CAST(CNPJ AS varchar(32)) COLLATE Latin1_General_CI_AS AS CNPJ
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+        WHERE CNPJ IS NOT NULL
+          AND ISNULL(BitAtivo, 1) = 1
+    """)
+
+    sql_cnpjs_painel = text("""
+        SELECT DISTINCT CAST(COALESCE(i.CNPJ, c.CNPJ) AS varchar(32)) COLLATE Latin1_General_CI_AS AS CNPJ
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
+        LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] c
+            ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+        WHERE i.CodPonto = :cod_ponto
+          AND COALESCE(i.CNPJ, c.CNPJ) IS NOT NULL
+          AND ISNULL(i.BitAtivo, 1) = 1
+          AND ISNULL(c.BitAtivo, 1) = 1
+    """)
+
+    cnpjs_clientes = {
+        cnpj_norm
+        for row_cnpj in db.session.execute(sql_cnpjs_clientes).mappings().all()
+        for cnpj_norm in [_normaliza_cnpj_api(row_cnpj.get("CNPJ"))]
+        if cnpj_norm
+    }
+
+    cnpjs_painel = {
+        cnpj_norm
+        for row_cnpj in db.session.execute(sql_cnpjs_painel, {"cod_ponto": int(codponto)}).mappings().all()
+        for cnpj_norm in [_normaliza_cnpj_api(row_cnpj.get("CNPJ"))]
+        if cnpj_norm
+    }
+
+    sql_empresas_receita = text("""
+        SELECT TOP (:limite_busca)
+            e.IDDimEmpresasReceita,
+            e.IDEmpresa,
+            CAST(e.CNPJ AS varchar(32)) AS CNPJ,
+            CAST(COALESCE(NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''), NULLIF(LTRIM(RTRIM(e.RazaoSocial)), ''), '') AS nvarchar(260)) AS Nome,
+            CAST(ISNULL(e.RazaoSocial, '') AS nvarchar(260)) AS RazaoSocial,
+            CAST(ISNULL(e.NomeFantasia, '') AS nvarchar(260)) AS NomeFantasia,
+            CAST(ISNULL(e.DescricaoCnae, '') AS nvarchar(300)) AS DescricaoCnae,
+            e.CNAE AS CNAE,
+            CAST(ISNULL(e.UF, '') AS varchar(10)) AS UF,
+            CAST(ISNULL(e.Municipio, '') AS nvarchar(160)) AS Municipio,
+            CAST(ISNULL(e.Bairro, '') AS nvarchar(160)) AS Bairro,
+            CAST(ISNULL(e.CEP, '') AS varchar(20)) AS CEP,
+            CAST(ISNULL(e.Logradouro, '') AS nvarchar(260)) AS Logradouro,
+            CAST(ISNULL(e.Numero, '') AS varchar(50)) AS Numero,
+            CAST(ISNULL(e.Porte, '') AS nvarchar(120)) AS Porte,
+            e.CapitalSocial AS CapitalSocial,
+            CAST(ISNULL(e.DescricaoSituacaoCadastral, '') AS nvarchar(120)) AS DescricaoSituacaoCadastral,
+            CAST(ISNULL(e.DescricaoIdentificadorMatrizFilial, '') AS nvarchar(120)) AS DescricaoMatrizFilial,
+            e.Latitude AS lat,
+            e.Longitude AS lng,
+            DistanciaAproximada = (
+                POWER(e.Latitude - :lat_painel, 2) + POWER(e.Longitude - :lng_painel, 2)
+            )
+        FROM [ReceitaFederal].[Silver].[DimEmpresasReceita] e
+        WHERE e.CNAE IN :cnaes
+          AND e.Latitude IS NOT NULL
+          AND e.Longitude IS NOT NULL
+          AND e.Latitude BETWEEN :lat_min AND :lat_max
+          AND e.Longitude BETWEEN :lng_min AND :lng_max
+          AND e.Latitude BETWEEN -90 AND 90
+          AND e.Longitude BETWEEN -180 AND 180
+        ORDER BY
+            DistanciaAproximada ASC,
+            Nome ASC
+        OPTION (RECOMPILE);
+    """).bindparams(bindparam("cnaes", expanding=True))
+
+    params = {
+        "limite_busca": int(limite_busca),
+        "cnaes": cnaes,
+        "lat_painel": float(lat_painel),
+        "lng_painel": float(lng_painel),
+        "lat_min": float(lat_painel - lat_delta),
+        "lat_max": float(lat_painel + lat_delta),
+        "lng_min": float(lng_painel - lng_delta),
+        "lng_max": float(lng_painel + lng_delta),
+    }
+
+    rows = db.session.execute(sql_empresas_receita, params).mappings().all()
+
+    itens = []
+    cnpjs_vistos = set()
+
+    for row in rows:
+        lat = _to_float_api(row.get("lat"))
+        lng = _to_float_api(row.get("lng"))
+        if lat is None or lng is None:
+            continue
+
+        dist_m = _distancia_haversine_api(lat_painel, lng_painel, lat, lng)
+        if dist_m is None or dist_m > raio_m:
+            continue
+
+        cnpj = _texto_limpo_api(row.get("CNPJ"))
+        chave_cnpj = _normaliza_cnpj_api(cnpj)
+        if chave_cnpj:
+            # Evita duplicar a mesma empresa quando a base tiver cópias do mesmo CNPJ.
+            if chave_cnpj in cnpjs_vistos:
+                continue
+            cnpjs_vistos.add(chave_cnpj)
+
+        id_receita = row.get("IDDimEmpresasReceita")
+        try:
+            id_receita_int = int(id_receita) if id_receita is not None else 0
+        except Exception:
+            id_receita_int = 0
+
+        nome = _texto_limpo_api(row.get("Nome")) or "Empresa sem nome"
+        cnae_txt = _texto_limpo_api(row.get("CNAE"))
+        cnae_key = re.sub(r"\D+", "", cnae_txt)
+        meta_cnae = cnae_meta.get(cnae_key, {})
+        classe_cnae = _texto_limpo_api(meta_cnae.get("Classe")) or _texto_limpo_api(row.get("DescricaoCnae"))
+        descricao_cnae = _texto_limpo_api(row.get("DescricaoCnae")) or _texto_limpo_api(meta_cnae.get("Descricao"))
+        setor_cnae = _texto_limpo_api(meta_cnae.get("Setor"))
+        score_setor = _to_float_api(meta_cnae.get("ScoreSetor"))
+        classificacao_macro = _texto_limpo_api(meta_cnae.get("ClassificacaoMacro"))
+
+        contratou_este_painel = bool(chave_cnpj and chave_cnpj in cnpjs_painel)
+        ja_e_cliente_euromidia = bool(chave_cnpj and chave_cnpj in cnpjs_clientes)
+
+        if contratou_este_painel:
+            status_mapa = "cliente_painel"
+            status_relacao = "cliente_no_painel"
+        elif ja_e_cliente_euromidia:
+            status_mapa = "cliente_euromidia"
+            status_relacao = "cliente_euromidia"
+        else:
+            status_mapa = "prospect"
+            status_relacao = "prospect_receita"
+
+        itens.append({
+            "id_empresa": f"receita_{id_receita_int or len(itens) + 1}",
+            "id_dim_empresas_receita": id_receita_int or None,
+            "id_empresa_receita": row.get("IDEmpresa"),
+            "nome": nome,
+            "nome_fantasia": _texto_limpo_api(row.get("NomeFantasia")),
+            "razao_social": _texto_limpo_api(row.get("RazaoSocial")),
+            "segmento": classe_cnae,
+            "classe_cnae": classe_cnae,
+            "setor": setor_cnae,
+            "score_setor": score_setor,
+            "classificacao_macro": classificacao_macro,
+            "descricao_cnae": descricao_cnae,
+            "descricao_matriz_filial": _texto_limpo_api(row.get("DescricaoMatrizFilial")),
+            "descricao_identificador_matriz_filial": _texto_limpo_api(row.get("DescricaoMatrizFilial")),
+            "cnae": cnae_txt,
+            "lat": float(lat),
+            "lng": float(lng),
+            "distancia_m": int(dist_m),
+            "score": score_setor,
+            "ultimo_contato": None,
+            "status": status_mapa,
+            "status_relacao": status_relacao,
+            "proximidade": "dentro_do_raio",
+            "camada": "empresas_segmento_receita",
+            "tipo_marcador": "empresa_segmento_receita",
+            "origem": "receita_federal",
+            "contratou_este_painel": contratou_este_painel,
+            "ja_e_cliente_euromidia": ja_e_cliente_euromidia,
+            "eh_cliente_euro": ja_e_cliente_euromidia,
+            "cliente_euromidia": ja_e_cliente_euromidia,
+            "cliente": ja_e_cliente_euromidia,
+            "cnpj": cnpj,
+            "uf": _texto_limpo_api(row.get("UF")),
+            "municipio": _texto_limpo_api(row.get("Municipio")),
+            "bairro": _texto_limpo_api(row.get("Bairro")),
+            "cep": _texto_limpo_api(row.get("CEP")),
+            "logradouro": _texto_limpo_api(row.get("Logradouro")),
+            "numero": _texto_limpo_api(row.get("Numero")),
+            "porte": _texto_limpo_api(row.get("Porte")),
+            "capital_social": _to_float_api(row.get("CapitalSocial")),
+            "situacao_cadastral": _texto_limpo_api(row.get("DescricaoSituacaoCadastral")),
+            "url_ficha": None,
+        })
+
+    itens.sort(key=lambda item: (int(item.get("distancia_m") or 0), str(item.get("nome") or "")))
+    itens = itens[:limite]
+
+    return jsonify({
+        "items": itens,
+        "total": len(itens),
+        "segmentos": segmentos,
+        "raio_m": raio_m,
+        "limite": limite,
+    })
 
 
 
@@ -20522,7 +21092,7 @@ def api_ocupacao_calendario():
                 p.IDDimPaineisEuromidia DESC
         ) p
         WHERE LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), f.CodFace), ''))) = @CodFace
-          AND (@CodPonto IS NULL OR TRY_CONVERT(int, f.CodPonto) = @CodPonto)
+          AND (@CodPonto IS NULL OR f.CodPonto = @CodPonto)
         ORDER BY f.IDDimFacesPaineis DESC;
     """)
 
@@ -20674,7 +21244,7 @@ def api_ocupacao_calendario():
                     ,LoopFim = CAST(NULL AS varchar(30))
                     ,OrdemData = COALESCE(TRY_CONVERT(datetime2, i.DataAtualizacao), SYSUTCDATETIME())
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
-                WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
+                WHERE i.CodPonto = :cod_ponto
                   AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), i.CodFace), ''))) = :cod_face
                   AND i.DataInicioPrevisto IS NOT NULL
                   AND i.DataTerminoPrevisto IS NOT NULL
@@ -20696,7 +21266,7 @@ def api_ocupacao_calendario():
                     ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopFim), '')))
                     ,OrdemData = COALESCE(TRY_CONVERT(datetime2, o.CriadoEm), TRY_CONVERT(datetime2, o.DataAtualizacao), SYSUTCDATETIME())
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (NOLOCK)
-                WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+                WHERE o.CodPonto = :cod_ponto
                   AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
                   AND o.CanceladoEm IS NULL
                   -- Não conto aqui ocupações de CONTRATO/LOCAÇÃO gravadas em FatoOcupacao,
@@ -20752,7 +21322,7 @@ def api_ocupacao_calendario():
                     DataInicio = TRY_CONVERT(date, o.DataInicio),
                     DataFim = TRY_CONVERT(date, o.DataFim)
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (NOLOCK)
-                WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+                WHERE o.CodPonto = :cod_ponto
                   AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
                   AND o.CanceladoEm IS NULL
                   AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) IN ('ATIVO', 'RESERVADO')
@@ -20882,7 +21452,7 @@ def api_ocupacao_reserva_dados_modal():
             Vendedor
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
         WHERE CodFace = :cod_face
-          AND (:cod_ponto IS NULL OR :cod_ponto = '' OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
+          AND (:cod_ponto IS NULL OR :cod_ponto = '' OR CodPonto = :cod_ponto)
           AND CanceladoEm IS NULL
           AND Status IN ('ATIVO','RESERVADO')
         ORDER BY DataInicio
@@ -20946,7 +21516,7 @@ def api_ocupacao_reserva_dados_modal():
         LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] h
                ON h.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
         WHERE
-            (NULLIF(:cod_ponto,'') IS NULL OR TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto))
+            (NULLIF(:cod_ponto,'') IS NULL OR i.CodPonto = :cod_ponto)
         ORDER BY
             NULLIF(LTRIM(RTRIM(CAST(COALESCE(h.NumeroContrato, i.NumeroContrato) AS varchar(50)))), ''),
             NULLIF(LTRIM(RTRIM(CAST(COALESCE(h.NumeroPrevia,   i.NumeroPrevia)   AS varchar(50)))), '')
@@ -20979,7 +21549,7 @@ def api_ocupacao_reserva_dados_modal():
             CNPJ           = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), ''),
             IDEmpresa
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
-        WHERE (NULLIF(:cod_ponto,'') IS NULL OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
+        WHERE (NULLIF(:cod_ponto,'') IS NULL OR CodPonto = :cod_ponto)
         ORDER BY
             NULLIF(LTRIM(RTRIM(CAST(NumeroContrato AS varchar(50)))), ''),
             NULLIF(LTRIM(RTRIM(CAST(NumeroPrevia   AS varchar(50)))), '')
@@ -20996,7 +21566,7 @@ def api_ocupacao_reserva_dados_modal():
             CNPJ           = NULLIF(LTRIM(RTRIM(CAST(CNPJ AS varchar(30)))), ''),
             IDEmpresa
         FROM [Integracao].[Silver].[FatoControleContratos]
-        WHERE (NULLIF(:cod_ponto,'') IS NULL OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
+        WHERE (NULLIF(:cod_ponto,'') IS NULL OR CodPonto = :cod_ponto)
         ORDER BY
             NULLIF(LTRIM(RTRIM(CAST(NumeroContrato AS varchar(50)))), ''),
             NULLIF(LTRIM(RTRIM(CAST(NumeroPrevia   AS varchar(50)))), '')
@@ -21021,7 +21591,7 @@ def api_ocupacao_reserva_dados_modal():
                 IDEmpresa = TRY_CONVERT(int, IDCliente)
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
             WHERE CodFace = :cod_face
-              AND (:cod_ponto IS NULL OR :cod_ponto = '' OR TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :cod_ponto))
+              AND (:cod_ponto IS NULL OR :cod_ponto = '' OR CodPonto = :cod_ponto)
               AND CanceladoEm IS NULL
               AND Status IN ('ATIVO','RESERVADO')
               AND (NumeroContrato IS NOT NULL OR NumeroPrevia IS NOT NULL OR IDFatoControleContratos IS NOT NULL)
@@ -21423,7 +21993,7 @@ def _calcular_plano_encaixe_range_reserva_digital(
             ,LoopFim = CAST(NULL AS varchar(30))
             ,OrdemData = COALESCE(TRY_CONVERT(datetime2, i.DataAtualizacao), SYSUTCDATETIME())
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (UPDLOCK, HOLDLOCK)
-        WHERE TRY_CONVERT(int, i.CodPonto) = :cod_ponto
+        WHERE i.CodPonto = :cod_ponto
           AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), i.CodFace), ''))) = :cod_face
           AND i.DataInicioPrevisto IS NOT NULL
           AND i.DataTerminoPrevisto IS NOT NULL
@@ -21445,7 +22015,7 @@ def _calcular_plano_encaixe_range_reserva_digital(
             ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopFim), '')))
             ,OrdemData = COALESCE(TRY_CONVERT(datetime2, o.CriadoEm), TRY_CONVERT(datetime2, o.DataAtualizacao), SYSUTCDATETIME())
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (UPDLOCK, HOLDLOCK)
-        WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+        WHERE o.CodPonto = :cod_ponto
           AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
           AND o.CanceladoEm IS NULL
           -- Não conto aqui ocupações de CONTRATO/LOCAÇÃO gravadas em FatoOcupacao,
@@ -21905,7 +22475,7 @@ def api_ocupacao_reserva_criar():
 
     sql_cap = text("""
         DECLARE @CodFace varchar(20) = :cod_face;
-        DECLARE @CodPonto int = TRY_CONVERT(int, :cod_ponto);
+        DECLARE @CodPonto int = :cod_ponto;
 
         ;WITH Painel AS (
             SELECT TOP (1)
@@ -23043,7 +23613,7 @@ def ocupacao_alterar_status(id_ocupacao: int):
                     IDDimFacesPaineis
                 FROM [Integracao].[Silver].[DimFacesPaineis]
                 WHERE
-                    TRY_CONVERT(int, CodPonto) = TRY_CONVERT(int, :codponto)
+                    CodPonto = :codponto
                     AND LTRIM(RTRIM(ISNULL(CodFace,''))) = LTRIM(RTRIM(:codface))
                 ORDER BY IDDimFacesPaineis DESC
             """)
@@ -23709,7 +24279,7 @@ def _obter_item_contrato_checkin(
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
         WHERE
             i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
-            AND TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+            AND i.CodPonto = :cod_ponto
             AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
             AND ISNULL(i.BitAtivo, 1) = 1
         ORDER BY TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
@@ -24808,7 +25378,7 @@ def _obter_card_vinculado_item_contrato_checkin(
         WHERE
             i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
             AND i.IDFatoKanbanCard IS NOT NULL
-            AND TRY_CONVERT(int, i.CodPonto) = TRY_CONVERT(int, :cod_ponto)
+            AND i.CodPonto = :cod_ponto
             AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
         ORDER BY i.IDFatoControleContratosItensEuromidia DESC
     """)
@@ -25039,7 +25609,7 @@ def _obter_condicao_sql_tag_ativa_checkin_confirmado() -> str:
 def checkin_pontos_do_contrato(id_fato_controle_contratos: int):
     sql = text("""
         SELECT TOP (300)
-            CodPonto = TRY_CONVERT(int, i.CodPonto),
+            CodPonto = i.CodPonto,
             TipoPainel = MAX(
                 NULLIF(
                     LTRIM(RTRIM(COALESCE(p.Tipo, ''))),
@@ -25048,12 +25618,12 @@ def checkin_pontos_do_contrato(id_fato_controle_contratos: int):
             )
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
-            ON TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+            ON p.CodPonto = i.CodPonto
         WHERE
             i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
-            AND TRY_CONVERT(int, i.CodPonto) IS NOT NULL
-        GROUP BY TRY_CONVERT(int, i.CodPonto)
-        ORDER BY TRY_CONVERT(int, i.CodPonto) ASC
+            AND i.CodPonto IS NOT NULL
+        GROUP BY i.CodPonto
+        ORDER BY i.CodPonto ASC
     """)
 
     rows = db.session.execute(
@@ -25103,14 +25673,14 @@ def checkin_faces_do_contrato(id_fato_controle_contratos: int, codponto: int):
             )
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
         LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] f
-            ON TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+            ON f.CodPonto = i.CodPonto
             AND UPPER(LTRIM(RTRIM(CAST(f.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50)))))
         LEFT JOIN [Integracao].[Silver].[DimPaineisEuromidia] p
             ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
-            OR TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+            OR p.CodPonto = i.CodPonto
         WHERE
             i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
-            AND TRY_CONVERT(int, i.CodPonto) = :codponto
+            AND i.CodPonto = :codponto
             AND NULLIF(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50)))), '') IS NOT NULL
         GROUP BY UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50)))))
         ORDER BY UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) ASC
@@ -26642,7 +27212,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
                 cp.IDEmpresa AS IDEmpresaCompartilhamento,
                 ch.IDEmpresa AS IDEmpresaCheckinOrigem,
                 ch.IDFatoControleContratosEuromidia,
-                TRY_CONVERT(int, ch.CodPonto) AS CodPontoOrigem,
+                ch.CodPonto AS CodPontoOrigem,
                 UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) AS CodFaceOrigem
             FROM {TABELA_CHECKIN_COMPARTILHAMENTO_PUBLICO} cp
             INNER JOIN [Integracao].[Silver].[DimCheckinHistorico] ch
@@ -26674,7 +27244,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
             SELECT DISTINCT
                 i.IDFatoControleContratosItensEuromidia,
                 i.IDFatoControleContratoEuromidia,
-                TRY_CONVERT(int, i.CodPonto) AS CodPonto,
+                i.CodPonto AS CodPonto,
                 UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) AS CodFace,
                 TRY_CONVERT(int, i.IDEmpresaAgencia) AS IDEmpresaAgencia
             FROM DestinatarioBase d
@@ -26707,7 +27277,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
             ch.IDDimTipoMidia,
             ch.UrlImagemGerada,
             ch.Observacao,
-            TRY_CONVERT(int, ch.CodPonto) AS CodPonto,
+            ch.CodPonto AS CodPonto,
             UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) AS CodFace,
             ch.TipoPainel,
             ch.TipoFace,
@@ -26730,7 +27300,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
             ON c.IDFatoControleContratosEuromidia = ip.IDFatoControleContratoEuromidia
         INNER JOIN [Integracao].[Silver].[DimCheckinHistorico] ch
             ON ch.IDFatoControleContratosEuromidia = ip.IDFatoControleContratoEuromidia
-           AND TRY_CONVERT(int, ch.CodPonto) = ip.CodPonto
+           AND ch.CodPonto = ip.CodPonto
            AND UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) = ip.CodFace
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] emp_dest
             ON emp_dest.IDEmpresa = d.IDEmpresaDestinatario
@@ -26753,7 +27323,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
             )
         ORDER BY
             COALESCE(ch.DataConfirmacao, ch.DataChekin, ch.DataAtualizacao) DESC,
-            TRY_CONVERT(int, ch.CodPonto) ASC,
+            ch.CodPonto ASC,
             UPPER(LTRIM(RTRIM(CAST(ch.CodFace AS varchar(50))))) ASC,
             ch.IDDimCheckinHistorico DESC
     """)
@@ -27397,7 +27967,7 @@ def carteira_detalhe(id_fato_carteira_vendedor: int):
         LEFT JOIN [Integracao].[Silver].[DimEmpresas] e
             ON e.IDEmpresa = cve.IDEmpresa
         LEFT JOIN [Integracao].[Silver].[DimCnaes] cn
-            ON cn.cnaepadrao = e.CNAE
+            ON CAST(cn.cnaepadrao AS varchar(30)) COLLATE Latin1_General_CI_AS = CAST(e.CNAE AS varchar(30)) COLLATE Latin1_General_CI_AS
         WHERE cve.IDFatoCarteiraVendedor = :id_fato_carteira_vendedor
           AND (
                 :q = ''

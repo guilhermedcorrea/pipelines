@@ -34,15 +34,15 @@
 
   .mm-shell{
     display:grid;
-    grid-template-columns: 340px 1fr 380px;
-    gap: 14px;
+    grid-template-columns: 320px minmax(0, 1fr) 300px;
+    gap: 12px;
     align-items: stretch;
     min-height: 720px;
   }
 
   @media (max-width: 1200px){
     .mm-shell{
-      grid-template-columns: 340px 1fr;
+      grid-template-columns: 320px minmax(0, 1fr);
       grid-template-rows: auto auto;
     }
     .mm-right{ grid-column: 1 / -1; }
@@ -492,6 +492,159 @@
     line-height: 1.35;
   }
 
+
+
+  /* =========================================================
+     ✅ NOVO VISUAL DO TRECHO LATERAL ESQUERDO
+     - divide em dois cards, igual ao print:
+       1) Informações do Painel
+       2) Informações da Região (IBGE)
+     - mantém os IDs antigos no HTML para não quebrar o JavaScript
+     ========================================================= */
+  .painel-left-stack{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    min-width:0;
+    min-height:0;
+  }
+
+  .painel-resumo-card{
+    background:#fff;
+    border:1px solid rgba(226,232,240,.96);
+    border-radius:14px;
+    box-shadow:0 2px 10px rgba(15,23,42,.08);
+    overflow:hidden;
+    min-width:0;
+  }
+
+  .painel-resumo-body{
+    padding:14px 14px 16px 14px;
+    min-width:0;
+  }
+
+  .painel-section-title{
+    margin:0 0 14px 0;
+    color:var(--euro-blue);
+    font-size:16px;
+    font-weight:1100;
+    letter-spacing:-.15px;
+    line-height:1.15;
+  }
+
+  .painel-resumo-card .painel-foto,
+  .painel-resumo-card .painel-foto.painel-foto-galeria{
+    height:194px;
+    border-radius:6px;
+    border:1px solid rgba(203,213,225,.9);
+    box-shadow:none;
+    background:#F1F5F9;
+  }
+
+  .painel-resumo-card .painel-foto.painel-foto-galeria img{
+    object-fit:cover;
+  }
+
+  .painel-dados-list{
+    margin-top:14px;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr);
+    gap:10px;
+    min-width:0;
+  }
+
+  .painel-dado-row{
+    display:grid;
+    grid-template-columns:minmax(132px, 48%) minmax(0, 1fr);
+    gap:12px;
+    align-items:start;
+    min-width:0;
+  }
+
+  .painel-dado-label{
+    color:#475569;
+    font-size:12.5px;
+    font-weight:900;
+    line-height:1.28;
+    white-space:normal;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+  }
+
+  .painel-dado-valor{
+    color:#1e293b;
+    font-size:12.5px;
+    font-weight:950;
+    line-height:1.28;
+    text-align:left;
+    min-width:0;
+    white-space:normal;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+  }
+
+  .painel-dado-valor.valor-forte{
+    font-weight:1050;
+    color:#0f172a;
+  }
+
+  .painel-ocupacao-valor{
+    color:#16a34a;
+    font-weight:1100;
+  }
+
+  .painel-status-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:5px 12px;
+    min-height:24px;
+    border-radius:999px;
+    background:#DDF7E5;
+    border:1px solid rgba(34,197,94,.20);
+    color:#15803d;
+    font-size:12px;
+    font-weight:1100;
+    line-height:1;
+    white-space:nowrap;
+  }
+
+  .painel-status-badge.status-alerta{
+    background:#FEF3C7;
+    border-color:rgba(245,158,11,.28);
+    color:#B45309;
+  }
+
+  .painel-status-badge.status-ruim{
+    background:#FEE2E2;
+    border-color:rgba(239,68,68,.25);
+    color:#B91C1C;
+  }
+
+  .painel-left-actions{
+    padding:0;
+  }
+
+  .painel-left-stack .hint{
+    margin:0;
+  }
+
+  .painel-legacy-hidden{
+    display:none !important;
+  }
+
+  @media (max-width: 860px){
+    .painel-dado-row{
+      grid-template-columns:minmax(120px, 44%) minmax(0, 1fr);
+      gap:10px;
+    }
+    .painel-resumo-card .painel-foto,
+    .painel-resumo-card .painel-foto.painel-foto-galeria{
+      height:210px;
+    }
+  }
+
+
   /* CENTER - mapa */
   .mm-center{
     position:relative;
@@ -503,54 +656,206 @@
     min-height: 640px;
   }
 
-  .filters{
-    position:absolute;
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    display:flex;
-    gap: 10px;
-    z-index: 1200;
-    pointer-events:none;
-    flex-wrap: wrap;
+  /* =========================================================
+     ✅ BARRA SUPERIOR DE FILTROS
+     - os filtros saíram de dentro do mapa
+     - visual mais próximo do padrão arredondado da referência
+     ========================================================= */
+  .mm-page-toolbar{
+    position:relative;
+    z-index: 1600;
+    display:grid;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    gap: 14px;
+    align-items:stretch;
+    margin: 0 0 14px 0;
   }
-  .filters .fbox{
-    pointer-events:auto;
+
+  .mm-page-titlebox{
+    min-width:0;
+    border:1px solid rgba(226,232,240,.95);
+    border-radius: 18px;
     background: rgba(255,255,255,.96);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 8px 10px;
-    box-shadow: 0 12px 26px rgba(0,0,0,.12);
+    box-shadow:0 14px 34px rgba(15,23,42,.08);
+    padding: 14px 16px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:6px;
+  }
+
+  .mm-page-title-row{
+    min-width:0;
     display:flex;
     align-items:center;
-    gap: 8px;
+    gap:10px;
   }
+
+  .mm-page-titlebox h1{
+    margin:0;
+    min-width:0;
+    color:var(--euro-blue);
+    font-size: 22px;
+    line-height:1.1;
+    font-weight:1100;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .mm-page-titlebox p{
+    margin:0;
+    color:#475569;
+    font-size:12px;
+    font-weight:900;
+    line-height:1.25;
+    white-space:normal;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+  }
+
+  .mm-status-pill{
+    flex:0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:24px;
+    padding:4px 10px;
+    border-radius:999px;
+    background:#DDF7E5;
+    border:1px solid rgba(34,197,94,.20);
+    color:#15803d;
+    font-size:11px;
+    font-weight:1000;
+  }
+
+  .filters{
+    position:relative;
+    inset:auto;
+    z-index: 1600;
+    display:grid;
+    grid-template-columns: minmax(300px, 1.35fr) minmax(210px, .85fr) minmax(190px, .75fr) auto;
+    gap:12px;
+    align-items:stretch;
+    pointer-events:auto;
+  }
+
+  .filters .fbox{
+    pointer-events:auto;
+    min-width:0;
+    min-height:68px;
+    background: rgba(255,255,255,.97);
+    border: 1px solid rgba(203,213,225,.95);
+    border-radius: 18px;
+    padding: 10px 14px;
+    box-shadow:0 14px 34px rgba(15,23,42,.08);
+    display:flex;
+    align-items:center;
+    gap: 10px;
+  }
+
   .filters > .fbox > label{
     margin:0;
-    font-size: 12px;
-    font-weight: 900;
+    flex:0 0 auto;
+    font-size: 14px;
+    font-weight: 1000;
     color:#334155;
     white-space:nowrap;
   }
+
   .filters select{
-    height: 34px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
+    flex:1 1 auto;
+    min-width:0;
+    width:100%;
+    height:44px;
+    border-radius: 14px;
+    border: 1px solid rgba(203,213,225,.95);
     background:#fff;
-    font-weight: 900;
-    padding: 0 10px;
+    color:#0f172a;
+    font-size: 18px;
+    font-weight: 1000;
+    padding: 0 42px 0 14px;
     outline:none;
-    width: auto;
-    min-width: 140px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+  }
+
+  .filters select:focus{
+    border-color:rgba(0,40,132,.44);
+    box-shadow:0 0 0 4px rgba(0,40,132,.10);
   }
 
   .fbox-segmento{
     position:relative;
-    align-items:stretch;
+    align-items:center;
+  }
+
+  .filters .fbox-action{
+    justify-content:center;
+    padding:10px;
+  }
+
+  .btn-limpar-filtros{
+    height:44px;
+    min-width:146px;
+    border-radius: 14px;
+    border:1px solid rgba(203,213,225,.95);
+    background:#fff;
+    color:#334155;
+    font-size: 13px;
+    font-weight:1000;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+  }
+
+  .btn-limpar-filtros:hover{
+    border-color:rgba(0,40,132,.26);
+    color:var(--euro-blue);
+    background:#F8FAFC;
+  }
+
+  .btn-limpar-filtros:active{
+    transform: translateY(1px);
+  }
+
+  @media (max-width: 1280px){
+    .mm-page-toolbar{
+      grid-template-columns: 1fr;
+    }
+    .filters{
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .filters .fbox-action{
+      grid-column: 1 / -1;
+      justify-content:flex-start;
+    }
+  }
+
+  @media (max-width: 860px){
+    .filters{
+      grid-template-columns: 1fr;
+    }
+    .filters .fbox{
+      flex-direction:column;
+      align-items:stretch;
+      min-height:auto;
+    }
+    .filters > .fbox > label{
+      font-size:12px;
+    }
+    .filters select,
+    .btn-limpar-filtros{
+      width:100%;
+      font-size:15px;
+    }
   }
 
   .mm-multidd{
     position:relative;
+    flex:1 1 auto;
     min-width: 260px;
     max-width: min(420px, calc(100vw - 44px));
     font-weight: 900;
@@ -558,13 +863,13 @@
 
   .mm-multidd .dd-summary{
     list-style:none;
-    height:34px;
+    height:44px;
     min-width: 260px;
     max-width: 420px;
-    border-radius: 10px;
-    border:1px solid var(--border);
+    border-radius: 14px;
+    border:1px solid rgba(203,213,225,.95);
     background:#fff;
-    padding:0 10px;
+    padding:0 14px;
     outline:none;
     cursor:pointer;
     display:flex;
@@ -573,6 +878,7 @@
     gap:10px;
     color:#0f172a;
     user-select:none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
   }
 
   .mm-multidd .dd-summary::-webkit-details-marker{
@@ -589,7 +895,7 @@
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
-    font-size: 12.5px;
+    font-size: 18px;
     font-weight: 1000;
     color:#0f172a;
   }
@@ -692,7 +998,12 @@
   @media (max-width: 860px){
     .mm-multidd,
     .mm-multidd .dd-summary{
-      min-width: 220px;
+      min-width: 0;
+      width:100%;
+      max-width:100%;
+    }
+    .mm-multidd .dd-label{
+      font-size:15px;
     }
   }
 
@@ -838,12 +1149,12 @@
   .mm-right{
     display:flex;
     flex-direction:column;
-    gap: 14px;
+    gap: 12px;
     min-height:0;
   }
 
   .legend{
-    padding: 12px 14px;
+    padding: 10px 12px;
   }
   .legend .ttl{
     margin: 0 0 10px 0;
@@ -880,6 +1191,115 @@
     background:#fff;
     padding: 6px 10px;
     border-radius: 999px;
+  }
+
+  .mm-dist-card{
+    padding: 12px 14px 14px 14px;
+    min-width:0;
+  }
+
+  .mm-dist-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:10px;
+    min-width:0;
+  }
+
+  .mm-dist-title{
+    margin:0;
+    font-weight:1100;
+    color:var(--euro-blue);
+    letter-spacing:.2px;
+    line-height:1.15;
+  }
+
+  .mm-dist-sub{
+    display:block;
+    margin-top:3px;
+    color:#64748b;
+    font-size:11px;
+    font-weight:900;
+    line-height:1.2;
+  }
+
+  .mm-dist-total{
+    flex:0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:36px;
+    min-height:28px;
+    padding:5px 9px;
+    border-radius:999px;
+    background:rgba(0,40,132,.08);
+    border:1px solid rgba(0,40,132,.16);
+    color:var(--euro-blue);
+    font-size:12px;
+    font-weight:1100;
+  }
+
+  .mm-dist-list{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr);
+    gap:9px;
+    max-height:230px;
+    overflow:auto;
+    padding-right:2px;
+  }
+
+  .mm-dist-row{
+    min-width:0;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto;
+    gap:8px 10px;
+    align-items:center;
+  }
+
+  .mm-dist-name{
+    min-width:0;
+    color:#0f172a;
+    font-size:12px;
+    font-weight:1000;
+    line-height:1.2;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .mm-dist-meta{
+    color:#64748b;
+    font-size:11px;
+    font-weight:950;
+    white-space:nowrap;
+  }
+
+  .mm-dist-bar{
+    grid-column:1 / -1;
+    height:8px;
+    border-radius:999px;
+    background:#E2E8F0;
+    overflow:hidden;
+  }
+
+  .mm-dist-fill{
+    width:0%;
+    height:100%;
+    border-radius:999px;
+    background:linear-gradient(90deg, rgba(0,40,132,.92), rgba(255,179,0,.92));
+    transition:width .22s ease;
+  }
+
+  .mm-dist-empty{
+    padding:10px 12px;
+    border-radius:12px;
+    border:1px dashed rgba(203,213,225,.95);
+    background:#F8FAFC;
+    color:#64748b;
+    font-size:12px;
+    font-weight:900;
+    line-height:1.3;
   }
 
   .drawer{
@@ -1480,136 +1900,23 @@
 </style>
 
 
-
-<div class="mm-shell">
-
-  <!-- =========================
-       LEFT
-       ========================= -->
-  <div class="mm-card">
-    <div class="mm-head">
-      <div>
-        <div class="t">INFORMAÇÕES DO PAINEL</div>
-        <div class="sub">Resumo do ponto + dados operacionais</div>
-      </div>
+<div class="mm-page-toolbar">
+  <div class="mm-page-titlebox">
+    <div class="mm-page-title-row">
+      <h1 id="topPainelNome">Painel</h1>
+      <span class="mm-status-pill" id="topPainelStatus">Ativo</span>
     </div>
-
-    <div class="painel-box">
-      <div class="painel-foto painel-foto-galeria" id="painelFotoGaleria">
-        <button type="button" class="painel-foto-nav prev" id="btnPainelFotoPrev" aria-label="Imagem anterior">‹</button>
-
-        <img
-          id="imgPainelPrincipal"
-          src="{{ url_for('static', filename='imagens/painel-publicitario.png') }}"
-          alt="Painel"
-          loading="lazy"
-          decoding="async"
-        >
-
-        <button type="button" class="painel-foto-nav next" id="btnPainelFotoNext" aria-label="Próxima imagem">›</button>
-
-        <div class="painel-foto-overlay">
-          <span class="painel-foto-badge" id="lblPainelFotoContador">1 / 1</span>
-        </div>
-
-        <div class="painel-foto-dots" id="painelFotoDots"></div>
-      </div>
-
-      <!-- ✅ Ajuste HTML: evita corte/overflow dentro de flex -->
-      <div class="painel-info" style="min-width:0;">
-
-        <!-- ✅ Ajuste HTML: força quebra de linha mesmo sem CSS -->
-        <p class="nome" id="painelNome" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;margin:0;">
-          —
-        </p>
-
-        <p class="endereco" id="painelEndereco" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;margin:4px 0 10px 0;">
-          —
-        </p>
-
-        <div class="kv">
-          <b>Tipo:</b>
-          <span>
-            <span class="tipo-badge" id="painelTipoBadge" style="max-width:100%;display:inline-flex;min-width:0;">
-              <span class="dot"></span>
-
-              <!-- ✅ Ajuste HTML: garante que o texto do tipo pode quebrar -->
-              <span class="txt" id="painelTipoTxt" style="min-width:0;white-space:normal;word-break:break-word;overflow-wrap:anywhere;">
-                —
-              </span>
-            </span>
-          </span>
-        </div>
-
-        <div class="kv"><b>Produto:</b> <span id="painelProduto" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</span></div>
-        <div class="kv"><b>Sentido:</b> <span id="painelSentido" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere;">—</span></div>
-        <div class="kv"><b>Faces:</b> <span id="painelFaces">—</span></div>
-
-        <div class="painel-classificacao" id="painelClassificacaoBox">
-          <div class="painel-classificacao-head">
-            <div>
-              <div class="painel-classificacao-title">Classificação do Painel</div>
-              <div class="painel-classificacao-sub" id="painelClassificacaoSub">Dados da FatoClassificacaoFacesPaineis</div>
-            </div>
-            <span class="painel-classificacao-status" id="painelClassificacaoStatus">—</span>
-          </div>
-
-          <div class="painel-classificacao-grid">
-            <div class="painel-metrica">
-              <span>Fluxo Passantes Semanal</span>
-              <strong id="painelFluxoPassantesSemanal">—</strong>
-            </div>
-            <div class="painel-metrica">
-              <span>Índice Impacto População</span>
-              <strong id="painelIndiceImpactoPopulacao">—</strong>
-            </div>
-            <div class="painel-metrica">
-              <span>Renda Média</span>
-              <strong id="painelRendaMedia">—</strong>
-            </div>
-            <div class="painel-metrica">
-              <span>PEA Dia/Faixa</span>
-              <strong id="painelPeaDiaFaixa">—</strong>
-            </div>
-            <div class="painel-metrica">
-              <span>CPM</span>
-              <strong id="painelCPM">—</strong>
-            </div>
-          </div>
-
-          <div class="painel-flags">
-            <div class="painel-flag"><span>5 principais avenidas</span><strong id="painelBit5PrincipaisAvenidas">—</strong></div>
-            <div class="painel-flag"><span>Cruzamento</span><strong id="painelBitCruzamento">—</strong></div>
-            <div class="painel-flag"><span>Semáforo</span><strong id="painelBitSemaforo">—</strong></div>
-            <div class="painel-flag"><span>Proximidade Shopping</span><strong id="painelBitShopping">—</strong></div>
-            <div class="painel-flag"><span>Concorrente até 200m</span><strong id="painelBitConcorrente200m">—</strong></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div style="padding: 0 16px 16px 16px;">
-      <button class="btn-full" id="btnVerFichaPainel">Ver Ficha do Painel</button>
-    </div>
-
-    <div class="hint">
-      Passe o mouse nos pontos do mapa para ver a <b>legenda</b>. Clique em uma empresa para abrir detalhes no painel direito.
-    </div>
+    <p id="topPainelEndereco">—</p>
   </div>
 
-  <!-- =========================
-       CENTER / MAP
-       ========================= -->
-  <div class="mm-card mm-center">
-
-    <!-- filtros -->
+  <!-- filtros do mapa: agora ficam acima do mapa, fora da área Leaflet -->
     <div class="filters">
       <div class="fbox fbox-segmento">
         <label for="ddSegmento">Segmento:</label>
 
         <details class="mm-multidd" id="ddSegmento">
-          <summary class="dd-summary">
-            <span class="dd-label" id="lblSegmentoSelecionado">Todos</span>
+          <summary class="dd-summary" aria-expanded="false">
+            <span class="dd-label" id="lblSegmentoSelecionado" title="Todos">Todos</span>
             <span class="dd-caret">▾</span>
           </summary>
 
@@ -1649,7 +1956,204 @@
           <option value="5000">5 km</option>
         </select>
       </div>
+
+      <div class="fbox fbox-action">
+        <button type="button" class="btn-limpar-filtros" id="btnLimparFiltrosMapa" title="Voltar para Segmento: Todos, Status: Todos e Raio: 1 km">
+          ↻ Limpar filtros
+        </button>
+      </div>
     </div>
+
+</div>
+
+
+<div class="mm-shell">
+
+  <!-- =========================
+       LEFT
+       ========================= -->
+  <div class="painel-left-stack">
+
+    <section class="painel-resumo-card" aria-labelledby="tituloInfoPainel">
+      <div class="painel-resumo-body">
+        <h2 class="painel-section-title" id="tituloInfoPainel">Informações do Painel</h2>
+
+        <div class="painel-foto painel-foto-galeria" id="painelFotoGaleria" tabindex="0">
+          <button type="button" class="painel-foto-nav prev" id="btnPainelFotoPrev" aria-label="Imagem anterior">‹</button>
+
+          <img
+            id="imgPainelPrincipal"
+            src="{{ url_for('static', filename='imagens/painel-publicitario.png') }}"
+            alt="Painel"
+            loading="lazy"
+            decoding="async"
+          >
+
+          <button type="button" class="painel-foto-nav next" id="btnPainelFotoNext" aria-label="Próxima imagem">›</button>
+
+          <div class="painel-foto-overlay">
+            <span class="painel-foto-badge" id="lblPainelFotoContador">1 / 1</span>
+          </div>
+
+          <div class="painel-foto-dots" id="painelFotoDots"></div>
+        </div>
+
+        <div class="painel-dados-list">
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Código do Ponto</div>
+            <div class="painel-dado-valor valor-forte" id="painelCodigoPonto">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Formato</div>
+            <div class="painel-dado-valor valor-forte" id="painelTipoTxt">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Dimensão</div>
+            <div class="painel-dado-valor valor-forte" id="painelDimensao">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Endereço</div>
+            <div class="painel-dado-valor valor-forte" id="painelEndereco">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Latitude / Longitude</div>
+            <div class="painel-dado-valor valor-forte" id="painelLatLng">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Taxa de Ocupação</div>
+            <div class="painel-dado-valor painel-ocupacao-valor" id="painelOcupacaoTaxa">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Status</div>
+            <div class="painel-dado-valor">
+              <span class="painel-status-badge" id="painelStatusDetalhe">—</span>
+            </div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Última Atualização</div>
+            <div class="painel-dado-valor valor-forte" id="painelUltimaAtualizacao">—</div>
+          </div>
+        </div>
+
+        <!-- IDs legados mantidos para não quebrar preenchimentos/funções já existentes no JavaScript. -->
+        <div class="painel-legacy-hidden" aria-hidden="true">
+          <span id="painelNome">—</span>
+          <span id="painelProduto">—</span>
+          <span id="painelSentido">—</span>
+          <span id="painelFaces">—</span>
+
+          <div class="painel-classificacao" id="painelClassificacaoBox">
+            <div class="painel-classificacao-head">
+              <div>
+                <div class="painel-classificacao-title">Classificação do Painel</div>
+                <div class="painel-classificacao-sub" id="painelClassificacaoSub">Dados da FatoClassificacaoFacesPaineis</div>
+              </div>
+              <span class="painel-classificacao-status" id="painelClassificacaoStatus">—</span>
+            </div>
+
+            <div class="painel-classificacao-grid">
+              <div class="painel-metrica">
+                <span>Fluxo Passantes Semanal</span>
+                <strong id="painelFluxoPassantesSemanal">—</strong>
+              </div>
+              <div class="painel-metrica">
+                <span>Índice Impacto População</span>
+                <strong id="painelIndiceImpactoPopulacao">—</strong>
+              </div>
+              <div class="painel-metrica">
+                <span>Renda Média</span>
+                <strong id="painelRendaMedia">—</strong>
+              </div>
+              <div class="painel-metrica">
+                <span>PEA Dia/Faixa</span>
+                <strong id="painelPeaDiaFaixa">—</strong>
+              </div>
+              <div class="painel-metrica">
+                <span>CPM</span>
+                <strong id="painelCPM">—</strong>
+              </div>
+            </div>
+
+            <div class="painel-flags">
+              <div class="painel-flag"><span>5 principais avenidas</span><strong id="painelBit5PrincipaisAvenidas">—</strong></div>
+              <div class="painel-flag"><span>Cruzamento</span><strong id="painelBitCruzamento">—</strong></div>
+              <div class="painel-flag"><span>Semáforo</span><strong id="painelBitSemaforo">—</strong></div>
+              <div class="painel-flag"><span>Proximidade Shopping</span><strong id="painelBitShopping">—</strong></div>
+              <div class="painel-flag"><span>Concorrente até 200m</span><strong id="painelBitConcorrente200m">—</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="painel-resumo-card" aria-labelledby="tituloInfoRegiaoIBGE">
+      <div class="painel-resumo-body">
+        <h2 class="painel-section-title" id="tituloInfoRegiaoIBGE">Informações da Região (IBGE)</h2>
+
+        <div class="painel-dados-list" style="margin-top:0;">
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Bairro</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoBairro">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Município</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoMunicipio">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">UF</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoUF">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">População (raio 1 km)</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoPopulacaoRaio">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Densidade Demográfica</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoDensidadeDemografica">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Renda Média Domiciliar</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoRendaMediaDomiciliar">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Grau de Urbanização</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoGrauUrbanizacao">—</div>
+          </div>
+
+          <div class="painel-dado-row">
+            <div class="painel-dado-label">Classe Predominante</div>
+            <div class="painel-dado-valor valor-forte" id="regiaoClassePredominante">—</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="painel-left-actions">
+      <button class="btn-full" id="btnVerFichaPainel">Ver Ficha do Painel</button>
+    </div>
+
+    <div class="hint">
+      Passe o mouse nos pontos do mapa para ver a <b>legenda</b>. Clique em uma empresa para abrir detalhes no painel direito.
+    </div>
+  </div>
+
+  <!-- =========================
+       CENTER / MAP
+       ========================= -->
+  <div class="mm-card mm-center">
 
     <div id="mapa"></div>
 
@@ -1701,6 +2205,32 @@
         <div style="width:14px;height:14px;border-radius:6px;background:linear-gradient(180deg,#FFB300,#ef4444);border:2px solid rgba(255,255,255,.85);box-shadow: 0 6px 10px rgba(15,23,42,.10)"></div>
         <div><b>Concentração (Heat)</b></div>
         <div class="chip" id="chipHeat">On</div>
+      </div>
+    </div>
+
+    <div class="mm-card mm-dist-card" aria-labelledby="tituloDistribCategoria">
+      <div class="mm-dist-head">
+        <div>
+          <p class="mm-dist-title" id="tituloDistribCategoria">Distribuição Categoria</p>
+          <span class="mm-dist-sub">Contratos ativos ligados a este painel</span>
+        </div>
+        <span class="mm-dist-total" id="totalDistribCategoria">0</span>
+      </div>
+      <div class="mm-dist-list" id="listaDistribCategoria">
+        <div class="mm-dist-empty">Carregando distribuição por categoria…</div>
+      </div>
+    </div>
+
+    <div class="mm-card mm-dist-card" aria-labelledby="tituloDistribPorte">
+      <div class="mm-dist-head">
+        <div>
+          <p class="mm-dist-title" id="tituloDistribPorte">Distribuição Porte</p>
+          <span class="mm-dist-sub">Porte das empresas dos contratos do painel</span>
+        </div>
+        <span class="mm-dist-total" id="totalDistribPorte">0</span>
+      </div>
+      <div class="mm-dist-list" id="listaDistribPorte">
+        <div class="mm-dist-empty">Carregando distribuição por porte…</div>
       </div>
     </div>
 
@@ -1815,6 +2345,8 @@
   const EMPRESAS = {{ empresas_json|tojson }};
   const FILTRO_INICIAL = {{ filtro_inicial|tojson }};
   const CEP_POINTS = {{ cep_points_json|tojson }};  // ✅ NOVO (backend -> heat por CEP)
+  const SEGMENTOS_CNAE = {{ segmentos_cnae_json|default([], true)|tojson }};  // valores oficiais de DimCnaes.Classe
+  const DISTRIBUICOES_CONTRATOS = {{ distribuicoes_contratos_json|default({}, true)|tojson }};  // categoria/porte dos contratos do painel
 
   console.log("PAINEL:", PAINEL);
   console.log("EMPRESAS tipo:", typeof EMPRESAS, "isArray:", Array.isArray(EMPRESAS), "len:", (EMPRESAS && EMPRESAS.length) || 0);
@@ -1831,6 +2363,19 @@
   const painelObj = (PAINEL && typeof PAINEL === "object") ? PAINEL : {};
   const P = painelObj; // ✅ sem defaults
 
+  // ✅ endpoint sob demanda: empresas da Receita Federal por segmento selecionado
+  // Ícone físico no servidor:
+  // /home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/localizacao.png
+  // URL pública servida pelo Flask:
+  const URL_ICONE_EMPRESA_RECEITA = "{{ url_for('static', filename='imagens/localizacao.png') }}";
+
+  // Endpoint Flask gerado por url_for para não quebrar se o prefixo do blueprint mudar.
+  const URL_API_EMPRESAS_SEGMENTO_TEMPLATE = "{{ url_for('Paineis.api_empresas_receita_segmento_painel', codponto=0) }}";
+  const URL_API_EMPRESAS_SEGMENTO = URL_API_EMPRESAS_SEGMENTO_TEMPLATE.replace(
+    "/0/empresas-segmento",
+    `/${encodeURIComponent(P.id_painel || "")}/empresas-segmento`
+  );
+
   // ✅ garante array
   const empresasArr = Array.isArray(EMPRESAS) ? EMPRESAS : [];
 
@@ -1839,6 +2384,8 @@
 
   // ✅ garante array (CEP heat)
   const cepPointsArr = Array.isArray(CEP_POINTS) ? CEP_POINTS : [];
+
+  _renderDistribuicoesContratos();
 
   // =========================================================
   // Utils
@@ -1938,6 +2485,56 @@
     if(el) el.textContent = (valor === null || valor === undefined || valor === "") ? "—" : String(valor);
   }
 
+  function _renderDistribuicaoContratos(tipo, listaId, totalId){
+    const lista = document.getElementById(listaId);
+    const totalEl = document.getElementById(totalId);
+    if(!lista) return;
+
+    const fonte = (DISTRIBUICOES_CONTRATOS && typeof DISTRIBUICOES_CONTRATOS === "object")
+      ? DISTRIBUICOES_CONTRATOS
+      : {};
+
+    const itens = Array.isArray(fonte[tipo]) ? fonte[tipo] : [];
+    const total = itens.reduce((acc, item)=> acc + Number(item && item.quantidade || 0), 0);
+
+    if(totalEl) totalEl.textContent = _brNumero(total, 0);
+
+    if(!itens.length || total <= 0){
+      lista.innerHTML = '<div class="mm-dist-empty">Nenhum contrato ativo encontrado para montar esta distribuição.</div>';
+      return;
+    }
+
+    const ordenados = [...itens].sort((a,b)=>{
+      const qb = Number(b && b.quantidade || 0);
+      const qa = Number(a && a.quantidade || 0);
+      if(qb !== qa) return qb - qa;
+      return String(a && a.label || "").localeCompare(String(b && b.label || ""), "pt-BR", { sensitivity:"base" });
+    });
+
+    lista.innerHTML = ordenados.map(item => {
+      const label = String((item && item.label) || "Sem informação");
+      const qtd = Number(item && item.quantidade || 0);
+      const pct = total > 0 ? (qtd / total) * 100 : 0;
+      const valor = Number(item && item.valor || 0);
+      const title = `${label} • ${_brNumero(qtd, 0)} contrato(s) • ${_brPct(pct)}${Number.isFinite(valor) && valor > 0 ? ' • ' + _brMoeda(valor) + '/mês' : ''}`;
+
+      return `
+        <div class="mm-dist-row" title="${_escapeAttr(title)}">
+          <div class="mm-dist-name">${_escapeHtml(label)}</div>
+          <div class="mm-dist-meta">${_brNumero(qtd, 0)} • ${_brPct(pct)}</div>
+          <div class="mm-dist-bar" aria-hidden="true">
+            <div class="mm-dist-fill" style="width:${Math.max(2, Math.min(100, pct)).toFixed(2)}%"></div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function _renderDistribuicoesContratos(){
+    _renderDistribuicaoContratos("categoria", "listaDistribCategoria", "totalDistribCategoria");
+    _renderDistribuicaoContratos("porte", "listaDistribPorte", "totalDistribPorte");
+  }
+
   function _normStr(s){
     if(s == null) return "";
     return String(s)
@@ -1945,12 +2542,25 @@
       .trim().toLowerCase();
   }
 
+  function _escapeHtml(valor){
+    return String(valor ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function _escapeAttr(valor){
+    return _escapeHtml(valor).replace(/`/g, "&#096;");
+  }
+
   function _latPainel(){
-    const v = Number(P && P.lat);
+    const v = _numSeguro(P && (P.lat ?? P.latitude ?? P.Latitude ?? P.LatitudePainel));
     return Number.isFinite(v) ? v : null;
   }
   function _lngPainel(){
-    const v = Number(P && P.lng);
+    const v = _numSeguro(P && (P.lng ?? P.lon ?? P.longitude ?? P.Longitude ?? P.LongitudePainel));
     return Number.isFinite(v) ? v : null;
   }
 
@@ -1964,16 +2574,22 @@
   // =========================================================
   function _categoriaEmpresaMapa(e){
     const st = String(e?.status || "").trim().toLowerCase();
+    const ehReceita = (e?.tipo_marcador === "empresa_segmento_receita" || e?.origem === "receita_federal");
 
     // 1) flags explícitas (se vier do backend)
-    if(e?.cliente_painel === true || e?.eh_cliente_painel === true) return "cliente_painel";
-    if(e?.cliente_euro === true || e?.cliente_euromidia === true || e?.eh_cliente_euro === true) return "cliente_euro";
+    // IMPORTANTE: empresa da Receita também pode ser cliente. Não pode virar sempre "prospect".
+    if(e?.cliente_painel === true || e?.eh_cliente_painel === true || e?.contratou_este_painel === true) return "cliente_painel";
+    if(e?.cliente_euro === true || e?.cliente_euromidia === true || e?.eh_cliente_euro === true || e?.ja_e_cliente_euromidia === true) return "cliente_euro";
 
     // 2) status explícito
-    if(st === "cliente_painel") return "cliente_painel";
+    if(st === "cliente_painel" || st === "cliente_no_painel") return "cliente_painel";
     if(st === "cliente_euro" || st === "cliente_euromidia") return "cliente_euro";
 
-    // 3) compatibilidade com seu dataset atual
+    // 3) Receita Federal carregada sob demanda pelo filtro Segmento.
+    // Se não for cliente, mantém uma categoria própria só para legenda/contagem.
+    if(ehReceita) return "empresa_segmento_receita";
+
+    // 4) compatibilidade com seu dataset atual
     if(st === "cliente") return "cliente_painel";
     if(st === "prospect") return "prospect";
 
@@ -1986,11 +2602,220 @@
   }
 
   // =========================================================
+  // Helpers para preencher o novo card lateral sem depender de um único nome de campo
+  // =========================================================
+  function _isValorPreenchido(v){
+    return !(v === null || v === undefined || String(v).trim() === "");
+  }
+
+  function _firstValue(){
+    for(let i = 0; i < arguments.length; i++){
+      const v = arguments[i];
+      if(_isValorPreenchido(v)) return v;
+    }
+    return null;
+  }
+
+  function _pickField(obj, keys){
+    if(!obj || typeof obj !== "object") return null;
+    for(const k of keys){
+      if(Object.prototype.hasOwnProperty.call(obj, k) && _isValorPreenchido(obj[k])){
+        return obj[k];
+      }
+    }
+    return null;
+  }
+
+  function _numSeguro(v){
+    if(v === null || v === undefined || v === "") return NaN;
+    if(typeof v === "number") return Number.isFinite(v) ? v : NaN;
+
+    let s = String(v).trim();
+    if(!s) return NaN;
+
+    s = s
+      .replace(/R\$/gi, "")
+      .replace(/%/g, "")
+      .replace(/hab\/km²/gi, "")
+      .replace(/hab\/km2/gi, "")
+      .trim();
+
+    if(!s) return NaN;
+
+    // Formato BR: 1.234,56
+    if(/^[-+]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)){
+      s = s.replace(/\./g, "").replace(",", ".");
+    }else{
+      // Formato simples: 92,0
+      s = s.replace(",", ".");
+    }
+
+    const n = Number(s);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function _fmtPctFlex(v){
+    if(!_isValorPreenchido(v)) return "—";
+    const txt = String(v).trim();
+    const n = _numSeguro(txt);
+    if(!Number.isFinite(n)) return txt;
+    const pct = (Math.abs(n) <= 1) ? (n * 100) : n;
+    return `${pct.toFixed(1).replace(".", ",")}%`;
+  }
+
+  function _fmtNumeroOuTexto(v, casas = 0, sufixo = ""){
+    if(!_isValorPreenchido(v)) return "—";
+    const txt = String(v).trim();
+
+    // Se já veio formatado com texto, mantém como veio do backend.
+    if(/[a-zA-ZÀ-ÿ]/.test(txt) && !/^R\$/i.test(txt)){
+      return txt;
+    }
+
+    const n = _numSeguro(txt);
+    if(!Number.isFinite(n)) return txt;
+
+    return `${n.toLocaleString("pt-BR", {
+      minimumFractionDigits: casas,
+      maximumFractionDigits: casas
+    })}${sufixo}`;
+  }
+
+  function _fmtMoedaFlex(v){
+    if(!_isValorPreenchido(v)) return "—";
+    const txt = String(v).trim();
+    if(/^R\$/i.test(txt)) return txt;
+    const n = _numSeguro(txt);
+    if(!Number.isFinite(n)) return txt;
+    return _brMoedaCasas(n, 2);
+  }
+
+  function _fmtDataHoraFlex(v){
+    if(!_isValorPreenchido(v)) return "—";
+    const txt = String(v).trim();
+
+    // Já veio no formato BR.
+    if(/^\d{2}\/\d{2}\/\d{4}/.test(txt)){
+      return txt.slice(0, 16);
+    }
+
+    // YYYY-MM-DD HH:mm:ss / YYYY-MM-DDTHH:mm:ss
+    const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2}))?/);
+    if(m){
+      const data = `${m[3]}/${m[2]}/${m[1]}`;
+      const hora = (m[4] && m[5]) ? ` ${m[4]}:${m[5]}` : "";
+      return `${data}${hora}`;
+    }
+
+    return txt;
+  }
+
+  function _fmtLatLng(lat, lng){
+    const la = _numSeguro(lat);
+    const lo = _numSeguro(lng);
+    if(!Number.isFinite(la) || !Number.isFinite(lo)) return "—";
+    return `${la.toFixed(6)}, ${lo.toFixed(6)}`;
+  }
+
+  function _fmtDimensaoPainel(){
+    const pronto = _pickField(P, [
+      "dimensao", "Dimensao", "dimensão", "Dimensão",
+      "medida", "Medida", "tamanho", "Tamanho",
+      "dimensoes", "Dimensoes", "dimensões", "Dimensões"
+    ]);
+    if(_isValorPreenchido(pronto)) return String(pronto);
+
+    const largura = _firstValue(
+      _pickField(P, ["largura", "Largura", "largura_m", "LarguraM", "largura_metros", "LarguraMetros"]),
+      _pickField(P?.classificacao || {}, ["largura", "largura_m", "Largura"])
+    );
+
+    const altura = _firstValue(
+      _pickField(P, ["altura", "Altura", "altura_m", "AlturaM", "altura_metros", "AlturaMetros"]),
+      _pickField(P?.classificacao || {}, ["altura", "altura_m", "Altura"])
+    );
+
+    const nLargura = _numSeguro(largura);
+    const nAltura = _numSeguro(altura);
+
+    if(Number.isFinite(nLargura) && Number.isFinite(nAltura)){
+      return `${_brNumero(nLargura, 2)}m x ${_brNumero(nAltura, 2)}m`;
+    }
+
+    return "—";
+  }
+
+  function _obterRegiaoMaisProxima(){
+    const direto = _firstValue(
+      _pickField(P, ["regiao_ibge", "RegiaoIBGE", "dados_ibge", "DadosIBGE", "ibge", "IBGE", "regiao", "Regiao"]),
+      null
+    );
+
+    let base = (direto && typeof direto === "object") ? Object.assign({}, direto) : {};
+
+    const latBase = _latPainel();
+    const lngBase = _lngPainel();
+    let melhor = null;
+    let melhorDist = Infinity;
+
+    for(const ponto of cepPointsArr){
+      const props = (ponto && ponto.props && typeof ponto.props === "object") ? ponto.props : (ponto || {});
+      const lat = _numSeguro(ponto?.lat ?? props?.lat ?? props?.LatitudeBairro ?? props?.latitude ?? props?.Latitude);
+      const lng = _numSeguro(ponto?.lng ?? props?.lng ?? props?.LongitudeBairro ?? props?.longitude ?? props?.Longitude);
+
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      let dist = 0;
+      if(latBase != null && lngBase != null){
+        dist = _haversineMetros(latBase, lngBase, lat, lng);
+      }
+
+      if(melhor === null || dist < melhorDist){
+        melhor = Object.assign({}, props);
+        melhorDist = dist;
+      }
+    }
+
+    // Dados específicos do PAINEL têm prioridade sobre o ponto mais próximo.
+    return Object.assign({}, melhor || {}, base);
+  }
+
+  function _getRegiaoCampo(regiao, keys){
+    return _firstValue(_pickField(regiao, keys), _pickField(P, keys));
+  }
+
+  function _aplicarClasseStatus(el, status){
+    if(!el) return;
+
+    el.classList.remove("status-alerta", "status-ruim");
+    const statusNorm = _normStr(status);
+
+    if(statusNorm.includes("inativo") || statusNorm.includes("cancel") || statusNorm.includes("bloque")){
+      el.classList.add("status-ruim");
+      return;
+    }
+
+    if(statusNorm.includes("pendente") || statusNorm.includes("manut") || statusNorm.includes("aten")){
+      el.classList.add("status-alerta");
+    }
+  }
+
+  // =========================================================
   // Painel (lado esquerdo)
   // =========================================================
+  const topPainelNome = document.getElementById("topPainelNome");
+  const topPainelEndereco = document.getElementById("topPainelEndereco");
+  const topPainelStatus = document.getElementById("topPainelStatus");
+
   const painelNome = document.getElementById("painelNome");
+  const painelCodigoPonto = document.getElementById("painelCodigoPonto");
   const painelEndereco = document.getElementById("painelEndereco");
   const painelTipoTxt = document.getElementById("painelTipoTxt");
+  const painelDimensao = document.getElementById("painelDimensao");
+  const painelLatLng = document.getElementById("painelLatLng");
+  const painelOcupacaoTaxa = document.getElementById("painelOcupacaoTaxa");
+  const painelStatusDetalhe = document.getElementById("painelStatusDetalhe");
+  const painelUltimaAtualizacao = document.getElementById("painelUltimaAtualizacao");
   const painelProduto = document.getElementById("painelProduto");
   const painelSentido = document.getElementById("painelSentido");
   const painelFaces = document.getElementById("painelFaces");
@@ -2006,6 +2831,16 @@
   const painelBitSemaforo = document.getElementById("painelBitSemaforo");
   const painelBitShopping = document.getElementById("painelBitShopping");
   const painelBitConcorrente200m = document.getElementById("painelBitConcorrente200m");
+
+  const regiaoBairro = document.getElementById("regiaoBairro");
+  const regiaoMunicipio = document.getElementById("regiaoMunicipio");
+  const regiaoUF = document.getElementById("regiaoUF");
+  const regiaoPopulacaoRaio = document.getElementById("regiaoPopulacaoRaio");
+  const regiaoDensidadeDemografica = document.getElementById("regiaoDensidadeDemografica");
+  const regiaoRendaMediaDomiciliar = document.getElementById("regiaoRendaMediaDomiciliar");
+  const regiaoGrauUrbanizacao = document.getElementById("regiaoGrauUrbanizacao");
+  const regiaoClassePredominante = document.getElementById("regiaoClassePredominante");
+
   const btnVerFichaPainel = document.getElementById("btnVerFichaPainel");
 
   const painelFotoGaleria = document.getElementById("painelFotoGaleria");
@@ -2142,15 +2977,79 @@
     });
   }
 
+  const classificacaoPainel = (P && P.classificacao && typeof P.classificacao === "object") ? P.classificacao : {};
+  const temClassificacao = Boolean(classificacaoPainel.tem_classificacao === true);
+
+  const statusPainel = String(
+    _firstValue(
+      _pickField(P, ["status_nome", "StatusNome", "status", "Status", "situacao", "Situacao"]),
+      ((P && (P.ativo === false || P.bit_ativo === false || P.BitAtivo === 0)) ? "Inativo" : "Ativo")
+    )
+  ).trim() || "Ativo";
+
+  const codigoPonto = _firstValue(
+    _pickField(P, [
+      "codigo_ponto", "CodigoPonto", "cod_ponto", "CodPonto",
+      "codigo", "Codigo", "id_ponto", "IDPonto", "IDDimPainel", "id", "ID"
+    ]),
+    "—"
+  );
+
+  const formatoPainel = _firstValue(
+    _pickField(P, ["formato", "Formato", "tipo", "Tipo", "produto", "Produto", "modelo", "Modelo"]),
+    "—"
+  );
+
+  const ocupacaoPainel = _firstValue(
+    _pickField(P, [
+      "taxa_ocupacao", "TaxaOcupacao", "taxa_ocupacao_pct", "TaxaOcupacaoPct",
+      "ocupacao", "Ocupacao", "ocupacao_pct", "OcupacaoPct", "percentual_ocupacao", "PercentualOcupacao"
+    ]),
+    null
+  );
+
+  const ultimaAtualizacaoPainel = _firstValue(
+    _pickField(P, [
+      "ultima_atualizacao_br", "UltimaAtualizacaoBR", "ultima_atualizacao", "UltimaAtualizacao",
+      "data_atualizacao_br", "DataAtualizacaoBR", "data_atualizacao", "DataAtualizacao",
+      "dt_atualizacao", "DtAtualizacao"
+    ]),
+    classificacaoPainel.data_atualizacao_br,
+    classificacaoPainel.data_atualizacao,
+    null
+  );
+
+  if(topPainelNome) topPainelNome.textContent = (P && P.nome) ? P.nome : "Painel";
+  if(topPainelEndereco) topPainelEndereco.textContent = (P && P.endereco) ? P.endereco : "—";
+
+  if(topPainelStatus){
+    topPainelStatus.textContent = statusPainel;
+    const statusNorm = _normStr(statusPainel);
+    if(statusNorm.includes("inativo") || statusNorm.includes("cancel") || statusNorm.includes("bloque")){
+      topPainelStatus.style.background = "#FEE2E2";
+      topPainelStatus.style.borderColor = "rgba(239,68,68,.22)";
+      topPainelStatus.style.color = "#B91C1C";
+    }else if(statusNorm.includes("pendente") || statusNorm.includes("manut") || statusNorm.includes("aten")){
+      topPainelStatus.style.background = "#FEF3C7";
+      topPainelStatus.style.borderColor = "rgba(245,158,11,.28)";
+      topPainelStatus.style.color = "#B45309";
+    }
+  }
+
   if(painelNome) painelNome.textContent = (P && P.nome) ? P.nome : "—";
-  if(painelEndereco) painelEndereco.textContent = (P && P.endereco) ? P.endereco : "—";
-  if(painelTipoTxt) painelTipoTxt.textContent = (P && P.tipo) ? P.tipo : "—";
+  _setTxt(painelCodigoPonto, codigoPonto);
+  _setTxt(painelEndereco, (P && P.endereco) ? P.endereco : "—");
+  _setTxt(painelTipoTxt, formatoPainel);
+  _setTxt(painelDimensao, _fmtDimensaoPainel());
+  _setTxt(painelLatLng, _fmtLatLng(_latPainel(), _lngPainel()));
+  _setTxt(painelOcupacaoTaxa, _fmtPctFlex(ocupacaoPainel));
+  _setTxt(painelStatusDetalhe, statusPainel);
+  _aplicarClasseStatus(painelStatusDetalhe, statusPainel);
+  _setTxt(painelUltimaAtualizacao, _fmtDataHoraFlex(ultimaAtualizacaoPainel));
+
   if(painelProduto) painelProduto.textContent = (P && (P.produto || P.tipo)) ? (P.produto || P.tipo) : "—";
   if(painelSentido) painelSentido.textContent = (P && P.sentido) ? P.sentido : "—";
   if(painelFaces) painelFaces.textContent = (P && (P.faces != null || P.quantidade_faces != null)) ? String(P.faces ?? P.quantidade_faces) : "—";
-
-  const classificacaoPainel = (P && P.classificacao && typeof P.classificacao === "object") ? P.classificacao : {};
-  const temClassificacao = Boolean(classificacaoPainel.tem_classificacao === true);
 
   _setTxt(painelClassificacaoStatus, temClassificacao ? "Classificado" : "Sem dados");
 
@@ -2171,6 +3070,46 @@
   _setTxt(painelBitSemaforo, _simNao(classificacaoPainel.bit_semaforo));
   _setTxt(painelBitShopping, _simNao(classificacaoPainel.bit_proximidade_shopping));
   _setTxt(painelBitConcorrente200m, _simNao(classificacaoPainel.bit_presenca_concorrente_200_metros));
+
+  const regiaoPainel = _obterRegiaoMaisProxima();
+
+  const valorBairro = _getRegiaoCampo(regiaoPainel, ["BAIRRO", "Bairro", "bairro", "bairro_final", "NomeBairro", "nome_bairro"]);
+  const valorMunicipio = _getRegiaoCampo(regiaoPainel, ["MUNICIPIO", "Municipio", "Município", "municipio", "cidade", "Cidade", "NomeMunicipio", "nome_municipio"]);
+  const valorUF = _getRegiaoCampo(regiaoPainel, ["UF", "uf", "SiglaUF", "sigla_uf"]);
+  const valorPopulacao = _getRegiaoCampo(regiaoPainel, [
+    "populacao_raio_1km", "PopulacaoRaio1km", "PopulacaoRaio1Km", "PopulacaoRaio1KM",
+    "populacao_1km", "Populacao1km", "Populacao1Km", "Populacao",
+    "populacao", "PopulacaoTotal", "POPULACAO", "V001"
+  ]);
+  const valorDensidade = _getRegiaoCampo(regiaoPainel, [
+    "densidade_demografica", "DensidadeDemografica", "densidade_hab_km2", "DensidadeHabKm2",
+    "densidade", "Densidade", "DENSIDADE_DEMOGRAFICA"
+  ]);
+  const valorRenda = _firstValue(
+    _getRegiaoCampo(regiaoPainel, [
+      "renda_media_domiciliar", "RendaMediaDomiciliar", "RendaMediaDomiciliarMensal",
+      "renda_media", "RendaMedia", "MediaRenda", "RENDA_MEDIA_DOMICILIAR"
+    ]),
+    classificacaoPainel.renda_media,
+    null
+  );
+  const valorUrbanizacao = _getRegiaoCampo(regiaoPainel, [
+    "grau_urbanizacao", "GrauUrbanizacao", "urbanizacao", "Urbanizacao",
+    "percentual_urbanizacao", "PercentualUrbanizacao", "URBANIZACAO_PCT"
+  ]);
+  const valorClassePredominante = _getRegiaoCampo(regiaoPainel, [
+    "classe_predominante", "ClassePredominante", "classe_social_predominante", "ClasseSocialPredominante",
+    "classe", "Classe", "TIPO_AREA", "PerfilDominante", "perfil_dominante"
+  ]);
+
+  _setTxt(regiaoBairro, valorBairro || "—");
+  _setTxt(regiaoMunicipio, valorMunicipio || "—");
+  _setTxt(regiaoUF, valorUF || "—");
+  _setTxt(regiaoPopulacaoRaio, _fmtNumeroOuTexto(valorPopulacao, 0));
+  _setTxt(regiaoDensidadeDemografica, _fmtNumeroOuTexto(valorDensidade, 0, " hab/km²"));
+  _setTxt(regiaoRendaMediaDomiciliar, _fmtMoedaFlex(valorRenda));
+  _setTxt(regiaoGrauUrbanizacao, _fmtPctFlex(valorUrbanizacao));
+  _setTxt(regiaoClassePredominante, valorClassePredominante || "—");
 
   _renderizarGaleriaPainel();
 
@@ -2193,6 +3132,7 @@
 
   const selStatus = document.getElementById("selStatus");
   const selRaio = document.getElementById("selRaio");
+  const btnLimparFiltrosMapa = document.getElementById("btnLimparFiltrosMapa");
 
   const kpiEmpresas = document.getElementById("kpiEmpresas");
   const kpiClientes = document.getElementById("kpiClientes");
@@ -2314,7 +3254,19 @@
   }
 
   if(selSegmento){
-    const segmentos = Array.from(new Set(empresasArr.map(e => e && e.segmento).filter(Boolean)))
+    // O dropdown de Segmento deve exibir a lista oficial de classes CNAE,
+    // vinda de [Integracao].[Silver].[DimCnaes].[Classe].
+    // Fallback: se o backend ainda não mandar SEGMENTOS_CNAE, usa os segmentos do dataset.
+    const baseSegmentosCnae = Array.isArray(SEGMENTOS_CNAE) ? SEGMENTOS_CNAE : [];
+    const baseSegmentos = baseSegmentosCnae.length
+      ? baseSegmentosCnae
+      : empresasArr.map(e => e && (e.classe_cnae || e.segmento)).filter(Boolean);
+
+    const segmentos = Array.from(new Set(
+        baseSegmentos
+          .map(s => String(s || "").trim())
+          .filter(Boolean)
+      ))
       .sort((a,b)=> String(a).localeCompare(String(b), "pt-BR", { sensitivity:"base" }));
 
     for(const s of segmentos){
@@ -2534,20 +3486,12 @@
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapa);
 
-  const temCluster = typeof L.markerClusterGroup === "function";
   const temHeat = typeof L.heatLayer === "function";
 
-  // ✅ mantém tudo no código, mas NÃO duplica marker (agora categorias em camadas)
+  // Empresas NÃO podem usar MarkerCluster, porque o cluster gera as bolinhas numeradas.
+  // Agora cada empresa é um marker individual com ícone de localização.
   const USAR_CLUSTER_GERAL = false;
-
-  // ✅ Grupo cluster (mantido no código)
-  const grupoCluster = temCluster
-    ? L.markerClusterGroup({
-        chunkedLoading:true,
-        maxClusterRadius: 52,
-        pane: "empresasPane"
-      })
-    : L.layerGroup({ pane: "empresasPane" });
+  const grupoCluster = L.layerGroup();
 
   // ✅ Heat (declara antes de usar)
   const camadaHeat = temHeat
@@ -2568,27 +3512,26 @@
       })
     : null;
 
-  // ✅ camadas extras (mantidas)
-  //    OBS: bolhas (bairros/CEP) usam pane "bairrosPane" em cada circleMarker
+  // ✅ bolhas de bairros/CEP
   const camadaBairros = L.layerGroup();
 
-  const camadaClientesPainel = temCluster
-    ? L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius: 52, pane:"empresasPane" })
-    : L.layerGroup({ pane:"empresasPane" });
+  // ✅ camadas de empresas sem cluster numérico
+  const camadaClientesPainel = L.layerGroup();
+  const camadaClientesEuro = L.layerGroup();
+  const camadaProspects = L.layerGroup();
 
-  const camadaClientesEuro = temCluster
-    ? L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius: 52, pane:"empresasPane" })
-    : L.layerGroup({ pane:"empresasPane" });
+  // ✅ Empresas da Receita Federal por Segmento (carregadas sob demanda)
+  const camadaEmpresasSegmento = L.layerGroup();
 
-  const camadaProspects = temCluster
-    ? L.markerClusterGroup({ chunkedLoading:true, maxClusterRadius: 52, pane:"empresasPane" })
-    : L.layerGroup({ pane:"empresasPane" });
+  let empresasSegmentoReceitaArr = [];
+  let seqEmpresasSegmentoReceita = 0;
 
   // ✅ adiciona no mapa (ligadas por padrão)
   mapa.addLayer(camadaBairros);
   mapa.addLayer(camadaClientesPainel);
   mapa.addLayer(camadaClientesEuro);
   mapa.addLayer(camadaProspects);
+  mapa.addLayer(camadaEmpresasSegmento);
 
   // ✅ Mantém cluster geral (no código) - mas não popula para não duplicar
   mapa.addLayer(grupoCluster);
@@ -2603,7 +3546,8 @@
       "Bairros (Perfil da Região)": camadaBairros,
       "Clientes (Painel)": camadaClientesPainel,
       "Clientes (Euromídia)": camadaClientesEuro,
-      "Prospects": camadaProspects
+      "Prospects": camadaProspects,
+      "Empresas Segmento (Receita)": camadaEmpresasSegmento
     };
     if(camadaHeat) overlays["Heat (Concentração)"] = camadaHeat;
 
@@ -2947,7 +3891,8 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
     const segsSel = _segmentosSelecionados();
     if(segsSel.length){
       const mapaSegs = new Set(segsSel.map(_normStr));
-      if(!mapaSegs.has(_normStr(e.segmento))) return false;
+      const segmentoEmpresa = e.classe_cnae || e.segmento || "";
+      if(!mapaSegs.has(_normStr(segmentoEmpresa))) return false;
     }
 
     const stSel = selStatus ? selStatus.value : "todos";
@@ -2967,7 +3912,7 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
   function _topSegmento(lista){
     const mapaSeg = new Map();
     for(const e of lista){
-      const s = (e && e.segmento) ? String(e.segmento) : "—";
+      const s = (e && (e.classe_cnae || e.segmento)) ? String(e.classe_cnae || e.segmento) : "—";
       mapaSeg.set(s, (mapaSeg.get(s) || 0) + 1);
     }
     let top = null;
@@ -2978,10 +3923,11 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
   }
 
   function _corPorCategoria(cat){
-    if(cat === "cliente_painel") return "#16a34a";     // verde
-    if(cat === "cliente_euro")  return "#2563eb";     // azul
-    if(cat === "prospect")      return "#f59e0b";     // laranja
-    return "#94a3b8";                                  // cinza
+    if(cat === "cliente_painel") return "#16a34a";             // verde
+    if(cat === "cliente_euro")  return "#2563eb";             // azul
+    if(cat === "prospect")      return "#f59e0b";             // laranja
+    if(cat === "empresa_segmento_receita") return "#7c3aed";  // roxo - Receita Federal por segmento
+    return "#94a3b8";                                          // cinza
   }
 
 
@@ -3136,6 +4082,7 @@ function _criarOuAtualizarLegendaEmpresas(){
 
       ${_linhaPonto(_corPorCategoria("cliente_painel"), "Cliente (Painel)", qtClientes)}
       ${_linhaPonto(_corPorCategoria("prospect"), "Não Cliente", qtProspects)}
+      ${_linhaPonto(_corPorCategoria("empresa_segmento_receita"), "Empresas Segmento", String((empresasSegmentoReceitaArr && empresasSegmentoReceitaArr.length) || 0))}
       ${_linhaHeat("Heat (Concentração)", heatTxt)}
 
       <div style="margin-top:8px;font-weight:1100;color:#0f172a;font-size:12px">Bolhas (Bairro)</div>
@@ -3158,47 +4105,88 @@ function _criarOuAtualizarLegendaEmpresas(){
   legendaEmpresasCtrl.addTo(mapa);
 }
 
+  function _fmtCampoTooltip(valor){
+    const txt = String(valor ?? "").trim();
+    return txt ? _escapeHtml(txt) : "—";
+  }
 
+  function _fmtScoreTooltip(valor){
+    const n = Number(valor);
+    if(!Number.isFinite(n)) return "—";
+    return _escapeHtml(n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }));
+  }
 
+  function _clienteTooltip(e){
+    if(e && (e.contratou_este_painel === true || e.status_relacao === "cliente_no_painel" || e.status === "cliente_painel")){
+      return "Sim — cliente deste painel";
+    }
+    if(e && (e.ja_e_cliente_euromidia === true || e.cliente_euromidia === true || e.eh_cliente_euro === true || e.status === "cliente_euromidia")){
+      return "Sim — cliente Euromídia";
+    }
+    return "Não";
+  }
 
-
+  function _distanciaTooltip(e){
+    const d = Number(e && e.distancia_m);
+    if(!Number.isFinite(d)) return "—";
+    if(d >= 1000) return `${(d / 1000).toFixed(2).replace(".", ",")} km`;
+    return `${Math.round(d)} m`;
+  }
 
   function _criarMarcadorEmpresa(e, categoria){
-    const cat = categoria || _categoriaEmpresaMapa(e);
-    const cor = _corPorCategoria(cat);
+    const lat = Number(e && e.lat);
+    const lng = Number(e && e.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)){
+      return null;
+    }
 
-    const icone = L.divIcon({
-      className: "",
-      html: `
-        <div style="
-          width: 16px; height: 16px;
-          border-radius: 999px;
-          background:${cor};
-          border:2px solid rgba(255,255,255,.9);
-          box-shadow: 0 10px 18px rgba(15,23,42,.16);
-        "></div>
-      `
+    const iconeEmpresa = L.icon({
+      iconUrl: URL_ICONE_EMPRESA_RECEITA,
+      iconSize: [26, 26],
+      iconAnchor: [13, 26],
+      tooltipAnchor: [0, -24],
+      popupAnchor: [0, -24]
     });
 
-    const m = L.marker([Number(e.lat), Number(e.lng)], { icon: icone, pane: "empresasPane" });
+    const m = L.marker([lat, lng], {
+      icon: iconeEmpresa,
+      pane: "empresasPane",
+      riseOnHover: true
+    });
 
-    const nome = e.nome || "Empresa";
-    const seg = e.segmento || "—";
-    const st = _normalizarStatus(e.status);
-    const score = _num(e.score);
+    const nomeFantasia = e?.nome_fantasia || e?.NomeFantasia || e?.nome || e?.Nome || e?.razao_social || e?.RazaoSocial || "Empresa";
+    const cnae = e?.cnae || e?.CNAE || "—";
+    const descricaoCnae = e?.descricao_cnae || e?.DescricaoCnae || "—";
+    const matrizFilial = e?.descricao_matriz_filial || e?.descricao_identificador_matriz_filial || e?.DescricaoMatrizFilial || e?.DescricaoIdentificadorMatrizFilial || "—";
+    const setor = e?.setor || e?.Setor || "—";
+    const classe = e?.classe_cnae || e?.classe || e?.Classe || e?.segmento || "—";
+    const scoreSetor = e?.score_setor ?? e?.ScoreSetor ?? e?.score ?? null;
+    const classificacaoMacro = e?.classificacao_macro || e?.ClassificacaoMacro || "—";
+    const clienteTxt = _clienteTooltip(e);
+    const distanciaTxt = _distanciaTooltip(e);
 
     m.bindTooltip(`
-      <div style="font-weight:1000;color:#0f172a">${nome}</div>
-      <div style="color:#64748b;font-weight:900;font-size:12px;margin-top:2px">${seg} • ${st}</div>
-      <div style="margin-top:8px;font-size:12px;color:#0f172a">
-        <b>Score:</b> ${Math.round(score)} (${_classificarScore(score)})
+      <div style="min-width:240px;max-width:320px">
+        <div style="font-weight:1100;color:#0f172a;font-size:13px;line-height:1.25;margin-bottom:7px">
+          ${_fmtCampoTooltip(nomeFantasia)}
+        </div>
+        <div style="font-size:12px;color:#0f172a;line-height:1.42">
+          <b>CNAE:</b> ${_fmtCampoTooltip(cnae)}<br>
+          <b>Descrição CNAE:</b> ${_fmtCampoTooltip(descricaoCnae)}<br>
+          <b>Matriz/Filial:</b> ${_fmtCampoTooltip(matrizFilial)}<br>
+          <b>Setor:</b> ${_fmtCampoTooltip(setor)}<br>
+          <b>Classe:</b> ${_fmtCampoTooltip(classe)}<br>
+          <b>ScoreSetor:</b> ${_fmtScoreTooltip(scoreSetor)}<br>
+          <b>Classificação Macro:</b> ${_fmtCampoTooltip(classificacaoMacro)}<br>
+          <b>Cliente:</b> ${_fmtCampoTooltip(clienteTxt)}<br>
+          <b>Distância:</b> ${_fmtCampoTooltip(distanciaTxt)}
+        </div>
       </div>
     `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
 
     m.on("click", ()=> _setEmpresaSelecionada(e));
     return m;
   }
-
 
 
 function _limparCamadas(){
@@ -3213,6 +4201,9 @@ function _limparCamadas(){
   }
   if(camadaProspects && typeof camadaProspects.clearLayers === "function"){
     camadaProspects.clearLayers();
+  }
+  if(camadaEmpresasSegmento && typeof camadaEmpresasSegmento.clearLayers === "function"){
+    camadaEmpresasSegmento.clearLayers();
   }
 
   // ✅ BOLHAS DE BAIRRO / REGIÃO
@@ -3548,6 +4539,7 @@ function _renderMapa(){
   for(const e of exibidas){
     const cat = _categoriaEmpresaMapa(e);
     const m = _criarMarcadorEmpresa(e, cat);
+    if(!m) continue;
 
     if(USAR_CLUSTER_GERAL){
       if(grupoCluster && typeof grupoCluster.addLayer === "function"){
@@ -3589,6 +4581,147 @@ function _renderMapa(){
 
 
 
+
+  function _statusPermiteEmpresasReceita(){
+    // O status visual não deve impedir a consulta da Receita.
+    // Primeiro buscamos as empresas do segmento; depois filtramos cliente/não cliente no frontend.
+    return true;
+  }
+
+  function _empresaReceitaPassaStatus(e){
+    const stSel = selStatus ? String(selStatus.value || "todos") : "todos";
+    if(stSel === "todos") return true;
+
+    const ehCliente = (e?.contratou_este_painel === true)
+      || (e?.ja_e_cliente_euromidia === true)
+      || (e?.cliente_euromidia === true)
+      || (e?.eh_cliente_euro === true)
+      || (String(e?.status || "") === "cliente_painel")
+      || (String(e?.status || "") === "cliente_euromidia");
+
+    if(stSel === "cliente") return ehCliente;
+    if(stSel === "prospect") return !ehCliente;
+    return true;
+  }
+
+  function _montarUrlEmpresasSegmentoReceita(segmentos){
+    const params = new URLSearchParams();
+    params.set("raio_m", String(_raioAtualMetros()));
+    params.set("limite", "1200");
+
+    for(const seg of segmentos || []){
+      const txt = String(seg || "").trim();
+      if(txt) params.append("segmento", txt);
+    }
+
+    return `${URL_API_EMPRESAS_SEGMENTO}?${params.toString()}`;
+  }
+
+  function _atualizarContadoresComReceita(){
+    const segsSelecionados = _segmentosSelecionados();
+    const receitaVisiveis = (segsSelecionados.length > 0 && _statusPermiteEmpresasReceita())
+      ? (empresasSegmentoReceitaArr || []).filter(_empresaReceitaPassaStatus)
+      : [];
+    const receitaCount = receitaVisiveis.length;
+
+    const baseFiltradas = empresasArr.filter(_empresaPassaFiltro);
+    const baseNoRaio = baseFiltradas.filter(e => {
+      const lat = Number(e && e.lat);
+      const lng = Number(e && e.lng);
+      if(!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+      return _haversineMetros(latP0, lngP0, lat, lng) <= _raioAtualMetros();
+    });
+
+    const baseClientesNoRaio = baseNoRaio.filter(x => _ehClienteQualquer(x)).length;
+    const baseProspects = baseFiltradas.filter(x => _categoriaEmpresaMapa(x) === "prospect").length;
+
+    if(kpiEmpresas) kpiEmpresas.textContent = String(baseNoRaio.length + receitaCount);
+    if(kpiClientes) kpiClientes.textContent = String(baseClientesNoRaio);
+    if(kpiTopSeg){
+      const listaTop = receitaCount ? receitaVisiveis : (baseNoRaio.length ? baseNoRaio : baseFiltradas);
+      kpiTopSeg.textContent = _topSegmento(listaTop);
+    }
+
+    if(chipProspects) chipProspects.textContent = String(baseProspects + receitaCount);
+  }
+
+  function _renderEmpresasSegmentoReceita(){
+    if(camadaEmpresasSegmento && typeof camadaEmpresasSegmento.clearLayers === "function"){
+      camadaEmpresasSegmento.clearLayers();
+    }
+
+    if(!_statusPermiteEmpresasReceita()){
+      empresasSegmentoReceitaArr = [];
+      _atualizarContadoresComReceita();
+      _criarOuAtualizarLegendaEmpresas();
+      return;
+    }
+
+    const empresasReceitaVisiveis = (empresasSegmentoReceitaArr || []).filter(_empresaReceitaPassaStatus);
+
+    for(const e of empresasReceitaVisiveis){
+      const m = _criarMarcadorEmpresa(e, _categoriaEmpresaMapa(e));
+      if(!m) continue;
+      if(camadaEmpresasSegmento && typeof camadaEmpresasSegmento.addLayer === "function"){
+        camadaEmpresasSegmento.addLayer(m);
+      }
+    }
+
+    _atualizarContadoresComReceita();
+    _criarOuAtualizarLegendaEmpresas();
+  }
+
+  async function _sincronizarEmpresasSegmentoReceita(){
+    const seq = ++seqEmpresasSegmentoReceita;
+    const segmentos = _segmentosSelecionados();
+
+    if(camadaEmpresasSegmento && typeof camadaEmpresasSegmento.clearLayers === "function"){
+      camadaEmpresasSegmento.clearLayers();
+    }
+
+    if(!segmentos.length || !_statusPermiteEmpresasReceita()){
+      empresasSegmentoReceitaArr = [];
+      _atualizarContadoresComReceita();
+      _criarOuAtualizarLegendaEmpresas();
+      return;
+    }
+
+    try{
+      const resp = await fetch(_montarUrlEmpresasSegmentoReceita(segmentos), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin"
+      });
+
+      if(seq !== seqEmpresasSegmentoReceita) return;
+
+      if(!resp.ok){
+        console.warn("Falha ao carregar empresas da Receita por segmento:", resp.status, await resp.text());
+        empresasSegmentoReceitaArr = [];
+        _renderEmpresasSegmentoReceita();
+        return;
+      }
+
+      const data = await resp.json();
+      if(seq !== seqEmpresasSegmentoReceita) return;
+
+      empresasSegmentoReceitaArr = Array.isArray(data && data.items) ? data.items : [];
+      console.log("Empresas Receita carregadas:", {
+        segmentos,
+        total_api: data && data.total,
+        total_items: empresasSegmentoReceitaArr.length,
+        raio_m: data && data.raio_m
+      });
+      _renderEmpresasSegmentoReceita();
+    }catch(err){
+      if(seq !== seqEmpresasSegmentoReceita) return;
+      console.warn("Erro ao buscar empresas da Receita por segmento:", err);
+      empresasSegmentoReceitaArr = [];
+      _renderEmpresasSegmentoReceita();
+    }
+  }
+
+
   function _atualizarQuerystring(){
     const params = new URLSearchParams(window.location.search);
 
@@ -3602,7 +4735,7 @@ function _renderMapa(){
     }
 
     if(st  && st  !== "todos") params.set("status", st);   else params.delete("status");
-    if(r) params.set("raio_m", r); else params.delete("raio_m");
+    if(r && r !== "1000") params.set("raio_m", r); else params.delete("raio_m");
 
     const qs = params.toString();
     const novaUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
@@ -3612,12 +4745,33 @@ function _renderMapa(){
   function _recalcularTudoMapa(){
     _desenharRaio();
     _renderMapa();
+    _criarOuAtualizarLegendaEmpresas();
     _atualizarQuerystring();
+    _sincronizarEmpresasSegmentoReceita();
+  }
+
+  function _limparFiltrosMapa(){
+    _setSegmentosSelecionados([], false);
+
+    if(txtBuscaSegmento){
+      txtBuscaSegmento.value = "";
+      _filtrarOpcoesSegmento();
+    }
+
+    if(ddSegmento){
+      ddSegmento.open = false;
+    }
+
+    if(selStatus) selStatus.value = "todos";
+    if(selRaio) selRaio.value = "1000";
+
+    _recalcularTudoMapa();
   }
 
   if(selSegmento) selSegmento.addEventListener("change", _recalcularTudoMapa);
   if(selStatus) selStatus.addEventListener("change", _recalcularTudoMapa);
   if(selRaio) selRaio.addEventListener("change", _recalcularTudoMapa);
+  if(btnLimparFiltrosMapa) btnLimparFiltrosMapa.addEventListener("click", _limparFiltrosMapa);
 
   if(btnAnalisarArea){
     btnAnalisarArea.addEventListener("click", ()=> {
@@ -4178,14 +5332,11 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 
 
-
-
-
-
   _desenharRaio();
   _renderMapa();
   _criarOuAtualizarLegendaEmpresas();
   _atualizarQuerystring();
+  _sincronizarEmpresasSegmentoReceita();
   _atualizarGrafico();
   _renderCustoRosca();
 
