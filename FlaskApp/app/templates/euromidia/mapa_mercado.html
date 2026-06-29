@@ -657,31 +657,39 @@
   }
 
   /* =========================================================
-     ✅ BARRA SUPERIOR DE FILTROS
-     - os filtros saíram de dentro do mapa
-     - visual mais próximo do padrão arredondado da referência
+     ✅ BARRA SUPERIOR DE FILTROS RESPONSIVA
+     - elimina overflow horizontal e sobreposição entre cards
+     - mantém os filtros alinhados no desktop e empilha em telas menores
      ========================================================= */
   .mm-page-toolbar{
     position:relative;
-    z-index: 1600;
+    z-index:1600;
     display:grid;
-    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-    gap: 14px;
+    grid-template-columns:minmax(280px, 28rem) minmax(0, 1fr);
+    gap:14px;
     align-items:stretch;
-    margin: 0 0 14px 0;
+    margin:0 0 14px 0;
+    min-width:0;
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+    overflow:visible;
   }
 
   .mm-page-titlebox{
     min-width:0;
+    max-width:100%;
     border:1px solid rgba(226,232,240,.95);
-    border-radius: 18px;
-    background: rgba(255,255,255,.96);
+    border-radius:18px;
+    background:rgba(255,255,255,.96);
     box-shadow:0 14px 34px rgba(15,23,42,.08);
-    padding: 14px 16px;
+    padding:14px 16px;
     display:flex;
     flex-direction:column;
     justify-content:center;
     gap:6px;
+    box-sizing:border-box;
+    overflow:hidden;
   }
 
   .mm-page-title-row{
@@ -695,7 +703,7 @@
     margin:0;
     min-width:0;
     color:var(--euro-blue);
-    font-size: 22px;
+    font-size:clamp(20px, 1.35vw, 26px);
     line-height:1.1;
     font-weight:1100;
     white-space:nowrap;
@@ -706,7 +714,7 @@
   .mm-page-titlebox p{
     margin:0;
     color:#475569;
-    font-size:12px;
+    font-size:clamp(11px, .72vw, 12px);
     font-weight:900;
     line-height:1.25;
     white-space:normal;
@@ -727,56 +735,72 @@
     color:#15803d;
     font-size:11px;
     font-weight:1000;
+    white-space:nowrap;
   }
 
   .filters{
     position:relative;
     inset:auto;
-    z-index: 1600;
+    z-index:1600;
     display:grid;
-    grid-template-columns: minmax(300px, 1.35fr) minmax(210px, .85fr) minmax(190px, .75fr) auto;
+    grid-template-columns:repeat(auto-fit, minmax(min(220px, 100%), 1fr));
     gap:12px;
     align-items:stretch;
     pointer-events:auto;
+    min-width:0;
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+    overflow:visible;
   }
 
   .filters .fbox{
     pointer-events:auto;
     min-width:0;
+    max-width:100%;
     min-height:68px;
-    background: rgba(255,255,255,.97);
-    border: 1px solid rgba(203,213,225,.95);
-    border-radius: 18px;
-    padding: 10px 14px;
+    background:rgba(255,255,255,.97);
+    border:1px solid rgba(203,213,225,.95);
+    border-radius:18px;
+    padding:10px 14px;
     box-shadow:0 14px 34px rgba(15,23,42,.08);
     display:flex;
     align-items:center;
-    gap: 10px;
+    gap:10px;
+    box-sizing:border-box;
+    overflow:visible;
   }
 
   .filters > .fbox > label{
     margin:0;
     flex:0 0 auto;
-    font-size: 14px;
-    font-weight: 1000;
+    max-width:46%;
+    font-size:clamp(12px, .78vw, 14px);
+    font-weight:1000;
     color:#334155;
     white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
 
   .filters select{
     flex:1 1 auto;
     min-width:0;
+    max-width:100%;
     width:100%;
     height:44px;
-    border-radius: 14px;
-    border: 1px solid rgba(203,213,225,.95);
+    border-radius:14px;
+    border:1px solid rgba(203,213,225,.95);
     background:#fff;
     color:#0f172a;
-    font-size: 18px;
-    font-weight: 1000;
-    padding: 0 42px 0 14px;
+    font-size:clamp(15px, .95vw, 18px);
+    font-weight:1000;
+    padding:0 38px 0 14px;
     outline:none;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+    box-sizing:border-box;
+    white-space:nowrap;
+    text-overflow:ellipsis;
   }
 
   .filters select:focus{
@@ -784,9 +808,12 @@
     box-shadow:0 0 0 4px rgba(0,40,132,.10);
   }
 
-  .fbox-segmento{
+  .fbox-segmento,
+  .filters .fbox-status,
+  .filters .fbox-raio,
+  .filters .fbox-concorrente{
     position:relative;
-    align-items:center;
+    min-width:0;
   }
 
   .filters .fbox-action{
@@ -794,21 +821,29 @@
     padding:10px;
   }
 
+  .fbox-concorrente select{
+    min-width:0;
+  }
+
   .btn-limpar-filtros{
     height:44px;
-    min-width:146px;
-    border-radius: 14px;
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    border-radius:14px;
     border:1px solid rgba(203,213,225,.95);
     background:#fff;
     color:#334155;
-    font-size: 13px;
+    font-size:clamp(12px, .76vw, 13px);
     font-weight:1000;
     cursor:pointer;
     display:inline-flex;
     align-items:center;
     justify-content:center;
     gap:8px;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+    white-space:nowrap;
+    box-sizing:border-box;
   }
 
   .btn-limpar-filtros:hover{
@@ -818,32 +853,47 @@
   }
 
   .btn-limpar-filtros:active{
-    transform: translateY(1px);
+    transform:translateY(1px);
   }
 
-  @media (max-width: 1280px){
+  @media (max-width: 1680px){
     .mm-page-toolbar{
-      grid-template-columns: 1fr;
+      grid-template-columns:1fr;
     }
+  }
+
+  @media (max-width: 1200px){
     .filters{
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns:repeat(2, minmax(0, 1fr));
     }
     .filters .fbox-action{
-      grid-column: 1 / -1;
-      justify-content:flex-start;
+      grid-column:1 / -1;
     }
   }
 
-  @media (max-width: 860px){
+  @media (max-width: 760px){
+    .mm-page-toolbar{
+      gap:10px;
+      margin-bottom:10px;
+    }
+    .mm-page-titlebox{
+      border-radius:16px;
+      padding:12px 14px;
+    }
     .filters{
-      grid-template-columns: 1fr;
+      grid-template-columns:1fr;
+      gap:10px;
     }
     .filters .fbox{
       flex-direction:column;
       align-items:stretch;
       min-height:auto;
+      padding:12px;
+      border-radius:16px;
+      gap:7px;
     }
     .filters > .fbox > label{
+      max-width:100%;
       font-size:12px;
     }
     .filters select,
@@ -855,17 +905,19 @@
 
   .mm-multidd{
     position:relative;
-    flex:1 1 auto;
-    min-width: 260px;
-    max-width: min(420px, calc(100vw - 44px));
+    flex:1 1 0;
+    min-width:0;
+    width:100%;
+    max-width:100%;
     font-weight: 900;
   }
 
   .mm-multidd .dd-summary{
     list-style:none;
     height:44px;
-    min-width: 260px;
-    max-width: 420px;
+    min-width:0;
+    width:100%;
+    max-width:100%;
     border-radius: 14px;
     border:1px solid rgba(203,213,225,.95);
     background:#fff;
@@ -879,6 +931,7 @@
     color:#0f172a;
     user-select:none;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+    box-sizing:border-box;
   }
 
   .mm-multidd .dd-summary::-webkit-details-marker{
@@ -1026,8 +1079,8 @@
 
   .mm-multidd .dd-menu{
     overflow:hidden;
-    width:min(360px, calc(100vw - 44px));
-    max-width:min(360px, calc(100vw - 44px));
+    width:max(320px, 100%);
+    max-width:min(420px, calc(100vw - 44px));
     max-height:none;
   }
 
@@ -1897,6 +1950,300 @@
     color:#64748b;
     font-size: 12px;
   }
+
+  /* =========================================================
+     Desempenho Comercial do Painel
+     ========================================================= */
+  .mm-performance-shell{
+    width:100%;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr);
+    gap:14px;
+    margin:14px 0 16px 0;
+  }
+
+  .mm-performance-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 1px 8px rgba(0,0,0,.06);
+    overflow:hidden;
+    min-width:0;
+  }
+
+  .mm-performance-head{
+    padding:14px 16px 10px 16px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    border-bottom:1px solid rgba(203,213,225,.75);
+    background:linear-gradient(180deg,#fff,#f8fafc);
+  }
+
+  .mm-performance-title{
+    margin:0;
+    font-size:15px;
+    line-height:1.2;
+    font-weight:1000;
+    color:var(--euro-blue);
+  }
+
+  .mm-performance-sub{
+    display:block;
+    margin-top:3px;
+    font-size:11.5px;
+    line-height:1.35;
+    font-weight:850;
+    color:#64748b;
+  }
+
+  .mm-performance-badge{
+    flex:0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:28px;
+    padding:6px 10px;
+    border-radius:999px;
+    border:1px solid rgba(0,40,132,.14);
+    background:rgba(0,40,132,.06);
+    color:var(--euro-blue);
+    font-size:11px;
+    font-weight:1000;
+    white-space:nowrap;
+  }
+
+  .mm-performance-table-wrap{
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    padding:0 12px 14px 12px;
+    background:#fff;
+  }
+
+  .mm-performance-table{
+    width:100%;
+    min-width:1080px;
+    border-collapse:separate;
+    border-spacing:0;
+    color:#334155;
+  }
+
+  .mm-performance-table.mm-performance-table-segmentos{
+    min-width:1420px;
+  }
+
+  .mm-performance-table thead th{
+    position:sticky;
+    top:0;
+    z-index:2;
+    padding:12px 12px;
+    background:#fbfdff;
+    border-bottom:1px solid rgba(203,213,225,.95);
+    color:#475569;
+    font-size:11.5px;
+    font-weight:1000;
+    text-align:left;
+    white-space:nowrap;
+  }
+
+  .mm-performance-table tbody td{
+    padding:12px 12px;
+    border-bottom:1px solid rgba(226,232,240,.9);
+    font-size:12.5px;
+    font-weight:850;
+    vertical-align:middle;
+    white-space:nowrap;
+  }
+
+  .mm-performance-table tbody tr:hover td{
+    background:#f8fafc;
+  }
+
+  .mm-performance-table tbody tr:last-child td{
+    border-bottom:0;
+  }
+
+  .mm-performance-table .num{
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .mm-performance-periodo{
+    font-weight:1000;
+    color:#334155;
+  }
+
+  .mm-performance-segmento{
+    max-width:260px;
+    white-space:normal !important;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    color:#0f172a;
+    font-weight:1000;
+  }
+
+  .mm-performance-classificacao{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:24px;
+    padding:3px 8px;
+    border-radius:999px;
+    background:#f1f5f9;
+    color:#334155;
+    border:1px solid rgba(203,213,225,.85);
+    font-size:11px;
+    font-weight:1000;
+  }
+
+  .mm-renew-cell{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
+    min-width:150px;
+  }
+
+  .mm-renew-value{
+    min-width:38px;
+    text-align:right;
+    color:#334155;
+    font-weight:1000;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .mm-renew-bar{
+    position:relative;
+    width:92px;
+    height:10px;
+    border-radius:999px;
+    background:#e9eef4;
+    overflow:hidden;
+    box-shadow:inset 0 1px 2px rgba(15,23,42,.08);
+  }
+
+  .mm-renew-bar > span{
+    position:absolute;
+    inset:0 auto 0 0;
+    width:0%;
+    border-radius:999px;
+    background:linear-gradient(90deg,#65b944,#7bc957);
+  }
+
+  .mm-performance-empty{
+    padding:18px 12px !important;
+    color:#64748b;
+    font-weight:900;
+    text-align:center !important;
+    white-space:normal !important;
+  }
+
+  .mm-performance-pagination{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:0 12px 14px 12px;
+    background:#fff;
+    border-top:1px solid rgba(226,232,240,.85);
+  }
+
+  .mm-performance-pagination[hidden]{
+    display:none !important;
+  }
+
+  .mm-performance-pagination-info{
+    color:#64748b;
+    font-size:12px;
+    font-weight:950;
+    white-space:nowrap;
+  }
+
+  .mm-performance-pagination-actions{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex:0 0 auto;
+  }
+
+  .mm-performance-page-btn{
+    min-height:32px;
+    border:1px solid rgba(0,40,132,.18);
+    background:#fff;
+    color:var(--euro-blue);
+    border-radius:10px;
+    padding:7px 12px;
+    font-size:12px;
+    font-weight:1000;
+    cursor:pointer;
+    box-shadow:0 1px 4px rgba(15,23,42,.06);
+    transition:background .15s ease, border-color .15s ease, opacity .15s ease;
+  }
+
+  .mm-performance-page-btn:hover:not(:disabled){
+    background:rgba(0,40,132,.06);
+    border-color:rgba(0,40,132,.28);
+  }
+
+  .mm-performance-page-btn:disabled{
+    cursor:not-allowed;
+    opacity:.45;
+    box-shadow:none;
+  }
+
+  @media (max-width: 960px){
+    .mm-performance-head{
+      flex-direction:column;
+      align-items:stretch;
+      padding:13px 14px 10px 14px;
+    }
+    .mm-performance-badge{
+      width:max-content;
+      max-width:100%;
+      white-space:normal;
+    }
+    .mm-performance-table-wrap{
+      padding:0 10px 12px 10px;
+    }
+  }
+
+  @media (max-width: 640px){
+    .mm-performance-shell{
+      margin-top:10px;
+    }
+    .mm-performance-title{
+      font-size:14px;
+    }
+    .mm-performance-sub{
+      font-size:11px;
+    }
+    .mm-performance-table{
+      min-width:980px;
+    }
+    .mm-performance-table.mm-performance-table-segmentos{
+      min-width:1280px;
+    }
+    .mm-performance-table thead th,
+    .mm-performance-table tbody td{
+      padding:10px 9px;
+      font-size:11.5px;
+    }
+    .mm-performance-pagination{
+      flex-direction:column;
+      align-items:stretch;
+      gap:9px;
+    }
+    .mm-performance-pagination-info{
+      white-space:normal;
+      text-align:center;
+    }
+    .mm-performance-pagination-actions{
+      justify-content:center;
+    }
+  }
+
 </style>
 
 
@@ -1912,7 +2259,7 @@
   <!-- filtros do mapa: agora ficam acima do mapa, fora da área Leaflet -->
     <div class="filters">
       <div class="fbox fbox-segmento">
-        <label for="ddSegmento">Segmento:</label>
+        <label id="lblFiltroSegmento">Segmento:</label>
 
         <details class="mm-multidd" id="ddSegmento">
           <summary class="dd-summary" aria-expanded="false">
@@ -1938,7 +2285,7 @@
         </select>
       </div>
 
-      <div class="fbox">
+      <div class="fbox fbox-status">
         <label for="selStatus">Status:</label>
         <select id="selStatus">
           <option value="todos">Todos</option>
@@ -1947,7 +2294,7 @@
         </select>
       </div>
 
-      <div class="fbox">
+      <div class="fbox fbox-raio">
         <label for="selRaio">Raio:</label>
         <select id="selRaio">
           <option value="500">500 m</option>
@@ -1957,8 +2304,15 @@
         </select>
       </div>
 
+      <div class="fbox fbox-concorrente">
+        <label for="selConcorrente">Concorrente:</label>
+        <select id="selConcorrente">
+          <option value="todos" selected>Todos</option>
+        </select>
+      </div>
+
       <div class="fbox fbox-action">
-        <button type="button" class="btn-limpar-filtros" id="btnLimparFiltrosMapa" title="Voltar para Segmento: Todos, Status: Todos e Raio: 1 km">
+        <button type="button" class="btn-limpar-filtros" id="btnLimparFiltrosMapa" title="Voltar para Segmento: Todos, Status: Todos, Raio: 1 km e Concorrente: Todos">
           ↻ Limpar filtros
         </button>
       </div>
@@ -2287,6 +2641,125 @@
      ✅ NOVO BLOCO ABAIXO DO MAPA: GRÁFICO + MATRIZ (Mais Retorno-like)
      ========================================================= -->
 
+{% set desempenho_comercial = desempenho_comercial_json|default({}, true) %}
+{% set desempenho_painel = desempenho_comercial.get('painel', []) %}
+{% set desempenho_segmentos = desempenho_comercial.get('segmentos', []) %}
+
+<section class="mm-performance-shell" aria-label="Desempenho Comercial do Painel">
+  <div class="mm-performance-card">
+    <div class="mm-performance-head">
+      <div>
+        <h2 class="mm-performance-title">Desempenho Comercial do Painel</h2>
+        <span class="mm-performance-sub">Contratos, ocupação, preços e renovação calculados pelos itens ligados ao painel.</span>
+      </div>
+      <span class="mm-performance-badge">Painel {{ painel_json.id_painel if painel_json else '—' }}</span>
+    </div>
+
+    <div class="mm-performance-table-wrap">
+      <table class="mm-performance-table">
+        <thead>
+          <tr>
+            <th>Período</th>
+            <th class="num">Faturamento (R$)</th>
+            <th class="num">Nº Contratos/mês (média)</th>
+            <th class="num">Taxa de Ocupação</th>
+            <th class="num">Último Preço Negociado</th>
+            <th class="num">Preço de Tabela</th>
+            <th class="num">Preço Recomendado IA</th>
+            <th class="num">Desempenho de Renovação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for linha in desempenho_painel %}
+          <tr>
+            <td class="mm-performance-periodo">{{ linha.periodo }}</td>
+            <td class="num">{{ linha.faturamento_txt }}</td>
+            <td class="num">{{ linha.contratos_media_mes_txt }}</td>
+            <td class="num">{{ linha.taxa_ocupacao_txt }}</td>
+            <td class="num">{{ linha.ultimo_preco_negociado_txt }}</td>
+            <td class="num">{{ linha.preco_tabela_txt }}</td>
+            <td class="num">{{ linha.preco_recomendado_ia_txt }}</td>
+            <td class="num">
+              <div class="mm-renew-cell">
+                <span class="mm-renew-value">{{ linha.desempenho_renovacao_txt }}</span>
+                <span class="mm-renew-bar" aria-hidden="true"><span style="width: {{ linha.desempenho_renovacao_barra }}%;"></span></span>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td class="mm-performance-empty" colspan="8">Sem dados comerciais para este painel nos períodos calculados.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="mm-performance-card">
+    <div class="mm-performance-head">
+      <div>
+        <h2 class="mm-performance-title">Desempenho Comercial por Segmento</h2>
+
+      </div>
+      <span class="mm-performance-badge">Agrupamento por Classe</span>
+    </div>
+
+    <div class="mm-performance-table-wrap">
+      <table class="mm-performance-table mm-performance-table-segmentos" id="tblDesempenhoSegmentos">
+        <thead>
+          <tr>
+            <th>Segmento</th>
+            <th class="num">ScoreSetor</th>
+            <th>ClassificacaoMacro</th>
+            <th>Período</th>
+            <th class="num">Faturamento (R$)</th>
+            <th class="num">Nº Contratos/mês (média)</th>
+            <th class="num">Taxa de Ocupação</th>
+            <th class="num">Último Preço Negociado</th>
+            <th class="num">Preço de Tabela</th>
+            <th class="num">Preço Recomendado IA</th>
+            <th class="num">Desempenho de Renovação</th>
+          </tr>
+        </thead>
+        <tbody id="tbodyDesempenhoSegmentos">
+          {% for linha in desempenho_segmentos %}
+          <tr data-mm-segmento-row="1">
+            <td class="mm-performance-segmento">{{ linha.classe }}</td>
+            <td class="num">{{ linha.score_setor_txt }}</td>
+            <td><span class="mm-performance-classificacao">{{ linha.classificacao_macro }}</span></td>
+            <td class="mm-performance-periodo">{{ linha.periodo }}</td>
+            <td class="num">{{ linha.faturamento_txt }}</td>
+            <td class="num">{{ linha.contratos_media_mes_txt }}</td>
+            <td class="num">{{ linha.taxa_ocupacao_txt }}</td>
+            <td class="num">{{ linha.ultimo_preco_negociado_txt }}</td>
+            <td class="num">{{ linha.preco_tabela_txt }}</td>
+            <td class="num">{{ linha.preco_recomendado_ia_txt }}</td>
+            <td class="num">
+              <div class="mm-renew-cell">
+                <span class="mm-renew-value">{{ linha.desempenho_renovacao_txt }}</span>
+                <span class="mm-renew-bar" aria-hidden="true"><span style="width: {{ linha.desempenho_renovacao_barra }}%;"></span></span>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td class="mm-performance-empty" colspan="11">Sem contratos com segmento vinculado para este painel nos períodos calculados.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mm-performance-pagination" id="pagDesempenhoSegmentos" hidden aria-label="Paginação da tabela Desempenho Comercial por Segmento">
+      <div class="mm-performance-pagination-info" id="pagDesempenhoSegmentosInfo">Exibindo 0 a 0 de 0 registros</div>
+      <div class="mm-performance-pagination-actions">
+        <button type="button" class="mm-performance-page-btn" id="btnDesempenhoSegmentosAnterior">Anterior</button>
+        <button type="button" class="mm-performance-page-btn" id="btnDesempenhoSegmentosProxima">Próxima</button>
+      </div>
+    </div>
+  </div>
+</section>
 
 
 
@@ -2346,11 +2819,14 @@
   const FILTRO_INICIAL = {{ filtro_inicial|tojson }};
   const CEP_POINTS = {{ cep_points_json|tojson }};  // ✅ NOVO (backend -> heat por CEP)
   const SEGMENTOS_CNAE = {{ segmentos_cnae_json|default([], true)|tojson }};  // valores oficiais de DimCnaes.Classe
+  const CONCORRENTES_NOMES = {{ concorrentes_json|default([], true)|tojson }};  // valores oficiais de DimConcorrentesEuromidia.EmpresaProprietaria
   const DISTRIBUICOES_CONTRATOS = {{ distribuicoes_contratos_json|default({}, true)|tojson }};  // categoria/porte dos contratos do painel
+  const DESEMPENHO_COMERCIAL = {{ desempenho_comercial_json|default({}, true)|tojson }};  // tabelas de desempenho comercial do painel/segmento
 
   console.log("PAINEL:", PAINEL);
   console.log("EMPRESAS tipo:", typeof EMPRESAS, "isArray:", Array.isArray(EMPRESAS), "len:", (EMPRESAS && EMPRESAS.length) || 0);
   console.log("CEP_POINTS len:", (CEP_POINTS && CEP_POINTS.length) || 0);
+  console.log("CONCORRENTES_NOMES len:", (CONCORRENTES_NOMES && CONCORRENTES_NOMES.length) || 0);
 </script>
 
 <script>
@@ -2369,12 +2845,33 @@
   // URL pública servida pelo Flask:
   const URL_ICONE_EMPRESA_RECEITA = "{{ url_for('static', filename='imagens/localizacao.png') }}";
 
+  function _codPontoPainelAtual(){
+    const bruto = (P && (P.id_painel ?? P.cod_ponto ?? P.CodPonto ?? P.codPonto ?? P.id ?? P.IDPainelEuromidia)) ?? "";
+    const txt = String(bruto || "").trim();
+    return txt || "0";
+  }
+
+  function _trocarCodPontoUrlApi(template, sufixo){
+    const cod = encodeURIComponent(_codPontoPainelAtual());
+    const tpl = String(template || "");
+    const alvo = `/0/${sufixo}`;
+    const novo = `/${cod}/${sufixo}`;
+
+    if(tpl.includes(alvo)){
+      return tpl.replace(alvo, novo);
+    }
+
+    // Fallback defensivo caso o Flask gere alguma variação de prefixo.
+    return tpl.replace(new RegExp(`/0/${sufixo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), novo);
+  }
+
   // Endpoint Flask gerado por url_for para não quebrar se o prefixo do blueprint mudar.
   const URL_API_EMPRESAS_SEGMENTO_TEMPLATE = "{{ url_for('Paineis.api_empresas_receita_segmento_painel', codponto=0) }}";
-  const URL_API_EMPRESAS_SEGMENTO = URL_API_EMPRESAS_SEGMENTO_TEMPLATE.replace(
-    "/0/empresas-segmento",
-    `/${encodeURIComponent(P.id_painel || "")}/empresas-segmento`
-  );
+  const URL_API_EMPRESAS_SEGMENTO = _trocarCodPontoUrlApi(URL_API_EMPRESAS_SEGMENTO_TEMPLATE, "empresas-segmento");
+
+  // Endpoint sob demanda: painéis dos concorrentes por EmpresaProprietaria.
+  const URL_API_CONCORRENTES_TEMPLATE = "{{ url_for('Paineis.api_concorrentes_painel', codponto=0) }}";
+  const URL_API_CONCORRENTES = _trocarCodPontoUrlApi(URL_API_CONCORRENTES_TEMPLATE, "concorrentes");
 
   // ✅ garante array
   const empresasArr = Array.isArray(EMPRESAS) ? EMPRESAS : [];
@@ -3132,6 +3629,7 @@
 
   const selStatus = document.getElementById("selStatus");
   const selRaio = document.getElementById("selRaio");
+  const selConcorrente = document.getElementById("selConcorrente");
   const btnLimparFiltrosMapa = document.getElementById("btnLimparFiltrosMapa");
 
   const kpiEmpresas = document.getElementById("kpiEmpresas");
@@ -3368,6 +3866,82 @@
     selRaio.value = String(filtroIni.raio_m);
   }
 
+  function _popularFiltroConcorrente(){
+    if(!selConcorrente) return;
+
+    const nomes = Array.from(new Set(
+        (Array.isArray(CONCORRENTES_NOMES) ? CONCORRENTES_NOMES : [])
+          .map(nome => String(nome || "").trim())
+          .filter(Boolean)
+      ))
+      .sort((a,b)=> String(a).localeCompare(String(b), "pt-BR", { sensitivity:"base" }));
+
+    const valorAtual = String(selConcorrente.value || "todos");
+
+    selConcorrente.innerHTML = "";
+
+    const optTodos = document.createElement("option");
+    optTodos.value = "todos";
+    optTodos.textContent = "Todos";
+    selConcorrente.appendChild(optTodos);
+
+    for(const nome of nomes){
+      const opt = document.createElement("option");
+      opt.value = nome;
+      opt.textContent = nome;
+      selConcorrente.appendChild(opt);
+    }
+
+    if(valorAtual && Array.from(selConcorrente.options).some(opt => opt.value === valorAtual)){
+      selConcorrente.value = valorAtual;
+    }else{
+      selConcorrente.value = "todos";
+    }
+  }
+
+  function _normalizarConcorrentesEntrada(valor){
+    const saida = [];
+    const vistos = new Set();
+
+    function add(v){
+      const txt = String(v || "").trim();
+      if(!txt || _normStr(txt) === "todos") return;
+      const chave = _normStr(txt);
+      if(vistos.has(chave)) return;
+      vistos.add(chave);
+      saida.push(txt);
+    }
+
+    if(Array.isArray(valor)){
+      valor.forEach(v => _normalizarConcorrentesEntrada(v).forEach(add));
+      return saida;
+    }
+
+    if(valor != null){
+      String(valor)
+        .split(/\|/)
+        .map(v => v.trim())
+        .filter(Boolean)
+        .forEach(add);
+    }
+
+    return saida;
+  }
+
+  _popularFiltroConcorrente();
+
+  if(selConcorrente && filtroIni){
+    const concorrentesIniciais = [];
+    concorrentesIniciais.push(..._normalizarConcorrentesEntrada(filtroIni.concorrentes));
+    concorrentesIniciais.push(..._normalizarConcorrentesEntrada(filtroIni.concorrente));
+
+    if(concorrentesIniciais.length){
+      const alvo = concorrentesIniciais[0];
+      const achou = Array.from(selConcorrente.options).find(opt => _normStr(opt.value) === _normStr(alvo));
+      selConcorrente.value = achou ? achou.value : "todos";
+    }
+  }
+
   // =========================================================
   // Drawer (Empresa)
   // =========================================================
@@ -3481,6 +4055,9 @@
   mapa.createPane("empresasPane");
   mapa.getPane("empresasPane").style.zIndex = 650;
 
+  mapa.createPane("concorrentesPane");
+  mapa.getPane("concorrentesPane").style.zIndex = 680;
+
   mapa.createPane("painelPane");
   mapa.getPane("painelPane").style.zIndex = 700;
 
@@ -3523,8 +4100,13 @@
   // ✅ Empresas da Receita Federal por Segmento (carregadas sob demanda)
   const camadaEmpresasSegmento = L.layerGroup();
 
+  // ✅ Painéis dos concorrentes (carregados sob demanda pelo filtro Concorrente)
+  const camadaConcorrentes = L.layerGroup();
+
   let empresasSegmentoReceitaArr = [];
   let seqEmpresasSegmentoReceita = 0;
+  let concorrentesArr = [];
+  let seqConcorrentes = 0;
 
   // ✅ adiciona no mapa (ligadas por padrão)
   mapa.addLayer(camadaBairros);
@@ -3532,31 +4114,15 @@
   mapa.addLayer(camadaClientesEuro);
   mapa.addLayer(camadaProspects);
   mapa.addLayer(camadaEmpresasSegmento);
+  mapa.addLayer(camadaConcorrentes);
 
   // ✅ Mantém cluster geral (no código) - mas não popula para não duplicar
   mapa.addLayer(grupoCluster);
 
   if(camadaHeat) mapa.addLayer(camadaHeat);
 
-  // =========================================================
-  // ✅ Controle liga/desliga (camadas do mapa)
-  // =========================================================
-  (function _criarControleCamadas(){
-    const overlays = {
-      "Bairros (Perfil da Região)": camadaBairros,
-      "Clientes (Painel)": camadaClientesPainel,
-      "Clientes (Euromídia)": camadaClientesEuro,
-      "Prospects": camadaProspects,
-      "Empresas Segmento (Receita)": camadaEmpresasSegmento
-    };
-    if(camadaHeat) overlays["Heat (Concentração)"] = camadaHeat;
-
-    try{
-      L.control.layers(null, overlays, { collapsed: true, position: "topright" }).addTo(mapa);
-    } catch(e){
-      console.warn("Falha ao criar controle de camadas:", e);
-    }
-  })();
+  // Controle padrão de camadas do Leaflet removido a pedido.
+  // Isso elimina o botão padrão no canto do mapa.
 
   let circuloRaio = null;
 
@@ -3936,173 +4502,12 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
 let legendaEmpresasCtrl = null;
 
 function _criarOuAtualizarLegendaEmpresas(){
-  if(!mapa || !window.L) return;
-
-  // remove anterior
+  // Legenda lateral removida a pedido.
+  // Mantive a função como no-op para preservar as chamadas existentes sem quebrar o fluxo do mapa.
   if(legendaEmpresasCtrl){
     try { legendaEmpresasCtrl.remove(); } catch(e){}
     legendaEmpresasCtrl = null;
   }
-
-  // ✅ menor e menos intrusiva
-  legendaEmpresasCtrl = L.control({ position: "topright" });
-
-  legendaEmpresasCtrl.onAdd = function(){
-    const div = L.DomUtil.create("div", "mm-legend-empresas");
-
-    // ✅ tamanho compacto + scroll
-    div.style.cssText = `
-      background: rgba(255,255,255,.92);
-      border: 1px solid rgba(15,23,42,.10);
-      box-shadow: 0 10px 22px rgba(15,23,42,.10);
-      border-radius: 12px;
-      padding: 10px 10px;
-      width: 220px;
-      max-width: 220px;
-      max-height: 240px;
-      overflow: auto;
-      margin-top: 10px;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      user-select: none;
-      backdrop-filter: blur(6px);
-    `;
-
-    // ✅ badge pequeno
-    function _badge(txt){
-      if(txt == null) return ``;
-      const t = String(txt).trim();
-      if(!t) return ``;
-      return `
-        <span style="
-          min-width:34px;
-          text-align:center;
-          padding:3px 8px;
-          border-radius:999px;
-          border:1px solid rgba(15,23,42,.10);
-          background:rgba(15,23,42,.03);
-          color:#0f172a;
-          font-weight:1000;
-          font-size:11px
-        ">${t}</span>
-      `;
-    }
-
-    // ✅ linha compacta (sem descrição longa)
-    function _linhaPonto(cor, rotulo, badgeTxt){
-      return `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(15,23,42,.08)">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0">
-            <span style="
-              width:10px;height:10px;border-radius:999px;
-              background:${cor};
-              border:2px solid rgba(255,255,255,.95);
-              box-shadow:0 8px 14px rgba(15,23,42,.08);
-              display:inline-block;
-              flex:0 0 auto;
-            "></span>
-            <div style="font-weight:1000;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              ${rotulo}
-            </div>
-          </div>
-          ${_badge(badgeTxt)}
-        </div>
-      `;
-    }
-
-    function _linhaHeat(rotulo, badgeTxt){
-      return `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(15,23,42,.08)">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0">
-            <span style="
-              width:10px;height:10px;border-radius:999px;
-              background: linear-gradient(90deg,
-                rgba(0,40,132,.55),
-                rgba(245,158,11,.90),
-                rgba(239,68,68,.95)
-              );
-              border:2px solid rgba(255,255,255,.95);
-              box-shadow:0 8px 14px rgba(15,23,42,.08);
-              display:inline-block;
-              flex:0 0 auto;
-            "></span>
-            <div style="font-weight:1000;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              ${rotulo}
-            </div>
-          </div>
-          ${_badge(badgeTxt)}
-        </div>
-      `;
-    }
-
-    function _linhaIconePainel(rotulo){
-      const src = "/static/imagens/painel-publicitario.png";
-      return `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed rgba(15,23,42,.08)">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0">
-            <img
-              src="${src}"
-              alt="Painel"
-              style="
-                width:16px;height:16px;
-                object-fit:contain;
-                border-radius:6px;
-                box-shadow:0 8px 14px rgba(15,23,42,.08);
-                background:rgba(255,255,255,.9);
-                border:1px solid rgba(15,23,42,.10);
-                flex:0 0 auto;
-              "
-              onerror="this.style.display='none';"
-            />
-            <div style="font-weight:1100;color:#0f172a;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              ${rotulo}
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    // ✅ contagens (chips)
-    const qtClientes = (chipClientes && chipClientes.textContent) ? chipClientes.textContent.trim() : "";
-    const qtProspects = (chipProspects && chipProspects.textContent) ? chipProspects.textContent.trim() : "";
-    const heatTxt = (chipHeat && chipHeat.textContent) ? chipHeat.textContent.trim() : "";
-
-    // ✅ cores das bolhas grandes (perfil regional)
-    const corBolhaRes = "#2563eb";
-    const corBolhaEmp = "#f59e0b";
-    const corBolhaMix = "#94a3b8";
-
-    // ✅ header compacto
-    div.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div style="font-weight:1100;color:#0f172a;font-size:12px">Legenda</div>
-        <div style="font-size:11px;font-weight:1000;color:#64748b">Mapa</div>
-      </div>
-
-      ${_linhaIconePainel("Painel")}
-
-      ${_linhaPonto(_corPorCategoria("cliente_painel"), "Cliente (Painel)", qtClientes)}
-      ${_linhaPonto(_corPorCategoria("prospect"), "Não Cliente", qtProspects)}
-      ${_linhaPonto(_corPorCategoria("empresa_segmento_receita"), "Empresas Segmento", String((empresasSegmentoReceitaArr && empresasSegmentoReceitaArr.length) || 0))}
-      ${_linhaHeat("Heat (Concentração)", heatTxt)}
-
-      <div style="margin-top:8px;font-weight:1100;color:#0f172a;font-size:12px">Bolhas (Bairro)</div>
-      ${_linhaPonto(corBolhaRes, "Azul: Residencial", "")}
-      ${_linhaPonto(corBolhaEmp, "Laranja: Empresarial", "")}
-      ${_linhaPonto(corBolhaMix, "Cinza: Misto", "")}
-
-      <div style="margin-top:8px;color:#64748b;font-weight:900;font-size:11px;line-height:1.25">
-        Pequenas = empresas • Grandes = bairros/CEPs
-      </div>
-    `;
-
-    // ✅ impede que clique/scroll na legenda mexa no mapa
-    L.DomEvent.disableClickPropagation(div);
-    L.DomEvent.disableScrollPropagation(div);
-
-    return div;
-  };
-
-  legendaEmpresasCtrl.addTo(mapa);
 }
 
   function _fmtCampoTooltip(valor){
@@ -4189,6 +4594,64 @@ function _criarOuAtualizarLegendaEmpresas(){
   }
 
 
+
+
+  function _criarMarcadorConcorrente(c){
+    const lat = Number(c && c.lat);
+    const lng = Number(c && c.lng);
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)){
+      return null;
+    }
+
+    const iconeConcorrente = L.icon({
+      iconUrl: URL_ICONE_PAINEL,
+      iconSize: [34, 34],
+      iconAnchor: [17, 34],
+      tooltipAnchor: [0, -27],
+      popupAnchor: [0, -27]
+    });
+
+    const m = L.marker([lat, lng], {
+      icon: iconeConcorrente,
+      pane: "concorrentesPane",
+      riseOnHover: true,
+      zIndexOffset: 850
+    });
+
+    const empresa = c?.empresa_proprietaria || c?.EmpresaProprietaria || "Concorrente";
+    const tipo = c?.tipo || c?.Tipo || "—";
+    const nomePonto = c?.nome_ponto || c?.NomePonto || "—";
+    const formato = c?.formato || c?.Formato || "—";
+    const logradouro = c?.logradouro || c?.Logradouro || "";
+    const bairro = c?.bairro || c?.Bairro || "";
+    const cidade = c?.cidade || c?.Cidade || "";
+    const uf = c?.uf || c?.UF || "";
+    const distanciaTxt = _distanciaTooltip(c);
+
+    const endereco = [logradouro, bairro, cidade && uf ? `${cidade}-${uf}` : (cidade || uf)]
+      .map(v => String(v || "").trim())
+      .filter(Boolean)
+      .join(" • ");
+
+    m.bindTooltip(`
+      <div style="min-width:230px;max-width:330px">
+        <div style="font-weight:1100;color:#0f172a;font-size:13px;line-height:1.25;margin-bottom:7px">
+          ${_fmtCampoTooltip(empresa)}
+        </div>
+        <div style="font-size:12px;color:#0f172a;line-height:1.42">
+          <b>Tipo:</b> ${_fmtCampoTooltip(tipo)}<br>
+          <b>Nome do Ponto:</b> ${_fmtCampoTooltip(nomePonto)}<br>
+          <b>Formato:</b> ${_fmtCampoTooltip(formato)}<br>
+          <b>Distância:</b> ${_fmtCampoTooltip(distanciaTxt)}
+          ${endereco ? `<br><b>Endereço:</b> ${_fmtCampoTooltip(endereco)}` : ""}
+        </div>
+      </div>
+    `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
+
+    return m;
+  }
+
+
 function _limparCamadas(){
   if(grupoCluster && typeof grupoCluster.clearLayers === "function"){
     grupoCluster.clearLayers();
@@ -4204,6 +4667,9 @@ function _limparCamadas(){
   }
   if(camadaEmpresasSegmento && typeof camadaEmpresasSegmento.clearLayers === "function"){
     camadaEmpresasSegmento.clearLayers();
+  }
+  if(camadaConcorrentes && typeof camadaConcorrentes.clearLayers === "function"){
+    camadaConcorrentes.clearLayers();
   }
 
   // ✅ BOLHAS DE BAIRRO / REGIÃO
@@ -4645,6 +5111,32 @@ function _renderMapa(){
     if(chipProspects) chipProspects.textContent = String(baseProspects + receitaCount);
   }
 
+  function _normalizarEmpresaSegmentoReceitaItem(item){
+    const e = (item && typeof item === "object") ? Object.assign({}, item) : {};
+
+    const lat = _numSeguro(e.lat ?? e.latitude ?? e.Latitude ?? e.LatitudeReceita);
+    const lng = _numSeguro(e.lng ?? e.lon ?? e.longitude ?? e.Longitude ?? e.LongitudeReceita);
+
+    if(Number.isFinite(lat)) e.lat = lat;
+    if(Number.isFinite(lng)) e.lng = lng;
+
+    e.tipo_marcador = e.tipo_marcador || "empresa_segmento_receita";
+    e.origem = e.origem || "receita_federal";
+    e.camada = e.camada || "empresas_segmento_receita";
+    e.segmento = e.segmento || e.classe_cnae || e.Classe || e.classe || "";
+    e.classe_cnae = e.classe_cnae || e.segmento || e.Classe || e.classe || "";
+
+    return e;
+  }
+
+  function _extrairListaEmpresasSegmentoReceita(data){
+    if(Array.isArray(data)) return data;
+    if(Array.isArray(data && data.items)) return data.items;
+    if(Array.isArray(data && data.empresas)) return data.empresas;
+    if(Array.isArray(data && data.resultados)) return data.resultados;
+    return [];
+  }
+
   function _renderEmpresasSegmentoReceita(){
     if(camadaEmpresasSegmento && typeof camadaEmpresasSegmento.clearLayers === "function"){
       camadaEmpresasSegmento.clearLayers();
@@ -4705,8 +5197,12 @@ function _renderMapa(){
       const data = await resp.json();
       if(seq !== seqEmpresasSegmentoReceita) return;
 
-      empresasSegmentoReceitaArr = Array.isArray(data && data.items) ? data.items : [];
+      empresasSegmentoReceitaArr = _extrairListaEmpresasSegmentoReceita(data)
+        .map(_normalizarEmpresaSegmentoReceitaItem)
+        .filter(e => Number.isFinite(Number(e && e.lat)) && Number.isFinite(Number(e && e.lng)));
+
       console.log("Empresas Receita carregadas:", {
+        url: _montarUrlEmpresasSegmentoReceita(segmentos),
         segmentos,
         total_api: data && data.total,
         total_items: empresasSegmentoReceitaArr.length,
@@ -4721,6 +5217,85 @@ function _renderMapa(){
     }
   }
 
+  function _concorrenteSelecionado(){
+    if(!selConcorrente) return "todos";
+    const txt = String(selConcorrente.value || "todos").trim();
+    if(!txt) return "todos";
+    return txt;
+  }
+
+  function _montarUrlConcorrentes(){
+    const params = new URLSearchParams();
+    params.set("raio_m", String(_raioAtualMetros()));
+    params.set("limite", "1200");
+
+    const concorrente = _concorrenteSelecionado();
+    if(concorrente && _normStr(concorrente) !== "todos"){
+      params.append("concorrente", concorrente);
+    }
+
+    return `${URL_API_CONCORRENTES}?${params.toString()}`;
+  }
+
+  function _renderConcorrentes(){
+    if(camadaConcorrentes && typeof camadaConcorrentes.clearLayers === "function"){
+      camadaConcorrentes.clearLayers();
+    }
+
+    const concorrente = _concorrenteSelecionado();
+
+    for(const c of concorrentesArr || []){
+      const m = _criarMarcadorConcorrente(c);
+      if(!m) continue;
+      if(camadaConcorrentes && typeof camadaConcorrentes.addLayer === "function"){
+        camadaConcorrentes.addLayer(m);
+      }
+    }
+  }
+
+  async function _sincronizarConcorrentes(){
+    const seq = ++seqConcorrentes;
+    const concorrente = _concorrenteSelecionado();
+
+    if(camadaConcorrentes && typeof camadaConcorrentes.clearLayers === "function"){
+      camadaConcorrentes.clearLayers();
+    }
+
+    try{
+      const resp = await fetch(_montarUrlConcorrentes(), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin"
+      });
+
+      if(seq !== seqConcorrentes) return;
+
+      if(!resp.ok){
+        console.warn("Falha ao carregar painéis dos concorrentes:", resp.status, await resp.text());
+        concorrentesArr = [];
+        _renderConcorrentes();
+        return;
+      }
+
+      const data = await resp.json();
+      if(seq !== seqConcorrentes) return;
+
+      concorrentesArr = Array.isArray(data && data.items) ? data.items : [];
+      console.log("Painéis concorrentes carregados:", {
+        concorrente,
+        total_api: data && data.total,
+        total_items: concorrentesArr.length,
+        raio_m: data && data.raio_m
+      });
+      _renderConcorrentes();
+    }catch(err){
+      if(seq !== seqConcorrentes) return;
+      console.warn("Erro ao buscar painéis dos concorrentes:", err);
+      concorrentesArr = [];
+      _renderConcorrentes();
+    }
+  }
+
 
   function _atualizarQuerystring(){
     const params = new URLSearchParams(window.location.search);
@@ -4728,6 +5303,7 @@ function _renderMapa(){
     const segs = _segmentosSelecionados();
     const st  = selStatus ? selStatus.value : "todos";
     const r   = selRaio ? selRaio.value : "";
+    const concorrente = _concorrenteSelecionado();
 
     params.delete("segmento");
     for(const seg of segs){
@@ -4736,6 +5312,7 @@ function _renderMapa(){
 
     if(st  && st  !== "todos") params.set("status", st);   else params.delete("status");
     if(r && r !== "1000") params.set("raio_m", r); else params.delete("raio_m");
+    if(concorrente && _normStr(concorrente) !== "todos") params.set("concorrente", concorrente); else params.delete("concorrente");
 
     const qs = params.toString();
     const novaUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
@@ -4748,6 +5325,7 @@ function _renderMapa(){
     _criarOuAtualizarLegendaEmpresas();
     _atualizarQuerystring();
     _sincronizarEmpresasSegmentoReceita();
+    _sincronizarConcorrentes();
   }
 
   function _limparFiltrosMapa(){
@@ -4764,6 +5342,7 @@ function _renderMapa(){
 
     if(selStatus) selStatus.value = "todos";
     if(selRaio) selRaio.value = "1000";
+    if(selConcorrente) selConcorrente.value = "todos";
 
     _recalcularTudoMapa();
   }
@@ -4771,6 +5350,7 @@ function _renderMapa(){
   if(selSegmento) selSegmento.addEventListener("change", _recalcularTudoMapa);
   if(selStatus) selStatus.addEventListener("change", _recalcularTudoMapa);
   if(selRaio) selRaio.addEventListener("change", _recalcularTudoMapa);
+  if(selConcorrente) selConcorrente.addEventListener("change", _recalcularTudoMapa);
   if(btnLimparFiltrosMapa) btnLimparFiltrosMapa.addEventListener("click", _limparFiltrosMapa);
 
   if(btnAnalisarArea){
@@ -5332,11 +5912,71 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 
 
+  function _inicializarPaginacaoDesempenhoSegmentos(){
+    const tbody = document.getElementById("tbodyDesempenhoSegmentos");
+    const paginacao = document.getElementById("pagDesempenhoSegmentos");
+    const info = document.getElementById("pagDesempenhoSegmentosInfo");
+    const btnAnterior = document.getElementById("btnDesempenhoSegmentosAnterior");
+    const btnProxima = document.getElementById("btnDesempenhoSegmentosProxima");
+
+    if(!tbody || !paginacao || !info || !btnAnterior || !btnProxima){
+      return;
+    }
+
+    const linhas = Array.from(tbody.querySelectorAll('tr[data-mm-segmento-row="1"]'));
+    const tamanhoPagina = 10;
+    let paginaAtual = 1;
+
+    function render(){
+      const total = linhas.length;
+      const totalPaginas = Math.max(1, Math.ceil(total / tamanhoPagina));
+
+      if(total <= tamanhoPagina){
+        linhas.forEach(linha => { linha.hidden = false; });
+        paginacao.hidden = true;
+        info.textContent = total ? `Exibindo 1 a ${total} de ${total} registros` : "Exibindo 0 a 0 de 0 registros";
+        return;
+      }
+
+      if(paginaAtual < 1) paginaAtual = 1;
+      if(paginaAtual > totalPaginas) paginaAtual = totalPaginas;
+
+      const inicio = (paginaAtual - 1) * tamanhoPagina;
+      const fim = Math.min(inicio + tamanhoPagina, total);
+
+      linhas.forEach((linha, idx) => {
+        linha.hidden = !(idx >= inicio && idx < fim);
+      });
+
+      paginacao.hidden = false;
+      info.textContent = `Exibindo ${inicio + 1} a ${fim} de ${total} registros • Página ${paginaAtual} de ${totalPaginas}`;
+      btnAnterior.disabled = paginaAtual <= 1;
+      btnProxima.disabled = paginaAtual >= totalPaginas;
+    }
+
+    btnAnterior.addEventListener("click", () => {
+      paginaAtual -= 1;
+      render();
+    });
+
+    btnProxima.addEventListener("click", () => {
+      paginaAtual += 1;
+      render();
+    });
+
+    render();
+  }
+
+  _inicializarPaginacaoDesempenhoSegmentos();
+
+
+
   _desenharRaio();
   _renderMapa();
   _criarOuAtualizarLegendaEmpresas();
   _atualizarQuerystring();
   _sincronizarEmpresasSegmentoReceita();
+  _sincronizarConcorrentes();
   _atualizarGrafico();
   _renderCustoRosca();
 

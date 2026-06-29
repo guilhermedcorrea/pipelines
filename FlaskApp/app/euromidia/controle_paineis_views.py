@@ -18858,6 +18858,552 @@ def painel_detalhes(codponto: int):
     painel["faces"] = painel.get("quantidade_faces")
     painel["classificacao"] = _carregar_classificacao_painel(int(painel["id_painel"]))
 
+    def _fmt_moeda_br(valor):
+        try:
+            if valor is None:
+                return "—"
+            v = float(valor)
+            if not math.isfinite(v):
+                return "—"
+            txt = f"R$ {v:,.2f}"
+            return txt.replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return "—"
+
+    def _fmt_numero_br(valor, casas=1):
+        try:
+            if valor is None:
+                return "—"
+            v = float(valor)
+            if not math.isfinite(v):
+                return "—"
+            txt = f"{v:,.{int(casas)}f}"
+            return txt.replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return "—"
+
+    def _fmt_pct_br(valor, casas=1):
+        try:
+            if valor is None:
+                return "—"
+            v = float(valor)
+            if not math.isfinite(v):
+                return "—"
+            txt = f"{v:,.{int(casas)}f}%"
+            return txt.replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return "—"
+
+    def _clamp_pct(valor):
+        try:
+            if valor is None:
+                return 0.0
+            v = float(valor)
+            if not math.isfinite(v):
+                return 0.0
+            return max(0.0, min(100.0, v))
+        except Exception:
+            return 0.0
+
+    def _somar_meses(data_base: date, meses: int) -> date:
+        mes_total = (data_base.year * 12 + (data_base.month - 1)) + int(meses)
+        ano = mes_total // 12
+        mes = (mes_total % 12) + 1
+        dia = min(data_base.day, calendar.monthrange(ano, mes)[1])
+        return date(ano, mes, dia)
+
+    def _periodos_desempenho_comercial():
+        hoje = date.today()
+        primeiro_mes_atual = date(hoje.year, hoje.month, 1)
+        ultimo_dia_mes_atual = calendar.monthrange(hoje.year, hoje.month)[1]
+        fim = date(hoje.year, hoje.month, ultimo_dia_mes_atual)
+
+        saida = []
+        for meses, label in ((12, "Últimos 12 meses"), (24, "Últimos 24 meses"), (36, "Últimos 36 meses")):
+            ini = _somar_meses(primeiro_mes_atual, -(meses - 1))
+            saida.append({"meses": meses, "label": label, "dt_ini": ini, "dt_fim": fim})
+        return saida
+
+    def _buscar_preco_tabela_painel(cod_ponto: int, dt_ini_periodo: date, dt_fim_periodo: date):
+        try:
+            sql_preco_tabela = text("""
+                SELECT TOP 1
+                    t.Valor AS ValorTabela
+                FROM [Integracao].[Silver].[FatoTabelaPrecosEuromidia] AS t
+                INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS p
+                    ON p.IDDimPaineisEuromidia = t.IDDimPaineisEuromidia
+                WHERE p.CodPonto = :cod_ponto
+                  AND ISNULL(t.BitAtivo, 1) = 1
+                  AND (t.DataPublicacao IS NULL OR t.DataPublicacao <= :dt_fim)
+                  AND (t.DataValidade IS NULL OR t.DataValidade >= :dt_ini)
+                  AND t.Valor IS NOT NULL
+                ORDER BY
+                    CASE WHEN t.DataValidade IS NULL OR t.DataValidade >= :dt_fim THEN 0 ELSE 1 END,
+                    t.DataPublicacao DESC,
+                    t.DataAtualizacao DESC,
+                    t.IDDimTabelaPrecosEuromidia DESC;
+            """)
+            row = db.session.execute(
+                sql_preco_tabela,
+                {
+                    "cod_ponto": int(cod_ponto),
+                    "dt_ini": dt_ini_periodo.isoformat(),
+                    "dt_fim": dt_fim_periodo.isoformat(),
+                },
+            ).mappings().first()
+            return float(row.get("ValorTabela")) if row and row.get("ValorTabela") is not None else None
+        except Exception as exc:
+            try:
+                current_app.logger.warning(
+                    "Falha ao carregar preço de tabela do painel %s: %s",
+                    cod_ponto,
+                    exc,
+                )
+            except Exception:
+                pass
+            return None
+
+    def _carregar_desempenho_comercial_painel(cod_ponto: int, painel_info: dict) -> dict:
+        """
+        Monta as duas tabelas do bloco Desempenho Comercial do Painel.
+
+        Observação importante sobre Preço Recomendado IA:
+        ainda não existe, entre as tabelas informadas nesta tela, uma coluna/tabela explícita
+        com a saída final do motor de IA. Para não quebrar a tela, o campo é preenchido com
+        a proposta mais recente da FatoKanbanNegociacaoPreco quando houver PrecoProposto;
+        se não houver proposta, o front exibe "—".
+        """
+        periodos = _periodos_desempenho_comercial()
+
+        try:
+            tipo_painel = _texto_limpo((painel_info or {}).get("tipo") or (painel_info or {}).get("formato")).upper()
+            eh_digital = 1 if tipo_painel == "PAINEL DIGITAL" else 0
+        except Exception:
+            eh_digital = 0
+
+        try:
+            qtd_faces = int((painel_info or {}).get("quantidade_faces") or 0)
+        except Exception:
+            qtd_faces = 0
+
+        capacidade_dia = 16 if eh_digital else max(1, qtd_faces or 1)
+
+        sql_painel_metricas = text("""
+            ;WITH BaseItens AS (
+                SELECT
+                    i.IDFatoControleContratosItensEuromidia AS IDItem,
+                    i.IDFatoControleContratoEuromidia AS IDContrato,
+                    COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) AS DataEvento,
+                    CASE
+                        WHEN COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) IS NULL THEN NULL
+                        ELSE DATEFROMPARTS(
+                            YEAR(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
+                            MONTH(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
+                            1
+                        )
+                    END AS DataRef,
+                    COALESCE(i.FaturamentoLiquidoFinalMensal, i.FaturamentoLiquidoMensal, i.Faturamento) AS ReceitaMensal,
+                    i.DataInicioPrevisto AS DataInicioPrevisto,
+                    COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS DataFimPrevisto,
+                    CASE
+                        WHEN :eh_digital = 1 AND ISNULL(i.Cota, 0) >= 1080 THEN 2
+                        ELSE 1
+                    END AS SlotsItem,
+                    CASE
+                        WHEN UPPER(LTRIM(RTRIM(ISNULL(i.InicioRenovacao, '')))) = 'R'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(i.TipoDocumento, '')))) LIKE '%RENOV%'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(i.OBS, '')))) LIKE '%RENOV%'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(k.Titulo, '')))) LIKE '%RENOV%'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(k.Descricao, '')))) LIKE '%RENOV%'
+                        THEN 1 ELSE 0
+                    END AS FlagRenovacao,
+                    COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard) AS IDFatoKanbanCard
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+                OUTER APPLY (
+                    SELECT TOP 1
+                        fcc.IDFatoKanbanCard
+                    FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS fcc
+                    WHERE fcc.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+                      AND (
+                            fcc.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+                         OR fcc.IDFatoControleContratosItensEuromidia IS NULL
+                      )
+                    ORDER BY
+                        CASE WHEN fcc.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia THEN 0 ELSE 1 END,
+                        fcc.DataAtualizacao DESC,
+                        fcc.IDFatoContratoCardEuromidia DESC
+                ) AS rel
+                LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] AS k
+                    ON k.IDFatoKanbanCard = COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard)
+                WHERE i.CodPonto = :cod_ponto
+                  AND ISNULL(i.BitAtivo, 1) = 1
+                  AND (i.AtivoCancelamento IS NULL OR i.AtivoCancelamento = 'A')
+            ), MesesContrato AS (
+                SELECT
+                    DataRef,
+                    COUNT(DISTINCT COALESCE(IDContrato, -IDItem)) AS QtdContratosMes
+                FROM BaseItens
+                WHERE DataRef >= :dt_ini
+                  AND DataRef <= :dt_fim
+                GROUP BY DataRef
+            ), Resumo AS (
+                SELECT
+                    SUM(CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN ISNULL(ReceitaMensal, 0.0) ELSE 0.0 END) AS Faturamento,
+                    SUM(CASE
+                            WHEN DataInicioPrevisto IS NOT NULL
+                             AND DataFimPrevisto IS NOT NULL
+                             AND DataInicioPrevisto <= :dt_fim
+                             AND DataFimPrevisto >= :dt_ini
+                            THEN DATEDIFF(
+                                    DAY,
+                                    CASE WHEN DataInicioPrevisto < :dt_ini THEN :dt_ini ELSE DataInicioPrevisto END,
+                                    DATEADD(DAY, 1, CASE WHEN DataFimPrevisto > :dt_fim THEN :dt_fim ELSE DataFimPrevisto END)
+                                 ) * SlotsItem
+                            ELSE 0
+                        END) AS SlotDiasOcupados,
+                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosPeriodo,
+                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim AND FlagRenovacao = 1 THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosRenovacao
+                FROM BaseItens
+            ), UltPrecoNegociado AS (
+                SELECT TOP 1
+                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado
+                FROM BaseItens AS b
+                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                    ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
+                WHERE b.IDFatoKanbanCard IS NOT NULL
+                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) >= :dt_ini
+                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) <= :dt_fim
+                  AND COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) IS NOT NULL
+                ORDER BY
+                    COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) DESC,
+                    n.IDFatoKanbanNegociacaoPreco DESC
+            ), UltPrecoETL AS (
+                SELECT TOP 1
+                    COALESCE(ReceitaMensal, 0.0) AS PrecoNegociado
+                FROM BaseItens
+                WHERE DataRef >= :dt_ini
+                  AND DataRef <= :dt_fim
+                  AND ReceitaMensal IS NOT NULL
+                ORDER BY DataEvento DESC, IDItem DESC
+            ), UltPrecoIA AS (
+                SELECT TOP 1
+                    n.PrecoProposto AS PrecoRecomendadoIA
+                FROM BaseItens AS b
+                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                    ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
+                WHERE b.IDFatoKanbanCard IS NOT NULL
+                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) >= :dt_ini
+                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) <= :dt_fim
+                  AND n.PrecoProposto IS NOT NULL
+                ORDER BY
+                    COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) DESC,
+                    n.IDFatoKanbanNegociacaoPreco DESC
+            )
+            SELECT
+                r.Faturamento,
+                ContratosMediaMes = ISNULL((SELECT SUM(CAST(m.QtdContratosMes AS float)) / :meses FROM MesesContrato AS m), 0.0),
+                OcupacaoPct = CASE
+                    WHEN :capacidade_dia > 0 AND :dias_periodo > 0
+                    THEN (CAST(ISNULL(r.SlotDiasOcupados, 0) AS float) / CAST((:capacidade_dia * :dias_periodo) AS float)) * 100.0
+                    ELSE NULL
+                END,
+                UltimoPrecoNegociado = COALESCE((SELECT PrecoNegociado FROM UltPrecoNegociado), (SELECT PrecoNegociado FROM UltPrecoETL)),
+                PrecoRecomendadoIA = (SELECT PrecoRecomendadoIA FROM UltPrecoIA),
+                RenovacaoPct = CASE
+                    WHEN ISNULL(r.QtdContratosPeriodo, 0) > 0
+                    THEN (CAST(ISNULL(r.QtdContratosRenovacao, 0) AS float) / CAST(r.QtdContratosPeriodo AS float)) * 100.0
+                    ELSE NULL
+                END
+            FROM Resumo AS r;
+        """)
+
+        sql_segmentos_metricas = text("""
+            ;WITH BaseItens AS (
+                SELECT
+                    i.IDFatoControleContratosItensEuromidia AS IDItem,
+                    i.IDFatoControleContratoEuromidia AS IDContrato,
+                    COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) AS DataEvento,
+                    CASE
+                        WHEN COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) IS NULL THEN NULL
+                        ELSE DATEFROMPARTS(
+                            YEAR(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
+                            MONTH(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
+                            1
+                        )
+                    END AS DataRef,
+                    COALESCE(i.FaturamentoLiquidoFinalMensal, i.FaturamentoLiquidoMensal, i.Faturamento) AS ReceitaMensal,
+                    i.DataInicioPrevisto AS DataInicioPrevisto,
+                    COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS DataFimPrevisto,
+                    CASE
+                        WHEN :eh_digital = 1 AND ISNULL(i.Cota, 0) >= 1080 THEN 2
+                        ELSE 1
+                    END AS SlotsItem,
+                    CASE
+                        WHEN UPPER(LTRIM(RTRIM(ISNULL(i.InicioRenovacao, '')))) = 'R'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(i.TipoDocumento, '')))) LIKE '%RENOV%'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(i.OBS, '')))) LIKE '%RENOV%'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(k.Titulo, '')))) LIKE '%RENOV%'
+                          OR UPPER(LTRIM(RTRIM(ISNULL(k.Descricao, '')))) LIKE '%RENOV%'
+                        THEN 1 ELSE 0
+                    END AS FlagRenovacao,
+                    COALESCE(NULLIF(LTRIM(RTRIM(dc.Classe)), ''), 'Sem segmento') AS Classe,
+                    dc.ScoreSetor AS ScoreSetor,
+                    COALESCE(NULLIF(LTRIM(RTRIM(dc.ClassificacaoMacro)), ''), '—') AS ClassificacaoMacro,
+                    COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard) AS IDFatoKanbanCard
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+                OUTER APPLY (
+                    SELECT TOP 1
+                        fcc.IDFatoKanbanCard
+                    FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS fcc
+                    WHERE fcc.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+                      AND (
+                            fcc.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+                         OR fcc.IDFatoControleContratosItensEuromidia IS NULL
+                      )
+                    ORDER BY
+                        CASE WHEN fcc.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia THEN 0 ELSE 1 END,
+                        fcc.DataAtualizacao DESC,
+                        fcc.IDFatoContratoCardEuromidia DESC
+                ) AS rel
+                LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] AS k
+                    ON k.IDFatoKanbanCard = COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard)
+                LEFT JOIN [Integracao].[Silver].[DimCnaes] AS dc
+                    ON dc.IDDimCnaes = k.IDDimCnaes
+                WHERE i.CodPonto = :cod_ponto
+                  AND ISNULL(i.BitAtivo, 1) = 1
+                  AND (i.AtivoCancelamento IS NULL OR i.AtivoCancelamento = 'A')
+            ), MesesSegmento AS (
+                SELECT
+                    Classe,
+                    ScoreSetor,
+                    ClassificacaoMacro,
+                    DataRef,
+                    COUNT(DISTINCT COALESCE(IDContrato, -IDItem)) AS QtdContratosMes
+                FROM BaseItens
+                WHERE DataRef >= :dt_ini
+                  AND DataRef <= :dt_fim
+                GROUP BY Classe, ScoreSetor, ClassificacaoMacro, DataRef
+            ), ResumoSegmento AS (
+                SELECT
+                    Classe,
+                    ScoreSetor,
+                    ClassificacaoMacro,
+                    SUM(CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN ISNULL(ReceitaMensal, 0.0) ELSE 0.0 END) AS Faturamento,
+                    SUM(CASE
+                            WHEN DataInicioPrevisto IS NOT NULL
+                             AND DataFimPrevisto IS NOT NULL
+                             AND DataInicioPrevisto <= :dt_fim
+                             AND DataFimPrevisto >= :dt_ini
+                            THEN DATEDIFF(
+                                    DAY,
+                                    CASE WHEN DataInicioPrevisto < :dt_ini THEN :dt_ini ELSE DataInicioPrevisto END,
+                                    DATEADD(DAY, 1, CASE WHEN DataFimPrevisto > :dt_fim THEN :dt_fim ELSE DataFimPrevisto END)
+                                 ) * SlotsItem
+                            ELSE 0
+                        END) AS SlotDiasOcupados,
+                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosPeriodo,
+                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim AND FlagRenovacao = 1 THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosRenovacao
+                FROM BaseItens
+                GROUP BY Classe, ScoreSetor, ClassificacaoMacro
+            ), UltPrecoNegociadoSegmento AS (
+                SELECT
+                    b.Classe,
+                    b.ScoreSetor,
+                    b.ClassificacaoMacro,
+                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY b.Classe, b.ScoreSetor, b.ClassificacaoMacro
+                        ORDER BY COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) DESC, n.IDFatoKanbanNegociacaoPreco DESC
+                    ) AS rn
+                FROM BaseItens AS b
+                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                    ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
+                WHERE b.IDFatoKanbanCard IS NOT NULL
+                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) >= :dt_ini
+                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) <= :dt_fim
+                  AND COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) IS NOT NULL
+            ), UltPrecoETLSegmento AS (
+                SELECT
+                    Classe,
+                    ScoreSetor,
+                    ClassificacaoMacro,
+                    ReceitaMensal AS PrecoNegociado,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY Classe, ScoreSetor, ClassificacaoMacro
+                        ORDER BY DataEvento DESC, IDItem DESC
+                    ) AS rn
+                FROM BaseItens
+                WHERE DataRef >= :dt_ini
+                  AND DataRef <= :dt_fim
+                  AND ReceitaMensal IS NOT NULL
+            ), UltPrecoIASegmento AS (
+                SELECT
+                    b.Classe,
+                    b.ScoreSetor,
+                    b.ClassificacaoMacro,
+                    n.PrecoProposto AS PrecoRecomendadoIA,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY b.Classe, b.ScoreSetor, b.ClassificacaoMacro
+                        ORDER BY COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) DESC, n.IDFatoKanbanNegociacaoPreco DESC
+                    ) AS rn
+                FROM BaseItens AS b
+                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                    ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
+                WHERE b.IDFatoKanbanCard IS NOT NULL
+                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) >= :dt_ini
+                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) <= :dt_fim
+                  AND n.PrecoProposto IS NOT NULL
+            )
+            SELECT
+                r.Classe,
+                r.ScoreSetor,
+                r.ClassificacaoMacro,
+                r.Faturamento,
+                ContratosMediaMes = ISNULL((
+                    SELECT SUM(CAST(m.QtdContratosMes AS float)) / :meses
+                    FROM MesesSegmento AS m
+                    WHERE m.Classe = r.Classe
+                      AND (m.ScoreSetor = r.ScoreSetor OR (m.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
+                      AND m.ClassificacaoMacro = r.ClassificacaoMacro
+                ), 0.0),
+                OcupacaoPct = CASE
+                    WHEN :capacidade_dia > 0 AND :dias_periodo > 0
+                    THEN (CAST(ISNULL(r.SlotDiasOcupados, 0) AS float) / CAST((:capacidade_dia * :dias_periodo) AS float)) * 100.0
+                    ELSE NULL
+                END,
+                UltimoPrecoNegociado = COALESCE(neg.PrecoNegociado, etl.PrecoNegociado),
+                PrecoRecomendadoIA = ia.PrecoRecomendadoIA,
+                RenovacaoPct = CASE
+                    WHEN ISNULL(r.QtdContratosPeriodo, 0) > 0
+                    THEN (CAST(ISNULL(r.QtdContratosRenovacao, 0) AS float) / CAST(r.QtdContratosPeriodo AS float)) * 100.0
+                    ELSE NULL
+                END
+            FROM ResumoSegmento AS r
+            LEFT JOIN UltPrecoNegociadoSegmento AS neg
+                ON neg.Classe = r.Classe
+               AND (neg.ScoreSetor = r.ScoreSetor OR (neg.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
+               AND neg.ClassificacaoMacro = r.ClassificacaoMacro
+               AND neg.rn = 1
+            LEFT JOIN UltPrecoETLSegmento AS etl
+                ON etl.Classe = r.Classe
+               AND (etl.ScoreSetor = r.ScoreSetor OR (etl.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
+               AND etl.ClassificacaoMacro = r.ClassificacaoMacro
+               AND etl.rn = 1
+            LEFT JOIN UltPrecoIASegmento AS ia
+                ON ia.Classe = r.Classe
+               AND (ia.ScoreSetor = r.ScoreSetor OR (ia.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
+               AND ia.ClassificacaoMacro = r.ClassificacaoMacro
+               AND ia.rn = 1
+            WHERE ISNULL(r.Faturamento, 0.0) <> 0.0
+               OR ISNULL(r.QtdContratosPeriodo, 0) > 0
+            ORDER BY r.Faturamento DESC, r.Classe ASC;
+        """)
+
+        linhas_painel = []
+        linhas_segmentos = []
+
+        for periodo in periodos:
+            dt_ini_periodo = periodo["dt_ini"]
+            dt_fim_periodo = periodo["dt_fim"]
+            dias_periodo = (dt_fim_periodo - dt_ini_periodo).days + 1
+            preco_tabela = _buscar_preco_tabela_painel(cod_ponto, dt_ini_periodo, dt_fim_periodo)
+
+            params = {
+                "cod_ponto": int(cod_ponto),
+                "dt_ini": dt_ini_periodo.isoformat(),
+                "dt_fim": dt_fim_periodo.isoformat(),
+                "meses": int(periodo["meses"]),
+                "dias_periodo": int(dias_periodo),
+                "capacidade_dia": int(capacidade_dia),
+                "eh_digital": int(eh_digital),
+            }
+
+            try:
+                row = db.session.execute(sql_painel_metricas, params).mappings().first()
+            except Exception as exc:
+                try:
+                    current_app.logger.warning(
+                        "Falha ao carregar desempenho comercial do painel %s no período %s: %s",
+                        cod_ponto,
+                        periodo["label"],
+                        exc,
+                    )
+                except Exception:
+                    pass
+                row = None
+
+            row = row or {}
+            ocupacao_pct = _clamp_pct(row.get("OcupacaoPct")) if row.get("OcupacaoPct") is not None else None
+            renovacao_pct = _clamp_pct(row.get("RenovacaoPct")) if row.get("RenovacaoPct") is not None else None
+
+            linhas_painel.append({
+                "periodo": periodo["label"],
+                "faturamento": float(row.get("Faturamento") or 0.0),
+                "faturamento_txt": _fmt_moeda_br(row.get("Faturamento") or 0.0),
+                "contratos_media_mes": float(row.get("ContratosMediaMes") or 0.0),
+                "contratos_media_mes_txt": _fmt_numero_br(row.get("ContratosMediaMes") or 0.0, 1),
+                "taxa_ocupacao_pct": ocupacao_pct,
+                "taxa_ocupacao_txt": _fmt_pct_br(ocupacao_pct, 1),
+                "ultimo_preco_negociado": row.get("UltimoPrecoNegociado"),
+                "ultimo_preco_negociado_txt": _fmt_moeda_br(row.get("UltimoPrecoNegociado")),
+                "preco_tabela": preco_tabela,
+                "preco_tabela_txt": _fmt_moeda_br(preco_tabela),
+                "preco_recomendado_ia": row.get("PrecoRecomendadoIA"),
+                "preco_recomendado_ia_txt": _fmt_moeda_br(row.get("PrecoRecomendadoIA")),
+                "desempenho_renovacao_pct": renovacao_pct,
+                "desempenho_renovacao_txt": _fmt_pct_br(renovacao_pct, 0),
+                "desempenho_renovacao_barra": _clamp_pct(renovacao_pct),
+            })
+
+            try:
+                rows_seg = db.session.execute(sql_segmentos_metricas, params).mappings().all()
+            except Exception as exc:
+                try:
+                    current_app.logger.warning(
+                        "Falha ao carregar desempenho comercial por segmento do painel %s no período %s: %s",
+                        cod_ponto,
+                        periodo["label"],
+                        exc,
+                    )
+                except Exception:
+                    pass
+                rows_seg = []
+
+            for row_seg in rows_seg or []:
+                ocupacao_seg = _clamp_pct(row_seg.get("OcupacaoPct")) if row_seg.get("OcupacaoPct") is not None else None
+                renovacao_seg = _clamp_pct(row_seg.get("RenovacaoPct")) if row_seg.get("RenovacaoPct") is not None else None
+                linhas_segmentos.append({
+                    "periodo": periodo["label"],
+                    "classe": _texto_limpo(row_seg.get("Classe")) or "Sem segmento",
+                    "score_setor": row_seg.get("ScoreSetor"),
+                    "score_setor_txt": _fmt_numero_br(row_seg.get("ScoreSetor"), 2),
+                    "classificacao_macro": _texto_limpo(row_seg.get("ClassificacaoMacro")) or "—",
+                    "faturamento": float(row_seg.get("Faturamento") or 0.0),
+                    "faturamento_txt": _fmt_moeda_br(row_seg.get("Faturamento") or 0.0),
+                    "contratos_media_mes": float(row_seg.get("ContratosMediaMes") or 0.0),
+                    "contratos_media_mes_txt": _fmt_numero_br(row_seg.get("ContratosMediaMes") or 0.0, 1),
+                    "taxa_ocupacao_pct": ocupacao_seg,
+                    "taxa_ocupacao_txt": _fmt_pct_br(ocupacao_seg, 1),
+                    "ultimo_preco_negociado": row_seg.get("UltimoPrecoNegociado"),
+                    "ultimo_preco_negociado_txt": _fmt_moeda_br(row_seg.get("UltimoPrecoNegociado")),
+                    "preco_tabela": preco_tabela,
+                    "preco_tabela_txt": _fmt_moeda_br(preco_tabela),
+                    "preco_recomendado_ia": row_seg.get("PrecoRecomendadoIA"),
+                    "preco_recomendado_ia_txt": _fmt_moeda_br(row_seg.get("PrecoRecomendadoIA")),
+                    "desempenho_renovacao_pct": renovacao_seg,
+                    "desempenho_renovacao_txt": _fmt_pct_br(renovacao_seg, 0),
+                    "desempenho_renovacao_barra": _clamp_pct(renovacao_seg),
+                })
+
+        return {
+            "painel": linhas_painel,
+            "segmentos": linhas_segmentos,
+            "capacidade_dia": capacidade_dia,
+            "eh_digital": bool(eh_digital),
+        }
+
+    desempenho_comercial = _carregar_desempenho_comercial_painel(int(painel["id_painel"]), painel)
+
     try:
         dt_ini_str = request.args.get("dt_ini") or request.args.get("dtIni") or request.args.get("data_ini") or ""
         dt_fim_str = request.args.get("dt_fim") or request.args.get("dtFim") or request.args.get("data_fim") or ""
@@ -19199,6 +19745,33 @@ def painel_detalhes(codponto: int):
 
     raio_m = max(0, _to_int_seguro(request.args.get("raio_m", "1000"), 1000))
     status = (request.args.get("status", "todos") or "todos").strip()
+
+    def _concorrentes_mapa_mercado_request():
+        """Aceita concorrente único, concorrente repetido e legado separado por |."""
+        valores = []
+        vistos = set()
+
+        for valor in request.args.getlist("concorrente"):
+            texto = (valor or "").strip()
+            if not texto:
+                continue
+
+            for parte in re.split(r"[|]", texto):
+                nome = (parte or "").strip()
+                if not nome or nome.casefold() == "todos":
+                    continue
+
+                chave = nome.casefold()
+                if chave in vistos:
+                    continue
+
+                vistos.add(chave)
+                valores.append(nome)
+
+        return valores
+
+    concorrentes_filtro = _concorrentes_mapa_mercado_request()
+    concorrente = " | ".join(concorrentes_filtro) if concorrentes_filtro else "todos"
 
     def _segmentos_mapa_mercado_request():
         """Aceita segmento único, segmento repetido e legado separado por |."""
@@ -19542,14 +20115,45 @@ def painel_detalhes(codponto: int):
         # Fallback seguro: se a consulta falhar, o HTML usa os segmentos já presentes nas empresas.
         segmentos_cnae = []
 
+    # Lista oficial do filtro Concorrente.
+    # A tela exibe os valores distintos de [DataMining].[Silver].[DimConcorrentesEuromidia].[EmpresaProprietaria].
+    # Importante: a lista do SELECT não filtra Latitude/Longitude; o nome do concorrente precisa aparecer no filtro
+    # mesmo quando algum ponto da base ainda estiver sem coordenada. O mapa filtra coordenadas apenas no endpoint.
+    try:
+        sql_concorrentes_nomes = text("""
+            SELECT DISTINCT
+                EmpresaProprietaria = LTRIM(RTRIM(CAST([EmpresaProprietaria] AS nvarchar(260))))
+            FROM [DataMining].[Silver].[DimConcorrentesEuromidia]
+            WHERE NULLIF(LTRIM(RTRIM(CAST([EmpresaProprietaria] AS nvarchar(260)))), '') IS NOT NULL
+            ORDER BY EmpresaProprietaria ASC
+        """)
+
+        concorrentes_nomes = [
+            (row.get("EmpresaProprietaria") or "").strip()
+            for row in db.session.execute(sql_concorrentes_nomes).mappings().all()
+            if (row.get("EmpresaProprietaria") or "").strip()
+        ]
+    except Exception:
+        # Fallback seguro: se a consulta falhar, o HTML fica só com "Todos".
+        concorrentes_nomes = []
+
     return render_template(
         "euromidia/mapa_mercado.html",
         painel_json=painel,
         empresas_json=empresas_enriquecidas,
         cep_points_json=cep_points,
         segmentos_cnae_json=segmentos_cnae,
+        concorrentes_json=concorrentes_nomes,
         distribuicoes_contratos_json=distribuicoes_contratos,
-        filtro_inicial={"raio_m": raio_m, "status": status, "segmento": segmento, "segmentos": segmentos},
+        desempenho_comercial_json=desempenho_comercial,
+        filtro_inicial={
+            "raio_m": raio_m,
+            "status": status,
+            "segmento": segmento,
+            "segmentos": segmentos,
+            "concorrente": concorrente,
+            "concorrentes": concorrentes_filtro,
+        },
         camadas=camadas,
         kpis=kpis,
         fin_json=fin_json,
@@ -19968,6 +20572,277 @@ def api_empresas_receita_segmento_painel(codponto: int):
 
 
 
+
+
+
+
+
+
+@paineis_bp.route("/api/painel-detalhes/<int:codponto>/concorrentes", methods=["GET"])
+@login_required
+@limiter.limit("90 per minute", methods=["GET"])
+@retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
+def api_concorrentes_painel(codponto: int):
+    """
+    Retorna os painéis dos concorrentes para o mapa do detalhe do painel.
+
+    Regra:
+    - O filtro vem de [DataMining].[Silver].[DimConcorrentesEuromidia].[EmpresaProprietaria].
+    - Os marcadores usam Latitude/Longitude da própria DimConcorrentesEuromidia.
+    - O raio é aplicado em volta do painel aberto para não carregar a base inteira.
+    """
+    if _usuario_logado_eh_perfil_vendedor():
+        abort(403)
+
+    def _texto_limpo_api(valor):
+        try:
+            return str(valor or "").strip()
+        except Exception:
+            return ""
+
+    def _to_int_api(valor, padrao):
+        try:
+            return int(str(valor or "").strip())
+        except Exception:
+            return padrao
+
+    def _to_float_api(valor):
+        if valor is None:
+            return None
+
+        if isinstance(valor, (int, float)):
+            try:
+                v = float(valor)
+                return v if math.isfinite(v) else None
+            except Exception:
+                return None
+
+        txt = str(valor or "").strip()
+        if not txt:
+            return None
+
+        if "," in txt and "." in txt:
+            txt = txt.replace(".", "").replace(",", ".")
+        elif "," in txt and "." not in txt:
+            txt = txt.replace(",", ".")
+
+        try:
+            v = float(txt)
+            return v if math.isfinite(v) else None
+        except Exception:
+            return None
+
+    def _concorrentes_request_api() -> list[str]:
+        valores = []
+        vistos = set()
+
+        for valor in request.args.getlist("concorrente"):
+            texto = _texto_limpo_api(valor)
+            if not texto:
+                continue
+
+            # Mantém compatibilidade com legado "Concorrente A|Concorrente B".
+            for parte in re.split(r"[|]", texto):
+                nome = _texto_limpo_api(parte)
+                if not nome or nome.casefold() == "todos":
+                    continue
+
+                chave = nome.casefold()
+                if chave in vistos:
+                    continue
+
+                vistos.add(chave)
+                valores.append(nome)
+
+        return valores
+
+    def _distancia_haversine_api(lat1, lng1, lat2, lng2):
+        try:
+            if lat1 is None or lng1 is None or lat2 is None or lng2 is None:
+                return None
+            R = 6371000.0
+            lat1r = math.radians(float(lat1))
+            lng1r = math.radians(float(lng1))
+            lat2r = math.radians(float(lat2))
+            lng2r = math.radians(float(lng2))
+            dlat = lat2r - lat1r
+            dlng = lng2r - lng1r
+            a = (math.sin(dlat / 2) ** 2) + (math.cos(lat1r) * math.cos(lat2r) * (math.sin(dlng / 2) ** 2))
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            return int(round(R * c))
+        except Exception:
+            return None
+
+    concorrentes = _concorrentes_request_api()
+
+    raio_m = max(100, min(_to_int_api(request.args.get("raio_m"), 1000), 50000))
+    limite = max(1, min(_to_int_api(request.args.get("limite"), 1200), 3000))
+    limite_busca = max(limite * 3, 300)
+
+    sql_painel_dim = text("""
+        SELECT TOP 1
+            CodPonto AS CodPonto,
+            Latitude AS lat,
+            Longitude AS lng
+        FROM [Integracao].[Silver].[DimPaineisEuromidia]
+        WHERE CodPonto = :cod_ponto
+    """)
+    row_painel = db.session.execute(sql_painel_dim, {"cod_ponto": int(codponto)}).mappings().first()
+
+    lat_painel = _to_float_api(row_painel.get("lat") if row_painel else None)
+    lng_painel = _to_float_api(row_painel.get("lng") if row_painel else None)
+
+    if lat_painel is None or lng_painel is None:
+        sql_painel_fallback = text("""
+            SELECT TOP 1
+                CodPonto AS CodPonto,
+                LatD AS lat,
+                LonD AS lng
+            FROM [DataMining].[dbo].[CadastroPaineisEuromidia]
+            WHERE CodPonto = :cod_ponto
+        """)
+        row_fb = db.session.execute(sql_painel_fallback, {"cod_ponto": int(codponto)}).mappings().first()
+        lat_painel = _to_float_api(row_fb.get("lat") if row_fb else None)
+        lng_painel = _to_float_api(row_fb.get("lng") if row_fb else None)
+
+    if lat_painel is None or lng_painel is None:
+        abort(404, description=f"Painel {codponto} não encontrado ou sem Latitude/Longitude válidos.")
+
+    lat_delta = raio_m / 111320.0
+    cos_lat = math.cos(math.radians(float(lat_painel)))
+    lng_delta = raio_m / (111320.0 * max(abs(cos_lat), 0.20))
+
+    concorrentes_norm = [nome.strip() for nome in concorrentes if nome and nome.strip()]
+    filtro_concorrentes_sql = ""
+    if concorrentes_norm:
+        filtro_concorrentes_sql = """
+          AND LTRIM(RTRIM(CAST(EmpresaProprietaria AS nvarchar(260)))) IN :concorrentes
+        """
+
+    sql_concorrentes_txt = f"""
+        SELECT TOP (:limite_busca)
+            IDSilverDimConcorrentesEuromidia,
+            CAST(ISNULL(EmpresaProprietaria, '') AS nvarchar(260)) AS EmpresaProprietaria,
+            CAST(ISNULL(SiteEmpresaProprietaria, '') AS nvarchar(500)) AS SiteEmpresaProprietaria,
+            CAST(ISNULL(Tipo, '') AS nvarchar(160)) AS Tipo,
+            IDTipoEuromidia,
+            CAST(ISNULL(NomePonto, '') AS nvarchar(260)) AS NomePonto,
+            CAST(ISNULL(Logradouro, '') AS nvarchar(300)) AS Logradouro,
+            CAST(ISNULL(Bairro, '') AS nvarchar(180)) AS Bairro,
+            CAST(ISNULL(Cidade, '') AS nvarchar(180)) AS Cidade,
+            CAST(ISNULL(UF, '') AS varchar(10)) AS UF,
+            CAST(ISNULL(CEP, '') AS varchar(20)) AS CEP,
+            CAST(ISNULL(Formato, '') AS nvarchar(160)) AS Formato,
+            CAST(ISNULL(Referencia, '') AS nvarchar(500)) AS Referencia,
+            CAST(ISNULL(Imagem, '') AS nvarchar(700)) AS Imagem,
+            CAST(ISNULL(PaginaAnuncioURL, '') AS nvarchar(700)) AS PaginaAnuncioURL,
+            DataAtualizacao,
+            Latitude AS lat,
+            Longitude AS lng,
+            DistanciaAproximada = (
+                POWER(Latitude - :lat_painel, 2) + POWER(Longitude - :lng_painel, 2)
+            )
+        FROM [DataMining].[Silver].[DimConcorrentesEuromidia]
+        WHERE NULLIF(LTRIM(RTRIM(CAST(EmpresaProprietaria AS nvarchar(260)))), '') IS NOT NULL
+          {filtro_concorrentes_sql}
+          AND Latitude IS NOT NULL
+          AND Longitude IS NOT NULL
+          AND Latitude BETWEEN :lat_min AND :lat_max
+          AND Longitude BETWEEN :lng_min AND :lng_max
+          AND Latitude BETWEEN -90 AND 90
+          AND Longitude BETWEEN -180 AND 180
+        ORDER BY
+            DistanciaAproximada ASC,
+            EmpresaProprietaria ASC,
+            NomePonto ASC
+        OPTION (RECOMPILE);
+    """
+
+    sql_concorrentes = text(sql_concorrentes_txt)
+    params_concorrentes = {
+        "limite_busca": int(limite_busca),
+        "lat_painel": float(lat_painel),
+        "lng_painel": float(lng_painel),
+        "lat_min": float(lat_painel - lat_delta),
+        "lat_max": float(lat_painel + lat_delta),
+        "lng_min": float(lng_painel - lng_delta),
+        "lng_max": float(lng_painel + lng_delta),
+    }
+
+    if concorrentes_norm:
+        sql_concorrentes = sql_concorrentes.bindparams(bindparam("concorrentes", expanding=True))
+        params_concorrentes["concorrentes"] = concorrentes_norm
+
+    rows = db.session.execute(sql_concorrentes, params_concorrentes).mappings().all()
+
+    itens = []
+    ids_vistos = set()
+
+    for row in rows:
+        lat = _to_float_api(row.get("lat"))
+        lng = _to_float_api(row.get("lng"))
+        if lat is None or lng is None:
+            continue
+
+        dist_m = _distancia_haversine_api(lat_painel, lng_painel, lat, lng)
+        if dist_m is None or dist_m > raio_m:
+            continue
+
+        id_raw = row.get("IDSilverDimConcorrentesEuromidia")
+        try:
+            id_int = int(id_raw) if id_raw is not None else 0
+        except Exception:
+            id_int = 0
+
+        if id_int and id_int in ids_vistos:
+            continue
+        if id_int:
+            ids_vistos.add(id_int)
+
+        empresa_prop = _texto_limpo_api(row.get("EmpresaProprietaria")) or "Concorrente"
+        nome_ponto = _texto_limpo_api(row.get("NomePonto")) or empresa_prop
+
+        data_atualizacao = row.get("DataAtualizacao")
+        try:
+            data_atualizacao_iso = data_atualizacao.isoformat() if data_atualizacao else None
+        except Exception:
+            data_atualizacao_iso = None
+
+        itens.append({
+            "id_concorrente_ponto": id_int or len(itens) + 1,
+            "empresa_proprietaria": empresa_prop,
+            "site_empresa_proprietaria": _texto_limpo_api(row.get("SiteEmpresaProprietaria")),
+            "tipo": _texto_limpo_api(row.get("Tipo")),
+            "id_tipo_euromidia": row.get("IDTipoEuromidia"),
+            "nome_ponto": nome_ponto,
+            "logradouro": _texto_limpo_api(row.get("Logradouro")),
+            "bairro": _texto_limpo_api(row.get("Bairro")),
+            "cidade": _texto_limpo_api(row.get("Cidade")),
+            "uf": _texto_limpo_api(row.get("UF")),
+            "cep": _texto_limpo_api(row.get("CEP")),
+            "formato": _texto_limpo_api(row.get("Formato")),
+            "referencia": _texto_limpo_api(row.get("Referencia")),
+            "imagem": _texto_limpo_api(row.get("Imagem")),
+            "pagina_anuncio_url": _texto_limpo_api(row.get("PaginaAnuncioURL")),
+            "data_atualizacao": data_atualizacao_iso,
+            "lat": float(lat),
+            "lng": float(lng),
+            "distancia_m": int(dist_m),
+            "camada": "concorrentes",
+            "tipo_marcador": "painel_concorrente",
+            "origem": "dim_concorrentes_euromidia",
+        })
+
+        if len(itens) >= limite:
+            break
+
+    return jsonify({
+        "items": itens,
+        "total": len(itens),
+        "concorrentes": concorrentes_norm or ["todos"],
+        "raio_m": raio_m,
+        "limite": limite,
+    })
 
 
 
