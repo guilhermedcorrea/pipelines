@@ -20094,26 +20094,109 @@ def painel_detalhes(codponto: int):
             }
         })
 
-    # Lista oficial do filtro Segmento.
-    # A tela deve exibir os valores distintos de [Integracao].[Silver].[DimCnaes].[Classe].
-    # Fica separado do dataset das empresas para não depender do que existe no mapa naquele momento.
+    # Lista do filtro Segmento.
+    # Importante: não carregamos mais a lista oficial inteira da DimCnaes.
+    # Aqui entram apenas as Classes que possuem empresa da Receita Federal
+    # com Latitude/Longitude dentro do raio do painel aberto.
+    # Isso evita o usuário selecionar segmento sem empresa na região.
+    segmentos_cnae = []
     try:
-        sql_segmentos_cnae = text("""
-            SELECT DISTINCT
-                Classe = LTRIM(RTRIM(CAST([Classe] AS nvarchar(250))))
-            FROM [Integracao].[Silver].[DimCnaes]
-            WHERE NULLIF(LTRIM(RTRIM(CAST([Classe] AS nvarchar(250)))), '') IS NOT NULL
-            ORDER BY Classe ASC
-        """)
+        lat_painel_seg = _to_float_br(painel.get("lat"))
+        lng_painel_seg = _to_float_br(painel.get("lng"))
+        raio_segmentos_m = max(100, min(int(raio_m or 1000), 20000))
 
-        segmentos_cnae = [
-            (row.get("Classe") or "").strip()
-            for row in db.session.execute(sql_segmentos_cnae).mappings().all()
-            if (row.get("Classe") or "").strip()
-        ]
-    except Exception:
-        # Fallback seguro: se a consulta falhar, o HTML usa os segmentos já presentes nas empresas.
-        segmentos_cnae = []
+        if lat_painel_seg is not None and lng_painel_seg is not None:
+            lat_delta_seg = raio_segmentos_m / 111320.0
+            cos_lat_seg = max(0.15, abs(math.cos(math.radians(float(lat_painel_seg)))))
+            lng_delta_seg = raio_segmentos_m / (111320.0 * cos_lat_seg)
+
+            # Busca só o box geográfico do painel para não varrer a base inteira.
+            # O filtro circular exato continua no Python usando a mesma função
+            # de distância já usada nesta tela.
+            sql_cnaes_segmentos_no_box = text("""
+                SELECT TOP (50000)
+                    e.CNAE AS CNAE,
+                    e.Latitude AS lat,
+                    e.Longitude AS lng,
+                    DistanciaAproximada = (
+                        POWER(e.Latitude - :lat_painel, 2) + POWER(e.Longitude - :lng_painel, 2)
+                    )
+                FROM [ReceitaFederal].[Silver].[DimEmpresasReceita] e
+                WHERE e.CNAE IS NOT NULL
+                  AND e.Latitude IS NOT NULL
+                  AND e.Longitude IS NOT NULL
+                  AND e.Latitude BETWEEN :lat_min AND :lat_max
+                  AND e.Longitude BETWEEN :lng_min AND :lng_max
+                  AND e.Latitude BETWEEN -90 AND 90
+                  AND e.Longitude BETWEEN -180 AND 180
+                ORDER BY DistanciaAproximada ASC;
+            """)
+
+            rows_cnaes_segmentos_no_box = db.session.execute(
+                sql_cnaes_segmentos_no_box,
+                {
+                    "lat_painel": float(lat_painel_seg),
+                    "lng_painel": float(lng_painel_seg),
+                    "lat_min": float(lat_painel_seg - lat_delta_seg),
+                    "lat_max": float(lat_painel_seg + lat_delta_seg),
+                    "lng_min": float(lng_painel_seg - lng_delta_seg),
+                    "lng_max": float(lng_painel_seg + lng_delta_seg),
+                }
+            ).mappings().all()
+
+            cnaes_no_raio = []
+            cnaes_no_raio_vistos = set()
+
+            for row_seg in rows_cnaes_segmentos_no_box:
+                lat_emp_seg = _to_float_br(row_seg.get("lat"))
+                lng_emp_seg = _to_float_br(row_seg.get("lng"))
+                if lat_emp_seg is None or lng_emp_seg is None:
+                    continue
+
+                dist_seg_m = _distancia_haversine_m(lat_painel_seg, lng_painel_seg, lat_emp_seg, lng_emp_seg)
+                if dist_seg_m is None or dist_seg_m > raio_segmentos_m:
+                    continue
+
+                cnae_txt_seg = re.sub(r"\D+", "", str(row_seg.get("CNAE") or "").strip())
+                if not cnae_txt_seg or cnae_txt_seg in cnaes_no_raio_vistos:
+                    continue
+
+                cnaes_no_raio_vistos.add(cnae_txt_seg)
+                cnaes_no_raio.append(cnae_txt_seg)
+
+            if cnaes_no_raio:
+                sql_segmentos_cnae = text("""
+                    SELECT DISTINCT
+                        Classe = LTRIM(RTRIM(CAST([Classe] AS nvarchar(250))))
+                    FROM [Integracao].[Silver].[DimCnaes]
+                    WHERE CAST(cnaepadrao AS varchar(30)) IN :cnaes
+                      AND NULLIF(LTRIM(RTRIM(CAST([Classe] AS nvarchar(250)))), '') IS NOT NULL
+                    ORDER BY Classe ASC
+                """).bindparams(bindparam("cnaes", expanding=True))
+
+                segmentos_cnae = [
+                    (row.get("Classe") or "").strip()
+                    for row in db.session.execute(sql_segmentos_cnae, {"cnaes": cnaes_no_raio}).mappings().all()
+                    if (row.get("Classe") or "").strip()
+                ]
+
+    except Exception as exc:
+        try:
+            current_app.logger.warning(
+                "Falha ao carregar segmentos disponíveis do painel %s: %s",
+                painel.get("id_painel"),
+                exc,
+            )
+        except Exception:
+            pass
+
+        # Fallback seguro: mantém o mapa funcionando e usa somente os segmentos
+        # que já existem no payload atual do mapa.
+        segmentos_cnae = sorted({
+            str(e.get("classe_cnae") or e.get("segmento") or "").strip()
+            for e in empresas_no_raio
+            if str(e.get("classe_cnae") or e.get("segmento") or "").strip()
+        }, key=lambda x: x.casefold())
 
     # Lista oficial do filtro Concorrente.
     # A tela exibe os valores distintos de [DataMining].[Silver].[DimConcorrentesEuromidia].[EmpresaProprietaria].
@@ -20171,8 +20254,8 @@ def api_empresas_receita_segmento_painel(codponto: int):
     Retorna empresas da Receita Federal para o mapa do detalhe do painel.
 
     Regra:
-    - Só consulta quando o usuário seleciona um ou mais segmentos.
-    - Segmento vem da Classe da [Integracao].[Silver].[DimCnaes].
+    - Quando o usuário seleciona um ou mais segmentos, restringe pela Classe da [Integracao].[Silver].[DimCnaes].
+    - Quando o usuário mantém Segmento = Todos, retorna todas as empresas com Latitude/Longitude dentro do raio/região.
     - Empresas vêm de [ReceitaFederal].[Silver].[DimEmpresasReceita].
     - Usa Latitude/Longitude da Receita e limita pelo raio do painel para não carregar a base inteira.
     """
@@ -20265,13 +20348,6 @@ def api_empresas_receita_segmento_painel(codponto: int):
         return int(round(R * c))
 
     segmentos = _segmentos_request_api()
-    if not segmentos:
-        return jsonify({
-            "items": [],
-            "total": 0,
-            "segmentos": [],
-            "raio_m": _to_int_api(request.args.get("raio_m"), 1000),
-        })
 
     raio_m = max(100, min(_to_int_api(request.args.get("raio_m"), 1000), 20000))
     limite = max(50, min(_to_int_api(request.args.get("limite"), 800), 1500))
@@ -20322,48 +20398,51 @@ def api_empresas_receita_segmento_painel(codponto: int):
 
     segmentos_norm = [s.upper() for s in segmentos if _texto_limpo_api(s)]
 
-    # Primeiro resolve os CNAEs do segmento na DimCnaes, que é pequena.
-    # Assim a consulta grande na ReceitaFederal não precisa fazer JOIN cross-database nem TRY_CONVERT.
-    sql_cnaes_segmentos = text("""
-        SELECT
-            cnaepadrao AS CNAE,
-            CAST(ISNULL(Classe COLLATE Latin1_General_CI_AI, '') AS nvarchar(250)) AS Classe,
-            CAST(ISNULL(Setor COLLATE Latin1_General_CI_AI, '') AS nvarchar(160)) AS Setor,
-            ScoreSetor,
-            CAST(ISNULL(ClassificacaoMacro COLLATE Latin1_General_CI_AI, '') AS nvarchar(120)) AS ClassificacaoMacro,
-            CAST(ISNULL(Descricao COLLATE Latin1_General_CI_AI, '') AS nvarchar(300)) AS Descricao
-        FROM [Integracao].[Silver].[DimCnaes]
-        WHERE UPPER(LTRIM(RTRIM(CAST(Classe AS nvarchar(250))))) COLLATE Latin1_General_CI_AI IN :segmentos_norm
-          AND cnaepadrao IS NOT NULL
-    """).bindparams(bindparam("segmentos_norm", expanding=True))
-
-    rows_cnaes = db.session.execute(sql_cnaes_segmentos, {"segmentos_norm": segmentos_norm}).mappings().all()
-
     cnaes = []
     cnae_meta = {}
-    for row_cnae in rows_cnaes:
-        cnae_txt = _texto_limpo_api(row_cnae.get("CNAE"))
-        cnae_key = re.sub(r"\D+", "", cnae_txt)
-        if not cnae_txt or not cnae_key:
-            continue
-        if cnae_txt not in cnaes:
-            cnaes.append(cnae_txt)
-        cnae_meta[cnae_key] = {
-            "Classe": _texto_limpo_api(row_cnae.get("Classe")),
-            "Setor": _texto_limpo_api(row_cnae.get("Setor")),
-            "ScoreSetor": row_cnae.get("ScoreSetor"),
-            "ClassificacaoMacro": _texto_limpo_api(row_cnae.get("ClassificacaoMacro")),
-            "Descricao": _texto_limpo_api(row_cnae.get("Descricao")),
-        }
 
-    if not cnaes:
-        return jsonify({
-            "items": [],
-            "total": 0,
-            "segmentos": segmentos,
-            "raio_m": raio_m,
-            "limite": limite,
-        })
+    # Primeiro resolve os CNAEs do segmento na DimCnaes, que é pequena.
+    # Assim a consulta grande na ReceitaFederal não precisa fazer JOIN cross-database nem TRY_CONVERT.
+    # Se Segmento = Todos, não aplicamos filtro de CNAE aqui: a busca fica limitada pela caixa geográfica + raio.
+    if segmentos_norm:
+        sql_cnaes_segmentos = text("""
+            SELECT
+                cnaepadrao AS CNAE,
+                CAST(ISNULL(Classe COLLATE Latin1_General_CI_AI, '') AS nvarchar(250)) AS Classe,
+                CAST(ISNULL(Setor COLLATE Latin1_General_CI_AI, '') AS nvarchar(160)) AS Setor,
+                ScoreSetor,
+                CAST(ISNULL(ClassificacaoMacro COLLATE Latin1_General_CI_AI, '') AS nvarchar(120)) AS ClassificacaoMacro,
+                CAST(ISNULL(Descricao COLLATE Latin1_General_CI_AI, '') AS nvarchar(300)) AS Descricao
+            FROM [Integracao].[Silver].[DimCnaes]
+            WHERE UPPER(LTRIM(RTRIM(CAST(Classe AS nvarchar(250))))) COLLATE Latin1_General_CI_AI IN :segmentos_norm
+              AND cnaepadrao IS NOT NULL
+        """).bindparams(bindparam("segmentos_norm", expanding=True))
+
+        rows_cnaes = db.session.execute(sql_cnaes_segmentos, {"segmentos_norm": segmentos_norm}).mappings().all()
+
+        for row_cnae in rows_cnaes:
+            cnae_txt = _texto_limpo_api(row_cnae.get("CNAE"))
+            cnae_key = re.sub(r"\D+", "", cnae_txt)
+            if not cnae_txt or not cnae_key:
+                continue
+            if cnae_txt not in cnaes:
+                cnaes.append(cnae_txt)
+            cnae_meta[cnae_key] = {
+                "Classe": _texto_limpo_api(row_cnae.get("Classe")),
+                "Setor": _texto_limpo_api(row_cnae.get("Setor")),
+                "ScoreSetor": row_cnae.get("ScoreSetor"),
+                "ClassificacaoMacro": _texto_limpo_api(row_cnae.get("ClassificacaoMacro")),
+                "Descricao": _texto_limpo_api(row_cnae.get("Descricao")),
+            }
+
+        if not cnaes:
+            return jsonify({
+                "items": [],
+                "total": 0,
+                "segmentos": segmentos,
+                "raio_m": raio_m,
+                "limite": limite,
+            })
 
     def _normaliza_cnpj_api(valor):
         return re.sub(r"\D+", "", _texto_limpo_api(valor))
@@ -20409,7 +20488,11 @@ def api_empresas_receita_segmento_painel(codponto: int):
         if cnpj_norm
     }
 
-    sql_empresas_receita = text("""
+    filtro_cnaes_sql = ""
+    if cnaes:
+        filtro_cnaes_sql = "AND e.CNAE IN :cnaes"
+
+    sql_empresas_receita_txt = f"""
         SELECT TOP (:limite_busca)
             e.IDDimEmpresasReceita,
             e.IDEmpresa,
@@ -20435,9 +20518,9 @@ def api_empresas_receita_segmento_painel(codponto: int):
                 POWER(e.Latitude - :lat_painel, 2) + POWER(e.Longitude - :lng_painel, 2)
             )
         FROM [ReceitaFederal].[Silver].[DimEmpresasReceita] e
-        WHERE e.CNAE IN :cnaes
-          AND e.Latitude IS NOT NULL
+        WHERE e.Latitude IS NOT NULL
           AND e.Longitude IS NOT NULL
+          {filtro_cnaes_sql}
           AND e.Latitude BETWEEN :lat_min AND :lat_max
           AND e.Longitude BETWEEN :lng_min AND :lng_max
           AND e.Latitude BETWEEN -90 AND 90
@@ -20446,11 +20529,14 @@ def api_empresas_receita_segmento_painel(codponto: int):
             DistanciaAproximada ASC,
             Nome ASC
         OPTION (RECOMPILE);
-    """).bindparams(bindparam("cnaes", expanding=True))
+    """
+
+    sql_empresas_receita = text(sql_empresas_receita_txt)
+    if cnaes:
+        sql_empresas_receita = sql_empresas_receita.bindparams(bindparam("cnaes", expanding=True))
 
     params = {
         "limite_busca": int(limite_busca),
-        "cnaes": cnaes,
         "lat_painel": float(lat_painel),
         "lng_painel": float(lng_painel),
         "lat_min": float(lat_painel - lat_delta),
@@ -20458,8 +20544,56 @@ def api_empresas_receita_segmento_painel(codponto: int):
         "lng_min": float(lng_painel - lng_delta),
         "lng_max": float(lng_painel + lng_delta),
     }
+    if cnaes:
+        params["cnaes"] = cnaes
 
     rows = db.session.execute(sql_empresas_receita, params).mappings().all()
+
+    # Se Segmento = Todos, a consulta principal não passa por DimCnaes.
+    # Por isso, depois de buscar os pontos próximos, enriquecemos os CNAEs retornados
+    # para exibir Classe/Setor/Score no tooltip e no painel lateral.
+    cnaes_para_meta = []
+    cnaes_para_meta_vistos = set()
+    for row_meta in rows:
+        cnae_meta_txt = _texto_limpo_api(row_meta.get("CNAE"))
+        cnae_meta_key = re.sub(r"\D+", "", cnae_meta_txt)
+        if not cnae_meta_key or cnae_meta_key in cnae_meta:
+            continue
+        if cnae_meta_key in cnaes_para_meta_vistos:
+            continue
+        cnaes_para_meta_vistos.add(cnae_meta_key)
+        cnaes_para_meta.append(cnae_meta_key)
+
+    if cnaes_para_meta:
+        sql_cnaes_meta_retorno = text("""
+            SELECT
+                CAST(cnaepadrao AS varchar(30)) AS CNAE,
+                CAST(ISNULL(Classe COLLATE Latin1_General_CI_AI, '') AS nvarchar(250)) AS Classe,
+                CAST(ISNULL(Setor COLLATE Latin1_General_CI_AI, '') AS nvarchar(160)) AS Setor,
+                ScoreSetor,
+                CAST(ISNULL(ClassificacaoMacro COLLATE Latin1_General_CI_AI, '') AS nvarchar(120)) AS ClassificacaoMacro,
+                CAST(ISNULL(Descricao COLLATE Latin1_General_CI_AI, '') AS nvarchar(300)) AS Descricao
+            FROM [Integracao].[Silver].[DimCnaes]
+            WHERE CAST(cnaepadrao AS varchar(30)) IN :cnaes_meta
+        """).bindparams(bindparam("cnaes_meta", expanding=True))
+
+        # SQL Server tem limite prático de parâmetros por comando. Como Segmento = Todos
+        # pode retornar muitos CNAEs diferentes, faço o enriquecimento em lotes seguros.
+        tamanho_lote_cnaes_meta = 1800
+        for ini_lote in range(0, len(cnaes_para_meta), tamanho_lote_cnaes_meta):
+            lote_cnaes_meta = cnaes_para_meta[ini_lote:ini_lote + tamanho_lote_cnaes_meta]
+            for row_cnae in db.session.execute(sql_cnaes_meta_retorno, {"cnaes_meta": lote_cnaes_meta}).mappings().all():
+                cnae_txt = _texto_limpo_api(row_cnae.get("CNAE"))
+                cnae_key = re.sub(r"\D+", "", cnae_txt)
+                if not cnae_key:
+                    continue
+                cnae_meta[cnae_key] = {
+                    "Classe": _texto_limpo_api(row_cnae.get("Classe")),
+                    "Setor": _texto_limpo_api(row_cnae.get("Setor")),
+                    "ScoreSetor": row_cnae.get("ScoreSetor"),
+                    "ClassificacaoMacro": _texto_limpo_api(row_cnae.get("ClassificacaoMacro")),
+                    "Descricao": _texto_limpo_api(row_cnae.get("Descricao")),
+                }
 
     itens = []
     cnpjs_vistos = set()
@@ -20586,10 +20720,13 @@ def api_concorrentes_painel(codponto: int):
     """
     Retorna os painéis dos concorrentes para o mapa do detalhe do painel.
 
-    Regra:
-    - O filtro vem de [DataMining].[Silver].[DimConcorrentesEuromidia].[EmpresaProprietaria].
-    - Os marcadores usam Latitude/Longitude da própria DimConcorrentesEuromidia.
-    - O raio é aplicado em volta do painel aberto para não carregar a base inteira.
+    Regras ajustadas:
+    - Os dados vêm exclusivamente de [DataMining].[Silver].[DimConcorrentesEuromidia].
+    - O filtro Concorrente usa EmpresaProprietaria.
+    - Os marcadores usam Latitude/Longitude da própria tabela de concorrentes.
+    - Primeiro tenta retornar os concorrentes dentro do raio selecionado.
+    - Se não existir concorrente dentro do raio, cai para a região do painel: Cidade/UF, depois UF, e por último a base mais próxima.
+      Isso evita o problema de retornar 0 quando existe concorrente cadastrado, mas ele está fora do raio exato de 1 km.
     """
     if _usuario_logado_eh_perfil_vendedor():
         abort(403)
@@ -20644,7 +20781,7 @@ def api_concorrentes_painel(codponto: int):
             # Mantém compatibilidade com legado "Concorrente A|Concorrente B".
             for parte in re.split(r"[|]", texto):
                 nome = _texto_limpo_api(parte)
-                if not nome or nome.casefold() == "todos":
+                if not nome or nome.casefold() in ("todos", "nenhum"):
                     continue
 
                 chave = nome.casefold()
@@ -20679,11 +20816,16 @@ def api_concorrentes_painel(codponto: int):
     limite = max(1, min(_to_int_api(request.args.get("limite"), 1200), 3000))
     limite_busca = max(limite * 3, 300)
 
+    # Resolve coordenada e região do painel aberto.
     sql_painel_dim = text("""
         SELECT TOP 1
             CodPonto AS CodPonto,
             Latitude AS lat,
-            Longitude AS lng
+            Longitude AS lng,
+            CAST(ISNULL(Cidade, '') AS nvarchar(180)) AS Cidade,
+            CAST(ISNULL(UF, '') AS varchar(10)) AS UF,
+            CAST(ISNULL(Bairro, '') AS nvarchar(180)) AS Bairro,
+            CAST(ISNULL(CEP, '') AS varchar(20)) AS CEP
         FROM [Integracao].[Silver].[DimPaineisEuromidia]
         WHERE CodPonto = :cod_ponto
     """)
@@ -20691,19 +20833,31 @@ def api_concorrentes_painel(codponto: int):
 
     lat_painel = _to_float_api(row_painel.get("lat") if row_painel else None)
     lng_painel = _to_float_api(row_painel.get("lng") if row_painel else None)
+    cidade_painel = _texto_limpo_api(row_painel.get("Cidade") if row_painel else "")
+    uf_painel = _texto_limpo_api(row_painel.get("UF") if row_painel else "").upper()
+    bairro_painel = _texto_limpo_api(row_painel.get("Bairro") if row_painel else "")
+    cep_painel = _texto_limpo_api(row_painel.get("CEP") if row_painel else "")
 
     if lat_painel is None or lng_painel is None:
         sql_painel_fallback = text("""
             SELECT TOP 1
                 CodPonto AS CodPonto,
                 LatD AS lat,
-                LonD AS lng
+                LonD AS lng,
+                CAST(ISNULL([MUNICÍPIO], '') AS nvarchar(180)) AS Cidade,
+                CAST(ISNULL(UF, '') AS varchar(10)) AS UF,
+                CAST(ISNULL(BAIRRO, '') AS nvarchar(180)) AS Bairro,
+                CAST(ISNULL(CEP, '') AS varchar(20)) AS CEP
             FROM [DataMining].[dbo].[CadastroPaineisEuromidia]
             WHERE CodPonto = :cod_ponto
         """)
         row_fb = db.session.execute(sql_painel_fallback, {"cod_ponto": int(codponto)}).mappings().first()
         lat_painel = _to_float_api(row_fb.get("lat") if row_fb else None)
         lng_painel = _to_float_api(row_fb.get("lng") if row_fb else None)
+        cidade_painel = _texto_limpo_api(row_fb.get("Cidade") if row_fb else "")
+        uf_painel = _texto_limpo_api(row_fb.get("UF") if row_fb else "").upper()
+        bairro_painel = _texto_limpo_api(row_fb.get("Bairro") if row_fb else "")
+        cep_painel = _texto_limpo_api(row_fb.get("CEP") if row_fb else "")
 
     if lat_painel is None or lng_painel is None:
         abort(404, description=f"Painel {codponto} não encontrado ou sem Latitude/Longitude válidos.")
@@ -20713,128 +20867,198 @@ def api_concorrentes_painel(codponto: int):
     lng_delta = raio_m / (111320.0 * max(abs(cos_lat), 0.20))
 
     concorrentes_norm = [nome.strip() for nome in concorrentes if nome and nome.strip()]
+    concorrentes_norm_sql = [nome.upper() for nome in concorrentes_norm]
+
     filtro_concorrentes_sql = ""
-    if concorrentes_norm:
+    if concorrentes_norm_sql:
         filtro_concorrentes_sql = """
-          AND LTRIM(RTRIM(CAST(EmpresaProprietaria AS nvarchar(260)))) IN :concorrentes
+          AND UPPER(LTRIM(RTRIM(CAST(EmpresaProprietaria AS nvarchar(260))))) IN :concorrentes
         """
 
-    sql_concorrentes_txt = f"""
-        SELECT TOP (:limite_busca)
-            IDSilverDimConcorrentesEuromidia,
-            CAST(ISNULL(EmpresaProprietaria, '') AS nvarchar(260)) AS EmpresaProprietaria,
-            CAST(ISNULL(SiteEmpresaProprietaria, '') AS nvarchar(500)) AS SiteEmpresaProprietaria,
-            CAST(ISNULL(Tipo, '') AS nvarchar(160)) AS Tipo,
-            IDTipoEuromidia,
-            CAST(ISNULL(NomePonto, '') AS nvarchar(260)) AS NomePonto,
-            CAST(ISNULL(Logradouro, '') AS nvarchar(300)) AS Logradouro,
-            CAST(ISNULL(Bairro, '') AS nvarchar(180)) AS Bairro,
-            CAST(ISNULL(Cidade, '') AS nvarchar(180)) AS Cidade,
-            CAST(ISNULL(UF, '') AS varchar(10)) AS UF,
-            CAST(ISNULL(CEP, '') AS varchar(20)) AS CEP,
-            CAST(ISNULL(Formato, '') AS nvarchar(160)) AS Formato,
-            CAST(ISNULL(Referencia, '') AS nvarchar(500)) AS Referencia,
-            CAST(ISNULL(Imagem, '') AS nvarchar(700)) AS Imagem,
-            CAST(ISNULL(PaginaAnuncioURL, '') AS nvarchar(700)) AS PaginaAnuncioURL,
-            DataAtualizacao,
-            Latitude AS lat,
-            Longitude AS lng,
-            DistanciaAproximada = (
-                POWER(Latitude - :lat_painel, 2) + POWER(Longitude - :lng_painel, 2)
-            )
-        FROM [DataMining].[Silver].[DimConcorrentesEuromidia]
-        WHERE NULLIF(LTRIM(RTRIM(CAST(EmpresaProprietaria AS nvarchar(260)))), '') IS NOT NULL
-          {filtro_concorrentes_sql}
-          AND Latitude IS NOT NULL
-          AND Longitude IS NOT NULL
+    def _montar_sql_concorrentes(extra_where_sql: str):
+        return f"""
+            SELECT TOP (:limite_busca)
+                IDSilverDimConcorrentesEuromidia,
+                CAST(ISNULL(EmpresaProprietaria, '') AS nvarchar(260)) AS EmpresaProprietaria,
+                CAST(ISNULL(SiteEmpresaProprietaria, '') AS nvarchar(500)) AS SiteEmpresaProprietaria,
+                CAST(ISNULL(Tipo, '') AS nvarchar(160)) AS Tipo,
+                IDTipoEuromidia,
+                CAST(ISNULL(NomePonto, '') AS nvarchar(260)) AS NomePonto,
+                CAST(ISNULL(Logradouro, '') AS nvarchar(300)) AS Logradouro,
+                CAST(ISNULL(Bairro, '') AS nvarchar(180)) AS Bairro,
+                CAST(ISNULL(Cidade, '') AS nvarchar(180)) AS Cidade,
+                CAST(ISNULL(UF, '') AS varchar(10)) AS UF,
+                CAST(ISNULL(CEP, '') AS varchar(20)) AS CEP,
+                CAST(ISNULL(Formato, '') AS nvarchar(160)) AS Formato,
+                CAST(ISNULL(Referencia, '') AS nvarchar(500)) AS Referencia,
+                CAST(ISNULL(Imagem, '') AS nvarchar(700)) AS Imagem,
+                CAST(ISNULL(PaginaAnuncioURL, '') AS nvarchar(700)) AS PaginaAnuncioURL,
+                DataAtualizacao,
+                Latitude AS lat,
+                Longitude AS lng,
+                DistanciaAproximada = (
+                    POWER(Latitude - :lat_painel, 2) + POWER(Longitude - :lng_painel, 2)
+                )
+            FROM [DataMining].[Silver].[DimConcorrentesEuromidia]
+            WHERE NULLIF(LTRIM(RTRIM(CAST(EmpresaProprietaria AS nvarchar(260)))), '') IS NOT NULL
+              {filtro_concorrentes_sql}
+              AND Latitude IS NOT NULL
+              AND Longitude IS NOT NULL
+              AND Latitude BETWEEN -90 AND 90
+              AND Longitude BETWEEN -180 AND 180
+              {extra_where_sql}
+            ORDER BY
+                DistanciaAproximada ASC,
+                EmpresaProprietaria ASC,
+                NomePonto ASC
+            OPTION (RECOMPILE);
+        """
+
+    def _executar_busca_concorrentes(nome_escopo: str, extra_where_sql: str, params_extra: dict, aplicar_corte_raio: bool):
+        sql = text(_montar_sql_concorrentes(extra_where_sql))
+
+        if concorrentes_norm_sql:
+            sql = sql.bindparams(bindparam("concorrentes", expanding=True))
+
+        params = {
+            "limite_busca": int(limite_busca),
+            "lat_painel": float(lat_painel),
+            "lng_painel": float(lng_painel),
+        }
+        params.update(params_extra or {})
+
+        if concorrentes_norm_sql:
+            params["concorrentes"] = concorrentes_norm_sql
+
+        rows = db.session.execute(sql, params).mappings().all()
+
+        itens = []
+        ids_vistos = set()
+
+        for row in rows:
+            lat = _to_float_api(row.get("lat"))
+            lng = _to_float_api(row.get("lng"))
+            if lat is None or lng is None:
+                continue
+
+            dist_m = _distancia_haversine_api(lat_painel, lng_painel, lat, lng)
+            if dist_m is None:
+                continue
+
+            if aplicar_corte_raio and dist_m > raio_m:
+                continue
+
+            id_raw = row.get("IDSilverDimConcorrentesEuromidia")
+            try:
+                id_int = int(id_raw) if id_raw is not None else 0
+            except Exception:
+                id_int = 0
+
+            if id_int and id_int in ids_vistos:
+                continue
+            if id_int:
+                ids_vistos.add(id_int)
+
+            empresa_prop = _texto_limpo_api(row.get("EmpresaProprietaria")) or "Concorrente"
+            nome_ponto = _texto_limpo_api(row.get("NomePonto")) or empresa_prop
+
+            data_atualizacao = row.get("DataAtualizacao")
+            try:
+                data_atualizacao_iso = data_atualizacao.isoformat() if data_atualizacao else None
+            except Exception:
+                data_atualizacao_iso = None
+
+            itens.append({
+                "id_concorrente_ponto": id_int or len(itens) + 1,
+                "empresa_proprietaria": empresa_prop,
+                "site_empresa_proprietaria": _texto_limpo_api(row.get("SiteEmpresaProprietaria")),
+                "tipo": _texto_limpo_api(row.get("Tipo")),
+                "id_tipo_euromidia": row.get("IDTipoEuromidia"),
+                "nome_ponto": nome_ponto,
+                "logradouro": _texto_limpo_api(row.get("Logradouro")),
+                "bairro": _texto_limpo_api(row.get("Bairro")),
+                "cidade": _texto_limpo_api(row.get("Cidade")),
+                "uf": _texto_limpo_api(row.get("UF")),
+                "cep": _texto_limpo_api(row.get("CEP")),
+                "formato": _texto_limpo_api(row.get("Formato")),
+                "referencia": _texto_limpo_api(row.get("Referencia")),
+                "imagem": _texto_limpo_api(row.get("Imagem")),
+                "pagina_anuncio_url": _texto_limpo_api(row.get("PaginaAnuncioURL")),
+                "data_atualizacao": data_atualizacao_iso,
+                "lat": float(lat),
+                "lng": float(lng),
+                "distancia_m": int(dist_m),
+                "camada": "concorrentes",
+                "tipo_marcador": "painel_concorrente",
+                "origem": "dim_concorrentes_euromidia",
+                "escopo_busca": nome_escopo,
+            })
+
+            if len(itens) >= limite:
+                break
+
+        return itens, len(rows)
+
+    escopos = []
+
+    # 1) Escopo exato do raio selecionado.
+    escopos.append((
+        "raio",
+        """
           AND Latitude BETWEEN :lat_min AND :lat_max
           AND Longitude BETWEEN :lng_min AND :lng_max
-          AND Latitude BETWEEN -90 AND 90
-          AND Longitude BETWEEN -180 AND 180
-        ORDER BY
-            DistanciaAproximada ASC,
-            EmpresaProprietaria ASC,
-            NomePonto ASC
-        OPTION (RECOMPILE);
-    """
+        """,
+        {
+            "lat_min": float(lat_painel - lat_delta),
+            "lat_max": float(lat_painel + lat_delta),
+            "lng_min": float(lng_painel - lng_delta),
+            "lng_max": float(lng_painel + lng_delta),
+        },
+        True,
+    ))
 
-    sql_concorrentes = text(sql_concorrentes_txt)
-    params_concorrentes = {
-        "limite_busca": int(limite_busca),
-        "lat_painel": float(lat_painel),
-        "lng_painel": float(lng_painel),
-        "lat_min": float(lat_painel - lat_delta),
-        "lat_max": float(lat_painel + lat_delta),
-        "lng_min": float(lng_painel - lng_delta),
-        "lng_max": float(lng_painel + lng_delta),
-    }
+    # 2) Região/cidade do painel. Isso corrige o caso em que há concorrente cadastrado,
+    # mas ele não está exatamente dentro de 1 km do painel aberto.
+    if cidade_painel and uf_painel:
+        escopos.append((
+            "cidade_uf",
+            """
+              AND UPPER(LTRIM(RTRIM(CAST(UF AS varchar(10))))) COLLATE Latin1_General_CI_AI = :uf_painel
+              AND UPPER(LTRIM(RTRIM(CAST(Cidade AS nvarchar(180))))) COLLATE Latin1_General_CI_AI LIKE :cidade_painel_like
+            """,
+            {
+                "uf_painel": uf_painel,
+                "cidade_painel_like": f"%{cidade_painel.upper()}%",
+            },
+            False,
+        ))
 
-    if concorrentes_norm:
-        sql_concorrentes = sql_concorrentes.bindparams(bindparam("concorrentes", expanding=True))
-        params_concorrentes["concorrentes"] = concorrentes_norm
+    # 3) UF do painel, se a cidade não bater por diferença de cadastro.
+    if uf_painel:
+        escopos.append((
+            "uf",
+            """
+              AND UPPER(LTRIM(RTRIM(CAST(UF AS varchar(10))))) COLLATE Latin1_General_CI_AI = :uf_painel
+            """,
+            {"uf_painel": uf_painel},
+            False,
+        ))
 
-    rows = db.session.execute(sql_concorrentes, params_concorrentes).mappings().all()
+    # 4) Último fallback: retorna os pontos mais próximos da base, respeitando o filtro de concorrente.
+    escopos.append(("base_mais_proxima", "", {}, False))
 
     itens = []
-    ids_vistos = set()
+    total_linhas_lidas = 0
+    escopo_usado = "nenhum"
 
-    for row in rows:
-        lat = _to_float_api(row.get("lat"))
-        lng = _to_float_api(row.get("lng"))
-        if lat is None or lng is None:
-            continue
-
-        dist_m = _distancia_haversine_api(lat_painel, lng_painel, lat, lng)
-        if dist_m is None or dist_m > raio_m:
-            continue
-
-        id_raw = row.get("IDSilverDimConcorrentesEuromidia")
-        try:
-            id_int = int(id_raw) if id_raw is not None else 0
-        except Exception:
-            id_int = 0
-
-        if id_int and id_int in ids_vistos:
-            continue
-        if id_int:
-            ids_vistos.add(id_int)
-
-        empresa_prop = _texto_limpo_api(row.get("EmpresaProprietaria")) or "Concorrente"
-        nome_ponto = _texto_limpo_api(row.get("NomePonto")) or empresa_prop
-
-        data_atualizacao = row.get("DataAtualizacao")
-        try:
-            data_atualizacao_iso = data_atualizacao.isoformat() if data_atualizacao else None
-        except Exception:
-            data_atualizacao_iso = None
-
-        itens.append({
-            "id_concorrente_ponto": id_int or len(itens) + 1,
-            "empresa_proprietaria": empresa_prop,
-            "site_empresa_proprietaria": _texto_limpo_api(row.get("SiteEmpresaProprietaria")),
-            "tipo": _texto_limpo_api(row.get("Tipo")),
-            "id_tipo_euromidia": row.get("IDTipoEuromidia"),
-            "nome_ponto": nome_ponto,
-            "logradouro": _texto_limpo_api(row.get("Logradouro")),
-            "bairro": _texto_limpo_api(row.get("Bairro")),
-            "cidade": _texto_limpo_api(row.get("Cidade")),
-            "uf": _texto_limpo_api(row.get("UF")),
-            "cep": _texto_limpo_api(row.get("CEP")),
-            "formato": _texto_limpo_api(row.get("Formato")),
-            "referencia": _texto_limpo_api(row.get("Referencia")),
-            "imagem": _texto_limpo_api(row.get("Imagem")),
-            "pagina_anuncio_url": _texto_limpo_api(row.get("PaginaAnuncioURL")),
-            "data_atualizacao": data_atualizacao_iso,
-            "lat": float(lat),
-            "lng": float(lng),
-            "distancia_m": int(dist_m),
-            "camada": "concorrentes",
-            "tipo_marcador": "painel_concorrente",
-            "origem": "dim_concorrentes_euromidia",
-        })
-
-        if len(itens) >= limite:
+    for nome_escopo, where_sql, params_extra, aplicar_corte_raio in escopos:
+        itens, total_linhas_lidas = _executar_busca_concorrentes(nome_escopo, where_sql, params_extra, aplicar_corte_raio)
+        if itens:
+            escopo_usado = nome_escopo
             break
+
+    if not itens:
+        escopo_usado = "sem_resultado"
 
     return jsonify({
         "items": itens,
@@ -20842,6 +21066,16 @@ def api_concorrentes_painel(codponto: int):
         "concorrentes": concorrentes_norm or ["todos"],
         "raio_m": raio_m,
         "limite": limite,
+        "escopo_usado": escopo_usado,
+        "total_linhas_lidas": total_linhas_lidas,
+        "painel_regiao": {
+            "cidade": cidade_painel,
+            "uf": uf_painel,
+            "bairro": bairro_painel,
+            "cep": cep_painel,
+            "lat": lat_painel,
+            "lng": lng_painel,
+        },
     })
 
 

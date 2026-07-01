@@ -2244,6 +2244,38 @@
     }
   }
 
+
+
+  /* =========================================================
+     Rótulos fixos do mapa
+     - NÃO usado para empresas, para evitar poluição/travamento.
+     - Usado somente no painel Euromidia e nos concorrentes.
+     ========================================================= */
+  .mm-marker-label{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height:22px;
+    padding:0 8px;
+    border-radius:8px;
+    color:#fff;
+    font-size:12px;
+    font-weight:1000;
+    line-height:1;
+    white-space:nowrap;
+    border:1px solid rgba(255,255,255,.92);
+    box-shadow:0 6px 16px rgba(15,23,42,.26);
+    pointer-events:none;
+    user-select:none;
+    transform:translateY(-2px);
+  }
+  .mm-marker-label.euromidia{
+    background:#002884;
+  }
+  .mm-marker-label.concorrente{
+    background:#dc2626;
+  }
+
 </style>
 
 
@@ -2275,6 +2307,11 @@
               <span>Todos</span>
             </label>
 
+            <label class="dd-option dd-option-nenhum">
+              <input type="checkbox" id="chkSegmentoNenhum" value="nenhum">
+              <span>Nenhum</span>
+            </label>
+
             <div class="dd-options" id="listaSegmentos"></div>
             <div class="dd-empty" id="msgSegmentoVazio" hidden>Nenhum segmento encontrado</div>
           </div>
@@ -2282,6 +2319,7 @@
 
         <select id="selSegmento" multiple hidden aria-hidden="true">
           <option value="todos" selected>Todos</option>
+          <option value="nenhum">Nenhum</option>
         </select>
       </div>
 
@@ -3624,6 +3662,7 @@
   const lblSegmentoSelecionado = document.getElementById("lblSegmentoSelecionado");
   const txtBuscaSegmento = document.getElementById("txtBuscaSegmento");
   const chkSegmentoTodos = document.getElementById("chkSegmentoTodos");
+  const chkSegmentoNenhum = document.getElementById("chkSegmentoNenhum");
   const listaSegmentos = document.getElementById("listaSegmentos");
   const msgSegmentoVazio = document.getElementById("msgSegmentoVazio");
 
@@ -3648,12 +3687,34 @@
   // - permite digitar e selecionar múltiplos segmentos
   // - mantém #selSegmento oculto para compatibilidade com o restante do JS
   // =========================================================
-  function _segmentosSelecionados(){
+  function _segmentoNenhumSelecionado(){
+    if(!selSegmento) return false;
+    return Array.from(selSegmento.options).some(opt => opt.value === "nenhum" && opt.selected);
+  }
+
+  function _todosSegmentosDisponiveis(){
     if(!selSegmento) return [];
+    return Array.from(selSegmento.options)
+      .filter(opt => opt.value && opt.value !== "todos" && opt.value !== "nenhum")
+      .map(opt => opt.value);
+  }
+
+  function _segmentosSelecionados(){
+    if(!selSegmento || _segmentoNenhumSelecionado()) return [];
 
     return Array.from(selSegmento.options)
-      .filter(opt => opt.selected && opt.value && opt.value !== "todos")
+      .filter(opt => opt.selected && opt.value && opt.value !== "todos" && opt.value !== "nenhum")
       .map(opt => opt.value);
+  }
+
+  function _segmentoTodosSelecionado(){
+    if(!selSegmento || _segmentoNenhumSelecionado()) return false;
+    const todos = _todosSegmentosDisponiveis();
+    if(!todos.length){
+      return Array.from(selSegmento.options).some(opt => opt.value === "todos" && opt.selected);
+    }
+    const selecionados = new Set(_segmentosSelecionados().map(_normStr));
+    return todos.every(seg => selecionados.has(_normStr(seg)));
   }
 
   function _normalizarSegmentosEntrada(valor){
@@ -3686,23 +3747,35 @@
   }
 
   function _atualizarLabelSegmento(){
+    const modoNenhum = _segmentoNenhumSelecionado();
     const selecionados = _segmentosSelecionados();
+    const todosMarcados = _segmentoTodosSelecionado();
 
     if(lblSegmentoSelecionado){
-      if(!selecionados.length){
+      if(modoNenhum){
+        lblSegmentoSelecionado.textContent = "Nenhum";
+        lblSegmentoSelecionado.title = "Nenhum";
+      }else if(todosMarcados){
         lblSegmentoSelecionado.textContent = "Todos";
         lblSegmentoSelecionado.title = "Todos";
       }else if(selecionados.length === 1){
         lblSegmentoSelecionado.textContent = selecionados[0];
         lblSegmentoSelecionado.title = selecionados[0];
-      }else{
+      }else if(selecionados.length > 1){
         lblSegmentoSelecionado.textContent = `${selecionados.length} segmentos`;
         lblSegmentoSelecionado.title = selecionados.join(" | ");
+      }else{
+        lblSegmentoSelecionado.textContent = "Nenhum";
+        lblSegmentoSelecionado.title = "Nenhum";
       }
     }
 
     if(chkSegmentoTodos){
-      chkSegmentoTodos.checked = selecionados.length === 0;
+      chkSegmentoTodos.checked = !modoNenhum && todosMarcados;
+    }
+
+    if(chkSegmentoNenhum){
+      chkSegmentoNenhum.checked = modoNenhum;
     }
 
     if(listaSegmentos){
@@ -3710,7 +3783,7 @@
       checks.forEach(chk => {
         const valor = chk.value;
         const opt = selSegmento ? Array.from(selSegmento.options).find(o => o.value === valor) : null;
-        chk.checked = Boolean(opt && opt.selected);
+        chk.checked = Boolean(opt && opt.selected && !modoNenhum);
       });
     }
   }
@@ -3718,13 +3791,18 @@
   function _setSegmentosSelecionados(valores, dispararChange){
     if(!selSegmento) return;
 
-    const desejados = new Set(_normalizarSegmentosEntrada(valores).map(_normStr));
+    const listaEntrada = Array.isArray(valores) ? valores : (valores != null ? [valores] : []);
+    const modoNenhum = listaEntrada.some(v => _normStr(v) === "nenhum");
+    const modoTodos = !modoNenhum && (listaEntrada.length === 0 || listaEntrada.some(v => _normStr(v) === "todos"));
+    const desejados = new Set(_normalizarSegmentosEntrada(valores).filter(v => !["nenhum", "todos"].includes(_normStr(v))).map(_normStr));
 
     Array.from(selSegmento.options).forEach(opt => {
-      if(opt.value === "todos"){
-        opt.selected = desejados.size === 0;
+      if(opt.value === "nenhum"){
+        opt.selected = modoNenhum;
+      }else if(opt.value === "todos"){
+        opt.selected = modoTodos;
       }else{
-        opt.selected = desejados.has(_normStr(opt.value));
+        opt.selected = !modoNenhum && (modoTodos || desejados.has(_normStr(opt.value)));
       }
     });
 
@@ -3798,7 +3876,13 @@
           else atuais.delete(chave);
 
           const novos = segmentos.filter(seg => atuais.has(_normStr(seg)));
-          _setSegmentosSelecionados(novos, true);
+          if(novos.length === segmentos.length){
+            _setSegmentosSelecionados(["todos"], true);
+          }else if(novos.length === 0){
+            _setSegmentosSelecionados(["nenhum"], true);
+          }else{
+            _setSegmentosSelecionados(novos, true);
+          }
         });
       }
     }
@@ -3807,9 +3891,19 @@
   if(chkSegmentoTodos){
     chkSegmentoTodos.addEventListener("change", () => {
       if(chkSegmentoTodos.checked){
-        _setSegmentosSelecionados([], true);
+        _setSegmentosSelecionados(["todos"], true);
       }else{
-        _atualizarLabelSegmento();
+        _setSegmentosSelecionados(["nenhum"], true);
+      }
+    });
+  }
+
+  if(chkSegmentoNenhum){
+    chkSegmentoNenhum.addEventListener("change", () => {
+      if(chkSegmentoNenhum.checked){
+        _setSegmentosSelecionados(["nenhum"], true);
+      }else{
+        _setSegmentosSelecionados([], true);
       }
     });
   }
@@ -3884,6 +3978,11 @@
     optTodos.value = "todos";
     optTodos.textContent = "Todos";
     selConcorrente.appendChild(optTodos);
+
+    const optNenhum = document.createElement("option");
+    optNenhum.value = "nenhum";
+    optNenhum.textContent = "Nenhum";
+    selConcorrente.appendChild(optNenhum);
 
     for(const nome of nomes){
       const opt = document.createElement("option");
@@ -4061,6 +4160,10 @@
   mapa.createPane("painelPane");
   mapa.getPane("painelPane").style.zIndex = 700;
 
+  mapa.createPane("labelsPane");
+  mapa.getPane("labelsPane").style.zIndex = 720;
+  mapa.getPane("labelsPane").style.pointerEvents = "none";
+
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapa);
 
   const temHeat = typeof L.heatLayer === "function";
@@ -4153,6 +4256,34 @@
 
 
 
+
+
+function _criarLabelMapa(lat, lng, texto, tipo, opts){
+  const latN = Number(lat);
+  const lngN = Number(lng);
+  const txt = String(texto || "").trim();
+  if(!Number.isFinite(latN) || !Number.isFinite(lngN) || !txt) return null;
+
+  const cfg = Object.assign({ largura: 110, altura: 22, anchorY: 52 }, opts || {});
+  const clsTipo = String(tipo || "").trim() || "padrao";
+
+  const icon = L.divIcon({
+    className: "mm-marker-label-wrap",
+    html: `<div class="mm-marker-label ${_escapeHtml(clsTipo)}">${_escapeHtml(txt)}</div>`,
+    iconSize: [cfg.largura, cfg.altura],
+    iconAnchor: [Math.round(cfg.largura / 2), cfg.anchorY]
+  });
+
+  return L.marker([latN, lngN], {
+    icon,
+    pane: "labelsPane",
+    interactive: false,
+    keyboard: false,
+    zIndexOffset: 10000
+  });
+}
+
+
 // ✅ (NOVO) URL do ícone no static (Flask/Jinja)
 // - Se você NÃO estiver em Jinja aqui, troque pela string direta:
 //   const URL_ICONE_PAINEL = "/static/imagens/painel-publicitario.png";
@@ -4166,7 +4297,7 @@ const iconePainel = L.icon({
   tooltipAnchor: [0, -34]  // onde nasce o tooltip
 });
 
-L.marker([latP0, lngP0], { icon: iconePainel, zIndexOffset: 9999, pane: "painelPane" })
+const marcadorPainelEuromidia = L.marker([latP0, lngP0], { icon: iconePainel, zIndexOffset: 9999, pane: "painelPane" })
   .addTo(mapa)
   .bindTooltip(`
     <div style="font-weight:1000;color:#0f172a;margin-bottom:6px">${(P && P.nome) ? P.nome : "—"}</div>
@@ -4182,6 +4313,9 @@ L.marker([latP0, lngP0], { icon: iconePainel, zIndexOffset: 9999, pane: "painelP
       Faces: ${(P && P.faces != null) ? P.faces : "—"}
     </div>
   `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
+
+const labelPainelEuromidia = _criarLabelMapa(latP0, lngP0, "Euromidia", "euromidia", { largura: 108, altura: 22, anchorY: 58 });
+if(labelPainelEuromidia) labelPainelEuromidia.addTo(mapa);
 
 // =========================================================
 // ✅ Controle/Legenda do Heat (rodapé do lado)
@@ -4438,6 +4572,7 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
   // Filtros + Render do mapa
   // =========================================================
   function _empresaPassaFiltro(e){
+    if(_segmentoNenhumSelecionado()) return false;
     if(!e) return false;
 
     const lat = Number(e.lat);
@@ -4502,8 +4637,8 @@ function _criarOuAtualizarLegendaPerfilRegiao(){
 let legendaEmpresasCtrl = null;
 
 function _criarOuAtualizarLegendaEmpresas(){
-  // Legenda lateral removida a pedido.
-  // Mantive a função como no-op para preservar as chamadas existentes sem quebrar o fluxo do mapa.
+  // Legenda flutuante removida conforme ajuste solicitado.
+  // Mantém a função como no-op para não quebrar chamadas existentes do mapa.
   if(legendaEmpresasCtrl){
     try { legendaEmpresasCtrl.remove(); } catch(e){}
     legendaEmpresasCtrl = null;
@@ -4603,12 +4738,14 @@ function _criarOuAtualizarLegendaEmpresas(){
       return null;
     }
 
+    // Ícone do painel concorrente menor que o painel principal da Euromídia.
+    // Painel principal: 46x46. Concorrente: 24x24 para não competir visualmente no mapa.
     const iconeConcorrente = L.icon({
       iconUrl: URL_ICONE_PAINEL,
-      iconSize: [34, 34],
-      iconAnchor: [17, 34],
-      tooltipAnchor: [0, -27],
-      popupAnchor: [0, -27]
+      iconSize: [24, 24],
+      iconAnchor: [12, 24],
+      tooltipAnchor: [0, -20],
+      popupAnchor: [0, -20]
     });
 
     const m = L.marker([lat, lng], {
@@ -4648,7 +4785,8 @@ function _criarOuAtualizarLegendaEmpresas(){
       </div>
     `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
 
-    return m;
+    const labelConcorrente = _criarLabelMapa(lat, lng, empresa, "concorrente", { largura: 150, altura: 22, anchorY: 48 });
+    return labelConcorrente ? L.layerGroup([m, labelConcorrente]) : m;
   }
 
 
@@ -5049,6 +5187,7 @@ function _renderMapa(){
 
 
   function _statusPermiteEmpresasReceita(){
+    if(_segmentoNenhumSelecionado()) return false;
     // O status visual não deve impedir a consulta da Receita.
     // Primeiro buscamos as empresas do segmento; depois filtramos cliente/não cliente no frontend.
     return true;
@@ -5075,7 +5214,16 @@ function _renderMapa(){
     params.set("raio_m", String(_raioAtualMetros()));
     params.set("limite", "1200");
 
-    for(const seg of segmentos || []){
+    const listaSegmentos = Array.isArray(segmentos) ? segmentos : [];
+
+    // Segmento = Todos agora marca todos os segmentos no filtro, mas a API recebe todos=1
+    // para evitar URL enorme e retornar todas as empresas da região/raio.
+    if(_segmentoTodosSelecionado() || !listaSegmentos.length){
+      params.set("todos", "1");
+      return `${URL_API_EMPRESAS_SEGMENTO}?${params.toString()}`;
+    }
+
+    for(const seg of listaSegmentos){
       const txt = String(seg || "").trim();
       if(txt) params.append("segmento", txt);
     }
@@ -5084,8 +5232,7 @@ function _renderMapa(){
   }
 
   function _atualizarContadoresComReceita(){
-    const segsSelecionados = _segmentosSelecionados();
-    const receitaVisiveis = (segsSelecionados.length > 0 && _statusPermiteEmpresasReceita())
+    const receitaVisiveis = _statusPermiteEmpresasReceita()
       ? (empresasSegmentoReceitaArr || []).filter(_empresaReceitaPassaStatus)
       : [];
     const receitaCount = receitaVisiveis.length;
@@ -5099,16 +5246,21 @@ function _renderMapa(){
     });
 
     const baseClientesNoRaio = baseNoRaio.filter(x => _ehClienteQualquer(x)).length;
+    const baseClientesExibidos = baseFiltradas.filter(x => _ehClienteQualquer(x)).length;
     const baseProspects = baseFiltradas.filter(x => _categoriaEmpresaMapa(x) === "prospect").length;
 
+    const receitaClientes = receitaVisiveis.filter(x => _ehClienteQualquer(x)).length;
+    const receitaProspects = receitaVisiveis.filter(x => !_ehClienteQualquer(x)).length;
+
     if(kpiEmpresas) kpiEmpresas.textContent = String(baseNoRaio.length + receitaCount);
-    if(kpiClientes) kpiClientes.textContent = String(baseClientesNoRaio);
+    if(kpiClientes) kpiClientes.textContent = String(baseClientesNoRaio + receitaClientes);
     if(kpiTopSeg){
       const listaTop = receitaCount ? receitaVisiveis : (baseNoRaio.length ? baseNoRaio : baseFiltradas);
       kpiTopSeg.textContent = _topSegmento(listaTop);
     }
 
-    if(chipProspects) chipProspects.textContent = String(baseProspects + receitaCount);
+    if(chipClientes) chipClientes.textContent = String(baseClientesExibidos + receitaClientes);
+    if(chipProspects) chipProspects.textContent = String(baseProspects + receitaProspects);
   }
 
   function _normalizarEmpresaSegmentoReceitaItem(item){
@@ -5171,7 +5323,7 @@ function _renderMapa(){
       camadaEmpresasSegmento.clearLayers();
     }
 
-    if(!segmentos.length || !_statusPermiteEmpresasReceita()){
+    if(!_statusPermiteEmpresasReceita()){
       empresasSegmentoReceitaArr = [];
       _atualizarContadoresComReceita();
       _criarOuAtualizarLegendaEmpresas();
@@ -5225,11 +5377,13 @@ function _renderMapa(){
   }
 
   function _montarUrlConcorrentes(){
+    const concorrente = _concorrenteSelecionado();
+    if(_normStr(concorrente) === "nenhum") return null;
+
     const params = new URLSearchParams();
     params.set("raio_m", String(_raioAtualMetros()));
     params.set("limite", "1200");
 
-    const concorrente = _concorrenteSelecionado();
     if(concorrente && _normStr(concorrente) !== "todos"){
       params.append("concorrente", concorrente);
     }
@@ -5243,6 +5397,7 @@ function _renderMapa(){
     }
 
     const concorrente = _concorrenteSelecionado();
+    if(_normStr(concorrente) === "nenhum") return;
 
     for(const c of concorrentesArr || []){
       const m = _criarMarcadorConcorrente(c);
@@ -5261,8 +5416,14 @@ function _renderMapa(){
       camadaConcorrentes.clearLayers();
     }
 
+    const urlConcorrentes = _montarUrlConcorrentes();
+    if(!urlConcorrentes){
+      concorrentesArr = [];
+      return;
+    }
+
     try{
-      const resp = await fetch(_montarUrlConcorrentes(), {
+      const resp = await fetch(urlConcorrentes, {
         method: "GET",
         headers: { "Accept": "application/json" },
         credentials: "same-origin"
@@ -5285,7 +5446,9 @@ function _renderMapa(){
         concorrente,
         total_api: data && data.total,
         total_items: concorrentesArr.length,
-        raio_m: data && data.raio_m
+        raio_m: data && data.raio_m,
+        escopo_usado: data && data.escopo_usado,
+        painel_regiao: data && data.painel_regiao
       });
       _renderConcorrentes();
     }catch(err){
@@ -5306,8 +5469,12 @@ function _renderMapa(){
     const concorrente = _concorrenteSelecionado();
 
     params.delete("segmento");
-    for(const seg of segs){
-      params.append("segmento", seg);
+    if(_segmentoNenhumSelecionado()){
+      params.set("segmento", "nenhum");
+    }else if(!_segmentoTodosSelecionado()){
+      for(const seg of segs){
+        params.append("segmento", seg);
+      }
     }
 
     if(st  && st  !== "todos") params.set("status", st);   else params.delete("status");
@@ -5329,7 +5496,7 @@ function _renderMapa(){
   }
 
   function _limparFiltrosMapa(){
-    _setSegmentosSelecionados([], false);
+    _setSegmentosSelecionados(["todos"], false);
 
     if(txtBuscaSegmento){
       txtBuscaSegmento.value = "";
