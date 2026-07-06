@@ -5639,6 +5639,8 @@ def grade_painel(codponto: int):
     tipo_reserva_por_iditem_reserva = {}
     tipo_reserva_por_id_ocupacao_reserva = {}
     spanqtd_por_iditem_reserva = {}
+    expira_em_por_iditem_reserva = {}
+    expira_em_por_id_ocupacao_reserva = {}
     reserva_preferencia_visual_por_iditem = {}
     reserva_bloqueia_capacidade_por_iditem = {}
 
@@ -5683,6 +5685,14 @@ def grade_painel(codponto: int):
                 ELSE 0
              END AS BitPreferenciaItemOrigem
             ,TRY_CONVERT(int, oc.[TipoReserva]) AS TipoReserva
+            ,COALESCE(
+                 CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 126), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 121), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 120), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 103), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 105), 120)
+                ,NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), oc.[ExpiraEm]))), '')
+             ) AS ExpiraEm
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
         WHERE (
                 oc.[CodPonto] = :codponto
@@ -5853,6 +5863,7 @@ def grade_painel(codponto: int):
         _observacao_res = rr[18] if len(rr) > 18 else None
         _bit_preferencia_item_origem_res = rr[19] if len(rr) > 19 else 0
         _tipo_reserva_res = rr[20] if len(rr) > 20 else None
+        _expira_em_res = rr[21] if len(rr) > 21 else None
 
         try:
             tipo_reserva_int = int(_tipo_reserva_res) if _tipo_reserva_res is not None else None
@@ -5880,10 +5891,12 @@ def grade_painel(codponto: int):
         reserva_preferencia_visual_por_iditem[id_item_reserva] = bool(eh_preferencia_visual_reserva)
         reserva_bloqueia_capacidade_por_iditem[id_item_reserva] = not bool(eh_preferencia_visual_reserva)
         tipo_reserva_por_iditem_reserva[id_item_reserva] = tipo_reserva_int
+        expira_em_por_iditem_reserva[id_item_reserva] = _expira_em_res
 
         try:
             if _id_res is not None:
                 tipo_reserva_por_id_ocupacao_reserva[int(_id_res)] = tipo_reserva_int
+                expira_em_por_id_ocupacao_reserva[int(_id_res)] = _expira_em_res
         except Exception:
             pass
 
@@ -5912,6 +5925,7 @@ def grade_painel(codponto: int):
                 rr[12] if len(rr) > 12 else None,
                 rr[13] if len(rr) > 13 else None,
                 tipo_reserva_int,
+                _expira_em_res,
             )
         )
 
@@ -6390,6 +6404,48 @@ def grade_painel(codponto: int):
 
         return None
 
+    def _coerce_to_datetime_grade(valor):
+        """Converte ExpiraEm para datetime sem quebrar quando vier nulo/string."""
+        if valor in (None, ""):
+            return None
+
+        if isinstance(valor, datetime):
+            return valor
+
+        if isinstance(valor, date):
+            return datetime.combine(valor, datetime.min.time())
+
+        texto = str(valor or "").strip()
+        if not texto:
+            return None
+
+        texto_iso = texto.replace("Z", "").replace("T", " ")
+        if "." in texto_iso:
+            texto_iso = texto_iso.split(".", 1)[0]
+
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(texto_iso, fmt)
+            except Exception:
+                pass
+
+        try:
+            return datetime.fromisoformat(texto.replace("Z", ""))
+        except Exception:
+            return None
+
+    def _expira_em_iso_grade(valor):
+        dt_expira = _coerce_to_datetime_grade(valor)
+        if not dt_expira:
+            return ""
+        return dt_expira.strftime("%Y-%m-%dT%H:%M:%S")
+
+    def _expira_em_formatado_grade(valor):
+        dt_expira = _coerce_to_datetime_grade(valor)
+        if not dt_expira:
+            return ""
+        return dt_expira.strftime("%d/%m/%Y %H:%M")
+
     def _prefixar_id_reserva_no_texto(texto, id_reserva, eh_reserva):
         """Eu adiciono o IDFatoOcupacaoPaineisEuromidia só no texto visual da reserva."""
         texto_limpo = str(texto or "").strip()
@@ -6615,6 +6671,7 @@ def grade_painel(codponto: int):
 
             loop_inicio_db = r[14] if len(r) > 14 else None
             loop_fim_db = r[15] if len(r) > 15 else None
+            expira_em_item = r[17] if len(r) > 17 else None
 
             try:
                 bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
@@ -6674,6 +6731,20 @@ def grade_painel(codponto: int):
 
             id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
             tipo_reserva_item = _resolver_tipo_reserva_grade(_id_item, eh_reserva, r)
+
+            # Segurança: em alguns fluxos a tupla da reserva pode chegar sem o ExpiraEm no índice
+            # esperado. Para não renderizar data-expira-em vazio, recupero pelo ID negativo do item
+            # e pelo ID real da ocupação/reserva.
+            if eh_reserva and not _coerce_to_datetime_grade(expira_em_item):
+                try:
+                    expira_em_item = expira_em_por_iditem_reserva.get(int(_id_item)) or expira_em_item
+                except Exception:
+                    pass
+                try:
+                    expira_em_item = expira_em_por_id_ocupacao_reserva.get(int(id_reserva_original)) or expira_em_item
+                except Exception:
+                    pass
+
             eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
             marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
             barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
@@ -6722,6 +6793,9 @@ def grade_painel(codponto: int):
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                     "TipoReserva": tipo_reserva_item,
                     "EhReservaManual": eh_reserva_manual,
+                    "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
+                    "ExpiraEmIso": _expira_em_iso_grade(expira_em_item) if eh_reserva else "",
+                    "ExpiraEmFormatado": _expira_em_formatado_grade(expira_em_item) if eh_reserva else "",
                     "LoopInicioDb": loop_inicio_db,
                     "LoopFimDb": loop_fim_db,
                 }
@@ -7151,6 +7225,7 @@ def grade_painel(codponto: int):
 
             loop_inicio_db = r[14] if len(r) > 14 else None
             loop_fim_db = r[15] if len(r) > 15 else None
+            expira_em_item = r[17] if len(r) > 17 else None
 
             try:
                 bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
@@ -7193,6 +7268,20 @@ def grade_painel(codponto: int):
 
             id_reserva_original = _resolver_id_real_reserva_grade(_id_item, eh_reserva)
             tipo_reserva_item = _resolver_tipo_reserva_grade(_id_item, eh_reserva, r)
+
+            # Segurança: em alguns fluxos a tupla da reserva pode chegar sem o ExpiraEm no índice
+            # esperado. Para não renderizar data-expira-em vazio, recupero pelo ID negativo do item
+            # e pelo ID real da ocupação/reserva.
+            if eh_reserva and not _coerce_to_datetime_grade(expira_em_item):
+                try:
+                    expira_em_item = expira_em_por_iditem_reserva.get(int(_id_item)) or expira_em_item
+                except Exception:
+                    pass
+                try:
+                    expira_em_item = expira_em_por_id_ocupacao_reserva.get(int(id_reserva_original)) or expira_em_item
+                except Exception:
+                    pass
+
             eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
             marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
             barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
@@ -7225,6 +7314,9 @@ def grade_painel(codponto: int):
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                     "TipoReserva": tipo_reserva_item,
                     "EhReservaManual": eh_reserva_manual,
+                    "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
+                    "ExpiraEmIso": _expira_em_iso_grade(expira_em_item) if eh_reserva else "",
+                    "ExpiraEmFormatado": _expira_em_formatado_grade(expira_em_item) if eh_reserva else "",
                     "LoopInicioDb": loop_inicio_db,
                     "LoopFimDb": loop_fim_db,
                 }
@@ -9470,6 +9562,7 @@ def grade_painel_multi():
         loop_inicio_por_iditem_reserva_multi = {}
         loop_fim_por_iditem_reserva_multi = {}
         spanqtd_por_iditem_reserva_multi = {}
+        expira_em_por_iditem_reserva_multi = {}
 
         try:
             ids_paineis_grade_multi = []
@@ -9502,6 +9595,14 @@ def grade_painel_multi():
                     ,TRY_CONVERT(int, oc.[SpanQtd]) AS SpanQtd
                     ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
                     ,TRY_CONVERT(int, oc.[TipoReserva]) AS TipoReserva
+                    ,COALESCE(
+                 CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 126), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 121), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 120), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 103), 120)
+                ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 105), 120)
+                ,NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), oc.[ExpiraEm]))), '')
+             ) AS ExpiraEm
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
                 WHERE (
                         oc.[CodPonto] = :codponto
@@ -9587,6 +9688,7 @@ def grade_painel_multi():
                 span_qtd_res = rr_res[12] if len(rr_res) > 12 else None
                 id_vendedor_res = rr_res[13] if len(rr_res) > 13 else None
                 tipo_reserva_res = rr_res[14] if len(rr_res) > 14 else None
+                expira_em_res = rr_res[15] if len(rr_res) > 15 else None
 
                 try:
                     tipo_reserva_por_iditem_reserva_multi[id_item_reserva] = int(tipo_reserva_res) if tipo_reserva_res is not None else None
@@ -9595,6 +9697,7 @@ def grade_painel_multi():
 
                 loop_inicio_por_iditem_reserva_multi[id_item_reserva] = loop_inicio_res
                 loop_fim_por_iditem_reserva_multi[id_item_reserva] = loop_fim_res
+                expira_em_por_iditem_reserva_multi[id_item_reserva] = expira_em_res
 
                 try:
                     spanqtd_por_iditem_reserva_multi[id_item_reserva] = int(span_qtd_res) if span_qtd_res is not None else None
@@ -9620,6 +9723,7 @@ def grade_painel_multi():
                         loop_fim_res,
                         span_qtd_res,
                         tipo_reserva_res,
+                        expira_em_res,
                     )
                 )
 
@@ -9665,6 +9769,7 @@ def grade_painel_multi():
                 loop_fim_db = r[14] if len(r) > 14 else None
                 span_qtd_db = r[15] if len(r) > 15 else None
                 tipo_reserva_db = r[16] if len(r) > 16 else None
+                expira_em_item = r[17] if len(r) > 17 else None
 
                 try:
                     eh_reserva = int(_id_item) < 0
@@ -9722,6 +9827,12 @@ def grade_painel_multi():
                         except Exception:
                             tipo_reserva_item = None
 
+                if eh_reserva and not _coerce_to_datetime_grade(expira_em_item):
+                    try:
+                        expira_em_item = expira_em_por_iditem_reserva_multi.get(int(_id_item)) or expira_em_item
+                    except Exception:
+                        pass
+
                 eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
                 marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
                 barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
@@ -9750,6 +9861,9 @@ def grade_painel_multi():
                     "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                     "TipoReserva": tipo_reserva_item,
                     "EhReservaManual": eh_reserva_manual,
+                    "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
+                    "ExpiraEmIso": _expira_em_iso_grade(expira_em_item) if eh_reserva else "",
+                    "ExpiraEmFormatado": _expira_em_formatado_grade(expira_em_item) if eh_reserva else "",
                     "LoopInicioDb": loop_inicio_por_iditem_reserva_multi.get(int(_id_item), loop_inicio_db) if eh_reserva else loop_inicio_db,
                     "LoopFimDb": loop_fim_por_iditem_reserva_multi.get(int(_id_item), loop_fim_db) if eh_reserva else loop_fim_db,
                     "NumeroContrato": num_contrato,
@@ -9939,6 +10053,7 @@ def grade_painel_multi():
                     id_vendedor_item = None
 
                 tipo_reserva_db = r[16] if len(r) > 16 else None
+                expira_em_item = r[17] if len(r) > 17 else None
 
                 if di is None:
                     continue
@@ -9979,6 +10094,12 @@ def grade_painel_multi():
                         except Exception:
                             tipo_reserva_item = None
 
+                if eh_reserva and not _coerce_to_datetime_grade(expira_em_item):
+                    try:
+                        expira_em_item = expira_em_por_iditem_reserva_multi.get(int(_id_item)) or expira_em_item
+                    except Exception:
+                        pass
+
                 eh_reserva_manual = bool(eh_reserva and tipo_reserva_item == 1)
                 marca_exibida_grade = _prefixar_id_reserva_no_texto(marca, id_reserva_original, eh_reserva)
                 barra_texto_grade = _texto_barra(cota, marca_exibida_grade, vend)
@@ -10008,6 +10129,9 @@ def grade_painel_multi():
                         "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
                         "TipoReserva": tipo_reserva_item,
                         "EhReservaManual": eh_reserva_manual,
+                        "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
+                        "ExpiraEmIso": _expira_em_iso_grade(expira_em_item) if eh_reserva else "",
+                        "ExpiraEmFormatado": _expira_em_formatado_grade(expira_em_item) if eh_reserva else "",
                         "NumeroContrato": num_contrato,
                         "NumeroPrevia": num_previa,
                     }

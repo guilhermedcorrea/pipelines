@@ -2032,6 +2032,71 @@
     color: rgba(146,64,14,.85) !important;
   }
 
+  /*
+    Reserva: ExpiraEm + contador.
+    O contador fica colado ao texto da reserva/vendedor, sem jogar para o fim da barra.
+  */
+  .barra.reservado{
+    gap: 5px;
+    justify-content: flex-start;
+  }
+
+  .barra.reservado .txt{
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .barra .reserva-expira{
+    margin-left: 4px;
+    flex: 0 1 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: calc(100% - 6px);
+    max-width: min(320px, 55%);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(146,64,14,.28);
+    background: rgba(255,255,255,.92);
+    color: #92400e;
+    font-size: clamp(9px, .62vw, 11px);
+    font-weight: 950;
+    line-height: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.65);
+  }
+
+  .barra .reserva-expira-label,
+  .barra .reserva-expira-sep{
+    opacity: .72;
+    flex: 0 0 auto;
+  }
+
+  .barra .reserva-expira-data{
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .barra .reserva-expira-restante{
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .barra .reserva-expira.expirada{
+    color: #b91c1c;
+    border-color: rgba(185,28,28,.30);
+    background: rgba(254,242,242,.95);
+  }
+
   .barra .reserva-id{
     display:inline-flex;
     align-items:center;
@@ -2129,6 +2194,7 @@
   .barra.multi-span.span-continuacao .txt,
   .barra.multi-span.span-continuacao .vend,
   .barra.multi-span.span-continuacao .reserva-id,
+  .barra.multi-span.span-continuacao .reserva-expira,
   .barra.multi-span.span-continuacao .icone-preferencia,
   .barra.multi-span.span-continuacao .icone-reserva{
     visibility: hidden;
@@ -2233,6 +2299,19 @@
     font-weight: 800;
     margin-top: 6px;
     font-size: 12px;
+  }
+
+  .tooltip .t-inline-expira{
+    white-space: nowrap;
+  }
+
+  .tooltip .js-tooltip-expira-restante{
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+  }
+
+  .tooltip .js-tooltip-expira-restante.expirada{
+    color:#b91c1c;
   }
 </style>
 
@@ -2504,6 +2583,9 @@
                         'TextoOriginal': (atual.TextoOriginal if atual.TextoOriginal else (it.TextoOriginal if it.TextoOriginal is defined else '')),
                         'TipoReserva': (atual.TipoReserva if atual.TipoReserva is defined and atual.TipoReserva not in (none, '') else (it.TipoReserva if it.TipoReserva is defined else '')),
                         'EhReservaManual': ((atual.EhReservaManual if atual.EhReservaManual is defined else False) or (it.EhReservaManual if it.EhReservaManual is defined else False) or (atual.TipoReserva is defined and ((atual.TipoReserva | int) == 1)) or (it.TipoReserva is defined and ((it.TipoReserva | int) == 1))),
+                        'ExpiraEm': (atual.ExpiraEm if atual.ExpiraEm is defined and atual.ExpiraEm else (it.ExpiraEm if it.ExpiraEm is defined else '')),
+                        'ExpiraEmIso': (atual.ExpiraEmIso if atual.ExpiraEmIso is defined and atual.ExpiraEmIso else (it.ExpiraEmIso if it.ExpiraEmIso is defined else '')),
+                        'ExpiraEmFormatado': (atual.ExpiraEmFormatado if atual.ExpiraEmFormatado is defined and atual.ExpiraEmFormatado else (it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '')),
                         'Status': (atual.Status if atual.Status is defined else ''),
                         'Origem': (atual.Origem if atual.Origem is defined else '')
                       }
@@ -2556,6 +2638,9 @@
                         'TextoOriginal': (it.TextoOriginal if it.TextoOriginal is defined else ''),
                         'TipoReserva': (it.TipoReserva if it.TipoReserva is defined else ''),
                         'EhReservaManual': ((it.EhReservaManual if it.EhReservaManual is defined else False) or (it.TipoReserva is defined and ((it.TipoReserva | int) == 1))),
+                        'ExpiraEm': (it.ExpiraEm if it.ExpiraEm is defined else ''),
+                        'ExpiraEmIso': (it.ExpiraEmIso if it.ExpiraEmIso is defined else ''),
+                        'ExpiraEmFormatado': (it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else ''),
                         'Status': (it.Status if it.Status is defined else ''),
                         'Origem': (it.Origem if it.Origem is defined else '')
                       }
@@ -2665,8 +2750,10 @@
                      data-reserva-manual="{{ 1 if mostra_icone_reserva else 0 }}"
                      data-bit-preferencia="{{ 1 if mostra_icone_preferencia else 0 }}"
                      data-reserva-id="{{ reserva_id_visivel }}"
+                     data-expira-em="{{ it.ExpiraEmIso if it.ExpiraEmIso is defined else '' }}"
+                     data-expira-formatada="{{ it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '' }}"
                      data-item-id="{{ it.ID if it.ID is defined else '' }}"
-                     title="{{ ('Reserva #' ~ reserva_id_visivel) if reserva_id_visivel else 'Duplo clique para abrir o contrato' }}"
+                     title="{{ '' if eh_reserva else 'Duplo clique para abrir o contrato' }}"
                      data-tooltip-title="{{ barra_txt|e }}"
                      data-tooltip-loop="{{ it.Loop|e }}"
                      data-tooltip-vendedor="{{ it.Vendedor|e }}"
@@ -2683,6 +2770,18 @@
                   {% endif %}
 
                   <span class="txt">{{ resto_txt if resto_txt else barra_txt }}</span>
+
+                  {% if eh_reserva and it.ExpiraEmIso is defined and it.ExpiraEmIso %}
+                    <span class="reserva-expira js-reserva-expira"
+                          data-expira-em="{{ it.ExpiraEmIso }}"
+                          data-expira-formatada="{{ it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '' }}"
+                          aria-label="Expiração da reserva">
+                      <span class="reserva-expira-label">Expira:</span>
+                      <span class="reserva-expira-data">{{ it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '' }}</span>
+                      <span class="reserva-expira-sep">|</span>
+                      <span class="reserva-expira-restante">calculando...</span>
+                    </span>
+                  {% endif %}
 
                   {% if (not eh_reserva) and it.Vendedor %}
                     <span class="vend">{{ it.Vendedor }}</span>
@@ -2756,8 +2855,10 @@
                        data-reserva-manual="{{ 1 if mostra_icone_reserva_cont else 0 }}"
                        data-bit-preferencia="{{ 1 if mostra_icone_preferencia_cont else 0 }}"
                        data-reserva-id="{{ reserva_id_visivel_cont }}"
+                       data-expira-em="{{ it_cont.ExpiraEmIso if it_cont.ExpiraEmIso is defined else '' }}"
+                       data-expira-formatada="{{ it_cont.ExpiraEmFormatado if it_cont.ExpiraEmFormatado is defined else '' }}"
                        data-item-id="{{ it_cont.ID if it_cont.ID is defined else '' }}"
-                       title="{{ ('Reserva #' ~ reserva_id_visivel_cont) if reserva_id_visivel_cont else 'Duplo clique para abrir o contrato' }}"
+                       title="{{ '' if eh_reserva_cont else 'Duplo clique para abrir o contrato' }}"
                        data-tooltip-title="{{ barra_txt_cont|e }}"
                        data-tooltip-loop="{{ it_cont.Loop|e }}"
                        data-tooltip-vendedor="{{ it_cont.Vendedor|e }}"
@@ -2768,6 +2869,17 @@
                       <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
                     {% endif %}
                     <span class="txt">{{ barra_txt_cont }}</span>
+                    {% if eh_reserva_cont and it_cont.ExpiraEmIso is defined and it_cont.ExpiraEmIso %}
+                      <span class="reserva-expira js-reserva-expira"
+                            data-expira-em="{{ it_cont.ExpiraEmIso }}"
+                            data-expira-formatada="{{ it_cont.ExpiraEmFormatado if it_cont.ExpiraEmFormatado is defined else '' }}"
+                            aria-label="Expiração da reserva">
+                        <span class="reserva-expira-label">Expira:</span>
+                        <span class="reserva-expira-data">{{ it_cont.ExpiraEmFormatado if it_cont.ExpiraEmFormatado is defined else '' }}</span>
+                        <span class="reserva-expira-sep">|</span>
+                        <span class="reserva-expira-restante">calculando...</span>
+                      </span>
+                    {% endif %}
                     {% if (not eh_reserva_cont) and it_cont.Vendedor %}
                       <span class="vend">{{ it_cont.Vendedor }}</span>
                     {% endif %}
@@ -2883,8 +2995,10 @@
                    data-reserva-manual="{{ 1 if mostra_icone_reserva2 else 0 }}"
                    data-bit-preferencia="{{ 1 if mostra_icone_preferencia2 else 0 }}"
                    data-reserva-id="{{ reserva_id_visivel2 }}"
+                   data-expira-em="{{ it.ExpiraEmIso if it.ExpiraEmIso is defined else '' }}"
+                   data-expira-formatada="{{ it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '' }}"
                    data-item-id="{{ it.ID if it.ID is defined else '' }}"
-                   title="{{ ('Reserva #' ~ reserva_id_visivel2) if reserva_id_visivel2 else 'Duplo clique para abrir o contrato' }}"
+                   title="{{ '' if eh_reserva2 else 'Duplo clique para abrir o contrato' }}"
                    data-tooltip-title="{{ barra_txt|e }}"
                    data-tooltip-loop="{{ it.Loop|e }}"
                    data-tooltip-vendedor="{{ it.Vendedor|e }}"
@@ -2895,6 +3009,17 @@
                   <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
                 {% endif %}
                 <span class="txt">{{ txt2 if eh_reserva2 else barra_txt }}</span>
+                {% if eh_reserva2 and it.ExpiraEmIso is defined and it.ExpiraEmIso %}
+                  <span class="reserva-expira js-reserva-expira"
+                        data-expira-em="{{ it.ExpiraEmIso }}"
+                        data-expira-formatada="{{ it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '' }}"
+                        aria-label="Expiração da reserva">
+                    <span class="reserva-expira-label">Expira:</span>
+                    <span class="reserva-expira-data">{{ it.ExpiraEmFormatado if it.ExpiraEmFormatado is defined else '' }}</span>
+                    <span class="reserva-expira-sep">|</span>
+                    <span class="reserva-expira-restante">calculando...</span>
+                  </span>
+                {% endif %}
                 {% if mostra_icone_preferencia2 %}
                   <img class="icone-preferencia" src="{{ url_icone_preferencia }}" alt="Preferência de reserva" title="Preferência de reserva - período de 6 meses ou mais">
                 {% endif %}
@@ -3041,6 +3166,98 @@ document.addEventListener("DOMContentLoaded", () => {
     alert("Este contrato pertence a outro vendedor. Seu perfil VENDEDOR só pode abrir contratos vinculados a você.");
   }
 
+  function parseDataExpiraReserva(valor){
+    const raw = String(valor || "").trim();
+    if (!raw) return null;
+
+    const normalizado = raw.includes("T") ? raw : raw.replace(" ", "T");
+    const dt = new Date(normalizado);
+    if (!Number.isNaN(dt.getTime())) return dt;
+
+    const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (m){
+      return new Date(
+        parseInt(m[3], 10),
+        parseInt(m[2], 10) - 1,
+        parseInt(m[1], 10),
+        parseInt(m[4] || "0", 10),
+        parseInt(m[5] || "0", 10),
+        parseInt(m[6] || "0", 10)
+      );
+    }
+
+    return null;
+  }
+
+  function formatarTempoRestanteReserva(valor, comPrefixo = true){
+    const dt = parseDataExpiraReserva(valor);
+    if (!dt) return "";
+
+    const diffMs = dt.getTime() - Date.now();
+    if (diffMs <= 0) return "expirada";
+
+    const totalSeg = Math.floor(diffMs / 1000);
+    const horas = Math.floor(totalSeg / 3600);
+    const minutos = Math.floor((totalSeg % 3600) / 60);
+    const segundos = totalSeg % 60;
+
+    const h = String(horas).padStart(2, "0");
+    const m = String(minutos).padStart(2, "0");
+    const s = String(segundos).padStart(2, "0");
+    const tempo = `${h}h ${m}m ${s}s`;
+
+    return comPrefixo ? `faltam ${tempo}` : tempo;
+  }
+
+  function atualizarContadorReservaElemento(el){
+    if (!el) return;
+
+    const expiraRaw = el.getAttribute("data-expira-em") || "";
+    if (!expiraRaw) return;
+
+    const expiraFmt = el.getAttribute("data-expira-formatada") || expiraRaw;
+    const restanteCurto = formatarTempoRestanteReserva(expiraRaw, false);
+    const restanteCompleto = formatarTempoRestanteReserva(expiraRaw, true);
+
+    let dataEl = el.querySelector(".reserva-expira-data");
+    let restanteEl = el.querySelector(".reserva-expira-restante");
+
+    if (!dataEl || !restanteEl) {
+      el.innerHTML = `
+        <span class="reserva-expira-label">Expira:</span>
+        <span class="reserva-expira-data"></span>
+        <span class="reserva-expira-sep">|</span>
+        <span class="reserva-expira-restante"></span>
+      `;
+      dataEl = el.querySelector(".reserva-expira-data");
+      restanteEl = el.querySelector(".reserva-expira-restante");
+    }
+
+    if (dataEl) dataEl.textContent = expiraFmt;
+    if (restanteEl) restanteEl.textContent = restanteCurto || "";
+
+    const expirada = String(restanteCurto || "").toLowerCase().includes("expirada");
+    el.classList.toggle("expirada", expirada);
+
+    const textoAcessivel = restanteCompleto
+      ? `Expira em: ${expiraFmt} (${restanteCompleto})`
+      : `Expira em: ${expiraFmt}`;
+
+    el.setAttribute("aria-label", textoAcessivel);
+    el.removeAttribute("title");
+  }
+
+  function atualizarContadoresReservas(){
+    document.querySelectorAll(".js-reserva-expira").forEach(atualizarContadorReservaElemento);
+
+    document.querySelectorAll(".js-tooltip-expira-restante").forEach((el) => {
+      const expiraRaw = el.getAttribute("data-expira-em") || "";
+      const restante = formatarTempoRestanteReserva(expiraRaw, true);
+      el.textContent = restante;
+      el.classList.toggle("expirada", String(restante || "").toLowerCase().includes("expirada"));
+    });
+  }
+
   function showTooltip(e, el){
     if (!tooltip) return;
 
@@ -3051,22 +3268,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const df = el.getAttribute("data-tooltip-df") || "";
     const txt = el.getAttribute("data-tooltip-txt") || "";
     const reservaId = (el.getAttribute("data-reserva-id") || "").trim();
+    const expiraRaw = (el.getAttribute("data-expira-em") || "").trim();
+    const expiraFmt = (el.getAttribute("data-expira-formatada") || expiraRaw).trim();
 
     const reserva = isReserva(el);
     const tipoLinha = reserva ? "RESERVA" : "CONTRATO";
     const linhaReservaId = reserva && reservaId ? `<div class="t-row"><b>ID Reserva:</b> ${reservaId}</div>` : "";
+    const linhaExpira = reserva && expiraRaw
+      ? ` <span class="t-inline-expira">| <b>Expira em:</b> ${expiraFmt} (<span class="js-tooltip-expira-restante" data-expira-em="${expiraRaw}">${formatarTempoRestanteReserva(expiraRaw)}</span>)</span>`
+      : "";
 
     tooltip.innerHTML = `
       <div class="t-title">${title}</div>
       <div class="t-row"><b>Tipo:</b> ${tipoLinha}</div>
       ${linhaReservaId}
       <div class="t-row"><b>Loop:</b> ${loop}</div>
-      <div class="t-row"><b>Vendedor:</b> ${vendedor}</div>
+      <div class="t-row"><b>Vendedor:</b> ${vendedor}${linhaExpira}</div>
       <div class="t-row"><b>Período:</b> ${di} → ${df}</div>
       <div class="t-muted">${txt}</div>
     `;
 
     tooltip.style.display = "block";
+    atualizarContadoresReservas();
     positionTooltip(e);
   }
 
@@ -3116,6 +3339,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!tooltip) return;
     if (tooltip.style.display === "block") positionTooltip(e);
   });
+
+  atualizarContadoresReservas();
+  window.setInterval(atualizarContadoresReservas, 1000);
 
   document.addEventListener("dblclick", (e) => {
     const el = e.target && e.target.closest ? e.target.closest(".barra") : null;
