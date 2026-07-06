@@ -2214,7 +2214,9 @@
                          data-codponto="{{ x.CodPonto }}"
                          data-codface="{{ x.CodFace }}"
                          data-tipo-prod="{{ x.TipoProd or x.Tipo or '' }}"
-                         data-denominador="{{ x.NumFacesOcupacao if x.NumFacesOcupacao is defined else x.NumFaces }}">
+                         data-denominador="{{ x.NumFacesOcupacao if x.NumFacesOcupacao is defined else x.NumFaces }}"
+                         data-total-espacos-ocupados="{{ x.TotalEspacosOcupados if x.TotalEspacosOcupados is defined else 0 }}"
+                         data-total-espacos-disponiveis="{{ x.TotalEspacosDisponiveis if x.TotalEspacosDisponiveis is defined else 0 }}">
 
                       <div>
                         <input
@@ -2375,6 +2377,8 @@
                              data-codface="{{ x.CodFace }}"
                              data-tipo-prod="{{ x.TipoProd or x.Tipo or '' }}"
                              data-denominador="{{ x.NumFacesOcupacao if x.NumFacesOcupacao is defined else x.NumFaces }}"
+                             data-total-espacos-ocupados="{{ x.TotalEspacosOcupados if x.TotalEspacosOcupados is defined else 0 }}"
+                             data-total-espacos-disponiveis="{{ x.TotalEspacosDisponiveis if x.TotalEspacosDisponiveis is defined else 0 }}"
                              style="
                           position:relative;
                           height: 22px;
@@ -2420,15 +2424,19 @@
 
                           {% if x.Conflitos > 0 %}
                             <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#b91c1c;font-weight:900;">
-                              ▲ Conflito ({{ x.Conflitos }}/{{ x.NumFaces }})
+                              ▲ Conflito — {{ x.TotalEspacosOcupados if x.TotalEspacosOcupados is defined else 0 }}/{{ x.TotalEspacosDisponiveis if x.TotalEspacosDisponiveis is defined else x.NumFaces }} espaços ocupados
+                            </span>
+                          {% elif x.TotalEspacosOcupados is defined and x.TotalEspacosOcupados > 0 %}
+                            <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
+                              ● Ocupado — {{ x.TotalEspacosOcupados }}/{{ x.TotalEspacosDisponiveis }} espaços ocupados
                             </span>
                           {% elif x.Ocupadas > 0 %}
                             <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
-                              ● Ocupado ({{ x.Ocupadas }}/{{ x.NumFaces }})
+                              ● Ocupado — {{ x.Ocupadas }}/{{ x.NumFaces }} espaços ocupados
                             </span>
                           {% else %}
                             <span data-ocupacao-status-texto style="display:inline-flex;align-items:center;gap:6px;color:#64748B;font-weight:900;">
-                              ● Livre (0/{{ x.NumFaces }})
+                              ● Livre — 0/{{ x.TotalEspacosDisponiveis if x.TotalEspacosDisponiveis is defined else x.NumFaces }} espaços ocupados
                             </span>
                           {% endif %}
                         </div>
@@ -4213,12 +4221,45 @@
       });
       if (!linha) return;
 
-      const pct = Math.max(0, Math.min(100, numeroDecimal(item.pct, 0)));
       const conflitos = numeroInteiro(item.conflitos, 0);
-      const textoBarra = textoLimpo(item.texto_barra) || ((item.pct_texto || pct.toFixed(1).replace(".", ",")) + "%");
-      const textoLegenda = textoLimpo(item.texto_legenda);
+
+      /*
+        A lista e a grade precisam obedecer à mesma regra:
+        percentual = slot-dia ocupado no período / slot-dia disponível no período.
+        Se o Socket.IO mandar o cálculo antigo por média diária/pico (ex.: 9/16),
+        eu preservo os totais oficiais renderizados pelo backend da lista.
+      */
+      const totalDisponivelPayload = numeroInteiro(item.total_espacos_disponiveis, 0);
+      const totalOcupadoPayload = numeroInteiro(item.total_espacos_ocupados, 0);
+      const totalDisponivelLinha = numeroInteiro(linha.getAttribute("data-total-espacos-disponiveis"), 0);
+      const totalOcupadoLinha = numeroInteiro(linha.getAttribute("data-total-espacos-ocupados"), 0);
+
+      /*
+        A tela já vem renderizada pelo backend com os mesmos totais usados pela grade.
+        O Socket.IO antigo ainda pode devolver outro cálculo, como 263/480 = 54,8%.
+        Por isso, quando a linha já tem TotalEspacosDisponiveis/TotalEspacosOcupados,
+        eles são a fonte oficial e NÃO podem ser sobrescritos pelo payload em tempo real.
+      */
+      const totalDisponivel = totalDisponivelLinha > 0 ? totalDisponivelLinha : totalDisponivelPayload;
+      const totalOcupado = totalDisponivelLinha > 0 ? totalOcupadoLinha : totalOcupadoPayload;
+
+      let pct = numeroDecimal(item.pct, 0);
+      if (totalDisponivel > 0){
+        pct = (Number(totalOcupado || 0) / Number(totalDisponivel)) * 100;
+      }
+      pct = Math.max(0, Math.min(100, pct));
+
+      const pctTexto = pct.toFixed(1).replace(".", ",") + "%";
+      const textoBarra = pctTexto;
+      const textoLegenda = totalDisponivel > 0
+        ? ((conflitos > 0 ? "▲ Conflito — " : (totalOcupado > 0 ? "● Ocupado — " : "● Livre — ")) + String(totalOcupado || 0) + "/" + String(totalDisponivel) + " espaços ocupados")
+        : textoLimpo(item.texto_legenda);
 
       linha.setAttribute("data-denominador", item.denominador || item.num_faces || linha.getAttribute("data-denominador") || "1");
+      if (totalDisponivel > 0){
+        linha.setAttribute("data-total-espacos-disponiveis", String(totalDisponivel));
+        linha.setAttribute("data-total-espacos-ocupados", String(totalOcupado || 0));
+      }
       linha.setAttribute("data-ocupacao-status", item.status || "");
 
       const barra = linha.querySelector('[data-ocupacao-bar]');
@@ -4229,7 +4270,9 @@
 
       if (barra){
         barra.classList.remove("ocupacao-atualizando");
-        barra.setAttribute("title", "Ocupado: " + (item.total_espacos_ocupados || 0) + " / " + (item.total_espacos_disponiveis || 0) + " slot-dia");
+        if (totalDisponivel > 0){
+          barra.setAttribute("title", "Ocupado: " + String(totalOcupado || 0) + " / " + String(totalDisponivel) + " slot-dia");
+        }
       }
 
       if (preenchimento){

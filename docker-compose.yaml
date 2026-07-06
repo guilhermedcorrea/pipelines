@@ -41,6 +41,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__FAB__NAVBAR_TEXT_HOVER_COLOR: "#ffffff"
 
     TZ: America/Sao_Paulo
+
+    # Backups SQL Server - a mesma pasta precisa estar montada no Airflow
+    # e existir no host/container onde o SQL Server grava os .bak/.trn.
+    BACKUP_SQLSERVER_MANUAL_DIR: /var/opt/mssql/backups/manual
+    BACKUP_FILESYSTEM_BACKEND: airflow
+    BACKUP_MOVER_INVALIDOS: "1"
+
     PYTHONPATH: /opt/airflow:/opt/airflow/src:/opt/airflow/plugins:/opt/airflow/dags
     CAMINHO_STATIC_FLASK: /opt/airflow/FlaskApp/app/static
     CAMINHO_BASE_FLASK_APP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp
@@ -86,6 +93,8 @@ x-airflow-common: &airflow-common
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/config:/opt/airflow/config
+    # Backups SQL Server: monta no Airflow o mesmo caminho usado pelo SQL Server.
+    - /var/opt/mssql/backups/manual:/var/opt/mssql/backups/manual:rw
     # IMPORTANTE:
     # O rclone.conf deve ficar em ./airflow/config/rclone/rclone.conf no host.
     # Não use bind mount somente leitura para esse arquivo, porque o rclone precisa

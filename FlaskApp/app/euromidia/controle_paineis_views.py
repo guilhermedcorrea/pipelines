@@ -4000,24 +4000,18 @@ def lista_paineis():
 
         rows_itens_q = (
             db.session.query(
+                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia,
                 FatoControleContratosItensEuromidia.CodPonto,
                 FatoControleContratosItensEuromidia.CodFace,
                 FatoControleContratosItensEuromidia.Cota,
                 FatoControleContratosItensEuromidia.DataInicioPrevisto,
                 FatoControleContratosItensEuromidia.DataTerminoPrevisto,
                 FatoControleContratosItensEuromidia.DataCancelamento,
-                DimFacesPaineis.IDDimFacesPaineis,
-            )
-            .outerjoin(
-                DimFacesPaineis,
-                and_(
-                    DimFacesPaineis.CodPonto == FatoControleContratosItensEuromidia.CodPonto,
-                    DimFacesPaineis.CodFace == FatoControleContratosItensEuromidia.CodFace,
-                ),
             )
             .filter(
                 FatoControleContratosItensEuromidia.CodPonto.in_(codpontos_pagina),
                 filtro_periodo_itens_ocup,
+                text("ISNULL(TRY_CONVERT(INT, [BitAtivo]), 1) = 1"),
             )
         )
 
@@ -4044,7 +4038,20 @@ def lista_paineis():
 
         rows_itens = rows_itens_q.all()
 
-        for cp, cf, cota, di, df_prev, dc, idcad in rows_itens:
+        ids_itens_ocupacao_vistos = set()
+
+        for id_item_ocup, cp, cf, cota, di, df_prev, dc in rows_itens:
+            idcad = None
+            try:
+                id_item_ocup_int = int(id_item_ocup or 0)
+            except Exception:
+                id_item_ocup_int = 0
+
+            if id_item_ocup_int > 0:
+                if id_item_ocup_int in ids_itens_ocupacao_vistos:
+                    continue
+                ids_itens_ocupacao_vistos.add(id_item_ocup_int)
+
             if cp is None or di is None:
                 continue
 
@@ -18989,24 +18996,60 @@ def painel_detalhes(codponto: int):
         capacidade_dia = 16 if eh_digital else max(1, qtd_faces or 1)
 
         sql_painel_metricas = text("""
-            ;WITH BaseItens AS (
+            ;WITH BaseItensRaw AS (
                 SELECT
                     i.IDFatoControleContratosItensEuromidia AS IDItem,
                     i.IDFatoControleContratoEuromidia AS IDContrato,
-                    COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) AS DataEvento,
-                    CASE
-                        WHEN COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) IS NULL THEN NULL
-                        ELSE DATEFROMPARTS(
-                            YEAR(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
-                            MONTH(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
-                            1
-                        )
-                    END AS DataRef,
+                    COALESCE(
+                            TRY_CONVERT(date, i.Referencia),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 101)
+                        ) AS ReferenciaDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataLancamento),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 101)
+                        ) AS DataLancamentoDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataInicioPrevisto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 101)
+                        ) AS DataInicioPrevistoDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataFimEfetiva),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 101)
+                        ) AS DataFimEfetivaDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataTerminoPrevisto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 101)
+                        ) AS DataTerminoPrevistoDate,
                     COALESCE(i.FaturamentoLiquidoFinalMensal, i.FaturamentoLiquidoMensal, i.Faturamento) AS ReceitaMensal,
-                    i.DataInicioPrevisto AS DataInicioPrevisto,
-                    COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS DataFimPrevisto,
                     CASE
-                        WHEN :eh_digital = 1 AND ISNULL(i.Cota, 0) >= 1080 THEN 2
+                        WHEN :eh_digital = 1
+                         AND TRY_CONVERT(decimal(18,2), REPLACE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Cota))), ''), ',', '.')) >= 1080
+                        THEN 2
                         ELSE 1
                     END AS SlotsItem,
                     CASE
@@ -19038,6 +19081,91 @@ def painel_detalhes(codponto: int):
                 WHERE i.CodPonto = :cod_ponto
                   AND ISNULL(i.BitAtivo, 1) = 1
                   AND (i.AtivoCancelamento IS NULL OR i.AtivoCancelamento = 'A')
+            ), BaseItens AS (
+                SELECT
+                    IDItem,
+                    IDContrato,
+                    COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) AS DataEvento,
+                    CASE
+                        WHEN COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) IS NULL THEN NULL
+                        ELSE DATEFROMPARTS(
+                            YEAR(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
+                            MONTH(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
+                            1
+                        )
+                    END AS DataRef,
+                    ReceitaMensal,
+                    DataInicioPrevistoDate AS DataInicioPrevisto,
+                    COALESCE(DataFimEfetivaDate, DataTerminoPrevistoDate) AS DataFimPrevisto,
+                    SlotsItem,
+                    FlagRenovacao,
+                    IDFatoKanbanCard
+                FROM BaseItensRaw
+            ), Negociacoes AS (
+                SELECT
+                    n.IDFatoKanbanCard,
+                    n.IDFatoKanbanNegociacaoPreco,
+                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado,
+                    n.PrecoProposto AS PrecoProposto,
+                    COALESCE(
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataAprovacaoPreco),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataPrecoProposto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.PeriodoInicio),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 101)
+                        )
+                    ) AS DataNegociacaoPreco,
+                    COALESCE(
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataPrecoProposto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataAprovacaoPreco),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.PeriodoInicio),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 101)
+                        )
+                    ) AS DataNegociacaoIA
+                FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
             ), MesesContrato AS (
                 SELECT
                     DataRef,
@@ -19056,8 +19184,8 @@ def painel_detalhes(codponto: int):
                              AND DataFimPrevisto >= :dt_ini
                             THEN DATEDIFF(
                                     DAY,
-                                    CASE WHEN DataInicioPrevisto < :dt_ini THEN :dt_ini ELSE DataInicioPrevisto END,
-                                    DATEADD(DAY, 1, CASE WHEN DataFimPrevisto > :dt_fim THEN :dt_fim ELSE DataFimPrevisto END)
+                                    CASE WHEN DataInicioPrevisto < :dt_ini THEN CAST(:dt_ini AS date) ELSE DataInicioPrevisto END,
+                                    DATEADD(DAY, 1, CASE WHEN DataFimPrevisto > :dt_fim THEN CAST(:dt_fim AS date) ELSE DataFimPrevisto END)
                                  ) * SlotsItem
                             ELSE 0
                         END) AS SlotDiasOcupados,
@@ -19066,16 +19194,16 @@ def painel_detalhes(codponto: int):
                 FROM BaseItens
             ), UltPrecoNegociado AS (
                 SELECT TOP 1
-                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado
+                    n.PrecoNegociado AS PrecoNegociado
                 FROM BaseItens AS b
-                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                INNER JOIN Negociacoes AS n
                     ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
                 WHERE b.IDFatoKanbanCard IS NOT NULL
-                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) >= :dt_ini
-                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) <= :dt_fim
-                  AND COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) IS NOT NULL
+                  AND n.DataNegociacaoPreco >= :dt_ini
+                  AND n.DataNegociacaoPreco <= :dt_fim
+                  AND n.PrecoNegociado IS NOT NULL
                 ORDER BY
-                    COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) DESC,
+                    n.DataNegociacaoPreco DESC,
                     n.IDFatoKanbanNegociacaoPreco DESC
             ), UltPrecoETL AS (
                 SELECT TOP 1
@@ -19089,14 +19217,14 @@ def painel_detalhes(codponto: int):
                 SELECT TOP 1
                     n.PrecoProposto AS PrecoRecomendadoIA
                 FROM BaseItens AS b
-                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                INNER JOIN Negociacoes AS n
                     ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
                 WHERE b.IDFatoKanbanCard IS NOT NULL
-                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) >= :dt_ini
-                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) <= :dt_fim
+                  AND n.DataNegociacaoIA >= :dt_ini
+                  AND n.DataNegociacaoIA <= :dt_fim
                   AND n.PrecoProposto IS NOT NULL
                 ORDER BY
-                    COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) DESC,
+                    n.DataNegociacaoIA DESC,
                     n.IDFatoKanbanNegociacaoPreco DESC
             )
             SELECT
@@ -19118,24 +19246,60 @@ def painel_detalhes(codponto: int):
         """)
 
         sql_segmentos_metricas = text("""
-            ;WITH BaseItens AS (
+            ;WITH BaseItensRaw AS (
                 SELECT
                     i.IDFatoControleContratosItensEuromidia AS IDItem,
                     i.IDFatoControleContratoEuromidia AS IDContrato,
-                    COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) AS DataEvento,
-                    CASE
-                        WHEN COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto) IS NULL THEN NULL
-                        ELSE DATEFROMPARTS(
-                            YEAR(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
-                            MONTH(COALESCE(i.Referencia, i.DataLancamento, i.DataInicioPrevisto)),
-                            1
-                        )
-                    END AS DataRef,
+                    COALESCE(
+                            TRY_CONVERT(date, i.Referencia),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 101)
+                        ) AS ReferenciaDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataLancamento),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 101)
+                        ) AS DataLancamentoDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataInicioPrevisto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataInicioPrevisto))), ''), 101)
+                        ) AS DataInicioPrevistoDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataFimEfetiva),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataFimEfetiva))), ''), 101)
+                        ) AS DataFimEfetivaDate,
+                    COALESCE(
+                            TRY_CONVERT(date, i.DataTerminoPrevisto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 101)
+                        ) AS DataTerminoPrevistoDate,
                     COALESCE(i.FaturamentoLiquidoFinalMensal, i.FaturamentoLiquidoMensal, i.Faturamento) AS ReceitaMensal,
-                    i.DataInicioPrevisto AS DataInicioPrevisto,
-                    COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS DataFimPrevisto,
                     CASE
-                        WHEN :eh_digital = 1 AND ISNULL(i.Cota, 0) >= 1080 THEN 2
+                        WHEN :eh_digital = 1
+                         AND TRY_CONVERT(decimal(18,2), REPLACE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Cota))), ''), ',', '.')) >= 1080
+                        THEN 2
                         ELSE 1
                     END AS SlotsItem,
                     CASE
@@ -19172,6 +19336,94 @@ def painel_detalhes(codponto: int):
                 WHERE i.CodPonto = :cod_ponto
                   AND ISNULL(i.BitAtivo, 1) = 1
                   AND (i.AtivoCancelamento IS NULL OR i.AtivoCancelamento = 'A')
+            ), BaseItens AS (
+                SELECT
+                    IDItem,
+                    IDContrato,
+                    COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) AS DataEvento,
+                    CASE
+                        WHEN COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) IS NULL THEN NULL
+                        ELSE DATEFROMPARTS(
+                            YEAR(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
+                            MONTH(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
+                            1
+                        )
+                    END AS DataRef,
+                    ReceitaMensal,
+                    DataInicioPrevistoDate AS DataInicioPrevisto,
+                    COALESCE(DataFimEfetivaDate, DataTerminoPrevistoDate) AS DataFimPrevisto,
+                    SlotsItem,
+                    FlagRenovacao,
+                    Classe,
+                    ScoreSetor,
+                    ClassificacaoMacro,
+                    IDFatoKanbanCard
+                FROM BaseItensRaw
+            ), Negociacoes AS (
+                SELECT
+                    n.IDFatoKanbanCard,
+                    n.IDFatoKanbanNegociacaoPreco,
+                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado,
+                    n.PrecoProposto AS PrecoProposto,
+                    COALESCE(
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataAprovacaoPreco),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataPrecoProposto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.PeriodoInicio),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 101)
+                        )
+                    ) AS DataNegociacaoPreco,
+                    COALESCE(
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataPrecoProposto),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.DataAprovacaoPreco),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, n.PeriodoInicio),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 101)
+                        )
+                    ) AS DataNegociacaoIA
+                FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
             ), MesesSegmento AS (
                 SELECT
                     Classe,
@@ -19196,8 +19448,8 @@ def painel_detalhes(codponto: int):
                              AND DataFimPrevisto >= :dt_ini
                             THEN DATEDIFF(
                                     DAY,
-                                    CASE WHEN DataInicioPrevisto < :dt_ini THEN :dt_ini ELSE DataInicioPrevisto END,
-                                    DATEADD(DAY, 1, CASE WHEN DataFimPrevisto > :dt_fim THEN :dt_fim ELSE DataFimPrevisto END)
+                                    CASE WHEN DataInicioPrevisto < :dt_ini THEN CAST(:dt_ini AS date) ELSE DataInicioPrevisto END,
+                                    DATEADD(DAY, 1, CASE WHEN DataFimPrevisto > :dt_fim THEN CAST(:dt_fim AS date) ELSE DataFimPrevisto END)
                                  ) * SlotsItem
                             ELSE 0
                         END) AS SlotDiasOcupados,
@@ -19210,18 +19462,18 @@ def painel_detalhes(codponto: int):
                     b.Classe,
                     b.ScoreSetor,
                     b.ClassificacaoMacro,
-                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado,
+                    n.PrecoNegociado AS PrecoNegociado,
                     ROW_NUMBER() OVER (
                         PARTITION BY b.Classe, b.ScoreSetor, b.ClassificacaoMacro
-                        ORDER BY COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) DESC, n.IDFatoKanbanNegociacaoPreco DESC
+                        ORDER BY n.DataNegociacaoPreco DESC, n.IDFatoKanbanNegociacaoPreco DESC
                     ) AS rn
                 FROM BaseItens AS b
-                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                INNER JOIN Negociacoes AS n
                     ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
                 WHERE b.IDFatoKanbanCard IS NOT NULL
-                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) >= :dt_ini
-                  AND COALESCE(n.DataAprovacaoPreco, n.DataPrecoProposto, n.PeriodoInicio) <= :dt_fim
-                  AND COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) IS NOT NULL
+                  AND n.DataNegociacaoPreco >= :dt_ini
+                  AND n.DataNegociacaoPreco <= :dt_fim
+                  AND n.PrecoNegociado IS NOT NULL
             ), UltPrecoETLSegmento AS (
                 SELECT
                     Classe,
@@ -19244,14 +19496,14 @@ def painel_detalhes(codponto: int):
                     n.PrecoProposto AS PrecoRecomendadoIA,
                     ROW_NUMBER() OVER (
                         PARTITION BY b.Classe, b.ScoreSetor, b.ClassificacaoMacro
-                        ORDER BY COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) DESC, n.IDFatoKanbanNegociacaoPreco DESC
+                        ORDER BY n.DataNegociacaoIA DESC, n.IDFatoKanbanNegociacaoPreco DESC
                     ) AS rn
                 FROM BaseItens AS b
-                INNER JOIN [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
+                INNER JOIN Negociacoes AS n
                     ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
                 WHERE b.IDFatoKanbanCard IS NOT NULL
-                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) >= :dt_ini
-                  AND COALESCE(n.DataPrecoProposto, n.DataAprovacaoPreco, n.PeriodoInicio) <= :dt_fim
+                  AND n.DataNegociacaoIA >= :dt_ini
+                  AND n.DataNegociacaoIA <= :dt_fim
                   AND n.PrecoProposto IS NOT NULL
             )
             SELECT
@@ -19310,8 +19562,8 @@ def painel_detalhes(codponto: int):
 
             params = {
                 "cod_ponto": int(cod_ponto),
-                "dt_ini": dt_ini_periodo.isoformat(),
-                "dt_fim": dt_fim_periodo.isoformat(),
+                "dt_ini": dt_ini_periodo,
+                "dt_fim": dt_fim_periodo,
                 "meses": int(periodo["meses"]),
                 "dias_periodo": int(dias_periodo),
                 "capacidade_dia": int(capacidade_dia),
@@ -19415,20 +19667,46 @@ def painel_detalhes(codponto: int):
 
         dt_ini_mes = _primeiro_dia_mes(dt_ini_str, "2024-01-01")
         dt_fim_mes = _primeiro_dia_mes(dt_fim_str, "2026-12-01")
+        dt_ini_mes_sql = datetime.strptime(dt_ini_mes, "%Y-%m-%d").date()
+        dt_fim_mes_sql = datetime.strptime(dt_fim_mes, "%Y-%m-%d").date()
 
         sql_financeiro = text("""
-            ;WITH BaseItens AS (
+            ;WITH BaseItensRaw AS (
                 SELECT
                     i.CodPonto AS CodPonto,
-                    DATEFROMPARTS(
-                        YEAR(COALESCE(i.Referencia, i.DataLancamento)),
-                        MONTH(COALESCE(i.Referencia, i.DataLancamento)),
-                        1
-                    ) AS DataRef,
+                    COALESCE(
+                        COALESCE(
+                            TRY_CONVERT(date, i.Referencia),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Referencia))), ''), 101)
+                        ),
+                        COALESCE(
+                            TRY_CONVERT(date, i.DataLancamento),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 23),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 103),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 120),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 121),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 126),
+                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataLancamento))), ''), 101)
+                        )
+                    ) AS DataEvento,
                     i.FaturamentoLiquidoFinalMensal AS ReceitaLiquidaMensal
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
                 WHERE i.CodPonto = :cod_ponto
-                  AND COALESCE(i.Referencia, i.DataLancamento) IS NOT NULL
+            ), BaseItens AS (
+                SELECT
+                    CodPonto,
+                    CASE
+                        WHEN DataEvento IS NULL THEN NULL
+                        ELSE DATEFROMPARTS(YEAR(DataEvento), MONTH(DataEvento), 1)
+                    END AS DataRef,
+                    ReceitaLiquidaMensal
+                FROM BaseItensRaw
+                WHERE DataEvento IS NOT NULL
             ),
             ReceitaMes_Full AS (
                 SELECT
@@ -19469,8 +19747,10 @@ def painel_detalhes(codponto: int):
                     c.ValorMensal AS ValorMensal
                 FROM [Integracao].[Silver].[DimCustoMensalPainel] c
                 WHERE c.CodPonto = r.CodPonto
-                  AND ((c.Ano * 100 + c.Mes) <= (YEAR(r.DataRef) * 100 + MONTH(r.DataRef)))
-                ORDER BY (c.Ano * 100 + c.Mes) DESC
+                  AND TRY_CONVERT(int, c.Ano) IS NOT NULL
+                  AND TRY_CONVERT(int, c.Mes) IS NOT NULL
+                  AND ((TRY_CONVERT(int, c.Ano) * 100 + TRY_CONVERT(int, c.Mes)) <= (YEAR(r.DataRef) * 100 + MONTH(r.DataRef)))
+                ORDER BY (TRY_CONVERT(int, c.Ano) * 100 + TRY_CONVERT(int, c.Mes)) DESC
             ) ca
             ORDER BY r.DataRef ASC;
         """)
@@ -19479,8 +19759,8 @@ def painel_detalhes(codponto: int):
             sql_financeiro,
             {
                 "cod_ponto": int(painel["id_painel"]),
-                "dt_ini": dt_ini_mes,
-                "dt_fim": dt_fim_mes,
+                "dt_ini": dt_ini_mes_sql,
+                "dt_fim": dt_fim_mes_sql,
             }
         ).mappings().all()
 
@@ -19567,8 +19847,8 @@ def painel_detalhes(codponto: int):
             sql_custo_categoria,
             {
                 "cod_ponto": int(painel["id_painel"]),
-                "dt_ini_mes": dt_ini_mes,
-                "dt_fim_mes": dt_fim_mes,
+                "dt_ini_mes": dt_ini_mes_sql,
+                "dt_fim_mes": dt_fim_mes_sql,
             }
         ).mappings().all()
 
