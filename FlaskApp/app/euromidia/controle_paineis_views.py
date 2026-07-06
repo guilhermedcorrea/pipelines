@@ -6901,8 +6901,11 @@ def grade_painel(codponto: int):
 
                     lp = LOOPS_PERMITIDOS[idx_slot]
                     item_slot = dict(it)
+                    # Datas reais vindas do banco. O recorte visual da barra não pode aparecer no tooltip.
                     item_slot["DataInicioOriginal"] = it.get("DataInicio")
                     item_slot["DataFimOriginal"] = it.get("DataFim")
+                    item_slot["DataInicioTooltip"] = it.get("DataInicio")
+                    item_slot["DataFimTooltip"] = it.get("DataFim")
                     item_slot["DiaInicioOriginal"] = it.get("DiaInicio")
                     item_slot["DiaFimOriginal"] = it.get("DiaFim")
                     seg_ini_data = _coerce_data_visual_grade(seg_ini)

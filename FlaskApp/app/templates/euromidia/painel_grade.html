@@ -2472,6 +2472,35 @@
                         'Loop': (atual.Loop if atual.Loop else (it.Loop if it.Loop is defined else '')),
                         'DataInicio': (atual.DataInicio if atual.DataInicio else (it.DataInicio if it.DataInicio is defined else None)),
                         'DataFim': (atual.DataFim if atual.DataFim else (it.DataFim if it.DataFim is defined else None)),
+                        'DataInicioOriginal': (
+                          atual.DataInicioOriginal if atual.DataInicioOriginal is defined and atual.DataInicioOriginal else
+                          (it.DataInicioOriginal if it.DataInicioOriginal is defined and it.DataInicioOriginal else
+                           (atual.DataInicioTooltip if atual.DataInicioTooltip is defined and atual.DataInicioTooltip else
+                            (it.DataInicioTooltip if it.DataInicioTooltip is defined and it.DataInicioTooltip else
+                             (atual.DataInicio if atual.DataInicio else (it.DataInicio if it.DataInicio is defined else None)))))
+                        ),
+                        'DataFimOriginal': (
+                          atual.DataFimOriginal if atual.DataFimOriginal is defined and atual.DataFimOriginal else
+                          (it.DataFimOriginal if it.DataFimOriginal is defined and it.DataFimOriginal else
+                           (atual.DataFimTooltip if atual.DataFimTooltip is defined and atual.DataFimTooltip else
+                            (it.DataFimTooltip if it.DataFimTooltip is defined and it.DataFimTooltip else
+                             (atual.DataFim if atual.DataFim else (it.DataFim if it.DataFim is defined else None)))))
+                        ),
+                        'DataInicioTooltip': (
+                          atual.DataInicioTooltip if atual.DataInicioTooltip is defined and atual.DataInicioTooltip else
+                          (it.DataInicioTooltip if it.DataInicioTooltip is defined and it.DataInicioTooltip else
+                           (atual.DataInicioOriginal if atual.DataInicioOriginal is defined and atual.DataInicioOriginal else
+                            (it.DataInicioOriginal if it.DataInicioOriginal is defined and it.DataInicioOriginal else
+                             (atual.DataInicio if atual.DataInicio else (it.DataInicio if it.DataInicio is defined else None)))))
+                        ),
+                        'DataFimTooltip': (
+                          atual.DataFimTooltip if atual.DataFimTooltip is defined and atual.DataFimTooltip else
+                          (it.DataFimTooltip if it.DataFimTooltip is defined and it.DataFimTooltip else
+                           (atual.DataFimOriginal if atual.DataFimOriginal is defined and atual.DataFimOriginal else
+                            (it.DataFimOriginal if it.DataFimOriginal is defined and it.DataFimOriginal else
+                             (atual.DataFim if atual.DataFim else (it.DataFim if it.DataFim is defined else None)))))
+                        ),
+
                         'TextoOriginal': (atual.TextoOriginal if atual.TextoOriginal else (it.TextoOriginal if it.TextoOriginal is defined else '')),
                         'TipoReserva': (atual.TipoReserva if atual.TipoReserva is defined and atual.TipoReserva not in (none, '') else (it.TipoReserva if it.TipoReserva is defined else '')),
                         'EhReservaManual': ((atual.EhReservaManual if atual.EhReservaManual is defined else False) or (it.EhReservaManual if it.EhReservaManual is defined else False) or (atual.TipoReserva is defined and ((atual.TipoReserva | int) == 1)) or (it.TipoReserva is defined and ((it.TipoReserva | int) == 1))),
@@ -2503,6 +2532,27 @@
                         'Loop': (it.Loop if it.Loop is defined else ''),
                         'DataInicio': (it.DataInicio if it.DataInicio is defined else None),
                         'DataFim': (it.DataFim if it.DataFim is defined else None),
+                        'DataInicioOriginal': (
+                          it.DataInicioOriginal if it.DataInicioOriginal is defined and it.DataInicioOriginal else
+                          (it.DataInicioTooltip if it.DataInicioTooltip is defined and it.DataInicioTooltip else
+                           (it.DataInicio if it.DataInicio is defined else None))
+                        ),
+                        'DataFimOriginal': (
+                          it.DataFimOriginal if it.DataFimOriginal is defined and it.DataFimOriginal else
+                          (it.DataFimTooltip if it.DataFimTooltip is defined and it.DataFimTooltip else
+                           (it.DataFim if it.DataFim is defined else None))
+                        ),
+                        'DataInicioTooltip': (
+                          it.DataInicioTooltip if it.DataInicioTooltip is defined and it.DataInicioTooltip else
+                          (it.DataInicioOriginal if it.DataInicioOriginal is defined and it.DataInicioOriginal else
+                           (it.DataInicio if it.DataInicio is defined else None))
+                        ),
+                        'DataFimTooltip': (
+                          it.DataFimTooltip if it.DataFimTooltip is defined and it.DataFimTooltip else
+                          (it.DataFimOriginal if it.DataFimOriginal is defined and it.DataFimOriginal else
+                           (it.DataFim if it.DataFim is defined else None))
+                        ),
+
                         'TextoOriginal': (it.TextoOriginal if it.TextoOriginal is defined else ''),
                         'TipoReserva': (it.TipoReserva if it.TipoReserva is defined else ''),
                         'EhReservaManual': ((it.EhReservaManual if it.EhReservaManual is defined else False) or (it.TipoReserva is defined and ((it.TipoReserva | int) == 1))),
@@ -2620,8 +2670,8 @@
                      data-tooltip-title="{{ barra_txt|e }}"
                      data-tooltip-loop="{{ it.Loop|e }}"
                      data-tooltip-vendedor="{{ it.Vendedor|e }}"
-                     data-tooltip-di="{{ it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '' }}"
-                     data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
+                     data-tooltip-di="{{ it.DataInicioTooltip.strftime('%d/%m/%Y') if it.DataInicioTooltip is defined and it.DataInicioTooltip else (it.DataInicioOriginal.strftime('%d/%m/%Y') if it.DataInicioOriginal is defined and it.DataInicioOriginal else (it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '')) }}"
+                     data-tooltip-df="{{ it.DataFimTooltip.strftime('%d/%m/%Y') if it.DataFimTooltip is defined and it.DataFimTooltip else (it.DataFimOriginal.strftime('%d/%m/%Y') if it.DataFimOriginal is defined and it.DataFimOriginal else (it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '')) }}"
                      data-tooltip-txt="{{ it.TextoOriginal|e }}">
 
                   {% if chip_txt %}
@@ -2711,8 +2761,8 @@
                        data-tooltip-title="{{ barra_txt_cont|e }}"
                        data-tooltip-loop="{{ it_cont.Loop|e }}"
                        data-tooltip-vendedor="{{ it_cont.Vendedor|e }}"
-                       data-tooltip-di="{{ it_cont.DataInicio.strftime('%d/%m/%Y') if it_cont.DataInicio else '' }}"
-                       data-tooltip-df="{{ it_cont.DataFim.strftime('%d/%m/%Y') if it_cont.DataFim else '' }}"
+                       data-tooltip-di="{{ it_cont.DataInicioTooltip.strftime('%d/%m/%Y') if it_cont.DataInicioTooltip is defined and it_cont.DataInicioTooltip else (it_cont.DataInicioOriginal.strftime('%d/%m/%Y') if it_cont.DataInicioOriginal is defined and it_cont.DataInicioOriginal else (it_cont.DataInicio.strftime('%d/%m/%Y') if it_cont.DataInicio else '')) }}"
+                       data-tooltip-df="{{ it_cont.DataFimTooltip.strftime('%d/%m/%Y') if it_cont.DataFimTooltip is defined and it_cont.DataFimTooltip else (it_cont.DataFimOriginal.strftime('%d/%m/%Y') if it_cont.DataFimOriginal is defined and it_cont.DataFimOriginal else (it_cont.DataFim.strftime('%d/%m/%Y') if it_cont.DataFim else '')) }}"
                        data-tooltip-txt="{{ it_cont.TextoOriginal|e }}">
                     {% if mostra_icone_reserva_cont %}
                       <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
@@ -2838,8 +2888,8 @@
                    data-tooltip-title="{{ barra_txt|e }}"
                    data-tooltip-loop="{{ it.Loop|e }}"
                    data-tooltip-vendedor="{{ it.Vendedor|e }}"
-                   data-tooltip-di="{{ it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '' }}"
-                   data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
+                   data-tooltip-di="{{ it.DataInicioTooltip.strftime('%d/%m/%Y') if it.DataInicioTooltip is defined and it.DataInicioTooltip else (it.DataInicioOriginal.strftime('%d/%m/%Y') if it.DataInicioOriginal is defined and it.DataInicioOriginal else (it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '')) }}"
+                   data-tooltip-df="{{ it.DataFimTooltip.strftime('%d/%m/%Y') if it.DataFimTooltip is defined and it.DataFimTooltip else (it.DataFimOriginal.strftime('%d/%m/%Y') if it.DataFimOriginal is defined and it.DataFimOriginal else (it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '')) }}"
                    data-tooltip-txt="{{ it.TextoOriginal|e }}">
                 {% if mostra_icone_reserva2 %}
                   <img class="icone-reserva" src="{{ url_icone_reserva }}" alt="Reserva" title="Reserva manual - TipoReserva = 1">
