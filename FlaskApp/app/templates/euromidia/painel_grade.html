@@ -2499,11 +2499,25 @@
                     {% endif %}
                   {% endif %}
 
-                  {% set chave = (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else None) %}
+                  {#
+                    Chave visual da barra.
+                    Antes a grade usava o ID do cabeçalho do contrato como chave. Isso podia
+                    juntar barras diferentes do mesmo contrato/cabeçalho ou esconder itens
+                    distintos na mesma face. A chave agora prioriza o ID do item da grade e
+                    mantém DiaInicio/DiaFim/SpanOffset para não juntar fragmentos criados pelo
+                    encaixe visual da grade digital.
+                  #}
+                  {% set chave = None %}
                   {% if eh_reserva_item and reserva_id_chave %}
-                    {% set chave = 'RESERVA|' ~ (reserva_id_chave|string) %}
-                  {% elif not chave %}
-                    {% set chave = ((it.MarcaExibida or it.BarraTexto or 'SEM_TEXTO') ~ '|' ~ (it.Loop|string) ~ '|' ~ (dia_ini|string) ~ '|' ~ (dia_fim|string)) %}
+                    {% set chave = 'RESERVA|' ~ (reserva_id_chave|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
+                  {% elif it.ID is defined and it.ID not in (none, '') %}
+                    {% set chave = 'ITEM|' ~ (it.ID|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
+                  {% elif contrato_txt %}
+                    {% set chave = 'CONTRATO|' ~ (contrato_txt|string) ~ '|PREVIA:' ~ (previa_txt|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
+                  {% elif it.IDFatoControleContratos is not none %}
+                    {% set chave = 'CABECALHO|' ~ (it.IDFatoControleContratos|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
+                  {% else %}
+                    {% set chave = ((it.MarcaExibida or it.BarraTexto or 'SEM_TEXTO') ~ '|' ~ (it.Loop|string) ~ '|OFF:' ~ (_off_item|string) ~ '|' ~ (dia_ini|string) ~ '|' ~ (dia_fim|string)) %}
                   {% endif %}
 
                   {% if chave in ns.agrupados %}
@@ -2541,6 +2555,8 @@
 
                         'ID': (atual.ID if atual.ID is defined and atual.ID not in (none, '') else (it.ID if it.ID is defined else '')),
                         'IDFatoControleContratos': (atual.IDFatoControleContratos if atual.IDFatoControleContratos is not none else (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '')),
+                        'NumeroContrato': (atual.NumeroContrato if atual.NumeroContrato is defined and atual.NumeroContrato not in (none, '') else (it.NumeroContrato if it.NumeroContrato is defined else contrato_txt)),
+                        'NumeroPrevia': (atual.NumeroPrevia if atual.NumeroPrevia is defined and atual.NumeroPrevia not in (none, '') else (it.NumeroPrevia if it.NumeroPrevia is defined else previa_txt)),
                         'IDFatoOcupacaoPaineisEuromidia': (atual.IDFatoOcupacaoPaineisEuromidia if atual.IDFatoOcupacaoPaineisEuromidia is defined and atual.IDFatoOcupacaoPaineisEuromidia not in (none, '') else (it.IDFatoOcupacaoPaineisEuromidia if it.IDFatoOcupacaoPaineisEuromidia is defined else '')),
                         'ReservaIDOriginal': (atual.ReservaIDOriginal if atual.ReservaIDOriginal is defined and atual.ReservaIDOriginal not in (none, '') else (it.ReservaIDOriginal if it.ReservaIDOriginal is defined else '')),
                         'IDVendedor': (atual.IDVendedor if atual.IDVendedor is defined and atual.IDVendedor not in (none, '') else (it.IDVendedor if it.IDVendedor is defined else '')),
@@ -2604,6 +2620,8 @@
 
                         'ID': (it.ID if it.ID is defined else ''),
                         'IDFatoControleContratos': (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else ''),
+                        'NumeroContrato': (it.NumeroContrato if it.NumeroContrato is defined and it.NumeroContrato else contrato_txt),
+                        'NumeroPrevia': (it.NumeroPrevia if it.NumeroPrevia is defined and it.NumeroPrevia else previa_txt),
                         'IDFatoOcupacaoPaineisEuromidia': (it.IDFatoOcupacaoPaineisEuromidia if it.IDFatoOcupacaoPaineisEuromidia is defined else ''),
                         'ReservaIDOriginal': (it.ReservaIDOriginal if it.ReservaIDOriginal is defined else ''),
                         'IDVendedor': (it.IDVendedor if it.IDVendedor is defined else ''),

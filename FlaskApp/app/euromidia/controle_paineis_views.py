@@ -2074,15 +2074,17 @@ def _fim_efetivo_item(dt_fim_previsto, dt_cancelamento):
 
 
 def _span_por_cota(cota) -> int:
+    """Regra oficial: Cota 1080 = 2 slots; Cota 540 = 1 slot."""
     try:
-        c = int(cota)
-    except:
+        c = int(round(float(str(cota).strip().replace(',', '.'))))
+    except Exception:
         c = None
 
-    if c == 1:
+    if c == 1080:
         return 2
-    if c == 2:
+    if c == 540:
         return 1
+
     return 1
 
 
@@ -2723,29 +2725,54 @@ def lista_paineis():
             return None
 
  
-    def _slots_por_cota(cota):
+    def _slots_por_cota(cota, span_qtd=None):
         """
-        Regra de slot da grade digital:
+        Regra oficial de slot da grade digital:
         - COTA 1080 ocupa 2 slots.
         - COTA 540 ocupa 1 slot.
-        - Valores antigos 1/2 continuam tratados por compatibilidade.
+
+        Eu não uso _somente_digitos aqui porque valores vindos do SQL como
+        "1080.00" viravam "108000" e derrubavam a cota para 1 slot errado.
         """
         try:
-            if cota is None:
+            try:
+                if span_qtd not in (None, "", "null", "None"):
+                    span_tmp = float(str(span_qtd).strip().replace(",", "."))
+                    if span_tmp > 0:
+                        return float(span_tmp)
+            except Exception:
+                pass
+
+            if cota in (None, ""):
                 return 1.0
 
-            if isinstance(cota, (int, float)):
-                c = float(cota)
+            if isinstance(cota, Decimal):
+                try:
+                    c = int(cota)
+                except Exception:
+                    c = int(float(cota))
+            elif isinstance(cota, (int, float)):
+                try:
+                    c = int(round(float(cota)))
+                except Exception:
+                    return 1.0
             else:
-                s = str(cota).strip()
+                s = str(cota or "").strip()
                 if not s:
                     return 1.0
-                d = _somente_digitos(s)
-                if d:
-                    c = float(d)
-                else:
+
+                s = s.replace("R$", "").replace(" ", "")
+
+                if "," in s and "." in s:
+                    s = s.replace(".", "").replace(",", ".")
+                elif "," in s:
+                    s = s.replace(",", ".")
+
+                try:
+                    c = int(Decimal(s))
+                except Exception:
                     try:
-                        c = float(s.replace(",", "."))
+                        c = int(round(float(s)))
                     except Exception:
                         return 1.0
 
@@ -2755,12 +2782,6 @@ def lista_paineis():
             if c == 1080:
                 return 2.0
             if c == 540:
-                return 1.0
-
-            # Compatibilidade com cadastros antigos que guardavam 1/2 em vez de 1080/540.
-            if c == 1:
-                return 2.0
-            if c == 2:
                 return 1.0
 
             return 1.0
@@ -2864,7 +2885,13 @@ def lista_paineis():
         try:
             por_face_tipo = {}
 
-            for cp_int, cf_norm, cota, di, df_ef, idcad in (ocupacoes or []):
+            for item_ocupacao in (ocupacoes or []):
+                try:
+                    cp_int, cf_norm, cota, di, df_ef, idcad = item_ocupacao[:6]
+                    span_qtd_ocup = item_ocupacao[6] if len(item_ocupacao) > 6 else None
+                except Exception:
+                    continue
+
                 if cp_int is None:
                     continue
                 if not cf_norm:
@@ -2901,8 +2928,7 @@ def lista_paineis():
                 - ocupado = soma de slot-dia ocupado dentro do período;
                 - para PAINEL DIGITAL, a ocupação deve respeitar o span da campanha;
                 - COTA 1080 ocupa 2 slots por dia;
-                - COTA 540 ocupa 1 slot por dia;
-                - valores legados 1/2 continuam aceitos por compatibilidade.
+                - COTA 540 ocupa 1 slot por dia.
 
                 Observação importante:
                 - Em painel NÃO digital, a face física continua valendo 1 espaço por dia.
@@ -2910,7 +2936,7 @@ def lista_paineis():
                   a lista mostra percentual menor que a grade, como no caso 215/480.
                 """
                 if tp_up == "PAINEL DIGITAL":
-                    slots = float(_slots_por_cota(cota) or 1.0)
+                    slots = float(_slots_por_cota(cota, span_qtd_ocup) or 1.0)
                 else:
                     slots = 1.0
 
@@ -3952,7 +3978,10 @@ def lista_paineis():
                     if cp_int is None:
                         continue
                     cap = int(qf) if qf is not None else int(CAPACIDADE_DIGITAL_FIXA)
-                    cap = max(1, min(cap, 200))
+                    # Regra oficial da grade digital: capacidade mínima de 16 slots por dia.
+                    # Se o cadastro vier com 12, o percentual mensal fica errado: 199 / (30*12) = 55,2%.
+                    # O correto para junho no exemplo é 199 / (30*16) = 41,46%.
+                    cap = max(int(CAPACIDADE_DIGITAL_FIXA or 16), min(cap, 200))
                     capacidade_digital_por_cp[cp_int] = cap
                 except:
                     continue
@@ -4011,7 +4040,6 @@ def lista_paineis():
             .filter(
                 FatoControleContratosItensEuromidia.CodPonto.in_(codpontos_pagina),
                 filtro_periodo_itens_ocup,
-                text("ISNULL(TRY_CONVERT(INT, [BitAtivo]), 1) = 1"),
             )
         )
 
@@ -4089,6 +4117,70 @@ def lista_paineis():
                     continue
 
             ocupacoes.append((cp_int, cf_norm, cota, di_dt, df_ef, idcad))
+
+
+    # Reservas também ocupam slot na mesma regra da sql_periodo_grade.sql.
+    # A lista /paineis/ precisa somar CONTRATOS + RESERVAS, igual à grade/KPI.
+    try:
+        if codpontos_pagina:
+            partes_reserva_lista = ["""
+                SELECT
+                    CodPonto = TRY_CONVERT(int, r.[CodPonto]),
+                    CodFace = LTRIM(RTRIM(COALESCE(r.[CodFace], ''))),
+                    Cota = r.[Cota],
+                    SpanQtd = TRY_CONVERT(decimal(18,6), r.[SpanQtd]),
+                    DtIni = TRY_CONVERT(date, r.[DataInicio]),
+                    DtFim = COALESCE(TRY_CONVERT(date, r.[DataFim]), CONVERT(date, '9999-12-31'))
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS r WITH (NOLOCK)
+                WHERE TRY_CONVERT(int, r.[CodPonto]) IN :codpontos_reserva_lista
+                  AND UPPER(LTRIM(RTRIM(COALESCE(r.[Origem], '')))) COLLATE Latin1_General_CI_AS = 'RESERVA'
+                  AND UPPER(LTRIM(RTRIM(COALESCE(r.[Status], '')))) COLLATE Latin1_General_CI_AS = 'RESERVADO'
+                  AND TRY_CONVERT(date, r.[DataInicio]) IS NOT NULL
+                  AND TRY_CONVERT(date, r.[DataInicio]) <= :dt_fim_reserva_lista
+                  AND COALESCE(TRY_CONVERT(date, r.[DataFim]), CONVERT(date, '9999-12-31')) >= :dt_ini_reserva_lista
+            """]
+
+            params_reserva_lista = {
+                "codpontos_reserva_lista": list(codpontos_pagina),
+                "dt_ini_reserva_lista": dt_ini_ocup,
+                "dt_fim_reserva_lista": dt_fim_ocup,
+            }
+            binds_reserva_lista = [bindparam("codpontos_reserva_lista", expanding=True)]
+
+            if codfaces_pagina:
+                partes_reserva_lista.append(" AND LTRIM(RTRIM(COALESCE(r.[CodFace], ''))) IN :codfaces_reserva_lista ")
+                params_reserva_lista["codfaces_reserva_lista"] = list(codfaces_pagina)
+                binds_reserva_lista.append(bindparam("codfaces_reserva_lista", expanding=True))
+
+
+            if vendedor_list:
+                partes_reserva_lista.append(" AND r.[Vendedor] IN :vendedores_reserva_lista ")
+                params_reserva_lista["vendedores_reserva_lista"] = list(vendedor_list)
+                binds_reserva_lista.append(bindparam("vendedores_reserva_lista", expanding=True))
+
+            if marca_exibida_list:
+                partes_reserva_lista.append(" AND r.[MarcaExibida] IN :marcas_reserva_lista ")
+                params_reserva_lista["marcas_reserva_lista"] = list(marca_exibida_list)
+                binds_reserva_lista.append(bindparam("marcas_reserva_lista", expanding=True))
+
+            stmt_reserva_lista = text("".join(partes_reserva_lista)).bindparams(*binds_reserva_lista)
+            rows_reservas_lista = db.session.execute(stmt_reserva_lista, params_reserva_lista).mappings().all()
+
+            for rr_res in (rows_reservas_lista or []):
+                try:
+                    cp_res = int(rr_res.get("CodPonto")) if rr_res.get("CodPonto") is not None else None
+                except Exception:
+                    cp_res = None
+                cf_res = (str(rr_res.get("CodFace") or "")).strip()
+                di_res = _coerce_to_date(rr_res.get("DtIni"))
+                df_res = _coerce_to_date(rr_res.get("DtFim"))
+                if cp_res is None or not cf_res or di_res is None or df_res is None:
+                    continue
+                if df_res < dt_ini_ocup or di_res > dt_fim_ocup or df_res < di_res:
+                    continue
+                ocupacoes.append((cp_res, cf_res, rr_res.get("Cota"), di_res, df_res, None, rr_res.get("SpanQtd")))
+    except Exception:
+        pass
 
     mapa_face = _calcular_ocupacao_e_conflitos_por_face(
         ocupacoes=ocupacoes,
@@ -5215,8 +5307,10 @@ def grade_painel(codponto: int):
 
     if eh_digital:
         capacidade_digital_grade = int(qtd_faces_painel_max or 0)
-        if capacidade_digital_grade <= 0:
-            capacidade_digital_grade = int(CAPACIDADE_DIGITAL_FIXA or 16)
+        capacidade_digital_grade = max(
+            int(CAPACIDADE_DIGITAL_FIXA or 16),
+            int(capacidade_digital_grade or 0),
+        )
 
         num_faces = int(capacidade_digital_grade)
         LOOPS_PERMITIDOS = [f"SPAN{n:02d}" for n in range(1, capacidade_digital_grade + 1)]
@@ -5490,7 +5584,9 @@ def grade_painel(codponto: int):
         .filter(
             FatoControleContratosItensEuromidia.CodPonto == codponto,
             FatoControleContratosItensEuromidia.AtivoCancelamento == "A",
-            sql_text("ISNULL(TRY_CONVERT(INT, [BitAtivo]), 1) = 1"),
+            # Regra oficial para ocupar slot: AtivoCancelamento + CodPonto/CodFace + período.
+            # Não corto por BitAtivo aqui, senão a lista e a grade podem divergir
+            # dos contratos que realmente ocupam slot no período.
             FatoControleContratosItensEuromidia.DataInicioPrevisto != None,
             FatoControleContratosItensEuromidia.DataTerminoPrevisto != None,
             FatoControleContratosItensEuromidia.DataInicioPrevisto < dt_fim_exclusivo,
@@ -5547,6 +5643,21 @@ def grade_painel(codponto: int):
             )
         else:
             q_oc = q_oc.filter(sa_false())
+
+    # Base específica para o KPI da grade.
+    # Regra oficial: a ocupação da grade e da lista deve seguir a mesma base
+    # da query sql_periodo_grade.sql: AtivoCancelamento + CodPonto/CodFace + período.
+    # Não corto por BitAtivo aqui, porque isso fazia a lista/grade divergirem
+    # dos contratos que realmente ocupam slot no período.
+    q_oc_kpi_ocupacao = q_oc
+
+    rows_kpi_ocupacao = (
+        q_oc_kpi_ocupacao.order_by(
+            FatoControleContratosItensEuromidia.CodFace.asc(),
+            FatoControleContratosItensEuromidia.DataInicioPrevisto.asc(),
+        )
+        .all()
+    )
 
     rows = (
         q_oc.order_by(
@@ -6624,13 +6735,6 @@ def grade_painel(codponto: int):
         if c == 540:
             return 1
 
-        # Compatibilidade com cadastros antigos que gravavam 1/2 no lugar de 1080/540.
-        if c == 1:
-            return 2
-
-        if c == 2:
-            return 1
-
         return 1
 
     slots_total = None
@@ -6766,6 +6870,8 @@ def grade_painel(codponto: int):
                 {
                     "ID": _id_item,
                     "IDFatoControleContratos": _id_contrato,
+                    "NumeroContrato": num_contrato,
+                    "NumeroPrevia": num_previa,
                     "CodFace": cf,
                     "MarcaExibida": marca_exibida_grade,
                     "MarcaExibidaOriginal": marca,
@@ -7290,6 +7396,8 @@ def grade_painel(codponto: int):
                 {
                     "ID": _id_item,
                     "IDFatoControleContratos": _id_contrato,
+                    "NumeroContrato": num_contrato,
+                    "NumeroPrevia": num_previa,
                     "CodFace": cf,
                     "MarcaExibida": marca_exibida_grade,
                     "MarcaExibidaOriginal": marca,
@@ -7331,7 +7439,54 @@ def grade_painel(codponto: int):
     caminho_sql = Path(current_app.root_path) / "euromidia" / "querys" / "sql_periodo_grade.sql"
     SQL_KPI_PERIODO = caminho_sql.read_text(encoding="utf-8")
 
-    k_digital = int((num_faces if eh_digital else 1) or CAPACIDADE_DIGITAL_FIXA or 16)
+    def _corrigir_regra_span_sql_grade(sql_original: str) -> str:
+        """
+        A query externa sql_periodo_grade.sql ainda pode vir com a fórmula antiga:
+            1080 / Cota
+
+        Essa fórmula inverte a regra da grade:
+        - COTA 540 passa a contar 2 slots;
+        - COTA 1080 passa a contar 1 slot.
+
+        A regra correta da tela é:
+        - COTA 540 = 1 slot;
+        - COTA 1080 = 2 slots.
+
+        Como a rota carrega a SQL de arquivo externo, corrijo a expressão em memória
+        antes de executar. Assim o KPI do card passa a bater com a grade visual sem
+        depender de trocar o arquivo .sql junto com este view.
+        """
+        sql_corrigido = str(sql_original or "")
+
+        def _substituir_case_cota(match):
+            alias = match.group("alias")
+            cota_expr = f"TRY_CONVERT(decimal(18,6), REPLACE(CONVERT(varchar(50), {alias}.Cota), ',', '.'))"
+            return (
+                f"WHEN {cota_expr} IS NULL OR {cota_expr} <= 0 THEN 0\n"
+                f"            WHEN {cota_expr} = 1080 THEN 2.0\n"
+                f"            WHEN {cota_expr} = 540 THEN 1.0\n"
+                f"            ELSE 1.0"
+            )
+
+        padrao_formula_invertida = re.compile(
+            r"WHEN\s+TRY_CONVERT\(INT,\s*(?P<alias>[cr])\.Cota\)\s+IS\s+NULL\s+"
+            r"OR\s+TRY_CONVERT\(INT,\s*(?P=alias)\.Cota\)\s*<=\s*0\s+THEN\s+0\s+"
+            r"ELSE\s*\(\s*1080\.0\s*/\s*CAST\(\s*TRY_CONVERT\(INT,\s*(?P=alias)\.Cota\)\s+AS\s+float\s*\)\s*\)",
+            flags=re.IGNORECASE,
+        )
+
+        sql_corrigido = padrao_formula_invertida.sub(_substituir_case_cota, sql_corrigido)
+        return sql_corrigido
+
+    SQL_KPI_PERIODO = _corrigir_regra_span_sql_grade(SQL_KPI_PERIODO)
+
+    # Capacidade do KPI SEMPRE respeita o filtro de datas da tela.
+    # Fórmula oficial: dias_filtrados × 16 slots × faces selecionadas.
+    # Ex.: filtro 01/06 a 30/06 => 30 × 16 = 480 por face.
+    # Ex.: filtro 01/06 a 10/07 => 40 × 16 = 640 por face.
+    # Não uso QuantidadeFaces menor do cadastro como denominador, porque isso gera percentual errado
+    # quando o cadastro vem com 12, 14 etc. Painel digital deve usar mínimo oficial 16.
+    k_digital = int((max(int(num_faces or 0), int(CAPACIDADE_DIGITAL_FIXA or 16)) if eh_digital else 1) or CAPACIDADE_DIGITAL_FIXA or 16)
     face_padrao = (faces[0] if faces else "").strip()
 
     cliente_like = _like_param(filtro_cliente)
@@ -7416,8 +7571,8 @@ def grade_painel(codponto: int):
         6 = SlotsOcupadosPicoOficial
 
         Antes o card usava row_kpi[2] e row_kpi[6], o que mostrava pico diário
-        como 4/16. Para ocupação mensal, o correto é mostrar ocupado/capacidade
-        do período inteiro, por exemplo 93/480.
+        como 4/16. Para ocupação do filtro, o correto é mostrar ocupado/capacidade
+        do período selecionado, por exemplo 199/480 em 01/06 a 30/06.
         """
         try:
             slots_ocupados = int(round(float(row_kpi[3] or 0)))
@@ -7448,7 +7603,7 @@ def grade_painel(codponto: int):
         - Em PAINEL DIGITAL, COTA 1080 ocupa 2 slots por dia.
         - Em PAINEL DIGITAL, COTA 540 ocupa 1 slot por dia.
         - Portanto, uma campanha COTA 1080 durante 30 dias conta 60 slot-dias,
-          não 30 slot-dias.
+          e COTA 540 durante 30 dias conta 30 slot-dias.
 
         Importante:
         - Reserva entra na grade visual, mas não entra na ocupação oficial.
@@ -7456,9 +7611,13 @@ def grade_painel(codponto: int):
         - O numerador é limitado pela capacidade diária da face para evitar percentual acima de 100%.
         """
         try:
-            total_dias_kpi = int(total_dias or 0)
+            # Usa o range filtrado real da tela, não o mês cheio automaticamente.
+            total_dias_kpi = int((dt_fim - dt_ini).days) + 1
         except Exception:
-            total_dias_kpi = 0
+            try:
+                total_dias_kpi = int(total_dias or 0)
+            except Exception:
+                total_dias_kpi = 0
 
         if total_dias_kpi <= 0:
             return None
@@ -7483,7 +7642,7 @@ def grade_painel(codponto: int):
             if slots_por_face_kpi <= 0:
                 slots_por_face_kpi = int(CAPACIDADE_DIGITAL_FIXA or 16)
 
-            slots_por_face_kpi = max(1, int(slots_por_face_kpi))
+            slots_por_face_kpi = max(int(CAPACIDADE_DIGITAL_FIXA or 16), int(slots_por_face_kpi))
             quantidade_faces_kpi = int(slots_por_face_kpi) * int(qtd_faces_selecionadas_kpi)
         else:
             slots_por_face_kpi = 1
@@ -7501,7 +7660,7 @@ def grade_painel(codponto: int):
 
         ocupacao_por_face_dia = {}
 
-        for r in (rows or []):
+        for r in (rows_kpi_ocupacao or []):
             try:
                 id_item = r[0]
             except Exception:
@@ -7591,9 +7750,10 @@ def grade_painel(codponto: int):
         ocupacao_pct_calc = (float(slot_dias_ocupados) / float(capacidade_total_periodo)) * 100.0
         return float(ocupacao_pct_calc), int(round(slot_dias_ocupados, 0)), int(capacidade_total_periodo)
 
-    kpi_ocupacao_oficial = _calcular_kpi_ocupacao_por_slot_dia_oficial()
-    if kpi_ocupacao_oficial is not None:
-        ocupacao_pct, slots_ocupados, slots_total = kpi_ocupacao_oficial
+    # O KPI oficial vem diretamente da sql_periodo_grade.sql.
+    # Não recalculo aqui em Python para não criar uma terceira regra diferente
+    # da lista e da query validada no banco.
+    kpi_ocupacao_oficial = None
 
     receita_periodo_sql = None
     custo_periodo_sql = None
@@ -8202,8 +8362,28 @@ def grade_painel_multi():
         dt_ini = dt_ini_mes
         dt_fim = dt_fim_mes
 
-        mes_de_arg = _coerce_to_date(request.args.get("mes_de"))
-        mes_ate_arg = _coerce_to_date(request.args.get("mes_ate"))
+        def _coerce_mes_ou_data_inicio(valor):
+            txt = _normalizar_texto(valor)
+            if re.match(r"^\d{4}-\d{2}$", txt):
+                try:
+                    return date(int(txt[:4]), int(txt[5:7]), 1)
+                except Exception:
+                    return None
+            return _coerce_to_date(valor)
+
+        def _coerce_mes_ou_data_fim(valor):
+            txt = _normalizar_texto(valor)
+            if re.match(r"^\d{4}-\d{2}$", txt):
+                try:
+                    ano_tmp = int(txt[:4])
+                    mes_tmp = int(txt[5:7])
+                    return date(ano_tmp, mes_tmp, calendar.monthrange(ano_tmp, mes_tmp)[1])
+                except Exception:
+                    return None
+            return _coerce_to_date(valor)
+
+        mes_de_arg = _coerce_mes_ou_data_inicio(request.args.get("mes_de"))
+        mes_ate_arg = _coerce_mes_ou_data_fim(request.args.get("mes_ate"))
         data_ref_arg = _coerce_to_date(request.args.get("data_ref"))
         modo = _normalizar_texto(request.args.get("modo")).lower()
 
@@ -9476,8 +9656,10 @@ def grade_painel_multi():
             except:
                 capacidade_digital = 0
 
-            if capacidade_digital <= 0:
-                capacidade_digital = int(CAPACIDADE_DIGITAL_PADRAO or 16)
+            capacidade_digital = max(
+                int(CAPACIDADE_DIGITAL_PADRAO or 16),
+                int(capacidade_digital or 0),
+            )
 
             loops_permitidos_multi = _montar_slots_digitais(capacidade_digital)
         else:
@@ -10147,9 +10329,14 @@ def grade_painel_multi():
 
         def _calcular_kpi_ocupacao_visual_multi():
             try:
-                total_dias_kpi = int(total_dias or 0)
+                # Usa exatamente o período filtrado deste bloco de grade.
+                # Não força mês cheio: 01/06 a 10/07 precisa virar 40 dias, não 30/31.
+                total_dias_kpi = int((dt_fim - dt_ini).days) + 1
             except:
-                total_dias_kpi = 0
+                try:
+                    total_dias_kpi = int(total_dias or 0)
+                except:
+                    total_dias_kpi = 0
 
             if total_dias_kpi <= 0:
                 return None
@@ -10241,6 +10428,12 @@ def grade_painel_multi():
                             data_cursor = data_cursor + timedelta(days=1)
 
                     slot_dias_ocupados += len(dias_ocupados_face)
+
+            if eh_digital:
+                linhas_capacidade = max(
+                    int(linhas_capacidade or 0),
+                    int(len(faces_validas_kpi)) * int(CAPACIDADE_DIGITAL_PADRAO or 16),
+                )
 
             capacidade_total_periodo = int(linhas_capacidade) * int(total_dias_kpi)
             if capacidade_total_periodo <= 0:
@@ -16665,7 +16858,6 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
         Regra usada na tela:
         - Cota 1080 ocupa 2 slots.
         - Cota 540 ocupa 1 slot.
-        - Valores antigos 1/2 são mantidos por compatibilidade.
 
         Correção importante:
         - SQL Server pode devolver a cota como Decimal, float, "1080.00" ou "1080,00".
@@ -16723,12 +16915,6 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
         if c == 1080:
             return 2
         if c == 540:
-            return 1
-
-        # Compatibilidade com cadastros antigos que gravavam 1/2 no lugar de 1080/540.
-        if c == 1:
-            return 2
-        if c == 2:
             return 1
 
         return 1
@@ -18219,7 +18405,7 @@ def _excel_montar_aba_grade_ano(
     - cada ocupação é mesclada no intervalo de datas dela;
     - o texto fica centralizado na barra;
     - há uma linha fina de respiro entre as faces para as barras não ficarem coladas;
-    - Cota 1080 ocupa duas faces/slots no painel digital;
+    - Cota 1080 ocupa 2 slots no painel digital;
     - a borda da barra é externa, então uma ocupação não parece colada na outra.
     """
     import calendar
@@ -23244,9 +23430,8 @@ def _span_por_cota_reserva_grade(cota, span_qtd=None) -> int:
     Traduz cota em quantidade de slots adjacentes.
 
     Regras usadas na grade digital:
-    - Cota 1080 ocupa 2 slots juntos.
+    - Cota 1080 ocupa 2 slots adjacentes.
     - Cota 540 ocupa 1 slot.
-    - Compatibilidade antiga: cota 1 = 2 slots; cota 2 = 1 slot.
     - SpanQtd do banco tem prioridade quando vier preenchido.
     """
     try:
@@ -23297,10 +23482,6 @@ def _span_por_cota_reserva_grade(cota, span_qtd=None) -> int:
     if cota_int == 1080:
         return 2
     if cota_int == 540:
-        return 1
-    if cota_int == 1:
-        return 2
-    if cota_int == 2:
         return 1
 
     return 1
@@ -24037,8 +24218,8 @@ def api_ocupacao_reserva_criar():
         return jsonify({"ok": False, "erro": "Capacidade inválida (<=0)"}), 400
 
 
-    # Regra comercial da ocupação digital:
-    # cota 1080 consome 2 slots/faces na grade; cota 540 consome 1 slot/face.
+    # Regra comercial oficial da ocupação digital:
+    # Cota 1080 consome 2 slots; cota 540 consome 1 slot.
     # Em painel não digital, não gravamos SpanQtd nem Cota.
     slots_novo = 2 if eh_digital == 1 and cota_int == 1080 else 1
     spanqtd_novo = slots_novo if eh_digital == 1 else None
