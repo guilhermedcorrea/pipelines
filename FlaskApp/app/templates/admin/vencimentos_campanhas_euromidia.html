@@ -775,6 +775,69 @@
     overflow-wrap:anywhere;
   }
 
+  .vc-vendedor-stack{
+    display:inline-flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:7px;
+    min-width:150px;
+    max-width:270px;
+  }
+
+  .vc-cancelar-reserva-form{
+    margin:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:flex-start;
+  }
+
+  .vc-cancelar-reserva-btn{
+    min-height:30px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    padding:7px 10px;
+    border-radius:11px;
+    border:1px solid rgba(185,28,28,.24);
+    background:linear-gradient(180deg, #FEF2F2 0%, #FFF7F7 100%);
+    color:#991B1B;
+    box-shadow:0 6px 14px rgba(153,27,27,.07);
+    font-size:11px;
+    font-weight:950;
+    line-height:1;
+    cursor:pointer;
+    white-space:nowrap;
+    transition:transform .08s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease;
+  }
+
+  .vc-cancelar-reserva-btn::before{
+    content:'✕';
+    width:17px;
+    height:17px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    background:#FEE2E2;
+    color:#B91C1C;
+    font-size:10px;
+    font-weight:950;
+    line-height:1;
+  }
+
+  .vc-cancelar-reserva-btn:hover{
+    transform:translateY(-1px);
+    background:#FEE2E2;
+    border-color:rgba(185,28,28,.38);
+    box-shadow:0 9px 18px rgba(153,27,27,.12);
+  }
+
+  .vc-cancelar-reserva-btn:active{
+    transform:translateY(0);
+    box-shadow:none;
+  }
+
   .vc-marca{
     color:#334155;
     font-weight:850;
@@ -873,6 +936,99 @@
     background:#FEF3C7;
     color:#92400E;
     border:1px solid rgba(146,64,14,.22);
+  }
+
+
+  .vc-status-stack{
+    display:inline-flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:6px;
+    min-width:168px;
+  }
+
+  .vc-reserva-expira{
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    max-width:100%;
+    padding:6px 9px;
+    border-radius:12px;
+    background:linear-gradient(180deg, #FFF7ED 0%, #FFFBEB 100%);
+    color:#7C2D12;
+    border:1px solid rgba(245,158,11,.34);
+    box-shadow:0 6px 14px rgba(146,64,14,.08);
+    line-height:1.05;
+    white-space:nowrap;
+  }
+
+  .vc-reserva-expira-icone{
+    width:22px;
+    height:22px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+    border-radius:999px;
+    background:#FED7AA;
+    color:#9A3412;
+    font-size:13px;
+  }
+
+  .vc-reserva-expira-info{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+  }
+
+  .vc-reserva-expira-topo{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    min-width:0;
+    font-size:10px;
+    font-weight:900;
+    color:#9A3412;
+  }
+
+  .vc-reserva-expira-label{
+    color:#C2410C;
+  }
+
+  .vc-reserva-expira-data{
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .vc-reserva-expira-restante{
+    font-size:11px;
+    font-weight:950;
+    color:#7C2D12;
+    letter-spacing:.02em;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .vc-reserva-expira.is-expirada{
+    background:#F1F5F9;
+    color:#64748B;
+    border-color:rgba(100,116,139,.22);
+    box-shadow:none;
+  }
+
+  .vc-reserva-expira.is-expirada .vc-reserva-expira-icone{
+    background:#E2E8F0;
+    color:#64748B;
+  }
+
+  .vc-reserva-expira.is-expirada .vc-reserva-expira-topo,
+  .vc-reserva-expira.is-expirada .vc-reserva-expira-label,
+  .vc-reserva-expira.is-expirada .vc-reserva-expira-restante{
+    color:#64748B;
+  }
+
+  .vc-row-expirada-js{
+    display:none;
   }
 
   .vc-badge.neutro{
@@ -1260,6 +1416,149 @@
     }
   }
 
+
+
+  /* =========================================================
+     LAYOUT CORRIGIDO DOS FILTROS - VENCIMENTOS DE CAMPANHAS
+     Regra visual:
+     1) período + status + marca + vendedor ficam na linha de cima;
+     2) busca fica na linha de baixo;
+     3) botões ficam ao lado da busca.
+     ========================================================= */
+  .vc-page .vc-form.vc-form-layout-v2{
+    width:100% !important;
+    max-width:100% !important;
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:stretch !important;
+    justify-content:flex-start !important;
+    gap:12px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row{
+    width:100% !important;
+    display:flex !important;
+    align-items:flex-start !important;
+    justify-content:flex-start !important;
+    flex-wrap:nowrap !important;
+    gap:12px !important;
+    min-width:0 !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .periodo-shell{
+    flex:2 1 540px !important;
+    min-width:520px !important;
+    max-width:none !important;
+    width:auto !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .vc-dd{
+    flex:1 1 230px !important;
+    min-width:220px !important;
+    max-width:none !important;
+    width:auto !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .periodo-topbar,
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .vc-dd-summary{
+    min-height:50px !important;
+    height:50px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .periodo-topbar{
+    flex-wrap:nowrap !important;
+    overflow:visible !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .periodo-chip{
+    height:34px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .periodo-open{
+    height:34px !important;
+    min-width:160px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row{
+    width:100% !important;
+    display:flex !important;
+    align-items:stretch !important;
+    justify-content:flex-start !important;
+    flex-wrap:nowrap !important;
+    gap:12px !important;
+    min-width:0 !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .vc-search-combobox{
+    flex:1 1 auto !important;
+    width:auto !important;
+    max-width:none !important;
+    min-width:640px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .vc-search-box{
+    height:52px !important;
+    border-radius:15px !important;
+    padding:0 18px !important;
+    box-shadow:0 10px 24px rgba(15,23,42,.07) !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .vc-search-input{
+    height:50px !important;
+    font-size:14px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .vc-search-icon{
+    font-size:17px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .btn,
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row a.btn{
+    min-height:52px !important;
+    height:52px !important;
+    padding:0 20px !important;
+    border-radius:14px !important;
+    font-weight:950 !important;
+    white-space:nowrap !important;
+    flex:0 0 auto !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .btn-primary{
+    min-width:126px !important;
+  }
+
+  .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .btn-secondary{
+    min-width:136px !important;
+  }
+
+  @media (max-width: 1320px){
+    .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row{
+      flex-wrap:wrap !important;
+    }
+    .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .periodo-shell{
+      flex:1 1 100% !important;
+      min-width:0 !important;
+    }
+    .vc-page .vc-form.vc-form-layout-v2 .vc-filtros-top-row .vc-dd{
+      flex:1 1 260px !important;
+      min-width:220px !important;
+    }
+  }
+
+  @media (max-width: 900px){
+    .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row{
+      flex-wrap:wrap !important;
+    }
+    .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .vc-search-combobox{
+      flex:1 1 100% !important;
+      min-width:0 !important;
+    }
+    .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row .btn,
+    .vc-page .vc-form.vc-form-layout-v2 .vc-search-actions-row a.btn{
+      flex:1 1 160px !important;
+    }
+  }
+
 </style>
 
 <div class="container container-limit vc-page">
@@ -1277,32 +1576,9 @@
 
   <div class="vc-card">
     <div class="vc-toolbar">
-      <form id="formVencimentosCampanhas" method="get" action="{{ url_for('admin.vencimentos_campanhas_euromidia') }}" class="vc-form">
-        <div
-          id="comboBuscaVencimentosCampanhas"
-          class="vc-search-combobox"
-          data-sugestoes-url="{{ url_for('admin.vencimentos_campanhas_sugestoes') }}"
-        >
-          <div class="vc-search-box">
-            <span class="vc-search-icon">🔎</span>
-            <input
-              id="buscaVencimentosCampanhas"
-              class="vc-search-input"
-              type="search"
-              name="q"
-              value="{{ q or '' }}"
-              placeholder="Pesquisar por vendedor, contrato, marca, painel/CodFace, razão social ou status..."
-              autocomplete="off"
-              spellcheck="false"
-              aria-autocomplete="list"
-              aria-expanded="false"
-              aria-controls="listaBuscaVencimentosCampanhas"
-            >
-          </div>
-          <div id="listaBuscaVencimentosCampanhas" class="vc-search-sugestoes"></div>
-        </div>
-
-        <div class="periodo-shell" id="periodoShell" title="Período usado para filtrar campanhas pelo vencimento (DataTerminoPrevisto)">
+      <form id="formVencimentosCampanhas" method="get" action="{{ url_for('admin.vencimentos_campanhas_euromidia') }}" class="vc-form vc-form-layout-v2">
+        <div class="vc-filtros-top-row">
+          <div class="periodo-shell" id="periodoShell" title="Período usado para filtrar campanhas pelo vencimento (DataTerminoPrevisto)">
           <div class="periodo-topbar">
             <span class="periodo-chip" data-modo="dia">Dia</span>
             <span class="periodo-chip" data-modo="semana">Semana</span>
@@ -1379,7 +1655,7 @@
           </div>
         </div>
 
-        <details class="vc-dd" data-dd="status">
+          <details class="vc-dd" data-dd="status">
           <summary class="vc-dd-summary">
             <span class="vc-dd-label" data-default="Status">Status</span>
             <span class="vc-dd-caret">▾</span>
@@ -1401,7 +1677,7 @@
           </div>
         </details>
 
-        <details class="vc-dd" data-dd="marca">
+          <details class="vc-dd" data-dd="marca">
           <summary class="vc-dd-summary">
             <span class="vc-dd-label" data-default="Marca">Marca</span>
             <span class="vc-dd-caret">▾</span>
@@ -1422,7 +1698,7 @@
           </div>
         </details>
 
-        {% if usuario_logado_eh_admin %}
+          {% if usuario_logado_eh_admin %}
           <details class="vc-dd" data-dd="vendedor">
             <summary class="vc-dd-summary">
               <span class="vc-dd-label" data-default="Vendedor">Vendedor</span>
@@ -1445,12 +1721,39 @@
             </div>
           </details>
         {% endif %}
+        </div>
 
-        <button type="submit" class="btn btn-primary">Buscar</button>
+        <div class="vc-search-actions-row">
+          <div
+          id="comboBuscaVencimentosCampanhas"
+          class="vc-search-combobox"
+          data-sugestoes-url="{{ url_for('admin.vencimentos_campanhas_sugestoes') }}"
+        >
+          <div class="vc-search-box">
+            <span class="vc-search-icon">🔎</span>
+            <input
+              id="buscaVencimentosCampanhas"
+              class="vc-search-input"
+              type="search"
+              name="q"
+              value="{{ q or '' }}"
+              placeholder="Pesquisar por vendedor, contrato, marca, painel/CodFace, razão social ou status..."
+              autocomplete="off"
+              spellcheck="false"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="listaBuscaVencimentosCampanhas"
+            >
+          </div>
+          <div id="listaBuscaVencimentosCampanhas" class="vc-search-sugestoes"></div>
+        </div>
+
+          <button type="submit" class="btn btn-primary">Pesquisar</button>
 
         {% if q or status_ids_selecionados or marcas_selecionadas or vendedores_ids_selecionados or periodo_filtro_ativo %}
-          <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}">Limpar</a>
+          <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}">Limpar filtro</a>
         {% endif %}
+        </div>
       </form>
     </div>
 
@@ -1475,7 +1778,7 @@
             {% for row in itens %}
               {% set usuario_pode_acessar_contrato = row.UsuarioPodeAcessarContrato if row.UsuarioPodeAcessarContrato is defined else (not usuario_logado_eh_vendedor and row.IDFatoControleContratosEuromidia) %}
               {% set usuario_pode_renovar_linha = row.UsuarioPodeRenovarLinha if row.UsuarioPodeRenovarLinha is defined else (not usuario_logado_eh_vendedor and row.PodeRenovar) %}
-              <tr>
+              <tr data-fonte-linha="{{ row.FonteLinha }}" data-id-reserva="{{ row.IDReservaOcupacao or '' }}">
                 <td data-label="Contrato">
                   {% if usuario_pode_acessar_contrato %}
                     {% set url_contrato_rapido = url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=request.full_path, modo_rapido=1) %}
@@ -1498,7 +1801,29 @@
                 </td>
 
                 <td data-label="Vendedor">
-                  <div class="vc-vendedor">{{ row.NomeVendedor or '—' }}</div>
+                  <div class="vc-vendedor-stack">
+                    <div class="vc-vendedor">{{ row.NomeVendedor or '—' }}</div>
+
+                    {% if row.FonteLinha == 'RESERVA' and row.IDReservaOcupacao and row.UsuarioPodeCancelarReserva %}
+                      <form
+                        class="vc-cancelar-reserva-form js-cancelar-reserva-form"
+                        method="post"
+                        action="{{ url_for('admin.vencimentos_campanhas_cancelar_reserva', id_reserva=row.IDReservaOcupacao) }}"
+                        data-reserva-id="{{ row.IDReservaOcupacao }}"
+                      >
+                        {% if csrf_token is defined %}
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        {% endif %}
+                        <button
+                          type="submit"
+                          class="vc-cancelar-reserva-btn"
+                          title="Cancelar a reserva #{{ row.IDReservaOcupacao }}"
+                        >
+                          Cancelar Reserva
+                        </button>
+                      </form>
+                    {% endif %}
+                  </div>
                 </td>
 
                 <td data-label="Marca">
@@ -1518,7 +1843,27 @@
                 </td>
 
                 <td data-label="Status">
-                  <span class="vc-badge {{ row.ClasseStatus }}">{{ row.NomeStatus or 'Sem status' }}</span>
+                  <div class="vc-status-stack">
+                    <span class="vc-badge {{ row.ClasseStatus }}">{{ row.NomeStatus or 'Sem status' }}</span>
+                    {% if row.FonteLinha == 'RESERVA' and row.ReservaExpiraEmIso %}
+                      <span
+                        class="vc-reserva-expira js-reserva-expira"
+                        data-expira-em="{{ row.ReservaExpiraEmIso }}"
+                        data-expira-formatada="{{ row.ReservaExpiraEmTexto or '' }}"
+                        aria-label="Expira em: {{ row.ReservaExpiraEmTexto or row.ReservaExpiraEmIso }}"
+                        title="Expira em: {{ row.ReservaExpiraEmTexto or row.ReservaExpiraEmIso }}"
+                      >
+                        <span class="vc-reserva-expira-icone" aria-hidden="true">⏱</span>
+                        <span class="vc-reserva-expira-info">
+                          <span class="vc-reserva-expira-topo">
+                            <span class="vc-reserva-expira-label">Expira:</span>
+                            <span class="vc-reserva-expira-data">{{ row.ReservaExpiraEmTexto or row.ReservaExpiraEmIso }}</span>
+                          </span>
+                          <span class="vc-reserva-expira-restante">calculando...</span>
+                        </span>
+                      </span>
+                    {% endif %}
+                  </div>
                 </td>
 
                 <td data-label="Dias" title="Dias restantes até o fim da campanha. Se já terminou, exibe 0.">
@@ -2234,6 +2579,91 @@
         });
     }, 180);
   }
+
+
+  function vcPad2(valor){
+    return String(Math.max(0, Number(valor) || 0)).padStart(2, '0');
+  }
+
+  function vcDataLocalReserva(valor){
+    const texto = String(valor || '').trim();
+    if(!texto){ return null; }
+
+    const data = new Date(texto);
+    if(!Number.isNaN(data.getTime())){ return data; }
+
+    const normalizado = texto.replace(' ', 'T').slice(0, 19);
+    const dataNormalizada = new Date(normalizado);
+    if(!Number.isNaN(dataNormalizada.getTime())){ return dataNormalizada; }
+
+    return null;
+  }
+
+  function vcFormatarTempoReserva(msRestante){
+    if(msRestante <= 0){ return 'VENCIDA'; }
+
+    const totalSegundos = Math.floor(msRestante / 1000);
+    const horas = Math.floor(totalSegundos / 3600);
+    const minutos = Math.floor((totalSegundos % 3600) / 60);
+    const segundos = totalSegundos % 60;
+
+    return `${vcPad2(horas)}h ${vcPad2(minutos)}m ${vcPad2(segundos)}s`;
+  }
+
+  function atualizarRelogiosReserva(){
+    const agora = Date.now();
+
+    document.querySelectorAll('.js-reserva-expira').forEach(function(el){
+      const dataExpiracao = vcDataLocalReserva(el.dataset.expiraEm);
+      const restanteEl = el.querySelector('.vc-reserva-expira-restante');
+      const dataFormatada = el.dataset.expiraFormatada || el.dataset.expiraEm || '';
+
+      if(!dataExpiracao){
+        if(restanteEl){ restanteEl.textContent = 'sem horário'; }
+        return;
+      }
+
+      const msRestante = dataExpiracao.getTime() - agora;
+      const textoRestante = vcFormatarTempoReserva(msRestante);
+
+      if(restanteEl){ restanteEl.textContent = textoRestante; }
+
+      if(msRestante <= 0){
+        el.classList.add('is-expirada');
+        el.setAttribute('aria-label', `Expira em: ${dataFormatada} (vencida)`);
+        el.setAttribute('title', `Expira em: ${dataFormatada} (vencida)`);
+
+        const linha = el.closest('tr');
+        if(linha){
+          setTimeout(function(){
+            linha.classList.add('vc-row-expirada-js');
+          }, 650);
+        }
+      }else{
+        el.classList.remove('is-expirada');
+        el.setAttribute('aria-label', `Expira em: ${dataFormatada} (faltam ${textoRestante})`);
+        el.setAttribute('title', `Expira em: ${dataFormatada} (faltam ${textoRestante})`);
+      }
+    });
+  }
+
+  if(document.querySelector('.js-reserva-expira')){
+    atualizarRelogiosReserva();
+    setInterval(atualizarRelogiosReserva, 1000);
+  }
+
+  document.querySelectorAll('.js-cancelar-reserva-form').forEach(function(form){
+    form.addEventListener('submit', function(ev){
+      const idReserva = form.dataset.reservaId || '';
+      const mensagem = idReserva
+        ? `Confirmar cancelamento da reserva #${idReserva}?`
+        : 'Confirmar cancelamento desta reserva?';
+
+      if(!window.confirm(mensagem)){
+        ev.preventDefault();
+      }
+    });
+  });
 
   document.querySelectorAll('.vc-page details.vc-dd').forEach(configurarDropdown);
 

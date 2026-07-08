@@ -383,6 +383,170 @@
     overflow-wrap:anywhere;
   }
 
+  .msg-reserva-card{
+    background:#fff;
+    border:1px solid #E6EAF2;
+    border-radius:18px;
+    overflow:hidden;
+    box-shadow:0 10px 26px rgba(15,23,42,.08);
+    margin-bottom:18px;
+  }
+
+  .msg-reserva-topbar{
+    height:9px;
+    background:#FFD000;
+  }
+
+  .msg-reserva-hero{
+    background:#0B0C8F;
+    color:#fff;
+    padding:22px 26px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+
+  .msg-reserva-title{
+    font-size:clamp(21px, 2vw, 30px);
+    line-height:1.05;
+    font-weight:950;
+    letter-spacing:-.03em;
+  }
+
+  .msg-reserva-subtitle{
+    margin-top:6px;
+    font-size:12px;
+    line-height:1.45;
+    font-weight:850;
+    opacity:.96;
+  }
+
+  .msg-reserva-badge{
+    background:rgba(255,255,255,.12);
+    border:1px solid rgba(255,255,255,.26);
+    border-radius:999px;
+    padding:9px 12px;
+    font-size:12px;
+    font-weight:950;
+    white-space:nowrap;
+  }
+
+  .msg-reserva-body{
+    padding:22px 26px 24px 26px;
+  }
+
+  .msg-reserva-abertura{
+    margin:0 0 18px 0;
+    color:#1D2433;
+    font-size:14px;
+    line-height:1.65;
+    font-weight:700;
+  }
+
+  .msg-reserva-label{
+    margin:0 0 12px 0;
+    color:#4F5B6B;
+    font-size:12px;
+    line-height:1.5;
+    font-weight:850;
+  }
+
+  .msg-reserva-table-wrap{
+    width:100%;
+    overflow:auto;
+    border:1px solid #E7EBF3;
+    border-radius:13px;
+    margin-bottom:20px;
+  }
+
+  .msg-reserva-table{
+    width:100%;
+    min-width:860px;
+    border-collapse:separate;
+    border-spacing:0;
+    font-size:12px;
+  }
+
+  .msg-reserva-table th{
+    background:#4B4BDB;
+    color:#fff;
+    padding:12px 10px;
+    text-align:left;
+    font-size:10px;
+    line-height:1.2;
+    letter-spacing:.2px;
+    text-transform:uppercase;
+    font-weight:950;
+    white-space:nowrap;
+  }
+
+  .msg-reserva-table th.is-center,
+  .msg-reserva-table td.is-center{
+    text-align:center;
+  }
+
+  .msg-reserva-table td{
+    padding:14px 12px;
+    border-bottom:1px solid #E8ECF5;
+    color:#1D2433;
+    font-size:12px;
+    line-height:1.35;
+    font-weight:700;
+    white-space:nowrap;
+  }
+
+  .msg-reserva-table tbody tr:nth-child(even){
+    background:#FAFBFF;
+  }
+
+  .msg-reserva-table tbody tr:last-child td{
+    border-bottom:0;
+  }
+
+  .msg-reserva-table td.is-strong{
+    font-weight:950;
+  }
+
+  .msg-reserva-table td.is-alert{
+    color:#CF1F2E;
+    font-weight:950;
+    text-align:center;
+  }
+
+  .msg-reserva-aviso{
+    display:grid;
+    grid-template-columns:6px minmax(0, 1fr);
+    background:#FFF1F3;
+    border-radius:12px;
+    overflow:hidden;
+  }
+
+  .msg-reserva-aviso-bar{
+    background:#E0202D;
+  }
+
+  .msg-reserva-aviso-body{
+    padding:17px 18px 16px 18px;
+  }
+
+  .msg-reserva-aviso-title{
+    color:#991B1B;
+    font-size:14px;
+    font-weight:950;
+    margin-bottom:8px;
+  }
+
+  .msg-reserva-aviso-list{
+    margin:0;
+    padding-left:17px;
+    color:#7F1D1D;
+    font-size:12px;
+    line-height:1.65;
+    font-weight:750;
+  }
+
   .msg-detail-grid{
     display:grid;
     grid-template-columns:repeat(3, minmax(0, 1fr));
@@ -966,6 +1130,120 @@
     }
   }
 
+  function textoReservaSeguro(valor, padrao){
+    const texto = (valor === undefined || valor === null) ? "" : String(valor).trim();
+    return texto || (padrao || "—");
+  }
+
+  function valoresUnicosReserva(linhas, campo){
+    const vistos = new Set();
+    const valores = [];
+
+    (Array.isArray(linhas) ? linhas : []).forEach(function(linha){
+      const valor = textoReservaSeguro(linha && linha[campo], "");
+      if (valor && !vistos.has(valor)){
+        vistos.add(valor);
+        valores.push(valor);
+      }
+    });
+
+    return valores;
+  }
+
+  function renderizarReservaConfirmada(container, payload, textoFallback){
+    const dados = payload && typeof payload === "object" ? payload : {};
+    const linhas = Array.isArray(dados.linhas) ? dados.linhas : [];
+    const avisos = Array.isArray(dados.avisos) ? dados.avisos : [];
+
+    const card = criarEl("div", "msg-reserva-card");
+    card.appendChild(criarEl("div", "msg-reserva-topbar"));
+
+    const hero = criarEl("div", "msg-reserva-hero");
+    const heroText = criarEl("div", "");
+    heroText.appendChild(criarEl("div", "msg-reserva-title", textoReservaSeguro(dados.titulo_visual, "Reserva Confirmada")));
+    heroText.appendChild(criarEl("div", "msg-reserva-subtitle", textoReservaSeguro(dados.subtitulo_visual, "Bloqueio registrado com validade de 48h úteis.")));
+    hero.appendChild(heroText);
+
+    const totalFaces = valoresUnicosReserva(linhas, "cod_face").length;
+    const badgeTexto = totalFaces > 1 ? `${totalFaces} faces reservadas` : "1 face reservada";
+    hero.appendChild(criarEl("div", "msg-reserva-badge", badgeTexto));
+    card.appendChild(hero);
+
+    const body = criarEl("div", "msg-reserva-body");
+    body.appendChild(criarEl("p", "msg-reserva-abertura", textoReservaSeguro(dados.frase_abertura, textoFallback || "Reserva confirmada.")));
+    body.appendChild(criarEl("p", "msg-reserva-label", "Confira os detalhes da reserva abaixo:"));
+
+    if (linhas.length){
+      const wrap = criarEl("div", "msg-reserva-table-wrap");
+      const tabela = criarEl("table", "msg-reserva-table");
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+
+      const colunas = [
+        ["Número da Reserva", "numero_reserva", ""],
+        ["Vendedor", "vendedor", ""],
+        ["Código Face", "cod_face", ""],
+        ["Cota", "cota", "is-center"],
+        ["Data Início Campanha", "data_inicio", "is-center"],
+        ["Data Fim Campanha", "data_fim", "is-center"],
+        ["Marca", "marca", ""],
+        ["Fim do Bloqueio", "fim_bloqueio", "is-center"]
+      ];
+
+      colunas.forEach(function(col){
+        const th = criarEl("th", col[2] || "", col[0]);
+        trHead.appendChild(th);
+      });
+
+      thead.appendChild(trHead);
+      tabela.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      linhas.forEach(function(linha){
+        const tr = document.createElement("tr");
+        colunas.forEach(function(col){
+          const classeBase = col[2] || "";
+          let classe = classeBase;
+          if (col[1] === "numero_reserva" || col[1] === "cod_face"){
+            classe = (classe ? classe + " " : "") + "is-strong";
+          }
+          if (col[1] === "fim_bloqueio"){
+            classe = (classe ? classe + " " : "") + "is-alert";
+          }
+          tr.appendChild(criarEl("td", classe, textoReservaSeguro(linha && linha[col[1]], "—")));
+        });
+        tbody.appendChild(tr);
+      });
+      tabela.appendChild(tbody);
+      wrap.appendChild(tabela);
+      body.appendChild(wrap);
+    } else if (textoFallback){
+      body.appendChild(criarEl("div", "msg-detail-text", textoFallback));
+    }
+
+    const aviso = criarEl("div", "msg-reserva-aviso");
+    aviso.appendChild(criarEl("div", "msg-reserva-aviso-bar"));
+    const avisoBody = criarEl("div", "msg-reserva-aviso-body");
+    avisoBody.appendChild(criarEl("div", "msg-reserva-aviso-title", "Avisos importantes"));
+    const ul = criarEl("ul", "msg-reserva-aviso-list");
+
+    const avisosFinais = avisos.length ? avisos : [
+      "Esta Reserva será expirada automaticamente dentro do prazo limite.",
+      "A Venda só será efetivada e aprovada após o envio dos documentos oficiais."
+    ];
+
+    avisosFinais.forEach(function(item){
+      ul.appendChild(criarEl("li", "", textoReservaSeguro(item, "")));
+    });
+
+    avisoBody.appendChild(ul);
+    aviso.appendChild(avisoBody);
+    body.appendChild(aviso);
+    card.appendChild(body);
+
+    container.appendChild(card);
+  }
+
   function renderizarDetalhe(msg){
     limparElemento(detalhe);
     mensagemAbertaId = msg.id;
@@ -989,25 +1267,53 @@
 
     detalhe.appendChild(meta);
 
-    const texto = criarEl("div", "msg-detail-text", msg.texto || "");
-    detalhe.appendChild(texto);
+    const payloadReserva = msg && msg.reserva_confirmada ? msg.reserva_confirmada : null;
+
+    if (payloadReserva){
+      renderizarReservaConfirmada(detalhe, payloadReserva, msg.texto || "");
+    } else {
+      const texto = criarEl("div", "msg-detail-text", msg.texto || "");
+      detalhe.appendChild(texto);
+    }
 
     const grid = criarEl("div", "msg-detail-grid");
 
-    const infoContrato = criarEl("div", "msg-info-box");
-    infoContrato.appendChild(criarEl("div", "msg-info-label", "Contrato"));
-    infoContrato.appendChild(criarEl("div", "msg-info-value", msg.id_contrato ? String(msg.id_contrato) : "—"));
-    grid.appendChild(infoContrato);
+    if (payloadReserva){
+      const linhasReserva = Array.isArray(payloadReserva.linhas) ? payloadReserva.linhas : [];
+      const idsReserva = Array.isArray(payloadReserva.ids_reserva) ? payloadReserva.ids_reserva : valoresUnicosReserva(linhasReserva, "numero_reserva");
+      const codFaces = valoresUnicosReserva(linhasReserva, "cod_face");
+      const finsBloqueio = valoresUnicosReserva(linhasReserva, "fim_bloqueio");
 
-    const infoItem = criarEl("div", "msg-info-box");
-    infoItem.appendChild(criarEl("div", "msg-info-label", "Item contrato"));
-    infoItem.appendChild(criarEl("div", "msg-info-value", msg.id_item ? String(msg.id_item) : "—"));
-    grid.appendChild(infoItem);
+      const infoReservas = criarEl("div", "msg-info-box");
+      infoReservas.appendChild(criarEl("div", "msg-info-label", "Reservas"));
+      infoReservas.appendChild(criarEl("div", "msg-info-value", idsReserva.length ? idsReserva.join(" / ") : "—"));
+      grid.appendChild(infoReservas);
 
-    const infoVencimento = criarEl("div", "msg-info-box");
-    infoVencimento.appendChild(criarEl("div", "msg-info-label", "Vencimento campanha"));
-    infoVencimento.appendChild(criarEl("div", "msg-info-value", msg.id_vencimento ? String(msg.id_vencimento) : "—"));
-    grid.appendChild(infoVencimento);
+      const infoFaces = criarEl("div", "msg-info-box");
+      infoFaces.appendChild(criarEl("div", "msg-info-label", "CodFaces"));
+      infoFaces.appendChild(criarEl("div", "msg-info-value", codFaces.length ? codFaces.join(" / ") : "—"));
+      grid.appendChild(infoFaces);
+
+      const infoBloqueio = criarEl("div", "msg-info-box");
+      infoBloqueio.appendChild(criarEl("div", "msg-info-label", "Fim do bloqueio"));
+      infoBloqueio.appendChild(criarEl("div", "msg-info-value", finsBloqueio.length ? finsBloqueio.join(" / ") : "—"));
+      grid.appendChild(infoBloqueio);
+    } else {
+      const infoContrato = criarEl("div", "msg-info-box");
+      infoContrato.appendChild(criarEl("div", "msg-info-label", "Contrato"));
+      infoContrato.appendChild(criarEl("div", "msg-info-value", msg.id_contrato ? String(msg.id_contrato) : "—"));
+      grid.appendChild(infoContrato);
+
+      const infoItem = criarEl("div", "msg-info-box");
+      infoItem.appendChild(criarEl("div", "msg-info-label", "Item contrato"));
+      infoItem.appendChild(criarEl("div", "msg-info-value", msg.id_item ? String(msg.id_item) : "—"));
+      grid.appendChild(infoItem);
+
+      const infoVencimento = criarEl("div", "msg-info-box");
+      infoVencimento.appendChild(criarEl("div", "msg-info-label", "Vencimento campanha"));
+      infoVencimento.appendChild(criarEl("div", "msg-info-value", msg.id_vencimento ? String(msg.id_vencimento) : "—"));
+      grid.appendChild(infoVencimento);
+    }
 
     detalhe.appendChild(grid);
 

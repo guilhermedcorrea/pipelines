@@ -51,6 +51,11 @@ import hashlib
 from sqlalchemy.orm import aliased, noload
 from ..extensions import cache
 
+try:
+    from app.socket_events import emitir_nova_mensagem_usuario
+except Exception:  # pragma: no cover - mantém o módulo importável mesmo se o Socket.IO não estiver carregado
+    emitir_nova_mensagem_usuario = None
+
 
 
 
@@ -23498,6 +23503,18 @@ def _buscar_dados_email_confirmacao_reserva(ids_fato_ocupacao) -> dict:
     sql = text("""
         SELECT
              IDReserva = o.IDFatoOcupacaoPaineisEuromidia
+            ,IDDimUsuariosDestinatario = COALESCE(
+                TRY_CONVERT(int, u_vendedor.IDDimUsuarios),
+                TRY_CONVERT(int, u_criador.IDDimUsuarios),
+                TRY_CONVERT(int, o.CriadoPorIDUsuario)
+             )
+            ,IDDimUsuariosVendedor = TRY_CONVERT(int, u_vendedor.IDDimUsuarios)
+            ,IDDimUsuariosCriador = TRY_CONVERT(int, u_criador.IDDimUsuarios)
+            ,IDUsuarioCriacaoRaw = TRY_CONVERT(int, o.CriadoPorIDUsuario)
+            ,IDFatoControleContratosEuromidia = TRY_CONVERT(int, o.IDFatoControleContratos)
+            ,IDFatoControleContratosItensEuromidia = CONVERT(int, NULL)
+            ,IDCliente = TRY_CONVERT(int, o.IDCliente)
+            ,IDVendedorReserva = TRY_CONVERT(int, o.IDVendedor)
             ,EmailUsuario = COALESCE(
                 NULLIF(LTRIM(RTRIM(u_vendedor.Email)), ''),
                 NULLIF(LTRIM(RTRIM(u_criador.Email)), '')
@@ -23987,6 +24004,419 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
         )
         return {"enviado": False, "motivo": str(exc)[:300]}
 
+
+
+
+RESERVA_NOTIFICACAO_MARKER = "__EUROMIDIA_RESERVA_CONFIRMADA_JSON__"
+
+
+def _notificacao_reserva_int_ou_none(valor):
+    try:
+        if valor is None or str(valor).strip() == "":
+            return None
+        valor_int = int(valor)
+        return valor_int if valor_int > 0 else None
+    except Exception:
+        return None
+
+
+def _notificacao_reserva_montar_payload(dados: dict) -> dict:
+    """
+    Monta o payload estruturado da notificação de reserva confirmada.
+
+    A notificação usa a mesma base de dados do e-mail, mas guarda um JSON no final
+    do TextoMensagem para a tela /admin/mensagens renderizar uma tabela segura,
+    sem depender de HTML vindo do banco.
+    """
+    linhas_reserva = dados.get("LinhasReserva") or [dados]
+    linhas_payload = []
+
+    ids_reserva = []
+    vistos_reserva = set()
+
+    for linha in linhas_reserva:
+        linha_dict = dict(linha or {})
+
+        expira_em = linha_dict.get("ExpiraEm")
+        if not expira_em:
+            criado_em = linha_dict.get("CriadoEm")
+            if isinstance(criado_em, datetime):
+                expira_em = _somar_dias_uteis_reserva(criado_em, 2)
+
+        id_reserva_texto = _email_reserva_texto_seguro(linha_dict.get("IDReserva"), "")
+        if id_reserva_texto and id_reserva_texto not in vistos_reserva:
+            ids_reserva.append(id_reserva_texto)
+            vistos_reserva.add(id_reserva_texto)
+
+        linhas_payload.append({
+            "numero_reserva": _email_reserva_texto_seguro(linha_dict.get("IDReserva")),
+            "vendedor": _email_reserva_texto_seguro(linha_dict.get("Vendedor")),
+            "cod_face": _email_reserva_texto_seguro(linha_dict.get("CodFace")),
+            "cota": _email_reserva_texto_seguro(linha_dict.get("Cota")),
+            "data_inicio": _email_reserva_formatar_data(linha_dict.get("DataInicio"), incluir_hora=False),
+            "data_fim": _email_reserva_formatar_data(linha_dict.get("DataFim"), incluir_hora=False),
+            "marca": _email_reserva_texto_seguro(linha_dict.get("MarcaExibida")),
+            "fim_bloqueio": _email_reserva_formatar_data(expira_em, incluir_hora=True),
+            "cod_ponto": _email_reserva_texto_seguro(linha_dict.get("CodPonto")),
+            "referencia_painel": _email_reserva_texto_seguro(linha_dict.get("ReferenciaPainel")),
+            "cidade": _email_reserva_texto_seguro(linha_dict.get("Cidade")),
+            "uf": _email_reserva_texto_seguro(linha_dict.get("UF")),
+        })
+
+    ids_reserva_texto = ", ".join(ids_reserva) if ids_reserva else ", ".join(str(x) for x in (dados.get("IDsConsulta") or []))
+    ids_reserva_assunto = "/".join(ids_reserva) if ids_reserva else ids_reserva_texto.replace(", ", "/")
+    nome_usuario = str(dados.get("NomeUsuario") or "Usuário").strip() or "Usuário"
+    vendedor_assunto = str(dados.get("Vendedor") or nome_usuario or "Usuário").strip() or "Usuário"
+
+    if len(ids_reserva) > 1:
+        frase_abertura = f"Olá, {nome_usuario}, suas reservas números {ids_reserva_texto} foram confirmadas."
+    else:
+        frase_abertura = f"Olá, {nome_usuario}, sua reserva número {ids_reserva_texto} foi confirmada."
+
+    titulo = f"{vendedor_assunto} - Reserva {ids_reserva_assunto} realizada com sucesso"[:180]
+    resumo = f"Reserva confirmada: {ids_reserva_texto}. Confira as CodFaces e o fim do bloqueio."
+
+    payload = {
+        "tipo_payload": "reserva_confirmada",
+        "versao": 1,
+        "ids_reserva": ids_reserva,
+        "ids_chave": "|".join(ids_reserva),
+        "titulo_visual": "Reserva Confirmada",
+        "subtitulo_visual": "Bloqueio registrado com validade de 48h úteis.",
+        "frase_abertura": frase_abertura,
+        "resumo": resumo,
+        "linhas": linhas_payload,
+        "avisos": [
+            "Esta Reserva será expirada automaticamente dentro do prazo limite.",
+            "A Venda só será efetivada e aprovada após o envio dos documentos oficiais.",
+        ],
+    }
+
+    texto_humano = (
+        f"{frase_abertura}\n\n"
+        "Confira os detalhes da reserva na tabela da mensagem.\n\n"
+        "Avisos importantes:\n"
+        "Esta Reserva será expirada automaticamente dentro do prazo limite.\n"
+        "A Venda só será efetivada e aprovada após o envio dos documentos oficiais."
+    )
+
+    texto_banco = (
+        texto_humano
+        + "\n\n"
+        + RESERVA_NOTIFICACAO_MARKER
+        + "\n"
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    )
+
+    return {
+        "titulo": titulo,
+        "resumo": resumo,
+        "texto": texto_banco,
+        "payload": payload,
+        "ids_reserva_texto": ids_reserva_texto,
+    }
+
+
+
+def _notificacao_reserva_ids_destinatarios(dados: dict) -> list[int]:
+    """
+    Resolve todos os usuários que precisam receber a mensagem interna da reserva.
+
+    A falha mais comum aqui é gravar a mensagem só para o usuário vinculado ao
+    vendedor e deixar de fora o usuário que realmente criou a reserva. Por isso
+    eu envio para os dois quando forem IDs diferentes:
+    - usuário vinculado ao vendedor;
+    - usuário criador da reserva;
+    - usuário logado no request, quando houver contexto de request.
+    """
+    candidatos = []
+
+    def adicionar(valor):
+        valor_int = _notificacao_reserva_int_ou_none(valor)
+        if valor_int and valor_int not in candidatos:
+            candidatos.append(valor_int)
+
+    adicionar(dados.get("IDDimUsuariosDestinatario"))
+    adicionar(dados.get("IDDimUsuariosVendedor"))
+    adicionar(dados.get("IDDimUsuariosCriador"))
+    adicionar(dados.get("IDUsuarioCriacaoRaw"))
+
+    for linha in dados.get("LinhasReserva") or []:
+        linha_dict = dict(linha or {})
+        adicionar(linha_dict.get("IDDimUsuariosDestinatario"))
+        adicionar(linha_dict.get("IDDimUsuariosVendedor"))
+        adicionar(linha_dict.get("IDDimUsuariosCriador"))
+        adicionar(linha_dict.get("IDUsuarioCriacaoRaw"))
+
+    try:
+        adicionar(getattr(current_user, "IDDimUsuarios", None))
+        adicionar(getattr(current_user, "id", None))
+    except Exception:
+        pass
+
+    return candidatos
+
+
+def _notificacao_reserva_resolver_tipo_mensagem_id():
+    """
+    Resolve o IDDimTipoMensagem usado na FatoMensagemUsuario.
+
+    Não crio tipo novo aqui para não depender de permissão/DDL/DML em dimensão.
+    Se existir um tipo específico de reserva, uso ele. Se não existir, uso o
+    primeiro tipo ativo encontrado, mantendo compatibilidade com a tela atual.
+    """
+    row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                IDDimTipoMensagem
+            FROM [Integracao].[Silver].[DimTipoMensagem] WITH (NOLOCK)
+            WHERE UPPER(LTRIM(RTRIM(NomeTipoMensagem))) IN (
+                N'RESERVA CONFIRMADA',
+                N'RESERVA',
+                N'RESERVA DE OCUPACAO',
+                N'RESERVA DE OCUPAÇÃO',
+                N'CONFIRMACAO DE RESERVA',
+                N'CONFIRMAÇÃO DE RESERVA'
+            )
+            ORDER BY
+                CASE UPPER(LTRIM(RTRIM(NomeTipoMensagem)))
+                    WHEN N'RESERVA CONFIRMADA' THEN 0
+                    WHEN N'CONFIRMAÇÃO DE RESERVA' THEN 1
+                    WHEN N'CONFIRMACAO DE RESERVA' THEN 2
+                    WHEN N'RESERVA' THEN 3
+                    ELSE 4
+                END,
+                IDDimTipoMensagem;
+        """)
+    ).mappings().first()
+
+    id_tipo = _notificacao_reserva_int_ou_none(row.get("IDDimTipoMensagem") if row else None)
+    if id_tipo:
+        return id_tipo
+
+    row = db.session.execute(
+        text("""
+            SELECT TOP (1)
+                IDDimTipoMensagem
+            FROM [Integracao].[Silver].[DimTipoMensagem] WITH (NOLOCK)
+            ORDER BY IDDimTipoMensagem;
+        """)
+    ).mappings().first()
+
+    return _notificacao_reserva_int_ou_none(row.get("IDDimTipoMensagem") if row else None)
+
+
+def _registrar_notificacao_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
+    """
+    Cria a mensagem interna em Integracao.Silver.FatoMensagemUsuario.
+
+    Ajuste importante:
+    - não uso mais INSERT multi-statement com @@ROWCOUNT, porque em SQL Server +
+      SQLAlchemy/pyodbc isso pode falhar/rollbackar silenciosamente dependendo
+      do driver;
+    - faço SELECT do tipo, SELECT de duplicidade e INSERT separados na mesma
+      transação;
+    - envio para vendedor e criador da reserva, evitando o caso do e-mail sair,
+      mas a tela /admin/mensagens do usuário logado não receber a mensagem.
+    """
+    ids_ocupacao = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    if not ids_ocupacao:
+        return {"registrada": False, "motivo": "ids_reserva_invalidos"}
+
+    dados = _buscar_dados_email_confirmacao_reserva(ids_ocupacao)
+    if not dados:
+        return {"registrada": False, "motivo": "dados_reserva_nao_encontrados"}
+
+    ids_destinatarios = _notificacao_reserva_ids_destinatarios(dados)
+    if not ids_destinatarios:
+        current_app.logger.warning(
+            "RESERVA_NOTIFICACAO | nenhum destinatário identificado | ids_reserva=%s",
+            ids_ocupacao,
+        )
+        return {"registrada": False, "motivo": "destinatario_nao_identificado"}
+
+    pacote = _notificacao_reserva_montar_payload(dados)
+    linhas = (pacote.get("payload") or {}).get("linhas") or []
+
+    link_destino = ""
+    primeiro = linhas[0] if linhas else {}
+    cod_ponto = str(primeiro.get("cod_ponto") or dados.get("CodPonto") or "").strip()
+    if cod_ponto:
+        link_destino = f"/paineis/ocupacao?codponto={cod_ponto}"
+
+    try:
+        id_tipo_reserva = _notificacao_reserva_resolver_tipo_mensagem_id()
+        if not id_tipo_reserva:
+            db.session.rollback()
+            current_app.logger.warning(
+                "RESERVA_NOTIFICACAO | IDDimTipoMensagem não encontrado | ids_reserva=%s",
+                ids_ocupacao,
+            )
+            return {"registrada": False, "motivo": "tipo_mensagem_nao_encontrado"}
+
+        ids_mensagens_inseridas = []
+        ids_ja_existentes = []
+
+        sql_buscar_existente = text("""
+            SELECT TOP (1)
+                IDFatoMensagemUsuario
+            FROM [Integracao].[Silver].[FatoMensagemUsuario] WITH (UPDLOCK, HOLDLOCK)
+            WHERE IDDimUsuariosDestinatario = :id_usuario_destinatario
+              AND ISNULL(BitAtivo, 1) = 1
+              AND ISNULL(TituloMensagem, '') = :titulo
+            ORDER BY IDFatoMensagemUsuario DESC;
+        """)
+
+        sql_inserir = text("""
+            INSERT INTO [Integracao].[Silver].[FatoMensagemUsuario]
+            (
+                IDDimUsuariosDestinatario,
+                IDDimTipoMensagem,
+                TituloMensagem,
+                TextoMensagem,
+                LinkDestino,
+                BitLida,
+                DataLeitura,
+                BitAtivo,
+                DataCriacao,
+                DataAtualizacao
+            )
+            VALUES
+            (
+                :id_usuario_destinatario,
+                :id_tipo_mensagem,
+                :titulo,
+                :texto_mensagem,
+                NULLIF(LTRIM(RTRIM(:link_destino)), ''),
+                0,
+                NULL,
+                1,
+                SYSDATETIME(),
+                SYSDATETIME()
+            );
+        """)
+
+        for id_usuario_destinatario in ids_destinatarios:
+            row_existente = db.session.execute(
+                sql_buscar_existente,
+                {
+                    "id_usuario_destinatario": int(id_usuario_destinatario),
+                    "titulo": pacote["titulo"],
+                },
+            ).mappings().first()
+
+            id_existente = _notificacao_reserva_int_ou_none(
+                row_existente.get("IDFatoMensagemUsuario") if row_existente else None
+            )
+            if id_existente:
+                ids_ja_existentes.append(id_existente)
+                continue
+
+            db.session.execute(
+                sql_inserir,
+                {
+                    "id_usuario_destinatario": int(id_usuario_destinatario),
+                    "id_tipo_mensagem": int(id_tipo_reserva),
+                    "titulo": pacote["titulo"],
+                    "texto_mensagem": pacote["texto"],
+                    "link_destino": link_destino,
+                },
+            )
+
+            row_inserido = db.session.execute(
+                text("""
+                    SELECT TOP (1)
+                        IDFatoMensagemUsuario
+                    FROM [Integracao].[Silver].[FatoMensagemUsuario] WITH (NOLOCK)
+                    WHERE IDDimUsuariosDestinatario = :id_usuario_destinatario
+                      AND ISNULL(BitAtivo, 1) = 1
+                      AND ISNULL(TituloMensagem, '') = :titulo
+                    ORDER BY IDFatoMensagemUsuario DESC;
+                """),
+                {
+                    "id_usuario_destinatario": int(id_usuario_destinatario),
+                    "titulo": pacote["titulo"],
+                },
+            ).mappings().first()
+
+            id_inserido = _notificacao_reserva_int_ou_none(
+                row_inserido.get("IDFatoMensagemUsuario") if row_inserido else None
+            )
+            ids_mensagens_inseridas.append(id_inserido or int(id_usuario_destinatario))
+
+        db.session.commit()
+
+        if ids_mensagens_inseridas and callable(emitir_nova_mensagem_usuario):
+            for id_usuario_destinatario in ids_destinatarios:
+                try:
+                    emitir_nova_mensagem_usuario(int(id_usuario_destinatario))
+                except Exception:
+                    current_app.logger.exception(
+                        "RESERVA_NOTIFICACAO | falha ao emitir socket | id_usuario=%s | ids_reserva=%s",
+                        id_usuario_destinatario,
+                        ids_ocupacao,
+                    )
+
+        current_app.logger.info(
+            "RESERVA_NOTIFICACAO | concluída | ids_reserva=%s | destinatarios=%s | inseridas=%s | existentes=%s",
+            ids_ocupacao,
+            ids_destinatarios,
+            ids_mensagens_inseridas,
+            ids_ja_existentes,
+        )
+
+        return {
+            "registrada": bool(ids_mensagens_inseridas),
+            "motivo": None if ids_mensagens_inseridas else "mensagem_ja_existente",
+            "ids_usuarios": ids_destinatarios,
+            "ids_mensagens_inseridas": ids_mensagens_inseridas,
+            "ids_mensagens_existentes": ids_ja_existentes,
+            "linhas_inseridas": len(ids_mensagens_inseridas),
+        }
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "RESERVA_NOTIFICACAO | falha ao registrar mensagem interna | ids_reserva=%s | destinatarios=%s",
+            ids_ocupacao,
+            ids_destinatarios,
+        )
+        return {"registrada": False, "motivo": str(exc)[:300], "ids_usuarios": ids_destinatarios}
+
+
+def _registrar_notificacao_confirmacao_reserva_ocupacao_agrupada(ids_fato_ocupacao) -> dict:
+    """
+    Registra a notificação agrupada da tela /paineis/reserva-ocupacao.
+
+    Usa a mesma regra do e-mail: só a chamada que contém o maior ID do grupo
+    grava a mensagem. Assim, várias CodFaces do mesmo cliente viram uma única
+    notificação com todas as faces na tabela.
+    """
+    ids_atuais = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    if not ids_atuais:
+        return {"registrada": False, "motivo": "ids_reserva_invalidos"}
+
+    ids_grupo = _buscar_ids_grupo_email_reserva_ocupacao(ids_atuais, janela_segundos=120)
+    if not ids_grupo:
+        return {"registrada": False, "motivo": "grupo_reserva_vazio"}
+
+    maior_id_atual = max(ids_atuais)
+    maior_id_grupo = max(ids_grupo)
+
+    if maior_id_atual != maior_id_grupo:
+        current_app.logger.info(
+            "RESERVA_NOTIFICACAO | registro agrupado ignorado nesta chamada; outra CodFace do mesmo cliente registrará a mensagem | ids_atuais=%s | ids_grupo=%s | maior_id_grupo=%s",
+            ids_atuais,
+            ids_grupo,
+            maior_id_grupo,
+        )
+        return {
+            "registrada": False,
+            "motivo": "agrupada_em_outra_notificacao_reserva_ocupacao",
+            "ids_grupo": ids_grupo,
+        }
+
+    return _registrar_notificacao_confirmacao_reserva_por_id(ids_grupo)
 
 
 
@@ -24622,6 +25052,7 @@ def _agendar_email_confirmacao_reserva_ocupacao(ids_fato_ocupacao, atraso_segund
             with app.app_context():
                 try:
                     _enviar_email_confirmacao_reserva_ocupacao_agrupado(ids_agendados)
+                    _registrar_notificacao_confirmacao_reserva_ocupacao_agrupada(ids_agendados)
                 finally:
                     try:
                         db.session.remove()
@@ -24661,6 +25092,13 @@ def _agendar_email_confirmacao_reserva_ocupacao(ids_fato_ocupacao, atraso_segund
             ids_agendados,
         )
         retorno = _enviar_email_confirmacao_reserva_ocupacao_agrupado(ids_agendados)
+        try:
+            retorno["notificacao"] = _registrar_notificacao_confirmacao_reserva_ocupacao_agrupada(ids_agendados)
+        except Exception:
+            current_app.logger.exception(
+                "RESERVA_NOTIFICACAO | falha no fallback síncrono de agrupamento | ids=%s",
+                ids_agendados,
+            )
         if not retorno.get("enviado") and not retorno.get("motivo"):
             retorno["motivo"] = str(exc)[:300]
         return retorno
@@ -25468,6 +25906,22 @@ def api_ocupacao_reserva_criar():
         )
         email_confirmacao_reserva = {"enviado": False, "motivo": str(exc)[:300]}
 
+    notificacao_confirmacao_reserva = {"registrada": False, "motivo": "nao_tentada"}
+    try:
+        if origem_tela_reserva_ocupacao:
+            notificacao_confirmacao_reserva = (
+                email_confirmacao_reserva.get("notificacao")
+                or {"registrada": False, "motivo": "agendada_agrupamento_reserva_ocupacao"}
+            )
+        else:
+            notificacao_confirmacao_reserva = _registrar_notificacao_confirmacao_reserva_por_id(ids_fato_ocupacao)
+    except Exception as exc:
+        current_app.logger.exception(
+            "RESERVA_NOTIFICACAO | erro inesperado após salvar reserva | id_reserva=%s",
+            id_fato_ocupacao_int,
+        )
+        notificacao_confirmacao_reserva = {"registrada": False, "motivo": str(exc)[:300]}
+
     return jsonify({
         "ok": True,
         "id_fato_ocupacao_paineis_euromidia": id_fato_ocupacao_int,
@@ -25481,6 +25935,8 @@ def api_ocupacao_reserva_criar():
         "qtd_segmentos_encaixe": total_segmentos_encaixe,
         "email_confirmacao_enviado": bool(email_confirmacao_reserva.get("enviado")),
         "email_confirmacao_motivo": email_confirmacao_reserva.get("motivo"),
+        "notificacao_confirmacao_registrada": bool(notificacao_confirmacao_reserva.get("registrada")),
+        "notificacao_confirmacao_motivo": notificacao_confirmacao_reserva.get("motivo"),
     })
 
 

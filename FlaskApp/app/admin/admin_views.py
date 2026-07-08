@@ -19744,6 +19744,48 @@ def _mensagens_param_int(nome: str, padrao: int, minimo: int, maximo: int) -> in
     return valor
 
 
+
+RESERVA_NOTIFICACAO_MARKER = "__EUROMIDIA_RESERVA_CONFIRMADA_JSON__"
+
+
+def _mensagens_extrair_reserva_confirmada_payload(texto_original) -> tuple[dict | None, str]:
+    """
+    Lê o payload estruturado gravado pelas reservas confirmadas.
+
+    O TextoMensagem continua tendo um texto humano antes do marcador; o JSON fica
+    apenas como contrato interno para a tela renderizar tabela segura no front.
+    Se a mensagem não for de reserva, devolve o texto original sem alterar nada.
+    """
+    texto = str(texto_original or "")
+    if RESERVA_NOTIFICACAO_MARKER not in texto:
+        return None, texto
+
+    texto_humano, texto_payload = texto.split(RESERVA_NOTIFICACAO_MARKER, 1)
+    texto_humano = texto_humano.strip()
+    texto_payload = texto_payload.strip()
+
+    if not texto_payload:
+        return None, texto_humano
+
+    try:
+        payload = json.loads(texto_payload)
+    except Exception:
+        current_app.logger.exception("MENSAGENS | falha ao ler payload de reserva confirmada")
+        return None, texto_humano
+
+    if not isinstance(payload, dict) or payload.get("tipo_payload") != "reserva_confirmada":
+        return None, texto_humano
+
+    linhas = payload.get("linhas")
+    if not isinstance(linhas, list):
+        payload["linhas"] = []
+
+    avisos = payload.get("avisos")
+    if not isinstance(avisos, list):
+        payload["avisos"] = []
+
+    return payload, texto_humano
+
 def _mensagens_formatar_data(valor) -> str:
     if not valor:
         return ""
@@ -19759,12 +19801,26 @@ def _mensagens_payload_lista(row_mensagem, id_usuario_logado: int) -> dict:
     data_criacao = row_mensagem.get("DataCriacao")
     data_leitura = row_mensagem.get("DataLeitura")
 
+    texto_base = row_mensagem.get("TextoMensagem")
+    if texto_base in (None, ""):
+        texto_base = row_mensagem.get("ResumoMensagem") or ""
+
+    payload_reserva, texto_limpo = _mensagens_extrair_reserva_confirmada_payload(texto_base)
+
+    if payload_reserva:
+        tipo = "Reserva Confirmada"
+        resumo = payload_reserva.get("resumo") or texto_limpo[:260]
+    else:
+        tipo = row_mensagem.get("NomeTipoMensagem") or "Mensagem"
+        resumo = (texto_limpo or row_mensagem.get("ResumoMensagem") or "")[:260]
+
     return {
         "id": int(row_mensagem["IDFatoMensagemUsuario"]),
         "id_tipo": row_mensagem.get("IDDimTipoMensagem"),
-        "tipo": row_mensagem.get("NomeTipoMensagem") or "Mensagem",
+        "tipo": tipo,
         "titulo": row_mensagem.get("TituloMensagem") or "Sem título",
-        "resumo": row_mensagem.get("ResumoMensagem") or "",
+        "resumo": resumo,
+        "reserva_confirmada": payload_reserva,
         "link": destino.get("link") or "",
         "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
         "motivo_destino": destino.get("motivo_destino") or "",
@@ -19782,12 +19838,16 @@ def _mensagens_payload_detalhe(row_mensagem, id_usuario_logado: int) -> dict:
     data_criacao = row_mensagem.get("DataCriacao")
     data_leitura = row_mensagem.get("DataLeitura")
 
+    payload_reserva, texto_limpo = _mensagens_extrair_reserva_confirmada_payload(row_mensagem.get("TextoMensagem") or "")
+    tipo = "Reserva Confirmada" if payload_reserva else (row_mensagem.get("NomeTipoMensagem") or "Mensagem")
+
     return {
         "id": int(row_mensagem["IDFatoMensagemUsuario"]),
         "id_tipo": row_mensagem.get("IDDimTipoMensagem"),
-        "tipo": row_mensagem.get("NomeTipoMensagem") or "Mensagem",
+        "tipo": tipo,
         "titulo": row_mensagem.get("TituloMensagem") or "Sem título",
-        "texto": row_mensagem.get("TextoMensagem") or "",
+        "texto": texto_limpo or "",
+        "reserva_confirmada": payload_reserva,
         "link": destino.get("link") or "",
         "pode_abrir_destino": bool(destino.get("pode_abrir_destino")),
         "motivo_destino": destino.get("motivo_destino") or "",
@@ -19919,6 +19979,7 @@ def api_mensagens_lista():
                 ,m.IDFatoControleContratosEuromidia
                 ,m.IDFatoControleContratosItensEuromidia
                 ,m.TituloMensagem
+                ,m.TextoMensagem
                 ,LEFT(ISNULL(m.TextoMensagem, ''), 260) AS ResumoMensagem
                 ,m.LinkDestino
                 ,ISNULL(m.BitLida, 0) AS BitLida
@@ -20862,6 +20923,154 @@ def _campanhas_vencimentos_usuario_eh_admin() -> bool:
         return False
 
 
+
+
+def _campanhas_vencimentos_usuario_tem_perfil(
+    *,
+    nomes_permitidos: set[str] | None = None,
+    ids_permitidos: set[int] | None = None,
+) -> bool:
+    """Valida perfil do usuário logado por ID e por nome, com fallback no banco.
+
+    Uso aqui porque a regra do botão Cancelar Reserva depende explicitamente do
+    Perfil = ADMIN ou Perfil = COORDENADOR em DimPerfilUsuario.
+    """
+
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    nomes_permitidos_norm = {
+        _normalizar_texto_perfil_lista_precos(nome)
+        for nome in (nomes_permitidos or set())
+        if str(nome or "").strip()
+    }
+    ids_permitidos_int: set[int] = set()
+    for valor in ids_permitidos or set():
+        try:
+            ids_permitidos_int.add(int(valor))
+        except Exception:
+            continue
+
+    def _id_perfil_permitido(valor) -> bool:
+        try:
+            return int(valor or 0) in ids_permitidos_int
+        except Exception:
+            return False
+
+    def _nome_perfil_permitido(valor) -> bool:
+        nome = _normalizar_texto_perfil_lista_precos(valor)
+        return bool(nome and nome in nomes_permitidos_norm)
+
+    for nome_atributo in (
+        "IDDimPerfilUsuario",
+        "id_dim_perfil_usuario",
+        "id_perfil_usuario",
+        "IDPerfilUsuario",
+        "IDPerfil",
+        "PerfilID",
+        "perfil_id",
+    ):
+        if _id_perfil_permitido(getattr(current_user, nome_atributo, None)):
+            return True
+
+    for nome_atributo in (
+        "Perfil",
+        "NomePerfil",
+        "nome_perfil",
+        "DescricaoPerfil",
+        "descricao_perfil",
+        "TipoPerfil",
+        "tipo_perfil",
+        "PerfilUsuario",
+        "perfil_usuario",
+        "Role",
+        "role",
+        "Papel",
+        "papel",
+    ):
+        if _nome_perfil_permitido(getattr(current_user, nome_atributo, None)):
+            return True
+
+    perfil_rel = getattr(current_user, "perfil", None)
+    if perfil_rel is not None:
+        for nome_atributo in (
+            "IDDimPerfilUsuario",
+            "id_dim_perfil_usuario",
+            "IDPerfilUsuario",
+            "IDPerfil",
+            "id",
+        ):
+            if _id_perfil_permitido(getattr(perfil_rel, nome_atributo, None)):
+                return True
+
+        for nome_atributo in (
+            "Perfil",
+            "NomePerfil",
+            "nome_perfil",
+            "Descricao",
+            "descricao",
+            "DescricaoPerfil",
+            "descricao_perfil",
+            "NomePerfilUsuario",
+            "nome",
+        ):
+            if _nome_perfil_permitido(getattr(perfil_rel, nome_atributo, None)):
+                return True
+
+    id_usuario = _campanhas_vencimentos_usuario_logado_id()
+    if not id_usuario:
+        return False
+
+    try:
+        row_perfil = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                       p.IDDimPerfilUsuario,
+                       p.NomePerfil,
+                       p.Descricao
+                FROM [Integracao].[Silver].[DimUsuarios] AS u WITH (NOLOCK)
+                INNER JOIN [Integracao].[Silver].[DimPerfilUsuario] AS p WITH (NOLOCK)
+                    ON p.IDDimPerfilUsuario = u.IDDimPerfilUsuario
+                WHERE u.IDDimUsuarios = :id_usuario
+                  AND ISNULL(u.BitAtivo, 1) = 1
+            """),
+            {"id_usuario": int(id_usuario)},
+        ).mappings().first()
+
+        if row_perfil:
+            if _id_perfil_permitido(row_perfil.get("IDDimPerfilUsuario")):
+                return True
+            if _nome_perfil_permitido(row_perfil.get("NomePerfil")):
+                return True
+            if _nome_perfil_permitido(row_perfil.get("Descricao")):
+                return True
+
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao verificar perfil do usuário para permissão de cancelamento de reserva."
+        )
+
+    return False
+
+
+def _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas() -> bool:
+    """ADMIN e COORDENADOR podem cancelar qualquer reserva listada na tela."""
+
+    try:
+        metodo = getattr(current_user, "has_permission", None)
+        if metodo and bool(metodo("ADMIN_TUDO")):
+            return True
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao verificar ADMIN_TUDO para cancelamento de reservas."
+        )
+
+    return _campanhas_vencimentos_usuario_tem_perfil(
+        nomes_permitidos={"ADMIN", "COORDENADOR"},
+        ids_permitidos={1, 5},
+    )
+
 def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
     """Converte o nome do status em classe CSS segura para o badge."""
 
@@ -21091,6 +21300,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), ctr.Vendedor))), '')
                 ),
                 vend.IDDimUsuarios AS IDDimUsuariosVendedor,
+                CriadoPorIDUsuario = CAST(NULL AS int),
                 CONVERT(varchar(80), ctr.NumeroContrato) AS NumeroContrato,
                 CONVERT(varchar(80), ctr.NumeroPrevia) AS NumeroPrevia,
                 RazaoSocial = COALESCE(
@@ -21116,6 +21326,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(venc.DataTerminoPrevisto AS date))
                 END,
                 venc.BitAtivo,
+                ReservaExpiraEm = CAST(NULL AS datetime2),
                 venc.DataCriacao,
                 venc.DataAtualizacao
             FROM
@@ -21139,6 +21350,11 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     WHERE ISNULL(venc_base.BitAtivo, 1) = 1
                       AND ISNULL(venc_base.IDFatoControleContratosEuromidia, 0) > 0
                       AND ISNULL(venc_base.IDFatoControleContratosItensEuromidia, 0) > 0
+                      -- Regra da tela: exibir somente campanhas com prazo futuro.
+                      -- DiasParaVencer = 0 significa vencimento hoje e não deve aparecer nesta tela.
+                      -- Se DataTerminoPrevisto for menor ou igual a hoje, a linha fica fora da listagem.
+                      AND venc_base.DataTerminoPrevisto IS NOT NULL
+                      AND CAST(venc_base.DataTerminoPrevisto AS date) > CAST(SYSDATETIME() AS date)
                 ) AS venc_filtrado
                 WHERE venc_filtrado.LinhaMaisRecente = 1
             ) AS venc
@@ -21174,6 +21390,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), reserva.Vendedor))), '')
                 ),
                 vend_res.IDDimUsuarios AS IDDimUsuariosVendedor,
+                reserva.CriadoPorIDUsuario,
                 NumeroContrato = COALESCE(
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), reserva.NumeroContrato))), ''),
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(80), ctr_res.NumeroContrato))), '')
@@ -21201,6 +21418,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                     ELSE DATEDIFF(DAY, CAST(SYSDATETIME() AS date), CAST(reserva.DataFim AS date))
                 END,
                 BitAtivo = CAST(1 AS bit),
+                ReservaExpiraEm = reserva.ExpiraEm,
                 DataCriacao = reserva.CriadoEm,
                 DataAtualizacao = reserva.DataAtualizacao
             FROM
@@ -21231,9 +21449,15 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                       AND reserva_base.CanceladoEm IS NULL
                       AND UPPER(LTRIM(RTRIM(ISNULL(reserva_base.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
                       AND UPPER(LTRIM(RTRIM(ISNULL(reserva_base.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                      -- Regra da tela: exibir somente reservas cujo período da campanha ainda tenha prazo futuro.
+                      -- DiasParaVencer = 0 significa vencimento hoje e não deve aparecer nesta tela.
+                      AND reserva_base.DataFim IS NOT NULL
+                      AND CAST(reserva_base.DataFim AS date) > CAST(SYSDATETIME() AS date)
+                      -- Regra da tela: reserva comum/preferência vencida pela validade de 48h úteis
+                      -- não deve aparecer, mesmo que ainda não tenha sido cancelada pelo job automático.
                       AND (
-                            reserva_base.DataFim IS NULL
-                            OR CAST(reserva_base.DataFim AS date) >= CAST(SYSDATETIME() AS date)
+                            reserva_base.ExpiraEm IS NULL
+                            OR reserva_base.ExpiraEm > SYSDATETIME()
                           )
                 ) AS reserva_filtrada
                 WHERE reserva_filtrada.rn_key = 1
@@ -21275,6 +21499,55 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
         ) AS vc
         WHERE {where_sql}
     """
+
+def _campanhas_vencimentos_datetime_iso_local(valor) -> str | None:
+    """Formata datetime SQL em ISO local para o contador regressivo no navegador."""
+
+    if not valor:
+        return None
+
+    if isinstance(valor, datetime):
+        return valor.strftime("%Y-%m-%dT%H:%M:%S")
+
+    if isinstance(valor, date):
+        return datetime.combine(valor, datetime.min.time()).strftime("%Y-%m-%dT%H:%M:%S")
+
+    texto = str(valor).strip()
+    if not texto:
+        return None
+
+    texto = texto.replace("Z", "").replace(" ", "T")
+    if "." in texto:
+        texto = texto.split(".", 1)[0]
+
+    return texto[:19]
+
+
+def _campanhas_vencimentos_datetime_pt(valor) -> str | None:
+    """Formata datetime SQL em dd/mm/aaaa hh:mm para exibição amigável."""
+
+    if not valor:
+        return None
+
+    if isinstance(valor, datetime):
+        return valor.strftime("%d/%m/%Y %H:%M")
+
+    if isinstance(valor, date):
+        return datetime.combine(valor, datetime.min.time()).strftime("%d/%m/%Y %H:%M")
+
+    texto = str(valor).strip()
+    if not texto:
+        return None
+
+    texto_iso = _campanhas_vencimentos_datetime_iso_local(texto)
+    if texto_iso:
+        try:
+            return datetime.fromisoformat(texto_iso).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            pass
+
+    return texto
+
 
 def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     """Adiciona classes CSS e textos auxiliares usados na tabela e nas sugestões."""
@@ -21354,6 +21627,10 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
             d["ValorCampanhaTexto"] = str(valor_campanha)
 
     d["TotalLiquidoContratoTexto"] = d["ValorCampanhaTexto"]
+
+    reserva_expira_em = d.get("ReservaExpiraEm")
+    d["ReservaExpiraEmIso"] = _campanhas_vencimentos_datetime_iso_local(reserva_expira_em) if fonte_linha == "RESERVA" else None
+    d["ReservaExpiraEmTexto"] = _campanhas_vencimentos_datetime_pt(reserva_expira_em) if fonte_linha == "RESERVA" else None
 
     return d
 
@@ -21838,20 +22115,20 @@ def _campanhas_vencimentos_bisemanas_select(
         rows = db.session.execute(
             text("""
                 SELECT
-                    c.bi_semana_numero,
-                    c.inicio_bi_semana,
-                    c.fim_bi_semana
+                    c.BiSemanaNumero AS bi_semana_numero,
+                    c.InicioBiSemana AS inicio_bi_semana,
+                    c.FimBiSemana AS fim_bi_semana
                 FROM [Integracao].[Silver].[DimCalendario] AS c
-                WHERE c.bi_semana_numero IS NOT NULL
-                  AND c.inicio_bi_semana IS NOT NULL
-                  AND c.fim_bi_semana IS NOT NULL
-                  AND c.inicio_bi_semana <= :dt_fim_base
-                  AND c.fim_bi_semana >= :dt_ini_base
+                WHERE c.BiSemanaNumero IS NOT NULL
+                  AND c.InicioBiSemana IS NOT NULL
+                  AND c.FimBiSemana IS NOT NULL
+                  AND c.InicioBiSemana <= :dt_fim_base
+                  AND c.FimBiSemana >= :dt_ini_base
                 GROUP BY
-                    c.bi_semana_numero,
-                    c.inicio_bi_semana,
-                    c.fim_bi_semana
-                ORDER BY c.inicio_bi_semana ASC
+                    c.BiSemanaNumero,
+                    c.InicioBiSemana,
+                    c.FimBiSemana
+                ORDER BY c.InicioBiSemana ASC
             """),
             {
                 "dt_ini_base": inicio_base,
@@ -22393,6 +22670,7 @@ def _campanhas_vencimentos_buscar_reserva_preferencia_renovacao(campanha: dict) 
               AND reserva.CanceladoEm IS NULL
               AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
               AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+              AND (reserva.ExpiraEm IS NULL OR reserva.ExpiraEm > SYSDATETIME())
               AND UPPER(LTRIM(RTRIM(ISNULL(reserva.TipoVinculoOrigem, '')))) COLLATE Latin1_General_CI_AI = 'PREFERENCIA RENOVAÇÃO CONTRATO'
               AND (
                     :id_contrato IS NULL
@@ -23290,6 +23568,7 @@ def _campanhas_vencimentos_buscar_base_reserva(id_reserva: int) -> dict | None:
             reserva.TextoOriginal,
             reserva.Observacao,
             reserva.CriadoEm,
+            reserva.CriadoPorIDUsuario,
             reserva.ExpiraEm,
             reserva.ReservaOrdemPrioridade,
             reserva.TipoVinculoOrigem,
@@ -23357,7 +23636,8 @@ def _campanhas_vencimentos_buscar_base_reserva(id_reserva: int) -> dict | None:
         WHERE reserva.IDFatoOcupacaoPaineisEuromidia = :id_reserva
           AND reserva.CanceladoEm IS NULL
           AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
-          AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO';
+          AND UPPER(LTRIM(RTRIM(ISNULL(reserva.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+          AND (reserva.ExpiraEm IS NULL OR reserva.ExpiraEm > SYSDATETIME());
     """)
 
     row = db.session.execute(sql, {"id_reserva": int(id_reserva_int)}).mappings().first()
@@ -23627,6 +23907,124 @@ def _campanhas_vencimentos_atualizar_card_reserva_dados_cadastro(
         "id_card": int(id_card_int),
         "id_reserva": int(id_reserva),
     }
+
+
+
+@admin.route("/vencimentos-campanhas/reserva/<int:id_reserva>/cancelar", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute", methods=["POST"])
+def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
+    """Cancela uma RESERVA ativa pela tela de vencimentos de campanhas.
+
+    Regra de permissão:
+    - Perfil ADMIN ou COORDENADOR cancela qualquer reserva;
+    - Perfil VENDEDOR cancela somente reserva criada pelo próprio usuário
+      em FatoOcupacaoPaineisEuromidia.CriadoPorIDUsuario.
+    """
+
+    url_retorno = request.referrer or url_for("admin.vencimentos_campanhas_euromidia")
+    id_reserva_int = int(id_reserva or 0)
+    id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
+
+    if id_reserva_int <= 0:
+        flash("Reserva inválida para cancelamento.", "warning")
+        return redirect(url_retorno)
+
+    if id_usuario_logado <= 0:
+        abort(403, description="Não foi possível identificar o usuário logado para cancelar a reserva.")
+
+    try:
+        reserva = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    r.IDFatoOcupacaoPaineisEuromidia,
+                    r.CriadoPorIDUsuario,
+                    r.CodFace,
+                    r.MarcaExibida,
+                    r.Vendedor,
+                    r.Status,
+                    r.Origem,
+                    r.CanceladoEm,
+                    r.ExpiraEm
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS r WITH (UPDLOCK, ROWLOCK)
+                WHERE r.IDFatoOcupacaoPaineisEuromidia = :id_reserva
+                  AND r.CanceladoEm IS NULL
+                  AND UPPER(LTRIM(RTRIM(ISNULL(r.Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+                  AND UPPER(LTRIM(RTRIM(ISNULL(r.Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                  AND (r.ExpiraEm IS NULL OR r.ExpiraEm > SYSDATETIME())
+            """),
+            {"id_reserva": id_reserva_int},
+        ).mappings().first()
+
+        if not reserva:
+            db.session.rollback()
+            flash("Não encontrei a reserva ativa para cancelar. Ela pode já ter sido cancelada, expirada ou efetivada.", "warning")
+            return redirect(url_retorno)
+
+        criador_reserva = _parse_int(reserva.get("CriadoPorIDUsuario")) or 0
+        pode_cancelar_todas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
+        usuario_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+
+        if not pode_cancelar_todas:
+            if not usuario_eh_vendedor:
+                abort(403, description="Seu perfil não tem permissão para cancelar reservas nesta tela.")
+
+            if criador_reserva <= 0 or criador_reserva != id_usuario_logado:
+                abort(403, description="Você só pode cancelar reservas criadas pelo seu próprio usuário.")
+
+        observacao_cancelamento = (
+            f"Reserva cancelada manualmente pela tela de vencimentos em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} "
+            f"- ID Usuário: {id_usuario_logado}."
+        )
+
+        resultado = db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+                   SET Status = 'CANCELADO',
+                       CanceladoEm = SYSDATETIME(),
+                       CanceladoPorIDUsuario = :id_usuario_logado,
+                       DataAtualizacao = SYSDATETIME(),
+                       Observacao = CONCAT(
+                           NULLIF(LTRIM(RTRIM(ISNULL(Observacao, ''))), ''),
+                           CASE
+                               WHEN NULLIF(LTRIM(RTRIM(ISNULL(Observacao, ''))), '') IS NULL THEN ''
+                               ELSE CHAR(13) + CHAR(10)
+                           END,
+                           :observacao_cancelamento
+                       )
+                 WHERE IDFatoOcupacaoPaineisEuromidia = :id_reserva
+                   AND CanceladoEm IS NULL
+                   AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
+                   AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO';
+            """),
+            {
+                "id_reserva": id_reserva_int,
+                "id_usuario_logado": id_usuario_logado,
+                "observacao_cancelamento": observacao_cancelamento,
+            },
+        )
+
+        if int(resultado.rowcount or 0) <= 0:
+            db.session.rollback()
+            flash("A reserva não foi cancelada porque o status mudou antes da confirmação.", "warning")
+            return redirect(url_retorno)
+
+        db.session.commit()
+        flash(f"Reserva #{id_reserva_int} cancelada com sucesso.", "success")
+        return redirect(url_retorno)
+
+    except HTTPException:
+        db.session.rollback()
+        raise
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Erro ao cancelar reserva pela tela de vencimentos. id_reserva=%s",
+            id_reserva_int,
+        )
+        flash(f"Erro ao cancelar reserva: {exc}", "danger")
+        return redirect(url_retorno)
 
 
 @admin.route("/vencimentos-campanhas/reserva/<int:id_reserva>/renovar", methods=["POST"])
@@ -23915,6 +24313,7 @@ def vencimentos_campanhas_euromidia():
 
     usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
     usuario_logado_eh_admin = _campanhas_vencimentos_usuario_eh_admin()
+    usuario_logado_pode_cancelar_todas_reservas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
     id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
 
     q = (request.args.get("q") or "").strip()[:160]
@@ -23989,6 +24388,7 @@ def vencimentos_campanhas_euromidia():
             vc.IDVendedor,
             vc.NomeVendedor,
             vc.IDDimUsuariosVendedor,
+            vc.CriadoPorIDUsuario,
             vc.NumeroContrato,
             vc.NumeroPrevia,
             vc.RazaoSocial,
@@ -24000,6 +24400,7 @@ def vencimentos_campanhas_euromidia():
             vc.DataTermino,
             vc.DiasParaVencer,
             vc.BitAtivo,
+            vc.ReservaExpiraEm,
             vc.DataCriacao,
             vc.DataAtualizacao
         {sql_from_where}
@@ -24039,6 +24440,21 @@ def vencimentos_campanhas_euromidia():
         item["UsuarioPodeRenovarLinha"] = bool(
             linha_pertence_ao_usuario_logado
             and bool(item.get("PodeRenovar"))
+        )
+
+        id_criador_reserva = _parse_int(item.get("CriadoPorIDUsuario")) or 0
+        item["UsuarioPodeCancelarReserva"] = bool(
+            str(item.get("FonteLinha") or "").strip().upper() == "RESERVA"
+            and (_parse_int(item.get("IDReservaOcupacao")) or 0) > 0
+            and (
+                usuario_logado_pode_cancelar_todas_reservas
+                or (
+                    usuario_logado_eh_vendedor
+                    and id_usuario_logado_int > 0
+                    and id_criador_reserva > 0
+                    and id_criador_reserva == id_usuario_logado_int
+                )
+            )
         )
 
     filtros_status_opcoes = []
@@ -24090,6 +24506,7 @@ def vencimentos_campanhas_euromidia():
         vendedor_opcoes=vendedor_opcoes,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
         usuario_logado_eh_admin=usuario_logado_eh_admin,
+        usuario_logado_pode_cancelar_todas_reservas=usuario_logado_pode_cancelar_todas_reservas,
         id_usuario_logado=id_usuario_logado_int,
         q=q,
         dt_ini=dt_ini,
@@ -24184,6 +24601,7 @@ def vencimentos_campanhas_sugestoes():
             vc.DataTermino,
             vc.DiasParaVencer,
             vc.BitAtivo,
+            vc.ReservaExpiraEm,
             vc.DataAtualizacao
         {sql_from_where}
         ORDER BY
@@ -24224,6 +24642,8 @@ def vencimentos_campanhas_sugestoes():
             "classe_ativo": d.get("ClasseBitAtivo") or "inativo",
             "data_inicio": _campanhas_vencimentos_data_json(d.get("DataInicioCampanha")),
             "data_termino": _campanhas_vencimentos_data_json(d.get("DataTermino")),
+            "reserva_expira_em": d.get("ReservaExpiraEmIso"),
+            "reserva_expira_texto": d.get("ReservaExpiraEmTexto"),
             "vendedor": str(d.get("NomeVendedor") or ""),
         })
 
