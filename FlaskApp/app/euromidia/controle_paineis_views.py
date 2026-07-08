@@ -31,6 +31,8 @@ from flask_login import current_user
 from markupsafe import escape as html_escape
 import threading
 import os
+import smtplib
+from email.message import EmailMessage
 from urllib.parse import parse_qs, urlsplit
 from types import SimpleNamespace
 from PIL import Image, ImageOps
@@ -21674,9 +21676,16 @@ def api_concorrentes_painel(codponto: int):
 
 
 
-@paineis_bp.route("/ocupacao/reserva/nova", methods=["GET"])
+@paineis_bp.route("/ocupacao/reserva/nova", methods=["GET", "POST"])
 @login_required
 def reserva_nova():
+    # Esta é a tela antiga/de detalhe de nova reserva.
+    # Se o front enviar POST para a própria URL, eu reaproveito o mesmo endpoint
+    # oficial de criação da reserva, que já grava no banco e envia o e-mail de
+    # confirmação ao vendedor/usuário após o commit.
+    if request.method == "POST":
+        return api_ocupacao_reserva_criar()
+
     codponto = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
     mes_ref  = (request.args.get("mes_ref") or "").strip()
     tipo = (request.args.get("tipo") or "").strip()
@@ -23362,6 +23371,625 @@ def _somar_dias_uteis_reserva(data_base: datetime, qtd_dias_uteis: int = 2) -> d
 
 
 
+def _config_reserva_email_valor(nome_config: str, nome_env: str | None = None, padrao=None):
+    """Lê configuração de e-mail priorizando current_app.config e depois variáveis de ambiente."""
+    valor = None
+
+    try:
+        valor = current_app.config.get(nome_config)
+    except Exception:
+        valor = None
+
+    if valor in (None, ""):
+        try:
+            valor = os.getenv(nome_env or nome_config)
+        except Exception:
+            valor = None
+
+    if valor in (None, ""):
+        return padrao
+
+    return valor
+
+
+def _email_reserva_tem_formato_minimo(email: str) -> bool:
+    texto = str(email or "").strip()
+    if not texto or len(texto) > 254:
+        return False
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", texto))
+
+
+
+def _email_reserva_normalizar_ids(ids_fato_ocupacao) -> list[int]:
+    """Normaliza um ID ou uma lista de IDs de ocupação/reserva."""
+    if ids_fato_ocupacao is None:
+        return []
+
+    if isinstance(ids_fato_ocupacao, (list, tuple, set)):
+        fonte = list(ids_fato_ocupacao)
+    else:
+        fonte = [ids_fato_ocupacao]
+
+    ids: list[int] = []
+    vistos = set()
+    for item in fonte:
+        try:
+            valor = int(item or 0)
+        except Exception:
+            valor = 0
+        if valor > 0 and valor not in vistos:
+            ids.append(valor)
+            vistos.add(valor)
+
+    return ids
+
+
+def _email_reserva_texto_seguro(valor, padrao: str = "-") -> str:
+    texto = str(valor or "").strip()
+    return texto if texto else padrao
+
+
+def _email_reserva_html(valor, padrao: str = "-") -> str:
+    return str(html_escape(_email_reserva_texto_seguro(valor, padrao)))
+
+
+def _email_reserva_formatar_data(valor, incluir_hora: bool = False, padrao: str = "-") -> str:
+    if valor in (None, ""):
+        return padrao
+
+    dt = None
+
+    if isinstance(valor, datetime):
+        dt = valor
+    elif isinstance(valor, date):
+        dt = datetime(valor.year, valor.month, valor.day)
+    else:
+        texto = str(valor or "").strip()
+        if not texto:
+            return padrao
+
+        tentativas = [
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y",
+        ]
+        for fmt in tentativas:
+            try:
+                dt = datetime.strptime(texto[:26], fmt)
+                break
+            except Exception:
+                pass
+
+        if dt is None:
+            try:
+                dt = datetime.fromisoformat(texto.replace("Z", ""))
+            except Exception:
+                return texto
+
+    if incluir_hora:
+        return dt.strftime("%d/%m/%Y - %H:%M")
+    return dt.strftime("%d/%m/%Y")
+
+
+def _buscar_dados_email_confirmacao_reserva(ids_fato_ocupacao) -> dict:
+    """
+    Busca os dados reais gravados da reserva para montar o e-mail de confirmação.
+
+    Regra principal:
+    - o número exibido da reserva é o IDFatoOcupacaoPaineisEuromidia;
+    - os dados comerciais vêm de Integracao.Silver.FatoOcupacaoPaineisEuromidia;
+    - os dados de ponto/endereço vêm de DimFacesPaineis + DimPaineisEuromidia;
+    - quando a reserva foi quebrada em vários segmentos, o e-mail lista todas as linhas criadas.
+
+    Regra de destinatário:
+    - primeiro tenta o usuário vinculado ao vendedor da reserva;
+    - se não existir, tenta o usuário que criou a reserva;
+    - se não houver e-mail válido, o envio é ignorado com log.
+    """
+    ids_ocupacao = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    if not ids_ocupacao:
+        return {}
+
+    sql = text("""
+        SELECT
+             IDReserva = o.IDFatoOcupacaoPaineisEuromidia
+            ,EmailUsuario = COALESCE(
+                NULLIF(LTRIM(RTRIM(u_vendedor.Email)), ''),
+                NULLIF(LTRIM(RTRIM(u_criador.Email)), '')
+             )
+            ,NomeUsuario = COALESCE(
+                NULLIF(LTRIM(RTRIM(u_vendedor.NomeUsuario)), ''),
+                NULLIF(LTRIM(RTRIM(u_criador.NomeUsuario)), ''),
+                NULLIF(LTRIM(RTRIM(o.Vendedor)), ''),
+                NULLIF(LTRIM(RTRIM(v.NomeVendedor)), ''),
+                'Usuário'
+             )
+            ,Vendedor = COALESCE(
+                NULLIF(LTRIM(RTRIM(u_vendedor.NomeUsuario)), ''),
+                NULLIF(LTRIM(RTRIM(u_criador.NomeUsuario)), ''),
+                NULLIF(LTRIM(RTRIM(o.Vendedor)), ''),
+                NULLIF(LTRIM(RTRIM(v.NomeVendedor)), ''),
+                'Usuário'
+             )
+            ,NomeEmpresa = COALESCE(
+                NULLIF(LTRIM(RTRIM(emp.RazaoSocial)), ''),
+                NULLIF(LTRIM(RTRIM(emp.NomeFantasia)), ''),
+                CONCAT('IDCliente ', CONVERT(varchar(20), o.IDCliente))
+             )
+            ,MarcaExibida = NULLIF(LTRIM(RTRIM(o.MarcaExibida)), '')
+            ,CodPonto = NULLIF(LTRIM(RTRIM(CAST(o.CodPonto AS varchar(50)))), '')
+            ,CodFace = COALESCE(
+                NULLIF(LTRIM(RTRIM(CAST(face.CodFace AS varchar(50)))), ''),
+                NULLIF(LTRIM(RTRIM(CAST(o.CodFace AS varchar(50)))), '')
+             )
+            ,Cota = NULLIF(LTRIM(RTRIM(CAST(o.Cota AS varchar(50)))), '')
+            ,DataInicio = o.DataInicio
+            ,DataFim = o.DataFim
+            ,ExpiraEm = o.ExpiraEm
+            ,CriadoEm = o.CriadoEm
+            ,Face = NULLIF(LTRIM(RTRIM(CAST(face.Face AS varchar(50)))), '')
+            ,Logradouro = NULLIF(LTRIM(RTRIM(painel.Logradouro)), '')
+            ,Bairro = NULLIF(LTRIM(RTRIM(painel.Bairro)), '')
+            ,Cidade = NULLIF(LTRIM(RTRIM(painel.Cidade)), '')
+            ,UF = NULLIF(LTRIM(RTRIM(painel.UF)), '')
+            ,ReferenciaPainel = NULLIF(LTRIM(RTRIM(painel.Referencia)), '')
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS o WITH (NOLOCK)
+        OUTER APPLY (
+            SELECT TOP (1)
+                 f.IDDimFacesPaineis
+                ,f.Face
+                ,f.CodFace
+                ,f.IDDimPaineisEuromidia
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+            WHERE NULLIF(LTRIM(RTRIM(CAST(f.CodPonto AS varchar(50)))), '') = NULLIF(LTRIM(RTRIM(CAST(o.CodPonto AS varchar(50)))), '')
+              AND (
+                    NULLIF(LTRIM(RTRIM(CAST(f.CodFace AS varchar(50)))), '') = NULLIF(LTRIM(RTRIM(CAST(o.CodFace AS varchar(50)))), '')
+                 OR NULLIF(LTRIM(RTRIM(CAST(f.Face    AS varchar(50)))), '') = NULLIF(LTRIM(RTRIM(CAST(o.CodFace AS varchar(50)))), '')
+              )
+            ORDER BY
+                CASE
+                    WHEN NULLIF(LTRIM(RTRIM(CAST(f.CodFace AS varchar(50)))), '') = NULLIF(LTRIM(RTRIM(CAST(o.CodFace AS varchar(50)))), '') THEN 0
+                    ELSE 1
+                END,
+                f.IDDimFacesPaineis
+        ) AS face
+        OUTER APPLY (
+            SELECT TOP (1)
+                 p.IDDimPaineisEuromidia
+                ,p.CodPonto
+                ,p.Logradouro
+                ,p.Bairro
+                ,p.Cidade
+                ,p.UF
+                ,p.Referencia
+                ,p.BitAtivo
+            FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
+            WHERE (
+                    face.IDDimPaineisEuromidia IS NOT NULL
+                AND p.IDDimPaineisEuromidia = face.IDDimPaineisEuromidia
+            )
+               OR NULLIF(LTRIM(RTRIM(CAST(p.CodPonto AS varchar(50)))), '') = NULLIF(LTRIM(RTRIM(CAST(o.CodPonto AS varchar(50)))), '')
+            ORDER BY
+                CASE
+                    WHEN face.IDDimPaineisEuromidia IS NOT NULL
+                     AND p.IDDimPaineisEuromidia = face.IDDimPaineisEuromidia THEN 0
+                    ELSE 1
+                END,
+                ISNULL(TRY_CONVERT(int, p.BitAtivo), 0) DESC,
+                p.IDDimPaineisEuromidia
+        ) AS painel
+        LEFT JOIN [Integracao].[dbo].[Vendedores] AS v WITH (NOLOCK)
+            ON v.IDVendedor = o.IDVendedor
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] AS u_vendedor WITH (NOLOCK)
+            ON u_vendedor.IDDimUsuarios = v.IDDimUsuarios
+        LEFT JOIN [Integracao].[Silver].[DimUsuarios] AS u_criador WITH (NOLOCK)
+            ON u_criador.IDDimUsuarios = o.CriadoPorIDUsuario
+        LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS emp WITH (NOLOCK)
+            ON emp.IDEmpresa = o.IDCliente
+        WHERE o.IDFatoOcupacaoPaineisEuromidia IN :ids_ocupacao
+        ORDER BY
+             o.IDFatoOcupacaoPaineisEuromidia
+            ,o.DataInicio
+            ,o.DataFim
+            ,o.CodFace;
+    """).bindparams(bindparam("ids_ocupacao", expanding=True))
+
+    rows = db.session.execute(sql, {"ids_ocupacao": ids_ocupacao}).mappings().all()
+    linhas = [dict(row or {}) for row in rows]
+    if not linhas:
+        return {}
+
+    resultado = dict(linhas[0])
+    resultado["LinhasReserva"] = linhas
+    resultado["IDsConsulta"] = ids_ocupacao
+    return resultado
+
+
+def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
+    """Envia confirmação da reserva por SMTP usando as variáveis do .env já existentes."""
+    ids_ocupacao = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    dados = _buscar_dados_email_confirmacao_reserva(ids_ocupacao)
+    if not dados:
+        return {"enviado": False, "motivo": "dados_reserva_nao_encontrados"}
+
+    destinatario = str(dados.get("EmailUsuario") or "").strip()
+    ids_log = ",".join(str(x) for x in ids_ocupacao) if ids_ocupacao else str(ids_fato_ocupacao or "")
+    if not _email_reserva_tem_formato_minimo(destinatario):
+        current_app.logger.warning(
+            "RESERVA_EMAIL | e-mail do usuário não encontrado ou inválido | ids_reserva=%s",
+            ids_log,
+        )
+        return {"enviado": False, "motivo": "email_destinatario_invalido"}
+
+    # IMPORTANTE:
+    # O projeto já usa dotenv/env_file. Portanto a configuração oficial aqui é
+    # exatamente a que você informou no .env: SENHA_EMAIL, SMTP, porta e criptografia.
+    smtp_host = str(
+        _config_reserva_email_valor("SMTP", "SMTP", None)
+        or "smtp.office365.com"
+    ).strip()
+
+    smtp_port_raw = (
+        _config_reserva_email_valor("porta", "porta", None)
+        or 587
+    )
+
+    criptografia = str(
+        _config_reserva_email_valor("criptografia", "criptografia", None)
+        or "STARTTLS"
+    ).strip().upper()
+
+    smtp_user = "notificacoes@euromidia.com.br"
+    smtp_password = _config_reserva_email_valor("SENHA_EMAIL", "SENHA_EMAIL", None)
+    remetente = smtp_user
+    remetente_nome = "Euromídia"
+
+    try:
+        smtp_port = int(str(smtp_port_raw or "587").strip())
+    except Exception:
+        smtp_port = 587
+
+    if not smtp_host or not smtp_user or not smtp_password or not remetente:
+        current_app.logger.warning(
+            "RESERVA_EMAIL | configuração SMTP incompleta. "
+            "Verifique SENHA_EMAIL, SMTP, porta e criptografia no .env. "
+            "smtp_host=%s | smtp_port=%s | criptografia=%s | smtp_user_configurado=%s | senha_configurada=%s",
+            smtp_host or "VAZIO",
+            smtp_port,
+            criptografia or "VAZIO",
+            "sim" if bool(smtp_user) else "nao",
+            "sim" if bool(smtp_password) else "nao",
+        )
+        return {"enviado": False, "motivo": "smtp_config_incompleta"}
+
+    linhas_reserva = dados.get("LinhasReserva") or [dados]
+    linhas_email = []
+    for linha in linhas_reserva:
+        linha_dict = dict(linha or {})
+        expira_em = linha_dict.get("ExpiraEm")
+        if not expira_em:
+            criado_em = linha_dict.get("CriadoEm")
+            if isinstance(criado_em, datetime):
+                expira_em = _somar_dias_uteis_reserva(criado_em, 2)
+        linha_dict["FimBloqueioFormatado"] = _email_reserva_formatar_data(expira_em, incluir_hora=True)
+        linha_dict["DataInicioFormatada"] = _email_reserva_formatar_data(linha_dict.get("DataInicio"), incluir_hora=False)
+        linha_dict["DataFimFormatada"] = _email_reserva_formatar_data(linha_dict.get("DataFim"), incluir_hora=False)
+        linhas_email.append(linha_dict)
+
+    ids_reserva = []
+    vistos_reserva = set()
+    for linha in linhas_email:
+        valor = _email_reserva_texto_seguro(linha.get("IDReserva"), "")
+        if valor and valor not in vistos_reserva:
+            ids_reserva.append(valor)
+            vistos_reserva.add(valor)
+
+    ids_reserva_texto = ", ".join(ids_reserva) if ids_reserva else ids_log
+    ids_reserva_assunto = "/".join(ids_reserva) if ids_reserva else ids_log.replace(",", "/")
+    nome_usuario = str(dados.get("NomeUsuario") or "Usuário").strip() or "Usuário"
+    vendedor_assunto = str(dados.get("Vendedor") or nome_usuario or "Usuário").strip() or "Usuário"
+
+    if len(ids_reserva) > 1:
+        frase_abertura = f"Olá, {nome_usuario}, suas reservas números {ids_reserva_texto} foram confirmadas."
+    else:
+        frase_abertura = f"Olá, {nome_usuario}, sua reserva número {ids_reserva_texto} foi confirmada."
+
+    assunto = f'{vendedor_assunto} - Reserva {ids_reserva_assunto} realizada com sucesso'[:180]
+
+    cabecalhos_texto = [
+        "NÚMERO DA RESERVA",
+        "VENDEDOR",
+        "CÓDIGO FACE",
+        "COTA",
+        "DATA INÍCIO CAMPANHA",
+        "DATA FIM CAMPANHA",
+        "MARCA",
+        "FIM DO BLOQUEIO",
+    ]
+
+    linhas_texto = ["\t".join(cabecalhos_texto)]
+    for linha in linhas_email:
+        linhas_texto.append("\t".join([
+            _email_reserva_texto_seguro(linha.get("IDReserva")),
+            _email_reserva_texto_seguro(linha.get("Vendedor")),
+            _email_reserva_texto_seguro(linha.get("CodFace")),
+            _email_reserva_texto_seguro(linha.get("Cota")),
+            _email_reserva_texto_seguro(linha.get("DataInicioFormatada")),
+            _email_reserva_texto_seguro(linha.get("DataFimFormatada")),
+            _email_reserva_texto_seguro(linha.get("MarcaExibida")),
+            _email_reserva_texto_seguro(linha.get("FimBloqueioFormatado")),
+        ]))
+
+    corpo = (
+        f"{frase_abertura}\n\n"
+        "Confira os detalhes:\n\n"
+        + "\n".join(linhas_texto)
+        + "\n\nAvisos Importantes:\n\n"
+        "Esta Reserva será expirada automaticamente dentro do prazo limite.\n"
+        "A Venda só será efetivada e aprovada após o envio dos documentos oficiais.\n"
+    )
+
+    logo_cid = "euromidia_logo"
+    # ATENÇÃO:
+    # Pelo docker-compose, o Flask NÃO enxerga diretamente o caminho do host:
+    # /home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/logoeuro.png
+    # O volume está montado assim:
+    # ./FlaskApp/app/static:/app/app/static
+    # Portanto, dentro do container flask-app, o caminho correto do logo é:
+    # /app/app/static/imagens/logoeuro.png
+    logo_path = "/app/app/static/imagens/logoeuro.png"
+    logo_bytes = None
+    logo_subtype = "png"
+    logo_path_usado = None
+
+    candidatos_logo = []
+    for candidato in (
+        os.getenv("EMAIL_RESERVA_LOGO_PATH"),
+        "/app/app/static/imagens/logoeuro.png",
+        str(Path(current_app.root_path) / "static" / "imagens" / "logoeuro.png"),
+        str(Path(current_app.static_folder or "") / "imagens" / "logoeuro.png"),
+        "/home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
+    ):
+        candidato = str(candidato or "").strip()
+        if candidato and candidato not in candidatos_logo:
+            candidatos_logo.append(candidato)
+
+    for candidato in candidatos_logo:
+        try:
+            logo_path_obj = Path(candidato)
+            if logo_path_obj.is_file():
+                logo_bytes = logo_path_obj.read_bytes()
+                logo_path_usado = candidato
+                mime_type, _ = mimetypes.guess_type(str(logo_path_obj))
+                if mime_type and "/" in mime_type:
+                    logo_subtype = mime_type.split("/", 1)[1].lower() or "png"
+                break
+        except Exception:
+            current_app.logger.exception(
+                "RESERVA_EMAIL | falha ao tentar carregar logo | caminho=%s",
+                candidato,
+            )
+
+    logo_url_publica = ""
+    try:
+        logo_url_publica = url_for(
+            "static",
+            filename="imagens/logoeuro.png",
+            _external=True,
+        )
+    except Exception:
+        logo_url_publica = "/static/imagens/logoeuro.png"
+
+    if logo_bytes:
+        current_app.logger.info(
+            "RESERVA_EMAIL | logo Euromidia carregado inline | caminho=%s | bytes=%s",
+            logo_path_usado,
+            len(logo_bytes),
+        )
+        logo_html = (
+            f'<img src="cid:{logo_cid}" alt="Euromídia Comunicação" '
+            'width="190" style="display:block;width:190px;max-width:190px;height:auto;border:0;outline:none;text-decoration:none;margin-left:auto;">'
+        )
+    else:
+        # Não volto mais para o texto "EUROMÍDIA COMUNICAÇÃO". Se o arquivo não existir
+        # dentro do container, tento carregar a imagem pela URL pública do static.
+        current_app.logger.warning(
+            "RESERVA_EMAIL | logo Euromidia não encontrado nos caminhos=%s | usando url=%s",
+            candidatos_logo,
+            logo_url_publica,
+        )
+        logo_html = (
+            f'<img src="{html_escape(logo_url_publica)}" alt="Euromídia Comunicação" '
+            'width="190" style="display:block;width:190px;max-width:190px;height:auto;border:0;outline:none;text-decoration:none;margin-left:auto;">'
+        )
+
+    linhas_html = []
+    for idx, linha in enumerate(linhas_email):
+        bg = "#FFFFFF" if idx % 2 == 0 else "#FAFBFF"
+        linhas_html.append(f"""
+            <tr style="background:{bg};">
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;font-weight:700;color:#1D2433;white-space:nowrap;">{_email_reserva_html(linha.get('IDReserva'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;color:#1D2433;white-space:nowrap;">{_email_reserva_html(linha.get('Vendedor'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;font-weight:700;color:#1D2433;white-space:nowrap;">{_email_reserva_html(linha.get('CodFace'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;color:#1D2433;text-align:center;white-space:nowrap;">{_email_reserva_html(linha.get('Cota'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;color:#1D2433;text-align:center;white-space:nowrap;">{_email_reserva_html(linha.get('DataInicioFormatada'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;color:#1D2433;text-align:center;white-space:nowrap;">{_email_reserva_html(linha.get('DataFimFormatada'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;color:#1D2433;white-space:nowrap;">{_email_reserva_html(linha.get('MarcaExibida'))}</td>
+                <td style="padding:14px 12px;border-bottom:1px solid #E8ECF5;font-size:12px;line-height:1.35;color:#CF1F2E;font-weight:800;text-align:center;white-space:nowrap;">{_email_reserva_html(linha.get('FimBloqueioFormatado'))}</td>
+            </tr>
+        """)
+
+    corpo_html = f"""
+    <!doctype html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{_email_reserva_html(assunto)}</title>
+    </head>
+    <body style="margin:0;padding:0;background:#F2F4F8;font-family:Arial,Helvetica,sans-serif;color:#1D2433;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;background:#F2F4F8;border-collapse:collapse;margin:0;padding:0;">
+            <tr>
+                <td align="center" style="padding:28px 14px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="860" style="width:860px;max-width:860px;background:#FFFFFF;border-collapse:separate;border-spacing:0;border:1px solid #E6EAF2;box-shadow:0 10px 28px rgba(10,22,70,0.10);">
+                        <tr>
+                            <td style="height:12px;background:#FFD000;border-radius:14px 14px 0 0;font-size:0;line-height:0;">&nbsp;</td>
+                        </tr>
+                        <tr>
+                            <td style="background:#0B0C8F;padding:30px 42px 28px 42px;">
+                                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;">
+                                    <tr>
+                                        <td align="left" valign="middle" style="width:62%;">
+                                            <div style="font-size:30px;line-height:1.05;color:#FFFFFF;font-weight:900;letter-spacing:-0.7px;">Reserva Confirmada</div>
+                                            <div style="font-size:12px;line-height:1.4;color:#FFFFFF;font-weight:700;margin-top:6px;opacity:.95;">Bloqueio Registrado com Validade de 48h úteis.</div>
+                                        </td>
+                                        <td align="right" valign="middle" style="width:38%;">
+                                            {logo_html}
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="padding:26px 36px 0 36px;">
+                                <p style="font-size:14px;line-height:1.6;margin:0 0 20px 0;color:#1D2433;">
+                                    {_email_reserva_html(frase_abertura, '')}
+                                </p>
+                                <p style="font-size:12px;line-height:1.6;margin:0;color:#4F5B6B;">
+                                    Confira os detalhes da reserva abaixo:
+                                </p>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="padding:18px 36px 22px 36px;">
+                                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:separate;border-spacing:0;border:1px solid #E7EBF3;border-radius:12px;overflow:hidden;font-size:12px;">
+                                    <thead>
+                                        <tr style="background:#4B4BDB;color:#FFFFFF;">
+                                            <th style="padding:12px 10px;text-align:left;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Número da Reserva</th>
+                                            <th style="padding:12px 10px;text-align:left;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Vendedor</th>
+                                            <th style="padding:12px 10px;text-align:left;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Código Face</th>
+                                            <th style="padding:12px 10px;text-align:center;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Cota</th>
+                                            <th style="padding:12px 10px;text-align:center;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Data Início Campanha</th>
+                                            <th style="padding:12px 10px;text-align:center;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Data Fim Campanha</th>
+                                            <th style="padding:12px 10px;text-align:left;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Marca</th>
+                                            <th style="padding:12px 10px;text-align:center;font-size:10px;line-height:1.2;letter-spacing:.2px;text-transform:uppercase;font-weight:800;white-space:nowrap;">Fim do Bloqueio</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {''.join(linhas_html)}
+                                    </tbody>
+                                </table>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="padding:0 36px 24px 36px;">
+                                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:separate;border-spacing:0;background:#FFF1F3;border-radius:10px;overflow:hidden;">
+                                    <tr>
+                                        <td style="width:6px;background:#E0202D;font-size:0;line-height:0;">&nbsp;</td>
+                                        <td style="padding:17px 18px 16px 18px;">
+                                            <div style="font-size:14px;font-weight:900;color:#991B1B;margin-bottom:8px;">Avisos importantes</div>
+                                            <div style="font-size:12px;line-height:1.65;color:#7F1D1D;">
+                                                Esta Reserva será expirada automaticamente dentro do prazo limite.<br>
+                                                A Venda só será efetivada e aprovada após o envio dos documentos oficiais.
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+
+                        <tr>
+                            <td style="padding:0 0 0 0;">
+                                <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;background:#F8FAFE;border-top:1px solid #E5E9F1;">
+                                    <tr>
+                                        <td style="padding:18px 36px;color:#647084;font-size:11px;line-height:1.5;">
+                                            Mensagem automática do sistema de reservas Euromídia. Não responda este e-mail.
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    msg = EmailMessage()
+    msg["Subject"] = assunto
+    msg["From"] = f"{remetente_nome} <{remetente}>"
+    msg["To"] = destinatario
+    msg.set_content(corpo)
+    msg.add_alternative(corpo_html, subtype="html")
+
+    if logo_bytes:
+        try:
+            html_part = msg.get_payload()[-1]
+            html_part.add_related(
+                logo_bytes,
+                maintype="image",
+                subtype=logo_subtype,
+                cid=f"<{logo_cid}>",
+                filename="logoeuro.png",
+            )
+        except Exception:
+            current_app.logger.exception(
+                "RESERVA_EMAIL | falha ao anexar logo inline no e-mail | caminho=%s",
+                logo_path,
+            )
+
+    try:
+        current_app.logger.info(
+            "RESERVA_EMAIL | tentando enviar confirmação | ids_reserva=%s | destinatario=%s | smtp_host=%s | smtp_port=%s | criptografia=%s",
+            ids_log,
+            destinatario,
+            smtp_host,
+            smtp_port,
+            criptografia,
+        )
+
+        if criptografia in {"SSL", "TLS", "SMTPS"}:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20) as smtp:
+                smtp.login(smtp_user, smtp_password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+                smtp.ehlo()
+                if criptografia in {"STARTTLS", "START_TLS", "TLS_STARTTLS"}:
+                    smtp.starttls()
+                    smtp.ehlo()
+                smtp.login(smtp_user, smtp_password)
+                smtp.send_message(msg)
+
+        current_app.logger.info(
+            "RESERVA_EMAIL | confirmação enviada | ids_reserva=%s | destinatario=%s",
+            ids_log,
+            destinatario,
+        )
+        return {"enviado": True, "motivo": None, "destinatario": destinatario}
+
+    except Exception as exc:
+        current_app.logger.exception(
+            "RESERVA_EMAIL | falha ao enviar confirmação | ids_reserva=%s | destinatario=%s",
+            ids_log,
+            destinatario,
+        )
+        return {"enviado": False, "motivo": str(exc)[:300]}
+
+
+
+
 def _slot_indice_grade_reserva(valor, capacidade_slots: int) -> int | None:
     """Converte SPAN01/1/01 em índice 0-based da grade digital."""
     try:
@@ -23814,6 +24442,230 @@ def _calcular_plano_encaixe_range_reserva_digital(
         "conflitos_existentes": conflitos_existentes,
     }
 
+def _request_origem_tela_reserva_ocupacao(payload: dict | None = None) -> bool:
+    """
+    Identifica a tela /paineis/reserva-ocupacao.
+
+    Essa tela pode disparar uma requisição por CodFace. Por isso o e-mail dela
+    precisa passar por agrupamento/debounce no backend, em vez de ser enviado
+    imediatamente a cada POST.
+    """
+    payload = payload or {}
+
+    def _tem_reserva_ocupacao(valor) -> bool:
+        texto = str(valor or "").strip().lower()
+        return bool(texto and "reserva-ocupacao" in texto)
+
+    try:
+        for chave in (
+            "origem_tela",
+            "tela_origem",
+            "source",
+            "origem",
+            "pagina_origem",
+            "referer",
+            "referrer",
+        ):
+            if _tem_reserva_ocupacao(payload.get(chave)):
+                return True
+    except Exception:
+        pass
+
+    try:
+        for header in (
+            request.headers.get("Referer"),
+            request.headers.get("Referrer"),
+            request.headers.get("X-Origem-Tela"),
+            request.headers.get("X-Source-Page"),
+            request.referrer,
+        ):
+            if _tem_reserva_ocupacao(header):
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _buscar_ids_grupo_email_reserva_ocupacao(ids_fato_ocupacao, janela_segundos: int = 120) -> list[int]:
+    """
+    Busca reservas recém-criadas pela tela /paineis/reserva-ocupacao para o mesmo Cliente.
+
+    A regra pedida é: se for a mesma empresa/cliente, a tabela do e-mail deve
+    juntar as CodFaces e sair apenas um e-mail. Como o front dessa tela pode
+    chamar o endpoint uma vez para cada CodFace, o agrupamento aqui usa:
+    - mesmo IDCliente;
+    - mesmo usuário que criou;
+    - mesmo vendedor;
+    - reservas criadas dentro de uma janela curta.
+    """
+    ids_base = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    if not ids_base:
+        return []
+
+    try:
+        janela_int = int(janela_segundos or 120)
+    except Exception:
+        janela_int = 120
+    janela_int = max(15, min(janela_int, 600))
+
+    sql = text("""
+        ;WITH base AS (
+            SELECT TOP (1)
+                 IDBase = o.IDFatoOcupacaoPaineisEuromidia
+                ,CriadoEmBase = COALESCE(o.CriadoEm, o.DataAtualizacao, SYSDATETIME())
+                ,IDClienteBase = o.IDCliente
+                ,IDVendedorBase = o.IDVendedor
+                ,CriadoPorBase = o.CriadoPorIDUsuario
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS o WITH (NOLOCK)
+            WHERE o.IDFatoOcupacaoPaineisEuromidia IN :ids_base
+            ORDER BY
+                COALESCE(o.CriadoEm, o.DataAtualizacao, SYSDATETIME()) DESC,
+                o.IDFatoOcupacaoPaineisEuromidia DESC
+        )
+        SELECT
+            o.IDFatoOcupacaoPaineisEuromidia
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS o WITH (NOLOCK)
+        CROSS JOIN base AS b
+        WHERE ISNULL(LTRIM(RTRIM(o.Origem)), '') = 'RESERVA'
+          AND ISNULL(LTRIM(RTRIM(o.Status)), '') = 'RESERVADO'
+          AND o.CanceladoEm IS NULL
+          AND ISNULL(o.IDCliente, -1) = ISNULL(b.IDClienteBase, -1)
+          AND ISNULL(o.IDVendedor, -1) = ISNULL(b.IDVendedorBase, -1)
+          AND ISNULL(o.CriadoPorIDUsuario, -1) = ISNULL(b.CriadoPorBase, -1)
+          AND ABS(DATEDIFF(SECOND, COALESCE(b.CriadoEmBase, SYSDATETIME()), COALESCE(o.CriadoEm, o.DataAtualizacao, SYSDATETIME()))) <= :janela_segundos
+        ORDER BY
+            o.IDFatoOcupacaoPaineisEuromidia ASC;
+    """).bindparams(bindparam("ids_base", expanding=True))
+
+    rows = db.session.execute(sql, {
+        "ids_base": ids_base,
+        "janela_segundos": janela_int,
+    }).fetchall()
+
+    ids = []
+    vistos = set()
+    for row in rows:
+        try:
+            valor = int(row[0])
+        except Exception:
+            continue
+        if valor <= 0 or valor in vistos:
+            continue
+        vistos.add(valor)
+        ids.append(valor)
+
+    return ids or ids_base
+
+
+def _enviar_email_confirmacao_reserva_ocupacao_agrupado(ids_fato_ocupacao) -> dict:
+    """
+    Envia o e-mail agrupado da tela /paineis/reserva-ocupacao.
+
+    Para impedir dois e-mails quando o front fez um POST por CodFace, só o POST
+    que contém o maior ID do grupo fica autorizado a enviar. Os demais apenas
+    retornam como agrupados em outro envio.
+    """
+    ids_atuais = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    if not ids_atuais:
+        return {"enviado": False, "motivo": "ids_reserva_invalidos"}
+
+    ids_grupo = _buscar_ids_grupo_email_reserva_ocupacao(ids_atuais, janela_segundos=120)
+    if not ids_grupo:
+        return {"enviado": False, "motivo": "grupo_reserva_vazio"}
+
+    maior_id_atual = max(ids_atuais)
+    maior_id_grupo = max(ids_grupo)
+
+    if maior_id_atual != maior_id_grupo:
+        current_app.logger.info(
+            "RESERVA_EMAIL | envio agrupado ignorado nesta chamada; outra CodFace do mesmo cliente enviará o e-mail | ids_atuais=%s | ids_grupo=%s | maior_id_grupo=%s",
+            ids_atuais,
+            ids_grupo,
+            maior_id_grupo,
+        )
+        return {
+            "enviado": False,
+            "motivo": "agrupado_em_outro_email_reserva_ocupacao",
+            "ids_grupo": ids_grupo,
+        }
+
+    current_app.logger.info(
+        "RESERVA_EMAIL | enviando e-mail único agrupado da tela reserva-ocupacao | ids_grupo=%s",
+        ids_grupo,
+    )
+    return _enviar_email_confirmacao_reserva_por_id(ids_grupo)
+
+
+def _agendar_email_confirmacao_reserva_ocupacao(ids_fato_ocupacao, atraso_segundos: float = 8.0) -> dict:
+    """
+    Agenda o e-mail da tela /paineis/reserva-ocupacao com pequeno debounce.
+
+    O retorno HTTP não fica preso esperando o usuário finalizar todas as faces.
+    Depois do atraso, o worker consulta o banco e envia só pelo maior ID do grupo.
+    """
+    ids_agendados = _email_reserva_normalizar_ids(ids_fato_ocupacao)
+    if not ids_agendados:
+        return {"enviado": False, "motivo": "ids_reserva_invalidos"}
+
+    try:
+        atraso = float(atraso_segundos or 8.0)
+    except Exception:
+        atraso = 8.0
+    atraso = max(3.0, min(atraso, 30.0))
+
+    app = current_app._get_current_object()
+
+    def _worker_email_reserva_ocupacao():
+        try:
+            time.sleep(atraso)
+            with app.app_context():
+                try:
+                    _enviar_email_confirmacao_reserva_ocupacao_agrupado(ids_agendados)
+                finally:
+                    try:
+                        db.session.remove()
+                    except Exception:
+                        pass
+        except Exception:
+            try:
+                with app.app_context():
+                    current_app.logger.exception(
+                        "RESERVA_EMAIL | falha no worker de agrupamento reserva-ocupacao | ids=%s",
+                        ids_agendados,
+                    )
+            except Exception:
+                pass
+
+    try:
+        t = threading.Thread(
+            target=_worker_email_reserva_ocupacao,
+            name=f"reserva-ocupacao-email-{max(ids_agendados)}",
+            daemon=True,
+        )
+        t.start()
+        current_app.logger.info(
+            "RESERVA_EMAIL | e-mail da tela reserva-ocupacao agendado para agrupamento | ids=%s | atraso=%ss",
+            ids_agendados,
+            atraso,
+        )
+        return {
+            "enviado": False,
+            "motivo": "agendado_agrupamento_reserva_ocupacao",
+            "ids_agendados": ids_agendados,
+            "atraso_segundos": atraso,
+        }
+    except Exception as exc:
+        current_app.logger.exception(
+            "RESERVA_EMAIL | não consegui agendar agrupamento; tentando envio síncrono agrupado | ids=%s",
+            ids_agendados,
+        )
+        retorno = _enviar_email_confirmacao_reserva_ocupacao_agrupado(ids_agendados)
+        if not retorno.get("enviado") and not retorno.get("motivo"):
+            retorno["motivo"] = str(exc)[:300]
+        return retorno
+
+
 
 @paineis_bp.route("/api/ocupacao/reserva/criar", methods=["POST"])
 @login_required
@@ -23837,7 +24689,71 @@ def api_ocupacao_reserva_criar():
         return jsonify({"ok": False, "erro": "CSRF inválido/ausente"}), 400
 
     cod_ponto = (payload.get("cod_ponto") or request.form.get("cod_ponto") or "").strip()
-    cod_face  = (payload.get("cod_face")  or request.form.get("cod_face")  or "").strip()
+    origem_tela_reserva_ocupacao = _request_origem_tela_reserva_ocupacao(payload)
+
+    def _normalizar_codfaces_payload_reserva():
+        """
+        Eu aceito uma ou várias CodFaces no mesmo POST.
+
+        Compatibilidade:
+        - telas antigas continuam enviando cod_face único;
+        - a tela /paineis/reserva-ocupacao pode enviar cod_faces/codfaces/faces como lista,
+          string separada por vírgula/ponto-e-vírgula, ou lista de objetos com CodFace/cod_face.
+        """
+        codfaces = []
+        vistos = set()
+
+        def _adicionar(valor):
+            if valor in (None, "", [], (), {}):
+                return
+
+            if isinstance(valor, dict):
+                valor = (
+                    valor.get("cod_face")
+                    or valor.get("codface")
+                    or valor.get("CodFace")
+                    or valor.get("face")
+                    or valor.get("Face")
+                )
+
+            if isinstance(valor, (list, tuple, set)):
+                for item in valor:
+                    _adicionar(item)
+                return
+
+            texto = str(valor or "").strip()
+            if not texto:
+                return
+
+            for parte in texto.replace(";", ",").split(","):
+                cod = str(parte or "").strip()
+                if not cod:
+                    continue
+                chave = cod.upper()
+                if chave in vistos:
+                    continue
+                vistos.add(chave)
+                codfaces.append(cod)
+
+        for nome in ("cod_faces", "codfaces", "faces", "cod_face", "codface"):
+            if nome in payload:
+                _adicionar(payload.get(nome))
+
+            try:
+                for valor_form in request.form.getlist(nome):
+                    _adicionar(valor_form)
+            except Exception:
+                pass
+
+            try:
+                _adicionar(request.form.get(nome))
+            except Exception:
+                pass
+
+        return codfaces
+
+    cod_faces_reserva = _normalizar_codfaces_payload_reserva()
+    cod_face = cod_faces_reserva[0] if cod_faces_reserva else ""
 
     cota_raw = payload.get("cota")
     if cota_raw is None:
@@ -23878,7 +24794,7 @@ def api_ocupacao_reserva_criar():
 
     if not cod_ponto:
         return jsonify({"ok": False, "erro": "cod_ponto obrigatório"}), 400
-    if not cod_face:
+    if not cod_faces_reserva:
         return jsonify({"ok": False, "erro": "cod_face obrigatório"}), 400
     if not data_inicio or not data_fim:
         return jsonify({"ok": False, "erro": "data_inicio e data_fim obrigatórios"}), 400
@@ -23974,29 +24890,6 @@ def api_ocupacao_reserva_criar():
           AND f.CodPonto = :cod_ponto
         ORDER BY f.IDDimFacesPaineis DESC
     """)
-    painel_row = db.session.execute(
-        sql_painel,
-        {"cod_face": cod_face, "cod_ponto": cod_ponto_int},
-    ).mappings().first()
-
-    if not painel_row:
-        return jsonify({"ok": False, "erro": "CodFace não pertence ao CodPonto informado."}), 400
-
-    try:
-        id_painel = painel_row.get("IDPainelEuromidia")
-        id_painel_int = int(id_painel) if id_painel is not None else None
-    except Exception:
-        id_painel_int = None
-
-    eh_digital_face = int(painel_row.get("EhDigital") or 0) == 1
-
-    if eh_digital_face:
-        if cota_invalida or cota_int not in (540, 1080):
-            return jsonify({"ok": False, "erro": "Para painel digital, informe uma cota válida: 540 ou 1080."}), 400
-    else:
-        cota_int = None
-
-
     vendedor_nome = vendedor_nome_raw or None
     if id_vendedor_int is not None:
         sql_vend = text("""
@@ -24199,112 +25092,156 @@ def api_ocupacao_reserva_criar():
                     ELSE 1
                 END;
     """)
-    cap_row = db.session.execute(
-        sql_cap,
-        {"cod_face": cod_face, "cod_ponto": cod_ponto_int},
-    ).mappings().first()
 
-    if not cap_row:
-        return jsonify({"ok": False, "erro": "Não consegui resolver capacidade do painel para essa CodFace"}), 400
+    faces_para_gravar = []
+    total_segmentos_encaixe = 0
 
-    bit_ativo = int(cap_row.get("BitAtivo") or 0)
-    eh_digital = int(cap_row.get("EhDigital") or 0)
-    capacidade_slots = int(cap_row.get("CapacidadeSlots") or 0)
+    for cod_face_item in cod_faces_reserva:
+        cod_face_atual = str(cod_face_item or "").strip()
+        if not cod_face_atual:
+            continue
 
-    if bit_ativo == 0:
-        return jsonify({"ok": False, "erro": "Painel inativo (BitAtivo=0)"}), 409
+        painel_row_item = db.session.execute(
+            sql_painel,
+            {"cod_face": cod_face_atual, "cod_ponto": cod_ponto_int},
+        ).mappings().first()
 
-    if capacidade_slots <= 0:
-        return jsonify({"ok": False, "erro": "Capacidade inválida (<=0)"}), 400
+        if not painel_row_item:
+            return jsonify({"ok": False, "erro": f"CodFace {cod_face_atual} não pertence ao CodPonto informado."}), 400
 
+        try:
+            id_painel_item = painel_row_item.get("IDPainelEuromidia")
+            id_painel_item_int = int(id_painel_item) if id_painel_item is not None else None
+        except Exception:
+            id_painel_item_int = None
 
-    # Regra comercial oficial da ocupação digital:
-    # Cota 1080 consome 2 slots; cota 540 consome 1 slot.
-    # Em painel não digital, não gravamos SpanQtd nem Cota.
-    slots_novo = 2 if eh_digital == 1 and cota_int == 1080 else 1
-    spanqtd_novo = slots_novo if eh_digital == 1 else None
+        cap_row = db.session.execute(
+            sql_cap,
+            {"cod_face": cod_face_atual, "cod_ponto": cod_ponto_int},
+        ).mappings().first()
 
+        if not cap_row:
+            return jsonify({"ok": False, "erro": f"Não consegui resolver capacidade do painel para a CodFace {cod_face_atual}"}), 400
 
-    plano_encaixe_reserva = {
+        bit_ativo = int(cap_row.get("BitAtivo") or 0)
+        eh_digital = int(cap_row.get("EhDigital") or 0)
+        capacidade_slots = int(cap_row.get("CapacidadeSlots") or 0)
+
+        # A regra de digital vem do painel/capacidade, igual à grade. Se a face também vier como
+        # digital, ela naturalmente cai nessa mesma validação.
+        if bit_ativo == 0:
+            return jsonify({"ok": False, "erro": f"Painel inativo (BitAtivo=0) para a CodFace {cod_face_atual}"}), 409
+
+        if capacidade_slots <= 0:
+            return jsonify({"ok": False, "erro": f"Capacidade inválida (<=0) para a CodFace {cod_face_atual}"}), 400
+
+        if eh_digital == 1:
+            if cota_invalida or cota_int not in (540, 1080):
+                return jsonify({"ok": False, "erro": f"Para painel digital, informe uma cota válida: 540 ou 1080. CodFace {cod_face_atual}."}), 400
+            cota_gravar = cota_int
+        else:
+            cota_gravar = None
+
+        # Regra comercial oficial da ocupação digital:
+        # Cota 1080 consome 2 slots; cota 540 consome 1 slot.
+        # Em painel não digital, não gravamos SpanQtd nem Cota.
+        slots_novo = 2 if eh_digital == 1 and cota_gravar == 1080 else 1
+        spanqtd_novo = slots_novo if eh_digital == 1 else None
+
+        plano_encaixe_reserva_item = {
+            "ok": True,
+            "modo": "nao_digital",
+            "segmentos": [],
+            "conflitos_existentes": 0,
+        }
+
+        if eh_digital == 0:
+            sql_conflito = text("""
+                SELECT TOP 1 1
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] WITH (UPDLOCK, HOLDLOCK)
+                WHERE CodFace = :cod_face
+                  AND CodPonto = :cod_ponto
+                  AND CanceladoEm IS NULL
+                  AND Status IN ('ATIVO','RESERVADO')
+                  AND NOT (
+                        TRY_CONVERT(date, :data_fim) < DataInicio
+                     OR TRY_CONVERT(date, :data_inicio) > DataFim
+                  )
+            """)
+            existe = db.session.execute(sql_conflito, {
+                "cod_face": cod_face_atual,
+                "cod_ponto": cod_ponto_int,
+                "data_inicio": data_inicio,
+                "data_fim": data_fim,
+            }).scalar()
+
+            if existe:
+                return jsonify({
+                    "ok": False,
+                    "erro": f"Não há espaço livre nesse período para painel não digital. CodFace {cod_face_atual}. A reserva não foi gravada."
+                }), 409
+
+            segmentos_encaixe_item = [{
+                "data_inicio": data_inicio_obj,
+                "data_fim": data_fim_obj,
+                "slot_inicio": None,
+                "slot_fim": None,
+                "span_qtd": None,
+            }]
+        else:
+            plano_encaixe_reserva_item = _calcular_plano_encaixe_range_reserva_digital(
+                cod_ponto=cod_ponto_int,
+                cod_face=cod_face_atual,
+                data_inicio_obj=data_inicio_obj,
+                data_fim_obj=data_fim_obj,
+                span_necessario=slots_novo,
+                capacidade_slots=capacidade_slots,
+            )
+
+            if not plano_encaixe_reserva_item.get("ok"):
+                dia_sem_espaco = plano_encaixe_reserva_item.get("dia_sem_espaco")
+                dia_txt = dia_sem_espaco.strftime("%Y-%m-%d") if hasattr(dia_sem_espaco, "strftime") else None
+                erro_msg = plano_encaixe_reserva_item.get("erro") or "Não há espaço suficiente na grade para esse range."
+                if dia_txt:
+                    erro_msg = f"{erro_msg} Dia sem encaixe: {dia_txt}."
+                return jsonify({
+                    "ok": False,
+                    "erro": f"{erro_msg} CodFace {cod_face_atual}.",
+                    "dia_sem_espaco": dia_txt,
+                    "cod_face_sem_espaco": cod_face_atual,
+                    "encaixe_modo": "sem_espaco",
+                    "qtd_segmentos_simulados": len(plano_encaixe_reserva_item.get("segmentos") or []),
+                }), 409
+
+            segmentos_encaixe_item = plano_encaixe_reserva_item.get("segmentos") or []
+            if not segmentos_encaixe_item:
+                return jsonify({
+                    "ok": False,
+                    "erro": f"O simulador de encaixe não retornou segmentos para gravar a reserva digital. CodFace {cod_face_atual}."
+                }), 409
+
+        total_segmentos_encaixe += len(segmentos_encaixe_item)
+        faces_para_gravar.append({
+            "cod_face": cod_face_atual,
+            "id_painel": id_painel_item_int,
+            "eh_digital": eh_digital,
+            "capacidade_slots": capacidade_slots,
+            "cota": cota_gravar,
+            "spanqtd_novo": spanqtd_novo,
+            "plano_encaixe": plano_encaixe_reserva_item,
+            "segmentos": segmentos_encaixe_item,
+        })
+
+    if not faces_para_gravar:
+        return jsonify({"ok": False, "erro": "Nenhuma CodFace válida foi informada para criar reserva."}), 400
+
+    reserva_ordem_prioridade_int = 1
+    plano_encaixe_reserva = faces_para_gravar[0].get("plano_encaixe") or {
         "ok": True,
         "modo": "nao_digital",
         "segmentos": [],
         "conflitos_existentes": 0,
     }
-
-    if eh_digital == 0:
-        sql_conflito = text("""
-            SELECT TOP 1 1
-            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] WITH (UPDLOCK, HOLDLOCK)
-            WHERE CodFace = :cod_face
-              AND CodPonto = :cod_ponto
-              AND CanceladoEm IS NULL
-              AND Status IN ('ATIVO','RESERVADO')
-              AND NOT (
-                    TRY_CONVERT(date, :data_fim) < DataInicio
-                 OR TRY_CONVERT(date, :data_inicio) > DataFim
-              )
-        """)
-        existe = db.session.execute(sql_conflito, {
-            "cod_face": cod_face,
-            "cod_ponto": cod_ponto_int,
-            "data_inicio": data_inicio,
-            "data_fim": data_fim
-        }).scalar()
-
-        if existe:
-            return jsonify({
-                "ok": False,
-                "erro": "Não há espaço livre nesse período para painel não digital. A reserva não foi gravada."
-            }), 409
-
-    else:
-        plano_encaixe_reserva = _calcular_plano_encaixe_range_reserva_digital(
-            cod_ponto=cod_ponto_int,
-            cod_face=cod_face,
-            data_inicio_obj=data_inicio_obj,
-            data_fim_obj=data_fim_obj,
-            span_necessario=slots_novo,
-            capacidade_slots=capacidade_slots,
-        )
-
-        if not plano_encaixe_reserva.get("ok"):
-            dia_sem_espaco = plano_encaixe_reserva.get("dia_sem_espaco")
-            dia_txt = dia_sem_espaco.strftime("%Y-%m-%d") if hasattr(dia_sem_espaco, "strftime") else None
-            erro_msg = plano_encaixe_reserva.get("erro") or "Não há espaço suficiente na grade para esse range."
-            if dia_txt:
-                erro_msg = f"{erro_msg} Dia sem encaixe: {dia_txt}."
-            return jsonify({
-                "ok": False,
-                "erro": erro_msg,
-                "dia_sem_espaco": dia_txt,
-                "encaixe_modo": "sem_espaco",
-                "qtd_segmentos_simulados": len(plano_encaixe_reserva.get("segmentos") or []),
-            }), 409
-
-    reserva_ordem_prioridade_int = 1
-
-    segmentos_encaixe = plano_encaixe_reserva.get("segmentos") or []
-
-    # Regra Tetris/fragmentada:
-    # - se a grade encontrou uma linha reta, grava 1 linha com LoopInicio/LoopFim;
-    # - se a grade precisou encaixar em pedaços, grava 1 linha por segmento.
-    # Isso evita o bug antigo de gravar um único range grande sem LoopInicio/LoopFim,
-    # que depois podia ser redesenhado em cima de outra ocupação quando a grade ficava cheia.
-    if eh_digital == 1:
-        if not segmentos_encaixe:
-            return jsonify({
-                "ok": False,
-                "erro": "O simulador de encaixe não retornou segmentos para gravar a reserva digital."
-            }), 409
-    else:
-        segmentos_encaixe = [{
-            "data_inicio": data_inicio_obj,
-            "data_fim": data_fim_obj,
-            "slot_inicio": None,
-            "slot_fim": None,
-            "span_qtd": None,
-        }]
 
 
     sql_insert = text("""
@@ -24404,62 +25341,76 @@ def api_ocupacao_reserva_criar():
 
     try:
         ids_fato_ocupacao: list[int] = []
+        ids_por_codface: dict[str, list[int]] = {}
 
-        for idx_segmento, segmento in enumerate(segmentos_encaixe, start=1):
-            seg_ini = segmento.get("data_inicio") or data_inicio_obj
-            seg_fim = segmento.get("data_fim") or data_fim_obj
+        for face_gravacao in faces_para_gravar:
+            cod_face_gravar = str(face_gravacao.get("cod_face") or "").strip()
+            id_painel_gravar = face_gravacao.get("id_painel")
+            eh_digital_gravar = int(face_gravacao.get("eh_digital") or 0)
+            capacidade_slots_gravar = int(face_gravacao.get("capacidade_slots") or 0)
+            cota_gravar = face_gravacao.get("cota")
+            spanqtd_novo_gravar = face_gravacao.get("spanqtd_novo")
+            segmentos_face = face_gravacao.get("segmentos") or []
 
-            if isinstance(seg_ini, datetime):
-                seg_ini = seg_ini.date()
-            if isinstance(seg_fim, datetime):
-                seg_fim = seg_fim.date()
+            ids_por_codface.setdefault(cod_face_gravar, [])
 
-            if seg_ini is None or seg_fim is None or seg_fim < seg_ini:
-                raise ValueError(f"Segmento de encaixe inválido na posição {idx_segmento}.")
+            for idx_segmento, segmento in enumerate(segmentos_face, start=1):
+                seg_ini = segmento.get("data_inicio") or data_inicio_obj
+                seg_fim = segmento.get("data_fim") or data_fim_obj
 
-            dias_segmento_int = int((seg_fim - seg_ini).days + 1)
-            loop_inicio_segmento = None
-            loop_fim_segmento = None
-            spanqtd_segmento = int(segmento.get("span_qtd") or spanqtd_novo or 1) if eh_digital == 1 else None
+                if isinstance(seg_ini, datetime):
+                    seg_ini = seg_ini.date()
+                if isinstance(seg_fim, datetime):
+                    seg_fim = seg_fim.date()
 
-            if eh_digital == 1:
-                loop_inicio_segmento = _slot_numero_grade_reserva(segmento.get("slot_inicio"), capacidade_slots)
-                loop_fim_segmento = _slot_numero_grade_reserva(segmento.get("slot_fim"), capacidade_slots)
+                if seg_ini is None or seg_fim is None or seg_fim < seg_ini:
+                    raise ValueError(f"Segmento de encaixe inválido na posição {idx_segmento} da CodFace {cod_face_gravar}.")
 
-                if loop_inicio_segmento is None or loop_fim_segmento is None:
-                    raise ValueError(f"Segmento de encaixe sem LoopInicio/LoopFim numérico na posição {idx_segmento}.")
+                dias_segmento_int = int((seg_fim - seg_ini).days + 1)
+                loop_inicio_segmento = None
+                loop_fim_segmento = None
+                spanqtd_segmento = int(segmento.get("span_qtd") or spanqtd_novo_gravar or 1) if eh_digital_gravar == 1 else None
 
-                if int(loop_fim_segmento) < int(loop_inicio_segmento):
-                    raise ValueError(f"Segmento de encaixe com LoopFim menor que LoopInicio na posição {idx_segmento}.")
+                if eh_digital_gravar == 1:
+                    loop_inicio_segmento = _slot_numero_grade_reserva(segmento.get("slot_inicio"), capacidade_slots_gravar)
+                    loop_fim_segmento = _slot_numero_grade_reserva(segmento.get("slot_fim"), capacidade_slots_gravar)
 
-            id_fato_ocupacao = db.session.execute(sql_insert, {
-                "cod_ponto": cod_ponto_int,
-                "cod_face": cod_face,
-                "id_painel": id_painel_int,
-                "data_inicio": seg_ini,
-                "data_fim": seg_fim,
-                "loop_inicio": loop_inicio_segmento,
-                "loop_fim": loop_fim_segmento,
-                "spanqtd": spanqtd_segmento,
-                "cota": cota_int,
-                "marca_exibida": marca_exibida,
-                "vendedor_nome": vendedor_nome,
-                "id_vendedor": id_vendedor_int,
-                "id_cliente": id_cliente_int,
-                "id_fato_controle": id_fato_controle_int,
-                "numero_contrato": numero_contrato,
-                "numero_previa": numero_previa,
-                "texto_original": texto_original_reserva,
-                "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
-                "dias": dias_segmento_int,
-                "expira_em": expira_em_reserva,
-                "criado_por": criado_por,
-                "reserva_ordem_prioridade": reserva_ordem_prioridade_int,
-                "tipo_vinculo_origem": "Reserva",
-                "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0
-            }).scalar_one()
+                    if loop_inicio_segmento is None or loop_fim_segmento is None:
+                        raise ValueError(f"Segmento de encaixe sem LoopInicio/LoopFim numérico na posição {idx_segmento} da CodFace {cod_face_gravar}.")
 
-            ids_fato_ocupacao.append(int(id_fato_ocupacao))
+                    if int(loop_fim_segmento) < int(loop_inicio_segmento):
+                        raise ValueError(f"Segmento de encaixe com LoopFim menor que LoopInicio na posição {idx_segmento} da CodFace {cod_face_gravar}.")
+
+                id_fato_ocupacao = db.session.execute(sql_insert, {
+                    "cod_ponto": cod_ponto_int,
+                    "cod_face": cod_face_gravar,
+                    "id_painel": id_painel_gravar,
+                    "data_inicio": seg_ini,
+                    "data_fim": seg_fim,
+                    "loop_inicio": loop_inicio_segmento,
+                    "loop_fim": loop_fim_segmento,
+                    "spanqtd": spanqtd_segmento,
+                    "cota": cota_gravar,
+                    "marca_exibida": marca_exibida,
+                    "vendedor_nome": vendedor_nome,
+                    "id_vendedor": id_vendedor_int,
+                    "id_cliente": id_cliente_int,
+                    "id_fato_controle": id_fato_controle_int,
+                    "numero_contrato": numero_contrato,
+                    "numero_previa": numero_previa,
+                    "texto_original": texto_original_reserva,
+                    "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
+                    "dias": dias_segmento_int,
+                    "expira_em": expira_em_reserva,
+                    "criado_por": criado_por,
+                    "reserva_ordem_prioridade": reserva_ordem_prioridade_int,
+                    "tipo_vinculo_origem": "Reserva",
+                    "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0
+                }).scalar_one()
+
+                id_fato_ocupacao_int_item = int(id_fato_ocupacao)
+                ids_fato_ocupacao.append(id_fato_ocupacao_int_item)
+                ids_por_codface[cod_face_gravar].append(id_fato_ocupacao_int_item)
 
         if not ids_fato_ocupacao:
             raise RuntimeError("Nenhuma linha de reserva foi inserida.")
@@ -24504,14 +25455,32 @@ def api_ocupacao_reserva_criar():
         current_app.logger.exception("Erro ao inserir reserva de ocupação e empresas relacionadas.")
         return jsonify({"ok": False, "erro": f"Erro ao inserir reserva na tabela: {exc}"}), 500
 
+    email_confirmacao_reserva = {"enviado": False, "motivo": "nao_tentado"}
+    try:
+        if origem_tela_reserva_ocupacao:
+            email_confirmacao_reserva = _agendar_email_confirmacao_reserva_ocupacao(ids_fato_ocupacao)
+        else:
+            email_confirmacao_reserva = _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao)
+    except Exception as exc:
+        current_app.logger.exception(
+            "RESERVA_EMAIL | erro inesperado após salvar reserva | id_reserva=%s",
+            id_fato_ocupacao_int,
+        )
+        email_confirmacao_reserva = {"enviado": False, "motivo": str(exc)[:300]}
+
     return jsonify({
         "ok": True,
         "id_fato_ocupacao_paineis_euromidia": id_fato_ocupacao_int,
         "ids_fato_ocupacao_paineis_euromidia": ids_fato_ocupacao,
+        "ids_por_codface": ids_por_codface,
+        "cod_faces": [face.get("cod_face") for face in faces_para_gravar],
+        "qtd_codfaces": len(faces_para_gravar),
         "bit_empresas_relacionadas": 1 if empresas_relacionadas else 0,
         "qtd_empresas_relacionadas": len(empresas_relacionadas),
-        "encaixe_modo": plano_encaixe_reserva.get("modo"),
-        "qtd_segmentos_encaixe": len(plano_encaixe_reserva.get("segmentos") or []),
+        "encaixe_modo": "multi" if len(faces_para_gravar) > 1 else plano_encaixe_reserva.get("modo"),
+        "qtd_segmentos_encaixe": total_segmentos_encaixe,
+        "email_confirmacao_enviado": bool(email_confirmacao_reserva.get("enviado")),
+        "email_confirmacao_motivo": email_confirmacao_reserva.get("motivo"),
     })
 
 
