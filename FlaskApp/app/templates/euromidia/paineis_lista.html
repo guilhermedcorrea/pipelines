@@ -681,10 +681,14 @@
 
   .periodo-range{
     display:grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 76px;
     gap: 10px;
     padding: 10px 4px 8px 4px;
     border-top: 1px solid rgba(15,23,42,.10);
+  }
+
+  .periodo-range > div{
+    min-width: 0;
   }
 
   .periodo-range label{
@@ -705,6 +709,11 @@
     font-size: 13px;
     color: rgba(15,23,42,.92);
     background: #fff;
+  }
+
+  .periodo-range input[type="number"]{
+    padding: 0 8px;
+    text-align: center;
   }
 
   /* ✅ NOVO: BI-SEMANA */
@@ -2096,6 +2105,18 @@
                         <label>Até</label>
                         <input type="date" id="pickerAte" value="">
                       </div>
+                      <div>
+                        <label for="pickerDias">Dias</label>
+                        <input
+                          type="number"
+                          id="pickerDias"
+                          value=""
+                          min="0"
+                          step="1"
+                          inputmode="numeric"
+                          placeholder="0"
+                          aria-label="Quantidade de dias a adicionar à data inicial">
+                      </div>
                     </div>
 
                     {# ✅ NOVO: BI-SEMANA #}
@@ -2668,6 +2689,7 @@
 
     const pickerDe  = document.getElementById("pickerDe");
     const pickerAte = document.getElementById("pickerAte");
+    const pickerDias = document.getElementById("pickerDias");
     const selBiSemana = document.getElementById("selBiSemana");
 
     /* ✅ PATCH: tenta por ID e, se não existir, tenta por name (evita quebrar se você mudou o HTML) */
@@ -2742,6 +2764,59 @@
       }
     }
 
+    function limparDias(){
+      if (pickerDias){
+        pickerDias.value = "";
+        pickerDias.setCustomValidity("");
+      }
+      if (pickerDe){
+        pickerDe.setCustomValidity("");
+      }
+    }
+
+    function aplicarDiasNoAte(exibirValidacao){
+      if (!pickerDias) return true;
+
+      const valor = String(pickerDias.value || "").trim();
+      if (!valor){
+        pickerDias.setCustomValidity("");
+        if (pickerDe) pickerDe.setCustomValidity("");
+        return true;
+      }
+
+      const dias = Number(valor);
+      if (!Number.isInteger(dias) || dias < 0){
+        pickerDias.setCustomValidity("Informe uma quantidade inteira de dias igual ou maior que zero.");
+        if (pickerDe) pickerDe.setCustomValidity("");
+        if (exibirValidacao) pickerDias.reportValidity();
+        return false;
+      }
+
+      const dataInicial = fromISO(pickerDe ? pickerDe.value : "");
+      if (!dataInicial){
+        pickerDias.setCustomValidity("");
+        if (pickerDe){
+          pickerDe.setCustomValidity("Informe a data inicial no campo De.");
+          if (exibirValidacao) pickerDe.reportValidity();
+        }
+        return false;
+      }
+
+      pickerDias.setCustomValidity("");
+      pickerDe.setCustomValidity("");
+
+      const dataFinal = new Date(
+        dataInicial.getFullYear(),
+        dataInicial.getMonth(),
+        dataInicial.getDate()
+      );
+      dataFinal.setDate(dataFinal.getDate() + dias);
+
+      if (pickerAte) pickerAte.value = toISO(dataFinal);
+      aplicarPickersParaReal();
+      return true;
+    }
+
     function aplicarBiSemanaSelecionadaNoRange(){
       if (!selBiSemana || !selBiSemana.value) return false;
 
@@ -2750,6 +2825,8 @@
 
       const ini = (opt.getAttribute("data-inicio") || "").trim();
       const fim = (opt.getAttribute("data-fim") || "").trim();
+
+      limparDias();
 
       if (pickerDe)  pickerDe.value  = ini;
       if (pickerAte) pickerAte.value = fim;
@@ -2857,6 +2934,7 @@
     function setRange(iniDateObj, fimDateObj){
       const di = toISO(iniDateObj);
       const df = toISO(fimDateObj);
+      limparDias();
       if (pickerDe)  pickerDe.value  = di;
       if (pickerAte) pickerAte.value = df;
       aplicarPickersParaReal();
@@ -3002,14 +3080,28 @@
       pickerDe.addEventListener("change", function(){
         limparBiSemana();
         limparChipsAtivos();
-        aplicarPickersParaReal();
+        pickerDe.setCustomValidity("");
+        if (!(pickerDias && String(pickerDias.value || "").trim())){
+          aplicarPickersParaReal();
+          return;
+        }
+        aplicarDiasNoAte(false);
       });
     }
     if (pickerAte){
       pickerAte.addEventListener("change", function(){
         limparBiSemana();
         limparChipsAtivos();
+        limparDias();
         aplicarPickersParaReal();
+      });
+    }
+
+    if (pickerDias){
+      pickerDias.addEventListener("input", function(){
+        limparBiSemana();
+        limparChipsAtivos();
+        aplicarDiasNoAte(false);
       });
     }
 
@@ -3028,6 +3120,7 @@
         ev.stopPropagation();
 
         if (!(selBiSemana && selBiSemana.value)){
+          if (!aplicarDiasNoAte(true)) return;
           aplicarPickersParaReal();
         } else {
           aplicarBiSemanaSelecionadaNoRange();

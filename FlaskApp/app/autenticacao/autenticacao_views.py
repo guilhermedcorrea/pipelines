@@ -13,7 +13,6 @@ from functools import wraps
 from urllib.parse import urlparse, urljoin
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
-from flask_wtf import RecaptchaField
 from wtforms.validators import DataRequired
 import os
 import requests
@@ -31,7 +30,6 @@ autenticacao_bp = Blueprint("Autenticacao", __name__)
 class FormLogin(FlaskForm):
     email = StringField("Email", validators=[DataRequired()])
     senha = PasswordField("Senha", validators=[DataRequired()])
-    recaptcha = RecaptchaField()
     entrar = SubmitField("Entrar")
 
 
@@ -62,45 +60,6 @@ def _url_segura(url: str) -> bool:
     return (test_url.scheme in ("http", "https")) and (host_url.netloc == test_url.netloc)
 
 
-def _validar_recaptcha_v2(token_resposta: str) -> tuple[bool, str]:
-   
-    if not token_resposta:
-        return False, "Confirme o reCAPTCHA para continuar."
-
-    
-    recaptcha_secret = (
-        current_app.config.get("RECAPTCHA_SECRET_KEY")
-        or current_app.config.get("RECAPTCHA_PRIVATE_KEY")
-        or "SEU_SECRET_AQUI_PARA_TESTE"
-    )
-
-    try:
-        resp = requests.post(
-            "https://www.google.com/recaptcha/api/siteverify",
-            data={
-                "secret": recaptcha_secret,
-                "response": token_resposta,
-                "remoteip": request.remote_addr, 
-            },
-            timeout=6,
-        )
-        data = resp.json()
-    except Exception:
-        return False, "Falha ao validar o reCAPTCHA. Tente novamente."
-
-    if not data.get("success"):
-        
-        codigos = data.get("error-codes") or []
-      
-        if "invalid-input-secret" in codigos:
-            return False, "reCAPTCHA: secret inválido (chave secreta errada)."
-        if "invalid-input-response" in codigos:
-            return False, "reCAPTCHA inválido. Marque novamente."
-        return False, "Não foi possível validar o reCAPTCHA. Tente novamente."
-
-    return True, ""
-
-
 @autenticacao_bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("15 per minute", methods=["POST"])
 def login():
@@ -109,47 +68,16 @@ def login():
         if current_user.is_authenticated:
             return redirect(url_for("Paineis.lista_paineis"))
 
-        site_key = current_app.config.get("RECAPTCHA_SITE_KEY") or current_app.config.get("RECAPTCHA_PUBLIC_KEY")
-
-        if not site_key:
-            raise RuntimeError("reCAPTCHA SITE KEY não configurada. Defina RECAPTCHA_SITE_KEY (ou RECAPTCHA_PUBLIC_KEY) no app.config.")
-
-       
-        current_app.config["RECAPTCHA_SITE_KEY"] = site_key
-
-        return render_template(
-            "autenticacao/login.html",
-            recaptcha_erro=None
-        )
+        return render_template("autenticacao/login.html")
 
  
     email = _texto(request.form.get("email")).lower()
     senha = _texto(request.form.get("senha"))
     lembrar = bool(request.form.get("lembrar"))
 
-    recaptcha_token = _texto(request.form.get("g-recaptcha-response"))
-
     if not email or not senha:
         flash("Informe email e senha.", "warning")
         return redirect(url_for("Autenticacao.login"))
-
-   
-    ok_recaptcha, msg_recaptcha = _validar_recaptcha_v2(recaptcha_token)
-    if not ok_recaptcha:
-      
-        flash("Falha no reCAPTCHA. Verifique e tente novamente.", "danger")
-
-   
-        if not current_app.config.get("RECAPTCHA_SITE_KEY"):
-            current_app.config["RECAPTCHA_SITE_KEY"] = (
-                current_app.config.get("RECAPTCHA_PUBLIC_KEY")
-                or "SEU_SITE_KEY_AQUI_PARA_TESTE"
-            )
-
-        return render_template(
-            "autenticacao/login.html",
-            recaptcha_erro=msg_recaptcha,
-        )
 
     
     usuario = (

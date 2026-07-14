@@ -151,28 +151,6 @@
       line-height:1.4;
     }
 
-    /* ✅ bloco do captcha */
-    .captcha-wrap{
-      display:flex;
-      justify-content:center;
-      margin:12px 0 10px 0;
-    }
-
-    .captcha-erro{
-      margin-top:8px;
-      font-size:12px;
-      font-weight:900;
-      color:var(--danger);
-      text-align:center;
-    }
-
-    /* ✅ deixa o recaptcha responsivo em telas menores */
-    @media (max-width: 380px){
-      .captcha-wrap{
-        transform: scale(.92);
-        transform-origin: center;
-      }
-    }
   </style>
 </head>
 
@@ -221,20 +199,6 @@
             </label>
           </div>
 
-   
-          <div class="captcha-wrap">
-            <div
-              class="g-recaptcha"
-              data-sitekey="{{ config.get('RECAPTCHA_PUBLIC_KEY', '') }}"
-
-            ></div>
-          </div>
-
-          {# (opcional) se você der flash de erro específico #}
-          {% if recaptcha_erro %}
-            <div class="captcha-erro">{{ recaptcha_erro }}</div>
-          {% endif %}
-
           <button class="btn" type="submit">Entrar</button>
         </form>
 
@@ -245,8 +209,5 @@
       </div>
     </div>
   </div>
-
-  <!-- ✅ script do Google reCAPTCHA -->
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </body>
 </html>

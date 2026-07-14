@@ -1559,46 +1559,81 @@ def montar_comando_rclone(argumentos: list[str], rclone_config: Path) -> list[st
 
 
 def obter_info_remote_rclone(env_rclone: dict[str, str], rclone_config: Path) -> dict[str, Any]:
-    """Consulta metadados do arquivo remoto antes do download para provar que a origem oficial foi checada."""
+    """Localiza o arquivo remoto com o comando compatível com o rclone instalado.
+
+    O rclone v1.60.1-DEV apresentou resultados inconsistentes com ``lsjson`` no
+    backend do SharePoint: ``--stat`` retornou ``directory not found`` e a
+    listagem direta da pasta retornou uma lista vazia. A listagem recursiva com
+    ``lsf`` foi validada no próprio worker e encontrou corretamente o arquivo.
+
+    Esta função usa essa listagem apenas para confirmar o caminho remoto. A
+    existência e a leitura efetiva do conteúdo continuam sendo validadas pelo
+    ``rclone copyto`` e pelas verificações do arquivo temporário após o download.
+    """
+    raiz_remota = f"{RCLONE_REMOTE_CONTROLE_CONTRATOS}:"
+    caminho_relativo_esperado = (
+        f"{RCLONE_PASTA_CONTROLE_CONTRATOS.strip('/')}/"
+        f"{NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS}"
+    )
+
     comando = montar_comando_rclone(
         [
-            "lsjson",
-            RCLONE_ARQUIVO_ORIGEM,
-            "--stat",
+            "lsf",
+            raiz_remota,
+            "--recursive",
+            "--files-only",
+            "--include",
+            NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS,
         ],
         rclone_config,
     )
 
     resultado = executar_comando_sistema(
         comando,
-        "rclone_lsjson_arquivo_origem_sharepoint",
+        "rclone_lsf_recursivo_arquivo_origem_sharepoint",
         env=env_rclone,
     )
 
     if not resultado.stdout.strip():
         raise FileNotFoundError(
-            f"O rclone não retornou metadados para o arquivo de origem: {RCLONE_ARQUIVO_ORIGEM}"
+            "O rclone não encontrou o arquivo esperado na listagem recursiva do SharePoint. "
+            f"Raiz consultada: {raiz_remota}. "
+            f"Caminho esperado: {caminho_relativo_esperado}"
         )
 
-    try:
-        dados = json.loads(resultado.stdout)
-    except Exception as erro:
+    caminhos_retornados = [
+        linha.strip().replace("\\", "/")
+        for linha in resultado.stdout.splitlines()
+        if linha.strip()
+    ]
+
+    arquivos_encontrados = [
+        caminho
+        for caminho in caminhos_retornados
+        if caminho.rstrip("/") == caminho_relativo_esperado
+    ]
+
+    if not arquivos_encontrados:
+        raise FileNotFoundError(
+            "O rclone retornou arquivos, mas nenhum corresponde exatamente ao caminho esperado. "
+            f"Caminho esperado: {caminho_relativo_esperado}. "
+            f"Caminhos retornados: {caminhos_retornados!r}"
+        )
+
+    if len(arquivos_encontrados) > 1:
         raise RuntimeError(
-            "O rclone lsjson retornou saída não parseável como JSON. "
-            f"Saída recebida: {resultado.stdout}"
-        ) from erro
+            "O rclone retornou o mesmo caminho mais de uma vez na listagem recursiva. "
+            f"Caminhos encontrados: {arquivos_encontrados!r}"
+        )
 
-    if isinstance(dados, list):
-        if not dados:
-            raise FileNotFoundError(
-                f"O arquivo de origem não foi encontrado no SharePoint/rclone: {RCLONE_ARQUIVO_ORIGEM}"
-            )
-        dados = dados[0]
-
-    if not isinstance(dados, dict):
-        raise RuntimeError(f"Formato inesperado no retorno do rclone lsjson: {dados!r}")
-
-    return dados
+    caminho_encontrado = arquivos_encontrados[0]
+    return {
+        "Path": caminho_encontrado,
+        "Name": NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS,
+        "IsDir": False,
+        "Remote": RCLONE_REMOTE_CONTROLE_CONTRATOS,
+        "Consulta": "rclone lsf recursivo",
+    }
 
 
 def calcular_sha256_arquivo(caminho: Path, bloco_bytes: int = 1024 * 1024) -> str:
@@ -4081,6 +4116,4 @@ def pipeline_controle_contratos_euromidia():
 
 
 dag = pipeline_controle_contratos_euromidia()
-
-
 

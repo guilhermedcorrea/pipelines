@@ -3107,6 +3107,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const USUARIO_LOGADO_EH_PERFIL_VENDEDOR = {{ 'true' if usuario_logado_eh_perfil_vendedor else 'false' }};
   const ID_VENDEDOR_LOGADO = String({{ (id_vendedor_logado if id_vendedor_logado is not none else '')|tojson }}).trim();
   const NOME_VENDEDOR_LOGADO = String({{ (nome_vendedor_logado or '')|tojson }}).trim();
+  const RESERVA_AGORA_SERVIDOR_RAW = String({{ (agora_servidor_reserva_iso or '')|tojson }}).trim();
+  const RESERVA_FERIADOS = new Set({{ (feriados_reserva_iso or [])|tojson }});
+  const RESERVA_CALENDARIO_DISPONIVEL = {{ 'true' if calendario_reserva_disponivel else 'false' }};
+  const RESERVA_RELOGIO_CLIENTE_INICIO_MS = Date.now();
+  const RESERVA_RELOGIO_SERVIDOR_INICIO = RESERVA_AGORA_SERVIDOR_RAW
+    ? new Date(RESERVA_AGORA_SERVIDOR_RAW)
+    : null;
 
   function submeterFormFiltroGrade(form){
     if(!form) return;
@@ -3207,12 +3214,75 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
+  function agoraServidorReserva(){
+    if (
+      !RESERVA_RELOGIO_SERVIDOR_INICIO
+      || Number.isNaN(RESERVA_RELOGIO_SERVIDOR_INICIO.getTime())
+    ) {
+      return null;
+    }
+
+    const decorridoNoNavegador = Date.now() - RESERVA_RELOGIO_CLIENTE_INICIO_MS;
+    return new Date(RESERVA_RELOGIO_SERVIDOR_INICIO.getTime() + decorridoNoNavegador);
+  }
+
+  function chaveDataLocalReserva(dt){
+    const ano = dt.getFullYear();
+    const mes = String(dt.getMonth() + 1).padStart(2, "0");
+    const dia = String(dt.getDate()).padStart(2, "0");
+    return `${ano}-${mes}-${dia}`;
+  }
+
+  function ehDataUtilReserva(dt){
+    const diaSemana = dt.getDay();
+    if (diaSemana === 0 || diaSemana === 6) return false;
+    return !RESERVA_FERIADOS.has(chaveDataLocalReserva(dt));
+  }
+
+  function calcularMilissegundosUteisReserva(inicio, fim){
+    if (!(inicio instanceof Date) || Number.isNaN(inicio.getTime())) return null;
+    if (!(fim instanceof Date) || Number.isNaN(fim.getTime())) return null;
+    if (fim.getTime() <= inicio.getTime()) return 0;
+
+    let cursor = new Date(inicio.getTime());
+    let totalUtilMs = 0;
+    let protecao = 0;
+
+    while (cursor.getTime() < fim.getTime()) {
+      protecao += 1;
+      if (protecao > 740) return null;
+
+      const inicioDiaSeguinte = new Date(
+        cursor.getFullYear(),
+        cursor.getMonth(),
+        cursor.getDate() + 1,
+        0, 0, 0, 0
+      );
+      const fimTrechoMs = Math.min(inicioDiaSeguinte.getTime(), fim.getTime());
+
+      if (ehDataUtilReserva(cursor)) {
+        totalUtilMs += Math.max(0, fimTrechoMs - cursor.getTime());
+      }
+
+      cursor = new Date(fimTrechoMs);
+    }
+
+    return totalUtilMs;
+  }
+
   function formatarTempoRestanteReserva(valor, comPrefixo = true){
     const dt = parseDataExpiraReserva(valor);
     if (!dt) return "";
 
-    const diffMs = dt.getTime() - Date.now();
-    if (diffMs <= 0) return "expirada";
+    const agora = agoraServidorReserva();
+    if (!agora || !RESERVA_CALENDARIO_DISPONIVEL) {
+      return "calendário indisponível";
+    }
+
+    if (dt.getTime() <= agora.getTime()) return "expirada";
+
+    const diffMs = calcularMilissegundosUteisReserva(agora, dt);
+    if (diffMs === null) return "calendário indisponível";
 
     const totalSeg = Math.floor(diffMs / 1000);
     const horas = Math.floor(totalSeg / 3600);

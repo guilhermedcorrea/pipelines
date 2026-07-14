@@ -6,7 +6,9 @@ from flask_login import current_user
 
 
 ID_PERFIL_ADMIN_PADRAO = 1
+ID_PERFIL_USUARIO_PADRAO = 2
 ID_PERFIL_VENDEDOR_PADRAO = 3
+ID_PERFIL_CONTROLE_PADRAO = 4
 ID_PERFIL_COORDENADOR_PADRAO = 5
 
 
@@ -284,6 +286,28 @@ def usuario_eh_perfil_vendedor() -> bool:
     return _perfil_usuario_logado() == "vendedor"
 
 
+def usuario_eh_perfil_usuario() -> bool:
+    """Eu identifico o perfil USUARIO pelo ID 2 ou pelo nome carregado no login."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    if _id_perfil_usuario_logado() == ID_PERFIL_USUARIO_PADRAO:
+        return True
+
+    return _perfil_usuario_logado() == "usuario"
+
+
+def usuario_eh_perfil_controle() -> bool:
+    """Eu identifico o perfil CONTROLE pelo ID 4 ou pelo nome carregado no login."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    if _id_perfil_usuario_logado() == ID_PERFIL_CONTROLE_PADRAO:
+        return True
+
+    return _perfil_usuario_logado() == "controle"
+
+
 def usuario_eh_perfil_coordenador() -> bool:
     """usuario_eh_perfil_coordenador
     - Eu identifico o perfil Coordenador pelo ID fixo informado: IDDimPerfilUsuario = 5.
@@ -368,6 +392,19 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
         return False
 
     chave = _normalizar_texto_acl(item_menu)
+
+    if chave in {"vencimentos_campanhas", "vencimentos_campanhas_euromidia"}:
+        return (
+            usuario_eh_perfil_admin()
+            or usuario_eh_perfil_coordenador()
+            or usuario_eh_perfil_controle()
+            or usuario_eh_perfil_vendedor()
+            or usuario_eh_perfil_usuario()
+            or _usuario_tem_permissao("ADMIN_TUDO")
+            or _usuario_tem_permissao("VENCIMENTOS_CAMPANHAS_VER")
+            or _usuario_tem_permissao("KANBAN_VER")
+            or _usuario_tem_permissao("KANBAN_EDITAR")
+        )
 
     if chave in {"preferencia_reservas", "preferencia_reservas_lista"}:
         return (

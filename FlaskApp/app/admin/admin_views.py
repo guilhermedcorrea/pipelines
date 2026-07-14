@@ -21055,20 +21055,19 @@ def _campanhas_vencimentos_usuario_tem_perfil(
 
 
 def _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas() -> bool:
-    """ADMIN e COORDENADOR podem cancelar qualquer reserva listada na tela."""
+    """ADMIN, CONTROLE e COORDENADOR podem ver e cancelar qualquer reserva."""
+    return _campanhas_vencimentos_usuario_tem_perfil(
+        nomes_permitidos={"ADMIN", "CONTROLE", "COORDENADOR"},
+        ids_permitidos={1, 4, 5},
+    )
 
-    try:
-        metodo = getattr(current_user, "has_permission", None)
-        if metodo and bool(metodo("ADMIN_TUDO")):
-            return True
-    except Exception:
-        current_app.logger.exception(
-            "Falha ao verificar ADMIN_TUDO para cancelamento de reservas."
-        )
+
+def _campanhas_vencimentos_usuario_pode_operar_reservas_proprias() -> bool:
+    """VENDEDOR e USUARIO podem ver/cancelar somente reservas criadas pelo próprio login."""
 
     return _campanhas_vencimentos_usuario_tem_perfil(
-        nomes_permitidos={"ADMIN", "COORDENADOR"},
-        ids_permitidos={1, 5},
+        nomes_permitidos={"VENDEDOR", "USUARIO"},
+        ids_permitidos={2, 3},
     )
 
 def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
@@ -21157,6 +21156,44 @@ def _campanhas_vencimentos_nome_vendedor_sql() -> str:
     return "NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vc.NomeVendedor))), '')"
 
 
+def _campanhas_vencimentos_filtro_visibilidade_sql(
+    *,
+    usuario_logado_eh_vendedor: bool,
+    usuario_logado_pode_ver_todas_reservas: bool,
+) -> str | None:
+    """Monta a barreira de visibilidade aplicada à lista, filtros e sugestões.
+
+    - ADMIN, CONTROLE e COORDENADOR não recebem restrição de reserva;
+    - VENDEDOR vê campanhas da própria carteira e reservas criadas pelo próprio login;
+    - USUARIO (e qualquer perfil sem acesso global) não vê reservas de terceiros.
+      As campanhas mantêm a regra anterior para perfis que não são VENDEDOR.
+    """
+
+    fonte_reserva_sql = (
+        "UPPER(LTRIM(RTRIM(ISNULL(vc.FonteLinha, '')))) "
+        "COLLATE Latin1_General_CI_AI = 'RESERVA'"
+    )
+
+    if usuario_logado_eh_vendedor:
+        return f"""
+            (
+                ({fonte_reserva_sql} AND ISNULL(vc.CriadoPorIDUsuario, 0) = :id_usuario_logado)
+                OR
+                (NOT ({fonte_reserva_sql}) AND ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado)
+            )
+        """
+
+    if usuario_logado_pode_ver_todas_reservas:
+        return None
+
+    return f"""
+        (
+            NOT ({fonte_reserva_sql})
+            OR ISNULL(vc.CriadoPorIDUsuario, 0) = :id_usuario_logado
+        )
+    """
+
+
 def _campanhas_vencimentos_adicionar_filtro_in(
     filtros_sql: list[str],
     params: dict,
@@ -21187,6 +21224,7 @@ def _campanhas_vencimentos_montar_filtros_sql(
     vendedores_ids_selecionados: list[int],
     usuario_logado_eh_vendedor: bool,
     usuario_logado_eh_admin: bool,
+    usuario_logado_pode_ver_todas_reservas: bool,
     id_usuario_logado: int | None,
     data_inicio_filtro: date | None = None,
     data_fim_filtro: date | None = None,
@@ -21209,8 +21247,12 @@ def _campanhas_vencimentos_montar_filtros_sql(
         "id_usuario_logado": int(id_usuario_logado or 0),
     }
 
-    if usuario_logado_eh_vendedor:
-        filtros_sql.append("ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado")
+    filtro_visibilidade = _campanhas_vencimentos_filtro_visibilidade_sql(
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_pode_ver_todas_reservas=usuario_logado_pode_ver_todas_reservas,
+    )
+    if filtro_visibilidade:
+        filtros_sql.append(filtro_visibilidade)
 
     if q:
         filtros_sql.append(f"""
@@ -21637,9 +21679,10 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
 
 def _campanhas_vencimentos_opcoes_marca(
     usuario_logado_eh_vendedor: bool,
+    usuario_logado_pode_ver_todas_reservas: bool,
     id_usuario_logado: int | None,
 ) -> list[str]:
-    """Busca as marcas disponíveis na origem unificada, respeitando a restrição do perfil VENDEDOR."""
+    """Busca somente marcas de linhas que o perfil logado pode visualizar."""
 
     marca_sql = _campanhas_vencimentos_marca_sql()
     filtros_sql: list[str] = [
@@ -21647,8 +21690,12 @@ def _campanhas_vencimentos_opcoes_marca(
     ]
     params = {"id_usuario_logado": int(id_usuario_logado or 0)}
 
-    if usuario_logado_eh_vendedor:
-        filtros_sql.append("ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado")
+    filtro_visibilidade = _campanhas_vencimentos_filtro_visibilidade_sql(
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_pode_ver_todas_reservas=usuario_logado_pode_ver_todas_reservas,
+    )
+    if filtro_visibilidade:
+        filtros_sql.append(filtro_visibilidade)
 
     where_sql = " AND ".join(f"({item})" for item in filtros_sql)
     sql_from_where = _campanhas_vencimentos_sql_from_where(where_sql)
@@ -23917,8 +23964,8 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
     """Cancela uma RESERVA ativa pela tela de vencimentos de campanhas.
 
     Regra de permissão:
-    - Perfil ADMIN ou COORDENADOR cancela qualquer reserva;
-    - Perfil VENDEDOR cancela somente reserva criada pelo próprio usuário
+    - Perfil ADMIN, CONTROLE ou COORDENADOR cancela qualquer reserva;
+    - Perfil VENDEDOR ou USUARIO cancela somente reserva criada pelo próprio usuário
       em FatoOcupacaoPaineisEuromidia.CriadoPorIDUsuario.
     """
 
@@ -23963,10 +24010,10 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
 
         criador_reserva = _parse_int(reserva.get("CriadoPorIDUsuario")) or 0
         pode_cancelar_todas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
-        usuario_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
+        pode_cancelar_proprias = _campanhas_vencimentos_usuario_pode_operar_reservas_proprias()
 
         if not pode_cancelar_todas:
-            if not usuario_eh_vendedor:
+            if not pode_cancelar_proprias:
                 abort(403, description="Seu perfil não tem permissão para cancelar reservas nesta tela.")
 
             if criador_reserva <= 0 or criador_reserva != id_usuario_logado:
@@ -23995,11 +24042,16 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
                  WHERE IDFatoOcupacaoPaineisEuromidia = :id_reserva
                    AND CanceladoEm IS NULL
                    AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
-                   AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO';
+                   AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                   AND (
+                        :pode_cancelar_todas = 1
+                        OR CriadoPorIDUsuario = :id_usuario_logado
+                   );
             """),
             {
                 "id_reserva": id_reserva_int,
                 "id_usuario_logado": id_usuario_logado,
+                "pode_cancelar_todas": 1 if pode_cancelar_todas else 0,
                 "observacao_cancelamento": observacao_cancelamento,
             },
         )
@@ -24300,12 +24352,14 @@ def vencimentos_campanhas_euromidia():
     """
     Tela de vencimentos de campanhas da Euromídia.
 
-    Admin / perfis não vendedores:
-        - visualizam todos os contratos/campanhas.
+    ADMIN, CONTROLE e COORDENADOR:
+        - visualizam todas as reservas e podem cancelar qualquer uma.
 
-    Perfil VENDEDOR:
-        - visualiza somente campanhas cujo IDVendedor esteja ligado ao seu IDDimUsuarios
-          em Integracao.dbo.Vendedores.
+    VENDEDOR e USUARIO:
+        - visualizam somente reservas criadas pelo próprio IDDimUsuarios;
+        - só podem cancelar essas reservas próprias.
+
+    Para campanhas, o VENDEDOR continua vendo apenas sua própria carteira.
     """
 
     _campanhas_vencimentos_sincronizar_itens_controle()
@@ -24314,6 +24368,7 @@ def vencimentos_campanhas_euromidia():
     usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
     usuario_logado_eh_admin = _campanhas_vencimentos_usuario_eh_admin()
     usuario_logado_pode_cancelar_todas_reservas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
+    usuario_logado_pode_operar_reservas_proprias = _campanhas_vencimentos_usuario_pode_operar_reservas_proprias()
     id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
 
     q = (request.args.get("q") or "").strip()[:160]
@@ -24351,6 +24406,7 @@ def vencimentos_campanhas_euromidia():
         vendedores_ids_selecionados=vendedores_ids_selecionados,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
         usuario_logado_eh_admin=usuario_logado_eh_admin,
+        usuario_logado_pode_ver_todas_reservas=usuario_logado_pode_cancelar_todas_reservas,
         id_usuario_logado=id_usuario_logado,
         data_inicio_filtro=data_inicio_filtro,
         data_fim_filtro=data_fim_filtro,
@@ -24421,9 +24477,20 @@ def vencimentos_campanhas_euromidia():
 
     id_usuario_logado_int = int(id_usuario_logado or 0)
     for item in itens:
+        fonte_linha = str(item.get("FonteLinha") or "").strip().upper()
         id_usuario_vendedor_linha = _parse_int(item.get("IDDimUsuariosVendedor")) or 0
+        id_criador_reserva = _parse_int(item.get("CriadoPorIDUsuario")) or 0
 
-        if usuario_logado_eh_vendedor:
+        if fonte_linha == "RESERVA":
+            linha_pertence_ao_usuario_logado = bool(
+                usuario_logado_pode_cancelar_todas_reservas
+                or (
+                    id_usuario_logado_int > 0
+                    and id_criador_reserva > 0
+                    and id_criador_reserva == id_usuario_logado_int
+                )
+            )
+        elif usuario_logado_eh_vendedor:
             linha_pertence_ao_usuario_logado = (
                 id_usuario_logado_int > 0
                 and id_usuario_vendedor_linha > 0
@@ -24442,14 +24509,13 @@ def vencimentos_campanhas_euromidia():
             and bool(item.get("PodeRenovar"))
         )
 
-        id_criador_reserva = _parse_int(item.get("CriadoPorIDUsuario")) or 0
         item["UsuarioPodeCancelarReserva"] = bool(
-            str(item.get("FonteLinha") or "").strip().upper() == "RESERVA"
+            fonte_linha == "RESERVA"
             and (_parse_int(item.get("IDReservaOcupacao")) or 0) > 0
             and (
                 usuario_logado_pode_cancelar_todas_reservas
                 or (
-                    usuario_logado_eh_vendedor
+                    usuario_logado_pode_operar_reservas_proprias
                     and id_usuario_logado_int > 0
                     and id_criador_reserva > 0
                     and id_criador_reserva == id_usuario_logado_int
@@ -24459,8 +24525,12 @@ def vencimentos_campanhas_euromidia():
 
     filtros_status_opcoes = []
     params_status_opcoes = {"id_usuario_logado": int(id_usuario_logado or 0)}
-    if usuario_logado_eh_vendedor:
-        filtros_status_opcoes.append("ISNULL(vc.IDDimUsuariosVendedor, 0) = :id_usuario_logado")
+    filtro_visibilidade_status = _campanhas_vencimentos_filtro_visibilidade_sql(
+        usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_pode_ver_todas_reservas=usuario_logado_pode_cancelar_todas_reservas,
+    )
+    if filtro_visibilidade_status:
+        filtros_status_opcoes.append(filtro_visibilidade_status)
 
     where_status_opcoes = " AND ".join(f"({item})" for item in filtros_status_opcoes) if filtros_status_opcoes else "1=1"
     sql_status_opcoes = text(f"""
@@ -24479,6 +24549,7 @@ def vencimentos_campanhas_euromidia():
 
     marca_opcoes = _campanhas_vencimentos_opcoes_marca(
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
+        usuario_logado_pode_ver_todas_reservas=usuario_logado_pode_cancelar_todas_reservas,
         id_usuario_logado=id_usuario_logado,
     )
 
@@ -24540,6 +24611,7 @@ def vencimentos_campanhas_sugestoes():
 
     usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
     usuario_logado_eh_admin = _campanhas_vencimentos_usuario_eh_admin()
+    usuario_logado_pode_ver_todas_reservas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
     id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
 
     q = (request.args.get("q") or "").strip()[:160]
@@ -24569,6 +24641,7 @@ def vencimentos_campanhas_sugestoes():
         vendedores_ids_selecionados=vendedores_ids_selecionados,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
         usuario_logado_eh_admin=usuario_logado_eh_admin,
+        usuario_logado_pode_ver_todas_reservas=usuario_logado_pode_ver_todas_reservas,
         id_usuario_logado=id_usuario_logado,
         data_inicio_filtro=data_inicio_filtro,
         data_fim_filtro=data_fim_filtro,

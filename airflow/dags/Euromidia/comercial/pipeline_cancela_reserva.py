@@ -13,12 +13,20 @@ try:
 except ImportError:
     from airflow.decorators import dag, task
 
+try:
+    from airflow.providers.standard.operators.trigger_dagrun import (
+        TriggerDagRunOperator,
+    )
+except ImportError:
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+
 from hooks.BancodeDados.SqlServer import HookSqlServer
 
 
 logger = logging.getLogger(__name__)
 
 NOME_DAG = "pipeline_cancela_reserva"
+NOME_DAG_NOTIFICACOES = "pipeline_notificacoes_euromidia"
 CONN_ID_SQL_SERVER = "mssql_integracao"
 TIMEZONE_SAO_PAULO = pendulum.timezone("America/Sao_Paulo")
 
@@ -411,6 +419,8 @@ SET
     reserva.Status = N'CANCELADO',
     reserva.Observacao = {SQL_OBSERVACAO_CANCELAMENTO},
     reserva.DataAtualizacao = SYSDATETIME()
+OUTPUT
+    INSERTED.IDFatoOcupacaoPaineisEuromidia AS IDReserva
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (UPDLOCK, READPAST, ROWLOCK)
 WHERE
 {SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO};
@@ -498,6 +508,15 @@ O DAG não recancela registros já cancelados porque a atualização exige:
 - `Status <> 'CANCELADO'`
 
 Também usa `UPDLOCK`, `READPAST` e `ROWLOCK` no `UPDATE` para reduzir risco de concorrência.
+
+O próprio `UPDATE` devolve, por meio de `OUTPUT INSERTED`, somente os IDs que
+foram realmente cancelados. A transação é confirmada antes de o DAG
+`pipeline_notificacoes_euromidia` ser disparado. Quando nenhum registro é
+alterado, o DAG de notificações não é chamado.
+
+O disparo é assíncrono: o DAG pai não mantém um worker ocupado aguardando o
+DAG de notificações. Isso evita bloqueio quando o executor ou o pool possui
+poucos slots disponíveis.
 
 ## Agendamento
 
@@ -676,10 +695,17 @@ def pipeline_cancela_reserva():
                 {"id_usuario_integracao": id_usuario_integracao},
             )
 
-            total_cancelado = resultado_update.rowcount
+            reservas_canceladas = [
+                dict(linha) for linha in resultado_update.mappings().all()
+            ]
+            ids_reservas_canceladas = [
+                int(linha["IDReserva"]) for linha in reservas_canceladas
+            ]
+            total_cancelado = len(ids_reservas_canceladas)
 
-            if total_cancelado is None or total_cancelado < 0:
-                total_cancelado = total_elegivel_antes
+        # A saída do bloco engine.begin() confirma a transação. Somente depois
+        # desse ponto o resumo fica disponível para a tarefa que dispara o DAG
+        # de notificações.
 
         resumo = {
             "dag": NOME_DAG,
@@ -700,6 +726,7 @@ def pipeline_cancela_reserva():
             "total_preferencia_origem_nao_renovada": total_preferencia_origem_nao_renovada,
             "total_preferencia_sem_data_fim": total_preferencia_sem_data_fim,
             "total_cancelado": int(total_cancelado or 0),
+            "ids_reservas_canceladas": ids_reservas_canceladas,
             "data_execucao_sql_server": (
                 data_execucao_sql_server.isoformat()
                 if hasattr(data_execucao_sql_server, "isoformat")
@@ -728,7 +755,48 @@ def pipeline_cancela_reserva():
 
         return resumo
 
-    cancelar_reservas_elegiveis()
+    @task.short_circuit(task_id="verificar_se_houve_cancelamento")
+    def verificar_se_houve_cancelamento(resumo: dict[str, Any]) -> bool:
+        ids_cancelados = resumo.get("ids_reservas_canceladas") or []
+        houve_cancelamento = bool(ids_cancelados)
+
+        if not houve_cancelamento:
+            logger.info(
+                "Nenhuma reserva foi cancelada nesta execução; o DAG %s não será disparado.",
+                NOME_DAG_NOTIFICACOES,
+            )
+
+        return houve_cancelamento
+
+    resultado_cancelamento = cancelar_reservas_elegiveis()
+    houve_cancelamento = verificar_se_houve_cancelamento(resultado_cancelamento)
+
+    disparar_notificacoes = TriggerDagRunOperator(
+        task_id="disparar_pipeline_notificacoes_euromidia",
+        trigger_dag_id=NOME_DAG_NOTIFICACOES,
+        conf={
+            "origem_disparo": NOME_DAG,
+            "tipo_evento": "RESERVA CANCELADA AUTOMATICAMENTE",
+            "ids_reservas_canceladas": (
+                "{{ ti.xcom_pull(task_ids='cancelar_reservas_elegiveis', "
+                "key='return_value')['ids_reservas_canceladas'] }}"
+            ),
+            "data_execucao_cancelamento": (
+                "{{ ti.xcom_pull(task_ids='cancelar_reservas_elegiveis', "
+                "key='return_value')['data_execucao_sql_server'] }}"
+            ),
+            "run_id_origem": "{{ run_id }}",
+        },
+        # O cancelamento já foi confirmado antes deste ponto. O DAG de
+        # notificações deve ser disparado sem manter um worker ocupado
+        # esperando o DAG filho. Em ambientes com apenas um slot de worker ou
+        # de pool, wait_for_completion=True cria um bloqueio: o pai espera e o
+        # filho não consegue iniciar.
+        wait_for_completion=False,
+        retries=0,
+    )
+
+    houve_cancelamento >> disparar_notificacoes
 
 
 pipeline_cancela_reserva()

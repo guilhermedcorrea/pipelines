@@ -16,6 +16,7 @@ FormUsuarioEditar, FormTrocarSenha, FormPermissaoExtraUpsert, FormPermissaoExtra
 from ..models.admin_models import DimCalendario,DimEmpresaProprietaria,DimRecorrencia,DimPublicoAlvo
 from sqlalchemy import case, String, cast, or_, and_, func, text, select, desc, bindparam
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from sqlalchemy.exc import OperationalError
 from functools import wraps
 import time,random,calendar,re,requests,unicodedata,mimetypes
@@ -2330,7 +2331,11 @@ def lista_paineis():
 
             if p == "mes":
                 inicio = date(hoje_ref.year, hoje_ref.month, 1)
-                fim = hoje_ref
+                fim = date(
+                    hoje_ref.year,
+                    hoje_ref.month,
+                    calendar.monthrange(hoje_ref.year, hoje_ref.month)[1],
+                )
                 return inicio, fim
 
             if p == "ano":
@@ -3052,7 +3057,9 @@ def lista_paineis():
         if url_lista_salva:
             session.pop(chave_return_to_paineis, None)
 
-    hoje = date.today()
+    # A tela atende usuários de Campinas/SP. Usar explicitamente o fuso local
+    # evita que a virada do dia no servidor antecipe ou atrase a data padrão.
+    hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     primeiro_dia_mes_atual = date(hoje.year, hoje.month, 1)
 
     q = (request.args.get("q") or "").strip()
@@ -3173,17 +3180,32 @@ def lista_paineis():
 
     fim_de_semana_filtro = (request.args.get("fim_de_semana") or "").strip()
 
-    try:
-        chaves_args_reais = [
-            k for k in request.args.keys()
-            if k not in ("selected_codface", "selected_codponto")
-        ]
-        sem_args_reais = (len(chaves_args_reais) == 0)
-    except:
-        sem_args_reais = False
+    # Se o usuário não escolheu nenhum período, o padrão é somente o dia atual.
+    # O intervalo do primeiro ao último dia do mês fica reservado para uma
+    # escolha explícita do mês ou para datas digitadas pelo próprio usuário.
+    periodo_foi_informado = any((
+        dt_ini_str,
+        dt_fim_str,
+        periodo_rapido,
+        ano_filtro,
+        anomes_filtro,
+        mes_filtro,
+        dia_filtro,
+        trimestre_filtro,
+        semana_iso_filtro,
+        dia_semana_iso_filtro,
+        quinzena_filtro,
+        bi_semana_filtro,
+        fim_de_semana_filtro,
+        "1" if mes_atual_user else "",
+        "1" if tudo else "",
+    ))
 
-    if sem_args_reais:
-        mes_atual_user = True
+    if not periodo_foi_informado:
+        dt_ini_str = hoje.strftime("%Y-%m-%d")
+        dt_fim_str = hoje.strftime("%Y-%m-%d")
+        mes_atual_user = False
+        periodo_rapido = ""
 
     try:
         page = int(request.args.get("page") or "1")
@@ -4408,7 +4430,10 @@ def lista_paineis():
         "dia": (hoje, hoje),
         "hoje": (hoje, hoje),
         "semana": (hoje - timedelta(days=hoje.weekday()), (hoje - timedelta(days=hoje.weekday())) + timedelta(days=6)),
-        "mes": (primeiro_dia_mes_atual, hoje),
+        "mes": (
+            primeiro_dia_mes_atual,
+            date(hoje.year, hoje.month, calendar.monthrange(hoje.year, hoje.month)[1]),
+        ),
         "ano": (date(hoje.year, 1, 1), hoje),
     }
 
@@ -8158,6 +8183,8 @@ def grade_painel(codponto: int):
     nome_vendedor_logado = str(vendedor_logado_info.get("NomeVendedor") or "").strip()
     pode_ver_kpis_financeiros = not usuario_logado_eh_perfil_vendedor
 
+    contexto_contador_reserva = _montar_contexto_contador_horas_uteis_grade()
+
     if usuario_logado_eh_perfil_vendedor:
         receita_liquida_periodo = None
         custo_total = None
@@ -8243,6 +8270,9 @@ def grade_painel(codponto: int):
         bairro_painel=bairro_painel,
         logradouro_painel=logradouro_painel,
         return_to_paineis=return_to_paineis,
+        agora_servidor_reserva_iso=contexto_contador_reserva["agora_servidor_reserva_iso"],
+        feriados_reserva_iso=contexto_contador_reserva["feriados_reserva_iso"],
+        calendario_reserva_disponivel=contexto_contador_reserva["calendario_reserva_disponivel"],
     )
 
 
@@ -23346,32 +23376,294 @@ def _parse_data_reserva_yyyy_mm_dd(valor: str):
         return None
 
 
-def _somar_dias_uteis_reserva(data_base: datetime, qtd_dias_uteis: int = 2) -> datetime:
-    """
-    Eu calculo a expiração da reserva em dias úteis.
+RESERVA_VALIDADE_HORAS_UTEIS = 48
+RESERVA_CALENDARIO_UF_PADRAO = "SP"
+RESERVA_CALENDARIO_MUNICIPIO_PADRAO = "VALINHOS"
+RESERVA_FUSO_HORARIO_PADRAO = "America/Sao_Paulo"
 
-    Regra usada aqui:
-    - 48 horas úteis = 2 dias úteis corridos;
-    - sábado e domingo não contam;
-    - o horário atual é preservado.
-    """
+
+def _config_calendario_reserva(nome: str, padrao=None):
+    """Lê a configuração do calendário no Flask e, depois, no ambiente."""
+    valor = None
+
     try:
-        dias_alvo = int(qtd_dias_uteis or 0)
+        valor = current_app.config.get(nome)
     except Exception:
-        dias_alvo = 0
+        valor = None
 
-    if dias_alvo <= 0:
+    if valor in (None, ""):
+        try:
+            valor = os.getenv(nome)
+        except Exception:
+            valor = None
+
+    return padrao if valor in (None, "") else valor
+
+
+def _agora_campinas_reserva() -> datetime:
+    """
+    Retorna o horário civil de Campinas/São Paulo sem depender do timezone
+    configurado no servidor, no container ou no SQL Server.
+
+    A tabela atual usa datetime2 (sem offset). Por isso, depois de converter o
+    instante para America/Sao_Paulo, removo apenas a informação de timezone e
+    preservo os valores locais que serão gravados em CriadoEm e ExpiraEm.
+    """
+    nome_fuso = str(
+        _config_calendario_reserva(
+            "RESERVA_FUSO_HORARIO",
+            RESERVA_FUSO_HORARIO_PADRAO,
+        )
+        or RESERVA_FUSO_HORARIO_PADRAO
+    ).strip()
+
+    try:
+        agora_local = datetime.now(ZoneInfo(nome_fuso))
+    except Exception as exc:
+        raise RuntimeError(
+            f"Não foi possível carregar o fuso horário da reserva: {nome_fuso}"
+        ) from exc
+
+    return agora_local.replace(tzinfo=None, microsecond=0)
+
+
+def _buscar_datas_feriados_reserva(data_inicial: date, data_final: date) -> set[date]:
+    """
+    Busca os dias que realmente interrompem a contagem da reserva.
+
+    São considerados somente registros ativos, marcados como feriado e que não
+    estejam liberados explicitamente por ConsiderarComoDiaUtil. O calendário
+    corporativo usa feriados nacionais, do estado configurado e do município
+    configurado. Assim, faces de cidades diferentes continuam com um único
+    prazo comercial de bloqueio.
+    """
+    uf = str(
+        _config_calendario_reserva(
+            "RESERVA_CALENDARIO_FERIADOS_UF",
+            RESERVA_CALENDARIO_UF_PADRAO,
+        )
+        or ""
+    ).strip().upper()
+    municipio = str(
+        _config_calendario_reserva(
+            "RESERVA_CALENDARIO_FERIADOS_MUNICIPIO",
+            RESERVA_CALENDARIO_MUNICIPIO_PADRAO,
+        )
+        or ""
+    ).strip().upper()
+
+    codigo_ibge_raw = _config_calendario_reserva(
+        "RESERVA_CALENDARIO_FERIADOS_CODIGO_IBGE",
+        None,
+    )
+    try:
+        codigo_ibge = int(codigo_ibge_raw) if codigo_ibge_raw not in (None, "") else 0
+    except Exception:
+        codigo_ibge = 0
+
+    sql = text("""
+        SELECT DISTINCT
+            DataFeriado = TRY_CONVERT(date, f.DataFeriado)
+        FROM [Integracao].[Silver].[FatoFeriados] AS f
+        WHERE TRY_CONVERT(date, f.DataFeriado) BETWEEN :data_inicial AND :data_final
+          AND ISNULL(TRY_CONVERT(int, f.Ativo), 0) = 1
+          AND ISNULL(TRY_CONVERT(int, f.EhFeriado), 0) = 1
+          AND ISNULL(TRY_CONVERT(int, f.ConsiderarComoDiaUtil), 0) = 0
+          AND (
+                -- Feriado nacional/federal declarado pelo tipo ou abrangência.
+                UPPER(LTRIM(RTRIM(COALESCE(f.TipoFeriado, '')))) LIKE '%NACION%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(f.Abrangencia, '')))) LIKE '%NACION%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(f.TipoFeriado, '')))) LIKE '%FEDERAL%'
+             OR UPPER(LTRIM(RTRIM(COALESCE(f.Abrangencia, '')))) LIKE '%FEDERAL%'
+
+                -- Registro geral sem UF, município ou código IBGE.
+             OR (
+                    NULLIF(LTRIM(RTRIM(COALESCE(f.UF, ''))), '') IS NULL
+                AND NULLIF(LTRIM(RTRIM(COALESCE(f.Municipio, ''))), '') IS NULL
+                AND TRY_CONVERT(bigint, f.CodigoIBGE) IS NULL
+                )
+
+                -- Feriado estadual da UF do calendário corporativo.
+             OR (
+                    :uf <> ''
+                AND UPPER(LTRIM(RTRIM(COALESCE(f.UF, '')))) = :uf
+                AND (
+                       UPPER(LTRIM(RTRIM(COALESCE(f.TipoFeriado, '')))) LIKE '%ESTAD%'
+                    OR UPPER(LTRIM(RTRIM(COALESCE(f.Abrangencia, '')))) LIKE '%ESTAD%'
+                    OR (
+                           NULLIF(LTRIM(RTRIM(COALESCE(f.Municipio, ''))), '') IS NULL
+                       AND TRY_CONVERT(bigint, f.CodigoIBGE) IS NULL
+                       )
+                    )
+                )
+
+                -- Feriado municipal identificado pelo código IBGE configurado.
+             OR (
+                    :codigo_ibge > 0
+                AND TRY_CONVERT(bigint, f.CodigoIBGE) = :codigo_ibge
+                )
+
+                -- Feriado municipal identificado pelo nome do município.
+             OR (
+                    :municipio <> ''
+                AND UPPER(LTRIM(RTRIM(COALESCE(f.Municipio, '')))) = :municipio
+                AND (
+                       :uf = ''
+                    OR NULLIF(LTRIM(RTRIM(COALESCE(f.UF, ''))), '') IS NULL
+                    OR UPPER(LTRIM(RTRIM(COALESCE(f.UF, '')))) = :uf
+                    )
+                )
+          );
+    """)
+
+    rows = db.session.execute(sql, {
+        "data_inicial": data_inicial,
+        "data_final": data_final,
+        "uf": uf,
+        "municipio": municipio,
+        "codigo_ibge": codigo_ibge,
+    }).fetchall()
+
+    datas = set()
+    for row in rows:
+        valor = row[0] if row else None
+        if isinstance(valor, datetime):
+            valor = valor.date()
+        if isinstance(valor, date):
+            datas.add(valor)
+
+    return datas
+
+
+def _somar_horas_uteis_calendario_reserva(
+    data_base: datetime,
+    horas_uteis: int,
+    datas_feriados: set[date] | None = None,
+) -> datetime:
+    """
+    Soma horas úteis de 24 horas, interrompendo totalmente a contagem em
+    sábados, domingos e feriados.
+
+    Não existe uma janela comercial de 8 horas neste processo: uma segunda-feira
+    útil possui 24 horas contáveis. Essa é a regra que mantém 48 horas úteis como
+    dois dias úteis no mesmo horário quando a criação ocorre em um dia útil.
+    """
+    if not isinstance(data_base, datetime):
+        raise TypeError("data_base da reserva deve ser datetime")
+
+    try:
+        horas_restantes = int(horas_uteis or 0)
+    except Exception as exc:
+        raise ValueError("horas_uteis da reserva deve ser um número inteiro") from exc
+
+    if horas_restantes < 0:
+        raise ValueError("horas_uteis da reserva não pode ser negativo")
+    if horas_restantes == 0:
         return data_base
 
+    feriados = set(datas_feriados or set())
+    restante = timedelta(hours=horas_restantes)
     atual = data_base
-    dias_somados = 0
 
-    while dias_somados < dias_alvo:
-        atual = atual + timedelta(days=1)
-        if atual.weekday() < 5:
-            dias_somados += 1
+    # Limite defensivo: 370 dias é muito superior ao necessário para somar
+    # 48 horas úteis e impede loop infinito se o calendário estiver corrompido.
+    limite = data_base + timedelta(days=370)
+
+    while restante > timedelta(0):
+        if atual > limite:
+            raise RuntimeError("Não foi possível calcular 48 horas úteis dentro de 370 dias")
+
+        data_atual = atual.date()
+        inicio_dia_seguinte = datetime.combine(
+            data_atual + timedelta(days=1),
+            datetime.min.time(),
+        )
+
+        if atual.weekday() >= 5 or data_atual in feriados:
+            atual = inicio_dia_seguinte
+            continue
+
+        tempo_util_disponivel = inicio_dia_seguinte - atual
+        if restante <= tempo_util_disponivel:
+            return atual + restante
+
+        restante -= tempo_util_disponivel
+        atual = inicio_dia_seguinte
 
     return atual
+
+
+def _calcular_expiracao_reserva_48_horas_uteis(data_base: datetime | None = None) -> tuple[datetime, datetime]:
+    """
+    Retorna (CriadoEm, ExpiraEm) no fuso de Campinas/São Paulo e usando a tabela
+    de feriados. O mesmo par é reutilizado em todas as faces e segmentos do POST.
+    """
+    criado_em = data_base
+    if criado_em is None:
+        criado_em = _agora_campinas_reserva()
+
+    if not isinstance(criado_em, datetime):
+        raise RuntimeError("Não foi possível obter uma data válida para a reserva")
+
+    data_final_consulta = criado_em.date() + timedelta(days=370)
+    feriados = _buscar_datas_feriados_reserva(criado_em.date(), data_final_consulta)
+    expira_em = _somar_horas_uteis_calendario_reserva(
+        criado_em,
+        RESERVA_VALIDADE_HORAS_UTEIS,
+        feriados,
+    )
+    return criado_em, expira_em
+
+
+def _montar_contexto_contador_horas_uteis_grade() -> dict:
+    """
+    Entrega ao JavaScript da grade o mesmo calendário usado para criar o
+    ExpiraEm. A hora usa explicitamente America/Sao_Paulo para o contador não
+    depender do relógio do servidor, do SQL Server ou do computador do usuário.
+
+    Se o calendário não puder ser consultado, a grade recebe o indicador de
+    indisponibilidade e não exibe um número de horas corridas como se fosse útil.
+    """
+    agora_campinas = None
+
+    try:
+        agora_campinas = _agora_campinas_reserva()
+    except Exception:
+        current_app.logger.exception(
+            "RESERVA_GRADE | falha ao obter a hora de Campinas/São Paulo para o contador"
+        )
+
+    if not isinstance(agora_campinas, datetime):
+        return {
+            "agora_servidor_reserva_iso": "",
+            "feriados_reserva_iso": [],
+            "calendario_reserva_disponivel": False,
+        }
+
+    try:
+        data_final_consulta = agora_campinas.date() + timedelta(days=370)
+        datas_feriados = _buscar_datas_feriados_reserva(
+            agora_campinas.date(),
+            data_final_consulta,
+        )
+
+        return {
+            "agora_servidor_reserva_iso": agora_campinas.strftime("%Y-%m-%dT%H:%M:%S"),
+            "feriados_reserva_iso": sorted(
+                data_feriado.strftime("%Y-%m-%d")
+                for data_feriado in datas_feriados
+            ),
+            "calendario_reserva_disponivel": True,
+        }
+    except Exception:
+        current_app.logger.exception(
+            "RESERVA_GRADE | falha ao consultar FatoFeriados para o contador de horas úteis"
+        )
+        return {
+            "agora_servidor_reserva_iso": agora_campinas.strftime("%Y-%m-%dT%H:%M:%S"),
+            "feriados_reserva_iso": [],
+            "calendario_reserva_disponivel": False,
+        }
 
 
 
@@ -23627,6 +23919,217 @@ def _buscar_dados_email_confirmacao_reserva(ids_fato_ocupacao) -> dict:
     return resultado
 
 
+RESERVA_EMAIL_COPIA_CONTRATOS = "contratos@euromidia.com.br"
+RESERVA_NOTIFICACAO_ORIGEM = "RESERVA"
+RESERVA_NOTIFICACAO_TIPO_EVENTO = "CONFIRMACAO DE RESERVA"
+RESERVA_NOTIFICACAO_SISTEMA_ORIGEM = "PAINEIS EUROMIDIA"
+RESERVA_NOTIFICACAO_MODULO_ORIGEM = "RESERVAS"
+RESERVA_NOTIFICACAO_TIPO_REFERENCIA = "RESERVA"
+
+
+def _registrar_fato_notificacao_email_reserva(
+    *,
+    dados: dict,
+    ids_reserva,
+    destinatario: str,
+    destinatario_copia: str,
+    assunto: str,
+    corpo_html: str,
+    corpo_texto: str,
+    bit_enviado: bool,
+    erro_envio: str | None = None,
+) -> dict:
+    """
+    Registra o resultado do envio na Integracao.Silver.FatoNotificacoes.
+
+    É gravada uma linha por ID de reserva. Dessa forma, um único e-mail agrupado
+    continua vinculado individualmente a cada linha da
+    FatoOcupacaoPaineisEuromidia por TipoReferencia + IDReferencia.
+
+    A ChaveIdempotencia é determinística por reserva e evento. Se a mesma
+    confirmação for processada novamente, o registro existente é atualizado
+    em vez de gerar outra linha lógica para a mesma notificação.
+    """
+    ids_normalizados = _email_reserva_normalizar_ids(ids_reserva)
+    if not ids_normalizados:
+        return {"registrado": False, "motivo": "ids_reserva_invalidos"}
+
+    try:
+        id_usuario_destino = int(dados.get("IDDimUsuariosDestinatario") or 0) or None
+    except Exception:
+        id_usuario_destino = None
+
+    data_email = datetime.now(ZoneInfo("America/Sao_Paulo")).replace(tzinfo=None)
+    erro_envio_texto = str(erro_envio or "").strip()[:1000] or None
+    bit_enviado_int = 1 if bit_enviado else 0
+
+    sql_registrar = text("""
+        SET NOCOUNT ON;
+
+        IF EXISTS
+        (
+            SELECT 1
+            FROM [Integracao].[Silver].[FatoNotificacoes] WITH (UPDLOCK, HOLDLOCK)
+            WHERE ChaveIdempotencia = :chave_idempotencia
+        )
+        BEGIN
+            UPDATE [Integracao].[Silver].[FatoNotificacoes]
+               SET Origem = :origem,
+                   TipoEvendo = :tipo_evento,
+                   IDUsuarioDestino = :id_usuario_destino,
+                   EmailDestino = :email_destino,
+                   EmailCopia = :email_copia,
+                   SistemaOrigem = :sistema_origem,
+                   ModuloOrigem = :modulo_origem,
+                   TipoReferencia = :tipo_referencia,
+                   IDReferencia = :id_referencia,
+                   Assunto = :assunto,
+                   CorpoEmail = :corpo_email,
+                   CorpoTexto = :corpo_texto,
+                   PayloadJson = :payload_json,
+                   BitEnviado = :bit_enviado,
+                   DataEmail = :data_email
+             WHERE ChaveIdempotencia = :chave_idempotencia;
+        END
+        ELSE
+        BEGIN
+            INSERT INTO [Integracao].[Silver].[FatoNotificacoes]
+            (
+                Origem,
+                TipoEvendo,
+                IDUsuarioDestino,
+                EmailDestino,
+                EmailCopia,
+                ChaveIdempotencia,
+                SistemaOrigem,
+                ModuloOrigem,
+                TipoReferencia,
+                IDReferencia,
+                Assunto,
+                CorpoEmail,
+                CorpoTexto,
+                PayloadJson,
+                BitEnviado,
+                DataEmail
+            )
+            VALUES
+            (
+                :origem,
+                :tipo_evento,
+                :id_usuario_destino,
+                :email_destino,
+                :email_copia,
+                :chave_idempotencia,
+                :sistema_origem,
+                :modulo_origem,
+                :tipo_referencia,
+                :id_referencia,
+                :assunto,
+                :corpo_email,
+                :corpo_texto,
+                :payload_json,
+                :bit_enviado,
+                :data_email
+            );
+        END;
+
+        SELECT TOP (1)
+            IDFatoNotificacoes
+        FROM [Integracao].[Silver].[FatoNotificacoes] WITH (NOLOCK)
+        WHERE ChaveIdempotencia = :chave_idempotencia
+        ORDER BY IDFatoNotificacoes DESC;
+    """)
+
+    ids_fato_notificacoes = []
+
+    try:
+        for id_reserva in ids_normalizados:
+            chave_idempotencia = (
+                f"{RESERVA_NOTIFICACAO_SISTEMA_ORIGEM}|"
+                f"{RESERVA_NOTIFICACAO_MODULO_ORIGEM}|"
+                f"{RESERVA_NOTIFICACAO_TIPO_EVENTO}|{id_reserva}"
+            )[:300]
+
+            payload = {
+                "Origem": RESERVA_NOTIFICACAO_ORIGEM,
+                "TipoEvento": RESERVA_NOTIFICACAO_TIPO_EVENTO,
+                "SistemaOrigem": RESERVA_NOTIFICACAO_SISTEMA_ORIGEM,
+                "ModuloOrigem": RESERVA_NOTIFICACAO_MODULO_ORIGEM,
+                "TipoReferencia": RESERVA_NOTIFICACAO_TIPO_REFERENCIA,
+                "IDReferencia": id_reserva,
+                "IDsReservaEmail": ids_normalizados,
+                "IDUsuarioDestino": id_usuario_destino,
+                "EmailDestino": destinatario,
+                "EmailCopia": destinatario_copia,
+                "BitEnviado": bool(bit_enviado),
+                "ErroEnvio": erro_envio_texto,
+                "DataEmail": data_email.isoformat(timespec="seconds"),
+            }
+
+            row = db.session.execute(
+                sql_registrar,
+                {
+                    "origem": RESERVA_NOTIFICACAO_ORIGEM,
+                    "tipo_evento": RESERVA_NOTIFICACAO_TIPO_EVENTO,
+                    "id_usuario_destino": id_usuario_destino,
+                    "email_destino": str(destinatario or "").strip() or None,
+                    "email_copia": str(destinatario_copia or "").strip() or None,
+                    "chave_idempotencia": chave_idempotencia,
+                    "sistema_origem": RESERVA_NOTIFICACAO_SISTEMA_ORIGEM,
+                    "modulo_origem": RESERVA_NOTIFICACAO_MODULO_ORIGEM,
+                    "tipo_referencia": RESERVA_NOTIFICACAO_TIPO_REFERENCIA,
+                    "id_referencia": int(id_reserva),
+                    "assunto": str(assunto or "")[:1000],
+                    "corpo_email": str(corpo_html or ""),
+                    "corpo_texto": str(corpo_texto or ""),
+                    "payload_json": json.dumps(
+                        payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        default=str,
+                    ),
+                    "bit_enviado": bit_enviado_int,
+                    "data_email": data_email,
+                },
+            ).mappings().first()
+
+            if row and row.get("IDFatoNotificacoes") is not None:
+                ids_fato_notificacoes.append(int(row["IDFatoNotificacoes"]))
+
+        db.session.commit()
+
+        current_app.logger.info(
+            "RESERVA_EMAIL_NOTIFICACAO | registro concluído | ids_reserva=%s | ids_notificacoes=%s | enviado=%s | destinatario=%s | copia=%s",
+            ids_normalizados,
+            ids_fato_notificacoes,
+            bit_enviado_int,
+            destinatario,
+            destinatario_copia,
+        )
+
+        return {
+            "registrado": True,
+            "motivo": None,
+            "ids_reserva": ids_normalizados,
+            "ids_fato_notificacoes": ids_fato_notificacoes,
+            "bit_enviado": bool(bit_enviado),
+        }
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "RESERVA_EMAIL_NOTIFICACAO | falha ao registrar FatoNotificacoes | ids_reserva=%s | enviado=%s",
+            ids_normalizados,
+            bit_enviado_int,
+        )
+        return {
+            "registrado": False,
+            "motivo": str(exc)[:300],
+            "ids_reserva": ids_normalizados,
+            "bit_enviado": bool(bit_enviado),
+        }
+
+
 def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
     """Envia confirmação da reserva por SMTP usando as variáveis do .env já existentes."""
     ids_ocupacao = _email_reserva_normalizar_ids(ids_fato_ocupacao)
@@ -23635,6 +24138,7 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
         return {"enviado": False, "motivo": "dados_reserva_nao_encontrados"}
 
     destinatario = str(dados.get("EmailUsuario") or "").strip()
+    destinatario_copia = RESERVA_EMAIL_COPIA_CONTRATOS
     ids_log = ",".join(str(x) for x in ids_ocupacao) if ids_ocupacao else str(ids_fato_ocupacao or "")
     if not _email_reserva_tem_formato_minimo(destinatario):
         current_app.logger.warning(
@@ -23690,9 +24194,10 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
         linha_dict = dict(linha or {})
         expira_em = linha_dict.get("ExpiraEm")
         if not expira_em:
-            criado_em = linha_dict.get("CriadoEm")
-            if isinstance(criado_em, datetime):
-                expira_em = _somar_dias_uteis_reserva(criado_em, 2)
+            current_app.logger.error(
+                "RESERVA_EMAIL | ExpiraEm não foi gravado; o e-mail não recalculará um prazo divergente | id_reserva=%s",
+                linha_dict.get("IDReserva"),
+            )
         linha_dict["FimBloqueioFormatado"] = _email_reserva_formatar_data(expira_em, incluir_hora=True)
         linha_dict["DataInicioFormatada"] = _email_reserva_formatar_data(linha_dict.get("DataInicio"), incluir_hora=False)
         linha_dict["DataFimFormatada"] = _email_reserva_formatar_data(linha_dict.get("DataFim"), incluir_hora=False)
@@ -23947,6 +24452,7 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
     msg["Subject"] = assunto
     msg["From"] = f"{remetente_nome} <{remetente}>"
     msg["To"] = destinatario
+    msg["Cc"] = destinatario_copia
     msg.set_content(corpo)
     msg.add_alternative(corpo_html, subtype="html")
 
@@ -23968,9 +24474,10 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
 
     try:
         current_app.logger.info(
-            "RESERVA_EMAIL | tentando enviar confirmação | ids_reserva=%s | destinatario=%s | smtp_host=%s | smtp_port=%s | criptografia=%s",
+            "RESERVA_EMAIL | tentando enviar confirmação | ids_reserva=%s | destinatario=%s | copia=%s | smtp_host=%s | smtp_port=%s | criptografia=%s",
             ids_log,
             destinatario,
+            destinatario_copia,
             smtp_host,
             smtp_port,
             criptografia,
@@ -23979,7 +24486,11 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
         if criptografia in {"SSL", "TLS", "SMTPS"}:
             with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20) as smtp:
                 smtp.login(smtp_user, smtp_password)
-                smtp.send_message(msg)
+                smtp.send_message(
+                    msg,
+                    from_addr=remetente,
+                    to_addrs=[destinatario, destinatario_copia],
+                )
         else:
             with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
                 smtp.ehlo()
@@ -23987,22 +24498,62 @@ def _enviar_email_confirmacao_reserva_por_id(ids_fato_ocupacao) -> dict:
                     smtp.starttls()
                     smtp.ehlo()
                 smtp.login(smtp_user, smtp_password)
-                smtp.send_message(msg)
+                smtp.send_message(
+                    msg,
+                    from_addr=remetente,
+                    to_addrs=[destinatario, destinatario_copia],
+                )
 
         current_app.logger.info(
-            "RESERVA_EMAIL | confirmação enviada | ids_reserva=%s | destinatario=%s",
+            "RESERVA_EMAIL | confirmação enviada | ids_reserva=%s | destinatario=%s | copia=%s",
             ids_log,
             destinatario,
+            destinatario_copia,
         )
-        return {"enviado": True, "motivo": None, "destinatario": destinatario}
+        registro_notificacao = _registrar_fato_notificacao_email_reserva(
+            dados=dados,
+            ids_reserva=ids_ocupacao,
+            destinatario=destinatario,
+            destinatario_copia=destinatario_copia,
+            assunto=assunto,
+            corpo_html=corpo_html,
+            corpo_texto=corpo,
+            bit_enviado=True,
+        )
+        return {
+            "enviado": True,
+            "motivo": None,
+            "destinatario": destinatario,
+            "copia": destinatario_copia,
+            "registro_notificacao": registro_notificacao,
+        }
 
     except Exception as exc:
+        motivo_erro = str(exc)[:300]
         current_app.logger.exception(
-            "RESERVA_EMAIL | falha ao enviar confirmação | ids_reserva=%s | destinatario=%s",
+            "RESERVA_EMAIL | falha ao enviar confirmação | ids_reserva=%s | destinatario=%s | copia=%s",
             ids_log,
             destinatario,
+            destinatario_copia,
         )
-        return {"enviado": False, "motivo": str(exc)[:300]}
+        registro_notificacao = _registrar_fato_notificacao_email_reserva(
+            dados=dados,
+            ids_reserva=ids_ocupacao,
+            destinatario=destinatario,
+            destinatario_copia=destinatario_copia,
+            assunto=assunto,
+            corpo_html=corpo_html,
+            corpo_texto=corpo,
+            bit_enviado=False,
+            erro_envio=motivo_erro,
+        )
+        return {
+            "enviado": False,
+            "motivo": motivo_erro,
+            "destinatario": destinatario,
+            "copia": destinatario_copia,
+            "registro_notificacao": registro_notificacao,
+        }
 
 
 
@@ -24039,9 +24590,10 @@ def _notificacao_reserva_montar_payload(dados: dict) -> dict:
 
         expira_em = linha_dict.get("ExpiraEm")
         if not expira_em:
-            criado_em = linha_dict.get("CriadoEm")
-            if isinstance(criado_em, datetime):
-                expira_em = _somar_dias_uteis_reserva(criado_em, 2)
+            current_app.logger.error(
+                "RESERVA_NOTIFICACAO | ExpiraEm não foi gravado; a notificação não recalculará um prazo divergente | id_reserva=%s",
+                linha_dict.get("IDReserva"),
+            )
 
         id_reserva_texto = _email_reserva_texto_seguro(linha_dict.get("IDReserva"), "")
         if id_reserva_texto and id_reserva_texto not in vistos_reserva:
@@ -24947,6 +25499,7 @@ def _buscar_ids_grupo_email_reserva_ocupacao(ids_fato_ocupacao, janela_segundos:
                 ,IDClienteBase = o.IDCliente
                 ,IDVendedorBase = o.IDVendedor
                 ,CriadoPorBase = o.CriadoPorIDUsuario
+                ,ExpiraEmBase = o.ExpiraEm
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS o WITH (NOLOCK)
             WHERE o.IDFatoOcupacaoPaineisEuromidia IN :ids_base
             ORDER BY
@@ -24964,12 +25517,24 @@ def _buscar_ids_grupo_email_reserva_ocupacao(ids_fato_ocupacao, janela_segundos:
           AND ISNULL(o.IDVendedor, -1) = ISNULL(b.IDVendedorBase, -1)
           AND ISNULL(o.CriadoPorIDUsuario, -1) = ISNULL(b.CriadoPorBase, -1)
           AND ABS(DATEDIFF(SECOND, COALESCE(b.CriadoEmBase, SYSDATETIME()), COALESCE(o.CriadoEm, o.DataAtualizacao, SYSDATETIME()))) <= :janela_segundos
+          AND (
+                o.IDFatoOcupacaoPaineisEuromidia IN :ids_base_expiracao
+             OR (
+                    b.ExpiraEmBase IS NOT NULL
+                AND o.ExpiraEm IS NOT NULL
+                AND ABS(DATEDIFF(SECOND, b.ExpiraEmBase, o.ExpiraEm)) <= :janela_segundos
+                )
+          )
         ORDER BY
             o.IDFatoOcupacaoPaineisEuromidia ASC;
-    """).bindparams(bindparam("ids_base", expanding=True))
+    """).bindparams(
+        bindparam("ids_base", expanding=True),
+        bindparam("ids_base_expiracao", expanding=True),
+    )
 
     rows = db.session.execute(sql, {
         "ids_base": ids_base,
+        "ids_base_expiracao": ids_base,
         "janela_segundos": janela_int,
     }).fetchall()
 
@@ -25296,12 +25861,6 @@ def api_ocupacao_reserva_criar():
     except Exception:
         return jsonify({"ok": False, "erro": "id_fato_controle_contratos inválido"}), 400
 
-    # Regra de negócio: reserva sempre expira em 48 horas úteis.
-    # Mesmo que o front-end ou uma requisição manual envie outro valor,
-    # o backend força 2 dias úteis para não gravar prazo maior ou menor.
-    dias_int = 2
-    expira_em_reserva = _somar_dias_uteis_reserva(datetime.now(), dias_int)
-
     sql_painel = text("""
         SELECT TOP 1
             IDPainelEuromidia = COALESCE(f.IDDimPaineisEuromidia, p.IDDimPaineisEuromidia),
@@ -25463,6 +26022,26 @@ def api_ocupacao_reserva_criar():
         return jsonify({"ok": False, "erro": str(exc)}), 400
 
     criado_por = _id_usuario_logado_carteira()
+
+    # Regra única de validade da reserva:
+    # - usa explicitamente o fuso de Campinas/São Paulo (America/Sao_Paulo);
+    # - soma exatamente 48 horas em dias úteis de 24 horas;
+    # - consulta Integracao.Silver.FatoFeriados;
+    # - reutiliza o mesmo CriadoEm/ExpiraEm para todas as faces e segmentos.
+    try:
+        criado_em_reserva, expira_em_reserva = _calcular_expiracao_reserva_48_horas_uteis()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "RESERVA_PRAZO | falha ao calcular 48 horas úteis pela FatoFeriados"
+        )
+        return jsonify({
+            "ok": False,
+            "erro": (
+                "Não foi possível calcular as 48 horas úteis da reserva pela tabela "
+                f"Integracao.Silver.FatoFeriados: {exc}"
+            )[:500],
+        }), 500
 
     def _montar_texto_original_reserva(id_usuario: int, empresas_relacionadas_normalizadas: list[dict]) -> str:
         """Eu monto um TextoOriginal legível, sem gravar dict/JSON."""
@@ -25724,7 +26303,7 @@ def api_ocupacao_reserva_criar():
         OUTPUT INSERTED.IDFatoOcupacaoPaineisEuromidia
         INTO @ReservasInseridas (IDFatoOcupacaoPaineisEuromidia)
         VALUES (
-            SYSDATETIME(),
+            :criado_em,
             CONVERT(varchar(64),
                 HASHBYTES('SHA2_256',
                     CONCAT(
@@ -25764,7 +26343,7 @@ def api_ocupacao_reserva_criar():
             NULLIF(LTRIM(RTRIM(:observacao)), ''),
             :dias,
             :expira_em,
-            SYSDATETIME(),
+            :criado_em,
             :criado_por,
             :reserva_ordem_prioridade,
             :tipo_vinculo_origem,
@@ -25840,6 +26419,7 @@ def api_ocupacao_reserva_criar():
                     "observacao": (payload.get("observacao") or request.form.get("observacao") or "").strip(),
                     "dias": dias_segmento_int,
                     "expira_em": expira_em_reserva,
+                    "criado_em": criado_em_reserva,
                     "criado_por": criado_por,
                     "reserva_ordem_prioridade": reserva_ordem_prioridade_int,
                     "tipo_vinculo_origem": "Reserva",
@@ -25933,6 +26513,9 @@ def api_ocupacao_reserva_criar():
         "qtd_empresas_relacionadas": len(empresas_relacionadas),
         "encaixe_modo": "multi" if len(faces_para_gravar) > 1 else plano_encaixe_reserva.get("modo"),
         "qtd_segmentos_encaixe": total_segmentos_encaixe,
+        "criado_em": criado_em_reserva.isoformat(sep=" "),
+        "expira_em": expira_em_reserva.isoformat(sep=" "),
+        "validade_horas_uteis": RESERVA_VALIDADE_HORAS_UTEIS,
         "email_confirmacao_enviado": bool(email_confirmacao_reserva.get("enviado")),
         "email_confirmacao_motivo": email_confirmacao_reserva.get("motivo"),
         "notificacao_confirmacao_registrada": bool(notificacao_confirmacao_reserva.get("registrada")),
